@@ -197,9 +197,9 @@ func (e *Engine) EmitFinalizeAuditTx(ctx context.Context, tx *sql.Tx, inv domain
 }
 
 // finalizeAuditEmit adapts emitFinalizeAuditTx to the CreateInvoiceWithLineItemsAudited
-// callback shape, so the own-tx finalize paths audit on the create tx. The store
-// hands back the persisted invoice as `out` (with its real ID); audit that, not
-// the pre-insert struct.
+// callback shape, so the own-tx finalize path (BillOnCreate) audits on the
+// create tx. The store hands back the persisted invoice as `out` (with its real
+// ID); audit that, not the pre-insert struct.
 func (e *Engine) finalizeAuditEmit(ctx context.Context) func(tx *sql.Tx, out domain.Invoice) error {
 	return func(tx *sql.Tx, out domain.Invoice) error {
 		return e.emitFinalizeAuditTx(ctx, tx, out)
@@ -595,10 +595,10 @@ type InvoiceWriter interface {
 	// in-transaction audit emission (ADR-090): emit runs on the SAME tx as the
 	// header + line INSERTs, after they land and BEFORE commit, so an emission
 	// error rolls the whole invoice back — the finalize row and the invoice share
-	// fate. The own-tx engine finalize paths (cycle close, subscription create,
-	// cancel-final) route through here so a finalized invoice can never commit
-	// without its audit trail (the residual own-tx post-commit Log left an
-	// invoice visible with no record of what created it if the write failed).
+	// fate. BillOnCreate, the own-transaction finalize path, routes through here
+	// so a finalized invoice can never commit without its audit trail (the
+	// residual own-tx post-commit Log left an invoice visible with no record of
+	// what created it if the write failed).
 	CreateInvoiceWithLineItemsAudited(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error)
 	// CreateInvoiceWithLineItemsTx is the in-tx variant — used by BillOnCreateTx
 	// and BillOnPlanSwapTx; the latter inserts the cross-interval swap's invoice
@@ -746,19 +746,19 @@ type TaxProviderResolver interface {
 // tax_calculations audit table. Separate interface so engine tests can
 // skip persistence without wiring a full postgres store.
 //
-// LookupCalculationCreatedAt powers the CommitTax expiry guard.
-// Stripe Tax calculations expire 24h after creation — operator-finalized
-// drafts held longer than that quietly fail at commit time and leave
-// the invoice with tax_calculation_id but no tax_transaction_id (i.e.
-// Stripe Tax reporting silently broken). Returning the calc's age lets
-// CommitTax fail loud before calling Stripe so the operator knows to
-// retry tax first. Returns errs.ErrNotFound when no row matches —
+// LookupCalculationUsableUntil powers the CommitTax expiry guard.
+// A Stripe Tax calculation expires (90 days after it is made, the
+// expires_at Stripe returns with it) — an operator-finalized draft held
+// longer than that fails at commit time and leaves the invoice with
+// tax_calculation_id but no tax_transaction_id (i.e. Stripe Tax reporting
+// silently broken). Returning the calc's expiry lets CommitTax fail loud
+// before calling Stripe so the operator knows to retry tax first. Returns errs.ErrNotFound when no row matches —
 // caller treats as "skip the guard" (manual / none provider produces
 // no row; defensive against tests that wire a fake store without the
 // row pre-loaded).
 type TaxCalculationWriter interface {
 	Record(ctx context.Context, tenantID, invoiceID string, req tax.Request, res *tax.Result) (string, error)
-	LookupCalculationCreatedAt(ctx context.Context, tenantID, invoiceID, providerRef string) (time.Time, error)
+	LookupCalculationUsableUntil(ctx context.Context, tenantID, invoiceID, providerRef string) (time.Time, error)
 	// LinkInvoice backfills invoice_id on the audit row once the invoice
 	// exists. Record runs before the invoice is persisted (invoice_id NULL);
 	// CommitTax calls this with the known id so audit joins + the expiry
@@ -766,11 +766,12 @@ type TaxCalculationWriter interface {
 	LinkInvoice(ctx context.Context, tenantID, invoiceID, providerRef string) error
 }
 
-// taxCalculationMaxAge is the Stripe Tax calculation window. Stripe's
-// own docs put it at 24h; we use 23h to leave a safety buffer so a
-// near-expiry calc isn't sent to Stripe just to bounce. Operator
-// guidance on expiry: "Retry tax to refresh, then finalize."
-const taxCalculationMaxAge = 23 * time.Hour
+// taxCalculationExpiryMargin is how long before a calculation's expiry the
+// commit guard stops using it, so one about to expire isn't sent to Stripe
+// just to bounce. The expiry itself is the calculation's own: Stripe Tax's
+// expires_at, 90 days after it was made (tax.CalculationUsableUntilSQL).
+// Operator guidance on expiry: "Retry tax to refresh, then finalize."
+const taxCalculationExpiryMargin = time.Hour
 
 // SetTaxProviderResolver wires the per-tenant tax provider resolver. When
 // nil, the engine skips tax calculation entirely and invoices carry zero
@@ -786,11 +787,13 @@ func (e *Engine) SetTaxCalculationStore(s TaxCalculationWriter) {
 	e.taxCalcStore = s
 }
 
-// CommitTax resolves the tenant's tax provider and commits the named
-// calculation to a tax_transaction. Used after invoice finalize to
-// finalize Stripe Tax reporting. Returns nil when no resolver is wired
-// or the tenant's settings can't be loaded — the invoice still exists,
-// so the caller should log but not unwind.
+// CommitTax commits the named calculation to a tax_transaction, at the
+// provider that made it: a calculation id is a Stripe Tax reference, so the
+// commit goes to Stripe Tax whatever provider the tenant has selected since
+// (settingsForTaxDocument). Used after invoice finalize to finalize Stripe Tax
+// reporting. Returns nil when no resolver or settings reader is wired; an
+// error when the tenant's settings can't be loaded or the commit fails. The invoice still
+// exists either way, so the caller logs and does not unwind.
 //
 // On success, the returned upstream transaction id (Stripe: tx_xxx) is
 // persisted onto the invoice so a later credit note can issue a tax
@@ -807,7 +810,7 @@ func (e *Engine) CommitTax(ctx context.Context, tenantID, invoiceID, calculation
 	if err != nil {
 		return fmt.Errorf("load tenant settings: %w", err)
 	}
-	provider, err := e.taxProviders.Resolve(ctx, ts)
+	provider, err := e.taxProviders.Resolve(ctx, settingsForTaxDocument(ts, calculationID))
 	if err != nil {
 		return fmt.Errorf("resolve provider: %w", err)
 	}
@@ -834,28 +837,28 @@ func (e *Engine) CommitTax(ctx context.Context, tenantID, invoiceID, calculation
 }
 
 // CheckTaxCalculationUsable is the Stripe-Tax calc expiry guard, callable
-// on its own. Stripe Tax calculations are valid for 24h after creation;
-// a draft held longer fails at Stripe's CreateFromCalculation with
-// "calculation expired". Non-nil means: this calculation can NEVER be
-// committed — only a fresh calculation (retry tax) fixes it.
+// on its own. A Stripe Tax calculation is valid until its expires_at, 90
+// days after creation; a draft held longer fails at Stripe's
+// CreateFromCalculation with "calculation expired". Non-nil means: this
+// calculation can NEVER be committed — only a fresh calculation (retry tax)
+// fixes it.
 //
 // Two callers, deliberately: CommitTax (so an expired calc is refused at
 // the commit) and invoice.Service.Finalize's PRE-transition check. The
 // finalize check is the load-bearing one — the post-finalize commit
 // failure is swallowed BY DECISION (transient provider errors defer to
-// the orphan reconciler, which re-commits idempotently within its 24h
-// window), and that decision is only sound when deferral can succeed.
-// An expired calc is the one failure the reconciler can never heal: the
-// same age rule blocks its re-commit, and after the scan's 24h bound the
-// orphan exits silently — an invoice collected with tax printed on the
-// PDF but never reported to Stripe. So expiry must refuse the finalize
+// the orphan reconciler, which re-commits idempotently until the
+// calculation expires), and that decision is only sound when deferral can
+// succeed. An expired calc is the one failure the reconciler can never
+// heal: the same expiry blocks its re-commit and drops the orphan from the
+// scan — an invoice collected with tax printed on the PDF but never
+// reported to Stripe. So expiry must refuse the finalize
 // UP FRONT, while the invoice is still a draft and "retry tax" is still
 // available. That is also what this guard's message has promised the
 // operator all along.
 //
 // Returns nil when there is nothing to guard: store unwired, no
-// calculation, a tenant with no committing provider (none/manual), or no
-// audit row for the calculation. A read ERROR fails closed (2026-10-11): it
+// calculation, or no audit row for the calculation. A read ERROR fails closed (2026-10-11): it
 // used to return nil — "never block an invoice on a DB blip" — but a
 // finalize let through on an unreadable guard could finalize an expired
 // calculation, which is the one failure nothing heals. A refused finalize
@@ -866,9 +869,9 @@ func (e *Engine) CheckTaxCalculationUsable(ctx context.Context, tenantID, invoic
 		return nil
 	}
 	ctx = auth.WithTenantID(ctx, tenantID)
-	// Mirror CommitTax's provider short-circuit: a tenant whose provider
-	// resolves to nil (none/manual, or since disconnected) skips the commit
-	// entirely, so an aged calc must not block THEIR finalize either.
+	// The age rule applies whatever provider the tenant has selected: the
+	// calculation is Stripe Tax's. The resolver never returns a nil provider,
+	// so the nil check below only serves a stub resolver in tests.
 	ts, err := e.settings.Get(ctx, tenantID)
 	if err != nil {
 		return fmt.Errorf("tax expiry guard: read settings: %w", err)
@@ -887,42 +890,41 @@ func (e *Engine) CheckTaxCalculationUsable(ctx context.Context, tenantID, invoic
 	if linkErr := e.taxCalcStore.LinkInvoice(ctx, tenantID, invoiceID, calculationID); linkErr != nil {
 		return fmt.Errorf("tax expiry guard: link calculation %s to invoice: %w", calculationID, linkErr)
 	}
-	createdAt, lookupErr := e.taxCalcStore.LookupCalculationCreatedAt(ctx, tenantID, invoiceID, calculationID)
+	usableUntil, lookupErr := e.taxCalcStore.LookupCalculationUsableUntil(ctx, tenantID, invoiceID, calculationID)
 	if lookupErr == nil {
-		// REAL wall-clock on BOTH sides — never clock.Now(ctx). The
-		// calc's 24h TTL lives at Stripe, which knows nothing about a
-		// Hardcount test clock; the row's created_at is stamped by the DB
-		// (now(), real time). Using the ctx-bound simulated clock here
-		// conflated the two: a customer pinned to a test clock advanced
-		// >23h past real wall-clock (e.g. a mid-period proration after
-		// advancing the clock 15 days) made clock.Now(ctx) - createdAt
-		// exceed the window, so the guard falsely "expired" a calc that
-		// was created seconds ago in real time. The commit was skipped
-		// and the proration invoice kept tax_calculation_id but no
-		// tax_transaction_id — and the wall-clock reconciler excludes
-		// clock-pinned invoices, so nothing recovered it. Real elapsed
-		// time is the only correct measure of a Stripe-side TTL.
-		if age := time.Now().UTC().Sub(createdAt); age > taxCalculationMaxAge { //nolint:forbidigo // wall-clock: Stripe's calc TTL is a real-world 24h, never the simulated clock
+		// REAL wall-clock — never clock.Now(ctx). The calculation expires at
+		// Stripe, which knows nothing about a Hardcount test clock, and
+		// usableUntil is Stripe's own instant. Using the ctx-bound simulated
+		// clock here conflated the two: a customer pinned to a test clock
+		// advanced past the window (e.g. a mid-period proration after
+		// advancing the clock) made a calc created seconds ago in real time
+		// read as expired. The commit was skipped and the proration invoice
+		// kept tax_calculation_id but no tax_transaction_id — and the
+		// wall-clock reconciler excludes clock-pinned invoices, so nothing
+		// recovered it.
+		if now := time.Now().UTC(); now.After(usableUntil.Add(-taxCalculationExpiryMargin)) { //nolint:forbidigo // wall-clock: the calculation expires at Stripe in real time, never on the simulated clock
 			de := errs.InvalidState(fmt.Sprintf(
-				"tax calculation expired (age %s, max %s) — retry tax to refresh, then finalize",
-				age.Truncate(time.Minute), taxCalculationMaxAge))
+				"tax calculation expired (usable until %s) — retry tax to refresh, then finalize",
+				usableUntil.UTC().Format(time.RFC3339)))
 			// Stable machine code: integrators and the dashboard branch on
 			// this, never on the message text.
 			return de.WithCode("tax_calculation_expired")
 		}
 	} else if !errors.Is(lookupErr, errs.ErrNotFound) {
-		return fmt.Errorf("tax expiry guard: look up calculation age: %w", lookupErr)
+		return fmt.Errorf("tax expiry guard: look up calculation expiry: %w", lookupErr)
 	}
 	return nil
 }
 
-// ReverseTax resolves the tenant's tax provider and issues a reversal
-// against a previously committed tax_transaction. Called from the credit
-// note issue path after the refund / credit-grant / invoice-reduction
-// side-effects have succeeded. Returns an empty ReversalResult when no
-// resolver is wired, no provider is configured, or the provider has no
-// durable upstream state (none, manual) — the caller treats an empty
-// TransactionID as "nothing to record" and proceeds.
+// ReverseTax issues a reversal against a previously committed
+// tax_transaction, at the provider that made it: a transaction id is a Stripe
+// Tax reference, so the reversal goes to Stripe Tax whatever provider the
+// tenant has selected since (settingsForTaxDocument). Called from the void
+// path, the credit note issue path and their sweeps. Stripe Tax answers a
+// reversal with a transaction id or an error, for a zero-tax transaction too
+// (checked in test mode, 2026-11-10). An empty ReversalResult comes back only
+// when no resolver is wired or the request names no transaction; a caller
+// that holds a committed transaction treats it as a failure.
 func (e *Engine) ReverseTax(ctx context.Context, tenantID string, req tax.ReversalRequest) (*tax.ReversalResult, error) {
 	if e.taxProviders == nil || e.settings == nil {
 		return &tax.ReversalResult{}, nil
@@ -933,7 +935,7 @@ func (e *Engine) ReverseTax(ctx context.Context, tenantID string, req tax.Revers
 	if err != nil {
 		return nil, fmt.Errorf("load tenant settings: %w", err)
 	}
-	provider, err := e.taxProviders.Resolve(ctx, ts)
+	provider, err := e.taxProviders.Resolve(ctx, settingsForTaxDocument(ts, req.OriginalTransactionID))
 	if err != nil {
 		return nil, fmt.Errorf("resolve provider: %w", err)
 	}
@@ -941,6 +943,19 @@ func (e *Engine) ReverseTax(ctx context.Context, tenantID string, req tax.Revers
 		return &tax.ReversalResult{}, nil
 	}
 	return provider.Reverse(ctx, req)
+}
+
+// settingsForTaxDocument makes a commit or a reversal go to the provider that
+// made the document, not the one the tenant has selected today. upstreamRef is
+// the document's Stripe Tax reference: the calculation to commit, or the
+// transaction to reverse. Only Stripe Tax has upstream state (the manual and
+// none providers return no reference), so a non-empty one means the document
+// is Stripe Tax's, and it is committed and reversed there.
+func settingsForTaxDocument(ts domain.TenantSettings, upstreamRef string) domain.TenantSettings {
+	if upstreamRef != "" {
+		ts.TaxProvider = "stripe_tax"
+	}
+	return ts
 }
 
 // SetTestClockReader wires the test-clock resolver. Optional: when nil, the
@@ -3108,7 +3123,7 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	nextPeriodEnd := domain.NextBillingPeriodEnd(periodEnd, sub.BillingTime, plans[sub.Items[0].PlanID].BillingInterval, billingLoc, sub.BillingAnchorDay)
 
 	// Skip empty cycle-close invoices — matches BillOnCreate's and
-	// BillFinalOnImmediateCancel's existing zero-subtotal guards and
+	// priceFinalOnCancel's existing zero-subtotal guards and
 	// the Stripe / Lago / Chargebee / Orb convention of NOT emitting
 	// a $0 invoice when there's literally nothing to bill. Common
 	// triggers in practice:
@@ -3185,7 +3200,8 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 
 	// Single source of truth for the draft/finalized decision —
 	// shared across all four invoice-emitting paths (cycle close,
-	// BillOnCreate, BillFinalOnImmediateCancel, handleItemProration).
+	// BillOnCreate, the cancel's final invoice that priceFinalOnCancel
+	// prices, handleItemProration).
 	// Encodes: tax pending → draft; collection paused at the period's
 	// end → draft; otherwise finalized. See
 	// domain.InvoiceFinalizationStatus.
@@ -3820,7 +3836,7 @@ func onCreateBaseLines(sub domain.Subscription, plans map[string]domain.Plan, ad
 // coordinator-tx callers call it post-commit.
 func (e *Engine) FinalizeOnCreateInvoice(ctx context.Context, sub domain.Subscription, inv domain.Invoice) {
 	// The finalize AUDIT row and invoice.finalized rode the invoice-create tx
-	// (ADR-090, ADR-040): the own-tx callers (BillOnCreate) emit the row via
+	// (ADR-090, ADR-040): the own-tx caller (BillOnCreate) emits the row via
 	// finalizeAuditEmit, and the coordinator-tx callers (BillOnCreateTx, the
 	// cross-interval swap through BillOnPlanSwapTx, the cancel through
 	// BillCancelTx) emit it on the coordinator tx; the invoice
@@ -3843,59 +3859,6 @@ func (e *Engine) FinalizeOnCreateInvoice(ctx context.Context, sub domain.Subscri
 	// Collect now (credits first, ADR-088). The invoice was queued in its
 	// create tx, so a crash before this leaves it for the next sweep.
 	e.CollectInvoice(ctx, sub.TenantID, inv.ID, nil)
-}
-
-// BillFinalOnImmediateCancel emits the final partial-period invoice
-// for a sub that was canceled mid-period via the operator's immediate
-// Cancel action. Pre-PR-10, mid-period immediate cancels generated NO
-// final invoice — partial-period usage was never billed (revenue leak:
-// customer could rack up usage and cancel for free). For in_arrears
-// plans, the partial-period base was also never billed.
-//
-// Scope of the invoice:
-//   - Period: [current_period_start, canceled_at] — the elapsed
-//     portion of the just-canceled cycle.
-//   - Lines:
-//   - in_arrears base items: prorated by `elapsed / full_cycle`.
-//   - in_advance base items: skipped (already paid up-front; the
-//     relief for the unused portion is BillOnCancelDraftsTx's job).
-//   - Usage: aggregated for [periodStart, canceled_at] across every
-//     meter referenced by every item. Same shape as a normal cycle
-//     invoice's usage section, just with a truncated period_end.
-//   - billing_reason = subscription_cancel (distinguishes from the
-//     normal subscription_cycle invoice and from subscription_create).
-//
-// No-op when:
-//   - sub.Status != canceled (defensive — caller should have flipped it)
-//   - no current period set / canceled_at missing
-//   - canceled_at AT or BEFORE current_period_start (defensive)
-//   - a never-activated trial (trials are free, ADR-069)
-//   - computed subtotal rounds to zero (no in_arrears base AND no
-//     usage events; matches BillOnCreate's $0-invoice-skip pattern)
-//
-// Refuses (InvalidState, code unbilled_period) when canceled_at is AT or
-// AFTER current_period_end: the period ended and its close has not run.
-// The cycle close skips a canceled subscription, so letting the cancel
-// through would leave that period uninvoiced for good.
-//
-// Idempotent via the standard (subscription_id, period_start,
-// period_end) UNIQUE constraint — the period_end is canceled_at which
-// is durably stamped, so a retry against the same canceled sub
-// returns the existing-invoice idempotent skip.
-//
-// Auto-charge: attempted synchronously when a PM is ready, mirrors
-// BillOnCreate's post-finalize path. Without a PM, the invoice is
-// marked auto_charge_pending and the no-PM notifier fires. Dunning
-// takes over from there on a failed charge.
-func (e *Engine) BillFinalOnImmediateCancel(ctx context.Context, sub domain.Subscription) (domain.Invoice, error) {
-	ctx, span := startFinalOnCancelSpan(ctx, "billing.BillFinalOnImmediateCancel", sub)
-	defer span.End()
-	unpriced := unpricedUsage{}
-	p, err := e.priceFinalOnCancel(ctx, nil, sub, unpriced)
-	if err != nil {
-		return domain.Invoice{}, err
-	}
-	return e.writeFinalOnCancel(ctx, nil, sub, p, unpriced)
 }
 
 // BillCancelTx writes a cancel's final invoice and its relief on the cancel's
@@ -3936,14 +3899,14 @@ func (e *Engine) BillCancelTx(ctx context.Context, tx *sql.Tx, sub domain.Subscr
 	if r, err = e.BillOnCancelDraftsTx(ctx, tx, sub); err != nil {
 		return domain.Invoice{}, domain.Relief{}, afterCommit, fmt.Errorf("cancel proration relief: %w", err)
 	}
-	if inv, err = e.writeFinalOnCancel(ctx, tx, sub, p, unpriced); err != nil {
+	if inv, err = e.writeFinalOnCancel(ctx, tx, sub, p); err != nil {
 		return domain.Invoice{}, domain.Relief{}, afterCommit, fmt.Errorf("final-on-cancel invoice: %w", err)
 	}
 	return inv, r, afterCommit, nil
 }
 
-// startFinalOnCancelSpan starts a trace span for billing a cancel: the final
-// invoice, and in BillCancelTx also the relief.
+// startFinalOnCancelSpan starts the trace span for billing a cancel: its final
+// invoice and its relief (BillCancelTx).
 func startFinalOnCancelSpan(ctx context.Context, name string, sub domain.Subscription) (context.Context, trace.Span) {
 	return telemetry.Tracer("billing").Start(ctx, name,
 		trace.WithAttributes(
@@ -3965,10 +3928,9 @@ const (
 // base fees over the partial period [periodStart, canceledAt] (skipped
 // entirely when a threshold fire already billed the unprorated base)
 // plus segment-aware usage, honoring the threshold watermark's
-// clamped/full dual-window protocol. Extracted whole from
-// billFinalOnImmediateCancelImpl (behavior-preserving) to separate the
-// pricing computation from the cancel-invoice orchestration; it is the
-// cancel-path analog of buildLineItems and shares its segment model.
+// clamped/full dual-window protocol. It holds the pricing computation
+// apart from the cancel-invoice orchestration in priceFinalOnCancel; it is
+// the cancel-path analog of buildLineItems and shares its segment model.
 // Usage left unpriced is added to unpriced, and usage below zero to
 // belowZero, as in buildLineItems. usageSuffix ends each usage line's
 // description and says why the window ended early: cancelUsageSuffix or
@@ -4116,7 +4078,6 @@ const (
 // what writeFinalOnCancel needs, with nothing written yet.
 type finalOnCancel struct {
 	kind            finalOnCancelKind
-	live            bool
 	periodStart     time.Time
 	canceledAt      time.Time
 	billingLoc      *time.Location
@@ -4131,15 +4092,11 @@ type finalOnCancel struct {
 
 // priceFinalOnCancel runs the guards of a cancel's final invoice and prices
 // it: the threshold watermark, the lines and the tax. It writes nothing and
-// takes neither the tenant's number row nor a credit-note lock. With tx it
-// reads the watermark on tx. It refuses (InvalidState, code unbilled_period)
-// a cancel at or after current_period_end.
+// takes neither the tenant's number row nor a credit-note lock. It reads the
+// watermark on tx, the cancel's transaction. It refuses (InvalidState, code
+// unbilled_period) a cancel at or after current_period_end.
 func (e *Engine) priceFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.Subscription, unpriced unpricedUsage) (finalOnCancel, error) {
-	live, err := postgres.Livemode(ctx)
-	if err != nil {
-		return finalOnCancel{}, err
-	}
-	p := finalOnCancel{live: live}
+	p := finalOnCancel{}
 
 	if sub.Status != domain.SubscriptionCanceled {
 		return p, nil
@@ -4208,9 +4165,9 @@ func (e *Engine) priceFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.
 	// as with no fire (a fire bills no base), except behind a fire made
 	// before that change, which billed it in full.
 	//
-	// Read on the cancel's tx when there is one: after the cancel's UPDATE
-	// locked the subscription, and holding the threshold invoice FOR KEY
-	// SHARE until the cancel commits. A void of that invoice after this read then
+	// Read on the cancel's tx: after the cancel's UPDATE locked the
+	// subscription, and holding the threshold invoice FOR KEY SHARE until
+	// the cancel commits. A void of that invoice after this read then
 	// lands after the final invoice and the window is forgiven; a void that
 	// commits first is seen here, and the final invoice bills the window
 	// (ADR-066 amendment 2026-10-23).
@@ -4259,10 +4216,9 @@ func (e *Engine) priceFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.
 		return finalOnCancel{}, err
 	}
 	// The cancel's final invoice is the last one for this period, so usage
-	// it leaves unpriced is billed nowhere. Without tx, writeFinalOnCancel
-	// counts it once the decision is durable: no invoice, or the invoice
-	// written. With tx, the caller's transaction can still roll back, so it
-	// is left in unpriced for the caller to count after its commit.
+	// it leaves unpriced is billed nowhere. It is left in unpriced for the
+	// caller to count after its commit, because the cancel's transaction can
+	// still roll back.
 	belowZero := netNegativeUsage{}
 	lineItems, subtotal, err := e.buildCancelLineItems(ctx, sub, wm, plans, invoiceCurrency, periodStart, canceledAt, billingLoc, unpriced, belowZero, cancelUsageSuffix)
 	if err != nil {
@@ -4287,16 +4243,15 @@ func (e *Engine) priceFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.
 	return p, nil
 }
 
-// writeFinalOnCancel writes what priceFinalOnCancel priced: the invoice with
-// its number, finalize audit row and usage-below-zero row, or, for a zero
-// subtotal, only that row. With tx it writes on tx and leaves the tax commit
-// and collection to the caller's post-commit FinalizeOnCreateInvoice. Without
-// tx it writes in its own transaction, then commits the tax and collects.
-func (e *Engine) writeFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.Subscription, p finalOnCancel, unpriced unpricedUsage) (domain.Invoice, error) {
-	// Usage below zero billed 0 (#1193). Its row rides the transaction that
-	// makes this decision final: the caller's, the invoice's, or (no tx and
-	// no invoice) one of its own.
-	noteBelowZero := func(tx *sql.Tx, inv domain.Invoice) error {
+// writeFinalOnCancel writes on tx, the cancel's transaction, what
+// priceFinalOnCancel priced: the invoice with its number, finalize audit row
+// and usage-below-zero row, or, for a zero subtotal, only that row. It leaves
+// the tax commit and collection to the caller's post-commit
+// FinalizeOnCreateInvoice.
+func (e *Engine) writeFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.Subscription, p finalOnCancel) (domain.Invoice, error) {
+	// Usage below zero billed 0 (#1193). Its row rides tx, the transaction
+	// that makes this decision final.
+	noteBelowZero := func(inv domain.Invoice) error {
 		return e.noteNetNegativeTx(ctx, tx, sub, p.belowZero, domain.BillingReasonSubscriptionCancel, p.periodStart, p.canceledAt, inv)
 	}
 	switch p.kind {
@@ -4306,20 +4261,9 @@ func (e *Engine) writeFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.
 		// Nothing to bill — no in_arrears base AND no usage. The
 		// customer canceled before they consumed anything billable.
 		// Skip the $0 invoice (matches BillOnCreate's behavior).
-		if tx != nil {
-			if err := noteBelowZero(tx, domain.Invoice{}); err != nil {
-				return domain.Invoice{}, fmt.Errorf("usage below zero row (cancel tx): %w", err)
-			}
-			return domain.Invoice{}, nil
+		if err := noteBelowZero(domain.Invoice{}); err != nil {
+			return domain.Invoice{}, fmt.Errorf("usage below zero row (cancel tx): %w", err)
 		}
-		if len(p.belowZero) > 0 {
-			if err := e.subs.WithTenantTx(ctx, sub.TenantID, func(tx *sql.Tx) error {
-				return noteBelowZero(tx, domain.Invoice{})
-			}); err != nil {
-				return domain.Invoice{}, fmt.Errorf("usage below zero row (cancel): %w", err)
-			}
-		}
-		unpriced.record(p.live, sub)
 		return domain.Invoice{}, nil
 	}
 
@@ -4358,68 +4302,24 @@ func (e *Engine) writeFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.
 		BillingReason:      domain.BillingReasonSubscriptionCancel,
 		IsSimulated:        sub.TestClockID != "",
 	}
-	if tx != nil {
-		// Atomic path (CancelAtomicWithBill): insert on the caller's coordinator
-		// tx. No idempotent-skip — a unique violation poisons the caller's tx, so
-		// surface it and let the cancel roll back (same contract as the swap
-		// path's BillOnPlanSwapTx). The external finalize (tax commit +
-		// auto-charge) runs post-commit via FinalizeOnCreateInvoice; the AUDIT row
-		// and invoice.finalized ride THIS coordinator tx, so they commit
-		// atomically with the cancel.
-		created, err := e.invoices.CreateInvoiceWithLineItemsTx(ctx, tx, sub.TenantID, invToCreate, p.lineItems)
-		if err != nil {
-			return domain.Invoice{}, err
-		}
-		if err := e.emitFinalizeAuditTx(ctx, tx, created); err != nil {
-			return domain.Invoice{}, fmt.Errorf("finalize audit (cancel tx): %w", err)
-		}
-		if err := noteBelowZero(tx, created); err != nil {
-			return domain.Invoice{}, fmt.Errorf("usage below zero row (cancel tx): %w", err)
-		}
-		return created, nil
-	}
-
-	inv, err := e.invoices.CreateInvoiceWithLineItemsAudited(ctx, sub.TenantID, invToCreate, p.lineItems, func(tx *sql.Tx, out domain.Invoice) error {
-		if err := e.emitFinalizeAuditTx(ctx, tx, out); err != nil {
-			return err
-		}
-		return noteBelowZero(tx, out)
-	})
+	// Insert on the caller's coordinator tx (CancelAtomicWithBill). No
+	// idempotent-skip — a unique violation poisons the caller's tx, so
+	// surface it and let the cancel roll back (same contract as the swap
+	// path's BillOnPlanSwapTx). The external finalize (tax commit +
+	// auto-charge) runs post-commit via FinalizeOnCreateInvoice; the AUDIT row
+	// and invoice.finalized ride THIS coordinator tx, so they commit
+	// atomically with the cancel.
+	created, err := e.invoices.CreateInvoiceWithLineItemsTx(ctx, tx, sub.TenantID, invToCreate, p.lineItems)
 	if err != nil {
-		if errors.Is(err, errs.ErrAlreadyExists) {
-			slog.Info("subscription_cancel final invoice already exists (idempotent skip)",
-				"subscription_id", sub.ID,
-				"period_start", p.periodStart,
-				"canceled_at", p.canceledAt,
-			)
-			return domain.Invoice{}, nil
-		}
-		return domain.Invoice{}, fmt.Errorf("create final-on-cancel invoice: %w", err)
+		return domain.Invoice{}, err
 	}
-	unpriced.record(p.live, sub)
-
-	// The finalize AUDIT row and invoice.finalized already committed inside
-	// the create tx above.
-	if inv.TaxProvider != "" && inv.TaxCalculationID != "" {
-		if err := e.CommitTax(ctx, sub.TenantID, inv.ID, inv.TaxCalculationID); err != nil {
-			slog.Warn("tax: commit failed after final-on-cancel invoice",
-				"error", err, "tenant_id", sub.TenantID, "invoice_id", inv.ID)
-		}
+	if err := e.emitFinalizeAuditTx(ctx, tx, created); err != nil {
+		return domain.Invoice{}, fmt.Errorf("finalize audit (cancel tx): %w", err)
 	}
-
-	// Collect now (credits first, ADR-088); dunning takes over on a real
-	// decline. The invoice was queued in its create tx.
-	e.CollectInvoice(ctx, sub.TenantID, inv.ID, nil)
-
-	slog.Info("subscription_cancel final invoice generated",
-		"invoice_id", inv.ID,
-		"subscription_id", sub.ID,
-		"period_start", p.periodStart,
-		"canceled_at", p.canceledAt,
-		"total_cents", totalWithTax,
-		"line_items", len(p.lineItems),
-	)
-	return inv, nil
+	if err := noteBelowZero(created); err != nil {
+		return domain.Invoice{}, fmt.Errorf("usage below zero row (cancel tx): %w", err)
+	}
+	return created, nil
 }
 
 // cancelCreditInputs is the shared setup for the in_advance cancel-proration
@@ -5327,8 +5227,9 @@ func (e *Engine) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID str
 	}
 	// pending is the classic retry shape. The second admitted shape
 	// is a draft whose calculation SUCCEEDED at build time but has since
-	// aged past the provider's 24h TTL — a paused-collection sub's cycle
-	// invoice is the common way a draft sits that long. Finalize refuses
+	// expired at the provider (a Stripe Tax calculation lasts 90 days) — a
+	// paused-collection sub's cycle invoice is the way a draft sits that
+	// long. Finalize refuses
 	// those with "retry tax to refresh, then finalize" (the expiry
 	// pre-check), so the refresh it names must be performable; recomputing
 	// a DRAFT's tax is always safe, its totals are not yet issued.

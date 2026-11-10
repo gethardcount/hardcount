@@ -246,8 +246,8 @@ func TestPaymentStateCopy_EveryBranch(t *testing.T) {
 			"Stripe hasn't confirmed this charge yet, and Hardcount re-checks automatically until it does.",
 			"3-D Secure", nil},
 		{"parked (no payment id)", func() Invoice { i := queued(false); i.PaymentStatus = PaymentUnknown; return i }(), withCard,
-			AttentionReasonPaymentUnconfirmed, AttentionSeverityWarning,
-			"Stripe didn't confirm this charge and may still complete it.\nHardcount checks Stripe every hour and records the payment if it appears.\nIf none appears within 24 hours, the invoice is charged again as usual.",
+			AttentionReasonPaymentUnconfirmed, AttentionSeverityCritical,
+			"An earlier Hardcount version couldn't confirm this charge with Stripe, and Hardcount can't look it up.\nCheck the customer's payments in Stripe.",
 			"paid another way", []AttentionAction{AttentionActionMarkUncollectible}},
 		{"declined", func() Invoice {
 			i := queued(false)

@@ -337,15 +337,89 @@ type stripeStub struct {
 	extra func(call string, form url.Values) (status int, body string, ok bool)
 }
 
+// twoStepStripe adapts a stub scripted for a one-call charge (one POST
+// /v1/payment_intents that created and confirmed) to Hardcount's charge,
+// which creates the PaymentIntent unconfirmed and then confirms it (POST
+// /v1/payment_intents/{id}/confirm). The create goes to the stub, which
+// answers with its scripted outcome. An answer Stripe gives at the create (a
+// 400 refusal, a refused key, a 429) goes back as it is. Any other is held:
+// the create gets an unconfirmed PaymentIntent with the outcome's id, and the
+// confirm of that id gets the held outcome. The stub sees one charge request
+// per charge, as before.
+func twoStepStripe(answer func(*http.Request) *http.Response) func(*http.Request) *http.Response {
+	type held struct {
+		status int
+		body   string
+	}
+	var (
+		mu    sync.Mutex
+		holds = map[string]held{}
+		n     int
+	)
+	respond := func(req *http.Request, status int, body string) *http.Response {
+		return &http.Response{
+			StatusCode: status,
+			Header:     http.Header{"Content-Type": {"application/json"}},
+			Body:       io.NopCloser(strings.NewReader(body)),
+			Request:    req,
+		}
+	}
+	return func(req *http.Request) *http.Response {
+		path := req.URL.Path
+		if req.Method == "POST" && path == "/v1/payment_intents" {
+			res := answer(req)
+			b, _ := io.ReadAll(res.Body)
+			_ = res.Body.Close()
+			switch res.StatusCode {
+			case http.StatusBadRequest, http.StatusUnauthorized, http.StatusForbidden, http.StatusTooManyRequests:
+				return respond(req, res.StatusCode, string(b))
+			}
+			var shape struct {
+				ID    string `json:"id"`
+				Error struct {
+					PaymentIntent struct {
+						ID string `json:"id"`
+					} `json:"payment_intent"`
+				} `json:"error"`
+			}
+			_ = json.Unmarshal(b, &shape)
+			id := shape.ID
+			if id == "" {
+				id = shape.Error.PaymentIntent.ID
+			}
+			mu.Lock()
+			if id == "" {
+				n++
+				id = fmt.Sprintf("pi_two_step_%d", n)
+			}
+			holds[id] = held{res.StatusCode, string(b)}
+			mu.Unlock()
+			return respond(req, http.StatusOK, fmt.Sprintf(`{"id":%q,"object":"payment_intent","status":"requires_confirmation"}`, id))
+		}
+		if req.Method == "POST" && strings.HasPrefix(path, "/v1/payment_intents/") && strings.HasSuffix(path, "/confirm") {
+			id := strings.TrimSuffix(strings.TrimPrefix(path, "/v1/payment_intents/"), "/confirm")
+			mu.Lock()
+			h, ok := holds[id]
+			delete(holds, id)
+			mu.Unlock()
+			if ok {
+				return respond(req, h.status, h.body)
+			}
+		}
+		return answer(req)
+	}
+}
+
 func installStripeStub(t *testing.T) *stripeStub {
 	t.Helper()
 	stub := &stripeStub{forms: map[string]url.Values{}}
+	charge := twoStepStripe(stub.answer)
 	prev := http.DefaultTransport
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if req.URL.Host != "api.stripe.com" {
 			return prev.RoundTrip(req)
 		}
-		return stub.answer(req), nil
+		return charge(req), nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = prev })
 	return stub

@@ -218,3 +218,35 @@ discarded work. It is removed: the set is self-draining (success stamps
 
 This ADR's own change — narrowing the sweep to voided-only — is unrelated to
 the window and unaffected.
+
+## Amendment 2026-11-10 — the calculation's own expiry
+
+Replaces, in the section above, "24h matches a HARD ceiling (the Stripe Tax
+calculation TTL, after which a re-commit is impossible)". The rest stands.
+
+1. A Stripe Tax calculation is usable until its own `expires_at`, 90 days
+   after it is made (verified in Stripe test mode); 24 hours was the life of
+   an idempotency key. The commit guard refuses it within 1 hour of the
+   stored `expires_at`, taken as 24 hours after its record if none is stored.
+2. `ListPendingTaxCommit` lists an invoice until that expiry (24 hours after
+   its last write if no calculation is recorded), so a tax commit that failed
+   for days is recorded once its cause is fixed.
+3. A failed tax commit or tax reversal waits before its sweep's next try: an
+   eighth of the time since the invoice's last write, at least 1 hour and at
+   most 12 hours. Before, one tenant's failing invoices held the list's head.
+
+4. Over 24 hours after a commit landed, Stripe refuses a re-commit ("You
+   already created tax transaction tax_… from tax calculation …"). The commit
+   then reads the transaction that message names and adopts its id when its
+   reference is the invoice, so a commit whose answer was lost still ends
+   with its transaction id.
+
+Two consequences to know:
+
+- A late commit is posted at Stripe when it is recorded, not at the invoice's
+  date (no `posted_at` is sent), so its tax lands in the reporting period of
+  the commit.
+- A draft that waited more than a day is finalized on the calculation it was
+  built with. Before, the 23-hour guard forced a "Retry tax", which picked up
+  an address or tax ID changed since the draft was built. "Retry tax" on such
+  a draft is refused until the calculation expires.

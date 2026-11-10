@@ -21,6 +21,88 @@ only way back.
    `no migration record`, stop: the upgrade will not run
    ([why](ops/runbook/migration-failed-midway.md#tables-but-no-migration-record)).
 
+### Migration 00225: finish charges first
+
+The release with migration `00225_charge_hold_token` changes how a charge
+reaches Stripe: each charge puts its Stripe payment on the invoice before
+any money moves ([ADR-137](adr/137-charge-stamps-invoice-before-confirming.md)). The
+migration refuses to run while an open or written-off invoice has a charge
+in progress or a parked charge from the previous version. The new version
+cannot settle those, because the previous version put nothing on the invoice
+before its charge reached Stripe.
+
+1. With the previous version still running, count them in the database
+   shell (`docker compose exec postgres psql -U hardcount -d hardcount` on
+   one VM):
+
+   ```sql
+   SET app.bypass_rls = 'on';
+   SELECT count(*) FROM invoices
+   WHERE status IN ('finalized', 'uncollectible')
+     AND (auto_charge_claimed_until IS NOT NULL
+          OR (payment_status = 'unknown' AND COALESCE(stripe_payment_intent_id, '') = ''));
+   ```
+
+   **You see:** a `count` column with one number.
+2. Above 0: leave the previous version running and count again later. Its
+   billing run finishes a charge in progress within about an hour, and a
+   parked charge about 25 hours after the charge.
+3. At 0: stop every copy of the previous version, then take the backup
+   (step 2 of [Before you upgrade](#before-you-upgrade)) and upgrade as the
+   rest of this page says. A backup taken while the count was above 0 needs
+   one more step when it is restored
+   ([A backup with a charge in progress](ops/restore.md#a-backup-with-a-charge-in-progress)).
+   Run one version at a time for this upgrade. A copy of the previous
+   version that keeps running can leave a charge that the new one will not
+   settle on its own
+   ([Left by an earlier version](ops/runbook/unclear-charge.md#left-by-an-earlier-version)).
+
+Written-off invoices count: the previous version still settles a charge on
+one (it records a payment it finds at Stripe, and ends a parked charge), and
+the new version does not. Paid and voided invoices do not count: nothing is
+left to settle on them.
+
+If the count stays above 0 for more than 26 hours, the previous version is
+keeping a charge it cannot finish. List the invoices (the query above with
+`SELECT id, invoice_number, status, payment_status` in place of
+`count(*)`), and read the previous version's
+`hardcount_stale_charge_hold_resolutions_total` by its `result` label:
+
+- **`waiting`:** a payment is still processing at Stripe (a bank debit takes
+  days). Wait for it. Do not write the invoice off.
+- **`cannot_ask`:** it cannot ask Stripe about the charge: the key was
+  revoked, or the customer was deleted in Stripe. Fix the Stripe connection
+  so its next billing run can ask. If that cannot be fixed, write the
+  invoice off: its next run clears the charge hold of a written-off invoice.
+- **`failed`:** a database error, which the log line names.
+
+A parked invoice (`payment_status` `unknown`, no `stripe_payment_intent_id`)
+that Stripe can never be asked about keeps its hold after a write-off too.
+Look at the customer's payments in Stripe yourself. If one is for this
+invoice, send its `payment_intent.succeeded` event again from the Stripe
+dashboard, and the previous version marks the invoice paid. If there is
+none, stop the previous version and end the parked charge by hand, then
+count again:
+
+```sql
+SET app.bypass_rls = 'on';
+UPDATE invoices
+SET payment_status = 'pending', auto_charge_claimed_until = NULL,
+    charge_attempt_seq = charge_attempt_seq + 1
+WHERE id = '<invoice id>'
+  AND payment_status = 'unknown' AND COALESCE(stripe_payment_intent_id, '') = '';
+```
+
+If the upgrade stops with `Hardcount upgrade stopped: … open or written-off
+invoice(s) have a charge in progress or a parked charge from the previous
+version`, that migration changed nothing. Start the previous version again
+(on one VM, the steps in [Upgrade on one VM](#upgrade-on-one-vm) with its
+version number), then do steps 1 to 3. If the release's other migrations
+ran, the previous version logs that the database is newer than it; that is
+expected here. On a database you restored from a backup, do not start the
+previous version: see
+[A backup with a charge in progress](ops/restore.md#a-backup-with-a-charge-in-progress).
+
 ### Coming from Velox
 
 Hardcount was called Velox before v0.9.0. v0.9.0 installs fresh only: it

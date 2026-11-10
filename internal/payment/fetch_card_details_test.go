@@ -24,7 +24,7 @@ func TestFetchCardDetails_ReadsOnlyAndSendsNoCustomerUpdate(t *testing.T) {
 			return http.StatusOK, `{"id":"cus_x","object":"customer"}`
 		},
 	})
-	c, ctx := listClient()
+	c, ctx := readClient()
 
 	got, err := c.FetchCardDetails(ctx, "cus_x")
 	if err != nil {

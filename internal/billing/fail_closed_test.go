@@ -43,8 +43,9 @@ func (g *guardCalcStore) Record(context.Context, string, string, tax.Request, *t
 	return "taxcalc_x", g.recordErr
 }
 func (g *guardCalcStore) LinkInvoice(context.Context, string, string, string) error { return g.linkErr }
-func (g *guardCalcStore) LookupCalculationCreatedAt(context.Context, string, string, string) (time.Time, error) {
-	return g.createdAt, g.lookupErr
+func (g *guardCalcStore) LookupCalculationUsableUntil(context.Context, string, string, string) (time.Time, error) {
+	// A calculation recorded at createdAt whose response names no expiry.
+	return g.createdAt.Add(tax.CalculationFallbackLifetime), g.lookupErr
 }
 
 // The finalize expiry guard fails closed on a read error (it returned nil, so

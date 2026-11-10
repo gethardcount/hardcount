@@ -267,38 +267,36 @@ follows.
   every automatic charge, so Stripe never picks one.
   [More](guides/connect-stripe.md#3-save-a-customers-card), and
   [the decision](adr/053-explicit-payment-method-at-charge.md)
-- **unknown payment status**: A charge got an unclear answer (a timeout, a
-  server error, a dropped connection), so Hardcount cannot tell if money moved.
-  Nothing charges the invoice while the status is unknown. A Stripe webhook
-  or the reconciler (below), Hardcount's regular check with Stripe, settles
-  it. If no PaymentIntent ID was
-  recorded, the invoice is parked (below), which can end in a new
-  charge.
+- **unknown payment status**: A charge is at Stripe, and Hardcount has no
+  answer yet. Every charge is unknown for the second or so it takes: Hardcount
+  puts the PaymentIntent on the invoice before any money moves. The status
+  stays unknown when the answer is unclear (a timeout, a server error, a
+  dropped connection). Nothing charges the invoice while the status is
+  unknown. A Stripe webhook settles it, or the reconciler (below),
+  Hardcount's regular check with Stripe, looks the payment up by its ID.
   [More](concepts/payments.md#when-the-answer-is-unclear), and
   [the decision](adr/107-unknown-is-terminal-until-a-human.md)
 - **charge hold**: A 5-minute claim Hardcount puts on an invoice while it
   charges it, so only one charge runs at a time. Automatic charges, payment
   retries and **Collect payment** all share it. A charge with a clear answer
-  lifts it at once. After a lost answer (a crash, a shutdown) it stays until
-  the reconciler has asked Stripe.
+  lifts it at once. After an unclear answer (a crash, a shutdown, a timeout)
+  it stays for the rest of the 5 minutes, and the reconciler reads the
+  payment once it has ended. A hold left by a charge that stopped before it
+  asked Stripe to take the money stays until the reconciler clears it.
   [More](concepts/payments.md#when-the-answer-is-unclear)
 - **reconciler**: The check that asks Stripe what happened to payments
-  Hardcount did not hear back about: `unknown` and `processing` payments,
-  charge holds left after a lost answer, and parked invoices. It runs with
-  every scheduled billing run, hourly (every 5 minutes when `APP_ENV` is
-  `local` or not set).
+  Hardcount did not hear back about: `unknown` and `processing` payments.
+  It also clears a charge hold left by a charge that stopped before it asked
+  Stripe to take the money, without a call to Stripe. It runs with every
+  scheduled billing run, hourly (every 5 minutes when `APP_ENV` is `local`
+  or not set).
   [More](concepts/payments.md#when-the-answer-is-unclear)
-- **parked invoice**: An invoice whose charge result is unknown and that has
-  no PaymentIntent ID recorded, so Hardcount cannot yet tell if the customer
-  paid. Nothing charges it. On every scheduled billing run (every hour, or
-  every 5 minutes when `APP_ENV` is `local` or not set, but not
-  `POST /v1/billing/run`),
-  Hardcount lists the customer's payments in Stripe. A payment that appears is
-  recorded, and if none has appeared
-  24 hours after the charge, the invoice is charged again as usual. An
-  operator can write it off meanwhile.
-  [More](concepts/payments.md#when-the-answer-is-unclear), and
-  [the decision](adr/127-a-lost-charge-result-is-resolved-by-asking-stripe.md)
+- **parked invoice**: A state that only earlier Hardcount versions created:
+  the charge result was unknown and no PaymentIntent ID was recorded. This
+  version never parks an invoice, and its upgrade does not run while one
+  exists. Only a write-off is allowed on a parked invoice.
+  [More](ops/runbook/unclear-charge.md#parked-no-paymentintent), and
+  [the decision](adr/137-charge-stamps-invoice-before-confirming.md)
 - **parked subscription**: A subscription whose billing failed eight times
   in a row for the same due time. Hardcount stops trying to bill it, so it
   stays due and no invoice is issued for that period. It leaves this state

@@ -1897,10 +1897,21 @@ func (s *Service) reverseInvoiceTax(ctx context.Context, tenantID string, inv do
 			req.GrossAmountCents = remainingGross
 		}
 	}
-	if _, err := s.taxReverser.ReverseTax(ctx, tenantID, req); err != nil {
+	res, err := s.taxReverser.ReverseTax(ctx, tenantID, req)
+	if err == nil && (res == nil || res.TransactionID == "") {
+		// tax_reversed_at is stamped only on a named reversal. Stripe Tax
+		// answers with a transaction id or an error, so a result that names
+		// none comes only from a reverser that is not wired to a provider.
+		// It reversed nothing, and is a failure here as in the credit-note
+		// sweep.
+		err = errors.New("the tax provider returned no reversal transaction")
+	}
+	if err != nil {
 		// Leave tax_reversed_at NULL: RetryPendingTaxReversal (the scheduler
 		// sweep, symmetric sibling of #267's RetryPendingTaxCommit) re-drives
-		// this on the next tick. The re-drive converges via the request's
+		// this: on the next tick after a failure at status change, and after
+		// the wait deferTaxWork sets when the failure is in the sweep itself.
+		// The re-drive converges via the request's
 		// Idempotency-Key (hardcount_tax_rev_<ref>): within Stripe's cache window a
 		// retry returns the original reversal (a true no-op), and the stable
 		// `inv_taxrev_<id>` Reference prevents a duplicate reversal from ever
@@ -2003,13 +2014,11 @@ func voidRefusal(inv domain.Invoice) error {
 // on a voided invoice, or a customer paying twice after an offline payment
 // (#975, ADR-059 amendment).
 //
-// Since ADR-127 a stale hold refuses void and offline payment too: its
-// charge's result was lost and Stripe may hold the payment. The stale-hold
-// sweep asks Stripe within about an hour, so an operator (or a cancel's
-// prebill void, R3) waits up to that long after a lost charge, and a hold left
-// by a charge that was never sent (breaker open, credentials unreadable)
-// costs the same wait. Write-off stays allowed on a stale hold (see
-// domain.PaymentBlocksActionHeld).
+// Since ADR-127 a stale hold refuses void and offline payment too, until the
+// stale-hold sweep clears it at the next billing tick at least ten minutes
+// after it ended; an operator (or a cancel's prebill void, R3) waits up to
+// that long after a charge that stopped before confirming. Write-off stays
+// allowed on a stale hold (see domain.PaymentBlocksActionHeld).
 //
 // The hold's own owner passes: dunning's final action takes the hold for the
 // subscription cancel, and the cancel's prebill void runs under that ctx
@@ -2045,8 +2054,8 @@ func (s *Service) VoidUnchangedTx(ctx context.Context, tx *sql.Tx, tenantID stri
 		// when the first automatic charge fires: refuse while a charge holds
 		// it (#975), so the cancel or plan swap rolls back and is retried.
 		// A stale hold refuses too (ADR-127): the retry succeeds once the
-		// stale-hold sweep has confirmed the lost charge with Stripe, up to
-		// about an hour later (residual R3).
+		// stale-hold sweep has cleared it, up to about an hour later
+		// (residual R3).
 		if err := s.refuseWhileChargeHeld(ctx, tx, locked, domain.ActionVoid); err != nil {
 			return err
 		}
@@ -2211,24 +2220,22 @@ func (s *Service) MarkUncollectibleThen(ctx context.Context, tenantID, id string
 	case domain.InvoiceUncollectible:
 		return domain.Invoice{}, errs.InvalidState("invoice is already uncollectible")
 	}
-	// A charge in flight may still succeed. MarkPaid IS allowed from
-	// uncollectible (the "wrote it off but paid after all" recovery), so if we
-	// reverse tax + flip to uncollectible now and the charge then settles, the
-	// tax for a real collected sale has been reversed → the tenant under-remits.
-	// Block until terminal. Stripe enforces the same ("can't mark uncollectible
-	// with open payments"). Guard sits BEFORE reverseInvoiceTax.
-	// A PARKED invoice is the exception (ADR-107): payment_status='unknown' with
-	// no PaymentIntent id means Stripe's answer was unclear and named no
-	// payment. The stale-hold sweep finishes it within a day (REC-5), and
-	// writing it off is the action for a customer who paid another way, or
-	// for a park Stripe cannot be asked about (found by the honesty sweep,
-	// 2026-07-31, when it had no exit at all).
+	// A write-off is refused while a payment is processing, and while a
+	// charge holds the invoice (live, or stale and waiting for the stale-hold
+	// sweep). MarkPaid IS allowed from uncollectible (the "wrote it off but
+	// paid after all" recovery), so reversing the tax and writing off while a
+	// charge is being sent would reverse the tax of a sale that is then
+	// collected. Stripe enforces the same ("can't mark uncollectible with open
+	// payments"). The guard sits BEFORE reverseInvoiceTax.
 	//
-	// Writing it off is safe in a way voiding is not: it moves no money, and if
-	// the charge did succeed the payment webhook or the stale-hold sweep still
-	// marks the invoice paid, which audits recovered_from. Void
-	// stays refused because a voided-then-succeeded invoice is a contradiction,
-	// and RecordOfflinePayment stays refused because it would label a card
+	// It is allowed on any 'unknown' invoice once its hold has ended
+	// (ADR-137): the charge's result is not known, and writing off is the
+	// action for a customer who paid another way, or for a payment Stripe
+	// cannot be asked about. It is safe in a way voiding is not: it moves no
+	// money, and a payment the unknown sweep or a webhook finds later still
+	// settles the invoice (uncollectible to paid, audited as recovered_from).
+	// Void stays refused because a voided-then-succeeded invoice is a
+	// contradiction, and RecordOfflinePayment because it would label a card
 	// charge as out-of-band.
 	if b := domain.PaymentBlocksAction(inv, domain.ActionMarkUncollectible); b.Blocked {
 		return domain.Invoice{}, errs.InvalidState(b.Message).WithCode(b.Code)
@@ -2236,10 +2243,9 @@ func (s *Service) MarkUncollectibleThen(ctx context.Context, tenantID, id string
 
 	// Re-run under the row lock, with the charge hold: the check above read
 	// the invoice before the lock, and a charge can claim it in between
-	// (#975). A parked invoice still passes (the hold is not consulted on
-	// 'unknown'), so ADR-107's only exit stays open, and so does an invoice
-	// whose hold is stale (ADR-127): writing off moves no money, and a payment
-	// the stale-hold sweep finds later still settles it.
+	// (#975). A live hold refuses; an 'unknown' invoice whose hold has ended
+	// passes, and so does one whose hold is stale (ADR-127): writing off moves
+	// no money, and a payment the unknown sweep finds later still settles it.
 	updated, err := s.store.UpdateStatusWithReversalPrior(ctx, tenantID, id, domain.InvoiceUncollectible, func(tx *sql.Tx, locked domain.Invoice) error {
 		if err := s.refuseWhileChargeHeld(ctx, tx, locked, domain.ActionMarkUncollectible); err != nil {
 			return err
@@ -2270,7 +2276,7 @@ func (s *Service) MarkUncollectibleThen(ctx context.Context, tenantID, id string
 	// Reversing here shipped a machine-driven under-remit with no human in it:
 	// an ambiguous charge parks an invoice (ADR-107), write-off is its only
 	// legal exit and the attention banner advises it, the reversal fires, then
-	// the stale-hold sweep finds the charge succeeded at Stripe and
+	// a sweep finds the charge succeeded at Stripe and
 	// markPaidReportingTransition settles uncollectible -> paid — leaving a
 	// PAID invoice whose tax is un-reported and nothing to re-report it. The
 	// in-flight guard above catches only the payment already moving at
@@ -2686,7 +2692,7 @@ func (s *Service) RetryTax(ctx context.Context, tenantID, invoiceID string) (dom
 		if perr != nil {
 			// Unknown is not "not paused": leave the draft (tax is already
 			// persisted), and return the error like a failed auto-finalize below.
-			return s.attachAttention(ctx, inv), fmt.Errorf("tax is calculated but the invoice was not finalized: %w; finalize it, or Retry tax after 24h", perr)
+			return s.attachAttention(ctx, inv), fmt.Errorf("tax is calculated but the invoice was not finalized: %w; finalize it", perr)
 		}
 		if paused {
 			slog.Info("invoice: tax resolved but collection is paused on the subscription; leaving the invoice as a draft",
@@ -2708,7 +2714,7 @@ func (s *Service) RetryTax(ctx context.Context, tenantID, invoiceID string) (dom
 			// does not unwind the recompute. No sweep lists a draft whose
 			// tax is ok, so return the error: the sweep counts it, and
 			// the operator's click fails.
-			return s.attachAttention(ctx, inv), fmt.Errorf("tax is calculated but the invoice was not finalized: %w; finalize it, or Retry tax after 24h", ferr)
+			return s.attachAttention(ctx, inv), fmt.Errorf("tax is calculated but the invoice was not finalized: %w; finalize it", ferr)
 		}
 		// Nothing owed after finalize (a $0 invoice): settle it now so the
 		// operator who clicked Retry tax sees it paid. The auto-charge sweep
@@ -2923,10 +2929,16 @@ func (s *Service) RetryPendingTax(ctx context.Context, batch int) (int, []error)
 // finalized + tax_status=ok with a calculation id but no transaction id — tax
 // was charged and reported upstream, but Hardcount can't reverse it on a later void
 // (the reversal guard keys on tax_transaction_id). Re-committing is safe:
-// CommitTax's idempotency key makes Stripe return the ORIGINAL transaction
-// (never a duplicate), and CommitTax persists it. Self-healing — a re-commit
-// whose persist fails again is simply picked up on the next tick until it
-// sticks; once persisted the invoice falls out of the scan.
+// while Stripe holds CommitTax's idempotency key (24 hours) it returns the
+// ORIGINAL transaction (never a duplicate), and CommitTax persists it.
+// Self-healing — a re-commit whose persist fails again is simply picked up on
+// the next tick until it sticks; once persisted the invoice falls out of the
+// scan.
+//
+// It also commits an invoice whose commit never reached Stripe (a key that
+// cannot write tax transactions, a Stripe Tax incident), any time until the
+// calculation expires (ListPendingTaxCommit). A commit that fails here waits
+// before its next try (deferTaxWork), so it is not retried on every tick.
 //
 // Runs on the wall-clock scheduler tick (clock-pinned invoices are excluded by
 // the store query). Per-row errors collected, not aborted-on.
@@ -2950,11 +2962,51 @@ func (s *Service) RetryPendingTaxCommit(ctx context.Context, batch int) (int, []
 		}
 		if err := s.taxCommitter.CommitTax(ctx, inv.TenantID, inv.ID, inv.TaxCalculationID); err != nil {
 			errsOut = append(errsOut, fmt.Errorf("re-commit tax for invoice %s: %w", inv.ID, err))
+			s.deferTaxWork(ctx, inv)
 			continue
 		}
 		recovered++
 	}
 	return recovered, errsOut
+}
+
+// Bounds of the wait after a tax commit or reversal fails in its sweep. The
+// longest wait stays under the 24 hours Stripe keeps an idempotency key: a
+// commit whose answer was lost (it was recorded at Stripe, Hardcount saw a
+// timeout) is then normally retried while Stripe still replays the original
+// transaction. A retry that comes later is refused by Stripe, which names
+// the existing transaction; the provider reads it and adopts its id
+// (tax.StripeTaxProvider.Commit).
+const (
+	taxWorkMinWait = time.Hour
+	taxWorkMaxWait = 12 * time.Hour
+)
+
+// nextTaxWorkAttempt is when a tax commit or reversal that just failed is
+// tried again: after an eighth of the time since the invoice's last write, no
+// less than an hour and no more than twelve. A fault a few hours old is
+// retried about hourly; one that has lasted four days or more, twice a day.
+// The pending lists hold invoices of every tenant and take a fixed number per
+// run, so a failing invoice has to give way to the others.
+//
+// The invoice's last write stands in for "how long this has been failing":
+// there is no attempt count for this work. Any other write to the invoice (a
+// payment, a credit) resets it, and the wait starts short again.
+func nextTaxWorkAttempt(now, lastWrite time.Time) time.Time {
+	wait := now.Sub(lastWrite) / 8
+	wait = max(taxWorkMinWait, min(wait, taxWorkMaxWait))
+	return now.Add(wait)
+}
+
+// deferTaxWork records the wait after a failed commit or reversal. On the
+// real clock: the sweeps run on it, and the lists compare with now(). A failed
+// write is only logged; the invoice is then retried on the next run.
+func (s *Service) deferTaxWork(ctx context.Context, inv domain.Invoice) {
+	now := time.Now().UTC() //nolint:forbidigo // wall-clock: the tax sweeps exclude clock-pinned invoices and their lists compare with now()
+	if err := s.store.DeferTaxWork(ctx, inv.TenantID, inv.ID, nextTaxWorkAttempt(now, inv.UpdatedAt)); err != nil {
+		slog.WarnContext(ctx, "could not record the wait before the next tax commit or reversal attempt; it is retried on the next run",
+			"invoice_id", inv.ID, "error", err)
+	}
 }
 
 // RetryPendingTaxReversal recovers voided/uncollectible stripe_tax invoices
@@ -2964,7 +3016,8 @@ func (s *Service) RetryPendingTaxCommit(ctx context.Context, batch int) (int, []
 // reverseInvoiceTax — idempotent at Stripe (the invoice-stable inv_taxrev_<id>
 // reference dedups), and it stamps tax_reversed_at on success so the row falls
 // out of the next scan. Self-healing: a re-reversal whose stamp fails again is
-// picked up next tick.
+// picked up next tick. A reversal that fails here waits before its next try
+// (deferTaxWork), so it is not retried on every tick.
 //
 // Runs on the wall-clock scheduler tick (clock-pinned invoices excluded by the
 // store query). Per-row errors collected, not aborted-on.
@@ -2987,9 +3040,11 @@ func (s *Service) RetryPendingTaxReversal(ctx context.Context, batch int) (int, 
 			return recovered, errsOut // see processTaxRetryBatch
 		}
 		// reverseInvoiceTax already logs an ERROR + leaves tax_reversed_at NULL
-		// on failure (re-scanned next tick); aggregate the error for the return.
+		// on failure (re-scanned once its wait is over); aggregate the error
+		// for the return.
 		if rerr := s.reverseInvoiceTax(ctx, inv.TenantID, inv, "inv_taxrev_"+inv.ID); rerr != nil {
 			errsOut = append(errsOut, fmt.Errorf("re-reverse tax for invoice %s: %w", inv.ID, rerr))
+			s.deferTaxWork(ctx, inv)
 			continue
 		}
 		recovered++

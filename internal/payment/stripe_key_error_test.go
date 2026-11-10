@@ -65,7 +65,7 @@ func TestCreatePaymentIntent_RefusedKeyIsNotADecline(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			stub := withCannedStripe(t, tc.status, tc.body)
 			c := NewLiveStripeClient(NewStripeClients(fixedCreds{}))
-			_, err := c.CreatePaymentIntent(auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), createParams())
+			_, err := c.CreateUnconfirmedPaymentIntent(auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), createParams())
 			assertKeyError(t, err, StripeKeyRejected)
 			var ke *StripeKeyError
 			if errors.As(err, &ke) && !strings.Contains(ke.Message, tc.inMsg) {
@@ -82,7 +82,7 @@ func TestCreatePaymentIntent_NoKeyIsNotADecline(t *testing.T) {
 	t.Run("no credentials for the mode", func(t *testing.T) {
 		stub := withCannedStripe(t, http.StatusOK, `{}`)
 		c := NewLiveStripeClient(NewStripeClients(&stubCredentials{}))
-		_, err := c.CreatePaymentIntent(auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), createParams())
+		_, err := c.CreateUnconfirmedPaymentIntent(auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), createParams())
 		assertKeyError(t, err, StripeKeyNotConfigured)
 		if stub.calls != 0 {
 			t.Errorf("Stripe called %d times with no key", stub.calls)
@@ -90,7 +90,7 @@ func TestCreatePaymentIntent_NoKeyIsNotADecline(t *testing.T) {
 	})
 	t.Run("no Stripe bundle at all", func(t *testing.T) {
 		var c *LiveStripeClient // NewLiveStripeClient's answer with no fetcher
-		_, err := c.CreatePaymentIntent(context.Background(), createParams())
+		_, err := c.CreateUnconfirmedPaymentIntent(context.Background(), createParams())
 		assertKeyError(t, err, StripeKeyNotConfigured)
 	})
 }
@@ -101,7 +101,7 @@ func TestCreatePaymentIntent_RefusedKeyControls(t *testing.T) {
 	ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1")
 	t.Run("402 decline", func(t *testing.T) {
 		withCannedStripe(t, http.StatusPaymentRequired, stripeDecline)
-		_, err := NewLiveStripeClient(NewStripeClients(fixedCreds{})).CreatePaymentIntent(ctx, createParams())
+		_, err := NewLiveStripeClient(NewStripeClients(fixedCreds{})).CreateUnconfirmedPaymentIntent(ctx, createParams())
 		var pe *PaymentError
 		if !errors.As(err, &pe) || pe.Unknown || pe.DeclineCode != "generic_decline" {
 			t.Fatalf("err = %#v, want a definite decline with code generic_decline", err)
@@ -113,7 +113,7 @@ func TestCreatePaymentIntent_RefusedKeyControls(t *testing.T) {
 	})
 	t.Run("429", func(t *testing.T) {
 		withCannedStripe(t, http.StatusTooManyRequests, stripe429)
-		_, err := NewLiveStripeClient(NewStripeClients(fixedCreds{})).CreatePaymentIntent(ctx, createParams())
+		_, err := NewLiveStripeClient(NewStripeClients(fixedCreds{})).CreateUnconfirmedPaymentIntent(ctx, createParams())
 		var ke *StripeKeyError
 		if !errors.Is(err, ErrPaymentTransient) || errors.As(err, &ke) {
 			t.Fatalf("err = %#v, want a plain ErrPaymentTransient", err)
@@ -121,7 +121,7 @@ func TestCreatePaymentIntent_RefusedKeyControls(t *testing.T) {
 	})
 	t.Run("500", func(t *testing.T) {
 		withCannedStripe(t, http.StatusInternalServerError, stripe500)
-		_, err := NewLiveStripeClient(NewStripeClients(fixedCreds{})).CreatePaymentIntent(ctx, createParams())
+		_, err := NewLiveStripeClient(NewStripeClients(fixedCreds{})).CreateUnconfirmedPaymentIntent(ctx, createParams())
 		var pe *PaymentError
 		if !errors.As(err, &pe) || !pe.Unknown {
 			t.Fatalf("err = %#v, want an unknown outcome", err)

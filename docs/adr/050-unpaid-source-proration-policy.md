@@ -1,7 +1,7 @@
 # ADR-050: Unpaid-source proration — block charges, adjust credits
 
 **Date:** 2026-06-08
-**Status:** Accepted (amended 2026-10-12; amended 2026-10-22: the net-credit side uses the one crediting rule of ADR-118; amended 2026-10-23: a written-off invoice is unpaid)
+**Status:** Accepted (amended 2026-10-12; amended 2026-10-22: the net-credit side uses the one crediting rule of ADR-118; amended 2026-10-23: a written-off invoice is unpaid; amended 2026-11-10: ADR-137)
 
 ## Summary
 
@@ -293,3 +293,30 @@ paid controls), `TestE2E_WrittenOffBase_NothingDue_UpgradeGoesAhead` (with the
 unpaid control), `TestListPendingClawbackDrafts_ParkedWrittenOffSourceWaitsThenIssues`,
 `TestParked_WrittenOff_StripeRefusedForGood_KeptUntilStripeAnswers`,
 `TestIssue_WrittenOffWhileWaitingForItsRow_StillRelieves`.
+
+## Amendment 2026-11-10 — what releases a draft on a written-off source (ADR-137)
+
+A charge now puts its PaymentIntent on the invoice before confirming it
+([ADR-137](137-charge-stamps-invoice-before-confirming.md)). No charge parks an
+invoice, and the stale-hold sweep no longer asks Stripe or ends a park. So
+the paragraph above on a written-off park, and its two `…Parked…` tests, no
+longer describe the code.
+
+A relief draft on a written-off invoice whose charge is `unknown` still
+waits until that charge is answered. The unknown sweep reads the invoice's
+PaymentIntent and either records its payment (the draft issues on the paid
+branch) or ends the attempt with no payment (`EndAttemptWithoutPayment`,
+which admits a written-off invoice; the draft issues on the unpaid branch and
+lowers what the invoice asks for). A write-off is now allowed on any
+`unknown` invoice once its charge hold has ended, so this state is reached
+more often than a written-off park was.
+
+The upgrade check (migration 00225) refuses to run while a written-off
+invoice has a charge hold or a parked charge from the previous version. That
+version still ends them itself; this one does not, and a written-off park
+that got past the check would keep its draft waiting for good.
+
+Test: `TestListPendingClawbackDrafts_UnknownWrittenOffSourceWaitsThenIssues`
+replaces `TestListPendingClawbackDrafts_ParkedWrittenOffSourceWaitsThenIssues`.
+`TestParked_WrittenOff_StripeRefusedForGood_KeptUntilStripeAnswers` is deleted
+with the sweep's Stripe check.

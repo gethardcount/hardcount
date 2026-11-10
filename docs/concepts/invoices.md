@@ -67,8 +67,9 @@ Each route is under `/v1/invoices/{id}`.
 - While a card payment may still go through, a void, a write-off or a
   recorded payment is refused with a `409`, usually
   `payment_in_flight`. Wait for the payment to settle
-  ([Payments](payments.md#when-the-answer-is-unclear)). A parked invoice
-  can still be written off after a few minutes.
+  ([Payments](payments.md#when-the-answer-is-unclear)). An invoice whose
+  payment is `unknown` can still be written off a few minutes after the
+  charge.
 - A void gives back any credit the invoice used, to the credit grants it
   came from ([Credits](credits.md#credit-given-back)).
 - A draft sends no webhook. A period's invoice that is made already

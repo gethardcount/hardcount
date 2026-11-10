@@ -42,7 +42,7 @@ func (r *recordingTaxCalcs) Record(context.Context, string, string, tax.Request,
 	r.records++
 	return "taxcalc_test", nil
 }
-func (r *recordingTaxCalcs) LookupCalculationCreatedAt(context.Context, string, string, string) (time.Time, error) {
+func (r *recordingTaxCalcs) LookupCalculationUsableUntil(context.Context, string, string, string) (time.Time, error) {
 	return time.Time{}, nil
 }
 func (r *recordingTaxCalcs) LinkInvoice(context.Context, string, string, string) error { return nil }
@@ -164,7 +164,7 @@ func TestBillFinalOnImmediateCancel_EverySettingsReadFailsClosed(t *testing.T) {
 	failEachSettingsRead(t, func(s *flakySettings, taxCalcs *recordingTaxCalcs) (int, error) {
 		engine, sub, invoices := cancelFixture(s)
 		engine.SetTaxCalculationStore(taxCalcs)
-		_, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
+		_, err := engine.BillFinalOnCancel(postgres.WithLivemode(context.Background(), true), sub)
 		return len(invoices.invoices), err
 	})
 }

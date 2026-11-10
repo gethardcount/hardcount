@@ -60,28 +60,6 @@ func TestClassifyStripeError_RealRejectionsStayDefinite(t *testing.T) {
 	}
 }
 
-// TestIsIdempotencyConflict_DiscriminatesByType guards the predicate that
-// decides whether the operator-facing ERROR (naming the key for a Stripe
-// dashboard lookup) fires. A predicate that matched everything would bury the
-// one case where the key is the only handle on a live PaymentIntent.
-func TestIsIdempotencyConflict_DiscriminatesByType(t *testing.T) {
-	if !isIdempotencyConflict(&stripe.Error{Type: stripe.ErrorTypeIdempotency}) {
-		t.Error("an idempotency error was not recognised as one")
-	}
-	for _, other := range []stripe.ErrorType{
-		stripe.ErrorTypeCard,
-		stripe.ErrorTypeAPI,
-		stripe.ErrorTypeInvalidRequest,
-	} {
-		if isIdempotencyConflict(&stripe.Error{Type: other}) {
-			t.Errorf("%s was misread as an idempotency conflict", other)
-		}
-	}
-	if isIdempotencyConflict(errors.New("plain error")) {
-		t.Error("a non-Stripe error was misread as an idempotency conflict")
-	}
-}
-
 // TestClassifyStripeError_DefiniteIsAnAllowList pins the classifier's whole
 // safety posture: "definite failure" is a closed allow-list (card,
 // invalid_request) and EVERYTHING else is ambiguous — a 5xx, a non-Stripe

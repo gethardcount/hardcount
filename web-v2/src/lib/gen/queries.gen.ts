@@ -9226,10 +9226,12 @@ export const getMarkInvoiceUncollectibleUrl = (id: string,) => {
  * tied to a subscription's period, does not affect subscription
  * changes.
  *
- * An invoice whose last charge got an unclear answer from Stripe with
- * no payment named (payment status `unknown`, no
- * `stripe_payment_intent_id`) can be written off; if the charge did
- * succeed, the invoice is still marked paid when Stripe shows it.
+ * An invoice whose payment is `unknown` (a charge whose answer from
+ * Stripe was unclear) can be written off once that charge is no longer
+ * being sent, a few minutes after it started; until then the call
+ * answers `409 payment_in_flight`. If the charge did succeed, the
+ * invoice is still marked paid when Hardcount reads the payment from
+ * Stripe or its event arrives.
  * @summary Write off an invoice as uncollectible
  */
 export const markInvoiceUncollectible = async (id: string, options?: RequestInit): Promise<Invoice> => {
@@ -10945,9 +10947,9 @@ export const getRetryInvoiceTaxUrl = (id: string,) => {
 /**
  * Calculates tax again on a draft invoice whose `tax_status` is
  * `pending`, after you fixed the cause (for example the customer's
- * address). It also refreshes a draft whose Stripe Tax calculation is
- * more than 23 hours old and was never recorded, which finalize
- * refuses. The route takes no body.
+ * address). It also refreshes a draft whose Stripe Tax calculation
+ * expires within 1 hour or has expired, and was never recorded, which
+ * finalize refuses. The route takes no body.
  *
  * Each call rewrites the tax on the lines and the invoice. A retry of
  * pending tax adds one to `tax_retry_count`; refreshing an expired

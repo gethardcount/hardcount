@@ -16,6 +16,11 @@ import (
 	vtestutil "github.com/gethardcount/hardcount/internal/testutil"
 )
 
+// parkedNothingWait is the day the parked-invoice gauge waits before it
+// counts a park (ADR-127). Charges no longer park; the gauge stays until the
+// parked state is removed from the API surface.
+const parkedNothingWait = 24 * time.Hour
+
 // The gauges register on the default Prometheus registry, which refuses a
 // second registration. Both tests in this file therefore share one
 // registration whose count function reads through gaugeDB, the database of
@@ -328,7 +333,7 @@ func TestOutboxGauges_StallAndRelayBroken(t *testing.T) {
 // TestParkedInvoicesGauge_CountsOnlyParksPastTheirDay pins the parked-invoice
 // gauge to the parks Hardcount has not ended on schedule (REC-5, ADR-127
 // amendment 2026-10-20). Hardcount ends a park at the first hourly tick 24 hours
-// after its charge's hold (domain.ParkedNothingWait), so a park is counted
+// after its charge's hold (parkedNothingWait), so a park is counted
 // once its hold is more than 26 hours old, or when it has no hold, which
 // nothing checks. The real trigger for the predicate: a count of every park
 // stays above 0 for as long as parks keep arriving, so a Stripe incident that
@@ -371,8 +376,8 @@ func TestParkedInvoicesGauge_CountsOnlyParksPastTheirDay(t *testing.T) {
 			fmt.Sprintf("hc_inv_pkgauge%d", n), tenantID, customerID, status, paymentStatus, paymentIntent, ageSecs)
 	}
 	ago := func(d time.Duration) *time.Duration { return &d }
-	onSchedule := ago(domain.ParkedNothingWait + 30*time.Minute) // the 24 hours are over; the next hourly tick ends it
-	overdue := ago(domain.ParkedNothingWait + 3*time.Hour)
+	onSchedule := ago(parkedNothingWait + 30*time.Minute) // the 24 hours are over; the next hourly tick ends it
+	overdue := ago(parkedNothingWait + 3*time.Hour)
 
 	mustExec(`SELECT set_config('app.livemode', 'off', true)`)
 	mustExec(`INSERT INTO customers (id, tenant_id, external_id, display_name, email) VALUES ('cus_pkgauge_t', $1, 'pkt', 'ParkedGauge', '')`, tenantID)

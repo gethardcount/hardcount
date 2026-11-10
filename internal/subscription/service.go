@@ -43,12 +43,6 @@ type CustomerReader interface {
 // by *billing.Engine.
 type Biller interface {
 	BillOnCreate(ctx context.Context, sub domain.Subscription) (domain.Invoice, error)
-	// BillFinalOnImmediateCancel emits the final partial-period invoice
-	// for a mid-period immediate cancel (in_arrears prorated base +
-	// usage). It refuses (InvalidState, code unbilled_period) when
-	// canceled_at is at/after current_period_end: that period ended
-	// unbilled, and no billing run bills a canceled subscription.
-	BillFinalOnImmediateCancel(ctx context.Context, sub domain.Subscription) (domain.Invoice, error)
 	// BillCancelTx writes a cancel's final invoice and its relief on the
 	// caller's cancel tx (ADR-056, ADR-118). It prices the final invoice,
 	// then writes the relief: credit-note drafts (issue_pending) for paid and
@@ -56,11 +50,13 @@ type Biller interface {
 	// fully-unused unpaid one. Then it numbers and inserts the final invoice,
 	// so the relief's credit-note locks come before the tenant's number row,
 	// the order every credit-note writer keeps. inv is empty when there is
-	// nothing to bill. An error names the step that failed (the final
-	// invoice or the relief) and rolls the cancel back. After commit the
-	// caller runs afterCommit (never nil: it counts usage the invoice left
-	// unpriced, which a rolled-back, retried cancel must not count twice),
-	// then FinishRelief, then FinalizeOnCreateInvoice.
+	// nothing to bill. It refuses (InvalidState, code unbilled_period) a
+	// cancel at or after current_period_end: that period ended unbilled, and
+	// no billing run bills a canceled subscription. An error names the step
+	// that failed (the final invoice or the relief) and rolls the cancel
+	// back. After commit the caller runs afterCommit (never nil: it counts
+	// usage the invoice left unpriced, which a rolled-back, retried cancel
+	// must not count twice), then FinishRelief, then FinalizeOnCreateInvoice.
 	BillCancelTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (inv domain.Invoice, r domain.Relief, afterCommit func(), err error)
 	// FinishRelief runs a committed relief's post-commit legs (issue the
 	// drafts; the voids' tax reversal). Best-effort: each leg is durable and
@@ -2266,7 +2262,7 @@ func graceWait(sub domain.Subscription, grace time.Duration) *InsideInvoiceGrace
 
 // errUnbilledPeriod is the refusal of a write that would act on a period that
 // ended and could not be closed. Code unbilled_period, the same answer an
-// immediate cancel gives (billing.Engine.billFinalOnImmediateCancelImpl).
+// immediate cancel gives (billing.Engine.priceFinalOnCancel).
 func errUnbilledPeriod(sub domain.Subscription) error {
 	next := "retry billing for this subscription, then try again"
 	if sub.TestClockID != "" {

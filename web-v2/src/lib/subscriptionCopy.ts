@@ -44,7 +44,7 @@ export const PAUSE_DIALOG_SENTENCE =
 
 // The "Immediately" choice and the typed confirm after it. Cancelling now
 // bills a final invoice for time and usage so far (billing.Engine
-// BillFinalOnImmediateCancel) and credits unused prepaid time; a trial
+// priceFinalOnCancel) and credits unused prepaid time; a trial
 // that never turned paid bills nothing (trials are free, ADR-069). The old
 // "Stops billing right now" hid that final charge.
 export function cancelImmediatelyText(status: string): string {
