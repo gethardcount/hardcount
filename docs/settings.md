@@ -102,7 +102,7 @@ Without `SMTP_HOST`, Hardcount sends no email: every send fails with "SMTP not c
 
 | Setting | What it does | Default |
 |---|---|---|
-| `INVOICE_GRACE_PERIOD` | How long after a billing period ends Hardcount waits before it builds the invoice, so late usage stamped inside the period is billed. A Go duration from `0` to `72h`. See [Invoice timing and late usage](ops/runbook/invoice-timing-late-usage.md). | `1h`. Any other value stops start-up. |
+| `INVOICE_GRACE_PERIOD` | How late usage may arrive and still be billed. A period's invoice is built this long after the period ends, and a spend-threshold invoice bills usage up to this long before it is built. A Go duration from `0` to `72h`. See [Invoice timing and late usage](ops/runbook/invoice-timing-late-usage.md). | `1h`. Any other value stops start-up. |
 
 How often background billing runs is not a setting: every hour, or every 5 minutes with `APP_ENV=local`.
 

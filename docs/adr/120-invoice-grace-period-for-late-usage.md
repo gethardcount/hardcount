@@ -1,7 +1,7 @@
 # ADR-120: A period's invoice is built after a grace period, and late usage after it is not billed automatically
 
 **Date:** 2026-10-14
-**Status:** Accepted (amended 2026-10-19: credit expiry no longer uses the grace; amended 2026-10-22: dunning's final pause and cancel wait for the grace; amended 2026-10-22: late usage after the invoice is flagged); amended by [ADR-130](130-usage-prices-belong-to-the-plan.md) (after_close reads the meter's aggregation, built in PR-2; an event's answer says what Hardcount found when it arrived, and one unbilled counter, built in PR-6 #1390)
+**Status:** Accepted (amended 2026-10-19: credit expiry no longer uses the grace; amended 2026-10-22: dunning's final pause and cancel wait for the grace; amended 2026-10-22: late usage after the invoice is flagged; amended 2026-11-10: a spend-threshold invoice bills usage up to one grace before it is built); amended by [ADR-130](130-usage-prices-belong-to-the-plan.md) (after_close reads the meter's aggregation, built in PR-2; an event's answer says what Hardcount found when it arrived, and one unbilled counter, built in PR-6 #1390)
 
 **Amended by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23. Until each part is built, this ADR describes the code. In the after_close rule, "every bucket of the meter is sum or count" becomes "the meter's aggregation is sum or count", and the `last_ever` case goes (PR-2, built in #1376: no meter has a `last_ever` rule any more, so the bullet on it below no longer applies). "Prices its meter" is read from each current plan at its pin of the period: the period's start, or where the subscription first joined the plan in it (PR-4, amended in #1388). Since PR-6 review round 2 the before-the-period-start case no longer asks whether a plan prices the meter (see the amendment of 2026-10-27). Built in PR-6 (#1390), with D07 folded in: the answer that writes an event carries a `billing_status` (`after_close`, `no_price`, `not_on_plan`, `outside_subscription`) when Hardcount finds a reason it is not billed, as a snapshot of what Hardcount found then, not a promise; and `hardcount_usage_after_close_total{origin}` became `hardcount_usage_unbilled_total{reason, origin}` (see the amendment of 2026-10-27 below). Two stated exceptions to "a flag is never false" stay (see "Where a present status can be wrong" in that amendment): a price write whose transaction spans a period start and commits after the ingest read, and a subscription change that commits between the read and the write. The grace and the after_close flag stay.
 
@@ -506,6 +506,68 @@ whatever plan priced it then; and the read-to-write race. Refusing
 scan, is a separate item. A stored per-event status (for a Usage list
 badge) is PR-8 input: it should come from the close, which knows what it
 billed.
+
+## Amendment 2026-11-10: a spend-threshold invoice reads usage one grace late
+
+Replaces, in "What does not wait", "Spend threshold invoices ... are built at
+once, as before", and narrows the risk "Usage stamped before a
+spend-threshold invoice and arriving after it is billed on no invoice".
+
+That risk was the normal path, not an edge. A fire read usage up to the scan
+instant and made that instant the watermark, and every close bills `sum` and
+`count` usage only from the watermark on. This ADR's own premise is that
+usage arrives some time after it happens. So each fire dropped whatever was
+in flight: stamped just before it, stored just after. A fire also happens
+while the customer is spending fastest.
+
+Now the scan reads usage up to now less `INVOICE_GRACE_PERIOD`
+(`thresholdUsageThrough`, `internal/billing/threshold_scan.go`). The fire
+bills the window that ends there, and that end is the invoice's
+`billing_period_end` and the watermark. The invoice is still issued, dated
+and collected at the fire's own instant.
+
+- Usage that arrives within the grace of its timestamp is after the
+  watermark, and the period's own invoice bills it.
+- A crossing is seen, and its invoice built, up to one grace later than
+  before. An operator who wants the earlier fire sets a shorter grace, which
+  shortens the period-end wait with it.
+- A scan whose window would not reach past the period's start does nothing.
+- A subscription on a test clock gets no grace, as the test-clock run gives
+  the period close none.
+- Usage more than one grace late is still on no invoice, as at a period's
+  end.
+- The usage floors (another subscription's coverage end, the trial end) are
+  found up to the fire's own instant, and the windows are then cut at the
+  window's end. Found only up to the window's end, a coverage end inside the
+  grace was missed, and the fire billed usage another subscription had
+  billed.
+- The credit draw is unchanged: a threshold invoice tests grant expiry at its
+  `issued_at`, the fire's instant (ADR-071 §2). That instant is now one grace
+  after the window's end, so a grant that expires inside that grace was live
+  for all the usage the invoice bills and does not pay it; the card is
+  charged. Testing at the window's end instead would need the expiry sweep
+  to hold such a grant until the fire.
+- A crossing inside the last grace of a period never fires: the window
+  cannot reach it before the period ends, and the period's own invoice bills
+  it.
+
+Readers of the watermark (`billing_period_end` of the threshold invoice),
+each checked against the new value:
+
+- The close and every closer (`meterUsageIntervals`, `commitPeriodClose`):
+  `sum` and `count` usage from it on. Correct by design.
+- The preview (`internal/billing/preview.go`) and the live balance
+  (`live_balance.go`): unbilled usage from it on, so usage in the grace
+  counts as unbilled, which it is.
+- `ThresholdWatermarks` (`internal/api/adapters.go`): the dashboard's
+  "billed through" line shows it.
+- The credit draw: does not read it (above).
+
+Not done here: the state-based rule, in which a close bills the full
+window's quantity less the quantity on the fire's lines, so that no usage is
+dropped at any lateness and the watermark's special cases go away. It
+rewrites the window builder, the rater passes and the ladder, and is
+planned after the billing-engine changes now in progress.
 
 ## References
 

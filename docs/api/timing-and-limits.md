@@ -8,7 +8,7 @@ the person who runs your server ([Settings](../settings.md)).
 
 | What | Value | Setting |
 |---|---|---|
-| Wait after a billing period ends before its invoice is built (the grace period) | 1 hour | `INVOICE_GRACE_PERIOD`, from `0s` to `72h` |
+| Wait after a billing period ends before its invoice is built (the grace period); also how far before it is built a spend-threshold invoice's usage ends | 1 hour | `INVOICE_GRACE_PERIOD`, from `0s` to `72h` |
 | How often the scheduled billing run starts | Every hour. Every 5 minutes when `APP_ENV` is `local` or not set. | `APP_ENV` |
 
 So an invoice appears 1 to 2 hours after its period ends, with the default
