@@ -675,6 +675,20 @@ func (s *Service) RunCatchup(ctx context.Context, job CatchupJob) (err error) {
 			runErrs = append(runErrs, taxErrs...)
 		}
 
+		// Phase 2.9: issue this clock's pending clawback drafts BEFORE the
+		// charge phase, as the wall-clock billing run issues relief drafts
+		// (clawback_issue) before it collects queued invoices. A cancel or
+		// plan change whose relief note failed to issue in its own call left
+		// its invoice uncollected (subscription's finishReliefThenCollect);
+		// charged first, the card paid the whole of it and the relief landed
+		// on the balance after. A draft whose source is still in flight is
+		// not listed here; Phase 3.7 issues it once Phase 3 settles it.
+		if s.clawback != nil {
+			clawbackCount, clawbackErrs := s.clawback.RetryPendingClawbackIssueForClock(ctx, job.TenantID, job.ClockID, frozen, 100)
+			sum.ClawbacksIssued += clawbackCount
+			runErrs = append(runErrs, clawbackErrs...)
+		}
+
 		// Phase 3 (ADR-029): collect auto_charge_pending invoices for this
 		// clock's subs. A card-less invoice gets its setup-link email and
 		// no-payment dunning here too (the collector starts it), so a
@@ -695,7 +709,7 @@ func (s *Service) RunCatchup(ctx context.Context, job CatchupJob) (err error) {
 		// stamps the note + its ledger / tax effects in simulated time.
 		if s.clawback != nil {
 			clawbackCount, clawbackErrs := s.clawback.RetryPendingClawbackIssueForClock(ctx, job.TenantID, job.ClockID, frozen, 100)
-			sum.ClawbacksIssued = clawbackCount
+			sum.ClawbacksIssued += clawbackCount
 			runErrs = append(runErrs, clawbackErrs...)
 		}
 

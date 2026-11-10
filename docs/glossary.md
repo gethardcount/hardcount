@@ -171,7 +171,8 @@ follows.
   [the decision](adr/050-unpaid-source-proration-policy.md)
 - **spend threshold**: A limit on one subscription that issues an invoice
   early. It is either a money amount (`amount_gte`) checked against the
-  period's usage so far, or a usage count on one item (`usage_gte`).
+  period's usage so far, or a usage count on one item (`usage_gte`). "So
+  far" ends one `INVOICE_GRACE_PERIOD` before the check.
   Crossing it issues an invoice with `billing_reason` "threshold" for that
   usage, and no base fee. The period keeps its dates, and the base fee is
   billed as it would be with no threshold.

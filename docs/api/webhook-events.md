@@ -2019,7 +2019,8 @@ means Hardcount builds its invoice and starts the next period.
 
 Usage crossed a spend threshold, so an invoice was made early. A spend
 threshold (the subscription's `billing_thresholds`) is a money amount for
-the period's usage so far, or a usage count on one item.
+the period's usage so far, or a usage count on one item. "So far" ends one
+`INVOICE_GRACE_PERIOD` before the invoice was made.
 
 - `invoice_id`: the invoice made early.
 - `running_subtotal`: the spend compared with the threshold, in cents.

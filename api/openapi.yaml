@@ -4940,7 +4940,8 @@ components:
       required: [item_thresholds]
       description: |
         Limits that make Hardcount invoice before the period ends. A threshold
-        invoice bills the period's usage so far, and no base fee. The period
+        invoice bills the period's usage so far (up to one
+        `INVOICE_GRACE_PERIOD` before it is built), and no base fee. The period
         keeps its dates, the base fee is billed as it would be with no
         threshold, and the period's next invoice bills the rest of the usage.
         Absent on a subscription with no thresholds. Set them with
@@ -4951,8 +4952,9 @@ components:
           format: int64
           description: |
             Usage threshold in the subscription currency's minor unit
-            (cents for USD), compared with the period's usage so far (the
-            base fee is not counted). Absent when not set.
+            (cents for USD), compared with the period's usage so far, up to
+            one `INVOICE_GRACE_PERIOD` before the check (the base fee is not
+            counted). Absent when not set.
         item_thresholds:
           type: array
           description: Per-item usage quantity thresholds. Empty when only `amount_gte` is set.
@@ -10514,7 +10516,11 @@ paths:
         "409":
           description: |
             Archive refused because an active or trialing subscription still
-            bills (`invalid_state`). The message names the subscriptions.
+            bills (`invalid_state`). The message names the subscriptions. Code
+            `concurrent_change`: Postgres stopped the update because of another
+            change to the same records (it broke a deadlock, or ended a wait for
+            a lock), so the customer is unchanged; send the same request again,
+            with the same `Idempotency-Key`.
           content:
             application/json:
               schema:
@@ -10657,7 +10663,10 @@ paths:
           description: |
             The currency differs from the plan currency of one of the
             customer's draft, trialing or active subscriptions
-            (`invalid_state`).
+            (`invalid_state`). Code `concurrent_change`: Postgres stopped the
+            write because of another change to the same records (it broke a
+            deadlock, or ended a wait for a lock), so the profile is unchanged;
+            send the same request again, with the same `Idempotency-Key`.
           content:
             application/json:
               schema:
@@ -12845,9 +12854,10 @@ paths:
             that is still in flight at Stripe. Codes `payment_in_flight` and
             `payment_unidentifiable`: a charge on the invoice is unresolved.
             Code `concurrent_change`: with `auto_issue`, Postgres stopped the
-            issue to break a deadlock with another change to the same records,
-            and the note made was voided; send the same request again, with
-            the same `Idempotency-Key`, to make and issue a new one.
+            issue because of another change to the same records (it broke a
+            deadlock, or ended a wait for a lock), and the note made was voided;
+            send the same request again, with the same `Idempotency-Key`, to
+            make and issue a new one.
           content:
             application/json:
               schema:
@@ -15534,7 +15544,11 @@ paths:
             `draft`, `trialing` or `active` subscription of the customer
             already bills; or the plans' currency differs from each other,
             from the customer's billing profile or from the customer's other
-            `draft`, `trialing` or `active` subscriptions.
+            `draft`, `trialing` or `active` subscriptions. Code
+            `concurrent_change`: Postgres stopped the create because of another
+            change to the same records (it broke a deadlock, or ended a wait for
+            a lock), so nothing was created; send the same request again, with
+            the same `Idempotency-Key`.
           content:
             application/json:
               schema:
@@ -15797,7 +15811,11 @@ paths:
             Code `invalid_state`: the subscription is not a `draft`, its
             plans' currency differs from the customer's billing profile or
             from the customer's other `draft`, `trialing` or `active`
-            subscriptions, or the customer is archived.
+            subscriptions, or the customer is archived. Code
+            `concurrent_change`: Postgres stopped the activation because of
+            another change to the same records (it broke a deadlock, or ended a
+            wait for a lock), so the subscription is still a `draft`; send the
+            same request again, with the same `Idempotency-Key`.
           content:
             application/json:
               schema:
@@ -16136,11 +16154,11 @@ paths:
             could not be invoiced; retry billing first. Code
             `funding_invoice_tax_pending`: an invoice the relief would credit
             is a draft whose tax is not calculated yet; retry once it is.
-            Code `concurrent_change`: Postgres stopped the cancel to break a
-            deadlock with another change to the same records, so the
-            subscription is not canceled; send the same request again, with
-            the same `Idempotency-Key`. A period that had ended and was
-            billed first stays billed.
+            Code `concurrent_change`: Postgres stopped the cancel because of
+            another change to the same records (it broke a deadlock, or ended a
+            wait for a lock), so the subscription is not canceled; send the same
+            request again, with the same `Idempotency-Key`. A period that had
+            ended and was billed first stays billed.
           content:
             application/json:
               schema:
@@ -16919,9 +16937,11 @@ paths:
         first threshold reached triggers the invoice.
 
         The threshold invoice bills the period's usage so far, and no base
-        fee. The period keeps its dates, the base fee is billed as it would
-        be with no threshold, and the period's next invoice bills the rest
-        of the usage.
+        fee. "So far" ends one `INVOICE_GRACE_PERIOD` before the invoice is
+        built (its `billing_period_end`), so usage that arrives late is
+        still billed. The period keeps its dates, the base fee is billed as
+        it would be with no threshold, and the period's next invoice bills
+        the rest of the usage.
         `reset_billing_cycle`, which started a new period at the threshold
         invoice, was removed; a body that sends it is refused with 422.
 
@@ -17265,7 +17285,11 @@ paths:
             period is unpaid (a written-off invoice is unpaid); settle or
             void it first. Code
             `unbilled_period`: a billing period ended and could not be
-            invoiced; retry billing first.
+            invoiced; retry billing first. Code `concurrent_change`: Postgres
+            stopped the add because of another change to the same records (it
+            broke a deadlock, or ended a wait for a lock), so no item was added;
+            send the same request again, with the same `Idempotency-Key`. A
+            period that had ended and was billed first stays billed.
           content:
             application/json:
               schema:
@@ -17471,11 +17495,11 @@ paths:
             invoiced; retry billing first. Code
             `funding_invoice_tax_pending`: an invoice a decrease would
             credit is a draft whose tax is not calculated yet; retry once it
-            is. Code `concurrent_change`: Postgres stopped the change to break
-            a deadlock with another change to the same records, so the item
-            is unchanged; send the same request again, with the same
-            `Idempotency-Key`. A period that had ended and was billed first
-            stays billed.
+            is. Code `concurrent_change`: Postgres stopped the change because
+            of another change to the same records (it broke a deadlock, or
+            ended a wait for a lock), so the item is unchanged; send the same
+            request again, with the same `Idempotency-Key`. A period that had
+            ended and was billed first stays billed.
           content:
             application/json:
               schema:
@@ -17593,6 +17617,11 @@ paths:
             could not be invoiced; retry billing first. Code
             `funding_invoice_tax_pending`: an invoice the credit would go on
             is a draft whose tax is not calculated yet; retry once it is.
+            Code `concurrent_change`: Postgres stopped the removal because of
+            another change to the same records (it broke a deadlock, or ended
+            a wait for a lock), so the item is still on the subscription; send
+            the same request again. A period that had ended and was billed
+            first stays billed.
           content:
             application/json:
               schema:
@@ -20199,9 +20228,10 @@ paths:
             The payment cannot be recorded. Codes: `invalid_state` (draft,
             voided or already paid), `payment_in_flight` or
             `payment_unidentifiable` (a card charge is unresolved), and
-            `concurrent_change` (Postgres stopped the request to break a
-            deadlock with another change to the same records; send the same
-            request again, with the same `Idempotency-Key`).
+            `concurrent_change` (Postgres stopped the request because of
+            another change to the same records: it broke a deadlock, or ended a
+            wait for a lock; send the same request again, with the same
+            `Idempotency-Key`).
           content:
             application/json:
               schema:
@@ -20481,8 +20511,9 @@ paths:
             not charge it again and nothing reached Stripe; the customer needs
             a different card, or can pay on the hosted invoice page. Code
             `concurrent_change`: the customer's credit covered the invoice,
-            and Postgres stopped the settle to break a deadlock with another
-            change to the same records. Nothing was charged, and any credit
+            and Postgres stopped the settle because of another change to the
+            same records (it broke a deadlock, or ended a wait for a lock).
+            Nothing was charged, and any credit
             the request applied stays applied, so the invoice is open with
             nothing due. Collect sent again, with the same `Idempotency-Key`,
             marks it paid and applies no credit twice.
@@ -21401,9 +21432,10 @@ paths:
             draft. Code `credit_note_exceeds_invoice`: on an unpaid invoice,
             the note is now more than the amount due plus the credit applied
             (the invoice changed after the draft was made). Code
-            `concurrent_change`: Postgres stopped the issue to break a
-            deadlock with another change to the same records; send the same
-            request again, with the same `Idempotency-Key`.
+            `concurrent_change`: Postgres stopped the issue because of another
+            change to the same records (it broke a deadlock, or ended a wait for
+            a lock); send the same request again, with the same
+            `Idempotency-Key`.
           content:
             application/json:
               schema:
