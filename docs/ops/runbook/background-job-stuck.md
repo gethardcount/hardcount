@@ -1,7 +1,7 @@
 # A background job is stuck
 
-Hardcount runs its billing, payment retries (dunning), webhooks and emails in
-background jobs. Each job is a *role*: only one replica runs it at a time, one
+Hardcount runs its billing, payment retries (dunning), webhooks, emails and
+test-clock catch-ups in background jobs. Each job is a *role*: only one replica runs it at a time, one
 *tick* (run) after another, under a short *lease* (a booking in the database
 that expires unless it is renewed). Each role's interval, and how the roles
 share work, are in [How the jobs share work](#how-the-jobs-share-work). Back to
@@ -188,7 +188,7 @@ in flight.
 
 ## How the jobs share work
 
-Five background jobs must run on exactly one replica at a time. Each is
+Six background jobs must run on exactly one replica at a time. Each is
 called a role:
 
 | Role | Runs every |
@@ -197,6 +197,7 @@ called a role:
 | `webhook_outbox` | 2 s |
 | `email_outbox` | 5 s |
 | `webhook_delivery` (the webhook retry worker) | 30 s |
+| `testclock_catchup` (runs advancing test clocks; [Test-clock advance hung](test-clock-advance-hung.md)) | 2 s |
 
 Each role is one row in the `leader_leases` table.
 

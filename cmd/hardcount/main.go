@@ -30,7 +30,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/migrate"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/platform/telemetry"
-	"github.com/gethardcount/hardcount/internal/testclock"
 	"github.com/gethardcount/hardcount/internal/version"
 	"github.com/gethardcount/hardcount/internal/webhook"
 )
@@ -259,17 +258,6 @@ func serve() {
 	api.SetSchedulerInterval(billingInterval)
 	scheduler.SetOnRun(api.RecordSchedulerRun)
 
-	// Test-clock catch-up runs off the request (ADR-015). Catch-up is the
-	// billing for the time a test clock skipped. The Advance handler sets the
-	// clock to status='advancing' and queues a job, and this worker runs it.
-	// A buffer of 100 is plenty: at expected operator volumes, there are never
-	// more than a few advances in flight.
-	catchupQueue := testclock.NewCatchupQueue(100)
-	server.TestClockSvc.SetCatchupQueue(catchupQueue)
-	catchupWorker := testclock.NewCatchupWorker(catchupQueue, func(ctx context.Context, job testclock.CatchupJob) error {
-		return server.TestClockSvc.RunCatchup(ctx, job)
-	})
-
 	srv := &http.Server{
 		Addr:    fmt.Sprintf(":%s", cfg.Port),
 		Handler: server,
@@ -290,17 +278,16 @@ func serve() {
 		MaxHeaderBytes:    1 << 13, // 8 KB
 	}
 
-	// Shutdown has a published time budget in three stages: at most 90s after
+	// Shutdown has a published time budget in two stages: at most 60s after
 	// the SHUTDOWN_DRAIN_DELAY readiness drain, and usually under two seconds.
 	// Each stage's limit abandons only work that is built to be resumed. Set
-	// the orchestrator's grace period above the drain delay plus 90s: 120s
+	// the orchestrator's grace period above the drain delay plus 60s: 90s
 	// with the 5s default (docs/ops/high-availability.md, "What happens when a
 	// copy stops"; compose sets stop_grace_period). Docker's 10s default sends
 	// SIGKILL mid-drain.
 	const (
 		shutdownHTTPDrain   = 30 * time.Second // stage 1: in-flight requests
-		shutdownCatchupWait = 30 * time.Second // stage 2: an in-flight test-clock advance
-		shutdownWorkerDrain = 30 * time.Second // stage 3: scheduler + dispatcher ticks
+		shutdownWorkerDrain = 30 * time.Second // stage 2: scheduler, dispatcher and test-clock catch-up ticks
 	)
 
 	// Stage 0: as soon as Shutdown is called, close every SSE subscriber, so
@@ -317,7 +304,7 @@ func serve() {
 	// entries without their invoice update, or webhook deliveries in flight.
 	var workers sync.WaitGroup
 
-	workers.Add(2)
+	workers.Add(3)
 	go func() {
 		defer workers.Done()
 		scheduler.Start(ctx)
@@ -326,19 +313,15 @@ func serve() {
 		defer workers.Done()
 		server.WebhookOutSvc.StartRetryWorker(ctx, 30*time.Second, gate)
 	}()
-
-	// Start the catch-up worker after the queue is set on the service, so a
-	// clock recovered at boot has a queue to land in. Recovery is best-effort:
-	// clocks left 'advancing' by an earlier process are queued again and run
-	// like any other job. If recovery fails, log an error and keep booting.
-	// New clocks still work. Only the stuck old clocks are not recovered, and
-	// they can be deleted by hand.
-	catchupWorker.Start()
-	recoveryCtx, recoveryCancel := context.WithTimeout(context.Background(), 30*time.Second)
-	if err := server.TestClockSvc.RecoverInFlight(recoveryCtx); err != nil {
-		slog.Error("test-clock catchup recovery failed", "error", err)
-	}
-	recoveryCancel()
+	// The test-clock catch-up (ADR-140): the work that fell due in the time an
+	// advancing test clock skipped. A leader-leased role like the others, so
+	// it always runs, whatever the scheduler's settings: an advance would
+	// otherwise never finish. A shutdown mid-pass leaves the clock advancing,
+	// and the next leader runs the pass again.
+	go func() {
+		defer workers.Done()
+		server.TestClockSvc.RunCatchupLoop(ctx, gate)
+	}()
 
 	// The outbox dispatchers always run (ADR-040). The webhook dispatcher
 	// turns webhook_outbox rows into events and their deliveries, and the
@@ -399,22 +382,9 @@ func serve() {
 		slog.Error("http shutdown error", "error", err)
 	}
 
-	// Stage 2 (at most 30s): the test-clock catch-up worker. Catch-up runs on
-	// context.Background(), so cancelling ctx does not reach it. An advance in
-	// flight must not stop mid-write. Stop waits up to shutdownCatchupWait
-	// for the advance in flight (most finish in seconds), then abandons it.
-	// An abandoned advance leaves the clock 'advancing', and RecoverInFlight
-	// runs only when a copy boots. So in a rolling deploy, where the new copy
-	// is already up, nothing resumes the advance until some copy restarts:
-	// hazard 7, with its planned fix ha-9, in
-	// docs/dev/records/ha-readiness-2026-07-06.md.
-	if !catchupWorker.Stop(shutdownCatchupWait) {
-		slog.Warn("test-clock catchup worker still busy — abandoning the in-flight advance; the clock stays 'advancing' until a replica restarts (docs/ops/runbook/test-clock-advance-hung.md)")
-	}
-
-	// Stage 3 (at most 30s): the scheduler and the dispatchers. Their ticks
-	// run on ctx, which is now cancelled, and abort atomically at their next
-	// database call. This wait is for the work that runs with
+	// Stage 2 (at most 30s): the scheduler, the dispatchers and the test-clock
+	// catch-up. Their ticks run on ctx, which is now cancelled, and abort
+	// atomically at their next database call. This wait is for the work that runs with
 	// context.WithoutCancel: a Stripe charge, a tax retry's finalize and its
 	// CommitTax, and an outbox row's detached mark. Waiting lets a tick that
 	// is part-way through record its result, instead of leaving a claimed

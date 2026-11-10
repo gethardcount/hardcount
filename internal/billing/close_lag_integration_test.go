@@ -9,10 +9,13 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/leader"
+	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/pricing"
 	"github.com/gethardcount/hardcount/internal/subscription"
 	"github.com/gethardcount/hardcount/internal/testclock"
+	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/usage"
 )
 
@@ -352,7 +355,7 @@ func TestLateClose_ScheduledResume_TestClock_AdvancePastResume(t *testing.T) {
 	orchestrator := testclock.NewService(clocks)
 	orchestrator.SetBillingRunner(r.f.engine)
 	orchestrator.SetPauseResumer(r.f.subSvc)
-	if err := orchestrator.RunCatchup(r.base, testclock.CatchupJob{TenantID: r.f.tenantID, ClockID: clockID, PrevFrozenTime: p0}); err != nil {
+	if err := orchestrator.RunCatchup(leadertest.Token(t, testutil.AdminPool(t), r.base, leader.RoleTestClockCatchup), testclock.CatchupJob{TenantID: r.f.tenantID, ClockID: clockID}); err != nil {
 		t.Fatalf("catchup: %v", err)
 	}
 	invs, _ := r.liveInvoices(t)
@@ -538,7 +541,7 @@ func TestTrialFlipAfterResume_TestClock(t *testing.T) {
 	orchestrator.SetBillingRunner(r.f.engine)
 	orchestrator.SetTrialExpirer(r.f.subSvc)
 	orchestrator.SetPauseResumer(r.f.subSvc)
-	if err := orchestrator.RunCatchup(r.base, testclock.CatchupJob{TenantID: r.f.tenantID, ClockID: clockID, PrevFrozenTime: r.f.cycleStart}); err != nil {
+	if err := orchestrator.RunCatchup(leadertest.Token(t, testutil.AdminPool(t), r.base, leader.RoleTestClockCatchup), testclock.CatchupJob{TenantID: r.f.tenantID, ClockID: clockID}); err != nil {
 		t.Fatalf("catchup: %v", err)
 	}
 	if sub := r.sub(t); sub.Status != domain.SubscriptionActive {

@@ -29,7 +29,6 @@ var sqlRowCaps = map[string]string{
 	"internal/invoice/postgres.go PostgresStore.ListCustomerDataInvalidErrors": "a tax retry fan-out that retries the oldest 1000, not a list route",
 	"internal/invoice/postgres.go PostgresStore.ListProviderConfigErrors":      "a tax retry fan-out that retries the oldest 1000, not a list route",
 	"internal/subscription/postgres.go PostgresStore.ListLiveByCustomer":       "usage ingest's read of a customer's live subscriptions, not a list route",
-	"internal/testclock/postgres.go PostgresStore.ListAllAdvancing":            "start-up recovery of clocks that were advancing, not a list route",
 }
 
 var sqlLimitLiteral = regexp.MustCompile(`(?i)\bLIMIT\s+(\d+)`)

@@ -126,13 +126,12 @@ type Server struct {
 	// leader's cleanup steps.
 	LoginThrottle *user.LoginThrottle
 
-	// TestClockSvc lets main.go wire the catch-up queue and worker, and run
-	// boot recovery for clocks that an earlier process left 'advancing'.
-	// Catch-up runs everything that fell due in the time a test clock
-	// skipped, such as trial ends, billing, tax retries, dunning and credit
-	// expiries. It runs off the request, as Stripe's test-clock advance does
-	// (ADR-015). The service is built here, and main.go runs it with the
-	// other background workers.
+	// TestClockSvc lets main.go run the test-clock catch-up: everything that
+	// fell due in the time an advancing test clock skipped, such as trial
+	// ends, billing, tax retries, dunning and credit expiries. It runs off
+	// the request, as Stripe's test-clock advance does, as the
+	// testclock_catchup leader role (ADR-140). The service is built here,
+	// and main.go runs its loop with the other background workers.
 	TestClockSvc *testclock.Service
 
 	// RestoreCatchUp applies Stripe's events to a restored database through

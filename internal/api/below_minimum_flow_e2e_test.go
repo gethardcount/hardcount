@@ -17,6 +17,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/tenantstripe"
+	"github.com/gethardcount/hardcount/internal/testclock/testclocktest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -160,7 +161,8 @@ func TestE2E_BelowStripeMinimum_NotADecline(t *testing.T) {
 	// only with these addresses set; they have no default.
 	t.Setenv("HOSTED_INVOICE_BASE_URL", "https://billing.min-charge.test")
 	t.Setenv("CUSTOMER_PORTAL_URL", "https://app.min-charge.test")
-	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
+	srv := NewServer(db, clock.Real(), nil)
+	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
 	tenantID := testutil.CreateTestTenant(t, db, "Min Charge Co")
@@ -398,6 +400,7 @@ func TestE2E_BelowStripeMinimum_NotADecline(t *testing.T) {
 	call("POST", "/v1/test-clocks/"+clockID+"/advance", flowReq{body: map[string]any{
 		"frozen_time": frozen.Add(5 * 24 * time.Hour).Format(time.RFC3339),
 	}}).want(t, 200, "advance clock")
+	testclocktest.Drain(t, srv.TestClockSvc)
 	if got := stripe.count("POST /v1/payment_intents") - charges; got != 1 {
 		t.Errorf("charges sent on the advance: %d, want 1 (the refusal ends recovery)", got)
 	}
@@ -436,6 +439,7 @@ func TestE2E_BelowStripeMinimum_NotADecline(t *testing.T) {
 	call("POST", "/v1/test-clocks/"+clockID+"/advance", flowReq{body: map[string]any{
 		"frozen_time": frozen.Add(10 * 24 * time.Hour).Format(time.RFC3339),
 	}}).want(t, 200, "advance clock for D")
+	testclocktest.Drain(t, srv.TestClockSvc)
 	if got := stripe.count("POST /v1/payment_intents") - charges; got != 1 {
 		t.Errorf("charges sent on D's advance: %d, want 1 (the first retry; the refusal ends recovery)", got)
 	}
@@ -497,6 +501,7 @@ func TestE2E_BelowStripeMinimum_NotADecline(t *testing.T) {
 	call("POST", "/v1/test-clocks/"+clockE+"/advance", flowReq{body: map[string]any{
 		"frozen_time": frozen.Add(30 * 24 * time.Hour).Format(time.RFC3339),
 	}}).want(t, 200, "advance clock E")
+	testclocktest.Drain(t, srv.TestClockSvc)
 	runs = runsOf(idE)
 	if len(runs) != 1 || flowStr(runs[0], "state") != "resolved" || flowStr(runs[0], "resolution") != "amount_below_minimum" {
 		t.Errorf("invoice E run after the advance: %v, want resolved with amount_below_minimum", runs)

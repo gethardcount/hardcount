@@ -10,6 +10,8 @@ import (
 	"github.com/gethardcount/hardcount/internal/billing"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/leader"
+	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testclock"
 	"github.com/gethardcount/hardcount/internal/testutil"
@@ -140,7 +142,7 @@ func TestCancel_ReliefNotIssued_OnATestClock_TheAdvanceChargesNetOfTheRelief(t *
 	orchestrator := testclock.NewService(clocks)
 	orchestrator.SetBillingRunner(r.engine)
 	orchestrator.SetClawbackRetrier(r.cn)
-	if err := orchestrator.RunCatchup(r.ctx, testclock.CatchupJob{TenantID: r.tenantID, ClockID: clockID, PrevFrozenTime: r.cancelAt}); err != nil {
+	if err := orchestrator.RunCatchup(leadertest.Token(t, testutil.AdminPool(t), r.ctx, leader.RoleTestClockCatchup), testclock.CatchupJob{TenantID: r.tenantID, ClockID: clockID}); err != nil {
 		t.Fatalf("catch-up: %v", err)
 	}
 

@@ -55,7 +55,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [012](012-day-grade-calendar-billing.md) | 2026-05-01 | Accepted (amended) | Billing | Billing periods start and end at tenant-timezone midnight; a day is the smallest unit |
 | [013](013-invoice-attention-collection-state.md) | 2026-05-01 | Accepted | Invoices | Attention reports a missing payment method apart from an invoice that is awaiting payment |
 | [014](014-sso-direction-embedded-oidc-saml.md) | 2026-05-02 | Accepted (amended) | Auth & security | When SSO is needed, embed OIDC and SAML libraries in-process; keep passwords homegrown |
-| [015](015-test-clock-async-catchup.md) | 2026-05-04 | Accepted | Test clocks & simulated time | Advancing a test clock returns at once; a background worker runs the catch-up |
+| [015](015-test-clock-async-catchup.md) | 2026-05-04 | Accepted (queue and worker superseded by ADR-140) | Test clocks & simulated time | Advancing a test clock returns at once; a background worker runs the catch-up |
 | [016](016-test-clock-soft-delete.md) | 2026-05-04 | Superseded by ADR-086 | Test clocks & simulated time | Deleting a test clock soft-deletes it and cancels its pinned subscriptions |
 | [017](017-tax-retry-and-auto-finalize.md) | 2026-05-04 | Accepted | Tax | A background job retries failed tax calculation and finalizes the invoice when it succeeds |
 | [018](018-test-clock-retry-and-failure-reason.md) | 2026-05-04 | Accepted (amended) | Test clocks & simulated time | A failed test-clock advance stores its reason and can be retried |
@@ -177,6 +177,7 @@ Each row links to the full record. Browse by Topic, or search this page for a te
 | [135](135-restore-refuses-to-serve-until-caught-up.md) | 2026-11-09 | Accepted | Platform & ops | A restored database is marked, and serve refuses to start until `hardcount restore catch-up` has applied Stripe's events since the backup; a payment whose invoice was lost is listed for the operator |
 | [136](136-deadlock-loser-answers-409-at-its-handler.md) | 2026-11-09 | Accepted (amended 2026-11-10) | Platform & ops | A request that loses a database deadlock, or whose lock wait Postgres ended, answers `409` `concurrent_change` on twelve routes, so the same idempotency key runs again; Hardcount does not retry it itself |
 | [137](137-charge-stamps-invoice-before-confirming.md) | 2026-11-10 | Accepted | Payments | A charge creates its PaymentIntent unconfirmed, puts it on the invoice as an unknown outcome in one compare-and-set, then confirms; an unclear answer always names the payment, so nothing is parked, nothing waits 24 hours, and the stale-hold sweep asks Stripe nothing |
+| [140](140-test-clock-catchup-is-a-leader-role.md) | 2026-11-11 | Accepted | Test clocks & simulated time | The test-clock catch-up is a leader-leased role (`testclock_catchup`): Advance only marks the clock, one replica runs every advancing clock on a 2s tick, and its writes to the clock row prove the lease, so a deploy no longer strands or doubles an advance |
 
 > ℹ️ **ADR-084 was never used.** No file has ever carried that number (verified
 > across every ref). It is a skipped number, not a lost decision.

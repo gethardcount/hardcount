@@ -257,7 +257,6 @@ Each sends a `Retry-After` header with the seconds to wait.
 | `ingest_unavailable` | The usage store did not answer. Nothing was recorded. | Send the same events again |
 | `currency_unavailable` | `POST /v1/invoices` could not read the customer's currency. No invoice was made. | Retry the same request, with the same `Idempotency-Key` if you sent one |
 | `proration_unavailable` | Adding an item, or an immediate quantity or plan change that costs more, could not check whether the current period's invoice is paid. The change was not made. | Retry the same request after `Retry-After` (1 second), with the same `Idempotency-Key` if you sent one |
-| `catchup_queue_full` | A test-clock advance or retry-advance found too many catch-ups waiting. A catch-up is the billing Hardcount runs for the time a test clock skipped. This clock's catch-up did not start, and the clock is set to `internal_failure`. | Once the running catch-ups finish, send `POST /v1/test-clocks/{id}/retry-advance`. The same advance again answers `409`. |
 
 ### 504 Gateway Timeout
 

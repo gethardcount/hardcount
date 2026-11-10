@@ -11,6 +11,8 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/leader"
+	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testclock"
 	"github.com/gethardcount/hardcount/internal/testutil"
@@ -88,7 +90,7 @@ func TestPostgresStore_Delete_HardDeletes_TearsDownPinnedSubs(t *testing.T) {
 func TestPostgresStore_AdvanceSummary_RoundTrips(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	store := testclock.NewPostgresStore(db)
-	ctx := postgres.WithLivemode(context.Background(), false)
+	ctx := leadertest.Token(t, testutil.AdminPool(t), postgres.WithLivemode(context.Background(), false), leader.RoleTestClockCatchup)
 	tenantID := testutil.CreateTestTenant(t, db, "Tenant")
 
 	clk, err := store.Create(ctx, tenantID, domain.TestClock{
@@ -104,8 +106,14 @@ func TestPostgresStore_AdvanceSummary_RoundTrips(t *testing.T) {
 	}
 
 	to := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
-	if _, err := store.MarkAdvancing(ctx, tenantID, clk.ID, to); err != nil {
+	marked, err := store.MarkAdvancing(ctx, tenantID, clk.ID, to)
+	if err != nil {
 		t.Fatalf("mark advancing: %v", err)
+	}
+	// MarkAdvancing restarts the summary with where the advance starts from,
+	// read off the row before it moves frozen_time.
+	if marked.LastAdvanceSummary == nil || !marked.LastAdvanceSummary.AdvancedFrom.Equal(clk.FrozenTime) {
+		t.Fatalf("summary after MarkAdvancing: %+v, want advanced_from %s", marked.LastAdvanceSummary, clk.FrozenTime)
 	}
 
 	want := domain.AdvanceSummary{
@@ -159,7 +167,7 @@ func TestPostgresStore_AdvanceSummary_RoundTrips(t *testing.T) {
 func TestPostgresStore_MarkFailed_ReasonCutInsideACharacter(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	store := testclock.NewPostgresStore(db)
-	ctx := postgres.WithLivemode(context.Background(), false)
+	ctx := leadertest.Token(t, testutil.AdminPool(t), postgres.WithLivemode(context.Background(), false), leader.RoleTestClockCatchup)
 	tenantID := testutil.CreateTestTenant(t, db, "Tenant")
 
 	clk, err := store.Create(ctx, tenantID, domain.TestClock{

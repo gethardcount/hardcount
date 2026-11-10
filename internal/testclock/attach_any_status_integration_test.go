@@ -7,6 +7,8 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/customer"
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/leader"
+	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testclock"
 	"github.com/gethardcount/hardcount/internal/testutil"
@@ -21,7 +23,9 @@ import (
 func TestCustomerJoinsAClockInAnyStatus(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	clocks := testclock.NewPostgresStore(db)
-	ctx := postgres.WithLivemode(context.Background(), false)
+	// The lease lets the internal_failure case park the clock with the
+	// catch-up's fenced MarkFailed.
+	ctx := leadertest.Token(t, testutil.AdminPool(t), postgres.WithLivemode(context.Background(), false), leader.RoleTestClockCatchup)
 	tenantID := testutil.CreateTestTenant(t, db, "Attach in any status")
 	customers := customer.NewService(customer.NewPostgresStore(db))
 	customers.SetTestClockChecker(clocks)

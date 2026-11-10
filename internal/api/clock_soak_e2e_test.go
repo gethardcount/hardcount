@@ -13,6 +13,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/doctor"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/testclock/testclocktest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -154,6 +155,7 @@ func TestE2E_ClockSoak_MonthEndAnchorThroughYearBoundary(t *testing.T) {
 			"frozen_time": target.Format(time.RFC3339),
 		})
 		assertStatus(t, resp, 200)
+		testclocktest.Drain(t, srv.TestClockSvc)
 		deadline := time.Now().Add(60 * time.Second)
 		for {
 			resp := doGet(t, ts, "/v1/test-clocks/"+clockID, auth)

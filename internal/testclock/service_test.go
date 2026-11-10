@@ -237,7 +237,7 @@ func TestAdvance_RunsBillingUntilQuiet(t *testing.T) {
 	s := NewService(store)
 	s.SetBillingRunner(runner)
 
-	clk, err := s.Advance(context.Background(), "t1", "c1", AdvanceInput{FrozenTime: newTime})
+	clk, err := advanceThenCatchUp(context.Background(), s, "t1", "c1", AdvanceInput{FrozenTime: newTime})
 	if err != nil {
 		t.Fatalf("advance failed: %v", err)
 	}
@@ -260,12 +260,10 @@ func TestAdvance_RunsBillingUntilQuiet(t *testing.T) {
 	}
 }
 
-// TestAdvance_AsyncEnqueuesAndReturnsAdvancing covers the production
-// path: with a CatchupQueue wired, Advance returns synchronously
-// after MarkAdvancing + Enqueue and does NOT run catchup inline.
-// The clock should remain in status='advancing' on return; the
-// worker is expected to drive it to 'ready' separately. ADR-015.
-func TestAdvance_AsyncEnqueuesAndReturnsAdvancing(t *testing.T) {
+// TestAdvance_OnlyMarksTheClock: Advance marks the clock advancing at the new
+// time, records where the advance starts from, and returns. It does not run
+// the catch-up: the testclock_catchup leader does, on its tick (ADR-140).
+func TestAdvance_OnlyMarksTheClock(t *testing.T) {
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	newTime := start.Add(60 * 24 * time.Hour)
 
@@ -273,38 +271,33 @@ func TestAdvance_AsyncEnqueuesAndReturnsAdvancing(t *testing.T) {
 	store.clocks["c1"] = domain.TestClock{
 		ID: "c1", TenantID: "t1", Status: domain.TestClockStatusReady, FrozenTime: start,
 	}
-	store.subsOnClock["c1"] = nil
-
-	queue := &recordingQueue{}
+	runner := &countingRunner{}
 	s := NewService(store)
-	s.SetCatchupQueue(queue)
-	// Deliberately NO SetBillingRunner — the async path must not
-	// invoke billing during the request handler at all.
+	s.SetBillingRunner(runner)
 
 	clk, err := s.Advance(context.Background(), "t1", "c1", AdvanceInput{FrozenTime: newTime})
 	if err != nil {
 		t.Fatalf("advance failed: %v", err)
 	}
 	if clk.Status != domain.TestClockStatusAdvancing {
-		t.Errorf("status on return: got %q, want advancing (worker drives to ready async)", clk.Status)
+		t.Errorf("status on return: got %q, want advancing (the leader drives it to ready)", clk.Status)
 	}
 	if !clk.FrozenTime.Equal(newTime) {
 		t.Errorf("frozen_time: got %v, want %v", clk.FrozenTime, newTime)
 	}
-	if len(queue.jobs) != 1 {
-		t.Fatalf("expected 1 job enqueued, got %d", len(queue.jobs))
+	if clk.LastAdvanceSummary == nil || !clk.LastAdvanceSummary.AdvancedFrom.Equal(start) {
+		t.Errorf("advanced_from: got %+v, want %v", clk.LastAdvanceSummary, start)
 	}
-	if queue.jobs[0].ClockID != "c1" || queue.jobs[0].TenantID != "t1" {
-		t.Errorf("job identity: %+v", queue.jobs[0])
+	if runner.cycleCalls != 0 {
+		t.Errorf("Advance ran the billing cycle %d times, want 0: the catch-up is the leader's", runner.cycleCalls)
 	}
 }
 
 // TestRetryAdvance_ResumesFromInternalFailure covers ADR-018:
 // a clock parked at internal_failure can be retried without
 // destroying simulation state. After RetryAdvance the clock is
-// back in 'advancing' (or 'ready' on the sync path with no
-// billing wired), the prior failure reason is cleared, and the
-// catchup-job pipeline has been kicked.
+// back in 'advancing' with the prior failure reason cleared, for the
+// testclock_catchup leader to pick up.
 func TestRetryAdvance_ResumesFromInternalFailure(t *testing.T) {
 	store := newMockStore()
 	store.clocks["c1"] = domain.TestClock{
@@ -314,9 +307,7 @@ func TestRetryAdvance_ResumesFromInternalFailure(t *testing.T) {
 		FrozenTime:        time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
 		LastFailureReason: "stripe tax: provider 503",
 	}
-	queue := &recordingQueue{}
 	s := NewService(store)
-	s.SetCatchupQueue(queue)
 
 	clk, err := s.RetryAdvance(context.Background(), "t1", "c1")
 	if err != nil {
@@ -327,9 +318,6 @@ func TestRetryAdvance_ResumesFromInternalFailure(t *testing.T) {
 	}
 	if clk.LastFailureReason != "" {
 		t.Errorf("last_failure_reason: got %q, want empty (cleared on retry)", clk.LastFailureReason)
-	}
-	if len(queue.jobs) != 1 || queue.jobs[0].ClockID != "c1" {
-		t.Errorf("expected 1 enqueued job for c1, got %v", queue.jobs)
 	}
 }
 
@@ -346,7 +334,6 @@ func TestRetryAdvance_RefusesNonFailedClock(t *testing.T) {
 				FrozenTime: time.Now(),
 			}
 			s := NewService(store)
-			s.SetCatchupQueue(&recordingQueue{})
 			_, err := s.RetryAdvance(context.Background(), "t1", "c1")
 			if err == nil {
 				t.Fatalf("expected error retrying from %s", status)
@@ -379,8 +366,7 @@ func TestAdvance_FailurePersistsReason(t *testing.T) {
 	}
 	s := NewService(store)
 	s.SetBillingRunner(runner)
-	// Sync path: no queue, so Advance runs catchup inline.
-	_, err := s.Advance(context.Background(), "t1", "c1", AdvanceInput{FrozenTime: newTime})
+	_, err := advanceThenCatchUp(context.Background(), s, "t1", "c1", AdvanceInput{FrozenTime: newTime})
 	if err == nil {
 		t.Fatal("expected advance to fail")
 	}
@@ -393,43 +379,35 @@ func TestAdvance_FailurePersistsReason(t *testing.T) {
 	}
 }
 
-// TestRecoverInFlight_ReEnqueuesAdvancingClocks covers the boot
-// recovery path: a clock left in 'advancing' from a prior process
-// (server restart mid-catchup) is re-enqueued so the worker
-// resumes it rather than leaving it stuck.
-func TestRecoverInFlight_ReEnqueuesAdvancingClocks(t *testing.T) {
+// TestRunAdvancing_RunsEachAdvancingClock: the tick runs one pass on every
+// clock its claim list returns, and leaves the others alone.
+func TestRunAdvancing_RunsEachAdvancingClock(t *testing.T) {
+	at := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
 	store := newMockStore()
 	store.clocks["c1"] = domain.TestClock{
-		ID: "c1", TenantID: "t1", Status: domain.TestClockStatusAdvancing,
+		ID: "c1", TenantID: "t1", Status: domain.TestClockStatusAdvancing, FrozenTime: at,
 	}
 	store.clocks["c2"] = domain.TestClock{
-		ID: "c2", TenantID: "t2", Status: domain.TestClockStatusReady,
+		ID: "c2", TenantID: "t2", Status: domain.TestClockStatusAdvancing, FrozenTime: at,
 	}
-
-	queue := &recordingQueue{}
+	store.clocks["c3"] = domain.TestClock{
+		ID: "c3", TenantID: "t3", Status: domain.TestClockStatusReady, FrozenTime: at,
+	}
 	s := NewService(store)
-	s.SetCatchupQueue(queue)
+	s.SetBillingRunner(&countingRunner{})
 
-	if err := s.RecoverInFlight(context.Background()); err != nil {
-		t.Fatalf("recover failed: %v", err)
+	worked, err := s.RunAdvancing(context.Background())
+	if err != nil {
+		t.Fatalf("RunAdvancing: %v", err)
 	}
-	if len(queue.jobs) != 1 {
-		t.Fatalf("expected 1 job enqueued (only c1 was advancing), got %d", len(queue.jobs))
+	if worked != 2 {
+		t.Errorf("clocks run: got %d, want 2 (only c1 and c2 were advancing)", worked)
 	}
-	if queue.jobs[0].ClockID != "c1" {
-		t.Errorf("re-enqueued wrong clock: %s", queue.jobs[0].ClockID)
+	for _, id := range []string{"c1", "c2", "c3"} {
+		if got := store.clocks[id].Status; got != domain.TestClockStatusReady {
+			t.Errorf("%s: status %q, want ready", id, got)
+		}
 	}
-}
-
-// recordingQueue is a CatchupQueue test double that captures jobs
-// in-memory for assertions instead of dispatching them.
-type recordingQueue struct {
-	jobs []CatchupJob
-}
-
-func (q *recordingQueue) Enqueue(job CatchupJob) error {
-	q.jobs = append(q.jobs, job)
-	return nil
 }
 
 func TestAdvance_BillingFailureMarksClockFailed(t *testing.T) {
@@ -454,7 +432,7 @@ func TestAdvance_BillingFailureMarksClockFailed(t *testing.T) {
 	s := NewService(store)
 	s.SetBillingRunner(runner)
 
-	_, err := s.Advance(context.Background(), "t1", "c1", AdvanceInput{
+	_, err := advanceThenCatchUp(context.Background(), s, "t1", "c1", AdvanceInput{
 		FrozenTime: start.Add(30 * 24 * time.Hour),
 	})
 	if err == nil {
@@ -494,7 +472,7 @@ func TestAdvance_InjectFailureEnv(t *testing.T) {
 	s := NewService(store)
 	s.SetBillingRunner(runner)
 
-	_, err := s.Advance(context.Background(), "t1", "c1", AdvanceInput{
+	_, err := advanceThenCatchUp(context.Background(), s, "t1", "c1", AdvanceInput{
 		FrozenTime: start.Add(30 * 24 * time.Hour),
 	})
 	if err == nil {
@@ -570,6 +548,7 @@ func (m *mockStore) MarkAdvancing(_ context.Context, _, id string, newFrozenTime
 		return domain.TestClock{}, errs.InvalidState("not ready")
 	}
 	c.Status = domain.TestClockStatusAdvancing
+	c.LastAdvanceSummary = &domain.AdvanceSummary{AdvancedFrom: c.FrozenTime}
 	c.FrozenTime = newFrozenTime
 	m.clocks[id] = c
 	return c, nil
@@ -628,10 +607,10 @@ func (m *mockStore) RetryFromFailed(_ context.Context, _, id string) (domain.Tes
 	return c, nil
 }
 
-func (m *mockStore) ListAllAdvancing(_ context.Context) ([]domain.TestClock, error) {
+func (m *mockStore) ListAdvancingForCatchup(_ context.Context, limit int) ([]domain.TestClock, error) {
 	var out []domain.TestClock
 	for _, c := range m.clocks {
-		if c.Status == domain.TestClockStatusAdvancing {
+		if c.Status == domain.TestClockStatusAdvancing && len(out) < limit {
 			out = append(out, c)
 		}
 	}
@@ -647,11 +626,13 @@ func (m *mockStore) ListAllAdvancing(_ context.Context) ([]domain.TestClock, err
 // fixed invoice count (or a fixed error), and the other phases are no-ops. Used
 // to assert the advance summary captures the phase counts exactly.
 type countingRunner struct {
-	invoices int
-	err      error
+	invoices   int
+	err        error
+	cycleCalls int
 }
 
 func (r *countingRunner) RunCycleForClock(_ context.Context, _, _ string, _ int) (int, []error) {
+	r.cycleCalls++
 	if r.err != nil {
 		return 0, []error{r.err}
 	}
@@ -675,12 +656,13 @@ func TestRunCatchup_RecordsAdvanceSummary(t *testing.T) {
 		store := newMockStore()
 		store.clocks["c1"] = domain.TestClock{
 			ID: "c1", TenantID: "t1", Status: domain.TestClockStatusAdvancing, FrozenTime: to,
+			LastAdvanceSummary: &domain.AdvanceSummary{AdvancedFrom: from}, // as MarkAdvancing leaves it
 		}
 		s := NewService(store)
 		s.SetBillingRunner(&countingRunner{invoices: 3})
 
 		if err := s.RunCatchup(context.Background(),
-			CatchupJob{TenantID: "t1", ClockID: "c1", PrevFrozenTime: from}); err != nil {
+			CatchupJob{TenantID: "t1", ClockID: "c1"}); err != nil {
 			t.Fatalf("RunCatchup: %v", err)
 		}
 		got := store.clocks["c1"]
@@ -706,12 +688,13 @@ func TestRunCatchup_RecordsAdvanceSummary(t *testing.T) {
 		store := newMockStore()
 		store.clocks["c1"] = domain.TestClock{
 			ID: "c1", TenantID: "t1", Status: domain.TestClockStatusAdvancing, FrozenTime: to,
+			LastAdvanceSummary: &domain.AdvanceSummary{AdvancedFrom: from},
 		}
 		s := NewService(store)
 		s.SetBillingRunner(&countingRunner{err: errors.New("phase boom")})
 
 		if err := s.RunCatchup(context.Background(),
-			CatchupJob{TenantID: "t1", ClockID: "c1", PrevFrozenTime: from}); err == nil {
+			CatchupJob{TenantID: "t1", ClockID: "c1"}); err == nil {
 			t.Fatal("expected RunCatchup to surface the phase error")
 		}
 		got := store.clocks["c1"]
@@ -834,7 +817,7 @@ func TestRunCatchup_BindsClockOntoCtx(t *testing.T) {
 	s.SetBillingRunner(runner)
 
 	if err := s.RunCatchup(context.Background(), CatchupJob{
-		TenantID: "t1", ClockID: "c1", PrevFrozenTime: frozen.AddDate(0, -3, 0),
+		TenantID: "t1", ClockID: "c1",
 	}); err != nil {
 		t.Fatalf("RunCatchup: %v", err)
 	}
@@ -887,10 +870,24 @@ func TestRunCatchup_ResumesPausesAfterCycleBilling(t *testing.T) {
 	rec := &orderRecorder{}
 	s.SetBillingRunner(rec)
 	s.SetPauseResumer(rec)
-	if err := s.RunCatchup(context.Background(), CatchupJob{TenantID: "t1", ClockID: "c1", PrevFrozenTime: to.AddDate(0, -1, 0)}); err != nil {
+	if err := s.RunCatchup(context.Background(), CatchupJob{TenantID: "t1", ClockID: "c1"}); err != nil {
 		t.Fatalf("RunCatchup: %v", err)
 	}
 	if got, want := strings.Join(rec.calls, ","), "cycle,resume,threshold"; got != want {
 		t.Errorf("phase order = %s, want %s", got, want)
 	}
+}
+
+// advanceThenCatchUp is what a caller sees from an advance once the
+// testclock_catchup leader has run it: Advance marks the clock, then one
+// catch-up pass (RunCatchup) runs it. It returns the clock after the pass,
+// and the pass's error.
+func advanceThenCatchUp(ctx context.Context, s *Service, tenantID, id string, in AdvanceInput) (domain.TestClock, error) {
+	if _, err := s.Advance(ctx, tenantID, id, in); err != nil {
+		return domain.TestClock{}, err
+	}
+	if err := s.RunCatchup(ctx, CatchupJob{TenantID: tenantID, ClockID: id}); err != nil {
+		return domain.TestClock{}, err
+	}
+	return s.Get(ctx, tenantID, id)
 }

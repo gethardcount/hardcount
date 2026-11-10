@@ -3,6 +3,7 @@ package testclock
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -11,9 +12,9 @@ import (
 
 // ctxCheckingStore embeds the unit mockStore but makes MarkFailed fail when its
 // context is already canceled/expired — modelling the real store, where a write
-// on a dead ctx can't land. This is the condition the fix addresses: the
-// catchup ctx hits CatchupTimeout, so reusing it for the failure-flip would
-// also fail and leave the clock stuck in 'advancing'.
+// on a dead ctx can't land. This is the condition the detached failure-flip
+// addresses: the pass's ctx hits its deadline, so reusing it for the
+// failure-flip would also fail and leave the clock stuck in 'advancing'.
 type ctxCheckingStore struct {
 	*mockStore
 	markFailedSawLiveCtx bool
@@ -27,43 +28,72 @@ func (s *ctxCheckingStore) MarkFailed(ctx context.Context, tenantID, id, reason 
 	return s.mockStore.MarkFailed(ctx, tenantID, id, reason)
 }
 
-// TestRunCatchup_MarksFailedOnExpiredCtx covers the medium-severity audit
-// finding: when catchup timed out, MarkFailed ran on the already-expired
-// catchup ctx and failed, leaving the clock stuck in 'advancing' forever. The
-// failure-flip now runs on a ctx detached from the catchup deadline.
-func TestRunCatchup_MarksFailedOnExpiredCtx(t *testing.T) {
-	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+// blockingRunner's billing phase runs until its ctx ends, like a pass that
+// would take longer than its deadline.
+type blockingRunner struct{ stubRunner }
+
+func (r *blockingRunner) RunCycleForClock(ctx context.Context, _, _ string, _ int) (int, []error) {
+	<-ctx.Done()
+	return 0, []error{ctx.Err()}
+}
+
+// TestRunCatchup_PassDeadlineMarksFailedOnALiveCtx: a pass that overruns its
+// deadline fails the advance with a reason that names the clock's time, and
+// the failure-flip runs on a ctx detached from the pass, so it lands (the
+// medium-severity audit finding: MarkFailed once ran on the expired ctx and
+// left the clock stuck in 'advancing').
+func TestRunCatchup_PassDeadlineMarksFailedOnALiveCtx(t *testing.T) {
+	prev := catchupPassDeadline
+	catchupPassDeadline = 50 * time.Millisecond
+	t.Cleanup(func() { catchupPassDeadline = prev })
+
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	base := newMockStore()
 	base.clocks["c1"] = domain.TestClock{
-		ID: "c1", TenantID: "t1", Status: domain.TestClockStatusAdvancing, FrozenTime: start,
+		ID: "c1", TenantID: "t1", Status: domain.TestClockStatusAdvancing, FrozenTime: at,
 	}
-	sub := domain.Subscription{ID: "s1", TenantID: "t1", TestClockID: "c1", Status: domain.SubscriptionActive}
-	nextBilling := start.Add(1 * time.Hour)
-	sub.NextBillingAt = &nextBilling
-	base.subsOnClock["c1"] = []domain.Subscription{sub}
-
 	store := &ctxCheckingStore{mockStore: base}
-	runner := &stubRunner{store: base, clockID: "c1", subID: "s1", err: errors.New("catchup deadline exceeded")}
 	s := NewService(store)
-	s.SetBillingRunner(runner)
+	s.SetBillingRunner(&blockingRunner{})
 
-	// Simulate the catchup ctx having hit CatchupTimeout: already canceled.
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
-
-	err := s.RunCatchup(ctx, CatchupJob{TenantID: "t1", ClockID: "c1"})
-	if err == nil {
-		t.Fatal("expected RunCatchup to return the catchup error")
+	if err := s.RunCatchup(context.Background(), CatchupJob{TenantID: "t1", ClockID: "c1"}); err == nil {
+		t.Fatal("expected RunCatchup to return the overrun as an error")
 	}
-
 	if !store.markFailedSawLiveCtx {
-		t.Error("MarkFailed was not called with a live (detached) ctx — failure-flip reused the expired catchup ctx")
+		t.Error("MarkFailed was not called with a live (detached) ctx — the failure-flip reused the expired pass ctx")
 	}
-	got := store.clocks["c1"]
+	got := base.clocks["c1"]
 	if got.Status != domain.TestClockStatusInternalFailed {
 		t.Errorf("status: got %q, want internal_failure (clock must not be left stuck in 'advancing')", got.Status)
 	}
-	if got.LastFailureReason == "" {
-		t.Error("last_failure_reason should be populated")
+	if !strings.Contains(got.LastFailureReason, "the catch-up pass at 2026-01-01T00:00:00Z did not finish within 50ms") {
+		t.Errorf("last_failure_reason should name the clock's time and the deadline, got %q", got.LastFailureReason)
+	}
+}
+
+// TestRunCatchup_EndedCtxLeavesTheClockAdvancing: when the tick's own ctx
+// ends mid-pass — a shutdown, or the testclock_catchup lease lost — the pass
+// stops and the clock stays advancing, unmarked, for the next leader to run
+// the pass again. A deploy no longer fails an advance.
+func TestRunCatchup_EndedCtxLeavesTheClockAdvancing(t *testing.T) {
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	base := newMockStore()
+	base.clocks["c1"] = domain.TestClock{
+		ID: "c1", TenantID: "t1", Status: domain.TestClockStatusAdvancing, FrozenTime: at,
+	}
+	store := &ctxCheckingStore{mockStore: base}
+	s := NewService(store)
+	s.SetBillingRunner(&stubRunner{store: base, clockID: "c1", subID: "s1", err: errors.New("context canceled")})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := s.RunCatchup(ctx, CatchupJob{TenantID: "t1", ClockID: "c1"}); err != nil {
+		t.Fatalf("RunCatchup on an ended ctx: %v, want nil (the next leader runs the pass)", err)
+	}
+	if store.markFailedSawLiveCtx {
+		t.Error("MarkFailed ran: an ended tick must leave the clock for the next leader, not fail it")
+	}
+	if got := base.clocks["c1"].Status; got != domain.TestClockStatusAdvancing {
+		t.Errorf("status: got %q, want advancing", got)
 	}
 }

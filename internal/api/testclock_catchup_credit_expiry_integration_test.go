@@ -9,8 +9,11 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/dunning"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/leader"
+	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testclock"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // noBillingRunner is the catchup's billing seam with nothing to bill: the
@@ -152,7 +155,7 @@ func TestCatchup_CreditExpiryRunsAfterDunningRetries_RealStore(t *testing.T) {
 			clocks.SetBillingRunner(noBillingRunner{})
 			clocks.SetCreditExpirer(credits)
 			clocks.SetDunning(dunningSvc)
-			if err := clocks.RunCatchup(r.ctx, testclock.CatchupJob{TenantID: r.tenantID, ClockID: clockID, PrevFrozenTime: t0}); err != nil {
+			if err := clocks.RunCatchup(leadertest.Token(t, testutil.AdminPool(t), r.ctx, leader.RoleTestClockCatchup), testclock.CatchupJob{TenantID: r.tenantID, ClockID: clockID}); err != nil {
 				t.Fatalf("catchup: %v", err)
 			}
 

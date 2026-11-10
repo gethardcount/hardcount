@@ -130,7 +130,7 @@ services:
       HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC: ${HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC:-}
       # Optional — how long a stopping API keeps serving after /health/ready
       # turns 503 (empty = 5s, or 0 with APP_ENV=local). Keep
-      # stop_grace_period above it plus 90s.
+      # stop_grace_period above it plus 60s.
       SHUTDOWN_DRAIN_DELAY: ${SHUTDOWN_DRAIN_DELAY:-}
       # Optional — outbound email (SMTP). Hardcount enqueues to email_outbox
       # regardless; sends DLQ when SMTP_HOST is unset.

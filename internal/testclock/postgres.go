@@ -11,6 +11,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/leader"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -254,19 +255,21 @@ func (s *PostgresStore) MarkAdvancing(ctx context.Context, tenantID, id string, 
 // CompleteAdvance flips advancing → ready and clears any prior
 // last_failure_reason. The clear matters when the operator
 // retried a failed advance and it succeeded — the dashboard
-// shouldn't keep showing yesterday's error.
+// shouldn't keep showing yesterday's error. A catch-up write: fenced on the
+// testclock_catchup lease (fencedMiss gives its errors).
 func (s *PostgresStore) CompleteAdvance(ctx context.Context, tenantID, id string) (domain.TestClock, error) {
 	return s.transitionWithReason(ctx, tenantID, id, "ready",
-		[]string{"advancing"}, "", true,
+		[]string{"advancing"}, "", true, true,
 		"can only complete an advance from status=advancing")
 }
 
 // MarkFailed flips advancing → internal_failure and persists the
 // reason, cut to about 500 bytes between two characters; the full
-// payload stays in structured slog.
+// payload stays in structured slog. A catch-up write: fenced on the
+// testclock_catchup lease (fencedMiss gives its errors).
 func (s *PostgresStore) MarkFailed(ctx context.Context, tenantID, id, reason string) (domain.TestClock, error) {
 	return s.transitionWithReason(ctx, tenantID, id, "internal_failure",
-		[]string{"advancing"}, reason, false,
+		[]string{"advancing"}, reason, false, true,
 		"can only mark failed from status=advancing")
 }
 
@@ -276,7 +279,7 @@ func (s *PostgresStore) MarkFailed(ctx context.Context, tenantID, id, reason str
 // has already passed it. ADR-018.
 func (s *PostgresStore) RetryFromFailed(ctx context.Context, tenantID, id string) (domain.TestClock, error) {
 	return s.transitionWithReason(ctx, tenantID, id, "advancing",
-		[]string{"internal_failure"}, "", true,
+		[]string{"internal_failure"}, "", true, false,
 		"can only retry from status=internal_failure")
 }
 
@@ -284,42 +287,56 @@ func (s *PostgresStore) RetryFromFailed(ctx context.Context, tenantID, id string
 // either write or clear last_failure_reason. clearReason=true
 // means SET last_failure_reason = NULL; false means SET
 // last_failure_reason = $reason. Used by CompleteAdvance,
-// MarkFailed, RetryFromFailed.
+// MarkFailed, RetryFromFailed. fenced adds the testclock_catchup lease's
+// fence to the statement (the catch-up's writes, ADR-140); a fenced write
+// that changes no row is then reported by fencedMiss, not as a wrong state.
 func (s *PostgresStore) transitionWithReason(
 	ctx context.Context, tenantID, id, to string, allowedFrom []string,
-	reason string, clearReason bool, wrongStateMsg string,
+	reason string, clearReason, fenced bool, wrongStateMsg string,
 ) (domain.TestClock, error) {
+	var token int64
+	if fenced {
+		var err error
+		if token, err = leader.Fence(ctx, leader.RoleTestClockCatchup); err != nil {
+			return domain.TestClock{}, err
+		}
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.TestClock{}, err
 	}
 	defer postgres.Rollback(tx)
 
-	var clk domain.TestClock
-	var query string
-	var args []any
-	if clearReason {
-		query = `UPDATE test_clocks SET status = $1, last_failure_reason = NULL,
-			updated_at = now()
-			WHERE id = $2 AND status = ANY($3)			RETURNING ` + clockCols
-		args = []any{to, id, allowedFrom}
-	} else {
-		query = `UPDATE test_clocks SET status = $1, last_failure_reason = $2,
-			updated_at = now()
-			WHERE id = $3 AND status = ANY($4)			RETURNING ` + clockCols
+	set := `last_failure_reason = NULL`
+	args := []any{to, id, allowedFrom}
+	if !clearReason {
 		// The dashboard shows the reason in one panel: keep 500 bytes, or
 		// 499 and "…" when the reason is longer. The full text is in the log.
 		stored := errs.Clip(reason, 500)
 		if len(reason) > 500 {
 			stored = errs.Clip(reason, 499) + "…"
 		}
-		args = []any{to, stored, id, allowedFrom}
+		args = append(args, stored)
+		set = fmt.Sprintf("last_failure_reason = $%d", len(args))
 	}
+	fence := ""
+	if fenced {
+		args = append(args, string(leader.RoleTestClockCatchup), token)
+		fence = fmt.Sprintf(" AND leader_fence($%d, $%d)", len(args)-1, len(args))
+	}
+	query := `UPDATE test_clocks SET status = $1, ` + set + `, updated_at = now()
+		WHERE id = $2 AND status = ANY($3)` + fence + `
+		RETURNING ` + clockCols
+
+	var clk domain.TestClock
 	err = tx.QueryRowContext(ctx, query, args...).Scan(scanDest(&clk)...)
-	if err == sql.ErrNoRows {
+	if errors.Is(err, sql.ErrNoRows) {
+		if fenced {
+			return domain.TestClock{}, fencedMiss(ctx, tx, id)
+		}
 		var current string
 		err2 := tx.QueryRowContext(ctx, `SELECT status FROM test_clocks WHERE id = $1`, id).Scan(&current)
-		if err2 == sql.ErrNoRows {
+		if errors.Is(err2, sql.ErrNoRows) {
 			return domain.TestClock{}, errs.ErrNotFound
 		}
 		if err2 != nil {
@@ -336,6 +353,27 @@ func (s *PostgresStore) transitionWithReason(
 	return clk, nil
 }
 
+// fencedMiss explains a fenced catch-up write that changed no row. A clock
+// that is gone, or no longer advancing (another run completed or failed it,
+// or the tenant deleted it), gives ErrClockNoLongerAdvancing. A clock still
+// advancing means the fence failed: this run no longer holds the
+// testclock_catchup lease, and it gives ErrCatchupFenceLost. Neither is a
+// failure of the advance; the run stops and leaves the clock as it is.
+func fencedMiss(ctx context.Context, tx *sql.Tx, id string) error {
+	var current string
+	err := tx.QueryRowContext(ctx, `SELECT status FROM test_clocks WHERE id = $1`, id).Scan(&current)
+	switch {
+	case errors.Is(err, sql.ErrNoRows):
+		return fmt.Errorf("%w: the clock is gone", ErrClockNoLongerAdvancing)
+	case err != nil:
+		return err
+	case current != string(domain.TestClockStatusAdvancing):
+		return fmt.Errorf("%w: the clock is %s", ErrClockNoLongerAdvancing, current)
+	default:
+		return ErrCatchupFenceLost
+	}
+}
+
 // transition is the atomic CAS helper for status changes: UPDATE … WHERE
 // status = ANY(allowedFrom) returning the row. Returning zero rows is
 // ambiguous (missing row vs wrong state), so a second lookup distinguishes.
@@ -350,7 +388,13 @@ func (s *PostgresStore) transition(ctx context.Context, tenantID, id, to string,
 	var query string
 	var args []any
 	if frozenTime != nil {
-		query = `UPDATE test_clocks SET status = $1, frozen_time = $2, updated_at = now()
+		// The summary restarts with the time the advance starts from, read
+		// off the row before this statement changes it (the right-hand side
+		// of SET sees the old row). The catch-up reads it back from the
+		// clock, so a Retry and a run another replica picks up keep it.
+		query = `UPDATE test_clocks SET status = $1, frozen_time = $2,
+			last_advance_summary = jsonb_build_object('advanced_from', frozen_time),
+			updated_at = now()
 			WHERE id = $3 AND status = ANY($4) RETURNING ` + clockCols
 		args = []any{to, *frozenTime, id, allowedFrom}
 	} else {
@@ -379,15 +423,19 @@ func (s *PostgresStore) transition(ctx context.Context, tenantID, id, to string,
 	return clk, nil
 }
 
-// ListAllAdvancing scans test_clocks for rows in status='advancing'
-// across every tenant. Used at boot to recover catchup jobs that
-// were in-flight when the previous process exited. RLS-bypassed
-// (TxBypass) because the recovery path runs before any tenant ctx
-// is established and needs to see all tenants. Limited to 1000 to
-// bound the recovery enqueue burst — at expected pre-launch
-// volumes there will rarely be more than 0-1 stuck clocks; the
-// limit is a sanity cap, not a paging target.
-func (s *PostgresStore) ListAllAdvancing(ctx context.Context) ([]domain.TestClock, error) {
+// ListAdvancingForCatchup is the testclock_catchup role's claim list
+// (ADR-140, ADR-114): the clocks in status='advancing' across every tenant,
+// the one touched longest ago first, at most limit. Every write the
+// catch-up makes to a clock bumps updated_at, so a clock worked on this tick
+// goes to the back and one large clock cannot hold the head of the list.
+// The statement proves the lease's fence, so a deposed leader lists nothing.
+// RLS-bypassed (TxBypass): the tick runs for every tenant, before any tenant
+// ctx exists.
+func (s *PostgresStore) ListAdvancingForCatchup(ctx context.Context, limit int) ([]domain.TestClock, error) {
+	token, err := leader.Fence(ctx, leader.RoleTestClockCatchup)
+	if err != nil {
+		return nil, err
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err
@@ -396,9 +444,11 @@ func (s *PostgresStore) ListAllAdvancing(ctx context.Context) ([]domain.TestCloc
 
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+clockCols+` FROM test_clocks
-		WHERE status = 'advancing'		ORDER BY updated_at ASC
-		LIMIT 1000
-	`)
+		WHERE status = 'advancing'
+		  AND leader_fence($1, $2)
+		ORDER BY updated_at ASC, id ASC
+		LIMIT $3
+	`, string(leader.RoleTestClockCatchup), token, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -454,25 +504,36 @@ func (a advanceSummaryScan) Scan(src any) error {
 }
 
 // SaveAdvanceSummary persists the per-phase counts the catchup produced onto
-// the clock row. Written by RunCatchup just before the advancing → ready /
+// the clock row. Written by the catch-up just before the advancing → ready /
 // internal_failure transition, so the transition's RETURNING clause reads it
-// back. A plain column write (not gated on status): the catchup is the only
-// writer and the clock is 'advancing' at this point. Best-effort relative to
-// the transition — if the process dies between the two writes the clock simply
-// shows no summary, which is strictly better than blocking the transition.
+// back. A catch-up write: fenced on the testclock_catchup lease and on the
+// clock still advancing, so a deposed run cannot overwrite the summary of a
+// run that finished after it (fencedMiss gives its errors). Best-effort
+// relative to the transition — if the process dies between the two writes
+// the clock simply shows no summary.
 func (s *PostgresStore) SaveAdvanceSummary(ctx context.Context, tenantID, id string, summaryJSON []byte) error {
+	token, err := leader.Fence(ctx, leader.RoleTestClockCatchup)
+	if err != nil {
+		return err
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return err
 	}
 	defer postgres.Rollback(tx)
 
-	if _, err := tx.ExecContext(ctx,
+	res, err := tx.ExecContext(ctx,
 		`UPDATE test_clocks SET last_advance_summary = $1::jsonb, updated_at = now()
-		 WHERE id = $2`,
-		summaryJSON, id,
-	); err != nil {
+		 WHERE id = $2 AND status = 'advancing' AND leader_fence($3, $4)`,
+		summaryJSON, id, string(leader.RoleTestClockCatchup), token,
+	)
+	if err != nil {
 		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return fencedMiss(ctx, tx, id)
 	}
 	return tx.Commit()
 }

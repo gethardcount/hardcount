@@ -1,197 +1,96 @@
 package testclock
 
+// The test-clock catch-up runs everything that fell due in the time an
+// advancing clock skipped. It is a leader-leased role, testclock_catchup
+// (ADR-140, ADR-114): one replica at a time runs it, on a tick, and every
+// write it makes to a clock row proves the role's fence. Advance and Retry
+// advance only mark the clock; the leader picks it up within a tick. A
+// process that stops mid-pass leaves the clock advancing, and the next
+// leader runs the pass again: every phase is safe to repeat (its own
+// compare-and-set guards), which is what a repeated pass relies on.
+
 import (
 	"context"
-	"errors"
+	"fmt"
 	"log/slog"
-	"runtime/debug"
-	"sync"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/platform/leader"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/scheduler"
 )
 
-// CatchupJob is the unit of work the async worker processes — one
-// clock's worth of post-advance billing catchup. Carries tenant +
-// clock identity; the worker reloads frozen_time and the sub list
-// inside its own ctx (RLS-scoped per-tenant).
+// CatchupJob names one clock's catch-up: its tenant and its id.
 type CatchupJob struct {
 	TenantID string
 	ClockID  string
-	// PrevFrozenTime is the clock's frozen_time BEFORE this advance (the
-	// simulated "from" instant), captured by Advance before MarkAdvancing
-	// overwrites it. RunCatchup records it as the advance summary's
-	// AdvancedFrom so the dashboard can show the span the advance covered.
-	// Zero on the recover-in-flight path (the pre-advance value is no longer
-	// available after a restart); the summary then shows only the destination.
-	PrevFrozenTime time.Time
 }
 
-// CatchupQueue is the narrow contract the service uses to dispatch
-// catchup work. Behind a small interface so the in-process channel
-// implementation here can be swapped for a Redis/durable queue
-// later without touching the service.
-//
-// Enqueue is non-blocking but bounded — if the buffer is full, the
-// caller gets an error rather than blocking the request handler.
-// At expected operator volumes (one operator clicking Advance, not
-// a load test) the buffer never fills; on full it surfaces as a
-// 503 to the caller, which is the right shape compared to a hung
-// request handler.
-type CatchupQueue interface {
-	Enqueue(job CatchupJob) error
+const (
+	// CatchupTickInterval is the testclock_catchup role's cadence. The
+	// runner polls at min(interval, leader.MaxPoll), so an advance starts
+	// within about one interval of Advance marking the clock, or after the
+	// leader's current tick. A tick with no advancing clock is one fenced
+	// SELECT.
+	CatchupTickInterval = 2 * time.Second
+
+	// CatchupPassDeadline bounds one catch-up pass on one clock. A pass that
+	// has not finished by then ends the advance in internal_failure, with a
+	// reason that names the clock's time, and Retry advance runs it again.
+	// The pass still covers the whole advance (one pass at the new time), so
+	// this is the queue worker's old whole-run bound.
+	CatchupPassDeadline = 10 * time.Minute
+
+	// catchupClocksPerTick caps how many clocks one tick works. The rest
+	// wait for the next tick, which starts with the one touched longest ago.
+	catchupClocksPerTick = 20
+)
+
+// catchupPassDeadline is the deadline runClock applies: CatchupPassDeadline,
+// shortened only by tests.
+var catchupPassDeadline = CatchupPassDeadline
+
+// RunCatchupLoop runs the testclock_catchup role until ctx ends: each tick
+// this replica leads runs CatchupTick.
+func (s *Service) RunCatchupLoop(ctx context.Context, gate leader.Gate) {
+	scheduler.Run(ctx, leader.RoleTestClockCatchup, CatchupTickInterval, gate, s.CatchupTick, nil)
 }
 
-// CatchupRunner is the function the worker calls per job. The
-// service satisfies it via Service.RunCatchup. Kept as a function
-// type to avoid a method-on-struct dependency cycle and to make
-// the worker easy to stub in tests.
-type CatchupRunner func(ctx context.Context, job CatchupJob) error
-
-// CatchupTimeout caps the wall-clock duration of a single advance
-// catchup. Defends against pathological data shapes (e.g. an
-// operator advancing 10 years on a daily-billed sub) that would
-// otherwise tie up a worker indefinitely. On timeout the worker
-// flips the clock to internal_failure so the operator can
-// inspect-and-delete to recover.
-const CatchupTimeout = 10 * time.Minute
-
-// ErrQueueFull is returned by Enqueue when the buffered channel is
-// at capacity. The advance and retry-advance handlers answer it with 503
-// catchup_queue_full (writeAdvanceError).
-var ErrQueueFull = errors.New("test-clock catchup queue is full")
-
-// chanCatchupQueue is a bounded, in-process channel-backed queue.
-// Single-process — fine for Hardcount's single-binary deployment shape.
-// When/if multi-replica self-hosters arrive, swap for a Redis or
-// Postgres LISTEN/NOTIFY queue without touching service code.
-type chanCatchupQueue struct {
-	ch chan CatchupJob
-}
-
-// NewCatchupQueue returns a queue with the given buffer size.
-// Buffer should be larger than max-expected concurrent in-flight
-// advances; 100 is generous.
-func NewCatchupQueue(buffer int) *chanCatchupQueue {
-	if buffer <= 0 {
-		buffer = 100
-	}
-	return &chanCatchupQueue{ch: make(chan CatchupJob, buffer)}
-}
-
-func (q *chanCatchupQueue) Enqueue(job CatchupJob) error {
-	select {
-	case q.ch <- job:
-		return nil
-	default:
-		return ErrQueueFull
-	}
-}
-
-// CatchupWorker drains the queue and runs catchup for each job.
-// Single-goroutine on purpose — concurrent catchups on the same
-// tenant fight for the same RLS partition and the same DB rows,
-// so serialising is simpler and there's no per-clock isolation
-// that parallelism would buy us at expected operator volumes.
-type CatchupWorker struct {
-	queue  *chanCatchupQueue
-	runner CatchupRunner
-	stopCh chan struct{}
-	doneCh chan struct{}
-	once   sync.Once
-}
-
-// NewCatchupWorker wires a worker around a queue + runner. Caller
-// must call Start to begin draining; Stop to shut down cleanly.
-func NewCatchupWorker(queue *chanCatchupQueue, runner CatchupRunner) *CatchupWorker {
-	return &CatchupWorker{
-		queue:  queue,
-		runner: runner,
-		stopCh: make(chan struct{}),
-		doneCh: make(chan struct{}),
-	}
-}
-
-// Start spawns the drain goroutine. Idempotent — repeat calls are
-// no-ops (sync.Once-guarded) so a misconfigured boot path can't
-// produce two competing workers.
-func (w *CatchupWorker) Start() {
-	w.once.Do(func() {
-		go w.run()
-	})
-}
-
-func (w *CatchupWorker) run() {
-	defer close(w.doneCh)
-	slog.Info("test-clock catchup worker started")
-	for {
-		select {
-		case <-w.stopCh:
-			slog.Info("test-clock catchup worker stopped")
-			return
-		case job, ok := <-w.queue.ch:
-			if !ok {
-				return
-			}
-			w.process(job)
-		}
-	}
-}
-
-// process runs one catchup with a wall-clock timeout. Test clocks
-// are always test-mode (CHECK constraint at the table level), so
-// the ctx is pinned to livemode=false — required by the engine
-// because subs on a clock have next_billing_at compared against
-// the clock's frozen_time, which only makes sense inside the
-// test-mode RLS partition.
-func (w *CatchupWorker) process(job CatchupJob) {
-	ctx, cancel := context.WithTimeout(context.Background(), CatchupTimeout)
-	defer cancel()
-	ctx = postgres.WithLivemode(ctx, false)
-
-	// A panic in the runner (nil-deref in some billing path, etc.) would
-	// otherwise unwind this goroutine and crash the whole process, taking
-	// down the API server for every tenant. Recover, log with the stack, and
-	// let the drain loop continue — one bad clock can't kill the server.
-	// Mirrors scheduler.leadOneTick's recovering wrapper.
-	defer func() {
-		if r := recover(); r != nil {
-			slog.Error("test-clock catchup panicked",
-				"clock_id", job.ClockID,
-				"tenant_id", job.TenantID,
-				"panic", r,
-				"stack", string(debug.Stack()),
-			)
-		}
-	}()
-
-	start := time.Now()
-	if err := w.runner(ctx, job); err != nil {
-		slog.Error("test-clock catchup failed",
-			"clock_id", job.ClockID,
-			"tenant_id", job.TenantID,
-			"duration_ms", time.Since(start).Milliseconds(),
-			"error", err,
-		)
+// CatchupTick is the role's tick body (scheduler.WorkFunc). It logs its own
+// errors.
+func (s *Service) CatchupTick(ctx context.Context) {
+	worked, err := s.RunAdvancing(ctx)
+	if err != nil {
+		slog.ErrorContext(ctx, "test clock: catch-up tick could not list the advancing clocks", "error", err)
 		return
 	}
-	slog.Info("test-clock catchup complete",
-		"clock_id", job.ClockID,
-		"tenant_id", job.TenantID,
-		"duration_ms", time.Since(start).Milliseconds(),
-	)
+	if worked > 0 {
+		slog.InfoContext(ctx, "test clock: catch-up tick", "clocks", worked)
+	}
 }
 
-// Stop signals the worker to exit and waits up to deadline for any
-// in-flight job to finish. Returns true if the worker stopped cleanly,
-// false on timeout — an abandoned advance leaves the clock 'advancing'
-// and resumes from durable state on the next boot's RecoverInFlight.
-func (w *CatchupWorker) Stop(deadline time.Duration) bool {
-	close(w.stopCh)
-	select {
-	case <-w.doneCh:
-		return true
-	case <-time.After(deadline):
-		return false
+// RunAdvancing lists the advancing clocks with the role's fenced claim list
+// and runs one catch-up pass on each, the one touched longest ago first. It
+// returns how many clocks it ran. When ctx ends (a shutdown, or the lease
+// lost) it stops before the next clock, and those clocks stay advancing for
+// the next leader. A clock's failure is the clock's: it is recorded on the
+// clock (internal_failure) and logged, and the tick goes on.
+func (s *Service) RunAdvancing(ctx context.Context) (int, error) {
+	clocks, err := s.store.ListAdvancingForCatchup(ctx, catchupClocksPerTick)
+	if err != nil {
+		return 0, fmt.Errorf("list advancing clocks: %w", err)
 	}
+	worked := 0
+	for _, clk := range clocks {
+		if ctx.Err() != nil {
+			break
+		}
+		// Test clocks exist only in test mode (the table's CHECK).
+		if err := s.runClock(postgres.WithLivemode(ctx, false), clk); err != nil {
+			slog.ErrorContext(ctx, "test clock: catch-up pass failed",
+				"clock_id", clk.ID, "tenant_id", clk.TenantID, "error", err)
+		}
+		worked++
+	}
+	return worked, nil
 }

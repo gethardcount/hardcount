@@ -2349,8 +2349,8 @@ func (e *Engine) RunCycle(ctx context.Context, batchSize int, onPage func()) (in
 //
 // 10000 covers any realistic catch-up: 833 years of monthly billing,
 // 27 years of daily. Test-clock advances beyond that need a chained
-// retry, which is fine — the wall-clock 10-min CatchupTimeout is the
-// outer ceiling.
+// retry, which is fine — the 10-minute test-clock catch-up pass
+// deadline (testclock.CatchupPassDeadline) is the outer ceiling.
 const maxPeriodsPerSubPerCall = 10000
 
 // billSubscription catches a subscription up to its effectiveNow by
@@ -2382,8 +2382,8 @@ func (e *Engine) billSubscription(ctx context.Context, sub domain.Subscription, 
 	count := 0
 	movedRetry := false
 	for i := 0; i < maxPeriodsPerSubPerCall; i++ {
-		// Honour ctx deadline (CatchupTimeout from the worker, request
-		// timeout from the scheduler). Returns the partial count + err.
+		// Honour ctx deadline (the test-clock catch-up's pass deadline, or
+		// the scheduler tick's ctx). Returns the partial count + err.
 		if err := ctx.Err(); err != nil {
 			return count, fmt.Errorf("billing loop ctx done: %w", err)
 		}
