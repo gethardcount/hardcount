@@ -132,7 +132,7 @@ func TestEvaluateThresholds_PriceReadFails(t *testing.T) {
 	mp.pricesErr = errors.New("db down")
 	sub, _ := engine.subs.Get(context.Background(), "t1", "sub_1")
 	periodStart := *sub.CurrentBillingPeriodStart
-	if _, err := engine.evaluateThresholds(context.Background(), sub, periodStart, periodStart.AddDate(0, 0, 5)); err == nil {
+	if _, err := engine.evaluateThresholds(context.Background(), sub, periodStart, periodStart.AddDate(0, 0, 5), periodStart.AddDate(0, 0, 5)); err == nil {
 		t.Fatal("evaluateThresholds with a failed price read must fail, not drop the line")
 	}
 }
@@ -179,7 +179,7 @@ func TestEvaluateThresholds_NegativeRunningUsageCountsAsZero(t *testing.T) {
 	engine, _, _ := setupThresholdEngine(thresholds, -500)
 	sub, _ := engine.subs.Get(context.Background(), "t1", "sub_1")
 	periodStart := *sub.CurrentBillingPeriodStart
-	if _, err := engine.evaluateThresholds(context.Background(), sub, periodStart, periodStart.AddDate(0, 0, 5)); err != nil {
+	if _, err := engine.evaluateThresholds(context.Background(), sub, periodStart, periodStart.AddDate(0, 0, 5), periodStart.AddDate(0, 0, 5)); err != nil {
 		t.Fatalf("a net-negative running total must not fail the evaluation: %v", err)
 	}
 }

@@ -5,10 +5,14 @@ import (
 	"strings"
 )
 
-// creditDrawAsOfIssueReasons are the billing reasons of the invoices that bill
-// a stretch of time ending at their issued_at: the close of a period
-// (subscription_cycle) and a spend-threshold fire (threshold). Both keep that
-// issued_at through a later finalize.
+// creditDrawAsOfIssueReasons are the billing reasons of the invoices that test
+// credit grant expiry at their issued_at: the close of a period
+// (subscription_cycle), whose issued_at is the period end, and a
+// spend-threshold fire (threshold), whose issued_at is the fire's instant.
+// A threshold invoice's window ends one invoice grace before that instant
+// (its billing_period_end), so a grant that expires inside that grace does
+// not pay it (ADR-120 amendment 2026-11-10). Both keep issued_at through a
+// later finalize.
 var creditDrawAsOfIssueReasons = []InvoiceBillingReason{BillingReasonSubscriptionCycle, BillingReasonThreshold}
 
 // DrawsCreditAsOfIssue reports whether an invoice with this billing reason

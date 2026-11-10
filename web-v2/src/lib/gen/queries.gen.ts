@@ -6960,9 +6960,11 @@ export const getSetSubscriptionBillingThresholdsUrl = (id: string,) => {
  * first threshold reached triggers the invoice.
  *
  * The threshold invoice bills the period's usage so far, and no base
- * fee. The period keeps its dates, the base fee is billed as it would
- * be with no threshold, and the period's next invoice bills the rest
- * of the usage.
+ * fee. "So far" ends one `INVOICE_GRACE_PERIOD` before the invoice is
+ * built (its `billing_period_end`), so usage that arrives late is
+ * still billed. The period keeps its dates, the base fee is billed as
+ * it would be with no threshold, and the period's next invoice bills
+ * the rest of the usage.
  * `reset_billing_cycle`, which started a new period at the threshold
  * invoice, was removed; a body that sends it is refused with 422.
  *

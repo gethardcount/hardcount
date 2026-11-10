@@ -86,7 +86,10 @@ idempotency key, evaluated check-then-act across transactions.
      for collection (`auto_charge_pending`). "At or before" since the
      2026-10-22 amendment below.
    - **The draw.** A `subscription_cycle` or `threshold` invoice tests
-     grant expiry at its `issued_at` (the period end or the fire instant)
+     grant expiry at its `issued_at` (the period end or the fire instant;
+     since 2026-11-10 a threshold invoice's window ends one invoice grace
+     before its fire, so a grant that expires inside that grace does not
+     pay it: ADR-120's amendment of that date)
      whenever it is collected: `ApplyToInvoiceAtomic` reads it on its
      locked invoice read. Only the expiry test moves. The usage entry,
      the invoice's `updated_at`, `paid_at` and the dunning start stay at
