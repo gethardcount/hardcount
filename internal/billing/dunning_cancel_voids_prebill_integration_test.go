@@ -3,6 +3,10 @@ package billing_test
 import (
 	"context"
 	"database/sql"
+	"io"
+	"net/http"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -12,7 +16,9 @@ import (
 	"github.com/gethardcount/hardcount/internal/customer"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/dunning"
+	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/invoice"
+	"github.com/gethardcount/hardcount/internal/payment"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/leader"
 	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
@@ -22,6 +28,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/subscription/subscriptiontest"
 	"github.com/gethardcount/hardcount/internal/tax"
 	"github.com/gethardcount/hardcount/internal/tenant"
+	"github.com/gethardcount/hardcount/internal/tenantstripe"
 	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/usage"
 	"github.com/gethardcount/hardcount/internal/webhook"
@@ -32,7 +39,8 @@ import (
 // Postgres. A cancel or plan swap now leaves the period wholly unused, so its
 // relief voids the prebill (ADR-118). The engine, the subscription service,
 // the invoice service and dunning are wired as internal/api/router.go wires
-// them; only Stripe is a recording fake (the collection stopper).
+// them; only Stripe is a recording fake (the collection stopper), until
+// declinedAtStripe puts the real one in its place.
 type prebillVoidRig struct {
 	t        *testing.T
 	ctx      context.Context
@@ -44,6 +52,7 @@ type prebillVoidRig struct {
 	subStore *subscription.PostgresStore
 	subSvc   *subscription.Service
 	invStore *invoice.PostgresStore
+	invSvc   *invoice.Service
 	cn       *creditnote.Service
 	dstore   *dunning.PostgresStore
 	dsvc     *dunning.Service
@@ -113,6 +122,7 @@ func newPrebillVoidRig(t *testing.T, name string, policy domain.DunningPolicy) *
 	invSvc := invoice.NewService(r.invStore, clock.Real(), settings)
 	invSvc.SetCollectionStopper(r.stopper)
 	invSvc.SetDunningResolver(r.dsvc)
+	r.invSvc = invSvc
 
 	e := billing.NewEngine(
 		&subStoreAdapter{r.subStore}, &usageStoreAdapter{usage.NewPostgresStore(db)},
@@ -264,6 +274,99 @@ func (r *prebillVoidRig) requireVoidedAndRunClosed() {
 	}
 }
 
+// stripeKeys holds one Stripe secret key per (tenant, livemode). Any other
+// lookup finds no key, as for a tenant that has not connected Stripe in that
+// mode, so a lookup with the wrong tenant or mode sends nothing.
+type stripeKeys map[stripeKeyFor]string
+
+type stripeKeyFor struct {
+	tenantID string
+	livemode bool
+}
+
+func (k stripeKeys) GetPlaintext(_ context.Context, tenantID string, livemode bool) (tenantstripe.PlaintextSecrets, error) {
+	key, ok := k[stripeKeyFor{tenantID, livemode}]
+	if !ok {
+		return tenantstripe.PlaintextSecrets{}, errs.ErrNotFound
+	}
+	return tenantstripe.PlaintextSecrets{SecretKey: key}, nil
+}
+
+// cancelingStripe answers every request as Stripe answers a PaymentIntent
+// cancel, and records each request as "METHOD path Authorization".
+type cancelingStripe struct {
+	mu       sync.Mutex
+	requests []string
+}
+
+func (s *cancelingStripe) RoundTrip(req *http.Request) (*http.Response, error) {
+	s.mu.Lock()
+	s.requests = append(s.requests, req.Method+" "+req.URL.Path+" "+req.Header.Get("Authorization"))
+	s.mu.Unlock()
+	return &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"application/json"}},
+		Body:       io.NopCloser(strings.NewReader(`{"id":"pi_day1_declined","object":"payment_intent","status":"canceled"}`)),
+		Request:    req,
+	}, nil
+}
+
+func (s *cancelingStripe) seen() []string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return append([]string(nil), s.requests...)
+}
+
+// rigStripeKey is the rig tenant's test-mode Stripe key.
+const rigStripeKey = "sk_test_prebill_void"
+
+// declinedAtStripe makes the day-1 prebill what a declined auto-charge leaves:
+// payment_status failed, with the declined PaymentIntent recorded on it. It
+// then puts router.go's collection stopper in place of the recording one: the
+// real payment.Stripe and Stripe client, holding the tenant's test-mode key
+// and sending through the returned stub.
+func (r *prebillVoidRig) declinedAtStripe() *cancelingStripe {
+	r.t.Helper()
+	tx, err := r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
+	if err != nil {
+		r.t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	if _, err := tx.ExecContext(r.ctx, `
+		UPDATE invoices SET payment_status = 'failed', stripe_payment_intent_id = 'pi_day1_declined',
+			last_payment_error = 'Your card was declined.'
+		WHERE id = $1`, r.day1.ID); err != nil {
+		r.t.Fatalf("stamp the decline: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		r.t.Fatalf("commit: %v", err)
+	}
+
+	api := &cancelingStripe{}
+	keys := stripeKeys{{r.tenantID, false}: rigStripeKey}
+	client := payment.NewLiveStripeClient(payment.NewStripeClientsWithHTTPClient(keys, &http.Client{Transport: api}))
+	r.invSvc.SetCollectionStopper(payment.NewStripe(client, r.invStore, payment.NewPostgresWebhookStore(r.db), nil))
+	return api
+}
+
+// requireVoidedAndPaymentIntentCanceled: the prebill is voided, and Stripe
+// received one request, the cancel of its declined PaymentIntent, sent with
+// the tenant's key.
+func (r *prebillVoidRig) requireVoidedAndPaymentIntentCanceled(api *cancelingStripe) {
+	r.t.Helper()
+	inv, err := r.invStore.Get(r.ctx, r.tenantID, r.day1.ID)
+	if err != nil {
+		r.t.Fatalf("read invoice: %v", err)
+	}
+	if inv.Status != domain.InvoiceVoided {
+		r.t.Fatalf("day-1 invoice is %s, want voided: nothing of the period was used and nothing paid", inv.Status)
+	}
+	want := "POST /v1/payment_intents/pi_day1_declined/cancel Bearer " + rigStripeKey
+	if got := api.seen(); len(got) != 1 || got[0] != want {
+		r.t.Errorf("Stripe requests = %q, want one %q: the voided invoice's declined PaymentIntent must be canceled with its tenant's key", got, want)
+	}
+}
+
 // waitingPolicy retries every 72 hours, three times: a run inserted with one
 // attempt is not due for days.
 func waitingPolicy() domain.DunningPolicy {
@@ -368,6 +471,53 @@ func TestDunningFinalCancel_VoidsTheUnusedPrebillUnderItsOwnHold(t *testing.T) {
 			}
 		})
 	}
+}
+
+// A void run by dunning or by the billing run cancels, at Stripe, the
+// declined PaymentIntent recorded on the invoice, with the invoice's tenant's
+// key. Both run on a ctx that holds livemode and no tenant, as r.ctx does. A
+// test-clock catch-up does too: its ctx is context.Background() plus
+// livemode. The Stripe client finds the key by the tenant on ctx, so
+// payment.Stripe.StopCollection names the void's tenant itself.
+//
+// Mutation: delete the auth.WithTenantID line in
+// payment.Stripe.StopCollection → both subtests see no Stripe request.
+func TestBackgroundVoid_CancelsTheDeclinedPaymentIntentAtStripe(t *testing.T) {
+	t.Run("dunning final cancel", func(t *testing.T) {
+		r := newPrebillVoidRig(t, "Background Void PI Cancel: dunning", domain.DunningPolicy{
+			Name: "cancel at the end", Enabled: true, RetryDays: []int{3},
+			FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: domain.InvActionMarkUncollectible,
+		})
+		api := r.declinedAtStripe()
+		if _, tickErrs := r.dsvc.ProcessDueRuns(r.ctx, r.tenantID, 50); len(tickErrs) != 0 {
+			t.Fatalf("dunning tick: %v", tickErrs)
+		}
+		r.requireVoidedAndPaymentIntentCanceled(api)
+	})
+
+	t.Run("scheduled cancel", func(t *testing.T) {
+		r := newPrebillVoidRig(t, "Background Void PI Cancel: schedule", waitingPolicy())
+		api := r.declinedAtStripe()
+		// Due a minute ago, on the period's first day, so the relief voids the
+		// wholly unused prebill.
+		at := time.Now().UTC().Add(-time.Minute).Truncate(time.Second)
+		tx, err := r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer postgres.Rollback(tx)
+		if _, err := tx.ExecContext(r.ctx, `UPDATE subscriptions SET cancel_at = $1 WHERE id = $2`, at, r.sub.ID); err != nil {
+			t.Fatalf("schedule cancel: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+		// The call the billing run makes for a due scheduled cancel.
+		if err := r.subSvc.FireDueScheduledCancel(r.ctx, r.tenantID, r.sub.ID, at); err != nil {
+			t.Fatalf("fire scheduled cancel: %v", err)
+		}
+		r.requireVoidedAndPaymentIntentCanceled(api)
+	})
 }
 
 // finalActionMovers is dunning's view of the subscription service, as the

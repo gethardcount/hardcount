@@ -11,6 +11,7 @@ import (
 
 	"github.com/stripe/stripe-go/v82"
 
+	hardcountauth "github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
@@ -541,19 +542,38 @@ func logPaymentAnomaly(ctx context.Context, tenantID string, inv domain.Invoice,
 // terminates with it.
 //
 // The PI cancel still runs afterwards for engine-minted PIs (auto-charge,
-// dunning retry) — those are cancelable and have no session. Both legs are
-// best-effort: the DB-side claim close (in the void tx) already stops OUR
-// reuse path, ExpiresAt bounds the Stripe-side window, and the ADR-068
-// payment-received-on-voided-invoice anomaly remains the last backstop.
+// dunning retry) — those are cancelable and have no session.
+//
+// Both legs are best-effort, and nothing retries either. The void's
+// transaction already closed Hardcount's own claims, so Hardcount does not
+// collect on this invoice again. A session whose expire fails stays payable
+// until its ExpiresAt (at most an hour). A PaymentIntent whose cancel fails
+// may stay open at Stripe for good. The customer cannot pay it, because
+// Hardcount never shows its client secret. A payment that lands anyway raises
+// the ADR-068 payment-received-on-voided-invoice anomaly.
 func (s *Stripe) StopCollection(ctx context.Context, tenantID string, inv domain.Invoice) {
+	// LiveStripeClient reads the tenant's key from the tenant on ctx. A void
+	// run by the billing run, dunning or a test-clock advance carries none,
+	// so name this void's tenant, as chargeInvoice does.
+	ctx = hardcountauth.WithTenantID(ctx, tenantID)
 	s.ExpireCheckoutSessions(ctx, tenantID, inv)
 	if inv.StripePaymentIntentID == "" {
 		return
 	}
 	if err := s.client.CancelPaymentIntent(ctx, inv.StripePaymentIntentID); err != nil {
-		// Checkout-owned PIs are expected to refuse; the expire above is
-		// the real stop for those. Anything else is worth a line.
-		slog.InfoContext(ctx, "stop collection: payment intent not canceled (checkout-owned PIs expire with their session)",
+		if errors.Is(err, ErrStripeCredentialsUnavailable) {
+			// Nothing was sent. Same cause and level as the session leg's
+			// "credentials unreadable" line.
+			slog.WarnContext(ctx, "stop collection: payment intent cancel skipped, Stripe credentials unreadable (it stays open at Stripe)",
+				"invoice_id", inv.ID, "payment_intent_id", inv.StripePaymentIntentID, "error", err)
+			return
+		}
+		// Anything other than unreadable credentials. Stripe refused (a
+		// Checkout-owned payment intent, which the expire above ends, or
+		// one already terminal), or the call failed (network, 5xx, 429, a
+		// revoked key), or Stripe is not connected. CancelPaymentIntent
+		// keeps only Stripe's message, so the error field says which.
+		slog.InfoContext(ctx, "stop collection: payment intent cancel returned an error (it may stay open at Stripe)",
 			"invoice_id", inv.ID, "payment_intent_id", inv.StripePaymentIntentID, "error", err)
 		return
 	}
