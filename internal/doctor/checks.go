@@ -313,7 +313,7 @@ WHERE g.entry_type = 'grant' AND g.consumed_cents < g.amount_cents;`,
 	{
 		Name:   "invoice_tax_calculated_never_committed",
 		Domain: "invoices",
-		Why:    "a finalized stripe_tax invoice carrying tax with a calculation but no committed transaction never reported that tax — and the ~24h calculation TTL means it can no longer be committed automatically",
+		Why:    "a finalized stripe_tax invoice carrying tax with a calculation but no committed transaction has not reported that tax — its tax commit keeps failing, and Hardcount stops retrying it when the Stripe Tax calculation expires (90 days after it was made)",
 		SQL: `SELECT id, tenant_id, invoice_number, status, tax_amount_cents, tax_calculation_id, issued_at
 		FROM invoices
 		WHERE id NOT LIKE 'hc_inv_safe%'

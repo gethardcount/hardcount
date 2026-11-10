@@ -15,7 +15,7 @@ import (
 // finalize+auto-charge path, where the invoice reaches 'paid' in the same
 // flow before any scheduler tick. Pre-fix the finalized-only filter missed
 // these, so a later credit-note/void couldn't reverse the committed tax and
-// the tenant over-remitted. Bounded by the existing 24h Stripe-calc window.
+// the tenant over-remitted. Bounded by the calculation's expiry.
 func TestListPendingTaxCommit_IncludesNonFinalizedOrphans(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)

@@ -226,7 +226,7 @@ func (r *inclusiveRefreshRig) closeCycle(t *testing.T) domain.Invoice {
 	return invs[0]
 }
 
-// refresh ages the draft's calculation past Stripe's 24 hours and clicks
+// refresh ages the draft's calculation past its expiry and clicks
 // Retry tax.
 func (r *inclusiveRefreshRig) refresh(t *testing.T, invoiceID string) {
 	t.Helper()

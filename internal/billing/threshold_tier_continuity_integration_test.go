@@ -148,7 +148,7 @@ func TestImmediateCancel_GraduatedTiersContinueAcrossFire_RealStore(t *testing.T
 	if err != nil {
 		t.Fatalf("get sub: %v", err)
 	}
-	finalInv, err := p.f.engine.BillFinalOnImmediateCancel(p.ctx, sub)
+	finalInv, err := p.f.engine.BillFinalOnCancel(p.ctx, sub)
 	if err != nil || finalInv.ID == "" {
 		t.Fatalf("bill final on cancel: inv=%q err=%v", finalInv.ID, err)
 	}

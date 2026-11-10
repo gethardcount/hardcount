@@ -136,7 +136,7 @@ func TestCheckedMath_CancelBaseFee(t *testing.T) {
 			}
 			now := time.Now().UTC()
 			sub.Status, sub.CanceledAt = domain.SubscriptionCanceled, &now
-			inv, err := lf.engine.BillFinalOnImmediateCancel(lf.ctx, sub)
+			inv, err := lf.engine.BillFinalOnCancel(lf.ctx, sub)
 			invs := lf.listInvoices(t, lf.ctx)
 			if tc.refused {
 				if !errors.Is(err, domain.ErrAmountOverflow) {
@@ -339,7 +339,7 @@ func TestCheckedMath_CancelUsageSumPastInt64(t *testing.T) {
 	}
 	now := time.Now().UTC()
 	sub.Status, sub.CanceledAt = domain.SubscriptionCanceled, &now
-	inv, err := lf.engine.BillFinalOnImmediateCancel(lf.ctx, sub)
+	inv, err := lf.engine.BillFinalOnCancel(lf.ctx, sub)
 	if !errors.Is(err, domain.ErrAmountOverflow) {
 		t.Errorf("cancel err = %v (invoice %q), want ErrAmountOverflow", err, inv.ID)
 	}

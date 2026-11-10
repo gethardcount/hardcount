@@ -781,7 +781,7 @@ export default function InvoiceDetailPage() {
               {/* Drafts with a tax calculation can refresh it here. The
                   attention banner offers Retry tax only while tax is
                   pending/failed — but finalize also refuses a draft whose
-                  SUCCESSFUL calculation aged past the provider's 24h window,
+                  SUCCESSFUL calculation has expired at the provider (90 days),
                   with "retry tax to refresh, then finalize". That draft has
                   no banner, so without this item the toast names a remedy
                   the page nowhere offers. The server gates misuse: a fresh

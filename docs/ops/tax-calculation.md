@@ -22,7 +22,7 @@ One line is never taxed under any provider: a prepaid-commit purchase, where the
 
 If Stripe Tax fails, the invoice waits; Hardcount never falls back to a guessed rate ([what to do](#when-tax-cannot-be-worked-out)).
 
-**Switching away from Stripe Tax.** Invoices Stripe Tax already taxed stay Stripe's: when you void or credit one, Hardcount reverses its tax at Stripe, whatever provider is selected now. So keep Stripe connected until those invoices are settled, voided or credited. With Stripe disconnected, the reversal fails and is tried again until Stripe is connected.
+**Switching away from Stripe Tax.** Invoices Stripe Tax already taxed stay Stripe's, whatever provider is selected now: Hardcount still records their tax in Stripe's tax reports (a tax commit), and reverses it there when you void or credit one (a tax reversal). So keep Stripe connected until those invoices are settled, voided or credited. With Stripe disconnected, the commit or reversal fails and is tried again, with a wait between tries, until Stripe is connected.
 
 ### Manual (flat rate)
 
@@ -66,7 +66,9 @@ This happens only with Stripe Tax. The invoice waits: it is not issued, emailed 
 
 After 8 automatic tries, Hardcount stops and the notice says so. Click the notice's retry button to try again: **Retry now** when the provider could not be reached or Stripe is now connected, **Retry tax** otherwise.
 
-Stripe keeps a tax calculation for 24 hours, and Hardcount finalizes with one up to 23 hours old. When billing builds a subscription's invoice, a draft too, it records the calculation in Stripe's tax reports at once, so most drafts can wait. A draft whose calculation is not recorded cannot. That happens when Stripe failed at the moment billing built the draft, or when a retry worked the tax out. If such a draft waits more than 23 hours, for example because its subscription has collection paused, finalize answers `tax_calculation_expired`. Retry the tax (`POST /v1/invoices/{id}/retry-tax`), then finalize.
+Stripe keeps a tax calculation for 90 days, and Hardcount finalizes with one until 1 hour before it expires. When billing builds a subscription's invoice, a draft too, it records the calculation in Stripe's tax reports at once, so most drafts can wait. A draft whose calculation is not recorded can wait only until the calculation expires. That happens when Stripe failed at the moment billing built the draft, or when a retry worked the tax out. If such a draft waits that long, for example because its subscription has collection paused, finalize answers `tax_calculation_expired`. Retry the tax (`POST /v1/invoices/{id}/retry-tax`), then finalize.
+
+When a tax commit fails on a finalized invoice, Hardcount retries it until the calculation expires. The cause can last for days, such as a Stripe key that cannot write tax transactions, or a Stripe Tax incident. The tax is recorded after the cause is fixed, any time within the 90 days. Allow up to about a day after the fix: Stripe repeats its saved answer to a request, an error included, for 24 hours. After each failed try Hardcount waits before the next: an eighth of the time since the invoice was last written, at least 1 hour and at most 12 hours. The tax reversal of a voided invoice waits the same way. The invoice's `tax_next_retry_at` is the time of the next try. A commit made late is posted in Stripe's reporting period of the day it is made, not of the invoice's date, so tax for an invoice of one month can appear in the next month's report.
 
 With tax-inclusive pricing, the retry keeps the total at the sum of the line prices, and only the tax inside them follows the new calculation. A draft that v0.9.2 or earlier already refreshed is the exception: see the next section.
 
