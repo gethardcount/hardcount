@@ -354,7 +354,7 @@ func TestThresholdFire_vs_Close_ResetFalse_CloseFirst(t *testing.T) {
 // T5 — S3: immediate cancel holds the row while the fire arrives.
 // ---------------------------------------------------------------------------
 
-// TestImmediateCancel_vs_ThresholdFire_Concurrent: the cancel's transitionInTx
+// TestImmediateCancel_vs_ThresholdFire_Concurrent: the cancel's compare-and-set
 // X-locks the row from its first statement; the fire's CAS blocks behind it,
 // then re-evaluates against the committed row (status=canceled) → 0 rows. The
 // final-on-cancel invoice F bills [P0, tc); no T; the canceled sub keeps its
@@ -371,14 +371,14 @@ func TestImmediateCancel_vs_ThresholdFire_Concurrent(t *testing.T) {
 	}
 	done := make(chan fireOut, 1)
 	ctxCancel := r.at(r.tc)
-	if _, err := r.f.subStore.CancelAtomicWithBill(ctxCancel, r.f.tenantID, r.f.subID, func(tx *sql.Tx, canceled domain.Subscription) error {
+	if _, err := r.f.subStore.CancelAtomicWithBill(ctxCancel, r.f.tenantID, r.f.subID, subscription.SnapshotOf(r.sub(t)), r.tc, func(tx *sql.Tx, canceled domain.Subscription) error {
 		go func() {
 			fired, errs := r.fire.engine.ScanThresholds(r.at(r.t1), 50)
 			done <- fireOut{fired, errs}
 		}()
 		// The fire's CAS blocked behind the cancel's row lock.
 		testutil.WaitForLockWaiter(t, r.base, admin, "UPDATE subscriptions")
-		_, _, _, err := r.closer.engine.BillCancelTx(ctxCancel, tx, canceled)
+		_, _, _, err := r.closer.engine.BillCancelOnTx(ctxCancel, tx, canceled)
 		return err
 	}); err != nil {
 		t.Fatalf("cancel: %v", err)
@@ -802,8 +802,8 @@ func TestImmediateCancel_vs_BoundaryClose_NoDoubleBill(t *testing.T) {
 	r.closer.subs.beforeTx = func() {
 		r.closer.subs.beforeTx = nil
 		ctxCancel := r.at(r.tc)
-		if _, err := r.f.subStore.CancelAtomicWithBill(ctxCancel, r.f.tenantID, r.f.subID, func(tx *sql.Tx, canceled domain.Subscription) error {
-			_, _, _, err := r.fire.engine.BillCancelTx(ctxCancel, tx, canceled)
+		if _, err := r.f.subStore.CancelAtomicWithBill(ctxCancel, r.f.tenantID, r.f.subID, subscription.SnapshotOf(r.sub(t)), r.tc, func(tx *sql.Tx, canceled domain.Subscription) error {
+			_, _, _, err := r.fire.engine.BillCancelOnTx(ctxCancel, tx, canceled)
 			return err
 		}); err != nil {
 			t.Fatalf("cancel: %v", err)

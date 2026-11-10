@@ -591,3 +591,7 @@ on real Postgres:
   both abort one side.
 - `TestCancel_TaxCallHoldsNoNumberRowOrCreditNoteLock`: neither lock is held
   during the final invoice's tax call.
+
+## Amendment 2026-11-10: the cancel's relief is planned before its transaction
+
+The cancel's relief is now planned before the cancel's transaction (`planRelief`: the funding invoices, which to void, each one's room) and written in it (`writeReliefTx`), in the same order as before: voids, the credit-note locks of every invoice it credits, the drafts, then the final invoice's number. What the plan read is proved under those locks, as before: `VoidUnchangedTx` and the room re-check under each invoice's credit-note lock. The cross-interval swap still plans and writes in one call (`BillOnPlanSwapDraftsTx`) until P1-23 PR-2; `swap_requires_atomic_path`, named above, is unchanged ([ADR-139](139-cancel-prices-before-its-transaction.md)).

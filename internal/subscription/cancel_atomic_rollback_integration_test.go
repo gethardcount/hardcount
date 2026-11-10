@@ -53,7 +53,7 @@ func TestCancelAtomicWithBill_BillFailure_RealTxRollsBackCancel(t *testing.T) {
 
 	billErr := errors.New("simulated in-tx final-on-cancel bill failure")
 	billFnCalled := false
-	_, err = store.CancelAtomicWithBill(ctx, tenantID, created.ID, func(tx *sql.Tx, canceled domain.Subscription) error {
+	_, err = store.CancelAtomicWithBill(ctx, tenantID, created.ID, SnapshotOf(created), time.Now().UTC(), func(tx *sql.Tx, canceled domain.Subscription) error {
 		billFnCalled = true
 		if canceled.Status != domain.SubscriptionCanceled {
 			t.Errorf("billFn should see the in-tx-canceled sub; status=%q", canceled.Status)

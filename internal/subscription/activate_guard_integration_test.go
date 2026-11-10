@@ -77,7 +77,7 @@ func TestActivate_StoreUpdate_GuardsAgainstConcurrentCancel(t *testing.T) {
 	// Guard: a draft canceled out-of-band (the TOCTOU window between Activate's Get and
 	// this write) must NOT be resurrected to active.
 	raced := newDraft("sub-act-raced")
-	if _, err := store.CancelAtomic(ctx, tenantID, raced.ID); err != nil {
+	if _, err := cancelNow(ctx, store, tenantID, raced.ID); err != nil {
 		t.Fatalf("cancel the draft: %v", err)
 	}
 	if _, err := store.ActivateDraftWithBill(ctx, tenantID, raced.ID, at, at, pe, 1, nil); err == nil {

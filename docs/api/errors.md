@@ -100,7 +100,7 @@ decide.
 |---|---|---|
 | `already_exists` | A value that must be unique is taken, such as a customer's `external_id`. `param` names it. | Use another value, or read the one that exists |
 | `invalid_state` | The resource is in the wrong state for this action, such as advancing a test clock that is still advancing | Read it, wait or change it, then try again |
-| `concurrent_change` | Postgres stopped the request because of another change to the same records: it broke a deadlock, or it ended the request's wait for a lock. Only the routes listed below answer it. | Send the same request again. With an `Idempotency-Key`, the same key works. Some steps stay done (below). |
+| `concurrent_change` | Another change to the same records stopped the request: Postgres broke a deadlock or ended the request's wait for a lock, or, for a cancel, the subscription changed twice while the cancel priced it. Only the routes listed below answer it. | Send the same request again. With an `Idempotency-Key`, the same key works. Some steps stay done (below). |
 | `already_bootstrapped` | `POST /v1/bootstrap` after the first account exists | Do not retry |
 
 These routes answer `concurrent_change`:
@@ -116,6 +116,12 @@ Postgres ends a wait for a lock only when a `lock_timeout` is set, for
 example on the database user Hardcount runs as. On any other route or step,
 a deadlock or an ended lock wait answers `500` `internal_error`, which an
 `Idempotency-Key` stores ([Idempotency](idempotency.md)).
+
+A cancel prices its final invoice before it writes anything. When the
+subscription changes in that time (a billing period closes, a spend-threshold
+invoice is issued or voided, an item changes), the cancel writes nothing and
+prices once more on its own. If the subscription changes again, the cancel
+answers `concurrent_change` and the subscription is not canceled.
 
 After `concurrent_change`, a step that the request saved on its own before
 Postgres stopped it stays done. The routes not listed here save nothing

@@ -2441,7 +2441,19 @@ func (e *Engine) billSubscription(ctx context.Context, sub domain.Subscription, 
 				// cancellation. The producer always wires the executor.
 				return count, fmt.Errorf("due mid-period cancel_at on %s but no ScheduledCancelExecutor wired", sub.ID)
 			}
-			if err := e.cancelExecutor.FireDueScheduledCancel(ctx, sub.TenantID, sub.ID, *sub.CancelAt); err != nil {
+			err := e.cancelExecutor.FireDueScheduledCancel(ctx, sub.TenantID, sub.ID, *sub.CancelAt)
+			if errors.Is(err, subscription.ErrWatermarkMoved) {
+				// The subscription changed while the cancel was priced, before
+				// its transaction (ADR-139); nothing was written. Re-read once
+				// and fire again, as for a period close below. A second miss
+				// leaves it due for the next fetch (errStillDue).
+				if movedRetry {
+					return count, nil
+				}
+				movedRetry = true
+				continue
+			}
+			if err != nil {
 				return count, fmt.Errorf("fire due mid-period cancel %s: %w", sub.ID, err)
 			}
 			// Terminal: the sub is canceled (or a benign race already
@@ -3706,7 +3718,7 @@ func (e *Engine) FinalizeOnCreateInvoice(ctx context.Context, sub domain.Subscri
 	// The finalize AUDIT row and invoice.finalized rode the invoice-create tx
 	// (ADR-090, ADR-040): the coordinator-tx callers (BillOnCreateTx, the
 	// cross-interval swap through BillOnPlanSwapTx, the cancel through
-	// BillCancelTx) emit it on the coordinator tx; the invoice
+	// PlanCancelBill's writer) emit it on the coordinator tx; the invoice
 	// store queues the event on the same tx. So this post-commit path runs
 	// only the external, best-effort effects — tax commit, auto-charge — none
 	// of which may ride a DB tx.
@@ -3728,52 +3740,102 @@ func (e *Engine) FinalizeOnCreateInvoice(ctx context.Context, sub domain.Subscri
 	e.CollectInvoice(ctx, sub.TenantID, inv.ID, nil)
 }
 
-// BillCancelTx writes a cancel's final invoice and its relief on the cancel's
-// transaction (ADR-056, ADR-118), so a failure of either rolls the cancel
-// back. It runs three steps, in this order:
-//  1. Price the final invoice: lines and tax. Nothing is written and no
-//     tenant-wide lock is taken, so the tax call (a network call for a Stripe
-//     Tax tenant) holds up no other invoice or credit note.
-//  2. Write the relief (BillOnCancelDraftsTx). It takes the credit-note lock
-//     of each invoice it credits, then the tenant's number row for each note.
-//  3. Number and insert the final invoice, which takes the number row again.
+// PlanCancelBill prices a cancel's final invoice and plans its relief, with no
+// transaction open (ADR-139). sub is the row the cancel read; at is the cancel
+// instant, which becomes canceled_at. The plan is priced from sub as canceled
+// at at. It reads the threshold watermark, the lines and their usage, and
+// calls the tax provider: a network call for a Stripe Tax tenant. The relief
+// is planned last, right before the caller opens its transaction, so the room
+// it reads on each funding invoice is as fresh as it can be.
+//
+// It refuses (InvalidState, code unbilled_period) a cancel at or after
+// current_period_end: that period ended unbilled, and no billing run bills a
+// canceled subscription. An error names the step that failed (the final
+// invoice or the relief).
+//
+// The writer it returns writes the plan on the caller's transaction, after
+// the caller's compare-and-set has proved the period and its own checks have
+// proved the items (see writePlanned). inv is empty when there is nothing to
+// bill. Neither write applies credits: after commit the caller runs
+// afterCommit, then FinishRelief, then FinalizeOnCreateInvoice. afterCommit
+// counts the usage the invoice left unpriced (#981), which a cancel that rolls
+// back and runs again must not count twice (ADR-119).
+func (e *Engine) PlanCancelBill(ctx context.Context, sub domain.Subscription, at time.Time) (subscription.BillWriter, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return nil, err
+	}
+	ctx, span := startFinalOnCancelSpan(ctx, "billing.PlanCancelBill", sub)
+	defer span.End()
+
+	canceled := sub
+	canceled.Status = domain.SubscriptionCanceled
+	canceled.CanceledAt = &at
+	unpriced := unpricedUsage{}
+	final, err := e.priceFinalOnCancel(ctx, canceled, unpriced)
+	if err != nil {
+		return nil, fmt.Errorf("final-on-cancel invoice: %w", err)
+	}
+	relief, err := e.planCancelRelief(ctx, canceled)
+	if err != nil {
+		return nil, fmt.Errorf("cancel proration relief: %w", err)
+	}
+	return func(ctx context.Context, tx *sql.Tx, locked domain.Subscription) (domain.Invoice, domain.Relief, func(), error) {
+		inv, r, err := e.writePlanned(ctx, tx, locked, final, relief)
+		if err != nil {
+			return domain.Invoice{}, domain.Relief{}, nil, err
+		}
+		return inv, r, func() { unpriced.record(live, canceled) }, nil
+	}, nil
+}
+
+// writePlanned writes a planned final invoice and relief on tx, the cancel's
+// transaction, after its compare-and-set (ADR-139). locked is the row that
+// statement returned. In this order:
+//  1. The threshold watermark, read again on tx and held FOR KEY SHARE. A
+//     fire or a void that committed since the plan read it answers
+//     subscription.ErrWatermarkMoved, and nothing is written. A void that
+//     comes after this read waits for the commit, and the window it covered
+//     is forgiven (ADR-066 amendment 2026-10-23).
+//  2. The relief (writeReliefTx). It takes the credit-note lock of each
+//     invoice it credits, then the tenant's number row for each note.
+//  3. The final invoice: its number, the insert, the finalize audit row and
+//     the usage-below-zero row. Its status follows the collection pause of
+//     locked, not of the row the plan read.
 //
 // The relief comes before the invoice number because every credit-note
 // writer takes an invoice's credit-note lock before the number row. Holding
 // the number row while asking for a credit-note lock deadlocks with a credit
-// note on that invoice (ADR-118 amendment 2026-11-09).
-//
-// inv is empty when there is nothing to bill. Neither write applies credits:
-// after commit the caller runs FinishRelief, then FinalizeOnCreateInvoice.
-// afterCommit is never nil, and the caller runs it only once tx commits. It
-// counts the usage the invoice left unpriced (#981), which a cancel retried
-// after a rollback must not count twice (ADR-119).
-func (e *Engine) BillCancelTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (inv domain.Invoice, r domain.Relief, afterCommit func(), err error) {
-	afterCommit = func() {}
-	live, err := postgres.Livemode(ctx)
+// note on that invoice (ADR-118 amendment 2026-11-09). Nothing here calls a
+// provider or reads off tx.
+func (e *Engine) writePlanned(ctx context.Context, tx *sql.Tx, locked domain.Subscription, final finalOnCancel, relief reliefPlan) (domain.Invoice, domain.Relief, error) {
+	if final.watermarkRead {
+		var current *time.Time
+		wm, err := e.invoices.GetLatestThresholdInvoiceForCycleTx(ctx, tx, locked.TenantID, locked.ID, final.periodStart, final.periodEnd)
+		switch {
+		case err == nil:
+			end := wm.BillingPeriodEnd
+			current = &end
+		case !errors.Is(err, errs.ErrNotFound):
+			return domain.Invoice{}, domain.Relief{}, fmt.Errorf("final-on-cancel invoice: re-read threshold watermark: %w", err)
+		}
+		if !sameInstant(current, final.builtAgainst) {
+			return domain.Invoice{}, domain.Relief{}, subscription.ErrWatermarkMoved
+		}
+	}
+	r, err := e.writeReliefTx(ctx, tx, locked, relief)
 	if err != nil {
-		return domain.Invoice{}, domain.Relief{}, afterCommit, err
+		return domain.Invoice{}, domain.Relief{}, fmt.Errorf("cancel proration relief: %w", err)
 	}
-	ctx, span := startFinalOnCancelSpan(ctx, "billing.BillCancelTx", sub)
-	defer span.End()
-	unpriced := unpricedUsage{}
-	afterCommit = func() { unpriced.record(live, sub) }
-
-	p, err := e.priceFinalOnCancel(ctx, tx, sub, unpriced)
+	inv, err := e.writeFinalOnCancel(ctx, tx, locked, final)
 	if err != nil {
-		return domain.Invoice{}, domain.Relief{}, afterCommit, fmt.Errorf("final-on-cancel invoice: %w", err)
+		return domain.Invoice{}, domain.Relief{}, fmt.Errorf("final-on-cancel invoice: %w", err)
 	}
-	if r, err = e.BillOnCancelDraftsTx(ctx, tx, sub); err != nil {
-		return domain.Invoice{}, domain.Relief{}, afterCommit, fmt.Errorf("cancel proration relief: %w", err)
-	}
-	if inv, err = e.writeFinalOnCancel(ctx, tx, sub, p); err != nil {
-		return domain.Invoice{}, domain.Relief{}, afterCommit, fmt.Errorf("final-on-cancel invoice: %w", err)
-	}
-	return inv, r, afterCommit, nil
+	return inv, r, nil
 }
 
-// startFinalOnCancelSpan starts the trace span for billing a cancel: its final
-// invoice and its relief (BillCancelTx).
+// startFinalOnCancelSpan starts the trace span for planning a cancel: its
+// final invoice and its relief (PlanCancelBill).
 func startFinalOnCancelSpan(ctx context.Context, name string, sub domain.Subscription) (context.Context, trace.Span) {
 	return telemetry.Tracer("billing").Start(ctx, name,
 		trace.WithAttributes(
@@ -3807,7 +3869,8 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 	// partial period [periodStart, canceledAt]. in_advance items are
 	// explicitly skipped — their base for the just-canceled period
 	// was already paid at period start (BillOnCreate or prior cycle),
-	// and the unused portion is relieved by BillOnCancelDraftsTx.
+	// and the unused portion is relieved by the cancel's relief
+	// (planCancelRelief).
 	//
 	// Segment-aware: if the customer changed plan or quantity (or
 	// added/removed an item) between periodStart and canceledAt, each
@@ -3944,8 +4007,15 @@ const (
 // finalOnCancel is a cancel's final invoice as priceFinalOnCancel priced it:
 // what writeFinalOnCancel needs, with nothing written yet.
 type finalOnCancel struct {
-	kind            finalOnCancelKind
+	kind finalOnCancelKind
+	// watermarkRead is set once the threshold watermark was read, and
+	// builtAgainst is the instant it gave (nil: no fire this period).
+	// writePlanned reads it again on the cancel's transaction over
+	// [periodStart, periodEnd) and requires the same instant.
+	watermarkRead   bool
+	builtAgainst    *time.Time
 	periodStart     time.Time
+	periodEnd       time.Time
 	canceledAt      time.Time
 	billingLoc      *time.Location
 	netDays         int
@@ -3958,11 +4028,12 @@ type finalOnCancel struct {
 }
 
 // priceFinalOnCancel runs the guards of a cancel's final invoice and prices
-// it: the threshold watermark, the lines and the tax. It writes nothing and
-// takes neither the tenant's number row nor a credit-note lock. It reads the
-// watermark on tx, the cancel's transaction. It refuses (InvalidState, code
-// unbilled_period) a cancel at or after current_period_end.
-func (e *Engine) priceFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.Subscription, unpriced unpricedUsage) (finalOnCancel, error) {
+// it: the threshold watermark, the lines and the tax. sub is the row as the
+// cancel will write it (status canceled, canceled_at set). It writes nothing,
+// takes no lock and runs on no transaction: PlanCancelBill calls it before
+// the cancel opens one. It refuses (InvalidState, code unbilled_period) a
+// cancel at or after current_period_end.
+func (e *Engine) priceFinalOnCancel(ctx context.Context, sub domain.Subscription, unpriced unpricedUsage) (finalOnCancel, error) {
 	p := finalOnCancel{}
 
 	if sub.Status != domain.SubscriptionCanceled {
@@ -4010,8 +4081,8 @@ func (e *Engine) priceFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.
 	// is refused and rolls back. subscription.Service.Cancel closes ended
 	// periods before it gets here; this stops the cancel when that close
 	// could not run (billing failing, a deadline mid catch-up, a boundary
-	// crossed in between). sub is the row the cancel's own UPDATE returned,
-	// so nothing can move the period between this check and the commit.
+	// crossed in between). sub is the row the cancel read; the cancel's
+	// compare-and-set proves its period is still the row's when it writes.
 	if !canceledAt.Before(periodEnd) {
 		next := "retry billing for this subscription, then cancel again"
 		if sub.TestClockID != "" {
@@ -4032,16 +4103,18 @@ func (e *Engine) priceFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.
 	// as with no fire (a fire bills no base), except behind a fire made
 	// before that change, which billed it in full.
 	//
-	// Read on the cancel's tx: after the cancel's UPDATE locked the
-	// subscription, and holding the threshold invoice FOR KEY SHARE until
-	// the cancel commits. A void of that invoice after this read then
-	// lands after the final invoice and the window is forgiven; a void that
-	// commits first is seen here, and the final invoice bills the window
+	// Read before the cancel's transaction. writePlanned reads it again on
+	// that transaction, after the compare-and-set, and holds the threshold
+	// invoice FOR KEY SHARE until the commit. A fire or a void that commits
+	// in between is seen there, and the cancel is priced again. A void after
+	// that read lands after the final invoice and the window is forgiven
 	// (ADR-066 amendment 2026-10-23).
-	wm, err := e.loadThresholdWatermarkTx(ctx, tx, sub.TenantID, sub.ID, periodStart, periodEnd)
+	wm, err := e.loadThresholdWatermark(ctx, sub.TenantID, sub.ID, periodStart, periodEnd)
 	if err != nil {
 		return finalOnCancel{}, err
 	}
+	p.watermarkRead, p.builtAgainst = true, wm.billedThrough
+	p.periodStart, p.periodEnd = periodStart, periodEnd
 
 	// Resolve plans for every item — needed for in_arrears proration
 	// math, currency resolution, and usage-meter discovery.
@@ -4112,9 +4185,10 @@ func (e *Engine) priceFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.
 
 // writeFinalOnCancel writes on tx, the cancel's transaction, what
 // priceFinalOnCancel priced: the invoice with its number, finalize audit row
-// and usage-below-zero row, or, for a zero subtotal, only that row. It leaves
-// the tax commit and collection to the caller's post-commit
-// FinalizeOnCreateInvoice.
+// and usage-below-zero row, or, for a zero subtotal, only that row. sub is the
+// row the cancel's compare-and-set locked; the invoice takes its collection
+// pause from it. It leaves the tax commit and collection to the caller's
+// post-commit FinalizeOnCreateInvoice.
 func (e *Engine) writeFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.Subscription, p finalOnCancel) (domain.Invoice, error) {
 	// Usage below zero billed 0 (#1193). Its row rides tx, the transaction
 	// that makes this decision final.
@@ -4150,7 +4224,9 @@ func (e *Engine) writeFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.
 		// Tax-deferred + pause-collection gate (matches billOnePeriod).
 		// Pre-fix this path hardcoded Finalized regardless of tax;
 		// invoices with tax_status=pending finalized with
-		// TaxAmountCents=0, lying about authoritative amounts.
+		// TaxAmountCents=0, lying about authoritative amounts. The pause
+		// is the locked row's: one set while the cancel was priced holds
+		// this invoice too.
 		Status:        domain.InvoiceFinalizationStatus(taxApp.TaxStatus, sub.PauseCollection, p.canceledAt),
 		PaymentStatus: domain.PaymentPending,
 		Currency:      p.invoiceCurrency,
@@ -4314,27 +4390,25 @@ func (e *Engine) prepareCancelCredit(ctx context.Context, sub domain.Subscriptio
 	}, true, nil
 }
 
-// BillOnCancelDraftsTx writes the cancel-proration relief on the caller's
-// cancel *sql.Tx (ADR-057, completed by ADR-118): every funding share, paid or
-// unpaid, so the relief commits — or rolls back — with the cancel. Any error
-// rolls the cancel back: never a canceled subscription whose relief was lost.
-// The caller runs FinishRelief after commit.
-//
-// BillCancelTx calls it after pricing the final invoice and before numbering
-// it: the relief's credit-note locks come before the tenant's number row.
-func (e *Engine) BillOnCancelDraftsTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (domain.Relief, error) {
+// planCancelRelief plans the cancel-proration relief (ADR-057, completed by
+// ADR-118) from sub, the row as the cancel will write it, with no transaction
+// open. writePlanned writes it on the cancel's transaction: every funding
+// share, paid or unpaid, so the relief commits, or rolls back, with the
+// cancel. Any error rolls the cancel back: never a canceled subscription whose
+// relief was lost. The caller runs FinishRelief after commit.
+func (e *Engine) planCancelRelief(ctx context.Context, sub domain.Subscription) (reliefPlan, error) {
 	in, ok, err := e.prepareCancelCredit(ctx, sub)
 	if err != nil {
-		return domain.Relief{}, err // malformed sub or plan lookup failure → roll the cancel back
+		return reliefPlan{}, err // malformed sub or plan lookup failure → roll the cancel back
 	}
 	if !ok {
-		return domain.Relief{}, nil // nothing to credit
+		return reliefPlan{}, nil // nothing to credit
 	}
-	return e.reliefTx(ctx, tx, sub, in, "subscription_cancellation", "cancel proration")
+	return e.planRelief(ctx, sub, in, "subscription_cancellation", "cancel proration")
 }
 
 // BillOnPlanSwapDraftsTx is the ATOMIC half of the cross-interval plan-swap
-// refund — the same folded-write shape as BillOnCancelDraftsTx (deferred
+// refund — the same folded-write shape as the cancel's relief (deferred
 // Bug B, closed 2026-07-05). Pre-fix the ENTIRE swap refund ran post-commit
 // on the request ctx: a crash or disconnect
 // between the swap commit and the refund permanently lost the customer's
@@ -4350,6 +4424,11 @@ func (e *Engine) BillOnCancelDraftsTx(ctx context.Context, tx *sql.Tx, sub domai
 // the swap tx, and any error rolls the whole swap back (never a swapped sub
 // with a silently-lost refund). sub is the PRE-swap snapshot; at is the swap
 // instant.
+//
+// It plans the relief and writes it in one call, while the swap's
+// transaction is open, so the plan's reads run on other connections while
+// the swap holds its locks. The cancel plans before its transaction
+// (PlanCancelBill); the swap still does both here.
 func (e *Engine) BillOnPlanSwapDraftsTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription, at time.Time) (domain.Relief, error) {
 	in, ok, err := e.prepareSwapCredit(ctx, sub, at)
 	if err != nil {
@@ -4358,7 +4437,11 @@ func (e *Engine) BillOnPlanSwapDraftsTx(ctx context.Context, tx *sql.Tx, sub dom
 	if !ok {
 		return domain.Relief{}, nil // nothing to credit (in_arrears, boundary swap)
 	}
-	return e.reliefTx(ctx, tx, sub, in, "subscription_plan_change", "plan-swap refund")
+	p, err := e.planRelief(ctx, sub, in, "subscription_plan_change", "plan-swap refund")
+	if err != nil {
+		return domain.Relief{}, err
+	}
+	return e.writeReliefTx(ctx, tx, sub, p)
 }
 
 // prepareSwapCredit mirrors prepareCancelCredit for the mid-period plan
@@ -4399,29 +4482,48 @@ func (e *Engine) prepareSwapCredit(ctx context.Context, sub domain.Subscription,
 	}, true, nil
 }
 
-// reliefTx is the shared in-tx trunk of BillOnCancelDraftsTx and
-// BillOnPlanSwapDraftsTx: funding lookup → allocation → one write per share on
-// the caller's tx. what labels log lines ("cancel proration" / "plan-swap
-// refund").
+// reliefPlan is a relief as planRelief planned it, with nothing written:
+// the invoices to void, each as it was read, and the credit-note share of
+// each invoice to credit. The zero value relieves nothing.
+type reliefPlan struct {
+	// reason is the credit notes' reason; what labels log lines and errors
+	// ("cancel proration" / "plan-swap refund").
+	reason, what string
+	desc         string
+	voids        []domain.Invoice
+	shares       []domain.CreditShare
+	uncredited   int64
+}
+
+// planRelief is the read half of a cancel's or a swap's relief: funding
+// lookup → which invoices to void → allocation of the rest. It reads off any
+// transaction and writes nothing; writeReliefTx writes the plan.
 //
-// Every share is written here, paid or unpaid (ADR-118). Until then an UNPAID
+// Every share is written, paid or unpaid (ADR-118). Until then an UNPAID
 // funding source sent the whole relief to a post-commit path whose failure was
 // only logged — the cancel or swap stood and the customer's relief was lost,
 // with no retry. Any error now rolls the change back; callers retry (dunning
 // and the scheduled-cancel scan do it on their own).
-func (e *Engine) reliefTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription, in cancelCreditInputs, reason, what string) (domain.Relief, error) {
+//
+// What the plan read is proved under the locks writeReliefTx takes: a void
+// requires the invoice unchanged (VoidUnchangedTx), and each draft re-checks
+// its invoice's room under that invoice's credit-note lock
+// (CreateAdjustmentDraftTx). A payment, a void or a credit note that lands
+// after the plan therefore rolls the change back (invoice_changed, a cap
+// refusal) and it is retried, or the note fits the room left.
+func (e *Engine) planRelief(ctx context.Context, sub domain.Subscription, in cancelCreditInputs, reason, what string) (reliefPlan, error) {
+	p := reliefPlan{reason: reason, what: what, desc: in.Desc}
 	sources, err := e.invoices.FindFundingInvoicesForPeriod(ctx, sub.TenantID, sub.ID, in.PeriodStart, in.PeriodEnd)
 	if errors.Is(err, errs.ErrNotFound) {
 		// No in_advance invoice funded this period (e.g. trial cancel) — nothing to relieve.
 		slog.InfoContext(ctx, what+": no in_advance invoice for period; no relief to apply",
 			"subscription_id", sub.ID, "customer_id", sub.CustomerID, "period_start", in.PeriodStart)
-		return domain.Relief{}, nil
+		return reliefPlan{}, nil
 	}
 	if err != nil {
-		return domain.Relief{}, fmt.Errorf("%s: look up funding invoices: %w", what, err)
+		return reliefPlan{}, fmt.Errorf("%s: look up funding invoices: %w", what, err)
 	}
 
-	var r domain.Relief
 	// An unpaid source whose whole window is unused (zero used days at the
 	// relief math's day granularity — the change lands on its period start's
 	// day), with nothing paid and no charge in flight, is
@@ -4445,72 +4547,93 @@ func (e *Engine) reliefTx(ctx context.Context, tx *sql.Tx, sub domain.Subscripti
 		if voidable {
 			voidable, err = e.onlyPrepaidBase(ctx, sub.TenantID, src, in.PeriodStart)
 			if err != nil {
-				return domain.Relief{}, fmt.Errorf("%s: read lines of %s: %w", what, src.ID, err)
+				return reliefPlan{}, fmt.Errorf("%s: read lines of %s: %w", what, src.ID, err)
 			}
 		}
 		if voidable {
-			voided, verr := e.invoiceVoider.VoidUnchangedTx(ctx, tx, sub.TenantID, src)
-			if verr != nil {
-				return domain.Relief{}, fmt.Errorf("%s: void fully-unused %s: %w", what, src.ID, verr)
-			}
-			r.Voided = append(r.Voided, voided)
+			p.voids = append(p.voids, src)
 			totalUnused = max(0, totalUnused-src.SubtotalCents)
 			continue
 		}
 		allocate = append(allocate, src)
 	}
 	if len(allocate) == 0 || totalUnused <= 0 {
-		return r, nil
+		return p, nil
 	}
 
 	// One crediting rule (ADR-118, amended 2026-10-22): the newest charging
 	// invoice first, each capped at its room. The headroom read MUST stay off
-	// this tx: it counts drafts, so an on-tx read would let this change's own
-	// drafts shrink their room. CreateAdjustmentDraftTx re-checks the cap
-	// under the invoice lock.
+	// the change's tx: it counts drafts, so an on-tx read would let this
+	// change's own drafts shrink their room. CreateAdjustmentDraftTx re-checks
+	// the cap under the invoice lock.
 	credited := make(map[string]int64, len(allocate))
 	for _, src := range allocate {
 		c, cerr := e.creditHeadroom.CreditedCents(ctx, sub.TenantID, src.ID)
 		if cerr != nil {
-			return domain.Relief{}, fmt.Errorf("%s: read creditable headroom for %s: %w", what, src.ID, cerr)
+			return reliefPlan{}, fmt.Errorf("%s: read creditable headroom for %s: %w", what, src.ID, cerr)
 		}
 		credited[src.ID] = c
 	}
 	shares, unplaced := domain.AllocateUnusedCredit(allocate, credited, "", totalUnused)
 	// What did not fit is not owed (every invoice is credited up to its total,
 	// or relieved of all it asks for); the change records it.
-	r.UncreditedCents = unplaced
+	p.uncredited = unplaced
 	// A draft whose tax is not settled has no final total to size its note
 	// against: refuse, so the change is retried once the tax retry resolves it
 	// (normally minutes) rather than relieving a wrong amount.
 	if src, pending := domain.TaxPendingShare(allocate, shares); pending {
-		return domain.Relief{}, errs.InvalidState(fmt.Sprintf(
+		return reliefPlan{}, errs.InvalidState(fmt.Sprintf(
 			"%s: funding invoice %s is a draft whose tax is still %s; retry once it is calculated", what, src.ID, src.TaxStatus)).
 			WithCode("funding_invoice_tax_pending")
 	}
+	p.shares = shares
+	return p, nil
+}
 
-	shareIDs := make([]string, 0, len(shares))
-	for _, sh := range shares {
+// writeReliefTx is the write half of a relief: it writes p on tx, the
+// change's transaction, in this order, and reads nothing off tx:
+//  1. Void each invoice p voids. VoidUnchangedTx locks its row and refuses
+//     (invoice_changed) when it is no longer the invoice planRelief read.
+//  2. Take the credit-note lock of every invoice p credits, in one call,
+//     before the first draft numbers a note.
+//  3. Write one issue_pending credit-note draft per share.
+//
+// Any error rolls the change back.
+func (e *Engine) writeReliefTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription, p reliefPlan) (domain.Relief, error) {
+	r := domain.Relief{UncreditedCents: p.uncredited}
+	for _, src := range p.voids {
+		voided, err := e.invoiceVoider.VoidUnchangedTx(ctx, tx, sub.TenantID, src)
+		if err != nil {
+			return domain.Relief{}, fmt.Errorf("%s: void fully-unused %s: %w", p.what, src.ID, err)
+		}
+		r.Voided = append(r.Voided, voided)
+	}
+	if len(p.shares) == 0 {
+		return r, nil
+	}
+
+	shareIDs := make([]string, 0, len(p.shares))
+	for _, sh := range p.shares {
 		shareIDs = append(shareIDs, sh.InvoiceID)
 	}
 	if err := e.creditNoteAdjuster.LockInvoicesForDraftsTx(ctx, tx, sub.TenantID, shareIDs); err != nil {
-		return domain.Relief{}, fmt.Errorf("%s: lock funding invoices: %w", what, err)
+		return domain.Relief{}, fmt.Errorf("%s: lock funding invoices: %w", p.what, err)
 	}
-	for _, sh := range shares {
+	for _, sh := range p.shares {
 		// A credit-note cap rejection here (a concurrent operator credit note
-		// shrank the source's headroom after the off-tx CreditedCents read)
-		// rolls the change back too; the retry re-reads the smaller headroom.
-		// A draft or in-flight source gets its note too: Issue holds it until
-		// the invoice is finalized or the charge settles (and voids it if the
-		// source is voided instead).
-		cn, cerr := e.creditNoteAdjuster.CreateAdjustmentDraftTx(ctx, tx, sub.TenantID, sh.InvoiceID, sh.GrossCents, reason, in.Desc)
-		if cerr != nil {
-			return domain.Relief{}, fmt.Errorf("%s: credit-note draft on %s: %w", what, sh.InvoiceID, cerr)
+		// shrank the source's headroom after planRelief read it) rolls the
+		// change back too; the retry re-reads the smaller headroom. A draft or
+		// in-flight source gets its note too: Issue holds it until the invoice
+		// is finalized or the charge settles (and voids it if the source is
+		// voided instead).
+		cn, err := e.creditNoteAdjuster.CreateAdjustmentDraftTx(ctx, tx, sub.TenantID, sh.InvoiceID, sh.GrossCents, p.reason, p.desc)
+		if err != nil {
+			return domain.Relief{}, fmt.Errorf("%s: credit-note draft on %s: %w", p.what, sh.InvoiceID, err)
 		}
 		r.DraftIDs = append(r.DraftIDs, cn.ID)
 		if sh.ToBalance {
 			if r.CreditedCents, err = addCents(r.CreditedCents, sh.GrossCents); err != nil {
-				return domain.Relief{}, fmt.Errorf("%s: credited total: %w", what, err)
+				return domain.Relief{}, fmt.Errorf("%s: credited total: %w", p.what, err)
 			}
 		}
 	}

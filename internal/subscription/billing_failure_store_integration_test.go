@@ -11,6 +11,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/pricing"
 	"github.com/gethardcount/hardcount/internal/subscription"
+	"github.com/gethardcount/hardcount/internal/subscription/subscriptiontest"
 )
 
 func (s *bfSeed) record(id string, w subscription.BillingFailureWrite) bool {
@@ -242,8 +243,8 @@ func TestDueInstantWriters_VoidOrKeepTheRecord(t *testing.T) {
 			return err
 		}, false},
 		// --- void: the row leaves active/trialing; the columns stay as evidence ---
-		{"CancelAtomic", parked(bfRow{nextBilling: due}, due), func(id string) error {
-			_, err := s.store.CancelAtomic(s.ctx, s.tenantID, id)
+		{"CancelAtomicWithBill", parked(bfRow{nextBilling: due}, due), func(id string) error {
+			_, err := subscriptiontest.Cancel(s.ctx, s.store, s.tenantID, id)
 			return err
 		}, false},
 		{"FireScheduledCancellationTx", parked(bfRow{nextBilling: due}, due), func(id string) error {
@@ -254,7 +255,7 @@ func TestDueInstantWriters_VoidOrKeepTheRecord(t *testing.T) {
 			})
 		}, false},
 		{"FireScheduledCancellationWithBill", parked(bfRow{nextBilling: future, cancelAt: &cancelDue}, cancelDue), func(id string) error {
-			_, err := s.store.FireScheduledCancellationWithBill(s.ctx, s.tenantID, id, cancelDue, nil)
+			_, err := s.store.FireScheduledCancellationWithBill(s.ctx, s.tenantID, id, subscription.SnapshotOf(s.get(id)), cancelDue, nil)
 			return err
 		}, false},
 		{"CancelAtTrialEnd", parked(bfRow{status: "trialing", nextBilling: due, trialEnd: &trialEnd, cancelAt: &trialEnd}, due), func(id string) error {

@@ -215,7 +215,9 @@ func snapshotMatches(s domain.Subscription, expected PeriodSnapshot) bool {
 	return s.Status == expected.Status && sameTime(s.CurrentBillingPeriodStart, expected.Start) && sameTime(s.NextBillingAt, expected.Next)
 }
 
-func (m *memStore) cancelAtomic(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
+// cancelAtomic mirrors the store's compare-and-set: a canceled row is
+// already terminated, and any other row must still hold expected.
+func (m *memStore) cancelAtomic(tenantID, id string, expected PeriodSnapshot, at time.Time) (domain.Subscription, error) {
 	s, ok := m.subs[id]
 	if !ok || s.TenantID != tenantID {
 		return domain.Subscription{}, errs.ErrNotFound
@@ -223,12 +225,25 @@ func (m *memStore) cancelAtomic(ctx context.Context, tenantID, id string) (domai
 	if s.Status == domain.SubscriptionCanceled {
 		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("cannot cancel %s subscription (already terminated)", s.Status))
 	}
-	now := clock.Now(ctx)
+	if !snapshotMatches(s, expected) {
+		return domain.Subscription{}, ErrWatermarkMoved
+	}
 	s.Status = domain.SubscriptionCanceled
-	s.CanceledAt = &now
-	s.UpdatedAt = now
+	s.CanceledAt = &at
+	s.UpdatedAt = at
 	m.subs[id] = s
+	s.Items = m.hydrateItems(id)
 	return s, nil
+}
+
+// The memory store keeps no billing intervals: both reads find none, so a
+// cancel's interval check always passes here.
+func (m *memStore) ListItemIntervals(context.Context, string, string) ([]domain.ItemInterval, error) {
+	return nil, nil
+}
+
+func (m *memStore) ListItemIntervalsTx(context.Context, *sql.Tx, string) ([]domain.ItemInterval, error) {
+	return nil, nil
 }
 
 // retireLiveOnlyState mirrors the store's retireLiveOnlyStateTx: the last
@@ -250,9 +265,9 @@ func (m *memStore) retireLiveOnlyState(id string) domain.Subscription {
 	return s
 }
 
-func (m *memStore) CancelAtomicWithBill(ctx context.Context, tenantID, id string, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error) {
+func (m *memStore) CancelAtomicWithBill(_ context.Context, tenantID, id string, expected PeriodSnapshot, at time.Time, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error) {
 	prev, existed := m.subs[id]
-	canceled, err := m.cancelAtomic(ctx, tenantID, id)
+	canceled, err := m.cancelAtomic(tenantID, id, expected, at)
 	if err != nil {
 		return domain.Subscription{}, err
 	}
@@ -306,17 +321,22 @@ func (m *memStore) ClearScheduledCancellation(ctx context.Context, tenantID, id 
 	return s, nil
 }
 
-func (m *memStore) FireScheduledCancellationWithBill(ctx context.Context, tenantID, id string, at time.Time, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error) {
+func (m *memStore) FireScheduledCancellationWithBill(ctx context.Context, tenantID, id string, expected PeriodSnapshot, at time.Time, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error) {
 	s, ok := m.subs[id]
 	if !ok || s.TenantID != tenantID {
 		return domain.Subscription{}, errs.ErrNotFound
 	}
-	// Mirror the real CAS: status AND cancel_at equality (ADR-097).
+	// Mirror the real CAS: status AND cancel_at equality (ADR-097), then the
+	// period (ADR-139).
 	if s.Status != domain.SubscriptionActive {
 		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("scheduled cancel cannot fire on %s subscription", s.Status)).WithCode(ScheduledCancelSuperseded)
 	}
 	if s.CancelAt == nil || !s.CancelAt.Equal(at) {
 		return domain.Subscription{}, errs.InvalidState("scheduled cancel no longer current (unscheduled or re-scheduled concurrently)").WithCode(ScheduledCancelSuperseded)
+	}
+	expected.Status = domain.SubscriptionActive
+	if !snapshotMatches(s, expected) {
+		return domain.Subscription{}, ErrWatermarkMoved
 	}
 	s.Status = domain.SubscriptionCanceled
 	s.CanceledAt = &at
@@ -1131,7 +1151,7 @@ func TestCreate(t *testing.T) {
 		// Pre-fix: mid-period immediate cancel generated NO final
 		// invoice. Customer's partial-period usage went uncaptured
 		// (revenue leak). Fix: Service.Cancel now also calls
-		// BillCancelTx, which emits a usage + prorated
+		// PlanCancelBill, which prices a usage + prorated
 		// in_arrears base invoice for [period_start, canceled_at].
 		svcWithBiller := NewService(newMemStore(), nil)
 		fb := &fakeBiller{}
@@ -1300,12 +1320,21 @@ type fakeBiller struct {
 	swapBillAt           time.Time
 	swapAfterCommitCalls int
 	finalizeCalls        int
-	// Cancel relief (inside BillCancelTx): what it returns, and how often it
-	// ran in the cancel tx.
+	// Cancel relief (PlanCancelBill's writer): what it returns, and how often
+	// it ran in the cancel tx.
 	draftTxCalls int
 	draftIDs     []string
 	draftCredit  int64
 	draftTxErr   error
+	// planAts is the instant of each PlanCancelBill call and plannedFrom the
+	// row it priced; writeMoved is how many writer calls answer
+	// ErrWatermarkMoved first. onPlan, when set, runs inside each
+	// PlanCancelBill call, as a change that commits while the cancel is
+	// priced.
+	planAts     []time.Time
+	plannedFrom []domain.Subscription
+	writeMoved  int
+	onPlan      func()
 	// Plan-swap relief (BillOnPlanSwapDraftsTx).
 	swapDraftTxCalls int
 	swapDraftIDs     []string
@@ -1315,13 +1344,13 @@ type fakeBiller struct {
 	// and swap share it).
 	finishCalls    int
 	finishedDrafts []string
-	// afterCommitCalls counts runs of BillCancelTx's
+	// afterCommitCalls counts runs of the cancel writer's
 	// afterCommit (the unpriced-usage count, #981): post-commit only.
 	afterCommitCalls int
 	// postCommit is the order of the post-commit legs: "relief" per
 	// FinishRelief, "finalize:<invoice id>" per FinalizeOnCreateInvoice.
 	postCommit []string
-	// onAfterCommit runs inside BillCancelTx's afterCommit,
+	// onAfterCommit runs inside the cancel writer's afterCommit,
 	// right after the cancel commits; a test ends the caller's context here.
 	onAfterCommit func()
 	// postCommitCtxErr is ctx.Err() as each post-commit leg saw it, in
@@ -1329,25 +1358,39 @@ type fakeBiller struct {
 	postCommitCtxErr []error
 }
 
-// BillCancelTx counts the final invoice in finalCalls and the relief in
-// draftTxCalls. It fails with finalCancelErr before the relief runs, then
-// with draftTxErr.
-func (f *fakeBiller) BillCancelTx(_ context.Context, _ *sql.Tx, _ domain.Subscription) (domain.Invoice, domain.Relief, func(), error) {
-	afterCommit := func() {
-		f.afterCommitCalls++
-		if f.onAfterCommit != nil {
-			f.onAfterCommit()
-		}
-	}
+// PlanCancelBill counts the plan in finalCalls, records its instant in
+// planAts and its row in plannedFrom, and runs onPlan; it fails with
+// finalCancelErr. Its writer counts the relief write in draftTxCalls and fails
+// with draftTxErr. While writeMoved is above zero, the writer answers
+// ErrWatermarkMoved instead, once per call, as a change that committed while
+// the cancel was priced would.
+func (f *fakeBiller) PlanCancelBill(_ context.Context, sub domain.Subscription, at time.Time) (BillWriter, error) {
 	f.finalCalls++
+	f.planAts = append(f.planAts, at)
+	f.plannedFrom = append(f.plannedFrom, sub)
+	if f.onPlan != nil {
+		f.onPlan()
+	}
 	if f.finalCancelErr != nil {
-		return domain.Invoice{}, domain.Relief{}, afterCommit, f.finalCancelErr
+		return nil, f.finalCancelErr
 	}
-	f.draftTxCalls++
-	if f.draftTxErr != nil {
-		return domain.Invoice{}, domain.Relief{}, afterCommit, f.draftTxErr
-	}
-	return f.finalCancelInv, domain.Relief{DraftIDs: f.draftIDs, CreditedCents: f.draftCredit}, afterCommit, nil
+	return func(context.Context, *sql.Tx, domain.Subscription) (domain.Invoice, domain.Relief, func(), error) {
+		if f.writeMoved > 0 {
+			f.writeMoved--
+			return domain.Invoice{}, domain.Relief{}, nil, ErrWatermarkMoved
+		}
+		f.draftTxCalls++
+		if f.draftTxErr != nil {
+			return domain.Invoice{}, domain.Relief{}, nil, f.draftTxErr
+		}
+		afterCommit := func() {
+			f.afterCommitCalls++
+			if f.onAfterCommit != nil {
+				f.onAfterCommit()
+			}
+		}
+		return f.finalCancelInv, domain.Relief{DraftIDs: f.draftIDs, CreditedCents: f.draftCredit}, afterCommit, nil
+	}, nil
 }
 
 func (f *fakeBiller) BillOnPlanSwapDraftsTx(_ context.Context, _ *sql.Tx, _ domain.Subscription, at time.Time) (domain.Relief, error) {

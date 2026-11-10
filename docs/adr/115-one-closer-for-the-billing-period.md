@@ -356,3 +356,7 @@ microsecond), `TestPlanSwap_InAdvance_AtFireInstant_Succeeds`,
 `TestThresholdFire_SiblingFireAtTheInsert_Skips`,
 `TestBillOnePeriod_UniqueViolationFailsAndDoesNotAdvance`,
 `TestThresholdSlotTaken`.
+
+## Amendment 2026-11-10: the immediate cancel proves the same snapshot
+
+The immediate cancel and dunning's cancel now run this compare-and-set too: `CancelAtomicWithBill`'s first statement matches the status, period start and `next_billing_at` the cancel priced its final invoice from, before its transaction opened. The scheduled mid-period cancel's statement adds the period to its `cancel_at` match. A moved period writes nothing, and the cancel plans again once ([ADR-139](139-cancel-prices-before-its-transaction.md)).

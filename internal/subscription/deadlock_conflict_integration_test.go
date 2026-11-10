@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgconn"
 
@@ -53,11 +54,11 @@ type deadlockOnceStore struct {
 // CancelAtomicWithBill runs the real cancel transaction. When armed, its
 // bill step (the relief's void, where the deadlock happens) fails, so the
 // flip it made is rolled back.
-func (s *deadlockOnceStore) CancelAtomicWithBill(ctx context.Context, tenantID, id string, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error) {
+func (s *deadlockOnceStore) CancelAtomicWithBill(ctx context.Context, tenantID, id string, expected PeriodSnapshot, at time.Time, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error) {
 	if s.cancel.CompareAndSwap(true, false) {
 		billFn = func(*sql.Tx, domain.Subscription) error { return errDeadlockLost() }
 	}
-	return s.PostgresStore.CancelAtomicWithBill(ctx, tenantID, id, billFn)
+	return s.PostgresStore.CancelAtomicWithBill(ctx, tenantID, id, expected, at, billFn)
 }
 
 // WithTenantTx opens the real transaction. When armed, its first statement

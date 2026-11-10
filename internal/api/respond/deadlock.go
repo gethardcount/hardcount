@@ -13,12 +13,24 @@ import (
 
 // CodeConcurrentChange is the code of the 409 a request answers when
 // Postgres stopped it to break a deadlock, or ended its wait for a lock
-// (ConcurrentChangeAsConflict).
+// (ConcurrentChangeAsConflict), and when a cancel's subscription changed
+// twice while the cancel priced it (ConcurrentChange, ADR-139).
 const CodeConcurrentChange = "concurrent_change"
 
 // concurrentChangeMessage is the 409's message. The dashboard shows it to an
 // operator as it is, so it names no cause, no SQL and no idempotency key.
 const concurrentChangeMessage = "Another change to the same records ran at the same time, so this request stopped before it finished. Send it again."
+
+// ConcurrentChange is the 409 concurrent_change itself. A handler returns it
+// for a change that stopped, with nothing written, because another change to
+// the same records committed while it ran: the cancel whose subscription
+// changed twice while it was priced (ADR-139). The idempotency layer does not
+// store a 409, so the client can send the same request again with the same
+// key. ConcurrentChangeAsConflict answers it for a deadlock or an ended lock
+// wait.
+func ConcurrentChange() error {
+	return errs.InvalidState(concurrentChangeMessage).WithCode(CodeConcurrentChange)
+}
 
 // ConcurrentChangeAsConflict returns a 409 concurrent_change in place of err
 // when Postgres aborted the request's transaction to break a deadlock
@@ -43,7 +55,7 @@ func ConcurrentChangeAsConflict(r *http.Request, err error) error {
 			"method", r.Method,
 			"route", routePattern(r),
 		)
-		return errs.InvalidState(concurrentChangeMessage).WithCode(CodeConcurrentChange)
+		return ConcurrentChange()
 	}
 	if !postgres.IsDeadlock(err) {
 		return err
@@ -59,5 +71,5 @@ func ConcurrentChangeAsConflict(r *http.Request, err error) error {
 		"method", r.Method,
 		"route", routePattern(r),
 	)
-	return errs.InvalidState(concurrentChangeMessage).WithCode(CodeConcurrentChange)
+	return ConcurrentChange()
 }

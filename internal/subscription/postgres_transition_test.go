@@ -4,15 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"github.com/gethardcount/hardcount/internal/errs"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/errs"
+
 	"github.com/gethardcount/hardcount/internal/customer"
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/pricing"
 	"github.com/gethardcount/hardcount/internal/subscription"
@@ -609,7 +611,7 @@ func TestPauseCollection_Roundtrip(t *testing.T) {
 	}
 
 	// 5. Set on a canceled sub is rejected.
-	if _, err := store.CancelAtomic(ctx, tenantID, subID); err != nil {
+	if _, err := subscriptiontest.Cancel(ctx, store, tenantID, subID); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 	_, err = store.SetPauseCollection(ctx, tenantID, subID, domain.PauseCollection{
@@ -864,7 +866,7 @@ func TestClosePeriodTx_CASOneWinner(t *testing.T) {
 			t.Fatalf("get: %v", err)
 		}
 		snap := subscription.SnapshotOf(read)
-		if _, err := store.CancelAtomicWithBill(ctx, tenantID, cancelSubID, nil); err != nil {
+		if _, err := store.CancelAtomicWithBill(ctx, tenantID, cancelSubID, snap, clock.Now(ctx), nil); err != nil {
 			t.Fatalf("cancel: %v", err)
 		}
 		for i := range 3 {

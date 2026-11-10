@@ -152,3 +152,7 @@ lines alike. A resend with the same key creates the invoice once.
 Tests: `TestE2E_LockWaitEnded_AnswersConflict_SameKeyRunsAgain`, cases
 `invoice_create` and `invoice_create_with_lines` (a second session holds the
 account's invoice-number row).
+
+## Amendment 2026-11-10 (ADR-139): the cancel's second plan is not a deadlock retry
+
+The cancel now plans its bill before its transaction and plans it again once when the subscription moved in between ([ADR-139](139-cancel-prices-before-its-transaction.md)). That second plan follows a compare-and-set that wrote nothing, not a deadlock: a 40P01 or a 55P03 still answers `409` here, and is not run again in the process. Before a cancel's second plan, or its `409` `concurrent_change` after a second move, only an ended period's invoice and a `tax_calculations` row with no invoice can have been saved, as before a lost deadlock.

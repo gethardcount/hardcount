@@ -125,8 +125,7 @@ item:
    through?
    *(`ResolveRun` has six resolve paths, all funneled through `resolveRunNow`;
    a seventh site that writes the state directly is the
-   bug. Compare `subscription.Activate`, the one status-flip that bypasses
-   `transitionInTx`.)*
+   bug.)*
 2. **Every effect-firer** hanging off the transition (Stripe call, ledger write,
    email, outbound webhook). Is each idempotent under replay, and either in-tx or
    outbox-enqueued?
@@ -148,7 +147,7 @@ Write the site-set as a checklist in the PR description. Check each box
 **against grep output**, not against memory:
 
 ```
-grep -n "TxTenant\|MarkPaid\|resolveRunNow\|transitionInTx\|[Ee]nqueue\|\.Send" internal/<domain>/
+grep -n "TxTenant\|MarkPaid\|resolveRunNow\|[Ee]nqueue\|\.Send" internal/<domain>/
 ```
 
 If a new writer can't reuse the existing chokepoint (`transitionAtomic`,

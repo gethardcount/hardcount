@@ -14,6 +14,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/pricing"
 	"github.com/gethardcount/hardcount/internal/subscription"
+	"github.com/gethardcount/hardcount/internal/subscription/subscriptiontest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/webhook"
 )
@@ -136,10 +137,10 @@ func TestLifecycleEvents_EnqueuedInTransitionTx(t *testing.T) {
 	// one tx can't disagree. An OPERATOR cancel is therefore one whose ctx
 	// carries operator identity — a bare ctx is a background actor.
 	opCtx := auth.WithKeyID(ctx, "hc_key_lifecycle_obx")
-	if _, err := store.CancelAtomic(opCtx, tenantID, sub.ID); err != nil {
+	if _, err := subscriptiontest.Cancel(opCtx, store, tenantID, sub.ID); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
-	if _, err := store.CancelAtomic(opCtx, tenantID, sub.ID); err == nil {
+	if _, err := subscriptiontest.Cancel(opCtx, store, tenantID, sub.ID); err == nil {
 		t.Fatal("second cancel should fail (already canceled)")
 	}
 	if n, p := events(domain.EventSubscriptionCanceled); n != 1 || p["canceled_by"] != "operator" {
@@ -207,7 +208,7 @@ func TestLifecycleEvents_EnqueuedInTransitionTx(t *testing.T) {
 	// cancel AND its event back together.
 	subF := newSub("lc-rollback", domain.SubscriptionActive, nil)
 	sentinel := errors.New("bill failed")
-	if _, err := store.CancelAtomicWithBill(ctx, tenantID, subF.ID, func(*sql.Tx, domain.Subscription) error {
+	if _, err := store.CancelAtomicWithBill(ctx, tenantID, subF.ID, subscription.SnapshotOf(subF), time.Now().UTC(), func(*sql.Tx, domain.Subscription) error {
 		return sentinel
 	}); !errors.Is(err, sentinel) {
 		t.Fatalf("cancel-with-bill: got %v, want sentinel", err)

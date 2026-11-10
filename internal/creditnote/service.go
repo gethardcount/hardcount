@@ -37,6 +37,12 @@ func withoutEmpty(md map[string]any) map[string]any {
 type InvoiceReader interface {
 	Get(ctx context.Context, tenantID, id string) (domain.Invoice, error)
 	ListLineItems(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceLineItem, error)
+	// GetTx and ListLineItemsTx read on the caller's transaction, with no
+	// lock. create uses them when it writes on a caller's transaction, so a
+	// cancel's or an item change's transaction needs no second connection
+	// while it holds its locks (ADR-139).
+	GetTx(ctx context.Context, tx *sql.Tx, tenantID, id string) (domain.Invoice, error)
+	ListLineItemsTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string) ([]domain.InvoiceLineItem, error)
 	// LockForCreditNoteTx locks the invoice row on Issue()'s coordinator tx and
 	// returns it as it is under the lock; Issue() decides from that row.
 	LockForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, id string) (domain.Invoice, error)
@@ -402,8 +408,23 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 // the CALLER's transaction (coordinator-owned *sql.Tx, ADR-056) so the note
 // commits ATOMICALLY with the caller's other writes — used by
 // CreateAdjustmentDraftTx so a subscription item delete and its clawback
-// obligation roll back together.
+// obligation roll back together. With a tx, the invoice and its lines are
+// read on it too (ADR-139): the caller holds its locks while create runs, and
+// a read on another connection would hold them while it waits for one, the
+// pool stall P1-23 removed.
 func (s *Service) create(ctx context.Context, tenantID string, input CreateInput, tx *sql.Tx) (domain.CreditNote, error) {
+	getInvoice := func() (domain.Invoice, error) {
+		if tx != nil {
+			return s.invoices.GetTx(ctx, tx, tenantID, input.InvoiceID)
+		}
+		return s.invoices.Get(ctx, tenantID, input.InvoiceID)
+	}
+	listLines := func() ([]domain.InvoiceLineItem, error) {
+		if tx != nil {
+			return s.invoices.ListLineItemsTx(ctx, tx, tenantID, input.InvoiceID)
+		}
+		return s.invoices.ListLineItems(ctx, tenantID, input.InvoiceID)
+	}
 	if input.InvoiceID == "" {
 		return domain.CreditNote{}, errs.Required("invoice_id")
 	}
@@ -424,7 +445,7 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 	}
 
 	// Verify invoice exists and is finalized or paid
-	inv, err := s.invoices.Get(ctx, tenantID, input.InvoiceID)
+	inv, err := getInvoice()
 	if err != nil {
 		return domain.CreditNote{}, fmt.Errorf("invoice not found: %w", err)
 	}
@@ -456,7 +477,7 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 	// blocked until the CN-retire leg ships (phase 2 — trigger: first DP
 	// commit-refund ask). Checked in the shared core so the operator path
 	// and the automated clawback paths carry the same rule.
-	invLines, err := s.invoices.ListLineItems(ctx, tenantID, input.InvoiceID)
+	invLines, err := listLines()
 	if err != nil {
 		return domain.CreditNote{}, fmt.Errorf("list invoice line items: %w", err)
 	}
@@ -503,7 +524,7 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 			continue
 		}
 		if ownLines == nil {
-			invLines, err := s.invoices.ListLineItems(ctx, tenantID, input.InvoiceID)
+			invLines, err := listLines()
 			if err != nil {
 				return domain.CreditNote{}, fmt.Errorf("list invoice line items: %w", err)
 			}
