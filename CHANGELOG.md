@@ -51,7 +51,7 @@ original text.
 
 ### Changed
 
-- **Test clocks: a deploy no longer strands an advance or runs it twice.** One replica at a time, the holder of the new `testclock_catchup` leader role, runs every advancing clock on a 2-second tick, and its writes to the clock prove the lease. An advance starts within a few seconds of the request, where it started at once. A replica that stops in the middle leaves the clock `advancing`, and the next replica to take the role runs the catch-up again, where before the clock waited until some replica restarted ([ADR-140](docs/adr/140-test-clock-catchup-is-a-leader-role.md), [#PR]).
+- **Test clocks: a deploy no longer strands an advance or runs it twice.** One replica at a time, the holder of the new `testclock_catchup` leader role, runs every advancing clock on a 2-second tick, and its writes to the clock prove the lease. An advance starts within a few seconds of the request, where it started at once. A replica that stops in the middle leaves the clock `advancing`, and the next replica to take the role runs the catch-up again, where before the clock waited until some replica restarted ([ADR-140](docs/adr/140-test-clock-catchup-is-a-leader-role.md), [#1689](https://github.com/gethardcount/hardcount/pull/1689)).
   - `last_advance_summary.advanced_from` is now the clock's time before the advance on a retried advance and after a restart too. Before, a retry showed the target there, and a restart showed nothing.
   - A catch-up pass that runs longer than 10 minutes ends the advance in `internal_failure`, with a reason naming the clock's time. Retry advance runs it again.
 
