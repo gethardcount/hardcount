@@ -973,80 +973,75 @@ func (s *PostgresStore) ListByTestClockID(ctx context.Context, tenantID, clockID
 	return customers, total, rows.Err()
 }
 
-func (s *PostgresStore) Update(ctx context.Context, tenantID string, c domain.Customer) (domain.Customer, error) {
-	enc, err := s.encryptCustomer(c)
-	if err != nil {
-		return domain.Customer{}, err
-	}
-
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.Customer{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	now := clock.Now(ctx)
-	storedCC, err := s.additionalEmailsStored(c.AdditionalEmails)
-	if err != nil {
-		return domain.Customer{}, err
-	}
-	// Update intentionally does NOT touch test_clock_id — Stripe parity:
-	// once a customer is attached to a clock at create time, they're
-	// pinned for life. To switch clocks, delete + recreate. The column
-	// is read back into the result so callers see the unchanged value.
-	err = tx.QueryRowContext(ctx, `
-		UPDATE customers SET display_name = $1, email = $2, email_bidx = NULLIF($3,''),
-			additional_emails = $4, status = $5, dunning_policy_id = NULLIF($6,''), updated_at = $7
-		WHERE id = $8
-		RETURNING id, tenant_id, external_id, display_name, email, status, COALESCE(test_clock_id,''), COALESCE(dunning_policy_id,''), created_at, updated_at
-	`, enc.DisplayName, enc.Email, s.emailBlindIndex(c.Email), storedCC, c.Status, c.DunningPolicyID, now, c.ID,
-	).Scan(&c.ID, &c.TenantID, &c.ExternalID, &c.DisplayName, &c.Email, &c.Status, &c.TestClockID, &c.DunningPolicyID, &c.CreatedAt, &c.UpdatedAt)
-
-	if err == sql.ErrNoRows {
-		return domain.Customer{}, errs.ErrNotFound
-	}
-	if err != nil {
-		return domain.Customer{}, err
-	}
-
-	c, err = s.decryptCustomer(c)
-	if err != nil {
-		return domain.Customer{}, err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return domain.Customer{}, err
-	}
-	return c, nil
-}
-
-// ResetEmailStatus clears any prior bounce/complain state on the
-// customer. Called by the service layer when the email value changes
-// (operator edit, portal self-edit, billing-profile email change that
-// syncs down) — without this reset, a bounced flag on the OLD address
-// would silently suppress sends to a brand-new untested address.
-//
-// Sets email_status to 'unknown' (not 'ok') because we don't actually
-// know the new address works yet; the next successful dispatch is
-// what flips it to 'ok' (future change). Idempotent: re-resetting an
-// already-unknown row is a no-op write.
-func (s *PostgresStore) ResetEmailStatus(ctx context.Context, tenantID, customerID string) error {
+// WithCustomerRulesLock: see the Store interface.
+func (s *PostgresStore) WithCustomerRulesLock(ctx context.Context, tenantID, id string, fn func(tx *sql.Tx, locked domain.Customer) error) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return err
 	}
 	defer postgres.Rollback(tx)
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE customers
-		SET email_status = 'unknown',
-		    email_bounce_reason = NULL,
-		    email_last_bounced_at = NULL,
-		    updated_at = NOW()
-		WHERE id = $1
-	`, customerID); err != nil {
-		return fmt.Errorf("reset email status: %w", err)
+
+	if err := postgres.LockCustomerRulesTx(ctx, tx, tenantID, id); err != nil {
+		return err
+	}
+	locked, err := s.scanCustomerFull(tx.QueryRowContext(ctx,
+		`SELECT `+customerFullCols+` FROM customers WHERE id = $1`, id))
+	if errors.Is(err, sql.ErrNoRows) {
+		return errs.ErrNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if err := fn(tx, locked); err != nil {
+		return err
 	}
 	return tx.Commit()
+}
+
+// UpdateTx: see the Store interface. It leaves test_clock_id alone: a
+// customer stays on the clock it was created on (Stripe parity), and moving
+// it means deleting and creating it again.
+func (s *PostgresStore) UpdateTx(ctx context.Context, tx *sql.Tx, c domain.Customer, emailChanged bool) (domain.Customer, error) {
+	enc, err := s.encryptCustomer(c)
+	if err != nil {
+		return domain.Customer{}, err
+	}
+	storedCC, err := s.additionalEmailsStored(c.AdditionalEmails)
+	if err != nil {
+		return domain.Customer{}, err
+	}
+	out, err := s.scanCustomerFull(tx.QueryRowContext(ctx, `
+		UPDATE customers SET display_name = $1, email = $2, email_bidx = NULLIF($3,''),
+			additional_emails = $4, status = $5, dunning_policy_id = NULLIF($6,''), updated_at = $7,
+			email_status = CASE WHEN $9::boolean THEN 'unknown' ELSE email_status END,
+			email_bounce_reason = CASE WHEN $9::boolean THEN NULL ELSE email_bounce_reason END,
+			email_last_bounced_at = CASE WHEN $9::boolean THEN NULL ELSE email_last_bounced_at END
+		WHERE id = $8
+		RETURNING `+customerFullCols,
+		enc.DisplayName, enc.Email, s.emailBlindIndex(c.Email), storedCC, c.Status, c.DunningPolicyID,
+		clock.Now(ctx), c.ID, emailChanged,
+	))
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Customer{}, errs.ErrNotFound
+	}
+	if err != nil {
+		return domain.Customer{}, err
+	}
+	return out, nil
+}
+
+// Update is UpdateTx in a transaction of its own, under the customer-rules
+// lock, for a caller with no rule to check, such as a test fixture. It
+// clears the bounce state when c's email differs from the stored one.
+// Service.Update checks its rules inside WithCustomerRulesLock instead.
+func (s *PostgresStore) Update(ctx context.Context, tenantID string, c domain.Customer) (domain.Customer, error) {
+	var out domain.Customer
+	err := s.WithCustomerRulesLock(ctx, tenantID, c.ID, func(tx *sql.Tx, locked domain.Customer) error {
+		var err error
+		out, err = s.UpdateTx(ctx, tx, c, c.Email != locked.Email)
+		return err
+	})
+	return out, err
 }
 
 // MarkEmailBounced flips email_status to 'bounced' and records the
@@ -1119,17 +1114,26 @@ func (s *PostgresStore) markEmailSuppressed(ctx context.Context, tenantID, custo
 	return tx.Commit()
 }
 
+// UpsertBillingProfile is UpsertBillingProfileTx in a transaction of its
+// own, under the customer-rules lock, for a caller with no rule to check,
+// such as a test fixture. Service.UpsertBillingProfile runs its currency
+// check inside WithCustomerRulesLock instead.
 func (s *PostgresStore) UpsertBillingProfile(ctx context.Context, tenantID string, bp domain.CustomerBillingProfile) (domain.CustomerBillingProfile, error) {
+	var out domain.CustomerBillingProfile
+	err := s.WithCustomerRulesLock(ctx, tenantID, bp.CustomerID, func(tx *sql.Tx, _ domain.Customer) error {
+		var err error
+		out, err = s.UpsertBillingProfileTx(ctx, tx, tenantID, bp)
+		return err
+	})
+	return out, err
+}
+
+// UpsertBillingProfileTx: see the Store interface.
+func (s *PostgresStore) UpsertBillingProfileTx(ctx context.Context, tx *sql.Tx, tenantID string, bp domain.CustomerBillingProfile) (domain.CustomerBillingProfile, error) {
 	enc, err := s.encryptBillingProfile(bp)
 	if err != nil {
 		return domain.CustomerBillingProfile{}, err
 	}
-
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.CustomerBillingProfile{}, err
-	}
-	defer postgres.Rollback(tx)
 
 	now := clock.Now(ctx)
 	status := string(bp.TaxStatus)
@@ -1177,10 +1181,6 @@ func (s *PostgresStore) UpsertBillingProfile(ctx context.Context, tenantID strin
 
 	bp, err = s.decryptBillingProfile(bp)
 	if err != nil {
-		return domain.CustomerBillingProfile{}, err
-	}
-
-	if err := tx.Commit(); err != nil {
 		return domain.CustomerBillingProfile{}, err
 	}
 	return bp, nil

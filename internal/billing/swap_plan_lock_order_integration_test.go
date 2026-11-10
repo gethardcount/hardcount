@@ -229,3 +229,154 @@ func TestCrossIntervalSwap_PlansLockedBeforeTheNumberRow(t *testing.T) {
 		t.Fatalf("refund credit notes on the old period's invoice = %d, want 1", len(notes))
 	}
 }
+
+// TestCrossIntervalSwap_CustomerLockedBeforeTheNumberRow pins where an item
+// change takes the customer-rules lock: right after its subscription row,
+// before it numbers anything (ADR-130 §8 step 1a). The cross-interval swap
+// numbers a refund credit note before it writes the item. A create for the
+// same customer takes the lock before its insert and numbers its day-1
+// invoice after it. With the swap waiting at the tenant's number row while
+// it holds the lock, the create waits for the lock, and both commit.
+//
+// Passes on main too: it guards the lock order.
+//
+// Mutation-verify: take the lock in applyItemPlanImmediatelyInTx (the item
+// write, after the credit note) instead of LockForItemChangeTx → the swap
+// holds the number row and waits for the create's lock while the create
+// waits for the number row; Postgres aborts one with 40P01.
+func TestCrossIntervalSwap_CustomerLockedBeforeTheNumberRow(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	admin := testutil.AdminPool(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+
+	customerStore := customer.NewPostgresStore(db)
+	pricingStore := pricing.NewPostgresStore(db)
+	subStore := subscription.NewPostgresStore(db)
+	invoiceStore := invoice.NewPostgresStore(db)
+	settingsStore := tenant.NewSettingsStore(db)
+
+	tenantID := testutil.CreateTestTenant(t, db, "Swap Customer Lock Order")
+	plan := func(code string, interval domain.BillingInterval, base int64) domain.Plan {
+		p, err := pricingStore.CreatePlan(ctx, tenantID, domain.Plan{
+			Code: code, Name: code, Currency: "USD",
+			BillingInterval: interval, Status: domain.PlanActive,
+			BaseAmountCents: base, BaseBillTiming: domain.BillInAdvance,
+		})
+		if err != nil {
+			t.Fatalf("create plan %s: %v", code, err)
+		}
+		return p
+	}
+	monthly := plan("custlock-monthly", domain.BillingMonthly, 4900)
+	yearly := plan("custlock-yearly", domain.BillingYearly, 49000)
+	addOn := plan("custlock-add-on", domain.BillingMonthly, 1000) // no meter, same currency
+
+	periodStart := time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)
+	swapAt := time.Date(2026, 6, 16, 0, 0, 0, 0, time.UTC)
+
+	cnSvc := creditnote.NewService(creditnote.NewPostgresStore(db), invoiceStore, nil)
+	cnSvc.SetNumberGenerator(settingsStore)
+	e := newRealEngine(db, clock.NewFake(periodStart.Add(time.Hour)))
+	e.SetCreditNoteAdjuster(cnSvc)
+	e.SetCreditHeadroomReader(cnSvc)
+
+	// The swapped subscription: on the monthly plan, its period paid, so the
+	// swap writes a refund credit note.
+	cust, err := customerStore.Create(ctx, tenantID, domain.Customer{ExternalID: "cus_swap_custlock", DisplayName: "Swap Customer Lock"})
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	sub, err := subStore.Create(ctx, tenantID, domain.Subscription{
+		Code: "sub-swap-custlock", DisplayName: "Swap", CustomerID: cust.ID,
+		Items:  []domain.SubscriptionItem{{PlanID: monthly.ID, Quantity: 1}},
+		Status: domain.SubscriptionActive, BillingTime: domain.BillingTimeCalendar,
+		StartedAt:                 &periodStart,
+		CurrentBillingPeriodStart: &periodStart, CurrentBillingPeriodEnd: bivPE(periodStart),
+	})
+	if err != nil {
+		t.Fatalf("create sub: %v", err)
+	}
+	subscriptiontest.SetBillingCycle(t, ctx, db, tenantID, sub.ID, periodStart, periodEnd, periodEnd, 0)
+	sub, err = subStore.Get(ctx, tenantID, sub.ID)
+	if err != nil {
+		t.Fatalf("get sub: %v", err)
+	}
+	funding, err := e.BillOnCreate(ctx, sub)
+	if err != nil {
+		t.Fatalf("BillOnCreate: %v", err)
+	}
+	if _, err := invoiceStore.MarkPaid(ctx, tenantID, funding.ID, "pi_swap_custlock", periodStart); err != nil {
+		t.Fatalf("mark paid: %v", err)
+	}
+
+	subSvc := subscription.NewService(subStore, clock.NewFake(swapAt))
+	subSvc.SetPlanReader(&swapLockPlanReader{plans: map[string]domain.Plan{monthly.ID: monthly, yearly.ID: yearly}})
+	subSvc.SetBiller(e)
+	opCtx := clock.WithEffectiveNow(ctx, swapAt)
+
+	gate := holdNumberRow(t, ctx, db, tenantID)
+
+	// 1. The swap holds its subscription row and the customer-rules lock,
+	// and waits at the number of its refund credit note.
+	swapDone := make(chan error, 1)
+	go func() {
+		swapDone <- func() error {
+			tx, err := db.BeginTx(opCtx, postgres.TxTenant, tenantID)
+			if err != nil {
+				return err
+			}
+			defer postgres.Rollback(tx)
+			if _, err := subSvc.UpdateItemTx(opCtx, tx, tenantID, sub.ID, sub.Items[0].ID, subscription.UpdateItemInput{
+				NewPlanID: yearly.ID, Immediate: true,
+			}); err != nil {
+				return err
+			}
+			return tx.Commit()
+		}()
+	}()
+	testutil.WaitForLockWaiter(t, ctx, admin, "credit_note_next_seq")
+
+	// 2. A create for the same customer. It waits for the swap's lock, or,
+	// with no lock, at the number of its day-1 invoice.
+	createDone := make(chan error, 1)
+	go func() {
+		_, err := subStore.CreateWithBill(opCtx, tenantID, domain.Subscription{
+			Code: "sub-custlock-add-on", DisplayName: "Add-on", CustomerID: cust.ID,
+			Items:  []domain.SubscriptionItem{{PlanID: addOn.ID, Quantity: 1}},
+			Status: domain.SubscriptionActive, BillingTime: domain.BillingTimeCalendar,
+			StartedAt:                 &swapAt,
+			CurrentBillingPeriodStart: &swapAt, CurrentBillingPeriodEnd: &periodEnd, NextBillingAt: &periodEnd,
+		}, func(tx *sql.Tx, created domain.Subscription) error {
+			_, _, err := e.BillOnCreateTx(opCtx, tx, created, swapAt)
+			return err
+		})
+		createDone <- err
+	}()
+	testutil.WaitForLockWaiters(t, ctx, admin, "", 2)
+
+	// 3. Release the number row.
+	if err := gate.Rollback(); err != nil {
+		t.Fatalf("release the number row: %v", err)
+	}
+
+	results := map[string]error{}
+	for range 2 {
+		select {
+		case err := <-swapDone:
+			results["swap"] = err
+		case err := <-createDone:
+			results["create"] = err
+		case <-time.After(20 * time.Second):
+			t.Fatal("the swap or the create never finished")
+		}
+	}
+	requireBothCommitted(t, results)
+	notes, err := cnSvc.List(ctx, creditnote.ListFilter{TenantID: tenantID, InvoiceID: funding.ID})
+	if err != nil {
+		t.Fatalf("list credit notes: %v", err)
+	}
+	if len(notes) != 1 {
+		t.Fatalf("refund credit notes on the old period's invoice = %d, want 1", len(notes))
+	}
+}

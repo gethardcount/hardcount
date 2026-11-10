@@ -59,8 +59,9 @@ export interface Customer {
      */
   additional_emails?: string[];
   /**
-     * `archived` blocks new subscriptions for the customer. Its
-     * unpaid invoices stay collectible.
+     * `archived` blocks new subscriptions for the customer and
+     * activating its draft subscriptions. Its unpaid invoices stay
+     * collectible.
      */
   status: CustomerStatus;
   /** When the customer was created. */

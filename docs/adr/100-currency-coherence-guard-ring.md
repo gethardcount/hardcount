@@ -1,13 +1,13 @@
 # ADR-100: Currency coherence is enforced at every write — a guard ring, not engine reconciliation
 
 **Date:** 2026-07-26
-**Status:** Accepted (amended 2026-10-23 by [ADR-129](129-credit-carries-its-own-currency.md)); superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md) (G1, G2, G2b, G4 and the override currency clause are gone), built in PR-4 (#1386)
+**Status:** Accepted (amended 2026-10-23 by [ADR-129](129-credit-carries-its-own-currency.md); amended 2026-11-10: G3's create pin and the profile guard run under the customer-rules lock); superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md) (G1, G2, G2b, G4 and the override currency clause are gone), built in PR-4 (#1386)
 
 **Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and built in PR-4 (#1386). Where this ADR differs, ADR-130 describes the code. G1, G2, G2b and ADR-070's override currency clause go, because a price and an override have no currency and take the plan's (PR-4). G4 goes whole: its `CreateRatingRuleTx` normalization, allowlist and republish clauses go with the rating-rule tables, and its recipe meter probe goes because recipe prices take the new plan's currency (PR-4). G3, G5 to G8 and the ADR-129 amendment stay.
 
 ## Summary
 
-Hardcount refuses mismatched currencies at every write that could create them (rule republishes, plans, meter prices, subscriptions and recipes), so the billing engine never needs to convert. A customer's subscriptions, their plans, the meters' prices and the billing profile share one currency, so selling in two currencies needs separate meters, plans and customers. Zero-decimal currencies (JPY, KRW, VND, CLP) are refused, because Hardcount amounts are cents and those charges would be 100 times too large. A settled Stripe charge in a currency other than the invoice's raises a `payment.currency_mismatch` anomaly. Status: active; multi-currency catalogs, zero-decimal support, a currency on the credit ledger and locks against concurrent writes are deferred.
+Hardcount refuses mismatched currencies at every write that could create them (rule republishes, plans, meter prices, subscriptions and recipes), so the billing engine never needs to convert. A customer's subscriptions, their plans, the meters' prices and the billing profile share one currency, so selling in two currencies needs separate meters, plans and customers. Zero-decimal currencies (JPY, KRW, VND, CLP) are refused, because Hardcount amounts are cents and those charges would be 100 times too large. A settled Stripe charge in a currency other than the invoice's raises a `payment.currency_mismatch` anomaly. Status: active; multi-currency catalogs and zero-decimal support are deferred. Since 2026-11-10 a per-customer lock orders concurrent subscription creates and billing-profile writes, so neither can add a second currency. The manual-invoice currency check takes no lock, so a currency change at the same moment can still pass it (see Deferred).
 
 ## Context
 
@@ -40,14 +40,29 @@ An adversarial panel (three lenses: legitimate-flow breakage, completeness, blas
 
 - A tenant selling in two currencies needs **separate meters/rule keys per currency and separate customers per currency** — coherent-by-construction rather than ambiguous. This is a real product limitation, accepted pre-launch (see Deferred: multi-currency catalog).
 - Wrong-currency installs are repairable: archive the sub-less plan → republish the key → recreate the plan.
-- All guards fail CLOSED for single writers. Concurrent writer pairs (profile-save racing sub-create, republish racing plan-create) are check-then-act TOCTOU windows — deferred with the serialization design named (customer-scoped and catalog-scoped `pg_advisory_xact_lock`), trigger: first multi-operator tenant.
+- All guards fail CLOSED for single writers. Concurrent writer pairs (profile-save racing sub-create, republish racing plan-create) are check-then-act TOCTOU windows — deferred with the serialization design named (customer-scoped and catalog-scoped `pg_advisory_xact_lock`), trigger: first multi-operator tenant. *Amended 2026-11-10:* the customer-scoped lock now exists (the customer-rules lock, [ADR-130](130-usage-prices-belong-to-the-plan.md) section 8 step 1a). Profile-save racing sub-create, and sub-create racing sub-create, are closed. Republish racing plan-create went with G1 and G2. The manual-invoice currency check stays open: it reads the profile and the subscriptions in their own transactions and takes no lock ([ADR-129](129-credit-carries-its-own-currency.md) Deferred). A lost race gives one invoice in another currency. Credit stays safe, because the drain pays only invoices in the credit's own currency.
 
 ## Deferred (register entries in velox-ops)
 
 - ~~**Credit-ledger currency column**~~ — closed 2026-10-23 by [ADR-129](129-credit-carries-its-own-currency.md): each ledger row stores its currency and credit pays only same-currency invoices, and a manual invoice is held to the customer's currency.
 - **Multi-currency price catalogs** (Stripe `currency_options` parity — Hardcount is BEHIND here, knowingly). Trigger: first DP selling one product in two currencies.
 - **Zero-decimal currency support** (amount semantics per currency at Stripe boundary + renderers). Trigger: first JPY/KRW-pricing DP.
-- **TOCTOU serialization locks** as above.
+- **TOCTOU serialization locks** (check-then-act races between two writers). The customer-scoped lock shipped 2026-11-10 (amendment below) and closes profile-versus-create and create-versus-create. Still open:
+  - **The manual-invoice currency check** takes no lock ([ADR-129](129-credit-carries-its-own-currency.md) Deferred). A lost race gives one invoice in another currency. Credit stays safe, because it drains per currency.
+  - **A price added to a used plan while a subscription is created on another plan.** This is a meter race: it can put one meter on two of a customer's items, which bills its usage twice. It adds no currency, because a price takes its plan's currency ([ADR-130](130-usage-prices-belong-to-the-plan.md) Risks).
+
+  Trigger: the first multi-operator tenant.
+
+## Amendment 2026-11-10: G3's create pin and the profile guard run under the customer-rules lock
+
+Every check in the ring reads committed rows only. So two writers for one customer at once could both pass G3 or the profile guard. A USD create and an EUR create both committed. A profile currency saved during a create relabeled that subscription's cents.
+
+- **Subscription create** runs G3 on its own transaction, after it takes the customer-rules lock ([ADR-130](130-usage-prices-belong-to-the-plan.md) section 8 step 1a) and before its day-1 invoice. The check before the transaction is gone.
+- **The billing-profile guard** reads the customer's subscriptions and saves the profile under the same lock.
+- **Activation** keeps G3 before its transaction, for drafts older than the pin. Drafts already count toward the customer's currency, so activating one adds none.
+- **Item add and both swap paths** are pinned to their own subscription's currency and outgoing plan, so they cannot add a second currency. They take the lock too, as item writers.
+
+Every writer of G3's inputs holds the lock until it commits, so a check made under it sees each one. The manual-invoice currency check ([ADR-129](129-credit-carries-its-own-currency.md)) does not take the lock (see Deferred). Tests: `TestE2E_CustomerLock_TwoCreatesTwoCurrencies` and `TestE2E_CustomerLock_ProfileCurrencyRacesCreate` (internal/api).
 
 ## Amendment 2026-10-23: credit carries its own currency (ADR-129)
 

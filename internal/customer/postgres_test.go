@@ -244,8 +244,9 @@ func TestPostgresStore_Update(t *testing.T) {
 // would silently drop sends to a brand-new untested address.
 //
 // Goes through service.Update (not the store directly) because the
-// reset logic lives in the service — it has both the prior and new
-// email values in scope and the store doesn't.
+// service decides whether the email changed: it compares the new value
+// with the row it read under the customer-rules lock. UpdateTx clears the
+// state in the same write.
 //
 // Three cases:
 //  1. Email changes → bounce state resets to 'unknown' + NULLs.

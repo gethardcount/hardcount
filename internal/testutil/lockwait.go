@@ -39,8 +39,25 @@ func WaitForLockWaiter(t *testing.T, ctx context.Context, admin *sql.DB, queryLi
 // requests behind one lock: it returns once at least n backends wait.
 func WaitForLockWaiters(t *testing.T, ctx context.Context, admin *sql.DB, queryLike string, n int) {
 	t.Helper()
+	WaitForLockWaitersOrDone(t, ctx, admin, queryLike, n)
+}
+
+// WaitForLockWaitersOrDone is WaitForLockWaiters for a race test whose
+// writer may not wait at all: it also returns as soon as any channel in done
+// is closed. Use it when a writer that does not queue is the bug under test.
+// The test then goes on and reads that writer's result, which shows the bug,
+// instead of failing here after 15 seconds with no answer.
+func WaitForLockWaitersOrDone(t *testing.T, ctx context.Context, admin *sql.DB, queryLike string, n int, done ...<-chan struct{}) {
+	t.Helper()
 	deadline := time.Now().Add(lockWaitTimeout)
 	for {
+		for _, d := range done {
+			select {
+			case <-d:
+				return
+			default:
+			}
+		}
 		var waiting int
 		if err := admin.QueryRowContext(ctx, `
 			SELECT count(*) FROM pg_stat_activity

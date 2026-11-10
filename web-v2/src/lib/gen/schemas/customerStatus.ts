@@ -13,8 +13,9 @@
  */
 
 /**
- * `archived` blocks new subscriptions for the customer. Its
- * unpaid invoices stay collectible.
+ * `archived` blocks new subscriptions for the customer and
+ * activating its draft subscriptions. Its unpaid invoices stay
+ * collectible.
  */
 export type CustomerStatus = typeof CustomerStatus[keyof typeof CustomerStatus];
 

@@ -88,6 +88,13 @@ type NonTerminalSubscription struct {
 // SetSubscriptionChecker (precedent: SetStripeSyncer) so the customer
 // package keeps the zero-peer-import rule; implemented by an adapter over
 // the subscription store in api/router.go.
+//
+// The service calls it under the customer-rules lock
+// (Store.WithCustomerRulesLock). Subscription creates and draft activations
+// hold the same lock, so the answer counts every one that committed first.
+// A trial that ends does not take the lock; the implementation must still
+// count that subscription when it moves from trialing to active between its
+// reads.
 type SubscriptionChecker interface {
 	// includeDraft widens the status set for the currency guard (ADR-100):
 	// a draft doesn't bill yet, but it WILL at activate, so the profile
@@ -406,107 +413,113 @@ type UpdateInput struct {
 	AdditionalEmails *[]string `json:"additional_emails,omitempty"`
 }
 
+// Update applies input to the customer and saves it. It reads the customer,
+// checks its rules and writes it under the customer-rules lock
+// (Store.WithCustomerRulesLock). Two updates at once run one after the
+// other, and the second applies its fields to the row the first saved, so
+// neither writes back a field it did not send. An archive and a subscription
+// create are ordered the same way. An email change clears the bounce state
+// in the same write. The Stripe sync runs after the commit.
 func (s *Service) Update(ctx context.Context, tenantID, id string, input UpdateInput) (domain.Customer, error) {
 	ctx = s.bindForCustomer(ctx, tenantID, id)
-	existing, err := s.store.Get(ctx, tenantID, id)
-	if err != nil {
-		return domain.Customer{}, err
-	}
 
-	prevEmail := existing.Email
-
-	if name := strings.TrimSpace(input.DisplayName); name != "" {
-		existing.DisplayName = name
-	}
-	if email := strings.TrimSpace(input.Email); email != "" {
-		addr, err := domain.ValidateEmail("email", email)
+	// Checks that read only the input run before the lock.
+	name := strings.TrimSpace(input.DisplayName)
+	var email string
+	if e := strings.TrimSpace(input.Email); e != "" {
+		addr, err := domain.ValidateEmail("email", e)
 		if err != nil {
 			return domain.Customer{}, err
 		}
-		existing.Email = addr
+		email = addr
 	}
-	if status := domain.CustomerStatus(input.Status); status != "" {
-		// Checked here, not left to customers_status_check: the constraint's
-		// error is a 500, which the idempotency middleware caches.
-		if status != domain.CustomerStatusActive && status != domain.CustomerStatusArchived {
-			return domain.Customer{}, errs.Invalid("status", "must be active or archived")
-		}
-		// Archive = 409-BLOCK while any subscription still bills, never
-		// auto-cancel (ADR-067). Auto-cancel would run the immediate-cancel
-		// billing path — final prorated invoice + auto-charge of the saved
-		// card — turning "archive to stop billing" into N surprise charges.
-		// Archive only hides the customer + blocks NEW subscriptions;
-		// existing unpaid invoices remain collectible and dunning continues
-		// (both are invoice-driven). The operator cancels subs first, then
-		// archives.
-		if status == domain.CustomerStatusArchived && existing.Status != domain.CustomerStatusArchived {
-			if s.subChecker == nil {
-				// Fail closed: an unenforced archive silently keeps charging
-				// the customer against explicit operator intent — the exact
-				// HIGH this guard exists to prevent.
-				return domain.Customer{}, fmt.Errorf("subscription checker not wired: cannot verify archive safety")
-			}
-			blocking, err := s.subChecker.NonTerminalForCustomer(ctx, tenantID, id, false)
-			if err != nil {
-				return domain.Customer{}, fmt.Errorf("check subscriptions before archive: %w", err)
-			}
-			if len(blocking) > 0 {
-				return domain.Customer{}, errs.InvalidState(archiveBlockedMessage(blocking))
-			}
-		}
-		existing.Status = status
+	status := domain.CustomerStatus(input.Status)
+	// Checked here, not left to customers_status_check: the constraint's
+	// error is a 500, which the idempotency middleware caches.
+	if status != "" && status != domain.CustomerStatusActive && status != domain.CustomerStatusArchived {
+		return domain.Customer{}, errs.Invalid("status", "must be active or archived")
 	}
-	if input.DunningPolicyID != nil {
-		policyID := strings.TrimSpace(*input.DunningPolicyID)
-		// An empty id clears the assignment. A set one must be a policy in
-		// the caller's tenant and mode: the foreign key is on the id alone
-		// and foreign-key checks do not apply row-level security, so the
-		// update would accept another tenant's or the other mode's policy.
-		if policyID != "" && s.dunningPolicy != nil {
-			if _, err := s.dunningPolicy.GetPolicyByID(ctx, tenantID, policyID); err != nil {
-				if errors.Is(err, errs.ErrNotFound) {
-					return domain.Customer{}, errs.NotFound("dunning policy")
+
+	var updated domain.Customer
+	err := s.store.WithCustomerRulesLock(ctx, tenantID, id, func(tx *sql.Tx, locked domain.Customer) error {
+		next := locked
+		if name != "" {
+			next.DisplayName = name
+		}
+		if email != "" {
+			next.Email = email
+		}
+		if status != "" {
+			// Archive = 409-BLOCK while any subscription still bills, never
+			// auto-cancel (ADR-067). Auto-cancel would run the immediate-cancel
+			// billing path — final prorated invoice + auto-charge of the saved
+			// card — turning "archive to stop billing" into N surprise charges.
+			// Archive only hides the customer + blocks NEW subscriptions;
+			// existing unpaid invoices remain collectible and dunning continues
+			// (both are invoice-driven). The operator cancels subs first, then
+			// archives. The check runs under the lock, so a create or an
+			// activation that committed before it is counted, and one that
+			// comes later waits and then sees the archive.
+			if status == domain.CustomerStatusArchived && locked.Status != domain.CustomerStatusArchived {
+				if s.subChecker == nil {
+					// Fail closed: an unenforced archive silently keeps charging
+					// the customer against explicit operator intent — the exact
+					// HIGH this guard exists to prevent.
+					return fmt.Errorf("subscription checker not wired: cannot verify archive safety")
 				}
-				return domain.Customer{}, fmt.Errorf("get dunning policy: %w", err)
+				blocking, err := s.subChecker.NonTerminalForCustomer(ctx, tenantID, id, false)
+				if err != nil {
+					return fmt.Errorf("check subscriptions before archive: %w", err)
+				}
+				if len(blocking) > 0 {
+					return errs.InvalidState(archiveBlockedMessage(blocking))
+				}
+			}
+			next.Status = status
+		}
+		if input.DunningPolicyID != nil {
+			policyID := strings.TrimSpace(*input.DunningPolicyID)
+			// An empty id clears the assignment. A set one must be a policy in
+			// the caller's tenant and mode: the foreign key is on the id alone
+			// and foreign-key checks do not apply row-level security, so the
+			// update would accept another tenant's or the other mode's policy.
+			if policyID != "" && s.dunningPolicy != nil {
+				if _, err := s.dunningPolicy.GetPolicyByID(ctx, tenantID, policyID); err != nil {
+					if errors.Is(err, errs.ErrNotFound) {
+						return errs.NotFound("dunning policy")
+					}
+					return fmt.Errorf("get dunning policy: %w", err)
+				}
+			}
+			next.DunningPolicyID = policyID
+		}
+		if input.AdditionalEmails != nil {
+			cc, err := normalizeAdditionalEmails(*input.AdditionalEmails, next.Email)
+			if err != nil {
+				return err
+			}
+			next.AdditionalEmails = cc
+		} else if next.Email != locked.Email {
+			// Primary changed without touching the CC list: if the new
+			// primary is already on the stored list it would be both To and
+			// Cc on every send — reject rather than silently rewrite the
+			// operator's list.
+			for _, cc := range next.AdditionalEmails {
+				if strings.EqualFold(cc, next.Email) {
+					return errs.Invalid("email",
+						"this address is on the additional-emails list — remove it there first")
+				}
 			}
 		}
-		existing.DunningPolicyID = policyID
-	}
-	if input.AdditionalEmails != nil {
-		cc, err := normalizeAdditionalEmails(*input.AdditionalEmails, existing.Email)
-		if err != nil {
-			return domain.Customer{}, err
-		}
-		existing.AdditionalEmails = cc
-	} else if existing.Email != prevEmail {
-		// Primary changed without touching the CC list: if the new
-		// primary is already on the stored list it would be both To and
-		// Cc on every send — reject rather than silently rewrite the
-		// operator's list.
-		for _, cc := range existing.AdditionalEmails {
-			if strings.EqualFold(cc, existing.Email) {
-				return domain.Customer{}, errs.Invalid("email",
-					"this address is on the additional-emails list — remove it there first")
-			}
-		}
-	}
-
-	updated, err := s.store.Update(ctx, tenantID, existing)
+		// A bounce or complaint belonged to the old address, so an email
+		// change clears it in the same write. Left in place, it would make
+		// the suppression gate drop every send to the new address.
+		var err error
+		updated, err = s.store.UpdateTx(ctx, tx, next, next.Email != locked.Email)
+		return err
+	})
 	if err != nil {
 		return domain.Customer{}, err
-	}
-
-	// Bounce-state reset: if the email value actually changed, any
-	// previously-recorded 'bounced'/'complained' state was tied to the
-	// OLD address and must be cleared so the suppression gate doesn't
-	// silently drop sends to the new untested address. Best-effort —
-	// failure here doesn't fail the update (the bounce flag is
-	// diagnostic data; eventual consistency is acceptable).
-	if existing.Email != prevEmail {
-		if err := s.store.ResetEmailStatus(ctx, tenantID, id); err != nil {
-			slog.WarnContext(ctx, "reset email_status after email change failed",
-				"tenant_id", tenantID, "customer_id", id, "error", err)
-		}
 	}
 
 	// Stripe sync (2026-05-29): propagate email + display_name changes
@@ -623,27 +636,8 @@ func (s *Service) UpsertBillingProfile(ctx context.Context, tenantID string, bp 
 		if err := domain.ValidateCurrency(bp.Currency); err != nil {
 			return domain.CustomerBillingProfile{}, err
 		}
-		if s.subChecker != nil {
-			subs, err := s.subChecker.NonTerminalForCustomer(ctx, tenantID, bp.CustomerID, true)
-			if err != nil {
-				return domain.CustomerBillingProfile{}, fmt.Errorf("check subscriptions for currency guard: %w", err)
-			}
-			for _, sub := range subs {
-				for _, cur := range sub.PlanCurrencies {
-					if cur != "" && !strings.EqualFold(cur, bp.Currency) {
-						return domain.CustomerBillingProfile{}, errs.InvalidState(fmt.Sprintf(
-							"billing profile currency %s conflicts with subscription %s's plan currency %s — invoices would relabel plan prices in %s without conversion; cancel the subscription or keep the currency",
-							bp.Currency, sub.ID, strings.ToUpper(cur), bp.Currency))
-					}
-				}
-			}
-		} else {
-			// Test-only path — production wires the checker in router.go. The
-			// format validation above still applies; only the cross-sub
-			// mismatch check is skipped.
-			slog.Warn("billing profile currency guard skipped: subscription checker not wired",
-				"customer_id", bp.CustomerID)
-		}
+		// The check against the customer's subscriptions runs under the
+		// customer-rules lock, with the write (below).
 	}
 	// Normalize + format-validate tax IDs. Unknown kinds pass through untouched
 	// so we don't reject jurisdictions we haven't added explicit support for.
@@ -694,9 +688,22 @@ func (s *Service) UpsertBillingProfile(ctx context.Context, tenantID string, bp 
 	// fell through to the DB CHECK and surfaced as a 500 rather than the
 	// clean 400 tax_status gets above.
 	bp.ProfileStatus = deriveProfileStatus(bp)
-	result, err := s.store.UpsertBillingProfile(ctx, tenantID, bp)
+
+	// The currency check and the write run under the customer-rules lock. A
+	// subscription create or activation holds the same lock until it
+	// commits, so the check counts one that committed first, and one that
+	// comes later waits and then checks against this profile.
+	var result domain.CustomerBillingProfile
+	err := s.store.WithCustomerRulesLock(ctx, tenantID, bp.CustomerID, func(tx *sql.Tx, _ domain.Customer) error {
+		if err := s.checkProfileCurrency(ctx, tenantID, bp); err != nil {
+			return err
+		}
+		var err error
+		result, err = s.store.UpsertBillingProfileTx(ctx, tx, tenantID, bp)
+		return err
+	})
 	if err != nil {
-		return result, err
+		return domain.CustomerBillingProfile{}, err
 	}
 
 	// Note: billing-profile.email was removed in migration 0100.
@@ -744,6 +751,40 @@ func (s *Service) UpsertBillingProfile(ctx context.Context, tenantID string, bp 
 	}
 
 	return result, nil
+}
+
+// checkProfileCurrency refuses a profile currency that differs from a plan
+// currency of the customer's draft, trialing or active subscriptions
+// (InvalidState). The profile currency replaces the plan currency on every
+// invoice, so a mismatch would relabel plan prices without conversion
+// ($100 invoiced as €100). An empty currency checks nothing.
+// UpsertBillingProfile calls it under the customer-rules lock.
+func (s *Service) checkProfileCurrency(ctx context.Context, tenantID string, bp domain.CustomerBillingProfile) error {
+	if bp.Currency == "" {
+		return nil
+	}
+	if s.subChecker == nil {
+		// Test-only path — production wires the checker in router.go. The
+		// format validation still applies; only the cross-sub mismatch
+		// check is skipped.
+		slog.Warn("billing profile currency guard skipped: subscription checker not wired",
+			"customer_id", bp.CustomerID)
+		return nil
+	}
+	subs, err := s.subChecker.NonTerminalForCustomer(ctx, tenantID, bp.CustomerID, true)
+	if err != nil {
+		return fmt.Errorf("check subscriptions for currency guard: %w", err)
+	}
+	for _, sub := range subs {
+		for _, cur := range sub.PlanCurrencies {
+			if cur != "" && !strings.EqualFold(cur, bp.Currency) {
+				return errs.InvalidState(fmt.Sprintf(
+					"billing profile currency %s conflicts with subscription %s's plan currency %s — invoices would relabel plan prices in %s without conversion; cancel the subscription or keep the currency",
+					bp.Currency, sub.ID, strings.ToUpper(cur), bp.Currency))
+			}
+		}
+	}
+	return nil
 }
 
 func (s *Service) GetBillingProfile(ctx context.Context, tenantID, customerID string) (domain.CustomerBillingProfile, error) {

@@ -521,8 +521,9 @@ components:
           type: string
           enum: [active, archived]
           description: |
-            `archived` blocks new subscriptions for the customer. Its
-            unpaid invoices stay collectible.
+            `archived` blocks new subscriptions for the customer and
+            activating its draft subscriptions. Its unpaid invoices stay
+            collectible.
         created_at:
           type: string
           format: date-time
@@ -10431,8 +10432,9 @@ paths:
                   type: string
                   enum: [active, archived]
                   description: |
-                    `archived` blocks new subscriptions for the customer.
-                    `active` lifts that.
+                    `archived` blocks new subscriptions for the customer
+                    and activating its draft subscriptions. `active` lifts
+                    that.
                 dunning_policy_id:
                   type: string
                   description: Policy ID, or `""` to use the account's default policy.
@@ -15720,8 +15722,8 @@ paths:
         billed in advance is invoiced in the same database transaction as
         the activation: both are saved, or neither is. The plans'
         currency must still match the customer's billing profile and the
-        customer's other `draft`, `trialing` and `active` subscriptions.
-        Takes no body.
+        customer's other `draft`, `trialing` and `active` subscriptions,
+        and the customer must not be archived. Takes no body.
 
         Sends the `subscription.activated` webhook event.
       parameters:
@@ -15784,10 +15786,10 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "409":
           description: |
-            Code `invalid_state`: the subscription is not a `draft`, or its
+            Code `invalid_state`: the subscription is not a `draft`, its
             plans' currency differs from the customer's billing profile or
             from the customer's other `draft`, `trialing` or `active`
-            subscriptions.
+            subscriptions, or the customer is archived.
           content:
             application/json:
               schema:
