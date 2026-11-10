@@ -1897,7 +1897,15 @@ func (s *Service) reverseInvoiceTax(ctx context.Context, tenantID string, inv do
 			req.GrossAmountCents = remainingGross
 		}
 	}
-	if _, err := s.taxReverser.ReverseTax(ctx, tenantID, req); err != nil {
+	res, err := s.taxReverser.ReverseTax(ctx, tenantID, req)
+	if err == nil && (res == nil || res.TransactionID == "") {
+		// The invoice carries a committed transaction, so a reversal that
+		// names no transaction reversed nothing (no provider resolved). It is
+		// a failure, as the credit-note sweep treats it: stamping
+		// tax_reversed_at here would record a reversal that was never made.
+		err = errors.New("the tax provider returned no reversal transaction")
+	}
+	if err != nil {
 		// Leave tax_reversed_at NULL: RetryPendingTaxReversal (the scheduler
 		// sweep, symmetric sibling of #267's RetryPendingTaxCommit) re-drives
 		// this on the next tick. The re-drive converges via the request's

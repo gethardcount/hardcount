@@ -3618,11 +3618,14 @@ func (s *PostgresStore) ListPendingTaxCommit(ctx context.Context, batch int, liv
 // bound the set to what genuinely needs work, and ORDER BY + LIMIT bound the
 // batch.
 //
-// The one case that now retries forever instead of aging out is the
-// mode-drift limitation below, which Stripe rejects on every re-drive. That
-// is a permanent per-tick ERROR rather than silent money loss — the honest
-// trade, and the same direction as every other no-silent-fallback call on
-// this path.
+// Two cases now retry forever instead of aging out: the mode-drift limitation
+// below, which Stripe rejects on every re-drive, and a tenant that has
+// disconnected Stripe while an invoice Stripe Tax taxed still owes its
+// reversal (the reversal goes to the provider that made the document, whatever
+// the tenant has selected since). Each is a permanent per-tick ERROR rather
+// than silent money loss — the honest trade, and the same direction as every
+// other no-silent-fallback call on this path. A failing row is not moved
+// back, so enough of them hold the head of this list.
 //
 // LIMITATION (mode-drift): reverseInvoiceTax recomputes the reversal amount
 // (total − credited) on each re-drive. If the invoice's credit-noted total

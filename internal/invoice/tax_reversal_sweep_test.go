@@ -55,6 +55,22 @@ func TestRetryPendingTaxReversal(t *testing.T) {
 		}
 	})
 
+	// The invoice carries a committed transaction, so a reversal that names
+	// no transaction reversed nothing. Stamping tax_reversed_at on it recorded
+	// a reversal that was never made, and the sale stayed on the tax report.
+	t.Run("a result naming no reversal transaction is a failure, not a reversal", func(t *testing.T) {
+		svc, store, rev := seed()
+		rev.empty = true
+
+		recovered, errs := svc.RetryPendingTaxReversal(ctx, 50)
+		if recovered != 0 || len(errs) != 1 {
+			t.Fatalf("recovered=%d errs=%d, want 0/1", recovered, len(errs))
+		}
+		if store.invoices["inv_rev"].TaxReversedAt != nil {
+			t.Error("tax_reversed_at must stay NULL when no reversal transaction came back")
+		}
+	})
+
 	t.Run("failure leaves the row pending and aggregates the error", func(t *testing.T) {
 		svc, store, rev := seed()
 		rev.failErr = errors.New("stripe 503")

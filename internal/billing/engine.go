@@ -807,7 +807,7 @@ func (e *Engine) CommitTax(ctx context.Context, tenantID, invoiceID, calculation
 	if err != nil {
 		return fmt.Errorf("load tenant settings: %w", err)
 	}
-	provider, err := e.taxProviders.Resolve(ctx, ts)
+	provider, err := e.taxProviders.Resolve(ctx, settingsForTaxDocument(ts, calculationID))
 	if err != nil {
 		return fmt.Errorf("resolve provider: %w", err)
 	}
@@ -873,7 +873,7 @@ func (e *Engine) CheckTaxCalculationUsable(ctx context.Context, tenantID, invoic
 	if err != nil {
 		return fmt.Errorf("tax expiry guard: read settings: %w", err)
 	}
-	provider, perr := e.taxProviders.Resolve(ctx, ts)
+	provider, perr := e.taxProviders.Resolve(ctx, settingsForTaxDocument(ts, calculationID))
 	if perr != nil {
 		return fmt.Errorf("tax expiry guard: resolve provider: %w", perr)
 	}
@@ -933,7 +933,7 @@ func (e *Engine) ReverseTax(ctx context.Context, tenantID string, req tax.Revers
 	if err != nil {
 		return nil, fmt.Errorf("load tenant settings: %w", err)
 	}
-	provider, err := e.taxProviders.Resolve(ctx, ts)
+	provider, err := e.taxProviders.Resolve(ctx, settingsForTaxDocument(ts, req.OriginalTransactionID))
 	if err != nil {
 		return nil, fmt.Errorf("resolve provider: %w", err)
 	}
@@ -941,6 +941,25 @@ func (e *Engine) ReverseTax(ctx context.Context, tenantID string, req tax.Revers
 		return &tax.ReversalResult{}, nil
 	}
 	return provider.Reverse(ctx, req)
+}
+
+// settingsForTaxDocument makes a commit or a reversal go to the provider that
+// made the document, not the one the tenant has selected today. upstreamRef is
+// the document's Stripe Tax reference: the calculation to commit, or the
+// transaction to reverse. Only Stripe Tax has upstream state (the manual and
+// none providers return no reference), so a non-empty one means the document
+// is Stripe Tax's, and it is committed and reversed there.
+//
+// Resolved from the current setting, a tenant that switched from Stripe Tax to
+// manual or none got the manual provider for an older invoice: its reversal
+// answered "nothing to reverse" with no error, the invoice was stamped
+// tax_reversed_at, and the sale stayed on Stripe's tax report for good; a
+// commit still owed "succeeded" the same way with nothing reported.
+func settingsForTaxDocument(ts domain.TenantSettings, upstreamRef string) domain.TenantSettings {
+	if upstreamRef != "" {
+		ts.TaxProvider = "stripe_tax"
+	}
+	return ts
 }
 
 // SetTestClockReader wires the test-clock resolver. Optional: when nil, the
