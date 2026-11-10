@@ -467,7 +467,7 @@ func (r *cancelRig) cancelHTTP(t *testing.T, at time.Time) (int, string) {
 // lost period: 409 unbilled_period, the subscription stays active, the record
 // stays. Once billing is fixed, retry-billing then cancel loses nothing.
 //
-// Mutation seam: turn the refusal in billFinalOnImmediateCancelImpl back into
+// Mutation seam: turn the refusal in priceFinalOnCancel back into
 // a silent return → the cancel succeeds with no invoice.
 func TestImmediateCancel_BillingWaitingOrParked_Refused(t *testing.T) {
 	for _, parked := range []bool{false, true} {

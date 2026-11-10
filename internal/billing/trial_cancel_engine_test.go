@@ -91,7 +91,7 @@ func TestBillFinalOnImmediateCancel_TrialWriteOff(t *testing.T) {
 	sub.ActivatedAt = nil
 	subs.subs["sub_1"] = sub
 
-	inv, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
+	inv, err := engine.BillFinalOnCancel(postgres.WithLivemode(context.Background(), true), sub)
 	if err != nil {
 		t.Fatalf("bill final: %v", err)
 	}
@@ -103,7 +103,7 @@ func TestBillFinalOnImmediateCancel_TrialWriteOff(t *testing.T) {
 	activatedAt := trialEnd
 	sub.ActivatedAt = &activatedAt
 	subs.subs["sub_1"] = sub
-	inv2, err := engine.BillFinalOnImmediateCancel(postgres.WithLivemode(context.Background(), true), sub)
+	inv2, err := engine.BillFinalOnCancel(postgres.WithLivemode(context.Background(), true), sub)
 	if err != nil {
 		t.Fatalf("bill final (activated): %v", err)
 	}
