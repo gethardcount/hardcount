@@ -44,7 +44,6 @@ func roundDays(d time.Duration) int {
 
 // SettingsReader reads tenant settings for invoice configuration.
 type SettingsReader interface {
-	NextInvoiceNumber(ctx context.Context, tenantID string) (string, error)
 	// NextInvoiceNumberTx allocates on the caller's tx. The period closers
 	// (ADR-115) take the number AFTER the row CAS on the same tx, so a lost
 	// race burns no number and a rolled-back invoice leaves no sequence gap.
@@ -195,16 +194,6 @@ func (e *Engine) emitFinalizeAuditTx(ctx context.Context, tx *sql.Tx, inv domain
 // row the engine writes for its own invoices, so the two cannot drift (#1279).
 func (e *Engine) EmitFinalizeAuditTx(ctx context.Context, tx *sql.Tx, inv domain.Invoice) error {
 	return e.emitFinalizeAuditTx(ctx, tx, inv)
-}
-
-// finalizeAuditEmit adapts emitFinalizeAuditTx to the CreateInvoiceWithLineItemsAudited
-// callback shape, so the own-tx finalize path (BillOnCreate) audits on the
-// create tx. The store hands back the persisted invoice as `out` (with its real
-// ID); audit that, not the pre-insert struct.
-func (e *Engine) finalizeAuditEmit(ctx context.Context) func(tx *sql.Tx, out domain.Invoice) error {
-	return func(tx *sql.Tx, out domain.Invoice) error {
-		return e.emitFinalizeAuditTx(ctx, tx, out)
-	}
 }
 
 // SetInvoiceVoider / SetCreditNoteAdjuster wire the two issuers the cancel and
@@ -595,16 +584,6 @@ type PricingReader interface {
 
 // InvoiceWriter creates invoices and line items.
 type InvoiceWriter interface {
-	CreateInvoiceWithLineItems(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error)
-	// CreateInvoiceWithLineItemsAudited is CreateInvoiceWithLineItems with an
-	// in-transaction audit emission (ADR-090): emit runs on the SAME tx as the
-	// header + line INSERTs, after they land and BEFORE commit, so an emission
-	// error rolls the whole invoice back — the finalize row and the invoice share
-	// fate. BillOnCreate, the own-transaction finalize path, routes through here
-	// so a finalized invoice can never commit without its audit trail (the
-	// residual own-tx post-commit Log left an invoice visible with no record of
-	// what created it if the write failed).
-	CreateInvoiceWithLineItemsAudited(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error)
 	// CreateInvoiceWithLineItemsTx is the in-tx variant — used by BillOnCreateTx
 	// and BillOnPlanSwapTx; the latter inserts the cross-interval swap's invoice
 	// on the coordinator's tx, atomically with the plan write + watermark
@@ -3354,92 +3333,14 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	return true, nil
 }
 
-// BillOnCreate emits the day-1 invoice for an in_advance subscription
-// (ADR-031). Called by subscription.Service.Create immediately after
-// the sub is persisted. Returns a zero Invoice + nil when the sub
-// has no in_advance items — the cycle path will pick the sub up at
-// period close as usual.
-//
-// Scope of the invoice:
-//   - Period: [CurrentBillingPeriodStart, CurrentBillingPeriodEnd].
-//     Mid-period creation prorates the base by remaining days
-//     (matches the cycle path).
-//   - Line items: base fee for each in_advance item. Arrears items
-//     contribute nothing — their base waits for cycle close.
-//   - Usage: zero. No events have happened yet at t=0.
-//   - billing_reason = subscription_create (distinguishes from the
-//     subscription_cycle invoice that lands at period close with
-//     usage from this same elapsed period).
-//
-// Idempotent via the standard (subscription_id, period_start,
-// period_end) UNIQUE constraint: if BillOnCreate runs twice (e.g. a
-// retry after a transient failure), the second call hits the period
-// slot (errs.CodeInvoiceBillingPeriodTaken) and returns the zero
-// invoice — no duplicate. Any other unique violation is an error. Auto-charge is best-effort: PM ready → synchronous
-// charge with 30s timeout; no PM → queue auto_charge_pending and
-// fire the no-PM notifier email (same path as the cycle invoice).
-func (e *Engine) BillOnCreate(ctx context.Context, sub domain.Subscription) (domain.Invoice, error) {
-	ctx, span := telemetry.Tracer("billing").Start(ctx, "billing.BillOnCreate",
-		trace.WithAttributes(
-			attribute.String("subscription_id", sub.ID),
-			attribute.String("tenant_id", sub.TenantID),
-			attribute.String("customer_id", sub.CustomerID),
-		),
-	)
-	defer span.End()
-
-	inv, lineItems, ok, err := e.buildOnCreateInvoice(ctx, sub, e.effectiveNow(ctx, sub), nil)
-	if err != nil {
-		return domain.Invoice{}, err
-	}
-	if !ok {
-		return domain.Invoice{}, nil
-	}
-
-	invoiceNumber, err := e.settings.NextInvoiceNumber(ctx, sub.TenantID)
-	if err != nil {
-		return domain.Invoice{}, fmt.Errorf("mint invoice number: %w", err)
-	}
-	inv.InvoiceNumber = invoiceNumber
-
-	created, err := e.invoices.CreateInvoiceWithLineItemsAudited(ctx, sub.TenantID, inv, lineItems, e.finalizeAuditEmit(ctx))
-	if err != nil {
-		if errs.Code(err) == errs.CodeInvoiceBillingPeriodTaken {
-			slog.Info("subscription_create invoice already exists (idempotent skip)",
-				"subscription_id", sub.ID,
-				"period_start", inv.BillingPeriodStart,
-				"period_end", inv.BillingPeriodEnd,
-			)
-			return domain.Invoice{}, nil
-		}
-		return domain.Invoice{}, fmt.Errorf("create invoice: %w", err)
-	}
-
-	// Post-persist external/best-effort steps (tax commit, auto-charge). The
-	// finalize AUDIT row and invoice.finalized already committed inside the
-	// create tx above.
-	e.FinalizeOnCreateInvoice(ctx, sub, created)
-
-	slog.Info("subscription_create invoice generated",
-		"invoice_id", created.ID,
-		"subscription_id", sub.ID,
-		"total_cents", created.TotalAmountCents,
-		"line_items", len(lineItems),
-	)
-	return created, nil
-}
-
-// nextInvoiceNumber allocates an invoice number on the caller's transaction
-// when there is one. Inside a transaction the number must never come from the
-// settings store's own connection: the tenant's sequence row may already be
-// locked by this same transaction (a credit-note number taken earlier holds it
-// to commit), and a second connection then waits on it until the request times
-// out. A rollback also returns the number, so no gap is left.
+// nextInvoiceNumber allocates an invoice number on the caller's transaction.
+// The number must never come from the settings store's own connection: the
+// tenant's sequence row may already be locked by this same transaction (a
+// credit-note number taken earlier holds it to commit), and a second
+// connection then waits on it until the request times out. A rollback also
+// returns the number, so no gap is left.
 func (e *Engine) nextInvoiceNumber(ctx context.Context, tx *sql.Tx, tenantID string) (string, error) {
-	if tx != nil {
-		return e.settings.NextInvoiceNumberTx(ctx, tx, tenantID)
-	}
-	return e.settings.NextInvoiceNumber(ctx, tenantID)
+	return e.settings.NextInvoiceNumberTx(ctx, tx, tenantID)
 }
 
 // BillOnCreateTx is the in-transaction variant of BillOnCreate: it builds and
@@ -3481,8 +3382,8 @@ func (e *Engine) BillOnCreateTx(ctx context.Context, tx *sql.Tx, sub domain.Subs
 
 	created, err := e.invoices.CreateInvoiceWithLineItemsTx(ctx, tx, sub.TenantID, inv, lineItems)
 	if err != nil {
-		// Unlike the non-tx BillOnCreate, there is NO clean "idempotent skip"
-		// here: a unique-violation (duplicate period) fires on a statement inside
+		// There is NO clean "idempotent skip" here: a unique-violation
+		// (duplicate period) fires on a statement inside
 		// the CALLER's tx, which poisons it — every later statement and the final
 		// commit then fail. So surface the error (ErrAlreadyExists included) and
 		// let the swap roll back with a clear message rather than an opaque
@@ -3811,12 +3712,11 @@ func onCreateBaseLines(sub domain.Subscription, plans map[string]domain.Plan, ad
 // engine created finalized on a first invoice, a plan swap or a cancel: the
 // Stripe Tax commit, and auto-charge (or enroll-for-retry + no-PM notify).
 // These are external / best-effort and MUST run AFTER the invoice is durably
-// committed — never inside a DB tx. BillOnCreate calls it inline; the
-// coordinator-tx callers call it post-commit.
+// committed — never inside a DB tx. The coordinator-tx callers call it
+// post-commit.
 func (e *Engine) FinalizeOnCreateInvoice(ctx context.Context, sub domain.Subscription, inv domain.Invoice) {
 	// The finalize AUDIT row and invoice.finalized rode the invoice-create tx
-	// (ADR-090, ADR-040): the own-tx caller (BillOnCreate) emits the row via
-	// finalizeAuditEmit, and the coordinator-tx callers (BillOnCreateTx, the
+	// (ADR-090, ADR-040): the coordinator-tx callers (BillOnCreateTx, the
 	// cross-interval swap through BillOnPlanSwapTx, the cancel through
 	// PlanCancelBill's writer) emit it on the coordinator tx; the invoice
 	// store queues the event on the same tx. So this post-commit path runs

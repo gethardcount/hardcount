@@ -33,9 +33,6 @@ func (r *swapPlanReader) GetPlan(_ context.Context, _, id string) (domain.Plan, 
 // roll back from.
 type swapBillErrBiller struct{ err error }
 
-func (b *swapBillErrBiller) BillOnCreate(context.Context, domain.Subscription) (domain.Invoice, error) {
-	return domain.Invoice{}, nil
-}
 func (b *swapBillErrBiller) PlanCancelBill(context.Context, domain.Subscription, time.Time) (subscription.BillWriter, error) {
 	return func(context.Context, *sql.Tx, domain.Subscription) (domain.Invoice, domain.Relief, func(), error) {
 		return domain.Invoice{}, domain.Relief{}, func() {}, nil

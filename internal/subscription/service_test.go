@@ -1081,8 +1081,8 @@ func TestCreate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected: %v", err)
 		}
-		if fb.calls != 0 {
-			t.Errorf("biller called %d times for trialing sub, want 0", fb.calls)
+		if fb.createTxCalls != 0 {
+			t.Errorf("day-1 bill (BillOnCreateTx) ran %d times for a trialing sub, want 0", fb.createTxCalls)
 		}
 	})
 
@@ -1104,8 +1104,8 @@ func TestCreate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create: %v", err)
 		}
-		if fb.calls != 0 {
-			t.Fatalf("biller calls after create-trialing: got %d, want 0", fb.calls)
+		if fb.createTxCalls != 0 {
+			t.Fatalf("day-1 bill (BillOnCreateTx) after create-trialing: got %d, want 0", fb.createTxCalls)
 		}
 		if _, err := svcWithBiller.EndTrial(ctx, "t1", sub.ID); err != nil {
 			t.Fatalf("EndTrial: %v", err)
@@ -1305,9 +1305,7 @@ type fakeBiller struct {
 	// fire-vs-swap guard (ADR-115). nil = no threshold fire this period.
 	thresholdBilledThrough    *time.Time
 	thresholdBilledThroughErr error
-	calls                     int
 	finalCalls                int
-	err                       error
 	finalCancelErr            error
 	finalCancelInv            domain.Invoice
 	createTxCalls             int
@@ -1358,11 +1356,6 @@ type fakeBiller struct {
 	// postCommitCtxErr is ctx.Err() as each post-commit leg saw it, in
 	// postCommit's order.
 	postCommitCtxErr []error
-}
-
-func (f *fakeBiller) BillOnCreate(_ context.Context, _ domain.Subscription) (domain.Invoice, error) {
-	f.calls++
-	return domain.Invoice{}, f.err
 }
 
 // PlanCancelBill counts the plan in finalCalls, records its instant in
@@ -3017,11 +3010,10 @@ func TestPeriodAnchoring(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		// Reset the BillOnCreate counter — Create unconditionally calls
-		// the biller even for in_arrears (the engine no-ops internally),
-		// so fb.calls increments here. The assertion below is about the
-		// swap path, not Create's call.
-		fb.calls, fb.createTxCalls = 0, 0
+		// Reset the day-1 bill counter: Create calls BillOnCreateTx even for
+		// in_arrears (the engine no-ops internally). The assertion below is
+		// about the swap path, not Create's call.
+		fb.createTxCalls = 0
 		oldPS := *sub.CurrentBillingPeriodStart
 		// The non-atomic UpdateItem refuses a cycle-restructuring swap
 		// (ADR-118); the handler runs it through UpdateItemTx.
@@ -3046,8 +3038,8 @@ func TestPeriodAnchoring(t *testing.T) {
 			t.Errorf("expected 1 BillOnPlanSwapDraftsTx call, got %d", fb.swapDraftTxCalls)
 		}
 		// in_arrears NEW plan: no new-period bill.
-		if fb.calls != 0 || fb.createTxCalls != 0 || fb.swapBillCalls != 0 {
-			t.Errorf("expected no new-period bill (in_arrears NEW), got BillOnCreate=%d BillOnCreateTx=%d BillOnPlanSwapTx=%d", fb.calls, fb.createTxCalls, fb.swapBillCalls)
+		if fb.createTxCalls != 0 || fb.swapBillCalls != 0 {
+			t.Errorf("expected no new-period bill (in_arrears NEW), got BillOnCreateTx=%d BillOnPlanSwapTx=%d", fb.createTxCalls, fb.swapBillCalls)
 		}
 		updated, err := svc.store.Get(ctx, "t1", sub.ID)
 		if err != nil {
@@ -3084,8 +3076,8 @@ func TestPeriodAnchoring(t *testing.T) {
 		if err != nil {
 			t.Fatalf("Create: %v", err)
 		}
-		// Reset the bill counters — Create's day-1 invoice fires them once.
-		fb.calls, fb.createTxCalls = 0, 0
+		// Reset the bill counter — Create's day-1 invoice fires it once.
+		fb.createTxCalls = 0
 		fb.createTxOK = true
 		res, err := svc.UpdateItemTx(ctx, nil, "t1", sub.ID, sub.Items[0].ID, UpdateItemInput{
 			NewPlanID: "p_monthly_adv",
@@ -3222,7 +3214,7 @@ func TestUpdateItemTx_CrossIntervalAtomic(t *testing.T) {
 			t.Fatalf("Create: %v", err)
 		}
 		fb.createTxErr, fb.createTxOK = savedErr, savedOK
-		fb.calls, fb.createTxCalls, fb.finalizeCalls, fb.swapDraftTxCalls, fb.finishCalls, fb.swapBillCalls = 0, 0, 0, 0, 0, 0
+		fb.createTxCalls, fb.finalizeCalls, fb.swapDraftTxCalls, fb.finishCalls, fb.swapBillCalls = 0, 0, 0, 0, 0
 		return svc, sub
 	}
 

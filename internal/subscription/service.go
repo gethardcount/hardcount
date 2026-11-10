@@ -53,7 +53,6 @@ type BillWriter func(ctx context.Context, tx *sql.Tx, locked domain.Subscription
 // in_arrears (no day-1 invoice, no cancel proration). Implemented
 // by *billing.Engine.
 type Biller interface {
-	BillOnCreate(ctx context.Context, sub domain.Subscription) (domain.Invoice, error)
 	// PlanCancelBill prices a cancel's final invoice and plans its relief
 	// (ADR-056, ADR-118), with no transaction open: sub is the row the
 	// cancel read, priced as canceled at at. The tax call (a network call
