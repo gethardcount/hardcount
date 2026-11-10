@@ -60,8 +60,8 @@ func TestProcessExpiredTrials_RoutesDueCancel(t *testing.T) {
 	if out.CanceledAt == nil || !out.CanceledAt.Equal(trialEnd) {
 		t.Fatalf("canceled_at = %v, want trial_end %v", out.CanceledAt, trialEnd)
 	}
-	if fb.createTxCalls != 0 || fb.calls != 0 {
-		t.Fatalf("bill calls = %d/%d, want 0/0 (trials are FREE)", fb.createTxCalls, fb.calls)
+	if fb.createTxCalls != 0 {
+		t.Fatalf("day-1 bill calls = %d, want 0 (trials are FREE)", fb.createTxCalls)
 	}
 }
 

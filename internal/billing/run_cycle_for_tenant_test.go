@@ -32,9 +32,7 @@ func tenantRunEngine(subs *mockSubs) *Engine {
 	return tenantRunEngineWith(subs, &mockInvoices{})
 }
 
-// tenantRunEngineWith lets a test supply the invoice mock — e.g. a db-backed one
-// (`&mockInvoices{db: db}`) so the engine's in-tx finalize emission (ADR-090) can
-// ride a real tx when the test also wires the real audit logger.
+// tenantRunEngineWith lets a test supply the invoice mock.
 func tenantRunEngineWith(subs *mockSubs, invoices *mockInvoices) *Engine {
 	pricing := &mockPricing{plans: map[string]domain.Plan{
 		"pln_1": {ID: "pln_1", Currency: "USD", BillingInterval: domain.BillingMonthly, BaseAmountCents: 1000},

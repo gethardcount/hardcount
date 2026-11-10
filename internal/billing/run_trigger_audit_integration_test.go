@@ -97,7 +97,7 @@ func TestTriggerCycleAudit_OperatorTriggerRow(t *testing.T) {
 			cycleUpdated: make(map[string]bool),
 		}
 		subs.db = db // the closer tx is real too, so the in-tx finalize emission has a handle
-		engine := tenantRunEngineWith(subs, &mockInvoices{db: db})
+		engine := tenantRunEngineWith(subs, &mockInvoices{})
 		engine.SetAuditLogger(logger)
 		h := NewHandler(engine)
 
@@ -153,7 +153,7 @@ func TestTriggerCycleAudit_OperatorTriggerRow(t *testing.T) {
 			cycleUpdated: make(map[string]bool),
 		}
 		subs.db = db // the closer tx is real too, so the in-tx finalize emission has a handle
-		engine := tenantRunEngineWith(subs, &mockInvoices{db: db})
+		engine := tenantRunEngineWith(subs, &mockInvoices{})
 		failing := &erroringRunAudit{}
 		engine.SetAuditLogger(failing)
 		h := NewHandler(engine)

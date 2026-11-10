@@ -2,6 +2,7 @@ package billing_test
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -103,10 +104,7 @@ func (r *cycleRig) cycleInvoices(t *testing.T) int {
 // repairs the counter.
 func takeNextInvoiceNumber(t *testing.T, ctx context.Context, db *postgres.DB, invoices *invoice.PostgresStore, tenantID, customerID string) (repair func()) {
 	t.Helper()
-	num, err := tenant.NewSettingsStore(db).NextInvoiceNumber(ctx, tenantID)
-	if err != nil {
-		t.Fatalf("take a number: %v", err)
-	}
+	num := allocateInvoiceNumber(t, ctx, db, tenant.NewSettingsStore(db), tenantID)
 	now := time.Now().UTC()
 	if _, err := invoices.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 		CustomerID: customerID, InvoiceNumber: num, Status: domain.InvoiceDraft, PaymentStatus: domain.PaymentPending,
@@ -190,4 +188,19 @@ func TestBilling_PeriodSlotTaken_FailsBillKeepsPeriod(t *testing.T) {
 	if n := r.cycleInvoices(t); n != 1 {
 		t.Errorf("cycle invoices = %d, want 1", n)
 	}
+}
+
+// allocateInvoiceNumber takes the tenant's next invoice number on a
+// transaction of its own and commits it, as an invoice writer would.
+func allocateInvoiceNumber(t *testing.T, ctx context.Context, db *postgres.DB, settings *tenant.SettingsStore, tenantID string) string {
+	t.Helper()
+	var num string
+	if err := db.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+		var err error
+		num, err = settings.NextInvoiceNumberTx(ctx, tx, tenantID)
+		return err
+	}); err != nil {
+		t.Fatalf("allocate an invoice number: %v", err)
+	}
+	return num
 }
