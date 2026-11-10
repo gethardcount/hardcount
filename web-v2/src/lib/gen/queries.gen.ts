@@ -9478,7 +9478,10 @@ export const getCollectInvoicePaymentUrl = (id: string,) => {
  *
  * A paid invoice sends the `invoice.paid` webhook event (and
  * `payment.succeeded` for a card payment), and any active dunning run
- * is resolved with `payment_recovered`. A declined card answers 502;
+ * is resolved with `payment_recovered`. A payment Stripe is still
+ * processing answers 200 with `payment_status: processing`, and the
+ * dunning run stays open until the payment settles. A declined card
+ * answers 502;
  * the invoice's `payment_status` becomes `failed`, and dunning starts
  * when the customer's policy is enabled. Check
  * `payment_status` on the returned invoice.
