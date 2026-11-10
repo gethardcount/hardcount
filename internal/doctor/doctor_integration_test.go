@@ -416,9 +416,11 @@ func TestDoctor_CreditCurrencyChecks(t *testing.T) {
 
 // TestDoctor_WebhookDeliveryPendingPastGiveUp: the retry worker gives up a
 // webhook delivery still pending 50 hours 36 minutes after it was created,
-// at the delivery's next claim. The check flags one still pending an hour
-// after that. It stays silent on a pending delivery inside that hour, on one
-// waiting for its last retry, and on a failed one of any age.
+// at the delivery's next claim. That claim can be a retry the schedule set,
+// up to 24 hours later. The check flags one still pending 25 hours after the
+// age. It stays silent on a pending delivery inside those 25 hours, on one
+// waiting for its last retry on either side of the age, and on a failed one
+// of any age.
 func TestDoctor_WebhookDeliveryPendingPastGiveUp(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -451,19 +453,28 @@ func TestDoctor_WebhookDeliveryPendingPastGiveUp(t *testing.T) {
 	mustExec(`INSERT INTO webhook_endpoints (id, tenant_id, url, secret_encrypted, secret_last4)
 		VALUES ('hc_whe_doc', $1, 'https://example.test/hook', 'whsec_doc', '_doc')`, tenantID)
 	mustExec(`INSERT INTO webhook_events (id, tenant_id, event_type) VALUES ('hc_whevt_doc', $1, 'invoice.paid')`, tenantID)
-	delivery := func(id, status string, attempts int, age string) {
+	// retryIn is how far ahead a pending delivery's next_retry_at is: a claim
+	// lease for a row that records no result, or the wait the retry schedule
+	// set after a counted failure.
+	delivery := func(id, status string, attempts int, age, retryIn string) {
 		t.Helper()
 		mustExec(`INSERT INTO webhook_deliveries (id, tenant_id, webhook_endpoint_id, webhook_event_id, status, attempt_count,
 				next_retry_at, created_at, completed_at)
 			VALUES ($1, $2, 'hc_whe_doc', 'hc_whevt_doc', $3, $4,
-				CASE WHEN $3 = 'pending' THEN now() + interval '3 minutes' END,
+				CASE WHEN $3 = 'pending' THEN now() + $6::interval END,
 				now() - $5::interval,
-				CASE WHEN $3 <> 'pending' THEN now() END)`, id, tenantID, status, attempts, age)
+				CASE WHEN $3 <> 'pending' THEN now() END)`, id, tenantID, status, attempts, age, retryIn)
 	}
-	delivery("hc_whd_doc_stuck", "pending", 0, "51 hours 37 minutes")
-	delivery("hc_whd_doc_grace", "pending", 0, "51 hours 35 minutes")
-	delivery("hc_whd_doc_last_retry", "pending", 5, "27 hours")
-	delivery("hc_whd_doc_failed", "failed", 6, "90 hours")
+	const lease = "3 minutes"
+	delivery("hc_whd_doc_stuck", "pending", 0, "75 hours 37 minutes", lease)
+	delivery("hc_whd_doc_grace", "pending", 0, "75 hours 35 minutes", lease)
+	delivery("hc_whd_doc_last_retry", "pending", 5, "27 hours", lease)
+	// Past the give-up age and healthy. The worker was stopped for almost two
+	// days, so the fifth attempt failed 48 hours in, and the schedule set the
+	// last retry 24 hours after that. The worker gives the row up at that
+	// claim.
+	delivery("hc_whd_doc_late_retry", "pending", 5, "52 hours", "20 hours")
+	delivery("hc_whd_doc_failed", "failed", 6, "90 hours", lease)
 
 	res := doctor.Run(ctx, admin, doctor.Checks)
 	for _, e := range res.Errors {
@@ -479,6 +490,7 @@ func TestDoctor_WebhookDeliveryPendingPastGiveUp(t *testing.T) {
 		"hc_whd_doc_stuck":      true,
 		"hc_whd_doc_grace":      false,
 		"hc_whd_doc_last_retry": false,
+		"hc_whd_doc_late_retry": false,
 		"hc_whd_doc_failed":     false,
 	} {
 		if flagged[id] != want {

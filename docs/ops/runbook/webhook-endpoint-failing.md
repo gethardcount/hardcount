@@ -74,6 +74,12 @@ delivery is retried on the schedule.
 
 1. Find the ERROR line `webhook delivery attempt panicked` with the
    delivery's `delivery_id`. Its `stack` field shows where.
+   - If no line has that `delivery_id`, search for
+     `webhook delivery attempt panicked in a dial hook`. The panic was in
+     the check Hardcount makes on an address before it connects, and that
+     line has no `delivery_id`. Its `address` field is the host being
+     connected, by name or by IP address, with the port. Match the line
+     to the delivery by that and by the time.
 2. Report the stack as a bug. A delivery that ends failed can be replayed
    once the bug is fixed.
 
@@ -95,6 +101,10 @@ failed, the text ends with `(last error: …)`.
      with the same `delivery_id`.
 3. Fix the cause, then replay the event as in step 3 of [Fix](#fix).
 
-`hardcount-doctor` lists every delivery still pending an hour past that
-age (check `webhook_delivery_pending_past_give_up`). A row there means the
-`webhook_delivery` job is not running, or it cannot save the delivery.
+`hardcount-doctor` lists every delivery still pending 25 hours past that
+age, so 75 hours 36 minutes after it was created (check
+`webhook_delivery_pending_past_give_up`). The 25 hours cover a delivery
+that is waiting for a retry. Hardcount gives a delivery up the next time
+it picks the delivery up, and a retry set just before the age comes due
+up to 24 hours later. A row there means the `webhook_delivery` job is
+stopped, paused or far behind, or it cannot save the delivery.

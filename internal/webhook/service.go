@@ -196,12 +196,48 @@ func NewService(store Store, client HTTPClient, appEnv string) *Service {
 // The transport keeps the default proxy setting. With HTTPS_PROXY set the
 // socket goes to the proxy, so the address checked is the proxy's and the
 // webhook target is resolved by the proxy, outside this guard.
+//
+// Both dial hooks defer recoverDialHook, because neither runs on the
+// goroutine that sends the delivery.
 func ssrfHardenedTransport(allowLoopback bool) *http.Transport {
 	t := http.DefaultTransport.(*http.Transport).Clone()
-	t.DialContext = func(ctx context.Context, network, addr string) (net.Conn, error) {
+	t.DialContext = func(ctx context.Context, network, addr string) (_ net.Conn, err error) {
+		defer recoverDialHook(ctx, addr, &err)
 		return ssrfSafeDialContext(ctx, network, addr, allowLoopback)
 	}
 	return t
+}
+
+// errDialHookPanicked is the error a dial hook returns in place of a panic
+// (see recoverDialHook). It says no more than deliveryPanicMessage, because
+// a delivery's error is shown to the tenant.
+var errDialHookPanicked = errors.New(deliveryPanicMessage)
+
+// recoverDialHook is deferred by the delivery client's two dial hooks, with
+// err pointing at the hook's error result. It turns a panic in the hook into
+// errDialHookPanicked. The POST then fails, and attemptDelivery counts it as
+// one failed attempt.
+//
+// guardAttempt cannot recover these panics. net/http calls the transport's
+// DialContext on a goroutine of its own. net.Dialer calls Control on a
+// further one when the host has both IPv4 and IPv6 addresses. A panic on
+// either would end the process.
+//
+// The hook logs the panic and also returns an error. The stack exists only
+// here, and the dialer drops one address's error when another address
+// connects. An error from a hook also refuses the connection, so a hook that
+// panicked lets no address through.
+func recoverDialHook(ctx context.Context, address string, err *error) {
+	r := recover()
+	if r == nil {
+		return
+	}
+	slog.ErrorContext(ctx, "webhook delivery attempt panicked in a dial hook; the connection is refused",
+		"address", address,
+		"panic", r,
+		"stack", string(debug.Stack()),
+	)
+	*err = errDialHookPanicked
 }
 
 // ssrfSafeDialContext is the dial function wired into the delivery client.
@@ -229,7 +265,9 @@ func ssrfSafeDialContext(ctx context.Context, network, addr string, allowLoopbac
 // that does not parse is refused. allowLoopback is the same development
 // exception assertDialAddrAllowed applies.
 func dialControl(allowLoopback bool) func(network, address string, _ syscall.RawConn) error {
-	return func(_, address string, _ syscall.RawConn) error {
+	return func(_, address string, _ syscall.RawConn) (err error) {
+		// Control is given no context.
+		defer recoverDialHook(context.Background(), address, &err)
 		ap, err := netip.ParseAddrPort(address)
 		if err != nil {
 			return fmt.Errorf("refusing to dial unparseable address %q: %w", address, err)
@@ -676,7 +714,9 @@ func (s *Service) spawnAttempts(ctx context.Context, event domain.WebhookEvent, 
 // it into one failed attempt. Both goroutines that send deliveries run under
 // it: an event's first attempt, and each row of the retry worker. No caller
 // can recover for them, so a panic there would end the process, and with it
-// the API and every background job on this replica.
+// the API and every background job on this replica. The client's dial hooks
+// run on goroutines that net/http and net start, outside this guard, and
+// recover for themselves (see recoverDialHook).
 //
 // The panic is counted through scheduleRetryOrFail, like any failed attempt,
 // so the delivery waits out the ladder and ends failed after the last one.
@@ -1288,7 +1328,14 @@ func (s *Service) attemptDelivery(ctx context.Context, d domain.WebhookDelivery,
 				"delivery_id", d.ID, "endpoint_id", ep.ID, "error", err)
 			return
 		}
-		s.scheduleRetryOrFail(ctx, d.TenantID, d, err.Error())
+		errMsg := err.Error()
+		if errors.Is(err, errDialHookPanicked) {
+			// A dial hook panicked and logged it (see recoverDialHook). Store
+			// the text of a panicked attempt alone, as guardAttempt does:
+			// err wraps it in the URL and the address.
+			errMsg = deliveryPanicMessage
+		}
+		s.scheduleRetryOrFail(ctx, d.TenantID, d, errMsg)
 		return
 	}
 	defer func() { _ = resp.Body.Close() }()

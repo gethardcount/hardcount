@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"net"
 	"net/http"
 	"strings"
 	"sync/atomic"
@@ -307,6 +308,35 @@ func TestDeliveryPanic_RetryWorker_IsOneFailedAttempt(t *testing.T) {
 				t.Errorf("POSTs = %d, want %d", posts, tc.wantPosts)
 			}
 		})
+	}
+}
+
+// TestDeliveryPanic_DialHook_IsOneFailedAttempt: the panic is in a dial hook
+// of the delivery client. net/http runs that hook in a goroutine of its own,
+// where guardAttempt cannot recover it. The process survives, and the
+// delivery counts one failed attempt and waits for the ladder's retry. The
+// stored error is the fixed text for a panicked attempt, without the panic
+// value: the API shows it to the tenant.
+//
+// The client is the real one NewService builds. Without the recover in the
+// hook the panic ends the test process, as it would the server. After the
+// restart the row still counts no attempt, so the retry worker claims it at
+// the end of its lease and panics again.
+func TestDeliveryPanic_DialHook_IsOneFailedAttempt(t *testing.T) {
+	f := newGuardFixture(t, "Delivery panic dial hook")
+	// The endpoint's URL names a host, so the dial hook resolves it first.
+	resolve := lookupIP
+	lookupIP = func(string) ([]net.IP, error) { panic("dial hook bug") }
+	t.Cleanup(func() { lookupIP = resolve })
+	svc := NewService(f.store, nil, "local")
+	d := f.claimableDelivery(t)
+
+	sent := time.Now()
+	retryPass(t, svc, f.tick)
+	got := f.delivery(t, d.ID)
+	wantRetryScheduled(t, got, 1, sent)
+	if got.ErrorMessage != deliveryPanicMessage {
+		t.Errorf("error_message = %q, want %q", got.ErrorMessage, deliveryPanicMessage)
 	}
 }
 

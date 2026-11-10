@@ -246,6 +246,7 @@ recorded a result.
 | Detached mark | Every delivery mark goes through `markDelivery`: `context.WithoutCancel` plus 5 seconds. | A retry's context ends with its tick: at shutdown, on a lost leader lease, or when the row's 13-second budget runs out. A `2xx` left unrecorded was sent again when the lease ended. |
 | A POST cut short by its tick | Not counted. The row keeps its claim lease. | The receiver did not fail. Counting it would use up one retry of every delivery in flight at each deploy. |
 | Panic | Both goroutines that send recover: an event's first attempt, and each row of the retry worker. The panic is logged with its stack and counted as one failed attempt. | No caller could recover for them, so a panic ended the process. Uncounted, the row was claimed when its lease ended and panicked again. |
+| Panic in a dial hook | The client's two dial hooks, which check an address before it connects, recover for themselves (`recoverDialHook`). A panic is logged with its stack and returned as an error: the connection is refused, and the POST counts as one failed attempt. | `net/http` runs the transport's `DialContext` on a goroutine of its own, and `net.Dialer` runs `Control` on a further one for a host with both IPv4 and IPv6 addresses. The guard above does not cover them. |
 | Age bound | A delivery still `pending` 50 hours 36 minutes after `created_at` is marked `failed` at its next claim, with no POST. `attempt_count` is unchanged. | Only a mark moves `attempt_count`. A delivery whose endpoint or event read kept failing, or whose mark did, was claimed at the end of every lease, for good. |
 
 The age is the retry ladder plus a margin. The ladder is 26 hours 36
@@ -266,13 +267,25 @@ nothing is not an attempt.
 - A delivery delayed by more than a day in total is given up without its
   remaining attempts. That needs the worker stopped or far behind for that
   long. The operator replays it.
+- A delivery past the age stays `pending` until its next claim. For one
+  that counted a failure just before the age, that claim is the retry the
+  ladder set, up to 24 hours later.
 - A mark that panics or fails every time leaves the row `pending`. Each
-  try is logged. `hardcount-doctor` flags a delivery still pending an hour
-  past the age (`webhook_delivery_pending_past_give_up`).
+  try is logged. `hardcount-doctor` flags a delivery still pending 25
+  hours past the age (`webhook_delivery_pending_past_give_up`). The 25
+  hours cover the ladder's longest wait, so the check does not flag a
+  delivery that is waiting for a retry.
+- The two dial hooks are the only code of this package that Go's `net`
+  and `net/http` run on goroutines of their own today. A new hook there,
+  such as a request body that this package reads, needs a recover of its
+  own.
 - A POST cut short by its tick may have reached the receiver. It is sent
   again after the lease, which decision 5 already allows.
 
 Tested against real Postgres in
-`internal/webhook/delivery_guards_integration_test.go`. Removing the
+`internal/webhook/delivery_guards_integration_test.go`. Removing a
 recover, putting the mark back on the tick's context, or removing the
-bound each turns its test red.
+bound each turns its test red. One recover has no such test: the `defer`
+in `dialControl`. Its body has no seam through which a test can make it
+panic. `recoverDialHook` itself is tested in a `Control` hook on a real
+dialer (`internal/webhook/delivery_guards_test.go`).
