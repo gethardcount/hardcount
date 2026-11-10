@@ -890,8 +890,9 @@ func (s *PostgresStore) ApplyToInvoiceAtomic(ctx context.Context, tenantID, cust
 		now = clock.Now(ctx)
 	}
 	// liveAt is the instant a grant must not yet have expired at to pay this
-	// invoice (ADR-071 §2). A period or threshold invoice uses its issued_at,
-	// the end of the stretch it bills, however late it is collected: a close
+	// invoice (ADR-071 §2). A period or threshold invoice uses its issued_at
+	// (a period's end; a threshold fire's instant, one invoice grace after the
+	// end of the window it bills), however late it is collected: a close
 	// that failed and waited on the retry ladder, a draft finalized after its
 	// tax was computed, a crash before the inline collection. The expiry sweep
 	// holds such a grant until then (domain.CreditDrawOwedSQL). Only the

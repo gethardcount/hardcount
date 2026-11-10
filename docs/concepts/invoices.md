@@ -167,7 +167,18 @@ When one is crossed, Hardcount issues an invoice for the usage so far,
 with `billing_reason` `threshold` and no base fee, and sends
 `subscription.threshold_crossed`. The period keeps its dates, and the
 period's own invoice bills the rest. A threshold fires at most once a
-period. Usage of a `max` or `last` meter waits for the period's own
+period.
+
+"So far" ends one `INVOICE_GRACE_PERIOD` before the invoice is built (1
+hour unless you set it): Hardcount counts and bills usage stamped up to that
+instant, and the invoice's `billing_period_end` is that instant. Usage
+reaches Hardcount some time after it happens, and this gives it the wait a
+period's own invoice gives it. So a threshold invoice is built at least one
+grace after the usage that crossed it, at the first billing run after that.
+A crossing within the last grace of a period makes no invoice: the period's
+own invoice bills that usage. A credit grant that expires within the grace
+before the invoice is built does not pay it. A subscription on a test clock
+gets no wait. Usage of a `max` or `last` meter waits for the period's own
 invoice. `DELETE /v1/subscriptions/{id}/billing-thresholds` removes them.
 
 What happens to the usage a spend-threshold invoice billed depends on what
@@ -191,8 +202,11 @@ fee of a plan billed in arrears. These rules apply to that fee as to the
 usage.
 
 Usage of a `sum` or `count` meter
-([aggregation](meters-and-prices.md#meters)) that is stamped before a
-spend-threshold invoice but arrives after it is on neither invoice. While
+([aggregation](meters-and-prices.md#meters)) that is stamped before the end
+of a spend-threshold invoice's window (its `billing_period_end`) but arrives
+after the invoice is built is on neither invoice. That is usage more than
+one grace late; usage stamped after the window's end is billed by the
+period's own invoice whenever it arrives before that invoice is built. While
 the spend-threshold invoice can still be voided, such usage is not flagged
 `after_close` ([late usage](usage-events.md#late-usage)): a void would give
 its window back. A written-off invoice can still be voided, so usage behind
