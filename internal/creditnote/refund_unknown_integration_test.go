@@ -251,23 +251,33 @@ func TestRefundUnknown_RealStore(t *testing.T) {
 		return cn
 	}
 
-	// A refund asked for through the API runs on the request's context, which
-	// chi's middleware.Timeout ends after 30 seconds. When Stripe hangs, that
-	// context ends during the Stripe call, and Postgres refuses a transaction
-	// begun on it. The write that records the unclear result must still land.
+	// The issue endpoint (POST /v1/credit-notes/{id}/issue) runs Issue on the
+	// request's context, which the route's Timeout middleware ends after 30
+	// seconds. When Stripe hangs, that context ends during the Stripe call,
+	// and Postgres refuses a transaction begun on it. The write that records
+	// the unclear result must still land.
 	t.Run("a request that ends during the Stripe call still stores unknown at issue", func(t *testing.T) {
 		_, inv := seedInvoiceForCN(t, db, tenantID, "unk-deadline-issue", domain.InvoicePaid, domain.PaymentSucceeded, "pi_unk_deadline_issue")
 		refunder := &keyRecordingRefunder{}
 		svc := creditnote.NewService(store, invStore, refunder)
 		svc.SetNumberGenerator(&seqNumbers{prefix: "UNKDLISSUE"})
 		svc.SetAuditLogger(audit.NewLogger(db)) // its row rides the same write
+		// The issue endpoint runs Issue on the request's context. (A refund,
+		// CreateRefund, runs on a context the request cannot cancel.)
+		draft, err := svc.Create(ctx, tenantID, creditnote.CreateInput{
+			InvoiceID: inv.ID, Reason: "requested_by_customer", RefundAmountCents: inv.TotalAmountCents,
+			Lines: []creditnote.CreditLineInput{{Description: "Refund", Quantity: 1, UnitAmountCents: inv.TotalAmountCents}},
+		})
+		if err != nil {
+			t.Fatalf("create the draft: %v", err)
+		}
 		reqCtx, cancel := context.WithCancel(ctx)
 		defer cancel()
 		refunder.during = cancel
 
-		cn, err := svc.CreateRefund(reqCtx, tenantID, creditnote.RefundInput{InvoiceID: inv.ID, Reason: "requested_by_customer"})
+		cn, err := svc.Issue(reqCtx, tenantID, draft.ID)
 		if err != nil {
-			t.Fatalf("CreateRefund: %v (want the issued note with refund_status unknown)", err)
+			t.Fatalf("Issue: %v (want the issued note with refund_status unknown)", err)
 		}
 		got, err := store.Get(ctx, tenantID, cn.ID)
 		if err != nil {
