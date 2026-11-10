@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"net/http/httptest"
 	"strings"
@@ -58,7 +57,7 @@ func TestE2E_CardDispute_RecordedNeverActedOn(t *testing.T) {
 			inv["paid_at"], inv["stripe_payment_intent_id"])
 	}
 
-	if _, err := tenantstripe.NewStore(db).Upsert(context.Background(), tenantstripe.UpsertInput{
+	if _, err := tenantstripe.NewStore(db).Upsert(callerCtx(tenantID, false), tenantstripe.UpsertInput{
 		TenantID: tenantID, Livemode: false, SecretKey: "sk_test_dispute_flow", PublishableKey: "pk_test_dispute_flow",
 	}); err != nil {
 		t.Fatalf("connect stripe: %v", err)

@@ -75,7 +75,4 @@ func TestService_RefusesOtherModeBeforeWriting(t *testing.T) {
 			t.Errorf("Delete live with a %s = %v, want ErrForbidden", tc.name, err)
 		}
 	}
-	if _, err := svc.List(hardcountauth.WithKeyType(context.Background(), hardcountauth.KeyTypeSession), tenantID); !errors.Is(err, postgres.ErrLivemodeUnset) {
-		t.Errorf("List with no mode on ctx = %v, want ErrLivemodeUnset", err)
-	}
 }

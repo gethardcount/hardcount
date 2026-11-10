@@ -94,7 +94,7 @@ func newKeyRefusedRig(t *testing.T, name string, connected bool, status int, bod
 	d := newDunningRetryRig(t, name)
 	r := &keyRefusedRig{dunningRetryRig: d, stub: &keyStripeStub{status: status, body: body}, creds: tenantstripe.NewStore(d.db)}
 	if connected {
-		if _, err := r.creds.Upsert(d.ctx, tenantstripe.UpsertInput{
+		if _, err := r.creds.Upsert(auth.WithTenantID(d.ctx, d.tenantID), tenantstripe.UpsertInput{
 			TenantID: d.tenantID, Livemode: false, SecretKey: "sk_test_rolled_abcd", PublishableKey: "pk_test_abcd",
 		}); err != nil {
 			t.Fatalf("store stripe key: %v", err)
@@ -152,7 +152,7 @@ func (r *keyRefusedRig) assertNothingWritten(before domain.Invoice) {
 // settingsMark is the test-mode key row's last_verified_error and its kind.
 func (r *keyRefusedRig) settingsMark() (found bool, msg, kind string) {
 	r.t.Helper()
-	rows, err := r.creds.ListByTenant(r.ctx, r.tenantID)
+	rows, err := r.creds.ListByTenant(auth.WithTenantID(r.ctx, r.tenantID), r.tenantID)
 	if err != nil {
 		r.t.Fatalf("list stripe keys: %v", err)
 	}

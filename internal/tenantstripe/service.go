@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
-	"slices"
 	"strings"
 	"time"
 
@@ -217,24 +216,16 @@ func (s *Service) runPostConnectRetry(tenantID string, livemode bool, expected i
 		"duration_ms", time.Since(start).Milliseconds())
 }
 
-// List returns the public view of the caller's own mode's connection (see
-// checkMode), as a list of at most one. Handlers enforce that the caller's
-// auth key tenant matches tenantID before calling.
+// List returns the public view of the caller's own mode's connection, as a
+// list of at most one. The store reads it as the caller in ctx, under
+// row-level security, so the other mode's connection never shows. A ctx
+// without the tenant returns postgres.ErrTenantUnset, and one without the
+// mode returns postgres.ErrLivemodeUnset.
 func (s *Service) List(ctx context.Context, tenantID string) ([]domain.StripeProviderCredentials, error) {
 	if tenantID == "" {
 		return nil, errs.Required("tenant_id")
 	}
-	own, err := postgres.Livemode(ctx)
-	if err != nil {
-		return nil, err
-	}
-	all, err := s.store.ListByTenant(ctx, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	return slices.DeleteFunc(all, func(c domain.StripeProviderCredentials) bool {
-		return c.Livemode != own
-	}), nil
+	return s.store.ListByTenant(ctx, tenantID)
 }
 
 // Delete removes credentials for a single mode. Returns errs.ErrNotFound if

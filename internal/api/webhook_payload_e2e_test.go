@@ -232,7 +232,7 @@ func TestE2E_WebhookPayloads_InvoicePaymentDunningPaymentMethod(t *testing.T) {
 	}
 
 	// Stripe: a card payment, a second charge, a decline, a dispute, a card.
-	if _, err := tenantstripe.NewStore(db).Upsert(context.Background(), tenantstripe.UpsertInput{
+	if _, err := tenantstripe.NewStore(db).Upsert(callerCtx(tenantID, false), tenantstripe.UpsertInput{
 		TenantID: tenantID, Livemode: false, SecretKey: "sk_test_webhook_payload", PublishableKey: "pk_test_webhook_payload",
 	}); err != nil {
 		t.Fatalf("connect stripe: %v", err)

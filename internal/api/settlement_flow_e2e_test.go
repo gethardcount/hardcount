@@ -2,7 +2,6 @@ package api
 
 import (
 	"bytes"
-	"context"
 	"fmt"
 	"net/http/httptest"
 	"strings"
@@ -153,7 +152,7 @@ func TestE2E_InvoiceSettlement_OfflineAndStripeWebhook(t *testing.T) {
 	// Connect Stripe in test mode, then register the webhook signing secret
 	// as the settings page does. (The connect call itself checks the keys
 	// with Stripe, so the keys go in through the store.)
-	if _, err := tenantstripe.NewStore(db).Upsert(context.Background(), tenantstripe.UpsertInput{
+	if _, err := tenantstripe.NewStore(db).Upsert(callerCtx(tenantID, false), tenantstripe.UpsertInput{
 		TenantID: tenantID, Livemode: false, SecretKey: "sk_test_settlement_flow", PublishableKey: "pk_test_settlement_flow",
 	}); err != nil {
 		t.Fatalf("connect stripe: %v", err)

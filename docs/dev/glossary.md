@@ -15,8 +15,8 @@ them to use Hardcount.
   with `db.BeginTx`. TxTenant sets the tenant (and test or live mode), so
   RLS shows only that tenant's rows. TxBypass turns RLS off, so the query
   must filter by tenant itself. Background jobs, sign-in, public links,
-  incoming webhooks, two signed-in areas and the restore commands use it
-  ([list](../architecture.md#design-rules)).
+  incoming webhooks, reading a tenant's Stripe keys, one signed-in area and
+  the restore commands use it ([list](../architecture.md#design-rules)).
   [More](../adr/003-postgresql-rls-multi-tenancy.md#decision)
 - **Table and column names behind the words above**:
   - dimensions: the `properties` column of a usage event.

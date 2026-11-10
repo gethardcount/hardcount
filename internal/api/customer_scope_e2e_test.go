@@ -656,7 +656,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 	// last: connecting Stripe changes what other endpoints do. Stripe is
 	// replaced by a stub that counts calls.
 	t.Run("payment method setup session with stripe [path customer]", func(t *testing.T) {
-		if _, err := tenantstripe.NewStore(db).Upsert(context.Background(), tenantstripe.UpsertInput{
+		if _, err := tenantstripe.NewStore(db).Upsert(callerCtx(tenantA, true), tenantstripe.UpsertInput{
 			TenantID: tenantA, Livemode: true, SecretKey: "sk_live_stub", PublishableKey: "pk_live_stub",
 		}); err != nil {
 			t.Fatalf("connect stripe: %v", err)

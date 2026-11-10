@@ -134,7 +134,7 @@ func (r *noStripeRig) runs(invoiceID string) []map[string]any {
 
 func (r *noStripeRig) connectStripe() {
 	r.t.Helper()
-	if _, err := tenantstripe.NewStore(r.db).Upsert(context.Background(), tenantstripe.UpsertInput{
+	if _, err := tenantstripe.NewStore(r.db).Upsert(callerCtx(r.tenantID, false), tenantstripe.UpsertInput{
 		TenantID: r.tenantID, Livemode: false, SecretKey: "sk_test_no_stripe_later", PublishableKey: "pk_test_no_stripe_later",
 	}); err != nil {
 		r.t.Fatalf("connect stripe: %v", err)

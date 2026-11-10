@@ -88,13 +88,14 @@ instead (see the [README](README.md)).
 ### Local services
 
 `docker compose up -d postgres redis mailpit` starts everything the API can
-use on your machine:
+use on your machine. The three containers listen on 127.0.0.1 only, so
+another machine on your network cannot reach them:
 
 | Service | Where | Notes |
 |---|---|---|
-| Postgres | `:5432` | Password `hardcount`. Data is kept in a Docker volume. |
-| Redis | `:6379` | Used for rate limiting. Optional outside production: without it, only sign-in (`/v1/auth`) is rate-limited. |
-| Mailpit | `:1025` (SMTP), `:8025` (web) | Catches every email Hardcount sends, so nothing leaves your machine. |
+| Postgres | `127.0.0.1:5432` | Password `hardcount`. Data is kept in a Docker volume. |
+| Redis | `127.0.0.1:6379` | Used for rate limiting. Optional outside production: without it, only sign-in (`/v1/auth`) is rate-limited. |
+| Mailpit | `127.0.0.1:1025` (SMTP), `127.0.0.1:8025` (web) | Catches every email Hardcount sends, so nothing leaves your machine. |
 | The API | `:8080` | Started by `make dev`. Not a container. |
 
 `make bootstrap` takes an optional owner email and password:
@@ -195,8 +196,9 @@ internal/{domain}/
   `db.BeginTx(ctx, postgres.TxTenant, tenantID)`. A tenant is one account's
   data in a shared database; RLS hides every other tenant's rows.
 - Some store methods run under `postgres.TxBypass`, where RLS does not
-  apply: work across tenants, work before the tenant is known, and two
-  signed-in areas. Such a query must filter by `tenant_id` itself.
+  apply: work across tenants, work before the tenant is known, reading a
+  tenant's Stripe keys, and one signed-in area. Such a query must filter by
+  `tenant_id` itself.
   [Architecture](docs/architecture.md#design-rules) lists them. A new use
   fails `internal/arch/txbypass_allowlist_test.go` until it is listed there.
 - Integration tests use `testutil.SetupTestDB()`.
@@ -246,7 +248,7 @@ secrets.
 |---|---|---|
 | `unit` | Unit tests with the race detector. Includes the source-rule tests in `internal/arch` | `go test ./... -race -short -count=1` |
 | `test` | Module checksums, and the integration tests against a real Postgres | `go test -p 1 ./... -count=1 -short=false` (needs `docker compose up -d postgres`; test databases are created for you) |
-| `test-pgbouncer` | The same suite through PgBouncer, a connection pooler, in transaction mode | `scripts/pgbouncer-test.sh` (needs Docker) |
+| `test-pgbouncer` | The same suite through PgBouncer, a connection pooler, in transaction mode | `scripts/pgbouncer-test.sh` (needs Docker and `docker compose up -d postgres`. With Docker Engine on Linux, it sets `PGB_MODE=ci` itself, because only the host network reaches the dev Postgres on 127.0.0.1) |
 | `golden-path` | Boots a real server, runs `scripts/demo.sh` from prices to a finished invoice, then runs hardcount-doctor over the rows it wrote | Steps 2 to 5 of [Development setup](#development-setup), then `go run ./cmd/hardcount-doctor` |
 | `lint` | golangci-lint (`.golangci.yml`), the Go version in `go.mod` against the `Dockerfile`, the quickstart release against the Compose template, ShellCheck on every shell script, and `govulncheck` | `make lint`, `scripts/ci/shellcheck.sh` (needs ShellCheck), then `govulncheck ./...` |
 | `codegen-drift` | Generated TypeScript matches `api/openapi.yaml` | `make gen && git diff --exit-code` |

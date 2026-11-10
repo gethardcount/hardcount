@@ -23,9 +23,9 @@ only that account's rows. A leak means one of these failed:
 - A query ran with the wrong `app.tenant_id`.
 - A query ran with `app.bypass_rls` on, which skips RLS, and its own
   account filter was wrong or missing. Background jobs and sign-in use this
-  mode. So do two areas a signed-in user works in for one account: Stripe
-  credential settings, and team members and invites. Check every area on
-  the [full list](../../architecture.md#design-rules).
+  mode. So does reading an account's Stripe keys to call Stripe, and one
+  area a signed-in user works in for one account: team members and invites.
+  Check every area on the [full list](../../architecture.md#design-rules).
 
 In the code, the first kind of transaction is `postgres.TxTenant` and the
 `app.bypass_rls` kind is `postgres.TxBypass`.

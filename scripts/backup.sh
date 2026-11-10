@@ -22,6 +22,10 @@
 
 set -euo pipefail
 
+# Only the user who runs this script may read a dump: files are created 0600
+# and folders 0700. A dump holds every account's customers and payments.
+umask 077
+
 # ---------------------------------------------------------------------------
 # Configuration
 # ---------------------------------------------------------------------------

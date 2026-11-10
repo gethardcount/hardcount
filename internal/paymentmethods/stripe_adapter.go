@@ -30,7 +30,7 @@ type CustomerStripeLink interface {
 }
 
 // StripeAdapter wires the payment-methods Service to the existing
-// payment.StripeClients pool. Mode-aware — ForCtx(ctx) returns the right
+// payment.StripeClients pool. Mode-aware — ResolveCtx(ctx) returns the right
 // client for the caller's livemode, set from the auth ctx.
 type StripeAdapter struct {
 	clients      *payment.StripeClients
@@ -63,7 +63,7 @@ func (a *StripeAdapter) client(ctx context.Context) (*stripe.Client, error) {
 // short-circuit on the persisted ID.
 //
 // Stripe client lookup uses explicit (tenantID, livemode) rather than
-// `ForCtx` so this method works on BOTH authenticated portal requests
+// `ResolveCtx` so this method works on BOTH authenticated portal requests
 // (auth.TenantID populated) and public token-authenticated requests
 // (hosted-invoice Pay flow — no auth ctx, tenantID comes from the
 // public_token row, livemode pinned by hostedinvoice.resolveInvoice).

@@ -204,7 +204,7 @@ Mailpit is a local email catcher with a web inbox. It comes with the source code
 
 Hardcount in a container, such as the quick start or the Compose stack, cannot use these settings as they are:
 
-- **`localhost` is the container itself**, not your computer, so `SMTP_HOST=localhost` reaches no Mailpit. With Docker Desktop (macOS, Windows), `SMTP_HOST=host.docker.internal` reaches the Mailpit on your computer. On Linux, first add `extra_hosts: ["host.docker.internal:host-gateway"]` to the `hardcount-api` service in `deploy/compose/docker-compose.override.yml` ([the override file](../settings.md#your-own-changes-the-override-file)), or use a test inbox such as Mailtrap instead.
+- **`localhost` is the container itself**, not your computer, so `SMTP_HOST=localhost` reaches no Mailpit. With Docker Desktop (macOS, Windows), `SMTP_HOST=host.docker.internal` reaches the Mailpit on your computer. With Docker Engine on Linux, a container cannot reach this Mailpit: it listens only on your computer's 127.0.0.1. Use a test inbox such as Mailtrap instead.
 - **`SMTP_TLS=none` works only outside production.** The quick start runs with `APP_ENV=local`. The Compose stack runs with `APP_ENV=production` unless you set it, and then Hardcount refuses to send in plain text.
 
 ## Common mistakes
