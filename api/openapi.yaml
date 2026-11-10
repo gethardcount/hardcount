@@ -17609,6 +17609,11 @@ paths:
             could not be invoiced; retry billing first. Code
             `funding_invoice_tax_pending`: an invoice the credit would go on
             is a draft whose tax is not calculated yet; retry once it is.
+            Code `concurrent_change`: Postgres stopped the removal because of
+            another change to the same records (it broke a deadlock, or ended
+            a wait for a lock), so the item is still on the subscription; send
+            the same request again. A period that had ended and was billed
+            first stays billed.
           content:
             application/json:
               schema:

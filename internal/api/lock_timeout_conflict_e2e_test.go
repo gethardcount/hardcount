@@ -23,11 +23,12 @@ import (
 // request with the same Idempotency-Key then runs once (ADR-136, amended
 // 2026-11-10).
 //
-// The five new routes are the request-path takers of the customer-rules
-// lock: subscription create and activate, item add (both its branches), and
-// customer update and billing profile. A second session holds that lock. The
-// cancel, a route that already converted a deadlock, waits for the
-// subscription row instead.
+// The six new routes, with the item change that already converted a
+// deadlock, are the request-path takers of the customer-rules lock:
+// subscription create and activate, item add and item remove (both branches
+// of each), and customer update and billing profile. A second session holds
+// that lock. The cancel, a route that already converted a deadlock, waits for
+// the subscription row instead.
 //
 // The server runs on a pool whose role has lock_timeout = 300ms, as an
 // operator's ALTER ROLE hardcount_app SET lock_timeout does today. So the
@@ -39,21 +40,31 @@ import (
 func TestE2E_LockWaitEnded_AnswersConflict_SameKeyRunsAgain(t *testing.T) {
 	addAt := lagP0.AddDate(0, 0, 10) // mid-period: the add prorates
 
-	// activeRig is a subscription on plan_a from lagP0, its first invoice
-	// paid: an add that prorates is refused against an unpaid one (ADR-050).
-	activeRig := func(t *testing.T) *lagRig {
-		r := newLagRig(t, "in_advance", false)
-		r.must(http.MethodPost, "/v1/invoices/"+r.firstInvoiceID()+"/record-payment", lagP0.Add(time.Hour),
-			map[string]any{"note": "fixture"}, http.StatusOK)
-		return r
+	// paidRig is a subscription on plan_a from lagP0, with the plan_c add-on
+	// as a second item when withAddOn is set, its first invoice paid: an add
+	// that prorates is refused against an unpaid one (ADR-050), and a removal
+	// credits only what was paid.
+	paidRig := func(withAddOn bool) func(t *testing.T) *lagRig {
+		return func(t *testing.T) *lagRig {
+			r := newLagRig(t, "in_advance", withAddOn)
+			r.must(http.MethodPost, "/v1/invoices/"+r.firstInvoiceID()+"/record-payment", lagP0.Add(time.Hour),
+				map[string]any{"note": "fixture"}, http.StatusOK)
+			return r
+		}
 	}
-	// createdRig is the rig's customer with one subscription made by body.
-	createdRig := func(extra map[string]any) func(t *testing.T) *lagRig {
+	activeRig := paidRig(false)
+	// createdRig is the rig's customer with one subscription made by body: on
+	// plan_a, and with the plan_c add-on as a second item when withAddOn is
+	// set.
+	createdRig := func(withAddOn bool, extra map[string]any) func(t *testing.T) *lagRig {
 		return func(t *testing.T) *lagRig {
 			r := newLagRigBare(t, "in_advance", 0)
+			items := []map[string]any{{"plan_id": r.planA, "quantity": 1}}
+			if withAddOn {
+				items = append(items, map[string]any{"plan_id": r.planC, "quantity": 1})
+			}
 			body := map[string]any{
-				"code": "lock-sub", "display_name": "Lock Sub", "customer_id": r.custID,
-				"items": []map[string]any{{"plan_id": r.planA, "quantity": 1}},
+				"code": "lock-sub", "display_name": "Lock Sub", "customer_id": r.custID, "items": items,
 			}
 			for k, v := range extra {
 				body[k] = v
@@ -78,6 +89,17 @@ func TestE2E_LockWaitEnded_AnswersConflict_SameKeyRunsAgain(t *testing.T) {
 	}
 	customer := func(r *lagRig) map[string]any {
 		return r.must(http.MethodGet, "/v1/customers/"+r.custID, addAt, nil, http.StatusOK)
+	}
+	// addOnPath is the route that removes the plan_c add-on. The last item of
+	// an active subscription cannot be removed, so the rig has two.
+	addOnPath := func(r *lagRig) string {
+		for _, it := range r.sub().Items {
+			if it.PlanID == r.planC {
+				return "/v1/subscriptions/" + r.subID + "/items/" + it.ID
+			}
+		}
+		r.t.Fatalf("no add-on item on the subscription")
+		return ""
 	}
 
 	for _, c := range []struct {
@@ -131,7 +153,7 @@ func TestE2E_LockWaitEnded_AnswersConflict_SameKeyRunsAgain(t *testing.T) {
 			},
 		},
 		{
-			name: "subscription_activate", rig: createdRig(map[string]any{"status": "draft"}), hold: holdCustomerRules,
+			name: "subscription_activate", rig: createdRig(false, map[string]any{"status": "draft"}), hold: holdCustomerRules,
 			method: http.MethodPost, path: func(r *lagRig) string { return "/v1/subscriptions/" + r.subID + "/activate" },
 			at: lagP0, want: http.StatusOK,
 			unchanged: func(t *testing.T, r *lagRig) {
@@ -176,7 +198,7 @@ func TestE2E_LockWaitEnded_AnswersConflict_SameKeyRunsAgain(t *testing.T) {
 		{
 			// A trialing subscription prorates nothing, so the add runs in
 			// Service.AddItem's transaction of its own.
-			name: "item_add_unprorated", rig: createdRig(map[string]any{"trial_days": 14}), hold: holdCustomerRules,
+			name: "item_add_unprorated", rig: createdRig(false, map[string]any{"trial_days": 14}), hold: holdCustomerRules,
 			method: http.MethodPost, path: func(r *lagRig) string { return "/v1/subscriptions/" + r.subID + "/items" },
 			body: func(r *lagRig) any { return map[string]any{"plan_id": r.planC, "quantity": 1} },
 			at:   lagP0.AddDate(0, 0, 2), want: http.StatusCreated,
@@ -188,6 +210,48 @@ func TestE2E_LockWaitEnded_AnswersConflict_SameKeyRunsAgain(t *testing.T) {
 			once: func(t *testing.T, r *lagRig) {
 				if n := items(t, r); n != 2 {
 					t.Fatalf("%d items, want 2", n)
+				}
+			},
+		},
+		{
+			// Mid-period on a paid invoice, the removal credits the add-on's
+			// unused time: a credit note on the first invoice, drafted in the
+			// removal's transaction. The middleware keeps no key for a DELETE,
+			// so the resend runs as any request does.
+			name: "item_remove_prorated", rig: paidRig(true), hold: holdCustomerRules,
+			method: http.MethodDelete, path: addOnPath,
+			at: addAt, want: http.StatusNoContent,
+			unchanged: func(t *testing.T, r *lagRig) {
+				if n := items(t, r); n != 2 {
+					t.Fatalf("%d items, want 2", n)
+				}
+				if n := r.creditNotesOn(r.firstInvoiceID()); n != 0 {
+					t.Fatalf("%d credit notes on the first invoice, want none", n)
+				}
+			},
+			once: func(t *testing.T, r *lagRig) {
+				if n := items(t, r); n != 1 {
+					t.Fatalf("%d items, want 1", n)
+				}
+				if n := r.creditNotesOn(r.firstInvoiceID()); n != 1 {
+					t.Fatalf("%d credit notes on the first invoice, want the one removal credit", n)
+				}
+			},
+		},
+		{
+			// A trialing subscription credits nothing, so the removal runs in
+			// Service.RemoveItem's transaction of its own.
+			name: "item_remove_unprorated", rig: createdRig(true, map[string]any{"trial_days": 14}), hold: holdCustomerRules,
+			method: http.MethodDelete, path: addOnPath,
+			at: lagP0.AddDate(0, 0, 2), want: http.StatusNoContent,
+			unchanged: func(t *testing.T, r *lagRig) {
+				if n := items(t, r); n != 2 {
+					t.Fatalf("%d items, want 2", n)
+				}
+			},
+			once: func(t *testing.T, r *lagRig) {
+				if n := items(t, r); n != 1 {
+					t.Fatalf("%d items, want 1", n)
 				}
 			},
 		},
@@ -237,6 +301,8 @@ func TestE2E_LockWaitEnded_AnswersConflict_SameKeyRunsAgain(t *testing.T) {
 			if c.body != nil {
 				body = c.body(r)
 			}
+			// Read before the lock is held, so the path's own read cannot wait.
+			path := c.path(r)
 
 			admin := testutil.AdminPool(t)
 			holder, err := admin.BeginTx(t.Context(), nil)
@@ -246,7 +312,7 @@ func TestE2E_LockWaitEnded_AnswersConflict_SameKeyRunsAgain(t *testing.T) {
 			defer func() { _ = holder.Rollback() }()
 			c.hold(t, holder, r)
 
-			first := r.doKey(c.method, c.path(r), key, c.at, body)
+			first := r.doKey(c.method, path, key, c.at, body)
 			if err := holder.Rollback(); err != nil {
 				t.Fatalf("release: %v", err)
 			}
@@ -261,7 +327,7 @@ func TestE2E_LockWaitEnded_AnswersConflict_SameKeyRunsAgain(t *testing.T) {
 			}
 			c.unchanged(t, r)
 
-			again := r.doKey(c.method, c.path(r), key, c.at, body)
+			again := r.doKey(c.method, path, key, c.at, body)
 			if again.Code != c.want || again.Header().Get("Idempotent-Replayed") != "" {
 				t.Fatalf("resend with the same key: %d (replayed=%q) %s, want %d from the handler",
 					again.Code, again.Header().Get("Idempotent-Replayed"), again.Body.String(), c.want)

@@ -105,23 +105,25 @@ decide.
 
 These routes answer `concurrent_change`:
 
-- Subscriptions: create, activate, cancel, add an item, and change an item.
+- Subscriptions: create, activate, cancel, and add, change or remove an item.
 - Customers: update, and write the billing profile.
-- Invoices: record payment, and collect.
-- Credit notes: issue, and create with `auto_issue`.
+- Invoices: record payment, and collect when it settles the invoice without
+  a card charge.
+- Credit notes: issue, and the issue step of create with `auto_issue`. The
+  create step itself answers `500`.
 
 Postgres ends a wait for a lock only when a `lock_timeout` is set, for
-example on the database user Hardcount runs as. On any other route, a
-deadlock or an ended lock wait answers `500` `internal_error`, which an
+example on the database user Hardcount runs as. On any other route or step,
+a deadlock or an ended lock wait answers `500` `internal_error`, which an
 `Idempotency-Key` stores ([Idempotency](idempotency.md)).
 
 After `concurrent_change`, a step that the request saved on its own before
 Postgres stopped it stays done. The routes not listed here save nothing
 first:
 
-- **Cancel, adding an item and changing an item:** the invoice for a billing
-  period that had already ended. It may already be charged. The request sent
-  again does not bill that period twice.
+- **Cancel, and adding, changing or removing an item:** the invoice for a
+  billing period that had already ended. It may already be charged. The
+  request sent again does not bill that period twice.
 - **Collect:** the customer's credit that the request applied to the invoice
   before the settle that Postgres stopped. Sent again, Collect finds nothing
   left due, so it applies no credit and marks the invoice paid.
