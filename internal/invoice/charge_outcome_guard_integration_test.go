@@ -37,6 +37,19 @@ func stampOutcome(t *testing.T, store *invoice.PostgresStore, ctx context.Contex
 	}
 }
 
+// seedPark leaves the invoice as a parked charge an earlier version wrote:
+// unknown with no PaymentIntent. No writer of this version produces one (a
+// charge puts its PaymentIntent on the invoice before it confirms, and the
+// store refuses the shape; ADR-137), so the row is written directly.
+func seedPark(t *testing.T, db *postgres.DB, id, msg string) {
+	t.Helper()
+	execBypassStamp(t, db, `
+		UPDATE invoices SET payment_status = 'unknown', stripe_payment_intent_id = NULL,
+		       last_payment_error = $2, below_minimum_at = NULL, updated_at = now(),
+		       charge_attempt_seq = charge_attempt_seq + 1
+		 WHERE id = $1`, id, msg)
+}
+
 // TestStampChargeOutcome_OutcomeRecordedDuringTheCallWins (P13): the charge
 // path stamps its outcome after a Stripe round-trip, and another outcome can
 // be recorded during it. Each case reads the attempt's seq (as the charge
@@ -46,7 +59,7 @@ func stampOutcome(t *testing.T, store *invoice.PostgresStore, ctx context.Contex
 // Refused cases must leave the winner's row exactly as it was, seq included.
 // Applied cases are the negative controls: writes the guard must not block (a
 // dunning retry starting from the previous attempt's failure, a void or
-// write-off that landed mid-charge, a park).
+// write-off that landed mid-charge, a failure with no PaymentIntent).
 func TestStampChargeOutcome_OutcomeRecordedDuringTheCallWins(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -99,17 +112,17 @@ func TestStampChargeOutcome_OutcomeRecordedDuringTheCallWins(t *testing.T) {
 	}{
 		// Refused — a paid invoice is never un-settled.
 		{"own webhook paid, then unknown with the PI", none, markPaid("pi_X"), domain.PaymentUnknown, "pi_X", false},
-		{"own webhook paid, then unknown with no PI", none, markPaid("pi_X"), domain.PaymentUnknown, "", false},
+		{"own webhook paid, then failed with no PI", none, markPaid("pi_X"), domain.PaymentFailed, "", false},
 		{"paid offline, then processing", none, markPaidOffline, domain.PaymentProcessing, "pi_X", false},
 		{"paid by credits (no PI), then failed with no PI", none, markPaid(""), domain.PaymentFailed, "", false},
 		// Refused — a decline its own webhook already recorded stays recorded.
 		{"own decline webhook, then unknown with the PI", none, markFailed("pi_X"), domain.PaymentUnknown, "pi_X", false},
 		{"own decline webhook, then processing with the PI", none, markFailed("pi_X"), domain.PaymentProcessing, "pi_X", false},
-		{"own decline webhook, then unknown with no PI (would park a known decline)", none, markFailed("pi_X"), domain.PaymentUnknown, "", false},
+		{"own decline webhook, then failed with no PI (would drop a known decline's PaymentIntent)", none, markFailed("pi_X"), domain.PaymentFailed, "", false},
 
 		// Applied — a new attempt starting from the previous attempt's failure.
 		{"previous attempt failed, then unknown for a new PI", markFailed("pi_W"), none, domain.PaymentUnknown, "pi_X", true},
-		{"previous attempt failed, then unknown with no PI (park)", markFailed("pi_W"), none, domain.PaymentUnknown, "", true},
+		{"previous attempt failed, then failed with no PI", markFailed("pi_W"), none, domain.PaymentFailed, "", true},
 		// Applied — the previous attempt's decline webhook lands mid-call,
 		// re-recording a failure already on the row. It records nothing new,
 		// so it must not refuse this attempt's outcome.
@@ -183,6 +196,26 @@ func TestStampChargeOutcome_OutcomeRecordedDuringTheCallWins(t *testing.T) {
 		}
 	})
 
+	// A parked charge (in flight with no PaymentIntent) is a state nothing in
+	// this version resolves: the sweeps read the PaymentIntent the invoice
+	// names. A charge writes "unknown" through StampPendingConfirm, which
+	// always names one, so this writer must refuse the shape.
+	t.Run("an in-flight outcome that names no PaymentIntent is refused", func(t *testing.T) {
+		for _, ps := range []domain.InvoicePaymentStatus{domain.PaymentUnknown, domain.PaymentProcessing} {
+			inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-P13-PARK-"+string(ps))
+			if _, applied, err := store.StampChargeOutcome(ctx, tenantID, inv.ID, inv.ChargeAttemptSeq, ps, "", "timeout"); err == nil || applied {
+				t.Fatalf("stamped %s with no PaymentIntent (applied=%v err=%v); want a refusal: that is a parked charge", ps, applied, err)
+			}
+			after, err := store.Get(ctx, tenantID, inv.ID)
+			if err != nil {
+				t.Fatalf("get after: %v", err)
+			}
+			if after.PaymentStatus != inv.PaymentStatus || after.ChargeAttemptSeq != inv.ChargeAttemptSeq {
+				t.Fatalf("the refused stamp changed the row: %s/seq %d → %s/seq %d", inv.PaymentStatus, inv.ChargeAttemptSeq, after.PaymentStatus, after.ChargeAttemptSeq)
+			}
+		}
+	})
+
 	t.Run("succeeded is not a charge outcome — it goes through MarkPaid", func(t *testing.T) {
 		inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-P13-SUCC")
 		if _, _, err := store.StampChargeOutcome(ctx, tenantID, inv.ID, inv.ChargeAttemptSeq, domain.PaymentSucceeded, "pi_X", ""); err == nil {
@@ -226,7 +259,7 @@ func TestStampChargeOutcome_WaitsForAnInFlightSettle(t *testing.T) {
 	}
 	done := make(chan result, 1)
 	go func() {
-		got, applied, err := store.StampChargeOutcome(ctx, tenantID, inv.ID, inv.ChargeAttemptSeq, domain.PaymentUnknown, "", "timeout")
+		got, applied, err := store.StampChargeOutcome(ctx, tenantID, inv.ID, inv.ChargeAttemptSeq, domain.PaymentUnknown, "pi_late", "timeout")
 		done <- result{got, applied, err}
 	}()
 

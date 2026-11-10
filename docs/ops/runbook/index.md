@@ -18,7 +18,7 @@ Stripe troubleshooting is out of scope.
 | `hardcount_webhook_outbox_oldest_pending_age_seconds` firing, or `webhook_outbox` rows dead-lettered | [Webhook outbox backed up](webhook-outbox-backed-up.md) |
 | One customer's webhook endpoint keeps failing (`hardcount_webhook_deliveries_total{status="failed"}`) | [A webhook endpoint keeps failing](webhook-endpoint-failing.md) |
 | `hardcount_stripe_breaker_state == 2`, or dunning retries skipped | [Stripe circuit breaker open](stripe-circuit-breaker-open.md) |
-| Invoices stuck with an unconfirmed payment for hours | [A charge's result is unclear](unclear-charge.md#unconfirmed-with-a-paymentintent) |
+| Invoices stuck with an unconfirmed payment for hours, or `reconciler error` in the logs with `get payment intent` on every billing run for the same invoice | [A charge's result is unclear](unclear-charge.md#unconfirmed-with-a-paymentintent) |
 | A payment `processing` for days, or a dunning retry that "is processing" | [A charge's result is unclear: processing](unclear-charge.md#processing-for-days) |
 | A test clock stuck on the Advancing badge | [Test-clock advance hung](test-clock-advance-hung.md) |
 | An account sees another account's data | [Data leak between accounts suspected](rls-leak-suspected.md) |
@@ -32,10 +32,10 @@ Stripe troubleshooting is out of scope.
 | `hardcount migrate` or the start-up stops with `this database was made by Velox` | [The database was made by Velox](migration-failed-midway.md#the-database-was-made-by-velox) |
 | An upgrade stops with `waited 5s for a table lock` | [A database upgrade stopped: table lock](migration-failed-midway.md#it-waited-5s-for-a-table-lock) |
 | `hardcount_stripe_key_unusable_total` rising, or "Stripe refused this tenant's API key" in the logs: charges paused until the key is fixed in Settings → Payments | [Health checks, alerts and logs](monitoring.md) |
-| `hardcount_parked_invoices{disposition="open"}` above zero | [A charge's result is unclear: parked](unclear-charge.md#parked-no-paymentintent) |
+| "stale charge check: this charge hold or parked charge was left by an earlier Hardcount version" in the logs, `hardcount_stale_charge_hold_resolutions_total{result="earlier"}` rising, or `hardcount_parked_invoices{disposition="open"}` above zero | [A charge's result is unclear: left by an earlier version](unclear-charge.md#left-by-an-earlier-version) |
 | An invoice notice reads "Customer must confirm payment", or a payment retry was not attempted because the bank wants the customer to confirm | [The customer's bank wants them to confirm a payment](customer-must-confirm-payment.md) |
 | An invoice notice reads "Below Stripe's minimum charge", or a customer's hosted page has no Pay button for a small amount | [An invoice is below Stripe's minimum charge](below-stripe-minimum.md) |
-| "stale charge check: can't confirm an earlier charge with Stripe" in the logs, or `hardcount_stale_charge_hold_resolutions_total{result="cannot_ask"}` rising | [A charge's result is unclear: lost, and Hardcount cannot ask Stripe](unclear-charge.md#interrupted-hardcount-cannot-ask-stripe) |
+| `hardcount_stale_charge_hold_resolutions_total{result="failed"}` rising, or an invoice that refuses **Collect payment** with "A charge on this invoice is being confirmed with Stripe" for more than two hours | [A charge's result is unclear: a charge hold that does not clear](unclear-charge.md#a-charge-hold-that-does-not-clear) |
 | An invoice says "after a lost dispute", a `payment.dispute_opened` or `payment.dispute_closed` webhook, or Stripe emails about a dispute | [Card disputes](card-disputes.md) |
 | An invoice says "A refund of … was made in Stripe and not recorded here", a `payment.refunded_in_stripe` webhook, or a refund made in the Stripe dashboard | [A refund made in Stripe](refund-made-in-stripe.md) |
 | `hardcount_creditnote_pending_issue_drafts` growing over days | [A charge's result is unclear: clawback drafts](unclear-charge.md#clawback-drafts-waiting) |
@@ -100,15 +100,15 @@ tables without account data (`leader_leases`, `leader_status`,
   **dunning run** is the retries for one unpaid invoice.
 - **Charge hold**: a 5-minute claim on an invoice while Hardcount charges
   it, so only one charge runs at a time.
-- **Lost result**: a charge Hardcount sent to Stripe whose answer it never
-  saved, for example after a crash or a shutdown.
-- **Reconciler**: the check that asks Stripe what happened to a charge whose
-  result Hardcount did not save. It runs with every scheduled billing run.
+- **Reconciler**: the check that asks Stripe what happened to a payment
+  Hardcount has no answer for. It also clears a charge hold that a stopped
+  charge left behind. It runs with every scheduled billing run.
 - **Clawback**: a credit note Hardcount issues when a paid, in-advance
   period is cut short, for example by a downgrade.
-- **Parked**: set aside until something changes
-  ([invoices](unclear-charge.md#parked-no-paymentintent),
-  [subscriptions](billing-failing.md)).
+- **Parked**: set aside until something changes. A subscription parks after
+  eight failed billing attempts ([Billing failing](billing-failing.md)).
+  Only earlier versions parked invoices
+  ([A charge's result is unclear](unclear-charge.md#parked-no-paymentintent)).
 - **Wait ladder**: the growing waits between billing retries
   ([Billing failing](billing-failing.md#why)).
 - **PI**: a Stripe PaymentIntent, the Stripe object for one card charge.

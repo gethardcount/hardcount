@@ -1278,7 +1278,7 @@ func TestImmediateCancel_AfterThresholdFire_NoDoubleBill(t *testing.T) {
 		t.Fatalf("get sub: %v", err)
 	}
 
-	finalInv, err := f.engine.BillFinalOnImmediateCancel(ctx, sub)
+	finalInv, err := f.engine.BillFinalOnCancel(ctx, sub)
 	if err != nil {
 		t.Fatalf("bill final on cancel: %v", err)
 	}

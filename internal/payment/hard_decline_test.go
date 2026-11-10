@@ -82,7 +82,7 @@ func TestChargeDecline_RecordsDeclineCodeAndCard(t *testing.T) {
 			invoices := newMockInvoiceUpdater()
 			snapshot := pendingSnapshot()
 			invoices.invoices["inv_1"] = snapshot
-			withCannedStripe(t, http.StatusPaymentRequired,
+			withCannedConfirm(t, http.StatusPaymentRequired,
 				`{"error": `+stripeCardErrorJSON(tc.code, tc.message, "pi_decl", "pm_on_file")+`}`)
 			email := &recordingFailedEmail{}
 			dunning := &recordingDunningStarter{}

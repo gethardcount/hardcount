@@ -47,7 +47,7 @@ func (c *capturingStripe) RoundTrip(r *http.Request) (*http.Response, error) {
 // "confirm the payment" decline: a definite failure, whose email asks the
 // customer to confirm on the hosted invoice page and whose next dunning retry
 // does not charge the same card again (domain.RetryBlock).
-func TestCreatePaymentIntent_PaymentNeedingTheCustomerFailsAsConfirmDecline(t *testing.T) {
+func TestConfirmPaymentIntent_PaymentNeedingTheCustomerFailsAsConfirmDecline(t *testing.T) {
 	stub := &capturingStripe{cannedStripe: cannedStripe{status: http.StatusPaymentRequired, body: stripeAuthNotHandled}}
 	old := stripeHTTPClient.Transport
 	stripeHTTPClient.Transport = stub
@@ -55,14 +55,14 @@ func TestCreatePaymentIntent_PaymentNeedingTheCustomerFailsAsConfirmDecline(t *t
 
 	ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1")
 	c := NewLiveStripeClient(NewStripeClients(fixedCreds{}))
-	_, err := c.CreatePaymentIntent(ctx, PaymentIntentParams{AmountCents: 1099, Currency: "usd", CustomerID: "cus_x", PaymentMethodID: "pm_x", IdempotencyKey: "k"})
+	_, err := c.ConfirmPaymentIntent(ctx, "pi_1G8JtxDpqHItWkFAnB32FhtI", PaymentIntentParams{AmountCents: 1099, Currency: "usd", CustomerID: "cus_x", PaymentMethodID: "pm_x", IdempotencyKey: "k"})
 
 	if len(stub.forms) != 1 {
 		t.Fatalf("requests to Stripe = %d, want 1", len(stub.forms))
 	}
-	for field, want := range map[string]string{"confirm": "true", "off_session": "true", "error_on_requires_action": "true", "payment_method_types[0]": "card"} {
+	for field, want := range map[string]string{"off_session": "true", "error_on_requires_action": "true", "payment_method": "pm_x"} {
 		if got := stub.forms[0].Get(field); got != want {
-			t.Errorf("PaymentIntent create sent %s=%q, want %q", field, got, want)
+			t.Errorf("PaymentIntent confirm sent %s=%q, want %q", field, got, want)
 		}
 	}
 
@@ -100,13 +100,19 @@ const stripeDashboardMethodsRefusal = `{"error":{"message":"The ` + "`error_on_r
 
 const stripeSucceededPI = `{"id":"pi_ok","object":"payment_intent","amount":1099,"currency":"usd","status":"succeeded","payment_method_types":["card"]}`
 
-// stripePaymentMethodRule answers a PaymentIntent create the way Stripe does
-// (https://docs.stripe.com/changelog/2023-08-16/automatic-payment-methods):
-// error_on_requires_action without payment_method_types is refused, because
-// the PaymentIntent then takes the Dashboard's payment methods. Otherwise the
-// charge succeeds.
+const stripeUnconfirmedPI = `{"id":"pi_ok","object":"payment_intent","amount":1099,"currency":"usd","status":"requires_confirmation","payment_method_types":["card"]}`
+
+// stripePaymentMethodRule answers a charge's two calls the way Stripe does
+// (https://docs.stripe.com/changelog/2023-08-16/automatic-payment-methods): a
+// confirm with error_on_requires_action is refused unless the PaymentIntent
+// was created with payment_method_types (otherwise it takes the Dashboard's
+// payment methods). Checked against Stripe test mode on 2026-11-09: a
+// PaymentIntent created with payment_method_types[]=card and confirmed with
+// error_on_requires_action=true succeeds.
 type stripePaymentMethodRule struct {
-	forms []url.Values
+	forms    []url.Values
+	paths    []string
+	cardOnly bool // the created PaymentIntent named card as its only type
 }
 
 func (s *stripePaymentMethodRule) RoundTrip(r *http.Request) (*http.Response, error) {
@@ -119,9 +125,15 @@ func (s *stripePaymentMethodRule) RoundTrip(r *http.Request) (*http.Response, er
 		return nil, err
 	}
 	s.forms = append(s.forms, form)
-	status, reply := http.StatusOK, stripeSucceededPI
-	if form.Get("error_on_requires_action") == "true" && form.Get("payment_method_types[0]") == "" {
-		status, reply = http.StatusBadRequest, stripeDashboardMethodsRefusal
+	s.paths = append(s.paths, r.URL.Path)
+	status, reply := http.StatusOK, stripeUnconfirmedPI
+	if strings.HasSuffix(r.URL.Path, "/confirm") {
+		reply = stripeSucceededPI
+		if form.Get("error_on_requires_action") == "true" && !s.cardOnly {
+			status, reply = http.StatusBadRequest, stripeDashboardMethodsRefusal
+		}
+	} else {
+		s.cardOnly = form.Get("payment_method_types[0]") == "card"
 	}
 	return &http.Response{
 		StatusCode: status,
@@ -133,8 +145,10 @@ func (s *stripePaymentMethodRule) RoundTrip(r *http.Request) (*http.Response, er
 // Every off-session charge that asks Stripe to fail a payment needing the
 // customer must also name card as its only payment method type. Without it
 // Stripe refused every auto-charge, Collect payment and dunning retry with a
-// 400, which Hardcount recorded as a failed payment and dunned.
-func TestCreatePaymentIntent_ErrorOnRequiresActionNamesCardPaymentMethodType(t *testing.T) {
+// 400, which Hardcount recorded as a failed payment and dunned. The type goes
+// on the create; error_on_requires_action and off_session go on the confirm,
+// the only call Stripe takes them with.
+func TestChargeCalls_ErrorOnRequiresActionNamesCardPaymentMethodType(t *testing.T) {
 	stub := &stripePaymentMethodRule{}
 	old := stripeHTTPClient.Transport
 	stripeHTTPClient.Transport = stub
@@ -142,28 +156,43 @@ func TestCreatePaymentIntent_ErrorOnRequiresActionNamesCardPaymentMethodType(t *
 
 	ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1")
 	c := NewLiveStripeClient(NewStripeClients(fixedCreds{}))
-	res, err := c.CreatePaymentIntent(ctx, PaymentIntentParams{AmountCents: 1099, Currency: "usd", CustomerID: "cus_x", PaymentMethodID: "pm_x", IdempotencyKey: "k"})
+	p := PaymentIntentParams{AmountCents: 1099, Currency: "usd", CustomerID: "cus_x", PaymentMethodID: "pm_x", IdempotencyKey: "k"}
+	created, err := c.CreateUnconfirmedPaymentIntent(ctx, p)
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	res, err := c.ConfirmPaymentIntent(ctx, created.ID, p)
 
-	if len(stub.forms) != 1 {
-		t.Fatalf("requests to Stripe = %d, want 1", len(stub.forms))
+	if len(stub.forms) != 2 {
+		t.Fatalf("requests to Stripe = %d, want 2 (create, confirm)", len(stub.forms))
 	}
-	form := stub.forms[0]
-	if form.Get("error_on_requires_action") != "true" {
-		t.Fatalf("error_on_requires_action = %q; this test guards the payment method type sent with it", form.Get("error_on_requires_action"))
+	create, confirm := stub.forms[0], stub.forms[1]
+	if got := create.Get("payment_method_types[0]"); got != "card" {
+		t.Errorf("create sent payment_method_types[0] = %q, want %q: Stripe refuses error_on_requires_action without it", got, "card")
 	}
-	if got := form.Get("payment_method_types[0]"); got != "card" {
-		t.Errorf("payment_method_types[0] = %q, want %q: Stripe refuses error_on_requires_action without it", got, "card")
+	for _, field := range []string{"confirm", "off_session", "error_on_requires_action"} {
+		if create.Has(field) {
+			t.Errorf("create sent %s=%q: the create must move no money and leave confirm-time settings to the confirm", field, create.Get(field))
+		}
 	}
-	for field := range form {
+	for field := range create {
 		if strings.HasPrefix(field, "payment_method_types[") && field != "payment_method_types[0]" {
-			t.Errorf("sent %s=%q: Hardcount charges cards only", field, form.Get(field))
+			t.Errorf("create sent %s=%q: Hardcount charges cards only", field, create.Get(field))
 		}
 		if strings.HasPrefix(field, "automatic_payment_methods") {
-			t.Errorf("sent %s: Stripe refuses it with error_on_requires_action", field)
+			t.Errorf("create sent %s: Stripe refuses it with error_on_requires_action", field)
+		}
+	}
+	if !strings.HasSuffix(stub.paths[1], "/v1/payment_intents/pi_ok/confirm") {
+		t.Errorf("second request went to %s, want the created PaymentIntent's confirm", stub.paths[1])
+	}
+	for field, want := range map[string]string{"error_on_requires_action": "true", "off_session": "true", "payment_method": "pm_x"} {
+		if got := confirm.Get(field); got != want {
+			t.Errorf("confirm sent %s=%q, want %q", field, got, want)
 		}
 	}
 	if err != nil {
-		t.Fatalf("CreatePaymentIntent: %v", err)
+		t.Fatalf("confirm: %v", err)
 	}
 	if res.ID != "pi_ok" || res.Status != "succeeded" {
 		t.Errorf("result = %+v, want pi_ok succeeded", res)
@@ -181,7 +210,7 @@ func TestCreatePaymentIntent_RequestRefusalIsDefiniteWithNoCardWords(t *testing.
 	withCannedStripe(t, http.StatusBadRequest, stripeDashboardMethodsRefusal)
 	ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1")
 	c := NewLiveStripeClient(NewStripeClients(fixedCreds{}))
-	_, err := c.CreatePaymentIntent(ctx, PaymentIntentParams{AmountCents: 1099, Currency: "usd", CustomerID: "cus_x", PaymentMethodID: "pm_x", IdempotencyKey: "k"})
+	_, err := c.CreateUnconfirmedPaymentIntent(ctx, PaymentIntentParams{AmountCents: 1099, Currency: "usd", CustomerID: "cus_x", PaymentMethodID: "pm_x", IdempotencyKey: "k"})
 
 	var pe *PaymentError
 	if !errors.As(err, &pe) {

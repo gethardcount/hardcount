@@ -1,7 +1,7 @@
 # ADR-127: A lost charge result is resolved by asking Stripe before anything irreversible
 
 **Date:** 2026-10-19
-**Status:** Accepted (amended 2026-10-20; amended 2026-10-23: a written-off park keeps its hold when Stripe refuses; amended 2026-10-29: a park keeps one attempt row and its hold)
+**Status:** Accepted (amended 2026-10-20; amended 2026-10-23: a written-off park keeps its hold when Stripe refuses; amended 2026-10-29: a park keeps one attempt row and its hold; amended 2026-11-10: ADR-137)
 **Supersedes:** [ADR-106](106-charge-intent-ledger.md) (the charge-intent
 ledger, parked since 2026-07-31), and since the 2026-10-20 amendment
 [ADR-108](108-parked-invoices-search-and-adopt.md) (the Stripe Search sweep). PR #1291 drafted a second record-based
@@ -498,3 +498,26 @@ Tests: `TestParked_EndsWithAPayment_TheParkedAttemptRecordsIt`,
 `TestParkedHold_NeverClearedWhileParked`, and the parked rows of
 `TestPaymentBlocksActionHeld_Matrix`. Each guard was removed in turn and its
 test went red.
+
+## Amendment 2026-11-10
+
+The stale-hold sweep no longer calls Stripe. A charge puts its PaymentIntent
+on the invoice before confirming it, and the unknown sweep reads that
+PaymentIntent by id ([ADR-137](137-charge-stamps-invoice-before-confirming.md)).
+There is no customer-list check and no 24-hour park, so R10 is gone. The
+stale-hold sweep only clears: a hold that ended on an invoice still pending
+or failed belongs to a charge that never stamped, so never confirmed.
+
+The charge hold, its TTL and the 10-minute wait before the sweep are
+unchanged.
+
+What above no longer describes the code: every section on the customer-list
+read, on a parked invoice and its 24-hour wait, on a written-off park keeping
+its hold while Stripe refuses the check, and on which contexts may save an
+unclear outcome. Their tests were deleted with the code:
+`TestParked_EndsWithAPayment_TheParkedAttemptRecordsIt`,
+`TestParked_PaymentAlreadyHasARow_ParkStillEnds`,
+`TestParked_WrittenOff_StripeRefusedForGood_KeptUntilStripeAnswers`,
+`TestParkedHold_NeverClearedWhileParked`. The parked rows of
+`TestPaymentBlocksActionHeld_Matrix` remain, for a park an earlier version
+left. ADR-137 lists the tests of the design that replaced them.

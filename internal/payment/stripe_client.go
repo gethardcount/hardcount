@@ -112,11 +112,11 @@ func humanizeDeclineCode(code string) string {
 // scheduler/dunning path should treat this as "skip this tick" and not tick
 // the dunning attempt count, unlike a real payment failure.
 //
-// A 429 speaks only for the request it answers. When stripe-go resent the
-// request after a network error, the first request under the same key may
-// still be running at Stripe and charge the card (#976). The hold stays, so
-// the same initiator resends the same key; another charge kind or a changed
-// card sends a new one.
+// A 429 speaks only for the request it answers. When stripe-go resent a
+// confirm after a network error, the first send under the same key may still
+// be running at Stripe and charge the card (#976). The invoice already names
+// the PaymentIntent, so the unknown sweep reads what it did. A 429 to the
+// create is harmless: at most an unconfirmed PaymentIntent exists.
 var ErrPaymentTransient = errors.New("payment attempt skipped; upstream breaker open, timeout before Stripe, or Stripe rate limit")
 
 // ErrStripeCredentialsUnavailable is the ErrPaymentTransient for a request
@@ -142,6 +142,11 @@ var ErrStripeCredentialsUnavailable = fmt.Errorf("%w: stripe credentials could n
 type StripeKeyError struct {
 	Reason  string // StripeKeyRejected or StripeKeyNotConfigured
 	Message string // Stripe's own sentence, scrubbed; empty for not_configured
+	// AtConfirm: the key was refused at the confirm, after the invoice was
+	// stamped unknown on its PaymentIntent. The invoice is not unchanged, and
+	// collecting again is refused until the unknown sweep has read that
+	// PaymentIntent, which needs a working key.
+	AtConfirm bool
 }
 
 // Reasons of a StripeKeyError; also the label of
@@ -164,6 +169,9 @@ func (e *StripeKeyError) Unwrap() error { return ErrPaymentTransient }
 // sentence names the key's last characters or the missing permission; it
 // goes to the log and the Settings notice, not to this response.
 func (e *StripeKeyError) OperatorSafeMessage() string {
+	if e.AtConfirm {
+		return "Stripe refused this account's API key while the payment was being confirmed, so its outcome is not known yet. Update the key under Settings → Payments. Hardcount then reads the payment from Stripe and records the result; collecting again is refused until it has."
+	}
 	return "Stripe refused this account's API key (or none is connected for this mode). Nothing was charged. Update the key under Settings → Payments, then collect again."
 }
 
@@ -239,16 +247,6 @@ func IsDefiniteRefusal(err error) bool {
 func isRateLimited(err error) bool {
 	var se *stripe.Error
 	return errors.As(err, &se) && se.HTTPStatusCode == http.StatusTooManyRequests
-}
-
-// isIdempotencyConflict reports whether err is Stripe refusing a key that was
-// already used with different parameters. Distinguished from the other
-// ambiguous outcomes because it carries a stronger fact: an attempt under this
-// exact key definitely reached Stripe. Callers use it to name the key in an
-// operator-facing ERROR, since the dashboard is searchable by it.
-func isIdempotencyConflict(err error) bool {
-	var stripeErr *stripe.Error
-	return errors.As(err, &stripeErr) && stripeErr.Type == stripe.ErrorTypeIdempotency
 }
 
 // declineCodeOf is the code that says why Stripe refused a card: the error's
@@ -374,23 +372,6 @@ func classifyStripeError(err error) *PaymentError {
 // actionable signal ("connect Stripe under Settings → Payments").
 var ErrStripeNotConfigured = &PaymentError{Message: "stripe not configured for this mode"}
 
-// ErrStripeAuthFailed marks a read Stripe refused with 401 or 403: the
-// tenant's key is wrong or revoked, or is a restricted key without permission
-// to read PaymentIntents. It will not succeed until someone fixes the key, so
-// the stale-hold sweep logs it as a check that cannot run (ADR-127).
-var ErrStripeAuthFailed = errors.New("stripe rejected the API key")
-
-// ErrStripeUnreachable marks a read that got no answer from Stripe: a
-// network error, or the caller's time limit ended it. Unlike a 5xx or a 429,
-// which Stripe answers at once, it can take as long as the time limit allows,
-// so the stale-hold sweep stops for the tick after several in a row.
-var ErrStripeUnreachable = errors.New("stripe could not be reached")
-
-// ErrStripeCustomerMissing marks a read Stripe refused because the customer
-// does not exist in this account (resource_missing on the customer): deleted,
-// or created under other credentials. It will not succeed on retry.
-var ErrStripeCustomerMissing = errors.New("stripe customer not found in this account")
-
 // ErrNoSavedCard is FetchCardDetails' "the Stripe customer has no card" — a
 // one-off payment where the customer did not save the card. It is the only
 // FetchCardDetails error that means "nothing to record"; any other is a
@@ -398,8 +379,10 @@ var ErrStripeCustomerMissing = errors.New("stripe customer not found in this acc
 var ErrNoSavedCard = errors.New("no saved card on the Stripe customer")
 
 // LiveStripeClient wraps the Stripe SDK for PaymentIntent operations. Despite
-// the "Live" in the name, it handles both live and test modes — it selects
-// the underlying per-mode client from clients.ForCtx(ctx) on each call.
+// the "Live" in the name, it handles both live and test modes: each call
+// resolves the tenant and mode on ctx through StripeClients.ResolveCtx. A
+// caller outside a request (a background job, a sweep) must set the tenant
+// first with auth.WithTenantID, or the call fails and nothing reaches Stripe.
 // Implements the StripeClient interface used by the payment adapter.
 type LiveStripeClient struct {
 	clients *StripeClients
@@ -438,7 +421,12 @@ func (c *LiveStripeClient) client(ctx context.Context) (*stripe.Client, error) {
 	return sc, nil
 }
 
-func (c *LiveStripeClient) CreatePaymentIntent(ctx context.Context, params PaymentIntentParams) (PaymentIntentResult, error) {
+// CreateUnconfirmedPaymentIntent creates one charge attempt's PaymentIntent
+// without confirming it, so no money can move (ADR-137). The caller puts its
+// id on the invoice, then calls ConfirmPaymentIntent. The
+// confirm-time settings (off_session, error_on_requires_action) go on the
+// confirm: Stripe takes off_session only together with confirmation.
+func (c *LiveStripeClient) CreateUnconfirmedPaymentIntent(ctx context.Context, params PaymentIntentParams) (PaymentIntentResult, error) {
 	sc, err := c.client(ctx)
 	if errors.Is(err, ErrStripeNotConfigured) {
 		return PaymentIntentResult{}, &StripeKeyError{Reason: StripeKeyNotConfigured}
@@ -446,47 +434,18 @@ func (c *LiveStripeClient) CreatePaymentIntent(ctx context.Context, params Payme
 	if err != nil {
 		return PaymentIntentResult{}, err
 	}
-
-	metadata := make(map[string]string)
-	for k, v := range params.Metadata {
-		metadata[k] = v
-	}
-
-	// Charge the exact PaymentMethod the caller resolved from Hardcount's
-	// payment_methods table (the single source of truth for the customer's
-	// default card). We deliberately do NOT consult Stripe's
-	// invoice_settings.default_payment_method or fall back to "most recent
-	// card" — those are independent selectors that can disagree with
-	// Hardcount's default and previously let an off-session charge hit a
-	// different card than the one Hardcount gated on. No PM id → loud failure,
-	// never a silent guess.
 	if params.PaymentMethodID == "" {
 		return PaymentIntentResult{}, &PaymentError{Message: "customer has no payment method on file"}
 	}
-
+	metadata := make(map[string]string, len(params.Metadata))
+	for k, v := range params.Metadata {
+		metadata[k] = v
+	}
 	pi, err := sc.V1PaymentIntents.Create(ctx, &stripe.PaymentIntentCreateParams{
-		Amount:        stripe.Int64(params.AmountCents),
-		Currency:      stripe.String(params.Currency),
-		Customer:      stripe.String(params.CustomerID),
-		PaymentMethod: stripe.String(params.PaymentMethodID),
-		Confirm:       stripe.Bool(true),
-		OffSession:    stripe.Bool(true),
-		// A payment the bank wants the customer to confirm fails now, as a
-		// card_error with code authentication_required, instead of waiting in
-		// requires_action: no customer can reach an off-session
-		// PaymentIntent to confirm it, so it never ended and held the
-		// invoice (ADR-107, ADR-127 follow-up C). The customer confirms on
-		// the hosted invoice page, which the decline's email links to.
-		// https://docs.stripe.com/payments/without-card-authentication
-		ErrorOnRequiresAction: stripe.Bool(true),
-		// Required with ErrorOnRequiresAction. Without it Stripe uses the
-		// payment methods set in its Dashboard, and refuses that flag with
-		// HTTP 400 (invalid_request_error) on every charge: "you can't use
-		// error_on_requires_action. Use payment_method_types with
-		// error_on_requires_action"
-		// (https://docs.stripe.com/changelog/2023-08-16/automatic-payment-methods).
-		// Hardcount takes cards only, as the three Checkout Session creates
-		// say.
+		Amount:             stripe.Int64(params.AmountCents),
+		Currency:           stripe.String(params.Currency),
+		Customer:           stripe.String(params.CustomerID),
+		PaymentMethod:      stripe.String(params.PaymentMethodID),
 		PaymentMethodTypes: stripe.StringSlice([]string{"card"}),
 		Params: stripe.Params{
 			IdempotencyKey: stripe.String(SentIdempotencyKey(params.IdempotencyKey, params.PaymentMethodID)),
@@ -495,40 +454,80 @@ func (c *LiveStripeClient) CreatePaymentIntent(ctx context.Context, params Payme
 		Description: stripe.String(params.Description),
 	})
 	if err != nil {
-		if isRateLimited(err) {
-			// Stripe refused this request before processing it, so this
-			// request charged nothing (an earlier one that stripe-go resent
-			// may still be running; see isRateLimited). A transient skip: no
-			// state write, and the next tick tries again. Unlike the breaker
-			// short-circuit the hold stays, for that earlier request. Classified
-			// as an error it would park the invoice at 'unknown' (an
-			// unrecognised type) for a person to resolve.
-			return PaymentIntentResult{}, fmt.Errorf("%w: stripe rate limit: %v", ErrPaymentTransient, errs.Scrub(err.Error()))
-		}
-		// Stripe refused the key itself, before looking at the charge: 401 for
-		// an invalid or rolled key, 403 for a restricted key without
-		// PaymentIntent write access. Both come as invalid_request_error, so
-		// read by type they were a definite failure: the invoice marked
-		// failed, a dunning attempt used, Stripe's sentence in the customer's
-		// email. Keyed on the HTTP status, which is what says "the key".
-		var se *stripe.Error
-		if errors.As(err, &se) && (se.HTTPStatusCode == http.StatusUnauthorized || se.HTTPStatusCode == http.StatusForbidden) {
-			return PaymentIntentResult{}, &StripeKeyError{Reason: StripeKeyRejected, Message: errs.Scrub(se.Msg)}
-		}
-		// Below Stripe's minimum charge: an invalid_request_error, so read by
-		// type it was a decline that started dunning and emailed the
-		// customer "declined". Keyed on the code (domain.ErrBelowMinimumCharge).
-		if bm := belowMinimumOf(err); bm != nil {
-			return PaymentIntentResult{}, bm
-		}
-		return PaymentIntentResult{}, classifyStripeError(err)
+		return PaymentIntentResult{}, classifyPaymentIntentWriteError(err)
 	}
+	return PaymentIntentResult{ID: pi.ID, Status: string(pi.Status), ClientSecret: pi.ClientSecret}, nil
+}
 
-	return PaymentIntentResult{
-		ID:           pi.ID,
-		Status:       string(pi.Status),
-		ClientSecret: pi.ClientSecret,
-	}, nil
+// ConfirmPaymentIntent confirms a PaymentIntent that CreateUnconfirmedPaymentIntent
+// made: the step where money moves. Every error it returns names the
+// PaymentIntent, so an unclear answer is never one Hardcount cannot look up.
+//
+// A confirm Stripe refuses as payment_intent_unexpected_state is not a
+// decline: an earlier confirm of the same PaymentIntent already moved it on
+// (stripe-go resent after a lost reply, or a retry of this attempt). Read by
+// its type (invalid_request_error) it would mark a paid invoice failed, so
+// the PaymentIntent is read and its real state returned instead.
+func (c *LiveStripeClient) ConfirmPaymentIntent(ctx context.Context, paymentIntentID string, params PaymentIntentParams) (PaymentIntentResult, error) {
+	sc, err := c.client(ctx)
+	if errors.Is(err, ErrStripeNotConfigured) {
+		return PaymentIntentResult{}, &StripeKeyError{Reason: StripeKeyNotConfigured}
+	}
+	if err != nil {
+		return PaymentIntentResult{}, err
+	}
+	pi, err := sc.V1PaymentIntents.Confirm(ctx, paymentIntentID, &stripe.PaymentIntentConfirmParams{
+		PaymentMethod:         stripe.String(params.PaymentMethodID),
+		OffSession:            stripe.Bool(true),
+		ErrorOnRequiresAction: stripe.Bool(true),
+		Params: stripe.Params{
+			IdempotencyKey: stripe.String(SentIdempotencyKey(params.IdempotencyKey, params.PaymentMethodID) + "_confirm"),
+		},
+	})
+	if err != nil {
+		var se *stripe.Error
+		if errors.As(err, &se) && string(se.Code) == "payment_intent_unexpected_state" {
+			got, gerr := c.GetPaymentIntent(ctx, paymentIntentID)
+			if gerr == nil && (got.Status == domain.ProviderPISucceeded || got.Status == domain.ProviderPIProcessing) {
+				return got, nil
+			}
+			return PaymentIntentResult{}, &PaymentError{Message: stripeErrorMessage(err), PaymentIntentID: paymentIntentID, Unknown: true}
+		}
+		// A definite refusal names the PaymentIntent only when it is a card
+		// error: a bank's answer about this payment. A request Stripe refused
+		// outright (an invalid request) names none, whatever its error body
+		// carries: Stripe puts the payment_intent object on errors of a
+		// request that involves one, a refused confirm included. The caller
+		// tells the two apart by this field: only a decline is reported as a
+		// failed payment, with a customer email.
+		werr := classifyPaymentIntentWriteError(err)
+		var pe *PaymentError
+		if errors.As(werr, &pe) && !pe.Unknown {
+			if se != nil && se.Type == stripe.ErrorTypeCard {
+				pe.PaymentIntentID = paymentIntentID
+			} else {
+				pe.PaymentIntentID = ""
+			}
+		}
+		return PaymentIntentResult{}, werr
+	}
+	return PaymentIntentResult{ID: pi.ID, Status: string(pi.Status), ClientSecret: pi.ClientSecret}, nil
+}
+
+// classifyPaymentIntentWriteError maps a create or confirm error: a 429 is transient, a refused key is a key error,
+// below Stripe's minimum is its own error, the rest by classifyStripeError.
+func classifyPaymentIntentWriteError(err error) error {
+	if isRateLimited(err) {
+		return fmt.Errorf("%w: stripe rate limit: %v", ErrPaymentTransient, errs.Scrub(err.Error()))
+	}
+	var se *stripe.Error
+	if errors.As(err, &se) && (se.HTTPStatusCode == http.StatusUnauthorized || se.HTTPStatusCode == http.StatusForbidden) {
+		return &StripeKeyError{Reason: StripeKeyRejected, Message: errs.Scrub(se.Msg)}
+	}
+	if bm := belowMinimumOf(err); bm != nil {
+		return bm
+	}
+	return classifyStripeError(err)
 }
 
 func (c *LiveStripeClient) FetchCardDetails(ctx context.Context, stripeCustomerID string) (CardDetails, error) {
@@ -622,9 +621,11 @@ func (c *LiveStripeClient) CancelPaymentIntent(ctx context.Context, paymentInten
 	return nil
 }
 
-// GetPaymentIntent fetches the current state of a PaymentIntent. Used by the
-// reconciler to resolve PaymentUnknown invoices — Stripe is the source of
-// truth for whether a charge actually succeeded.
+// GetPaymentIntent fetches the current state of a PaymentIntent. The unknown
+// and processing sweeps read it: Stripe is the source of truth for what a
+// charge did. A failed read (a refused key, a PaymentIntent not in this
+// account, a 5xx, no answer) is an error the sweep reports and retries on a
+// later tick; the invoice stays as it is.
 func (c *LiveStripeClient) GetPaymentIntent(ctx context.Context, paymentIntentID string) (PaymentIntentResult, error) {
 	sc, err := c.client(ctx)
 	if err != nil {
@@ -653,10 +654,10 @@ func paymentIntentResult(pi *stripe.PaymentIntent) PaymentIntentResult {
 		AmountReceivedCents: pi.AmountReceived,
 		AnchorAt:            anchorFromPIMetadata(pi.Metadata),
 	}
-	// Only an expanded latest_charge says whether it was refunded; an
-	// unexpanded one carries just its id, and Refunded reads false.
-	if pi.LatestCharge != nil && pi.LatestCharge.Refunded {
-		res.FullyRefunded = true
+	// latest_charge is set (unexpanded: its id) once a confirm reached the
+	// card network.
+	if pi.LatestCharge != nil {
+		res.Charged = true
 	}
 	if lpe := pi.LastPaymentError; lpe != nil {
 		res.DeclineCode = declineCodeOf(string(lpe.Type), string(lpe.Code), string(lpe.DeclineCode))
@@ -683,66 +684,6 @@ func anchorFromPIMetadata(meta map[string]string) time.Time {
 		return time.Time{}
 	}
 	return t
-}
-
-// ListPaymentIntentsForCustomer is the stale-hold sweep's read (ADR-127):
-// every PaymentIntent of the Stripe customer created at or after createdGTE,
-// each with its hardcount_invoice_id, status, captured amount and whether its
-// latest charge was refunded in full (expand[]=data.latest_charge).
-//
-// Why List and not Search (Stripe's docs, fetched 2026-10-19): List is the
-// read-after-write API — "Don't use search for read-after-write flows… use the
-// various list APIs… These APIs aren't subject to the availability delays" —
-// and it is offered in every country, while Search "isn't available to
-// businesses in India". The sweep reads "no PaymentIntent for this invoice" as
-// "Stripe never received the charge", which only a consistent read supports.
-//
-// An error on any page fails the whole read: a partial list is never
-// returned, because a missing page could hold the payment. Errors are typed
-// for the sweep: ErrStripeNotConfigured, ErrStripeAuthFailed (401, 403) and
-// ErrStripeCustomerMissing (resource_missing on the customer) will not
-// succeed on retry; anything else (5xx, 429, network, unreadable
-// credentials) may, and a read Stripe never answered (network, time limit)
-// is also ErrStripeUnreachable.
-func (c *LiveStripeClient) ListPaymentIntentsForCustomer(ctx context.Context, stripeCustomerID string, createdGTE time.Time) ([]PaymentIntentResult, error) {
-	sc, err := c.client(ctx)
-	if err != nil {
-		return nil, err
-	}
-	params := &stripe.PaymentIntentListParams{
-		Customer:     stripe.String(stripeCustomerID),
-		CreatedRange: &stripe.RangeQueryParams{GreaterThanOrEqual: createdGTE.Unix()},
-	}
-	params.Limit = stripe.Int64(100)
-	params.AddExpand("data.latest_charge")
-	var out []PaymentIntentResult
-	for pi, err := range sc.V1PaymentIntents.List(ctx, params) {
-		if err != nil {
-			return nil, fmt.Errorf("list PaymentIntents of Stripe customer %s: %w", stripeCustomerID, classifyListError(err))
-		}
-		out = append(out, paymentIntentResult(pi))
-	}
-	return out, nil
-}
-
-// classifyListError types a failed PaymentIntent list for the stale-hold
-// sweep: a 401, a 403 (a restricted key without PaymentIntent read access)
-// and a missing customer will not heal on retry; a read Stripe never answered
-// (no *stripe.Error: a network error, a time limit) is ErrStripeUnreachable;
-// everything else is classifyStripeError's. The sweep retries all but the
-// first three.
-func classifyListError(err error) error {
-	var se *stripe.Error
-	if !errors.As(err, &se) {
-		return fmt.Errorf("%w: %w", ErrStripeUnreachable, classifyStripeError(err))
-	}
-	switch {
-	case se.HTTPStatusCode == http.StatusUnauthorized || se.HTTPStatusCode == http.StatusForbidden:
-		return fmt.Errorf("%w: %s", ErrStripeAuthFailed, errs.Scrub(se.Msg))
-	case se.Code == stripe.ErrorCodeResourceMissing && (se.Param == "customer" || strings.Contains(se.Msg, "customer")):
-		return fmt.Errorf("%w: %s", ErrStripeCustomerMissing, errs.Scrub(se.Msg))
-	}
-	return classifyStripeError(err)
 }
 
 // GetCheckoutSession reads a hosted Checkout Session's outcome (the hosted

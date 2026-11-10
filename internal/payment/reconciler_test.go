@@ -33,7 +33,7 @@ func (m *mockReconcileStore) ClearStaleChargeHold(context.Context, string, strin
 
 func (m *mockReconcileStore) MarkStaleHoldChecked(context.Context, string, string) error { return nil }
 
-func (m *mockReconcileStore) UnparkAfterNoPayment(context.Context, string, string, time.Time, int64) (domain.InvoicePaymentStatus, bool, error) {
+func (m *mockReconcileStore) EndAttemptWithoutPayment(context.Context, string, string, string, string) (domain.InvoicePaymentStatus, bool, error) {
 	return "", false, nil
 }
 
@@ -169,7 +169,7 @@ func TestReconciler_CanceledMarksFailed(t *testing.T) {
 	})
 	client := &mockStripeClient{
 		piStates: map[string]PaymentIntentResult{
-			"pi_ambig_2": {ID: "pi_ambig_2", Status: "canceled"},
+			"pi_ambig_2": {ID: "pi_ambig_2", Status: "canceled", Charged: true},
 		},
 	}
 	r := NewReconciler(client, store, time.Second)

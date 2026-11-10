@@ -36,9 +36,6 @@ type swapBillErrBiller struct{ err error }
 func (b *swapBillErrBiller) BillOnCreate(context.Context, domain.Subscription) (domain.Invoice, error) {
 	return domain.Invoice{}, nil
 }
-func (b *swapBillErrBiller) BillFinalOnImmediateCancel(context.Context, domain.Subscription) (domain.Invoice, error) {
-	return domain.Invoice{}, nil
-}
 func (b *swapBillErrBiller) BillCancelTx(context.Context, *sql.Tx, domain.Subscription) (domain.Invoice, domain.Relief, func(), error) {
 	return domain.Invoice{}, domain.Relief{}, func() {}, nil
 }

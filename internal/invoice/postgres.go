@@ -525,7 +525,7 @@ func (s *PostgresStore) UpdateStatusWithReversalPriorTx(ctx context.Context, tx 
 // an annulled invoice. The CAS covers status only. Payment state and the
 // charge hold are checked by Void and MarkUncollectible on the row their
 // locking variant reads (#975), not here: this body also serves
-// draft→finalized, and a parked invoice must stay writable-off. Allowed sources per target (matching the service-layer
+// draft→finalized. Allowed sources per target (matching the service-layer
 // state machine): finalized←draft; voided←draft/finalized/uncollectible
 // (never paid — "issue a credit note instead"); uncollectible←finalized.
 // 0 rows → re-read → typed conflict with the actual current status.
@@ -775,17 +775,20 @@ func (s *PostgresStore) runOnFinalizedTx(ctx context.Context, tx *sql.Tx, inv do
 	return after, nil
 }
 
-// StampChargeOutcome records a charge attempt's outcome (processing, unknown,
-// or a failure with no PaymentIntent) on the invoice. A failure that names a
-// PaymentIntent goes through MarkPaymentFailedReportingTransition, which
+// StampChargeOutcome records a charge attempt's outcome on the invoice:
+// processing or unknown on a named PaymentIntent, or a failure with no
+// PaymentIntent. An in-flight outcome that names no PaymentIntent is refused:
+// that is a parked charge, which nothing in this version resolves (the
+// sweeps read the PaymentIntent the invoice names; ADR-137). A charge writes
+// "unknown" through StampPendingConfirm, before it confirms. A failure that
+// names a PaymentIntent goes through MarkPaymentFailedReportingTransition, which
 // applies the same seq CAS for the charge call (ChargedAtSeq). The write lands AFTER a Stripe round-trip, and
 // another outcome can be recorded during it: the PaymentIntent's own webhook
 // (paid or declined), an offline payment, a hosted Checkout payment, a credit
 // cover. A late write over any of those undid it (P13) — a paid invoice lost
 // paid_at and its PaymentIntent, so a second capture read as "already
 // settled" instead of payment.duplicate_charge; a recorded decline turned
-// back into "unknown", and with no PaymentIntent id that parked the invoice
-// for good.
+// back into "unknown".
 //
 // It clears below_minimum_at: this answer from Stripe replaces an earlier
 // below-minimum one (StampBelowMinimum).
@@ -796,8 +799,10 @@ func (s *PostgresStore) runOnFinalizedTx(ctx context.Context, tx *sql.Tx, inv do
 // and status='paid' is only ever set by one of them, so "seq unchanged" means
 // exactly "nothing was recorded since this attempt began". That one CAS covers
 // a named and an unnamed attempt alike, which no comparison of state or
-// PaymentIntent id can: an unknown with no id cannot tell its own decline
-// from someone else's.
+// PaymentIntent id can: a failure with no id cannot tell its own attempt from
+// someone else's. One writer records an outcome without moving the counter:
+// EndAttemptWithoutPayment, which ends an attempt whose counter
+// StampPendingConfirm already moved.
 //
 // Writes that do not record an outcome leave the seq alone and so do not
 // block the stamp: a void or write-off that lands mid-charge still gets it,
@@ -812,6 +817,9 @@ func (s *PostgresStore) runOnFinalizedTx(ctx context.Context, tx *sql.Tx, inv do
 func (s *PostgresStore) StampChargeOutcome(ctx context.Context, tenantID, id string, attemptSeq int64, paymentStatus domain.InvoicePaymentStatus, stripePaymentIntentID, lastPaymentError string) (domain.Invoice, bool, error) {
 	switch paymentStatus {
 	case domain.PaymentProcessing, domain.PaymentUnknown:
+		if stripePaymentIntentID == "" {
+			return domain.Invoice{}, false, fmt.Errorf("stamp charge outcome: %q must name its PaymentIntent (an in-flight payment with none is a parked charge, which nothing resolves)", paymentStatus)
+		}
 	case domain.PaymentFailed:
 		// A failure that names a PaymentIntent is a report the webhook and
 		// reconciler may repeat; it goes through
@@ -832,17 +840,6 @@ func (s *PostgresStore) StampChargeOutcome(ctx context.Context, tenantID, id str
 	}
 	defer postgres.Rollback(tx)
 
-	// A stamp that names a PaymentIntent on a parked invoice (the stale-hold
-	// sweep adopting the park's payment) ends the park: lock the row and read
-	// that first, so the parked attempt's row takes the PaymentIntent below.
-	var wasParked bool
-	if stripePaymentIntentID != "" {
-		err := tx.QueryRowContext(ctx, `SELECT `+parkedSQL+` FROM invoices WHERE id = $1 FOR UPDATE`, id).Scan(&wasParked)
-		if err != nil && err != sql.ErrNoRows {
-			return domain.Invoice{}, false, fmt.Errorf("read park before charge-outcome stamp: %w", err)
-		}
-	}
-
 	now := clock.Now(ctx)
 	var inv domain.Invoice
 	applied := true
@@ -856,17 +853,6 @@ func (s *PostgresStore) StampChargeOutcome(ctx context.Context, tenantID, id str
 		postgres.NullableString(lastPaymentError), now, id, attemptSeq,
 	).Scan(s.scanInvDest(&inv)...)
 
-	if err == nil && wasParked {
-		// processing: the payment is in flight, which the attempt row calls
-		// pending; unknown: it names the payment but its outcome is unclear.
-		outcome := domain.ChargeAttemptPending
-		if paymentStatus == domain.PaymentUnknown {
-			outcome = domain.ChargeAttemptUnknown
-		}
-		if lerr := linkParkedAttemptTx(ctx, tx, inv.ID, stripePaymentIntentID, outcome); lerr != nil {
-			return domain.Invoice{}, false, lerr
-		}
-	}
 	if err == sql.ErrNoRows {
 		// Refused, or no such invoice: the re-read tells which.
 		applied = false
@@ -1078,13 +1064,7 @@ func (s *PostgresStore) MarkPaymentFailedReportingTransition(ctx context.Context
 		}
 	}
 	// ADR-103: the attempt's outcome lands in THIS tx, so the timeline's
-	// single payment owner can never disagree with the invoice's state. A
-	// decline that ends a park lands on the parked attempt's row.
-	if domain.InvoicePaymentStatus(paymentStatus) == domain.PaymentUnknown && rowPI.String == "" {
-		if err := linkParkedAttemptTx(ctx, tx, inv.ID, pi, domain.ChargeAttemptFailed); err != nil {
-			return domain.Invoice{}, domain.PaymentFailureResult{}, err
-		}
-	}
+	// single payment owner can never disagree with the invoice's state.
 	if err := upsertChargeAttemptTx(ctx, tx, tenantID, inv.ID, pi,
 		domain.ChargeAttemptFailed, report.Message, inv.AmountDueCents, report.DeclineCode, report.PaymentMethodID, simAtOf(ctx)); err != nil {
 		return domain.Invoice{}, domain.PaymentFailureResult{}, err
@@ -1120,8 +1100,8 @@ func (s *PostgresStore) MarkPaymentFailedReportingTransition(ctx context.Context
 // the outcome, and its charges are serialized by the charge lease, so the
 // newest Hardcount-made row is the attempt the invoice is waiting on. Rows for
 // attempts Hardcount did not make (hosted Checkout, inserted 'external' by a
-// report) do not count. Empty-PI rows (a create that failed, a parked
-// attempt) do: an older attempt's late decline is superseded by them.
+// report) do not count. Empty-PI rows (a create Stripe refused) do: an older
+// attempt's late decline is superseded by them.
 func hardcountAttemptStandingTx(ctx context.Context, tx *sql.Tx, invoiceID, pi string) (domain.AttemptStanding, error) {
 	var mine bool
 	var newest sql.NullString
@@ -1440,18 +1420,6 @@ func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenant
 	// PARTIAL capture, and Hardcount is PaymentIntent-only full-capture (no
 	// partial/manual-capture flow). Revisit if partial capture is added.
 	// (2026-06-15 proration audit; Parts A/B shipped #295 + ADR-059.)
-	//
-	// A parked invoice's payment ends the park: read that before the flip, so
-	// the parked attempt's row is the one that records it (linkParkedAttemptTx).
-	var wasParked bool
-	if stripePaymentIntentID != "" {
-		if err := tx.QueryRowContext(ctx, `SELECT `+parkedSQL+` FROM invoices WHERE id = $1`, id).Scan(&wasParked); err != nil {
-			if err == sql.ErrNoRows {
-				return domain.Invoice{}, errs.ErrNotFound
-			}
-			return domain.Invoice{}, fmt.Errorf("read park before mark-paid: %w", err)
-		}
-	}
 	err := tx.QueryRowContext(ctx, `
 		UPDATE invoices SET
 			status = 'paid',
@@ -1519,11 +1487,6 @@ func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenant
 	var attemptSimAt *time.Time
 	if _, ok := clock.SimOf(ctx); ok {
 		attemptSimAt = &paidAt
-	}
-	if wasParked {
-		if err := linkParkedAttemptTx(ctx, tx, inv.ID, stripePaymentIntentID, domain.ChargeAttemptSucceeded); err != nil {
-			return domain.Invoice{}, err
-		}
 	}
 	if err := upsertChargeAttemptTx(ctx, tx, tenantID, inv.ID, stripePaymentIntentID,
 		domain.ChargeAttemptSucceeded, "", inv.AmountPaidCents, "", "", attemptSimAt); err != nil {
@@ -2492,20 +2455,6 @@ func lockInvoiceForChargeClaim(ctx context.Context, tx *sql.Tx, id string) (bool
 // again (#976). Shared by every claim so they cannot drift apart.
 const chargeHoldFree = `auto_charge_claimed_until IS NULL`
 
-// holdKeptWhileParkedSQL is the condition every write that clears the hold
-// without ending a park carries: the invoice is not parked (domain.Invoice.Parked).
-// A park keeps its hold until it ends, because the stale-hold sweep finds
-// parks only by their hold (ListStaleChargeHolds): a parked invoice with no
-// hold refuses every claim and is never looked at again, so a payment Stripe
-// made for it is never recorded and the invoice stays blocked. Only
-// UnparkAfterNoPayment clears a park's hold, in the same statement that ends
-// the park; a write that records the park's payment moves it out of the park
-// first. ADR-127 amendment 2026-10-29.
-const holdKeptWhileParkedSQL = `NOT ` + parkedSQL
-
-// parkedSQL is domain.Invoice.Parked on the invoices row.
-const parkedSQL = `(payment_status = 'unknown' AND COALESCE(stripe_payment_intent_id, '') = '')`
-
 // chargeHoldReleaseTimeout bounds a release detached from its caller's
 // context (ReleaseChargeHold): one UPDATE, so a stalled database cannot hold
 // a request or a shutdown for longer than this.
@@ -2531,7 +2480,11 @@ func (s *PostgresStore) claimChargeHold(ctx context.Context, tenantID, id, eligi
 	var until time.Time
 	err = tx.QueryRowContext(ctx, `
 		UPDATE invoices
-		SET auto_charge_claimed_until = now() + make_interval(secs => $2)
+		SET auto_charge_claimed_until = now() + make_interval(secs => $2),
+		    -- The token (ADR-137): equal to the hold, so the stale-hold sweep
+		    -- knows this hold's charger puts its PaymentIntent on the invoice
+		    -- before confirming.
+		    charge_hold_token = now() + make_interval(secs => $2)
 		WHERE id = $1
 		  AND `+eligibility+`
 		  AND `+chargeHoldFree+`
@@ -2609,18 +2562,16 @@ const invoiceClockNowSQL = `COALESCE((SELECT tc.frozen_time FROM customers pc
 // failure, no payment method, a settle that needed no charge, the charge's
 // re-check refusing, the breaker open, unreadable credentials), after a
 // DEFINITE outcome (a decline, a settled success), and dunning's final action
-// after its subscription action. An unclear outcome (timeout, unknown, 429)
-// never releases: the call may have reached Stripe, and the stale-hold sweep
-// asks Stripe before anything can charge again. No updated_at write (see
-// ClaimAutoCharge).
+// after its subscription action. An unclear outcome of the confirm (timeout,
+// unknown, 429) never releases: the confirm may be running at Stripe, and the
+// unknown sweep leaves the invoice alone until the hold has ended. No
+// updated_at write (see ClaimAutoCharge).
 //
 // It runs to completion even when the caller's context has ended: Collect
 // releases on the request's context (an operator closing the tab) and the
 // auto-charge sweep on the tick's (a shutdown). A release lost that way left
 // an invoice whose charge was never sent refused by every charge, void and
-// offline payment until the stale-hold sweep asked Stripe, an hour or more.
-//
-// It never clears a parked invoice's hold (holdKeptWhileParkedSQL).
+// offline payment until the stale-hold sweep cleared it, an hour or more.
 func (s *PostgresStore) ReleaseChargeHold(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error {
 	if !hold.Held() {
 		return nil
@@ -2635,11 +2586,46 @@ func (s *PostgresStore) ReleaseChargeHold(ctx context.Context, tenantID, id stri
 
 	if _, err := tx.ExecContext(ctx,
 		`UPDATE invoices SET auto_charge_claimed_until = NULL
-		 WHERE id = $1 AND auto_charge_claimed_until = $2 AND `+holdKeptWhileParkedSQL,
+		 WHERE id = $1 AND auto_charge_claimed_until = $2`,
 		id, hold.Until); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// EndUnstampedAttempt ends a charge attempt that created its PaymentIntent but
+// did not put it on the invoice (StampPendingConfirm did not apply, or
+// failed), so it confirmed nothing (ADR-137).
+//
+// On an invoice still open for a charge it clears the caller's hold and moves
+// the charge counter in one compare-and-set (ClearStaleChargeHold's statement,
+// on the hold and the counter the charger read): "nothing was confirmed" is
+// this attempt's outcome, and the next charge must send a fresh idempotency
+// key. The stamp is refused when the amount due changed since the charge read
+// the invoice (a credit note); the old key with the new amount is answered by
+// Stripe with an idempotency error, which reads as an unclear charge.
+//
+// When that does not apply (the invoice was paid, voided or stamped
+// meanwhile, or the counter moved), only the caller's own hold is cleared,
+// if it is still the caller's. Like ReleaseChargeHold it runs to completion
+// after the caller's context has ended.
+func (s *PostgresStore) EndUnstampedAttempt(ctx context.Context, tenantID, id string, hold domain.ChargeHold, attemptSeq int64) error {
+	if !hold.Held() {
+		return nil
+	}
+	clearCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), chargeHoldReleaseTimeout)
+	defer cancel()
+	moved, err := s.ClearStaleChargeHold(clearCtx, tenantID, id, hold.Until, attemptSeq, true)
+	if err == nil && moved {
+		return nil
+	}
+	if err != nil {
+		// The release below may still free the hold. The counter then stays
+		// where it was, and the next charge sends the old key.
+		slog.WarnContext(ctx, "ending a charge attempt that confirmed nothing: the hold and counter could not be cleared together; releasing the hold only, so the next charge reuses its idempotency key",
+			"invoice_id", id, "error", err)
+	}
+	return s.ReleaseChargeHold(ctx, tenantID, id, hold)
 }
 
 // ReleaseRetryChargeHoldTx frees the charge hold a dunning retry kept while
@@ -2651,11 +2637,10 @@ func (s *PostgresStore) ReleaseChargeHold(ctx context.Context, tenantID, id stri
 // Why the hold is that retry's: until this transaction the invoice was
 // processing on paymentIntentID, and no claim admits a processing invoice, so
 // no other owner can have taken a hold since the retry's. The one other
-// writer of a hold in that state is the stale-hold sweep, which keeps it while
-// a payment the invoice does not follow is still processing at Stripe
-// (keepForProcessing). The sweep looks only at holds that ended at least
-// domain.StaleChargeHoldWait ago, so this releases only a hold younger than
-// that, which the sweep has not looked at. An older one stays for the sweep,
+// writer of a hold in that state is the stale-hold sweep, which looks only at
+// holds that ended at least domain.StaleChargeHoldWait ago, so this releases
+// only a hold younger than that, which the sweep has not looked at. An older
+// one stays for the sweep,
 // whose next check clears it. Reports whether it released. No updated_at
 // write (see ClaimAutoCharge).
 func (s *PostgresStore) ReleaseRetryChargeHoldTx(ctx context.Context, tx *sql.Tx, invoiceID, paymentIntentID string) (bool, error) {
@@ -2744,7 +2729,7 @@ func (s *PostgresStore) ConfirmChargeHold(ctx context.Context, tenantID, id stri
 	err = tx.QueryRowContext(ctx, `
 		SELECT COALESCE(
 			auto_charge_claimed_until = $2
-			AND auto_charge_claimed_until > now() + make_interval(secs => $3)
+			AND auto_charge_claimed_until > clock_timestamp() + make_interval(secs => $3)
 			AND charge_attempt_seq = $4
 			AND status = 'finalized' AND payment_status IN ('pending', 'failed'),
 			false)
@@ -2822,8 +2807,8 @@ func (s *PostgresStore) ClaimChargeHoldForFinalAction(ctx context.Context, tenan
 		  AND status = 'finalized'`)
 }
 
-// staleHoldRecheckAfter is how long a checked hold waits before the sweep
-// asks Stripe about it again. A kept hold's check stamps provider_synced_at
+// staleHoldRecheckAfter is how long a kept hold waits before the sweep
+// looks at it again. A kept hold's check stamps provider_synced_at
 // (MarkStaleHoldChecked), so a hold whose check failed rotates to the back of
 // the queue instead of heading it forever (the 0167 rotation). Shorter than
 // the hourly production tick on purpose: a stamp taken during one tick must
@@ -2831,16 +2816,11 @@ func (s *PostgresStore) ClaimChargeHoldForFinalAction(ctx context.Context, tenan
 const staleHoldRecheckAfter = 30 * time.Minute
 
 // ListStaleChargeHolds is the stale-hold sweep's input (ADR-127): invoices
-// whose hold ended at least domain.StaleChargeHoldWait ago, in ANY status —
-// a lost charge's payment can still be found after the invoice was settled,
-// written off or voided some other way, and the sweep must flag it rather
-// than leave the hold forever. Each row carries the hold value and the
-// customer's Stripe customer id.
-//
-// Parked invoices are among them: a park keeps its claim's hold, so this is
-// how the sweep finds every park (REC-5). PastParkedWait says whether the hold
-// ended more than domain.ParkedNothingWait ago, on the clock the hold was
-// written with.
+// whose hold ended at least domain.StaleChargeHoldWait ago, in ANY status:
+// a hold left on an invoice that was settled, written off or voided must be
+// cleared too, not left forever. Each row carries the hold value and whether
+// the hold carries its token (charge_hold_token equal to it: taken by a
+// charger that stamps the invoice before confirming, ADR-137).
 //
 // TxBypass across tenants with an explicit livemode, like the payment sweeps'
 // lists. Not gated on is_simulated: the hold is always written on the
@@ -2871,10 +2851,9 @@ func (s *PostgresStore) ListStaleChargeHolds(ctx context.Context, limit int, ski
 	// COALESCE: pgx sends a nil skip list as NULL, and
 	// NOT (id = ANY(NULL)) would filter out every row.
 	rows, err := tx.QueryContext(ctx, `
-		SELECT `+qualifiedInvCols("i")+`, i.auto_charge_claimed_until, COALESCE(c.stripe_customer_id, ''),
-		       i.auto_charge_claimed_until < now() - make_interval(secs => $6)
+		SELECT `+qualifiedInvCols("i")+`, i.auto_charge_claimed_until,
+		       COALESCE(i.charge_hold_token = i.auto_charge_claimed_until, false)
 		FROM invoices i
-		LEFT JOIN customers c ON c.id = i.customer_id AND c.tenant_id = i.tenant_id
 		WHERE i.auto_charge_claimed_until < now() - make_interval(secs => $1)
 		  AND i.livemode = $2
 		  AND (i.provider_synced_at IS NULL OR i.provider_synced_at < now() - make_interval(secs => $3))
@@ -2882,8 +2861,7 @@ func (s *PostgresStore) ListStaleChargeHolds(ctx context.Context, limit int, ski
 		ORDER BY (i.status = 'finalized' AND i.payment_status IN ('pending', 'failed')) DESC,
 		         i.provider_synced_at ASC NULLS FIRST, i.auto_charge_claimed_until ASC, i.id ASC
 		LIMIT $4
-	`, domain.StaleChargeHoldWait.Seconds(), live, staleHoldRecheckAfter.Seconds(), limit, skip,
-		domain.ParkedNothingWait.Seconds())
+	`, domain.StaleChargeHoldWait.Seconds(), live, staleHoldRecheckAfter.Seconds(), limit, skip)
 	if err != nil {
 		return nil, err
 	}
@@ -2892,7 +2870,7 @@ func (s *PostgresStore) ListStaleChargeHolds(ctx context.Context, limit int, ski
 	var out []domain.StaleChargeHold
 	for rows.Next() {
 		var h domain.StaleChargeHold
-		dest := append(s.scanInvDest(&h.Invoice), &h.Hold, &h.StripeCustomerID, &h.PastParkedWait)
+		dest := append(s.scanInvDest(&h.Invoice), &h.Hold, &h.Tokened)
 		if err := rows.Scan(dest...); err != nil {
 			return nil, err
 		}
@@ -2906,14 +2884,11 @@ func (s *PostgresStore) ListStaleChargeHolds(ctx context.Context, limit int, ski
 // read, so a concurrent outcome (a webhook stamp, the sweep running twice)
 // makes it a no-op instead of clearing a hold it no longer speaks for.
 //
-// moveSeq is set when Stripe was shown to hold nothing for the lost charge
-// and the invoice is still open: "no payment was created" is the attempt's
-// outcome, so the counter moves and the next charge sends a fresh idempotency
-// key (ADR-105 amendment). Reusing the old key could be handed a 500 Stripe
-// saved under it, or a 409 when credits changed the amount.
-//
-// It never clears a parked invoice's hold (holdKeptWhileParkedSQL); on a park
-// it reports false, as for any changed row.
+// moveSeq is set when the held charge took no money and the invoice is still
+// open: that is the attempt's outcome, so the counter moves and the next
+// charge sends a fresh idempotency key (ADR-105 amendment). Reusing the old
+// key could be handed a 500 Stripe saved under it, or a 409 when credits
+// changed the amount.
 func (s *PostgresStore) ClearStaleChargeHold(ctx context.Context, tenantID, id string, hold time.Time, attemptSeq int64, moveSeq bool) (bool, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -2934,7 +2909,7 @@ func (s *PostgresStore) ClearStaleChargeHold(ctx context.Context, tenantID, id s
 			UPDATE invoices
 			SET auto_charge_claimed_until = NULL
 			WHERE id = $1 AND auto_charge_claimed_until = $2 AND charge_attempt_seq = $3
-			  AND `+holdKeptWhileParkedSQL, id, hold, attemptSeq)
+		`, id, hold, attemptSeq)
 	}
 	if err != nil {
 		return false, err
@@ -2950,16 +2925,14 @@ func (s *PostgresStore) ClearStaleChargeHold(ctx context.Context, tenantID, id s
 }
 
 // MarkStaleHoldChecked stamps provider_synced_at for a stale hold the sweep
-// asked about and kept, so the row rotates (staleHoldRecheckAfter). Only the
+// looked at and kept, so the row rotates (staleHoldRecheckAfter). Only the
 // time: provider_payment_status stays the verbatim PaymentIntent status the
 // payment sweeps last read, and no money column or updated_at is touched
 // (see RecordProviderSync).
 //
-// A parked invoice is stamped too: this sweep is the only one that checks it
-// (REC-5), and unstamped it would come back on every tick ahead of the holds
-// already checked. Not an 'unknown' invoice that names its PaymentIntent:
-// there the column is the unknown sweep's rotation key, and that sweep stamps
-// it on its own checks.
+// Not an 'unknown' invoice that names its PaymentIntent: there the column is
+// the unknown sweep's rotation key, and that sweep stamps it on its own
+// checks.
 func (s *PostgresStore) MarkStaleHoldChecked(ctx context.Context, tenantID, id string) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -2976,42 +2949,27 @@ func (s *PostgresStore) MarkStaleHoldChecked(ctx context.Context, tenantID, id s
 	return tx.Commit()
 }
 
-// parkedNoPaymentReason is a parked attempt's reason once its park ends with
-// no payment at Stripe (UnparkAfterNoPayment).
-const parkedNoPaymentReason = "Stripe showed no payment for this attempt 24 hours later."
-
-// UnparkAfterNoPayment is the stale-hold sweep's write when Stripe shows no
-// payment for a parked invoice's charge domain.ParkedNothingWait after the
-// attempt (REC-5, ADR-127 amendment 2026-10-20). It puts the invoice back
-// where a charge picks it up and returns the status it set:
+// EndAttemptWithoutPayment ends a charge attempt whose PaymentIntent took no
+// payment and never will: no confirm got an answer from a bank, and it is
+// canceled at Stripe. The reconciler calls it for an invoice left unknown on
+// that PaymentIntent, open or written off (a write-off is allowed on an
+// unknown invoice once its hold has ended, and credit note drafts waiting on
+// the payment are released by this write).
 //
-//   - 'failed' when the parked attempt was a dunning retry, so the run retries
-//     it at once (the parked attempt was never counted);
-//   - 'pending' otherwise: an auto-charge, Collect, or no attempt row (its
-//     write is best-effort). Collect on a 'failed' invoice comes back
-//     'pending': the status shown differs, who may charge does not.
+// The invoice goes back where a charge picks it up: 'failed' when the
+// attempt was a dunning retry (the run retries it; an unclear result was
+// never counted), 'pending' otherwise. Collect on a 'failed' invoice comes
+// back 'pending': the status shown differs, who may charge does not.
+// No payment-failed email and no dunning start: those are for a bank's answer.
+// The hold and last_payment_error are cleared. The counter is left: it moved
+// when this PaymentIntent was stamped on the invoice (ADR-105), so the next
+// charge already sends a new key.
 //
-// The park overwrote the status it came from, and no column keeps it; the
-// parked attempt's row says who made it. last_payment_error is cleared: after
-// a park it holds Stripe's 500 message, which the failure banner would print
-// as the bank's words. The counter moves, so the next charge sends a new
-// idempotency key and never gets back a 500 Stripe saved under the parked
-// one (ADR-105 amendment). The hold is cleared in the same statement, so no
-// claim ever sees one change without the other.
-//
-// A compare-and-set on the hold, the counter and the parked shape, so a
-// webhook or another sweep that changed the invoice since the sweep read it
-// makes this a no-op (false). Written-off parks are included: nothing charges
-// an uncollectible invoice (ADR-113), so for them this only ends the park.
-//
-// In the same transaction the parked attempt's row is recorded as failed,
-// with parkedNoPaymentReason as its reason: Hardcount now knows the attempt took
-// no money, and the timeline would otherwise say "result unknown" forever.
-// The saved answer is not kept as the reason. For a timed-out call it is Go's
-// error (`Post "https://api.stripe.com/v1/payment_intents": context deadline
-// exceeded`), and for a 500 or a 409 it is Stripe's words about the request,
-// not about the payment; the Activity card prints the reason as the problem.
-func (s *PostgresStore) UnparkAfterNoPayment(ctx context.Context, tenantID, id string, hold time.Time, attemptSeq int64) (domain.InvoicePaymentStatus, bool, error) {
+// A compare-and-set on the invoice still being unknown on this PaymentIntent:
+// a webhook or another sweep that settled it since makes this a no-op
+// (false). In the same transaction the attempt's row is recorded as failed
+// with reason, so the timeline does not show it open.
+func (s *PostgresStore) EndAttemptWithoutPayment(ctx context.Context, tenantID, id, paymentIntentID, reason string) (domain.InvoicePaymentStatus, bool, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return "", false, err
@@ -3022,37 +2980,42 @@ func (s *PostgresStore) UnparkAfterNoPayment(ctx context.Context, tenantID, id s
 	err = tx.QueryRowContext(ctx, `
 		UPDATE invoices SET
 			auto_charge_claimed_until = NULL,
-			charge_attempt_seq = charge_attempt_seq + 1,
 			last_payment_error = NULL,
 			updated_at = now(),
-			-- Last: TestChargeAttemptSeqBumpedByEveryPIStamp reads the SET
-			-- list up to the first WHERE, and the subquery has one.
 			payment_status = CASE WHEN (
 				SELECT a.trigger_source FROM invoice_charge_attempts a
-				WHERE a.invoice_id = invoices.id AND a.outcome = 'unknown' AND a.stripe_payment_intent_id = ''
+				WHERE a.invoice_id = invoices.id AND a.stripe_payment_intent_id = $2
 				ORDER BY a.created_at DESC, a.id DESC LIMIT 1) = 'dunning_retry'
 			THEN 'failed' ELSE 'pending' END
-		WHERE id = $1 AND auto_charge_claimed_until = $2 AND charge_attempt_seq = $3
-		  AND payment_status = 'unknown' AND COALESCE(stripe_payment_intent_id, '') = ''
+		WHERE id = $1 AND payment_status = 'unknown' AND stripe_payment_intent_id = $2
 		  AND status IN ('finalized', 'uncollectible')
 		RETURNING payment_status
-	`, id, hold, attemptSeq).Scan(&status)
+	`, id, paymentIntentID).Scan(&status)
 	if err == sql.ErrNoRows {
 		return "", false, nil
 	}
 	if err != nil {
 		return "", false, err
 	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE invoice_charge_attempts SET outcome = 'failed', provider_reason = $2, updated_at = now()
-		WHERE invoice_id = $1 AND outcome = 'unknown' AND stripe_payment_intent_id = ''
-	`, id, parkedNoPaymentReason); err != nil {
+	if err := closeAttemptTx(ctx, tx, id, paymentIntentID, reason); err != nil {
 		return "", false, err
 	}
 	if err := tx.Commit(); err != nil {
 		return "", false, err
 	}
 	return status, true, nil
+}
+
+// closeAttemptTx records an attempt Hardcount ended without a bank's answer
+// (its PaymentIntent took no money) as failed, with reason. Only an open row
+// (pending or unknown) moves: a row a report already settled keeps its
+// outcome.
+func closeAttemptTx(ctx context.Context, tx *sql.Tx, invoiceID, paymentIntentID, reason string) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE invoice_charge_attempts SET outcome = 'failed', provider_reason = $3, updated_at = now()
+		WHERE invoice_id = $1 AND stripe_payment_intent_id = $2 AND outcome IN ('pending', 'unknown')
+	`, invoiceID, paymentIntentID, reason)
+	return err
 }
 
 // SetAutoChargePending marks an invoice for scheduler-based auto-charge retry.
@@ -3408,16 +3371,25 @@ func (s *PostgresStore) listInflightPayments(ctx context.Context, status domain.
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+invCols+` FROM invoices
 		WHERE payment_status = $1
-		  AND updated_at < $2
+		  -- The cool-off since the invoice's last write. That write is dated
+		  -- on the invoice's clock, so on a test clock advanced ahead of real
+		  -- time it lies in the future and the cool-off would never pass: the
+		  -- PaymentIntent would never be read. A last write in the future is
+		  -- such a row, and it is listed at once, in both sweeps that share
+		  -- this list: an unknown charge, and a processing payment (which is
+		  -- then read on every run instead of never). A confirm still in
+		  -- flight is protected by its hold, below.
+		  AND (updated_at < $2 OR updated_at > now())
 		  AND livemode = $3
-		  -- A row with no PaymentIntent id is NOT reconcilable here: this
-		  -- sweep resolves by querying Stripe for the id, and there is none.
-		  -- Such a row is parked (ADR-107): the stale-hold sweep finishes it
-		  -- from Stripe's list of the customer's payments (REC-5). Listed
-		  -- here, under this oldest-first LIMIT, parked rows would head the
-		  -- queue and keep a NEW ambiguous charge that DOES carry an id from
-		  -- being reached (found by the honesty sweep, 2026-07-31).
+		  -- This sweep resolves by reading the PaymentIntent by id. A charge
+		  -- saves its PaymentIntent before confirming, so an unclear outcome
+		  -- always names one; a row without one has nothing to read.
 		  AND COALESCE(stripe_payment_intent_id, '') <> ''
+		  -- Not while a charge still holds the invoice: its charger stamped
+		  -- the invoice unknown before confirming (ADR-137) and may be waiting
+		  -- for Stripe's answer, and a check now would cancel a payment that
+		  -- is about to succeed. The hold ends within minutes.
+		  AND (auto_charge_claimed_until IS NULL OR auto_charge_claimed_until < now())
 		-- Least-recently-observed first, never-observed ahead of everything
 		-- (migration 0167). This replaced ORDER BY updated_at ASC, which was a
 		-- liveness sink: the reconciler writes NOTHING when it finds a
@@ -4567,10 +4539,10 @@ func buildInvWhere(f ListFilter) (string, []any) {
 		// attention dot still reflects the authoritative state.
 		// 'unknown' is excluded alongside 'processing' because the comment above
 		// already states the intent — "not mid-payment" — and IsInFlight has
-		// always meant processing OR unknown. Leaving it in listed a PARKED
-		// invoice (ADR-107) as past-due and chaseable, when it is the one
-		// invoice no charge path will touch and whose money may already have
-		// been taken. The filter said what it meant; the SQL did not match it.
+		// always meant processing OR unknown. Leaving it in listed an invoice
+		// whose charge is unresolved as past-due and chaseable, when no
+		// charge path will touch it and its money may already have been
+		// taken. The filter said what it meant; the SQL did not match it.
 		clauses = append(clauses, fmt.Sprintf(
 			"(status = $%d AND due_at IS NOT NULL AND due_at < now() AND payment_status NOT IN ($%d, $%d, $%d))",
 			idx, idx+1, idx+2, idx+3))
@@ -4712,45 +4684,6 @@ func (s *PostgresStore) StreamForExport(ctx context.Context, tenantID string, fr
 	return rows.Err()
 }
 
-// linkParkedAttemptTx gives a parked attempt's row the PaymentIntent that ends
-// the park, with outcome, so one attempt keeps one row (ADR-127 amendment
-// 2026-10-29). A park's attempt row names no PaymentIntent, because Stripe's
-// answer named none. When a payment for the invoice turns up later (its
-// webhook, or the stale-hold sweep's list) the write that records it upserts
-// a row keyed on the PaymentIntent, so without this the parked row stayed
-// "Payment result unknown" on the Activity card of an invoice already paid or
-// failed. Its reason is cleared: it was Stripe's words about the request (a
-// 500, a 409) or Go's timeout, not about the payment; the upsert that follows
-// writes a decline's reason.
-//
-// The caller holds the invoice row lock, read the invoice parked under it, and
-// calls this before upsertChargeAttemptTx, which then updates the linked row.
-// Lock order holds: the invoice row first, then the attempt row (#989).
-//
-// Only the newest parked row is linked (an older one belongs to an earlier
-// park), and only while no row names pi: a row a report inserted earlier
-// stays the record of pi, and a link then would break the unique index on
-// (tenant_id, stripe_payment_intent_id) and roll the settle back on every
-// retry. Which attempt pi belongs to is not known for certain, since the park
-// named no PaymentIntent. It is the parked attempt's in every case but two
-// unnamed attempts on one invoice, which nothing can tell apart (ADR-127 R16).
-func linkParkedAttemptTx(ctx context.Context, tx *sql.Tx, invoiceID, pi string, outcome domain.ChargeAttemptOutcome) error {
-	if pi == "" {
-		return nil
-	}
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE invoice_charge_attempts
-		SET stripe_payment_intent_id = $2, outcome = $3, provider_reason = '', updated_at = now()
-		WHERE id = (SELECT id FROM invoice_charge_attempts
-		            WHERE invoice_id = $1 AND outcome = 'unknown' AND stripe_payment_intent_id = ''
-		            ORDER BY created_at DESC, id DESC LIMIT 1)
-		  AND NOT EXISTS (SELECT 1 FROM invoice_charge_attempts WHERE stripe_payment_intent_id = $2)`,
-		invoiceID, pi, outcome); err != nil {
-		return fmt.Errorf("link the parked attempt to its payment: %w", err)
-	}
-	return nil
-}
-
 // upsertChargeAttemptTx resolves an attempt's outcome INSIDE the caller's
 // settle transaction (ADR-103). Atomic with the invoice's own state flip:
 // the attempt fact and the invoice's truth about that same payment can
@@ -4775,9 +4708,6 @@ func linkParkedAttemptTx(ctx context.Context, tx *sql.Tx, invoiceID, pi string, 
 // (#966); an empty value keeps what an earlier writer recorded, so a source
 // that did not say (a reconciler read, a success) never erases a hard
 // decline another source put on record.
-//
-// A park's payment updates the parked attempt's row, not a new one: the
-// transitions that end a park call linkParkedAttemptTx first.
 func upsertChargeAttemptTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, piID string, outcome domain.ChargeAttemptOutcome, reason string, amountCents int64, declineCode, paymentMethodID string, simAt *time.Time) error {
 	if piID == "" {
 		return nil
@@ -4845,12 +4775,81 @@ func simAtOf(ctx context.Context) *time.Time {
 // actor follows trigger_source: kept once written, and filled in on a row a
 // report inserted first, which has none.
 func (s *PostgresStore) RecordChargeAttempt(ctx context.Context, tenantID string, a domain.InvoiceChargeAttempt) error {
-	actorType, actorID := audit.ResolveActor(ctx)
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return err
 	}
 	defer postgres.Rollback(tx)
+	if err := recordChargeAttemptTx(ctx, tx, tenantID, a); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// StampPendingConfirm is the charge's write between creating its PaymentIntent
+// and confirming it (ADR-137): it puts the PaymentIntent on the invoice as an
+// unknown outcome and records the attempt, in one transaction, and the charge
+// confirms only if it applied. From then on the invoice itself says which
+// payment may be taking money, so every way the confirm can end without an
+// answer (a crash, a timeout, a 500, a refused key) leaves a state the unknown
+// sweep already resolves by reading that PaymentIntent, and no claim admits
+// the invoice meanwhile.
+//
+// One UPDATE, compare-and-set on everything the charger read: the hold it
+// wrote, not yet ended (clock_timestamp, not the transaction's start, so a
+// charger paused after BEGIN does not pass on an ended hold), the counter its
+// idempotency key was built from, the invoice still finalized and open for a
+// charge, and the amount due still the PaymentIntent's (a credit note issued
+// since the charge read the invoice must not be overcharged). The stale-hold sweep's clear is a compare-and-set on the same
+// row, so exactly one of the two wins: a charger that stalled past its hold
+// either stamps before the sweep (which then leaves the invoice to the unknown
+// sweep) or finds the hold gone and confirms nothing.
+//
+// The counter moves, as on every write that puts a PaymentIntent on the
+// invoice (ADR-105). It returns the invoice as stamped; false when nothing was
+// written.
+func (s *PostgresStore) StampPendingConfirm(ctx context.Context, tenantID string, a domain.InvoiceChargeAttempt, hold domain.ChargeHold, attemptSeq int64) (domain.Invoice, bool, error) {
+	if !hold.Held() || a.StripePaymentIntentID == "" {
+		return domain.Invoice{}, false, nil
+	}
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return domain.Invoice{}, false, err
+	}
+	defer postgres.Rollback(tx)
+
+	var inv domain.Invoice
+	err = tx.QueryRowContext(ctx, `
+		UPDATE invoices SET payment_status = 'unknown', stripe_payment_intent_id = $2,
+			last_payment_error = NULL, updated_at = $3, below_minimum_at = NULL,
+			charge_attempt_seq = charge_attempt_seq + 1
+		WHERE id = $1 AND charge_attempt_seq = $4
+		  AND auto_charge_claimed_until = $5 AND auto_charge_claimed_until > clock_timestamp()
+		  AND status = 'finalized' AND payment_status IN ('pending', 'failed')
+		  AND amount_due_cents = $6
+		RETURNING `+invCols,
+		a.InvoiceID, a.StripePaymentIntentID, clock.Now(ctx), attemptSeq, hold.Until, a.AmountCents,
+	).Scan(s.scanInvDest(&inv)...)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.Invoice{}, false, nil
+	}
+	if err != nil {
+		return domain.Invoice{}, false, fmt.Errorf("stamp pending confirm: %w", err)
+	}
+	if err := recordChargeAttemptTx(ctx, tx, tenantID, a); err != nil {
+		return domain.Invoice{}, false, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Invoice{}, false, err
+	}
+	return inv, true, nil
+}
+
+// recordChargeAttemptTx inserts or upserts the attempt row (RecordChargeAttempt's
+// rules) inside tx.
+func recordChargeAttemptTx(ctx context.Context, tx *sql.Tx, tenantID string, a domain.InvoiceChargeAttempt) error {
+	actorType, actorID := audit.ResolveActor(ctx)
+	var err error
 
 	// Lock order: the invoice row first, then the attempt row. A settle for
 	// the same PaymentIntent (webhook, reconciler) locks the invoice FOR
@@ -4882,9 +4881,15 @@ func (s *PostgresStore) RecordChargeAttempt(ctx context.Context, tenantID string
 			ON CONFLICT (tenant_id, stripe_payment_intent_id)
 				WHERE stripe_payment_intent_id <> ''
 			DO UPDATE SET
+				-- A row that recorded success keeps it. A row a sweep closed
+				-- as failed keeps that too against a late "pending" or
+				-- "unknown" note from a charger that stalled past its hold
+				-- (review 4): the note knows less than the close.
 				outcome = CASE WHEN invoice_charge_attempts.outcome = 'succeeded'
+						OR (invoice_charge_attempts.outcome = 'failed' AND EXCLUDED.outcome IN ('pending', 'unknown'))
 					THEN invoice_charge_attempts.outcome ELSE EXCLUDED.outcome END,
 				provider_reason = CASE WHEN EXCLUDED.provider_reason <> ''
+						AND NOT (invoice_charge_attempts.outcome = 'failed' AND EXCLUDED.outcome IN ('pending', 'unknown'))
 					THEN EXCLUDED.provider_reason ELSE invoice_charge_attempts.provider_reason END,
 				amount_cents = CASE WHEN EXCLUDED.amount_cents > 0
 					THEN EXCLUDED.amount_cents ELSE invoice_charge_attempts.amount_cents END,
@@ -4922,7 +4927,7 @@ func (s *PostgresStore) RecordChargeAttempt(ctx context.Context, tenantID string
 	if err != nil {
 		return fmt.Errorf("record charge attempt: %w", err)
 	}
-	return tx.Commit()
+	return nil
 }
 
 // PaymentPagesLive reports which of the invoices have a hosted payment page

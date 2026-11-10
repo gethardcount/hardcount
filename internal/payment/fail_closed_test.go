@@ -28,7 +28,7 @@ func (f credsFetcher) GetPlaintext(context.Context, string, bool) (tenantstripe.
 func TestStripeClient_CredentialReadErrorIsTransient(t *testing.T) {
 	ctx := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1")
 	c := NewLiveStripeClient(NewStripeClients(credsFetcher{err: errBlip}))
-	_, err := c.CreatePaymentIntent(ctx, PaymentIntentParams{})
+	_, err := c.CreateUnconfirmedPaymentIntent(ctx, PaymentIntentParams{})
 	if !errors.Is(err, ErrPaymentTransient) || errors.Is(err, ErrStripeNotConfigured) {
 		t.Fatalf("read error: err = %v, want ErrPaymentTransient", err)
 	}
@@ -36,7 +36,7 @@ func TestStripeClient_CredentialReadErrorIsTransient(t *testing.T) {
 	// No credentials is a charge not attempted (G2): a StripeKeyError, not
 	// the ErrStripeNotConfigured PaymentError that counted as a decline.
 	var ke *StripeKeyError
-	if _, err := c.CreatePaymentIntent(ctx, PaymentIntentParams{}); !errors.As(err, &ke) || ke.Reason != StripeKeyNotConfigured {
+	if _, err := c.CreateUnconfirmedPaymentIntent(ctx, PaymentIntentParams{}); !errors.As(err, &ke) || ke.Reason != StripeKeyNotConfigured {
 		t.Fatalf("no credentials: err = %v, want a not_configured StripeKeyError", err)
 	}
 }

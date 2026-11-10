@@ -167,7 +167,7 @@ func TestChargeHold_ParkedInvoice_WriteOffWaitsForALiveHold(t *testing.T) {
 
 	inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-HOLD-PARKED")
 	claimAuto(t, store, ctx, tenantID, inv.ID)
-	stampOutcome(t, store, ctx, tenantID, inv.ID, domain.PaymentUnknown, "", "ambiguous: no payment_intent_id")
+	seedPark(t, db, inv.ID, "ambiguous: no payment_intent_id")
 	if _, err := svc.Void(ctx, tenantID, inv.ID); err == nil {
 		t.Fatal("a parked invoice must still refuse a void")
 	}

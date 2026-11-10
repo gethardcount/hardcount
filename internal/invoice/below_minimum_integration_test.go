@@ -81,7 +81,7 @@ func TestStampBelowMinimum(t *testing.T) {
 		}{
 			{"processing", domain.PaymentProcessing, "pi_later_processing"},
 			{"declined", domain.PaymentFailed, "pi_later_declined"},
-			{"unknown", domain.PaymentUnknown, ""},
+			{"unknown", domain.PaymentUnknown, "pi_later_unknown"},
 		} {
 			t.Run(tc.name, func(t *testing.T) {
 				inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-MIN-E-"+tc.name)

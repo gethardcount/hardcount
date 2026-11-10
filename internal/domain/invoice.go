@@ -108,10 +108,10 @@ func (i Invoice) PaymentInFlight() bool {
 // Parked reports whether the invoice's last charge got an unclear answer from
 // Stripe that named no PaymentIntent (ADR-107): payment_status 'unknown' with
 // no PaymentIntent ID. No charge path takes it, and no sweep can look the
-// payment up by ID. The stale-hold sweep finishes it from Stripe's list of
-// the customer's payments. It records or follows a payment that appears. If
-// none has appeared ParkedNothingWait after the attempt, it puts the invoice
-// back where a charge picks it up (ADR-127 amendment 2026-10-20).
+// payment up by ID. Only an earlier Hardcount version parked an invoice:
+// since ADR-137 every unclear answer names its PaymentIntent, and the upgrade
+// refuses to run over a park. The stale-hold sweep keeps one that got past it
+// for a person.
 func (i Invoice) Parked() bool {
 	return i.PaymentStatus == PaymentUnknown && i.StripePaymentIntentID == ""
 }
@@ -204,8 +204,8 @@ const (
 // InvoiceFinalizationStatus returns the Status an invoice must be stamped
 // with at creation, given its tax and pause-collection state. It is the one
 // source of this rule for all four invoice-emitting paths
-// (engine.billOnePeriod, engine.BillOnCreate,
-// engine.BillFinalOnImmediateCancel, subscription.handleItemProration). So
+// (engine.billOnePeriod, engine.BillOnCreate, the cancel's final invoice
+// that engine.priceFinalOnCancel prices, subscription.handleItemProration). So
 // the rule "tax_status=pending or pause_collection set → draft" cannot drift
 // between flows.
 //

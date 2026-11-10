@@ -1,7 +1,7 @@
 # ADR-117: One PaymentIntent per invoice — considered, deferred
 
 **Date:** 2026-10-11
-**Status:** Proposed (deferred with triggers)
+**Status:** Proposed (deferred with triggers; amended 2026-11-10: ADR-137)
 
 ## Summary
 
@@ -135,3 +135,7 @@ per-attempt model in production, as Hardcount does.
   charge. ADR-108: search and adopt.
 - [Stripe: Status transitions and finalization](https://docs.stripe.com/invoicing/integration/workflow-transitions)
 - [Lago: Stripe payments create service](https://github.com/getlago/lago-api/blob/main/app/services/payment_providers/stripe/payments/create_service.rb)
+
+## Amendment 2026-11-10
+
+Option C, create-then-confirm per attempt, is adopted as [ADR-137](137-charge-stamps-invoice-before-confirming.md): the off-session half of one PaymentIntent per invoice. The decision below (defer one PaymentIntent per invoice) stands.

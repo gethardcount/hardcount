@@ -45,12 +45,13 @@ type confirmStripe struct {
 func installConfirmStripe(t *testing.T) *confirmStripe {
 	t.Helper()
 	s := &confirmStripe{}
+	charge := twoStepStripe(s.answer)
 	prev := http.DefaultTransport
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if req.URL.Host != "api.stripe.com" {
 			return prev.RoundTrip(req)
 		}
-		return s.answer(req), nil
+		return charge(req), nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = prev })
 	return s

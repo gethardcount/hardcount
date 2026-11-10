@@ -82,9 +82,14 @@ would charge a customer who has already paid.
    - **`succeeded`:** the customer paid through Stripe, and Hardcount has
      not recorded it yet. Do not record a payment: the money would be
      counted twice. See [A charge's result is unclear](unclear-charge.md).
-   - **`processing`, `requires_action`, `requires_confirmation` or
-     `requires_capture`:** the payment can still go through. Wait until it
-     ends.
+   - **`processing`, `requires_action` or `requires_capture`:** the payment
+     can still go through. Wait until it ends.
+   - **`requires_confirmation`:** a payment Hardcount created and has not
+     confirmed, so it has taken no money. Hardcount confirms a payment only
+     after putting it on the invoice. From then on the invoice's
+     `payment_status` is `unknown`, and step 2 is refused. Go on to step 2.
+     If it is refused, a charge may still confirm that payment: wait until
+     Hardcount has settled or canceled it, usually within about an hour.
 
    Stripe's search is not offered to Stripe accounts in India. There,
    list the customer's payments instead, with the customer's
@@ -102,7 +107,9 @@ would charge a customer who has already paid.
    `POST /v1/invoices/{id}/record-payment` (optional body
    `{"note": "Cheque #1234"}`). It also closes the dunning run, sends
    `invoice.paid` and writes the audit row. Record payment is refused while
-   a charge on the invoice is still being confirmed with Stripe: see
+   a card charge on the invoice is at Stripe: the invoice's `payment_status`
+   is `unknown` or `processing`, or a charge holds the invoice. Every charge
+   does this for the second or so it takes. If it lasts, see
    [A charge's result is unclear](unclear-charge.md). Do not mark an
    invoice paid with SQL: an SQL update skips all of this.
 

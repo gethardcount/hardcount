@@ -354,7 +354,7 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 
 // thresholdWatermark is one close window's threshold-fire ground truth
 // (ADR-066 §4) — shared by BOTH period-closers (billOnePeriod and
-// billFinalOnImmediateCancelImpl) so the protocol cannot drift between them:
+// priceFinalOnCancel) so the protocol cannot drift between them:
 //
 //   - billedThrough: usage before this instant already billed on the
 //     mid-cycle threshold invoice; additive buckets bill only the residual
