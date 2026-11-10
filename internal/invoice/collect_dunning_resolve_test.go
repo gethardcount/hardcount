@@ -102,3 +102,78 @@ func TestCollect_CreditSettle_ResolvesDunningOnlyWhenPaid(t *testing.T) {
 		})
 	}
 }
+
+// processingCharger is a charge Stripe accepted and is still processing: it
+// returns the invoice in flight, with no error.
+type processingCharger struct{ store *memStore }
+
+func (c *processingCharger) ChargeInvoiceNow(_ context.Context, _ string, inv domain.Invoice, _ domain.ChargeHold, _, _ string) (domain.Invoice, error) {
+	inv.PaymentStatus = domain.PaymentProcessing
+	inv.StripePaymentIntentID = "pi_processing"
+	c.store.invoices[inv.ID] = inv
+	return inv, nil
+}
+
+// A card charge that comes back still processing has not recovered anything
+// yet, so Collect must leave the dunning run open: the payment's settle
+// resolves it if it succeeds, and dunning goes on if it fails. Closed here, a
+// processing payment that later failed left the invoice with no dunning run.
+func TestCollect_CardCharge_ResolvesDunningOnlyWhenPaid(t *testing.T) {
+	t.Parallel()
+	for _, tc := range []struct {
+		name    string
+		charger func(*memStore) PaymentCharger
+		want    []domain.DunningResolution
+	}{
+		{
+			name: "paid: run resolved as payment_recovered",
+			charger: func(s *memStore) PaymentCharger {
+				return chargerFunc(func(inv domain.Invoice) (domain.Invoice, error) {
+					inv.Status, inv.PaymentStatus = domain.InvoicePaid, domain.PaymentSucceeded
+					s.invoices[inv.ID] = inv
+					return inv, nil
+				})
+			},
+			want: []domain.DunningResolution{domain.ResolutionPaymentRecovered},
+		},
+		{
+			name:    "still processing: run left open",
+			charger: func(s *memStore) PaymentCharger { return &processingCharger{store: s} },
+			want:    nil,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			store := newMemStore()
+			inv, err := store.Create(context.Background(), "t1", domain.Invoice{
+				InvoiceNumber: "INV-001", Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed,
+				AmountDueCents: 5000, CustomerID: "cus_1", Currency: "USD",
+			})
+			if err != nil {
+				t.Fatalf("seed: %v", err)
+			}
+			dun := &recordingDunning{}
+			h := &Handler{
+				svc:     NewService(store, nil, nil),
+				charger: tc.charger(store),
+				paymentSetups: &fakePaymentSetups{setup: domain.CustomerPaymentSetup{
+					StripeCustomerID: "cus_stripe_1", StripePaymentMethodID: "pm_1", SetupStatus: domain.PaymentSetupReady,
+				}},
+				dunning: dun,
+			}
+			rr := collectReq(t, h, inv.ID)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("collect: status %d, body %s", rr.Code, rr.Body.String())
+			}
+			if len(dun.resolutions) != len(tc.want) || (len(tc.want) > 0 && dun.resolutions[0] != tc.want[0]) {
+				t.Errorf("dunning resolutions = %v, want %v", dun.resolutions, tc.want)
+			}
+		})
+	}
+}
+
+// chargerFunc adapts a function to the charger Collect calls.
+type chargerFunc func(domain.Invoice) (domain.Invoice, error)
+
+func (f chargerFunc) ChargeInvoiceNow(_ context.Context, _ string, inv domain.Invoice, _ domain.ChargeHold, _, _ string) (domain.Invoice, error) {
+	return f(inv)
+}

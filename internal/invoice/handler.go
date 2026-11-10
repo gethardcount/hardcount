@@ -1102,17 +1102,27 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Resolve any active dunning run — manual collect payment bypasses dunning retry
-	h.resolveDunningRecovered(r.Context(), tenantID, id)
+	// A paid invoice ends its dunning run as recovered: Collect went around
+	// the retry schedule. Only a paid one. The charge also returns without an
+	// error when Stripe is still processing the payment, and that run must
+	// stay: the payment's settle resolves it if it succeeds, and dunning goes
+	// on if it fails. Resolved here, a processing payment that later failed
+	// left the invoice failed with no dunning run, so nothing retried it.
+	if charged.Status == domain.InvoicePaid {
+		h.resolveDunningRecovered(r.Context(), tenantID, id)
+	}
 
 	// Explicit audit row for the money-movement action — "Collected payment on
 	// INV-NNN", the row an auditor looks for when money left the customer's card
-	// outside a billing run.
+	// outside a billing run. Written for a payment still processing too: it is
+	// the only record that an operator sent this charge, and a later settle
+	// writes no operator row. payment_status says which it was.
 	if h.auditLogger != nil {
 		_ = h.auditLogger.Log(h.svc.AuditCtx(r.Context(), charged), tenantID, domain.AuditActionCollect, "invoice", charged.ID, charged.InvoiceNumber, map[string]any{
 			"invoice_number": charged.InvoiceNumber,
 			"amount_cents":   inv.AmountDueCents,
 			"currency":       inv.Currency,
+			"payment_status": string(charged.PaymentStatus),
 		})
 	}
 
