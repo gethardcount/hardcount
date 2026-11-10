@@ -1127,11 +1127,11 @@ func TestCreate(t *testing.T) {
 		}
 	})
 
-	t.Run("PR-10: BillFinalOnImmediateCancel called on Cancel (covers partial-period usage gap)", func(t *testing.T) {
+	t.Run("PR-10: the final invoice is billed on Cancel (covers partial-period usage gap)", func(t *testing.T) {
 		// Pre-fix: mid-period immediate cancel generated NO final
 		// invoice. Customer's partial-period usage went uncaptured
 		// (revenue leak). Fix: Service.Cancel now also calls
-		// BillFinalOnImmediateCancel, which emits a usage + prorated
+		// BillCancelTx, which emits a usage + prorated
 		// in_arrears base invoice for [period_start, canceled_at].
 		svcWithBiller := NewService(newMemStore(), nil)
 		fb := &fakeBiller{}
@@ -1148,12 +1148,12 @@ func TestCreate(t *testing.T) {
 			t.Fatalf("cancel: %v", err)
 		}
 		if fb.finalCalls != 1 {
-			t.Errorf("BillFinalOnImmediateCancel called %d times, want 1", fb.finalCalls)
+			t.Errorf("final invoice billed %d times, want 1", fb.finalCalls)
 		}
 		// The proration relief also still runs — the two are independent
 		// operations (invoice vs credit).
 		if fb.finishCalls != 1 {
-			t.Errorf("FinishRelief called %d times, want 1 (independent of BillFinalOnImmediateCancel)", fb.finishCalls)
+			t.Errorf("FinishRelief called %d times, want 1 (independent of the final invoice)", fb.finishCalls)
 		}
 	})
 
@@ -1334,11 +1334,6 @@ type fakeBiller struct {
 func (f *fakeBiller) BillOnCreate(_ context.Context, _ domain.Subscription) (domain.Invoice, error) {
 	f.calls++
 	return domain.Invoice{}, f.err
-}
-
-func (f *fakeBiller) BillFinalOnImmediateCancel(_ context.Context, _ domain.Subscription) (domain.Invoice, error) {
-	f.finalCalls++
-	return domain.Invoice{}, f.finalCancelErr
 }
 
 // BillCancelTx counts the final invoice in finalCalls and the relief in

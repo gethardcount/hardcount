@@ -204,8 +204,8 @@ const (
 // InvoiceFinalizationStatus returns the Status an invoice must be stamped
 // with at creation, given its tax and pause-collection state. It is the one
 // source of this rule for all four invoice-emitting paths
-// (engine.billOnePeriod, engine.BillOnCreate,
-// engine.BillFinalOnImmediateCancel, subscription.handleItemProration). So
+// (engine.billOnePeriod, engine.BillOnCreate, the cancel's final invoice
+// that engine.priceFinalOnCancel prices, subscription.handleItemProration). So
 // the rule "tax_status=pending or pause_collection set → draft" cannot drift
 // between flows.
 //

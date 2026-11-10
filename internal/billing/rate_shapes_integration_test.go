@@ -227,7 +227,7 @@ func TestRateShapes_PreviewEqualsTheInvoice(t *testing.T) {
 					if err != nil {
 						t.Fatalf("get sub: %v", err)
 					}
-					inv, err := lf.engine.BillFinalOnImmediateCancel(ctx, sub)
+					inv, err := lf.engine.BillFinalOnCancel(ctx, sub)
 					if err != nil || inv.ID == "" {
 						t.Fatalf("cancel final invoice: inv=%q err=%v", inv.ID, err)
 					}

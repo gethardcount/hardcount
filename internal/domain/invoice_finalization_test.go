@@ -7,9 +7,9 @@ import (
 
 // TestInvoiceFinalizationStatus locks in the single-source-of-truth
 // rule shared across all four invoice-emitting paths
-// (engine.billOnePeriod, engine.BillOnCreate,
-// engine.BillFinalOnImmediateCancel, subscription.handleItemProration).
-// Pre-fix BillOnCreate + BillFinalOnImmediateCancel + handleItemProration
+// (engine.billOnePeriod, engine.BillOnCreate, the cancel's final invoice
+// that engine.priceFinalOnCancel prices, subscription.handleItemProration).
+// Pre-fix BillOnCreate + the cancel's final invoice + handleItemProration
 // hardcoded InvoiceFinalized regardless of tax_status, producing
 // finalized invoices with TaxAmountCents=0 when Stripe Tax returned
 // customer_data_invalid — lying about authoritative amounts.

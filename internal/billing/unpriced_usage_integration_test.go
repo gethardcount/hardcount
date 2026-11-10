@@ -306,7 +306,7 @@ func TestUnpricedUsage_ImmediateCancel_NoInvoice_Counted(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get sub: %v", err)
 	}
-	inv, err := f.engine.BillFinalOnImmediateCancel(ctx, sub)
+	inv, err := f.engine.BillFinalOnCancel(ctx, sub)
 	if err != nil {
 		t.Fatalf("bill final: %v", err)
 	}
