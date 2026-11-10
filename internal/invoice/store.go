@@ -12,17 +12,21 @@ import (
 // Service calls; other packages reach the PostgresStore methods they need
 // through their own interfaces.
 type Store interface {
-	// CreateWithLineItemsAudited / AddLineItemAtomicAudited run the
+	// CreateNumberedAudited / AddLineItemAtomicAudited run the
 	// caller-supplied audit emission on the SAME transaction as the write
 	// (ADR-090 in-tx emission): the invoice mutation and its audit row commit
 	// or roll back together. The service builds the emission closure (it owns
 	// audit-row content — the manual-create / line-item-added intent); the
 	// store owns the transaction and exposes it to the closure. emit receives
 	// the PERSISTED row(s) so the audit row can reference the store-assigned
-	// id, invoice number, and recomputed totals. nil emit = unaudited write —
-	// what the engine's cycle/threshold paths pass, since their canonical
-	// evidence is the finalize row. A bare-header create passes no items.
-	CreateWithLineItemsAudited(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error)
+	// id, invoice number, and recomputed totals. nil emit = unaudited write.
+	// A bare-header create passes no items.
+	//
+	// CreateNumberedAudited also takes the invoice number on that
+	// transaction: number runs before the insert and its result is the
+	// invoice number. A create that fails gives the number back, so the
+	// tenant's numbers keep no gap.
+	CreateNumberedAudited(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, number func(tx *sql.Tx) (string, error), emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error)
 	Get(ctx context.Context, tenantID, id string) (domain.Invoice, error)
 	List(ctx context.Context, filter ListFilter) ([]domain.Invoice, int, error)
 	// UpdateStatusWithReversalPrior flips the status AND runs fn on the SAME
@@ -98,7 +102,7 @@ type Store interface {
 	// clients append lines concurrently. Returns the inserted line item and
 	// the updated invoice.
 	//
-	// emit is the in-tx audit emission (see CreateWithLineItemsAudited). It
+	// emit is the in-tx audit emission (see CreateNumberedAudited). It
 	// receives the persisted line item and the rewritten invoice — the invoice
 	// number it labels the row with is therefore read INSIDE the tx, under the
 	// same row lock as the mutation.
