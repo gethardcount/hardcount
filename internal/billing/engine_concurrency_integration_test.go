@@ -23,8 +23,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/usage"
 )
 
-// TestConcurrentBilling_ExactlyOneInvoice is the CONCURRENCY twin of FLOW B3's
-// sequential "run billing twice → idempotent skip". It proves exactly-once invoice
+// TestConcurrentBilling_ExactlyOneInvoice proves exactly-once invoice
 // generation under a real race: N billing-cycle runs hit the SAME due
 // subscription+period simultaneously (two scheduler instances / an overlapping
 // retry), yet exactly ONE cycle invoice is created.

@@ -1102,8 +1102,12 @@ func newInArrearsBaseSwapRig(t *testing.T, r *s1Rig) *swapRig {
 // goes through, and the close writes the cut period's invoice with its base
 // fee and the usage from the fire on, each instant billed once.
 //
-// Mutation: drop the guard's equality arm, and the swap at the fire instant
-// commits; the close then fails on invoice_billing_period_taken.
+// A swap in the same microsecond (a nanosecond tail) is refused too: the key
+// is stored to the microsecond.
+//
+// Mutations: drop the guard's equality arm, and the swap at the fire instant
+// commits (the close then fails on invoice_billing_period_taken); compare
+// without truncating, and the swap with a nanosecond tail commits.
 func TestPlanSwap_InArrears_AtFireInstant_Refused(t *testing.T) {
 	r := newS1Rig(t, "S1 in_arrears swap at the fire instant", 200)
 	sw := newInArrearsBaseSwapRig(t, r)
@@ -1113,6 +1117,7 @@ func TestPlanSwap_InArrears_AtFireInstant_Refused(t *testing.T) {
 	}
 
 	assertPeriodMoved409(t, sw.swap(t, r, fireAt), "ends at the current time")
+	assertPeriodMoved409(t, sw.swap(t, r, fireAt.Add(500*time.Nanosecond)), "ends at the current time")
 	if got := r.itemPlan(t); got == sw.newPlan.ID {
 		t.Fatal("item is on the new plan after a refused swap")
 	}
@@ -1200,4 +1205,45 @@ func TestThresholdFire_SiblingFireAtTheInsert_Skips(t *testing.T) {
 	if n := r.fire.invs.alreadyExists.Load(); n != 1 {
 		t.Errorf("outer fire's slot collisions = %d, want 1: it must reach the insert", n)
 	}
+}
+
+// TestPlanSwap_InAdvance_AtFireInstant_Succeeds: the guard's equality arm is
+// for in_arrears only. An in_advance cross-interval swap at a threshold
+// fire's instant goes through: its invoice starts at that instant (the new
+// period), so it does not take the threshold invoice's key (sub, P0, fire).
+// The swap invoice bills the new period from the fire instant, and every
+// usage instant is billed once.
+//
+// Mutation: drop the in_advance exemption, and this swap is refused.
+func TestPlanSwap_InAdvance_AtFireInstant_Succeeds(t *testing.T) {
+	r := newS1Rig(t, "S1 in_advance swap at the fire instant", 200)
+	sw, _ := newInAdvanceSwapRig(t, r)
+	fireAt := r.f.cycleStart.AddDate(0, 0, 3)
+	if fired, errs := r.fire.engine.ScanThresholds(r.at(fireAt), 50); fired != 1 || len(errs) != 0 {
+		t.Fatalf("fire = %d, errors %v; want 1, none", fired, errs)
+	}
+
+	if err := sw.swap(t, r, fireAt); err != nil {
+		t.Fatalf("in_advance swap at the fire instant: %v; want it to succeed (its invoice starts at the swap instant)", err)
+	}
+	if got := r.itemPlan(t); got != sw.newPlan.ID {
+		t.Fatalf("item plan = %s, want the new plan %s", got, sw.newPlan.ID)
+	}
+	var threshold, startsAtFire int
+	for _, inv := range r.f.listInvoices(t, r.base) {
+		if inv.Status == domain.InvoiceVoided {
+			continue
+		}
+		if inv.BillingReason == domain.BillingReasonThreshold {
+			threshold++
+			continue
+		}
+		if inv.BillingPeriodStart.Equal(fireAt) {
+			startsAtFire++
+		}
+	}
+	if threshold != 1 || startsAtFire != 1 {
+		t.Errorf("threshold invoices = %d, swap invoices starting at the fire instant = %d; want 1 and 1", threshold, startsAtFire)
+	}
+	assertUsageBilledOnce(t, r.base)
 }

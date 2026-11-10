@@ -388,14 +388,10 @@ type mockSubs struct {
 	// other subscriptions' meter coverage ends (the usage floors).
 	coverageEnds    []domain.MeterCoverageEnd
 	coverageEndsErr error
-	// closePeriodErr, when set, makes ClosePeriodTx (the closer's CAS) fail.
-	// closePeriodErrOnCall picks WHICH call fails (1-based; 0 = every call),
-	// so a test can let the first close reach its insert and fail only the
-	// heal-path re-drive — a failed period write must surface, not be
-	// swallowed.
-	closePeriodErr       error
-	closePeriodErrOnCall int
-	closePeriodCalls     int
+	// closePeriodErr, when set, makes every ClosePeriodTx (the closer's CAS)
+	// fail. closePeriodCalls counts the calls.
+	closePeriodErr   error
+	closePeriodCalls int
 	// beforeCloserTx runs when the engine opens a closer tx, BEFORE the
 	// emulated tx snapshot — the concurrent-resolver hook (playbook §5.3): a
 	// test moves the row here to emulate a competing closer that COMMITTED
@@ -468,7 +464,7 @@ func mockSnapshotMatches(s domain.Subscription, expected subscription.PeriodSnap
 // ErrWatermarkMoved is returned.
 func (m *mockSubs) ClosePeriodTx(_ context.Context, _ *sql.Tx, _, id string, expected subscription.PeriodSnapshot, start, end, next time.Time, anchorDay int) error {
 	m.closePeriodCalls++
-	if m.closePeriodErr != nil && (m.closePeriodErrOnCall == 0 || m.closePeriodErrOnCall == m.closePeriodCalls) {
+	if m.closePeriodErr != nil {
 		return m.closePeriodErr
 	}
 	s, ok := m.subs[id]
@@ -940,8 +936,7 @@ type mockInvoices struct {
 	invoices   []domain.Invoice
 	lineItems  []domain.InvoiceLineItem
 	// createErr, when set, is returned by CreateInvoiceWithLineItems[Tx] instead
-	// of inserting — used to drive the idempotent-skip heal path (set to
-	// errs.ErrAlreadyExists) and failure tests.
+	// of inserting: it drives the insert-failure tests.
 	createErr error
 	// getErr, when set, is returned by GetInvoice — drives the
 	// collector's reload-failure arms without breaking the mock's

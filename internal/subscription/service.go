@@ -1832,8 +1832,9 @@ func (s *Service) applyCrossIntervalPlanSwapTx(
 		// period's invoice takes the key (sub, start, now). A threshold
 		// invoice ending at now holds it (on a test clock a fire and a
 		// swap share an instant), so the cut period could not be invoiced.
-		// The in_advance swap's invoice starts at now, so it does not clash.
-		if billedThrough != nil && newTiming != domain.BillInAdvance && billedThrough.Equal(now) {
+		// The key is stored to the microsecond, so compare there. The
+		// in_advance swap's invoice starts at now, so it does not clash.
+		if billedThrough != nil && newTiming != domain.BillInAdvance && billedThrough.Equal(now.Truncate(time.Microsecond)) {
 			return ItemChangeResult{}, errs.InvalidState("A spend-threshold invoice for this subscription ends at the current time, so the period cannot end there. Try again later; on a test clock, advance the clock first.").WithCode("subscription_period_moved")
 		}
 	}

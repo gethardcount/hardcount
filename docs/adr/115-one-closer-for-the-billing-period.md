@@ -336,21 +336,22 @@ Now:
   on how the database was built. Any other violation (a number taken) is an
   error the scan reports; before, it was logged at INFO.
 - **The in_arrears swap is refused at a fire's instant** (decision 5):
-  409 `subscription_period_moved`. On a wall clock with a grace above zero
-  the fire's window ends one grace before the fire (ADR-120), so a later
-  swap cannot meet it; the guard matters on a test clock and with zero
-  grace. The in_advance swap's invoice starts at the swap instant, so it
-  does not clash.
-- **Residual:** the guard compares Go times; two instants in one microsecond
-  on a wall clock with zero grace can still pass it, and that close now
-  fails loudly. A test-clock subscription already swapped at a fire's
+  409 `subscription_period_moved`. The guard compares at the stored
+  precision (the swap's instant truncated to the microsecond), so a swap in
+  the same microsecond as the fire's end is refused too. It matters on a
+  clock that repeats an instant, a test clock: on a wall clock the fire's
+  window ends at or before the fire (one grace before it, ADR-120), and a
+  later swap's instant is after it. The in_advance swap's invoice starts at
+  the swap instant, so it does not clash.
+- **Upgrade:** a test-clock subscription already swapped at a fire's
   instant and not yet closed fails its close with
   `invoice_billing_period_taken`: void the threshold invoice if it is unpaid,
   and the close bills the whole window; otherwise delete the clock.
 
 Tests: `TestCycleClose_InvoiceNumberCollision_FailsBillKeepsPeriod`,
 `TestBilling_PeriodSlotTaken_FailsBillKeepsPeriod`,
-`TestPlanSwap_InArrears_AtFireInstant_Refused`,
+`TestPlanSwap_InArrears_AtFireInstant_Refused` (and a swap in the same
+microsecond), `TestPlanSwap_InAdvance_AtFireInstant_Succeeds`,
 `TestThresholdFire_InvoiceNumberCollision_ReportsError`,
 `TestThresholdFire_SiblingFireAtTheInsert_Skips`,
 `TestBillOnePeriod_UniqueViolationFailsAndDoesNotAdvance`,

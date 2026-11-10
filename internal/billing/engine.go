@@ -3268,12 +3268,14 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 		return false, err
 	}
 	if err != nil {
-		// Every unique violation is an error, the period's own key included:
-		// the period's CAS, its invoice and its advance are one transaction, so
-		// a racing closer misses its CAS before it inserts, and nothing else
-		// writes this key. The bill fails, the period stays, and the run saves
-		// a counted failure (ADR-119). Closing the period with no invoice here
-		// billed nothing for it. (See ADR-115.)
+		// Every unique violation is an error, the period's own key included.
+		// The period's CAS, its invoice and its advance are one transaction, so
+		// a racing closer misses its CAS before it inserts. A threshold invoice
+		// ending at an in_arrears swap's instant would hold this key, and
+		// applyCrossIntervalPlanSwapTx refuses that swap. A close with no
+		// invoice would bill nothing for the period, so the bill fails, the
+		// period stays, and the run saves a counted failure (ADR-119). (See
+		// ADR-115.)
 		return false, fmt.Errorf("create invoice: %w", err)
 	}
 	inv := out.inv
@@ -3344,9 +3346,9 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 //
 // Idempotent via the standard (subscription_id, period_start,
 // period_end) UNIQUE constraint: if BillOnCreate runs twice (e.g. a
-// retry after a transient failure), the second call hits the period slot
-// (errs.CodeInvoiceBillingPeriodTaken) and returns the zero invoice — no
-// duplicate. Any other unique violation is an error. Auto-charge is best-effort: PM ready → synchronous
+// retry after a transient failure), the second call hits the period
+// slot (errs.CodeInvoiceBillingPeriodTaken) and returns the zero
+// invoice — no duplicate. Any other unique violation is an error. Auto-charge is best-effort: PM ready → synchronous
 // charge with 30s timeout; no PM → queue auto_charge_pending and
 // fire the no-PM notifier email (same path as the cycle invoice).
 func (e *Engine) BillOnCreate(ctx context.Context, sub domain.Subscription) (domain.Invoice, error) {

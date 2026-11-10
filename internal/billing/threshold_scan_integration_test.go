@@ -883,8 +883,8 @@ func (a *failableSubAdapter) ClosePeriodTx(ctx context.Context, tx *sql.Tx, tena
 type failableInvoiceAdapter struct {
 	*invoiceStoreAdapter
 	createTxErr error
-	// alreadyExists counts inserts that hit an invoice unique index — the
-	// pre-ADR-115 loser's exit, which no racing closer should reach now.
+	// alreadyExists counts inserts that hit an invoice unique index (a sibling
+	// threshold fire's slot; no racing closer reaches it: it misses its CAS).
 	alreadyExists atomic.Int32
 	// createTxCalls counts every insert attempt, failed or not.
 	createTxCalls atomic.Int32
