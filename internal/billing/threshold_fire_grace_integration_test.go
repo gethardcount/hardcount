@@ -2,9 +2,12 @@ package billing_test
 
 import (
 	"context"
+	"database/sql"
+	"sync"
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/subscription"
@@ -200,6 +203,38 @@ func otherSubscriptionLeftTheMeter(t *testing.T, f *thresholdFixture, ctx contex
 	}
 }
 
+// thresholdAuditActions records the engine's audit actions.
+type thresholdAuditActions struct {
+	mu      sync.Mutex
+	actions []string
+}
+
+func (a *thresholdAuditActions) Log(_ context.Context, _, action, _, _, _ string, _ map[string]any) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.actions = append(a.actions, action)
+	return nil
+}
+
+func (a *thresholdAuditActions) LogInTx(_ context.Context, _ *sql.Tx, e audit.Entry) error {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	a.actions = append(a.actions, e.Action)
+	return nil
+}
+
+func (a *thresholdAuditActions) count(action string) int {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	n := 0
+	for _, got := range a.actions {
+		if got == action {
+			n++
+		}
+	}
+	return n
+}
+
 // A customer moves a meter from one subscription to another: subscription A
 // stops covering it ten minutes ago, and A billed the usage up to then. The
 // fixture's subscription took the meter after that, and its period began
@@ -209,6 +244,11 @@ func otherSubscriptionLeftTheMeter(t *testing.T, f *thresholdFixture, ctx contex
 // The fire reads usage up to one grace before the scan. Built only up to
 // there, the windows missed A's coverage end (it is after that instant), and
 // the fire billed, and counted toward the cap, the usage A had billed.
+//
+// A cap that counted A's usage but found nothing of this subscription's to
+// bill would not fire: it would note "threshold crossed, deferred" on the
+// subscription's timeline instead. So the test also wants no such note: no
+// cap may count A's usage at all.
 func TestThresholdFire_AMeterAnotherSubscriptionBilledIsNotBilledAgain(t *testing.T) {
 	for _, tc := range []struct {
 		name string
@@ -225,6 +265,8 @@ func TestThresholdFire_AMeterAnotherSubscriptionBilledIsNotBilledAgain(t *testin
 			f := newThresholdFixture(t, "Threshold Meter Moved "+tc.name)
 			ctx := postgres.WithLivemode(context.Background(), false)
 			f.engine.SetInvoiceGrace(time.Hour)
+			audits := &thresholdAuditActions{}
+			f.engine.SetAuditLogger(audits)
 			if _, err := f.subSvc.SetBillingThresholds(ctx, f.tenantID, f.subID, tc.set(f)); err != nil {
 				t.Fatalf("set thresholds: %v", err)
 			}
@@ -236,6 +278,9 @@ func TestThresholdFire_AMeterAnotherSubscriptionBilledIsNotBilledAgain(t *testin
 			}
 			if invs := f.listInvoices(t, ctx); len(invs) != 0 {
 				t.Fatalf("invoices = %d, want none", len(invs))
+			}
+			if n := audits.count(domain.AuditActionSubscriptionThresholdDeferred); n != 0 {
+				t.Fatalf("threshold-deferred notes = %d, want none: a cap counted the other subscription's usage", n)
 			}
 		})
 	}
