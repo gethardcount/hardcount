@@ -34,12 +34,9 @@ type Store interface {
 
 	// SetDefault atomically clears any existing default for (customerID)
 	// and flags pmID as the new default. Fails with ErrNotFound if pmID is
-	// detached or not owned by customerID.
+	// detached or not owned by customerID. Safe to call concurrently: it
+	// waits for any other change to the customer's default.
 	SetDefault(ctx context.Context, tenantID, customerID, pmID string) (PaymentMethod, error)
-
-	// Detach marks the PM as detached_at = now(). Idempotent — a second
-	// call on an already-detached row is a no-op and returns the row.
-	Detach(ctx context.Context, tenantID, customerID, pmID string) (PaymentMethod, error)
 
 	// DetachAndRebalance detaches pmID and, in the SAME transaction,
 	// promotes the newest remaining active PM to default when the detached
@@ -48,7 +45,9 @@ type Store interface {
 	// detach back too). Returns the detached row plus the promoted default
 	// (nil when the detached card wasn't the default, or no active PM
 	// remained to promote). Idempotent: re-detaching an already-detached
-	// row promotes nothing (a detached row is never the default).
+	// row promotes nothing (a detached row is never the default). Safe to
+	// call concurrently: it waits for any other change to the customer's
+	// default, so two removals at once still leave one default.
 	DetachAndRebalance(ctx context.Context, tenantID, customerID, pmID string) (PaymentMethod, *PaymentMethod, error)
 
 	// CustomersWithDefault reports, in one read, which of customerIDs have
@@ -247,11 +246,9 @@ func (s *PostgresStore) Upsert(ctx context.Context, tenantID string, pm PaymentM
 	// ON CONFLICT path, and when that one is the setup flow's attach the
 	// card stays beside the old default until Stripe redelivers. Serialized,
 	// the second attach reads the first's committed row and takes the update
-	// path. The key is this table's own; the credit ledger's per-customer
-	// lock is a different key.
-	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
-		"payment_methods:"+tenantID+":"+pm.CustomerID); err != nil {
-		return PaymentMethod{}, false, fmt.Errorf("acquire payment method attach lock: %w", err)
+	// path.
+	if err := lockCustomerCards(ctx, tx, tenantID, pm.CustomerID); err != nil {
+		return PaymentMethod{}, false, err
 	}
 
 	// A card already removed stays removed (see above). Read under the lock,
@@ -397,10 +394,10 @@ func (s *PostgresStore) Upsert(ctx context.Context, tenantID string, pm PaymentM
 		    -- left with none.
 		    is_default       = payment_methods.is_default OR $11,
 		    updated_at       = now()
-		-- A removal that committed after the removed-card check above (the
-		-- operator's Remove does not take the attach lock) leaves no row to
-		-- update: the attach fails and rolls back, and the webhook's retry
-		-- finds the card removed.
+		-- A removed row is never updated back to active. Every removal takes
+		-- the customer's card lock, so none commits after the removed-card
+		-- check above. If one ever did, no row is updated: the attach fails
+		-- and rolls back, and the webhook's retry finds the card removed.
 		WHERE payment_methods.detached_at IS NULL
 		RETURNING `+pmSelectCols,
 		tenantID, pm.CustomerID, pm.StripePaymentMethodID, defaultString(pm.Type, "card"),
@@ -435,14 +432,18 @@ func changedForTheAPI(before, after PaymentMethod) bool {
 		before.CardExpMonth != after.CardExpMonth || before.CardExpYear != after.CardExpYear
 }
 
-// SetDefault does the atomic swap inside one tx so RLS + partial unique
-// index see both writes consistently.
+// SetDefault clears the customer's default and sets pmID as the default in
+// one transaction, under the customer's card lock (lockCustomerCards).
 func (s *PostgresStore) SetDefault(ctx context.Context, tenantID, customerID, pmID string) (PaymentMethod, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return PaymentMethod{}, err
 	}
 	defer postgres.Rollback(tx)
+
+	if err := lockCustomerCards(ctx, tx, tenantID, customerID); err != nil {
+		return PaymentMethod{}, err
+	}
 
 	// Clear any other default for this customer first. Postgres validates
 	// the partial unique index per-row; clearing before setting avoids a
@@ -471,33 +472,6 @@ func (s *PostgresStore) SetDefault(ctx context.Context, tenantID, customerID, pm
 	return out, tx.Commit()
 }
 
-// Detach is idempotent by design. Re-detaching a row is a no-op write
-// (detached_at is kept at its original timestamp).
-func (s *PostgresStore) Detach(ctx context.Context, tenantID, customerID, pmID string) (PaymentMethod, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return PaymentMethod{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	var out PaymentMethod
-	if err := scanPM(tx.QueryRowContext(ctx, `
-		UPDATE payment_methods
-		SET detached_at = COALESCE(detached_at, now()),
-		    is_default  = false,
-		    updated_at  = now()
-		WHERE tenant_id = $1 AND customer_id = $2 AND id = $3
-		RETURNING `+pmSelectCols,
-		tenantID, customerID, pmID), &out); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return PaymentMethod{}, errs.ErrNotFound
-		}
-		return PaymentMethod{}, fmt.Errorf("detach: %w", err)
-	}
-
-	return out, tx.Commit()
-}
-
 // DetachAndRebalance does the detach and the replacement-default promotion
 // in one transaction so the invariant "≥1 active PM ⇒ exactly one default"
 // holds across the whole operation — no committed window with active cards
@@ -509,9 +483,15 @@ func (s *PostgresStore) DetachAndRebalance(ctx context.Context, tenantID, custom
 	}
 	defer postgres.Rollback(tx)
 
-	// Lock + read the target to learn whether it was the default BEFORE we
-	// clear the flag (RETURNING gives the post-update value). FOR UPDATE
-	// serialises concurrent detaches of the same customer's cards.
+	// The customer's card lock orders this removal against every other
+	// change to the customer's cards, a second removal included.
+	if err := lockCustomerCards(ctx, tx, tenantID, customerID); err != nil {
+		return PaymentMethod{}, nil, err
+	}
+
+	// Read whether the target is the default before the UPDATE clears the
+	// flag (RETURNING gives the value after it). FOR UPDATE locks only this
+	// row; it does not order removals of the customer's other cards.
 	var wasDefault bool
 	if err := tx.QueryRowContext(ctx, `
 		SELECT is_default FROM payment_methods
@@ -537,19 +517,14 @@ func (s *PostgresStore) DetachAndRebalance(ctx context.Context, tenantID, custom
 
 	var newDefault *PaymentMethod
 	if wasDefault {
-		// Promote the newest remaining active card. The just-detached row is
-		// detached_at IS NULL appears in BOTH the subquery and the OUTER
-		// WHERE, and the outer copy is load-bearing: under READ COMMITTED a
-		// concurrent Detach of the chosen id commits between snapshot and
-		// row lock, and EvalPlanQual re-evaluates only the OUTER predicate —
-		// without it the promote lands is_default=true on a detached card
-		// (the charge-a-removed-card hazard; found by the ADR-113 doctor
-		// mining pass, and exactly what the doctor's
-		// payment_methods_detached_but_still_default check flags).
-		// excluded (detached_at IS NOT NULL). The prior default is already
-		// cleared, so no other is_default row conflicts with the partial
-		// unique index — a single targeted set is safe. ErrNoRows = no
-		// active card left, leave the customer with no default.
+		// Promote the newest remaining active card; the just-detached row is
+		// excluded. Under the customer's card lock no other removal commits
+		// between the subquery's read and the UPDATE. The outer
+		// detached_at IS NULL still keeps the promote off a removed card,
+		// the state the doctor's payment_methods_detached_but_still_default
+		// check flags. The old default is already cleared, so the one-default
+		// unique index sees no other default. ErrNoRows means no active card
+		// is left, and the customer has no default.
 		var nd PaymentMethod
 		err := scanPM(tx.QueryRowContext(ctx, `
 			UPDATE payment_methods SET is_default = true, updated_at = now()
@@ -573,6 +548,23 @@ func (s *PostgresStore) DetachAndRebalance(ctx context.Context, tenantID, custom
 		return PaymentMethod{}, nil, err
 	}
 	return detached, newDefault, nil
+}
+
+// lockCustomerCards takes the customer's card lock on tx, held until the
+// transaction ends. Every write that can change which card is the
+// customer's default takes it first: Upsert, SetDefault and
+// DetachAndRebalance. Without it, two such writes at once each read the
+// cards before the other commits. The second flip then misses the first's
+// new default and fails on the one-default unique index, or a removal
+// promotes a card another removal has just removed and leaves no default.
+// The key is this table's own; the credit ledger's per-customer lock is a
+// different key.
+func lockCustomerCards(ctx context.Context, tx *sql.Tx, tenantID, customerID string) error {
+	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+		"payment_methods:"+tenantID+":"+customerID); err != nil {
+		return fmt.Errorf("acquire payment method lock: %w", err)
+	}
+	return nil
 }
 
 func defaultString(s, d string) string {
