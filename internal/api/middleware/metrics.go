@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"net/http"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
@@ -347,6 +349,19 @@ func b2f(b bool) float64 {
 		return 1
 	}
 	return 0
+}
+
+// RegisterDBPoolStats exports the connection-pool counters of pool on
+// /metrics, as the go_sql_* series with db_name="app". Pass the pool that
+// serves requests and background jobs. Call it once, at boot. A second call
+// panics on the duplicate registration.
+//
+// go_sql_wait_count_total counts the callers that had to wait for a free
+// connection. It stays flat while DB_MAX_OPEN_CONNS is enough, so the runbook
+// alerts on its rate. The series are database/sql's own counters: a scrape
+// reads them from memory and runs no query.
+func RegisterDBPoolStats(pool *sql.DB) {
+	prometheus.MustRegister(collectors.NewDBStatsCollector(pool, "app"))
 }
 
 // RecordStripeBreakerState updates the global breaker state gauge. Called

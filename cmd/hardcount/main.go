@@ -158,6 +158,10 @@ func serve() {
 
 	appPool, closeAppPool := openAppPool(cfg, pool)
 	defer closeAppPool()
+	// appPool serves every request and background job, so its waits are the
+	// ones an operator needs to see. pool, when it is a separate pool, runs
+	// only the start-up checks above, so it is not exported.
+	mw.RegisterDBPoolStats(appPool)
 
 	db := postgres.NewDB(appPool, cfg.DB.QueryTimeout)
 
