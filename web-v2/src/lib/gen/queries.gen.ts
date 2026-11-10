@@ -10957,12 +10957,14 @@ export const getRetryInvoiceTaxUrl = (id: string,) => {
  * invoice, so check its `attention`.
  *
  * When the tax resolves on an invoice the billing engine made, the
- * call also finalizes it, unless collection is paused on its
- * subscription. If nothing is then due, the invoice is marked paid at
- * once; otherwise the automatic charge collects it on its next run.
- * An invoice you created stays a draft for you to finalize. If the
- * finalize fails, the call returns 500 or 409 and the invoice stays a
- * draft with its tax saved: finalize it.
+ * call also finalizes it, in the same transaction as the tax, unless
+ * collection is paused on its subscription. If nothing is then due,
+ * the invoice is marked paid at once; otherwise the automatic charge
+ * collects it on its next run. An invoice you created stays a draft
+ * for you to finalize. If the finalize fails, the call returns 500 or
+ * 409 and nothing is saved: the invoice stays a draft with its tax
+ * pending, the try counts toward the automatic retries, and the
+ * server log says why.
  * @summary Retry tax calculation on a draft invoice
  */
 export const retryInvoiceTax = async (id: string, options?: RequestInit): Promise<Invoice> => {

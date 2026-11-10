@@ -127,6 +127,14 @@ Each domain package in `internal/` has a **handler** (HTTP), a **service**
 - **Work that outlives a request uses `context.WithoutCancel(ctx)` with a
   timeout,** not `context.Background()`, so it keeps the request id and tenant.
   ([context.WithoutCancel](https://pkg.go.dev/context#WithoutCancel))
+  - A transaction whose follow-up steps must run is taken on such a ctx with
+    `commitBudget` (30s), just before the transaction: pgx commits on the
+    transaction's ctx, so a cancel during COMMIT can apply the commit and
+    still return an error. Nothing else runs on that ctx.
+  - Each group of steps after that commit gets its own such ctx with
+    `stepsBudget` (5 minutes, above three Stripe calls at their limit),
+    taken after the commit.
+  - Each constant is unexported in the package that uses it.
 - **Every goroutine has an owner that waits for it at shutdown,** such as the
   `sync.WaitGroup` in `cmd/hardcount/main.go`. If nothing waits, a comment
   names the background job that retries the work.

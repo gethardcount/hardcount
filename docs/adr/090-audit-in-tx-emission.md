@@ -6,7 +6,7 @@ Relates: ADR-089 (fail-closed retirement — the interim step this supersedes st
 
 ## Summary
 
-The target rule is that an audit row is written inside the caller's business transaction with `audit.Logger.LogInTx`, so a change and its row commit or roll back together. This replaces an HTTP catch-all that guessed rows from the URL path and missed background writers. Every mutating route is declared in `internal/api/audit_routes.go` as emitting its own row or exempt with a reason; a CI test fails on undeclared or stale entries, and a runtime observer counts any undeclared 2xx mutation that wrote no row. Migration is partial: engine invoice finalize, credit grants and routes whose registry note names `LogInTx` are in-tx, but most HTTP routes (including operator invoice finalize) and six `internal/billing` background sites, pinned in `internal/arch/audit_background_writers_test.go`, write after commit, so a failed write loses the row. Inbound Stripe webhook settlement writes none. Bulk CSV exports are audited before the first byte streams, fail closed; paginated list reads are not.
+The target rule is that an audit row is written inside the caller's business transaction with `audit.Logger.LogInTx`, so a change and its row commit or roll back together. This replaces an HTTP catch-all that guessed rows from the URL path and missed background writers. Every mutating route is declared in `internal/api/audit_routes.go` as emitting its own row or exempt with a reason; a CI test fails on undeclared or stale entries, and a runtime observer counts any undeclared 2xx mutation that wrote no row. Migration is partial: engine invoice finalize, the finalize of a draft (operator or tax retry, since 2026-11-10), credit grants and routes whose registry note names `LogInTx` are in-tx, but most HTTP routes and six `internal/billing` background sites, pinned in `internal/arch/audit_background_writers_test.go`, write after commit, so a failed write loses the row. Inbound Stripe webhook settlement writes none. Bulk CSV exports are audited before the first byte streams, fail closed; paginated list reads are not.
 
 ## Context
 
@@ -274,13 +274,14 @@ timeline of a simulation is reading an incomplete one. Instead:
   emits no audit row: the event-sourced credit ledger IS its record. An earlier
   draft of this list said otherwise, which credited a row that does not exist.)
 - **BOTH writers stamp**: `LogInTx` and the residual own-tx `Log`. The
-  own-tx callers are not a lesser class of evidence — `invoice.Service.
-  Finalize` and `billing.Engine.auditInvoiceFinalized` — the TWO writers of the
-  finalize row, the heaviest evidence in the log — both write through `Log`.
-  (Engine invoices are born finalized and never pass through
-  `invoice.Service.Finalize`; earlier prose here named it as the writer for
-  "every invoice a clock advance generates", the opposite of what
-  `billing/engine.go` says.)
+  own-tx callers are not a lesser class of evidence — the finalize row, the
+  heaviest evidence in the log, has two writers: `billing.Engine.
+  auditInvoiceFinalized` writes through `Log`, and `invoice.Service.Finalize`
+  and the tax-retry chain write through `LogInTx` on the finalize's
+  transaction (since 2026-11-10, P1-29). (Engine invoices are born finalized
+  and never pass through `invoice.Service.Finalize`; earlier prose here named
+  it as the writer for "every invoice a clock advance generates", the
+  opposite of what `billing/engine.go` says.)
 - Handler-level emitters (which emit on `r.Context()`, a ctx the service's
   internal bind never reaches) bind explicitly before emitting:
   `invoice` (gated on `inv.IsSimulated` — exact and free on the wall-clock

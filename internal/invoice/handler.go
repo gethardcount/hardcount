@@ -1307,12 +1307,14 @@ func (h *Handler) refund(w http.ResponseWriter, r *http.Request) {
 // 200 with the updated invoice (carrying the new Attention) on
 // success or post-retry failure (a "still failing" retry is not an
 // HTTP error — the dashboard wants the new code to render). 409 when
-// the gate fails (status != draft, or tax_status not retryable). 404
-// when the invoice doesn't exist. When the tax resolves but the
-// auto-finalize does not happen (the pause state could not be read, or
-// finalize failed), the call fails: 500 for a database error, 409 for a
-// state conflict. The invoice stays a draft with its tax saved, for the
-// operator to finalize, and the retry_tax audit row is still written.
+// the gate fails (status != draft, or tax_status not retryable), and when
+// the invoice was finalized while its tax was being calculated. 404 when the
+// invoice doesn't exist. When the tax resolves but the auto-finalize fails
+// (the pause state could not be read, or the finalize failed), the call
+// fails (500 for a database error, 409 for a state conflict) and nothing is
+// saved: the finalize rides on the tax write's transaction, so the invoice
+// stays a draft with its tax pending, and the try is counted. The retry_tax
+// audit row is written only on success.
 func (h *Handler) retryTax(w http.ResponseWriter, r *http.Request) {
 	if !respond.NoBody(w, r) {
 		return
@@ -1325,9 +1327,9 @@ func (h *Handler) retryTax(w http.ResponseWriter, r *http.Request) {
 	before, _ := h.svc.Get(r.Context(), tenantID, id)
 
 	inv, err := h.svc.RetryTax(r.Context(), tenantID, id)
-	// RetryTax returns an invoice whenever its tax write committed, with or
-	// without an error: the click changed the tax and total, so audit it.
-	if inv.ID != "" && h.auditLogger != nil {
+	// RetryTax returns an invoice only when its tax write committed, and
+	// then with no error: the click changed the tax and total, so audit it.
+	if err == nil && h.auditLogger != nil {
 		var beforeReason, afterReason string
 		if before.Attention != nil {
 			beforeReason = string(before.Attention.Reason)

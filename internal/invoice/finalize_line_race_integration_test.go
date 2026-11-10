@@ -2,6 +2,7 @@ package invoice
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/domain"
@@ -77,7 +78,7 @@ func TestUpdateTaxAtomic_RefusesWhenALineWasAddedMeanwhile(t *testing.T) {
 		t.Fatalf("add line: %v", err)
 	}
 
-	_, err = r.store.UpdateTaxAtomic(r.ctx, r.tenantID, d.ID, update(read), items)
+	_, err = r.store.UpdateTaxAtomic(r.ctx, r.tenantID, d.ID, update(read), items, nil)
 	wantLinesChanged(t, err, "tax write over a stale read")
 
 	after, err := r.store.Get(r.ctx, r.tenantID, d.ID)
@@ -91,7 +92,7 @@ func TestUpdateTaxAtomic_RefusesWhenALineWasAddedMeanwhile(t *testing.T) {
 
 	// The header basis is current now, but the lines are the ones read before
 	// the add, one short. Same refusal.
-	_, err = r.store.UpdateTaxAtomic(r.ctx, r.tenantID, d.ID, update(after), items)
+	_, err = r.store.UpdateTaxAtomic(r.ctx, r.tenantID, d.ID, update(after), items, nil)
 	wantLinesChanged(t, err, "tax write with the old line set")
 
 	// Read again, and the write goes through.
@@ -99,7 +100,7 @@ func TestUpdateTaxAtomic_RefusesWhenALineWasAddedMeanwhile(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list lines again: %v", err)
 	}
-	taxed, err := r.store.UpdateTaxAtomic(r.ctx, r.tenantID, d.ID, update(after), fresh)
+	taxed, err := r.store.UpdateTaxAtomic(r.ctx, r.tenantID, d.ID, update(after), fresh, nil)
 	if err != nil {
 		t.Fatalf("tax write over a fresh read: %v", err)
 	}
@@ -115,7 +116,9 @@ type addingTaxRetrier struct {
 	add   bool
 }
 
-func (f *addingTaxRetrier) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID string) (domain.Invoice, error) {
+func (f *addingTaxRetrier) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID string,
+	_ func(ctx context.Context, tx *sql.Tx, taxed domain.Invoice) error,
+) (domain.Invoice, error) {
 	return f.ComputeTaxForInvoice(ctx, tenantID, invoiceID)
 }
 

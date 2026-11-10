@@ -126,6 +126,8 @@ billing_reason ∉ {"", "manual"}
 `Finalize` failure post-retry doesn't unwind the tax recompute —
 the invoice stays draft with the new tax decision and a logged
 warning so post-mortems can answer "why didn't it auto-finalize?"
+(Superseded by the 2026-11-10 amendment: the finalize rides on the
+tax write's transaction, and a failure rolls both back.)
 
 References: Recurly + Chargebee both auto-finalize subscription
 invoices on tax-success. Stripe + Lago require a manual finalize
@@ -184,3 +186,56 @@ Hardcount doesn't.
 - The reconciler runs leader-gated via the existing billing
   advisory lock (no new lock key required) since it's part of
   `runBillingHalf`.
+
+## Amendment 2026-11-10: the tax and the finalize in one transaction (P1-29)
+
+The auto-finalize was a second transaction after the tax write. A stop
+between the two (a SIGTERM or a lost lease cancelling the tax_retry tick,
+a COMMIT cut by a cancel, a crash) left an engine draft with tax ok. No
+sweep lists that row (every tax sweep lists pending tax), so the period was
+never issued or collected. Only an operator's Finalize moved it.
+
+- **One transaction.** `RetryTax` passes a hook to the engine, which runs it
+  on `UpdateTaxAtomic`'s transaction after the tax is written and before the
+  commit. The hook reads the subscription's pause on that transaction
+  (`CollectionPausedTx`, the sweeps' predicate, no lock on the subscription)
+  and, unless collection is paused, finalizes there (`FinalizeDraftTx`: the
+  flip, the held relief, the finalize audit row, the token and
+  `invoice.finalized`). The finalize's steps after the commit (the Stripe
+  Tax commit, the held relief's steps) and the $0 settle run on a ctx the
+  caller cannot cancel, with a 5-minute budget.
+- **The write cannot be cut by its caller.** The Stripe Tax calculation runs
+  on the caller's ctx. The write runs on `WithoutCancel` with a 30s budget,
+  taken just before it; a caller cancelled during the calculation writes
+  nothing.
+- **A failed finalize leaves the tax pending and counts as a try.** The
+  hook's error rolls the tax write back, so the row is still a draft with
+  tax pending and its last tax error, which is true. The engine then adds
+  the try to `tax_retry_count` and sets `tax_next_retry_at` as the failed
+  code would (`RecordTaxRetryAttempt`), so the 8-try cap and the backoff
+  hold. The finalize error is in the server log at ERROR with the invoice
+  id. While it lasts, cancel, swap and decrease on that subscription are
+  refused (`funding_invoice_tax_pending`) and Finalize is blocked, as for any
+  pending tax. A row the sweep does not list (a code it does not retry, or
+  past 8 tries) is tried again only by Retry tax or a fan-out.
+- **A rival gets a 409.** A retry that finalized the invoice while another
+  was calculating wins; the other's write finds the invoice finalized and
+  is refused (`invalid_state`), as the engine's draft check refuses it a
+  moment earlier. It counts no try.
+- `POST /v1/invoices/{id}/retry-tax` no longer answers an error with the
+  tax saved: on an error nothing is saved, and the `retry_tax` audit row is
+  written only on success.
+- No sweep for the old shape: a draft with tax ok and no pause cannot be
+  told from one kept by a pause that has since ended. The upgrade note asks
+  operators to review such drafts.
+
+Tests: `TestRetryTax_ProcessStops_NeverLeavesATaxedDraft`,
+`TestRetryTax_CancelledDuringCommit_InvoiceIsFinalized`,
+`TestRetryTax_FinalizeFails_TaxStaysPendingAndTheTryIsCounted`,
+`TestRetryTax_CancelledDuringCalculation_WritesNothing`,
+`TestRetryTax_PausedSubscription_DraftKept`,
+`TestRetryTax_RivalFinalizesDuringTheCalculation_AnswersConflict`,
+`TestRetryTax_WriteRefusedForAnotherReason_TheTryIsNotCounted`,
+`TestUpdateTaxAtomic_ThenRunsOnTheTransaction`,
+`TestRetryTaxForInvoice_PassesTheHook`,
+`TestFinalize_AuditFailureRollsTheFinalizeBack`.

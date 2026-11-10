@@ -20,6 +20,10 @@ import (
 type memStore struct {
 	invoices  map[string]domain.Invoice
 	lineItems map[string][]domain.InvoiceLineItem
+	// pausedSubs: subscriptions with pause_collection in force
+	// (CollectionPausedTx); pauseErr fails that read.
+	pausedSubs map[string]bool
+	pauseErr   error
 }
 
 func newMemStore() *memStore {
@@ -213,6 +217,23 @@ func (m *memStore) FinalizeWithDates(_ context.Context, tenantID, id string, iss
 	return m.mintToken(id), nil
 }
 
+// CollectionPausedTx reads pausedSubs; the tx is ignored (nil here).
+func (m *memStore) CollectionPausedTx(_ context.Context, _ *sql.Tx, invoiceID string, _ time.Time) (bool, error) {
+	if m.pauseErr != nil {
+		return false, m.pauseErr
+	}
+	inv, ok := m.invoices[invoiceID]
+	if !ok {
+		return false, errs.ErrNotFound
+	}
+	return m.pausedSubs[inv.SubscriptionID], nil
+}
+
+// FinalizeDraftTx is FinalizeDraft; the memStore has no transaction.
+func (m *memStore) FinalizeDraftTx(ctx context.Context, _ *sql.Tx, tenantID, id string, onFinalized func(tx *sql.Tx, inv domain.Invoice) error) (domain.Invoice, error) {
+	return m.FinalizeDraft(ctx, tenantID, id, onFinalized)
+}
+
 func (m *memStore) FinalizeDraft(ctx context.Context, tenantID, id string, onFinalized func(tx *sql.Tx, inv domain.Invoice) error) (domain.Invoice, error) {
 	inv, err := m.UpdateStatus(ctx, tenantID, id, domain.InvoiceFinalized)
 	if err != nil {
@@ -339,18 +360,30 @@ type stubTaxRetrier struct {
 	calledOn []string
 }
 
-func (s *stubTaxRetrier) RetryTaxForInvoice(_ context.Context, tenantID, invoiceID string) (domain.Invoice, error) {
+// RetryTaxForInvoice resolves the tax and runs then as the store would, on
+// the write's "transaction": a then error puts the row back as it was and is
+// returned.
+func (s *stubTaxRetrier) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID string,
+	then func(ctx context.Context, tx *sql.Tx, taxed domain.Invoice) error,
+) (domain.Invoice, error) {
 	s.calls++
 	s.calledOn = append(s.calledOn, invoiceID)
 	inv, ok := s.store.invoices[invoiceID]
 	if !ok || inv.TenantID != tenantID {
 		return domain.Invoice{}, errs.ErrNotFound
 	}
+	before := inv
 	inv.TaxStatus = domain.InvoiceTaxOK
 	inv.TaxPendingReason = ""
 	inv.TaxErrorCode = ""
 	s.store.invoices[invoiceID] = inv
-	return inv, nil
+	if then != nil {
+		if err := then(ctx, nil, inv); err != nil {
+			s.store.invoices[invoiceID] = before
+			return domain.Invoice{}, err
+		}
+	}
+	return s.store.invoices[invoiceID], nil
 }
 
 // ComputeTaxForInvoice mirrors the finalize-time compute: resolve tax to ok
@@ -1655,8 +1688,7 @@ func TestRetryTax_AutoFinalize_RespectsPauseCollection(t *testing.T) {
 		newStuckInvoice(store)
 		svc := NewService(store, nil, nil)
 		svc.SetTaxRetrier(&stubTaxRetrier{store: store})
-		pauses := &stubPauseReader{paused: true}
-		svc.SetSubscriptionPauseReader(pauses)
+		store.pausedSubs = map[string]bool{"sub_1": true}
 
 		out, err := svc.RetryTax(context.Background(), "t1", "inv_paused")
 		if err != nil {
@@ -1680,7 +1712,6 @@ func TestRetryTax_AutoFinalize_RespectsPauseCollection(t *testing.T) {
 		newStuckInvoice(store)
 		svc := NewService(store, nil, nil)
 		svc.SetTaxRetrier(&stubTaxRetrier{store: store})
-		svc.SetSubscriptionPauseReader(&stubPauseReader{paused: false})
 
 		out, err := svc.RetryTax(context.Background(), "t1", "inv_paused")
 		if err != nil {
@@ -1694,33 +1725,18 @@ func TestRetryTax_AutoFinalize_RespectsPauseCollection(t *testing.T) {
 		}
 	})
 
-	t.Run("subscription gone → finalizes (nothing to pause)", func(t *testing.T) {
+	// The pause is read on the tax write's transaction (P1-29): a failed read
+	// rolls the tax write back, so the row is listed again, and RetryTax
+	// returns the error so the sweep counts it.
+	t.Run("read error → stays a draft with tax pending (never charge on a guess) and RetryTax errors", func(t *testing.T) {
 		store := newMemStore()
 		newStuckInvoice(store)
 		svc := NewService(store, nil, nil)
 		svc.SetTaxRetrier(&stubTaxRetrier{store: store})
-		svc.SetSubscriptionPauseReader(&stubPauseReader{err: errs.ErrNotFound})
-
-		out, err := svc.RetryTax(context.Background(), "t1", "inv_paused")
-		if err != nil {
-			t.Fatalf("RetryTax: %v", err)
-		}
-		if out.Status != domain.InvoiceFinalized {
-			t.Errorf("status = %s, want finalized — a missing subscription has no pause", out.Status)
-		}
-	})
-
-	// The draft does not wait for anything: its tax is ok, so no sweep lists
-	// it again. RetryTax returns the error so the sweep counts it (G7).
-	t.Run("read error → stays draft (never charge on a guess) and RetryTax errors", func(t *testing.T) {
-		store := newMemStore()
-		newStuckInvoice(store)
-		svc := NewService(store, nil, nil)
-		svc.SetTaxRetrier(&stubTaxRetrier{store: store})
-		svc.SetSubscriptionPauseReader(&stubPauseReader{err: errors.New("connection reset")})
+		store.pauseErr = errors.New("connection reset")
 
 		if _, err := svc.RetryTax(context.Background(), "t1", "inv_paused"); err == nil {
-			t.Fatal("RetryTax = nil on an unread pause state: the sweep counts a draft no sweep revisits as advanced")
+			t.Fatal("RetryTax = nil on an unread pause state, want the error")
 		}
 		got := store.invoices["inv_paused"]
 		if got.Status != domain.InvoiceDraft {
@@ -1729,8 +1745,8 @@ func TestRetryTax_AutoFinalize_RespectsPauseCollection(t *testing.T) {
 		if got.AutoChargePending {
 			t.Error("auto_charge_pending set on an unread pause state")
 		}
-		if got.TaxStatus != domain.InvoiceTaxOK {
-			t.Errorf("tax_status = %s, want ok (the tax write is kept)", got.TaxStatus)
+		if got.TaxStatus != domain.InvoiceTaxPending {
+			t.Errorf("tax_status = %s, want pending (the tax write rolled back with the read)", got.TaxStatus)
 		}
 	})
 }
