@@ -871,6 +871,7 @@ func TestCancel_SnapshotMoved_ReplansOnce_ThresholdFire(t *testing.T) {
 func TestCancel_SnapshotMoved_ReplansOnce_SwapReanchorsThePeriod(t *testing.T) {
 	r := newPrebillVoidRig(t, "P1-23 swap during the cancel's pricing", waitingPolicy())
 	r.subStore.SetOutboxEnqueuer(webhook.NewOutboxStore(r.db))
+	r.subSvc.SetResolver(wallClockResolver{})
 
 	var pe probeErrs
 	var swapAt time.Time
@@ -923,6 +924,32 @@ func TestCancel_SnapshotMoved_ReplansOnce_SwapReanchorsThePeriod(t *testing.T) {
 	if n := countTenantRows(t, r.ctx, r.db, r.tenantID, `SELECT count(*) FROM webhook_outbox WHERE event_type = $1`, domain.EventSubscriptionCanceled); n != 1 {
 		t.Errorf("subscription.canceled events = %d, want 1", n)
 	}
+}
+
+// wallClockResolver resolves every entity as a wall-clock one, as the engine
+// does for an entity on no test clock: to the bound instant on a bound
+// context, and to the wall clock's now otherwise. So a second bind on a bound
+// context gives the first instant back, and a bind on the API's unbound
+// context gives a new one.
+type wallClockResolver struct{}
+
+func (wallClockResolver) sim(ctx context.Context) clock.Sim {
+	if at, ok := clock.EffectiveNow(ctx); ok {
+		return clock.Sim{At: at}
+	}
+	return clock.Sim{At: time.Now().UTC()}
+}
+
+func (r wallClockResolver) SimForSubscription(ctx context.Context, _, _ string) (clock.Sim, error) {
+	return r.sim(ctx), nil
+}
+
+func (r wallClockResolver) SimForCustomer(ctx context.Context, _, _ string) (clock.Sim, error) {
+	return r.sim(ctx), nil
+}
+
+func (r wallClockResolver) SimForInvoice(ctx context.Context, _, _ string) (clock.Sim, error) {
+	return r.sim(ctx), nil
 }
 
 // swapToYearly runs the monthly-to-yearly swap of the prebill rig's item on

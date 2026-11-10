@@ -60,31 +60,36 @@ func TestCancel_SnapshotMovedTwice_ReturnsErrWatermarkMoved(t *testing.T) {
 	}
 }
 
-// steppingResolver resolves every subscription to a new instant on each call:
-// a wall-clock subscription read at a later moment.
+// steppingResolver resolves a wall-clock subscription as the engine does
+// (Engine.SimForSubscription): on a context with no bound instant, to the
+// clock's now, here a new instant on each call, as a later moment; on a bound
+// context, to the bound instant.
 type steppingResolver struct {
 	mu   sync.Mutex
 	base time.Time
 	n    int
 }
 
-func (r *steppingResolver) next() clock.Sim {
+func (r *steppingResolver) sim(ctx context.Context) clock.Sim {
+	if at, ok := clock.EffectiveNow(ctx); ok {
+		return clock.Sim{At: at}
+	}
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.n++
 	return clock.Sim{At: r.base.Add(time.Duration(r.n) * time.Second)}
 }
 
-func (r *steppingResolver) SimForSubscription(context.Context, string, string) (clock.Sim, error) {
-	return r.next(), nil
+func (r *steppingResolver) SimForSubscription(ctx context.Context, _, _ string) (clock.Sim, error) {
+	return r.sim(ctx), nil
 }
 
-func (r *steppingResolver) SimForCustomer(context.Context, string, string) (clock.Sim, error) {
-	return r.next(), nil
+func (r *steppingResolver) SimForCustomer(ctx context.Context, _, _ string) (clock.Sim, error) {
+	return r.sim(ctx), nil
 }
 
-func (r *steppingResolver) SimForInvoice(context.Context, string, string) (clock.Sim, error) {
-	return r.next(), nil
+func (r *steppingResolver) SimForInvoice(ctx context.Context, _, _ string) (clock.Sim, error) {
+	return r.sim(ctx), nil
 }
 
 // Each attempt binds its instant from the caller's context. On the API's
