@@ -536,6 +536,32 @@ and collected at the fire's own instant.
   the period close none.
 - Usage more than one grace late is still on no invoice, as at a period's
   end.
+- The usage floors (another subscription's coverage end, the trial end) are
+  found up to the fire's own instant, and the windows are then cut at the
+  window's end. Found only up to the window's end, a coverage end inside the
+  grace was missed, and the fire billed usage another subscription had
+  billed.
+- The credit draw is unchanged: a threshold invoice tests grant expiry at its
+  `issued_at`, the fire's instant (ADR-071 §2). That instant is now one grace
+  after the window's end, so a grant that expires inside that grace was live
+  for all the usage the invoice bills and does not pay it; the card is
+  charged. Testing at the window's end instead would need the expiry sweep
+  to hold such a grant until the fire.
+- A crossing inside the last grace of a period never fires: the window
+  cannot reach it before the period ends, and the period's own invoice bills
+  it.
+
+Readers of the watermark (`billing_period_end` of the threshold invoice),
+each checked against the new value:
+
+- The close and every closer (`meterUsageIntervals`, `commitPeriodClose`):
+  `sum` and `count` usage from it on. Correct by design.
+- The preview (`internal/billing/preview.go`) and the live balance
+  (`live_balance.go`): unbilled usage from it on, so usage in the grace
+  counts as unbilled, which it is.
+- `ThresholdWatermarks` (`internal/api/adapters.go`): the dashboard's
+  "billed through" line shows it.
+- The credit draw: does not read it (above).
 
 Not done here: the state-based rule, in which a close bills the full
 window's quantity less the quantity on the fire's lines, so that no usage is

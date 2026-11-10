@@ -124,7 +124,7 @@ func TestEvaluateThresholds_AmountCross(t *testing.T) {
 	periodStart := *sub.CurrentBillingPeriodStart
 	now := periodStart.AddDate(0, 0, 5) // 5 days into the cycle
 
-	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now)
+	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now, now)
 	if err != nil {
 		t.Fatalf("evaluateThresholds: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestEvaluateThresholds_BelowAmount(t *testing.T) {
 	periodStart := *sub.CurrentBillingPeriodStart
 	now := periodStart.AddDate(0, 0, 5)
 
-	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now)
+	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now, now)
 	if err != nil {
 		t.Fatalf("evaluateThresholds: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestEvaluateThresholds_ItemCross(t *testing.T) {
 	periodStart := *sub.CurrentBillingPeriodStart
 	now := periodStart.AddDate(0, 0, 5)
 
-	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now)
+	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now, now)
 	if err != nil {
 		t.Fatalf("evaluateThresholds: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestEvaluateThresholds_BelowItemQuantity(t *testing.T) {
 	periodStart := *sub.CurrentBillingPeriodStart
 	now := periodStart.AddDate(0, 0, 5)
 
-	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now)
+	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now, now)
 	if err != nil {
 		t.Fatalf("evaluateThresholds: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestEvaluateThresholds_InAdvanceBaseExcluded(t *testing.T) {
 	periodStart := *sub.CurrentBillingPeriodStart
 	now := periodStart.AddDate(0, 0, 5)
 
-	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now)
+	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now, now)
 	if err != nil {
 		t.Fatalf("evaluateThresholds: %v", err)
 	}
@@ -372,7 +372,7 @@ func TestEvaluateThresholds_InArrearsBaseExcluded(t *testing.T) {
 	periodStart := *sub.CurrentBillingPeriodStart
 	now := periodStart.AddDate(0, 0, 5)
 
-	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now)
+	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now, now)
 	if err != nil {
 		t.Fatalf("evaluateThresholds: %v", err)
 	}
@@ -403,7 +403,7 @@ func TestEvaluateThresholds_InArrearsBaseAloneDoesNotCross(t *testing.T) {
 
 	sub, _ := engine.subs.Get(context.Background(), "t1", "sub_1")
 	periodStart := *sub.CurrentBillingPeriodStart
-	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, periodStart.AddDate(0, 0, 1))
+	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, periodStart.AddDate(0, 0, 1), periodStart.AddDate(0, 0, 1))
 	if err != nil {
 		t.Fatalf("evaluateThresholds: %v", err)
 	}

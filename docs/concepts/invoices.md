@@ -170,9 +170,12 @@ period.
 hour unless you set it): Hardcount counts and bills usage stamped up to that
 instant, and the invoice's `billing_period_end` is that instant. Usage
 reaches Hardcount some time after it happens, and this gives it the wait a
-period's own invoice gives it. So a threshold is seen, and its invoice
-built, up to one grace after the usage that crossed it. A subscription on a
-test clock gets no wait. Usage of a `max` or `last` meter waits for the period's own
+period's own invoice gives it. So a threshold invoice is built at least one
+grace after the usage that crossed it, at the first billing run after that.
+A crossing within the last grace of a period makes no invoice: the period's
+own invoice bills that usage. A credit grant that expires within the grace
+before the invoice is built does not pay it. A subscription on a test clock
+gets no wait. Usage of a `max` or `last` meter waits for the period's own
 invoice. `DELETE /v1/subscriptions/{id}/billing-thresholds` removes them.
 
 What happens to the usage a spend-threshold invoice billed depends on what

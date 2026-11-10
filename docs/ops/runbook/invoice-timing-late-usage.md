@@ -267,7 +267,7 @@ rows of `PLAN`, this subscription's plan.
 **To stop it happening again:** if a pipeline often delivers later than
 the grace, raise `INVOICE_GRACE_PERIOD` above its worst delay (a duration
 such as `3h`, at most `72h`) and restart. Every period-end invoice then
-comes that much later.
+comes that much later, and so does every spend-threshold invoice.
 
 **Verify:** step 1's list shows the one-off invoice, `finalized` or `paid`,
 with its memo.
@@ -289,5 +289,9 @@ with its memo.
 - **The subscription's period.** During the grace the subscription still
   shows the ended period. Spend thresholds and the current credit balance
   do not count the new period's usage until the invoice is built.
+- **A spend-threshold invoice.** It bills usage up to one grace before it is
+  built, so it comes at least one grace after the usage that crossed the
+  threshold. A crossing within the last grace of a period makes no
+  threshold invoice; the period's own invoice bills it.
 
 Related: [ADR-120](../../adr/120-invoice-grace-period-for-late-usage.md).

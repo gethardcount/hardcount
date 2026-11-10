@@ -306,13 +306,15 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 	}
 
 	// The usage a fire reads, and bills, ends one invoice grace before now.
-	// Until that instant is inside the period there is nothing to read.
+	// Until that instant is inside the period the window is empty, so the
+	// evaluation would find nothing to count: this skips its reads. (Not a
+	// guard: without it the evaluation crosses nothing.)
 	through := e.thresholdUsageThrough(sub, now)
 	if !through.After(periodStart) {
 		return false, nil
 	}
 
-	eval, err := e.evaluateThresholds(ctx, sub, periodStart, through)
+	eval, err := e.evaluateThresholds(ctx, sub, periodStart, through, now)
 	if err != nil {
 		return false, fmt.Errorf("evaluate: %w", err)
 	}
@@ -549,10 +551,10 @@ func (e *Engine) healStrandedZeroDue(ctx context.Context, tenantID string, inv d
 }
 
 // thresholdUsage is the usage a spend-threshold invoice bills over
-// [periodStart, now): the close's own windows (ADR-130 §9), one per stretch
-// of the period a plan was on the subscription and per meter it prices, each
-// from its meter's usage floor, priced by its own plan at the plan's pin of
-// the period (pinsOf).
+// [periodStart, through): the close's own windows (ADR-130 §9), one per
+// stretch of the period a plan was on the subscription and per meter it
+// prices, each from its meter's usage floor, priced by its own plan at the
+// plan's pin of the period (pinsOf).
 // Before PR-4 it priced one flat window with the current items' plans, which
 // priced pre-swap usage at the new plan's rates. No ladder: the evaluation
 // runs only while the period has no threshold invoice (the fire-once probe).
@@ -568,7 +570,13 @@ type thresholdUsage struct {
 	src        PriceSource
 }
 
-func (e *Engine) readThresholdUsage(ctx context.Context, sub domain.Subscription, periodStart, now time.Time) (thresholdUsage, error) {
+// The windows are built over [periodStart, now), as the subscription stands
+// at the fire, and then cut at through. Built only to through, a usage floor
+// in [through, now) would be missed: another subscription of the customer
+// that stopped covering a meter there billed the usage before it, and this
+// fire would bill it again. A window whose floored start is at or past
+// through is dropped.
+func (e *Engine) readThresholdUsage(ctx context.Context, sub domain.Subscription, periodStart, through, now time.Time) (thresholdUsage, error) {
 	plans := make(map[string]domain.Plan, len(sub.Items))
 	for _, it := range sub.Items {
 		if _, ok := plans[it.PlanID]; ok {
@@ -602,6 +610,12 @@ func (e *Engine) readThresholdUsage(ctx context.Context, sub domain.Subscription
 	var windows []rateWindow
 	for _, k := range sortedPlanMeters(clamped) {
 		for _, iv := range mergeUsageIntervals(clamped[k]) {
+			if iv.end.After(through) {
+				iv.end = through
+			}
+			if !iv.end.After(iv.start) {
+				continue
+			}
 			windows = append(windows, rateWindow{planID: k.planID, meterID: k.meterID, iv: iv, pass: passEvery})
 		}
 	}
@@ -615,12 +629,13 @@ func (e *Engine) readThresholdUsage(ctx context.Context, sub domain.Subscription
 	}, nil
 }
 
-// evaluateThresholds computes the partial-cycle running totals for a sub and
-// reports whether any configured cap has been crossed. It prices the usage
-// the way the close will (readThresholdUsage), so the threshold invoice and
-// the later close agree on what each window billed.
-func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription, periodStart, now time.Time) (thresholdEval, error) {
-	tu, err := e.readThresholdUsage(ctx, sub, periodStart, now)
+// evaluateThresholds computes the partial-cycle running totals for a sub over
+// [periodStart, through) and reports whether any configured cap has been
+// crossed. now is the scan's instant: the usage floors are read up to it
+// (readThresholdUsage). It prices the usage the way the close will, so the
+// threshold invoice and the later close agree on what each window billed.
+func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription, periodStart, through, now time.Time) (thresholdEval, error) {
+	tu, err := e.readThresholdUsage(ctx, sub, periodStart, through, now)
 	if err != nil {
 		return thresholdEval{}, err
 	}
@@ -711,8 +726,8 @@ func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription
 	}
 
 	// Per-item caps: sum the running quantity across the meters each item's
-	// plan prices, during [floor, now), the window the fire bills each meter
-	// over. Every event of those meters counts, priced or not. Item to meter
+	// plan prices, during [floor, through), the window the fire bills each
+	// meter over. The floor is found up to now, as for the windows above. Every event of those meters counts, priced or not. Item to meter
 	// is via the plan's prices at its pin of the period. One currency per
 	// subscription, so summing across plans is safe.
 	if !eval.CrossedAny && len(bt.ItemThresholds) > 0 {
@@ -733,10 +748,10 @@ func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription
 					return thresholdEval{}, fmt.Errorf("item threshold: get meter %s: %w", meterID, mErr)
 				}
 				from := tu.floors.start(meterID, periodStart, now)
-				if !from.Before(now) {
+				if !from.Before(through) {
 					continue
 				}
-				aggs, aErr := e.usage.AggregateClaims(ctx, sub.TenantID, sub.CustomerID, meterID, meter.Aggregation, domain.ClaimsOf(pricesOn(prices, meterID)), from, now)
+				aggs, aErr := e.usage.AggregateClaims(ctx, sub.TenantID, sub.CustomerID, meterID, meter.Aggregation, domain.ClaimsOf(pricesOn(prices, meterID)), from, through)
 				if aErr != nil {
 					return thresholdEval{}, fmt.Errorf("item threshold: aggregate meter %s: %w", meterID, aErr)
 				}
