@@ -6,12 +6,12 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"runtime/debug"
 	"strings"
 	"time"
 
 	"github.com/stripe/stripe-go/v82"
 
-	hardcountauth "github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
@@ -31,8 +31,10 @@ type ProviderConfigErrorRetrier interface {
 // wall-clock work. 5 minutes covers ~1500 invoices retrying at
 // the typical ~200ms/invoice Stripe Tax round-trip — far beyond
 // expected per-tenant volumes. After the timeout, in-flight
-// retries log + exit; remaining stuck rows can be cleared by an
-// operator-driven Retry tax click on each.
+// retries log + exit. The rows it did not reach stay in the
+// needs-attention list: the tax_retry sweep retries the
+// provider_not_configured ones, and a provider_auth one waits for
+// a Retry tax click or the next connect.
 const PostConnectRetryTimeout = 5 * time.Minute
 
 // StripeClientFactory builds a *stripe.Client from a secret key. Injected so
@@ -178,25 +180,45 @@ func (s *Service) Connect(ctx context.Context, tenantID string, in ConnectInput)
 		} else {
 			creds.RetriesQueued = stuckCount
 			if stuckCount > 0 {
-				go s.runPostConnectRetry(tenantID, in.Livemode, stuckCount)
+				s.startPostConnectRetry(ctx, tenantID, in.Livemode, stuckCount)
 			}
 		}
 	}
 	return creds, nil
 }
 
+// startPostConnectRetry runs the post-connect retry in a goroutine. The
+// retry outlives the request. Its ctx keeps the request's values without
+// its cancel: the tenant, the mode (checkMode proved it is the
+// connection's), the actor, so the invoices it finalizes are recorded under
+// the operator who connected, and the request id. It is capped at
+// PostConnectRetryTimeout.
+//
+// Nothing waits for it at shutdown. A stop mid-row leaves that row pending
+// or finalized, never between: a tax retry writes the tax and the finalize
+// in one transaction. The rows it did not reach stay in the needs-attention
+// list: the tax_retry sweep retries the provider_not_configured ones, and a
+// provider_auth one waits for a Retry tax click or the next connect. A wait
+// would not change what a stopped retry leaves.
+func (s *Service) startPostConnectRetry(ctx context.Context, tenantID string, livemode bool, expected int) {
+	retryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), PostConnectRetryTimeout)
+	go s.runPostConnectRetry(retryCtx, cancel, tenantID, livemode, expected)
+}
+
 // runPostConnectRetry is the goroutine body that flushes stuck
-// invoices after a successful Connect. Built off context.Background
-// so it survives the connect HTTP request lifecycle, with explicit
-// WithTenantID + WithLivemode (per the ctx-attribute audit memory:
-// every ctx-detached worker must pin all relevant ctx attrs, not
-// just livemode). Capped at PostConnectRetryTimeout so a stuck
-// retry can't tie up resources indefinitely.
-func (s *Service) runPostConnectRetry(tenantID string, livemode bool, expected int) {
-	ctx, cancel := context.WithTimeout(context.Background(), PostConnectRetryTimeout)
+// invoices after a successful Connect, on ctx: the request's values
+// without its cancel, capped at PostConnectRetryTimeout (see the go
+// statement in Connect). cancel releases that timeout. A panic is
+// logged at ERROR and ends only this retry: a goroutine's panic
+// would otherwise stop the server.
+func (s *Service) runPostConnectRetry(ctx context.Context, cancel context.CancelFunc, tenantID string, livemode bool, expected int) {
 	defer cancel()
-	ctx = hardcountauth.WithTenantID(ctx, tenantID)
-	ctx = postgres.WithLivemode(ctx, livemode)
+	defer func() {
+		if p := recover(); p != nil {
+			s.logger.ErrorContext(ctx, "tenantstripe: post-connect retry panicked; the rows it did not reach stay in the needs-attention list",
+				"tenant_id", tenantID, "livemode", livemode, "panic", fmt.Sprint(p), "stack", string(debug.Stack()))
+		}
+	}()
 
 	start := time.Now()
 	processed, errs := s.stuckRetrier.RetryProviderConfigErrors(ctx, tenantID, livemode)

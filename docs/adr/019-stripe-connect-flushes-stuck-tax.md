@@ -49,11 +49,10 @@ from Stripe), the service:
    'provider_auth')`. The count is included in the Connect HTTP
    response as `retries_queued` so the dashboard renders
    "Retrying N stuck invoices in the background".
-2. Fans out a goroutine to actually run the retries. The
-   goroutine builds a fresh `context.Background() +
-   WithTenantID + WithLivemode + 5-min timeout` (per the
-   ctx-attribute audit memory: every ctx-detached worker pins all
-   relevant attrs, not just livemode). Calls
+2. Fans out a goroutine to actually run the retries, on the
+   request's ctx without its cancel and with a 5-min timeout
+   (amended 2026-11-10; it was a fresh `context.Background()`
+   with the tenant and mode pinned). Calls
    `invoice.Service.RetryProviderConfigErrors`, which iterates
    the stuck rows and invokes existing `Service.RetryTax` per
    row. RetryTax already includes the auto-finalize chain from
@@ -154,3 +153,26 @@ relevant memory) for a low-frequency, operator-initiated event.
 - The 5-min `PostConnectRetryTimeout` covers ~1500 invoices at
   Stripe Tax's typical ~200ms/call latency. Far beyond expected
   per-tenant volumes.
+
+## Amendment 2026-11-10: the request's actor, a recover, what a stop leaves
+
+- **The request's ctx without its cancel.** The fan-out ran on
+  `context.Background()` with the tenant and mode pinned. The actor and
+  the request id were gone, so every invoice it finalized was recorded
+  under "system", not the operator who connected. It now runs on
+  `context.WithTimeout(context.WithoutCancel(ctx), PostConnectRetryTimeout)`,
+  built before the `go` statement: the tenant, the mode (`checkMode` proved
+  it is the connection's), the actor and the request id carry over, and the
+  request ending does not stop it.
+- **A recover.** A panic in the goroutine stopped the whole server. It is
+  now logged at ERROR and ends only the retry.
+- **Nothing waits for it at shutdown, on purpose.** Since P1-29 (#1679) a
+  tax retry writes the tax and the finalize in one transaction, so a stop
+  mid-row leaves that row pending or finalized, never between. The rows it
+  did not reach stay in the needs-attention list: the tax_retry sweep
+  retries the `provider_not_configured` ones, and a `provider_auth` one
+  waits for a Retry tax click or the next connect. A shutdown wait would not
+  change what a stopped retry leaves, so it gets no stage.
+
+Tests: `TestPostConnectRetry_KeepsTheRequestsActorAndOutlivesIt`,
+`TestPostConnectRetry_PanicIsRecovered`.
