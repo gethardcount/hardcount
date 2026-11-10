@@ -197,9 +197,9 @@ func (e *Engine) EmitFinalizeAuditTx(ctx context.Context, tx *sql.Tx, inv domain
 }
 
 // finalizeAuditEmit adapts emitFinalizeAuditTx to the CreateInvoiceWithLineItemsAudited
-// callback shape, so the own-tx finalize paths audit on the create tx. The store
-// hands back the persisted invoice as `out` (with its real ID); audit that, not
-// the pre-insert struct.
+// callback shape, so the own-tx finalize path (BillOnCreate) audits on the
+// create tx. The store hands back the persisted invoice as `out` (with its real
+// ID); audit that, not the pre-insert struct.
 func (e *Engine) finalizeAuditEmit(ctx context.Context) func(tx *sql.Tx, out domain.Invoice) error {
 	return func(tx *sql.Tx, out domain.Invoice) error {
 		return e.emitFinalizeAuditTx(ctx, tx, out)
@@ -595,10 +595,10 @@ type InvoiceWriter interface {
 	// in-transaction audit emission (ADR-090): emit runs on the SAME tx as the
 	// header + line INSERTs, after they land and BEFORE commit, so an emission
 	// error rolls the whole invoice back — the finalize row and the invoice share
-	// fate. The own-tx engine finalize paths (cycle close, subscription create,
-	// cancel-final) route through here so a finalized invoice can never commit
-	// without its audit trail (the residual own-tx post-commit Log left an
-	// invoice visible with no record of what created it if the write failed).
+	// fate. BillOnCreate, the own-transaction finalize path, routes through here
+	// so a finalized invoice can never commit without its audit trail (the
+	// residual own-tx post-commit Log left an invoice visible with no record of
+	// what created it if the write failed).
 	CreateInvoiceWithLineItemsAudited(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error)
 	// CreateInvoiceWithLineItemsTx is the in-tx variant — used by BillOnCreateTx
 	// and BillOnPlanSwapTx; the latter inserts the cross-interval swap's invoice
@@ -3821,7 +3821,7 @@ func onCreateBaseLines(sub domain.Subscription, plans map[string]domain.Plan, ad
 // coordinator-tx callers call it post-commit.
 func (e *Engine) FinalizeOnCreateInvoice(ctx context.Context, sub domain.Subscription, inv domain.Invoice) {
 	// The finalize AUDIT row and invoice.finalized rode the invoice-create tx
-	// (ADR-090, ADR-040): the own-tx callers (BillOnCreate) emit the row via
+	// (ADR-090, ADR-040): the own-tx caller (BillOnCreate) emits the row via
 	// finalizeAuditEmit, and the coordinator-tx callers (BillOnCreateTx, the
 	// cross-interval swap through BillOnPlanSwapTx, the cancel through
 	// BillCancelTx) emit it on the coordinator tx; the invoice
