@@ -191,8 +191,14 @@ func (a *invoiceStoreAdapter) ListLineItems(ctx context.Context, tenantID, invoi
 	return a.store.ListLineItems(ctx, tenantID, invoiceID)
 }
 
-func (a *invoiceStoreAdapter) UpdateTaxAtomic(ctx context.Context, tenantID, invoiceID string, update domain.InvoiceTaxRetryUpdate, lineItems []domain.InvoiceLineItem) (domain.Invoice, error) {
-	return a.store.UpdateTaxAtomic(ctx, tenantID, invoiceID, update, lineItems)
+func (a *invoiceStoreAdapter) UpdateTaxAtomic(ctx context.Context, tenantID, invoiceID string, update domain.InvoiceTaxRetryUpdate, lineItems []domain.InvoiceLineItem,
+	then func(ctx context.Context, tx *sql.Tx, taxed domain.Invoice) error,
+) (domain.Invoice, error) {
+	return a.store.UpdateTaxAtomic(ctx, tenantID, invoiceID, update, lineItems, then)
+}
+
+func (a *invoiceStoreAdapter) RecordTaxRetryAttempt(ctx context.Context, tenantID, invoiceID string, nextRetryAt *time.Time) error {
+	return a.store.RecordTaxRetryAttempt(ctx, tenantID, invoiceID, nextRetryAt)
 }
 
 func (a *invoiceStoreAdapter) FindFundingInvoicesForPeriod(ctx context.Context, tenantID, subscriptionID string, periodStart, periodEnd time.Time) ([]domain.Invoice, error) {
@@ -609,7 +615,9 @@ func TestBillTiming_InAdvance_E2E(t *testing.T) {
 	if err := reliefTx.Commit(); err != nil {
 		t.Fatalf("commit relief: %v", err)
 	}
-	engine.FinishRelief(ctx, subRefreshed, relief)
+	if err := engine.FinishRelief(ctx, subRefreshed, relief); err != nil {
+		t.Fatalf("FinishRelief: %v", err)
+	}
 
 	// Read the customer's credit ledger; should have a grant entry for
 	// the unused portion. July has 31 days; unused = 15 days =
@@ -951,6 +959,8 @@ func cancelRelief(t *testing.T, ctx context.Context, db *postgres.DB, tenantID s
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit relief: %v", err)
 	}
-	e.FinishRelief(ctx, sub, r)
+	if err := e.FinishRelief(ctx, sub, r); err != nil {
+		t.Fatalf("FinishRelief: %v", err)
+	}
 	return r
 }

@@ -518,9 +518,9 @@ func (h *Handler) finalize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// service.Finalize is the one finalize path, for this endpoint and the
-	// tax-retry auto-finalize alike. Its transaction queued invoice.finalized
-	// (the store), and it wrote the finalize audit row.
+	// service.Finalize's transaction queued invoice.finalized (the store) and
+	// wrote the finalize audit row (finalizeHook). The tax retry finalizes a
+	// draft through the same hook, inside its tax write's transaction.
 
 	// No automatic "here's your invoice" email on finalize while Stripe is
 	// connected. Hardcount auto-charges the saved card (Stripe
@@ -756,8 +756,8 @@ func (h *Handler) recordOfflinePayment(w http.ResponseWriter, r *http.Request) {
 	inv, err := h.svc.RecordOfflinePayment(r.Context(), tenantID, id, input.Note)
 	if err != nil {
 		// Nothing commits before the paid flip, so a payment that lost a
-		// deadlock may be sent again (ADR-136).
-		respond.FromError(w, r, respond.DeadlockAsConflict(r, err), "invoice")
+		// deadlock or a lock wait may be sent again (ADR-136).
+		respond.FromError(w, r, respond.ConcurrentChangeAsConflict(r, err), "invoice")
 		return
 	}
 
@@ -1033,13 +1033,13 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		settled, serr := h.svc.SettleZeroDue(r.Context(), tenantID, id)
 		h.releaseCollectHold(r.Context(), tenantID, id, hold)
 		if serr != nil {
-			// A settle that lost a deadlock may be sent again: no charge was
-			// sent, and the credit applied above stays applied. The resend
-			// finds nothing due, so it applies no credit and settles the
-			// invoice from the credit already applied (collectNothingDue,
-			// ADR-136). Only this branch: a deadlock after a card charge
-			// keeps its stored 500.
-			respond.FromError(w, r, respond.DeadlockAsConflict(r, serr), "invoice")
+			// A settle that lost a deadlock or a lock wait may be sent again:
+			// no charge was sent, and the credit applied above stays applied.
+			// The resend finds nothing due, so it applies no credit and
+			// settles the invoice from the credit already applied
+			// (collectNothingDue, ADR-136). Only this branch: a deadlock or
+			// lock wait after a card charge keeps its stored 500.
+			respond.FromError(w, r, respond.ConcurrentChangeAsConflict(r, serr), "invoice")
 			return
 		}
 		// A credit-paid invoice is recovered exactly as a card-paid one is, so
@@ -1142,9 +1142,9 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) collectNothingDue(w http.ResponseWriter, r *http.Request, tenantID, id string) {
 	settled, paid, err := h.svc.SettleZeroDueWithoutClaim(r.Context(), tenantID, id)
 	if err != nil {
-		// Nothing commits before this settle, so one that lost a deadlock
-		// may be sent again (ADR-136).
-		respond.FromError(w, r, respond.DeadlockAsConflict(r, err), "invoice")
+		// Nothing commits before this settle, so one that lost a deadlock or
+		// a lock wait may be sent again (ADR-136).
+		respond.FromError(w, r, respond.ConcurrentChangeAsConflict(r, err), "invoice")
 		return
 	}
 	if !paid {
@@ -1307,12 +1307,17 @@ func (h *Handler) refund(w http.ResponseWriter, r *http.Request) {
 // 200 with the updated invoice (carrying the new Attention) on
 // success or post-retry failure (a "still failing" retry is not an
 // HTTP error — the dashboard wants the new code to render). 409 when
-// the gate fails (status != draft, or tax_status not retryable). 404
-// when the invoice doesn't exist. When the tax resolves but the
-// auto-finalize does not happen (the pause state could not be read, or
-// finalize failed), the call fails: 500 for a database error, 409 for a
-// state conflict. The invoice stays a draft with its tax saved, for the
-// operator to finalize, and the retry_tax audit row is still written.
+// the gate fails (status != draft, or tax_status not retryable), and when
+// the invoice was finalized while its tax was being calculated. 404 when the
+// invoice doesn't exist. When the tax resolves but the auto-finalize fails
+// (the pause state could not be read, or the finalize failed), the call
+// fails and the tax is not saved: the finalize rides on the tax write's
+// transaction, so the invoice stays a draft with its tax pending. A state
+// conflict answers 409 with a message naming the finalize; a database error
+// answers 500 internal_error, and the server log names the cause. The
+// retry_tax audit row is written only on success. A failed click still
+// counts the try when the tax was pending (tax_retry_count and
+// tax_next_retry_at change), and that leaves no audit row.
 func (h *Handler) retryTax(w http.ResponseWriter, r *http.Request) {
 	if !respond.NoBody(w, r) {
 		return
@@ -1325,9 +1330,9 @@ func (h *Handler) retryTax(w http.ResponseWriter, r *http.Request) {
 	before, _ := h.svc.Get(r.Context(), tenantID, id)
 
 	inv, err := h.svc.RetryTax(r.Context(), tenantID, id)
-	// RetryTax returns an invoice whenever its tax write committed, with or
-	// without an error: the click changed the tax and total, so audit it.
-	if inv.ID != "" && h.auditLogger != nil {
+	// RetryTax returns an invoice only when its tax write committed, and
+	// then with no error: the click changed the tax and total, so audit it.
+	if err == nil && h.auditLogger != nil {
 		var beforeReason, afterReason string
 		if before.Attention != nil {
 			beforeReason = string(before.Attention.Reason)

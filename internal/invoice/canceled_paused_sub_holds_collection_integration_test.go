@@ -20,7 +20,7 @@ import (
 // queued invoice and the retry finalizes the draft.
 func TestCanceledPausedSub_PauseStillHoldsItsInvoices(t *testing.T) {
 	r := newSnapRig(t, "Canceled Paused Sub Corp")
-	draftID := r.subTaxPendingDraft(t, "A4-HOLD-DRAFT", true)
+	draftID := r.subTaxPendingDraft(t, "A4-HOLD-DRAFT", pauseKeep)
 	draft, err := r.store.Get(r.ctx, r.tenantID, draftID)
 	if err != nil {
 		t.Fatalf("get draft: %v", err)

@@ -59,10 +59,11 @@ type Biller interface {
 	// must not count twice), then FinishRelief, then FinalizeOnCreateInvoice.
 	BillCancelTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (inv domain.Invoice, r domain.Relief, afterCommit func(), err error)
 	// FinishRelief runs a committed relief's post-commit legs (issue the
-	// drafts; the voids' tax reversal). Best-effort: each leg is durable and
-	// recovered by its own sweep. Each void's invoice.voided committed with
-	// the relief.
-	FinishRelief(ctx context.Context, sub domain.Subscription, r domain.Relief)
+	// drafts; the voids' tax reversal). Each leg is durable and recovered by
+	// its own sweep. Each void's invoice.voided committed with the relief. It
+	// returns an error when an Issue call returned one and the note is not
+	// issued: that note has reduced nothing yet.
+	FinishRelief(ctx context.Context, sub domain.Subscription, r domain.Relief) error
 	// ThresholdBilledThroughTx reads, on the caller's tx, the instant a
 	// mid-cycle threshold invoice already billed sub's CURRENT period
 	// through (nil = no threshold fire this period). The atomic plan swap
@@ -1954,7 +1955,24 @@ func (s *Service) finishReliefThenCollect(ctx context.Context, sub domain.Subscr
 	if s.biller == nil {
 		return
 	}
-	s.biller.FinishRelief(ctx, sub, r)
+	if err := s.biller.FinishRelief(ctx, sub, r); err != nil {
+		// An Issue call returned an error and the note is not issued, so it
+		// has reduced nothing yet. This call then does not collect the
+		// change's invoice: collected now, the card would be charged the
+		// whole of it, and the credit would reach the balance later. The
+		// invoice was queued for collection when it was created, and its tax
+		// commit has a sweep. A billing run issues relief drafts before it
+		// collects queued invoices (clawback_issue before the auto-charge
+		// step; on a test clock the catch-up does the same). Not covered: a
+		// note that keeps failing is followed by a full charge on the next
+		// run; a run already inside its auto-charge step when this commits
+		// charges the invoice before the note is retried; and a draft Issue
+		// holds (its source is a draft, or its payment is in flight) is not
+		// an error, so the invoice is collected in full here, as before.
+		slog.ErrorContext(ctx, "relief credit note not issued; this call does not collect the change's invoice",
+			"subscription_id", sub.ID, "invoice_id", inv.ID, "error", err)
+		return
+	}
 	if inv.ID != "" {
 		s.biller.FinalizeOnCreateInvoice(ctx, sub, inv)
 	}

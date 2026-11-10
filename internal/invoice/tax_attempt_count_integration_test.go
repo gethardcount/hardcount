@@ -57,7 +57,7 @@ func TestUpdateTaxAtomic_InitialAttemptDoesNotCountAsRetry(t *testing.T) {
 
 	// Finalize-time initial computation: no bump.
 	update.InitialAttempt = true
-	got, err := store.UpdateTaxAtomic(ctx, tenantID, inv.ID, update, nil)
+	got, err := store.UpdateTaxAtomic(ctx, tenantID, inv.ID, update, nil, nil)
 	if err != nil {
 		t.Fatalf("initial UpdateTaxAtomic: %v", err)
 	}
@@ -67,7 +67,7 @@ func TestUpdateTaxAtomic_InitialAttemptDoesNotCountAsRetry(t *testing.T) {
 
 	// A genuine retry: bumps.
 	update.InitialAttempt = false
-	got, err = store.UpdateTaxAtomic(ctx, tenantID, inv.ID, update, nil)
+	got, err = store.UpdateTaxAtomic(ctx, tenantID, inv.ID, update, nil, nil)
 	if err != nil {
 		t.Fatalf("retry UpdateTaxAtomic: %v", err)
 	}

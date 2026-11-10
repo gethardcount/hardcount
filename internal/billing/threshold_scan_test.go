@@ -124,7 +124,7 @@ func TestEvaluateThresholds_AmountCross(t *testing.T) {
 	periodStart := *sub.CurrentBillingPeriodStart
 	now := periodStart.AddDate(0, 0, 5) // 5 days into the cycle
 
-	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now)
+	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now, now)
 	if err != nil {
 		t.Fatalf("evaluateThresholds: %v", err)
 	}
@@ -165,7 +165,7 @@ func TestEvaluateThresholds_BelowAmount(t *testing.T) {
 	periodStart := *sub.CurrentBillingPeriodStart
 	now := periodStart.AddDate(0, 0, 5)
 
-	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now)
+	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now, now)
 	if err != nil {
 		t.Fatalf("evaluateThresholds: %v", err)
 	}
@@ -193,7 +193,7 @@ func TestEvaluateThresholds_ItemCross(t *testing.T) {
 	periodStart := *sub.CurrentBillingPeriodStart
 	now := periodStart.AddDate(0, 0, 5)
 
-	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now)
+	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now, now)
 	if err != nil {
 		t.Fatalf("evaluateThresholds: %v", err)
 	}
@@ -226,7 +226,7 @@ func TestEvaluateThresholds_BelowItemQuantity(t *testing.T) {
 	periodStart := *sub.CurrentBillingPeriodStart
 	now := periodStart.AddDate(0, 0, 5)
 
-	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now)
+	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now, now)
 	if err != nil {
 		t.Fatalf("evaluateThresholds: %v", err)
 	}
@@ -334,7 +334,7 @@ func TestEvaluateThresholds_InAdvanceBaseExcluded(t *testing.T) {
 	periodStart := *sub.CurrentBillingPeriodStart
 	now := periodStart.AddDate(0, 0, 5)
 
-	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now)
+	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now, now)
 	if err != nil {
 		t.Fatalf("evaluateThresholds: %v", err)
 	}
@@ -372,7 +372,7 @@ func TestEvaluateThresholds_InArrearsBaseExcluded(t *testing.T) {
 	periodStart := *sub.CurrentBillingPeriodStart
 	now := periodStart.AddDate(0, 0, 5)
 
-	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now)
+	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, now, now)
 	if err != nil {
 		t.Fatalf("evaluateThresholds: %v", err)
 	}
@@ -403,7 +403,7 @@ func TestEvaluateThresholds_InArrearsBaseAloneDoesNotCross(t *testing.T) {
 
 	sub, _ := engine.subs.Get(context.Background(), "t1", "sub_1")
 	periodStart := *sub.CurrentBillingPeriodStart
-	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, periodStart.AddDate(0, 0, 1))
+	eval, err := engine.evaluateThresholds(context.Background(), sub, periodStart, periodStart.AddDate(0, 0, 1), periodStart.AddDate(0, 0, 1))
 	if err != nil {
 		t.Fatalf("evaluateThresholds: %v", err)
 	}
@@ -737,5 +737,25 @@ func TestScanThresholds_ProbeHealsStrandedZeroDue(t *testing.T) {
 	healed := invoices.invoices[len(invoices.invoices)-1]
 	if healed.Status != domain.InvoicePaid || healed.PaymentStatus != domain.PaymentSucceeded {
 		t.Errorf("stranded $0 invoice not healed on probe re-entry: status=%q payment=%q", healed.Status, healed.PaymentStatus)
+	}
+}
+
+// A threshold scan reads usage up to one invoice grace before now on the wall
+// clock, and up to now on a test clock (the test-clock run gives a period's
+// close no grace either, so advancing a clock past a crossing fires at once).
+func TestThresholdUsageThrough(t *testing.T) {
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	e := &Engine{}
+	e.SetInvoiceGrace(time.Hour)
+
+	if got := e.thresholdUsageThrough(domain.Subscription{}, now); !got.Equal(now.Add(-time.Hour)) {
+		t.Errorf("wall clock: usage is read through %s, want one grace before now (%s)", got, now.Add(-time.Hour))
+	}
+	if got := e.thresholdUsageThrough(domain.Subscription{TestClockID: "hc_clk_1"}, now); !got.Equal(now) {
+		t.Errorf("test clock: usage is read through %s, want now (%s): a clock advance fires at once", got, now)
+	}
+	e.SetInvoiceGrace(0)
+	if got := e.thresholdUsageThrough(domain.Subscription{}, now); !got.Equal(now) {
+		t.Errorf("no grace: usage is read through %s, want now (%s)", got, now)
 	}
 }

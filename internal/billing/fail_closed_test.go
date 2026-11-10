@@ -132,7 +132,7 @@ func TestEvaluateThresholds_PriceReadFails(t *testing.T) {
 	mp.pricesErr = errors.New("db down")
 	sub, _ := engine.subs.Get(context.Background(), "t1", "sub_1")
 	periodStart := *sub.CurrentBillingPeriodStart
-	if _, err := engine.evaluateThresholds(context.Background(), sub, periodStart, periodStart.AddDate(0, 0, 5)); err == nil {
+	if _, err := engine.evaluateThresholds(context.Background(), sub, periodStart, periodStart.AddDate(0, 0, 5), periodStart.AddDate(0, 0, 5)); err == nil {
 		t.Fatal("evaluateThresholds with a failed price read must fail, not drop the line")
 	}
 }
@@ -179,7 +179,7 @@ func TestEvaluateThresholds_NegativeRunningUsageCountsAsZero(t *testing.T) {
 	engine, _, _ := setupThresholdEngine(thresholds, -500)
 	sub, _ := engine.subs.Get(context.Background(), "t1", "sub_1")
 	periodStart := *sub.CurrentBillingPeriodStart
-	if _, err := engine.evaluateThresholds(context.Background(), sub, periodStart, periodStart.AddDate(0, 0, 5)); err != nil {
+	if _, err := engine.evaluateThresholds(context.Background(), sub, periodStart, periodStart.AddDate(0, 0, 5), periodStart.AddDate(0, 0, 5)); err != nil {
 		t.Fatalf("a net-negative running total must not fail the evaluation: %v", err)
 	}
 }
@@ -209,7 +209,7 @@ func TestRetryTax_RefreshesOnlyAProvenExpiredCalculation(t *testing.T) {
 			TaxFacts: domain.TaxFacts{TaxStatus: domain.InvoiceTaxOK, TaxCalculationID: "taxcalc_old"},
 		}}},
 	}
-	if _, err := e.RetryTaxForInvoice(context.Background(), "t1", "inv_1"); !errors.Is(err, errBlip) {
+	if _, err := e.RetryTaxForInvoice(context.Background(), "t1", "inv_1", nil); !errors.Is(err, errBlip) {
 		t.Fatalf("err = %v, want the guard's read error", err)
 	}
 	if prov.calls != 0 {

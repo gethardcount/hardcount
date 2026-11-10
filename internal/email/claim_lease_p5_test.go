@@ -98,10 +98,10 @@ func TestP5_PermanentErrorsDLQImmediately(t *testing.T) {
 	}
 }
 
-// TestP5_PanicRowDoesNotStrandBatch: a poisoned row is recovered
-// per-row — later rows in the same claimed batch still get attempted
-// this tick, and the poison row records an attempt (advances to DLQ
-// instead of cycling lease-long forever).
+// TestP5_PanicRowDoesNotStrandBatch: a row whose handler panics is
+// recovered per row. Later rows in the same claimed batch are still
+// attempted this tick, and the panicked row counts one failed attempt and
+// waits for its retry, like any other error.
 func TestP5_PanicRowDoesNotStrandBatch(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := leadertest.Token(t, testutil.AdminPool(t), postgres.WithLivemode(context.Background(), false), leader.RoleEmailOutbox)
@@ -132,9 +132,9 @@ func TestP5_PanicRowDoesNotStrandBatch(t *testing.T) {
 	if status, _ := emailRowState(t, db, okID); status != "dispatched" {
 		t.Errorf("row after the poison: %q, want dispatched", status)
 	}
-	// Handler panics classify as payload-decode (permanent) → DLQ now.
-	if status, _ := emailRowState(t, db, poisonID); status != "failed" {
-		t.Errorf("poison row: %q, want failed", status)
+	// A panic is retryable: one attempt counted, still pending.
+	if status, attempts := emailRowState(t, db, poisonID); status != "pending" || attempts != 1 {
+		t.Errorf("panicked row: status=%q attempts=%d, want pending/1", status, attempts)
 	}
 }
 

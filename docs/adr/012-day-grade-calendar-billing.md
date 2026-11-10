@@ -241,8 +241,9 @@ immediate and scheduled cancel, the cross-interval swap (ADR-056), the
 operator preview and the live credit estimate. The threshold fire, its
 item-threshold count and create_preview with a custom window do not
 bill by segment. They rate one flat window per meter on the current
-items, `[floor, now)`, where the floor is the same `usageFloors` start
-taken over the whole period. The fire's usage lines are stamped with
+items, `[floor, through)`, where `through` is one invoice grace before the
+scan (ADR-120 amendment 2026-11-10) and the floor is the same
+`usageFloors` start taken over the whole period up to the scan. The fire's usage lines are stamped with
 the floored start. Rules stay pinned at the period start (ADR-070).
 
 **Why "strictly inside" is enough.** `rejectMeterOverlap` keeps two

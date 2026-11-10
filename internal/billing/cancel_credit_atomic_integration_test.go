@@ -65,6 +65,9 @@ func (f *failingDraftAdjuster) LockInvoicesForDraftsTx(context.Context, *sql.Tx,
 func (f *failingDraftAdjuster) Issue(context.Context, string, string) (domain.CreditNote, error) {
 	return domain.CreditNote{}, nil
 }
+func (f *failingDraftAdjuster) Get(context.Context, string, string) (domain.CreditNote, error) {
+	return domain.CreditNote{}, nil
+}
 
 // TestCancelCredit_DraftFailure_RealTxRollsBackCancel is the real-Postgres proof
 // of the atomic guarantee: when the in-tx cancel-credit DRAFT create fails,

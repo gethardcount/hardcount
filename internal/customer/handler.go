@@ -251,7 +251,10 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 
 	customer, err := h.svc.Update(r.Context(), tenantID, id, input)
 	if err != nil {
-		respond.FromError(w, r, err, "customer")
+		// An update that lost a deadlock or a lock wait (such as on the
+		// customer-rules lock) may be sent again: nothing commits before its
+		// one transaction, and after it the Stripe sync only logs (ADR-136).
+		respond.FromError(w, r, respond.ConcurrentChangeAsConflict(r, err), "customer")
 		return
 	}
 
@@ -307,7 +310,11 @@ func (h *Handler) upsertBillingProfile(w http.ResponseWriter, r *http.Request) {
 
 	profile, err := h.svc.UpsertBillingProfile(r.Context(), tenantID, bp)
 	if err != nil {
-		respond.FromError(w, r, err, "billing profile")
+		// A write that lost a deadlock or a lock wait (such as on the
+		// customer-rules lock) may be sent again: nothing commits before its
+		// one transaction, and after it the Stripe sync and the tax retry
+		// only log (ADR-136).
+		respond.FromError(w, r, respond.ConcurrentChangeAsConflict(r, err), "billing profile")
 		return
 	}
 

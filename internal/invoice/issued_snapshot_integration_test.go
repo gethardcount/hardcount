@@ -404,21 +404,41 @@ func (r *snapRig) taxPendingDraft(t *testing.T, num string) string {
 }
 
 // resolvingTaxRetrier stands in for the billing engine's tax recompute: it
-// marks the invoice's tax resolved on the real row and returns it, which is
-// all RetryTax needs before it auto-finalizes.
+// writes the invoice's tax as resolved through the real store's
+// UpdateTaxAtomic, with RetryTax's hook on that transaction, which is all
+// RetryTax needs to auto-finalize.
 type resolvingTaxRetrier struct {
 	db    *postgres.DB
 	store *PostgresStore
 }
 
-func (f *resolvingTaxRetrier) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID string) (domain.Invoice, error) {
-	if err := f.db.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
-		_, err := tx.ExecContext(ctx, `UPDATE invoices SET tax_status = 'ok', tax_error_code = NULL WHERE id = $1`, invoiceID)
-		return err
-	}); err != nil {
+func (f *resolvingTaxRetrier) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID string,
+	then func(ctx context.Context, tx *sql.Tx, taxed domain.Invoice) error,
+) (domain.Invoice, error) {
+	return resolveTaxThen(ctx, f.store, tenantID, invoiceID, then)
+}
+
+// resolveTaxThen writes a draft's tax as resolved (status ok, no error code,
+// the amounts it has) through UpdateTaxAtomic, running then on its
+// transaction, as the engine's retry does.
+func resolveTaxThen(ctx context.Context, store *PostgresStore, tenantID, invoiceID string,
+	then func(ctx context.Context, tx *sql.Tx, taxed domain.Invoice) error,
+) (domain.Invoice, error) {
+	inv, err := store.Get(ctx, tenantID, invoiceID)
+	if err != nil {
 		return domain.Invoice{}, err
 	}
-	return f.store.Get(ctx, tenantID, invoiceID)
+	lines, err := store.ListLineItems(ctx, tenantID, invoiceID)
+	if err != nil {
+		return domain.Invoice{}, err
+	}
+	facts := inv.TaxFacts
+	facts.TaxStatus, facts.TaxErrorCode, facts.TaxPendingReason, facts.TaxDeferredAt = domain.InvoiceTaxOK, "", "", nil
+	return store.UpdateTaxAtomic(ctx, tenantID, invoiceID, domain.InvoiceTaxRetryUpdate{
+		SubtotalCents: inv.SubtotalCents, DiscountCents: inv.DiscountCents,
+		TaxFacts: facts, TotalAmountCents: inv.TotalAmountCents,
+		BasisSubtotalCents: inv.SubtotalCents, BasisDiscountCents: inv.DiscountCents,
+	}, lines, then)
 }
 
 func (f *resolvingTaxRetrier) ComputeTaxForInvoice(ctx context.Context, tenantID, invoiceID string) (domain.Invoice, error) {

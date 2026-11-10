@@ -257,7 +257,7 @@ func TestRetryTax_TaxInclusiveDraft_TaxesTheGross(t *testing.T) {
 				tc.change(fake)
 			}
 
-			inv, err := e.RetryTaxForInvoice(postgres.WithLivemode(t.Context(), false), "t1", "inv_1")
+			inv, err := e.RetryTaxForInvoice(postgres.WithLivemode(t.Context(), false), "t1", "inv_1", nil)
 			if err != nil {
 				t.Fatalf("retry tax: %v", err)
 			}
@@ -295,7 +295,7 @@ func TestRetryTax_TaxInclusiveProrationDraft_CreditLineKeepsTheTotal(t *testing.
 	ctx := postgres.WithLivemode(t.Context(), false)
 
 	// 1. The pending tax is retried and succeeds.
-	inv, err := e.RetryTaxForInvoice(ctx, "t1", "inv_1")
+	inv, err := e.RetryTaxForInvoice(ctx, "t1", "inv_1", nil)
 	if err != nil {
 		t.Fatalf("retry tax: %v", err)
 	}
@@ -306,7 +306,7 @@ func TestRetryTax_TaxInclusiveProrationDraft_CreditLineKeepsTheTotal(t *testing.
 
 	// 2. The calculation expires and the rate is now 25%: the refresh.
 	fake.SetRate(2500)
-	inv, err = e.RetryTaxForInvoice(ctx, "t1", "inv_1")
+	inv, err = e.RetryTaxForInvoice(ctx, "t1", "inv_1", nil)
 	if err != nil {
 		t.Fatalf("refresh: %v", err)
 	}
@@ -345,7 +345,7 @@ func TestRetryTax_TaxInclusive_LineAmountFollowsWhoMadeTheDraft(t *testing.T) {
 			e := newStripeTaxEngine(fake, true, time.Now().UTC())
 			pendingDraft(tc.reason, grossLine("li_1", linePrice))(t, e, fake)
 
-			inv, err := e.RetryTaxForInvoice(postgres.WithLivemode(t.Context(), false), "t1", "inv_1")
+			inv, err := e.RetryTaxForInvoice(postgres.WithLivemode(t.Context(), false), "t1", "inv_1", nil)
 			if err != nil {
 				t.Fatalf("retry tax: %v", err)
 			}

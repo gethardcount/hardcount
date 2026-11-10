@@ -36,7 +36,7 @@ func TestUpdateTaxAtomic_RejectsNonDraft(t *testing.T) {
 		TaxFacts:         domain.TaxFacts{TaxAmountCents: 100, TaxStatus: domain.InvoiceTaxOK},
 		TotalAmountCents: 600,
 		SubtotalCents:    500,
-	}, nil)
+	}, nil, nil)
 	if err == nil {
 		t.Fatal("expected error updating tax on finalized invoice, got nil")
 	}
@@ -86,7 +86,7 @@ func TestUpdateTaxAtomic_ConcurrentSerializes(t *testing.T) {
 				DiscountCents:      0,
 				TotalAmountCents:   total,
 				BasisSubtotalCents: subtotal,
-			}, nil)
+			}, nil, nil)
 			if err != nil {
 				errCh <- err
 			}

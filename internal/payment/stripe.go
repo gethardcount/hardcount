@@ -953,6 +953,24 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	}
 	if !applied {
 		logRefusedChargeOutcome(ctx, current, domain.PaymentProcessing, result.ID, sentKey)
+		paid := current.Status == domain.InvoicePaid || current.PaymentStatus == domain.PaymentSucceeded
+		if !paid && current.StripePaymentIntentID != "" && current.StripePaymentIntentID != result.ID {
+			// The invoice names another attempt's PaymentIntent. This
+			// payment's failure was settled while the stamp was on its way
+			// (by its webhook, which frees the hold), and a later attempt has
+			// since put its own PaymentIntent on the invoice: in flight, or
+			// already failed. Either way the row describes that attempt, not
+			// this charge, so it is not returned as this charge's outcome (a
+			// dunning retry would wait on, or count, a payment it did not
+			// make). A paid row is returned: the invoice is settled.
+			//
+			// The error is not a decline, so a dunning retry that gets it is
+			// skipped uncounted and tries again on its schedule. This
+			// payment's failure was recorded by the settle that won; its
+			// dunning warning is not sent.
+			return domain.Invoice{}, fmt.Errorf("charge of invoice %s: payment %s was settled by another writer during the call, and the invoice now names %s (%s)",
+				inv.ID, result.ID, current.StripePaymentIntentID, current.PaymentStatus)
+		}
 	}
 	return current, nil
 }

@@ -6960,9 +6960,11 @@ export const getSetSubscriptionBillingThresholdsUrl = (id: string,) => {
  * first threshold reached triggers the invoice.
  *
  * The threshold invoice bills the period's usage so far, and no base
- * fee. The period keeps its dates, the base fee is billed as it would
- * be with no threshold, and the period's next invoice bills the rest
- * of the usage.
+ * fee. "So far" ends one `INVOICE_GRACE_PERIOD` before the invoice is
+ * built (its `billing_period_end`), so usage that arrives late is
+ * still billed. The period keeps its dates, the base fee is billed as
+ * it would be with no threshold, and the period's next invoice bills
+ * the rest of the usage.
  * `reset_billing_cycle`, which started a new period at the threshold
  * invoice, was removed; a body that sends it is refused with 422.
  *
@@ -10957,12 +10959,15 @@ export const getRetryInvoiceTaxUrl = (id: string,) => {
  * invoice, so check its `attention`.
  *
  * When the tax resolves on an invoice the billing engine made, the
- * call also finalizes it, unless collection is paused on its
- * subscription. If nothing is then due, the invoice is marked paid at
- * once; otherwise the automatic charge collects it on its next run.
- * An invoice you created stays a draft for you to finalize. If the
- * finalize fails, the call returns 500 or 409 and the invoice stays a
- * draft with its tax saved: finalize it.
+ * call also finalizes it, in the same transaction as the tax, unless
+ * collection is paused on its subscription. If nothing is then due,
+ * the invoice is marked paid at once; otherwise the automatic charge
+ * collects it on its next run. An invoice you created stays a draft
+ * for you to finalize. If the finalize fails, the call returns 500 or
+ * 409 and the tax is not saved: the invoice stays a draft with its tax
+ * pending and keeps its notice. The try is counted (toward the
+ * automatic retries, for an error Hardcount retries). A 409 names the
+ * finalize failure; for a 500 the server log says why.
  * @summary Retry tax calculation on a draft invoice
  */
 export const retryInvoiceTax = async (id: string, options?: RequestInit): Promise<Invoice> => {

@@ -64,6 +64,10 @@ This happens only with Stripe Tax. The invoice waits: it is not issued, emailed 
 | The tax provider can't calculate tax for this customer's region | Add a tax registration for that region in Stripe, then retry | No |
 | Tax calculation failed for an unknown reason | Retry. If it keeps failing, check the server log. | Yes, up to 8 times |
 
+When the tax is worked out on an invoice billing made, Hardcount finalizes it in the same step. If that finalize fails, the tax is not saved: the invoice keeps its notice and its last tax error, and the server log says why (`tax retry resolved the tax but did not finalize`). The try is counted, toward the 8 for an error Hardcount retries by itself.
+
+While the invoice waits like this, its subscription cannot be canceled, change plan or lower a quantity (`funding_invoice_tax_pending`), and **Finalize** is refused. That lasts until a retry finalizes the invoice, or you void it; the 8-try limit stops the automatic retries, not the wait. If the finalize keeps failing, fix the cause the server log names and click **Retry tax**, or void the draft and bill the period on a [one-off invoice](../concepts/invoices.md#when-hardcount-makes-an-invoice).
+
 After 8 automatic tries, Hardcount stops and the notice says so. Click the notice's retry button to try again: **Retry now** when the provider could not be reached or Stripe is now connected, **Retry tax** otherwise.
 
 Stripe keeps a tax calculation for 90 days, and Hardcount finalizes with one until 1 hour before it expires. When billing builds a subscription's invoice, a draft too, it records the calculation in Stripe's tax reports at once, so most drafts can wait. A draft whose calculation is not recorded can wait only until the calculation expires. That happens when Stripe failed at the moment billing built the draft, or when a retry worked the tax out. If such a draft waits that long, for example because its subscription has collection paused, finalize answers `tax_calculation_expired`. Retry the tax (`POST /v1/invoices/{id}/retry-tax`), then finalize.

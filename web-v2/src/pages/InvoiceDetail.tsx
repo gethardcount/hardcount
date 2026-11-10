@@ -574,9 +574,10 @@ export default function InvoiceDetailPage() {
         })
       }
     },
-    // A failed retry can still have saved the tax: the finalize after it is
-    // what failed. Reload so the page shows the draft and its Finalize button
-    // instead of the old "tax pending" notice.
+    // A failed retry saves no tax, but it can still change the page: a try
+    // whose finalize failed is counted (the retry count and the next retry
+    // time move), and a 409 can mean another retry finalized the invoice
+    // meanwhile. Reload so the page shows the invoice as it is now.
     onError: err => { invalidateAll(); showApiError(err, 'Failed to retry tax') },
   })
 

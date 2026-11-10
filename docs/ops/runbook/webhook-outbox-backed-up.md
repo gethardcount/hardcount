@@ -22,6 +22,10 @@ before anything is sent. An endpoint that keeps failing does not make this table
 - **Writing the event and its deliveries fails.** The database refuses the
   write, for example on lost connections or a full disk. The error is in
   `last_error`, and the row is retried with growing waits (a backoff ramp).
+- **A bug in Hardcount.** `last_error` begins `outbox handler panic`, and
+  the row is retried like any other error. The ERROR line `webhook outbox:
+  handler panicked; counting a failed attempt` with the row's `outbox_id`
+  has the stack in its `stack` field. Report the stack as a bug.
 
 ## Check
 

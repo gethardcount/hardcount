@@ -931,6 +931,8 @@ func priceWith(id, meterID string, match map[string]string, shape domain.PriceSh
 
 type mockInvoices struct {
 	mu sync.Mutex
+	// taxTriesRecorded counts RecordTaxRetryAttempt calls.
+	taxTriesRecorded int
 	// clockQueue holds the ids ListAutoChargePendingForClock returns (the fake
 	// has no sub→clock mapping). Empty by default.
 	clockQueue map[string]bool
@@ -1293,7 +1295,9 @@ func (m *mockInvoices) ListLineItems(_ context.Context, _, invoiceID string) ([]
 	return out, nil
 }
 
-func (m *mockInvoices) UpdateTaxAtomic(_ context.Context, tenantID, invoiceID string, update domain.InvoiceTaxRetryUpdate, lineItems []domain.InvoiceLineItem) (domain.Invoice, error) {
+func (m *mockInvoices) UpdateTaxAtomic(ctx context.Context, tenantID, invoiceID string, update domain.InvoiceTaxRetryUpdate, lineItems []domain.InvoiceLineItem,
+	then func(ctx context.Context, tx *sql.Tx, taxed domain.Invoice) error,
+) (domain.Invoice, error) {
 	idx := -1
 	for i, inv := range m.invoices {
 		if inv.ID == invoiceID && inv.TenantID == tenantID {
@@ -1311,6 +1315,8 @@ func (m *mockInvoices) UpdateTaxAtomic(_ context.Context, tenantID, invoiceID st
 	if inv.Status != domain.InvoiceDraft {
 		return domain.Invoice{}, errs.InvalidState(fmt.Sprintf("invoice must be draft (current: %s)", inv.Status))
 	}
+	// then's error rolls the whole write back, as the store's transaction does.
+	before, beforeLines := inv, append([]domain.InvoiceLineItem(nil), m.lineItems...)
 	byID := make(map[string]domain.InvoiceLineItem, len(lineItems))
 	for _, li := range lineItems {
 		byID[li.ID] = li
@@ -1355,7 +1361,27 @@ func (m *mockInvoices) UpdateTaxAtomic(_ context.Context, tenantID, invoiceID st
 	}
 	inv.AmountDueCents = due
 	m.invoices[idx] = inv
+	if then != nil {
+		if err := then(ctx, nil, inv); err != nil {
+			m.invoices[idx], m.lineItems = before, beforeLines
+			return domain.Invoice{}, err
+		}
+		inv = m.invoices[idx]
+	}
 	return inv, nil
+}
+
+// RecordTaxRetryAttempt mirrors the store: a draft with tax pending gains a
+// try and its next retry time; any other row is left alone.
+func (m *mockInvoices) RecordTaxRetryAttempt(_ context.Context, tenantID, invoiceID string, nextRetryAt *time.Time) error {
+	m.taxTriesRecorded++
+	for i, inv := range m.invoices {
+		if inv.ID == invoiceID && inv.TenantID == tenantID && inv.Status == domain.InvoiceDraft && inv.TaxStatus == domain.InvoiceTaxPending {
+			m.invoices[i].TaxRetryCount++
+			m.invoices[i].TaxNextRetryAt = nextRetryAt
+		}
+	}
+	return nil
 }
 
 // fakeInvoiceVoider / fakeCreditNoteAdjuster back the #22 unpaid-prebill-relief
@@ -1388,7 +1414,9 @@ func billOnCancel(e *Engine, ctx context.Context, sub domain.Subscription) (int6
 	if err != nil {
 		return 0, err
 	}
-	e.FinishRelief(ctx, sub, r)
+	if err := e.FinishRelief(ctx, sub, r); err != nil {
+		return 0, err
+	}
 	return r.CreditedCents, nil
 }
 
@@ -1398,7 +1426,9 @@ func billOnPlanSwap(e *Engine, ctx context.Context, sub domain.Subscription, at 
 	if err != nil {
 		return 0, err
 	}
-	e.FinishRelief(ctx, sub, r)
+	if err := e.FinishRelief(ctx, sub, r); err != nil {
+		return 0, err
+	}
 	return r.CreditedCents, nil
 }
 
@@ -1416,6 +1446,10 @@ type fakeCreditNoteAdjuster struct {
 	lockedBeforeDrafts []string
 	err                error
 	draftErr           error
+	// issueErr makes Issue fail for a draft id; statusOnGet is what Get then
+	// reads for it (draft when unset).
+	issueErr    map[string]error
+	statusOnGet map[string]domain.CreditNoteStatus
 }
 
 func (a *fakeCreditNoteAdjuster) CreateAndIssueAdjustment(_ context.Context, _, invoiceID string, grossCents int64, _, _ string) (domain.CreditNote, error) {
@@ -1448,8 +1482,20 @@ func (a *fakeCreditNoteAdjuster) CreateAdjustmentDraftTx(_ context.Context, _ *s
 }
 
 func (a *fakeCreditNoteAdjuster) Issue(_ context.Context, _, id string) (domain.CreditNote, error) {
+	if a.issueErr[id] != nil {
+		return domain.CreditNote{}, a.issueErr[id]
+	}
 	a.issued = append(a.issued, id)
-	return domain.CreditNote{ID: id}, nil
+	return domain.CreditNote{ID: id, Status: domain.CreditNoteIssued}, nil
+}
+
+func (a *fakeCreditNoteAdjuster) Get(_ context.Context, _, id string) (domain.CreditNote, error) {
+	for _, got := range a.issued {
+		if got == id {
+			return domain.CreditNote{ID: id, Status: domain.CreditNoteIssued}, nil
+		}
+	}
+	return domain.CreditNote{ID: id, Status: a.statusOnGet[id]}, nil
 }
 
 func (m *mockInvoices) FindBaseInvoiceForPeriod(_ context.Context, tenantID, subscriptionID string, periodStart time.Time) (domain.Invoice, error) {

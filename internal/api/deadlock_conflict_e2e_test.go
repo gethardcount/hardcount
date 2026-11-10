@@ -32,7 +32,7 @@ import (
 // intact: a layer that swallowed it and ran another statement would turn it
 // into 25P02 (transaction aborted), which answers 500.
 //
-// Mutation-verify: drop respond.DeadlockAsConflict from the cancel handler →
+// Mutation-verify: drop respond.ConcurrentChangeAsConflict from the cancel handler →
 // the first answer is a 500, and the same key replays it.
 func TestE2E_CancelDeadlock_AnswersConflict_SameKeyRunsAgain(t *testing.T) {
 	r := newLagRig(t, "in_advance", false)

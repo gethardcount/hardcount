@@ -100,15 +100,30 @@ decide.
 |---|---|---|
 | `already_exists` | A value that must be unique is taken, such as a customer's `external_id`. `param` names it. | Use another value, or read the one that exists |
 | `invalid_state` | The resource is in the wrong state for this action, such as advancing a test clock that is still advancing | Read it, wait or change it, then try again |
-| `concurrent_change` | Postgres stopped the request to break a deadlock with another change to the same records. Only cancel, item changes, record payment, collect, credit-note issue and create with `auto_issue` answer it. | Send the same request again. With an `Idempotency-Key`, the same key works. Some steps stay done (below). |
+| `concurrent_change` | Postgres stopped the request because of another change to the same records: it broke a deadlock, or it ended the request's wait for a lock. Only the routes listed below answer it. | Send the same request again. With an `Idempotency-Key`, the same key works. Some steps stay done (below). |
 | `already_bootstrapped` | `POST /v1/bootstrap` after the first account exists | Do not retry |
 
-After `concurrent_change`, a step that the request saved on its own before
-Postgres stopped it stays done:
+These routes answer `concurrent_change`:
 
-- **Cancel and item changes:** the invoice for a billing period that had
-  already ended. It may already be charged. The request sent again does not
-  bill that period twice.
+- Subscriptions: create, activate, cancel, and add, change or remove an item.
+- Customers: update, and write the billing profile.
+- Invoices: record payment, and collect when it settles the invoice without
+  a card charge.
+- Credit notes: issue, and the issue step of create with `auto_issue`. The
+  create step itself answers `500`.
+
+Postgres ends a wait for a lock only when a `lock_timeout` is set, for
+example on the database user Hardcount runs as. On any other route or step,
+a deadlock or an ended lock wait answers `500` `internal_error`, which an
+`Idempotency-Key` stores ([Idempotency](idempotency.md)).
+
+After `concurrent_change`, a step that the request saved on its own before
+Postgres stopped it stays done. The routes not listed here save nothing
+first:
+
+- **Cancel, and adding, changing or removing an item:** the invoice for a
+  billing period that had already ended. It may already be charged. The
+  request sent again does not bill that period twice.
 - **Collect:** the customer's credit that the request applied to the invoice
   before the settle that Postgres stopped. Sent again, Collect finds nothing
   left due, so it applies no credit and marks the invoice paid.

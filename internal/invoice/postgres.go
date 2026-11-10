@@ -741,6 +741,21 @@ func (s *PostgresStore) FinalizeDraft(ctx context.Context, tenantID, id string, 
 		return domain.Invoice{}, err
 	}
 	defer postgres.Rollback(tx)
+	inv, err := s.FinalizeDraftTx(ctx, tx, tenantID, id, onFinalized)
+	if err != nil {
+		return domain.Invoice{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.Invoice{}, err
+	}
+	return inv, nil
+}
+
+// FinalizeDraftTx is FinalizeDraft on the caller's transaction: the flip, the
+// hook, and the token and invoice.finalized (finalizedTx). A tax retry runs it
+// inside UpdateTaxAtomic's transaction, so the tax write and the finalize
+// commit together. (See ADR-017.) The caller commits.
+func (s *PostgresStore) FinalizeDraftTx(ctx context.Context, tx *sql.Tx, tenantID, id string, onFinalized func(tx *sql.Tx, inv domain.Invoice) error) (domain.Invoice, error) {
 	inv, err := s.updateStatusInTx(ctx, tx, id, domain.InvoiceFinalized)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -748,13 +763,7 @@ func (s *PostgresStore) FinalizeDraft(ctx context.Context, tenantID, id string, 
 	if inv, err = s.runOnFinalizedTx(ctx, tx, inv, onFinalized); err != nil {
 		return domain.Invoice{}, err
 	}
-	if inv, err = s.finalizedTx(ctx, tx, tenantID, inv); err != nil {
-		return domain.Invoice{}, err
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.Invoice{}, err
-	}
-	return inv, nil
+	return s.finalizedTx(ctx, tx, tenantID, inv)
 }
 
 // runOnFinalizedTx runs a finalize hook on the finalize tx and returns the row
@@ -1030,6 +1039,16 @@ func (s *PostgresStore) MarkPaymentFailedReportingTransition(ctx context.Context
 			postgres.NullableString(report.Message), pi, now, id,
 		).Scan(s.scanInvDest(&inv)...)
 	} else {
+		// A failure that ends the attempt the invoice was in flight on
+		// (unknown or processing on this PaymentIntent) frees that attempt's
+		// hold: no claim admits an in-flight invoice, so the hold is its
+		// own. In any other state the hold may be a charger's that has
+		// claimed and not yet stamped, and stays. So does a hold without its
+		// token (an earlier version's), which the stale-hold sweep keeps for
+		// a person. (See ADR-137.)
+		endsInFlightAttempt := holdsThisPI &&
+			(domain.InvoicePaymentStatus(paymentStatus) == domain.PaymentUnknown ||
+				domain.InvoicePaymentStatus(paymentStatus) == domain.PaymentProcessing)
 		err = tx.QueryRowContext(ctx, `
 			UPDATE invoices SET
 				payment_status = 'failed',
@@ -1038,10 +1057,13 @@ func (s *PostgresStore) MarkPaymentFailedReportingTransition(ctx context.Context
 				failure_notified_pi = $1,
 				below_minimum_at = NULL,
 				charge_attempt_seq = charge_attempt_seq + 1,
+				auto_charge_claimed_until = CASE
+					WHEN $5 AND charge_hold_token = auto_charge_claimed_until THEN NULL
+					ELSE auto_charge_claimed_until END,
 				updated_at = $3
 			WHERE id = $4
 			RETURNING `+invCols,
-			pi, postgres.NullableString(report.Message), now, id,
+			pi, postgres.NullableString(report.Message), now, id, endsInFlightAttempt,
 		).Scan(s.scanInvDest(&inv)...)
 	}
 	if err != nil {
@@ -1431,6 +1453,10 @@ func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenant
 			amount_paid_cents = amount_due_cents,
 			amount_due_cents = 0,
 			auto_charge_pending = FALSE,
+			-- A paid invoice admits no charge, so no hold has a use on it:
+			-- the write that pays it frees the hold (a charger between its
+			-- claim and its stamp is refused by the stamp's compare-and-set).
+			auto_charge_claimed_until = NULL,
 			updated_at = $3
 		WHERE id = $4
 		RETURNING `+invCols,
@@ -2074,9 +2100,17 @@ func errLinesChanged() error {
 // (caller surfaces 409), invoice_lines_changed when a line was added after
 // the computation read the invoice, and errs.ErrNotFound when the invoice
 // doesn't exist (caller surfaces 404).
+//
+// then, when not nil, runs on the same transaction after the tax is written
+// and before the commit, with the taxed row; it receives the transaction's
+// ctx. A tax retry finalizes the draft there, so the tax and the finalize
+// commit together or not at all. (See ADR-017.) A then error rolls the tax write
+// back and is returned. After a then, the row is read again on the
+// transaction and that is what is returned.
 func (s *PostgresStore) UpdateTaxAtomic(
 	ctx context.Context, tenantID, invoiceID string,
 	update domain.InvoiceTaxRetryUpdate, lineItems []domain.InvoiceLineItem,
+	then func(ctx context.Context, tx *sql.Tx, taxed domain.Invoice) error,
 ) (domain.Invoice, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -2202,11 +2236,39 @@ func (s *PostgresStore) UpdateTaxAtomic(
 	if err != nil {
 		return domain.Invoice{}, err
 	}
+	if then != nil {
+		if err := then(ctx, tx, inv); err != nil {
+			return domain.Invoice{}, err
+		}
+		if err := tx.QueryRowContext(ctx, `SELECT `+invCols+` FROM invoices WHERE id = $1`, invoiceID).Scan(s.scanInvDest(&inv)...); err != nil {
+			return domain.Invoice{}, fmt.Errorf("read the invoice after its tax write's hook: %w", err)
+		}
+	}
 
 	if err := tx.Commit(); err != nil {
 		return domain.Invoice{}, err
 	}
 	return inv, nil
+}
+
+// RecordTaxRetryAttempt counts a tax retry whose write was rolled back
+// because the finalize that rode on it failed (UpdateTaxAtomic's then). The
+// row is still a draft with tax pending, as it was before the try. Adding the
+// try to tax_retry_count and moving tax_next_retry_at keeps the 8-try cap and
+// the backoff in force, so the row does not head the tax_retry sweep's page
+// on every tick. A row that is no longer a draft with tax pending is left
+// alone, and that is not an error.
+func (s *PostgresStore) RecordTaxRetryAttempt(ctx context.Context, tenantID, invoiceID string, nextRetryAt *time.Time) error {
+	return s.db.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+			UPDATE invoices
+			   SET tax_retry_count = tax_retry_count + 1,
+			       tax_next_retry_at = $2,
+			       updated_at = $3
+			 WHERE id = $1 AND status = 'draft' AND tax_status = 'pending'`,
+			invoiceID, postgres.NullableTime(nextRetryAt), clock.Now(ctx))
+		return err
+	})
 }
 
 // CreateWithLineItems creates an invoice and all its line items in a single
@@ -2447,12 +2509,11 @@ func lockInvoiceForChargeClaim(ctx context.Context, tx *sql.Tx, id string) (bool
 }
 
 // chargeHoldFree is the claim predicate on the hold (ADR-127): only a NULL
-// hold is free. An expired hold is NOT free — it means a charge may have been
-// sent and its result was not saved, and only the stale-hold sweep, after
-// asking Stripe, may clear it. Before ADR-127 the claims took an expired hold
-// as free (`IS NULL OR < now()`), so an interrupted charge left the invoice
-// looking exactly like one never charged and the next initiator charged it
-// again (#976). Shared by every claim so they cannot drift apart.
+// hold is free. An expired hold is NOT free: a charge may have been sent and
+// its result not saved. The stale-hold sweep clears it, or the settle that
+// records the result (ADR-137). A claim that took an expired hold as free
+// would charge again an invoice whose charge was interrupted (#976). Shared
+// by every claim so they cannot drift apart.
 const chargeHoldFree = `auto_charge_claimed_until IS NULL`
 
 // chargeHoldReleaseTimeout bounds a release detached from its caller's
@@ -2626,40 +2687,6 @@ func (s *PostgresStore) EndUnstampedAttempt(ctx context.Context, tenantID, id st
 			"invoice_id", id, "error", err)
 	}
 	return s.ReleaseChargeHold(ctx, tenantID, id, hold)
-}
-
-// ReleaseRetryChargeHoldTx frees the charge hold a dunning retry kept while
-// its payment was processing, once that payment has failed (#1289). It runs
-// on the failure settle's transaction (MarkPaymentFailedReportingTransition's
-// hook), which holds the invoice's row lock, and only for the PaymentIntent
-// the invoice now records as failed.
-//
-// Why the hold is that retry's: until this transaction the invoice was
-// processing on paymentIntentID, and no claim admits a processing invoice, so
-// no other owner can have taken a hold since the retry's. The one other
-// writer of a hold in that state is the stale-hold sweep, which looks only at
-// holds that ended at least domain.StaleChargeHoldWait ago, so this releases
-// only a hold younger than that, which the sweep has not looked at. An older
-// one stays for the sweep,
-// whose next check clears it. Reports whether it released. No updated_at
-// write (see ClaimAutoCharge).
-func (s *PostgresStore) ReleaseRetryChargeHoldTx(ctx context.Context, tx *sql.Tx, invoiceID, paymentIntentID string) (bool, error) {
-	if paymentIntentID == "" {
-		return false, nil
-	}
-	res, err := tx.ExecContext(ctx, `
-		UPDATE invoices SET auto_charge_claimed_until = NULL
-		WHERE id = $1 AND stripe_payment_intent_id = $2 AND payment_status = 'failed'
-		  AND auto_charge_claimed_until > now() - make_interval(secs => $3)`,
-		invoiceID, paymentIntentID, domain.StaleChargeHoldWait.Seconds())
-	if err != nil {
-		return false, fmt.Errorf("release the retry's charge hold: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return n == 1, nil
 }
 
 // ChargeHeldTx reports the invoice's hold: none, live, or stale (ADR-127),
@@ -3099,6 +3126,29 @@ func notPausedForCollection(alias, at string) string {
 			   AND ps.pause_collection_behavior IS NOT NULL
 			   AND (ps.pause_collection_resumes_at IS NULL OR ps.pause_collection_resumes_at > ` + at + `)
 		)`
+}
+
+// CollectionPausedTx reports, on the caller's transaction, whether the
+// invoice's subscription has pause_collection in force at `at` (the same
+// predicate as the sweeps, notPausedForCollection). An invoice with no
+// subscription, or whose subscription is gone, is not paused. A tax retry
+// reads it inside UpdateTaxAtomic's transaction before it finalizes: a paused
+// subscription keeps its invoices as drafts.
+//
+// It takes no lock on the subscription. A cancel locks the subscription and
+// then its invoices; this transaction already holds the invoice row, so a
+// lock here would take the two in the other order.
+func (s *PostgresStore) CollectionPausedTx(ctx context.Context, tx *sql.Tx, invoiceID string, at time.Time) (bool, error) {
+	var notPaused bool
+	err := tx.QueryRowContext(ctx, `SELECT `+notPausedForCollection("i", "$2::timestamptz")+` FROM invoices i WHERE i.id = $1`,
+		invoiceID, at).Scan(&notPaused)
+	if err == sql.ErrNoRows {
+		return false, errs.ErrNotFound
+	}
+	if err != nil {
+		return false, fmt.Errorf("read the subscription's pause_collection: %w", err)
+	}
+	return !notPaused, nil
 }
 
 // ListAutoChargePending returns one page of invoices queued for the
