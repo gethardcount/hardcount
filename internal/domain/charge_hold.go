@@ -64,7 +64,11 @@ const (
 //     StaleChargeHoldWait ago, and the unknown sweep only at invoices whose
 //     hold has ended. Neither needs the wait for safety: the stamp and the
 //     clear are compare-and-sets on one row, and Stripe refuses a confirm on a
-//     canceled PaymentIntent (ADR-137).
+//     canceled PaymentIntent (ADR-137). StaleChargeHoldWait is kept from the
+//     one-call charge, where it gave the charge's webhook time to arrive
+//     before the sweep asked Stripe. Today it only lets a slow charger's own
+//     release land first, and delays the next charge of a stopped one by up
+//     to ten minutes; removing it is a follow-up.
 const (
 	ChargeHoldTTL       = 5 * time.Minute
 	ChargeSendMargin    = 2 * time.Minute

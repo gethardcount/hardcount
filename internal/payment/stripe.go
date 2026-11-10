@@ -257,9 +257,7 @@ type PaymentIntentResult struct {
 	Status       string
 	ClientSecret string
 	// CreatedAt is the PI's Stripe-side creation instant (unix seconds).
-	// Populated by the List read, so the stale-hold sweep orders the payments
-	// it finds (oldest succeeded first, newest processing adopted) on
-	// provider truth, not result order. Zero when unset.
+	// Populated by the read. Zero when unset.
 	CreatedAt int64
 	// Purpose is the hardcount_purpose PI metadata (e.g. "dunning_retry",
 	// "hosted_invoice_pay"). Populated by GetPaymentIntent so the reconciler
@@ -297,18 +295,14 @@ type PaymentIntentResult struct {
 	// (cardErrorMessage), for the customer's payment-failed email.
 	CardMessage string
 	// InvoiceID is the hardcount_invoice_id metadata every Hardcount PaymentIntent
-	// carries (the off-session charge and the hosted page alike). The
-	// stale-hold sweep matches on it. Populated by the read paths.
+	// carries (the off-session charge and the hosted page alike). Populated
+	// by the read paths.
 	InvoiceID string
 	// TenantID is the hardcount_tenant_id metadata, which every Hardcount
 	// PaymentIntent carries beside InvoiceID. Populated by the read paths.
 	// A refund of another tenant's payment on a shared Stripe account is
 	// told apart by it (unmatchedRefund).
 	TenantID string
-	// FullyRefunded is set when the PaymentIntent's latest charge was
-	// refunded in full (list with expand[]=data.latest_charge). The
-	// stale-hold sweep does not count such a payment as paying the invoice.
-	FullyRefunded bool
 	// Charged is set when the PaymentIntent has a charge (latest_charge): some
 	// confirm reached the card network, whatever its result. A canceled
 	// PaymentIntent without one never asked a bank for money, so ending it
@@ -376,6 +370,12 @@ type InvoiceUpdater interface {
 	// retry held the hold 5 wall-minutes, starving every later same-advance
 	// retry in test-clock catchup ("dunning catchup loop made no progress").
 	ReleaseChargeHold(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error
+	// EndUnstampedAttempt ends an attempt whose PaymentIntent was created
+	// but not put on the invoice: on an invoice still open it clears the
+	// caller's hold and moves the charge counter in one compare-and-set, so
+	// the next charge sends a fresh key; otherwise it only clears the
+	// caller's hold (ADR-137).
+	EndUnstampedAttempt(ctx context.Context, tenantID, id string, hold domain.ChargeHold, attemptSeq int64) error
 	// ConfirmChargeHold is the re-check right before a charge is sent: the
 	// caller's hold is still its own with domain.ChargeSendMargin left, the
 	// charge counter is unchanged, and the invoice is still finalized and
@@ -967,19 +967,34 @@ func (s *Stripe) beforeConfirmError(ctx context.Context, tenantID string, inv do
 		// hold and moves the counter, so the next charge sends a new key. An
 		// unconfirmed PaymentIntent the create may have left at Stripe can
 		// take no money: only one stamped on the invoice is ever confirmed.
-		// Anything else (credentials unreadable, a 429, a stamp that did not
-		// apply) releases the hold: the same key returns the same
-		// unconfirmed PaymentIntent next time.
+		//
+		// A stamp that did not apply ends the attempt: the hold is cleared
+		// and the counter moved together, so the next charge sends a new key.
+		// The stamp is refused when the amount due changed since the charge
+		// read the invoice (a credit note), and the old key with the new
+		// amount would be answered with an idempotency error, which reads as
+		// an unclear charge. The PaymentIntent the create made stays
+		// unconfirmed at Stripe and takes no money. It is not canceled here:
+		// another charger that claimed after this one's hold ended can have
+		// been handed the same PaymentIntent under the same key.
+		//
+		// Anything else (credentials unreadable, a 429) releases the hold:
+		// nothing reached Stripe under the key.
 		var pe *PaymentError
-		if !errors.As(err, &pe) || !pe.Unknown {
-			s.releaseUnsentHold(ctx, tenantID, inv.ID, hold, "nothing confirmed")
-		}
-		if errors.Is(err, errStampFailed) {
+		switch {
+		case errors.Is(err, errStampFailed):
+			if eerr := s.invoices.EndUnstampedAttempt(ctx, tenantID, inv.ID, hold, inv.ChargeAttemptSeq); eerr != nil {
+				slog.WarnContext(ctx, "could not end a charge attempt that confirmed nothing — the invoice waits for the stale-hold sweep",
+					"invoice_id", inv.ID, "error", eerr)
+			}
 			// The stamp is required before any confirm: one failing on every
 			// attempt would leave the invoice uncharged, so it is a warning.
 			slog.WarnContext(ctx, "charge stopped before its confirm: the PaymentIntent could not be put on the invoice; nothing was charged",
 				"invoice_id", inv.ID, "error", err)
-		} else {
+		case !errors.As(err, &pe) || !pe.Unknown:
+			s.releaseUnsentHold(ctx, tenantID, inv.ID, hold, "nothing confirmed")
+			slog.InfoContext(ctx, "charge stopped before its confirm; nothing was charged", "invoice_id", inv.ID, "error", err)
+		default:
 			slog.InfoContext(ctx, "charge stopped before its confirm; nothing was charged", "invoice_id", inv.ID, "error", err)
 		}
 		return ErrPaymentTransient
@@ -1018,10 +1033,11 @@ func (s *Stripe) beforeConfirmError(ctx context.Context, tenantID string, inv do
 //   - A decline: Stripe answered, so it is reported through SettleFailed, the
 //     primitive its webhook and the reconciler also report through, which
 //     records it and notifies once between them. The hold is released.
-//   - Stripe refused the confirm request itself (an invalid request that
-//     names no PaymentIntent): a definite failure nothing will report, so the
-//     invoice is stamped failed with no PaymentIntent, as for a refused
-//     create, and the unconfirmed PaymentIntent is canceled.
+//   - Stripe refused the confirm request itself (an invalid request, not a
+//     bank's answer; ConfirmPaymentIntent names the PaymentIntent only on a
+//     card error): a definite failure nothing will report, so the invoice is
+//     stamped failed with no PaymentIntent, as for a refused create, and the
+//     unconfirmed PaymentIntent is canceled.
 //   - Anything else (a timeout, a 500, a 409, a 429, a refused key, a caller
 //     cancelled): no answer about the payment. Nothing is written: the invoice
 //     already says so, the hold stays until it ends, and the unknown sweep
@@ -1085,7 +1101,11 @@ func (s *Stripe) afterConfirmError(ctx context.Context, tenantID string, ce *con
 		chargedCard{paymentMethodID: stripePaymentMethodID})
 	mw.RecordPaymentCharge("failed")
 	if ke != nil {
-		return ce.Err
+		// Still the key error (it must not count as a Stripe failure in the
+		// breaker every tenant shares), but one that says the invoice is no
+		// longer as it was: it is unknown on the PaymentIntent, and
+		// collecting again is refused until the payment has been read.
+		return &StripeKeyError{Reason: ke.Reason, Message: ke.Message, AtConfirm: true}
 	}
 	return fmt.Errorf("payment state unknown: %w", unknown)
 }

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/creditnote"
 	"github.com/gethardcount/hardcount/internal/domain"
 )
 
@@ -148,5 +149,96 @@ func TestTwoStep_StalledChargersLateNote_DoesNotReopenAClosedAttempt(t *testing.
 	}
 	if got := r.get(inv.ID); got.PaymentStatus != domain.PaymentPending {
 		t.Errorf("invoice %s, want pending (the late answer must not move it)", got.PaymentStatus)
+	}
+}
+
+// afterCreateHook runs hook once, right after Stripe has answered the create
+// and before the charger stamps the invoice: something that changes the
+// invoice in between.
+type afterCreateHook struct {
+	*fakeStripe
+	hook func()
+}
+
+func (c *afterCreateHook) CreateUnconfirmedPaymentIntent(ctx context.Context, p PaymentIntentParams) (PaymentIntentResult, error) {
+	res, err := c.fakeStripe.CreateUnconfirmedPaymentIntent(ctx, p)
+	if h := c.hook; h != nil && err == nil {
+		c.hook = nil
+		h()
+	}
+	return res, err
+}
+
+// A credit note is issued between the charge's read of the invoice and its
+// stamp (a credit note does not read the charge hold). The PaymentIntent was
+// created for the old amount, so the stamp must not apply and nothing may be
+// confirmed: the stamp's amount predicate is the only thing that stops a
+// charge of the amount before the credit note.
+//
+// The attempt ends there: the hold is cleared and the counter moved, so the
+// next charge creates a new PaymentIntent for the reduced amount under a new
+// key. Under the old key Stripe answers "same key, other parameters", which
+// reads as an unclear charge: the hold was kept, the invoice waited for the
+// stale-hold sweep, and the breaker every tenant shares counted a failure.
+func TestTwoStep_CreditNoteBeforeTheStamp_NothingConfirmed_ThenTheNewAmountOnce(t *testing.T) {
+	r := newTwoStepRig(t, "CN Before Stamp")
+	inv := r.seed("INV-CN-STAMP")
+	const credit = 4000
+	notes := creditnote.NewPostgresStore(r.db)
+	issuer := creditnote.NewService(notes, r.invoices, nil)
+	hooked := &afterCreateHook{fakeStripe: r.fake}
+	hooked.hook = func() {
+		cn, err := notes.Create(r.ctx, r.tenantID, domain.CreditNote{
+			InvoiceID: inv.ID, CustomerID: inv.CustomerID, CreditNoteNumber: "CN-STAMP-1",
+			Status: domain.CreditNoteDraft, Reason: "fraudulent",
+			SubtotalCents: credit, TotalCents: credit, Currency: "USD", RefundStatus: domain.RefundNone,
+		})
+		if err != nil {
+			t.Fatalf("create credit note: %v", err)
+		}
+		if _, err := issuer.Issue(r.ctx, r.tenantID, cn.ID); err != nil {
+			t.Fatalf("issue credit note inside the create: %v", err)
+		}
+	}
+	r.rewire(hooked)
+
+	_, err := r.chargeAs(r.ctx, autoCharge, inv.ID, "pm_card_1")
+	if !errors.Is(err, ErrPaymentTransient) || IsUnknownPaymentFailure(err) {
+		t.Fatalf("charge 1: err = %v (counts as a Stripe failure: %v), want a skipped charge that counts as none", err, IsUnknownPaymentFailure(err))
+	}
+	if r.fake.confirms != 0 {
+		t.Fatalf("confirms = %d: a PaymentIntent for the amount before the credit note was confirmed", r.fake.confirms)
+	}
+	first := r.fake.onlyPI()
+	got := r.get(inv.ID)
+	if got.PaymentStatus != domain.PaymentPending || got.StripePaymentIntentID != "" || got.AmountDueCents != shDue-credit {
+		t.Fatalf("after charge 1: %s on %q with %d due, want pending on no PaymentIntent with %d due", got.PaymentStatus, got.StripePaymentIntentID, got.AmountDueCents, shDue-credit)
+	}
+	if h := r.hold(inv.ID); h != nil {
+		t.Fatalf("the hold of an attempt that confirmed nothing is still set (%v): the invoice waits for the stale-hold sweep", h)
+	}
+	if got.ChargeAttemptSeq != inv.ChargeAttemptSeq+1 {
+		t.Fatalf("charge counter = %d, want %d: the next charge would reuse the key with another amount", got.ChargeAttemptSeq, inv.ChargeAttemptSeq+1)
+	}
+
+	paid, err := r.chargeAs(r.ctx, autoCharge, inv.ID, "pm_card_1")
+	if err != nil {
+		t.Fatalf("charge 2: %v (counts as a Stripe failure: %v), want the reduced amount charged", err, IsUnknownPaymentFailure(err))
+	}
+	if paid.Status != domain.InvoicePaid {
+		t.Fatalf("after charge 2: status %s, want paid", paid.Status)
+	}
+	if r.fake.creates != 2 || r.fake.countPIs() != 2 {
+		t.Fatalf("creates = %d, PaymentIntents = %d, want 2 and 2: one create per key", r.fake.creates, r.fake.countPIs())
+	}
+	second := r.fake.pi(paid.StripePaymentIntentID)
+	if second.id == first.id || second.amount != shDue-credit || second.status != "succeeded" {
+		t.Fatalf("the paying PaymentIntent is %s for %d (%s), want a new one for %d, succeeded", second.id, second.amount, second.status, shDue-credit)
+	}
+	if st := r.fake.pi(first.id).status; st != "requires_confirmation" {
+		t.Fatalf("the first PaymentIntent is %s, want it never confirmed", st)
+	}
+	if ids := r.succeededFor(inv.ID); len(ids) != 1 || ids[0] != second.id {
+		t.Fatalf("PaymentIntents that took money = %v, want only %s", ids, second.id)
 	}
 }

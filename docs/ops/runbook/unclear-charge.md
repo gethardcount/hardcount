@@ -332,7 +332,7 @@ Earlier Hardcount versions charged in one call, and saved nothing before the
 charge reached Stripe. Such a charge could leave an invoice with a charge
 hold, or parked (next section). The upgrade to this version refuses to run
 while any exists
-([Upgrade Hardcount](../../upgrades.md#migration-00224-finish-charges-first)).
+([Upgrade Hardcount](../../upgrades.md#migration-00225-finish-charges-first)).
 So you see this case only when a copy of an earlier version ran against the
 upgraded database.
 

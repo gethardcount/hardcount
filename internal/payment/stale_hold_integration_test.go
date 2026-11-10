@@ -647,7 +647,12 @@ func TestStaleHold_WhatTheSweepFinds(t *testing.T) {
 		}
 	})
 
-	t.Run("succeeded but fully refunded: not counted as paying the invoice", func(t *testing.T) {
+	// A payment that succeeded pays the invoice, whichever of the sweep and
+	// its webhook records it first. One refunded at Stripe before the sweep
+	// read it is still that payment: the refund is recorded by its own
+	// webhook as a refund made in Stripe (ADR-134). Counting it as no payment
+	// charged the customer again, and depended on which of the two came first.
+	t.Run("succeeded, then refunded in full at Stripe: still recorded as the payment, never charged again", func(t *testing.T) {
 		r := newSHRig(t, "SH Found Refunded")
 		inv := r.seed("INV-SH-REFUNDED")
 		pi := r.crashAfterCharge(inv, autoCharge, "")
@@ -655,12 +660,11 @@ func TestStaleHold_WhatTheSweepFinds(t *testing.T) {
 		r.ageHold(inv.ID, staleSweepAge)
 		r.runClean()
 		got := r.get(inv.ID)
-		if got.Status != domain.InvoiceFinalized || got.PaymentStatus != domain.PaymentPending {
-			t.Fatalf("after the sweep: %s/%s, want finalized/pending: a refunded payment does not pay the invoice", got.Status, got.PaymentStatus)
+		if got.Status != domain.InvoicePaid || got.PaymentStatus != domain.PaymentSucceeded || got.StripePaymentIntentID != pi.id {
+			t.Fatalf("after the sweep: %s/%s on %q, want paid/succeeded on %s", got.Status, got.PaymentStatus, got.StripePaymentIntentID, pi.id)
 		}
-		if r.hold(inv.ID) != nil || got.ChargeAttemptSeq != inv.ChargeAttemptSeq+1 {
-			t.Errorf("after the sweep: hold %v seq %d, want treated as nothing at Stripe: cleared, seq %d",
-				r.hold(inv.ID), got.ChargeAttemptSeq, inv.ChargeAttemptSeq+1)
+		if n := r.fake.countPIs(); n != 1 {
+			t.Fatalf("PaymentIntents at Stripe = %d, want 1: the customer was charged again", n)
 		}
 	})
 }

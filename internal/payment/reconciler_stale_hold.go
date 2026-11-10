@@ -106,7 +106,7 @@ func (r *Reconciler) checkStaleHold(ctx context.Context, h domain.StaleChargeHol
 	ctx = auth.WithTenantID(ctx, inv.TenantID)
 	if !h.Tokened || inv.Parked() {
 		// Left by the one-call version (no current charge parks an invoice).
-		// The upgrade's migration refuses to run while any exists (00224), so
+		// The upgrade's migration refuses to run while any exists (00225), so
 		// this is a fail-safe for one that got past it.
 		return r.earlierVersionHold(ctx, h)
 	}
@@ -116,7 +116,7 @@ func (r *Reconciler) checkStaleHold(ctx context.Context, h domain.StaleChargeHol
 // earlierVersionHold handles a hold without its token, or a park: left by the
 // one-call version, whose charge put nothing on the invoice before it reached
 // Stripe, so Hardcount's records cannot say whether it took money. The
-// upgrade's migration refuses to run while any exists (00224); this is the
+// upgrade's migration refuses to run while any exists (00225); this is the
 // fail-safe for one that got past it (an old version still running against
 // the new schema). Never cleared on a guess: kept and reported on the open
 // invoice, whose charges stay blocked, for a person to check the customer's

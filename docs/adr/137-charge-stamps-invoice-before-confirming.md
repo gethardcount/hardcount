@@ -86,7 +86,7 @@ without its token, or a park, was left by the one-call version: kept and
 reported, never resolved on a guess.
 
 Write-off is allowed on any `unknown` invoice while no charge holds it.
-Migration 00224 adds the token column and refuses to run while any invoice
+Migration 00225 adds the token column and refuses to run while any invoice
 still open has a charge hold or a parked charge from the previous version.
 
 ## Why this design
@@ -185,7 +185,7 @@ gives no cancel.
 ## References
 
 - ADR-001, ADR-068, ADR-105, ADR-107, ADR-117, ADR-127.
-- Migration 00224 (`charge_hold_token`, the upgrade check).
+- Migration 00225 (`charge_hold_token`, the upgrade check).
 - [Stripe: advanced error handling](https://docs.stripe.com/error-low-level)
 - [Stripe: PaymentIntent lifecycle](https://docs.stripe.com/payments/paymentintents/lifecycle)
 - Provider research, 2026-11-10: Razorpay, Cashfree, Juspay, PayU, PayPal,

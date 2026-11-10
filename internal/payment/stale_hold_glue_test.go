@@ -2,7 +2,6 @@ package payment
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/gethardcount/hardcount/internal/domain"
 )
@@ -44,11 +43,10 @@ func (r *shRig) release(c chargeClaim, invoiceID string) error {
 }
 
 // setFakeListFields fills what the read reports beyond the common
-// PaymentIntent fields: the invoice it is for, whether its charge was refunded
-// in full, and whether any confirm reached a bank.
+// PaymentIntent fields: the invoice it is for, and whether any confirm reached
+// a bank.
 func setFakeListFields(res *PaymentIntentResult, pi *fakePI) {
 	res.InvoiceID = pi.invoiceID
-	res.FullyRefunded = pi.refunded
 	// A charge exists once a confirm reached the card network: it succeeded,
 	// is processing, or was declined (and may since have been canceled).
 	res.Charged = pi.status == "succeeded" || pi.status == "processing" || pi.declineCode != "" || pi.refunded
@@ -56,11 +54,11 @@ func setFakeListFields(res *PaymentIntentResult, pi *fakePI) {
 
 // fakeAuthFailedErr is LiveStripeClient's error for a rejected API key.
 func fakeAuthFailedErr() error {
-	return fmt.Errorf("%w: %w", ErrStripeAuthFailed, &PaymentError{Message: "Invalid API Key provided"})
+	return &PaymentError{Message: "Invalid API Key provided"}
 }
 
 // fakeUnreachableErr is LiveStripeClient's error for a read Stripe never
 // answered: a network error, or the caller's time limit.
 func fakeUnreachableErr(cause string) error {
-	return fmt.Errorf("%w: %w", ErrStripeUnreachable, &PaymentError{Message: cause, Unknown: true})
+	return &PaymentError{Message: cause, Unknown: true}
 }

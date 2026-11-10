@@ -86,28 +86,48 @@ func (failPendingSave) StampPendingConfirm(context.Context, string, domain.Invoi
 }
 
 // A failed pending save stops the charge before the confirm: nothing is
-// confirmed, the hold is released, and the retry gets the same PaymentIntent
-// back, saves it and confirms it. One PaymentIntent in all.
+// confirmed, and the attempt is over. The hold is released and the counter
+// moved together, so the retry creates a new PaymentIntent under a new key
+// and confirms that one. The first stays unconfirmed at Stripe and takes no
+// money. (The old key is not reused: the charger cannot tell why its stamp
+// failed, and a key whose amount has changed since is answered by Stripe as
+// an unclear charge.)
 func TestTwoStep_PendingSaveFails_NoConfirmSent(t *testing.T) {
 	r := newSHRig(t, "TS Save Fails")
 	inv := r.seed("INV-TS-SAVEFAIL")
 	r.stripe.invoices = failPendingSave{InvoiceUpdater: r.invoices}
 	_, err := r.chargeAs(r.ctx, autoCharge, inv.ID, "pm_card_1")
 	r.stripe.invoices = r.invoices
-	if !errors.Is(err, ErrPaymentTransient) {
-		t.Fatalf("err = %v, want ErrPaymentTransient (nothing confirmed)", err)
+	if !errors.Is(err, ErrPaymentTransient) || IsUnknownPaymentFailure(err) {
+		t.Fatalf("err = %v, want ErrPaymentTransient (nothing confirmed), not counted as a Stripe failure", err)
 	}
 	if r.fake.confirms != 0 {
 		t.Fatalf("confirms = %d after the pending save failed, want 0", r.fake.confirms)
 	}
-	if got := r.get(inv.ID); got.PaymentStatus != domain.PaymentPending || got.ChargeAttemptSeq != inv.ChargeAttemptSeq || r.hold(inv.ID) != nil {
-		t.Fatalf("after the failed save: %s seq %d hold %v, want pending, seq %d, hold released", got.PaymentStatus, got.ChargeAttemptSeq, r.hold(inv.ID), inv.ChargeAttemptSeq)
+	if got := r.get(inv.ID); got.PaymentStatus != domain.PaymentPending || got.ChargeAttemptSeq != inv.ChargeAttemptSeq+1 || r.hold(inv.ID) != nil {
+		t.Fatalf("after the failed save: %s seq %d hold %v, want pending, seq %d, hold released", got.PaymentStatus, got.ChargeAttemptSeq, r.hold(inv.ID), inv.ChargeAttemptSeq+1)
 	}
 	first := r.fake.onlyPI()
-	if _, err := r.chargeAs(r.ctx, autoCharge, inv.ID, "pm_card_1"); err != nil {
+	paid, err := r.chargeAs(r.ctx, autoCharge, inv.ID, "pm_card_1")
+	if err != nil {
 		t.Fatalf("retry: %v", err)
 	}
-	r.assertPaidOnce(inv.ID, first.id)
+	if paid.StripePaymentIntentID == first.id || r.fake.countPIs() != 2 {
+		t.Fatalf("the retry paid on %s with %d PaymentIntents at Stripe, want a new one (2 in all)", paid.StripePaymentIntentID, r.fake.countPIs())
+	}
+	if st := r.fake.pi(first.id).status; st != "requires_confirmation" {
+		t.Fatalf("the first PaymentIntent is %s, want it never confirmed", st)
+	}
+	got := r.get(inv.ID)
+	if got.Status != domain.InvoicePaid || got.AmountPaidCents != shDue || r.hold(inv.ID) != nil {
+		t.Fatalf("after the retry: %s with %d paid, hold %v; want paid in full and no hold", got.Status, got.AmountPaidCents, r.hold(inv.ID))
+	}
+	if ids := r.succeededFor(inv.ID); len(ids) != 1 || ids[0] != paid.StripePaymentIntentID {
+		t.Fatalf("PaymentIntents that took money = %v, want only %s", ids, paid.StripePaymentIntentID)
+	}
+	if n := r.events(domain.EventPaymentSucceeded, inv.ID); n != 1 {
+		t.Errorf("payment.succeeded rows = %d, want 1", n)
+	}
 }
 
 // A confirm that fails before it is sent (the credentials could not be read)
@@ -342,13 +362,13 @@ func (c *createFailer) CreateUnconfirmedPaymentIntent(ctx context.Context, p Pay
 	return c.fakeStripe.CreateUnconfirmedPaymentIntent(ctx, p)
 }
 
-// upgradeCheck runs migration 00224's upgrade check against the test
+// upgradeCheck runs migration 00225's upgrade check against the test
 // database, as the migration does before adding its columns, inside a
 // transaction that is rolled back: setup runs first in it, so the test
 // database (shared with other runs) is never changed.
 func (r *shRig) upgradeCheck(setup ...string) error {
 	r.t.Helper()
-	raw, err := os.ReadFile("../platform/migrate/sql/00224_charge_hold_token.sql")
+	raw, err := os.ReadFile("../platform/migrate/sql/00225_charge_hold_token.sql")
 	if err != nil {
 		r.t.Fatalf("read the migration: %v", err)
 	}
@@ -373,7 +393,11 @@ func (r *shRig) upgradeCheck(setup ...string) error {
 }
 
 // The upgrade refuses to run over a charge hold or a parked charge the
-// previous version left, and runs once there are none.
+// previous version left, on an open invoice or a written-off one, and runs
+// once there are none. The previous version still settles those on a
+// written-off invoice (it records a payment it finds, and ends a park); this
+// version does not, so a written-off park that got past the check would stay
+// parked for good, with its credit note drafts waiting.
 func TestUpgradeCheck_RefusesEarlierVersionHoldsAndParks(t *testing.T) {
 	r := newSHRig(t, "Upgrade Check")
 	inv := r.seed("INV-UP-CHECK")
@@ -387,13 +411,19 @@ func TestUpgradeCheck_RefusesEarlierVersionHoldsAndParks(t *testing.T) {
 		{"a parked charge", `payment_status = 'unknown', stripe_payment_intent_id = NULL`},
 	} {
 		err := r.upgradeCheck(none, `UPDATE invoices SET `+tc.set+` WHERE id = '`+inv.ID+`'`)
-		if err == nil || !strings.Contains(err.Error(), "Hardcount upgrade stopped: 1 invoice(s)") {
+		if err == nil || !strings.Contains(err.Error(), "Hardcount upgrade stopped: 1 open or written-off invoice(s)") {
 			t.Errorf("with %s: err = %v, want the upgrade stopped", tc.name, err)
 		}
-		// On an invoice no longer open nothing charges again: it does not
-		// block the upgrade (review 3), and this version clears its hold.
-		if err := r.upgradeCheck(none, `UPDATE invoices SET `+tc.set+`, status = 'uncollectible' WHERE id = '`+inv.ID+`'`); err != nil {
-			t.Errorf("with %s on a written-off invoice: %v, want the upgrade to run", tc.name, err)
+		err = r.upgradeCheck(none, `UPDATE invoices SET `+tc.set+`, status = 'uncollectible' WHERE id = '`+inv.ID+`'`)
+		if err == nil || !strings.Contains(err.Error(), "Hardcount upgrade stopped: 1 open or written-off invoice(s)") {
+			t.Errorf("with %s on a written-off invoice: err = %v, want the upgrade stopped", tc.name, err)
+		}
+		// On a paid or voided invoice nothing is left to settle: it does not
+		// block the upgrade, and this version clears its hold.
+		for _, closed := range []string{"paid", "voided"} {
+			if err := r.upgradeCheck(none, `UPDATE invoices SET `+tc.set+`, status = '`+closed+`' WHERE id = '`+inv.ID+`'`); err != nil {
+				t.Errorf("with %s on a %s invoice: %v, want the upgrade to run", tc.name, closed, err)
+			}
 		}
 	}
 }

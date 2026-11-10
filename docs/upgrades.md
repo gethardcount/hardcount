@@ -21,9 +21,9 @@ only way back.
    `no migration record`, stop: the upgrade will not run
    ([why](ops/runbook/migration-failed-midway.md#tables-but-no-migration-record)).
 
-### Migration 00224: finish charges first
+### Migration 00225: finish charges first
 
-The release with migration `00224_charge_hold_token` changes how a charge
+The release with migration `00225_charge_hold_token` changes how a charge
 reaches Stripe: each charge puts its Stripe payment on the invoice before
 any money moves ([ADR-137](adr/137-charge-stamps-invoice-before-confirming.md)). The
 migration refuses to run while any invoice has a charge in progress or a
