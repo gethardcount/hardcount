@@ -19152,7 +19152,11 @@ paths:
           description: |
             `currency` is not the customer's (code
             `customer_currency_conflict`). The message names the billing
-            profile or subscription plan currency it conflicts with.
+            profile or subscription plan currency it conflicts with. Code
+            `concurrent_change`: Postgres stopped the create because of
+            another change to the same records (it broke a deadlock, or ended
+            a wait for a lock); nothing was created, so send the same request
+            again, with the same `Idempotency-Key`.
           content:
             application/json:
               schema:
