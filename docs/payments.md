@@ -52,7 +52,10 @@ Hardcount charges cards with Stripe PaymentIntents.
    - A charge that stops after its PaymentIntent is on the invoice, with no
      definite answer, keeps its charge hold until the 5 minutes end. The
      invoice is `unknown`, so nothing charges it, and the reconciler reads
-     the PaymentIntent once the charge hold has ended (rule 5).
+     the PaymentIntent once the charge hold has ended (rule 5). A webhook
+     that reports the payment paid or failed in the meantime frees the
+     charge hold with the result, so the hosted page, **Collect payment**,
+     void and offline payment work again at once.
    - A charge that stops before that, after a crash or an unclear answer to
      the create, leaves its charge hold set on a `pending` or `failed`
      invoice after the 5 minutes.

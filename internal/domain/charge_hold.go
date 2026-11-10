@@ -17,8 +17,12 @@ import (
 //     the invoice, as an unknown outcome, before it confirms (ADR-137).
 //
 // While the hold is set, nothing but its owner takes the hold, charges, or
-// does anything irreversible. Only the owner clears its own hold, by
-// comparing the value it wrote. Only the stale-hold sweep (payment.Reconciler)
+// does anything irreversible. The owner clears its own hold, by comparing
+// the value it wrote. The write that ends the attempt the hold belongs to
+// clears it too: a settle that marks the invoice paid, or one that marks it
+// failed while it was in flight (unknown or processing) on that attempt's
+// PaymentIntent. No claim admits an in-flight invoice, so a hold on one is
+// its attempt's. Otherwise only the stale-hold sweep (payment.Reconciler)
 // clears a stale hold; it needs no answer from Stripe to do so.
 // Write-off is the one action allowed on a stale hold: it moves no money.
 //

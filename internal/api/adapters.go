@@ -615,10 +615,10 @@ func definiteRetryFailure(err error) *dunning.RetryError {
 //     first. The result is a definite decline, built from that attempt's own
 //     row (its decline code gives the Ask), so dunning counts it and warns
 //     as for any decline. The invoice's last_payment_error is never the
-//     reason. The round trip is over, so the hold is released (release, by
-//     its token), as for a decline the charge itself answered. If the hold
-//     were kept, the next retry and the final action would wait for the
-//     stale-hold sweep.
+//     reason. The round trip is over. The failure settle freed the hold
+//     with the write that recorded the failure, so release (by the hold's
+//     token) normally finds nothing to do; it stays for a hold the settle
+//     left.
 //   - Anything else (pending, void, written off): a loud error, which
 //     RetryPayment turns into an uncounted skip. The next tick reads the
 //     invoice again.

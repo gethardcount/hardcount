@@ -54,6 +54,7 @@ original text.
 
 ### Fixed
 
+- **An invoice is no longer blocked for up to an hour after a late decline.** When a charge got no answer from Stripe and the decline then arrived by webhook, the invoice was marked failed and the customer emailed, but the charge hold stayed until the next scheduled run cleared it. Until then the payment page said a payment was in progress, and **Collect payment**, void and offline payment were refused. The write that records the result now frees the hold.
 - **An archived customer's draft subscription can no longer be activated.** Activating it started billing a customer you had archived. `POST /v1/subscriptions/{id}/activate` now answers `409 invalid_state`. Unarchive the customer first. ([#1659](https://github.com/gethardcount/hardcount/pull/1659))
 - **Two edits to one customer at once no longer undo each other.** An edit wrote back every field as it had read them, so a rename could un-archive the customer or reset its dunning policy. The second edit now waits and applies to the saved customer. ([#1659](https://github.com/gethardcount/hardcount/pull/1659))
 - **Archiving a customer no longer leaves a subscription billing.** An archive that ran while a subscription was being created, or while a trial was ending, could miss that subscription and succeed. The archive now sees it and gets `409`. A create that waited for an archive gets `409` too. ([#1659](https://github.com/gethardcount/hardcount/pull/1659))

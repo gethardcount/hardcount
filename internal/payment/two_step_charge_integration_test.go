@@ -35,9 +35,9 @@ func (r *shRig) ageUpdated(invoiceID string, age time.Duration) {
 }
 
 // assertPaidNowHoldClearedLater: the reconciler's settle pays the invoice at
-// once, and, as in every design (MarkPaid writes no hold), the charge hold an
-// unclear outcome kept is cleared by the stale-hold sweep once it ends. A
-// hold on a paid invoice blocks nothing a paid invoice allows.
+// once and frees the charge hold an unclear outcome kept, in the same write.
+// The stale-hold sweep that follows finds nothing to do. (The name is from
+// when the hold waited for that sweep.)
 func (r *shRig) assertPaidNowHoldClearedLater(invoiceID, piID string) {
 	r.t.Helper()
 	got := r.get(invoiceID)
@@ -46,6 +46,9 @@ func (r *shRig) assertPaidNowHoldClearedLater(invoiceID, piID string) {
 	}
 	if n := r.fake.countPIs(); n != 1 {
 		r.t.Errorf("PaymentIntents at Stripe = %d, want 1", n)
+	}
+	if state, err := r.invoices.ChargeHoldStateOf(r.ctx, r.tenantID, invoiceID); err != nil || state != domain.ChargeHoldNone {
+		r.t.Errorf("charge hold after the settle paid the invoice: state=%v err=%v, want none", state, err)
 	}
 	r.ageHold(invoiceID, staleSweepAge)
 	r.runClean()

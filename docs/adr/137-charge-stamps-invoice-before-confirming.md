@@ -182,6 +182,25 @@ gives no cancel.
 - Upgrade: keep the previous version running until it has finished its
   charges, then stop it and start the new one; one version at a time.
 
+## Amendment 2026-11-10: a settle frees the hold of the attempt it ends
+
+The hold outlived the answer that ended its attempt. A confirm with no answer
+keeps its hold; when the result then arrived by webhook, the invoice went to
+`failed` (or `paid`) and the hold stayed until it ended and the stale-hold
+sweep cleared it, which the sweep counted as "never confirmed a payment". For
+up to an hour the hosted page, Collect, void and offline payment were refused
+on an invoice whose customer had just been told the payment failed.
+
+The settle now clears `auto_charge_claimed_until` in the write that records
+the result: always when it marks the invoice paid, and when it marks it failed
+only if the invoice was in flight (`unknown` or `processing`) on that
+PaymentIntent. No claim admits an in-flight invoice, so a hold on one is that
+attempt's. A failure report in any other state leaves the hold, which may be a
+charger's that has claimed and not yet stamped. The owner's own release is a
+compare-and-set on its hold value and finds nothing to do. The release that
+existed only for a dunning retry whose payment came back processing
+(`ReleaseRetryChargeHoldTx`) is removed.
+
 ## References
 
 - ADR-001, ADR-068, ADR-105, ADR-107, ADR-117, ADR-127.

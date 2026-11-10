@@ -953,6 +953,15 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	}
 	if !applied {
 		logRefusedChargeOutcome(ctx, current, domain.PaymentProcessing, result.ID, sentKey)
+		if current.PaymentInFlight() && current.StripePaymentIntentID != result.ID {
+			// Another writer settled this payment while the stamp was on its
+			// way (its failure webhook, which frees the hold), and a later
+			// attempt has since put its own PaymentIntent on the invoice. The
+			// row describes that attempt. Returned as this charge's outcome,
+			// a dunning retry would wait on a payment that is not its own.
+			return domain.Invoice{}, fmt.Errorf("charge of invoice %s: payment %s was settled by another writer during the call, and the invoice is now in flight on %s",
+				inv.ID, result.ID, current.StripePaymentIntentID)
+		}
 	}
 	return current, nil
 }

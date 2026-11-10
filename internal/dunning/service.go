@@ -135,16 +135,6 @@ type ChargeHoldClaimer interface {
 	ReleaseChargeHold(ctx context.Context, tenantID, invoiceID string, hold domain.ChargeHold) error
 }
 
-// RetryHoldReleaser frees the charge hold a dunning retry kept while its
-// payment was processing (#1289), on the failure settle's transaction, which
-// holds the invoice's row lock. The in-flight charge keeps its hold (an
-// unclear outcome never releases, ADR-127), and the due-run pickers skip a
-// held run, so without this the next retry waited for the stale-hold sweep.
-// Implemented by *invoice.PostgresStore.
-type RetryHoldReleaser interface {
-	ReleaseRetryChargeHoldTx(ctx context.Context, tx *sql.Tx, invoiceID, paymentIntentID string) (bool, error)
-}
-
 // SubscriptionTerminalState reports whether a subscription can still be
 // acted on. Terminated: `canceled` is the state in which BOTH movers
 // refuse.
@@ -233,7 +223,6 @@ type Service struct {
 	invoiceUncollect InvoiceUncollectibleMarker
 	invoiceGet       InvoiceGetter
 	chargeHolds      ChargeHoldClaimer
-	retryHolds       RetryHoldReleaser
 	emailNotifier    EmailNotifier
 	customerEmail    CustomerEmailFetcher
 	custPolicy       CustomerPolicyReader
@@ -338,13 +327,6 @@ func (s *Service) SetSubscriptionStateReader(r SubscriptionStateReader) {
 // without the hold, as before ADR-127.
 func (s *Service) SetChargeHoldClaimer(c ChargeHoldClaimer) {
 	s.chargeHolds = c
-}
-
-// SetRetryHoldReleaser wires the release of a processing retry's charge hold
-// when its payment fails (RetryPaymentFailed). The producer always wires it;
-// unwired (narrow tests) the hold waits for the stale-hold sweep.
-func (s *Service) SetRetryHoldReleaser(r RetryHoldReleaser) {
-	s.retryHolds = r
 }
 
 // SetInvoiceUncollectibleMarker configures the write-off terminal action.
@@ -1200,9 +1182,10 @@ var errRetryPaymentFailed = errors.New("payment failed")
 // found no run waiting on it. The invoice says which way it went. Paid closes
 // the run as a recovered retry. Failed on this PaymentIntent is a counted
 // failure, with its warning email, as if the charge had answered the decline.
-// Either way the payment is over, so the hold its charge kept is released by
-// its own token: the failure settle's hook found no run waiting and released
-// nothing. Anything else is loud: the attempt stays counted as the pre-charge
+// Either way the payment is over. The settle that recorded it freed the hold
+// its charge kept, so the release here, by the hold's own token, normally
+// finds nothing to do; it stays for a hold the settle left (one without its
+// token). Anything else is loud: the attempt stays counted as the pre-charge
 // persist wrote it, the hold stays, and the next due tick reads the invoice
 // again.
 func (s *Service) retrySettledFirst(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, pi string, hold domain.ChargeHold, now time.Time) error {
@@ -2086,9 +2069,10 @@ type warningRecipient struct {
 //     (TakeAwaitedRetryTx). The webhook, a redelivery and the reconciler can
 //     each report the failure; one wins, so the attempt gets one failed row
 //     and one email;
-//   - releases the charge hold the retry kept while the payment was
-//     processing, so the next retry is not left waiting for the stale-hold
-//     sweep;
+//   - finds the charge hold the retry kept while the payment was
+//     processing already free: the settle's write that marked the invoice
+//     failed cleared it, so the next retry is not left waiting for the
+//     stale-hold sweep;
 //   - records the failed attempt, at the failure's instant, with its
 //     PaymentIntent, so the timeline matches it to its charge attempt;
 //   - on any attempt but the last, moves the next retry to the failure plus
@@ -2140,11 +2124,8 @@ func (s *Service) retryPaymentFailedTx(ctx context.Context, tx *sql.Tx, tenantID
 	if !won {
 		return nil
 	}
-	if s.retryHolds != nil {
-		if _, err := s.retryHolds.ReleaseRetryChargeHoldTx(ctx, tx, inv.ID, pi); err != nil {
-			return fmt.Errorf("release the retry's charge hold: %w", err)
-		}
-	}
+	// The retry's charge hold is already free: the failure settle this runs
+	// in cleared it with the write that marked the invoice failed.
 	// The failure's instant: the settle's ctx is bound to the invoice's
 	// clock, so on a test clock this is the simulated time it was learned.
 	failedAt := s.clock.Now(ctx)

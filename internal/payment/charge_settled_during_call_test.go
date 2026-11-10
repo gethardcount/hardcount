@@ -181,3 +181,47 @@ func TestChargeInvoice_RetryAfterEarlierAttempts_StampLands(t *testing.T) {
 		t.Fatalf("row %s/%q/seq %d, want failed/pi_X/seq 5 (the stamp, then the decline) — the retry's decline was not recorded", got.PaymentStatus, got.StripePaymentIntentID, got.ChargeAttemptSeq)
 	}
 }
+
+// takenOverStore answers the processing stamp as the real store does when
+// another attempt owns the invoice by then: refused, with the row as it
+// stands, in flight on that attempt's PaymentIntent.
+type takenOverStore struct {
+	*mockInvoiceUpdater
+}
+
+func (s *takenOverStore) StampChargeOutcome(ctx context.Context, tenantID, id string, attemptSeq int64, ps domain.InvoicePaymentStatus, piID, errMsg string) (domain.Invoice, bool, error) {
+	if ps != domain.PaymentProcessing {
+		return s.mockInvoiceUpdater.StampChargeOutcome(ctx, tenantID, id, attemptSeq, ps, piID, errMsg)
+	}
+	inv := s.invoices[id]
+	inv.PaymentStatus = domain.PaymentUnknown
+	inv.StripePaymentIntentID = "pi_other_attempt"
+	inv.ChargeAttemptSeq = attemptSeq + 2
+	s.invoices[id] = inv
+	return inv, false, nil
+}
+
+// A charge's payment comes back processing. Before its stamp lands, the
+// payment's failure is settled by its webhook, which frees the charge hold,
+// and another attempt puts its own PaymentIntent on the invoice. The refused
+// stamp then finds the invoice in flight on that other PaymentIntent. That row
+// is not this charge's outcome: returned as such, a dunning retry would wait
+// on a payment it did not make.
+func TestChargeInvoice_ProcessingStampRefused_InvoiceInFlightOnAnotherAttempt_IsAnError(t *testing.T) {
+	base := newMockInvoiceUpdater()
+	inv := domain.Invoice{
+		ID: "inv_1", TenantID: "t1", CustomerID: "cus_1", Status: domain.InvoiceFinalized,
+		PaymentStatus: domain.PaymentPending, AmountDueCents: 5000, Currency: "USD",
+	}
+	base.invoices["inv_1"] = inv
+	client := &mockStripeClient{piID: "pi_mine", chargeStatus: "processing"}
+	stripe := NewStripe(client, &takenOverStore{mockInvoiceUpdater: base}, newMockWebhookStore(), nil, &recordingDunningStarter{})
+
+	got, err := stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", inv, testHold, "cus_stripe", "pm_test")
+	if err == nil {
+		t.Fatalf("ChargeInvoice returned the other attempt's row (%s on %q) as this charge's outcome; want an error", got.PaymentStatus, got.StripePaymentIntentID)
+	}
+	if client.confirmCalls != 1 {
+		t.Fatalf("confirms = %d, want 1", client.confirmCalls)
+	}
+}

@@ -62,7 +62,6 @@ func newInFlightFixture(t *testing.T, db *postgres.DB, name string, retry *proce
 	f = newExhaustFixture(t, db, name, finalActions{name: "none", sub: domain.SubActionNone, inv: domain.InvActionNone}, 0, nil, retry)
 	f.svc.SetEmailNotifier(email.NewOutboxSender(email.NewOutboxStore(db)))
 	f.svc.SetCustomerEmailFetcher(fixedEmailFetcher{email: "slow@retry-in-flight.test", name: "Slow"})
-	f.svc.SetRetryHoldReleaser(f.invoices)
 	return f
 }
 
@@ -106,7 +105,9 @@ func (f *exhaustFixture) getRun(t *testing.T) domain.InvoiceDunningRun {
 }
 
 // setHold sets the invoice's charge hold to a live value, as the retry's own
-// claim left it while its payment was processing.
+// claim left it while its payment was processing: the hold and, equal to it,
+// its token (a hold without its token is an earlier version's, which the
+// failure settle leaves for a person).
 func (f *exhaustFixture) setHold(t *testing.T) {
 	t.Helper()
 	tx, err := f.db.BeginTx(f.ctx, postgres.TxBypass, "")
@@ -114,7 +115,7 @@ func (f *exhaustFixture) setHold(t *testing.T) {
 		t.Fatalf("begin: %v", err)
 	}
 	defer postgres.Rollback(tx)
-	if _, err := tx.ExecContext(f.ctx, `UPDATE invoices SET auto_charge_claimed_until = now() + interval '4 minutes' WHERE id = $1 AND tenant_id = $2`, f.invoiceID, f.tenantID); err != nil {
+	if _, err := tx.ExecContext(f.ctx, `UPDATE invoices SET auto_charge_claimed_until = now() + interval '4 minutes', charge_hold_token = now() + interval '4 minutes' WHERE id = $1 AND tenant_id = $2`, f.invoiceID, f.tenantID); err != nil {
 		t.Fatalf("set hold: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
