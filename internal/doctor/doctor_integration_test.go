@@ -31,11 +31,10 @@ func TestDoctor_CleanSchemaIsQuiet_AndSeededViolationsAreCaught(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
 	defer cancel()
 
-	// The doctor MUST run as a role that sees every row (the table owner /
-	// an admin DSN). This test originally ran it on the RLS-scoped app pool
-	// and the doctor reported a spotless bill of health over rows it could
-	// not see — the exact silent-blindness failure this comment now warns
-	// about. cmd/hardcount-doctor documents the same requirement.
+	// The sweep runs on the admin pool here. The doctor reads every tenant's
+	// rows under any role that can read the tables (see beginRead in
+	// doctor.go). The tests in cmd/hardcount-doctor run it as a non-superuser
+	// owner.
 	adminURL := strings.TrimSpace(os.Getenv("TEST_ADMIN_DATABASE_URL"))
 	if adminURL == "" {
 		adminURL = "postgres://hardcount:hardcount@localhost:5432/hardcount_test?sslmode=disable"
@@ -412,5 +411,29 @@ func TestDoctor_CreditCurrencyChecks(t *testing.T) {
 		if got := has(c.check, c.part); got != c.want {
 			t.Errorf("%s flags %q: %v, want %v (flagged: %v)", c.check, c.part, got, c.want, flagged[c.check])
 		}
+	}
+}
+
+// A check runs in a read-only transaction, so a check whose SQL writes fails
+// to run and leaves no row behind. It runs on the app pool, which may write
+// to tenants.
+func TestDoctor_ACheckCannotWrite(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := t.Context()
+
+	res := doctor.Run(ctx, db.Pool, []doctor.Check{{
+		Name:   "writes",
+		Domain: "test",
+		SQL:    `INSERT INTO tenants (id, name, status) VALUES ('hc_ten_doc_write', 'Doctor Write', 'active') RETURNING id`,
+	}})
+	if len(res.Errors) != 1 || !strings.Contains(res.Errors[0].Error(), "read-only transaction") {
+		t.Fatalf("errors = %v, want one refusal by a read-only transaction", res.Errors)
+	}
+	var n int
+	if err := db.Pool.QueryRowContext(ctx, `SELECT count(*) FROM tenants WHERE id = 'hc_ten_doc_write'`).Scan(&n); err != nil {
+		t.Fatalf("count tenants: %v", err)
+	}
+	if n != 0 {
+		t.Fatalf("the writing check left %d tenant row(s) behind", n)
 	}
 }

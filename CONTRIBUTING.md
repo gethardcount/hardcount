@@ -272,8 +272,9 @@ Notes on three of them:
 
 - **hardcount-doctor** is a read-only command that scans a database for states
   no correct code could produce, such as invoice totals that do not add up.
-  Point `DATABASE_URL` at the owner connection: under the app's RLS role it
-  sees no rows and reports clean.
+  Point `DATABASE_URL` at any user that can read the tables, such as the
+  owner. The doctor reads every account's rows itself, and exits 2 if
+  accounts exist but it reads no customers and no invoices.
 - **`govulncheck`** can fail when a new Go vulnerability is published, even
   if your change is fine. Say so in the PR and we will handle it.
 - **Lint waivers and source rules** (the `//nolint:forbidigo` reasons and
