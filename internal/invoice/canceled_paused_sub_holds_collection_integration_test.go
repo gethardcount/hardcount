@@ -6,6 +6,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/subscription"
+	"github.com/gethardcount/hardcount/internal/subscription/subscriptiontest"
 )
 
 // TestCanceledPausedSub_PauseStillHoldsItsInvoices: a cancel ends the
@@ -41,7 +42,7 @@ func TestCanceledPausedSub_PauseStillHoldsItsInvoices(t *testing.T) {
 	}
 
 	subs := subscription.NewPostgresStore(r.db)
-	canceled, err := subs.CancelAtomic(r.ctx, r.tenantID, subID)
+	canceled, err := subscriptiontest.Cancel(r.ctx, subs, r.tenantID, subID)
 	if err != nil {
 		t.Fatalf("cancel: %v", err)
 	}

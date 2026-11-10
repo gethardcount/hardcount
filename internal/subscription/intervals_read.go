@@ -2,6 +2,7 @@ package subscription
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"sort"
 	"time"
@@ -21,7 +22,15 @@ func (s *PostgresStore) ListItemIntervals(ctx context.Context, tenantID, subscri
 		return nil, err
 	}
 	defer postgres.Rollback(tx)
+	return s.ListItemIntervalsTx(ctx, tx, subscriptionID)
+}
 
+// ListItemIntervalsTx is ListItemIntervals on the caller's transaction. A
+// cancel reads the rows on its transaction, after its compare-and-set locked
+// the subscription row, and compares them with the rows it priced from
+// (ADR-139). Every item writer locks that row first, so the read sees every
+// item change committed before the lock.
+func (s *PostgresStore) ListItemIntervalsTx(ctx context.Context, tx *sql.Tx, subscriptionID string) ([]domain.ItemInterval, error) {
 	rows, err := tx.QueryContext(ctx, `
 		SELECT bi.subscription_item_id, bi.plan_id, bi.quantity, bi.starts_at, bi.ends_at, si.created_at
 		FROM billing_intervals bi

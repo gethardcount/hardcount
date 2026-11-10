@@ -246,7 +246,7 @@ func readWriterTokens(t *testing.T) writerTokens {
 	for _, v := range grepSource(t, filepath.Join(root, "internal", "subscription"), regexp.MustCompile(`return "(subscription_\w+)"`)) {
 		reasons[v] = true
 	}
-	for _, v := range grepSource(t, filepath.Join(root, "internal", "billing"), regexp.MustCompile(`reliefTx\([^)]*"(subscription_\w+)"`)) {
+	for _, v := range grepSource(t, filepath.Join(root, "internal", "billing"), regexp.MustCompile(`planRelief\([^)]*"(subscription_\w+)"`)) {
 		reasons[v] = true
 	}
 	for _, v := range grepSource(t, filepath.Join(root, "internal", "creditnote"), regexp.MustCompile(`reason = "(\w+)"`)) {

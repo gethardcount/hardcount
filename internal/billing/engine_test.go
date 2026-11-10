@@ -1354,7 +1354,7 @@ func (v *fakeInvoiceVoider) AfterVoid(_ context.Context, _ string, inv domain.In
 // (here absent) tx, then its post-commit legs — and returns the customer-
 // balance credit, the shape the pre-ADR-118 BillOnCancel returned.
 func billOnCancel(e *Engine, ctx context.Context, sub domain.Subscription) (int64, error) {
-	r, err := e.BillOnCancelDraftsTx(ctx, nil, sub)
+	r, err := e.WriteCancelReliefTx(ctx, nil, sub)
 	if err != nil {
 		return 0, err
 	}

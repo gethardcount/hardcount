@@ -1,11 +1,11 @@
 # ADR-097: A due mid-period `cancel_at` fires as an immediate cancel at that instant
 
-**Status**: Accepted 2026-07-18. Amended by [ADR-118](118-cancel-and-swap-relief-in-the-change-transaction.md) on 2026-10-12 and 2026-11-09, and by [ADR-120](120-invoice-grace-period-for-late-usage.md) on 2026-10-14.
+**Status**: Accepted 2026-07-18. Amended by [ADR-118](118-cancel-and-swap-relief-in-the-change-transaction.md) on 2026-10-12 and 2026-11-09, by [ADR-120](120-invoice-grace-period-for-late-usage.md) on 2026-10-14, and by [ADR-139](139-cancel-prices-before-its-transaction.md) on 2026-11-10.
 **Context**: FLOW TC8 walkthrough live-find; fixes the stranded-cancel money bug.
 
 ## Summary
 
-A scheduled cancel whose `cancel_at` falls inside a billing period fires as an immediate cancel at that instant. Before this, the billing scans looked only at period ends, so such a subscription renewed past its own cancel date. One transaction cancels it, bills usage and any in-arrears base fee up to `cancel_at`, and writes relief for the unused prepaid part, never as a cash refund. `canceled_at` and the final invoice's period end are the `cancel_at` instant, even when the fire runs late. Status: active, amended: all relief is written in the cancel transaction ([ADR-118](118-cancel-and-swap-relief-in-the-change-transaction.md)), and wall-clock runs fire after the invoice grace period ([ADR-120](120-invoice-grace-period-for-late-usage.md)).
+A scheduled cancel whose `cancel_at` falls inside a billing period fires as an immediate cancel at that instant. Before this, the billing scans looked only at period ends, so such a subscription renewed past its own cancel date. One transaction cancels it, bills usage and any in-arrears base fee up to `cancel_at`, and writes relief for the unused prepaid part, never as a cash refund. `canceled_at` and the final invoice's period end are the `cancel_at` instant, even when the fire runs late. Status: active, amended: all relief is written in the cancel transaction ([ADR-118](118-cancel-and-swap-relief-in-the-change-transaction.md)), wall-clock runs fire after the invoice grace period ([ADR-120](120-invoice-grace-period-for-late-usage.md)), and the fire is priced before its transaction ([ADR-139](139-cancel-prices-before-its-transaction.md)).
 
 ## The bug
 
@@ -40,16 +40,18 @@ as-is; this ADR fixes the *firing* side.
    billing loop meets a sub whose `cancel_at` is due strictly before
    `next_billing_at`, it does NOT invent a new billing mode. It executes the
    same atomic composition the operator immediate-cancel uses
-   (`CancelAtomicWithBill`): one tx that CAS-flips the sub
+   (`CancelAtomicWithBill`). First, with no tx open, `PlanCancelBill` prices
+   the final partial period (usage to `cancel_at` + prorated in_arrears
+   base) and plans the prepaid relief ([ADR-139](139-cancel-prices-before-its-transaction.md)
+   amendment 2026-11-10). Then one tx CAS-flips the sub
    (`canceled_at = cancel_at`, schedule fields cleared,
-   `subscription.canceled` webhook enqueued with `canceled_by="schedule"`),
-   then, inside the same tx, makes one `BillCancelTx` call. It prices the
-   final partial period (usage to `cancel_at` + prorated in_arrears base),
-   writes the prepaid relief (the unused prepaid in_advance portion returns
-   as balance credit, never cash — the shipped six-platform-verified
-   policy), and only then numbers and inserts the final invoice (ADR-118
-   amendment 2026-11-09). Post-commit: issue the relief, then commit the
-   final invoice's tax and collect it — identical to the operator path.
+   `subscription.canceled` webhook enqueued with `canceled_by="schedule"`).
+   Inside the same tx, the plan's writer writes the prepaid relief (the
+   unused prepaid in_advance portion returns as balance credit, never cash —
+   the shipped six-platform-verified policy), and only then numbers and
+   inserts the final invoice (ADR-118 amendment 2026-11-09). Post-commit:
+   issue the relief, then commit the final invoice's tax and collect it —
+   identical to the operator path.
 
    The engine reaches this through a narrow consumer-defined executor
    interface implemented by `subscription.Service` (the coordinator wires
@@ -99,6 +101,8 @@ sub simply drops out of the scan's cancel arm. A concurrent operator
 immediate-cancel surfaces as `InvalidState` (status no longer active) and
 is treated as success — the sub is canceled, and the CAS guarantees exactly
 one biller ever ran.
+
+> **2026-11-10 ([ADR-139](139-cancel-prices-before-its-transaction.md)):** the fire is priced before its transaction, and its CAS also matches the period it was priced from (`current_billing_period_start`, `next_billing_at`). A period that moved in between answers `ErrWatermarkMoved` with nothing written, and the billing run fires again.
 
 **Scan-arm scoping (livelock guard).** The `OR` arm admits only rows the
 executor can make progress on: `s.status = 'active'` in SQL (trialing

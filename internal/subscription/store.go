@@ -155,25 +155,33 @@ type Store interface {
 	// 0 rows → ErrWatermarkMoved (ErrNotFound if the row is gone).
 	ClosePeriodTx(ctx context.Context, tx *sql.Tx, tenantID, id string, expected PeriodSnapshot, periodStart, periodEnd, nextBillingAt time.Time, anchorDay int) error
 
-	// CancelAtomicWithBill cancels the subscription AND runs billFn (the
-	// final-on-cancel partial-period invoice insert) in the SAME transaction, so
-	// a billing failure rolls the cancel back rather than leaving a canceled sub
-	// with an uninvoiced partial period (a revenue leak — no final-on-cancel
-	// reconciler exists). billFn may be nil.
+	// CancelAtomicWithBill cancels the subscription at `at` AND runs billFn
+	// (the final-on-cancel invoice and the relief, planned before this call)
+	// in the SAME transaction, so a billing failure rolls the cancel back
+	// rather than leaving a canceled sub with an uninvoiced partial period (a
+	// revenue leak — no final-on-cancel reconciler exists). billFn may be nil.
 	//
-	// Its UPDATE transitions only from an allowed source state, which closes
-	// the read-check-write race where two goroutines observing the same
-	// non-terminal status could each apply a different target state across
-	// two transactions. When the source state does not match, a re-query
-	// distinguishes not-found from a stale-status conflict and surfaces the
-	// current status in the error message.
+	// Its first statement is a compare-and-set (ADR-115, ADR-139): the UPDATE
+	// matches only a draft, trialing or active row that still holds
+	// `expected` (status, period start, next_billing_at), the row the caller
+	// planned the bill from. 0 rows → ErrNotFound (row gone), InvalidState
+	// "already terminated" (canceled), or ErrWatermarkMoved (the period or
+	// status moved; nothing was written and the caller plans again). It then
+	// seals every open billing interval at `at` before billFn runs.
 	//
-	// Every cancel writer (this, CancelAtTrialEnd, the store's CancelAtomic
-	// and both FireScheduledCancellation methods) stores and returns the
-	// canceled row with no cancel schedule and no pending plan change on its
-	// items (retireLiveOnlyStateTx). The collection pause stays: it still
-	// holds the subscription's unpaid invoices.
-	CancelAtomicWithBill(ctx context.Context, tenantID, id string, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error)
+	// Every cancel writer (this, CancelAtTrialEnd and both
+	// FireScheduledCancellation methods) stores and returns the canceled row
+	// with no cancel schedule and no pending plan change on its items
+	// (retireLiveOnlyStateTx). The collection pause stays: it still holds the
+	// subscription's unpaid invoices.
+	CancelAtomicWithBill(ctx context.Context, tenantID, id string, expected PeriodSnapshot, at time.Time, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error)
+
+	// ListItemIntervals reads the subscription's full billing-interval
+	// history in a transaction of its own; ListItemIntervalsTx reads it on
+	// the caller's. A cancel reads it before it plans and again on its
+	// transaction, and requires the same rows (ADR-139).
+	ListItemIntervals(ctx context.Context, tenantID, subscriptionID string) ([]domain.ItemInterval, error)
+	ListItemIntervalsTx(ctx context.Context, tx *sql.Tx, subscriptionID string) ([]domain.ItemInterval, error)
 
 	// ScheduleCancellation persists a future cancel intent. cancelAt is a
 	// nullable timestamp; cancelAtPeriodEnd is the soft-cancel flag. Both
@@ -197,11 +205,14 @@ type Store interface {
 	ClearScheduledCancellation(ctx context.Context, tenantID, id string) (domain.Subscription, error)
 
 	// FireScheduledCancellationWithBill is the ADR-097 mid-period variant:
-	// flip + billFn (final partial invoice + relief drafts) in ONE tx, CAS
-	// on status='active' AND cancel_at = at so a concurrent unschedule or
-	// re-schedule defeats the fire. errs.InvalidState covers both benign
-	// race outcomes (already terminated; schedule changed).
-	FireScheduledCancellationWithBill(ctx context.Context, tenantID, id string, at time.Time, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error)
+	// flip + billFn (final partial invoice + relief drafts, planned before
+	// this call) in ONE tx, CAS on status='active', cancel_at = at AND the
+	// period of `expected`, so a concurrent unschedule or re-schedule defeats
+	// the fire, and a period that moved since the plan answers
+	// ErrWatermarkMoved (ADR-139). errs.InvalidState with code
+	// ScheduledCancelSuperseded covers both benign race outcomes (already
+	// terminated; schedule changed).
+	FireScheduledCancellationWithBill(ctx context.Context, tenantID, id string, expected PeriodSnapshot, at time.Time, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error)
 
 	// SetPauseCollection writes the (behavior, resumes_at) pair onto the row.
 	// The hard pause (Service.Pause/PauseAtomic) was removed in PR-8 /

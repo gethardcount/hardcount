@@ -573,9 +573,15 @@ func (h *Handler) cancel(w http.ResponseWriter, r *http.Request) {
 
 	sub, prorationCreditCents, err := h.svc.Cancel(r.Context(), tenantID, id)
 	if err != nil {
-		// A cancel that lost a deadlock or a lock wait may be sent again: the
-		// only thing it commits first is an ended period's invoice, which the
-		// period CAS never bills twice (ADR-136).
+		// A cancel whose subscription changed twice while it was priced wrote
+		// nothing (ADR-139), and answers 409 concurrent_change here only:
+		// dunning, which cancels through the service, still sees the error. It
+		// may be sent again, as may a cancel that lost a deadlock or a lock
+		// wait: the only thing either commits first is an ended period's
+		// invoice, which the period CAS never bills twice (ADR-136).
+		if errors.Is(err, ErrWatermarkMoved) {
+			err = respond.ConcurrentChange()
+		}
 		respond.FromError(w, r, respond.ConcurrentChangeAsConflict(r, err), "subscription")
 		return
 	}

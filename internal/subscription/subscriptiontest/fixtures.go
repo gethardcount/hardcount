@@ -8,8 +8,23 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/subscription"
 )
+
+// Cancel cancels a subscription at clock.Now(ctx) with no bill, for tests
+// that need a canceled row. It reads the row and runs the store's cancel
+// against that snapshot, as Service.Cancel does after it plans its bill
+// (ADR-139). A canceled row answers "already terminated".
+func Cancel(ctx context.Context, store *subscription.PostgresStore, tenantID, id string) (domain.Subscription, error) {
+	sub, err := store.Get(ctx, tenantID, id)
+	if err != nil {
+		return domain.Subscription{}, err
+	}
+	return store.CancelAtomicWithBill(ctx, tenantID, id, subscription.SnapshotOf(sub), clock.Now(ctx), nil)
+}
 
 // SetBillingCycle re-stamps a newly created subscription's period
 // boundaries, next_billing_at and billing anchor day. It uses raw SQL on

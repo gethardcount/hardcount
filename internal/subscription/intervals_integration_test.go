@@ -373,7 +373,7 @@ func TestIntervals_CancelClosesAll(t *testing.T) {
 		{PlanID: planA.ID, Quantity: 1}, {PlanID: planB.ID, Quantity: 2},
 	})
 	at := ivPS.Add(15 * 24 * time.Hour)
-	if _, err := store.CancelAtomic(clock.WithEffectiveNow(ctx, at), tenantID, sub.ID); err != nil {
+	if _, err := cancelNow(clock.WithEffectiveNow(ctx, at), store, tenantID, sub.ID); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 	for _, it := range sub.Items {
@@ -386,7 +386,7 @@ func TestIntervals_CancelClosesAll(t *testing.T) {
 	// Cancel firing past the period end caps at the period end.
 	sub2 := ivActiveSub(t, store, ctx, tenantID, cust, "sub-iv-cxl2", []domain.SubscriptionItem{{PlanID: planA.ID, Quantity: 1}})
 	late := ivPE.Add(48 * time.Hour)
-	if _, err := store.CancelAtomic(clock.WithEffectiveNow(ctx, late), tenantID, sub2.ID); err != nil {
+	if _, err := cancelNow(clock.WithEffectiveNow(ctx, late), store, tenantID, sub2.ID); err != nil {
 		t.Fatalf("late cancel: %v", err)
 	}
 	ivs := readItemIntervals(t, db, ctx, tenantID, sub2.Items[0].ID)

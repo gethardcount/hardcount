@@ -119,7 +119,7 @@ func TestExhaust_CancelAndWriteOff_BothApply(t *testing.T) {
 
 // TestExhaust_PartialFailure_ReattemptSkipsTheDoneHalf is the convergence
 // guarantee. Both subscription movers refuse an already-terminal sub
-// (cancelSpec allows only draft/trialing/active), so without the
+// (the cancel's compare-and-set matches only draft/trialing/active), so without the
 // skip-if-done read a re-attempt after a partial failure would fail forever
 // on the half that already succeeded and never reach the half that did not.
 //

@@ -509,49 +509,68 @@ func (s *PostgresStore) ListLiveByCustomer(ctx context.Context, tenantID, custom
 	return subs, nil
 }
 
-func cancelSpec() transitionSpec {
-	return transitionSpec{
-		targetStatus: string(domain.SubscriptionCanceled),
-		allowedFrom: []string{
-			string(domain.SubscriptionDraft),
-			string(domain.SubscriptionTrialing),
-			string(domain.SubscriptionActive),
-		},
-		setCanceledAt: true,
-		wrongStateMsg: "cannot cancel %s subscription (already terminated)",
-	}
-}
-
-// CancelAtomic terminates a subscription. Cancellation is allowed from
-// every non-terminal status — draft (operator scrapping a never-activated
-// row), trialing (customer abandoning during trial — by far the dominant
-// industry cancel path; Stripe / Lago / Recurly / Chargebee all allow it),
-// and active. Only canceled is rejected (the row already
-// terminated). Note: the `paused` source state was removed in PR-8
-// when the hard-pause API was deleted — no path now produces
-// status='paused', so it's not in allowedFrom.
-func (s *PostgresStore) CancelAtomic(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
-	return s.CancelAtomicWithBill(ctx, tenantID, id, nil)
-}
-
-// CancelAtomicWithBill cancels the subscription AND runs billFn — the
-// final-on-cancel partial-period invoice insert — in the SAME transaction, so a
-// billing failure rolls the cancel back rather than leaving a canceled sub with
-// an uninvoiced partial period (a revenue leak: there is no final-on-cancel
-// reconciler). ADR-056 coordinator pattern. The external finalize (tax commit +
-// auto-charge) and the proration relief's legs run post-commit via the caller
-// (FinalizeOnCreateInvoice / FinishRelief). billFn may be nil. billFn gets
-// the row as the flip left it; the row returned, and the one
-// subscription.canceled carries, is the retired one (finishCancelTx).
-func (s *PostgresStore) CancelAtomicWithBill(ctx context.Context, tenantID, id string, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error) {
+// CancelAtomicWithBill cancels the subscription at `at` AND runs billFn — the
+// final-on-cancel invoice and the relief the caller planned — in the SAME
+// transaction, so a billing failure rolls the cancel back rather than leaving
+// a canceled sub with an uninvoiced partial period (a revenue leak: there is
+// no final-on-cancel reconciler). ADR-056 coordinator pattern. The external
+// finalize (tax commit + auto-charge) and the proration relief's legs run
+// post-commit via the caller (FinalizeOnCreateInvoice / FinishRelief). billFn
+// may be nil. billFn gets the row as the flip left it; the row returned, and
+// the one subscription.canceled carries, is the retired one (finishCancelTx).
+//
+// The first statement is a compare-and-set (ADR-115, ADR-139). It matches a
+// draft, trialing or active row only: draft (an operator scrapping a
+// never-activated row), trialing (a customer leaving during a trial; Stripe,
+// Lago, Recurly and Chargebee all allow it) and active. It also requires the
+// row to still hold `expected`, the status, period start and next_billing_at
+// the caller priced the bill from. Zero rows resolve to ErrNotFound (row
+// gone), InvalidState "already terminated" (canceled, today's answer to a
+// second cancel), or ErrWatermarkMoved (anything else moved; nothing was
+// written, and the caller plans again from the new row).
+func (s *PostgresStore) CancelAtomicWithBill(ctx context.Context, tenantID, id string, expected PeriodSnapshot, at time.Time, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.Subscription{}, err
 	}
 	defer postgres.Rollback(tx)
 
-	canceled, err := s.transitionInTx(ctx, tx, id, cancelSpec(), clock.Now(ctx))
+	var canceled domain.Subscription
+	err = scanSubRow(tx.QueryRowContext(ctx, `
+		UPDATE subscriptions
+		SET status = 'canceled', canceled_at = $1, updated_at = $1
+		WHERE id = $2
+		  AND status IN ('draft', 'trialing', 'active')
+		  AND status = $3
+		  AND current_billing_period_start IS NOT DISTINCT FROM $4
+		  AND next_billing_at              IS NOT DISTINCT FROM $5
+		RETURNING `+subCols,
+		at, id, string(expected.Status), expected.Start, expected.Next,
+	), &canceled)
+	if err == sql.ErrNoRows {
+		var current string
+		err2 := tx.QueryRowContext(ctx, `SELECT status FROM subscriptions WHERE id = $1`, id).Scan(&current)
+		if err2 == sql.ErrNoRows {
+			return domain.Subscription{}, errs.ErrNotFound
+		}
+		if err2 != nil {
+			return domain.Subscription{}, err2
+		}
+		if current == string(domain.SubscriptionCanceled) {
+			return domain.Subscription{}, errAlreadyTerminated(domain.SubscriptionStatus(current))
+		}
+		return domain.Subscription{}, ErrWatermarkMoved
+	}
 	if err != nil {
+		return domain.Subscription{}, err
+	}
+	if err := hydrateSubChildrenTx(ctx, tx, &canceled); err != nil {
+		return domain.Subscription{}, err
+	}
+	// ADR-101: an immediate cancel seals every open interval — at the cancel
+	// instant for the common mid-period case, capped at the period end the
+	// final invoice covers.
+	if err := intervalCloseAllForCancel(ctx, tx, canceled, at); err != nil {
 		return domain.Subscription{}, err
 	}
 	if billFn != nil {
@@ -745,10 +764,11 @@ func (s *PostgresStore) ClearScheduledCancellation(ctx context.Context, tenantID
 // FireScheduledCancellationTx is the terminal cycle close (ADR-115): it runs
 // on the engine's closer tx, as its FIRST statement, so the final invoice the
 // engine inserts afterwards shares fate with the flip. Differs from
-// CancelAtomic in that (a) it accepts the engine's effectiveNow as the
-// canceled_at timestamp so the audit trail stays consistent under test
-// clocks, and (b) it clears the schedule fields so a subsequent cycle tick is
-// a no-op rather than a confusing re-fire attempt.
+// CancelAtomicWithBill in that (a) it accepts the engine's effectiveNow as
+// the canceled_at timestamp so the audit trail stays consistent under test
+// clocks, (b) it clears the schedule fields so a subsequent cycle tick is a
+// no-op rather than a confusing re-fire attempt, and (c) it runs on the
+// caller's transaction.
 //
 // The CAS proves `expected` (period start + watermark) as well as
 // status='active': a closer that planned this terminal close from a period
@@ -828,17 +848,20 @@ const ScheduledCancelSuperseded = "scheduled_cancel_superseded"
 //
 // The CAS matches cancel_at = $at as well as status: the fire must lose to
 // a concurrent UnscheduleCancel (cancel_at NULLed) or a re-schedule to a
-// different instant, not silently override the operator's newer intent.
-// Zero rows disambiguate to ErrNotFound (row gone) or InvalidState (status
-// changed, or the schedule changed under us) — callers treat InvalidState
-// as a benign no-op: whichever writer won has already put the sub in a
-// state the scans resolve (canceled drops out entirely; unscheduled drops
-// out of the cancel arm).
+// different instant, not silently override the operator's newer intent. It
+// also matches the period of `expected`, the row the caller priced the bill
+// from (ADR-139). Zero rows disambiguate to ErrNotFound (row gone),
+// InvalidState with code ScheduledCancelSuperseded (status changed, or the
+// schedule changed under us), or ErrWatermarkMoved (the period moved).
+// Callers treat the superseded outcome as a benign no-op: whichever writer
+// won has already put the sub in a state the scans resolve (canceled drops
+// out entirely; unscheduled drops out of the cancel arm). A moved period is
+// planned again (billSubscription re-reads once).
 //
 // Timestamp split (ADR-097 §3): canceled_at = at (the contracted instant,
 // possibly months in the past for the remediation cohort); updated_at =
 // clock.Now(ctx) (operational time — never rewound).
-func (s *PostgresStore) FireScheduledCancellationWithBill(ctx context.Context, tenantID, id string, at time.Time, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error) {
+func (s *PostgresStore) FireScheduledCancellationWithBill(ctx context.Context, tenantID, id string, expected PeriodSnapshot, at time.Time, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.Subscription{}, err
@@ -854,12 +877,15 @@ func (s *PostgresStore) FireScheduledCancellationWithBill(ctx context.Context, t
 		    cancel_at_period_end = false,
 		    updated_at = $2
 		WHERE id = $3 AND status = 'active' AND cancel_at = $1
+		  AND current_billing_period_start IS NOT DISTINCT FROM $4
+		  AND next_billing_at              IS NOT DISTINCT FROM $5
 		RETURNING `+subCols,
-		at, clock.Now(ctx), id,
+		at, clock.Now(ctx), id, expected.Start, expected.Next,
 	), &sub)
 	if err == sql.ErrNoRows {
 		var currentStatus string
-		err2 := tx.QueryRowContext(ctx, `SELECT status FROM subscriptions WHERE id = $1`, id).Scan(&currentStatus)
+		var cancelAt *time.Time
+		err2 := tx.QueryRowContext(ctx, `SELECT status, cancel_at FROM subscriptions WHERE id = $1`, id).Scan(&currentStatus, &cancelAt)
 		if err2 == sql.ErrNoRows {
 			return domain.Subscription{}, errs.ErrNotFound
 		}
@@ -869,7 +895,10 @@ func (s *PostgresStore) FireScheduledCancellationWithBill(ctx context.Context, t
 		if currentStatus != string(domain.SubscriptionActive) {
 			return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("scheduled cancel cannot fire on %s subscription", currentStatus)).WithCode(ScheduledCancelSuperseded)
 		}
-		return domain.Subscription{}, errs.InvalidState("scheduled cancel no longer current (unscheduled or re-scheduled concurrently)").WithCode(ScheduledCancelSuperseded)
+		if cancelAt == nil || !cancelAt.Equal(at) {
+			return domain.Subscription{}, errs.InvalidState("scheduled cancel no longer current (unscheduled or re-scheduled concurrently)").WithCode(ScheduledCancelSuperseded)
+		}
+		return domain.Subscription{}, ErrWatermarkMoved
 	}
 	if err != nil {
 		return domain.Subscription{}, err
@@ -1649,82 +1678,6 @@ func (s *PostgresStore) ExtendTrial(ctx context.Context, tenantID, id string, ne
 
 	if err := tx.Commit(); err != nil {
 		return domain.Subscription{}, err
-	}
-	return sub, nil
-}
-
-type transitionSpec struct {
-	targetStatus  string
-	allowedFrom   []string
-	setCanceledAt bool
-	wrongStateMsg string
-}
-
-// transitionInTx runs the status-transition UPDATE (+ child hydration) on the
-// given tx WITHOUT committing, for the CancelAtomicWithBill coordinator, so
-// the final-on-cancel invoice can join the same transaction (ADR-056).
-func (s *PostgresStore) transitionInTx(ctx context.Context, tx *sql.Tx, id string, spec transitionSpec, now time.Time) (domain.Subscription, error) {
-	// Build the WHERE status IN (...) clause with positional args starting at $3
-	// ($1 = updated_at, $2 = id). canceled_at slots in at $3 when needed.
-	canceledAtArg := "canceled_at"
-	args := []any{now, id}
-	argIdx := 3
-	if spec.setCanceledAt {
-		canceledAtArg = fmt.Sprintf("$%d", argIdx)
-		args = append(args, now)
-		argIdx++
-	}
-	statusPlaceholders := make([]string, len(spec.allowedFrom))
-	for i, st := range spec.allowedFrom {
-		statusPlaceholders[i] = fmt.Sprintf("$%d", argIdx)
-		args = append(args, st)
-		argIdx++
-	}
-
-	query := fmt.Sprintf(`
-		UPDATE subscriptions
-		SET status = '%s', canceled_at = %s, updated_at = $1
-		WHERE id = $2 AND status IN (%s)
-		RETURNING %s`,
-		spec.targetStatus,
-		canceledAtArg,
-		strings.Join(statusPlaceholders, ","),
-		subCols,
-	)
-
-	var sub domain.Subscription
-	err := scanSubRow(tx.QueryRowContext(ctx, query, args...), &sub)
-	if err == sql.ErrNoRows {
-		// Row either doesn't exist or is in a disallowed status. Re-query to
-		// distinguish and build a precise error.
-		var currentStatus string
-		err2 := tx.QueryRowContext(ctx, `SELECT status FROM subscriptions WHERE id = $1`, id).Scan(&currentStatus)
-		if err2 == sql.ErrNoRows {
-			return domain.Subscription{}, errs.ErrNotFound
-		}
-		if err2 != nil {
-			return domain.Subscription{}, err2
-		}
-		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf(spec.wrongStateMsg, currentStatus))
-	}
-	if err != nil {
-		return domain.Subscription{}, err
-	}
-
-	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
-		return domain.Subscription{}, err
-	}
-
-	// Cancel via CancelAtomic / CancelAtomicWithBill (cancelSpec is the only
-	// canceled-target spec). CancelAtomicWithBill queues subscription.canceled
-	// in this transaction once the row is final (finishCancelTx).
-	if spec.targetStatus == "canceled" {
-		// ADR-101: an immediate cancel seals every open interval — at the
-		// cancel instant for the common mid-period case, capped at the
-		// period end the final invoice covers.
-		if err := intervalCloseAllForCancel(ctx, tx, sub, now); err != nil {
-			return domain.Subscription{}, err
-		}
 	}
 	return sub, nil
 }

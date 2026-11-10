@@ -130,8 +130,9 @@ func TestCancelCredit_DraftFailure_RealTxRollsBackCancel(t *testing.T) {
 		t.Fatalf("mark paid: %v", err)
 	}
 
-	// Cancel through the real service → the billFn calls BillOnCancelDraftsTx,
-	// whose draft-create fails on the failing adjuster → the cancel tx rolls back.
+	// Cancel through the real service → the billFn runs the planned writer,
+	// whose relief draft-create fails on the failing adjuster → the cancel tx
+	// rolls back.
 	// Bind effective-now to cancelAt so canceled_at (stamped via clock.Now(ctx) in
 	// CancelAtomicWithBill) lands mid-period, matching what the HTTP handler binds
 	// from the sub pin. Without this the stamp fell back to wall-clock, making this
@@ -157,7 +158,7 @@ func TestCancelCredit_DraftFailure_RealTxRollsBackCancel(t *testing.T) {
 
 // TestCancelCredit_PaidInAdvance_DraftAtomicAndReconcilerRecovers is the
 // headline real-Postgres proof of the ADR-057 cancel-credit extension: on an
-// all-PAID in_advance cancel, BillOnCancelDraftsTx creates the proration credit
+// all-PAID in_advance cancel, WriteCancelReliefTx creates the proration credit
 // as an issue_pending DRAFT on the caller's tx. We then SIMULATE the post-commit
 // crash (never call FinishRelief) and prove RetryPendingClawbackIssue
 // recovers it — the customer's owed credit lands EXACTLY ONCE, deduped on a
@@ -238,10 +239,10 @@ func TestCancelCredit_PaidInAdvance_DraftAtomicAndReconcilerRecovers(t *testing.
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
-	r, err := e.BillOnCancelDraftsTx(ctx, tx, sub)
+	r, err := e.WriteCancelReliefTx(ctx, tx, sub)
 	if err != nil {
 		_ = tx.Rollback()
-		t.Fatalf("BillOnCancelDraftsTx: %v", err)
+		t.Fatalf("WriteCancelReliefTx: %v", err)
 	}
 	ids, credited := r.DraftIDs, r.CreditedCents
 	if credited != wantCredit || len(ids) != 1 {

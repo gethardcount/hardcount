@@ -567,47 +567,62 @@ func TestThresholdVoid_vs_Close_VoidHoldsTheRow(t *testing.T) {
 }
 
 // TestThresholdVoid_vs_ImmediateCancel_VoidAfterRead: the immediate cancel
-// is a closer of the same window. It reads the watermark after the cancel's
-// UPDATE locked the subscription, on the cancel's tx, FOR KEY SHARE, so a void
-// of the threshold invoice that arrives after the read waits for the cancel
-// and is forgiven. Before, the read ran on its own connection: the void
-// committed first and the cancel's final invoice billed only [t1, tc).
+// is a closer of the same window. It reads the watermark while it plans,
+// before its transaction, and again on its transaction after the
+// compare-and-set, FOR KEY SHARE (ADR-139).
+//   - A void after the plan's read commits first, and the re-read sees it:
+//     the cancel plans again and its final invoice bills the whole window
+//     [P0, tc).
+//   - A void after the re-read waits for the cancel's commit and lands after
+//     the final invoice: the window is forgiven, and the final invoice bills
+//     only [t1, tc).
+//
+// Mutation: drop the watermark check in writePlanned → the first case's
+// final invoice bills only [t1, tc) although the void came first.
 func TestThresholdVoid_vs_ImmediateCancel_VoidAfterRead(t *testing.T) {
-	r := newS1Rig(t, "Void after the cancel's read", 200)
-	if fired := r.runFire(t); fired != 1 {
-		t.Fatalf("fire reported %d, want 1", fired)
-	}
-	_, threshold, _ := r.liveInvoices(t)
-	if len(threshold) != 1 {
-		t.Fatalf("%d threshold invoices after the fire, want 1", len(threshold))
-	}
-	admin := testutil.AdminPool(t)
-	invSvc := invoice.NewService(r.f.invStore, clock.Real(), r.f.settings)
-	var v *racingVoid
-	var once sync.Once
-	hook := func() {
-		once.Do(func() {
-			v = startVoid(r, invSvc, admin, threshold[0].ID, r.t1.Add(time.Minute))
-			v.settle(t, r.base, admin)
+	for _, c := range []struct {
+		name string
+		// arm hooks the void to one watermark read of the closer.
+		arm func(r *s1Rig, hook func())
+	}{
+		{"void after the plan's read", func(r *s1Rig, hook func()) { r.closer.invs.afterWatermark = hook }},
+		{"void after the transaction's re-read", func(r *s1Rig, hook func()) { r.closer.invs.afterWatermarkTx = hook }},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			r := newS1Rig(t, "Void after the cancel's read: "+c.name, 200)
+			if fired := r.runFire(t); fired != 1 {
+				t.Fatalf("fire reported %d, want 1", fired)
+			}
+			_, threshold, _ := r.liveInvoices(t)
+			if len(threshold) != 1 {
+				t.Fatalf("%d threshold invoices after the fire, want 1", len(threshold))
+			}
+			admin := testutil.AdminPool(t)
+			invSvc := invoice.NewService(r.f.invStore, clock.Real(), r.f.settings)
+			var v *racingVoid
+			var once sync.Once
+			c.arm(r, func() {
+				once.Do(func() {
+					v = startVoid(r, invSvc, admin, threshold[0].ID, r.t1.Add(time.Minute))
+					v.settle(t, r.base, admin)
+				})
+			})
+			svc := subscription.NewService(r.f.subStore, nil)
+			svc.SetBiller(r.closer.engine)
+			if _, _, err := svc.Cancel(r.at(r.tc), r.f.tenantID, r.f.subID); err != nil {
+				t.Fatalf("cancel: %v", err)
+			}
+			if v == nil {
+				t.Fatal("the cancel never read the watermark where the void was hooked")
+			}
+			_, _, other := r.liveInvoices(t)
+			if len(other) != 1 || other[0].BillingReason != domain.BillingReasonSubscriptionCancel {
+				t.Fatalf("invoices other than the threshold one: %d, want the one final cancel invoice", len(other))
+			}
+			v.wantOrderHonored(t, r, other[0], 400, 100)
+			assertUsageBilledOnce(t, r.base)
 		})
 	}
-	r.closer.invs.afterWatermark, r.closer.invs.afterWatermarkTx = hook, hook
-	ctxCancel := r.at(r.tc)
-	if _, err := r.f.subStore.CancelAtomicWithBill(ctxCancel, r.f.tenantID, r.f.subID, func(tx *sql.Tx, canceled domain.Subscription) error {
-		_, _, _, err := r.closer.engine.BillCancelTx(ctxCancel, tx, canceled)
-		return err
-	}); err != nil {
-		t.Fatalf("cancel: %v", err)
-	}
-	if v == nil {
-		t.Fatal("the cancel never read the watermark")
-	}
-	_, _, other := r.liveInvoices(t)
-	if len(other) != 1 || other[0].BillingReason != domain.BillingReasonSubscriptionCancel {
-		t.Fatalf("invoices other than the threshold one: %d, want the one final cancel invoice", len(other))
-	}
-	v.wantOrderHonored(t, r, other[0], 400, 100)
-	assertUsageBilledOnce(t, r.base)
 }
 
 // TestThresholdVoid_vs_PlanSwap_VoidAfterRead: the cross-interval swap

@@ -313,6 +313,8 @@ lock is held across the tax provider call that follows in the same tx, so
 a void, write-off, charge claim or payment failure on that invoice waits
 for that call too.
 
+> **2026-11-10 ([ADR-139](139-cancel-prices-before-its-transaction.md)):** the immediate cancel and the scheduled mid-period cancel now read the watermark before their transaction, then read it again on it, after the compare-and-set, `FOR KEY SHARE` (`writePlanned`). A fire or a void in between plans the cancel again; a void after the re-read waits and is forgiven. Their lock is no longer held across the tax call. The cross-interval swap is unchanged.
+
 Payments do not wait for this lock. Every paid flip (card settle, offline payment,
 credit note, zero-due settle) locks the invoice `FOR NO KEY UPDATE`, which
 `FOR KEY SHARE` does not conflict with. This matters because a paid flip
@@ -340,7 +342,7 @@ display or flag, and never write an invoice.
 | Reader | Effect |
 |---|---|
 | cycle close build (`buildLineItems`) and its in-tx re-read (`commitPeriodClose`) | bills only the residual after a write-off; a void committed before the re-read moves the watermark, so the close re-plans and bills the window; the re-read holds the row `FOR KEY SHARE` |
-| immediate cancel (`billFinalOnImmediateCancelImpl`) | same, read on the cancel's tx `FOR KEY SHARE` (was its own connection) |
+| immediate cancel (`priceFinalOnCancel`, re-checked in `writePlanned`) | same; read on its own connection while it is priced, then again on the cancel's tx `FOR KEY SHARE` (2026-11-10, [ADR-139](139-cancel-prices-before-its-transaction.md)) |
 | cross-interval swap (`BillOnPlanSwapTx`) | same, read on the swap's tx `FOR KEY SHARE` |
 | swap re-anchor guard (`ThresholdBilledThroughTx`) | still refuses to re-anchor below a written-off fire; first `FOR KEY SHARE` read of the swap's tx |
 | operator preview, live balance | agree with the close |

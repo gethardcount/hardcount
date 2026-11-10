@@ -16,6 +16,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/pricing"
 	"github.com/gethardcount/hardcount/internal/subscription"
+	"github.com/gethardcount/hardcount/internal/subscription/subscriptiontest"
 	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
@@ -281,7 +282,7 @@ func runIntervalScenario(t *testing.T, db *postgres.DB, sc intervalScenario) []s
 
 	if sc.cancelDay > 0 {
 		at := parityPS.AddDate(0, 0, sc.cancelDay)
-		canceled, err := f.subs.CancelAtomic(clock.WithEffectiveNow(f.ctx, at), f.tenantID, sub.ID)
+		canceled, err := subscriptiontest.Cancel(clock.WithEffectiveNow(f.ctx, at), f.subs, f.tenantID, sub.ID)
 		if err != nil {
 			t.Fatalf("cancel: %v", err)
 		}

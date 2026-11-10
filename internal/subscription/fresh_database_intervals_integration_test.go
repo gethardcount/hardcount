@@ -66,7 +66,7 @@ func TestIntervals_FreshDatabaseNeedsNoBackfill(t *testing.T) {
 
 	// An active subscription canceled mid-period.
 	canceled := ivActiveSub(t, store, ctx, tenantID, cust, "sub-fresh-canceled", []domain.SubscriptionItem{{PlanID: planA.ID, Quantity: 1}})
-	if _, err := store.CancelAtomic(at(12*day), tenantID, canceled.ID); err != nil {
+	if _, err := cancelNow(at(12*day), store, tenantID, canceled.ID); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}
 
@@ -120,7 +120,7 @@ func TestIntervals_FreshDatabaseNeedsNoBackfill(t *testing.T) {
 		t.Fatalf("add item during trial: %v", err)
 	}
 	canceledTrial := trialSub("sub-fresh-trial-canceled")
-	if _, err := store.CancelAtomic(at(6*day), tenantID, canceledTrial.ID); err != nil {
+	if _, err := cancelNow(at(6*day), store, tenantID, canceledTrial.ID); err != nil {
 		t.Fatalf("cancel trial: %v", err)
 	}
 
