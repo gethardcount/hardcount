@@ -75,10 +75,10 @@ func TestEmailStatus_ComplaintLattice(t *testing.T) {
 		t.Error("complaint must stamp email_last_bounced_at (operator-visible recency)")
 	}
 
-	// An email edit still resets the lattice (existing behavior, now
-	// covering 'complained' too).
-	if err := store.ResetEmailStatus(ctx, tenantID, cust.ID); err != nil {
-		t.Fatalf("reset: %v", err)
+	// An email edit still resets the lattice, 'complained' included.
+	got.Email = "cl-new@example.com"
+	if _, err := store.Update(ctx, tenantID, got); err != nil {
+		t.Fatalf("change the email: %v", err)
 	}
 	got, _ = store.Get(ctx, tenantID, cust.ID)
 	if got.EmailStatus != domain.EmailStatusUnknown {

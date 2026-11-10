@@ -179,7 +179,7 @@ is a break. v0.9.0 is also a clean break: there is no upgrade from Hardcount
 
 1. The one live subscription that covers the customer and the meter owns
    the event. `rejectMeterOverlap` keeps that to one
-   (`internal/subscription/service.go:608`).
+   (`internal/subscription/service.go:589`).
 2. The window holding the event's timestamp gives the plan
    (`billing_intervals`).
 3. The pin is the start of the billing period being priced. It is the same
@@ -426,6 +426,8 @@ step. A test-clock teardown is one exception, and the clock reads of a
 price write and of a subscription create are the others (below).
 
 1. the subscription row ([ADR-115](115-one-closer-for-the-billing-period.md));
+   1a. the customer-rules lock, for the writers of a customer-scoped rule
+   (amended 2026-11-10, below);
 2. plan rows in ascending id, in one statement: `FOR KEY SHARE` for
    subscription writers and override writes, `FOR UPDATE` for writers of
    plan content;
@@ -486,6 +488,58 @@ every transaction that locks a clock row exclusively (a teardown, a clock
 state change) takes the clock first and holds no plan, and `FOR SHARE`
 does not conflict with an override write's `FOR SHARE` read of its
 customer's clock.
+
+**Step 1a: the customer-rules lock** (amended 2026-11-10, [#1659](https://github.com/gethardcount/hardcount/pull/1659)).
+Four rules span a customer's subscriptions:
+
+- one live item per meter (section 4 step 1);
+- one currency ([ADR-100](100-currency-coherence-guard-ring.md));
+- no new subscription or draft activation for an archived customer
+  ([ADR-067](067-archive-blocks-never-cancels.md));
+- a customer update reads and writes the row as one step.
+
+Their checks read only
+committed rows. Two writers at once could both pass: two creates on one
+meter both committed, and every period then billed that meter's usage
+twice.
+
+- **The lock.** `pg_advisory_xact_lock(hashtextextended('customer_rules:' || tenant || ':' || customer, 0))`,
+  held to commit or rollback, so it is safe behind a transaction-mode
+  pooler. It conflicts only with itself. The key is defined once, in
+  `postgres.LockCustomerRulesTx`.
+- **Who takes it, and where.** An item writer and a draft activation take
+  it right after their subscription row (step 1). A create takes it after
+  its clock read and before its insert. A customer update and a billing
+  profile write take it first. Each reads what its rule checks after it
+  gets the lock.
+- **The order.** It comes before step 2 and everything after: plans, the
+  number row, invoices, credit notes, the credit ledger lock and the
+  payment-method lock. A holder takes no subscription row other than its
+  own, and no clock row. No transaction that holds a lock of a later step
+  asks for it. So it adds no cycle.
+- **Teardown.** A test-clock teardown never takes it. A create waits for
+  it while holding only its clock `FOR KEY SHARE`, which teardown orders
+  at the clock as before. A customer update and a profile write take no
+  clock lock and hold their row only for their last statement.
+- **Who does not wait.** Bounce and complaint marks, the other single-row
+  customer writes, usage ingest and foreign-key checks on the customer row.
+- **The cost.** Quantity changes and removals take it too, because they
+  share `LockForItemChangeTx` with adds and plan changes. They check no
+  customer rule. One call site that no item writer can skip was judged
+  worth it: they now wait for the customer's other subscription writes,
+  and make them wait, for as long as a prorated tax call takes.
+- **The pool.** A holder reads on other connections while it holds the
+  lock, as before. If `DB_MAX_OPEN_CONNS` or more writers for one customer
+  run at once, they stall until timeout. The same limit already holds for
+  writers of one subscription row.
+- **Alternatives.** A `FOR NO KEY UPDATE` lock on the customer row was
+  rejected: every single-row customer write, the SMTP bounce mark among
+  them, would wait behind in-transaction tax calls and the number row. The
+  SMTP bounce mark has 5 seconds and nothing sends it again. A
+  meter-claims table with a unique index closes only the meter rule, and
+  needs triggers on about nine writers and a backfill. SERIALIZABLE was not
+  considered: no transaction uses it, and every writer would need a retry
+  loop.
 
 PR-0b (#1367, merged as `c234a364`) brought step 2 to every subscription
 writer. It fixed a deadlock it reproduced on main. D05's meter edit takes
@@ -823,8 +877,10 @@ The breaks that concerned moving 0.8.x data went with the clean break.
   `FOR KEY SHARE`, so a price and an item on the same plan are ordered by
   the plan lock, used or never-used (amended 2026-10-25, second review of
   #1386). A subscription created on another plan at the same moment is
-  not ordered with it. The same class
-  as two concurrent subscription creates today; it joins ADR-100's
+  not ordered with it. Two concurrent subscription creates, once the same
+  class, are ordered by the customer-rules lock (amended 2026-11-10,
+  section 8 step 1a). This race stays open: a price write is plan-scoped,
+  so the customer-rules lock does not order it. It stays among ADR-100's
   deferred locks. Trigger: the first account with several operators.
 - *Resolved 2026-10-26 (section 4 amendment): the two items below no longer
   hold. A new subscriber, a swap onto the plan and an added item pay the

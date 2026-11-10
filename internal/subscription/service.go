@@ -812,27 +812,24 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		inheritedClockID = cust.TestClockID
 	}
 
+	planIDs := make([]string, 0, len(items))
+	for _, it := range items {
+		planIDs = append(planIDs, it.PlanID)
+	}
 	// Archived plans accept no new subscriptions (ADR-067; same enforcement
 	// seam as the archived-customer guard). Pre-fix an archived plan
 	// remained fully subscribable via the API — archive only hid it from
 	// the picker. Skipped when PlanReader isn't wired (narrow unit tests).
 	if s.plans != nil {
-		planIDs := make([]string, 0, len(items))
-		for _, it := range items {
-			planIDs = append(planIDs, it.PlanID)
-		}
 		if err := s.rejectArchivedPlans(ctx, tenantID, planIDs); err != nil {
 			return domain.Subscription{}, err
 		}
 
 		// Double-billing guard: the new sub's meters must be disjoint from
-		// every other live sub of this customer (and from each other).
+		// every other live sub of this customer (and from each other). This
+		// is the early refusal; the store checks again on the create's
+		// transaction, under the customer-rules lock.
 		if err := s.rejectMeterOverlap(ctx, tenantID, input.CustomerID, "", "", planIDs); err != nil {
-			return domain.Subscription{}, err
-		}
-		// Currency pin (ADR-100): the new sub's plans must agree with each
-		// other, the profile currency, and the customer's other live subs.
-		if err := s.rejectCurrencyMismatch(ctx, tenantID, input.CustomerID, "", planIDs, ""); err != nil {
 			return domain.Subscription{}, err
 		}
 	}
@@ -944,6 +941,15 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		TestClockID:               inheritedClockID,
 		Items:                     items,
 	}, func(tx *sql.Tx, created domain.Subscription) error {
+		// Currency pin (ADR-100): the new sub's plans must agree with each
+		// other, the profile currency, and the customer's other live subs.
+		// It runs here, on the create's transaction after the store took
+		// the customer-rules lock. Every writer of those inputs (a create,
+		// an activation, a profile write) holds that lock until it commits,
+		// so these reads on other connections see each of them.
+		if err := s.rejectCurrencyMismatch(ctx, tenantID, created.CustomerID, created.ID, planIDs, ""); err != nil {
+			return err
+		}
 		if s.biller == nil || created.Status != domain.SubscriptionActive {
 			return nil
 		}
@@ -1223,18 +1229,24 @@ func addItemQuantity(input AddItemInput) (int64, error) {
 }
 
 // validateAddItem checks an add against sub, the subscription AddItemTx
-// read under the subscription row lock (#1270).
+// read under the subscription row lock (#1270) and the customer-rules lock.
 //
 // Its other reads (plans, meter conflicts, currencies) run in their own
 // transactions. That is enough for this subscription's items: every write
 // to them takes the same lock first, so the reads see every change to them
 // that committed before the lock, and none can commit until the caller's
-// transaction ends. Two adds of plans that bill one meter are therefore
-// checked one after the other. The unique index on (subscription, plan) is
-// the write-time gate for duplicates. Archiving a plan writes only the plan
-// row, so an archive that commits between this check and the insert orders
-// as "added, then archived": an existing item on an archived plan, which
-// keeps billing (ADR-067).
+// transaction ends. It is enough for the customer's other subscriptions
+// too: every customer-scoped writer that can add a meter or a currency for
+// the customer (a create, an add, a plan change, a billing-profile write)
+// holds the customer-rules lock until it commits. Two adds of plans that
+// bill one meter, on one subscription or on two, are therefore checked one
+// after the other. A price write is plan-scoped and takes no customer lock,
+// so a price added to a plan the customer already uses is not ordered with
+// this check (ADR-130 Risks). The unique index on
+// (subscription, plan) is the write-time gate for duplicates. Archiving a
+// plan writes only the plan row, so an archive that commits between this
+// check and the insert orders as "added, then archived": an existing item
+// on an archived plan, which keeps billing (ADR-067).
 func (s *Service) validateAddItem(ctx context.Context, tenantID string, sub domain.Subscription, planID string) error {
 	if sub.Status == domain.SubscriptionCanceled {
 		return errs.InvalidState(fmt.Sprintf("Items can't be added to a %s subscription.", sub.Status))

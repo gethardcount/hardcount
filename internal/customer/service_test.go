@@ -102,16 +102,31 @@ func (m *memoryStore) ListByTestClockID(_ context.Context, tenantID, clockID str
 	return result, len(result), nil
 }
 
-func (m *memoryStore) Update(_ context.Context, tenantID string, c domain.Customer) (domain.Customer, error) {
-	existing, ok := m.customers[c.ID]
-	if !ok || existing.TenantID != tenantID {
+// WithCustomerRulesLock: the fake has no locks or transactions, so fn runs
+// with a nil *sql.Tx on the stored customer. The lock's ordering is tested
+// against Postgres (internal/api customer_rules_lock_e2e_test.go).
+func (m *memoryStore) WithCustomerRulesLock(_ context.Context, tenantID, id string, fn func(tx *sql.Tx, locked domain.Customer) error) error {
+	c, ok := m.customers[id]
+	if !ok || c.TenantID != tenantID {
+		return errs.ErrNotFound
+	}
+	return fn(nil, c)
+}
+
+func (m *memoryStore) UpdateTx(_ context.Context, _ *sql.Tx, c domain.Customer, emailChanged bool) (domain.Customer, error) {
+	if _, ok := m.customers[c.ID]; !ok {
 		return domain.Customer{}, errs.ErrNotFound
+	}
+	if emailChanged {
+		c.EmailStatus = domain.EmailStatusUnknown
+		c.EmailLastBouncedAt = nil
+		c.EmailBounceReason = ""
 	}
 	m.customers[c.ID] = c
 	return c, nil
 }
 
-func (m *memoryStore) UpsertBillingProfile(_ context.Context, tenantID string, bp domain.CustomerBillingProfile) (domain.CustomerBillingProfile, error) {
+func (m *memoryStore) UpsertBillingProfileTx(_ context.Context, _ *sql.Tx, tenantID string, bp domain.CustomerBillingProfile) (domain.CustomerBillingProfile, error) {
 	bp.TenantID = tenantID
 	m.billingProfiles[bp.CustomerID] = bp
 	return bp, nil
@@ -162,18 +177,6 @@ func (m *memoryStore) MarkEmailComplained(_ context.Context, tenantID, customerI
 	c.EmailStatus = domain.EmailStatusComplained
 	c.EmailLastBouncedAt = &now
 	c.EmailBounceReason = reason
-	m.customers[customerID] = c
-	return nil
-}
-
-func (m *memoryStore) ResetEmailStatus(_ context.Context, tenantID, customerID string) error {
-	c, ok := m.customers[customerID]
-	if !ok || c.TenantID != tenantID {
-		return errs.ErrNotFound
-	}
-	c.EmailStatus = domain.EmailStatusUnknown
-	c.EmailLastBouncedAt = nil
-	c.EmailBounceReason = ""
 	m.customers[customerID] = c
 	return nil
 }

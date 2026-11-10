@@ -207,7 +207,22 @@ func (s *PostgresStore) createInTx(ctx context.Context, tx *sql.Tx, tenantID str
 		}
 	}
 
-	err := scanSubRow(tx.QueryRowContext(ctx, `
+	// The customer-rules lock comes next, before the insert, so the
+	// customer's status and every check after it (the meter check below,
+	// the currency check in billFn) read what earlier creates, item changes
+	// and customer updates committed.
+	status, err := lockCustomerRulesTx(ctx, tx, tenantID, sub.CustomerID)
+	if errors.Is(err, errs.ErrNotFound) {
+		return domain.Subscription{}, errs.NotFound("customer")
+	}
+	if err != nil {
+		return domain.Subscription{}, err
+	}
+	if status == domain.CustomerStatusArchived {
+		return domain.Subscription{}, errs.InvalidState("customer is archived — unarchive the customer before creating a subscription")
+	}
+
+	err = scanSubRow(tx.QueryRowContext(ctx, `
 		INSERT INTO subscriptions (id, tenant_id, code, display_name, customer_id, status,
 			billing_time, trial_start_at, trial_end_at, started_at,
 			current_billing_period_start, current_billing_period_end, next_billing_at,
@@ -1341,6 +1356,16 @@ func (s *PostgresStore) ActivateDraftWithBill(ctx context.Context, tenantID, id 
 	if err != nil {
 		return domain.Subscription{}, err
 	}
+	// The customer-rules lock, before the plans and billFn's invoice
+	// number: an archive that committed before it is seen here, and one
+	// that comes later waits for this activation and then sees it billing.
+	status, err := lockCustomerRulesTx(ctx, tx, tenantID, sub.CustomerID)
+	if err != nil {
+		return domain.Subscription{}, err
+	}
+	if status == domain.CustomerStatusArchived {
+		return domain.Subscription{}, errs.InvalidState("customer is archived — unarchive the customer before activating this subscription")
+	}
 	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
 		return domain.Subscription{}, err
 	}
@@ -2239,9 +2264,11 @@ func (s *PostgresStore) ClosePeriod(ctx context.Context, tenantID, id string, ex
 // (ADR-115). That mode leaves the FOR KEY SHARE of an invoice insert's
 // foreign-key check free.
 //
-// Every writer of a subscription's state takes this row first. A writer that
-// references more than one plan takes them next (lockPlansTx); item rows,
-// billing_intervals and invoices come after. The dunning pause takes the same
+// Every writer of a subscription's state takes this row first. A service item
+// change (LockForItemChangeTx) and a draft activation take the customer-rules
+// lock next (lockCustomerRulesTx). A writer that references more than one
+// plan takes them after that (lockPlansTx); item rows, billing_intervals and
+// invoices come after. The dunning pause takes the same
 // order: its write (SetDunningPause) and the payment that lifts it
 // (LockDunningPauseTx, before the payment locks the invoice) lock the
 // subscription row first, except when the pause commits after the payment's
@@ -2258,6 +2285,30 @@ func lockSubscriptionRow(ctx context.Context, tx *sql.Tx, subscriptionID string)
 		return errs.ErrNotFound
 	}
 	return err
+}
+
+// lockCustomerRulesTx takes the customer-rules lock
+// (postgres.LockCustomerRulesTx) on tx, then reads the customer's status.
+// The read comes after the lock, so it sees an archive or unarchive that
+// committed before the lock. ErrNotFound when RLS shows no such customer.
+//
+// Every writer of a customer-scoped rule takes this lock: a create after its
+// clock read, an item writer (LockForItemChangeTx) and a draft activation
+// right after their subscription row. Each takes it before its plans and
+// before any invoice, credit note or number.
+func lockCustomerRulesTx(ctx context.Context, tx *sql.Tx, tenantID, customerID string) (domain.CustomerStatus, error) {
+	if err := postgres.LockCustomerRulesTx(ctx, tx, tenantID, customerID); err != nil {
+		return "", err
+	}
+	var status domain.CustomerStatus
+	err := tx.QueryRowContext(ctx, `SELECT status FROM customers WHERE id = $1`, customerID).Scan(&status)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", errs.ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("read customer %s: %w", customerID, err)
+	}
+	return status, nil
 }
 
 // lockSubscriptionOfItem is lockSubscriptionRow for a writer that has only
@@ -2288,8 +2339,9 @@ func lockSubscriptionOfItem(ctx context.Context, tx *sql.Tx, itemID string) erro
 // a deadlock error (40P01). Both now take plans in the same order.
 //
 // A writer that references more than one plan calls it right after its
-// subscription row, before it locks any other row. D05 is the only plan lock
-// that blocks FOR KEY SHARE, and it waits only for plans. A writer that waits
+// subscription row and the customer-rules lock, before it locks any other
+// row. D05 is the only plan lock that blocks FOR KEY SHARE, and it waits
+// only for plans. A writer that waits
 // for a plan while it holds another row can still close a cycle through a
 // third transaction: one that holds a higher plan and waits for that row. The
 // cross-interval swap is the case: an activation holds plan B and waits for
@@ -2300,7 +2352,7 @@ func lockSubscriptionOfItem(ctx context.Context, tx *sql.Tx, itemID string) erro
 // order by itself. Quantity change and removal reference only the item's own
 // plan and leave it to their foreign-key checks. Those run in the item write,
 // before the proration invoice or clawback credit note takes a number, and
-// must stay there (internal/api TestE2E_ItemChange_ReachesItsPlanBeforeTheNumberRow).
+// must stay there.
 //
 // The order is the database's ORDER BY id, the one D05 uses. A plan RLS hides
 // from the transaction is not locked here; its foreign-key check still
@@ -2335,6 +2387,13 @@ type itemPlan struct{ itemID, planID string }
 // must price no meter that another live item of the customer prices, its
 // own subscription's other items included.
 //
+// Against other subscription writers this check is complete. Every writer
+// that can put a new meter on one of the customer's items holds the
+// customer-rules lock (lockCustomerRulesTx) from before this check until it
+// commits: a create, and a service add or plan change (LockForItemChangeTx).
+// So an item another writer wrote is committed and read here, or that
+// writer waits for this transaction and then reads this item.
+//
 // The service checks before the transaction, on the plans' meters as they
 // were then. A price for a new meter can commit in between: on a plan no one
 // has used it runs no overlap check, and on a used plan its check cannot see
@@ -2342,7 +2401,10 @@ type itemPlan struct{ itemID, planID string }
 // and the writer holds the plan FOR KEY SHARE (lockPlansTx) before this
 // check. So a price that committed first is read here, and one that comes
 // later waits for this transaction, then sees the item and refuses the
-// meter (pricing's 409 meter_overlap).
+// meter (pricing's 409 meter_overlap). A price write takes no customer
+// lock. So a price added to a plan the customer already uses is not ordered
+// with a subscription created at the same moment for that customer on
+// another plan (ADR-130 Risks).
 func refuseMeterOverlapTx(ctx context.Context, tx *sql.Tx, items []itemPlan) error {
 	itemIDs := make([]string, 0, len(items))
 	planIDs := make([]string, 0, len(items))
@@ -2398,15 +2460,21 @@ func (s *PostgresStore) LockPlansTx(ctx context.Context, tx *sql.Tx, planIDs []s
 	return lockPlansTx(ctx, tx, planIDs)
 }
 
-// LockForItemChangeTx: see the Store interface. tenantID is accepted for
-// symmetry with the store's other *Tx methods; RLS scoping rides the tx.
-func (s *PostgresStore) LockForItemChangeTx(ctx context.Context, tx *sql.Tx, _ string, subscriptionID string) (domain.Subscription, error) {
+// LockForItemChangeTx: see the Store interface. tenantID keys the
+// customer-rules lock; RLS scoping rides the tx.
+func (s *PostgresStore) LockForItemChangeTx(ctx context.Context, tx *sql.Tx, tenantID string, subscriptionID string) (domain.Subscription, error) {
 	var sub domain.Subscription
 	err := scanSubRow(tx.QueryRowContext(ctx, `SELECT `+subCols+` FROM subscriptions WHERE id = $1 FOR NO KEY UPDATE`, subscriptionID), &sub)
 	if err == sql.ErrNoRows {
 		return domain.Subscription{}, errs.ErrNotFound
 	}
 	if err != nil {
+		return domain.Subscription{}, err
+	}
+	// The items are read after the customer-rules lock, so the caller's
+	// checks see every change to the customer's other subscriptions that
+	// committed before it.
+	if _, err := lockCustomerRulesTx(ctx, tx, tenantID, sub.CustomerID); err != nil {
 		return domain.Subscription{}, err
 	}
 	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
