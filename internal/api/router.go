@@ -1384,7 +1384,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// host-header poisoning as password-reset links do.
 	membersSvc := dashmembers.NewService(
 		dashmembers.NewPostgresStore(db),
-		&memberUserDirectoryAdapter{svc: userSvc, store: userStore},
+		memberUserDirectoryAdapter{PostgresStore: userStore},
 		sessionSvc,
 		outboxSender,
 		&memberTenantNamerAdapter{svc: tenantSvc},
