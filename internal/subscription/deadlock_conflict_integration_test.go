@@ -33,7 +33,7 @@ import (
 // side it stops to break a deadlock. The proration's invoices and tax are
 // itemRaceRig's recorders.
 //
-// Mutation-verify: drop respond.DeadlockAsConflict from the cancel handler
+// Mutation-verify: drop respond.ConcurrentChangeAsConflict from the cancel handler
 // (cancel) or from updateItem (update_item): the first answer is a 500, and
 // the same key replays it.
 

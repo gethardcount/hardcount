@@ -756,8 +756,8 @@ func (h *Handler) recordOfflinePayment(w http.ResponseWriter, r *http.Request) {
 	inv, err := h.svc.RecordOfflinePayment(r.Context(), tenantID, id, input.Note)
 	if err != nil {
 		// Nothing commits before the paid flip, so a payment that lost a
-		// deadlock may be sent again (ADR-136).
-		respond.FromError(w, r, respond.DeadlockAsConflict(r, err), "invoice")
+		// deadlock or a lock wait may be sent again (ADR-136).
+		respond.FromError(w, r, respond.ConcurrentChangeAsConflict(r, err), "invoice")
 		return
 	}
 
@@ -1033,13 +1033,13 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		settled, serr := h.svc.SettleZeroDue(r.Context(), tenantID, id)
 		h.releaseCollectHold(r.Context(), tenantID, id, hold)
 		if serr != nil {
-			// A settle that lost a deadlock may be sent again: no charge was
-			// sent, and the credit applied above stays applied. The resend
-			// finds nothing due, so it applies no credit and settles the
-			// invoice from the credit already applied (collectNothingDue,
-			// ADR-136). Only this branch: a deadlock after a card charge
-			// keeps its stored 500.
-			respond.FromError(w, r, respond.DeadlockAsConflict(r, serr), "invoice")
+			// A settle that lost a deadlock or a lock wait may be sent again:
+			// no charge was sent, and the credit applied above stays applied.
+			// The resend finds nothing due, so it applies no credit and
+			// settles the invoice from the credit already applied
+			// (collectNothingDue, ADR-136). Only this branch: a deadlock or
+			// lock wait after a card charge keeps its stored 500.
+			respond.FromError(w, r, respond.ConcurrentChangeAsConflict(r, serr), "invoice")
 			return
 		}
 		// A credit-paid invoice is recovered exactly as a card-paid one is, so
@@ -1142,9 +1142,9 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) collectNothingDue(w http.ResponseWriter, r *http.Request, tenantID, id string) {
 	settled, paid, err := h.svc.SettleZeroDueWithoutClaim(r.Context(), tenantID, id)
 	if err != nil {
-		// Nothing commits before this settle, so one that lost a deadlock
-		// may be sent again (ADR-136).
-		respond.FromError(w, r, respond.DeadlockAsConflict(r, err), "invoice")
+		// Nothing commits before this settle, so one that lost a deadlock or
+		// a lock wait may be sent again (ADR-136).
+		respond.FromError(w, r, respond.ConcurrentChangeAsConflict(r, err), "invoice")
 		return
 	}
 	if !paid {

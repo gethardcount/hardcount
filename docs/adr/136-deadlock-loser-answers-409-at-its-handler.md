@@ -1,11 +1,13 @@
 # ADR-136: A deadlock loser answers 409 at its handler; no in-process retry
 
 **Date:** 2026-11-09
-**Status:** Accepted
+**Status:** Accepted (amended 2026-11-10: a lock wait that Postgres ended answers the same `409`, and six more routes answer it; [amendment](#amendment-2026-11-10-a-lock-wait-postgres-ended-answers-the-same-409-on-six-more-routes))
 
 ## Summary
 
 Postgres breaks a deadlock by aborting one of the transactions in it, with SQLSTATE 40P01. Six handlers now answer that abort with `409` `concurrent_change` instead of `500`. The idempotency layer does not store a `409`, so the client sends the same request again with the same `Idempotency-Key`. Before, the `500` was stored, and the key replayed it for 24 hours. Hardcount does not run the transaction again itself, and no lock order changes. `respond.DeadlockAsConflict` does the conversion, only in a handler, and only where what the request saved before the transaction that lost is safe to run twice.
+
+**Current rule (amended 2026-11-10).** The helper is now `respond.ConcurrentChangeAsConflict`. It also converts a statement whose wait for a lock Postgres ended at `lock_timeout` (SQLSTATE 55P03). Twelve routes call it: the six above, plus subscription create and activate, item add and item remove, customer update and billing profile. Those six and the item change above are the request-path takers of the per-customer lock that every writer of a customer's rules waits on. Every other route still answers a 40P01 or a 55P03 with a stored `500`.
 
 ## Context
 
@@ -90,9 +92,46 @@ Postgres breaks a deadlock by aborting one of the transactions in it, with SQLST
 - **The dashboard does not offer Collect on an invoice with nothing due.** After collect's `409`, the invoice page reloads and shows the invoice open with $0 due and no Collect button, so an operator there cannot send it again. The API resend settles it (decision 4). So does a dunning retry, and the auto-charge sweep while the invoice still waits for its automatic charge.
 - **Other transactions.** A 40P01 in any other request, the D4 writers included, stays a stored `500`. None has a documented deadlock now.
 
+## Amendment 2026-11-10: a lock wait Postgres ended answers the same 409, on six more routes
+
+**What changed.** When a statement waits for a lock longer than `lock_timeout`, Postgres ends it with SQLSTATE 55P03, and outside a savepoint that aborts the transaction. Hardcount sets no `lock_timeout` itself. Postgres raises 55P03 today only when the operator set one on the app role (`ALTER ROLE hardcount_app SET lock_timeout = …`). Before this amendment, that answered a stored `500` on every route.
+
+1. **The helper is renamed `respond.ConcurrentChangeAsConflict`** and also converts 55P03 (`postgres.IsLockTimeout`). It writes its own WARN line, "request's lock wait ended at the lock limit; answering 409", with the raw error and the route. The code and the message are the same as for a deadlock. A statement timeout (57014) is not converted: it measures the statement's own time, not a wait for another change.
+2. **The six routes above convert 55P03 unchanged.** Their condition is about what the request committed before the transaction that failed, not about why Postgres stopped that transaction.
+3. **The rule for a new route.** A handler converts a lock timeout when both hold:
+   - its write takes a lock that queues by design. That is the customer-rules lock (`postgres.LockCustomerRulesTx`). Every writer of one customer's rules waits in line behind each tax call made inside a transaction. So parallel creates for one customer wait the sum of those calls, with Stripe healthy;
+   - the condition of decision 2: everything the request committed before the transaction that failed is safe to run twice.
+4. **Six routes are added.** With the item change above, they are the request-path takers of the customer-rules lock. They convert a deadlock too. Each returns an error only from inside its one transaction, and its steps after the commit only log:
+
+   | Route | The one transaction | Before it | After the commit |
+   |---|---|---|---|
+   | `POST /v1/subscriptions` | `subscription.Service.Create` → `PostgresStore.CreateWithBill` | Reads and checks only | `FinalizeOnCreateInvoice` returns nothing |
+   | `POST /v1/subscriptions/{id}/activate` | `Service.Activate` → `ActivateDraftWithBill` | Reads and checks only | The same |
+   | `POST /v1/subscriptions/{id}/items` | `Handler.atomicAddItemWithProration`, or `Service.AddItem` when nothing prorates | `CloseEndedPeriodFirst`, whose period compare-and-set never bills a period twice | `commitProrationTax` and `issueClawbackDrafts` return nothing |
+   | `DELETE /v1/subscriptions/{id}/items/{itemID}` | `Handler.atomicRemoveItemWithProration`, or `Service.RemoveItem` when nothing is credited; both run `Service.RemoveItemTx` | `CloseEndedPeriodFirst`, the same | `commitProrationTax` and `issueClawbackDrafts` return nothing, and the audit row's error is dropped |
+   | `PATCH /v1/customers/{id}` | `customer.Service.Update` → `WithCustomerRulesLock` | Input checks only | The Stripe sync only logs |
+   | `PUT /v1/customers/{id}/billing-profile` | `Service.UpsertBillingProfile` → `WithCustomerRulesLock` | Reads and checks only | The Stripe sync and the tax retry only log |
+
+   The idempotency layer keeps no key for a `DELETE`, so the removal's `500` was never replayed. Its `409` tells the client that the removal can be sent again, as the item change's does.
+
+5. **Routes left out.** They keep the stored `500` for a 55P03:
+   - `POST /v1/subscriptions/{id}/schedule-cancel`, `PUT /v1/subscriptions/{id}/pause-collection`, `POST /v1/subscriptions/{id}/end-trial`, `POST /v1/subscriptions/{id}/extend-trial`, `POST /v1/subscriptions/{id}/retry-billing`, `PUT /v1/subscriptions/{id}/billing-thresholds`, and the plan and meter writes. They wait behind one writer of one subscription or plan, so their wait passes a lock limit only when one tax call or one usage read does.
+   - The routes that number a document: credit-note create (`POST /v1/credit-notes`, before its `auto_issue` step), the refund route (`POST /v1/invoices/{id}/refund`) and manual invoice create (`POST /v1/invoices`). They wait on the account's number row (`tenant_settings`). An immediate plan change across billing intervals holds that row across its usage read and its Stripe Tax call, because it numbers its refund credit note before it prices (`subscription.Service.applyCrossIntervalPlanSwapTx`). Until that swap prices first, these routes can wait behind it.
+   - Every other route.
+
+**Why the cause need not be known.** A 55P03 and a 40P01 both abort the transaction, so nothing it wrote is kept, and the answer depends only on what committed before it. The WARN lines tell the two apart for an operator.
+
+**Consequences.**
+
+- A resend repeats what the lost attempt did on other connections before Postgres stopped it. For create, activate and a prorated add, that includes the tax calculation, whose row stays with no invoice. Risks above says the same for a cancel.
+- A route left out answers a 55P03 with a `500` that its key replays for 24 hours. The client reads the resource, then sends the request again with a new key ([Idempotency](../api/idempotency.md)).
+
+**Tests.** `internal/api/respond/deadlock_test.go` (40P01 and 55P03 convert, each with its WARN line; 57014, 40001 and others pass through). `internal/api/lock_timeout_conflict_e2e_test.go`: a second session holds the customer-rules lock, or for the cancel the subscription row, and the server's pool runs as a role with `lock_timeout = '300ms'`. Each of the six routes, both branches of the add and of the remove, and the cancel answer `409` `concurrent_change` and change nothing. The same request, with the same key, then succeeds once.
+
 ## References
 
-- `internal/api/respond/deadlock.go`, and the seven call sites in `internal/subscription/handler.go`, `internal/invoice/handler.go` (two in collect) and `internal/creditnote/handler.go`.
+- `internal/api/respond/deadlock.go`, and the seven call sites in `internal/subscription/handler.go`, `internal/invoice/handler.go` (two in collect) and `internal/creditnote/handler.go`. Since the amendment of 2026-11-10, fourteen: five more in `internal/subscription/handler.go` (create, activate, item add, and both branches of item remove) and two in `internal/customer/handler.go` (update, billing profile).
+- `internal/api/lock_timeout_conflict_e2e_test.go`: a lock wait that Postgres ended, on each of the six routes and on cancel.
 - `internal/invoice/collect_open_at_zero_integration_test.go`: Collect on an invoice with nothing due, with and without a charge hold.
 - `internal/api/deadlock_conflict_e2e_test.go`: a real deadlock between a cancel and a payment.
 - [ADR-066](066-threshold-money-semantics.md): the D2 deadlock.
