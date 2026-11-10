@@ -15,7 +15,7 @@ import (
 //
 // ELIGIBILITY RULE — audited across all seven sweeps 2026-07-30. The predicate
 // must survive the very crash it recovers from, which permits two shapes and
-// forbids a third:
+// forbids a third (no sweep has the third since 2026-11-10):
 //
 //  1. STRUCTURAL — the missing effect IS the predicate; no marker exists.
 //     tax_commit (has tax_calculation_id, no tax_transaction_id),
@@ -28,24 +28,23 @@ import (
 //     obligation it describes, so it cannot be absent while the obligation
 //     exists. clawback_issue's issue_pending is created in-tx with the item
 //     change; tax_retry's tax_status/tax_error_code are set on the invoice
-//     struct before its INSERT. Equivalent safety: partial state is
-//     unreachable, so there is nothing for a backstop to catch.
+//     struct before its INSERT; cn_tax_reversal's tax_reversal_pending is set
+//     by the statement that issues the credit note. Equivalent safety:
+//     partial state is unreachable, so there is nothing for a backstop to
+//     catch.
 //
 //  3. POST-HOC MARKER — written in a separate write AFTER the obligation
 //     committed, so it can fail on its own and strand the row. NOT sufficient
-//     alone; always pair it with a structural branch. There is exactly one
-//     post-hoc case, and it is the exemplar:
-//     ListPendingCreditNoteTaxReversal = tax_reversal_pending OR the
-//     structural over-remit state.
+//     alone; always pair it with a structural branch. The one case there
+//     was, cn_tax_reversal (marker written after a failed Stripe call, plus a
+//     24h structural branch and a promote step), moved to shape 2.
 //
 // Adding a sweep? Say which shape it is. If the honest answer is (3), the
 // structural branch is not optional.
 //
-// Two known bounds, deliberate rather than accidental: the structural branches
-// carry a 24h freshness window (anti-churn, #310) that bounds DETECTION only —
-// cn_tax_reversal promotes a marker-less orphan onto its unbounded marker
-// branch on the first failed re-drive (2026-08-30), so an orphan is never aged
-// out of recovery, only out of the cheap scan. payment_unknown's state sync
+// One known bound, deliberate rather than accidental: tax_commit's structural
+// branch carries a 24h freshness window (anti-churn, #310); cn_tax_reversal
+// has none, an owed reversal stays listed until it is made. payment_unknown's state sync
 // covers a charge whose result was lost too, by a CO-TRANSACTIONAL marker: the
 // charge puts its PaymentIntent on the invoice as an unknown outcome, in its
 // own commit, before the confirm that moves money (ADR-137), and that outlives

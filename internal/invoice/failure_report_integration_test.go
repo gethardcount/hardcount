@@ -70,7 +70,7 @@ func TestFailureReport_MovesOnlyTheAttemptTheInvoiceWaitsOn(t *testing.T) {
 		stampOutcome(t, store, ctx, tenantID, id, domain.PaymentFailed, "", "stripe not configured")
 	}
 	park := func(t *testing.T, id string) {
-		stampOutcome(t, store, ctx, tenantID, id, domain.PaymentUnknown, "", "timeout")
+		seedPark(t, db, id, "timeout")
 	}
 	// The stale-hold sweep's adopt: it puts a processing payment it found at
 	// Stripe on a parked invoice, through StampChargeOutcome.

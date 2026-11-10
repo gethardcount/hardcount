@@ -142,6 +142,11 @@ var ErrStripeCredentialsUnavailable = fmt.Errorf("%w: stripe credentials could n
 type StripeKeyError struct {
 	Reason  string // StripeKeyRejected or StripeKeyNotConfigured
 	Message string // Stripe's own sentence, scrubbed; empty for not_configured
+	// AtConfirm: the key was refused at the confirm, after the invoice was
+	// stamped unknown on its PaymentIntent. The invoice is not unchanged, and
+	// collecting again is refused until the unknown sweep has read that
+	// PaymentIntent, which needs a working key.
+	AtConfirm bool
 }
 
 // Reasons of a StripeKeyError; also the label of
@@ -164,6 +169,9 @@ func (e *StripeKeyError) Unwrap() error { return ErrPaymentTransient }
 // sentence names the key's last characters or the missing permission; it
 // goes to the log and the Settings notice, not to this response.
 func (e *StripeKeyError) OperatorSafeMessage() string {
+	if e.AtConfirm {
+		return "Stripe refused this account's API key while the payment was being confirmed, so its outcome is not known yet. Update the key under Settings → Payments. Hardcount then reads the payment from Stripe and records the result; collecting again is refused until it has."
+	}
 	return "Stripe refused this account's API key (or none is connected for this mode). Nothing was charged. Update the key under Settings → Payments, then collect again."
 }
 
@@ -239,16 +247,6 @@ func IsDefiniteRefusal(err error) bool {
 func isRateLimited(err error) bool {
 	var se *stripe.Error
 	return errors.As(err, &se) && se.HTTPStatusCode == http.StatusTooManyRequests
-}
-
-// isIdempotencyConflict reports whether err is Stripe refusing a key that was
-// already used with different parameters. Distinguished from the other
-// ambiguous outcomes because it carries a stronger fact: an attempt under this
-// exact key definitely reached Stripe. Callers use it to name the key in an
-// operator-facing ERROR, since the dashboard is searchable by it.
-func isIdempotencyConflict(err error) bool {
-	var stripeErr *stripe.Error
-	return errors.As(err, &stripeErr) && stripeErr.Type == stripe.ErrorTypeIdempotency
 }
 
 // declineCodeOf is the code that says why Stripe refused a card: the error's
@@ -374,22 +372,6 @@ func classifyStripeError(err error) *PaymentError {
 // actionable signal ("connect Stripe under Settings → Payments").
 var ErrStripeNotConfigured = &PaymentError{Message: "stripe not configured for this mode"}
 
-// ErrStripeAuthFailed marks a read Stripe refused with 401 or 403: the
-// tenant's key is wrong or revoked, or is a restricted key without permission
-// to read PaymentIntents. It will not succeed until someone fixes the key;
-// the unknown sweep reports it each tick and the invoice stays unknown.
-var ErrStripeAuthFailed = errors.New("stripe rejected the API key")
-
-// ErrStripeUnreachable marks a read that got no answer from Stripe: a
-// network error, or the caller's time limit ended it. Unlike a 5xx or a 429,
-// which Stripe answers at once, it can take as long as the time limit allows.
-var ErrStripeUnreachable = errors.New("stripe could not be reached")
-
-// ErrStripePaymentIntentMissing marks a read of a PaymentIntent Stripe does
-// not have in this account (resource_missing): Hardcount saved it, so the
-// tenant's Stripe account changed. It will not succeed on retry.
-var ErrStripePaymentIntentMissing = errors.New("stripe payment intent not found in this account")
-
 // ErrNoSavedCard is FetchCardDetails' "the Stripe customer has no card" — a
 // one-off payment where the customer did not save the card. It is the only
 // FetchCardDetails error that means "nothing to record"; any other is a
@@ -511,15 +493,21 @@ func (c *LiveStripeClient) ConfirmPaymentIntent(ctx context.Context, paymentInte
 			}
 			return PaymentIntentResult{}, &PaymentError{Message: stripeErrorMessage(err), PaymentIntentID: paymentIntentID, Unknown: true}
 		}
-		// A card error is a bank's answer about this PaymentIntent, so it
-		// names it, whether or not Stripe's error body carried the object. A
-		// request Stripe refused outright (an invalid request) names none,
-		// and the caller must be able to tell the two apart: only a decline
-		// is reported as a failed payment, with a customer email (review 4).
+		// A definite refusal names the PaymentIntent only when it is a card
+		// error: a bank's answer about this payment. A request Stripe refused
+		// outright (an invalid request) names none, whatever its error body
+		// carries: Stripe puts the payment_intent object on errors of a
+		// request that involves one, a refused confirm included. The caller
+		// tells the two apart by this field: only a decline is reported as a
+		// failed payment, with a customer email.
 		werr := classifyPaymentIntentWriteError(err)
 		var pe *PaymentError
-		if errors.As(werr, &pe) && !pe.Unknown && pe.PaymentIntentID == "" && pe.CardMessage != "" {
-			pe.PaymentIntentID = paymentIntentID
+		if errors.As(werr, &pe) && !pe.Unknown {
+			if se != nil && se.Type == stripe.ErrorTypeCard {
+				pe.PaymentIntentID = paymentIntentID
+			} else {
+				pe.PaymentIntentID = ""
+			}
 		}
 		return PaymentIntentResult{}, werr
 	}
@@ -633,29 +621,19 @@ func (c *LiveStripeClient) CancelPaymentIntent(ctx context.Context, paymentInten
 	return nil
 }
 
-// GetPaymentIntent fetches the current state of a PaymentIntent. Used by the
-// reconciler to resolve PaymentUnknown invoices — Stripe is the source of
-// truth for whether a charge actually succeeded.
+// GetPaymentIntent fetches the current state of a PaymentIntent. The unknown
+// and processing sweeps read it: Stripe is the source of truth for what a
+// charge did. A failed read (a refused key, a PaymentIntent not in this
+// account, a 5xx, no answer) is an error the sweep reports and retries on a
+// later tick; the invoice stays as it is.
 func (c *LiveStripeClient) GetPaymentIntent(ctx context.Context, paymentIntentID string) (PaymentIntentResult, error) {
 	sc, err := c.client(ctx)
 	if err != nil {
 		return PaymentIntentResult{}, err
 	}
-	// latest_charge expanded: whether the charge was refunded in full is on
-	// the charge, and the stale-hold sweep must not count a payment refunded
-	// at Stripe as paying the invoice. Unexpanded it carries only the id.
-	pi, err := sc.V1PaymentIntents.Retrieve(ctx, paymentIntentID, &stripe.PaymentIntentRetrieveParams{
-		Expand: []*string{stripe.String("latest_charge")},
-	})
-	var se *stripe.Error
-	if errors.As(err, &se) && se.HTTPStatusCode == http.StatusForbidden {
-		// A restricted key may read PaymentIntents but not charges. Read it
-		// unexpanded: the status and whether it has a charge still come
-		// back, only the refund check does not.
-		pi, err = sc.V1PaymentIntents.Retrieve(ctx, paymentIntentID, nil)
-	}
+	pi, err := sc.V1PaymentIntents.Retrieve(ctx, paymentIntentID, nil)
 	if err != nil {
-		return PaymentIntentResult{}, classifyReadError(err)
+		return PaymentIntentResult{}, classifyStripeError(err)
 	}
 	return paymentIntentResult(pi), nil
 }
@@ -676,11 +654,10 @@ func paymentIntentResult(pi *stripe.PaymentIntent) PaymentIntentResult {
 		AmountReceivedCents: pi.AmountReceived,
 		AnchorAt:            anchorFromPIMetadata(pi.Metadata),
 	}
-	// Only an expanded latest_charge says whether it was refunded; an
-	// unexpanded one carries just its id, and Refunded reads false.
+	// latest_charge is set (unexpanded: its id) once a confirm reached the
+	// card network.
 	if pi.LatestCharge != nil {
 		res.Charged = true
-		res.FullyRefunded = pi.LatestCharge.Refunded
 	}
 	if lpe := pi.LastPaymentError; lpe != nil {
 		res.DeclineCode = declineCodeOf(string(lpe.Type), string(lpe.Code), string(lpe.DeclineCode))
@@ -707,25 +684,6 @@ func anchorFromPIMetadata(meta map[string]string) time.Time {
 		return time.Time{}
 	}
 	return t
-}
-
-// classifyReadError types a failed PaymentIntent read for its callers (the
-// reconciler's sweeps): a 401 or a 403 (a key rejected, or a restricted key
-// without PaymentIntent read access) will not heal on retry, and a read Stripe
-// never answered (no *stripe.Error: a network error, a time limit) is
-// ErrStripeUnreachable. Both still wrap classifyStripeError's PaymentError.
-func classifyReadError(err error) error {
-	var se *stripe.Error
-	if !errors.As(err, &se) {
-		return fmt.Errorf("%w: %w", ErrStripeUnreachable, classifyStripeError(err))
-	}
-	if se.HTTPStatusCode == http.StatusUnauthorized || se.HTTPStatusCode == http.StatusForbidden {
-		return fmt.Errorf("%w: %w", ErrStripeAuthFailed, classifyStripeError(err))
-	}
-	if se.Code == stripe.ErrorCodeResourceMissing {
-		return fmt.Errorf("%w: %w", ErrStripePaymentIntentMissing, classifyStripeError(err))
-	}
-	return classifyStripeError(err)
 }
 
 // GetCheckoutSession reads a hosted Checkout Session's outcome (the hosted

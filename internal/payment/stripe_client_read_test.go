@@ -71,63 +71,64 @@ func readClient() (*LiveStripeClient, context.Context) {
 }
 
 // The read carries what the sweeps act on: the invoice, purpose, created
-// time and captured amount; whether a confirm ever reached a bank (Charged);
-// and whether the charge was refunded in full, which needs latest_charge
-// expanded (unexpanded it is only an id).
+// time and captured amount, and whether a confirm ever reached a bank
+// (Charged: latest_charge is set, as an object or as its id). A payment
+// refunded at Stripe since is read as the payment it was.
 func TestGetPaymentIntent_ReadsWhatTheSweepsActOn(t *testing.T) {
 	stub := withRoutedStripe(t, map[string]func(*http.Request) (int, string){
 		"GET /v1/payment_intents/pi_a": func(*http.Request) (int, string) { return http.StatusOK, piSucceeded },
 		"GET /v1/payment_intents/pi_b": func(*http.Request) (int, string) { return http.StatusOK, piRefunded },
 		"GET /v1/payment_intents/pi_c": func(*http.Request) (int, string) { return http.StatusOK, piCanceledNoCharge },
+		"GET /v1/payment_intents/pi_u": func(*http.Request) (int, string) {
+			return http.StatusOK, `{"id":"pi_u","object":"payment_intent","status":"succeeded","amount_received":5000,"latest_charge":"ch_u"}`
+		},
 	})
 	c, ctx := readClient()
 	a, err := c.GetPaymentIntent(ctx, "pi_a")
 	if err != nil {
 		t.Fatal(err)
 	}
-	if a.Status != domain.ProviderPISucceeded || a.InvoiceID != "inv_1" || a.Purpose != "dunning_retry" || a.AmountReceivedCents != 5000 || a.CreatedAt != 1760000100 || !a.Charged || a.FullyRefunded {
+	if a.Status != domain.ProviderPISucceeded || a.InvoiceID != "inv_1" || a.Purpose != "dunning_retry" || a.AmountReceivedCents != 5000 || a.CreatedAt != 1760000100 || !a.Charged {
 		t.Errorf("pi_a = %+v", a)
 	}
-	if q := stub.requests[0].URL.Query(); len(q["expand[0]"]) != 1 || q["expand[0]"][0] != "latest_charge" {
-		t.Errorf("read query = %v, want expand[0]=latest_charge (the refund check reads it)", q)
+	if q := stub.requests[0].URL.Query(); len(q) != 0 {
+		t.Errorf("read query = %v, want a plain read: a restricted key may read PaymentIntents and not charges", q)
 	}
-	if b, err := c.GetPaymentIntent(ctx, "pi_b"); err != nil || !b.FullyRefunded || !b.Charged {
-		t.Errorf("pi_b = %+v, %v; want FullyRefunded and Charged", b, err)
+	if b, err := c.GetPaymentIntent(ctx, "pi_b"); err != nil || b.Status != domain.ProviderPISucceeded || !b.Charged || b.AmountReceivedCents != 5000 {
+		t.Errorf("pi_b = %+v, %v; want succeeded and Charged: a refund made at Stripe does not unmake the payment", b, err)
+	}
+	if u, err := c.GetPaymentIntent(ctx, "pi_u"); err != nil || !u.Charged {
+		t.Errorf("pi_u = %+v, %v; want Charged from latest_charge given as its id", u, err)
 	}
 	if cn, err := c.GetPaymentIntent(ctx, "pi_c"); err != nil || cn.Charged || cn.Status != "canceled" {
 		t.Errorf("pi_c = %+v, %v; want canceled and not Charged (no confirm reached a bank)", cn, err)
 	}
 }
 
-// A failed read is typed for the sweeps: a refused key (401, or a 403 for a
-// restricted key without PaymentIntent read access) will not heal on retry;
-// a 500 is an answer that may. Each still carries a *PaymentError.
-func TestGetPaymentIntent_AFailedReadIsTyped(t *testing.T) {
+// A failed read is an error that carries a *PaymentError, whatever refused
+// it: a rejected key, a restricted key without read access, a 500, a
+// PaymentIntent the account does not have. The sweep reports it and reads
+// again on a later tick; the invoice stays as it is.
+func TestGetPaymentIntent_AFailedReadIsAnError(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		status int
 		body   string
-		want   error // nil: an error that is not a refusal
 	}{
-		{"API key rejected", http.StatusUnauthorized, readBadKey, ErrStripeAuthFailed},
-		{"API key lacks permission (403)", http.StatusForbidden, readNoPermission, ErrStripeAuthFailed},
-		{"a 500", http.StatusInternalServerError, read500, nil},
+		{"API key rejected", http.StatusUnauthorized, readBadKey},
+		{"API key lacks permission (403)", http.StatusForbidden, readNoPermission},
+		{"a 500", http.StatusInternalServerError, read500},
+		{"not in this account", http.StatusNotFound, `{"error":{"code":"resource_missing","message":"No such payment_intent: 'pi_x'","param":"intent","type":"invalid_request_error"}}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			withRoutedStripe(t, map[string]func(*http.Request) (int, string){
 				"GET /v1/payment_intents/pi_x": func(*http.Request) (int, string) { return tc.status, tc.body },
 			})
 			c, ctx := readClient()
-			_, err := c.GetPaymentIntent(ctx, "pi_x")
+			got, err := c.GetPaymentIntent(ctx, "pi_x")
 			var pe *PaymentError
-			if err == nil || !errors.As(err, &pe) {
-				t.Fatalf("err = %#v, want an error carrying a *PaymentError", err)
-			}
-			switch {
-			case tc.want != nil && !errors.Is(err, tc.want):
-				t.Errorf("err = %v, want %v", err, tc.want)
-			case tc.want == nil && (errors.Is(err, ErrStripeAuthFailed) || errors.Is(err, ErrStripeUnreachable)):
-				t.Errorf("err = %v: an answer that may heal was typed as a refusal or as no answer", err)
+			if err == nil || !errors.As(err, &pe) || got.Status != "" {
+				t.Fatalf("got %+v, err = %#v; want no result and an error carrying a *PaymentError", got, err)
 			}
 		})
 	}
@@ -178,17 +179,17 @@ func TestGetPaymentIntent_NoStripeConfigured(t *testing.T) {
 	}
 }
 
-// A read Stripe never answered (a network error, a time limit) is
-// ErrStripeUnreachable, which the stale-hold sweep counts toward stopping for
-// the tick: each such read can take the whole time limit.
-func TestGetPaymentIntent_NoAnswerIsUnreachable(t *testing.T) {
+// A read Stripe never answered (a network error, a time limit) is an unclear
+// error, never a result.
+func TestGetPaymentIntent_NoAnswerIsAnError(t *testing.T) {
 	net := &noAnswer{}
 	old := stripeHTTPClient.Transport
 	stripeHTTPClient.Transport = net
 	t.Cleanup(func() { stripeHTTPClient.Transport = old })
 	c, ctx := readClient()
-	if _, err := c.GetPaymentIntent(ctx, "pi_x"); !errors.Is(err, ErrStripeUnreachable) || net.calls == 0 {
-		t.Fatalf("no answer (%d requests): err = %v, want ErrStripeUnreachable", net.calls, err)
+	var pe *PaymentError
+	if _, err := c.GetPaymentIntent(ctx, "pi_x"); !errors.As(err, &pe) || !pe.Unknown || net.calls == 0 {
+		t.Fatalf("no answer (%d requests): err = %v, want an unclear *PaymentError", net.calls, err)
 	}
 }
 
@@ -225,38 +226,5 @@ func TestConfirmPaymentIntent_UnexpectedState_ReturnsRealState(t *testing.T) {
 				t.Fatalf("err = %#v, want an unclear PaymentError naming pi_x (not a decline)", err)
 			}
 		})
-	}
-}
-
-// A PaymentIntent the account does not have (resource_missing) is a refusal
-// that will not heal: the sweeps report it instead of retrying quietly.
-func TestGetPaymentIntent_MissingFromTheAccount(t *testing.T) {
-	withRoutedStripe(t, map[string]func(*http.Request) (int, string){
-		"GET /v1/payment_intents/pi_gone": func(*http.Request) (int, string) {
-			return http.StatusNotFound, `{"error":{"code":"resource_missing","message":"No such payment_intent: 'pi_gone'","param":"intent","type":"invalid_request_error"}}`
-		},
-	})
-	c, ctx := readClient()
-	_, err := c.GetPaymentIntent(ctx, "pi_gone")
-	if !errors.Is(err, ErrStripePaymentIntentMissing) {
-		t.Fatalf("err = %v, want ErrStripePaymentIntentMissing", err)
-	}
-}
-
-// A restricted key that may read PaymentIntents but not charges is refused
-// the expanded read; the read falls back to the unexpanded PaymentIntent.
-func TestGetPaymentIntent_RestrictedKeyWithoutCharges_ReadsUnexpanded(t *testing.T) {
-	withRoutedStripe(t, map[string]func(*http.Request) (int, string){
-		"GET /v1/payment_intents/pi_r": func(req *http.Request) (int, string) {
-			if req.URL.Query().Get("expand[0]") != "" {
-				return http.StatusForbidden, readNoPermission
-			}
-			return http.StatusOK, `{"id":"pi_r","object":"payment_intent","status":"succeeded","amount_received":5000,"latest_charge":"ch_r"}`
-		},
-	})
-	c, ctx := readClient()
-	got, err := c.GetPaymentIntent(ctx, "pi_r")
-	if err != nil || got.Status != domain.ProviderPISucceeded || !got.Charged {
-		t.Fatalf("got %+v, %v; want succeeded and Charged from the unexpanded read", got, err)
 	}
 }

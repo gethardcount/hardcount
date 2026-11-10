@@ -501,4 +501,23 @@ test went red.
 
 ## Amendment 2026-11-10
 
-The stale-hold sweep reads the attempt saved under a hold by id instead of listing the customer's PaymentIntents, and there is no 24-hour park, so R10 is gone ([ADR-137](137-charge-stamps-invoice-before-confirming.md)). The charge hold, its TTL and the 10-minute wait before the sweep are unchanged.
+The stale-hold sweep no longer calls Stripe. A charge puts its PaymentIntent
+on the invoice before confirming it, and the unknown sweep reads that
+PaymentIntent by id ([ADR-137](137-charge-stamps-invoice-before-confirming.md)).
+There is no customer-list check and no 24-hour park, so R10 is gone. The
+stale-hold sweep only clears: a hold that ended on an invoice still pending
+or failed belongs to a charge that never stamped, so never confirmed.
+
+The charge hold, its TTL and the 10-minute wait before the sweep are
+unchanged.
+
+What above no longer describes the code: every section on the customer-list
+read, on a parked invoice and its 24-hour wait, on a written-off park keeping
+its hold while Stripe refuses the check, and on which contexts may save an
+unclear outcome. Their tests were deleted with the code:
+`TestParked_EndsWithAPayment_TheParkedAttemptRecordsIt`,
+`TestParked_PaymentAlreadyHasARow_ParkStillEnds`,
+`TestParked_WrittenOff_StripeRefusedForGood_KeptUntilStripeAnswers`,
+`TestParkedHold_NeverClearedWhileParked`. The parked rows of
+`TestPaymentBlocksActionHeld_Matrix` remain, for a park an earlier version
+left. ADR-137 lists the tests of the design that replaced them.

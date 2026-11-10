@@ -774,9 +774,13 @@ func (s *PostgresStore) runOnFinalizedTx(ctx context.Context, tx *sql.Tx, inv do
 	return after, nil
 }
 
-// StampChargeOutcome records a charge attempt's outcome (processing, unknown,
-// or a failure with no PaymentIntent) on the invoice. A failure that names a
-// PaymentIntent goes through MarkPaymentFailedReportingTransition, which
+// StampChargeOutcome records a charge attempt's outcome on the invoice:
+// processing or unknown on a named PaymentIntent, or a failure with no
+// PaymentIntent. An in-flight outcome that names no PaymentIntent is refused:
+// that is a parked charge, which nothing in this version resolves (the
+// sweeps read the PaymentIntent the invoice names; ADR-137). A charge writes
+// "unknown" through StampPendingConfirm, before it confirms. A failure that
+// names a PaymentIntent goes through MarkPaymentFailedReportingTransition, which
 // applies the same seq CAS for the charge call (ChargedAtSeq). The write lands AFTER a Stripe round-trip, and
 // another outcome can be recorded during it: the PaymentIntent's own webhook
 // (paid or declined), an offline payment, a hosted Checkout payment, a credit
@@ -794,8 +798,10 @@ func (s *PostgresStore) runOnFinalizedTx(ctx context.Context, tx *sql.Tx, inv do
 // and status='paid' is only ever set by one of them, so "seq unchanged" means
 // exactly "nothing was recorded since this attempt began". That one CAS covers
 // a named and an unnamed attempt alike, which no comparison of state or
-// PaymentIntent id can: an unknown with no id cannot tell its own decline
-// from someone else's.
+// PaymentIntent id can: a failure with no id cannot tell its own attempt from
+// someone else's. One writer records an outcome without moving the counter:
+// EndAttemptWithoutPayment, which ends an attempt whose counter
+// StampPendingConfirm already moved.
 //
 // Writes that do not record an outcome leave the seq alone and so do not
 // block the stamp: a void or write-off that lands mid-charge still gets it,
@@ -810,6 +816,9 @@ func (s *PostgresStore) runOnFinalizedTx(ctx context.Context, tx *sql.Tx, inv do
 func (s *PostgresStore) StampChargeOutcome(ctx context.Context, tenantID, id string, attemptSeq int64, paymentStatus domain.InvoicePaymentStatus, stripePaymentIntentID, lastPaymentError string) (domain.Invoice, bool, error) {
 	switch paymentStatus {
 	case domain.PaymentProcessing, domain.PaymentUnknown:
+		if stripePaymentIntentID == "" {
+			return domain.Invoice{}, false, fmt.Errorf("stamp charge outcome: %q must name its PaymentIntent (an in-flight payment with none is a parked charge, which nothing resolves)", paymentStatus)
+		}
 	case domain.PaymentFailed:
 		// A failure that names a PaymentIntent is a report the webhook and
 		// reconciler may repeat; it goes through
@@ -2604,6 +2613,34 @@ func (s *PostgresStore) ReleaseChargeHold(ctx context.Context, tenantID, id stri
 	return tx.Commit()
 }
 
+// EndUnstampedAttempt ends a charge attempt that created its PaymentIntent but
+// did not put it on the invoice (StampPendingConfirm did not apply, or
+// failed), so it confirmed nothing (ADR-137).
+//
+// On an invoice still open for a charge it clears the caller's hold and moves
+// the charge counter in one compare-and-set (ClearStaleChargeHold's statement,
+// on the hold and the counter the charger read): "nothing was confirmed" is
+// this attempt's outcome, and the next charge must send a fresh idempotency
+// key. The stamp is refused when the amount due changed since the charge read
+// the invoice (a credit note); the old key with the new amount is answered by
+// Stripe with an idempotency error, which reads as an unclear charge.
+//
+// When that does not apply (the invoice was paid, voided or stamped
+// meanwhile, or the counter moved), only the caller's own hold is cleared,
+// if it is still the caller's. Like ReleaseChargeHold it runs to completion
+// after the caller's context has ended.
+func (s *PostgresStore) EndUnstampedAttempt(ctx context.Context, tenantID, id string, hold domain.ChargeHold, attemptSeq int64) error {
+	if !hold.Held() {
+		return nil
+	}
+	clearCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), chargeHoldReleaseTimeout)
+	defer cancel()
+	if moved, err := s.ClearStaleChargeHold(clearCtx, tenantID, id, hold.Until, attemptSeq, true); err == nil && moved {
+		return nil
+	}
+	return s.ReleaseChargeHold(ctx, tenantID, id, hold)
+}
+
 // ChargeHeldTx reports the invoice's hold: none, live, or stale (ADR-127),
 // and the hold value. The caller must hold the invoice's row lock on tx —
 // every claim takes that lock before it writes the hold, so the answer cannot
@@ -2892,9 +2929,11 @@ func (s *PostgresStore) MarkStaleHoldChecked(ctx context.Context, tenantID, id s
 }
 
 // EndAttemptWithoutPayment ends a charge attempt whose PaymentIntent took no
-// payment and never will: no confirm reached Stripe and it is canceled there,
-// or its payment was refunded in full at Stripe. The reconciler calls it for
-// an invoice left unknown on that PaymentIntent.
+// payment and never will: no confirm got an answer from a bank, and it is
+// canceled at Stripe. The reconciler calls it for an invoice left unknown on
+// that PaymentIntent, open or written off (a write-off is allowed on an
+// unknown invoice once its hold has ended, and credit note drafts waiting on
+// the payment are released by this write).
 //
 // The invoice goes back where a charge picks it up: 'failed' when the
 // attempt was a dunning retry (the run retries it; an unclear result was
@@ -2922,8 +2961,6 @@ func (s *PostgresStore) EndAttemptWithoutPayment(ctx context.Context, tenantID, 
 			auto_charge_claimed_until = NULL,
 			last_payment_error = NULL,
 			updated_at = now(),
-			-- Last: TestChargeAttemptSeqBumpedByEveryPIStamp reads the SET
-			-- list up to the first WHERE, and the subquery has one.
 			payment_status = CASE WHEN (
 				SELECT a.trigger_source FROM invoice_charge_attempts a
 				WHERE a.invoice_id = invoices.id AND a.stripe_payment_intent_id = $2
@@ -3314,9 +3351,11 @@ func (s *PostgresStore) listInflightPayments(ctx context.Context, status domain.
 		  -- The cool-off since the invoice's last write. That write is dated
 		  -- on the invoice's clock, so on a test clock advanced ahead of real
 		  -- time it lies in the future and the cool-off would never pass: the
-		  -- charge's PaymentIntent would never be read (review 4). A last
-		  -- write in the future is such a row, and it is listed at once; a
-		  -- confirm still in flight is protected by its hold, below.
+		  -- PaymentIntent would never be read. A last write in the future is
+		  -- such a row, and it is listed at once, in both sweeps that share
+		  -- this list: an unknown charge, and a processing payment (which is
+		  -- then read on every run instead of never). A confirm still in
+		  -- flight is protected by its hold, below.
 		  AND (updated_at < $2 OR updated_at > now())
 		  AND livemode = $3
 		  -- This sweep resolves by reading the PaymentIntent by id. A charge

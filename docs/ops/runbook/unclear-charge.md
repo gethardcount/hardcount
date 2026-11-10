@@ -94,11 +94,11 @@ after the charge began, and until the invoice's last change is a minute old.
 
 | The PI at Stripe | What the reconciler does |
 |---|---|
-| `succeeded` | Records the invoice paid. A payment already refunded in full at Stripe does not count (below the table). |
+| `succeeded` | Records the invoice paid, also when the payment was refunded at Stripe since (below the table). |
 | `processing` | Records what it saw. The invoice stays `unknown`, and the reconciler reads the PI again on each run until it ends. |
-| `requires_confirmation`, `requires_action` or `requires_capture`: the payment never finished | Cancels the PI at Stripe, then reads it again. With no charge on it, no bank answered, and the attempt ends with no payment (below the table). A decline that landed before the cancel is recorded as a failed payment. |
-| `canceled`, with no charge | The attempt ends with no payment (below the table). |
-| `requires_payment_method` (declined), or `canceled` after a charge | Records a failed payment, as for any declined charge. |
+| `requires_confirmation`, `requires_action` or `requires_capture`: the payment never finished | Cancels the PI at Stripe, then reads it again. With no charge and no payment error on it, no bank answered, and the attempt ends with no payment (below the table). A decline that landed before the cancel is recorded as a failed payment, and so is a payment that needed the customer to authenticate. |
+| `canceled`, with no charge and no payment error | The attempt ends with no payment (below the table). |
+| `requires_payment_method` (declined), or `canceled` after a charge or a payment error | Records a failed payment, as for any declined charge. |
 
 **An attempt that ends with no payment.** A canceled PI is final: Stripe
 refuses a confirm that arrives later. The invoice goes back to `pending`
@@ -106,9 +106,10 @@ refuses a confirm that arrives later. The invoice goes back to `pending`
 charged again as usual, under a new idempotency key. An automatic charge can
 go out in the same billing run.
 
-**A payment refunded in full at Stripe** does not pay the invoice. The
-invoice goes back the same way, with no email, and an ERROR line says so:
-`reconcile: the charge's payment was found already fully refunded at Stripe`.
+**A payment refunded at Stripe before Hardcount read it** is still that
+payment: the invoice is marked paid, and the refund shows on it as
+[a refund made in Stripe](refund-made-in-stripe.md) once Stripe's refund
+event arrives.
 
 **Why it lasts hours:**
 
@@ -332,7 +333,7 @@ Earlier Hardcount versions charged in one call, and saved nothing before the
 charge reached Stripe. Such a charge could leave an invoice with a charge
 hold, or parked (next section). The upgrade to this version refuses to run
 while any exists
-([Upgrade Hardcount](../../upgrades.md#migration-00224-finish-charges-first)).
+([Upgrade Hardcount](../../upgrades.md#migration-00225-finish-charges-first)).
 So you see this case only when a copy of an earlier version ran against the
 upgraded database.
 
@@ -385,7 +386,9 @@ After you write it off (previous section), the next run clears its charge
 hold, and the hourly ERROR stops. Nothing charges a written-off invoice, and
 a payment Stripe completes later is still recorded by its webhook. The
 invoice stays parked and keeps its notice, which asks you to check the
-customer's payments in Stripe.
+customer's payments in Stripe. A credit note draft that waits on its payment
+([Clawback drafts waiting](#clawback-drafts-waiting)) keeps waiting: nothing
+in this version ends a park.
 
 **Verify:** the ERROR does not come back for the invoice on the next run,
 and its `auto_charge_claimed_until` is empty.

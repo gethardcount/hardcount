@@ -291,6 +291,20 @@ func (m *mockInvoiceUpdater) ReleaseChargeHold(_ context.Context, _, id string, 
 	return nil
 }
 
+// EndUnstampedAttempt mirrors the store: the hold is cleared, and the counter
+// moves when the invoice is still open for a charge at the counter the
+// charge read.
+func (m *mockInvoiceUpdater) EndUnstampedAttempt(_ context.Context, _, id string, _ domain.ChargeHold, attemptSeq int64) error {
+	m.leaseReleases = append(m.leaseReleases, id)
+	inv, ok := m.invoices[id]
+	if ok && inv.ChargeAttemptSeq == attemptSeq && inv.Status == domain.InvoiceFinalized &&
+		(inv.PaymentStatus == domain.PaymentPending || inv.PaymentStatus == domain.PaymentFailed || inv.PaymentStatus == "") {
+		inv.ChargeAttemptSeq++
+		m.invoices[id] = inv
+	}
+	return nil
+}
+
 func (m *mockInvoiceUpdater) ConfirmChargeHold(_ context.Context, _, _ string, hold domain.ChargeHold, _ int64) (bool, error) {
 	m.confirms++
 	return hold.Held() && !m.confirmRefused, nil

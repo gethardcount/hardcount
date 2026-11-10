@@ -326,14 +326,10 @@ func (r *Reconciler) reconcileOne(ctx context.Context, inv domain.Invoice) (bool
 
 	switch res.Status {
 	case "succeeded":
-		if res.FullyRefunded && res.Purpose != PurposeHostedInvoicePay && inv.PaymentStatus == domain.PaymentUnknown {
-			// Money taken and handed back in full at Stripe, outside
-			// Hardcount: it does not pay the invoice. Loud, because Hardcount
-			// did not refund it. The invoice goes back to being collected.
-			slog.ErrorContext(ctx, "reconcile: the charge's payment was found already fully refunded at Stripe; it is not counted as paying the invoice",
-				"invoice_id", inv.ID, "tenant_id", inv.TenantID, "stripe_payment_intent_id", res.ID)
-			return r.endWithoutPayment(ctx, inv, res.ID, res.Status, domain.AttemptReasonRefundedAtStripe)
-		}
+		// A payment that succeeded pays the invoice, whichever of this sweep
+		// and its webhook records it first. One refunded at Stripe since is
+		// still a payment: the refund is recorded by its own webhook as a
+		// refund made in Stripe (ADR-134).
 		// Carry the charge's contracted instant into the settle, exactly as the
 		// inline and webhook paths do. Without it SettleSucceeded falls back to
 		// the invoice pin, which resolves the clock's CURRENT frozen_time — so a
@@ -348,8 +344,8 @@ func (r *Reconciler) reconcileOne(ctx context.Context, inv domain.Invoice) (bool
 		return r.settle(settleCtx, inv, res.ID, res.AmountReceivedCents, res.Purpose, "", terminalSucceeded, res.Status, "", "", "")
 
 	case "canceled", "requires_payment_method":
-		if res.Status == "canceled" && !res.Charged && res.Purpose != PurposeHostedInvoicePay && inv.PaymentStatus == domain.PaymentUnknown {
-			// Canceled with no charge: no confirm ever reached a bank (a
+		if res.Status == "canceled" && !answered(res) && res.Purpose != PurposeHostedInvoicePay && inv.PaymentStatus == domain.PaymentUnknown {
+			// Canceled with no answer: no confirm ever reached a bank (a
 			// two-step charge canceled below, whose end was not saved). That is
 			// not a failed payment: end the attempt with no customer email.
 			return r.endWithoutPayment(ctx, inv, res.ID, res.Status, domain.AttemptReasonNeverConfirmed)
@@ -360,10 +356,10 @@ func (r *Reconciler) reconcileOne(ctx context.Context, inv domain.Invoice) (bool
 		// An unknown invoice on one of Hardcount's own PaymentIntents that
 		// never finished. Still awaiting its confirm: the confirm never
 		// reached Stripe (a crash, a passed deadline, a failed connection).
-		// Awaiting the customer or a capture: an off-session charge Hardcount
-		// shows no way to finish (its charges set error_on_requires_action
-		// and capture at once, so only an earlier version left one). None
-		// ends on its own. Cancel it first, so a confirm arriving later is
+		// Awaiting the customer or a capture: neither is expected (Hardcount's
+		// charges set error_on_requires_action and capture at once, in every
+		// version), and Hardcount shows no way to finish one. None ends on
+		// its own. Cancel it first, so a confirm arriving later is
 		// refused and can take no money, then end the attempt with no
 		// customer email: no bank took a charge. A cancel Stripe refuses
 		// means a confirm got there first; the next tick reads what it did.
@@ -377,16 +373,16 @@ func (r *Reconciler) reconcileOne(ctx context.Context, inv domain.Invoice) (bool
 			}
 			// The charge's own confirm may have landed between the read and
 			// the cancel, as a decline Stripe then let the cancel follow. Read
-			// it again: a charge on it means a bank answered, which is
-			// recorded as the decline it was (its code stops dunning
-			// re-charging a lost or stolen card); none means no bank was
+			// it again: an answer on it (answered) is recorded as the
+			// decline it was (its code stops dunning re-charging a lost or
+			// stolen card, and the customer is told); none means no bank was
 			// asked, ended with no email.
 			after, err := r.client.GetPaymentIntent(ctx, res.ID)
 			if err != nil {
 				r.recordSync(ctx, inv, "canceled")
 				return false, fmt.Errorf("read payment intent %s after canceling it: %w", res.ID, err)
 			}
-			if after.Charged {
+			if answered(after) {
 				return r.settleDeclined(ctx, inv, after)
 			}
 			return r.endWithoutPayment(ctx, inv, res.ID, "canceled", domain.AttemptReasonNeverConfirmed)
@@ -555,4 +551,14 @@ func (r *Reconciler) settle(ctx context.Context, inv domain.Invoice, piID string
 		}
 		return true, nil
 	}
+}
+
+// answered reports whether a confirm of the PaymentIntent got an answer about
+// the payment: it has a charge (the card network was asked), or Stripe
+// recorded a payment error on it. A payment that needs the customer to
+// authenticate is refused with a payment error and no charge
+// (error_on_requires_action), and the customer must be told, so a charge
+// alone does not decide it.
+func answered(res PaymentIntentResult) bool {
+	return res.Charged || res.DeclineCode != "" || res.CardMessage != ""
 }

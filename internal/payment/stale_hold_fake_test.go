@@ -282,7 +282,7 @@ func (f *fakeStripe) CancelPaymentIntent(_ context.Context, id string) error {
 }
 
 // GetPaymentIntent answers as LiveStripeClient does: the PaymentIntent, or an
-// error typed by classifyReadError.
+// error as LiveStripeClient returns it.
 func (f *fakeStripe) GetPaymentIntent(ctx context.Context, id string) (PaymentIntentResult, error) {
 	f.mu.Lock()
 	hook, hang := f.beforeRead, f.hang
@@ -339,5 +339,5 @@ func (f *fakeStripe) readLocked(id string) (PaymentIntentResult, error) {
 		return f.result(pi), nil
 	}
 	// LiveStripeClient's read of a PaymentIntent this account does not have.
-	return PaymentIntentResult{}, fmt.Errorf("%w: %w", ErrStripePaymentIntentMissing, &PaymentError{Message: "No such payment_intent: '" + id + "'"})
+	return PaymentIntentResult{}, &PaymentError{Message: "No such payment_intent: '" + id + "'"}
 }

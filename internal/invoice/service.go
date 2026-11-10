@@ -2043,8 +2043,8 @@ func (s *Service) VoidUnchangedTx(ctx context.Context, tx *sql.Tx, tenantID stri
 		// when the first automatic charge fires: refuse while a charge holds
 		// it (#975), so the cancel or plan swap rolls back and is retried.
 		// A stale hold refuses too (ADR-127): the retry succeeds once the
-		// stale-hold sweep has confirmed the lost charge with Stripe, up to
-		// about an hour later (residual R3).
+		// stale-hold sweep has cleared it, up to about an hour later
+		// (residual R3).
 		if err := s.refuseWhileChargeHeld(ctx, tx, locked, domain.ActionVoid); err != nil {
 			return err
 		}
@@ -2209,24 +2209,22 @@ func (s *Service) MarkUncollectibleThen(ctx context.Context, tenantID, id string
 	case domain.InvoiceUncollectible:
 		return domain.Invoice{}, errs.InvalidState("invoice is already uncollectible")
 	}
-	// A charge in flight may still succeed. MarkPaid IS allowed from
-	// uncollectible (the "wrote it off but paid after all" recovery), so if we
-	// reverse tax + flip to uncollectible now and the charge then settles, the
-	// tax for a real collected sale has been reversed → the tenant under-remits.
-	// Block until terminal. Stripe enforces the same ("can't mark uncollectible
-	// with open payments"). Guard sits BEFORE reverseInvoiceTax.
-	// A PARKED invoice is the exception (ADR-107): payment_status='unknown' with
-	// no PaymentIntent id means Stripe's answer was unclear and named no
-	// payment (only an earlier version parks; ADR-137), and writing it off is
-	// the action for a customer who paid another way, or for a park Stripe
-	// cannot be asked about (found by the honesty sweep, 2026-07-31, when it
-	// had no exit at all).
+	// A write-off is refused while a payment is processing, and while a
+	// charge holds the invoice (live, or stale and waiting for the stale-hold
+	// sweep). MarkPaid IS allowed from uncollectible (the "wrote it off but
+	// paid after all" recovery), so reversing the tax and writing off while a
+	// charge is being sent would reverse the tax of a sale that is then
+	// collected. Stripe enforces the same ("can't mark uncollectible with open
+	// payments"). The guard sits BEFORE reverseInvoiceTax.
 	//
-	// Writing it off is safe in a way voiding is not: it moves no money, and if
-	// the charge did succeed the payment webhook or the stale-hold sweep still
-	// marks the invoice paid, which audits recovered_from. Void
-	// stays refused because a voided-then-succeeded invoice is a contradiction,
-	// and RecordOfflinePayment stays refused because it would label a card
+	// It is allowed on any 'unknown' invoice once its hold has ended
+	// (ADR-137): the charge's result is not known, and writing off is the
+	// action for a customer who paid another way, or for a payment Stripe
+	// cannot be asked about. It is safe in a way voiding is not: it moves no
+	// money, and a payment the unknown sweep or a webhook finds later still
+	// settles the invoice (uncollectible to paid, audited as recovered_from).
+	// Void stays refused because a voided-then-succeeded invoice is a
+	// contradiction, and RecordOfflinePayment because it would label a card
 	// charge as out-of-band.
 	if b := domain.PaymentBlocksAction(inv, domain.ActionMarkUncollectible); b.Blocked {
 		return domain.Invoice{}, errs.InvalidState(b.Message).WithCode(b.Code)
@@ -2234,10 +2232,9 @@ func (s *Service) MarkUncollectibleThen(ctx context.Context, tenantID, id string
 
 	// Re-run under the row lock, with the charge hold: the check above read
 	// the invoice before the lock, and a charge can claim it in between
-	// (#975). A parked invoice still passes (the hold is not consulted on
-	// 'unknown'), so ADR-107's only exit stays open, and so does an invoice
-	// whose hold is stale (ADR-127): writing off moves no money, and a payment
-	// the unknown sweep finds later still settles it.
+	// (#975). A live hold refuses; an 'unknown' invoice whose hold has ended
+	// passes, and so does one whose hold is stale (ADR-127): writing off moves
+	// no money, and a payment the unknown sweep finds later still settles it.
 	updated, err := s.store.UpdateStatusWithReversalPrior(ctx, tenantID, id, domain.InvoiceUncollectible, func(tx *sql.Tx, locked domain.Invoice) error {
 		if err := s.refuseWhileChargeHeld(ctx, tx, locked, domain.ActionMarkUncollectible); err != nil {
 			return err

@@ -100,17 +100,15 @@ func TestTwoStep_LostAnswer_OnAdvancedTestClock_PaymentIsRecorded(t *testing.T) 
 	}
 }
 
-// Migration 00224's upgrade check, run the way the migration runs it: in its
+// Migration 00225's upgrade check, run the way the migration runs it: in its
 // own transaction, with nothing set. invoices has FORCE ROW LEVEL SECURITY, so
 // for a migration user that is the database owner but not a superuser (the
 // documented minimum for DATABASE_URL, docs/ops/postgres-requirements.md) the
-// count sees no rows unless the file turns the bypass on. Every other
-// migration that reads invoices starts with SET LOCAL app.bypass_rls = 'on'
-// (00186 says why); 00224 does not, and docs/upgrades.md's manual copy of the
-// same count does. The existing test runs the block inside a TxBypass
-// transaction, which sets the bypass for it.
-//
-// Correct: the upgrade stops while an open invoice has a charge hold.
+// count sees no rows unless the file turns the bypass on, as every migration
+// that reads invoices does (SET LOCAL app.bypass_rls = 'on'; 00186 says why).
+// This test guards that line: without it the check counts nothing and lets
+// the upgrade through. The other upgrade-check test runs the block inside a
+// TxBypass transaction, which sets the bypass for it and so cannot tell.
 func TestUpgradeCheck_RunAsTheMigrationRuns_StopsOnAHold(t *testing.T) {
 	r := newTwoStepRig(t, "R4 Upgrade RLS")
 	inv := r.seed("INV-R4-UPGRADE")
@@ -120,7 +118,7 @@ func TestUpgradeCheck_RunAsTheMigrationRuns_StopsOnAHold(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = r.release(c, inv.ID) })
 
-	raw, err := os.ReadFile("../platform/migrate/sql/00224_charge_hold_token.sql")
+	raw, err := os.ReadFile("../platform/migrate/sql/00225_charge_hold_token.sql")
 	if err != nil {
 		t.Fatalf("read the migration: %v", err)
 	}

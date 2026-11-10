@@ -49,7 +49,7 @@ alerting tier: what should page someone, and what is only informational.
 | `hardcount_billing_oldest_due_age_seconds{mode}` | > 2× billing interval | A subscription has been due that long, and it is not counted in `hardcount_billing_failing_subscriptions`. See [A subscription is due but not billed](background-job-stuck.md#a-subscription-is-due-but-not-billed) |
 | `hardcount_billing_failing_subscriptions{state="parked",mode="live"}` | > 0 | A subscription has not been invoiced and nothing will retry it. Eight billing attempts failed. See [Billing failing](billing-failing.md) |
 | `hardcount_dunning_runs_processed_total{outcome="failed"}` | rate > 0.5/s | Dunning (the automatic retries of failed payments) is struggling |
-| `hardcount_webhook_deliveries_total{status="failed"}` | sustained failure | Customer's webhook endpoint down, redirecting, or signature wrong. See [A webhook endpoint keeps failing](webhook-endpoint-failing.md) |
+| `hardcount_webhook_deliveries_total{status="failed"}` | sustained failure | Customer's webhook endpoint down, redirecting, or signature wrong. Or Hardcount gave up a delivery it could not finish. See [A webhook endpoint keeps failing](webhook-endpoint-failing.md) |
 | `hardcount_stripe_breaker_state` | == 2 (open; 0=closed, 1=half_open) | Stripe API circuit breaker tripped |
 | `hardcount_email_outbox_pending` | > 1000 | Email dispatcher stuck or SMTP provider issue (−1 = the metric query itself failed) |
 | `hardcount_webhook_outbox_pending` | > 1000 | Webhook dispatcher stuck (−1 = metric query failed) |
@@ -58,7 +58,7 @@ alerting tier: what should page someone, and what is only informational.
 | `min_over_time(hardcount_creditnote_pending_tax_reversals[24h])` | > 0 | The count of issued credit notes whose tax reversal at the provider is still owed has not been zero for a day. The gauge is a count, not an age. See the note below the table |
 | `min_over_time(hardcount_invoice_pending_tax_reversals[24h])` | > 0 | The count of voided invoices taxed by Stripe Tax (`stripe_tax`) whose committed tax transaction has no confirmed reversal has not been zero for a day. See the note below the table |
 | `hardcount_creditnote_pending_issue_drafts` | sustained growth over days | Clawback drafts are not issuing. A clawback is a credit note Hardcount issues when a paid, in-advance period is cut short. Alert on growth or age, not presence. See [Clawback drafts waiting](unclear-charge.md#clawback-drafts-waiting) |
-| `hardcount_parked_invoices{disposition="open"}` | > 0 | An invoice that an earlier version parked got past the upgrade check. A parked invoice is one whose charge got an unclear answer from Stripe that named no payment. This version parks no invoice, so the gauge stays 0 after the upgrade; a later release removes it. See [Left by an earlier version](unclear-charge.md#left-by-an-earlier-version) |
+| `hardcount_parked_invoices{disposition="open"}` | > 0 | An invoice that an earlier version parked got past the upgrade check. A parked invoice is one whose charge got an unclear answer from Stripe that named no payment. This version parks no invoice, and the upgrade refuses to run over one, so the gauge stays 0 unless a copy of an earlier version kept running against the upgraded database. A later release removes it. See [Left by an earlier version](unclear-charge.md#left-by-an-earlier-version) |
 | `hardcount_stale_charge_hold_resolutions_total{result="earlier"}` | increase > 0 | A charge hold (the 5-minute claim a charge puts on an invoice) or a parked charge that an earlier version left got past the upgrade check. Hardcount keeps it and charges nothing on that invoice until a person settles it. See [Left by an earlier version](unclear-charge.md#left-by-an-earlier-version) |
 | `hardcount_stripe_key_unusable_total{reason}` | increase > 0 | Charges are paused (not failed) until the key is fixed in Settings → Payments. `rejected`: Stripe refused the account's key (rolled, or a restricted key without a permission; adding the permission in Stripe also fixes it, and the next charge that goes through clears the Settings notice). `not_configured`: no key for that mode. The ERROR line "Stripe refused this tenant's API key" names the account and mode. Each tick tries again |
 | `hardcount_stale_charge_hold_resolutions_total{result="failed"}` | increase on several billing ticks in a row | Hardcount could not clear a charge hold that a stopped charge left: the database write failed, or the check panicked. The invoice cannot be charged until the hold clears. See [A charge hold that does not clear](unclear-charge.md#a-charge-hold-that-does-not-clear) |
@@ -87,7 +87,7 @@ Notes on three rows:
   day can be one reversal the provider keeps rejecting, or a steady stream
   of new ones. The oldest tells which (in `psql`, see
   [Before you start](index.md#before-you-start)):
-  `SET app.bypass_rls = 'on'; SELECT tenant_id, id, issued_at FROM credit_notes WHERE tax_reversal_pending AND status = 'issued' ORDER BY issued_at LIMIT 5;`.
+  `SET app.bypass_rls = 'on'; SELECT cn.tenant_id, cn.id, cn.issued_at FROM credit_notes cn WHERE cn.tax_reversal_pending AND cn.status = 'issued' AND cn.is_simulated = false AND EXISTS (SELECT 1 FROM invoices i WHERE i.id = cn.invoice_id AND i.tenant_id = cn.tenant_id AND COALESCE(i.tax_transaction_id, '') <> '') ORDER BY cn.issued_at LIMIT 5;`.
   One more than a day old: handle as SEV-2 (see [Escalation](escalation.md)).
 - **Pending tax reversals (invoices).** The invoice tax-reversal sweep
   tries each one again. The oldest:
@@ -129,6 +129,11 @@ grep "auto-charge retry error" log
 # Webhook deliveries that gave up, and ones that will retry
 grep "webhook delivery permanently failed" log
 grep "webhook delivery scheduled for retry" log
+
+# Webhook deliveries that failed inside Hardcount: an attempt that panicked
+# (with its stack), and one given up while still pending after 50h36m
+grep "webhook delivery attempt panicked" log
+grep "webhook delivery given up" log
 
 # Tax provider failures (the invoice waits for its tax retry)
 grep "stripe tax failed, deferring invoice for retry" log

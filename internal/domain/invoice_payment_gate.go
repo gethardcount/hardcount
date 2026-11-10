@@ -139,7 +139,7 @@ func PaymentBlocksActionHeld(inv Invoice, action InvoiceAction, hold ChargeHoldS
 
 // ChargeHoldRefusalMessage is what an operator reads when an action is refused
 // because a charge holds the invoice. The hold is live, or stale and waiting
-// for the stale-hold sweep to confirm it with Stripe (ADR-127).
+// for the stale-hold sweep to clear it (ADR-127, ADR-137).
 const ChargeHoldRefusalMessage = "A charge on this invoice is being confirmed with Stripe. Try again in a few minutes; an interrupted charge is cleared within about an hour."
 
 // parkedMessage says why the action is refused on a park and what to do. Only

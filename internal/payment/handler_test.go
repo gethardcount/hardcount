@@ -479,6 +479,10 @@ func (m *mockInvoiceUpdaterHandler) ReleaseChargeHold(_ context.Context, _, _ st
 	return nil
 }
 
+func (m *mockInvoiceUpdaterHandler) EndUnstampedAttempt(_ context.Context, _, _ string, _ domain.ChargeHold, _ int64) error {
+	return nil
+}
+
 func (m *mockInvoiceUpdaterHandler) ConfirmChargeHold(_ context.Context, _, _ string, hold domain.ChargeHold, _ int64) (bool, error) {
 	return hold.Held(), nil
 }
