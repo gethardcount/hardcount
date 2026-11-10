@@ -388,10 +388,15 @@ func (s *PostgresStore) CreateEvent(ctx context.Context, tenantID string, event 
 // retry worker is the crash backstop that picks the row up at lease
 // expiry — never a NULL next_retry_at double-POST race.
 //
-// outboxRowID, when non-empty, marks the webhook_outbox row dispatched
-// INSIDE the same tx (handler-owns-mark): a crash after this commit but
-// before the old separate outbox mark used to re-run the handler and
-// mint a DUPLICATE event with a fresh id that receivers cannot dedupe.
+// outboxRowID, when non-empty, is the webhook_outbox row the event comes
+// from. The row is marked dispatched in the same tx (handler-owns-mark). A
+// mark in a tx of its own could be lost to a crash after the event commits,
+// and the row would then be dispatched again as a second event with a new
+// id, which receivers cannot dedupe.
+//
+// The mark applies only to a row still pending. If it matches no row, the
+// call returns ErrOutboxRowNotPending and writes nothing: another claim of
+// the row has already written its event, or the row was given up on.
 func (s *PostgresStore) CreateEventWithDeliveries(ctx context.Context, tenantID string, event domain.WebhookEvent, endpointIDs []string, birthLease time.Duration, outboxRowID string) (domain.WebhookEvent, []domain.WebhookDelivery, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -440,14 +445,24 @@ func (s *PostgresStore) CreateEventWithDeliveries(ctx context.Context, tenantID 
 	}
 
 	if outboxRowID != "" {
-		// CAS: a replayed handler whose row was already resolved must
-		// not resurrect it.
-		if _, err := tx.ExecContext(ctx, `
+		// One outbox row makes one event. The UPDATE locks the row, so of
+		// two transactions marking the same row, the second waits for the
+		// first to commit and then finds the row dispatched. Returning on
+		// zero rows rolls back this event and its delivery rows.
+		res, err := tx.ExecContext(ctx, `
 			UPDATE webhook_outbox
 			SET status = 'dispatched', dispatched_at = now(), last_error = NULL
 			WHERE id = $1 AND status = 'pending'
-		`, outboxRowID); err != nil {
+		`, outboxRowID)
+		if err != nil {
 			return domain.WebhookEvent{}, nil, fmt.Errorf("mark outbox row %s: %w", outboxRowID, err)
+		}
+		n, err := res.RowsAffected()
+		if err != nil {
+			return domain.WebhookEvent{}, nil, fmt.Errorf("mark outbox row %s: %w", outboxRowID, err)
+		}
+		if n == 0 {
+			return domain.WebhookEvent{}, nil, ErrOutboxRowNotPending
 		}
 	}
 
@@ -759,6 +774,13 @@ func (s *PostgresStore) UpdateDelivery(ctx context.Context, tenantID string, d d
 // pending row — the row was resolved by another worker after this
 // worker's lease expired. The stale writer drops its result.
 var ErrStaleDeliveryMark = errors.New("webhook: stale delivery mark (row no longer pending)")
+
+// ErrOutboxRowNotPending is returned by CreateEventWithDeliveries when the
+// webhook_outbox row it was asked to mark dispatched is not pending: another
+// claim of the row already wrote its event, or the row was given up on. The
+// event and its delivery rows are rolled back, so the row has no second
+// event.
+var ErrOutboxRowNotPending = errors.New("webhook outbox: the dispatched mark matched no pending row; no event written")
 
 // ListPendingDeliveries atomically CLAIMS up to `limit` due deliveries and
 // returns them. It is not a pure read: each returned row is leased by pushing

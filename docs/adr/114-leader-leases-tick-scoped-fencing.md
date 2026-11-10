@@ -113,11 +113,18 @@ claim returns zero rows within the claim's own snapshot:
 (email_outbox), `webhook.ListPendingDeliveries` (webhook_delivery).
 
 Deliberately **not** fenced: completions already in flight (they land through
-the existing row CAS — `ErrStaleDeliveryMark`, email `markCAS`, the dunning
+the existing row CAS — `ErrStaleDeliveryMark`, the outbox marks, the dunning
 CAS, `ClaimAutoCharge`'s lease column, `idx_invoices_billing_period_dedup`);
 the eight secondary sweeps and reconcilers (CAS/idempotency-guarded or shared
 with non-leader callers; fencing them would be a second mechanism for a
-closed hazard); operator-path methods (`RunCycleForTenant`, replay). The one
+closed hazard); operator-path methods (`RunCycleForTenant`, replay).
+*(Amended 2026-11-10, #1661: this list named email `markCAS`, a check on
+`status = 'pending'` alone. It now names the marks of both outboxes. Each
+mark checks the row's status, and none checks the leader token. A retry or
+give-up mark also matches the `attempts` its claim returned. The sent and
+skip marks do not. See
+[ADR-072](072-transport-lease-model.md#amendment-2026-11-10--what-each-mark-may-change).)*
+The one
 named non-CAS effect-firer reachable from a leader tick —
 `ClearPauseCollection` → `subscription.collection_resumed` — becomes a CAS in
 PR-B (the clear reports whether it changed the row; the event fires only if

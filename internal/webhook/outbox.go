@@ -144,8 +144,10 @@ type OutboxHandler func(ctx context.Context, row OutboxRow) error
 //     new row starts once the batch ctx is nearly spent; the rest wait out
 //     their lease.
 //  3. MARK: each row in its own short tx on a ctx detached from the batch
-//     deadline, a CAS on status='pending'. A success is already marked by
-//     the handler, in the tx that writes the event and its deliveries.
+//     deadline. A retry or give-up mark applies only to a row that is
+//     still pending under this claim (see attemptRow). A success is already
+//     marked by the handler, in the tx that writes the event and its
+//     deliveries.
 //
 // Returns the number of rows attempted, whatever their outcome. The batch
 // ctx's deadline bounds how long the loop keeps starting rows.
@@ -240,6 +242,15 @@ func (s *OutboxStore) ProcessBatch(ctx context.Context, limit int, handler Outbo
 // handler-owns-mark (dispatchFromOutbox marks the row inside the event
 // tx), the success mark here is a no-op backstop — the CAS's zero-row
 // case, expected and silent for success.
+//
+// Another claim may have taken the row by the time this one marks it: this
+// claim's lease ran out while its handler was still at work. So the retry
+// and give-up marks apply only to a pending row whose attempts still equals
+// row.Attempts. Only a claim adds to attempts, so a later claim carries a
+// higher value, and this claim's mark then matches no row and is dropped
+// with a warning. Without that check, a late retry mark would end the new
+// claim's lease early, and a late give-up would mark failed a row the new
+// claim dispatches. (See ADR-072, amendment 2026-11-10.)
 func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler OutboxHandler) {
 	rowCtx, cancel := context.WithTimeout(ctx, outboxPerRowBudget)
 	hErr := func() (err error) {
@@ -280,16 +291,17 @@ func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler Out
 		res, err := mtx.ExecContext(markCtx, `
 			UPDATE webhook_outbox
 			SET status = 'failed', last_error = $2
-			WHERE id = $1 AND status = 'pending'
-		`, row.ID, errMsg)
+			WHERE id = $1 AND status = 'pending' AND attempts = $3
+		`, row.ID, errMsg, row.Attempts)
 		if err != nil {
 			slog.Error("webhook outbox: DLQ mark failed", "outbox_id", row.ID, "error", err)
 			return
 		}
 		// Counted and logged only when this mark moved the row. Zero rows:
-		// another processor resolved it after this one's lease ran out.
+		// after this claim's lease ran out, another processor resolved the
+		// row or claimed it again.
 		if n, err := res.RowsAffected(); err != nil || n == 0 {
-			slog.Warn("webhook outbox: stale DLQ mark dropped (row no longer pending)", "outbox_id", row.ID, "error", err)
+			slog.WarnContext(markCtx, "webhook outbox: stale DLQ mark dropped (row no longer pending, or claimed again)", "outbox_id", row.ID, "error", err)
 			return
 		}
 		if err := mtx.Commit(); err != nil {
@@ -308,12 +320,23 @@ func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler Out
 	}
 
 	nextAt := time.Now().UTC().Add(outboxBackoff(row.Attempts))
-	if _, err := mtx.ExecContext(markCtx, `
+	res, err := mtx.ExecContext(markCtx, `
 		UPDATE webhook_outbox
 		SET next_attempt_at = $2, last_error = $3
-		WHERE id = $1 AND status = 'pending'
-	`, row.ID, nextAt, errMsg); err != nil {
+		WHERE id = $1 AND status = 'pending' AND attempts = $4
+	`, row.ID, nextAt, errMsg, row.Attempts)
+	if err != nil {
 		slog.Error("webhook outbox: retry mark failed", "outbox_id", row.ID, "error", err)
+		return
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		slog.ErrorContext(markCtx, "webhook outbox: retry mark rows-affected", "outbox_id", row.ID, "error", err)
+		return
+	}
+	if n == 0 {
+		// The handler's error is logged here, because no row keeps it.
+		slog.WarnContext(markCtx, "webhook outbox: stale retry mark dropped (row no longer pending, or claimed again)", "outbox_id", row.ID, "error", errMsg)
 		return
 	}
 	if err := mtx.Commit(); err != nil {

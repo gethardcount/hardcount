@@ -39,6 +39,8 @@ type Store interface {
 	// delivery row (born leased) in ONE tx; outboxRowID, when set, marks
 	// the producing webhook_outbox row dispatched in the same tx (P5
 	// handler-owns-mark — see PostgresStore for the crash analysis).
+	// When that row is not pending, it returns ErrOutboxRowNotPending and
+	// writes nothing.
 	CreateEventWithDeliveries(ctx context.Context, tenantID string, event domain.WebhookEvent, endpointIDs []string, birthLease time.Duration, outboxRowID string) (domain.WebhookEvent, []domain.WebhookDelivery, error)
 	// CreateDeliveriesForEvent batch-creates born-leased delivery rows
 	// for an EXISTING event (the replay path — the clone commits first).
