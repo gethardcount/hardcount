@@ -19,6 +19,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/crypto"
 	"github.com/gethardcount/hardcount/internal/platform/listorder"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/tax"
 )
 
 type PostgresStore struct {
@@ -1029,6 +1030,16 @@ func (s *PostgresStore) MarkPaymentFailedReportingTransition(ctx context.Context
 			postgres.NullableString(report.Message), pi, now, id,
 		).Scan(s.scanInvDest(&inv)...)
 	} else {
+		// A failure that ends the attempt the invoice was in flight on
+		// (unknown or processing on this PaymentIntent) frees that attempt's
+		// hold: no claim admits an in-flight invoice, so the hold is its
+		// own. In any other state the hold may be a charger's that has
+		// claimed and not yet stamped, and stays. So does a hold without its
+		// token (an earlier version's), which the stale-hold sweep keeps for
+		// a person. (See ADR-137.)
+		endsInFlightAttempt := holdsThisPI &&
+			(domain.InvoicePaymentStatus(paymentStatus) == domain.PaymentUnknown ||
+				domain.InvoicePaymentStatus(paymentStatus) == domain.PaymentProcessing)
 		err = tx.QueryRowContext(ctx, `
 			UPDATE invoices SET
 				payment_status = 'failed',
@@ -1037,10 +1048,13 @@ func (s *PostgresStore) MarkPaymentFailedReportingTransition(ctx context.Context
 				failure_notified_pi = $1,
 				below_minimum_at = NULL,
 				charge_attempt_seq = charge_attempt_seq + 1,
+				auto_charge_claimed_until = CASE
+					WHEN $5 AND charge_hold_token = auto_charge_claimed_until THEN NULL
+					ELSE auto_charge_claimed_until END,
 				updated_at = $3
 			WHERE id = $4
 			RETURNING `+invCols,
-			pi, postgres.NullableString(report.Message), now, id,
+			pi, postgres.NullableString(report.Message), now, id, endsInFlightAttempt,
 		).Scan(s.scanInvDest(&inv)...)
 	}
 	if err != nil {
@@ -1430,6 +1444,10 @@ func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenant
 			amount_paid_cents = amount_due_cents,
 			amount_due_cents = 0,
 			auto_charge_pending = FALSE,
+			-- A paid invoice admits no charge, so no hold has a use on it:
+			-- the write that pays it frees the hold (a charger between its
+			-- claim and its stamp is refused by the stamp's compare-and-set).
+			auto_charge_claimed_until = NULL,
 			updated_at = $3
 		WHERE id = $4
 		RETURNING `+invCols,
@@ -2446,12 +2464,11 @@ func lockInvoiceForChargeClaim(ctx context.Context, tx *sql.Tx, id string) (bool
 }
 
 // chargeHoldFree is the claim predicate on the hold (ADR-127): only a NULL
-// hold is free. An expired hold is NOT free — it means a charge may have been
-// sent and its result was not saved, and only the stale-hold sweep, after
-// asking Stripe, may clear it. Before ADR-127 the claims took an expired hold
-// as free (`IS NULL OR < now()`), so an interrupted charge left the invoice
-// looking exactly like one never charged and the next initiator charged it
-// again (#976). Shared by every claim so they cannot drift apart.
+// hold is free. An expired hold is NOT free: a charge may have been sent and
+// its result not saved. The stale-hold sweep clears it, or the settle that
+// records the result (ADR-137). A claim that took an expired hold as free
+// would charge again an invoice whose charge was interrupted (#976). Shared
+// by every claim so they cannot drift apart.
 const chargeHoldFree = `auto_charge_claimed_until IS NULL`
 
 // chargeHoldReleaseTimeout bounds a release detached from its caller's
@@ -2625,40 +2642,6 @@ func (s *PostgresStore) EndUnstampedAttempt(ctx context.Context, tenantID, id st
 			"invoice_id", id, "error", err)
 	}
 	return s.ReleaseChargeHold(ctx, tenantID, id, hold)
-}
-
-// ReleaseRetryChargeHoldTx frees the charge hold a dunning retry kept while
-// its payment was processing, once that payment has failed (#1289). It runs
-// on the failure settle's transaction (MarkPaymentFailedReportingTransition's
-// hook), which holds the invoice's row lock, and only for the PaymentIntent
-// the invoice now records as failed.
-//
-// Why the hold is that retry's: until this transaction the invoice was
-// processing on paymentIntentID, and no claim admits a processing invoice, so
-// no other owner can have taken a hold since the retry's. The one other
-// writer of a hold in that state is the stale-hold sweep, which looks only at
-// holds that ended at least domain.StaleChargeHoldWait ago, so this releases
-// only a hold younger than that, which the sweep has not looked at. An older
-// one stays for the sweep,
-// whose next check clears it. Reports whether it released. No updated_at
-// write (see ClaimAutoCharge).
-func (s *PostgresStore) ReleaseRetryChargeHoldTx(ctx context.Context, tx *sql.Tx, invoiceID, paymentIntentID string) (bool, error) {
-	if paymentIntentID == "" {
-		return false, nil
-	}
-	res, err := tx.ExecContext(ctx, `
-		UPDATE invoices SET auto_charge_claimed_until = NULL
-		WHERE id = $1 AND stripe_payment_intent_id = $2 AND payment_status = 'failed'
-		  AND auto_charge_claimed_until > now() - make_interval(secs => $3)`,
-		invoiceID, paymentIntentID, domain.StaleChargeHoldWait.Seconds())
-	if err != nil {
-		return false, fmt.Errorf("release the retry's charge hold: %w", err)
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return false, err
-	}
-	return n == 1, nil
 }
 
 // ChargeHeldTx reports the invoice's hold: none, live, or stale (ADR-127),
@@ -3054,7 +3037,9 @@ func (s *PostgresStore) SetTaxTransaction(ctx context.Context, tenantID, id stri
 	}
 	defer postgres.Rollback(tx)
 
-	_, err = tx.ExecContext(ctx, `UPDATE invoices SET tax_transaction_id = $1, updated_at = $2 WHERE id = $3`,
+	// tax_next_retry_at is cleared with it: the commit sweep's back-off for
+	// this invoice is over (DeferTaxWork).
+	_, err = tx.ExecContext(ctx, `UPDATE invoices SET tax_transaction_id = $1, tax_next_retry_at = NULL, updated_at = $2 WHERE id = $3`,
 		taxTransactionID, clock.Now(ctx), id)
 	if err != nil {
 		return err
@@ -3491,13 +3476,26 @@ func (s *PostgresStore) ListPendingTaxRetry(ctx context.Context, batch int, retr
 // left when
 // CommitTax's Stripe commit succeeded upstream but the local SetTaxTransaction
 // write failed (or the process crashed in between). Powers the commit
-// reconciler, which re-commits each to recover the transaction id (idempotency
-// makes Stripe return the original transaction, never a duplicate).
+// reconciler, which re-commits each to recover the transaction id (while
+// Stripe holds the idempotency key, 24 hours, it returns the original
+// transaction, never a duplicate; for a later re-commit see
+// tax.StripeTaxProvider.Commit).
 //
-// Bounded to invoices touched within the last 24h: beyond that the Stripe Tax
-// calculation has expired, so the engine's expiry guard blocks the re-commit
-// anyway — chasing them every tick would only log churn. An aged-out orphan
-// needs a manual tax re-calc.
+// Bounded by the calculation's own expiry (tax.CalculationUsableUntilSQL, the
+// instant the engine's expiry guard uses): Stripe accepts a commit for 90
+// days after the calculation was made, so an invoice whose commit kept
+// failing (a key that cannot record tax, a Stripe Tax incident) is committed
+// whenever the cause is fixed within that time. Past the expiry the guard
+// refuses the commit, so the row is dropped; it needs a manual tax re-calc.
+// An invoice with no recorded calculation keeps the earlier bound, 24 hours
+// after its last write. Before, every invoice had that 24-hour bound, from a
+// mistaken reading of Stripe's limit, and a commit that failed for longer than
+// a day was never reported.
+//
+// A commit that fails is not retried on the next tick: the sweep moves the
+// invoice's tax_next_retry_at forward (DeferTaxWork), and the list takes
+// invoices never deferred first, then the longest-waiting. The list is across
+// tenants, so without that one tenant's failing invoices held its head.
 //
 // Clock-pinned invoices are excluded — but, unlike ListPendingTaxRetry (which
 // has a real catchup counterpart, ListPendingTaxRetryForClock), there is NO
@@ -3530,15 +3528,26 @@ func (s *PostgresStore) ListPendingTaxCommit(ctx context.Context, batch int, liv
 		  -- credit-note/void can't reverse its tax (the reversal guards key on
 		  -- a non-empty tax_transaction_id) → the tenant over-remits. CommitTax
 		  -- is status-agnostic + idempotent, so re-committing a paid/voided row
-		  -- is safe; the 24h window below bounds it to Stripe's calc TTL.
+		  -- is safe; the expiry predicate below bounds it to the calculation's life.
 		  AND i.status IN ('finalized', 'paid', 'voided', 'uncollectible')
 		  AND i.tax_status = 'ok'
 		  AND i.tax_provider = 'stripe_tax'
 		  AND COALESCE(i.tax_calculation_id, '') <> ''
 		  AND COALESCE(i.tax_transaction_id, '') = ''
-		  AND i.updated_at > now() - interval '24 hours'
+		  -- Issued invoices only. A draft can be voided, and it then has a
+		  -- calculation and no transaction; committing it would report tax
+		  -- for an invoice that was never issued, and the reversal sweep
+		  -- would then reverse it.
+		  AND i.issued_at IS NOT NULL
+		  AND COALESCE(
+		        (SELECT `+tax.CalculationUsableUntilSQL+`
+		           FROM tax_calculations c
+		          WHERE c.tenant_id = i.tenant_id AND c.provider_ref = i.tax_calculation_id
+		          ORDER BY c.created_at ASC LIMIT 1),
+		        i.updated_at + interval '24 hours') > now()
+		  AND (i.tax_next_retry_at IS NULL OR i.tax_next_retry_at <= now())
 		  AND i.is_simulated = false
-		ORDER BY i.updated_at ASC
+		ORDER BY i.tax_next_retry_at ASC NULLS FIRST, i.updated_at ASC
 		LIMIT $2
 	`, livemode, batch)
 	if err != nil {
@@ -3565,13 +3574,16 @@ func (s *PostgresStore) ListPendingTaxCommit(ctx context.Context, batch int, liv
 //
 // NOT time-bounded, and that is the difference from ListPendingTaxCommit.
 //
-// The commit sweep's `updated_at > now() - 24h` matches a HARD ceiling — the
-// Stripe Tax calculation TTL, after which a re-commit is impossible, so rows
-// outside the window are genuinely unrecoverable and skipping them costs
+// The commit sweep stops at a real ceiling: the Stripe Tax calculation's own
+// expiry (its expires_at, 90 days after it is made). After it a re-commit is
+// impossible, so a row past it is unrecoverable and skipping it costs
 // nothing. A REVERSAL has no such ceiling: it stays possible forever.
 //
-// This sweep carried the same 24h anyway, for anti-churn plus a one-time
-// grandfather of pre-0122 voids. The cost of that was measured on the live
+// Both sweeps once carried an `updated_at > now() - 24h` window. On the
+// commit sweep it was taken for that ceiling, wrongly: 24 hours is the life
+// of a Stripe idempotency key, not of a calculation. This sweep carried the
+// same 24h, for anti-churn plus a one-time grandfather of pre-0122 voids.
+// The cost of that was measured on the live
 // database while writing ADR-111: 4 voided invoices holding $46.69 of
 // committed tax, each with tax_reversed_at NULL and each past the window —
 // permanently stranded, silently, with the tenant over-remitting real money
@@ -3594,17 +3606,18 @@ func (s *PostgresStore) ListPendingTaxCommit(ctx context.Context, batch int, liv
 // below, which Stripe rejects on every re-drive, and a tenant that has
 // disconnected Stripe while an invoice Stripe Tax taxed still owes its
 // reversal (the reversal goes to the provider that made the document, whatever
-// the tenant has selected since). Each is a permanent per-tick ERROR rather
+// the tenant has selected since). Each is an ERROR on every try rather
 // than silent money loss — the honest trade, and the same direction as every
-// other no-silent-fallback call on this path. A failing row is not moved
-// back, so enough of them hold the head of this list.
+// other no-silent-fallback call on this path. A failing row backs off
+// (DeferTaxWork: tax_next_retry_at), so it is retried at most twice a day
+// once it has failed for four days, and never holds the head of this list.
 //
 // LIMITATION (mode-drift): reverseInvoiceTax recomputes the reversal amount
 // (total − credited) on each re-drive. If the invoice's credit-noted total
 // CHANGES after the status flip while a reversal is pending-failed (e.g. an
 // operator issues a credit note on an uncollectible invoice), the re-drive's
 // body differs under the SAME idempotency key and Stripe rejects it — surfaced
-// as the loud per-tick ERROR (→ manual reconcile), never a silent corruption.
+// as the loud ERROR on every try (→ manual reconcile), never a silent corruption.
 // We deliberately do NOT vary the key by mode/amount: the G1 fix relies on the
 // stable `inv_taxrev_<id>` reference to dedup an uncollectible-then-void pair to
 // ONE reversal, so a mode-keyed scheme would reintroduce that double-reversal
@@ -3641,8 +3654,9 @@ func (s *PostgresStore) ListPendingTaxReversal(ctx context.Context, batch int, l
 		  AND i.tax_provider = 'stripe_tax'
 		  AND COALESCE(i.tax_transaction_id, '') <> ''
 		  AND i.tax_reversed_at IS NULL
+		  AND (i.tax_next_retry_at IS NULL OR i.tax_next_retry_at <= now())
 		  AND i.is_simulated = false
-		ORDER BY i.updated_at ASC
+		ORDER BY i.tax_next_retry_at ASC NULLS FIRST, i.updated_at ASC
 		LIMIT $2
 	`, livemode, batch)
 	if err != nil {
@@ -3661,6 +3675,35 @@ func (s *PostgresStore) ListPendingTaxReversal(ctx context.Context, batch int, l
 	return out, rows.Err()
 }
 
+// DeferTaxWork moves an invoice's tax_next_retry_at to next after its tax
+// commit or tax reversal failed in a sweep, so the pending lists skip it until
+// then and take other invoices first. It writes nothing when that work is no
+// longer owed. It deliberately leaves updated_at alone:
+// the wait grows with the time since the invoice's last write (see
+// nextTaxWorkAttempt). The write that completes the work clears the column
+// (SetTaxTransaction, MarkTaxReversed).
+func (s *PostgresStore) DeferTaxWork(ctx context.Context, tenantID, id string, next time.Time) error {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return err
+	}
+	defer postgres.Rollback(tx)
+
+	// Only while the work is still owed: a commit (no transaction recorded
+	// yet) or a voided invoice's reversal (not stamped yet). The work can
+	// finish between the sweep's read and this write (the finalize-time
+	// commit, or another replica at a handover); a wait written then would
+	// sit on a finished invoice, where nothing clears it.
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE invoices SET tax_next_retry_at = $1
+		WHERE id = $2 AND status <> 'draft'
+		  AND (COALESCE(tax_transaction_id, '') = ''
+		       OR (status = 'voided' AND tax_reversed_at IS NULL))`, next, id); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 // MarkTaxReversed stamps tax_reversed_at once the upstream reversal is confirmed
 // (or there was nothing to reverse), dropping the invoice from the reversal
 // sweep. Idempotent: the `IS NULL` guard makes a re-confirm a no-op.
@@ -3672,7 +3715,7 @@ func (s *PostgresStore) MarkTaxReversed(ctx context.Context, tenantID, id string
 	defer postgres.Rollback(tx)
 
 	if _, err := tx.ExecContext(ctx,
-		`UPDATE invoices SET tax_reversed_at = $1 WHERE id = $2 AND tax_reversed_at IS NULL`,
+		`UPDATE invoices SET tax_reversed_at = $1, tax_next_retry_at = NULL WHERE id = $2 AND tax_reversed_at IS NULL`,
 		clock.Now(ctx), id,
 	); err != nil {
 		return err

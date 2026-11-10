@@ -51,11 +51,8 @@ func TestChargedOutcome(t *testing.T) {
 		inv.Status, inv.PaymentStatus, inv.StripePaymentIntentID = status, ps, pi
 		return inv
 	}
-	// The retry's own hold, and its release by token (retryPayment's release).
-	hold := domain.ChargeHold{Until: time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)}
-	releases := 0
 	outcome := func(a *paymentRetrierAdapter, inv domain.Invoice) error {
-		return a.chargedOutcome(ctx, "t1", inv, hold, func() { releases++ })
+		return a.chargedOutcome(ctx, "t1", inv)
 	}
 
 	t.Run("paid recovers the run", func(t *testing.T) {
@@ -72,9 +69,6 @@ func TestChargedOutcome(t *testing.T) {
 			var re *dunning.RetryError
 			if !errors.Is(err, dunning.ErrPaymentInFlight) || !errors.As(err, &re) || re.PaymentIntentID != "pi_slow" {
 				t.Fatalf("got %#v, want ErrPaymentInFlight naming pi_slow", err)
-			}
-			if re.Hold != hold || releases != 0 {
-				t.Errorf("hold %v released %d times, want the charge's hold carried to dunning and kept", re.Hold, releases)
 			}
 			if got := classifyDunningRetryResult(ctx, "inv_1", err); got != err {
 				t.Errorf("classified as %v, want counted as it is", got)
@@ -114,9 +108,6 @@ func TestChargedOutcome(t *testing.T) {
 		}
 		if err.Error() == inv.LastPaymentError {
 			t.Error("the failure's words are the invoice's last_payment_error")
-		}
-		if releases != 1 {
-			t.Errorf("hold released %d times, want once: the round-trip is over", releases)
 		}
 	})
 

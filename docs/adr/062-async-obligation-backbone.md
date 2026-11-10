@@ -359,3 +359,12 @@ yet recorded at Stripe. The CHANGELOG gives one UPDATE that marks those too.
 An earlier version running beside this one clears markers this version set:
 its sweep reads a marked note whose invoice has no tax transaction as stale.
 So that UPDATE is run after the last earlier replica has stopped.
+
+## Note 2026-11-10 — the tax-commit window was not a provider TTL
+
+"Status: build deferred" says `tax_commit` and `tax_reversal` have
+"TTL-encoding windows no queue can delete". The 24-hour tax-commit window
+encoded no provider TTL: 24 hours is the life of a Stripe idempotency key. A
+Stripe Tax calculation is usable until its own `expires_at`, 90 days after it
+is made, and the tax-commit sweep now stops at that expiry (see the
+2026-11-10 amendment of [ADR-111](111-a-write-off-has-no-tax-leg.md)).
