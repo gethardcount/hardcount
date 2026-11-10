@@ -18,6 +18,10 @@ import (
 // it. A transaction with no tax still records the sale in the tenant's Stripe
 // Tax reports, and the tax-commit sweep commits it like any other. The check
 // skipped zero-tax invoices, on the belief that they had nothing to report.
+//
+// It states the sweep's set (ListPendingTaxCommit): a draft voided before it
+// was issued was never a sale, the sweep never commits it, and the check
+// does not flag it.
 func TestDoctor_TaxCalculatedNeverCommitted_ZeroTaxToo(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -61,19 +65,22 @@ func TestDoctor_TaxCalculatedNeverCommitted_ZeroTaxToo(t *testing.T) {
 		}
 	}
 	seed(`INSERT INTO customers (id, tenant_id, external_id, display_name, email) VALUES ('cus_taxdoc', $1, 'taxdoc', 'Tax Doc', '')`, tenantID)
-	invoice := func(id string, taxCents int64, taxTx string) {
+	invoice := func(id, status string, issued bool, taxCents int64, taxTx string) {
 		seed(`INSERT INTO invoices (id, tenant_id, customer_id, invoice_number, status, payment_status, currency,
 				subtotal_cents, tax_amount_cents, total_amount_cents, amount_due_cents,
 				tax_provider, tax_status, tax_calculation_id, tax_transaction_id,
 				billing_period_start, billing_period_end, issued_at, updated_at)
-			VALUES ($1, $2, 'cus_taxdoc', $1, 'finalized', 'pending', 'USD', 10000, $3::bigint, 10000 + $3::bigint, 10000 + $3::bigint,
+			VALUES ($1, $2, 'cus_taxdoc', $1, $5, 'pending', 'USD', 10000, $3::bigint, 10000 + $3::bigint, 10000 + $3::bigint,
 				'stripe_tax', 'ok', 'taxcalc_' || $1::text, NULLIF($4::text, ''),
-				now() - interval '33 days', now() - interval '3 days', now() - interval '3 days', now() - interval '3 days')`,
-			id, tenantID, taxCents, taxTx)
+				now() - interval '33 days', now() - interval '3 days',
+				CASE WHEN $6 THEN now() - interval '3 days' END, now() - interval '3 days')`,
+			id, tenantID, taxCents, taxTx, status, issued)
 	}
-	invoice("hc_inv_taxdoc_zero", 0, "")
-	invoice("hc_inv_taxdoc_taxed", 1000, "")
-	invoice("hc_inv_taxdoc_committed", 0, "tax_recorded")
+	invoice("hc_inv_taxdoc_zero", "finalized", true, 0, "")
+	invoice("hc_inv_taxdoc_taxed", "finalized", true, 1000, "")
+	invoice("hc_inv_taxdoc_committed", "finalized", true, 0, "tax_recorded")
+	invoice("hc_inv_taxdoc_issued_voided", "voided", true, 0, "")
+	invoice("hc_inv_taxdoc_draft_voided", "voided", false, 1000, "")
 
 	res := doctor.Run(ctx, admin, check)
 	for _, e := range res.Errors {
@@ -91,5 +98,11 @@ func TestDoctor_TaxCalculatedNeverCommitted_ZeroTaxToo(t *testing.T) {
 	}
 	if flagged["hc_inv_taxdoc_committed"] {
 		t.Error("a committed invoice is flagged")
+	}
+	if !flagged["hc_inv_taxdoc_issued_voided"] {
+		t.Error("an invoice issued, then voided, never committed is not flagged: its sale is not on the report")
+	}
+	if flagged["hc_inv_taxdoc_draft_voided"] {
+		t.Error("a draft voided before it was issued is flagged: it was never a sale, and the sweep rightly never commits it")
 	}
 }
