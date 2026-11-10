@@ -21,6 +21,7 @@ original text.
 
 **Before upgrading:**
 
+- A spend-threshold invoice now bills usage up to one `INVOICE_GRACE_PERIOD` before it is built (1 hour unless you set it), and its `billing_period_end` is that instant, not the time it was built. A threshold is therefore seen, and its invoice built, up to one grace later than before. Set a shorter grace for an earlier invoice; that shortens the wait before a period's own invoice too. Subscriptions on a test clock are unchanged.
 - `POST /v1/subscriptions/{id}/activate` answers `409 invalid_state` for a draft whose customer is archived. Unarchive the customer first, then activate.
 - `scripts/backup.sh` now writes each dump so that only the user who runs it can read it, and creates a missing backup folder that only that user can open. A job that copies the dumps as another user can no longer read them: run that job as the user that runs `backup.sh`.
 - A subscription whose cycle close kept failing on a long Stripe Tax error, until billing parked it, stays parked after the upgrade. Its log line `bill subscription failed` reads `invalid byte sequence for encoding "UTF8"` (SQLSTATE 22021). Call `POST /v1/subscriptions/{id}/retry-billing` for each one.
@@ -49,6 +50,7 @@ original text.
 
 ### Fixed
 
+- **Usage in flight when a spend threshold fires is no longer left off every invoice.** A spend-threshold invoice billed usage up to the moment it was built, and the period's own invoice billed only from that moment on. Usage stamped just before it and stored just after was on neither, at every fire. The spend-threshold invoice now reads usage one grace late, so usage that arrives within the grace is billed by the period's own invoice.
 - **An archived customer's draft subscription can no longer be activated.** Activating it started billing a customer you had archived. `POST /v1/subscriptions/{id}/activate` now answers `409 invalid_state`. Unarchive the customer first. ([#1659](https://github.com/gethardcount/hardcount/pull/1659))
 - **Two edits to one customer at once no longer undo each other.** An edit wrote back every field as it had read them, so a rename could un-archive the customer or reset its dunning policy. The second edit now waits and applies to the saved customer. ([#1659](https://github.com/gethardcount/hardcount/pull/1659))
 - **Archiving a customer no longer leaves a subscription billing.** An archive that ran while a subscription was being created, or while a trial was ending, could miss that subscription and succeed. The archive now sees it and gets `409`. A create that waited for an archive gets `409` too. ([#1659](https://github.com/gethardcount/hardcount/pull/1659))

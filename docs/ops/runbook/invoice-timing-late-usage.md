@@ -72,9 +72,11 @@ hand, can bill it.
 - Usage on a canceled subscription is not flagged `after_close`, even for
   a period that was invoiced: it counts as `outside_subscription`. The
   steps below find it too.
-- A spend-threshold invoice bills a period's usage early, and the period's
-  own invoice then bills only the usage stamped after it. Usage stamped
-  before the spend-threshold invoice but arriving after it is on neither.
+- A spend-threshold invoice bills a period's usage early, up to one
+  `INVOICE_GRACE_PERIOD` before it is built (its `billing_period_end`), and
+  the period's own invoice then bills only the usage stamped from that
+  instant on. Usage stamped before it but arriving after the
+  spend-threshold invoice is built is on neither.
   While that invoice is not paid (open or written off), such usage is not
   flagged, so the counter misses it
   ([Spend thresholds](../../concepts/invoices.md#spend-thresholds-an-invoice-made-early)).

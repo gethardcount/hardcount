@@ -205,8 +205,9 @@ func (e *Engine) ScanThresholdsForClock(ctx context.Context, tenantID, clockID s
 }
 
 // scanOneThreshold evaluates a single subscription. Builds running line items
-// over the partial cycle [period_start, now), checks each configured cap,
-// and — when crossed — fires the early finalize via fireThreshold.
+// over the partial cycle [period_start, through), checks each configured cap,
+// and — when crossed — fires the early finalize via fireThreshold. through is
+// one invoice grace before now on the wall clock (thresholdUsageThrough).
 func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) (bool, error) {
 	live, err := postgres.Livemode(ctx)
 	if err != nil {
@@ -304,7 +305,14 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 		return false, fmt.Errorf("probe threshold invoice for cycle: %w", err)
 	}
 
-	eval, err := e.evaluateThresholds(ctx, sub, periodStart, now)
+	// The usage a fire reads, and bills, ends one invoice grace before now.
+	// Until that instant is inside the period there is nothing to read.
+	through := e.thresholdUsageThrough(sub, now)
+	if !through.After(periodStart) {
+		return false, nil
+	}
+
+	eval, err := e.evaluateThresholds(ctx, sub, periodStart, through)
 	if err != nil {
 		return false, fmt.Errorf("evaluate: %w", err)
 	}
@@ -325,7 +333,7 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 		return false, nil
 	}
 
-	fired, err := e.fireThreshold(ctx, sub, eval, periodStart, now)
+	fired, err := e.fireThreshold(ctx, sub, eval, periodStart, through, now)
 	if err != nil || !fired {
 		return fired, err
 	}
@@ -350,6 +358,29 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 			"subscription_id", sub.ID)
 	}
 	return true, nil
+}
+
+// thresholdUsageThrough is the instant a threshold scan reads usage up to. The
+// fire bills the window that ends there, and that end is the watermark every
+// later close bills sum and count usage from.
+//
+// On the wall clock it is now less INVOICE_GRACE_PERIOD, the wait a period's
+// own invoice gives late usage (ADR-120). Usage reaches Hardcount some time
+// after it happens. A fire that read up to now put the watermark at now, so an
+// event stamped just before the fire and stored just after it was before the
+// watermark and on no invoice: at every fire, while the customer was spending
+// fastest. Read one grace late, such an event is after the watermark, and the
+// close bills it. The cost is that a crossing is seen, and its invoice built,
+// up to one grace later. Usage that arrives more than the grace after its
+// timestamp is still billed on no invoice, as at a period's end.
+//
+// A subscription on a test clock gets no grace, as the test-clock run gives a
+// period's close none: advancing the clock past a crossing fires at once.
+func (e *Engine) thresholdUsageThrough(sub domain.Subscription, now time.Time) time.Time {
+	if sub.TestClockID != "" {
+		return now
+	}
+	return now.Add(-e.invoiceGrace)
 }
 
 // thresholdWatermark is one close window's threshold-fire ground truth
@@ -742,7 +773,11 @@ func (e *Engine) evaluateThresholds(ctx context.Context, sub domain.Subscription
 // landed between evaluate and fire. Tax + credit are applied via
 // the same paths the natural cycle uses so an early-finalize charge looks
 // identical to the customer.
-func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eval thresholdEval, periodStart, now time.Time) (bool, error) {
+//
+// through is the end of the usage window eval priced (thresholdUsageThrough):
+// the invoice's period end, and so the watermark. now is the fire's own
+// instant: the invoice is issued, dated and collected at it.
+func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eval thresholdEval, periodStart, through, now time.Time) (bool, error) {
 	if e.settings == nil {
 		return false, fmt.Errorf("settings reader required for invoice numbering")
 	}
@@ -823,7 +858,7 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 		TotalAmountCents:   totalWithTax,
 		AmountDueCents:     totalWithTax,
 		BillingPeriodStart: periodStart,
-		BillingPeriodEnd:   now,
+		BillingPeriodEnd:   through,
 		IssuedAt:           &now,
 		DueAt:              &dueAt,
 		// CreatedAt on test-clock time — keeps engine-driven rows
@@ -850,7 +885,7 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 	// committed since makes it 0 rows: the fire rolls back with nothing
 	// written and the next tick re-evaluates against the new period. Pre-fix
 	// the fire never touched the row, so a fire in flight across an operator
-	// close billed [periodStart, now) on both invoices and could rewind the
+	// close billed its window on both invoices and could rewind the
 	// watermark.
 	//
 	// The CAS writes the row VERIFY-ONLY: the same values, so the period does
@@ -863,7 +898,7 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 	expected := subscription.SnapshotOf(sub)
 	belowZero := netNegativeUsage{}
 	for _, b := range eval.BelowZero {
-		belowZero.add(b.MeterID, b.EventName, b.MeterName, b.Quantity, periodStart, now) // the window the fire priced
+		belowZero.add(b.MeterID, b.EventName, b.MeterName, b.Quantity, periodStart, through) // the window the fire priced
 	}
 	var inv domain.Invoice
 	err = e.subs.WithTenantTx(ctx, sub.TenantID, func(tx *sql.Tx) error {
@@ -886,7 +921,7 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 			return err
 		}
 		// So does the row for usage below zero this invoice counts as 0.
-		if err := e.noteNetNegativeTx(ctx, tx, sub, belowZero, domain.BillingReasonThreshold, periodStart, now, created); err != nil {
+		if err := e.noteNetNegativeTx(ctx, tx, sub, belowZero, domain.BillingReasonThreshold, periodStart, through, created); err != nil {
 			return err
 		}
 		// And subscription.threshold_crossed (ADR-040), carrying the

@@ -739,3 +739,23 @@ func TestScanThresholds_ProbeHealsStrandedZeroDue(t *testing.T) {
 		t.Errorf("stranded $0 invoice not healed on probe re-entry: status=%q payment=%q", healed.Status, healed.PaymentStatus)
 	}
 }
+
+// A threshold scan reads usage up to one invoice grace before now on the wall
+// clock, and up to now on a test clock (the test-clock run gives a period's
+// close no grace either, so advancing a clock past a crossing fires at once).
+func TestThresholdUsageThrough(t *testing.T) {
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	e := &Engine{}
+	e.SetInvoiceGrace(time.Hour)
+
+	if got := e.thresholdUsageThrough(domain.Subscription{}, now); !got.Equal(now.Add(-time.Hour)) {
+		t.Errorf("wall clock: usage is read through %s, want one grace before now (%s)", got, now.Add(-time.Hour))
+	}
+	if got := e.thresholdUsageThrough(domain.Subscription{TestClockID: "hc_clk_1"}, now); !got.Equal(now) {
+		t.Errorf("test clock: usage is read through %s, want now (%s): a clock advance fires at once", got, now)
+	}
+	e.SetInvoiceGrace(0)
+	if got := e.thresholdUsageThrough(domain.Subscription{}, now); !got.Equal(now) {
+		t.Errorf("no grace: usage is read through %s, want now (%s)", got, now)
+	}
+}
