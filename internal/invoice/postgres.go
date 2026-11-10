@@ -2292,15 +2292,35 @@ func (s *PostgresStore) CreateWithLineItems(ctx context.Context, tenantID string
 	return s.CreateWithLineItemsAudited(ctx, tenantID, inv, items, nil)
 }
 
-// CreateWithLineItemsAudited is CreateWithLineItems with an in-tx audit
-// emission (ADR-090): emit runs on the SAME transaction as the header + line
-// INSERTs, after they all land and BEFORE commit, so an emission error rolls
-// the whole composed invoice back. Both manual-create shapes (a bare header,
-// with no items, and create-with-lines) come through here, so a draft created
-// either way leaves exactly one 'create' row. nil emit = unaudited write
-// (engine cycle/threshold invoices).
+// CreateWithLineItemsAudited is CreateNumberedAudited with no numbering step:
+// inv already carries its invoice number. nil emit means an unaudited write.
 func (s *PostgresStore) CreateWithLineItemsAudited(
 	ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem,
+	emit func(tx *sql.Tx, out domain.Invoice) error,
+) (domain.Invoice, error) {
+	return s.CreateNumberedAudited(ctx, tenantID, inv, items, nil, emit)
+}
+
+// CreateNumberedAudited numbers an invoice and inserts it with its lines, on
+// one transaction it opens and commits. number runs first, on that
+// transaction, and its result becomes inv.InvoiceNumber. emit is the in-tx
+// audit emission (ADR-090): it runs after the header and line INSERTs and
+// before the commit. A failure anywhere in the transaction (number, the
+// insert, a line, emit, the commit) rolls the number back with the invoice,
+// so the tenant's numbers keep no gap. nil number keeps the number inv
+// carries. nil emit means an unaudited write.
+//
+// Both manual-create shapes (a bare header, with no items, and
+// create-with-lines) come through here with the same emission, so a draft
+// created either way leaves exactly one 'create' row.
+//
+// number locks the tenant's number row until the commit, and every writer
+// that numbers an invoice or a credit note for the tenant waits for that
+// row. So the caller does its reads and checks before this call, and the
+// transaction runs only the writes.
+func (s *PostgresStore) CreateNumberedAudited(
+	ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem,
+	number func(tx *sql.Tx) (string, error),
 	emit func(tx *sql.Tx, out domain.Invoice) error,
 ) (domain.Invoice, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
@@ -2308,6 +2328,13 @@ func (s *PostgresStore) CreateWithLineItemsAudited(
 		return domain.Invoice{}, err
 	}
 	defer postgres.Rollback(tx)
+	if number != nil {
+		num, err := number(tx)
+		if err != nil {
+			return domain.Invoice{}, fmt.Errorf("allocate invoice number: %w", err)
+		}
+		inv.InvoiceNumber = num
+	}
 	out, err := s.createWithLineItemsInTx(ctx, tx, tenantID, inv, items)
 	if err != nil {
 		return domain.Invoice{}, err
