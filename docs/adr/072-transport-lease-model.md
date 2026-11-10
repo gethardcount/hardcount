@@ -5,7 +5,7 @@
 
 ## Summary
 
-The email and webhook outboxes (tables of messages waiting to be sent) claim a batch in one short transaction that stamps a time-limited lease, then send each row outside it. Each row's result is saved in its own small update, so a rollback never re-sends a delivered email. A retry or a give-up applies only to a row still `pending` under the claim that made the attempt. An email's sent mark applies to any row not already sent. A webhook event commits together with its row's sent mark, or not at all. Delivery is at-least-once, with at most one duplicate per crash or expired lease, and a `failed` row waits for an operator to requeue it. Amended 2026-08-30 and 2026-10-13: no retention window exists, and a sent or skipped email row drops its links and PDF from the stored payload. Amended 2026-11-10: the retry, give-up and sent-mark rules above ([amendment](#amendment-2026-11-10--what-each-mark-may-change)). Amended 2026-11-10 again, for the webhook delivery worker, which POSTs each event to its endpoints. It saves each result on a detached context, and counts a panic as one failed attempt. It gives up a delivery still pending 50 hours 36 minutes after it was created ([amendment](#amendment-2026-11-10--guards-for-the-delivery-worker)). Status: active, amended; each worker now runs on one replica under a leader lease ([ADR-114](114-leader-leases-tick-scoped-fencing.md)).
+The email and webhook outboxes (tables of messages waiting to be sent) claim a batch in one short transaction that stamps a time-limited lease, then send each row outside it. Each row's result is saved in its own small update, so a rollback never re-sends a delivered email. A retry or a give-up applies only to a row still `pending` under the claim that made the attempt. An email's sent mark applies to any row not already sent. A webhook event commits together with its row's sent mark, or not at all. Delivery is at-least-once, with at most one duplicate per crash or expired lease, and a `failed` row waits for an operator to requeue it. Amended 2026-08-30 and 2026-10-13: no retention window exists, and a sent or skipped email row drops its links and PDF from the stored payload. Amended 2026-11-10: the retry, give-up and sent-mark rules above ([amendment](#amendment-2026-11-10--what-each-mark-may-change)). Amended 2026-11-10 again, for the webhook delivery worker, which POSTs each event to its endpoints. It saves each result on a detached context, and counts a panic as one failed attempt. It gives up a delivery still pending 50 hours 36 minutes after it was created ([amendment](#amendment-2026-11-10--guards-for-the-delivery-worker)). Amended 2026-11-10 a third time: in both outboxes, a handler panic is one failed attempt on the retry schedule, logged with its stack, and an email is no longer given up on its first panic ([amendment](#amendment-2026-11-10--a-handler-panic-is-one-failed-attempt)). Status: active, amended; each worker now runs on one replica under a leader lease ([ADR-114](114-leader-leases-tick-scoped-fencing.md)).
 
 ## Context
 
@@ -289,3 +289,42 @@ bound each turns its test red. One recover has no such test: the `defer`
 in `dialControl`. Its body has no seam through which a test can make it
 panic. `recoverDialHook` itself is tested in a `Control` hook on a real
 dialer (`internal/webhook/delivery_guards_test.go`).
+
+## Amendment 2026-11-10 — a handler panic is one failed attempt
+
+An email whose handler panicked was marked `failed` on its first attempt.
+The recover wrapped the panic in `ErrPayloadDecode`, which is permanent. The
+webhook outbox counted the same panic as one failed attempt and retried it.
+Neither logged the stack.
+
+**The rule now** (`attemptRow` in `internal/email/outbox.go` and
+`internal/webhook/outbox.go`):
+
+- A handler panic is one failed attempt, like any other error. The row waits
+  out the retry schedule (the backoff ramp) and is `failed` after its 15th
+  attempt. The email dead-letter metric counts it with
+  `cause="max_attempts"`.
+- The recover logs the panic at ERROR with its stack. `last_error` holds the
+  panic value.
+- A payload that cannot be decoded is still `failed` on its first attempt.
+  The email handler itself refuses it with `ErrPayloadDecode`.
+
+A panic is a fault in the code, not in the row. A deploy that fixes it can
+land before the schedule ends, and the email then goes out with nothing for
+an operator to do. The runbook's requeue of failed emails selects rows with
+15 attempts, so it skipped an email that a panic had failed at once.
+
+**What stays possible:**
+
+- A panic after the relay accepted the email sends it again at the next
+  attempt, which decision 5 already allows. After the relay accepts, the
+  send path only closes the connection and writes one log line.
+- A row that panics on every attempt is retried for about 52 hours, and each
+  attempt logs a stack.
+
+Tested against real Postgres in
+`internal/email/handler_panic_integration_test.go` and by
+`TestOutbox_ProcessBatch_PanicIsRetried` in
+`internal/webhook/outbox_integration_test.go`. Wrapping the panic in
+`ErrPayloadDecode` again, or dropping the stack from either log line, turns
+its test red.

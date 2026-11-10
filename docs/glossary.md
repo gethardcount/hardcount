@@ -281,7 +281,8 @@ follows.
   retries and **Collect payment** all share it. A charge with a clear answer
   lifts it at once. After an unclear answer (a crash, a shutdown, a timeout)
   it stays for the rest of the 5 minutes, and the reconciler reads the
-  payment once it has ended. A hold left by a charge that stopped before it
+  payment once it has ended. A result recorded sooner (the payment's webhook)
+  lifts it then. A hold left by a charge that stopped before it
   asked Stripe to take the money stays until the reconciler clears it.
   [More](concepts/payments.md#when-the-answer-is-unclear)
 - **reconciler**: The check that asks Stripe what happened to payments

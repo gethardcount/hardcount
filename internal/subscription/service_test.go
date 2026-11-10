@@ -1279,6 +1279,8 @@ func TestCreate(t *testing.T) {
 // fakeBiller captures the billing calls a subscription change makes, for the
 // ADR-031 / ADR-118 tests.
 type fakeBiller struct {
+	// finishErr is what FinishRelief returns: a relief note that was not issued.
+	finishErr error
 	// thresholdBilledThrough feeds ThresholdBilledThroughTx — the swap's
 	// fire-vs-swap guard (ADR-115). nil = no threshold fire this period.
 	thresholdBilledThrough    *time.Time
@@ -1364,11 +1366,12 @@ func (f *fakeBiller) BillOnPlanSwapDraftsTx(_ context.Context, _ *sql.Tx, _ doma
 	return domain.Relief{DraftIDs: f.swapDraftIDs}, nil
 }
 
-func (f *fakeBiller) FinishRelief(ctx context.Context, _ domain.Subscription, r domain.Relief) {
+func (f *fakeBiller) FinishRelief(ctx context.Context, _ domain.Subscription, r domain.Relief) error {
 	f.finishCalls++
 	f.finishedDrafts = append(f.finishedDrafts, r.DraftIDs...)
 	f.postCommit = append(f.postCommit, "relief")
 	f.postCommitCtxErr = append(f.postCommitCtxErr, ctx.Err())
+	return f.finishErr
 }
 
 func (f *fakeBiller) BillOnCreateTx(_ context.Context, _ *sql.Tx, _ domain.Subscription, _ time.Time) (domain.Invoice, bool, error) {
