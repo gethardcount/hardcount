@@ -40,8 +40,9 @@ func TestChargeDecline_NotifiesWithoutAWebhook(t *testing.T) {
 		t.Fatal("a decline must return an error to the caller")
 	}
 	got := invoices.invoices["inv_1"]
-	if got.PaymentStatus != domain.PaymentFailed || got.StripePaymentIntentID != "pi_X" || got.ChargeAttemptSeq != 1 {
-		t.Fatalf("row %s/%q/seq %d, want failed/pi_X/seq 1", got.PaymentStatus, got.StripePaymentIntentID, got.ChargeAttemptSeq)
+	// The counter moves twice: the stamp before the confirm, then the decline.
+	if got.PaymentStatus != domain.PaymentFailed || got.StripePaymentIntentID != "pi_X" || got.ChargeAttemptSeq != 2 {
+		t.Fatalf("row %s/%q/seq %d, want failed/pi_X/seq 2", got.PaymentStatus, got.StripePaymentIntentID, got.ChargeAttemptSeq)
 	}
 	if invoices.failedEventEnqueues != 1 {
 		t.Errorf("payment.failed enqueued %d times, want 1 — the decline must announce itself with no webhook", invoices.failedEventEnqueues)
@@ -112,8 +113,8 @@ func TestChargeDecline_DunningRetry_EventButNoEmail(t *testing.T) {
 	if email.sends != 0 {
 		t.Errorf("generic decline email sent %d times on a dunning retry, want 0", email.sends)
 	}
-	if got := invoices.invoices["inv_1"]; got.StripePaymentIntentID != "pi_X" || got.ChargeAttemptSeq != 3 {
-		t.Errorf("row %q/seq %d, want pi_X/seq 3", got.StripePaymentIntentID, got.ChargeAttemptSeq)
+	if got := invoices.invoices["inv_1"]; got.StripePaymentIntentID != "pi_X" || got.ChargeAttemptSeq != 4 {
+		t.Errorf("row %q/seq %d, want pi_X/seq 4 (the stamp, then the decline)", got.StripePaymentIntentID, got.ChargeAttemptSeq)
 	}
 }
 

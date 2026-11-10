@@ -8,13 +8,11 @@ import (
 // TestParkedInvoiceAttentionTellsTheTruth pins the banner for an invoice whose
 // charge got an unclear answer from Stripe that named no payment (ADR-107).
 //
-// Since REC-5 (ADR-127 amendment, 2026-10-20) Hardcount finishes such an invoice
-// itself: each billing tick lists the customer's payments at Stripe, records
-// one that appears, and with none 24 hours after the attempt charges the
-// invoice again as usual. The banner says exactly that, as a Warning, in the
-// words Sagar approved on 2026-10-19. Write-off stays, as a secondary action,
-// for a customer who paid another way: telling every operator to write off an
-// invoice that will be collected tomorrow would be the wrong advice.
+// Only an earlier Hardcount version parked an invoice, and the upgrade to
+// ADR-137 refuses to run while any exists. This version saved no payment to
+// look up and never resolves a park on its own or charges it again, so the
+// banner is Critical, sends the operator to Stripe, and keeps write-off for a
+// customer who paid another way.
 func TestParkedInvoiceAttentionTellsTheTruth(t *testing.T) {
 	parked := Invoice{
 		Status:                InvoiceFinalized,
@@ -27,12 +25,11 @@ func TestParkedInvoiceAttentionTellsTheTruth(t *testing.T) {
 	if att == nil {
 		t.Fatal("a parked invoice must raise an attention")
 	}
-	if att.Severity != AttentionSeverityWarning {
-		t.Errorf("severity = %v, want warning: Hardcount resolves it within a day, and a payment may still arrive", att.Severity)
+	if att.Severity != AttentionSeverityCritical {
+		t.Errorf("severity = %v, want critical: nothing resolves it without a person", att.Severity)
 	}
-	const want = "Stripe didn't confirm this charge and may still complete it.\n" +
-		"Hardcount checks Stripe every hour and records the payment if it appears.\n" +
-		"If none appears within 24 hours, the invoice is charged again as usual."
+	const want = "An earlier Hardcount version couldn't confirm this charge with Stripe, and Hardcount can't look it up.\n" +
+		"Check the customer's payments in Stripe."
 	if att.Message != want {
 		t.Errorf("message = %q, want the approved copy %q", att.Message, want)
 	}
@@ -41,7 +38,7 @@ func TestParkedInvoiceAttentionTellsTheTruth(t *testing.T) {
 	// again, and if Stripe creates the original payment after that (ADR-127
 	// R10) the customer has paid twice; the second payment is flagged
 	// (payment.duplicate_charge), not prevented.
-	for _, stale := range []string{"will not resolve on its own", "keeps searching", "can't tell", "won't charge again", "charged twice"} {
+	for _, stale := range []string{"24 hours", "charged again", "keeps searching", "checks Stripe every hour", "charged twice"} {
 		if strings.Contains(all, stale) {
 			t.Errorf("the notice still says %q, which is no longer true", stale)
 		}
@@ -55,8 +52,8 @@ func TestParkedInvoiceAttentionTellsTheTruth(t *testing.T) {
 		t.Errorf("detail = %q: it must say when to write the invoice off (the customer paid another way)", att.Detail)
 	}
 	// And that nothing is charged meanwhile, or the wait reads as a defect.
-	if !strings.Contains(att.Detail, "No new charge is made before then.") {
-		t.Errorf("detail = %q: it must say no new charge is made during the 24 hours", att.Detail)
+	if !strings.Contains(att.Detail, "No new charge is made while it is unresolved.") {
+		t.Errorf("detail = %q: it must say no new charge is made meanwhile", att.Detail)
 	}
 }
 

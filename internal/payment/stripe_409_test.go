@@ -5,7 +5,6 @@ import (
 	"errors"
 	"io"
 	"net/http"
-	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -61,14 +60,27 @@ const stripe409CardError = `{"error":{"code":"card_declined","decline_code":"los
 
 // stripe409ParamsDiffer is the "same key, different parameters" answer
 // (type idempotency_error). It was already an unclear outcome and keeps its
-// behavior: the invoice parks (ADR-107).
+// behavior.
 const stripe409ParamsDiffer = `{"error":{"message":"Keys for idempotent requests can only be used with the same parameters they were first used with.","type":"idempotency_error"}}`
 
 // stripe400MissingParam is a genuine rejection: Stripe refused the request
 // before running it, so nothing was charged.
 const stripe400MissingParam = `{"error":{"code":"parameter_missing","doc_url":"https://stripe.com/docs/error-codes/parameter-missing","message":"Missing required param: amount.","param":"amount","type":"invalid_request_error"}}`
 
-func TestCreatePaymentIntent_A409IsNeverADefiniteFailure(t *testing.T) {
+// Both calls of a charge read a 409 as unclear: the create (then nothing was
+// confirmed, and the hold waits for the stale-hold sweep) and the confirm
+// (then the invoice is unknown on its PaymentIntent).
+func TestPaymentIntentCalls_A409IsNeverADefiniteFailure(t *testing.T) {
+	calls := map[string]func(c *LiveStripeClient, ctx context.Context, p PaymentIntentParams) error{
+		"create": func(c *LiveStripeClient, ctx context.Context, p PaymentIntentParams) error {
+			_, err := c.CreateUnconfirmedPaymentIntent(ctx, p)
+			return err
+		},
+		"confirm": func(c *LiveStripeClient, ctx context.Context, p PaymentIntentParams) error {
+			_, err := c.ConfirmPaymentIntent(ctx, "pi_x", p)
+			return err
+		},
+	}
 	for _, tc := range []struct {
 		name string
 		body string
@@ -78,25 +90,27 @@ func TestCreatePaymentIntent_A409IsNeverADefiniteFailure(t *testing.T) {
 		{"card_error", stripe409CardError},
 		{"same key, different parameters", stripe409ParamsDiffer},
 	} {
-		t.Run(tc.name, func(t *testing.T) {
-			stub := withCannedStripe(t, http.StatusConflict, tc.body)
-			c := NewLiveStripeClient(NewStripeClients(fixedCreds{}))
+		for callName, call := range calls {
+			t.Run(callName+"/"+tc.name, func(t *testing.T) {
+				stub := withCannedStripe(t, http.StatusConflict, tc.body)
+				c := NewLiveStripeClient(NewStripeClients(fixedCreds{}))
 
-			_, err := c.CreatePaymentIntent(auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), PaymentIntentParams{AmountCents: 100, Currency: "usd", CustomerID: "cus_x", PaymentMethodID: "pm_x", IdempotencyKey: "k"})
-			var pe *PaymentError
-			if !errors.As(err, &pe) || !pe.Unknown {
-				t.Fatalf("err = %#v, want an unclear outcome (Unknown): a 409 can follow an earlier request under the same key that Stripe is still running", err)
-			}
-			if errors.Is(err, ErrPaymentTransient) {
-				t.Errorf("a 409 was treated as 'nothing reached Stripe': %v", err)
-			}
-			if pe.DeclineCode != "" {
-				t.Errorf("DeclineCode = %q, want none: a 409 is not a decline, and an unknown attempt row must not record one", pe.DeclineCode)
-			}
-			if stub.calls != 1 {
-				t.Errorf("Stripe was called %d times, want 1 (stripe-go does not retry a 409 Stripe error)", stub.calls)
-			}
-		})
+				err := call(c, auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), PaymentIntentParams{AmountCents: 100, Currency: "usd", CustomerID: "cus_x", PaymentMethodID: "pm_x", IdempotencyKey: "k"})
+				var pe *PaymentError
+				if !errors.As(err, &pe) || !pe.Unknown {
+					t.Fatalf("err = %#v, want an unclear outcome (Unknown): a 409 can follow an earlier request under the same key that Stripe is still running", err)
+				}
+				if errors.Is(err, ErrPaymentTransient) {
+					t.Errorf("a 409 was treated as 'nothing reached Stripe': %v", err)
+				}
+				if pe.DeclineCode != "" {
+					t.Errorf("DeclineCode = %q, want none: a 409 is not a decline, and an unknown attempt row must not record one", pe.DeclineCode)
+				}
+				if stub.calls != 1 {
+					t.Errorf("Stripe was called %d times, want 1 (stripe-go does not retry a 409 Stripe error)", stub.calls)
+				}
+			})
+		}
 	}
 }
 
@@ -107,7 +121,7 @@ func TestCreatePaymentIntent_A400RejectionStaysDefinite(t *testing.T) {
 	withCannedStripe(t, http.StatusBadRequest, stripe400MissingParam)
 	c := NewLiveStripeClient(NewStripeClients(fixedCreds{}))
 
-	_, err := c.CreatePaymentIntent(auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), PaymentIntentParams{AmountCents: 100, Currency: "usd", CustomerID: "cus_x", PaymentMethodID: "pm_x", IdempotencyKey: "k"})
+	_, err := c.CreateUnconfirmedPaymentIntent(auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), PaymentIntentParams{AmountCents: 100, Currency: "usd", CustomerID: "cus_x", PaymentMethodID: "pm_x", IdempotencyKey: "k"})
 	var pe *PaymentError
 	if !errors.As(err, &pe) || pe.Unknown {
 		t.Fatalf("err = %#v, want a definite failure", err)
@@ -158,15 +172,20 @@ func withScriptedStripe(t *testing.T, steps ...scriptedStep) *scriptedStripe {
 	return s
 }
 
-// The panel's sequence through the real charge path: the first request's
-// connection drops, stripe-go retries it under the same key, and Stripe
-// answers the retry with 409 "key in use" because the first request is still
-// running. The charge must not count as a decline: no failed status, no
-// dunning, no released hold, no new key. Until the interrupted-charge check
-// ships, the invoice parks for the provider search (ADR-107/108), as any
-// unclear answer with no PaymentIntent id does.
+// stripeCreatedForConfirm is the create's answer: the PaymentIntent, not yet
+// confirmed.
+const stripeCreatedForConfirm = `{"id":"pi_scripted","object":"payment_intent","amount":5000,"currency":"usd","status":"requires_confirmation","payment_method_types":["card"]}`
+
+// The panel's sequence through the real charge path, on the confirm (the
+// call that moves money): the confirm's connection drops, stripe-go retries
+// it under the same key, and Stripe answers the retry with 409 "key in use"
+// because the first request is still running. The charge must not count as a
+// decline: no failed status, no dunning, no released hold, no new key. The
+// invoice is unknown on the PaymentIntent the charge saved before confirming,
+// so the reconciler reads it by id; nothing is parked.
 func TestChargeInvoice_NetworkErrorThenKeyInUse_IsNotADecline(t *testing.T) {
 	connReset := errors.New("read tcp 10.0.0.2:51234->34.200.27.109:443: read: connection reset by peer")
+	created := scriptedStep{status: http.StatusOK, body: stripeCreatedForConfirm}
 	for _, tc := range []struct {
 		name     string
 		purpose  string
@@ -175,14 +194,14 @@ func TestChargeInvoice_NetworkErrorThenKeyInUse_IsNotADecline(t *testing.T) {
 	}{
 		{
 			name:     "auto-charge or Collect payment: network error, then 409 key in use",
-			steps:    []scriptedStep{{err: connReset}, {status: http.StatusConflict, body: stripe409KeyInUse}},
-			requests: 2,
+			steps:    []scriptedStep{created, {err: connReset}, {status: http.StatusConflict, body: stripe409KeyInUse}},
+			requests: 3,
 		},
 		{
 			name:     "dunning retry: network error, then 409 key in use",
 			purpose:  piPurposeDunningRetry,
-			steps:    []scriptedStep{{err: connReset}, {status: http.StatusConflict, body: stripe409KeyInUse}},
-			requests: 2,
+			steps:    []scriptedStep{created, {err: connReset}, {status: http.StatusConflict, body: stripe409KeyInUse}},
+			requests: 3,
 		},
 		{
 			// A hard-decline code on a 409 must not reach the attempt row:
@@ -190,18 +209,17 @@ func TestChargeInvoice_NetworkErrorThenKeyInUse_IsNotADecline(t *testing.T) {
 			// would stop charging the card.
 			name:     "dunning retry: network error, then a 409 card_error carrying lost_card",
 			purpose:  piPurposeDunningRetry,
-			steps:    []scriptedStep{{err: connReset}, {status: http.StatusConflict, body: stripe409CardError}},
-			requests: 2,
+			steps:    []scriptedStep{created, {err: connReset}, {status: http.StatusConflict, body: stripe409CardError}},
+			requests: 3,
 		},
 		{
 			// Control: unchanged behavior for the one 409 that keeps it.
 			name:     "409 same key, different parameters",
-			steps:    []scriptedStep{{status: http.StatusConflict, body: stripe409ParamsDiffer}},
-			requests: 1,
+			steps:    []scriptedStep{created, {status: http.StatusConflict, body: stripe409ParamsDiffer}},
+			requests: 2,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			logs := captureLogs(t)
 			stub := withScriptedStripe(t, tc.steps...)
 			invoices := newMockInvoiceUpdater()
 			snapshot := pendingSnapshot()
@@ -217,14 +235,19 @@ func TestChargeInvoice_NetworkErrorThenKeyInUse_IsNotADecline(t *testing.T) {
 				_, err = s.ChargeInvoice(ctx, "t1", snapshot, testHold, "cus_stripe", "pm_on_file")
 			}
 
-			// stripe-go itself sent the retry, under the same key.
-			wantKey := ChargeIdempotencyKey("inv_1", snapshot.ChargeAttemptSeq, tc.purpose) + "_pm_on_file"
+			// The create under the attempt's key; stripe-go itself sent the
+			// confirm's retry, under the confirm's same key.
+			createKey := ChargeIdempotencyKey("inv_1", snapshot.ChargeAttemptSeq, tc.purpose) + "_pm_on_file"
 			if len(stub.keys) != tc.requests {
 				t.Fatalf("requests to Stripe = %d (keys %q), want %d", len(stub.keys), stub.keys, tc.requests)
 			}
 			for i, k := range stub.keys {
-				if k != wantKey {
-					t.Errorf("request %d idempotency key = %q, want %q", i+1, k, wantKey)
+				want := createKey + "_confirm"
+				if i == 0 {
+					want = createKey
+				}
+				if k != want {
+					t.Errorf("request %d idempotency key = %q, want %q", i+1, k, want)
 				}
 			}
 
@@ -252,33 +275,13 @@ func TestChargeInvoice_NetworkErrorThenKeyInUse_IsNotADecline(t *testing.T) {
 				t.Errorf("failure reports = %d, want 0", len(invoices.failureReports))
 			}
 			got := invoices.invoices["inv_1"]
-			if got.PaymentStatus != domain.PaymentUnknown || got.StripePaymentIntentID != "" {
-				t.Errorf("invoice payment_status %q, PaymentIntent %q; want unknown with no PaymentIntent (parked, ADR-107), never failed",
+			if got.PaymentStatus != domain.PaymentUnknown || got.StripePaymentIntentID != "pi_scripted" {
+				t.Errorf("invoice payment_status %q, PaymentIntent %q; want unknown on the saved pi_scripted, never failed",
 					got.PaymentStatus, got.StripePaymentIntentID)
 			}
 			if len(invoices.chargeAttempts) != 1 || invoices.chargeAttempts[0].Outcome != domain.ChargeAttemptUnknown || invoices.chargeAttempts[0].DeclineCode != "" {
 				t.Errorf("charge attempts = %+v, want one unknown attempt with no decline code", invoices.chargeAttempts)
 			}
-
-			// The park's ERROR names the key: a 409 proves an attempt under it
-			// reached Stripe, and the operator looks the attempt up by it. So
-			// it is the key Stripe received, card included; the bare charge
-			// key finds nothing in Stripe's dashboard.
-			if line := parkAnnouncement(logs.String()); line == "" {
-				t.Errorf("park not announced at ERROR:\n%s", logs)
-			} else if field := "idempotency_key=" + wantKey; !slices.Contains(strings.Fields(line), field) {
-				t.Errorf("park announcement does not carry %s:\n%s", field, line)
-			}
 		})
 	}
-}
-
-// parkAnnouncement is the log line that announces a parked invoice, or "".
-func parkAnnouncement(logs string) string {
-	for _, line := range strings.Split(logs, "\n") {
-		if strings.Contains(line, "level=ERROR") && strings.Contains(line, "this invoice is parked") {
-			return line
-		}
-	}
-	return ""
 }

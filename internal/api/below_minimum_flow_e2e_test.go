@@ -53,12 +53,13 @@ func (s *minChargeStripe) setMinimum(cents int) {
 func installMinChargeStripe(t *testing.T) *minChargeStripe {
 	t.Helper()
 	s := &minChargeStripe{minimum: 50}
+	charge := twoStepStripe(s.answer)
 	prev := http.DefaultTransport
 	http.DefaultTransport = roundTripFunc(func(req *http.Request) (*http.Response, error) {
 		if req.URL.Host != "api.stripe.com" {
 			return prev.RoundTrip(req)
 		}
-		return s.answer(req), nil
+		return charge(req), nil
 	})
 	t.Cleanup(func() { http.DefaultTransport = prev })
 	return s

@@ -43,7 +43,7 @@ func TestChargeDecline_AuthenticationRequired_AsksTheCustomerToConfirm(t *testin
 		invoices := newMockInvoiceUpdater()
 		snapshot := pendingSnapshot()
 		invoices.invoices["inv_1"] = snapshot
-		withCannedStripe(t, http.StatusPaymentRequired, authRequiredErrorJSON(withDeclineCode))
+		withCannedConfirm(t, http.StatusPaymentRequired, authRequiredErrorJSON(withDeclineCode))
 		email := &recordingFailedEmail{}
 		s := NewStripe(NewLiveStripeClient(NewStripeClients(fixedCreds{})), invoices, newMockWebhookStore(), nil, &recordingDunningStarter{})
 		s.SetEmailPaymentFailed(email, staticCustomerEmail{})

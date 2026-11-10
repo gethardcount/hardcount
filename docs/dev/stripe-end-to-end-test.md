@@ -277,8 +277,9 @@ curl -s "http://localhost:8080/v1/invoices?customer_id=<hc_cus_...>" \
 ```
 
 **You see:** an invoice with `total_amount_cents=2900` and
-`stripe_payment_intent_id` populated. With the `4242` card, the PaymentIntent
-auto-confirms, and within about 5 seconds the invoice is `status=paid`,
+`stripe_payment_intent_id` populated. With the `4242` card, Hardcount creates
+the PaymentIntent and confirms it, and within about 5 seconds the invoice is
+`status=paid`,
 `payment_status=succeeded` and `amount_due_cents=0`. The PaymentIntent ID
 also shows on the Stripe dashboard under **Test data → Payments**.
 

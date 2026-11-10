@@ -1,6 +1,6 @@
 # ADR-105: The charge idempotency key is seeded by an attempt counter, not `updated_at`
 
-**Status:** Accepted (amended 2026-10-19, 2026-10-20)
+**Status:** Accepted (amended 2026-10-19, 2026-10-20; amended 2026-11-10: ADR-137)
 **Date:** 2026-07-30
 **Supersedes:** the `hardcount_inv_<id>_<UpdatedAt>` key shape, and the
 money-path playbook's gate #2 wording that blessed it.
@@ -206,3 +206,7 @@ hold-clearing writes.
 A processing payment the sweep finds for a parked invoice is put on it with
 `StampChargeOutcome`, which stamps the PaymentIntent and moves the counter in
 one statement. ADR-108's `AdoptPaymentIntentIfParked` is deleted.
+
+## Amendment 2026-11-10
+
+The key now seeds the unconfirmed create; the confirm sends the key plus `_confirm` ([ADR-137](137-charge-stamps-invoice-before-confirming.md)). With the park gone, the counter moves only on PaymentIntent stamps and the stale-hold clear.

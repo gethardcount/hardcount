@@ -2,6 +2,7 @@ package invoice_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/domain"
@@ -63,36 +64,52 @@ func TestUnknownPaymentIsUnchargeableByEveryClaimPath(t *testing.T) {
 		},
 	}
 
+	// The two shapes of "unknown". On a PaymentIntent: what every charge
+	// writes before it confirms (ADR-137), and what an unclear confirm leaves.
+	// Parked (no PaymentIntent): only an earlier version wrote it.
+	shapes := []struct {
+		name string
+		make func(t *testing.T, inv domain.Invoice)
+	}{
+		{"unknown on a PaymentIntent", func(t *testing.T, inv domain.Invoice) {
+			stampOutcome(t, store, ctx, tenantID, inv.ID, domain.PaymentUnknown, "pi_live_"+inv.ID, "unclear answer to the confirm")
+		}},
+		{"parked", func(t *testing.T, inv domain.Invoice) {
+			seedPark(t, db, inv.ID, "ambiguous: no payment_intent_id")
+		}},
+	}
+
 	for _, c := range claims {
-		t.Run(c.name, func(t *testing.T) {
-			inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-UNK-"+c.name)
+		for _, shape := range shapes {
+			t.Run(c.name+"/"+shape.name, func(t *testing.T) {
+				inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-UNK-"+c.name+"-"+strings.ReplaceAll(shape.name, " ", "-"))
 
-			// Control: while the invoice is claimable the path DOES claim it.
-			// Without this the test could pass against a predicate that refuses
-			// everything, which would prove nothing.
-			h, err := c.claim(inv)
-			if err != nil {
-				t.Fatalf("control claim: %v", err)
-			}
-			if !h.Held() {
-				t.Fatalf("%s refused a claimable invoice — the negative result below would be meaningless", c.name)
-			}
-			releaseClaim(t, db, inv.ID)
+				// Control: while the invoice is claimable the path DOES claim it.
+				// Without this the test could pass against a predicate that refuses
+				// everything, which would prove nothing.
+				h, err := c.claim(inv)
+				if err != nil {
+					t.Fatalf("control claim: %v", err)
+				}
+				if !h.Held() {
+					t.Fatalf("%s refused a claimable invoice — the negative result below would be meaningless", c.name)
+				}
+				releaseClaim(t, db, inv.ID)
 
-			// Treatment: an ambiguous outcome with no PaymentIntent id.
-			stampOutcome(t, store, ctx, tenantID, inv.ID, domain.PaymentUnknown, "", "ambiguous: no payment_intent_id")
+				shape.make(t, inv)
 
-			h, err = c.claim(inv)
-			if err != nil {
-				t.Fatalf("treatment claim: %v", err)
-			}
-			if h.Held() {
-				t.Fatalf("%s (%s) CLAIMED an invoice at payment_status='unknown'. "+
-					"A PaymentIntent may be live at Stripe for it, so this charge would be the customer's SECOND. "+
-					"ADR-107's guarantee is that no claim path admits 'unknown' — if this path must change, the "+
-					"guarantee needs replacing, not the assertion.", c.name, c.what)
-			}
-		})
+				h, err = c.claim(inv)
+				if err != nil {
+					t.Fatalf("treatment claim: %v", err)
+				}
+				if h.Held() {
+					t.Fatalf("%s (%s) CLAIMED an invoice at payment_status='unknown' (%s). "+
+						"A PaymentIntent may be live at Stripe for it, so this charge would be the customer's SECOND. "+
+						"ADR-107's guarantee is that no claim path admits 'unknown' — if this path must change, the "+
+						"guarantee needs replacing, not the assertion.", c.name, c.what, shape.name)
+				}
+			})
+		}
 	}
 }
 

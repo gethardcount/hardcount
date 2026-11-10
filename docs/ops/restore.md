@@ -122,6 +122,33 @@ docker compose run --rm hardcount-api migrate status
 - `ahead`: the backup came from a newer release. Install the release the backup came from, or a newer one, and run the check again.
 - `no migration record`: the backup was restored without its migration table. Restore it again, with the table, into an empty database. A Velox 0.8.x backup gives this answer too, and a later Velox build gives `made by Velox`: neither can be restored ([Coming from Velox](../upgrades.md#coming-from-velox)).
 
+### A backup with a charge in progress
+
+`hardcount migrate` can stop at migration 00225:
+
+```
+Hardcount upgrade stopped: 1 open or written-off invoice(s) have a charge in progress or a parked charge from the previous version.
+```
+
+The backup was made by an earlier release while a card charge was being sent (a charge is in progress for minutes; a parked charge lasts about a day). The message tells an upgrade to run the previous version until those charges finish. Do not do that here: on a restored database the previous version would bill on old data, with no catch-up.
+
+Nothing runs on the restored database, so end those charges by hand in the database shell, then run `hardcount migrate` again:
+
+```sql
+SET app.bypass_rls = 'on';
+UPDATE invoices
+SET auto_charge_claimed_until = NULL,
+    charge_attempt_seq = charge_attempt_seq + 1,
+    payment_status = CASE WHEN payment_status = 'unknown' AND COALESCE(stripe_payment_intent_id, '') = ''
+                          THEN 'pending' ELSE payment_status END
+WHERE status IN ('finalized', 'uncollectible')
+  AND (auto_charge_claimed_until IS NOT NULL
+       OR (payment_status = 'unknown' AND COALESCE(stripe_payment_intent_id, '') = ''))
+RETURNING id, invoice_number;
+```
+
+**You see:** one row for each such invoice. Keep the list. If one of those charges took money, the payment is in Stripe, and [the catch-up](#run-the-catch-up) records it from Stripe's events. Billing stays paused until you resume it, so nothing charges these invoices before then. Before you [resume billing](#resume-billing-then-dunning), look up each invoice on the list in Stripe (search by the invoice's ID), and record a payment that the catch-up did not ([Mark an invoice paid](runbook/manual-interventions.md#mark-an-invoice-paid-offline-payment-received)).
+
 ## Check the restored database
 
 Run these checks before the catch-up. They catch a wrong backup, and the catch-up writes to your live Stripe account and lists payments for you to refund.

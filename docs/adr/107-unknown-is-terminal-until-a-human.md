@@ -1,6 +1,6 @@
 # ADR-107: An unnameable charge attempt parks the invoice; it is never settled failed
 
-**Status:** Accepted (amended 2026-08-01, 2026-08-02, 2026-10-18, 2026-10-19, 2026-10-20)
+**Status:** Accepted (amended 2026-08-01, 2026-08-02, 2026-10-18, 2026-10-19, 2026-10-20; amended 2026-11-10: ADR-137)
 **Date:** 2026-07-31
 **Supersedes:** [ADR-106](106-charge-intent-ledger.md) as the answer to this
 problem. ADR-106's charge-intent ledger is **parked, not deleted** — see
@@ -485,3 +485,30 @@ the customer ends at once and the customer is asked to confirm, rather than
 waiting or being cancelled later. Nothing cancels a PaymentIntent: Stripe never
 leaves one waiting. ADR-127's follow-up C is closed for Hardcount's own charges.
 
+## Amendment 2026-11-10
+
+Charges no longer park an invoice: each charge puts its PaymentIntent on the
+invoice before confirming, so an unclear answer always names one
+([ADR-137](137-charge-stamps-invoice-before-confirming.md)). The parked state
+above applies only to invoices an earlier version parked; the upgrade to
+ADR-137 refuses to run while any exists.
+
+Two statements of the 2026-10-29 amendment changed with it:
+
+- "Nothing cancels a PaymentIntent" no longer holds. The unknown sweep
+  cancels Hardcount's own PaymentIntent when it finds it unfinished
+  (`requires_confirmation`: the confirm never reached Stripe; also
+  `requires_action` and `requires_capture`, which Hardcount's charges do not
+  produce and are handled the same way). A canceled PaymentIntent refuses a
+  later confirm, so "nothing was charged" is final before the invoice is
+  charged again.
+- `error_on_requires_action` and `payment_method_types=[card]` are no longer
+  sent on one request. A charge is now a create and a confirm:
+  `payment_method_types=[card]` goes on the create, the flag on the confirm.
+  The tests named there are now
+  `TestConfirmPaymentIntent_PaymentNeedingTheCustomerFailsAsConfirmDecline`
+  and `TestChargeCalls_ErrorOnRequiresActionNamesCardPaymentMethodType`.
+
+A write-off, this ADR's exit for a park, is now allowed on any `unknown`
+invoice once its charge hold has ended. A payment the unknown sweep or a
+webhook finds later still settles the invoice.
