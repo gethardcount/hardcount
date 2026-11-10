@@ -5,7 +5,7 @@
 
 ## Summary
 
-The email and webhook outboxes (tables of messages waiting to be sent) claim a batch in one short transaction that stamps a time-limited lease, then send each row outside it. Each row's result is saved in its own small update, so a rollback never re-sends a delivered email. A retry or a give-up applies only to a row still `pending` under the claim that made the attempt. An email's sent mark applies to any row not already sent. A webhook event commits together with its row's sent mark, or not at all. Delivery is at-least-once, with at most one duplicate per crash or expired lease, and a `failed` row waits for an operator to requeue it. Amended 2026-08-30 and 2026-10-13: no retention window exists, and a sent or skipped email row drops its links and PDF from the stored payload. Amended 2026-11-10: the retry, give-up and sent-mark rules above ([amendment](#amendment-2026-11-10--what-each-mark-may-change)). Status: active, amended; each worker now runs on one replica under a leader lease ([ADR-114](114-leader-leases-tick-scoped-fencing.md)).
+The email and webhook outboxes (tables of messages waiting to be sent) claim a batch in one short transaction that stamps a time-limited lease, then send each row outside it. Each row's result is saved in its own small update, so a rollback never re-sends a delivered email. A retry or a give-up applies only to a row still `pending` under the claim that made the attempt. An email's sent mark applies to any row not already sent. A webhook event commits together with its row's sent mark, or not at all. Delivery is at-least-once, with at most one duplicate per crash or expired lease, and a `failed` row waits for an operator to requeue it. Amended 2026-08-30 and 2026-10-13: no retention window exists, and a sent or skipped email row drops its links and PDF from the stored payload. Amended 2026-11-10: the retry, give-up and sent-mark rules above ([amendment](#amendment-2026-11-10--what-each-mark-may-change)). Amended 2026-11-10 again, for the webhook delivery worker, which POSTs each event to its endpoints. It saves each result on a detached context, and counts a panic as one failed attempt. It gives up a delivery still pending 50 hours 36 minutes after it was created ([amendment](#amendment-2026-11-10--guards-for-the-delivery-worker)). Status: active, amended; each worker now runs on one replica under a leader lease ([ADR-114](114-leader-leases-tick-scoped-fencing.md)).
 
 ## Context
 
@@ -230,3 +230,62 @@ The overlaps are tested against real Postgres in
 `internal/email/outbox_claim_fence_integration_test.go`. Each test ends one
 claim's lease from inside its handler and runs a second `ProcessBatch` on
 the same row.
+
+## Amendment 2026-11-10 — guards for the delivery worker
+
+The delivery worker POSTs each webhook event to its endpoints and records
+the result in `webhook_deliveries`. Decision 3 says every per-row mark runs
+on a detached context, and both outboxes recover a panic per row. The
+delivery worker did neither, and nothing ended a delivery that never
+recorded a result.
+
+**The rule now** (`internal/webhook/service.go`):
+
+| Guard | Rule | Why |
+|---|---|---|
+| Detached mark | Every delivery mark goes through `markDelivery`: `context.WithoutCancel` plus 5 seconds. | A retry's context ends with its tick: at shutdown, on a lost leader lease, or when the row's 13-second budget runs out. A `2xx` left unrecorded was sent again when the lease ended. |
+| A POST cut short by its tick | Not counted. The row keeps its claim lease. | The receiver did not fail. Counting it would use up one retry of every delivery in flight at each deploy. |
+| Panic | Both goroutines that send recover: an event's first attempt, and each row of the retry worker. The panic is logged with its stack and counted as one failed attempt. | No caller could recover for them, so a panic ended the process. Uncounted, the row was claimed when its lease ended and panicked again. |
+| Panic in a dial hook | The client's two dial hooks, which check an address before it connects, recover for themselves (`recoverDialHook`). A panic is logged with its stack and returned as an error: the connection is refused, and the POST counts as one failed attempt. | `net/http` runs the transport's `DialContext` on a goroutine of its own, and `net.Dialer` runs `Control` on a further one for a host with both IPv4 and IPv6 addresses. The guard above does not cover them. |
+| Age bound | A delivery still `pending` 50 hours 36 minutes after `created_at` is marked `failed` at its next claim, with no POST. `attempt_count` is unchanged. | Only a mark moves `attempt_count`. A delivery whose endpoint or event read kept failing, or whose mark did, was claimed at the end of every lease, for good. |
+
+The age is the retry ladder plus a margin. The ladder is 26 hours 36
+minutes, summed from `retryBackoffs`, so a change to the schedule moves the
+bound. The margin is 24 hours. It keeps the bound off a delivery that is
+still on its ladder. Such a delivery makes its last attempt one ladder
+after its first, plus three delays: jitter, the wait for a tick, and any
+time the worker was not running. In normal running they add up to minutes.
+A wide margin costs little. A row that never records a result takes one
+claim slot each claim lease until the bound.
+
+`attempt_count` is not moved to the claim, as the outboxes' `attempts` is.
+The API returns it as the number of attempts made, and a claim that sends
+nothing is not an attempt.
+
+**What stays possible:**
+
+- A delivery delayed by more than a day in total is given up without its
+  remaining attempts. That needs the worker stopped or far behind for that
+  long. The operator replays it.
+- A delivery past the age stays `pending` until its next claim. For one
+  that counted a failure just before the age, that claim is the retry the
+  ladder set, up to 24 hours later.
+- A mark that panics or fails every time leaves the row `pending`. Each
+  try is logged. `hardcount-doctor` flags a delivery still pending 25
+  hours past the age (`webhook_delivery_pending_past_give_up`). The 25
+  hours cover the ladder's longest wait, so the check does not flag a
+  delivery that is waiting for a retry.
+- The two dial hooks are the only code of this package that Go's `net`
+  and `net/http` run on goroutines of their own today. A new hook there,
+  such as a request body that this package reads, needs a recover of its
+  own.
+- A POST cut short by its tick may have reached the receiver. It is sent
+  again after the lease, which decision 5 already allows.
+
+Tested against real Postgres in
+`internal/webhook/delivery_guards_integration_test.go`. Removing a
+recover, putting the mark back on the tick's context, or removing the
+bound each turns its test red. One recover has no such test: the `defer`
+in `dialControl`. Its body has no seam through which a test can make it
+panic. `recoverDialHook` itself is tested in a `Control` hook on a real
+dialer (`internal/webhook/delivery_guards_test.go`).
