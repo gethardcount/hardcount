@@ -1236,11 +1236,13 @@ func addItemQuantity(input AddItemInput) (int64, error) {
 // to them takes the same lock first, so the reads see every change to them
 // that committed before the lock, and none can commit until the caller's
 // transaction ends. It is enough for the customer's other subscriptions
-// too: every writer that can add a meter or a currency for the customer (a
-// create, an add, a plan change, a billing-profile write) holds the
-// customer-rules lock until it commits. Two adds
-// of plans that bill one meter, on one subscription or on two, are
-// therefore checked one after the other. The unique index on
+// too: every customer-scoped writer that can add a meter or a currency for
+// the customer (a create, an add, a plan change, a billing-profile write)
+// holds the customer-rules lock until it commits. Two adds of plans that
+// bill one meter, on one subscription or on two, are therefore checked one
+// after the other. A price write is plan-scoped and takes no customer lock,
+// so a price added to a plan the customer already uses is not ordered with
+// this check (ADR-130 Risks). The unique index on
 // (subscription, plan) is the write-time gate for duplicates. Archiving a
 // plan writes only the plan row, so an archive that commits between this
 // check and the insert orders as "added, then archived": an existing item

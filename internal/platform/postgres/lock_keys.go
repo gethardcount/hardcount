@@ -16,13 +16,16 @@ import (
 //   - LockKeyBootstrap, a fixed number, serializes first-boot tenant
 //     bootstrap.
 //   - Per-row keys are text hashed into the 64-bit key space with
-//     hashtextextended(key, 0). Each names its table or rule in a prefix, so
-//     two locks share a key only through a hash collision, which adds a wait
-//     and nothing else. In use: the credit ledger ("tenant:customer",
-//     internal/credit), the credit-note invoice lock ("tenant:invoice",
-//     internal/creditnote), the payment-method attach lock
+//     hashtextextended(key, 0). The payment-method attach lock
 //     ("payment_methods:tenant:customer", internal/paymentmethods) and the
-//     customer-rules lock (LockCustomerRulesTx, below).
+//     customer-rules lock ("customer_rules:tenant:customer",
+//     LockCustomerRulesTx, below) name their lock in a prefix. The credit
+//     ledger ("tenant:customer", internal/credit) and the credit-note invoice
+//     lock ("tenant:invoice", internal/creditnote) are bare "tenant:id"
+//     pairs. Those two cannot be equal, because customer and invoice ids
+//     differ (hc_cus_ and hc_inv_). A new key takes its own prefix, so it
+//     cannot equal any of these. Two different keys share a lock only
+//     through a hash collision, which adds a wait and nothing else.
 //
 // Migrations take goose's own session lock (id 4097083626, ADR-125) on a
 // dedicated one-connection pool. That key is goose's, so it is not listed
@@ -38,13 +41,15 @@ const (
 )
 
 // LockCustomerRulesTx takes the customer-rules lock for one customer on tx and
-// holds it until tx ends. Every writer of a rule that spans a customer's
-// subscriptions takes it: one live subscription item per meter, one currency,
-// no new business on an archived customer, and a customer update read and
-// written as one step. Those are subscription creates, item changes, draft
-// activations, customer updates and billing-profile writes. Each one reads
-// the state its rule checks after it gets the lock, so it sees every earlier
-// holder's commit.
+// holds it until tx ends. Every customer-scoped writer of a rule that spans
+// a customer's subscriptions takes it: one live subscription item per meter,
+// one currency, no new business on an archived customer, and a customer
+// update read and written as one step. Those are subscription creates, item
+// changes, draft activations, customer updates and billing-profile writes.
+// Each one reads the state its rule checks after it gets the lock, so it sees
+// every earlier holder's commit. A price write is plan-scoped and takes no
+// customer lock, so a price added to a plan the customer already uses is not
+// ordered with these checks (ADR-130 Risks).
 //
 // A taker takes it before plans, invoices, credit notes, the tenant's number
 // row, the credit ledger lock and the payment-method lock, and holds no
