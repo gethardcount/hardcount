@@ -84,7 +84,7 @@ ALTER ROLE hardcount_app SET statement_timeout = '30s';
 
 **You see:** `ALTER ROLE` twice. They apply to new connections, so restart Hardcount afterwards.
 
-- **`idle_in_transaction_session_timeout` is required.** Closing a billing period locks the subscription's row until the invoice is saved. If a Hardcount process freezes in the middle (a paused VM, for example), that lock blocks every other change to the subscription. This timeout ends such a frozen session. The Compose stack sets it when it creates a new data volume. Hardcount itself neither sets it nor checks it at start-up.
+- **`idle_in_transaction_session_timeout` is required.** Closing a billing period locks the subscription's row until the invoice is saved. If a Hardcount process freezes in the middle (a paused VM, for example), that lock blocks every other change to the subscription. This timeout ends such a frozen session. The Compose stack sets it when it creates a new data volume. Hardcount itself does not set it, and warns at start-up when it is not set: the log line `the app database role has no idle-transaction timeout` means it is `0` for the limited user. Hardcount still starts.
 - **`statement_timeout` is optional.** Hardcount sets no time limit on most queries. `DB_QUERY_TIMEOUT_MS` (default 5 seconds) covers only one account lookup. Set this if you want a hard limit on every query.
 
 To check, connect as `hardcount_app` and run `SHOW idle_in_transaction_session_timeout;`. On the Compose stack, from `deploy/compose`:

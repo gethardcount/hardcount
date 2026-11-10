@@ -416,7 +416,11 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 
 	sub, err := h.svc.Create(r.Context(), tenantID, input)
 	if err != nil {
-		respond.FromError(w, r, err, "subscription")
+		// A create that lost a deadlock or a lock wait (such as on the
+		// customer-rules lock) may be sent again: nothing commits before its
+		// one transaction, and once that commits it returns no error
+		// (ADR-136).
+		respond.FromError(w, r, respond.ConcurrentChangeAsConflict(r, err), "subscription")
 		return
 	}
 
@@ -539,7 +543,10 @@ func (h *Handler) activate(w http.ResponseWriter, r *http.Request) {
 
 	sub, err := h.svc.Activate(r.Context(), tenantID, id)
 	if err != nil {
-		respond.FromError(w, r, err, "subscription")
+		// An activation that lost a deadlock or a lock wait may be sent
+		// again: nothing commits before its one transaction, and once that
+		// commits it returns no error (ADR-136).
+		respond.FromError(w, r, respond.ConcurrentChangeAsConflict(r, err), "subscription")
 		return
 	}
 
@@ -566,10 +573,10 @@ func (h *Handler) cancel(w http.ResponseWriter, r *http.Request) {
 
 	sub, prorationCreditCents, err := h.svc.Cancel(r.Context(), tenantID, id)
 	if err != nil {
-		// A cancel that lost a deadlock may be sent again: the only thing it
-		// commits first is an ended period's invoice, which the period CAS
-		// never bills twice (ADR-136).
-		respond.FromError(w, r, respond.DeadlockAsConflict(r, err), "subscription")
+		// A cancel that lost a deadlock or a lock wait may be sent again: the
+		// only thing it commits first is an ended period's invoice, which the
+		// period CAS never bills twice (ADR-136).
+		respond.FromError(w, r, respond.ConcurrentChangeAsConflict(r, err), "subscription")
 		return
 	}
 
@@ -1022,7 +1029,11 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 		item, addErr = h.svc.AddItem(ctx, tenantID, id, input)
 	}
 	if addErr != nil {
-		respond.FromError(w, r, addErr, "subscription")
+		// An add that lost a deadlock or a lock wait may be sent again: the
+		// only thing it commits first is CloseEndedPeriodFirst's invoice,
+		// which the period CAS never bills twice, and both paths return no
+		// error once their one transaction has committed (ADR-136).
+		respond.FromError(w, r, respond.ConcurrentChangeAsConflict(r, addErr), "subscription")
 		return
 	}
 
@@ -1150,11 +1161,11 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 		result, err = h.svc.UpdateItem(ctx, tenantID, subID, itemID, input)
 	}
 	if err != nil {
-		// A change that lost a deadlock may be sent again: the only thing it
-		// commits first is CloseEndedPeriodFirst's invoice, which the period
-		// CAS never bills twice, and both paths return no error once their
-		// transaction has committed (ADR-136).
-		respond.FromError(w, r, respond.DeadlockAsConflict(r, err), "subscription item")
+		// A change that lost a deadlock or a lock wait may be sent again: the
+		// only thing it commits first is CloseEndedPeriodFirst's invoice,
+		// which the period CAS never bills twice, and both paths return no
+		// error once their transaction has committed (ADR-136).
+		respond.FromError(w, r, respond.ConcurrentChangeAsConflict(r, err), "subscription item")
 		return
 	}
 
@@ -1299,12 +1310,18 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 	// A removal that credits deletes the item and drafts the credit note on
 	// one transaction, so a failed draft rolls back the delete. A removal
 	// that credits nothing runs in a transaction of its own.
+	//
+	// A removal that lost a deadlock or a lock wait (such as on the
+	// customer-rules lock) may be sent again: the only thing it commits first
+	// is CloseEndedPeriodFirst's invoice, which the period CAS never bills
+	// twice, and both paths return no error once their one transaction has
+	// committed (ADR-136).
 	wantProration := prorationRemainingDays > 0 && removedPlanID != "" && h.invoices != nil
 	var removeProration *ProrationDetail
 	if wantProration {
 		removed, detail, err := h.atomicRemoveItemWithProration(ctx, tenantID, subID, itemID)
 		if err != nil {
-			respond.FromError(w, r, err, "subscription item")
+			respond.FromError(w, r, respond.ConcurrentChangeAsConflict(r, err), "subscription item")
 			return
 		}
 		removeProration = detail
@@ -1312,7 +1329,7 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 		removedPlanID = removed.PlanID
 	} else {
 		if err := h.svc.RemoveItem(ctx, tenantID, subID, itemID); err != nil {
-			respond.FromError(w, r, err, "subscription item")
+			respond.FromError(w, r, respond.ConcurrentChangeAsConflict(r, err), "subscription item")
 			return
 		}
 	}

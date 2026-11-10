@@ -189,6 +189,16 @@ func IsDeadlock(err error) bool {
 	return errors.As(err, &pgErr) && pgErr.Code == "40P01"
 }
 
+// IsLockTimeout reports whether err is Postgres ending a statement that
+// waited for a lock longer than lock_timeout (SQLSTATE 55P03). Outside a
+// savepoint that aborts the transaction, so nothing it wrote is kept. A
+// FOR UPDATE NOWAIT raises the same code; no application statement uses
+// NOWAIT.
+func IsLockTimeout(err error) bool {
+	var pgErr *pgconn.PgError
+	return errors.As(err, &pgErr) && pgErr.Code == "55P03"
+}
+
 // UniqueViolationConstraint returns the constraint name if err is a Postgres
 // unique violation (SQLSTATE 23505), and "" otherwise. Use it to tell apart
 // several unique constraints on one table. For example, subscriptions has

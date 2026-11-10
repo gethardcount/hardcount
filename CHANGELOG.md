@@ -48,12 +48,15 @@ original text.
 
 ### Changed
 
+- **API callers: six more routes answer `409` `concurrent_change`, and the code also covers a lock wait that Postgres ended.** Create and activate a subscription, add or remove an item, update a customer and write a billing profile answer it, beside the six routes that already did. A `409` is not stored, so the same `Idempotency-Key` works again. Postgres ends a lock wait only if a `lock_timeout` is set, for example on `hardcount_app` ([Errors](docs/api/errors.md#409-conflict)). ([#1677](https://github.com/gethardcount/hardcount/pull/1677))
+  - Every other route still answers a deadlock or an ended lock wait with a `500`, which its key replays for 24 hours. Among them: schedule-cancel, pause collection, end or extend a trial, retry billing, billing thresholds, plan and meter writes, credit-note create, refunds and manual invoices.
 - **A charge saves its Stripe payment before any money can move.** Each charge creates the PaymentIntent unconfirmed, puts it on the invoice, then confirms it. While it runs, the invoice's payment is `unknown`. An unclear answer from the confirm names the payment and is settled within about an hour. No invoice is parked for 24 hours ([ADR-137](docs/adr/137-charge-stamps-invoice-before-confirming.md)). What else you see ([#1666](https://github.com/gethardcount/hardcount/pull/1666)):
   - `POST /v1/invoices/{id}/mark-uncollectible` now succeeds on any invoice whose payment is `unknown`, once the charge is no longer being sent. Before, it answered 409 unless the invoice was parked. A payment found later still marks the invoice paid.
   - A decline whose answer was lost is now recorded as a decline: the customer gets the payment-failed email and dunning starts. Before, the invoice was charged again a day later.
   - A confirm request that Stripe refuses outright (not a card decline) marks the invoice `failed` and starts dunning, with no email to the customer.
   - A payment that succeeded and was refunded in Stripe before Hardcount recorded it is recorded as paid, with the refund shown as a refund made in Stripe. Before, the invoice could be charged again.
   - If Stripe refuses your API key while a payment is being confirmed, Collect payment says the outcome is not known yet, and the invoice is `unknown` until Hardcount has read the payment with a working key.
+- **Hardcount warns at start-up when the limited database user has no idle-transaction timeout.** The warning `the app database role has no idle-transaction timeout` means `idle_in_transaction_session_timeout` is `0` for that user. Hardcount still starts. Set it as [Postgres requirements](docs/ops/postgres-requirements.md#timeouts-on-the-limited-user) says, then restart. ([#1680](https://github.com/gethardcount/hardcount/pull/1680))
 
 ### Added
 
