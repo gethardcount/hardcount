@@ -4804,12 +4804,18 @@ func (e *Engine) onlyPrepaidBase(ctx context.Context, tenantID string, src domai
 // amount_due reduction) and each void's AfterVoid, the same legs an operator
 // void runs (stop collection at Stripe, tax reversal, close the dunning run).
 // Each void's invoice.voided already committed with the relief's
-// transaction. Best-effort:
-// every leg is already durable and recovered by its own sweep, so a failure
-// here is logged, never returned.
-func (e *Engine) FinishRelief(ctx context.Context, sub domain.Subscription, r domain.Relief) {
+// transaction. Every leg is already durable and recovered by its own sweep,
+// and every leg runs whatever another one did.
+//
+// It returns the errors of the drafts' Issue calls, joined: a note that was
+// not issued has not reduced anything yet, so the caller must not collect
+// the change's invoice now, or the card is charged the whole of it (see
+// subscription's finishReliefThenCollect). The voids' legs return nothing.
+func (e *Engine) FinishRelief(ctx context.Context, sub domain.Subscription, r domain.Relief) error {
+	var issueErrs []error
 	for _, id := range r.DraftIDs {
 		if _, err := e.creditNoteAdjuster.Issue(ctx, sub.TenantID, id); err != nil {
+			issueErrs = append(issueErrs, fmt.Errorf("issue relief credit note %s: %w", id, err))
 			// Issue() is atomic + recoverable (ADR-061): either the draft→issued
 			// CAS never committed (still draft + issue_pending →
 			// RetryPendingClawbackIssue re-drives) or a post-commit external leg
@@ -4822,6 +4828,7 @@ func (e *Engine) FinishRelief(ctx context.Context, sub domain.Subscription, r do
 	for _, inv := range r.Voided {
 		e.invoiceVoider.AfterVoid(ctx, sub.TenantID, inv)
 	}
+	return errors.Join(issueErrs...)
 }
 
 // invoicePage returns one page of a background invoice queue after the

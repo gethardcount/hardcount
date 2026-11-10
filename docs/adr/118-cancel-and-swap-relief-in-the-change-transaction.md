@@ -295,6 +295,20 @@ charge settles or the draft is finalized.
   all three callers, and that both legs still run on a live context when
   the caller's context ends right after the commit.
 
+**2026-11-10: no collect when a relief note was not issued.** The order alone
+did not cover a relief note whose `Issue` failed (a database error, a
+deadline): the collect ran anyway and charged the card the whole final
+invoice, and the credit landed on the balance later. `Engine.FinishRelief`
+now returns the drafts' `Issue` errors, and `finishReliefThenCollect` collects
+the change's invoice only when there were none. Otherwise the invoice, queued
+for collection when it was created, is left to the billing run, which issues
+the note (`clawback_issue`) before it collects queued invoices (the
+auto-charge step). Still possible, as before: a note that fails on every run
+is followed by a full charge on a later run. Tests:
+`TestCancel_ReliefNotIssued_FinalInvoiceWaitsForTheSweeps` (real Postgres,
+both cancels) and `TestReliefNotIssued_TheChangesInvoiceIsNotCollectedInTheCall`
+(all three callers).
+
 ## Amendment 2026-10-22: one crediting rule, the invoice that charged it, newest first
 
 **Decision** (Sagar, 2026-10-21). Every change that gives unused prepaid time

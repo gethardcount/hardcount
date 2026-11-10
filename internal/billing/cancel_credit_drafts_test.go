@@ -75,7 +75,9 @@ func TestBillOnCancelDraftsTx_AllPaid_CreatesDrafts(t *testing.T) {
 	if len(adjuster.issued) != 0 {
 		t.Errorf("nothing may be issued before the cancel commits; issued=%v", adjuster.issued)
 	}
-	e.FinishRelief(context.Background(), sub, r)
+	if err := e.FinishRelief(context.Background(), sub, r); err != nil {
+		t.Fatalf("FinishRelief: %v", err)
+	}
 	if len(adjuster.issued) != 1 || adjuster.issued[0] != r.DraftIDs[0] {
 		t.Errorf("FinishRelief issued=%v, want %v", adjuster.issued, r.DraftIDs)
 	}
@@ -145,7 +147,9 @@ func TestBillOnCancelDraftsTx_UnpaidFullyUnused_VoidsInTx(t *testing.T) {
 	if r.CreditedCents != 0 {
 		t.Errorf("credited=%d, want 0 (nothing was paid)", r.CreditedCents)
 	}
-	e.FinishRelief(context.Background(), sub, r)
+	if err := e.FinishRelief(context.Background(), sub, r); err != nil {
+		t.Fatalf("FinishRelief: %v", err)
+	}
 	if len(voider.afterVoids) != 1 {
 		t.Errorf("AfterVoid ran %d time(s), want 1", len(voider.afterVoids))
 	}

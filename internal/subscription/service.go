@@ -63,10 +63,11 @@ type Biller interface {
 	// then FinishRelief, then FinalizeOnCreateInvoice.
 	BillCancelTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription) (inv domain.Invoice, r domain.Relief, afterCommit func(), err error)
 	// FinishRelief runs a committed relief's post-commit legs (issue the
-	// drafts; the voids' tax reversal). Best-effort: each leg is durable and
-	// recovered by its own sweep. Each void's invoice.voided committed with
-	// the relief.
-	FinishRelief(ctx context.Context, sub domain.Subscription, r domain.Relief)
+	// drafts; the voids' tax reversal). Each leg is durable and recovered by
+	// its own sweep. Each void's invoice.voided committed with the relief. It
+	// returns the drafts' Issue errors: a note not issued has reduced nothing
+	// yet, so the change's invoice must not be collected now.
+	FinishRelief(ctx context.Context, sub domain.Subscription, r domain.Relief) error
 	// ThresholdBilledThroughTx reads, on the caller's tx, the instant a
 	// mid-cycle threshold invoice already billed sub's CURRENT period
 	// through (nil = no threshold fire this period). The atomic plan swap
@@ -1958,7 +1959,19 @@ func (s *Service) finishReliefThenCollect(ctx context.Context, sub domain.Subscr
 	if s.biller == nil {
 		return
 	}
-	s.biller.FinishRelief(ctx, sub, r)
+	if err := s.biller.FinishRelief(ctx, sub, r); err != nil {
+		// A relief note was not issued, so it has not reduced the change's
+		// invoice yet: collected now, the card is charged the whole of it, and
+		// the credit lands on the balance later. The invoice was queued for
+		// collection when it was created, and its tax commit has a sweep. The
+		// billing run issues the note (clawback_issue) before it collects
+		// queued invoices (the auto-charge step), so both finish in order.
+		if inv.ID != "" {
+			slog.WarnContext(ctx, "relief credit note not issued; the change's invoice is left for the billing run to collect after the note is issued",
+				"subscription_id", sub.ID, "invoice_id", inv.ID, "error", err)
+		}
+		return
+	}
 	if inv.ID != "" {
 		s.biller.FinalizeOnCreateInvoice(ctx, sub, inv)
 	}

@@ -45,7 +45,9 @@ func (b *swapBillErrBiller) BillCancelTx(context.Context, *sql.Tx, domain.Subscr
 func (b *swapBillErrBiller) BillOnPlanSwapDraftsTx(context.Context, *sql.Tx, domain.Subscription, time.Time) (domain.Relief, error) {
 	return domain.Relief{}, nil
 }
-func (b *swapBillErrBiller) FinishRelief(context.Context, domain.Subscription, domain.Relief) {}
+func (b *swapBillErrBiller) FinishRelief(context.Context, domain.Subscription, domain.Relief) error {
+	return nil
+}
 func (b *swapBillErrBiller) BillOnCreateTx(context.Context, *sql.Tx, domain.Subscription, time.Time) (domain.Invoice, bool, error) {
 	return domain.Invoice{}, false, nil
 }

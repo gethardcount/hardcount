@@ -1388,7 +1388,9 @@ func billOnCancel(e *Engine, ctx context.Context, sub domain.Subscription) (int6
 	if err != nil {
 		return 0, err
 	}
-	e.FinishRelief(ctx, sub, r)
+	if err := e.FinishRelief(ctx, sub, r); err != nil {
+		return 0, err
+	}
 	return r.CreditedCents, nil
 }
 
@@ -1398,7 +1400,9 @@ func billOnPlanSwap(e *Engine, ctx context.Context, sub domain.Subscription, at 
 	if err != nil {
 		return 0, err
 	}
-	e.FinishRelief(ctx, sub, r)
+	if err := e.FinishRelief(ctx, sub, r); err != nil {
+		return 0, err
+	}
 	return r.CreditedCents, nil
 }
 
