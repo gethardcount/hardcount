@@ -220,43 +220,21 @@ func (s *SettingsStore) Upsert(ctx context.Context, ts domain.TenantSettings) (d
 	return ts, nil
 }
 
-// NextInvoiceNumber atomically allocates the next invoice number for a tenant
-// in the mode carried on ctx (postgres.WithLivemode). Test mode and live mode
-// each have their own monotonic sequence — Stripe-style — so test exploration
-// doesn't burn numbers that should have belonged to live invoices.
+// NextInvoiceNumberTx allocates the next invoice number for a tenant on the
+// caller's transaction, in the mode carried on ctx (postgres.WithLivemode),
+// so the number and the invoice commit together: a rolled-back insert
+// returns the number and leaves no gap (ADR-030). Every invoice writer takes
+// its number this way. Test mode and live mode each have their own monotonic
+// sequence, Stripe-style, so test exploration doesn't burn numbers that
+// should have belonged to live invoices.
 //
-// The UPSERT form lazily initializes tenant_settings on first call so a freshly
-// bootstrapped tenant — which has a tenants row but no tenant_settings row —
-// gets HC-000001, HC-000002, ... without operators needing to touch the
-// settings endpoint first. Concurrent callers serialize on the row lock, so
-// no number is handed out twice within a mode.
-//
-// The INSERT seeds the active mode's column to 2 so RETURNING (seq - 1)
-// yields 1 for the first invoice and (seq - 1) yields the pre-increment value
-// on every subsequent UPDATE call — keeping the sequence monotonic and
-// gap-free across both code paths.
-func (s *SettingsStore) NextInvoiceNumber(ctx context.Context, tenantID string) (string, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return "", err
-	}
-	defer postgres.Rollback(tx)
-	num, err := s.nextInvoiceNumberInTx(ctx, tx, tenantID)
-	if err != nil {
-		return "", err
-	}
-	if err := tx.Commit(); err != nil {
-		return "", err
-	}
-	return num, nil
-}
-
-// NextInvoiceNumberTx is the in-transaction variant. Used by callers
-// that need to allocate the invoice number and insert the invoice in a
-// single atomic step — e.g. the subscription handler's atomic
-// AddItem+proration flow. Without this the number was allocated in its
-// own tx and committed even when the subsequent invoice insert rolled
-// back, leaving a sequence gap. ADR-030 atomic-proration follow-through.
+// The UPSERT form lazily initializes tenant_settings on first call, so a
+// freshly bootstrapped tenant (a tenants row but no tenant_settings row) gets
+// HC-000001, HC-000002, ... without operators touching the settings endpoint
+// first. Concurrent callers serialize on the row lock, so no number is handed
+// out twice within a mode. The INSERT seeds the active mode's column to 2 so
+// RETURNING (seq - 1) yields 1 for the first invoice, and the pre-increment
+// value on every later UPDATE.
 func (s *SettingsStore) NextInvoiceNumberTx(ctx context.Context, tx *sql.Tx, tenantID string) (string, error) {
 	return s.nextInvoiceNumberInTx(ctx, tx, tenantID)
 }
@@ -324,7 +302,7 @@ func (s *SettingsStore) NextInvoiceSequence(ctx context.Context, tenantID string
 // credit note. A rolled-back create (a failed cancel, a refused swap) rolls
 // the number back with it, so the sequence stays gap-free, the same contract
 // NextInvoiceNumberTx keeps for invoices. Same per-mode-column rationale as
-// NextInvoiceNumber above.
+// NextInvoiceNumberTx above.
 func (s *SettingsStore) NextCreditNoteNumberTx(ctx context.Context, tx *sql.Tx, tenantID string) (string, error) {
 	live, err := postgres.Livemode(ctx)
 	if err != nil {

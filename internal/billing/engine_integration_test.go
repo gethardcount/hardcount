@@ -139,14 +139,6 @@ func (a *invoiceStoreAdapter) MarkPaid(ctx context.Context, tenantID, id string,
 	return a.store.MarkPaid(ctx, tenantID, id, stripePaymentIntentID, paidAt)
 }
 
-func (a *invoiceStoreAdapter) CreateInvoiceWithLineItems(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
-	return a.store.CreateWithLineItems(ctx, tenantID, inv, items)
-}
-
-func (a *invoiceStoreAdapter) CreateInvoiceWithLineItemsAudited(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error) {
-	return a.store.CreateWithLineItemsAudited(ctx, tenantID, inv, items, emit)
-}
-
 func (a *invoiceStoreAdapter) CreateInvoiceWithLineItemsTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
 	return a.store.CreateWithLineItemsTx(ctx, tx, tenantID, inv, items)
 }

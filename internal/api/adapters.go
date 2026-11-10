@@ -213,14 +213,6 @@ func (a *invoiceWriterAdapter) GetInvoice(ctx context.Context, tenantID, id stri
 	return a.Get(ctx, tenantID, id)
 }
 
-func (a *invoiceWriterAdapter) CreateInvoiceWithLineItems(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
-	return a.CreateWithLineItems(ctx, tenantID, inv, items)
-}
-
-func (a *invoiceWriterAdapter) CreateInvoiceWithLineItemsAudited(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, emit func(tx *sql.Tx, out domain.Invoice) error) (domain.Invoice, error) {
-	return a.CreateWithLineItemsAudited(ctx, tenantID, inv, items, emit)
-}
-
 func (a *invoiceWriterAdapter) CreateInvoiceWithLineItemsTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem) (domain.Invoice, error) {
 	return a.CreateWithLineItemsTx(ctx, tx, tenantID, inv, items)
 }

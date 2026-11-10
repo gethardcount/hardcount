@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -50,6 +51,46 @@ func (e *Engine) BillFinalOnCancel(ctx context.Context, sub domain.Subscription)
 		e.FinalizeOnCreateInvoice(ctx, sub, inv)
 	}
 	return inv, nil
+}
+
+// BillOnCreate bills a subscription's day-1 in_advance invoice on its own
+// transaction, for the tests that check what that invoice bills: it runs
+// BillOnCreateTx at the subscription's effective now on e.subs.WithTenantTx,
+// then, after the commit, FinalizeOnCreateInvoice, the one step the deleted
+// own-transaction BillOnCreate ran after its insert. Like it, a second call
+// for the same period finds the period's slot taken and returns the zero
+// invoice. The invoice is empty when there is nothing to bill. Production
+// code has no such method: create, activate and the trial flip bill through
+// BillOnCreateTx, on the transaction that writes the subscription.
+func (e *Engine) BillOnCreate(ctx context.Context, sub domain.Subscription) (domain.Invoice, error) {
+	var (
+		inv domain.Invoice
+		ok  bool
+	)
+	if err := e.subs.WithTenantTx(ctx, sub.TenantID, func(tx *sql.Tx) error {
+		var err error
+		inv, ok, err = e.BillOnCreateTx(ctx, tx, sub, e.effectiveNow(ctx, sub))
+		return err
+	}); err != nil {
+		if errs.Code(err) == errs.CodeInvoiceBillingPeriodTaken {
+			return domain.Invoice{}, nil
+		}
+		return domain.Invoice{}, err
+	}
+	if !ok {
+		return domain.Invoice{}, nil
+	}
+	e.FinalizeOnCreateInvoice(ctx, sub, inv)
+	return inv, nil
+}
+
+// finalizeAuditEmit adapts emitFinalizeAuditTx to the store's audited-create
+// callback shape, for the shared-fate test: the store hands back the persisted
+// invoice as `out` (with its real ID), and the finalize row audits that.
+func (e *Engine) finalizeAuditEmit(ctx context.Context) func(tx *sql.Tx, out domain.Invoice) error {
+	return func(tx *sql.Tx, out domain.Invoice) error {
+		return e.emitFinalizeAuditTx(ctx, tx, out)
+	}
 }
 
 // ShortenCommitBudget sets commitBudget to d for one test, so a test can run

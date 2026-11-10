@@ -42,7 +42,6 @@ type CustomerReader interface {
 // in_arrears (no day-1 invoice, no cancel proration). Implemented
 // by *billing.Engine.
 type Biller interface {
-	BillOnCreate(ctx context.Context, sub domain.Subscription) (domain.Invoice, error)
 	// BillCancelTx writes a cancel's final invoice and its relief on the
 	// caller's cancel tx (ADR-056, ADR-118). It prices the final invoice,
 	// then writes the relief: credit-note drafts (issue_pending) for paid and
