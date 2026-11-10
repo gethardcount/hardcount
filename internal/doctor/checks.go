@@ -275,6 +275,16 @@ WHERE g.entry_type = 'grant' AND g.consumed_cents < g.amount_cents;`,
 		SQL:    `SELECT 'webhook_outbox' AS src, id, tenant_id, event_type AS kind, attempts, next_attempt_at, created_at, COALESCE(last_error,'') AS last_error FROM webhook_outbox WHERE status = 'pending' AND attempts >= 15 AND next_attempt_at < now() - interval '24 hours' UNION ALL SELECT 'email_outbox' AS src, id, tenant_id, email_type AS kind, attempts, next_attempt_at, created_at, COALESCE(last_error,'') AS last_error FROM email_outbox WHERE status = 'pending' AND attempts >= 15 AND next_attempt_at < now() - interval '24 hours'`,
 	},
 	{
+		Name:   "webhook_delivery_pending_past_give_up",
+		Domain: "transport",
+		Why:    "the retry worker marks failed a webhook delivery still pending 50 hours 36 minutes after it was created (the whole retry schedule plus a day), at the delivery's next claim. One still pending an hour later was not claimed, or its mark never lands: the webhook_delivery job is stopped or paused, or the mark fails every time. The receiver may not have the event: fix the cause, then resend the delivery",
+		// The first interval is the worker's own bound, deliveryGiveUpAfter
+		// in internal/webhook/service.go. A test there fails when the two
+		// differ. The second is this check's grace: the worker reaches a row
+		// within one claim lease and one tick of the bound, a few minutes.
+		SQL: `SELECT id, tenant_id, livemode, webhook_endpoint_id, webhook_event_id, attempt_count, next_retry_at, created_at, COALESCE(error_message, '') AS error_message FROM webhook_deliveries WHERE status = 'pending' AND created_at < now() - interval '50 hours 36 minutes' - interval '1 hour'`,
+	},
+	{
 		Name:   "payment_methods_detached_but_still_default",
 		Domain: "transport",
 		Why:    "a detached card may never remain the default — that is the charge-a-removed-card hazard",

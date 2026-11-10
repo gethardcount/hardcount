@@ -9,12 +9,17 @@ error, the next retry time). Back to the [runbook index](index.md).
 
 - `hardcount_webhook_deliveries_total{status="failed"}` rises. It counts
   deliveries marked failed after their last retry, about 26 hours 36
-  minutes after the first attempt, for all endpoints together (it has no endpoint label).
+  minutes after the first attempt. It also counts deliveries given up
+  while still pending 50 hours 36 minutes after they were created. It
+  covers all endpoints together (it has no endpoint label).
 - Earlier, from the first failed attempt: the WARN line
   `webhook delivery scheduled for retry`, which names the `endpoint_id`.
   The last failure logs `webhook delivery permanently failed` at ERROR.
 - The dashboard shows failed deliveries and a falling success rate for one
   endpoint.
+- The ERROR line `webhook delivery attempt panicked` or
+  `webhook delivery given up`. Both mean the failure is Hardcount's own
+  ([below](#the-failure-is-hardcounts-own)).
 
 ## Why
 
@@ -23,6 +28,8 @@ error, the next retry time). Back to the [runbook index](index.md).
   redirects, so a redirect is a failed delivery.
 - The HMAC signature does not match: the shared-secret signature on each
   delivery no longer verifies. The customer checks against an old secret.
+- Hardcount itself failed. The delivery's `error_message` says so
+  ([below](#the-failure-is-hardcounts-own)).
 
 ## Check
 
@@ -56,3 +63,38 @@ LIMIT 20;
 
 The query shows no new failures for the endpoint, and its success rate in
 the dashboard recovers.
+
+## The failure is Hardcount's own
+
+Two values of `error_message` mean the endpoint is not at fault.
+
+**`internal error during the delivery attempt`.** An attempt panicked: a
+bug in Hardcount. The attempt counts as one failed attempt, and the
+delivery is retried on the schedule.
+
+1. Find the ERROR line `webhook delivery attempt panicked` with the
+   delivery's `delivery_id`. Its `stack` field shows where.
+2. Report the stack as a bug. A delivery that ends failed can be replayed
+   once the bug is fixed.
+
+**`gave up: still pending past the whole retry schedule, with no final
+outcome recorded`.** The delivery was still pending 50 hours 36 minutes
+after it was created: the whole retry schedule plus a day. The retry
+worker marked it failed without sending it. When an earlier attempt had
+failed, the text ends with `(last error: …)`.
+
+1. Find the ERROR line `webhook delivery given up` with the delivery's
+   `delivery_id`. Its `attempts` field counts the attempts made.
+2. Find why it waited that long:
+   - The `webhook_delivery` job was stopped, paused or far behind for more
+     than a day: see [A background job is stuck](background-job-stuck.md).
+   - Hardcount could not read the delivery's endpoint or event. Search the
+     log for `get endpoint for retry` or `get event for retry` with the
+     same `delivery_id`. The line's `error` field says why.
+   - Hardcount could not save the result. Search for `mark not applied`
+     with the same `delivery_id`.
+3. Fix the cause, then replay the event as in step 3 of [Fix](#fix).
+
+`hardcount-doctor` lists every delivery still pending an hour past that
+age (check `webhook_delivery_pending_past_give_up`). A row there means the
+`webhook_delivery` job is not running, or it cannot save the delivery.

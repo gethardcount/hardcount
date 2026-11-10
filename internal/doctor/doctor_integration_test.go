@@ -414,6 +414,79 @@ func TestDoctor_CreditCurrencyChecks(t *testing.T) {
 	}
 }
 
+// TestDoctor_WebhookDeliveryPendingPastGiveUp: the retry worker gives up a
+// webhook delivery still pending 50 hours 36 minutes after it was created,
+// at the delivery's next claim. The check flags one still pending an hour
+// after that. It stays silent on a pending delivery inside that hour, on one
+// waiting for its last retry, and on a failed one of any age.
+func TestDoctor_WebhookDeliveryPendingPastGiveUp(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+	admin := testutil.AdminPool(t)
+
+	tenantID := testutil.CreateTestTenant(t, db, "Doctor Webhook Delivery")
+	// Raw SQL, because no writer makes a delivery that is days old in test
+	// time.
+	mustExec := func(q string, args ...any) {
+		t.Helper()
+		tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
+		if err != nil {
+			t.Fatalf("seed begin: %v", err)
+		}
+		defer postgres.Rollback(tx)
+		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', 'on', true)`); err != nil {
+			t.Fatalf("set livemode: %v", err)
+		}
+		if _, err := tx.ExecContext(ctx, q, args...); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("seed commit: %v", err)
+		}
+	}
+	// The sweep refuses to vouch for a database in which it reads no customer.
+	mustExec(`INSERT INTO customers (id, tenant_id, external_id, display_name, email)
+		VALUES ('cus_doc_whd', $1, 'doc_whd', 'Doc', '')`, tenantID)
+	mustExec(`INSERT INTO webhook_endpoints (id, tenant_id, url, secret_encrypted, secret_last4)
+		VALUES ('hc_whe_doc', $1, 'https://example.test/hook', 'whsec_doc', '_doc')`, tenantID)
+	mustExec(`INSERT INTO webhook_events (id, tenant_id, event_type) VALUES ('hc_whevt_doc', $1, 'invoice.paid')`, tenantID)
+	delivery := func(id, status string, attempts int, age string) {
+		t.Helper()
+		mustExec(`INSERT INTO webhook_deliveries (id, tenant_id, webhook_endpoint_id, webhook_event_id, status, attempt_count,
+				next_retry_at, created_at, completed_at)
+			VALUES ($1, $2, 'hc_whe_doc', 'hc_whevt_doc', $3, $4,
+				CASE WHEN $3 = 'pending' THEN now() + interval '3 minutes' END,
+				now() - $5::interval,
+				CASE WHEN $3 <> 'pending' THEN now() END)`, id, tenantID, status, attempts, age)
+	}
+	delivery("hc_whd_doc_stuck", "pending", 0, "51 hours 37 minutes")
+	delivery("hc_whd_doc_grace", "pending", 0, "51 hours 35 minutes")
+	delivery("hc_whd_doc_last_retry", "pending", 5, "27 hours")
+	delivery("hc_whd_doc_failed", "failed", 6, "90 hours")
+
+	res := doctor.Run(ctx, admin, doctor.Checks)
+	for _, e := range res.Errors {
+		t.Errorf("check failed to run: %v", e)
+	}
+	flagged := map[string]bool{}
+	for _, v := range res.Violations {
+		if v.Check.Name == "webhook_delivery_pending_past_give_up" {
+			flagged[v.RowID] = true
+		}
+	}
+	for id, want := range map[string]bool{
+		"hc_whd_doc_stuck":      true,
+		"hc_whd_doc_grace":      false,
+		"hc_whd_doc_last_retry": false,
+		"hc_whd_doc_failed":     false,
+	} {
+		if flagged[id] != want {
+			t.Errorf("webhook_delivery_pending_past_give_up flags %s: %v, want %v", id, flagged[id], want)
+		}
+	}
+}
+
 // A check runs in a read-only transaction, so a check whose SQL writes fails
 // to run and leaves no row behind. It runs on the app pool, which may write
 // to tenants.

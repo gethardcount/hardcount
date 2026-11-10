@@ -73,6 +73,7 @@ at the first billing run after its time is up.
 | Time your endpoint has to answer | 10 seconds. Only a `2xx` counts as delivered. |
 | Waits between delivery attempts | 1 minute, 5 minutes, 30 minutes, 2 hours, 24 hours, each plus up to 30 seconds |
 | Delivery attempts | 6, over about 26 hours 36 minutes. Then the delivery is marked failed. |
+| A delivery still waiting, whatever its attempts | Marked failed 50 hours 36 minutes after it was created, without another attempt |
 | Tries to turn a queued event into deliveries | 15, over about 52 hours |
 | Both secrets sign each message after a secret rotation | 72 hours |
 
