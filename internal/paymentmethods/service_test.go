@@ -150,23 +150,6 @@ func (m *memStore) SetDefault(_ context.Context, tenantID, customerID, pmID stri
 	return target, nil
 }
 
-func (m *memStore) Detach(_ context.Context, tenantID, customerID, pmID string) (PaymentMethod, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	row, ok := m.rows[pmID]
-	if !ok || row.TenantID != tenantID || row.CustomerID != customerID {
-		return PaymentMethod{}, errs.ErrNotFound
-	}
-	if row.DetachedAt == nil {
-		now := time.Now().UTC()
-		row.DetachedAt = &now
-	}
-	row.IsDefault = false
-	row.UpdatedAt = time.Now().UTC()
-	m.rows[pmID] = row
-	return row, nil
-}
-
 func (m *memStore) CustomersWithDefault(_ context.Context, tenantID string, customerIDs []string) (map[string]bool, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

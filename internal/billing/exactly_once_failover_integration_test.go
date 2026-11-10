@@ -390,10 +390,11 @@ func seedFailingHeadSubscription(t *testing.T, db *postgres.DB, seed exactlyOnce
 // what the doctor is for, and a crash is exactly the event most likely to
 // produce one.
 //
-// Deliberately uses the ADMIN pool. The checks are raw SELECTs with no tenant
-// predicate, so under an RLS-scoped app role they return zero rows and the
-// sweep passes without having looked at anything — a green result that means
-// the opposite of what it appears to.
+// The sweep runs on the admin pool here. The doctor reads every tenant's rows
+// under any role that can read the tables (see beginRead in
+// internal/doctor/doctor.go). When tenants exist but it reads no customers
+// and no invoices, it returns an error instead of a pass, and this helper
+// fails on any error.
 func assertDoctorClean(t *testing.T) {
 	t.Helper()
 	res := doctor.Run(context.Background(), testutil.AdminPool(t), doctor.Checks)

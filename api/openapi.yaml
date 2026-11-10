@@ -457,9 +457,7 @@ components:
         revoked_at:
           type: string
           format: date-time
-          description: |
-            When the invitation was revoked, by a member or because its
-            email could not be queued. Absent unless it was revoked.
+          description: When a member revoked the invitation. Absent unless it was revoked.
       example:
         id: hc_minv_davn542q3gpgqfoq5ccg
         email: sam@northwind.example

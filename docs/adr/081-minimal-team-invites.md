@@ -1,7 +1,7 @@
 # ADR-081: Minimal team invites (no RBAC)
 
 Date: 2026-07-06
-Status: Accepted
+Status: Accepted (amended 2026-11-10)
 Amends: ADR-011 (which shipped single-user auth and deferred invites)
 Trigger: DP-readiness cut-reinstatement #2 ("Single dashboard seat" in the
 DP-readiness register, maintained in the internal `velox-ops` repo) — a
@@ -12,7 +12,7 @@ user, undercutting a feature the README sells.
 
 ## Summary
 
-Teammates join an account through a single-use email invite (`POST /v1/members/invite`) valid for 7 days, so people stop sharing one password and audit rows name the real person. There is no role-based access control: every member has full access, and the recorded role is not enforced. Only a signed-in dashboard user can invite or remove members, because an API key has no person to attribute the act to. Removing a member ends all their sessions, and nobody can remove themselves or the last member. Status: active, amending [ADR-011](011-email-password-auth-and-clean-api-keys.md); roles, MFA and SSO are not built.
+Teammates join an account through a single-use email invite (`POST /v1/members/invite`) valid for 7 days, so people stop sharing one password and audit rows name the real person. There is no role-based access control: every member has full access, and the recorded role is not enforced. Only a signed-in dashboard user can invite or remove members, because an API key has no person to attribute the act to. Removing a member ends all their sessions, and nobody can remove themselves or the last member, even when two removals run at once. An invitation is saved with its email, and an accept saves the account and the membership with its claim on the invitation, so a failure leaves nothing half done (amendment 2026-11-10). Status: active, amending [ADR-011](011-email-password-auth-and-clean-api-keys.md); roles, MFA and SSO are not built.
 
 ## Decision
 
@@ -84,3 +84,31 @@ map swap-over point is documented at `internal/auth/permission.go`.
   per-session, not per-user). On a single-tenant install — the pilot
   shape — the only existing-user accept is a removed member re-invited,
   which round-trips cleanly.
+
+## Amendment 2026-11-10: each membership change is one transaction
+
+Three membership writes were split across transactions, so a race or a
+crash between the parts could leave a half-done state. Each is now one
+transaction.
+
+- **Removal (decision 5).** The last-member check counted members in one
+  transaction and deleted in another. Two members removing each other at
+  once both saw two members, and the account was left with none. Now
+  `PostgresStore.RemoveMember` takes a per-tenant advisory lock
+  (`user_tenants:<tenant>`, held to commit) and deletes with the count in
+  the `DELETE` itself. The second removal waits, sees one member, and gets
+  the same "cannot remove the last member" refusal. Session revocation is
+  unchanged.
+- **Accept (decision 1).** The accept used up the invitation in one
+  transaction, then created the account and the membership in two more. A
+  failure in between burned the token, and could leave an account in no
+  workspace. Now the claim on `accepted_at`, the account and the
+  membership commit together. A failed accept writes nothing, so the
+  invitee can use the link again. The password is still checked, and now
+  hashed, before the claim.
+- **Invite email (decision 7).** The email was queued after the
+  invitation committed, and a failed queue revoked the invitation. A crash
+  in between left a pending invitation whose link was never sent. Now the
+  `email_outbox` row is written on the invitation's transaction, which
+  runs under `TxTenant` so the row gets the mode. A failed queue writes no
+  invitation, and the revoke is gone.

@@ -106,14 +106,15 @@ Exit codes: `0` passed, `1` a setting is wrong, `2` the backup failed, `3` the r
 **Last, check the money rules on a restored copy.** `hardcount-doctor` reads the database and reports money records that break Hardcount's rules. The drill removes its copy, so restore into a spare database instead, such as the test database of [Test a restore](../production-one-vm.md#test-a-restore), and run the doctor before you delete it. The release image does not include it: run it from a source checkout of the same release.
 
 ```bash
-PGOPTIONS='-c app.bypass_rls=on' \
-  DATABASE_URL="postgres://hardcount:PASSWORD@db-host:5432/hardcount_restore_test?sslmode=require" \
+DATABASE_URL="postgres://hardcount:PASSWORD@db-host:5432/hardcount_restore_test?sslmode=require" \
   go run ./cmd/hardcount-doctor
 ```
 
 **You see:** `hardcount-doctor: <n> checks in <time>`, then `OK — no invariant violations`.
 
-`PGOPTIONS` lets the doctor read every account's rows. Without it, only a superuser, or a user with `BYPASSRLS`, sees them. Any other user sees no rows, and the doctor then reports no problems even when there are some ([why](runbook/index.md#before-you-start)).
+The doctor reads every account's rows under any database user that can read the tables. If accounts exist but it reads no customers and no invoices, it exits with status 2 instead of printing `OK`.
+
+v0.9.3 and earlier need `PGOPTIONS='-c app.bypass_rls=on'` in front of the command. Without it, their doctor run as a user that is neither a superuser nor `BYPASSRLS` sees no rows, and reports no problems even when there are some ([why](runbook/index.md#before-you-start)).
 
 Do not start Hardcount on a copy of your live database. The copy holds your live Stripe keys and your customers' email addresses, and Hardcount has no setting that makes it safe to start. Its background jobs would bill your customers, charge their cards a second time, and email them.
 

@@ -20,7 +20,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/gethardcount/hardcount/internal/auth"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/user"
 )
@@ -245,8 +244,20 @@ func flowBootstrap(t *testing.T, ts *httptest.Server, token, email, password str
 func flowSignIn(t *testing.T, db *postgres.DB, ts *httptest.Server, tenantID string) *http.Cookie {
 	t.Helper()
 	email, password := "owner_"+tenantID+"@flow.test", "flow-sign-in-pw-12"
-	if _, err := user.NewService(user.NewPostgresStore(db), clock.Real()).CreateUser(t.Context(), email, password, tenantID, "owner"); err != nil {
+	hash, err := user.HashPassword(password)
+	if err != nil {
+		t.Fatalf("hash the owner's password: %v", err)
+	}
+	tx, err := db.BeginTx(t.Context(), postgres.TxBypass, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer postgres.Rollback(tx)
+	if _, err := user.NewPostgresStore(db).CreateInTx(t.Context(), tx, email, hash, tenantID, "owner"); err != nil {
 		t.Fatalf("add an owner to %s: %v", tenantID, err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit the owner of %s: %v", tenantID, err)
 	}
 	return login(t, ts, email, password)
 }
