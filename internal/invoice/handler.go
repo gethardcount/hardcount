@@ -388,8 +388,12 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		currencyUnavailable(w, r, tenantID, input.CustomerID, err)
 		return
 	}
+	// A lost lock wait or deadlock answers 409 concurrent_change, which the
+	// idempotency layer does not store: nothing commits before the store's one
+	// transaction, which takes the invoice number inside it (#1681), so a
+	// resend with the same key runs once (ADR-136).
 	if err != nil {
-		respond.FromError(w, r, err, "invoice")
+		respond.FromError(w, r, respond.ConcurrentChangeAsConflict(r, err), "invoice")
 		return
 	}
 
