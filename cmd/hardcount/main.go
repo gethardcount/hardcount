@@ -619,6 +619,26 @@ func checkRLSCapability(pool *sql.DB) (role string, canBypass bool, err error) {
 	return role, canBypass, err
 }
 
+// warnIfNoIdleTxTimeout logs one warning when idle_in_transaction_session_timeout
+// is 0 for the pool's role, which Postgres reads as no limit. Without it, a
+// Hardcount process that freezes inside a transaction keeps its row locks
+// until something ends its session. It warns and does not stop the boot: the
+// server works without the setting, and a Compose data volume created before
+// the stack set it has none. A failed read is logged too, so a check that did
+// not run never looks like a role that passed it.
+func warnIfNoIdleTxTimeout(logger *slog.Logger, pool *sql.DB, role string) {
+	var timeout string
+	if err := pool.QueryRow(`SELECT current_setting('idle_in_transaction_session_timeout')`).Scan(&timeout); err != nil {
+		logger.Warn("could not read the app database role's idle_in_transaction_session_timeout, so start-up did not check it — see docs/ops/postgres-requirements.md#timeouts-on-the-limited-user.",
+			"role", role, "error", err)
+		return
+	}
+	if timeout == "0" {
+		logger.Warn("the app database role has no idle-transaction timeout (idle_in_transaction_session_timeout is 0), so a Hardcount process that freezes inside a transaction keeps its locks until its session ends. Set it as the admin role, then restart Hardcount — see docs/ops/postgres-requirements.md#timeouts-on-the-limited-user.",
+			"role", role, "statement", "ALTER ROLE "+role+" SET idle_in_transaction_session_timeout = '30s'")
+	}
+}
+
 // openAppPool returns the connection for request-time queries, where RLS must
 // be enforced (ADR-073). APP_DATABASE_URL is used as given when set.
 // Staging and production refuse to start without it, with an empty or
@@ -627,7 +647,8 @@ func checkRLSCapability(pool *sql.DB) (role string, canBypass bool, err error) {
 // DATABASE_URL into APP_DATABASE_URL, which no check on the URL text can
 // see. Local development still derives hardcount_app:hardcount_app. When
 // that URL cannot be used, openAppPool falls back to the admin pool with a
-// warning. The returned cleanup does nothing after a fallback.
+// warning. The returned cleanup does nothing after a fallback. On the app
+// pool it also warns when the role has no idle-transaction timeout.
 func openAppPool(cfg config.Config, adminPool *sql.DB) (*sql.DB, func()) {
 	noop := func() {}
 
@@ -683,6 +704,8 @@ func openAppPool(cfg config.Config, adminPool *sql.DB) (*sql.DB, func()) {
 			"role", role, "grants", strings.Join(missing, "; "))
 		os.Exit(1)
 	}
+
+	warnIfNoIdleTxTimeout(slog.Default(), appPool, role)
 
 	slog.Info("using app database connection (RLS enforced)", "role", role)
 	return appPool, func() { _ = appPool.Close() }

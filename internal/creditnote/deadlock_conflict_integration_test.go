@@ -36,7 +36,7 @@ import (
 // of an issue fail with SQLSTATE 40P01, as Postgres fails the side it stops
 // to break a deadlock with a cancel.
 //
-// Mutation-verify: drop respond.DeadlockAsConflict from the issue handler
+// Mutation-verify: drop respond.ConcurrentChangeAsConflict from the issue handler
 // (issue) or from create's auto_issue step (auto_issue): the first answer is
 // a 500, and the same key replays it. Convert at the auto_issue step even
 // when the void failed (auto_issue_void_fails): the answer is a 409.
