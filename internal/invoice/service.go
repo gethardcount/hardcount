@@ -1899,10 +1899,11 @@ func (s *Service) reverseInvoiceTax(ctx context.Context, tenantID string, inv do
 	}
 	res, err := s.taxReverser.ReverseTax(ctx, tenantID, req)
 	if err == nil && (res == nil || res.TransactionID == "") {
-		// The invoice carries a committed transaction, so a reversal that
-		// names no transaction reversed nothing (no provider resolved). It is
-		// a failure, as the credit-note sweep treats it: stamping
-		// tax_reversed_at here would record a reversal that was never made.
+		// tax_reversed_at is stamped only on a named reversal. Stripe Tax
+		// answers with a transaction id or an error, so a result that names
+		// none comes only from a reverser that is not wired to a provider.
+		// It reversed nothing, and is a failure here as in the credit-note
+		// sweep.
 		err = errors.New("the tax provider returned no reversal transaction")
 	}
 	if err != nil {
