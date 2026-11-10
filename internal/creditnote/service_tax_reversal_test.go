@@ -262,7 +262,7 @@ func TestIssue_ReversalFailureStillIssuesCN(t *testing.T) {
 			"inv_paid": {
 				ID: "inv_paid", TenantID: "t1", CustomerID: "cus_1",
 				Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded,
-				Currency: "USD", SubtotalCents: 10000, TaxFacts: domain.TaxFacts{TaxAmountCents: 1800},
+				Currency: "USD", SubtotalCents: 10000, TaxFacts: domain.TaxFacts{TaxAmountCents: 1800, TaxProvider: "stripe_tax"},
 				TotalAmountCents: 11800, AmountPaidCents: 11800,
 				StripePaymentIntentID: "pi_4",
 				TaxTransactionID:      "tx_upstream_2",
@@ -311,7 +311,7 @@ func TestRetryPendingCreditNoteTaxReversal_ReDrivesAndClears(t *testing.T) {
 			"inv_paid": {
 				ID: "inv_paid", TenantID: "t1", CustomerID: "cus_1",
 				Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded,
-				Currency: "USD", SubtotalCents: 10000, TaxFacts: domain.TaxFacts{TaxAmountCents: 1800},
+				Currency: "USD", SubtotalCents: 10000, TaxFacts: domain.TaxFacts{TaxAmountCents: 1800, TaxProvider: "stripe_tax"},
 				TotalAmountCents: 11800, AmountPaidCents: 11800,
 				StripePaymentIntentID: "pi_5",
 				TaxTransactionID:      "tx_upstream_3",
@@ -368,7 +368,7 @@ func TestRetryPendingCreditNoteTaxReversal_RecoversANoteWhoseInlineReversalNever
 			"inv_tax": {
 				ID: "inv_tax", TenantID: "t1", CustomerID: "cus_1",
 				Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded,
-				Currency: "USD", SubtotalCents: 10000, TaxFacts: domain.TaxFacts{TaxAmountCents: 1000},
+				Currency: "USD", SubtotalCents: 10000, TaxFacts: domain.TaxFacts{TaxAmountCents: 1000, TaxProvider: "stripe_tax"},
 				TotalAmountCents: 11000, AmountPaidCents: 11000,
 				StripePaymentIntentID: "pi_never_ran",
 				TaxTransactionID:      "tx_upstream_never_ran",
@@ -461,7 +461,7 @@ func TestRetryPendingCreditNoteTaxReversal_ZeroTaxInvoice_ClearsAStaleMarkerWith
 				ID: "inv_zero_tax", TenantID: "t1", CustomerID: "cus_1",
 				Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded,
 				Currency: "USD", SubtotalCents: 10000,
-				TaxFacts:         domain.TaxFacts{TaxAmountCents: 0},
+				TaxFacts:         domain.TaxFacts{TaxAmountCents: 0, TaxProvider: "stripe_tax"},
 				TotalAmountCents: 10000, AmountPaidCents: 10000,
 				StripePaymentIntentID: "pi_zero_tax",
 				TaxTransactionID:      "tx_upstream_zero_tax",
@@ -573,11 +573,11 @@ func taxInvoiceReader() *memInvoiceReader {
 	}}
 }
 
-// A re-drive that fails writes the marker again. The write stamps the note's
-// updated_at, which is the list's order, so the failing note goes behind the
-// others: the list holds every tenant's notes and takes a fixed number per
-// run, and failing notes left at its head kept every other reversal waiting.
-func TestRetryPendingCreditNoteTaxReversal_AFailedReDriveGoesBehindTheOthers(t *testing.T) {
+// A re-drive that fails writes nothing to the note. Any write stamps
+// updated_at, which the refunds-needing-attention rule reads as the note's
+// age: a note re-driven every hour would never be old enough to be listed
+// there, and a stuck refund would stay hidden.
+func TestRetryPendingCreditNoteTaxReversal_AFailedReDriveWritesNothing(t *testing.T) {
 	t.Parallel()
 	store := newMemStore()
 	rev := &fakeTaxReverser{failWith: errors.New("stripe 503")}
@@ -588,8 +588,8 @@ func TestRetryPendingCreditNoteTaxReversal_AFailedReDriveGoesBehindTheOthers(t *
 	if _, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(postgres.WithLivemode(context.Background(), true), 10); len(sweepErrs) != 1 {
 		t.Fatalf("errs=%v, want exactly the re-drive error", sweepErrs)
 	}
-	if store.setPendingCalls != 1 {
-		t.Fatalf("marker writes: %d, want 1 — the write that moves a failed note behind the others", store.setPendingCalls)
+	if store.setPendingCalls != 0 {
+		t.Fatalf("marker writes: %d, want 0 — a failed re-drive must not write the note", store.setPendingCalls)
 	}
 	if got, _ := store.Get(context.Background(), "t1", cn.ID); !got.TaxReversalPending {
 		t.Fatal("the marker must stay set after a failed re-drive")

@@ -278,7 +278,7 @@ func (m *memStore) TransitionStatus(ctx context.Context, tenantID, id string, fr
 		cn.TaxReversalPending = false
 		if m.invoices != nil && cn.TotalCents > 0 {
 			if inv, ok := m.invoices.invoices[cn.InvoiceID]; ok {
-				cn.TaxReversalPending = inv.TaxAmountCents > 0 && (inv.TaxProvider == "stripe_tax" || inv.TaxTransactionID != "")
+				cn.TaxReversalPending = inv.TaxProvider == "stripe_tax" && inv.TaxAmountCents > 0
 			}
 		}
 	}

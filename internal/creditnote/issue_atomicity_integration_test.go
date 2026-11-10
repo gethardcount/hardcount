@@ -276,6 +276,142 @@ func TestIssue_MarksTheTaxReversalOwed_InTheIssueStatement(t *testing.T) {
 			t.Fatal("a zero-tax transaction has nothing to reverse")
 		}
 	})
+
+	t.Run("a note with no amount: not marked", func(t *testing.T) {
+		cn := f.issue("CN-MARK-5", f.invoice("INV-MARK-5", "stripe_tax", 1000, "tx_upstream_5"), 0)
+		if cn.TaxReversalPending {
+			t.Fatal("a note of zero credits no tax, so it owes no reversal")
+		}
+	})
+
+	t.Run("a draft that is voided, not issued: not marked", func(t *testing.T) {
+		inv := f.invoice("INV-MARK-6", "stripe_tax", 1000, "tx_upstream_6")
+		cn, err := f.notes.Create(f.ctx, f.tenantID, domain.CreditNote{
+			InvoiceID: inv.ID, CustomerID: f.custID, CreditNoteNumber: "CN-MARK-6",
+			Status: domain.CreditNoteDraft, Reason: "fraudulent",
+			SubtotalCents: 5500, TotalCents: 5500, Currency: "USD", RefundStatus: domain.RefundNone,
+		})
+		if err != nil {
+			t.Fatalf("create draft: %v", err)
+		}
+		if won, err := f.notes.TransitionStatus(f.ctx, f.tenantID, cn.ID, domain.CreditNoteDraft, domain.CreditNoteVoided); err != nil || !won {
+			t.Fatalf("void the draft: won=%v err=%v", won, err)
+		}
+		if f.note(cn.ID).TaxReversalPending {
+			t.Fatal("only issuing marks a note: a voided draft credited nothing")
+		}
+	})
+}
+
+// The recovery through a service issue path, on real Postgres. Issue commits
+// the note with its marker; the reversal call after the commit fails; the
+// sweep, once the provider answers, stores the reversal and clears the marker.
+func TestIssue_ReversalFails_TheSweepMakesIt(t *testing.T) {
+	f := newReversalFixture(t, "CN Reversal Through Issue")
+	inv := f.invoice("INV-ISSUE-REV", "stripe_tax", 1000, "tx_upstream_issue")
+	draft, err := f.notes.Create(f.ctx, f.tenantID, domain.CreditNote{
+		InvoiceID: inv.ID, CustomerID: f.custID, CreditNoteNumber: "CN-ISSUE-REV",
+		Status: domain.CreditNoteDraft, Reason: "fraudulent",
+		SubtotalCents: 5000, TaxAmountCents: 500, TotalCents: 5500,
+		CreditAmountCents: 5500, // a credit-type note: Issue takes the in-tx grant path
+		Currency:          "USD", RefundStatus: domain.RefundNone,
+	})
+	if err != nil {
+		t.Fatalf("create draft: %v", err)
+	}
+
+	svc := creditnote.NewService(f.notes, f.invoices, nil, okGranterTx{})
+	svc.SetTaxReverser(failingReverser{})
+	if _, err := svc.Issue(f.ctx, f.tenantID, draft.ID); err != nil {
+		t.Fatalf("Issue: %v (a failed tax reversal must not fail the issue)", err)
+	}
+	got := f.note(draft.ID)
+	if got.Status != domain.CreditNoteIssued || !got.TaxReversalPending || got.TaxTransactionID != "" {
+		t.Fatalf("after Issue with the provider down: status=%s pending=%v tx=%q, want issued, marked, no reversal", got.Status, got.TaxReversalPending, got.TaxTransactionID)
+	}
+	if !f.listed(draft.ID) {
+		t.Fatal("the issued note must be listed for the reversal sweep")
+	}
+
+	rev := &recordingReverser{id: "tx_reversal_by_sweep"}
+	svc.SetTaxReverser(rev)
+	if n, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(f.ctx, 50); n != 1 || len(sweepErrs) != 0 {
+		t.Fatalf("sweep with the provider back: reversed=%d errs=%v, want 1 and none", n, sweepErrs)
+	}
+	got = f.note(draft.ID)
+	if got.TaxTransactionID != "tx_reversal_by_sweep" || got.TaxReversalPending {
+		t.Fatalf("after the sweep: tx=%q pending=%v, want the reversal stored and the marker cleared", got.TaxTransactionID, got.TaxReversalPending)
+	}
+	if len(rev.requests) != 1 || rev.requests[0].OriginalTransactionID != "tx_upstream_issue" || rev.requests[0].GrossAmountCents != 5500 {
+		t.Fatalf("reversal requests = %+v, want one, against the invoice's transaction, for the note's total", rev.requests)
+	}
+	if f.listed(draft.ID) {
+		t.Fatal("a note whose reversal is stored must leave the list")
+	}
+}
+
+// recordingReverser answers every reversal with id and keeps the requests.
+type recordingReverser struct {
+	id       string
+	requests []tax.ReversalRequest
+}
+
+func (r *recordingReverser) ReverseTax(_ context.Context, _ string, req tax.ReversalRequest) (*tax.ReversalResult, error) {
+	r.requests = append(r.requests, req)
+	return &tax.ReversalResult{TransactionID: r.id}, nil
+}
+
+// A note whose tax reversal keeps failing must still grow old for the
+// refunds-needing-attention rule, which reads credit_notes.updated_at as the
+// note's age (a refund pending for 72 hours is listed for the operator). A
+// re-drive that wrote the note on every failure kept it young for ever, and a
+// stuck refund on it was never listed.
+func TestCreditNoteTaxReversal_AFailedReDriveKeepsTheNotesAge(t *testing.T) {
+	f := newReversalFixture(t, "CN Reversal Keeps Age")
+	cn := f.issue("CN-AGE", f.invoice("INV-AGE", "stripe_tax", 1000, "tx_upstream_age"), 5500)
+
+	exec := func(sql string, args ...any) {
+		t.Helper()
+		tx, err := f.db.BeginTx(f.ctx, postgres.TxBypass, "")
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer postgres.Rollback(tx)
+		if _, err := tx.ExecContext(f.ctx, sql, args...); err != nil {
+			t.Fatalf("exec: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+	}
+	needsAttention := func() bool {
+		t.Helper()
+		tx, err := f.db.BeginTx(f.ctx, postgres.TxBypass, "")
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer postgres.Rollback(tx)
+		var n int
+		if err := tx.QueryRowContext(f.ctx, `SELECT COUNT(*) FROM credit_notes WHERE id = $1 AND `+domain.CreditNoteRefundNeedsAttentionSQL, cn.ID).Scan(&n); err != nil {
+			t.Fatalf("needs-attention query: %v", err)
+		}
+		return n == 1
+	}
+
+	// Its refund has been pending for 80 hours.
+	exec(`UPDATE credit_notes SET refund_status = 'pending', refund_amount_cents = 5500, updated_at = now() - interval '80 hours' WHERE id = $1`, cn.ID)
+	if !needsAttention() {
+		t.Fatal("setup: a refund pending for 80 hours must be listed as needing attention")
+	}
+
+	svc := creditnote.NewService(f.notes, f.invoices, nil, nil)
+	svc.SetTaxReverser(failingReverser{})
+	if n, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(f.ctx, 50); n != 0 || len(sweepErrs) != 1 {
+		t.Fatalf("sweep with the provider down: reversed=%d errs=%v, want 0 and the re-drive error", n, sweepErrs)
+	}
+	if !needsAttention() {
+		t.Fatal("a failed tax-reversal re-drive made the note young again: its stuck refund left the needs-attention list")
+	}
 }
 
 // failingReverser is the always-failing provider.
@@ -312,13 +448,13 @@ func TestCreditNoteTaxReversal_OwedReversalStaysListedUntilItIsMade(t *testing.T
 		t.Fatal("a reversal still owed after 30 days fell out of the list")
 	}
 
-	// A failed re-drive moves the note behind the others: its updated_at, the
-	// list's order, is stamped. Left at 30 days ago it would head every page.
+	// A failed re-drive writes nothing to the note: it stays marked, and its
+	// updated_at, which other rules read as the note's age, does not move.
 	if n, sweepErrs := svc.RetryPendingCreditNoteTaxReversal(f.ctx, 50); n != 0 || len(sweepErrs) != 1 {
 		t.Fatalf("second sweep with the provider down: reversed=%d errs=%v", n, sweepErrs)
 	}
-	if got := f.note(cn.ID); !got.TaxReversalPending || got.UpdatedAt.Before(time.Now().Add(-time.Hour)) {
-		t.Fatalf("after a failed re-drive: pending=%v updated_at=%v, want still marked and stamped now", got.TaxReversalPending, got.UpdatedAt)
+	if got := f.note(cn.ID); !got.TaxReversalPending || got.UpdatedAt.After(time.Now().Add(-29*24*time.Hour)) {
+		t.Fatalf("after a failed re-drive: pending=%v updated_at=%v, want still marked and still 30 days old", got.TaxReversalPending, got.UpdatedAt)
 	}
 
 	if err := f.notes.SetTaxTransaction(f.ctx, f.tenantID, cn.ID, "tx_reversal_made"); err != nil {

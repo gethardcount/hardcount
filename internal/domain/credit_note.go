@@ -111,8 +111,8 @@ type CreditNote struct {
 	IssuePending bool `json:"issue_pending"`
 	// TaxReversalPending marks an issued credit note that still owes its
 	// upstream tax reversal. The statement that issues the note sets it, for
-	// a note with an amount on an invoice Stripe Tax taxed; the write that
-	// stores the reversal's transaction clears it. The reversal is a Stripe
+	// a note with an amount on an invoice Stripe Tax taxed with tax; the write
+	// that stores the reversal's transaction clears it. The reversal is a Stripe
 	// call made after the issue commit, so the flag is true from the commit
 	// until that call succeeds: normally within the same request, longer if
 	// the call fails, the process stops first, or the invoice's own tax

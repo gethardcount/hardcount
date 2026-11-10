@@ -114,9 +114,8 @@ type Store interface {
 	// the tax provider at Issue time.
 	SetTaxTransaction(ctx context.Context, tenantID, id string, taxTransactionID string) error
 	// SetTaxReversalPending writes the tax-reversal marker on its own. Issuing
-	// sets it and SetTaxTransaction clears it; this is for the sweep, to clear
-	// a marker on a note with nothing to reverse and to move a note whose
-	// re-drive failed behind the others (the write stamps updated_at).
+	// sets it and SetTaxTransaction clears it; this is for the sweep to clear
+	// a marker on a note with nothing to reverse.
 	SetTaxReversalPending(ctx context.Context, tenantID, id string, pending bool) error
 	ListLineItems(ctx context.Context, tenantID, creditNoteID string) ([]domain.CreditNoteLineItem, error)
 }

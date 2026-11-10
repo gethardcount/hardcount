@@ -192,8 +192,9 @@ recorded ways (per `feedback_amend_decisions_when_course_changes`):
    voided/uncollectible invoices and keys off `invoices.tax_reversed_at`, so a CN
    reversal stamped on a finalized/paid invoice is structurally invisible to it.
    Since 2026-11-10 the marker is set by the statement that issues the note
-   and cleared by the write that stores the reversal, and the list is the
-   marker alone, with no structural branch or 24-hour window
+   and cleared by the write that stores the reversal, and the list is marked
+   notes whose invoice has a tax transaction, with no structural branch or
+   24-hour window
    ([ADR-062](062-async-obligation-backbone.md), amendment 2026-11-10).
    The outbox-obligation route is the **north star**, un-deferred at the first live
    tax design partner (when a dispatcher event-type discriminator + obligation

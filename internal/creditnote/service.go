@@ -747,8 +747,9 @@ func (s *Service) LockInvoicesForDraftsTx(ctx context.Context, tx *sql.Tx, tenan
 // tx — the draft→issued CAS AND the internal effect (balance credit / amount_due
 // reduction) commit together, so a failed internal effect rolls the flip back and
 // the note stays status='draft' for this scan to re-issue. The only post-commit
-// leg is the EXTERNAL tax reversal, which on failure sets tax_reversal_pending and
-// self-heals via RetryPendingCreditNoteTaxReversal — not something this sweep
+// leg is the EXTERNAL tax reversal. The note carries tax_reversal_pending from
+// the issue statement until that reversal is stored, and
+// RetryPendingCreditNoteTaxReversal makes it — not something this sweep
 // chases. Per-row errors are collected, not aborted-on.
 func (s *Service) RetryPendingClawbackIssue(ctx context.Context, batch int) (int, []error) {
 	livemode, err := postgres.Livemode(ctx)
@@ -833,8 +834,10 @@ func (s *Service) RetryPendingCreditNoteTaxReversal(ctx context.Context, batch i
 	var errsOut []error
 	reversed := 0
 	for _, cn := range pending {
-		// Already reversed upstream (a prior sweep stamped the tx id but failed
-		// to clear the marker): just clear it so it leaves the scan.
+		// Marked, with its reversal already stored: a row an earlier version
+		// left (it stored the id and cleared the marker in two writes). One
+		// write does both now, so this version does not produce the state.
+		// Clear the marker so the note leaves the scan.
 		if cn.TaxTransactionID != "" {
 			if err := s.store.SetTaxReversalPending(ctx, cn.TenantID, cn.ID, false); err != nil {
 				errsOut = append(errsOut, fmt.Errorf("clear tax_reversal_pending for %s: %w", cn.ID, err))
@@ -866,8 +869,12 @@ func (s *Service) RetryPendingCreditNoteTaxReversal(ctx context.Context, batch i
 			GrossAmountCents:      cn.TotalCents,
 		})
 		if err != nil {
+			// A failed re-drive writes nothing. The marker is already set, and
+			// any write to the note stamps updated_at, which the refunds-
+			// needing-attention rule reads as the note's age
+			// (domain.CreditNoteRefundNeedsAttentionSQL): a note re-driven
+			// every hour would never grow old enough to be listed there.
 			errsOut = append(errsOut, fmt.Errorf("re-drive tax reversal for credit note %s: %w", cn.ID, err))
-			s.sendToBack(ctx, cn, &errsOut)
 			continue
 		}
 		if res == nil || res.TransactionID == "" {
@@ -878,7 +885,6 @@ func (s *Service) RetryPendingCreditNoteTaxReversal(ctx context.Context, batch i
 			// failure: the marker stays, and the note is not counted (HA-13,
 			// 2026-08-30).
 			errsOut = append(errsOut, fmt.Errorf("re-drive tax reversal for credit note %s: provider returned no reversal transaction", cn.ID))
-			s.sendToBack(ctx, cn, &errsOut)
 			continue
 		}
 		// One write stores the reversal and clears the marker.
@@ -889,19 +895,6 @@ func (s *Service) RetryPendingCreditNoteTaxReversal(ctx context.Context, batch i
 		reversed++
 	}
 	return reversed, errsOut
-}
-
-// sendToBack moves a note whose re-drive failed behind the others. The list
-// holds every tenant's notes, oldest write first, and takes a fixed number
-// per run: with nothing moving a failing note back, enough of them (one tenant
-// with Stripe disconnected) filled every page and no other tenant's reversal
-// was attempted. Writing the marker again stamps updated_at, which is the
-// list's order. No age limit reads updated_at any more, so the write changes
-// only the note's place in the list.
-func (s *Service) sendToBack(ctx context.Context, cn domain.CreditNote, errsOut *[]error) {
-	if err := s.store.SetTaxReversalPending(ctx, cn.TenantID, cn.ID, true); err != nil {
-		*errsOut = append(*errsOut, fmt.Errorf("move credit note %s behind the others after its tax reversal failed: %w", cn.ID, err))
-	}
 }
 
 // buildCreditNote runs the tax-breakout, three-channel allocation, refund cap,
