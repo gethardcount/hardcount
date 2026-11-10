@@ -36,9 +36,6 @@ type fakeUserStore struct {
 	createTokenErr error
 }
 
-func (f *fakeUserStore) Create(ctx context.Context, email, passwordHash string) (domain.User, error) {
-	return domain.User{}, errs.ErrNotFound
-}
 func (f *fakeUserStore) GetByEmail(ctx context.Context, email string) (domain.User, error) {
 	if f.loginUser != nil && f.loginUser.Email == email {
 		return *f.loginUser, nil
@@ -56,9 +53,6 @@ func (f *fakeUserStore) TouchLastLogin(ctx context.Context, id string, at time.T
 }
 func (f *fakeUserStore) SetPassword(ctx context.Context, id, passwordHash string) error {
 	f.setPasswordHash = passwordHash
-	return nil
-}
-func (f *fakeUserStore) AttachTenant(ctx context.Context, userID, tenantID, role string) error {
 	return nil
 }
 func (f *fakeUserStore) TenantsForUser(ctx context.Context, userID string) ([]domain.UserTenant, error) {

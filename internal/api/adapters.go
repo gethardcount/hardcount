@@ -1822,32 +1822,15 @@ func (a *subscriptionCheckerAdapter) NonTerminalForCustomer(ctx context.Context,
 }
 
 // memberUserDirectoryAdapter implements dashmembers.UserDirectory over the
-// user package. It uses the service to create accounts, which validates and
-// hashes the password, and the store for lookups and attaching a tenant. It
-// keeps dashmembers decoupled from internal/user.
+// user package: the store for lookups and for the account and membership
+// writes on the accept's transaction, and user.HashPassword for the password
+// rules. It keeps dashmembers decoupled from internal/user.
 type memberUserDirectoryAdapter struct {
-	svc   *user.Service
-	store *user.PostgresStore
+	*user.PostgresStore
 }
 
-func (a *memberUserDirectoryAdapter) GetByEmail(ctx context.Context, email string) (domain.User, error) {
-	return a.store.GetByEmail(ctx, email)
-}
-
-func (a *memberUserDirectoryAdapter) TenantsForUser(ctx context.Context, userID string) ([]domain.UserTenant, error) {
-	return a.store.TenantsForUser(ctx, userID)
-}
-
-func (a *memberUserDirectoryAdapter) CreateUser(ctx context.Context, email, plaintext, tenantID, role string) (domain.User, error) {
-	return a.svc.CreateUser(ctx, email, plaintext, tenantID, role)
-}
-
-func (a *memberUserDirectoryAdapter) AttachTenant(ctx context.Context, userID, tenantID, role string) error {
-	return a.store.AttachTenant(ctx, userID, tenantID, role)
-}
-
-func (a *memberUserDirectoryAdapter) ValidatePassword(plaintext string) error {
-	return user.ValidatePassword(plaintext)
+func (memberUserDirectoryAdapter) HashPassword(plaintext string) (string, error) {
+	return user.HashPassword(plaintext)
 }
 
 // memberTenantNamerAdapter resolves the workspace display name for

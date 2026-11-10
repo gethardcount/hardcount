@@ -18,17 +18,9 @@ import (
 // guarantee is one transaction's lock + count + insert; a fake would only
 // prove the fake.
 
-func mkResetUser(t *testing.T, store *user.PostgresStore, ctx context.Context, email string) string {
+func mkResetUser(t *testing.T, db *postgres.DB, tenantID, email string) string {
 	t.Helper()
-	hash, err := user.HashPassword("original-pw-12ch")
-	if err != nil {
-		t.Fatalf("hash: %v", err)
-	}
-	u, err := store.Create(ctx, email, hash)
-	if err != nil {
-		t.Fatalf("create user %s: %v", email, err)
-	}
-	return u.ID
+	return user.CreateTestUser(t, db, email, "original-pw-12ch", tenantID, "owner").ID
 }
 
 // TestCreateResetToken_CapsSendsPerAccount: three links per account per
@@ -40,10 +32,10 @@ func mkResetUser(t *testing.T, store *user.PostgresStore, ctx context.Context, e
 func TestCreateResetToken_CapsSendsPerAccount(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
-	_ = testutil.CreateTestTenant(t, db, "Reset Cap")
+	tenantID := testutil.CreateTestTenant(t, db, "Reset Cap")
 	store := user.NewPostgresStore(db)
-	victim := mkResetUser(t, store, ctx, "victim@resetcap.test")
-	bystander := mkResetUser(t, store, ctx, "bystander@resetcap.test")
+	victim := mkResetUser(t, db, tenantID, "victim@resetcap.test")
+	bystander := mkResetUser(t, db, tenantID, "bystander@resetcap.test")
 
 	for i := 0; i < user.ResetSendsPerWindow; i++ {
 		if _, err := store.CreateResetToken(ctx, victim, "hash-a-"+time.Now().Format("150405.000000000"), time.Now().Add(time.Hour)); err != nil {
@@ -85,9 +77,9 @@ func TestCreateResetToken_CapsSendsPerAccount(t *testing.T) {
 func TestCreateResetToken_ConcurrentRacersRespectCap(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
-	_ = testutil.CreateTestTenant(t, db, "Reset Cap Race")
+	tenantID := testutil.CreateTestTenant(t, db, "Reset Cap Race")
 	store := user.NewPostgresStore(db)
-	victim := mkResetUser(t, store, ctx, "victim@resetrace.test")
+	victim := mkResetUser(t, db, tenantID, "victim@resetrace.test")
 
 	const racers = 8
 	var wg sync.WaitGroup

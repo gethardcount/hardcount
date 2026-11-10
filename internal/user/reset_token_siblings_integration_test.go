@@ -29,10 +29,10 @@ import (
 func TestConsumeResetToken_VoidsSiblingTokens(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
-	_ = testutil.CreateTestTenant(t, db, "Reset Siblings")
+	tenantID := testutil.CreateTestTenant(t, db, "Reset Siblings")
 	store := user.NewPostgresStore(db)
-	victim := mkResetUser(t, store, ctx, "victim@reset.test")
-	bystander := mkResetUser(t, store, ctx, "bystander@reset.test")
+	victim := mkResetUser(t, db, tenantID, "victim@reset.test")
+	bystander := mkResetUser(t, db, tenantID, "bystander@reset.test")
 
 	issue := func(userID, hash string) {
 		t.Helper()

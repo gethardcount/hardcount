@@ -45,11 +45,8 @@ func throttleIT(t *testing.T) (*postgres.DB, *lookupCounter) {
 	t.Helper()
 	db := testutil.SetupTestDB(t)
 	tenantID := testutil.CreateTestTenant(t, db, "Throttle IT")
-	store := NewPostgresStore(db)
-	if _, err := NewService(store, clock.Real()).CreateUser(context.Background(), itEmail, itPassword, tenantID, "owner"); err != nil {
-		t.Fatalf("create user: %v", err)
-	}
-	return db, &lookupCounter{Store: store}
+	CreateTestUser(t, db, itEmail, itPassword, tenantID, "owner")
+	return db, &lookupCounter{Store: NewPostgresStore(db)}
 }
 
 // itHandler is the dashboard auth handler on the real store. throttle may be
@@ -243,9 +240,7 @@ func TestLoginThrottle_BrowserIsKnownPerEmail(t *testing.T) {
 	db, store := throttleIT(t)
 	const guesser, guesserPassword = "guesser@throttle-it.test", "guesser-pw-5678"
 	tenantID := testutil.CreateTestTenant(t, db, "Throttle IT guesser")
-	if _, err := NewService(store, clock.Real()).CreateUser(context.Background(), guesser, guesserPassword, tenantID, "owner"); err != nil {
-		t.Fatalf("create the guesser's user: %v", err)
-	}
+	CreateTestUser(t, db, guesser, guesserPassword, tenantID, "owner")
 	h := itHandler(store, itThrottle(t, db))
 
 	owner := deviceCookie(t, itSignInWith(h, "203.0.113.1", itEmail, itPassword, nil))

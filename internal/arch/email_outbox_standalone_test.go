@@ -35,8 +35,6 @@ var standaloneEmailSends = map[string]string{
 	"internal/creditnote/handler.go Handler.sendEmail SendCreditNote":                        "The operator's Email credit note: the note is already issued, and the email is the whole action. The error goes back to the operator.",
 	"internal/user/handler.go Handler.requestPasswordReset SendPasswordReset":                "Account plane, no money. A single-use reset token is useless without the email, and the user asks again.",
 	"internal/api/adapters.go passwordResetEmailAdapter.SendPasswordReset SendPasswordReset": "Forwards the password reset to OutboxSender, for user.Handler.requestPasswordReset.",
-	"internal/dashmembers/service.go Service.Invite SendMemberInvite": "Account plane. The invitation is written on a TxBypass transaction, which sets no app.livemode, so the email_outbox insert would be refused on it. " +
-		"An invite whose email is lost shows as pending on the Team page, and the operator can revoke and send it again.",
 }
 
 // standaloneEmailSenders returns the OutboxSender methods whose body calls
@@ -71,8 +69,8 @@ func standaloneEmailSenders(t *testing.T, root string) map[string]bool {
 func TestStandaloneEmailSendsAreListed(t *testing.T) {
 	root := repoRoot(t)
 	senders := standaloneEmailSenders(t, root)
-	if len(senders) < 6 {
-		t.Fatalf("found %d OutboxSender methods that call s.enqueue; want at least 6 (SendInvoice, SendCreditNote, …). The parse is broken, not the code", len(senders))
+	if len(senders) < 5 {
+		t.Fatalf("found %d OutboxSender methods that call s.enqueue; want at least 5 (SendInvoice, SendCreditNote, …). The parse is broken, not the code", len(senders))
 	}
 
 	found := map[string]bool{} // "<file> <Func> <Sender>" of each call

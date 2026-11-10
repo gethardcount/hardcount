@@ -13,6 +13,7 @@ import (
 	mw "github.com/gethardcount/hardcount/internal/api/middleware"
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/dashmembers"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/session"
 )
 
@@ -32,7 +33,7 @@ func (r *ipAuditRecorder) Log(ctx context.Context, _, _, _, _, _ string, _ map[s
 // forged left-most entry, 6.6.6.6.
 func TestAcceptInvite_SessionIPIsTheTrustedClientIP(t *testing.T) {
 	h := newHarness(t, "Team Forwarded")
-	ctx := context.Background()
+	ctx := postgres.WithLivemode(context.Background(), false)
 
 	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "forwarded@example.com"); err != nil {
 		t.Fatalf("invite: %v", err)

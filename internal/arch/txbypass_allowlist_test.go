@@ -97,9 +97,7 @@ var txBypassUsers = map[string]string{
 	"internal/session/store.go postgresStore.RevokeAllForUser":  "signin",
 	"internal/session/store.go postgresStore.UpdateLivemode":    "signin",
 	"internal/tenant/bootstrap_run.go RunBootstrap":             "signin",
-	"internal/user/postgres.go PostgresStore.AttachTenant":      "signin",
 	"internal/user/postgres.go PostgresStore.ConsumeResetToken": "signin",
-	"internal/user/postgres.go PostgresStore.Create":            "signin",
 	"internal/user/postgres.go PostgresStore.CreateResetToken":  "signin",
 	"internal/user/postgres.go PostgresStore.GetByEmail":        "signin",
 	"internal/user/postgres.go PostgresStore.GetByID":           "signin",
@@ -132,9 +130,9 @@ var txBypassUsers = map[string]string{
 	"internal/tenantstripe/postgres.go Store.MarkVerifyFailed": "stripe",
 
 	// Signed-in, one tenant: team members and invites (accepting an invite
-	// runs from its emailed link).
+	// runs from its emailed link). Creating an invitation runs under
+	// TxTenant.
 	"internal/dashmembers/postgres.go PostgresStore.AcceptInvitation":         "members",
-	"internal/dashmembers/postgres.go PostgresStore.CreateInvitation":         "members",
 	"internal/dashmembers/postgres.go PostgresStore.GetInvitationByTokenHash": "members",
 	"internal/dashmembers/postgres.go PostgresStore.ListInvitations":          "members",
 	"internal/dashmembers/postgres.go PostgresStore.ListMembers":              "members",

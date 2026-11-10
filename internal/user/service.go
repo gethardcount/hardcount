@@ -7,7 +7,6 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"strings"
 	"time"
 
 	"golang.org/x/crypto/bcrypt"
@@ -135,30 +134,6 @@ func wrongPasswordUserID(err error) string {
 		return wp.userID
 	}
 	return ""
-}
-
-// CreateUser inserts a new user with hashed password and binds them
-// to the given tenant with the supplied role. Used by the bootstrap
-// CLI; not exposed via the HTTP API in v1 (no public signup).
-func (s *Service) CreateUser(ctx context.Context, email, plaintext, tenantID, role string) (domain.User, error) {
-	email = strings.TrimSpace(email)
-	if email == "" {
-		return domain.User{}, errs.Required("email")
-	}
-	hash, err := HashPassword(plaintext)
-	if err != nil {
-		return domain.User{}, err
-	}
-	u, err := s.store.Create(ctx, email, hash)
-	if err != nil {
-		return domain.User{}, err
-	}
-	if tenantID != "" {
-		if err := s.store.AttachTenant(ctx, u.ID, tenantID, role); err != nil {
-			return domain.User{}, fmt.Errorf("attach tenant: %w", err)
-		}
-	}
-	return u, nil
 }
 
 // GetByID looks up a user by id. Used by /v1/whoami to project email
