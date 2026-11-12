@@ -559,6 +559,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// an in_advance period.
 	invoiceSvc.SetCollectionStopper(stripeAdapter)
 	invoiceSvc.SetDunningResolver(dunningSvc)
+	// A credit note that lowers what an unpaid invoice asks for expires the
+	// customer's open Checkout page at Stripe, as a void or a payment does.
+	creditNoteSvc.SetCheckoutExpirer(stripeAdapter)
 	// Finalize issues any relief held on a draft before the invoice can be
 	// charged.
 	invoiceSvc.SetHeldReliefIssuer(heldReliefIssuerAdapter{svc: creditNoteSvc})

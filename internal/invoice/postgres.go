@@ -1481,8 +1481,12 @@ func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenant
 	// converges here, so the DB-side close is a single choke point instead of
 	// 9+ hand-stitched post-commit hooks — and it atomically kills the "POST
 	// /checkout returns a stored open session for a just-settled invoice"
-	// race. The Stripe-side expire is the caller's post-commit best-effort;
-	// the session's own ExpiresAt is the backstop.
+	// race. Three settles can happen while the customer has a page open, and
+	// each expires the session at Stripe after its commit: SettleSucceeded,
+	// RecordOfflinePayment, and creditnote.Service.Issue for a note that
+	// leaves nothing due. The credit-covered settles need nothing: they run
+	// under a charge claim, and no claim is granted while a page is open. The
+	// session's own ExpiresAt is the backstop.
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE checkout_sessions SET status = 'invoice_settled', updated_at = now()
 		WHERE invoice_id = $1 AND status = 'open'
@@ -1667,9 +1671,9 @@ func (s *PostgresStore) ApplyCreditNoteTx(ctx context.Context, tx *sql.Tx, tenan
 	}
 	// Any amount_due change invalidates an open checkout claim (its session
 	// was minted for the OLD amount): close it in the SAME tx so the next
-	// POST mints at the new amount and the post-commit helper can expire the
-	// stale-amount Stripe session (ADR-068; covers both partial credit and
-	// credit-to-zero — the latter also exits the payable state entirely).
+	// POST mints at the new amount. creditnote.Service.Issue expires the
+	// stale-amount Stripe session after its commit (ADR-068; partial credit
+	// and credit-to-zero alike).
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE checkout_sessions SET status = 'superseded', updated_at = now()
 		WHERE invoice_id = $1 AND status = 'open'

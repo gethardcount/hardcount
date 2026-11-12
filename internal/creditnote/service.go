@@ -64,6 +64,12 @@ type DunningResolver interface {
 	ResolveByInvoice(ctx context.Context, tenantID, invoiceID string, resolution domain.DunningResolution) error
 }
 
+// CheckoutExpirer expires, at Stripe, the Checkout sessions still open for an
+// invoice. payment.Stripe implements it.
+type CheckoutExpirer interface {
+	ExpireCheckoutSessions(ctx context.Context, tenantID string, inv domain.Invoice)
+}
+
 // Refunder processes refunds via the payment provider.
 //
 // Convergence contract (ADR-063 amendment, 2026-08-04): the idempotency key
@@ -217,15 +223,16 @@ type CreditGrantInput struct {
 }
 
 type Service struct {
-	store    Store
-	invoices InvoiceReader
-	refunder Refunder
-	credits  CreditGranter
-	numbers  NumberGenerator
-	taxRev   TaxReverser
-	audit    AuditEmitter
-	resolver clock.Resolver
-	dunning  DunningResolver
+	store           Store
+	invoices        InvoiceReader
+	refunder        Refunder
+	credits         CreditGranter
+	numbers         NumberGenerator
+	taxRev          TaxReverser
+	audit           AuditEmitter
+	resolver        clock.Resolver
+	dunning         DunningResolver
+	checkoutExpirer CheckoutExpirer
 	// Refunds made in Stripe outside Hardcount (ADR-134): see
 	// SetStripeRefundRecording and SetRefundReader.
 	refunds      StripeRefundStore
@@ -286,6 +293,11 @@ func (s *Service) bindForInvoice(ctx context.Context, tenantID, invoiceID string
 // run stays escalated, because the dunning ticks skip escalated runs. Optional:
 // nil leaves the run to its next due tick (unit-test fakes).
 func (s *Service) SetDunningResolver(r DunningResolver) { s.dunning = r }
+
+// SetCheckoutExpirer wires the payment adapter, so a credit note that lowers
+// what an unpaid invoice asks for expires the customer's open Checkout page.
+// A setter until this service takes its dependencies at construction.
+func (s *Service) SetCheckoutExpirer(e CheckoutExpirer) { s.checkoutExpirer = e }
 
 // SetNumberGenerator sets the sequential number generator (breaks circular dep).
 func (s *Service) SetNumberGenerator(ng NumberGenerator) {
@@ -1609,8 +1621,9 @@ func (s *Service) settleFailedIssue(ctx context.Context, tenantID string, cn dom
 	return domain.CreditNote{}, draftStays
 }
 
-// stepsBudget bounds a refund's create and issue (with its Stripe call), run
-// on a ctx their caller cannot cancel and taken before the create: a unit
+// stepsBudget bounds a refund's create and issue (with its Stripe call), and
+// Issue's Checkout expiry, each run on a ctx their caller cannot cancel. A
+// refund takes it before the create: a unit
 // that calls Stripe between its transactions takes one steps budget before
 // its first transaction (docs/dev/code-standard.md). 5 minutes is the
 // invoice package's value, above three Stripe calls at their limit, so a call
@@ -1856,6 +1869,18 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 			slog.WarnContext(ctx, "credit note marked the invoice paid but closing its dunning run failed; an active run closes at its next retry, an escalated one needs Resolve",
 				"credit_note_id", cn.ID, "invoice_id", cn.InvoiceID, "error", err)
 		}
+	}
+
+	// A note that lowered what is owed leaves any Checkout page the customer
+	// still has open asking for the old amount, or, when nothing is left due,
+	// still taking a payment. Expire it, on a context the caller cannot
+	// cancel. After a partial note, a page opened in the instant between the
+	// commit and this call is expired too; that costs no money. A failed
+	// expiry leaves the old page until it ends (at most an hour).
+	if dueReduced > 0 && s.checkoutExpirer != nil {
+		stepsCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), stepsBudget)
+		s.checkoutExpirer.ExpireCheckoutSessions(stepsCtx, tenantID, inv)
+		cancel()
 	}
 
 	// inv is the invoice as locked, before this note: the refund leg reads

@@ -745,9 +745,8 @@ type RecordPaymentInput struct {
 // when a customer asks. Date stamps as clock.Now (sim-time on
 // clock-pinned invoices).
 //
-// Side-effects: resolves any active dunning run with
-// ResolutionPaymentRecovered so the dashboard reflects the recovery
-// in the dunning history view.
+// The service closes the invoice's dunning run and expires its open
+// Checkout page after the commit.
 func (h *Handler) recordOfflinePayment(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	id := chi.URLParam(r, "id")
@@ -763,16 +762,6 @@ func (h *Handler) recordOfflinePayment(w http.ResponseWriter, r *http.Request) {
 		// deadlock or a lock wait may be sent again (ADR-136).
 		respond.FromError(w, r, respond.ConcurrentChangeAsConflict(r, err), "invoice")
 		return
-	}
-
-	// The payment_recorded audit row is written by service.RecordOfflinePayment
-	// (the canonical writer — its row also carries recovered_from_status). The
-	// handler-level write that used to live here duplicated it on every call.
-
-	if h.dunning != nil {
-		if err := h.dunning.ResolveByInvoice(r.Context(), tenantID, id, domain.ResolutionPaymentRecovered); err != nil {
-			slog.WarnContext(r.Context(), "failed to resolve dunning on record-payment", "invoice_id", id, "error", err)
-		}
 	}
 
 	respond.JSON(w, r, http.StatusOK, inv)
