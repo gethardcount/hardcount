@@ -64,9 +64,9 @@ type DunningResolver interface {
 	ResolveByInvoice(ctx context.Context, tenantID, invoiceID string, resolution domain.DunningResolution) error
 }
 
-// CheckoutSessionExpirer expires, at Stripe, the Checkout sessions still open
-// for an invoice. payment.Stripe implements it.
-type CheckoutSessionExpirer interface {
+// CheckoutExpirer expires, at Stripe, the Checkout sessions still open for an
+// invoice. payment.Stripe implements it.
+type CheckoutExpirer interface {
 	ExpireCheckoutSessions(ctx context.Context, tenantID string, inv domain.Invoice)
 }
 
@@ -223,16 +223,16 @@ type CreditGrantInput struct {
 }
 
 type Service struct {
-	store    Store
-	invoices InvoiceReader
-	refunder Refunder
-	credits  CreditGranter
-	numbers  NumberGenerator
-	taxRev   TaxReverser
-	audit    AuditEmitter
-	resolver clock.Resolver
-	dunning  DunningResolver
-	checkout CheckoutSessionExpirer
+	store           Store
+	invoices        InvoiceReader
+	refunder        Refunder
+	credits         CreditGranter
+	numbers         NumberGenerator
+	taxRev          TaxReverser
+	audit           AuditEmitter
+	resolver        clock.Resolver
+	dunning         DunningResolver
+	checkoutExpirer CheckoutExpirer
 	// Refunds made in Stripe outside Hardcount (ADR-134): see
 	// SetStripeRefundRecording and SetRefundReader.
 	refunds      StripeRefundStore
@@ -296,9 +296,8 @@ func (s *Service) SetDunningResolver(r DunningResolver) { s.dunning = r }
 
 // SetCheckoutExpirer wires the payment adapter, so a credit note that lowers
 // what an unpaid invoice asks for expires the customer's open Checkout page.
-// A setter until this service takes its dependencies at construction; the
-// router's wiring is pinned by a test (internal/api).
-func (s *Service) SetCheckoutExpirer(e CheckoutSessionExpirer) { s.checkout = e }
+// A setter until this service takes its dependencies at construction.
+func (s *Service) SetCheckoutExpirer(e CheckoutExpirer) { s.checkoutExpirer = e }
 
 // SetNumberGenerator sets the sequential number generator (breaks circular dep).
 func (s *Service) SetNumberGenerator(ng NumberGenerator) {
@@ -1873,12 +1872,14 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 	}
 
 	// A note that lowered what is owed leaves any Checkout page the customer
-	// still has open asking for the old amount. Expire it, on a context the
-	// caller cannot cancel; the next page asks for the new amount. A failed
+	// still has open asking for the old amount, or, when nothing is left due,
+	// still taking a payment. Expire it, on a context the caller cannot
+	// cancel. After a partial note, a page opened in the instant between the
+	// commit and this call is expired too; that costs no money. A failed
 	// expiry leaves the old page until it ends (at most an hour).
-	if dueReduced > 0 && s.checkout != nil {
+	if dueReduced > 0 && s.checkoutExpirer != nil {
 		stepsCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), stepsBudget)
-		s.checkout.ExpireCheckoutSessions(stepsCtx, tenantID, inv)
+		s.checkoutExpirer.ExpireCheckoutSessions(stepsCtx, tenantID, inv)
 		cancel()
 	}
 

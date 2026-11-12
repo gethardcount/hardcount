@@ -77,3 +77,65 @@ func TestRecordOfflinePayment_CallerContextEnds_ExpiryStillRuns(t *testing.T) {
 		t.Errorf("Stripe expiry calls with a live context = %v, want [true]: a call on an ended context leaves the page payable", stopper.liveCtx)
 	}
 }
+
+// step is one call after the commit: which, and whether its context was live.
+type step struct {
+	name string
+	live bool
+}
+
+type stepResolver struct {
+	steps       *[]step
+	resolutions []domain.DunningResolution
+}
+
+func (r *stepResolver) ResolveByInvoice(ctx context.Context, _, _ string, resolution domain.DunningResolution) error {
+	*r.steps = append(*r.steps, step{"resolve dunning", ctx.Err() == nil})
+	r.resolutions = append(r.resolutions, resolution)
+	return nil
+}
+
+type stepStopper struct{ steps *[]step }
+
+func (*stepStopper) StopCollection(context.Context, string, domain.Invoice) {}
+
+func (s *stepStopper) ExpireCheckoutSessions(ctx context.Context, _ string, _ domain.Invoice) {
+	*s.steps = append(*s.steps, step{"expire checkout", ctx.Err() == nil})
+}
+
+// An offline payment closes the invoice's dunning run itself, before the
+// Stripe expiry, which can take minutes, and on a context the caller cannot
+// cancel. An escalated run is closed by nothing else, so a run left open on a
+// paid invoice would stay escalated.
+//
+// Mutations: drop the resolve → no "resolve dunning" step; resolve on the
+// caller's context → the step sees an ended one; resolve after the expiry →
+// the order is wrong.
+func TestRecordOfflinePayment_ClosesDunningBeforeTheExpiry(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	base := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "Offline Payment Closes Dunning")
+	inv := seedClaimableInvoice(t, db, base, tenantID, "INV-OFFLINE-DUNNING")
+
+	ctx, cancel := context.WithCancel(base)
+	defer cancel()
+	var steps []step
+	resolver := &stepResolver{steps: &steps}
+	svc := invoice.NewService(invoice.NewPostgresStore(db), nil, nil)
+	svc.SetDunningResolver(resolver)
+	svc.SetCollectionStopper(&stepStopper{steps: &steps})
+	// The caller's context ends while the audit row is written, after the
+	// commit and before both steps.
+	svc.SetAuditLogger(endingAudit{AuditLogger: audit.NewLogger(db), endCaller: cancel})
+
+	if _, err := svc.RecordOfflinePayment(ctx, tenantID, inv.ID, ""); err != nil {
+		t.Fatalf("record offline payment: %v", err)
+	}
+	want := []step{{"resolve dunning", true}, {"expire checkout", true}}
+	if len(steps) != len(want) || steps[0] != want[0] || steps[1] != want[1] {
+		t.Errorf("steps after the commit = %+v, want %+v", steps, want)
+	}
+	if len(resolver.resolutions) != 1 || resolver.resolutions[0] != domain.ResolutionPaymentRecovered {
+		t.Errorf("resolutions = %v, want [payment_recovered]", resolver.resolutions)
+	}
+}

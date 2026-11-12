@@ -15,14 +15,10 @@ import (
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// A customer with an invoice's Checkout page open can no longer pay it once
-// the invoice stops asking for that money. Recording an offline payment, or
-// issuing a credit note that lowers what an unpaid invoice asks for, expires
-// the open session at Stripe after its commit, as a void and a write-off do.
-// Before, the page stayed payable for the rest of its hour: the invoice could
-// be paid twice, or at the old amount.
-//
-// Run on a build without the fix, every case is red: no expire reaches Stripe.
+// An invoice's open Checkout page is expired at Stripe once the invoice stops
+// asking for that money. Recording an offline payment, or issuing a credit
+// note that lowers what an unpaid invoice asks for, expires the open session
+// after its commit, as a void and a write-off do.
 func TestE2E_CheckoutPageExpiresWhenTheInvoiceStopsAsking(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	// The hosted page takes payment only with these addresses set.

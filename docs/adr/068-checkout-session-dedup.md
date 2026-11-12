@@ -51,14 +51,16 @@ sketch's four categories. Instead of per-call-site hooks, the claim rows
 close **inside the exiting transaction** at the three store choke points
 everything converges on: `markPaidReportingTransition` (every MarkPaid
 variant), the void/uncollectible status transition, and **both**
-`amount_due` reducers (`ApplyCreditNoteTx`, `ApplyCredits` — any
-reduction supersedes the claim; its minted amount is stale). Each exit
-then expires the sessions at Stripe after its commit, best-effort (a sweep
-over every unresolved session for the invoice, including previously
-superseded ones): a Stripe settle, a void, a write-off, an offline payment,
-and a credit note that lowers what is owed. Per-session `ExpiresAt` is the
-backstop. `ApplyCredits` needs no expire: it runs only under a charge
-claim, which no open page can coexist with.
+`amount_due` reducers (`ApplyCreditNoteTx`, `credit.ApplyToInvoiceAtomic`
+— any reduction supersedes the claim; its minted amount is stale). Then
+each exit a customer can reach while a page is open expires the sessions at
+Stripe after its commit. These are a Stripe settle, a void, a write-off, an
+offline payment, and a credit note that lowers what is owed. Each expire is
+best-effort, a sweep over every unresolved session for the invoice,
+including previously superseded ones. Per-session `ExpiresAt` is the
+backstop. The credit-covered settles expire nothing, and need not:
+`credit.ApplyToInvoiceAtomic`'s callers hold a charge claim, and a claim is
+refused while a page is live.
 `checkout.session.completed` truth-syncs the row.
 
 ### Loud anomaly settlement
@@ -203,9 +205,9 @@ Now:
 
 Two exits from payable closed the claim row in their transaction but did not
 expire the session at Stripe, so a customer with the page open could still
-pay for up to an hour: an offline payment (including dunning's "payment
-recovered" resolve, which records one), and a credit note on an unpaid
-invoice, whose open page kept asking for the old amount. Both now expire the
+pay for up to an hour. One is an offline payment, including dunning's
+"payment recovered" resolve, which records one. The other is a credit note
+on an unpaid invoice, whose open page kept asking for the old amount. Both now expire the
 sessions after their commit, as a void and a write-off do
 (`invoice.Service.RecordOfflinePayment`, `creditnote.Service.Issue`). A
 payment that still lands through a page whose expire failed is detected
@@ -213,5 +215,6 @@ payment that still lands through a page whose expire failed is detected
 
 This is a patch. The page stays payable between the commit and the expire
 because Stripe takes the customer's payment without asking Hardcount. What
-would remove it is Hardcount's server confirming the customer's payment, so
-every payment passes the same database check as Hardcount's own charges.
+removes it is replacing the hosted Checkout page with a payment form whose
+PaymentIntent Hardcount's server confirms, so every payment passes the same
+database check as Hardcount's own charges.

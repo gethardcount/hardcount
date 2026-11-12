@@ -1481,10 +1481,12 @@ func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenant
 	// converges here, so the DB-side close is a single choke point instead of
 	// 9+ hand-stitched post-commit hooks — and it atomically kills the "POST
 	// /checkout returns a stored open session for a just-settled invoice"
-	// race. A settle the customer did not make on the page expires the
-	// session at Stripe after its commit: a Stripe settle (SettleSucceeded)
-	// and an offline payment (RecordOfflinePayment). The session's own
-	// ExpiresAt is the backstop.
+	// race. Three settles can happen while the customer has a page open, and
+	// each expires the session at Stripe after its commit: SettleSucceeded,
+	// RecordOfflinePayment, and creditnote.Service.Issue for a note that
+	// leaves nothing due. The credit-covered settles need nothing: they run
+	// under a charge claim, and no claim is granted while a page is open. The
+	// session's own ExpiresAt is the backstop.
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE checkout_sessions SET status = 'invoice_settled', updated_at = now()
 		WHERE invoice_id = $1 AND status = 'open'
