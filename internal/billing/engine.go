@@ -1320,6 +1320,20 @@ func (e *Engine) hydrateSegmentPlans(ctx context.Context, sub domain.Subscriptio
 	return nil
 }
 
+// cycleAnchor is the anchor an in_arrears period was opened on: the stored
+// anchor when the period's start lies on it, clamped to the month's end, and
+// the start's own day otherwise. Calendar monthly has no anchor (0).
+func cycleAnchor(periodStart time.Time, billingTime domain.SubscriptionBillingTime, interval domain.BillingInterval, loc *time.Location, storedAnchor int) int {
+	startDay := domain.AnchorDayFor(periodStart, billingTime, interval, loc)
+	if startDay == 0 {
+		return 0
+	}
+	if storedAnchor > 0 && domain.IsPeriodStartOnAnchor(periodStart, storedAnchor, loc) {
+		return storedAnchor
+	}
+	return startDay
+}
+
 // emitBaseSegmentLine pushes a base-fee line item for one [start, end]
 // segment of an in_arrears period. Prorated against the cycle length
 // (full plan-interval cycle from periodStart) so a 14-day segment of
@@ -1327,17 +1341,19 @@ func (e *Engine) hydrateSegmentPlans(ctx context.Context, sub domain.Subscriptio
 // segment items (no mid-period changes) collapse to "segment ==
 // period" math, matching the pre-segment-aware single-line path.
 //
-// The denominator's anchor is derived from THE PERIOD BEING BILLED
-// (AnchorDayFor(periodStart)), never from the subscription's live
-// billing_anchor_day: a cross-interval swap rewrites the sub's anchor
-// before the truncated old period closes, and the mutated anchor
-// stretched the old period's denominator (found live, FLOW B21
-// 2026-07-21 — a calendar-monthly period closed at "15/46 days"
-// instead of 15/31, silently under-billing every anchor-changing
-// arrears swap). Residual ambiguity: a period whose start was
-// month-end-CLAMPED from a higher anchor reconstructs the clamped
-// day (a ≤3-day denominator error in that one rare combination) —
-// strictly narrower than the up-to-half-cycle error it replaces.
+// The denominator is the cycle the period was opened on, counted with the
+// anchor in force when it opened (cycleAnchor). A start clamped to a shorter
+// month's end opened on the higher stored anchor: Feb 28 to Mar 31 is a full
+// 31-day cycle on anchor 31, and counting it from the start's own day (28)
+// divided by 28 and over-billed. A cross-interval swap rewrites the stored
+// anchor before the truncated old period closes, so a start that is not on
+// the stored anchor counts from its own day instead.
+//
+// Two cases are still counted wrong until the period carries its own cycle:
+// a truncated swap period whose old start was itself clamped (an anchor-31
+// period from Feb 28, swapped mid-March, still divides by 28), and an old
+// yearly period starting Feb 28 on anchor 28 that is swapped on day 29 to 31
+// of a later month before a leap year (366 where its cycle was 365).
 //
 // A segment's days are its two boundaries rounded to whole days from
 // periodStart, then subtracted. Rounding the boundaries, not each segment's
@@ -1347,12 +1363,12 @@ func (e *Engine) hydrateSegmentPlans(ctx context.Context, sub domain.Subscriptio
 // or in a period that crosses a DST change. The in-advance proration
 // (remainingPeriodRatio) rounds from the period end instead, so the two can
 // count a day apart for the same change instant in those same cases.
-func emitBaseSegmentLine(seg baseSegment, plan domain.Plan, periodStart time.Time, periodDays int, currency string, loc *time.Location, billingTime domain.SubscriptionBillingTime, lineItems *[]domain.InvoiceLineItem, subtotal *int64) error {
+func emitBaseSegmentLine(seg baseSegment, plan domain.Plan, periodStart time.Time, periodDays int, currency string, loc *time.Location, billingTime domain.SubscriptionBillingTime, storedAnchor int, lineItems *[]domain.InvoiceLineItem, subtotal *int64) error {
 	segDays := roundDays(seg.end.Sub(periodStart)) - roundDays(seg.start.Sub(periodStart))
 	if segDays <= 0 {
 		return nil
 	}
-	anchorDay := domain.AnchorDayFor(periodStart, billingTime, plan.BillingInterval, loc)
+	anchorDay := cycleAnchor(periodStart, billingTime, plan.BillingInterval, loc, storedAnchor)
 	fullCycleDays := roundDays(advanceBillingPeriod(periodStart, plan.BillingInterval, loc, anchorDay).Sub(periodStart))
 	fullFee, err := baseFeeCents(plan, seg.quantity)
 	if err != nil {
@@ -3929,7 +3945,7 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 				if !ok || segPlan.BaseAmountCents <= 0 || segPlan.BaseBillTiming == domain.BillInAdvance {
 					continue
 				}
-				if err := emitBaseSegmentLine(seg, segPlan, periodStart, periodDays, invoiceCurrency, billingLoc, sub.BillingTime, &lineItems, &subtotal); err != nil {
+				if err := emitBaseSegmentLine(seg, segPlan, periodStart, periodDays, invoiceCurrency, billingLoc, sub.BillingTime, sub.BillingAnchorDay, &lineItems, &subtotal); err != nil {
 					return nil, 0, err
 				}
 			}
@@ -3947,7 +3963,7 @@ func (e *Engine) buildCancelLineItems(ctx context.Context, sub domain.Subscripti
 				if !ok || segPlan.BaseAmountCents <= 0 || segPlan.BaseBillTiming == domain.BillInAdvance {
 					continue
 				}
-				if err := emitBaseSegmentLine(seg, segPlan, periodStart, periodDays, invoiceCurrency, billingLoc, sub.BillingTime, &lineItems, &subtotal); err != nil {
+				if err := emitBaseSegmentLine(seg, segPlan, periodStart, periodDays, invoiceCurrency, billingLoc, sub.BillingTime, sub.BillingAnchorDay, &lineItems, &subtotal); err != nil {
 					return nil, 0, err
 				}
 			}
