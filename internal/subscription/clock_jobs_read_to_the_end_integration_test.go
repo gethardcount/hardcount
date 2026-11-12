@@ -257,7 +257,7 @@ type extendAfterList struct {
 func (e extendAfterList) extend(ctx context.Context, subs []domain.Subscription) {
 	for _, sub := range subs {
 		periodEnd := e.newEnd.AddDate(0, 1, 0)
-		if _, err := e.PostgresStore.ExtendTrial(ctx, sub.TenantID, sub.ID, e.newEnd, e.newEnd, periodEnd, e.newEnd, e.newEnd.Day()); err != nil {
+		if _, err := e.ExtendTrial(ctx, sub.TenantID, sub.ID, e.newEnd, e.newEnd, periodEnd, e.newEnd, e.newEnd.Day()); err != nil {
 			e.t.Fatalf("extend trial: %v", err)
 		}
 	}
