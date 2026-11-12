@@ -77,7 +77,8 @@ type CreditNoteTotaler interface {
 
 // stepsBudget bounds one group of steps after a commit that run on a ctx their
 // caller cannot cancel: a tax retry's finalize steps and $0 settle
-// (RetryTax). It is taken after that commit. 5 minutes is above three Stripe
+// (RetryTax), and an offline payment's Checkout expiry
+// (RecordOfflinePayment). It is taken after that commit. 5 minutes is above three Stripe
 // calls at their limit (3 × 92s), so a call that can still succeed is not
 // cut. docs/dev/code-standard.md names it.
 const stepsBudget = 5 * time.Minute
@@ -204,8 +205,9 @@ type Service struct {
 	currencyFacts  CustomerCurrencyFacts
 	audit          AuditLogger
 	// collectionStopper and dunningResolver are AfterVoid's Stripe and
-	// dunning legs; collectionStopper is also MarkUncollectible's Checkout
-	// expiry. Only a test leaves them unwired.
+	// dunning legs; collectionStopper also expires the Checkout sessions
+	// after a write-off and an offline payment. Only a test leaves them
+	// unwired.
 	collectionStopper PaymentCanceler
 	dunningResolver   DunningResolver
 	// setupLinkEmailOff is true when this server cannot email a setup link
@@ -2443,6 +2445,16 @@ func (s *Service) RecordOfflinePayment(ctx context.Context, tenantID, id, note s
 			}
 		}
 		_ = s.audit.Log(ctx, tenantID, domain.AuditActionUpdate, "invoice", updated.ID, updated.InvoiceNumber, meta)
+	}
+	// The customer may still have a Checkout page open for this invoice, and
+	// Stripe would take a second payment through it. Expire it, on a context
+	// the caller cannot cancel. A failed expiry leaves the page until it ends
+	// (at most an hour); a payment through it raises the duplicate-charge
+	// alarm.
+	if s.collectionStopper != nil {
+		stepsCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), stepsBudget)
+		s.collectionStopper.ExpireCheckoutSessions(stepsCtx, tenantID, updated)
+		cancel()
 	}
 	return updated, nil
 }
