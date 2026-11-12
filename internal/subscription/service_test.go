@@ -619,12 +619,25 @@ func (m *memStore) ListExpiredTrials(_ context.Context, before time.Time, _ bool
 	return out, nil
 }
 
-func (m *memStore) ListExpiredTrialsForClock(_ context.Context, tenantID, clockID string, frozen time.Time, limit int) ([]domain.Subscription, error) {
+// subsByID returns the subscriptions in id order, as the clock lists page them.
+func (m *memStore) subsByID() []domain.Subscription {
+	out := make([]domain.Subscription, 0, len(m.subs))
+	for _, s := range m.subs {
+		out = append(out, s)
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+	return out
+}
+
+func (m *memStore) ListExpiredTrialsForClock(_ context.Context, tenantID, clockID string, frozen time.Time, after string, limit int) ([]domain.Subscription, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 	var out []domain.Subscription
-	for _, s := range m.subs {
+	for _, s := range m.subsByID() {
+		if s.ID <= after {
+			continue
+		}
 		if s.TenantID != tenantID {
 			continue
 		}
@@ -670,12 +683,15 @@ func (m *memStore) ListExpiredPauseCollections(_ context.Context, before time.Ti
 	return out, nil
 }
 
-func (m *memStore) ListExpiredPauseCollectionsForClock(_ context.Context, tenantID, clockID string, frozen time.Time, limit int) ([]domain.Subscription, error) {
+func (m *memStore) ListExpiredPauseCollectionsForClock(_ context.Context, tenantID, clockID string, frozen time.Time, after string, limit int) ([]domain.Subscription, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 	var out []domain.Subscription
-	for _, s := range m.subs {
+	for _, s := range m.subsByID() {
+		if s.ID <= after {
+			continue
+		}
 		if s.TenantID != tenantID || s.TestClockID != clockID {
 			continue
 		}

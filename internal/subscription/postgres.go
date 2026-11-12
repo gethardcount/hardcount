@@ -1858,6 +1858,10 @@ func (s *PostgresStore) GetDueBillingForTenant(ctx context.Context, tenantID str
 // "now" cutoff. Tenant scope comes from RLS via the BeginTx
 // caller, but because the test-clock catch-up is a per-clock unit of
 // work, we also filter by test_clock_id explicitly.
+//
+// It takes no lock: a clock has one runner, and a row another transaction
+// holds must be waited for, not skipped. ClosePeriodTx's check that the
+// period has not moved is the guard.
 func (s *PostgresStore) GetDueBillingForClock(ctx context.Context, tenantID, clockID string, exclude []string, limit int) ([]domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -1879,7 +1883,6 @@ func (s *PostgresStore) GetDueBillingForClock(ctx context.Context, tenantID, clo
 		       OR (s.status = 'active' AND s.cancel_at IS NOT NULL AND s.cancel_at <= tc.frozen_time))
 		  AND NOT (s.id = ANY(COALESCE($3::text[], '{}')))
 		ORDER BY s.next_billing_at ASC LIMIT $2
-		FOR UPDATE OF s SKIP LOCKED
 	`, clockID, limit, exclude)
 	if err != nil {
 		return nil, err
@@ -1993,7 +1996,11 @@ func (s *PostgresStore) ListExpiredPauseCollections(ctx context.Context, before 
 // inside an Advance window, never by the wall-clock cron. Uses the
 // clock's frozen_time as the cutoff so an Advance that crosses
 // resumes_at picks the row up in the same advance window.
-func (s *PostgresStore) ListExpiredPauseCollectionsForClock(ctx context.Context, tenantID, clockID string, frozen time.Time, limit int) ([]domain.Subscription, error) {
+//
+// It returns the page after the subscription id after, in id order: an id
+// never changes, so a row the job leaves paused is not read twice. It takes
+// no lock; the resume's own conditional write is the guard.
+func (s *PostgresStore) ListExpiredPauseCollectionsForClock(ctx context.Context, tenantID, clockID string, frozen time.Time, after string, limit int) ([]domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return nil, err
@@ -2009,9 +2016,9 @@ func (s *PostgresStore) ListExpiredPauseCollectionsForClock(ctx context.Context,
 		  AND s.pause_collection_resumes_at IS NOT NULL
 		  AND s.pause_collection_resumes_at <= $2
 		  AND `+resumeNotWaitingOnCloseSQL("s")+`
-		ORDER BY s.pause_collection_resumes_at ASC LIMIT $3
-		FOR UPDATE OF s SKIP LOCKED
-	`, clockID, frozen, limit)
+		  AND s.id > $3
+		ORDER BY s.id LIMIT $4
+	`, clockID, frozen, after, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -3271,12 +3278,12 @@ func (s *PostgresStore) ListWithThresholdsForClock(ctx context.Context, tenantID
 // doesn't lie about lifecycle state for the (potentially 30-day)
 // gap between trial_end_at and the next cycle close.
 //
-// FOR UPDATE SKIP LOCKED guards against a concurrent operator
-// EndTrial racing the catchup pass — whichever path takes the row
-// first wins; the loser sees a no-row UPDATE and continues to the
-// next sub. Items are hydrated for the in_advance BillOnCreate
-// downstream.
-func (s *PostgresStore) ListExpiredTrialsForClock(ctx context.Context, tenantID, clockID string, frozen time.Time, limit int) ([]domain.Subscription, error) {
+// It returns the page after the subscription id after, in id order: an id
+// never changes, so a row the job leaves trialing is not read twice. It
+// takes no lock: the activation's conditional write (status still
+// 'trialing') decides a race with an operator's End trial. Items are
+// hydrated for the in_advance BillOnCreate downstream.
+func (s *PostgresStore) ListExpiredTrialsForClock(ctx context.Context, tenantID, clockID string, frozen time.Time, after string, limit int) ([]domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return nil, err
@@ -3293,10 +3300,10 @@ func (s *PostgresStore) ListExpiredTrialsForClock(ctx context.Context, tenantID,
 		  AND s.test_clock_id = $1
 		  AND s.trial_end_at IS NOT NULL
 		  AND s.trial_end_at <= $2
-		ORDER BY s.trial_end_at ASC
-		LIMIT $3
-		FOR UPDATE OF s SKIP LOCKED
-	`, clockID, frozen, limit)
+		  AND s.id > $3
+		ORDER BY s.id
+		LIMIT $4
+	`, clockID, frozen, after, limit)
 	if err != nil {
 		return nil, err
 	}
