@@ -6,8 +6,10 @@ import (
 	"context"
 	"testing"
 
+	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/leader"
 	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testclock"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
@@ -36,4 +38,19 @@ func Drain(t *testing.T, svc *testclock.Service) {
 		}
 	}
 	t.Fatalf("testclocktest.Drain: test clocks still advancing after %d catch-up ticks", maxTicks)
+}
+
+// DrainReady is Drain for one clock that must end ready: it fails the test
+// with the clock's failure reason when the catch-up failed it.
+func DrainReady(t *testing.T, svc *testclock.Service, tenantID, clockID string) {
+	t.Helper()
+	Drain(t, svc)
+	// Test clocks exist only in test mode.
+	clk, err := svc.Get(postgres.WithLivemode(context.Background(), false), tenantID, clockID)
+	if err != nil {
+		t.Fatalf("testclocktest.DrainReady: read clock %s: %v", clockID, err)
+	}
+	if clk.Status != domain.TestClockStatusReady {
+		t.Fatalf("testclocktest.DrainReady: clock %s is %s after the catch-up: %s", clockID, clk.Status, clk.LastFailureReason)
+	}
 }

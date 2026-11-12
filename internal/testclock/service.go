@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
-	"os"
 	"runtime/debug"
 	"strings"
 	"time"
@@ -14,34 +13,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
-
-// envInjectCatchupFailure is the manual-test injection knob — see
-// runClock and MANUAL_TEST.md FLOW TC2. Setting the env var to
-// any non-empty value causes the next catchup attempt to fail with
-// the value as the failure reason ("injected: <reason>"). The flag
-// is one-shot — cleared after firing — so the operator can chain
-// failure → Retry advance → success in one session.
-//
-// Off-by-default. Production processes don't set it; if they
-// accidentally do, every advance fails until they unset it (loud
-// failure, easy to spot). Not a security risk: the env is process-
-// local and only affects an operator-initiated test-clock advance.
-const envInjectCatchupFailure = "HARDCOUNT_TEST_CLOCK_INJECT_FAILURE"
-
-// injectedCatchupFailureReason reads + clears the injection env var.
-// One-shot semantics: if the var was set, the helper returns the
-// value AND unsets the env so a subsequent retry sees a clean state.
-// Returns empty when the var isn't set (production fast path).
-func injectedCatchupFailureReason() string {
-	v := os.Getenv(envInjectCatchupFailure)
-	if v == "" {
-		return ""
-	}
-	// One-shot: clear so Retry advance sees a clean state. Process-
-	// local env mutation; doesn't affect the parent shell.
-	_ = os.Unsetenv(envInjectCatchupFailure)
-	return "injected: " + v
-}
 
 // BillingRunner is the narrow hook the service uses to drive a billing
 // catchup after a clock advance. In production billing.Engine satisfies
@@ -392,29 +363,13 @@ func (s *Service) RetryAdvance(ctx context.Context, tenantID, id string) (domain
 	return s.store.RetryFromFailed(ctx, tenantID, id)
 }
 
-// RunCatchup runs one catch-up pass on one advancing clock now: the tick's
-// per-clock body (runClock), with the clock read from the store first.
-// Tests call it. ctx must carry the testclock_catchup lease (leadertest),
-// because the pass's writes to the clock row are fenced. A clock that is
-// not advancing is an error: there is nothing to catch up.
-func (s *Service) RunCatchup(ctx context.Context, tenantID, clockID string) error {
-	clk, err := s.store.Get(ctx, tenantID, clockID)
-	if err != nil {
-		return fmt.Errorf("read clock for catchup: %w", err)
-	}
-	if clk.Status != domain.TestClockStatusAdvancing {
-		return errs.InvalidState(fmt.Sprintf("test clock %s is %s, not advancing", clockID, clk.Status))
-	}
-	return s.runClock(ctx, clk)
-}
-
 // runClock is one catch-up pass on one advancing clock, at its frozen_time.
 // It runs every phase once (runPhases), then completes or fails the advance,
 // writing the summary in the same fenced statement.
 //
 // The pass first moves the clock to the back of the claim list, so a clock
 // whose pass keeps being cut off does not hold up the others. It runs under
-// CatchupPassDeadline; a pass that overruns it fails the advance with a
+// Deps.PassDeadline; a pass that overruns it fails the advance with a
 // reason that names the clock's time. When ctx itself ends first (a
 // shutdown, or the testclock_catchup lease lost: the heartbeat cancels a led
 // tick's ctx within leader.AbandonAfter), the pass stops and the clock stays
@@ -471,14 +426,6 @@ func (s *Service) runClock(ctx context.Context, clk domain.TestClock) (err error
 			return nil
 		}
 		return fmt.Errorf("start catch-up pass: %w", err)
-	}
-
-	// Manual-test injection point (MANUAL_TEST FLOW TC2): a fast,
-	// deterministic failure before any billing work. Its text is
-	// operator-safe by construction.
-	if reason := injectedCatchupFailureReason(); reason != "" {
-		fail(reason)
-		return fmt.Errorf("%s", reason)
 	}
 
 	passCtx, cancel := context.WithTimeout(ctx, s.passDeadline)

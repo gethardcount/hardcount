@@ -288,6 +288,36 @@ test('a new test clock says customers, not subscriptions, go on it', async ({ pa
   await expect(page.getByText(/catchup/i)).toHaveCount(0)
 })
 
+// A failed advance shows its reason and a Retry advance button, and the
+// button retries it. Nothing fails an advance on demand, so the browser
+// answers the clock's read as failed until the retry, and the retry as
+// accepted.
+test('a failed advance shows its reason, and Retry advance retries it', async ({ page }) => {
+  const clock = await createClock()
+  const clockPath = `/v1/test-clocks/${clock.id}`
+  const reason = 'Tax could not be calculated for invoice INV-E2E.'
+  let retried = false
+  await page.route(url => url.pathname === clockPath, async route => {
+    if (route.request().method() !== 'GET' || retried) return route.fallback()
+    const res = await route.fetch()
+    await route.fulfill({ response: res, json: { ...(await res.json()), status: 'internal_failure', last_failure_reason: reason } })
+  })
+  await page.route(url => url.pathname === `${clockPath}/retry-advance`, async route => {
+    retried = true
+    await route.fulfill({ json: { ...clock, status: 'advancing' } })
+  })
+
+  await page.goto(`/test-clocks/${clock.id}`)
+  await expect(page.getByText('The last advance stopped before it finished billing the skipped days.')).toBeVisible()
+  await expect(page.getByText(`Reason: ${reason}`)).toBeVisible()
+  // CI uploads activity-shots/ on every run, so a reviewer can see the banner.
+  await page.screenshot({ path: path.join(import.meta.dirname, '..', 'activity-shots', 'test-clock-failed-advance.png'), animations: 'disabled' })
+  await page.getByRole('button', { name: 'Retry advance' }).click()
+  await expect(page.getByText('Retrying. Billing the skipped days…')).toBeVisible()
+  expect(retried).toBe(true)
+  await expect(page.getByText('The last advance stopped before it finished billing the skipped days.')).toHaveCount(0)
+})
+
 test('a draft invoice reads as a draft and shows its memo', async ({ page }) => {
   const customer = await createCustomer()
   const memo = `E2E memo ${uniq()}`

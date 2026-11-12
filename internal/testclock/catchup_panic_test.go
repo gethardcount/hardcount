@@ -64,9 +64,9 @@ func TestRunCatchup_PanicMarksClockFailed(t *testing.T) {
 
 	s := NewService(store, testDeps(&panickingRunner{}))
 
-	err := s.RunCatchup(context.Background(), "t1", "c1")
+	err := runPass(context.Background(), s, "t1", "c1")
 	if err == nil {
-		t.Fatal("expected RunCatchup to surface the panic as an error")
+		t.Fatal("expected the pass to surface the panic as an error")
 	}
 
 	got := store.clocks["c1"]
@@ -100,8 +100,8 @@ func TestRunCatchup_PanicWhenTheTickEnded(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := s.RunCatchup(ctx, "t1", "c1"); err == nil {
-		t.Fatal("expected RunCatchup to surface the panic as an error")
+	if err := runPass(ctx, s, "t1", "c1"); err == nil {
+		t.Fatal("expected the pass to surface the panic as an error")
 	}
 	if got := store.clocks["c1"]; got.Status != domain.TestClockStatusAdvancing || got.LastFailureReason != "" {
 		t.Errorf("status %q reason %q, want advancing and no reason: the next leader runs the pass", got.Status, got.LastFailureReason)

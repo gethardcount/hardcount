@@ -10,8 +10,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/billing"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
-	"github.com/gethardcount/hardcount/internal/platform/leader"
-	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testclock"
 	"github.com/gethardcount/hardcount/internal/testclock/testclocktest"
@@ -143,9 +141,7 @@ func TestCancel_ReliefNotIssued_OnATestClock_TheAdvanceChargesNetOfTheRelief(t *
 	clockDeps := testclocktest.Deps(r.engine)
 	clockDeps.Relief = r.cn
 	orchestrator := testclock.NewService(clocks, clockDeps)
-	if err := orchestrator.RunCatchup(leadertest.Token(t, testutil.AdminPool(t), r.ctx, leader.RoleTestClockCatchup), r.tenantID, clockID); err != nil {
-		t.Fatalf("catch-up: %v", err)
-	}
+	testclocktest.DrainReady(t, orchestrator, r.tenantID, clockID)
 
 	final = r.invoice(t, final.ID)
 	if final.CreditsAppliedCents != reliefCents {

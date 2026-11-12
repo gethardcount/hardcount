@@ -118,7 +118,7 @@ func TestFinalizeAuditEmission(t *testing.T) {
 		}
 	})
 
-	// Under a catchup the ctx arrives ALREADY bound (testclock.RunCatchup binds
+	// Under a catchup the ctx arrives ALREADY bound (the clock's catch-up pass binds
 	// it once for the advance; the engine never binds). This emission must run
 	// under that binding and must not hand-stamp the axis into metadata — the
 	// writer owns those keys, and an emitter that also wrote them would be

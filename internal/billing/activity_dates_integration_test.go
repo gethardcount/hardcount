@@ -12,8 +12,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
-	"github.com/gethardcount/hardcount/internal/platform/leader"
-	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/pricing"
 	"github.com/gethardcount/hardcount/internal/subscription"
@@ -103,9 +101,7 @@ func TestTrialExpiry_TestClock_ChargeNotBeforeIssue(t *testing.T) {
 	clockDeps := testclocktest.Deps(engine)
 	clockDeps.Trials = f.subSvc
 	orchestrator := testclock.NewService(clocks, clockDeps)
-	if err := orchestrator.RunCatchup(leadertest.Token(t, testutil.AdminPool(t), r.base, leader.RoleTestClockCatchup), f.tenantID, clockID); err != nil {
-		t.Fatalf("catchup: %v", err)
-	}
+	testclocktest.DrainReady(t, orchestrator, f.tenantID, clockID)
 
 	invs, _ := r.liveInvoices(t)
 	inv := invoiceFor(t, invs, trialEnd, trialEnd.AddDate(0, 1, 0))

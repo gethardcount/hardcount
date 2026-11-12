@@ -177,7 +177,6 @@ Then run `docker compose config` in `deploy/compose`.
 | `TEST_DATABASE_URL` | Limited-user URL of the integration-test database. | `postgres://hardcount_test_app:hardcount_test_app@localhost:5432/hardcount_test?sslmode=disable` |
 | `TEST_RUNTIME_ROLE_DATABASE_URL` | The `hardcount_app` URL the audit-table grants test connects with. | `TEST_DATABASE_URL` with user and password `hardcount_app` |
 | `HARDCOUNT_LIVE_BALANCE_TIMING_EVENTS` | Event counts for a timing measurement in `internal/billing`, such as `100000,1000000`. | Unset: that test is skipped. |
-| `HARDCOUNT_TEST_CLOCK_INJECT_FAILURE` | Read by the server: makes the next test-clock advance fail with this text, once, for manual tests. Never set it in production. | Unset |
 | `BENCH_LIVEMODE` | Read by `hardcount-bench-seed`: seed live mode (`true`) or test mode (`false`). | `true`. Any other value stops it. |
 | `BENCH_CUSTOMERS` | Read by `hardcount-bench-seed`: how many customers to create. | `200`. A value that is not a whole number of 1 or more stops it. |
 | `VITE_API_URL`, `VITE_HOSTED_INVOICE_BASE_URL` | Read when the dashboard (`web-v2`) is built, not by the server: the API address and the hosted invoice address. | Unset: the dashboard's own address. |

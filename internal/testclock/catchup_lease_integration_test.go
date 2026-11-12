@@ -203,18 +203,18 @@ func TestRunCatchup_DeposedLeaderChangesNothing(t *testing.T) {
 	current := leadertest.Token(t, admin, base, leader.RoleTestClockCatchup)
 
 	failing := testclock.NewService(store, testclocktest.Deps(failingRunner{}))
-	if err := failing.RunCatchup(deposed, tenantID, clk.ID); err != nil {
+	if err := testclock.RunPass(deposed, failing, tenantID, clk.ID); err != nil {
 		t.Errorf("deposed failing pass: %v, want nil (its MarkFailed misses the fence)", err)
 	}
 	completing := testclock.NewService(store, testclocktest.Deps(countingClockRunner{}))
-	if err := completing.RunCatchup(deposed, tenantID, clk.ID); err != nil {
+	if err := testclock.RunPass(deposed, completing, tenantID, clk.ID); err != nil {
 		t.Errorf("deposed completing pass: %v, want nil (its CompleteAdvance misses the fence)", err)
 	}
 	if got, _ := store.Get(base, tenantID, clk.ID); got.Status != domain.TestClockStatusAdvancing || got.LastFailureReason != "" {
 		t.Fatalf("after the deposed passes: status %q reason %q, want advancing and no reason", got.Status, got.LastFailureReason)
 	}
 
-	if err := completing.RunCatchup(current, tenantID, clk.ID); err != nil {
+	if err := testclock.RunPass(current, completing, tenantID, clk.ID); err != nil {
 		t.Fatalf("current leader's pass: %v", err)
 	}
 	if got, _ := store.Get(base, tenantID, clk.ID); got.Status != domain.TestClockStatusReady {
@@ -258,8 +258,8 @@ func TestRunCatchup_ClockTurnsReadyUnderThePass(t *testing.T) {
 	clk := advancingClock(t, store, base, tenantID, "overlap")
 
 	svc := testclock.NewService(store, testclocktest.Deps(readyUnderPassRunner{admin: admin, clockID: clk.ID}))
-	if err := svc.RunCatchup(ctx, tenantID, clk.ID); err != nil {
-		t.Fatalf("RunCatchup: %v, want nil (the clock was completed under it)", err)
+	if err := testclock.RunPass(ctx, svc, tenantID, clk.ID); err != nil {
+		t.Fatalf("pass: %v, want nil (the clock was completed under it)", err)
 	}
 	got, err := store.Get(base, tenantID, clk.ID)
 	if err != nil {
@@ -416,7 +416,7 @@ func TestCatchupTick_LeaseLostMidPass(t *testing.T) {
 	}
 
 	next := testclock.NewService(store, testclocktest.Deps(countingClockRunner{}))
-	if err := next.RunCatchup(successor, tenantID, clk.ID); err != nil {
+	if err := testclock.RunPass(successor, next, tenantID, clk.ID); err != nil {
 		t.Fatalf("the next leader's pass: %v", err)
 	}
 	got, err = store.Get(base, tenantID, clk.ID)

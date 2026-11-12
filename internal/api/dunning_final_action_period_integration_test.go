@@ -110,7 +110,7 @@ func TestDunningFinalAction_TestClock_NeverBeforeTheCurrentPeriod(t *testing.T) 
 				t.Fatalf("commit run: %v", err)
 			}
 
-			// The catchup's dunning phase, as testclock.Service.RunCatchup
+			// The catchup's dunning phase, as the clock's catch-up pass
 			// calls it.
 			simCtx := clock.WithSim(ctx, clock.Sim{At: frozen, TestClockID: clockID})
 			if _, errs := r.srv.DunningSvc.ProcessDueRunsForClock(simCtx, r.tenantID, clockID, frozen, 50); len(errs) != 0 {

@@ -183,3 +183,9 @@ Stripe Test Clock has the same affordance ("force-fail simulation"
 under their test-clock primitives). Mirroring it removes ambiguity
 in the manual-test bullet without changing production semantics.
 
+**2026-11-13: the switch is removed.** A server that had it set
+failed every advance, and the failure path no longer needs it. The
+catch-up takes each job at construction, so a test fails a stub job
+(`TestAdvance_FailedJobThenRetryCompletes`) and Retry advance then
+completes the clock. A Playwright spec shows the failure banner.
+
