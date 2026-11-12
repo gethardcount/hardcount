@@ -75,11 +75,12 @@ type CreditNoteTotaler interface {
 	UnreliefedClawbackCents(ctx context.Context, tenantID, invoiceID string) (int64, error)
 }
 
-// stepsBudget bounds one group of steps after a commit that run on a ctx their
-// caller cannot cancel: a tax retry's finalize steps and $0 settle
-// (RetryTax). It is taken after that commit. 5 minutes is above three Stripe
-// calls at their limit (3 × 92s), so a call that can still succeed is not
-// cut. docs/dev/code-standard.md names it.
+// stepsBudget bounds the steps after a commit that run on a context their
+// caller cannot cancel: a tax retry's finalize steps and $0 settle (RetryTax),
+// and an offline payment's dunning resolve and Checkout expiry
+// (RecordOfflinePayment). It starts after that commit and is above three
+// Stripe calls at their limit (3 × 92s), so a call that can still succeed is
+// not cut; docs/dev/code-standard.md names it.
 const stepsBudget = 5 * time.Minute
 
 // TaxRetrier is the narrow view into tax recompute + persistence the
@@ -204,8 +205,10 @@ type Service struct {
 	currencyFacts  CustomerCurrencyFacts
 	audit          AuditLogger
 	// collectionStopper and dunningResolver are AfterVoid's Stripe and
-	// dunning legs; collectionStopper is also MarkUncollectible's Checkout
-	// expiry. Only a test leaves them unwired.
+	// dunning legs. After an offline payment, dunningResolver closes the
+	// dunning run and collectionStopper expires the Checkout sessions;
+	// collectionStopper also expires them after a write-off. Only a test
+	// leaves them unwired.
 	collectionStopper PaymentCanceler
 	dunningResolver   DunningResolver
 	// setupLinkEmailOff is true when this server cannot email a setup link
@@ -2349,6 +2352,10 @@ func (s *Service) MarkUncollectibleThen(ctx context.Context, tenantID, id string
 // note is a short operator memo persisted in the audit metadata
 // (e.g. "Cheque #1234", "Wire 2026-05-20"). Not surfaced in
 // customer-facing payloads. Empty string is permitted.
+//
+// After the commit it closes the invoice's dunning run and expires any
+// Checkout page still open for it, so every caller (the invoice page, and
+// dunning's "payment recovered" resolve) gets both.
 func (s *Service) RecordOfflinePayment(ctx context.Context, tenantID, id, note string) (domain.Invoice, error) {
 	ctx = s.bindForInvoice(ctx, tenantID, id)
 	inv, err := s.store.Get(ctx, tenantID, id)
@@ -2443,6 +2450,26 @@ func (s *Service) RecordOfflinePayment(ctx context.Context, tenantID, id, note s
 			}
 		}
 		_ = s.audit.Log(ctx, tenantID, domain.AuditActionUpdate, "invoice", updated.ID, updated.InvoiceNumber, meta)
+	}
+	// The steps after the commit run on a context the caller cannot cancel:
+	// the payment is recorded whatever happens to the request.
+	stepsCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), stepsBudget)
+	defer cancel()
+	// Close the invoice's dunning run, active or escalated. The dunning ticks
+	// skip an escalated run, so nothing else would close it. This comes before
+	// the Stripe call below, which can be slow.
+	if s.dunningResolver != nil {
+		if err := s.dunningResolver.ResolveByInvoice(stepsCtx, tenantID, updated.ID, domain.ResolutionPaymentRecovered); err != nil {
+			slog.WarnContext(ctx, "the offline payment is recorded but closing the invoice's dunning run failed; an active run closes at its next retry, an escalated one needs Resolve",
+				"invoice_id", updated.ID, "error", err)
+		}
+	}
+	// The customer may still have a Checkout page open for this invoice, and
+	// Stripe would take a second payment through it. Expire it. A failed
+	// expiry leaves the page until it ends (at most an hour); a payment
+	// through it raises the duplicate-charge alarm.
+	if s.collectionStopper != nil {
+		s.collectionStopper.ExpireCheckoutSessions(stepsCtx, tenantID, updated)
 	}
 	return updated, nil
 }
