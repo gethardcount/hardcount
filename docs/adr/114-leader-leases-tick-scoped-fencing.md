@@ -460,3 +460,15 @@ unchanged: a stale tick's escalation write applies to no row, and a resolver
 that loses the compare-and-set writes nothing, so neither queues an event. A
 tick whose write commits cannot lose its event to a lost lease or a crash
 after the commit.
+
+## Amendment 2026-11-11 — a sixth role, `testclock_catchup`
+
+The test-clock catch-up is a leader-leased role
+([ADR-140](140-test-clock-catchup-is-a-leader-role.md)). Migration 00226 adds
+`testclock_catchup` to `leader_leases`' role CHECK and seeds its row, so
+there are six singleton roles where the Context above counts five. Its claim
+funnel is `testclock.PostgresStore.ListAdvancingForCatchup`, and its writes
+to the clock row (`SaveAdvanceSummary`, `CompleteAdvance`, `MarkFailed`)
+also prove the fence. Like the billing role, some of its phase work runs on
+detached contexts that can outlive a deposed tick; the per-row guards that
+cover a billing takeover cover it the same way.

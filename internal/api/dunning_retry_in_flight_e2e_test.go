@@ -16,6 +16,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/tenantstripe"
+	"github.com/gethardcount/hardcount/internal/testclock/testclocktest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -151,6 +152,7 @@ type inFlightRig struct {
 	t        *testing.T
 	db       *postgres.DB
 	ts       *httptest.Server
+	srv      *Server
 	tenantID string
 	key      string
 	endpoint string
@@ -170,9 +172,10 @@ func newInFlightRig(t *testing.T, name string, retryDays []int, script map[strin
 	// A setup session with no return_url needs the dashboard address; it has
 	// no default.
 	t.Setenv("CUSTOMER_PORTAL_URL", "https://app.retry-in-flight.test")
-	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
+	srv := NewServer(db, clock.Real(), nil)
+	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
-	r := &inFlightRig{t: t, db: db, ts: ts, secret: "whsec_retry_in_flight",
+	r := &inFlightRig{t: t, db: db, ts: ts, srv: srv, secret: "whsec_retry_in_flight",
 		frozen: time.Date(2027, 5, 3, 9, 0, 0, 0, time.UTC)}
 	r.tenantID = testutil.CreateTestTenant(t, db, name)
 	r.key = createAPIKeyWithMode(t, db, r.tenantID, false)
@@ -208,6 +211,7 @@ func (r *inFlightRig) advance(days int) {
 	r.call("POST", "/v1/test-clocks/"+r.clockID+"/advance", map[string]any{
 		"frozen_time": r.day(days).Format(time.RFC3339),
 	}).want(r.t, 200, fmt.Sprintf("advance clock to day %d", days))
+	testclocktest.Drain(r.t, r.srv.TestClockSvc)
 }
 
 // webhook signs and posts one Stripe event to the tenant's endpoint.

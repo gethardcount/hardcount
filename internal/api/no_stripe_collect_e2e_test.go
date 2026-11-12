@@ -11,6 +11,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/tenantstripe"
+	"github.com/gethardcount/hardcount/internal/testclock/testclocktest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -72,6 +73,7 @@ func (r *noStripeRig) advanceTo(hours int) {
 	r.call("POST", "/v1/test-clocks/"+r.clockID+"/advance", flowReq{body: map[string]any{
 		"frozen_time": r.frozen.Add(time.Duration(hours) * time.Hour).Format(time.RFC3339),
 	}}).want(r.t, 200, fmt.Sprintf("advance clock to hour %d", hours))
+	testclocktest.Drain(r.t, r.srv.TestClockSvc)
 }
 
 // finalizedInvoice is a $49 one-off invoice, finalized, for a new customer

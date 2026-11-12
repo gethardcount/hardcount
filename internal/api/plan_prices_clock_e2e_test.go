@@ -4,6 +4,8 @@ import (
 	"net/http"
 	"testing"
 	"time"
+
+	"github.com/gethardcount/hardcount/internal/testclock/testclocktest"
 )
 
 // Test clocks follow the plan price edit rule in simulated time (ADR-130
@@ -20,13 +22,14 @@ func (r *ppRig) clock(name string, frozen time.Time) string {
 	}, http.StatusCreated), "id")
 }
 
-// advance moves the clock to target. The test server runs the catch-up
-// inside the request.
+// advance moves the clock to target and runs its catch-up, as the
+// testclock_catchup leader would.
 func (r *ppRig) advance(clockID string, target time.Time) {
 	r.t.Helper()
 	r.must(time.Time{}, http.MethodPost, "/v1/test-clocks/"+clockID+"/advance", map[string]any{
 		"frozen_time": target.Format(time.RFC3339),
 	}, http.StatusOK)
+	testclocktest.Drain(r.t, r.srv.TestClockSvc)
 	if st := flowStr(r.must(time.Time{}, http.MethodGet, "/v1/test-clocks/"+clockID, nil, http.StatusOK), "status"); st != "ready" {
 		r.t.Fatalf("clock status after the advance = %q, want ready", st)
 	}

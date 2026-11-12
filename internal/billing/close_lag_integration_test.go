@@ -9,10 +9,13 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/leader"
+	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/pricing"
 	"github.com/gethardcount/hardcount/internal/subscription"
 	"github.com/gethardcount/hardcount/internal/testclock"
+	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/usage"
 )
 
@@ -349,10 +352,9 @@ func TestLateClose_ScheduledResume_TestClock_AdvancePastResume(t *testing.T) {
 		t.Fatal("the clock resumer cleared the pause while [P0, P1), which ended before resumes_at, was still unclosed")
 	}
 
-	orchestrator := testclock.NewService(clocks)
-	orchestrator.SetBillingRunner(r.f.engine)
+	orchestrator := testclock.NewService(clocks, r.f.engine)
 	orchestrator.SetPauseResumer(r.f.subSvc)
-	if err := orchestrator.RunCatchup(r.base, testclock.CatchupJob{TenantID: r.f.tenantID, ClockID: clockID, PrevFrozenTime: p0}); err != nil {
+	if err := orchestrator.RunCatchup(leadertest.Token(t, testutil.AdminPool(t), r.base, leader.RoleTestClockCatchup), r.f.tenantID, clockID); err != nil {
 		t.Fatalf("catchup: %v", err)
 	}
 	invs, _ := r.liveInvoices(t)
@@ -534,11 +536,10 @@ func TestTrialFlipAfterResume_TestClock(t *testing.T) {
 	r.f.engine.SetTestClockReader(clocks)
 	r.f.subSvc.SetResolver(r.f.engine)
 
-	orchestrator := testclock.NewService(clocks)
-	orchestrator.SetBillingRunner(r.f.engine)
+	orchestrator := testclock.NewService(clocks, r.f.engine)
 	orchestrator.SetTrialExpirer(r.f.subSvc)
 	orchestrator.SetPauseResumer(r.f.subSvc)
-	if err := orchestrator.RunCatchup(r.base, testclock.CatchupJob{TenantID: r.f.tenantID, ClockID: clockID, PrevFrozenTime: r.f.cycleStart}); err != nil {
+	if err := orchestrator.RunCatchup(leadertest.Token(t, testutil.AdminPool(t), r.base, leader.RoleTestClockCatchup), r.f.tenantID, clockID); err != nil {
 		t.Fatalf("catchup: %v", err)
 	}
 	if sub := r.sub(t); sub.Status != domain.SubscriptionActive {

@@ -9,25 +9,37 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 )
 
-// TestCatchupProcess_RecoversPanic covers the medium-severity audit finding:
-// the catchup worker goroutine had no panic recovery, so a panic in the runner
-// (a nil-deref in some billing path) would unwind the goroutine and crash the
-// whole process, taking down the API for every tenant. process() now recovers,
-// logs, and returns so the drain loop continues.
-func TestCatchupProcess_RecoversPanic(t *testing.T) {
-	w := NewCatchupWorker(NewCatchupQueue(1), func(_ context.Context, _ CatchupJob) error {
-		panic("boom: nil deref in billing path")
-	})
+// TestRunAdvancing_APanickingPassDoesNotStopTheTick: a panic in one clock's
+// pass (a nil-deref in some billing path) is the clock's alone. runClock
+// recovers it and fails that clock, and the tick goes on to the next clock.
+// Without the recover, the panic would unwind the tick: the scheduler's
+// recover keeps the process alive, but every later clock would wait for the
+// next tick, which would panic on the same clock first.
+func TestRunAdvancing_APanickingPassDoesNotStopTheTick(t *testing.T) {
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	store := newMockStore()
+	for _, id := range []string{"c1", "c2"} {
+		store.clocks[id] = domain.TestClock{ID: id, TenantID: "t1", Status: domain.TestClockStatusAdvancing, FrozenTime: at}
+	}
+	s := NewService(store, &panickingRunner{})
 
-	// If process did not recover, the panic would propagate and fail the test.
-	// Reaching the line after the call proves recovery.
-	w.process(CatchupJob{TenantID: "t1", ClockID: "c1"})
+	worked, err := s.RunAdvancing(context.Background())
+	if err != nil {
+		t.Fatalf("RunAdvancing: %v", err)
+	}
+	if worked != 2 {
+		t.Errorf("clocks run: got %d, want 2", worked)
+	}
+	for _, id := range []string{"c1", "c2"} {
+		if got := store.clocks[id].Status; got != domain.TestClockStatusInternalFailed {
+			t.Errorf("%s: status %q, want internal_failure", id, got)
+		}
+	}
 }
 
-// panickingRunner blows up inside the billing phase — the worker's (or
-// chi's) recover keeps the process alive, but pre-fix nothing flipped
-// the clock out of 'advancing', a state with no operator exit (Advance
-// needs 'ready', Retry advance needs 'internal_failure').
+// panickingRunner blows up inside the billing phase. The scheduler's recover
+// keeps the process alive; runClock's recover must also take the clock out
+// of 'advancing', or the next leader would panic on it again.
 type panickingRunner struct{ stubRunner }
 
 func (r *panickingRunner) RunCycleForClock(_ context.Context, _, _ string, _ int) (int, []error) {
@@ -50,10 +62,9 @@ func TestRunCatchup_PanicMarksClockFailed(t *testing.T) {
 	sub.NextBillingAt = &nextBilling
 	store.subsOnClock["c1"] = []domain.Subscription{sub}
 
-	s := NewService(store)
-	s.SetBillingRunner(&panickingRunner{})
+	s := NewService(store, &panickingRunner{})
 
-	err := s.RunCatchup(context.Background(), CatchupJob{TenantID: "t1", ClockID: "c1"})
+	err := s.RunCatchup(context.Background(), "t1", "c1")
 	if err == nil {
 		t.Fatal("expected RunCatchup to surface the panic as an error")
 	}
@@ -67,5 +78,32 @@ func TestRunCatchup_PanicMarksClockFailed(t *testing.T) {
 	}
 	if strings.Contains(got.LastFailureReason, "boom") || strings.Contains(got.LastFailureReason, "panic") {
 		t.Errorf("operator-facing reason must not leak panic internals, got %q", got.LastFailureReason)
+	}
+	// The failed advance records its end and that it failed, so the dashboard
+	// does not show it as a clean advance with nothing billed.
+	if sum := got.LastAdvanceSummary; sum == nil || !sum.HadErrors || !sum.AdvancedTo.Equal(start) {
+		t.Errorf("summary after a panic = %+v, want advanced_to %s and had_errors", sum, start)
+	}
+}
+
+// TestRunCatchup_PanicWhenTheTickEnded: a panic in a pass whose tick has
+// ended (a shutdown, or the lease lost, which may be what panicked) leaves
+// the clock advancing for the next leader, as an ended tick without a panic
+// does. It is not the advance's failure.
+func TestRunCatchup_PanicWhenTheTickEnded(t *testing.T) {
+	store := newMockStore()
+	store.clocks["c1"] = domain.TestClock{
+		ID: "c1", TenantID: "t1", Status: domain.TestClockStatusAdvancing,
+		FrozenTime: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
+	}
+	s := NewService(store, &panickingRunner{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := s.RunCatchup(ctx, "t1", "c1"); err == nil {
+		t.Fatal("expected RunCatchup to surface the panic as an error")
+	}
+	if got := store.clocks["c1"]; got.Status != domain.TestClockStatusAdvancing || got.LastFailureReason != "" {
+		t.Errorf("status %q reason %q, want advancing and no reason: the next leader runs the pass", got.Status, got.LastFailureReason)
 	}
 }

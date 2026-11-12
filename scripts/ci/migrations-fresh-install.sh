@@ -176,13 +176,14 @@ check_app_timeout() {
   [ "$got" = 30s ] || fail "$c: $role starts with idle_in_transaction_session_timeout = $got, want 30s"
 }
 
-# 0174's seed takes each row's token from clock_timestamp(), so the five
-# tokens can straddle a millisecond: they are checked for age, not equality.
+# 0174's seed and 00226's take each row's token from clock_timestamp(), so
+# the six tokens (five roles from 0174, testclock_catchup from 00226) can
+# straddle a millisecond: they are checked for age, not equality.
 check_leases() {
   local c=$1 setup=$2 got
   got=$(q "$c" "$setup" "SELECT count(*) || ',' ||
          bool_and(abs(holder_token - (extract(epoch FROM now()) * 1000)::bigint) < 86400000) FROM public.leader_leases")
-  [ "$got" = "5,true" ] || fail "$c: leader_leases want 5 rows with tokens from the last day, got $got"
+  [ "$got" = "6,true" ] || fail "$c: leader_leases want 6 rows with tokens from the last day, got $got"
 }
 
 fresh_install() {

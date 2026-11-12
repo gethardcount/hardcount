@@ -1,6 +1,6 @@
 # ADR-015: Test-clock advance runs catchup asynchronously
 
-**Status:** Accepted
+**Status:** Accepted (amended 2026-11-11: the queue and worker are superseded by ADR-140)
 **Date:** 2026-05-04
 
 ## Summary
@@ -154,3 +154,14 @@ freely.
   the sync fallback path (`s.queue == nil`) remains for narrow
   unit tests that want to assert end-state synchronously without
   standing up the worker.
+
+## Amendment 2026-11-11 — the queue and worker are replaced by a leader role
+
+[ADR-140](140-test-clock-catchup-is-a-leader-role.md) replaces this ADR's
+dispatch. Advance still returns as soon as the clock is `advancing`, and the
+catch-up still runs off the request. There is no in-process queue, no
+`CatchupWorker`, no `RecoverInFlight` and no `503 catchup_queue_full`. The
+`testclock_catchup` leader lists the advancing clocks on a 2-second tick and
+runs each, and its writes to the clock row prove the lease. The 10-minute
+`CatchupTimeout` on the whole run became a per-pass deadline. The sections
+above describe the design as it was.

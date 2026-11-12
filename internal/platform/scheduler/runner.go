@@ -1,10 +1,10 @@
 // Package scheduler hosts the standard tick-loop runner that every
 // ticker-driven singleton worker in Hardcount uses. The authoritative list
-// is `grep -rn "scheduler.Run("`. There are five: billing (1h in production,
+// is `grep -rn "scheduler.Run("`. There are six: billing (1h in production,
 // 5m in local), dunning (the same interval), webhook_outbox (2s),
-// email_outbox (5s) and webhook_delivery (30s). The test-clock catch-up
-// worker (it runs everything that fell due in the time a test clock skipped)
-// is driven by a queue, not a ticker, so it does not use this runner.
+// email_outbox (5s), webhook_delivery (30s) and testclock_catchup (2s: it
+// runs everything that fell due in the time an advancing test clock
+// skipped, ADR-140).
 //
 // Every loop is leader-gated (ADR-114). A tick runs only when this replica
 // leads the role for that tick, on a ctx carrying the lease token that the

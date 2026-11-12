@@ -54,8 +54,8 @@ var txBypassUsers = map[string]string{
 
 	"internal/platform/postgres/postgres.go DB.BeginTx": "definer",
 
-	// Background jobs: sweeps across tenants, test-clock catch-up (run by
-	// the catch-up worker), start-up recovery and backfill.
+	// Background jobs: sweeps across tenants, the test-clock catch-up (the
+	// testclock_catchup role's claim list), start-up recovery and backfill.
 	"internal/api/middleware/idempotency.go CleanExpired":                                    "background",
 	"internal/credit/postgres.go PostgresStore.ListExpiredGrants":                            "background",
 	"internal/credit/postgres.go PostgresStore.ListExpiredGrantsForClock":                    "background",
@@ -81,7 +81,7 @@ var txBypassUsers = map[string]string{
 	"internal/subscription/postgres.go PostgresStore.ListExpiredTrials":                      "background",
 	"internal/subscription/postgres.go PostgresStore.ListWithThresholds":                     "background",
 	"internal/subscription/postgres.go PostgresStore.ListWithThresholdsForClock":             "background",
-	"internal/testclock/postgres.go PostgresStore.ListAllAdvancing":                          "background",
+	"internal/testclock/postgres.go PostgresStore.ListAdvancingForCatchup":                   "background",
 	"internal/webhook/outbox.go OutboxStore.ProcessBatch":                                    "background",
 	"internal/webhook/outbox.go OutboxStore.attemptRow":                                      "background",
 	"internal/webhook/postgres.go PostgresStore.ListPendingDeliveries":                       "background",

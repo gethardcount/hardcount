@@ -47,8 +47,8 @@ type Config struct {
 	// follows health checks then stops routing to the replica before the
 	// requests in flight are drained. Env SHUTDOWN_DRAIN_DELAY (a Go
 	// duration). The default is 5s outside local and 0 in local. The delay
-	// comes before the published 90s shutdown budget in three stages
-	// (cmd/hardcount/main.go), so the worst case is this delay plus 90s.
+	// comes before the published 60s shutdown budget in two stages
+	// (cmd/hardcount/main.go), so the worst case is this delay plus 60s.
 	ShutdownDrainDelay time.Duration
 
 	// InvoiceGracePeriod is how long after a billing period ends (or after a
