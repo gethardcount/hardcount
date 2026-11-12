@@ -300,7 +300,8 @@ var twoMeterWriters = []lockOrderWriter{
 	{"trial conversion", func(t *testing.T, r *lockOrderRig, lo, hi domain.Plan) func(context.Context) error {
 		sub := r.sub(t, "trial", domain.SubscriptionTrialing, hi, lo)
 		return func(ctx context.Context) error {
-			_, err := r.store.ActivateAfterTrial(ctx, r.tenantID, sub.ID, lockOrderPS.Add(2*time.Hour))
+			// The trial ends at lockOrderPE; the flip acts for that end.
+			_, err := r.store.ActivateAfterTrial(ctx, r.tenantID, sub.ID, lockOrderPE)
 			return err
 		}
 	}},

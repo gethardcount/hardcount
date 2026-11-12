@@ -3218,8 +3218,10 @@ func (s *Service) ProcessExpiredTrialsForClock(ctx context.Context, tenantID, cl
 		batchErrs []error
 	)
 	// Every page: a clock has no next tick to pick up what is left.
-	for after := ""; ; {
-		expired, err := s.store.ListExpiredTrialsForClock(ctx, tenantID, clockID, frozen, after, clockJobPage)
+	var afterAt time.Time
+	afterID := ""
+	for {
+		expired, err := s.store.ListExpiredTrialsForClock(ctx, tenantID, clockID, frozen, afterAt, afterID, clockJobPage)
 		if err != nil {
 			return processed, append(batchErrs, fmt.Errorf("list expired trials: %w", err))
 		}
@@ -3281,8 +3283,9 @@ func (s *Service) ProcessExpiredTrialsForClock(ctx context.Context, tenantID, cl
 				}
 				// Operator-EndTrial race: the row already left 'trialing'
 				// between the scan SELECT and the UPDATE. Not an error —
-				// just a no-op for this pass.
-				if errors.Is(err, errs.ErrInvalidState) {
+				// just a no-op for this pass. An Extend trial in the same
+				// window leaves it trialing with a later end: not due yet.
+				if errors.Is(err, errs.ErrInvalidState) || errors.Is(err, domain.ErrTrialNotDue) {
 					continue
 				}
 				batchErrs = append(batchErrs, fmt.Errorf("activate sub %s: %w", sub.ID, err))
@@ -3319,7 +3322,8 @@ func (s *Service) ProcessExpiredTrialsForClock(ctx context.Context, tenantID, cl
 		if len(expired) < clockJobPage {
 			return processed, batchErrs
 		}
-		after = expired[len(expired)-1].ID
+		last := expired[len(expired)-1]
+		afterAt, afterID = *last.TrialEndAt, last.ID
 	}
 }
 
@@ -3405,9 +3409,11 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 				}
 				continue
 			}
-			if errors.Is(err, errs.ErrInvalidState) {
+			if errors.Is(err, errs.ErrInvalidState) || errors.Is(err, domain.ErrTrialNotDue) {
 				// Operator-EndTrial race (or already-active by some
-				// other path) — desired state reached, skip.
+				// other path) — desired state reached, skip. An Extend
+				// trial in the same window leaves the trial running
+				// past trialEndAt: not due yet, skip.
 				continue
 			}
 			batchErrs = append(batchErrs, fmt.Errorf("activate sub %s: %w", sub.ID, err))
@@ -3458,18 +3464,21 @@ func (s *Service) ProcessExpiredPauseCollectionsForClock(ctx context.Context, te
 		batchErrs []error
 	)
 	// Every page: a clock has no next tick to pick up what is left.
-	for after := ""; ; {
-		expired, err := s.store.ListExpiredPauseCollectionsForClock(ctx, tenantID, clockID, frozen, after, clockJobPage)
+	var afterAt time.Time
+	afterID := ""
+	for {
+		expired, err := s.store.ListExpiredPauseCollectionsForClock(ctx, tenantID, clockID, frozen, afterAt, afterID, clockJobPage)
 		if err != nil {
 			return processed, append(batchErrs, fmt.Errorf("list expired pause collections: %w", err))
 		}
-		n, errs := s.resumeListedPauses(ctx, expired)
+		n, pageErrs := s.resumeListedPauses(ctx, expired)
 		processed += n
-		batchErrs = append(batchErrs, errs...)
+		batchErrs = append(batchErrs, pageErrs...)
 		if len(expired) < clockJobPage {
 			return processed, batchErrs
 		}
-		after = expired[len(expired)-1].ID
+		last := expired[len(expired)-1]
+		afterAt, afterID = *last.PauseCollection.ResumesAt, last.ID
 	}
 }
 
