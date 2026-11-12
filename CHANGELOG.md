@@ -67,7 +67,7 @@ original text.
 
 ### Changed
 
-- **The contributor rules are half as long (2026-11-13).** Contributors: CONTRIBUTING, the engineering principles, the code standard, the testing guide and the money-path playbook were rewritten in plain words, with each rule in one place. No rule about money changed. [#PR](https://github.com/gethardcount/hardcount/pull/PR)
+- **The contributor rules are half as long (2026-11-13).** Contributors: CONTRIBUTING, the engineering principles, the code standard, the testing guide and the money-path playbook were rewritten in plain words, with each rule in one place. No rule about money changed. [#1692](https://github.com/gethardcount/hardcount/pull/1692)
 - **A `503` is no longer stored under its `Idempotency-Key`.** A retry with the same key runs the request again, instead of getting the stored `503` back. Hardcount answers `503` only when nothing the request did would be done twice. After `currency_unavailable`, send the same request with the same key, not a new one. ([#1646](https://github.com/gethardcount/hardcount/pull/1646))
 
 ### Removed
