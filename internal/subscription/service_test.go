@@ -2346,7 +2346,7 @@ func TestProcessExpiredTrialsForClock(t *testing.T) {
 		// Advance simulated clock to 5 days past trial_end (Dec 13).
 		frozen := sub.TrialEndAt.Add(5 * 24 * time.Hour)
 		// The DRIVER CONTRACT: every *ForClock phase is called only from
-		// testclock.RunCatchup, which binds the clock + its frozen instant onto
+		// the clock's catch-up pass, which binds the clock + its frozen instant onto
 		// ctx ONCE for the whole advance (one bind, not nine self-binds). Every
 		// audit row a phase emits inherits the axis from that ctx. Reproduce it
 		// here — calling the phase on a bare ctx tests a shape production never

@@ -450,8 +450,8 @@ type SubscriptionReader interface {
 	GetDueBilling(ctx context.Context, now, dueBy time.Time, exclude []string, limit int) ([]domain.Subscription, error)
 	// GetDueBillingForClock: operator-driven catchup path. Returns
 	// ONLY subs pinned to the given clock whose next_billing_at is
-	// on-or-before that clock's frozen time. Called by RunCatchup
-	// after Advance flips status to 'advancing'.
+	// on-or-before that clock's frozen time. Called by the clock's catch-up
+	// pass after Advance flips status to 'advancing'.
 	GetDueBillingForClock(ctx context.Context, tenantID, clockID string, exclude []string, limit int) ([]domain.Subscription, error)
 	// GetDueBillingForTenant: operator-triggered (POST /v1/billing/run)
 	// path, scoped to ONE tenant under RLS. Wall-clock-due, non-clock-

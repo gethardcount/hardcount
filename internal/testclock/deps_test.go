@@ -88,3 +88,13 @@ func TestNewService_RefusesAMissingDependency(t *testing.T) {
 		t.Fatal("NewService with every dependency returned nil")
 	}
 }
+
+// runPass runs one catch-up pass on one clock, as the tick does for each
+// clock it lists. On the real store ctx must hold the testclock_catchup lease.
+func runPass(ctx context.Context, s *Service, tenantID, clockID string) error {
+	clk, err := s.store.Get(ctx, tenantID, clockID)
+	if err != nil {
+		return err
+	}
+	return s.runClock(ctx, clk)
+}

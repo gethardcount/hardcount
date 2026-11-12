@@ -837,7 +837,7 @@ func (stubCustomerEmail) GetCustomerEmail(context.Context, string, string) (stri
 //
 // Pre-fix the warning + escalation enqueues ran in goroutines bound to
 // the catchup ctx, which testclock/catchup.go cancels via `defer
-// cancel()` the instant RunCatchup returns. The escalation, spawned
+// cancel()` the instant the pass returns. The escalation, spawned
 // during the final retry, lost the race and the email never landed in
 // the outbox — even though the run's DB state correctly read
 // state=escalated. Symptom: 5/6 of an exhausted run's emails appeared

@@ -52,8 +52,17 @@ func TestRunCatchup_PassDeadlineMarksFailedOnALiveCtx(t *testing.T) {
 	deps.PassDeadline = 50 * time.Millisecond
 	s := NewService(store, deps)
 
-	if err := s.RunCatchup(context.Background(), "t1", "c1"); err == nil {
-		t.Fatal("expected RunCatchup to return the overrun as an error")
+	// The pass must end at the configured deadline: one that used any other
+	// deadline would block for minutes, so the test fails fast instead.
+	done := make(chan error, 1)
+	go func() { done <- runPass(context.Background(), s, "t1", "c1") }()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("expected the pass to return the overrun as an error")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("the pass did not end within a second of its 50ms deadline: it ignores Deps.PassDeadline")
 	}
 	if !store.markFailedSawLiveCtx {
 		t.Error("MarkFailed was not called with a live (detached) ctx — the failure-flip reused the expired pass ctx")
@@ -82,8 +91,8 @@ func TestRunCatchup_EndedCtxLeavesTheClockAdvancing(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := s.RunCatchup(ctx, "t1", "c1"); err != nil {
-		t.Fatalf("RunCatchup on an ended ctx: %v, want nil (the next leader runs the pass)", err)
+	if err := runPass(ctx, s, "t1", "c1"); err != nil {
+		t.Fatalf("the pass on an ended ctx: %v, want nil (the next leader runs the pass)", err)
 	}
 	if store.markFailedSawLiveCtx {
 		t.Error("MarkFailed ran: an ended tick must leave the clock for the next leader, not fail it")

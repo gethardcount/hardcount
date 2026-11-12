@@ -3,7 +3,6 @@ package testclock
 import (
 	"context"
 	"errors"
-	"os"
 	"strings"
 	"testing"
 	"time"
@@ -231,7 +230,7 @@ func TestAdvance_RunsBillingUntilQuiet(t *testing.T) {
 	if !clk.FrozenTime.Equal(newTime) {
 		t.Errorf("frozen_time: got %v, want %v", clk.FrozenTime, newTime)
 	}
-	// Post-ADR-028: RunCatchup invokes RunCycle exactly once. The
+	// Post-ADR-028: a pass invokes RunCycle exactly once. The
 	// engine (here, stubRunner) catches the sub up across all due
 	// periods internally — no outer loop in the test-clock service.
 	if runner.calls != 1 {
@@ -422,55 +421,6 @@ func TestAdvance_BillingFailureMarksClockFailed(t *testing.T) {
 	}
 }
 
-// TestAdvance_InjectFailureEnv asserts the manual-test injection knob:
-// when HARDCOUNT_TEST_CLOCK_INJECT_FAILURE is set, runCatchupLoop fails
-// with the value as the reason, the clock flips to internal_failure,
-// and the env is cleared so a subsequent retry sees a clean state.
-// Powers the MANUAL_TEST FLOW TC2 catchup-failure UI bullet —
-// reliable reproduction without disconnecting Stripe.
-func TestAdvance_InjectFailureEnv(t *testing.T) {
-	t.Setenv("HARDCOUNT_TEST_CLOCK_INJECT_FAILURE", "manual UI test")
-
-	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	store := newMockStore()
-	store.clocks["c1"] = domain.TestClock{
-		ID: "c1", TenantID: "t1", Status: domain.TestClockStatusReady, FrozenTime: start,
-	}
-	sub := domain.Subscription{
-		ID: "s1", TenantID: "t1", TestClockID: "c1", Status: domain.SubscriptionActive,
-	}
-	nextBilling := start.Add(1 * time.Hour)
-	sub.NextBillingAt = &nextBilling
-	store.subsOnClock["c1"] = []domain.Subscription{sub}
-
-	// stubRunner with no error — proves the env injection runs BEFORE
-	// the billing path, so a successful runner can't hide a missed
-	// injection.
-	runner := &stubRunner{store: store, clockID: "c1", subID: "s1"}
-	s := NewService(store, testDeps(runner))
-
-	_, err := advanceThenCatchUp(context.Background(), s, "t1", "c1", AdvanceInput{
-		FrozenTime: start.Add(30 * 24 * time.Hour),
-	})
-	if err == nil {
-		t.Fatal("expected error from injected failure")
-	}
-	if !strings.Contains(err.Error(), "injected: manual UI test") {
-		t.Errorf("expected reason to carry the injected text, got %q", err.Error())
-	}
-	if store.clocks["c1"].Status != domain.TestClockStatusInternalFailed {
-		t.Errorf("clock status: got %q, want internal_failure",
-			store.clocks["c1"].Status)
-	}
-	if sum := store.clocks["c1"].LastAdvanceSummary; sum == nil || !sum.HadErrors || sum.AdvancedTo.IsZero() {
-		t.Errorf("summary after the injected failure = %+v, want advanced_to and had_errors", sum)
-	}
-	// One-shot: env cleared so retry would see clean state.
-	if v := os.Getenv("HARDCOUNT_TEST_CLOCK_INJECT_FAILURE"); v != "" {
-		t.Errorf("env should be cleared after one-shot fire, got %q", v)
-	}
-}
-
 // --- Mocks ---
 
 type mockStore struct {
@@ -596,7 +546,7 @@ func (m *mockStore) ListAdvancingForCatchup(_ context.Context, limit int) ([]dom
 // catches the sub up across all due periods. Advances next_billing_at
 // by cycleDur in a loop until it overshoots frozen_time. Returns the
 // number of "invoices" generated. Track call count for tests that
-// assert RunCycle is invoked exactly once per RunCatchup.
+// assert RunCycle is invoked exactly once per pass.
 // countingRunner is a deterministic BillingRunner: RunCycleForClock returns a
 // fixed invoice count (or a fixed error), and the other phases are no-ops. Used
 // to assert the advance summary captures the phase counts exactly.
@@ -635,8 +585,8 @@ func TestRunCatchup_RecordsAdvanceSummary(t *testing.T) {
 		}
 		s := NewService(store, testDeps(&countingRunner{invoices: 3}))
 
-		if err := s.RunCatchup(context.Background(), "t1", "c1"); err != nil {
-			t.Fatalf("RunCatchup: %v", err)
+		if err := runPass(context.Background(), s, "t1", "c1"); err != nil {
+			t.Fatalf("pass: %v", err)
 		}
 		got := store.clocks["c1"]
 		if got.Status != domain.TestClockStatusReady {
@@ -665,8 +615,8 @@ func TestRunCatchup_RecordsAdvanceSummary(t *testing.T) {
 		}
 		s := NewService(store, testDeps(&countingRunner{err: errors.New("phase boom")}))
 
-		if err := s.RunCatchup(context.Background(), "t1", "c1"); err == nil {
-			t.Fatal("expected RunCatchup to surface the phase error")
+		if err := runPass(context.Background(), s, "t1", "c1"); err == nil {
+			t.Fatal("expected the pass to surface the phase error")
 		}
 		got := store.clocks["c1"]
 		if got.Status != domain.TestClockStatusInternalFailed {
@@ -786,8 +736,8 @@ func TestRunCatchup_BindsClockOntoCtx(t *testing.T) {
 	runner := &simCapturingRunner{}
 	s := NewService(store, testDeps(runner))
 
-	if err := s.RunCatchup(context.Background(), "t1", "c1"); err != nil {
-		t.Fatalf("RunCatchup: %v", err)
+	if err := runPass(context.Background(), s, "t1", "c1"); err != nil {
+		t.Fatalf("pass: %v", err)
 	}
 
 	if len(runner.sims) == 0 {
@@ -838,8 +788,8 @@ func TestRunCatchup_ResumesPausesAfterCycleBilling(t *testing.T) {
 	clockDeps := testDeps(rec)
 	clockDeps.Pauses = rec
 	s := NewService(store, clockDeps)
-	if err := s.RunCatchup(context.Background(), "t1", "c1"); err != nil {
-		t.Fatalf("RunCatchup: %v", err)
+	if err := runPass(context.Background(), s, "t1", "c1"); err != nil {
+		t.Fatalf("pass: %v", err)
 	}
 	if got, want := strings.Join(rec.calls, ","), "cycle,resume,threshold"; got != want {
 		t.Errorf("phase order = %s, want %s", got, want)
@@ -848,13 +798,13 @@ func TestRunCatchup_ResumesPausesAfterCycleBilling(t *testing.T) {
 
 // advanceThenCatchUp is what a caller sees from an advance once the
 // testclock_catchup leader has run it: Advance marks the clock, then one
-// catch-up pass (RunCatchup) runs it. It returns the clock after the pass,
+// catch-up pass runs it. It returns the clock after the pass,
 // and the pass's error.
 func advanceThenCatchUp(ctx context.Context, s *Service, tenantID, id string, in AdvanceInput) (domain.TestClock, error) {
 	if _, err := s.Advance(ctx, tenantID, id, in); err != nil {
 		return domain.TestClock{}, err
 	}
-	if err := s.RunCatchup(ctx, tenantID, id); err != nil {
+	if err := runPass(ctx, s, tenantID, id); err != nil {
 		return domain.TestClock{}, err
 	}
 	return s.Get(ctx, tenantID, id)

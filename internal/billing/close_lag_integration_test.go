@@ -9,14 +9,11 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
-	"github.com/gethardcount/hardcount/internal/platform/leader"
-	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/pricing"
 	"github.com/gethardcount/hardcount/internal/subscription"
 	"github.com/gethardcount/hardcount/internal/testclock"
 	"github.com/gethardcount/hardcount/internal/testclock/testclocktest"
-	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/usage"
 )
 
@@ -356,9 +353,7 @@ func TestLateClose_ScheduledResume_TestClock_AdvancePastResume(t *testing.T) {
 	clockDeps := testclocktest.Deps(r.f.engine)
 	clockDeps.Pauses = r.f.subSvc
 	orchestrator := testclock.NewService(clocks, clockDeps)
-	if err := orchestrator.RunCatchup(leadertest.Token(t, testutil.AdminPool(t), r.base, leader.RoleTestClockCatchup), r.f.tenantID, clockID); err != nil {
-		t.Fatalf("catchup: %v", err)
-	}
+	testclocktest.DrainReady(t, orchestrator, r.f.tenantID, clockID)
 	invs, _ := r.liveInvoices(t)
 	wantStatus(t, invoiceFor(t, invs, p0, p1), domain.InvoiceDraft, "collection was paused at P1 (resumes_at P1+30m)")
 	if sub := r.sub(t); sub.PauseCollection != nil {
@@ -542,9 +537,7 @@ func TestTrialFlipAfterResume_TestClock(t *testing.T) {
 	clockDeps.Trials = r.f.subSvc
 	clockDeps.Pauses = r.f.subSvc
 	orchestrator := testclock.NewService(clocks, clockDeps)
-	if err := orchestrator.RunCatchup(leadertest.Token(t, testutil.AdminPool(t), r.base, leader.RoleTestClockCatchup), r.f.tenantID, clockID); err != nil {
-		t.Fatalf("catchup: %v", err)
-	}
+	testclocktest.DrainReady(t, orchestrator, r.f.tenantID, clockID)
 	if sub := r.sub(t); sub.Status != domain.SubscriptionActive {
 		t.Fatalf("status after the advance = %s, want active", sub.Status)
 	}
