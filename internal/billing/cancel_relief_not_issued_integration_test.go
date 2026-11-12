@@ -139,10 +139,9 @@ func TestCancel_ReliefNotIssued_OnATestClock_TheAdvanceChargesNetOfTheRelief(t *
 
 	// The next Advance's catch-up.
 	execBypassOnce(t, db, `UPDATE test_clocks SET status = 'advancing' WHERE id = $1`, clockID)
-	orchestrator := testclock.NewService(clocks)
-	orchestrator.SetBillingRunner(r.engine)
+	orchestrator := testclock.NewService(clocks, r.engine)
 	orchestrator.SetClawbackRetrier(r.cn)
-	if err := orchestrator.RunCatchup(leadertest.Token(t, testutil.AdminPool(t), r.ctx, leader.RoleTestClockCatchup), testclock.CatchupJob{TenantID: r.tenantID, ClockID: clockID}); err != nil {
+	if err := orchestrator.RunCatchup(leadertest.Token(t, testutil.AdminPool(t), r.ctx, leader.RoleTestClockCatchup), r.tenantID, clockID); err != nil {
 		t.Fatalf("catch-up: %v", err)
 	}
 

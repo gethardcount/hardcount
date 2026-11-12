@@ -151,11 +151,10 @@ func TestCatchup_CreditExpiryRunsAfterDunningRetries_RealStore(t *testing.T) {
 				{err: stripeDeclined("pi_goodwill_3", "insufficient_funds", "Your card has insufficient funds.")},
 			}
 
-			clocks := testclock.NewService(testclock.NewPostgresStore(r.db))
-			clocks.SetBillingRunner(noBillingRunner{})
+			clocks := testclock.NewService(testclock.NewPostgresStore(r.db), noBillingRunner{})
 			clocks.SetCreditExpirer(credits)
 			clocks.SetDunning(dunningSvc)
-			if err := clocks.RunCatchup(leadertest.Token(t, testutil.AdminPool(t), r.ctx, leader.RoleTestClockCatchup), testclock.CatchupJob{TenantID: r.tenantID, ClockID: clockID}); err != nil {
+			if err := clocks.RunCatchup(leadertest.Token(t, testutil.AdminPool(t), r.ctx, leader.RoleTestClockCatchup), r.tenantID, clockID); err != nil {
 				t.Fatalf("catchup: %v", err)
 			}
 

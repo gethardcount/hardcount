@@ -52,8 +52,9 @@ type TestClock struct {
 	// The dashboard shows it as a "Last advance results" card once the clock
 	// polls back to status='ready'. So the operator sees what an advance did
 	// without searching the Invoices, Audit and Dunning pages. It is nil
-	// until the clock has been advanced with billing wired. Each advance
-	// overwrites it, whether the advance succeeded or partly failed.
+	// until the clock is first advanced. MarkAdvancing restarts it with
+	// AdvancedFrom alone; the catch-up's completing or failing write fills
+	// in the rest.
 	LastAdvanceSummary *AdvanceSummary `json:"last_advance_summary,omitempty"`
 }
 
@@ -65,10 +66,10 @@ type TestClock struct {
 // the clock row.
 type AdvanceSummary struct {
 	// AdvancedFrom and AdvancedTo are the simulated frozen-time span this
-	// advance covered (AdvancedTo is the new frozen_time). On a retry of a
-	// failed advance the two can be equal, because the original "from" was
-	// lost when the failed advance overwrote frozen_time. The dashboard then
-	// shows only the destination.
+	// advance covered (AdvancedTo is the new frozen_time). AdvancedFrom is
+	// the clock's time before the advance, stored by MarkAdvancing, so a
+	// retried or resumed advance keeps it. A summary from an earlier release
+	// may hold AdvancedTo or the zero time there.
 	AdvancedFrom time.Time `json:"advanced_from"`
 	AdvancedTo   time.Time `json:"advanced_to"`
 	// InvoicesGenerated is the number of cycle/proration invoices the period

@@ -2213,7 +2213,7 @@ func subBillErrors(failures []SubBillError) []error {
 }
 
 // RunCycleForClock bills the due subs attached to ONE test clock, catching
-// each up to the clock's frozen time. Called by the test-clock catchup worker
+// each up to the clock's frozen time. Called by the test-clock catch-up
 // after MarkAdvancing — operator-driven (Advance click), never the wall-clock
 // cron. ADR-028 disjoint flows: this is the ONLY path for clock-pinned
 // billing; the wall-clock RunCycle excludes clock-pinned subs.

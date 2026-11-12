@@ -15,13 +15,16 @@
 /**
  * What the latest advance did: the time span it covered and how many
  * of each billing step it ran. Absent until the clock is first
- * advanced.
+ * advanced. While the clock is `advancing`, it describes the advance
+ * in progress: `advanced_from` only, with the other fields zero until
+ * the advance ends.
  */
 export interface TestClockAdvanceSummary {
   /**
-     * The clock's time before the advance. After a retried advance it
-     * equals `advanced_to`. When the server restarted during the
-     * advance and resumed it, it is `0001-01-01T00:00:00Z`.
+     * The clock's time before the advance, on a retried or resumed
+     * advance too. A summary written by 0.9.3 or earlier may hold
+     * `advanced_to` here (after a retry) or `0001-01-01T00:00:00Z`
+     * (after a restart).
      */
   advanced_from: string;
   /** The clock's time after the advance. */

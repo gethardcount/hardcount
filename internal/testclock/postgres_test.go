@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
-	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -85,8 +84,9 @@ func TestPostgresStore_Delete_HardDeletes_TearsDownPinnedSubs(t *testing.T) {
 
 // TestPostgresStore_AdvanceSummary_RoundTrips locks the last_advance_summary
 // JSONB column + the scan adapter: a never-advanced clock reads back a nil
-// summary; after SaveAdvanceSummary the next Get decodes the stored counts and
-// span exactly; and the advancing → ready transition's RETURNING carries it.
+// summary; MarkAdvancing stores advanced_from; CompleteAdvance stores the
+// summary in its own statement, its RETURNING carries it, and the next Get
+// decodes the stored counts and span exactly.
 func TestPostgresStore_AdvanceSummary_RoundTrips(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	store := testclock.NewPostgresStore(db)
@@ -123,16 +123,9 @@ func TestPostgresStore_AdvanceSummary_RoundTrips(t *testing.T) {
 		DunningAdvanced:   1,
 		CreditsExpired:    3,
 	}
-	b, err := json.Marshal(want)
-	if err != nil {
-		t.Fatalf("marshal: %v", err)
-	}
-	if err := store.SaveAdvanceSummary(ctx, tenantID, clk.ID, b); err != nil {
-		t.Fatalf("save summary: %v", err)
-	}
-
-	// The completing transition's RETURNING reads the summary back.
-	done, err := store.CompleteAdvance(ctx, tenantID, clk.ID)
+	// The completing transition stores the summary, and its RETURNING reads
+	// it back.
+	done, err := store.CompleteAdvance(ctx, tenantID, clk.ID, want)
 	if err != nil {
 		t.Fatalf("complete advance: %v", err)
 	}
@@ -183,7 +176,7 @@ func TestPostgresStore_MarkFailed_ReasonCutInsideACharacter(t *testing.T) {
 
 	// "é" takes bytes 498 and 499, so the 499-byte cut lands inside it.
 	kept := strings.Repeat("a", 498)
-	got, err := store.MarkFailed(ctx, tenantID, clk.ID, kept+"é"+strings.Repeat("b", 100))
+	got, err := store.MarkFailed(ctx, tenantID, clk.ID, kept+"é"+strings.Repeat("b", 100), domain.AdvanceSummary{HadErrors: true})
 	if err != nil {
 		t.Fatalf("mark failed: %v", err)
 	}

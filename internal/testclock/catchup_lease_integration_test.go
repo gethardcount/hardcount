@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
@@ -54,16 +55,17 @@ func TestCatchupWrites_FencedOnTheLease(t *testing.T) {
 	deposed := leadertest.Token(t, admin, base, leader.RoleTestClockCatchup)
 	current := leadertest.Token(t, admin, base, leader.RoleTestClockCatchup) // takes the role over
 
-	if err := store.SaveAdvanceSummary(deposed, tenantID, clk.ID, []byte(`{"invoices_generated": 9}`)); !errors.Is(err, testclock.ErrCatchupFenceLost) {
-		t.Errorf("deposed SaveAdvanceSummary: %v, want ErrCatchupFenceLost", err)
+	late := domain.AdvanceSummary{InvoicesGenerated: 9}
+	if err := store.TouchAdvancing(deposed, tenantID, clk.ID); !errors.Is(err, testclock.ErrCatchupFenceLost) {
+		t.Errorf("deposed TouchAdvancing: %v, want ErrCatchupFenceLost", err)
 	}
-	if _, err := store.MarkFailed(deposed, tenantID, clk.ID, "deposed"); !errors.Is(err, testclock.ErrCatchupFenceLost) {
+	if _, err := store.MarkFailed(deposed, tenantID, clk.ID, "deposed", late); !errors.Is(err, testclock.ErrCatchupFenceLost) {
 		t.Errorf("deposed MarkFailed: %v, want ErrCatchupFenceLost", err)
 	}
-	if _, err := store.CompleteAdvance(deposed, tenantID, clk.ID); !errors.Is(err, testclock.ErrCatchupFenceLost) {
+	if _, err := store.CompleteAdvance(deposed, tenantID, clk.ID, late); !errors.Is(err, testclock.ErrCatchupFenceLost) {
 		t.Errorf("deposed CompleteAdvance: %v, want ErrCatchupFenceLost", err)
 	}
-	if _, err := store.CompleteAdvance(base, tenantID, clk.ID); !errors.Is(err, leader.ErrNoToken) {
+	if _, err := store.CompleteAdvance(base, tenantID, clk.ID, late); !errors.Is(err, leader.ErrNoToken) {
 		t.Errorf("CompleteAdvance with no lease: %v, want leader.ErrNoToken", err)
 	}
 
@@ -78,7 +80,7 @@ func TestCatchupWrites_FencedOnTheLease(t *testing.T) {
 		t.Errorf("summary after the deposed write: %+v, want MarkAdvancing's (advanced_from %s, no counts)", got.LastAdvanceSummary, leaseFrom)
 	}
 
-	done, err := store.CompleteAdvance(current, tenantID, clk.ID)
+	done, err := store.CompleteAdvance(current, tenantID, clk.ID, domain.AdvanceSummary{AdvancedFrom: leaseFrom, AdvancedTo: leaseTarget})
 	if err != nil || done.Status != domain.TestClockStatusReady {
 		t.Fatalf("current leader's CompleteAdvance: %v status %q, want ready", err, done.Status)
 	}
@@ -97,17 +99,18 @@ func TestCatchupWrites_ClockNoLongerAdvancing(t *testing.T) {
 
 	t.Run("completed", func(t *testing.T) {
 		clk := advancingClock(t, store, base, tenantID, "completed")
-		if _, err := store.CompleteAdvance(ctx, tenantID, clk.ID); err != nil {
+		late := domain.AdvanceSummary{InvoicesGenerated: 9}
+		if _, err := store.CompleteAdvance(ctx, tenantID, clk.ID, domain.AdvanceSummary{AdvancedFrom: leaseFrom, AdvancedTo: leaseTarget}); err != nil {
 			t.Fatalf("complete: %v", err)
 		}
-		if _, err := store.CompleteAdvance(ctx, tenantID, clk.ID); !errors.Is(err, testclock.ErrClockNoLongerAdvancing) {
+		if _, err := store.CompleteAdvance(ctx, tenantID, clk.ID, late); !errors.Is(err, testclock.ErrClockNoLongerAdvancing) {
 			t.Errorf("second CompleteAdvance: %v, want ErrClockNoLongerAdvancing", err)
 		}
-		if _, err := store.MarkFailed(ctx, tenantID, clk.ID, "late"); !errors.Is(err, testclock.ErrClockNoLongerAdvancing) {
+		if _, err := store.MarkFailed(ctx, tenantID, clk.ID, "late", late); !errors.Is(err, testclock.ErrClockNoLongerAdvancing) {
 			t.Errorf("MarkFailed on a ready clock: %v, want ErrClockNoLongerAdvancing", err)
 		}
-		if err := store.SaveAdvanceSummary(ctx, tenantID, clk.ID, []byte(`{"invoices_generated": 9}`)); !errors.Is(err, testclock.ErrClockNoLongerAdvancing) {
-			t.Errorf("SaveAdvanceSummary on a ready clock: %v, want ErrClockNoLongerAdvancing", err)
+		if err := store.TouchAdvancing(ctx, tenantID, clk.ID); !errors.Is(err, testclock.ErrClockNoLongerAdvancing) {
+			t.Errorf("TouchAdvancing on a ready clock: %v, want ErrClockNoLongerAdvancing", err)
 		}
 		got, err := store.Get(base, tenantID, clk.ID)
 		if err != nil || got.Status != domain.TestClockStatusReady || got.LastFailureReason != "" || got.LastAdvanceSummary.InvoicesGenerated != 0 {
@@ -120,7 +123,7 @@ func TestCatchupWrites_ClockNoLongerAdvancing(t *testing.T) {
 		if err := store.Delete(base, tenantID, clk.ID); err != nil {
 			t.Fatalf("delete: %v", err)
 		}
-		if _, err := store.CompleteAdvance(ctx, tenantID, clk.ID); !errors.Is(err, testclock.ErrClockNoLongerAdvancing) {
+		if _, err := store.CompleteAdvance(ctx, tenantID, clk.ID, domain.AdvanceSummary{}); !errors.Is(err, testclock.ErrClockNoLongerAdvancing) {
 			t.Errorf("CompleteAdvance on a deleted clock: %v, want ErrClockNoLongerAdvancing", err)
 		}
 	})
@@ -194,25 +197,23 @@ func TestRunCatchup_DeposedLeaderChangesNothing(t *testing.T) {
 	base := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Catchup Deposed")
 	clk := advancingClock(t, store, base, tenantID, "two leaders")
-	job := testclock.CatchupJob{TenantID: tenantID, ClockID: clk.ID}
 
 	deposed := leadertest.Token(t, admin, base, leader.RoleTestClockCatchup)
 	current := leadertest.Token(t, admin, base, leader.RoleTestClockCatchup)
 
-	failing := testclock.NewService(store)
-	failing.SetBillingRunner(failingRunner{})
-	if err := failing.RunCatchup(deposed, job); err != nil {
+	failing := testclock.NewService(store, failingRunner{})
+	if err := failing.RunCatchup(deposed, tenantID, clk.ID); err != nil {
 		t.Errorf("deposed failing pass: %v, want nil (its MarkFailed misses the fence)", err)
 	}
-	completing := testclock.NewService(store) // no billing: the pass is just CompleteAdvance
-	if err := completing.RunCatchup(deposed, job); err != nil {
+	completing := testclock.NewService(store, countingClockRunner{})
+	if err := completing.RunCatchup(deposed, tenantID, clk.ID); err != nil {
 		t.Errorf("deposed completing pass: %v, want nil (its CompleteAdvance misses the fence)", err)
 	}
 	if got, _ := store.Get(base, tenantID, clk.ID); got.Status != domain.TestClockStatusAdvancing || got.LastFailureReason != "" {
 		t.Fatalf("after the deposed passes: status %q reason %q, want advancing and no reason", got.Status, got.LastFailureReason)
 	}
 
-	if err := completing.RunCatchup(current, job); err != nil {
+	if err := completing.RunCatchup(current, tenantID, clk.ID); err != nil {
 		t.Fatalf("current leader's pass: %v", err)
 	}
 	if got, _ := store.Get(base, tenantID, clk.ID); got.Status != domain.TestClockStatusReady {
@@ -255,9 +256,8 @@ func TestRunCatchup_ClockTurnsReadyUnderThePass(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, db, "Catchup Overlap")
 	clk := advancingClock(t, store, base, tenantID, "overlap")
 
-	svc := testclock.NewService(store)
-	svc.SetBillingRunner(readyUnderPassRunner{admin: admin, clockID: clk.ID})
-	if err := svc.RunCatchup(ctx, testclock.CatchupJob{TenantID: tenantID, ClockID: clk.ID}); err != nil {
+	svc := testclock.NewService(store, readyUnderPassRunner{admin: admin, clockID: clk.ID})
+	if err := svc.RunCatchup(ctx, tenantID, clk.ID); err != nil {
 		t.Fatalf("RunCatchup: %v, want nil (the clock was completed under it)", err)
 	}
 	got, err := store.Get(base, tenantID, clk.ID)
@@ -286,9 +286,8 @@ func (countingClockRunner) ScanThresholdsForClock(context.Context, string, strin
 }
 
 // TestRunAdvancing_RetryKeepsAdvancedFrom: an advance that failed and is
-// retried, then run by the tick, still reports the span from the time before
-// the advance — not the target (what the queue job carried on a Retry) and
-// not zero (what it carried after a restart).
+// retried, then run by the tick, reports the span from the clock's time
+// before the advance to the target.
 func TestRunAdvancing_RetryKeepsAdvancedFrom(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	store := testclock.NewPostgresStore(db)
@@ -297,11 +296,10 @@ func TestRunAdvancing_RetryKeepsAdvancedFrom(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, db, "Catchup Retry")
 	clk := advancingClock(t, store, base, tenantID, "retried")
 
-	if _, err := store.MarkFailed(ctx, tenantID, clk.ID, "first try failed"); err != nil {
+	if _, err := store.MarkFailed(ctx, tenantID, clk.ID, "first try failed", domain.AdvanceSummary{AdvancedFrom: leaseFrom, AdvancedTo: leaseTarget, HadErrors: true}); err != nil {
 		t.Fatalf("mark failed: %v", err)
 	}
-	svc := testclock.NewService(store)
-	svc.SetBillingRunner(countingClockRunner{})
+	svc := testclock.NewService(store, countingClockRunner{})
 	if _, err := svc.RetryAdvance(base, tenantID, clk.ID); err != nil {
 		t.Fatalf("retry advance: %v", err)
 	}
@@ -318,5 +316,113 @@ func TestRunAdvancing_RetryKeepsAdvancedFrom(t *testing.T) {
 	sum := got.LastAdvanceSummary
 	if sum == nil || !sum.AdvancedFrom.Equal(leaseFrom) || !sum.AdvancedTo.Equal(leaseTarget) || sum.InvoicesGenerated != 2 {
 		t.Errorf("summary %+v, want %s → %s with 2 invoices", sum, leaseFrom, leaseTarget)
+	}
+}
+
+// leaseLossRunner's billing phase reports that the pass started, then waits
+// for the pass's context to end and records why.
+type leaseLossRunner struct {
+	once    sync.Once
+	started chan struct{}
+	cause   chan error
+}
+
+func (r *leaseLossRunner) RunCycleForClock(ctx context.Context, _, _ string, _ int) (int, []error) {
+	r.once.Do(func() { close(r.started) })
+	select {
+	case <-ctx.Done():
+		select {
+		case r.cause <- context.Cause(ctx):
+		default:
+		}
+		return 0, []error{ctx.Err()}
+	case <-time.After(30 * time.Second):
+		return 0, []error{errors.New("the pass's context never ended")}
+	}
+}
+func (*leaseLossRunner) RetryPendingChargesForClock(context.Context, string, string, int) (int, []error) {
+	return 0, nil
+}
+func (*leaseLossRunner) ScanThresholdsForClock(context.Context, string, string, int) (int, []error) {
+	return 0, nil
+}
+
+// TestCatchupTick_LeaseLostMidPass: a real leader gate leads the tick, and
+// mid-pass another holder takes the role over. The heartbeat cancels the
+// pass's context with leader.ErrLeaseLost, the pass writes nothing, and the
+// clock stays advancing. The next leader completes it once.
+func TestCatchupTick_LeaseLostMidPass(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	admin := testutil.AdminPool(t)
+	store := testclock.NewPostgresStore(db)
+	base := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "Catchup Lease Lost")
+	clk := advancingClock(t, store, base, tenantID, "lease lost")
+	markedAt := clk.UpdatedAt
+
+	runner := &leaseLossRunner{started: make(chan struct{}), cause: make(chan error, 1)}
+	svc := testclock.NewService(store, runner)
+	gate := leader.New(db.Pool, nil)
+	led := make(chan error, 1)
+	go func() {
+		ok, err := gate.Lead(context.Background(), leader.RoleTestClockCatchup, time.Second, svc.CatchupTick)
+		if err == nil && !ok {
+			err = errors.New("the gate did not lead the role")
+		}
+		led <- err
+	}()
+
+	select {
+	case <-runner.started:
+	case err := <-led:
+		t.Fatalf("the tick ended before its pass started: %v", err)
+	case <-time.After(30 * time.Second):
+		t.Fatal("the pass never started")
+	}
+	successor := leadertest.Token(t, admin, base, leader.RoleTestClockCatchup)
+
+	select {
+	case cause := <-runner.cause:
+		if !errors.Is(cause, leader.ErrLeaseLost) {
+			t.Errorf("the pass's context ended with %v, want leader.ErrLeaseLost", cause)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("the pass's context did not end after the takeover")
+	}
+	select {
+	case err := <-led:
+		if err != nil {
+			t.Fatalf("lead: %v", err)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("the tick did not return after the takeover")
+	}
+
+	got, err := store.Get(base, tenantID, clk.ID)
+	if err != nil {
+		t.Fatalf("get clock: %v", err)
+	}
+	if got.Status != domain.TestClockStatusAdvancing || got.LastFailureReason != "" {
+		t.Fatalf("after the lost lease: status %q reason %q, want advancing and no reason", got.Status, got.LastFailureReason)
+	}
+	if got.LastAdvanceSummary == nil || !got.LastAdvanceSummary.AdvancedTo.IsZero() {
+		t.Errorf("summary after the lost lease = %+v, want MarkAdvancing's (the pass wrote nothing)", got.LastAdvanceSummary)
+	}
+	// The pass moved the clock to the back of the claim list when it began,
+	// so a pass that keeps being cut off does not hold up other clocks.
+	if !got.UpdatedAt.After(markedAt) {
+		t.Errorf("updated_at %s not after the advance's %s: the cut-off pass left the clock at the head of the list", got.UpdatedAt, markedAt)
+	}
+
+	next := testclock.NewService(store, countingClockRunner{})
+	if err := next.RunCatchup(successor, tenantID, clk.ID); err != nil {
+		t.Fatalf("the next leader's pass: %v", err)
+	}
+	got, err = store.Get(base, tenantID, clk.ID)
+	if err != nil {
+		t.Fatalf("get clock: %v", err)
+	}
+	if got.Status != domain.TestClockStatusReady || got.LastAdvanceSummary == nil || got.LastAdvanceSummary.InvoicesGenerated != 2 {
+		t.Errorf("after the next leader: status %q summary %+v, want ready with its 2 invoices", got.Status, got.LastAdvanceSummary)
 	}
 }

@@ -4,7 +4,7 @@ package testclock
 // advancing clock skipped. It is a leader-leased role, testclock_catchup
 // (ADR-140, ADR-114): one replica at a time runs it, on a tick, and every
 // write it makes to a clock row proves the role's fence. Advance and Retry
-// advance only mark the clock; the leader picks it up within a tick. A
+// advance only mark the clock; the leader runs it on a later tick. A
 // process that stops mid-pass leaves the clock advancing, and the next
 // leader runs the pass again: every phase is safe to repeat (its own
 // compare-and-set guards), which is what a repeated pass relies on.
@@ -20,29 +20,24 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/scheduler"
 )
 
-// CatchupJob names one clock's catch-up: its tenant and its id.
-type CatchupJob struct {
-	TenantID string
-	ClockID  string
-}
-
 const (
 	// CatchupTickInterval is the testclock_catchup role's cadence. The
-	// runner polls at min(interval, leader.MaxPoll), so an advance starts
-	// within about one interval of Advance marking the clock, or after the
-	// leader's current tick. A tick with no advancing clock is one fenced
+	// runner polls at min(interval, leader.MaxPoll). An advance starts
+	// within about one interval when no other catch-up is running;
+	// otherwise it waits for the passes ahead of it, each up to
+	// CatchupPassDeadline. A tick with no advancing clock is one fenced
 	// SELECT.
 	CatchupTickInterval = 2 * time.Second
 
 	// CatchupPassDeadline bounds one catch-up pass on one clock. A pass that
 	// has not finished by then ends the advance in internal_failure, with a
 	// reason that names the clock's time, and Retry advance runs it again.
-	// The pass still covers the whole advance (one pass at the new time), so
-	// this is the queue worker's old whole-run bound.
+	// One pass covers the whole advance, so it is generous.
 	CatchupPassDeadline = 10 * time.Minute
 
 	// catchupClocksPerTick caps how many clocks one tick works. The rest
-	// wait for the next tick, which starts with the one touched longest ago.
+	// wait for the next tick, which starts with the one whose pass started
+	// longest ago.
 	catchupClocksPerTick = 20
 )
 

@@ -19,8 +19,8 @@ const maxTicks = 5
 
 // Drain runs the catch-up until no test clock is advancing, on a ctx that
 // holds the testclock_catchup lease (leadertest.Token). Advance and Retry
-// advance only mark a clock; a test calls Drain right after one, where the
-// advance used to finish inline. svc must be the service the advance went
+// advance only mark a clock; a test calls Drain right after one to run the
+// catch-up as the leader would. svc must be the service the advance went
 // through, so the catch-up runs with the same phases wired. The claim list
 // spans every tenant, as the leader's does.
 func Drain(t *testing.T, svc *testclock.Service) {

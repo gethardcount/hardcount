@@ -17,6 +17,9 @@ catch-up: the holder of the `testclock_catchup` role, on a 2-second tick
 - **The catch-up is working through many cycles.** A large jump on a
   monthly subscription can need dozens of billing passes. One pass may run
   for up to 10 minutes; a longer one ends the advance in `internal_failure`.
+  The role runs one clock at a time, so an advance can also wait for other
+  clocks' passes. While it does, the role's stall alert
+  (`hardcount_leader_last_tick_age_seconds`) can fire with nothing wrong.
 - **Billing failed during the catch-up.** The clock then moves to
   `internal_failure`, with the reason in the dashboard's banner.
 - **The `testclock_catchup` role is not running:** it was paused, or no

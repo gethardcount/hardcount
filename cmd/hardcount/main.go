@@ -165,9 +165,9 @@ func serve() {
 	db := postgres.NewDB(appPool, cfg.DB.QueryTimeout)
 
 	// Leader gate (ADR-114). Each singleton loop (billing, dunning, the two
-	// outbox dispatchers and webhook delivery retry) runs one tick at a time
-	// under a lease in leader_leases. Each role's claim statement re-checks
-	// the lease token in SQL. Every statement stands alone, so the gate is
+	// outbox dispatchers, webhook delivery retry and the test-clock catch-up)
+	// runs one tick at a time under a lease in leader_leases. Each role's
+	// claim statement re-checks the lease token in SQL. Every statement stands alone, so the gate is
 	// safe behind a transaction-mode pooler.
 	gate := leader.New(appPool, func(role leader.Role, reason string) {
 		mw.RecordLeaderLeaseLost(string(role), reason)
@@ -314,10 +314,9 @@ func serve() {
 		server.WebhookOutSvc.StartRetryWorker(ctx, 30*time.Second, gate)
 	}()
 	// The test-clock catch-up (ADR-140): the work that fell due in the time an
-	// advancing test clock skipped. A leader-leased role like the others, so
-	// it always runs, whatever the scheduler's settings: an advance would
-	// otherwise never finish. A shutdown mid-pass leaves the clock advancing,
-	// and the next leader runs the pass again.
+	// advancing test clock skipped. A leader-leased role like the others; it
+	// starts beside billing.Scheduler, not inside it. A shutdown mid-pass
+	// leaves the clock advancing, and the next leader runs the pass again.
 	go func() {
 		defer workers.Done()
 		server.TestClockSvc.RunCatchupLoop(ctx, gate)

@@ -2,7 +2,6 @@ package testclock
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"os"
 	"strings"
@@ -43,7 +42,7 @@ func TestListAttachedCustomers_RoutesThroughCustomerReader(t *testing.T) {
 	reader := &fakeCustomerReader{returns: []domain.Customer{
 		{ID: "cus_1", TenantID: "t1", DisplayName: "Smoke Corp"},
 	}}
-	svc := NewService(store)
+	svc := NewService(store, &countingRunner{})
 	svc.SetCustomerReader(reader)
 
 	got, _, err := svc.ListAttachedCustomers(context.Background(), "t1", "c1", 50, 0)
@@ -69,7 +68,7 @@ func TestListAttachedCustomers_FailsLoudWithoutReader(t *testing.T) {
 	store := newMockStore()
 	store.clocks["c1"] = domain.TestClock{ID: "c1", TenantID: "t1", Status: domain.TestClockStatusReady}
 
-	svc := NewService(store) // no SetCustomerReader
+	svc := NewService(store, &countingRunner{}) // no SetCustomerReader
 	_, _, err := svc.ListAttachedCustomers(context.Background(), "t1", "c1", 50, 0)
 	if err == nil {
 		t.Fatal("expected error when CustomerReader is unwired; got nil")
@@ -77,7 +76,7 @@ func TestListAttachedCustomers_FailsLoudWithoutReader(t *testing.T) {
 }
 
 func TestCreate_RequiresFrozenTime(t *testing.T) {
-	s := NewService(newMockStore())
+	s := NewService(newMockStore(), &countingRunner{})
 	_, err := s.Create(context.Background(), "t1", CreateInput{Name: "jan 1"})
 	if err == nil {
 		t.Fatal("expected error for zero frozen_time")
@@ -88,7 +87,7 @@ func TestCreate_RequiresFrozenTime(t *testing.T) {
 }
 
 func TestCreate_RejectsLongName(t *testing.T) {
-	s := NewService(newMockStore())
+	s := NewService(newMockStore(), &countingRunner{})
 	longName := make([]byte, 201)
 	for i := range longName {
 		longName[i] = 'x'
@@ -104,7 +103,7 @@ func TestCreate_RejectsLongName(t *testing.T) {
 
 func TestCreate_Succeeds(t *testing.T) {
 	store := newMockStore()
-	s := NewService(store)
+	s := NewService(store, &countingRunner{})
 	now := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 
 	clk, err := s.Create(context.Background(), "t1", CreateInput{
@@ -133,7 +132,7 @@ func TestAdvance_RejectsNonReadyClock(t *testing.T) {
 		Status:     domain.TestClockStatusAdvancing,
 		FrozenTime: time.Now(),
 	}
-	s := NewService(store)
+	s := NewService(store, &countingRunner{})
 
 	_, err := s.Advance(context.Background(), "t1", "c1", AdvanceInput{
 		FrozenTime: time.Now().Add(24 * time.Hour),
@@ -152,7 +151,7 @@ func TestAdvance_RejectsBackwardTime(t *testing.T) {
 		Status:     domain.TestClockStatusReady,
 		FrozenTime: now,
 	}
-	s := NewService(store)
+	s := NewService(store, &countingRunner{})
 
 	_, err := s.Advance(context.Background(), "t1", "c1", AdvanceInput{
 		FrozenTime: now.Add(-time.Hour),
@@ -188,7 +187,7 @@ func TestAdvance_RejectsAdvanceOverOneYear(t *testing.T) {
 			store.clocks["c1"] = domain.TestClock{
 				ID: "c1", TenantID: "t1", Status: domain.TestClockStatusReady, FrozenTime: start,
 			}
-			s := NewService(store)
+			s := NewService(store, &countingRunner{})
 			_, err := s.Advance(context.Background(), "t1", "c1", AdvanceInput{FrozenTime: tc.newTime})
 
 			if tc.wantErr {
@@ -234,8 +233,7 @@ func TestAdvance_RunsBillingUntilQuiet(t *testing.T) {
 		subID:    "s1",
 		cycleDur: 30 * 24 * time.Hour,
 	}
-	s := NewService(store)
-	s.SetBillingRunner(runner)
+	s := NewService(store, runner)
 
 	clk, err := advanceThenCatchUp(context.Background(), s, "t1", "c1", AdvanceInput{FrozenTime: newTime})
 	if err != nil {
@@ -261,8 +259,9 @@ func TestAdvance_RunsBillingUntilQuiet(t *testing.T) {
 }
 
 // TestAdvance_OnlyMarksTheClock: Advance marks the clock advancing at the new
-// time, records where the advance starts from, and returns. It does not run
-// the catch-up: the testclock_catchup leader does, on its tick (ADR-140).
+// time and returns. It does not run the catch-up: the testclock_catchup
+// leader does, on its tick (ADR-140). Where the advance starts from is the
+// store's (TestPostgresStore_AdvanceSummary_RoundTrips).
 func TestAdvance_OnlyMarksTheClock(t *testing.T) {
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	newTime := start.Add(60 * 24 * time.Hour)
@@ -272,8 +271,7 @@ func TestAdvance_OnlyMarksTheClock(t *testing.T) {
 		ID: "c1", TenantID: "t1", Status: domain.TestClockStatusReady, FrozenTime: start,
 	}
 	runner := &countingRunner{}
-	s := NewService(store)
-	s.SetBillingRunner(runner)
+	s := NewService(store, runner)
 
 	clk, err := s.Advance(context.Background(), "t1", "c1", AdvanceInput{FrozenTime: newTime})
 	if err != nil {
@@ -284,9 +282,6 @@ func TestAdvance_OnlyMarksTheClock(t *testing.T) {
 	}
 	if !clk.FrozenTime.Equal(newTime) {
 		t.Errorf("frozen_time: got %v, want %v", clk.FrozenTime, newTime)
-	}
-	if clk.LastAdvanceSummary == nil || !clk.LastAdvanceSummary.AdvancedFrom.Equal(start) {
-		t.Errorf("advanced_from: got %+v, want %v", clk.LastAdvanceSummary, start)
 	}
 	if runner.cycleCalls != 0 {
 		t.Errorf("Advance ran the billing cycle %d times, want 0: the catch-up is the leader's", runner.cycleCalls)
@@ -307,7 +302,7 @@ func TestRetryAdvance_ResumesFromInternalFailure(t *testing.T) {
 		FrozenTime:        time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
 		LastFailureReason: "stripe tax: provider 503",
 	}
-	s := NewService(store)
+	s := NewService(store, &countingRunner{})
 
 	clk, err := s.RetryAdvance(context.Background(), "t1", "c1")
 	if err != nil {
@@ -333,7 +328,7 @@ func TestRetryAdvance_RefusesNonFailedClock(t *testing.T) {
 				ID: "c1", TenantID: "t1", Status: status,
 				FrozenTime: time.Now(),
 			}
-			s := NewService(store)
+			s := NewService(store, &countingRunner{})
 			_, err := s.RetryAdvance(context.Background(), "t1", "c1")
 			if err == nil {
 				t.Fatalf("expected error retrying from %s", status)
@@ -364,8 +359,7 @@ func TestAdvance_FailurePersistsReason(t *testing.T) {
 		store: store, clockID: "c1", subID: "s1",
 		err: errors.New("stripe tax: 503 service unavailable"),
 	}
-	s := NewService(store)
-	s.SetBillingRunner(runner)
+	s := NewService(store, runner)
 	_, err := advanceThenCatchUp(context.Background(), s, "t1", "c1", AdvanceInput{FrozenTime: newTime})
 	if err == nil {
 		t.Fatal("expected advance to fail")
@@ -393,8 +387,7 @@ func TestRunAdvancing_RunsEachAdvancingClock(t *testing.T) {
 	store.clocks["c3"] = domain.TestClock{
 		ID: "c3", TenantID: "t3", Status: domain.TestClockStatusReady, FrozenTime: at,
 	}
-	s := NewService(store)
-	s.SetBillingRunner(&countingRunner{})
+	s := NewService(store, &countingRunner{})
 
 	worked, err := s.RunAdvancing(context.Background())
 	if err != nil {
@@ -429,8 +422,7 @@ func TestAdvance_BillingFailureMarksClockFailed(t *testing.T) {
 		subID:   "s1",
 		err:     errors.New("boom"),
 	}
-	s := NewService(store)
-	s.SetBillingRunner(runner)
+	s := NewService(store, runner)
 
 	_, err := advanceThenCatchUp(context.Background(), s, "t1", "c1", AdvanceInput{
 		FrozenTime: start.Add(30 * 24 * time.Hour),
@@ -469,8 +461,7 @@ func TestAdvance_InjectFailureEnv(t *testing.T) {
 	// the billing path, so a successful runner can't hide a missed
 	// injection.
 	runner := &stubRunner{store: store, clockID: "c1", subID: "s1"}
-	s := NewService(store)
-	s.SetBillingRunner(runner)
+	s := NewService(store, runner)
 
 	_, err := advanceThenCatchUp(context.Background(), s, "t1", "c1", AdvanceInput{
 		FrozenTime: start.Add(30 * 24 * time.Hour),
@@ -484,6 +475,9 @@ func TestAdvance_InjectFailureEnv(t *testing.T) {
 	if store.clocks["c1"].Status != domain.TestClockStatusInternalFailed {
 		t.Errorf("clock status: got %q, want internal_failure",
 			store.clocks["c1"].Status)
+	}
+	if sum := store.clocks["c1"].LastAdvanceSummary; sum == nil || !sum.HadErrors || sum.AdvancedTo.IsZero() {
+		t.Errorf("summary after the injected failure = %+v, want advanced_to and had_errors", sum)
 	}
 	// One-shot: env cleared so retry would see clean state.
 	if v := os.Getenv("HARDCOUNT_TEST_CLOCK_INJECT_FAILURE"); v != "" {
@@ -548,13 +542,20 @@ func (m *mockStore) MarkAdvancing(_ context.Context, _, id string, newFrozenTime
 		return domain.TestClock{}, errs.InvalidState("not ready")
 	}
 	c.Status = domain.TestClockStatusAdvancing
-	c.LastAdvanceSummary = &domain.AdvanceSummary{AdvancedFrom: c.FrozenTime}
 	c.FrozenTime = newFrozenTime
 	m.clocks[id] = c
 	return c, nil
 }
 
-func (m *mockStore) CompleteAdvance(_ context.Context, _, id string) (domain.TestClock, error) {
+func (m *mockStore) TouchAdvancing(_ context.Context, _, id string) error {
+	c, ok := m.clocks[id]
+	if !ok || c.Status != domain.TestClockStatusAdvancing {
+		return ErrClockNoLongerAdvancing
+	}
+	return nil
+}
+
+func (m *mockStore) CompleteAdvance(_ context.Context, _, id string, sum domain.AdvanceSummary) (domain.TestClock, error) {
 	c, ok := m.clocks[id]
 	if !ok {
 		return domain.TestClock{}, errs.ErrNotFound
@@ -564,33 +565,21 @@ func (m *mockStore) CompleteAdvance(_ context.Context, _, id string) (domain.Tes
 	}
 	c.Status = domain.TestClockStatusReady
 	c.LastFailureReason = ""
+	c.LastAdvanceSummary = &sum
 	m.clocks[id] = c
 	return c, nil
 }
 
-func (m *mockStore) MarkFailed(_ context.Context, _, id, reason string) (domain.TestClock, error) {
+func (m *mockStore) MarkFailed(_ context.Context, _, id, reason string, sum domain.AdvanceSummary) (domain.TestClock, error) {
 	c, ok := m.clocks[id]
 	if !ok {
 		return domain.TestClock{}, errs.ErrNotFound
 	}
 	c.Status = domain.TestClockStatusInternalFailed
 	c.LastFailureReason = reason
+	c.LastAdvanceSummary = &sum
 	m.clocks[id] = c
 	return c, nil
-}
-
-func (m *mockStore) SaveAdvanceSummary(_ context.Context, _, id string, summaryJSON []byte) error {
-	c, ok := m.clocks[id]
-	if !ok {
-		return errs.ErrNotFound
-	}
-	var s domain.AdvanceSummary
-	if err := json.Unmarshal(summaryJSON, &s); err != nil {
-		return err
-	}
-	c.LastAdvanceSummary = &s
-	m.clocks[id] = c
-	return nil
 }
 
 func (m *mockStore) RetryFromFailed(_ context.Context, _, id string) (domain.TestClock, error) {
@@ -658,11 +647,9 @@ func TestRunCatchup_RecordsAdvanceSummary(t *testing.T) {
 			ID: "c1", TenantID: "t1", Status: domain.TestClockStatusAdvancing, FrozenTime: to,
 			LastAdvanceSummary: &domain.AdvanceSummary{AdvancedFrom: from}, // as MarkAdvancing leaves it
 		}
-		s := NewService(store)
-		s.SetBillingRunner(&countingRunner{invoices: 3})
+		s := NewService(store, &countingRunner{invoices: 3})
 
-		if err := s.RunCatchup(context.Background(),
-			CatchupJob{TenantID: "t1", ClockID: "c1"}); err != nil {
+		if err := s.RunCatchup(context.Background(), "t1", "c1"); err != nil {
 			t.Fatalf("RunCatchup: %v", err)
 		}
 		got := store.clocks["c1"]
@@ -690,11 +677,9 @@ func TestRunCatchup_RecordsAdvanceSummary(t *testing.T) {
 			ID: "c1", TenantID: "t1", Status: domain.TestClockStatusAdvancing, FrozenTime: to,
 			LastAdvanceSummary: &domain.AdvanceSummary{AdvancedFrom: from},
 		}
-		s := NewService(store)
-		s.SetBillingRunner(&countingRunner{err: errors.New("phase boom")})
+		s := NewService(store, &countingRunner{err: errors.New("phase boom")})
 
-		if err := s.RunCatchup(context.Background(),
-			CatchupJob{TenantID: "t1", ClockID: "c1"}); err == nil {
+		if err := s.RunCatchup(context.Background(), "t1", "c1"); err == nil {
 			t.Fatal("expected RunCatchup to surface the phase error")
 		}
 		got := store.clocks["c1"]
@@ -812,13 +797,10 @@ func TestRunCatchup_BindsClockOntoCtx(t *testing.T) {
 	store.clocks["c1"] = domain.TestClock{
 		ID: "c1", TenantID: "t1", Status: domain.TestClockStatusAdvancing, FrozenTime: frozen,
 	}
-	s := NewService(store)
 	runner := &simCapturingRunner{}
-	s.SetBillingRunner(runner)
+	s := NewService(store, runner)
 
-	if err := s.RunCatchup(context.Background(), CatchupJob{
-		TenantID: "t1", ClockID: "c1",
-	}); err != nil {
+	if err := s.RunCatchup(context.Background(), "t1", "c1"); err != nil {
 		t.Fatalf("RunCatchup: %v", err)
 	}
 
@@ -866,11 +848,10 @@ func TestRunCatchup_ResumesPausesAfterCycleBilling(t *testing.T) {
 	to := time.Date(2026, 2, 1, 0, 45, 0, 0, time.UTC)
 	store := newMockStore()
 	store.clocks["c1"] = domain.TestClock{ID: "c1", TenantID: "t1", Status: domain.TestClockStatusAdvancing, FrozenTime: to}
-	s := NewService(store)
 	rec := &orderRecorder{}
-	s.SetBillingRunner(rec)
+	s := NewService(store, rec)
 	s.SetPauseResumer(rec)
-	if err := s.RunCatchup(context.Background(), CatchupJob{TenantID: "t1", ClockID: "c1"}); err != nil {
+	if err := s.RunCatchup(context.Background(), "t1", "c1"); err != nil {
 		t.Fatalf("RunCatchup: %v", err)
 	}
 	if got, want := strings.Join(rec.calls, ","), "cycle,resume,threshold"; got != want {
@@ -886,7 +867,7 @@ func advanceThenCatchUp(ctx context.Context, s *Service, tenantID, id string, in
 	if _, err := s.Advance(ctx, tenantID, id, in); err != nil {
 		return domain.TestClock{}, err
 	}
-	if err := s.RunCatchup(ctx, CatchupJob{TenantID: tenantID, ClockID: id}); err != nil {
+	if err := s.RunCatchup(ctx, tenantID, id); err != nil {
 		return domain.TestClock{}, err
 	}
 	return s.Get(ctx, tenantID, id)

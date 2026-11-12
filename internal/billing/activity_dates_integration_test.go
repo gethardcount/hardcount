@@ -99,10 +99,9 @@ func TestTrialExpiry_TestClock_ChargeNotBeforeIssue(t *testing.T) {
 	f.subSvc.SetDueBiller(engine)
 	f.subSvc.SetResolver(engine)
 
-	orchestrator := testclock.NewService(clocks)
-	orchestrator.SetBillingRunner(engine)
+	orchestrator := testclock.NewService(clocks, engine)
 	orchestrator.SetTrialExpirer(f.subSvc)
-	if err := orchestrator.RunCatchup(leadertest.Token(t, testutil.AdminPool(t), r.base, leader.RoleTestClockCatchup), testclock.CatchupJob{TenantID: f.tenantID, ClockID: clockID}); err != nil {
+	if err := orchestrator.RunCatchup(leadertest.Token(t, testutil.AdminPool(t), r.base, leader.RoleTestClockCatchup), f.tenantID, clockID); err != nil {
 		t.Fatalf("catchup: %v", err)
 	}
 

@@ -13496,9 +13496,11 @@ export const getAdvanceTestClockUrl = (id: string,) => {
  * every customer and subscription attached to it. The call returns
  * 200 as soon as the clock is `advancing`; the catch-up (the billing
  * of everything that fell due in the skipped time) runs in the
- * background and starts within a few seconds. One server at a time
- * runs the catch-ups; if it stops, another server picks the advance
- * up where it was. Poll `GET /v1/test-clocks/{id}` until `status`
+ * background. One server at a time runs the catch-ups, one clock
+ * after another: it starts within a few seconds when no other
+ * catch-up is running, otherwise after the ones ahead of it, each up
+ * to 10 minutes. If that server stops, another one runs the advance
+ * again. Poll `GET /v1/test-clocks/{id}` until `status`
  * leaves `advancing`. While it runs, another advance answers 409. One
  * advance moves the clock at most one year; split a longer span into
  * several advances.
