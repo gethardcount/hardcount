@@ -18,7 +18,7 @@ import (
 
 // Facts: dates (ADR-128 §5, PR 7). A line Hardcount writes at an instant the
 // contract names is dated at that instant, on both clocks. Each scenario uses
-// the playbook's "one advance, many boundaries" shape: the test clock is
+// the playbook's "one advance, many due times" test: the test clock is
 // advanced to two days past the boundary, so a row dated at the advance
 // instead of its named instant shows up as two days late.
 

@@ -8,6 +8,13 @@
 // providers that support it, Commit at invoice finalize time to durably
 // record the tax decision with the upstream (e.g. create a Stripe
 // tax_transaction from the earlier calculation).
+//
+// Calculate works out the tax and must not write anything outside Hardcount.
+// Commit records the tax at the provider, and Reverse undoes it for a void or
+// a credit note. A write-off reverses no tax (ADR-111). Only stripe_tax has
+// something to record. Each commit or reversal carries a reference built from
+// the invoice or credit-note ID, and Stripe refuses a second record with the
+// same reference.
 package tax
 
 import (
@@ -37,7 +44,7 @@ type Provider interface {
 	Commit(ctx context.Context, calcRef, invoiceID string) (transactionID string, err error)
 
 	// Reverse issues a reversal against a previously committed tax
-	// transaction. Called from the credit note issue path. Providers
+	// transaction. Called for a credit note and for an invoice void. Providers
 	// without durable upstream state (none, manual) return an empty
 	// ReversalResult with no error so the credit note flow can ignore
 	// the outcome without branching on provider name.
@@ -65,7 +72,7 @@ type ReversalRequest struct {
 	// reversal. Stripe requires the reference be globally unique
 	// across all tax_transactions in the account, so callers MUST
 	// supply a value that uniquely identifies the logical reversal
-	// (CN id for credit-note reversals, "inv_void_<id>" for invoice
+	// (CN id for credit-note reversals, "inv_taxrev_<id>" for invoice
 	// void reversals). Retries with the same Reference converge.
 	// Falls back to CreditNoteID when empty for back-compat.
 	Reference string

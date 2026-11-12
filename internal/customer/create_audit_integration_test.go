@@ -21,7 +21,7 @@ import (
 
 // landThenFailEmitter writes the REAL audit row on the caller's tx and then
 // errors. It satisfies customer.AuditEmitter and is the fault injection the
-// playbook's mutation-verify gate demands — landing the row first proves the
+// playbook's test 2 demands — landing the row first proves the
 // audit INSERT is rolled back WITH the business write, not merely that a
 // never-attempted write left nothing behind.
 type landThenFailEmitter struct {

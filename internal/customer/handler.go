@@ -58,7 +58,7 @@ type SentEmailRow struct {
 // SentEmailsLister returns email_outbox rows for a customer (30-day
 // window, newest first). Implemented at the router layer via an
 // adapter over *email.OutboxStore so the customer package doesn't
-// import email (peer-domain rule per CLAUDE.md).
+// import email (the package-boundary rule, docs/architecture.md "Design rules").
 type SentEmailsLister interface {
 	ListByCustomer(ctx context.Context, tenantID, customerID string) ([]SentEmailOutboxRow, error)
 }

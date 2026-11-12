@@ -106,7 +106,7 @@ DLQ.
 > gains a function or method that takes an event type but no `*sql.Tx`. It
 > does not see a hand-rolled `BeginTx` + `Enqueue` + `Commit` with no state
 > write in it; the class B question of the
-> [money-path playbook](../dev/money-path-robustness-playbook.md#4-review-lens--questions-that-independently-re-derive-each-invariant)
+> [money-path playbook](../dev/money-path-robustness-playbook.md#b-half-saved)
 > covers that. `webhook.MustWiredOutbox` refuses to boot when a store that
 > queues events has no outbox, because such a store skips its events.
 >

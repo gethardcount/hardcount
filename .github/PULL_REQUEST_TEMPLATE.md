@@ -1,34 +1,25 @@
-<!-- Thanks for contributing! The checklist mirrors what CI enforces plus
-     the two house rules CI can't check. Delete lines that don't apply. -->
+<!-- Delete what does not apply. -->
 
 ## Linked issue
 
-<!-- Required for anything bigger than a typo or a broken link: an issue a
-     maintainer agreed to. See CONTRIBUTING's "What we accept". -->
+<!-- An issue a maintainer agreed to. A typo or broken link needs none. See CONTRIBUTING, "What we accept". -->
 Closes #
 
-## What & why
+## What changed, why, and how I checked it
 
 ## Checklist
 
-- [ ] It links an issue a maintainer agreed to (not needed for a typo or a broken link)
-- [ ] It is one change, with no unrelated edits
-- [ ] I ran it myself, and the description says how I checked it
-- [ ] I can explain every line; if an AI tool wrote part of it, the description says which part
-- [ ] Tests cover the new behavior (unit; integration too if a store or money path changed)
-- [ ] `go test ./... -race -short -count=1` passes
-- [ ] `make lint` passes (golangci-lint; see CONTRIBUTING's "What CI runs on your PR" for the full gate list)
-- [ ] `CHANGELOG.md` entry added — required for any user-visible change
-- [ ] UI changed? A Playwright spec covers it (`cd web-v2 && npm run test:e2e`), and you looked at a screenshot of the screen
-- [ ] `make gen` re-run — required if `api/openapi.yaml` changed
-- [ ] Frontend touched? `cd web-v2 && npm run build && npm test && npm run lint` passes
+<!-- CI runs more checks: see CONTRIBUTING, "What CI runs on your PR". -->
+- [ ] It is one change, with no unrelated edits.
+- [ ] I ran it, and the description says how I checked.
+- [ ] I can explain every line. Commits an AI tool helped with end in `Assisted-by:`.
+- [ ] Tests cover the new behavior.
+- [ ] `go test ./... -race -short -count=1` and `make lint` pass.
+- [ ] A user-visible change has a `CHANGELOG.md` entry and updated docs.
+- [ ] A UI change has a Playwright spec, and I looked at a screenshot.
+- [ ] `api/openapi.yaml` changed: I ran `make gen` and committed the result.
+- [ ] `web-v2/` changed: `cd web-v2 && npm run build && npm test && npm run lint` passes.
 
-## Money path only
+## Site-set (money and billing state only)
 
-<!-- Invoices, payments, credits, dunning, subscriptions, or tax?
-     Per docs/dev/money-path-robustness-playbook.md §2, list the state's
-     site-set here: every code site that can write or react to the state
-     you change. That is every writer, every effect-firer (code that sends
-     an email, webhook or Stripe call on the change), every gated reader
-     (code that branches on the state), and every crash point your change
-     touches. Delete this section otherwise. -->
+<!-- Every place that writes, reacts to or branches on the state you change, with the search you ran. Then each checklist item in docs/dev/money-path-robustness-playbook.md: yes, no, or "n/a, because ...". -->

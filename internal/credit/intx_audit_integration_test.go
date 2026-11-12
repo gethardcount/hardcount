@@ -14,8 +14,8 @@ import (
 )
 
 // failingEmitter satisfies credit.AuditEmitter and always errors — the fault
-// injection for the shared-fate direction the playbook's mutation-verify
-// gate demands: if the audit row cannot be written, the money mutation must
+// injection for the shared-fate direction the playbook's test 2 demands:
+// if the audit row cannot be written, the money mutation must
 // not commit.
 type failingEmitter struct{}
 

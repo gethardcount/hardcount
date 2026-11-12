@@ -127,7 +127,7 @@ func TestThresholdBilledThroughTx_WriteOffKeepsVoidDrops(t *testing.T) {
 }
 
 // TestThresholdWriteOff_vs_Close_WriteOffInFlight is the concurrent-resolver
-// schedule (playbook §5.3) for a write-off: the close has built its lines
+// schedule (playbook test 3) for a write-off: the close has built its lines
 // against the fire's watermark (residual [t1, P1) = 700c), and the operator
 // writes the threshold invoice off before the close's tx opens. A write-off
 // keeps the window billed, so the watermark the close re-reads on its tx is

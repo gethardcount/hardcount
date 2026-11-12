@@ -22,6 +22,10 @@ import (
 // has no business transaction. A new call fails until it is listed here. The
 // pin is by function and sender: a second call of the same sender in a listed
 // function is covered by that entry's reason.
+//
+// It does not see a send made through a function value, a direct
+// EnqueueStandalone call, or a send from inside internal/email. Review covers
+// those (playbook item 3).
 
 // standaloneEmailSends maps each production call of a standalone OutboxSender
 // method, as "<file> <Func> <Sender>" or "<file> <Recv.Func> <Sender>", to why

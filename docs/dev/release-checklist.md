@@ -123,7 +123,7 @@ These prove that the images the quick start pulls work, and that an existing ins
 
 Run it from v0.9.1 on. It was skipped for v0.9.0, the first release named Hardcount: its previous release, Velox v0.8.2, has no upgrade path. The `.env` that v0.8.2's quickstart writes names `VELOX_*` settings, so step 2 stops at `docker compose pull` with `required variable HARDCOUNT_APP_DB_PASSWORD is missing a value`. With the settings renamed by hand, `hardcount migrate status` says `no migration record` for a v0.8.2 database, and `made by Velox` for one a build of Velox's `main` made after the switch to goose (#1198); start-up refuses both.
 
-The `upgrade` CI job runs steps 1 to 5 and 7 on every pull request ([How we test](../testing.md#before-a-release)), but from source, not the published images, and without comparing the PDF's text. This drill checks the images and the PDF.
+The `upgrade` CI job runs steps 1 to 5 and 7 on every pull request ([What CI runs on your PR](../../CONTRIBUTING.md#what-ci-runs-on-your-pr)), but from source, not the published images, and without comparing the PDF's text. This drill checks the images and the PDF.
 
 1. To start from an empty install, run `./quickstart.sh destroy --yes` in the fresh install's `deploy/compose`. In a folder with no `.env`, it deletes nothing, so run it where the fresh install ran. `docker compose ls -a` then lists no `hardcount-quickstart`. Check out the previous release tag and run `./quickstart.sh`, then `./quickstart.sh demo`.
    **You see:** the demo's invoice link. Open it and note the invoice number, total and line amounts. Download its PDF.

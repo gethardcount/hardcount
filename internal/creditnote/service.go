@@ -2506,7 +2506,7 @@ func (s *Service) RetryRefund(ctx context.Context, tenantID, id string) (domain.
 	gen := sha256.Sum256([]byte(cn.StripeRefundID + "|" + string(cn.RefundStatus)))
 	idempotencyKey := fmt.Sprintf("hardcount_cn_%s_r_%s", cn.ID, hex.EncodeToString(gen[:8]))
 	// The exceptions are `unknown` and `none`: no outcome was recorded for
-	// the last request, so the key must not move (money-path playbook, gate
+	// the last request, so the key must not move (money-path playbook, item
 	// 2). From `unknown` that request's key is stored; from `none` it is
 	// Issue's, the only key Issue sends. The search above finds the refund
 	// once Stripe has made it; it cannot see one Stripe is still making,

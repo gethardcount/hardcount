@@ -366,7 +366,7 @@ func (r *eventRig) schedule(t *testing.T) {
 
 // applyFirst is the subscription store, except that ClearItemPendingPlan
 // first runs apply: a concurrent writer that commits between the service's
-// read of the item and the clear (playbook §5.3).
+// read of the item and the clear (playbook test 3).
 type applyFirst struct {
 	*PostgresStore
 	apply func()

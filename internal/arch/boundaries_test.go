@@ -1,7 +1,5 @@
-// Package arch holds architecture-invariant tests that keep CLAUDE.md's
-// stated boundaries from silently eroding (a repeat of the doc-drift the
-// 2026-07-07 doc-truth audit found: CLAUDE.md claimed "zero cross-domain
-// imports" while several domains imported peers).
+// Package arch holds architecture-invariant tests for the rules in
+// docs/architecture.md (Design rules).
 package arch
 
 import (

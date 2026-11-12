@@ -42,8 +42,8 @@ import (
 // *sql.Tx.
 //
 // It does not see a hand-rolled BeginTx + Enqueue + Commit with no state
-// write in it, which looks like an in-transaction send. The class B question
-// in docs/dev/money-path-robustness-playbook.md §4 covers that.
+// write in it, which looks like an in-transaction send. Review covers that:
+// item 3 in docs/dev/money-path-robustness-playbook.md.
 
 // webhookSinkNames are the webhook package's entry points that write an
 // event to the outbox.

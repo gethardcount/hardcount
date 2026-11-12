@@ -29,7 +29,7 @@ import (
 // cancel, and the plan swap) are period writers that used to have disjoint
 // idempotency seams and no shared row lock. Every schedule below is driven
 // deterministically through the concurrent-resolver hooks on the
-// failableSubAdapter (playbook §5.3) — the competing writer commits between
+// failableSubAdapter (playbook test 3) — the competing writer commits between
 // the engine's read and its write — except the barrier test, which races for
 // real. Time is bound per writer with clock.WithEffectiveNow on the ctx (the
 // engine's Real clock and every store's clock.Now read it): the fire runs

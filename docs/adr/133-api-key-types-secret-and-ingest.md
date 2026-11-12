@@ -103,7 +103,7 @@ asked to cut it.
   "Not `usage:write`" above.
 - **C. Keep platform keys and add a bootstrap path that mints the first
   one:** rejected. One server with several accounts is served by running
-  the bootstrap again (CONTRIBUTING, "Add a second account"). No user has
+  the bootstrap again (CONTRIBUTING, "Local services"). No user has
   asked to manage accounts over the API.
 
 ## Consequences
