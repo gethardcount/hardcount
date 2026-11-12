@@ -42,17 +42,15 @@ func (r *blockingRunner) RunCycleForClock(ctx context.Context, _, _ string, _ in
 // the failure-flip runs on a ctx detached from the pass, so it lands: on the
 // expired ctx it could not, and the clock would stay 'advancing'.
 func TestRunCatchup_PassDeadlineMarksFailedOnALiveCtx(t *testing.T) {
-	prev := catchupPassDeadline
-	catchupPassDeadline = 50 * time.Millisecond
-	t.Cleanup(func() { catchupPassDeadline = prev })
-
 	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	base := newMockStore()
 	base.clocks["c1"] = domain.TestClock{
 		ID: "c1", TenantID: "t1", Status: domain.TestClockStatusAdvancing, FrozenTime: at,
 	}
 	store := &ctxCheckingStore{mockStore: base}
-	s := NewService(store, &blockingRunner{})
+	deps := testDeps(&blockingRunner{})
+	deps.PassDeadline = 50 * time.Millisecond
+	s := NewService(store, deps)
 
 	if err := s.RunCatchup(context.Background(), "t1", "c1"); err == nil {
 		t.Fatal("expected RunCatchup to return the overrun as an error")
@@ -80,7 +78,7 @@ func TestRunCatchup_EndedCtxLeavesTheClockAdvancing(t *testing.T) {
 		ID: "c1", TenantID: "t1", Status: domain.TestClockStatusAdvancing, FrozenTime: at,
 	}
 	store := &ctxCheckingStore{mockStore: base}
-	s := NewService(store, &stubRunner{store: base, clockID: "c1", subID: "s1", err: errors.New("context canceled")})
+	s := NewService(store, testDeps(&stubRunner{store: base, clockID: "c1", subID: "s1", err: errors.New("context canceled")}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

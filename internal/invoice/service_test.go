@@ -1915,3 +1915,13 @@ func TestServiceReads_SetBillingPeriodDisplay(t *testing.T) {
 		})
 	}
 }
+
+// TestRetryPendingTaxForClock_NoTaxRetrierIsAnError: a clock's tax retry with
+// no retrier fails the advance; skipping it would end the advance ready with
+// drafts still waiting for tax.
+func TestRetryPendingTaxForClock_NoTaxRetrierIsAnError(t *testing.T) {
+	svc := NewService(newMemStore(), nil, nil)
+	if _, errs := svc.RetryPendingTaxForClock(context.Background(), "t1", "tc_1", 50); len(errs) != 1 {
+		t.Errorf("errors = %v, want one: the job cannot retry tax", errs)
+	}
+}

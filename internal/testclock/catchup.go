@@ -41,10 +41,6 @@ const (
 	catchupClocksPerTick = 20
 )
 
-// catchupPassDeadline is the deadline runClock applies: CatchupPassDeadline,
-// shortened only by tests.
-var catchupPassDeadline = CatchupPassDeadline
-
 // RunCatchupLoop runs the testclock_catchup role until ctx ends: each tick
 // this replica leads runs CatchupTick.
 func (s *Service) RunCatchupLoop(ctx context.Context, gate leader.Gate) {

@@ -3091,8 +3091,10 @@ func (s *Service) RetryPendingTaxReversal(ctx context.Context, batch int) (int, 
 // see the period-gen + auto-charge phases run, but the still-pending
 // tax invoices wouldn't retry until the NEXT advance — confusing.
 func (s *Service) RetryPendingTaxForClock(ctx context.Context, tenantID, clockID string, batch int) (int, []error) {
+	// An advance that skipped the tax retry would end ready with its drafts
+	// still waiting for tax.
 	if s.taxRetrier == nil {
-		return 0, nil
+		return 0, []error{errors.New("retry tax on the clock's invoices: the invoice service has no tax retrier")}
 	}
 	// Same single source as the wall cron above — the catchup scan had
 	// the identical hand-rolled list with the identical drift.

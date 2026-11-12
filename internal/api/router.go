@@ -893,13 +893,20 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	engine.SetIntervalReader(subStore)
 	engine.SetInvoiceGrace(o.invoiceGrace)
 	engine.SetTestClockReader(testClockStore)
-	testClockSvc := testclock.NewService(testClockStore, engine)
-	// The attached-customers panel reads through the customer service, so
-	// display_name and email arrive decrypted. The customer package owns the
-	// encryption at rest. Without this, the testclock domain would have to
-	// read the customers table directly and would skip decryption.
-	testClockSvc.SetCustomerReader(customerSvc)
-	testClockSvc.SetSubscriptionLister(subStore)
+	// The clock's customers are read through the customer service, so
+	// display_name and email arrive decrypted.
+	testClockSvc := testclock.NewService(testClockStore, testclock.Deps{
+		Billing:      engine,
+		Customers:    customerSvc,
+		Subs:         subStore,
+		Trials:       subSvc,
+		Pauses:       subSvc,
+		Tax:          invoiceSvc,
+		Relief:       creditNoteSvc,
+		Credits:      creditSvc,
+		Dunning:      dunningSvc,
+		PassDeadline: testclock.CatchupPassDeadline,
+	})
 	testClockH := testclock.NewHandler(testClockSvc)
 	testClockH.SetAuditLogger(auditLogger)
 	// The engine writes audit_log rows for lifecycle events it fires in the
@@ -1054,33 +1061,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// The currency a manual invoice must agree with, or takes when none is
 	// sent (ADR-100, ADR-129): billing profile, then live subscription plans.
 	invoiceSvc.SetCustomerCurrencyFacts(customerCurrencyFactsAdapter{profiles: customerStore, subs: subStore})
-	// Catch-up Phase 0.5 is trial expiry, before Phase 1 cycle billing. It
-	// moves subscriptions with status='trialing' to active once simulated
-	// time passes trial_end_at. Without it, the status stays 'trialing' for
-	// up to about 30 days past the real end of the trial, until calendar
-	// billing's stub period closes.
-	testClockSvc.SetTrialExpirer(subSvc)
-	// Catch-up Phase 1.2 resumes pause_collection, after cycle billing. Each
-	// period closes with the pause as it stood at the period's end. Then a
-	// pause whose resumes_at has passed clears in the same Advance.
-	testClockSvc.SetPauseResumer(subSvc)
-	// Catch-up retries tax on clock-pinned invoices (ADR-029 Phase 2). The
-	// scheduled retry rightly skips them, by its NOT EXISTS filter on clock
-	// pinning. Without this phase no other path would retry them, and a
-	// clock-pinned invoice with pending tax would wait until an operator
-	// clicked Retry tax on it.
-	testClockSvc.SetTaxRetrier(invoiceSvc)
-	// Catch-up issues a clock's deferred simulated clawback drafts against
-	// frozen_time (ADR-029 Phase 3.7). The wall-clock clawback reconciler
-	// skips simulated rows. So without this, a simulated downgrade whose
-	// source was in flight would leave its clawback draft stranded.
-	testClockSvc.SetClawbackRetrier(creditNoteSvc)
-	// Catch-up expires the credit grants of clock-pinned customers against
-	// the clock's frozen_time (ADR-029 Phase 4).
-	testClockSvc.SetCreditExpirer(creditSvc)
-	// Catch-up advances dunning for clock-pinned invoices against the clock's
-	// frozen_time, not on the wall-clock 5-min tick (ADR-029 Phase 5).
-	testClockSvc.SetDunning(dunningSvc)
 	// The no-payment-method notifier runs at finalize when the customer has
 	// no PaymentSetup ready (ADR-013). The engine queues the invoice for
 	// retry, so a payment method added later collects it automatically, and

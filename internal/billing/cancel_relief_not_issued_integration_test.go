@@ -14,6 +14,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testclock"
+	"github.com/gethardcount/hardcount/internal/testclock/testclocktest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -139,8 +140,9 @@ func TestCancel_ReliefNotIssued_OnATestClock_TheAdvanceChargesNetOfTheRelief(t *
 
 	// The next Advance's catch-up.
 	execBypassOnce(t, db, `UPDATE test_clocks SET status = 'advancing' WHERE id = $1`, clockID)
-	orchestrator := testclock.NewService(clocks, r.engine)
-	orchestrator.SetClawbackRetrier(r.cn)
+	clockDeps := testclocktest.Deps(r.engine)
+	clockDeps.Relief = r.cn
+	orchestrator := testclock.NewService(clocks, clockDeps)
 	if err := orchestrator.RunCatchup(leadertest.Token(t, testutil.AdminPool(t), r.ctx, leader.RoleTestClockCatchup), r.tenantID, clockID); err != nil {
 		t.Fatalf("catch-up: %v", err)
 	}

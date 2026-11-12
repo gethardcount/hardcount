@@ -164,6 +164,16 @@ func TestRetryPendingCharges_DispatchesToCorrectQuery(t *testing.T) {
 	})
 }
 
+// TestRetryPendingChargesForClock_NoChargerIsAnError: a clock's collection
+// job with no charger fails the advance; skipping it would end the advance
+// ready with the clock's invoices uncharged.
+func TestRetryPendingChargesForClock_NoChargerIsAnError(t *testing.T) {
+	engine := NewEngine(&mockSubs{cycleUpdated: map[string]bool{}}, &mockUsage{}, &mockPricing{}, &mockInvoices{}, nil, &mockSettings{}, nil, nil, billingTestClock())
+	if _, errs := engine.RetryPendingChargesForClock(context.Background(), "t1", "tc_1", 50); len(errs) != 1 {
+		t.Errorf("errors = %v, want one: the job cannot collect", errs)
+	}
+}
+
 // TestRetryPendingCharges_CardDeclineDoesNotEscalate locks in the
 // expected-vs-fatal classification fix. A Stripe card decline is a
 // routine business outcome handled by dunning (ChargeInvoice fires
