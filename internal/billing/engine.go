@@ -2756,6 +2756,12 @@ func (e *Engine) handleTrialState(ctx context.Context, sub domain.Subscription, 
 			return nil
 		})
 		if err != nil {
+			if errors.Is(err, domain.ErrTrialNotDue) {
+				// Extend trial committed after the snapshot: the trial now
+				// ends after this close. Nothing was written; the close
+				// reads the subscription again.
+				return sub, true, errPeriodMoved
+			}
 			if errors.Is(err, domain.ErrTrialCancelDue) {
 				// Schedule committed after the snapshot — route to the free
 				// cancel. NO invoice, NO cycle advance either way.

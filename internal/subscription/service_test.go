@@ -492,6 +492,9 @@ func (m *memStore) activateAfterTrial(ctx context.Context, tenantID, id string, 
 	if s.Status != domain.SubscriptionTrialing {
 		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("Only a trialing subscription's trial can be ended. This one is %s.", s.Status))
 	}
+	if s.TrialEndAt != nil && s.TrialEndAt.After(at) {
+		return domain.Subscription{}, domain.ErrTrialNotDue
+	}
 	s.Status = domain.SubscriptionActive
 	if s.ActivatedAt == nil {
 		t := at
@@ -619,12 +622,39 @@ func (m *memStore) ListExpiredTrials(_ context.Context, before time.Time, _ bool
 	return out, nil
 }
 
-func (m *memStore) ListExpiredTrialsForClock(_ context.Context, tenantID, clockID string, frozen time.Time, limit int) ([]domain.Subscription, error) {
+// subsInDueOrder returns the subscriptions with a due time, ordered by it and
+// then by id, as the clock lists page them.
+func (m *memStore) subsInDueOrder(due func(domain.Subscription) *time.Time) []domain.Subscription {
+	out := make([]domain.Subscription, 0, len(m.subs))
+	for _, s := range m.subs {
+		if due(s) != nil {
+			out = append(out, s)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool {
+		di, dj := *due(out[i]), *due(out[j])
+		if !di.Equal(dj) {
+			return di.Before(dj)
+		}
+		return out[i].ID < out[j].ID
+	})
+	return out
+}
+
+// afterKey reports whether (at, id) comes after the cursor (afterAt, afterID).
+func afterKey(at time.Time, id string, afterAt time.Time, afterID string) bool {
+	return at.After(afterAt) || (at.Equal(afterAt) && id > afterID)
+}
+
+func (m *memStore) ListExpiredTrialsForClock(_ context.Context, tenantID, clockID string, frozen, afterAt time.Time, afterID string, limit int) ([]domain.Subscription, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 	var out []domain.Subscription
-	for _, s := range m.subs {
+	for _, s := range m.subsInDueOrder(func(s domain.Subscription) *time.Time { return s.TrialEndAt }) {
+		if s.TrialEndAt == nil || !afterKey(*s.TrialEndAt, s.ID, afterAt, afterID) {
+			continue
+		}
 		if s.TenantID != tenantID {
 			continue
 		}
@@ -670,12 +700,20 @@ func (m *memStore) ListExpiredPauseCollections(_ context.Context, before time.Ti
 	return out, nil
 }
 
-func (m *memStore) ListExpiredPauseCollectionsForClock(_ context.Context, tenantID, clockID string, frozen time.Time, limit int) ([]domain.Subscription, error) {
+func (m *memStore) ListExpiredPauseCollectionsForClock(_ context.Context, tenantID, clockID string, frozen, afterAt time.Time, afterID string, limit int) ([]domain.Subscription, error) {
 	if limit <= 0 {
 		limit = 100
 	}
 	var out []domain.Subscription
-	for _, s := range m.subs {
+	for _, s := range m.subsInDueOrder(func(s domain.Subscription) *time.Time {
+		if s.PauseCollection == nil {
+			return nil
+		}
+		return s.PauseCollection.ResumesAt
+	}) {
+		if !afterKey(*s.PauseCollection.ResumesAt, s.ID, afterAt, afterID) {
+			continue
+		}
 		if s.TenantID != tenantID || s.TestClockID != clockID {
 			continue
 		}

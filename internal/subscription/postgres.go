@@ -1460,7 +1460,11 @@ func (s *PostgresStore) activateAfterTrialInTx(ctx context.Context, tx *sql.Tx, 
 	// cancel-at-trial-end committing between a scan's snapshot and this
 	// UPDATE must WIN — activating (and billing) a customer who canceled is
 	// the audit bug this arc exists to fix. Callers route the typed
-	// domain.ErrTrialCancelDue to the dedicated cancel transition.
+	// domain.ErrTrialCancelDue to the dedicated cancel transition. The
+	// trial-end predicate proves the end the caller acts for: an Extend trial
+	// that commits after the caller read the row moves the end past at, and
+	// the flip refuses (domain.ErrTrialNotDue) instead of activating and
+	// billing at the old end.
 	err := scanSubRow(tx.QueryRowContext(ctx, `
 		UPDATE subscriptions
 		SET status = 'active',
@@ -1468,11 +1472,12 @@ func (s *PostgresStore) activateAfterTrialInTx(ctx context.Context, tx *sql.Tx, 
 		    updated_at = $1
 		WHERE id = $2 AND status = 'trialing'
 		  AND cancel_at IS NULL AND cancel_at_period_end = false
+		  AND (trial_end_at IS NULL OR trial_end_at <= $1)
 		RETURNING `+subCols,
 		at, id,
 	), &sub)
 	if err == sql.ErrNoRows {
-		return domain.Subscription{}, s.classifyActivationConflict(ctx, tx, id)
+		return domain.Subscription{}, s.classifyActivationConflict(ctx, tx, id, &at)
 	}
 	if err != nil {
 		return domain.Subscription{}, err
@@ -1501,15 +1506,18 @@ func (s *PostgresStore) activateAfterTrialInTx(ctx context.Context, tx *sql.Tx, 
 }
 
 // classifyActivationConflict names WHY a trialing→active UPDATE matched no
-// row: gone, already non-trialing, or blocked by a pending cancel schedule
-// (domain.ErrTrialCancelDue — the caller routes to CancelAtTrialEnd).
-func (s *PostgresStore) classifyActivationConflict(ctx context.Context, tx *sql.Tx, id string) error {
+// row: gone, already non-trialing, blocked by a pending cancel schedule
+// (domain.ErrTrialCancelDue — the caller routes to CancelAtTrialEnd), or
+// trialing with an end after at (domain.ErrTrialNotDue — extended since the
+// caller read it; nothing to do yet). at is nil for an early end, which ends
+// the trial before its end on purpose.
+func (s *PostgresStore) classifyActivationConflict(ctx context.Context, tx *sql.Tx, id string, at *time.Time) error {
 	var currentStatus string
-	var cancelAt sql.NullTime
+	var cancelAt, trialEndAt sql.NullTime
 	var cancelAtPeriodEnd bool
 	err := tx.QueryRowContext(ctx,
-		`SELECT status, cancel_at, cancel_at_period_end FROM subscriptions WHERE id = $1`, id,
-	).Scan(&currentStatus, &cancelAt, &cancelAtPeriodEnd)
+		`SELECT status, cancel_at, cancel_at_period_end, trial_end_at FROM subscriptions WHERE id = $1`, id,
+	).Scan(&currentStatus, &cancelAt, &cancelAtPeriodEnd, &trialEndAt)
 	if err == sql.ErrNoRows {
 		return errs.ErrNotFound
 	}
@@ -1518,6 +1526,9 @@ func (s *PostgresStore) classifyActivationConflict(ctx context.Context, tx *sql.
 	}
 	if currentStatus == "trialing" && (cancelAt.Valid || cancelAtPeriodEnd) {
 		return domain.ErrTrialCancelDue
+	}
+	if currentStatus == "trialing" && at != nil && trialEndAt.Valid && trialEndAt.Time.After(*at) {
+		return domain.ErrTrialNotDue
 	}
 	return errs.InvalidState(fmt.Sprintf("Only a trialing subscription's trial can be ended. This one is %s.", currentStatus))
 }
@@ -1584,7 +1595,7 @@ func (s *PostgresStore) endTrialEarlyInTx(ctx context.Context, tx *sql.Tx, id st
 		// active + day-1 invoice + a schedule that now means paid-period
 		// cancel). classifyActivationConflict maps it to domain.ErrTrialCancelDue;
 		// EndTrial translates that to the operator 409.
-		return domain.Subscription{}, s.classifyActivationConflict(ctx, tx, id)
+		return domain.Subscription{}, s.classifyActivationConflict(ctx, tx, id, nil)
 	}
 	if err != nil {
 		return domain.Subscription{}, err
@@ -1717,7 +1728,7 @@ func (s *PostgresStore) GetDueBilling(ctx context.Context, now, dueBy time.Time,
 	// GetDueBillingForClock). Without this filter, the cron would
 	// silently drip-bill stuck clock-pinned subs in the background,
 	// breaking the operator's mental model of simulation time AND
-	// racing with the test-clock catch-up via SKIP LOCKED.
+	// racing with the test-clock catch-up for the same rows.
 	//
 	// Stripe Test Clocks operate the same way: no cron touches
 	// clock-pinned customers; advance is the sole path.
@@ -1858,6 +1869,10 @@ func (s *PostgresStore) GetDueBillingForTenant(ctx context.Context, tenantID str
 // "now" cutoff. Tenant scope comes from RLS via the BeginTx
 // caller, but because the test-clock catch-up is a per-clock unit of
 // work, we also filter by test_clock_id explicitly.
+//
+// It takes no lock: a clock has one runner, and a row another transaction
+// holds must be waited for, not skipped. ClosePeriodTx's check that the
+// period has not moved is the guard.
 func (s *PostgresStore) GetDueBillingForClock(ctx context.Context, tenantID, clockID string, exclude []string, limit int) ([]domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -1879,7 +1894,6 @@ func (s *PostgresStore) GetDueBillingForClock(ctx context.Context, tenantID, clo
 		       OR (s.status = 'active' AND s.cancel_at IS NOT NULL AND s.cancel_at <= tc.frozen_time))
 		  AND NOT (s.id = ANY(COALESCE($3::text[], '{}')))
 		ORDER BY s.next_billing_at ASC LIMIT $2
-		FOR UPDATE OF s SKIP LOCKED
 	`, clockID, limit, exclude)
 	if err != nil {
 		return nil, err
@@ -1993,7 +2007,12 @@ func (s *PostgresStore) ListExpiredPauseCollections(ctx context.Context, before 
 // inside an Advance window, never by the wall-clock cron. Uses the
 // clock's frozen_time as the cutoff so an Advance that crosses
 // resumes_at picks the row up in the same advance window.
-func (s *PostgresStore) ListExpiredPauseCollectionsForClock(ctx context.Context, tenantID, clockID string, frozen time.Time, limit int) ([]domain.Subscription, error) {
+//
+// It returns the page after (afterAt, afterID) in due order, resumes_at
+// then id, so a clock resumes its pauses in the order they fell due and a
+// row the job leaves paused is not read again. It takes no lock; the
+// resume's own conditional write is the guard.
+func (s *PostgresStore) ListExpiredPauseCollectionsForClock(ctx context.Context, tenantID, clockID string, frozen, afterAt time.Time, afterID string, limit int) ([]domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return nil, err
@@ -2009,9 +2028,9 @@ func (s *PostgresStore) ListExpiredPauseCollectionsForClock(ctx context.Context,
 		  AND s.pause_collection_resumes_at IS NOT NULL
 		  AND s.pause_collection_resumes_at <= $2
 		  AND `+resumeNotWaitingOnCloseSQL("s")+`
-		ORDER BY s.pause_collection_resumes_at ASC LIMIT $3
-		FOR UPDATE OF s SKIP LOCKED
-	`, clockID, frozen, limit)
+		  AND (s.pause_collection_resumes_at, s.id) > ($3, $4)
+		ORDER BY s.pause_collection_resumes_at, s.id LIMIT $5
+	`, clockID, frozen, afterAt, afterID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -3271,12 +3290,14 @@ func (s *PostgresStore) ListWithThresholdsForClock(ctx context.Context, tenantID
 // doesn't lie about lifecycle state for the (potentially 30-day)
 // gap between trial_end_at and the next cycle close.
 //
-// FOR UPDATE SKIP LOCKED guards against a concurrent operator
-// EndTrial racing the catchup pass — whichever path takes the row
-// first wins; the loser sees a no-row UPDATE and continues to the
-// next sub. Items are hydrated for the in_advance BillOnCreate
-// downstream.
-func (s *PostgresStore) ListExpiredTrialsForClock(ctx context.Context, tenantID, clockID string, frozen time.Time, limit int) ([]domain.Subscription, error) {
+// It returns the page after (afterAt, afterID) in due order, trial_end_at
+// then id, so a clock ends its trials (and numbers their day-1 invoices) in
+// the order they fell due, and a row the job leaves trialing is not read
+// again. It takes no lock: the activation's conditional write (still
+// trialing, the trial ended by the time it acts for) decides a race with an
+// operator's End trial or Extend trial. Items are hydrated for the
+// in_advance BillOnCreate downstream.
+func (s *PostgresStore) ListExpiredTrialsForClock(ctx context.Context, tenantID, clockID string, frozen, afterAt time.Time, afterID string, limit int) ([]domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return nil, err
@@ -3293,10 +3314,10 @@ func (s *PostgresStore) ListExpiredTrialsForClock(ctx context.Context, tenantID,
 		  AND s.test_clock_id = $1
 		  AND s.trial_end_at IS NOT NULL
 		  AND s.trial_end_at <= $2
-		ORDER BY s.trial_end_at ASC
-		LIMIT $3
-		FOR UPDATE OF s SKIP LOCKED
-	`, clockID, frozen, limit)
+		  AND (s.trial_end_at, s.id) > ($3, $4)
+		ORDER BY s.trial_end_at, s.id
+		LIMIT $5
+	`, clockID, frozen, afterAt, afterID, limit)
 	if err != nil {
 		return nil, err
 	}

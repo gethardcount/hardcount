@@ -279,8 +279,9 @@ type Store interface {
 	// status='trialing' from Dec 13 to Jan 1).
 	//
 	// Hydrated with items so the caller can fire BillOnCreate for
-	// in_advance items without a round-trip.
-	ListExpiredTrialsForClock(ctx context.Context, tenantID, clockID string, frozen time.Time, limit int) ([]domain.Subscription, error)
+	// in_advance items without a round-trip. One page, after (afterAt,
+	// afterID) in trial_end_at then id order.
+	ListExpiredTrialsForClock(ctx context.Context, tenantID, clockID string, frozen, afterAt time.Time, afterID string, limit int) ([]domain.Subscription, error)
 
 	// ListExpiredTrials is the wall-clock counterpart for the cron
 	// tick — returns non-clock-pinned subs whose `trial_end_at` has
@@ -303,8 +304,9 @@ type Store interface {
 	// ListExpiredPauseCollectionsForClock is the clock-scoped counterpart
 	// invoked from the catchup orchestrator after cycle billing, with the
 	// same skip, so an Advance that crosses resumes_at unpauses the sub in
-	// the same window once its paused periods are closed.
-	ListExpiredPauseCollectionsForClock(ctx context.Context, tenantID, clockID string, frozen time.Time, limit int) ([]domain.Subscription, error)
+	// the same window once its paused periods are closed. One page, after
+	// (afterAt, afterID) in resumes_at then id order.
+	ListExpiredPauseCollectionsForClock(ctx context.Context, tenantID, clockID string, frozen, afterAt time.Time, afterID string, limit int) ([]domain.Subscription, error)
 
 	// ActivateAfterTrialWithBill flips trialing→active AND runs billFn (the day-1
 	// in_advance invoice insert) in the SAME transaction, so a billing failure

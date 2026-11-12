@@ -564,6 +564,11 @@ type Subscription struct {
 // billing engine can route on it without a peer import.
 var ErrTrialCancelDue = errors.New("trial has a cancel schedule due — route to CancelAtTrialEnd")
 
+// ErrTrialNotDue: the trial-end flip found the trial still running past the
+// time it acted for, because Extend trial moved its end after the caller read
+// the row. Nothing is due yet; the caller skips the row.
+var ErrTrialNotDue = errors.New("the trial has not ended yet")
+
 // ErrTrialCancelConflict: CancelAtTrialEnd's CAS matched no row — the
 // schedule was cleared, the trial extended, or another site already
 // canceled. The caller treats the sub as NOT handled this pass.
