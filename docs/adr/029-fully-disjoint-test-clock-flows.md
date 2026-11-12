@@ -7,7 +7,7 @@
 
 ## Summary
 
-Every time-driven scheduler job (auto-charge retry, tax retry, threshold scan, dunning, credit expiry) is split into two separate flows. The wall-clock cron query excludes entities attached to a test clock. A per-clock variant (`*ForClock`) processes those entities only when an operator clicks Advance, through `testclock.CatchupWorker`. Each entity is processed by exactly one flow, so the cron can no longer charge a test-clock invoice, and simulated time moves only on Advance. The tax-commit reconciler (`RetryPendingTaxCommit`) also excludes test-clock invoices but has no per-clock variant, because those invoices are test-mode only. Amended 2026-06-13: the invoice-reminder job was removed. Amended 2026-10-10: the payment reconciler is not split, and a rule now decides which test-clock defects get fixed (see the amendment below). Amended 2026-10-20: credit expiry runs after dunning again, as the orchestration sequence below first had it.
+Every time-driven scheduler job (auto-charge retry, tax retry, threshold scan, dunning, credit expiry) is split into two separate flows. The wall-clock cron query excludes entities attached to a test clock. A per-clock variant (`*ForClock`) processes those entities only when an operator clicks Advance, through `testclock.CatchupWorker`. Each entity is processed by exactly one flow, so the cron can no longer charge a test-clock invoice, and simulated time moves only on Advance. The tax-commit reconciler (`RetryPendingTaxCommit`) also excludes test-clock invoices but has no per-clock variant, because those invoices are test-mode only. Amended 2026-06-13: the invoice-reminder job was removed. Amended 2026-10-10: the payment reconciler is not split, and a rule now decides which test-clock defects get fixed (see the amendment below). Amended 2026-10-20: credit expiry runs after dunning again, as the orchestration sequence below first had it. Amended 2026-11-13: a pass stops at its first failed job, so the jobs after it do not run (see the amendment below).
 
 ## Context
 
@@ -238,7 +238,9 @@ process(job CatchupJob):
 
 Each phase is independently retryable: a failure in Phase 4 doesn't
 prevent Phase 5 from running. The catchup worker's outer transaction
-boundary stays per-phase (current shape).
+boundary stays per-phase (current shape). *Amended 2026-11-13: a failure
+now stops the pass, so the phases after it do not run; see the amendment
+below.*
 
 ## Architecture properties
 
@@ -255,7 +257,8 @@ boundary stays per-phase (current shape).
 - **Failure isolation**: each phase is independently retryable; a
   partial failure leaves the catchup worker in a recoverable state
   (status='internal_failure' on the clock; existing Retry advance
-  flow resumes).
+  flow resumes). *Amended 2026-11-13: the phases after a failed one do not
+  run; see the amendment below.*
 - **Deterministic ordering**: Phases 1-6 run in a documented order
   per Advance. Operator running the same advance twice gets identical
   end-state for the entities involved.
@@ -393,9 +396,9 @@ queue-driven `CatchupWorker`. The phase list and its order are unchanged
 
 ## Amendment 2026-11-13: a pass stops at its first failed job
 
-Each job still runs all its rows, but the pass now stops at the first job
-that returns an error, and the clock's failure reason names that job. Before,
-every later job ran too, so a relief credit note that failed to issue let
-collection charge the full amount. Retry advance runs the pass again from the
-top; every job is safe to repeat. Real time does not stop: its next tick asks
-again.
+An error on one row does not stop a job's other rows. The pass now stops at
+the first job that returns an error. The clock's failure reason starts with
+that job's name, as `docs/concepts/test-clocks.md` lists the jobs.
+Before, every later job ran too, so a relief credit note that failed to issue
+let the card charge take the full amount. Retry advance runs the pass again
+from the top; every job is safe to repeat.

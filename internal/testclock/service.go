@@ -364,8 +364,8 @@ func (s *Service) RetryAdvance(ctx context.Context, tenantID, id string) (domain
 }
 
 // runClock is one catch-up pass on one advancing clock, at its frozen_time.
-// It runs every phase once (runPhases), then completes or fails the advance,
-// writing the summary in the same fenced statement.
+// It runs the jobs in order until one fails (runPhases), then completes or
+// fails the advance, writing the summary in the same fenced statement.
 //
 // The pass first moves the clock to the back of the claim list, so a clock
 // whose pass keeps being cut off does not hold up the others. It runs under
@@ -442,19 +442,25 @@ func (s *Service) runClock(ctx context.Context, clk domain.TestClock) (err error
 		logStopped(ctx, tenantID, clockID)
 		return nil
 	}
-	// The banner gets an operator-safe reason that names the job that failed
-	// (ADR-026); the log keeps every error in full.
-	var reasons []string
+	// The banner gets an operator-safe reason (ADR-026); the log keeps every
+	// error in full. When the pass ran out of time, the reason is the
+	// deadline alone: the job that met the ended ctx is not the one that took
+	// the time.
+	var reason, logged []string
 	if errors.Is(passCtx.Err(), context.DeadlineExceeded) {
-		reasons = append(reasons, fmt.Sprintf("the catch-up pass at %s did not finish within %s",
-			clk.FrozenTime.UTC().Format(time.RFC3339), s.passDeadline))
+		msg := fmt.Sprintf("the catch-up pass at %s did not finish within %s",
+			clk.FrozenTime.UTC().Format(time.RFC3339), s.passDeadline)
+		reason, logged = []string{msg}, []string{msg}
 	}
 	if len(runErrs) > 0 {
-		reasons = append(reasons, failedJob+": "+errs.SummarizeForOperator(runErrs, clockID))
+		if reason == nil {
+			reason = []string{failedJob + ": " + errs.SummarizeForOperator(runErrs, clockID)}
+		}
+		logged = append(logged, fmt.Sprintf("%s: %v", failedJob, errors.Join(runErrs...)))
 	}
-	if len(reasons) > 0 {
-		fail(strings.Join(reasons, "; "))
-		return fmt.Errorf("catch-up pass failed in %q: %v", failedJob, runErrs)
+	if reason != nil {
+		fail(reason[0])
+		return fmt.Errorf("catch-up pass failed: %s", strings.Join(logged, "; "))
 	}
 	if _, err := s.store.CompleteAdvance(ctx, tenantID, clockID, sum); err != nil {
 		if fencedWriteMissed(err) {
@@ -486,18 +492,18 @@ func logStopped(ctx context.Context, tenantID, clockID string) {
 		"clock_id", clockID, "tenant_id", tenantID, "cause", context.Cause(ctx))
 }
 
-// runPhases runs every catch-up phase once, in dependency order, on ctx,
-// which carries the clock and frozen (clock.WithSim). ADR-028 disjoint
-// flows: each phase scopes to THIS clock's entities, and the wall-clock
-// cron never sees them. ADR-029: every time-aware engine concern that
-// touches clock-pinned entities runs here, in lockstep with simulated time.
-// Each job runs all its rows. The pass stops at the first job that returned
-// an error and returns its name with the errors, so no later job acts on
-// state the failed one did not reach: a failed relief credit note stops the
-// collection that would charge the full amount. Retry advance runs the pass
-// again from the top; every job is safe to repeat. This stop is the clock's
-// only: real time has a next tick, and its jobs go on. Counts accumulate
-// into sum.
+// runPhases runs the catch-up jobs in dependency order on ctx, which
+// carries the clock and frozen (clock.WithSim). ADR-028 disjoint flows:
+// each job scopes to THIS clock's entities, and the wall-clock cron never
+// sees them. ADR-029: every time-aware engine concern that touches
+// clock-pinned entities runs here, in lockstep with simulated time. An
+// error on one row does not stop the job's other rows. The pass stops at
+// the first job that returned an error and returns its name, as
+// docs/concepts/test-clocks.md lists the jobs, with the errors: no later job
+// acts on state the failed one did not reach, so a failed relief credit note
+// stops the card charge that would take the full amount. Retry advance runs
+// the pass again from the top; every job is safe to repeat. Counts
+// accumulate into sum, the failed job's included.
 func (s *Service) runPhases(ctx context.Context, tenantID, clockID string, frozen time.Time, sum *domain.AdvanceSummary) (string, []error) {
 	// Phase 0.5 (Bug #8): flip trialing subs to active at
 	// trial_end_at when sim time has elapsed past it, BEFORE
@@ -522,7 +528,7 @@ func (s *Service) runPhases(ctx context.Context, tenantID, clockID string, froze
 	periodCount, periodErrs := s.billing.RunCycleForClock(ctx, tenantID, clockID, 100)
 	sum.InvoicesGenerated = periodCount
 	if len(periodErrs) > 0 {
-		return "period closes", periodErrs
+		return "billing period closes", periodErrs
 	}
 
 	// Phase 1.2: auto-resume any sub whose pause_collection_resumes_at
@@ -586,7 +592,7 @@ func (s *Service) runPhases(ctx context.Context, tenantID, clockID string, froze
 	chargeCount, chargeErrs := s.billing.RetryPendingChargesForClock(ctx, tenantID, clockID, 100)
 	sum.ChargesRetried = chargeCount
 	if len(chargeErrs) > 0 {
-		return "collection", chargeErrs
+		return "card charges", chargeErrs
 	}
 
 	// Phase 3.7 (ADR-029): issue this clock's DEFERRED simulated clawback

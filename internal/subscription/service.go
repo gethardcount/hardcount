@@ -2011,9 +2011,10 @@ func (s *Service) finishReliefThenCollect(ctx context.Context, sub domain.Subscr
 		// invoice was queued for collection when it was created, and its tax
 		// commit has a sweep. A billing run issues relief drafts before it
 		// collects queued invoices (clawback_issue before the auto-charge
-		// step; on a test clock the catch-up does the same). Not covered: a
-		// note that keeps failing is followed by a full charge on the next
-		// run; a run already inside its auto-charge step when this commits
+		// step; on a test clock the catch-up does the same, and stops before
+		// the charge when a note fails). Not covered in real time: a note
+		// that keeps failing is followed by a full charge on the next run; a
+		// run already inside its auto-charge step when this commits
 		// charges the invoice before the note is retried; and a draft Issue
 		// holds (its source is a draft, or its payment is in flight) is not
 		// an error, so the invoice is collected in full here, as before.
