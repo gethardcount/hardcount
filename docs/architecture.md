@@ -91,7 +91,7 @@ internal/                     (abridged — one package per domain)
   creditnote/               — credit notes + refunds
   webhook/                  — outbound webhooks (HMAC-signed delivery)
   email/                    — email outbox + sender
-  testclock/                — test clocks + the worker that bills skipped time
+  testclock/                — test clocks + the leader role that bills skipped time
   audit/                    — immutable append-only audit log
   platform/leader/          — leader leases for the background jobs
   platform/postgres/        — RLS-aware database layer
@@ -106,7 +106,7 @@ Every copy of Hardcount runs the same background loops. Jobs that must run once
 across all copies take a **leader lease** first: a row in the
 `leader_leases` table that lets exactly one copy run one tick of that job.
 The lease expires 10 seconds after its last renewal, so another copy takes
-over when a leader dies. The five leased jobs:
+over when a leader dies. The six leased jobs:
 
 | Job | What it does |
 |---|---|
@@ -115,6 +115,7 @@ over when a leader dies. The five leased jobs:
 | `webhook_outbox` | Sends queued webhook events to your endpoints |
 | `email_outbox` | Sends queued emails |
 | `webhook_delivery` | Retries webhook deliveries that failed |
+| `testclock_catchup` | Bills the skipped time for every [test clock](glossary.md#testing-with-simulated-time) that is being moved forward (the catch-up), one clock after another |
 
 An **outbox** is a database table of messages waiting to be sent
 (`webhook_outbox`, `email_outbox`). Every webhook event, and some emails,
@@ -122,8 +123,9 @@ are written in the same transaction as the change that caused them, so a
 crash cannot lose those ([Webhooks](webhooks.md#three-rules-for-your-receiver)).
 
 When you move a [test clock](glossary.md#testing-with-simulated-time)
-forward, a worker in the copy that took the request bills the skipped time
-for that clock's customers.
+forward, the request only marks the clock; the `testclock_catchup` leader
+bills the skipped time for that clock's customers within a few seconds. If
+the copy running it stops, the next leader runs the catch-up again.
 
 More on each term: [Words on these pages](ops/runbook/index.md#words-on-these-pages). When a job is
 stuck: [A background job is stuck](ops/runbook/background-job-stuck.md).

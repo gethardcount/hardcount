@@ -126,13 +126,12 @@ type Server struct {
 	// leader's cleanup steps.
 	LoginThrottle *user.LoginThrottle
 
-	// TestClockSvc lets main.go wire the catch-up queue and worker, and run
-	// boot recovery for clocks that an earlier process left 'advancing'.
-	// Catch-up runs everything that fell due in the time a test clock
-	// skipped, such as trial ends, billing, tax retries, dunning and credit
-	// expiries. It runs off the request, as Stripe's test-clock advance does
-	// (ADR-015). The service is built here, and main.go runs it with the
-	// other background workers.
+	// TestClockSvc lets main.go run the test-clock catch-up: everything that
+	// fell due in the time an advancing test clock skipped, such as trial
+	// ends, billing, tax retries, dunning and credit expiries. It runs off
+	// the request, as Stripe's test-clock advance does, as the
+	// testclock_catchup leader role (ADR-140). The service is built here,
+	// and main.go runs its loop with the other background workers.
 	TestClockSvc *testclock.Service
 
 	// RestoreCatchUp applies Stripe's events to a restored database through
@@ -857,14 +856,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// transaction of each change (invoiceStore.SetOutboxEnqueuer above).
 	invoiceSvc.SetAuditLogger(auditLogger)
 
-	// Test clocks simulate frozen time, in test mode only. The clock service
-	// is built before the billing engine, so the engine can read clock state.
-	// The service then gets the engine as its billing runner through
-	// SetBillingRunner below, which breaks the dependency cycle.
+	// Test clocks simulate frozen time, in test mode only. The billing engine
+	// reads clock state from the store; the clock service, built after the
+	// engine, runs the engine in its catch-up.
 	testClockStore := testclock.NewPostgresStore(db)
-	testClockSvc := testclock.NewService(testClockStore)
-	testClockH := testclock.NewHandler(testClockSvc)
-	testClockH.SetAuditLogger(auditLogger)
 	// A test clock attaches at the customer level (ADR-027), and the customer
 	// service checks test_clock_id at create. This is wired once the store
 	// exists. Without it, customer create always refuses a test_clock_id, as
@@ -883,12 +878,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// flush after a Stripe reconnect. Without it, the operator must click
 	// Retry on each invoice after fixing the address.
 	customerSvc.SetTaxFlusher(invoiceSvc)
-	// The attached-customers panel reads through the customer service, so
-	// display_name and email arrive decrypted. The customer package owns the
-	// encryption at rest. Without this, the testclock domain would have to
-	// read the customers table directly and would skip decryption.
-	testClockSvc.SetCustomerReader(customerSvc)
-	testClockSvc.SetSubscriptionLister(subStore)
 
 	// Billing engine and manual trigger (with credit auto-application).
 	// paymentReadiness answers "can we charge this customer?" in one call,
@@ -901,6 +890,15 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	engine.SetIntervalReader(subStore)
 	engine.SetInvoiceGrace(o.invoiceGrace)
 	engine.SetTestClockReader(testClockStore)
+	testClockSvc := testclock.NewService(testClockStore, engine)
+	// The attached-customers panel reads through the customer service, so
+	// display_name and email arrive decrypted. The customer package owns the
+	// encryption at rest. Without this, the testclock domain would have to
+	// read the customers table directly and would skip decryption.
+	testClockSvc.SetCustomerReader(customerSvc)
+	testClockSvc.SetSubscriptionLister(subStore)
+	testClockH := testclock.NewHandler(testClockSvc)
+	testClockH.SetAuditLogger(auditLogger)
 	// The engine writes audit_log rows for lifecycle events it fires in the
 	// background (currently a scheduled cancellation firing at period end).
 	// Without it, the subscription's Activity timeline shows "Cancellation
@@ -1053,7 +1051,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// The currency a manual invoice must agree with, or takes when none is
 	// sent (ADR-100, ADR-129): billing profile, then live subscription plans.
 	invoiceSvc.SetCustomerCurrencyFacts(customerCurrencyFactsAdapter{profiles: customerStore, subs: subStore})
-	testClockSvc.SetBillingRunner(engine)
 	// Catch-up Phase 0.5 is trial expiry, before Phase 1 cycle billing. It
 	// moves subscriptions with status='trialing' to active once simulated
 	// time passes trial_end_at. Without it, the status stays 'trialing' for

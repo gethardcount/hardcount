@@ -50,8 +50,8 @@ function LastAdvanceCard({ summary }: { summary: AdvanceSummary }) {
     ] as Array<[string, number]>
   ).filter(([, n]) => n > 0)
 
-  // advanced_from is the Go zero time on the recover-in-flight path, and equals
-  // advanced_to on a retry — in both cases show only the destination.
+  // A summary from an earlier release may have no start (the Go zero time, or
+  // advanced_from equal to advanced_to); then show only the destination.
   const noFrom = !summary.advanced_from || summary.advanced_from.startsWith('0001-01-01')
   const span =
     noFrom || summary.advanced_from === summary.advanced_to

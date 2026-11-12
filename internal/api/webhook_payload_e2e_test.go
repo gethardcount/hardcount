@@ -15,6 +15,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/tenantstripe"
+	"github.com/gethardcount/hardcount/internal/testclock/testclocktest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -654,7 +655,8 @@ func TestE2E_WebhookPayloads_CreditBalance(t *testing.T) {
 // cancel at period end.
 func TestE2E_WebhookPayloads_SubscriptionSchedule(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
+	srv := NewServer(db, clock.Real(), nil)
+	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
 	tenantID := testutil.CreateTestTenant(t, db, "Webhook Payload Schedule Co")
@@ -696,6 +698,7 @@ func TestE2E_WebhookPayloads_SubscriptionSchedule(t *testing.T) {
 	advanceTo := func(target time.Time) {
 		t.Helper()
 		call("POST", "/v1/test-clocks/"+clockID+"/advance", map[string]any{"frozen_time": target.Format(time.RFC3339)}).want(t, 200, "advance")
+		testclocktest.Drain(t, srv.TestClockSvc)
 		deadline := time.Now().Add(60 * time.Second)
 		for flowStr(call("GET", "/v1/test-clocks/"+clockID, nil).want(t, 200, "get clock").body, "status") != "ready" {
 			if time.Now().After(deadline) {
@@ -766,7 +769,8 @@ func TestE2E_WebhookPayloads_SubscriptionSchedule(t *testing.T) {
 // cycle close.
 func TestE2E_WebhookPayloads_EngineAndDunning(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
+	srv := NewServer(db, clock.Real(), nil)
+	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
 	tenantID := testutil.CreateTestTenant(t, db, "Webhook Payload Engine Co")
@@ -821,6 +825,7 @@ func TestE2E_WebhookPayloads_EngineAndDunning(t *testing.T) {
 	advanceTo := func(target time.Time) {
 		t.Helper()
 		call("POST", "/v1/test-clocks/"+clockID+"/advance", map[string]any{"frozen_time": target.Format(time.RFC3339)}).want(t, 200, "advance")
+		testclocktest.Drain(t, srv.TestClockSvc)
 		deadline := time.Now().Add(60 * time.Second)
 		for flowStr(call("GET", "/v1/test-clocks/"+clockID, nil).want(t, 200, "get clock").body, "status") != "ready" {
 			if time.Now().After(deadline) {
@@ -893,7 +898,8 @@ func cancelAuditCanceledBy(t *testing.T, call func(method, path string, body any
 // invoice is paid and the pause lifts.
 func TestE2E_WebhookPayloads_DunningPause(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
+	srv := NewServer(db, clock.Real(), nil)
+	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
 	tenantID := testutil.CreateTestTenant(t, db, "Webhook Payload Dunning Pause Co")
@@ -926,6 +932,7 @@ func TestE2E_WebhookPayloads_DunningPause(t *testing.T) {
 	advanceTo := func(target time.Time) {
 		t.Helper()
 		call("POST", "/v1/test-clocks/"+clockID+"/advance", map[string]any{"frozen_time": target.Format(time.RFC3339)}).want(t, 200, "advance")
+		testclocktest.Drain(t, srv.TestClockSvc)
 		deadline := time.Now().Add(60 * time.Second)
 		for flowStr(call("GET", "/v1/test-clocks/"+clockID, nil).want(t, 200, "get clock").body, "status") != "ready" {
 			if time.Now().After(deadline) {
