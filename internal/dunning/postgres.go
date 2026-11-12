@@ -1283,6 +1283,11 @@ func (s *PostgresStore) ListDueRuns(ctx context.Context, tenantID string, dueBef
 // subscription is pinned to the given clock and whose next_action_at
 // has elapsed against the clock's frozen_time (passed explicitly so
 // the comparison runs in simulated time, not wall-clock).
+//
+// It takes no lock. A clock has one runner, so a run whose rows another
+// transaction holds is reached and its own conditional writes decide; and
+// a list that locked the run would take it before its invoice, the reverse
+// of the invoice-then-run order every settle uses.
 func (s *PostgresStore) ListDueRunsForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time, limit int) ([]domain.InvoiceDunningRun, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -1328,7 +1333,6 @@ func (s *PostgresStore) ListDueRunsForClock(ctx context.Context, tenantID, clock
 			  AND i.status NOT IN ('voided', 'uncollectible')
 			)
 		ORDER BY r.next_action_at ASC LIMIT $4
-		FOR UPDATE SKIP LOCKED
 	`, tenantID, clockID, frozenTime, limit)
 	if err != nil {
 		return nil, err
