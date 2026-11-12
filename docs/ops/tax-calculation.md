@@ -85,7 +85,7 @@ With tax-inclusive pricing, the retry keeps the total at the sum of the line pri
 - A refresh that failed left the draft waiting for tax, with the lowered amounts.
 - On a draft whose tax had been retried before, a refresh at a new rate lowered the total with a discount (`discount_cents`) of about the old tax.
 
-Later versions tax the line prices. They do not restore a lowered draft: a retry taxes what the lines charge, and they already charge the lowered amounts.
+Later versions tax the line prices. They do not restore a lowered draft: a retry taxes what the lines charge, and they already charge the lowered amounts. On a release after v0.9.3, a retry also drops a draft's `discount_cents`: no invoice has a discount of its own.
 
 **Check.** Run this before you upgrade, in `psql` as the database owner ([why the first line](runbook/index.md#before-you-start)). After the upgrade, a retry changes the lines it looks for. So if you upgraded already, it still finds each invoice that no retry has touched since.
 

@@ -199,39 +199,17 @@ func TestApplyTaxToLineItems_ZeroSubtotal(t *testing.T) {
 	}
 }
 
-func TestApplyTaxToLineItems_DiscountReducesTax(t *testing.T) {
-	// 18.5% of ($100 - $50) = $9.25 → 925 cents.
+// The providers tax the whole line amounts, so a discount would be taken off
+// a total whose tax it never lowered. No invoice has one: it is refused.
+func TestApplyTaxToLineItems_RefusesADiscount(t *testing.T) {
 	e := newManualEngine(1850, "VAT", nil)
 	lineItems := []domain.InvoiceLineItem{{AmountCents: 10000, Quantity: 1}}
 
-	r, err := e.ApplyTaxToLineItems(context.Background(), "t1", "cus_1", "USD", 10000, 5000, lineItems)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if _, err := e.ApplyTaxToLineItems(context.Background(), "t1", "cus_1", "USD", 10000, 5000, lineItems); err == nil {
+		t.Fatal("a 5000 discount was accepted, want an error")
 	}
-	if r.TaxAmountCents != 925 {
-		t.Errorf("got tax %d, want 925", r.TaxAmountCents)
-	}
-}
-
-func TestApplyTaxToLineItems_ProportionalDiscountDistribution(t *testing.T) {
-	// $50 + $150 = $200 gross; $20 discount; 10% → $18 tax total.
-	// Line sums must match.
-	e := newManualEngine(1000, "VAT", nil)
-	lineItems := []domain.InvoiceLineItem{
-		{AmountCents: 5000, Description: "small", Quantity: 1},
-		{AmountCents: 15000, Description: "large", Quantity: 1},
-	}
-
-	r, err := e.ApplyTaxToLineItems(context.Background(), "t1", "cus_1", "USD", 20000, 2000, lineItems)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if r.TaxAmountCents != 1800 {
-		t.Errorf("got tax %d, want 1800", r.TaxAmountCents)
-	}
-	if lineItems[0].TaxAmountCents+lineItems[1].TaxAmountCents != r.TaxAmountCents {
-		t.Errorf("line tax sum != invoice tax (%d + %d vs %d)",
-			lineItems[0].TaxAmountCents, lineItems[1].TaxAmountCents, r.TaxAmountCents)
+	if lineItems[0].TaxAmountCents != 0 || lineItems[0].TotalAmountCents != 0 {
+		t.Errorf("line tax/total = %d/%d after the refusal, want the line untouched", lineItems[0].TaxAmountCents, lineItems[0].TotalAmountCents)
 	}
 }
 
@@ -358,15 +336,15 @@ func TestApplyTaxToLineItems_Inclusive_ZeroRate(t *testing.T) {
 	e := newInclusiveManualEngine(0, "")
 	lineItems := []domain.InvoiceLineItem{{AmountCents: 10000, Quantity: 1}}
 
-	r, err := e.ApplyTaxToLineItems(context.Background(), "t1", "cus_1", "USD", 10000, 500, lineItems)
+	r, err := e.ApplyTaxToLineItems(context.Background(), "t1", "cus_1", "USD", 10000, 0, lineItems)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if r.TaxAmountCents != 0 {
 		t.Errorf("got tax %d, want 0", r.TaxAmountCents)
 	}
-	if r.SubtotalCents != 10000 || r.DiscountCents != 500 {
-		t.Errorf("inputs should pass through: subtotal=%d discount=%d", r.SubtotalCents, r.DiscountCents)
+	if r.SubtotalCents != 10000 || r.DiscountCents != 0 {
+		t.Errorf("subtotal=%d discount=%d, want 10000 and 0", r.SubtotalCents, r.DiscountCents)
 	}
 }
 

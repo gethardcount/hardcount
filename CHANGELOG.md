@@ -82,6 +82,7 @@ original text.
 
 ### Fixed
 
+- **With tax-inclusive prices on the manual tax provider, an invoice with several lines now charges the sum of its prices.** Each line's net is its price less its tax. Before, the total could be a cent short per line, or show a 0.01 discount nobody gave. A tax retry or a finalize no longer keeps a draft's stored discount. Issued invoices are unchanged.
 - **A test-clock advance now ends every due trial and resumes every due collection pause, however many, in the order they fell due.** It did the first 100 of each and said `ready`, and it skipped a trial, pause or period close whose subscription another request held at that moment. Advance again to finish what an earlier advance left ([#1696](https://github.com/gethardcount/hardcount/pull/1696)).
 - **A trial extended while its trial-end job runs is no longer activated and billed at its old end.** The job now checks the trial's end when it flips it, in real time and on a test clock, and leaves an extended trial running ([#1696](https://github.com/gethardcount/hardcount/pull/1696)).
 - **A test-clock advance stops at the first job that fails, and the clock's reason names that job.** Before, the jobs after it ran too: a relief credit note that failed to issue let the card charge take the full amount. Retry advance runs the advance again from the top ([#1695](https://github.com/gethardcount/hardcount/pull/1695)).
