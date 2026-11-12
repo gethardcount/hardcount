@@ -30,7 +30,7 @@ come from the clock, not from the real time.
 |---|---|---|
 | `ready` | Idle. | Move it, or delete it. |
 | `advancing` | Hardcount is running everything that fell due in the skipped time. | Wait, and read the clock again. |
-| `internal_failure` | A step failed, or the run took more than 10 minutes. Work done before the failure is kept. `last_failure_reason` says why. | `POST /v1/test-clocks/{id}/retry-advance`, or delete the clock. |
+| `internal_failure` | A step failed, or the run took more than 10 minutes. Work done before the failure is kept, and the steps after it did not run. `last_failure_reason` names the step that failed and why. | `POST /v1/test-clocks/{id}/retry-advance`, or delete the clock. |
 
 ## Moving a clock
 

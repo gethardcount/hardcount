@@ -390,3 +390,12 @@ The per-clock phases above are driven by the `testclock_catchup` leader's
 tick ([ADR-140](140-test-clock-catchup-is-a-leader-role.md)), not by a
 queue-driven `CatchupWorker`. The phase list and its order are unchanged
 (`testclock.Service.runPhases`).
+
+## Amendment 2026-11-13: a pass stops at its first failed job
+
+Each job still runs all its rows, but the pass now stops at the first job
+that returns an error, and the clock's failure reason names that job. Before,
+every later job ran too, so a relief credit note that failed to issue let
+collection charge the full amount. Retry advance runs the pass again from the
+top; every job is safe to repeat. Real time does not stop: its next tick asks
+again.
