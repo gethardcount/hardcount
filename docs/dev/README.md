@@ -1,42 +1,29 @@
 # Contributor docs
 
-For people changing Hardcount itself. You do not need these pages to use or run
-Hardcount: the user and operator docs start at [docs/README.md](../README.md).
+For people changing Hardcount. To use or run it, see [docs/README.md](../README.md).
 
-## Start here
+## Read in this order
 
-1. [CONTRIBUTING](../../CONTRIBUTING.md): setup, tests, and what CI checks.
-2. [Architecture](../architecture.md): package layout and design rules.
-3. [Money-path robustness playbook](money-path-robustness-playbook.md):
-   required for any change to invoices, payments, credits, dunning,
-   subscriptions or tax.
-4. [How we test](../testing.md): which test to write, and how to run it.
-   The [release checklist](release-checklist.md) holds the live checks
-   run by hand before each release, and the
-   [Stripe end-to-end test](stripe-end-to-end-test.md) has the
-   step-by-step Stripe commands.
-5. [OpenAPI workflow](openapi-workflow.md): changing the API contract.
-6. [Writing a database migration](migrations.md): changing the
-   database schema.
-7. [Code standard](code-standard.md): how we write code, tooling and the
-   dashboard.
-8. [Writing style](writing-style.md): how to write docs here.
-9. [Code comments](code-comments.md): how to write comments in code (Go, TypeScript, scripts and CI).
-10. [Activity lines and UI words](activity-lines.md): how to word the text
-    the dashboard shows.
-11. [Contributor glossary](glossary.md): words from the code, the database
-    and the operations docs.
-12. AI coding agents start at [CLAUDE.md](../../CLAUDE.md).
+1. [CONTRIBUTING](../../CONTRIBUTING.md): set up, test, open a pull request.
+2. [How Hardcount is built](../ENGINEERING.md): the principles.
+3. [Architecture](../architecture.md): the packages and design rules.
+4. [Code standard](code-standard.md) and [Code comments](code-comments.md).
+5. [How we test](../testing.md).
+6. [Money-path playbook](money-path-robustness-playbook.md): before you change money or billing state.
+
+## Read when you need it
+
+- [Writing a database migration](migrations.md)
+- [OpenAPI workflow](openapi-workflow.md)
+- [Writing style](writing-style.md): docs and pull requests.
+- [Activity lines and UI words](activity-lines.md)
+- [Release checklist](release-checklist.md) and [Stripe end-to-end test](stripe-end-to-end-test.md): by hand, before a release.
+- [Product glossary](../glossary.md) (billing words) and [contributor glossary](glossary.md) (code words)
+- [CLAUDE.md](../../CLAUDE.md): for AI sessions.
 
 ## Background
 
-Background for a decision, kept as written.
-
-- [Architecture decision records (ADRs)](../adr/README.md): one decision per
-  file, with the reasons and the alternatives.
-- [Design docs](design/README.md): the plan for each feature, written
-  before it was built. Where a design doc and the code disagree, the code
-  and the ADRs are the current record.
-- [Records](records/README.md): dated audits, reviews, plans and benchmark
-  run journals, kept as written.
-- [CHANGELOG](../../CHANGELOG.md): every change, by date.
+- [Decision records (ADRs)](../adr/README.md)
+- [Design docs](design/README.md): plans written before the code. Where the two differ, the code is right.
+- [Records](records/README.md): dated audits and reviews, kept as written.
+- [CHANGELOG](../../CHANGELOG.md)

@@ -22,8 +22,8 @@ import (
 // dunning store, the invoice store and its failure settle, and the email
 // outbox. Only the card charge is faked: it stamps the invoice processing as
 // the charge path does, and, for the races, commits the payment's outcome
-// before the run write (the concurrent-resolver fake, money-path playbook §5
-// pattern 3).
+// before the run write (the concurrent-resolver fake, money-path playbook
+// test 3).
 
 // processingRetry is the charge of a retry whose payment Stripe left
 // processing: it takes the invoice's charge hold as the adapter's claim does,

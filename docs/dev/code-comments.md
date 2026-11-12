@@ -1,88 +1,27 @@
 # Code comments
 
-These rules are for anyone who writes or changes a comment in code: Go,
-TypeScript, shell scripts, Makefiles, Dockerfiles and CI YAML. Each comment
-serves two readers with the code open:
+How to write a comment in Go, TypeScript, shell scripts, Makefiles, Dockerfiles and CI YAML.
 
-- **A developer who knows the language but is new to this codebase.** They
-  understand the comment on the first read, without opening another file.
-- **A maintainer about to change the code.** The comment gives them the rules,
-  invariants and traps they would otherwise break, with the reason.
+A comment has two readers. A developer new to the code understands it on first read, without opening another file. A maintainer finds the rules and traps a change could break.
 
-Making a comment easier for the first reader never removes what the second
-needs. A comment adds only what the code cannot say. The
-[writing style](writing-style.md) rules still apply: one idea per sentence,
-plain words and quiet emphasis.
+The [writing rules](writing-style.md#the-rules) apply too, above all: no history, no capitals for emphasis. Only review checks this page. Older comments do not all follow it.
 
-1. **Say why, not what.** Explain the reason, the rule the code keeps, or the
-   trap it avoids. Do not repeat what the next line does. If a better name
-   would make the comment unnecessary, rename instead
-   ([Google Go style guide](https://google.github.io/styleguide/go/guide#clarity)).
-2. **Doc comments follow Go's conventions**
-   ([Go Doc Comments](https://go.dev/doc/comment)).
-   - Every exported name has one. It is a full sentence that starts with the
-     name.
-   - It says what the function returns or does, and what a caller must know:
-     preconditions, errors, whether it runs on the caller's transaction, and
-     whether it is safe to call concurrently.
-   - How the function works goes in comments inside its body.
-   - Each package has one package comment (`// Package billing …`), in
-     `doc.go` or the package's main file.
-   - In TypeScript, an exported function, hook or component gets a `/** */`
-     comment ([TSDoc](https://tsdoc.org)) when its name and types do not say
-     what a caller must know. The types already give the shapes.
-3. **Rule first, then the reason.** Write the rule in one sentence and the
-   reason in the next: "Allocate the number on the caller's transaction.
-   Otherwise a second connection waits on the row this transaction holds."
-   When a sentence says "so" or "this", the reader must see what it points to
-   on the first read.
-4. **Keep it short.** Most comments are one to three lines. A doc comment over
-   about 15 lines, or a comment inside a function over about 8, needs a
-   reason: usually several rules that a caller must all know. Design
-   discussion, rejected options and future plans go in an ADR, and the comment
-   links to it.
-5. **Describe today's code, and keep history behind a link.** Leave out
-   incident stories, "used to", "pre-fix", corrections, audit dates and review
-   rounds. When history is the reason for a rule, state the reason in the
-   present tense and add a pointer: "(See ADR-107.)" The comment must make
-   sense without opening the link.
-6. **State rules, not counts or call sites.** "Every service guard calls this"
-   stays true. "The seven call sites" goes stale the day an eighth is added.
-   Name a caller, file or line only when the reader needs to go there.
-7. **Write plainly.**
-   - No capitals for emphasis (NOT, NEVER, MUST). Plain "must" and "never",
-     with the reason, carry the weight.
-   - Break chains of dashes and semicolons into sentences.
-   - Define a project word on first use (parked, lane, catch-up), or use plain
-     words. Spell identifiers exactly as the code does.
-   - Wrap at about 80 columns, as most of the code already does.
-8. **A wrong comment is a bug.** When you change code, update or delete the
-   comments that describe it in the same commit. A false comment you find
-   while doing other work gets its own PR or an issue. Do not fix it in a PR
-   that only rewords comments.
+## The rules
 
-Keep the markers that tools read, with their syntax unchanged: `//go:`
-directives, `//nolint:<linter> // <reason>` waivers (golangci-lint requires
-the reason), `eslint-disable` and `@ts-expect-error` comments, and
-`# shellcheck` directives.
+1. **Say why, not what.** Give the reason, the rule the code keeps or the trap it avoids.
+2. **A long comment means the code needs work.** If a guard, fallback or workaround takes many lines to explain, remove the second path or fix the cause, and most of the comment goes too.
+3. **Keep it short.** Most comments are one to three lines, wrapped at about 80 columns. A doc comment over about 15 lines, or a comment inside a function over about 8, needs a reason. Design discussion, rejected options and plans go in a decision record (an ADR, `docs/adr/`). When you cut, [nothing a maintainer needs is dropped](writing-style.md#shorter-with-nothing-lost).
+4. **A doc comment tells the caller what they must know:** what the function returns or does, its preconditions, its errors, whether it uses the caller's transaction and whether concurrent calls are safe. Every exported name and package has one, in [Go Doc Comments](https://go.dev/doc/comment) form.
+5. **In TypeScript,** an exported function, hook or component gets a `/** */` comment ([TSDoc](https://tsdoc.org)) when its name and types do not say enough.
+6. **State rules, not counts or call sites.** "Every service guard calls this" stays true. "The seven call sites" is wrong once an eighth is added.
+7. **A wrong comment is a bug.** Change the comment with the code: update or delete it in the same commit.
+8. **Leave tool markers as they are:** `//go:` directives, `eslint-disable`, `@ts-expect-error`, `# shellcheck` and `//nolint`.
 
-## Before and after
+To reword or fix existing comments, see [Changing existing text](writing-style.md#changing-existing-text).
 
-A "so" whose subject is not said (`cmd/hardcount/main.go`):
+## Example
 
-```go
-// Before
-// A period is closed on the first billing tick after its end plus the
-// grace, so the operator sees when invoices will actually be built.
-slog.Info("invoice grace period", "invoice_grace_period", cfg.InvoiceGracePeriod, "billing_interval", billingInterval)
-
-// After
-// Log the grace and the billing interval together. A period closes on the
-// first billing tick after its end plus the grace, so an operator needs both
-// to know when invoices are built.
-```
-
-History and capitals in place of the reason (same file):
+History and capitals where the reason belongs (adapted from `cmd/hardcount/main.go`):
 
 ```go
 // Before
@@ -95,62 +34,6 @@ History and capitals in place of the reason (same file):
 
 // After
 // api.NewServer always builds these services, so wire them without nil
-// checks. The scheduler skips a worker whose service is nil, which tests
-// rely on. A nil check here would hide a wiring bug by turning off a
+// checks. A nil check here would hide a wiring bug by turning off a
 // money-path worker without a word.
 ```
-
-A doc comment that grew into a design record. The one on
-`domain.PaymentBlocksAction` had 83 lines: a correction story, a count of call
-sites and the design of a superseded ADR. A caller needs these 16:
-
-```go
-// PaymentBlocksAction reports whether the invoice's payment state blocks an
-// operator action, and what to tell the operator. It is the one statement of
-// this rule: change it here, not at the call sites.
-//
-// There are three cases:
-//   - No payment in flight: nothing is blocked here. The caller's own status
-//     rules (paid, voided, draft) still apply, because they differ per action.
-//   - Parked (payment_status 'unknown' with no PaymentIntent ID): Stripe's
-//     answer named no payment, and Hardcount checks the customer's payments
-//     at Stripe within a day. Only mark-uncollectible is allowed, for a
-//     customer who paid another way. Every other action is refused, and the
-//     message says what Hardcount does next.
-//   - In flight with a known PaymentIntent: the charge is resolving, so every
-//     action is refused and the operator is told to wait.
-//
-// See ADR-107 and ADR-127 for the parked state.
-```
-
-## Changing existing comments
-
-- **One package per PR, comments only.** No code changes, so the tests and
-  lint show that no behaviour changed. Small PRs keep conflicts with other
-  work cheap. Small sibling packages, under about 300 comment lines each,
-  can share a PR, and a file with over about 1,000 comment lines gets its
-  own.
-- **Prove it.** This prints every changed line that is not a comment or blank,
-  and must print nothing:
-
-  ```bash
-  git diff -U0 origin/main -- '*.go' | grep -E '^[+-][^+-]' | grep -vE '^[+-][[:space:]]*(//.*)?$'
-  ```
-
-  A comment at the end of a code line shows up here. Check each one by hand.
-  For TypeScript, run the same check on `'*.ts' '*.tsx'` with
-  `(//|/\*|\*)` as the comment marker. For scripts and YAML, use `#`.
-- **A shipped migration is a record.** Leave the comments in a migration that
-  has been released as they are. New migrations follow these rules.
-- **Review with both readers.** One reviewer reads the new comments cold, as
-  a developer new to the codebase. Another reads them as the maintainer,
-  next to the old text, and checks that no rule or trap was lost.
-- **Rewording and fact fixes stay apart.** A rewording PR changes only how
-  comments are written, and keeps every fact. A truth PR fixes comments that
-  disagree with the code, and re-checks each claim against the code. Docs
-  allow both in one PR
-  ([Changing existing docs safely](writing-style.md#changing-existing-docs-safely)),
-  but comments do not. A comment often says what the code is meant to do, so
-  when the two disagree, the code may be the part that is wrong. Deciding
-  which is wrong means reading the code, and the fix may be a code change,
-  which a comments-only PR cannot hold.

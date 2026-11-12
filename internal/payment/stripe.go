@@ -620,8 +620,8 @@ func (s *Stripe) ChargeInvoiceNow(ctx context.Context, tenantID string, inv doma
 // Exposed as a separate method rather than a variadic option so the
 // engine's InvoiceCharger interface stays narrow (default-mode only)
 // and the cross-domain import that a shared options type would force
-// (billing → payment) is avoided per the per-domain-isolation rule
-// in CLAUDE.md.
+// (billing → payment) is avoided per the package-boundary rule in
+// docs/architecture.md ("Design rules").
 func (s *Stripe) ChargeInvoiceForDunningRetry(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, stripeCustomerID, stripePaymentMethodID string) (domain.Invoice, error) {
 	return s.chargeInvoice(ctx, tenantID, inv, hold, stripeCustomerID, stripePaymentMethodID, piPurposeDunningRetry, domain.ChargeTriggerDunningRetry)
 }

@@ -32,8 +32,8 @@ func scanDisputeDest(d *domain.InvoiceDispute) []any {
 //     recorded it, otherwise from the disputed PaymentIntent (the invoice's
 //     charge attempts, then the invoice's own payment and anomaly columns).
 //     No invoice holds it: errs.ErrNotFound, the charge was not Hardcount's;
-//   - the invoice row is locked first, then the dispute row (lock order rule,
-//     playbook §5.6), so two events for one dispute serialize;
+//   - the invoice row is locked first, then the dispute row (lock order,
+//     playbook item 8), so two events for one dispute serialize;
 //   - the snapshot is written only when it is newer than the row
 //     (InvoiceDispute.SupersededBy), so a redelivery or an older event that
 //     arrives late changes nothing and queues nothing;

@@ -2,7 +2,7 @@
 
 > **Record of 2026-07, kept as written.** A census here is a dated count of which money-path failure classes the code still had.
 
-A dated census, moved verbatim from the [Money-Path Robustness Playbook](../money-path-robustness-playbook.md); its § numbers refer to that playbook.
+A dated census, moved verbatim from the [Money-Path Robustness Playbook](https://github.com/gethardcount/hardcount/blob/19a49cb0d6c9cf228ed7772096511f2a87182494/docs/dev/money-path-robustness-playbook.md); its § numbers refer to that version, the last one with numbered sections.
 
 <!-- vale off -->
 <!-- Recorded text, kept as written (docs/dev/writing-style.md: do not rewrite records). -->

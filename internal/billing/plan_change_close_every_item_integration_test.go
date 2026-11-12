@@ -134,7 +134,7 @@ func (f *everyItemFixture) close(t *testing.T, afterRead func()) {
 // readHookSubAdapter runs afterRead once, right after the engine's first read
 // of a subscription. The billing run closes a period from that read, so a
 // write afterRead commits lands between the close's read and its plan swap:
-// the concurrent writer of the money-path playbook's §5 pattern 3.
+// the concurrent writer of the money-path playbook's test 3.
 type readHookSubAdapter struct {
 	*subStoreAdapter
 	afterRead func()

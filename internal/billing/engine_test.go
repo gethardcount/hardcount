@@ -389,7 +389,7 @@ type mockSubs struct {
 	closePeriodErr   error
 	closePeriodCalls int
 	// beforeCloserTx runs when the engine opens a closer tx, BEFORE the
-	// emulated tx snapshot — the concurrent-resolver hook (playbook §5.3): a
+	// emulated tx snapshot — the concurrent-resolver hook (playbook test 3): a
 	// test moves the row here to emulate a competing closer that COMMITTED
 	// between the engine's read and its write, so the faithful CAS below
 	// misses and the loser's rollback (which restores only its own writes)
@@ -1034,7 +1034,7 @@ func (m *mockInvoices) CreateInvoiceWithLineItemsTx(_ context.Context, _ *sql.Tx
 }
 
 // ClaimAutoCharge is a FAITHFUL concurrent-resolver fake (playbook
-// pattern): it honors the real CAS semantics — predicate re-check +
+// test 3): it honors the real CAS semantics — predicate re-check +
 // exactly-one-winner — so engine tests exercising concurrent sweeps
 // prove the claim actually gates the charge leg.
 // Each claim hands out its own token, and a release clears the hold only

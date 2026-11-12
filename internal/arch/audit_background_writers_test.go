@@ -26,7 +26,7 @@ import (
 // Every one of these discards the error (`_ =`), which is correct and is also the
 // point: post-commit, there is nothing the caller can do. The only real fix is to
 // stop writing post-commit, and that means threading the business tx down to the
-// emission — a money-path change per domain, under the playbook gates, which is
+// emission — a money-path change per domain, under the playbook checklist, which is
 // what ADR-090 says each domain does in its own PR.
 //
 // So this gate does the one thing that is both cheap and load-bearing today: it

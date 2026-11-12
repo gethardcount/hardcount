@@ -67,4 +67,4 @@ them to use Hardcount.
   Stripe call or a ledger write when the state changes). It also means each
   gated reader (code that branches on the state), each caller and callee,
   and each crash point.
-  [More](money-path-robustness-playbook.md#2-the-meta-practice-complete-site-set-enumeration)
+  [More](money-path-robustness-playbook.md#list-every-place-first)

@@ -817,7 +817,7 @@ func TestThresholdScan_ConcurrentDoubleFire_IndexHolds(t *testing.T) {
 // failableSubAdapter wraps subStoreAdapter with (a) an injectable
 // ClosePeriodTx failure — the closer's CAS — and (b) a hook that runs INSIDE
 // WithTenantTx before the engine's tx is opened: the concurrent-resolver seam
-// (playbook §5.3) the ADR-115 collision tests use to commit a competing
+// (playbook test 3) the ADR-115 collision tests use to commit a competing
 // period writer between the engine's read and its write.
 type failableSubAdapter struct {
 	*subStoreAdapter

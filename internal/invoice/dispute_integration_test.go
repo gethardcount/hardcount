@@ -272,7 +272,7 @@ func TestRecordStripeDispute_AnyOrderAndRedelivery(t *testing.T) {
 }
 
 // TestRecordStripeDispute_ConcurrentEventsRecordOnce is the collision test
-// (playbook §5.1): every event of a new dispute, each delivered twice, all at
+// (playbook test 1): every event of a new dispute, each delivered twice, all at
 // once. They serialize on the invoice row; exactly one row results, ending at
 // the newest snapshot, with one opened and one closed event.
 func TestRecordStripeDispute_ConcurrentEventsRecordOnce(t *testing.T) {
@@ -362,7 +362,7 @@ func TestRecordStripeDispute_FindsTheInvoiceByThePayment(t *testing.T) {
 }
 
 // TestDisputes_TenantAndModeIsolation: RLS, not the SQL, keeps one tenant's
-// disputes from another, and test mode from live mode (playbook §5.2): the
+// disputes from another, and test mode from live mode (playbook test 2): the
 // count query has no WHERE. Another tenant cannot record against this
 // tenant's payment either: the lookup does not see it.
 func TestDisputes_TenantAndModeIsolation(t *testing.T) {

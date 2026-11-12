@@ -71,7 +71,7 @@ Postgres breaks a deadlock by aborting one of the transactions in it, with SQLST
   It would save one client resend in a race that is already rare. A retry added later builds on this ADR: the handler conversion stays as its last step.
 - **B. Map 40P01 in `FromError` for every route.** Rejected. A `409` frees the key, which is safe only where everything the request saved earlier can run twice. Collect's card branch can deadlock in its settle after Stripe captured the charge. The idempotency layer stores that `500` on purpose.
 - **C. Run the whole request again in the idempotency middleware.** Rejected. Charge now would claim the invoice again after a capture, `auto_issue` would make a second note, and the middleware cannot see the error once the handler has written the answer.
-- **D. Fix the lock order of each pair** ([money-path playbook](../dev/money-path-robustness-playbook.md#5-test-lock-doctrine), item 6; [ADR-078](078-prepaid-commits-phase-1.md) decision 7). Not needed now:
+- **D. Fix the lock order of each pair** ([money-path playbook](../dev/money-path-robustness-playbook.md#the-tests-a-money-change-needs), test 6; [ADR-078](078-prepaid-commits-phase-1.md) decision 7). Not needed now:
   - D1 has no small fix. `LockDunningPauseTx` locks the subscription only after a pause has committed, on purpose. Locking it on every payment would make each payment wait behind closers that hold the subscription across their tax call.
   - D2: the teardown could lock the clock's subscriptions right after the clock row. After this ADR, neither side leaves a stored `500`.
   - D3: release and discard could lock in key order. Neither side is stored.
@@ -87,7 +87,7 @@ Postgres breaks a deadlock by aborting one of the transactions in it, with SQLST
 
 ### Risks / open items
 
-- **Revisit trigger.** The WARN line "request lost a database deadlock" names a pair. A pair that recurs gets a lock-order fix and its pair test, under the money-path playbook (section 5, item 6).
+- **Revisit trigger.** The WARN line "request lost a database deadlock" names a pair. A pair that recurs gets a lock-order fix and its pair test, under the money-path playbook (test 6).
 - **A resend repeats the work the lost attempt did before Postgres stopped it.** For a cancel or a prorated item change that includes the tax calculation, whose row stays with no invoice. The `invoice_changed` `409` already has the same cost.
 - **The dashboard does not offer Collect on an invoice with nothing due.** After collect's `409`, the invoice page reloads and shows the invoice open with $0 due and no Collect button, so an operator there cannot send it again. The API resend settles it (decision 4). So does a dunning retry, and the auto-charge sweep while the invoice still waits for its automatic charge.
 - **Other transactions.** A 40P01 in any other request, the D4 writers included, stays a stored `500`. None has a documented deadlock now.
