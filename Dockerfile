@@ -11,7 +11,7 @@
 # job runs only on main.
 # The builder runs on the machine doing the build and cross-compiles for
 # the target, so a multi-platform build needs no emulation.
-FROM --platform=$BUILDPLATFORM golang:1.26.10-alpine AS builder
+FROM --platform=$BUILDPLATFORM golang:1.26.11-alpine AS builder
 
 RUN apk add --no-cache ca-certificates
 
