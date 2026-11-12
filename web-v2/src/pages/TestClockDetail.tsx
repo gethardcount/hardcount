@@ -70,9 +70,13 @@ function LastAdvanceCard({ summary }: { summary: AdvanceSummary }) {
         </div>
         <p className="mt-1 text-xs text-muted-foreground">{span}</p>
         {rows.length === 0 ? (
-          <p className="mt-3 text-sm text-muted-foreground">
-            No billing activity — nothing was due in this period.
-          </p>
+          // A pass that failed at its first job did nothing; the error line
+          // below says so, and "nothing was due" would be false.
+          !summary.had_errors && (
+            <p className="mt-3 text-sm text-muted-foreground">
+              No billing activity — nothing was due in this period.
+            </p>
+          )
         ) : (
           <dl className="mt-3 grid grid-cols-2 gap-x-8 gap-y-2 sm:grid-cols-3">
             {rows.map(([label, n]) => (
@@ -88,8 +92,9 @@ function LastAdvanceCard({ summary }: { summary: AdvanceSummary }) {
         {summary.had_errors && (
           <p className="mt-3 flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
             <AlertTriangle size={13} className="mt-0.5 shrink-0" aria-hidden />
-            This advance ended with an error — the counts above reflect only the work that
-            completed before it failed.
+            {rows.length === 0
+              ? 'This advance ended with an error before any billing work was done.'
+              : 'This advance ended with an error — the counts above reflect only the work that completed before it failed.'}
           </p>
         )}
       </CardContent>

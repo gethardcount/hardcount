@@ -55,9 +55,9 @@ export interface TestClockAdvanceSummary {
   /** Dunning runs that took a step. */
   dunning_advanced: number;
   /**
-     * True when a step failed, which leaves the clock in
-     * `internal_failure`. The steps after a failed one still ran, so
-     * each count is what its step did.
+     * True when a job failed, which leaves the clock in
+     * `internal_failure`. The jobs after the failed one did not run,
+     * so their counts are 0.
      */
   had_errors: boolean;
 }

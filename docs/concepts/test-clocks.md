@@ -30,7 +30,7 @@ come from the clock, not from the real time.
 |---|---|---|
 | `ready` | Idle. | Move it, or delete it. |
 | `advancing` | Hardcount is running everything that fell due in the skipped time. | Wait, and read the clock again. |
-| `internal_failure` | A step failed, or the run took more than 10 minutes. Work done before the failure is kept. `last_failure_reason` says why. | `POST /v1/test-clocks/{id}/retry-advance`, or delete the clock. |
+| `internal_failure` | A job failed, or the run took more than 10 minutes. Work done before the failure is kept, and the jobs after it did not run. `last_failure_reason` names the job that failed and why. | `POST /v1/test-clocks/{id}/retry-advance`, or delete the clock. |
 
 ## Moving a clock
 
@@ -53,19 +53,25 @@ as `invoices_generated` and `charges_retried`.
 ## What runs while the clock moves
 
 Hardcount runs everything that fell due between the old time and the new
-one. It runs it by kind, not in time order:
+one. It runs one job for each kind, in this order, not in time order:
 
 1. trial ends;
 2. billing period closes, which make the invoices;
-3. pauses that reach their `resumes_at`;
+3. pause ends: pauses that reach their `resumes_at`;
 4. spend thresholds;
-5. tax calculations waiting for a retry;
-6. card charges of invoices waiting to be charged, such as new invoices
+5. tax retries: tax calculations waiting for a retry;
+6. relief credit notes: credit notes (documents that lower what a customer
+   owes) waiting to be issued, so an invoice is charged the lower amount;
+7. card charges of invoices waiting to be charged, such as new invoices
    or ones whose customer just added a card;
-7. credit notes (documents that lower what a customer owes) that were
-   waiting for an invoice to settle;
-8. dunning steps: payment retries, reminder emails and final actions;
-9. credit expiry, last.
+8. relief credit notes again, for those that were waiting for an invoice
+   to settle;
+9. payment retries: dunning retries, reminder emails and final actions;
+10. credit expiry, last.
+
+If a job fails, the jobs after it do not run: the clock stops at
+`internal_failure`, and its `last_failure_reason` starts with the job's
+name from this list.
 
 A clock has no invoice grace period: moving past a period's end makes its
 invoice at once.

@@ -61,6 +61,10 @@ func TestRunCatchup_PassDeadlineMarksFailedOnALiveCtx(t *testing.T) {
 		if err == nil {
 			t.Fatal("expected the pass to return the overrun as an error")
 		}
+		// The log keeps the deadline and the error of the job that met it.
+		if msg := err.Error(); !strings.Contains(msg, "did not finish within 50ms") || !strings.Contains(msg, "billing period closes: ") {
+			t.Errorf("returned error %q, want the deadline and the job's error", msg)
+		}
 	case <-time.After(time.Second):
 		t.Fatal("the pass did not end within a second of its 50ms deadline: it ignores Deps.PassDeadline")
 	}
@@ -71,8 +75,10 @@ func TestRunCatchup_PassDeadlineMarksFailedOnALiveCtx(t *testing.T) {
 	if got.Status != domain.TestClockStatusInternalFailed {
 		t.Errorf("status: got %q, want internal_failure (clock must not be left stuck in 'advancing')", got.Status)
 	}
-	if !strings.Contains(got.LastFailureReason, "the catch-up pass at 2026-01-01T00:00:00Z did not finish within 50ms") {
-		t.Errorf("last_failure_reason should name the clock's time and the deadline, got %q", got.LastFailureReason)
+	// The banner is the deadline alone: the job that met the ended ctx is not
+	// the one that took the time.
+	if want := "the catch-up pass at 2026-01-01T00:00:00Z did not finish within 50ms"; got.LastFailureReason != want {
+		t.Errorf("last_failure_reason = %q, want %q", got.LastFailureReason, want)
 	}
 }
 
