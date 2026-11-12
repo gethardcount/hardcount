@@ -158,11 +158,9 @@ type DunningProcessor interface {
 	ProcessDueRunsForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time, limit int) (int, []error)
 }
 
-// Service provides the test-clock API surface. Depends on Store for
-// persistence and BillingRunner to drive the billing engine during the
-// catch-up. Advance and Retry advance only mark the clock; the
-// testclock_catchup leader runs the catch-up on its tick (catchup.go,
-// ADR-140), off the request path.
+// Service provides the test-clock API surface. Advance and Retry advance only
+// mark the clock; the testclock_catchup leader runs the catch-up on its tick
+// (catchup.go, ADR-140), off the request path.
 type Service struct {
 	store         Store
 	billing       BillingRunner
@@ -174,87 +172,74 @@ type Service struct {
 	clawback      ClawbackRetrier
 	creditExpirer CreditExpirer
 	dunning       DunningProcessor
+	passDeadline  time.Duration
 }
 
-// NewService takes the billing engine as its BillingRunner: an advance that
-// bills nothing would be a wrong advance, so the runner is required.
-func NewService(store Store, billing BillingRunner) *Service {
-	return &Service{store: store, billing: billing}
+// Deps is everything the service needs. Every field is required: a catch-up
+// that skipped a job would leave the clock ready with that job's work undone.
+type Deps struct {
+	// Billing closes the clock's due periods, collects their invoices and
+	// fires spend thresholds.
+	Billing BillingRunner
+	// Customers and Subs read the clock's customers and subscriptions for
+	// its detail page.
+	Customers CustomerReader
+	Subs      SubscriptionLister
+	// Trials ends the trials due by the clock's time; without it a
+	// subscription stays trialing until its next period closes.
+	Trials TrialExpirer
+	// Pauses resumes the collection pauses due by the clock's time.
+	Pauses PauseResumer
+	// Tax retries tax on the clock's invoices waiting for it. The scheduled
+	// retry skips clock invoices.
+	Tax TaxRetrier
+	// Relief issues the relief credit notes held for the clock's invoices,
+	// before collection and again after it. The real-time job skips them.
+	Relief ClawbackRetrier
+	// Credits expires the clock's credit grants due by its time.
+	Credits CreditExpirer
+	// Dunning runs the clock's payment retries due by its time. The
+	// real-time dunning tick skips clock invoices.
+	Dunning DunningProcessor
+	// PassDeadline bounds one catch-up pass; a pass that runs past it fails
+	// the advance. The router passes CatchupPassDeadline.
+	PassDeadline time.Duration
 }
 
-// SetCustomerReader wires the customer-domain hook used to list
-// attached customers. Late-bound (not a constructor arg) because the
-// customer service and the testclock service are built in the same
-// router-wiring step; passing a nil reader is fine for narrow unit
-// tests that don't exercise the attached-customers surface, but the
-// production producer always sets a real reader.
-func (s *Service) SetCustomerReader(r CustomerReader) {
-	s.customers = r
-}
-
-// SetSubscriptionLister wires the subscription read behind
-// GET /v1/test-clocks/{id}/subscriptions.
-func (s *Service) SetSubscriptionLister(l SubscriptionLister) {
-	s.subs = l
-}
-
-// SetDunning wires the per-clock dunning-advance phase of catchup.
-// Optional — when nil, catchup skips Phase 5 (dunning advance) for
-// clock-pinned invoices. The cron's ProcessDueRuns excludes them
-// already, so nil here means clock-pinned dunning state freezes
-// until an operator advances; for narrow tests without dunning
-// fixtures, that's fine. ADR-029 Phase 5.
-func (s *Service) SetDunning(d DunningProcessor) {
-	s.dunning = d
-}
-
-// SetCreditExpirer wires the per-clock credit-expiry phase of catchup.
-// Optional — when nil, catchup skips Phase 4 (credit expiry). The
-// cron's ListExpiredGrants would have processed those rows pre-
-// ADR-029, so nil here means clock-pinned grants don't expire until
-// an operator advances the clock; for narrow unit tests that don't
-// exercise credits, nil is fine. Production wires the real credit
-// service. ADR-029 Phase 4.
-func (s *Service) SetCreditExpirer(c CreditExpirer) {
-	s.creditExpirer = c
-}
-
-// SetTaxRetrier wires the per-clock tax-retry phase of catchup.
-// Optional — when nil, catchup skips Phase 2 (tax retry); the cron's
-// ListPendingTaxRetry would have processed those rows pre-ADR-029, so
-// nil here means clock-pinned tax retries simply don't fire (callers
-// without the wiring are typically narrow unit tests). Production
-// always wires this with the real invoice service. ADR-029 Phase 2.
-func (s *Service) SetTaxRetrier(t TaxRetrier) {
-	s.taxRetry = t
-}
-
-// SetClawbackRetrier wires the per-clock clawback-issue phase (ADR-029). When
-// nil, catchup skips it and a deferred simulated clawback waits for a later
-// advance that has the wiring; production wires the creditnote Service. Runs
-// after the charge phase so a source invoice that just settled this advance is
-// terminal by the time the deferred clawback re-drives.
-func (s *Service) SetClawbackRetrier(c ClawbackRetrier) {
-	s.clawback = c
-}
-
-// SetTrialExpirer wires the per-clock trial-expiry phase (Phase 0.5).
-// Optional — narrow unit tests skip it; production wires the
-// subscription Service. Without this, a clock advance past
-// trial_end_at leaves the sub's status='trialing' until the next
-// cycle close (Bug #8 regression).
-func (s *Service) SetTrialExpirer(t TrialExpirer) {
-	s.trialExpirer = t
-}
-
-// SetPauseResumer wires the per-clock pause-resume phase (Phase 1.2).
-// Optional — without it, clock-pinned subs whose
-// pause_collection_resumes_at has elapsed stay paused until a cycle
-// happens to be due (the engine's defensive in-cycle gate). Production
-// wires the subscription Service so resume-at-resumes_at parity with
-// Stripe holds across all subs, not just those with imminent cycles.
-func (s *Service) SetPauseResumer(r PauseResumer) {
-	s.pauseResumer = r
+// NewService panics when a dependency is missing, so a wiring mistake stops
+// the server at boot instead of skipping a job on every advance.
+func NewService(store Store, d Deps) *Service {
+	missing := func(name string) { panic("testclock.NewService: " + name + " is required") }
+	switch {
+	case store == nil:
+		missing("store")
+	case d.Billing == nil:
+		missing("Deps.Billing")
+	case d.Customers == nil:
+		missing("Deps.Customers")
+	case d.Subs == nil:
+		missing("Deps.Subs")
+	case d.Trials == nil:
+		missing("Deps.Trials")
+	case d.Pauses == nil:
+		missing("Deps.Pauses")
+	case d.Tax == nil:
+		missing("Deps.Tax")
+	case d.Relief == nil:
+		missing("Deps.Relief")
+	case d.Credits == nil:
+		missing("Deps.Credits")
+	case d.Dunning == nil:
+		missing("Deps.Dunning")
+	case d.PassDeadline <= 0:
+		missing("Deps.PassDeadline")
+	}
+	return &Service{
+		store: store, billing: d.Billing, customers: d.Customers, subs: d.Subs,
+		trialExpirer: d.Trials, pauseResumer: d.Pauses, taxRetry: d.Tax,
+		clawback: d.Relief, creditExpirer: d.Credits, dunning: d.Dunning,
+		passDeadline: d.PassDeadline,
+	}
 }
 
 type CreateInput struct {
@@ -297,9 +282,6 @@ func (s *Service) ListSubscriptions(ctx context.Context, tenantID, clockID strin
 	if _, err := s.store.Get(ctx, tenantID, clockID); err != nil {
 		return nil, 0, err
 	}
-	if s.subs == nil {
-		return nil, 0, fmt.Errorf("testclock: subscription lister not wired")
-	}
 	return s.subs.ListByTestClock(ctx, tenantID, clockID, limit, offset)
 }
 
@@ -311,9 +293,6 @@ func (s *Service) ListSubscriptions(ctx context.Context, tenantID, clockID strin
 func (s *Service) ListAttachedCustomers(ctx context.Context, tenantID, clockID string, limit, offset int) ([]domain.Customer, int, error) {
 	if _, err := s.store.Get(ctx, tenantID, clockID); err != nil {
 		return nil, 0, err
-	}
-	if s.customers == nil {
-		return nil, 0, fmt.Errorf("testclock: customer reader not wired")
 	}
 	return s.customers.ListByTestClockID(ctx, tenantID, clockID, limit, offset)
 }
@@ -502,7 +481,7 @@ func (s *Service) runClock(ctx context.Context, clk domain.TestClock) (err error
 		return fmt.Errorf("%s", reason)
 	}
 
-	passCtx, cancel := context.WithTimeout(ctx, catchupPassDeadline)
+	passCtx, cancel := context.WithTimeout(ctx, s.passDeadline)
 	defer cancel()
 	// The pass's ctx carries the clock and its frozen_time (clock.WithSim):
 	// every clock.Now(ctx) below reads the simulated time, and every audit
@@ -518,7 +497,7 @@ func (s *Service) runClock(ctx context.Context, clk domain.TestClock) (err error
 	}
 	if errors.Is(passCtx.Err(), context.DeadlineExceeded) {
 		runErrs = append([]error{fmt.Errorf("the catch-up pass at %s did not finish within %s",
-			clk.FrozenTime.UTC().Format(time.RFC3339), catchupPassDeadline)}, runErrs...)
+			clk.FrozenTime.UTC().Format(time.RFC3339), s.passDeadline)}, runErrs...)
 	}
 	if len(runErrs) > 0 {
 		// The banner gets the operator-safe summary (ADR-026); the log keeps
@@ -579,11 +558,9 @@ func (s *Service) runPhases(ctx context.Context, tenantID, clockID string, froze
 	// Also fires BillOnCreate per activated sub so in_advance
 	// items' first paid period is covered at the activation
 	// instant (Bug #6 carry-through).
-	if s.trialExpirer != nil {
-		trialCount, trialErrs := s.trialExpirer.ProcessExpiredTrialsForClock(ctx, tenantID, clockID, frozen)
-		sum.TrialsActivated = trialCount
-		runErrs = append(runErrs, trialErrs...)
-	}
+	trialCount, trialErrs := s.trialExpirer.ProcessExpiredTrialsForClock(ctx, tenantID, clockID, frozen)
+	sum.TrialsActivated = trialCount
+	runErrs = append(runErrs, trialErrs...)
 
 	// Phase 1 (ADR-028): generate any newly-due periods. Multi-period
 	// catchup happens inside billSubscription's per-sub loop.
@@ -598,11 +575,9 @@ func (s *Service) runPhases(ctx context.Context, tenantID, clockID string, froze
 	// query also skips a sub that still owes such a close (a failed
 	// Phase 1), so a later advance resumes it once that period is
 	// billed. Before Phase 1.5 so the threshold scan sees a resumed sub.
-	if s.pauseResumer != nil {
-		pauseCount, pauseErrs := s.pauseResumer.ProcessExpiredPauseCollectionsForClock(ctx, tenantID, clockID, frozen)
-		sum.PausesResumed = pauseCount
-		runErrs = append(runErrs, pauseErrs...)
-	}
+	pauseCount, pauseErrs := s.pauseResumer.ProcessExpiredPauseCollectionsForClock(ctx, tenantID, clockID, frozen)
+	sum.PausesResumed = pauseCount
+	runErrs = append(runErrs, pauseErrs...)
 
 	// Phase 1.5 (ADR-029 Phase 3): threshold scan for early-invoice
 	// invoices. Runs after period generation (so the latest
@@ -619,11 +594,9 @@ func (s *Service) runPhases(ctx context.Context, tenantID, clockID string, froze
 	// in the same Advance — without this ordering, an invoice that
 	// gets unstuck would have to wait for the next advance to fire
 	// its charge attempt.
-	if s.taxRetry != nil {
-		taxCount, taxErrs := s.taxRetry.RetryPendingTaxForClock(ctx, tenantID, clockID, 100)
-		sum.TaxRetried = taxCount
-		runErrs = append(runErrs, taxErrs...)
-	}
+	taxCount, taxErrs := s.taxRetry.RetryPendingTaxForClock(ctx, tenantID, clockID, 100)
+	sum.TaxRetried = taxCount
+	runErrs = append(runErrs, taxErrs...)
 
 	// Phase 2.9: issue this clock's pending clawback drafts BEFORE the
 	// charge phase, as the wall-clock billing run issues relief drafts
@@ -633,11 +606,9 @@ func (s *Service) runPhases(ctx context.Context, tenantID, clockID string, froze
 	// charged first, the card paid the whole of it and the relief landed
 	// on the balance after. A draft whose source is still in flight is
 	// not listed here; Phase 3.7 issues it once Phase 3 settles it.
-	if s.clawback != nil {
-		clawbackCount, clawbackErrs := s.clawback.RetryPendingClawbackIssueForClock(ctx, tenantID, clockID, frozen, 100)
-		sum.ClawbacksIssued += clawbackCount
-		runErrs = append(runErrs, clawbackErrs...)
-	}
+	clawbackCount, clawbackErrs := s.clawback.RetryPendingClawbackIssueForClock(ctx, tenantID, clockID, frozen, 100)
+	sum.ClawbacksIssued += clawbackCount
+	runErrs = append(runErrs, clawbackErrs...)
 
 	// Phase 3 (ADR-029): collect auto_charge_pending invoices for this
 	// clock's subs. A card-less invoice gets its setup-link email and
@@ -657,11 +628,9 @@ func (s *Service) runPhases(ctx context.Context, tenantID, clockID string, froze
 	// (ADR-059) can re-drive; the wall-clock reconciler skips simulated
 	// rows, so this is their only issuer. frozen_time is bound so Issue()
 	// stamps the note + its ledger / tax effects in simulated time.
-	if s.clawback != nil {
-		clawbackCount, clawbackErrs := s.clawback.RetryPendingClawbackIssueForClock(ctx, tenantID, clockID, frozen, 100)
-		sum.ClawbacksIssued += clawbackCount
-		runErrs = append(runErrs, clawbackErrs...)
-	}
+	clawbackCount, clawbackErrs = s.clawback.RetryPendingClawbackIssueForClock(ctx, tenantID, clockID, frozen, 100)
+	sum.ClawbacksIssued += clawbackCount
+	runErrs = append(runErrs, clawbackErrs...)
 
 	// Phase 5 (ADR-029): dunning advance for clock-pinned invoices.
 	// Runs after the charge/credit-settle phases. A Phase 1/1.5/3
@@ -671,11 +640,9 @@ func (s *Service) runPhases(ctx context.Context, tenantID, clockID string, froze
 	// invoice's run is resolved, never re-advanced (a credit-cover settle
 	// previously left it active, the bug this fixes). next_action_at vs
 	// simulated time.
-	if s.dunning != nil {
-		dunningCount, dunningErrs := s.dunning.ProcessDueRunsForClock(ctx, tenantID, clockID, frozen, 50)
-		sum.DunningAdvanced = dunningCount
-		runErrs = append(runErrs, dunningErrs...)
-	}
+	dunningCount, dunningErrs := s.dunning.ProcessDueRunsForClock(ctx, tenantID, clockID, frozen, 50)
+	sum.DunningAdvanced = dunningCount
+	runErrs = append(runErrs, dunningErrs...)
 
 	// Phase 4 (ADR-029): credit expiry for grants belonging to
 	// customers pinned to this clock. expires_at compared against
@@ -693,10 +660,8 @@ func (s *Service) runPhases(ctx context.Context, tenantID, clockID string, froze
 	// tests expiry at an earlier instant than its own breaks this; the
 	// control case of TestCatchup_CreditExpiryRunsAfterDunningRetries_RealStore
 	// then fails.
-	if s.creditExpirer != nil {
-		creditCount, creditErrs := s.creditExpirer.ExpireCreditsForClock(ctx, tenantID, clockID, frozen)
-		sum.CreditsExpired = creditCount
-		runErrs = append(runErrs, creditErrs...)
-	}
+	creditCount, creditErrs := s.creditExpirer.ExpireCreditsForClock(ctx, tenantID, clockID, frozen)
+	sum.CreditsExpired = creditCount
+	runErrs = append(runErrs, creditErrs...)
 	return runErrs
 }

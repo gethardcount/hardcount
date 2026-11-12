@@ -15,6 +15,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/pricing"
 	"github.com/gethardcount/hardcount/internal/subscription"
 	"github.com/gethardcount/hardcount/internal/testclock"
+	"github.com/gethardcount/hardcount/internal/testclock/testclocktest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/usage"
 )
@@ -352,8 +353,9 @@ func TestLateClose_ScheduledResume_TestClock_AdvancePastResume(t *testing.T) {
 		t.Fatal("the clock resumer cleared the pause while [P0, P1), which ended before resumes_at, was still unclosed")
 	}
 
-	orchestrator := testclock.NewService(clocks, r.f.engine)
-	orchestrator.SetPauseResumer(r.f.subSvc)
+	clockDeps := testclocktest.Deps(r.f.engine)
+	clockDeps.Pauses = r.f.subSvc
+	orchestrator := testclock.NewService(clocks, clockDeps)
 	if err := orchestrator.RunCatchup(leadertest.Token(t, testutil.AdminPool(t), r.base, leader.RoleTestClockCatchup), r.f.tenantID, clockID); err != nil {
 		t.Fatalf("catchup: %v", err)
 	}
@@ -536,9 +538,10 @@ func TestTrialFlipAfterResume_TestClock(t *testing.T) {
 	r.f.engine.SetTestClockReader(clocks)
 	r.f.subSvc.SetResolver(r.f.engine)
 
-	orchestrator := testclock.NewService(clocks, r.f.engine)
-	orchestrator.SetTrialExpirer(r.f.subSvc)
-	orchestrator.SetPauseResumer(r.f.subSvc)
+	clockDeps := testclocktest.Deps(r.f.engine)
+	clockDeps.Trials = r.f.subSvc
+	clockDeps.Pauses = r.f.subSvc
+	orchestrator := testclock.NewService(clocks, clockDeps)
 	if err := orchestrator.RunCatchup(leadertest.Token(t, testutil.AdminPool(t), r.base, leader.RoleTestClockCatchup), r.f.tenantID, clockID); err != nil {
 		t.Fatalf("catchup: %v", err)
 	}

@@ -21,7 +21,7 @@ func TestRunAdvancing_APanickingPassDoesNotStopTheTick(t *testing.T) {
 	for _, id := range []string{"c1", "c2"} {
 		store.clocks[id] = domain.TestClock{ID: id, TenantID: "t1", Status: domain.TestClockStatusAdvancing, FrozenTime: at}
 	}
-	s := NewService(store, &panickingRunner{})
+	s := NewService(store, testDeps(&panickingRunner{}))
 
 	worked, err := s.RunAdvancing(context.Background())
 	if err != nil {
@@ -62,7 +62,7 @@ func TestRunCatchup_PanicMarksClockFailed(t *testing.T) {
 	sub.NextBillingAt = &nextBilling
 	store.subsOnClock["c1"] = []domain.Subscription{sub}
 
-	s := NewService(store, &panickingRunner{})
+	s := NewService(store, testDeps(&panickingRunner{}))
 
 	err := s.RunCatchup(context.Background(), "t1", "c1")
 	if err == nil {
@@ -96,7 +96,7 @@ func TestRunCatchup_PanicWhenTheTickEnded(t *testing.T) {
 		ID: "c1", TenantID: "t1", Status: domain.TestClockStatusAdvancing,
 		FrozenTime: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
 	}
-	s := NewService(store, &panickingRunner{})
+	s := NewService(store, testDeps(&panickingRunner{}))
 
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()

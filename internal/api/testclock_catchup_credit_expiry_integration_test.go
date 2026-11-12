@@ -13,6 +13,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testclock"
+	"github.com/gethardcount/hardcount/internal/testclock/testclocktest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -151,9 +152,10 @@ func TestCatchup_CreditExpiryRunsAfterDunningRetries_RealStore(t *testing.T) {
 				{err: stripeDeclined("pi_goodwill_3", "insufficient_funds", "Your card has insufficient funds.")},
 			}
 
-			clocks := testclock.NewService(testclock.NewPostgresStore(r.db), noBillingRunner{})
-			clocks.SetCreditExpirer(credits)
-			clocks.SetDunning(dunningSvc)
+			clockDeps := testclocktest.Deps(noBillingRunner{})
+			clockDeps.Credits = credits
+			clockDeps.Dunning = dunningSvc
+			clocks := testclock.NewService(testclock.NewPostgresStore(r.db), clockDeps)
 			if err := clocks.RunCatchup(leadertest.Token(t, testutil.AdminPool(t), r.ctx, leader.RoleTestClockCatchup), r.tenantID, clockID); err != nil {
 				t.Fatalf("catchup: %v", err)
 			}

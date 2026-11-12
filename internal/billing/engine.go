@@ -4797,8 +4797,10 @@ func (e *Engine) RetryPendingCharges(ctx context.Context, pageSize int, onPage f
 // errors) so the orchestrator can log the same telemetry shape per
 // catchup phase.
 func (e *Engine) RetryPendingChargesForClock(ctx context.Context, tenantID, clockID string, limit int) (int, []error) {
+	// An advance that skipped collection would end ready with its invoices
+	// uncharged.
 	if e.charger == nil || e.paymentSetups == nil {
-		return 0, nil
+		return 0, []error{errors.New("collect the clock's invoices: the engine has no charger or payment readiness")}
 	}
 	fetch := func(ctx context.Context, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error) {
 		pending, err := e.invoices.ListAutoChargePendingForClock(ctx, tenantID, clockID, after, limit)

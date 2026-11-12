@@ -13,6 +13,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testclock"
+	"github.com/gethardcount/hardcount/internal/testclock/testclocktest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -201,11 +202,11 @@ func TestRunCatchup_DeposedLeaderChangesNothing(t *testing.T) {
 	deposed := leadertest.Token(t, admin, base, leader.RoleTestClockCatchup)
 	current := leadertest.Token(t, admin, base, leader.RoleTestClockCatchup)
 
-	failing := testclock.NewService(store, failingRunner{})
+	failing := testclock.NewService(store, testclocktest.Deps(failingRunner{}))
 	if err := failing.RunCatchup(deposed, tenantID, clk.ID); err != nil {
 		t.Errorf("deposed failing pass: %v, want nil (its MarkFailed misses the fence)", err)
 	}
-	completing := testclock.NewService(store, countingClockRunner{})
+	completing := testclock.NewService(store, testclocktest.Deps(countingClockRunner{}))
 	if err := completing.RunCatchup(deposed, tenantID, clk.ID); err != nil {
 		t.Errorf("deposed completing pass: %v, want nil (its CompleteAdvance misses the fence)", err)
 	}
@@ -256,7 +257,7 @@ func TestRunCatchup_ClockTurnsReadyUnderThePass(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, db, "Catchup Overlap")
 	clk := advancingClock(t, store, base, tenantID, "overlap")
 
-	svc := testclock.NewService(store, readyUnderPassRunner{admin: admin, clockID: clk.ID})
+	svc := testclock.NewService(store, testclocktest.Deps(readyUnderPassRunner{admin: admin, clockID: clk.ID}))
 	if err := svc.RunCatchup(ctx, tenantID, clk.ID); err != nil {
 		t.Fatalf("RunCatchup: %v, want nil (the clock was completed under it)", err)
 	}
@@ -299,7 +300,7 @@ func TestRunAdvancing_RetryKeepsAdvancedFrom(t *testing.T) {
 	if _, err := store.MarkFailed(ctx, tenantID, clk.ID, "first try failed", domain.AdvanceSummary{AdvancedFrom: leaseFrom, AdvancedTo: leaseTarget, HadErrors: true}); err != nil {
 		t.Fatalf("mark failed: %v", err)
 	}
-	svc := testclock.NewService(store, countingClockRunner{})
+	svc := testclock.NewService(store, testclocktest.Deps(countingClockRunner{}))
 	if _, err := svc.RetryAdvance(base, tenantID, clk.ID); err != nil {
 		t.Fatalf("retry advance: %v", err)
 	}
@@ -361,7 +362,7 @@ func TestCatchupTick_LeaseLostMidPass(t *testing.T) {
 	markedAt := clk.UpdatedAt
 
 	runner := &leaseLossRunner{started: make(chan struct{}), cause: make(chan error, 1)}
-	svc := testclock.NewService(store, runner)
+	svc := testclock.NewService(store, testclocktest.Deps(runner))
 	gate := leader.New(db.Pool, nil)
 	led := make(chan error, 1)
 	go func() {
@@ -414,7 +415,7 @@ func TestCatchupTick_LeaseLostMidPass(t *testing.T) {
 		t.Errorf("updated_at %s not after the advance's %s: the cut-off pass left the clock at the head of the list", got.UpdatedAt, markedAt)
 	}
 
-	next := testclock.NewService(store, countingClockRunner{})
+	next := testclock.NewService(store, testclocktest.Deps(countingClockRunner{}))
 	if err := next.RunCatchup(successor, tenantID, clk.ID); err != nil {
 		t.Fatalf("the next leader's pass: %v", err)
 	}
