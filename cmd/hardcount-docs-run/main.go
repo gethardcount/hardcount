@@ -16,6 +16,17 @@
 // runs, as a reader who follows "change acme-1 to acme-2" does, or to point
 // it at another address. Each -skip and -replace must match the page, or
 // the run stops before it starts.
+//
+// To run the tutorial yourself, start Hardcount on port 8080 and save your
+// test key in ~/hardcount-key.json as {"secret_key_test": "hc_secret_test_…"}.
+// Then run:
+//
+//	go run ./cmd/hardcount-docs-run \
+//	  -replace deploy/compose/quickstart-credentials.json=$HOME/hardcount-key.json \
+//	  -replace acme-1=acme-$RANDOM docs/first-invoice.md
+//
+// The second -replace gives the customer a new external ID, so the page can
+// run again on the same database.
 package main
 
 import (

@@ -231,7 +231,5 @@ lines that ADR-128 left out.)
 cp TEMPLATE.md NNN-short-slug.md
 ```
 
-Pick NNN as the next sequential number — check `ls docs/adr/`, NOT
-your local branch (per `feedback_migration_numbering`: numbering is
-chosen from origin/main to avoid duplicates that only fail at
-integration-test time).
+Pick NNN as the next free number. Nothing checks it, so list `docs/adr/`
+on `origin/main` and on every branch first.

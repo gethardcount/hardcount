@@ -14,7 +14,7 @@ import (
 // postgres.TxBypass opens a transaction where Row-Level Security does not
 // apply: the query must filter by tenant_id itself. docs/architecture.md
 // ("Design rules") lists the kinds of work that may do this, and features,
-// comparison, SECURITY, CONTRIBUTING and the RLS-leak runbook link to that
+// comparison, SECURITY, CLAUDE.md and the RLS-leak runbook link to that
 // list. Nothing else checked it, so a new TxBypass on a signed-in path would
 // have made every one of those pages wrong with CI green.
 //

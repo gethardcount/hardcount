@@ -73,7 +73,7 @@ var errRefundInvoiceNotPaidYet = errors.New("refund of a payment on an invoice n
 //     invoice's charge attempts, its own payment, its anomaly marker). No
 //     invoice holds it: errs.ErrNotFound, the charge was not Hardcount's;
 //   - the invoice row is locked, then the per-invoice credit-note lock, then
-//     the refund's row (lock order rule, playbook §5.6), and every check
+//     the refund's row (lock order, playbook item 8), and every check
 //     below reads under them;
 //   - a credit note already holds the refund id (a refund Hardcount made
 //     before refunds carried hardcount_cn_id, a note this recorded, or one the

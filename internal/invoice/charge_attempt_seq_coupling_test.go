@@ -17,8 +17,8 @@ import (
 // every UPDATE on invoices that sets stripe_payment_intent_id must bump
 // charge_attempt_seq in the SAME statement.
 //
-// Why a source-scanning test and not a convention: this is a class-C2 hazard
-// (playbook §1) — the invariant is spread across FOUR writers today
+// Why a source-scanning test and not a convention: no one function holds this
+// guard (playbook item 6) — the invariant is spread across FOUR writers today
 // (StampPendingConfirm, StampChargeOutcome,
 // MarkPaymentFailedReportingTransition, markPaidReportingTransition), and a
 // fifth added later would fail silently in the worst direction. Missing the

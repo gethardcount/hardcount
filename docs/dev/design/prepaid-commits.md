@@ -167,7 +167,7 @@ UPDATEs have no status predicate). Before money hangs off them:
   uncollectible — never paid; uncollectible: finalized), then flip.
 - Kills: void→finalize resurrection minting a grant on a voided invoice;
   pay-vs-void retiring credits the customer just paid for.
-- Concurrent mutation-verified tests required (playbook §5.3/§5.4).
+- Concurrent mutation-verified tests required (playbook tests 3 and 4).
 
 ### D6. One global lock order: invoice-row → advisory → ledger-rows
 

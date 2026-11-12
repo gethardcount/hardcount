@@ -143,6 +143,8 @@ Each one also logs a WARN line, `stripe tax failed, deferring invoice for retry`
 | Many accounts at the same time | A Stripe outage. Check [status.stripe.com](https://status.stripe.com). | Make sure the waiting invoices clear once Stripe is back |
 | One account, starting suddenly | Its Stripe API key was changed or revoked | Ask the account owner to update the keys |
 
-How the providers work inside Hardcount: [Architecture](../architecture.md#tax-providers).
+Each invoice stores its provider and its Stripe Tax IDs (`tax_provider`, `tax_calculation_id`, `tax_transaction_id`), so you can match it to Stripe's tax reports without reading logs.
+
+The provider code is in `internal/tax`; [Architecture](../architecture.md#tax-providers) says where it sits.
 
 **Next:** [alerts on billing runs](runbook/monitoring.md).

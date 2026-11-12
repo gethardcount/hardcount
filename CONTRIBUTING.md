@@ -1,21 +1,35 @@
 # Contributing to Hardcount
 
-Hardcount is a billing system you run yourself, written in Go on PostgreSQL. It
-counts what your customers use, works out each bill, makes the invoice, and
-charges the card through Stripe.
+Hardcount is a billing system you run yourself, written in Go on PostgreSQL. This page takes you from a fresh clone to a merged pull request.
 
-This page takes you from a fresh clone to a pull request that passes CI. It
-shows how to run Hardcount from source, where the code goes, and which checks CI
-runs on your change.
+Report a security problem privately ([SECURITY.md](SECURITY.md)), and ask questions in [GitHub Discussions](https://github.com/gethardcount/hardcount/discussions).
+
+## What we accept
+
+1. **Start with an issue.** For anything bigger than a typo or a broken link, open an issue or comment on an existing one, and wait. An issue is agreed when a maintainer says so on it.
+2. **Some areas need an invitation.** A change here needs an agreed issue that says an outside pull request is welcome:
+   - money and billing state (invoices, payments, credits, dunning, subscriptions, tax), which follow the [money-path playbook](docs/dev/money-path-robustness-playbook.md);
+   - database migrations;
+   - sign-in, sessions and API keys;
+   - CI and release files (`.github/`);
+   - dependencies (`go.mod`, `web-v2/package.json` and the lock files).
+3. **Send one change. Run it yourself, and be able to explain every line.**
+4. **AI help is fine.** End each commit an AI tool helped with in an `Assisted-by:` line, such as `Assisted-by: Claude Code`.
+
+**Never accepted:** links that promote you or a product, batches of tiny edits made to collect contributions, and changes to the licence or the credits.
+
+A pull request below this bar gets one short comment and is closed. You may open an issue and try again. Repeats, or behaviour the [code of conduct](CODE_OF_CONDUCT.md) rules out, lead to a block.
 
 ## Development setup
 
-You need Go 1.26 or newer and Docker. Node 22 or newer is needed only for
-dashboard work, and `jq` only for `scripts/demo.sh`.
+You need Go 1.26 or newer and Docker. Dashboard work and `make gen` also need Node 22 or newer, and the demo needs `jq`.
+
+Fork the repository on GitHub, then:
 
 ```bash
-git clone https://github.com/gethardcount/hardcount.git
+git clone https://github.com/<your-user>/hardcount.git
 cd hardcount
+git remote add upstream https://github.com/gethardcount/hardcount.git
 cp .env.example .env
 ```
 
@@ -25,330 +39,95 @@ cp .env.example .env
    docker compose up -d postgres
    ```
 
-   **You see:** `docker compose ps` lists the `postgres` service as
-   `healthy` after a few seconds.
+   **You see:** `docker compose ps` lists `postgres` as `healthy`.
 
-2. **Create your first account and its keys.** This also runs the database
-   migrations.
+2. **Create the first account and its keys.**
 
    ```bash
    make bootstrap
    ```
 
-   **You see:** a "Hardcount Bootstrap Complete" box with the dashboard sign-in
-   (email `admin@hardcount.local` unless you set `HARDCOUNT_BOOTSTRAP_EMAIL`), a
-   generated password, and two secret API keys, one for test mode and one
-   for live mode. Save the password: it is shown only once. Copy the key under "Secret Key — TEST mode"
-   (`hc_secret_test_…`).
+   **You see:** a box with the sign-in email (`admin@hardcount.local`), a password shown only this once, and two API keys. Copy the key under "Secret Key — TEST mode" (`hc_secret_test_…`).
 
-3. **Start the API.** `make dev` reads `.env`, which points at the local
-   Postgres and runs migrations on boot.
+3. **Start the API.** `make dev` reads `.env` and applies new migrations.
 
    ```bash
    make dev
    ```
 
-   **You see:** a JSON log line with `"msg":"listening"` and
-   `"addr":":8080"`. `curl http://localhost:8080/health` returns
-   `{"status":"ok"}`.
+   **You see:** `curl http://localhost:8080/health` returns `{"status":"ok"}`.
 
-4. **Start the dashboard**, in a second terminal.
+4. **Start the dashboard** (only for UI work), in a second terminal.
 
    ```bash
    cd web-v2 && npm install && npm run dev
    ```
 
-   **You see:** Vite prints `http://localhost:5173/`. Open
-   `http://localhost:5173/login` and sign in with the email and password
-   from step 2. The dashboard opens in test mode, where nothing charges real
-   money.
+   **You see:** Vite prints `http://localhost:5173/`. Sign in there with step 2's email and password.
 
-5. **Bill a test customer end to end**, in a third terminal. This is the
-   golden path: the one flow CI also runs on every PR, from loading prices
-   to a finished invoice.
+5. **Bill a test customer end to end** (optional), in a third terminal.
 
    ```bash
    ./scripts/demo.sh hc_secret_test_...   # the key from step 2
    ```
 
-   **You see:** nine numbered steps, each with a green `✓` line, then
-   "Done: every step above ran and was checked" and two dashboard links,
-   one to the invoice and one to the customer.
+   **You see:** numbered steps, each with a green `✓`.
 
-Run the tests with Postgres still up:
+### Run the tests
 
 ```bash
-go test ./... -race -short -count=1         # unit tests (CI runs -race too)
-go test -p 1 ./... -count=1 -short=false    # unit + integration tests
+go test ./... -race -short -count=1         # unit tests
+go test -p 1 ./... -count=1 -short=false    # all tests
+go test ./internal/invoice/ -run TestName -count=1 -short=false   # one test
 ```
 
-To try a release without Go or Node, use `deploy/compose/quickstart.sh`
-instead (see the [README](README.md)).
+Integration tests use the Postgres from step 1. They empty only their own `hardcount_test` database, which the container creates from `docker/init.sql` when its volume is first made. `go test` does not read `.env`: for another Postgres, set `TEST_ADMIN_DATABASE_URL` and `TEST_DATABASE_URL`.
+
+To start over, or if `hardcount_test` is missing, `docker compose down -v` deletes the volume. Then repeat steps 1 and 2.
 
 ### Local services
 
-`docker compose up -d postgres redis mailpit` starts everything the API can
-use on your machine. The three containers listen on 127.0.0.1 only, so
-another machine on your network cannot reach them:
+`docker compose up -d postgres redis mailpit` starts everything the API can use.
 
-| Service | Where | Notes |
-|---|---|---|
-| Postgres | `127.0.0.1:5432` | Password `hardcount`. Data is kept in a Docker volume. |
-| Redis | `127.0.0.1:6379` | Used for rate limiting. Optional outside production: without it, only sign-in (`/v1/auth`) is rate-limited. |
-| Mailpit | `127.0.0.1:1025` (SMTP), `127.0.0.1:8025` (web) | Catches every email Hardcount sends, so nothing leaves your machine. |
-| The API | `:8080` | Started by `make dev`. Not a container. |
+- **Redis**, on port 6379, is optional outside production: without it, only sign-in (`/v1/auth`) is rate-limited.
+- **Mailpit** catches every email, on SMTP port 1025 (set in `.env.example`). Read them at `http://localhost:8025`.
 
-`make bootstrap` takes an optional owner email and password:
-`HARDCOUNT_BOOTSTRAP_EMAIL=you@example.com HARDCOUNT_BOOTSTRAP_PASSWORD=change-me-please1 make bootstrap`.
-A password needs at least 12 characters, and Hardcount refuses common passwords
-from leaked-password lists.
-
-### Add a second account
-
-One Hardcount server can hold many accounts (tenants), each with its own data,
-dashboard users and API keys. To add another one, run the bootstrap tool
-again with a different owner email:
-
-```bash
-make bootstrap HARDCOUNT_BOOTSTRAP_EMAIL=tenant-b@hardcount.local \
-  HARDCOUNT_BOOTSTRAP_PASSWORD='choose-a-password' \
-  HARDCOUNT_BOOTSTRAP_TENANT='Tenant B'
-```
-
-The tool runs from source, so it needs Go and this repository. It is not in
-the Docker image. There is no button for this in the dashboard and no API
-route: no key can create an account or read another one
-([ADR-133](docs/adr/133-api-key-types-secret-and-ingest.md)).
-
-### Several worktrees
-
-Never `git stash` in a repo shared by several worktrees. The stash belongs
-to the whole repo, and a `pop` can land another worktree's work in your
-tree.
-
-### Without make
-
-These are the same steps without make. `make dev` reads `.env`, which sets
-`DATABASE_URL` and `RUN_MIGRATIONS_ON_BOOT=true`. Here you set them on the
-command line:
-
-```bash
-docker compose up -d postgres
-DATABASE_URL="postgres://hardcount:hardcount@localhost:5432/hardcount?sslmode=disable" go run ./cmd/hardcount-bootstrap
-DATABASE_URL="postgres://hardcount:hardcount@localhost:5432/hardcount?sslmode=disable" RUN_MIGRATIONS_ON_BOOT=true go run ./cmd/hardcount
-```
-
-To run only the migrations:
-
-```bash
-DATABASE_URL="postgres://hardcount:hardcount@localhost:5432/hardcount?sslmode=disable" go run ./cmd/hardcount migrate
-```
-
-### Run your change in the Compose stack
-
-This builds the API image from your checkout and runs it in the same stack
-as a [one-VM install](deploy/compose/README.md):
-
-```bash
-docker build -t hardcount:local .        # from the repo root
-cd deploy/compose
-cp .env.example .env
-$EDITOR .env   # set POSTGRES_PASSWORD, HARDCOUNT_APP_DB_PASSWORD, HARDCOUNT_ENCRYPTION_KEY, HARDCOUNT_BOOTSTRAP_TOKEN
-HARDCOUNT_IMAGE=hardcount:local docker compose up -d
-```
-
-**You see:** `docker compose logs -f hardcount-api` prints a log line with
-`"msg":"listening"` and `"addr":":8080"` when the API is ready.
-
-To build the image and run it on its own, against a Postgres you already have:
-
-```bash
-docker build -t hardcount:latest .
-docker run --rm -e DATABASE_URL="..." -p 8080:8080 hardcount:latest
-```
-
-## Project structure
-
-Each billing domain (invoice, credit, customer, and so on) is a
-self-contained package under `internal/`. [Architecture](docs/architecture.md)
-shows how the packages work together.
-
-```
-internal/{domain}/
-  store.go       — Store interface (what the domain needs from persistence)
-  postgres.go    — PostgreSQL implementation of the store
-  service.go     — Business logic (validates, orchestrates)
-  handler.go     — HTTP handlers (decodes request, calls service, writes response)
-  *_test.go      — Unit tests (in-memory store) + integration tests (real Postgres)
-```
-
-**Rules:**
-
-- One domain package never calls another domain's `Service` or `Store`
-  directly. A package may import shared value types, cross-cutting
-  infrastructure (`auth`, `audit`, `session`), and the small interfaces of
-  the `billing` coordinator. The allowlist in
-  `internal/arch/boundaries_test.go` enforces this: a new cross-domain
-  import fails the test until it is added there on purpose.
-- Every handler uses `respond.JSON()` / `respond.FromError()` for responses.
-- Most store methods run inside a transaction scoped to one tenant by
-  Postgres Row-Level Security (RLS):
-  `db.BeginTx(ctx, postgres.TxTenant, tenantID)`. A tenant is one account's
-  data in a shared database; RLS hides every other tenant's rows.
-- Some store methods run under `postgres.TxBypass`, where RLS does not
-  apply: work across tenants, work before the tenant is known, reading a
-  tenant's Stripe keys, and one signed-in area. Such a query must filter by
-  `tenant_id` itself.
-  [Architecture](docs/architecture.md#design-rules) lists them. A new use
-  fails `internal/arch/txbypass_allowlist_test.go` until it is listed there.
-- Integration tests use `testutil.SetupTestDB()`.
-
-## Adding a new domain
-
-1. Create `internal/{domain}/store.go` with the store interface.
-2. Create `internal/{domain}/postgres.go` implementing the store.
-3. Create `internal/{domain}/service.go` with business logic.
-4. Create `internal/{domain}/handler.go` with HTTP handlers using the
-   `respond` package.
-5. Add a migration with `make migration name=...`, then follow
-   [Writing a database migration](docs/dev/migrations.md).
-6. Wire it into `internal/api/router.go`.
-7. Write tests at the layers [How we test](docs/testing.md#which-test-to-write)
-   names for your change.
-
-## Code style
-
-New and changed code follows the [code standard](docs/dev/code-standard.md).
-Comments follow [Code comments](docs/dev/code-comments.md), and docs follow the
-[writing style](docs/dev/writing-style.md).
-`make lint` checks the rules a linter can.
+For a second account, run `make bootstrap` again with another `HARDCOUNT_BOOTSTRAP_EMAIL` ([Settings](docs/settings.md#first-account)). To run your change as a one-VM install does, see [Build from source](deploy/compose/README.md#build-from-source-instead).
 
 ## Frontend (web-v2)
 
-The dashboard is a React + TypeScript + Vite app. See
-[`web-v2/README.md`](web-v2/README.md) for setup, the dev server, and the
-directory's own CI checks. Two things often surprise first-time contributors:
+The dashboard's setup and checks are in [`web-v2/README.md`](web-v2/README.md). Use npm 10, or 11.6.3 or later: 11.5.0 to 11.6.2 drops an `@emnapi` package from the lockfile, and CI's `npm ci` fails.
 
-- Use npm 10 (it comes with Node 22, as in CI) or npm 11.6.3 or later.
-  `npm install` on npm 11.5.0 to 11.6.2 drops an `@emnapi` package from the
-  lockfile, and CI's `npm ci` then fails with `Missing: @emnapi/... from lock
-  file`. Check with `npm --version`; `npm install -g npm@11` fixes it.
-- Typechecking is `npx tsc -b`. Do not use `tsc --noEmit`: here it checks
-  nothing and reports no error.
+## Your first pull request
+
+1. **Agree the change in an issue.** New here? Comment on one labelled [`good first issue`](https://github.com/gethardcount/hardcount/labels/good%20first%20issue). Then, in your fork, branch from `main`.
+2. **Make the change, with its test.** First read [How Hardcount is built](docs/ENGINEERING.md), [Architecture](docs/architecture.md), the [code standard](docs/dev/code-standard.md) and [How we test](docs/testing.md). [Contributor docs](docs/dev/README.md) lists the rest, with two glossaries.
+3. **Update the docs.** A change a user can see gets a `CHANGELOG.md` entry under `[Unreleased]`. The [writing style](docs/dev/writing-style.md) says how, and which other docs change.
+4. **Open the pull request.** Title it like the commits on `main`: `fix(invoice): what is now true`. Other types: `feat`, `docs`, `test`, `refactor`, `chore`, `ui`, `ci`. The area is optional, and `!` marks a breaking change. The template is the checklist.
+5. **Wait for review.** We answer within two days. CI on a fork's pull request starts when a maintainer approves the run. We squash-merge, and your change ships under the [MIT licence](LICENSE).
 
 ## What CI runs on your PR
 
-CI runs every check below on every PR. Run the ones your change touches
-locally before you push. Fork PRs get the same run, because no check uses
-secrets.
+CI runs these checks on every pull request. Run the ones your change touches before you push.
 
-**Required to merge.** A PR cannot merge until each of these passes on a branch that is up to date with `main`. If `main` moved after your last push, use **Update branch** on the PR (or rebase) and let the checks run again: two PRs that each add the same migration number cannot both merge that way.
+All but `upgrade`, `doc-links` and `doc-style` must pass to merge, on a branch up to date with `main`. If `main` moved, use **Update branch** or rebase. A red `upgrade` or `doc-links` does not block the merge. Fix one your change caused.
 
-| CI job | What it checks | Local command |
+| CI job | Checks | Run locally |
 |---|---|---|
-| `unit` | Unit tests with the race detector. Includes the source-rule tests in `internal/arch` | `go test ./... -race -short -count=1` |
-| `test` | Module checksums, and the integration tests against a real Postgres | `go test -p 1 ./... -count=1 -short=false` (needs `docker compose up -d postgres`; test databases are created for you) |
-| `test-pgbouncer` | The same suite through PgBouncer, a connection pooler, in transaction mode | `scripts/pgbouncer-test.sh` (needs Docker and `docker compose up -d postgres`. With Docker Engine on Linux, it sets `PGB_MODE=ci` itself, because only the host network reaches the dev Postgres on 127.0.0.1) |
-| `golden-path` | Boots a real server, runs `scripts/demo.sh` from prices to a finished invoice, then runs hardcount-doctor over the rows it wrote | Steps 2 to 5 of [Development setup](#development-setup), then `go run ./cmd/hardcount-doctor` |
-| `lint` | golangci-lint (`.golangci.yml`), the Go version in `go.mod` against the `Dockerfile`, the quickstart release against the Compose template, ShellCheck on every shell script, and `govulncheck` | `make lint`, `scripts/ci/shellcheck.sh` (needs ShellCheck), then `govulncheck ./...` |
-| `codegen-drift` | Generated TypeScript matches `api/openapi.yaml` | `make gen && git diff --exit-code` |
-| `frontend` | Dashboard build (`tsc -b` and Vite), unit tests, eslint, and knip (unused files, exports and dependencies) | `cd web-v2 && npm run build && npm test && npm run lint` |
-| `e2e` | Playwright tests against a real API and dashboard. Setup: [`web-v2/e2e/README.md`](web-v2/e2e/README.md) | `cd web-v2 && npm run test:e2e` |
-| `pricing-shapes` | Each common way to price, billed end to end and checked to the cent, plus the expected results of each price shape. The `test` job runs these too; this job gives them a check of their own | The `go test` lines in this job in `.github/workflows/ci.yml` (needs Postgres) |
-| `migrations` | A fresh install on an empty database under three role setups, then a second run that has nothing to do. Also a backup-restore drill and an install on Postgres 15 and on 18 | `scripts/ci/migrations-fresh-install.sh` (needs Docker, `psql` and `pg_restore`) |
+| `unit` | Unit tests, with the race detector | `go test ./... -race -short -count=1` |
+| `test` | Integration tests on real Postgres, and module checksums | `go test -p 1 ./... -count=1 -short=false` |
+| `test-pgbouncer` | The same tests through PgBouncer, a connection pooler | `scripts/pgbouncer-test.sh` |
+| `pricing-shapes` | Each common way to price, billed and checked to the cent | This job's `go test` lines in `.github/workflows/ci.yml` |
+| `migrations` | A fresh install under each database role setup, a backup restore, and Postgres 15 and 18 | `scripts/ci/migrations-fresh-install.sh` |
+| `golden-path` | The [first-invoice tutorial](docs/first-invoice.md) and the demo on a real server, then [hardcount-doctor](docs/dev/glossary.md) over the rows | Steps 2, 3 and 5 of [Development setup](#development-setup), then `DATABASE_URL=postgres://hardcount:hardcount@localhost:5432/hardcount?sslmode=disable go run ./cmd/hardcount-doctor` |
+| `lint` | golangci-lint, ShellCheck, `govulncheck`, and checks on the Dockerfile, quickstart and nginx files | `make lint`, `scripts/ci/shellcheck.sh`, then `govulncheck ./...` |
+| `codegen-drift` | The generated TypeScript matches `api/openapi.yaml` | `make gen && git diff --exit-code` |
+| `frontend` | The dashboard's build, unit tests, eslint, and knip for unused code | `cd web-v2 && npm run build && npm test && npm run lint` |
+| `e2e` | Playwright against a real API and dashboard | `cd web-v2 && npm run test:e2e` ([setup](web-v2/e2e/README.md)) |
+| `upgrade` | The previous release bills a month, then your code starts on its database. Earlier invoices must read the same | `scripts/ci/upgrade-from-previous-tag.sh` |
+| `doc-links` | Every internal Markdown link and `#anchor` resolves | `lychee --offline --include-fragments '**/*.md'` |
+| `doc-style` | Vale, a prose linter, comments on added lines and never fails | `vale <changed .md files>` |
 
-**Also run, not required to merge.**
+Install the tools: `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v<version>` (the `GOLANGCI_LINT_VERSION` in `.github/workflows/ci.yml`), `go install golang.org/x/vuln/cmd/govulncheck@latest`, and `brew install shellcheck lychee vale` or your package manager. Most scripts need Docker; each header lists what it needs.
 
-| CI job | What it checks | Local command |
-|---|---|---|
-| `upgrade` | Installs the previous release from its tag and bills a month with its demo, then starts HEAD on the same database. Every invoice from before must read the same through the API, HEAD must bill a new month, and hardcount-doctor must find nothing | `scripts/ci/upgrade-from-previous-tag.sh` (needs Docker) |
-| `doc-links` | Every internal Markdown link and `#anchor` resolves. It turns red on a broken link; fix it before merging | `lychee --offline --include-fragments '**/*.md'` |
-| `doc-style` | Vale prose lint on the lines your PR adds. It comments only and never fails | `vale <changed .md files>` |
-
-The `docker` job builds and publishes the images. It runs only on `main`
-and on release tags, after the jobs above pass.
-
-Notes on three of them:
-
-- **hardcount-doctor** is a read-only command that scans a database for states
-  no correct code could produce, such as invoice totals that do not add up.
-  Point `DATABASE_URL` at any user that can read the tables, such as the
-  owner. The doctor reads every account's rows itself, and exits 2 if
-  accounts exist but it reads no customers and no invoices.
-- **`govulncheck`** can fail when a new Go vulnerability is published, even
-  if your change is fine. Say so in the PR and we will handle it.
-- **Lint waivers and source rules** (the `//nolint:forbidigo` reasons and
-  the `//tz:ok` date rule) are described in
-  [How we test](docs/testing.md#which-test-to-write).
-
-## What we accept
-
-Anyone can contribute. We judge the change, not the person. To keep review
-time for real work, every pull request meets this bar:
-
-1. **Start with an issue.** For anything bigger than a typo or a broken
-   link, open an issue first, or comment on an existing one. Wait until a
-   maintainer agrees with the approach, then link that issue in your pull
-   request. A pull request without an agreed issue is closed without review.
-2. **Some areas are maintainer-only.** A change in these areas needs an
-   agreed issue that says an outside pull request is welcome:
-   - money and state machines: invoices, payments, credits, dunning,
-     subscriptions and tax;
-   - database migrations;
-   - sign-in, sessions and API keys;
-   - CI and release files (`.github/`);
-   - dependencies (`go.mod`, `web-v2/package.json` and the lock files).
-3. **One change per pull request,** with its tests and docs, and CI green.
-   Unrelated edits, such as formatting sweeps, renames or bulk dependency
-   bumps, are closed.
-4. **Show that you ran it.** Say what you changed, why, and how you checked
-   it. A pull request that was not run or understood is closed.
-5. **AI help is fine; say so.** If an AI tool wrote part of the change,
-   say which part in the description, and end each such commit with an
-   `Assisted-by:` line naming the tool, such as `Assisted-by: Claude Code`
-   (the Linux kernel's convention). You answer for every line: in review,
-   you can explain what it does and why. A change you cannot explain is
-   closed. Commits before 2026-11-02 say `Co-Authored-By: Claude` for the
-   same thing.
-
-**Never accepted:** links that promote you or a product, batches of tiny
-edits made to collect contributions, and changes to the licence or the
-credits.
-
-**What happens next:** CI on a pull request from outside the project waits
-until a maintainer has read the diff and approved the run. We answer within
-two days. A pull request below the bar gets one short comment and is
-closed; you are welcome to open an issue and try again.
-Repeated pull requests below the bar, or behaviour the
-[code of conduct](CODE_OF_CONDUCT.md) rules out, lead to a block.
-
-## Pull requests
-
-1. Fork the repo and create a feature branch.
-2. Write tests for new behavior, at the layer
-   [How we test](docs/testing.md) names for your change.
-3. Run the checks above that your change touches (at least the two test
-   commands).
-4. Update the docs in the same PR. Every user-visible change gets a
-   `CHANGELOG.md` entry, and every UI change is covered by a Playwright
-   spec in `web-v2/e2e/`. A doc that no longer matches the code is a bug.
-   For how to write docs, see the
-   [writing style guide](docs/dev/writing-style.md).
-5. Open the PR with a clear description of what changed and why.
-
-**Touching money or a state machine?** This covers invoices, payments,
-credits, dunning (retrying a failed card payment and emailing the
-customer), subscriptions and tax. Follow the
-[Money-path robustness playbook](docs/dev/money-path-robustness-playbook.md):
-
-- Before opening the PR, work through its implementation checklist
-  ([§3](docs/dev/money-path-robustness-playbook.md#3-implementation-checklist--gates-before-opening-a-money-path-pr)).
-- In the PR description, list the state's site-set
-  ([§2](docs/dev/money-path-robustness-playbook.md#2-the-meta-practice-complete-site-set-enumeration)):
-  every place in the code that writes that state or reacts to it.
-- A guard against a race or a broken money rule needs an automated test.
-  The test forces the race, and you show it fails once the guard is
-  removed ([§5](docs/dev/money-path-robustness-playbook.md#5-test-lock-doctrine)).
-
-Words used here that you have not met are in the
-[glossary](docs/dev/glossary.md).
+`govulncheck` can fail on a new Go vulnerability your change did not cause: say so in the pull request.

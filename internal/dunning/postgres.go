@@ -992,7 +992,7 @@ func scanRun(row interface{ Scan(dest ...any) error }) (domain.InvoiceDunningRun
 // retry_attempted event, all in one transaction. So a run resolved in the
 // meantime leaves no stray event behind.
 //
-// Lock order: the invoice row first (the money-path playbook, §5 pattern 6).
+// Lock order: the invoice row first (the money-path playbook, item 8).
 // The failure settle locks the invoice FOR UPDATE and then writes this run
 // (TakeAwaitedRetryTx), and the event insert below takes a key-share lock on
 // the invoice for its foreign key. Writing the run first would deadlock

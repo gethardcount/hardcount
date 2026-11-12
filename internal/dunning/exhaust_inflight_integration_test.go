@@ -35,7 +35,7 @@ import (
 //
 // The payment goes in flight between the final retry and its final action:
 // the stale-precondition gap the late re-check exists for (playbook class D,
-// C4). The pickers already skip an invoice that is processing or unknown, so
+// item 7). The pickers already skip an invoice that is processing or unknown, so
 // these are the two ways it can reach the final action today: inline after the
 // final retry, and exhaust-on-entry after the listing.
 

@@ -103,8 +103,8 @@ func TestChargeKey_StableUntilAnOutcomeIsRecorded(t *testing.T) {
 // anywhere (playbook class G, liveness sink).
 //
 // Both recorded-decline writers are exercised, because they are separate SQL
-// statements and a fix applied to only one is the class-C2 shape this test
-// exists to catch.
+// statements, and a fix applied to only one (playbook item 6) is what this
+// test exists to catch.
 func TestChargeKey_MovesOnEveryRecordedOutcome(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)

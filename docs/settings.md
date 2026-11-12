@@ -125,8 +125,10 @@ The OpenTelemetry library reads these itself, and also its other standard `OTEL_
 | Setting | What it does | Default |
 |---|---|---|
 | `HARDCOUNT_BOOTSTRAP_EMAIL` | The dashboard owner's email: one address with a dot in the domain, such as `you@example.com`. | `admin@hardcount.local` |
-| `HARDCOUNT_BOOTSTRAP_PASSWORD` | The owner's password. | Unset: one is generated and printed once. |
+| `HARDCOUNT_BOOTSTRAP_PASSWORD` | The owner's password. It needs at least 12 characters, and common leaked passwords are refused. | Unset: one is generated and printed once. |
 | `HARDCOUNT_BOOTSTRAP_TENANT` | The account's name. | Unset: the command-line arguments, or `Demo Tenant` without any. |
+
+The tool runs from source. It is not in the Docker image.
 
 ## Compose only
 

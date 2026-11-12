@@ -82,8 +82,8 @@ type BillingRunner interface {
 // surface gets the same decrypted view that every other read path
 // (customer detail page, customer list, etc.) does.
 //
-// Per-domain rule (CLAUDE.md): zero cross-domain imports between peer
-// packages; coordination via narrow interfaces only.
+// Per-domain rule (docs/architecture.md, "Design rules"): zero cross-domain
+// imports between peer packages; coordination via narrow interfaces only.
 type CustomerReader interface {
 	ListByTestClockID(ctx context.Context, tenantID, clockID string, limit, offset int) ([]domain.Customer, int, error)
 }

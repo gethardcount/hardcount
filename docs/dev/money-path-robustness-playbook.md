@@ -1,371 +1,112 @@
 # Money-path robustness playbook
 
-How to build and review a change that touches money or a state machine, so
-that it never charges twice, never loses an effect, and never leaves a record
-stuck. Every rule below points at real Hardcount code: copy the pattern, do not
-reinvent it. Guard the money invariants, and do not over-engineer past them.
+The checklist for a change to money or a billing state, so it never charges twice, loses an effect or leaves a record stuck.
 
-## Use this when
+## When this applies
 
-Your change writes, reacts to, or branches on the state of an invoice, a
-payment, a credit, a dunning run (the automatic retries after a failed
-payment), a subscription or a tax record.
+Your change writes, reacts to, or branches on the state of an invoice, a payment, a credit, a [dunning run](../glossary.md#payments-and-collection), a subscription or a tax record.
 
-## The five steps
+1. [List every place](#list-every-place-first) that touches the state, before you write code.
+2. Answer [the checklist](#the-checklist): yes, no, or "n/a, because …". A "no" blocks the pull request.
+3. Write [the tests](#the-tests-a-money-change-needs).
 
-1. **List the site-set before you write code.** The site-set is every code
-   place that touches the state: each writer, effect-firer, gated reader,
-   caller and callee, and crash point. Check each one against grep output,
-   and put the list in the PR description. See [§2](#2-the-meta-practice-complete-site-set-enumeration).
-2. **Choose the dedup primitive and place each effect at design time.** Name
-   the key that makes a repeat collide. Put each coupled effect in the same
-   transaction, or in the outbox. See gates 1 to 3 in
-   [§3](#3-implementation-checklist--gates-before-opening-a-money-path-pr).
-3. **Pass every implementation gate in §3** before you open the PR. A "no"
-   blocks the PR.
-4. **Review by class with the §4 questions.** Run the greps yourself, and
-   re-derive each invariant. Do not accept "none of X can Y".
-5. **Lock the behavior with an automated test.** Concurrency and
-   crash-between-writes always need one. A money invariant needs one unless
-   the test would repeat a proven pattern. Use the six
-   [§5](#5-test-lock-doctrine) patterns: collision, real Postgres,
-   concurrent-resolver fake, mutation-verify, one advance across many
-   boundaries, and the invoice row locked first.
+The reviewer answers the checklist again from the code and reruns your searches.
 
-The terms are defined in the [§1 table](#1-the-failure-class-map) and the
-[glossary](../glossary.md).
+## List every place first
 
-## Why it exists
+Check the state, such as an invoice's `paid` status, not your diff. A money bug is usually in another caller, a race, or a crash between two writes.
 
-These bugs do not show on the path where everything succeeds. They live in
-sibling call sites, in concurrent interleavings and in crash windows. A crash
-window is the gap between two writes where a process can die with half the
-work done.
+The **site-set** is every place in the code that touches one state:
 
-In PR #325, a dunning resolve change went through four review rounds. Each
-round found a different instance of the same root problem, because each
-reasoned about the function in the diff, not the whole state machine. Step 1
-turns that four-round discovery into one checklist.
+- Every writer: handler, service, billing engine, scheduler, webhook, operator action, repair job.
+- Everything that fires an effect on a change: an email, a webhook, a Stripe call, a ledger write.
+- Everything that branches on the state.
+- What calls these, and what they call.
+- The line after each commit and each external call: a crash can stop there.
 
-When the design or review runs as a panel of AI agents prompted in parallel,
-prompt them per
-[docs/dev/records/agent-prompting-standards.md](records/agent-prompting-standards.md).
-It covers grounded claims, the reasoning sent with each request
-(reason-with-request), effort routing, and the optional mid-build
-spec-conformance verifier.
+Put the list in the pull request, ticked against search output:
 
----
-
-## 1. The failure-class map
-
-The complete set of ways a billing engine silently does the wrong thing with
-money. Each class has a *different fix kind* and a *different detection
-method*, which is why they are separate.
-
-Terms the tables lean on:
-
-| Term | Meaning |
-|------|---------|
-| **invariant** | a property that must hold at all times |
-| **idempotent** | safe to run twice with the effect landing once |
-| **dedup key** | a stored deduplication key that makes a repeat attempt collide instead of double-firing |
-| **tx** | a database transaction |
-| **CAS** | compare-and-swap: an `UPDATE` that applies only while the row is still in the expected state |
-| **outbox** | a pattern that enqueues an external call as a DB row inside the same transaction as the state change |
-| **RLS** | Postgres Row-Level Security, per-tenant row filtering enforced by the database itself |
-| **PI** | a Stripe PaymentIntent (Stripe's object for a single payment) |
-| **livemode** | the flag separating real money data from test-mode data |
-| **ADR-NNN** | an Architecture Decision Record in `docs/adr/` |
-
-| # | Class | Invariant | Fix kind | Hardcount example |
-|---|-------|-----------|----------|---------------|
-| **A** | **Exactly-once / idempotency** | Every money mutation is idempotent-by-construction or dedup-key-guarded | dedup index / CAS / stable Stripe key | proration `idx_invoices_proration_dedup` → `invoice_proration_source_taken`; MarkPaid no-op re-read branch (avoids `amount_paid=amount_due` re-zero) |
-| **B** | **Dual-write atomicity** | Internal state + its coupled effect never diverge | coordinator-tx (internal, ADR-056) / outbox-in-tx (external, ADR-040); reconciler is the *fallback* | `invoice.paid`+`payment.succeeded` enqueue **in** the MarkPaid tx; `invoice.finalized` in the tx that inserts or finalizes the invoice; cancel final-bill folded into the cancel tx (#307) |
-| **C** | **External-truth / webhooks** | Stripe (signed webhook or server response) is the *sole* money-outcome authority; ingestion is idempotent + order-insensitive; never mark money-state from a browser redirect | write the dedup row **last** (after the effect commits); 5xx to force redelivery | dedup row after effect (`row present ⇒ effect committed`); hosted-pay `?status=success` is cosmetic only |
-| **D** | **Concurrency races (C1–C4)** | A transition is one atomic CAS; every write/effect/action around it is proven safe | see the C1–C4 sub-table | `SELECT … FOR UPDATE` gates + `ResolveRun WHERE state<>'resolved'` |
-| **E** | **Partial-failure & loud-fail** | A mid-flow crash is recoverable (record-before-effect + requeryable state, or one atomic tx); every money error is surfaced; **no comment claims a backstop that doesn't exist** | in-tx / requeryable state / ERROR+operator path | test-clock panic → `internal_failure` on a `WithoutCancel` ctx; PaymentUnknown loud-fail CRITICAL-with-PI |
-| **F** | **Incomplete-set read** | An effect that spans a *set* must read the *whole* set — no `LIMIT 1` over what is plural | fan-out query over the true set | single-source `FindBaseInvoiceForPeriod` missed the mid-period upgrade sibling → **4 of 5** money bugs (#276/#277/#278) |
-| **G** | **Lifecycle termination (liveness sink)** | Every run/subscription/invoice reaches a terminal state — no stuck-active, no infinite retry, never escalate/cancel a paid customer | ensure a writer advances *every* reachable state to terminal | card-less `auto_charge_pending` retried forever (#297); exhaustRun set `escalated` even when the mover failed (#299) |
-| **H** | **Tenant/livemode isolation** | Every `tenant_id` table has RLS `ENABLE`+**`FORCE`**+policy; app runs as non-superuser `hardcount_app` (fail-closed); scope is server-derived, never client-supplied; every `TxBypass` carries explicit `WHERE tenant_id` | migration adds RLS in the same PR; `openAppPool` role swap | 45 tables covered; `os.Exit(1)` refuses to boot RLS-bypassed in non-local |
-| **I** | **Time / precision / validation** | Month/year math anchored in tenant TZ (never host `time.Local`). Simulated vs wall-clock never cross-compare. int64 cents with `RoundHalfToEven` (no float). Currency UPPERCASE at store. Malformed input fails loud. A call that never reached the provider isn't a burned attempt | `addIntervalIn` / `time.Now().UTC()` both sides / `ErrTransientSkip` | tenant-TZ `domain.addIntervalIn` (ADR-058); `ErrTransientSkip` rewinds the attempt |
-| **J** | **Contracted-instant stamping** | A transition executed LATE (catchup sweep, background settle, webhook, operator retry) stamps the instant it was *contracted* to fire — never the executor's effective-now; purely operational stamps (`issued_at`, `updated_at`, audit recorded-at) stay at effective-now. One advance crossing N boundaries produces N artifacts each at its own boundary instant | plumb the contracted instant INTO the writer (an `at` param like `resolveRunAt`; a `WithSim` ctx rebind per boundary; a PI-metadata anchor across the provider round-trip) — never re-resolve `clock.Now()` at the write site | **6 sightings before mechanizing**: trial flips, boundary cancels (ADR-097), pause resumes (#516), dunning resolves + success retry rows (#520), retry-charge ctx (#523), `paid_at` via `hardcount_anchor_at` (#523) |
-
-### The C1–C4 concurrency sub-table (class D)
-
-| | Class | Tell | Fix |
-|--|-------|------|-----|
-| **C1** | Non-idempotent effect under a **new caller** *or* a **crash-retry** | an effect (an outbox `Enqueue`, an email, a Stripe call) fires unconditionally after a state write | fire **only on the winning CAS branch** (`RowsAffected==1`) *and/or* carry an internal dedup/source key |
-| **C2** | Incomplete invariant rollout | a new guard/chokepoint is added, but not every writer routes through it | enumerate ALL writers, route each through the one chokepoint |
-| **C3** | Unguarded write racing a transition | `UPDATE … WHERE id=$X` with no state predicate | state-predicate `WHERE … AND status=<expected>` + `RowsAffected` gate |
-| **C4** | Irreversible action on a **stale precondition** | a tick-start / handler-start check that goes stale across a Stripe (or DB) round-trip | re-read the precondition **immediately before** the irreversible action |
-
-> **C3 and C4 are one root** — *check-then-act across a gap* (a concurrent-tx gap
-> vs. a slow-external-call gap). The single scanning heuristic — "is the
-> precondition re-asserted atomically at the moment of the write/action?" —
-> catches both.
-
----
-
-## 2. The meta-practice: complete-site-set enumeration
-
-**Never reason locally about a money or state change. Enumerate its complete
-site-set: every code site that writes, reacts to, or gates on the state. Prove
-each element is covered before you write a line.** The racing firer, the
-clobbering write and the stale-gated action all live in sibling branches and
-callees that a diff-scoped read never opens.
-
-The unit of proof is the **state value** (`'resolved'`, `SubscriptionActive`,
-…), not your diff. For the state machine you touch, list and discharge each
-item:
-
-1. **Every writer** of this state: handler, service, engine, scheduler,
-   webhook, operator action, reconciler (a background sweep that finds and
-   repairs half-done work). Do they all route through the one guarded
-   transition chokepoint, the single function every transition must pass
-   through?
-   *(`ResolveRun` has six resolve paths, all funneled through `resolveRunNow`;
-   a seventh site that writes the state directly is the
-   bug.)*
-2. **Every effect-firer** hanging off the transition (Stripe call, ledger write,
-   email, outbound webhook). Is each idempotent under replay, and either in-tx or
-   outbox-enqueued?
-3. **Every caller and callee.** Does a `*Tx` variant skip a validation or
-   effect that the non-Tx path runs? Such a variant is the flavor of a store
-   method that runs inside a caller-supplied transaction. *(Example: the
-   pre-#333 `UpsertPolicyTx` skipped the retry-schedule-length check that
-   `UpsertPolicy` enforced. Both writers now share the
-   `normalizeAndValidatePolicy` chokepoint.)* Does the guard extend into
-   functions the changed one *calls*? *(The exhaustRun miss.)*
-4. **Every gap between a precondition check and an external call.** Between the
-   check and the irreversible action, can a concurrent settle or redelivery
-   invalidate it?
-5. **Every crash point.** For the line *after* each commit, name the exact
-   reconciler row, outbox obligation or marker column that re-drives the
-   missing effect. Then **open it** to confirm it sweeps this state.
-
-Write the site-set as a checklist in the PR description. Check each box
-**against grep output**, not against memory:
-
-```
-grep -n "TxTenant\|MarkPaid\|resolveRunNow\|[Ee]nqueue\|\.Send" internal/<domain>/
+```bash
+grep -rnE "MarkPaid|resolveRunAt|Enqueue|\.Send" internal/<domain>/
 ```
 
-If a new writer can't reuse the existing chokepoint (`transitionAtomic`,
-`resolveRunNow`, `MarkPaid*Transition`), **create or extend the chokepoint
-first, then add the caller.** Never hand-roll a fresh `UPDATE`+effect.
+## The checklist
 
----
+Each lettered class is one way a billing change goes wrong, with an example. Most numbered items name code to copy: do not invent a second way. Cite them in code comments as `playbook class J` or `playbook item 8`, and never renumber them.
 
-## 3. Implementation checklist — gates before opening a money-path PR
+### A. Done twice
 
-Ordered by leverage. A "no" blocks the PR.
+A charge key built from `updated_at` moved on an unrelated write and started a second payment.
 
-1. **Dedup primitive chosen at design time?**
-   - Client write → `/v1` Idempotency-Key middleware (dedup keyed on a
-     client-sent HTTP header).
-   - Server/engine/scheduler/webhook write → a `source_*` partial-unique dedup
-     index OR a same-tx CAS.
-   - **Never rely on the API header for engine paths.** They carry none.
-2. **Stripe idempotency key is provenance-stable, not a fresh UUID?**
-   - **Rule.** Derive the key from the durable id you dedup on
-     (`hardcount_inv_<id>_<charge_attempt_seq>`, `hardcount_cn_<id>`,
-     `inv_taxrev_<id>`). It must not collide across purposes (finalize vs
-     dunning suffix), and it must not dedup two genuinely different charges.
-     **The varying part must be the event you mean, never a proxy for it.**
-     The key answers "same attempt or new attempt?", so it may move only when
-     an attempt's PaymentIntent goes onto the invoice (before the confirm, or
-     with an outcome), or when the reconciler clears the hold of a charge
-     that confirmed nothing (ADR-137).
-   - **Proxy test.** When a seed is a proxy, ask what writes it that you did
-     not intend. If the answer is "a whole table's worth of writers",
-     introduce the explicit counter instead.
-   - **Why.** This gate used to bless `hardcount_inv_<id>_<UpdatedAt>`. But
-     `updated_at` answers the much broader question "did anything touch this
-     row?". That made every unrelated writer a participant in the payment
-     protocol. A tax-commit stamp landing in a crash window then minted a
-     second PaymentIntent (ADR-105, #678).
-3. **Coupled effect classified and placed?**
-   - Internal DB write → threaded `*sql.Tx` in-tx (ADR-056).
-   - External call → `OutboxStore.Enqueue(ctx, tx, …)` in the commit tx
-     (ADR-040), or a self-clearing marker column + scheduler sweep.
-   - `EnqueueStandalone` only where no business transaction exists;
-     `internal/arch/email_outbox_standalone_test.go` pins the list.
-4. **The UPDATE itself is idempotent?** Keep a no-op re-read branch for when
-   the transition already ran (guard the `amount_paid=amount_due` re-zeroing
-   class). The CAS lists the states the row may come from
-   (`WHERE state = ANY($allowed)`, which leaves out the target) and is
-   `RowsAffected`-gated.
-5. **Webhook: the dedup-row write (`IngestEvent`) is the last write, after the
-   effect commits?** Only errors that can never be processed (`ErrNotFound`)
-   ack. To ack is to acknowledge the event, which ends redelivery. Everything
-   else returns 5xx to force redelivery. No money-state from a browser
-   redirect.
-6. **Irreversible action re-reads its precondition immediately before firing?**
-   Cancel/void/pause/uncollectible re-fetch terminal status (not a stale
-   pre-read). They fall through on a fetch error, so a DB blip never burns the
-   action.
-7. **Every money-path error is loud?** No `_ =` / `_, _ =` (Go's
-   discard-the-error assignment) on a store write or `Dispatch`. WARN→ERROR
-   when sustained failure means under-collected money.
-8. **Every background goroutine/worker/advance wrapped in `recover()`** (Go's
-   panic catch)? The recover flips the entity to a *requeryable terminal*
-   state, which an operator can find and act on later (`MarkFailed` on a
-   `WithoutCancel` ctx). It never leaves the entity in progress with no
-   operator exit.
-9. **New `tenant_id` table? Same migration adds `ENABLE` + `FORCE` +
-   `tenant_isolation`.** `ENABLE`-without-`FORCE` exempts the table-owner role
-   from RLS (the bug migration 0111 shipped).
-   Every new `TxBypass`/`db.Pool` query carries explicit `WHERE tenant_id` (+
-   `livemode`).
-10. **Time/money hygiene:**
-    - Every +1mo/+1yr goes through `domain.addIntervalIn`/`AddBillingInterval`
-      with tenant loc.
-    - Any TTL/staleness compare uses `time.Now().UTC()` on **both** sides.
-      Never compare `clock.Now(ctx)` with a DB-`now()` column; that is the
-      tax-commit bug shape.
-    - No `float64` reaches cents.
-    - Currency is written only at the `ToUpper` store chokepoint.
-11. **Validation enforced at every save entrypoint**, including the
-    Tx/recipe/bulk variant? If a Tx-variant skips it "because upstream
-    validated", point at the exact upstream check for each invariant.
-12. **Grep your own diff** for `catchup will retry` / `next cycle` / `reconciler
-    will catch` / `EnqueueStandalone` / `_ =` on side-effects. Prove each
-    named backstop exists and sweeps this state.
-    - **Tests.** Two tests fail the common shapes of a new send queued after
-      its commit. `internal/arch/webhook_emit_catalog_test.go` fails when
-      the webhook package gains a function or method that takes an event
-      type but no `*sql.Tx`, so `OutboxStore.Enqueue` on a caller's
-      transaction stays the only way to queue a webhook event.
-      `internal/arch/email_outbox_standalone_test.go` fails a call of an
-      `OutboxSender` method built on `enqueue`, unless the call is listed
-      with a reason.
-    - **What they miss.** Green tests do not prove that no new post-commit
-      send exists. Neither test sees a hand-rolled `BeginTx` + `Enqueue` +
-      `Commit` with no state write in it. The email test also does not see a
-      send made through a function value, a direct `EnqueueStandalone` call,
-      or a send from inside `internal/email`.
-    - **Who catches those.** The grep above finds a direct
-      `EnqueueStandalone`. For the rest, a reviewer checks each `Enqueue` the
-      diff reaches, including those in the functions it calls. Each must run
-      on the same `*sql.Tx` as its state write: the class B question in §4.
+1. **Does every money write have a stored key that makes a repeat collide?** An API request has the `Idempotency-Key` header. Engine, scheduler and webhook work has none, so it uses a unique index on its cause (`idx_invoices_proration_dedup`) or item 5's `UPDATE`.
+2. **Is each Stripe [idempotency key](../glossary.md#pricing-and-usage) built from stored ids, the attempt and the purpose?** Never a random value or a stand-in such as `updated_at`, which every writer of the row changes. Use a counter that only the attempt moves, like `invoices.charge_attempt_seq` ([ADR-105](../adr/105-charge-idempotency-key-seed.md), [ADR-137](../adr/137-charge-stamps-invoice-before-confirming.md)). Copy: `internal/payment/stripe.go:ChargeIdempotencyKey`.
 
----
+### B. Half saved
 
-## 4. Review lens — questions that INDEPENDENTLY re-derive each invariant
+A cancel committed, and a crash lost its final bill.
 
-Do not accept "none of X can Y." Run the greps yourself, and make the author's
-proof land on the table.
+3. **Is each effect saved in the same transaction as its change?** A database write uses the caller's `*sql.Tx` ([ADR-056](../adr/056-atomic-cross-interval-plan-swap.md)). A webhook event or a money email is queued on it with `OutboxStore.Enqueue` ([ADR-040](../adr/040-outbox-always-on.md)). An effect that cannot join leaves a marker for a later pass, such as `no_pm_notified_at`. Check: `internal/arch/webhook_emit_catalog_test.go`, `internal/arch/email_outbox_standalone_test.go`. Review: follow each `Enqueue`'s transaction back to its `BeginTx`. No test catches a transaction opened only to call `Enqueue`.
 
-- **A (exactly-once):** "What is the dedup key for this write? Is it stable
-  across (a) at-least-once redelivery, (b) a crash between the Stripe call and
-  the DB commit, and (c) two concurrent callers? If the answer is 'the CAS
-  already guarantees exactly-once' with no atomic internal effect, an atomic
-  option was skipped."
-- **B (dual-write):** "Does each coupled effect, an internal write or an
-  outbox `Enqueue`, run on the same `*sql.Tx` as the state write? Follow its
-  `*sql.Tx` param back to the `BeginTx` that opened it. An `Enqueue` on a tx
-  opened just for it commits after the state write, so it runs post-commit. If
-  post-commit, what re-drives it after a crash: a marker or a state that a
-  sweep re-reads? If nothing does, a crash loses it."
-- **C (webhooks):** "If Stripe redelivers this exact event after `processEvent`
-  committed but `IngestEvent` failed, does re-running double-count money or
-  re-fire an outbound event? Does any money-state come from a browser redirect?"
-- **D (concurrency):** "Show me the writer set (`grep` every `UPDATE` of this
-  column — does each carry a state predicate + `RowsAffected` gate?). Trace each
-  effect up to its CAS. Where was the precondition last read relative to the
-  irreversible action?"
-- **E (partial-failure):** "If the process crashes on the line after this
-  commit, name the exact reconciler/outbox row/marker that re-drives the
-  effect. Open it to confirm it re-visits this state. Is this error `_ =`
-  swallowed? Is it WARN where sustained failure = lost money?"
-- **F (incomplete-set):** "What query anchors this effect, and is its result set
-  complete? Any `LIMIT 1` or single-status predicate over what is actually plural
-  (multiple funding invoices per period; orphan paid/void/uncollectible rows)?"
-- **G (liveness):** "Does every reachable state have a writer that advances it to
-  terminal? What happens to this entity if the terminal action *fails*?"
-- **H (isolation):** "Does every `tenant_id` table this diff touches have BOTH
-  `ENABLE` and `FORCE` + a policy? Any new `TxBypass`/`db.Pool` query — explicit
-  `WHERE tenant_id AND livemode`? Does any `BeginTx(TxTenant, X)` take X from
-  request input rather than the auth-derived ctx?"
-- **I (time/precision/validation):** "Does this time compare put `clock.Now(ctx)`
-  on one side and a DB-`now()`/Stripe timestamp on the other? Does any advance skip
-  `addIntervalIn`? Does a `float64` reach cents? Which entrypoints reach this store
-  write, and does EACH run the same validation? For an external 5xx/timeout where
-  the effect *may* have happened — is it counted as a real attempt?"
+### C. Wrong source of truth
 
----
+A webhook was marked handled, its effect failed, and Stripe's retry was dropped.
 
-## 5. Test-lock doctrine
+4. **Does only Stripe's word change what was paid?** Money state comes from a signed webhook or Stripe's answer to a server call, never a browser redirect. A webhook handler is safe to run twice and in any order. It runs the effect, then marks the event handled (`IngestEvent`). It returns every error but `ErrNotFound`, which no retry can fix, so Stripe sends the event again. Copy: `internal/payment/stripe.go:HandleWebhook`.
 
-**Must be an automated test.** Three kinds of behavior need one (see
-[How we test](../testing.md) for the layers):
+### D. Race
 
-- (i) **concurrency**: always;
-- (ii) **money-invariant**: automate unless it's an Nth duplicate of a proven
-  pattern;
-- (iii) **partial-failure / crash-between-writes.**
+Dunning cancelled a subscription while its invoice was being paid.
 
-**A hand check** is only for live external services, in the
-[release checklist](release-checklist.md) (live-Stripe exactly-once
-stays manual). Dashboard screens get a Playwright test.
+5. **Is each state change one conditional `UPDATE`, with effects fired only by the winner?** The `UPDATE`, a CAS (compare-and-set) in the code, names the states the row may come from ([code standard](code-standard.md#errors-state-and-structure)). A call that changed no row lost the race, and fires nothing. Copy: `internal/dunning/postgres.go:UpdateRunIfActive`.
+6. **Do all writers go through one function that holds the guard and the validation?** That includes a `…Tx` variant, a bulk save and a recipe. One that skips a check names the earlier check that covers it. If no function fits, extend one first. Copy: `internal/dunning/service.go:resolveRunAt`, `internal/dunning/service.go:normalizeAndValidatePolicy`, `internal/invoice/postgres.go:markPaidLockedTx`.
+7. **Does each action that cannot be undone re-read its precondition right before it fires?** That means cancel, [void](../glossary.md#subscriptions-and-invoices), pause and mark-uncollectible: a check made before a Stripe call is stale after it. If the read fails, nothing fires, and the record is tried again. Copy: the late paid re-check in `internal/dunning/service.go:exhaustRun`.
+8. **Does a transaction lock the invoice row before it writes a row that belongs to the invoice?** A settle (the transaction that records a payment) locks the invoice first. A writer that writes its row first deadlocks with it: its foreign-key check waits for the invoice, and the settle for the row. Copy: the "Lock order" comments in `internal/dunning/postgres.go`.
 
-Six non-negotiable patterns:
+### E. Crash or hidden error
 
-1. **Collision, not happy-path.** Fire the same mutation twice, both
-   concurrently and serially. Assert exactly-one effect + the specific dedup
-   error code (`invoice_proration_source_taken`,
-   `credit_reversal_source_taken`). Assert the re-run invariant explicitly:
-   second MarkPaid leaves `amount_paid` unchanged; second credit-apply drains
-   0. *Pattern:*
-   `internal/invoice/postgres_proration_dedup_integration_test.go`,
-   `internal/billing/engine_idempotency_integration_test.go`.
-2. **Real Postgres, the DB did the filtering.**
-   - Atomicity: force the second leg to fail inside the tx, and assert the
-     first leg rolled back (row absent). This is what #307/#309/#312 shipped.
-   - RLS: open `TxTenant(A)`, write, then assert `TxTenant(B)` sees ZERO rows
-     **with no `WHERE` clause in the query**. That proves the DB, not the SQL,
-     filtered.
-   - A schema test enumerating `information_schema` for every `tenant_id`
-     table + asserting `relrowsecurity AND relforcerowsecurity` in `pg_class`
-     catches every future 0111-class RLS slip automatically.
-3. **Concurrent-resolver / fault-injecting fake.** A test double that, at the
-   external-call boundary or between the precondition read and the write,
-   *concurrently commits the racing transition* (pays/cancels/resolves the
-   target). Assert BOTH outcomes: winner did the effect exactly once (assert the
-   *count*, not just final state); loser took the `RowsAffected==0` branch — no
-   second fire, no clobber. *Pattern:* `resolvingCanceler`/`resolvingRetrier` in
-   the dunning tests, `TestResolveRun_CAS_ExactlyOnce`. A test asserting only "no
-   error returned" is vacuous.
-4. **Mutation-verify the guard is non-vacuous.** Temporarily revert the `WHERE`
-   predicate / the CAS gate / the re-read and confirm the test goes **red**. The
-   red run is the *only* proof the guard exists rather than being decorative.
-   It is also what a later refactor trips over in CI if it re-introduces an
-   unconditional fire or a second tx. (PR #325 shipped a 5-mutation check.)
-5. **One advance, many boundaries (class J).** Drive a test clock across ≥2
-   contracted instants in a single advance (two retry dates; a resume date
-   plus a cycle close). A test clock is a simulated clock the engine's
-   time-based behavior can be advanced against. Assert that each artifact
-   stamps its own boundary instant, and none stamps the advance-end frozen
-   time. The artifacts are `resolved_at`, `paid_at`, timeline rows, and the
-   charge ctx's `Sim.At`. Asserting only the final state is vacuous: the sweep
-   reaches it either way; the *instants* are what regress. *Pattern:*
-   `TestProcessDueRunsForClock_RecoveryStampsContractedInstant`,
-   `TestProcessDueRunsForClock_ChargeCtxCarriesAnchoredInstant`.
-6. **Lock order: the invoice row first.** A transaction that writes a row
-   belonging to an invoice (a charge attempt, for example) locks the invoice
-   row before it writes that row. An insert takes its own unique slot, then
-   waits on the invoice for the foreign-key check, so the opposite order
-   deadlocks against a settle that holds the invoice. That happened in #989:
-   the charge path's attempt write against a webhook settle of the same
-   payment. **Decision (2026-10-14): one real-Postgres race test per pair of
-   writers, no general lock-order checker.** Revisit if a deadlock reaches a
-   release that a pair test did not cover. *Pattern:*
-   `TestSettleSucceeded_ConcurrentSources_RecordsOnce`,
-   `internal/creditnote/number_lock_order_integration_test.go`.
+A [test-clock](../glossary.md#testing-with-simulated-time) advance panicked and stayed `advancing`.
 
----
+9. **After a crash on any line, does something that exists finish the work?** Name the queued row, marker column or repair job that picks the work up, and confirm it reads this state. A comment that promises a retry names the code that does it. Background work that panics marks its record failed, where an operator finds it. Copy: the test-clock advance (`internal/testclock/service.go`).
+10. **Is every error on a money write returned, or logged as an error?** No `_ =` on a store write or a queued send. Older code does not all follow this yet. A failure that leaves money uncollected if it lasts is logged at `ERROR`, not `WARN`.
 
-## 6. Current posture (as of 2026-07-11)
+### F. Part of a set
 
-The dated census of each class's status moved to
-[docs/dev/records/money-path-census-2026-07.md](records/money-path-census-2026-07.md).
+A credit read one invoice for a period that had two.
+
+11. **Does an effect that covers a set read the whole set?** No `LIMIT 1`, no single-row lookup, and no status filter that drops a paid, void or uncollectible sibling. Several invoices can bill one period, its funding invoices: read them with `FindFundingInvoicesForPeriod`, which lint enforces in two packages ([code standard](code-standard.md#go-rules-a-tool-checks)).
+
+### G. Never ends
+
+An invoice with no card was retried for auto-charge forever.
+
+12. **Can every record reach an end state?** Every state has a writer that moves it on, also when the final action fails. A dunning retry with no definite answer returns `dunning.ErrTransientSkip` and uses up no attempt.
+
+### H. Tenant leak
+
+[Row-level security](glossary.md#database-access) was enabled but not forced, so the table's owner read every tenant's rows.
+
+13. **Is every tenant's data still fenced?** A new table with `tenant_id` gets row-level security in the same migration: `ENABLE`, `FORCE` and a `tenant_isolation` policy (`internal/platform/postgres/rls_enumeration_test.go`). A query that skips it (`TxBypass` or `db.Pool`) filters by tenant as [Architecture](../architecture.md#design-rules) says, and by [`livemode`](../glossary.md#accounts-and-access) where the table has it. The tenant comes from the signed-in key or session, never from the client.
+
+### I. Wrong time or amount
+
+A staleness check compared test-clock time with the database's `now()`.
+
+14. **Does every time come from the right clock?** A month or year step goes through `domain.AddBillingInterval` with the tenant's time zone, never the host's ([ADR-058](../adr/058-billing-date-math-tenant-timezone.md)). A compare has the same clock on both sides: never test-clock time against the database's `now()` or a Stripe timestamp.
+15. **Is the money math exact?** Whole cents, no floats ([code standard](code-standard.md)), and currency codes in upper case.
+
+### J. Stamped late
+
+One clock advance crossed two retry dates, and both retries carried its end time.
+
+16. **Does work that runs late stamp the time it was due?** That is any field for when a billing event happened: `resolved_at`, `paid_at`, a timeline row. Pass the due time in, as `resolveRunAt`'s `at` parameter does. A bookkeeping field (`updated_at`, `issued_at`, audit time) carries the current time.
+
+## The tests a money change needs
+
+A race or a crash between two writes always gets an automated test. A money rule gets one unless an existing test covers the same pattern. Write the tests whose items your change touches. [How we test](../testing.md) has the layers and the hand checks.
+
+1. **Collision (items 1, 4).** Run the change twice, together and in turn. Assert one effect, the error code (`invoice_proration_source_taken`) and an unchanged second run. Copy: `internal/invoice/postgres_proration_dedup_integration_test.go`, `internal/billing/engine_idempotency_integration_test.go`.
+2. **Real Postgres (items 3, 13).** Make a transaction's second write fail and assert the first is gone. For tenant isolation, write as two tenants and read as one with no `WHERE`: it must see only its own rows. Copy: `internal/platform/postgres/rls_isolation_test.go`.
+3. **A fake that races (items 5, 7).** A concurrent-resolver fake commits the competing change at the external call, or between the read and the write. Assert by count that the winner fired once and the loser changed nothing. Copy: `resolvingCanceler` and `resolvingRetrier` in `internal/dunning/resolve_on_settle_test.go`.
+4. **Break the guard once.** Remove the `WHERE` condition, the rows-changed check or the re-read, and watch the test fail.
+5. **One advance, many due times (item 16).** Advance a test clock across two or more due times, or two days past one. Assert each record carries its own. The final state alone proves nothing. Copy: `internal/dunning/service_test.go:TestProcessDueRunsForClock_RecoveryStampsContractedInstant`, `internal/api/activity_parity_dates_integration_test.go`.
+6. **A race for each pair of writers (item 8).** Two writers that lock the same rows get one real-Postgres test that runs them together. Copy: `internal/payment/settle_once_concurrent_integration_test.go:TestSettleSucceeded_ConcurrentSources_RecordsOnce`, `internal/creditnote/number_lock_order_integration_test.go`.

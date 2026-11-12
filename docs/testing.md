@@ -1,272 +1,79 @@
 # How we test Hardcount
 
-Each code change should ship with a test at the right layer. This page says
-which test to write for a change, how to run each kind, and what is checked
-by hand before a release.
+Every change ships with a test ([why](ENGINEERING.md)).
 
 ## The four layers
 
 | Layer | Tools | What belongs here |
 |---|---|---|
-| 1. Logic and money | `go test`: unit tests (`-short`) and integration tests against a real Postgres (`internal/testutil`) | All money math, state changes, Row-Level Security (RLS), migrations, API contracts and architecture rules (the source tests in `internal/arch`) |
-| 2. Static checks | golangci-lint, eslint, `tsc -b`, codegen drift (`make gen`), ShellCheck | Code rules. A rule we can check by reading the code becomes a linter rule or a Go test, not a script |
-| 3. Dashboard end to end | Playwright (`@playwright/test`) | A smoke test over every page, plus a few key user journeys, against a real API with seeded data |
-| 4. Live services | [Release checklist](dev/release-checklist.md), run by hand | Real Stripe test mode, real email, the LiteLLM callback and the invoice PDF. Run before each release tag |
+| 1. Logic and money | `go test`: unit tests (`-short`) and integration tests on real Postgres | Money math, state changes, tenant isolation, migrations, API contracts, and the source tests in `internal/arch` (Go tests that read the code and fail on a banned pattern) |
+| 2. Static checks | golangci-lint, eslint, `tsc -b`, generated code up to date (`make gen`), ShellCheck | Rules about how code is written |
+| 3. Dashboard end to end | Playwright, in a real browser | A smoke test that opens every page, and the main user journeys, against a real API |
+| 4. Live services | The [release checklist](dev/release-checklist.md), run by hand before each release | Real Stripe in test mode, real email, the LiteLLM usage callback and the invoice PDF |
 
-Most tests belong in layer 1. Layers 3 and 4 stay small on purpose.
+Most tests belong in layer 1. Use layer 3 or 4 only when no Go test can prove the same thing.
 
 ## Which test to write
 
 | You changed | Write |
 |---|---|
-| Money, an invoice, payment, credit, dunning, subscription or tax state | A Go integration test against real Postgres. Follow the [money-path playbook](dev/money-path-robustness-playbook.md) §5: test the collision, not only the happy path |
-| Pure logic with no database (a calculation, a parser, a formatter) | A Go unit test, or a Vitest test in `web-v2/tests/` for dashboard code |
-| An API endpoint | A Go test that calls the handler and checks the status code and body |
-| A rule about how code may be written | A golangci-lint rule in `.golangci.yml`, or a source test in `internal/arch` |
-| A dashboard page or a user journey | A Playwright spec in `web-v2/e2e/`. New pages are added to the smoke list |
-| Stripe, email or PDF behavior that a fake cannot prove | A line in the [release checklist](dev/release-checklist.md), plus a Go test for the logic around it |
+| Money, or a billing state such as an invoice's status | A Go integration test against real Postgres. Test the race and the repeat, not only the happy path. The [money-path playbook](dev/money-path-robustness-playbook.md) says how |
+| Pure logic with no database: a calculation, a parser, a formatter | A Go unit test. For dashboard code, a Vitest test in `web-v2/tests/` |
+| An API endpoint | A Go test that calls the handler and checks the status and the body |
+| A new field on an invoice or a line item in the API | List it in `scripts/ci/upgrade-new-fields.txt`, with why. The `upgrade` CI job fails until you do |
+| A rule about how code may be written | A golangci-lint rule in `.golangci.yml`, or a source test in `internal/arch`. Not a script |
+| A dashboard page or a user journey | A Playwright spec in `web-v2/e2e/`. A new page also gets a line in the `routes` list in `smoke.spec.ts` |
+| Stripe, email or PDF behavior that a fake cannot prove | A line in the [release checklist](dev/release-checklist.md), and a Go test for the logic around it |
 
-A Playwright test checks that the screen shows what the API returned.
-Arithmetic stays in Go tests.
-
-A lint waiver names the linter and says why, on the same line. A bare
-`//nolint` fails the lint. For example:
-
-| Waiver | The rule it waives |
-|---|---|
-| `//nolint:forbidigo // wall-clock: <reason>` | No bare `time.Now()` in packages whose time can come from a test clock |
-| `//nolint:forbidigo // single-invoice-ok: <reason>` | No lookup of one invoice for a billing period in `internal/subscription` and `internal/billing`, because several invoices can pay for one period |
-
-One source test in `internal/arch` checks dates: a calendar date must be
-formatted in an explicit time zone (`.In(loc)`), or carry a same-line
-`//tz:ok` comment that marks a real UTC case.
-
-A row dated at an instant the contract names (a trial end, a dunning retry,
-a cycle close) is tested on a test clock advanced two days past that
-instant. A row dated at the advance instead then reads two days late. The
-activity scenarios are in
-`internal/api/activity_parity_dates_integration_test.go`.
+A Playwright test checks that the screen shows what the API returned. Arithmetic stays in Go tests.
 
 ## Writing tests
 
-The rest of the code rules are in the [code standard](dev/code-standard.md).
+We follow the Go wiki's [test comments](https://go.dev/wiki/TestComments) and Playwright's [best practices](https://playwright.dev/docs/best-practices). The rules below are ours, and review checks them. Older tests do not all follow them yet: some sleep, match an error's text, insert rows with raw SQL or find elements by CSS selector.
 
-**Go tests**
+### Every Go test
 
-- **A test must be able to fail when the behavior it names breaks.** Assert a
-  value, a row or an effect; "no error" alone proves little. Watch it fail
-  without your fix. ([Kent Beck: canon TDD](https://newsletter.kentbeck.com/p/canon-tdd))
-- **Wait on a condition, never a sleep.** Use a channel, a WaitGroup,
-  `testutil.WaitForLockWaiter`, a fake clock or `testing/synctest`. A sleep is
-  slow, and too short on a slow runner.
-  ([Go blog: synctest](https://go.dev/blog/synctest))
-- **Test SQL behavior against real Postgres** through
-  `testutil.SetupTestDB`. It connects as the app's own non-owner role, so
-  row-level security applies. A fake can't run a `WHERE` clause or a lock.
-  ([SWE at Google, ch. 13](https://abseil.io/resources/swe-book/html/ch13.html))
-- **Test a shared helper once, in its own package.** Callers test only their
-  own inputs. Copies of the same cases add work, not coverage.
-  ([Fowler: test pyramid](https://martinfowler.com/articles/practical-test-pyramid.html))
-- **Use the helpers in `internal/testutil` instead of copying them.** Copies
-  drift. ([SWE at Google, ch. 12](https://abseil.io/resources/swe-book/html/ch12.html))
-- **Make a test's own database role with `testutil.CreateRole`.** A role
-  belongs to the whole Postgres server, not to one database. With a fixed
-  name, the same test running on another test database at the same time
-  drops or changes your role. `CreateRole` names the role after the test
-  database, and drops it and its grants when the test ends.
-  ([Postgres: database roles](https://www.postgresql.org/docs/current/user-manag.html))
-- **Build test data through production code** (constructors, services, the
-  API). Use raw SQL only for a state production can't reach, and say why.
-  ([Google: test helpers](https://google.github.io/styleguide/go/best-practices#creating-test-helper-packages))
-- **Fakes are hand-written and implement the consumer's small interface.**
-  Assert the resulting state. Count calls only when the call is the effect,
-  such as a Stripe request or an email.
-  ([SWE at Google, ch. 13](https://abseil.io/resources/swe-book/html/ch13.html))
-- **Plain Go assertions; no testify or mock generators.** Use `cmp.Diff` for
-  nested structs. ([Go wiki](https://go.dev/wiki/TestComments#assert-libraries))
-- **Check errors with `errors.Is`, or by error code,** not by message text.
-  Wording changes; behavior doesn't.
-  ([Go wiki: error semantics](https://go.dev/wiki/TestComments#test-error-semantics))
-- **Skip a test only when something it needs is missing,** like Postgres under
-  `-short`. `SetupTestDB` already skips, so don't add a second check. A
-  skipped test reports ok, so CI stays green while nothing ran. A test that
-  fails at some hours reads the wall clock: give it a fake clock instead of
-  skipping it.
-  ([Fowler: non-determinism in tests](https://martinfowler.com/articles/nonDeterminism.html))
-- **Change environment variables only with `t.Setenv`,** and don't use
-  `t.Parallel` in tests that use `SetupTestDB`, because it clears the tables.
-  ([testing: T.Setenv](https://pkg.go.dev/testing#T.Setenv))
-- **Test a cut COMMIT with a store wrapper.** pgx commits on the
-  transaction's ctx, so a cancel during COMMIT can apply the commit and still
-  return `context.Canceled`. Wrap the store method that owns the transaction:
-  run the real call, then cancel the request's ctx, and return
-  `context.Canceled` if the ctx the call was given is now done (for example
-  `cutCommitInvoices` in `internal/billing/tax_retry_one_tx_integration_test.go`).
-- **Run a concurrency test under `-race`.** The race detector only sees code
-  that runs, and CI's `-race` run covers only the `-short` unit tests, so run
-  `go test -race -short=false` yourself on a Postgres-backed concurrency test.
-  ([Go race detector](https://go.dev/doc/articles/race_detector))
-- **Go test style:** helpers call `t.Helper()` first; table tests name each
-  row; failure messages read `Total(x) = 3, want 4`; use `t.Context()`, and
-  `b.Loop()` in benchmarks. **lint:** thelper, usetesting.
-  ([Google: test failures](https://google.github.io/styleguide/go/decisions#useful-test-failures))
+- A test must be able to fail. Assert a value, a row or an effect, not only "no error". For a fix, watch the new test fail without the fix.
+- Build test data through production code: constructors, services, the API. Raw SQL is only for a state production cannot reach, with a comment that says why.
+- Wait on a condition, never a sleep: a channel, a fake clock, or `testutil.WaitForLockWaiter` for a query blocked on a lock.
+- Check an error with `errors.Is` or its error code, not its message text.
+- Use plain Go assertions: no testify, no mock generators.
+- Use the helpers in `internal/testutil`; do not copy them. Test a shared helper once, in its own package.
+- Skip a test only when something it needs is missing. A test that fails at some hours needs a fake clock, not a skip.
 
-**Dashboard tests**
+### Tests on real Postgres
 
-- **Logic is tested in Vitest,** as pure functions in `src/lib` (see the
-  [code standard](dev/code-standard.md#frontend-web-v2)).
-- **Playwright tests find elements by role, label or text,** never by CSS
-  class, and await every action.
-  ([Playwright best practices](https://playwright.dev/docs/best-practices))
+- `testutil.SetupTestDB` gives a test the real database, migrated and empty. It skips under `-short`, so add no skip of your own.
+- `SetupTestDB` connects as a non-owner role set up like the app's (`hardcount_test_app`). So row-level security (RLS, the database rule that hides other tenants' rows) applies in the test as it does in production.
+- Every call empties the tables. So run packages one at a time (`-p 1`), and never use `t.Parallel` with it.
+- A second run at the same time needs its own database (`TEST_ADMIN_DATABASE_URL`, `TEST_DATABASE_URL`), made as `docker/init.sql` makes `hardcount_test`.
+- Make a test's own Postgres role with `testutil.CreateRole`. A fixed name is shared by every database on the server.
 
-**What we don't adopt:** `t.Parallel` everywhere, `-shuffle`, build tags for
-integration tests, a coverage percentage gate, contract tests for every fake,
-component tests with jsdom, Firefox and WebKit runs, and pixel snapshots. None
-of them fixes a problem we have measured, and real Postgres and Playwright
-already cover what they would.
+### Test doubles
 
-## Run each layer locally
+A test double is a hand-written stand-in for a real dependency.
 
-Start Postgres once: `docker compose up -d postgres`.
+- A double is for an outside service, such as Stripe or email, or for a peer domain behind the small interface its caller defines.
+- A double never copies a rule that lives in our SQL: a `WHERE` clause, a lock, a unique index or a conditional update. A Go copy proves the copy, not the query. Test that rule on the real store.
+- Assert the resulting state. Count calls only when the call is the effect you check, such as "one email was queued".
+- Some packages have an in-memory copy of their own store (`memStore`). Do not write a new one, and add no SQL rule to an old one.
 
-```bash
-# Layer 1: Go
-go test ./... -short                 # unit tests, no database
-go test -p 1 ./... -short=false      # unit + integration; test databases are created for you
+### Money and state tests
 
-# Layer 2: static checks
-make lint                            # golangci-lint
-make gen && git diff --exit-code     # generated code matches api/openapi.yaml
-scripts/ci/shellcheck.sh             # ShellCheck on every shell script
-cd web-v2 && npx tsc -b && npm run lint   # eslint, then knip (unused code)
+The [money-path playbook](dev/money-path-robustness-playbook.md) lists the tests a money change needs. Two more points:
 
-# Dashboard unit tests (Vitest, web-v2/tests/*.test.ts)
-cd web-v2 && npm test
+- CI runs the race detector on the `-short` unit tests only. Run a Postgres concurrency test yourself, with `go test -race -short=false` on its package.
+- When steps must run after a commit, test a request canceled during COMMIT. The commit can succeed while the caller gets `context.Canceled` ([code standard](dev/code-standard.md)). Copy `cutCommitInvoices` in `internal/billing/tax_retry_one_tx_integration_test.go`, which wraps the store method and cancels the request after the real call.
 
-# Layer 3: Playwright (needs a running API and dashboard; see web-v2/e2e/README.md)
-cd web-v2 && npm run test:e2e
-```
+### Dashboard tests
 
-Use `npx tsc -b` for type checks. `tsc --noEmit` checks nothing in this repo.
+Playwright specs follow the [e2e README's rules](../web-v2/e2e/README.md#rules): find elements by role or label, wait for the screen and not a timer, make your own data, and run a new or changed spec five times.
 
-[CONTRIBUTING](../CONTRIBUTING.md#what-ci-runs-on-your-pr) lists every CI
-gate and its local command.
+## Running tests
 
-## Playwright: how the end-to-end tests work
-
-The specs live in `web-v2/e2e/` and run in Chromium against a real API and
-the built dashboard (`vite preview`, which forwards `/v1` to the API).
-
-- **Smoke:** `smoke.spec.ts` opens every dashboard page, and every public
-  page signed out, at 1440px and 390px wide. A page fails if it logs a console error, an API call answers 400 or
-  more, the page scrolls sideways, or its heading is missing. Each page is
-  its own test, so a failure names the page.
-- **Journeys:** `journeys.spec.ts` signs in, creates a customer and a
-  subscription, advances a test clock to the renewal and opens the new
-  invoice, opens the public invoice page, and grants credits.
-  `subscriptions.spec.ts` changes a subscription's plan, items, trial and
-  collection, and cancels it, checking each change against the API.
-  `account-setup.spec.ts` creates a price, meter and plan, installs a recipe,
-  adds and ends a customer's price override, and creates, assigns and makes
-  default a dunning policy.
-  `invoices.spec.ts` issues, settles, corrects and closes invoices: draft to
-  finalized, credit notes, an offline payment, void and write-off.
-  `dunning.spec.ts` bills a customer with no card so payment retries start,
-  closes a retry run by hand, and checks that a policy that has run cannot
-  be deleted.
-  `layout.spec.ts` checks that the sidebar stays on screen as pages change
-  and while a page's code downloads.
-- **Activity screenshots:** `activity.spec.ts` screenshots the invoice and
-  subscription Activity cards, a Dunning run and Sent emails, each on the
-  real clock and on a test clock. They are for comparing a PR with main by
-  eye. CI uploads them as the `activity-shots` artifact on every run
-  ([how to compare](../web-v2/e2e/README.md#activity-screenshots)). One
-  test checks text parity: the same operator steps on an invoice give the
-  same Activity rows on both clocks, apart from times and the Recorded part.
-  It also checks that the card's times follow the account's zone, not the
-  browser's.
-- **Data:** the tests make their data through the public API, with the
-  test-mode secret key from `hardcount-bootstrap`. Each test uses its own unique
-  names, so the suite can run many times against the same database. Use a
-  database of your own anyway, so the tests never touch your dev data.
-- **In CI:** the `e2e` job runs on every PR and is a required check: a PR cannot merge while it fails.
-  On a failure, download the `playwright-report` artifact and open its trace
-  with `npx playwright show-trace`.
-
-How to run them locally, step by step: [web-v2/e2e/README.md](../web-v2/e2e/README.md).
-
-### Flaky tests
-
-A flaky test passes and fails on the same code.
-
-- CI retries a failed test once. A test that passes on the retry is
-  reported as flaky, not as passed.
-- Before you commit a spec, run it five times:
-  `npx playwright test --repeat-each 5 <spec>`.
-- Wait on the page or the network, never on a fixed sleep.
-- Select by role and label (`getByRole`, `getByLabel`), not by CSS class.
-- Fix or delete a flaky spec. Do not mark it as skipped and move on.
+[What CI runs on your PR](../CONTRIBUTING.md#what-ci-runs-on-your-pr) lists every CI job with its local command. The [e2e README](../web-v2/e2e/README.md) covers Playwright, and the trace of a CI failure.
 
 ## Checking a change by hand
 
-Automated tests come first. When you also check something by hand, three
-habits have caught real bugs here:
-
-- **Look at the screen.** Text and DOM checks cannot see layout bugs. A UI
-  change is not done until you have looked at a screenshot of it, in the
-  state a user would see.
-- **Check money at the provider.** For a payment or refund, confirm the
-  amount in the Stripe dashboard, not only in Hardcount.
-- **For a fix, see the test fail without it.** Revert the fix, run the new
-  test, watch it fail, then restore the fix. A test that passes either way
-  proves nothing.
-
-## Before a release
-
-Run the [release checklist](dev/release-checklist.md) before each tag.
-
-The golden-path demo (`scripts/demo.sh`) and the `hardcount-doctor` sweep also
-run in CI on every PR. The doctor checks the money invariants over the rows
-the golden path left behind.
-
-The `upgrade` job checks an upgrade from the previous release on every PR,
-from source. It installs the newest `v*` tag, bills a month with that tag's
-`scripts/demo.sh`, then starts HEAD on the same database, which runs HEAD's
-migrations. Every invoice from before must read the same through the API,
-timestamps included. Two fields are left out, `attention` and
-`recovery_warning`, because the API works them out on each read. A field
-HEAD adds passes only when `scripts/ci/upgrade-new-fields.txt` lists it,
-with why. HEAD must then render the old invoices' PDFs and bill a new month
-there, and `hardcount-doctor` must find nothing. To run it yourself:
-`scripts/ci/upgrade-from-previous-tag.sh` (needs Docker, Go and `jq`). It is
-not a required check yet. Why it exists:
-[ADR-125, amendment 2026-10-30](adr/125-goose-migrations-from-one-v081-baseline.md#amendment-2026-10-30-an-upgrade-job-checks-that-invoices-survive-an-upgrade).
-
-The [first-invoice tutorial](first-invoice.md) runs in the same CI job.
-`cmd/hardcount-docs-run` runs each code block the page marks
-`<!-- docs-run: command -->` in one shell, in order, and checks the block
-marked `<!-- docs-run: output -->` below it. Every code block on the page
-needs one of the two markers, and every command needs an output block. A
-code block the runner cannot read, such as one in a blockquote, is an
-error. So is a marked block that GitHub does not show as a code block, such
-as one inside `<details>` with no blank line before it. A unit test checks
-that each command runs in at least one of the job's passes. To run the page
-yourself, start Hardcount on
-port 8080 and save your test key in a file such as `~/hardcount-key.json`, as
-`{"secret_key_test": "hc_secret_test_…"}`. Then run:
-
-```bash
-go run ./cmd/hardcount-docs-run \
-  -replace deploy/compose/quickstart-credentials.json=$HOME/hardcount-key.json \
-  -replace acme-1=acme-$RANDOM docs/first-invoice.md
-```
-
-The second `-replace` gives the customer a new external ID, so the page can
-run again on the same database.
-
-Step 8 only prints the invoice's dashboard link. The link opens on the
-quick-start stack, which serves the dashboard and the API on one address.
-When the API runs on its own, as in CI, the dashboard is elsewhere: the
-dashboard's dev server (`npm run dev` in `web-v2`) is on port 5173.
-
-**Next:** set up your machine: [CONTRIBUTING](../CONTRIBUTING.md#development-setup).
+- **Look at the screen.** For a UI change, look at a screenshot in the state a user would see. Text and DOM checks cannot see a layout bug.
+- **Check money at the provider.** Confirm a payment or refund amount in the Stripe dashboard, not only in Hardcount. Any Stripe test account works: the release checklist's [Setup](dev/release-checklist.md#setup) says how to connect one.

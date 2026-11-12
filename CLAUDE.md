@@ -1,121 +1,41 @@
-# Hardcount — Claude Code Context
+# Hardcount: for AI coding sessions
 
-Hardcount is an open-source usage-based billing engine built in Go. It handles pricing, subscriptions, usage metering, invoice generation, Stripe payments, dunning, and customer credits.
+Hardcount is an open-source usage-based billing engine in Go on PostgreSQL. This page adds what an AI session needs beyond [CONTRIBUTING](CONTRIBUTING.md).
 
-## Rules at a glance
-Each rule is explained in the section named after it.
+**Before any change to money or billing state, read the [money-path playbook](docs/dev/money-path-robustness-playbook.md).**
 
-- **Architecture:** a domain never calls another domain's `Service`/`Store` directly. `internal/arch/boundaries_test.go` enforces this.
-- **Money-path changes:** before writing, list every code place that touches the state. Follow the money-path playbook.
-- **Testing:** every change ships with a test at the right layer. UI changes are checked with Playwright and by looking at the screen.
-- **Concurrent sessions:** work in your own git worktree, and check every branch before you claim a migration or ADR number.
-- **Documentation discipline:** every user-visible ship updates its docs in the same PR. The doc must not lie.
-- **Code standard:** new and changed code follows [docs/dev/code-standard.md](docs/dev/code-standard.md).
+## Sharing the repository
 
-## Architecture
-- Per-domain packages in `internal/`. Each domain owns its store, service and handler, with store interfaces per domain (not a god Repository).
-- **Rule:** no cross-domain **concrete-service/store** coupling between peer business domains. A domain never calls another domain's `Service`/`Store` directly.
-- **Allowed cross-domain imports:**
-  - (a) cross-cutting infra (`auth`, `audit`, `session`);
-  - (b) shared value types, DTOs and validation helpers (chiefly `tax.*`, `subscription.ListFilter`);
-  - (c) the `billing` coordinator. The billing engine orchestrates peers through narrow **consumer-defined** interfaces.
-- A new cross-domain import edge fails `internal/arch/boundaries_test.go` until it is justified in the allowlist.
-- PostgreSQL with Row-Level Security for tenant isolation on most API requests: `db.BeginTx(ctx, postgres.TxTenant, tenantID)`.
-  - Some work runs under `postgres.TxBypass`, where RLS does not apply, and must filter by tenant itself. Examples: background jobs, sign-in and sessions, public links, incoming webhooks, reading an account's Stripe keys to call Stripe, and team members. The full list is in `docs/architecture.md` (Design rules).
-  - A new `TxBypass` use fails `internal/arch/txbypass_allowlist_test.go` until it is listed.
-- chi/v5 for HTTP routing.
-- API key auth with 2 stored key types: secret and ingest (`api_keys_key_type_check`, ADR-133).
-  - An ingest key (`hc_ingest_`) holds only `usage:ingest`: it can send usage events and call `/v1/whoami`, nothing else.
-  - Dashboard sessions use a third, in-code type, `KeyTypeSession`, with the secret-key permission set (`internal/auth/permission.go`).
-  - There is no platform key and no `/v1/tenants`: accounts are created only by the bootstrap.
-- HMAC-SHA256 webhook signing (both inbound Stripe and outbound).
+Several sessions may share this clone.
 
-## Money-path changes
-Any change that touches money or a state machine follows **[docs/dev/money-path-robustness-playbook.md](docs/dev/money-path-robustness-playbook.md)**.
-State machines here are invoices, payments, credits, dunning, subscriptions and tax.
+- **Work in your own git worktree,** under `.claude/worktrees/<task-name>`. The main working tree stays on `main`: do not edit, switch or stage anything in it.
+- **Never `git stash`.** Every worktree shares one stash.
+- **Do not run two integration runs (`-short=false`) at once.** They share one test database. If another session may be running one, use your own ([Tests on real Postgres](docs/testing.md#tests-on-real-postgres)).
 
-**The one rule the playbook enforces:** do not reason locally. Before writing, enumerate the state's
-complete site-set (every writer, effect-firer, gated reader, caller/callee, crash
-point).
+  ```bash
+  go test ./... -race -short -count=1         # unit tests
+  go test -p 1 ./... -count=1 -short=false    # all tests
+  ```
 
-- **Site-set:** every code place that touches one state, such as an invoice status.
-- **Effect-firer:** code that sends an email, webhook, Stripe call or ledger write on a change.
-- **Gated reader:** code that branches on the state.
+- **The dev servers default to ports 8080 (API) and 5173 (dashboard).** If another session holds them, run `make dev PORT=<free port>` (a `PORT` in your shell loses to `.env`). Start the dashboard with `HARDCOUNT_DEV_PORT=<free port>` and `HARDCOUNT_API_TARGET=http://localhost:<your API port>`.
+- **Rebase onto `origin/main` before you push.**
+- **End each commit with `Assisted-by: Claude Code`,** not `Co-Authored-By` ([What we accept](CONTRIBUTING.md#what-we-accept)).
 
-See the [glossary](docs/glossary.md) for the full entry. Use the playbook at four stages:
+## Claiming a number
 
-| Stage | What the playbook gives you |
+Another session's unmerged branch may hold the next migration or ADR number.
+
+- **Migration:** run `git fetch origin`, then `make migration name=...`. [Writing a database migration](docs/dev/migrations.md)
+- **ADR** (a decision record): nothing checks its number. List `docs/adr/` on `origin/main` and every branch, then take the next free one.
+
+## Where the rules live
+
+| Before you | Read |
 |---|---|
-| Design | site-set enumeration + adversarial panel |
-| Implementation | the 12 gates |
-| Review | the per-class lens |
-| Tests | collision + real-Postgres + concurrent-resolver fake + mutation-verify |
-
-A concurrent-resolver fake is a test double that commits the racing transition at the external-call boundary, or between the precondition read and the write.
-
-## Running locally
-```bash
-docker compose up -d postgres
-DATABASE_URL="postgres://hardcount:hardcount@localhost:5432/hardcount?sslmode=disable" go run ./cmd/hardcount-bootstrap
-DATABASE_URL="postgres://hardcount:hardcount@localhost:5432/hardcount?sslmode=disable" RUN_MIGRATIONS_ON_BOOT=true go run ./cmd/hardcount
-```
-
-## Testing
-How we test, which test to write for which change, and how to run each layer:
-**[docs/testing.md](docs/testing.md)**.
-
-```bash
-go test ./... -race -short -count=1          # unit tests only (CI's unit job)
-go test -p 1 ./... -count=1 -short=false  # includes integration tests (needs postgres)
-```
-
-- Every change ships with a test at the right layer. Money and state changes get a Go integration test against real Postgres.
-- UI changes are checked with Playwright (`cd web-v2 && npm run test:e2e`) and by looking at a screenshot of the screen. Text and DOM checks cannot see layout bugs.
-- Live Stripe, email, LiteLLM and PDF checks run by hand before each release: [docs/dev/release-checklist.md](docs/dev/release-checklist.md).
-
-## Concurrent sessions
-Two or more Claude Code sessions may work this repo at the same time. Rules:
-
-- **Every session works in its own git worktree** (`.claude/worktrees/<task-name>`). The main working tree stays on `main`. No session edits it, switches its branch, or stages files there.
-- **Claim a migration or ADR number** only after checking origin/main **and** every local branch (`git worktree list`, `git branch -a`). Another session's unmerged migration or ADR may already hold the next number. For an ADR, list `docs/adr/` on each branch too: a duplicate migration number fails loudly at integration-test time, but a duplicate ADR number fails silently (#196/#197 shipped two `050`s).
-- **Stay on disjoint domains/packages** where possible. CHANGELOG conflicts are expected and cheap: whoever merges second rebases and keeps both sides' entries.
-- **Merge small PRs promptly; rebase onto origin/main before push.** A conflicting PR gets no CI, because GitHub cannot build the merge ref. Rebase first, then watch checks.
-- **Shared singletons:**
-  - One local Postgres. Concurrent `-short=false` runs from two sessions can interfere. Run unit tests freely, and treat CI as the integration gate.
-  - One `make dev` / vite (ports 8080/5173).
-
-## Important decisions
-- **Auth:** dashboard uses email + password; API uses Bearer keys. See `docs/adr/011-email-password-auth-and-clean-api-keys.md`; ADR-007 and ADR-008 are superseded.
-  - Dashboard `POST /v1/auth/login` validates against `users.password_hash` (bcrypt cost 12). It mints an httpOnly `hardcount_session` cookie bound to `users.id`, not to any API key.
-  - SDK / curl callers send `Authorization: Bearer <hc_…>`. `internal/session.MiddlewareOrAPIKey` accepts either; the cookie takes precedence.
-  - Password reset uses single-use 1h tokens delivered via SMTP (Mailpit in local dev: `docker compose up -d mailpit`).
-  - Team invites (ADR-081): tokenized email invites, and member removal with session revocation.
-  - No RBAC: every member holds the full permission set. The role is recorded but not enforced.
-  - No 2FA in v1.
-- **Email:** single delivery path.
-  - `Sender` returns `ErrSMTPNotConfigured` when `SMTP_HOST` is unset. There is no stdout fallback. The producer always wires the real adapter.
-  - Boot logs a WARN when SMTP is not configured, and one for each unset email-link env: `HOSTED_INVOICE_BASE_URL`, `PAYMENT_UPDATE_URL`, `DASHBOARD_BASE_URL`.
-  - Without `DASHBOARD_BASE_URL`, password-reset emails are not sent (an error log) and invites are refused.
-- **Stripe:** PaymentIntent-only pattern (no Stripe Billing/Invoices to avoid its percentage fee).
-- **Background work:** no Temporal dependency in v1.
-  - Background work runs as simple goroutine loops. Each loop is a leader-leased singleton role (`internal/platform/leader`, ADR-114).
-  - A [leader lease](docs/glossary.md) is a per-tick lease row on the database clock. Its fence token is re-checked inside every claim statement. The lease is safe behind transaction-mode poolers.
-  - Redis is used for distributed rate limiting only. Production (`APP_ENV=production`) refuses to start without `REDIS_URL`.
-- **Credits:** one ledger of grant, usage, expiry and adjustment entries.
-  - Each entry carries its currency (ADR-129).
-  - It is not strictly append-only: `consumed_cents` and `cn_retired_cents` on grant entries are updated in place (`internal/credit/postgres.go`).
-
-## Documentation discipline
-Every user-visible ship updates the docs that describe it, in the same PR:
-
-- `CHANGELOG.md` (Keep-a-Changelog) — what shipped, dated.
-- `docs/dev/release-checklist.md` if the change alters what a live Stripe, email or PDF check should see.
-- `docs/adr/` if the change is a decision worth re-litigating later.
-- `docs/roadmap.md` ("Now", "Next", "Later", "Not building", "Shipped recently") — keep aligned with reality; if a roadmap item is silently descoped, edit the roadmap first, then act.
-
-How to write them: **[docs/dev/writing-style.md](docs/dev/writing-style.md)** (one reader and one job per page, point first, one idea per sentence, define terms). A PR that rewords, restructures or rewrites a page also checks every fact the page keeps against the code and fixes the false ones. Its description lists each changed fact with the code that proves it.
-
-The bar isn't "perfect docs." The bar is "the doc doesn't lie." A doc that says "logs link to stdout" when the code returns an error is worse than no doc.
-
-## Code standard
-New and changed code follows **[docs/dev/code-standard.md](docs/dev/code-standard.md)**. Test-writing rules are in [docs/testing.md](docs/testing.md#writing-tests). Old code is brought in line by small cleanup PRs, not by rewrites.
+| Set up, test or open a pull request | [CONTRIBUTING](CONTRIBUTING.md) |
+| Design a change | [How Hardcount is built](docs/ENGINEERING.md) |
+| Import across packages, or open a transaction | [Architecture](docs/architecture.md#design-rules) |
+| Write code, a comment or a test | [Code standard](docs/dev/code-standard.md), [Code comments](docs/dev/code-comments.md), [How we test](docs/testing.md) |
+| Change the API | [OpenAPI workflow](docs/dev/openapi-workflow.md) |
+| Write docs, PR text or dashboard text | [Writing style](docs/dev/writing-style.md), [Activity lines and UI words](docs/dev/activity-lines.md) |
+| Meet an unknown word | [Product glossary](docs/glossary.md) for billing words, [contributor glossary](docs/dev/glossary.md) for code words |
