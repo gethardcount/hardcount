@@ -289,3 +289,12 @@ reasons under "Why a cap". The error no longer ends with
 - DB schema unchanged.
 - Existing test clocks in `internal_failure` from pre-ADR-028 cap-hit
   scenarios will catch up cleanly on the next Retry advance.
+
+## Amendment 2026-11-11 — the outer bound is a per-pass deadline
+
+The 10-minute `CatchupTimeout` on the worker's ctx, named above as the outer
+bound, is now `testclock.CatchupPassDeadline` (also 10 minutes) on each
+catch-up pass, which the `testclock_catchup` leader runs
+([ADR-140](140-test-clock-catchup-is-a-leader-role.md)). A pass that overruns
+it ends the advance in `internal_failure`; a pass whose leader stops is run
+again by the next leader.

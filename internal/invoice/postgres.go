@@ -3200,7 +3200,7 @@ func (s *PostgresStore) CollectionPausedTx(ctx context.Context, tx *sql.Tx, invo
 //
 // Excludes clock-pinned subscriptions per ADR-029: simulation
 // time progresses only on operator Advance, so the wall-clock scheduler
-// must never charge a clock-pinned invoice. The catchup worker uses
+// must never charge a clock-pinned invoice. The test-clock catch-up uses
 // ListAutoChargePendingForClock as the disjoint per-clock entry point.
 func (s *PostgresStore) ListAutoChargePending(ctx context.Context, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error) {
 	live, err := postgres.Livemode(ctx)
@@ -3334,7 +3334,7 @@ func (s *PostgresStore) ListFailedWithoutDunningRun(ctx context.Context, olderTh
 // ListPendingTaxRetryForClock below; every other ForClock candidate
 // query already resolves via customers.
 //
-// Time predicate is implicit: the catchup worker calls this AFTER it
+// Time predicate is implicit: the test-clock catch-up calls this AFTER it
 // has finalized any newly-due periods for the same clock, so any
 // auto_charge_pending row that exists is by definition due for a
 // retry attempt. No separate "due_at" filter — cycle math is owned by
@@ -3438,7 +3438,7 @@ func (s *PostgresStore) ListProcessingPayments(ctx context.Context, olderThan ti
 // DELIBERATELY NOT gated on is_simulated, unlike every sibling invoice sweep:
 // payment state-sync is the wall-clock plane by design (ADR-030's Stripe
 // exception — PaymentIntent truth lives at Stripe on real time, even for
-// clock-pinned invoices), and the catchup worker has no payment-sync phase,
+// clock-pinned invoices), and the test-clock catch-up has no payment-sync phase,
 // so excluding simulated rows here would strand an ambiguous simulated charge
 // in unknown/processing forever. The settle path re-binds simulated time via
 // BindEffectiveNow + the hardcount_anchor_at PI anchor, so recovered outcomes

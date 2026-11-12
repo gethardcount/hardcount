@@ -1,7 +1,7 @@
 # A background job is stuck
 
-Hardcount runs its billing, payment retries (dunning), webhooks and emails in
-background jobs. Each job is a *role*: only one replica runs it at a time, one
+Hardcount runs its billing, payment retries (dunning), webhooks, emails and
+test-clock catch-ups in background jobs. Each job is a *role*: only one replica runs it at a time, one
 *tick* (run) after another, under a short *lease* (a booking in the database
 that expires unless it is renewed). Each role's interval, and how the roles
 share work, are in [How the jobs share work](#how-the-jobs-share-work). Back to
@@ -68,7 +68,10 @@ The next tick starts one interval after it ends.
 2. **Read the answer.**
    - Paused: see [Pause a role](#pause-a-role-on-purpose).
    - `held` true and `last_tick_age_s` growing: a wedged holder. For
-     billing, check the due gauge first (step 3).
+     billing, check the due gauge first (step 3). For `testclock_catchup`,
+     a long advance looks the same: one tick runs every advancing clock's
+     pass, each up to 10 minutes. Run the progress query in
+     [Test-clock advance hung](test-clock-advance-hung.md) first.
    - `held` false and `last_tick_age_s` growing: no replica is polling.
      Check every replica's logs and `/health/ready`.
 
@@ -188,7 +191,7 @@ in flight.
 
 ## How the jobs share work
 
-Five background jobs must run on exactly one replica at a time. Each is
+Six background jobs must run on exactly one replica at a time. Each is
 called a role:
 
 | Role | Runs every |
@@ -197,6 +200,7 @@ called a role:
 | `webhook_outbox` | 2 s |
 | `email_outbox` | 5 s |
 | `webhook_delivery` (the webhook retry worker) | 30 s |
+| `testclock_catchup` (runs advancing test clocks; [Test-clock advance hung](test-clock-advance-hung.md)) | 2 s |
 
 Each role is one row in the `leader_leases` table.
 
@@ -253,7 +257,7 @@ table:
 
 | Metric | Alert when |
 |---|---|
-| `hardcount_leader_last_tick_age_seconds{role}` | > max(3× the role's interval, 5 min): no replica has finished a tick |
+| `hardcount_leader_last_tick_age_seconds{role}` | > max(3× the role's interval, 5 min): no replica has finished a tick. For `testclock_catchup` a long advance trips it too (a pass may run 10 minutes); see [Test-clock advance hung](test-clock-advance-hung.md) |
 | `hardcount_leader_held{role}` | Stays 1 while `last_tick_age` grows: a tick is wedged but still renewing. See [Check](#check) step 3 for billing |
 | `hardcount_leader_paused{role}` | 1 outside a planned window |
 | `hardcount_leader_lease_lost_total{role,reason}` | Any increase, except `reason="paused"`. See [Lease-lost reasons](#lease-lost-reasons) |

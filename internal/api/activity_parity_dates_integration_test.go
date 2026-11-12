@@ -13,6 +13,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/payment"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/testclock/testclocktest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -63,13 +64,14 @@ func (r *datesRig) newClock(name string, frozen time.Time) string {
 	}}).want(r.t, 201, "create test clock "+name).body, "id")
 }
 
-// advance moves the clock to target. The test server has no catchup queue,
-// so the catchup runs inside the request; the clock is ready on return.
+// advance moves the clock to target and runs its catch-up, as the
+// testclock_catchup leader would; the clock is ready on return.
 func (r *datesRig) advance(clockID string, target time.Time) {
 	r.t.Helper()
 	r.call("POST", "/v1/test-clocks/"+clockID+"/advance", flowReq{body: map[string]any{
 		"frozen_time": target.Format(time.RFC3339),
 	}}).want(r.t, 200, "advance clock")
+	testclocktest.Drain(r.t, r.srv.TestClockSvc)
 	if status := flowStr(r.call("GET", "/v1/test-clocks/"+clockID, flowReq{}).want(r.t, 200, "read clock").body, "status"); status != "ready" {
 		r.t.Fatalf("clock status after the advance = %q, want ready", status)
 	}

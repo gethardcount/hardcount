@@ -383,3 +383,10 @@ ADR-029 is complete when:
    wall-clock tick" assertion.
 5. Strict-mode integration sweep stays green throughout (the
    livemode-strict guard from earlier work is the safety net).
+
+## Amendment 2026-11-11: the catch-up is a leader role
+
+The per-clock phases above are driven by the `testclock_catchup` leader's
+tick ([ADR-140](140-test-clock-catchup-is-a-leader-role.md)), not by a
+queue-driven `CatchupWorker`. The phase list and its order are unchanged
+(`testclock.Service.runPhases`).

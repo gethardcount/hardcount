@@ -1717,7 +1717,7 @@ func (s *PostgresStore) GetDueBilling(ctx context.Context, now, dueBy time.Time,
 	// GetDueBillingForClock). Without this filter, the cron would
 	// silently drip-bill stuck clock-pinned subs in the background,
 	// breaking the operator's mental model of simulation time AND
-	// racing with the test-clock catchup worker via SKIP LOCKED.
+	// racing with the test-clock catch-up via SKIP LOCKED.
 	//
 	// Stripe Test Clocks operate the same way: no cron touches
 	// clock-pinned customers; advance is the sole path.
@@ -1850,13 +1850,13 @@ func (s *PostgresStore) GetDueBillingForTenant(ctx context.Context, tenantID str
 // GetDueBillingForClock returns subs attached to a specific test
 // clock whose next_billing_at is on-or-before the clock's frozen
 // time. Operator-driven catchup path (ADR-028 disjoint flows) —
-// fired by the test-clock catchup worker after MarkAdvancing,
+// fired by the test-clock catch-up after MarkAdvancing,
 // never by the wall-clock cron. The complement of GetDueBilling.
 //
 // The query joins test_clocks (not LEFT JOIN — clock-pinned subs
 // always have a row) and uses the clock's frozen_time as the
 // "now" cutoff. Tenant scope comes from RLS via the BeginTx
-// caller, but because the catchup worker is a per-clock unit of
+// caller, but because the test-clock catch-up is a per-clock unit of
 // work, we also filter by test_clock_id explicitly.
 func (s *PostgresStore) GetDueBillingForClock(ctx context.Context, tenantID, clockID string, exclude []string, limit int) ([]domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)

@@ -38,10 +38,13 @@ const (
 	RoleWebhookOutbox   Role = "webhook_outbox"
 	RoleEmailOutbox     Role = "email_outbox"
 	RoleWebhookDelivery Role = "webhook_delivery"
+	// RoleTestClockCatchup runs the test-clock catch-up: the work that fell
+	// due in the time an advancing test clock skipped (ADR-140).
+	RoleTestClockCatchup Role = "testclock_catchup"
 )
 
 // Roles is every role a binary may lead.
-var Roles = []Role{RoleBilling, RoleDunning, RoleWebhookOutbox, RoleEmailOutbox, RoleWebhookDelivery}
+var Roles = []Role{RoleBilling, RoleDunning, RoleWebhookOutbox, RoleEmailOutbox, RoleWebhookDelivery, RoleTestClockCatchup}
 
 // The lease timings are compiled in, like the tick interval. A mis-set TTL
 // would mean two leaders at once with no error, so it is not a setting.

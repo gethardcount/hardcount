@@ -8,18 +8,19 @@ import (
 	"testing"
 )
 
-// The five leader-only claim funnels (ADR-114). Each must (1) take its
+// The six leader-only claim funnels (ADR-114). Each must (1) take its
 // fence token from the ctx pinned to ITS OWN role and (2) carry
 // leader_fence(...) inside the claim statement. A funnel that loses either
 // half in a refactor is a tick that can run twice after a takeover — the
 // integration tests prove one funnel honours the fence; this pins that the
-// other four still have one to honour.
+// others still have one to honour.
 var leaderFunnels = map[string]struct{ fn, role string }{
 	"internal/subscription/postgres.go": {"GetDueBilling", "RoleBilling"},
 	"internal/dunning/postgres.go":      {"ListDueRuns", "RoleDunning"},
 	"internal/webhook/postgres.go":      {"ListPendingDeliveries", "RoleWebhookDelivery"},
 	"internal/webhook/outbox.go":        {"ProcessBatch", "RoleWebhookOutbox"},
 	"internal/email/outbox.go":          {"claimBatch", "RoleEmailOutbox"},
+	"internal/testclock/postgres.go":    {"ListAdvancingForCatchup", "RoleTestClockCatchup"},
 }
 
 func TestLeaderFunnels_KeepTheirFence(t *testing.T) {
@@ -42,10 +43,10 @@ func TestLeaderFunnels_KeepTheirFence(t *testing.T) {
 	}
 }
 
-// TestSingletonLoops_AreExactlyTheFiveRoles pins the runner's doc claim:
+// TestSingletonLoops_AreExactlyTheLeaderRoles pins the runner's doc claim:
 // `grep scheduler.Run(` is the authoritative list of leader-gated loops,
 // and every one passes a leader.Role constant (never an ad-hoc string).
-func TestSingletonLoops_AreExactlyTheFiveRoles(t *testing.T) {
+func TestSingletonLoops_AreExactlyTheLeaderRoles(t *testing.T) {
 	root := repoRoot(t)
 	call := regexp.MustCompile(`scheduler\.Run\(ctx, leader\.(Role\w+),`)
 	seen := map[string]int{}
@@ -68,7 +69,7 @@ func TestSingletonLoops_AreExactlyTheFiveRoles(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	want := []string{"RoleBilling", "RoleDunning", "RoleWebhookOutbox", "RoleEmailOutbox", "RoleWebhookDelivery"}
+	want := []string{"RoleBilling", "RoleDunning", "RoleWebhookOutbox", "RoleEmailOutbox", "RoleWebhookDelivery", "RoleTestClockCatchup"}
 	for _, r := range want {
 		if seen[r] != 1 {
 			t.Errorf("leader.%s: %d scheduler.Run sites, want exactly 1", r, seen[r])

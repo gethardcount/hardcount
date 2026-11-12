@@ -2,7 +2,6 @@ package testclock
 
 import (
 	"context"
-	"errors"
 	"log/slog"
 	"net/http"
 	"time"
@@ -203,7 +202,7 @@ func (h *Handler) advance(w http.ResponseWriter, r *http.Request) {
 
 	clk, err := h.svc.Advance(r.Context(), tenantID, id, input)
 	if err != nil {
-		writeAdvanceError(w, r, id, err)
+		respond.FromError(w, r, err, "test_clock")
 		return
 	}
 	if h.auditLogger != nil {
@@ -235,7 +234,7 @@ func (h *Handler) retryAdvance(w http.ResponseWriter, r *http.Request) {
 
 	clk, err := h.svc.RetryAdvance(r.Context(), tenantID, id)
 	if err != nil {
-		writeAdvanceError(w, r, id, err)
+		respond.FromError(w, r, err, "test_clock")
 		return
 	}
 	if h.auditLogger != nil {
@@ -245,24 +244,6 @@ func (h *Handler) retryAdvance(w http.ResponseWriter, r *http.Request) {
 		})
 	}
 	respond.JSON(w, r, http.StatusOK, clk)
-}
-
-// writeAdvanceError answers a failed advance or retry-advance. A full
-// catch-up queue is a 503 catchup_queue_full, as ADR-015 promises: the clock
-// is parked in internal_failure (Service.parkAfterEnqueueFailed), and the
-// way on is POST /retry-advance once the running catch-ups finish — the
-// same advance sent again would get a 409, the clock not being ready. No
-// Retry-After: nothing tells how soon the single worker frees a slot, as a
-// catch-up runs from seconds up to CatchupTimeout. Every other error is
-// FromError's.
-func writeAdvanceError(w http.ResponseWriter, r *http.Request, id string, err error) {
-	if errors.Is(err, ErrQueueFull) {
-		respond.Error(w, r, http.StatusServiceUnavailable, "api_error", "catchup_queue_full",
-			"Too many test-clock catch-ups are waiting, so this clock's catch-up did not start and the clock is set to internal_failure. "+
-				"Resume it with POST /v1/test-clocks/"+id+"/retry-advance once the running catch-ups finish.")
-		return
-	}
-	respond.FromError(w, r, err, "test_clock")
 }
 
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {

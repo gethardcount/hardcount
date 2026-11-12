@@ -9687,16 +9687,19 @@ components:
       description: |
         What the latest advance did: the time span it covered and how many
         of each billing step it ran. Absent until the clock is first
-        advanced.
+        advanced. While the clock is `advancing`, it describes the advance
+        in progress: `advanced_from` only, with the other fields zero until
+        the advance ends.
       required: [advanced_from, advanced_to, invoices_generated, trials_activated, pauses_resumed, thresholds_fired, tax_retried, charges_retried, clawbacks_issued, credits_expired, dunning_advanced, had_errors]
       properties:
         advanced_from:
           type: string
           format: date-time
           description: |
-            The clock's time before the advance. After a retried advance it
-            equals `advanced_to`. When the server restarted during the
-            advance and resumed it, it is `0001-01-01T00:00:00Z`.
+            The clock's time before the advance, on a retried or resumed
+            advance too. A summary written by 0.9.3 or earlier may hold
+            `advanced_to` here (after a retry) or `0001-01-01T00:00:00Z`
+            (after a restart).
         advanced_to:
           type: string
           format: date-time
@@ -24461,8 +24464,12 @@ paths:
         every customer and subscription attached to it. The call returns
         200 as soon as the clock is `advancing`; the catch-up (the billing
         of everything that fell due in the skipped time) runs in the
-        background. Poll `GET /v1/test-clocks/{id}` until `status` leaves
-        `advancing`. While it runs, another advance answers 409. One
+        background. One server at a time runs the catch-ups, one clock
+        after another: it starts within a few seconds when no other
+        catch-up is running, otherwise after the ones ahead of it, each up
+        to 10 minutes. If that server stops, another one runs the advance
+        again. Poll `GET /v1/test-clocks/{id}` until `status`
+        leaves `advancing`. While it runs, another advance answers 409. One
         advance moves the clock at most one year; split a longer span into
         several advances.
 
@@ -24587,23 +24594,6 @@ paths:
                   param: frozen_time
         "429":
           $ref: "#/components/responses/RateLimited"
-        "503":
-          description: |
-            Code `catchup_queue_full`: too many test-clock catch-ups are
-            waiting, so this catch-up did not start. The clock is set to
-            `internal_failure`. Once the running catch-ups finish, resume it
-            with `POST /v1/test-clocks/{id}/retry-advance`; sending the same
-            advance again answers 409. The answer has no `Retry-After`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: api_error
-                  code: catchup_queue_full
-                  message: "Too many test-clock catch-ups are waiting, so this clock's catch-up did not start and the clock is set to internal_failure. Resume it with POST /v1/test-clocks/hc_tclk_8e1f3a5c7b9d0e2f4a6c8b1d/retry-advance once the running catch-ups finish."
-                  request_id: req_dbjg652q3gpgqfoq5cd0
 
   /v1/test-clocks/{id}/retry-advance:
     post:
@@ -24711,22 +24701,6 @@ paths:
                   param: frozen_time
         "429":
           $ref: "#/components/responses/RateLimited"
-        "503":
-          description: |
-            Code `catchup_queue_full`: too many test-clock catch-ups are
-            waiting, so this catch-up did not start. The clock is set to
-            `internal_failure` again. Send this retry again once the running
-            catch-ups finish. The answer has no `Retry-After`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: api_error
-                  code: catchup_queue_full
-                  message: "Too many test-clock catch-ups are waiting, so this clock's catch-up did not start and the clock is set to internal_failure. Resume it with POST /v1/test-clocks/hc_tclk_8e1f3a5c7b9d0e2f4a6c8b1d/retry-advance once the running catch-ups finish."
-                  request_id: req_dbjg652q3gpgqfoq5cd0
 
   /v1/test-clocks/{id}/customers:
     get:

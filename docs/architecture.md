@@ -81,17 +81,18 @@ Under `internal/`:
 
 ## Background work
 
-Five jobs take a [leader lease](#design-rules):
+Six jobs take a [leader lease](#design-rules):
 
 - **`billing`**, every hour (5 minutes when `APP_ENV=local`). Runs for live mode, then test mode. Retries stuck charges and tax. Charges invoices waiting for payment. Checks billing thresholds (spend or usage) and ends trials. Closes billing periods into invoices. Resumes paused collection and expires credits.
 - **`dunning`**, at the same interval. Runs the payment retries that are due, queues their emails and takes final actions.
 - **`webhook_outbox`**, every 2 seconds. Sends queued webhook events.
 - **`email_outbox`**, every 5 seconds. Sends queued emails.
 - **`webhook_delivery`**, every 30 seconds. Retries failed deliveries.
+- **`testclock_catchup`**, every 2 seconds. Bills the skipped time for each [test clock](glossary.md#testing-with-simulated-time) that is being moved forward, one clock after another.
 
 An **outbox** is a table of messages waiting to be sent (`webhook_outbox`, `email_outbox`). Write to one in the same transaction as the change that needs the message: `OutboxStore.Enqueue(ctx, tx, ...)`.
 
-One worker takes no lease. When a [test clock](glossary.md#testing-with-simulated-time) moves forward, the copy that took the request bills the skipped time.
+A request to move a test clock forward only marks the clock. If the copy running the catch-up stops, the next leader runs it again.
 
 ## Tax providers
 
