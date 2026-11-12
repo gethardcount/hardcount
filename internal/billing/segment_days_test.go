@@ -49,7 +49,7 @@ func TestEmitBaseSegmentLine_DaysAddUpToThePeriod(t *testing.T) {
 			for i := range len(bounds) - 1 {
 				qty := int64(i + 1)
 				seg := baseSegment{start: bounds[i], end: bounds[i+1], quantity: qty}
-				if err := emitBaseSegmentLine(seg, plan, periodStart, 30, "USD", time.UTC, domain.BillingTimeCalendar, 0, &lines, &subtotal); err != nil {
+				if err := emitBaseSegmentLine(seg, plan, periodStart, periodEnd, 30, "USD", time.UTC, domain.BillingTimeCalendar, 0, &lines, &subtotal); err != nil {
 					t.Fatalf("segment %d: %v", i, err)
 				}
 				days += tc.wantDays[i]
@@ -131,7 +131,7 @@ func TestEmitBaseSegmentLine_OneChangeAddsUpToThePeriod(t *testing.T) {
 				{start: tc.change, end: tc.end, quantity: 2},
 			}
 			for i, seg := range segs {
-				if err := emitBaseSegmentLine(seg, plan, tc.start, periodDays, "USD", tc.loc, domain.BillingTimeCalendar, 0, &lines, &subtotal); err != nil {
+				if err := emitBaseSegmentLine(seg, plan, tc.start, tc.end, periodDays, "USD", tc.loc, domain.BillingTimeCalendar, 0, &lines, &subtotal); err != nil {
 					t.Fatalf("segment %d: %v", i, err)
 				}
 			}

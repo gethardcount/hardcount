@@ -32,16 +32,26 @@ type clampedLine struct {
 	amount int64
 }
 
-func newClampedRig(t *testing.T) *lagRig {
+// newClampedRig is the clamped period's subscription with one item on the
+// 10000c plan, and with addOn a second item on a 5000c plan (r.planC).
+func newClampedRig(t *testing.T, addOn bool) *lagRig {
 	t.Helper()
 	r := newLagRigBare(t, "in_arrears", 0)
-	plan := r.must(http.MethodPost, "/v1/plans", clampedStart, map[string]any{
-		"code": "clamped", "name": "Clamped", "currency": "USD", "billing_interval": "monthly",
-		"base_amount_cents": 10000, "base_bill_timing": "in_arrears", "prices": []map[string]any{},
-	}, http.StatusCreated)
+	plan := func(code string, base int64) string {
+		p := r.must(http.MethodPost, "/v1/plans", clampedStart, map[string]any{
+			"code": code, "name": code, "currency": "USD", "billing_interval": "monthly",
+			"base_amount_cents": base, "base_bill_timing": "in_arrears", "prices": []map[string]any{},
+		}, http.StatusCreated)
+		return p["id"].(string)
+	}
+	items := []map[string]any{{"plan_id": plan("Clamped", 10000), "quantity": 1}}
+	if addOn {
+		r.planC = plan("ClampedAddOn", 5000)
+		items = append(items, map[string]any{"plan_id": r.planC, "quantity": 1})
+	}
 	sub := r.must(http.MethodPost, "/v1/subscriptions", clampedStart, map[string]any{
 		"code": "clamped-sub", "display_name": "Clamped", "customer_id": r.custID, "billing_time": "anniversary",
-		"items": []map[string]any{{"plan_id": plan["id"], "quantity": 1}},
+		"items": items,
 	}, http.StatusCreated)
 	r.subID = sub["id"].(string)
 	r.run(clampedFrom.Add(time.Hour))
@@ -50,7 +60,11 @@ func newClampedRig(t *testing.T) *lagRig {
 		t.Fatalf("fixture period = [%v, %v) anchor %d, want [%v, %v) anchor 31",
 			s.CurrentBillingPeriodStart, s.CurrentBillingPeriodEnd, s.BillingAnchorDay, clampedFrom, clampedTo)
 	}
-	r.itemA = s.Items[0].ID
+	for _, it := range s.Items {
+		if it.PlanID != r.planC {
+			r.itemA = it.ID
+		}
+	}
 	return r
 }
 
@@ -68,7 +82,7 @@ func clampedBaseLines(t *testing.T, r *lagRig, reason string) []clampedLine {
 		FROM invoice_line_items li JOIN invoices i ON i.id = li.invoice_id
 		WHERE i.subscription_id = $1 AND i.billing_reason = $2 AND i.status <> 'voided' AND li.line_type = 'base_fee'
 		  AND i.billing_period_start = $3
-		ORDER BY li.billing_period_start`, r.subID, reason, clampedFrom)
+		ORDER BY li.billing_period_start, li.amount_cents`, r.subID, reason, clampedFrom)
 	if err != nil {
 		t.Fatalf("list base lines: %v", err)
 	}
@@ -100,13 +114,60 @@ func wantClampedLines(t *testing.T, what string, got, want []clampedLine) {
 	}
 }
 
+// overBilledLinesQuery is the query the operator runs (from the CHANGELOG) to
+// find base-fee lines this fix may have changed: base-fee lines on cycle and
+// cancel invoices of subscriptions anchored on the 29th or later, whose
+// invoice period starts on the last day of its month before the anchor day,
+// and that are a share of the period.
+const overBilledLinesQuery = `SELECT i.tenant_id, i.id AS invoice_id, i.invoice_number, i.billing_reason,
+       li.id AS line_id, li.description, li.amount_cents,
+       s.id AS subscription_id, s.billing_anchor_day
+FROM invoice_line_items li
+JOIN invoices i ON i.id = li.invoice_id
+JOIN subscriptions s ON s.id = i.subscription_id
+CROSS JOIN LATERAL (
+  SELECT i.billing_period_start AT TIME ZONE COALESCE(NULLIF(i.billing_timezone, ''), 'UTC') AS local_start
+) z
+WHERE li.line_type = 'base_fee'
+  AND i.billing_reason IN ('subscription_cycle', 'subscription_cancel')
+  AND i.status <> 'voided'
+  AND s.billing_anchor_day >= 29
+  -- the invoice's period starts on the last day of its month, before the anchor day
+  AND z.local_start::date = (date_trunc('month', z.local_start) + interval '1 month - 1 day')::date
+  AND extract(day FROM z.local_start) < s.billing_anchor_day
+  -- a share of the period: a narrower line, or a cancel's final invoice
+  AND (i.billing_reason = 'subscription_cancel'
+       OR li.billing_period_start > i.billing_period_start
+       OR li.billing_period_end < i.billing_period_end)
+  AND s.id = $1`
+
+func overBilledLines(t *testing.T, r *lagRig) int {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, postgres.TxBypass, "")
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	rows, err := tx.QueryContext(ctx, overBilledLinesQuery, r.subID)
+	if err != nil {
+		t.Fatalf("over-billed lines query: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	n := 0
+	for rows.Next() {
+		n++
+	}
+	return n
+}
+
 func TestProration_ClampedStart_ChargesOverTheFullCycle(t *testing.T) {
 	change := func(r *lagRig, at time.Time) {
 		r.must(http.MethodPatch, "/v1/subscriptions/"+r.subID+"/items/"+r.itemA, at, map[string]any{"quantity": 2}, http.StatusOK)
 	}
 
 	t.Run("close after a change on Mar 16, and the preview equals it", func(t *testing.T) {
-		r := newClampedRig(t)
+		r := newClampedRig(t, false)
 		change(r, time.Date(2027, 3, 16, 0, 0, 0, 0, time.UTC))
 
 		preview := r.must(http.MethodPost, "/v1/invoices/create_preview", time.Date(2027, 3, 30, 12, 0, 0, 0, time.UTC),
@@ -126,18 +187,39 @@ func TestProration_ClampedStart_ChargesOverTheFullCycle(t *testing.T) {
 		if previewBase != 5161+9677 {
 			t.Errorf("preview base fee = %dc, want %dc, as the close bills", previewBase, 5161+9677)
 		}
+		if n := overBilledLines(t, r); n != 2 {
+			t.Errorf("the operator's query finds %d lines, want the close's 2 base lines", n)
+		}
 	})
 
 	t.Run("cancel on Mar 20 after a change on Mar 16", func(t *testing.T) {
-		r := newClampedRig(t)
+		r := newClampedRig(t, false)
 		change(r, time.Date(2027, 3, 16, 0, 0, 0, 0, time.UTC))
 		r.cancelNow(time.Date(2027, 3, 20, 0, 0, 0, 0, time.UTC))
 		want := []clampedLine{{1, 5161}, {2, 2581}} // 10000 x 16/31, 20000 x 4/31
 		wantClampedLines(t, "cancel", clampedBaseLines(t, r, "subscription_cancel"), want)
+		if n := overBilledLines(t, r); n != 2 {
+			t.Errorf("the operator's query finds %d lines, want the cancel's 2 base lines", n)
+		}
+	})
+
+	t.Run("cancel on Mar 20 after an item was removed on Mar 16", func(t *testing.T) {
+		r := newClampedRig(t, true)
+		var addOn string
+		for _, it := range r.sub().Items {
+			if it.PlanID == r.planC {
+				addOn = it.ID
+			}
+		}
+		r.must(http.MethodDelete, "/v1/subscriptions/"+r.subID+"/items/"+addOn, time.Date(2027, 3, 16, 0, 0, 0, 0, time.UTC), nil, http.StatusNoContent)
+		r.cancelNow(time.Date(2027, 3, 20, 0, 0, 0, 0, time.UTC))
+		// The removed add-on: 5000 x 16/31; the kept item: 10000 x 20/31.
+		want := []clampedLine{{1, 2581}, {1, 6452}}
+		wantClampedLines(t, "cancel", clampedBaseLines(t, r, "subscription_cancel"), want)
 	})
 
 	t.Run("a change on Mar 30 bills 30 of the 31 days, not the full fee", func(t *testing.T) {
-		r := newClampedRig(t)
+		r := newClampedRig(t, false)
 		change(r, time.Date(2027, 3, 30, 0, 0, 0, 0, time.UTC))
 		r.run(clampedTo.Add(time.Hour))
 		want := []clampedLine{{1, 9677}, {2, 645}} // 10000 x 30/31, 20000 x 1/31
