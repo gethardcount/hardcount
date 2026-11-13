@@ -51,11 +51,13 @@ func seedClockDueRuns(t *testing.T, db *postgres.DB, ctx context.Context, tenant
 	return frozen
 }
 
-// The clock's due list returns a run whose invoice another transaction holds,
-// a settle for example. A clock has one runner, so its dunning job reaches the
-// run and its own conditional writes decide; a skipped run waited for a later
-// pass, if one came. The list takes no lock, so it never locks a run before
-// its invoice, the order every settle uses the other way round.
+// The clock's due list returns a run whose invoice or run row another
+// transaction holds (a settle locks the invoice, then writes the run), and
+// returns at once. A clock has one runner, so its dunning job reaches the run
+// and the run's own conditional writes decide; a skipped run waited for a
+// later pass, if one came, and a list that waited would stall the advance
+// behind the settle. The list takes no lock, so it also never locks a run
+// before its invoice, the order every settle uses the other way round.
 func TestListDueRunsForClock_ReturnsARunWhoseInvoiceIsHeld(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -63,21 +65,27 @@ func TestListDueRunsForClock_ReturnsARunWhoseInvoiceIsHeld(t *testing.T) {
 	const clockID = "hc_tclk_due_held"
 	frozen := seedClockDueRuns(t, db, ctx, tenantID, clockID)
 
-	holder, err := db.BeginTx(ctx, postgres.TxBypass, "")
-	if err != nil {
-		t.Fatalf("begin holder: %v", err)
-	}
-	defer postgres.Rollback(holder)
-	if _, err := holder.ExecContext(ctx, `SELECT id FROM invoices WHERE id = 'inv_due_held_2' FOR UPDATE`); err != nil {
-		t.Fatalf("hold invoice: %v", err)
-	}
-
-	due, err := dunning.NewPostgresStore(db).ListDueRunsForClock(ctx, tenantID, clockID, frozen, 50)
-	if err != nil {
-		t.Fatalf("ListDueRunsForClock: %v", err)
-	}
-	if len(due) != 3 {
-		t.Errorf("due runs = %d, want 3: the run whose invoice is held was skipped", len(due))
+	for _, held := range []struct{ name, lock string }{
+		{"invoice", `SELECT id FROM invoices WHERE id = 'inv_due_held_2' FOR UPDATE`},
+		{"run", `SELECT id FROM invoice_dunning_runs WHERE id = 'run_due_held_3' FOR UPDATE`},
+	} {
+		holder, err := db.BeginTx(ctx, postgres.TxBypass, "")
+		if err != nil {
+			t.Fatalf("begin holder: %v", err)
+		}
+		if _, err := holder.ExecContext(ctx, held.lock); err != nil {
+			t.Fatalf("hold the %s: %v", held.name, err)
+		}
+		listCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		due, err := dunning.NewPostgresStore(db).ListDueRunsForClock(listCtx, tenantID, clockID, frozen, 50)
+		cancel()
+		postgres.Rollback(holder)
+		if err != nil {
+			t.Fatalf("%s held: ListDueRunsForClock: %v (a list that waits for the held row takes a lock)", held.name, err)
+		}
+		if len(due) != 3 {
+			t.Errorf("%s held: due runs = %d, want 3: the run was skipped", held.name, len(due))
+		}
 	}
 }
 
