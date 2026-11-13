@@ -128,6 +128,6 @@ All but `upgrade`, `doc-links` and `doc-style` must pass to merge, on a branch u
 | `doc-links` | Every internal Markdown link and `#anchor` resolves | `lychee --offline --include-fragments '**/*.md'` |
 | `doc-style` | Vale, a prose linter, comments on added lines and never fails | `vale <changed .md files>` |
 
-Install the tools: `go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v<version>` (the `GOLANGCI_LINT_VERSION` in `.github/workflows/ci.yml`), `go install golang.org/x/vuln/cmd/govulncheck@latest`, and `brew install shellcheck lychee vale` or your package manager. Most scripts need Docker; each header lists what it needs.
+Install the tools. Build the two Go tools with the Go version in `go.mod`, because one built with an older Go refuses the module: `GOTOOLCHAIN=go<go.mod version> go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v<version>` (the `GOLANGCI_LINT_VERSION` in `.github/workflows/ci.yml`) and `GOTOOLCHAIN=go<go.mod version> go install golang.org/x/vuln/cmd/govulncheck@latest`. Then `brew install shellcheck lychee vale` or your package manager. Most scripts need Docker; each header lists what it needs.
 
 `govulncheck` can fail on a new Go vulnerability your change did not cause: say so in the pull request.
