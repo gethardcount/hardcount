@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
 import { FlaskConical } from 'lucide-react'
 import { formatDateTime } from '@/lib/api'
-import { useTestClocks } from '@/hooks/useNow'
+import { useTestClock } from '@/hooks/useNow'
 import { cn } from '@/lib/utils'
 
 // TestClockBanner is the one line on a detail page whose record is pinned
@@ -15,16 +15,14 @@ import { cn } from '@/lib/utils'
 // so a "Past due" pill next to a future-looking due date makes sense. How
 // simulated and real times appear on the page sits in a collapsed Details.
 //
-// The clock comes from the clock list (useTestClocks), the source every page
+// The clock comes from the clock list (useTestClock), the source every page
 // reads a clock's time from, so the line shows the same time as the page.
 export function TestClockBanner({ testClockId, className }: { testClockId: string; className?: string }) {
-  const { data: clocks } = useTestClocks()
-  const clock = clocks?.data.find(c => c.id === testClockId)
-
-  // Deleting a clock deletes its records too, so this is rare (a page left
-  // open while the clock was deleted). It stays as one line, without the
+  // missing: a read of the list made after the page opened does not hold the
+  // clock. Deleting a clock deletes its records too, so this is rare (a page
+  // left open while the clock was deleted). It stays as one line, without the
   // View-clock link, which would open a dead page.
-  const clockDeleted = !!clocks && !clock
+  const { clock, missing: clockDeleted } = useTestClock(testClockId)
 
   return (
     <div className={cn('mb-6 text-sm text-muted-foreground', className)}>

@@ -50,11 +50,9 @@ import { ChevronDown, ChevronRight, Activity, Loader2, Receipt } from 'lucide-re
 // Top-level wrapper
 // ============================================================================
 
-// customerTestClockId: the customer's test-clock pin (ADR-027, customer-level).
-// When set, every relative-time / rolling-window surface below reads its "now"
-// from the clock's frozen_time instead of wall-clock, so the cycle bar,
-// last-invoice "X ago", and activity window all track simulation time. Omitted /
-// undefined for wall-clock customers, which fall back to Date.now() unchanged.
+// customerTestClockId: the customer's test clock, or undefined for a customer
+// on no clock. The sections below take their now from hooks/useNow, so the
+// cycle bar, last-invoice "X ago" and activity window follow the clock.
 // currency: the customer's currency (useCustomerCurrency), used for a figure
 // the server sent without one, such as an empty window's $0. Undefined while
 // it loads, and such a figure reads "—" until then.

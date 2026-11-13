@@ -1,11 +1,13 @@
-import { useCallback, useMemo } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useQuery, type QueryClient } from '@tanstack/react-query'
-import { api } from '@/lib/api'
+import { api, type TestClock } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 import { clockTime, wallClockNow, type EffectiveNow } from '@/lib/effectiveNow'
 
-// What time it is for a record. A page asks it here, and only here, before it
-// draws anything measured from "now" (see lib/effectiveNow).
+// What time it is for a record. Every page asks it here before it draws
+// anything measured from a record's "now" (see lib/effectiveNow). The one
+// exception is the clock page, which measures its advance picker from its own
+// read of that clock.
 //
 // There are three answers:
 //   - real time: the record has loaded and is on no test clock;
@@ -17,7 +19,7 @@ import { clockTime, wallClockNow, type EffectiveNow } from '@/lib/effectiveNow'
 // every page shows the same time for a clock, and refreshTestClocks after a
 // clock change updates them all.
 
-/** A record that can be on a test clock: a customer, subscription or invoice. */
+/** A record that can be on a test clock: a customer, subscription, invoice or dunning run. */
 export interface ClockPinned {
   test_clock_id?: string | null
 }
@@ -45,14 +47,36 @@ export function refreshTestClocks(qc: QueryClient) {
   return qc.invalidateQueries({ queryKey: ['test-clocks'] })
 }
 
+/**
+ * useTestClock finds one clock in the clock list. `missing` is true only when
+ * a list read made after this component mounted does not hold the clock. A
+ * list cached from before can predate a clock made since (through the API or
+ * in another tab), so when that list lacks the clock it is read again once,
+ * and until then the clock is not known rather than missing.
+ */
+export function useTestClock(id: string | null | undefined): { clock: TestClock | undefined; missing: boolean } {
+  const { data, dataUpdatedAt, isFetching, isError, refetch } = useTestClocks()
+  const [readBeforeMount] = useState(dataUpdatedAt)
+  const readSinceMount = dataUpdatedAt > readBeforeMount
+  const clock = id ? data?.data.find(c => c.id === id) : undefined
+  const notInList = !!id && !!data && !clock && !isFetching
+
+  const readAgain = notInList && !readSinceMount && !isError
+  useEffect(() => {
+    if (readAgain) void refetch({ cancelRefetch: false })
+  }, [readAgain, refetch])
+
+  return { clock, missing: notInList && readSinceMount }
+}
+
 // A record's clock time: the clock's frozen_time, null for a record on no
 // clock, or undefined when it is not known.
 type ClockAnswer = string | null | undefined
 
-function clockAnswer(record: ClockPinned | undefined, clocks: Map<string, string> | undefined): ClockAnswer {
+function clockAnswer(record: ClockPinned | undefined, frozenTimeOf: (clockId: string) => string | undefined): ClockAnswer {
   if (!record) return undefined
   if (!record.test_clock_id) return null
-  return clocks?.get(record.test_clock_id)
+  return frozenTimeOf(record.test_clock_id)
 }
 
 function toNow(answer: ClockAnswer): EffectiveNow {
@@ -64,29 +88,28 @@ function toNow(answer: ClockAnswer): EffectiveNow {
   return wallClockNow()
 }
 
-// useClockTimes maps each clock id to its frozen_time, or is undefined while
-// the list has not loaded (still loading, failed, or live mode).
-function useClockTimes(): Map<string, string> | undefined {
-  const { data } = useTestClocks()
-  return useMemo(() => data && new Map(data.data.map(c => [c.id, c.frozen_time])), [data])
-}
-
 /**
  * useNowFor is "now" for one record: pass the loaded record, or undefined
- * while it loads. The value changes only when the answer does, so it is safe
- * in a dependency array or a query key: a record on no clock keeps one
- * real-time value for the life of the component.
+ * while it loads. The value changes only when the answer does, so it is the
+ * one for a dependency array or a query key: a record on no clock keeps one
+ * real-time value for the life of the component. A value that is only drawn
+ * takes useNowResolver instead, so it moves with real time while the page
+ * stays open.
  */
 export function useNowFor(record: ClockPinned | undefined): EffectiveNow {
-  const answer = clockAnswer(record, useClockTimes())
+  const { clock } = useTestClock(record?.test_clock_id)
+  const answer = clockAnswer(record, () => clock?.frozen_time)
   return useMemo(() => toNow(answer), [answer])
 }
 
 /**
- * useNowResolver is useNowFor for a list whose rows can be on different
- * clocks: it returns a function that answers for one row's record.
+ * useNowResolver returns a function that answers "now" for a record each time
+ * it is called, so a record on no clock gets the real time of that render. A
+ * list whose rows can be on different clocks calls it for each row, and a
+ * detail page calls it for the values it only draws.
  */
 export function useNowResolver(): (record: ClockPinned | undefined) => EffectiveNow {
-  const clocks = useClockTimes()
-  return useCallback((record: ClockPinned | undefined) => toNow(clockAnswer(record, clocks)), [clocks])
+  const { data } = useTestClocks()
+  const clocks = useMemo(() => data && new Map(data.data.map(c => [c.id, c.frozen_time])), [data])
+  return useCallback((record: ClockPinned | undefined) => toNow(clockAnswer(record, id => clocks?.get(id))), [clocks])
 }

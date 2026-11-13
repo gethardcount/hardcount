@@ -6,7 +6,7 @@ import { api, formatCents } from '@/lib/api'
 import { fillRevenueBuckets } from '@/lib/revenueChart'
 import { formatCompactCents } from '@/lib/money'
 import { ATTENTION_LISTS, homeAttentionLines, type AttentionSeverity } from '@/lib/homeAttention'
-import type { Invoice, Customer } from '@/lib/api'
+import type { Invoice } from '@/lib/api'
 import { timeAgo, wallClockNow } from '@/lib/effectiveNow'
 import { useNowResolver, useTestClocks } from '@/hooks/useNow'
 import { useAuth } from '@/contexts/AuthContext'
@@ -57,27 +57,8 @@ export default function DashboardPage() {
     queryFn: () => api.listInvoices('limit=5'),
   })
 
-  // Resolve each recent invoice's simulated "now" so the "X ago" label reads
-  // against the test clock, not wall-clock (a clock-advanced invoice's created_at
-  // is simulated). The pin is customer-level and immutable, and subs inherit it
-  // (ADR-027) — so the customer's test_clock_id resolves BOTH subscription and
-  // one-off invoices; no need to fetch subscriptions. Only the ≤5 recent
-  // invoices' customers are fetched (by id), and clocks come from the shared
-  // cached map. Non-pinned customers resolve to undefined → Date.now().
-  const recentCustomerIds = useMemo(
-    () => [...new Set((recentInvoices?.data ?? []).map(i => i.customer_id).filter(Boolean))],
-    [recentInvoices],
-  )
-  const { data: recentCustomers } = useQuery({
-    queryKey: ['dashboard-recent-invoice-customers', recentCustomerIds],
-    queryFn: () => api.listCustomers(`ids=${recentCustomerIds.join(',')}&limit=${recentCustomerIds.length}`),
-    enabled: recentCustomerIds.length > 0,
-  })
-  const customerMap = useMemo(() => {
-    const m: Record<string, Customer> = {}
-    ;(recentCustomers?.data ?? []).forEach(c => { m[c.id] = c })
-    return m
-  }, [recentCustomers])
+  // Each invoice's now (its clock's time when it is on one), for the status
+  // and "X ago".
   const resolveNow = useNowResolver()
   // Totals leave out test-clock customers (analytics/simfilter.go) while
   // Recent Invoices lists their invoices; the note says so where it matters.
@@ -319,10 +300,10 @@ export default function DashboardPage() {
                       {/* Wraps on a phone: at 390px the badges ran under the
                           amount ("$99.00 due" over "Simulated"). */}
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
-                        <StatusDot status={invoiceStatus(inv, resolveNow(customerMap[inv.customer_id]))} />
+                        <StatusDot status={invoiceStatus(inv, resolveNow(inv))} />
                         <span className="text-sm font-mono text-foreground">{inv.invoice_number}</span>
                         <StatusBadge
-                          status={invoiceStatus(inv, resolveNow(customerMap[inv.customer_id]))}
+                          status={invoiceStatus(inv, resolveNow(inv))}
                           className="text-[10px]"
                         />
                         {/* Authoritative per-invoice flag — same rule as the
@@ -340,7 +321,7 @@ export default function DashboardPage() {
                               invoice); wall-clock invoices resolve to wall time. */}
                           {timeAgo(
                             inv.created_at,
-                            resolveNow(customerMap[inv.customer_id]),
+                            resolveNow(inv),
                           )}
                         </span>
                       </div>

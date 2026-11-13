@@ -23,7 +23,7 @@ import {
 import { cancelAtPeriodEndText, periodLabels, trialLength } from '@/lib/subscriptionPeriod'
 import { previewView } from '@/lib/invoicePreview'
 import { ExpiryBadge } from '@/components/ExpiryBadge'
-import { useNowFor } from '@/hooks/useNow'
+import { useNowResolver } from '@/hooks/useNow'
 import { useTenantTimezone } from '@/hooks/useTenantTimezone'
 import { cn } from '@/lib/utils'
 import { invoicePaymentChip, invoiceStatus, subscriptionStatus, trialBadgeEndsAt } from '@/lib/statusLabels'
@@ -151,8 +151,10 @@ export default function SubscriptionDetailPage() {
   // The subscription's "now" (its clock's time when it is on one): the one
   // anchor for Trial ends, the lifecycle timeline's past and future dots and
   // the date-picker floors below. A subscription frozen in the past must not
-  // offer real-time dates its engine would treat as far in the future.
-  const now = useNowFor(sub)
+  // offer real-time dates its engine would treat as far in the future. It is
+  // asked again on each render, so a subscription on no clock left open
+  // moves with real time, for example across midnight.
+  const now = useNowResolver()(sub)
   const nowDate = new Date(now)
   // The account's zone, which the resume date and a new trial end are
   // picked and sent in.

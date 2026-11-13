@@ -1597,10 +1597,9 @@ export interface DunningRun {
   invoice_number?: string
   invoice_amount_due_cents?: number
   invoice_currency?: string
-  // The customer's test-clock time, on list responses when the customer is
-  // on a clock; absent for a customer on no clock. The "now" this row's
-  // relative times (Next step, Started) are measured from.
-  effective_now?: string
+  // The customer's test clock, on list responses when the customer is on
+  // one. The row's "now" (Next step, Started) is that clock's time from the
+  // clock list (useNowResolver); the response's effective_now is not read.
   test_clock_id?: string
   // How many retries the run's policy makes, the length of its retry_days
   // (list responses).

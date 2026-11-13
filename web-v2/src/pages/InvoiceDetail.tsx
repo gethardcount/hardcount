@@ -29,7 +29,7 @@ import { collectionPausedNow, finalizeConfirmLines, pickInvoiceNotice, writtenOf
 import { issueDates, sellerBlock, sellerMissing, SELLER_SETTINGS_PATH } from '@/lib/invoiceDocument'
 import { authApi } from '@/lib/auth'
 import { useAuth } from '@/contexts/AuthContext'
-import { useNowFor } from '@/hooks/useNow'
+import { useNowResolver } from '@/hooks/useNow'
 import { classifyError } from '@/lib/errorCopy'
 import { useGetInvoice, useListInvoiceStripeRefunds } from '@/lib/gen/queries.gen'
 import type { Invoice } from '@/lib/gen/schemas/invoice'
@@ -255,8 +255,10 @@ export default function InvoiceDetailPage() {
 
   // The invoice's "now", for Due in N days, Past due and "since X ago". The
   // server fills test_clock_id from the customer's clock, which every
-  // subscription inherits (ADR-027), so it covers one-off invoices too.
-  const now = useNowFor(invoice)
+  // subscription inherits (ADR-027), so it covers one-off invoices too. It is
+  // asked again on each render, so an invoice on no clock left open turns
+  // Past due when its due time passes.
+  const now = useNowResolver()(invoice)
 
   const { data: creditNotesData } = useQuery({
     queryKey: ['invoice-credit-notes', id],
