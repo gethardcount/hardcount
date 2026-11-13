@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { genericStatus, subscriptionStatus } from '@/lib/statusLabels'
 import { StatusBadge as StatusPill } from '@/components/StatusBadge'
 import { usePageTitle } from '@/hooks/usePageTitle'
@@ -162,6 +162,18 @@ export default function TestClockDetailPage() {
   const clock = clockQ.data
   const subs = subsQ.data?.data ?? []
   const attachedCustomers = customersQ.data?.data ?? []
+
+  // Only this page polls the clock while it advances. When the poll sees the
+  // status leave 'advancing', the clock list, which every other page reads,
+  // is refreshed too, or it keeps reading 'advancing'.
+  const status = clock?.status
+  const previousStatus = useRef(status)
+  useEffect(() => {
+    if (previousStatus.current === 'advancing' && status !== undefined && status !== 'advancing') {
+      void refreshTestClocks(queryClient)
+    }
+    previousStatus.current = status
+  }, [status, queryClient])
 
   const handleRetryAdvance = async () => {
     if (!id) return

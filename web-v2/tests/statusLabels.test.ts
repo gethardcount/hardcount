@@ -23,6 +23,12 @@ test('Past due follows the given now (a test clock), not the wall clock', () => 
   assert.equal(invoiceStatus(inv, Date.parse('2027-01-16T00:00:00Z')).label, 'Past due')
 })
 
+test('while now is not known, an open invoice shows its stored status, never Past due', () => {
+  const inv = { status: 'finalized', payment_status: 'pending', due_at: '2020-01-15T00:00:00Z' }
+  assert.deepEqual(invoiceStatus(inv, undefined), { label: 'Open', tone: 'info' })
+  assert.deepEqual(invoiceStatus({ ...inv, payment_status: 'failed' }, undefined), { label: 'Payment failed', tone: 'danger' })
+})
+
 test('subscriptionStatus and flags: paused collection and scheduled cancel are visible', () => {
   assert.deepEqual(subscriptionStatus({ status: 'active' }), { label: 'Active', tone: 'success' })
   assert.deepEqual(subscriptionStatus({ status: 'canceled' }), { label: 'Canceled', tone: 'neutral' })

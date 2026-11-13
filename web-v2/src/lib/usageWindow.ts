@@ -104,7 +104,8 @@ export const MARGIN_PRESETS: { key: MarginPreset; label: string; days: number }[
 // MarginWindow is what the card can query for a preset:
 //   ready      [from, to) to send; `period` marks a billing period, which the
 //              card prints as its inclusive dates
-//   waiting    the period is still loading
+//   waiting    the period, or the customer's now for a rolling window, is
+//              still loading
 //   pick-dates a custom range is missing an end
 //   no-cycle   the customer has no current billing period
 //   no-invoice the customer has no subscription invoice yet
@@ -114,12 +115,13 @@ export type MarginWindow =
 
 // marginWindowFor resolves a preset to a window. `cycle` and `lastInvoiced`
 // are the query results: undefined while loading, null when there is none.
+// `now` is the customer's now (hooks/useNow), undefined while it is not known.
 export function marginWindowFor(
   preset: MarginPreset,
   inputs: {
     cycle: { from: string; to: string } | null | undefined
     lastInvoiced: { from: string; to: string } | null | undefined
-    now: EffectiveNow
+    now: EffectiveNow | undefined
     customFrom: string
     customTo: string
     // The account's zone: custom dates are sent as its day bounds.
@@ -144,6 +146,7 @@ export function marginWindowFor(
         period: false,
       }
     default: {
+      if (inputs.now === undefined) return { kind: 'waiting' }
       const days = MARGIN_PRESETS.find(p => p.key === preset)?.days ?? 30
       return { kind: 'ready', ...rollingWindow(days, inputs.now), period: false }
     }

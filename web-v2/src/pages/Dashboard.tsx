@@ -14,6 +14,7 @@ import { NoticeRow } from '@/components/NoticeRow'
 import { CUSTOMERS_DEFINITION, FAILED_PAYMENTS_DEFINITION, MRR_DEFINITION, currencyScopedHint, customersTrend, failedPaymentsTrend, subscriptionsHint } from '@/lib/homeKpis'
 import { SIMULATED_TOTALS_SENTENCE, SIMULATED_TOTALS_TITLE, showSimulatedTotalsNote } from '@/lib/homeNotices'
 import { LoadError } from '@/components/LoadError'
+import { TestClocksLoadError } from '@/components/TestClocksLoadError'
 import { FeedSkeleton } from '@/components/ui/TableSkeleton'
 import { SimulatedBadge } from '@/components/TestClockBadge'
 import { cn } from '@/lib/utils'
@@ -58,7 +59,8 @@ export default function DashboardPage() {
   })
 
   // Each invoice's now (its clock's time when it is on one), for the status
-  // and "X ago".
+  // and "X ago". While a row's now is not known, the row shows its stored
+  // status and no "X ago".
   const resolveNow = useNowResolver()
   // Totals leave out test-clock customers (analytics/simfilter.go) while
   // Recent Invoices lists their invoices; the note says so where it matters.
@@ -278,6 +280,8 @@ export default function DashboardPage() {
             </Card>
           )}
 
+          <TestClocksLoadError records={recentInvoices?.data ?? []} className="mt-6 mb-0" />
+
           {/* Recent activity */}
           <Card className="mt-6">
             <CardContent className="p-0">
@@ -291,7 +295,9 @@ export default function DashboardPage() {
                 <FeedSkeleton rows={5} />
               ) : recentInvoices?.data && recentInvoices.data.length > 0 ? (
                 <div className="divide-y divide-border">
-                  {recentInvoices.data.slice(0, 5).map((inv: Invoice) => (
+                  {recentInvoices.data.slice(0, 5).map((inv: Invoice) => {
+                    const now = resolveNow(inv)
+                    return (
                     <Link
                       key={inv.id}
                       to={`/invoices/${inv.id}`}
@@ -300,10 +306,10 @@ export default function DashboardPage() {
                       {/* Wraps on a phone: at 390px the badges ran under the
                           amount ("$99.00 due" over "Simulated"). */}
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
-                        <StatusDot status={invoiceStatus(inv, resolveNow(inv))} />
+                        <StatusDot status={invoiceStatus(inv, now)} />
                         <span className="text-sm font-mono text-foreground">{inv.invoice_number}</span>
                         <StatusBadge
-                          status={invoiceStatus(inv, resolveNow(inv))}
+                          status={invoiceStatus(inv, now)}
                           className="text-[10px]"
                         />
                         {/* Authoritative per-invoice flag — same rule as the
@@ -319,14 +325,12 @@ export default function DashboardPage() {
                           {/* Relative to the invoice's simulated clock when pinned
                               (created_at is stamped in simulation time on a clock-advanced
                               invoice); wall-clock invoices resolve to wall time. */}
-                          {timeAgo(
-                            inv.created_at,
-                            resolveNow(inv),
-                          )}
+                          {now !== undefined && timeAgo(inv.created_at, now)}
                         </span>
                       </div>
                     </Link>
-                  ))}
+                    )
+                  })}
                 </div>
               ) : (
                 <div className="px-5 py-8 text-center text-sm text-muted-foreground">

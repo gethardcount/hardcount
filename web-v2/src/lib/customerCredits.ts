@@ -55,10 +55,11 @@ export type GrantState = 'active' | 'used_up' | 'expired' | 'canceled' | 'deduct
 // wins over canceled: the sweep takes whatever is left, so it is the last
 // thing that can happen to a grant. A grant past its expiry that the sweep
 // has not written off yet is "expired" too. A credit is live up to and
-// including its expires_at, the rule the server draws by.
-export function grantState(g: GrantRow, nowMs: number): GrantState {
+// including its expires_at, the rule the server draws by. While nowMs is not
+// known (undefined), a grant with credit left is "active", as stored.
+export function grantState(g: GrantRow, nowMs: number | undefined): GrantState {
   if (g.remaining_cents > 0) {
-    return g.expires_at && Date.parse(g.expires_at) < nowMs ? 'expired' : 'active'
+    return nowMs !== undefined && g.expires_at && Date.parse(g.expires_at) < nowMs ? 'expired' : 'active'
   }
   if ((g.expired_cents ?? 0) > 0) return 'expired'
   if ((g.retired_cents ?? 0) > 0) return 'canceled'
@@ -74,7 +75,7 @@ export function grantUsedCents(g: GrantRow): number {
 
 // splitGrants keeps the order the server sent and separates the grants that
 // still hold credit from the finished ones (shown behind a toggle).
-export function splitGrants<T extends GrantRow>(grants: readonly T[], nowMs: number): { active: T[]; finished: T[] } {
+export function splitGrants<T extends GrantRow>(grants: readonly T[], nowMs: number | undefined): { active: T[]; finished: T[] } {
   const active: T[] = []
   const finished: T[] = []
   for (const g of grants) (grantState(g, nowMs) === 'active' ? active : finished).push(g)

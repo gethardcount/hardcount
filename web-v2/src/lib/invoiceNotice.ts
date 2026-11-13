@@ -2,6 +2,8 @@
 // written-off notice that depend on real state. Plain data in, plain data
 // out, so the unit tests can check every branch without rendering.
 
+import { formatDate } from '@/lib/api'
+
 // The page shows at most one notice above the invoice (the most urgent one).
 // Two can apply:
 //   - the server's attention notice (invoice.attention), and
@@ -110,13 +112,16 @@ export function stripePaymentUrl(paymentIntentId: string, livemode: boolean): st
 //     can be charged, a setup link is refused (409 stripe_not_connected) and
 //     the update-payment page says adding a card isn't available, so the
 //     confirmation promises none of them.
-//   - collectionPaused: the invoice's subscription has collection paused
-//     now (pause_collection in force, as domain.PauseCollection.InForceAt).
-//     The finalize still queues the invoice, but the auto-charge claim skips
-//     a paused subscription's invoices (notPausedForCollection), so nothing
-//     is collected until collection resumes.
+//   - collectionPaused: collectionPausedNow's answer. true: the invoice's
+//     subscription has collection paused now (pause_collection in force, as
+//     domain.PauseCollection.InForceAt). The finalize still queues the
+//     invoice, but the auto-charge claim skips a paused subscription's
+//     invoices (notPausedForCollection), so nothing is collected until
+//     collection resumes. { until }: a timed pause whose end may already
+//     have passed by the subscription's clock, which is not known yet, so the
+//     line names the stored end and promises neither outcome.
 export function finalizeConfirmLines(o: {
-  collectionPaused: boolean
+  collectionPaused: CollectionPause
   stripeConnected: boolean | undefined
   hasCard: boolean | undefined
   hasEmail: boolean
@@ -127,8 +132,10 @@ export function finalizeConfirmLines(o: {
   if (o.taxAtFinalize) lines.push('Tax is worked out now, so the total may change.')
   const collect = "Hardcount then collects payment right away. It uses the customer's credit balance first."
   const canEmail = o.canEmailSetupLinks === true
-  if (o.collectionPaused) {
+  if (o.collectionPaused === true) {
     lines.push('Collection is paused on this subscription, so nothing is charged now. Hardcount collects payment once collection resumes.')
+  } else if (o.collectionPaused) {
+    lines.push(`Collection is paused on this subscription until ${formatDate(o.collectionPaused.until)}. Once it resumes, Hardcount collects payment.`)
   } else if (o.stripeConnected === false) {
     lines.push(`${collect} Stripe isn't connected in this mode, so no card can be charged or added online. Connect Stripe under Settings to collect by card.`)
   } else if (o.stripeConnected === undefined) {
@@ -152,12 +159,19 @@ export function finalizeConfirmLines(o: {
 }
 
 // collectionPausedNow says whether a subscription's collection pause holds
-// collection at nowMs (the page's effective now, test clock aware). It is the
+// collection at nowMs (the subscription's now, hooks/useNow). It is the
 // server's collection rule (notPausedForCollection, InForceAt): a pause with
 // no resumes_at holds, a timed one holds strictly before resumes_at. Unlike
 // collectionPausedFlag it does not look at the subscription's status: the
-// claim skips a paused row's invoices whatever its status.
-export function collectionPausedNow(pause: { resumes_at?: string | null } | null | undefined, nowMs: number): boolean {
+// claim skips a paused row's invoices whatever its status. While nowMs is not
+// known (undefined), a pause with no resumes_at still holds, and a timed one
+// answers { until: resumes_at }: it may already have ended by the clock, and
+// the server would then collect at once.
+export type CollectionPause = boolean | { until: string }
+
+export function collectionPausedNow(pause: { resumes_at?: string | null } | null | undefined, nowMs: number | undefined): CollectionPause {
   if (!pause) return false
-  return !pause.resumes_at || new Date(pause.resumes_at).getTime() > nowMs
+  if (!pause.resumes_at) return true
+  if (nowMs === undefined) return { until: pause.resumes_at }
+  return new Date(pause.resumes_at).getTime() > nowMs
 }

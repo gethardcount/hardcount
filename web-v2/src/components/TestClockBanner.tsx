@@ -2,6 +2,7 @@ import { Link } from 'react-router-dom'
 import { FlaskConical } from 'lucide-react'
 import { formatDateTime } from '@/lib/api'
 import { useTestClock } from '@/hooks/useNow'
+import { TestClocksLoadError } from '@/components/TestClocksLoadError'
 import { cn } from '@/lib/utils'
 
 // TestClockBanner is the one line on a detail page whose record is pinned
@@ -17,6 +18,8 @@ import { cn } from '@/lib/utils'
 //
 // The clock comes from the clock list (useTestClock), the source every page
 // reads a clock's time from, so the line shows the same time as the page.
+// When that list fails to load, the banner is where the page shows the load
+// error, once, with Retry.
 export function TestClockBanner({ testClockId, className }: { testClockId: string; className?: string }) {
   // missing: a read of the list made after the page opened does not hold the
   // clock. Deleting a clock deletes its records too, so this is rare (a page
@@ -58,6 +61,7 @@ export function TestClockBanner({ testClockId, className }: { testClockId: strin
           sent, a &quot;Recorded&quot; line under it shows the real time.
         </p>
       </details>
+      <TestClocksLoadError records={[{ test_clock_id: testClockId }]} className="mt-3 mb-0" />
     </div>
   )
 }

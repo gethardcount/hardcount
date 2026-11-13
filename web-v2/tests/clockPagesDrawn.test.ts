@@ -1,8 +1,10 @@
-// What pages draw for a record on a test clock that has loaded: the invoice
-// page's "Due in" badge and the subscription pages' "Trial ends" badge are
-// worked out from the clock's time, and the simulated-time line shows that
-// time with a link to the clock. The clock stands in 2031, so a page that
-// measured against real time would show years, not days.
+// What pages draw for a record on a test clock. Once the clock has loaded,
+// the invoice page's "Due in" badge, the subscription pages' "Trial ends"
+// badge and the customer's cycle bar are worked out from the clock's time,
+// and the simulated-time line shows that time with a link to the clock. The
+// clock stands in 2031, so a page that measured against real time would show
+// years, not days. While the clock list loads or after it failed, a page
+// shows the stored status and dates, and nothing counted from now.
 //
 // The pages are rendered once on the server, from a cache that already holds
 // their reads. Server rendering sends no request, so a read missing from the
@@ -14,7 +16,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { test, vi } from 'vitest'
 import assert from 'node:assert/strict'
 import { getGetTenantSettingsQueryKey } from '../src/lib/gen/queries.gen.ts'
-import { formatDateTime, setTenantTimezone } from '../src/lib/api.ts'
+import { formatDate, formatDateTime, setTenantTimezone } from '../src/lib/api.ts'
 
 // The display zone, as AccountSettingsGate sets it once the settings load.
 setTenantTimezone('UTC')
@@ -88,11 +90,19 @@ const INVOICE = {
 }
 
 // A cache holding the reads both pages make once loaded. A page reads a
-// clock's time from the clock list.
-function loadedCache(clocks: (typeof CLOCK)[] | 'loading' = [CLOCK]): QueryClient {
+// clock's time from the clock list, which can also be still loading or
+// failed.
+function loadedCache(clocks: (typeof CLOCK)[] | 'loading' | 'failed' = [CLOCK]): QueryClient {
   const client = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } })
   client.setQueryData(getGetTenantSettingsQueryKey(), { default_currency: 'USD', timezone: 'UTC' })
-  if (clocks !== 'loading') client.setQueryData(['test-clocks'], { data: clocks, total: clocks.length })
+  if (clocks === 'failed') {
+    client.getQueryCache().build(client, { queryKey: ['test-clocks'] }).setState({
+      status: 'error', fetchStatus: 'idle', error: new Error('500 Internal Server Error'),
+      errorUpdatedAt: 1, errorUpdateCount: 1, fetchFailureCount: 2, fetchFailureReason: null,
+    })
+  } else if (clocks !== 'loading') {
+    client.setQueryData(['test-clocks'], { data: clocks, total: clocks.length })
+  }
   client.setQueryData(['invoice', INVOICE.id], { invoice: INVOICE, line_items: [] })
   client.setQueryData(['customer', CUSTOMER.id], CUSTOMER)
   client.setQueryData(['subscription', SUBSCRIPTION.id], SUBSCRIPTION)
@@ -179,4 +189,147 @@ test("the dunning list counts a run's next step from the clock list", async () =
   const page = text(render(client, '/dunning', '/dunning', DunningPage))
   assert.match(page, /in 3d/)
   assert.doesNotMatch(page, /in 31d/)
+})
+
+// Relative text a page works out from now. None of it may show while the
+// clock is not known.
+const RELATIVE = /Past due|Due in|Due today|Trial ends in|Day \d+ of/
+
+test('while the clock list loads, the invoice page shows the stored status and dates, and nothing counted from now', async () => {
+  const page = text(await invoicePage(loadedCache('loading')))
+  assert.doesNotMatch(page, RELATIVE)
+  assert.match(page, /Status ?Open/)
+  assert.match(page, new RegExp(formatDate(INVOICE.due_at)))
+})
+
+test('while the clock list loads, an invoice that real time would call past due is not', async () => {
+  // A clock in 2020: from real time this invoice is years past due, and
+  // from its clock it is due in 10 days.
+  const past = { ...CLOCK, frozen_time: '2020-03-01T12:00:00Z' }
+  const invoice = { ...INVOICE, issued_at: '2020-03-01T00:00:00Z', due_at: '2020-03-11T00:00:00Z' }
+  const loading = loadedCache('loading')
+  loading.setQueryData(['invoice', INVOICE.id], { invoice, line_items: [] })
+  const page = text(await invoicePage(loading))
+  assert.doesNotMatch(page, RELATIVE)
+  assert.match(page, /Status ?Open/)
+
+  const loaded = loadedCache([past])
+  loaded.setQueryData(['invoice', INVOICE.id], { invoice, line_items: [] })
+  const drawn = text(await invoicePage(loaded))
+  assert.match(drawn, /Due in 10d/)
+  assert.doesNotMatch(drawn, /Past due/)
+})
+
+test('when the clock list failed, the invoice page shows its load error once and nothing counted from now', async () => {
+  const html = await invoicePage(loadedCache('failed'))
+  const page = text(html)
+  assert.equal(page.match(/Couldn't load test clocks/g)?.length, 1)
+  assert.match(html, />Retry</)
+  assert.doesNotMatch(page, RELATIVE)
+  assert.match(page, /Status ?Open/)
+})
+
+function subscriptionsPage(client: QueryClient): Promise<string> {
+  return import('../src/pages/Subscriptions.tsx').then(({ default: SubscriptionsPage }) => {
+    client.setQueryData(['subscriptions', 'limit=25&offset=0&sort=created_at&dir=desc'], { data: [SUBSCRIPTION], total: 1 })
+    return text(render(client, '/subscriptions', '/subscriptions', SubscriptionsPage))
+  })
+}
+
+test('while the clock list loads, the subscriptions list shows the stored status and no trial countdown', async () => {
+  const page = await subscriptionsPage(loadedCache('loading'))
+  assert.doesNotMatch(page, RELATIVE)
+  assert.match(page, /Trialing/)
+})
+
+test('when the clock list failed, the subscriptions list shows its load error once and no trial countdown', async () => {
+  const page = await subscriptionsPage(loadedCache('failed'))
+  assert.equal(page.match(/Couldn't load test clocks/g)?.length, 1)
+  assert.doesNotMatch(page, RELATIVE)
+  assert.match(page, /Trialing/)
+})
+
+// The customer page's upcoming-invoice card: its cycle bar counts the day of
+// the period from the customer's clock. The period runs 2031-02-20 to
+// 2031-03-20, and the clock stands at noon on 2031-03-01, day 10 of 28.
+function upcomingCard(client: QueryClient): Promise<string> {
+  return import('../src/components/CostDashboard.tsx').then(({ CostDashboard }) => {
+    const sub = {
+      ...SUBSCRIPTION, status: 'active', trial_end_at: null,
+      current_billing_period_start: '2031-02-20T00:00:00Z', current_billing_period_end: '2031-03-20T00:00:00Z',
+    }
+    client.setQueryData(['customer-subs-upcoming', CUSTOMER.id], { data: [sub], total: 1 })
+    return text(renderToStaticMarkup(createElement(QueryClientProvider, { client },
+      createElement(MemoryRouter, null, createElement(CostDashboard, { customer: CUSTOMER as never })))))
+  })
+}
+
+test("the customer's cycle bar counts the day from its clock", async () => {
+  assert.match(await upcomingCard(loadedCache()), /Day 10 of 28/)
+})
+
+test("while the clock list loads, the customer's cycle bar shows its period and no day count", async () => {
+  const page = await upcomingCard(loadedCache('loading'))
+  assert.doesNotMatch(page, RELATIVE)
+  assert.match(page, new RegExp(formatDate('2031-02-20T00:00:00Z')))
+})
+
+test("while the clock list loads, an active subscription's timeline marks its period start as past", async () => {
+  // The current period's start is at or before the subscription's now on
+  // any clock, so it is a stored fact and needs no now.
+  const { default: SubscriptionDetailPage } = await import('../src/pages/SubscriptionDetail.tsx')
+  const client = loadedCache('loading')
+  client.removeQueries({ queryKey: ['customer'] })
+  client.setQueryData(['subscription', SUBSCRIPTION.id], {
+    ...SUBSCRIPTION, status: 'active', trial_start_at: null, trial_end_at: null,
+    current_billing_period_start: '2031-02-20T00:00:00Z', current_billing_period_end: '2031-03-20T00:00:00Z',
+  })
+  const html = render(client, `/subscriptions/${SUBSCRIPTION.id}`, '/subscriptions/:id', SubscriptionDetailPage)
+  assert.match(html, /font-medium text-foreground"[^>]*>Period start</)
+})
+
+test("while the clock list loads, the dunning list shows a run's stored times in place of relative ones", async () => {
+  const { default: DunningPage } = await import('../src/pages/Dunning.tsx')
+  const client = loadedCache('loading')
+  const run = {
+    id: 'hc_dun_1', invoice_id: INVOICE.id, customer_id: CUSTOMER.id, policy_id: 'hc_pol_1',
+    state: 'active', reason: 'payment_failed', attempt_count: 1, paused: false, resolution: '',
+    next_action_at: '2031-03-04T12:00:00Z', created_at: '2031-02-28T12:00:00Z',
+    test_clock_id: CLOCK.id,
+  }
+  client.setQueryData(['dunning-runs', 1, ''], { runs: [run], total: 1, invoiceMap: {}, customerMap: {} })
+  const page = text(render(client, '/dunning', '/dunning', DunningPage))
+  assert.match(page, new RegExp(formatDateTime(run.next_action_at)))
+  assert.match(page, new RegExp(formatDateTime(run.created_at)))
+})
+
+test('for a customer on no clock, the cycle read keeps one entry across visits, and a revisit draws it at once', async () => {
+  const { CostDashboard } = await import('../src/components/CostDashboard.tsx')
+  const customer = { ...CUSTOMER, test_clock_id: undefined }
+  const client = loadedCache()
+  const draw = () => text(renderToStaticMarkup(createElement(QueryClientProvider, { client },
+    createElement(MemoryRouter, null, createElement(CostDashboard, { customer: customer as never })))))
+  const cycleReads = () => client.getQueryCache().findAll({ queryKey: ['customer-usage', customer.id, 'cycle'] })
+
+  vi.useFakeTimers({ toFake: ['Date'] })
+  try {
+    vi.setSystemTime(Date.parse('2031-03-01T12:00:00Z'))
+    draw()
+    assert.equal(cycleReads().length, 1)
+    // The read lands, as a fetch would.
+    client.setQueryData(cycleReads()[0].queryKey, {
+      customer_id: customer.id,
+      period: { from: '2031-02-20T00:00:00Z', to: '2031-03-20T00:00:00Z', source: 'current_billing_cycle' },
+      subscriptions: [], meters: [], warnings: [], buckets: [],
+      totals: [{ currency: 'USD', amount_cents: 1234 }],
+    })
+
+    // A later visit, a second later by real time.
+    vi.setSystemTime(Date.parse('2031-03-01T12:00:01Z'))
+    const page = draw()
+    assert.equal(cycleReads().length, 1)
+    assert.match(page, /Billed usage \$12\.34/)
+  } finally {
+    vi.useRealTimers()
+  }
 })

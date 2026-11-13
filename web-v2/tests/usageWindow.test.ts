@@ -54,6 +54,8 @@ test('demo: the last invoiced period holds the usage the invoice billed', () => 
 
 test('marginWindowFor waits for the period, and names a missing one', () => {
   assert.deepEqual(marginWindowFor('cycle', { ...base, cycle: undefined }), { kind: 'waiting' })
+  // A rolling window waits for the customer's now.
+  assert.deepEqual(marginWindowFor('30d', { ...base, now: undefined }), { kind: 'waiting' })
   assert.deepEqual(marginWindowFor('cycle', { ...base, cycle: null }), { kind: 'no-cycle' })
   assert.deepEqual(marginWindowFor('last_invoiced', { ...base, lastInvoiced: undefined }), { kind: 'waiting' })
   assert.deepEqual(marginWindowFor('last_invoiced', { ...base, lastInvoiced: null }), { kind: 'no-invoice' })
