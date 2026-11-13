@@ -3100,11 +3100,25 @@ func (s *Service) RetryPendingTaxForClock(ctx context.Context, tenantID, clockID
 	// the identical hand-rolled list with the identical drift.
 	codes := domain.TaxRetryableErrorCodes()
 	maxAttempts := domain.MaxTaxRetryAttempts
-	stuck, err := s.store.ListPendingTaxRetryForClock(ctx, tenantID, clockID, codes, maxAttempts, batch)
-	if err != nil {
-		return 0, []error{fmt.Errorf("list pending tax retries for clock %s: %w", clockID, err)}
+	var (
+		processed int
+		errs      []error
+	)
+	// Every page, each draft once: a clock has no next tick, and a draft the
+	// retry leaves waiting stays in the list, so the cursor moves past it.
+	for after := (domain.InvoiceKeyset{}); ; {
+		stuck, err := s.store.ListPendingTaxRetryForClock(ctx, tenantID, clockID, codes, maxAttempts, after, batch)
+		if err != nil {
+			return processed, append(errs, fmt.Errorf("list pending tax retries for clock %s: %w", clockID, err))
+		}
+		n, pageErrs := s.processTaxRetryBatch(ctx, stuck)
+		processed += n
+		errs = append(errs, pageErrs...)
+		if len(stuck) < batch || ctx.Err() != nil {
+			return processed, errs
+		}
+		after = domain.KeysetOf(stuck[len(stuck)-1])
 	}
-	return s.processTaxRetryBatch(ctx, stuck)
 }
 
 // processTaxRetryBatch is the per-row body of the cron-path

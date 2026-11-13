@@ -44,7 +44,7 @@ func TestPerClockQueries_SQLValid(t *testing.T) {
 
 	t.Run("ListPendingTaxRetryForClock", func(t *testing.T) {
 		got, err := store.ListPendingTaxRetryForClock(ctx, "hc_ten_test", "hc_tclk_test",
-			[]string{"provider_outage", "unknown"}, 8, 50)
+			[]string{"provider_outage", "unknown"}, 8, domain.InvoiceKeyset{}, 50)
 		if err != nil {
 			t.Fatalf("expected nil error on empty DB; got: %v", err)
 		}
