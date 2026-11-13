@@ -19,14 +19,19 @@ import (
 // mockSubs's status-based GetDueBilling filter.
 type thresholdMockSubs struct {
 	*mockSubs
-	candidates []domain.Subscription
+	candidates      []domain.Subscription
+	clockCandidates []domain.Subscription
 }
 
 func (m *thresholdMockSubs) ListWithThresholds(_ context.Context, _ bool, afterID string, limit int) ([]domain.Subscription, error) {
-	// Page the candidate set by the id cursor, mirroring the store's drain
-	// contract (ORDER BY id ASC, id > afterID, LIMIT) so the ScanThresholds
-	// drain loop is exercised with real paging.
-	sorted := append([]domain.Subscription(nil), m.candidates...)
+	return pageByID(m.candidates, afterID, limit), nil
+}
+
+// pageByID pages candidates by the id cursor, mirroring the store's drain
+// contract (ORDER BY id ASC, id > afterID, LIMIT) so the scans' drain loops
+// are exercised with real paging.
+func pageByID(candidates []domain.Subscription, afterID string, limit int) []domain.Subscription {
+	sorted := append([]domain.Subscription(nil), candidates...)
 	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
 	var out []domain.Subscription
 	for _, c := range sorted {
@@ -38,15 +43,11 @@ func (m *thresholdMockSubs) ListWithThresholds(_ context.Context, _ bool, afterI
 			break
 		}
 	}
-	return out, nil
+	return out
 }
 
-// ListWithThresholdsForClock — ADR-029 Phase 3 stub. The threshold-
-// scan unit tests in this file exercise the cron path; the per-clock
-// path's behaviour is identical (same scan logic, different fetch
-// scope), so a no-op satisfies the interface for the cron-side tests.
-func (m *thresholdMockSubs) ListWithThresholdsForClock(_ context.Context, _, _, _ string, _ int) ([]domain.Subscription, error) {
-	return nil, nil
+func (m *thresholdMockSubs) ListWithThresholdsForClock(_ context.Context, _, _, afterID string, limit int) ([]domain.Subscription, error) {
+	return pageByID(m.clockCandidates, afterID, limit), nil
 }
 
 // setupThresholdEngine builds a minimal engine wired with mocks that mirror the
@@ -615,6 +616,48 @@ func TestScanThresholds_DrainsPastBatchSize(t *testing.T) {
 	}
 
 	fired, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50)
+	if len(errs) != 0 {
+		t.Fatalf("scan errors: %v", errs)
+	}
+	if fired != 60 {
+		t.Fatalf("drain incomplete: fired = %d, want 60 (subs #51-60 past the first batch must scan)", fired)
+	}
+	if len(invoices.invoices) != 60 {
+		t.Fatalf("expected 60 threshold invoices, got %d", len(invoices.invoices))
+	}
+}
+
+// The clock's threshold scan drains the same way: a clock has no next tick,
+// so 60 crossed subs with batchSize 50 must all fire in one call.
+func TestScanThresholdsForClock_DrainsPastBatchSize(t *testing.T) {
+	thresholds := &domain.BillingThresholds{AmountGTE: 50000}
+	engine, subs, invoices := setupThresholdEngine(thresholds, 1000)
+	at := time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC)
+	engine.clock = clock.NewFake(at)
+
+	periodStart := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	nextBilling := periodEnd
+	many := make([]domain.Subscription, 0, 60)
+	for i := 1; i <= 60; i++ {
+		many = append(many, domain.Subscription{
+			ID: fmt.Sprintf("sub_%04d", i), TenantID: "t1", CustomerID: "cus_1", TestClockID: "tc_1",
+			Items:                     []domain.SubscriptionItem{{ID: "subitem_1", PlanID: "pln_1", Quantity: 1}},
+			Status:                    domain.SubscriptionActive,
+			BillingTime:               domain.BillingTimeCalendar,
+			CurrentBillingPeriodStart: &periodStart,
+			CurrentBillingPeriodEnd:   &periodEnd,
+			NextBillingAt:             &nextBilling,
+			BillingThresholds:         thresholds,
+		})
+	}
+	subs.clockCandidates = many
+	for _, s := range many {
+		subs.subs[s.ID] = s
+	}
+
+	ctx := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: at, TestClockID: "tc_1"})
+	fired, errs := engine.ScanThresholdsForClock(ctx, "t1", "tc_1", 50)
 	if len(errs) != 0 {
 		t.Fatalf("scan errors: %v", errs)
 	}

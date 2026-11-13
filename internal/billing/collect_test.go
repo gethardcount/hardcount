@@ -119,7 +119,7 @@ func TestCollectInvoice(t *testing.T) {
 		e.CollectInvoice(ctx, "t1", inv.ID, nil)
 		// The sweep lists the same row; hand it the PRE-email snapshot to
 		// prove the collector re-reads after claiming instead of trusting it.
-		if _, errs := e.processAutoCharge(ctx, []domain.Invoice{inv}, nil, noPMTriggerSweep); len(errs) != 0 {
+		if _, errs := e.processAutoCharge(ctx, inv, nil, noPMTriggerSweep); len(errs) != 0 {
 			t.Fatalf("sweep errs: %v", errs)
 		}
 		if len(n.triggers) != 1 {
@@ -294,7 +294,7 @@ func TestCollect_ZeroDueSettles(t *testing.T) {
 	charger := &recordingCharger{}
 	e.charger = charger
 
-	if n, errs := e.processAutoCharge(ctx, []domain.Invoice{inv}, nil, noPMTriggerSweep); n != 1 || len(errs) != 0 {
+	if n, errs := e.processAutoCharge(ctx, inv, nil, noPMTriggerSweep); n != 1 || len(errs) != 0 {
 		t.Fatalf("settled=%d errs=%v, want 1 settle", n, errs)
 	}
 	got, _ := invoices.GetInvoice(ctx, "t1", inv.ID)
@@ -328,7 +328,7 @@ func TestSweepNoPM_SetupEmailSentExactlyOnce(t *testing.T) {
 
 	t.Run("no PM, never emailed → one email, stamped; second tick silent", func(t *testing.T) {
 		e, invoices, notifier, inv := collectFixture()
-		if n, errs := e.processAutoCharge(ctx, []domain.Invoice{inv}, nil, noPMTriggerSweep); n != 0 || len(errs) != 0 {
+		if n, errs := e.processAutoCharge(ctx, inv, nil, noPMTriggerSweep); n != 0 || len(errs) != 0 {
 			t.Fatalf("tick 1: charged=%d errs=%v", n, errs)
 		}
 		if len(notifier.got) != 1 {
@@ -338,7 +338,7 @@ func TestSweepNoPM_SetupEmailSentExactlyOnce(t *testing.T) {
 		if stamped.NoPMNotifiedAt == nil {
 			t.Fatal("send-once marker must be stamped after the email")
 		}
-		if _, errs := e.processAutoCharge(ctx, []domain.Invoice{stamped}, nil, noPMTriggerSweep); len(errs) != 0 {
+		if _, errs := e.processAutoCharge(ctx, stamped, nil, noPMTriggerSweep); len(errs) != 0 {
 			t.Fatalf("tick 2 errs: %v", errs)
 		}
 		if len(notifier.got) != 1 {
@@ -350,14 +350,14 @@ func TestSweepNoPM_SetupEmailSentExactlyOnce(t *testing.T) {
 		e, invoices, _, inv := collectFixture()
 		skipper := &skippingNoPMNotifier{}
 		e.noPMNotifier = skipper
-		if _, errs := e.processAutoCharge(ctx, []domain.Invoice{inv}, nil, noPMTriggerSweep); len(errs) != 0 {
+		if _, errs := e.processAutoCharge(ctx, inv, nil, noPMTriggerSweep); len(errs) != 0 {
 			t.Fatalf("errs: %v", errs)
 		}
 		got, _ := invoices.GetInvoice(ctx, "t1", inv.ID)
 		if got.NoPMNotifiedAt != nil {
 			t.Fatal("skipped-no-email must NOT stamp — it must retry when an address appears")
 		}
-		if _, errs := e.processAutoCharge(ctx, []domain.Invoice{got}, nil, noPMTriggerSweep); len(errs) != 0 {
+		if _, errs := e.processAutoCharge(ctx, got, nil, noPMTriggerSweep); len(errs) != 0 {
 			t.Fatalf("tick 2 errs: %v", errs)
 		}
 		if skipper.calls != 2 {
@@ -437,7 +437,7 @@ func TestCollect_DefiniteFailureWithoutDeclineCode_ClearsFlag(t *testing.T) {
 	e.paymentSetups = &fakePaymentSetups{ready: true, stripeCustomerID: "cus_stripe"}
 	e.charger = refusingCharger{store: invoices}
 
-	_, errs := e.processAutoCharge(postgres.WithLivemode(context.Background(), false), []domain.Invoice{inv}, nil, noPMTriggerSweep)
+	_, errs := e.processAutoCharge(postgres.WithLivemode(context.Background(), false), inv, nil, noPMTriggerSweep)
 	if len(errs) != 1 {
 		t.Errorf("an unusual refusal is surfaced to the caller, got errs=%v", errs)
 	}
@@ -490,10 +490,23 @@ func TestProcessAutoCharge_BelowMinimumIsNotAnError(t *testing.T) {
 	charger := &belowMinimumCharger{}
 	e.charger = charger
 
-	if _, errs := e.processAutoCharge(postgres.WithLivemode(context.Background(), false), []domain.Invoice{inv}, nil, noPMTriggerSweep); len(errs) != 0 {
+	if _, errs := e.processAutoCharge(postgres.WithLivemode(context.Background(), false), inv, nil, noPMTriggerSweep); len(errs) != 0 {
 		t.Fatalf("errs = %v, want none", errs)
 	}
 	if charger.calls != 1 || len(notifier.got) != 0 {
 		t.Errorf("charges %d, setup-link emails %d; want 1 and 0", charger.calls, len(notifier.got))
 	}
+}
+
+// collectEach runs processAutoCharge on each invoice, as a sweep does, and
+// adds up what it charged and the errors.
+func collectEach(e *Engine, ctx context.Context, invs []domain.Invoice, at *time.Time, trigger string) (int, []error) {
+	charged := 0
+	var errs []error
+	for _, inv := range invs {
+		n, rowErrs := e.processAutoCharge(ctx, inv, at, trigger)
+		charged += n
+		errs = append(errs, rowErrs...)
+	}
+	return charged, errs
 }

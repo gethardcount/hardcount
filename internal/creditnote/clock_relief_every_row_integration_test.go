@@ -76,6 +76,27 @@ func TestRetryPendingClawbackIssueForClock_IssuesEveryDraft(t *testing.T) {
 	}
 }
 
+// A clock's relief-note job whose context has ended says so: it returns the
+// cut, with the context's error, instead of ending as if it had issued every
+// held note.
+func TestRetryPendingClawbackIssueForClock_ACutIsReported(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "Clock Relief Cut")
+	clockID, _ := seedClockReliefDrafts(t, db, ctx, tenantID, 3)
+
+	svc := creditnote.NewService(creditnote.NewPostgresStore(db), invoice.NewPostgresStore(db), nil, okGranterTx{})
+	cut, cancel := context.WithCancel(ctx)
+	cancel()
+	issued, errs := svc.RetryPendingClawbackIssueForClock(cut, tenantID, clockID, time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC), 100)
+	if issued != 0 {
+		t.Errorf("issued %d, want 0 on a context that had ended", issued)
+	}
+	if len(errs) != 1 || !errors.Is(errs[0], context.Canceled) {
+		t.Fatalf("errors = %v, want one that wraps context.Canceled", errs)
+	}
+}
+
 // Walking the clock's list page by page, as the job does, returns every held
 // note exactly once when the order the notes were created in disagrees with
 // the order they were inserted in (and so with id order) and with the order

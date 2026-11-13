@@ -265,7 +265,7 @@ func TestProcessAutoCharge_StopsAtTheNextInvoiceWhenCtxEnds(t *testing.T) {
 	charger := &cancelingCharger{recordingCharger: recordingCharger{store: invoices}, cancel: cancel}
 	e.charger = charger
 
-	_, errs := e.processAutoCharge(ctx, invoices.invoices, nil, noPMTriggerSweep)
+	_, errs := collectEach(e, ctx, invoices.invoices, nil, noPMTriggerSweep)
 
 	if len(charger.got) != 1 {
 		t.Fatalf("charged %d invoices, want 1: the second must wait for the next tick", len(charger.got))

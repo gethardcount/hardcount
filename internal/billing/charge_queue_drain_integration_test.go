@@ -9,6 +9,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/walk"
 )
 
 // cardFor resolves a chargeable card only for the listed customers; everyone
@@ -49,7 +50,7 @@ func TestRetryPendingCharges_CardlessHeadDoesNotBlockNewerInvoices(t *testing.T)
 	if pages != 2 {
 		t.Errorf("pages = %d, want 2 (50, then 1)", pages)
 	}
-	queued, err := h.invoices.ListAutoChargePending(h.ctx, domain.InvoiceKeyset{}, 100)
+	queued, err := h.invoices.ListAutoChargePending(h.ctx, walk.Key{}, 100)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -96,7 +97,7 @@ func TestListAutoChargePending_CursorBreaksCreatedAtTiesByID(t *testing.T) {
 	}
 
 	seen := map[string]bool{}
-	var after domain.InvoiceKeyset
+	var after walk.Key
 	for page := 0; page < 5; page++ {
 		got, err := h.invoices.ListAutoChargePending(h.ctx, after, 1)
 		if err != nil {
@@ -109,7 +110,7 @@ func TestListAutoChargePending_CursorBreaksCreatedAtTiesByID(t *testing.T) {
 			t.Fatalf("page %d repeated %s", page, got[0].ID)
 		}
 		seen[got[0].ID] = true
-		after = domain.KeysetOf(got[0])
+		after = walk.Key{At: got[0].CreatedAt, ID: got[0].ID}
 	}
 	for _, inv := range []domain.Invoice{a, b, c} {
 		if !seen[inv.ID] {
@@ -141,18 +142,18 @@ func TestListAutoChargePendingForClock_PagesAfterTheCursor(t *testing.T) {
 		t.Fatalf("commit: %v", err)
 	}
 
-	page1, err := h.invoices.ListAutoChargePendingForClock(h.ctx, h.tenantID, clockID, domain.InvoiceKeyset{}, 1)
+	page1, err := h.invoices.ListAutoChargePendingForClock(h.ctx, h.tenantID, clockID, walk.Key{}, 1)
 	if err != nil || len(page1) != 1 {
 		t.Fatalf("page 1: %v %v", page1, err)
 	}
-	page2, err := h.invoices.ListAutoChargePendingForClock(h.ctx, h.tenantID, clockID, domain.KeysetOf(page1[0]), 1)
+	page2, err := h.invoices.ListAutoChargePendingForClock(h.ctx, h.tenantID, clockID, walk.Key{At: page1[0].CreatedAt, ID: page1[0].ID}, 1)
 	if err != nil || len(page2) != 1 {
 		t.Fatalf("page 2: %v %v", page2, err)
 	}
 	if page1[0].ID == page2[0].ID {
 		t.Fatalf("page 2 repeated %s: the cursor is ignored", page1[0].ID)
 	}
-	page3, err := h.invoices.ListAutoChargePendingForClock(h.ctx, h.tenantID, clockID, domain.KeysetOf(page2[0]), 1)
+	page3, err := h.invoices.ListAutoChargePendingForClock(h.ctx, h.tenantID, clockID, walk.Key{At: page2[0].CreatedAt, ID: page2[0].ID}, 1)
 	if err != nil || len(page3) != 0 {
 		t.Fatalf("page 3 = %v %v, want empty", page3, err)
 	}
