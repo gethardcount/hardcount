@@ -76,26 +76,50 @@ func TestRetryPendingClawbackIssueForClock_IssuesEveryDraft(t *testing.T) {
 	}
 }
 
-// The cursor is on fields fixed at insert. An issue attempt that leaves a note
-// held may move its updated_at; the next page still does not return it.
-func TestListPendingClawbackDraftsForClock_CursorIgnoresUpdatedAt(t *testing.T) {
+// Walking the clock's list page by page, as the job does, returns every held
+// note exactly once when the order notes are touched in disagrees with the
+// order they were created in: the first-created notes were touched last.
+// The page's order and the cursor must both be (created_at, id); a page
+// ordered by updated_at would end on a late-created note and leave the
+// earlier ones behind the cursor, and a cursor on updated_at would meet
+// notes again.
+func TestListPendingClawbackDraftsForClock_WalkReturnsEveryNoteOnce(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
-	tenantID := testutil.CreateTestTenant(t, db, "Clock Relief Cursor")
-	clockID, _ := seedClockReliefDrafts(t, db, ctx, tenantID, 3)
+	tenantID := testutil.CreateTestTenant(t, db, "Clock Relief Walk")
+	const n, page = 5, 2
+	clockID, notes := seedClockReliefDrafts(t, db, ctx, tenantID, n)
+	base := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i, cn := range notes {
+		updated := base.Add(time.Duration(i) * time.Minute)
+		if i < 3 {
+			updated = updated.Add(time.Hour) // touched last
+		}
+		execBypassCN(t, db, `UPDATE credit_notes SET created_at = $2, updated_at = $3 WHERE id = $1`,
+			cn.ID, base.Add(time.Duration(i)*time.Minute), updated)
+	}
 	store := creditnote.NewPostgresStore(db)
 
-	first, err := store.ListPendingClawbackDraftsForClock(ctx, tenantID, clockID, time.Time{}, "", 2)
-	if err != nil || len(first) != 2 {
-		t.Fatalf("first page: %d notes, err %v; want 2", len(first), err)
+	seen := map[string]int{}
+	var afterCreatedAt time.Time
+	afterID := ""
+	for range n + 1 {
+		got, err := store.ListPendingClawbackDraftsForClock(ctx, tenantID, clockID, afterCreatedAt, afterID, page)
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		for _, cn := range got {
+			seen[cn.ID]++
+		}
+		if len(got) < page {
+			break
+		}
+		afterCreatedAt, afterID = got[len(got)-1].CreatedAt, got[len(got)-1].ID
 	}
-	execBypassCN(t, db, `UPDATE credit_notes SET updated_at = now() + interval '1 hour' WHERE id = ANY($1)`, []string{first[0].ID, first[1].ID})
-	next, err := store.ListPendingClawbackDraftsForClock(ctx, tenantID, clockID, first[1].CreatedAt, first[1].ID, 2)
-	if err != nil {
-		t.Fatalf("next page: %v", err)
-	}
-	if len(next) != 1 || next[0].ID == first[0].ID || next[0].ID == first[1].ID {
-		t.Errorf("next page = %v, want the one note not on the first page", cnIDs(next))
+	for i, cn := range notes {
+		if seen[cn.ID] != 1 {
+			t.Errorf("note %d (created %d of %d) returned %d times, want once", i, i+1, n, seen[cn.ID])
+		}
 	}
 }
 
