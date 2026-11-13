@@ -53,7 +53,7 @@ original text.
 
 ### Changed
 
-- **A subscription item change whose tax cannot be worked out is refused with `503` `proration_unavailable` and a `Retry-After`,** as cycle and cancel invoices already are. That covers a misconfigured tax provider, and a failed read of the billing profile or tax settings. It used to write a draft proration invoice. Nothing is changed, so send it again.
+- **A subscription item change whose tax cannot be worked out is refused with `503` `proration_unavailable` and a `Retry-After`,** as cycle and cancel invoices already are. That covers a misconfigured tax provider, and a failed read of the billing profile or tax settings. It used to write a draft proration invoice. Nothing is changed, so send it again ([#1719](https://github.com/gethardcount/hardcount/pull/1719)).
 - **`POST /v1/subscriptions/{id}/cancel` can answer `409` `concurrent_change` when the subscription changes while the cancel prices it.** The cancel prices once more on its own. If the subscription changes again, it is not canceled. A period that had already ended and was billed first stays billed. Send the request again; the same `Idempotency-Key` works ([ADR-139](docs/adr/139-cancel-prices-before-its-transaction.md), [#1685](https://github.com/gethardcount/hardcount/pull/1685)).
 - **Test clocks: one replica at a time runs every advance, and a deploy no longer leaves one waiting.** The holder of the new `testclock_catchup` leader role runs each advancing clock; an advance waits behind any catch-up already running, up to 10 minutes each. `last_advance_summary.advanced_from` is now always the clock's time before the advance ([ADR-140](docs/adr/140-test-clock-catchup-is-a-leader-role.md), [#1689](https://github.com/gethardcount/hardcount/pull/1689)).
 
