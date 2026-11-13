@@ -85,9 +85,9 @@ With tax-inclusive pricing, the retry keeps the total at the sum of the line pri
 - A refresh that failed left the draft waiting for tax, with the lowered amounts.
 - On a draft whose tax had been retried before, a refresh at a new rate lowered the total with a discount (`discount_cents`) of about the old tax.
 
-Later versions tax the line prices. They do not restore a lowered draft: a retry taxes what the lines charge, and they already charge the lowered amounts. On a release after v0.9.3, a retry also drops a draft's `discount_cents`: no invoice has a discount of its own.
+Later versions tax the line prices. They do not restore a lowered draft: a retry taxes what the lines charge, and they already charge the lowered amounts. On a release after v0.9.3, a retry also drops the draft's `discount_cents`. Its total then rises by that amount, to the sum of the lowered lines, and is still short.
 
-**Check.** Run this before you upgrade, in `psql` as the database owner ([why the first line](runbook/index.md#before-you-start)). After the upgrade, a retry changes the lines it looks for. So if you upgraded already, it still finds each invoice that no retry has touched since.
+**Check.** Run this before you upgrade, in `psql` as the database owner ([why the first line](runbook/index.md#before-you-start)). After the upgrade, a retry changes the lines and the discount it looks for. So if you upgraded already, it still finds each invoice that no retry has touched since.
 
 ```sql
 SET app.bypass_rls = 'on';
@@ -101,6 +101,7 @@ WHERE s.tax_inclusive
   AND i.status <> 'voided'
   AND (
     (i.status = 'draft' AND i.tax_status = 'pending')
+    OR i.discount_cents <> 0
     OR EXISTS (
       SELECT 1 FROM invoice_line_items li
       WHERE li.invoice_id = i.id

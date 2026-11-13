@@ -5339,7 +5339,7 @@ func (e *Engine) computeAndPersistInvoiceTax(ctx context.Context, tenantID, invo
 	if err != nil {
 		return domain.Invoice{}, fmt.Errorf("recompute tax: %w", err)
 	}
-	basis, subtotal, err := storedTaxBasis(items, inv.SubtotalCents, ts.TaxInclusive)
+	basis, subtotal, err := storedTaxBasis(inv, items, ts.TaxInclusive)
 	if err != nil {
 		return domain.Invoice{}, fmt.Errorf("recompute tax: %w", err)
 	}
