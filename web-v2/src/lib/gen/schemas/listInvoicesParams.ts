@@ -13,7 +13,9 @@
  */
 import type { LimitParameter } from './limitParameter';
 import type { ListInvoicesDir } from './listInvoicesDir';
+import type { ListInvoicesPaymentStatus } from './listInvoicesPaymentStatus';
 import type { ListInvoicesSort } from './listInvoicesSort';
+import type { ListInvoicesStatus } from './listInvoicesStatus';
 import type { OffsetParameter } from './offsetParameter';
 
 export type ListInvoicesParams = {
@@ -27,15 +29,16 @@ customer_id?: string;
 subscription_id?: string;
 /**
  * Only invoices in this status: `draft`, `finalized`, `paid`,
- * `voided` or `uncollectible`. Another value matches nothing.
+ * `voided` or `uncollectible`. Any other value is a 422 with
+ * `param: status`.
  */
-status?: string;
+status?: ListInvoicesStatus;
 /**
  * Only invoices with this payment status: `pending`, `processing`,
- * `succeeded`, `failed` or `unknown`. Another value matches
- * nothing.
+ * `succeeded`, `failed` or `unknown`. Any other value is a 422
+ * with `param: payment_status`.
  */
-payment_status?: string;
+payment_status?: ListInvoicesPaymentStatus;
 /**
  * Case-insensitive substring match on the invoice number, or on
  * the customer's name or email, also when customer data is

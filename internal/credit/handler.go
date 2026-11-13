@@ -185,10 +185,15 @@ func (h *Handler) listEntries(w http.ResponseWriter, r *http.Request) {
 		respond.FromError(w, r, err, "credit")
 		return
 	}
+	entryType, ok := respond.ParseFilter(w, r, "entry_type", domain.CreditGrant, domain.CreditUsage,
+		domain.CreditExpiry, domain.CreditAdjustment)
+	if !ok {
+		return
+	}
 	filter := ListFilter{
 		TenantID:   tenantID,
 		CustomerID: customerID,
-		EntryType:  r.URL.Query().Get("entry_type"),
+		EntryType:  string(entryType),
 		Sort:       r.URL.Query().Get("sort"),
 		SortDir:    r.URL.Query().Get("dir"),
 		Limit:      page.Limit,

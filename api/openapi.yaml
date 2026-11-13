@@ -10157,9 +10157,10 @@ paths:
           in: query
           description: |
             Only customers with this status, `active` or `archived`. Any other
-            value matches no customer.
+            value is a 422 with `param: status`.
           schema:
             type: string
+            enum: [active, archived]
         - name: external_id
           in: query
           description: Only the customer with this `external_id` (exact match).
@@ -10236,10 +10237,11 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "422":
           description: |
-            `limit` or `offset` is out of range or not a whole number, the
-            request sends the removed `after` cursor, `sort` or `dir` is not
-            one of its values. `param` names it, and for `sort` and `dir`
-            the message lists the allowed values.
+            `status` is not one of its values, `limit` or `offset` is out of
+            range or not a whole number, the request sends the removed
+            `after` cursor, or `sort` or `dir` is not one of its values.
+            `param` names it, and for `status`, `sort` and `dir` the
+            message lists the allowed values.
           content:
             application/json:
               schema:
@@ -10680,7 +10682,7 @@ paths:
                 error:
                   type: invalid_request_error
                   code: invalid_state
-                  message: billing profile currency EUR conflicts with subscription hc_sub_dauq502q3gpgqfoq5c2g's plan currency USD — invoices would relabel plan prices in EUR without conversion; cancel the subscription or keep the currency
+                  message: billing profile currency EUR conflicts with subscription acme-pro's plan currency USD — invoices would relabel plan prices in EUR without conversion; cancel the subscription or keep the currency
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "422":
           description: |
@@ -12932,7 +12934,9 @@ paths:
             type: string
         - name: status
           in: query
-          description: Only notes in this status.
+          description: |
+            Only notes in this status. Any other value is a 422 with
+            `param: status`.
           schema:
             type: string
             enum: [draft, issued, voided]
@@ -12946,7 +12950,7 @@ paths:
             returns issued, non-test-clock notes whose
             refund failed or has an unknown result, has been pending more
             than 72 hours, or has a refund amount still at `none` after 1
-            hour.
+            hour. Any other value is a 422 with `param: refund_status`.
         - name: sort
           in: query
           description: |
@@ -13034,9 +13038,10 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "422":
           description: |
-            `limit` or `offset` is out of range or not a whole number, the
-            request sends the removed `after` cursor, `sort` or `dir` is not
-            one of its values. `param` names it, and for `sort` and `dir`
+            `status` or `refund_status` is not one of its values, `limit` or
+            `offset` is out of range or not a whole number, the request sends
+            the removed `after` cursor, or `sort` or `dir` is not one of its
+            values. `param` names it, and for the filters, `sort` and `dir`
             the message lists the allowed values.
           content:
             application/json:
@@ -13312,7 +13317,9 @@ paths:
             type: string
         - name: entry_type
           in: query
-          description: Only entries of this type.
+          description: |
+            Only entries of this type. Any other value is a 422 with
+            `param: entry_type`.
           schema:
             type: string
             enum: [grant, usage, expiry, adjustment]
@@ -13400,10 +13407,11 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "422":
           description: |
-            `limit` or `offset` is out of range or not a whole number, the
-            request sends the removed `after` cursor, `sort` or `dir` is not
-            one of its values. `param` names it, and for `sort` and `dir`
-            the message lists the allowed values.
+            `entry_type` is not one of its values, `limit` or `offset` is out
+            of range or not a whole number, the request sends the removed
+            `after` cursor, or `sort` or `dir` is not one of its values.
+            `param` names it, and for `entry_type`, `sort` and `dir` the
+            message lists the allowed values.
           content:
             application/json:
               schema:
@@ -18862,17 +18870,20 @@ paths:
           in: query
           description: |
             Only invoices in this status: `draft`, `finalized`, `paid`,
-            `voided` or `uncollectible`. Another value matches nothing.
+            `voided` or `uncollectible`. Any other value is a 422 with
+            `param: status`.
           schema:
             type: string
+            enum: [draft, finalized, paid, voided, uncollectible]
         - name: payment_status
           in: query
           description: |
             Only invoices with this payment status: `pending`, `processing`,
-            `succeeded`, `failed` or `unknown`. Another value matches
-            nothing.
+            `succeeded`, `failed` or `unknown`. Any other value is a 422
+            with `param: payment_status`.
           schema:
             type: string
+            enum: [pending, processing, succeeded, failed, unknown]
         - name: search
           in: query
           description: |
@@ -19014,11 +19025,12 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "422":
           description: |
-            `limit` or `offset` is out of range or not a whole number, the
-            request sends the removed `after` cursor, `sort` or `dir` is not
-            one of its values, `from` or `to` is neither an RFC 3339 time nor
-            a YYYY-MM-DD date, or `to` is before `from`. `param` names it, and
-            for `sort` and `dir` the message lists the allowed values.
+            `status` or `payment_status` is not one of its values, `limit` or
+            `offset` is out of range or not a whole number, the request sends
+            the removed `after` cursor, `sort` or `dir` is not one of its
+            values, `from` or `to` is neither an RFC 3339 time nor a YYYY-MM-DD
+            date, or `to` is before `from`. `param` names it, and for the
+            filters, `sort` and `dir` the message lists the allowed values.
           content:
             application/json:
               schema:
