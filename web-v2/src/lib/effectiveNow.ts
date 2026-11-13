@@ -1,60 +1,30 @@
-// effectiveNow — the one way to obtain a "now" for relative-time UI.
+// The "now" every relative value on the dashboard is measured from: "2h ago",
+// "due in 3 days", "day 12 of 30", a rolling 30-day window.
 //
-// THE PROBLEM THIS CLOSES
-// Test clocks let an operator advance simulated time; a clock-pinned entity's
-// timestamps (billing-period bounds, due/expiry dates, created_at) are stamped
-// in simulation time and can sit far in the browser's future or past. Any UI
-// that renders a value RELATIVE to "now" — "X ago", "in N days", cycle %, "Day
-// N of M", a rolling 30d window — must read that "now" from the entity's clock,
-// or it lies. The #410/#411/#413 audit fixed ~59 such sites by threading an
-// optional `nowISO`, but every helper still ended in `?? Date.now()`: forget to
-// pass the anchor and the surface silently reverts to wall-clock, wrong only
-// once a clock is advanced. That silent fallback is the drift class.
-//
-// THE MECHANISM
-// `EffectiveNow` is a branded epoch-ms value. A plain number/Date/string is NOT
-// assignable to it — the ONLY ways to make one are the two constructors below,
-// and every relative-time helper REQUIRES one (no `?? Date.now()` fallback
-// anywhere). So "did you handle the test clock?" stops being a discipline you
-// can forget and becomes a compile error: you must call either
-//   • effectiveNow(frozenISO)  — anchor an ENTITY surface on its resolved clock
-//                                time (frozen_time when pinned, wall time when
-//                                not — an unpinned entity genuinely has wall
-//                                time as its effective now), or
-//   • wallClockNow()           — an EXPLICIT, greppable "this surface is
-//                                deliberately real-time" (forensic/egress
-//                                layers — audit log, email/webhook outbox — and
-//                                entities that can never be clock-pinned:
-//                                API keys, webhook endpoints).
-//
-// This is the ADR-086 Phase-4 endpoint: a required-anchor helper. It sits over
-// the existing client-side frozen-time resolution (useClockFrozenMap); if the
-// backend later ships `effective_now` per row (Pillar 1, the dunning-run
-// pattern), effectiveNow() takes that value with no site changes.
-//
-// See useEffectiveNowResolver (hooks/useClockFrozenMap) for the ergonomic
-// list/feed path, and the ESLint no-restricted-syntax rule that bans raw
-// Date.now()/new Date() in display code so nothing bypasses these constructors.
+// A record on a test clock lives at the clock's time, which can be months
+// away from real time, so measuring it against Date.now() draws wrong values.
+// EffectiveNow is a branded number that only the two constructors below make,
+// and every helper in this file requires one. A page therefore cannot measure
+// from "now" without saying which now it means:
+//   - for a record, take it from useNowFor or useNowResolver (hooks/useNow),
+//     which answer with the record's clock time or real time;
+//   - wallClockNow() marks a surface that is real time on purpose: the audit
+//     log, the email and webhook outbox, API keys.
+// The no-restricted-syntax rule in eslint.config.js bans a bare Date.now() or
+// new Date() in display code, so nothing goes around the constructors.
 
 declare const EFFECTIVE_NOW: unique symbol
 
-// EffectiveNow is epoch milliseconds, branded so it can only originate from a
-// constructor below. Arithmetic works (it is a number subtype); construction
-// does not (a bare number won't assign).
+// EffectiveNow is epoch milliseconds. Arithmetic works, because it is a
+// number; a bare number does not assign to it.
 export type EffectiveNow = number & { readonly [EFFECTIVE_NOW]: true }
 
-// effectiveNow builds the anchor for an entity-bound surface from its resolved
-// clock time. Pass the owning test clock's frozen_time (ISO) when the entity is
-// clock-pinned; pass null/undefined when it isn't (→ wall time). Pair with
-// clockNow()/useClockFrozenMap or a single-clock fetch to produce the argument.
-export function effectiveNow(frozenISO?: string | null): EffectiveNow {
-  // eslint-disable-next-line no-restricted-syntax -- this IS the wall-clock seam
-  return (frozenISO ? new Date(frozenISO).getTime() : Date.now()) as EffectiveNow
+// clockTime is a test clock's time: pass the clock's frozen_time.
+export function clockTime(frozenISO: string): EffectiveNow {
+  return new Date(frozenISO).getTime() as EffectiveNow
 }
 
-// wallClockNow is the explicit wall-clock anchor for surfaces that are meant to
-// be real-time regardless of any clock. Using it is a documented decision, not
-// an accidental Date.now() — reviewers can grep for it.
+// wallClockNow is real time, for a surface that does not follow any clock.
 export function wallClockNow(): EffectiveNow {
   // eslint-disable-next-line no-restricted-syntax -- this IS the wall-clock seam
   return Date.now() as EffectiveNow

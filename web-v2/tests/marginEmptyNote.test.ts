@@ -26,8 +26,8 @@ vi.mock('@/hooks/useTenantTimezone', () => ({
   useTenantTimezone: () => 'UTC',
 }))
 
-vi.mock('@/hooks/useClockFrozenMap', () => ({
-  useEffectiveNow: () => Date.parse('2026-10-16T12:00:00Z'),
+vi.mock('@/hooks/useNow', () => ({
+  useNowFor: () => Date.parse('2026-10-16T12:00:00Z'),
 }))
 
 vi.mock('@/hooks/useCustomerUsageWindows', () => ({

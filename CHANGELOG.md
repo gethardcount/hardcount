@@ -54,6 +54,7 @@ original text.
 
 ### Changed
 
+- **A subscription item change whose tax cannot be worked out is refused with `503` `proration_unavailable` and a `Retry-After`,** as cycle and cancel invoices already are. That covers a misconfigured tax provider, and a failed read of the billing profile or tax settings. It used to write a draft proration invoice. Nothing is changed, so send it again ([#1719](https://github.com/gethardcount/hardcount/pull/1719)).
 - **`POST /v1/subscriptions/{id}/cancel` can answer `409` `concurrent_change` when the subscription changes while the cancel prices it.** The cancel prices once more on its own. If the subscription changes again, it is not canceled. A period that had already ended and was billed first stays billed. Send the request again; the same `Idempotency-Key` works ([ADR-139](docs/adr/139-cancel-prices-before-its-transaction.md), [#1685](https://github.com/gethardcount/hardcount/pull/1685)).
 - **Test clocks: one replica at a time runs every advance, and a deploy no longer leaves one waiting.** The holder of the new `testclock_catchup` leader role runs each advancing clock; an advance waits behind any catch-up already running, up to 10 minutes each. `last_advance_summary.advanced_from` is now always the clock's time before the advance ([ADR-140](docs/adr/140-test-clock-catchup-is-a-leader-role.md), [#1689](https://github.com/gethardcount/hardcount/pull/1689)).
 
@@ -88,6 +89,7 @@ original text.
 
 ### Fixed
 
+- **After you advance a test clock, the dashboard shows its new time on every page.** A page opened within 30 seconds of its last read of the clock kept the old time, and counted "Due in", "Trial ends" and a payment retry's "Next step" from it. Every clock change now refreshes the clock everywhere ([#1713](https://github.com/gethardcount/hardcount/pull/1713)).
 - **A test-clock change whose audit row cannot be written is no longer saved.** Before, a create, advance, retry advance or delete was saved with no row in the audit log; now the request answers `500` and nothing changes. An advance's row now always names the time it advanced from ([#1711](https://github.com/gethardcount/hardcount/pull/1711)).
 - **The audit log now records a change to the low-balance alert threshold from one amount to another, such as $50 to $70.** The save's row left the threshold out, and a save that changed only the threshold wrote no row. A change that turned the alert on or off was recorded ([#1707](https://github.com/gethardcount/hardcount/pull/1707)).
 - **A Settings save no longer puts back a change someone else saved, such as the tax rate.** The dashboard sent every field, so a page opened before another person's save restored their old values, and later invoices used the old rate. It now sends only the fields you change, and two saves at once each keep the other's fields ([#1707](https://github.com/gethardcount/hardcount/pull/1707)).

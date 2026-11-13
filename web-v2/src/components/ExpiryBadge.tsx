@@ -7,9 +7,9 @@ interface ExpiryBadgeProps {
   noExpiryLabel?: string
   label?: string
   className?: string
-  // Reference "now" for the days-until calculation — REQUIRED. Build it
-  // with effectiveNow(clockFrozen) so a clock-pinned entity reads "in N
-  // days" relative to simulation time, or wallClockNow() for a genuinely
+  // Reference "now" for the days-until calculation — REQUIRED. Take the
+  // record's from useNowFor or useNowResolver, so a record on a test clock
+  // reads "in N days" from the clock's time, or wallClockNow() for a genuinely
   // real-time surface (e.g. API-key expiry). Engine actions (dunning,
   // finalize) fire on simulation time; the badge has to match or it
   // understates urgency.

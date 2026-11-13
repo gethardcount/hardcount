@@ -103,8 +103,10 @@ func TestProration_FinalizedInvoice_AuditOnce(t *testing.T) {
 // it finalizes.
 func TestProration_DraftInvoice_NoAudit(t *testing.T) {
 	r := newProrationFinalizeRig(t)
-	// The engine wraps a failure after the settings read in PricedTaxError.
-	r.h.SetProrationTaxApplier(&prorationTaxApplierMock{err: &domain.PricedTaxError{Err: errors.New("tax provider unreachable")}})
+	// A provider that does not answer: the engine leaves the tax pending.
+	r.h.SetProrationTaxApplier(&prorationTaxApplierMock{result: ProrationTaxResult{TaxFacts: domain.TaxFacts{
+		TaxStatus: domain.InvoiceTaxPending, TaxErrorCode: "provider_outage", TaxPendingReason: "tax provider unreachable",
+	}}})
 	if rr := r.upgrade(t); rr.Code != http.StatusOK {
 		t.Fatalf("upgrade: %d %s", rr.Code, rr.Body.String())
 	}

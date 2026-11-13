@@ -61,7 +61,7 @@ export function InvoiceAttention({
   // must be computed against the clock's frozen_time, NOT wall-clock.
   // Wall-clock would surface absurd deltas like "833d ago" on a
   // newly-finalized invoice whose sub is frozen at 2024-02-01 while
-  // wall-clock sits in 2026. Build the anchor with effectiveNow(...) —
+  // wall-clock sits in 2026. Take the anchor from useNowResolver()(invoice) —
   // the type makes passing it non-optional so this can't regress.
   now: EffectiveNow
   // Buttons the page draws after the server's own, for facts the notice
