@@ -44,7 +44,7 @@ func closeBaseFeeLines(sub domain.Subscription, segsByItem map[string][]baseSegm
 	emitSeg := func(seg baseSegment, plan domain.Plan) error {
 		var one []domain.InvoiceLineItem
 		var ignored int64
-		if err := emitBaseSegmentLine(seg, plan, periodStart, periodDays, invoiceCurrency, billingLoc, sub.BillingTime, &one, &ignored); err != nil {
+		if err := emitBaseSegmentLine(seg, plan, periodStart, periodEnd, periodDays, invoiceCurrency, billingLoc, sub.BillingTime, sub.BillingAnchorDay, &one, &ignored); err != nil {
 			return err
 		}
 		for _, li := range one {
