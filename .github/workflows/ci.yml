@@ -680,7 +680,7 @@ jobs:
       - name: Vulnerability check
         run: |
           echo "::remove-matcher owner=go::"
-          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4 && govulncheck ./...
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0 && govulncheck ./...
 
   # codegen-drift fails the build when api/openapi.yaml has been edited
   # without regenerating the TS artifacts that derive from it
