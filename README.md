@@ -9,7 +9,7 @@
 
 <p align="center">
   <a href="https://github.com/gethardcount/hardcount/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/gethardcount/hardcount/actions/workflows/ci.yml/badge.svg"></a>
-  <a href="https://go.dev"><img alt="Go" src="https://img.shields.io/badge/Go-1.26-00ADD8?logo=go"></a>
+  <a href="https://go.dev"><img alt="Go" src="https://img.shields.io/badge/Go-1.27-00ADD8?logo=go"></a>
   <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/License-MIT-green"></a>
   <a href="CHANGELOG.md"><img alt="Release" src="https://img.shields.io/github/v/tag/gethardcount/hardcount?label=release"></a>
 </p>

@@ -2112,20 +2112,6 @@ func TestRunCycle_WithPriceOverride(t *testing.T) {
 	}
 }
 
-func TestAdvanceBillingPeriod(t *testing.T) {
-	from := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
-
-	monthly := advanceBillingPeriod(from, domain.BillingMonthly, time.UTC, 0)
-	if monthly.Month() != time.April || monthly.Day() != 1 {
-		t.Errorf("monthly: got %v, want 2026-04-01", monthly)
-	}
-
-	yearly := advanceBillingPeriod(from, domain.BillingYearly, time.UTC, 0)
-	if yearly.Year() != 2027 || yearly.Month() != time.March {
-		t.Errorf("yearly: got %v, want 2027-03-01", yearly)
-	}
-}
-
 // TestRunCycle_UnitAmountRoundsBankers is the COR-5 regression: the rating
 // path previously used `amount / quantity` (truncating int division) to
 // derive the per-unit display amount. For graduated/tiered rules the total

@@ -149,7 +149,7 @@ type CreditNoteIssuer interface {
 }
 
 // TenantLocator resolves the tenant's billing timezone so the proration
-// denominator (fullBillingCycleDays) advances the cycle in the same zone the
+// denominator (domain.CyclePeriod.CycleDays) advances the cycle in the same zone the
 // engine computes period boundaries in (ADR-058). *billing.Engine satisfies it
 // (TenantLocation). Optional: when unwired (narrow tests) the day-math falls
 // back to UTC — correct for UTC tenants; the only deployments that diverge are
@@ -223,7 +223,7 @@ func (h *Handler) SetResolver(r clock.Resolver) { h.resolver = r }
 
 // bindForSub returns ctx with effective-now bound from the sub pin
 // when the resolver is wired. Used at proration handler entries so
-// remainingPeriodRatio / changeAt stamps land in simulated time on
+// daysLeftInPeriod / changeAt stamps land in simulated time on
 // clock-pinned subs. Falls through unchanged when resolver isn't set
 // or the sub isn't clock-pinned (resolver returns wall-clock).
 func (h *Handler) bindForSub(ctx context.Context, tenantID, subID string) context.Context {
@@ -291,7 +291,7 @@ func (h *Handler) SetProrationTaxApplier(a ProrationTaxApplier) {
 
 // SetTenantLocator wires the tenant-billing-timezone resolver (the billing
 // engine) so proration day-math anchors its denominator in the tenant zone
-// (ADR-058). When unset, fullBillingCycleDays falls back to UTC.
+// (ADR-058). When unset, CycleDays counts in UTC.
 func (h *Handler) SetTenantLocator(l TenantLocator) { h.tzLocator = l }
 
 // SetNetTermsReader wires the tenant Net-terms resolver (the billing engine)
@@ -980,7 +980,7 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 
 	// Bind effective-now from the sub pin so proration math runs in
 	// simulated time on clock-pinned subs (ADR-030). Without binding,
-	// `remainingPeriodRatio(sub, time.Now())` would compute the
+	// `daysLeftInPeriod(sub, time.Now())` would compute the
 	// wrong ratio for a clock-pinned sub whose current_period is in
 	// the simulated future. PR-12.
 	ctx := h.bindForSub(r.Context(), tenantID, id)
@@ -1010,7 +1010,7 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 		}
 		subBefore = sub
 		var derr error
-		prorationRemainingDays, _, derr = h.addProrationDays(ctx, tenantID, sub, clock.Now(ctx))
+		prorationRemainingDays, derr = h.addProrationDays(ctx, tenantID, sub, clock.Now(ctx))
 		if derr != nil {
 			slog.ErrorContext(ctx, "add item refused: tenant timezone unreadable for proration",
 				"subscription_id", id, "error", derr)
@@ -1114,7 +1114,7 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		subBefore = sub
-		prorationRemainingDays, _ = remainingPeriodRatio(sub, clock.Now(ctx))
+		prorationRemainingDays = daysLeftInPeriod(sub, clock.Now(ctx))
 	}
 
 	// A change that prorates writes the item change and its proration on one
@@ -1309,7 +1309,7 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 		}
 		subBefore = sub
 		if sub.Status == domain.SubscriptionActive {
-			prorationRemainingDays, _ = remainingPeriodRatio(sub, clock.Now(ctx))
+			prorationRemainingDays = daysLeftInPeriod(sub, clock.Now(ctx))
 		}
 	}
 
@@ -1378,7 +1378,6 @@ type itemProrationSpec struct {
 	changeType    domain.ItemChangeType
 	changeAt      time.Time
 	remainingDays int64 // ADR-042: integer day-ratio for proration math
-	totalDays     int64
 	itemID        string
 	oldPlanID     string
 	oldQuantity   int64
@@ -1418,7 +1417,7 @@ func (h *Handler) atomicAddItemWithProration(
 		}
 		item = result.Item
 		locked := result.pricedFrom.sub
-		remainingDays, totalDays, err := h.addProrationDays(ctx, tenantID, locked, result.EffectiveAt)
+		remainingDays, err := h.addProrationDays(ctx, tenantID, locked, result.EffectiveAt)
 		if err != nil {
 			return fmt.Errorf("proration days in atomic addItem tx: %w", err)
 		}
@@ -1431,7 +1430,6 @@ func (h *Handler) atomicAddItemWithProration(
 			changeType:    domain.ItemChangeTypeAdd,
 			changeAt:      changeAt,
 			remainingDays: remainingDays,
-			totalDays:     totalDays,
 			itemID:        item.ID,
 			oldPlanID:     "",
 			oldQuantity:   0,
@@ -1484,9 +1482,9 @@ func (h *Handler) atomicAddItemWithProration(
 	return item, detail, nil
 }
 
-// addProrationDays is the share of sub's current period an item added at
-// `at` pays for in advance: the days left and the period's days, or zero
-// when sub is not active or the days left round to zero.
+// addProrationDays is the days of sub's current period an item added at `at`
+// pays for in advance, or zero when sub is not active or the days left round
+// to zero. The proration divides them by the period's cycle.
 //
 // Day-grade clamp (ADR-012 amendment 2026-07-26): an item added ON the
 // period-start calendar day (tenant TZ) owes the whole period — the add day
@@ -1495,21 +1493,21 @@ func (h *Handler) atomicAddItemWithProration(
 // in_advance while its in_arrears twin bills the full period at close. Adds
 // only: plan/quantity/remove changes stay instant-precise per ADR-012's
 // Consequences, so their handlers don't clamp.
-func (h *Handler) addProrationDays(ctx context.Context, tenantID string, sub domain.Subscription, at time.Time) (remainingDays, totalDays int64, err error) {
+func (h *Handler) addProrationDays(ctx context.Context, tenantID string, sub domain.Subscription, at time.Time) (int64, error) {
 	if sub.Status != domain.SubscriptionActive {
-		return 0, 0, nil
+		return 0, nil
 	}
-	remainingDays, totalDays = remainingPeriodRatio(sub, at)
-	if remainingDays > 0 && sub.CurrentBillingPeriodStart != nil {
+	days := daysLeftInPeriod(sub, at)
+	if days > 0 {
 		loc, err := h.tenantLoc(ctx, tenantID)
 		if err != nil {
-			return 0, 0, err
+			return 0, err
 		}
 		if domain.SameCalendarDayIn(at, *sub.CurrentBillingPeriodStart, loc) {
-			remainingDays = totalDays
+			days = daysLeftInPeriod(sub, *sub.CurrentBillingPeriodStart)
 		}
 	}
-	return remainingDays, totalDays, nil
+	return days, nil
 }
 
 // atomicUpdateItemWithProration mirrors atomicAddItemWithProration for
@@ -1548,7 +1546,7 @@ func (h *Handler) atomicUpdateItemWithProration(
 		}
 		base := result.pricedFrom
 
-		remainingDays, totalDays := remainingPeriodRatio(base.sub, result.EffectiveAt)
+		remainingDays := daysLeftInPeriod(base.sub, result.EffectiveAt)
 		var spec itemProrationSpec
 		if input.NewPlanID != "" && input.Immediate {
 			var changeAt time.Time
@@ -1561,7 +1559,6 @@ func (h *Handler) atomicUpdateItemWithProration(
 				changeType:    domain.ItemChangeTypePlan,
 				changeAt:      changeAt,
 				remainingDays: remainingDays,
-				totalDays:     totalDays,
 				itemID:        result.Item.ID,
 				oldPlanID:     base.item.PlanID,
 				oldQuantity:   result.Item.Quantity,
@@ -1577,7 +1574,6 @@ func (h *Handler) atomicUpdateItemWithProration(
 				changeType:    domain.ItemChangeTypeQuantity,
 				changeAt:      changeAt,
 				remainingDays: remainingDays,
-				totalDays:     totalDays,
 				itemID:        result.Item.ID,
 				oldPlanID:     base.item.PlanID,
 				oldQuantity:   base.item.Quantity,
@@ -1663,15 +1659,14 @@ func (h *Handler) atomicRemoveItemWithProration(
 		removed = base.item
 
 		// Only an active subscription's unused prebill is credited.
-		var remainingDays, totalDays int64
+		var remainingDays int64
 		if base.sub.Status == domain.SubscriptionActive {
-			remainingDays, totalDays = remainingPeriodRatio(base.sub, result.EffectiveAt)
+			remainingDays = daysLeftInPeriod(base.sub, result.EffectiveAt)
 		}
 		spec := itemProrationSpec{
 			changeType:    domain.ItemChangeTypeRemove,
 			changeAt:      result.EffectiveAt,
 			remainingDays: remainingDays,
-			totalDays:     totalDays,
 			itemID:        itemID,
 			oldPlanID:     base.item.PlanID,
 			oldQuantity:   base.item.Quantity,
@@ -1886,13 +1881,10 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 	// net charge (upgrade / add / qty-increase) reads the base invoice, whose
 	// unpaid state blocks it (ADR-050).
 	//
-	// Denominator is the FULL billing cycle, NOT spec.totalDays (the current
-	// period). On a stub/partial period (mid-cycle signup) spec.totalDays is
-	// the short stub length, and dividing by it over-charges upgrades /
-	// over-credits downgrades — the customer paid old × stub/fullCycle for the
-	// period, so the delta for the remaining portion is (new−old) ×
-	// remaining/fullCycle. This matches the engine's day-1 stub base fee and
-	// cross-interval swap refund (both divide by fullCycleDays).
+	// The denominator is the period's cycle (domain.CyclePeriod.CycleDays),
+	// as the engine's base lines and refunds use: on a stub the customer paid
+	// old × stub/cycle, so the delta for the remaining days is (new−old) ×
+	// remaining/cycle.
 	oldAmount, ok := money.Mul(oldPlan.BaseAmountCents, spec.oldQuantity)
 	if !ok {
 		return nil, fmt.Errorf("proration: base fee of plan %s × quantity %d: %w", oldPlan.ID, spec.oldQuantity, domain.ErrAmountOverflow)
@@ -1905,13 +1897,16 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 	if err != nil {
 		return nil, err
 	}
-	denomDays := spec.totalDays
-	if sub.CurrentBillingPeriodStart != nil {
-		if fc := fullBillingCycleDays(*sub.CurrentBillingPeriodStart, effectivePlan.BillingInterval, billingLoc, sub.BillingAnchorDay); fc > 0 {
-			denomDays = fc
-		}
+	// Remaining days are above 0 only when the period's bounds are set
+	// (daysLeftInPeriod), so the bounds below are not nil.
+	if spec.remainingDays <= 0 {
+		return nil, nil
 	}
-	remainingDays := min(spec.remainingDays, denomDays)
+	denomDays := int64(domain.CyclePeriod{
+		Start: *sub.CurrentBillingPeriodStart, End: *sub.CurrentBillingPeriodEnd, BillingTime: sub.BillingTime,
+		Interval: effectivePlan.BillingInterval, Loc: billingLoc, StoredAnchor: sub.BillingAnchorDay,
+	}.CycleDays())
+	remainingDays := spec.remainingDays
 	proratedCents, err := prorationCents(oldAmount, newAmount, remainingDays, denomDays)
 	if err != nil {
 		return nil, err
@@ -1923,11 +1918,8 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 
 	// Display-only factor for the ProrationDetail payload (operator-visible
 	// event metadata). Source of truth for the cents math is the integer
-	// remainingDays / fullCycle denominator above.
-	var displayFactor float64
-	if denomDays > 0 {
-		displayFactor = float64(remainingDays) / float64(denomDays)
-	}
+	// remainingDays / denomDays above; the cycle is never 0.
+	displayFactor := float64(remainingDays) / float64(denomDays)
 	detail := &ProrationDetail{
 		OldPlanID:       spec.oldPlanID,
 		NewPlanID:       spec.newPlanID,
@@ -2481,30 +2473,18 @@ func clawbackReason(ct domain.ItemChangeType) string {
 	}
 }
 
-// remainingPeriodRatio returns the integer day counts that drive proration
-// math. Per ADR-042 (2026-05-31) Hardcount switched from float64 prorationFactor
-// to integer day-ratio (`amount * remaining / total`) matching engine.go's
-// segment-aware billing pattern and Stripe / Lago / Orb proration semantics.
-// Pre-fix: prorationFactor was float64 hours/24 — introduced ULP error on
-// large amounts and was non-deterministic across architectures.
-//
-// Returns (0, 0) when proration doesn't apply (period boundaries missing,
-// already past end of period, or period of zero length). When `remaining`
-// exceeds `total` (clock-skew edge case), both clamp to `total` for full-
-// period proration (factor 1).
-func remainingPeriodRatio(sub domain.Subscription, now time.Time) (remainingDays, totalDays int64) {
+// daysLeftInPeriod is the whole days from now to the end of the subscription's
+// current period, the numerator of an in-advance proration (ADR-042). It is 0
+// when the period is not set or has ended. The days never exceed the period's
+// own length, because a change is made inside its period: the service refuses
+// an item change on a subscription that is not active (checkItemChange, and
+// again under the lock), and only a trialing one has a period that starts in
+// the future.
+func daysLeftInPeriod(sub domain.Subscription, now time.Time) int64 {
 	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
-		return 0, 0
+		return 0
 	}
-	total := int64(math.Round(sub.CurrentBillingPeriodEnd.Sub(*sub.CurrentBillingPeriodStart).Hours() / 24))
-	remaining := int64(math.Round(sub.CurrentBillingPeriodEnd.Sub(now).Hours() / 24))
-	if total <= 0 || remaining <= 0 {
-		return 0, 0
-	}
-	if remaining > total {
-		return total, total
-	}
-	return remaining, total
+	return max(int64(math.Round(sub.CurrentBillingPeriodEnd.Sub(now).Hours()/24)), 0)
 }
 
 func planIDsFromItems(items []domain.SubscriptionItem) []string {
