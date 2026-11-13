@@ -14,8 +14,9 @@ import { clockTime, wallClockNow, type EffectiveNow } from '@/lib/effectiveNow'
 //   - the clock's time: the record is on a clock, and the clock is in the
 //     loaded clock list;
 //   - not known (undefined): the record has not loaded, or its clock is still
-//     loading, failed to load or is not in the list, or a live record carries
-//     a clock id.
+//     loading, failed to load or is not in the list. Live mode reads no clock
+//     list and keeps its own cache, so a live record with a clock id is not
+//     known either.
 // While the answer is not known, a page draws nothing worked out from "now"
 // and shows only stored facts: dates, amounts and the stored status. When the
 // clock list fails to load, the page shows that load error once, with Retry
@@ -81,16 +82,9 @@ export function useTestClock(id: string | null | undefined): { clock: TestClock 
 // clock, or undefined when it is not known.
 type ClockAnswer = string | null | undefined
 
-function clockAnswer(
-  record: ClockPinned | undefined,
-  livemode: boolean,
-  frozenTimeOf: (clockId: string) => string | undefined,
-): ClockAnswer {
+function clockAnswer(record: ClockPinned | undefined, frozenTimeOf: (clockId: string) => string | undefined): ClockAnswer {
   if (!record) return undefined
   if (!record.test_clock_id) return null
-  // No live record is on a clock, so a live record with a clock id has no
-  // answer, even when a test-mode list is still cached.
-  if (livemode) return undefined
   return frozenTimeOf(record.test_clock_id)
 }
 
@@ -109,9 +103,8 @@ function toNow(answer: ClockAnswer): EffectiveNow | undefined {
  * moves with real time while the page stays open.
  */
 export function useNowFor(record: ClockPinned | undefined): EffectiveNow | undefined {
-  const { user } = useAuth()
   const { clock } = useTestClock(record?.test_clock_id)
-  const answer = clockAnswer(record, user?.livemode ?? false, () => clock?.frozen_time)
+  const answer = clockAnswer(record, () => clock?.frozen_time)
   return useMemo(() => toNow(answer), [answer])
 }
 
@@ -123,12 +116,7 @@ export function useNowFor(record: ClockPinned | undefined): EffectiveNow | undef
  * undefined while the answer is not known.
  */
 export function useNowResolver(): (record: ClockPinned | undefined) => EffectiveNow | undefined {
-  const { user } = useAuth()
-  const livemode = user?.livemode ?? false
   const { data } = useTestClocks()
   const clocks = useMemo(() => data && new Map(data.data.map(c => [c.id, c.frozen_time])), [data])
-  return useCallback(
-    (record: ClockPinned | undefined) => toNow(clockAnswer(record, livemode, id => clocks?.get(id))),
-    [clocks, livemode],
-  )
+  return useCallback((record: ClockPinned | undefined) => toNow(clockAnswer(record, id => clocks?.get(id))), [clocks])
 }

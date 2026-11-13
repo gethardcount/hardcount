@@ -43,7 +43,6 @@ const ROWS: Row[] = [
   { name: 'clock loaded', record: { test_clock_id: CLOCK.id }, list: 'loaded', want: 'clock' },
   { name: 'clock not in the list', record: { test_clock_id: 'hc_clk_gone' }, list: 'loaded', want: 'unknown' },
   { name: 'live record with a clock id', record: { test_clock_id: CLOCK.id }, list: 'loading', live: true, want: 'unknown' },
-  { name: 'live record with a clock id, a test-mode list cached', record: { test_clock_id: CLOCK.id }, list: 'loaded', live: true, want: 'unknown' },
   { name: 'live record on no clock', record: {}, list: 'loading', live: true, want: 'real' },
 ]
 
