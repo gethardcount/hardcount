@@ -148,10 +148,6 @@ type Request struct {
 	// rounding can be reconciled server-side.
 	LineItems []RequestLine
 
-	// DiscountCents is an invoice-level discount that providers distribute
-	// proportionally across lines before taxing. Zero when no discount.
-	DiscountCents int64
-
 	// DefaultTaxCode is the tenant's fallback product tax code used when a
 	// line's TaxCode is empty (e.g. "txcd_10103001" for SaaS business).
 	DefaultTaxCode string
