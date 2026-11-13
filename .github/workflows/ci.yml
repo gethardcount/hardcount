@@ -549,12 +549,13 @@ jobs:
     timeout-minutes: 15
     env:
       # Pinned, so a golangci-lint release cannot change CI results without a
-      # change in this repo: a newer release flags code this one passes (see
-      # #834). Bump it deliberately, with the fix for whatever the new version
-      # flags. The SHA-256 is the linux-amd64 archive's, from
-      # golangci-lint-<version>-checksums.txt in the same release.
-      GOLANGCI_LINT_VERSION: 2.12.2
-      GOLANGCI_LINT_SHA256: 8df580d2670fed8fa984aac0507099af8df275e665215f5c7a2ae3943893a553
+      # change in this repo. A newer release (2.15.0) flags code this one
+      # passes. The SA1019 finding on stripe-go's Params.Metadata is excluded
+      # in .golangci.yml until #834 lands. The SHA-256 is the linux-amd64
+      # archive's, from golangci-lint-<version>-checksums.txt in the same
+      # release.
+      GOLANGCI_LINT_VERSION: 2.14.0
+      GOLANGCI_LINT_SHA256: ab90aeb7b066f92a33415b638a50fe5344bbb75a0d32ad30cc248d88f81032ab
     steps:
       - uses: actions/checkout@v7
 
@@ -680,7 +681,7 @@ jobs:
       - name: Vulnerability check
         run: |
           echo "::remove-matcher owner=go::"
-          go install golang.org/x/vuln/cmd/govulncheck@v1.1.4 && govulncheck ./...
+          go install golang.org/x/vuln/cmd/govulncheck@v1.8.0 && govulncheck ./...
 
   # codegen-drift fails the build when api/openapi.yaml has been edited
   # without regenerating the TS artifacts that derive from it

@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -81,6 +82,85 @@ func TestDecodeStrict(t *testing.T) {
 			}
 			if body.Message != tc.wantMsg {
 				t.Errorf("message: got %q, want %q", body.Message, tc.wantMsg)
+			}
+		})
+	}
+}
+
+type edgeBody struct {
+	Code  string       `json:"code"`
+	Days  int          `json:"days"`
+	Items []strictItem `json:"items"`
+	Any   any          `json:"any"`
+}
+
+// TestDecodeStrict_EdgesOfJSON pins the answer an API caller gets where a
+// JSON decoder makes its own choices: duplicate keys, invalid UTF-8, which
+// of two faults it reports, keys that differ from a field's name only by
+// case folding or an underscore, keys a JSON Pointer must escape, and
+// numbers that do not fit. A refusal is its status, error code and param. An
+// accepted body is the value it decodes to.
+func TestDecodeStrict_EdgesOfJSON(t *testing.T) {
+	const bad, unknown = "invalid_request", "validation_error"
+	cases := []struct {
+		name       string
+		body       string
+		wantStatus int // 0: accepted
+		wantCode   string
+		wantParam  string
+		want       edgeBody
+	}{
+		{name: "duplicate key: the last value wins", body: `{"code":"a","code":"b"}`, want: edgeBody{Code: "b"}},
+		{name: "duplicate nested key: the last value wins", body: `{"items":[{"plan_id":"p","plan_id":"q"}]}`, want: edgeBody{Code: "keep", Items: []strictItem{{PlanID: "q"}}}},
+		{name: "duplicate key inside an any value", body: `{"any":{"x":1,"x":2}}`, want: edgeBody{Code: "keep", Any: map[string]any{"x": 2.0}}},
+		{name: "invalid UTF-8 in a value becomes U+FFFD", body: "{\"code\":\"a\xffb\"}", want: edgeBody{Code: "a�b"}},
+		{name: "a lone surrogate escape becomes U+FFFD", body: `{"code":"\ud800"}`, want: edgeBody{Code: "�"}},
+		{name: "invalid UTF-8 in a key", body: "{\"co\xffde\":\"a\"}", wantStatus: http.StatusUnprocessableEntity, wantCode: unknown, wantParam: "co�de"},
+		{name: "null leaves the field as it was", body: `{"code":null}`, want: edgeBody{Code: "keep"}},
+
+		{name: "a wrong type before an unknown key", body: `{"code":7,"bogus":1}`, wantStatus: http.StatusBadRequest, wantCode: bad},
+		{name: "an unknown key before a wrong type", body: `{"bogus":1,"code":7}`, wantStatus: http.StatusUnprocessableEntity, wantCode: unknown, wantParam: "bogus"},
+		{name: "a wrong type in a nested object", body: `{"items":[{"plan_id":7}]}`, wantStatus: http.StatusBadRequest, wantCode: bad},
+
+		{name: "a key that folds to a field name", body: `{"itemſ":[]}`, wantStatus: http.StatusUnprocessableEntity, wantCode: unknown, wantParam: "itemſ"},
+		{name: "a key without its underscore", body: `{"items":[{"planid":"p"}]}`, wantStatus: http.StatusUnprocessableEntity, wantCode: unknown, wantParam: "planid"},
+		{name: "a key with a dash for its underscore", body: `{"items":[{"plan-id":"p"}]}`, wantStatus: http.StatusUnprocessableEntity, wantCode: unknown, wantParam: "plan-id"},
+		{name: "an unknown key with a slash", body: `{"a/b":1}`, wantStatus: http.StatusUnprocessableEntity, wantCode: unknown, wantParam: "a/b"},
+		{name: "an unknown nested key with a tilde", body: `{"items":[{"a~b":1}]}`, wantStatus: http.StatusUnprocessableEntity, wantCode: unknown, wantParam: "a~b"},
+		{name: "an unknown key with an escaped quote", body: `{"a\"b":1}`, wantStatus: http.StatusUnprocessableEntity, wantCode: unknown, wantParam: `a"b`},
+		{name: "an empty key", body: `{"":1}`, wantStatus: http.StatusBadRequest, wantCode: bad},
+
+		{name: "a whole number too large", body: `{"days":99999999999999999999}`, wantStatus: http.StatusBadRequest, wantCode: bad},
+		{name: "a fraction for a whole number", body: `{"days":3.0}`, wantStatus: http.StatusBadRequest, wantCode: bad},
+		{name: "an exponent for a whole number", body: `{"days":1e2}`, wantStatus: http.StatusBadRequest, wantCode: bad},
+		{name: "a number too large for any", body: `{"any":1e400}`, wantStatus: http.StatusBadRequest, wantCode: bad},
+		{name: "a leading zero", body: `{"days":01}`, wantStatus: http.StatusBadRequest, wantCode: bad},
+
+		{name: "a byte order mark", body: "\xEF\xBB\xBF{\"code\":\"a\"}", wantStatus: http.StatusBadRequest, wantCode: bad},
+		{name: "a control character in a string", body: "{\"code\":\"a\x01b\"}", wantStatus: http.StatusBadRequest, wantCode: bad},
+		{name: "a trailing comma", body: `{"code":"a",}`, wantStatus: http.StatusBadRequest, wantCode: bad},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest("POST", "/", strings.NewReader(tc.body))
+			v := edgeBody{Code: "keep"}
+			ok := DecodeStrict(rec, req, &v)
+			if tc.wantStatus == 0 {
+				if !ok {
+					t.Fatalf("refused with %d %s, want accepted", rec.Code, rec.Body.String())
+				}
+				if !reflect.DeepEqual(v, tc.want) {
+					t.Errorf("decoded %+v, want %+v", v, tc.want)
+				}
+				return
+			}
+			if ok {
+				t.Fatalf("accepted as %+v, want %d", v, tc.wantStatus)
+			}
+			body := decodeError(t, rec)
+			if rec.Code != tc.wantStatus || body.Code != tc.wantCode || body.Param != tc.wantParam {
+				t.Errorf("answer %d code %q param %q, want %d code %q param %q", rec.Code, body.Code, body.Param, tc.wantStatus, tc.wantCode, tc.wantParam)
 			}
 		})
 	}

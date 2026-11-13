@@ -73,13 +73,13 @@ A [test-clock](../glossary.md#testing-with-simulated-time) advance panicked and 
 
 A credit read one invoice for a period that had two.
 
-11. **Does an effect that covers a set read the whole set?** No `LIMIT 1`, no single-row lookup, and no status filter that drops a paid, void or uncollectible sibling. Several invoices can bill one period, its funding invoices: read them with `FindFundingInvoicesForPeriod`, which lint enforces in two packages ([code standard](code-standard.md#go-rules-a-tool-checks)).
+11. **Does an effect that covers a set read the whole set?** No `LIMIT 1`, no single-row lookup, and no status filter that drops a paid, void or uncollectible sibling. Several invoices can bill one period, its funding invoices: read them with `FindFundingInvoicesForPeriod`, which lint enforces in two packages ([code standard](code-standard.md#go-rules-a-tool-checks)). A question about every row ("does any subscription bill in another currency?") is one query with no page limit.
 
 ### G. Never ends
 
 An invoice with no card was retried for auto-charge forever.
 
-12. **Can every record reach an end state?** Every state has a writer that moves it on, also when the final action fails. A dunning retry with no definite answer returns `dunning.ErrTransientSkip` and uses up no attempt.
+12. **Can every record reach an end state?** Every state has a writer that moves it on, also when the final action fails. A dunning retry with no definite answer returns `dunning.ErrTransientSkip` and uses up no attempt. A job that works a list reads it to the end with a cursor on the columns it orders by, or stamps each row it looked at. Then rows it could not finish never hold back the rows behind them.
 
 ### H. Tenant leak
 
@@ -107,6 +107,8 @@ A race or a crash between two writes always gets an automated test. A money rule
 1. **Collision (items 1, 4).** Run the change twice, together and in turn. Assert one effect, the error code (`invoice_proration_source_taken`) and an unchanged second run. Copy: `internal/invoice/postgres_proration_dedup_integration_test.go`, `internal/billing/engine_idempotency_integration_test.go`.
 2. **Real Postgres (items 3, 13).** Make a transaction's second write fail and assert the first is gone. For tenant isolation, write as two tenants and read as one with no `WHERE`: it must see only its own rows. Copy: `internal/platform/postgres/rls_isolation_test.go`.
 3. **A fake that races (items 5, 7).** A concurrent-resolver fake commits the competing change at the external call, or between the read and the write. Assert by count that the winner fired once and the loser changed nothing. Copy: `resolvingCanceler` and `resolvingRetrier` in `internal/dunning/resolve_on_settle_test.go`.
-4. **Break the guard once.** Remove the `WHERE` condition, the rows-changed check or the re-read, and watch the test fail.
+4. **Break it once.** Remove the `WHERE` condition, the rows-changed check, the re-read or the line the fix added, and watch a test fail. A line no test misses is not proven.
 5. **One advance, many due times (item 16).** Advance a test clock across two or more due times, or two days past one. Assert each record carries its own. The final state alone proves nothing. Copy: `internal/dunning/service_test.go:TestProcessDueRunsForClock_RecoveryStampsContractedInstant`, `internal/api/activity_parity_dates_integration_test.go`.
 6. **A race for each pair of writers (item 8).** Two writers that lock the same rows get one real-Postgres test that runs them together. Copy: `internal/payment/settle_once_concurrent_integration_test.go:TestSettleSucceeded_ConcurrentSources_RecordsOnce`, `internal/creditnote/number_lock_order_integration_test.go`.
+7. **Compare with today (a change to an amount or a date).** Run the old and the new calculation over the shapes real writers produce. Every difference falls in a class you name, each with one case worked by hand and its expected value. No case may get worse than today: where the new rule cannot be right, keep today's answer and name the case.
+8. **Walk a paged list (item 12).** Make the key order differ from insert order and from update order across a page boundary, and leave rows that stay listed. Assert every row comes back once and the walk ends.

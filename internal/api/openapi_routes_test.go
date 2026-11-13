@@ -246,12 +246,10 @@ func specIdempotencyHeader(t *testing.T) map[string]bool {
 }
 
 // isIdempotencyMiddleware reports whether m is the closure mw.Idempotency
-// returns. Comparing function pointers does not work: the compiler inlines
-// mw.Idempotency into NewServer, so the router's closure is a different
-// function from one built here. The closure's name still carries
-// ".Idempotency." either way ("middleware.Idempotency.func1" when not inlined,
-// "NewServer.func15.Idempotency.4" when inlined). If a rename breaks the match,
-// the test finds 0 routes and fails.
+// returns, by its name: "middleware.Idempotency.1", whether or not the
+// compiler inlined mw.Idempotency into NewServer. A function pointer is no
+// test: an inlined copy can be a different function from one built here. If
+// a rename breaks the match, the test finds 0 routes and fails.
 func isIdempotencyMiddleware(m func(http.Handler) http.Handler) bool {
 	fn := runtime.FuncForPC(reflect.ValueOf(m).Pointer())
 	return fn != nil && strings.Contains(fn.Name(), ".Idempotency.")
