@@ -382,7 +382,12 @@ func (s *PostgresStore) ListHeldReliefTx(ctx context.Context, tx *sql.Tx, tenant
 // simulated rows (is_simulated=false above). Scoped to the clock's customer set
 // (test_clock_id = $2), with the same in-flight-source defer (ADR-059) as the
 // wall-clock scan.
-func (s *PostgresStore) ListPendingClawbackDraftsForClock(ctx context.Context, tenantID, clockID string, batch int) ([]domain.CreditNote, error) {
+//
+// It returns the page after (afterCreatedAt, afterID), in that order. Both are
+// fixed at insert: a note the issue leaves held stays in the list, and an
+// attempt may move its updated_at, so a cursor on updated_at would meet the
+// note again.
+func (s *PostgresStore) ListPendingClawbackDraftsForClock(ctx context.Context, tenantID, clockID string, afterCreatedAt time.Time, afterID string, batch int) ([]domain.CreditNote, error) {
 	if batch <= 0 {
 		batch = 50
 	}
@@ -405,8 +410,9 @@ func (s *PostgresStore) ListPendingClawbackDraftsForClock(ctx context.Context, t
 		      AND i.payment_status IN ('processing', 'unknown')
 		      AND i.status <> 'voided'
 		  )
-		ORDER BY updated_at ASC
-		LIMIT $3`, tenantID, clockID, batch)
+		  AND (created_at, id) > ($3, $4)
+		ORDER BY created_at, id
+		LIMIT $5`, tenantID, clockID, afterCreatedAt, afterID, batch)
 	if err != nil {
 		return nil, err
 	}
