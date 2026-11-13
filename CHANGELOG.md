@@ -87,6 +87,7 @@ original text.
 
 ### Fixed
 
+- **After you advance a test clock, the dashboard shows its new time on every page.** A page opened within 30 seconds of its last read of the clock kept the old time, and counted "Due in", "Trial ends" and a payment retry's "Next step" from it. Every clock change now refreshes the clock everywhere ([#1713](https://github.com/gethardcount/hardcount/pull/1713)).
 - **A test-clock change whose audit row cannot be written is no longer saved.** Before, a create, advance, retry advance or delete was saved with no row in the audit log; now the request answers `500` and nothing changes. An advance's row now always names the time it advanced from ([#1711](https://github.com/gethardcount/hardcount/pull/1711)).
 - **The audit log now records a change to the low-balance alert threshold from one amount to another, such as $50 to $70.** The save's row left the threshold out, and a save that changed only the threshold wrote no row. A change that turned the alert on or off was recorded ([#1707](https://github.com/gethardcount/hardcount/pull/1707)).
 - **A Settings save no longer puts back a change someone else saved, such as the tax rate.** The dashboard sent every field, so a page opened before another person's save restored their old values, and later invoices used the old rate. It now sends only the fields you change, and two saves at once each keep the other's fields ([#1707](https://github.com/gethardcount/hardcount/pull/1707)).

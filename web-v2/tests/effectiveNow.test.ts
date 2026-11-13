@@ -10,7 +10,7 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
-  effectiveNow,
+  clockTime,
   wallClockNow,
   timeAgo,
   daysUntil,
@@ -22,7 +22,7 @@ import {
 } from '../src/lib/effectiveNow.ts'
 
 test('timeAgo anchors on the frozen instant, not wall-clock', () => {
-  const now = effectiveNow('2027-08-08T00:00:00.000Z')
+  const now = clockTime('2027-08-08T00:00:00.000Z')
   // Three days before the anchor reads "3d ago" no matter what the real clock
   // says. A leaked Date.now() would make this a multi-year delta today.
   assert.equal(timeAgo('2027-08-05T00:00:00.000Z', now), '3d ago')
@@ -34,26 +34,26 @@ test('timeAgo anchors on the frozen instant, not wall-clock', () => {
 })
 
 test('daysUntil is ceil-days relative to the anchor', () => {
-  const now = effectiveNow('2027-08-08T00:00:00.000Z')
+  const now = clockTime('2027-08-08T00:00:00.000Z')
   assert.equal(daysUntil('2027-08-11T00:00:00.000Z', now), 3)
   assert.equal(daysUntil('2027-08-05T00:00:00.000Z', now), -3)
 })
 
 test('isOlderThan gates on the anchor, guards NaN', () => {
-  const now = effectiveNow('2027-08-08T00:00:00.000Z')
+  const now = clockTime('2027-08-08T00:00:00.000Z')
   assert.equal(isOlderThan('2027-08-06T00:00:00.000Z', 24 * 60 * 60 * 1000, now), true)
   assert.equal(isOlderThan('2027-08-07T12:00:00.000Z', 24 * 60 * 60 * 1000, now), false)
   assert.equal(isOlderThan('garbage', 1000, now), false)
 })
 
 test('sinceMs / untilMs have opposite signs around the anchor', () => {
-  const now = effectiveNow('2027-08-08T00:00:00.000Z')
+  const now = clockTime('2027-08-08T00:00:00.000Z')
   assert.equal(sinceMs('2027-08-07T00:00:00.000Z', now), 86_400_000)
   assert.equal(untilMs('2027-08-09T00:00:00.000Z', now), 86_400_000)
 })
 
 test('cycleProgress measures against the anchor and clamps to 100%', () => {
-  const now = effectiveNow('2027-08-20T00:00:00.000Z')
+  const now = clockTime('2027-08-20T00:00:00.000Z')
   const p = cycleProgress('2027-08-01T00:00:00.000Z', '2027-08-31T00:00:00.000Z', now)
   assert.equal(p.totalDays, 30)
   assert.equal(p.daysIn, 19)
@@ -66,7 +66,7 @@ test('rollingWindow includes the anchor instant (to is exclusive on the server)'
   // A test clock frozen at Nov 15 23:00 stamps an untimestamped event at
   // exactly 23:00:00. The server keeps `timestamp < to`, so `to` must be past
   // the anchor or the 30d window misses the customer's newest usage.
-  const now = effectiveNow('2026-11-15T23:00:00.000Z')
+  const now = clockTime('2026-11-15T23:00:00.000Z')
   const w = rollingWindow(30, now)
   const event = Date.parse('2026-11-15T23:00:00.000Z')
   assert.ok(event < Date.parse(w.to), 'an event stamped at the anchor is inside the window')
@@ -75,9 +75,9 @@ test('rollingWindow includes the anchor instant (to is exclusive on the server)'
   assert.equal(w.from, '2026-10-16T23:00:00.000Z')
 })
 
-test('effectiveNow(undefined) and wallClockNow() both fall to wall time', () => {
-  // Both are the explicit wall-clock path; they should agree to the second.
-  const a = effectiveNow(undefined) as unknown as number
-  const b = wallClockNow() as unknown as number
-  assert.ok(Math.abs(a - b) < 1000, 'unpinned anchor and wallClockNow agree')
+test('clockTime is the clock\'s instant, and wallClockNow() is real time', () => {
+  assert.equal(clockTime('2027-08-08T00:00:00.000Z'), Date.parse('2027-08-08T00:00:00.000Z'))
+  const before = Date.now()
+  const now = wallClockNow()
+  assert.ok(now >= before && now <= Date.now())
 })

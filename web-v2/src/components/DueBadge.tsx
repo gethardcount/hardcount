@@ -6,10 +6,10 @@ interface DueBadgeProps {
   dueAt?: string | null
   warningDays?: number
   className?: string
-  // Reference "now" for the comparison — REQUIRED. Build it with
-  // effectiveNow(clockFrozen) so a clock-pinned invoice reads relative
-  // to simulation time, or wallClockNow() for a genuinely real-time
-  // surface. Engine actions (auto-charge retries, dunning) fire on
+  // Reference "now" for the comparison — REQUIRED. Take the invoice's
+  // from useNowFor or useNowResolver, so an invoice on a test clock reads
+  // relative to the clock's time, or wallClockNow() for a genuinely
+  // real-time surface. Engine actions (auto-charge retries, dunning) fire on
   // simulation time; the badge has to match or it understates urgency.
   now: EffectiveNow
 }

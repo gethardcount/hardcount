@@ -13,7 +13,8 @@ import {
   type Invoice,
   type Customer,
 } from '@/lib/api'
-import { effectiveNow, sinceMs, untilMs, type EffectiveNow } from '@/lib/effectiveNow'
+import { sinceMs, untilMs, type EffectiveNow } from '@/lib/effectiveNow'
+import { useNowResolver } from '@/hooks/useNow'
 import { TestClockBadge } from '@/components/TestClockBadge'
 import { dunningReasonLabel } from '@/lib/dunningReasons'
 import { retriesOffNotice } from '@/lib/dunningCoverage'
@@ -48,7 +49,6 @@ import { TableSkeleton } from '@/components/ui/TableSkeleton'
 import { Loader2 } from 'lucide-react'
 import { useIsPhone } from '@/hooks/useIsPhone'
 
-// effectiveNowMs resolves the "now" baseline for relative-time
 // Human labels for the resolution enum — raw values like
 // "payment_recovered" are backend identifiers, not operator copy.
 // EVERY value the column can hold, including the two the ENGINE writes.
@@ -161,6 +161,9 @@ function RunsTab() {
     return next
   }, { replace: true })
   const [page, setPage] = useState(1)
+  // Each run's "now" (its customer's clock time when it is on one), for Next
+  // step and Started.
+  const resolveNow = useNowResolver()
 
   const queryParams = useMemo(() => {
     const params = new URLSearchParams()
@@ -356,7 +359,7 @@ function RunsTab() {
                     const invoiceLabel = run.invoice_number || inv?.invoice_number || run.invoice_id.slice(0, 8) + '...'
                     const amount = dunningRunAmount(run, inv) ?? '\u2014'
                     const nextStep = run.next_action_at
-                      ? <span className="text-xs text-muted-foreground" title={formatDateTime(run.next_action_at)}>{dunningFinalStepNext(run) ? 'Final step ' : ''}{futureRelativeTime(run.next_action_at, effectiveNow(run.effective_now))}</span>
+                      ? <span className="text-xs text-muted-foreground" title={formatDateTime(run.next_action_at)}>{dunningFinalStepNext(run) ? 'Final step ' : ''}{futureRelativeTime(run.next_action_at, resolveNow(run))}</span>
                       : <span className="text-xs text-muted-foreground">{'\u2014'}</span>
                     // Closing a run is done on its invoice: Record offline
                     // payment, Void or Write off each close the run, with the
@@ -451,7 +454,7 @@ function RunsTab() {
                             {nextStep}
                           </TableCell>
                           <TableCell className="hidden sm:table-cell">
-                            <span className="text-xs text-muted-foreground" title={formatDateTime(run.created_at)}>{relativeTime(run.created_at, effectiveNow(run.effective_now))}</span>
+                            <span className="text-xs text-muted-foreground" title={formatDateTime(run.created_at)}>{relativeTime(run.created_at, resolveNow(run))}</span>
                           </TableCell>
                         </TableRow>
 

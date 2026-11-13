@@ -9,7 +9,7 @@
 import { afterAll, test } from 'vitest'
 import assert from 'node:assert/strict'
 import { format } from 'date-fns'
-import { effectiveNow } from '../src/lib/effectiveNow.ts'
+import { clockTime } from '../src/lib/effectiveNow.ts'
 import { dayAsDate, pickerDays } from '../src/lib/datePickerDays.ts'
 
 const browserZone = process.env.TZ
@@ -21,7 +21,7 @@ afterAll(() => {
 
 test('with the browser in Los Angeles and the account in Tokyo, today is the Tokyo day', () => {
   // 20:00 on Nov 8 in Los Angeles is 13:00 on Nov 9 in Tokyo.
-  const now = effectiveNow('2026-11-09T04:00:00Z')
+  const now = clockTime('2026-11-09T04:00:00Z')
   assert.equal(format(new Date(now), 'yyyy-MM-dd'), '2026-11-08', 'the browser reads Nov 8')
   assert.equal(pickerDays(now, 'Asia/Tokyo').today, '2026-11-09')
   assert.equal(pickerDays(now, 'America/Los_Angeles').today, '2026-11-08')
@@ -30,13 +30,13 @@ test('with the browser in Los Angeles and the account in Tokyo, today is the Tok
 test("on a test clock, today is the clock's day in the account zone", () => {
   // A clock frozen at 20:00 UTC on Jan 15: Jan 16 in Tokyo, whatever the
   // real date is.
-  const now = effectiveNow('2026-01-15T20:00:00Z')
+  const now = clockTime('2026-01-15T20:00:00Z')
   assert.equal(pickerDays(now, 'Asia/Tokyo').today, '2026-01-16')
   assert.equal(pickerDays(now, 'UTC').today, '2026-01-15')
 })
 
 test('Today can be picked only on or after the first day allowed', () => {
-  const now = effectiveNow('2026-01-15T20:00:00Z')
+  const now = clockTime('2026-01-15T20:00:00Z')
   assert.equal(pickerDays(now, 'Asia/Tokyo').todayAllowed, true, 'no first day')
   assert.equal(pickerDays(now, 'Asia/Tokyo', '2026-01-16').todayAllowed, true, 'today is the first day')
   assert.equal(pickerDays(now, 'Asia/Tokyo', '2026-01-17').todayAllowed, false, 'the first day is tomorrow')

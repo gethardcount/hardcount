@@ -26,7 +26,7 @@ import { compactAxisTick, utcBucketLabel } from '@/lib/chartLabels'
 import type { CustomerUsage, CustomerUsageMeter, CustomerUsagePrice, Subscription, Invoice, InvoicePreview } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { cycleProgress, rollingWindow, sinceMs, type EffectiveNow } from '@/lib/effectiveNow'
-import { useEffectiveNow, useEffectiveNowResolver } from '@/hooks/useClockFrozenMap'
+import { useNowFor, useNowResolver } from '@/hooks/useNow'
 import { fetchCustomerUsageOrNull, useCurrentCycleUsage, useLatestUsageAt } from '@/hooks/useCustomerUsageWindows'
 import { useCustomerSubscriptions } from '@/hooks/useCustomerCurrency'
 import { DEFAULT_ACTIVITY_PRESET, isOutsideWindow, rangeIncluding, usageWindowIsEmpty } from '@/lib/usageWindow'
@@ -50,11 +50,9 @@ import { ChevronDown, ChevronRight, Activity, Loader2, Receipt } from 'lucide-re
 // Top-level wrapper
 // ============================================================================
 
-// customerTestClockId: the customer's test-clock pin (ADR-027, customer-level).
-// When set, every relative-time / rolling-window surface below reads its "now"
-// from the clock's frozen_time instead of wall-clock, so the cycle bar,
-// last-invoice "X ago", and activity window all track simulation time. Omitted /
-// undefined for wall-clock customers, which fall back to Date.now() unchanged.
+// customerTestClockId: the customer's test clock, or undefined for a customer
+// on no clock. The sections below take their now from hooks/useNow, so the
+// cycle bar, last-invoice "X ago" and activity window follow the clock.
 // currency: the customer's currency (useCustomerCurrency), used for a figure
 // the server sent without one, such as an empty window's $0. Undefined while
 // it loads, and such a figure reads "—" until then.
@@ -78,7 +76,7 @@ function UpcomingInvoicesSection({ customerId }: { customerId: string }) {
   // last-invoice "X ago". Resolved per subscription (not customer) because the
   // period bounds and invoice created_at were stamped on the sub's own clock.
   // Wall-clock subs (no test_clock_id) resolve to wall time.
-  const resolveNow = useEffectiveNowResolver()
+  const resolveNow = useNowResolver()
 
   const activeSubs = useMemo(
     () =>
@@ -125,7 +123,7 @@ function UpcomingInvoicesSection({ customerId }: { customerId: string }) {
               key={sub.id}
               sub={sub}
               customerId={customerId}
-              effectiveNow={resolveNow(sub.test_clock_id)}
+              effectiveNow={resolveNow(sub)}
             />
           ))}
           {hidden > 0 && (
@@ -391,7 +389,7 @@ function ActivitySection({ customerId, customerTestClockId, currency }: { custom
   // wall-clock window that predates it. Keyed into the query so a clock advance
   // refetches; a wall-clock customer's anchor is stable across renders (captured
   // at mount) so it doesn't churn the query.
-  const now = useEffectiveNow(customerTestClockId)
+  const now = useNowFor({ test_clock_id: customerTestClockId })
 
   // The cycle query is shared with the Margin card's "Current period".
   // fetchCustomerUsageOrNull turns 422 customer_has_no_subscription (the

@@ -8,7 +8,7 @@ import { api, formatCents, formatCentsBare, formatDate } from '@/lib/api'
 import { creditExpiryLabel } from '@/lib/dates'
 import { creditTotalsLine, grantState, grantUsedCents, ledgerEntryLabel, ledgerEntryTitle, splitGrants } from '@/lib/customerCredits'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
-import { useEffectiveNow } from '@/hooks/useClockFrozenMap'
+import { useNowFor } from '@/hooks/useNow'
 import { Section } from '@/components/page/Section'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -30,7 +30,7 @@ export function CustomerCreditsSection({ customerId, customerName, currency, tes
   readOnly?: boolean
 }) {
   const qc = useQueryClient()
-  const now = useEffectiveNow(testClockId)
+  const now = useNowFor({ test_clock_id: testClockId })
   const [showFinished, setShowFinished] = useState(false)
   const [grantOpen, setGrantOpen] = useState(false)
 

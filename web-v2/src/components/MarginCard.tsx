@@ -18,7 +18,7 @@ import {
   DEFAULT_MARGIN_PRESET, MARGIN_EMPTY_NOTE, MARGIN_PRESETS, isOutsideWindow, marginWindowFor, marginWindowIsEmpty, rangeIncluding, type MarginPreset,
 } from '@/lib/usageWindow'
 import { useGetCustomerMargin } from '@/lib/gen/queries.gen'
-import { useEffectiveNow } from '@/hooks/useClockFrozenMap'
+import { useNowFor } from '@/hooks/useNow'
 import { useTenantTimezone } from '@/hooks/useTenantTimezone'
 import { useCurrentCycleUsage, useLastInvoicedPeriod, useLatestUsageAt } from '@/hooks/useCustomerUsageWindows'
 
@@ -44,7 +44,7 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
   // simulation time (usage/service.go), so a wall-clock "last 30 days" sits
   // before them. The billing periods come from the server, already on the
   // customer's clock. Custom absolute dates are left untouched.
-  const now = useEffectiveNow(customerTestClockId)
+  const now = useNowFor({ test_clock_id: customerTestClockId })
   const tz = useTenantTimezone()
 
   const cycleQuery = useCurrentCycleUsage(customerId, customerTestClockId, preset === 'cycle')
