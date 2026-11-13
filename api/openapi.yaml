@@ -10155,9 +10155,10 @@ paths:
           in: query
           description: |
             Only customers with this status, `active` or `archived`. Any other
-            value matches no customer.
+            value is a 422 with `param: status`.
           schema:
             type: string
+            enum: [active, archived]
         - name: external_id
           in: query
           description: Only the customer with this `external_id` (exact match).
@@ -10678,7 +10679,7 @@ paths:
                 error:
                   type: invalid_request_error
                   code: invalid_state
-                  message: billing profile currency EUR conflicts with subscription hc_sub_dauq502q3gpgqfoq5c2g's plan currency USD — invoices would relabel plan prices in EUR without conversion; cancel the subscription or keep the currency
+                  message: billing profile currency EUR conflicts with subscription acme-pro's plan currency USD — invoices would relabel plan prices in EUR without conversion; cancel the subscription or keep the currency
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "422":
           description: |
@@ -12930,7 +12931,9 @@ paths:
             type: string
         - name: status
           in: query
-          description: Only notes in this status.
+          description: |
+            Only notes in this status. Any other value is a 422 with
+            `param: status`.
           schema:
             type: string
             enum: [draft, issued, voided]
@@ -12944,7 +12947,7 @@ paths:
             returns issued, non-test-clock notes whose
             refund failed or has an unknown result, has been pending more
             than 72 hours, or has a refund amount still at `none` after 1
-            hour.
+            hour. Any other value is a 422 with `param: refund_status`.
         - name: sort
           in: query
           description: |
@@ -13310,7 +13313,9 @@ paths:
             type: string
         - name: entry_type
           in: query
-          description: Only entries of this type.
+          description: |
+            Only entries of this type. Any other value is a 422 with
+            `param: entry_type`.
           schema:
             type: string
             enum: [grant, usage, expiry, adjustment]
@@ -18860,17 +18865,20 @@ paths:
           in: query
           description: |
             Only invoices in this status: `draft`, `finalized`, `paid`,
-            `voided` or `uncollectible`. Another value matches nothing.
+            `voided` or `uncollectible`. Any other value is a 422 with
+            `param: status`.
           schema:
             type: string
+            enum: [draft, finalized, paid, voided, uncollectible]
         - name: payment_status
           in: query
           description: |
             Only invoices with this payment status: `pending`, `processing`,
-            `succeeded`, `failed` or `unknown`. Another value matches
-            nothing.
+            `succeeded`, `failed` or `unknown`. Any other value is a 422
+            with `param: payment_status`.
           schema:
             type: string
+            enum: [pending, processing, succeeded, failed, unknown]
         - name: search
           in: query
           description: |

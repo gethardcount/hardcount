@@ -66,28 +66,29 @@ type TaxFlusher interface {
 	RetryCustomerDataErrors(ctx context.Context, tenantID, customerID string) (int, []error)
 }
 
-// NonTerminalSubscription is one still-billing subscription blocking a
-// customer-level change — the archive guard's and the billing-profile
-// currency guard's shared ground truth (ADR-067).
+// NonTerminalSubscription is one still-billing subscription blocking an
+// archive (ADR-067).
 type NonTerminalSubscription struct {
 	ID     string
 	Status string
 	// Name is the subscription's display name (its code when it has none):
 	// the archive refusal names subscriptions the way the page lists them.
 	Name string
-	// PlanCurrencies are the distinct currencies of the subscription's
-	// item plans — the currency-mismatch guard compares the billing
-	// profile's currency against them (a profile currency override
-	// re-denominates plan prices at invoice time: $100 plan → €100).
-	PlanCurrencies []string
 }
 
-// SubscriptionChecker reports a customer's non-terminal (still-billing)
-// subscriptions: active or trialing, including active subs with a scheduled
-// cancel (they bill until the boundary). Narrow interface wired via
-// SetSubscriptionChecker (precedent: SetStripeSyncer) so the customer
-// package keeps the zero-peer-import rule; implemented by an adapter over
-// the subscription store in api/router.go.
+// SubscriptionCurrency is the currency of one plan a live subscription bills
+// on: what the billing-profile currency guard compares against.
+type SubscriptionCurrency struct {
+	// Code is the subscription's code, which the refusal names.
+	Code     string
+	Currency string
+}
+
+// SubscriptionChecker reads a customer's subscriptions for the archive and
+// currency guards. Narrow interface wired via SetSubscriptionChecker
+// (precedent: SetStripeSyncer) so the customer package keeps the
+// zero-peer-import rule; implemented by an adapter over the subscription
+// store in api/router.go.
 //
 // The service calls it under the customer-rules lock
 // (Store.WithCustomerRulesLock). Subscription creates and draft activations
@@ -96,12 +97,16 @@ type NonTerminalSubscription struct {
 // count that subscription when it moves from trialing to active between its
 // reads.
 type SubscriptionChecker interface {
-	// includeDraft widens the status set for the currency guard (ADR-100):
-	// a draft doesn't bill yet, but it WILL at activate, so the profile
-	// currency must already agree with it. The archive guard keeps drafts
-	// excluded — "still bill" copy stays true and an abandoned draft never
-	// blocks an archive.
-	NonTerminalForCustomer(ctx context.Context, tenantID, customerID string, includeDraft bool) ([]NonTerminalSubscription, error)
+	// NonTerminalForCustomer returns the subscriptions that still bill:
+	// active or trialing, including an active one with a scheduled cancel
+	// (it bills until the boundary). A draft is left out, so an abandoned
+	// draft never blocks an archive.
+	NonTerminalForCustomer(ctx context.Context, tenantID, customerID string) ([]NonTerminalSubscription, error)
+	// PlanCurrencies returns the plan currencies of every draft, trialing
+	// and active subscription of the customer, however many, a pending plan
+	// change's plan included. A draft counts: it bills from its activation
+	// (ADR-100).
+	PlanCurrencies(ctx context.Context, tenantID, customerID string) ([]SubscriptionCurrency, error)
 }
 
 // AuditEmitter is the narrow in-tx audit seam (ADR-090). The service builds
@@ -467,7 +472,7 @@ func (s *Service) Update(ctx context.Context, tenantID, id string, input UpdateI
 					// HIGH this guard exists to prevent.
 					return fmt.Errorf("subscription checker not wired: cannot verify archive safety")
 				}
-				blocking, err := s.subChecker.NonTerminalForCustomer(ctx, tenantID, id, false)
+				blocking, err := s.subChecker.NonTerminalForCustomer(ctx, tenantID, id)
 				if err != nil {
 					return fmt.Errorf("check subscriptions before archive: %w", err)
 				}
@@ -771,17 +776,15 @@ func (s *Service) checkProfileCurrency(ctx context.Context, tenantID string, bp 
 			"customer_id", bp.CustomerID)
 		return nil
 	}
-	subs, err := s.subChecker.NonTerminalForCustomer(ctx, tenantID, bp.CustomerID, true)
+	subs, err := s.subChecker.PlanCurrencies(ctx, tenantID, bp.CustomerID)
 	if err != nil {
 		return fmt.Errorf("check subscriptions for currency guard: %w", err)
 	}
 	for _, sub := range subs {
-		for _, cur := range sub.PlanCurrencies {
-			if cur != "" && !strings.EqualFold(cur, bp.Currency) {
-				return errs.InvalidState(fmt.Sprintf(
-					"billing profile currency %s conflicts with subscription %s's plan currency %s — invoices would relabel plan prices in %s without conversion; cancel the subscription or keep the currency",
-					bp.Currency, sub.ID, strings.ToUpper(cur), bp.Currency))
-			}
+		if sub.Currency != "" && !strings.EqualFold(sub.Currency, bp.Currency) {
+			return errs.InvalidState(fmt.Sprintf(
+				"billing profile currency %s conflicts with subscription %s's plan currency %s — invoices would relabel plan prices in %s without conversion; cancel the subscription or keep the currency",
+				bp.Currency, sub.Code, strings.ToUpper(sub.Currency), bp.Currency))
 		}
 	}
 	return nil

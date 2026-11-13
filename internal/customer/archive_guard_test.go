@@ -10,14 +10,19 @@ import (
 	"github.com/gethardcount/hardcount/internal/errs"
 )
 
-// fakeSubChecker satisfies SubscriptionChecker with a canned answer.
+// fakeSubChecker satisfies SubscriptionChecker with canned answers.
 type fakeSubChecker struct {
-	subs []NonTerminalSubscription
-	err  error
+	subs       []NonTerminalSubscription
+	currencies []SubscriptionCurrency
+	err        error
 }
 
-func (f *fakeSubChecker) NonTerminalForCustomer(_ context.Context, _, _ string, _ bool) ([]NonTerminalSubscription, error) {
+func (f *fakeSubChecker) NonTerminalForCustomer(_ context.Context, _, _ string) ([]NonTerminalSubscription, error) {
 	return f.subs, f.err
+}
+
+func (f *fakeSubChecker) PlanCurrencies(_ context.Context, _, _ string) ([]SubscriptionCurrency, error) {
+	return f.currencies, f.err
 }
 
 func newArchiveTestSvc(t *testing.T, checker SubscriptionChecker) (*Service, domain.Customer) {
@@ -114,15 +119,18 @@ func TestArchive_FailsClosedWithoutChecker(t *testing.T) {
 // validation + normalization always; mismatch vs a billing subscription's
 // plan currency → 409.
 func TestBillingProfileCurrency_Guard(t *testing.T) {
-	// Mismatch: active sub priced in USD, profile wants EUR.
-	svc, cust := newArchiveTestSvc(t, &fakeSubChecker{subs: []NonTerminalSubscription{
-		{ID: "sub_1", Status: "active", PlanCurrencies: []string{"USD"}},
+	// Mismatch: a subscription priced in USD, profile wants EUR.
+	svc, cust := newArchiveTestSvc(t, &fakeSubChecker{currencies: []SubscriptionCurrency{
+		{Code: "sub-1", Currency: "USD"},
 	}})
 	_, err := svc.UpsertBillingProfile(context.Background(), "t1", domain.CustomerBillingProfile{
 		CustomerID: cust.ID, Currency: "EUR",
 	})
 	if !errors.Is(err, errs.ErrInvalidState) {
 		t.Fatalf("EUR profile over USD plan: err = %v, want InvalidState (silent re-denomination)", err)
+	}
+	if !strings.Contains(err.Error(), "sub-1") {
+		t.Errorf("409 message must name the conflicting subscription: %q", err.Error())
 	}
 
 	// Match (case-normalized): "usd" → stored "USD", allowed.

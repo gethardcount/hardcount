@@ -168,13 +168,17 @@ type InvoiceSums struct {
 	RefundCents int64
 }
 
+// RefundNeedsAttention is the list's refund_status value for the notes whose
+// refund needs an operator: it is a filter, not a refund status.
+const RefundNeedsAttention = "needs_attention"
+
 type ListFilter struct {
 	TenantID   string
 	InvoiceID  string
 	CustomerID string
 	Status     string
-	// RefundStatus filters by the Stripe refund leg. Exact match, except the
-	// sentinel "needs_attention" → domain.CreditNoteRefundNeedsAttentionSQL (the
+	// RefundStatus filters by the Stripe refund leg. Exact match, except
+	// RefundNeedsAttention → domain.CreditNoteRefundNeedsAttentionSQL (the
 	// dashboard "refunds need attention" alert links here).
 	RefundStatus string
 	Limit        int

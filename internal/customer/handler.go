@@ -195,10 +195,14 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		respond.FromError(w, r, err, "customer")
 		return
 	}
+	status, ok := respond.ParseFilter(w, r, "status", domain.CustomerStatusActive, domain.CustomerStatusArchived)
+	if !ok {
+		return
+	}
 
 	filter := ListFilter{
 		TenantID:   tenantID,
-		Status:     r.URL.Query().Get("status"),
+		Status:     string(status),
 		ExternalID: r.URL.Query().Get("external_id"),
 		Search:     strings.TrimSpace(r.URL.Query().Get("search")),
 		IDs:        ids,

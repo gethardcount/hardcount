@@ -632,7 +632,7 @@ func creditNoteWhere(filter ListFilter) (string, []any) {
 		args = append(args, filter.Status)
 		idx++
 	}
-	if filter.RefundStatus == "needs_attention" {
+	if filter.RefundStatus == RefundNeedsAttention {
 		// failed (terminal — money returned to the platform, customer un-refunded)
 		// OR unknown (Stripe gave no clear answer; only a retry settles it)
 		// OR a 'pending' that's genuinely STUCK (>72h ≈ 3 business days). Fresh
