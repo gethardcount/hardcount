@@ -74,6 +74,7 @@ original text.
 
 ### Changed
 
+- **The money-path playbook has four rules the last week of fixes needed.** Contributors: no page limit on a question about every row; a job reads its list to the end or stamps what it looked at; compare an amount change with today and make no case worse; walk a paged list in a test. [#1710](https://github.com/gethardcount/hardcount/pull/1710)
 - **The contributor rules are half as long (2026-11-13).** Contributors: CONTRIBUTING, the engineering principles, the code standard, the testing guide and the money-path playbook were rewritten in plain words, with each rule in one place. No rule about money changed. [#1692](https://github.com/gethardcount/hardcount/pull/1692)
 - **A `503` is no longer stored under its `Idempotency-Key`.** A retry with the same key runs the request again, instead of getting the stored `503` back. Hardcount answers `503` only when nothing the request did would be done twice. After `currency_unavailable`, send the same request with the same key, not a new one. ([#1646](https://github.com/gethardcount/hardcount/pull/1646))
 
