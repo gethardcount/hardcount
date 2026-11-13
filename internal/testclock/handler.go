@@ -14,7 +14,6 @@ import (
 // Handler exposes /v1/test-clocks. Auth middleware upstream enforces that the
 // caller holds a test-mode key (livemode=false); the service itself adds a
 // second guard so a misconfigured auth chain can't slip live writes through.
-// The service writes each change's audit row, in the change's transaction.
 type Handler struct {
 	svc *Service
 }

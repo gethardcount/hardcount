@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -187,6 +188,73 @@ func TestPostgresStore_MarkFailed_ReasonCutInsideACharacter(t *testing.T) {
 	if want := kept + "…"; got.LastFailureReason != want {
 		t.Errorf("last_failure_reason = %q, want the first 498 bytes, which end before the split character, and …", got.LastFailureReason)
 	}
+}
+
+// TestPostgresStore_AFailedAuditRowSavesNothing: the store saves an operator's
+// change only with its audit row. The row's function fails here without
+// touching the database, so Postgres does not abort the transaction and only
+// the store's own check keeps the change from being committed.
+func TestPostgresStore_AFailedAuditRowSavesNothing(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	store := testclock.NewPostgresStore(db)
+	ctx := leadertest.Token(t, testutil.AdminPool(t), postgres.WithLivemode(context.Background(), false), leader.RoleTestClockCatchup)
+	tenantID := testutil.CreateTestTenant(t, db, "Tenant")
+
+	refused := errors.New("audit row refused")
+	failing := func(*sql.Tx, domain.TestClock) error { return refused }
+	t0 := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	t1 := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+
+	if _, err := store.Create(ctx, tenantID, domain.TestClock{Name: "refused", FrozenTime: t0}, failing); !errors.Is(err, refused) {
+		t.Fatalf("create: err = %v, want the audit row's error", err)
+	}
+	if clocks, _, err := store.List(ctx, tenantID, 100, 0); err != nil || len(clocks) != 0 {
+		t.Fatalf("after the refused create: %d clocks (err %v), want none", len(clocks), err)
+	}
+
+	clk, err := store.Create(ctx, tenantID, domain.TestClock{Name: "kept", FrozenTime: t0}, noAuditRow)
+	if err != nil {
+		t.Fatalf("create clock: %v", err)
+	}
+	get := func(t *testing.T) domain.TestClock {
+		t.Helper()
+		got, err := store.Get(ctx, tenantID, clk.ID)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		return got
+	}
+
+	t.Run("advance", func(t *testing.T) {
+		if _, err := store.MarkAdvancing(ctx, tenantID, clk.ID, t1, failing); !errors.Is(err, refused) {
+			t.Fatalf("err = %v, want the audit row's error", err)
+		}
+		if got := get(t); got.Status != domain.TestClockStatusReady || !got.FrozenTime.Equal(t0) || got.LastAdvanceSummary != nil {
+			t.Errorf("clock = %s at %s, summary %+v; want ready at %s with no summary", got.Status, got.FrozenTime, got.LastAdvanceSummary, t0)
+		}
+	})
+
+	t.Run("retry advance", func(t *testing.T) {
+		if _, err := store.MarkAdvancing(ctx, tenantID, clk.ID, t1, noAuditRow); err != nil {
+			t.Fatalf("mark advancing: %v", err)
+		}
+		if _, err := store.MarkFailed(ctx, tenantID, clk.ID, "the catch-up failed", domain.AdvanceSummary{HadErrors: true}); err != nil {
+			t.Fatalf("mark failed: %v", err)
+		}
+		if _, err := store.RetryFromFailed(ctx, tenantID, clk.ID, failing); !errors.Is(err, refused) {
+			t.Fatalf("err = %v, want the audit row's error", err)
+		}
+		if got := get(t); got.Status != domain.TestClockStatusInternalFailed || got.LastFailureReason != "the catch-up failed" {
+			t.Errorf("clock = %s, reason %q; want internal_failure with its reason", got.Status, got.LastFailureReason)
+		}
+	})
+
+	t.Run("delete", func(t *testing.T) {
+		if err := store.Delete(ctx, tenantID, clk.ID, failing); !errors.Is(err, refused) {
+			t.Fatalf("err = %v, want the audit row's error", err)
+		}
+		get(t) // still there
+	})
 }
 
 // noAuditRow stands in for the audit row in tests of the store alone. The

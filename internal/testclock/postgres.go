@@ -27,7 +27,7 @@ const clockCols = `id, tenant_id, name, frozen_time, status,
 	created_at, updated_at,
 	COALESCE(last_failure_reason,''), last_advance_summary`
 
-func (s *PostgresStore) Create(ctx context.Context, tenantID string, clk domain.TestClock, audit AuditRow) (domain.TestClock, error) {
+func (s *PostgresStore) Create(ctx context.Context, tenantID string, clk domain.TestClock, auditRow AuditRow) (domain.TestClock, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.TestClock{}, err
@@ -49,7 +49,7 @@ func (s *PostgresStore) Create(ctx context.Context, tenantID string, clk domain.
 		}
 		return domain.TestClock{}, err
 	}
-	if err := audit(tx, clk); err != nil {
+	if err := auditRow(tx, clk); err != nil {
 		return domain.TestClock{}, fmt.Errorf("audit emission: %w", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -209,7 +209,7 @@ var clockTeardownStatements = []string{
 // as belt. Runs under TxTenant (RLS confines it to the tenant).
 //
 // Idempotent: re-deleting a gone clock returns errs.ErrNotFound.
-func (s *PostgresStore) Delete(ctx context.Context, tenantID, id string, audit AuditRow) error {
+func (s *PostgresStore) Delete(ctx context.Context, tenantID, id string, auditRow AuditRow) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return err
@@ -247,19 +247,19 @@ func (s *PostgresStore) Delete(ctx context.Context, tenantID, id string, audit A
 		`DELETE FROM test_clocks WHERE id = $1 AND livemode = false`, id); err != nil {
 		return fmt.Errorf("delete test clock: %w", err)
 	}
-	if err := audit(tx, deleted); err != nil {
+	if err := auditRow(tx, deleted); err != nil {
 		return fmt.Errorf("audit emission: %w", err)
 	}
 
 	return tx.Commit()
 }
 
-func (s *PostgresStore) MarkAdvancing(ctx context.Context, tenantID, id string, newFrozenTime time.Time, audit AuditRow) (domain.TestClock, error) {
+func (s *PostgresStore) MarkAdvancing(ctx context.Context, tenantID, id string, newFrozenTime time.Time, auditRow AuditRow) (domain.TestClock, error) {
 	// The summary restarts with the time the advance starts from, read off
 	// the row before this statement changes it (the right-hand side of SET
 	// sees the old row). The catch-up reads it back from the clock, so a
 	// Retry and a run another replica picks up keep it.
-	return s.transition(ctx, tenantID, id, audit, "can only advance a clock in status=ready", `
+	return s.transition(ctx, tenantID, id, auditRow, "can only advance a clock in status=ready", `
 		UPDATE test_clocks SET status = 'advancing', frozen_time = $2,
 			last_advance_summary = jsonb_build_object('advanced_from', frozen_time),
 			updated_at = now()
@@ -290,8 +290,8 @@ func (s *PostgresStore) MarkFailed(ctx context.Context, tenantID, id, reason str
 // the failure reason. Frozen_time stays at its current value —
 // the catchup loop is idempotent on subs whose next_billing_at
 // has already passed it. ADR-018.
-func (s *PostgresStore) RetryFromFailed(ctx context.Context, tenantID, id string, audit AuditRow) (domain.TestClock, error) {
-	return s.transition(ctx, tenantID, id, audit, "can only retry from status=internal_failure", `
+func (s *PostgresStore) RetryFromFailed(ctx context.Context, tenantID, id string, auditRow AuditRow) (domain.TestClock, error) {
+	return s.transition(ctx, tenantID, id, auditRow, "can only retry from status=internal_failure", `
 		UPDATE test_clocks SET status = 'advancing', last_failure_reason = NULL, updated_at = now()
 		WHERE id = $1 AND status = 'internal_failure'
 		RETURNING `+clockCols, id)
@@ -381,7 +381,7 @@ func fencedMiss(ctx context.Context, tx *sql.Tx, id string) error {
 // (a CAS). The change's audit row is written on the same transaction, so
 // neither is saved without the other. Zero rows back is ambiguous (missing
 // row vs wrong state), so a second lookup distinguishes.
-func (s *PostgresStore) transition(ctx context.Context, tenantID, id string, audit AuditRow, wrongStateMsg, query string, args ...any) (domain.TestClock, error) {
+func (s *PostgresStore) transition(ctx context.Context, tenantID, id string, auditRow AuditRow, wrongStateMsg, query string, args ...any) (domain.TestClock, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.TestClock{}, err
@@ -404,7 +404,7 @@ func (s *PostgresStore) transition(ctx context.Context, tenantID, id string, aud
 	if err != nil {
 		return domain.TestClock{}, err
 	}
-	if err := audit(tx, clk); err != nil {
+	if err := auditRow(tx, clk); err != nil {
 		return domain.TestClock{}, fmt.Errorf("audit emission: %w", err)
 	}
 	if err := tx.Commit(); err != nil {

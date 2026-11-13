@@ -26,15 +26,13 @@ type AuditRow func(tx *sql.Tx, clk domain.TestClock) error
 // Store is the persistence contract for TestClock rows. Kept narrow: create,
 // read, list, atomic status transitions, atomic advance, delete. Every method
 // is RLS-scoped to one tenant (postgres.TxTenant) except
-// ListAdvancingForCatchup, the catch-up role's list across tenants. The
-// operator's changes (Create, Delete, MarkAdvancing, RetryFromFailed) each
-// write their audit row on their own transaction.
+// ListAdvancingForCatchup, the catch-up role's list across tenants.
 type Store interface {
-	Create(ctx context.Context, tenantID string, clk domain.TestClock, audit AuditRow) (domain.TestClock, error)
+	Create(ctx context.Context, tenantID string, clk domain.TestClock, auditRow AuditRow) (domain.TestClock, error)
 	Get(ctx context.Context, tenantID, id string) (domain.TestClock, error)
 	// List returns one page of the clocks, newest first, and how many there are.
 	List(ctx context.Context, tenantID string, limit, offset int) ([]domain.TestClock, int, error)
-	Delete(ctx context.Context, tenantID, id string, audit AuditRow) error
+	Delete(ctx context.Context, tenantID, id string, auditRow AuditRow) error
 
 	// MarkAdvancing flips status ready → advancing and simultaneously sets
 	// the new frozen_time, atomically. It restarts last_advance_summary with
@@ -45,7 +43,7 @@ type Store interface {
 	//
 	// The new frozen_time must be >= the current frozen_time; the service
 	// enforces that up-front so we don't ship a regressed-time clock.
-	MarkAdvancing(ctx context.Context, tenantID, id string, newFrozenTime time.Time, audit AuditRow) (domain.TestClock, error)
+	MarkAdvancing(ctx context.Context, tenantID, id string, newFrozenTime time.Time, auditRow AuditRow) (domain.TestClock, error)
 
 	// TouchAdvancing starts a catch-up pass: it moves the clock to the back
 	// of the claim list.
@@ -66,7 +64,7 @@ type Store interface {
 	// frozen_time, so resuming from where the previous attempt
 	// stopped is idempotent. The testclock_catchup leader picks the
 	// clock up on its next tick, like any other advance. ADR-018.
-	RetryFromFailed(ctx context.Context, tenantID, id string, audit AuditRow) (domain.TestClock, error)
+	RetryFromFailed(ctx context.Context, tenantID, id string, auditRow AuditRow) (domain.TestClock, error)
 
 	// ListAdvancingForCatchup is the testclock_catchup role's claim list:
 	// the clocks in status='advancing' across ALL tenants, the one touched

@@ -182,8 +182,8 @@ type Deps struct {
 	// Dunning runs the clock's payment retries due by its time. The
 	// real-time dunning tick skips clock invoices.
 	Dunning DunningProcessor
-	// Audit writes the audit row of each create, advance, retry advance and
-	// delete, in the transaction that makes the change.
+	// Audit writes the audit row of an operator's change, in the change's
+	// transaction.
 	Audit AuditEmitter
 	// PassDeadline bounds one catch-up pass; a pass that runs past it fails
 	// the advance. The router passes CatchupPassDeadline.
@@ -374,12 +374,13 @@ func (s *Service) Advance(ctx context.Context, tenantID, id string, input Advanc
 
 	// The audit row records the window the advance swept, so the events it
 	// causes can be traced to it. advanced_from is the time MarkAdvancing
-	// replaced, read by the same statement.
+	// replaced: its statement always writes the summary, from the old row.
+	// It is shown in frozen_time's zone, so the two read alike.
 	return s.store.MarkAdvancing(ctx, tenantID, id, newTime, s.auditRow(ctx, domain.AuditActionUpdate, func(clk domain.TestClock) map[string]any {
 		return map[string]any{
 			"action":        "advanced",
 			"frozen_time":   clk.FrozenTime,
-			"advanced_from": clk.LastAdvanceSummary.AdvancedFrom,
+			"advanced_from": clk.LastAdvanceSummary.AdvancedFrom.In(clk.FrozenTime.Location()),
 		}
 	}))
 }
