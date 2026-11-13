@@ -135,13 +135,15 @@ func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Han
 
 			fingerprint := fingerprintRequest(r.Method, r.URL.Path, bodyBytes)
 
-			// Reserve the key before running the handler. One INSERT ... ON
-			// CONFLICT DO NOTHING is the serialization point. Of the
-			// concurrent requests with the same (tenant, livemode, key),
-			// exactly one inserts the pending row, and every other one
-			// conflicts. Without the reservation, two simultaneous retries
-			// could both find no row and both run the side effect: a double
-			// credit grant or a double charge.
+			// Reserve the key before running the handler. reserveKey's one
+			// conditional INSERT ... ON CONFLICT DO UPDATE, which resets only
+			// an expired row, is the serialization point. Of the concurrent
+			// requests with the same (tenant, livemode, key), exactly one
+			// claims the row and runs: it inserts a new row or resets an
+			// expired one, and RowsAffected = 1 names it. Every other one
+			// finds the row taken. Without the reservation, two
+			// simultaneous retries could both find no row and both run the
+			// side effect: a double credit grant or a double charge.
 			claimed, err := reserveKey(r.Context(), db, tenantID, key,
 				r.Method, r.URL.Path, fingerprint)
 			if err != nil {
@@ -255,7 +257,9 @@ type cachedResponse struct {
 //
 // An expired key is absent. When the key's row has passed expires_at, the
 // conflict branch resets that row to a new pending reservation, so the
-// request runs as new without waiting for CleanExpired to delete it. Of two
+// request runs as new without waiting for CleanExpired to delete it. The
+// reset sets status_code back to statusPending, so a retry that arrives
+// during the new run waits for the new answer, not the expired one. Of two
 // requests that find the same expired row, the second waits on the first's
 // row lock, then sees the reset row as unexpired and does not claim it.
 //

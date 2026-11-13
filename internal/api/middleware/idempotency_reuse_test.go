@@ -3,6 +3,7 @@ package middleware
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -193,9 +194,11 @@ func TestIdempotency_ExpiredKeyRunsAsNew(t *testing.T) {
 
 // Two requests that reuse one expired key at the same time: taking over the
 // expired row is the serialization point, so the handler runs once. The
-// other request replays its answer or gets 409, never a second run.
-// Mutation check: drop the WHERE on the DO UPDATE, and both requests take
-// the row and run.
+// other request replays the new answer or gets 409, never a second run and
+// never the expired row's answer.
+// Mutation checks: drop the WHERE on the DO UPDATE, and both requests take
+// the row and run. Drop status_code from the DO UPDATE SET, and the other
+// request gets the expired row's 201 replayed.
 func TestIdempotency_ExpiredKey_ConcurrentReuseRunsOnce(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	tenantID := testutil.CreateTestTenant(t, db, "Idempotency Expired Concurrent")
@@ -216,6 +219,7 @@ func TestIdempotency_ExpiredKey_ConcurrentReuseRunsOnce(t *testing.T) {
 		start   = make(chan struct{})
 		codes   [n]int
 		replays [n]string
+		bodies  [n]string
 	)
 	for i := 0; i < n; i++ {
 		wg.Add(1)
@@ -225,6 +229,7 @@ func TestIdempotency_ExpiredKey_ConcurrentReuseRunsOnce(t *testing.T) {
 			rec := invokeWithKey(t, handler, tenantID, "idem-expired-race", `{"amount":100}`)
 			codes[i] = rec.Code
 			replays[i] = rec.Header().Get("Idempotent-Replayed")
+			bodies[i] = rec.Body.String()
 		}(i)
 	}
 	close(start)
@@ -238,12 +243,84 @@ func TestIdempotency_ExpiredKey_ConcurrentReuseRunsOnce(t *testing.T) {
 		switch {
 		case codes[i] == http.StatusCreated && replays[i] == "":
 			fresh++
-		case codes[i] == http.StatusCreated && replays[i] == "true", codes[i] == http.StatusConflict:
+		case codes[i] == http.StatusCreated && replays[i] == "true":
+			if !strings.Contains(bodies[i], `"new"`) {
+				t.Errorf("request %d replayed %s, want the new request's answer, never the expired row's", i, bodies[i])
+			}
+		case codes[i] == http.StatusConflict:
 		default:
 			t.Errorf("request %d: got %d (replayed %q), want 201 or 409", i, codes[i], replays[i])
 		}
 	}
 	if fresh != 1 {
 		t.Fatalf("%d requests ran fresh, want 1 (codes %v, replayed %v)", fresh, codes, replays)
+	}
+}
+
+// A retry sent while the request that took over an expired key is still
+// running waits for that request's answer. Taking over the row marks it
+// pending again, so the retry never gets the expired request's
+// {"id":"old"} as the new request's result.
+// Mutation check: drop status_code from reserveKey's DO UPDATE SET, and the
+// retry gets the expired row's 201 replayed at once.
+func TestIdempotency_ExpiredKey_RetryWhileRunningWaitsForTheNewAnswer(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	tenantID := testutil.CreateTestTenant(t, db, "Idempotency Expired Retry")
+	const key = "idem-expired-wait"
+	seedExpiredKey(t, db, tenantID, key, http.StatusCreated)
+
+	var runs atomic.Int64
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	handler := Idempotency(db, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if runs.Add(1) == 1 {
+			close(entered)
+		}
+		<-release
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"new"}`))
+	}))
+
+	first := make(chan *httptest.ResponseRecorder, 1)
+	go func() { first <- invokeWithKey(t, handler, tenantID, key, `{"amount":100}`) }()
+	select {
+	case <-entered:
+	case <-time.After(5 * time.Second):
+		close(release)
+		t.Fatal("the request on the expired key never reached its handler")
+	}
+
+	second := make(chan *httptest.ResponseRecorder, 1)
+	go func() { second <- invokeWithKey(t, handler, tenantID, key, `{"amount":100}`) }()
+
+	// The first request is still in its handler. Hold it until the retry
+	// answers, or long enough for the retry to read the row and start
+	// waiting. The retry waits up to 5 seconds, far longer than this hold.
+	var retry *httptest.ResponseRecorder
+	select {
+	case retry = <-second:
+	case <-time.After(500 * time.Millisecond):
+	}
+	close(release)
+	got := <-first
+	if retry == nil {
+		retry = <-second
+	}
+
+	if got.Code != http.StatusCreated || got.Header().Get("Idempotent-Replayed") != "" ||
+		!strings.Contains(got.Body.String(), `"new"`) {
+		t.Fatalf("request on the expired key: got %d (replayed %q) %s, want a fresh 201",
+			got.Code, got.Header().Get("Idempotent-Replayed"), got.Body.String())
+	}
+	switch {
+	case retry.Code == http.StatusCreated && retry.Header().Get("Idempotent-Replayed") == "true" &&
+		strings.Contains(retry.Body.String(), `"new"`):
+	case retry.Code == http.StatusConflict:
+	default:
+		t.Fatalf("retry while the request ran: got %d (replayed %q) %s, want the new 201 replayed or 409, never the expired row's answer",
+			retry.Code, retry.Header().Get("Idempotent-Replayed"), retry.Body.String())
+	}
+	if n := runs.Load(); n != 1 {
+		t.Fatalf("handler ran %d times, want 1", n)
 	}
 }
