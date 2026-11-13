@@ -1683,8 +1683,8 @@ func (e *Engine) SimForCustomer(ctx context.Context, tenantID, customerID string
 //
 // SubtotalCents and DiscountCents are the net (ex-tax) values the caller
 // should persist to invoice.SubtotalCents / invoice.DiscountCents. In
-// tax-exclusive mode they equal the caller's input. In tax-inclusive mode
-// the provider carves tax out of the gross line amounts and the engine
+// tax-exclusive mode they are the caller's subtotal and 0. In tax-inclusive
+// mode the provider carves tax out of the gross line amounts and the engine
 // rewrites lineItems[i].AmountCents to the net value so the invariant
 // SubtotalCents - DiscountCents + TaxAmountCents = customer payment holds.
 //
@@ -1776,14 +1776,21 @@ func domesticReverseCharge(status domain.CustomerTaxStatus, customerCountry, reg
 //     AmountCents to that net value so Subtotal - Discount + Tax == gross.
 //  6. Persist the calculation to tax_calculations for durable audit.
 //
-// Safe to call with subtotal-discount <= 0 — returns zero tax and leaves
-// line items untouched.
+// Safe to call with subtotal <= 0 — returns zero tax and leaves line items
+// untouched.
+//
+// discount must be 0: an invoice has no discount of its own, and the
+// providers tax the whole line amounts. The parameter is left for the
+// proration caller's interface (subscription.ProrationTaxApplier).
 func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, currency string, subtotal, discount int64, lineItems []domain.InvoiceLineItem) (TaxApplication, error) {
+	if discount != 0 {
+		return TaxApplication{}, fmt.Errorf("tax: an invoice discount (%d) is not supported", discount)
+	}
 	ctx, ts, err := e.loadTaxSettings(ctx, tenantID)
 	if err != nil {
 		return TaxApplication{}, err
 	}
-	return e.applyTax(ctx, ts, tenantID, customerID, currency, subtotal, discount, lineItems)
+	return e.applyTax(ctx, ts, tenantID, customerID, currency, subtotal, lineItems)
 }
 
 // loadTaxSettings checks the tax wiring, pins the tenant on ctx and reads
@@ -1830,7 +1837,7 @@ func (e *Engine) loadTaxSettings(ctx context.Context, tenantID string) (context.
 
 // applyTax is ApplyTaxToLineItems after the settings read: ctx carries the
 // tenant, and ts is the tenant's settings.
-func (e *Engine) applyTax(ctx context.Context, ts domain.TenantSettings, tenantID, customerID, currency string, subtotal, discount int64, lineItems []domain.InvoiceLineItem) (TaxApplication, error) {
+func (e *Engine) applyTax(ctx context.Context, ts domain.TenantSettings, tenantID, customerID, currency string, subtotal int64, lineItems []domain.InvoiceLineItem) (TaxApplication, error) {
 	// Every invoice with priced lines passes here, so this is where its
 	// amounts are held to int64 cents: when the lines' sizes sum inside
 	// int64, no sum of them wraps, whatever the caller or the steps below
@@ -1844,7 +1851,6 @@ func (e *Engine) applyTax(ctx context.Context, ts domain.TenantSettings, tenantI
 	}
 	app := TaxApplication{
 		SubtotalCents: subtotal,
-		DiscountCents: discount,
 		TaxFacts:      domain.TaxFacts{TaxStatus: domain.InvoiceTaxOK},
 	}
 	app.TaxName = ts.TaxName
@@ -1940,7 +1946,6 @@ func (e *Engine) applyTax(ctx context.Context, ts domain.TenantSettings, tenantI
 		CustomerStatus:       profile.TaxStatus,
 		CustomerExemptReason: profile.TaxExemptReason,
 		TaxInclusive:         ts.TaxInclusive,
-		DiscountCents:        discount,
 		DefaultTaxCode:       ts.DefaultProductTaxCode,
 		OnFailure:            onFailure,
 		LineItems:            reqLines,
@@ -2036,9 +2041,6 @@ func (e *Engine) applyTax(ctx context.Context, ts domain.TenantSettings, tenantI
 			continue
 		}
 		net := rl.NetAmountCents
-		if net == 0 {
-			net = lineItems[i].AmountCents
-		}
 		lineItems[i].AmountCents = net
 		lineItems[i].TaxRate = rl.TaxRate
 		lineItems[i].TaxAmountCents = rl.TaxAmountCents
@@ -2059,17 +2061,14 @@ func (e *Engine) applyTax(ctx context.Context, ts domain.TenantSettings, tenantI
 	// subtotal/discount to net units so the invoice invariant holds.
 	if ts.TaxInclusive && netSubtotalSum != subtotal {
 		app.SubtotalCents = netSubtotalSum
-		// Gross paid == subtotal - discount, which after tax carve-out is
-		// netSubtotalSum - netDiscount + tax. Solve for netDiscount.
-		gross, err := subCents(subtotal, discount)
-		if err != nil {
-			return TaxApplication{}, fmt.Errorf("invoice gross: %w", err)
-		}
+		// Gross paid == subtotal, which after tax carve-out is
+		// netSubtotalSum - netDiscount + tax. Solve for netDiscount: 0 when
+		// the provider's line taxes add up to its total, as manual's do.
 		netWithTax, err := addCents(netSubtotalSum, res.TotalTaxCents)
 		if err != nil {
 			return TaxApplication{}, fmt.Errorf("invoice net with tax: %w", err)
 		}
-		netDiscount, err := subCents(netWithTax, gross)
+		netDiscount, err := subCents(netWithTax, subtotal)
 		if err != nil {
 			return TaxApplication{}, fmt.Errorf("invoice discount: %w", err)
 		}
@@ -5365,12 +5364,11 @@ func (e *Engine) computeAndPersistInvoiceTax(ctx context.Context, tenantID, invo
 	if err != nil {
 		return domain.Invoice{}, fmt.Errorf("recompute tax: %w", err)
 	}
-	basis, subtotal, err := storedTaxBasis(items, inv.SubtotalCents, ts.TaxInclusive)
+	basis, subtotal, err := storedTaxBasis(inv, items, ts.TaxInclusive)
 	if err != nil {
 		return domain.Invoice{}, fmt.Errorf("recompute tax: %w", err)
 	}
-	taxApp, err := e.applyTax(taxCtx, ts, tenantID, inv.CustomerID, inv.Currency,
-		subtotal, inv.DiscountCents, basis)
+	taxApp, err := e.applyTax(taxCtx, ts, tenantID, inv.CustomerID, inv.Currency, subtotal, basis)
 	if err != nil {
 		return domain.Invoice{}, fmt.Errorf("recompute tax: %w", err)
 	}
@@ -5382,8 +5380,8 @@ func (e *Engine) computeAndPersistInvoiceTax(ctx context.Context, tenantID, invo
 	// taxApp.SubtotalCents is the net and taxApp.TaxAmountCents is the
 	// portion already embedded in the prices — adding it onto the prices
 	// would double-count tax and overstate the total by ~one tax amount. In
-	// tax-EXCLUSIVE mode (the common case) taxApp.SubtotalCents/DiscountCents
-	// pass through unchanged (== inv.*), so this is a no-op there.
+	// tax-EXCLUSIVE mode (the common case) taxApp.SubtotalCents passes
+	// through unchanged (== inv.SubtotalCents) and the discount is 0.
 	// Persisting the net subtotal/discount keeps subtotal − discount + tax
 	// == gross, the same invariant the cycle path maintains.
 	totalWithTax := taxApp.SubtotalCents - taxApp.DiscountCents + taxApp.TaxAmountCents
