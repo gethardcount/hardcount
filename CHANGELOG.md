@@ -74,6 +74,7 @@ original text.
 
 ### Changed
 
+- **A pull request needs an agreed issue first.** Contributors: comment on an issue with what you plan and wait for a maintainer to agree; a pull request opened before that is closed without review, and so is one from an account that sends them in bulk. The `good first issue` label is no longer used. [#1720](https://github.com/gethardcount/hardcount/pull/1720)
 - **The money-path playbook has four rules the last week of fixes needed.** Contributors: no page limit on a question about every row; a job reads its list to the end or stamps what it looked at; compare an amount change with today and make no case worse; walk a paged list in a test. [#1710](https://github.com/gethardcount/hardcount/pull/1710)
 - **The contributor rules are half as long (2026-11-13).** Contributors: CONTRIBUTING, the engineering principles, the code standard, the testing guide and the money-path playbook were rewritten in plain words, with each rule in one place. No rule about money changed. [#1692](https://github.com/gethardcount/hardcount/pull/1692)
 - **A `503` is no longer stored under its `Idempotency-Key`.** A retry with the same key runs the request again, instead of getting the stored `503` back. Hardcount answers `503` only when nothing the request did would be done twice. After `currency_unavailable`, send the same request with the same key, not a new one. ([#1646](https://github.com/gethardcount/hardcount/pull/1646))
@@ -87,6 +88,7 @@ original text.
 
 ### Fixed
 
+- **After you advance a test clock, the dashboard shows its new time on every page.** A page opened within 30 seconds of its last read of the clock kept the old time, and counted "Due in", "Trial ends" and a payment retry's "Next step" from it. Every clock change now refreshes the clock everywhere ([#1713](https://github.com/gethardcount/hardcount/pull/1713)).
 - **A test-clock change whose audit row cannot be written is no longer saved.** Before, a create, advance, retry advance or delete was saved with no row in the audit log; now the request answers `500` and nothing changes. An advance's row now always names the time it advanced from ([#1711](https://github.com/gethardcount/hardcount/pull/1711)).
 - **The audit log now records a change to the low-balance alert threshold from one amount to another, such as $50 to $70.** The save's row left the threshold out, and a save that changed only the threshold wrote no row. A change that turned the alert on or off was recorded ([#1707](https://github.com/gethardcount/hardcount/pull/1707)).
 - **A Settings save no longer puts back a change someone else saved, such as the tax rate.** The dashboard sent every field, so a page opened before another person's save restored their old values, and later invoices used the old rate. It now sends only the fields you change, and two saves at once each keep the other's fields ([#1707](https://github.com/gethardcount/hardcount/pull/1707)).

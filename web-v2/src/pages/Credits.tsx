@@ -18,7 +18,7 @@ import { creditExpiryLabel, startOfNextDayInTZ } from '@/lib/dates'
 import type { Customer, CreditBalance } from '@/lib/api'
 import { applyApiError } from '@/lib/formErrors'
 import { downloadCSV } from '@/lib/csv'
-import { useEffectiveNow } from '@/hooks/useClockFrozenMap'
+import { useNowFor } from '@/hooks/useNow'
 import { useTenantTimezone } from '@/hooks/useTenantTimezone'
 import { pickerDays } from '@/lib/datePickerDays'
 import { TestClockBadge } from '@/components/TestClockBadge'
@@ -675,7 +675,7 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
     staleTime: 60_000,
   })
   const activeCustomer = selectedInBalances ?? pickedCustomerData?.data?.[0]
-  const now = useEffectiveNow(activeCustomer?.test_clock_id)
+  const now = useNowFor(activeCustomer)
   // "Valid through" is a day of the account's zone, and is sent as the
   // midnight that ends it there.
   const tz = useTenantTimezone()
