@@ -821,16 +821,16 @@ export default function CustomerDetailPage() {
           </div>
           {/* Usage This Period — multi-dim cost dashboard backed by
               GET /v1/customers/{id}/usage. Operator-facing surface.
-              customerTestClockId pins its relative-time/window surfaces to the
+              The customer pins its relative-time/window surfaces to the
               customer's simulated clock (ADR-027) instead of wall-clock. */}
           <div>
-            <CostDashboard customerId={id!} customerTestClockId={customer.test_clock_id} currency={customerCurrency?.currency} />
+            <CostDashboard customer={customer} currency={customerCurrency?.currency} />
           </div>
 
           {/* Margin — rated usage revenue vs provider COGS (ADR-079).
               Operator-only; never rendered on customer-facing surfaces. */}
           <div>
-            <MarginCard customerId={id!} customerTestClockId={customer.test_clock_id} currency={customerCurrency?.currency} />
+            <MarginCard customer={customer} currency={customerCurrency?.currency} />
           </div>
 
           {/* Price overrides — negotiated per-customer prices (ADR-070). The
@@ -1130,10 +1130,8 @@ export default function CustomerDetailPage() {
               currency is only the grant dialog's default. */}
           <div>
             <CustomerCreditsSection
-              customerId={id!}
-              customerName={customer.display_name}
+              customer={customer}
               currency={creditCurrency}
-              testClockId={customer.test_clock_id}
               readOnly={isArchived}
             />
           </div>
@@ -1872,7 +1870,9 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
             // "Today" is judged in tenant TZ, the zone startOfNextDayInTZ
             // resolves the expiry in below: valid through the picked day, so
             // today is a valid pick, as in the grant dialog.
-            if (isBeforeCivilToday(l.commitExpiresAt, now, tz)) {
+            // While the customer's now is not known the check is left to
+            // the server, which refuses an expiry in the past.
+            if (now !== undefined && isBeforeCivilToday(l.commitExpiresAt, now, tz)) {
               errs.commit = 'Credit expiry must be today or later'
             } else {
               commitExpires = startOfNextDayInTZ(l.commitExpiresAt, tz)

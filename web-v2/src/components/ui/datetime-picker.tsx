@@ -28,7 +28,7 @@ interface DateTimePickerProps {
   onDateChange: (date: string) => void
   onTimeChange: (time: string) => void
   timeZone: string
-  now: EffectiveNow
+  now: EffectiveNow | undefined
   min?: string                       // first day allowed, yyyy-MM-dd
   className?: string
   // datePlaceholder is forwarded to DatePicker for the empty-date state.

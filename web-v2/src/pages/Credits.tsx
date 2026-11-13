@@ -34,6 +34,7 @@ import {
 
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
+import { TestClocksLoadError } from '@/components/TestClocksLoadError'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
@@ -651,22 +652,14 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
     defaultValues: { amount: '', description: '', expiresAt: '', promotional: false },
   })
 
-  // Credit-expiry floor reads the selected customer's simulated now when
-  // clock-pinned (same class as CustomerDetail's expiry validation): a wall-clock
-  // floor would block valid sim-future dates or admit sim-past ones. Re-resolves
-  // as the dialog's customer selection changes.
-  // `customers` above is scoped to customers who ALREADY have a balance
-  // (the page's table), but the dialog can grant to ANY customer — so on a
-  // FIRST-EVER grant the lookup missed and the floor silently fell back to
-  // wall-clock, exactly the failure this guard exists to prevent (found
-  // walking FLOW C1 2026-07-29: a customer pinned to a Sep-2027 clock
-  // offered a Jul-2026 floor, letting the operator pick a sim-PAST date the
-  // API then rejected with "must be in the future" — for a date that IS in
-  // the future by the wall calendar the picker was drawn from).
-  //
-  // Fall back to the combobox's own by-id fetch, sharing its EXACT query key
-  // so React Query serves it from cache — no extra request, and the picker
-  // is guaranteed to have resolved the same row it is displaying.
+  // The expiry picker's first day is the selected customer's today, on its
+  // test clock when it is on one: a real-time floor would block valid
+  // simulated-future dates or admit simulated-past ones. Until a customer is
+  // picked and its now is known, the picker is disabled.
+  // `customers` above holds only customers who already have a balance (the
+  // page's table), and the dialog can grant to any customer, so a customer
+  // not in it is read through the combobox's own by-id query, under its key,
+  // which React Query serves from cache.
   const selectedInBalances = customers?.find(c => c.id === selectedCustomer)
   const { data: pickedCustomerData } = useQuery({
     queryKey: ['customers-picker-selected', selectedCustomer],
@@ -909,6 +902,10 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Valid through</FormLabel>
+                      {/* The picker stays disabled while the customer's
+                          clock is not known; a failed clock list says why,
+                          with Retry. */}
+                      <TestClocksLoadError records={activeCustomer ? [activeCustomer] : []} className="mb-0" />
                       {/* Today is the first day: valid through today ends
                           at tonight's midnight, still ahead. */}
                       <DatePicker
@@ -917,7 +914,7 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
                         placeholder="Never expires"
                         timeZone={tz}
                         now={now}
-                        min={pickerDays(now, tz).today}
+                        min={now === undefined ? undefined : pickerDays(now, tz).today}
                       />
                       <FormDescription>The credits can be used until the end of this day in your account's time zone. Leave empty for credits that never expire.</FormDescription>
                     </FormItem>

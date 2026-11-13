@@ -12,12 +12,14 @@ import type { EffectiveNow } from '@/lib/effectiveNow'
 // The picker works in days (yyyy-mm-dd) of the account's zone. Its today,
 // marked in the calendar and set by the Today button, is the day of `now` in
 // `timeZone`: pass the account zone (useTenantTimezone) and the customer's
-// now (useNowFor), or wallClockNow() where no clock applies.
+// now (useNowFor), or wallClockNow() where no clock applies. While that now
+// is not known (undefined), the field is disabled: its today and the days it
+// allows are counted from it.
 interface DatePickerProps {
   value: string                    // yyyy-mm-dd, or ''
   onChange: (value: string) => void
   timeZone: string
-  now: EffectiveNow
+  now: EffectiveNow | undefined
   min?: string                     // The first day that can be picked, yyyy-mm-dd
   placeholder?: string
   className?: string
@@ -78,8 +80,6 @@ export function DatePicker({ value, onChange, timeZone, now, min, placeholder = 
   const errorId = React.useId()
 
   const selectedDate = value ? dayAsDate(value) : undefined
-  const { today, todayAllowed } = pickerDays(now, timeZone, min)
-  const todayDate = dayAsDate(today)
   const minDate = min ? dayAsDate(min) : undefined
 
   // Sync the input text when the external value changes (e.g. caller
@@ -155,6 +155,26 @@ export function DatePicker({ value, onChange, timeZone, now, min, placeholder = 
     setErrorReason(null)
     inputRef.current?.focus()
   }
+
+  if (now === undefined) {
+    return (
+      <div className={cn('relative', className)}>
+        <div className="flex h-9 items-center gap-1.5 rounded-md border border-input bg-transparent dark:bg-input/30 px-2.5 opacity-50 cursor-not-allowed">
+          <Calendar className="h-4 w-4 text-muted-foreground shrink-0" />
+          <input
+            type="text"
+            value={inputText}
+            placeholder={placeholder}
+            readOnly
+            disabled
+            className="flex-1 min-w-0 bg-transparent outline-none text-sm placeholder:text-muted-foreground cursor-not-allowed"
+          />
+        </div>
+      </div>
+    )
+  }
+  const { today, todayAllowed } = pickerDays(now, timeZone, min)
+  const todayDate = dayAsDate(today)
 
   return (
     <PopoverPrimitive.Root open={open} onOpenChange={setOpen}>
