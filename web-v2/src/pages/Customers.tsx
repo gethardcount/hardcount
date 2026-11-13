@@ -13,6 +13,7 @@ import type { Customer } from '@/lib/api'
 import { applyApiError } from '@/lib/formErrors'
 import { TestClockBadge } from '@/components/TestClockBadge'
 import { useAuth } from '@/contexts/AuthContext'
+import { useTestClocks } from '@/hooks/useNow'
 import { Combobox } from '@/components/Combobox'
 import { downloadServerCSV } from '@/lib/csv'
 import { useSortable, type SortDir } from '@/hooks/useSortable'
@@ -122,18 +123,11 @@ export default function CustomersPage() {
     defaultValues: { external_id: '', display_name: '', email: '', test_clock_id: '' },
   })
 
-  // Test-clock pin (ADR-027): the field is gated on test mode +
-  // clocks existing — same shape as the old sub-create gating.
-  // useAuth gives us the dashboard's current mode; useQuery for
-  // clocks reuses the same key as other surfaces so the cache is
-  // shared.
+  // Test-clock pin (ADR-027): the field shows in test mode when a clock
+  // exists.
   const { user } = useAuth()
   const isTestMode = user?.livemode === false
-  const { data: clocksData } = useQuery({
-    queryKey: ['test-clocks'],
-    queryFn: () => api.listTestClocks(),
-    enabled: isTestMode,
-  })
+  const { data: clocksData } = useTestClocks()
   const clocks = clocksData?.data ?? []
 
   // Debounced server-side search: matches name / email / external ID

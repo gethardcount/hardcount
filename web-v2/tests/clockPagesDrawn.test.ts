@@ -86,13 +86,12 @@ const INVOICE = {
   test_clock_id: CLOCK.id,
 }
 
-// A cache holding the reads both pages make once loaded. The clock is held
-// under every key a page might read it from.
+// A cache holding the reads both pages make once loaded. A page reads a
+// clock's time from the clock list.
 function loadedCache(): QueryClient {
   const client = new QueryClient({ defaultOptions: { queries: { retryOnMount: false } } })
   client.setQueryData(getGetTenantSettingsQueryKey(), { default_currency: 'USD', timezone: 'UTC' })
   client.setQueryData(['test-clocks'], { data: [CLOCK], total: 1 })
-  client.setQueryData(['test-clock', CLOCK.id], CLOCK)
   client.setQueryData(['invoice', INVOICE.id], { invoice: INVOICE, line_items: [] })
   client.setQueryData(['customer', CUSTOMER.id], CUSTOMER)
   client.setQueryData(['subscription', SUBSCRIPTION.id], SUBSCRIPTION)

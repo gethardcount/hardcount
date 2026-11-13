@@ -26,7 +26,7 @@ import { compactAxisTick, utcBucketLabel } from '@/lib/chartLabels'
 import type { CustomerUsage, CustomerUsageMeter, CustomerUsagePrice, Subscription, Invoice, InvoicePreview } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { cycleProgress, rollingWindow, sinceMs, type EffectiveNow } from '@/lib/effectiveNow'
-import { useEffectiveNow, useEffectiveNowResolver } from '@/hooks/useClockFrozenMap'
+import { useNowFor, useNowResolver } from '@/hooks/useNow'
 import { fetchCustomerUsageOrNull, useCurrentCycleUsage, useLatestUsageAt } from '@/hooks/useCustomerUsageWindows'
 import { useCustomerSubscriptions } from '@/hooks/useCustomerCurrency'
 import { DEFAULT_ACTIVITY_PRESET, isOutsideWindow, rangeIncluding, usageWindowIsEmpty } from '@/lib/usageWindow'
@@ -78,7 +78,7 @@ function UpcomingInvoicesSection({ customerId }: { customerId: string }) {
   // last-invoice "X ago". Resolved per subscription (not customer) because the
   // period bounds and invoice created_at were stamped on the sub's own clock.
   // Wall-clock subs (no test_clock_id) resolve to wall time.
-  const resolveNow = useEffectiveNowResolver()
+  const resolveNow = useNowResolver()
 
   const activeSubs = useMemo(
     () =>
@@ -125,7 +125,7 @@ function UpcomingInvoicesSection({ customerId }: { customerId: string }) {
               key={sub.id}
               sub={sub}
               customerId={customerId}
-              effectiveNow={resolveNow(sub.test_clock_id)}
+              effectiveNow={resolveNow(sub)}
             />
           ))}
           {hidden > 0 && (
@@ -391,7 +391,7 @@ function ActivitySection({ customerId, customerTestClockId, currency }: { custom
   // wall-clock window that predates it. Keyed into the query so a clock advance
   // refetches; a wall-clock customer's anchor is stable across renders (captured
   // at mount) so it doesn't churn the query.
-  const now = useEffectiveNow(customerTestClockId)
+  const now = useNowFor({ test_clock_id: customerTestClockId })
 
   // The cycle query is shared with the Margin card's "Current period".
   // fetchCustomerUsageOrNull turns 422 customer_has_no_subscription (the

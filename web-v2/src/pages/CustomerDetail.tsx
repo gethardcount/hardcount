@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { StaleNotice } from '@/components/StaleNotice'
 import { usePageTitle } from '@/hooks/usePageTitle'
-import { useEffectiveNow } from '@/hooks/useClockFrozenMap'
+import { useNowFor } from '@/hooks/useNow'
 import { useTenantTimezone } from '@/hooks/useTenantTimezone'
 import { useSingleFlight } from '@/hooks/useSingleFlight'
 import { useNavigate, useParams, Link } from 'react-router-dom'
@@ -209,7 +209,7 @@ export default function CustomerDetailPage() {
   // The customer's "now" (its test clock when pinned), for Past due on the
   // recent-invoice badges and for when a timed collection pause ends on the
   // subscription rows. Subscriptions inherit the customer's pin (ADR-027).
-  const invoiceNow = useEffectiveNow(customer?.test_clock_id)
+  const invoiceNow = useNowFor(customer)
 
   const { data: overview } = useQuery({
     queryKey: ['customer-overview', id],
@@ -1777,7 +1777,7 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
   // a customer frozen at 2027 must reject a 2026 credit-expiry (past in sim
   // time), which a wall-clock "today" would wrongly accept as "future". Surfaced
   // by the no-restricted-syntax relative-time gate (ADR-086 Phase 4).
-  const now = useEffectiveNow(customer?.test_clock_id)
+  const now = useNowFor(customer)
   // The commit expiry and the service period are days of the account's
   // zone, sent as instants there.
   const tz = useTenantTimezone()

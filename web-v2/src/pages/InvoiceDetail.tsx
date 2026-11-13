@@ -29,6 +29,7 @@ import { collectionPausedNow, finalizeConfirmLines, pickInvoiceNotice, writtenOf
 import { issueDates, sellerBlock, sellerMissing, SELLER_SETTINGS_PATH } from '@/lib/invoiceDocument'
 import { authApi } from '@/lib/auth'
 import { useAuth } from '@/contexts/AuthContext'
+import { useNowFor } from '@/hooks/useNow'
 import { classifyError } from '@/lib/errorCopy'
 import { useGetInvoice, useListInvoiceStripeRefunds } from '@/lib/gen/queries.gen'
 import type { Invoice } from '@/lib/gen/schemas/invoice'
@@ -36,7 +37,6 @@ import type { InvoiceLineItem as LineItem } from '@/lib/gen/schemas/invoiceLineI
 import { applyApiError, showApiError } from '@/lib/formErrors'
 import { taxReasonLabel } from '@/lib/taxReasons'
 import { DueBadge } from '@/components/DueBadge'
-import { effectiveNow } from '@/lib/effectiveNow'
 import { invoiceStatus } from '@/lib/statusLabels'
 import { StatusBadge } from '@/components/StatusBadge'
 import { cn } from '@/lib/utils'
@@ -253,25 +253,10 @@ export default function InvoiceDetailPage() {
     enabled: !!invoice?.subscription_id,
   })
 
-  // Resolve the test clock this invoice's dates live on. A subscription
-  // invoice inherits the sub's pin; a MANUAL one-off invoice has no
-  // subscription, so fall back to the customer's pin (the customer is
-  // already loaded above, so this is no extra fetch). invoice.is_simulated
-  // is the authoritative "these dates are simulated" flag; the resolved id
-  // just tells the banner which clock's "currently at" time to show.
-  const resolvedTestClockId = subscription?.test_clock_id || customer?.test_clock_id || ''
-
-  // Test-clock frozen_time becomes the "now" for relative-time badges
-  // (Due in N days) on this page. Without this the badge reads from
-  // wall-clock and understates urgency on simulated invoices — "Due in
-  // 45d" while the engine perceives 15d. Keyed off the resolved id so it
-  // works for manual simulated invoices too (was sub-only, which made the
-  // DueBadge count against wall-clock while the page claimed simulated).
-  const { data: testClock } = useQuery({
-    queryKey: ['test-clock', resolvedTestClockId],
-    queryFn: () => api.getTestClock(resolvedTestClockId),
-    enabled: !!resolvedTestClockId,
-  })
+  // The invoice's "now", for Due in N days, Past due and "since X ago". The
+  // server fills test_clock_id from the customer's clock, which every
+  // subscription inherits (ADR-027), so it covers one-off invoices too.
+  const now = useNowFor(invoice)
 
   const { data: creditNotesData } = useQuery({
     queryKey: ['invoice-credit-notes', id],
@@ -893,9 +878,9 @@ export default function InvoiceDetailPage() {
       {/* Simulated-time line (ADR-099): one quiet line under the title, not
           a box. Gated on the AUTHORITATIVE invoice.is_simulated (not the
           subscription's clock id), so manual one-off invoices get it too.
-          resolvedTestClockId falls back to the customer's pin. */}
-      {invoice.is_simulated && (
-        <TestClockBanner testClockId={resolvedTestClockId} />
+          test_clock_id is the customer's pin. */}
+      {invoice.is_simulated && invoice.test_clock_id && (
+        <TestClockBanner testClockId={invoice.test_clock_id} />
       )}
 
       {/* Summary strip (L-03): the invoice's state, what is owed and by when,
@@ -908,7 +893,7 @@ export default function InvoiceDetailPage() {
             <div className="min-w-0 px-6 py-4 md:flex-1">
               <p className="text-sm text-muted-foreground">Status</p>
               <div className="mt-1 flex flex-wrap items-center gap-2">
-                <StatusBadge status={invoiceStatus(invoice, effectiveNow(testClock?.frozen_time))} />
+                <StatusBadge status={invoiceStatus(invoice, now)} />
                 {/* Bare date: the badge already says Paid or Void. */}
                 {invoice.status === 'voided' && invoice.voided_at && (
                   <span className="text-xs text-muted-foreground">{formatInvoiceDate(invoice.voided_at, invoice.billing_timezone)}</span>
@@ -933,7 +918,7 @@ export default function InvoiceDetailPage() {
                     "Net 30 from finalizing" in both places. */}
                 <p className="text-sm font-medium text-foreground">{dates.dueHint ?? dates.due}</p>
                 {invoice.due_at && invoice.status === 'finalized' && (
-                  <DueBadge dueAt={invoice.due_at} warningDays={3} now={effectiveNow(testClock?.frozen_time)} />
+                  <DueBadge dueAt={invoice.due_at} warningDays={3} now={now} />
                 )}
               </div>
             </div>
@@ -1064,12 +1049,7 @@ export default function InvoiceDetailPage() {
           retrying={retryTaxMutation.isPending}
           charging={collectMutation.isPending}
           sending={resendSetupLinkMutation.isPending}
-          // ADR-030 / simulated-time discipline: anchor "since X ago" on the
-          // owning sub's test-clock frozen_time, not wall-clock. Without this, a
-          // sub frozen at 2024-02-01 on a wall-clock 2026-05-15 dashboard shows
-          // "since 833d ago" on a fresh attention state. effectiveNow(undefined)
-          // for a wall-clock invoice → wall time.
-          now={effectiveNow(testClock?.frozen_time)}
+          now={now}
         />
       )}
 
@@ -1196,7 +1176,7 @@ export default function InvoiceDetailPage() {
                     invoices ('paid' is never the value), so the
                     badge leaked onto paid rows. */}
                 {invoice.due_at && invoice.status === 'finalized' && (
-                  <DueBadge dueAt={invoice.due_at} warningDays={3} now={effectiveNow(testClock?.frozen_time)} />
+                  <DueBadge dueAt={invoice.due_at} warningDays={3} now={now} />
                 )}
               </div>
               {dates.dueHint && <p className="text-xs text-muted-foreground mt-0.5">{dates.dueHint}</p>}
@@ -1614,7 +1594,7 @@ export default function InvoiceDetailPage() {
           </AlertDialogHeader>
           <div className="space-y-2 text-sm text-muted-foreground">
             {finalizeConfirmLines({
-              collectionPaused: collectionPausedNow(subscription?.pause_collection, effectiveNow(testClock?.frozen_time)),
+              collectionPaused: collectionPausedNow(subscription?.pause_collection, now),
               stripeConnected,
               hasCard: paymentMethodsList === undefined ? undefined : hasPaymentMethod,
               hasEmail: !!customer?.email,

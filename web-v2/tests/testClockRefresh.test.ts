@@ -5,7 +5,7 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import { QueryClient, QueryObserver } from '@tanstack/react-query'
-import { refreshTestClocks } from '../src/hooks/useClockFrozenMap.ts'
+import { refreshTestClocks } from '../src/hooks/useNow.ts'
 
 interface Clock { id: string; frozen_time: string }
 
@@ -25,7 +25,7 @@ test('an advance refreshes the time an open list page shows', async () => {
 
   // The clock page advances the clock, then refreshes what it changed.
   server.frozen_time = '2031-04-01T12:00:00Z'
-  await refreshTestClocks(qc, server.id)
+  await refreshTestClocks(qc)
 
   assert.equal(list.getCurrentResult().data?.data[0].frozen_time, '2031-04-01T12:00:00Z')
   unsubscribe()

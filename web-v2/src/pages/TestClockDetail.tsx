@@ -9,7 +9,7 @@ import { toast } from 'sonner'
 import { api, ApiError, formatDateTime, type TestClock, type AdvanceSummary } from '@/lib/api'
 import { showApiError } from '@/lib/formErrors'
 import { addCalendarMonthInTZ, formatYMDInTZ } from '@/lib/dates'
-import { effectiveNow } from '@/lib/effectiveNow'
+import { clockTime } from '@/lib/effectiveNow'
 import { useTenantTimezone } from '@/hooks/useTenantTimezone'
 import { cn } from '@/lib/utils'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
@@ -28,7 +28,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { useAuth } from '@/contexts/AuthContext'
-import { refreshTestClocks } from '@/hooks/useClockFrozenMap'
+import { refreshTestClocks } from '@/hooks/useNow'
 import { ChevronLeft, FastForward, Loader2, Trash2, AlertTriangle, Clock as ClockIcon, Users } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
 
@@ -169,13 +169,10 @@ export default function TestClockDetailPage() {
     try {
       await api.retryAdvanceTestClock(id)
       toast.success('Retrying. Billing the skipped days…')
-      // Refresh the clock + its subs. The detail query's poll
-      // (every 1.5s while status==='advancing', set up below)
-      // picks up the worker-driven transition without us doing
-      // anything else. Forcing one immediate refetch makes the
-      // status badge flip to "Advancing" without waiting for the
-      // first poll tick.
-      refreshTestClocks(queryClient, id)
+      // One refetch now flips the status badge to Advancing; the
+      // detail query's poll (every 1.5s while advancing, set up above)
+      // then follows the worker until the clock is ready.
+      refreshTestClocks(queryClient)
     } catch (err) {
       showApiError(err, 'Failed to retry')
     } finally {
@@ -553,7 +550,7 @@ function AdvanceClockDialog({
     try {
       await api.advanceTestClock(clock.id, targetIso)
       toast.success('Moving the clock forward. Billing the skipped days…')
-      refreshTestClocks(queryClient, clock.id)
+      refreshTestClocks(queryClient)
       queryClient.invalidateQueries({ queryKey: ['invoices'] })
       onClose()
     } catch (err) {
@@ -607,7 +604,7 @@ function AdvanceClockDialog({
                 onDateChange={setDatePart}
                 onTimeChange={setTimePart}
                 timeZone={tz}
-                now={effectiveNow(clock.frozen_time)}
+                now={clockTime(clock.frozen_time)}
                 min={formatYMDInTZ(clock.frozen_time, tz)}
               />
             </div>

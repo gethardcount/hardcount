@@ -1,7 +1,7 @@
 import { Link } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
 import { FlaskConical } from 'lucide-react'
-import { api, formatDateTime, ApiError } from '@/lib/api'
+import { formatDateTime } from '@/lib/api'
+import { useTestClocks } from '@/hooks/useNow'
 import { cn } from '@/lib/utils'
 
 // TestClockBanner is the one line on a detail page whose record is pinned
@@ -15,25 +15,16 @@ import { cn } from '@/lib/utils'
 // so a "Past due" pill next to a future-looking due date makes sense. How
 // simulated and real times appear on the page sits in a collapsed Details.
 //
-// React Query dedupes the test-clock fetch across components, so this adds
-// no network round-trip when the page already loads the same clock.
+// The clock comes from the clock list (useTestClocks), the source every page
+// reads a clock's time from, so the line shows the same time as the page.
 export function TestClockBanner({ testClockId, className }: { testClockId: string; className?: string }) {
-  const { data: clock, error } = useQuery({
-    queryKey: ['test-clock', testClockId],
-    queryFn: () => api.getTestClock(testClockId),
-    enabled: !!testClockId,
-    // Don't retry on 404: the clock is gone, and the line must say so
-    // without four wasted retries first.
-    retry: (failureCount, err) => {
-      if (err instanceof ApiError && err.status === 404) return false
-      return failureCount < 3
-    },
-  })
+  const { data: clocks } = useTestClocks()
+  const clock = clocks?.data.find(c => c.id === testClockId)
 
-  // Deleting a clock now deletes its records too, so this is rare (a page
-  // left open while the clock was deleted). It stays as one line, without
-  // the View-clock link, which would open a dead page.
-  const clockDeleted = error instanceof ApiError && error.status === 404
+  // Deleting a clock deletes its records too, so this is rare (a page left
+  // open while the clock was deleted). It stays as one line, without the
+  // View-clock link, which would open a dead page.
+  const clockDeleted = !!clocks && !clock
 
   return (
     <div className={cn('mb-6 text-sm text-muted-foreground', className)}>
@@ -51,14 +42,12 @@ export function TestClockBanner({ testClockId, className }: { testClockId: strin
               {clock && <>: <span className="text-foreground">{formatDateTime(clock.frozen_time)}</span></>}.
               {' '}Dates on this page follow the test clock.
             </span>
-            {/* The id can be empty for a moment while the page resolves which
-                clock its record is pinned to; no link until it is known. */}
-            {testClockId && <Link
+            <Link
               to={`/test-clocks/${testClockId}`}
               className="text-primary underline-offset-2 hover:underline"
             >
               View clock
-            </Link>}
+            </Link>
           </>
         )}
       </div>

@@ -23,7 +23,7 @@ import {
 import { cancelAtPeriodEndText, periodLabels, trialLength } from '@/lib/subscriptionPeriod'
 import { previewView } from '@/lib/invoicePreview'
 import { ExpiryBadge } from '@/components/ExpiryBadge'
-import { effectiveNow } from '@/lib/effectiveNow'
+import { useNowFor } from '@/hooks/useNow'
 import { useTenantTimezone } from '@/hooks/useTenantTimezone'
 import { cn } from '@/lib/utils'
 import { invoicePaymentChip, invoiceStatus, subscriptionStatus, trialBadgeEndsAt } from '@/lib/statusLabels'
@@ -137,15 +137,6 @@ export default function SubscriptionDetailPage() {
     enabled: !!id,
   })
 
-  // Test-clock frozen_time for relative-time badges (Trial ends in N
-  // days). Without it the trial-end countdown reads from wall-clock,
-  // not the simulation time the engine bills under.
-  const { data: testClock } = useQuery({
-    queryKey: ['test-clock', sub?.test_clock_id],
-    queryFn: () => api.getTestClock(sub!.test_clock_id!),
-    enabled: !!sub?.test_clock_id,
-  })
-
   // Only a subscription with a current period and items has a next invoice
   // to preview, so the page asks only for those.
   const previewable = !!sub && !!sub.current_billing_period_start && !!sub.current_billing_period_end && (sub.items?.length ?? 0) > 0
@@ -157,11 +148,11 @@ export default function SubscriptionDetailPage() {
   })
   const previewNotes = preview ? invoicePreviewNotes(preview) : null
 
-  // Simulated "now" as a Date (the clock's frozen_time when this sub is pinned,
-  // else wall time) — the single anchor for the lifecycle timeline's past/future
-  // dots and the date-picker floors below. A sub frozen in the past must not
-  // offer wall-clock dates its engine would treat as far-future.
-  const now = effectiveNow(sub?.test_clock_id ? testClock?.frozen_time : undefined)
+  // The subscription's "now" (its clock's time when it is on one): the one
+  // anchor for Trial ends, the lifecycle timeline's past and future dots and
+  // the date-picker floors below. A subscription frozen in the past must not
+  // offer real-time dates its engine would treat as far in the future.
+  const now = useNowFor(sub)
   const nowDate = new Date(now)
   // The account's zone, which the resume date and a new trial end are
   // picked and sent in.
@@ -512,7 +503,7 @@ export default function SubscriptionDetailPage() {
             </>
           )}
           <StatusBadge status={subscriptionStatus(sub)} />
-          <ExpiryBadge expiresAt={trialBadgeEndsAt(sub)} label="Trial ends" warningDays={3} now={effectiveNow(sub.test_clock_id ? testClock?.frozen_time : undefined)} />
+          <ExpiryBadge expiresAt={trialBadgeEndsAt(sub)} label="Trial ends" warningDays={3} now={now} />
         </div>
       </div>
 
@@ -1068,7 +1059,7 @@ export default function SubscriptionDetailPage() {
                         with no payment chip, never "voided" beside the
                         "pending" it kept. */}
                     <TableCell>
-                      <StatusBadge status={invoiceStatus(inv, effectiveNow(sub.test_clock_id ? testClock?.frozen_time : undefined))} />
+                      <StatusBadge status={invoiceStatus(inv, now)} />
                     </TableCell>
                     <TableCell>
                       {(() => {

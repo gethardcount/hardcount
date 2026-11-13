@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { Link } from 'react-router-dom'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -32,6 +32,7 @@ import {
   Form, FormControl, FormField, FormItem, FormLabel, FormMessage,
 } from '@/components/ui/form'
 import { useAuth } from '@/contexts/AuthContext'
+import { refreshTestClocks, useTestClocks } from '@/hooks/useNow'
 import { useNavigate } from 'react-router-dom'
 import { useEffect } from 'react'
 import { Plus, Clock as ClockIcon, Loader2 } from 'lucide-react'
@@ -74,11 +75,7 @@ export default function TestClocksPage() {
     if (user?.livemode) navigate('/', { replace: true })
   }, [user?.livemode, navigate])
 
-  const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['test-clocks'],
-    queryFn: () => api.listTestClocks(),
-    enabled: !!user && !user.livemode,
-  })
+  const { data, isLoading, error, refetch } = useTestClocks()
   const clocks = data?.data ?? []
 
   return (
@@ -201,7 +198,7 @@ function CreateClockDialog({ onClose }: { onClose: () => void }) {
         frozen_time: isoUtc,
       })
       toast.success('Test clock created')
-      queryClient.invalidateQueries({ queryKey: ['test-clocks'] })
+      refreshTestClocks(queryClient)
       onClose()
       navigate(`/test-clocks/${clk.id}`)
     } catch (err) {

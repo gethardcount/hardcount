@@ -8,7 +8,7 @@ import { formatCompactCents } from '@/lib/money'
 import { ATTENTION_LISTS, homeAttentionLines, type AttentionSeverity } from '@/lib/homeAttention'
 import type { Invoice, Customer } from '@/lib/api'
 import { timeAgo, wallClockNow } from '@/lib/effectiveNow'
-import { useEffectiveNowResolver, useTestClocks } from '@/hooks/useClockFrozenMap'
+import { useNowResolver, useTestClocks } from '@/hooks/useNow'
 import { useAuth } from '@/contexts/AuthContext'
 import { NoticeRow } from '@/components/NoticeRow'
 import { CUSTOMERS_DEFINITION, FAILED_PAYMENTS_DEFINITION, MRR_DEFINITION, currencyScopedHint, customersTrend, failedPaymentsTrend, subscriptionsHint } from '@/lib/homeKpis'
@@ -78,7 +78,7 @@ export default function DashboardPage() {
     ;(recentCustomers?.data ?? []).forEach(c => { m[c.id] = c })
     return m
   }, [recentCustomers])
-  const resolveNow = useEffectiveNowResolver()
+  const resolveNow = useNowResolver()
   // Totals leave out test-clock customers (analytics/simfilter.go) while
   // Recent Invoices lists their invoices; the note says so where it matters.
   const { user } = useAuth()
@@ -319,10 +319,10 @@ export default function DashboardPage() {
                       {/* Wraps on a phone: at 390px the badges ran under the
                           amount ("$99.00 due" over "Simulated"). */}
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
-                        <StatusDot status={invoiceStatus(inv, resolveNow(customerMap[inv.customer_id]?.test_clock_id))} />
+                        <StatusDot status={invoiceStatus(inv, resolveNow(customerMap[inv.customer_id]))} />
                         <span className="text-sm font-mono text-foreground">{inv.invoice_number}</span>
                         <StatusBadge
-                          status={invoiceStatus(inv, resolveNow(customerMap[inv.customer_id]?.test_clock_id))}
+                          status={invoiceStatus(inv, resolveNow(customerMap[inv.customer_id]))}
                           className="text-[10px]"
                         />
                         {/* Authoritative per-invoice flag — same rule as the
@@ -340,7 +340,7 @@ export default function DashboardPage() {
                               invoice); wall-clock invoices resolve to wall time. */}
                           {timeAgo(
                             inv.created_at,
-                            resolveNow(customerMap[inv.customer_id]?.test_clock_id),
+                            resolveNow(customerMap[inv.customer_id]),
                           )}
                         </span>
                       </div>

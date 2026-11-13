@@ -12,7 +12,7 @@ import type { EffectiveNow } from '@/lib/effectiveNow'
 // The picker works in days (yyyy-mm-dd) of the account's zone. Its today,
 // marked in the calendar and set by the Today button, is the day of `now` in
 // `timeZone`: pass the account zone (useTenantTimezone) and the customer's
-// now (useEffectiveNow), or wallClockNow() where no clock applies.
+// now (useNowFor), or wallClockNow() where no clock applies.
 interface DatePickerProps {
   value: string                    // yyyy-mm-dd, or ''
   onChange: (value: string) => void
