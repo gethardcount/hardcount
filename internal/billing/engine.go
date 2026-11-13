@@ -1749,7 +1749,7 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 	if err != nil {
 		return TaxApplication{}, err
 	}
-	return e.applyTax(ctx, ts, tenantID, customerID, currency, subtotal, lineItems)
+	return e.applyTax(ctx, ts, ts.TaxInclusive, tenantID, customerID, currency, subtotal, lineItems)
 }
 
 // loadTaxSettings checks the tax wiring, pins the tenant on ctx and reads
@@ -1795,8 +1795,11 @@ func (e *Engine) loadTaxSettings(ctx context.Context, tenantID string) (context.
 }
 
 // applyTax is ApplyTaxToLineItems after the settings read: ctx carries the
-// tenant, and ts is the tenant's settings.
-func (e *Engine) applyTax(ctx context.Context, ts domain.TenantSettings, tenantID, customerID, currency string, subtotal int64, lineItems []domain.InvoiceLineItem) (TaxApplication, error) {
+// tenant, and ts is the tenant's settings. inclusive is whether these prices
+// include tax: for a new invoice, the setting it is priced under; for a stored
+// invoice, its own TaxInclusive. The provider request and the net-sum check
+// read it, never ts.TaxInclusive.
+func (e *Engine) applyTax(ctx context.Context, ts domain.TenantSettings, inclusive bool, tenantID, customerID, currency string, subtotal int64, lineItems []domain.InvoiceLineItem) (TaxApplication, error) {
 	// Every invoice with priced lines passes here, so this is where its
 	// amounts are held to int64 cents: when the lines' sizes sum inside
 	// int64, no sum of them wraps, whatever the caller or the steps below
@@ -1811,7 +1814,7 @@ func (e *Engine) applyTax(ctx context.Context, ts domain.TenantSettings, tenantI
 	app := TaxApplication{
 		SubtotalCents: subtotal,
 		TaxFacts:      domain.TaxFacts{TaxStatus: domain.InvoiceTaxOK},
-		TaxInclusive:  ts.TaxInclusive,
+		TaxInclusive:  inclusive,
 	}
 	app.TaxName = ts.TaxName
 
@@ -1905,7 +1908,7 @@ func (e *Engine) applyTax(ctx context.Context, ts domain.TenantSettings, tenantI
 		CustomerTaxIDType:    profile.TaxIDType,
 		CustomerStatus:       profile.TaxStatus,
 		CustomerExemptReason: profile.TaxExemptReason,
-		TaxInclusive:         ts.TaxInclusive,
+		TaxInclusive:         inclusive,
 		DefaultTaxCode:       ts.DefaultProductTaxCode,
 		OnFailure:            onFailure,
 		LineItems:            reqLines,
@@ -2019,7 +2022,7 @@ func (e *Engine) applyTax(ctx context.Context, ts domain.TenantSettings, tenantI
 
 	// Inclusive mode: the provider returned net line amounts; rewrite
 	// subtotal/discount to net units so the invoice invariant holds.
-	if ts.TaxInclusive && netSubtotalSum != subtotal {
+	if inclusive && netSubtotalSum != subtotal {
 		app.SubtotalCents = netSubtotalSum
 		// Gross paid == subtotal, which after tax carve-out is
 		// netSubtotalSum - netDiscount + tax. Solve for netDiscount: 0 when
@@ -5294,11 +5297,13 @@ func (e *Engine) computeAndPersistInvoiceTax(ctx context.Context, tenantID, invo
 	if err != nil {
 		return domain.Invoice{}, fmt.Errorf("recompute tax: %w", err)
 	}
-	basis, subtotal, err := storedTaxBasis(inv, items, ts.TaxInclusive)
+	// A stored invoice's tax is worked out in the terms it was priced in, not
+	// the tenant's setting now: a switch applies to invoices priced after it.
+	basis, subtotal, err := storedTaxBasis(inv, items, inv.TaxInclusive)
 	if err != nil {
 		return domain.Invoice{}, fmt.Errorf("recompute tax: %w", err)
 	}
-	taxApp, err := e.applyTax(taxCtx, ts, tenantID, inv.CustomerID, inv.Currency, subtotal, basis)
+	taxApp, err := e.applyTax(taxCtx, ts, inv.TaxInclusive, tenantID, inv.CustomerID, inv.Currency, subtotal, basis)
 	if err != nil {
 		return domain.Invoice{}, fmt.Errorf("recompute tax: %w", err)
 	}

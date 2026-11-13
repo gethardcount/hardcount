@@ -281,8 +281,10 @@ type AuditLogger interface {
 	LogInTx(ctx context.Context, tx *sql.Tx, e audit.Entry) error
 }
 
-// SetTenantSettingsReader wires the tenant-settings reader used to default a
-// manual invoice's net payment terms when the caller omits them. Optional.
+// SetTenantSettingsReader wires the tenant-settings reader a manual invoice is
+// created under: its net payment terms when the caller omits them, and whether
+// its prices include tax. Optional; without it an invoice is Net 30 with
+// prices before tax.
 func (s *Service) SetTenantSettingsReader(r TenantSettingsReader) { s.settings = r }
 
 // SetAuditLogger wires the audit logger.

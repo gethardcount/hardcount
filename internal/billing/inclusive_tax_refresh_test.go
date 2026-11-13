@@ -92,6 +92,8 @@ func engineDraft(reason domain.InvoiceBillingReason, lines ...domain.InvoiceLine
 				Status: domain.InvoiceDraft, BillingReason: reason,
 				SubtotalCents: app.SubtotalCents, DiscountCents: app.DiscountCents, TaxFacts: app.TaxFacts,
 				TotalAmountCents: total, AmountDueCents: total,
+				// What the build stamps: the terms the lines were priced in.
+				TaxInclusive: app.TaxInclusive,
 			}},
 			lineItems: lines,
 		}
@@ -126,6 +128,8 @@ func operatorDraft(lines ...domain.InvoiceLineItem) draftBuild {
 				Status: domain.InvoiceDraft, BillingReason: domain.BillingReasonManual,
 				SubtotalCents: subtotal, TotalAmountCents: subtotal, AmountDueCents: subtotal,
 				TaxFacts: domain.TaxFacts{TaxStatus: domain.InvoiceTaxOK},
+				// What the create stamps: the tenant's setting at that moment.
+				TaxInclusive: e.settings.(*taxSettings).inclusive,
 			}},
 			lineItems: lines,
 		}

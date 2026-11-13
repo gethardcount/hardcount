@@ -249,7 +249,8 @@ func TestComputeTax_InclusiveCommitDraftComputedBeforeTheChange(t *testing.T) {
 				invoices: []domain.Invoice{{
 					ID: "inv_1", TenantID: "t1", CustomerID: "cus_1", Currency: "USD", Status: domain.InvoiceDraft,
 					SubtotalCents: tc.oldSubtotal, TotalAmountCents: tc.oldSubtotal + tc.oldTax, AmountDueCents: tc.oldSubtotal + tc.oldTax,
-					TaxFacts: domain.TaxFacts{TaxStatus: domain.InvoiceTaxOK, TaxAmountCents: tc.oldTax, TaxRate: 18},
+					TaxFacts:     domain.TaxFacts{TaxStatus: domain.InvoiceTaxOK, TaxAmountCents: tc.oldTax, TaxRate: 18},
+					TaxInclusive: true, // created under the inclusive setting
 				}},
 				lineItems: append([]domain.InvoiceLineItem(nil), tc.lines...),
 			}
