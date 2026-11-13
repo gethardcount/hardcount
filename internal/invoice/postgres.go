@@ -3848,6 +3848,9 @@ func (s *PostgresStore) MarkTaxReversed(ctx context.Context, tenantID, id string
 //     (maxAttempts) still applies as a defense against runaway
 //     retries chewing through the 10-min catchup ceiling.
 //
+// It returns the page after the keyset after: a draft the retry leaves
+// waiting stays in the list, and the cursor moves past it.
+//
 // Design choice (operator-friendly over production-fidelity): each
 // Advance gives every pending row exactly one retry attempt. An
 // operator running through a tax-error rehearsal scenario clicks
@@ -3857,7 +3860,7 @@ func (s *PostgresStore) MarkTaxReversed(ctx context.Context, tenantID, id string
 // deferred to a follow-up ADR — it's a niche use case operators
 // don't typically run, while operator-confusion from "I clicked
 // Advance and nothing happened" is a daily failure mode.
-func (s *PostgresStore) ListPendingTaxRetryForClock(ctx context.Context, tenantID, clockID string, retryableCodes []string, maxAttempts, limit int) ([]domain.Invoice, error) {
+func (s *PostgresStore) ListPendingTaxRetryForClock(ctx context.Context, tenantID, clockID string, retryableCodes []string, maxAttempts int, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -3879,9 +3882,10 @@ func (s *PostgresStore) ListPendingTaxRetryForClock(ctx context.Context, tenantI
 		  AND i.tax_status = 'pending'
 		  AND COALESCE(i.tax_error_code, '') = ANY($3)
 		  AND i.tax_retry_count < $4
-		ORDER BY i.created_at ASC
-		LIMIT $5
-	`, tenantID, clockID, retryableCodes, maxAttempts, limit)
+		  AND (i.created_at, i.id) > ($5, $6)
+		ORDER BY i.created_at, i.id
+		LIMIT $7
+	`, tenantID, clockID, retryableCodes, maxAttempts, after.CreatedAt, after.ID, limit)
 	if err != nil {
 		return nil, err
 	}
