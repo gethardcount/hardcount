@@ -25,15 +25,13 @@ import (
 // setManualTax turns on the manual provider at a flat rate for the tenant.
 func setManualTax(t *testing.T, ctx context.Context, settings *tenant.SettingsStore, tenantID string, rate float64) {
 	t.Helper()
-	ts, err := settings.Get(ctx, tenantID)
-	if err != nil {
-		t.Fatalf("get settings: %v", err)
-	}
-	ts.TaxProvider = "manual"
-	ts.TaxRate = rate
-	ts.TaxName = "VAT"
-	if _, err := settings.Upsert(ctx, ts); err != nil {
-		t.Fatalf("upsert settings: %v", err)
+	if _, err := settings.Update(ctx, tenantID, func(ts *domain.TenantSettings) error {
+		ts.TaxProvider = "manual"
+		ts.TaxRate = rate
+		ts.TaxName = "VAT"
+		return nil
+	}); err != nil {
+		t.Fatalf("update settings: %v", err)
 	}
 }
 
@@ -209,13 +207,11 @@ func TestCommitTax_InclusiveDraftComputedBeforeTheChange_E2E(t *testing.T) {
 	lf := newLiveFixture(t, "Commit Tax Inclusive Draft", 0)
 	ctx := lf.ctx
 	setManualTax(t, ctx, lf.settings, lf.tenantID, 18)
-	ts, err := lf.settings.Get(ctx, lf.tenantID)
-	if err != nil {
-		t.Fatalf("get settings: %v", err)
-	}
-	ts.TaxInclusive = true
-	if _, err := lf.settings.Upsert(ctx, ts); err != nil {
-		t.Fatalf("upsert settings: %v", err)
+	if _, err := lf.settings.Update(ctx, lf.tenantID, func(ts *domain.TenantSettings) error {
+		ts.TaxInclusive = true
+		return nil
+	}); err != nil {
+		t.Fatalf("update settings: %v", err)
 	}
 
 	lf.invStore.SetCommitFunder(lf.creditSvc)

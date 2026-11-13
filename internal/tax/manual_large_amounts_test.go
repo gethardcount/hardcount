@@ -10,7 +10,7 @@ import (
 )
 
 // The manual provider works in int64 cents. Its products (amount × rate in
-// parts per million, amount × discount) can be larger than any int64, so
+// parts per million) can be larger than any int64, so
 // they are worked out in 128 bits: the tax of any line amount is exact, and
 // a result that does not fit int64 is an error, never a wrapped number.
 // The rate is 0 to 100%, so a tax never exceeds its base and only the sum of
@@ -30,7 +30,6 @@ func TestManual_LargeAmountsAreExact(t *testing.T) {
 		name      string
 		rate      float64
 		inclusive bool
-		discount  int64
 		amounts   []int64
 		wantTax   int64
 		wantLines []int64 // per-line tax
@@ -64,15 +63,6 @@ func TestManual_LargeAmountsAreExact(t *testing.T) {
 			wantNet:   []int64{6_000_000_000_000_000_000, 3_000_000_000_000_000_000},
 		},
 		{
-			// Discount 1e18 off 9e18, spread 2:1: bases 5.333…e18 and
-			// 2.666…e18; tax 20% of 8e18 = 1.6e18.
-			name: "exclusive, discount on large lines", rate: 20, discount: 1_000_000_000_000_000_000,
-			amounts:   []int64{6_000_000_000_000_000_000, 3_000_000_000_000_000_000},
-			wantTax:   1_600_000_000_000_000_000,
-			wantLines: []int64{1_066_666_666_666_666_667, 533_333_333_333_333_333},
-			wantNet:   []int64{6_000_000_000_000_000_000, 3_000_000_000_000_000_000},
-		},
-		{
 			// Gross 1e14 at 20%: net = 1e14 / 1.2 = 83333333333333.33 → 83333333333333;
 			// tax = 1e14 − 83333333333333 = 16666666666667.
 			name: "inclusive, 1e14 at 20%", rate: 20, inclusive: true,
@@ -93,7 +83,7 @@ func TestManual_LargeAmountsAreExact(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			p := NewManualProvider(tc.rate, "VAT")
 			res, err := p.Calculate(context.Background(), Request{
-				LineItems: manualLines(tc.amounts...), TaxInclusive: tc.inclusive, DiscountCents: tc.discount,
+				LineItems: manualLines(tc.amounts...), TaxInclusive: tc.inclusive,
 			})
 			if err != nil {
 				t.Fatalf("Calculate: %v", err)

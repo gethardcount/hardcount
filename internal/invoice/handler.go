@@ -454,13 +454,23 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		respond.FromError(w, r, err, "invoice")
 		return
 	}
+	status, ok := respond.ParseFilter(w, r, "status", domain.InvoiceDraft, domain.InvoiceFinalized,
+		domain.InvoicePaid, domain.InvoiceVoided, domain.InvoiceUncollectible)
+	if !ok {
+		return
+	}
+	paymentStatus, ok := respond.ParseFilter(w, r, "payment_status", domain.PaymentPending, domain.PaymentProcessing,
+		domain.PaymentSucceeded, domain.PaymentFailed, domain.PaymentUnknown)
+	if !ok {
+		return
+	}
 
 	filter := ListFilter{
 		TenantID:       tenantID,
 		CustomerID:     r.URL.Query().Get("customer_id"),
 		SubscriptionID: r.URL.Query().Get("subscription_id"),
-		Status:         r.URL.Query().Get("status"),
-		PaymentStatus:  r.URL.Query().Get("payment_status"),
+		Status:         string(status),
+		PaymentStatus:  string(paymentStatus),
 		Search:         strings.TrimSpace(r.URL.Query().Get("search")),
 		CreatedFrom:    createdFrom,
 		CreatedTo:      createdTo,

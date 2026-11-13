@@ -73,12 +73,10 @@ func switchedTenant(t *testing.T, name, now string) (f *thresholdFixture, ctx co
 	stripeTax = newReversalDouble(t)
 	f.engine.SetTaxProviderResolver(tax.NewResolver(stripeTax))
 
-	ts, err := f.settings.Get(ctx, f.tenantID)
-	if err != nil {
-		t.Fatalf("get settings: %v", err)
-	}
-	ts.TaxProvider = now
-	if _, err := f.settings.Upsert(ctx, ts); err != nil {
+	if _, err := f.settings.Update(ctx, f.tenantID, func(ts *domain.TenantSettings) error {
+		ts.TaxProvider = now
+		return nil
+	}); err != nil {
 		t.Fatalf("switch tax provider to %s: %v", now, err)
 	}
 

@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
@@ -37,18 +39,15 @@ func TestSettingsUpsert_MergePatch(t *testing.T) {
 	store := NewSettingsStore(db)
 	h := NewSettingsHandler(store)
 
-	// Seed a fully-configured tenant on top of the synthesized defaults
-	// (a bare struct violates the enum CHECKs on tax fields).
-	seed, err := store.Get(ctx, tenantID)
-	if err != nil {
-		t.Fatalf("get defaults: %v", err)
-	}
-	seed.CompanyName = "Acme GmbH"
-	seed.DefaultCurrency = "EUR"
-	seed.Timezone = "Europe/Berlin"
-	seed.InvoicePrefix = "ACME"
-	seed.NetPaymentTerms = 15
-	if _, err := store.Upsert(ctx, seed); err != nil {
+	// Seed a fully-configured tenant on top of the defaults.
+	if _, err := store.Update(ctx, tenantID, func(seed *domain.TenantSettings) error {
+		seed.CompanyName = "Acme GmbH"
+		seed.DefaultCurrency = "EUR"
+		seed.Timezone = "Europe/Berlin"
+		seed.InvoicePrefix = "ACME"
+		seed.NetPaymentTerms = 15
+		return nil
+	}); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}
 
@@ -96,6 +95,33 @@ func TestSettingsUpsert_MergePatch(t *testing.T) {
 	got, _ = store.Get(ctx, tenantID)
 	if got.InvoicePrefix != "HC" {
 		t.Errorf("invoice_prefix after explicit \"\": got %q, want the HC default", got.InvoicePrefix)
+	}
+
+	// A low-balance threshold changed from one amount to another gets an audit
+	// row. The threshold is a pointer, and decoding a number into a non-nil
+	// pointer writes into the int64 it points at. A "before" that shares that
+	// pointer then reads the new amount, the diff finds no change, and the
+	// save records nothing.
+	//
+	// Mutation-verify: take "before" as a plain struct copy (before = *ts).
+	// The 5000 to 7000 save writes no audit row.
+	audit := &changeRecorder{}
+	h.SetAuditLogger(audit)
+	for _, body := range []string{
+		`{"credit_balance_low_threshold_cents":5000}`,
+		`{"credit_balance_low_threshold_cents":7000}`,
+	} {
+		rr, req = settingsRequest(t, tenantID, body)
+		h.upsert(rr, req)
+		if rr.Code != http.StatusOK {
+			t.Fatalf("threshold save %s: status %d body=%s", body, rr.Code, rr.Body.String())
+		}
+	}
+	audit.mu.Lock()
+	defer audit.mu.Unlock()
+	want := map[string]any{"from": float64(5000), "to": float64(7000)}
+	if len(audit.changes) != 2 || !reflect.DeepEqual(audit.changes[1]["credit_balance_low_threshold_cents"], want) {
+		t.Errorf("audit rows %v, want a second row with credit_balance_low_threshold_cents %v", audit.changes, want)
 	}
 }
 

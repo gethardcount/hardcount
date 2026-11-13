@@ -14,14 +14,15 @@
 import type { LimitParameter } from './limitParameter';
 import type { ListCustomersDir } from './listCustomersDir';
 import type { ListCustomersSort } from './listCustomersSort';
+import type { ListCustomersStatus } from './listCustomersStatus';
 import type { OffsetParameter } from './offsetParameter';
 
 export type ListCustomersParams = {
 /**
  * Only customers with this status, `active` or `archived`. Any other
- * value matches no customer.
+ * value is a 422 with `param: status`.
  */
-status?: string;
+status?: ListCustomersStatus;
 /**
  * Only the customer with this `external_id` (exact match).
  */

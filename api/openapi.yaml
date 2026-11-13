@@ -140,12 +140,14 @@ components:
         For 24 hours, a repeat with the same key, method, path and body gets
         the first response again, byte for byte, with an
         `Idempotent-Replayed: true` header, instead of running again. A
-        first answer of 409, 422 or 503 is not kept, so a retry with the
-        same key runs again. A repeat sent while the first request is still
-        running waits up to 5 seconds for its answer; if there is none by
-        then, it gets 409 with code `conflict_idempotency`. The same key
-        with a different method, path or body is a 422 with code
-        `idempotency_error`. The other error cases are in
+        first answer of 409, 422 or 503, or a 400 `invalid JSON body`, is
+        not kept, so a retry with the same key runs again.
+        A repeat sent while the first request is still running waits up to
+        5 seconds for its answer; if there is none by then, it gets 409
+        with code `conflict_idempotency`. The same key with a different
+        method, path or body is a 422 with code `idempotency_error`. After
+        24 hours the key is free, and a request with it runs as new. The
+        other error cases are in
         [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
         not take it: each usage event carries its own `idempotency_key`.
       schema:
@@ -326,9 +328,9 @@ components:
         The body is not one valid JSON value, it is not a JSON object, it
         is empty where the operation needs one, or a field has the wrong
         JSON type (such as a string where a number belongs). A body over
-        1 MB gets 400 too, unless the operation lists a 413. On a route
-        that takes `Idempotency-Key`, a 400 is kept for the key: send the
-        corrected request with a new key.
+        1 MB gets 400 too, unless the operation lists a 413. This answer
+        is not kept for an `Idempotency-Key`: send the corrected request
+        with the same key.
       content:
         application/json:
           schema:
@@ -10155,9 +10157,10 @@ paths:
           in: query
           description: |
             Only customers with this status, `active` or `archived`. Any other
-            value matches no customer.
+            value is a 422 with `param: status`.
           schema:
             type: string
+            enum: [active, archived]
         - name: external_id
           in: query
           description: Only the customer with this `external_id` (exact match).
@@ -10234,10 +10237,11 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "422":
           description: |
-            `limit` or `offset` is out of range or not a whole number, the
-            request sends the removed `after` cursor, `sort` or `dir` is not
-            one of its values. `param` names it, and for `sort` and `dir`
-            the message lists the allowed values.
+            `status` is not one of its values, `limit` or `offset` is out of
+            range or not a whole number, the request sends the removed
+            `after` cursor, or `sort` or `dir` is not one of its values.
+            `param` names it, and for `status`, `sort` and `dir` the
+            message lists the allowed values.
           content:
             application/json:
               schema:
@@ -10678,7 +10682,7 @@ paths:
                 error:
                   type: invalid_request_error
                   code: invalid_state
-                  message: billing profile currency EUR conflicts with subscription hc_sub_dauq502q3gpgqfoq5c2g's plan currency USD — invoices would relabel plan prices in EUR without conversion; cancel the subscription or keep the currency
+                  message: billing profile currency EUR conflicts with subscription acme-pro's plan currency USD — invoices would relabel plan prices in EUR without conversion; cancel the subscription or keep the currency
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "422":
           description: |
@@ -12930,7 +12934,9 @@ paths:
             type: string
         - name: status
           in: query
-          description: Only notes in this status.
+          description: |
+            Only notes in this status. Any other value is a 422 with
+            `param: status`.
           schema:
             type: string
             enum: [draft, issued, voided]
@@ -12944,7 +12950,7 @@ paths:
             returns issued, non-test-clock notes whose
             refund failed or has an unknown result, has been pending more
             than 72 hours, or has a refund amount still at `none` after 1
-            hour.
+            hour. Any other value is a 422 with `param: refund_status`.
         - name: sort
           in: query
           description: |
@@ -13032,9 +13038,10 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "422":
           description: |
-            `limit` or `offset` is out of range or not a whole number, the
-            request sends the removed `after` cursor, `sort` or `dir` is not
-            one of its values. `param` names it, and for `sort` and `dir`
+            `status` or `refund_status` is not one of its values, `limit` or
+            `offset` is out of range or not a whole number, the request sends
+            the removed `after` cursor, or `sort` or `dir` is not one of its
+            values. `param` names it, and for the filters, `sort` and `dir`
             the message lists the allowed values.
           content:
             application/json:
@@ -13310,7 +13317,9 @@ paths:
             type: string
         - name: entry_type
           in: query
-          description: Only entries of this type.
+          description: |
+            Only entries of this type. Any other value is a 422 with
+            `param: entry_type`.
           schema:
             type: string
             enum: [grant, usage, expiry, adjustment]
@@ -13398,10 +13407,11 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "422":
           description: |
-            `limit` or `offset` is out of range or not a whole number, the
-            request sends the removed `after` cursor, `sort` or `dir` is not
-            one of its values. `param` names it, and for `sort` and `dir`
-            the message lists the allowed values.
+            `entry_type` is not one of its values, `limit` or `offset` is out
+            of range or not a whole number, the request sends the removed
+            `after` cursor, or `sort` or `dir` is not one of its values.
+            `param` names it, and for `entry_type`, `sort` and `dir` the
+            message lists the allowed values.
           content:
             application/json:
               schema:
@@ -18860,17 +18870,20 @@ paths:
           in: query
           description: |
             Only invoices in this status: `draft`, `finalized`, `paid`,
-            `voided` or `uncollectible`. Another value matches nothing.
+            `voided` or `uncollectible`. Any other value is a 422 with
+            `param: status`.
           schema:
             type: string
+            enum: [draft, finalized, paid, voided, uncollectible]
         - name: payment_status
           in: query
           description: |
             Only invoices with this payment status: `pending`, `processing`,
-            `succeeded`, `failed` or `unknown`. Another value matches
-            nothing.
+            `succeeded`, `failed` or `unknown`. Any other value is a 422
+            with `param: payment_status`.
           schema:
             type: string
+            enum: [pending, processing, succeeded, failed, unknown]
         - name: search
           in: query
           description: |
@@ -19012,11 +19025,12 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "422":
           description: |
-            `limit` or `offset` is out of range or not a whole number, the
-            request sends the removed `after` cursor, `sort` or `dir` is not
-            one of its values, `from` or `to` is neither an RFC 3339 time nor
-            a YYYY-MM-DD date, or `to` is before `from`. `param` names it, and
-            for `sort` and `dir` the message lists the allowed values.
+            `status` or `payment_status` is not one of its values, `limit` or
+            `offset` is out of range or not a whole number, the request sends
+            the removed `after` cursor, `sort` or `dir` is not one of its
+            values, `from` or `to` is neither an RFC 3339 time nor a YYYY-MM-DD
+            date, or `to` is before `from`. `param` names it, and for the
+            filters, `sort` and `dir` the message lists the allowed values.
           content:
             application/json:
               schema:
@@ -27741,6 +27755,11 @@ paths:
         keeps its stored value. A field you send is set, even to `""` or
         `0`. Send `credit_balance_low_threshold_cents: null` to turn
         low-balance alerts off.
+
+        Saves run one at a time, so two saves at once each keep the fields
+        the other sends. Send only the fields you change: a field you send
+        unchanged puts back the value you read, even if someone saved a new
+        one since.
 
         Empty `default_currency`, `timezone`, `invoice_prefix`,
         `credit_note_prefix`, `tax_provider` and `tax_on_failure` fall back

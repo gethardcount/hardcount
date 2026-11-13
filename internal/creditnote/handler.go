@@ -270,12 +270,21 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		respond.FromError(w, r, err, "credit_note")
 		return
 	}
+	status, ok := respond.ParseFilter(w, r, "status", domain.CreditNoteDraft, domain.CreditNoteIssued, domain.CreditNoteVoided)
+	if !ok {
+		return
+	}
+	refundStatus, ok := respond.ParseFilter(w, r, "refund_status", string(domain.RefundNone), string(domain.RefundPending),
+		string(domain.RefundSucceeded), string(domain.RefundFailed), string(domain.RefundUnknown), RefundNeedsAttention)
+	if !ok {
+		return
+	}
 	filter := ListFilter{
 		TenantID:     tenantID,
 		InvoiceID:    r.URL.Query().Get("invoice_id"),
 		CustomerID:   r.URL.Query().Get("customer_id"),
-		Status:       r.URL.Query().Get("status"),
-		RefundStatus: r.URL.Query().Get("refund_status"),
+		Status:       string(status),
+		RefundStatus: refundStatus,
 		Limit:        page.Limit,
 		Offset:       page.Offset,
 		Sort:         r.URL.Query().Get("sort"),

@@ -84,28 +84,23 @@ func DefaultSettings(tenantID string) domain.TenantSettings {
 	}
 }
 
-func (s *SettingsStore) Get(ctx context.Context, tenantID string) (domain.TenantSettings, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.TenantSettings{}, err
-	}
-	defer postgres.Rollback(tx)
+// settingsColumns is the column list every settings read returns, in the
+// order scanSettings reads it.
+const settingsColumns = `tenant_id, default_currency, timezone, invoice_prefix, credit_note_prefix,
+	net_payment_terms, tax_provider, tax_rate, COALESCE(tax_name,''), tax_inclusive,
+	COALESCE(default_product_tax_code,''), tax_on_failure,
+	COALESCE(company_name,''),
+	COALESCE(company_address_line1,''), COALESCE(company_address_line2,''),
+	COALESCE(company_city,''), COALESCE(company_state,''),
+	COALESCE(company_postal_code,''), COALESCE(company_country,''),
+	COALESCE(company_email,''), COALESCE(company_phone,''), COALESCE(logo_url,''),
+	COALESCE(brand_color,''),
+	COALESCE(tax_id,''), COALESCE(support_url,''), COALESCE(invoice_footer,''),
+	credit_balance_low_threshold_cents, created_at, updated_at`
 
+func scanSettings(row *sql.Row) (domain.TenantSettings, error) {
 	var ts domain.TenantSettings
-	err = tx.QueryRowContext(ctx, `
-		SELECT tenant_id, default_currency, timezone, invoice_prefix, credit_note_prefix,
-			net_payment_terms, tax_provider, tax_rate, COALESCE(tax_name,''), tax_inclusive,
-			COALESCE(default_product_tax_code,''), tax_on_failure,
-			COALESCE(company_name,''),
-			COALESCE(company_address_line1,''), COALESCE(company_address_line2,''),
-			COALESCE(company_city,''), COALESCE(company_state,''),
-			COALESCE(company_postal_code,''), COALESCE(company_country,''),
-			COALESCE(company_email,''), COALESCE(company_phone,''), COALESCE(logo_url,''),
-			COALESCE(brand_color,''),
-			COALESCE(tax_id,''), COALESCE(support_url,''), COALESCE(invoice_footer,''),
-			credit_balance_low_threshold_cents, created_at, updated_at
-		FROM tenant_settings WHERE tenant_id = $1
-	`, tenantID).Scan(&ts.TenantID, &ts.DefaultCurrency, &ts.Timezone, &ts.InvoicePrefix, &ts.CreditNotePrefix,
+	err := row.Scan(&ts.TenantID, &ts.DefaultCurrency, &ts.Timezone, &ts.InvoicePrefix, &ts.CreditNotePrefix,
 		&ts.NetPaymentTerms, &ts.TaxProvider, &ts.TaxRate, &ts.TaxName, &ts.TaxInclusive,
 		&ts.DefaultProductTaxCode, &ts.TaxOnFailure,
 		&ts.CompanyName,
@@ -116,6 +111,18 @@ func (s *SettingsStore) Get(ctx context.Context, tenantID string) (domain.Tenant
 		&ts.BrandColor,
 		&ts.TaxID, &ts.SupportURL, &ts.InvoiceFooter,
 		&ts.CreditBalanceLowThresholdCents, &ts.CreatedAt, &ts.UpdatedAt)
+	return ts, err
+}
+
+func (s *SettingsStore) Get(ctx context.Context, tenantID string) (domain.TenantSettings, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return domain.TenantSettings{}, err
+	}
+	defer postgres.Rollback(tx)
+
+	ts, err := scanSettings(tx.QueryRowContext(ctx,
+		`SELECT `+settingsColumns+` FROM tenant_settings WHERE tenant_id = $1`, tenantID))
 
 	if err == sql.ErrNoRows {
 		// Synthesize Hardcount defaults so callers don't have to handle
@@ -134,90 +141,73 @@ func (s *SettingsStore) Get(ctx context.Context, tenantID string) (domain.Tenant
 	return ts, nil
 }
 
-func (s *SettingsStore) Upsert(ctx context.Context, ts domain.TenantSettings) (domain.TenantSettings, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, ts.TenantID)
+// Update is the only writer of the settings an operator sets. In one
+// transaction it locks the settings row, reads it, lets change edit the
+// values and writes them back. A save that runs at the same time waits for
+// the lock and then reads what this one wrote, so it cannot write back a
+// value it read before this save changed it. change runs while the lock is
+// held, so it does only work in memory. If it returns an error, nothing is
+// saved and Update returns that error.
+//
+// Get reads a missing row as the defaults. Update first inserts the row with
+// the column defaults when it is missing, so even a first save has a row to
+// lock, and two first saves wait for each other.
+func (s *SettingsStore) Update(ctx context.Context, tenantID string, change func(*domain.TenantSettings) error) (domain.TenantSettings, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.TenantSettings{}, err
 	}
 	defer postgres.Rollback(tx)
 
-	now := time.Now().UTC()
-	err = tx.QueryRowContext(ctx, `
-		INSERT INTO tenant_settings (tenant_id, default_currency, timezone, invoice_prefix,
-			net_payment_terms, tax_provider, tax_rate, tax_name, tax_inclusive, default_product_tax_code,
-			tax_on_failure,
-			company_name,
-			company_address_line1, company_address_line2, company_city, company_state,
-			company_postal_code, company_country,
-			company_email, company_phone,
-			logo_url, brand_color, tax_id, support_url, invoice_footer,
-			credit_balance_low_threshold_cents, created_at, updated_at, credit_note_prefix)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$27,$28)
-		ON CONFLICT (tenant_id) DO UPDATE SET
-			default_currency = EXCLUDED.default_currency, timezone = EXCLUDED.timezone,
-			invoice_prefix = EXCLUDED.invoice_prefix, credit_note_prefix = EXCLUDED.credit_note_prefix,
-			net_payment_terms = EXCLUDED.net_payment_terms,
-			tax_provider = EXCLUDED.tax_provider,
-			tax_rate = EXCLUDED.tax_rate,
-			tax_name = EXCLUDED.tax_name,
-			tax_inclusive = EXCLUDED.tax_inclusive,
-			default_product_tax_code = EXCLUDED.default_product_tax_code,
-			tax_on_failure = EXCLUDED.tax_on_failure,
-			company_name = EXCLUDED.company_name,
-			company_address_line1 = EXCLUDED.company_address_line1,
-			company_address_line2 = EXCLUDED.company_address_line2,
-			company_city = EXCLUDED.company_city, company_state = EXCLUDED.company_state,
-			company_postal_code = EXCLUDED.company_postal_code,
-			company_country = EXCLUDED.company_country,
-			company_email = EXCLUDED.company_email, company_phone = EXCLUDED.company_phone,
-			logo_url = EXCLUDED.logo_url,
-			brand_color = EXCLUDED.brand_color,
-			tax_id = EXCLUDED.tax_id, support_url = EXCLUDED.support_url,
-			invoice_footer = EXCLUDED.invoice_footer,
-			credit_balance_low_threshold_cents = EXCLUDED.credit_balance_low_threshold_cents,
-			updated_at = EXCLUDED.updated_at
-		RETURNING tenant_id, default_currency, timezone, invoice_prefix, credit_note_prefix,
-			net_payment_terms, tax_provider, tax_rate, COALESCE(tax_name,''), tax_inclusive,
-			COALESCE(default_product_tax_code,''), tax_on_failure,
-			COALESCE(company_name,''),
-			COALESCE(company_address_line1,''), COALESCE(company_address_line2,''),
-			COALESCE(company_city,''), COALESCE(company_state,''),
-			COALESCE(company_postal_code,''), COALESCE(company_country,''),
-			COALESCE(company_email,''), COALESCE(company_phone,''), COALESCE(logo_url,''),
-			COALESCE(brand_color,''),
-			COALESCE(tax_id,''), COALESCE(support_url,''), COALESCE(invoice_footer,''),
-			credit_balance_low_threshold_cents, created_at, updated_at
-	`, ts.TenantID, ts.DefaultCurrency, ts.Timezone, ts.InvoicePrefix,
-		ts.NetPaymentTerms, ts.TaxProvider, ts.TaxRate, ts.TaxName, ts.TaxInclusive, ts.DefaultProductTaxCode,
-		ts.TaxOnFailure,
+	if _, err := tx.ExecContext(ctx,
+		`INSERT INTO tenant_settings (tenant_id) VALUES ($1) ON CONFLICT (tenant_id) DO NOTHING`, tenantID); err != nil {
+		return domain.TenantSettings{}, err
+	}
+	ts, err := scanSettings(tx.QueryRowContext(ctx,
+		`SELECT `+settingsColumns+` FROM tenant_settings WHERE tenant_id = $1 FOR UPDATE`, tenantID))
+	if err != nil {
+		return domain.TenantSettings{}, err
+	}
+	if err := change(&ts); err != nil {
+		return domain.TenantSettings{}, err
+	}
+
+	// The invoice and credit note counters are not set here:
+	// NextInvoiceNumberTx and NextCreditNoteNumberTx own them.
+	saved, err := scanSettings(tx.QueryRowContext(ctx, `
+		UPDATE tenant_settings SET
+			default_currency = $2, timezone = $3, invoice_prefix = $4, credit_note_prefix = $5,
+			net_payment_terms = $6, tax_provider = $7, tax_rate = $8, tax_name = $9,
+			tax_inclusive = $10, default_product_tax_code = $11, tax_on_failure = $12,
+			company_name = $13,
+			company_address_line1 = $14, company_address_line2 = $15,
+			company_city = $16, company_state = $17,
+			company_postal_code = $18, company_country = $19,
+			company_email = $20, company_phone = $21,
+			logo_url = $22, brand_color = $23,
+			tax_id = $24, support_url = $25, invoice_footer = $26,
+			credit_balance_low_threshold_cents = $27, updated_at = $28
+		WHERE tenant_id = $1
+		RETURNING `+settingsColumns,
+		tenantID, ts.DefaultCurrency, ts.Timezone, ts.InvoicePrefix, ts.CreditNotePrefix,
+		ts.NetPaymentTerms, ts.TaxProvider, ts.TaxRate, ts.TaxName,
+		ts.TaxInclusive, ts.DefaultProductTaxCode, ts.TaxOnFailure,
 		postgres.NullableString(ts.CompanyName),
 		postgres.NullableString(ts.CompanyAddressLine1), postgres.NullableString(ts.CompanyAddressLine2),
 		postgres.NullableString(ts.CompanyCity), postgres.NullableString(ts.CompanyState),
 		postgres.NullableString(ts.CompanyPostalCode), postgres.NullableString(ts.CompanyCountry),
 		postgres.NullableString(ts.CompanyEmail), postgres.NullableString(ts.CompanyPhone),
-		postgres.NullableString(ts.LogoURL),
-		postgres.NullableString(ts.BrandColor),
-		postgres.NullableString(ts.TaxID), postgres.NullableString(ts.SupportURL),
-		postgres.NullableString(ts.InvoiceFooter),
-		ts.CreditBalanceLowThresholdCents, now, ts.CreditNotePrefix,
-	).Scan(&ts.TenantID, &ts.DefaultCurrency, &ts.Timezone, &ts.InvoicePrefix, &ts.CreditNotePrefix,
-		&ts.NetPaymentTerms, &ts.TaxProvider, &ts.TaxRate, &ts.TaxName, &ts.TaxInclusive,
-		&ts.DefaultProductTaxCode, &ts.TaxOnFailure,
-		&ts.CompanyName,
-		&ts.CompanyAddressLine1, &ts.CompanyAddressLine2,
-		&ts.CompanyCity, &ts.CompanyState,
-		&ts.CompanyPostalCode, &ts.CompanyCountry,
-		&ts.CompanyEmail, &ts.CompanyPhone, &ts.LogoURL,
-		&ts.BrandColor,
-		&ts.TaxID, &ts.SupportURL, &ts.InvoiceFooter,
-		&ts.CreditBalanceLowThresholdCents, &ts.CreatedAt, &ts.UpdatedAt)
+		postgres.NullableString(ts.LogoURL), postgres.NullableString(ts.BrandColor),
+		postgres.NullableString(ts.TaxID), postgres.NullableString(ts.SupportURL), postgres.NullableString(ts.InvoiceFooter),
+		ts.CreditBalanceLowThresholdCents, time.Now().UTC(),
+	))
 	if err != nil {
 		return domain.TenantSettings{}, err
 	}
 	if err := tx.Commit(); err != nil {
 		return domain.TenantSettings{}, err
 	}
-	return ts, nil
+	return saved, nil
 }
 
 // NextInvoiceNumberTx allocates the next invoice number for a tenant on the
@@ -419,20 +409,10 @@ type SettingsResponse struct {
 func (h *SettingsHandler) upsert(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	// MERGE semantics: decode the body OVER the tenant's current
-	// settings, so a field absent from the JSON keeps its stored value
-	// and an explicitly-present value (including "" / 0) sets it. The
-	// old code decoded into a zero struct — a partial body silently
-	// WIPED every unsent field (an SDK call updating just the tax rate
-	// reset the company address, invoice prefix, and net terms, which
-	// validateSettings then "helpfully" re-defaulted). Get synthesizes
-	// defaults on miss, so the merge base always exists; a Get failure
-	// is a real DB error and must fail the save — writing against an
-	// unknown base would resurrect replace semantics.
-	ts, err := h.store.Get(r.Context(), tenantID)
-	if err != nil {
-		slog.Log(r.Context(), logging.ErrorLevel(r.Context(), err), "get settings for merge", "error", err)
-		respond.InternalError(w, r)
+	// The body is read before the save locks the settings row, so a slow
+	// client never holds the lock.
+	var body json.RawMessage
+	if !respond.DecodeStrict(w, r, &body) {
 		return
 	}
 	// Read before the write, so a failed read cannot turn a committed save
@@ -443,24 +423,38 @@ func (h *SettingsHandler) upsert(w http.ResponseWriter, r *http.Request) {
 		respond.InternalError(w, r)
 		return
 	}
-	// The same pre-decode snapshot is the audit diff's honest "before"
-	// (the synthesized defaults for a first-ever save).
-	before := ts
-	haveBefore := h.auditLogger != nil
 
-	if !respond.DecodeStrict(w, r, &ts, respond.ReadOnly("tenant_id", "created_at", "updated_at")) {
+	// Merge: the body is decoded over the stored settings, so a field it
+	// leaves out keeps its stored value, and a field it sends is set, even to
+	// "" or 0. Update holds the row lock from that read to the write, so two
+	// saves at once each keep the fields the other sends. The locked row is
+	// the audit diff's "before".
+	var before domain.TenantSettings
+	result, err := h.store.Update(r.Context(), tenantID, func(ts *domain.TenantSettings) error {
+		before = *ts
+		// The threshold is a pointer, and decoding a number into a non-nil
+		// pointer writes into the int64 it points at. before gets its own
+		// copy, or it would read the new amount and the diff would miss the
+		// change.
+		if p := ts.CreditBalanceLowThresholdCents; p != nil {
+			v := *p
+			before.CreditBalanceLowThresholdCents = &v
+		}
+		if err := respond.DecodeValue(body, ts, respond.ReadOnly("tenant_id", "created_at", "updated_at")); err != nil {
+			return err
+		}
+		return validateSettings(ts)
+	})
+	var bodyErr *respond.BodyError
+	switch {
+	case errors.As(err, &bodyErr):
+		respond.WriteBodyError(w, r, err)
 		return
-	}
-	ts.TenantID = tenantID
-
-	if err := validateSettings(&ts); err != nil {
+	case errors.Is(err, errs.ErrValidation):
 		respond.FromError(w, r, err, "tenant_settings")
 		return
-	}
-
-	result, err := h.store.Upsert(r.Context(), ts)
-	if err != nil {
-		slog.Log(r.Context(), logging.ErrorLevel(r.Context(), err), "upsert settings", "error", err)
+	case err != nil:
+		slog.Log(r.Context(), logging.ErrorLevel(r.Context(), err), "update settings", "error", err)
 		respond.InternalError(w, r)
 		return
 	}
@@ -473,7 +467,7 @@ func (h *SettingsHandler) upsert(w http.ResponseWriter, r *http.Request) {
 	// leaving a 200-with-no-row that the audit-coverage detector must read as a
 	// lost audit row. (The deleted catch-all used to record every no-op save as a
 	// generic "update setting" with an empty resource_id.)
-	if h.auditLogger != nil && haveBefore {
+	if h.auditLogger != nil {
 		if changed := diffSettings(before, result); len(changed) > 0 {
 			// Settings are ACCOUNT-PLANE: one set per tenant, not one per mode. The
 			// row is therefore filed in the canonical (test) partition rather than

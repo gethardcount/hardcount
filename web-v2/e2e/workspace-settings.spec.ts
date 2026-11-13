@@ -250,6 +250,36 @@ test('a Settings save reaches the other mode too', async ({ page }) => {
   endOfTest()
 })
 
+test('a Settings save sends only what changed, then shows a tax rate saved after the page loaded', async ({ page }) => {
+  // The page loads a tax rate of 8. Someone else then saves 10, and this page
+  // changes only the business name. The server keeps every field a save
+  // leaves out, so the browser answers the save with the rate of 10.
+  type TaxSettings = Settings & { tax_provider: string; tax_rate: number }
+  const real = await api<TaxSettings>('GET', '/settings')
+  const loaded = { ...real, tax_provider: 'manual', tax_rate: 8 }
+  let saved: TaxSettings | undefined
+  await page.route(url => url.pathname === '/v1/settings', async route => {
+    if (route.request().method() === 'PUT') {
+      saved = { ...loaded, tax_rate: 10, ...(route.request().postDataJSON() as Partial<TaxSettings>) }
+    }
+    return route.fulfill({ json: saved ?? loaded })
+  })
+
+  await page.goto('/settings?tab=tax')
+  const taxRate = page.getByLabel('Tax rate', { exact: true })
+  await expect(taxRate).toHaveValue('8')
+  await page.getByRole('tab', { name: 'General' }).click()
+  const name = `E2E Seller ${uniq()}`
+  await page.getByLabel('Business name', { exact: true }).fill(name)
+  const saving = page.waitForRequest(r => r.method() === 'PUT' && new URL(r.url()).pathname === '/v1/settings')
+  await page.getByRole('button', { name: 'Save changes' }).click()
+  expect((await saving).postDataJSON()).toEqual({ company_name: name })
+  await expect(page.getByRole('region', { name: /^Notifications/ }).getByText('Settings saved', { exact: true })).toBeVisible()
+
+  await page.getByRole('tab', { name: 'Tax' }).click()
+  await expect(taxRate).toHaveValue('10')
+})
+
 test("a new default currency reloads Home's figures", async ({ page }) => {
   // Home's figures and revenue chart are in the default currency, so a new
   // one reads them again, within the cache's 30 s too.

@@ -18,12 +18,14 @@
  * For 24 hours, a repeat with the same key, method, path and body gets
  * the first response again, byte for byte, with an
  * `Idempotent-Replayed: true` header, instead of running again. A
- * first answer of 409, 422 or 503 is not kept, so a retry with the
- * same key runs again. A repeat sent while the first request is still
- * running waits up to 5 seconds for its answer; if there is none by
- * then, it gets 409 with code `conflict_idempotency`. The same key
- * with a different method, path or body is a 422 with code
- * `idempotency_error`. The other error cases are in
+ * first answer of 409, 422 or 503, or a 400 `invalid JSON body`, is
+ * not kept, so a retry with the same key runs again.
+ * A repeat sent while the first request is still running waits up to
+ * 5 seconds for its answer; if there is none by then, it gets 409
+ * with code `conflict_idempotency`. The same key with a different
+ * method, path or body is a 422 with code `idempotency_error`. After
+ * 24 hours the key is free, and a request with it runs as new. The
+ * other error cases are in
  * [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
  * not take it: each usage event carries its own `idempotency_key`.
  */

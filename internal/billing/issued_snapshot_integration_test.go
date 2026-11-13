@@ -86,13 +86,11 @@ func newSnapshotEngineFixture(t *testing.T, ctx context.Context, name string) *t
 	}); err != nil {
 		t.Fatalf("upsert profile: %v", err)
 	}
-	ts, err := f.settings.Get(ctx, f.tenantID)
-	if err != nil {
-		t.Fatalf("get settings: %v", err)
-	}
-	ts.CompanyName = "Engine Seller Ltd"
-	if _, err := f.settings.Upsert(ctx, ts); err != nil {
-		t.Fatalf("upsert settings: %v", err)
+	if _, err := f.settings.Update(ctx, f.tenantID, func(ts *domain.TenantSettings) error {
+		ts.CompanyName = "Engine Seller Ltd"
+		return nil
+	}); err != nil {
+		t.Fatalf("update settings: %v", err)
 	}
 
 	return f
