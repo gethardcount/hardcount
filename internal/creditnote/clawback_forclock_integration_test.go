@@ -84,7 +84,7 @@ func TestClawbackForClock_GatesWallClock_IssuesInFrozenTime(t *testing.T) {
 	}
 
 	// 2. Catchup scan returns ONLY this clock's simulated draft.
-	forClock, err := cnStore.ListPendingClawbackDraftsForClock(ctx, tenantID, clockID, 100)
+	forClock, err := cnStore.ListPendingClawbackDraftsForClock(ctx, tenantID, clockID, time.Time{}, "", 100)
 	if err != nil {
 		t.Fatalf("forClock scan: %v", err)
 	}
