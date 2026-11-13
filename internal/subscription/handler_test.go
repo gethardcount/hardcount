@@ -486,12 +486,15 @@ func TestUpdateItem_ProrationTaxedByPlanTaxCode(t *testing.T) {
 	}
 }
 
-// TestUpdateItem_ProrationTaxErrorDefersToDraft covers the medium-severity
-// audit finding: when ApplyTaxToLineItems returns a non-nil (transient infra)
-// error, the proration invoice must NOT finalize with zero tax — it would ship
-// an invoice lying about authoritative amounts. Instead the invoice is stamped
-// Draft with tax_status=pending so the tax retry worker re-runs calculation.
-func TestUpdateItem_ProrationTaxErrorDefersToDraft(t *testing.T) {
+// TestUpdateItem_ProrationTaxCannotBeApplied_Refused: when the tax cannot be
+// applied to the proration invoice (a failed read of the tax settings or the
+// customer's billing profile, a failed save of the calculation), the change is
+// refused with 503 proration_unavailable and a Retry-After, as the engine's
+// writers refuse. No invoice is written and the item keeps its plan. A tax
+// provider that fails or does not answer is not this case: the engine leaves
+// the tax pending and returns no error
+// (TestUpdateItem_ProrationDeferredTaxCarriesRetryFacts).
+func TestUpdateItem_ProrationTaxCannotBeApplied_Refused(t *testing.T) {
 	ctx := context.Background()
 	tenantID := "t1"
 
@@ -506,7 +509,7 @@ func TestUpdateItem_ProrationTaxErrorDefersToDraft(t *testing.T) {
 	invoices := &invoicesMock{
 		sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded},
 	}
-	taxMock := &prorationTaxApplierMock{err: errors.New("stripe tax: 503 service unavailable")}
+	taxMock := &prorationTaxApplierMock{err: errors.New("get billing profile for tax: connection reset by peer")}
 
 	h := NewHandler(svc)
 	h.SetProrationDeps(plans, invoices)
@@ -518,90 +521,24 @@ func TestUpdateItem_ProrationTaxErrorDefersToDraft(t *testing.T) {
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
 
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status: got %d, want 200. body=%s", rr.Code, rr.Body.String())
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status: got %d, want 503. body=%s", rr.Code, rr.Body.String())
 	}
-	if taxMock.calls != 1 {
-		t.Errorf("tax applier called %d times, want 1", taxMock.calls)
+	if !strings.Contains(rr.Body.String(), "proration_unavailable") {
+		t.Errorf("body = %s, want the proration_unavailable code", rr.Body.String())
 	}
-	if len(invoices.createdInvoices) != 1 {
-		t.Fatalf("got %d invoices, want 1", len(invoices.createdInvoices))
+	if rr.Header().Get("Retry-After") == "" {
+		t.Error("no Retry-After: a client cannot tell the refusal is safe to send again")
 	}
-	inv := invoices.createdInvoices[0]
-	if inv.TaxStatus != domain.InvoiceTaxPending {
-		t.Errorf("invoice TaxStatus = %q, want %q (defer for retry)", inv.TaxStatus, domain.InvoiceTaxPending)
+	if len(invoices.createdInvoices) != 0 {
+		t.Errorf("got %d invoices, want none", len(invoices.createdInvoices))
 	}
-	if inv.Status != domain.InvoiceDraft {
-		t.Errorf("invoice Status = %q, want %q (not finalized with zero tax)", inv.Status, domain.InvoiceDraft)
+	sub, err := store.Get(ctx, tenantID, subID)
+	if err != nil {
+		t.Fatalf("get sub: %v", err)
 	}
-	if inv.TaxAmountCents != 0 {
-		t.Errorf("invoice TaxAmountCents = %d, want 0 (no tax computed yet)", inv.TaxAmountCents)
-	}
-	// Deferral facts (2026-07-10 fix): without a retryable tax_error_code the
-	// tax-retry reconciler's filter (billing/tax_retry.go taxRetryableCodes)
-	// skips the invoice FOREVER — deferred-to-draft was only half the fix.
-	if inv.TaxErrorCode != string(tax.ErrCodeProviderOutage) {
-		t.Errorf("invoice TaxErrorCode = %q, want %q (503 classifies as outage; must be retryable)", inv.TaxErrorCode, tax.ErrCodeProviderOutage)
-	}
-	if inv.TaxDeferredAt == nil {
-		t.Error("invoice TaxDeferredAt must be stamped on deferral")
-	}
-	if inv.TaxPendingReason == "" {
-		t.Error("invoice TaxPendingReason must carry the provider error")
-	}
-}
-
-// TestUpdateItem_ProrationTaxErrorReasonCutBetweenCharacters: the tax error
-// is long and not plain ASCII. The proration invoice's tax_pending_reason
-// keeps the error up to the last whole character before each cut: 200 bytes
-// plus "…" for a plain error (tax.CleanMessage), 500 bytes for the message in
-// a Stripe JSON envelope. Postgres refuses text that is not valid UTF-8
-// (SQLSTATE 22021), so a reason cut inside a character failed the invoice
-// write, and with it the item change.
-func TestUpdateItem_ProrationTaxErrorReasonCutBetweenCharacters(t *testing.T) {
-	for _, tc := range []struct {
-		name string
-		err  error
-		want string
-	}{
-		{
-			name: "plain error, 200-byte cut",
-			err:  errors.New(strings.Repeat("a", 199) + "é and more" + strings.Repeat("b", 100)),
-			want: strings.Repeat("a", 199) + "…",
-		},
-		{
-			name: "JSON envelope, 500-byte cut",
-			err:  errors.New(`stripe tax: {"message":"` + strings.Repeat("a", 499) + `é and more"}`),
-			want: strings.Repeat("a", 499),
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			ctx := context.Background()
-			store := newMemStore()
-			subID, itemID := seedSubWithItem(t, store, "t1", "cus_1", "plan_old")
-			plans := &plansMock{plans: map[string]domain.Plan{
-				"plan_old": {ID: "plan_old", Name: "Basic", BaseAmountCents: 1000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
-				"plan_new": {ID: "plan_new", Name: "Pro", BaseAmountCents: 3000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
-			}}
-			invoices := &invoicesMock{sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded}}
-			h := NewHandler(NewService(store, nil))
-			h.SetProrationDeps(plans, invoices)
-			h.SetProrationTaxApplier(&prorationTaxApplierMock{err: tc.err})
-
-			body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
-			rr := httptest.NewRecorder()
-			h.updateItem(rr, updateItemURL(auth.WithTenantID(ctx, "t1"), subID, itemID, body))
-
-			if rr.Code != http.StatusOK {
-				t.Fatalf("status: got %d, want 200. body=%s", rr.Code, rr.Body.String())
-			}
-			if len(invoices.createdInvoices) != 1 {
-				t.Fatalf("got %d invoices, want 1", len(invoices.createdInvoices))
-			}
-			if got := invoices.createdInvoices[0].TaxPendingReason; got != tc.want {
-				t.Errorf("TaxPendingReason = %q, want %q", got, tc.want)
-			}
-		})
+	if len(sub.Items) != 1 || sub.Items[0].PlanID != "plan_old" {
+		t.Errorf("items = %+v, want the item still on plan_old", sub.Items)
 	}
 }
 

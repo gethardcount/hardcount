@@ -24,7 +24,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/money"
 	"github.com/gethardcount/hardcount/internal/platform/timeline"
-	"github.com/gethardcount/hardcount/internal/tax"
 )
 
 // PlanReader reads plan data for proration calculations.
@@ -2035,28 +2034,23 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 				return nil, fmt.Errorf("proration invoice: %w", err)
 			}
 			if err != nil {
-				// Transient tax-infra failure. Do NOT finalize with zero tax —
-				// that ships an invoice lying about authoritative amounts.
-				// Mark pending so InvoiceFinalizationStatus stamps Draft and the
-				// tax retry worker re-runs calculation (same contract as the
-				// engine's billOnePeriod / BillOnCreate paths).
-				slog.WarnContext(ctx, "tax apply failed on proration, deferring invoice to draft for retry",
-					"error", err, "subscription_id", sub.ID)
-				taxResult.TaxStatus = domain.InvoiceTaxPending
-				// Stamp the deferral facts the tax-retry reconciler keys on —
-				// classified like the engine's deferral path (engine.go
-				// ApplyTaxToLineItems). Without a retryable tax_error_code the
-				// reconciler's filter skips the invoice forever.
-				taxResult.TaxErrorCode = string(tax.Classify(err))
-				taxResult.TaxPendingReason = errs.Clip(tax.CleanMessage(err.Error()), 500)
-				deferredAt := now
-				taxResult.TaxDeferredAt = &deferredAt
-			} else {
-				taxResult = r
+				// The tax could not be applied: the tax settings or the
+				// customer's billing profile could not be read, or the tax
+				// calculation could not be saved. Each is a database failure a
+				// retry gets past, and the engine's writers refuse on them too.
+				// A tax provider that fails or does not answer is not one of
+				// them: the engine leaves the tax pending on the invoice and
+				// returns no error.
+				// Refuse the change. A second request is safe (errs.Unavailable):
+				// this transaction rolls back.
+				return nil, errs.Unavailable("proration_unavailable",
+					"could not work out the tax on this change, so it was not made — please retry",
+					fmt.Errorf("apply tax to the proration invoice: %w", err))
 			}
+			taxResult = r
 		}
-		// ApplyTaxToLineItems checks that this total fits; without a tax
-		// result (deferred) it is the subtotal less a zero discount.
+		// ApplyTaxToLineItems checks that this total fits; with no tax applier
+		// wired it is the subtotal less a zero discount.
 		netProrated := taxResult.SubtotalCents - taxResult.DiscountCents + taxResult.TaxAmountCents
 
 		// ADR-048 Phase C: present a PLAN upgrade as the industry-standard
