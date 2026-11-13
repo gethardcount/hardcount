@@ -105,9 +105,7 @@ type PreviewResult struct {
 //
 // A trialing subscription's current period is its first paid period (it
 // starts at the trial end, firstPeriodAfterTrial), so its preview is the
-// first invoice after the trial — see previewTrialEnd. The exception is a
-// trial that outlasts the current period: the close at its end only advances
-// it, so that keeps the flat window estimate.
+// first invoice after the trial — see previewTrialEnd.
 func (e *Engine) previewCycle(ctx context.Context, sub domain.Subscription) (PreviewResult, error) {
 	periodStart := *sub.CurrentBillingPeriodStart
 	periodEnd := *sub.CurrentBillingPeriodEnd
@@ -115,9 +113,6 @@ func (e *Engine) previewCycle(ctx context.Context, sub domain.Subscription) (Pre
 	// reads plans (applyDueScheduledPlanChanges), so its estimate reads the
 	// items as the close will (A5).
 	sub = withDuePlanChanges(sub, periodEnd)
-	if sub.Status == domain.SubscriptionTrialing && sub.TrialEndAt != nil && sub.TrialEndAt.After(periodEnd) {
-		return e.previewWithWindow(ctx, sub, periodStart, periodEnd)
-	}
 	return e.previewWindow(ctx, sub, periodStart, periodEnd, true)
 }
 
