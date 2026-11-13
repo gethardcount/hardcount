@@ -1656,10 +1656,12 @@ type TaxApplication struct {
 	domain.TaxFacts
 	SubtotalCents int64
 	DiscountCents int64
-	// TaxInclusive is whether these prices were read as including tax: the
-	// tenant's setting in the same read that priced them. Set before the
-	// provider is called, so an invoice whose tax is left pending records it
-	// too. The writer copies it onto the invoice it creates.
+	// TaxInclusive is the pricing terms applyTax was given: for a new
+	// invoice, the tenant's setting in the same read that priced it; for a
+	// stored invoice, its own TaxInclusive. Set before the provider is
+	// called, so an invoice whose tax is left pending records it too. A new
+	// invoice's writer copies it onto the invoice; on a stored invoice it is
+	// never written back.
 	TaxInclusive bool
 }
 
@@ -1753,9 +1755,10 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 }
 
 // loadTaxSettings checks the tax wiring, pins the tenant on ctx and reads
-// the tenant's settings. A caller that needs the settings before it builds
-// the lines to tax (computeAndPersistInvoiceTax) reads them here once and
-// passes them to applyTax, so both steps see the same tax mode.
+// the tenant's settings: the provider, the tax name and the failure policy.
+// Whether prices include tax is read from them only for a new invoice
+// (ApplyTaxToLineItems); a stored invoice's own TaxInclusive decides its
+// terms (computeAndPersistInvoiceTax).
 func (e *Engine) loadTaxSettings(ctx context.Context, tenantID string) (context.Context, domain.TenantSettings, error) {
 	// Wiring is required, not optional. Tests that don't need tax
 	// must wire NoneProvider explicitly (e.NewResolver(nil) +
@@ -5299,7 +5302,7 @@ func (e *Engine) computeAndPersistInvoiceTax(ctx context.Context, tenantID, invo
 	}
 	// A stored invoice's tax is worked out in the terms it was priced in, not
 	// the tenant's setting now: a switch applies to invoices priced after it.
-	basis, subtotal, err := storedTaxBasis(inv, items, inv.TaxInclusive)
+	basis, subtotal, err := storedTaxBasis(inv, items)
 	if err != nil {
 		return domain.Invoice{}, fmt.Errorf("recompute tax: %w", err)
 	}
