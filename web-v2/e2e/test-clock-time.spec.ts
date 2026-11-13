@@ -64,12 +64,6 @@ test('after an advance, the invoices list and the invoice count the due date fro
   await expect(dialog).toBeHidden()
   await expect(page.getByText('Last advance results')).toBeVisible({ timeout: 30_000 })
 
-  // The clock page saw the advance finish, so the clock list reads Ready.
-  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Test clocks' }).click()
-  const clockRow = page.getByRole('row').filter({ hasText: clock.name })
-  await expect(clockRow.getByText('Ready')).toBeVisible()
-  await expect(clockRow.getByText('Advancing')).toHaveCount(0)
-
   row = await invoiceRow(page, invoice)
   await expect(row.getByText(/^Past due \d+d$/)).toBeVisible()
   await openInvoice(page, invoice)
@@ -148,4 +142,36 @@ test('when the clock list fails to load, the invoice shows that load error and n
   await expect(loadError).toHaveCount(0)
   await expect(page.getByText(/^Due in \d+d$/).first()).toBeVisible()
   await expect(page.getByText(/^Past due/)).toHaveCount(0)
+})
+
+test('when the clock page sees an advance finish, the clock list reads Ready', async ({ page }) => {
+  const clock = await createClock()
+  // The first read of the list and of the clock answer as if made during an
+  // advance; later reads reach the server, where the clock is ready.
+  let listReads = 0
+  let clockReads = 0
+  await page.route(isClockList, async route => {
+    const response = await route.fetch()
+    const body = await response.json() as { data: TestClock[] }
+    if (listReads++ === 0) body.data = body.data.map(c => (c.id === clock.id ? { ...c, status: 'advancing' } : c))
+    await route.fulfill({ response, json: body })
+  })
+  await page.route(url => url.pathname === `/v1/test-clocks/${clock.id}`, async route => {
+    const response = await route.fetch()
+    const json = await response.json() as TestClock
+    await route.fulfill({ response, json: clockReads++ === 0 ? { ...json, status: 'advancing' } : json })
+  })
+
+  await page.goto('/test-clocks')
+  const row = page.getByRole('row').filter({ hasText: clock.name })
+  await expect(row.getByText('Advancing')).toBeVisible()
+
+  // The clock page polls the clock and sees the advance finish.
+  await row.getByRole('link', { name: clock.name }).click()
+  await expect(page.getByRole('heading', { level: 1, name: clock.name })).toBeVisible()
+  await expect(page.getByText('Ready', { exact: true })).toBeVisible()
+
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Test clocks' }).click()
+  await expect(row.getByText('Ready')).toBeVisible()
+  await expect(row.getByText('Advancing')).toHaveCount(0)
 })
