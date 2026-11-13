@@ -26,6 +26,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/platform/scheduler"
 	"github.com/gethardcount/hardcount/internal/platform/telemetry"
+	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/subscription"
 	"github.com/gethardcount/hardcount/internal/tax"
 	"go.opentelemetry.io/otel/attribute"
@@ -4672,58 +4673,15 @@ func (e *Engine) FinishRelief(ctx context.Context, sub domain.Subscription, r do
 	return errors.Join(issueErrs...)
 }
 
-// invoicePage returns one page of a background invoice queue after the
-// cursor, oldest first by (created_at, id).
-type invoicePage func(ctx context.Context, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error)
-
-// drainInvoiceQueue visits every row of a background invoice queue once:
-// page after page by (created_at, id) until a short page. It replaced
-// single-page sweeps. Those read the oldest pageSize rows and stopped, so rows
-// that stay queued by design (a card-less invoice waits for a card; a
-// no-policy invoice is skipped by dunning) filled the page for good, and
-// nothing newer was ever reached.
-//
-// The cursor comes from the LISTED row, and the queue's order columns never
-// change, so the drain ends: each full page moves the cursor forward. A row
-// that joins behind the cursor mid-drain is visited on the next call.
-//
-// visit returns how many rows it completed; onPage, if set, runs after each
-// page (the scheduler's liveness stamp: a drain can outlast the interval).
-func drainInvoiceQueue(ctx context.Context, pageSize int, fetch invoicePage, visit func(context.Context, []domain.Invoice) (int, []error), onPage func()) (listed, done int, errs []error) {
-	if pageSize <= 0 {
-		pageSize = 50
-	}
-	var after domain.InvoiceKeyset
-	for {
-		if err := ctx.Err(); err != nil {
-			return listed, done, append(errs, fmt.Errorf("queue drain stopped: %w", err))
-		}
-		page, err := fetch(ctx, after, pageSize)
-		if err != nil {
-			return listed, done, append(errs, err)
-		}
-		if len(page) == 0 {
-			return listed, done, errs
-		}
-		n, verrs := visit(ctx, page)
-		listed += len(page)
-		done += n
-		errs = append(errs, verrs...)
-		after = domain.KeysetOf(page[len(page)-1])
-		if onPage != nil {
-			onPage()
-		}
-		if len(page) < pageSize {
-			return listed, done, errs
-		}
-	}
-}
-
 // RetryPendingCharges visits every invoice queued for auto-charge, once per
 // call, pageSize at a time, and tries to collect it. CRON path — the
 // wall-clock scheduler calls this every tick, passing its liveness stamp as
-// onPage. ADR-029 Phase 1: clock-pinned invoices are excluded from this query
-// and are processed instead by RetryPendingChargesForClock during catchup.
+// onPage: a sweep can outlast the interval. ADR-029 Phase 1: clock-pinned
+// invoices are excluded from this query and are processed instead by
+// RetryPendingChargesForClock during catchup.
+//
+// Rows that stay queued by design (a card-less invoice waits for a card) do
+// not hold back the rows behind them: the walk reads the queue to its end.
 func (e *Engine) RetryPendingCharges(ctx context.Context, pageSize int, onPage func()) (int, []error) {
 	live, err := postgres.Livemode(ctx)
 	if err != nil {
@@ -4732,18 +4690,32 @@ func (e *Engine) RetryPendingCharges(ctx context.Context, pageSize int, onPage f
 	if e.charger == nil || e.paymentSetups == nil {
 		return 0, nil
 	}
+	if pageSize <= 0 {
+		pageSize = 50
+	}
 	start := time.Now() //nolint:forbidigo // wall-clock: measures how long the sweep ran, for its log line; not a billing instant
-	fetch := func(ctx context.Context, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error) {
-		pending, err := e.invoices.ListAutoChargePending(ctx, after, limit)
+	list := func(ctx context.Context, after walk.Key, limit int) ([]domain.Invoice, error) {
+		pending, err := e.invoices.ListAutoChargePending(ctx, invoiceKeyset(after), limit)
 		if err != nil {
 			return nil, fmt.Errorf("list pending charges: %w", err)
 		}
+		if len(pending) > 0 && onPage != nil {
+			onPage() // once per page of invoices
+		}
 		return pending, nil
 	}
-	visit := func(ctx context.Context, page []domain.Invoice) (int, []error) {
-		return e.processAutoCharge(ctx, page, nil, noPMTriggerSweep)
+	listed, charged := 0, 0
+	var errs []error
+	for inv, err := range walk.Walk(ctx, "ListAutoChargePending", list, invoiceWalkKey, pageSize) {
+		if err != nil {
+			errs = append(errs, fmt.Errorf("auto-charge sweep: %w", err))
+			break
+		}
+		listed++
+		n, rowErrs := e.processAutoCharge(ctx, []domain.Invoice{inv}, nil, noPMTriggerSweep)
+		charged += n
+		errs = append(errs, rowErrs...)
 	}
-	listed, charged, errs := drainInvoiceQueue(ctx, pageSize, fetch, visit, onPage)
 	if listed > 0 {
 		slog.Info("auto-charge sweep", "livemode", live, "listed", listed,
 			"charged", charged, "errors", len(errs), "duration_ms", time.Since(start).Milliseconds())
@@ -4766,18 +4738,36 @@ func (e *Engine) RetryPendingChargesForClock(ctx context.Context, tenantID, cloc
 	if e.charger == nil || e.paymentSetups == nil {
 		return 0, []error{errors.New("collect the clock's invoices: the engine has no charger or payment readiness")}
 	}
-	fetch := func(ctx context.Context, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error) {
-		pending, err := e.invoices.ListAutoChargePendingForClock(ctx, tenantID, clockID, after, limit)
+	if limit <= 0 {
+		limit = 50
+	}
+	list := func(ctx context.Context, after walk.Key, limit int) ([]domain.Invoice, error) {
+		pending, err := e.invoices.ListAutoChargePendingForClock(ctx, tenantID, clockID, invoiceKeyset(after), limit)
 		if err != nil {
 			return nil, fmt.Errorf("list pending charges for clock %s: %w", clockID, err)
 		}
 		return pending, nil
 	}
-	visit := func(ctx context.Context, page []domain.Invoice) (int, []error) {
-		return e.processAutoCharge(ctx, page, nil, noPMTriggerSweep)
+	charged := 0
+	var errs []error
+	for inv, err := range walk.Walk(ctx, "ListAutoChargePendingForClock", list, invoiceWalkKey, limit) {
+		if err != nil {
+			errs = append(errs, fmt.Errorf("collect the clock's invoices: %w", err))
+			break
+		}
+		n, rowErrs := e.processAutoCharge(ctx, []domain.Invoice{inv}, nil, noPMTriggerSweep)
+		charged += n
+		errs = append(errs, rowErrs...)
 	}
-	_, charged, errs := drainInvoiceQueue(ctx, limit, fetch, visit, nil)
 	return charged, errs
+}
+
+// invoiceWalkKey is an invoice's place in a queue read by (created_at, id).
+func invoiceWalkKey(inv domain.Invoice) walk.Key { return walk.Key{At: inv.CreatedAt, ID: inv.ID} }
+
+// invoiceKeyset is the invoice store's form of a walk key.
+func invoiceKeyset(k walk.Key) domain.InvoiceKeyset {
+	return domain.InvoiceKeyset{CreatedAt: k.At, ID: k.ID}
 }
 
 // failedDunningBackfillCoolOff lets the inline SettleFailed StartDunning win the

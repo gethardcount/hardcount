@@ -18,6 +18,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/money"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/tax"
 )
 
@@ -829,27 +830,26 @@ func (s *Service) RetryPendingClawbackIssueForClock(ctx context.Context, tenantI
 	var errsOut []error
 	issued := 0
 	// Every page, each note once: a clock has no next tick, and a note the
-	// issue leaves held stays in the list, so the cursor moves past it.
-	var afterCreatedAt time.Time
-	afterID := ""
-	for {
-		drafts, err := s.store.ListPendingClawbackDraftsForClock(ctx, tenantID, clockID, afterCreatedAt, afterID, batch)
+	// issue leaves held stays in the list, so the walk moves past it.
+	list := func(ctx context.Context, after walk.Key, limit int) ([]domain.CreditNote, error) {
+		drafts, err := s.store.ListPendingClawbackDraftsForClock(ctx, tenantID, clockID, after.At, after.ID, limit)
 		if err != nil {
-			return issued, append(errsOut, fmt.Errorf("list pending clawback drafts for clock %s: %w", clockID, err))
+			return nil, fmt.Errorf("list pending clawback drafts for clock %s: %w", clockID, err)
 		}
-		for _, cn := range drafts {
-			if _, err := s.Issue(ctx, cn.TenantID, cn.ID); err != nil {
-				errsOut = append(errsOut, fmt.Errorf("re-issue clawback credit note %s: %w", cn.ID, err))
-				continue
-			}
-			issued++
-		}
-		if len(drafts) < batch || ctx.Err() != nil {
-			return issued, errsOut
-		}
-		last := drafts[len(drafts)-1]
-		afterCreatedAt, afterID = last.CreatedAt, last.ID
+		return drafts, nil
 	}
+	created := func(cn domain.CreditNote) walk.Key { return walk.Key{At: cn.CreatedAt, ID: cn.ID} }
+	for cn, err := range walk.Walk(ctx, "ListPendingClawbackDraftsForClock", list, created, batch) {
+		if err != nil {
+			return issued, append(errsOut, fmt.Errorf("issue the clock's held relief notes: %w", err))
+		}
+		if _, err := s.Issue(ctx, cn.TenantID, cn.ID); err != nil {
+			errsOut = append(errsOut, fmt.Errorf("re-issue clawback credit note %s: %w", cn.ID, err))
+			continue
+		}
+		issued++
+	}
+	return issued, errsOut
 }
 
 // RetryPendingCreditNoteTaxReversal makes the upstream tax reversal for issued

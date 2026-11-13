@@ -16,6 +16,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/logging"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/tax"
 )
 
@@ -3105,20 +3106,25 @@ func (s *Service) RetryPendingTaxForClock(ctx context.Context, tenantID, clockID
 		errs      []error
 	)
 	// Every page, each draft once: a clock has no next tick, and a draft the
-	// retry leaves waiting stays in the list, so the cursor moves past it.
-	for after := (domain.InvoiceKeyset{}); ; {
-		stuck, err := s.store.ListPendingTaxRetryForClock(ctx, tenantID, clockID, codes, maxAttempts, after, batch)
+	// retry leaves waiting stays in the list, so the walk moves past it.
+	list := func(ctx context.Context, after walk.Key, limit int) ([]domain.Invoice, error) {
+		stuck, err := s.store.ListPendingTaxRetryForClock(ctx, tenantID, clockID, codes, maxAttempts,
+			domain.InvoiceKeyset{CreatedAt: after.At, ID: after.ID}, limit)
 		if err != nil {
-			return processed, append(errs, fmt.Errorf("list pending tax retries for clock %s: %w", clockID, err))
+			return nil, fmt.Errorf("list pending tax retries for clock %s: %w", clockID, err)
 		}
-		n, pageErrs := s.processTaxRetryBatch(ctx, stuck)
-		processed += n
-		errs = append(errs, pageErrs...)
-		if len(stuck) < batch || ctx.Err() != nil {
-			return processed, errs
-		}
-		after = domain.KeysetOf(stuck[len(stuck)-1])
+		return stuck, nil
 	}
+	created := func(inv domain.Invoice) walk.Key { return walk.Key{At: inv.CreatedAt, ID: inv.ID} }
+	for inv, err := range walk.Walk(ctx, "ListPendingTaxRetryForClock", list, created, batch) {
+		if err != nil {
+			return processed, append(errs, fmt.Errorf("retry tax on the clock's invoices: %w", err))
+		}
+		n, rowErrs := s.processTaxRetryBatch(ctx, []domain.Invoice{inv})
+		processed += n
+		errs = append(errs, rowErrs...)
+	}
+	return processed, errs
 }
 
 // processTaxRetryBatch is the per-row body of the cron-path

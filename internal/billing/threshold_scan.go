@@ -13,6 +13,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/subscription"
 )
 
@@ -89,52 +90,38 @@ func (e *Engine) ScanThresholds(ctx context.Context, batchSize int) (int, []erro
 		batchSize = 50
 	}
 
-	// Cursor-drain the WHOLE candidate set. Pre-fix this fetched a single
-	// `ORDER BY s.id LIMIT batch` page per tick with no cursor: the candidate
-	// set never drains (a fired sub still has thresholds configured), so subs
-	// beyond the first batch were NEVER scanned — spend caps silently disabled
-	// past batchSize subscriptions. The strictly-increasing id cursor makes the
-	// loop terminate by construction (no max-pages belt-and-suspenders), and it
-	// advances past failing subs so one bad row can't wedge the scan or cause a
-	// re-evaluation within the same tick. The fire-once probe in
-	// scanOneThreshold is what keeps a full drain affordable — already-fired
-	// subs cost one indexed lookup, not a window-preview aggregation.
+	// Read the whole candidate set. A fired sub still has thresholds
+	// configured, so the set never empties by itself: a single page would
+	// leave every sub past it unscanned. The walk moves past failing subs, so
+	// one bad row cannot hold back the rest or be evaluated twice in a tick.
+	// The fire-once probe in scanOneThreshold keeps a full read affordable:
+	// an already-fired sub costs one indexed lookup.
+	list := func(ctx context.Context, after walk.Key, limit int) ([]domain.Subscription, error) {
+		candidates, err := e.subs.ListWithThresholds(ctx, live, after.ID, limit)
+		if err != nil {
+			return nil, fmt.Errorf("list candidates: %w", err)
+		}
+		return candidates, nil
+	}
 	fired := 0
 	var errsOut []error
-	afterID := ""
-	for {
-		if err := ctx.Err(); err != nil {
-			errsOut = append(errsOut, fmt.Errorf("threshold scan ctx done: %w", err))
-			break
-		}
-		candidates, err := e.subs.ListWithThresholds(ctx, live, afterID, batchSize)
+	for sub, err := range walk.Walk(ctx, "ListWithThresholds", list, subscriptionIDKey, batchSize) {
 		if err != nil {
-			errsOut = append(errsOut, fmt.Errorf("list candidates: %w", err))
+			errsOut = append(errsOut, fmt.Errorf("threshold scan: %w", err))
 			break
 		}
-		if len(candidates) == 0 {
-			break
+		didFire, err := e.scanOneThreshold(ctx, sub)
+		if err != nil {
+			slog.Error("threshold scan failed for subscription",
+				"subscription_id", sub.ID,
+				"tenant_id", sub.TenantID,
+				"error", err,
+			)
+			errsOut = append(errsOut, fmt.Errorf("subscription %s: %w", sub.ID, err))
+			continue
 		}
-
-		for _, sub := range candidates {
-			didFire, err := e.scanOneThreshold(ctx, sub)
-			if err != nil {
-				slog.Error("threshold scan failed for subscription",
-					"subscription_id", sub.ID,
-					"tenant_id", sub.TenantID,
-					"error", err,
-				)
-				errsOut = append(errsOut, fmt.Errorf("subscription %s: %w", sub.ID, err))
-				continue
-			}
-			if didFire {
-				fired++
-			}
-		}
-
-		afterID = candidates[len(candidates)-1].ID
-		if len(candidates) < batchSize {
-			break // short page = set drained
+		if didFire {
+			fired++
 		}
 	}
 
@@ -157,45 +144,36 @@ func (e *Engine) ScanThresholdsForClock(ctx context.Context, tenantID, clockID s
 	if batchSize <= 0 {
 		batchSize = 50
 	}
-	// Same cursor-drain as ScanThresholds — a clock with more than batchSize
-	// threshold subs must scan all of them in one Advance.
+	// Read the clock's whole candidate set, as ScanThresholds does: a clock
+	// with more than batchSize threshold subs must scan all of them in one
+	// Advance.
+	list := func(ctx context.Context, after walk.Key, limit int) ([]domain.Subscription, error) {
+		candidates, err := e.subs.ListWithThresholdsForClock(ctx, tenantID, clockID, after.ID, limit)
+		if err != nil {
+			return nil, fmt.Errorf("list threshold candidates for clock %s: %w", clockID, err)
+		}
+		return candidates, nil
+	}
 	fired := 0
 	var errsOut []error
-	afterID := ""
-	for {
-		if err := ctx.Err(); err != nil {
-			errsOut = append(errsOut, fmt.Errorf("threshold scan ctx done: %w", err))
-			break
-		}
-		candidates, err := e.subs.ListWithThresholdsForClock(ctx, tenantID, clockID, afterID, batchSize)
+	for sub, err := range walk.Walk(ctx, "ListWithThresholdsForClock", list, subscriptionIDKey, batchSize) {
 		if err != nil {
-			errsOut = append(errsOut, fmt.Errorf("list threshold candidates for clock %s: %w", clockID, err))
+			errsOut = append(errsOut, fmt.Errorf("threshold scan on clock %s: %w", clockID, err))
 			break
 		}
-		if len(candidates) == 0 {
-			break
+		didFire, err := e.scanOneThreshold(ctx, sub)
+		if err != nil {
+			slog.Error("threshold scan failed for clock-pinned subscription",
+				"subscription_id", sub.ID,
+				"tenant_id", sub.TenantID,
+				"clock_id", clockID,
+				"error", err,
+			)
+			errsOut = append(errsOut, fmt.Errorf("subscription %s: %w", sub.ID, err))
+			continue
 		}
-
-		for _, sub := range candidates {
-			didFire, err := e.scanOneThreshold(ctx, sub)
-			if err != nil {
-				slog.Error("threshold scan failed for clock-pinned subscription",
-					"subscription_id", sub.ID,
-					"tenant_id", sub.TenantID,
-					"clock_id", clockID,
-					"error", err,
-				)
-				errsOut = append(errsOut, fmt.Errorf("subscription %s: %w", sub.ID, err))
-				continue
-			}
-			if didFire {
-				fired++
-			}
-		}
-
-		afterID = candidates[len(candidates)-1].ID
-		if len(candidates) < batchSize {
-			break
+		if didFire {
+			fired++
 		}
 	}
 	if fired > 0 {
@@ -203,6 +181,9 @@ func (e *Engine) ScanThresholdsForClock(ctx context.Context, tenantID, clockID s
 	}
 	return fired, errsOut
 }
+
+// subscriptionIDKey is a subscription's place in a list read by id.
+func subscriptionIDKey(sub domain.Subscription) walk.Key { return walk.Key{ID: sub.ID} }
 
 // scanOneThreshold evaluates a single subscription. Builds running line items
 // over the partial cycle [period_start, through), checks each configured cap,
