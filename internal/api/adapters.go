@@ -1756,34 +1756,29 @@ func (a *hostedInvoiceStripeAdapter) expireStripeSession(ctx context.Context, sc
 }
 
 // subscriptionCheckerAdapter implements customer.SubscriptionChecker over the
-// subscription store and the pricing service, for the archive and currency
-// guards (ADR-067). Non-terminal means active or trialing. An active
-// subscription with a scheduled cancel still bills until the cancel takes
-// effect, so it is included on purpose.
+// subscription store, for the archive and currency guards (ADR-067,
+// ADR-100).
 type subscriptionCheckerAdapter struct {
-	subs  subscriptionLister
-	plans *pricing.Service
+	subs subscriptionReader
 }
 
-// subscriptionLister is the subscription read the archive and currency
+// subscriptionReader is the subscription reads the archive and currency
 // guards need. Satisfied by *subscription.PostgresStore.
-type subscriptionLister interface {
+type subscriptionReader interface {
 	List(ctx context.Context, filter subscription.ListFilter) ([]domain.Subscription, int, error)
+	CustomerSubPlanCurrencies(ctx context.Context, tenantID, customerID, excludeSubID string) ([]subscription.SubPlanCurrency, error)
 }
 
-// NonTerminalForCustomer reads one status at a time: trialing, then active,
-// then draft when includeDraft is set. The customer service calls it under
-// the customer-rules lock, which creates and draft activations also take, so
-// those cannot move a subscription into the set between the reads. A trial
-// end (trialing to active) takes no customer lock. Reading trialing first
-// finds such a subscription in the first read if the trial has not ended,
-// and in the second if it has; an id already collected is skipped.
-func (a *subscriptionCheckerAdapter) NonTerminalForCustomer(ctx context.Context, tenantID, customerID string, includeDraft bool) ([]customer.NonTerminalSubscription, error) {
+// NonTerminalForCustomer reads one status at a time: trialing, then active.
+// The customer service calls it under the customer-rules lock, which creates
+// and draft activations also take, so those cannot move a subscription into
+// the set between the reads. A trial end (trialing to active) takes no
+// customer lock. Reading trialing first finds such a subscription in the
+// first read if the trial has not ended, and in the second if it has; an id
+// already collected is skipped.
+func (a *subscriptionCheckerAdapter) NonTerminalForCustomer(ctx context.Context, tenantID, customerID string) ([]customer.NonTerminalSubscription, error) {
 	var out []customer.NonTerminalSubscription
 	statuses := []string{string(domain.SubscriptionTrialing), string(domain.SubscriptionActive)}
-	if includeDraft {
-		statuses = append(statuses, string(domain.SubscriptionDraft))
-	}
 	collected := map[string]bool{}
 	for _, status := range statuses {
 		subs, _, err := a.subs.List(ctx, subscription.ListFilter{
@@ -1804,26 +1799,24 @@ func (a *subscriptionCheckerAdapter) NonTerminalForCustomer(ctx context.Context,
 			if name == "" {
 				name = sub.Code
 			}
-			ref := customer.NonTerminalSubscription{ID: sub.ID, Status: string(sub.Status), Name: name}
-			seen := map[string]struct{}{}
-			for _, it := range sub.Items {
-				plan, perr := a.plans.GetPlan(ctx, tenantID, it.PlanID)
-				if perr != nil {
-					// Fail loudly: the currency guard cannot decide
-					// safely on a half-resolved set of plans.
-					return nil, fmt.Errorf("resolve plan %s for guard: %w", it.PlanID, perr)
-				}
-				if plan.Currency == "" {
-					continue
-				}
-				if _, dup := seen[plan.Currency]; dup {
-					continue
-				}
-				seen[plan.Currency] = struct{}{}
-				ref.PlanCurrencies = append(ref.PlanCurrencies, plan.Currency)
-			}
-			out = append(out, ref)
+			out = append(out, customer.NonTerminalSubscription{ID: sub.ID, Status: string(sub.Status), Name: name})
 		}
+	}
+	return out, nil
+}
+
+// PlanCurrencies is the currency pin's own query (ADR-100 G3): one read of
+// every draft, trialing and active subscription of the customer, with no
+// page, so the profile guard and the pin judge the same set. One statement
+// sees one snapshot, so a trial that ends meanwhile is still in it.
+func (a *subscriptionCheckerAdapter) PlanCurrencies(ctx context.Context, tenantID, customerID string) ([]customer.SubscriptionCurrency, error) {
+	pairs, err := a.subs.CustomerSubPlanCurrencies(ctx, tenantID, customerID, "")
+	if err != nil {
+		return nil, err
+	}
+	out := make([]customer.SubscriptionCurrency, len(pairs))
+	for i, p := range pairs {
+		out[i] = customer.SubscriptionCurrency{Code: p.SubCode, Currency: p.Currency}
 	}
 	return out, nil
 }

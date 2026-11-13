@@ -201,23 +201,29 @@ func commitInvoiceSubtotal(lineItems []domain.InvoiceLineItem, subtotal int64) (
 //
 //   - Tax-exclusive: the price is the stored amount, which tax never
 //     changes, and the subtotal is the stored header's.
-//   - Tax-inclusive: the price holds the tax, and the line total is that
-//     price. A taxed line on billing's draft stores its net in the amount
-//     (the carve rewrote it) and its price in the total. A line an operator
-//     entered, or one never taxed, stores its price in both. The header
-//     subtotal is the net after any successful calculation, so the
-//     subtotal is the sum of the line prices instead.
+//   - Tax-inclusive, an operator's invoice (inv.OperatorComposed): the
+//     price is the stored amount, which is what was entered. No tax write
+//     changes it (keepEnteredAmounts). The line total is not used: an
+//     earlier version rounded a line's net apart from its tax, so the total
+//     it stored can be a cent off the price.
+//   - Tax-inclusive, billing's invoice: the price is the line total. A
+//     taxed line stores its net in the amount (the carve rewrote it) and its
+//     price in the total. An untaxed line stores its price in both.
 //
-// Taxing a stored net carved the tax out a second time: the invoice total
-// fell by the tax.
-func storedTaxBasis(items []domain.InvoiceLineItem, headerSubtotal int64, inclusive bool) ([]domain.InvoiceLineItem, int64, error) {
+// In tax-inclusive mode the header subtotal is the net after any successful
+// calculation, so the subtotal is the sum of the line prices instead. Taxing
+// a stored net carved the tax out a second time: the invoice total fell by
+// the tax.
+func storedTaxBasis(inv domain.Invoice, items []domain.InvoiceLineItem, inclusive bool) ([]domain.InvoiceLineItem, int64, error) {
 	basis := slices.Clone(items)
 	if !inclusive {
-		return basis, headerSubtotal, nil
+		return basis, inv.SubtotalCents, nil
 	}
 	var subtotal int64
 	for i := range basis {
-		basis[i].AmountCents = basis[i].TotalAmountCents
+		if !inv.OperatorComposed() {
+			basis[i].AmountCents = basis[i].TotalAmountCents
+		}
 		var err error
 		if subtotal, err = addCents(subtotal, basis[i].AmountCents); err != nil {
 			return nil, 0, fmt.Errorf("invoice line prices sum: %w", err)
@@ -235,7 +241,8 @@ func storedTaxBasis(items []domain.InvoiceLineItem, headerSubtotal int64, inclus
 //     or on a line that had no tax before.
 //   - An operator (inv.OperatorComposed): the amount entered, which is the
 //     price. The subtotal of a line added later sums these amounts
-//     (AddLineItemAtomicAudited), and commitInvoiceSubtotal reads them.
+//     (AddLineItemAtomicAudited), and commitInvoiceSubtotal and
+//     storedTaxBasis read them.
 //
 // In tax-exclusive mode the calculation returns every amount as stored, so
 // both give the stored amount there.

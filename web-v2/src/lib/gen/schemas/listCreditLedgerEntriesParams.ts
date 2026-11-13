@@ -19,7 +19,8 @@ import type { OffsetParameter } from './offsetParameter';
 
 export type ListCreditLedgerEntriesParams = {
 /**
- * Only entries of this type.
+ * Only entries of this type. Any other value is a 422 with
+ * `param: entry_type`.
  */
 entry_type?: ListCreditLedgerEntriesEntryType;
 /**

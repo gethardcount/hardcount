@@ -874,7 +874,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// UpsertBillingProfile refuses a currency that would re-denominate an
 	// active subscription's plan prices. The adapter lives here, so the
 	// customer and subscription packages do not import each other.
-	customerSvc.SetSubscriptionChecker(&subscriptionCheckerAdapter{subs: subStore, plans: pricingSvc})
+	customerSvc.SetSubscriptionChecker(&subscriptionCheckerAdapter{subs: subStore})
 	// A billing-profile save (the operator edits country, postal_code, state
 	// or tax_id) retries tax on every draft invoice of that customer stuck on
 	// customer_data_invalid. It is the per-customer sibling of the ADR-019

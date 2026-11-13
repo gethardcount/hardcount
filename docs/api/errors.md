@@ -217,7 +217,7 @@ the credit ledger, and report it if the state looks wrong:
 
 | `code` | When | What to do |
 |---|---|---|
-| `validation_error` | A field failed a rule, such as a missing `external_id`, a bad `limit`, a list `sort` or `dir` the list does not take, or a field the operation does not take. A filter that takes a fixed set of values got another, such as `status` on the subscription list. `param` names it. | Fix the field |
+| `validation_error` | A field failed a rule, such as a missing `external_id`, a bad `limit`, a list `sort` or `dir` the list does not take, or a field the operation does not take. A list filter that takes a fixed set of values got another, such as `status` on the invoice list. `param` names it. | Fix the field |
 | `batch_rejected` | At least one event of a usage batch failed. Nothing was stored. The body lists each failure in `errors`. | Fix the events named, then send the whole batch again |
 | `idempotency_error` | An `Idempotency-Key` was used before with a different method, path or body | Use a new key for a new request |
 | `customer_has_no_subscription` | An invoice preview or a usage summary for a customer with no active subscription | Send `subscription_id`, or a period with `from` and `to` |
@@ -276,7 +276,8 @@ Each sends a `Retry-After` header with the seconds to wait.
   that say so and after `429`. Fix the request first. If it carried an
   `Idempotency-Key`, send the fixed request with a new key: the answer was
   stored, and the old key with a changed body answers `422`
-  `idempotency_error`.
+  `idempotency_error`. A `400` `invalid JSON body` is not stored: send the
+  fixed body with the same key.
 - **`429` `rate_limited` and `login_throttled`:** wait `Retry-After`
   seconds, then send the same request, with the same key. Nothing ran and
   nothing was stored. `cooldown_active` is stored: see its row above.

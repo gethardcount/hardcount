@@ -86,6 +86,77 @@ func TestRetryTax_TaxInclusiveCycleDraft_RefreshKeepsTheTotal(t *testing.T) {
 	})
 }
 
+// The same draft as v0.9.2 left it after two refreshes, the second at 25%
+// (docs/ops/tax-calculation.md, "Invoices an earlier version under-billed").
+// Each refresh taxed the stored line amounts as if they were the prices, and
+// that version wrote no line amount, so the lines charge 100.00 and 50.00,
+// not 120.00 and 60.00. The second refresh also stored a discount of 25.00,
+// about the old tax, so the draft charges 125.00.
+//
+// A refresh now drops the discount. The draft charges the sum of its line
+// totals, 150.00: its total rises by the discount, and the lowered lines stay.
+//
+// Mutation: carry the stored discount into the write
+// (update.DiscountCents = max(taxApp.DiscountCents, inv.DiscountCents)) and
+// the refresh keeps the discount of 2500.
+func TestRetryTax_TaxInclusiveCycleDraft_RefreshDropsAStoredDiscount(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	r := newInclusiveRefreshRig(t, db, "Inclusive Tax Stored Discount")
+	draft := r.closeCycle(t)
+	r.storeAsV092(t, draft.ID, 12000, 2500, 3000, map[string]lineWant{
+		"base":     {10000, 2000, 10000},
+		"calls":    {5000, 1000, 5000},
+		"included": {0, 0, 0},
+	})
+
+	r.fake.SetRate(2500)
+	r.refresh(t, draft.ID)
+	r.assertDraft(t, draft.ID, 12000, 3000, map[string]lineWant{
+		"base":     {8000, 2000, 10000},
+		"calls":    {4000, 1000, 5000},
+		"included": {0, 0, 0},
+	})
+}
+
+// storeAsV092 writes a draft's tax as v0.9.2 stored it: each line's amount,
+// tax and total by line key, and the header's subtotal, discount and tax,
+// with the total and amount due that follow. Raw SQL, because this version
+// never stores these amounts.
+func (r *inclusiveRefreshRig) storeAsV092(t *testing.T, invoiceID string, subtotal, discount, taxCents int64, lines map[string]lineWant) {
+	t.Helper()
+	stored, err := r.invoices.ListLineItems(r.ctx, r.tenantID, invoiceID)
+	if err != nil {
+		t.Fatalf("list lines: %v", err)
+	}
+	tx, err := r.db.BeginTx(r.ctx, postgres.TxTenant, r.tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	for _, li := range stored {
+		key := "base"
+		if li.LineType == domain.LineTypeUsage {
+			key = r.meters[li.MeterID]
+		}
+		want, ok := lines[key]
+		if !ok {
+			t.Fatalf("no amounts given for the %s line", key)
+		}
+		if _, err := tx.ExecContext(r.ctx, `UPDATE invoice_line_items SET amount_cents = $2, tax_amount_cents = $3, total_amount_cents = $4 WHERE id = $1`,
+			li.ID, want.amount, want.tax, want.total); err != nil {
+			t.Fatalf("store the %s line: %v", key, err)
+		}
+	}
+	total := subtotal - discount + taxCents
+	if _, err := tx.ExecContext(r.ctx, `UPDATE invoices SET subtotal_cents = $2, discount_cents = $3, tax_amount_cents = $4,
+		total_amount_cents = $5, amount_due_cents = $5 WHERE id = $1`, invoiceID, subtotal, discount, taxCents, total); err != nil {
+		t.Fatalf("store the header: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+}
+
 // lineWant is one stored line: amount, tax and total.
 type lineWant struct{ amount, tax, total int64 }
 
@@ -234,8 +305,9 @@ func (r *inclusiveRefreshRig) refresh(t *testing.T, invoiceID string) {
 	}
 }
 
-// assertDraft checks the stored draft charges 18000 in all: the header's
-// subtotal and tax, and each line's amount, tax and total, by line key.
+// assertDraft checks the stored draft charges the sum of wantLines' totals,
+// with no discount: the header's subtotal and tax, and each line's amount,
+// tax and total, by line key.
 func (r *inclusiveRefreshRig) assertDraft(t *testing.T, invoiceID string, wantSubtotal, wantTax int64, wantLines map[string]lineWant) domain.Invoice {
 	t.Helper()
 	inv, err := r.invoices.Get(r.ctx, r.tenantID, invoiceID)
@@ -248,8 +320,12 @@ func (r *inclusiveRefreshRig) assertDraft(t *testing.T, invoiceID string, wantSu
 	if inv.SubtotalCents != wantSubtotal || inv.DiscountCents != 0 || inv.TaxAmountCents != wantTax {
 		t.Errorf("subtotal/discount/tax = %d/%d/%d, want %d/0/%d", inv.SubtotalCents, inv.DiscountCents, inv.TaxAmountCents, wantSubtotal, wantTax)
 	}
-	if inv.TotalAmountCents != 18000 || inv.AmountDueCents != 18000 {
-		t.Errorf("total/due = %d/%d, want 18000/18000 (the prices, tax included)", inv.TotalAmountCents, inv.AmountDueCents)
+	var wantTotal int64
+	for _, l := range wantLines {
+		wantTotal += l.total
+	}
+	if inv.TotalAmountCents != wantTotal || inv.AmountDueCents != wantTotal {
+		t.Errorf("total/due = %d/%d, want %d/%d (the line totals, tax included)", inv.TotalAmountCents, inv.AmountDueCents, wantTotal, wantTotal)
 	}
 	lines, err := r.invoices.ListLineItems(r.ctx, r.tenantID, invoiceID)
 	if err != nil {

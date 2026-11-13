@@ -12,8 +12,8 @@ import (
 //
 // Tax apportionment is an unusually dangerous piece of arithmetic: every bug is
 // a penny that either vanishes or is invented, and it appears only for specific
-// combinations of amount, rate, discount and line count — exactly the shape
-// example tests under-cover and generators cover well.
+// combinations of amount, rate and line count — exactly the shape example
+// tests under-cover and generators cover well.
 //
 // Most properties below drive the PUBLIC Calculate entry point rather than the
 // unexported distributeLargestRemainder helper. That is deliberate. The helper
@@ -30,12 +30,11 @@ const taxIters = 20000
 func taxRand() *rand.Rand { return rand.New(rand.NewPCG(0xFEE5, 0x9A17)) }
 
 // genRequest builds a Request weighted toward the awkward cases: single lines,
-// many lines, zero amounts, discounts that exceed the subtotal, and rates with
-// full 4-decimal precision (the ppm scaling's reason to exist).
+// many lines, zero amounts, and rates with full 4-decimal precision (the ppm
+// scaling's reason to exist).
 func genRequest(r *rand.Rand) (Request, float64) {
 	n := r.IntN(8) + 1
 	lines := make([]RequestLine, n)
-	var subtotal int64
 	for i := range lines {
 		var amt int64
 		switch r.IntN(6) {
@@ -49,7 +48,6 @@ func genRequest(r *rand.Rand) (Request, float64) {
 			amt = int64(r.IntN(100_000))
 		}
 		lines[i] = RequestLine{Ref: "line", AmountCents: amt, Quantity: 1}
-		subtotal += amt
 	}
 
 	// Rates: common real ones plus arbitrary 4-decimal values.
@@ -63,23 +61,10 @@ func genRequest(r *rand.Rand) (Request, float64) {
 		rate = float64(r.IntN(300000)) / 10000 // 0.0000 .. 30.0000
 	}
 
-	var discount int64
-	switch r.IntN(4) {
-	case 0:
-		discount = 0
-	case 1:
-		discount = subtotal + int64(r.IntN(1000)) // at or beyond the subtotal
-	default:
-		if subtotal > 0 {
-			discount = int64(r.IntN(int(min(subtotal, 1_000_000))))
-		}
-	}
-
 	return Request{
-		Currency:      "usd",
-		LineItems:     lines,
-		DiscountCents: discount,
-		TaxInclusive:  r.IntN(2) == 0,
+		Currency:     "usd",
+		LineItems:    lines,
+		TaxInclusive: r.IntN(2) == 0,
 	}, rate
 }
 
@@ -103,15 +88,41 @@ func TestProperty_Calculate_LineTaxesSumToTotal(t *testing.T) {
 		}
 		if sum != res.TotalTaxCents {
 			t.Fatalf("line taxes do not sum to the invoice tax total: Σlines=%d total=%d\n"+
-				"rate=%v inclusive=%v discount=%d lines=%+v",
-				sum, res.TotalTaxCents, rate, req.TaxInclusive, req.DiscountCents, req.LineItems)
+				"rate=%v inclusive=%v lines=%+v",
+				sum, res.TotalTaxCents, rate, req.TaxInclusive, req.LineItems)
+		}
+	}
+}
+
+// TestProperty_Calculate_NetPlusTaxIsTheLineAmount: with tax-inclusive
+// prices a line's net and tax add up to its price, so the invoice charges
+// the sum of its prices. Without tax included the net is the price.
+func TestProperty_Calculate_NetPlusTaxIsTheLineAmount(t *testing.T) {
+	r := taxRand()
+	ctx := context.Background()
+	for i := 0; i < taxIters; i++ {
+		req, rate := genRequest(r)
+		res, err := NewManualProvider(rate, "VAT").Calculate(ctx, req)
+		if err != nil {
+			t.Fatalf("Calculate: %v", err)
+		}
+		for j, l := range res.Lines {
+			want := req.LineItems[j].AmountCents
+			got := l.NetAmountCents
+			if req.TaxInclusive {
+				got += l.TaxAmountCents
+			}
+			if got != want {
+				t.Fatalf("line %d: net %d, tax %d, price %d (rate=%v inclusive=%v lines=%+v)",
+					j, l.NetAmountCents, l.TaxAmountCents, want, rate, req.TaxInclusive, req.LineItems)
+			}
 		}
 	}
 }
 
 // TestProperty_Calculate_ShapeAndSign: one result line per request line, in
-// order, and no negative tax from non-negative amounts. A negative tax line
-// reads as a refund the customer did not earn.
+// order, and no negative tax or net from non-negative amounts. A negative tax
+// line reads as a refund the customer did not earn.
 func TestProperty_Calculate_ShapeAndSign(t *testing.T) {
 	r := taxRand()
 	ctx := context.Background()
@@ -126,13 +137,13 @@ func TestProperty_Calculate_ShapeAndSign(t *testing.T) {
 			t.Fatalf("got %d result lines for %d request lines", len(res.Lines), len(req.LineItems))
 		}
 		if res.TotalTaxCents < 0 {
-			t.Fatalf("negative invoice tax total %d: rate=%v inclusive=%v discount=%d lines=%+v",
-				res.TotalTaxCents, rate, req.TaxInclusive, req.DiscountCents, req.LineItems)
+			t.Fatalf("negative invoice tax total %d: rate=%v inclusive=%v lines=%+v",
+				res.TotalTaxCents, rate, req.TaxInclusive, req.LineItems)
 		}
 		for j, l := range res.Lines {
-			if l.TaxAmountCents < 0 {
-				t.Fatalf("negative tax on line %d: %d (rate=%v inclusive=%v discount=%d lines=%+v)",
-					j, l.TaxAmountCents, rate, req.TaxInclusive, req.DiscountCents, req.LineItems)
+			if l.TaxAmountCents < 0 || l.NetAmountCents < 0 {
+				t.Fatalf("negative tax or net on line %d: tax %d, net %d (rate=%v inclusive=%v lines=%+v)",
+					j, l.TaxAmountCents, l.NetAmountCents, rate, req.TaxInclusive, req.LineItems)
 			}
 		}
 	}
@@ -157,41 +168,13 @@ func TestProperty_Calculate_TaxNeverExceedsTheTaxableBase(t *testing.T) {
 			t.Fatalf("Calculate: %v", err)
 		}
 
-		var subtotal int64
+		var base int64
 		for _, l := range req.LineItems {
-			subtotal += l.AmountCents
+			base += l.AmountCents
 		}
-		base := subtotal - min(max(req.DiscountCents, 0), subtotal)
 		if res.TotalTaxCents > base {
-			t.Fatalf("tax %d exceeds taxable base %d at rate %v%%: discount=%d lines=%+v",
-				res.TotalTaxCents, base, rate, req.DiscountCents, req.LineItems)
-		}
-	}
-}
-
-// TestProperty_Calculate_FullyDiscountedInvoiceIsUntaxed: when the discount
-// wipes out the subtotal there is nothing to tax, in either mode. This is the
-// branch that returns early, and it is worth pinning because "discount larger
-// than subtotal" is a real operator action (a credit applied to a shrinking
-// subscription) and an unclamped version taxes a negative base.
-func TestProperty_Calculate_FullyDiscountedInvoiceIsUntaxed(t *testing.T) {
-	r := taxRand()
-	ctx := context.Background()
-	for i := 0; i < taxIters/4; i++ {
-		req, rate := genRequest(r)
-		var subtotal int64
-		for _, l := range req.LineItems {
-			subtotal += l.AmountCents
-		}
-		req.DiscountCents = subtotal + int64(r.IntN(10_000))
-
-		res, err := NewManualProvider(rate, "VAT").Calculate(ctx, req)
-		if err != nil {
-			t.Fatalf("Calculate: %v", err)
-		}
-		if res.TotalTaxCents != 0 {
-			t.Fatalf("fully discounted invoice was taxed %d: rate=%v inclusive=%v subtotal=%d discount=%d",
-				res.TotalTaxCents, rate, req.TaxInclusive, subtotal, req.DiscountCents)
+			t.Fatalf("tax %d exceeds taxable base %d at rate %v%%: lines=%+v",
+				res.TotalTaxCents, base, rate, req.LineItems)
 		}
 	}
 }
@@ -246,8 +229,8 @@ func TestProperty_Calculate_RateIsMonotonic(t *testing.T) {
 				t.Fatalf("Calculate: %v", err)
 			}
 			if res.TotalTaxCents < prev {
-				t.Fatalf("raising the rate lowered the tax: %v%%→%d then %v%%→%d (inclusive=%v discount=%d lines=%+v)",
-					prevRate, prev, rate, res.TotalTaxCents, req.TaxInclusive, req.DiscountCents, req.LineItems)
+				t.Fatalf("raising the rate lowered the tax: %v%%→%d then %v%%→%d (inclusive=%v lines=%+v)",
+					prevRate, prev, rate, res.TotalTaxCents, req.TaxInclusive, req.LineItems)
 			}
 			prev, prevRate = res.TotalTaxCents, rate
 		}
@@ -299,11 +282,10 @@ func TestProperty_Calculate_TaxIsTheNEARESTCent(t *testing.T) {
 			t.Fatalf("Calculate: %v", err)
 		}
 
-		var subtotal int64
+		var base int64
 		for _, l := range req.LineItems {
-			subtotal += l.AmountCents
+			base += l.AmountCents
 		}
-		base := subtotal - min(max(req.DiscountCents, 0), subtotal)
 		if base <= 0 {
 			continue
 		}
@@ -321,9 +303,9 @@ func TestProperty_Calculate_TaxIsTheNEARESTCent(t *testing.T) {
 		}
 		if err2*2 > den {
 			t.Fatalf("tax is not the nearest cent: got=%d exact=%d/%d off-by=%.4f cents\n"+
-				"rate=%v inclusive=%v base=%d discount=%d",
+				"rate=%v inclusive=%v base=%d",
 				res.TotalTaxCents, base*m.ratePPM, den, float64(err2)/float64(den),
-				rate, req.TaxInclusive, base, req.DiscountCents)
+				rate, req.TaxInclusive, base)
 		}
 	}
 }
@@ -438,11 +420,6 @@ func TestProperty_Apportion_WithinOneCentOfExactShare(t *testing.T) {
 // (operator retry-tax, the tax_retry reconciler, the clock variant) recomputes
 // tax from the STORED lines, so a tie-break that changed would move a cent
 // between lines on a recalculation of an unchanged invoice.
-//
-// Two other mutations of this function survived the property suite —
-// removing the discount clamp and the negative-share clamp — and deliberately
-// get no test: both are unreachable, and a 50,000-request fingerprint of every
-// Result was byte-identical with and without them.
 func TestApportion_TiesGoToTheLowestIndex(t *testing.T) {
 	// Three identical shares of 1/3 each, one cent of residual: line 0 takes it.
 	got, _ := distributeLargestRemainder(1, []int64{100, 100, 100}, 1, 300)

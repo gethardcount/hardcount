@@ -1,7 +1,7 @@
 # ADR-100: Currency coherence is enforced at every write — a guard ring, not engine reconciliation
 
 **Date:** 2026-07-26
-**Status:** Accepted (amended 2026-10-23 by [ADR-129](129-credit-carries-its-own-currency.md); amended 2026-11-10: G3's create pin and the profile guard run under the customer-rules lock); superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md) (G1, G2, G2b, G4 and the override currency clause are gone), built in PR-4 (#1386)
+**Status:** Accepted (amended 2026-10-23 by [ADR-129](129-credit-carries-its-own-currency.md); amended 2026-11-10: G3's create pin and the profile guard run under the customer-rules lock; amended 2026-11-13: the profile guard reads every live subscription); superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md) (G1, G2, G2b, G4 and the override currency clause are gone), built in PR-4 (#1386)
 
 **Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md)**, decided 2026-10-23 and built in PR-4 (#1386). Where this ADR differs, ADR-130 describes the code. G1, G2, G2b and ADR-070's override currency clause go, because a price and an override have no currency and take the plan's (PR-4). G4 goes whole: its `CreateRatingRuleTx` normalization, allowlist and republish clauses go with the rating-rule tables, and its recipe meter probe goes because recipe prices take the new plan's currency (PR-4). G3, G5 to G8 and the ADR-129 amendment stay.
 
@@ -52,6 +52,17 @@ An adversarial panel (three lenses: legitimate-flow breakage, completeness, blas
   - **A price added to a used plan while a subscription is created on another plan.** This is a meter race: it can put one meter on two of a customer's items, which bills its usage twice. It adds no currency, because a price takes its plan's currency ([ADR-130](130-usage-prices-belong-to-the-plan.md) Risks).
 
   Trigger: the first multi-operator tenant.
+
+## Amendment 2026-11-13: the profile guard reads every live subscription
+
+The billing-profile guard read at most 100 subscriptions of each status, newest first. A customer with more could take a profile currency that an older subscription does not bill in.
+
+- **The guard uses G3's own query (iv).** It reads every draft, trialing and active subscription of the customer, with a pending plan change's plan, in one statement with no page. The profile guard and the pin judge the same set.
+- **The ADR-067 checker's statuses parameter is gone.** Its read serves only the archive guard, which leaves drafts out.
+- **The refusal names the subscription by its code,** as G3's refusals do.
+- **With no checker wired, the guard refuses the currency,** as the archive guard does (ADR-067). It logged a warning and saved the profile unchecked.
+
+Tests: `TestBillingProfileCurrency_ChecksEveryLiveSubscription` (internal/api), `TestBillingProfileCurrency_FailsClosedWithoutChecker` (internal/customer).
 
 ## Amendment 2026-11-10: G3's create pin and the profile guard run under the customer-rules lock
 

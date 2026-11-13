@@ -28,7 +28,8 @@ invoice_id?: string;
  */
 customer_id?: string;
 /**
- * Only notes in this status.
+ * Only notes in this status. Any other value is a 422 with
+ * `param: status`.
  */
 status?: ListCreditNotesStatus;
 /**
@@ -36,7 +37,7 @@ status?: ListCreditNotesStatus;
  * returns issued, non-test-clock notes whose
  * refund failed or has an unknown result, has been pending more
  * than 72 hours, or has a refund amount still at `none` after 1
- * hour.
+ * hour. Any other value is a 422 with `param: refund_status`.
  */
 refund_status?: ListCreditNotesRefundStatus;
 /**
