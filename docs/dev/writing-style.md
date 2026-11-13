@@ -29,7 +29,7 @@ A change in behavior updates its docs in the same PR. Check these too:
 
 ## Shapes for common docs
 
-- **CHANGELOG entry.** At most about 50 words: a bold outcome, who is affected, and any action to take. Add the PR link once the PR is open.
+- **CHANGELOG entry.** At most about 50 words: a bold outcome, who is affected, and any action to take. Add the PR link once the PR is open. A fix to an amount says which way it was wrong, and its PR gives a query that finds the records it affected.
 - **PR description.** Fill in the template. How the change works, how it was tested and its history go here, not in the CHANGELOG.
 - **ADR.** Follow the [template](../adr/TEMPLATE.md), and keep its Summary current.
 - **Checklist item.** One action and the result to see, on one line.
