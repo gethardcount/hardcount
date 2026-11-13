@@ -449,7 +449,7 @@ func (m *memStore) ListProviderConfigErrors(_ context.Context, tenantID string, 
 // test store. The narrow service tests in this file don't exercise the
 // catchup path; integration tests cover it. Returning nothing here
 // satisfies the interface without faking sub→clock joins in memory.
-func (m *memStore) ListPendingTaxRetryForClock(_ context.Context, _, _ string, _ []string, _, _ int) ([]domain.Invoice, error) {
+func (m *memStore) ListPendingTaxRetryForClock(_ context.Context, _, _ string, _ []string, _ int, _ domain.InvoiceKeyset, _ int) ([]domain.Invoice, error) {
 	return nil, nil
 }
 

@@ -155,7 +155,7 @@ type Store interface {
 	// clock-pinned tax retries fire only on operator Advance, never on
 	// the wall-clock tick. One retry per row per Advance (no backoff
 	// gate) — operator-friendly: each click does something visible.
-	ListPendingTaxRetryForClock(ctx context.Context, tenantID, clockID string, retryableCodes []string, maxAttempts, limit int) ([]domain.Invoice, error)
+	ListPendingTaxRetryForClock(ctx context.Context, tenantID, clockID string, retryableCodes []string, maxAttempts int, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error)
 
 	// ListCustomerDataInvalidErrors returns draft invoices for ONE
 	// customer stuck on `customer_data_invalid` — the only tax error a
