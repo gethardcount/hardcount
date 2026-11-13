@@ -30,6 +30,15 @@ async function invoiceRow(page: Page, invoice: Invoice) {
   return page.getByRole('row').filter({ hasText: invoice.invoice_number })
 }
 
+// A clock frozen 60 days ago. From real time an invoice due 10 days after
+// it reads Past due; from the clock's time it reads Due in.
+async function clockSixtyDaysAgo(): Promise<TestClock> {
+  const frozen = new Date(Date.now() - 60 * 86_400_000).toISOString().replace(/\.\d+Z$/, 'Z')
+  return api<TestClock>('POST', '/test-clocks', { name: `E2E Clock ${uniq()}`, frozen_time: frozen })
+}
+
+const isClockList = (url: URL) => url.pathname === '/v1/test-clocks'
+
 async function openInvoice(page: Page, invoice: Invoice) {
   await page.getByRole('link', { name: invoice.invoice_number, exact: true }).click()
   await expect(page.getByRole('heading', { level: 1, name: invoice.invoice_number, exact: true })).toBeVisible()
@@ -55,6 +64,12 @@ test('after an advance, the invoices list and the invoice count the due date fro
   await expect(dialog).toBeHidden()
   await expect(page.getByText('Last advance results')).toBeVisible({ timeout: 30_000 })
 
+  // The clock page saw the advance finish, so the clock list reads Ready.
+  await page.getByRole('navigation', { name: 'Main navigation' }).getByRole('link', { name: 'Test clocks' }).click()
+  const clockRow = page.getByRole('row').filter({ hasText: clock.name })
+  await expect(clockRow.getByText('Ready')).toBeVisible()
+  await expect(clockRow.getByText('Advancing')).toHaveCount(0)
+
   row = await invoiceRow(page, invoice)
   await expect(row.getByText(/^Past due \d+d$/)).toBeVisible()
   await openInvoice(page, invoice)
@@ -69,10 +84,7 @@ test('an invoice on a clock made after the clock list was read shows its clock, 
   await expect(page.getByRole('heading', { level: 1, name: 'Test clocks', exact: true })).toBeVisible()
   await listRead
 
-  // A clock frozen 60 days ago: from real time the invoice would read
-  // Past due, and from the clock's time it reads Due in.
-  const frozen = new Date(Date.now() - 60 * 86_400_000).toISOString().replace(/\.\d+Z$/, 'Z')
-  const clock = await api<TestClock>('POST', '/test-clocks', { name: `E2E Clock ${uniq()}`, frozen_time: frozen })
+  const clock = await clockSixtyDaysAgo()
   const invoice = await openInvoiceOn(clock.id)
 
   await invoiceRow(page, invoice)
@@ -82,4 +94,58 @@ test('an invoice on a clock made after the clock list was read shows its clock, 
   await expect(page.getByText('Test clock deleted.')).toHaveCount(0)
   await expect(page.getByText(/^Due in \d+d$/).first()).toBeVisible()
   await expect(page.getByText(/^Past due \d+d$/)).toHaveCount(0)
+})
+
+test('while the clock list loads, the invoice shows its stored status and no due countdown', async ({ page }) => {
+  const clock = await clockSixtyDaysAgo()
+  const invoice = await openInvoiceOn(clock.id)
+
+  // Hold the clock list until the page has been checked.
+  let release!: () => void
+  const held = new Promise<void>(resolve => { release = resolve })
+  let holds = 0
+  await page.route(isClockList, async route => {
+    holds++
+    await held
+    await route.continue()
+  })
+
+  await page.goto(`/invoices/${invoice.id}`)
+  await expect(page.getByRole('heading', { level: 1, name: invoice.invoice_number, exact: true })).toBeVisible()
+  await expect.poll(() => holds).toBeGreaterThan(0)
+  const summary = page.getByTestId('invoice-summary')
+  await expect(summary.getByText('Open', { exact: true })).toBeVisible()
+  await expect(page.getByText(/^Past due/)).toHaveCount(0)
+  await expect(page.getByText(/^Due in \d+d$/)).toHaveCount(0)
+
+  release()
+  await expect(page.getByText(/^Due in \d+d$/).first()).toBeVisible()
+  await expect(page.getByText(/^Past due/)).toHaveCount(0)
+  await page.unrouteAll({ behavior: 'wait' })
+})
+
+test('when the clock list fails to load, the invoice shows that load error and no due countdown', async ({ page }) => {
+  const clock = await clockSixtyDaysAgo()
+  const invoice = await openInvoiceOn(clock.id)
+
+  let failing = true
+  await page.route(isClockList, async route => {
+    if (failing) await route.fulfill({ status: 500, json: { error: { type: 'api_error', message: 'internal error' } } })
+    else await route.continue()
+  })
+
+  await page.goto(`/invoices/${invoice.id}`)
+  await expect(page.getByRole('heading', { level: 1, name: invoice.invoice_number, exact: true })).toBeVisible()
+  const loadError = page.getByRole('alert').filter({ hasText: "Couldn't load test clocks" })
+  await expect(loadError).toHaveCount(1)
+  await expect(page.getByTestId('invoice-summary').getByText('Open', { exact: true })).toBeVisible()
+  await expect(page.getByText(/^Past due/)).toHaveCount(0)
+  await expect(page.getByText(/^Due in \d+d$/)).toHaveCount(0)
+
+  // Retry reads the list again, and the countdown comes from the clock.
+  failing = false
+  await loadError.getByRole('button', { name: 'Retry' }).click()
+  await expect(loadError).toHaveCount(0)
+  await expect(page.getByText(/^Due in \d+d$/).first()).toBeVisible()
+  await expect(page.getByText(/^Past due/)).toHaveCount(0)
 })
