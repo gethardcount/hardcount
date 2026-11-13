@@ -69,7 +69,6 @@ func TestCycleDays_FullPeriodsAreTheirOwnLength(t *testing.T) {
 func TestCycleDays_Rows(t *testing.T) {
 	utc := time.UTC
 	ist, _ := time.LoadLocation("Asia/Kolkata")
-	ny, _ := time.LoadLocation("America/New_York")
 	d := func(loc *time.Location, y int, m time.Month, day, h, min int) time.Time {
 		return time.Date(y, m, day, h, min, 0, 0, loc)
 	}
@@ -84,14 +83,14 @@ func TestCycleDays_Rows(t *testing.T) {
 		{"calendar stub from Feb 10: February's days", CyclePeriod{d(utc, 2027, 2, 10, 0, 0), d(utc, 2027, 3, 1, 0, 0), cal, monthly, utc, 0}, 28},
 		{"calendar after a yearly change keeps no anchor: Apr 1 with stale anchor 15", CyclePeriod{d(utc, 2027, 4, 1, 0, 0), d(utc, 2027, 5, 1, 0, 0), cal, monthly, utc, 15}, 30},
 		{"calendar stub from Jan 29 after a yearly change on anchor 29", CyclePeriod{d(utc, 2027, 1, 29, 0, 0), d(utc, 2027, 2, 1, 0, 0), cal, monthly, utc, 29}, 31},
-		{"calendar period longer than its month: its own length", CyclePeriod{d(ny, 2027, 1, 1, 0, 0), d(ny, 2027, 2, 2, 0, 0), cal, monthly, ny, 0}, 32},
+		{"calendar March opened in IST, read in UTC, starts Feb 28: its own 31 days", CyclePeriod{d(ist, 2027, 3, 1, 0, 0), d(ist, 2027, 4, 1, 0, 0), cal, monthly, utc, 0}, 31},
 		{"clamped start on its anchor: Feb 28 to Mar 31 on 31", CyclePeriod{d(utc, 2027, 2, 28, 0, 0), d(utc, 2027, 3, 31, 0, 0), anniv, monthly, utc, 31}, 31},
 		{"cut short, anchor rewritten to 15 at midnight Mar 15 (the old start was clamped): 28", CyclePeriod{d(ist, 2033, 2, 28, 0, 0), d(ist, 2033, 3, 15, 0, 0), anniv, monthly, ist, 15}, 28},
 		{"cut short yearly from Feb 28 2031, anchor rewritten to 30: 365", CyclePeriod{d(ist, 2031, 2, 28, 0, 0), d(ist, 2031, 3, 30, 0, 0), anniv, yearly, ist, 30}, 365},
 		{"cut short from Jan 15, anchor rewritten to 20", CyclePeriod{d(ist, 2033, 1, 15, 0, 0), d(ist, 2033, 1, 30, 0, 0), anniv, monthly, ist, 20}, 31},
-		{"seam: a 1-day period off the anchor counts one interval from its own day", CyclePeriod{d(utc, 2027, 1, 14, 18, 30), d(utc, 2027, 1, 15, 18, 30), anniv, monthly, utc, 15}, 31},
-		{"seam from Jan 31: one interval from the 31st, clamped to Feb 28", CyclePeriod{d(utc, 2027, 1, 31, 18, 30), d(utc, 2027, 2, 1, 18, 30), anniv, monthly, utc, 1}, 28},
-		{"a period longer than one interval: its own length", CyclePeriod{d(utc, 2027, 1, 1, 18, 30), d(utc, 2027, 2, 2, 18, 30), anniv, monthly, utc, 2}, 32},
+		{"opened in IST on anchor 15, read in UTC from Jan 14 18:30: one interval from the 14th", CyclePeriod{d(ist, 2027, 1, 15, 0, 0), d(ist, 2027, 2, 15, 0, 0), anniv, monthly, utc, 15}, 31},
+		{"1-day seam rolled in UTC from IST's Feb 1 on anchor 1: one interval from the 31st, clamped", CyclePeriod{d(utc, 2027, 1, 31, 18, 30), d(utc, 2027, 2, 1, 18, 30), anniv, monthly, utc, 1}, 28},
+		{"seam rolled in UTC from IST's Jan 2 on anchor 2 is 32 days: its own length", CyclePeriod{d(utc, 2027, 1, 1, 18, 30), d(utc, 2027, 2, 2, 18, 30), anniv, monthly, utc, 2}, 32},
 		{"no stored anchor (legacy row): Jan 31 to Mar 3 is its own length", CyclePeriod{d(utc, 2027, 1, 31, 0, 0), d(utc, 2027, 3, 3, 0, 0), anniv, monthly, utc, 0}, 31},
 		{"no stored anchor, Jan 15 to Feb 15", CyclePeriod{d(utc, 2027, 1, 15, 0, 0), d(utc, 2027, 2, 15, 0, 0), anniv, monthly, utc, 0}, 31},
 	}

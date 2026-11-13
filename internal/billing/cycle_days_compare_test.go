@@ -47,13 +47,16 @@ func storedAnchorCycle(p domain.CyclePeriod) int {
 	return roundDays(domain.AddBillingInterval(p.Start, p.Interval, p.Loc, p.StoredAnchor).Sub(p.Start))
 }
 
-// readerSees lists the kinds of period each reader is given.
+// readerSees lists the kinds of period each reader is given. The in-advance
+// close (R2) bills the period it rolls, which ends where NextBillingPeriodEnd
+// says in the tenant's zone now; the others read the stored period, which a
+// zone change can leave as it was opened.
 var readerSees = map[string][]string{
-	"R1": {"plain", "calendar", "calendar-stub", "calendar-stale", "cut-short", "seam", "long", "no-anchor"},
-	"R2": {"plain", "calendar", "calendar-stale", "seam", "long", "no-anchor"},
+	"R1": {"plain", "calendar", "calendar-stub", "calendar-stale", "cut-short", "seam", "zone-changed", "no-anchor"},
+	"R2": {"plain", "calendar", "calendar-stale", "seam", "no-anchor"},
 	"R3": {"plain", "calendar", "calendar-stub"},
-	"R4": {"plain", "calendar", "calendar-stub", "calendar-stale", "seam", "long", "no-anchor"},
-	"R5": {"plain", "calendar", "calendar-stub", "calendar-stale", "seam", "long", "no-anchor"},
+	"R4": {"plain", "calendar", "calendar-stub", "calendar-stale", "seam", "zone-changed", "no-anchor"},
+	"R5": {"plain", "calendar", "calendar-stub", "calendar-stale", "seam", "zone-changed", "no-anchor"},
 }
 
 func daysInMonth(y int, m time.Month) int { return time.Date(y, m+1, 0, 0, 0, 0, 0, time.UTC).Day() }
@@ -96,9 +99,10 @@ func cycleGrid(t *testing.T) []gridPeriod {
 						for w := start.Add(12 * time.Hour); w.Before(end) && w.Sub(start) < 62*24*time.Hour; w = w.Add(12 * time.Hour) {
 							add("cut-short", domain.CyclePeriod{Start: start, End: w, BillingTime: bt, Interval: iv, Loc: loc, StoredAnchor: w.In(loc).Day()})
 						}
-						// Seams: the boundary at midnight in another zone. Its
-						// period ends where the engine rolls it in this zone, or,
-						// for a sub-day seam, at this zone's midnight that day.
+						// After the tenant's zone changes from another one to this:
+						// the period the close rolls in this zone from a boundary
+						// at midnight in the other (a seam), and a period opened in
+						// the other zone, read in this one.
 						for _, other := range cycleTableZones {
 							if other == zone {
 								continue
@@ -106,11 +110,7 @@ func cycleGrid(t *testing.T) []gridPeriod {
 							ol, _ := time.LoadLocation(other)
 							s := time.Date(y, m, min(anchor, daysInMonth(y, m)), 0, 0, 0, 0, ol)
 							add("seam", domain.CyclePeriod{Start: s, End: domain.NextBillingPeriodEnd(s, bt, iv, loc, anchor), BillingTime: bt, Interval: iv, Loc: loc, StoredAnchor: anchor})
-							add("seam", domain.CyclePeriod{Start: s, End: start, BillingTime: bt, Interval: iv, Loc: loc, StoredAnchor: anchor})
-							// A period opened in the other zone and ended in this one.
-							next := domain.NextBillingPeriodEnd(s, bt, iv, ol, anchor).In(ol)
-							e := time.Date(next.Year(), next.Month(), next.Day(), 0, 0, 0, 0, loc)
-							add("long", domain.CyclePeriod{Start: s, End: e, BillingTime: bt, Interval: iv, Loc: loc, StoredAnchor: anchor})
+							add("zone-changed", domain.CyclePeriod{Start: s, End: domain.NextBillingPeriodEnd(s, bt, iv, ol, anchor), BillingTime: bt, Interval: iv, Loc: loc, StoredAnchor: anchor})
 						}
 					}
 				}
@@ -136,6 +136,15 @@ func cycleGrid(t *testing.T) []gridPeriod {
 			}
 			for w := first.Add(12 * time.Hour); w.Before(next); w = w.Add(12 * time.Hour) {
 				cal("cut-short", first, w, 0)
+			}
+			for _, other := range cycleTableZones {
+				if other == zone {
+					continue
+				}
+				ol, _ := time.LoadLocation(other)
+				s := time.Date(y, m, 1, 0, 0, 0, 0, ol)
+				cal("seam", s, domain.NextBillingPeriodEnd(s, domain.BillingTimeCalendar, domain.BillingMonthly, loc, 0), 0)
+				cal("zone-changed", s, domain.NextBillingPeriodEnd(s, domain.BillingTimeCalendar, domain.BillingMonthly, ol, 0), 0)
 			}
 		}
 	}
@@ -220,6 +229,10 @@ func differenceClass(g gridPeriod) string {
 	switch {
 	case calendar && p.StoredAnchor > 0:
 		return "calendar after yearly"
+	case calendar && own > daysInMonth(p.Start.In(p.Loc).Year(), p.Start.In(p.Loc).Month()):
+		// Read in a new zone, a calendar period can start on the last day
+		// of the month before.
+		return "longer than one interval"
 	case calendar:
 		return ""
 	case p.StoredAnchor == 0:
