@@ -48,4 +48,6 @@ test('a timed pause stops showing once its resume date passes, by the given now 
   assert.deepEqual(collectionPausedFlag(sub, Date.parse('2027-01-14T00:00:00Z')), { label: 'Collection paused', tone: 'warning' })
   assert.equal(collectionPausedFlag(sub, Date.parse('2027-01-15T00:00:00Z')), null)
   assert.equal(collectionPausedFlag(sub, Date.parse('2027-01-16T00:00:00Z')), null)
+  // While now is not known, the chip follows the stored pause.
+  assert.deepEqual(collectionPausedFlag(sub, undefined), { label: 'Collection paused', tone: 'warning' })
 })

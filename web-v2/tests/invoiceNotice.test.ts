@@ -190,4 +190,7 @@ test('the finalize confirmation says nothing is charged while collection is paus
   assert.equal(collectionPausedNow({}, now), true)
   assert.equal(collectionPausedNow({ resumes_at: '2026-10-29T00:00:00Z' }, now), true)
   assert.equal(collectionPausedNow({ resumes_at: '2026-10-28T00:00:00Z' }, now), false)
+  // While now is not known, it follows the stored pause.
+  assert.equal(collectionPausedNow({ resumes_at: '2026-10-28T00:00:00Z' }, undefined), true)
+  assert.equal(collectionPausedNow(undefined, undefined), false)
 })
