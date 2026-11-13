@@ -179,17 +179,10 @@ func trialCancelsFree(sub domain.Subscription) bool {
 // while the status still says trialing. Usage before the stored period start,
 // the trial proper, falls outside the window on its own.
 //
-// Two trialing periods close without an invoice (handleTrialState): one the
-// trial outlasts (the close only advances it), and one with a cancel due at
-// trial end.
+// A trialing period with a cancel due at trial end closes without an
+// invoice (handleTrialState).
 func trialPeriodBilled(sub domain.Subscription) bool {
-	if trialCancelsFree(sub) {
-		return false
-	}
-	if sub.TrialEndAt != nil && sub.CurrentBillingPeriodEnd != nil && sub.TrialEndAt.After(*sub.CurrentBillingPeriodEnd) {
-		return false
-	}
-	return true
+	return !trialCancelsFree(sub)
 }
 
 // unbilledUsageCents is the usage amount the period close would bill for

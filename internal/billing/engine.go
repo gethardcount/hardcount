@@ -477,9 +477,6 @@ type SubscriptionReader interface {
 	// it verify-only (same values) to take the lock and prove the
 	// snapshot before inserting.
 	ClosePeriodTx(ctx context.Context, tx *sql.Tx, tenantID, id string, expected subscription.PeriodSnapshot, periodStart, periodEnd, nextBillingAt time.Time, anchorDay int) error
-	// ClosePeriod is the own-tx wrapper for the trial-active advance (no
-	// invoice, nothing else to commit alongside).
-	ClosePeriod(ctx context.Context, tenantID, id string, expected subscription.PeriodSnapshot, periodStart, periodEnd, nextBillingAt time.Time, anchorDay int) error
 	// ApplyDuePendingItemPlansAtomic swaps plan_id ← pending_plan_id for every
 	// item on the subscription whose pending_plan_effective_at <= now, in one
 	// statement. Called at the cycle boundary so the just-closed period is
@@ -2717,37 +2714,21 @@ func (e *Engine) resolveBillingInputs(ctx context.Context, sub domain.Subscripti
 }
 
 // handleTrialState runs the trial lifecycle for a trialing subscription:
-// advance-without-billing while the trial runs, cancel-free when a cancel
-// is due at trial end, or atomically flip to active (billing day-1
-// in-advance coverage) when the trial has elapsed. Returns the
-// (possibly-updated) subscription and done=true when the caller should
-// stop billing this sub this tick (trial still active, canceled, or
-// resolved to a non-active state by a concurrent writer); done=false
+// cancel-free when a cancel is due at trial end, or atomically flip to
+// active (billing day-1 in-advance coverage) when the trial has elapsed.
+// Returns the (possibly-updated) subscription and done=true when the caller
+// should stop billing this sub this tick (canceled, or resolved to a
+// non-active state by a concurrent writer); done=false
 // means continue to normal billing with the returned subscription.
 // Non-trialing subscriptions return (sub, false, nil) immediately.
 // Extracted from billOnePeriod (behavior-preserving).
 func (e *Engine) handleTrialState(ctx context.Context, sub domain.Subscription, now, periodStart, periodEnd time.Time) (domain.Subscription, bool, error) {
 	if sub.Status == domain.SubscriptionTrialing {
-		trialOver := sub.TrialEndAt == nil || !now.Before(*sub.TrialEndAt)
-		if !trialOver {
-			// Trial-active cycle advance: honors billing_time so calendar
-			// subs with an extended-past-period trial stay calendar-aligned.
-			// Interval is hardcoded monthly here (plans not yet fetched);
-			// trial-extended-past-yearly-cycle is an edge case that the
-			// pre-existing hardcoded `monthly` already approximated.
-			loc, err := e.tenantLocation(ctx, sub.TenantID)
-			if err != nil {
-				return sub, true, err
-			}
-			nextBilling := domain.NextBillingPeriodEnd(periodEnd, sub.BillingTime, domain.BillingMonthly, loc, sub.BillingAnchorDay)
-			slog.Info("skipping billing (trial active)", "subscription_id", sub.ID)
-			// ADR-115: the advance proves the trialing snapshot — EndTrial /
-			// ExtendTrial change status or period, so a stale advance misses.
-			err = e.subs.ClosePeriod(ctx, sub.TenantID, sub.ID, subscription.SnapshotOf(sub), periodEnd, nextBilling, nextBilling, sub.BillingAnchorDay)
-			if errors.Is(err, subscription.ErrWatermarkMoved) {
-				return sub, true, errPeriodMoved
-			}
-			return sub, true, err
+		// A trialing row's period ends after its trial (the trial's first
+		// paid period, firstPeriodAfterTrial), so it is not due before the
+		// trial ends.
+		if sub.TrialEndAt != nil && now.Before(*sub.TrialEndAt) {
+			return sub, true, fmt.Errorf("subscription %s is due before its trial ends at %s", sub.ID, sub.TrialEndAt.Format(time.RFC3339))
 		}
 		// ADR-069: a due cancel schedule means CANCEL FREE — never
 		// activate-and-bill. Pre-route on the snapshot; the activation
@@ -3008,10 +2989,9 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 // which loops until the sub catches up to its effectiveNow.
 //
 // Returns (true, nil) if an invoice was created, (false, nil) if
-// skipped (e.g. trial-active, status not active). The bool here
-// means "invoice generated", NOT "next_billing_at advanced" — some
-// skip paths (trial-active) advance the cycle without generating
-// an invoice. The wrapper distinguishes via fresh sub-state reads.
+// skipped (e.g. status not active). The bool here means "invoice
+// generated", NOT "next_billing_at advanced". The wrapper distinguishes
+// via fresh sub-state reads.
 func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bool, error) {
 	live, err := postgres.Livemode(ctx)
 	if err != nil {
@@ -3027,9 +3007,8 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	defer span.End()
 
 	// Guard: only bill active or trialing subscriptions. Trialing subs flow
-	// through to the trial state machine below, which either advances the
-	// cycle without billing (trial active) or atomically flips to active and
-	// then bills (trial elapsed).
+	// through to the trial state machine below, which cancels free or
+	// atomically flips to active and then bills.
 	if sub.Status != domain.SubscriptionActive && sub.Status != domain.SubscriptionTrialing {
 		slog.Info("skipping billing (not active)", "subscription_id", sub.ID, "status", sub.Status)
 		return false, nil
@@ -3102,7 +3081,7 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	periodStart := *sub.CurrentBillingPeriodStart
 	periodEnd := *sub.CurrentBillingPeriodEnd
 
-	// Trial lifecycle: advance-without-bill, cancel-free, or flip-to-active.
+	// Trial lifecycle: cancel-free, or flip-to-active.
 	sub, trialDone, err := e.handleTrialState(ctx, sub, now, periodStart, periodEnd)
 	if trialDone {
 		return false, err
@@ -3681,10 +3660,10 @@ func (e *Engine) buildOnCreateInvoice(ctx context.Context, sub domain.Subscripti
 
 // onCreateBaseLines is the day-1 in_advance invoice's base-fee lines for
 // [periodStart, periodEnd]: one line per in_advance item, prorated when the
-// period is shorter than a full plan cycle (a calendar stub). Moved out of
-// buildOnCreateInvoice unchanged so the operator preview of a trialing
-// subscription (previewTrialEnd) shows the invoice the trial end issues with
-// this one copy of the math.
+// period is shorter than a full plan cycle (a calendar stub). The day-1
+// invoice (buildOnCreateInvoice), the in-advance swap's new period
+// (BillOnPlanSwapTx) and the operator preview of a trialing subscription
+// (previewTrialEnd) share this one copy of the math.
 func onCreateBaseLines(sub domain.Subscription, plans map[string]domain.Plan, advanceItems []domain.SubscriptionItem, periodStart, periodEnd time.Time, invoiceCurrency string, billingLoc *time.Location) ([]closeBaseLine, error) {
 	out := make([]closeBaseLine, 0, len(advanceItems))
 	periodDays := roundDays(periodEnd.Sub(periodStart))

@@ -299,6 +299,11 @@ keep-anchor fire: close first, the fire's CAS loses; fire first, the close's
 in-tx watermark re-read sees the fire and bills only the rest. Both orders
 are still asserted, and 1000c of usage is billed once in each.
 
+2026-11-13: the trial-active advance is removed. No writer leaves a
+trialing row due before its trial ends (its period is the trial's first
+paid period, `firstPeriodAfterTrial`), so the engine fails such a row
+instead of moving its period.
+
 ## Amendment 2026-11-10: the cycle close has no catch for a unique violation
 
 The cycle close read every unique violation on its invoice insert as "this

@@ -391,11 +391,12 @@ an invoice will bill it. So the contract changed and the code did not.
 - `outside_subscription`: no active or trialing subscription bills the
   time: none exists, or the time is before one's first period (which
   starts at midnight of its first day), in a free trial (also on the
-  trial-end day, before the trial end, and in the grace of a period the
-  trial outlasts), after one ends at its period end or at a scheduled
+  trial-end day, before the trial end), after one ends at its period end or at a scheduled
   cancel, or in a stretch of the meter that another subscription, since
   ended, billed. The end is the subscription's `cancel_effective_at`
   (ADR-069).
+  (2026-11-13: "in the grace of a period the trial outlasts" is removed. A
+  trial never outlasts its period; see ADR-115's dated line.)
 
 Where they disagree across subscriptions, a subscription that bills the
 event wins, then one that prices its meter (`no_price`), then one that
