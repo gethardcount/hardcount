@@ -19,6 +19,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/pricing"
 	"github.com/gethardcount/hardcount/internal/subscription"
 	"github.com/gethardcount/hardcount/internal/subscription/subscriptiontest"
@@ -159,7 +160,7 @@ func (a *invoiceStoreAdapter) ReleaseChargeHold(ctx context.Context, tenantID, i
 	return a.store.ReleaseChargeHold(ctx, tenantID, id, hold)
 }
 
-func (a *invoiceStoreAdapter) ListAutoChargePending(ctx context.Context, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error) {
+func (a *invoiceStoreAdapter) ListAutoChargePending(ctx context.Context, after walk.Key, limit int) ([]domain.Invoice, error) {
 	return a.store.ListAutoChargePending(ctx, after, limit)
 }
 
@@ -167,7 +168,7 @@ func (a *invoiceStoreAdapter) ListFailedWithoutDunningRun(ctx context.Context, o
 	return a.store.ListFailedWithoutDunningRun(ctx, olderThan, limit)
 }
 
-func (a *invoiceStoreAdapter) ListAutoChargePendingForClock(ctx context.Context, tenantID, clockID string, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error) {
+func (a *invoiceStoreAdapter) ListAutoChargePendingForClock(ctx context.Context, tenantID, clockID string, after walk.Key, limit int) ([]domain.Invoice, error) {
 	return a.store.ListAutoChargePendingForClock(ctx, tenantID, clockID, after, limit)
 }
 

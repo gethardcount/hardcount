@@ -10,6 +10,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -222,7 +223,7 @@ func TestClaimAutoCharge_ZeroDueIsClaimable(t *testing.T) {
 		t.Fatalf("commit: %v", err)
 	}
 
-	listed, err := store.ListAutoChargePending(ctx, domain.InvoiceKeyset{}, 50)
+	listed, err := store.ListAutoChargePending(ctx, walk.Key{}, 50)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
@@ -294,7 +295,7 @@ func TestClaimAutoCharge_ListsStayClaimBlind(t *testing.T) {
 	if h, _ := store.ClaimAutoCharge(ctx, tenantID, inv.ID); !h.Held() {
 		t.Fatal("claim must succeed")
 	}
-	listed, err := store.ListAutoChargePending(ctx, domain.InvoiceKeyset{}, 50)
+	listed, err := store.ListAutoChargePending(ctx, walk.Key{}, 50)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}

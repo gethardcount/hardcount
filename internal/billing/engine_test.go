@@ -21,6 +21,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/payment"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/tax"
 )
 
@@ -1119,7 +1120,7 @@ func (m *mockInvoices) SetAutoChargePending(_ context.Context, _, id string, pen
 // install a more meaningful stub via the test fixture; the default
 // returns nothing because mockInvoices doesn't track sub→clock
 // mapping (that's the postgres store's job).
-func (m *mockInvoices) ListAutoChargePendingForClock(_ context.Context, _ string, _ string, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error) {
+func (m *mockInvoices) ListAutoChargePendingForClock(_ context.Context, _ string, _ string, after walk.Key, limit int) ([]domain.Invoice, error) {
 	var result []domain.Invoice
 	for _, inv := range m.invoices {
 		if m.clockQueue[inv.ID] && inv.AutoChargePending && inv.Status == domain.InvoiceFinalized && inv.PaymentStatus == domain.PaymentPending {
@@ -1132,7 +1133,7 @@ func (m *mockInvoices) ListAutoChargePendingForClock(_ context.Context, _ string
 // keysetPage mirrors the store's queue paging: ORDER BY (created_at, id),
 // rows strictly after the cursor, at most limit. Fakes must page like the
 // real query, or a drain test proves nothing about the real one.
-func keysetPage(rows []domain.Invoice, after domain.InvoiceKeyset, limit int) []domain.Invoice {
+func keysetPage(rows []domain.Invoice, after walk.Key, limit int) []domain.Invoice {
 	sorted := slices.Clone(rows)
 	slices.SortFunc(sorted, func(a, b domain.Invoice) int {
 		if c := a.CreatedAt.Compare(b.CreatedAt); c != 0 {
@@ -1142,7 +1143,7 @@ func keysetPage(rows []domain.Invoice, after domain.InvoiceKeyset, limit int) []
 	})
 	var out []domain.Invoice
 	for _, inv := range sorted {
-		if c := inv.CreatedAt.Compare(after.CreatedAt); c < 0 || (c == 0 && inv.ID <= after.ID) {
+		if c := inv.CreatedAt.Compare(after.At); c < 0 || (c == 0 && inv.ID <= after.ID) {
 			continue
 		}
 		out = append(out, inv)
@@ -1196,7 +1197,7 @@ func (m *mockInvoices) latestThresholdInvoice(subscriptionID string, periodStart
 	return latest, nil
 }
 
-func (m *mockInvoices) ListAutoChargePending(_ context.Context, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error) {
+func (m *mockInvoices) ListAutoChargePending(_ context.Context, after walk.Key, limit int) ([]domain.Invoice, error) {
 	var result []domain.Invoice
 	for _, inv := range m.invoices {
 		if inv.AutoChargePending && inv.Status == domain.InvoiceFinalized && inv.PaymentStatus == domain.PaymentPending {

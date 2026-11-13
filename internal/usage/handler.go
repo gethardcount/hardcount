@@ -20,6 +20,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/logging"
 )
 
 // CustomerResolver looks up a customer by external ID.
@@ -466,7 +467,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	events, total, err := h.svc.List(r.Context(), filter)
 	if err != nil {
 		respond.InternalError(w, r)
-		slog.ErrorContext(r.Context(), "list usage events", "error", err)
+		slog.Log(r.Context(), logging.ErrorLevel(r.Context(), err), "list usage events", "error", err)
 		return
 	}
 	if events == nil {
@@ -512,7 +513,7 @@ func (h *Handler) aggregate(w http.ResponseWriter, r *http.Request) {
 		meters, err := h.meterModes.ListMeters(r.Context(), filter.TenantID)
 		if err != nil {
 			respond.InternalError(w, r)
-			slog.ErrorContext(r.Context(), "aggregate usage events: list meters", "error", err)
+			slog.Log(r.Context(), logging.ErrorLevel(r.Context(), err), "aggregate usage events: list meters", "error", err)
 			return
 		}
 		modes = BillingModes(meters)
@@ -521,7 +522,7 @@ func (h *Handler) aggregate(w http.ResponseWriter, r *http.Request) {
 	agg, err := h.svc.Aggregate(r.Context(), filter, modes)
 	if err != nil {
 		respond.InternalError(w, r)
-		slog.ErrorContext(r.Context(), "aggregate usage events", "error", err)
+		slog.Log(r.Context(), logging.ErrorLevel(r.Context(), err), "aggregate usage events", "error", err)
 		return
 	}
 	respond.JSON(w, r, http.StatusOK, agg)

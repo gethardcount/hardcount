@@ -336,9 +336,9 @@ func (s *Scheduler) runBillingCycleForMode(ctx context.Context, live bool, panic
 
 	// 0. Collect queued invoices: charge, settle $0, or (no card) email the
 	// setup link and start no-payment dunning. Visits every queued invoice,
-	// page by page (card-less ones stay queued, and a single oldest-first page
-	// filled up with them for good). The engine logs the sweep summary; it
-	// stamps liveness per page, like the billing drain.
+	// page by page, so the card-less ones, which stay queued, never hold back
+	// the rest. The engine logs the sweep summary; it stamps liveness each
+	// time it reads a page of invoices, before working it.
 	func() {
 		defer panics.Guard("step", "auto_charge_retry", "mode", mode)
 		chargeRetried, chargeErrs := s.engine.RetryPendingCharges(ctx, s.batch, s.onRun)

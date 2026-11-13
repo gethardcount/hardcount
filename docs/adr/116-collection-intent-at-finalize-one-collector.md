@@ -64,7 +64,7 @@ Fifty of them filled the page for good, and nothing newer was retried. That incl
 It was reproduced against real Postgres (`TestRetryPendingCharges_CardlessHeadDoesNotBlockNewerInvoices`).
 
 **Change.**
-- The sweep and the test-clock sweep page by `(created_at, id)` until a short page (`drainInvoiceQueue`). Every queued row is visited once per tick, however many rows ahead of it never leave. Both columns are fixed at insert, so the cursor moves strictly forward; a row that is queued behind it during the drain is visited on the next tick.
+- The sweep and the test-clock sweep page by `(created_at, id)` until a short page (`walk.Walk`). Every queued row is visited once per tick, however many rows ahead of it never leave. Both columns are fixed at insert, so the cursor moves strictly forward; a row that is queued behind it during the drain is visited on the next tick.
 - A sweep stops before the next invoice when its ctx ends (shutdown, lost lease), and the scheduler passes its liveness stamp to the sweep, as it does to the billing drain (P27).
 - New gauge `hardcount_auto_charge_queued_invoices{mode}`, using the list's predicate.
 

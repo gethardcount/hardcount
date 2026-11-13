@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/subscription"
 	"github.com/gethardcount/hardcount/internal/subscription/subscriptiontest"
 )
@@ -80,7 +81,7 @@ func TestCanceledPausedSub_PauseStillHoldsItsInvoices(t *testing.T) {
 // it holds id.
 func (r *snapRig) sweepLists(t *testing.T, id string) bool {
 	t.Helper()
-	var after domain.InvoiceKeyset
+	var after walk.Key
 	for {
 		page, err := r.store.ListAutoChargePending(r.ctx, after, 200)
 		if err != nil {
@@ -94,6 +95,7 @@ func (r *snapRig) sweepLists(t *testing.T, id string) bool {
 		if len(page) < 200 {
 			return false
 		}
-		after = domain.KeysetOf(page[len(page)-1])
+		last := page[len(page)-1]
+		after = walk.Key{At: last.CreatedAt, ID: last.ID}
 	}
 }
