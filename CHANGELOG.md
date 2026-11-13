@@ -76,6 +76,7 @@ original text.
 
 - **The contributor rules are half as long (2026-11-13).** Contributors: CONTRIBUTING, the engineering principles, the code standard, the testing guide and the money-path playbook were rewritten in plain words, with each rule in one place. No rule about money changed. [#1692](https://github.com/gethardcount/hardcount/pull/1692)
 - **A `503` is no longer stored under its `Idempotency-Key`.** A retry with the same key runs the request again, instead of getting the stored `503` back. Hardcount answers `503` only when nothing the request did would be done twice. After `currency_unavailable`, send the same request with the same key, not a new one. ([#1646](https://github.com/gethardcount/hardcount/pull/1646))
+- **Hardcount builds with Go 1.27.4 (2026-11-13).** To build from source, you need Go 1.27.4 or newer. The go command downloads it, unless `GOTOOLCHAIN=local` is set, as in the `golang` images: then it stops with `go.mod requires go >= 1.27.4`. An install that runs the published images has nothing to do. Contributors: `make lint` needs golangci-lint v2.14.0.
 
 ### Removed
 

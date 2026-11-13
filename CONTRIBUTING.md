@@ -22,7 +22,7 @@ A pull request below this bar gets one short comment and is closed. You may open
 
 ## Development setup
 
-You need Go 1.26 or newer and Docker. Dashboard work and `make gen` also need Node 22 or newer, and the demo needs `jq`.
+You need Go 1.27 or newer and Docker. Dashboard work and `make gen` also need Node 22 or newer, and the demo needs `jq`.
 
 Fork the repository on GitHub, then:
 

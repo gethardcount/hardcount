@@ -45,6 +45,12 @@ linters:
       # Tests may use wall-clock time and single-row lookups freely.
       - linters: [forbidigo]
         path: _test\.go$
+      # stripe-go deprecates Params.Metadata for the Metadata field of each
+      # typed params struct. Moving the payment calls changes what they send
+      # to Stripe, so it follows the money-path playbook in its own change:
+      # remove this rule with issue #834. Every other SA1019 still fails.
+      - linters: [staticcheck]
+        text: 'SA1019: \(github\.com/stripe/stripe-go/v82\.Params\)\.Metadata is deprecated'
 
 formatters:
   enable:

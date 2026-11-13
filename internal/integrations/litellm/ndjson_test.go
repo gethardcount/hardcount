@@ -66,7 +66,9 @@ func TestSpend_NDJSONBatchIsAccepted(t *testing.T) {
 // record, and nothing of the send is written. Lines are counted as they are:
 // a blank line counts, so line and record can differ.
 // Mutation-verify: drop the newlines still buffered from the count in
-// recordFailed → the lines are wrong and this fails.
+// recordFailed → the lines are wrong and this fails. Count the offending
+// byte from the body's first byte, not the decoder's → the rows with blank
+// lines before the body fail.
 func TestSpend_BadNDJSONLineIs400WithItsLine(t *testing.T) {
 	ok := func(id string) string {
 		b, _ := json.Marshal(spendPayload(id))
@@ -80,6 +82,12 @@ func TestSpend_BadNDJSONLineIs400WithItsLine(t *testing.T) {
 		{"an id given as a number", ok("a") + "\n{\"id\":5,\"user\":\"cus_acme\"}\n" + ok("c"), "line 2 (record 2)"},
 		{"after a blank line", ok("a") + "\n\n" + ok("b") + "\n{\"id\":\"c\" \"x\"}", "line 4 (record 3)"},
 		{"an element of an array", "[\n" + ok("a") + ",\n" + ok("b") + ",\n{\"id\":}\n]", "line 4 (record 3)"},
+		{"the first element of an array", "[\n{\"id\":}\n]", "line 2 (record 1)"},
+		{"an element after a blank line", "[\n" + ok("a") + ",\n\n  {\"id\":}\n]", "line 4 (record 2)"},
+		{"an element after a comma on its own line", "[\n" + ok("a") + "\n,\n{\"id\" x}\n]", "line 4 (record 2)"},
+		{"an element that is not JSON", "[\n" + ok("a") + ",\nnot json\n]", "line 3 (record 2)"},
+		{"blank lines before an array", "\n\n[\n" + ok("a") + ",\nnot json\n]", "line 5 (record 2)"},
+		{"blank lines before NDJSON", "\n\n" + ok("a") + "\nnot json", "line 4 (record 2)"},
 		{"a record over two lines, bad on its second", ok("a") + "\n{\"id\":\n\"b\" x}", "line 3 (record 2)"},
 	} {
 		t.Run(c.name, func(t *testing.T) {

@@ -553,8 +553,8 @@ jobs:
       # #834). Bump it deliberately, with the fix for whatever the new version
       # flags. The SHA-256 is the linux-amd64 archive's, from
       # golangci-lint-<version>-checksums.txt in the same release.
-      GOLANGCI_LINT_VERSION: 2.12.2
-      GOLANGCI_LINT_SHA256: 8df580d2670fed8fa984aac0507099af8df275e665215f5c7a2ae3943893a553
+      GOLANGCI_LINT_VERSION: 2.14.0
+      GOLANGCI_LINT_SHA256: ab90aeb7b066f92a33415b638a50fe5344bbb75a0d32ad30cc248d88f81032ab
     steps:
       - uses: actions/checkout@v7
 
