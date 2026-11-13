@@ -199,8 +199,9 @@ func decodePolicyBody(w http.ResponseWriter, r *http.Request) (domain.DunningPol
 	var body policyBody
 	if err := respond.DecodeBody(r, &body, policyReadOnly); err != nil {
 		var typeErr *json.UnmarshalTypeError
-		// The field path names the embedded struct: DunningPolicy.retry_days.
-		if errors.As(err, &typeErr) && strings.HasPrefix(strings.TrimPrefix(typeErr.Field, "DunningPolicy."), "retry_days") {
+		// Field is the key's path in the body: retry_days, or retry_days.1
+		// for an entry.
+		if errors.As(err, &typeErr) && strings.HasPrefix(typeErr.Field, "retry_days") {
 			respond.ValidationField(w, r, "retry_days", "retry_days is a list of whole days, for example [3, 4, 7]")
 			return domain.DunningPolicy{}, false
 		}

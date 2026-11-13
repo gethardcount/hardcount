@@ -535,7 +535,7 @@ at all?
 
 | Status | Meaning | What to do |
 |---|---|---|
-| 400 | The body is empty or not valid JSON. The batch was not saved. The message names the first bad record and its line, such as `invalid JSON body at line 3 (record 3)`. | Fix that record. |
+| 400 | The body is empty or not valid JSON. The batch was not saved. The message names the first bad record and its line, such as `invalid JSON body at line 3 (record 3)`. A body cut short names the line it ends on. | Fix that record. |
 | `413 batch_too_large` | The body is over 32 MB. The batch was not saved. | Have LiteLLM send fewer records at once ([how](#keep-each-send-under-the-size-limit)). A batch this size gets this answer every time. |
 | 413, from a proxy in front | Your own proxy's body limit for this route is below 32 MB. The batch did not reach Hardcount. | Raise that proxy's limit for this route above 32 MB ([how](#keep-each-send-under-the-size-limit)). |
 | 401 | The API key is missing, wrong, revoked or expired. The batch was not saved. | Fix the `Authorization` header. |
