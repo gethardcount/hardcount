@@ -2,6 +2,7 @@ package respond
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -10,6 +11,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync/atomic"
 
 	kjson "sigs.k8s.io/json"
 )
@@ -27,9 +29,11 @@ import (
 // encoding/json drops unknown keys without a word. Without this rule,
 // `trial_period_days` instead of `trial_days` would create an active,
 // charged subscription with a 201. A PATCH with a misspelled field would
-// answer 200 and change nothing. The refusal is a 422, not a 400, because
-// the idempotency middleware caches a 400. A corrected retry under the same
-// Idempotency-Key would then get the refusal replayed.
+// answer 200 and change nothing.
+//
+// A handler decodes its body before it changes anything. A refused body
+// then frees the request's Idempotency-Key (TrackBodyRefusal), so the
+// corrected request with the same key runs.
 
 // DecodeOption changes what DecodeStrict and DecodeBody accept.
 type DecodeOption func(*decodeRule)
@@ -105,14 +109,32 @@ func DecodeBody(r *http.Request, v any, opts ...DecodeOption) error {
 }
 
 // WriteBodyError writes the response for a DecodeBody error: a 422 naming
-// the field for a refused key, otherwise a 400 "invalid JSON body".
+// the field for a refused key, otherwise a 400 "invalid JSON body". It
+// marks the request as refused for TrackBodyRefusal.
 func WriteBodyError(w http.ResponseWriter, r *http.Request, err error) {
+	if refused, ok := r.Context().Value(bodyRefusalKey{}).(*atomic.Bool); ok {
+		refused.Store(true)
+	}
 	var be *BodyError
 	if errors.As(err, &be) && be.Field != "" {
 		ValidationField(w, r, be.Field, be.Error())
 		return
 	}
 	BadRequest(w, r, "invalid JSON body")
+}
+
+// bodyRefusalKey holds the flag that WriteBodyError sets on a request that
+// TrackBodyRefusal watches.
+type bodyRefusalKey struct{}
+
+// TrackBodyRefusal returns ctx with a flag that WriteBodyError sets when it
+// refuses the request's body, and a function that reads the flag. The
+// idempotency middleware watches each request with it. A refused body is
+// answered before the handler changes anything, so the middleware does not
+// store the refusal under the request's Idempotency-Key.
+func TrackBodyRefusal(ctx context.Context) (context.Context, func() bool) {
+	refused := new(atomic.Bool)
+	return context.WithValue(ctx, bodyRefusalKey{}, refused), refused.Load
 }
 
 func decodeBody(r *http.Request, v any, rule decodeRule) error {
