@@ -152,6 +152,10 @@ func (errTenantLocator) TenantLocation(_ context.Context, _ string) (*time.Locat
 	return nil, errors.New("settings read: connection reset")
 }
 
+func (errTenantLocator) TenantCreditTerms(_ context.Context, _ string) (*time.Location, bool, error) {
+	return nil, false, errors.New("settings read: connection reset")
+}
+
 // TestUpdateItem_ProrationFailsWhenTimezoneUnreadable: the proration
 // denominator is a full cycle counted in the tenant timezone, so a timezone
 // read failure fails the request with no proration invoice, instead of

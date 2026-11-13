@@ -4238,7 +4238,7 @@ func (e *Engine) writeFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.
 // swap) and consumed by the in-tx relief trunk.
 type cancelCreditInputs struct {
 	PeriodStart, PeriodEnd, CancelAt time.Time
-	TotalUnused                      int64
+	TotalUnused                      domain.UnusedCents
 	Desc                             string
 }
 
@@ -4247,16 +4247,20 @@ type cancelCreditInputs struct {
 // avoid int64 overflow — nanosecond math overflows for ~$36+ base fees on
 // a full-month proration. It divides by the period's cycle
 // (domain.CyclePeriod.CycleDays), as the base lines that charged it do.
-func (e *Engine) unusedBaseForPeriod(ctx context.Context, sub domain.Subscription, periodStart, periodEnd, at time.Time, billingLoc *time.Location) (int64, error) {
+//
+// The amount is worked out from the plan's price, so it carries tax when the
+// tenant's prices include tax (taxInclusive, read once at the change) and is
+// before tax otherwise; domain.UnusedCents carries which.
+func (e *Engine) unusedBaseForPeriod(ctx context.Context, sub domain.Subscription, periodStart, periodEnd, at time.Time, billingLoc *time.Location, taxInclusive bool) (domain.UnusedCents, error) {
 	unusedDays := roundDays(periodEnd.Sub(at))
 	if unusedDays <= 0 {
-		return 0, nil
+		return domain.UnusedCents{IncludesTax: taxInclusive}, nil
 	}
 	totalUnused := int64(0)
 	for _, it := range sub.Items {
 		plan, err := e.pricing.GetPlan(ctx, sub.TenantID, it.PlanID)
 		if err != nil {
-			return 0, fmt.Errorf("get plan %s: %w", it.PlanID, err)
+			return domain.UnusedCents{}, fmt.Errorf("get plan %s: %w", it.PlanID, err)
 		}
 		if plan.BaseBillTiming != domain.BillInAdvance || plan.BaseAmountCents <= 0 {
 			continue
@@ -4267,19 +4271,19 @@ func (e *Engine) unusedBaseForPeriod(ctx context.Context, sub domain.Subscriptio
 		}.CycleDays()
 		baseFee, err := baseFeeCents(plan, it.Quantity)
 		if err != nil {
-			return 0, err
+			return domain.UnusedCents{}, err
 		}
 		unused, err := prorateCents(baseFee, unusedDays, cycleDays)
 		if err != nil {
-			return 0, err
+			return domain.UnusedCents{}, err
 		}
 		if unused > 0 {
 			if totalUnused, err = addCents(totalUnused, unused); err != nil {
-				return 0, fmt.Errorf("unused base: %w", err)
+				return domain.UnusedCents{}, fmt.Errorf("unused base: %w", err)
 			}
 		}
 	}
-	return totalUnused, nil
+	return domain.UnusedCents{Cents: totalUnused, IncludesTax: taxInclusive}, nil
 }
 
 // prorationRefundDesc formats the customer-facing credit-note / ledger
@@ -4328,15 +4332,15 @@ func (e *Engine) prepareCancelCredit(ctx context.Context, sub domain.Subscriptio
 	}
 
 	// One zone for the refund amount and its description.
-	loc, err := e.tenantLocation(ctx, sub.TenantID)
+	loc, inclusive, err := e.tenantCreditTerms(ctx, sub.TenantID)
 	if err != nil {
 		return cancelCreditInputs{}, false, err
 	}
-	totalUnused, err := e.unusedBaseForPeriod(ctx, sub, periodStart, periodEnd, cancelAt, loc)
+	totalUnused, err := e.unusedBaseForPeriod(ctx, sub, periodStart, periodEnd, cancelAt, loc, inclusive)
 	if err != nil {
 		return cancelCreditInputs{}, false, err
 	}
-	if totalUnused <= 0 {
+	if totalUnused.Cents <= 0 {
 		return cancelCreditInputs{}, false, nil
 	}
 
@@ -4423,15 +4427,15 @@ func (e *Engine) prepareSwapCredit(ctx context.Context, sub domain.Subscription,
 	}
 
 	// One zone for the refund amount and its description.
-	loc, err := e.tenantLocation(ctx, sub.TenantID)
+	loc, inclusive, err := e.tenantCreditTerms(ctx, sub.TenantID)
 	if err != nil {
 		return cancelCreditInputs{}, false, err
 	}
-	totalUnused, err := e.unusedBaseForPeriod(ctx, sub, periodStart, periodEnd, at, loc)
+	totalUnused, err := e.unusedBaseForPeriod(ctx, sub, periodStart, periodEnd, at, loc, inclusive)
 	if err != nil {
 		return cancelCreditInputs{}, false, err
 	}
-	if totalUnused <= 0 {
+	if totalUnused.Cents <= 0 {
 		return cancelCreditInputs{}, false, nil
 	}
 
@@ -4516,12 +4520,12 @@ func (e *Engine) planRelief(ctx context.Context, sub domain.Subscription, in can
 		}
 		if voidable {
 			p.voids = append(p.voids, src)
-			totalUnused = max(0, totalUnused-src.SubtotalCents)
+			totalUnused = totalUnused.LessVoided(src)
 			continue
 		}
 		allocate = append(allocate, src)
 	}
-	if len(allocate) == 0 || totalUnused <= 0 {
+	if len(allocate) == 0 || totalUnused.Cents <= 0 {
 		return p, nil
 	}
 
@@ -5437,6 +5441,13 @@ func (e *Engine) TenantLocation(ctx context.Context, tenantID string) (*time.Loc
 	return e.tenantLocation(ctx, tenantID)
 }
 
+// TenantCreditTerms exposes the tenant's billing zone and whether its prices
+// include tax, in one read, to the subscription handler's credit for unused
+// time.
+func (e *Engine) TenantCreditTerms(ctx context.Context, tenantID string) (*time.Location, bool, error) {
+	return e.tenantCreditTerms(ctx, tenantID)
+}
+
 // NetPaymentTermDays exposes the tenant's configured Net payment terms so the
 // subscription handler's proration invoice stamps the same terms + due date
 // the engine's own invoices do. Wired via subH.SetNetTermsReader(engine).
@@ -5480,12 +5491,32 @@ func (e *Engine) tenantLocation(ctx context.Context, tenantID string) (*time.Loc
 	if err != nil {
 		return nil, fmt.Errorf("read tenant timezone: %w", err)
 	}
-	if ts.Timezone == "" {
+	return zoneOf(ts.Timezone)
+}
+
+// tenantCreditTerms reads, in one settings read, what a change that credits
+// unused prepaid time needs: the tenant's billing zone, and whether its
+// prices include tax (as the bill reads it).
+func (e *Engine) tenantCreditTerms(ctx context.Context, tenantID string) (*time.Location, bool, error) {
+	if e.settings == nil {
+		return time.UTC, false, nil // test seam; production always wires settings
+	}
+	ts, err := e.settings.Get(ctx, tenantID)
+	if err != nil {
+		return nil, false, fmt.Errorf("read tenant settings: %w", err)
+	}
+	loc, err := zoneOf(ts.Timezone)
+	return loc, ts.TaxInclusive, err
+}
+
+// zoneOf loads a tenant's billing timezone: UTC when unset.
+func zoneOf(tz string) (*time.Location, error) {
+	if tz == "" {
 		return time.UTC, nil
 	}
-	loc, err := time.LoadLocation(ts.Timezone)
+	loc, err := time.LoadLocation(tz)
 	if err != nil {
-		return nil, refuse(refusalTimezone, fmt.Errorf("load tenant timezone %q: %w", ts.Timezone, err))
+		return nil, refuse(refusalTimezone, fmt.Errorf("load tenant timezone %q: %w", tz, err))
 	}
 	return loc, nil
 }

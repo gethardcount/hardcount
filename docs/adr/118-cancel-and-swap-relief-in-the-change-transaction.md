@@ -595,3 +595,12 @@ on real Postgres:
 ## Amendment 2026-11-10: the cancel's relief is planned before its transaction
 
 The cancel's relief is now planned before the cancel's transaction (`planRelief`: the funding invoices, which to void, each one's room) and written in it (`writeReliefTx`), in the same order as before: voids, the credit-note locks of every invoice it credits, the drafts, then the final invoice's number. What the plan read is proved under those locks, as before: `VoidUnchangedTx` and the room re-check under each invoice's credit-note lock. The cross-interval swap still plans and writes in one call (`BillOnPlanSwapDraftsTx`) until P1-23 PR-2; `swap_requires_atomic_path`, named above, is unchanged ([ADR-139](139-cancel-prices-before-its-transaction.md)).
+
+## Amendment 2026-11-13: the unused amount says whether it carries tax
+
+The crediting rule split the unused amount as an amount before tax, and grossed each share up by its invoice's total over its subtotal. The unused amount is worked out from the plan's price, which carries tax when the tenant's prices include tax (`tenant_settings.tax_inclusive`). On such a tenant the gross-up ran twice: a cancel with half of a 12000 month unused (subtotal 10000, tax 2000) credited 7200, not 6000. The void subtraction took a voided invoice's subtotal off the same amount, and a quantity decrease or a downgrade credited the same way.
+
+- The two places that work the amount out, the relief's `unusedBaseForPeriod` and the item-change proration, produce a `domain.UnusedCents`: the amount and whether it carries tax, from the tenant's `tax_inclusive` read once at the change, as the bill reads it.
+- `AllocateUnusedCredit` takes only that type. An amount with tax in it is split against each invoice's room as it is; an amount before tax is grossed up as before. The void subtraction is `UnusedCents.LessVoided`: a voided invoice's total, or its subtotal.
+- Known gap: an invoice does not record whether its prices included tax. A tenant that switches `tax_inclusive` between the bill and the change has the amount read in the new terms. The settings endpoint allows that switch at any time. A test pins today's answer for it. Working the unused amount out from each funding invoice's own base line removes the gap and is its own later item.
+

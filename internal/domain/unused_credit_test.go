@@ -156,7 +156,7 @@ func TestAllocateUnusedCredit(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got, unplaced := AllocateUnusedCredit(tc.sources, tc.credited, tc.itemID, tc.net)
+			got, unplaced := AllocateUnusedCredit(tc.sources, tc.credited, tc.itemID, UnusedCents{Cents: tc.net})
 			if !reflect.DeepEqual(got, tc.want) || unplaced != tc.wantUnplaced {
 				t.Errorf("got %+v unplaced %d, want %+v unplaced %d", got, unplaced, tc.want, tc.wantUnplaced)
 			}

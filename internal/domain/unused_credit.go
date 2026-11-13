@@ -53,9 +53,34 @@ func creditShareFor(inv Invoice, gross int64) CreditShare {
 	return sh
 }
 
-// AllocateUnusedCredit splits netCents of unused prepaid time (tax excluded)
-// across the invoices that charged it. It is the one crediting rule for every
-// change that gives prepaid time back: a quantity decrease, a downgrade, an
+// UnusedCents is an amount of unused prepaid time, and whether it carries
+// tax. It is worked out from the plan's price, so it carries tax when the
+// tenant's prices include tax (tenant_settings.tax_inclusive, read once at
+// the change, as the bill reads it), and is before tax otherwise.
+//
+// Known gap: an invoice does not record whether its prices included tax. A
+// tenant that switches tax_inclusive between the bill and the change has
+// the amount read in the new terms, and so credited by the tax rate too much
+// or too little.
+type UnusedCents struct {
+	Cents       int64
+	IncludesTax bool
+}
+
+// LessVoided is what is left of u once inv, an invoice voided whole, has
+// taken its part: its total when u carries tax, its subtotal otherwise.
+func (u UnusedCents) LessVoided(inv Invoice) UnusedCents {
+	part := inv.SubtotalCents
+	if u.IncludesTax {
+		part = inv.TotalAmountCents
+	}
+	u.Cents = max(0, u.Cents-part)
+	return u
+}
+
+// AllocateUnusedCredit splits unused prepaid time across the invoices that
+// charged it. It is the one crediting rule for every change that gives
+// prepaid time back: a quantity decrease, a downgrade, an
 // item removal, a cancel and a cross-interval plan swap (ADR-118).
 //
 // The rule is "credit the invoice that charged it, newest first", which is
@@ -87,12 +112,16 @@ func creditShareFor(inv Invoice, gross int64) CreditShare {
 // is written. So a concurrent note makes the change fail and retry, and
 // never over-credits.
 //
-// unplacedCents (net) is what did not fit. It is not owed: every invoice is
-// either credited up to its total or, if unpaid, relieved of all it asks for.
-// The caller records it on the change (uncredited_cents) instead of logging
-// it.
-func AllocateUnusedCredit(sources []Invoice, credited map[string]int64, itemID string, netCents int64) (shares []CreditShare, unplacedCents int64) {
-	if netCents <= 0 {
+// The amount is in the terms it was worked out in (UnusedCents). With tax
+// in it, each invoice takes it up to its room as is; before tax, each
+// invoice's share is grossed up by that invoice's total over its subtotal.
+//
+// unplacedCents, in the amount's own terms, is what did not fit. It is not
+// owed: every invoice is either credited up to its total or, if unpaid,
+// relieved of all it asks for. The caller records it on the change
+// (uncredited_cents) instead of logging it.
+func AllocateUnusedCredit(sources []Invoice, credited map[string]int64, itemID string, unused UnusedCents) (shares []CreditShare, unplacedCents int64) {
+	if unused.Cents <= 0 {
 		return nil, 0
 	}
 	type candidate struct {
@@ -138,21 +167,24 @@ func AllocateUnusedCredit(sources []Invoice, credited map[string]int64, itemID s
 		return cands[a].pos > cands[b].pos
 	})
 
-	netCaps := make([]int64, len(cands))
+	caps := make([]int64, len(cands))
 	for i := range cands {
-		netCaps[i] = cands[i].netCap
+		caps[i] = cands[i].netCap
+		if unused.IncludesTax {
+			caps[i] = cands[i].grossCap
+		}
 	}
-	nets, unplaced := money.AllocateLIFO(netCents, netCaps)
+	amounts, unplaced := money.AllocateLIFO(unused.Cents, caps)
 	for i, c := range cands {
-		if nets[i] <= 0 {
+		if amounts[i] <= 0 {
 			continue
 		}
-		gross := nets[i]
-		if c.inv.SubtotalCents > 0 {
+		gross := amounts[i]
+		if !unused.IncludesTax && c.inv.SubtotalCents > 0 {
 			// Worked in 128 bits. A gross past int64 cents is above the
 			// room, so the room is what the min below would keep.
 			var ok bool
-			if gross, ok = money.MulDivRoundHalfToEven(nets[i], c.inv.TotalAmountCents, c.inv.SubtotalCents); !ok {
+			if gross, ok = money.MulDivRoundHalfToEven(amounts[i], c.inv.TotalAmountCents, c.inv.SubtotalCents); !ok {
 				gross = c.grossCap
 			}
 		}

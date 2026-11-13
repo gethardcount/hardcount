@@ -23,6 +23,10 @@ func (f fakeTenantLocator) TenantLocation(_ context.Context, _ string) (*time.Lo
 	return f.loc, nil
 }
 
+func (f fakeTenantLocator) TenantCreditTerms(_ context.Context, _ string) (*time.Location, bool, error) {
+	return f.loc, false, nil
+}
+
 // TestHandler_Get_PeriodDisplayTZ is the display half of ADR-077: the
 // backend-authored current_billing_period_display is anchored in the ORG's
 // billing timezone (whatever the tenant locator reports), not the process/host

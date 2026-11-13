@@ -157,6 +157,9 @@ type CreditNoteIssuer interface {
 // failure is an error, never UTC (P24).
 type TenantLocator interface {
 	TenantLocation(ctx context.Context, tenantID string) (*time.Location, error)
+	// TenantCreditTerms is the zone and whether the tenant's prices include
+	// tax, in one settings read, for a change that credits unused time.
+	TenantCreditTerms(ctx context.Context, tenantID string) (*time.Location, bool, error)
 }
 
 // NetTermsReader resolves the tenant's configured Net payment terms so the
@@ -305,6 +308,16 @@ func (h *Handler) tenantLoc(ctx context.Context, tenantID string) (*time.Locatio
 		return time.UTC, nil
 	}
 	return h.tzLocator.TenantLocation(ctx, tenantID)
+}
+
+// tenantCreditTerms resolves the tenant's billing zone and whether its prices
+// include tax. Unwired (narrow tests), it is a tenant on the defaults: UTC,
+// prices before tax.
+func (h *Handler) tenantCreditTerms(ctx context.Context, tenantID string) (*time.Location, bool, error) {
+	if h.tzLocator == nil {
+		return time.UTC, false, nil
+	}
+	return h.tzLocator.TenantCreditTerms(ctx, tenantID)
 }
 
 // stampPeriodDisplay populates the computed CurrentBillingPeriodDisplay — the
@@ -1893,7 +1906,7 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 	if !ok {
 		return nil, fmt.Errorf("proration: base fee of plan %s × quantity %d: %w", newPlan.ID, spec.newQuantity, domain.ErrAmountOverflow)
 	}
-	billingLoc, err := h.tenantLoc(ctx, sub.TenantID)
+	billingLoc, taxInclusive, err := h.tenantCreditTerms(ctx, sub.TenantID)
 	if err != nil {
 		return nil, err
 	}
@@ -1933,7 +1946,9 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 	// that charged the unused time, whatever their payment state: one rule
 	// for every change (ADR-118 amendment 2026-10-22).
 	if proratedCents < 0 {
-		return h.creditUnusedTime(ctx, tenantID, sub, spec, detail, -proratedCents, memo)
+		// The amount is worked out from the plans' prices, so it carries tax
+		// when the tenant's prices include it.
+		return h.creditUnusedTime(ctx, tenantID, sub, spec, detail, domain.UnusedCents{Cents: -proratedCents, IncludesTax: taxInclusive}, memo)
 	}
 
 	// A net charge needs the period's base invoice: none yet (a fresh
@@ -2334,7 +2349,7 @@ func unpaidSourceBlocksCharge(ctx context.Context, sub domain.Subscription, spec
 // What does not fit is not owed (every invoice is credited up to its total,
 // or relieved of all it asks for), so the change goes ahead and records it on
 // the detail (UncreditedCents → the audit row's uncredited_cents).
-func (h *Handler) creditUnusedTime(ctx context.Context, tenantID string, sub domain.Subscription, spec itemProrationSpec, detail *ProrationDetail, netCredit int64, memo string) (*ProrationDetail, error) {
+func (h *Handler) creditUnusedTime(ctx context.Context, tenantID string, sub domain.Subscription, spec itemProrationSpec, detail *ProrationDetail, unused domain.UnusedCents, memo string) (*ProrationDetail, error) {
 	if h.creditNotes == nil || h.invoices == nil {
 		return nil, fmt.Errorf("credit for unused time: the credit-note issuer is not wired")
 	}
@@ -2364,7 +2379,7 @@ func (h *Handler) creditUnusedTime(ctx context.Context, tenantID string, sub dom
 		}
 		credited[f.ID] = c
 	}
-	shares, unplaced := domain.AllocateUnusedCredit(funding, credited, spec.itemID, netCredit)
+	shares, unplaced := domain.AllocateUnusedCredit(funding, credited, spec.itemID, unused)
 	if src, pending := domain.TaxPendingShare(funding, shares); pending {
 		return nil, errs.InvalidState(fmt.Sprintf(
 			"funding invoice %s is a draft whose tax is still %s; retry once it is calculated", src.ID, src.TaxStatus)).
@@ -2402,7 +2417,8 @@ func (h *Handler) creditUnusedTime(ctx context.Context, tenantID string, sub dom
 		"item_id", spec.itemID,
 		"change_type", spec.changeType,
 		"invoices", len(shares),
-		"net_cents", netCredit,
+		"unused_cents", unused.Cents,
+		"unused_includes_tax", unused.IncludesTax,
 		"gross_cents", gross,
 		"uncredited_cents", unplaced,
 	)

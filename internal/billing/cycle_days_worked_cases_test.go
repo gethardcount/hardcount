@@ -101,11 +101,11 @@ func TestCycleDays_WorkedCases_UnusedBase(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			sub := domain.Subscription{TenantID: "t1", BillingTime: tc.bt, BillingAnchorDay: tc.anchor,
 				Items: []domain.SubscriptionItem{{PlanID: "pln", Quantity: 1}}}
-			got, err := e.unusedBaseForPeriod(context.Background(), sub, tc.start, tc.end, tc.at, time.UTC)
+			unused, err := e.unusedBaseForPeriod(context.Background(), sub, tc.start, tc.end, tc.at, time.UTC, false)
 			if err != nil {
 				t.Fatalf("unusedBaseForPeriod: %v", err)
 			}
-			if got != tc.want {
+			if got := unused.Cents; got != tc.want {
 				t.Errorf("unused base = %d, want %d", got, tc.want)
 			}
 		})
