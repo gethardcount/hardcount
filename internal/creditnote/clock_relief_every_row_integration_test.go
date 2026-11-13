@@ -77,8 +77,10 @@ func TestRetryPendingClawbackIssueForClock_IssuesEveryDraft(t *testing.T) {
 }
 
 // Walking the clock's list page by page, as the job does, returns every held
-// note exactly once when the order notes are touched in disagrees with the
-// order they were created in: the first-created notes were touched last.
+// note exactly once when the order the notes were created in disagrees with
+// the order they were inserted in (and so with id order) and with the order
+// they were touched in: the last inserted were created first, and the
+// first-created notes were touched last.
 // The page's order and the cursor must both be (created_at, id); a page
 // ordered by updated_at would end on a late-created note and leave the
 // earlier ones behind the cursor, and a cursor on updated_at would meet
@@ -90,13 +92,14 @@ func TestListPendingClawbackDraftsForClock_WalkReturnsEveryNoteOnce(t *testing.T
 	const n, page = 5, 2
 	clockID, notes := seedClockReliefDrafts(t, db, ctx, tenantID, n)
 	base := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	created := func(i int) int { return n - 1 - i } // the last inserted were created first
 	for i, cn := range notes {
-		updated := base.Add(time.Duration(i) * time.Minute)
-		if i < 3 {
+		at := base.Add(time.Duration(created(i)) * time.Minute)
+		updated := at
+		if created(i) < 3 {
 			updated = updated.Add(time.Hour) // touched last
 		}
-		execBypassCN(t, db, `UPDATE credit_notes SET created_at = $2, updated_at = $3 WHERE id = $1`,
-			cn.ID, base.Add(time.Duration(i)*time.Minute), updated)
+		execBypassCN(t, db, `UPDATE credit_notes SET created_at = $2, updated_at = $3 WHERE id = $1`, cn.ID, at, updated)
 	}
 	store := creditnote.NewPostgresStore(db)
 
@@ -118,7 +121,7 @@ func TestListPendingClawbackDraftsForClock_WalkReturnsEveryNoteOnce(t *testing.T
 	}
 	for i, cn := range notes {
 		if seen[cn.ID] != 1 {
-			t.Errorf("note %d (created %d of %d) returned %d times, want once", i, i+1, n, seen[cn.ID])
+			t.Errorf("note created %d of %d returned %d times, want once", created(i)+1, n, seen[cn.ID])
 		}
 	}
 }
