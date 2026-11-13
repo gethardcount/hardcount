@@ -262,6 +262,13 @@ type Invoice struct {
 	// The retry bookkeeping below is the same.
 	TaxTransactionID string `json:"tax_transaction_id,omitempty"`
 	TaxRetryCount    int    `json:"tax_retry_count,omitempty"`
+	// TaxInclusive is whether the invoice's prices include tax. A subscription
+	// invoice records the setting its lines were priced under; a manual
+	// invoice records the setting at create, and lines added later are in its
+	// terms. The one INSERT writes it and nothing updates it after. Finalize
+	// and the tax retry still compute with the tenant's current setting until
+	// they read it, so nothing may read it before then. Not on the API.
+	TaxInclusive bool `json:"-"`
 
 	// The PaymentAnomaly* fields are the durable marker of an anomaly on the
 	// settle path (ADR-068). Kind is the per-cause event name

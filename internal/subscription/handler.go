@@ -103,6 +103,9 @@ type ProrationTaxResult struct {
 	domain.TaxFacts
 	SubtotalCents int64
 	DiscountCents int64
+	// TaxInclusive is whether the prices were read as including tax, from
+	// the settings read that priced them. The proration invoice records it.
+	TaxInclusive bool
 }
 
 // ProrationTaxApplier resolves and applies tax against a proration invoice's
@@ -2050,7 +2053,7 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 			taxResult = r
 		}
 		// ApplyTaxToLineItems checks that this total fits; with no tax applier
-		// wired it is the subtotal less a zero discount.
+		// wired it is the subtotal less a zero discount, with prices before tax.
 		netProrated := taxResult.SubtotalCents - taxResult.DiscountCents + taxResult.TaxAmountCents
 
 		// ADR-048 Phase C: present a PLAN upgrade as the industry-standard
@@ -2154,7 +2157,8 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 			// ONE struct assignment carries every tax fact — the 13
 			// hand-copied lines this replaces produced three documented
 			// field-drop bugs on this writer alone (see domain/tax_facts.go).
-			TaxFacts: taxResult.TaxFacts,
+			TaxFacts:     taxResult.TaxFacts,
+			TaxInclusive: taxResult.TaxInclusive,
 			// Denormalized zone at issue (ADR-077) — every engine writer
 			// stamps this; the proration writer was the one omission.
 			BillingTimezone:    billingLoc.String(),

@@ -1171,6 +1171,7 @@ func (a *prorationTaxApplierAdapter) ApplyTaxToLineItems(ctx context.Context, te
 		TaxFacts:      r.TaxFacts,
 		SubtotalCents: r.SubtotalCents,
 		DiscountCents: r.DiscountCents,
+		TaxInclusive:  r.TaxInclusive,
 	}, nil
 }
 
