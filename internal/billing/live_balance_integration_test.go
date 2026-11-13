@@ -459,31 +459,6 @@ func TestLiveBalance_Trial_CountsOnlyTheFirstPaidPeriod(t *testing.T) {
 	}
 }
 
-// A trial that runs past the end of the stored period: the close advances the
-// period without an invoice (handleTrialState), so that period's usage never
-// draws credit and is not counted.
-func TestLiveBalance_TrialOutlastsThePeriod_UsageNotSubtracted(t *testing.T) {
-	lf := newLiveFixture(t, "Live Balance Long Trial", 10000)
-
-	lf.exec(t, `UPDATE subscriptions SET status = 'trialing', trial_start_at = $1, trial_end_at = $2 WHERE id = $3`,
-		lf.cycleStart, lf.cycleEnd.Add(14*24*time.Hour), lf.subID)
-	lf.ingestUsage(t, lf.ctx, 25, 100) // $25.00 of usage during the trial
-
-	if got := lf.estimated(t); got != 10000 {
-		t.Errorf("estimated remaining = %d, want 10000; 7500 subtracts trial usage nobody will bill", got)
-	}
-
-	if n := lf.closeEveryPeriod(t); n != 0 {
-		t.Fatalf("cycle close produced %d invoices for a trialing subscription, want 0", n)
-	}
-	if invs := lf.listInvoices(t, lf.ctx); len(invs) != 0 {
-		t.Fatalf("trial period close wrote %d invoices, want 0", len(invs))
-	}
-	if got := lf.balance(t); got != 10000 {
-		t.Errorf("settled balance after the trial period closed = %d, want 10000", got)
-	}
-}
-
 // A trialing subscription that is set to cancel at the end of its trial is
 // canceled without an invoice, so its usage is not counted.
 func TestLiveBalance_TrialSetToCancel_UsageNotSubtracted(t *testing.T) {

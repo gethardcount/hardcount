@@ -492,12 +492,6 @@ func (m *mockSubs) ClosePeriodTx(_ context.Context, _ *sql.Tx, _, id string, exp
 	return nil
 }
 
-func (m *mockSubs) ClosePeriod(ctx context.Context, tenantID, id string, expected subscription.PeriodSnapshot, start, end, next time.Time, anchorDay int) error {
-	return m.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
-		return m.ClosePeriodTx(ctx, tx, tenantID, id, expected, start, end, next, anchorDay)
-	})
-}
-
 func (m *mockSubs) GetDueBilling(_ context.Context, _, dueBy time.Time, exclude []string, limit int) ([]domain.Subscription, error) {
 	var result []domain.Subscription
 	for _, s := range m.subs {
@@ -1959,35 +1953,6 @@ func TestRunCycle_NoDueSubscriptions(t *testing.T) {
 	}
 }
 
-func TestRunCycle_SkipsTrialSubscription(t *testing.T) {
-	engine, subs, _, _, invoices := setupEngine()
-
-	// New state-machine semantics: a trial is conveyed by status='trialing',
-	// not just by trial_end_at being set. Service.Create routes new subs with
-	// trial_days > 0 to trialing; the engine skips billing while they're in
-	// that state.
-	s := subs.subs["sub_1"]
-	trialEnd := time.Now().UTC().AddDate(0, 0, 7) // 7 days from now
-	s.Status = domain.SubscriptionTrialing
-	s.TrialEndAt = &trialEnd
-	subs.subs["sub_1"] = s
-
-	count, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
-	if len(errs) > 0 {
-		t.Fatalf("unexpected errors: %v", errs)
-	}
-	if count != 0 {
-		t.Errorf("got %d, want 0 (trial should be skipped)", count)
-	}
-	if len(invoices.invoices) != 0 {
-		t.Error("no invoice should be generated during trial")
-	}
-	// But billing cycle should still advance
-	if !subs.cycleUpdated["sub_1"] {
-		t.Error("billing cycle should advance even during trial")
-	}
-}
-
 func TestRunCycle_ZeroUsage(t *testing.T) {
 	engine, _, usage, _, invoices := setupEngine()
 
@@ -3118,10 +3083,10 @@ func TestRunCycle_PauseCollection_GeneratesDraft(t *testing.T) {
 // ResumesAtPasses) has been removed; the new contract is covered by
 // service-level tests in the subscription package.
 
-// TestRunCycle_Trial_Active_SkipsBillingAndAdvancesCycle covers case (a) of
-// the trial state machine: the cycle scan visits a trialing sub whose trial
-// has not yet elapsed. No invoice generated; next_billing_at advances.
-func TestRunCycle_Trial_Active_SkipsBillingAndAdvancesCycle(t *testing.T) {
+// A trialing row's period ends after its trial, so no writer leaves one due
+// while its trial runs. A row in that state (written by hand) fails with an
+// error and is neither billed nor moved.
+func TestRunCycle_TrialingSubDueInsideItsTrial_Fails(t *testing.T) {
 	periodStart := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
 	periodEnd := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC) // past, so cycle scan picks it up
 	trialEnd := time.Date(2099, 1, 1, 0, 0, 0, 0, time.UTC)  // far-future: trial still active at scan time
@@ -3149,18 +3114,18 @@ func TestRunCycle_Trial_Active_SkipsBillingAndAdvancesCycle(t *testing.T) {
 	invoices := &mockInvoices{}
 	engine := wireBaseTax(NewEngine(subs, &mockUsage{totals: map[string]int64{}}, pricing, invoices, nil, &mockSettings{}, nil, nil, billingTestClock()))
 
-	if _, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) > 0 {
-		t.Fatalf("unexpected errors: %v", errs)
+	_, errs := engine.RunCycle(postgres.WithLivemode(context.Background(), true), 50, nil)
+	if len(errs) != 1 || !strings.Contains(errs[0].Error(), "due before its trial ends") {
+		t.Fatalf("errors = %v, want one: due before its trial ends", errs)
 	}
-
 	if len(invoices.invoices) != 0 {
-		t.Errorf("expected 0 invoices during active trial, got %d", len(invoices.invoices))
+		t.Errorf("invoices = %d, want 0", len(invoices.invoices))
 	}
-	if !subs.cycleUpdated["sub_1"] {
-		t.Error("expected cycle to be advanced even when trial-skipping")
+	if subs.cycleUpdated["sub_1"] {
+		t.Error("the period moved")
 	}
 	if subs.subs["sub_1"].Status != domain.SubscriptionTrialing {
-		t.Errorf("status should remain trialing during active trial, got %q", subs.subs["sub_1"].Status)
+		t.Errorf("status = %q, want trialing", subs.subs["sub_1"].Status)
 	}
 }
 

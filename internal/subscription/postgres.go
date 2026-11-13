@@ -2218,14 +2218,6 @@ func (s *PostgresStore) ClearBillingFailure(ctx context.Context, tenantID, id st
 	return cleared, nil
 }
 
-// ClosePeriod is the own-tx wrapper of ClosePeriodTx for advance-only callers
-// (the billing engine's trial-active advance).
-func (s *PostgresStore) ClosePeriod(ctx context.Context, tenantID, id string, expected PeriodSnapshot, periodStart, periodEnd, nextBillingAt time.Time, anchorDay int) error {
-	return s.db.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
-		return s.ClosePeriodTx(ctx, tx, tenantID, id, expected, periodStart, periodEnd, nextBillingAt, anchorDay)
-	})
-}
-
 // ---------------------------------------------------------------------------
 // Item CRUD
 // ---------------------------------------------------------------------------
