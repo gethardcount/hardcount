@@ -6,7 +6,7 @@ Report a security problem privately ([SECURITY.md](SECURITY.md)), and ask questi
 
 ## What we accept
 
-1. **Start with an issue.** For anything bigger than a typo or a broken link, open an issue or comment on an existing one, and wait. An issue is agreed when a maintainer says so on it.
+1. **Start with an issue.** For anything bigger than a typo or a broken link, open an issue or comment on an existing one, and wait. An issue is agreed when a maintainer says so on it. A pull request opened before that is closed without review.
 2. **Some areas need an invitation.** A change here needs an agreed issue that says an outside pull request is welcome:
    - money and billing state (invoices, payments, credits, dunning, subscriptions, tax), which follow the [money-path playbook](docs/dev/money-path-robustness-playbook.md);
    - database migrations;
@@ -16,7 +16,7 @@ Report a security problem privately ([SECURITY.md](SECURITY.md)), and ask questi
 3. **Send one change. Run it yourself, and be able to explain every line.**
 4. **AI help is fine.** End each commit an AI tool helped with in an `Assisted-by:` line, such as `Assisted-by: Claude Code`.
 
-**Never accepted:** links that promote you or a product, batches of tiny edits made to collect contributions, and changes to the licence or the credits.
+**Never accepted:** links that promote you or a product, batches of tiny edits made to collect contributions, and changes to the licence or the credits. A pull request from an account that sends them in bulk to projects it does not use is closed, whatever it changes.
 
 A pull request below this bar gets one short comment and is closed. You may open an issue and try again. Repeats, or behaviour the [code of conduct](CODE_OF_CONDUCT.md) rules out, lead to a block.
 
@@ -100,7 +100,7 @@ The dashboard's setup and checks are in [`web-v2/README.md`](web-v2/README.md). 
 
 ## Your first pull request
 
-1. **Agree the change in an issue.** New here? Comment on one labelled [`good first issue`](https://github.com/gethardcount/hardcount/labels/good%20first%20issue). Then, in your fork, branch from `main`.
+1. **Agree the change in an issue.** New here? Pick an open issue, say in a comment what you plan to change and how, and wait for a maintainer to agree. Then, in your fork, branch from `main`.
 2. **Make the change, with its test.** First read [How Hardcount is built](docs/ENGINEERING.md), [Architecture](docs/architecture.md), the [code standard](docs/dev/code-standard.md) and [How we test](docs/testing.md). [Contributor docs](docs/dev/README.md) lists the rest, with two glossaries.
 3. **Update the docs.** A change a user can see gets a `CHANGELOG.md` entry under `[Unreleased]`. The [writing style](docs/dev/writing-style.md) says how, and which other docs change.
 4. **Open the pull request.** Title it like the commits on `main`: `fix(invoice): what is now true`. Other types: `feat`, `docs`, `test`, `refactor`, `chore`, `ui`, `ci`. The area is optional, and `!` marks a breaking change. The template is the checklist.
