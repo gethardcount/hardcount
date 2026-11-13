@@ -397,13 +397,10 @@ func TestIntervalReader_TZChangeDoesNotReinterpret(t *testing.T) {
 	settings := tenant.NewSettingsStore(db)
 	setTZ := func(tz string) {
 		t.Helper()
-		ts, err := settings.Get(f.ctx, f.tenantID) // defaults for the rest
-		if err != nil {
-			t.Fatalf("get settings: %v", err)
-		}
-		ts.TenantID = f.tenantID
-		ts.Timezone = tz
-		if _, err := settings.Upsert(f.ctx, ts); err != nil {
+		if _, err := settings.Update(f.ctx, f.tenantID, func(ts *domain.TenantSettings) error {
+			ts.Timezone = tz
+			return nil
+		}); err != nil {
 			t.Fatalf("set tz %s: %v", tz, err)
 		}
 	}

@@ -1075,13 +1075,11 @@ func TestBillingFailure_SavedTextIsCuratedOrGeneric(t *testing.T) {
 		a := env.dueSub(t, "sub-a", env.planOK, env.periodEnd)
 		// stripe_tax with no Stripe client wired: the resolver refuses.
 		settings := tenant.NewSettingsStore(env.db)
-		ts, err := settings.Get(env.ctx, env.tenantID)
-		if err != nil {
-			t.Fatalf("settings: %v", err)
-		}
-		ts.TenantID, ts.TaxProvider = env.tenantID, "stripe_tax"
-		if _, err := settings.Upsert(env.ctx, ts); err != nil {
-			t.Fatalf("settings upsert: %v", err)
+		if _, err := settings.Update(env.ctx, env.tenantID, func(ts *domain.TenantSettings) error {
+			ts.TaxProvider = "stripe_tax"
+			return nil
+		}); err != nil {
+			t.Fatalf("settings update: %v", err)
 		}
 		env.mustFail(t, a.ID)
 		want := "The tax provider in settings cannot be used. Choose a tax provider that is configured, then retry billing."

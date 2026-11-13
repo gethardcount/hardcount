@@ -103,16 +103,14 @@ func (r *snapRig) applyEra(t *testing.T, e partyEra) {
 	}); err != nil {
 		t.Fatalf("upsert billing profile: %v", err)
 	}
-	ts, err := r.settings.Get(r.ctx, r.tenantID)
-	if err != nil {
-		t.Fatalf("get settings: %v", err)
-	}
-	ts.CompanyName, ts.CompanyAddressLine1, ts.CompanyCity = e.company, e.companyLine1, e.companyCity
-	ts.CompanyCountry, ts.TaxID = e.companyCountry, e.companyTaxID
-	ts.InvoiceFooter = e.footer
-	ts.CompanyEmail, ts.CompanyPhone = "billing@"+strings.ToLower(strings.Fields(e.company)[1])+".test", "+1 555 "+e.postal
-	if _, err := r.settings.Upsert(r.ctx, ts); err != nil {
-		t.Fatalf("upsert settings: %v", err)
+	if _, err := r.settings.Update(r.ctx, r.tenantID, func(ts *domain.TenantSettings) error {
+		ts.CompanyName, ts.CompanyAddressLine1, ts.CompanyCity = e.company, e.companyLine1, e.companyCity
+		ts.CompanyCountry, ts.TaxID = e.companyCountry, e.companyTaxID
+		ts.InvoiceFooter = e.footer
+		ts.CompanyEmail, ts.CompanyPhone = "billing@"+strings.ToLower(strings.Fields(e.company)[1])+".test", "+1 555 "+e.postal
+		return nil
+	}); err != nil {
+		t.Fatalf("update settings: %v", err)
 	}
 }
 

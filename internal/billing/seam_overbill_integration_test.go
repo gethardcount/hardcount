@@ -144,12 +144,10 @@ func newSeamFixture(t *testing.T, zone string, billingTime domain.SubscriptionBi
 // billing zone in the one-zone model.
 func (f *seamFixture) setOrgTimezone(tz string) {
 	f.t.Helper()
-	ts, err := f.settings.Get(f.ctx, f.tenantID)
-	if err != nil {
-		f.t.Fatalf("get settings: %v", err)
-	}
-	ts.Timezone = tz
-	if _, err := f.settings.Upsert(f.ctx, ts); err != nil {
+	if _, err := f.settings.Update(f.ctx, f.tenantID, func(ts *domain.TenantSettings) error {
+		ts.Timezone = tz
+		return nil
+	}); err != nil {
 		f.t.Fatalf("set org timezone %s: %v", tz, err)
 	}
 }

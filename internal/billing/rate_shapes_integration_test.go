@@ -119,13 +119,11 @@ func TestRateShapes_PreviewEqualsTheInvoice(t *testing.T) {
 			tc.price(t, lf)
 			if tc.taxInclusive {
 				setManualTax(t, ctx, lf.settings, lf.tenantID, 18)
-				ts, err := lf.settings.Get(ctx, lf.tenantID)
-				if err != nil {
-					t.Fatalf("get settings: %v", err)
-				}
-				ts.TaxInclusive = true
-				if _, err := lf.settings.Upsert(ctx, ts); err != nil {
-					t.Fatalf("upsert settings: %v", err)
+				if _, err := lf.settings.Update(ctx, lf.tenantID, func(ts *domain.TenantSettings) error {
+					ts.TaxInclusive = true
+					return nil
+				}); err != nil {
+					t.Fatalf("update settings: %v", err)
 				}
 			}
 			for i, ev := range tc.events {

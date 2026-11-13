@@ -109,9 +109,11 @@ the screen, and that the main things an operator does work end to end.
   credits needs fails, the dialog must say so, with a Retry that loads it.
   The spec also saves a new time zone and currency in Settings. The Usage
   page and Create plan must use them without a reload, also after a switch
-  to the other mode, and Home must read its figures again. The browser answers the settings
-  reads, the save and the mode switch, so the account's real settings and
-  the shared session's mode never change.
+  to the other mode, and Home must read its figures again. A save must send
+  only the fields changed on the page, then show the saved settings,
+  including a tax rate someone else saved after the page loaded. The browser
+  answers the settings reads, the save and the mode switch, so the account's
+  real settings and the shared session's mode never change.
 - `time-zones.spec.ts` answers the settings read with a zone other than the
   account's. A signed-in page must wait for the settings, then send a credit
   expiry as a midnight in that zone. When the read fails, the page must say

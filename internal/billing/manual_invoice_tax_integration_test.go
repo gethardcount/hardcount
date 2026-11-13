@@ -44,17 +44,14 @@ func TestManualInvoice_TaxComputedAtFinalize(t *testing.T) {
 
 	tenantID := testutil.CreateTestTenant(t, db, "Manual Invoice Tax Corp")
 
-	// Tenant tax = manual flat 7.25%. Get→mutate→Upsert preserves the other
-	// NOT NULL settings columns (currency, timezone, prefix, ...).
-	ts, err := settingsStore.Get(ctx, tenantID)
-	if err != nil {
-		t.Fatalf("get settings: %v", err)
-	}
-	ts.TaxProvider = "manual"
-	ts.TaxRate = 7.25
-	ts.TaxName = "Sales Tax"
-	if _, err := settingsStore.Upsert(ctx, ts); err != nil {
-		t.Fatalf("upsert settings: %v", err)
+	// Tenant tax = manual flat 7.25%. Update keeps the other settings.
+	if _, err := settingsStore.Update(ctx, tenantID, func(ts *domain.TenantSettings) error {
+		ts.TaxProvider = "manual"
+		ts.TaxRate = 7.25
+		ts.TaxName = "Sales Tax"
+		return nil
+	}); err != nil {
+		t.Fatalf("update settings: %v", err)
 	}
 
 	cust, err := customerStore.Create(ctx, tenantID, domain.Customer{
@@ -174,16 +171,14 @@ func TestManualInvoice_TaxInclusive_TotalEqualsGross(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, db, "Inclusive Tax Corp")
 
 	// Tenant tax = manual flat 18%, TAX-INCLUSIVE.
-	ts, err := settingsStore.Get(ctx, tenantID)
-	if err != nil {
-		t.Fatalf("get settings: %v", err)
-	}
-	ts.TaxProvider = "manual"
-	ts.TaxRate = 18.0
-	ts.TaxName = "GST"
-	ts.TaxInclusive = true
-	if _, err := settingsStore.Upsert(ctx, ts); err != nil {
-		t.Fatalf("upsert settings: %v", err)
+	if _, err := settingsStore.Update(ctx, tenantID, func(ts *domain.TenantSettings) error {
+		ts.TaxProvider = "manual"
+		ts.TaxRate = 18.0
+		ts.TaxName = "GST"
+		ts.TaxInclusive = true
+		return nil
+	}); err != nil {
+		t.Fatalf("update settings: %v", err)
 	}
 
 	cust, err := customerStore.Create(ctx, tenantID, domain.Customer{

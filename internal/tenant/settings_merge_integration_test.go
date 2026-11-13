@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
@@ -37,18 +38,15 @@ func TestSettingsUpsert_MergePatch(t *testing.T) {
 	store := NewSettingsStore(db)
 	h := NewSettingsHandler(store)
 
-	// Seed a fully-configured tenant on top of the synthesized defaults
-	// (a bare struct violates the enum CHECKs on tax fields).
-	seed, err := store.Get(ctx, tenantID)
-	if err != nil {
-		t.Fatalf("get defaults: %v", err)
-	}
-	seed.CompanyName = "Acme GmbH"
-	seed.DefaultCurrency = "EUR"
-	seed.Timezone = "Europe/Berlin"
-	seed.InvoicePrefix = "ACME"
-	seed.NetPaymentTerms = 15
-	if _, err := store.Upsert(ctx, seed); err != nil {
+	// Seed a fully-configured tenant on top of the defaults.
+	if _, err := store.Update(ctx, tenantID, func(seed *domain.TenantSettings) error {
+		seed.CompanyName = "Acme GmbH"
+		seed.DefaultCurrency = "EUR"
+		seed.Timezone = "Europe/Berlin"
+		seed.InvoicePrefix = "ACME"
+		seed.NetPaymentTerms = 15
+		return nil
+	}); err != nil {
 		t.Fatalf("seed settings: %v", err)
 	}
 

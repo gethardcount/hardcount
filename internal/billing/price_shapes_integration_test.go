@@ -453,13 +453,11 @@ invoice subscription_cancel: subtotal=33 tax=0 total=33
 func setTaxInclusive(t *testing.T, lf *liveFixture, rate float64) {
 	t.Helper()
 	setManualTax(t, lf.ctx, lf.settings, lf.tenantID, rate)
-	ts, err := lf.settings.Get(lf.ctx, lf.tenantID)
-	if err != nil {
-		t.Fatalf("get settings: %v", err)
-	}
-	ts.TaxInclusive = true
-	if _, err := lf.settings.Upsert(lf.ctx, ts); err != nil {
-		t.Fatalf("upsert settings: %v", err)
+	if _, err := lf.settings.Update(lf.ctx, lf.tenantID, func(ts *domain.TenantSettings) error {
+		ts.TaxInclusive = true
+		return nil
+	}); err != nil {
+		t.Fatalf("update settings: %v", err)
 	}
 }
 
