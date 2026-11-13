@@ -829,8 +829,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	//
 	// Handler-side audit for API keys, dunning policies, pricing, the Stripe
 	// connection and the webhook endpoint lifecycle. Each gives operator
-	// state changes an audit trail. testClockH is wired after its declaration
-	// further down.
+	// state changes an audit trail.
 	authH.SetAuditLogger(auditLogger)
 	dunningH.SetAuditLogger(auditLogger)
 	pricingH.SetAuditLogger(auditLogger)
@@ -905,10 +904,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		Relief:       creditNoteSvc,
 		Credits:      creditSvc,
 		Dunning:      dunningSvc,
+		Audit:        auditLogger,
 		PassDeadline: testclock.CatchupPassDeadline,
 	})
 	testClockH := testclock.NewHandler(testClockSvc)
-	testClockH.SetAuditLogger(auditLogger)
 	// The engine writes audit_log rows for lifecycle events it fires in the
 	// background (currently a scheduled cancellation firing at period end).
 	// Without it, the subscription's Activity timeline shows "Cancellation
@@ -1139,7 +1138,8 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// Stripe is not configured, so its wiring is guarded above.
 	audit.MustWired(creditSvc, subSvc, invoiceSvc, creditNoteSvc,
 		stripeAdapter, paymentMethodsSvc, engine, hostedInvoiceStripe,
-		customerSvc, pricingSvc, recipeSvc, providerCostH, usageSvc)
+		customerSvc, pricingSvc, recipeSvc, providerCostH, usageSvc,
+		testClockSvc)
 	if publicPaymentH != nil {
 		// Guarded, because the constructor returns nil without Stripe keys.
 		// When the handler exists, its emitter must be wired.
@@ -1408,7 +1408,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	audit.MustWired(
 		customerH, settingsH, invoiceH, subH, creditNoteH,
 		authH, dunningH, pricingH, tenantStripeH, webhookOutH,
-		testClockH, paymentMethodsH, dashboardAuthH, membersH,
+		paymentMethodsH, dashboardAuthH, membersH,
 		emailSettingsH,
 	)
 

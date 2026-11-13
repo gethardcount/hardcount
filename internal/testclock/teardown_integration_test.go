@@ -88,7 +88,7 @@ func TestDelete_TearsDownSimulatedGraph_KeepsEverythingElse(t *testing.T) {
 
 	// Tear down the clock (exercises every ordered DELETE).
 	store := testclock.NewPostgresStore(db)
-	if err := store.Delete(ctx, tenantID, clockID); err != nil {
+	if err := store.Delete(ctx, tenantID, clockID, noAuditRow); err != nil {
 		t.Fatalf("clock teardown: %v", err)
 	}
 
@@ -112,7 +112,7 @@ func TestDelete_TearsDownSimulatedGraph_KeepsEverythingElse(t *testing.T) {
 	}
 
 	// Idempotent: re-deleting the gone clock is ErrNotFound, not a crash.
-	if err := store.Delete(ctx, tenantID, clockID); !errors.Is(err, errs.ErrNotFound) {
+	if err := store.Delete(ctx, tenantID, clockID, noAuditRow); !errors.Is(err, errs.ErrNotFound) {
 		t.Errorf("re-deleting a gone clock must return ErrNotFound, got %v", err)
 	}
 }
