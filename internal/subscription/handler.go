@@ -1114,9 +1114,7 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		subBefore = sub
-		if sub.Status == domain.SubscriptionActive {
-			prorationRemainingDays = daysLeftInPeriod(sub, clock.Now(ctx))
-		}
+		prorationRemainingDays = daysLeftInPeriod(sub, clock.Now(ctx))
 	}
 
 	// A change that prorates writes the item change and its proration on one
@@ -1548,10 +1546,7 @@ func (h *Handler) atomicUpdateItemWithProration(
 		}
 		base := result.pricedFrom
 
-		var remainingDays int64
-		if base.sub.Status == domain.SubscriptionActive {
-			remainingDays = daysLeftInPeriod(base.sub, result.EffectiveAt)
-		}
+		remainingDays := daysLeftInPeriod(base.sub, result.EffectiveAt)
 		var spec itemProrationSpec
 		if input.NewPlanID != "" && input.Immediate {
 			var changeAt time.Time
@@ -2480,10 +2475,11 @@ func clawbackReason(ct domain.ItemChangeType) string {
 
 // daysLeftInPeriod is the whole days from now to the end of the subscription's
 // current period, the numerator of an in-advance proration (ADR-042). It is 0
-// when the period is not set or has ended. Callers pass only an active
-// subscription: its change is made inside its period, so the days never
-// exceed the period's own length. A trialing subscription's period starts in
-// the future, so its days could.
+// when the period is not set or has ended. The days never exceed the period's
+// own length, because a change is made inside its period: the service refuses
+// an item change on a subscription that is not active (checkItemChange, and
+// again under the lock), and only a trialing one has a period that starts in
+// the future.
 func daysLeftInPeriod(sub domain.Subscription, now time.Time) int64 {
 	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
 		return 0
