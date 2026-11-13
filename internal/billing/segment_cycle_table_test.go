@@ -17,13 +17,13 @@ var proratedOver = regexp.MustCompile(`prorated 1/(\d+) days`)
 
 // segmentDenominator bills a one-day segment at the start of [ps, pe) and
 // returns the days the line was prorated over.
-func segmentDenominator(t *testing.T, ps, pe time.Time, interval domain.BillingInterval, bt domain.SubscriptionBillingTime, loc *time.Location, anchor, periodDays int) int {
+func segmentDenominator(t *testing.T, ps, pe time.Time, interval domain.BillingInterval, bt domain.SubscriptionBillingTime, loc *time.Location, anchor int) int {
 	t.Helper()
 	plan := domain.Plan{Name: "Table", BaseAmountCents: 10000, BillingInterval: interval}
 	seg := baseSegment{start: ps, end: ps.Add(24 * time.Hour), quantity: 1}
 	var lines []domain.InvoiceLineItem
 	var subtotal int64
-	if err := emitBaseSegmentLine(seg, plan, ps, pe, periodDays, "USD", loc, bt, anchor, &lines, &subtotal); err != nil {
+	if err := emitBaseSegmentLine(seg, plan, domain.CyclePeriod{Start: ps, End: pe, BillingTime: bt, Loc: loc, StoredAnchor: anchor}, "USD", &lines, &subtotal); err != nil {
 		t.Fatalf("emitBaseSegmentLine: %v", err)
 	}
 	if len(lines) != 1 {
@@ -70,7 +70,7 @@ func TestEmitBaseSegmentLine_DenominatorIsTheOpenedCycle(t *testing.T) {
 				to := next(from)
 				want := civilDays(from.y, from.m, from.d, to.y, to.m, to.d)
 				ps, pe := at(from), at(to)
-				if got := segmentDenominator(t, ps, pe, interval, bt, loc, anchor, want); got != want {
+				if got := segmentDenominator(t, ps, pe, interval, bt, loc, anchor); got != want {
 					t.Errorf("%s %s: period [%04d-%02d-%02d, %04d-%02d-%02d) is %d days, prorated over %d",
 						zone, name, from.y, from.m, from.d, to.y, to.m, to.d, want, got)
 				}

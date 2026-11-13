@@ -12,7 +12,7 @@ import { applyApiError } from '@/lib/formErrors'
 import { LoadError } from '@/components/LoadError'
 import { Callout } from '@/components/Callout'
 import { TestClockBadge } from '@/components/TestClockBadge'
-import { useEffectiveNowResolver } from '@/hooks/useClockFrozenMap'
+import { useNowResolver } from '@/hooks/useNow'
 import { collectionPausedFlag, genericStatus, subscriptionStatus } from '@/lib/statusLabels'
 import { StatusBadge } from '@/components/StatusBadge'
 
@@ -67,7 +67,7 @@ export default function PlanDetailPage() {
   const queryClient = useQueryClient()
   // Each subscription's "now" (its test clock when pinned), for when a timed
   // collection pause ends.
-  const resolveNow = useEffectiveNowResolver()
+  const resolveNow = useNowResolver()
   const [showEdit, setShowEdit] = useState(false)
 
   const { data: plan, isLoading, error: loadError, refetch } = useQuery({
@@ -273,7 +273,7 @@ export default function PlanDetailPage() {
                       <div className="flex items-center gap-2">
                         <StatusBadge status={subscriptionStatus(sub)} />
                         {(() => {
-                          const paused = collectionPausedFlag(sub, resolveNow(sub.test_clock_id))
+                          const paused = collectionPausedFlag(sub, resolveNow(sub))
                           return paused && <StatusBadge status={paused} />
                         })()}
                       </div>

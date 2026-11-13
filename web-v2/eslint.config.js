@@ -6,8 +6,8 @@ import { defineConfig, globalIgnores } from 'eslint/config'
 
 // Relative-time gate (ADR-086 Phase 4): raw `Date.now()` / argless `new Date()`
 // is wall-clock now — on a clock-pinned (test-clock-simulated) entity that's a
-// lie. All age/countdown/window UI must anchor on an EffectiveNow built via
-// effectiveNow(frozenISO) or wallClockNow() (src/lib/effectiveNow.ts), which the
+// lie. All age/countdown/window UI must anchor on an EffectiveNow from
+// useNowFor/useNowResolver (src/hooks/useNow.ts) or wallClockNow(), which the
 // type system already makes non-optional at the helper boundary. This rule is
 // the second, independent gate against hand-rolled wall-clock relative-time,
 // and since 2026-07-19 it is a real CI gate: the frontend job runs
@@ -20,12 +20,12 @@ const noWallClockNow = [
   {
     selector: "CallExpression[callee.object.name='Date'][callee.property.name='now']",
     message:
-      'Raw Date.now() ignores test clocks. Use effectiveNow(frozenISO) or wallClockNow() from @/lib/effectiveNow for relative-time. For genuine wall-clock/calendar/infra use, add `// eslint-disable-next-line no-restricted-syntax -- <reason>`.',
+      'Raw Date.now() ignores test clocks. Use useNowFor/useNowResolver (@/hooks/useNow) or wallClockNow() (@/lib/effectiveNow) for relative-time. For genuine wall-clock/calendar/infra use, add `// eslint-disable-next-line no-restricted-syntax -- <reason>`.',
   },
   {
     selector: "NewExpression[callee.name='Date'][arguments.length=0]",
     message:
-      'Argless `new Date()` is wall-clock now. Use effectiveNow()/wallClockNow() from @/lib/effectiveNow for relative-time. For calendar/date-picker/infra use, add `// eslint-disable-next-line no-restricted-syntax -- <reason>` (or keep it in lib/dates.ts).',
+      'Argless `new Date()` is wall-clock now. Use useNowFor/useNowResolver (@/hooks/useNow) or wallClockNow() (@/lib/effectiveNow) for relative-time. For calendar/date-picker/infra use, add `// eslint-disable-next-line no-restricted-syntax -- <reason>` (or keep it in lib/dates.ts).',
   },
 ]
 

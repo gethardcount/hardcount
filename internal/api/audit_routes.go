@@ -322,10 +322,10 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 	// subscriptions canceled) with no cause. It would show no "created", no
 	// "advanced to 2027-03-01" and no "deleted". The "deleted" row is the one
 	// that explains why every other trace of the simulation is gone.
-	{"POST", "/v1/test-clocks"}:                    explicit("testclock.Handler.create → Log(create, test_clock)."),
-	{"POST", "/v1/test-clocks/{id}/advance"}:       explicit("testclock.Handler.advance → Log(update, test_clock; metadata action=advanced)."),
-	{"POST", "/v1/test-clocks/{id}/retry-advance"}: explicit("testclock.Handler.retryAdvance → Log(update, test_clock; metadata action=retry_advance)."),
-	{"DELETE", "/v1/test-clocks/{id}"}:             explicit("testclock.Handler.delete → Log(delete, test_clock: teardown), reading the clock BEFORE the teardown so the row carries its name + final frozen instant. ADR-086: the audit row is the simulation's ONLY surviving record after teardown."),
+	{"POST", "/v1/test-clocks"}:                    explicit("testclock.Service.Create → LogInTx(create, test_clock) on the clock's insert tx."),
+	{"POST", "/v1/test-clocks/{id}/advance"}:       explicit("testclock.Service.Advance → LogInTx(update, test_clock; metadata action=advanced, advanced_from read by the same statement) on the tx that marks the clock advancing."),
+	{"POST", "/v1/test-clocks/{id}/retry-advance"}: explicit("testclock.Service.RetryAdvance → LogInTx(update, test_clock; metadata action=retry_advance) on the tx that marks the clock advancing again."),
+	{"DELETE", "/v1/test-clocks/{id}"}:             explicit("testclock.Service.Delete → LogInTx(delete, test_clock: teardown) on the teardown tx, named from the clock row it deletes. ADR-086: the audit row is the simulation's only record after teardown."),
 
 	// --- checkout / public payment surfaces --------------------------------
 	{"POST", "/v1/public/invoices/{token}/checkout"}:        explicit("hostedInvoiceStripeAdapter (api/adapters.go) → LogInTx on the checkout-claim tx; actor is the CUSTOMER (auth.WithCustomerActor). Outside the old catch-all entirely."),

@@ -2,7 +2,7 @@
 // Pure functions, no DOM: runs with `npm test`.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { effectiveNow } from '../src/lib/effectiveNow.ts'
+import { clockTime } from '../src/lib/effectiveNow.ts'
 import {
   DEFAULT_ACTIVITY_PRESET,
   DEFAULT_MARGIN_PRESET,
@@ -19,7 +19,7 @@ import {
 // instant, the clock is advanced 32 days to 2026-03-04T10:00Z. The first
 // period [Jan 31, Feb 28) is invoiced; the current cycle is [Feb 28, Mar 31).
 const usageAt = '2026-01-31T10:00:00Z'
-const clock = effectiveNow('2026-03-04T10:00:00Z')
+const clock = clockTime('2026-03-04T10:00:00Z')
 const cycle = { from: '2026-02-28T00:00:00Z', to: '2026-03-31T00:00:00Z' }
 const invoices = [
   {

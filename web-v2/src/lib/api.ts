@@ -1597,11 +1597,9 @@ export interface DunningRun {
   invoice_number?: string
   invoice_amount_due_cents?: number
   invoice_currency?: string
-  // Owning sub's test-clock frozen_time when applicable. Used as the
-  // "now" baseline for relative-time rendering on this row (Next
-  // step / Started). Missing for wall-clock runs — renderer falls
-  // back to Date.now(). Authoritative; replaces prior heuristic.
-  effective_now?: string
+  // The customer's test clock, on list responses when the customer is on
+  // one. The row's "now" (Next step, Started) is that clock's time from the
+  // clock list (useNowResolver); the response's effective_now is not read.
   test_clock_id?: string
   // How many retries the run's policy makes, the length of its retry_days
   // (list responses).

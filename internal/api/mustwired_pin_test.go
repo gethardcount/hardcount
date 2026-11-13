@@ -112,7 +112,9 @@ func structLiteralAuditWirings(text string) [][]int {
 
 // enclosingVar walks BACKWARD from a struct-literal field to the variable the
 // literal is assigned to: `noPMNotifier := &noPaymentMethodNotifierAdapter{` →
-// "noPMNotifier". Nil when it cannot tell, which the caller treats as a failure —
+// "noPMNotifier". A literal passed as a constructor's last argument names the
+// constructed variable: `testClockSvc := testclock.NewService(store, testclock.Deps{`
+// → "testClockSvc". Nil when it cannot tell, which the caller treats as a failure —
 // a gate that silently gives up is the thing being gated against.
 func enclosingVar(text string, at int) string {
 	// Same line first: `x := &T{a: 1, audit: auditLogger}`.
@@ -121,7 +123,7 @@ func enclosingVar(text string, at int) string {
 		return m[1]
 	}
 	// Otherwise the nearest multi-line literal opened above.
-	assign := regexp.MustCompile(`(?m)^\s*(\w+)\s*:?=\s*&?[\w.]+\{\s*$`)
+	assign := regexp.MustCompile(`(?m)^\s*(\w+)\s*:?=\s*(?:[\w.]+\([^()\n]*)?&?[\w.]+\{\s*$`)
 	best := ""
 	for _, m := range assign.FindAllStringSubmatchIndex(text, -1) {
 		if m[0] < at {

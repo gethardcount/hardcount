@@ -33,6 +33,20 @@ type CyclePeriod struct {
 // to the nominal branch. A stored anchor of 0 (a row from before the column)
 // counts as on the anchor and advances by plain month arithmetic, so such a
 // period is its own length.
+//
+// Known wrong until a period carries the cycle and zone it was opened in
+// (TestCycleDays_Rows pins each):
+//   - A period a swap cut short whose start was a shortened month end is
+//     counted from that day: 28 where its cycle (anchor 31) was 31. When the
+//     cut-short period is longer than that, its own length caps it at one
+//     fee, which is not the right split either.
+//   - A period charged in one zone and refunded or prorated in another can be
+//     divided by two numbers a day or a few apart, toward an under-refund: a
+//     calendar month Feb 1 to Mar 1 opened in Asia/Kolkata is charged over
+//     28 and, read in UTC, refunded over 31.
+//   - A full cycle opened on anchor 29 to 31 east of the current zone is
+//     prorated at a trial end: Jan 31 to Feb 28 opened in Asia/Kolkata on
+//     anchor 31, read in UTC, bills 28/29.
 func (p CyclePeriod) CycleDays() int {
 	// The zone is the tenant's, read by the caller; a period with none is the
 	// caller's bug, and In panics on it here, on every path.

@@ -19,8 +19,8 @@ import { StatusBadge } from '@/components/StatusBadge'
 import { attentionReasonLabel } from '@/lib/attentionLabels'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 import { DueBadge } from '@/components/DueBadge'
-import { effectiveNow, wallClockNow } from '@/lib/effectiveNow'
-import { useClockFrozenMap } from '@/hooks/useClockFrozenMap'
+import { wallClockNow } from '@/lib/effectiveNow'
+import { useNowResolver } from '@/hooks/useNow'
 import { SimulatedBadge } from '@/components/TestClockBadge'
 
 import { Button } from '@/components/ui/button'
@@ -177,13 +177,9 @@ export default function InvoicesPage() {
     enabled: customerIds.length > 0,
   })
 
-  // Test clocks → frozen_time lookup so per-row "Due in N days" badges
-  // read from simulation time when the row's invoice follows a clock
-  // (inv.test_clock_id, read from its customer by the server). Without it, the badge defaults to wall-clock and understates
-  // urgency on test-clock-driven invoices. The hook is mode-gated (no
-  // fetch in live, where the server refuses the resource) and returns {}
-  // there — every live row correctly falls back to wall time.
-  const clockFrozenMap = useClockFrozenMap()
+  // Each row's "now" (its clock's time when it is on one), for Due in N days.
+  // The server fills each invoice's test_clock_id from its customer.
+  const resolveNow = useNowResolver()
 
   const invoices = invoicesData?.data ?? []
   const total = invoicesData?.total ?? 0
@@ -415,11 +411,7 @@ export default function InvoicesPage() {
                 </TableHeader>
                 <TableBody>
                   {sorted.map((inv: Invoice) => {
-                    // The invoice's own "now": the clock its customer is pinned
-                    // to, which every subscription inherits (ADR-027). The
-                    // server sends it on each row; wall-clock invoices have
-                    // none → wall time.
-                    const now = effectiveNow(clockFrozenMap[inv.test_clock_id ?? ''])
+                    const now = resolveNow(inv)
                     const badge = invoiceStatus(inv, now)
                     const chip = invoicePaymentChip(inv)
                     const customerName = customerMap[inv.customer_id]?.display_name || unknownCustomer

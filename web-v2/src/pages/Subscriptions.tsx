@@ -44,10 +44,9 @@ import { Plus, Search, Download, ArrowUpDown, ArrowUp, ArrowDown, Repeat } from 
 import { EmptyState } from '@/components/EmptyState'
 import { ExpiryBadge } from '@/components/ExpiryBadge'
 import { trialBadgeEndsAt } from '@/lib/statusLabels'
-import { effectiveNow } from '@/lib/effectiveNow'
 import { formatCivilDate } from '@/lib/dates'
 import { nextBillCell, periodLabels } from '@/lib/subscriptionPeriod'
-import { useTestClocks } from '@/hooks/useClockFrozenMap'
+import { useNowResolver, useTestClocks } from '@/hooks/useNow'
 
 const PAGE_SIZE = 25
 
@@ -131,16 +130,10 @@ export default function SubscriptionsPage() {
     queryFn: () => api.listPlans(),
   })
 
-  // Test clocks → frozen_time map so per-row "Trial ends in N days"
-  // reads from simulation time when the sub is pinned to a clock.
-  // useTestClocks is mode-gated (no fetch in live, where the server
-  // refuses the resource) and shares one cache entry app-wide.
+  // Each row's "now" (its clock's time when it is on one), for Trial ends and
+  // a timed collection pause.
+  const resolveNow = useNowResolver()
   const { data: testClocksData } = useTestClocks()
-  const clockFrozenMap = useMemo(() => {
-    const m: Record<string, string> = {}
-    ;(testClocksData?.data ?? []).forEach(c => { m[c.id] = c.frozen_time })
-    return m
-  }, [testClocksData])
   // Clock id → name lookup for the customer-inherits-clock hint
   // (ADR-027). Surfaced inside the Create dialog when the picked
   // customer is pinned to a clock so the operator knows the new
@@ -366,7 +359,7 @@ export default function SubscriptionsPage() {
                         <div className="flex items-center gap-2">
                           <StatusBadge status={subscriptionStatus(sub)} />
                           {(() => {
-                            const paused = collectionPausedFlag(sub, effectiveNow(sub.test_clock_id ? clockFrozenMap[sub.test_clock_id] : undefined))
+                            const paused = collectionPausedFlag(sub, resolveNow(sub))
                             return paused && <StatusBadge status={paused} />
                           })()}
                           {sub.billing_failure && (
@@ -381,7 +374,7 @@ export default function SubscriptionsPage() {
                             expiresAt={trialBadgeEndsAt(sub)}
                             label="Trial ends"
                             warningDays={3}
-                            now={effectiveNow(sub.test_clock_id ? clockFrozenMap[sub.test_clock_id] : undefined)}
+                            now={resolveNow(sub)}
                           />
                         </div>
                       </TableCell>

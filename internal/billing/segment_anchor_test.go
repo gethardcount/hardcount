@@ -11,7 +11,7 @@ import (
 
 // TestEmitBaseSegmentLine_DenominatorFromPeriodAnchor: the proration
 // denominator is one full cycle from the period's start, counted on the
-// anchor cycleAnchor reconstructs.
+// anchor CycleDays reconstructs (domain.CyclePeriod).
 //
 // A period not cut short ends where its start and the stored anchor say, and
 // is counted on the stored anchor: Feb 28 to Mar 31 on anchor 31 is 31 days.
@@ -26,8 +26,9 @@ import (
 // the known wrong case, a monthly period from Feb 28 2033 whose old anchor
 // was 31, cut short at midnight on Mar 15 with the anchor rewritten to 15,
 // divides by 28 where its cycle was 31. Its end is where Feb 28 and anchor
-// 15 would end a period, so only the start's test keeps it off anchor 15. A subscription with no stored anchor counts on the start's
-// own day.
+// 15 would end a period, so only the start's test keeps it off anchor 15. A
+// legacy period with no stored anchor (Jan 31 to Mar 3 by AddDate) divides by
+// its own 31 days, not the 28 from the start's own day.
 func TestEmitBaseSegmentLine_DenominatorFromPeriodAnchor(t *testing.T) {
 	ist, err := time.LoadLocation("Asia/Kolkata")
 	if err != nil {
@@ -52,14 +53,14 @@ func TestEmitBaseSegmentLine_DenominatorFromPeriodAnchor(t *testing.T) {
 		{"anniversary from Feb 28 on anchor 31", monthly, inIST(2033, 2, 28), inIST(2033, 3, 31), domain.BillingTimeAnniversary, 31, 31, 4839},
 		{"yearly from Feb 28 2031, cut short Mar 30, anchor rewritten to 30", yearly, inIST(2031, 2, 28), inIST(2031, 3, 30), domain.BillingTimeAnniversary, 30, 365, 411},
 		{"known wrong: monthly from Feb 28 2033, cut short at midnight Mar 15, anchor rewritten to 15", monthly, inIST(2033, 2, 28), inIST(2033, 3, 15), domain.BillingTimeAnniversary, 15, 28, 5357},
-		{"no stored anchor: anniversary from Jan 31", monthly, inIST(2033, 1, 31), inIST(2033, 3, 3), domain.BillingTimeAnniversary, 0, 28, 5357},
+		{"no stored anchor: a legacy period from Jan 31 is its own length", monthly, inIST(2033, 1, 31), inIST(2033, 3, 3), domain.BillingTimeAnniversary, 0, 31, 4839},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			seg := baseSegment{start: tc.start, end: tc.start.Add(15 * 24 * time.Hour), quantity: 1}
 			var lines []domain.InvoiceLineItem
 			var subtotal int64
-			if err := emitBaseSegmentLine(seg, tc.plan, tc.start, tc.end, roundDays(tc.end.Sub(tc.start)), "USD", ist, tc.billingTime, tc.stored, &lines, &subtotal); err != nil {
+			if err := emitBaseSegmentLine(seg, tc.plan, domain.CyclePeriod{Start: tc.start, End: tc.end, BillingTime: tc.billingTime, Loc: ist, StoredAnchor: tc.stored}, "USD", &lines, &subtotal); err != nil {
 				t.Fatalf("emitBaseSegmentLine: %v", err)
 			}
 			if len(lines) != 1 {

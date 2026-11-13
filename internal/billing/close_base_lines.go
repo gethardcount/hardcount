@@ -33,18 +33,10 @@ type closeBaseLine struct {
 func closeBaseFeeLines(sub domain.Subscription, segsByItem map[string][]baseSegment, plans map[string]domain.Plan, periodStart, periodEnd time.Time, invoiceCurrency string, billingLoc *time.Location, terminalCycleClose, thresholdBilled bool) ([]closeBaseLine, error) {
 	var out []closeBaseLine
 
-	// Detect partial period once — same across all items since they share the
-	// billing period. Use math.Round, not int truncation: a sub created
-	// at 14:00 was previously billed for 30/31 days because hour-precise
-	// duration / 24 truncated to 30. With period boundaries snapped to
-	// 00:00 in tenant TZ (subscription.Service), elapsed hours land on
-	// (or within ±1h of) a whole-day multiple — DST transitions
-	// account for the ±1h tolerance, which Round absorbs.
-	periodDays := roundDays(periodEnd.Sub(periodStart))
 	emitSeg := func(seg baseSegment, plan domain.Plan) error {
 		var one []domain.InvoiceLineItem
 		var ignored int64
-		if err := emitBaseSegmentLine(seg, plan, periodStart, periodEnd, periodDays, invoiceCurrency, billingLoc, sub.BillingTime, sub.BillingAnchorDay, &one, &ignored); err != nil {
+		if err := emitBaseSegmentLine(seg, plan, domain.CyclePeriod{Start: periodStart, End: periodEnd, BillingTime: sub.BillingTime, Loc: billingLoc, StoredAnchor: sub.BillingAnchorDay}, invoiceCurrency, &one, &ignored); err != nil {
 			return err
 		}
 		for _, li := range one {
@@ -120,23 +112,14 @@ func closeBaseFeeLines(sub domain.Subscription, segsByItem map[string][]baseSegm
 			if advanceDays <= 0 {
 				continue
 			}
-			fullCycleDays := roundDays(advanceBillingPeriod(baseStart, plan.BillingInterval, billingLoc, sub.BillingAnchorDay).Sub(baseStart))
-			// An org-timezone change (ADR-077, resolved live each roll) re-resolves
-			// the stored boundary in the new zone, leaving baseStart OFF the anchor
-			// grid.
-			// For anniversary/yearly, advanceBillingPeriod re-anchors to the next
-			// anchor DAY, so fullCycleDays collapses to the seam width (==
-			// advanceDays) and the gate below dies — a ~24h seam would then bill a
-			// FULL base fee (the anniversary/yearly analogue of the calendar seam,
-			// ADR-091). When baseStart is off-anchor, measure the full cycle
-			// NOMINALLY (one calendar interval from baseStart, anchorDay 0) so the
-			// short seam prorates instead of overbilling. Calendar billing
-			// (anchorDay 0) is reported on-anchor and untouched — its denominator
-			// already never collapses (it snaps to the fixed 1st-of-month grid).
-			if !domain.IsPeriodStartOnAnchor(baseStart, sub.BillingAnchorDay, billingLoc) {
-				fullCycleDays = roundDays(advanceBillingPeriod(baseStart, plan.BillingInterval, billingLoc, 0).Sub(baseStart))
-			}
-			if advanceDays > 0 && fullCycleDays > 0 && advanceDays < fullCycleDays {
+			// An org-timezone change (ADR-077) can leave baseStart off the
+			// anchor grid; CycleDays counts such a seam over one interval from
+			// its own day, so it prorates instead of billing a full fee.
+			fullCycleDays := domain.CyclePeriod{
+				Start: baseStart, End: baseEnd, BillingTime: sub.BillingTime,
+				Interval: plan.BillingInterval, Loc: billingLoc, StoredAnchor: sub.BillingAnchorDay,
+			}.CycleDays()
+			if advanceDays < fullCycleDays {
 				if baseFee, err = prorateCents(fullFee, advanceDays, fullCycleDays); err != nil {
 					return nil, err
 				}
