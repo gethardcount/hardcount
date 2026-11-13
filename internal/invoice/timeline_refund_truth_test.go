@@ -51,7 +51,7 @@ func TestPaymentTimeline_RefundRowReportsOutcomeNotIntent(t *testing.T) {
 		cn.TenantID = "t1"
 		cn.Status = domain.CreditNoteIssued
 		cn.IssuedAt = &issuedAt
-		h := &Handler{svc: NewService(store, nil, nil)}
+		h := &Handler{svc: NewService(store, nil, newMemNumberer())}
 		h.creditNotes = &cnLaneFake{cns: []domain.CreditNote{cn}}
 
 		req := httptest.NewRequest(http.MethodGet, "/", nil)

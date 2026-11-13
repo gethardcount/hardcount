@@ -8,6 +8,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/webhook"
 )
@@ -43,7 +44,7 @@ func TestMarkUncollectible_ExpiresCheckoutSessions(t *testing.T) {
 	inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-WO-EXPIRE")
 
 	rec := &stopperRecorder{}
-	svc := invoice.NewService(store, nil, nil)
+	svc := invoice.NewService(store, nil, tenant.NewSettingsStore(db))
 	svc.SetCollectionStopper(rec)
 
 	if _, err := svc.MarkUncollectible(ctx, tenantID, inv.ID); err != nil {
@@ -129,7 +130,7 @@ func TestMarkUncollectible_CallerContextEnds_EveryLegStillRuns(t *testing.T) {
 			} else {
 				logger = endingAudit{AuditLogger: logger, endCaller: cancel}
 			}
-			svc := invoice.NewService(store, nil, nil)
+			svc := invoice.NewService(store, nil, tenant.NewSettingsStore(db))
 			svc.SetCollectionStopper(stopper)
 			svc.SetAuditLogger(logger)
 

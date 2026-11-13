@@ -242,7 +242,6 @@ func newComposedRig(t *testing.T, db *postgres.DB, name string, rate float64) co
 	engine.SetStripeReadiness(testStripeConnected{})
 	engine.SetInvoiceEmailer(&testInvoiceEmailer{})
 	svc := invoice.NewService(invoices, clock.Real(), settings)
-	svc.SetTenantSettingsReader(settings) // as router.go wires it
 	svc.SetTaxRetrier(engine)
 	return composedRig{ctx: ctx, tenantID: tenantID, custID: cust.ID, invoices: invoices, engine: engine, svc: svc}
 }

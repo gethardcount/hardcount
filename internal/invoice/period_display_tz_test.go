@@ -32,7 +32,7 @@ func (d dispSettings) Get(_ context.Context, _ string) (domain.TenantSettings, e
 func TestInvoice_PeriodDisplay_AnchoredInBillingTZ(t *testing.T) {
 	ctx := context.Background()
 	// The tenant has SINCE moved its display TZ to New_York.
-	s := &Service{settings: dispSettings{tz: "America/New_York"}}
+	s := &Service{settings: newMemNumberer().withSettings(dispSettings{tz: "America/New_York"})}
 
 	start := time.Date(2026, 5, 1, 18, 30, 0, 0, time.UTC) // May 2 00:00 IST
 	end := time.Date(2026, 5, 31, 18, 30, 0, 0, time.UTC)  // Jun 1 00:00 IST

@@ -167,7 +167,7 @@ func TestList_AttentionReadsOncePerPage(t *testing.T) {
 		}
 	}
 
-	svc := NewService(store, nil, nil)
+	svc := NewService(store, nil, newMemNumberer())
 	svc.SetPaymentMethodReader(pms)
 	svc.SetCustomerReader(custs)
 	svc.SetDunningRunReader(runs)
@@ -223,7 +223,7 @@ func TestGet_AttentionMatchesListRow(t *testing.T) {
 		ID: "inv_1", TenantID: "t1", CustomerID: "cus_1", SubscriptionID: "sub_1", InvoiceNumber: "INV-1",
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending, Currency: "USD", AmountDueCents: 1000,
 	}
-	svc := NewService(store, nil, nil)
+	svc := NewService(store, nil, newMemNumberer())
 	svc.SetCustomerReader(&countingCustomers{email: map[string]string{"cus_1": "a@acme.test"}})
 	svc.SetDunningRunReader(&countingDunning{escalated: map[string]bool{"inv_1": true}})
 	svc.SetSubscriptionPauseReader(&countingPauses{paused: map[string]bool{"sub_1": true}})

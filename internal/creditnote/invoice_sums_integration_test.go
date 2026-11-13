@@ -321,7 +321,7 @@ func TestVoid_ReversesTaxNoIssuedNoteCovered(t *testing.T) {
 	}
 
 	rec := &reversalRecorder{}
-	invSvc := invoice.NewService(r.invoices, clock.Real(), nil)
+	invSvc := invoice.NewService(r.invoices, clock.Real(), tenant.NewSettingsStore(r.db))
 	invSvc.SetTaxReverser(rec)
 	invSvc.SetCreditNoteTotaler(r.svc)
 	if _, err := invSvc.Void(r.ctx, r.tenantID, inv.ID); err != nil {

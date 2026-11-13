@@ -35,7 +35,7 @@ func TestRetryTax_AutoFinalizeSkipsTheExpiryGuard(t *testing.T) {
 		BillingReason: "subscription_cycle", Currency: "USD",
 		TotalAmountCents: 5000, AmountDueCents: 5000, CreatedAt: time.Now().UTC(),
 	}
-	svc := NewService(store, nil, nil)
+	svc := NewService(store, nil, newMemNumberer())
 	svc.SetTaxRetrier(&stubTaxRetrier{store: store})
 	svc.SetTaxCommitter(unreadableGuardCommitter{})
 

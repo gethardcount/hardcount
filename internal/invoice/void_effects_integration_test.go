@@ -7,6 +7,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -80,7 +81,7 @@ func TestVoid_EveryPathStopsAndResolvesOnce(t *testing.T) {
 			inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-VOID-FX-"+string(rune('A'+i)))
 			stopper := &recordingStopper{}
 			resolver := &recordingDunningResolver{}
-			svc := invoice.NewService(store, nil, nil)
+			svc := invoice.NewService(store, nil, tenant.NewSettingsStore(db))
 			svc.SetCollectionStopper(stopper)
 			svc.SetDunningResolver(resolver)
 

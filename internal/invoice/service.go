@@ -149,14 +149,24 @@ type CustomerReader interface {
 	GetMany(ctx context.Context, tenantID string, ids []string) ([]domain.Customer, error)
 }
 
-// TenantSettingsReader reads tenant settings. Service reads them when it
-// creates a manual invoice: with no explicit net term it uses the tenant's
-// configured terms, 0 included — the same resolution as the billing engine's
-// invoices — and it records whether the invoice's prices include tax.
-// Optional; nil (narrow tests) means Net 30 with prices before tax. Handler
-// and BuildPDFContext read them for the PDF's company info.
+// TenantSettingsReader reads tenant settings. Handler and BuildPDFContext read
+// them for the PDF's company info; Service reads them through
+// TenantSettingsStore.
 type TenantSettingsReader interface {
 	Get(ctx context.Context, tenantID string) (domain.TenantSettings, error)
+}
+
+// TenantSettingsStore is the tenant's settings as Service uses them. Create
+// reads them for a manual invoice: with no explicit net term it uses the
+// tenant's configured terms, 0 included — the same resolution as the billing
+// engine's invoices — and it takes the tenant's billing zone, its default
+// currency, and whether the invoice's prices include tax. An invoice with no
+// zone of its own is shown in the tenant's. Create takes the invoice number
+// from it, on the transaction that inserts the invoice.
+// *tenant.SettingsStore is the one implementation.
+type TenantSettingsStore interface {
+	TenantSettingsReader
+	InvoiceNumberer
 }
 
 // CreditReverser restores customer-balance credits that were applied to an
@@ -184,7 +194,7 @@ type Service struct {
 	store          Store
 	clock          clock.Clock
 	resolver       clock.Resolver
-	numberer       InvoiceNumberer
+	settings       TenantSettingsStore
 	taxCommitter   TaxCommitter
 	taxReverser    TaxReverser
 	creditNotes    CreditNoteTotaler
@@ -203,7 +213,6 @@ type Service struct {
 	disputes       DisputeReader
 	stripeRefunds  StripeRefunds
 	creditApplier  CreditApplier
-	settings       TenantSettingsReader
 	currencyFacts  CustomerCurrencyFacts
 	audit          AuditLogger
 	// collectionStopper and dunningResolver are AfterVoid's Stripe and
@@ -281,12 +290,6 @@ type AuditLogger interface {
 	// the commit-grant retirement, and the audit row share one fate.
 	LogInTx(ctx context.Context, tx *sql.Tx, e audit.Entry) error
 }
-
-// SetTenantSettingsReader wires the tenant-settings reader a manual invoice is
-// created under: its net payment terms when the caller omits them, and whether
-// its prices include tax. Optional; without it an invoice is Net 30 with
-// prices before tax.
-func (s *Service) SetTenantSettingsReader(r TenantSettingsReader) { s.settings = r }
 
 // SetAuditLogger wires the audit logger.
 func (s *Service) SetAuditLogger(l AuditLogger) { s.audit = l }
@@ -370,11 +373,19 @@ func (s *Service) resolveCurrency(ctx context.Context, tenantID, customerID, req
 	return currency, nil
 }
 
-func NewService(store Store, clk clock.Clock, numberer InvoiceNumberer) *Service {
+// NewService builds the invoice service on the tenant's settings, which
+// decide a manual invoice's terms, zone, currency and number, and the zone an
+// invoice with none of its own is shown in. They are required: there is no
+// default to fall back to, so a nil settings panics where the service is
+// built.
+func NewService(store Store, clk clock.Clock, settings TenantSettingsStore) *Service {
+	if settings == nil {
+		panic("invoice.NewService: settings is required")
+	}
 	if clk == nil {
 		clk = clock.Real()
 	}
-	return &Service{store: store, clock: clk, numberer: numberer}
+	return &Service{store: store, clock: clk, settings: settings}
 }
 
 // SetTaxCommitter wires the upstream tax-transaction committer. Called from
@@ -864,22 +875,18 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	}
 
 	// Read tenant settings once, for the default Net terms, the billing
-	// timezone and the workspace currency. A read failure fails the create
-	// rather than guessing Net 30 (P24), a zone or a currency. No reader
-	// wired (tests) means Net 30, UTC, USD and prices before tax, as in the
-	// engine.
-	ts := domain.TenantSettings{DefaultCurrency: "USD"}
-	if s.settings != nil {
-		ts, err = s.settings.Get(ctx, tenantID)
-		if err != nil {
-			// With no currency in the request this read may hold the one
-			// to use (the workspace default), so it is the documented,
-			// retryable 503 currency_unavailable.
-			if currency == "" {
-				return domain.Invoice{}, fmt.Errorf("%w: read tenant settings: %v", ErrCurrencyUnavailable, err)
-			}
-			return domain.Invoice{}, fmt.Errorf("read tenant settings: %w", err)
+	// timezone, the workspace currency and the tax terms. A read failure
+	// fails the create rather than guessing Net 30 (P24), a zone, a currency
+	// or the tax terms.
+	ts, err := s.settings.Get(ctx, tenantID)
+	if err != nil {
+		// With no currency in the request this read may hold the one to
+		// use (the workspace default), so it is the documented, retryable
+		// 503 currency_unavailable.
+		if currency == "" {
+			return domain.Invoice{}, fmt.Errorf("%w: read tenant settings: %v", ErrCurrencyUnavailable, err)
 		}
+		return domain.Invoice{}, fmt.Errorf("read tenant settings: %w", err)
 	}
 	// The customer's currency (ADR-100, ADR-129): an explicit one must agree
 	// with the stored facts, an empty one is taken from them.
@@ -897,14 +904,10 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	// receipt") is honored verbatim; a negative value is clamped to 0. When
 	// omitted, the tenant's configured terms apply, 0 included, as on every
 	// engine invoice.
-	netDays := 30
-	switch {
-	case input.NetPaymentTermDays != nil:
-		netDays = *input.NetPaymentTermDays
-		if netDays < 0 {
-			netDays = 0
-		}
-	case s.settings != nil:
+	var netDays int
+	if input.NetPaymentTermDays != nil {
+		netDays = max(*input.NetPaymentTermDays, 0)
+	} else {
 		if ts.NetPaymentTerms < 0 {
 			return domain.Invoice{}, fmt.Errorf("tenant net payment terms is negative (%d)", ts.NetPaymentTerms)
 		}
@@ -999,7 +1002,7 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	// numbers must run without a gap, and a create that fails then gives its
 	// number back.
 	number := func(tx *sql.Tx) (string, error) {
-		return s.numberer.NextInvoiceNumberTx(ctx, tx, tenantID)
+		return s.settings.NextInvoiceNumberTx(ctx, tx, tenantID)
 	}
 
 	// Bare-header create — caller adds line items incrementally afterwards.
@@ -1608,12 +1611,9 @@ func (s *Service) invoiceDisplayLocCached(ctx context.Context, inv domain.Invoic
 }
 
 // invoiceLocation resolves the tenant billing timezone for display math, UTC
-// when no settings reader is wired or the tenant has no timezone configured —
-// matching ADR-058 / engine.tenantLocation.
+// when the tenant has no timezone configured — matching ADR-058 /
+// engine.tenantLocation.
 func (s *Service) invoiceLocation(ctx context.Context, tenantID string) *time.Location {
-	if s.settings == nil {
-		return time.UTC
-	}
 	ts, err := s.settings.Get(ctx, tenantID)
 	if err != nil {
 		return time.UTC

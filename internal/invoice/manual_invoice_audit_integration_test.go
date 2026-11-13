@@ -36,9 +36,14 @@ func (f *failingEmitter) LogInTx(context.Context, *sql.Tx, audit.Entry) error {
 	return errEmitBoom
 }
 
-// fixedNumberer hands the service a deterministic invoice number so a
-// rolled-back create can be proven absent by number lookup.
+// fixedNumberer is the tenant's settings for these tests: a deterministic
+// invoice number, so a rolled-back create can be proven absent by number
+// lookup, and a tenant on Net 30, in UTC, in USD, with prices before tax.
 type fixedNumberer struct{ number string }
+
+func (n *fixedNumberer) Get(context.Context, string) (domain.TenantSettings, error) {
+	return domain.TenantSettings{NetPaymentTerms: 30, DefaultCurrency: "USD"}, nil
+}
 
 func (n *fixedNumberer) NextInvoiceNumberTx(context.Context, *sql.Tx, string) (string, error) {
 	return n.number, nil

@@ -8,6 +8,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -29,7 +30,7 @@ func TestParkedInvoiceHasExactlyOneWayOut(t *testing.T) {
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Parked Lever")
 	store := invoice.NewPostgresStore(db)
-	svc := invoice.NewService(store, nil, nil)
+	svc := invoice.NewService(store, nil, tenant.NewSettingsStore(db))
 
 	park := func(num string) domain.Invoice {
 		inv := seedClaimableInvoice(t, db, ctx, tenantID, num)

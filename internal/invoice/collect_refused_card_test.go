@@ -40,7 +40,7 @@ func TestCollectPayment_RefusesACardRefusedForGood(t *testing.T) {
 			if err != nil {
 				t.Fatalf("seed invoice: %v", err)
 			}
-			svc := NewService(store, nil, nil)
+			svc := NewService(store, nil, newMemNumberer())
 			svc.SetCardRefusalReader(refusedCards{inv.ID: tc.lastDecline})
 			charger := &ctxCapturingCharger{}
 			h := &Handler{

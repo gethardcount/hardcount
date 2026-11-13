@@ -18,6 +18,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/paymentmethods"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/subscription"
+	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -128,7 +129,7 @@ func TestInvoiceList_AttentionCostIsPerPage_RealStore(t *testing.T) {
 	traced := testutil.OpenTracedDB(t, counter)
 	custStore := customer.NewPostgresStore(traced)
 	invStore := invoice.NewPostgresStore(traced)
-	svc := invoice.NewService(invStore, nil, nil)
+	svc := invoice.NewService(invStore, nil, tenant.NewSettingsStore(db))
 	svc.SetPaymentMethodReader(&compositePaymentSetupStore{
 		customers: custStore,
 		pms:       paymentmethods.NewService(paymentmethods.NewPostgresStore(traced), nil, nil),

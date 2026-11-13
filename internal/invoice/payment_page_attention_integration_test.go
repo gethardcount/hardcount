@@ -9,6 +9,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -22,7 +23,7 @@ func TestGet_PaymentPageOpenBanner_RealStore(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, db, "Payment Page Banner")
 	inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-PAGE-OPEN")
 	store := invoice.NewPostgresStore(db)
-	svc := invoice.NewService(store, nil, nil)
+	svc := invoice.NewService(store, nil, tenant.NewSettingsStore(db))
 	svc.SetPaymentPageReader(store)
 
 	got, err := svc.Get(ctx, tenantID, inv.ID)
@@ -113,7 +114,7 @@ func TestGet_SimulatedFailureBannerDatesFromTheCharge_RealStore(t *testing.T) {
 		}
 	}
 
-	got, err := invoice.NewService(store, nil, nil).Get(ctx, tenantID, inv.ID)
+	got, err := invoice.NewService(store, nil, tenant.NewSettingsStore(db)).Get(ctx, tenantID, inv.ID)
 	if err != nil {
 		t.Fatalf("get: %v", err)
 	}

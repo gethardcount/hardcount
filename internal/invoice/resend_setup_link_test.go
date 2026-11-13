@@ -78,7 +78,7 @@ func TestResendSetupLink_NotCollectibleEnvelope(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	h := &Handler{svc: NewService(store, nil, nil), noPMNotifier: &outcomeNoPMNotifier{outcome: domain.NotifySent}}
+	h := &Handler{svc: NewService(store, nil, newMemNumberer()), noPMNotifier: &outcomeNoPMNotifier{outcome: domain.NotifySent}}
 	req := httptest.NewRequest(http.MethodPost, "/"+inv.ID+"/resend-setup-link", nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", inv.ID)
@@ -122,7 +122,7 @@ func TestResendSetupLink_HonestDispositions(t *testing.T) {
 		store := newMemStore()
 		inv := seed(t, store)
 		notifier := &outcomeNoPMNotifier{outcome: domain.NotifySent}
-		h := &Handler{svc: NewService(store, nil, nil), noPMNotifier: notifier, emailConfigured: true}
+		h := &Handler{svc: NewService(store, nil, newMemNumberer()), noPMNotifier: notifier, emailConfigured: true}
 		req, rr := newReq(t, inv.ID)
 		h.resendSetupLink(rr, req)
 		if rr.Code != http.StatusOK {
@@ -137,7 +137,7 @@ func TestResendSetupLink_HonestDispositions(t *testing.T) {
 		store := newMemStore()
 		inv := seed(t, store)
 		notifier := &outcomeNoPMNotifier{outcome: domain.NotifySkippedNoEmail}
-		h := &Handler{svc: NewService(store, nil, nil), noPMNotifier: notifier, emailConfigured: true}
+		h := &Handler{svc: NewService(store, nil, newMemNumberer()), noPMNotifier: notifier, emailConfigured: true}
 		req, rr := newReq(t, inv.ID)
 		h.resendSetupLink(rr, req)
 		if rr.Code != http.StatusConflict {
@@ -155,7 +155,7 @@ func TestResendSetupLink_HonestDispositions(t *testing.T) {
 		store := newMemStore()
 		inv := seed(t, store)
 		notifier := &outcomeNoPMNotifier{outcome: domain.NotifySent}
-		h := &Handler{svc: NewService(store, nil, nil), noPMNotifier: notifier} // emailConfigured: false
+		h := &Handler{svc: NewService(store, nil, newMemNumberer()), noPMNotifier: notifier} // emailConfigured: false
 		req, rr := newReq(t, inv.ID)
 		h.resendSetupLink(rr, req)
 		if rr.Code != http.StatusConflict {

@@ -11,6 +11,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/webhook"
 )
@@ -98,7 +99,7 @@ func newOpenAtZeroRig(t *testing.T, db *postgres.DB, name string, paymentStatus 
 		store = pg
 	}
 	dunning := &countingDunning{}
-	h := invoice.NewHandler(invoice.NewService(store, nil, nil), nil, nil, invoice.HandlerDeps{Dunning: dunning})
+	h := invoice.NewHandler(invoice.NewService(store, nil, tenant.NewSettingsStore(db)), nil, nil, invoice.HandlerDeps{Dunning: dunning})
 	return &openAtZeroRig{t: t, db: db, ctx: ctx, tenantID: tenantID, inv: inv, dunning: dunning, h: h}
 }
 

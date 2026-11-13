@@ -74,7 +74,7 @@ func TestRefusedCardAttention_PromisesRetriesOnlyWhileARetryIsScheduled(t *testi
 			if tc.run != nil {
 				runs["inv_1"] = *tc.run
 			}
-			svc := NewService(store, nil, nil)
+			svc := NewService(store, nil, newMemNumberer())
 			svc.SetPaymentMethodReader(&countingPMReader{ready: map[string]bool{"cus_1": true}})
 			svc.SetCardRefusalReader(refusedCards{"inv_1": "lost_card"})
 			svc.SetDunningRunReader(runs)

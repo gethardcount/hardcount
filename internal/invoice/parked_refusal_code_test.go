@@ -60,7 +60,7 @@ func TestParkedRefusalsAnswerOneCode(t *testing.T) {
 			}
 
 			h := &Handler{
-				svc:           NewService(store, nil, nil),
+				svc:           NewService(store, nil, newMemNumberer()),
 				charger:       &fakeCharger{},
 				paymentSetups: &fakePaymentSetups{setup: domain.CustomerPaymentSetup{SetupStatus: domain.PaymentSetupReady, StripeCustomerID: "cus_stripe_1"}},
 				auditLogger:   &capturingInvoiceAudit{},

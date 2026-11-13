@@ -78,7 +78,6 @@ func TestManualInvoice_TaxComputedAtFinalize(t *testing.T) {
 	engine.SetInvoiceEmailer(&testInvoiceEmailer{})
 
 	invoiceSvc := invoice.NewService(invoiceStore, clock.Real(), settingsStore)
-	invoiceSvc.SetTenantSettingsReader(settingsStore) // as router.go wires it
 	invoiceSvc.SetTaxRetrier(engine)
 
 	// Atomic create-with-lines: $33.33 + $33.33 + $33.34 = $100.00.
@@ -203,7 +202,6 @@ func TestManualInvoice_TaxInclusive_TotalEqualsGross(t *testing.T) {
 	engine.SetInvoiceEmailer(&testInvoiceEmailer{})
 
 	invoiceSvc := invoice.NewService(invoiceStore, clock.Real(), settingsStore)
-	invoiceSvc.SetTenantSettingsReader(settingsStore) // as router.go wires it
 	invoiceSvc.SetTaxRetrier(engine)
 
 	// Operator enters a GROSS $118.00 line; at 18% inclusive that decomposes

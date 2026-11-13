@@ -12,6 +12,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/platform/walk"
+	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -88,7 +89,7 @@ func TestRetryPendingTaxForClock_TriesEveryDraftOnce(t *testing.T) {
 	clockID := seedClockTaxDrafts(t, db, ctx, tenantID, store, n)
 
 	retrier := &stillPendingRetrier{tried: map[string]int{}}
-	svc := invoice.NewService(store, nil, nil)
+	svc := invoice.NewService(store, nil, tenant.NewSettingsStore(db))
 	svc.SetTaxRetrier(retrier)
 	done := make(chan []error, 1)
 	go func() {
@@ -136,7 +137,7 @@ func TestRetryPendingTaxForClock_DraftsThatStayListed(t *testing.T) {
 	clockID := seedClockTaxDrafts(t, db, ctx, tenantID, store, n)
 
 	retrier := &refusingRetrier{tried: map[string]int{}}
-	svc := invoice.NewService(store, nil, nil)
+	svc := invoice.NewService(store, nil, tenant.NewSettingsStore(db))
 	svc.SetTaxRetrier(retrier)
 	runCtx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()

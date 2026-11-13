@@ -38,9 +38,8 @@ func (f currencySettingsFake) Get(context.Context, string) (domain.TenantSetting
 // currencyHandler is the create route over a service whose currency facts
 // and workspace default are the given ones.
 func currencyHandler(store *memStore, facts currencyFactsFake, settings currencySettingsFake) *Handler {
-	svc := NewService(store, nil, newMemNumberer())
+	svc := NewService(store, nil, newMemNumberer().withSettings(settings))
 	svc.SetCustomerCurrencyFacts(facts)
-	svc.SetTenantSettingsReader(settings)
 	return &Handler{svc: svc}
 }
 

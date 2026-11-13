@@ -70,7 +70,7 @@ func TestPaymentTimeline_DegradationDisclosure(t *testing.T) {
 		if err != nil {
 			t.Fatalf("seed invoice: %v", err)
 		}
-		return &Handler{svc: NewService(store, nil, nil)}, inv
+		return &Handler{svc: NewService(store, nil, newMemNumberer())}, inv
 	}
 
 	fetch := func(t *testing.T, h *Handler, invID string) timelineResp {

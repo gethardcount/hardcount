@@ -8,6 +8,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/customer"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -20,7 +21,7 @@ import (
 func TestList_SearchMatchesTheCustomer(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	store := invoice.NewPostgresStore(db)
-	svc := invoice.NewService(store, nil, nil)
+	svc := invoice.NewService(store, nil, tenant.NewSettingsStore(db))
 	svc.SetCustomerSearcher(customer.NewPostgresStore(db))
 	ctx := postgres.WithLivemode(context.Background(), false)
 

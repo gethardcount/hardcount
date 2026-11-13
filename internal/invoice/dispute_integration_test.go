@@ -12,6 +12,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/webhook"
 )
@@ -408,7 +409,7 @@ func TestDisputes_TenantAndModeIsolation(t *testing.T) {
 func TestInvoiceService_LostDisputeRaisesAttention(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	h := newDisputeHarness(t, db, "Dispute Attention")
-	svc := invoice.NewService(h.store, nil, nil)
+	svc := invoice.NewService(h.store, nil, tenant.NewSettingsStore(db))
 	svc.SetDisputeReader(h.store)
 	attention := func() *domain.Attention {
 		t.Helper()
