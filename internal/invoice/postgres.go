@@ -2775,6 +2775,45 @@ func (s *PostgresStore) ChargeHoldStateOf(ctx context.Context, tenantID, id stri
 	return state, err
 }
 
+// HeldChargeIDs reads, outside any lock and in one query, which of the ids
+// have a charge hold the payment notice waits on: a live hold, or a stale one
+// that carries its token, which the stale-hold sweep clears within
+// domain.StaleChargeHoldWait. A stale hold without its token is kept for a
+// person (earlierVersionHold) and is not reported, so the notice never promises
+// a clear that will not come. Only for choosing what to tell an operator; never
+// a gate.
+func (s *PostgresStore) HeldChargeIDs(ctx context.Context, tenantID string, ids []string) (map[string]bool, error) {
+	out := map[string]bool{}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer postgres.Rollback(tx)
+	rows, err := tx.QueryContext(ctx, `
+		SELECT id FROM invoices
+		WHERE id = ANY($1::text[])
+		  AND auto_charge_claimed_until IS NOT NULL
+		  AND (auto_charge_claimed_until > now() OR charge_hold_token = auto_charge_claimed_until)`, ids)
+	if err != nil {
+		return nil, fmt.Errorf("read charge holds: %w", err)
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("read charge holds: %w", err)
+		}
+		out[id] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("read charge holds: %w", err)
+	}
+	return out, nil
+}
+
 // ConfirmChargeHold is the charge's re-check right before it sends
 // (ADR-127): true only while the owner's hold is still the one it wrote and
 // has at least domain.ChargeSendMargin left, the charge counter is still the

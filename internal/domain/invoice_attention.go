@@ -543,6 +543,14 @@ type AttentionContext struct {
 	// service reads it for failed invoices only.
 	RetryBlockingDeclineCode string
 
+	// ChargeHeld is true when a charge hold is on the invoice that the
+	// stale-hold sweep will clear or that is still live (ADR-127): an
+	// interrupted charge is being confirmed with Stripe. The payment-failure
+	// notice then says so, and offers no Retry payment, which the hold would
+	// refuse with 409 payment_in_flight. A refused or must-confirm card keeps
+	// its own notice. The invoice service reads it for failed invoices only.
+	ChargeHeld bool
+
 	// DunningRetrying is true when a charge retry on the invoice's dunning
 	// run is still to come (InvoiceDunningRun.RetryScheduled: active, not
 	// paused, attempts left under its policy). Once every attempt is used
@@ -1151,6 +1159,12 @@ func classifyPaymentFailure(inv Invoice, atc AttentionContext) *Attention {
 	case IsAuthenticationRequired(code):
 		return classifyNeedsConfirmation(inv, atc.DunningRetrying, atc.HostedPayOff, since)
 	}
+	// A refused or must-confirm card keeps its own notice above, which already
+	// offers no Retry payment. Only the generic decline is replaced by the
+	// charge-confirming one.
+	if atc.ChargeHeld {
+		return classifyChargeConfirming(inv, atc)
+	}
 	// Update Payment Method is the primary action: the card on file
 	// is broken, retrying with the same card will decline again.
 	// Retry Payment is offered as secondary for transient declines
@@ -1174,6 +1188,27 @@ func classifyPaymentFailure(inv Invoice, atc AttentionContext) *Attention {
 		},
 		ProviderResponse: inv.LastPaymentError,
 		Since:            &since,
+	}
+}
+
+// classifyChargeConfirming is the payment-failure notice while a charge hold is
+// on an invoice whose last charge failed (ADR-127): an interrupted charge is
+// being confirmed with Stripe. Retry payment is not offered, because the hold
+// refuses it with 409 payment_in_flight. Nothing needs the operator yet, so
+// the notice is a Warning and has no action.
+func classifyChargeConfirming(inv Invoice, atc AttentionContext) *Attention {
+	since := attentionSince(inv)
+	if atc.LastFailedChargeAt != nil {
+		since = *atc.LastFailedChargeAt
+	}
+	return &Attention{
+		Severity: AttentionSeverityWarning,
+		Reason:   AttentionReasonPaymentUnconfirmed,
+		Code:     "payment.confirming",
+		Message:  "A charge on this invoice is being confirmed with Stripe.\nRetry payment is not offered until it is done.",
+		Detail:   "An interrupted charge is cleared within about an hour.",
+		DocURL:   docURL("payment-failed"),
+		Since:    &since,
 	}
 }
 

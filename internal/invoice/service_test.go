@@ -134,6 +134,10 @@ func (m *memStore) ChargeHoldStateOf(_ context.Context, _, _ string) (domain.Cha
 	return domain.ChargeHoldNone, nil
 }
 
+func (m *memStore) HeldChargeIDs(_ context.Context, _ string, _ []string) (map[string]bool, error) {
+	return map[string]bool{}, nil
+}
+
 // MarkPaidOffline: check sees the current in-memory invoice as the locked row.
 // Like the real store, the paid flip sets paid_out_of_band and no PaymentIntent.
 func (m *memStore) MarkPaidOffline(ctx context.Context, tenantID, id string, paidAt time.Time, check func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error) {

@@ -1198,6 +1198,7 @@ type attentionFacts struct {
 	paused          map[string]bool                       // subscription id → pause_collection in force
 	pageLive        map[string]bool                       // invoice id → hosted payment page live
 	refusedCard     map[string]string                     // invoice id → decline code that stops retries charging the default card
+	chargeHeld      map[string]bool                       // invoice id → a charge hold is on (an interrupted charge is being confirmed)
 	retrying        map[string]bool                       // invoice id → a charge retry is still to come (RetryScheduled)
 	lostDispute     map[string]domain.InvoiceDispute      // invoice id → newest dispute closed as lost
 	refundReview    map[string]domain.InvoiceStripeRefund // invoice id → newest refund made in Stripe that needs review
@@ -1322,6 +1323,25 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 			}
 			f.refusedCard = refused
 		}
+	}
+
+	// A charge hold on a failed invoice (ADR-127) turns its notice into "being
+	// confirmed with Stripe", with no Retry payment, since the hold refuses it.
+	// One read for the page, outside any lock: a read error leaves the holds
+	// unseen, and the notice then offers Retry payment as before.
+	ids := distinct(page, func(inv domain.Invoice) string {
+		if inv.Status == domain.InvoiceFinalized && inv.PaymentStatus == domain.PaymentFailed {
+			return inv.ID
+		}
+		return ""
+	})
+	if len(ids) > 0 {
+		held, err := s.store.HeldChargeIDs(ctx, tenantID, ids)
+		if err != nil {
+			slog.Warn("invoice: attention could not read the charge holds", "error", err,
+				"tenant_id", tenantID, "invoices", len(ids))
+		}
+		f.chargeHeld = held
 	}
 
 	// Same guard for the dunning-escalated signal (P1-4): only the
@@ -1490,6 +1510,7 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 	}
 	atc.PaymentPageOpen = f.pageLive[inv.ID]
 	atc.RetryBlockingDeclineCode = f.refusedCard[inv.ID]
+	atc.ChargeHeld = f.chargeHeld[inv.ID]
 	atc.DunningRetrying = f.retrying[inv.ID]
 	if d, ok := f.lostDispute[inv.ID]; ok {
 		atc.LostDispute = &d

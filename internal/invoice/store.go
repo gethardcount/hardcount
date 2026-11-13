@@ -81,6 +81,9 @@ type Store interface {
 	ChargeHeldTx(ctx context.Context, tx *sql.Tx, id string) (domain.ChargeHoldState, domain.ChargeHold, error)
 	// ChargeHoldStateOf reads the hold outside any lock, to word a refusal.
 	ChargeHoldStateOf(ctx context.Context, tenantID, id string) (domain.ChargeHoldState, error)
+	// HeldChargeIDs is ChargeHoldStateOf for a page at once: the ids whose
+	// charge hold the payment notice waits on (see the Postgres method).
+	HeldChargeIDs(ctx context.Context, tenantID string, ids []string) (map[string]bool, error)
 
 	// ClaimChargeForManualCollect / ReleaseChargeHold: the per-invoice charge
 	// hold (HA hazard #1, ADR-127) — exactly one owner enters the charge leg
