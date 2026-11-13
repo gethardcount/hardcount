@@ -862,7 +862,8 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	// Read tenant settings once, for the default Net terms, the billing
 	// timezone and the workspace currency. A read failure fails the create
 	// rather than guessing Net 30 (P24), a zone or a currency. No reader
-	// wired (tests) means Net 30, UTC and USD, as in the engine.
+	// wired (tests) means Net 30, UTC, USD and prices before tax, as in the
+	// engine.
 	ts := domain.TenantSettings{DefaultCurrency: "USD"}
 	if s.settings != nil {
 		ts, err = s.settings.Get(ctx, tenantID)

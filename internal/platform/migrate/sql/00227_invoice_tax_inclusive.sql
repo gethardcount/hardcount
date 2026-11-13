@@ -4,21 +4,11 @@
 -- amounts later took the tenant's setting at the time of reading, which
 -- changes when the tenant switches it.
 --
--- The one INSERT into invoices writes it, from the same settings read that
--- priced the lines, and nothing updates it after.
---
--- An existing invoice takes its tenant's current setting: that is the one
--- thing known about it, and it is how the code reads it today, so no
--- existing invoice is read differently. Adding the column with a constant
--- default rewrites no row; only the invoices of tenants whose prices include
--- tax are updated.
+-- The one INSERT into invoices writes it, from the setting the invoice was
+-- priced under, and nothing updates it after. Adding the column with a
+-- constant default rewrites no row. 00228 sets it on the invoices that
+-- existed before, in its own file, so this lock on invoices is short.
 ALTER TABLE invoices ADD COLUMN tax_inclusive boolean NOT NULL DEFAULT false;
-
-UPDATE invoices i
-SET tax_inclusive = true
-FROM tenant_settings ts
-WHERE ts.tenant_id = i.tenant_id
-  AND ts.tax_inclusive;
 
 -- +goose Down
 ALTER TABLE invoices DROP COLUMN tax_inclusive;

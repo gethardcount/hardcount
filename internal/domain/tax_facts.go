@@ -20,9 +20,10 @@ import "time"
 // is never retried automatically. To add a tax field, add it here, and every
 // embedder carries it.
 //
-// TaxTransactionID, TaxRetryCount and TaxNextRetryAt are left out on
-// purpose. They belong to the invoice's lifecycle and are not products of a
-// calculation. TaxTransactionID is written at Commit or finalize, not at
+// TaxTransactionID, TaxRetryCount, TaxNextRetryAt and TaxInclusive are left
+// out on purpose. They belong to the invoice's lifecycle and are not products
+// of a calculation. TaxInclusive is fixed when the invoice is written and a
+// recalculation never changes it. TaxTransactionID is written at Commit or finalize, not at
 // calculation. TaxRetryCount and TaxNextRetryAt are bookkeeping for the retry
 // scheduler.
 type TaxFacts struct {
