@@ -26,6 +26,7 @@ import { InitialsAvatar } from '@/components/InitialsAvatar'
 
 import { Button, buttonVariants } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
+import { TestClocksLoadError } from '@/components/TestClocksLoadError'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -162,7 +163,8 @@ function RunsTab() {
   }, { replace: true })
   const [page, setPage] = useState(1)
   // Each run's "now" (its customer's clock time when it is on one), for Next
-  // step and Started.
+  // step and Started. While a run's now is not known, those cells show the
+  // stored time itself in place of the relative one.
   const resolveNow = useNowResolver()
 
   const queryParams = useMemo(() => {
@@ -303,6 +305,8 @@ function RunsTab() {
         </div>
       )}
 
+      <TestClocksLoadError records={runs} className="mt-4 mb-0" />
+
       {/* Runs list */}
       <Card className="mt-4">
         <CardContent className="p-0">
@@ -358,8 +362,9 @@ function RunsTab() {
                     const isFinished = run.state !== 'active'
                     const invoiceLabel = run.invoice_number || inv?.invoice_number || run.invoice_id.slice(0, 8) + '...'
                     const amount = dunningRunAmount(run, inv) ?? '\u2014'
+                    const runNow = resolveNow(run)
                     const nextStep = run.next_action_at
-                      ? <span className="text-xs text-muted-foreground" title={formatDateTime(run.next_action_at)}>{dunningFinalStepNext(run) ? 'Final step ' : ''}{futureRelativeTime(run.next_action_at, resolveNow(run))}</span>
+                      ? <span className="text-xs text-muted-foreground" title={formatDateTime(run.next_action_at)}>{dunningFinalStepNext(run) ? 'Final step ' : ''}{runNow === undefined ? formatDateTime(run.next_action_at) : futureRelativeTime(run.next_action_at, runNow)}</span>
                       : <span className="text-xs text-muted-foreground">{'\u2014'}</span>
                     // Closing a run is done on its invoice: Record offline
                     // payment, Void or Write off each close the run, with the
@@ -454,7 +459,7 @@ function RunsTab() {
                             {nextStep}
                           </TableCell>
                           <TableCell className="hidden sm:table-cell">
-                            <span className="text-xs text-muted-foreground" title={formatDateTime(run.created_at)}>{relativeTime(run.created_at, resolveNow(run))}</span>
+                            <span className="text-xs text-muted-foreground" title={formatDateTime(run.created_at)}>{runNow === undefined ? formatDateTime(run.created_at) : relativeTime(run.created_at, runNow)}</span>
                           </TableCell>
                         </TableRow>
 

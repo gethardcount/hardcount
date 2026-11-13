@@ -25,6 +25,7 @@ import { SimulatedBadge } from '@/components/TestClockBadge'
 
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
+import { TestClocksLoadError } from '@/components/TestClocksLoadError'
 import { Input } from '@/components/ui/input'
 import { DatePicker } from '@/components/ui/date-picker'
 import { Badge } from '@/components/ui/badge'
@@ -341,6 +342,8 @@ export default function InvoicesPage() {
           />
         </div>
       )}
+
+      <TestClocksLoadError records={invoices} className="mt-4 mb-0" />
 
       {/* Table */}
       <Card className="mt-4">

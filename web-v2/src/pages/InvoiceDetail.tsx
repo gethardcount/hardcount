@@ -257,7 +257,8 @@ export default function InvoiceDetailPage() {
   // server fills test_clock_id from the customer's clock, which every
   // subscription inherits (ADR-027), so it covers one-off invoices too. It is
   // asked again on each render, so an invoice on no clock left open turns
-  // Past due when its due time passes.
+  // Past due when its due time passes. While it is not known (the invoice or
+  // its clock has not loaded), the badges show the stored status only.
   const now = useNowResolver()(invoice)
 
   const { data: creditNotesData } = useQuery({

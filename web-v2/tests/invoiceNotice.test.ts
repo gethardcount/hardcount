@@ -190,4 +190,19 @@ test('the finalize confirmation says nothing is charged while collection is paus
   assert.equal(collectionPausedNow({}, now), true)
   assert.equal(collectionPausedNow({ resumes_at: '2026-10-29T00:00:00Z' }, now), true)
   assert.equal(collectionPausedNow({ resumes_at: '2026-10-28T00:00:00Z' }, now), false)
+  // While now is not known, a pause with no end still holds, and a timed
+  // one may have ended already, so the answer names its stored end.
+  assert.equal(collectionPausedNow({}, undefined), true)
+  assert.deepEqual(collectionPausedNow({ resumes_at: '2026-10-28T00:00:00Z' }, undefined), { until: '2026-10-28T00:00:00Z' })
+  assert.equal(collectionPausedNow(undefined, undefined), false)
+})
+
+// On a clock whose time is not known, a timed pause may already have ended
+// by that clock, and the server would then charge at once. The confirmation
+// names the stored end and does not say nothing is charged.
+test('the finalize confirmation names the pause end when it cannot tell whether the pause holds', () => {
+  const until = finalizeConfirmLines({ collectionPaused: { until: '2026-10-28T12:00:00Z' }, stripeConnected: true, hasCard: true, hasEmail: true, canEmailSetupLinks: true, taxAtFinalize: false })
+  assert.match(until[1], /Collection is paused on this subscription until Oct 28, 2026/)
+  assert.match(until[1], /once it resumes, Hardcount collects payment/i)
+  assert.doesNotMatch(until[1], /nothing is charged now/)
 })

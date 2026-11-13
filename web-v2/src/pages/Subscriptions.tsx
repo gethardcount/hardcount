@@ -19,6 +19,7 @@ import { CreateSubscriptionDialog } from '@/components/CreateSubscriptionDialog'
 
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
+import { TestClocksLoadError } from '@/components/TestClocksLoadError'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -242,6 +243,8 @@ export default function SubscriptionsPage() {
           </div>
         </div>
       )}
+
+      <TestClocksLoadError records={subs} className="mt-4 mb-0" />
 
       {/* Table */}
       <Card className="mt-4">

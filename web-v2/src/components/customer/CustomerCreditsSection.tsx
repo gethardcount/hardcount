@@ -4,7 +4,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { toast } from 'sonner'
 
-import { api, formatCents, formatCentsBare, formatDate } from '@/lib/api'
+import { api, formatCents, formatCentsBare, formatDate, type Customer } from '@/lib/api'
 import { creditExpiryLabel } from '@/lib/dates'
 import { creditTotalsLine, grantState, grantUsedCents, ledgerEntryLabel, ledgerEntryTitle, splitGrants } from '@/lib/customerCredits'
 import { invalidateMoneySurfaces } from '@/lib/invalidateMoney'
@@ -22,15 +22,16 @@ import { CreditDialog } from '@/pages/Credits'
 // A grant that was fully applied to an invoice used to leave no trace here.
 // Every amount is shown in its own currency (ADR-129); `currency` is only
 // the customer's billing currency, the default of the grant dialog.
-export function CustomerCreditsSection({ customerId, customerName, currency, testClockId, readOnly }: {
-  customerId: string
-  customerName: string
+// A grant's expired state is counted from the customer's now; while that is
+// not known, a grant with credit left shows as stored (active).
+export function CustomerCreditsSection({ customer, currency, readOnly }: {
+  customer: Customer
   currency?: string
-  testClockId?: string
   readOnly?: boolean
 }) {
+  const customerId = customer.id
   const qc = useQueryClient()
-  const now = useNowFor({ test_clock_id: testClockId })
+  const now = useNowFor(customer)
   const [showFinished, setShowFinished] = useState(false)
   const [grantOpen, setGrantOpen] = useState(false)
 
@@ -211,7 +212,7 @@ export function CustomerCreditsSection({ customerId, customerName, currency, tes
         <CreditDialog
           mode="grant"
           customerId={customerId}
-          customerName={customerName}
+          customerName={customer.display_name}
           currency={currency}
           open={grantOpen}
           onOpenChange={setGrantOpen}

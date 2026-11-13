@@ -6,12 +6,11 @@ interface DueBadgeProps {
   dueAt?: string | null
   warningDays?: number
   className?: string
-  // Reference "now" for the comparison — REQUIRED. Take the invoice's
-  // from useNowFor or useNowResolver, so an invoice on a test clock reads
-  // relative to the clock's time, or wallClockNow() for a genuinely
-  // real-time surface. Engine actions (auto-charge retries, dunning) fire on
-  // simulation time; the badge has to match or it understates urgency.
-  now: EffectiveNow
+  // The invoice's now, from useNowFor or useNowResolver, so an invoice on a
+  // test clock reads relative to the clock's time. Engine actions (auto-charge
+  // retries, dunning) fire on that time, so the badge has to match. While it
+  // is not known (undefined), the badge is not drawn.
+  now: EffectiveNow | undefined
 }
 
 // DueBadge renders an invoice's due-date status as the operator-
@@ -25,7 +24,7 @@ interface DueBadgeProps {
 // looking at an Open invoice that's still actionable (collect, void,
 // credit, email all remain valid past the due date).
 export function DueBadge({ dueAt, warningDays = 3, className, now }: DueBadgeProps) {
-  if (!dueAt) return null
+  if (!dueAt || now === undefined) return null
 
   // Calendar days in tenant TZ, the zone the Due date beside the badge is
   // printed in (formatDate). The deadline is a date, so on the due date the

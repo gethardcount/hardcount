@@ -7,7 +7,9 @@
 // and every helper in this file requires one. A page therefore cannot measure
 // from "now" without saying which now it means:
 //   - for a record, take it from useNowFor or useNowResolver (hooks/useNow),
-//     which answer with the record's clock time or real time;
+//     which answer with the record's clock time, real time, or undefined
+//     while it is not known; draw nothing counted from now while it is
+//     undefined;
 //   - wallClockNow() marks a surface that is real time on purpose: the audit
 //     log, the email and webhook outbox, API keys.
 // The no-restricted-syntax rule in eslint.config.js bans a bare Date.now() or
