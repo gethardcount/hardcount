@@ -383,13 +383,11 @@ func newArrearsCancelRig(t *testing.T, db *postgres.DB, name string, n int, taxR
 	tenantID := testutil.CreateTestTenant(t, db, name)
 	settings := tenant.NewSettingsStore(db)
 	if taxRate > 0 {
-		ts, err := settings.Get(ctx, tenantID)
-		if err != nil {
-			t.Fatalf("get settings: %v", err)
-		}
-		ts.TaxProvider, ts.TaxRate, ts.TaxName = "manual", taxRate, "Sales Tax"
-		if _, err := settings.Upsert(ctx, ts); err != nil {
-			t.Fatalf("upsert settings: %v", err)
+		if _, err := settings.Update(ctx, tenantID, func(ts *domain.TenantSettings) error {
+			ts.TaxProvider, ts.TaxRate, ts.TaxName = "manual", taxRate, "Sales Tax"
+			return nil
+		}); err != nil {
+			t.Fatalf("update settings: %v", err)
 		}
 	}
 

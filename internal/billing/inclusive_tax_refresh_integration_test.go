@@ -184,15 +184,13 @@ func newInclusiveRefreshRig(t *testing.T, db *postgres.DB, name string) *inclusi
 	tenantID := testutil.CreateTestTenant(t, db, name)
 
 	settings := tenant.NewSettingsStore(db)
-	ts, err := settings.Get(ctx, tenantID)
-	if err != nil {
-		t.Fatalf("get settings: %v", err)
-	}
-	ts.TaxProvider = "stripe_tax"
-	ts.TaxInclusive = true
-	ts.TaxName = "VAT"
-	if _, err := settings.Upsert(ctx, ts); err != nil {
-		t.Fatalf("upsert settings: %v", err)
+	if _, err := settings.Update(ctx, tenantID, func(ts *domain.TenantSettings) error {
+		ts.TaxProvider = "stripe_tax"
+		ts.TaxInclusive = true
+		ts.TaxName = "VAT"
+		return nil
+	}); err != nil {
+		t.Fatalf("update settings: %v", err)
 	}
 
 	customers := customer.NewPostgresStore(db)

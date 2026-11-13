@@ -67,6 +67,19 @@ function messageOf(e: { message?: unknown }): string {
   return typeof e.message === 'string' && e.message.trim() ? e.message : 'Check this value.'
 }
 
+// changedSettings returns the fields whose edited value differs from the
+// saved one, the value the form loaded. A Settings save sends only these. The
+// server keeps every field the body leaves out, so a save made from a page
+// opened earlier cannot put back an older value of a field that someone else
+// saved since. A field with no saved value counts as changed.
+export function changedSettings<T extends object>(saved: Partial<T> | undefined, edited: T): Partial<T> {
+  const changed: Partial<T> = {}
+  for (const key of Object.keys(edited) as (keyof T)[]) {
+    if (!Object.is(saved?.[key], edited[key])) changed[key] = edited[key]
+  }
+  return changed
+}
+
 // invalidSettingsToast is the message for a Save that cannot go through.
 export function invalidSettingsToast(f: InvalidSettingsField): { title: string; description: string } {
   const msg = /[.!?]$/.test(f.message) ? f.message : f.message + '.'

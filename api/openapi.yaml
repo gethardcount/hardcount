@@ -27756,6 +27756,11 @@ paths:
         `0`. Send `credit_balance_low_threshold_cents: null` to turn
         low-balance alerts off.
 
+        Saves run one at a time, so two saves at once each keep the fields
+        the other sends. Send only the fields you change: a field you send
+        unchanged puts back the value you read, even if someone saved a new
+        one since.
+
         Empty `default_currency`, `timezone`, `invoice_prefix`,
         `credit_note_prefix`, `tax_provider` and `tax_on_failure` fall back
         to their defaults.

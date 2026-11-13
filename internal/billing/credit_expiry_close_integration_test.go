@@ -544,12 +544,10 @@ func TestCycleClose_GrantValidThroughTheLastDay_PaysThePeriodInvoice(t *testing.
 		t.Fatalf("load zone: %v", err)
 	}
 	settings := tenant.NewSettingsStore(x.db)
-	ts, err := settings.Get(x.ctx, x.tenantID)
-	if err != nil {
-		t.Fatalf("get settings: %v", err)
-	}
-	ts.Timezone = ny.String()
-	if _, err := settings.Upsert(x.ctx, ts); err != nil {
+	if _, err := settings.Update(x.ctx, x.tenantID, func(ts *domain.TenantSettings) error {
+		ts.Timezone = ny.String()
+		return nil
+	}); err != nil {
 		t.Fatalf("set tenant zone: %v", err)
 	}
 	// The November period in New York; in the past, so the wall-clock sweep

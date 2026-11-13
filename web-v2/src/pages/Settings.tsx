@@ -13,7 +13,7 @@ import { useBothModeQueryClients } from '@/contexts/modeQueryClients'
 import { applyApiError, showApiError } from '@/lib/formErrors'
 import { taxExampleAmounts } from '@/lib/taxExample'
 import { dollarsToWholeCents, percentRate } from '@/lib/priceInput'
-import { SETTINGS_FIELDS, firstInvalidSettingsField, invalidSettingsToast } from '@/lib/settingsFields'
+import { SETTINGS_FIELDS, changedSettings, firstInvalidSettingsField, invalidSettingsToast } from '@/lib/settingsFields'
 import { LoadError } from '@/components/LoadError'
 import { useAuth } from '@/contexts/AuthContext'
 import { toast } from 'sonner'
@@ -265,15 +265,21 @@ export default function SettingsPage() {
   const handleSave = handleSubmit(async (data) => {
     setSaving(true)
     try {
-      // Dollar string -> cents (null clears the threshold: alerts off).
-      const { credit_balance_low_threshold, ...rest } = data
+      // Only the fields changed here are sent, against the values the form
+      // loaded (its default values). The server keeps every field the body
+      // leaves out, so this save cannot put back an older value of a field
+      // someone else saved since this page loaded.
+      const { credit_balance_low_threshold, ...rest } = changedSettings(formMethods.formState.defaultValues, data)
       const updated = await updateTenantSettings({
         ...rest,
+        // Dollar string -> cents (null clears the threshold: alerts off).
         // The schema took only an amount with at most two decimals, so
         // this reads it exactly (string math, no float rounding).
-        credit_balance_low_threshold_cents: credit_balance_low_threshold === ''
-          ? null
-          : dollarsToWholeCents(credit_balance_low_threshold),
+        ...(credit_balance_low_threshold !== undefined && {
+          credit_balance_low_threshold_cents: credit_balance_low_threshold === ''
+            ? null
+            : dollarsToWholeCents(credit_balance_low_threshold),
+        }),
       })
       const f = {
         company_name: updated.company_name || '', company_email: updated.company_email || '',

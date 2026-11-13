@@ -249,13 +249,11 @@ func TestRequestRates_LargeAmountsTaxedExactly(t *testing.T) {
 			ctx := lf.ctx
 			setManualTax(t, ctx, lf.settings, lf.tenantID, tc.taxRate)
 			if tc.inclusive {
-				ts, err := lf.settings.Get(ctx, lf.tenantID)
-				if err != nil {
-					t.Fatalf("get settings: %v", err)
-				}
-				ts.TaxInclusive = true
-				if _, err := lf.settings.Upsert(ctx, ts); err != nil {
-					t.Fatalf("upsert settings: %v", err)
+				if _, err := lf.settings.Update(ctx, lf.tenantID, func(ts *domain.TenantSettings) error {
+					ts.TaxInclusive = true
+					return nil
+				}); err != nil {
+					t.Fatalf("update settings: %v", err)
 				}
 			}
 			h := pricing.NewHandler(lf.pricingSvc)

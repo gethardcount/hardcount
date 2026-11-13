@@ -305,13 +305,11 @@ func storeEarlierTax(t *testing.T, ctx context.Context, db *postgres.DB, tenantI
 func setInclusiveManualTax(t *testing.T, ctx context.Context, settings *tenant.SettingsStore, tenantID string, rate float64) {
 	t.Helper()
 	setManualTax(t, ctx, settings, tenantID, rate)
-	ts, err := settings.Get(ctx, tenantID)
-	if err != nil {
-		t.Fatalf("get settings: %v", err)
-	}
-	ts.TaxInclusive = true
-	if _, err := settings.Upsert(ctx, ts); err != nil {
-		t.Fatalf("upsert settings: %v", err)
+	if _, err := settings.Update(ctx, tenantID, func(ts *domain.TenantSettings) error {
+		ts.TaxInclusive = true
+		return nil
+	}); err != nil {
+		t.Fatalf("update settings: %v", err)
 	}
 }
 

@@ -53,13 +53,11 @@ func TestHostedView_IssuedInvoiceKeepsIssueTimeParties(t *testing.T) {
 		}); err != nil {
 			t.Fatalf("upsert profile: %v", err)
 		}
-		ts, err := settings.Get(ctx, tenantID)
-		if err != nil {
-			t.Fatalf("get settings: %v", err)
-		}
-		ts.CompanyName, ts.CompanyAddressLine1, ts.BrandColor = company, companyLine1, brand
-		if _, err := settings.Upsert(ctx, ts); err != nil {
-			t.Fatalf("upsert settings: %v", err)
+		if _, err := settings.Update(ctx, tenantID, func(ts *domain.TenantSettings) error {
+			ts.CompanyName, ts.CompanyAddressLine1, ts.BrandColor = company, companyLine1, brand
+			return nil
+		}); err != nil {
+			t.Fatalf("update settings: %v", err)
 		}
 	}
 	setParties("Before GmbH", "Alte Strasse 1", "DE", "Seller Before Ltd", "1 Old Road", "#111111")

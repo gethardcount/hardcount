@@ -3,7 +3,7 @@
 // tab of the first invalid field and says what to fix.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { firstInvalidSettingsField, invalidSettingsToast } from '../src/lib/settingsFields.ts'
+import { changedSettings, firstInvalidSettingsField, invalidSettingsToast } from '../src/lib/settingsFields.ts'
 
 test('finds the first invalid field in page order, with its tab', () => {
   const f = firstInvalidSettingsField({
@@ -41,4 +41,26 @@ test('the credit note prefix is on the Invoicing tab, next to the invoice prefix
     label: 'Credit note prefix',
     message: 'Letters, numbers, and hyphens only',
   })
+})
+
+// A Settings save sent every field, so a page opened before someone else's
+// save put that save's tax rate back. It now sends only what changed here,
+// and the server keeps the rest.
+test('a save sends only the fields changed on the page', () => {
+  const saved = { company_name: 'Acme', tax_rate: 8, tax_inclusive: false, credit_balance_low_threshold: '' }
+  assert.deepEqual(changedSettings(saved, { ...saved, company_name: 'Acme GmbH' }), { company_name: 'Acme GmbH' })
+  assert.deepEqual(changedSettings(saved, { ...saved }), {})
+})
+
+test('a change to 0, false or an empty value is still a change', () => {
+  const saved = { tax_rate: 8, tax_inclusive: true, credit_balance_low_threshold: '50' }
+  assert.deepEqual(
+    changedSettings(saved, { tax_rate: 0, tax_inclusive: false, credit_balance_low_threshold: '' }),
+    { tax_rate: 0, tax_inclusive: false, credit_balance_low_threshold: '' },
+  )
+})
+
+test('with nothing loaded, every field is sent', () => {
+  const edited = { company_name: 'Acme', tax_rate: 8 }
+  assert.deepEqual(changedSettings(undefined, edited), edited)
 })
