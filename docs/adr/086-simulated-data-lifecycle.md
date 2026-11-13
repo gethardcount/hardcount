@@ -110,3 +110,7 @@ Surfaced as `?test_clock_id=` / `?sim_from=` / `?sim_to=`, a clock filter on
 `/audit-log` sourced from the AUDIT ROWS (not `test_clocks` — that table is
 empty exactly when the forensic view is wanted), and sim columns in the CSV
 export. Wall-clock `created_at` primacy (ADR-030) is unchanged.
+
+## Amendment 2026-11-13: the dashboard asks one hook for "now"
+
+The constructors in `web-v2/src/lib/effectiveNow.ts` are now `clockTime(frozenISO)`, which takes a required clock time, and `wallClockNow()`. `effectiveNow(frozenISO?)` is gone. A page takes a record's "now" from `useNowFor(record)` or `useNowResolver()` in `web-v2/src/hooks/useNow.ts`, which replace `useEffectiveNow` and `useEffectiveNowResolver`. A clock's time comes only from the clock list, and every clock change refreshes it. The rest of this record is unchanged.

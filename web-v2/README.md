@@ -39,10 +39,10 @@ committed.
 
 ## Conventions worth knowing before a first PR
 
-- Relative-time / "now"-dependent UI must resolve "now" via
-  `src/hooks/useClockFrozenMap.ts` — test clocks (simulated billing
-  timelines) freeze time per entity; an eslint rule bans bare
-  `Date.now()` in the affected surfaces.
+- Relative-time / "now"-dependent UI must take a record's "now" from
+  `useNowFor` or `useNowResolver` in `src/hooks/useNow.ts` — a record on a
+  test clock (a simulated billing timeline) lives at the clock's time; an
+  eslint rule bans bare `Date.now()` in the affected surfaces.
 - Money is formatted through `src/lib/priceDisplay.ts` — exact string math,
   never `parseFloat` on money strings.
 - Every user-visible change updates `CHANGELOG.md`, and UI changes are
