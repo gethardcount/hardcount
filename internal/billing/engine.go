@@ -1748,13 +1748,7 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 	if err != nil {
 		return TaxApplication{}, err
 	}
-	// From here the prices' meaning is known, so a failure carries it: a
-	// writer that keeps the invoice with its tax pending records it.
-	app, err := e.applyTax(ctx, ts, tenantID, customerID, currency, subtotal, lineItems)
-	if err != nil {
-		return TaxApplication{}, &domain.PricedTaxError{TaxInclusive: ts.TaxInclusive, Err: err}
-	}
-	return app, nil
+	return e.applyTax(ctx, ts, tenantID, customerID, currency, subtotal, lineItems)
 }
 
 // loadTaxSettings checks the tax wiring, pins the tenant on ctx and reads
