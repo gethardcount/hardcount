@@ -100,3 +100,19 @@ func TestSyncBillingProfile_PushesTheWholeProfile(t *testing.T) {
 		t.Errorf("requests =\n%+v\nwant\n%+v", *reqs, want)
 	}
 }
+
+// SyncCustomer sends the email alone: the Stripe customer keeps its
+// tax-exempt status and every tax ID.
+func TestSyncCustomer_SendsOnlyTheEmail(t *testing.T) {
+	sync, reqs := recordStripe(t)
+	if err := sync.SyncCustomer(syncCtx(), "cus_1", "new@acme.test"); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	want := []stripeRequest{
+		{method: http.MethodPost, path: "/v1/customers/cus_1", form: url.Values{"email": {"new@acme.test"}}},
+	}
+	if !reflect.DeepEqual(*reqs, want) {
+		t.Errorf("requests =\n%+v\nwant\n%+v", *reqs, want)
+	}
+}

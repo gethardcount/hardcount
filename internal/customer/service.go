@@ -27,8 +27,16 @@ var countryPattern = regexp.MustCompile(`^[A-Z]{2}$`)
 // currencyPattern: ISO-4217 alpha-3, canonical UPPERCASE (ADR-067 currency guard).
 var currencyPattern = regexp.MustCompile(`^[A-Z]{3}$`)
 
-// StripeSyncer syncs billing profile data to Stripe when a Stripe customer exists.
+// StripeSyncer copies a customer to its linked Stripe customer. Hardcount is
+// the record and Stripe holds a copy, so each call pushes only what the
+// caller holds and has just read.
 type StripeSyncer interface {
+	// SyncCustomer pushes the customer's own fields, the email, and leaves
+	// the billing-profile fields at Stripe as they are.
+	SyncCustomer(ctx context.Context, stripeCustomerID, customerEmail string) error
+	// SyncBillingProfile pushes the email and the whole profile. It sets
+	// tax_exempt and deletes every tax ID at Stripe that is not the
+	// profile's, so bp must be a profile just read or saved.
 	SyncBillingProfile(ctx context.Context, stripeCustomerID, customerEmail string, bp domain.CustomerBillingProfile) error
 }
 
@@ -527,23 +535,23 @@ func (s *Service) Update(ctx context.Context, tenantID, id string, input UpdateI
 		return domain.Customer{}, err
 	}
 
-	// Stripe sync (2026-05-29): propagate email + display_name changes
-	// to the linked Stripe Customer. Pre-fix only UpsertBillingProfile
-	// triggered Stripe sync; customer.Update silently diverged. Best-
-	// effort: local save succeeded, Stripe sync failure logs but doesn't
-	// fail the operator action (matches Lago/Recurly's "local is source
-	// of truth, sync is downstream" model).
+	// The edit has committed, so a failed or skipped Stripe sync is logged
+	// and the customer's next edit, or its profile's, pushes again.
 	if s.stripeSyncer != nil && updated.StripeCustomerID != "" {
-		// Pull the billing profile so the full set of Stripe-relevant
-		// fields stay in lockstep. ErrNotFound = no profile yet —
-		// pass an empty BP, SyncBillingProfile gracefully skips the
-		// fields that aren't set.
+		var syncErr error
 		bp, bpErr := s.store.GetBillingProfile(ctx, tenantID, id)
-		if bpErr != nil && !errors.Is(bpErr, errs.ErrNotFound) {
-			slog.WarnContext(ctx, "fetch billing profile for Stripe sync failed",
-				"tenant_id", tenantID, "customer_id", id, "error", bpErr)
+		switch {
+		case bpErr == nil:
+			syncErr = s.stripeSyncer.SyncBillingProfile(ctx, updated.StripeCustomerID, updated.Email, bp)
+		case errors.Is(bpErr, errs.ErrNotFound):
+			// Tax data at Stripe that Hardcount does not hold stays there.
+			syncErr = s.stripeSyncer.SyncCustomer(ctx, updated.StripeCustomerID, updated.Email)
+		default:
+			slog.ErrorContext(ctx, "Stripe customer not updated: read billing profile failed",
+				"tenant_id", tenantID, "customer_id", id,
+				"stripe_customer_id", updated.StripeCustomerID, "error", bpErr)
 		}
-		if syncErr := s.stripeSyncer.SyncBillingProfile(ctx, updated.StripeCustomerID, updated.Email, bp); syncErr != nil {
+		if syncErr != nil {
 			slog.WarnContext(ctx, "failed to sync customer update to Stripe",
 				"tenant_id", tenantID, "customer_id", id,
 				"stripe_customer_id", updated.StripeCustomerID, "error", syncErr)
@@ -717,16 +725,18 @@ func (s *Service) UpsertBillingProfile(ctx context.Context, tenantID string, bp 
 	// obsolete. Phase 2 (multi-recipient via customer_email_contacts
 	// table) will be additive when a DP requests it.
 
-	// Sync to Stripe if a Stripe customer exists. Reads from the
-	// canonical mapping on customers.stripe_customer_id (migration
-	// 0096); the legacy customer_payment_setups summary was retired
-	// in 0097.
+	// The profile has committed, so a failed or skipped Stripe sync is
+	// logged and the next save pushes again.
 	if s.stripeSyncer != nil {
-		if cust, getErr := s.store.Get(ctx, tenantID, bp.CustomerID); getErr == nil && cust.StripeCustomerID != "" {
+		cust, getErr := s.store.Get(ctx, tenantID, bp.CustomerID)
+		switch {
+		case getErr != nil:
+			slog.ErrorContext(ctx, "Stripe customer not updated: read customer failed",
+				"tenant_id", tenantID, "customer_id", bp.CustomerID, "error", getErr)
+		case cust.StripeCustomerID != "":
 			if syncErr := s.stripeSyncer.SyncBillingProfile(ctx, cust.StripeCustomerID, cust.Email, result); syncErr != nil {
 				slog.Warn("failed to sync billing profile to Stripe",
 					"customer_id", bp.CustomerID, "stripe_customer_id", cust.StripeCustomerID, "error", syncErr)
-				// Non-fatal: local save succeeded, Stripe sync is best-effort
 			}
 		}
 	}
