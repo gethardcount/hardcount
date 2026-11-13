@@ -25,6 +25,9 @@ type clockAuditRow struct {
 	Metadata    map[string]any
 	SimAt       time.Time
 	TestClockID string
+	ActorType   string
+	ActorID     string
+	RequestID   string
 }
 
 // clockAuditRows reads the tenant's test_clock audit rows, oldest first.
@@ -36,7 +39,8 @@ func clockAuditRows(t *testing.T, db *postgres.DB, tenantID string) []clockAudit
 	}
 	defer postgres.Rollback(tx)
 	rows, err := tx.QueryContext(t.Context(), `
-		SELECT action, resource_id, resource_label, metadata, sim_effective_at, test_clock_id
+		SELECT action, resource_id, resource_label, metadata, sim_effective_at, test_clock_id,
+			actor_type, actor_id, COALESCE(request_id, '')
 		FROM audit_log WHERE tenant_id = $1 AND resource_type = 'test_clock'
 		ORDER BY created_at, id`, tenantID)
 	if err != nil {
@@ -52,7 +56,8 @@ func clockAuditRows(t *testing.T, db *postgres.DB, tenantID string) []clockAudit
 			simAt   sql.NullTime
 			clockID sql.NullString
 		)
-		if err := rows.Scan(&r.Action, &r.ResourceID, &label, &meta, &simAt, &clockID); err != nil {
+		if err := rows.Scan(&r.Action, &r.ResourceID, &label, &meta, &simAt, &clockID,
+			&r.ActorType, &r.ActorID, &r.RequestID); err != nil {
 			t.Fatalf("scan audit row: %v", err)
 		}
 		if err := json.Unmarshal(meta, &r.Metadata); err != nil {
@@ -120,6 +125,7 @@ func TestE2E_TestClockAudit_Rows(t *testing.T) {
 			"action": "teardown", "sim_effective_at": s1, "test_clock_id": id,
 		}},
 	}
+	keyID := testKeyID(t, r.db, r.tenantID)
 	got := clockAuditRows(t, r.db, r.tenantID)
 	if len(got) != len(want) {
 		t.Fatalf("test_clock audit rows = %+v, want %d rows", got, len(want))
@@ -130,7 +136,28 @@ func TestE2E_TestClockAudit_Rows(t *testing.T) {
 			!g.SimAt.Equal(w.SimAt) || g.TestClockID != w.TestClockID || !reflect.DeepEqual(g.Metadata, w.Metadata) {
 			t.Errorf("row %d:\n got %+v\nwant %+v", i, g, w)
 		}
+		// Who acted and which request did it come from the request's own
+		// context, which must reach the write.
+		if g.ActorType != "api_key" || g.ActorID != keyID || g.RequestID == "" {
+			t.Errorf("row %d (%s): actor %s/%s, request id %q; want api_key/%s and the request's id",
+				i, g.Action, g.ActorType, g.ActorID, g.RequestID, keyID)
+		}
 	}
+}
+
+// testKeyID is the id of the rig's one API key, the actor its requests name.
+func testKeyID(t *testing.T, db *postgres.DB, tenantID string) string {
+	t.Helper()
+	tx, err := db.BeginTx(t.Context(), postgres.TxBypass, "")
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	var id string
+	if err := tx.QueryRowContext(t.Context(), `SELECT id FROM api_keys WHERE tenant_id = $1`, tenantID).Scan(&id); err != nil {
+		t.Fatalf("read the rig's API key: %v", err)
+	}
+	return id
 }
 
 // refuseClockAuditRows makes Postgres refuse every test_clock audit row until
@@ -266,4 +293,83 @@ func TestE2E_TestClockAudit_AdvancedFromIsTheReplacedTime(t *testing.T) {
 		}
 	}
 	t.Fatal("the advance wrote no audit row")
+}
+
+// TestE2E_TestClockAudit_ConcurrentChangesWriteOneRow: two advances (or two
+// retries) of one clock arrive together. Both pass the service's status read
+// before either writes, so only the store's compare-and-set on status
+// decides: one marks the clock and writes its row, the other answers 409 and
+// writes none.
+func TestE2E_TestClockAudit_ConcurrentChangesWriteOneRow(t *testing.T) {
+	t0 := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	t1 := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
+	advanceBody := map[string]any{"frozen_time": t1.Format(time.RFC3339)}
+	for _, tc := range []struct {
+		name   string
+		action string // the row's metadata action
+		path   string
+		body   any
+		setup  func(r *ppRig, id string)
+	}{
+		{name: "advance", action: "advanced", path: "/advance", body: advanceBody, setup: func(*ppRig, string) {}},
+		{name: "retry advance", action: "retry_advance", path: "/retry-advance", setup: func(r *ppRig, id string) {
+			r.must(time.Time{}, http.MethodPost, "/v1/test-clocks/"+id+"/advance", advanceBody, http.StatusOK)
+			failAdvance(t, r.db, id)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newPPRig(t, "clock audit concurrent "+tc.name)
+			id := r.clock("raced", t0)
+			tc.setup(r, id)
+
+			// Hold the clock's row lock, so both requests read its status
+			// before either write runs.
+			tx, err := r.db.BeginTx(t.Context(), postgres.TxBypass, "")
+			if err != nil {
+				t.Fatalf("begin tx: %v", err)
+			}
+			defer postgres.Rollback(tx)
+			if _, err := tx.ExecContext(t.Context(), `SELECT 1 FROM test_clocks WHERE id = $1 FOR UPDATE`, id); err != nil {
+				t.Fatalf("lock the clock: %v", err)
+			}
+			type answer struct {
+				code int
+				raw  []byte
+			}
+			done := make(chan answer, 2)
+			for range 2 {
+				go func() {
+					code, _, raw := r.do(time.Time{}, http.MethodPost, "/v1/test-clocks/"+id+tc.path, tc.body)
+					done <- answer{code, raw}
+				}()
+			}
+			testutil.WaitForLockWaiters(t, t.Context(), testutil.AdminPool(t), "UPDATE test_clocks SET status", 2)
+			if err := tx.Commit(); err != nil {
+				t.Fatalf("release the lock: %v", err)
+			}
+			codes := map[int]int{}
+			for range 2 {
+				a := <-done
+				codes[a.code]++
+				if a.code != http.StatusOK && a.code != http.StatusConflict {
+					t.Errorf("%s: %d %s, want 200 or 409", tc.name, a.code, a.raw)
+				}
+			}
+			if codes[http.StatusOK] != 1 || codes[http.StatusConflict] != 1 {
+				t.Errorf("answers = %v, want one 200 and one 409", codes)
+			}
+			if clk := r.must(time.Time{}, http.MethodGet, "/v1/test-clocks/"+id, nil, http.StatusOK); flowStr(clk, "status") != "advancing" {
+				t.Errorf("clock status = %q, want advancing", flowStr(clk, "status"))
+			}
+			n := 0
+			for _, row := range clockAuditRows(t, r.db, r.tenantID) {
+				if row.Metadata["action"] == tc.action {
+					n++
+				}
+			}
+			if n != 1 {
+				t.Errorf("%s audit rows = %d, want 1", tc.action, n)
+			}
+		})
+	}
 }
