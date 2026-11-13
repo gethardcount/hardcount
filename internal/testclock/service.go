@@ -2,6 +2,7 @@ package testclock
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
@@ -129,6 +131,12 @@ type DunningProcessor interface {
 	ProcessDueRunsForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time, limit int) (int, []error)
 }
 
+// AuditEmitter writes an audit row on the caller's transaction (ADR-090).
+// Implemented by *audit.Logger.
+type AuditEmitter interface {
+	LogInTx(ctx context.Context, tx *sql.Tx, e audit.Entry) error
+}
+
 // Service provides the test-clock API surface. Advance and Retry advance only
 // mark the clock; the testclock_catchup leader runs the catch-up on its tick
 // (catchup.go, ADR-140), off the request path.
@@ -143,11 +151,13 @@ type Service struct {
 	clawback      ClawbackRetrier
 	creditExpirer CreditExpirer
 	dunning       DunningProcessor
+	audit         AuditEmitter
 	passDeadline  time.Duration
 }
 
 // Deps is everything the service needs. Every field is required: a catch-up
-// that skipped a job would leave the clock ready with that job's work undone.
+// that skipped a job would leave the clock ready with that job's work undone,
+// and an operator's change to a clock is saved only with its audit row.
 type Deps struct {
 	// Billing closes the clock's due periods, collects their invoices and
 	// fires spend thresholds.
@@ -172,13 +182,17 @@ type Deps struct {
 	// Dunning runs the clock's payment retries due by its time. The
 	// real-time dunning tick skips clock invoices.
 	Dunning DunningProcessor
+	// Audit writes the audit row of an operator's change, in the change's
+	// transaction.
+	Audit AuditEmitter
 	// PassDeadline bounds one catch-up pass; a pass that runs past it fails
 	// the advance. The router passes CatchupPassDeadline.
 	PassDeadline time.Duration
 }
 
 // NewService panics when a dependency is missing, so a wiring mistake stops
-// the server at boot instead of skipping a job on every advance.
+// the server at boot instead of skipping a job on every advance or failing
+// every change for want of its audit row.
 func NewService(store Store, d Deps) *Service {
 	missing := func(name string) { panic("testclock.NewService: " + name + " is required") }
 	switch {
@@ -202,6 +216,8 @@ func NewService(store Store, d Deps) *Service {
 		missing("Deps.Credits")
 	case d.Dunning == nil:
 		missing("Deps.Dunning")
+	case d.Audit == nil:
+		missing("Deps.Audit")
 	case d.PassDeadline <= 0:
 		missing("Deps.PassDeadline")
 	}
@@ -209,7 +225,25 @@ func NewService(store Store, d Deps) *Service {
 		store: store, billing: d.Billing, customers: d.Customers, subs: d.Subs,
 		trialExpirer: d.Trials, pauseResumer: d.Pauses, taxRetry: d.Tax,
 		clawback: d.Relief, creditExpirer: d.Credits, dunning: d.Dunning,
-		passDeadline: d.PassDeadline,
+		audit: d.Audit, passDeadline: d.PassDeadline,
+	}
+}
+
+// auditRow is the audit row of an operator's change to a clock: a test_clock
+// row named after the clock, with the metadata meta builds from the row the
+// change wrote. It lands on the clock's own time axis, at the clock's
+// frozen_time. After a delete tears the simulation down (ADR-086), the
+// audit log is all that is left of it, and these rows say what the operator
+// did: created, advanced from and to, and deleted.
+func (s *Service) auditRow(ctx context.Context, action string, meta func(domain.TestClock) map[string]any) AuditRow {
+	return func(tx *sql.Tx, clk domain.TestClock) error {
+		return s.audit.LogInTx(clock.WithSim(ctx, clock.Sim{At: clk.FrozenTime, TestClockID: clk.ID}), tx, audit.Entry{
+			Action:        action,
+			ResourceType:  "test_clock",
+			ResourceID:    clk.ID,
+			ResourceLabel: clk.Name,
+			Metadata:      meta(clk),
+		})
 	}
 }
 
@@ -230,7 +264,9 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	return s.store.Create(ctx, tenantID, domain.TestClock{
 		Name:       name,
 		FrozenTime: input.FrozenTime.UTC(),
-	})
+	}, s.auditRow(ctx, domain.AuditActionCreate, func(clk domain.TestClock) map[string]any {
+		return map[string]any{"frozen_time": clk.FrozenTime}
+	}))
 }
 
 func (s *Service) Get(ctx context.Context, tenantID, id string) (domain.TestClock, error) {
@@ -241,8 +277,12 @@ func (s *Service) List(ctx context.Context, tenantID string, limit, offset int) 
 	return s.store.List(ctx, tenantID, limit, offset)
 }
 
+// Delete tears the clock down with its simulated customers (ADR-086). Its
+// audit row names the clock and its time from the row the teardown deletes.
 func (s *Service) Delete(ctx context.Context, tenantID, id string) error {
-	return s.store.Delete(ctx, tenantID, id)
+	return s.store.Delete(ctx, tenantID, id, s.auditRow(ctx, domain.AuditActionDelete, func(domain.TestClock) map[string]any {
+		return map[string]any{"action": "teardown"}
+	}))
 }
 
 // ListSubscriptions returns one page of the subscriptions pinned to the
@@ -332,7 +372,17 @@ func (s *Service) Advance(ctx context.Context, tenantID, id string, input Advanc
 			"advance cannot exceed 1 year per call — chunk longer ranges into successive advances")
 	}
 
-	return s.store.MarkAdvancing(ctx, tenantID, id, newTime)
+	// The audit row records the window the advance swept, so the events it
+	// causes can be traced to it. advanced_from is the time MarkAdvancing
+	// replaced: its statement always writes the summary, from the old row.
+	// It is shown in frozen_time's zone, so the two read alike.
+	return s.store.MarkAdvancing(ctx, tenantID, id, newTime, s.auditRow(ctx, domain.AuditActionUpdate, func(clk domain.TestClock) map[string]any {
+		return map[string]any{
+			"action":        "advanced",
+			"frozen_time":   clk.FrozenTime,
+			"advanced_from": clk.LastAdvanceSummary.AdvancedFrom.In(clk.FrozenTime.Location()),
+		}
+	}))
 }
 
 // RetryAdvance resumes a clock parked in status='internal_failure'
@@ -360,7 +410,9 @@ func (s *Service) RetryAdvance(ctx context.Context, tenantID, id string) (domain
 			"retry only valid on clocks in internal_failure (current: %s)", current.Status))
 	}
 
-	return s.store.RetryFromFailed(ctx, tenantID, id)
+	return s.store.RetryFromFailed(ctx, tenantID, id, s.auditRow(ctx, domain.AuditActionUpdate, func(clk domain.TestClock) map[string]any {
+		return map[string]any{"action": "retry_advance", "frozen_time": clk.FrozenTime}
+	}))
 }
 
 // runClock is one catch-up pass on one advancing clock, at its frozen_time.

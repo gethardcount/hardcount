@@ -29,11 +29,11 @@ var (
 // advancingClock creates a clock at leaseFrom and advances it to leaseTarget.
 func advancingClock(t *testing.T, store *testclock.PostgresStore, ctx context.Context, tenantID, name string) domain.TestClock {
 	t.Helper()
-	clk, err := store.Create(ctx, tenantID, domain.TestClock{Name: name, FrozenTime: leaseFrom})
+	clk, err := store.Create(ctx, tenantID, domain.TestClock{Name: name, FrozenTime: leaseFrom}, noAuditRow)
 	if err != nil {
 		t.Fatalf("create clock %s: %v", name, err)
 	}
-	clk, err = store.MarkAdvancing(ctx, tenantID, clk.ID, leaseTarget)
+	clk, err = store.MarkAdvancing(ctx, tenantID, clk.ID, leaseTarget, noAuditRow)
 	if err != nil {
 		t.Fatalf("mark %s advancing: %v", name, err)
 	}
@@ -121,7 +121,7 @@ func TestCatchupWrites_ClockNoLongerAdvancing(t *testing.T) {
 
 	t.Run("deleted", func(t *testing.T) {
 		clk := advancingClock(t, store, base, tenantID, "deleted")
-		if err := store.Delete(base, tenantID, clk.ID); err != nil {
+		if err := store.Delete(base, tenantID, clk.ID, noAuditRow); err != nil {
 			t.Fatalf("delete: %v", err)
 		}
 		if _, err := store.CompleteAdvance(ctx, tenantID, clk.ID, domain.AdvanceSummary{}); !errors.Is(err, testclock.ErrClockNoLongerAdvancing) {
@@ -143,7 +143,7 @@ func TestListAdvancingForCatchup_FencedAcrossTenants(t *testing.T) {
 
 	first := advancingClock(t, store, base, tenantA, "first")
 	second := advancingClock(t, store, base, tenantB, "second")
-	ready, err := store.Create(base, tenantA, domain.TestClock{Name: "ready", FrozenTime: leaseFrom})
+	ready, err := store.Create(base, tenantA, domain.TestClock{Name: "ready", FrozenTime: leaseFrom}, noAuditRow)
 	if err != nil {
 		t.Fatalf("create ready clock: %v", err)
 	}

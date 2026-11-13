@@ -251,10 +251,11 @@ type Entry struct {
 // catchup phase (the advance binds clock.WithSim, so finalize, cancel, clawback
 // issue, dunning and threshold rows all inherit it), every service whose entry
 // point resolves an entity's pin (BindEffectiveNow yields the clock id along
-// with the instant, and refuses to erase an inherited one), and the
+// with the instant, and refuses to erase an inherited one), the
 // handler-level emitters that bind explicitly before emitting (invoice,
 // subscription, customer — including CREATE, which binds from the clock it is
-// handed because the customer pin does not exist yet — dunning, test_clock).
+// handed because the customer pin does not exist yet — dunning), and the
+// test-clock service, which binds each change's row to the clock it changes.
 //
 // A note on what "covered" means, so this list cannot quietly become a lie: a
 // path is covered if it EMITS and its emission runs under a binding. Credit

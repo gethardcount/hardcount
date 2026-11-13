@@ -103,7 +103,7 @@ audit-only tx.
 > background paths emit none at all. Handlers are NOT fully migrated: the
 > money-path routes named `LogInTx` in the route registry ride the business tx,
 > but the majority of mutating HTTP routes (subscription updates, pricing,
-> webhook config, dunning ops, test clocks, auth, …) still emit post-commit
+> webhook config, dunning ops, auth, …) still emit post-commit
 > `Log` with the same residual exposure. `internal/api/audit_routes.go` is the
 > authoritative per-route record of which is which — trust it, not any prose
 > summary, including this one.
@@ -286,10 +286,12 @@ timeline of a simulation is reading an incomplete one. Instead:
 - Handler-level emitters (which emit on `r.Context()`, a ctx the service's
   internal bind never reaches) bind explicitly before emitting:
   `invoice` (gated on `inv.IsSimulated` — exact and free on the wall-clock
-  path), `subscription`, `customer`, `dunning`, and the `test_clock` routes
-  themselves. The clock's own create/advance/delete rows are what make a
-  post-teardown view self-explaining: without them the log has the effects
-  but not the cause, and no row saying why everything else is gone.
+  path), `subscription`, `customer` and `dunning`.
+- The test-clock service writes each change's row (create, advance, retry
+  advance, delete) with `LogInTx` in the change's transaction, and binds it
+  to the clock it changes (since 2026-11-13). The clock's own rows are what
+  make a post-teardown view self-explaining: without them the log has the
+  effects but not the cause, and no row saying why everything else is gone.
 - `auditMetaForSub` is DELETED. It merged the same pair into metadata from
   TWO sources — the clock id off the entity, the instant off
   `sub.UpdatedAt` — which is only true when the current request is what
