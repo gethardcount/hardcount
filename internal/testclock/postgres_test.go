@@ -3,6 +3,7 @@ package testclock_test
 import (
 	"context"
 	"crypto/rand"
+	"database/sql"
 	"encoding/hex"
 	"strings"
 	"testing"
@@ -32,7 +33,7 @@ func TestPostgresStore_Delete_HardDeletes_TearsDownPinnedSubs(t *testing.T) {
 	clk, err := store.Create(ctx, tenantID, domain.TestClock{
 		Name:       "trial",
 		FrozenTime: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC),
-	})
+	}, noAuditRow)
 	if err != nil {
 		t.Fatalf("create clock: %v", err)
 	}
@@ -46,7 +47,7 @@ func TestPostgresStore_Delete_HardDeletes_TearsDownPinnedSubs(t *testing.T) {
 	insertSub(t, db, "sub_active", tenantID, customerID, clk.ID, "active")
 	insertSub(t, db, "sub_canceled", tenantID, customerID, clk.ID, "canceled")
 
-	if err := store.Delete(ctx, tenantID, clk.ID); err != nil {
+	if err := store.Delete(ctx, tenantID, clk.ID, noAuditRow); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 
@@ -77,7 +78,7 @@ func TestPostgresStore_Delete_HardDeletes_TearsDownPinnedSubs(t *testing.T) {
 	}
 
 	// Idempotent: re-deleting a gone clock returns ErrNotFound.
-	if err := store.Delete(ctx, tenantID, clk.ID); err != errs.ErrNotFound {
+	if err := store.Delete(ctx, tenantID, clk.ID, noAuditRow); err != errs.ErrNotFound {
 		t.Errorf("repeat Delete: expected ErrNotFound, got %v", err)
 	}
 }
@@ -96,7 +97,7 @@ func TestPostgresStore_AdvanceSummary_RoundTrips(t *testing.T) {
 	clk, err := store.Create(ctx, tenantID, domain.TestClock{
 		Name:       "summary",
 		FrozenTime: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-	})
+	}, noAuditRow)
 	if err != nil {
 		t.Fatalf("create clock: %v", err)
 	}
@@ -106,7 +107,7 @@ func TestPostgresStore_AdvanceSummary_RoundTrips(t *testing.T) {
 	}
 
 	to := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
-	marked, err := store.MarkAdvancing(ctx, tenantID, clk.ID, to)
+	marked, err := store.MarkAdvancing(ctx, tenantID, clk.ID, to, noAuditRow)
 	if err != nil {
 		t.Fatalf("mark advancing: %v", err)
 	}
@@ -166,11 +167,11 @@ func TestPostgresStore_MarkFailed_ReasonCutInsideACharacter(t *testing.T) {
 	clk, err := store.Create(ctx, tenantID, domain.TestClock{
 		Name:       "long reason",
 		FrozenTime: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-	})
+	}, noAuditRow)
 	if err != nil {
 		t.Fatalf("create clock: %v", err)
 	}
-	if _, err := store.MarkAdvancing(ctx, tenantID, clk.ID, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)); err != nil {
+	if _, err := store.MarkAdvancing(ctx, tenantID, clk.ID, time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC), noAuditRow); err != nil {
 		t.Fatalf("mark advancing: %v", err)
 	}
 
@@ -187,6 +188,10 @@ func TestPostgresStore_MarkFailed_ReasonCutInsideACharacter(t *testing.T) {
 		t.Errorf("last_failure_reason = %q, want the first 498 bytes, which end before the split character, and …", got.LastFailureReason)
 	}
 }
+
+// noAuditRow stands in for the audit row in tests of the store alone. The
+// service builds the real one; internal/api's test-clock audit tests pin it.
+func noAuditRow(*sql.Tx, domain.TestClock) error { return nil }
 
 // Helpers — minimal raw inserts so the test doesn't pull the
 // subscription package's full Create surface (plans, items,

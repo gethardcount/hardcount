@@ -53,7 +53,7 @@ var allowedCrossDomainImports = map[string][]string{
 	"subscription":   {"audit", "auth", "tax"}, // tax = shared value types/classification (ADR-052 class; used for deferral-fact stamping on proration invoices)
 	"tenant":         {"audit", "auth"},        // audit = in-tx tenant-provisioning emission (ADR-090 PR4, panel Q6)
 	"tenantstripe":   {"auth"},
-	"testclock":      {"auth"},
+	"testclock":      {"audit", "auth"}, // audit = audit.Entry for the in-tx rows of create, advance, retry advance and delete (ADR-090)
 	"usage":          {"audit", "auth", "subscription"}, // audit = in-tx provider-cost rate upsert/delete emissions (ADR-090 PR5)
 	"user":           {"audit", "auth", "session"},
 	"webhook":        {"auth"},
