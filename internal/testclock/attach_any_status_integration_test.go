@@ -38,12 +38,12 @@ func TestCustomerJoinsAClockInAnyStatus(t *testing.T) {
 		want domain.TestClockStatus
 	}{
 		{"advancing", func(t *testing.T, id string) {
-			if _, err := clocks.MarkAdvancing(ctx, tenantID, id, to); err != nil {
+			if _, err := clocks.MarkAdvancing(ctx, tenantID, id, to, noAuditRow); err != nil {
 				t.Fatalf("mark advancing: %v", err)
 			}
 		}, domain.TestClockStatusAdvancing},
 		{"internal_failure", func(t *testing.T, id string) {
-			if _, err := clocks.MarkAdvancing(ctx, tenantID, id, to); err != nil {
+			if _, err := clocks.MarkAdvancing(ctx, tenantID, id, to, noAuditRow); err != nil {
 				t.Fatalf("mark advancing: %v", err)
 			}
 			if _, err := clocks.MarkFailed(ctx, tenantID, id, "catch-up failed", domain.AdvanceSummary{HadErrors: true}); err != nil {
@@ -52,7 +52,7 @@ func TestCustomerJoinsAClockInAnyStatus(t *testing.T) {
 		}, domain.TestClockStatusInternalFailed},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			clk, err := clocks.Create(ctx, tenantID, domain.TestClock{Name: c.name, FrozenTime: start})
+			clk, err := clocks.Create(ctx, tenantID, domain.TestClock{Name: c.name, FrozenTime: start}, noAuditRow)
 			if err != nil {
 				t.Fatalf("create clock: %v", err)
 			}

@@ -87,6 +87,7 @@ original text.
 
 ### Fixed
 
+- **A test-clock change whose audit row cannot be written is no longer saved.** Before, a create, advance, retry advance or delete was saved with no row in the audit log; now the request answers `500` and nothing changes. An advance's row now always names the time it advanced from ([#1711](https://github.com/gethardcount/hardcount/pull/1711)).
 - **On a tenant with tax-inclusive prices, a cancel, a plan swap, a quantity decrease or a downgrade credits what was paid for the unused time.** The credit was grossed up for tax twice: half of a 120.00 month, tax included, credited 72.00, not 60.00. If you switch tax-inclusive pricing, a change to a subscription billed before the switch is still credited in the new terms ([#1714](https://github.com/gethardcount/hardcount/pull/1714)).
 - **The audit log now records a change to the low-balance alert threshold from one amount to another, such as $50 to $70.** The save's row left the threshold out, and a save that changed only the threshold wrote no row. A change that turned the alert on or off was recorded ([#1707](https://github.com/gethardcount/hardcount/pull/1707)).
 - **A Settings save no longer puts back a change someone else saved, such as the tax rate.** The dashboard sent every field, so a page opened before another person's save restored their old values, and later invoices used the old rate. It now sends only the fields you change, and two saves at once each keep the other's fields ([#1707](https://github.com/gethardcount/hardcount/pull/1707)).
