@@ -116,3 +116,39 @@ func TestSyncCustomer_SendsOnlyTheEmail(t *testing.T) {
 		t.Errorf("requests =\n%+v\nwant\n%+v", *reqs, want)
 	}
 }
+
+// SyncCustomer sends nothing for an empty email. Hardcount then holds no
+// email, and email= would clear one set at Stripe.
+func TestSyncCustomer_EmptyEmailSendsNothing(t *testing.T) {
+	sync, reqs := recordStripe(t)
+	if err := sync.SyncCustomer(syncCtx(), "cus_1", ""); err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+	if len(*reqs) != 0 {
+		t.Errorf("requests = %+v, want none", *reqs)
+	}
+}
+
+// A profile with no tax ID leaves no tax ID at Stripe: the sync lists them,
+// deletes each, and creates none.
+func TestSyncBillingProfile_NoTaxIDDeletesThemAll(t *testing.T) {
+	sync, reqs := recordStripe(t)
+	err := sync.SyncBillingProfile(syncCtx(), "cus_1", "billing@acme.test", domain.CustomerBillingProfile{
+		TaxStatus: tax.StatusStandard,
+	})
+	if err != nil {
+		t.Fatalf("sync: %v", err)
+	}
+
+	want := []stripeRequest{
+		{method: http.MethodPost, path: "/v1/customers/cus_1", form: url.Values{
+			"email":      {"billing@acme.test"},
+			"tax_exempt": {"none"},
+		}},
+		{method: http.MethodGet, path: "/v1/customers/cus_1/tax_ids", form: url.Values{}},
+		{method: http.MethodDelete, path: "/v1/customers/cus_1/tax_ids/txi_old", form: url.Values{}},
+	}
+	if !reflect.DeepEqual(*reqs, want) {
+		t.Errorf("requests =\n%+v\nwant\n%+v", *reqs, want)
+	}
+}

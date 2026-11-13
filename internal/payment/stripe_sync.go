@@ -25,10 +25,14 @@ func NewStripeBillingSync(clients *StripeClients) *StripeBillingSync {
 	return &StripeBillingSync{clients: clients}
 }
 
-// SyncCustomer pushes the fields that live on the Hardcount customer, the
-// email, to the Stripe customer. It leaves the billing-profile fields at
-// Stripe as they are: name, address, phone, tax_exempt and tax IDs.
+// SyncCustomer pushes the customer's email to the Stripe customer and leaves
+// every other field there as it is, the display name included. An empty
+// email sends nothing: Hardcount then holds none, and email= would clear one
+// set at Stripe.
 func (s *StripeBillingSync) SyncCustomer(ctx context.Context, stripeCustomerID, customerEmail string) error {
+	if customerEmail == "" {
+		return nil
+	}
 	sc, err := s.client(ctx)
 	if err != nil {
 		return err

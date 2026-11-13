@@ -2,7 +2,6 @@ package customer
 
 import (
 	"context"
-	"errors"
 	"reflect"
 	"testing"
 
@@ -32,71 +31,74 @@ func (r *recordingSyncer) SyncBillingProfile(_ context.Context, stripeCustomerID
 	return nil
 }
 
-// profileReadFails is the memory store with a billing-profile read that
-// fails, as a database error would.
-type profileReadFails struct {
-	*memoryStore
+var stripeSyncProfile = domain.CustomerBillingProfile{
+	LegalName:       "Acme GmbH",
+	Country:         "DE",
+	TaxStatus:       tax.StatusExempt,
+	TaxExemptReason: "charity",
+	TaxIDType:       "eu_vat",
+	TaxID:           "DE123456789",
 }
 
-var errProfileRead = errors.New("connection reset")
-
-func (profileReadFails) GetBillingProfile(context.Context, string, string) (domain.CustomerBillingProfile, error) {
-	return domain.CustomerBillingProfile{}, errProfileRead
-}
-
-// A customer edit pushes to Stripe only what Hardcount holds and has just
-// read. The full sync resets tax_exempt and removes every tax ID that does
-// not match the profile, so it must never run on a profile that is missing
-// or could not be read.
+// A customer edit pushes to Stripe only the one field it can change there,
+// the email, and only when the email changed. The billing profile is pushed
+// when it is saved, never from a customer edit: the full sync resets
+// tax_exempt and removes every tax ID that does not match the profile.
 func TestUpdate_StripeSync(t *testing.T) {
 	ctx := context.Background()
-	profile := domain.CustomerBillingProfile{
-		LegalName:       "Acme GmbH",
-		Country:         "DE",
-		TaxStatus:       tax.StatusExempt,
-		TaxExemptReason: "charity",
-		TaxIDType:       "eu_vat",
-		TaxID:           "DE123456789",
-	}
 
 	for _, tc := range []struct {
 		name       string
+		email      string // the customer's email at create
 		hasProfile bool
-		readFails  bool
+		unlinked   bool
+		input      UpdateInput
 		want       []syncCall
 	}{
 		{
-			name:       "profile read: the full sync carries it",
-			hasProfile: true,
-			want:       []syncCall{{method: "SyncBillingProfile", stripeCustomerID: "cus_stripe", email: "new@acme.test", profile: profile}},
+			name:  "email changed, no profile: the email alone",
+			email: "old@acme.test",
+			input: UpdateInput{Email: "new@acme.test"},
+			want:  []syncCall{{method: "SyncCustomer", stripeCustomerID: "cus_stripe", email: "new@acme.test"}},
 		},
 		{
-			name: "no profile: only the customer's own fields",
-			want: []syncCall{{method: "SyncCustomer", stripeCustomerID: "cus_stripe", email: "new@acme.test"}},
+			name:       "email changed, with a profile: the email alone",
+			email:      "old@acme.test",
+			hasProfile: true,
+			input:      UpdateInput{Email: "new@acme.test"},
+			want:       []syncCall{{method: "SyncCustomer", stripeCustomerID: "cus_stripe", email: "new@acme.test"}},
 		},
 		{
-			name:       "profile read fails: no Stripe call",
+			name:       "renamed, email unchanged: no Stripe call",
+			email:      "old@acme.test",
 			hasProfile: true,
-			readFails:  true,
-			want:       nil,
+			input:      UpdateInput{DisplayName: "Acme Two"},
+		},
+		{
+			name:  "no email, no profile, renamed: no Stripe call",
+			input: UpdateInput{DisplayName: "Acme Two"},
+		},
+		{
+			name:     "no Stripe customer linked: no Stripe call",
+			email:    "old@acme.test",
+			unlinked: true,
+			input:    UpdateInput{Email: "new@acme.test"},
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			mem := newMemoryStore()
-			var store Store = mem
-			if tc.readFails {
-				store = profileReadFails{mem}
-			}
-			svc := NewService(store)
-			cust, err := svc.Create(ctx, "t1", CreateInput{ExternalID: "ext_1", DisplayName: "Acme", Email: "old@acme.test"})
+			svc := NewService(mem)
+			cust, err := svc.Create(ctx, "t1", CreateInput{ExternalID: "ext_1", DisplayName: "Acme", Email: tc.email})
 			if err != nil {
 				t.Fatalf("create: %v", err)
 			}
-			if err := mem.SetStripeCustomerID(ctx, "t1", cust.ID, "cus_stripe"); err != nil {
-				t.Fatalf("link Stripe customer: %v", err)
+			if !tc.unlinked {
+				if err := mem.SetStripeCustomerID(ctx, "t1", cust.ID, "cus_stripe"); err != nil {
+					t.Fatalf("link Stripe customer: %v", err)
+				}
 			}
 			if tc.hasProfile {
-				bp := profile
+				bp := stripeSyncProfile
 				bp.CustomerID = cust.ID
 				if _, err := svc.UpsertBillingProfile(ctx, "t1", bp); err != nil {
 					t.Fatalf("save profile: %v", err)
@@ -105,21 +107,57 @@ func TestUpdate_StripeSync(t *testing.T) {
 			syncer := &recordingSyncer{}
 			svc.SetStripeSyncer(syncer)
 
-			updated, err := svc.Update(ctx, "t1", cust.ID, UpdateInput{Email: "new@acme.test"})
-			if err != nil {
+			if _, err := svc.Update(ctx, "t1", cust.ID, tc.input); err != nil {
 				t.Fatalf("update: %v", err)
-			}
-			if updated.Email != "new@acme.test" {
-				t.Errorf("email = %q, want the update saved", updated.Email)
-			}
-			for i := range syncer.calls {
-				// Compare what the profile says, not the bookkeeping the
-				// store adds.
-				p := &syncer.calls[i].profile
-				p.CustomerID, p.TenantID, p.ProfileStatus = "", "", ""
 			}
 			if !reflect.DeepEqual(syncer.calls, tc.want) {
 				t.Errorf("Stripe sync calls =\n%+v\nwant\n%+v", syncer.calls, tc.want)
+			}
+		})
+	}
+}
+
+// A profile save pushes the saved profile, with the customer's email, to the
+// linked Stripe customer, once.
+func TestUpsertBillingProfile_StripeSync(t *testing.T) {
+	ctx := context.Background()
+
+	for _, tc := range []struct {
+		name     string
+		unlinked bool
+		wantSync bool
+	}{
+		{name: "linked: one full sync with the saved profile", wantSync: true},
+		{name: "no Stripe customer linked: no Stripe call", unlinked: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			mem := newMemoryStore()
+			svc := NewService(mem)
+			cust, err := svc.Create(ctx, "t1", CreateInput{ExternalID: "ext_1", DisplayName: "Acme", Email: "billing@acme.test"})
+			if err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			if !tc.unlinked {
+				if err := mem.SetStripeCustomerID(ctx, "t1", cust.ID, "cus_stripe"); err != nil {
+					t.Fatalf("link Stripe customer: %v", err)
+				}
+			}
+			syncer := &recordingSyncer{}
+			svc.SetStripeSyncer(syncer)
+
+			bp := stripeSyncProfile
+			bp.CustomerID = cust.ID
+			saved, err := svc.UpsertBillingProfile(ctx, "t1", bp)
+			if err != nil {
+				t.Fatalf("save profile: %v", err)
+			}
+
+			var want []syncCall
+			if tc.wantSync {
+				want = []syncCall{{method: "SyncBillingProfile", stripeCustomerID: "cus_stripe", email: "billing@acme.test", profile: saved}}
+			}
+			if !reflect.DeepEqual(syncer.calls, want) {
+				t.Errorf("Stripe sync calls =\n%+v\nwant\n%+v", syncer.calls, want)
 			}
 		})
 	}
