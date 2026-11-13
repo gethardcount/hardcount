@@ -2,6 +2,7 @@ package billing_test
 
 import (
 	"context"
+	"database/sql"
 	"testing"
 	"time"
 
@@ -43,7 +44,8 @@ func TestManualInvoice_IsSimulatedFromCustomerPin(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, db, "Pinned Manual Corp")
 
 	frozen := time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)
-	clk, err := testClockStore.Create(ctx, tenantID, domain.TestClock{Name: "sim", FrozenTime: frozen})
+	clk, err := testClockStore.Create(ctx, tenantID, domain.TestClock{Name: "sim", FrozenTime: frozen},
+		func(*sql.Tx, domain.TestClock) error { return nil }) // no audit row: this test reads the invoice
 	if err != nil {
 		t.Fatalf("create test clock: %v", err)
 	}

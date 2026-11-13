@@ -2,10 +2,12 @@ package testclock
 
 import (
 	"context"
+	"database/sql"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
 )
 
@@ -15,13 +17,16 @@ func testDeps(billing BillingRunner) Deps {
 	n := noJobs{}
 	return Deps{
 		Billing: billing, Customers: n, Subs: n, Trials: n, Pauses: n,
-		Tax: n, Relief: n, Credits: n, Dunning: n,
+		Tax: n, Relief: n, Credits: n, Dunning: n, Audit: n,
 		PassDeadline: CatchupPassDeadline,
 	}
 }
 
-// noJobs is every clock job and reader with nothing to do.
+// noJobs is every clock job and reader with nothing to do, and an audit
+// writer that writes nothing.
 type noJobs struct{}
+
+func (noJobs) LogInTx(context.Context, *sql.Tx, audit.Entry) error { return nil }
 
 func (noJobs) RunCycleForClock(context.Context, string, string, int) (int, []error) { return 0, nil }
 func (noJobs) RetryPendingChargesForClock(context.Context, string, string, int) (int, []error) {
@@ -69,6 +74,7 @@ func TestNewService_RefusesAMissingDependency(t *testing.T) {
 		"Deps.Relief":       func(d *Deps) { d.Relief = nil },
 		"Deps.Credits":      func(d *Deps) { d.Credits = nil },
 		"Deps.Dunning":      func(d *Deps) { d.Dunning = nil },
+		"Deps.Audit":        func(d *Deps) { d.Audit = nil },
 		"Deps.PassDeadline": func(d *Deps) { d.PassDeadline = 0 },
 	}
 	for name, unset := range cases {

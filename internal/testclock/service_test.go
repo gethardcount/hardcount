@@ -435,7 +435,7 @@ func newMockStore() *mockStore {
 	}
 }
 
-func (m *mockStore) Create(_ context.Context, tenantID string, clk domain.TestClock) (domain.TestClock, error) {
+func (m *mockStore) Create(_ context.Context, tenantID string, clk domain.TestClock, _ AuditRow) (domain.TestClock, error) {
 	clk.ID = "c_" + clk.Name
 	clk.TenantID = tenantID
 	clk.Status = domain.TestClockStatusReady
@@ -461,7 +461,7 @@ func (m *mockStore) List(_ context.Context, _ string, _, _ int) ([]domain.TestCl
 	return out, len(out), nil
 }
 
-func (m *mockStore) Delete(_ context.Context, _, id string) error {
+func (m *mockStore) Delete(_ context.Context, _, id string, _ AuditRow) error {
 	if _, ok := m.clocks[id]; !ok {
 		return errs.ErrNotFound
 	}
@@ -469,7 +469,7 @@ func (m *mockStore) Delete(_ context.Context, _, id string) error {
 	return nil
 }
 
-func (m *mockStore) MarkAdvancing(_ context.Context, _, id string, newFrozenTime time.Time) (domain.TestClock, error) {
+func (m *mockStore) MarkAdvancing(_ context.Context, _, id string, newFrozenTime time.Time, _ AuditRow) (domain.TestClock, error) {
 	c, ok := m.clocks[id]
 	if !ok {
 		return domain.TestClock{}, errs.ErrNotFound
@@ -518,7 +518,7 @@ func (m *mockStore) MarkFailed(_ context.Context, _, id, reason string, sum doma
 	return c, nil
 }
 
-func (m *mockStore) RetryFromFailed(_ context.Context, _, id string) (domain.TestClock, error) {
+func (m *mockStore) RetryFromFailed(_ context.Context, _, id string, _ AuditRow) (domain.TestClock, error) {
 	c, ok := m.clocks[id]
 	if !ok {
 		return domain.TestClock{}, errs.ErrNotFound
