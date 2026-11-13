@@ -549,10 +549,11 @@ jobs:
     timeout-minutes: 15
     env:
       # Pinned, so a golangci-lint release cannot change CI results without a
-      # change in this repo: a newer release flags code this one passes (see
-      # #834). Bump it deliberately, with the fix for whatever the new version
-      # flags. The SHA-256 is the linux-amd64 archive's, from
-      # golangci-lint-<version>-checksums.txt in the same release.
+      # change in this repo. A newer release (2.15.0) flags code this one
+      # passes. The SA1019 finding on stripe-go's Params.Metadata is excluded
+      # in .golangci.yml until #834 lands. The SHA-256 is the linux-amd64
+      # archive's, from golangci-lint-<version>-checksums.txt in the same
+      # release.
       GOLANGCI_LINT_VERSION: 2.14.0
       GOLANGCI_LINT_SHA256: ab90aeb7b066f92a33415b638a50fe5344bbb75a0d32ad30cc248d88f81032ab
     steps:

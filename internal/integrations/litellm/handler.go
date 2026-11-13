@@ -449,7 +449,9 @@ type bodyDecoder struct {
 }
 
 // array reads a JSON array of payloads one element at a time. The decoder's
-// buffer holds about one record, not the whole array.
+// buffer holds about one record, not the whole array. When the body ends
+// before the closing ], Go 1.27's More reports true and the next Decode
+// fails, so the 400 names the record that would have come next.
 func (d *bodyDecoder) array() ([]StandardLoggingPayload, error) {
 	if _, err := d.dec.Token(); err != nil { // the opening [
 		return nil, err
@@ -519,9 +521,13 @@ func (e *recordError) Unwrap() error { return e.err }
 // decoder's buffer not yet decoded. A syntax error is placed at its
 // offending byte: the error's Offset counts the bytes the decoder read, up
 // to and including that byte. A truncated record is placed at the body's
-// end, and a record whose JSON parsed but did not fit (a string id given as
-// a number) on the line it ends on. A body over the cap keeps its
-// *http.MaxBytesError, which the handler answers with 413.
+// end. So is a syntax error at the body's last byte, which is how Go 1.27
+// reports a body that ends between array elements ("[\n{...}\n", with or
+// without a comma after the record): "unexpected end of JSON input", with
+// Offset at the end of the body. A record whose JSON parsed but did not fit
+// (a string id given as a number) is placed on the line it ends on. A body
+// over the cap keeps its *http.MaxBytesError, which the handler answers
+// with 413.
 func (d *bodyDecoder) recordFailed(record int, err error) error {
 	var tooBig *http.MaxBytesError
 	if errors.As(err, &tooBig) {
@@ -535,7 +541,9 @@ func (d *bodyDecoder) recordFailed(record int, err error) error {
 	case errors.As(err, &syntax):
 		// The offending byte, counted from where rest begins in the body.
 		at := d.start + syntax.Offset - 1 - (d.lines.read - int64(len(rest)))
-		if at >= 0 && at <= int64(len(rest)) {
+		if d.lines.eof && at == int64(len(rest))-1 {
+			upto = len(rest) // the body's last byte: placed at the body's end
+		} else if at >= 0 && at <= int64(len(rest)) {
 			upto = int(at) // the bytes before the offending one
 		}
 	case errors.Is(err, io.ErrUnexpectedEOF):
@@ -546,17 +554,22 @@ func (d *bodyDecoder) recordFailed(record int, err error) error {
 
 var newline = []byte{'\n'}
 
-// lineCounter counts the bytes and newlines read through it.
+// lineCounter counts the bytes and newlines read through it, and records
+// when the body has ended.
 type lineCounter struct {
 	r        io.Reader
 	read     int64
 	newlines int
+	eof      bool
 }
 
 func (c *lineCounter) Read(p []byte) (int, error) {
 	n, err := c.r.Read(p)
 	c.read += int64(n)
 	c.newlines += bytes.Count(p[:n], newline)
+	if errors.Is(err, io.EOF) {
+		c.eof = true
+	}
 	return n, err
 }
 

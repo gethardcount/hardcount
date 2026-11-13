@@ -3,9 +3,12 @@ package litellm
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
 )
 
 // liteLLMNDJSON is the body LiteLLM's generic_api logger sends with
@@ -68,7 +71,9 @@ func TestSpend_NDJSONBatchIsAccepted(t *testing.T) {
 // Mutation-verify: drop the newlines still buffered from the count in
 // recordFailed → the lines are wrong and this fails. Count the offending
 // byte from the body's first byte, not the decoder's → the rows with blank
-// lines before the body fail.
+// lines before the body fail. Place a syntax error at the body's last byte
+// at that byte, not at the body's end → the rows for an array the body ends
+// in fail.
 func TestSpend_BadNDJSONLineIs400WithItsLine(t *testing.T) {
 	ok := func(id string) string {
 		b, _ := json.Marshal(spendPayload(id))
@@ -89,6 +94,11 @@ func TestSpend_BadNDJSONLineIs400WithItsLine(t *testing.T) {
 		{"blank lines before an array", "\n\n[\n" + ok("a") + ",\nnot json\n]", "line 5 (record 2)"},
 		{"blank lines before NDJSON", "\n\n" + ok("a") + "\nnot json", "line 4 (record 2)"},
 		{"a record over two lines, bad on its second", ok("a") + "\n{\"id\":\n\"b\" x}", "line 3 (record 2)"},
+		// A body that ends inside an array is placed where it ends, as a
+		// truncated record is, and names the record that would come next.
+		{"an array the body ends in", "[\n" + ok("a") + "\n", "line 3 (record 2)"},
+		{"an array the body ends in after a comma", "[\n" + ok("a") + ",\n", "line 3 (record 2)"},
+		{"an array the body ends in on its last record's line", "[\n" + ok("a"), "line 2 (record 2)"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			ing := &fakeIngester{}
@@ -98,6 +108,33 @@ func TestSpend_BadNDJSONLineIs400WithItsLine(t *testing.T) {
 			}
 			if ing.calls != 0 {
 				t.Fatalf("%d calls written from a refused send, want none", ing.calls)
+			}
+		})
+	}
+}
+
+// TestDecodeBody_ReadEndingAtTheBadByteIsNotTheBodyEnd: a read from the
+// network can end on any byte. When it ends on a record's offending byte —
+// here a raw newline inside a string — that byte is the last one read but
+// not the body's last byte. So the 400 names the line the byte is on, not
+// the line after it, which it names only when the body ends there.
+// Mutation-verify: drop the d.lines.eof check in recordFailed → the line
+// after the bad byte is named and this fails.
+func TestDecodeBody_ReadEndingAtTheBadByteIsNotTheBodyEnd(t *testing.T) {
+	for _, c := range []struct {
+		name, body   string
+		line, record int
+	}{
+		{"an element of an array", "[\n{\"id\":\"a\"},\n{\"id\":\"b\nc\"}\n]", 3, 2},
+		{"an NDJSON record", "{\"id\":\"a\"}\n{\"id\":\"b\nc\"}", 2, 2},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			// One byte a read, so every read ends on the byte just read.
+			req := httptest.NewRequest(http.MethodPost, "/spend", iotest.OneByteReader(strings.NewReader(c.body)))
+			_, err := decodeBody(req)
+			var bad *recordError
+			if !errors.As(err, &bad) || bad.line != c.line || bad.record != c.record {
+				t.Fatalf("error %v, want record %d on line %d", err, c.record, c.line)
 			}
 		})
 	}
