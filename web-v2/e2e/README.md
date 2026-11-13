@@ -126,7 +126,11 @@ the screen, and that the main things an operator does work end to end.
   must read Past due when the operator clicks back to them, with no reload.
   An invoice on a clock made through the API after the clock list was read
   must show its clock's Simulated time line, not "Test clock deleted", and
-  count Due in from the clock's time.
+  count Due in from the clock's time. While the browser holds the clock list,
+  an invoice on a clock must read Open with no Due in or Past due, and count
+  Due in from its clock once the list arrives. When the list read fails, the
+  page must show that load error once, with a Retry that loads it. When the
+  clock page sees an advance finish, the clock list must read Ready.
 - `global.setup.ts` runs first. It seeds data through the API (code in
   `fixtures/`) and signs in once through the login page. The other tests reuse
   that session.

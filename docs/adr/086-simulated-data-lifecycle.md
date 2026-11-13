@@ -114,3 +114,5 @@ export. Wall-clock `created_at` primacy (ADR-030) is unchanged.
 ## Amendment 2026-11-13: the dashboard asks one hook for "now"
 
 The constructors in `web-v2/src/lib/effectiveNow.ts` are now `clockTime(frozenISO)`, which takes a required clock time, and `wallClockNow()`. `effectiveNow(frozenISO?)` is gone. A page takes a record's "now" from `useNowFor(record)` or `useNowResolver()` in `web-v2/src/hooks/useNow.ts`, which replace `useEffectiveNow` and `useEffectiveNowResolver`. Every record's "now" comes from those hooks, which read a clock's time from the clock list, and every clock change refreshes the list. The one exception is the clock page, which measures its own advance picker from its own read of that clock. The rest of this record is unchanged.
+
+While a record's "now" is not known (the record or its clock has not loaded, or the clock list failed to load), both hooks answer `undefined`, and a page draws nothing counted from it: only stored dates, amounts and statuses.
