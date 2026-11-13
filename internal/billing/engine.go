@@ -3082,7 +3082,7 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	periodStart := *sub.CurrentBillingPeriodStart
 	periodEnd := *sub.CurrentBillingPeriodEnd
 
-	// Trial lifecycle: advance-without-bill, cancel-free, or flip-to-active.
+	// Trial lifecycle: cancel-free, or flip-to-active.
 	sub, trialDone, err := e.handleTrialState(ctx, sub, now, periodStart, periodEnd)
 	if trialDone {
 		return false, err
@@ -3661,10 +3661,10 @@ func (e *Engine) buildOnCreateInvoice(ctx context.Context, sub domain.Subscripti
 
 // onCreateBaseLines is the day-1 in_advance invoice's base-fee lines for
 // [periodStart, periodEnd]: one line per in_advance item, prorated when the
-// period is shorter than a full plan cycle (a calendar stub). Moved out of
-// buildOnCreateInvoice unchanged so the operator preview of a trialing
-// subscription (previewTrialEnd) shows the invoice the trial end issues with
-// this one copy of the math.
+// period is shorter than a full plan cycle (a calendar stub). The day-1
+// invoice (buildOnCreateInvoice), the in-advance swap's new period
+// (BillOnPlanSwapTx) and the operator preview of a trialing subscription
+// (previewTrialEnd) share this one copy of the math.
 func onCreateBaseLines(sub domain.Subscription, plans map[string]domain.Plan, advanceItems []domain.SubscriptionItem, periodStart, periodEnd time.Time, invoiceCurrency string, billingLoc *time.Location) ([]closeBaseLine, error) {
 	out := make([]closeBaseLine, 0, len(advanceItems))
 	periodDays := roundDays(periodEnd.Sub(periodStart))
@@ -3680,15 +3680,12 @@ func onCreateBaseLines(sub domain.Subscription, plans map[string]domain.Plan, ad
 		baseFee := fullFee
 		description := fmt.Sprintf("%s - base fee (qty %d)", plan.Name, it.Quantity)
 
-		cycleDays := domain.CyclePeriod{
-			Start: periodStart, End: periodEnd, BillingTime: sub.BillingTime,
-			Interval: plan.BillingInterval, Loc: billingLoc, StoredAnchor: sub.BillingAnchorDay,
-		}.CycleDays()
-		if periodDays > 0 && periodDays < cycleDays {
-			if baseFee, err = prorateCents(fullFee, periodDays, cycleDays); err != nil {
+		fullCycleDays := roundDays(advanceBillingPeriod(periodStart, plan.BillingInterval, billingLoc, sub.BillingAnchorDay).Sub(periodStart))
+		if periodDays > 0 && fullCycleDays > 0 && periodDays < fullCycleDays {
+			if baseFee, err = prorateCents(fullFee, periodDays, fullCycleDays); err != nil {
 				return nil, err
 			}
-			description = fmt.Sprintf("%s - base fee (qty %d, prorated %d/%d days)", plan.Name, it.Quantity, periodDays, cycleDays)
+			description = fmt.Sprintf("%s - base fee (qty %d, prorated %d/%d days)", plan.Name, it.Quantity, periodDays, fullCycleDays)
 		}
 
 		unitAmount := plan.BaseAmountCents

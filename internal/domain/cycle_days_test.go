@@ -93,6 +93,7 @@ func TestCycleDays_Rows(t *testing.T) {
 		{"seam rolled in UTC from IST's Jan 2 on anchor 2 is 32 days: its own length", CyclePeriod{d(utc, 2027, 1, 1, 18, 30), d(utc, 2027, 2, 2, 18, 30), anniv, monthly, utc, 2}, 32},
 		{"no stored anchor (legacy row): Jan 31 to Mar 3 is its own length", CyclePeriod{d(utc, 2027, 1, 31, 0, 0), d(utc, 2027, 3, 3, 0, 0), anniv, monthly, utc, 0}, 31},
 		{"no stored anchor, Jan 15 to Feb 15", CyclePeriod{d(utc, 2027, 1, 15, 0, 0), d(utc, 2027, 2, 15, 0, 0), anniv, monthly, utc, 0}, 31},
+		{"yearly opened in IST on 2028-03-01, anchor 1, read in UTC from Feb 29: 365", CyclePeriod{d(ist, 2028, 3, 1, 0, 0), d(ist, 2029, 3, 1, 0, 0), anniv, yearly, utc, 1}, 365},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

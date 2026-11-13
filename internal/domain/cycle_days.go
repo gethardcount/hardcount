@@ -30,7 +30,9 @@ type CyclePeriod struct {
 // A period is on the anchor when its start lies on the stored anchor (clamped
 // to the month's end) and it ends where that start and anchor say. The end
 // test sends a period cut short by a swap, which rewrote the stored anchor,
-// to the nominal branch.
+// to the nominal branch. A stored anchor of 0 (a row from before the column)
+// counts as on the anchor and advances by plain month arithmetic, so such a
+// period is its own length.
 func (p CyclePeriod) CycleDays() int {
 	loc := p.Loc
 	if loc == nil {

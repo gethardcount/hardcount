@@ -50,13 +50,17 @@ func storedAnchorCycle(p domain.CyclePeriod) int {
 // readerSees lists the kinds of period each reader is given. The in-advance
 // close (R2) bills the period it rolls, which ends where NextBillingPeriodEnd
 // says in the tenant's zone now; the others read the stored period, which a
-// zone change can leave as it was opened.
+// zone change can leave as it was opened. The on-create lines (R3) bill a new
+// subscription's first period, the trial's first paid period at trial end
+// (written at create or ExtendTrial, so possibly in another zone), the
+// in-advance swap's period from the swap's instant (BillOnPlanSwapTx), and
+// the trial-end preview (previewTrialEnd).
 var readerSees = map[string][]string{
-	"R1": {"plain", "calendar", "calendar-stub", "calendar-stale", "cut-short", "seam", "zone-changed", "no-anchor"},
+	"R1": {"plain", "calendar", "calendar-stub", "calendar-stale", "cut-short", "seam", "zone-changed", "no-anchor", "swap"},
 	"R2": {"plain", "calendar", "calendar-stale", "seam", "no-anchor"},
-	"R3": {"plain", "calendar", "calendar-stub"},
-	"R4": {"plain", "calendar", "calendar-stub", "calendar-stale", "seam", "zone-changed", "no-anchor"},
-	"R5": {"plain", "calendar", "calendar-stub", "calendar-stale", "seam", "zone-changed", "no-anchor"},
+	"R3": {"plain", "calendar", "calendar-stub", "zone-changed", "swap"},
+	"R4": {"plain", "calendar", "calendar-stub", "calendar-stale", "seam", "zone-changed", "no-anchor", "swap"},
+	"R5": {"plain", "calendar", "calendar-stub", "calendar-stale", "seam", "zone-changed", "no-anchor", "swap"},
 }
 
 func daysInMonth(y int, m time.Month) int { return time.Date(y, m+1, 0, 0, 0, 0, 0, time.UTC).Day() }
@@ -91,6 +95,11 @@ func cycleGrid(t *testing.T) []gridPeriod {
 						start := at(y, m, min(anchor, daysInMonth(y, m)), 0)
 						end := domain.NextBillingPeriodEnd(start, bt, iv, loc, anchor)
 						add("plain", domain.CyclePeriod{Start: start, End: end, BillingTime: bt, Interval: iv, Loc: loc, StoredAnchor: anchor})
+						// The in-advance swap opens a period at the swap's instant,
+						// anchored on its day.
+						sw := time.Date(y, m, min(anchor, daysInMonth(y, m)), 13, 17, 0, 0, loc)
+						swAnchor := domain.AnchorDayFor(sw, bt, iv, loc)
+						add("swap", domain.CyclePeriod{Start: sw, End: domain.NextBillingPeriodEnd(sw, bt, iv, loc, swAnchor), BillingTime: bt, Interval: iv, Loc: loc, StoredAnchor: swAnchor})
 						// Legacy rows with no stored anchor advance by AddDate.
 						legacyEnd := domain.AddBillingInterval(start, iv, loc, 0)
 						add("no-anchor", domain.CyclePeriod{Start: start, End: legacyEnd, BillingTime: bt, Interval: iv, Loc: loc})
@@ -129,6 +138,7 @@ func cycleGrid(t *testing.T) []gridPeriod {
 			cal("calendar", first, next, 0)
 			for d := 2; d <= daysInMonth(y, m); d++ {
 				cal("calendar-stub", at(y, m, d, 0), next, 0)
+				cal("swap", time.Date(y, m, d, 13, 17, 0, 0, loc), next, 0)
 			}
 			for stale := 1; stale <= 31; stale++ {
 				cal("calendar-stale", first, next, stale)
@@ -151,14 +161,10 @@ func cycleGrid(t *testing.T) []gridPeriod {
 	return out
 }
 
-// callsCycleDays lists the readers that already divide by CycleDays: they
-// must give main's answer for every period they are given.
-var callsCycleDays = map[string]bool{"R3": true}
-
 // TestCycleDays_ComparedWithTheReaders compares CycleDays with each reader's
-// denominator on main over every kind of period the reader is given. A reader
-// that calls CycleDays must not differ; for the others, every difference must
-// have a named reason, and the counts by reader and reason are logged.
+// denominator on main over every kind of period the reader is given. Every
+// difference must have a named reason, and CycleDays must be the value the
+// design gives for that reason; the counts by reader and reason are logged.
 func TestCycleDays_ComparedWithTheReaders(t *testing.T) {
 	grid := cycleGrid(t)
 	type key struct{ reader, kind string }
@@ -175,20 +181,23 @@ func TestCycleDays_ComparedWithTheReaders(t *testing.T) {
 			}
 			k := key{reader, g.kind}
 			seen[k]++
-			if want := oracle(g.p); want != got {
-				differ[k]++
-				class := differenceClass(g)
-				byClass[key{reader, class}]++
-				if callsCycleDays[reader] {
-					t.Errorf("%s calls CycleDays and differs from main: %s main %d, CycleDays %d: %+v", reader, g.kind, want, got, g.p)
-				} else if class == "" {
-					t.Errorf("%s %s: main %d, CycleDays %d, in no named class: %+v", reader, g.kind, want, got, g.p)
-				}
-				if _, ok := sample[k]; !ok {
-					sample[k] = fmt.Sprintf("[%s, %s) %s %s %s anchor %d: main %d, CycleDays %d",
-						g.p.Start.In(g.p.Loc).Format("2006-01-02 15:04"), g.p.End.In(g.p.Loc).Format("2006-01-02 15:04"),
-						g.p.Loc, g.p.BillingTime, g.p.Interval, g.p.StoredAnchor, want, got)
-				}
+			want := oracle(g.p)
+			if want == got {
+				continue
+			}
+			differ[k]++
+			class, designed := differenceClass(g)
+			byClass[key{reader, class}]++
+			switch {
+			case class == "":
+				t.Errorf("%s %s: main %d, CycleDays %d, in no named class: %+v", reader, g.kind, want, got, g.p)
+			case got != designed:
+				t.Errorf("%s %s %q: CycleDays %d, the design gives %d: %+v", reader, g.kind, class, got, designed, g.p)
+			}
+			if _, ok := sample[k]; !ok {
+				sample[k] = fmt.Sprintf("[%s, %s) %s %s %s anchor %d: main %d, CycleDays %d",
+					g.p.Start.In(g.p.Loc).Format("2006-01-02 15:04"), g.p.End.In(g.p.Loc).Format("2006-01-02 15:04"),
+					g.p.Loc, g.p.BillingTime, g.p.Interval, g.p.StoredAnchor, want, got)
 			}
 		}
 	}
@@ -216,43 +225,49 @@ func TestCycleDays_ComparedWithTheReaders(t *testing.T) {
 		return classes[i].kind < classes[j].kind
 	})
 	for _, k := range classes {
-		t.Logf("class %s %-28s %6d", k.reader, k.kind, byClass[k])
+		t.Logf("class %s %-30s %6d", k.reader, k.kind, byClass[k])
 	}
 }
 
-// differenceClass names why CycleDays and main differ for a period, or ""
+// differenceClass names why CycleDays and main can differ for a period, and
+// the number of days the design gives it for that reason, computed from the
+// period's shape: the period's own length, one interval from its start on
+// its own day (clamped), or the days in its start's month. It returns ""
 // when no named reason applies.
-func differenceClass(g gridPeriod) string {
+func differenceClass(g gridPeriod) (string, int) {
 	p := g.p
+	local := p.Start.In(p.Loc)
 	own := roundDays(p.End.Sub(p.Start))
+	monthDays := daysInMonth(local.Year(), local.Month())
 	calendar := p.Interval != domain.BillingYearly && p.BillingTime == domain.BillingTimeCalendar
 	switch {
+	case calendar && own > monthDays:
+		// Read in a new zone, a calendar period can start on the last day of
+		// the month before.
+		return "longer than one interval", own
 	case calendar && p.StoredAnchor > 0:
-		return "calendar after yearly"
-	case calendar && own > daysInMonth(p.Start.In(p.Loc).Year(), p.Start.In(p.Loc).Month()):
-		// Read in a new zone, a calendar period can start on the last day
-		// of the month before.
-		return "longer than one interval"
+		return "calendar after yearly", monthDays
 	case calendar:
-		return ""
+		return "", 0
 	case p.StoredAnchor == 0:
-		return "no stored anchor"
+		// A legacy period advanced by AddDate is at least as long as one
+		// interval from its own day.
+		return "no stored anchor", own
 	}
+	nominal := roundDays(domain.AddBillingInterval(p.Start, p.Interval, p.Loc, local.Day()).Sub(p.Start))
 	onAnchor := domain.IsPeriodStartOnAnchor(p.Start, p.StoredAnchor, p.Loc)
-	nominal := roundDays(domain.AddBillingInterval(p.Start, p.Interval, p.Loc, p.Start.In(p.Loc).Day()).Sub(p.Start))
 	switch {
 	case own > nominal && g.kind == "cut-short":
-		return "cut short, longer than nominal"
+		return "cut short, longer than nominal", own
 	case own > nominal:
-		return "longer than one interval"
-	case g.kind == "cut-short":
-		return ""
-	case !onAnchor && p.Start.In(p.Loc).Day() >= 29:
-		return "seam from day 29-31"
-	case !onAnchor:
-		return "seam"
+		return "longer than one interval", own
+	case g.kind == "cut-short", onAnchor:
+		return "", 0
+	case local.Day() >= 29:
+		return "seam from day 29-31", nominal
+	default:
+		return "seam", nominal
 	}
-	return "seam ending off the anchor"
 }
 
 func contains(xs []string, x string) bool {
