@@ -363,8 +363,8 @@ func beginningOfDayIn(t time.Time, loc *time.Location) time.Time {
 // Monthly + anniversary: start = trial_end, end = trial_end + 1 month.
 // No stub — cycle anchors on the trial-end instant.
 //
-// Subsequent cycles roll forward via billOnePeriod's per-cycle
-// advanceBillingPeriod call (which is already interval-aware).
+// Subsequent cycles roll forward at each cycle close
+// (domain.NextBillingPeriodEnd).
 func firstPeriodAfterTrial(trialEnd time.Time, billingTime domain.SubscriptionBillingTime, interval domain.BillingInterval, loc *time.Location) (time.Time, time.Time, int) {
 	ps := beginningOfDayIn(trialEnd, loc)
 	anchorDay := domain.AnchorDayFor(ps, billingTime, interval, loc)

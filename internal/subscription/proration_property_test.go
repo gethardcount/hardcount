@@ -1,6 +1,7 @@
 package subscription
 
 import (
+	"math"
 	"math/rand/v2"
 	"testing"
 	"time"
@@ -265,20 +266,17 @@ func TestProperty_ProrationCents_DegenerateAndOverRangePeriods(t *testing.T) {
 	}
 }
 
-// TestProperty_FullBillingCycleDays_SaneAcrossZonesAndAnchors targets the code
-// where this codebase's proration bugs have actually lived. The properties
-// above exercise prorationCents, which is pure integer arithmetic; ADR-091's
-// timezone-seam overbill and the Jan-31→Feb-28 clamp were both in the DATE
-// MATH that produces the denominator.
+// TestProperty_CycleDays_SaneAcrossZonesAndAnchors targets the code where
+// this codebase's proration bugs have lived: the date math that produces the
+// denominator (ADR-091's seam overbill, the Jan 31 → Feb 28 clamp), not
+// prorationCents' integer arithmetic above.
 //
-// The anchor is generated ALIGNED with the period start, because that is the
-// only state the writers produce: domain.AnchorDayFor derives the anchor from
-// periodStart.Day(), and both call sites (subscription create, and the plan
-// swap which re-anchors to `now` while setting CurrentBillingPeriodStart=now)
-// keep them consistent. Generating arbitrary anchors would test a state the
-// system cannot reach — see the hazard test below for why that distinction
-// matters.
-func TestProperty_FullBillingCycleDays_SaneAcrossZonesAndAnchors(t *testing.T) {
+// A period's stored anchor need not agree with its start: a swap rewrites the
+// anchor, and a zone change reads the start on another day. So the anchor is
+// any day 1 to 31, and the end anything up to the boundary the start and that
+// anchor give. CycleDays is never shorter than the period, and is either its
+// own length or one interval: 28 to 31 days, or 365 to 366 for yearly.
+func TestProperty_CycleDays_SaneAcrossZonesAndAnchors(t *testing.T) {
 	zones := []string{"UTC", "Asia/Kolkata", "America/New_York", "Pacific/Chatham", "Australia/Lord_Howe"}
 	locs := make([]*time.Location, 0, len(zones))
 	for _, z := range zones {
@@ -291,64 +289,36 @@ func TestProperty_FullBillingCycleDays_SaneAcrossZonesAndAnchors(t *testing.T) {
 	r := genRand()
 	for i := 0; i < propIters; i++ {
 		loc := locs[r.IntN(len(locs))]
-		start := time.Date(2024, time.Month(r.IntN(12)+1), r.IntN(28)+1,
+		start := time.Date(2024, time.Month(r.IntN(12)+1), r.IntN(31)+1,
 			r.IntN(24), r.IntN(60), 0, 0, loc).AddDate(r.IntN(10), 0, 0)
+		anchor := r.IntN(31) + 1
 
 		for _, iv := range []domain.BillingInterval{domain.BillingMonthly, domain.BillingYearly} {
 			for _, bt := range []domain.SubscriptionBillingTime{domain.BillingTimeCalendar, domain.BillingTimeAnniversary} {
-				// Exactly how production derives it.
-				anchor := domain.AnchorDayFor(start, bt, iv, loc)
-				days := fullBillingCycleDays(start, iv, loc, anchor)
+				boundary := domain.NextBillingPeriodEnd(start, bt, iv, loc, anchor)
+				span := boundary.Sub(start)
+				if span <= 0 {
+					continue
+				}
+				end := start.Add(time.Duration(r.Int64N(int64(span))) + time.Minute)
+				if end.After(boundary) {
+					end = boundary
+				}
+				p := domain.CyclePeriod{Start: start, End: end, BillingTime: bt, Interval: iv, Loc: loc, StoredAnchor: anchor}
+				days := int64(p.CycleDays())
+				own := int64(math.Round(end.Sub(start).Hours() / 24))
 
 				lo, hi := int64(28), int64(31)
 				if iv == domain.BillingYearly {
 					lo, hi = 365, 366
 				}
-				if days < lo || days > hi {
-					t.Fatalf("cycle length outside the only legal range: start=%s zone=%s billing=%s anchor=%d interval=%s got=%d want %d..%d",
-						start.Format(time.RFC3339), loc, bt, anchor, iv, days, lo, hi)
+				if days < own || (days != own && (days < lo || days > hi)) {
+					t.Fatalf("CycleDays = %d: want the period's own %d days or %d..%d, and never less than its own; start=%s end=%s zone=%s billing=%s anchor=%d interval=%s",
+						days, own, lo, hi, start.Format(time.RFC3339), end.Format(time.RFC3339), loc, bt, anchor, iv)
 				}
 			}
 		}
 	}
-}
-
-// TestFullBillingCycleDays_MisalignedAnchorYieldsStubLength documents a hazard
-// rather than a live defect, and exists so the next person does not have to
-// rediscover it.
-//
-// fullBillingCycleDays is the guard against the stub-period overcharge: its
-// doc states proration must divide by the FULL cycle, never by the current
-// period length. That holds while anchorDay agrees with periodStart.Day(),
-// which is what AnchorDayFor guarantees today. If a future change ever writes
-// an anchor that disagrees with the period start, this function silently
-// returns the distance to the next anchor — a STUB length — and reintroduces
-// the exact overcharge it was written to prevent, with no error anywhere.
-//
-// Measured: signup Oct 24 with an anchor on the 6th yields a 13-day
-// denominator instead of 31, charging 1077c for an upgrade that should cost
-// 452c — 2.38x. This test pins that behaviour so the day it becomes reachable,
-// something fails.
-//
-// Found by property testing: every existing test of this function passes
-// anchorDay=0, so the parameter the single production caller actually supplies
-// had never been exercised.
-func TestFullBillingCycleDays_MisalignedAnchorYieldsStubLength(t *testing.T) {
-	loc := time.UTC
-	start := time.Date(2030, 10, 24, 0, 0, 0, 0, loc)
-
-	aligned := fullBillingCycleDays(start, domain.BillingMonthly, loc, domain.AnchorDayFor(start, domain.BillingTimeAnniversary, domain.BillingMonthly, loc))
-	if aligned < 28 || aligned > 31 {
-		t.Fatalf("aligned anchor must give a real cycle: got %d", aligned)
-	}
-
-	misaligned := fullBillingCycleDays(start, domain.BillingMonthly, loc, 6)
-	if misaligned >= 28 {
-		t.Fatalf("EXPECTED HAZARD GONE: a misaligned anchor now yields %d days. If the function "+
-			"was hardened to defend against drift, delete this test and the warning in its doc; "+
-			"if a writer changed, re-check that anchor and period start still agree.", misaligned)
-	}
-	t.Logf("hazard present as documented: aligned=%dd, misaligned(anchor=6)=%dd", aligned, misaligned)
 }
 
 func abs64(v int64) int64 {
