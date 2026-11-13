@@ -10235,10 +10235,11 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "422":
           description: |
-            `limit` or `offset` is out of range or not a whole number, the
-            request sends the removed `after` cursor, `sort` or `dir` is not
-            one of its values. `param` names it, and for `sort` and `dir`
-            the message lists the allowed values.
+            `status` is not one of its values, `limit` or `offset` is out of
+            range or not a whole number, the request sends the removed
+            `after` cursor, or `sort` or `dir` is not one of its values.
+            `param` names it, and for `status`, `sort` and `dir` the
+            message lists the allowed values.
           content:
             application/json:
               schema:
@@ -13035,9 +13036,10 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "422":
           description: |
-            `limit` or `offset` is out of range or not a whole number, the
-            request sends the removed `after` cursor, `sort` or `dir` is not
-            one of its values. `param` names it, and for `sort` and `dir`
+            `status` or `refund_status` is not one of its values, `limit` or
+            `offset` is out of range or not a whole number, the request sends
+            the removed `after` cursor, or `sort` or `dir` is not one of its
+            values. `param` names it, and for the filters, `sort` and `dir`
             the message lists the allowed values.
           content:
             application/json:
@@ -13403,10 +13405,11 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "422":
           description: |
-            `limit` or `offset` is out of range or not a whole number, the
-            request sends the removed `after` cursor, `sort` or `dir` is not
-            one of its values. `param` names it, and for `sort` and `dir`
-            the message lists the allowed values.
+            `entry_type` is not one of its values, `limit` or `offset` is out
+            of range or not a whole number, the request sends the removed
+            `after` cursor, or `sort` or `dir` is not one of its values.
+            `param` names it, and for `entry_type`, `sort` and `dir` the
+            message lists the allowed values.
           content:
             application/json:
               schema:
@@ -19020,11 +19023,12 @@ paths:
           $ref: "#/components/responses/Forbidden"
         "422":
           description: |
-            `limit` or `offset` is out of range or not a whole number, the
-            request sends the removed `after` cursor, `sort` or `dir` is not
-            one of its values, `from` or `to` is neither an RFC 3339 time nor
-            a YYYY-MM-DD date, or `to` is before `from`. `param` names it, and
-            for `sort` and `dir` the message lists the allowed values.
+            `status` or `payment_status` is not one of its values, `limit` or
+            `offset` is out of range or not a whole number, the request sends
+            the removed `after` cursor, `sort` or `dir` is not one of its
+            values, `from` or `to` is neither an RFC 3339 time nor a YYYY-MM-DD
+            date, or `to` is before `from`. `param` names it, and for the
+            filters, `sort` and `dir` the message lists the allowed values.
           content:
             application/json:
               schema:

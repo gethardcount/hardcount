@@ -521,6 +521,8 @@ func TestCustomerService_RotateCostDashboardToken(t *testing.T) {
 func TestCustomerService_BillingProfile(t *testing.T) {
 	store := newMemoryStore()
 	svc := NewService(store)
+	// No subscriptions: the profile currency guard has nothing to refuse.
+	svc.SetSubscriptionChecker(&fakeSubChecker{})
 	ctx := context.Background()
 
 	created, _ := svc.Create(ctx, "tenant1", CreateInput{

@@ -115,6 +115,27 @@ func TestArchive_FailsClosedWithoutChecker(t *testing.T) {
 	}
 }
 
+// TestBillingProfileCurrency_FailsClosedWithoutChecker: with no checker
+// wired, a profile currency is refused, as an archive is. Saved unchecked, it
+// could relabel a subscription's prices in another currency. A profile with
+// no currency checks nothing, so it still saves.
+func TestBillingProfileCurrency_FailsClosedWithoutChecker(t *testing.T) {
+	svc, cust := newArchiveTestSvc(t, nil)
+	if _, err := svc.UpsertBillingProfile(context.Background(), "t1", domain.CustomerBillingProfile{
+		CustomerID: cust.ID, Currency: "USD",
+	}); err == nil {
+		t.Fatal("profile currency without a wired checker must fail closed")
+	}
+	if _, err := svc.GetBillingProfile(context.Background(), "t1", cust.ID); !errors.Is(err, errs.ErrNotFound) {
+		t.Errorf("the refused profile was saved: GetBillingProfile err = %v, want not found", err)
+	}
+	if _, err := svc.UpsertBillingProfile(context.Background(), "t1", domain.CustomerBillingProfile{
+		CustomerID: cust.ID, LegalName: "Guard Co",
+	}); err != nil {
+		t.Fatalf("profile with no currency: %v", err)
+	}
+}
+
 // TestBillingProfileCurrency_Guard locks the ADR-067 currency rules: format
 // validation + normalization always; mismatch vs a billing subscription's
 // plan currency → 409.

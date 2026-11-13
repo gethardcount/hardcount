@@ -60,8 +60,9 @@ The billing-profile guard read at most 100 subscriptions of each status, newest 
 - **The guard uses G3's own query (iv).** It reads every draft, trialing and active subscription of the customer, with a pending plan change's plan, in one statement with no page. The profile guard and the pin judge the same set.
 - **The ADR-067 checker's statuses parameter is gone.** Its read serves only the archive guard, which leaves drafts out.
 - **The refusal names the subscription by its code,** as G3's refusals do.
+- **With no checker wired, the guard refuses the currency,** as the archive guard does (ADR-067). It logged a warning and saved the profile unchecked.
 
-Test: `TestBillingProfileCurrency_ChecksEveryLiveSubscription` (internal/api).
+Tests: `TestBillingProfileCurrency_ChecksEveryLiveSubscription` (internal/api), `TestBillingProfileCurrency_FailsClosedWithoutChecker` (internal/customer).
 
 ## Amendment 2026-11-10: G3's create pin and the profile guard run under the customer-rules lock
 

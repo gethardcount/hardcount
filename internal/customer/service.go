@@ -762,19 +762,17 @@ func (s *Service) UpsertBillingProfile(ctx context.Context, tenantID string, bp 
 // currency of the customer's draft, trialing or active subscriptions
 // (InvalidState). The profile currency replaces the plan currency on every
 // invoice, so a mismatch would relabel plan prices without conversion
-// ($100 invoiced as €100). An empty currency checks nothing.
-// UpsertBillingProfile calls it under the customer-rules lock.
+// ($100 invoiced as €100). An empty currency checks nothing, and a currency
+// with no checker wired is refused. UpsertBillingProfile calls it under the
+// customer-rules lock.
 func (s *Service) checkProfileCurrency(ctx context.Context, tenantID string, bp domain.CustomerBillingProfile) error {
 	if bp.Currency == "" {
 		return nil
 	}
 	if s.subChecker == nil {
-		// Test-only path — production wires the checker in router.go. The
-		// format validation still applies; only the cross-sub mismatch
-		// check is skipped.
-		slog.Warn("billing profile currency guard skipped: subscription checker not wired",
-			"customer_id", bp.CustomerID)
-		return nil
+		// Fail closed, as the archive guard does: a currency saved
+		// unchecked can relabel a subscription's prices.
+		return fmt.Errorf("subscription checker not wired: cannot verify profile currency")
 	}
 	subs, err := s.subChecker.PlanCurrencies(ctx, tenantID, bp.CustomerID)
 	if err != nil {

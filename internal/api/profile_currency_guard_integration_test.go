@@ -17,6 +17,13 @@ import (
 // currency on one customer at create (ADR-100 G3), so two currencies on one
 // customer exist only in rows written before the customer-rules lock closed
 // the race between two creates. The guard must still see them.
+//
+// The EUR subscription is both the oldest and the last by code, so a page of
+// 100 in either order misses it: the old read sorted newest first, and the
+// query the guard uses now sorts by code.
+//
+// Mutation-verify: add LIMIT 100 to CustomerSubPlanCurrencies → 200, and the
+// USD profile is saved.
 func TestBillingProfileCurrency_ChecksEveryLiveSubscription(t *testing.T) {
 	e := newCcyEnv(t, "Profile Currency Guard Co")
 	cus := e.customer(t, "guard-101")
@@ -28,10 +35,12 @@ func TestBillingProfileCurrency_ChecksEveryLiveSubscription(t *testing.T) {
 	}
 	usd, eur := plan("guard-usd", "USD"), plan("guard-eur", "EUR")
 
-	// The EUR subscription is the oldest, so a read of the newest 100 misses it.
+	// The EUR subscription is the oldest, so a read of the newest 100 misses
+	// it. Its code sorts after every 'guard-usd-N', so a read of the first 100
+	// by code misses it too.
 	seedBypass(t, e.db, `WITH s AS (
 			INSERT INTO subscriptions (tenant_id, livemode, customer_id, code, display_name, status, created_at)
-			VALUES ($1, false, $2, 'guard-eur-sub', 'Guard EUR', 'active', now() - interval '1 day')
+			VALUES ($1, false, $2, 'zz-guard-eur-sub', 'Guard EUR', 'active', now() - interval '1 day')
 			RETURNING id)
 		INSERT INTO subscription_items (tenant_id, livemode, subscription_id, plan_id)
 		SELECT $1, false, s.id, $3 FROM s`, e.tenantID, cus, eur)
@@ -48,8 +57,8 @@ func TestBillingProfileCurrency_ChecksEveryLiveSubscription(t *testing.T) {
 	if r.status != http.StatusConflict || r.errCode() != "invalid_state" {
 		t.Fatalf("USD profile over 100 USD subscriptions and 1 EUR: status %d code %q, want 409 invalid_state; body: %s", r.status, r.errCode(), r.raw)
 	}
-	if !strings.Contains(r.errMessage(), "guard-eur-sub") {
-		t.Errorf("409 message %q does not name the EUR subscription guard-eur-sub", r.errMessage())
+	if !strings.Contains(r.errMessage(), "zz-guard-eur-sub") {
+		t.Errorf("409 message %q does not name the EUR subscription zz-guard-eur-sub", r.errMessage())
 	}
 	if got := e.call(t, "GET", "/v1/customers/"+cus+"/billing-profile", nil); flowStr(got.body, "currency") == "USD" {
 		t.Errorf("the refused profile was saved: %s", got.raw)
