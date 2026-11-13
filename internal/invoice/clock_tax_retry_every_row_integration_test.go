@@ -11,6 +11,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -209,7 +210,7 @@ func TestListPendingTaxRetryForClock_WalkReturnsEveryDraftOnce(t *testing.T) {
 	}
 
 	seen := map[string]int{}
-	var after domain.InvoiceKeyset
+	var after walk.Key
 	for range n + 1 {
 		got, err := store.ListPendingTaxRetryForClock(ctx, tenantID, clockID, domain.TaxRetryableErrorCodes(), domain.MaxTaxRetryAttempts, after, page)
 		if err != nil {
@@ -221,7 +222,7 @@ func TestListPendingTaxRetryForClock_WalkReturnsEveryDraftOnce(t *testing.T) {
 		if len(got) < page {
 			break
 		}
-		after = domain.KeysetOf(got[len(got)-1])
+		after = walk.Key{At: got[len(got)-1].CreatedAt, ID: got[len(got)-1].ID}
 	}
 	if len(ids) != n {
 		t.Fatalf("seeded %d drafts, want %d", len(ids), n)

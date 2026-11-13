@@ -58,7 +58,7 @@ func (e *Engine) CollectInvoice(ctx context.Context, tenantID, invoiceID string,
 	if inv.Status != domain.InvoiceFinalized {
 		return
 	}
-	if _, errs := e.processAutoCharge(ctx, []domain.Invoice{inv}, at, noPMTriggerFinalize); len(errs) > 0 {
+	if _, errs := e.processAutoCharge(ctx, inv, at, noPMTriggerFinalize); len(errs) > 0 {
 		for _, cerr := range errs {
 			slog.WarnContext(ctx, "collect: did not complete; "+collectFailureNext(cerr),
 				"invoice_id", invoiceID, "error", cerr)
