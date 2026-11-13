@@ -64,3 +64,32 @@ func TestBillingProfileCurrency_ChecksEveryLiveSubscription(t *testing.T) {
 		t.Errorf("the refused profile was saved: %s", got.raw)
 	}
 }
+
+// TestBillingProfileCurrency_CountsTrialingAndDraftSubscriptions: a trialing
+// or a draft subscription will bill, so its plan's currency blocks a profile
+// currency it does not bill in, as an active one does.
+func TestBillingProfileCurrency_CountsTrialingAndDraftSubscriptions(t *testing.T) {
+	for _, status := range []string{"trialing", "draft"} {
+		t.Run(status, func(t *testing.T) {
+			e := newCcyEnv(t, "Profile Currency Guard "+status)
+			cus := e.customer(t, "guard-"+status)
+			eur := flowStr(e.call(t, "POST", "/v1/plans", map[string]any{
+				"code": "guard-eur-" + status, "name": "guard-eur", "currency": "EUR", "billing_interval": "monthly",
+				"base_amount_cents": 1000, "base_bill_timing": "in_arrears",
+			}).want(t, 201, "create plan").body, "id")
+			seedBypass(t, e.db, `WITH s AS (
+					INSERT INTO subscriptions (tenant_id, livemode, customer_id, code, display_name, status)
+					VALUES ($1, false, $2, 'guard-eur-sub', 'Guard EUR', $4)
+					RETURNING id)
+				INSERT INTO subscription_items (tenant_id, livemode, subscription_id, plan_id)
+				SELECT $1, false, s.id, $3 FROM s`, e.tenantID, cus, eur, status)
+
+			r := e.call(t, "PUT", "/v1/customers/"+cus+"/billing-profile", map[string]any{
+				"legal_name": "Guard Co", "currency": "USD",
+			})
+			if r.status != http.StatusConflict || r.errCode() != "invalid_state" {
+				t.Fatalf("USD profile over a %s EUR subscription: status %d code %q, want 409 invalid_state; body: %s", status, r.status, r.errCode(), r.raw)
+			}
+		})
+	}
+}
