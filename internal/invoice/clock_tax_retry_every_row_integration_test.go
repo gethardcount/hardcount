@@ -156,3 +156,79 @@ func TestRetryPendingTaxForClock_DraftsThatStayListed(t *testing.T) {
 		t.Errorf("drafts tried = %d, want %d", len(retrier.tried), n)
 	}
 }
+
+// Walking the clock's tax-retry list page by page, as the job does, returns
+// every waiting draft exactly once when the order the drafts were created in
+// disagrees with the order they were inserted in (and so with id order) and
+// with the order they were touched in: the last inserted were created first,
+// and the first-created drafts were touched last. The page's order and the cursor must both be
+// (created_at, id); a page ordered by updated_at would end on a late-created
+// draft and leave the earlier ones behind the cursor, and a cursor on
+// updated_at would meet drafts again.
+func TestListPendingTaxRetryForClock_WalkReturnsEveryDraftOnce(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "Clock Tax Walk")
+	store := invoice.NewPostgresStore(db)
+	const n, page = 5, 2
+	clockID := seedClockTaxDrafts(t, db, ctx, tenantID, store, n)
+
+	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM invoices WHERE invoice_number LIKE 'HC-CLOCKTAX-%' ORDER BY invoice_number`)
+	if err != nil {
+		t.Fatalf("list drafts: %v", err)
+	}
+	var ids []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			t.Fatalf("scan: %v", err)
+		}
+		ids = append(ids, id)
+	}
+	_ = rows.Close()
+	base := time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)
+	created := func(i int) int { return n - 1 - i } // the last inserted were created first
+	for i, id := range ids {
+		at := base.Add(time.Duration(created(i)) * time.Minute)
+		updated := at
+		if created(i) < 3 {
+			updated = updated.Add(time.Hour) // touched last
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE invoices SET created_at = $2, updated_at = $3 WHERE id = $1`,
+			id, at, updated); err != nil {
+			t.Fatalf("set times: %v", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	seen := map[string]int{}
+	var after domain.InvoiceKeyset
+	for range n + 1 {
+		got, err := store.ListPendingTaxRetryForClock(ctx, tenantID, clockID, domain.TaxRetryableErrorCodes(), domain.MaxTaxRetryAttempts, after, page)
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		for _, inv := range got {
+			seen[inv.ID]++
+		}
+		if len(got) < page {
+			break
+		}
+		after = domain.KeysetOf(got[len(got)-1])
+	}
+	if len(ids) != n {
+		t.Fatalf("seeded %d drafts, want %d", len(ids), n)
+	}
+	for i, id := range ids {
+		if seen[id] != 1 {
+			t.Errorf("draft created %d of %d returned %d times, want once", created(i)+1, n, seen[id])
+		}
+	}
+}

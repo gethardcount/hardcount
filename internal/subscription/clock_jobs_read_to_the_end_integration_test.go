@@ -117,6 +117,67 @@ func TestProcessExpiredPauseCollectionsForClock_DoesEveryPage(t *testing.T) {
 	}
 }
 
+// Walking the clock's pause list page by page, as the job does, returns
+// every due pause exactly once when the order they come due in disagrees with
+// the order they were inserted in (and so with id order) and with the order
+// they were touched in: the last inserted come due first, and the first-due
+// pauses were touched last.
+// The page's order and the cursor must both be (resumes_at, id); a page in
+// another order would end on a late-due row and leave the earlier ones
+// behind the cursor.
+func TestListExpiredPauseCollectionsForClock_WalkReturnsEveryRowOnce(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "Clock Pauses Walk")
+	store := NewPostgresStore(db)
+	const n, page = 5, 2
+	clockID, frozen, ids := seedClockSubs(t, db, ctx, tenantID, n, false)
+	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	base := frozen.Add(-24 * time.Hour)
+	due := func(i int) int { return n - 1 - i } // the last inserted come due first
+	for i, id := range ids {
+		at := base.Add(time.Duration(due(i)) * time.Minute)
+		updated := at
+		if due(i) < 3 {
+			updated = updated.Add(time.Hour) // touched last
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE subscriptions SET pause_collection_resumes_at = $2, updated_at = $3 WHERE id = $1`,
+			id, at, updated); err != nil {
+			t.Fatalf("set times: %v", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	seen := map[string]int{}
+	var afterAt time.Time
+	afterID := ""
+	for range n + 1 {
+		got, err := store.ListExpiredPauseCollectionsForClock(ctx, tenantID, clockID, frozen, afterAt, afterID, page)
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		for _, sub := range got {
+			seen[sub.ID]++
+		}
+		if len(got) < page {
+			break
+		}
+		last := got[len(got)-1]
+		afterAt, afterID = *last.PauseCollection.ResumesAt, last.ID
+	}
+	for i, id := range ids {
+		if seen[id] != 1 {
+			t.Errorf("pause due %d of %d returned %d times, want once", due(i)+1, n, seen[id])
+		}
+	}
+}
+
 // A row another transaction holds is waited for, not skipped: a clock has
 // one runner, and a skipped row would wait for a later pass, if one came.
 func TestProcessExpiredTrialsForClock_WaitsForALockedRow(t *testing.T) {
