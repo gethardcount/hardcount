@@ -19,6 +19,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/crypto"
 	"github.com/gethardcount/hardcount/internal/platform/listorder"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/tax"
 )
 
@@ -3206,7 +3207,7 @@ func (s *PostgresStore) CollectionPausedTx(ctx context.Context, tx *sql.Tx, invo
 // time progresses only on operator Advance, so the wall-clock scheduler
 // must never charge a clock-pinned invoice. The test-clock catch-up uses
 // ListAutoChargePendingForClock as the disjoint per-clock entry point.
-func (s *PostgresStore) ListAutoChargePending(ctx context.Context, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error) {
+func (s *PostgresStore) ListAutoChargePending(ctx context.Context, after walk.Key, limit int) ([]domain.Invoice, error) {
 	live, err := postgres.Livemode(ctx)
 	if err != nil {
 		return nil, err
@@ -3243,7 +3244,7 @@ func (s *PostgresStore) ListAutoChargePending(ctx context.Context, after domain.
 		  AND (i.created_at, i.id) > ($3, $4)
 		ORDER BY i.created_at ASC, i.id ASC
 		LIMIT $2
-	`, live, limit, after.CreatedAt, after.ID)
+	`, live, limit, after.At, after.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -3346,7 +3347,7 @@ func (s *PostgresStore) ListFailedWithoutDunningRun(ctx context.Context, olderTh
 //
 // Scoped by tenantID + clockID; livemode is implied (test clocks are
 // test-mode-only, enforced by the test_clocks CHECK constraint).
-func (s *PostgresStore) ListAutoChargePendingForClock(ctx context.Context, tenantID, clockID string, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error) {
+func (s *PostgresStore) ListAutoChargePendingForClock(ctx context.Context, tenantID, clockID string, after walk.Key, limit int) ([]domain.Invoice, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return nil, err
@@ -3368,7 +3369,7 @@ func (s *PostgresStore) ListAutoChargePendingForClock(ctx context.Context, tenan
 		  AND (i.created_at, i.id) > ($4, $5)
 		ORDER BY i.created_at ASC, i.id ASC
 		LIMIT $3
-	`, tenantID, clockID, limit, after.CreatedAt, after.ID)
+	`, tenantID, clockID, limit, after.At, after.ID)
 	if err != nil {
 		return nil, err
 	}
@@ -3860,7 +3861,7 @@ func (s *PostgresStore) MarkTaxReversed(ctx context.Context, tenantID, id string
 // deferred to a follow-up ADR — it's a niche use case operators
 // don't typically run, while operator-confusion from "I clicked
 // Advance and nothing happened" is a daily failure mode.
-func (s *PostgresStore) ListPendingTaxRetryForClock(ctx context.Context, tenantID, clockID string, retryableCodes []string, maxAttempts int, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error) {
+func (s *PostgresStore) ListPendingTaxRetryForClock(ctx context.Context, tenantID, clockID string, retryableCodes []string, maxAttempts int, after walk.Key, limit int) ([]domain.Invoice, error) {
 	if limit <= 0 {
 		limit = 50
 	}
@@ -3885,7 +3886,7 @@ func (s *PostgresStore) ListPendingTaxRetryForClock(ctx context.Context, tenantI
 		  AND (i.created_at, i.id) > ($5, $6)
 		ORDER BY i.created_at, i.id
 		LIMIT $7
-	`, tenantID, clockID, retryableCodes, maxAttempts, after.CreatedAt, after.ID, limit)
+	`, tenantID, clockID, retryableCodes, maxAttempts, after.At, after.ID, limit)
 	if err != nil {
 		return nil, err
 	}

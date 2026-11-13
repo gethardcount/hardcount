@@ -639,13 +639,13 @@ type InvoiceWriter interface {
 	// paths that sent no charge, so the next tick/Advance retries
 	// immediately instead of waiting for the stale-hold sweep.
 	ReleaseChargeHold(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error
-	ListAutoChargePending(ctx context.Context, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error)
+	ListAutoChargePending(ctx context.Context, after walk.Key, limit int) ([]domain.Invoice, error)
 	// ListAutoChargePendingForClock is the catchup-path counterpart to
 	// ListAutoChargePending — returns invoices whose owning subscription
 	// is pinned to the given clock. ADR-029 Phase 1: simulation-time
 	// charge attempts only fire on operator Advance, never on the
 	// wall-clock cron tick, mirroring Stripe Test Clocks.
-	ListAutoChargePendingForClock(ctx context.Context, tenantID, clockID string, after domain.InvoiceKeyset, limit int) ([]domain.Invoice, error)
+	ListAutoChargePendingForClock(ctx context.Context, tenantID, clockID string, after walk.Key, limit int) ([]domain.Invoice, error)
 	// ListFailedWithoutDunningRun powers the dunning_backfill reconciler:
 	// finalized, still-owed invoices in payment_status='failed' with NO
 	// dunning run — the SettleFailed post-commit crash / exhausted-retry
@@ -4695,24 +4695,24 @@ func (e *Engine) RetryPendingCharges(ctx context.Context, pageSize int, onPage f
 	}
 	start := time.Now() //nolint:forbidigo // wall-clock: measures how long the sweep ran, for its log line; not a billing instant
 	list := func(ctx context.Context, after walk.Key, limit int) ([]domain.Invoice, error) {
-		pending, err := e.invoices.ListAutoChargePending(ctx, invoiceKeyset(after), limit)
+		pending, err := e.invoices.ListAutoChargePending(ctx, after, limit)
 		if err != nil {
 			return nil, fmt.Errorf("list pending charges: %w", err)
 		}
 		if len(pending) > 0 && onPage != nil {
-			onPage() // once per page of invoices
+			onPage() // stamps when a page of invoices is read, before it is worked
 		}
 		return pending, nil
 	}
 	listed, charged := 0, 0
 	var errs []error
-	for inv, err := range walk.Walk(ctx, "ListAutoChargePending", list, invoiceWalkKey, pageSize) {
+	for inv, err := range walk.Walk(ctx, "ListAutoChargePending", list, autoChargePendingKey, pageSize) {
 		if err != nil {
 			errs = append(errs, fmt.Errorf("auto-charge sweep: %w", err))
 			break
 		}
 		listed++
-		n, rowErrs := e.processAutoCharge(ctx, []domain.Invoice{inv}, nil, noPMTriggerSweep)
+		n, rowErrs := e.processAutoCharge(ctx, inv, nil, noPMTriggerSweep)
 		charged += n
 		errs = append(errs, rowErrs...)
 	}
@@ -4742,7 +4742,7 @@ func (e *Engine) RetryPendingChargesForClock(ctx context.Context, tenantID, cloc
 		limit = 50
 	}
 	list := func(ctx context.Context, after walk.Key, limit int) ([]domain.Invoice, error) {
-		pending, err := e.invoices.ListAutoChargePendingForClock(ctx, tenantID, clockID, invoiceKeyset(after), limit)
+		pending, err := e.invoices.ListAutoChargePendingForClock(ctx, tenantID, clockID, after, limit)
 		if err != nil {
 			return nil, fmt.Errorf("list pending charges for clock %s: %w", clockID, err)
 		}
@@ -4750,24 +4750,22 @@ func (e *Engine) RetryPendingChargesForClock(ctx context.Context, tenantID, cloc
 	}
 	charged := 0
 	var errs []error
-	for inv, err := range walk.Walk(ctx, "ListAutoChargePendingForClock", list, invoiceWalkKey, limit) {
+	for inv, err := range walk.Walk(ctx, "ListAutoChargePendingForClock", list, autoChargePendingKey, limit) {
 		if err != nil {
 			errs = append(errs, fmt.Errorf("collect the clock's invoices: %w", err))
 			break
 		}
-		n, rowErrs := e.processAutoCharge(ctx, []domain.Invoice{inv}, nil, noPMTriggerSweep)
+		n, rowErrs := e.processAutoCharge(ctx, inv, nil, noPMTriggerSweep)
 		charged += n
 		errs = append(errs, rowErrs...)
 	}
 	return charged, errs
 }
 
-// invoiceWalkKey is an invoice's place in a queue read by (created_at, id).
-func invoiceWalkKey(inv domain.Invoice) walk.Key { return walk.Key{At: inv.CreatedAt, ID: inv.ID} }
-
-// invoiceKeyset is the invoice store's form of a walk key.
-func invoiceKeyset(k walk.Key) domain.InvoiceKeyset {
-	return domain.InvoiceKeyset{CreatedAt: k.At, ID: k.ID}
+// autoChargePendingKey is an invoice's place in the auto-charge queue, which
+// both sweeps read by (created_at, id).
+func autoChargePendingKey(inv domain.Invoice) walk.Key {
+	return walk.Key{At: inv.CreatedAt, ID: inv.ID}
 }
 
 // failedDunningBackfillCoolOff lets the inline SettleFailed StartDunning win the
@@ -4855,9 +4853,10 @@ func (e *Engine) emailInvoiceOnce(ctx context.Context, inv domain.Invoice) {
 	}
 }
 
-// processAutoCharge is the one collector for finalized invoices. The two
-// sweeps (RetryPendingCharges, RetryPendingChargesForClock) and the post-commit
-// CollectInvoice nudge all run it, so collection has a single implementation.
+// processAutoCharge collects one finalized invoice. The two sweeps
+// (RetryPendingCharges, RetryPendingChargesForClock) walk their queues and call
+// it for each invoice, and the post-commit CollectInvoice nudge calls it once,
+// so collection has a single implementation.
 //
 // at anchors the credit application and a credit-covered settle; nil means
 // "the invoice's own clock now" (SimForInvoice), which is what the sweeps want.
@@ -4879,274 +4878,272 @@ func (e *Engine) emailInvoiceOnce(ctx context.Context, inv domain.Invoice) {
 // to the operator. Industry parity: Stripe Test Clocks don't fail
 // when a tester uses a decline-card; they record the decline and
 // move on.
-func (e *Engine) processAutoCharge(ctx context.Context, pending []domain.Invoice, at *time.Time, trigger string) (int, []error) {
+func (e *Engine) processAutoCharge(ctx context.Context, inv domain.Invoice, at *time.Time, trigger string) (int, []error) {
 	charged := 0
 	var errs []error
-	for _, inv := range pending {
-		// Shutdown or a lost lease: stop before claiming the next row. The
-		// finalize-time nudge passes a detached ctx, so this only ends sweeps.
-		// No error here: the drain reports the stop once, so one shutdown is
-		// not counted as a failed retry per remaining row.
-		if ctx.Err() != nil {
+	// Shutdown or a lost lease: claim nothing. The finalize-time nudge
+	// passes a detached ctx, so this only ends sweeps. No error here: the
+	// walk reports the stop once, so one shutdown is not counted as a failed
+	// charge per remaining invoice.
+	if ctx.Err() != nil {
+		return charged, errs
+	}
+	// Per-invoice charge lease (HA hazard #1): exactly one collector
+	// enters the charge leg per invoice per 5m window. The CAS
+	// re-asserts the full eligibility predicate, so a rival collector's
+	// outcome (or a webhook settle) landing between list and claim
+	// fails the claim here — BEFORE the credit-apply/refresh path
+	// that could otherwise mint a divergent Stripe idempotency key.
+	//
+	// Refused also while a charge whose result was lost waits for the
+	// stale-hold sweep to ask Stripe (ADR-127): charging it now could take
+	// a second payment. The sweep runs before this one in the same tick.
+	hold, cerr := e.invoices.ClaimAutoCharge(ctx, inv.TenantID, inv.ID)
+	if cerr != nil {
+		errs = append(errs, fmt.Errorf("claim auto-charge %s: %w", inv.ID, cerr))
+		return charged, errs
+	}
+	if !hold.Held() {
+		return charged, errs
+	}
+	// Every path below that sends no charge releases the hold (by its
+	// token): left set, it would wait for the stale-hold sweep. The store
+	// runs the release even after a shutdown ends ctx.
+	release := func() {
+		if err := e.invoices.ReleaseChargeHold(ctx, inv.TenantID, inv.ID, hold); err != nil {
+			slog.Warn("auto-charge: releasing the charge hold failed — the invoice waits for the stale-hold sweep",
+				"invoice_id", inv.ID, "error", err)
+		}
+	}
+	// Work from the row as it is now, not the list snapshot: a rival
+	// collector may have applied credits or sent the no-payment-method
+	// email (and stamped no_pm_notified_at) between the list and the claim.
+	fresh, err := e.invoices.GetInvoice(ctx, inv.TenantID, inv.ID)
+	if err != nil {
+		errs = append(errs, fmt.Errorf("reload invoice %s after claim: %w", inv.ID, err))
+		release()
+		return charged, errs
+	}
+	inv = fresh
+
+	settleAt := e.collectionAt(ctx, inv, at)
+	// Apply customer credits BEFORE charging (trap R1: never charge the
+	// pre-credit amount). ApplyToInvoiceAt is safe to re-run: it drains
+	// min(amount_due, current balance), so an already-applied invoice or
+	// an empty balance applies nothing. Failure → skip this invoice (flag
+	// stays set; the next sweep retries) rather than charge pre-credit.
+	if e.credits != nil && inv.AmountDueCents > 0 {
+		if _, err := e.credits.ApplyToInvoiceAt(ctx, inv.TenantID, inv.CustomerID, inv.ID, inv.AmountDueCents, settleAt, inv.InvoiceNumber); err != nil {
+			slog.Warn("auto-charge: credit apply failed — skipping charge to avoid overcharging; will retry next tick",
+				"invoice_id", inv.ID, "error", err)
+			// Provably pre-Stripe: release the hold so the next
+			// tick/Advance retries immediately.
+			release()
 			return charged, errs
 		}
-		// Per-invoice charge lease (HA hazard #1): exactly one collector
-		// enters the charge leg per invoice per 5m window. The CAS
-		// re-asserts the full eligibility predicate, so a rival collector's
-		// outcome (or a webhook settle) landing between list and claim
-		// fails the claim here — BEFORE the credit-apply/refresh path
-		// that could otherwise mint a divergent Stripe idempotency key.
-		//
-		// Refused also while a charge whose result was lost waits for the
-		// stale-hold sweep to ask Stripe (ADR-127): charging it now could take
-		// a second payment. The sweep runs before this one in the same tick.
-		hold, cerr := e.invoices.ClaimAutoCharge(ctx, inv.TenantID, inv.ID)
-		if cerr != nil {
-			errs = append(errs, fmt.Errorf("claim auto-charge %s: %w", inv.ID, cerr))
-			continue
-		}
-		if !hold.Held() {
-			continue
-		}
-		// Every path below that sends no charge releases the hold (by its
-		// token): left set, it would wait for the stale-hold sweep. The store
-		// runs the release even after a shutdown ends ctx.
-		release := func() {
-			if err := e.invoices.ReleaseChargeHold(ctx, inv.TenantID, inv.ID, hold); err != nil {
-				slog.Warn("auto-charge: releasing the charge hold failed — the invoice waits for the stale-hold sweep",
-					"invoice_id", inv.ID, "error", err)
-			}
-		}
-		// Work from the row as it is now, not the list snapshot: a rival
-		// collector may have applied credits or sent the no-payment-method
-		// email (and stamped no_pm_notified_at) between the list and the claim.
-		fresh, err := e.invoices.GetInvoice(ctx, inv.TenantID, inv.ID)
+		// Refresh: credits may have reduced (or fully covered) amount_due.
+		refreshed, err := e.invoices.GetInvoice(ctx, inv.TenantID, inv.ID)
 		if err != nil {
-			errs = append(errs, fmt.Errorf("reload invoice %s after claim: %w", inv.ID, err))
-			release()
-			continue
+			errs = append(errs, fmt.Errorf("refresh invoice %s after credit apply: %w", inv.ID, err))
+			release() // provably pre-Stripe
+			return charged, errs
 		}
-		inv = fresh
-
-		settleAt := e.collectionAt(ctx, inv, at)
-		// Apply customer credits BEFORE charging (trap R1: never charge the
-		// pre-credit amount). ApplyToInvoiceAt is safe to re-run: it drains
-		// min(amount_due, current balance), so an already-applied invoice or
-		// an empty balance applies nothing. Failure → skip this invoice (flag
-		// stays set; the next sweep retries) rather than charge pre-credit.
-		if e.credits != nil && inv.AmountDueCents > 0 {
-			if _, err := e.credits.ApplyToInvoiceAt(ctx, inv.TenantID, inv.CustomerID, inv.ID, inv.AmountDueCents, settleAt, inv.InvoiceNumber); err != nil {
-				slog.Warn("auto-charge: credit apply failed — skipping charge to avoid overcharging; will retry next tick",
-					"invoice_id", inv.ID, "error", err)
-				// Provably pre-Stripe: release the hold so the next
-				// tick/Advance retries immediately.
-				release()
-				continue
-			}
-			// Refresh: credits may have reduced (or fully covered) amount_due.
-			refreshed, err := e.invoices.GetInvoice(ctx, inv.TenantID, inv.ID)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("refresh invoice %s after credit apply: %w", inv.ID, err))
-				release() // provably pre-Stripe
-				continue
-			}
-			inv = refreshed
-		}
-		if inv.AmountDueCents <= 0 {
-			// Nothing owed: born $0, fully covered by credits, or reduced to
-			// $0 by a credit note. Settle with no card charge (Stripe parity:
-			// zero-amount invoices are marked paid with no payment attempt).
-			// The claim admitted only a finalized, pending row, and MarkPaid
-			// re-checks status and tax_status under FOR UPDATE, so a draft
-			// can't be settled here. MarkPaid also clears the flag.
-			// No charge is sent either way, so the hold is released either way.
-			_, err := e.invoices.MarkPaid(ctx, inv.TenantID, inv.ID, "", settleAt)
-			release()
-			if err != nil {
-				errs = append(errs, fmt.Errorf("settle zero-due invoice %s: %w", inv.ID, err))
-				continue
-			}
-			// A background settle bypasses the invoice handler's dunning
-			// resolve; close any active run here (best-effort; the
-			// processRun pre-check backstops).
-			e.resolveDunningRecovered(ctx, inv.TenantID, inv.ID)
-			charged++
-			slog.Info("auto-charge: nothing owed, marked paid", "invoice_id", inv.ID)
-			continue
-		}
-
-		stripeCusID, stripePMID, err := e.paymentSetups.ResolveForCharge(ctx, inv.TenantID, inv.CustomerID)
-		if err != nil {
-			// A failed read (a database error, or a missing
-			// HARDCOUNT_ENCRYPTION_KEY that fails every customer decrypt) is not
-			// "no card": an error, so the sweep logs and counts it. No card
-			// resolves to ("", "", nil). Nothing was sent; the release below
-			// frees the hold and the invoice stays queued.
-			errs = append(errs, fmt.Errorf("resolve payment method for invoice %s: %w", inv.ID, err))
-		}
-		// Whether Stripe is connected for the invoice's mode (ADR-060
-		// amendment 2026-10-30), read before anything is sent or charged. A
-		// failed read is not "not connected": nothing is sent or charged, no
-		// dunning starts, and the sweep counts the error; the invoice stays
-		// queued, so the next visit reads it again.
-		connected := false
-		if err == nil {
-			var rerr error
-			if connected, rerr = e.stripeConnected(ctx, inv.TenantID); rerr != nil {
-				errs = append(errs, fmt.Errorf("read the Stripe connection for invoice %s: %w", inv.ID, rerr))
-				release()
-				continue
-			}
-		}
-		if err != nil || stripePMID == "" || stripeCusID == "" || !connected {
-			// No card, or no Stripe to charge one with. Without Stripe no card
-			// can be added or charged online, so the tenant collects like a
-			// send-invoice tenant: the customer is emailed the invoice, never a
-			// setup link, and dunning starts. That includes a card saved before
-			// Stripe was disconnected: charging it fails as "Stripe not
-			// configured", a skip the sweep would repeat on every visit with
-			// no email and no dunning run.
-			if err == nil && !connected && inv.InvoiceEmailedAt == nil {
-				e.emailInvoiceOnce(ctx, inv)
-			}
-			// Genuinely no PM (not a resolve error), Stripe connected, and
-			// never emailed: send the setup-link email ONCE (ADR-087
-			// follow-up). This closes the
-			// sweep-mediated silence: a proration invoice is enrolled here
-			// without any finalize-time email, and a finalize-time resolver
-			// error deliberately queues without emailing — pre-fix both aged
-			// into overdue with zero customer contact. The no_pm_notified_at
-			// stamp is the send-once marker (finalize-time senders stamp it
-			// too), so the per-tick revisit never duplicates; a
-			// skipped-no-email outcome is left unstamped so it self-heals if
-			// the customer gains an address. Runs inside the charge lease, so
-			// rival HA sweep leaders can't double-send within a tick. When
-			// Stripe is connected after the invoice email went out, the next
-			// visit arrives here with no_pm_notified_at unset and sends the
-			// link then.
-			if err == nil && connected && inv.NoPMNotifiedAt == nil {
-				outcome, nerr := e.noPMNotifier.NotifyNoPaymentMethod(ctx, inv.TenantID, inv, trigger)
-				switch {
-				case nerr != nil:
-					slog.Warn("auto-charge retry: no-PM notification failed", "invoice_id", inv.ID, "error", nerr)
-				case outcome == domain.NotifySkippedNoEmail:
-					slog.Info("auto-charge retry: setup-link email skipped: customer has no email on file", "invoice_id", inv.ID)
-				default:
-					if serr := e.invoices.SetNoPMNotifiedAt(ctx, inv.TenantID, inv.ID, e.clock.Now(ctx)); serr != nil {
-						slog.Warn("auto-charge retry: failed to stamp no-PM notified marker", "invoice_id", inv.ID, "error", serr)
-					}
-					slog.Info("auto-charge retry: setup-link email queued", "invoice_id", inv.ID)
-				}
-			}
-			// Owed, credits already applied, and genuinely no card: start
-			// no-payment dunning so the invoice reaches a terminal
-			// (pause/cancel/write-off) instead of waiting forever. This is
-			// the one place it starts, the no-card twin of the charger
-			// starting dunning on a decline. Being here is what makes it
-			// correct: the credit step above succeeded and still left money
-			// owed, under this invoice's lease. (A separate enrollment job
-			// that only read the queue could dun an invoice whose credits
-			// were about to cover it, or whose credit apply had just failed.)
-			// A resolve ERROR is not "no card", so it starts nothing.
-			// StartDunning is idempotent: one run per invoice, ever. The run
-			// starts with or without Stripe: without it, its reminders ask
-			// the customer to pay the invoice and its retries charge nothing,
-			// and it still ends in the policy's final action.
-			if err == nil {
-				// Anchored on settleAt, the instant this collection runs in the
-				// invoice's time domain: a cycle invoice's close when collected
-				// at finalize, the clock's now for a draft finalized on a later
-				// Advance (a paused subscription's). Its issue instant would date
-				// that draft's first retry in the past.
-				if derr := e.dunningStarter.StartDunning(ctx, inv.TenantID, inv.ID, inv.CustomerID, settleAt, domain.DunningCauseNoPaymentMethod); derr != nil {
-					// Left queued: the next sweep retries the start.
-					errs = append(errs, fmt.Errorf("start no-payment dunning for %s: %w", inv.ID, derr))
-				}
-			}
-			// Provably pre-Stripe (no chargeable PM resolved): release so a
-			// card attach retries without lease lag. The invoice stays queued
-			// on purpose, and the sweep visits it every tick (the drain
-			// reaches every queued row). That visit is what charges it once a
-			// card is attached, settles it if credits arrive, retries an email
-			// that was skipped, and starts dunning once the tenant has a
-			// policy.
-			release()
-			continue
-		}
-
-		chargeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-		if _, err := e.charger.ChargeInvoice(chargeCtx, inv.TenantID, inv, hold, stripeCusID, stripePMID); err != nil {
-			cancel()
-			// Below Stripe's minimum charge: not a decline and not an error of
-			// this sweep. The charger recorded it (the invoice stays pending,
-			// out of this queue, with the operator's notice) and ended any
-			// payment recovery on it; nothing else is owed here.
-			if errors.Is(err, domain.ErrBelowMinimumCharge) {
-				slog.Info("auto-charge: Stripe refused the amount as below its minimum charge; left for the operator",
-					"invoice_id", inv.ID)
-				continue
-			}
-			// A DEFINITE failure (declined, or refused outright by Stripe):
-			// ChargeInvoice recorded payment_status='failed' AND started
-			// dunning inline (a decline through SettleFailed, which its
-			// payment_intent.payment_failed webhook re-drives; a failure with
-			// no PaymentIntent through stampUnreportableOutcome; a lost start is
-			// backstopped by the EnrollFailedWithoutDunning reconciler). Clearing the flag is the
-			// OWNERSHIP HANDOFF: dunning's retry schedule drives every later
-			// attempt, so the sweep is never a second retry owner (ADR-116).
-			//
-			// Cleared even if the charger could not record 'failed' (it logs
-			// CRITICAL then). Keeping the invoice queued would re-charge it
-			// under the same idempotency key with rebuilt parameters (amount
-			// after credits, a swapped card, the test-clock anchor), which
-			// Stripe rejects as an idempotency conflict, and that parks the
-			// invoice as unknown for good. The inline dunning run, which
-			// retries under its own key, and the payment_failed webhook own it:
-			// the charge call wrote its attempt row before reporting, so the
-			// webhook records the decline as the invoice's newest attempt.
-			var pe *payment.PaymentError
-			if errors.As(err, &pe) && !pe.Unknown {
-				if err := e.invoices.SetAutoChargePending(ctx, inv.TenantID, inv.ID, false); err != nil {
-					// Benign relative to set(true): the next sweep re-lists the row
-					// and its predicate re-check skips ineligible invoices.
-					slog.Warn("failed to clear auto_charge_pending", "invoice_id", inv.ID, "error", err)
-				}
-				if pe.DeclineCode != "" {
-					// A card decline is a normal business outcome; don't push
-					// the catchup to internal_failure for it.
-					slog.Info("auto-charge declined; dunning will retry on schedule",
-						"invoice_id", inv.ID, "decline_code", pe.DeclineCode)
-					continue
-				}
-				// No decline code (e.g. an invalid_request): still dunning's,
-				// but surfaced so the operator sees an unusual refusal.
-				errs = append(errs, fmt.Errorf("charge invoice %s refused: %w", inv.ID, err))
-				continue
-			}
-			// Transient (breaker open / pre-Stripe timeout): skip
-			// this tick without bumping dunning. The next catchup
-			// will retry.
-			if errors.Is(err, payment.ErrPaymentTransient) {
-				slog.Info("auto-charge skipped; transient breaker/timeout",
-					"invoice_id", inv.ID)
-				continue
-			}
-			// Everything else (Unknown PaymentError or non-Stripe
-			// error) escalates — the catchup operator gets visible
-			// feedback to investigate.
-			errs = append(errs, fmt.Errorf("charge invoice %s: %w", inv.ID, err))
-			continue
-		}
-		cancel()
-
-		if err := e.invoices.SetAutoChargePending(ctx, inv.TenantID, inv.ID, false); err != nil {
-			// Benign relative to set(true): the next sweep re-lists the row
-			// and its predicate re-check skips ineligible invoices.
-			slog.Warn("failed to clear auto_charge_pending", "invoice_id", inv.ID, "error", err)
-		}
-		charged++
-		slog.Info("auto-charge retry succeeded", "invoice_id", inv.ID)
+		inv = refreshed
 	}
+	if inv.AmountDueCents <= 0 {
+		// Nothing owed: born $0, fully covered by credits, or reduced to
+		// $0 by a credit note. Settle with no card charge (Stripe parity:
+		// zero-amount invoices are marked paid with no payment attempt).
+		// The claim admitted only a finalized, pending row, and MarkPaid
+		// re-checks status and tax_status under FOR UPDATE, so a draft
+		// can't be settled here. MarkPaid also clears the flag.
+		// No charge is sent either way, so the hold is released either way.
+		_, err := e.invoices.MarkPaid(ctx, inv.TenantID, inv.ID, "", settleAt)
+		release()
+		if err != nil {
+			errs = append(errs, fmt.Errorf("settle zero-due invoice %s: %w", inv.ID, err))
+			return charged, errs
+		}
+		// A background settle bypasses the invoice handler's dunning
+		// resolve; close any active run here (best-effort; the
+		// processRun pre-check backstops).
+		e.resolveDunningRecovered(ctx, inv.TenantID, inv.ID)
+		charged++
+		slog.Info("auto-charge: nothing owed, marked paid", "invoice_id", inv.ID)
+		return charged, errs
+	}
+
+	stripeCusID, stripePMID, err := e.paymentSetups.ResolveForCharge(ctx, inv.TenantID, inv.CustomerID)
+	if err != nil {
+		// A failed read (a database error, or a missing
+		// HARDCOUNT_ENCRYPTION_KEY that fails every customer decrypt) is not
+		// "no card": an error, so the sweep logs and counts it. No card
+		// resolves to ("", "", nil). Nothing was sent; the release below
+		// frees the hold and the invoice stays queued.
+		errs = append(errs, fmt.Errorf("resolve payment method for invoice %s: %w", inv.ID, err))
+	}
+	// Whether Stripe is connected for the invoice's mode (ADR-060
+	// amendment 2026-10-30), read before anything is sent or charged. A
+	// failed read is not "not connected": nothing is sent or charged, no
+	// dunning starts, and the sweep counts the error; the invoice stays
+	// queued, so the next visit reads it again.
+	connected := false
+	if err == nil {
+		var rerr error
+		if connected, rerr = e.stripeConnected(ctx, inv.TenantID); rerr != nil {
+			errs = append(errs, fmt.Errorf("read the Stripe connection for invoice %s: %w", inv.ID, rerr))
+			release()
+			return charged, errs
+		}
+	}
+	if err != nil || stripePMID == "" || stripeCusID == "" || !connected {
+		// No card, or no Stripe to charge one with. Without Stripe no card
+		// can be added or charged online, so the tenant collects like a
+		// send-invoice tenant: the customer is emailed the invoice, never a
+		// setup link, and dunning starts. That includes a card saved before
+		// Stripe was disconnected: charging it fails as "Stripe not
+		// configured", a skip the sweep would repeat on every visit with
+		// no email and no dunning run.
+		if err == nil && !connected && inv.InvoiceEmailedAt == nil {
+			e.emailInvoiceOnce(ctx, inv)
+		}
+		// Genuinely no PM (not a resolve error), Stripe connected, and
+		// never emailed: send the setup-link email ONCE (ADR-087
+		// follow-up). This closes the
+		// sweep-mediated silence: a proration invoice is enrolled here
+		// without any finalize-time email, and a finalize-time resolver
+		// error deliberately queues without emailing — pre-fix both aged
+		// into overdue with zero customer contact. The no_pm_notified_at
+		// stamp is the send-once marker (finalize-time senders stamp it
+		// too), so the per-tick revisit never duplicates; a
+		// skipped-no-email outcome is left unstamped so it self-heals if
+		// the customer gains an address. Runs inside the charge lease, so
+		// rival HA sweep leaders can't double-send within a tick. When
+		// Stripe is connected after the invoice email went out, the next
+		// visit arrives here with no_pm_notified_at unset and sends the
+		// link then.
+		if err == nil && connected && inv.NoPMNotifiedAt == nil {
+			outcome, nerr := e.noPMNotifier.NotifyNoPaymentMethod(ctx, inv.TenantID, inv, trigger)
+			switch {
+			case nerr != nil:
+				slog.Warn("auto-charge retry: no-PM notification failed", "invoice_id", inv.ID, "error", nerr)
+			case outcome == domain.NotifySkippedNoEmail:
+				slog.Info("auto-charge retry: setup-link email skipped: customer has no email on file", "invoice_id", inv.ID)
+			default:
+				if serr := e.invoices.SetNoPMNotifiedAt(ctx, inv.TenantID, inv.ID, e.clock.Now(ctx)); serr != nil {
+					slog.Warn("auto-charge retry: failed to stamp no-PM notified marker", "invoice_id", inv.ID, "error", serr)
+				}
+				slog.Info("auto-charge retry: setup-link email queued", "invoice_id", inv.ID)
+			}
+		}
+		// Owed, credits already applied, and genuinely no card: start
+		// no-payment dunning so the invoice reaches a terminal
+		// (pause/cancel/write-off) instead of waiting forever. This is
+		// the one place it starts, the no-card twin of the charger
+		// starting dunning on a decline. Being here is what makes it
+		// correct: the credit step above succeeded and still left money
+		// owed, under this invoice's lease. (A separate enrollment job
+		// that only read the queue could dun an invoice whose credits
+		// were about to cover it, or whose credit apply had just failed.)
+		// A resolve ERROR is not "no card", so it starts nothing.
+		// StartDunning is idempotent: one run per invoice, ever. The run
+		// starts with or without Stripe: without it, its reminders ask
+		// the customer to pay the invoice and its retries charge nothing,
+		// and it still ends in the policy's final action.
+		if err == nil {
+			// Anchored on settleAt, the instant this collection runs in the
+			// invoice's time domain: a cycle invoice's close when collected
+			// at finalize, the clock's now for a draft finalized on a later
+			// Advance (a paused subscription's). Its issue instant would date
+			// that draft's first retry in the past.
+			if derr := e.dunningStarter.StartDunning(ctx, inv.TenantID, inv.ID, inv.CustomerID, settleAt, domain.DunningCauseNoPaymentMethod); derr != nil {
+				// Left queued: the next sweep retries the start.
+				errs = append(errs, fmt.Errorf("start no-payment dunning for %s: %w", inv.ID, derr))
+			}
+		}
+		// Provably pre-Stripe (no chargeable PM resolved): release so a
+		// card attach retries without lease lag. The invoice stays queued
+		// on purpose, and the sweep visits it every tick (the drain
+		// reaches every queued row). That visit is what charges it once a
+		// card is attached, settles it if credits arrive, retries an email
+		// that was skipped, and starts dunning once the tenant has a
+		// policy.
+		release()
+		return charged, errs
+	}
+
+	chargeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	if _, err := e.charger.ChargeInvoice(chargeCtx, inv.TenantID, inv, hold, stripeCusID, stripePMID); err != nil {
+		cancel()
+		// Below Stripe's minimum charge: not a decline and not an error of
+		// this sweep. The charger recorded it (the invoice stays pending,
+		// out of this queue, with the operator's notice) and ended any
+		// payment recovery on it; nothing else is owed here.
+		if errors.Is(err, domain.ErrBelowMinimumCharge) {
+			slog.Info("auto-charge: Stripe refused the amount as below its minimum charge; left for the operator",
+				"invoice_id", inv.ID)
+			return charged, errs
+		}
+		// A DEFINITE failure (declined, or refused outright by Stripe):
+		// ChargeInvoice recorded payment_status='failed' AND started
+		// dunning inline (a decline through SettleFailed, which its
+		// payment_intent.payment_failed webhook re-drives; a failure with
+		// no PaymentIntent through stampUnreportableOutcome; a lost start is
+		// backstopped by the EnrollFailedWithoutDunning reconciler). Clearing the flag is the
+		// OWNERSHIP HANDOFF: dunning's retry schedule drives every later
+		// attempt, so the sweep is never a second retry owner (ADR-116).
+		//
+		// Cleared even if the charger could not record 'failed' (it logs
+		// CRITICAL then). Keeping the invoice queued would re-charge it
+		// under the same idempotency key with rebuilt parameters (amount
+		// after credits, a swapped card, the test-clock anchor), which
+		// Stripe rejects as an idempotency conflict, and that parks the
+		// invoice as unknown for good. The inline dunning run, which
+		// retries under its own key, and the payment_failed webhook own it:
+		// the charge call wrote its attempt row before reporting, so the
+		// webhook records the decline as the invoice's newest attempt.
+		var pe *payment.PaymentError
+		if errors.As(err, &pe) && !pe.Unknown {
+			if err := e.invoices.SetAutoChargePending(ctx, inv.TenantID, inv.ID, false); err != nil {
+				// Benign relative to set(true): the next sweep re-lists the row
+				// and its predicate re-check skips ineligible invoices.
+				slog.Warn("failed to clear auto_charge_pending", "invoice_id", inv.ID, "error", err)
+			}
+			if pe.DeclineCode != "" {
+				// A card decline is a normal business outcome; don't push
+				// the catchup to internal_failure for it.
+				slog.Info("auto-charge declined; dunning will retry on schedule",
+					"invoice_id", inv.ID, "decline_code", pe.DeclineCode)
+				return charged, errs
+			}
+			// No decline code (e.g. an invalid_request): still dunning's,
+			// but surfaced so the operator sees an unusual refusal.
+			errs = append(errs, fmt.Errorf("charge invoice %s refused: %w", inv.ID, err))
+			return charged, errs
+		}
+		// Transient (breaker open / pre-Stripe timeout): skip
+		// this tick without bumping dunning. The next catchup
+		// will retry.
+		if errors.Is(err, payment.ErrPaymentTransient) {
+			slog.Info("auto-charge skipped; transient breaker/timeout",
+				"invoice_id", inv.ID)
+			return charged, errs
+		}
+		// Everything else (Unknown PaymentError or non-Stripe
+		// error) escalates — the catchup operator gets visible
+		// feedback to investigate.
+		errs = append(errs, fmt.Errorf("charge invoice %s: %w", inv.ID, err))
+		return charged, errs
+	}
+	cancel()
+
+	if err := e.invoices.SetAutoChargePending(ctx, inv.TenantID, inv.ID, false); err != nil {
+		// Benign relative to set(true): the next sweep re-lists the row
+		// and its predicate re-check skips ineligible invoices.
+		slog.Warn("failed to clear auto_charge_pending", "invoice_id", inv.ID, "error", err)
+	}
+	charged++
+	slog.Info("auto-charge retry succeeded", "invoice_id", inv.ID)
 	return charged, errs
 }
 

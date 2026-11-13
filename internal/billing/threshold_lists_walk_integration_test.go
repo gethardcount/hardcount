@@ -1,4 +1,4 @@
-package subscription
+package billing_test
 
 import (
 	"context"
@@ -6,8 +6,11 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/billing"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/walk"
+	"github.com/gethardcount/hardcount/internal/subscription"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -63,45 +66,35 @@ func seedThresholdSubs(t *testing.T, db *postgres.DB, ctx context.Context, tenan
 	return ids
 }
 
-// walkByID pages a threshold list by id, as the scans do, and counts how many
-// times each subscription comes back. It fails rather than loop for ever.
-func walkByID(t *testing.T, page int, list func(afterID string, limit int) ([]domain.Subscription, error)) map[string]int {
+// walkThresholds walks a threshold list as the scans do, with their key, and
+// counts how many times each subscription comes back.
+func walkThresholds(t *testing.T, ctx context.Context, name string, list walk.List[domain.Subscription]) map[string]int {
 	t.Helper()
 	seen := map[string]int{}
-	afterID := ""
-	for pages := 0; ; pages++ {
-		if pages > 100000 {
-			t.Fatal("the walk did not end")
-		}
-		got, err := list(afterID, page)
+	for sub, err := range walk.Walk(ctx, name, list, billing.ThresholdCandidateKey, 2) {
 		if err != nil {
-			t.Fatalf("list: %v", err)
+			t.Fatalf("walk: %v", err)
 		}
-		for _, sub := range got {
-			seen[sub.ID]++
-		}
-		if len(got) < page {
-			return seen
-		}
-		afterID = got[len(got)-1].ID
+		seen[sub.ID]++
 	}
+	return seen
 }
 
-// The threshold scans page their lists by id. Walking a list page by page
-// returns each subscription once when id order disagrees with the order the
-// rows were inserted in and the order they were touched in. A page in another
-// order would end on a late id and leave earlier ones behind the cursor.
+// The threshold scans walk their lists by id. Walking a list returns each
+// subscription once when id order disagrees with the order the rows were
+// inserted in and the order they were touched in. A page in another order
+// would end on a late id and leave earlier ones behind the cursor.
 func TestListWithThresholds_WalkReturnsEveryRowOnce(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Threshold List Walk")
-	store := NewPostgresStore(db)
+	store := subscription.NewPostgresStore(db)
 	ids := seedThresholdSubs(t, db, ctx, tenantID, "", 5)
 
 	// The real-time list reads every tenant in the mode, so other tests' rows
 	// are walked too; only ours are counted.
-	seen := walkByID(t, 2, func(afterID string, limit int) ([]domain.Subscription, error) {
-		return store.ListWithThresholds(ctx, false, afterID, limit)
+	seen := walkThresholds(t, ctx, "ListWithThresholds", func(ctx context.Context, after walk.Key, limit int) ([]domain.Subscription, error) {
+		return store.ListWithThresholds(ctx, false, after.ID, limit)
 	})
 	for i, id := range ids {
 		if seen[id] != 1 {
@@ -114,12 +107,12 @@ func TestListWithThresholdsForClock_WalkReturnsEveryRowOnce(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Clock Threshold List Walk")
-	store := NewPostgresStore(db)
+	store := subscription.NewPostgresStore(db)
 	clockID := postgres.NewID("hc_tclk")
 	ids := seedThresholdSubs(t, db, ctx, tenantID, clockID, 5)
 
-	seen := walkByID(t, 2, func(afterID string, limit int) ([]domain.Subscription, error) {
-		return store.ListWithThresholdsForClock(ctx, tenantID, clockID, afterID, limit)
+	seen := walkThresholds(t, ctx, "ListWithThresholdsForClock", func(ctx context.Context, after walk.Key, limit int) ([]domain.Subscription, error) {
+		return store.ListWithThresholdsForClock(ctx, tenantID, clockID, after.ID, limit)
 	})
 	if len(seen) != len(ids) {
 		t.Errorf("rows walked = %d, want the clock's %d", len(seen), len(ids))

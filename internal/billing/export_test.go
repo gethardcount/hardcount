@@ -20,6 +20,9 @@ var RunBillingHalf = (*Scheduler).runBillingHalf
 // real-Postgres tests. See stripeTaxFake.
 var NewStripeTaxFake = newStripeTaxFake
 
+// ThresholdCandidateKey is the key both threshold scans walk their lists by.
+var ThresholdCandidateKey = thresholdCandidateKey
+
 // StripeTaxFakeRequest is one calculation request the fake recorded.
 type StripeTaxFakeRequest = stripeTaxFakeRequest
 

@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -33,7 +33,7 @@ func TestPerClockQueries_SQLValid(t *testing.T) {
 	// Empty-DB smoke: each query should return ([], nil) — proving the
 	// SQL parses and executes, not that anything matches.
 	t.Run("ListAutoChargePendingForClock", func(t *testing.T) {
-		got, err := store.ListAutoChargePendingForClock(ctx, "hc_ten_test", "hc_tclk_test", domain.InvoiceKeyset{}, 50)
+		got, err := store.ListAutoChargePendingForClock(ctx, "hc_ten_test", "hc_tclk_test", walk.Key{}, 50)
 		if err != nil {
 			t.Fatalf("expected nil error on empty DB; got: %v", err)
 		}
@@ -44,7 +44,7 @@ func TestPerClockQueries_SQLValid(t *testing.T) {
 
 	t.Run("ListPendingTaxRetryForClock", func(t *testing.T) {
 		got, err := store.ListPendingTaxRetryForClock(ctx, "hc_ten_test", "hc_tclk_test",
-			[]string{"provider_outage", "unknown"}, 8, domain.InvoiceKeyset{}, 50)
+			[]string{"provider_outage", "unknown"}, 8, walk.Key{}, 50)
 		if err != nil {
 			t.Fatalf("expected nil error on empty DB; got: %v", err)
 		}
@@ -123,7 +123,7 @@ func TestListAutoChargePendingForClock_IncludesOneOffInvoices(t *testing.T) {
 		t.Fatalf("commit: %v", err)
 	}
 
-	got, err := store.ListAutoChargePendingForClock(ctx, tenantID, clockID, domain.InvoiceKeyset{}, 50)
+	got, err := store.ListAutoChargePendingForClock(ctx, tenantID, clockID, walk.Key{}, 50)
 	if err != nil {
 		t.Fatalf("query: %v", err)
 	}

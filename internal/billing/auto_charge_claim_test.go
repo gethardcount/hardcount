@@ -9,6 +9,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/walk"
 )
 
 // countingCharger records per-invoice charge invocations — the
@@ -49,15 +50,15 @@ func TestProcessAutoCharge_DualLeaderChargesOnce(t *testing.T) {
 
 	// Both leaders fetched the candidate list BEFORE either claimed —
 	// the exact premise of the hazard.
-	pending, err := inv.ListAutoChargePending(context.Background(), domain.InvoiceKeyset{}, 50)
+	pending, err := inv.ListAutoChargePending(context.Background(), walk.Key{}, 50)
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
 	samePending := make([]domain.Invoice, len(pending))
 	copy(samePending, pending)
 
-	chargedA, errsA := engine.processAutoCharge(postgres.WithLivemode(context.Background(), false), pending, nil, noPMTriggerSweep)
-	chargedB, errsB := engine.processAutoCharge(postgres.WithLivemode(context.Background(), false), samePending, nil, noPMTriggerSweep)
+	chargedA, errsA := collectEach(engine, postgres.WithLivemode(context.Background(), false), pending, nil, noPMTriggerSweep)
+	chargedB, errsB := collectEach(engine, postgres.WithLivemode(context.Background(), false), samePending, nil, noPMTriggerSweep)
 
 	if len(errsA) != 0 || len(errsB) != 0 {
 		t.Fatalf("unexpected errors: A=%v B=%v", errsA, errsB)
@@ -95,8 +96,8 @@ func TestProcessAutoCharge_ReleasesClaimOnPreStripeSkips(t *testing.T) {
 		pms := &fakePaymentSetups{ready: false}
 		engine := wireBaseTax(NewEngine(&mockSubs{cycleUpdated: make(map[string]bool)}, &mockUsage{}, &mockPricing{}, inv, nil, &mockSettings{}, pms, &countingCharger{}, billingTestClock()))
 
-		pending, _ := inv.ListAutoChargePending(context.Background(), domain.InvoiceKeyset{}, 50)
-		_, _ = engine.processAutoCharge(postgres.WithLivemode(context.Background(), false), pending, nil, noPMTriggerSweep)
+		pending, _ := inv.ListAutoChargePending(context.Background(), walk.Key{}, 50)
+		_, _ = collectEach(engine, postgres.WithLivemode(context.Background(), false), pending, nil, noPMTriggerSweep)
 
 		if h, _ := inv.ClaimAutoCharge(context.Background(), "t1", "inv_nopm"); !h.Held() {
 			t.Fatal("claim must be re-takeable immediately after the no-PM skip — the lease was not released")
@@ -114,8 +115,8 @@ func TestProcessAutoCharge_ReleasesClaimOnPreStripeSkips(t *testing.T) {
 		charger := &countingCharger{}
 		engine := wireBaseTax(NewEngine(&mockSubs{cycleUpdated: make(map[string]bool)}, &mockUsage{}, &mockPricing{}, inv, failingCredits{}, &mockSettings{}, &fakePaymentSetups{ready: true, stripeCustomerID: "cus_s"}, charger, billingTestClock()))
 
-		pending, _ := inv.ListAutoChargePending(context.Background(), domain.InvoiceKeyset{}, 50)
-		_, _ = engine.processAutoCharge(postgres.WithLivemode(context.Background(), false), pending, nil, noPMTriggerSweep)
+		pending, _ := inv.ListAutoChargePending(context.Background(), walk.Key{}, 50)
+		_, _ = collectEach(engine, postgres.WithLivemode(context.Background(), false), pending, nil, noPMTriggerSweep)
 
 		if charger.calls["inv_credfail"] != 0 {
 			t.Fatal("charge must not fire when credit re-apply failed (overcharge guard)")
@@ -164,8 +165,8 @@ func TestProcessAutoCharge_HoldTokenAndNoChargeReleases(t *testing.T) {
 		}}}
 		charger := &tokenCharger{}
 		engine := wireBaseTax(NewEngine(&mockSubs{cycleUpdated: make(map[string]bool)}, &mockUsage{}, &mockPricing{}, inv, nil, &mockSettings{}, &fakePaymentSetups{ready: true, stripeCustomerID: "cus_s"}, charger, billingTestClock()))
-		pending, _ := inv.ListAutoChargePending(context.Background(), domain.InvoiceKeyset{}, 50)
-		_, _ = engine.processAutoCharge(postgres.WithLivemode(context.Background(), false), pending, nil, noPMTriggerSweep)
+		pending, _ := inv.ListAutoChargePending(context.Background(), walk.Key{}, 50)
+		_, _ = collectEach(engine, postgres.WithLivemode(context.Background(), false), pending, nil, noPMTriggerSweep)
 		if len(charger.got) != 1 || !charger.got[0].Held() || charger.got[0] != inv.claimed["inv_tok"] {
 			t.Fatalf("charge got holds %v, want exactly the token the claim took (%v)", charger.got, inv.claimed["inv_tok"])
 		}
@@ -179,8 +180,8 @@ func TestProcessAutoCharge_HoldTokenAndNoChargeReleases(t *testing.T) {
 		}}}
 		charger := &countingCharger{}
 		engine := wireBaseTax(NewEngine(&mockSubs{cycleUpdated: make(map[string]bool)}, &mockUsage{}, &mockPricing{}, inv, nil, &mockSettings{}, &fakePaymentSetups{ready: true, stripeCustomerID: "cus_s"}, charger, billingTestClock()))
-		pending, _ := inv.ListAutoChargePending(context.Background(), domain.InvoiceKeyset{}, 50)
-		_, _ = engine.processAutoCharge(postgres.WithLivemode(context.Background(), false), pending, nil, noPMTriggerSweep)
+		pending, _ := inv.ListAutoChargePending(context.Background(), walk.Key{}, 50)
+		_, _ = collectEach(engine, postgres.WithLivemode(context.Background(), false), pending, nil, noPMTriggerSweep)
 		if charger.calls["inv_zero"] != 0 {
 			t.Fatal("charged an invoice with nothing owed")
 		}
@@ -199,8 +200,8 @@ func TestProcessAutoCharge_HoldTokenAndNoChargeReleases(t *testing.T) {
 		inv := &failAfterCredits{mockInvoices: base, credits: credits}
 		charger := &countingCharger{}
 		engine := wireBaseTax(NewEngine(&mockSubs{cycleUpdated: make(map[string]bool)}, &mockUsage{}, &mockPricing{}, inv, credits, &mockSettings{}, &fakePaymentSetups{ready: true, stripeCustomerID: "cus_s"}, charger, billingTestClock()))
-		pending, _ := base.ListAutoChargePending(context.Background(), domain.InvoiceKeyset{}, 50)
-		_, _ = engine.processAutoCharge(postgres.WithLivemode(context.Background(), false), pending, nil, noPMTriggerSweep)
+		pending, _ := base.ListAutoChargePending(context.Background(), walk.Key{}, 50)
+		_, _ = collectEach(engine, postgres.WithLivemode(context.Background(), false), pending, nil, noPMTriggerSweep)
 		if charger.calls["inv_refresh"] != 0 {
 			t.Fatal("charged after a failed refresh")
 		}

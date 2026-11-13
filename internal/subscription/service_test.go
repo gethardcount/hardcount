@@ -4032,7 +4032,7 @@ func (m *memStore) CustomerSubPlanCurrencies(_ context.Context, _, _, _ string) 
 // already cleared (a sibling leader won the CAS), the cron counts nothing and
 // reports no error. The event and the audit row are the store's, written only
 // when its clear wins (TestClearPauseCollection_CASOneWinner). Mutation-verify:
-// remove the ErrNotPaused branch in resumeListedPauses → the batch reports an
+// remove the ErrNotPaused branch in resumeListedPause → the batch reports an
 // error.
 func TestProcessExpiredPauseCollections_AlreadyClearedAnnouncesNothing(t *testing.T) {
 	store := newMemStore()

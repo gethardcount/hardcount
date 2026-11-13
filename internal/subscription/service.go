@@ -3227,24 +3227,22 @@ func (s *Service) ProcessExpiredTrialsForClock(ctx context.Context, tenantID, cl
 		}
 		return expired, nil
 	}
-	for sub, err := range walk.Walk(ctx, "ListExpiredTrialsForClock", list, trialEndKey, clockJobPage) {
+	for sub, err := range walk.Walk(ctx, "ListExpiredTrialsForClock", list, expiredTrialKey, clockJobPage) {
 		if err != nil {
-			return processed, append(batchErrs, fmt.Errorf("end the clock's trials: %w", err))
-		}
-		if sub.TrialEndAt == nil {
-			continue
+			batchErrs = append(batchErrs, fmt.Errorf("end the clock's trials: %w", err))
+			break
 		}
 		trialEndAt := *sub.TrialEndAt
-		// The trial ends at trial_end_at, not wherever the advance landed
-		// (B12): override the INSTANT while keeping the CLOCK, as the pause
-		// resume below does. Every branch runs on this ctx: the flip's audit
+		// The trial ends at trial_end_at, not wherever the advance landed:
+		// override the instant while keeping the clock, as the pause resume
+		// below does. Every branch runs on this ctx: the flip's audit
 		// row, the day-1 invoice (issued at trial_end_at, see
 		// buildOnCreateInvoice), its finalize row and collection, and the
 		// free cancel's row. Nested binds of the same clock inherit it
 		// (clock.BindEffectiveNow).
 		bound := clock.WithSim(s.bindForSub(ctx, tenantID, sub.ID), clock.Sim{At: trialEndAt, TestClockID: clockID})
-		// ADR-069 routing: a due cancel schedule means CANCEL FREE, never
-		// activate-and-bill. The SQL guard on the activation UPDATE is the
+		// A due cancel schedule means cancel free, never activate-and-bill
+		// (ADR-069). The SQL guard on the activation UPDATE is the
 		// atomic backstop for a schedule landing after this snapshot.
 		if trialCancelDue(sub) {
 			handled, cErr := s.cancelTrialAtEnd(bound, tenantID, sub)
@@ -3255,10 +3253,9 @@ func (s *Service) ProcessExpiredTrialsForClock(ctx context.Context, tenantID, cl
 			}
 			continue
 		}
-		// ADR-056 alignment (panel finding): the day-1 in_advance invoice now
-		// rides the SAME tx as the flip on this path too — the old post-flip
-		// BillOnCreate's "will be deferred" WARN was false (the cycle
-		// scheduler skips the just-elapsed segment; the fee was simply lost).
+		// The day-1 in_advance invoice is written in the same transaction as
+		// the flip (ADR-056): the cycle scan skips the elapsed segment, so a
+		// later bill would never charge it.
 		var firstInv domain.Invoice
 		var haveInv bool
 		activated, err := s.store.ActivateAfterTrialWithBill(bound, tenantID, sub.ID, trialEndAt, func(tx *sql.Tx, a domain.Subscription) error {
@@ -3297,10 +3294,7 @@ func (s *Service) ProcessExpiredTrialsForClock(ctx context.Context, tenantID, cl
 			continue
 		}
 
-		// Audit the auto-flip — the operator EndTrial path writes the same
-		// trial_ended row; without this, scheduler-driven expiry showed only
-		// in webhooks and the Activity feed missed it (same asymmetry the
-		// scheduled-cancel + pause-auto-resume audits already fixed).
+		// The trial_ended audit row, as the operator's EndTrial writes it.
 		if s.audit != nil {
 			// trial_end_at is its own fact, on every trial-end writer; the
 			// row's sim axis (test_clock_id + sim_effective_at) comes from the
@@ -3314,9 +3308,8 @@ func (s *Service) ProcessExpiredTrialsForClock(ctx context.Context, tenantID, cl
 			})
 		}
 
-		// Post-commit external finalize for the day-1 invoice (tax commit +
-		// auto-charge) — Stripe calls never ride a DB tx; the invoice is
-		// already durable + atomic with the activation.
+		// The day-1 invoice's finalize (tax commit and collection) runs after
+		// the commit: Stripe calls never ride a database transaction.
 		if haveInv {
 			s.biller.FinalizeOnCreateInvoice(bound, activated, firstInv)
 		}
@@ -3447,7 +3440,7 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 // ProcessExpiredPauseCollectionsForClock is the catchup-orchestrator
 // entry point that scans clock-pinned subs whose
 // pause_collection_resumes_at has passed in simulated time and resumes
-// each (resumeListedPauses). Runs as a catchup phase AFTER cycle billing,
+// each (resumeListedPause). Runs as a catchup phase AFTER cycle billing,
 // and the store query skips a sub that still owes a close before
 // resumes_at: that close bills the pause as it stood at the period's end,
 // so the pause must still be on the row when it runs.
@@ -3471,25 +3464,34 @@ func (s *Service) ProcessExpiredPauseCollectionsForClock(ctx context.Context, te
 		}
 		return expired, nil
 	}
-	for sub, err := range walk.Walk(ctx, "ListExpiredPauseCollectionsForClock", list, pauseResumeKey, clockJobPage) {
+	for sub, err := range walk.Walk(ctx, "ListExpiredPauseCollectionsForClock", list, expiredPauseCollectionKey, clockJobPage) {
 		if err != nil {
-			return processed, append(batchErrs, fmt.Errorf("resume the clock's pauses: %w", err))
+			batchErrs = append(batchErrs, fmt.Errorf("resume the clock's pauses: %w", err))
+			break
 		}
-		n, rowErrs := s.resumeListedPauses(ctx, []domain.Subscription{sub})
-		processed += n
-		batchErrs = append(batchErrs, rowErrs...)
+		ok, err := s.resumeListedPause(ctx, sub)
+		if err != nil {
+			batchErrs = append(batchErrs, err)
+			continue
+		}
+		if ok {
+			processed++
+		}
 	}
 	return processed, batchErrs
 }
 
-// trialEndKey is a trial's place in a list read by (trial_end_at, id).
-func trialEndKey(sub domain.Subscription) walk.Key {
+// expiredTrialKey is a trial's place in the expired-trials list, read by
+// (trial_end_at, id). The list's own predicate (trial_end_at IS NOT NULL)
+// means every listed row has one.
+func expiredTrialKey(sub domain.Subscription) walk.Key {
 	return walk.Key{At: *sub.TrialEndAt, ID: sub.ID}
 }
 
-// pauseResumeKey is a pause's place in a list read by
-// (pause_collection_resumes_at, id).
-func pauseResumeKey(sub domain.Subscription) walk.Key {
+// expiredPauseCollectionKey is a pause's place in the expired-pauses list,
+// read by (pause_collection_resumes_at, id). The list's own predicate
+// (resumes_at <= now) means every listed row has a pause and a resume time.
+func expiredPauseCollectionKey(sub domain.Subscription) walk.Key {
 	return walk.Key{At: *sub.PauseCollection.ResumesAt, ID: sub.ID}
 }
 
@@ -3510,8 +3512,8 @@ func (s *Service) ProcessExpiredPauseCollections(ctx context.Context, batch int)
 	return s.resumeListedPauses(ctx, expired)
 }
 
-// resumeListedPauses resumes each lifted pause a resumer listed. The clear
-// is a compare-and-set on the pause as listed (Store.ResumeLiftedPause):
+// resumeListedPause resumes one lifted pause a resumer listed, and reports
+// whether it did. The clear is a compare-and-set on the pause as listed (Store.ResumeLiftedPause):
 // the "Collection resumed" row and subscription.collection_resumed commit
 // with it, triggered_by "schedule" for an operator's timed pause or
 // "payment" for a dunning pause, resumed_at the CONTRACTED resumes_at (on
@@ -3519,23 +3521,35 @@ func (s *Service) ProcessExpiredPauseCollections(ctx context.Context, batch int)
 // ran. When another writer got to the row after the list (a sibling
 // leader, the operator, a new pause), the clear misses and the row is
 // skipped: that writer announced what it did.
+func (s *Service) resumeListedPause(ctx context.Context, sub domain.Subscription) (bool, error) {
+	// The store binds a test-clock row's ctx to its resumes_at.
+	_, err := s.store.ResumeLiftedPause(ctx, sub.TenantID, sub, s.resumeAudit())
+	if errors.Is(err, ErrNotPaused) {
+		slog.InfoContext(ctx, "pause collection changed since the list — skipping resume announcement", "subscription_id", sub.ID)
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("resume pause %s: %w", sub.ID, err)
+	}
+	return true, nil
+}
+
+// resumeListedPauses resumes the pauses of one page of the real-time list,
+// which ProcessExpiredPauseCollections reads one page of.
 func (s *Service) resumeListedPauses(ctx context.Context, listed []domain.Subscription) (int, []error) {
 	var (
 		processed int
 		batchErrs []error
 	)
 	for _, sub := range listed {
-		// The store binds a test-clock row's ctx to its resumes_at.
-		_, err := s.store.ResumeLiftedPause(ctx, sub.TenantID, sub, s.resumeAudit())
-		if errors.Is(err, ErrNotPaused) {
-			slog.InfoContext(ctx, "pause collection changed since the list — skipping resume announcement", "subscription_id", sub.ID)
-			continue
-		}
+		ok, err := s.resumeListedPause(ctx, sub)
 		if err != nil {
-			batchErrs = append(batchErrs, fmt.Errorf("resume pause %s: %w", sub.ID, err))
+			batchErrs = append(batchErrs, err)
 			continue
 		}
-		processed++
+		if ok {
+			processed++
+		}
 	}
 	return processed, batchErrs
 }

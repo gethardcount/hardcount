@@ -105,7 +105,7 @@ func (e *Engine) ScanThresholds(ctx context.Context, batchSize int) (int, []erro
 	}
 	fired := 0
 	var errsOut []error
-	for sub, err := range walk.Walk(ctx, "ListWithThresholds", list, subscriptionIDKey, batchSize) {
+	for sub, err := range walk.Walk(ctx, "ListWithThresholds", list, thresholdCandidateKey, batchSize) {
 		if err != nil {
 			errsOut = append(errsOut, fmt.Errorf("threshold scan: %w", err))
 			break
@@ -150,13 +150,13 @@ func (e *Engine) ScanThresholdsForClock(ctx context.Context, tenantID, clockID s
 	list := func(ctx context.Context, after walk.Key, limit int) ([]domain.Subscription, error) {
 		candidates, err := e.subs.ListWithThresholdsForClock(ctx, tenantID, clockID, after.ID, limit)
 		if err != nil {
-			return nil, fmt.Errorf("list threshold candidates for clock %s: %w", clockID, err)
+			return nil, fmt.Errorf("list threshold candidates: %w", err)
 		}
 		return candidates, nil
 	}
 	fired := 0
 	var errsOut []error
-	for sub, err := range walk.Walk(ctx, "ListWithThresholdsForClock", list, subscriptionIDKey, batchSize) {
+	for sub, err := range walk.Walk(ctx, "ListWithThresholdsForClock", list, thresholdCandidateKey, batchSize) {
 		if err != nil {
 			errsOut = append(errsOut, fmt.Errorf("threshold scan on clock %s: %w", clockID, err))
 			break
@@ -182,8 +182,9 @@ func (e *Engine) ScanThresholdsForClock(ctx context.Context, tenantID, clockID s
 	return fired, errsOut
 }
 
-// subscriptionIDKey is a subscription's place in a list read by id.
-func subscriptionIDKey(sub domain.Subscription) walk.Key { return walk.Key{ID: sub.ID} }
+// thresholdCandidateKey is a subscription's place in the threshold lists,
+// which both scans read by id.
+func thresholdCandidateKey(sub domain.Subscription) walk.Key { return walk.Key{ID: sub.ID} }
 
 // scanOneThreshold evaluates a single subscription. Builds running line items
 // over the partial cycle [period_start, through), checks each configured cap,

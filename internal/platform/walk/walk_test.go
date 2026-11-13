@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	herrs "github.com/gethardcount/hardcount/internal/errs"
 )
 
 type row struct {
@@ -50,6 +52,10 @@ func (s *sorted) list(_ context.Context, after Key, limit int) ([]row, error) {
 		}
 	}
 	return page, nil
+}
+
+func (s *sorted) remove(id string) {
+	s.rows = slices.DeleteFunc(s.rows, func(r row) bool { return r.id == id })
 }
 
 func collect(t *testing.T, seq func(func(row, error) bool)) ([]string, []error) {
@@ -120,14 +126,27 @@ func TestWalk_EveryRowOnceToTheEnd(t *testing.T) {
 	}
 }
 
-// A row the job leaves as it was stays in the list. The walk still moves past
-// it, because the next page starts after the last row listed, not after the
-// last row done.
+// The job finishes some rows, which leave the list, and leaves the others,
+// which stay. Every row still comes once, in order: the next page starts
+// after the last row listed, not after the last row done.
 func TestWalk_RowsThatStayListedDoNotHoldBackTheRest(t *testing.T) {
-	s := &sorted{rows: rows(5)}
-	ids, errs := collect(t, Walk(context.Background(), "test list", s.list, keyOf, 2))
-	if len(errs) != 0 || len(ids) != 5 {
-		t.Fatalf("rows = %v, errors = %v; want all 5 rows once and no error", ids, errs)
+	s := &sorted{rows: rows(7)}
+	var ids []string
+	for r, err := range Walk(context.Background(), "test list", s.list, keyOf, 2) {
+		if err != nil {
+			t.Fatalf("error: %v", err)
+		}
+		ids = append(ids, r.id)
+		if len(ids)%2 == 1 {
+			s.remove(r.id) // done: it leaves the list
+		}
+	}
+	want := []string{"r00", "r01", "r02", "r03", "r04", "r05", "r06"}
+	if !slices.Equal(ids, want) {
+		t.Fatalf("rows = %v, want %v: each once, in order", ids, want)
+	}
+	if len(s.rows) != 3 {
+		t.Errorf("rows left listed = %d, want the 3 the job left", len(s.rows))
 	}
 }
 
@@ -155,7 +174,7 @@ func TestWalk_AListErrorIsYieldedOnceAndEndsTheWalk(t *testing.T) {
 	if len(ids) != 2 || len(errs) != 1 || !errors.Is(errs[0], boom) {
 		t.Fatalf("rows = %v, errors = %v; want the first page's 2 rows, then boom once", ids, errs)
 	}
-	if errors.Is(errs[0], ErrCut) {
+	if strings.Contains(errs[0].Error(), "stopped before the end") {
 		t.Errorf("a list error with a live context is not a cut: %v", errs[0])
 	}
 	if calls != 2 {
@@ -169,7 +188,7 @@ func TestWalk_AContextThatEndedBeforeAPageIsACut(t *testing.T) {
 		cancel()
 		s := &sorted{rows: rows(5)}
 		ids, errs := collect(t, Walk(ctx, "test list", s.list, keyOf, 2))
-		if len(ids) != 0 || len(errs) != 1 || !errors.Is(errs[0], ErrCut) || !errors.Is(errs[0], context.Canceled) {
+		if len(ids) != 0 || len(errs) != 1 || !errors.Is(errs[0], context.Canceled) {
 			t.Fatalf("rows = %v, errors = %v; want no row and one cut that wraps context.Canceled", ids, errs)
 		}
 		if len(s.afters) != 0 {
@@ -195,7 +214,7 @@ func TestWalk_AContextThatEndedBeforeAPageIsACut(t *testing.T) {
 		if len(ids) != 2 {
 			t.Errorf("rows = %v, want the first page's 2: the cut comes before the next page, not mid-page", ids)
 		}
-		if len(errs) != 1 || !errors.Is(errs[0], ErrCut) || !errors.Is(errs[0], context.Canceled) || !errors.Is(errs[0], lost) {
+		if len(errs) != 1 || !errors.Is(errs[0], context.Canceled) || !errors.Is(errs[0], lost) {
 			t.Fatalf("errors = %v; want one cut that wraps context.Canceled and the cause", errs)
 		}
 		if got := errs[0].Error(); !strings.HasPrefix(got, "stopped before the end of the list") {
@@ -207,7 +226,7 @@ func TestWalk_AContextThatEndedBeforeAPageIsACut(t *testing.T) {
 		ctx, cancel := context.WithDeadline(context.Background(), time.Unix(0, 0))
 		defer cancel()
 		_, errs := collect(t, Walk(ctx, "test list", (&sorted{rows: rows(1)}).list, keyOf, 2))
-		if len(errs) != 1 || !errors.Is(errs[0], ErrCut) || !errors.Is(errs[0], context.DeadlineExceeded) {
+		if len(errs) != 1 || !errors.Is(errs[0], context.DeadlineExceeded) {
 			t.Fatalf("errors = %v; want one cut that wraps context.DeadlineExceeded", errs)
 		}
 	})
@@ -220,7 +239,7 @@ func TestWalk_AContextThatEndedBeforeAPageIsACut(t *testing.T) {
 			return nil, fmt.Errorf("query: %w", ctx.Err())
 		}
 		_, errs := collect(t, Walk(ctx, "test list", list, keyOf, 2))
-		if len(errs) != 1 || !errors.Is(errs[0], ErrCut) || !strings.Contains(errs[0].Error(), "query: ") {
+		if len(errs) != 1 || !errors.Is(errs[0], context.Canceled) || !strings.Contains(errs[0].Error(), "query: ") {
 			t.Fatalf("errors = %v; want one cut that also carries the list's error", errs)
 		}
 	})
@@ -271,8 +290,14 @@ func TestWalk_AListThatDoesNotMoveOnIsAnError(t *testing.T) {
 			if !strings.Contains(msg, "ListThings") || !strings.Contains(msg, "id \"") {
 				t.Errorf("message = %q, want the list's name and the keys", msg)
 			}
-			if errors.Is(errs[0], ErrCut) {
+			if strings.Contains(msg, "stopped before the end") {
 				t.Errorf("a list that does not move on is not a cut: %v", errs[0])
+			}
+			// On an operator's screen it is an internal error; the detail is
+			// for the log.
+			wrapped := fmt.Errorf("issue the clock's held relief notes: %w", errs[0])
+			if got, want := herrs.SummarizeForOperator([]error{wrapped}, ""), "An internal error occurred. See server logs for details."; got != want {
+				t.Errorf("operator reads %q, want %q", got, want)
 			}
 		})
 	}

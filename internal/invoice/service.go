@@ -3109,28 +3109,46 @@ func (s *Service) RetryPendingTaxForClock(ctx context.Context, tenantID, clockID
 	// retry leaves waiting stays in the list, so the walk moves past it.
 	list := func(ctx context.Context, after walk.Key, limit int) ([]domain.Invoice, error) {
 		stuck, err := s.store.ListPendingTaxRetryForClock(ctx, tenantID, clockID, codes, maxAttempts,
-			domain.InvoiceKeyset{CreatedAt: after.At, ID: after.ID}, limit)
+			after, limit)
 		if err != nil {
 			return nil, fmt.Errorf("list pending tax retries for clock %s: %w", clockID, err)
 		}
 		return stuck, nil
 	}
-	created := func(inv domain.Invoice) walk.Key { return walk.Key{At: inv.CreatedAt, ID: inv.ID} }
-	for inv, err := range walk.Walk(ctx, "ListPendingTaxRetryForClock", list, created, batch) {
+	for inv, err := range walk.Walk(ctx, "ListPendingTaxRetryForClock", list, pendingTaxRetryKey, batch) {
 		if err != nil {
-			return processed, append(errs, fmt.Errorf("retry tax on the clock's invoices: %w", err))
+			errs = append(errs, fmt.Errorf("retry tax on the clock's invoices: %w", err))
+			break
 		}
-		n, rowErrs := s.processTaxRetryBatch(ctx, []domain.Invoice{inv})
-		processed += n
-		errs = append(errs, rowErrs...)
+		if ctx.Err() != nil {
+			continue // the walk reports the stop once, at its next page
+		}
+		if err := s.retryTaxOne(ctx, inv); err != nil {
+			errs = append(errs, err)
+			continue
+		}
+		processed++
 	}
 	return processed, errs
 }
 
-// processTaxRetryBatch is the per-row body of the cron-path
-// RetryPendingTax. The catchup path (RetryPendingTaxForClock) has
-// its own event-walking loop with per-row ctx-binding; the cron
-// path doesn't need that since it's already wall-clock-driven.
+// pendingTaxRetryKey is a draft's place in the clock's tax-retry list, read
+// by (created_at, id).
+func pendingTaxRetryKey(inv domain.Invoice) walk.Key {
+	return walk.Key{At: inv.CreatedAt, ID: inv.ID}
+}
+
+// retryTaxOne retries tax on one invoice, under the invoice's own tenant:
+// the lists it comes from are cross-tenant.
+func (s *Service) retryTaxOne(ctx context.Context, inv domain.Invoice) error {
+	if _, err := s.RetryTax(ctx, inv.TenantID, inv.ID); err != nil {
+		return fmt.Errorf("invoice %s: %w", inv.ID, err)
+	}
+	return nil
+}
+
+// processTaxRetryBatch retries tax on one page of the real-time list, which
+// RetryPendingTax reads one page of.
 func (s *Service) processTaxRetryBatch(ctx context.Context, stuck []domain.Invoice) (int, []error) {
 	var (
 		processed int
@@ -3145,12 +3163,8 @@ func (s *Service) processTaxRetryBatch(ctx context.Context, stuck []domain.Invoi
 		if ctx.Err() != nil {
 			return processed, errs
 		}
-		// RetryTax pins tenant via the engine entry point that
-		// already does WithTenantID. We pass the per-row tenant
-		// explicitly here rather than relying on ctx because this
-		// loop is cross-tenant.
-		if _, retryErr := s.RetryTax(ctx, inv.TenantID, inv.ID); retryErr != nil {
-			errs = append(errs, fmt.Errorf("invoice %s: %w", inv.ID, retryErr))
+		if err := s.retryTaxOne(ctx, inv); err != nil {
+			errs = append(errs, err)
 			continue
 		}
 		processed++

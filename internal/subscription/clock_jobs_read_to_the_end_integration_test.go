@@ -12,6 +12,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -209,22 +210,16 @@ func TestListExpiredTrialsForClock_WalkReturnsEveryRowOnce(t *testing.T) {
 		t.Fatalf("commit: %v", err)
 	}
 
+	// Walked as the job walks it, with its key.
 	seen := map[string]int{}
-	var afterAt time.Time
-	afterID := ""
-	for range n + 1 {
-		got, err := store.ListExpiredTrialsForClock(ctx, tenantID, clockID, frozen, afterAt, afterID, page)
+	list := func(ctx context.Context, after walk.Key, limit int) ([]domain.Subscription, error) {
+		return store.ListExpiredTrialsForClock(ctx, tenantID, clockID, frozen, after.At, after.ID, limit)
+	}
+	for sub, err := range walk.Walk(ctx, "ListExpiredTrialsForClock", list, expiredTrialKey, page) {
 		if err != nil {
-			t.Fatalf("list: %v", err)
+			t.Fatalf("walk: %v", err)
 		}
-		for _, sub := range got {
-			seen[sub.ID]++
-		}
-		if len(got) < page {
-			break
-		}
-		last := got[len(got)-1]
-		afterAt, afterID = *last.TrialEndAt, last.ID
+		seen[sub.ID]++
 	}
 	for i, id := range ids {
 		if seen[id] != 1 {

@@ -27,23 +27,22 @@ type Key struct {
 // List returns up to limit rows that come after the key, in key order.
 type List[T any] func(ctx context.Context, after Key, limit int) ([]T, error)
 
-// ErrCut means the context ended before the list did. The error Walk yields
-// wraps it, the context's error and the context's cause.
-var ErrCut = errors.New("stopped before the end of the list")
-
 // Walk yields every row of the list, page by page, until a page comes back
 // with fewer than limit rows.
 //
-// A list error, a cut and a list that does not move on are each yielded once,
-// as the last value, with a zero row:
-//   - a list error is passed on as the list returned it;
-//   - when ctx has ended before a page, or the list failed because it had,
-//     the error wraps ErrCut;
-//   - when a page's first or last row is not after the page before it (the
-//     same row again, or earlier in time), the list is not ordering or paging
-//     by its key. None of that page's rows is yielded: going on would work
-//     the same rows again, and for ever. The error names the list and the
-//     keys.
+// Four errors end a walk. Each is yielded once, as the last value, with a
+// zero row:
+//   - a page size below 1;
+//   - a list error, passed on as the list returned it;
+//   - a context that has ended, before a page or while the list was read:
+//     "stopped before the end of the list", wrapping the context's error and
+//     its cause;
+//   - a page that is not after the page before it: its first or last row is
+//     the row the page before ended on, or, for a list keyed by a time, has
+//     an earlier time. The list is not ordering or paging by its key, a bug.
+//     None of that page's rows is yielded, since going on would work the same
+//     rows again, and for ever. The error names the list and the keys; on an
+//     operator's screen it reads as an internal error.
 //
 // Breaking out of the loop stops the walk; no further page is read.
 func Walk[T any](ctx context.Context, name string, list List[T], key func(T) Key, limit int) iter.Seq2[T, error] {
@@ -56,13 +55,13 @@ func Walk[T any](ctx context.Context, name string, list List[T], key func(T) Key
 		var after Key
 		for {
 			if ctx.Err() != nil {
-				yield(zero, cut(ctx))
+				yield(zero, cut(ctx, nil))
 				return
 			}
 			page, err := list(ctx, after, limit)
 			if err != nil {
 				if ctx.Err() != nil {
-					err = fmt.Errorf("%w: %w", cut(ctx), err)
+					err = cut(ctx, err)
 				}
 				yield(zero, err)
 				return
@@ -72,7 +71,7 @@ func Walk[T any](ctx context.Context, name string, list List[T], key func(T) Key
 			}
 			first, last := key(page[0]), key(page[len(page)-1])
 			if !movedOn(after, first) || !movedOn(after, last) {
-				yield(zero, fmt.Errorf("walk %s: a page ran from %s to %s, which is not after the page before it (%s): the list does not order or page by its key", name, first, last, after))
+				yield(zero, &orderError{list: name, first: first, last: last, after: after})
 				return
 			}
 			for _, row := range page {
@@ -98,14 +97,35 @@ func movedOn(prev, next Key) bool {
 	return !next.At.Equal(prev.At) || next.ID != prev.ID
 }
 
-// cut is ErrCut with the context's error and, when it differs, its cause
-// (leader.ErrLeaseLost, for one).
-func cut(ctx context.Context) error {
-	err, cause := ctx.Err(), context.Cause(ctx)
-	if cause == nil || errors.Is(cause, err) {
-		return fmt.Errorf("%w: %w", ErrCut, err)
+// cut is the error for a context that has ended: the context's error, its
+// cause when that differs (leader.ErrLeaseLost, for one), and the list's own
+// error when reading it failed.
+func cut(ctx context.Context, listErr error) error {
+	err := ctx.Err()
+	if cause := context.Cause(ctx); cause != nil && !errors.Is(cause, err) {
+		err = fmt.Errorf("%w (%w)", err, cause)
 	}
-	return fmt.Errorf("%w: %w (%w)", ErrCut, err, cause)
+	if listErr != nil {
+		return fmt.Errorf("stopped before the end of the list: %w: %w", err, listErr)
+	}
+	return fmt.Errorf("stopped before the end of the list: %w", err)
+}
+
+// orderError is a page that is not after the page before it.
+type orderError struct {
+	list               string
+	first, last, after Key
+}
+
+func (e *orderError) Error() string {
+	return fmt.Sprintf("walk %s: a page ran from %s to %s, which is not after the page before it (%s): the list does not order or page by its key",
+		e.list, e.first, e.last, e.after)
+}
+
+// OperatorSafeMessage is what an operator's screen shows (errs.SafeMessageError):
+// the error is a bug, and its detail belongs in the log.
+func (e *orderError) OperatorSafeMessage() string {
+	return "An internal error occurred. See server logs for details."
 }
 
 // String prints the key for an error message.

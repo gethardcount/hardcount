@@ -838,10 +838,10 @@ func (s *Service) RetryPendingClawbackIssueForClock(ctx context.Context, tenantI
 		}
 		return drafts, nil
 	}
-	created := func(cn domain.CreditNote) walk.Key { return walk.Key{At: cn.CreatedAt, ID: cn.ID} }
-	for cn, err := range walk.Walk(ctx, "ListPendingClawbackDraftsForClock", list, created, batch) {
+	for cn, err := range walk.Walk(ctx, "ListPendingClawbackDraftsForClock", list, pendingClawbackDraftKey, batch) {
 		if err != nil {
-			return issued, append(errsOut, fmt.Errorf("issue the clock's held relief notes: %w", err))
+			errsOut = append(errsOut, fmt.Errorf("issue the clock's held relief notes: %w", err))
+			break
 		}
 		if _, err := s.Issue(ctx, cn.TenantID, cn.ID); err != nil {
 			errsOut = append(errsOut, fmt.Errorf("re-issue clawback credit note %s: %w", cn.ID, err))
@@ -850,6 +850,12 @@ func (s *Service) RetryPendingClawbackIssueForClock(ctx context.Context, tenantI
 		issued++
 	}
 	return issued, errsOut
+}
+
+// pendingClawbackDraftKey is a held relief note's place in the clock's list,
+// read by (created_at, id).
+func pendingClawbackDraftKey(cn domain.CreditNote) walk.Key {
+	return walk.Key{At: cn.CreatedAt, ID: cn.ID}
 }
 
 // RetryPendingCreditNoteTaxReversal makes the upstream tax reversal for issued
