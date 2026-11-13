@@ -970,7 +970,10 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		IssuedAt:           &issuedAt,
 		DueAt:              &dueAt,
 		NetPaymentTermDays: netDays,
-		Memo:               strings.TrimSpace(input.Memo),
+		// The operator types this invoice's amounts under the tenant's setting
+		// now, and lines added later are in the invoice's terms.
+		TaxInclusive: ts.TaxInclusive,
+		Memo:         strings.TrimSpace(input.Memo),
 		// Operator-composed invoices are billing_reason='manual', mirroring
 		// Stripe. The marker drives two behaviours: (1) Finalize computes tax
 		// at finalize-time for these (cycle invoices already carry it), and

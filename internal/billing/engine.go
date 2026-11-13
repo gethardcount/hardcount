@@ -1655,6 +1655,11 @@ type TaxApplication struct {
 	domain.TaxFacts
 	SubtotalCents int64
 	DiscountCents int64
+	// TaxInclusive is whether these prices were read as including tax: the
+	// tenant's setting in the same read that priced them. Set before the
+	// provider is called, so an invoice whose tax is left pending records it
+	// too. The writer copies it onto the invoice it creates.
+	TaxInclusive bool
 }
 
 // displayTaxRate picks the rate to persist as invoice-level invoices.tax_rate.
@@ -1743,7 +1748,13 @@ func (e *Engine) ApplyTaxToLineItems(ctx context.Context, tenantID, customerID, 
 	if err != nil {
 		return TaxApplication{}, err
 	}
-	return e.applyTax(ctx, ts, tenantID, customerID, currency, subtotal, lineItems)
+	// From here the prices' meaning is known, so a failure carries it: a
+	// writer that keeps the invoice with its tax pending records it.
+	app, err := e.applyTax(ctx, ts, tenantID, customerID, currency, subtotal, lineItems)
+	if err != nil {
+		return TaxApplication{}, &domain.PricedTaxError{TaxInclusive: ts.TaxInclusive, Err: err}
+	}
+	return app, nil
 }
 
 // loadTaxSettings checks the tax wiring, pins the tenant on ctx and reads
@@ -1805,6 +1816,7 @@ func (e *Engine) applyTax(ctx context.Context, ts domain.TenantSettings, tenantI
 	app := TaxApplication{
 		SubtotalCents: subtotal,
 		TaxFacts:      domain.TaxFacts{TaxStatus: domain.InvoiceTaxOK},
+		TaxInclusive:  ts.TaxInclusive,
 	}
 	app.TaxName = ts.TaxName
 
@@ -3205,6 +3217,7 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 		DiscountCents:   taxApp.DiscountCents,
 		// ONE assignment carries every tax fact (see domain/tax_facts.go).
 		TaxFacts:           taxApp.TaxFacts,
+		TaxInclusive:       taxApp.TaxInclusive,
 		TotalAmountCents:   totalWithTax,
 		AmountDueCents:     totalWithTax,
 		BillingPeriodStart: invoicePeriodStart,
@@ -3599,6 +3612,7 @@ func (e *Engine) buildOnCreateInvoice(ctx context.Context, sub domain.Subscripti
 		DiscountCents: taxApp.DiscountCents,
 		// ONE assignment carries every tax fact (see domain/tax_facts.go).
 		TaxFacts:           taxApp.TaxFacts,
+		TaxInclusive:       taxApp.TaxInclusive,
 		TotalAmountCents:   totalWithTax,
 		AmountDueCents:     totalWithTax,
 		BillingPeriodStart: periodStart,
@@ -4201,6 +4215,7 @@ func (e *Engine) writeFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.
 		DiscountCents: taxApp.DiscountCents,
 		// ONE assignment carries every tax fact (see domain/tax_facts.go).
 		TaxFacts:           taxApp.TaxFacts,
+		TaxInclusive:       taxApp.TaxInclusive,
 		TotalAmountCents:   totalWithTax,
 		AmountDueCents:     totalWithTax,
 		BillingPeriodStart: p.periodStart,

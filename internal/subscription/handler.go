@@ -104,6 +104,9 @@ type ProrationTaxResult struct {
 	domain.TaxFacts
 	SubtotalCents int64
 	DiscountCents int64
+	// TaxInclusive is whether the prices were read as including tax, from
+	// the settings read that priced them. The proration invoice records it.
+	TaxInclusive bool
 }
 
 // ProrationTaxApplier resolves and applies tax against a proration invoice's
@@ -2034,6 +2037,13 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 				// fit int64 cents. Refuse the change; a draft would carry it.
 				return nil, fmt.Errorf("proration invoice: %w", err)
 			}
+			var priced *domain.PricedTaxError
+			if err != nil && !errors.As(err, &priced) {
+				// The tax settings could not be read, so whether the prices
+				// include tax is not known. Refuse the change rather than write
+				// an invoice that guesses it.
+				return nil, fmt.Errorf("proration invoice: %w", err)
+			}
 			if err != nil {
 				// Transient tax-infra failure. Do NOT finalize with zero tax —
 				// that ships an invoice lying about authoritative amounts.
@@ -2051,6 +2061,7 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 				taxResult.TaxPendingReason = errs.Clip(tax.CleanMessage(err.Error()), 500)
 				deferredAt := now
 				taxResult.TaxDeferredAt = &deferredAt
+				taxResult.TaxInclusive = priced.TaxInclusive
 			} else {
 				taxResult = r
 			}
@@ -2160,7 +2171,8 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 			// ONE struct assignment carries every tax fact — the 13
 			// hand-copied lines this replaces produced three documented
 			// field-drop bugs on this writer alone (see domain/tax_facts.go).
-			TaxFacts: taxResult.TaxFacts,
+			TaxFacts:     taxResult.TaxFacts,
+			TaxInclusive: taxResult.TaxInclusive,
 			// Denormalized zone at issue (ADR-077) — every engine writer
 			// stamps this; the proration writer was the one omission.
 			BillingTimezone:    billingLoc.String(),

@@ -506,7 +506,8 @@ func TestUpdateItem_ProrationTaxErrorDefersToDraft(t *testing.T) {
 	invoices := &invoicesMock{
 		sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded},
 	}
-	taxMock := &prorationTaxApplierMock{err: errors.New("stripe tax: 503 service unavailable")}
+	// The engine wraps a failure after the settings read in PricedTaxError.
+	taxMock := &prorationTaxApplierMock{err: &domain.PricedTaxError{Err: errors.New("stripe tax: 503 service unavailable")}}
 
 	h := NewHandler(svc)
 	h.SetProrationDeps(plans, invoices)
@@ -586,7 +587,7 @@ func TestUpdateItem_ProrationTaxErrorReasonCutBetweenCharacters(t *testing.T) {
 			invoices := &invoicesMock{sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded}}
 			h := NewHandler(NewService(store, nil))
 			h.SetProrationDeps(plans, invoices)
-			h.SetProrationTaxApplier(&prorationTaxApplierMock{err: tc.err})
+			h.SetProrationTaxApplier(&prorationTaxApplierMock{err: &domain.PricedTaxError{Err: tc.err}})
 
 			body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
 			rr := httptest.NewRecorder()

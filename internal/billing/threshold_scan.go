@@ -871,6 +871,7 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 		// ONE assignment carries every tax fact (see domain/tax_facts.go) —
 		// this writer once dropped TaxErrorCode by hand-copy; now impossible.
 		TaxFacts:           taxApp.TaxFacts,
+		TaxInclusive:       taxApp.TaxInclusive,
 		TotalAmountCents:   totalWithTax,
 		AmountDueCents:     totalWithTax,
 		BillingPeriodStart: periodStart,
