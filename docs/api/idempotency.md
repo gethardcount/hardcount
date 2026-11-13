@@ -85,8 +85,8 @@ runs again and gets `409` too. Use an `external_id` you have not used yet.
 
 | The first request | A retry with the same key gets |
 |---|---|
-| Finished with any status except `409`, `422` or `503`, including other `4xx` and `5xx` answers | The first status and body, plus `Idempotent-Replayed: true`. The request does not run again. A crash is the exception: see [A key Hardcount could not finish](#a-key-hardcount-could-not-finish). |
-| Finished with `409`, `422` or `503` | A new run. These answers are not stored, so the key is free again. |
+| Finished with any status except `409`, `422`, `503` or `400` `invalid JSON body`, including other `4xx` and `5xx` answers | The first status and body, plus `Idempotent-Replayed: true`. The request does not run again. A crash is the exception: see [A key Hardcount could not finish](#a-key-hardcount-could-not-finish). |
+| Finished with `409`, `422`, `503` or `400` `invalid JSON body` | A new run. These answers are not stored, so the key is free again. |
 | Is still running | Hardcount waits up to 5 seconds for it, then answers `409` `conflict_idempotency`. Retry later with the same key. |
 | Finished, but the retry's method, path or body differs | `422` `idempotency_error`. Your code reused a key for a different request. |
 | Started more than 5 minutes ago and never recorded an answer | `409` `conflict_idempotency_unresolved`. See [A key Hardcount could not finish](#a-key-hardcount-could-not-finish). |
@@ -95,10 +95,14 @@ A replay sends the first response's status and body only. The body's
 `request_id` is the first request's. The `Hardcount-Request-Id` header is the
 new request's. No other header of the first response is sent again.
 
-**A stored `4xx` comes back too.** A `400`, a `403` for a key type that
-may not call the route, or a `404` is stored like any other answer.
-Fix the request, then send it with a new key: the fixed request has a
-different body, so the old key answers `422` `idempotency_error`.
+**A stored `4xx` comes back too.** A `400` other than `invalid JSON body`,
+a `403` for a key type that may not call the route, or a `404` is stored
+like any other answer. Fix the request, then send it with a new key: the
+fixed request has a different body, so the old key answers `422`
+`idempotency_error`.
+
+**A `400` `invalid JSON body` is never stored.** Hardcount refused the body
+before it did anything. Fix the body, then send it with the same key.
 
 **A stored `500`, `502` or `504` comes back on every retry with that key.**
 Hardcount stores it on purpose: the first request may have charged a card or
@@ -152,10 +156,11 @@ twice. Whether the first one made its change is unknown:
 
 ### How long a key lasts
 
-Hardcount keeps a key for 24 hours after the first request. Do not reuse a
-key for a new request, even after that. The expired key is deleted by a
-cleanup that runs with each scheduled billing run, and until then a request
-with it gets `409` `conflict_idempotency`.
+Hardcount keeps a key for 24 hours after the first request. After that the
+key is free: a request with it runs as a new request, even a retry of the
+first one. Before you retry a request more than 24 hours old, read the
+resource to see whether the change happened. Do not reuse a key for a new
+request, even after 24 hours.
 
 ### Routes that ignore the header
 
@@ -177,9 +182,7 @@ take an API key. These routes ignore it, and run every time:
 3. On `429`, wait the seconds in `Retry-After`, then send it with the same
    key. See [Rate limits](rate-limits.md).
 4. On `409` `conflict_idempotency`, wait a few seconds and send it with the
-   same key. If the key is more than 24 hours old, it has expired, and the
-   same key gets this answer until the cleanup deletes it. Read the resource
-   instead, as in step 5.
+   same key.
 5. On `503`, wait the seconds in `Retry-After` when the answer has it, then
    send it with the same key.
 6. On another `5xx`, or `409` `conflict_idempotency_unresolved`, read the

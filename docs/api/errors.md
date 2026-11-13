@@ -276,7 +276,8 @@ Each sends a `Retry-After` header with the seconds to wait.
   that say so and after `429`. Fix the request first. If it carried an
   `Idempotency-Key`, send the fixed request with a new key: the answer was
   stored, and the old key with a changed body answers `422`
-  `idempotency_error`.
+  `idempotency_error`. A `400` `invalid JSON body` is not stored: send the
+  fixed body with the same key.
 - **`429` `rate_limited` and `login_throttled`:** wait `Retry-After`
   seconds, then send the same request, with the same key. Nothing ran and
   nothing was stored. `cooldown_active` is stored: see its row above.
