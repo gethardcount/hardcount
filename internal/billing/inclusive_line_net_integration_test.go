@@ -149,55 +149,156 @@ func TestManualInvoice_TaxInclusiveManual_FinalizeAgainChargesThePrices(t *testi
 	db := testutil.SetupTestDB(t)
 	for _, tc := range inclusiveLineCases {
 		t.Run(tc.name, func(t *testing.T) {
-			ctx := postgres.WithLivemode(t.Context(), false)
-			tenantID := testutil.CreateTestTenant(t, db, "Inclusive Composed "+tc.name)
-			settings := tenant.NewSettingsStore(db)
-			setInclusiveManualTax(t, ctx, settings, tenantID, tc.rate)
-
-			cust, err := customer.NewPostgresStore(db).Create(ctx, tenantID, domain.Customer{ExternalID: "cus_incl_composed", DisplayName: "Inclusive Composed"})
-			if err != nil {
-				t.Fatalf("create customer: %v", err)
-			}
-			invoices := invoice.NewPostgresStore(db)
-			engine := billing.NewEngine(
-				&subStoreAdapter{subscription.NewPostgresStore(db)}, &usageStoreAdapter{usage.NewPostgresStore(db)},
-				&pricingStoreAdapter{pricing.NewPostgresStore(db)}, &invoiceStoreAdapter{invoices},
-				nil, settings, testPaymentSetupsNoPM{}, testChargerSentinel{}, clock.Real(),
-			)
-			engine.SetTaxProviderResolver(tax.NewResolver(nil))
-			engine.SetNoPaymentMethodNotifier(&testNoPMNotifier{})
-			engine.SetDunningStarter(testDunningStarter{})
-			engine.SetStripeReadiness(testStripeConnected{})
-			engine.SetInvoiceEmailer(&testInvoiceEmailer{})
-			svc := invoice.NewService(invoices, clock.Real(), settings)
-			svc.SetTaxRetrier(engine)
-
-			var lines []invoice.AddLineItemInput
-			for i, p := range tc.prices {
-				lines = append(lines, invoice.AddLineItemInput{Description: fmt.Sprintf("Service %d", i), Quantity: 1, UnitAmountCents: p})
-			}
-			inv, err := svc.Create(ctx, tenantID, invoice.CreateInput{CustomerID: cust.ID, Currency: "USD", LineItems: lines})
-			if err != nil {
-				t.Fatalf("create invoice: %v", err)
-			}
+			r := newComposedRig(t, db, "Inclusive Composed "+tc.name, tc.rate)
+			inv := r.create(t, tc.prices)
 
 			// The tax a first finalize saves before it fails.
-			if _, err := engine.ComputeTaxForInvoice(ctx, tenantID, inv.ID); err != nil {
+			if _, err := r.engine.ComputeTaxForInvoice(r.ctx, r.tenantID, inv.ID); err != nil {
 				t.Fatalf("compute tax: %v", err)
 			}
-			first := assertChargesThePrices(t, ctx, invoices, tenantID, inv.ID, tc.prices, false)
+			first := assertChargesThePrices(t, r.ctx, r.invoices, r.tenantID, inv.ID, tc.prices, false)
 
-			finalized, err := svc.Finalize(ctx, tenantID, inv.ID)
-			if err != nil {
-				t.Fatalf("finalize: %v", err)
-			}
-			if finalized.Status != domain.InvoiceFinalized {
-				t.Fatalf("status = %s, want finalized", finalized.Status)
-			}
-			if again := assertChargesThePrices(t, ctx, invoices, tenantID, inv.ID, tc.prices, false); !slices.Equal(again, first) {
+			r.finalize(t, inv.ID)
+			if again := assertChargesThePrices(t, r.ctx, r.invoices, r.tenantID, inv.ID, tc.prices, false); !slices.Equal(again, first) {
 				t.Errorf("after the finalize, lines (amount, tax, total) = %v, want %v as first taxed", again, first)
 			}
 		})
+	}
+}
+
+// An earlier version taxed this composed draft at a finalize that then
+// failed. It rounded each line's net apart from the line's tax, so a line
+// total can be a cent off the price entered, and the header can carry a
+// discount of that cent. No version's tax write changes an operator's line
+// amount, so the amounts still hold the prices entered. The next finalize
+// charges those prices, with no discount.
+//
+// Mutations: tax each line's stored total (storedTaxBasis reading
+// TotalAmountCents for every invoice) and the first case charges 2009 with
+// line totals 1005 and 1004, the second 2999. Carry the stored discount
+// into the write (update.DiscountCents = max(taxApp.DiscountCents,
+// inv.DiscountCents)) and the first case keeps its discount of 1.
+func TestManualInvoice_TaxInclusiveManual_DraftAnEarlierVersionTaxedChargesThePrices(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	for _, tc := range []struct {
+		name   string
+		prices []int64
+		// What the earlier version stored: each line's (amount, tax, total),
+		// in the order of prices, and the header.
+		lines                          []lineWant
+		subtotal, discount, tax, total int64
+	}{
+		{
+			"two lines of 10.04 at 20%", []int64{1004, 1004},
+			[]lineWant{{1004, 168, 1005}, {1004, 167, 1004}}, 1674, 1, 335, 2008,
+		},
+		{
+			"three lines of 10.00 at 20%", []int64{1000, 1000, 1000},
+			[]lineWant{{1000, 167, 1000}, {1000, 167, 1000}, {1000, 166, 999}}, 2499, 0, 500, 2999,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := newComposedRig(t, db, "Inclusive Earlier "+tc.name, 20)
+			inv := r.create(t, tc.prices)
+			storeEarlierTax(t, r.ctx, db, r.tenantID, inv.ID, tc.lines, tc.subtotal, tc.discount, tc.tax, tc.total)
+
+			r.finalize(t, inv.ID)
+			assertChargesThePrices(t, r.ctx, r.invoices, r.tenantID, inv.ID, tc.prices, false)
+		})
+	}
+}
+
+// composedRig is one account on tax-inclusive manual tax with one customer,
+// and the engine and invoice service a finalize runs on.
+type composedRig struct {
+	ctx      context.Context
+	tenantID string
+	custID   string
+	invoices *invoice.PostgresStore
+	engine   *billing.Engine
+	svc      *invoice.Service
+}
+
+func newComposedRig(t *testing.T, db *postgres.DB, name string, rate float64) composedRig {
+	t.Helper()
+	ctx := postgres.WithLivemode(t.Context(), false)
+	tenantID := testutil.CreateTestTenant(t, db, name)
+	settings := tenant.NewSettingsStore(db)
+	setInclusiveManualTax(t, ctx, settings, tenantID, rate)
+
+	cust, err := customer.NewPostgresStore(db).Create(ctx, tenantID, domain.Customer{ExternalID: "cus_incl_composed", DisplayName: "Inclusive Composed"})
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	invoices := invoice.NewPostgresStore(db)
+	engine := billing.NewEngine(
+		&subStoreAdapter{subscription.NewPostgresStore(db)}, &usageStoreAdapter{usage.NewPostgresStore(db)},
+		&pricingStoreAdapter{pricing.NewPostgresStore(db)}, &invoiceStoreAdapter{invoices},
+		nil, settings, testPaymentSetupsNoPM{}, testChargerSentinel{}, clock.Real(),
+	)
+	engine.SetTaxProviderResolver(tax.NewResolver(nil))
+	engine.SetNoPaymentMethodNotifier(&testNoPMNotifier{})
+	engine.SetDunningStarter(testDunningStarter{})
+	engine.SetStripeReadiness(testStripeConnected{})
+	engine.SetInvoiceEmailer(&testInvoiceEmailer{})
+	svc := invoice.NewService(invoices, clock.Real(), settings)
+	svc.SetTaxRetrier(engine)
+	return composedRig{ctx: ctx, tenantID: tenantID, custID: cust.ID, invoices: invoices, engine: engine, svc: svc}
+}
+
+// create composes a draft with one line per price, described "Service 0",
+// "Service 1" and so on.
+func (r composedRig) create(t *testing.T, prices []int64) domain.Invoice {
+	t.Helper()
+	var lines []invoice.AddLineItemInput
+	for i, p := range prices {
+		lines = append(lines, invoice.AddLineItemInput{Description: fmt.Sprintf("Service %d", i), Quantity: 1, UnitAmountCents: p})
+	}
+	inv, err := r.svc.Create(r.ctx, r.tenantID, invoice.CreateInput{CustomerID: r.custID, Currency: "USD", LineItems: lines})
+	if err != nil {
+		t.Fatalf("create invoice: %v", err)
+	}
+	return inv
+}
+
+func (r composedRig) finalize(t *testing.T, invoiceID string) {
+	t.Helper()
+	finalized, err := r.svc.Finalize(r.ctx, r.tenantID, invoiceID)
+	if err != nil {
+		t.Fatalf("finalize: %v", err)
+	}
+	if finalized.Status != domain.InvoiceFinalized {
+		t.Fatalf("status = %s, want finalized", finalized.Status)
+	}
+}
+
+// storeEarlierTax writes the tax an earlier version saved on a composed
+// draft: line i ("Service i") gets lines[i], and the header the given
+// amounts. Raw SQL, because this version never stores these amounts.
+func storeEarlierTax(t *testing.T, ctx context.Context, db *postgres.DB, tenantID, invoiceID string, lines []lineWant, subtotal, discount, taxCents, total int64) {
+	t.Helper()
+	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	for i, l := range lines {
+		res, err := tx.ExecContext(ctx, `UPDATE invoice_line_items SET amount_cents = $3, tax_amount_cents = $4, total_amount_cents = $5
+			WHERE invoice_id = $1 AND description = $2`, invoiceID, fmt.Sprintf("Service %d", i), l.amount, l.tax, l.total)
+		if err != nil {
+			t.Fatalf("store line %d: %v", i, err)
+		}
+		if n, err := res.RowsAffected(); err != nil || n != 1 {
+			t.Fatalf("store line %d: %d rows, %v; want 1", i, n, err)
+		}
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE invoices SET subtotal_cents = $2, discount_cents = $3, tax_amount_cents = $4,
+		total_amount_cents = $5, amount_due_cents = $5, tax_provider = 'manual' WHERE id = $1`,
+		invoiceID, subtotal, discount, taxCents, total); err != nil {
+		t.Fatalf("store header: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
 	}
 }
 
