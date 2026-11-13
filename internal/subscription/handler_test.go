@@ -487,12 +487,13 @@ func TestUpdateItem_ProrationTaxedByPlanTaxCode(t *testing.T) {
 }
 
 // TestUpdateItem_ProrationTaxCannotBeApplied_Refused: when the tax cannot be
-// applied to the proration invoice (a misconfigured provider, a failed read of
-// the billing profile or the tax settings, a failed save of the calculation),
-// the change is refused with 503 proration_unavailable and a Retry-After, as
-// the engine's writers refuse. No invoice is written and the item keeps its
-// plan. A provider that does not answer is not this case: the engine leaves
-// the tax pending and returns no error (TestUpdateItem_ProrationDeferredTaxCarriesRetryFacts).
+// applied to the proration invoice (a failed read of the tax settings or the
+// customer's billing profile, a failed save of the calculation), the change is
+// refused with 503 proration_unavailable and a Retry-After, as the engine's
+// writers refuse. No invoice is written and the item keeps its plan. A tax
+// provider that fails or does not answer is not this case: the engine leaves
+// the tax pending and returns no error
+// (TestUpdateItem_ProrationDeferredTaxCarriesRetryFacts).
 func TestUpdateItem_ProrationTaxCannotBeApplied_Refused(t *testing.T) {
 	ctx := context.Background()
 	tenantID := "t1"
@@ -508,7 +509,7 @@ func TestUpdateItem_ProrationTaxCannotBeApplied_Refused(t *testing.T) {
 	invoices := &invoicesMock{
 		sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded},
 	}
-	taxMock := &prorationTaxApplierMock{err: errors.New("resolve tax provider: stripe_tax has no client for livemode=false")}
+	taxMock := &prorationTaxApplierMock{err: errors.New("get billing profile for tax: connection reset by peer")}
 
 	h := NewHandler(svc)
 	h.SetProrationDeps(plans, invoices)

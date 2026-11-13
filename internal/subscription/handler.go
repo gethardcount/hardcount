@@ -2037,12 +2037,13 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 				return nil, fmt.Errorf("proration invoice: %w", err)
 			}
 			if err != nil {
-				// The tax could not be applied: the tenant's provider is
-				// misconfigured, the billing profile or the tax settings could
-				// not be read, or the calculation could not be saved. The
-				// engine's writers refuse on these too. A provider that does not
-				// answer is not one of them: the engine leaves the tax pending
-				// on the invoice and returns no error.
+				// The tax could not be applied: the tax settings or the
+				// customer's billing profile could not be read, or the tax
+				// calculation could not be saved. Each is a database failure a
+				// retry gets past, and the engine's writers refuse on them too.
+				// A tax provider that fails or does not answer is not one of
+				// them: the engine leaves the tax pending on the invoice and
+				// returns no error.
 				// Refuse the change. A second request is safe (errs.Unavailable):
 				// this transaction rolls back.
 				return nil, errs.Unavailable("proration_unavailable",

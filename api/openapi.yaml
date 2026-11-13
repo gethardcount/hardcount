@@ -17339,7 +17339,10 @@ paths:
         "503":
           description: |
             Code `proration_unavailable`: Hardcount could not check whether
-            the current period's invoice is paid, so the item was not added.
+            the current period's invoice is paid, or could not work out the
+            proration's tax because the tax settings or the customer's
+            billing profile could not be read or the tax calculation could
+            not be saved, so the item was not added.
             This answer is not stored under the `Idempotency-Key`: send the
             same request with the same key after `Retry-After`.
           headers:
@@ -17552,8 +17555,10 @@ paths:
         "503":
           description: |
             Code `proration_unavailable`: an increase that takes effect now
-            could not check whether the current period's invoice is paid, so
-            the item was not changed. This answer is not stored under the
+            could not check whether the current period's invoice is paid, or
+            could not work out the proration's tax because the tax settings
+            or the customer's billing profile could not be read or the tax
+            calculation could not be saved, so the item was not changed. This answer is not stored under the
             `Idempotency-Key`: send the same request with the same key after
             `Retry-After`.
           headers:
