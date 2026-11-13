@@ -178,6 +178,61 @@ func TestListExpiredPauseCollectionsForClock_WalkReturnsEveryRowOnce(t *testing.
 	}
 }
 
+// The clock's trial list walks the same way, by (trial_end_at, id): the last
+// inserted trials end first, and the first to end were touched last.
+func TestListExpiredTrialsForClock_WalkReturnsEveryRowOnce(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "Clock Trials Walk")
+	store := NewPostgresStore(db)
+	const n, page = 5, 2
+	clockID, frozen, ids := seedClockSubs(t, db, ctx, tenantID, n, true)
+	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	base := frozen.Add(-24 * time.Hour)
+	ends := func(i int) int { return n - 1 - i } // the last inserted end first
+	for i, id := range ids {
+		at := base.Add(time.Duration(ends(i)) * time.Minute)
+		updated := at
+		if ends(i) < 3 {
+			updated = updated.Add(time.Hour) // touched last
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE subscriptions SET trial_end_at = $2, updated_at = $3 WHERE id = $1`,
+			id, at, updated); err != nil {
+			t.Fatalf("set times: %v", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	seen := map[string]int{}
+	var afterAt time.Time
+	afterID := ""
+	for range n + 1 {
+		got, err := store.ListExpiredTrialsForClock(ctx, tenantID, clockID, frozen, afterAt, afterID, page)
+		if err != nil {
+			t.Fatalf("list: %v", err)
+		}
+		for _, sub := range got {
+			seen[sub.ID]++
+		}
+		if len(got) < page {
+			break
+		}
+		last := got[len(got)-1]
+		afterAt, afterID = *last.TrialEndAt, last.ID
+	}
+	for i, id := range ids {
+		if seen[id] != 1 {
+			t.Errorf("trial ending %d of %d returned %d times, want once", ends(i)+1, n, seen[id])
+		}
+	}
+}
+
 // A row another transaction holds is waited for, not skipped: a clock has
 // one runner, and a skipped row would wait for a later pass, if one came.
 func TestProcessExpiredTrialsForClock_WaitsForALockedRow(t *testing.T) {
