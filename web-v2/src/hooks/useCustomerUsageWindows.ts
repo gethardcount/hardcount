@@ -28,16 +28,18 @@ export async function fetchCustomerUsageOrNull(
 
 // useCurrentCycleUsage is the customer's current-cycle usage: the server's
 // default window, the cycle of the subscription whose cycle started last.
-// Activity's Cycle tab and Margin's "Current period" call it. The key carries
-// the customer's now (useNowFor), so an advance of the customer's clock
-// refetches, and the read waits until that now is known. On a clock both
-// cards share one key; on no clock each key holds the real time its card
-// mounted at. Pass the customer, or undefined while it loads.
-export function useCurrentCycleUsage(customerId: string, customer: Customer | undefined, enabled = true) {
+// Activity's Cycle tab and Margin's "Current period" call it, and both share
+// one request. The request sends no time: the server picks the cycle from the
+// customer's now. So the key carries the clock's time for a customer on a
+// clock, and an advance refetches; a customer on no clock has the one key
+// 'no-clock'. The read waits while the clock's time is not known, and a
+// disabled read writes nothing to the cache, so "not known" never shares an
+// entry with "no clock".
+export function useCurrentCycleUsage(customer: Customer, enabled = true) {
   const now = useNowFor(customer)
   return useQuery({
-    queryKey: ['customer-usage', customerId, 'cycle', now],
-    queryFn: () => fetchCustomerUsageOrNull(customerId),
+    queryKey: ['customer-usage', customer.id, 'cycle', customer.test_clock_id ? now : 'no-clock'],
+    queryFn: () => fetchCustomerUsageOrNull(customer.id),
     enabled: enabled && now !== undefined,
   })
 }

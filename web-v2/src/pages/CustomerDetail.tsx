@@ -824,13 +824,13 @@ export default function CustomerDetailPage() {
               The customer pins its relative-time/window surfaces to the
               customer's simulated clock (ADR-027) instead of wall-clock. */}
           <div>
-            <CostDashboard customerId={id!} customer={customer} currency={customerCurrency?.currency} />
+            <CostDashboard customer={customer} currency={customerCurrency?.currency} />
           </div>
 
           {/* Margin — rated usage revenue vs provider COGS (ADR-079).
               Operator-only; never rendered on customer-facing surfaces. */}
           <div>
-            <MarginCard customerId={id!} customer={customer} currency={customerCurrency?.currency} />
+            <MarginCard customer={customer} currency={customerCurrency?.currency} />
           </div>
 
           {/* Price overrides — negotiated per-customer prices (ADR-070). The
@@ -1130,10 +1130,8 @@ export default function CustomerDetailPage() {
               currency is only the grant dialog's default. */}
           <div>
             <CustomerCreditsSection
-              customerId={id!}
-              customerName={customer.display_name}
-              currency={creditCurrency}
               customer={customer}
+              currency={creditCurrency}
               readOnly={isArchived}
             />
           </div>

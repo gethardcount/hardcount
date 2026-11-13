@@ -34,8 +34,8 @@ import { useCurrentCycleUsage, useLastInvoicedPeriod, useLatestUsageAt } from '@
 // currency: the customer's currency (useCustomerCurrency). The report names
 // no revenue currency when the window has no revenue, and that $0 must still
 // be in the customer's currency. Undefined while it loads: "—" until then.
-// customer: the customer, or undefined while it loads.
-export function MarginCard({ customerId, customer, currency }: { customerId: string; customer: Customer | undefined; currency?: string }) {
+export function MarginCard({ customer, currency }: { customer: Customer; currency?: string }) {
+  const customerId = customer.id
   const [preset, setPreset] = useState<MarginPreset>(DEFAULT_MARGIN_PRESET)
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
@@ -49,7 +49,7 @@ export function MarginCard({ customerId, customer, currency }: { customerId: str
   const now = useNowFor(customer)
   const tz = useTenantTimezone()
 
-  const cycleQuery = useCurrentCycleUsage(customerId, customer, preset === 'cycle')
+  const cycleQuery = useCurrentCycleUsage(customer, preset === 'cycle')
   const invoicedQuery = useLastInvoicedPeriod(customerId, preset === 'last_invoiced')
 
   const marginWindow = useMemo(() => marginWindowFor(preset, {

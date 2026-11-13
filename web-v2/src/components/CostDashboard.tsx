@@ -50,17 +50,17 @@ import { ChevronDown, ChevronRight, Activity, Loader2, Receipt } from 'lucide-re
 // Top-level wrapper
 // ============================================================================
 
-// customer: the customer, or undefined while it loads. The sections below take
-// their now from hooks/useNow, so the cycle bar, last-invoice "X ago" and
-// activity window follow the customer's test clock, and wait while it loads.
+// The sections below take their now from hooks/useNow, so the cycle bar,
+// last-invoice "X ago" and activity window follow the customer's test clock,
+// and wait while its time is not known.
 // currency: the customer's currency (useCustomerCurrency), used for a figure
 // the server sent without one, such as an empty window's $0. Undefined while
 // it loads, and such a figure reads "—" until then.
-export function CostDashboard({ customerId, customer, currency }: { customerId: string; customer: Customer | undefined; currency?: string }) {
+export function CostDashboard({ customer, currency }: { customer: Customer; currency?: string }) {
   return (
     <div className="space-y-6">
-      <UpcomingInvoicesSection customerId={customerId} />
-      <ActivitySection customerId={customerId} customer={customer} currency={currency} />
+      <UpcomingInvoicesSection customerId={customer.id} />
+      <ActivitySection customer={customer} currency={currency} />
     </div>
   )
 }
@@ -381,7 +381,8 @@ function activityPresetToParams(p: ActivityPreset, now: EffectiveNow): { from?: 
   return rollingWindow(days, now)
 }
 
-function ActivitySection({ customerId, customer, currency }: { customerId: string; customer: Customer | undefined; currency?: string }) {
+function ActivitySection({ customer, currency }: { customer: Customer; currency?: string }) {
+  const customerId = customer.id
   // Opens on the current billing cycle, the window the Upcoming card and the
   // invoice use (ADR-121). A rolling 30 days never matched a cycle, so its
   // total disagreed with the invoice above it.
@@ -395,12 +396,15 @@ function ActivitySection({ customerId, customer, currency }: { customerId: strin
   // until now is known, and the section shows its spinner meanwhile.
   const now = useNowFor(customer)
 
+  // The cycle query is shared with the Margin card's "Current period".
   // fetchCustomerUsageOrNull turns 422 customer_has_no_subscription (the
   // documented "no current cycle" state) and 404 into null, so the section
-  // renders its empty state instead of a red error.
-  const cycleQuery = useCurrentCycleUsage(customerId, customer, preset === 'cycle')
+  // renders its empty state instead of a red error. The rolling read's key
+  // says 'rolling', so while the Cycle tab is open its idle read holds no
+  // entry that looks like the cycle read.
+  const cycleQuery = useCurrentCycleUsage(customer, preset === 'cycle')
   const rollingQuery = useQuery({
-    queryKey: ['customer-usage', customerId, preset, now],
+    queryKey: ['customer-usage', customerId, 'rolling', preset, now],
     queryFn: () => fetchCustomerUsageOrNull(customerId, activityPresetToParams(preset, now!)),
     enabled: preset !== 'cycle' && now !== undefined,
   })

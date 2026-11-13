@@ -34,6 +34,7 @@ import {
 
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
+import { TestClocksLoadError } from '@/components/TestClocksLoadError'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
@@ -901,6 +902,10 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
                   render={({ field }) => (
                     <FormItem>
                       <FormLabel>Valid through</FormLabel>
+                      {/* The picker stays disabled while the customer's
+                          clock is not known; a failed clock list says why,
+                          with Retry. */}
+                      <TestClocksLoadError records={activeCustomer ? [activeCustomer] : []} className="mb-0" />
                       {/* Today is the first day: valid through today ends
                           at tonight's midnight, still ahead. */}
                       <DatePicker

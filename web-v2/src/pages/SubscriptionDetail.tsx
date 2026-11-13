@@ -541,9 +541,11 @@ export default function SubscriptionDetailPage() {
       {(() => {
         const timelinePoints: { label: string; date: string; isPast: boolean }[] = []
 
-        // A dot is past when its date is at or before the subscription's
-        // now (its clock's time when it is on one). While now is not known,
-        // only Created is marked past.
+        // Created and the current period's start are always at or before
+        // the subscription's now, so they are marked past from the stored
+        // record. The trial end is past when it is at or before that now
+        // (its clock's time when it is on one), and unmarked while now is
+        // not known.
         const reached = (iso: string) => now !== undefined && Date.parse(iso) <= now
 
         timelinePoints.push({
@@ -581,7 +583,7 @@ export default function SubscriptionDetailPage() {
             timelinePoints.push({
               label: sub.status === 'active' ? 'Period start' : 'Last period',
               date: formatDate(sub.current_billing_period_start, undefined),
-              isPast: reached(sub.current_billing_period_start),
+              isPast: true,
             })
           }
           if (labels.cancelsOn) {

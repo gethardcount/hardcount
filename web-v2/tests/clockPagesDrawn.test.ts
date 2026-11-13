@@ -260,7 +260,7 @@ function upcomingCard(client: QueryClient): Promise<string> {
     }
     client.setQueryData(['customer-subs-upcoming', CUSTOMER.id], { data: [sub], total: 1 })
     return text(renderToStaticMarkup(createElement(QueryClientProvider, { client },
-      createElement(MemoryRouter, null, createElement(CostDashboard, { customerId: CUSTOMER.id, customer: CUSTOMER as never })))))
+      createElement(MemoryRouter, null, createElement(CostDashboard, { customer: CUSTOMER as never })))))
   })
 }
 
@@ -272,4 +272,64 @@ test("while the clock list loads, the customer's cycle bar shows its period and 
   const page = await upcomingCard(loadedCache('loading'))
   assert.doesNotMatch(page, RELATIVE)
   assert.match(page, new RegExp(formatDate('2031-02-20T00:00:00Z')))
+})
+
+test("while the clock list loads, an active subscription's timeline marks its period start as past", async () => {
+  // The current period's start is at or before the subscription's now on
+  // any clock, so it is a stored fact and needs no now.
+  const { default: SubscriptionDetailPage } = await import('../src/pages/SubscriptionDetail.tsx')
+  const client = loadedCache('loading')
+  client.removeQueries({ queryKey: ['customer'] })
+  client.setQueryData(['subscription', SUBSCRIPTION.id], {
+    ...SUBSCRIPTION, status: 'active', trial_start_at: null, trial_end_at: null,
+    current_billing_period_start: '2031-02-20T00:00:00Z', current_billing_period_end: '2031-03-20T00:00:00Z',
+  })
+  const html = render(client, `/subscriptions/${SUBSCRIPTION.id}`, '/subscriptions/:id', SubscriptionDetailPage)
+  assert.match(html, /font-medium text-foreground"[^>]*>Period start</)
+})
+
+test("while the clock list loads, the dunning list shows a run's stored times in place of relative ones", async () => {
+  const { default: DunningPage } = await import('../src/pages/Dunning.tsx')
+  const client = loadedCache('loading')
+  const run = {
+    id: 'hc_dun_1', invoice_id: INVOICE.id, customer_id: CUSTOMER.id, policy_id: 'hc_pol_1',
+    state: 'active', reason: 'payment_failed', attempt_count: 1, paused: false, resolution: '',
+    next_action_at: '2031-03-04T12:00:00Z', created_at: '2031-02-28T12:00:00Z',
+    test_clock_id: CLOCK.id,
+  }
+  client.setQueryData(['dunning-runs', 1, ''], { runs: [run], total: 1, invoiceMap: {}, customerMap: {} })
+  const page = text(render(client, '/dunning', '/dunning', DunningPage))
+  assert.match(page, new RegExp(formatDateTime(run.next_action_at)))
+  assert.match(page, new RegExp(formatDateTime(run.created_at)))
+})
+
+test('for a customer on no clock, the cycle read keeps one entry across visits, and a revisit draws it at once', async () => {
+  const { CostDashboard } = await import('../src/components/CostDashboard.tsx')
+  const customer = { ...CUSTOMER, test_clock_id: undefined }
+  const client = loadedCache()
+  const draw = () => text(renderToStaticMarkup(createElement(QueryClientProvider, { client },
+    createElement(MemoryRouter, null, createElement(CostDashboard, { customer: customer as never })))))
+  const cycleReads = () => client.getQueryCache().findAll({ queryKey: ['customer-usage', customer.id, 'cycle'] })
+
+  vi.useFakeTimers({ toFake: ['Date'] })
+  try {
+    vi.setSystemTime(Date.parse('2031-03-01T12:00:00Z'))
+    draw()
+    assert.equal(cycleReads().length, 1)
+    // The read lands, as a fetch would.
+    client.setQueryData(cycleReads()[0].queryKey, {
+      customer_id: customer.id,
+      period: { from: '2031-02-20T00:00:00Z', to: '2031-03-20T00:00:00Z', source: 'current_billing_cycle' },
+      subscriptions: [], meters: [], warnings: [], buckets: [],
+      totals: [{ currency: 'USD', amount_cents: 1234 }],
+    })
+
+    // A later visit, a second later by real time.
+    vi.setSystemTime(Date.parse('2031-03-01T12:00:01Z'))
+    const page = draw()
+    assert.equal(cycleReads().length, 1)
+    assert.match(page, /Billed usage \$12\.34/)
+  } finally {
+    vi.useRealTimers()
+  }
 })

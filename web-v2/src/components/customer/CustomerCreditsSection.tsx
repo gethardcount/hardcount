@@ -22,16 +22,14 @@ import { CreditDialog } from '@/pages/Credits'
 // A grant that was fully applied to an invoice used to leave no trace here.
 // Every amount is shown in its own currency (ADR-129); `currency` is only
 // the customer's billing currency, the default of the grant dialog.
-// `customer` is the customer, or undefined while it loads. A grant's expired
-// state is counted from the customer's now; while that is not known, a grant
-// with credit left shows as stored (active).
-export function CustomerCreditsSection({ customerId, customerName, currency, customer, readOnly }: {
-  customerId: string
-  customerName: string
+// A grant's expired state is counted from the customer's now; while that is
+// not known, a grant with credit left shows as stored (active).
+export function CustomerCreditsSection({ customer, currency, readOnly }: {
+  customer: Customer
   currency?: string
-  customer: Customer | undefined
   readOnly?: boolean
 }) {
+  const customerId = customer.id
   const qc = useQueryClient()
   const now = useNowFor(customer)
   const [showFinished, setShowFinished] = useState(false)
@@ -214,7 +212,7 @@ export function CustomerCreditsSection({ customerId, customerName, currency, cus
         <CreditDialog
           mode="grant"
           customerId={customerId}
-          customerName={customerName}
+          customerName={customer.display_name}
           currency={currency}
           open={grantOpen}
           onOpenChange={setGrantOpen}

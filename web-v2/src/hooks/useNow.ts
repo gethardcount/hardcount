@@ -20,7 +20,8 @@ import { clockTime, wallClockNow, type EffectiveNow } from '@/lib/effectiveNow'
 // While the answer is not known, a page draws nothing worked out from "now"
 // and shows only stored facts: dates, amounts and the stored status. When the
 // clock list fails to load, the page shows that load error once, with Retry
-// (TestClockBanner on a record's page, TestClocksLoadError on a list).
+// (TestClockBanner on a record's page, TestClocksLoadError on a list and in
+// the Grant credits dialog).
 // The clock list (useTestClocks) is the one source of a clock's time, so
 // every page shows the same time for a clock, and refreshTestClocks after a
 // clock change updates them all.
