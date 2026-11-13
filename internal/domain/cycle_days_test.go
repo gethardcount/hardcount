@@ -103,3 +103,21 @@ func TestCycleDays_Rows(t *testing.T) {
 		})
 	}
 }
+
+// A period with no zone is the caller's bug: CycleDays panics on it, on the
+// on-anchor path too, where the date helpers would otherwise read UTC.
+func TestCycleDays_NoZonePanics(t *testing.T) {
+	for _, p := range []CyclePeriod{
+		{Start: time.Date(2027, 1, 15, 0, 0, 0, 0, time.UTC), End: time.Date(2027, 2, 15, 0, 0, 0, 0, time.UTC), BillingTime: BillingTimeAnniversary, Interval: BillingMonthly, StoredAnchor: 15},
+		{Start: time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC), End: time.Date(2027, 2, 1, 0, 0, 0, 0, time.UTC), BillingTime: BillingTimeCalendar, Interval: BillingMonthly},
+	} {
+		func() {
+			defer func() {
+				if recover() == nil {
+					t.Errorf("CycleDays with no zone returned instead of panicking: %+v", p)
+				}
+			}()
+			p.CycleDays()
+		}()
+	}
+}

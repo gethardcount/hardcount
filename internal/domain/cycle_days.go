@@ -6,8 +6,8 @@ import (
 )
 
 // CyclePeriod is a billing period as the proration of its base fee sees it:
-// the period's bounds, how the subscription is billed, and the anchor day
-// stored on the subscription.
+// the period's bounds, how the subscription is billed, the tenant's billing
+// zone (required), and the anchor day stored on the subscription.
 type CyclePeriod struct {
 	Start, End   time.Time
 	BillingTime  SubscriptionBillingTime
@@ -34,20 +34,18 @@ type CyclePeriod struct {
 // counts as on the anchor and advances by plain month arithmetic, so such a
 // period is its own length.
 func (p CyclePeriod) CycleDays() int {
-	loc := p.Loc
-	if loc == nil {
-		loc = time.UTC
-	}
+	// The zone is the tenant's, read by the caller; a period with none is the
+	// caller's bug, and In panics on it here, on every path.
+	local := p.Start.In(p.Loc)
 	own := wholeDays(p.End.Sub(p.Start))
 	if p.Interval != BillingYearly && p.BillingTime == BillingTimeCalendar {
-		local := p.Start.In(loc)
-		return max(lastDayOfMonthIn(local.Year(), local.Month(), loc), own)
+		return max(lastDayOfMonthIn(local.Year(), local.Month(), p.Loc), own)
 	}
-	if IsPeriodStartOnAnchor(p.Start, p.StoredAnchor, loc) &&
-		NextBillingPeriodEnd(p.Start, p.BillingTime, p.Interval, loc, p.StoredAnchor).Equal(p.End) {
+	if IsPeriodStartOnAnchor(p.Start, p.StoredAnchor, p.Loc) &&
+		NextBillingPeriodEnd(p.Start, p.BillingTime, p.Interval, p.Loc, p.StoredAnchor).Equal(p.End) {
 		return own
 	}
-	nominal := wholeDays(AddBillingInterval(p.Start, p.Interval, loc, p.Start.In(loc).Day()).Sub(p.Start))
+	nominal := wholeDays(AddBillingInterval(p.Start, p.Interval, p.Loc, local.Day()).Sub(p.Start))
 	return max(nominal, own)
 }
 
