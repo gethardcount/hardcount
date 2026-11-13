@@ -153,16 +153,17 @@ export default function SubscriptionDetailPage() {
   // the date-picker floors below. A subscription frozen in the past must not
   // offer real-time dates its engine would treat as far in the future. It is
   // asked again on each render, so a subscription on no clock left open
-  // moves with real time, for example across midnight.
+  // moves with real time, for example across midnight. While it is not known
+  // (the subscription or its clock has not loaded), nothing counted from it
+  // is drawn and the date pickers stay disabled.
   const now = useNowResolver()(sub)
-  const nowDate = new Date(now)
   // The account's zone, which the resume date and a new trial end are
   // picked and sent in.
   const tz = useTenantTimezone()
   // Earliest auto-resume date: tomorrow in tenant TZ. The pick is sent as
   // start of that day (startOfDayInTZ), and start of today is already past,
   // which the server refuses ("must be in the future").
-  const pauseResumeMin = civilDateFrom(now, 1, tz)
+  const pauseResumeMin = now === undefined ? undefined : civilDateFrom(now, 1, tz)
 
   // Activity timeline (T0-18) — chronological feed of lifecycle events
   // pulled from the audit log. Separate query key from the period-
@@ -479,10 +480,16 @@ export default function SubscriptionDetailPage() {
           {sub.status === 'trialing' && (
             <>
               <Button variant="outline" onClick={() => {
-                const seed = sub.trial_end_at ? new Date(sub.trial_end_at) : new Date(now)
-                seed.setDate(seed.getDate() + 7)
-                setExtendTrialDate(formatInTimeZone(seed, tz, 'yyyy-MM-dd'))
-                setExtendTrialTime(formatInTimeZone(seed, tz, 'HH:mm'))
+                const base = sub.trial_end_at ? Date.parse(sub.trial_end_at) : now
+                if (base === undefined) {
+                  setExtendTrialDate('')
+                  setExtendTrialTime('')
+                } else {
+                  const seed = new Date(base)
+                  seed.setDate(seed.getDate() + 7)
+                  setExtendTrialDate(formatInTimeZone(seed, tz, 'yyyy-MM-dd'))
+                  setExtendTrialTime(formatInTimeZone(seed, tz, 'HH:mm'))
+                }
                 setShowExtendTrial(true)
               }} disabled={acting}>
                 Extend trial
@@ -534,11 +541,10 @@ export default function SubscriptionDetailPage() {
       {(() => {
         const timelinePoints: { label: string; date: string; isPast: boolean }[] = []
 
-        // "now" baseline must read from the test clock for clock-pinned
-        // subs — otherwise every dot reads as past for any sub whose
-        // sim time is older than wall-clock (the common case during a
-        // catchup demo). nowDate is the sub's simulated now (see above).
-        const now = nowDate
+        // A dot is past when its date is at or before the subscription's
+        // now (its clock's time when it is on one). While now is not known,
+        // only Created is marked past.
+        const reached = (iso: string) => now !== undefined && Date.parse(iso) <= now
 
         timelinePoints.push({
           label: 'Created',
@@ -564,7 +570,7 @@ export default function SubscriptionDetailPage() {
             timelinePoints.push({
               label: 'Trial ends',
               date: formatDate(sub.trial_end_at),
-              isPast: new Date(sub.trial_end_at) <= now,
+              isPast: reached(sub.trial_end_at),
             })
           }
           if (labels.next && labels.next.label !== 'Trial ends') {
@@ -572,11 +578,10 @@ export default function SubscriptionDetailPage() {
           }
         } else {
           if (sub.current_billing_period_start) {
-            const periodStart = new Date(sub.current_billing_period_start)
             timelinePoints.push({
               label: sub.status === 'active' ? 'Period start' : 'Last period',
               date: formatDate(sub.current_billing_period_start, undefined),
-              isPast: periodStart <= now,
+              isPast: reached(sub.current_billing_period_start),
             })
           }
           if (labels.cancelsOn) {
@@ -1347,7 +1352,7 @@ export default function SubscriptionDetailPage() {
               onTimeChange={setExtendTrialTime}
               timeZone={tz}
               now={now}
-              min={formatYMDInTZ(sub.trial_end_at ?? nowDate.toISOString(), tz)}
+              min={sub.trial_end_at ? formatYMDInTZ(sub.trial_end_at, tz) : now === undefined ? undefined : formatYMDInTZ(new Date(now).toISOString(), tz)}
             />
             <p className="text-xs text-muted-foreground">
               Times are in your account's time zone ({tz}).

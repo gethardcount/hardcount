@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { api, type CustomerUsage } from '@/lib/api'
+import { api, type Customer, type CustomerUsage } from '@/lib/api'
 import { lastInvoicedPeriod } from '@/lib/usageWindow'
 import { useNowFor } from '@/hooks/useNow'
 
@@ -28,16 +28,17 @@ export async function fetchCustomerUsageOrNull(
 
 // useCurrentCycleUsage is the customer's current-cycle usage: the server's
 // default window, the cycle of the subscription whose cycle started last.
-// Activity's Cycle tab and Margin's "Current period" use the same key, so the
-// page makes one request for both. For a customer on a test clock the key
-// carries the clock's time, so an advance refetches; a customer on no clock
-// keys on 'wall'.
-export function useCurrentCycleUsage(customerId: string, testClockId?: string | null, enabled = true) {
-  const now = useNowFor({ test_clock_id: testClockId })
+// Activity's Cycle tab and Margin's "Current period" call it. The key carries
+// the customer's now (useNowFor), so an advance of the customer's clock
+// refetches, and the read waits until that now is known. On a clock both
+// cards share one key; on no clock each key holds the real time its card
+// mounted at. Pass the customer, or undefined while it loads.
+export function useCurrentCycleUsage(customerId: string, customer: Customer | undefined, enabled = true) {
+  const now = useNowFor(customer)
   return useQuery({
-    queryKey: ['customer-usage', customerId, 'cycle', testClockId ? now : 'wall'],
+    queryKey: ['customer-usage', customerId, 'cycle', now],
     queryFn: () => fetchCustomerUsageOrNull(customerId),
-    enabled,
+    enabled: enabled && now !== undefined,
   })
 }
 

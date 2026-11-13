@@ -152,12 +152,13 @@ export function finalizeConfirmLines(o: {
 }
 
 // collectionPausedNow says whether a subscription's collection pause holds
-// collection at nowMs (the page's effective now, test clock aware). It is the
+// collection at nowMs (the subscription's now, hooks/useNow). It is the
 // server's collection rule (notPausedForCollection, InForceAt): a pause with
 // no resumes_at holds, a timed one holds strictly before resumes_at. Unlike
 // collectionPausedFlag it does not look at the subscription's status: the
-// claim skips a paused row's invoices whatever its status.
-export function collectionPausedNow(pause: { resumes_at?: string | null } | null | undefined, nowMs: number): boolean {
+// claim skips a paused row's invoices whatever its status. While nowMs is not
+// known (undefined), it follows the stored pause.
+export function collectionPausedNow(pause: { resumes_at?: string | null } | null | undefined, nowMs: number | undefined): boolean {
   if (!pause) return false
-  return !pause.resumes_at || new Date(pause.resumes_at).getTime() > nowMs
+  return !pause.resumes_at || nowMs === undefined || new Date(pause.resumes_at).getTime() > nowMs
 }

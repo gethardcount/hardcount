@@ -2,6 +2,7 @@ import { useState, useMemo, useEffect } from 'react'
 import { genericStatus, invoiceStatus } from '@/lib/statusLabels'
 import { StatusBadge } from '@/components/StatusBadge'
 import { usePageTitle } from '@/hooks/usePageTitle'
+import { useNowResolver } from '@/hooks/useNow'
 import { Link, useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
@@ -784,6 +785,8 @@ function ChooseInvoiceDialog({ onClose, onChoose }: {
   const [customerId, setCustomerId] = useState('')
   const [numberSearch, setNumberSearch] = useState('')
   const search = useDebouncedValue(numberSearch.trim(), 300)
+  // Each invoice's now, for Past due: its clock's time when it is on one.
+  const resolveNow = useNowResolver()
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['credit-notes', 'choose-invoice', customerId, search],
@@ -846,7 +849,7 @@ function ChooseInvoiceDialog({ onClose, onChoose }: {
                       >
                         <span className="flex items-center gap-2 min-w-0">
                           <span className="font-mono truncate">{inv.invoice_number}</span>
-                          <StatusBadge status={invoiceStatus(inv, wallClockNow())} />
+                          <StatusBadge status={invoiceStatus(inv, resolveNow(inv))} />
                         </span>
                         <span className="tabular-nums text-muted-foreground whitespace-nowrap">
                           {formatCents(inv.total_amount_cents, inv.currency)}

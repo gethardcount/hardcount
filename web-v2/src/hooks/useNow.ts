@@ -13,8 +13,13 @@ import { clockTime, wallClockNow, type EffectiveNow } from '@/lib/effectiveNow'
 //   - real time: the record has loaded and is on no test clock;
 //   - the clock's time: the record is on a clock, and the clock is in the
 //     loaded clock list;
-//   - not known: the record has not loaded, or its clock is still loading,
-//     failed to load or is not in the list.
+//   - not known (undefined): the record has not loaded, or its clock is still
+//     loading, failed to load or is not in the list, or a live record carries
+//     a clock id.
+// While the answer is not known, a page draws nothing worked out from "now"
+// and shows only stored facts: dates, amounts and the stored status. When the
+// clock list fails to load, the page shows that load error once, with Retry
+// (TestClockBanner on a record's page, TestClocksLoadError on a list).
 // The clock list (useTestClocks) is the one source of a clock's time, so
 // every page shows the same time for a clock, and refreshTestClocks after a
 // clock change updates them all.
@@ -41,7 +46,10 @@ export function useTestClocks() {
 /**
  * refreshTestClocks marks every cached test-clock read stale (the list, and
  * each clock page's clock, subscriptions and customers), so open pages
- * refetch them. Call it after any change to a clock.
+ * refetch them. Call it after a clock is created, advanced or retried, and
+ * when the clock page sees an advance finish. Deleting a clock removes that
+ * clock's reads first, so nothing reads it again, then refreshes the list
+ * alone (handleDelete in TestClockDetail).
  */
 export function refreshTestClocks(qc: QueryClient) {
   return qc.invalidateQueries({ queryKey: ['test-clocks'] })
@@ -73,32 +81,37 @@ export function useTestClock(id: string | null | undefined): { clock: TestClock 
 // clock, or undefined when it is not known.
 type ClockAnswer = string | null | undefined
 
-function clockAnswer(record: ClockPinned | undefined, frozenTimeOf: (clockId: string) => string | undefined): ClockAnswer {
+function clockAnswer(
+  record: ClockPinned | undefined,
+  livemode: boolean,
+  frozenTimeOf: (clockId: string) => string | undefined,
+): ClockAnswer {
   if (!record) return undefined
   if (!record.test_clock_id) return null
+  // No live record is on a clock, so a live record with a clock id has no
+  // answer, even when a test-mode list is still cached.
+  if (livemode) return undefined
   return frozenTimeOf(record.test_clock_id)
 }
 
-function toNow(answer: ClockAnswer): EffectiveNow {
-  if (answer) return clockTime(answer)
-  // Not known (undefined) is answered with real time here, and nowhere else.
-  // The next pull request, "the hook returns undefined for not known", makes
-  // this return undefined, and every page then hides what it works out from
-  // "now" until the answer is known.
-  return wallClockNow()
+function toNow(answer: ClockAnswer): EffectiveNow | undefined {
+  if (answer === undefined) return undefined
+  return answer === null ? wallClockNow() : clockTime(answer)
 }
 
 /**
  * useNowFor is "now" for one record: pass the loaded record, or undefined
- * while it loads. The value changes only when the answer does, so it is the
- * one for a dependency array or a query key: a record on no clock keeps one
- * real-time value for the life of the component. A value that is only drawn
- * takes useNowResolver instead, so it moves with real time while the page
- * stays open.
+ * while it loads. It is undefined while the answer is not known, and the
+ * caller then draws nothing worked out from "now". The value changes only
+ * when the answer does, so it is the one for a dependency array or a query
+ * key: a record on no clock keeps one real-time value for the life of the
+ * component. A value that is only drawn takes useNowResolver instead, so it
+ * moves with real time while the page stays open.
  */
-export function useNowFor(record: ClockPinned | undefined): EffectiveNow {
+export function useNowFor(record: ClockPinned | undefined): EffectiveNow | undefined {
+  const { user } = useAuth()
   const { clock } = useTestClock(record?.test_clock_id)
-  const answer = clockAnswer(record, () => clock?.frozen_time)
+  const answer = clockAnswer(record, user?.livemode ?? false, () => clock?.frozen_time)
   return useMemo(() => toNow(answer), [answer])
 }
 
@@ -106,10 +119,16 @@ export function useNowFor(record: ClockPinned | undefined): EffectiveNow {
  * useNowResolver returns a function that answers "now" for a record each time
  * it is called, so a record on no clock gets the real time of that render. A
  * list whose rows can be on different clocks calls it for each row, and a
- * detail page calls it for the values it only draws.
+ * detail page calls it for the values it only draws. The function returns
+ * undefined while the answer is not known.
  */
-export function useNowResolver(): (record: ClockPinned | undefined) => EffectiveNow {
+export function useNowResolver(): (record: ClockPinned | undefined) => EffectiveNow | undefined {
+  const { user } = useAuth()
+  const livemode = user?.livemode ?? false
   const { data } = useTestClocks()
   const clocks = useMemo(() => data && new Map(data.data.map(c => [c.id, c.frozen_time])), [data])
-  return useCallback((record: ClockPinned | undefined) => toNow(clockAnswer(record, id => clocks?.get(id))), [clocks])
+  return useCallback(
+    (record: ClockPinned | undefined) => toNow(clockAnswer(record, livemode, id => clocks?.get(id))),
+    [clocks, livemode],
+  )
 }

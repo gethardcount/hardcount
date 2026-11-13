@@ -10,6 +10,7 @@ import { toast } from 'sonner'
 import { api, formatCents, formatDate, formatDateTime, type PlanDetail, type Customer } from '@/lib/api'
 import { applyApiError } from '@/lib/formErrors'
 import { LoadError } from '@/components/LoadError'
+import { TestClocksLoadError } from '@/components/TestClocksLoadError'
 import { Callout } from '@/components/Callout'
 import { TestClockBadge } from '@/components/TestClockBadge'
 import { useNowResolver } from '@/hooks/useNow'
@@ -66,7 +67,8 @@ export default function PlanDetailPage() {
   const navigate = useNavigate()
   const queryClient = useQueryClient()
   // Each subscription's "now" (its test clock when pinned), for when a timed
-  // collection pause ends.
+  // collection pause ends. While it is not known, the chip follows the
+  // stored pause.
   const resolveNow = useNowResolver()
   const [showEdit, setShowEdit] = useState(false)
 
@@ -218,6 +220,8 @@ export default function PlanDetailPage() {
       </Card>
 
       <PlanPricesCard plan={plan} meters={allMeters} />
+
+      <TestClocksLoadError records={subscriptions} className="mt-6 mb-0" />
 
       {/* Subscriptions */}
       <Card className="mt-6">

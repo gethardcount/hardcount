@@ -28,9 +28,10 @@ export interface InvoiceStatusInput {
 // invoiceStatus is the single badge for an invoice: lifecycle and payment
 // folded together, as Stripe shows them (Draft, Open, Past due, Paid, Void,
 // Uncollectible, plus Processing and Payment failed while a charge is in
-// flight or has failed). `nowMs` is the entity's effective now (test clock
-// aware) and only decides Past due.
-export function invoiceStatus(inv: InvoiceStatusInput, nowMs: number): StatusDisplay {
+// flight or has failed). `nowMs` is the invoice's now (hooks/useNow) and only
+// decides Past due. While it is not known (undefined), the badge is the
+// stored status: an open invoice reads Open.
+export function invoiceStatus(inv: InvoiceStatusInput, nowMs: number | undefined): StatusDisplay {
   switch (inv.status) {
     case 'draft': return { label: 'Draft', tone: 'neutral' }
     case 'voided': return { label: 'Void', tone: 'neutral' }
@@ -42,7 +43,7 @@ export function invoiceStatus(inv: InvoiceStatusInput, nowMs: number): StatusDis
   if (inv.payment_status === 'failed') return { label: 'Payment failed', tone: 'danger' }
   if (inv.status === 'finalized') {
     const due = inv.due_at ? new Date(inv.due_at).getTime() : NaN
-    if (!Number.isNaN(due) && due < nowMs) return { label: 'Past due', tone: 'danger' }
+    if (nowMs !== undefined && !Number.isNaN(due) && due < nowMs) return { label: 'Past due', tone: 'danger' }
     return { label: 'Open', tone: 'info' }
   }
   return { label: humanizeStatus(inv.status), tone: 'neutral' }
@@ -93,12 +94,13 @@ export function subscriptionStatus(sub: SubscriptionStatusInput): StatusDisplay 
 // same rule as GET /v1/subscriptions?collection=paused: live means active or
 // trialing (a canceled row can keep the pause columns), and a timed pause
 // ends at resumes_at, though the row can keep it a while after. `nowMs` is
-// the subscription's effective now (test clock aware).
-export function collectionPausedFlag(sub: SubscriptionStatusInput, nowMs: number): StatusDisplay | null {
+// the subscription's now (hooks/useNow). While it is not known (undefined),
+// the chip follows the stored pause and a passed resumes_at is not checked.
+export function collectionPausedFlag(sub: SubscriptionStatusInput, nowMs: number | undefined): StatusDisplay | null {
   if (sub.status !== 'active' && sub.status !== 'trialing') return null
   const pause = sub.pause_collection
   if (!pause) return null
-  if (pause.resumes_at && new Date(pause.resumes_at).getTime() <= nowMs) return null
+  if (nowMs !== undefined && pause.resumes_at && new Date(pause.resumes_at).getTime() <= nowMs) return null
   return { label: 'Collection paused', tone: 'warning' }
 }
 
@@ -113,7 +115,7 @@ export function trialBadgeEndsAt(sub: { status: string; trial_end_at?: string | 
 // subscriptionFlags are the secondary chips shown beside the main badge, for
 // states the main status does not carry: collection paused (often by
 // dunning) and a scheduled cancel. Only for live subscriptions.
-export function subscriptionFlags(sub: SubscriptionStatusInput, nowMs: number): StatusDisplay[] {
+export function subscriptionFlags(sub: SubscriptionStatusInput, nowMs: number | undefined): StatusDisplay[] {
   if (sub.status !== 'active' && sub.status !== 'trialing') return []
   const flags: StatusDisplay[] = []
   const paused = collectionPausedFlag(sub, nowMs)

@@ -23,7 +23,7 @@ import { useQuery } from '@tanstack/react-query'
 import { ResponsiveContainer, BarChart, Bar, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts'
 import { api, amountsByCurrencyText, formatCents, formatRate, formatDate } from '@/lib/api'
 import { compactAxisTick, utcBucketLabel } from '@/lib/chartLabels'
-import type { CustomerUsage, CustomerUsageMeter, CustomerUsagePrice, Subscription, Invoice, InvoicePreview } from '@/lib/api'
+import type { Customer, CustomerUsage, CustomerUsageMeter, CustomerUsagePrice, Subscription, Invoice, InvoicePreview } from '@/lib/api'
 import { cn } from '@/lib/utils'
 import { cycleProgress, rollingWindow, sinceMs, type EffectiveNow } from '@/lib/effectiveNow'
 import { useNowFor, useNowResolver } from '@/hooks/useNow'
@@ -50,17 +50,17 @@ import { ChevronDown, ChevronRight, Activity, Loader2, Receipt } from 'lucide-re
 // Top-level wrapper
 // ============================================================================
 
-// customerTestClockId: the customer's test clock, or undefined for a customer
-// on no clock. The sections below take their now from hooks/useNow, so the
-// cycle bar, last-invoice "X ago" and activity window follow the clock.
+// customer: the customer, or undefined while it loads. The sections below take
+// their now from hooks/useNow, so the cycle bar, last-invoice "X ago" and
+// activity window follow the customer's test clock, and wait while it loads.
 // currency: the customer's currency (useCustomerCurrency), used for a figure
 // the server sent without one, such as an empty window's $0. Undefined while
 // it loads, and such a figure reads "—" until then.
-export function CostDashboard({ customerId, customerTestClockId, currency }: { customerId: string; customerTestClockId?: string; currency?: string }) {
+export function CostDashboard({ customerId, customer, currency }: { customerId: string; customer: Customer | undefined; currency?: string }) {
   return (
     <div className="space-y-6">
       <UpcomingInvoicesSection customerId={customerId} />
-      <ActivitySection customerId={customerId} customerTestClockId={customerTestClockId} currency={currency} />
+      <ActivitySection customerId={customerId} customer={customer} currency={currency} />
     </div>
   )
 }
@@ -72,10 +72,9 @@ export function CostDashboard({ customerId, customerTestClockId, currency }: { c
 function UpcomingInvoicesSection({ customerId }: { customerId: string }) {
   const { data: subsRes, isLoading } = useCustomerSubscriptions(customerId)
 
-  // Per-sub effective-now — the "now" baseline for this sub's cycle bar and
-  // last-invoice "X ago". Resolved per subscription (not customer) because the
-  // period bounds and invoice created_at were stamped on the sub's own clock.
-  // Wall-clock subs (no test_clock_id) resolve to wall time.
+  // Each subscription's now, for its cycle bar and last-invoice "X ago": the
+  // period bounds and the invoice's created_at are on the subscription's
+  // clock. Undefined while that clock is not known.
   const resolveNow = useNowResolver()
 
   const activeSubs = useMemo(
@@ -150,7 +149,7 @@ function UpcomingInvoicesSection({ customerId }: { customerId: string }) {
   )
 }
 
-function UpcomingInvoiceCard({ sub, customerId, effectiveNow }: { sub: Subscription; customerId: string; effectiveNow: EffectiveNow }) {
+function UpcomingInvoiceCard({ sub, customerId, effectiveNow }: { sub: Subscription; customerId: string; effectiveNow: EffectiveNow | undefined }) {
   // Projected next invoice — Stripe Tier 1 create_preview parity.
   // Per-sub call so multi-sub customers see their projections
   // independently rather than rolled-up. A failure is shown with Retry,
@@ -243,8 +242,10 @@ function planNameFromPreview(preview: InvoicePreview | null | undefined): string
   return preview?.plan_name
 }
 
-function CycleProgress({ start, end, label, now }: { start: string; end: string; label?: string; now: EffectiveNow }) {
-  const { daysIn, totalDays, pct } = cycleProgress(start, end, now)
+// CycleProgress draws the period's label and its bar. The day count and the
+// filled part are counted from now, and are left out while it is not known.
+function CycleProgress({ start, end, label, now }: { start: string; end: string; label?: string; now: EffectiveNow | undefined }) {
+  const progress = now === undefined ? undefined : cycleProgress(start, end, now)
 
   return (
     <div className="space-y-1">
@@ -252,12 +253,14 @@ function CycleProgress({ start, end, label, now }: { start: string; end: string;
         <span>
           {label || formatDate(start)}
         </span>
-        <span>
-          Day {daysIn} of {totalDays} · {pct.toFixed(0)}%
-        </span>
+        {progress && (
+          <span>
+            Day {progress.daysIn} of {progress.totalDays} · {progress.pct.toFixed(0)}%
+          </span>
+        )}
       </div>
       <div className="h-1.5 rounded-full bg-muted overflow-hidden">
-        <div className="h-full bg-primary rounded-full" style={{ width: `${pct}%` }} />
+        {progress && <div className="h-full bg-primary rounded-full" style={{ width: `${progress.pct}%` }} />}
       </div>
     </div>
   )
@@ -307,11 +310,11 @@ function ProjectionBreakdown({ preview }: { preview: InvoicePreview }) {
 // while something holds it, such as paused collection or pending tax.
 const LAST_INVOICE_SCAN = 10
 
-function LastInvoiceLine({ invoice, effectiveNow }: { invoice: Invoice; effectiveNow: EffectiveNow }) {
+function LastInvoiceLine({ invoice, effectiveNow }: { invoice: Invoice; effectiveNow: EffectiveNow | undefined }) {
   // Invoices produced during a clock-advance carry a simulated created_at
   // (billing/engine.go stamps effectiveNow). Measure "X ago" against the sub's
   // frozen_time, or a simulated-future invoice collapses to "just now".
-  const finalizedAgo = invoice.created_at ? timeAgo(invoice.created_at, effectiveNow) : ''
+  const finalizedAgo = invoice.created_at && effectiveNow !== undefined ? timeAgo(invoice.created_at, effectiveNow) : ''
 
   return (
     <Link
@@ -378,30 +381,32 @@ function activityPresetToParams(p: ActivityPreset, now: EffectiveNow): { from?: 
   return rollingWindow(days, now)
 }
 
-function ActivitySection({ customerId, customerTestClockId, currency }: { customerId: string; customerTestClockId?: string; currency?: string }) {
+function ActivitySection({ customerId, customer, currency }: { customerId: string; customer: Customer | undefined; currency?: string }) {
   // Opens on the current billing cycle, the window the Upcoming card and the
   // invoice use (ADR-121). A rolling 30 days never matched a cycle, so its
   // total disagreed with the invoice above it.
   const [preset, setPreset] = useState<ActivityPreset>(DEFAULT_ACTIVITY_PRESET)
 
-  // Anchor the rolling window to the customer's simulated "now" when pinned to a
-  // test clock, so the 7/30/90d presets frame the simulated usage rather than a
-  // wall-clock window that predates it. Keyed into the query so a clock advance
-  // refetches; a wall-clock customer's anchor is stable across renders (captured
-  // at mount) so it doesn't churn the query.
-  const now = useNowFor({ test_clock_id: customerTestClockId })
+  // Anchor the rolling window to the customer's now (its test clock's time
+  // when it is on one), so the 7/30/90d presets frame the simulated usage
+  // rather than a real-time window that predates it. Keyed into the query so a
+  // clock advance refetches; a customer on no clock keeps one value per mount
+  // (useNowFor), so the key does not change between renders. Both reads wait
+  // until now is known, and the section shows its spinner meanwhile.
+  const now = useNowFor(customer)
 
-  // The cycle query is shared with the Margin card's "Current period".
   // fetchCustomerUsageOrNull turns 422 customer_has_no_subscription (the
   // documented "no current cycle" state) and 404 into null, so the section
   // renders its empty state instead of a red error.
-  const cycleQuery = useCurrentCycleUsage(customerId, customerTestClockId, preset === 'cycle')
+  const cycleQuery = useCurrentCycleUsage(customerId, customer, preset === 'cycle')
   const rollingQuery = useQuery({
     queryKey: ['customer-usage', customerId, preset, now],
-    queryFn: () => fetchCustomerUsageOrNull(customerId, activityPresetToParams(preset, now)),
-    enabled: preset !== 'cycle',
+    queryFn: () => fetchCustomerUsageOrNull(customerId, activityPresetToParams(preset, now!)),
+    enabled: preset !== 'cycle' && now !== undefined,
   })
-  const { data, isLoading, error, refetch } = preset === 'cycle' ? cycleQuery : rollingQuery
+  const query = preset === 'cycle' ? cycleQuery : rollingQuery
+  const { data, error, refetch } = query
+  const isLoading = query.isLoading || now === undefined
 
   // An empty window points at the customer's newest usage, with a link that
   // opens Usage events on a range that includes it.
@@ -410,7 +415,7 @@ function ActivitySection({ customerId, customerTestClockId, currency }: { custom
   const latestAt = empty && data && latestQuery.data && isOutsideWindow(latestQuery.data, data.period.from, data.period.to)
     ? latestQuery.data
     : null
-  const latestHref = latestAt
+  const latestHref = latestAt && now !== undefined
     ? (() => {
         const r = rangeIncluding(latestAt, now)
         return `/usage?${new URLSearchParams({ customer: customerId, range: 'custom', from: r.from, to: r.to }).toString()}`

@@ -56,14 +56,11 @@ export function InvoiceAttention({
   retrying?: boolean
   charging?: boolean
   sending?: boolean
-  // ADR-030 / simulated-time discipline: when the owning subscription
-  // is pinned to a test clock, relative-time renders ("since X ago")
-  // must be computed against the clock's frozen_time, NOT wall-clock.
-  // Wall-clock would surface absurd deltas like "833d ago" on a
-  // newly-finalized invoice whose sub is frozen at 2024-02-01 while
-  // wall-clock sits in 2026. Take the anchor from useNowResolver()(invoice) —
-  // the type makes passing it non-optional so this can't regress.
-  now: EffectiveNow
+  // The invoice's now, from useNowResolver()(invoice): "since X ago" on an
+  // invoice on a test clock is counted from the clock's time, or it reads
+  // deltas like "833d ago" on an invoice just finalized at the clock's time.
+  // While it is not known (undefined), "since" is not drawn.
+  now: EffectiveNow | undefined
   // Buttons the page draws after the server's own, for facts the notice
   // carries that its actions do not cover: the refunds made in Stripe that
   // Hardcount flagged (ADR-134), which come with no server action and can
@@ -93,7 +90,7 @@ export function InvoiceAttention({
               misleading "since 5m ago" copy on a just-finalized
               invoice; surface only when the state has actually
               persisted long enough to matter. */}
-          {att.since && isOlderThan(att.since, 24 * 60 * 60 * 1000, now) && (
+          {att.since && now !== undefined && isOlderThan(att.since, 24 * 60 * 60 * 1000, now) && (
             <span className="text-xs font-normal text-muted-foreground">
               · since {timeAgo(att.since, now)}
             </span>

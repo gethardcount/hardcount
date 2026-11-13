@@ -9,7 +9,7 @@ import { DatePicker } from '@/components/ui/date-picker'
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from '@/components/ui/table'
-import { formatCents, formatDate, getCurrencySymbol } from '@/lib/api'
+import { formatCents, formatDate, getCurrencySymbol, type Customer } from '@/lib/api'
 import { formatCivilPeriod } from '@/lib/dates'
 import { USAGE_ESTIMATE_NOTE } from '@/lib/activityPeriod'
 import { marginCardView } from '@/lib/actionOutcomes'
@@ -34,7 +34,8 @@ import { useCurrentCycleUsage, useLastInvoicedPeriod, useLatestUsageAt } from '@
 // currency: the customer's currency (useCustomerCurrency). The report names
 // no revenue currency when the window has no revenue, and that $0 must still
 // be in the customer's currency. Undefined while it loads: "—" until then.
-export function MarginCard({ customerId, customerTestClockId, currency }: { customerId: string; customerTestClockId?: string; currency?: string }) {
+// customer: the customer, or undefined while it loads.
+export function MarginCard({ customerId, customer, currency }: { customerId: string; customer: Customer | undefined; currency?: string }) {
   const [preset, setPreset] = useState<MarginPreset>(DEFAULT_MARGIN_PRESET)
   const [customFrom, setCustomFrom] = useState('')
   const [customTo, setCustomTo] = useState('')
@@ -43,11 +44,12 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
   // the clock's frozen_time: provider-costed usage events are stamped in
   // simulation time (usage/service.go), so a wall-clock "last 30 days" sits
   // before them. The billing periods come from the server, already on the
-  // customer's clock. Custom absolute dates are left untouched.
-  const now = useNowFor({ test_clock_id: customerTestClockId })
+  // customer's clock. Custom absolute dates are left untouched. While now is
+  // not known, a rolling window waits and the card shows its spinner.
+  const now = useNowFor(customer)
   const tz = useTenantTimezone()
 
-  const cycleQuery = useCurrentCycleUsage(customerId, customerTestClockId, preset === 'cycle')
+  const cycleQuery = useCurrentCycleUsage(customerId, customer, preset === 'cycle')
   const invoicedQuery = useLastInvoicedPeriod(customerId, preset === 'last_invoiced')
 
   const marginWindow = useMemo(() => marginWindowFor(preset, {
@@ -75,7 +77,7 @@ export function MarginCard({ customerId, customerTestClockId, currency }: { cust
     ? latestQuery.data
     : null
   const showLatest = () => {
-    if (!latestAt) return
+    if (!latestAt || now === undefined) return
     const r = rangeIncluding(latestAt, now, tz)
     setCustomFrom(r.from)
     setCustomTo(r.to)
