@@ -1,5 +1,5 @@
 import { useMemo, useCallback } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, type QueryClient } from '@tanstack/react-query'
 import { api } from '@/lib/api'
 import { useAuth } from '@/contexts/AuthContext'
 import { effectiveNow, type EffectiveNow } from '@/lib/effectiveNow'
@@ -37,6 +37,12 @@ export function useTestClocks() {
     queryFn: () => api.listTestClocks(),
     enabled: !(user?.livemode ?? false),
   })
+}
+
+// refreshTestClocks marks a test clock's cached reads stale after a change to
+// it (advance, retry), so mounted pages refetch them.
+export function refreshTestClocks(qc: QueryClient, clockId: string) {
+  return qc.invalidateQueries({ queryKey: ['test-clocks', clockId] })
 }
 
 export function useClockFrozenMap(): Record<string, string> {

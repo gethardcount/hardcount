@@ -28,6 +28,7 @@ import {
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
 import { useAuth } from '@/contexts/AuthContext'
+import { refreshTestClocks } from '@/hooks/useClockFrozenMap'
 import { ChevronLeft, FastForward, Loader2, Trash2, AlertTriangle, Clock as ClockIcon, Users } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
 
@@ -174,7 +175,7 @@ export default function TestClockDetailPage() {
       // anything else. Forcing one immediate refetch makes the
       // status badge flip to "Advancing" without waiting for the
       // first poll tick.
-      queryClient.invalidateQueries({ queryKey: ['test-clocks', id] })
+      refreshTestClocks(queryClient, id)
     } catch (err) {
       showApiError(err, 'Failed to retry')
     } finally {
@@ -552,8 +553,7 @@ function AdvanceClockDialog({
     try {
       await api.advanceTestClock(clock.id, targetIso)
       toast.success('Moving the clock forward. Billing the skipped days…')
-      queryClient.invalidateQueries({ queryKey: ['test-clocks', clock.id] })
-      queryClient.invalidateQueries({ queryKey: ['test-clocks', clock.id, 'subscriptions'] })
+      refreshTestClocks(queryClient, clock.id)
       queryClient.invalidateQueries({ queryKey: ['invoices'] })
       onClose()
     } catch (err) {
