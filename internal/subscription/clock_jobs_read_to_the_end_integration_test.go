@@ -12,6 +12,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -174,6 +175,55 @@ func TestListExpiredPauseCollectionsForClock_WalkReturnsEveryRowOnce(t *testing.
 	for i, id := range ids {
 		if seen[id] != 1 {
 			t.Errorf("pause due %d of %d returned %d times, want once", due(i)+1, n, seen[id])
+		}
+	}
+}
+
+// The clock's trial list walks the same way, by (trial_end_at, id): the last
+// inserted trials end first, and the first to end were touched last.
+func TestListExpiredTrialsForClock_WalkReturnsEveryRowOnce(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "Clock Trials Walk")
+	store := NewPostgresStore(db)
+	const n, page = 5, 2
+	clockID, frozen, ids := seedClockSubs(t, db, ctx, tenantID, n, true)
+	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	base := frozen.Add(-24 * time.Hour)
+	ends := func(i int) int { return n - 1 - i } // the last inserted end first
+	for i, id := range ids {
+		at := base.Add(time.Duration(ends(i)) * time.Minute)
+		updated := at
+		if ends(i) < 3 {
+			updated = updated.Add(time.Hour) // touched last
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE subscriptions SET trial_end_at = $2, updated_at = $3 WHERE id = $1`,
+			id, at, updated); err != nil {
+			t.Fatalf("set times: %v", err)
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	// Walked as the job walks it, with its key.
+	seen := map[string]int{}
+	list := func(ctx context.Context, after walk.Key, limit int) ([]domain.Subscription, error) {
+		return store.ListExpiredTrialsForClock(ctx, tenantID, clockID, frozen, after.At, after.ID, limit)
+	}
+	for sub, err := range walk.Walk(ctx, "ListExpiredTrialsForClock", list, expiredTrialKey, page) {
+		if err != nil {
+			t.Fatalf("walk: %v", err)
+		}
+		seen[sub.ID]++
+	}
+	for i, id := range ids {
+		if seen[id] != 1 {
+			t.Errorf("trial ending %d of %d returned %d times, want once", ends(i)+1, n, seen[id])
 		}
 	}
 }

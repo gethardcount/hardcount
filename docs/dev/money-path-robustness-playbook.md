@@ -79,7 +79,7 @@ A credit read one invoice for a period that had two.
 
 An invoice with no card was retried for auto-charge forever.
 
-12. **Can every record reach an end state?** Every state has a writer that moves it on, also when the final action fails. A dunning retry with no definite answer returns `dunning.ErrTransientSkip` and uses up no attempt. A job that works a list reads it to the end with a cursor on the columns it orders by, or stamps each row it looked at. Then rows it could not finish never hold back the rows behind them.
+12. **Can every record reach an end state?** Every state has a writer that moves it on, also when the final action fails. A dunning retry with no definite answer returns `dunning.ErrTransientSkip` and uses up no attempt. A job that works a list reads it to the end with a cursor on the columns it orders by, or stamps each row it looked at. Then rows it could not finish never hold back the rows behind them. The cursor is `walk.Walk` (`internal/platform/walk`): range over it and keep the job's own loop body.
 
 ### H. Tenant leak
 

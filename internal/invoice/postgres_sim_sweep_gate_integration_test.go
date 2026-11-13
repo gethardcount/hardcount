@@ -5,9 +5,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -61,7 +61,7 @@ func TestListAutoChargePending_ExcludesSimulatedOneOff(t *testing.T) {
 		       updated_at = now()
 		 WHERE id = $1`)
 
-	pending, err := store.ListAutoChargePending(ctx, domain.InvoiceKeyset{}, 200)
+	pending, err := store.ListAutoChargePending(ctx, walk.Key{}, 200)
 	if err != nil {
 		t.Fatalf("ListAutoChargePending: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestListAutoChargePending_ExcludesPausedSubscription(t *testing.T) {
 		       updated_at = now()
 		 WHERE id = $1`)
 
-	listed, err := store.ListAutoChargePending(ctx, domain.InvoiceKeyset{}, 100)
+	listed, err := store.ListAutoChargePending(ctx, walk.Key{}, 100)
 	if err != nil {
 		t.Fatalf("ListAutoChargePending: %v", err)
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/pricing"
 	"github.com/gethardcount/hardcount/internal/subscription"
 	"github.com/gethardcount/hardcount/internal/testclock"
@@ -579,7 +580,7 @@ func TestHeldTimedPause_DoesNotBlockOtherInvoicesPastResumesAt(t *testing.T) {
 
 	queued := func() bool {
 		t.Helper()
-		list, err := r.f.invStore.ListAutoChargePending(r.base, domain.InvoiceKeyset{}, 1000)
+		list, err := r.f.invStore.ListAutoChargePending(r.base, walk.Key{}, 1000)
 		if err != nil {
 			t.Fatalf("list auto-charge pending: %v", err)
 		}
