@@ -161,10 +161,34 @@ func cycleGrid(t *testing.T) []gridPeriod {
 	return out
 }
 
-// TestCycleDays_ComparedWithTheReaders compares CycleDays with each reader's
-// denominator on main over every kind of period the reader is given. Every
-// difference must have a named reason, and CycleDays must be the value the
-// design gives for that reason; the counts by reader and reason are logged.
+// changed is, for each reader and named reason, how many periods of the grid
+// it now divides by a different number of days than on main: the behaviour
+// this change makes, counted. Any other count fails the test.
+var changed = map[[2]string]int{
+	{"R1", "longer than one interval"}:       18424,
+	{"R1", "cut short, longer than nominal"}: 142,
+	{"R1", "no stored anchor"}:               100,
+	{"R2", "longer than one interval"}:       17800,
+	{"R2", "seam from day 29-31"}:            200,
+	{"R2", "calendar after yearly"}:          200,
+	{"R3", "seam"}:                           16740,
+	{"R3", "seam from day 29-31"}:            1230,
+	{"R3", "longer than one interval"}:       580,
+	{"R4", "seam"}:                           16780,
+	{"R4", "calendar after yearly"}:          5600,
+	{"R4", "seam from day 29-31"}:            1790,
+	{"R4", "longer than one interval"}:       580,
+	{"R5", "seam"}:                           16780,
+	{"R5", "calendar after yearly"}:          5600,
+	{"R5", "seam from day 29-31"}:            1790,
+	{"R5", "longer than one interval"}:       580,
+}
+
+// TestCycleDays_ComparedWithTheReaders compares CycleDays, which every reader
+// now divides by, with each reader's denominator on main over every kind of
+// period the reader is given. Every difference must have a named reason,
+// CycleDays must be the value the design gives for it, and the count for each
+// reader and reason is the one in changed.
 func TestCycleDays_ComparedWithTheReaders(t *testing.T) {
 	grid := cycleGrid(t)
 	type key struct{ reader, kind string }
@@ -226,6 +250,16 @@ func TestCycleDays_ComparedWithTheReaders(t *testing.T) {
 	})
 	for _, k := range classes {
 		t.Logf("class %s %-30s %6d", k.reader, k.kind, byClass[k])
+	}
+	for k, n := range byClass {
+		if k.kind != "" && changed[[2]string{k.reader, k.kind}] != n {
+			t.Errorf("%s %q: %d periods differ from main, want %d", k.reader, k.kind, n, changed[[2]string{k.reader, k.kind}])
+		}
+	}
+	for k, want := range changed {
+		if byClass[key{k[0], k[1]}] == 0 {
+			t.Errorf("%s %q: no period differs from main, want %d", k[0], k[1], want)
+		}
 	}
 }
 

@@ -9,41 +9,18 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/money"
 )
 
-// TestFullBillingCycleDays pins the proration denominator to the full
-// anniversary cycle from periodStart, regardless of how short the current
-// (stub) period is. Month length varies, so the value depends on periodStart.
-func TestFullBillingCycleDays(t *testing.T) {
-	utc := time.UTC
-	cases := []struct {
-		name     string
-		start    time.Time
-		interval domain.BillingInterval
-		want     int64
-	}{
-		{"monthly anchored mid-month (Apr 16 → May 16 = 30)", time.Date(2027, 4, 16, 18, 30, 0, 0, utc), domain.BillingMonthly, 30},
-		{"monthly anchored Jan 1 (→ Feb 1 = 31)", time.Date(2026, 1, 1, 0, 0, 0, 0, utc), domain.BillingMonthly, 31},
-		{"monthly anchored Feb 1 non-leap (→ Mar 1 = 28)", time.Date(2026, 2, 1, 0, 0, 0, 0, utc), domain.BillingMonthly, 28},
-		{"monthly anchored Feb 1 leap (→ Mar 1 = 29)", time.Date(2028, 2, 1, 0, 0, 0, 0, utc), domain.BillingMonthly, 29},
-		{"yearly anchored Jan 1 (→ Jan 1 = 365)", time.Date(2026, 1, 1, 0, 0, 0, 0, utc), domain.BillingYearly, 365},
-		{"yearly anchored in a leap year (366)", time.Date(2028, 1, 1, 0, 0, 0, 0, utc), domain.BillingYearly, 366},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := fullBillingCycleDays(tc.start, tc.interval, time.UTC, 0); got != tc.want {
-				t.Errorf("fullBillingCycleDays(%v, %s) = %d, want %d", tc.start, tc.interval, got, tc.want)
-			}
-		})
-	}
-}
-
 // TestProration_StubPeriod_DividesByFullCycle is the regression guard for the
 // stub-period overcharge: an upgrade on a 14-day stub of a 30-day monthly
 // cycle must prorate the delta against the FULL 30-day cycle, not the 14-day
 // stub. Models the exact real-data case (Start $20 → Pro $50, 13 of 14 stub
 // days remaining): correct $13.00, NOT the buggy $27.86.
 func TestProration_StubPeriod_DividesByFullCycle(t *testing.T) {
-	periodStart := time.Date(2027, 4, 16, 18, 30, 0, 0, time.UTC) // 14-day stub to Apr 30
-	fullCycle := fullBillingCycleDays(periodStart, domain.BillingMonthly, time.UTC, 0)
+	// A calendar stub from Apr 16 18:30 to May 1: 14 days of April's 30.
+	stub := domain.CyclePeriod{
+		Start: time.Date(2027, 4, 16, 18, 30, 0, 0, time.UTC), End: time.Date(2027, 5, 1, 0, 0, 0, 0, time.UTC),
+		BillingTime: domain.BillingTimeCalendar, Interval: domain.BillingMonthly, Loc: time.UTC,
+	}
+	fullCycle := int64(stub.CycleDays())
 	if fullCycle != 30 {
 		t.Fatalf("fullCycle = %d, want 30", fullCycle)
 	}
@@ -293,18 +270,18 @@ func TestSplitUpgradeProration_PartitionInvariant(t *testing.T) {
 	}
 }
 
-// TestFullBillingCycleDays_TenantTZAnchored is the proration-denominator side of
-// ADR-058: for an offset-TZ tenant the cycle length must be computed in the
-// tenant zone and be independent of the period_start's ambient Location (which,
-// DB-scanned on a non-UTC host, is time.Local). Pre-fix this returned 30 or 31
-// for the SAME instant depending on the host, mischarging every mid-cycle change.
-func TestFullBillingCycleDays_TenantTZAnchored(t *testing.T) {
+// TestCycleDays_TenantTZAnchored is the proration-denominator side of ADR-058:
+// for an offset-TZ tenant the cycle length is computed in the tenant zone and
+// does not depend on the period start's ambient Location (which, DB-scanned
+// on a non-UTC host, is time.Local).
+func TestCycleDays_TenantTZAnchored(t *testing.T) {
 	ist, err := time.LoadLocation("Asia/Kolkata")
 	if err != nil {
 		t.Fatalf("load IST: %v", err)
 	}
 	// 2026-05-31 18:30 UTC == 2026-06-01 00:00 IST: a June anniversary = 30 days.
 	inst := time.Date(2026, 5, 31, 18, 30, 0, 0, time.UTC)
+	end := domain.NextBillingPeriodEnd(inst, domain.BillingTimeAnniversary, domain.BillingMonthly, ist, 1)
 	for _, in := range []struct {
 		name string
 		t    time.Time
@@ -313,15 +290,11 @@ func TestFullBillingCycleDays_TenantTZAnchored(t *testing.T) {
 		{"period_start IST-located (DB scan on IST host)", inst.In(ist)},
 	} {
 		t.Run(in.name, func(t *testing.T) {
-			if got := fullBillingCycleDays(in.t, domain.BillingMonthly, ist, 0); got != 30 {
-				t.Errorf("fullBillingCycleDays = %d, want 30 (June IST anniversary; loc-anchored, provenance-independent)", got)
+			p := domain.CyclePeriod{Start: in.t, End: end, BillingTime: domain.BillingTimeAnniversary, Interval: domain.BillingMonthly, Loc: ist, StoredAnchor: 1}
+			if got := p.CycleDays(); got != 30 {
+				t.Errorf("CycleDays = %d, want 30 (June IST anniversary; loc-anchored, provenance-independent)", got)
 			}
 		})
-	}
-	// Same instant under a UTC tenant legitimately differs (May-31 UTC overflow
-	// = 31) — proving the result is driven by the tenant loc, as intended.
-	if got := fullBillingCycleDays(inst, domain.BillingMonthly, time.UTC, 0); got != 31 {
-		t.Errorf("UTC-tenant denom = %d, want 31 (May 31 UTC + 1mo overflow)", got)
 	}
 }
 

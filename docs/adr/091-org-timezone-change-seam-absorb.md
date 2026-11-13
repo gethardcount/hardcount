@@ -91,3 +91,11 @@ keeps the exact current behavior and never spuriously prorates.
   across all three billing intervals (mutation-verified against removing each
   guard) + a `IsPeriodStartOnAnchor` unit table (calendar / anniversary / month-end
   clamp).
+
+## Amendment 2026-11-13: every reader divides by one cycle length
+
+Every proration denominator is now `domain.CyclePeriod.CycleDays`: the in-arrears close, the in-advance close, the on-create lines, the refund of a cancel or swap, and the plan-change proration. A seam, or any period that does not start on the stored anchor and end where it says, counts one interval from its start on its own day, clamped to the month's end, or its own length if longer. Two things change from the decision above.
+
+- The in-advance close counted the nominal interval by AddDate. A seam from the 29th to the 31st now counts from its own day, clamped: from Jan 31 it is 28 days, not 31.
+- The refund and the plan-change proration used the stored anchor, so a 1-day seam was its own cycle. A cancel or a change in it refunded or charged a whole fee. They now count a seam like the closes do.
+

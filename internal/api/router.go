@@ -982,11 +982,11 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// frozen_time. Catch-up then never reaches it, as with dunning runs above.
 	subSvc.SetResolver(engine)
 	// The handler uses the resolver for proration math and changeAt stamps on
-	// clock-pinned subscriptions. Without it, remainingPeriodRatio and
+	// clock-pinned subscriptions. Without it, daysLeftInPeriod and
 	// handleItemProration would use the wall clock even when the subscription
 	// is in simulated time.
 	subH.SetResolver(engine)
-	// The proration denominator (fullBillingCycleDays) is anchored in the
+	// The proration denominator (domain.CyclePeriod.CycleDays) is anchored in the
 	// tenant's billing timezone, the zone the engine advances period
 	// boundaries in (ADR-058). So the cycle length cannot disagree with the
 	// period, and it does not depend on the host's time.Local.

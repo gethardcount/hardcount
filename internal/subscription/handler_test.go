@@ -964,7 +964,7 @@ func TestAddItem_ProratesMidCycle(t *testing.T) {
 		t.Errorf("invoice subscription_id: got %q, want %q", inv.SubscriptionID, subID)
 	}
 	// Period is an exact 30-day span (now ± 15 days) with now at the midpoint,
-	// so remainingPeriodRatio is exactly 15/30: RoundHalfToEven(2000×15, 30) =
+	// so daysLeftInPeriod is exactly 15/30: RoundHalfToEven(2000×15, 30) =
 	// 1000. Deterministic — no midnight snapping, and sub-second clock skew
 	// can't move the 15-day rounding.
 	if inv.SubtotalCents != 1000 {
