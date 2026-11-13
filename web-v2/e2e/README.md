@@ -120,6 +120,13 @@ the screen, and that the main things an operator does work end to end.
   so, with a Retry that loads it. With the browser in Los Angeles, on a test
   clock, the expiry picker's first day and its Today must be the clock's day
   in the account zone.
+- `test-clock-time.spec.ts` checks that pages count an invoice's due date
+  from its test clock's time, which they take from the cached clock list.
+  After an advance on the clock's page, the invoices list and the invoice
+  must read Past due when the operator clicks back to them, with no reload.
+  An invoice on a clock made through the API after the clock list was read
+  must show its clock's Simulated time line, not "Test clock deleted", and
+  count Due in from the clock's time.
 - `global.setup.ts` runs first. It seeds data through the API (code in
   `fixtures/`) and signs in once through the login page. The other tests reuse
   that session.
