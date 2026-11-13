@@ -203,13 +203,14 @@ func TestApplyTaxToLineItems_ZeroSubtotal(t *testing.T) {
 // a total whose tax it never lowered. No invoice has one: it is refused.
 func TestApplyTaxToLineItems_RefusesADiscount(t *testing.T) {
 	e := newManualEngine(1850, "VAT", nil)
-	lineItems := []domain.InvoiceLineItem{{AmountCents: 10000, Quantity: 1}}
-
-	if _, err := e.ApplyTaxToLineItems(context.Background(), "t1", "cus_1", "USD", 10000, 5000, lineItems); err == nil {
-		t.Fatal("a 5000 discount was accepted, want an error")
-	}
-	if lineItems[0].TaxAmountCents != 0 || lineItems[0].TotalAmountCents != 0 {
-		t.Errorf("line tax/total = %d/%d after the refusal, want the line untouched", lineItems[0].TaxAmountCents, lineItems[0].TotalAmountCents)
+	for _, discount := range []int64{5000, -5000} {
+		lineItems := []domain.InvoiceLineItem{{AmountCents: 10000, Quantity: 1}}
+		if _, err := e.ApplyTaxToLineItems(context.Background(), "t1", "cus_1", "USD", 10000, discount, lineItems); err == nil {
+			t.Fatalf("a discount of %d was accepted, want an error", discount)
+		}
+		if lineItems[0].TaxAmountCents != 0 || lineItems[0].TotalAmountCents != 0 {
+			t.Errorf("discount %d: line tax/total = %d/%d after the refusal, want the line untouched", discount, lineItems[0].TaxAmountCents, lineItems[0].TotalAmountCents)
+		}
 	}
 }
 
