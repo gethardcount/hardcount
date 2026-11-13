@@ -821,10 +821,6 @@ func (s *Service) RetryPendingClawbackIssue(ctx context.Context, batch int) (int
 // reversal — lands in SIMULATED time, mirroring the engine's in-band bind on the
 // initial downgrade. Per-row errors are collected, not aborted-on.
 func (s *Service) RetryPendingClawbackIssueForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time, batch int) (int, []error) {
-	drafts, err := s.store.ListPendingClawbackDraftsForClock(ctx, tenantID, clockID, batch)
-	if err != nil {
-		return 0, []error{fmt.Errorf("list pending clawback drafts for clock %s: %w", clockID, err)}
-	}
 	// WithSim: the clock id rides along with frozen_time, so the credit_note
 	// / grant / tax rows Issue() emits inside its coordinator tx land on the
 	// sim axis (ADR-090 §5) — this is the ONLY issuer for a simulated clawback,
@@ -832,14 +828,28 @@ func (s *Service) RetryPendingClawbackIssueForClock(ctx context.Context, tenantI
 	ctx = clock.WithSim(ctx, clock.Sim{At: frozenTime, TestClockID: clockID})
 	var errsOut []error
 	issued := 0
-	for _, cn := range drafts {
-		if _, err := s.Issue(ctx, cn.TenantID, cn.ID); err != nil {
-			errsOut = append(errsOut, fmt.Errorf("re-issue clawback credit note %s: %w", cn.ID, err))
-			continue
+	// Every page, each note once: a clock has no next tick, and a note the
+	// issue leaves held stays in the list, so the cursor moves past it.
+	var afterCreatedAt time.Time
+	afterID := ""
+	for {
+		drafts, err := s.store.ListPendingClawbackDraftsForClock(ctx, tenantID, clockID, afterCreatedAt, afterID, batch)
+		if err != nil {
+			return issued, append(errsOut, fmt.Errorf("list pending clawback drafts for clock %s: %w", clockID, err))
 		}
-		issued++
+		for _, cn := range drafts {
+			if _, err := s.Issue(ctx, cn.TenantID, cn.ID); err != nil {
+				errsOut = append(errsOut, fmt.Errorf("re-issue clawback credit note %s: %w", cn.ID, err))
+				continue
+			}
+			issued++
+		}
+		if len(drafts) < batch || ctx.Err() != nil {
+			return issued, errsOut
+		}
+		last := drafts[len(drafts)-1]
+		afterCreatedAt, afterID = last.CreatedAt, last.ID
 	}
-	return issued, errsOut
 }
 
 // RetryPendingCreditNoteTaxReversal makes the upstream tax reversal for issued
