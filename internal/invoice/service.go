@@ -964,7 +964,7 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	issuedAt := now
 	// Net N runs on the tenant's civil calendar, so the due date stays the
 	// same wall-clock time across a DST change.
-	dueAt := domain.AddDaysIn(now, netDays, s.invoiceLocation(ctx, tenantID))
+	dueAt := domain.AddDaysIn(now, netDays, billingLoc) // the zone read above: one read
 
 	inv := domain.Invoice{
 		CustomerID:         input.CustomerID,
@@ -1597,6 +1597,16 @@ func (s *Service) invoiceDisplayLoc(ctx context.Context, inv domain.Invoice) *ti
 	return s.invoiceDisplayLocCached(ctx, inv, &tenantLoc)
 }
 
+// invoiceZone is the zone a stored date of the invoice is worked out in: its
+// own (ADR-077), else the tenant's for a row from before invoices carried
+// one. Unlike the display zone, a failed tenant read is returned.
+func (s *Service) invoiceZone(ctx context.Context, inv domain.Invoice) (*time.Location, error) {
+	if inv.BillingTimezone != "" {
+		return domain.LoadLocationOrUTC(inv.BillingTimezone), nil
+	}
+	return s.tenantZone(ctx, inv.TenantID)
+}
+
 // invoiceDisplayLocCached is invoiceDisplayLoc reading the tenant TZ at most
 // once into *tenantLoc, so a list page of one tenant's invoices pays one
 // settings read, not one per row.
@@ -1610,15 +1620,26 @@ func (s *Service) invoiceDisplayLocCached(ctx context.Context, inv domain.Invoic
 	return *tenantLoc
 }
 
-// invoiceLocation resolves the tenant billing timezone for display math, UTC
-// when the tenant has no timezone configured — matching ADR-058 /
-// engine.tenantLocation.
-func (s *Service) invoiceLocation(ctx context.Context, tenantID string) *time.Location {
+// tenantZone is the tenant's billing timezone, UTC when it has none
+// configured — matching ADR-058 / engine.tenantLocation. A failed read is
+// returned, never taken as UTC: a date stored from it would be wrong.
+func (s *Service) tenantZone(ctx context.Context, tenantID string) (*time.Location, error) {
 	ts, err := s.settings.Get(ctx, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("read tenant settings for the billing zone: %w", err)
+	}
+	return domain.LoadLocationOrUTC(ts.Timezone), nil
+}
+
+// invoiceLocation is tenantZone for display math, which is computed on read
+// and never stored. It still takes a failed read as UTC; making the read fail
+// instead is its own item.
+func (s *Service) invoiceLocation(ctx context.Context, tenantID string) *time.Location {
+	loc, err := s.tenantZone(ctx, tenantID)
 	if err != nil {
 		return time.UTC
 	}
-	return domain.LoadLocationOrUTC(ts.Timezone)
+	return loc
 }
 
 func (s *Service) List(ctx context.Context, filter ListFilter) ([]domain.Invoice, int, error) {
@@ -1664,7 +1685,15 @@ func (s *Service) Finalize(ctx context.Context, tenantID, id string) (domain.Inv
 	// The lines are read first: finalize refuses if any line is added from
 	// here on, since the tax below covers only these (#1298).
 	var taxedLineIDs []string
+	var dueLoc *time.Location
 	if isOperatorComposed(inv) {
+		// The due date is worked out in the invoice's zone, resolved before
+		// anything is written: an unzoned draft whose tenant zone cannot be
+		// read is refused, and can be finalized again, instead of being due
+		// on a UTC calendar.
+		if dueLoc, err = s.invoiceZone(ctx, inv); err != nil {
+			return domain.Invoice{}, fmt.Errorf("finalize: %w", err)
+		}
 		lines, lerr := s.store.ListLineItems(ctx, tenantID, id)
 		if lerr != nil {
 			return domain.Invoice{}, fmt.Errorf("read lines at finalize: %w", lerr)
@@ -1743,7 +1772,7 @@ func (s *Service) Finalize(ctx context.Context, tenantID, id string) (domain.Inv
 	var finalized domain.Invoice
 	if isOperatorComposed(inv) {
 		issuedAt := s.clock.Now(ctx)
-		dueAt := domain.AddDaysIn(issuedAt, inv.NetPaymentTermDays, s.invoiceDisplayLoc(ctx, inv))
+		dueAt := domain.AddDaysIn(issuedAt, inv.NetPaymentTermDays, dueLoc)
 		finalized, err = s.store.FinalizeWithDates(ctx, tenantID, id, issuedAt, dueAt, taxedLineIDs, onFinalized)
 	} else {
 		finalized, err = s.store.FinalizeDraft(ctx, tenantID, id, onFinalized)
