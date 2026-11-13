@@ -432,6 +432,14 @@ func (h *SettingsHandler) upsert(w http.ResponseWriter, r *http.Request) {
 	var before domain.TenantSettings
 	result, err := h.store.Update(r.Context(), tenantID, func(ts *domain.TenantSettings) error {
 		before = *ts
+		// The threshold is a pointer, and decoding a number into a non-nil
+		// pointer writes into the int64 it points at. before gets its own
+		// copy, or it would read the new amount and the diff would miss the
+		// change.
+		if p := ts.CreditBalanceLowThresholdCents; p != nil {
+			v := *p
+			before.CreditBalanceLowThresholdCents = &v
+		}
 		if err := respond.DecodeValue(body, ts, respond.ReadOnly("tenant_id", "created_at", "updated_at")); err != nil {
 			return err
 		}

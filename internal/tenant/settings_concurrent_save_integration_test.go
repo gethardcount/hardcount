@@ -13,10 +13,12 @@ import (
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// changeRecorder keeps the field names of each settings audit row.
+// changeRecorder keeps each settings audit row: its field names in rows, and
+// its "changed" map (field to from and to) in changes.
 type changeRecorder struct {
-	mu   sync.Mutex
-	rows [][]string
+	mu      sync.Mutex
+	rows    [][]string
+	changes []map[string]any
 }
 
 func (c *changeRecorder) Log(_ context.Context, _, _, _, _, _ string, metadata map[string]any) error {
@@ -29,6 +31,7 @@ func (c *changeRecorder) Log(_ context.Context, _, _, _, _, _ string, metadata m
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.rows = append(c.rows, fields)
+	c.changes = append(c.changes, changed)
 	return nil
 }
 
