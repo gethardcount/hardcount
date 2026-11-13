@@ -252,11 +252,10 @@ func AnchorDayFor(periodStart time.Time, billingTime SubscriptionBillingTime, in
 
 // IsPeriodStartOnAnchor reports whether t falls on the subscription's billing
 // anchor day-of-month in loc, with month-end clamping (ADR-055: a day-31 anchor
-// is on-anchor at Feb 28). It is the "is this a clean anniversary boundary?"
-// test the in_advance base-fee proration uses to tell a FULL upcoming cycle
-// (on-anchor start) apart from a re-anchor SEAM (off-anchor start) — the latter
-// produced when the org timezone changes (ADR-077, resolved live each roll) and
-// the stored boundary is re-resolved in the new zone a few hours off the anchor.
+// is on-anchor at Feb 28). It is half of CyclePeriod.CycleDays' test for a
+// period on its anchor (the other half is the end); an off-anchor start comes
+// from a seam after the org timezone changes (ADR-077, resolved live each
+// roll), or from a swap that rewrote the anchor.
 //
 // anchorDay <= 0 is calendar billing, which snaps to a fixed grid (the 1st) and
 // whose proration denominator never collapses; it is reported on-anchor so the
@@ -299,18 +298,10 @@ func addIntervalIn(t time.Time, interval BillingInterval, loc *time.Location) ti
 }
 
 // AddBillingInterval returns t advanced by exactly one billing interval —
-// the anniversary advance: +1 year for yearly, otherwise +1 month. It is the
-// SINGLE source of truth for "one full cycle from an anchor".
-//
-// This is the denominator proration MUST divide by — the FULL cycle length,
-// NOT the current period length. On a stub/partial period (mid-cycle signup,
-// e.g. a 14-day period of a 30-day monthly cycle) the current period is
-// shorter than a cycle, so dividing by it over-charges upgrades and
-// over-credits downgrades. The engine's day-1 stub base fee is prorated against
-// this same full cycle (segDays/fullCycleDays), and the subscription handler's
-// immediate plan-change proration now derives its denominator from here too —
-// so the two paths can never disagree (the defect class that produced the
-// stub-period proration mischarge).
+// the anniversary advance: +1 year for yearly, otherwise +1 month, on
+// anchorDay clamped to the target month's end (plain month arithmetic when
+// anchorDay is 0). A proration does not divide by it directly: it divides by
+// CyclePeriod.CycleDays, which uses it for one interval from a period's start.
 //
 // Deliberately calendar-agnostic. For the calendar-snapping cycle-CLOSE
 // advance (which re-anchors to the 1st of the next month in tenant TZ), use

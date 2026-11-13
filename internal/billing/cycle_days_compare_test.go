@@ -169,26 +169,28 @@ var changed = map[[2]string]int{
 	{"R1", "cut short, longer than nominal"}: 142,
 	{"R1", "no stored anchor"}:               100,
 	{"R2", "longer than one interval"}:       17800,
-	{"R2", "seam from day 29-31"}:            200,
+	{"R2", "off the anchor, from day 29-31"}: 200,
 	{"R2", "calendar after yearly"}:          200,
-	{"R3", "seam"}:                           16740,
-	{"R3", "seam from day 29-31"}:            1230,
+	{"R3", "off the anchor"}:                 16740,
+	{"R3", "off the anchor, from day 29-31"}: 1230,
 	{"R3", "longer than one interval"}:       580,
-	{"R4", "seam"}:                           16780,
+	{"R4", "off the anchor"}:                 16780,
 	{"R4", "calendar after yearly"}:          5600,
-	{"R4", "seam from day 29-31"}:            1790,
+	{"R4", "off the anchor, from day 29-31"}: 1790,
 	{"R4", "longer than one interval"}:       580,
-	{"R5", "seam"}:                           16780,
+	{"R5", "off the anchor"}:                 16780,
 	{"R5", "calendar after yearly"}:          5600,
-	{"R5", "seam from day 29-31"}:            1790,
+	{"R5", "off the anchor, from day 29-31"}: 1790,
 	{"R5", "longer than one interval"}:       580,
 }
 
 // TestCycleDays_ComparedWithTheReaders compares CycleDays, which every reader
 // now divides by, with each reader's denominator on main over every kind of
-// period the reader is given. Every difference must have a named reason,
-// CycleDays must be the value the design gives for it, and the count for each
-// reader and reason is the one in changed.
+// period the reader is given. It proves that every change falls in a named
+// reason, that CycleDays is the value the design gives for that reason, and
+// how many periods each reason moves (changed). It does not prove each answer
+// right: the worked cases do that, and TestCycleDays_Rows pins what is known
+// to be still wrong.
 func TestCycleDays_ComparedWithTheReaders(t *testing.T) {
 	grid := cycleGrid(t)
 	type key struct{ reader, kind string }
@@ -264,10 +266,12 @@ func TestCycleDays_ComparedWithTheReaders(t *testing.T) {
 }
 
 // differenceClass names why CycleDays and main can differ for a period, and
-// the number of days the design gives it for that reason, computed from the
-// period's shape: the period's own length, one interval from its start on
-// its own day (clamped), or the days in its start's month. It returns ""
-// when no named reason applies.
+// returns the number of days the design gives it for that reason, computed
+// from the period's shape: the period's own length, one interval from its
+// start on its own day (clamped), or the days in its start's month. It
+// returns "" when no named reason applies. "Off the anchor" is a start off
+// the stored anchor: mostly full periods opened in another zone and read in
+// this one, and the seams a zone change rolls.
 func differenceClass(g gridPeriod) (string, int) {
 	p := g.p
 	local := p.Start.In(p.Loc)
@@ -298,9 +302,9 @@ func differenceClass(g gridPeriod) (string, int) {
 	case g.kind == "cut-short", onAnchor:
 		return "", 0
 	case local.Day() >= 29:
-		return "seam from day 29-31", nominal
+		return "off the anchor, from day 29-31", nominal
 	default:
-		return "seam", nominal
+		return "off the anchor", nominal
 	}
 }
 

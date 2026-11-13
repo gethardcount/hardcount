@@ -39,11 +39,10 @@ func TestCycleDays_WorkedCases_InArrearsClose(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			periodDays := roundDays(tc.end.Sub(tc.start))
 			var lines []domain.InvoiceLineItem
 			var subtotal int64
 			for _, seg := range []baseSegment{{start: tc.start, end: tc.split, quantity: 1}, {start: tc.split, end: tc.end, quantity: 1}} {
-				if err := emitBaseSegmentLine(seg, plan, tc.start, tc.end, periodDays, "USD", time.UTC, domain.BillingTimeAnniversary, tc.anchor, &lines, &subtotal); err != nil {
+				if err := emitBaseSegmentLine(seg, plan, domain.CyclePeriod{Start: tc.start, End: tc.end, BillingTime: domain.BillingTimeAnniversary, Loc: time.UTC, StoredAnchor: tc.anchor}, "USD", &lines, &subtotal); err != nil {
 					t.Fatalf("emitBaseSegmentLine: %v", err)
 				}
 			}
@@ -91,6 +90,12 @@ func TestCycleDays_WorkedCases_UnusedBase(t *testing.T) {
 		// 3409. Now April's 30 days: 15/30.
 		{"a cancel on Apr 16 of a calendar month with a stale yearly anchor", domain.BillingTimeCalendar,
 			utcAt(2027, 4, 1, 0, 0), utcAt(2027, 5, 1, 0, 0), 15, utcAt(2027, 4, 16, 0, 0), 5000},
+		// The period's end decides: Feb 28 to Mar 31 on anchor 31 is a full
+		// 31-day cycle, so 15 days left are 15/31. With any other end the
+		// period would read as cut short and count 28 days from the 28th
+		// (5357).
+		{"a cancel on Mar 16 of Feb 28 to Mar 31 on anchor 31", domain.BillingTimeAnniversary,
+			utcAt(2027, 2, 28, 0, 0), utcAt(2027, 3, 31, 0, 0), 31, utcAt(2027, 3, 16, 0, 0), 4839},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

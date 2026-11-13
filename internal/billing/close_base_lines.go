@@ -33,18 +33,10 @@ type closeBaseLine struct {
 func closeBaseFeeLines(sub domain.Subscription, segsByItem map[string][]baseSegment, plans map[string]domain.Plan, periodStart, periodEnd time.Time, invoiceCurrency string, billingLoc *time.Location, terminalCycleClose, thresholdBilled bool) ([]closeBaseLine, error) {
 	var out []closeBaseLine
 
-	// Detect partial period once — same across all items since they share the
-	// billing period. Use math.Round, not int truncation: a sub created
-	// at 14:00 was previously billed for 30/31 days because hour-precise
-	// duration / 24 truncated to 30. With period boundaries snapped to
-	// 00:00 in tenant TZ (subscription.Service), elapsed hours land on
-	// (or within ±1h of) a whole-day multiple — DST transitions
-	// account for the ±1h tolerance, which Round absorbs.
-	periodDays := roundDays(periodEnd.Sub(periodStart))
 	emitSeg := func(seg baseSegment, plan domain.Plan) error {
 		var one []domain.InvoiceLineItem
 		var ignored int64
-		if err := emitBaseSegmentLine(seg, plan, periodStart, periodEnd, periodDays, invoiceCurrency, billingLoc, sub.BillingTime, sub.BillingAnchorDay, &one, &ignored); err != nil {
+		if err := emitBaseSegmentLine(seg, plan, domain.CyclePeriod{Start: periodStart, End: periodEnd, BillingTime: sub.BillingTime, Loc: billingLoc, StoredAnchor: sub.BillingAnchorDay}, invoiceCurrency, &one, &ignored); err != nil {
 			return err
 		}
 		for _, li := range one {

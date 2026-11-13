@@ -1114,7 +1114,9 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		subBefore = sub
-		prorationRemainingDays = daysLeftInPeriod(sub, clock.Now(ctx))
+		if sub.Status == domain.SubscriptionActive {
+			prorationRemainingDays = daysLeftInPeriod(sub, clock.Now(ctx))
+		}
 	}
 
 	// A change that prorates writes the item change and its proration on one
@@ -1482,9 +1484,9 @@ func (h *Handler) atomicAddItemWithProration(
 	return item, detail, nil
 }
 
-// addProrationDays is the share of sub's current period an item added at
-// `at` pays for in advance: the days left and the period's days, or zero
-// when sub is not active or the days left round to zero.
+// addProrationDays is the days of sub's current period an item added at `at`
+// pays for in advance, or zero when sub is not active or the days left round
+// to zero. The proration divides them by the period's cycle.
 //
 // Day-grade clamp (ADR-012 amendment 2026-07-26): an item added ON the
 // period-start calendar day (tenant TZ) owes the whole period — the add day
@@ -1546,7 +1548,10 @@ func (h *Handler) atomicUpdateItemWithProration(
 		}
 		base := result.pricedFrom
 
-		remainingDays := daysLeftInPeriod(base.sub, result.EffectiveAt)
+		var remainingDays int64
+		if base.sub.Status == domain.SubscriptionActive {
+			remainingDays = daysLeftInPeriod(base.sub, result.EffectiveAt)
+		}
 		var spec itemProrationSpec
 		if input.NewPlanID != "" && input.Immediate {
 			var changeAt time.Time
@@ -1897,6 +1902,8 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 	if err != nil {
 		return nil, err
 	}
+	// Remaining days are above 0 only when the period's bounds are set
+	// (daysLeftInPeriod), so the bounds below are not nil.
 	if spec.remainingDays <= 0 {
 		return nil, nil
 	}
@@ -1916,11 +1923,8 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 
 	// Display-only factor for the ProrationDetail payload (operator-visible
 	// event metadata). Source of truth for the cents math is the integer
-	// remainingDays / fullCycle denominator above.
-	var displayFactor float64
-	if denomDays > 0 {
-		displayFactor = float64(remainingDays) / float64(denomDays)
-	}
+	// remainingDays / denomDays above; the cycle is never 0.
+	displayFactor := float64(remainingDays) / float64(denomDays)
 	detail := &ProrationDetail{
 		OldPlanID:       spec.oldPlanID,
 		NewPlanID:       spec.newPlanID,
@@ -2476,8 +2480,10 @@ func clawbackReason(ct domain.ItemChangeType) string {
 
 // daysLeftInPeriod is the whole days from now to the end of the subscription's
 // current period, the numerator of an in-advance proration (ADR-042). It is 0
-// when the period is not set or has ended. A change is made inside the period,
-// so it never exceeds the period's own length.
+// when the period is not set or has ended. Callers pass only an active
+// subscription: its change is made inside its period, so the days never
+// exceed the period's own length. A trialing subscription's period starts in
+// the future, so its days could.
 func daysLeftInPeriod(sub domain.Subscription, now time.Time) int64 {
 	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
 		return 0

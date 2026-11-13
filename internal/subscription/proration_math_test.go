@@ -296,6 +296,20 @@ func TestCycleDays_TenantTZAnchored(t *testing.T) {
 			}
 		})
 	}
+	// The zone changes the answer: a calendar month Feb 1 to Mar 1 opened in
+	// IST is February (28) read in IST, and starts on Jan 31 (31) read in UTC.
+	feb := domain.CyclePeriod{
+		Start: time.Date(2027, 2, 1, 0, 0, 0, 0, ist), End: time.Date(2027, 3, 1, 0, 0, 0, 0, ist),
+		BillingTime: domain.BillingTimeCalendar, Interval: domain.BillingMonthly,
+	}
+	feb.Loc = ist
+	if got := feb.CycleDays(); got != 28 {
+		t.Errorf("Feb 1 to Mar 1 IST read in IST: CycleDays = %d, want 28", got)
+	}
+	feb.Loc = time.UTC
+	if got := feb.CycleDays(); got != 31 {
+		t.Errorf("Feb 1 to Mar 1 IST read in UTC: CycleDays = %d, want 31 (starts on Jan 31 there)", got)
+	}
 }
 
 // mustProrationCents and mustSplitUpgradeProration are the checked

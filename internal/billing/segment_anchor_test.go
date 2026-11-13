@@ -60,7 +60,7 @@ func TestEmitBaseSegmentLine_DenominatorFromPeriodAnchor(t *testing.T) {
 			seg := baseSegment{start: tc.start, end: tc.start.Add(15 * 24 * time.Hour), quantity: 1}
 			var lines []domain.InvoiceLineItem
 			var subtotal int64
-			if err := emitBaseSegmentLine(seg, tc.plan, tc.start, tc.end, roundDays(tc.end.Sub(tc.start)), "USD", ist, tc.billingTime, tc.stored, &lines, &subtotal); err != nil {
+			if err := emitBaseSegmentLine(seg, tc.plan, domain.CyclePeriod{Start: tc.start, End: tc.end, BillingTime: tc.billingTime, Loc: ist, StoredAnchor: tc.stored}, "USD", &lines, &subtotal); err != nil {
 				t.Fatalf("emitBaseSegmentLine: %v", err)
 			}
 			if len(lines) != 1 {

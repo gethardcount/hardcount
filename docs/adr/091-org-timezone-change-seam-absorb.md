@@ -92,10 +92,17 @@ keeps the exact current behavior and never spuriously prorates.
   guard) + a `IsPeriodStartOnAnchor` unit table (calendar / anniversary / month-end
   clamp).
 
-## Amendment 2026-11-13: every reader divides by one cycle length
+## Amendment 2026-11-13: every reader divides by CycleDays
 
 Every proration denominator is now `domain.CyclePeriod.CycleDays`: the in-arrears close, the in-advance close, the on-create lines, the refund of a cancel or swap, and the plan-change proration. A seam, or any period that does not start on the stored anchor and end where it says, counts one interval from its start on its own day, clamped to the month's end, or its own length if longer. Two things change from the decision above.
 
 - The in-advance close counted the nominal interval by AddDate. A seam from the 29th to the 31st now counts from its own day, clamped: from Jan 31 it is 28 days, not 31.
-- The refund and the plan-change proration used the stored anchor, so a 1-day seam was its own cycle. A cancel or a change in it refunded or charged a whole fee. They now count a seam like the closes do.
+- The refund and the plan-change proration used the stored anchor. In the period during which a tenant billed on the 1st changed its zone, and in a 1-day seam, that made the cycle one day, so a cancel or a change refunded or charged a whole fee. They now count such a period like the closes do.
 
+Still wrong, because a period does not carry the cycle or the zone it was opened in (each pinned in `TestCycleDays_Rows`):
+
+- A period a swap cut short whose start was a shortened month end is counted from that day (28 where its cycle was 31). A cut-short period longer than that is capped at one fee, which is not the right split either.
+- A period charged in one zone and refunded or prorated in another can be divided by two numbers a day or a few apart, toward an under-refund: a calendar month Feb 1 to Mar 1 opened in Asia/Kolkata is charged over 28 and, read in UTC, refunded over 31.
+- A full cycle opened on anchor 29 to 31 east of the current zone is prorated at a trial end (Jan 31 to Feb 28 opened in Asia/Kolkata, read in UTC: 28/29).
+
+A later change stores the cycle a period was opened with, written by the truncating swap and by a change of the tenant's zone, and removes all three.

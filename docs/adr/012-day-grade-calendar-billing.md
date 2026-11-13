@@ -117,7 +117,7 @@ take over. No backfill needed.
 
 A mid-period change is prorated in whole days, rounded at the change
 instant. An in-advance change counts the days from the change to the period
-end, rounded to whole days (`remainingPeriodRatio` in
+end, rounded to whole days (`daysLeftInPeriod` in
 `internal/subscription/handler.go`). An in-arrears base fee is billed per
 segment at the period close: a segment's days are its two boundaries
 rounded to whole days from the period start, then subtracted
