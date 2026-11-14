@@ -2572,10 +2572,11 @@ const chargeHoldReleaseTimeout = 10 * time.Second
 // so the TTL has one source (TestChargeHoldTiming pins the relations).
 var chargeHoldTTLSecs = domain.ChargeHoldTTL.Seconds()
 
-// claimChargeHold runs one claim: lock the row, then the UPDATE whose
-// predicate is the claim's eligibility. It returns the hold value written —
-// the claim's token — or the zero ChargeHold when the claim was refused.
-func (s *PostgresStore) claimChargeHold(ctx context.Context, tenantID, id, eligibility string) (domain.ChargeHold, error) {
+// claimChargeHold runs one claim: lock the row, then the UPDATE whose WHERE
+// is the claim's whole predicate, where (chargeClaimSQL). It returns the hold
+// value written — the claim's token — or the zero ChargeHold when the claim
+// was refused.
+func (s *PostgresStore) claimChargeHold(ctx context.Context, tenantID, id, where string) (domain.ChargeHold, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.ChargeHold{}, err
@@ -2586,19 +2587,7 @@ func (s *PostgresStore) claimChargeHold(ctx context.Context, tenantID, id, eligi
 		return domain.ChargeHold{}, err
 	}
 	var until time.Time
-	err = tx.QueryRowContext(ctx, `
-		UPDATE invoices
-		SET auto_charge_claimed_until = now() + make_interval(secs => $2),
-		    -- The token (ADR-137): equal to the hold, so the stale-hold sweep
-		    -- knows this hold's charger puts its PaymentIntent on the invoice
-		    -- before confirming.
-		    charge_hold_token = now() + make_interval(secs => $2)
-		WHERE id = $1
-		  AND `+eligibility+`
-		  AND `+chargeHoldFree+`
-		  AND `+noLiveHostedPageSQL+`
-		RETURNING auto_charge_claimed_until
-	`, id, chargeHoldTTLSecs).Scan(&until)
+	err = tx.QueryRowContext(ctx, chargeClaimSQL(where), id, chargeHoldTTLSecs).Scan(&until)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.ChargeHold{}, nil
 	}
@@ -2609,6 +2598,32 @@ func (s *PostgresStore) claimChargeHold(ctx context.Context, tenantID, id, eligi
 		return domain.ChargeHold{}, err
 	}
 	return domain.ChargeHold{Until: until}, nil
+}
+
+// chargeClaimSQL is a claim's UPDATE. Its WHERE is the invoice and the
+// claim's predicate, and nothing else, so ChargeClaimStateOf, which reads
+// ClaimAutoCharge's predicate, reads all of that claim
+// (TestChargeClaimSQL_WhereIsThePredicateAlone).
+func chargeClaimSQL(where string) string {
+	return `
+		UPDATE invoices
+		SET auto_charge_claimed_until = now() + make_interval(secs => $2),
+		    -- The token (ADR-137): equal to the hold, so the stale-hold sweep
+		    -- knows this hold's charger puts its PaymentIntent on the invoice
+		    -- before confirming.
+		    charge_hold_token = now() + make_interval(secs => $2)
+		WHERE id = $1 AND (` + where + `)
+		RETURNING auto_charge_claimed_until`
+}
+
+// chargeClaimWhere is the predicate of the claims other than
+// ClaimAutoCharge: their own eligibility, a free hold, and no live hosted
+// page. ClaimAutoCharge's predicate is autoChargeClaim, which
+// ChargeClaimStateOf reads too.
+func chargeClaimWhere(eligibility string) string {
+	return eligibility + `
+		  AND ` + chargeHoldFree + `
+		  AND ` + noLiveHostedPageSQL
 }
 
 // ClaimAutoCharge takes the per-invoice charge hold (HA hazard #1,
@@ -2645,10 +2660,75 @@ func (s *PostgresStore) claimChargeHold(ctx context.Context, tenantID, id, eligi
 // 2026-07-06). The list stays claim-blind: a held row is listed and skipped
 // here when its claim fails.
 func (s *PostgresStore) ClaimAutoCharge(ctx context.Context, tenantID, id string) (domain.ChargeHold, error) {
-	return s.claimChargeHold(ctx, tenantID, id, `auto_charge_pending = TRUE
-		  AND payment_status = 'pending'
-		  AND status = 'finalized'
-		  AND `+notPausedForCollection("invoices", invoiceClockNowSQL))
+	return s.claimChargeHold(ctx, tenantID, id, autoChargeClaim.where())
+}
+
+// claimCondition is one condition of a claim's predicate, and what
+// ChargeClaimStateOf answers when it is the first that does not hold.
+type claimCondition struct {
+	sql     string
+	ifFalse domain.ChargeClaimState
+}
+
+type claimConditions []claimCondition
+
+// autoChargeClaim is ClaimAutoCharge's whole predicate, one list for the
+// claim and the read: the claim's WHERE is the AND of the conditions, and
+// ChargeClaimStateOf answers for the first that does not hold. So a condition
+// is in both or in neither; adding one means adding an entry with its
+// answer. The order picks the answer when several do not hold.
+var autoChargeClaim = claimConditions{
+	{`status = 'finalized'`, domain.ChargeNothingToCharge},
+	// A charge whose result is not known yet holds the invoice.
+	{`payment_status NOT IN ('unknown', 'processing')`, domain.ChargeHeldByAttempt},
+	{`payment_status = 'pending'`, domain.ChargeNothingToCharge},
+	{`auto_charge_pending = TRUE`, domain.ChargeNothingToCharge},
+	{chargeHoldFree, domain.ChargeHeldByAttempt},
+	{noLiveHostedPageSQL, domain.ChargePayingOnHostedPage},
+	{notPausedForCollection("invoices", invoiceClockNowSQL), domain.ChargeCollectionPaused},
+}
+
+// where is the conditions' AND: the claim's predicate.
+func (cs claimConditions) where() string {
+	parts := make([]string, len(cs))
+	for i, c := range cs {
+		parts[i] = "(" + c.sql + ")"
+	}
+	return strings.Join(parts, "\n\t\t  AND ")
+}
+
+// state is the read's answer: for the first condition that is not true (false
+// or NULL, as the WHERE takes neither), its answer; else claimable.
+func (cs claimConditions) state() string {
+	var b strings.Builder
+	b.WriteString("CASE")
+	for _, c := range cs {
+		fmt.Fprintf(&b, "\n\t\t  WHEN (%s) IS NOT TRUE THEN %d", c.sql, int(c.ifFalse))
+	}
+	fmt.Fprintf(&b, "\n\t\t  ELSE %d\n\t\tEND", int(domain.ChargeClaimable))
+	return b.String()
+}
+
+// ChargeClaimStateOf says whether ClaimAutoCharge would take the invoice now,
+// and if not, why not, in one read outside any lock: it walks the claim's
+// own conditions (autoChargeClaim). Only to say what is left of a charge a
+// run did not make; never a gate. An invoice RLS does not show, or that does
+// not exist, has nothing to charge, as the claim's row lock finds nothing.
+func (s *PostgresStore) ChargeClaimStateOf(ctx context.Context, tenantID, id string) (domain.ChargeClaimState, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return 0, err
+	}
+	defer postgres.Rollback(tx)
+	var state domain.ChargeClaimState
+	err = tx.QueryRowContext(ctx, `SELECT `+autoChargeClaim.state()+` FROM invoices WHERE id = $1`, id).Scan(&state)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.ChargeNothingToCharge, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read the invoice's charge claim: %w", err)
+	}
+	return state, nil
 }
 
 // invoiceClockNowSQL is the invoice's own now, on the database: the frozen
@@ -2835,9 +2915,9 @@ func (s *PostgresStore) ConfirmChargeHold(ctx context.Context, tenantID, id stri
 //
 // Same hold/no-updated_at rules as ClaimAutoCharge (see there).
 func (s *PostgresStore) ClaimChargeForDunningRetry(ctx context.Context, tenantID, id string) (domain.ChargeHold, error) {
-	return s.claimChargeHold(ctx, tenantID, id, `payment_status IN ('pending', 'failed')
+	return s.claimChargeHold(ctx, tenantID, id, chargeClaimWhere(`payment_status IN ('pending', 'failed')
 		  AND status = 'finalized'
-		  AND amount_due_cents > 0`)
+		  AND amount_due_cents > 0`))
 }
 
 // ClaimChargeForManualCollect is the operator-collect twin on the SAME hold
@@ -2855,9 +2935,9 @@ func (s *PostgresStore) ClaimChargeForDunningRetry(ctx context.Context, tenantID
 // it. Kept a separate function from the dunning claim so a future divergence
 // is a deliberate edit, not a shared-hold accident.
 func (s *PostgresStore) ClaimChargeForManualCollect(ctx context.Context, tenantID, id string) (domain.ChargeHold, error) {
-	return s.claimChargeHold(ctx, tenantID, id, `payment_status IN ('pending', 'failed')
+	return s.claimChargeHold(ctx, tenantID, id, chargeClaimWhere(`payment_status IN ('pending', 'failed')
 		  AND status = 'finalized'
-		  AND amount_due_cents > 0`)
+		  AND amount_due_cents > 0`))
 }
 
 // ClaimChargeHoldForFinalAction takes the hold for dunning's final action
@@ -2877,8 +2957,8 @@ func (s *PostgresStore) ClaimChargeForManualCollect(ctx context.Context, tenantI
 // under this hold, leaves the invoice open even when nothing is left due:
 // the write-off that follows needs it open.
 func (s *PostgresStore) ClaimChargeHoldForFinalAction(ctx context.Context, tenantID, id string) (domain.ChargeHold, error) {
-	return s.claimChargeHold(ctx, tenantID, id, `payment_status IN ('pending', 'failed')
-		  AND status = 'finalized'`)
+	return s.claimChargeHold(ctx, tenantID, id, chargeClaimWhere(`payment_status IN ('pending', 'failed')
+		  AND status = 'finalized'`))
 }
 
 // staleHoldRecheckAfter is how long a kept hold waits before the sweep

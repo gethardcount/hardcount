@@ -43,6 +43,8 @@ func TestProcessAutoCharge_DualLeaderChargesOnce(t *testing.T) {
 			Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
 			AutoChargePending: true, AmountDueCents: 1000,
 		}},
+		// What the store answers B, whose claim is refused: A charged it.
+		claimState: map[string]domain.ChargeClaimState{"inv_dual": domain.ChargeNothingToCharge},
 	}
 	pms := &fakePaymentSetups{ready: true, stripeCustomerID: "cus_stripe_1"}
 	charger := &countingCharger{}

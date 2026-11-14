@@ -152,8 +152,8 @@ func (a *invoiceStoreAdapter) SetAutoChargePending(ctx context.Context, tenantID
 	return a.store.SetAutoChargePending(ctx, tenantID, id, pending)
 }
 
-func (a *invoiceStoreAdapter) ChargeHoldStateOf(ctx context.Context, tenantID, id string) (domain.ChargeHoldState, error) {
-	return a.store.ChargeHoldStateOf(ctx, tenantID, id)
+func (a *invoiceStoreAdapter) ChargeClaimStateOf(ctx context.Context, tenantID, id string) (domain.ChargeClaimState, error) {
+	return a.store.ChargeClaimStateOf(ctx, tenantID, id)
 }
 
 func (a *invoiceStoreAdapter) ClaimAutoCharge(ctx context.Context, tenantID, id string) (domain.ChargeHold, error) {
