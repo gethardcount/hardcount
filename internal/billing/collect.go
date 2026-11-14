@@ -74,8 +74,11 @@ func (e *Engine) CollectInvoice(ctx context.Context, tenantID, invoiceID string,
 // for those sent the reader to a sweep that would never touch the invoice
 // (min-charge check 2026-10-22, finding 4.2).
 func collectFailureNext(err error) string {
+	var notMade *chargeNotMade
 	var pe *payment.PaymentError
 	switch {
+	case errors.As(err, &notMade):
+		return notMade.nextStep()
 	case errors.As(err, &pe) && !pe.Unknown:
 		return "Stripe refused the charge, so the invoice is marked failed and out of the auto-charge queue; payment recovery retries it if the account has it on"
 	case errors.As(err, &pe):

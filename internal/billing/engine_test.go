@@ -1068,6 +1068,16 @@ func (m *mockInvoices) ClaimAutoCharge(_ context.Context, _, id string) (domain.
 	return domain.ChargeHold{}, nil
 }
 
+// ChargeHoldStateOf answers from the fake's holds: held is live, else none.
+func (m *mockInvoices) ChargeHoldStateOf(_ context.Context, _, id string) (domain.ChargeHoldState, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.claimed[id].Held() {
+		return domain.ChargeHoldLive, nil
+	}
+	return domain.ChargeHoldNone, nil
+}
+
 func (m *mockInvoices) ReleaseChargeHold(_ context.Context, _, id string, hold domain.ChargeHold) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

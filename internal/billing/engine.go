@@ -639,6 +639,9 @@ type InvoiceWriter interface {
 	// paths that sent no charge, so the next tick/Advance retries
 	// immediately instead of waiting for the stale-hold sweep.
 	ReleaseChargeHold(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error
+	// ChargeHoldStateOf reads the invoice's hold outside any lock. Only to
+	// say what is left of a charge that was not made; never a gate.
+	ChargeHoldStateOf(ctx context.Context, tenantID, id string) (domain.ChargeHoldState, error)
 	ListAutoChargePending(ctx context.Context, after walk.Key, limit int) ([]domain.Invoice, error)
 	// ListAutoChargePendingForClock is the catchup-path counterpart to
 	// ListAutoChargePending — returns invoices whose owning subscription
@@ -4730,9 +4733,9 @@ func (e *Engine) RetryPendingCharges(ctx context.Context, pageSize int, onPage f
 		n, rowErrs := e.processAutoCharge(ctx, inv, nil, noPMTriggerSweep)
 		charged += n
 		for _, rerr := range rowErrs {
-			// The next tick does it; the invoice is still queued.
+			// A later run does it.
 			if errors.Is(rerr, domain.ErrLeftForNextRun) {
-				slog.WarnContext(ctx, "auto-charge: left for the next tick", "invoice_id", inv.ID, "error", rerr)
+				slog.WarnContext(ctx, "auto-charge: left for the next run", "invoice_id", inv.ID, "error", rerr)
 				continue
 			}
 			errs = append(errs, rerr)
@@ -4895,9 +4898,9 @@ func (e *Engine) emailInvoiceOnce(ctx context.Context, inv domain.Invoice) {
 // would push the test-clock catchup into 'internal_failure' for what
 // is supposed to be a normal payment-failure flow.
 //
-// Credits that could not be applied, and a transient refusal (nothing
-// sent), return domain.ErrLeftForNextRun: the invoice stays queued, the
-// real-time sweep logs it, and a clock's job returns it.
+// Credits that could not be applied, and a transient answer, return a
+// chargeNotMade (domain.ErrLeftForNextRun) that says what is left: the
+// real-time run logs it, and a clock's job returns it.
 //
 // Only Unknown (5xx, network drop, timeout — outcome unresolved) and
 // non-Stripe errors (config, infrastructure) escalate to the caller.
@@ -4959,13 +4962,15 @@ func (e *Engine) processAutoCharge(ctx context.Context, inv domain.Invoice, at *
 	// pre-credit amount). ApplyToInvoiceAt is safe to re-run: it drains
 	// min(amount_due, current balance), so an already-applied invoice or
 	// an empty balance applies nothing. Failure → skip this invoice (flag
-	// stays set; the next sweep retries) rather than charge pre-credit.
+	// stays set; a later run retries) rather than charge pre-credit.
 	if e.credits != nil && inv.AmountDueCents > 0 {
 		if _, err := e.credits.ApplyToInvoiceAt(ctx, inv.TenantID, inv.CustomerID, inv.ID, inv.AmountDueCents, settleAt, inv.InvoiceNumber); err != nil {
-			// Provably pre-Stripe: release the hold so the next run can
+			// Provably pre-Stripe: release the hold so a later run can
 			// claim the invoice at once.
 			release()
-			errs = append(errs, fmt.Errorf("apply credits to invoice %s before charging it, so it was not charged: %w: %w", inv.ID, domain.ErrLeftForNextRun, err))
+			if nerr := e.chargeNotMadeFor(ctx, inv, "its credits could not be applied first", fmt.Errorf("apply credits: %w", err)); nerr != nil {
+				errs = append(errs, nerr)
+			}
 			return charged, errs
 		}
 		// Refresh: credits may have reduced (or fully covered) amount_due.
@@ -5148,11 +5153,15 @@ func (e *Engine) processAutoCharge(ctx context.Context, inv domain.Invoice, at *
 			errs = append(errs, fmt.Errorf("charge invoice %s refused: %w", inv.ID, err))
 			return charged, errs
 		}
-		// Transient (breaker open, a timeout before anything was sent, a
-		// rate limit): nothing was charged and dunning is not bumped. The
-		// charger released the hold; the next run charges it.
+		// Transient (an open breaker, a rate limit, unreadable credentials,
+		// a refused Stripe key, an unclear answer before the confirm): no
+		// payment was confirmed and dunning is not bumped. Whether a later
+		// run can claim the invoice depends on what the charger did with its
+		// hold, so chargeNotMadeFor reads the invoice as stored.
 		if errors.Is(err, payment.ErrPaymentTransient) {
-			errs = append(errs, fmt.Errorf("charge invoice %s: %w: %w", inv.ID, domain.ErrLeftForNextRun, err))
+			if nerr := e.chargeNotMadeFor(ctx, inv, "Stripe could not take the charge just then", err); nerr != nil {
+				errs = append(errs, nerr)
+			}
 			return charged, errs
 		}
 		// Everything else (Unknown PaymentError or non-Stripe

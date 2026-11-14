@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/payment"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
@@ -99,5 +100,114 @@ func TestCollect_WorkLeftForTheNextRun(t *testing.T) {
 				t.Error("the invoice is no longer queued; the next tick must find it")
 			}
 		})
+	}
+}
+
+// answerCharger answers every charge with err, and does what the real charger
+// does on that path: releases its hold or keeps it, and stamps the invoice
+// (unknown at the confirm) or finds it settled meanwhile.
+type answerCharger struct {
+	store    *mockInvoices
+	err      error
+	keepHold bool
+	stamp    domain.InvoicePaymentStatus
+	paid     bool
+}
+
+func (c *answerCharger) ChargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, _, _ string) (domain.Invoice, error) {
+	if c.stamp != "" {
+		c.store.stampPaymentStatus(inv.ID, c.stamp)
+	}
+	if c.paid {
+		for i := range c.store.invoices {
+			if c.store.invoices[i].ID == inv.ID {
+				c.store.invoices[i].Status, c.store.invoices[i].PaymentStatus = domain.InvoicePaid, domain.PaymentSucceeded
+			}
+		}
+	}
+	if !c.keepHold {
+		_ = c.store.ReleaseChargeHold(ctx, tenantID, inv.ID, hold)
+	}
+	return domain.Invoice{}, c.err
+}
+
+// What a test clock's failure reason shows for a charge that was not made
+// (errs.SummarizeForOperator, as the advance writes it): what happened, and
+// what to do, read from the invoice as stored after the charge. The real-time
+// run returns none of them.
+func TestCollect_WhatTheOperatorReads(t *testing.T) {
+	keyRefused := &payment.StripeKeyError{Reason: payment.StripeKeyRejected, Message: "Invalid API Key provided"}
+	for _, c := range []struct {
+		name    string
+		credits error
+		charger *answerCharger
+		want    string // "" = no error: nothing is left
+	}{
+		{"credits that could not be applied", errors.New("db blip"), nil,
+			"Invoice HC-1 was not charged: its credits could not be applied first. Nothing was charged. Retry advance to charge it."},
+		{"a transient answer, hold released", nil, &answerCharger{err: payment.ErrPaymentTransient},
+			"Invoice HC-1 was not charged: Stripe could not take the charge just then. Nothing was charged. Retry advance to charge it."},
+		{"a refused key before the confirm", nil, &answerCharger{err: keyRefused},
+			"Invoice HC-1 was not charged: Stripe refused this account's API key, or none is connected. Nothing was charged. Fix the key under Settings → Payments, then Retry advance."},
+		{"a transient answer that kept the hold (an unclear create)", nil, &answerCharger{err: payment.ErrPaymentTransient, keepHold: true},
+			"Invoice HC-1: an earlier charge attempt is not resolved yet. Hardcount reads its result from Stripe on a later billing run; Retry advance after that."},
+		{"a key refused at the confirm (the invoice unknown, the hold kept)", nil,
+			&answerCharger{err: &payment.StripeKeyError{Reason: payment.StripeKeyRejected, AtConfirm: true}, keepHold: true, stamp: domain.PaymentUnknown},
+			"Invoice HC-1: Stripe refused this account's API key while charging it, so the result of the charge is not known yet. Fix the key under Settings → Payments; Hardcount then reads the result from Stripe on a later billing run, and Retry advance charges what is left."},
+		{"a transient answer, the invoice settled meanwhile", nil, &answerCharger{err: payment.ErrPaymentTransient, paid: true}, ""},
+	} {
+		setup := func(t *testing.T) (*Engine, *mockInvoices) {
+			inv, applier, _, engine := leftHarness(t)
+			applier.applyCents = 0
+			applier.err = c.credits
+			if c.charger != nil {
+				ch := *c.charger
+				ch.store = inv
+				engine.charger = &ch
+			}
+			return engine, inv
+		}
+		t.Run(c.name+", on a clock", func(t *testing.T) {
+			engine, _ := setup(t)
+			_, runErrs := engine.RetryPendingChargesForClock(postgres.WithLivemode(context.Background(), false), "t1", "tc_1", 50)
+			if c.want == "" {
+				if len(runErrs) != 0 {
+					t.Fatalf("errors = %v, want none: nothing is left to charge", runErrs)
+				}
+				return
+			}
+			if len(runErrs) != 1 || !errors.Is(runErrs[0], domain.ErrLeftForNextRun) {
+				t.Fatalf("errors = %v, want one ErrLeftForNextRun", runErrs)
+			}
+			got := errs.SummarizeForOperator(runErrs, "")
+			if got != c.want {
+				t.Errorf("the operator reads:\n  %q\nwant\n  %q", got, c.want)
+			}
+		})
+		t.Run(c.name+", in real time", func(t *testing.T) {
+			engine, _ := setup(t)
+			if _, runErrs := engine.RetryPendingCharges(postgres.WithLivemode(context.Background(), true), 50, nil); len(runErrs) != 0 {
+				t.Fatalf("errors = %v, want none: the run logs it", runErrs)
+			}
+		})
+	}
+}
+
+// A charge whose transient answer kept the hold: the next run's claim is
+// refused, and today that run returns nothing and charges nothing (a refused
+// claim is skipped quietly; its own change makes it an error on a clock).
+func TestCollect_KeptHoldIsRefusedQuietlyOnTheNextRun(t *testing.T) {
+	inv, applier, _, engine := leftHarness(t)
+	applier.applyCents = 0
+	ch := &answerCharger{store: inv, err: payment.ErrPaymentTransient, keepHold: true}
+	engine.charger = ch
+	ctx := postgres.WithLivemode(context.Background(), false)
+
+	if _, runErrs := engine.RetryPendingChargesForClock(ctx, "t1", "tc_1", 50); len(runErrs) != 1 {
+		t.Fatalf("first run: errors = %v, want the unresolved attempt", runErrs)
+	}
+	charged, runErrs := engine.RetryPendingChargesForClock(ctx, "t1", "tc_1", 50)
+	if charged != 0 || len(runErrs) != 0 {
+		t.Errorf("next run: charged %d, errors %v; want 0 and none, as the code does today", charged, runErrs)
 	}
 }
