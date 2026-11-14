@@ -62,14 +62,20 @@ func (h *Handler) EventRoutes() chi.Router {
 	return r
 }
 
+// StreamHeartbeatInterval is how often the live-tail stream re-checks its
+// credential and sends a heartbeat: a stream whose credential stops working
+// ends within this interval.
+const StreamHeartbeatInterval = 15 * time.Second
+
 // StreamHandler is the handler for the live-tail SSE stream, mounted by
 // router.go on a route block that skips the 30s timeout of the /v1 routes.
-// stillAuthenticated re-checks the request's credentials before each frame
-// the stream sends; the stream ends when it fails, so a revoked or expired
-// key, or an ended session, stops receiving events.
-func (h *Handler) StreamHandler(stillAuthenticated func(*http.Request) error) http.HandlerFunc {
+// Every interval, the stream calls credentialStopped on its own request and
+// then sends a heartbeat. credentialStopped answers whether the credential no
+// longer authenticates, a verdict that ends the stream, or returns an error
+// when the check reached none: the stream logs it and keeps going.
+func (h *Handler) StreamHandler(credentialStopped func(*http.Request) (bool, error), every time.Duration) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		h.streamEvents(w, r, stillAuthenticated)
+		h.streamEvents(w, r, credentialStopped, every)
 	}
 }
 

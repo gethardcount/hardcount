@@ -1699,17 +1699,12 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// chain as /v1/* (session cookie or Bearer API key, rate limit, permission
 	// check), but not idempotency, which adds nothing to a streaming GET, and
 	// not the Timeout. The stream is GET-only and read-only: it has no body to
-	// key for idempotency, and nothing to audit beyond the access log. The
-	// stream re-runs session.Authenticate before each frame and ends when it
-	// fails, so a revoked or expired key, or an ended session, stops it.
-	r.Route("/v1/webhook_events/stream", func(r chi.Router) {
-		r.Use(session.MiddlewareOrAPIKey(sessionSvc, authSvc))
-		r.Use(rateLimiter.Middleware())
-		r.With(auth.Require(auth.PermAPIKeyRead)).Get("/", webhookOutH.StreamHandler(func(r *http.Request) error {
-			_, err := session.Authenticate(r, sessionSvc, authSvc)
-			return err
-		}))
-	})
+	// key for idempotency, and nothing to audit beyond the access log. Every
+	// 15 seconds the stream checks its credential again: once the key is
+	// revoked or expires, or the session ends, it closes with no final frame,
+	// and a reconnect with the same credential answers 401. A store failure
+	// does not close it (eventStreamRoute).
+	r.Route("/v1/webhook_events/stream", eventStreamRoute(webhookOutH, sessionSvc, authSvc, rateLimiter.Middleware(), webhook.StreamHeartbeatInterval))
 
 	// Streaming CSV exports are mounted beside the /v1 block, like the SSE
 	// stream above, so they get a five-minute timeout instead of the 30s CRUD
