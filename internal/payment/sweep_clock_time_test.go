@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -152,8 +153,8 @@ func TestRealTimeSweep_AClockThatCannotBeReadLeavesTheRowForALaterTick(t *testin
 	r.invoices = store
 	r.SetResolver(failingClock{errors.New("connection reset by peer")})
 	_, errs := r.Run(tickCtx(), 10)
-	if len(errs) != 1 || !errors.Is(errs[0], clock.ErrUndecided) {
-		t.Fatalf("errors %v; want one clock.ErrUndecided for the row", errs)
+	if len(errs) != 1 || !errors.Is(errs[0], clock.ErrUndecided) || !strings.Contains(errs[0].Error(), "checked again on the next run; no payment is lost") {
+		t.Fatalf("errors %v; want one clock.ErrUndecided for the row, saying it is checked again and no payment is lost", errs)
 	}
 	if got := updater.invoices[inv.ID]; got.Status == domain.InvoicePaid || got.PaidAt != nil || len(dunning.calls) != 0 {
 		t.Errorf("status %s, paid_at %v, dunning %v; want the invoice untouched", got.Status, got.PaidAt, dunning.calls)
@@ -163,19 +164,75 @@ func TestRealTimeSweep_AClockThatCannotBeReadLeavesTheRowForALaterTick(t *testin
 	}
 }
 
-// An invoice deleted with its clock between the list and the read is
-// skipped: nothing to settle, and no error.
-func TestRealTimeSweep_AnInvoiceGoneWithItsClockIsSkipped(t *testing.T) {
+// A row whose invoice, or its clock, is not found under the decision is
+// skipped: nothing to settle, and no error. It is stamped like the other
+// skipped rows, so a row that keeps answering not-found does not stay at the
+// head of the list and take a slot every run.
+func TestRealTimeSweep_AnInvoiceGoneWithItsClockIsSkippedAndStamped(t *testing.T) {
 	inv := unknownClockInvoice()
 	r, updater, _ := sweepHarness(inv, &mockStripeClient{piStates: map[string]PaymentIntentResult{
 		"pi_sweep": {ID: "pi_sweep", Status: "succeeded", AmountReceivedCents: 5000},
 	}})
+	store := newMockReconcileStore(inv)
+	r.invoices = store
 	r.SetResolver(failingClock{fmt.Errorf("could not read invoice inv_1: %w", errs.ErrNotFound)})
 	if _, runErrs := r.Run(tickCtx(), 10); len(runErrs) != 0 {
 		t.Fatalf("errors %v; want none", runErrs)
 	}
 	if got := updater.invoices[inv.ID]; got.Status == domain.InvoicePaid {
 		t.Error("a gone invoice was settled")
+	}
+	if store.byID[inv.ID].ProviderSyncedAt == nil {
+		t.Error("the gone row was not stamped, so it stays at the head of the list")
+	}
+}
+
+// The hosted-session sweep treats a gone row the same way: skipped, no
+// error, and the session touched so the list moves on.
+func TestRealTimeSweep_HostedSessionWhoseInvoiceIsGoneIsTouched(t *testing.T) {
+	inv := finalizedPendingInvoice()
+	r, updater, _ := sweepHarness(inv, &mockStripeClient{piStates: map[string]PaymentIntentResult{
+		"pi_hosted": {ID: "pi_hosted", Status: "succeeded", AmountReceivedCents: 5000},
+	}})
+	ledger := &fakeHostedLedger{rows: []CheckoutClaim{{ID: "cks_1", TenantID: "t1", InvoiceID: inv.ID, StripeSessionID: "cs_1", Status: "completed"}}}
+	r.SetHostedSessions(ledger, fakeSessionReader{"cs_1": {Status: "complete", PaymentStatus: "paid", PaymentIntentID: "pi_hosted"}}, nil)
+	r.SetResolver(failingClock{fmt.Errorf("could not read invoice inv_1: %w", errs.ErrNotFound)})
+	if _, runErrs := r.sweepHostedSessions(tickCtx(), 50, new(scheduler.Panics)); len(runErrs) != 0 {
+		t.Fatalf("errors %v; want none", runErrs)
+	}
+	if got := updater.invoices[inv.ID]; got.Status == domain.InvoicePaid || len(ledger.touched) != 1 {
+		t.Errorf("status %s, touched %v; want unpaid and the session touched", got.Status, ledger.touched)
+	}
+}
+
+// noClock puts every record on no clock: the machine's time, as the engine
+// answers.
+type noClock struct{}
+
+func (noClock) SimForCustomer(context.Context, string, string) (clock.Sim, error) {
+	return clock.Sim{At: time.Now()}, nil
+}
+func (noClock) SimForSubscription(context.Context, string, string) (clock.Sim, error) {
+	return clock.Sim{At: time.Now()}, nil
+}
+func (noClock) SimForInvoice(context.Context, string, string) (clock.Sim, error) {
+	return clock.Sim{At: time.Now()}, nil
+}
+
+// A test-mode invoice on no clock is decided as real time: paid at the
+// machine's time.
+func TestRealTimeSweep_AnInvoiceOnNoClockIsPaidAtRealTime(t *testing.T) {
+	inv := unknownClockInvoice()
+	r, updater, _ := sweepHarness(inv, &mockStripeClient{piStates: map[string]PaymentIntentResult{
+		"pi_sweep": {ID: "pi_sweep", Status: "succeeded", AmountReceivedCents: 5000},
+	}})
+	r.SetResolver(noClock{})
+	r.settler.(*Stripe).SetResolver(noClock{})
+	if _, runErrs := r.Run(tickCtx(), 10); len(runErrs) != 0 {
+		t.Fatalf("errors %v; want none", runErrs)
+	}
+	if got := updater.invoices[inv.ID]; got.PaidAt == nil || time.Since(*got.PaidAt) > time.Minute {
+		t.Errorf("paid_at %v; want real time", got.PaidAt)
 	}
 }
 

@@ -2,11 +2,13 @@ package payment
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/scheduler"
 )
 
@@ -94,7 +96,9 @@ func (r *Reconciler) sweepHostedSessions(ctx context.Context, limit int, panics 
 			guardRow(panics, func() { done, err = r.reconcileHostedSession(rowCtx, c) },
 				"step", "hosted_session", "claim_id", c.ID, "invoice_id", c.InvoiceID, "tenant_id", c.TenantID)
 		}
-		if err != nil {
+		if errors.Is(err, clock.ErrUndecided) {
+			errs = append(errs, fmt.Errorf("checkout session %s: checked again on the next run; no payment is lost: %w", c.ID, err))
+		} else if err != nil {
 			errs = append(errs, fmt.Errorf("checkout session %s: %w", c.ID, err))
 		}
 		if done {

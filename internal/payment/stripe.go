@@ -1442,7 +1442,7 @@ func (s *Stripe) stampFailedWithoutPayment(ctx context.Context, tenantID string,
 			"invoice_id", inv.ID, "status", current.Status)
 		return
 	}
-	if _, derr := startDunningWithRetry(ctx, s.dunning, tenantID, inv.ID, inv.CustomerID, dunningSimFailedAt(ctx, inv), domain.DunningCausePaymentFailed); derr != nil {
+	if _, derr := startDunningWithRetry(ctx, s.dunning, tenantID, inv.ID, inv.CustomerID, dunningSimFailedAt(ctx), domain.DunningCausePaymentFailed); derr != nil {
 		slog.Error("inline StartDunning after a failed charge failed — for a wall-clock invoice the dunning backfill sweep starts the run on a later scheduler tick",
 			"invoice_id", inv.ID, "customer_id", inv.CustomerID, "error", derr)
 	}
@@ -1675,17 +1675,26 @@ func (s *Stripe) processEvent(ctx context.Context, tenantID string, event domain
 // failure is clock.ErrUndecided, which isTransientWebhookError delivers
 // again.
 func (s *Stripe) decideFor(ctx context.Context, pin clock.Pin) (context.Context, error) {
-	if s.resolver == nil {
-		return ctx, nil // only narrow unit tests build the adapter without one; NewServer always wires the engine
+	return decideTime(ctx, s.resolver, pin)
+}
+
+// decideTime is the package's one decision: with no resolver, nothing (only
+// narrow unit tests build the adapter or the reconciler without one;
+// NewServer always wires the engine); with no mode on ctx, a fault, refused
+// as clock.ErrUndecided; in live mode, nothing; else the record's clock, or
+// real time for a record on no clock.
+func decideTime(ctx context.Context, resolver clock.Resolver, pin clock.Pin) (context.Context, error) {
+	if resolver == nil {
+		return ctx, nil
 	}
 	live, err := postgres.Livemode(ctx)
 	if err != nil {
-		return ctx, fmt.Errorf("%w: the event's context has no mode", clock.ErrUndecided)
+		return ctx, fmt.Errorf("%w: the context has no mode", clock.ErrUndecided)
 	}
 	if live {
 		return ctx, nil
 	}
-	return clock.Decide(ctx, s.resolver, pin)
+	return clock.Decide(ctx, resolver, pin)
 }
 
 // decideForCustomer is decideFor for an event that names a customer it has

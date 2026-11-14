@@ -236,14 +236,12 @@ func (r *Reconciler) sweep(ctx context.Context, label string, list func(context.
 	)
 	for _, inv := range invoices {
 		rowCtx, gone, err := r.decideRow(ctx, inv.TenantID, inv.ID)
-		if gone {
-			continue
-		}
-		if err != nil {
-			// Stamped like a failed check, so the queue rotates and the row
-			// is tried again on a later tick.
+		if gone || err != nil {
+			// Stamped like a failed check, so the list moves on past it.
 			r.recordSync(ctx, inv, inv.ProviderPaymentStatus)
-			errs = append(errs, fmt.Errorf("invoice %s: %w", inv.ID, err))
+			if err != nil {
+				errs = append(errs, fmt.Errorf("invoice %s: checked again on the next run; no payment is lost: %w", inv.ID, err))
+			}
 			continue
 		}
 		var changed bool
@@ -264,34 +262,20 @@ func (r *Reconciler) sweep(ctx context.Context, label string, list func(context.
 }
 
 // decideRow decides a row's time from its invoice, right after the sweep
-// listed it: the invoice's clock, or real time for one on no clock. The
-// settle keeps that decision (BindEffectiveNow keeps a same-clock one). In
-// live mode it does nothing: no live record is on a test clock. gone is true
-// when the invoice is not found: it was deleted, with its clock, between the
-// list and the read, and there is nothing to settle. Any other failure is
-// clock.ErrUndecided, and the row waits for a later tick. A sweep with no
-// mode on its ctx is a fault (Run reads one first), so it is refused.
+// listed it (decideTime), and the settle keeps that decision
+// (BindEffectiveNow keeps a same-clock one). gone is true on a not-found:
+// the invoice, or, in a race with its clock's deletion, its clock; there is
+// nothing to settle, and the caller stamps the row so the list moves on.
+// Any other failure is clock.ErrUndecided: the row is checked again on the
+// next run.
 func (r *Reconciler) decideRow(ctx context.Context, tenantID, invoiceID string) (context.Context, bool, error) {
-	if r.resolver == nil {
-		return ctx, false, nil // only narrow unit tests build the reconciler without one; NewServer always wires the engine
-	}
-	live, err := postgres.Livemode(ctx)
-	if err != nil {
-		return ctx, false, fmt.Errorf("%w: the sweep's context has no mode", clock.ErrUndecided)
-	}
-	if live {
-		return ctx, false, nil
-	}
-	decided, err := clock.Decide(ctx, r.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
+	decided, err := decideTime(ctx, r.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
 	if errors.Is(err, errs.ErrNotFound) {
-		slog.InfoContext(ctx, "reconcile: the invoice is gone (deleted with its test clock); nothing to settle",
+		slog.InfoContext(ctx, "reconcile: the invoice or its test clock is gone; nothing to settle",
 			"invoice_id", invoiceID, "tenant_id", tenantID)
 		return ctx, true, nil
 	}
-	if err != nil {
-		return ctx, false, err
-	}
-	return decided, false, nil
+	return decided, false, err
 }
 
 type terminalKind int
