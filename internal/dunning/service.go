@@ -590,46 +590,66 @@ func (s *Service) finalRetryFailedAt(ctx context.Context, tenantID string, run d
 //
 // One advance can take a run through several steps (retries, then the final
 // actions), so the job works in rounds. Each round walks every due run by
-// (next_action_at, id) and takes each one a step, except a run its last step
-// left as it found it: the same attempt count and next_action_at as when that
-// step began. The job ends when a round finds nothing due. It fails, so the
-// advance fails and Retry advance goes on from there:
-//   - after a round in which a step returned an error, among them a retry
-//     with no definite answer and a final action that failed;
-//   - when a round finds only runs their last step left as it found them;
-//   - when runs are still due after maxDunningCatchupRounds rounds.
+// (next_action_at, id) and takes a step on each run nothing holds, except a
+// run its last step left as it found it (the same attempt count and
+// next_action_at as when that step began). A run whose invoice has an
+// earlier payment that has not finished is not stepped, since the invoice
+// cannot be charged twice; nor is a run whose customer may be paying on the
+// hosted page, a payment the customer, not Hardcount, finishes.
 //
-// The last two, the unanswered retry and the failed final action are
-// domain.ErrLeftForNextRun, each with a sentence for the operator
-// (leftForNextPass).
+// The job ends, in this order:
+//  1. with the errors of a round in which a step returned one, among them a
+//     retry with no definite answer and a final action that failed;
+//  2. when a round has nothing to step: with one error for the runs their
+//     last step left as they found them, if any, and one for each run an
+//     earlier payment of its invoice holds, all seen in that round's walk;
+//     with no error when there are none;
+//  3. with an error when runs are still due after maxDunningCatchupRounds
+//     rounds.
+//
+// An error fails the advance, and Retry advance goes on from there. All but
+// a step's own errors are domain.ErrLeftForNextRun, each with a sentence for
+// the operator (leftForNextPass).
 func (s *Service) ProcessDueRunsForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time, limit int) (int, []error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	list := func(ctx context.Context, after walk.Key, limit int) ([]domain.InvoiceDunningRun, error) {
+	list := func(ctx context.Context, after walk.Key, limit int) ([]DueRun, error) {
 		return s.store.ListDueRunsForClock(ctx, tenantID, clockID, frozenTime, after, limit)
 	}
 	lastStep := map[string]runPlace{} // each run as its last step found it
 	total := 0
 	for round := 0; ; round++ {
 		var due []domain.InvoiceDunningRun
+		var heldByAttempt []domain.InvoiceDunningRun
 		unmoved := 0
 		for run, err := range walk.Walk(ctx, "ListDueRunsForClock", list, dueRunKey, limit) {
 			if err != nil {
 				return total, []error{fmt.Errorf("list due runs for clock %s: %w", clockID, err)}
 			}
-			if unchangedSinceLastStep(lastStep, run) {
+			switch {
+			case run.HeldBy == domain.ChargeHeldByAttempt:
+				heldByAttempt = append(heldByAttempt, run.InvoiceDunningRun)
+			case run.HeldBy != domain.ChargeClaimable:
+				// The customer may be paying on the hosted page.
+			case unchangedSinceLastStep(lastStep, run.InvoiceDunningRun):
 				unmoved++
-				continue
+			default:
+				due = append(due, run.InvoiceDunningRun)
 			}
-			due = append(due, run)
 		}
 		if len(due) == 0 {
+			var left []error
 			if unmoved > 0 {
-				return total, []error{&leftForNextPass{say: fmt.Sprintf(
-					"%d payment retries due in this advance did not move: each is as its last step found it. Retry advance tries them again.", unmoved)}}
+				left = append(left, &leftForNextPass{say: fmt.Sprintf(
+					"%d payment retries due in this advance did not move: each is as its last step found it. Retry advance tries them again.", unmoved)})
 			}
-			return total, nil
+			for _, run := range heldByAttempt {
+				left = append(left, &leftForNextPass{say: fmt.Sprintf(
+					"Invoice %s: a payment retry is waiting for an earlier payment of this invoice to finish: it cannot be charged twice. "+
+						"Hardcount checks it on its next billing run (hourly by default). Retry advance once it is done; to stop waiting, void or write off the invoice.", invoiceRef(run))})
+			}
+			return total, left
 		}
 		if round == maxDunningCatchupRounds {
 			return total, []error{&leftForNextPass{say: fmt.Sprintf(
@@ -666,7 +686,7 @@ func unchangedSinceLastStep(lastStep map[string]runPlace, run domain.InvoiceDunn
 
 // dueRunKey is a run's place in the due list, which ListDueRunsForClock
 // orders by (next_action_at, id). A due run always has a next_action_at.
-func dueRunKey(run domain.InvoiceDunningRun) walk.Key {
+func dueRunKey(run DueRun) walk.Key {
 	return walk.Key{At: *run.NextActionAt, ID: run.ID}
 }
 

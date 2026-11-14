@@ -9,6 +9,14 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/walk"
 )
 
+// DueRun is a due run on a test clock, and what holds its retry:
+// domain.ChargeClaimable when nothing does, else a charge of its invoice in
+// flight (domain.ChargeHeldByAttempt or domain.ChargePayingOnHostedPage).
+type DueRun struct {
+	domain.InvoiceDunningRun
+	HeldBy domain.ChargeClaimState
+}
+
 type Store interface {
 	// Policy (ADR-036 campaigns model — see methods at bottom of
 	// interface for the multi-policy-per-tenant resolution path).
@@ -100,8 +108,9 @@ type Store interface {
 	// ADR-029 Phase 5: clock-pinned dunning advances fire only on
 	// operator Advance, against the clock's frozen_time, never on the
 	// wall-clock cron tick. It returns up to limit due runs after the key,
-	// in (next_action_at, id) order, for walk.Walk.
-	ListDueRunsForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time, after walk.Key, limit int) ([]domain.InvoiceDunningRun, error)
+	// in (next_action_at, id) order, for walk.Walk, each with what holds
+	// its retry.
+	ListDueRunsForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time, after walk.Key, limit int) ([]DueRun, error)
 
 	// Events
 	CreateEvent(ctx context.Context, tenantID string, event domain.InvoiceDunningEvent) (domain.InvoiceDunningEvent, error)

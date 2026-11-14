@@ -24,7 +24,10 @@ type memStore struct {
 	defaultID string
 	runs      map[string]domain.InvoiceDunningRun
 	events    []domain.InvoiceDunningEvent
-	hookErrs  []error // errors returned by UpdateRunIfActive `then` hooks (non-vetoing)
+	// heldBy says what holds a run's retry, by run id; a run not in it is
+	// held by nothing.
+	heldBy   map[string]domain.ChargeClaimState
+	hookErrs []error // errors returned by UpdateRunIfActive `then` hooks (non-vetoing)
 	// started records the dunning.started payloads StartRun enqueued (the
 	// PostgresStore's in-tx outbox row).
 	started []map[string]any
@@ -366,11 +369,11 @@ func (m *memStore) ClaimExhaustion(_ context.Context, _, runID string, expectedA
 
 // ListDueRunsForClock — mirrors ListDueRuns but compares against the
 // caller-supplied frozenTime instead of the cron's wall-clock "now," and
-// pages as the store does: (next_action_at, id) order, after the key.
-// Narrow-test version: ignores the clockID filter since memStore has
-// no clock binding (callers pass single-clock fixtures). Postgres
-// integration tests exercise the real SQL.
-func (m *memStore) ListDueRunsForClock(_ context.Context, _, _ string, frozenTime time.Time, after walk.Key, limit int) ([]domain.InvoiceDunningRun, error) {
+// pages as the store does: (next_action_at, id) order, after the key, with
+// what holds each run from heldBy. Narrow-test version: ignores the
+// clockID filter since memStore has no clock binding (callers pass
+// single-clock fixtures). Postgres integration tests exercise the real SQL.
+func (m *memStore) ListDueRunsForClock(_ context.Context, _, _ string, frozenTime time.Time, after walk.Key, limit int) ([]DueRun, error) {
 	due, _ := m.ListDueRuns(context.Background(), "", frozenTime, len(m.runs))
 	slices.SortFunc(due, func(a, b domain.InvoiceDunningRun) int {
 		if c := a.NextActionAt.Compare(*b.NextActionAt); c != 0 {
@@ -378,12 +381,12 @@ func (m *memStore) ListDueRunsForClock(_ context.Context, _, _ string, frozenTim
 		}
 		return strings.Compare(a.ID, b.ID)
 	})
-	var page []domain.InvoiceDunningRun
+	var page []DueRun
 	for _, r := range due {
 		if c := r.NextActionAt.Compare(after.At); c < 0 || (c == 0 && r.ID <= after.ID) {
 			continue
 		}
-		page = append(page, r)
+		page = append(page, DueRun{InvoiceDunningRun: r, HeldBy: m.heldBy[r.ID]})
 		if len(page) == limit {
 			break
 		}

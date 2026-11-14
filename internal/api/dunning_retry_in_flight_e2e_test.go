@@ -214,6 +214,32 @@ func (r *inFlightRig) advance(days int) {
 	testclocktest.Drain(r.t, r.srv.TestClockSvc)
 }
 
+// advanceHeld advances the clock to day days and expects the advance to
+// fail, because a payment retry due in it waits for an earlier payment of its invoice
+// to finish; the clock reads internal_failure with that reason.
+func (r *inFlightRig) advanceHeld(days int) {
+	r.t.Helper()
+	r.call("POST", "/v1/test-clocks/"+r.clockID+"/advance", map[string]any{
+		"frozen_time": r.day(days).Format(time.RFC3339),
+	}).want(r.t, 200, fmt.Sprintf("advance clock to day %d", days))
+	testclocktest.Drain(r.t, r.srv.TestClockSvc)
+	clk := r.call("GET", "/v1/test-clocks/"+r.clockID, nil).want(r.t, 200, "read clock").body
+	if status, reason := flowStr(clk, "status"), flowStr(clk, "last_failure_reason"); status != "internal_failure" ||
+		!strings.Contains(reason, "a payment retry is waiting for an earlier payment of this invoice to finish") {
+		r.t.Fatalf("clock after the advance to day %d: %s, %q; want internal_failure, the retry waiting for an earlier attempt", days, status, reason)
+	}
+}
+
+// retryAdvance retries the clock's failed advance and expects it to finish.
+func (r *inFlightRig) retryAdvance() {
+	r.t.Helper()
+	r.call("POST", "/v1/test-clocks/"+r.clockID+"/retry-advance", nil).want(r.t, 200, "retry advance")
+	testclocktest.Drain(r.t, r.srv.TestClockSvc)
+	if status := flowStr(r.call("GET", "/v1/test-clocks/"+r.clockID, nil).want(r.t, 200, "read clock").body, "status"); status != "ready" {
+		r.t.Fatalf("clock after Retry advance: %s, want ready", status)
+	}
+}
+
 // webhook signs and posts one Stripe event to the tenant's endpoint.
 func (r *inFlightRig) webhook(evt map[string]any) flowResp {
 	r.t.Helper()
@@ -560,39 +586,38 @@ func TestE2E_DunningRetryProcessing_FailsNeedingConfirmation(t *testing.T) {
 }
 
 // TestE2E_DunningFinalRetryProcessing_HeldThenEscalatedAtFailure: the last
-// retry comes back processing. No final action and no escalation while it
-// is processing; its failure sends no warning (the escalation is the last
-// attempt's email), and the next tick escalates, dated at the failure rather
-// than at the retry days before it.
+// retry comes back processing. Its final action falls due in the same
+// advance and waits: no final action and no escalation while the payment is
+// processing, and the advance fails, saying the retry waits for an earlier
+// charge attempt, so the clock cannot move past it until Stripe reports the
+// payment. Its failure sends no warning (the escalation is the last
+// attempt's email), and Retry advance escalates, dated at the failure rather
+// than at the retry before it.
 func TestE2E_DunningFinalRetryProcessing_HeldThenEscalatedAtFailure(t *testing.T) {
 	r := newInFlightRig(t, "Final Retry In Flight", []int{1}, map[string][]string{"pm_slow_d": {"processing"}})
 	inv := r.newInvoice(r.newCustomer("d", "pm_slow_d"))
-	r.advance(2)
+	r.advanceHeld(2)
 	pi := r.stripe.piOf("pm_slow_d")
 	run := r.run(inv)
 	if flowStr(run, "state") != "active" || flowInt(run, "attempt_count") != 1 {
-		t.Fatalf("run while the last retry is processing: %v / %v, want active / 1", run["state"], run["attempt_count"])
-	}
-	r.advance(4)
-	if run := r.run(inv); flowStr(run, "state") != "active" {
-		t.Fatalf("run two days into the processing payment: %v, want active (the final action waits)", run["state"])
+		t.Fatalf("run while the last retry is processing: %v / %v, want active / 1 (the final action waits)", run["state"], run["attempt_count"])
 	}
 	if n := r.emailsOfType(inv, "dunning_escalation"); n != 0 {
 		t.Fatalf("escalation emails while the last payment is processing: %d, want 0", n)
 	}
 
-	// The payment fails on day 4.
+	// The payment fails while the clock stands at day 2.
 	r.webhook(r.piEvent("payment_intent.payment_failed", pi, inv, "requires_payment_method",
 		cardError("insufficient_funds", "Your card has insufficient funds.", "pm_slow_d"))).want(t, 200, "payment_intent.payment_failed")
 	if w := r.warnings(inv); len(w) != 0 {
 		t.Errorf("warning emails after the last retry failed: %+v, want none (the escalation follows)", w)
 	}
-	r.advance(5)
+	r.retryAdvance()
 	run = r.run(inv)
 	if flowStr(run, "state") != "escalated" {
-		t.Fatalf("run after the next tick: %v, want escalated", run["state"])
+		t.Fatalf("run after Retry advance: %v, want escalated", run["state"])
 	}
-	if got, want := r.runTime(run, "resolved_at"), r.day(4); !got.Equal(want) {
+	if got, want := r.runTime(run, "resolved_at"), r.day(2); !got.Equal(want) {
 		t.Errorf("escalation dated %v, want the failure %v (not the retry on %v)", got, want, r.day(1))
 	}
 	if n := r.emailsOfType(inv, "dunning_escalation"); n != 1 {
