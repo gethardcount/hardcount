@@ -98,6 +98,15 @@ card decline (the invoice goes to dunning), an invoice the customer may be
 paying on the hosted page, one whose collection is paused, and one settled
 meanwhile. Collection waits for the page or the pause, as outside a clock.
 
+Payment retries work the same way. A retry that gets no definite answer
+from Stripe is not counted as an attempt, and on a clock it stops the move
+at `internal_failure`; Retry advance tries it again. One move takes each
+dunning run through every step due in it (its retries, then the final
+actions), up to 50 steps a run. A final action that fails, a run still due
+after 50 steps, or one that stops moving also stops the move. A retry whose
+invoice an earlier charge attempt still holds waits for that attempt to
+finish; the move does not stop for it.
+
 A clock has no invoice grace period: moving past a period's end makes its
 invoice at once.
 

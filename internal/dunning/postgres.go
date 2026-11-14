@@ -6,9 +6,11 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/gethardcount/hardcount/internal/platform/leader"
 	"log/slog"
 	"time"
+
+	"github.com/gethardcount/hardcount/internal/platform/leader"
+	"github.com/gethardcount/hardcount/internal/platform/walk"
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
@@ -1288,7 +1290,9 @@ func (s *PostgresStore) ListDueRuns(ctx context.Context, tenantID string, dueBef
 // transaction holds is reached and its own conditional writes decide; and
 // a list that locked the run would take it before its invoice, the reverse
 // of the invoice-then-run order every settle uses.
-func (s *PostgresStore) ListDueRunsForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time, limit int) ([]domain.InvoiceDunningRun, error) {
+//
+// It pages by (next_action_at, id), after the key, for walk.Walk.
+func (s *PostgresStore) ListDueRunsForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time, after walk.Key, limit int) ([]domain.InvoiceDunningRun, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return nil, err
@@ -1332,8 +1336,9 @@ func (s *PostgresStore) ListDueRunsForClock(ctx context.Context, tenantID, clock
 			    OR `+domain.HostedCheckoutLiveSQL("i.id")+`)
 			  AND i.status NOT IN ('voided', 'uncollectible')
 			)
-		ORDER BY r.next_action_at ASC LIMIT $4
-	`, tenantID, clockID, frozenTime, limit)
+			AND (r.next_action_at, r.id) > ($5, $6)
+		ORDER BY r.next_action_at ASC, r.id ASC LIMIT $4
+	`, tenantID, clockID, frozenTime, limit, after.At, after.ID)
 	if err != nil {
 		return nil, err
 	}
