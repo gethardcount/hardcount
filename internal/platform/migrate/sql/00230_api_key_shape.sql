@@ -9,8 +9,12 @@
 --   - the name is not blank;
 --   - no two keys share a prefix, the column a request's key is looked up by.
 -- key_type and livemode lose their defaults: every insert names the type,
--- and the set_livemode trigger sets the mode. The CHECKs hold for new rows
--- at once; 00231 checks the rows already there.
+-- and the set_livemode trigger sets the mode.
+--
+-- The CHECKs are added NOT VALID, which checks new rows at once without
+-- scanning the table. 00231 validates the rows already there, in a file of
+-- its own: a VALIDATE here would hold this file's lock on api_keys for the
+-- whole scan.
 --
 -- Two keys that share a prefix stop the upgrade here, before anything
 -- changes: Hardcount draws 48 random bits for each prefix, so such rows were
@@ -18,7 +22,6 @@
 -- delete. api_keys forces row-level security, and the user that runs
 -- migrations may be subject to it, so the file turns the bypass on for its
 -- own transaction: the count must see every account's keys.
--- hardcount:blocking-ddl-ok: api_keys holds a few rows per account, so building its unique index takes no time
 SET LOCAL app.bypass_rls = 'on';
 
 -- +goose StatementBegin
@@ -38,8 +41,12 @@ $$;
 -- +goose StatementEnd
 
 DROP INDEX idx_api_keys_prefix;
+-- hardcount:blocking-ddl-ok: api_keys holds a few rows per account, so building its unique index takes no time
 CREATE UNIQUE INDEX api_keys_key_prefix_key ON api_keys (key_prefix);
 
+-- A valid prefix is hc_, the type (secret or ingest, equal to key_type), _,
+-- the mode (live exactly when livemode, else test), _, then 12 lowercase hex
+-- characters: hc_secret_live_0123456789ab.
 ALTER TABLE api_keys ADD CONSTRAINT api_keys_prefix_shape_check CHECK (
     key_prefix ~ '^hc_(secret|ingest)_(live|test)_[0-9a-f]{12}$'
     AND split_part(key_prefix, '_', 2) = key_type
