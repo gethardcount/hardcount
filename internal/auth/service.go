@@ -272,8 +272,8 @@ const MaxRotationGraceSeconds = 7 * 24 * 60 * 60
 
 // RotateKeyInput sets how a rotation treats the old key. ExpiresInSeconds=0
 // revokes the old key at once. A positive value keeps it valid for that many
-// seconds past now, which gives deployed clients time to swap credentials
-// without a hard cutover.
+// seconds past now, or until its own expires_at if that comes first, which
+// gives deployed clients time to swap credentials without a hard cutover.
 type RotateKeyInput struct {
 	ExpiresInSeconds int64 `json:"expires_in_seconds,omitempty"`
 }
@@ -290,9 +290,9 @@ type RotateKeyResult struct {
 
 // RotateKey issues a replacement for key `id`, keeping its name, type,
 // livemode and any configured expires_at. The old key is revoked at once
-// (grace 0), or scheduled to expire after input.ExpiresInSeconds seconds. A
-// caller picks a non-zero grace to deploy with no downtime, at the cost of a
-// slightly wider blast radius.
+// (grace 0), or set to expire after input.ExpiresInSeconds seconds; a grace
+// never moves an earlier expires_at later. A revoked or expired key cannot be
+// rotated: create a new key instead.
 func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input RotateKeyInput) (RotateKeyResult, error) {
 	if input.ExpiresInSeconds < 0 {
 		return RotateKeyResult{}, errs.Invalid("expires_in_seconds", "must be >= 0")
@@ -308,6 +308,11 @@ func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input Rota
 	}
 	if old.RevokedAt != nil {
 		return RotateKeyResult{}, errs.InvalidState("cannot rotate a revoked key")
+	}
+	// CreateKey's rule for a new key's expires_at: at or before now is
+	// expired.
+	if old.ExpiresAt != nil && !time.Now().UTC().Before(*old.ExpiresAt) {
+		return RotateKeyResult{}, errs.InvalidState("cannot rotate an expired key")
 	}
 
 	// Mint the replacement through the same CreateKey path, so livemode
