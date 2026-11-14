@@ -1,0 +1,339 @@
+package api
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
+	"runtime"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/go-chi/chi/v5"
+
+	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+)
+
+// spyResolver answers every record on clock clk_1 at doorFrozen, or err, and
+// records what it was asked.
+type spyResolver struct {
+	asked []string
+	err   error
+}
+
+var doorFrozen = time.Date(2025, 3, 1, 12, 0, 0, 0, time.UTC)
+
+func (s *spyResolver) answer(kind, id string) (clock.Sim, error) {
+	s.asked = append(s.asked, kind+":"+id)
+	if s.err != nil {
+		return clock.Sim{}, s.err
+	}
+	return clock.Sim{At: doorFrozen, TestClockID: "clk_1"}, nil
+}
+func (s *spyResolver) SimForCustomer(_ context.Context, _, id string) (clock.Sim, error) {
+	return s.answer("customer", id)
+}
+func (s *spyResolver) SimForSubscription(_ context.Context, _, id string) (clock.Sim, error) {
+	return s.answer("subscription", id)
+}
+func (s *spyResolver) SimForInvoice(_ context.Context, _, id string) (clock.Sim, error) {
+	return s.answer("invoice", id)
+}
+
+// doorRig is the door on the built router, with fake record lookups.
+func doorRig(t *testing.T, res *spyResolver) *clockDoor {
+	t.Helper()
+	return &clockDoor{
+		root:              newTestServer().router,
+		resolver:          res,
+		creditNoteInvoice: func(context.Context, string, string) (string, error) { return "inv_of_note", nil },
+		dunningRunInvoice: func(context.Context, string, string) (string, error) { return "inv_of_run", nil },
+	}
+}
+
+// seen is what a request through the door came to: the decision the handler
+// saw on its ctx (decided false when it saw none), whether the handler was
+// reached, and the answer.
+type seen struct {
+	decision clock.Sim
+	decided  bool
+	reached  bool
+	code     int
+	body     string
+	header   http.Header
+}
+
+// through runs a request through the door to a handler that records what it
+// saw.
+func through(d *clockDoor, ctx context.Context, method, path string) seen {
+	var got seen
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got.reached = true
+		got.decision, got.decided = clock.Decision(r.Context())
+		w.WriteHeader(http.StatusNoContent)
+	})
+	rec := httptest.NewRecorder()
+	d.Middleware(next).ServeHTTP(rec, httptest.NewRequest(method, path, nil).WithContext(ctx))
+	got.code, got.body, got.header = rec.Code, rec.Body.String(), rec.Header()
+	return got
+}
+
+// In test mode the door decides each request's time from the route's entry:
+// the clock of the record the path names (directly, or through a credit
+// note's or a dunning run's invoice), else real time. In live mode it does
+// nothing: no decision, no lookup.
+func TestClockDoor_DecidesFromTheRouteTable(t *testing.T) {
+	test := auth.WithTenantID(postgres.WithLivemode(context.Background(), false), "t1")
+	onClock := clock.Sim{At: doorFrozen, TestClockID: "clk_1"}
+	for _, c := range []struct {
+		name, method, path string
+		want               clock.Sim // the zero Sim is real time
+		asked              string
+	}{
+		{"a customer's route", "GET", "/v1/customers/cus_1", onClock, "customer:cus_1"},
+		{"a customer's route by customer_id", "GET", "/v1/credits/balance/cus_2/live", onClock, "customer:cus_2"},
+		{"a subscription's route", "POST", "/v1/subscriptions/sub_1/cancel", onClock, "subscription:sub_1"},
+		{"an invoice's route", "GET", "/v1/invoices/inv_1/pdf", onClock, "invoice:inv_1"},
+		{"a credit note's route, by its invoice", "GET", "/v1/credit-notes/cn_1", onClock, "invoice:inv_of_note"},
+		{"a dunning run's route, by its invoice", "POST", "/v1/dunning/runs/run_1/resolve", onClock, "invoice:inv_of_run"},
+		{"a route that names no record", "GET", "/v1/whoami", clock.Sim{}, ""},
+		{"a route its function decides", "POST", "/v1/customers", clock.Sim{}, ""},
+		{"a route the router does not have", "GET", "/v1/nothing-here", clock.Sim{}, ""},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			res := &spyResolver{}
+			got := through(doorRig(t, res), test, c.method, c.path)
+			if !got.reached || !got.decided || got.decision != c.want {
+				t.Errorf("reached %v, decided %v, %+v; want decided %+v", got.reached, got.decided, got.decision, c.want)
+			}
+			if asked := strings.Join(res.asked, ","); asked != c.asked {
+				t.Errorf("asked %q, want %q", asked, c.asked)
+			}
+		})
+	}
+
+	t.Run("live mode: nothing decided, nothing read", func(t *testing.T) {
+		res := &spyResolver{}
+		live := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1")
+		got := through(doorRig(t, res), live, "GET", "/v1/customers/cus_1")
+		if !got.reached || got.decided || len(res.asked) != 0 {
+			t.Errorf("reached %v, decided %v, asked %v; want reached, nothing decided or asked", got.reached, got.decided, res.asked)
+		}
+	})
+
+	t.Run("no mode yet (a public page): real time", func(t *testing.T) {
+		res := &spyResolver{}
+		got := through(doorRig(t, res), context.Background(), "GET", "/v1/public/invoices/tok_1")
+		if !got.reached || !got.decided || got.decision != (clock.Sim{}) || len(res.asked) != 0 {
+			t.Errorf("reached %v, decided %v, %+v, asked %v; want real time", got.reached, got.decided, got.decision, res.asked)
+		}
+	})
+
+	// chi routes on the escaped path when there is one: a parameter holding
+	// an escaped slash finds the same route, and the same parameter, as the
+	// handler gets. Matched on the unescaped path, it would find no route and
+	// decide real time with no lookup.
+	t.Run("an escaped slash in a path parameter: the route chi routes on", func(t *testing.T) {
+		res := &spyResolver{}
+		got := through(doorRig(t, res), test, "GET", "/v1/customers/cus%2F1")
+		if !got.reached || got.decision.TestClockID != "clk_1" || strings.Join(res.asked, ",") != "customer:cus%2F1" {
+			t.Errorf("decided %+v, asked %v; want the clock of customer cus%%2F1", got.decision, res.asked)
+		}
+	})
+
+	// An empty id, or one Postgres cannot read, would fail its lookup with an
+	// error that is not a not-found: a 503 a client retries for ever. The
+	// door decides real time without a lookup, and the handler answers it as
+	// it would without the door.
+	for _, c := range []struct{ name, method, path string }{
+		{"an empty id in the middle of the path", "POST", "/v1/subscriptions//cancel"},
+		{"an id with a NUL", "GET", "/v1/customers/cus%001"},
+		{"an id that is not UTF-8", "GET", "/v1/invoices/%FF/pdf"},
+	} {
+		t.Run(c.name+": the handler answers it, at real time, with no lookup", func(t *testing.T) {
+			res := &spyResolver{err: errors.New("invalid byte sequence for encoding UTF8")}
+			got := through(doorRig(t, res), test, c.method, c.path)
+			if !got.reached || !got.decided || got.decision != (clock.Sim{}) || len(res.asked) != 0 {
+				t.Errorf("reached %v, decided %v, %+v, asked %v; want the handler reached at real time, nothing asked", got.reached, got.decided, got.decision, res.asked)
+			}
+		})
+	}
+
+	for _, c := range []struct{ name, method, path string }{
+		{"a customer", "GET", "/v1/customers/cus_gone"},
+		{"a credit note", "GET", "/v1/credit-notes/cn_gone"},
+		{"a dunning run", "POST", "/v1/dunning/runs/run_gone/resolve"},
+	} {
+		t.Run(c.name+" that does not exist: the handler answers it, at real time", func(t *testing.T) {
+			d := doorRig(t, &spyResolver{err: fmt.Errorf("read: %w", errs.ErrNotFound)})
+			gone := func(context.Context, string, string) (string, error) {
+				return "", fmt.Errorf("read: %w", errs.ErrNotFound)
+			}
+			d.creditNoteInvoice, d.dunningRunInvoice = gone, gone
+			got := through(d, test, c.method, c.path)
+			if !got.reached || !got.decided || got.decision != (clock.Sim{}) {
+				t.Errorf("reached %v, decided %v, %+v; want the handler reached at real time", got.reached, got.decided, got.decision)
+			}
+		})
+	}
+
+	// A clock that cannot be read is answered 503, retryable and never
+	// stored by the idempotency layer, naming the record; the handler does
+	// not run.
+	for _, c := range []struct{ name, method, path, record string }{
+		{"a customer", "GET", "/v1/customers/cus_1", "customer cus_1"},
+		{"a credit note", "GET", "/v1/credit-notes/cn_1", "credit note cn_1"},
+		{"a dunning run", "POST", "/v1/dunning/runs/run_1/resolve", "dunning run run_1"},
+	} {
+		t.Run(c.name+" whose clock cannot be read: 503, not served", func(t *testing.T) {
+			got := through(doorRig(t, &spyResolver{err: errors.New("db down")}), test, c.method, c.path)
+			if got.reached || got.code != http.StatusServiceUnavailable || got.header.Get("Retry-After") == "" {
+				t.Fatalf("reached %v, code %d, Retry-After %q; want not reached, 503 with Retry-After", got.reached, got.code, got.header.Get("Retry-After"))
+			}
+			want := "The test clock of " + c.record + " could not be read. Nothing was done; send the request again."
+			if !strings.Contains(got.body, want) || !strings.Contains(got.body, "test_clock_unavailable") || strings.Contains(got.body, "db down") {
+				t.Errorf("body %s; want %q, code test_clock_unavailable, and not the cause", got.body, want)
+			}
+		})
+	}
+}
+
+// Every route passes through the door, so no handler runs at a time nobody
+// decided.
+func TestClockDoor_EveryRoutePassesThroughIt(t *testing.T) {
+	srv := newTestServer()
+	var missing []string
+	checked := 0
+	if err := chi.Walk(srv.router, func(method, route string, _ http.Handler, mws ...func(http.Handler) http.Handler) error {
+		checked++
+		if chainIndex(mws, doorMW) < 0 {
+			missing = append(missing, method+" "+canonicalRoute(route))
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	if len(missing) > 0 {
+		t.Errorf("%d of %d routes do not pass through the clock door:\n  %s", len(missing), checked, strings.Join(missing, "\n  "))
+	}
+}
+
+// mwName is a middleware's function name, for finding it in a route's chain.
+func mwName(m func(http.Handler) http.Handler) string {
+	if fn := runtime.FuncForPC(reflect.ValueOf(m).Pointer()); fn != nil {
+		return fn.Name()
+	}
+	return ""
+}
+
+// chainIndex is the position in mws of the first middleware whose name
+// contains name, or -1.
+func chainIndex(mws []func(http.Handler) http.Handler, name string) int {
+	for i, m := range mws {
+		if strings.Contains(mwName(m), name) {
+			return i
+		}
+	}
+	return -1
+}
+
+const (
+	authMW        = "session.MiddlewareOrAPIKey."
+	timeoutMW     = "middleware.Timeout."
+	idempotencyMW = "middleware.Idempotency."
+	doorMW        = "clockDoor).Middleware"
+)
+
+// The door is the last of its group's middleware: after authentication, so
+// it reads the named record as the caller's tenant and mode; after the
+// timeout, so its lookups are bounded; and after Idempotency, so a replay
+// costs no lookup and the door's 503 is not stored. On the /v1 group all
+// four are there, in that order.
+func TestClockDoor_ComesAfterAuthenticationIdempotencyAndTheTimeout(t *testing.T) {
+	var wrong []string
+	v1 := false
+	if err := chi.Walk(newTestServer().router, func(method, route string, _ http.Handler, mws ...func(http.Handler) http.Handler) error {
+		door := chainIndex(mws, doorMW)
+		for _, before := range []string{authMW, timeoutMW, idempotencyMW} {
+			if i := chainIndex(mws, before); i >= 0 && i > door {
+				wrong = append(wrong, method+" "+route+": the door comes before "+before)
+			}
+		}
+		if method == "POST" && canonicalRoute(route) == "/v1/subscriptions/{id}/cancel" {
+			v1 = true
+			a, i, to := chainIndex(mws, authMW), chainIndex(mws, idempotencyMW), chainIndex(mws, timeoutMW)
+			if a < 0 || i < 0 || to < 0 || door < 0 || a >= i || i >= to || to >= door {
+				wrong = append(wrong, fmt.Sprintf("%s %s: authentication %d, Idempotency %d, timeout %d, door %d; want them in that order", method, route, a, i, to, door))
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	if !v1 {
+		t.Fatal("POST /v1/subscriptions/{id}/cancel not found: the /v1 group was not checked")
+	}
+	if len(wrong) > 0 {
+		t.Errorf("the door is out of place:\n  %s", strings.Join(wrong, "\n  "))
+	}
+}
+
+// Every route whose entry reads a record is authenticated, so the door reads
+// it as the caller's tenant and mode. A route with no authentication and an
+// entry that reads a record would read with no tenant and no mode.
+func TestClockDoor_EveryRouteThatReadsARecordIsAuthenticated(t *testing.T) {
+	var open []string
+	reading := 0
+	if err := chi.Walk(newTestServer().router, func(method, route string, _ http.Handler, mws ...func(http.Handler) http.Handler) error {
+		switch clockRoutes[routeKey{Method: method, Pattern: canonicalRoute(route)}].Source {
+		case clockOfCustomer, clockOfSubscription, clockOfInvoice, clockOfCreditNote, clockOfDunningRun:
+			reading++
+			if chainIndex(mws, authMW) < 0 {
+				open = append(open, method+" "+canonicalRoute(route))
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	if reading == 0 {
+		t.Fatal("no route reads a record: the walk found none of the table's entries")
+	}
+	if len(open) > 0 {
+		t.Errorf("%d routes read a record with no authentication:\n  %s", len(open), strings.Join(open, "\n  "))
+	}
+}
+
+// Every entry that reads a record names a parameter its route's pattern has.
+// One that did not would read an empty id, which the door decides as real
+// time: a record on a clock would silently run at real time.
+func TestClockDoor_EveryRecordEntryNamesAParameterOfItsRoute(t *testing.T) {
+	var wrong []string
+	reading := 0
+	if err := chi.Walk(newTestServer().router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		pattern := canonicalRoute(route)
+		entry := clockRoutes[routeKey{Method: method, Pattern: pattern}]
+		switch entry.Source {
+		case clockOfCustomer, clockOfSubscription, clockOfInvoice, clockOfCreditNote, clockOfDunningRun:
+			reading++
+			if !strings.Contains(pattern, "{"+entry.Param+"}") {
+				wrong = append(wrong, method+" "+pattern+": no {"+entry.Param+"}")
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	if reading == 0 {
+		t.Fatal("no route reads a record: the walk found none of the table's entries")
+	}
+	if len(wrong) > 0 {
+		t.Errorf("%d entries name a parameter their route does not have:\n  %s", len(wrong), strings.Join(wrong, "\n  "))
+	}
+}

@@ -50,7 +50,7 @@ func newStreamRig(t *testing.T, db, authDB *postgres.DB) *streamRig {
 	noRateLimit := func(next http.Handler) http.Handler { return next }
 	r.Route("/v1/webhook_events/stream", eventStreamRoute(webhook.NewHandler(srv.WebhookOutSvc),
 		session.NewService(session.NewPostgresStore(authDB)), auth.NewService(authDB, audit.NewLogger(authDB)),
-		noRateLimit, testStreamInterval))
+		noRateLimit, noRateLimit, testStreamInterval))
 	stream := httptest.NewServer(r)
 	t.Cleanup(stream.Close)
 

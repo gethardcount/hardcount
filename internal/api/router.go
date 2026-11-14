@@ -1544,10 +1544,23 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	paymentMethodsH.SetCooldown(setupLinkCooldown)
 
 	r := chi.NewRouter()
+	// The clock door (clockDoor); its root is the built router, set once every
+	// route is registered, below.
+	door := &clockDoor{
+		resolver: engine,
+		creditNoteInvoice: func(ctx context.Context, tenantID, id string) (string, error) {
+			cn, err := creditNoteStore.Get(ctx, tenantID, id)
+			return cn.InvoiceID, err
+		},
+		dunningRunInvoice: func(ctx context.Context, tenantID, id string) (string, error) {
+			run, err := dunningStore.GetRun(ctx, tenantID, id)
+			return run.InvoiceID, err
+		},
+	}
+	var allow *allowIndex // built once every route is registered, below
 	// An unknown path and a method the path does not take answer the JSON
 	// error envelope, not chi's plain text. chi hands both handlers down to
 	// every router mounted below. The 405 lists the path's methods in Allow.
-	var allow *allowIndex // built once every route is registered, below
 	r.NotFound(respond.RouteNotFound)
 	r.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
 		respond.MethodNotAllowed(w, req, allow.methods(req.URL))
@@ -1594,10 +1607,24 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// auth/login) need no 30s cap, because their handlers finish in
 	// milliseconds or fail fast on their own.
 
+	// The clock door (clockDoor) decides each request's time before its
+	// handler runs. It is the last middleware of every group below, after
+	// what that group has: on /v1, the CSRF guard, authentication, the rate
+	// limit, Idempotency and the timeout; on /v1/exports, authentication, the
+	// rate limit and the timeout; on the event stream, authentication and the
+	// rate limit; on bootstrap, /v1/auth and the public pages, their limiter
+	// and the timeout; on the Stripe webhooks, the timeout; on /health and
+	// /metrics, nothing. So it reads a named record as the caller's tenant and
+	// mode, a refused request pays for no lookup, a replay is answered from
+	// the stored response with no lookup (and the door's 503 is not stored),
+	// and its lookups are bounded. A route's own permission check runs after
+	// it, so a caller without the permission can meet the door's 503 before
+	// its 403.
+
 	// Public
-	r.Get("/health", handleHealth)
-	r.Get("/health/ready", handleDeepHealth(db))
-	r.Handle("/metrics", mw.MetricsAuth(o.appEnv, mw.MetricsHandler()))
+	r.With(door.Middleware).Get("/health", handleHealth)
+	r.With(door.Middleware).Get("/health/ready", handleDeepHealth(db))
+	r.With(door.Middleware).Handle("/metrics", mw.MetricsAuth(o.appEnv, mw.MetricsHandler()))
 
 	// Bootstrap is the one-time setup: no auth, and it works only while no
 	// tenant exists. The deps let tenant.RunBootstrap create the owner user
@@ -1624,6 +1651,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	r.Group(func(r chi.Router) {
 		r.Use(bootstrapLimiter.Middleware())
 		r.Use(mw.Timeout(30 * time.Second))
+		r.Use(door.Middleware)
 		r.Mount("/v1/bootstrap", bootstrapH.Routes())
 	})
 
@@ -1639,6 +1667,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		r.Use(mw.CSRFGuard(allowedOrigins))
 		r.Use(authLimiter.Middleware())
 		r.Use(mw.Timeout(30 * time.Second))
+		r.Use(door.Middleware)
 		// The invite accept flow is public like login and reset, because
 		// the token is the credential. It shares their limiter, so guessing
 		// invite tokens is throttled like credential stuffing. Explicit
@@ -1650,6 +1679,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// Stripe webhooks need no API key, because their signature verifies them.
 	r.Group(func(r chi.Router) {
 		r.Use(mw.Timeout(30 * time.Second))
+		r.Use(door.Middleware)
 		r.Mount("/v1/webhooks", webhookH.Routes())
 		// Postmark email webhooks need no API key either. Basic auth gates
 		// them, because Postmark signs nothing. The static route wins over the
@@ -1665,6 +1695,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		r.Group(func(r chi.Router) {
 			r.Use(hostedInvoiceRL.Middleware())
 			r.Use(mw.Timeout(30 * time.Second))
+			r.Use(door.Middleware)
 			r.Mount("/v1/public/payment-updates", publicPaymentH.Routes())
 		})
 	}
@@ -1677,6 +1708,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	r.Route("/v1/public/invoices", func(r chi.Router) {
 		r.Use(hostedInvoiceRL.Middleware())
 		r.Use(mw.Timeout(30 * time.Second))
+		r.Use(door.Middleware)
 		r.Mount("/", hostedInvoiceH.Routes())
 	})
 
@@ -1689,6 +1721,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	r.Route("/v1/public/cost-dashboard", func(r chi.Router) {
 		r.Use(hostedInvoiceRL.Middleware())
 		r.Use(mw.Timeout(30 * time.Second))
+		r.Use(door.Middleware)
 		r.Mount("/", customerH.PublicCostDashboardRoutes())
 	})
 
@@ -1703,7 +1736,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// revoked or expires, or the session ends, it closes with no final frame,
 	// and a reconnect with the same credential answers 401. A store failure
 	// does not close it (eventStreamRoute).
-	r.Route("/v1/webhook_events/stream", eventStreamRoute(webhookOutH, sessionSvc, authSvc, rateLimiter.Middleware(), webhook.StreamHeartbeatInterval))
+	r.Route("/v1/webhook_events/stream", eventStreamRoute(webhookOutH, sessionSvc, authSvc, rateLimiter.Middleware(), door.Middleware, webhook.StreamHeartbeatInterval))
 
 	// Streaming CSV exports are mounted beside the /v1 block, like the SSE
 	// stream above, so they get a five-minute timeout instead of the 30s CRUD
@@ -1729,6 +1762,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// timeout (extendExportWriteDeadline), because the server's
 		// WriteTimeout is 35 s.
 		r.Use(mw.Timeout(exportTimeout))
+		r.Use(door.Middleware)
 		exportsH := newExportsHandler(customerStore, invoiceStore, subStore, usageStore, auditLogger, auditLogger)
 		r.Mount("/", exportsH.Routes(
 			auth.Require(auth.PermCustomerRead),
@@ -1772,6 +1806,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// /v1/webhook_events/stream route, so it does not inherit the 30s
 		// cap. Long-lived EventSource connections must run with no limit.
 		r.Use(mw.Timeout(30 * time.Second))
+		r.Use(door.Middleware)
 
 		// /v1/whoami resolves the active credential to its tenant context,
 		// with no specific permission required. The cookie path returns
@@ -1922,6 +1957,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	})
 
 	allow = newAllowIndex(r)
+	door.root = r
 
 	s.router = r
 	return s
