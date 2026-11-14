@@ -28,9 +28,8 @@ live mode first to get a `hc_secret_live_…` key.
 
 You can also create a key with the API: `POST /v1/api-keys` with
 `{"name": "…", "key_type": "secret"}`, or `"key_type": "ingest"` for a
-usage-only key. The name is 1 to 100 characters. Add
-`"expires_at": "2027-01-01T00:00:00Z"` for a key that stops working at that
-time. The response's `raw_key` is the full key, and it
+usage-only key. Add `"expires_at": "2027-01-01T00:00:00Z"` for a key that
+stops working at that time. The response's `raw_key` is the full key, and it
 is shown only this once; if you lose that answer, see
 [Routes that ignore the header](api/idempotency.md#routes-that-ignore-the-header).
 `GET /v1/api-keys` lists the keys of your mode,

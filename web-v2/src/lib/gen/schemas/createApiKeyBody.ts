@@ -14,10 +14,7 @@
 import type { CreateApiKeyBodyKeyType } from './createApiKeyBodyKeyType';
 
 export type CreateApiKeyBody = {
-  /**
-     * Label shown in the key list. 1 to 100 characters, not blank.
-     * @maxLength 100
-     */
+  /** Label shown in the key list. Must not be blank. */
   name: string;
   /** `secret` for full access, or `ingest` for a key that can only send usage events. */
   key_type?: CreateApiKeyBodyKeyType;

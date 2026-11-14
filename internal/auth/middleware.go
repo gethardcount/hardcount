@@ -22,21 +22,15 @@ const (
 func Require(perm Permission) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if permitted(w, r, perm) {
-				next.ServeHTTP(w, r)
+			kt := GetKeyType(r.Context())
+			if !HasPermission(kt, perm) {
+				respond.Forbidden(w, r,
+					"insufficient permissions: this key type does not have "+string(perm)+" access")
+				return
 			}
+			next.ServeHTTP(w, r)
 		})
 	}
-}
-
-// permitted reports whether the request's principal holds perm, and answers
-// 403 when it does not.
-func permitted(w http.ResponseWriter, r *http.Request, perm Permission) bool {
-	if HasPermission(GetKeyType(r.Context()), perm) {
-		return true
-	}
-	respond.Forbidden(w, r, "insufficient permissions: this key type does not have "+string(perm)+" access")
-	return false
 }
 
 // RequireSession gates a route or subtree to dashboard-session principals
@@ -76,9 +70,13 @@ func RequireMethod(read, write Permission) func(http.Handler) http.Handler {
 			case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
 				perm = write
 			}
-			if permitted(w, r, perm) {
-				next.ServeHTTP(w, r)
+			kt := GetKeyType(r.Context())
+			if !HasPermission(kt, perm) {
+				respond.Forbidden(w, r,
+					"insufficient permissions: this key type does not have "+string(perm)+" access")
+				return
 			}
+			next.ServeHTTP(w, r)
 		})
 	}
 }
