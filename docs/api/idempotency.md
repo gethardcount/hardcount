@@ -48,11 +48,16 @@ The usage routes (`/v1/usage-events…` and `/v1/integrations/litellm…`)
 ignore the `Idempotency-Key` header. The event's own key is their only
 check.
 
-Creating or rotating an API key (`POST /v1/api-keys`, `POST
-/v1/api-keys/{id}/rotate`) ignores the header too: the answer holds the
-key's secret, which Hardcount does not keep, so a retry creates or rotates
-again. If you lose the answer, revoke the key you did not get
-([API keys](../api-keys.md)).
+The requests whose answer carries a secret shown only once ignore the
+header too, because Hardcount does not keep that answer, so a retry runs
+again:
+
+- `POST /v1/api-keys` and `POST /v1/api-keys/{id}/rotate`: if you lose the
+  answer, revoke the key you did not get ([API keys](../api-keys.md)).
+- `POST /v1/webhook-endpoints/endpoints`: if you lose the answer, delete the
+  endpoint you did not get the secret for, or rotate its secret.
+- `POST /v1/webhook-endpoints/endpoints/{id}/rotate-secret` and
+  `POST /v1/customers/{id}/rotate-cost-dashboard-token`: rotate again.
 
 ## Other writes: the `Idempotency-Key` header
 

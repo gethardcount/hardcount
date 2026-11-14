@@ -5,19 +5,20 @@ import (
 	"testing"
 )
 
-const deleteStoredAPIKeyAnswersVersion = 229
+const deleteKeptShowOnceAnswersVersion = 229
 
-// 00229 deletes the kept answers of the requests that issue an API key, a
-// create and a rotate, which held the key's secret, and keeps every other
-// kept answer. It runs as an owner without BYPASSRLS, as a least-privilege
+// 00229 deletes the kept answers of the requests whose answer carries a
+// secret shown only once (an API key's create and rotate, a webhook
+// endpoint's create and secret rotation, a cost dashboard token's rotation),
+// and keeps every other kept answer. It runs as an owner without BYPASSRLS, as a least-privilege
 // install does, so the file's own bypass is what lets it see the rows.
-func TestDeleteStoredAPIKeyAnswers(t *testing.T) {
-	const name = "hardcount_migrate_api_key_answers"
+func TestDeleteKeptShowOnceAnswers(t *testing.T) {
+	const name = "hardcount_migrate_show_once_answers"
 	_, db := scratchDB(t, name)
 	ownerDSN := leastPrivilegeOwner(t, name)
 	ctx := context.Background()
-	if err := up(ctx, ownerDSN, filesBefore(t, deleteStoredAPIKeyAnswersVersion)); err != nil {
-		t.Fatalf("Up to before %d: %v", deleteStoredAPIKeyAnswersVersion, err)
+	if err := up(ctx, ownerDSN, filesBefore(t, deleteKeptShowOnceAnswersVersion)); err != nil {
+		t.Fatalf("Up to before %d: %v", deleteKeptShowOnceAnswersVersion, err)
 	}
 	exec := func(livemode, q string, args ...any) {
 		t.Helper()
@@ -41,10 +42,14 @@ func TestDeleteStoredAPIKeyAnswers(t *testing.T) {
 		key, livemode, path string
 		kept                bool
 	}{
-		{"create-live", "on", "/v1/api-keys", false},
-		{"create-test", "off", "/v1/api-keys", false},
-		{"rotate", "off", "/v1/api-keys/hc_key_a/rotate", false},
+		{"key-create-live", "on", "/v1/api-keys", false},
+		{"key-create-test", "off", "/v1/api-keys", false},
+		{"key-rotate", "off", "/v1/api-keys/hc_key_a/rotate", false},
+		{"endpoint-create", "off", "/v1/webhook-endpoints/endpoints", false},
+		{"endpoint-rotate", "off", "/v1/webhook-endpoints/endpoints/hc_whe_a/rotate-secret", false},
+		{"dashboard-rotate", "off", "/v1/customers/hc_cus_a/rotate-cost-dashboard-token", false},
 		{"customer", "off", "/v1/customers", true},
+		{"endpoint-update", "off", "/v1/webhook-endpoints/endpoints/hc_whe_a/test", true},
 	}
 	for _, a := range answers {
 		exec(a.livemode, `INSERT INTO idempotency_keys (tenant_id, key, http_method, http_path, status_code, response_body)
