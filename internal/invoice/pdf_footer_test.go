@@ -5,8 +5,10 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/testutil/pdftest"
 )
 
@@ -172,4 +174,30 @@ func TestRenderPDF_ManyFooterLinesStayOnThePage(t *testing.T) {
 			}
 		})
 	}
+}
+
+// The footer says when the file was made, in machine time, even for an
+// invoice whose customer is on a test clock: the clock's time is the
+// invoice's dates, not the file's.
+func TestRenderPDF_GeneratedOnIsMachineTime(t *testing.T) {
+	inv, items := longInvoice(2, domain.InvoiceFinalized)
+	ctx := clock.WithSim(context.Background(), clock.Sim{At: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC), TestClockID: "hc_tclk_1"})
+	customers := &fakePDFCustomers{cust: domain.Customer{DisplayName: "Acme Corp"}}
+	bt, ci, cns := BuildPDFContext(ctx, customers, &fakePDFSettings{}, nil, "t1", inv)
+	out, err := RenderPDF(ctx, inv, items, bt, cns, ci)
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	want := "Generated on " + time.Now().UTC().Format("Jan 2, 2006")
+	for _, p := range pdftest.Read(t, out) {
+		for _, r := range p.Runs {
+			if strings.HasPrefix(r.Text, "Generated on ") {
+				if !strings.HasPrefix(r.Text, want) {
+					t.Errorf("footer %q, want it to start %q", r.Text, want)
+				}
+				return
+			}
+		}
+	}
+	t.Error("Generated on line missing")
 }
