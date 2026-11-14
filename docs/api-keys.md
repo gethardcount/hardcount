@@ -119,6 +119,8 @@ To turn a key off without a replacement, click **Revoke**, or call
 ## How Hardcount keeps keys safe
 
 Hardcount stores only a salted SHA-256 hash of each key, never the key itself.
+The two keys the setup command created in v0.9.3 or earlier have no salt;
+they still work, and rotating one replaces it with a salted key.
 That is why a key is shown only once, when it is created.
 
 **Next:** [make your first API call](api-surface.md#make-your-first-call).

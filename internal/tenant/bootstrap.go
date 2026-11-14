@@ -133,9 +133,6 @@ func (h *BootstrapHandler) bootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Credentials + raw keys transit exactly once; keep every cache
-	// (browser, proxy) out of the loop.
-	w.Header().Set("Cache-Control", "no-store")
 	respond.JSON(w, r, http.StatusCreated, BootstrapResponse{
 		Tenant:            result.Tenant,
 		OwnerEmail:        result.OwnerUser.Email,

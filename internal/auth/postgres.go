@@ -17,6 +17,11 @@ type store struct {
 	db *postgres.DB
 }
 
+// storedHash is a key's salt and hash as stored, both hex (hashKey).
+type storedHash struct {
+	salt, hash string
+}
+
 // ListFilter selects a page of a tenant's keys.
 type ListFilter struct {
 	TenantID string
@@ -36,12 +41,12 @@ func scanKey(row interface{ Scan(...any) error }) (domain.APIKey, error) {
 // insert stores key on tx and returns the stored row. The table's trigger
 // sets livemode from the transaction's app.livemode, and
 // api_keys_prefix_shape_check refuses a prefix whose mode differs.
-func (s store) insert(ctx context.Context, tx *sql.Tx, key domain.APIKey) (domain.APIKey, error) {
+func (s store) insert(ctx context.Context, tx *sql.Tx, key domain.APIKey, h storedHash) (domain.APIKey, error) {
 	return scanKey(tx.QueryRowContext(ctx, `
 		INSERT INTO api_keys (id, key_prefix, key_hash, key_salt, key_type, name, tenant_id, created_at, expires_at)
 		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING `+keyCols,
-		key.ID, key.KeyPrefix, key.KeyHash, key.KeySalt, key.KeyType, key.Name, key.TenantID, time.Now().UTC(),
+		key.ID, key.KeyPrefix, h.hash, h.salt, key.KeyType, key.Name, key.TenantID, time.Now().UTC(),
 		postgres.NullableTime(key.ExpiresAt),
 	))
 }
@@ -90,28 +95,31 @@ func (s store) scheduleExpiry(ctx context.Context, tx *sql.Tx, id string, expire
 }
 
 // getByPrefix returns the key that is not revoked and has the given lookup
-// prefix, with its hash and salt, or errs.ErrNotFound.
-func (s store) getByPrefix(ctx context.Context, prefix string) (domain.APIKey, error) {
+// prefix, with its stored salt and hash, or errs.ErrNotFound.
+func (s store) getByPrefix(ctx context.Context, prefix string) (domain.APIKey, storedHash, error) {
 	// The lookup bypasses RLS, because the key must be found before its
 	// tenant is known.
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
-		return domain.APIKey{}, err
+		return domain.APIKey{}, storedHash{}, err
 	}
 	defer postgres.Rollback(tx)
 
 	var key domain.APIKey
+	var h storedHash
 	err = tx.QueryRowContext(ctx, `
 		SELECT `+keyCols+`, key_hash, key_salt
 		FROM api_keys
 		WHERE key_prefix = $1 AND revoked_at IS NULL
 	`, prefix).Scan(&key.ID, &key.KeyPrefix, &key.KeyType, &key.Livemode, &key.Name, &key.TenantID,
-		&key.CreatedAt, &key.ExpiresAt, &key.RevokedAt, &key.LastUsedAt, &key.KeyHash, &key.KeySalt)
-
+		&key.CreatedAt, &key.ExpiresAt, &key.RevokedAt, &key.LastUsedAt, &h.hash, &h.salt)
 	if err == sql.ErrNoRows {
-		return domain.APIKey{}, errs.ErrNotFound
+		return domain.APIKey{}, storedHash{}, errs.ErrNotFound
 	}
-	return key, err
+	if err != nil {
+		return domain.APIKey{}, storedHash{}, err
+	}
+	return key, h, nil
 }
 
 // list returns one page of the tenant's API keys, newest first, and how many

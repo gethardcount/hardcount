@@ -16,6 +16,7 @@ import (
 	_ "github.com/jackc/pgx/v5/stdlib"
 
 	"github.com/gethardcount/hardcount/internal/audit"
+	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/config"
 	"github.com/gethardcount/hardcount/internal/dunning"
 	"github.com/gethardcount/hardcount/internal/platform/migrate"
@@ -72,16 +73,18 @@ func main() {
 	// for cross-tenant tests, and it stands in for a "platform admin" UI
 	// until one exists.
 	userStore := user.NewPostgresStore(db)
+	auditLogger := audit.NewLogger(db)
 	result, err := tenant.RunBootstrap(ctx, db, tenant.BootstrapDeps{
 		HashPassword: user.HashPassword,
 		CreateUserTx: userStore.CreateInTx,
+		CreateKeyTx:  auth.NewService(db, auditLogger).CreateKeyTx,
 		// The same default dunning policies as the HTTP route (ADR-123).
 		// Seeding needs only the store, so no retrier or clock is wired.
 		SeedDunningTx: dunning.NewService(dunning.NewPostgresStore(db), nil, nil).SeedDefaultPoliciesTx,
 		// The same provisioning audit rows as the HTTP bootstrap route
 		// (ADR-090). The CLI must not be the path that mints a live key with
 		// no record.
-		Audit: audit.NewLogger(db),
+		Audit: auditLogger,
 	}, tenant.BootstrapOpts{
 		TenantName:      tenantName,
 		OwnerEmail:      bootstrapEmail,

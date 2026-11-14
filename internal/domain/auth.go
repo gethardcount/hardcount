@@ -5,9 +5,7 @@ import "time"
 type APIKey struct {
 	ID         string     `json:"id"`
 	KeyPrefix  string     `json:"key_prefix"`
-	KeyHash    string     `json:"-"`
-	KeySalt    string     `json:"-"`        // hex-encoded 16-byte salt for SHA-256 hashing
-	KeyType    string     `json:"key_type"` // platform, secret
+	KeyType    string     `json:"key_type"` // secret or ingest
 	Livemode   bool       `json:"livemode"`
 	Name       string     `json:"name"`
 	TenantID   string     `json:"tenant_id"`

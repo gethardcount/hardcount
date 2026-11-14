@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 )
@@ -53,6 +54,9 @@ func TestRunBootstrap_OwnerEmailIsOneBareAddress(t *testing.T) {
 		HashPassword: func(string) (string, error) { return "", errPastEmail },
 		CreateUserTx: func(context.Context, *sql.Tx, string, string, string, string) (domain.User, error) {
 			return domain.User{}, errors.New("must not be reached")
+		},
+		CreateKeyTx: func(context.Context, *sql.Tx, string, auth.CreateKeyInput) (auth.CreateKeyResult, error) {
+			return auth.CreateKeyResult{}, errors.New("must not be reached")
 		},
 		SeedDunningTx: func(context.Context, *sql.Tx, string, func(domain.DunningPolicy, bool) error) error {
 			return errors.New("must not be reached")
