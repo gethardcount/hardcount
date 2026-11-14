@@ -4870,6 +4870,12 @@ export const getStreamWebhookEventsUrl = () => {
  * de-duplicate by `event_id`. A client that reads too slowly can miss
  * frames: reconnect to get the newest 50 again.
  *
+ * Every 15 seconds the stream checks its cookie or key again. Once the
+ * key is revoked or expires, or the session ends, the stream closes with
+ * no final frame, and a reconnect with the same credential answers
+ * `401`. A failure of the server's credential store does not close an
+ * open stream.
+ *
  * Frames sent after the first batch are not filtered by mode: check
  * `livemode` on each frame. The first batch holds only the caller's
  * mode. The later frames come from the server instance that handled the event, so with

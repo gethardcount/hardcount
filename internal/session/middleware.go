@@ -27,13 +27,18 @@ type unavailableError struct {
 func (e unavailableError) Error() string { return e.msg + ": " + e.err.Error() }
 func (e unavailableError) Unwrap() error { return e.err }
 
-// authenticate resolves r's credentials to the principal's context: the
-// session cookie first, then the API key (apiKeyFromHeaders). The cookie
-// takes precedence when both are present, so a browser tab with a stale
-// Authorization header cannot bypass session revocation by accident. It
-// returns ErrNoCredentials when neither is present, auth.ErrInvalidKey (wrapped)
-// for a key that is not valid, and an unavailableError when a store failed.
-func authenticate(r *http.Request, sessSvc *Service, keySvc *auth.Service) (context.Context, error) {
+// Authenticate resolves r's credentials to the principal's context. The
+// session cookie comes first and takes precedence when both are present, so a
+// browser tab with a stale Authorization header cannot bypass session
+// revocation by accident. A cookie that is present but not valid (an ended or
+// unknown session) falls through to the API key (apiKeyFromHeaders), so a
+// stale cookie does not block a valid key on the same request; with no key,
+// Authenticate then returns ErrNoCredentials, as it does when the request
+// carries neither. A key's error is returned as ValidateKey gave it:
+// auth.ErrInvalidKey, wrapped, for a key that is not valid. A store failure,
+// for the cookie or the key, returns an unavailableError: no verdict on the
+// credential.
+func Authenticate(r *http.Request, sessSvc *Service, keySvc *auth.Service) (context.Context, error) {
 	ctx := r.Context()
 	if c, err := r.Cookie(CookieName); err == nil && c.Value != "" {
 		sess, err := sessSvc.Resolve(ctx, c.Value)
@@ -68,14 +73,14 @@ func authenticate(r *http.Request, sessSvc *Service, keySvc *auth.Service) (cont
 	return ctx, nil
 }
 
-// MiddlewareOrAPIKey authenticates each request (authenticate) and answers
+// MiddlewareOrAPIKey authenticates each request (Authenticate) and answers
 // what it cannot: 401 with no credentials or a key that is not valid, and a
 // retryable 503 when a store failed. The dashboard uses the cookie, and SDKs
 // and curl callers use the API key.
 func MiddlewareOrAPIKey(sessSvc *Service, keySvc *auth.Service) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx, err := authenticate(r, sessSvc, keySvc)
+			ctx, err := Authenticate(r, sessSvc, keySvc)
 			var unavailable unavailableError
 			switch {
 			case err == nil:

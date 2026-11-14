@@ -1,7 +1,6 @@
 package webhook
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -12,6 +11,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/api/respond"
 	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/platform/logging"
 )
 
 // streamEvents serves the live-tail SSE feed for a tenant's webhook
@@ -22,8 +22,9 @@ import (
 //     not a blank table.
 //  2. Subscribes to the EventBus so any new Dispatch / Replay /
 //     deliver-result publishes a frame to this connection.
-//  3. Sends a heartbeat comment every 15s — proxies (nginx, ALB) idle
-//     connections at 60s by default; a periodic ":\n\n" line keeps the
+//  3. Every interval (StreamHeartbeatInterval in production), re-checks
+//     its credential and sends a heartbeat comment — proxies (nginx, ALB)
+//     idle connections at 60s by default; a periodic ":\n\n" line keeps the
 //     pipe warm without polluting the data channel.
 //
 // Tenant scoping is enforced two ways: ListEvents runs under the
@@ -43,16 +44,12 @@ import (
 // Postgres LISTEN/NOTIFY inside EventBus) is deferred: item 8 of
 // docs/dev/records/ha-readiness-2026-07-06.md. It affects only the
 // dashboard's live view, never delivery.
-const (
-	sseHeartbeatInterval = 15 * time.Second
-	sseSnapshotLimit     = 50
-)
+const sseSnapshotLimit = 50
 
-// streamEvents is the chi handler. Mounted at GET /webhook_events/stream
-// — registered BEFORE /webhook_events/{id} so chi's specificity-by-
-// registration-order rule picks the literal route.
-func (h *Handler) streamEvents(w http.ResponseWriter, r *http.Request) {
-	tenantID := auth.TenantID(r.Context())
+// streamEvents serves GET /v1/webhook_events/stream (StreamHandler).
+func (h *Handler) streamEvents(w http.ResponseWriter, r *http.Request, credentialStopped func(*http.Request) (bool, error), every time.Duration) {
+	ctx := r.Context()
+	tenantID := auth.TenantID(ctx)
 	if tenantID == "" {
 		respond.Unauthorized(w, r, "tenant required")
 		return
@@ -60,7 +57,7 @@ func (h *Handler) streamEvents(w http.ResponseWriter, r *http.Request) {
 
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		slog.ErrorContext(r.Context(), "webhook event stream: the response writer cannot flush")
+		slog.ErrorContext(ctx, "webhook event stream: the response writer cannot flush")
 		respond.InternalError(w, r)
 		return
 	}
@@ -68,7 +65,7 @@ func (h *Handler) streamEvents(w http.ResponseWriter, r *http.Request) {
 	// Disable the server's WriteTimeout for this connection. The stream is
 	// long-lived (clients tail webhook events for hours); the zero deadline
 	// removes the hard cap that would otherwise drop it after WriteTimeout.
-	// The 15s heartbeat below keeps idle proxies from closing it. Best-effort:
+	// The heartbeat below keeps idle proxies from closing it. Best-effort:
 	// SetWriteDeadline only no-ops if the writer can't support it.
 	_ = http.NewResponseController(w).SetWriteDeadline(time.Time{})
 
@@ -86,9 +83,9 @@ func (h *Handler) streamEvents(w http.ResponseWriter, r *http.Request) {
 	// waiting for the next live event. Newest-first is the SSE
 	// convention; the frontend prepends new live frames on top so the
 	// ordering is consistent.
-	snapshot, _, err := h.svc.ListEvents(r.Context(), tenantID, sseSnapshotLimit, 0)
+	snapshot, _, err := h.svc.ListEvents(ctx, tenantID, sseSnapshotLimit, 0)
 	if err != nil {
-		slog.ErrorContext(r.Context(), "sse snapshot failed", "error", err)
+		slog.ErrorContext(ctx, "sse snapshot failed", "error", err)
 	}
 	// One roll-up query for the whole snapshot: each event's status is
 	// derived from its actual deliveries, not guessed from its age. An
@@ -98,9 +95,9 @@ func (h *Handler) streamEvents(w http.ResponseWriter, r *http.Request) {
 	for _, e := range snapshot {
 		ids = append(ids, e.ID)
 	}
-	statuses, serr := h.svc.EventDeliveryStatuses(r.Context(), tenantID, ids)
+	statuses, serr := h.svc.EventDeliveryStatuses(ctx, tenantID, ids)
 	if serr != nil {
-		slog.ErrorContext(r.Context(), "sse snapshot status roll-up failed", "error", serr)
+		slog.ErrorContext(ctx, "sse snapshot status roll-up failed", "error", serr)
 	}
 	for _, e := range snapshot {
 		status, ok := statuses[e.ID]
@@ -117,29 +114,42 @@ func (h *Handler) streamEvents(w http.ResponseWriter, r *http.Request) {
 	// queued + snapshot SELECT pulled it"; the dashboard de-dupes by
 	// event_id so a stray double-frame just collapses into the same
 	// row.
-	frames, cancel := h.svc.EventBus().Subscribe(tenantID)
-	defer cancel()
+	frames, unsubscribe := h.svc.EventBus().Subscribe(tenantID)
+	defer unsubscribe()
 
-	heartbeat := time.NewTicker(sseHeartbeatInterval)
-	defer heartbeat.Stop()
+	tick := time.NewTicker(every)
+	defer tick.Stop()
 
-	ctx := r.Context()
 	for {
 		select {
 		case <-ctx.Done():
-			return
-		case <-heartbeat.C:
+			return // the client went away
+		case frame, open := <-frames:
+			if !open {
+				return // the bus closed this subscription
+			}
+			writeFrame(w, frame)
+			flusher.Flush()
+		case <-tick.C:
+			stopped, err := credentialStopped(r)
+			if err != nil {
+				// No verdict: a store failed. The stream keeps going, which
+				// lets no revoked credential stream past the outage: nothing
+				// can be revoked while the store is down, and a credential
+				// revoked before it ends the stream at the first check that
+				// reaches the store. A key whose expiry passes during the
+				// outage streams until the store is back.
+				slog.Log(ctx, logging.ErrorLevel(ctx, err), "webhook event stream: the credential check reached no verdict, so the stream stays open", "error", err)
+			}
+			if stopped {
+				slog.InfoContext(ctx, "webhook event stream: its credential no longer authenticates, so the stream ends")
+				return
+			}
 			// SSE comment lines (": ...\n\n") keep idle proxies from
 			// dropping the connection. The data channel stays clean.
 			if _, err := w.Write([]byte(": heartbeat\n\n")); err != nil {
-				return
+				return // the client went away
 			}
-			flusher.Flush()
-		case frame, ok := <-frames:
-			if !ok {
-				return
-			}
-			writeFrame(w, frame)
 			flusher.Flush()
 		}
 	}
@@ -176,6 +186,3 @@ func hashPayload(payload map[string]any) string {
 	sum := sha256.Sum256(blob)
 	return hex.EncodeToString(sum[:])
 }
-
-// _ ensures context import is used when the file is built standalone.
-var _ = context.Background
