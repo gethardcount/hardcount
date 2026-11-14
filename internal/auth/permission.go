@@ -1,7 +1,5 @@
 package auth
 
-import "strings"
-
 // Permission represents a specific API operation scope.
 type Permission string
 
@@ -45,40 +43,6 @@ const (
 	KeyTypeIngest  KeyType = "ingest"  // hc_ingest_ — sends usage events only (ADR-133)
 	KeyTypeSession KeyType = "session" // dashboard cookie session, never stored in api_keys
 )
-
-// keyPrefix returns a new key's prefix, "hc_{type}_{mode}_": hc_secret_live_,
-// hc_ingest_test_ and so on. The visible mode lets an operator spot a test
-// key in a production config. kt is secret or ingest, the types api_keys
-// holds.
-func keyPrefix(kt KeyType, livemode bool) string {
-	mode := "test"
-	if livemode {
-		mode = "live"
-	}
-	return "hc_" + string(kt) + "_" + mode + "_"
-}
-
-// keyPrefixes are the four prefixes a key can have: its type, then its mode.
-// api_keys_prefix_shape_check states the same shape for the stored prefix.
-var keyPrefixes = [...]string{"hc_secret_live_", "hc_secret_test_", "hc_ingest_live_", "hc_ingest_test_"}
-
-// lookupPrefix returns the stored lookup prefix of raw, its type-and-mode
-// prefix and the first keyPrefixLen hex characters of its secret, or false
-// when raw is not a key: one of keyPrefixes, then exactly 64 lowercase hex
-// characters.
-func lookupPrefix(raw string) (string, bool) {
-	for _, p := range keyPrefixes {
-		secret, ok := strings.CutPrefix(raw, p)
-		if !ok {
-			continue
-		}
-		if len(secret) != 2*keySecretLen || strings.Trim(secret, "0123456789abcdef") != "" {
-			return "", false
-		}
-		return p + secret[:keyPrefixLen], true
-	}
-	return "", false
-}
 
 // fullAccess is every permission. A secret key and a dashboard session
 // hold it.

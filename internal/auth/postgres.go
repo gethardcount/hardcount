@@ -17,11 +17,6 @@ type store struct {
 	db *postgres.DB
 }
 
-// storedHash is a key's salt and hash as stored, both hex (hashKey).
-type storedHash struct {
-	salt, hash string
-}
-
 // ListFilter selects a page of a tenant's keys.
 type ListFilter struct {
 	TenantID string

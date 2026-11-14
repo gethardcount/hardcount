@@ -18,7 +18,7 @@ import (
 func TestKeyShape_ParserAndTableAgree(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	tenantID := testutil.CreateTestTenant(t, db, "Key Shape")
-	rest := strings.Repeat("0", 2*keySecretLen-keyPrefixLen)
+	rest := strings.Repeat("0", 2*secretBytes-lookupHexLen)
 
 	for i, c := range []struct {
 		stored string
