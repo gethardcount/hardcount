@@ -125,10 +125,35 @@ func TestResolvers_UnreadableRecordIsAnError(t *testing.T) {
 			}
 		})
 	}
-	// Readable, the same records answer their clock.
+}
+
+// In test mode a record on a clock answers the clock's frozen time and id,
+// through each resolver on its own.
+func TestResolvers_ARecordOnAClockAnswersTheClock(t *testing.T) {
+	test := postgres.WithLivemode(context.Background(), false)
+	want := clock.Sim{At: time.Date(2024, 2, 1, 12, 0, 0, 0, time.UTC), TestClockID: "tc_1"}
 	e, _, _, _, _, _ := resolverHarness(nil)
-	if got, err := e.SimForInvoice(test, "t1", "inv_1"); err != nil || got.TestClockID != "tc_1" {
-		t.Errorf("a readable clock invoice: %+v, %v; want clock tc_1", got, err)
+	for name, resolve := range map[string]func() (clock.Sim, error){
+		"invoice":      func() (clock.Sim, error) { return e.SimForInvoice(test, "t1", "inv_1") },
+		"subscription": func() (clock.Sim, error) { return e.SimForSubscription(test, "t1", "sub_1") },
+		"customer":     func() (clock.Sim, error) { return e.SimForCustomer(test, "t1", "cus_1") },
+	} {
+		if got, err := resolve(); err != nil || got != want {
+			t.Errorf("%s: %+v, %v; want %+v", name, got, err, want)
+		}
+	}
+}
+
+// A ctx that carries no mode counts as test mode: the resolvers read, and a
+// record on a clock answers the clock.
+func TestResolvers_NoModeReads(t *testing.T) {
+	e, invoices, subs, _, clocks, _ := resolverHarness(nil)
+	got, err := e.SimForInvoice(context.Background(), "t1", "inv_1")
+	if err != nil || got.TestClockID != "tc_1" {
+		t.Errorf("no mode: %+v, %v; want clock tc_1", got, err)
+	}
+	if invoices.reads != 1 || subs.reads != 1 || clocks.reads != 1 {
+		t.Errorf("reads: invoices %d, subscriptions %d, clocks %d; want 1 each", invoices.reads, subs.reads, clocks.reads)
 	}
 }
 

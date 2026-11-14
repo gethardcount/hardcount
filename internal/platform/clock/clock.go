@@ -7,6 +7,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"sync"
 	"time"
 )
@@ -308,22 +309,21 @@ func BindEffectiveNow(ctx context.Context, r Resolver, p Pin) (context.Context, 
 		return ctx, false
 	}
 	if err != nil {
+		// A record the resolver could not read: go on in the time ctx
+		// already has. Logged here, the one place every bind passes.
+		slog.WarnContext(ctx, "clock: could not resolve the record's time; going on in the time the context has",
+			"tenant_id", p.TenantID, "customer_id", p.CustomerID, "subscription_id", p.SubscriptionID,
+			"invoice_id", p.InvoiceID, "error", err)
 		return ctx, false
 	}
 	// A nested resolution may refine the time domain, but never erase one it
-	// was handed. Every resolver that cannot resolve the pin (a dangling
-	// subscription, a deleted clock, an unpinned customer) falls back to
-	// `Sim{At: e.clock.Now(ctx)}`, with no clock id and a nil error. The error
-	// check above lets that fallback through, so this guard is what stops it.
-	// Under a bound ctx, `clock.Now(ctx)` reads this binding, so the fallback
-	// is the simulated instant with no clock. Binding it would drop the clock:
-	// SimOf() would turn false, and every audit row below this call would
-	// silently lose its sim columns for the rest of the service call. That is
-	// "no clock, at simulated now": the mirror of the "clock C at wall-clock
-	// now" half-truth that the resolvers' own comments warn about and that
-	// Sim exists to prevent. Inside a catch-up every entity touched is the
-	// clock's, so an unresolved pin there is a failed lookup, never a sign
-	// that the work left the simulation.
+	// was handed. A record on no clock (an unpinned customer, say) answers
+	// with no clock id; under a bound ctx its instant is the bound one, so it
+	// is the simulated instant with no clock. Binding it would drop the
+	// clock: SimOf would turn false, and every audit row below this call
+	// would lose its sim columns for the rest of the service call. Inside a
+	// catch-up every record touched is the clock's, so an answer with no
+	// clock there is never a sign that the work left the simulation.
 	if sim.TestClockID == "" {
 		if _, inherited := SimOf(ctx); inherited {
 			return ctx, true
