@@ -22,6 +22,7 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/leader"
 )
 
@@ -112,5 +113,9 @@ func leadOneTick(ctx context.Context, role leader.Role, interval time.Duration, 
 			led, err = false, nil
 		}
 	}()
-	return gate.Lead(ctx, role, interval, workFn)
+	// A tick runs in real time. Below it, the test-clock job binds each
+	// clock's time (testclock.Service.runClock), and the payment reconciler
+	// each invoice's it settles (Reconciler.settle); everything else a tick
+	// does is real time.
+	return gate.Lead(ctx, role, interval, func(ctx context.Context) { workFn(clock.WithRealTime(ctx)) })
 }
