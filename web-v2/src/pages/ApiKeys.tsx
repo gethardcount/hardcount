@@ -339,7 +339,8 @@ export default function ApiKeysPage() {
                   )}
                 </TableBody>
                 {expiredKeys.length + revokedKeys.length > 0 && (
-                  <TableBody id="api-key-inactive-rows" hidden={!showInactive}>
+                  // Its own top border: the body above drops the border of its last row.
+                  <TableBody id="api-key-inactive-rows" hidden={!showInactive} className="border-t">
                     {[...expiredKeys, ...revokedKeys].map(keyRow)}
                   </TableBody>
                 )}
