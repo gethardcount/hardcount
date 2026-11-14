@@ -48,10 +48,10 @@ const (
 	sseSnapshotLimit     = 50
 )
 
-// streamEvents is the chi handler. Mounted at GET /webhook_events/stream
-// — registered BEFORE /webhook_events/{id} so chi's specificity-by-
-// registration-order rule picks the literal route.
-func (h *Handler) streamEvents(w http.ResponseWriter, r *http.Request) {
+// streamEvents serves GET /v1/webhook_events/stream (StreamHandler).
+// stillAuthenticated runs before each frame and heartbeat; when it fails, the
+// stream ends.
+func (h *Handler) streamEvents(w http.ResponseWriter, r *http.Request, stillAuthenticated func(*http.Request) error) {
 	tenantID := auth.TenantID(r.Context())
 	if tenantID == "" {
 		respond.Unauthorized(w, r, "tenant required")
@@ -124,11 +124,21 @@ func (h *Handler) streamEvents(w http.ResponseWriter, r *http.Request) {
 	defer heartbeat.Stop()
 
 	ctx := r.Context()
+	authenticated := func() bool {
+		if err := stillAuthenticated(r); err != nil {
+			slog.InfoContext(ctx, "webhook event stream: its credentials no longer authenticate, so it ends", "error", err)
+			return false
+		}
+		return true
+	}
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-heartbeat.C:
+			if !authenticated() {
+				return
+			}
 			// SSE comment lines (": ...\n\n") keep idle proxies from
 			// dropping the connection. The data channel stays clean.
 			if _, err := w.Write([]byte(": heartbeat\n\n")); err != nil {
@@ -136,7 +146,7 @@ func (h *Handler) streamEvents(w http.ResponseWriter, r *http.Request) {
 			}
 			flusher.Flush()
 		case frame, ok := <-frames:
-			if !ok {
+			if !ok || !authenticated() {
 				return
 			}
 			writeFrame(w, frame)

@@ -52,35 +52,25 @@ func (h *Handler) Routes() chi.Router {
 	return r
 }
 
-// EventRoutes is the Week 6 real-time event surface, mounted at
-// /v1/webhook_events. Lives here (rather than alongside Routes) so the
-// route table stays tightly scoped to "the live-tail dashboard" and
-// router.go can mount it under its own auth scope without dragging in
-// the endpoint-management permissions.
-//
-// Critical: chi/v5 dispatches by registration order. We register
-// /stream BEFORE /{id} so a literal "stream" path doesn't get captured
-// as an ID and route to the deliveries handler. See
-// docs/dev/design/create-preview.md for the canonical write-up.
-//
-// Note: the SSE handler (streamEvents) IS exposed here for tests and
-// dev-time mounting, but the production router mounts /stream
-// SEPARATELY outside the /v1 block so it can skip the global 30s
-// middleware.Timeout (which would kill any long-lived stream). See
-// internal/api/router.go for the production mount.
+// EventRoutes serves an event's deliveries and its replay. The live stream is
+// mounted separately (StreamHandler), outside the /v1 block's 30s timeout,
+// which would cut a long-lived stream.
 func (h *Handler) EventRoutes() chi.Router {
 	r := chi.NewRouter()
-	r.Get("/stream", h.streamEvents)
 	r.Get("/{id}/deliveries", h.listDeliveriesEnriched)
 	r.Post("/{id}/replay", h.replayEventV2)
 	return r
 }
 
-// StreamHandler is the chi-compatible handler for the live-tail SSE
-// stream. Exported so router.go can mount it on a route block that
-// skips the 30s timeout middleware applied to /v1/* routes.
-func (h *Handler) StreamHandler() http.HandlerFunc {
-	return h.streamEvents
+// StreamHandler is the handler for the live-tail SSE stream, mounted by
+// router.go on a route block that skips the 30s timeout of the /v1 routes.
+// stillAuthenticated re-checks the request's credentials before each frame
+// the stream sends; the stream ends when it fails, so a revoked or expired
+// key, or an ended session, stops receiving events.
+func (h *Handler) StreamHandler(stillAuthenticated func(*http.Request) error) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		h.streamEvents(w, r, stillAuthenticated)
+	}
 }
 
 func (h *Handler) getEndpointStats(w http.ResponseWriter, r *http.Request) {
