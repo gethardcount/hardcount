@@ -41,12 +41,6 @@ func (s *PostgresStore) Create(ctx context.Context, tenantID string, clk domain.
 		tenantID, clk.Name, clk.FrozenTime,
 	).Scan(scanDest(&clk)...)
 	if err != nil {
-		// 23514 = check_violation; the livemode CHECK rejects any attempt to
-		// insert a test clock from a live-mode session. Surface as 400 invalid
-		// instead of leaking a raw SQL error string.
-		if postgres.IsCheckViolation(err) {
-			return domain.TestClock{}, errs.Invalid("livemode", "test clocks can only be created in test mode")
-		}
 		return domain.TestClock{}, err
 	}
 	if err := auditRow(tx, clk); err != nil {
