@@ -150,6 +150,8 @@ components:
         other error cases are in
         [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
         not take it: each usage event carries its own `idempotency_key`.
+        Creating or rotating an API key does not take it either: the
+        answer holds the key's secret, which Hardcount does not keep.
       schema:
         type: string
       example: 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -27373,8 +27375,6 @@ paths:
         (`hc_ingest_…`) can only send usage events: give it to LiteLLM or
         another gateway, so the key in its config cannot refund, void or
         read your data. Writes an audit row (never the key value).
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -27590,7 +27590,6 @@ paths:
         key working for that many seconds (at most 604800, 7 days), so
         deployed clients can switch without downtime. Writes an audit row.
       parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true

@@ -96,8 +96,8 @@ instead, with the reason. Today that is only the methods other than `GET` on
 - a `POST`, `PUT` or `PATCH` route behind the idempotency middleware does
   not list the `IdempotencyKey` parameter in the spec;
 - an operation lists it but the middleware does not run on that route, or
-  skips it (the usage routes, `isIngestPath`), so the server would ignore
-  the header.
+  skips it (the usage routes and the two requests that issue an API key,
+  `skipsIdempotency`), so the server would ignore the header.
 
 `TestOpenAPISpec_RequestBodies` in `openapi_bodies_test.go` checks request
 bodies. `requestBodies` maps each operation that has a JSON body to the Go

@@ -1758,9 +1758,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// After auth, so the tenant ID is available for the bucket key. Ingest
 		// paths use their own, much larger bucket (see ingestLimiter).
 		r.Use(mw.SplitRateLimit(isIngestPath, ingestLimiter, rateLimiter))
-		// Ingest routes (isIngestPath) ignore the Idempotency-Key header.
-		// There, each event's own idempotency_key is the one dedup rule.
-		r.Use(mw.Idempotency(db, isIngestPath))
+		// The usage routes and the key-issuing requests ignore the
+		// Idempotency-Key header (skipsIdempotency).
+		r.Use(mw.Idempotency(db, skipsIdempotency))
 		// No audit middleware here. The code that owns a write emits its
 		// audit row inside its transaction (audit.Logger.LogInTx). Every
 		// mutating route declares in the route-audit registry
@@ -2156,6 +2156,26 @@ const litellmPathPrefix = "/v1/integrations/litellm"
 func isIngestPath(r *http.Request) bool {
 	return strings.HasPrefix(r.URL.Path, "/v1/usage-events") ||
 		strings.HasPrefix(r.URL.Path, litellmPathPrefix)
+}
+
+// skipsIdempotency reports whether the idempotency layer leaves r alone. It
+// does for the usage routes (isIngestPath), where each event's own
+// idempotency_key is the one dedup rule, and for the requests that issue an
+// API key (issuesAPIKey): their answer holds the key's secret, which is
+// stored nowhere, so it is not kept for a replay.
+func skipsIdempotency(r *http.Request) bool {
+	return isIngestPath(r) || issuesAPIKey(r)
+}
+
+// issuesAPIKey reports whether r is one of the two requests whose answer
+// holds an API key's secret: POST /v1/api-keys and POST
+// /v1/api-keys/{id}/rotate.
+func issuesAPIKey(r *http.Request) bool {
+	if r.Method != http.MethodPost {
+		return false
+	}
+	p := strings.TrimSuffix(r.URL.Path, "/")
+	return p == "/v1/api-keys" || (strings.HasPrefix(p, "/v1/api-keys/") && strings.HasSuffix(p, "/rotate"))
 }
 
 // routeMethods are the methods the Allow header can list, in its order.
