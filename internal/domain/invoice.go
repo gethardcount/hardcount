@@ -150,6 +150,16 @@ func (i Invoice) CardRefundableCents(priorRefundCents int64) int64 {
 	return max(0, i.AmountPaidCents-priorRefundCents)
 }
 
+// PricedCents is the invoice's amount in the terms its prices were in: its
+// total when they included tax, its subtotal when they did not. A share of a
+// price is compared with it.
+func (inv Invoice) PricedCents() int64 {
+	if inv.TaxInclusive {
+		return inv.TotalAmountCents
+	}
+	return inv.SubtotalCents
+}
+
 // UnpaidRelievableCents is the most a credit note can relieve on an invoice
 // that has not been paid: what is still due, plus the customer credits
 // applied to it. A note first reduces the amount due. The rest of it

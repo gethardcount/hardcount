@@ -53,8 +53,13 @@ func creditShareFor(inv Invoice, gross int64) CreditShare {
 	return sh
 }
 
-// AllocateUnusedCredit splits netCents of unused prepaid time (tax excluded)
-// across the invoices that charged it. It is the one crediting rule for every
+// AllocateUnusedCredit splits unusedCents of unused prepaid time across the
+// invoices that charged it. unusedCents is a share of the price, and each
+// invoice records what its prices meant (TaxInclusive): with tax included the
+// share is the credit as it is, capped by the room on the invoice's total;
+// before tax it is grossed up by the invoice's total over its subtotal, and
+// capped by its room before tax. So two invoices billed under different
+// settings are each credited in their own terms. It is the one crediting rule for every
 // change that gives prepaid time back: a quantity decrease, a downgrade, an
 // item removal, a cancel and a cross-interval plan swap (ADR-118).
 //
@@ -87,18 +92,19 @@ func creditShareFor(inv Invoice, gross int64) CreditShare {
 // is written. So a concurrent note makes the change fail and retry, and
 // never over-credits.
 //
-// unplacedCents (net) is what did not fit. It is not owed: every invoice is
+// unplacedCents is what did not fit, in the price's terms. It is not owed: every invoice is
 // either credited up to its total or, if unpaid, relieved of all it asks for.
 // The caller records it on the change (uncredited_cents) instead of logging
 // it.
-func AllocateUnusedCredit(sources []Invoice, credited map[string]int64, itemID string, netCents int64) (shares []CreditShare, unplacedCents int64) {
-	if netCents <= 0 {
+func AllocateUnusedCredit(sources []Invoice, credited map[string]int64, itemID string, unusedCents int64) (shares []CreditShare, unplacedCents int64) {
+	if unusedCents <= 0 {
 		return nil, 0
 	}
 	type candidate struct {
-		inv              Invoice
-		pos              int
-		grossCap, netCap int64
+		inv      Invoice
+		pos      int
+		grossCap int64 // the room on the invoice's total
+		cap      int64 // the same room in the terms of the invoice's prices
 	}
 	cands := make([]candidate, 0, len(sources))
 	for pos, inv := range sources {
@@ -114,16 +120,17 @@ func AllocateUnusedCredit(sources []Invoice, credited map[string]int64, itemID s
 		if grossCap <= 0 {
 			continue // no room left
 		}
-		netCap := grossCap
-		if inv.SubtotalCents > 0 && inv.TotalAmountCents > 0 {
-			// Worked in 128 bits. A cap past int64 cents is above any
-			// netCents, so MaxInt64 allocates exactly as the exact cap would.
+		pcap := grossCap
+		if !inv.TaxInclusive && inv.SubtotalCents > 0 && inv.TotalAmountCents > 0 {
+			// Prices before tax: the room before tax. Worked in 128 bits. A
+			// cap past int64 cents is above any unusedCents, so MaxInt64
+			// allocates exactly as the exact cap would.
 			var ok bool
-			if netCap, ok = money.MulDivRoundHalfToEven(grossCap, inv.SubtotalCents, inv.TotalAmountCents); !ok {
-				netCap = math.MaxInt64
+			if pcap, ok = money.MulDivRoundHalfToEven(grossCap, inv.SubtotalCents, inv.TotalAmountCents); !ok {
+				pcap = math.MaxInt64
 			}
 		}
-		cands = append(cands, candidate{inv: inv, pos: pos, grossCap: grossCap, netCap: netCap})
+		cands = append(cands, candidate{inv: inv, pos: pos, grossCap: grossCap, cap: pcap})
 	}
 	sort.SliceStable(cands, func(a, b int) bool {
 		ia, ib := cands[a].inv, cands[b].inv
@@ -138,25 +145,25 @@ func AllocateUnusedCredit(sources []Invoice, credited map[string]int64, itemID s
 		return cands[a].pos > cands[b].pos
 	})
 
-	netCaps := make([]int64, len(cands))
+	caps := make([]int64, len(cands))
 	for i := range cands {
-		netCaps[i] = cands[i].netCap
+		caps[i] = cands[i].cap
 	}
-	nets, unplaced := money.AllocateLIFO(netCents, netCaps)
+	parts, unplaced := money.AllocateLIFO(unusedCents, caps)
 	for i, c := range cands {
-		if nets[i] <= 0 {
+		if parts[i] <= 0 {
 			continue
 		}
-		gross := nets[i]
-		if c.inv.SubtotalCents > 0 {
+		gross := parts[i]
+		if !c.inv.TaxInclusive && c.inv.SubtotalCents > 0 {
 			// Worked in 128 bits. A gross past int64 cents is above the
 			// room, so the room is what the min below would keep.
 			var ok bool
-			if gross, ok = money.MulDivRoundHalfToEven(nets[i], c.inv.TotalAmountCents, c.inv.SubtotalCents); !ok {
+			if gross, ok = money.MulDivRoundHalfToEven(parts[i], c.inv.TotalAmountCents, c.inv.SubtotalCents); !ok {
 				gross = c.grossCap
 			}
 		}
-		gross = min(gross, c.grossCap) // net→gross rounding never passes the room
+		gross = min(gross, c.grossCap) // rounding up to the total never passes the room
 		if gross <= 0 {
 			continue
 		}
