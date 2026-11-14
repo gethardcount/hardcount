@@ -14,6 +14,9 @@ Put the key in the `Authorization` header, after `Bearer` and one space:
 curl -s "$HARDCOUNT/v1/whoami" -H "Authorization: Bearer $HARDCOUNT_KEY"
 ```
 
+Hardcount also reads a key from an `X-API-Key` header when the request has
+no `Authorization` header.
+
 `GET /v1/whoami` needs no permission, so it is a good first call. It answers
 with your `tenant_id` (your account's ID), `livemode`, `key_id` and
 `key_type`.
@@ -22,8 +25,9 @@ Outside your own computer, send keys only over HTTPS.
 
 ## Key format
 
-A key is its prefix followed by 64 hex characters. The prefix says the key's
-type and mode:
+A key is its prefix followed by 64 lowercase hex characters. Any other
+string is refused as an invalid key. The prefix says the key's type and
+mode:
 
 | Prefix | Type | Mode |
 |---|---|---|
@@ -88,11 +92,14 @@ without touching the others, and each has its own
 
 A leaked test key exposes test data and the account settings, which both modes share. Test mode cannot charge a real card.
 
+The account's Audit Log shows who created, rotated and revoked each key, and
+when. Each change and its audit row are saved together.
+
 ## When a key is refused
 
 | Status | `code` | `message` | Why |
 |---|---|---|---|
-| `401` | `unauthorized` | `missing credentials — sign in at /login or send Authorization: Bearer hc_secret_...` | No key was sent, or the header is not `Bearer <key>` |
+| `401` | `unauthorized` | `missing credentials — sign in at /login or send Authorization: Bearer hc_secret_...` | No key was sent: no `Authorization: Bearer <key>` and no `X-API-Key` |
 | `401` | `unauthorized` | `invalid or expired API key` | The key is wrong, revoked or past its `expires_at`. The message is the same in each case, so it does not tell anyone whether a key exists. |
 | `403` | `forbidden` | `insufficient permissions: this key type does not have customer:read access` | The key's type cannot call this route; the message names the permission |
 | `403` | `forbidden` | `this endpoint requires a dashboard session — sign in to the dashboard to manage team membership` | `/v1/members` takes only a dashboard session |
@@ -103,6 +110,10 @@ A leaked test key exposes test data and the account settings, which both modes s
 
 All of them use `type` `authentication_error`, except the `503`, which is
 `api_error`. Every error code is in [Errors](errors.md).
+
+An open event stream (`GET /v1/webhook_events/stream`) checks its key again
+every 15 seconds. Once the key is revoked or expires, the stream closes with
+no final frame, and a reconnect with that key answers `401`.
 
 ## Manage keys with the API
 
@@ -129,18 +140,26 @@ curl -s -X POST "$HARDCOUNT/v1/api-keys" \
 
 The `201` answer has `key` (the key's record) and `raw_key` (the full key).
 `raw_key` is shown only this once: Hardcount stores only a salted SHA-256
-hash. An `expires_at` that is not in the future is refused with `422`.
+hash. This route ignores `Idempotency-Key`, so the key is never kept for a
+retry: a retried create makes a second key
+([Routes that ignore the header](idempotency.md#routes-that-ignore-the-header)).
+An `expires_at` that is not in the future is refused with `422`.
 
-**List.** Each key's record has `id`, `name`, `key_type`, `livemode`,
-`key_prefix` (the prefix and the first 12 hex characters), `created_at`,
-and, when set, `expires_at`, `revoked_at` and `last_used_at`. Revoked keys
-stay in the list. `last_used_at` is updated at most once a minute.
+**List.** Each key's record has `id`, `name`, `key_type`, `status`,
+`livemode`, `key_prefix` (the prefix and the first 12 hex characters),
+`created_at`, and, when set, `expires_at`, `revoked_at` and `last_used_at`.
+`status` is `active`, `expired` (from its `expires_at` on) or `revoked`;
+only an active key works. Revoked keys stay in the list. `last_used_at` is
+updated at most once a minute.
 
 **Rotate.** The new key keeps the old key's name, type, mode and
 `expires_at`. Send `expires_in_seconds` to keep the old key working for a
 while: `0`, the default, stops it at once, and the most is `604800` (7
-days). The answer has `old_key`, `new_key` and `raw_key`. A revoked key
-cannot be rotated: that is a `409`.
+days). The old key never works past its own `expires_at`, whatever the
+grace. The answer has `old_key`, `new_key` and `raw_key`; the new key, the
+old key's change and the audit row are saved together. A revoked or expired
+key cannot be rotated: that is a `409`. Like create, rotate ignores
+`Idempotency-Key`.
 
 **Revoke.** The key stops working on the next request. Revoking it a second
 time answers `404`.
