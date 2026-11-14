@@ -266,8 +266,8 @@ type Invoice struct {
 	// invoice records the setting its lines were priced under; a manual
 	// invoice records the setting at create, and lines added later are in its
 	// terms. The one INSERT writes it and nothing updates it after. Finalize
-	// and the tax retry still compute with the tenant's current setting until
-	// they read it, so nothing may read it before then. Not on the API.
+	// and the tax retry compute the invoice's tax in these terms. Not on the
+	// API.
 	TaxInclusive bool `json:"-"`
 
 	// The PaymentAnomaly* fields are the durable marker of an anomaly on the

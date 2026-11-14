@@ -1053,8 +1053,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// dispute rows and GET /v1/invoices/{id}/disputes.
 	invoiceSvc.SetDisputeReader(invoiceStore)
 	invoiceSvc.SetCreditApplier(creditSvc)
-	// A manual invoice created without net_payment_term_days takes the
-	// tenant's configured default, then 30, as the cycle engine does.
+	// A manual invoice is created under the tenant's settings: without
+	// net_payment_term_days it takes the configured default, then 30, as the
+	// cycle engine does, and it records whether its prices include tax.
 	// settingsStore satisfies TenantSettingsReader.
 	invoiceSvc.SetTenantSettingsReader(settingsStore)
 	// The currency a manual invoice must agree with, or takes when none is

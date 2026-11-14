@@ -44,7 +44,7 @@ If Stripe Tax fails, the invoice waits; Hardcount never falls back to a guessed 
 
 ## Options that work with every provider
 
-- **Tax-inclusive pricing** (Settings → Tax). When it is on, your prices already include tax, and Hardcount shows the tax part inside them. When it is off, tax is added on top.
+- **Tax-inclusive pricing** (Settings → Tax). When it is on, your prices already include tax, and Hardcount shows the tax part inside them. When it is off, tax is added on top. A switch applies to invoices created after it. An issued invoice is never taxed again. A draft keeps the terms it was created in, also when its tax is worked out again at its finalize, a tax retry or a refresh; to price a draft in the new terms, delete it and create it again.
 - **A customer's tax status**, set in the customer's **Billing Profile**:
   - **Standard**: tax applies as usual.
   - **Exempt**: no tax. Hardcount asks for the reason.

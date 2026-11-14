@@ -149,11 +149,12 @@ type CustomerReader interface {
 	GetMany(ctx context.Context, tenantID string, ids []string) ([]domain.Customer, error)
 }
 
-// TenantSettingsReader reads tenant settings. Service reads them so a manual
-// invoice with no explicit net term uses the tenant's configured terms, 0
-// included — the same resolution as the billing engine's invoices. Optional;
-// nil (narrow tests) uses 30. Handler and BuildPDFContext read them for the
-// PDF's company info.
+// TenantSettingsReader reads tenant settings. Service reads them when it
+// creates a manual invoice: with no explicit net term it uses the tenant's
+// configured terms, 0 included — the same resolution as the billing engine's
+// invoices — and it records whether the invoice's prices include tax.
+// Optional; nil (narrow tests) means Net 30 with prices before tax. Handler
+// and BuildPDFContext read them for the PDF's company info.
 type TenantSettingsReader interface {
 	Get(ctx context.Context, tenantID string) (domain.TenantSettings, error)
 }
@@ -281,8 +282,10 @@ type AuditLogger interface {
 	LogInTx(ctx context.Context, tx *sql.Tx, e audit.Entry) error
 }
 
-// SetTenantSettingsReader wires the tenant-settings reader used to default a
-// manual invoice's net payment terms when the caller omits them. Optional.
+// SetTenantSettingsReader wires the tenant-settings reader a manual invoice is
+// created under: its net payment terms when the caller omits them, and whether
+// its prices include tax. Optional; without it an invoice is Net 30 with
+// prices before tax.
 func (s *Service) SetTenantSettingsReader(r TenantSettingsReader) { s.settings = r }
 
 // SetAuditLogger wires the audit logger.
