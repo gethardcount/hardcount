@@ -1758,8 +1758,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// After auth, so the tenant ID is available for the bucket key. Ingest
 		// paths use their own, much larger bucket (see ingestLimiter).
 		r.Use(mw.SplitRateLimit(isIngestPath, ingestLimiter, rateLimiter))
-		// The usage routes and the key-issuing requests ignore the
-		// Idempotency-Key header (skipsIdempotency).
+		// The usage routes, and the requests whose answer carries a secret
+		// shown only once, ignore the Idempotency-Key header
+		// (skipsIdempotency).
 		r.Use(mw.Idempotency(db, skipsIdempotency))
 		// No audit middleware here. The code that owns a write emits its
 		// audit row inside its transaction (audit.Logger.LogInTx). Every
@@ -2160,22 +2161,56 @@ func isIngestPath(r *http.Request) bool {
 
 // skipsIdempotency reports whether the idempotency layer leaves r alone. It
 // does for the usage routes (isIngestPath), where each event's own
-// idempotency_key is the one dedup rule, and for the requests that issue an
-// API key (issuesAPIKey): their answer holds the key's secret, which is
-// stored nowhere, so it is not kept for a replay.
+// idempotency_key is the one dedup rule, and for the requests whose answer
+// carries a secret shown only in that answer (answersWithShowOnceSecret),
+// which is never kept for a replay.
 func skipsIdempotency(r *http.Request) bool {
-	return isIngestPath(r) || issuesAPIKey(r)
+	return isIngestPath(r) || answersWithShowOnceSecret(r)
 }
 
-// issuesAPIKey reports whether r is one of the two requests whose answer
-// holds an API key's secret: POST /v1/api-keys and POST
-// /v1/api-keys/{id}/rotate.
-func issuesAPIKey(r *http.Request) bool {
-	if r.Method != http.MethodPost {
+// showOnceSecretRoutes are the requests whose answer carries a secret shown
+// only in that answer: the fields marked `x-show-once: true` in
+// api/openapi.yaml. TestOpenAPISpec_ShowOnceSecretsAreNeverKept keeps the
+// list and the marks in step.
+var showOnceSecretRoutes = []string{
+	"POST /v1/api-keys",
+	"POST /v1/api-keys/{id}/rotate",
+	"POST /v1/customers/{id}/rotate-cost-dashboard-token",
+	"POST /v1/webhook-endpoints/endpoints",
+	"POST /v1/webhook-endpoints/endpoints/{id}/rotate-secret",
+}
+
+// answersWithShowOnceSecret reports whether r is one of showOnceSecretRoutes.
+func answersWithShowOnceSecret(r *http.Request) bool {
+	for _, route := range showOnceSecretRoutes {
+		method, pattern, _ := strings.Cut(route, " ")
+		if r.Method == method && pathMatchesPattern(r.URL.Path, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// pathMatchesPattern reports whether path has pattern's segments, a {name}
+// segment matching any one non-empty segment. A trailing slash is ignored.
+func pathMatchesPattern(path, pattern string) bool {
+	got := strings.Split(strings.Trim(path, "/"), "/")
+	want := strings.Split(strings.Trim(pattern, "/"), "/")
+	if len(got) != len(want) {
 		return false
 	}
-	p := strings.TrimSuffix(r.URL.Path, "/")
-	return p == "/v1/api-keys" || (strings.HasPrefix(p, "/v1/api-keys/") && strings.HasSuffix(p, "/rotate"))
+	for i, w := range want {
+		if strings.HasPrefix(w, "{") && strings.HasSuffix(w, "}") {
+			if got[i] == "" {
+				return false
+			}
+			continue
+		}
+		if got[i] != w {
+			return false
+		}
+	}
+	return true
 }
 
 // routeMethods are the methods the Allow header can list, in its order.

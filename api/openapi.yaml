@@ -8021,6 +8021,7 @@ components:
           $ref: "#/components/schemas/APIKey"
         raw_key:
           type: string
+          x-show-once: true
           description: |
             The full key: its prefix (`hc_secret_test_`, `hc_ingest_live_`
             and so on) and 64 hex characters. Shown only once; store it now.
@@ -8051,6 +8052,7 @@ components:
           $ref: "#/components/schemas/APIKey"
         raw_key:
           type: string
+          x-show-once: true
           description: The new key's full value. Shown only once; store it now.
       example:
         old_key:
@@ -8448,6 +8450,7 @@ components:
           description: The owner's dashboard sign-in email.
         owner_password:
           type: string
+          x-show-once: true
           description: |
             The owner's dashboard password: the one you sent, or the
             generated one (24 hex characters).
@@ -8456,9 +8459,11 @@ components:
           description: True when Hardcount generated `owner_password` because the request sent none.
         secret_key_test:
           type: string
+          x-show-once: true
           description: Test-mode secret key (`hc_secret_test_...`).
         secret_key_live:
           type: string
+          x-show-once: true
           description: Live-mode secret key (`hc_secret_live_...`).
         message:
           type: string
@@ -9524,6 +9529,7 @@ components:
           $ref: "#/components/schemas/WebhookEndpoint"
         secret:
           type: string
+          x-show-once: true
           description: The signing secret (`whsec_…`). Store it now; Hardcount does not show it again.
       example:
         endpoint:
@@ -9546,6 +9552,7 @@ components:
       properties:
         secret:
           type: string
+          x-show-once: true
           description: The new signing secret (`whsec_…`). Store it now; Hardcount does not show it again.
         secondary_valid_until:
           type: string
@@ -10274,7 +10281,6 @@ paths:
         time you see it: copy it now. The rotation is written to the audit
         log, without the token. Send no body.
       parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -10291,12 +10297,14 @@ paths:
                 properties:
                   token:
                     type: string
+                    x-show-once: true
                     description: |
                       The new token, `hc_pcd_` and 64 hex characters. Shown
                       only in this answer.
                     example: hc_pcd_3f9a1c7e5b2d4f6a8c0e1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f2a4c6e8b0d1f3a
                   public_url:
                     type: string
+                    x-show-once: true
                     description: |
                       `/v1/public/cost-dashboard/` and the token, after the
                       server's `HARDCOUNT_API_BASE_URL` when that is set.
@@ -13449,8 +13457,6 @@ paths:
         starts with `invoice.`. An event type Hardcount never sends is
         refused with 422, so a typo cannot leave the endpoint silent. Writes
         an audit row.
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -13789,7 +13795,6 @@ paths:
         switch to the new secret without rejecting events. After that only
         the new secret signs. Writes an audit row, without the secret.
       parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
