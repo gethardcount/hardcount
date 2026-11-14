@@ -143,10 +143,21 @@ func (s *Service) CreateKey(ctx context.Context, tenantID string, input CreateKe
 
 // CreateKeyTx is CreateKey on a transaction the caller owns, for the setup
 // command, which creates the account and its first keys in one transaction:
-// the key and its audit row commit with tx. tx must set app.tenant_id to
-// tenantID and app.livemode to the mode ctx carries; the table refuses a
-// prefix whose mode differs from the row's.
+// the key and its audit row commit with tx. It sets tx's app.livemode to the
+// mode ctx carries, so the key and its audit row are in that mode, and the
+// setting stays for the rest of tx. tx must set app.tenant_id to tenantID.
 func (s *Service) CreateKeyTx(ctx context.Context, tx *sql.Tx, tenantID string, input CreateKeyInput) (CreateKeyResult, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return CreateKeyResult{}, err
+	}
+	mode := "off"
+	if live {
+		mode = "on"
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', $1, true)`, mode); err != nil {
+		return CreateKeyResult{}, fmt.Errorf("set the key's mode: %w", err)
+	}
 	result, err := s.checkMintAndInsert(ctx, tx, tenantID, input)
 	if err != nil {
 		return CreateKeyResult{}, err

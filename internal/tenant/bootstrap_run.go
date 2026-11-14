@@ -25,7 +25,7 @@ import (
 // pg_advisory_xact_lock(LockKeyBootstrap):
 //
 //	guards (first-tenant / owner-email uniqueness, authoritative under
-//	the lock) → tenant → tenant_settings seed → 3 API keys → owner user
+//	the lock) → tenant → tenant_settings seed → test and live secret key → owner user
 //	→ audit rows → default dunning policy per mode
 //
 // so a failure anywhere leaves ZERO rows behind. The half-bootstrap
@@ -188,23 +188,15 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 	}
 
 	// The tx runs under TxBypass (no tenant exists at BEGIN), so it stamps
-	// the settings the writes below read: app.tenant_id for every audit row,
-	// and app.livemode, which the set_livemode trigger copies to each row.
+	// app.tenant_id, which every audit row reads.
 	if _, err := tx.ExecContext(ctx, `SELECT set_config('app.tenant_id', $1, true)`, tenantID); err != nil {
 		return BootstrapResult{}, fmt.Errorf("stamp tenant: %w", err)
 	}
 
 	// A test and a live secret key. A key mints keys only in its own mode, so
-	// the account's first live key comes from here. Each key and its audit
-	// row are written in the key's mode.
+	// the account's first live key comes from here. CreateKeyTx writes each
+	// key and its audit row in the key's mode.
 	mintSecret := func(live bool, name string) (string, error) {
-		mode := "off"
-		if live {
-			mode = "on"
-		}
-		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', $1, true)`, mode); err != nil {
-			return "", fmt.Errorf("set livemode: %w", err)
-		}
 		created, err := deps.CreateKeyTx(postgres.WithLivemode(ctx, live), tx, tenantID, auth.CreateKeyInput{Name: name, KeyType: auth.KeyTypeSecret})
 		if err != nil {
 			return "", fmt.Errorf("create %s: %w", name, err)
@@ -220,6 +212,11 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 		return BootstrapResult{}, err
 	}
 
+	// Account-plane rows (the owner user, and the tenant and owner audit rows
+	// below) are written live.
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', 'on', true)`); err != nil {
+		return BootstrapResult{}, fmt.Errorf("set livemode: %w", err)
+	}
 	ownerUser, err := deps.CreateUserTx(ctx, tx, ownerEmail, passwordHash, tenantID, "owner")
 	if err != nil {
 		return BootstrapResult{}, err
@@ -233,10 +230,6 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 	// actor = system: there is genuinely no authenticated identity here (the
 	// route runs only while zero tenants exist, gated by a bootstrap token).
 	if deps.Audit != nil {
-		// Account-plane facts are recorded live.
-		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', 'on', true)`); err != nil {
-			return BootstrapResult{}, fmt.Errorf("stamp livemode for audit: %w", err)
-		}
 
 		if err := deps.Audit.LogInTx(ctx, tx, audit.Entry{
 			Action:        domain.AuditActionCreate,
