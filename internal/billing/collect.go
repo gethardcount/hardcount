@@ -60,6 +60,10 @@ func (e *Engine) CollectInvoice(ctx context.Context, tenantID, invoiceID string,
 	}
 	if _, errs := e.processAutoCharge(ctx, inv, at, noPMTriggerFinalize); len(errs) > 0 {
 		for _, cerr := range errs {
+			if refusedClaim(cerr) {
+				slog.DebugContext(ctx, "collect: another charge has the invoice", "invoice_id", invoiceID, "error", cerr)
+				continue
+			}
 			slog.WarnContext(ctx, "collect: did not complete; "+collectFailureNext(cerr),
 				"invoice_id", invoiceID, "error", cerr)
 		}

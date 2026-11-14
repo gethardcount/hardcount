@@ -159,6 +159,8 @@ func TestRetrySweep_FullyCreditCovered_MarksPaidWithoutCharge(t *testing.T) {
 func TestRetrySweep_CreditApplyFailure_SkipsCharge(t *testing.T) {
 	applier := &fakeCreditApplier{err: errors.New("db blip")}
 	inv, charger, engine := retryHarness(t, applier)
+	// What the store answers after the hold is released: still queued.
+	inv.claimState = map[string]domain.ChargeClaimState{"inv_1": domain.ChargeClaimable}
 
 	charged, errs := engine.RetryPendingCharges(postgres.WithLivemode(context.Background(), true), 50, nil)
 	if len(errs) != 0 {
