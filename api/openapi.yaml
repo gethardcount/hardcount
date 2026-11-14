@@ -27630,7 +27630,9 @@ paths:
         The body is optional. With no body, or `expires_in_seconds: 0`,
         the old key is revoked at once. A positive value keeps the old
         key working for that many seconds (at most 604800, 7 days), so
-        deployed clients can switch without downtime. Writes an audit row.
+        deployed clients can switch without downtime; an old key that
+        already expires sooner keeps its own `expires_at`. A revoked or
+        expired key cannot be rotated. Writes an audit row.
       parameters:
         - name: id
           in: path
@@ -27713,7 +27715,7 @@ paths:
                   message: "insufficient permissions: this key type does not have apikey:write access"
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "409":
-          description: The key is already revoked (code `invalid_state`).
+          description: The key is revoked or has expired (code `invalid_state`). Create a new key instead.
           content:
             application/json:
               schema:
@@ -27725,7 +27727,7 @@ paths:
                   message: cannot rotate a revoked key
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "422":
-          description: "`expires_in_seconds` is negative or over 604800 (`param: expires_in_seconds`), the old key's `expires_at` has passed so the new key would copy it (`param: expires_at`), or the body has an unknown field."
+          description: "`expires_in_seconds` is negative or over 604800 (`param: expires_in_seconds`), or the body has an unknown field."
           content:
             application/json:
               schema:

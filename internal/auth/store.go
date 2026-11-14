@@ -14,7 +14,8 @@ type Store interface {
 	GetByPrefix(ctx context.Context, prefix string) (domain.APIKey, error)
 	Revoke(ctx context.Context, tenantID, id string) (domain.APIKey, error)
 	// ScheduleExpiry sets expires_at on a key that is not revoked, without
-	// revoking it. Rotation uses it when a grace period is requested.
+	// revoking it, and never later than the key's own expires_at. Rotation
+	// uses it when a grace period is requested.
 	// ValidateKey rejects expired keys the same way it rejects revoked ones.
 	// But with revoked_at unset, GetByPrefix still finds the key through the
 	// grace window, so requests in flight can still authenticate.

@@ -16965,7 +16965,9 @@ export const getRotateApiKeyUrl = (id: string,) => {
  * The body is optional. With no body, or `expires_in_seconds: 0`,
  * the old key is revoked at once. A positive value keeps the old
  * key working for that many seconds (at most 604800, 7 days), so
- * deployed clients can switch without downtime. Writes an audit row.
+ * deployed clients can switch without downtime; an old key that
+ * already expires sooner keeps its own `expires_at`. A revoked or
+ * expired key cannot be rotated. Writes an audit row.
  * @summary Rotate an API key
  */
 export const rotateApiKey = async (id: string,
