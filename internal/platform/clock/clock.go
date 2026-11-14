@@ -211,19 +211,20 @@ func Decision(ctx context.Context) (Sim, bool) {
 	return s, ok
 }
 
+// ErrUndecided is Decide's error when the resolver could not read the
+// record or its clock. It wraps the resolver's error, so the cause stays
+// readable. A caller refuses the work and lets its sender retry (a webhook
+// answers 5xx, so Stripe delivers it again). It checks ErrUndecided before
+// any not-found test: the cause underneath may itself be a not-found, and a
+// record whose time could not be read is not a record that is missing.
+var ErrUndecided = errors.New("the time could not be decided")
+
 // Decide resolves p through r and records the answer on ctx: the entity's
 // test clock and its instant, or real time when the entity is on no clock
 // (an answer without a clock id binds real time, never a frozen instant).
-// Unlike BindEffectiveNow it returns the resolver's error, keeps nothing an
-// earlier binding held, and needs a resolver and an id: it is the call that
-// decides, at the entry point of a request or a job's row.
-// ErrUndecided marks a time that could not be decided: the resolver could
-// not read the record's clock. It wraps the resolver's error, so the cause
-// stays readable; a caller that sorts errors checks it before any not-found,
-// since the cause underneath may itself be a not-found, and a record whose
-// time could not be read is not "a record we do not know".
-var ErrUndecided = errors.New("the time could not be decided")
-
+// Unlike BindEffectiveNow it returns the resolver's error, as ErrUndecided,
+// keeps nothing an earlier binding held, and needs a resolver and an id: it
+// is the call that decides, at the entry point of a request or a job's row.
 func Decide(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
 	if r == nil {
 		return ctx, errors.New("decide the time: no resolver")

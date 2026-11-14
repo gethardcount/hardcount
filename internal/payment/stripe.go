@@ -1668,19 +1668,32 @@ func (s *Stripe) processEvent(ctx context.Context, tenantID string, event domain
 }
 
 // decideFor decides an event's time from the record it names, right after
-// the handler has it (test-clock step 3): the record's clock, or real time.
-// In live mode it does nothing: no live record is on a test clock. A failure
-// is clock.ErrUndecided, which isTransientWebhookError delivers again.
+// the handler has read that record: the record's clock, or real time for a
+// record on no clock. In live mode it does nothing: no live record is on a
+// test clock. An event with no mode on its ctx is a fault (the webhook
+// handler and the restore catch-up both set one), so it is refused. A
+// failure is clock.ErrUndecided, which isTransientWebhookError delivers
+// again.
 func (s *Stripe) decideFor(ctx context.Context, pin clock.Pin) (context.Context, error) {
-	if live, err := postgres.Livemode(ctx); (err == nil && live) || s.resolver == nil {
+	if s.resolver == nil {
+		return ctx, nil // only narrow unit tests build the adapter without one; NewServer always wires the engine
+	}
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return ctx, fmt.Errorf("%w: the event's context has no mode", clock.ErrUndecided)
+	}
+	if live {
 		return ctx, nil
 	}
 	return clock.Decide(ctx, s.resolver, pin)
 }
 
 // decideForCustomer is decideFor for an event that names a customer it has
-// not read: a customer that does not exist gets real time, and the handler's
-// own path answers it as before.
+// not read. Any not-found gets real time, and the handler's own path answers
+// the event as before: either the customer does not exist, or it exists and
+// its clock was not found, which can only be a race with that clock's
+// deletion (customers.test_clock_id is ON DELETE SET NULL), after which the
+// customer is on no clock and real time is right.
 func (s *Stripe) decideForCustomer(ctx context.Context, tenantID, customerID string) (context.Context, error) {
 	decided, err := s.decideFor(ctx, clock.Pin{TenantID: tenantID, CustomerID: customerID})
 	if errors.Is(err, errs.ErrNotFound) {
@@ -1788,7 +1801,7 @@ func (s *Stripe) handleSetupIntentSucceeded(ctx context.Context, tenantID string
 	}
 	ctx, err := s.decideForCustomer(ctx, tenantID, customerID)
 	if err != nil {
-		return fmt.Errorf("setup_intent.succeeded for customer %s: %w", customerID, err)
+		return fmt.Errorf("setup_intent.succeeded for customer %s refused, Stripe delivers it again: %w", customerID, err)
 	}
 
 	// Attribute the attach to the CUSTOMER when this SetupIntent came from the
@@ -2167,7 +2180,7 @@ func (s *Stripe) handlePaymentSucceeded(ctx context.Context, tenantID string, ev
 		return fmt.Errorf("find invoice for PI %s: %w", event.PaymentIntentID, err)
 	}
 	if ctx, err = s.decideFor(ctx, clock.Pin{TenantID: tenantID, InvoiceID: inv.ID}); err != nil {
-		return fmt.Errorf("payment_intent.succeeded for invoice %s: %w", inv.ID, err)
+		return fmt.Errorf("payment_intent.succeeded for invoice %s refused, Stripe delivers it again: %w", inv.ID, err)
 	}
 
 	// Webhook is one of the discover-then-settle entry points (ADR-049): it
@@ -2219,7 +2232,7 @@ func (s *Stripe) handlePaymentFailed(ctx context.Context, tenantID string, event
 		return fmt.Errorf("find invoice for PI %s: %w", event.PaymentIntentID, err)
 	}
 	if ctx, err = s.decideFor(ctx, clock.Pin{TenantID: tenantID, InvoiceID: inv.ID}); err != nil {
-		return fmt.Errorf("payment_intent.payment_failed for invoice %s: %w", inv.ID, err)
+		return fmt.Errorf("payment_intent.payment_failed for invoice %s refused, Stripe delivers it again: %w", inv.ID, err)
 	}
 
 	// Discover-then-settle (ADR-049): hand the report to the shared primitive,
@@ -2391,7 +2404,7 @@ func (s *Stripe) handleCheckoutCompleted(ctx context.Context, tenantID string, e
 	}
 	ctx, err := s.decideForCustomer(ctx, tenantID, customerID)
 	if err != nil {
-		return fmt.Errorf("checkout.session.completed for customer %s: %w", customerID, err)
+		return fmt.Errorf("checkout.session.completed for customer %s refused, Stripe delivers it again: %w", customerID, err)
 	}
 
 	return s.RecordCheckoutCard(ctx, tenantID, customerID, event.CustomerExternalID, hardcountPurpose)
