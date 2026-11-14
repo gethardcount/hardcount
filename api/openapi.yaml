@@ -2573,6 +2573,7 @@ components:
         tax_rate: 0
         tax_provider: manual
         tax_status: ok
+        tax_inclusive: false
         payment_card_brand: visa
         payment_card_last4: "4242"
         total_amount_cents: 8650
@@ -3006,6 +3007,7 @@ components:
           tax_rate: 0
           tax_provider: manual
           tax_status: ok
+          tax_inclusive: false
           payment_card_brand: visa
           payment_card_last4: "4242"
           total_amount_cents: 8650
@@ -4616,6 +4618,7 @@ components:
             tax_amount_cents: 0
             tax_rate: 0
             tax_status: ok
+            tax_inclusive: false
             total_amount_cents: 8650
             amount_due_cents: 3650
             amount_paid_cents: 0
@@ -6609,6 +6612,7 @@ components:
           tax_rate: 0
           tax_provider: manual
           tax_status: ok
+          tax_inclusive: false
           payment_card_brand: visa
           payment_card_last4: "4242"
           total_amount_cents: 8650
@@ -6703,6 +6707,7 @@ components:
           tax_rate: 0
           tax_provider: manual
           tax_status: ok
+          tax_inclusive: false
           payment_card_brand: visa
           payment_card_last4: "4242"
           total_amount_cents: 8650
@@ -11035,6 +11040,7 @@ paths:
                     tax_amount_cents: 0
                     tax_rate: 0
                     tax_status: ok
+                    tax_inclusive: false
                     total_amount_cents: 8650
                     amount_due_cents: 3650
                     amount_paid_cents: 0
@@ -18997,6 +19003,7 @@ paths:
                     tax_rate: 0
                     tax_provider: manual
                     tax_status: ok
+                    tax_inclusive: false
                     payment_card_brand: visa
                     payment_card_last4: "4242"
                     total_amount_cents: 8650
@@ -19130,6 +19137,7 @@ paths:
                 tax_amount_cents: 0
                 tax_rate: 0
                 tax_status: ok
+                tax_inclusive: false
                 total_amount_cents: 25000
                 amount_due_cents: 25000
                 amount_paid_cents: 0
@@ -19396,6 +19404,7 @@ paths:
                   tax_rate: 0
                   tax_provider: manual
                   tax_status: ok
+                  tax_inclusive: false
                   payment_card_brand: visa
                   payment_card_last4: "4242"
                   total_amount_cents: 8650
@@ -19812,6 +19821,7 @@ paths:
                 tax_rate: 0
                 tax_provider: manual
                 tax_status: ok
+                tax_inclusive: false
                 total_amount_cents: 25000
                 amount_due_cents: 25000
                 amount_paid_cents: 0
@@ -20064,6 +20074,7 @@ paths:
                 tax_rate: 0
                 tax_provider: manual
                 tax_status: ok
+                tax_inclusive: false
                 total_amount_cents: 25000
                 amount_due_cents: 25000
                 amount_paid_cents: 0
@@ -20213,6 +20224,7 @@ paths:
                 tax_rate: 0
                 tax_provider: manual
                 tax_status: ok
+                tax_inclusive: false
                 total_amount_cents: 25000
                 amount_due_cents: 0
                 amount_paid_cents: 25000
@@ -20344,6 +20356,7 @@ paths:
                 tax_rate: 0
                 tax_provider: manual
                 tax_status: ok
+                tax_inclusive: false
                 payment_card_brand: visa
                 payment_card_last4: "4242"
                 total_amount_cents: 8650
@@ -20479,6 +20492,7 @@ paths:
                 tax_rate: 0
                 tax_provider: manual
                 tax_status: ok
+                tax_inclusive: false
                 payment_card_brand: visa
                 payment_card_last4: "4242"
                 total_amount_cents: 25000
@@ -22021,6 +22035,7 @@ paths:
                 tax_rate: 0
                 tax_provider: manual
                 tax_status: ok
+                tax_inclusive: false
                 payment_card_brand: visa
                 payment_card_last4: "4242"
                 total_amount_cents: 25000
@@ -22206,6 +22221,7 @@ paths:
                 tax_calculation_id: taxcalc_1QHkAbLkdIwHu7ixZ1y2x3w4
                 tax_transaction_id: tax_1QHkAcLkdIwHu7ixV5u6t7s8
                 tax_status: ok
+                tax_inclusive: false
                 tax_retry_count: 1
                 attention:
                   severity: info
