@@ -6,8 +6,9 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
-import { api, formatDate, type ApiKeyInfo } from '@/lib/api'
-import { timeAgo, sinceMs, untilMs, daysUntil, wallClockNow, type EffectiveNow } from '@/lib/effectiveNow'
+import { api, formatDate, formatDateTime } from '@/lib/api'
+import type { APIKey } from '@/lib/gen/schemas/aPIKey'
+import { timeAgo, sinceMs, daysUntil, wallClockNow, type EffectiveNow } from '@/lib/effectiveNow'
 import { addDaysInTZ, civilDateFrom, endOfDayInTZ, formatExpiryHintInTZ } from '@/lib/dates'
 import { applyApiError, showApiError } from '@/lib/formErrors'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -109,15 +110,11 @@ const KEY_TYPES: { value: KeyTypeChoice; label: string; hint: string; icon: type
   { value: 'ingest', label: 'Usage only', hint: 'Can only send usage events. Use it in LiteLLM or another gateway.', icon: Activity },
 ]
 
-function isExpired(key: ApiKeyInfo): boolean {
-  return !!key.expires_at && untilMs(key.expires_at, wallClockNow()) < 0
-}
-
-// keyStatus is the one status word a key shows: Active, a warning in the
-// last week before it expires, Expired or Revoked.
-function keyStatus(key: ApiKeyInfo): StatusDisplay {
-  if (key.revoked_at) return { label: 'Revoked', tone: 'neutral' }
-  if (isExpired(key)) return { label: 'Expired', tone: 'neutral' }
+// keyStatus is the status word a key shows. The server decides the status;
+// an active key in the last week before it expires gets a warning.
+function keyStatus(key: APIKey): StatusDisplay {
+  if (key.status === 'revoked') return { label: 'Revoked', tone: 'neutral' }
+  if (key.status === 'expired') return { label: 'Expired', tone: 'neutral' }
   if (key.expires_at) {
     const days = daysUntil(key.expires_at, wallClockNow())
     if (days <= 7) return { label: days === 0 ? 'Expires today' : `Expires in ${days} day${days === 1 ? '' : 's'}`, tone: 'warning' }
@@ -135,10 +132,10 @@ function inactiveLabel(expired: number, revoked: number): string {
 export default function ApiKeysPage() {
   usePageTitle('API keys')
   const [showCreate, setShowCreate] = useState(false)
-  const [createdKey, setCreatedKey] = useState<{ key: string; rotated: boolean } | null>(null)
-  const [revokeTarget, setRevokeTarget] = useState<ApiKeyInfo | null>(null)
+  const [createdKey, setCreatedKey] = useState<{ key: string; oldKey?: APIKey } | null>(null)
+  const [revokeTarget, setRevokeTarget] = useState<APIKey | null>(null)
   const [revoking, setRevoking] = useState(false)
-  const [rotateTarget, setRotateTarget] = useState<ApiKeyInfo | null>(null)
+  const [rotateTarget, setRotateTarget] = useState<APIKey | null>(null)
   const [showInactive, setShowInactive] = useState(false)
   const queryClient = useQueryClient()
 
@@ -168,9 +165,9 @@ export default function ApiKeysPage() {
     }
   }
 
-  const activeKeys = keys.filter(k => !k.revoked_at && !isExpired(k))
-  const expiredKeys = keys.filter(k => !k.revoked_at && isExpired(k))
-  const revokedKeys = keys.filter(k => !!k.revoked_at)
+  const activeKeys = keys.filter(k => k.status === 'active')
+  const expiredKeys = keys.filter(k => k.status === 'expired')
+  const revokedKeys = keys.filter(k => k.status === 'revoked')
 
   return (
     <>
@@ -244,13 +241,12 @@ export default function ApiKeysPage() {
                     <TableHead className={cn(HEAD, "w-12")}><span className="sr-only">Actions</span></TableHead>
                   </TableRow>
                 </TableHeader>
-                <TableBody>
+                <TableBody id="api-key-rows">
                   {[...activeKeys, ...(showInactive ? [...expiredKeys, ...revokedKeys] : [])].map(k => {
-                    const revoked = !!k.revoked_at
-                    const expired = !revoked && isExpired(k)
+                    const active = k.status === 'active'
                     return (
-                      <TableRow key={k.id} className={cn(ROW, (revoked || expired) && 'text-muted-foreground')}>
-                        <TableCell className={cn('text-sm font-medium', revoked || expired ? 'text-muted-foreground' : 'text-foreground')}>
+                      <TableRow key={k.id} className={cn(ROW, !active && 'text-muted-foreground')}>
+                        <TableCell className={cn('text-sm font-medium', active ? 'text-foreground' : 'text-muted-foreground')}>
                           {k.name}
                         </TableCell>
                         <TableCell className="hidden md:table-cell text-sm text-muted-foreground">{keyTypeLabel(k.key_type)}</TableCell>
@@ -265,18 +261,16 @@ export default function ApiKeysPage() {
                           {k.last_used_at ? relativeTime(k.last_used_at, wallClockNow()) : 'Never'}
                         </TableCell>
                         <TableCell className="text-right">
-                          {!revoked && (
+                          {active && (
                             <DropdownMenu>
                               <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="size-10 md:size-8" aria-label={`Actions for ${k.name}`} />}>
                                 <MoreHorizontal size={16} />
                               </DropdownMenuTrigger>
                               <DropdownMenuContent align="end" className="w-40">
-                                {!expired && (
-                                  <DropdownMenuItem onClick={() => setRotateTarget(k)}>
-                                    <RotateCw size={14} className="mr-2" />
-                                    Rotate
-                                  </DropdownMenuItem>
-                                )}
+                                <DropdownMenuItem onClick={() => setRotateTarget(k)}>
+                                  <RotateCw size={14} className="mr-2" />
+                                  Rotate
+                                </DropdownMenuItem>
                                 <DropdownMenuItem onClick={() => setRevokeTarget(k)} className="text-destructive focus:text-destructive">
                                   Revoke
                                 </DropdownMenuItem>
@@ -294,6 +288,7 @@ export default function ApiKeysPage() {
 
           {expiredKeys.length + revokedKeys.length > 0 && (
             <button onClick={() => setShowInactive(!showInactive)}
+              aria-expanded={showInactive} aria-controls="api-key-rows"
               className="mt-3 flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
               <ChevronDown size={14} className={cn('transition-transform', showInactive && 'rotate-180')} />
               {showInactive ? 'Hide' : 'Show'} {inactiveLabel(expiredKeys.length, revokedKeys.length)}
@@ -308,7 +303,7 @@ export default function ApiKeysPage() {
           onClose={() => setShowCreate(false)}
           onCreated={(rawKey) => {
             setShowCreate(false)
-            setCreatedKey({ key: rawKey, rotated: false })
+            setCreatedKey({ key: rawKey })
             queryClient.invalidateQueries({ queryKey: ['api-keys'] })
             toast.success('API key created')
           }}
@@ -320,9 +315,9 @@ export default function ApiKeysPage() {
         <RotateKeyDialog
           target={rotateTarget}
           onClose={() => setRotateTarget(null)}
-          onRotated={(rawKey) => {
+          onRotated={(rawKey, oldKey) => {
             setRotateTarget(null)
-            setCreatedKey({ key: rawKey, rotated: true })
+            setCreatedKey({ key: rawKey, oldKey })
             queryClient.invalidateQueries({ queryKey: ['api-keys'] })
             toast.success('API key rotated')
           }}
@@ -332,11 +327,18 @@ export default function ApiKeysPage() {
       {/* The new key, shown once. */}
       {createdKey && (
         <ShowOnceSecretDialog
-          title={createdKey.rotated ? 'Key rotated' : 'API key created'}
-          label={createdKey.rotated ? 'New key' : 'Key'}
+          title={createdKey.oldKey ? 'Key rotated' : 'API key created'}
+          label={createdKey.oldKey ? 'New key' : 'Key'}
           secret={createdKey.key}
           onDone={() => setCreatedKey(null)}
         >
+          {createdKey.oldKey && (
+            <p className="text-sm text-muted-foreground">
+              {createdKey.oldKey.status !== 'active' || !createdKey.oldKey.expires_at
+                ? 'The old key has stopped working.'
+                : `The old key keeps working until ${formatDateTime(createdKey.oldKey.expires_at, tenantTZ)}.`}
+            </p>
+          )}
           <div>
             <p className="text-xs font-medium text-muted-foreground">Try it</p>
             <div className="mt-1.5 flex items-start gap-2">
@@ -624,9 +626,9 @@ function RotateKeyDialog({
   onClose,
   onRotated,
 }: {
-  target: ApiKeyInfo
+  target: APIKey
   onClose: () => void
-  onRotated: (rawKey: string) => void
+  onRotated: (rawKey: string, oldKey: APIKey) => void
 }) {
   const [grace, setGrace] = useState<number>(24 * 60 * 60)
   const [submitting, setSubmitting] = useState(false)
@@ -635,7 +637,7 @@ function RotateKeyDialog({
     setSubmitting(true)
     try {
       const res = await api.rotateApiKey(target.id, grace)
-      onRotated(res.raw_key)
+      onRotated(res.raw_key, res.old_key)
     } catch (err) {
       showApiError(err, 'Failed to rotate key')
     } finally {

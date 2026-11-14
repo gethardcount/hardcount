@@ -54,9 +54,13 @@ export function CopyButton({ text, label = 'Copy' }: { text: string; label?: str
       variant="outline"
       size="sm"
       className="shrink-0"
-      onClick={() => {
-        void navigator.clipboard.writeText(text)
-        toast.success('Copied to clipboard')
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text)
+          toast.success('Copied to clipboard')
+        } catch {
+          toast.error("Couldn't copy. Select the text and copy it yourself.")
+        }
       }}
     >
       {label}

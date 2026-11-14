@@ -1185,6 +1185,149 @@ test('a usage-only API key is made from the dialog and shows its type in the lis
   expect(keys.data.find(k => k.name === name)?.key_type).toBe('ingest')
 })
 
+// A key made through the API, then found in the list by its name.
+async function apiKeyRow(page: import('@playwright/test').Page, name: string, expiresAt?: string): Promise<Locator> {
+  await api('POST', '/api-keys', { name, key_type: 'secret', ...(expiresAt ? { expires_at: expiresAt } : {}) })
+  await page.goto('/api-keys')
+  return page.getByRole('main').getByRole('row').filter({ hasText: name })
+}
+
+// shootKeys saves the page as it is, at the desktop width and at 390 px, as
+// activity-shots/api-keys-<state>-desktop.png and -390.png (CI uploads the
+// folder), then puts the desktop width back.
+async function shootKeys(page: import('@playwright/test').Page, state: string) {
+  const desktop = page.viewportSize() ?? { width: 1440, height: 900 }
+  const shots = path.join(import.meta.dirname, '..', 'activity-shots')
+  await page.screenshot({ path: path.join(shots, `api-keys-${state}-desktop.png`), animations: 'disabled' })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.screenshot({ path: path.join(shots, `api-keys-${state}-390.png`), animations: 'disabled' })
+  await page.setViewportSize(desktop)
+}
+
+test('copying a new key that the browser refuses says so, not "Copied"', async ({ page }) => {
+  await page.goto('/api-keys')
+  await page.getByRole('button', { name: 'Create API key' }).click()
+  await page.getByPlaceholder('e.g. Production, Staging, CI/CD').fill(`e2e copy refused ${uniq()}`)
+  await page.getByRole('button', { name: 'Create key' }).click()
+  const shown = page.getByRole('dialog', { name: 'API key created' })
+  await expect(shown).toBeVisible()
+  // The browser refuses the clipboard, as it does without permission.
+  await page.evaluate(() => {
+    Object.defineProperty(navigator.clipboard, 'writeText', { value: () => Promise.reject(new Error('denied')) })
+  })
+  await shown.getByRole('button', { name: 'Copy' }).first().click()
+  await expect(page.getByText("Couldn't copy. Select the text and copy it yourself.")).toBeVisible()
+  await expect(page.getByText('Copied to clipboard')).toHaveCount(0)
+  await expect(shown).toBeVisible()
+  await shootKeys(page, 'copy-refused')
+  await shown.getByRole('button', { name: "I've copied it" }).click()
+})
+
+test('a rotated key says when the old key stops working', async ({ page }) => {
+  const name = `e2e rotate ${uniq()}`
+  const row = await apiKeyRow(page, name)
+  const rotate = async (grace: string) => {
+    await page.getByRole('main').getByRole('row').filter({ hasText: name }).filter({ hasText: 'Active' }).first()
+      .getByRole('button', { name: `Actions for ${name}` }).click()
+    await page.getByRole('menuitem', { name: 'Rotate' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Rotate API key' })
+    await dialog.getByRole('button', { name: grace }).click()
+    await dialog.getByRole('button', { name: 'Rotate key' }).click()
+    return page.getByRole('dialog', { name: 'Key rotated' })
+  }
+  await expect(row).toHaveCount(1)
+  let shown = await rotate('In 24 hours')
+  await expect(shown.getByText(/^The old key keeps working until /)).toBeVisible()
+  await shootKeys(page, 'rotated-reveal')
+  await shown.getByRole('button', { name: "I've copied it" }).click()
+
+  shown = await rotate('Now')
+  await expect(shown.getByText('The old key has stopped working.')).toBeVisible()
+  await shown.getByRole('button', { name: "I've copied it" }).click()
+})
+
+test('expired and revoked keys sit behind a toggle and have no actions', async ({ page }) => {
+  const key = (id: string, name: string, status: string, extra: Record<string, string> = {}) => ({
+    id, name, status, key_type: 'secret', livemode: false, tenant_id: 'hc_ten_e2e',
+    key_prefix: 'hc_secret_test_0123456789ab', created_at: '2026-10-01T08:00:00Z', ...extra,
+  })
+  // The server decides each status; the page shows it.
+  await page.route('**/v1/api-keys?*', route => route.fulfill({
+    json: {
+      data: [
+        key('hc_key_a', 'Active one', 'active'),
+        key('hc_key_e', 'Expired one', 'expired', { expires_at: '2026-10-02T00:00:00Z' }),
+        key('hc_key_r', 'Revoked one', 'revoked', { revoked_at: '2026-10-03T00:00:00Z' }),
+      ],
+      total: 3,
+    },
+  }))
+  await page.goto('/api-keys')
+  const main = page.getByRole('main')
+  const toggle = main.getByRole('button', { name: 'Show 1 expired and 1 revoked keys' })
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(main.getByRole('row').filter({ hasText: 'Expired one' })).toHaveCount(0)
+  await toggle.click()
+  await expect(main.getByRole('button', { name: 'Hide 1 expired and 1 revoked keys' })).toHaveAttribute('aria-expanded', 'true')
+  for (const [name, status] of [['Expired one', 'Expired'], ['Revoked one', 'Revoked']]) {
+    const row = main.getByRole('row').filter({ hasText: name })
+    await expect(row).toContainText(status)
+    await expect(row.getByRole('button', { name: `Actions for ${name}` })).toHaveCount(0)
+  }
+  await expect(main.getByRole('button', { name: 'Actions for Active one' })).toHaveCount(1)
+  await shootKeys(page, 'inactive-open')
+})
+
+test('a key that expires within a week says so, and the list fits a phone', async ({ page }) => {
+  const name = `e2e expiring ${uniq()}`
+  const inThreeDays = new Date(Date.now() + 3 * 86_400_000 + 3_600_000).toISOString()
+  const row = await apiKeyRow(page, name, inThreeDays)
+  await expect(row).toContainText(/Expires in [23] days/)
+  await shootKeys(page, 'list-expiring')
+  // On a phone the row keeps its name, status and menu, with no sideways scroll.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(row.getByRole('button', { name: `Actions for ${name}` })).toBeVisible()
+  await expect(row).toContainText(/Expires in [23] days/)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+})
+
+test('revoking a test key is a plain confirm; a live key needs the typed word', async ({ page }) => {
+  const name = `e2e revoke ${uniq()}`
+  const row = await apiKeyRow(page, name)
+  await row.getByRole('button', { name: `Actions for ${name}` }).click()
+  await page.getByRole('menuitem', { name: 'Revoke' }).click()
+  const plain = page.getByRole('alertdialog')
+  await expect(plain.getByRole('textbox')).toHaveCount(0)
+  await plain.getByRole('button', { name: 'Revoke key' }).click()
+  await expect(plain).toHaveCount(0)
+  const keys = await apiListAll<{ name: string; status: string }>('/api-keys')
+  expect(keys.find(k => k.name === name)?.status).toBe('revoked')
+
+  // A live key: the dashboard is in test mode, so the list and the revoke are
+  // answered here.
+  const live = {
+    id: 'hc_key_live', name: 'Live one', status: 'active', key_type: 'secret', livemode: true,
+    tenant_id: 'hc_ten_e2e', key_prefix: 'hc_secret_live_0123456789ab', created_at: '2026-10-01T08:00:00Z',
+  }
+  let revoked = false
+  await page.route('**/v1/api-keys?*', route => route.fulfill({ json: { data: [live], total: 1 } }))
+  await page.route('**/v1/api-keys/hc_key_live', route => {
+    revoked = true
+    return route.fulfill({ json: { ...live, status: 'revoked', revoked_at: '2026-11-14T12:00:00Z' } })
+  })
+  await page.goto('/api-keys')
+  await page.getByRole('button', { name: 'Actions for Live one' }).click()
+  await page.getByRole('menuitem', { name: 'Revoke' }).click()
+  const typed = page.getByRole('alertdialog', { name: 'Revoke live API key' })
+  const confirm = typed.getByRole('button', { name: 'Revoke key' })
+  await expect(confirm).toBeDisabled()
+  await shootKeys(page, 'revoke-live')
+  await typed.getByRole('textbox').fill('REVOKE')
+  await confirm.click()
+  await expect(typed).toHaveCount(0)
+  expect(revoked).toBe(true)
+})
+
 test('each Home attention line counts the rows of the list it opens', async ({ page }) => {
   // Each count is its list's total (other workers add invoices meanwhile, so
   // the answers are fixed here). The overview, which leaves out test-clock
