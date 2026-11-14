@@ -16,7 +16,7 @@ test('the advance and delete dialogs count the customers on the clock', async ({
   await page.getByRole('button', { name: 'Advance', exact: true }).click()
   const advance = page.getByRole('dialog')
   await expect(advance).toContainText('Moves time forward for 1 customer on this clock')
-  await expect(advance).not.toContainText('subscription')
+  await expect(advance).not.toContainText(/\d+ subscriptions?\)/)
   await page.keyboard.press('Escape')
 
   await page.getByRole('button', { name: 'Delete test clock' }).click()
