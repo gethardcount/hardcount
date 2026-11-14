@@ -19951,8 +19951,10 @@ paths:
             Nothing was sent. Codes: `invoice_not_collectible` (the invoice
             is draft, voided or paid), `payment_in_flight` or
             `payment_unidentifiable` (a charge is unresolved),
-            `email_not_configured` (this server has no SMTP set up), or
-            `no_email_on_file` (the customer has no email address).
+            `stripe_not_connected` (Stripe is not connected for this mode;
+            connect it under Settings), `email_not_configured` (this server
+            has no SMTP set up), or `no_email_on_file` (the customer has no
+            email address).
           content:
             application/json:
               schema:

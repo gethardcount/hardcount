@@ -11,6 +11,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // outcomeNoPMNotifier returns a fixed NotifyOutcome so the endpoint tests can
@@ -102,6 +103,7 @@ func TestResendSetupLink_HonestDispositions(t *testing.T) {
 		rctx := chi.NewRouteContext()
 		rctx.URLParams.Add("id", invID)
 		reqCtx := auth.WithTenantID(req.Context(), "t1")
+		reqCtx = postgres.WithLivemode(reqCtx, true)
 		reqCtx = context.WithValue(reqCtx, chi.RouteCtxKey, rctx)
 		return req.WithContext(reqCtx), httptest.NewRecorder()
 	}
@@ -122,7 +124,7 @@ func TestResendSetupLink_HonestDispositions(t *testing.T) {
 		store := newMemStore()
 		inv := seed(t, store)
 		notifier := &outcomeNoPMNotifier{outcome: domain.NotifySent}
-		h := &Handler{svc: NewService(store, nil, nil), noPMNotifier: notifier, emailConfigured: true}
+		h := &Handler{svc: connectedService(store), noPMNotifier: notifier, emailConfigured: true}
 		req, rr := newReq(t, inv.ID)
 		h.resendSetupLink(rr, req)
 		if rr.Code != http.StatusOK {
@@ -137,7 +139,7 @@ func TestResendSetupLink_HonestDispositions(t *testing.T) {
 		store := newMemStore()
 		inv := seed(t, store)
 		notifier := &outcomeNoPMNotifier{outcome: domain.NotifySkippedNoEmail}
-		h := &Handler{svc: NewService(store, nil, nil), noPMNotifier: notifier, emailConfigured: true}
+		h := &Handler{svc: connectedService(store), noPMNotifier: notifier, emailConfigured: true}
 		req, rr := newReq(t, inv.ID)
 		h.resendSetupLink(rr, req)
 		if rr.Code != http.StatusConflict {
@@ -155,7 +157,7 @@ func TestResendSetupLink_HonestDispositions(t *testing.T) {
 		store := newMemStore()
 		inv := seed(t, store)
 		notifier := &outcomeNoPMNotifier{outcome: domain.NotifySent}
-		h := &Handler{svc: NewService(store, nil, nil), noPMNotifier: notifier} // emailConfigured: false
+		h := &Handler{svc: connectedService(store), noPMNotifier: notifier} // emailConfigured: false
 		req, rr := newReq(t, inv.ID)
 		h.resendSetupLink(rr, req)
 		if rr.Code != http.StatusConflict {

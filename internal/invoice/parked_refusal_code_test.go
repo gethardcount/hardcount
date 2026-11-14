@@ -12,6 +12,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // TestParkedRefusalsAnswerOneCode pins the HTTP half of the single-source rule.
@@ -60,7 +61,7 @@ func TestParkedRefusalsAnswerOneCode(t *testing.T) {
 			}
 
 			h := &Handler{
-				svc:           NewService(store, nil, nil),
+				svc:           connectedService(store),
 				charger:       &fakeCharger{},
 				paymentSetups: &fakePaymentSetups{setup: domain.CustomerPaymentSetup{SetupStatus: domain.PaymentSetupReady, StripeCustomerID: "cus_stripe_1"}},
 				auditLogger:   &capturingInvoiceAudit{},
@@ -71,6 +72,7 @@ func TestParkedRefusalsAnswerOneCode(t *testing.T) {
 			rctx := chi.NewRouteContext()
 			rctx.URLParams.Add("id", inv.ID)
 			reqCtx := auth.WithTenantID(req.Context(), "t1")
+			reqCtx = postgres.WithLivemode(reqCtx, true)
 			reqCtx = context.WithValue(reqCtx, chi.RouteCtxKey, rctx)
 			req = req.WithContext(reqCtx)
 			rr := httptest.NewRecorder()

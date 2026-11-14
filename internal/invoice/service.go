@@ -803,6 +803,20 @@ func (s *Service) SetStripeChecker(c StripeChecker) {
 	s.stripeChecker = c
 }
 
+// StripeConnected reports whether Stripe is connected for the request's mode.
+// It fails closed: with no checker wired it reports false, so a route that
+// needs Stripe refuses rather than skipping the check.
+func (s *Service) StripeConnected(ctx context.Context, tenantID string) (bool, error) {
+	if s.stripeChecker == nil {
+		return false, nil
+	}
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return false, err
+	}
+	return s.stripeChecker.HasFor(ctx, tenantID, live)
+}
+
 type CreateInput struct {
 	CustomerID         string    `json:"customer_id"`
 	SubscriptionID     string    `json:"subscription_id"`

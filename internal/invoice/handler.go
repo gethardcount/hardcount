@@ -634,6 +634,17 @@ func (h *Handler) resendSetupLink(w http.ResponseWriter, r *http.Request) {
 			"setup link can only be resent for an unpaid invoice that is finalized or written off")
 		return
 	}
+	// Without Stripe for this mode the customer could add a card that can
+	// never be saved or charged. Refuse before the email goes out.
+	connected, err := h.svc.StripeConnected(r.Context(), tenantID)
+	if err != nil {
+		respond.InternalError(w, r)
+		return
+	}
+	if !connected {
+		respond.FromError(w, r, errs.StripeNotConnected(), "invoice")
+		return
+	}
 	// The setup-link email tells the CUSTOMER "add a payment method and we'll
 	// collect it automatically". No charge path collects an invoice whose
 	// payment is in flight — for a parked one (ADR-107), not until Stripe has
