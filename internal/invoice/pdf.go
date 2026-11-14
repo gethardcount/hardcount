@@ -13,7 +13,6 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/pdffonts"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
 // CompanyInfo holds tenant company details for the PDF header.
@@ -1017,7 +1016,10 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 			need(10, false)
 			setFont(false, 7)
 			setColor(170, 170, 170)
-			footer := fmt.Sprintf("Generated on %s  |  %s", clock.Now(ctx).Format("Jan 2, 2006 15:04 UTC"), inv.ID)
+			// When this file was made: machine time, even for an invoice on a
+			// test clock, whose own dates are the clock's.
+			generated := time.Now().UTC() //nolint:forbidigo // wall-clock: the footer says when the file was made, not an invoice date
+			footer := fmt.Sprintf("Generated on %s  |  %s", generated.Format("Jan 2, 2006 15:04 UTC"), inv.ID)
 			fw, _ := pdf.MeasureTextWidth(footer)
 			textAt((pageW-fw)/2, y, footer)
 			y += 10 // the 7pt line's height, so keep measures the whole footer
