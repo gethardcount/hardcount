@@ -276,9 +276,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 		r.rate = id(create("PUT", "/v1/provider-costs", map[string]any{
 			"provider": "openai", "model": "model-" + tag, "token_type": "input", "unit_cost_cents": "0.0001",
 		}))
-		// createAPIKeyWithMode derives the key id from the key itself.
-		mode := strings.SplitN(strings.TrimPrefix(key, "hc_secret_"), "_", 2)
-		r.apiKey = "hc_key_e2e_" + mode[1][:8] + "_" + mode[0]
+		r.apiKey = apiKeyID(t, db, key)
 		return r
 	}
 	own := seed(aLive, keyALive, "own")

@@ -29,7 +29,7 @@ const (
 
 // Service creates, validates, rotates and revokes API keys.
 type Service struct {
-	store    Store
+	store    *PostgresStore
 	lastUsed lastUsedDebounce
 }
 
@@ -44,8 +44,8 @@ type Service struct {
 // only add waiters.
 const lastUsedTouchInterval = time.Minute
 
-// NewService returns a Service backed by store.
-func NewService(store Store) *Service {
+// NewService returns a Service on store.
+func NewService(store *PostgresStore) *Service {
 	return &Service{store: store}
 }
 
