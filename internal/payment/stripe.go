@@ -1667,6 +1667,41 @@ func (s *Stripe) processEvent(ctx context.Context, tenantID string, event domain
 	}
 }
 
+// decideFor decides an event's time from the record it names, right after
+// the handler has read that record: the record's clock, or real time for a
+// record on no clock. In live mode it does nothing: no live record is on a
+// test clock. An event with no mode on its ctx is a fault (the webhook
+// handler and the restore catch-up both set one), so it is refused. A
+// failure is clock.ErrUndecided, which isTransientWebhookError delivers
+// again.
+func (s *Stripe) decideFor(ctx context.Context, pin clock.Pin) (context.Context, error) {
+	if s.resolver == nil {
+		return ctx, nil // only narrow unit tests build the adapter without one; NewServer always wires the engine
+	}
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return ctx, fmt.Errorf("%w: the event's context has no mode", clock.ErrUndecided)
+	}
+	if live {
+		return ctx, nil
+	}
+	return clock.Decide(ctx, s.resolver, pin)
+}
+
+// decideForCustomer is decideFor for an event that names a customer it has
+// not read. Any not-found gets real time, and the handler's own path answers
+// the event as before: either the customer does not exist, or it exists and
+// its clock was not found, which can only be a race with that clock's
+// deletion (customers.test_clock_id is ON DELETE SET NULL), after which the
+// customer is on no clock and real time is right.
+func (s *Stripe) decideForCustomer(ctx context.Context, tenantID, customerID string) (context.Context, error) {
+	decided, err := s.decideFor(ctx, clock.Pin{TenantID: tenantID, CustomerID: customerID})
+	if errors.Is(err, errs.ErrNotFound) {
+		return clock.WithRealTime(ctx), nil
+	}
+	return decided, err
+}
+
 // isTransientWebhookError reports whether a webhook processing error is
 // worth a Stripe redelivery. A missing target entity (errs.ErrNotFound)
 // is permanent — the event references an invoice/customer that isn't in
@@ -1674,6 +1709,13 @@ func (s *Stripe) processEvent(ctx context.Context, tenantID string, event domain
 // else (DB write failure, contention, a downstream timeout) is treated
 // as transient: return it, respond 5xx, let Stripe redeliver.
 func isTransientWebhookError(err error) bool {
+	// Checked first: a record whose time could not be decided (its clock
+	// could not be read) is not "this event is about nothing we know", even
+	// when the cause underneath is a not-found. Acknowledging it would drop a
+	// payment's event for good.
+	if errors.Is(err, clock.ErrUndecided) {
+		return true
+	}
 	return !errors.Is(err, errs.ErrNotFound)
 }
 
@@ -1756,6 +1798,10 @@ func (s *Stripe) handleSetupIntentSucceeded(ctx context.Context, tenantID string
 		// to ~3 days, so a genuinely-foreign event can't redeliver unbounded.
 		return fmt.Errorf("setup_intent.succeeded: customer not yet resolvable for stripe customer %q (pm %s) — retry",
 			parsed.Data.Object.Customer, pmID)
+	}
+	ctx, err := s.decideForCustomer(ctx, tenantID, customerID)
+	if err != nil {
+		return fmt.Errorf("setup_intent.succeeded for customer %s refused, Stripe delivers it again: %w", customerID, err)
 	}
 
 	// Attribute the attach to the CUSTOMER when this SetupIntent came from the
@@ -2133,6 +2179,9 @@ func (s *Stripe) handlePaymentSucceeded(ctx context.Context, tenantID string, ev
 	if err != nil {
 		return fmt.Errorf("find invoice for PI %s: %w", event.PaymentIntentID, err)
 	}
+	if ctx, err = s.decideFor(ctx, clock.Pin{TenantID: tenantID, InvoiceID: inv.ID}); err != nil {
+		return fmt.Errorf("payment_intent.succeeded for invoice %s refused, Stripe delivers it again: %w", inv.ID, err)
+	}
 
 	// Webhook is one of the discover-then-settle entry points (ADR-049): it
 	// resolves the invoice, then hands the terminal outcome to the shared
@@ -2181,6 +2230,9 @@ func (s *Stripe) handlePaymentFailed(ctx context.Context, tenantID string, event
 	}
 	if err != nil {
 		return fmt.Errorf("find invoice for PI %s: %w", event.PaymentIntentID, err)
+	}
+	if ctx, err = s.decideFor(ctx, clock.Pin{TenantID: tenantID, InvoiceID: inv.ID}); err != nil {
+		return fmt.Errorf("payment_intent.payment_failed for invoice %s refused, Stripe delivers it again: %w", inv.ID, err)
 	}
 
 	// Discover-then-settle (ADR-049): hand the report to the shared primitive,
@@ -2349,6 +2401,10 @@ func (s *Stripe) handleCheckoutCompleted(ctx context.Context, tenantID string, e
 	if customerID == "" {
 		slog.Debug("checkout.session.completed missing hardcount_customer_id, skipping")
 		return nil
+	}
+	ctx, err := s.decideForCustomer(ctx, tenantID, customerID)
+	if err != nil {
+		return fmt.Errorf("checkout.session.completed for customer %s refused, Stripe delivers it again: %w", customerID, err)
 	}
 
 	return s.RecordCheckoutCard(ctx, tenantID, customerID, event.CustomerExternalID, hardcountPurpose)
