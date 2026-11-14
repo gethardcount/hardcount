@@ -2,10 +2,6 @@ package api
 
 import (
 	"bytes"
-	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -294,34 +290,8 @@ func readJSON(t *testing.T, resp *http.Response) map[string]any {
 	return body
 }
 
+// createTestAPIKey returns a new live secret key of the tenant.
 func createTestAPIKey(t *testing.T, db *postgres.DB, tenantID string) string {
 	t.Helper()
-
-	secret := make([]byte, 32)
-	_, _ = rand.Read(secret)
-	secretHex := hex.EncodeToString(secret)
-	rawKey := "hc_secret_" + secretHex
-	prefix := "hc_secret_" + secretHex[:12]
-	hash := sha256.Sum256([]byte(rawKey))
-	hashHex := hex.EncodeToString(hash[:])
-	keyID := "hc_key_e2e_" + secretHex[:8]
-
-	tx, err := db.BeginTx(context.Background(), postgres.TxBypass, "")
-	if err != nil {
-		t.Fatalf("begin tx: %v", err)
-	}
-	if _, err := tx.ExecContext(context.Background(), `SELECT set_config('app.livemode', 'on', true)`); err != nil {
-		t.Fatalf("set livemode: %v", err)
-	}
-	_, err = tx.ExecContext(context.Background(),
-		`INSERT INTO api_keys (id, key_prefix, key_hash, key_type, name, tenant_id)
-		VALUES ($1, $2, $3, 'secret', 'E2E Test Key', $4)`,
-		keyID, prefix, hashHex, tenantID)
-	if err != nil {
-		_ = tx.Rollback()
-		t.Fatalf("create key: %v", err)
-	}
-	_ = tx.Commit()
-
-	return rawKey
+	return createAPIKeyWithMode(t, db, tenantID, true)
 }

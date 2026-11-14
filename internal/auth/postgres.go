@@ -10,9 +10,16 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// PostgresStore is the Store on the api_keys table.
+// PostgresStore reads and writes the api_keys table.
 type PostgresStore struct {
 	db *postgres.DB
+}
+
+// ListFilter selects a page of a tenant's keys.
+type ListFilter struct {
+	TenantID string
+	Limit    int
+	Offset   int
 }
 
 // NewPostgresStore returns a PostgresStore on db.
