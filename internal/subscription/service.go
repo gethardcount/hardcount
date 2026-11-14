@@ -3275,6 +3275,8 @@ func (s *Service) ProcessExpiredTrialsForClock(ctx context.Context, tenantID, cl
 				// flip — the SQL guard blocked the activation. Route it.
 				fresh, gErr := s.store.Get(bound, tenantID, sub.ID)
 				if gErr != nil {
+					// Not domain.ErrLeftForNextRun: nothing was deferred on
+					// purpose, and what is true of the subscription is not known.
 					batchErrs = append(batchErrs, fmt.Errorf("re-read sub %s after its trial-end cancel came due: %w", sub.ID, gErr))
 					continue
 				}
@@ -3396,6 +3398,8 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 				// blocked the activation. Route to the free cancel.
 				fresh, gErr := s.store.Get(ctx, sub.TenantID, sub.ID)
 				if gErr != nil {
+					// Not domain.ErrLeftForNextRun: nothing was deferred on
+					// purpose, and what is true of the subscription is not known.
 					batchErrs = append(batchErrs, fmt.Errorf("re-read sub %s after its trial-end cancel came due: %w", sub.ID, gErr))
 					continue
 				}
