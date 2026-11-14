@@ -3,6 +3,8 @@ package invoice
 import (
 	"strings"
 	"testing"
+
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // A claim's UPDATE adds nothing to the predicate it is given: its WHERE is
@@ -35,5 +37,29 @@ func TestAutoChargeClaim_ClaimAndReadAreOneList(t *testing.T) {
 			t.Fatalf("the read has no branch for %q after the ones before it", c.sql)
 		}
 		at += i + 1
+	}
+}
+
+// The claim's in-flight conditions are the shared definition
+// (domain.ChargeNotInFlight), in the same order and with the same answers,
+// so the dunning due lists refuse exactly what the claim calls held or on
+// the hosted page.
+func TestAutoChargeClaim_UsesTheSharedInFlightConditions(t *testing.T) {
+	at := 0
+	for _, want := range domain.ChargeNotInFlight("invoices") {
+		found := false
+		for ; at < len(autoChargeClaim); at++ {
+			c := autoChargeClaim[at]
+			if c.sql == want.SQL {
+				if c.ifFalse != want.IfFalse {
+					t.Errorf("%q answers %d, want %d", want.SQL, c.ifFalse, want.IfFalse)
+				}
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("the claim lacks %q after the conditions before it", want.SQL)
+		}
 	}
 }
