@@ -1271,7 +1271,7 @@ test('a rotated key says when the old key stops working', async ({ page }) => {
       .getByRole('button', { name: `Actions for ${name}` }).click()
     await page.getByRole('menuitem', { name: 'Rotate' }).click()
     const dialog = page.getByRole('dialog', { name: 'Rotate API key' })
-    await expect(dialog.getByText('Old key stops working')).toBeVisible()
+    await expect(dialog.getByText('Old key stops working', { exact: true })).toBeVisible()
     await dialog.getByRole('button', { name: grace }).click()
     await dialog.getByRole('button', { name: 'Rotate key' }).click()
     return page.getByRole('dialog', { name: 'API key rotated' })
