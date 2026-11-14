@@ -1667,6 +1667,28 @@ func (s *Stripe) processEvent(ctx context.Context, tenantID string, event domain
 	}
 }
 
+// decideFor decides an event's time from the record it names, right after
+// the handler has it (test-clock step 3): the record's clock, or real time.
+// In live mode it does nothing: no live record is on a test clock. A failure
+// is clock.ErrUndecided, which isTransientWebhookError delivers again.
+func (s *Stripe) decideFor(ctx context.Context, pin clock.Pin) (context.Context, error) {
+	if live, err := postgres.Livemode(ctx); (err == nil && live) || s.resolver == nil {
+		return ctx, nil
+	}
+	return clock.Decide(ctx, s.resolver, pin)
+}
+
+// decideForCustomer is decideFor for an event that names a customer it has
+// not read: a customer that does not exist gets real time, and the handler's
+// own path answers it as before.
+func (s *Stripe) decideForCustomer(ctx context.Context, tenantID, customerID string) (context.Context, error) {
+	decided, err := s.decideFor(ctx, clock.Pin{TenantID: tenantID, CustomerID: customerID})
+	if errors.Is(err, errs.ErrNotFound) {
+		return clock.WithRealTime(ctx), nil
+	}
+	return decided, err
+}
+
 // isTransientWebhookError reports whether a webhook processing error is
 // worth a Stripe redelivery. A missing target entity (errs.ErrNotFound)
 // is permanent — the event references an invoice/customer that isn't in
@@ -1674,6 +1696,13 @@ func (s *Stripe) processEvent(ctx context.Context, tenantID string, event domain
 // else (DB write failure, contention, a downstream timeout) is treated
 // as transient: return it, respond 5xx, let Stripe redeliver.
 func isTransientWebhookError(err error) bool {
+	// Checked first: a record whose time could not be decided (its clock
+	// could not be read) is not "this event is about nothing we know", even
+	// when the cause underneath is a not-found. Acknowledging it would drop a
+	// payment's event for good.
+	if errors.Is(err, clock.ErrUndecided) {
+		return true
+	}
 	return !errors.Is(err, errs.ErrNotFound)
 }
 
@@ -1756,6 +1785,10 @@ func (s *Stripe) handleSetupIntentSucceeded(ctx context.Context, tenantID string
 		// to ~3 days, so a genuinely-foreign event can't redeliver unbounded.
 		return fmt.Errorf("setup_intent.succeeded: customer not yet resolvable for stripe customer %q (pm %s) — retry",
 			parsed.Data.Object.Customer, pmID)
+	}
+	ctx, err := s.decideForCustomer(ctx, tenantID, customerID)
+	if err != nil {
+		return fmt.Errorf("setup_intent.succeeded for customer %s: %w", customerID, err)
 	}
 
 	// Attribute the attach to the CUSTOMER when this SetupIntent came from the
@@ -2133,6 +2166,9 @@ func (s *Stripe) handlePaymentSucceeded(ctx context.Context, tenantID string, ev
 	if err != nil {
 		return fmt.Errorf("find invoice for PI %s: %w", event.PaymentIntentID, err)
 	}
+	if ctx, err = s.decideFor(ctx, clock.Pin{TenantID: tenantID, InvoiceID: inv.ID}); err != nil {
+		return fmt.Errorf("payment_intent.succeeded for invoice %s: %w", inv.ID, err)
+	}
 
 	// Webhook is one of the discover-then-settle entry points (ADR-049): it
 	// resolves the invoice, then hands the terminal outcome to the shared
@@ -2181,6 +2217,9 @@ func (s *Stripe) handlePaymentFailed(ctx context.Context, tenantID string, event
 	}
 	if err != nil {
 		return fmt.Errorf("find invoice for PI %s: %w", event.PaymentIntentID, err)
+	}
+	if ctx, err = s.decideFor(ctx, clock.Pin{TenantID: tenantID, InvoiceID: inv.ID}); err != nil {
+		return fmt.Errorf("payment_intent.payment_failed for invoice %s: %w", inv.ID, err)
 	}
 
 	// Discover-then-settle (ADR-049): hand the report to the shared primitive,
@@ -2349,6 +2388,10 @@ func (s *Stripe) handleCheckoutCompleted(ctx context.Context, tenantID string, e
 	if customerID == "" {
 		slog.Debug("checkout.session.completed missing hardcount_customer_id, skipping")
 		return nil
+	}
+	ctx, err := s.decideForCustomer(ctx, tenantID, customerID)
+	if err != nil {
+		return fmt.Errorf("checkout.session.completed for customer %s: %w", customerID, err)
 	}
 
 	return s.RecordCheckoutCard(ctx, tenantID, customerID, event.CustomerExternalID, hardcountPurpose)

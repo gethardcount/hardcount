@@ -510,7 +510,7 @@ func TestDecide(t *testing.T) {
 			t.Errorf("%s: err %v, ctx changed %v; want an error and ctx unchanged", name, err, got != ctx)
 		}
 	}
-	if _, err := Decide(context.Background(), resolver(Sim{}, lookup), pin); !errors.Is(err, lookup) {
-		t.Errorf("a failed lookup: err %v, want it to wrap the resolver's", err)
+	if _, err := Decide(context.Background(), resolver(Sim{}, lookup), pin); !errors.Is(err, lookup) || !errors.Is(err, ErrUndecided) {
+		t.Errorf("a failed lookup: err %v, want ErrUndecided wrapping the resolver's", err)
 	}
 }

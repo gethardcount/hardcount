@@ -217,6 +217,13 @@ func Decision(ctx context.Context) (Sim, bool) {
 // Unlike BindEffectiveNow it returns the resolver's error, keeps nothing an
 // earlier binding held, and needs a resolver and an id: it is the call that
 // decides, at the entry point of a request or a job's row.
+// ErrUndecided marks a time that could not be decided: the resolver could
+// not read the record's clock. It wraps the resolver's error, so the cause
+// stays readable; a caller that sorts errors checks it before any not-found,
+// since the cause underneath may itself be a not-found, and a record whose
+// time could not be read is not "a record we do not know".
+var ErrUndecided = errors.New("the time could not be decided")
+
 func Decide(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
 	if r == nil {
 		return ctx, errors.New("decide the time: no resolver")
@@ -236,7 +243,7 @@ func Decide(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
 		return ctx, errors.New("decide the time: the pin names no customer, subscription or invoice")
 	}
 	if err != nil {
-		return ctx, fmt.Errorf("decide the time: %w", err)
+		return ctx, fmt.Errorf("%w: %w", ErrUndecided, err)
 	}
 	if !sim.Simulated() {
 		return WithRealTime(ctx), nil
