@@ -12,10 +12,13 @@ const apiKeyTypeIngestVersion = 221
 
 const apiKeySeedTenant = `INSERT INTO tenants (id, name) VALUES ('ten_ak', 'API key types')`
 
-// apiKeyRow inserts one key of the given type for ten_ak.
+// apiKeyRow inserts one live key of the given type for ten_ak, in the shape
+// 00230 states (its prefix and hash are hex taken from id), so a secret or
+// ingest row also outlives the migrations after 00221.
 func apiKeyRow(id, keyType string) string {
 	return `INSERT INTO api_keys (id, key_prefix, key_hash, key_type, name, tenant_id)
-		VALUES ('` + id + `', 'hc_` + keyType + `_test_` + id + `', 'h_` + id + `', '` + keyType + `', 'Key', 'ten_ak')`
+		VALUES ('` + id + `', 'hc_` + keyType + `_live_' || substr(md5('` + id + `'), 1, 12),
+		md5('` + id + `') || md5('` + id + `'), '` + keyType + `', 'Key', 'ten_ak')`
 }
 
 // keyTypeAccepted reports whether api_keys takes a row of keyType, in a

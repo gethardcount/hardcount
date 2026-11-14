@@ -1,5 +1,7 @@
 package auth
 
+import "strings"
+
 // Permission represents a specific API operation scope.
 type Permission string
 
@@ -44,35 +46,38 @@ const (
 	KeyTypeSession KeyType = "session" // dashboard cookie session, never stored in api_keys
 )
 
-// StoredKeyTypes are the key types api_keys holds: the values
-// api_keys_key_type_check allows. CreateKey issues only these, and
-// ValidateKey reads only their prefixes.
-var StoredKeyTypes = []KeyType{KeyTypeSecret, KeyTypeIngest}
-
-// TypePrefix returns the type-only prefix (e.g. "hc_secret_"). Used when
-// parsing a raw key to identify its type before the mode infix. A type
-// that is never stored (a session) has no prefix, so it returns "".
-func (kt KeyType) TypePrefix() string {
-	switch kt {
-	case KeyTypeSecret:
-		return "hc_secret_"
-	case KeyTypeIngest:
-		return "hc_ingest_"
-	default:
-		return ""
-	}
-}
-
-// KeyPrefix returns the full "hc_{type}_{mode}_" prefix used on new keys, in
-// Stripe's style: hc_secret_live_..., hc_secret_test_... and so on. The
-// visible mode infix lets an operator spot a test key in a production config
-// without decoding the key.
-func KeyPrefix(kt KeyType, livemode bool) string {
+// keyPrefix returns a new key's prefix, "hc_{type}_{mode}_": hc_secret_live_,
+// hc_ingest_test_ and so on. The visible mode lets an operator spot a test
+// key in a production config. kt is secret or ingest, the types api_keys
+// holds.
+func keyPrefix(kt KeyType, livemode bool) string {
 	mode := "test"
 	if livemode {
 		mode = "live"
 	}
-	return kt.TypePrefix() + mode + "_"
+	return "hc_" + string(kt) + "_" + mode + "_"
+}
+
+// keyPrefixes are the four prefixes a key can have: its type, then its mode.
+// api_keys_prefix_shape_check states the same shape for the stored prefix.
+var keyPrefixes = [...]string{"hc_secret_live_", "hc_secret_test_", "hc_ingest_live_", "hc_ingest_test_"}
+
+// lookupPrefix returns the stored lookup prefix of raw, its type-and-mode
+// prefix and the first keyPrefixLen hex characters of its secret, or false
+// when raw is not a key: one of keyPrefixes, then exactly 64 lowercase hex
+// characters.
+func lookupPrefix(raw string) (string, bool) {
+	for _, p := range keyPrefixes {
+		secret, ok := strings.CutPrefix(raw, p)
+		if !ok {
+			continue
+		}
+		if len(secret) != 2*keySecretLen || strings.Trim(secret, "0123456789abcdef") != "" {
+			return "", false
+		}
+		return p + secret[:keyPrefixLen], true
+	}
+	return "", false
 }
 
 // fullAccess is every permission. A secret key and a dashboard session

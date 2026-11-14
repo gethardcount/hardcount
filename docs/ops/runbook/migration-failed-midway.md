@@ -259,6 +259,78 @@ changed nothing.
   version. Follow
   [A backup with a charge in progress](../restore.md#a-backup-with-a-charge-in-progress).
 
+## 00230 found API keys that share a prefix
+
+**Symptom:**
+
+```
+migration 00230_api_key_shape.sql failed: ERROR: migration 00230 makes an API key's prefix unique, and 1 prefix(es) in this database belong to more than one key
+```
+
+**Why:** from this release no two API keys share a lookup prefix, the
+`key_prefix` column a request's key is found by. Hardcount draws 48 random
+bits for each prefix, so these rows were written by hand. The migration does
+not choose which credential to delete, and nothing was changed.
+
+**Fix:** find the keys (as the database owner, in a transaction that
+bypasses row-level security):
+
+```sql
+BEGIN;
+SET LOCAL app.bypass_rls = 'on';
+SELECT id, tenant_id, name, key_prefix, created_at, revoked_at FROM api_keys
+WHERE key_prefix IN (SELECT key_prefix FROM api_keys GROUP BY key_prefix HAVING count(*) > 1)
+ORDER BY key_prefix, created_at;
+```
+
+Keep one key for each prefix, delete the others by `id` in the same
+transaction, then commit and run `hardcount migrate` again:
+
+```sql
+DELETE FROM api_keys WHERE id = 'hc_key_…';
+COMMIT;
+```
+
+## 00231 found API keys of another shape
+
+**Symptom:**
+
+```
+migration 00231_api_key_shape_validate.sql failed: ERROR: migration 00231 checks the shape of every API key, and 1 key(s) in this database do not have it
+```
+
+**Why:** from this release the database states an API key's shape: the
+prefix is `hc_secret_` or `hc_ingest_`, then `live_` or `test_`, then 12
+lowercase hex characters, matching the row's `key_type` and `livemode`; the
+hash is 64 lowercase hex characters; the salt is empty or 32 lowercase hex
+characters; the name is not blank. Hardcount writes every key in this shape,
+so these rows were written by hand. The migration does not delete a
+credential, and no constraint was validated.
+
+**Fix:** find the rows (as the database owner, in a transaction that
+bypasses row-level security):
+
+```sql
+BEGIN;
+SET LOCAL app.bypass_rls = 'on';
+SELECT id, tenant_id, name, key_type, livemode, key_prefix FROM api_keys
+WHERE NOT (key_prefix ~ '^hc_(secret|ingest)_(live|test)_[0-9a-f]{12}$'
+           AND split_part(key_prefix, '_', 2) = key_type
+           AND (split_part(key_prefix, '_', 3) = 'live') = livemode)
+   OR key_hash !~ '^[0-9a-f]{64}$'
+   OR key_salt !~ '^([0-9a-f]{32})?$'
+   OR btrim(name) = '';
+```
+
+A key of another shape cannot be used to sign in. Delete those rows in the
+same transaction, then commit, run `hardcount migrate` again, and create a
+new key for each one you still need:
+
+```sql
+DELETE FROM api_keys WHERE id = 'hc_key_…';
+COMMIT;
+```
+
 ## It waited 5s for a table lock
 
 First stop the API: see [Before anything else](#before-anything-else).

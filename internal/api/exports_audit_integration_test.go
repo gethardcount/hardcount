@@ -26,9 +26,8 @@ import (
 // guarantee here is a property of a committed row.
 
 // testKeyLivemode is the plane the suite's API key operates on. createTestAPIKey
-// inserts an api_keys row without a livemode column, and the column DEFAULTS to
-// true (migration 0020) — so every request it authenticates is a LIVE request,
-// and audit_log's trigger stamps its rows livemode=true. Reads that disagree see
+// mints a live key, so every request it authenticates is a LIVE request, and
+// audit_log's trigger stamps its rows livemode=true. Reads that disagree see
 // nothing (the explicit livemode predicate in buildListWhere), so the tests must
 // query the same plane they wrote on.
 const testKeyLivemode = true
