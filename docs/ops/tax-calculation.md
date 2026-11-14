@@ -125,6 +125,68 @@ The query lists every invoice of the shapes above, and some that are right:
 
 A one-off invoice is taxed when you finalize it, so with tax-inclusive pricing the difference you bill includes its tax.
 
+### Credits for unused time on tax-inclusive prices
+
+**Who is affected:** accounts that have, or had, tax-inclusive pricing on.
+
+**Credits already issued too high.** Before this version, a credit for unused prepaid time on an invoice whose prices included tax was grossed up for tax a second time. A cancel or a plan swap with half of a 120.00 month (20% tax included) unused credited 72.00, not 60.00. A quantity decrease, a downgrade or an item removal was over-credited by the tax rate the same way: 10 → 5 seats with half of a 120.00 month left credited 36.00, not 30.00. This lists the credit notes those changes wrote before the upgrade; `correct_total_cents` is what the note would have been. Run it in `psql` as the database owner ([why the first line](runbook/index.md#before-you-start)):
+
+```sql
+SET app.bypass_rls = 'on';
+SELECT cn.tenant_id, cn.livemode, cn.credit_note_number, cn.reason, cn.status,
+       cn.total_cents, i.invoice_number, i.subtotal_cents, i.total_amount_cents,
+       round(cn.total_cents * i.subtotal_cents::numeric / i.total_amount_cents) AS correct_total_cents
+FROM credit_notes cn
+JOIN invoices i ON i.id = cn.invoice_id AND i.tenant_id = cn.tenant_id
+WHERE i.tax_inclusive
+  AND i.total_amount_cents > i.subtotal_cents
+  AND cn.reason IN ('subscription_cancellation', 'subscription_plan_change', 'subscription_downgrade',
+                    'subscription_quantity_decrease', 'subscription_item_removed')
+  AND cn.status <> 'voided'
+  AND cn.created_at < (SELECT max(tstamp) FROM goose_db_version WHERE version_id = 228 AND is_applied)
+ORDER BY cn.tenant_id, cn.created_at;
+```
+
+It lists more than were over-credited:
+
+- A note capped by the room left on its invoice was over-credited by less than the difference shown, or not at all.
+- A note on an invoice billed before tax that carries `tax_inclusive` (see the next check) was credited correctly.
+
+**Invoices billed before a switch to tax-included prices.** An invoice from before this version records whether its prices include tax from the account's setting at the upgrade. If the account switched from prices before tax to tax-included prices while a period billed before the switch is still running, that period's invoices say their prices include tax. A cancel or an item change then credits them too little: half of a 120.00 month (100.00 plus 20.00 tax) credits 50.00, not 60.00. List them:
+
+```sql
+SET app.bypass_rls = 'on';
+SELECT i.tenant_id, i.livemode, i.id, i.invoice_number, i.status, i.created_at,
+       i.billing_period_end, i.subtotal_cents, i.tax_amount_cents, i.total_amount_cents,
+       sw.switched_at
+FROM invoices i
+JOIN tenant_settings s ON s.tenant_id = i.tenant_id AND s.tax_inclusive
+LEFT JOIN LATERAL (
+  SELECT max(a.created_at) AS switched_at
+  FROM audit_log a
+  WHERE a.tenant_id = i.tenant_id
+    AND a.resource_type = 'setting'
+    AND a.metadata->>'action' = 'settings_updated'
+    AND a.metadata->'changed'->'tax_inclusive'->>'to' = 'true'
+) sw ON true
+WHERE i.tax_inclusive
+  AND i.tax_amount_cents > 0
+  AND i.status <> 'voided'
+  AND i.billing_period_end > now()
+  AND i.created_at < (SELECT max(tstamp) FROM goose_db_version WHERE version_id = 228 AND is_applied)
+  AND (sw.switched_at IS NULL OR i.created_at < sw.switched_at)
+ORDER BY i.tenant_id, i.created_at;
+```
+
+`switched_at` is the last time the audit log recorded the account turning tax-inclusive pricing on. Invoices created after it were priced with tax included and are not listed. A row with no `switched_at` is on an account whose audit log records no switch: it either always had tax-included prices, and then there is nothing to fix, or it switched before the audit log recorded settings changes.
+
+**Fix.** For each listed invoice that was billed before tax, set its flag:
+
+```sql
+SET app.bypass_rls = 'on';
+UPDATE invoices SET tax_inclusive = false WHERE id IN ('hc_inv_…', 'hc_inv_…');
+```
+
 ## What to watch
 
 Hardcount counts every tax calculation that fails on the metric `hardcount_tax_outcome_total`, with `outcome="deferred"` and a `reason`. It counts attempts, not invoices: an invoice whose tax keeps failing adds one for each automatic retry. Successful calculations are not counted, so any increase means something needs a look: alert when its rate is above zero.

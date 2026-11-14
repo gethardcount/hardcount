@@ -6,10 +6,10 @@ package domain
 // shares that are partly used). Voided are invoices voided in place (unpaid
 // shares that are wholly unused). CreditedCents is the credit to the
 // customer's balance (paid and in-flight shares), for the activity timeline.
-// UncreditedCents (net) is unused time that the funding invoices had no room
-// left for: earlier notes credited them up to their totals, or an unpaid one
-// had nothing more to relieve. It is not owed. The change records it
-// (uncredited_cents) so the timeline can say so.
+// UncreditedCents is unused time, in the price's terms, that the funding
+// invoices had no room left for: earlier notes credited them up to their
+// totals, or an unpaid one had nothing more to relieve. It is not owed. The
+// change records it (uncredited_cents) so the timeline can say so.
 //
 // After the transaction commits, FinishRelief issues the drafts and runs the
 // voids' post-commit legs. A crash before that loses nothing:
