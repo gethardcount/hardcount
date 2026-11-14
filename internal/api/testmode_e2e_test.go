@@ -2,14 +2,12 @@ package api
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
-	"encoding/hex"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testutil"
@@ -176,54 +174,30 @@ func TestE2E_TestModeIsolation(t *testing.T) {
 	})
 }
 
-// createAPIKeyWithMode inserts an api_keys row with the Stripe-style mode
-// infix (hc_secret_live_… or hc_secret_test_…) and the correct livemode
-// column value for the trigger to preserve. Uses empty salt so the
-// hash-verification path in ValidateKey equals sha256(rawKey).
+// createAPIKeyWithMode returns a new secret key of the tenant in the given
+// mode, minted by the auth service as the API mints one.
 func createAPIKeyWithMode(t *testing.T, db *postgres.DB, tenantID string, livemode bool) string {
 	t.Helper()
-
 	mode := "test"
 	if livemode {
 		mode = "live"
 	}
-	secret := make([]byte, 32)
-	_, _ = rand.Read(secret)
-	secretHex := hex.EncodeToString(secret)
-	fullPrefix := "hc_secret_" + mode + "_"
-	rawKey := fullPrefix + secretHex
-	dbPrefix := fullPrefix + secretHex[:12]
-	hash := sha256.Sum256([]byte(rawKey))
-	hashHex := hex.EncodeToString(hash[:])
-	keyID := "hc_key_e2e_" + secretHex[:8] + "_" + mode
-
-	tx, err := db.BeginTx(context.Background(), postgres.TxBypass, "")
+	created, err := auth.NewService(auth.NewPostgresStore(db)).CreateKey(
+		postgres.WithLivemode(context.Background(), livemode), tenantID, auth.CreateKeyInput{Name: "E2E " + mode + " key"})
 	if err != nil {
-		t.Fatalf("begin tx: %v", err)
+		t.Fatalf("create %s api key: %v", mode, err)
 	}
-	// The 0021 trigger reads app.livemode on INSERT; in TxBypass we set it
-	// explicitly for the row being created. Without this, every bypass-mode
-	// insert would land with livemode=true.
-	sessionVal := "on"
-	if !livemode {
-		sessionVal = "off"
+	return created.RawKey
+}
+
+// apiKeyID returns the id of the stored key raw.
+func apiKeyID(t *testing.T, db *postgres.DB, raw string) string {
+	t.Helper()
+	key, err := auth.NewService(auth.NewPostgresStore(db)).ValidateKey(context.Background(), raw)
+	if err != nil {
+		t.Fatalf("look up api key: %v", err)
 	}
-	if _, err := tx.ExecContext(context.Background(),
-		`SELECT set_config('app.livemode', $1, true)`, sessionVal); err != nil {
-		_ = tx.Rollback()
-		t.Fatalf("set app.livemode: %v", err)
-	}
-	if _, err := tx.ExecContext(context.Background(),
-		`INSERT INTO api_keys (id, key_prefix, key_hash, key_type, name, tenant_id)
-		 VALUES ($1, $2, $3, 'secret', $4, $5)`,
-		keyID, dbPrefix, hashHex, "E2E "+mode+" key", tenantID); err != nil {
-		_ = tx.Rollback()
-		t.Fatalf("insert api key: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-	return rawKey
+	return key.ID
 }
 
 // extractListIDs returns the id of each item in a list response. Both lists
