@@ -12,7 +12,6 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/pdffonts"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
 // CompanyInfo holds the seller's registered-business details printed at
@@ -644,7 +643,10 @@ func RenderPDF(
 		y += 24
 		setFont(false, 7)
 		setColor(170, 170, 170)
-		footer := fmt.Sprintf("Generated on %s  |  %s", clock.Now(ctx).Format("Jan 2, 2006 15:04 UTC"), cn.ID)
+		// When this file was made: machine time, even for a credit note on a
+		// test clock, whose own dates are the clock's.
+		generated := time.Now().UTC() //nolint:forbidigo // wall-clock: the footer says when the file was made, not a credit note date
+		footer := fmt.Sprintf("Generated on %s  |  %s", generated.Format("Jan 2, 2006 15:04 UTC"), cn.ID)
 		fw, _ := pdf.MeasureTextWidth(footer)
 		textAt((pageW-fw)/2, y, footer)
 		y += 10 // the 7pt line's height, so keep measures the whole footer
