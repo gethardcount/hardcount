@@ -54,10 +54,4 @@ export interface TestClockAdvanceSummary {
   credits_expired: number;
   /** Dunning runs that took a step. */
   dunning_advanced: number;
-  /**
-     * True when a job failed, which leaves the clock in
-     * `internal_failure`. The jobs after the failed one did not run,
-     * so their counts are 0.
-     */
-  had_errors: boolean;
 }

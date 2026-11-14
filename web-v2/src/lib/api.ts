@@ -810,7 +810,6 @@ export interface AdvanceSummary {
   clawbacks_issued: number
   credits_expired: number
   dunning_advanced: number
-  had_errors: boolean
 }
 
 // Present while the subscription's billing is failing. The billing run

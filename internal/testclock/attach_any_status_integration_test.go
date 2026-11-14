@@ -46,7 +46,7 @@ func TestCustomerJoinsAClockInAnyStatus(t *testing.T) {
 			if _, err := clocks.MarkAdvancing(ctx, tenantID, id, to, noAuditRow); err != nil {
 				t.Fatalf("mark advancing: %v", err)
 			}
-			if _, err := clocks.MarkFailed(ctx, tenantID, id, "catch-up failed", domain.AdvanceSummary{HadErrors: true}); err != nil {
+			if _, err := clocks.MarkFailed(ctx, tenantID, id, "catch-up failed", domain.AdvanceSummary{}); err != nil {
 				t.Fatalf("mark failed: %v", err)
 			}
 		}, domain.TestClockStatusInternalFailed},

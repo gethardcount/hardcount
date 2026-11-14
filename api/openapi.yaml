@@ -9740,7 +9740,6 @@ components:
           clawbacks_issued: 0
           credits_expired: 0
           dunning_advanced: 0
-          had_errors: false
 
     TestClockAdvanceSummary:
       type: object
@@ -9750,7 +9749,7 @@ components:
         advanced. While the clock is `advancing`, it describes the advance
         in progress: `advanced_from` only, with the other fields zero until
         the advance ends.
-      required: [advanced_from, advanced_to, invoices_generated, trials_activated, pauses_resumed, thresholds_fired, tax_retried, charges_retried, clawbacks_issued, credits_expired, dunning_advanced, had_errors]
+      required: [advanced_from, advanced_to, invoices_generated, trials_activated, pauses_resumed, thresholds_fired, tax_retried, charges_retried, clawbacks_issued, credits_expired, dunning_advanced]
       properties:
         advanced_from:
           type: string
@@ -9796,12 +9795,6 @@ components:
         dunning_advanced:
           type: integer
           description: Dunning runs that took a step.
-        had_errors:
-          type: boolean
-          description: |
-            True when a job failed, which leaves the clock in
-            `internal_failure`. The jobs after the failed one did not run,
-            so their counts are 0.
       example:
         advanced_from: "2026-10-01T00:00:00Z"
         advanced_to: "2026-11-02T00:00:00Z"
@@ -9814,7 +9807,6 @@ components:
         clawbacks_issued: 0
         credits_expired: 0
         dunning_advanced: 0
-        had_errors: false
 
     InvoicePreview:
       type: object
@@ -24217,7 +24209,6 @@ paths:
                       clawbacks_issued: 0
                       credits_expired: 0
                       dunning_advanced: 0
-                      had_errors: false
                 total: 1
         "401":
           $ref: "#/components/responses/Unauthorized"
@@ -24360,7 +24351,6 @@ paths:
                   clawbacks_issued: 0
                   credits_expired: 0
                   dunning_advanced: 0
-                  had_errors: false
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
@@ -24758,7 +24748,6 @@ paths:
                   clawbacks_issued: 0
                   credits_expired: 0
                   dunning_advanced: 0
-                  had_errors: true
         "400":
           $ref: "#/components/responses/InvalidBody"
         "401":

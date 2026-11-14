@@ -79,10 +79,11 @@ func TestRunCatchup_PanicMarksClockFailed(t *testing.T) {
 	if strings.Contains(got.LastFailureReason, "boom") || strings.Contains(got.LastFailureReason, "panic") {
 		t.Errorf("operator-facing reason must not leak panic internals, got %q", got.LastFailureReason)
 	}
-	// The failed advance records its end and that it failed, so the dashboard
-	// does not show it as a clean advance with nothing billed.
-	if sum := got.LastAdvanceSummary; sum == nil || !sum.HadErrors || !sum.AdvancedTo.Equal(start) {
-		t.Errorf("summary after a panic = %+v, want advanced_to %s and had_errors", sum, start)
+	// The failed advance records its end, and the clock's status says it
+	// failed, so the dashboard does not show a clean advance with nothing
+	// billed.
+	if sum := got.LastAdvanceSummary; sum == nil || !sum.AdvancedTo.Equal(start) || got.Status != domain.TestClockStatusInternalFailed {
+		t.Errorf("status %s, summary after a panic = %+v; want internal_failure and advanced_to %s", got.Status, sum, start)
 	}
 }
 

@@ -99,8 +99,4 @@ type AdvanceSummary struct {
 	// DunningAdvanced is the number of dunning runs that advanced a step this
 	// advance (Phase 5).
 	DunningAdvanced int `json:"dunning_advanced"`
-	// HadErrors is true when at least one phase failed. The advance then
-	// ended in internal_failure, and this summary shows only the work that
-	// completed before the error.
-	HadErrors bool `json:"had_errors"`
 }

@@ -11,7 +11,6 @@ import { showApiError } from '@/lib/formErrors'
 import { addCalendarMonthInTZ, formatYMDInTZ } from '@/lib/dates'
 import { clockTime } from '@/lib/effectiveNow'
 import { useTenantTimezone } from '@/hooks/useTenantTimezone'
-import { cn } from '@/lib/utils'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
 import { DetailSkeleton } from '@/components/ui/DetailSkeleton'
 import { Button } from '@/components/ui/button'
@@ -35,8 +34,9 @@ import { EmptyState } from '@/components/EmptyState'
 // LastAdvanceCard summarises what the most recent advance produced, so the
 // operator sees the outcome inline instead of cross-checking the Invoices,
 // Audit, and Dunning pages. Only non-zero counts are shown; zero across the
-// board reads as an honest "nothing was due".
-function LastAdvanceCard({ summary }: { summary: AdvanceSummary }) {
+// board reads as an honest "nothing was due". When the advance failed, the
+// failure banner above says so, and that the work it finished is kept.
+function LastAdvanceCard({ summary, failed }: { summary: AdvanceSummary; failed: boolean }) {
   const rows = (
     [
       ['Invoices generated', summary.invoices_generated],
@@ -44,10 +44,10 @@ function LastAdvanceCard({ summary }: { summary: AdvanceSummary }) {
       ['Collections resumed', summary.pauses_resumed],
       ['Spending thresholds crossed', summary.thresholds_fired],
       ['Tax retries', summary.tax_retried],
-      ['Auto-charges retried', summary.charges_retried],
-      ['Clawbacks issued', summary.clawbacks_issued],
+      ['Charges attempted', summary.charges_retried],
+      ['Credit notes issued', summary.clawbacks_issued],
       ['Credit grants expired', summary.credits_expired],
-      ['Dunning steps advanced', summary.dunning_advanced],
+      ['Payment retry steps run', summary.dunning_advanced],
     ] as Array<[string, number]>
   ).filter(([, n]) => n > 0)
 
@@ -60,10 +60,7 @@ function LastAdvanceCard({ summary }: { summary: AdvanceSummary }) {
       : `Advanced ${formatDateTime(summary.advanced_from)} → ${formatDateTime(summary.advanced_to)}`
 
   return (
-    // A finished advance is information: neutral card. Amber only when the
-    // advance ended with an error, and then only on the line that says so.
-    // Card draws its edge with ring-1, so the amber edge is a ring colour.
-    <Card className={cn('mt-4', summary.had_errors && 'ring-amber-300 dark:ring-amber-500/40')}>
+    <Card className="mt-4">
       <CardContent className="px-6 py-5">
         <div className="flex items-center gap-2">
           <FastForward size={16} className="text-muted-foreground" />
@@ -71,9 +68,9 @@ function LastAdvanceCard({ summary }: { summary: AdvanceSummary }) {
         </div>
         <p className="mt-1 text-xs text-muted-foreground">{span}</p>
         {rows.length === 0 ? (
-          // A pass that failed at its first job did nothing; the error line
-          // below says so, and "nothing was due" would be false.
-          !summary.had_errors && (
+          // An advance that failed at its first job did nothing; the banner
+          // says it failed, and "nothing was due" would be false.
+          !failed && (
             <p className="mt-3 text-sm text-muted-foreground">
               No billing activity — nothing was due in this period.
             </p>
@@ -89,14 +86,6 @@ function LastAdvanceCard({ summary }: { summary: AdvanceSummary }) {
               </div>
             ))}
           </dl>
-        )}
-        {summary.had_errors && (
-          <p className="mt-3 flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-400">
-            <AlertTriangle size={13} className="mt-0.5 shrink-0" aria-hidden />
-            {rows.length === 0
-              ? 'This advance ended with an error before any billing work was done.'
-              : 'This advance ended with an error — the counts above reflect only the work that completed before it failed.'}
-          </p>
         )}
       </CardContent>
     </Card>
@@ -293,7 +282,7 @@ export default function TestClockDetailPage() {
                 </p>
               )}
               <p className="text-muted-foreground mt-2">
-                Some invoices may have been generated before the failure — review them below.
+                Work finished before the failure is kept.
                 Click <span className="font-medium text-foreground">Retry advance</span> to carry on from where it stopped, or
                 delete this clock to start over.
               </p>
@@ -328,7 +317,7 @@ export default function TestClockDetailPage() {
       {/* Last advance results — shown once the catchup has finished (status is
           no longer 'advancing') and a summary exists. */}
       {clock.status !== 'advancing' && clock.last_advance_summary && (
-        <LastAdvanceCard summary={clock.last_advance_summary} />
+        <LastAdvanceCard summary={clock.last_advance_summary} failed={clock.status === 'internal_failure'} />
       )}
 
       {/* Attached customers — Stripe-parity primary surface for a
