@@ -34,13 +34,14 @@ func scanKey(row interface{ Scan(...any) error }) (domain.APIKey, error) {
 }
 
 // insert stores key on tx and returns the stored row. The table's trigger
-// sets livemode from the transaction's app.livemode.
+// sets livemode from the transaction's app.livemode, and
+// api_keys_prefix_shape_check refuses a prefix whose mode differs.
 func (s store) insert(ctx context.Context, tx *sql.Tx, key domain.APIKey) (domain.APIKey, error) {
 	return scanKey(tx.QueryRowContext(ctx, `
-		INSERT INTO api_keys (id, key_prefix, key_hash, key_salt, key_type, livemode, name, tenant_id, created_at, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO api_keys (id, key_prefix, key_hash, key_salt, key_type, name, tenant_id, created_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING `+keyCols,
-		key.ID, key.KeyPrefix, key.KeyHash, key.KeySalt, key.KeyType, key.Livemode, key.Name, key.TenantID, time.Now().UTC(),
+		key.ID, key.KeyPrefix, key.KeyHash, key.KeySalt, key.KeyType, key.Name, key.TenantID, time.Now().UTC(),
 		postgres.NullableTime(key.ExpiresAt),
 	))
 }

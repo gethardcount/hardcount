@@ -177,9 +177,6 @@ func TestPlatformKeyType_RefusedAtCreateAndParse(t *testing.T) {
 
 	_, err := k.svc.ValidateKey(t.Context(), "hc_platform_live_"+strings.Repeat("ab", 32))
 	wantInvalidKey(t, err, "hc_platform_live_…")
-	if p := auth.KeyType("platform").TypePrefix(); p != "" {
-		t.Errorf("platform TypePrefix = %q, want none", p)
-	}
 }
 
 func TestCreateKey_DefaultsToSecret(t *testing.T) {
@@ -218,7 +215,7 @@ func TestCreateKey_PastExpiresAt(t *testing.T) {
 
 func TestValidateKey_AllTypes(t *testing.T) {
 	k := newKeyRig(t)
-	for _, kt := range auth.StoredKeyTypes {
+	for _, kt := range []auth.KeyType{auth.KeyTypeSecret, auth.KeyTypeIngest} {
 		t.Run(string(kt), func(t *testing.T) {
 			result := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "Test " + string(kt), KeyType: kt})
 			key, err := k.svc.ValidateKey(liveCtx(t), result.RawKey)
@@ -250,6 +247,36 @@ func TestValidateKey_WrongSecret(t *testing.T) {
 	}
 	_, err := k.svc.ValidateKey(liveCtx(t), fake)
 	wantInvalidKey(t, err, "the key's prefix with another secret")
+}
+
+// A string that is not a key is refused before any lookup: one of the four
+// type-and-mode prefixes, then exactly 64 lowercase hex characters. The
+// service's store is down, so a refusal that came from a lookup would be an
+// outage error, not ErrInvalidKey; a well-formed key does reach the store.
+func TestValidateKey_RefusesAStringThatIsNotAKeyBeforeAnyLookup(t *testing.T) {
+	down := testutil.OpenTracedDB(t, nil)
+	_ = down.Pool.Close()
+	keys := auth.NewService(down, audit.NewLogger(down))
+	secret := strings.Repeat("0123456789abcdef", 4)
+
+	for name, raw := range map[string]string{
+		"no mode (the older format)":   "hc_secret_" + secret,
+		"63 hex characters":            "hc_secret_live_" + secret[1:],
+		"65 hex characters":            "hc_secret_live_" + secret + "a",
+		"uppercase hex":                "hc_ingest_test_" + strings.ToUpper(secret),
+		"a character that is not hex":  "hc_secret_test_" + secret[:63] + "g",
+		"the removed platform type":    "hc_platform_live_" + secret,
+		"the removed publishable type": "hc_pub_live_" + secret,
+	} {
+		if _, err := keys.ValidateKey(t.Context(), raw); !errors.Is(err, auth.ErrInvalidKey) {
+			t.Errorf("%s: got %v, want ErrInvalidKey without a lookup", name, err)
+		}
+	}
+	for _, raw := range []string{"hc_secret_live_" + secret, "hc_ingest_test_" + secret} {
+		if _, err := keys.ValidateKey(t.Context(), raw); err == nil || errors.Is(err, auth.ErrInvalidKey) {
+			t.Errorf("%s…: got %v, want the lookup's outage error", raw[:15], err)
+		}
+	}
 }
 
 // A key whose expires_at has passed does not validate.
@@ -292,32 +319,6 @@ func TestCreateKey_TestModeFromCtx(t *testing.T) {
 	}
 	if key.Livemode {
 		t.Error("validated key should be test-mode")
-	}
-}
-
-// A key in the older format, with no mode infix (hc_secret_<hex>), validates
-// and is live.
-func TestValidateKey_LegacyFormat(t *testing.T) {
-	k := newKeyRig(t)
-	rawKey := "hc_secret_" + strings.Repeat("ab", 32)
-	salt := []byte("legacytestsalt16")
-	hash := sha256.Sum256(append(salt, []byte(rawKey)...))
-	// The row as the older minter wrote it.
-	k.bypass(t, func(tx *sql.Tx) error {
-		if _, err := tx.Exec(`SELECT set_config('app.livemode', 'on', true)`); err != nil {
-			return err
-		}
-		_, err := tx.Exec(`INSERT INTO api_keys (id, key_prefix, key_hash, key_salt, key_type, name, tenant_id)
-			VALUES ('hc_key_legacy', $1, $2, $3, 'secret', 'Legacy', $4)`,
-			"hc_secret_"+strings.Repeat("ab", 6), hex.EncodeToString(hash[:]), hex.EncodeToString(salt), k.tenantID)
-		return err
-	})
-	key, err := k.svc.ValidateKey(t.Context(), rawKey)
-	if err != nil {
-		t.Fatalf("legacy key validate: %v", err)
-	}
-	if !key.Livemode {
-		t.Error("legacy key should be classified as live")
 	}
 }
 

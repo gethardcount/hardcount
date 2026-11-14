@@ -190,7 +190,7 @@ func (s *Service) checkMintAndInsert(ctx context.Context, tx *sql.Tx, tenantID s
 		return CreateKeyResult{}, fmt.Errorf("generate key: %w", err)
 	}
 	secretHex := hex.EncodeToString(secret)
-	prefix := KeyPrefix(keyType, livemode)
+	prefix := keyPrefix(keyType, livemode)
 	rawKey := prefix + secretHex
 
 	// DB prefix: full mode-aware prefix + first N hex chars (indexed lookup)
@@ -238,47 +238,18 @@ func (s *Service) checkMintAndInsert(ctx context.Context, tx *sql.Tx, tenantID s
 // holds.
 var ErrInvalidKey = errors.New("invalid api key")
 
-// ValidateKey looks up a key by its prefix, verifies the hash and checks
-// expiry.
-//
-// It accepts three prefix forms, in priority order:
-//  1. "hc_{type}_live_..."
-//  2. "hc_{type}_test_..."
-//  3. "hc_{type}_..." (the older form with no mode, treated as live)
-//
-// Form 3 keeps keys issued before the mode infix working. Newly issued keys
-// always use form 1 or 2.
+// ValidateKey returns the key rawKey is, or ErrInvalidKey. rawKey must have a
+// key's shape (lookupPrefix) and match a stored key's hash, and the key must
+// be neither revoked nor expired. It writes the key's last_used_at at most
+// once per lastUsedTouchInterval; a failed write is logged and does not refuse
+// the key.
 func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey, error) {
+	// A string that is not a key is refused before any lookup.
 	rawKey = strings.TrimSpace(rawKey)
-
-	var fullPrefix string
-	for _, kt := range StoredKeyTypes {
-		typeP := kt.TypePrefix()
-		if !strings.HasPrefix(rawKey, typeP) {
-			continue
-		}
-		after := rawKey[len(typeP):]
-		switch {
-		case strings.HasPrefix(after, "live_"):
-			fullPrefix = typeP + "live_"
-		case strings.HasPrefix(after, "test_"):
-			fullPrefix = typeP + "test_"
-		default:
-			// The older format has no mode infix: treat it as live.
-			fullPrefix = typeP
-		}
-		break
-	}
-	if fullPrefix == "" {
+	dbPrefix, ok := lookupPrefix(rawKey)
+	if !ok {
 		return domain.APIKey{}, fmt.Errorf("invalid key format: %w", ErrInvalidKey)
 	}
-
-	secretPart := strings.TrimPrefix(rawKey, fullPrefix)
-	if len(secretPart) < keyPrefixLen {
-		return domain.APIKey{}, fmt.Errorf("invalid key format: %w", ErrInvalidKey)
-	}
-
-	dbPrefix := fullPrefix + secretPart[:keyPrefixLen]
 
 	key, err := s.store.getByPrefix(ctx, dbPrefix)
 	if err != nil {
@@ -293,7 +264,9 @@ func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey
 	// Verify hash using the stored salt
 	salt, err := hex.DecodeString(key.KeySalt)
 	if err != nil {
-		return domain.APIKey{}, fmt.Errorf("undecodable key salt: %w", ErrInvalidKey)
+		// api_keys_salt_shape_check refuses such a row, so this is a fault in
+		// the store, not a verdict on the key.
+		return domain.APIKey{}, fmt.Errorf("stored key %s has a salt that is not hex: %w", key.ID, err)
 	}
 	hash := sha256.Sum256(append(salt, []byte(rawKey)...))
 	hashHex := hex.EncodeToString(hash[:])

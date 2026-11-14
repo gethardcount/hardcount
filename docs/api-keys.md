@@ -70,6 +70,10 @@ picks the set.
 | Test | `hc_secret_test_` | Works on test data only. Test mode connects only to Stripe test keys (`sk_test_…`), so no real card is charged. |
 | Live | `hc_secret_live_` | Works on live data. Charges real cards once you connect Stripe's live keys. |
 
+A key is its type and mode prefix (`hc_secret_live_`, `hc_secret_test_`,
+`hc_ingest_live_` or `hc_ingest_test_`) followed by 64 lowercase hex
+characters. Any other string is refused as an invalid key.
+
 Build and try everything with a test key. Switch to a live key when you go
 live. Customers, prices and invoices made in test mode do not appear in live
 mode.
