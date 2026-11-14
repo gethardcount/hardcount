@@ -415,7 +415,6 @@ func (s *Service) runClock(ctx context.Context, clk domain.TestClock) (err error
 	// a context detached from the pass (its deadline may be what ended it)
 	// that keeps ctx's values: the livemode pin and the lease token.
 	fail := func(reason string) {
-		sum.HadErrors = true
 		failCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		if _, ferr := s.store.MarkFailed(failCtx, tenantID, clockID, reason, sum); ferr != nil {

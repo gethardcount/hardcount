@@ -137,8 +137,8 @@ func TestPass_StopsAtTheFailedJob(t *testing.T) {
 			if !strings.HasPrefix(got.LastFailureReason, failing+": ") || !strings.Contains(got.LastFailureReason, "sub_spy") {
 				t.Errorf("reason %q, want it to name the job (%q) and the row", got.LastFailureReason, failing)
 			}
-			if sum := got.LastAdvanceSummary; sum == nil || counted(sum, failing) != nth || !sum.HadErrors {
-				t.Errorf("summary %+v: want %q counted %d and had_errors", sum, failing, nth)
+			if sum := got.LastAdvanceSummary; sum == nil || counted(sum, failing) != nth {
+				t.Errorf("summary %+v: want %q counted %d", sum, failing, nth)
 			}
 		})
 	}

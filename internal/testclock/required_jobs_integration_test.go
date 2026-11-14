@@ -52,8 +52,8 @@ func TestAdvance_FailedJobThenRetryCompletes(t *testing.T) {
 	if got.Status != domain.TestClockStatusInternalFailed || got.LastFailureReason == "" {
 		t.Fatalf("after the failed job: status %q reason %q, want internal_failure with a reason", got.Status, got.LastFailureReason)
 	}
-	if sum := got.LastAdvanceSummary; sum == nil || !sum.HadErrors || !sum.AdvancedTo.Equal(leaseTarget) {
-		t.Errorf("summary after the failed job = %+v, want advanced_to %s and had_errors", sum, leaseTarget)
+	if sum := got.LastAdvanceSummary; sum == nil || !sum.AdvancedTo.Equal(leaseTarget) {
+		t.Errorf("summary after the failed job = %+v, want advanced_to %s", sum, leaseTarget)
 	}
 
 	if _, err := svc.RetryAdvance(base, tenantID, clk.ID); err != nil {

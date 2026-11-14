@@ -178,7 +178,7 @@ func TestPostgresStore_MarkFailed_ReasonCutInsideACharacter(t *testing.T) {
 
 	// "é" takes bytes 498 and 499, so the 499-byte cut lands inside it.
 	kept := strings.Repeat("a", 498)
-	got, err := store.MarkFailed(ctx, tenantID, clk.ID, kept+"é"+strings.Repeat("b", 100), domain.AdvanceSummary{HadErrors: true})
+	got, err := store.MarkFailed(ctx, tenantID, clk.ID, kept+"é"+strings.Repeat("b", 100), domain.AdvanceSummary{})
 	if err != nil {
 		t.Fatalf("mark failed: %v", err)
 	}
@@ -238,7 +238,7 @@ func TestPostgresStore_AFailedAuditRowSavesNothing(t *testing.T) {
 		if _, err := store.MarkAdvancing(ctx, tenantID, clk.ID, t1, noAuditRow); err != nil {
 			t.Fatalf("mark advancing: %v", err)
 		}
-		if _, err := store.MarkFailed(ctx, tenantID, clk.ID, "the catch-up failed", domain.AdvanceSummary{HadErrors: true}); err != nil {
+		if _, err := store.MarkFailed(ctx, tenantID, clk.ID, "the catch-up failed", domain.AdvanceSummary{}); err != nil {
 			t.Fatalf("mark failed: %v", err)
 		}
 		if _, err := store.RetryFromFailed(ctx, tenantID, clk.ID, failing); !errors.Is(err, refused) {

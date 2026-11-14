@@ -297,7 +297,7 @@ func TestRunAdvancing_RetryKeepsAdvancedFrom(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, db, "Catchup Retry")
 	clk := advancingClock(t, store, base, tenantID, "retried")
 
-	if _, err := store.MarkFailed(ctx, tenantID, clk.ID, "first try failed", domain.AdvanceSummary{AdvancedFrom: leaseFrom, AdvancedTo: leaseTarget, HadErrors: true}); err != nil {
+	if _, err := store.MarkFailed(ctx, tenantID, clk.ID, "first try failed", domain.AdvanceSummary{AdvancedFrom: leaseFrom, AdvancedTo: leaseTarget}); err != nil {
 		t.Fatalf("mark failed: %v", err)
 	}
 	svc := testclock.NewService(store, testclocktest.Deps(countingClockRunner{}))

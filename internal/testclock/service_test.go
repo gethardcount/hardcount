@@ -602,12 +602,9 @@ func TestRunCatchup_RecordsAdvanceSummary(t *testing.T) {
 		if sum.InvoicesGenerated != 3 {
 			t.Errorf("InvoicesGenerated: got %d, want 3", sum.InvoicesGenerated)
 		}
-		if sum.HadErrors {
-			t.Error("HadErrors should be false on a clean advance")
-		}
 	})
 
-	t.Run("partial failure still persists the summary with HadErrors", func(t *testing.T) {
+	t.Run("partial failure still persists the summary", func(t *testing.T) {
 		store := newMockStore()
 		store.clocks["c1"] = domain.TestClock{
 			ID: "c1", TenantID: "t1", Status: domain.TestClockStatusAdvancing, FrozenTime: to,
@@ -624,9 +621,6 @@ func TestRunCatchup_RecordsAdvanceSummary(t *testing.T) {
 		}
 		if got.LastAdvanceSummary == nil {
 			t.Fatal("summary must persist even on a partial-failure advance")
-		}
-		if !got.LastAdvanceSummary.HadErrors {
-			t.Error("HadErrors should be true when a phase errored")
 		}
 	})
 }
