@@ -147,6 +147,24 @@ func TestClockDoor_DecidesFromTheRouteTable(t *testing.T) {
 		}
 	})
 
+	// An empty id, or one Postgres cannot read, would fail its lookup with an
+	// error that is not a not-found: a 503 a client retries for ever. The
+	// door decides real time without a lookup, and the handler answers it as
+	// it would without the door.
+	for _, c := range []struct{ name, method, path string }{
+		{"an empty id in the middle of the path", "POST", "/v1/subscriptions//cancel"},
+		{"an id with a NUL", "GET", "/v1/customers/cus%001"},
+		{"an id that is not UTF-8", "GET", "/v1/invoices/%FF/pdf"},
+	} {
+		t.Run(c.name+": the handler answers it, at real time, with no lookup", func(t *testing.T) {
+			res := &spyResolver{err: errors.New("invalid byte sequence for encoding UTF8")}
+			got := through(doorRig(t, res), test, c.method, c.path)
+			if !got.reached || !got.decided || got.decision != (clock.Sim{}) || len(res.asked) != 0 {
+				t.Errorf("reached %v, decided %v, %+v, asked %v; want the handler reached at real time, nothing asked", got.reached, got.decided, got.decision, res.asked)
+			}
+		})
+	}
+
 	for _, c := range []struct{ name, method, path string }{
 		{"a customer", "GET", "/v1/customers/cus_gone"},
 		{"a credit note", "GET", "/v1/credit-notes/cn_gone"},
@@ -178,7 +196,7 @@ func TestClockDoor_DecidesFromTheRouteTable(t *testing.T) {
 			if got.reached || got.code != http.StatusServiceUnavailable || got.header.Get("Retry-After") == "" {
 				t.Fatalf("reached %v, code %d, Retry-After %q; want not reached, 503 with Retry-After", got.reached, got.code, got.header.Get("Retry-After"))
 			}
-			want := "could not read the test clock of " + c.record + "; retry"
+			want := "The test clock of " + c.record + " could not be read. Nothing was done; send the request again."
 			if !strings.Contains(got.body, want) || !strings.Contains(got.body, "test_clock_unavailable") || strings.Contains(got.body, "db down") {
 				t.Errorf("body %s; want %q, code test_clock_unavailable, and not the cause", got.body, want)
 			}
@@ -289,5 +307,33 @@ func TestClockDoor_EveryRouteThatReadsARecordIsAuthenticated(t *testing.T) {
 	}
 	if len(open) > 0 {
 		t.Errorf("%d routes read a record with no authentication:\n  %s", len(open), strings.Join(open, "\n  "))
+	}
+}
+
+// Every entry that reads a record names a parameter its route's pattern has.
+// One that did not would read an empty id, which the door decides as real
+// time: a record on a clock would silently run at real time.
+func TestClockDoor_EveryRecordEntryNamesAParameterOfItsRoute(t *testing.T) {
+	var wrong []string
+	reading := 0
+	if err := chi.Walk(newTestServer().router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		pattern := canonicalRoute(route)
+		entry := clockRoutes[routeKey{Method: method, Pattern: pattern}]
+		switch entry.Source {
+		case clockOfCustomer, clockOfSubscription, clockOfInvoice, clockOfCreditNote, clockOfDunningRun:
+			reading++
+			if !strings.Contains(pattern, "{"+entry.Param+"}") {
+				wrong = append(wrong, method+" "+pattern+": no {"+entry.Param+"}")
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	if reading == 0 {
+		t.Fatal("no route reads a record: the walk found none of the table's entries")
+	}
+	if len(wrong) > 0 {
+		t.Errorf("%d entries name a parameter their route does not have:\n  %s", len(wrong), strings.Join(wrong, "\n  "))
 	}
 }

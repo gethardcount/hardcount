@@ -14,8 +14,8 @@ import (
 )
 
 // eventStreamRoute mounts GET /v1/webhook_events/stream: the session cookie
-// or API key (session.MiddlewareOrAPIKey), the rate limit, the apikey:read
-// permission, then the stream, which re-checks its credential every interval
+// or API key (session.MiddlewareOrAPIKey), the rate limit, the clock door
+// (clockDoor), the apikey:read permission, then the stream, which re-checks its credential every interval
 // (streamCredentialStopped). router.go passes webhook.StreamHeartbeatInterval.
 func eventStreamRoute(h *webhook.Handler, sessSvc *session.Service, authSvc *auth.Service, rateLimit, door func(http.Handler) http.Handler, every time.Duration) func(chi.Router) {
 	return func(r chi.Router) {

@@ -1608,14 +1608,19 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// auth/login) need no 30s cap, because their handlers finish in
 	// milliseconds or fail fast on their own.
 
-	// The clock door decides each request's time before its handler runs,
-	// and it is the last middleware of every group, mounted below with each:
-	// after authentication, so it reads the named record as the caller's
-	// tenant and mode; after the rate limit, so a refused request pays for no
-	// lookup; after Idempotency, so a replay is answered from the stored
-	// response with no lookup, and the door's 503 for a clock it cannot read
-	// is not stored (errs.Unavailable); and after the timeout, so its lookups
-	// are bounded.
+	// The clock door (clockDoor) decides each request's time before its
+	// handler runs. It is the last middleware of every group below, after
+	// what that group has: on /v1, the CSRF guard, authentication, the rate
+	// limit, Idempotency and the timeout; on /v1/exports, authentication, the
+	// rate limit and the timeout; on the event stream, authentication and the
+	// rate limit; on bootstrap, /v1/auth and the public pages, their limiter
+	// and the timeout; on the Stripe webhooks, the timeout; on /health and
+	// /metrics, nothing. So it reads a named record as the caller's tenant and
+	// mode, a refused request pays for no lookup, a replay is answered from
+	// the stored response with no lookup (and the door's 503 is not stored),
+	// and its lookups are bounded. A route's own permission check runs after
+	// it, so a caller without the permission can meet the door's 503 before
+	// its 403.
 
 	// Public
 	r.With(door.Middleware).Get("/health", handleHealth)

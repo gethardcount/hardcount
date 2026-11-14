@@ -88,11 +88,18 @@ func TestClockDoor_AClockThatCannotBeReadIsRetriedNotReplayed(t *testing.T) {
 	clocks.fail.Store(true)
 	cancel := flowReq{header: map[string]string{"Idempotency-Key": "door-unreadable-cancel"}}
 	refused := r.call("POST", "/v1/subscriptions/"+subID+"/cancel", cancel)
-	want := "could not read the test clock of subscription " + subID + "; retry"
+	want := "The test clock of subscription " + subID + " could not be read. Nothing was done; send the request again."
 	if refused.status != 503 || !strings.Contains(string(refused.raw), want) {
 		t.Fatalf("cancel while the clock cannot be read: %d %s; want 503 %q", refused.status, refused.raw, want)
 	}
 	r.call("POST", "/v1/subscriptions/sub_door_none/cancel", flowReq{}).want(t, 404, "cancel a subscription that does not exist")
+	// A live customer is hidden from a test-mode read by row-level security:
+	// not found, so the handler answers it with its 404, not the door's 503.
+	liveKey := createAPIKeyWithMode(t, r.db, r.tenantID, true)
+	liveCustomer := flowStr(flowDo(t, r.ts, "POST", "/v1/customers", flowReq{bearer: liveKey, body: map[string]any{
+		"external_id": "door-live", "display_name": "Live customer",
+	}}).want(t, 201, "create a live customer").body, "id")
+	r.call("GET", "/v1/customers/"+liveCustomer, flowReq{}).want(t, 404, "read a live customer with a test key")
 
 	clocks.fail.Store(false)
 	if status := flowStr(r.call("GET", "/v1/subscriptions/"+subID, flowReq{}).want(t, 200, "read the subscription").body, "status"); status == "canceled" {
