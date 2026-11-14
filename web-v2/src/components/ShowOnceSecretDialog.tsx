@@ -12,8 +12,8 @@ import {
 
 /**
  * Shows a secret the server returns once (a new API key, a webhook signing
- * secret). It closes only from "I've copied it": Esc, a click outside and a
- * close button used to dismiss it, and the secret was gone for good (B-08).
+ * secret). It closes only from "I've copied it", so Esc or a click outside
+ * cannot lose the secret by accident.
  */
 export function ShowOnceSecretDialog({ title, label, secret, children, onDone }: {
   title: string

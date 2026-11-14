@@ -62,8 +62,8 @@ import { EmptyState } from '@/components/EmptyState'
 import { CopyButton, ShowOnceSecretDialog } from '@/components/ShowOnceSecretDialog'
 import { API_ORIGIN, DOCS_BASE } from '@/lib/apiOrigin'
 
-// The list standard (UI plan 1.4): 12 px muted headers on a row shorter than
-// the data rows, and rows tall enough to tap on a phone (1.14).
+// 12 px muted headers on a row shorter than the data rows, and rows tall
+// enough to tap on a phone.
 const HEAD = 'h-9 text-xs font-medium text-muted-foreground'
 const ROW = 'h-11'
 
@@ -73,9 +73,8 @@ const createApiKeySchema = z.object({
 
 type CreateApiKeyData = z.infer<typeof createApiKeySchema>
 
-// API keys are platform/tenant-scoped and never clock-pinned, so their
-// timestamps are genuinely wall-clock — callers pass wallClockNow(). The
-// required anchor keeps the choice explicit rather than an implicit Date.now().
+// A key is never on a test clock, so its times are wall-clock: callers pass
+// wallClockNow().
 function relativeTime(dateStr: string, now: EffectiveNow): string {
   const days = Math.floor(sinceMs(dateStr, now) / 86_400_000)
   if (days < 7) return timeAgo(dateStr, now)
@@ -139,8 +138,7 @@ export default function ApiKeysPage() {
   const [showInactive, setShowInactive] = useState(false)
   const queryClient = useQueryClient()
 
-  // Tenant timezone for displaying expires_at — see CreateKeyDialog
-  // for the "why tenant TZ" rationale.
+  // Tenant timezone for displaying expires_at.
   const tenantTZ = useTenantTimezone()
 
   const { data: keysData, isLoading: loading, error: loadError, refetch } = useQuery({
@@ -222,11 +220,9 @@ export default function ApiKeysPage() {
         </Card>
       ) : (
         <>
-          {/* One row per key (UI plan 4.22): the type, the key's start, its
-              status and dates, and the actions in the row's menu. Per
-              ADR-011 dashboard sessions are user-bound, not key-bound, so
-              every active key can be revoked (the server still enforces
-              permissions). */}
+          {/* One row per key: the type, the key's start, its status and
+              dates, and the actions in the row's menu. Every active key can
+              be revoked: a dashboard session is not tied to a key (ADR-011). */}
           <Card className="mt-6">
             <CardContent className="p-0">
               <Table>
@@ -367,9 +363,7 @@ export default function ApiKeysPage() {
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Revoke API key?</AlertDialogTitle>
-            {/* Key lookup reads only rows with revoked_at IS NULL and
-                nothing caches keys (internal/auth), so the next request
-                with this key is refused. */}
+            {/* The server refuses the next request made with this key. */}
             <AlertDialogDescription>
               {revokeTarget
                 ? `Anything using "${revokeTarget.name}" (${revokeTarget.key_prefix}…) is refused from its next request. This can't be undone.`
@@ -392,16 +386,15 @@ export default function ApiKeysPage() {
 
 type ExpiryPreset = 'never' | '30d' | '90d' | '1y' | 'custom'
 
-// Date-grade helpers (endOfDayInTZ, addDaysInTZ, formatExpiryHintInTZ)
-// live in @/lib/dates so Credits / future pickers can reuse
-// the same TZ-grounded arithmetic. See ADR-010.
+// The date helpers (endOfDayInTZ, addDaysInTZ, formatExpiryHintInTZ) are in
+// @/lib/dates (ADR-010).
 
 // The first call to make with a key: whoami names its account and mode.
 function tryItCurl(key: string): string {
   return `curl ${API_ORIGIN}/v1/whoami -H "Authorization: Bearer ${key}"`
 }
 
-// Where the API is and how to call it, before any key exists (C-28).
+// Where the API is and how to call it, before any key exists.
 function QuickStart() {
   const guides = [
     { href: `${DOCS_BASE}/api-keys.md`, label: 'API keys' },
@@ -438,8 +431,7 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
   const [customDate, setCustomDate] = useState('')
   const [customDateError, setCustomDateError] = useState('')
 
-  // Tenant timezone is the canonical clock for date-grade picks
-  // (matches Stripe / Auth0), from the account settings.
+  // Date picks use the account's timezone, from its settings.
   const tenantTZ = useTenantTimezone()
 
   const form = useForm<CreateApiKeyData>({
@@ -485,10 +477,9 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
     { value: 'custom', label: 'Custom' },
   ]
 
-  // The custom picker's first day is tomorrow in the tenant zone. A
-  // 0-day-from-now expiry is a foot-gun for prod workflows, hence the
-  // tomorrow-or-later floor (matches GitHub PAT minimum and the FLOW K2
-  // doc bullet). A key is never on a test clock, so now is the wall clock.
+  // The custom picker starts tomorrow in the account's zone: a key that
+  // expires later today would stop its integrations before anyone notices.
+  // A key is never on a test clock, so now is the wall clock.
   const now = wallClockNow()
   const tomorrow = civilDateFrom(now, 1, tenantTZ)
 
@@ -609,11 +600,9 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
 
 /* --- Rotate key Dialog --- */
 
-// Rotate replaces a key in place: the old key keeps working for the
-// chosen grace window (so deployed clients can swap credentials without
-// downtime), then expires automatically. Picking "Now" revokes the old
-// key the moment the new one is minted — pick this only when you can
-// redeploy immediately. Mirrors Stripe's Roll API key UX.
+// Rotate replaces a key: the old key keeps working for the chosen grace
+// window, so deployed clients can switch, then expires. "Now" revokes the old
+// key as the new one is made.
 const ROTATE_GRACE_PRESETS: { value: number; label: string }[] = [
   { value: 0, label: 'Now' },
   { value: 60 * 60, label: 'In 1 hour' },
