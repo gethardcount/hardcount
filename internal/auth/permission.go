@@ -46,26 +46,34 @@ const (
 	KeyTypeSession KeyType = "session" // dashboard cookie session, never stored in api_keys
 )
 
+// storedKeyTypes are the types a key can be issued and stored as. The type
+// prefixes (typePrefixes) and the create check (checkCreateInput) both come
+// from this list, and TestStoredKeyTypes_EachHasPrefixesAndPermissions fails
+// for a type here with no permission entry. A new type also needs the
+// api_keys CHECKs widened by a migration.
+var storedKeyTypes = []KeyType{KeyTypeSecret, KeyTypeIngest}
+
+// allPermissions is every permission a route can require.
+var allPermissions = []Permission{
+	PermCustomerRead, PermCustomerWrite,
+	PermPricingRead, PermPricingWrite,
+	PermSubscriptionRead, PermSubscriptionWrite,
+	PermUsageRead, PermUsageWrite, PermUsageIngest,
+	PermInvoiceRead, PermInvoiceWrite,
+	PermDunningRead, PermDunningWrite,
+	PermAPIKeyRead, PermAPIKeyWrite,
+	PermTestClockWrite,
+}
+
 // fullAccess is every permission. A secret key and a dashboard session
 // hold it.
-var fullAccess = map[Permission]bool{
-	PermCustomerRead:      true,
-	PermCustomerWrite:     true,
-	PermPricingRead:       true,
-	PermPricingWrite:      true,
-	PermSubscriptionRead:  true,
-	PermSubscriptionWrite: true,
-	PermUsageRead:         true,
-	PermUsageWrite:        true,
-	PermUsageIngest:       true,
-	PermInvoiceRead:       true,
-	PermInvoiceWrite:      true,
-	PermDunningRead:       true,
-	PermDunningWrite:      true,
-	PermAPIKeyRead:        true,
-	PermAPIKeyWrite:       true,
-	PermTestClockWrite:    true,
-}
+var fullAccess = func() map[Permission]bool {
+	m := make(map[Permission]bool, len(allPermissions))
+	for _, p := range allPermissions {
+		m[p] = true
+	}
+	return m
+}()
 
 var keyPermissions = map[KeyType]map[Permission]bool{
 	KeyTypeSecret: fullAccess,

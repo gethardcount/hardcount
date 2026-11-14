@@ -111,9 +111,13 @@ when. Each change and its audit row are saved together.
 All of them use `type` `authentication_error`, except the `503`, which is
 `api_error`. Every error code is in [Errors](errors.md).
 
-An open event stream (`GET /v1/webhook_events/stream`) checks its key again
-every 15 seconds. Once the key is revoked or expires, the stream closes with
-no final frame, and a reconnect with that key answers `401`.
+An open event stream (`GET /v1/webhook_events/stream`) checks its caller
+again every 15 seconds, and closes with no final frame once that caller no
+longer authenticates: its key is revoked or expires, or its dashboard
+session ends. A stream opened with a session cookie and a key on the same
+request is the session's, so it closes when the session ends, even though
+the key still works. A reconnect with credentials that no longer work
+answers `401`.
 
 ## Manage keys with the API
 

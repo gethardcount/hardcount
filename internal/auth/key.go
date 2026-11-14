@@ -21,8 +21,7 @@ const (
 
 // typePrefix returns a key's type prefix, "hc_{type}_{mode}_": hc_secret_live_,
 // hc_ingest_test_ and so on. The visible mode lets an operator spot a test
-// key in a production config. kt is secret or ingest, the types api_keys
-// holds.
+// key in a production config. kt is one of storedKeyTypes.
 func typePrefix(kt KeyType, livemode bool) string {
 	mode := "test"
 	if livemode {
@@ -31,11 +30,15 @@ func typePrefix(kt KeyType, livemode bool) string {
 	return "hc_" + string(kt) + "_" + mode + "_"
 }
 
-// typePrefixes are the four type prefixes a key can have.
-var typePrefixes = []string{
-	typePrefix(KeyTypeSecret, true), typePrefix(KeyTypeSecret, false),
-	typePrefix(KeyTypeIngest, true), typePrefix(KeyTypeIngest, false),
-}
+// typePrefixes are the type prefixes a key can have: each stored key type,
+// live and test.
+var typePrefixes = func() []string {
+	var ps []string
+	for _, kt := range storedKeyTypes {
+		ps = append(ps, typePrefix(kt, true), typePrefix(kt, false))
+	}
+	return ps
+}()
 
 // lookupPrefix returns the lookup prefix of raw, or false when raw is not a
 // key: one of typePrefixes, then exactly 2*secretBytes lowercase hex

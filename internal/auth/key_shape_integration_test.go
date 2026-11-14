@@ -20,10 +20,11 @@ func TestKeyShape_ParserAndTableAgree(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, db, "Key Shape")
 	rest := strings.Repeat("0", 2*secretBytes-lookupHexLen)
 
-	for i, c := range []struct {
+	type shapeCase struct {
 		stored string
 		valid  bool
-	}{
+	}
+	cases := []shapeCase{
 		{"hc_secret_live_0123456789ab", true},
 		{"hc_secret_test_0123456789ab", true},
 		{"hc_ingest_live_0123456789ab", true},
@@ -35,7 +36,15 @@ func TestKeyShape_ParserAndTableAgree(t *testing.T) {
 		{"hc_secret_live_0123456789ag", false},   // not hex
 		{"hc_platform_live_0123456789ab", false}, // a removed type
 		{"hc_pub_live_0123456789ab", false},      // a removed type
-	} {
+	}
+	// Each stored type's prefixes, so a type added to storedKeyTypes fails here
+	// until a migration widens the CHECK.
+	for _, kt := range storedKeyTypes {
+		for _, live := range []bool{true, false} {
+			cases = append(cases, shapeCase{typePrefix(kt, live) + "0123456789ab", true})
+		}
+	}
+	for i, c := range cases {
 		parsed, parsedOK := lookupPrefix(c.stored + rest)
 		if parsedOK && parsed != c.stored {
 			t.Errorf("%s: the parser's lookup prefix is %q", c.stored, parsed)

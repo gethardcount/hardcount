@@ -96,3 +96,53 @@ func TestMiddlewareOrAPIKey_APIKey(t *testing.T) {
 		}
 	})
 }
+
+// The context Authenticate returns names one caller, whatever the request's
+// context already held: a key empties the user, and a session empties the
+// key. The event stream re-runs Authenticate on a request whose context holds
+// the caller that opened it, and compares the two.
+func TestAuthenticate_NamesOneCaller(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	keys := auth.NewService(db, audit.NewLogger(db))
+	tenantID := testutil.CreateTestTenant(t, db, "One Caller")
+	created, err := keys.CreateKey(postgres.WithLivemode(t.Context(), false), tenantID, auth.CreateKeyInput{Name: "CI"})
+	if err != nil {
+		t.Fatalf("create key: %v", err)
+	}
+	store := &fakeSessionStore{sessions: map[string]Session{}}
+	sessions := NewService(store)
+	rawSession, sess, err := sessions.Issue(t.Context(), IssueInput{UserID: "usr_owner", TenantID: tenantID})
+	if err != nil {
+		t.Fatalf("issue session: %v", err)
+	}
+	store.sessions[sess.IDHash] = sess // the fake's Insert keeps nothing
+	held := auth.WithKeyID(auth.WithUserID(t.Context(), "usr_held"), "hc_key_held")
+
+	t.Run("a key", func(t *testing.T) {
+		ctx, err := Authenticate(keyRequest("Authorization", created.RawKey).WithContext(held), sessions, keys)
+		if err != nil {
+			t.Fatalf("authenticate: %v", err)
+		}
+		if got := auth.KeyID(ctx); got != created.Key.ID {
+			t.Errorf("key id = %q, want %q", got, created.Key.ID)
+		}
+		if got := auth.UserID(ctx); got != "" {
+			t.Errorf("user id = %q, want none for a key", got)
+		}
+	})
+
+	t.Run("a session", func(t *testing.T) {
+		req := httptest.NewRequest("GET", "/", nil).WithContext(held)
+		req.AddCookie(&http.Cookie{Name: CookieName, Value: rawSession})
+		ctx, err := Authenticate(req, sessions, keys)
+		if err != nil {
+			t.Fatalf("authenticate: %v", err)
+		}
+		if got := auth.UserID(ctx); got != sess.UserID {
+			t.Errorf("user id = %q, want %q", got, sess.UserID)
+		}
+		if got := auth.KeyID(ctx); got != "" {
+			t.Errorf("key id = %q, want none for a session", got)
+		}
+	})
+}
