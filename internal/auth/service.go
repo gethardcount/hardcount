@@ -277,7 +277,7 @@ var ErrInvalidKey = errors.New("invalid api key")
 
 // ValidateKey returns the key rawKey is, or ErrInvalidKey. rawKey must have a
 // key's shape (lookupPrefix) and match a stored key's hash, and the key must
-// be neither revoked nor expired. It writes the key's last_used_at at most
+// be active (statusAt). It writes the key's last_used_at at most
 // once per lastUsedTouchInterval; a failed write is logged and does not refuse
 // the key.
 func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey, error) {
