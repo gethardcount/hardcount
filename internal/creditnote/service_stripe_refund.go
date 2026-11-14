@@ -125,8 +125,12 @@ func (s *Service) RecordStripeRefund(ctx context.Context, tenantID string, snap 
 		return domain.StripeRefundRecordResult{}, err
 	}
 	// ADR-030: a recorded note is dated on the invoice's clock, as every
-	// credit note is.
-	ctx = s.bindForInvoice(ctx, tenantID, invoiceID)
+	// credit note is. The time is decided here, right after the invoice is
+	// found (test-clock step 3); one that cannot be decided fails the event,
+	// which Stripe delivers again.
+	if ctx, err = s.decideForInvoice(ctx, tenantID, invoiceID); err != nil {
+		return domain.StripeRefundRecordResult{}, fmt.Errorf("refund %s: %w", snap.StripeRefundID, err)
+	}
 
 	inv, err := s.invoices.LockForCreditNoteTx(ctx, tx, tenantID, invoiceID)
 	if err != nil {

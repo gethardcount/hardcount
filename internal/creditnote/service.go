@@ -281,6 +281,24 @@ func (s *Service) SetResolver(r clock.Resolver) { s.resolver = r }
 // grant, amount_due relief — lands in the invoice's own time domain. Mirrors
 // invoice.Service.bindForInvoice. Unresolvable pin or unwired resolver leaves
 // ctx untouched (wall-clock), which is correct for a non-simulated invoice.
+// decideForInvoice decides a Stripe event's write from the invoice it
+// belongs to (test-clock step 3): the invoice's clock, or real time. In live
+// mode it does nothing: no live record is on a test clock. A failure is
+// clock.ErrUndecided, which the webhook delivers again.
+func (s *Service) decideForInvoice(ctx context.Context, tenantID, invoiceID string) (context.Context, error) {
+	if !s.decidesTime(ctx) {
+		return ctx, nil
+	}
+	return clock.Decide(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
+}
+
+// decidesTime reports whether a Stripe event's write decides its time: in
+// test mode, or with no mode on ctx, when a resolver is wired.
+func (s *Service) decidesTime(ctx context.Context) bool {
+	live, err := postgres.Livemode(ctx)
+	return s.resolver != nil && (err != nil || !live)
+}
+
 func (s *Service) bindForInvoice(ctx context.Context, tenantID, invoiceID string) context.Context {
 	if s.resolver == nil || invoiceID == "" {
 		return ctx
@@ -2678,7 +2696,19 @@ func (s *Service) ApplyRefundWebhook(ctx context.Context, tenantID, stripeRefund
 			})
 		}
 	}
-	return s.store.ApplyRefundWebhookStatusAudited(ctx, tenantID, stripeRefundID, status, emit)
+	// The write decides its time from the credit note's invoice, right after
+	// the store finds the note; live mode reads nothing for it.
+	var decide DecideForInvoice
+	if s.decidesTime(ctx) {
+		decide = func(ctx context.Context, invoiceID string) (context.Context, error) {
+			ctx, err := s.decideForInvoice(ctx, tenantID, invoiceID)
+			if err != nil {
+				return ctx, fmt.Errorf("refund %s: %w", stripeRefundID, err)
+			}
+			return ctx, nil
+		}
+	}
+	return s.store.ApplyRefundWebhookStatusAudited(ctx, tenantID, stripeRefundID, status, decide, emit)
 }
 
 func (s *Service) Void(ctx context.Context, tenantID, id string) (domain.CreditNote, error) {

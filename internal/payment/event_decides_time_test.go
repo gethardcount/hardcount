@@ -208,3 +208,36 @@ func TestHandleWebhook_ALiveEventDecidesNothing(t *testing.T) {
 		t.Errorf("card: attached %d times, clock reads %d; want attached, no read", attacher.called, cardRes.reads)
 	}
 }
+
+// A refund event whose recorder could not decide its time is delivered
+// again, even for an old refund and with a not-found underneath: it is not
+// "no credit note holds this refund" (acknowledged for an old refund) nor
+// "no invoice holds this payment" (recorded as unmatched).
+func TestHandleWebhook_ARefundWhoseTimeIsUndecidedIsDeliveredAgain(t *testing.T) {
+	undecided := fmt.Errorf("refund re_x: %w: %w", clock.ErrUndecided, fmt.Errorf("read test clock clk_e: %w", errs.ErrNotFound))
+	for _, c := range []struct {
+		name string
+		obj  map[string]any
+	}{
+		// hardcount_cn_id: Hardcount's own refund, applied to its credit note.
+		{"a Hardcount refund's status", dashboardRefund(1000, map[string]string{"hardcount_cn_id": "cn_1"})},
+		// No metadata: a refund made in Stripe, recorded against its invoice.
+		{"a refund made in Stripe", dashboardRefund(1000, nil)},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			updater := &fakeRefundUpdater{err: undecided}
+			external := &fakeExternalRefunds{err: undecided}
+			s := refundAdapter(updater, external)
+			webhooks := s.webhooks.(*mockWebhookStore)
+			event := domain.StripeWebhookEvent{StripeEventID: "evt_re_undecided", EventType: "refund.updated",
+				Payload: map[string]any{"raw": refundRaw(t, c.obj)}}
+			err := s.HandleWebhook(postgres.WithLivemode(context.Background(), false), "t1", event)
+			if err == nil || !isTransientWebhookError(err) {
+				t.Fatalf("err = %v; want a transient error, so Stripe delivers it again", err)
+			}
+			if webhooks.ingestCalls != 0 {
+				t.Errorf("the refused refund event was recorded as processed (%d ingest calls)", webhooks.ingestCalls)
+			}
+		})
+	}
+}
