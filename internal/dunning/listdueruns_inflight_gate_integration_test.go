@@ -142,6 +142,10 @@ func TestListDueRuns_InFlightGate(t *testing.T) {
 	hostedLiveWrittenOff := mkDueRun("INV-HOSTED-WROFF", domain.PaymentFailed, "", domain.InvoiceUncollectible)
 	seedLiveHostedPage(t, db, ctx, tenantID, hostedLive)
 	seedLiveHostedPage(t, db, ctx, tenantID, hostedLiveWrittenOff)
+	held := mkDueRun("INV-HELD", domain.PaymentFailed, "", domain.InvoiceFinalized)
+	heldWrittenOff := mkDueRun("INV-HELD-WROFF", domain.PaymentFailed, "", domain.InvoiceUncollectible)
+	seedChargeHold(t, db, ctx, tenantID, held)
+	seedChargeHold(t, db, ctx, tenantID, heldWrittenOff)
 
 	due, err := dstore.ListDueRuns(ctx, tenantID, now.Add(time.Minute), 200)
 	if err != nil {
@@ -172,6 +176,32 @@ func TestListDueRuns_InFlightGate(t *testing.T) {
 	}
 	if !got[hostedLiveWrittenOff] {
 		t.Error("a written-off source with a hosted page must still be selected — the terminal branch resolves the run")
+	}
+	if got[held] {
+		t.Error("a run whose invoice a charge attempt holds must be excluded — the charge claim refuses a set hold, stale included")
+	}
+	if !got[heldWrittenOff] {
+		t.Error("a written-off source with a hold must still be selected — the terminal branch resolves the run")
+	}
+}
+
+// seedChargeHold sets a stale charge hold on the run's invoice: a charge
+// whose result was lost, waiting for the stale-hold sweep.
+func seedChargeHold(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, runID string) {
+	t.Helper()
+	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE invoices SET auto_charge_claimed_until = now() - interval '1 hour'
+		WHERE id = (SELECT r.invoice_id FROM invoice_dunning_runs r WHERE r.id = $1)
+	`, runID); err != nil {
+		t.Fatalf("seed charge hold: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
 	}
 }
 
@@ -253,6 +283,8 @@ func TestListDueRunsForClock_InFlightGate(t *testing.T) {
 	seedInvRun("inv_clk_wroff", "run_clk_wroff", "unknown", "", "uncollectible")
 	seedInvRun("inv_clk_failed", "run_clk_failed", "failed", "", "finalized")
 	seedInvRun("inv_clk_hosted", "run_clk_hosted", "failed", "", "finalized")
+	seedInvRun("inv_clk_held", "run_clk_held", "failed", "", "finalized")
+	mustExec(`UPDATE invoices SET auto_charge_claimed_until = now() - interval '1 hour' WHERE id = 'inv_clk_held'`)
 	mustExec(`INSERT INTO checkout_sessions (id, tenant_id, invoice_id, livemode, stripe_session_id, amount_cents, currency, status, expires_at)
 		VALUES ('cks_clk_hosted', $1, 'inv_clk_hosted', false, 'cs_clk_hosted', 2500, 'USD', 'open', now() + interval '50 minutes')`, tenantID)
 	if err := tx.Commit(); err != nil {
@@ -285,5 +317,8 @@ func TestListDueRunsForClock_InFlightGate(t *testing.T) {
 	}
 	if got["run_clk_hosted"] {
 		t.Error("a simulated invoice with a live hosted page must be excluded — its charge claim refuses, so a clock advance would spin it")
+	}
+	if got["run_clk_held"] {
+		t.Error("a simulated invoice a charge attempt holds must be excluded — its charge claim refuses a set hold")
 	}
 }

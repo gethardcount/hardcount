@@ -1251,9 +1251,7 @@ func (s *PostgresStore) ListDueRuns(ctx context.Context, tenantID string, dueBef
 			AND NOT EXISTS (
 			  SELECT 1 FROM invoices i
 			  WHERE i.id = r.invoice_id
-			    AND (i.payment_status IN ('processing', 'unknown')
-			      OR i.auto_charge_claimed_until IS NOT NULL
-			      OR `+domain.HostedCheckoutLiveSQL("i.id")+`)
+			    AND NOT `+domain.ChargeNotInFlightSQL("i")+`
 			    AND i.status NOT IN ('voided', 'uncollectible')
 			)
 		  AND leader_fence($3, $4)
@@ -1327,9 +1325,7 @@ func (s *PostgresStore) ListDueRunsForClock(ctx context.Context, tenantID, clock
 			-- in-flight sim invoice can consume the whole catchup budget and stall
 			-- every other run on the clock.
 			AND NOT (
-			  (i.payment_status IN ('processing', 'unknown')
-			    OR i.auto_charge_claimed_until IS NOT NULL
-			    OR `+domain.HostedCheckoutLiveSQL("i.id")+`)
+			  NOT `+domain.ChargeNotInFlightSQL("i")+`
 			  AND i.status NOT IN ('voided', 'uncollectible')
 			)
 		ORDER BY r.next_action_at ASC LIMIT $4
