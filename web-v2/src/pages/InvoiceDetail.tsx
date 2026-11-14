@@ -78,6 +78,24 @@ import { DetailBreadcrumb } from '@/components/DetailBreadcrumb'
 import { DetailSkeleton } from '@/components/ui/DetailSkeleton'
 import { stripeKeyState } from '@/lib/stripeVerify'
 
+// taxTerms is the one wording for whether an invoice's prices include tax,
+// fixed when the invoice was created. It makes the amounts readable after the
+// account's setting is switched.
+function taxTerms(taxInclusive: boolean): string {
+  return taxInclusive ? 'Prices include tax' : 'Prices exclude tax'
+}
+
+// showTaxTerms: on a draft, where lines are still added, and on any invoice
+// whose summary shows a tax row (tax charged, reverse charge, or exempt): the
+// same conditions as those rows. An invoice that charges no tax, such as one
+// of an account on the default manual 0%, leaves it out.
+function showTaxTerms(inv: {
+  status: string; tax_amount_cents: number; tax_reverse_charge?: boolean; tax_exempt_reason?: string
+}): boolean {
+  const showsTaxRow = inv.tax_amount_cents > 0 || !!inv.tax_reverse_charge || !!inv.tax_exempt_reason
+  return inv.status === 'draft' || showsTaxRow
+}
+
 // TaxReversedLine renders the "↳ Tax reversed $X (Stripe Tax)" sub-fact for a
 // credit note, shared by the pre-payment and post-payment settlement blocks so
 // the disclosure can't drift (pre-fix it lived only in the post-payment block,
@@ -1374,6 +1392,12 @@ export default function InvoiceDetailPage() {
                 </div>
               )}
 
+              {showTaxTerms(invoice) && (
+                <div className="text-right text-xs text-muted-foreground">
+                  {taxTerms(invoice.tax_inclusive)}
+                </div>
+              )}
+
               {/* Total */}
               {(invoice.discount_cents > 0 || invoice.tax_amount_cents > 0) && (
                 <div className={cn('flex justify-between text-sm font-medium', invoice.status === 'voided' && 'text-muted-foreground')}>
@@ -1841,6 +1865,7 @@ export default function InvoiceDetailPage() {
         <AddLineItemDialog
           invoiceId={invoice.id}
           currency={invoice.currency}
+          taxInclusive={invoice.tax_inclusive}
           onClose={() => setShowAddLineItem(false)}
           onAdded={() => { setShowAddLineItem(false); toast.success('Line item added'); invalidateAll() }}
           onFailed={invalidateAll}
@@ -1992,8 +2017,8 @@ function OperatorContextCard({
   )
 }
 
-function AddLineItemDialog({ invoiceId, currency, onClose, onAdded, onFailed }: {
-  invoiceId: string; currency: string; onClose: () => void; onAdded: () => void
+function AddLineItemDialog({ invoiceId, currency, taxInclusive, onClose, onAdded, onFailed }: {
+  invoiceId: string; currency: string; taxInclusive: boolean; onClose: () => void; onAdded: () => void
   // Reads the invoice again: a try that failed may still have added the line.
   onFailed: () => void
 }) {
@@ -2096,6 +2121,9 @@ function AddLineItemDialog({ invoiceId, currency, onClose, onAdded, onFailed }: 
               Total: {formatCents(qty * unitCents, currency)}
             </p>
           )}
+          {/* The draft's terms were fixed when it was created; a price typed
+              here is read in them, whatever the account's setting is now. */}
+          <p className="text-xs text-muted-foreground">{taxTerms(taxInclusive)}</p>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
             <Button type="submit" disabled={saving}>

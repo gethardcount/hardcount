@@ -83,6 +83,16 @@ export interface Invoice {
   tax_amount_cents: number;
   /** Tax rate as a percent, up to four decimal places (18.5 means 18.5%). */
   tax_rate: number;
+  /**
+     * Whether the invoice's prices include tax, fixed when the invoice is
+     * created: a subscription invoice takes the account's tax-inclusive
+     * setting at the time its lines were priced, a one-off invoice the
+     * setting when it was created. The invoice's tax is always worked out
+     * in these terms, so a later change to the setting does not change
+     * it. Invoices from before this field take the account's setting at
+     * the upgrade.
+     */
+  readonly tax_inclusive: boolean;
   /** The tax's label, such as `VAT` or `Sales Tax`. Absent when there is none. */
   tax_name?: string;
   /** The country the tax was calculated for. Absent when none was recorded. */
