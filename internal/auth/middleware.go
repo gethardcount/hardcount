@@ -2,14 +2,9 @@ package auth
 
 import (
 	"context"
-	"errors"
-	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/gethardcount/hardcount/internal/api/respond"
-	"github.com/gethardcount/hardcount/internal/platform/logging"
-	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 type contextKey string
@@ -21,54 +16,6 @@ const (
 	keyTypeKey       contextKey = "key_type"
 	customerActorKey contextKey = "customer_actor_id"
 )
-
-// Middleware validates the request's API key and puts its tenant context on
-// the request.
-func Middleware(svc *Service) func(http.Handler) http.Handler {
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			rawKey := extractBearerToken(r)
-			if rawKey == "" {
-				respond.Unauthorized(w, r, "missing credentials — use Authorization: Bearer hc_secret_...")
-				return
-			}
-
-			key, err := svc.ValidateKey(r.Context(), rawKey)
-			if err != nil {
-				if !errors.Is(err, ErrInvalidKey) {
-					// The store reached no verdict (a database outage or a
-					// timeout). A 401 here would tell integrators their key
-					// went bad mid-outage, and start a pointless rotation. A
-					// 503 for every caller reveals nothing about any one
-					// key, so the ADR-026 rule against key enumeration
-					// holds (#560).
-					slog.Log(r.Context(), logging.ErrorLevel(r.Context(), err), "api key validation unavailable",
-						"error", err)
-					respond.Error(w, r, http.StatusServiceUnavailable, "api_error",
-						"authentication_unavailable",
-						"authentication is temporarily unavailable — retry shortly")
-					return
-				}
-				// Use a generic message that never says whether a key
-				// exists, has expired or was revoked, so keys cannot be
-				// enumerated (ADR-026). The full reason is logged with the
-				// request ID.
-				slog.WarnContext(r.Context(), "api key validation failed",
-					"error", err)
-				respond.Unauthorized(w, r, "invalid or expired API key")
-				return
-			}
-
-			ctx := r.Context()
-			ctx = context.WithValue(ctx, tenantIDKey, key.TenantID)
-			ctx = context.WithValue(ctx, apiKeyIDKey, key.ID)
-			ctx = context.WithValue(ctx, keyTypeKey, KeyType(key.KeyType))
-			ctx = postgres.WithLivemode(ctx, key.Livemode)
-
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
-}
 
 // Require returns middleware that checks that the authenticated key has a
 // specific permission. Use it to protect individual route groups.
@@ -216,12 +163,4 @@ func CustomerActorID(ctx context.Context) string {
 // it to write actor_type='customer'.
 func WithCustomerActor(ctx context.Context, customerID string) context.Context {
 	return context.WithValue(ctx, customerActorKey, customerID)
-}
-
-func extractBearerToken(r *http.Request) string {
-	auth := r.Header.Get("Authorization")
-	if strings.HasPrefix(auth, "Bearer ") {
-		return strings.TrimPrefix(auth, "Bearer ")
-	}
-	return r.Header.Get("X-API-Key")
 }
