@@ -419,8 +419,8 @@ func TestCycleClose_CollectsAtThePeriodBoundary(t *testing.T) {
 	}
 }
 
-// refusingCharger fails definitely with no decline code (a Stripe
-// invalid_request, or a card_error that carries only a code).
+// refusingCharger fails definitely with no decline code and no card error:
+// a Stripe invalid_request ("No such PaymentMethod").
 // Records payment_status='failed' on store first, as the real charger does.
 type refusingCharger struct{ store *mockInvoices }
 
@@ -509,4 +509,60 @@ func collectEach(e *Engine, ctx context.Context, invs []domain.Invoice, at *time
 		errs = append(errs, rowErrs...)
 	}
 	return charged, errs
+}
+
+// cardRefusingCharger is refused by the card with no decline code (a
+// card_error that carries only a code, such as processing_error). Records
+// payment_status='failed' on store first, as the real charger does.
+type cardRefusingCharger struct{ store *mockInvoices }
+
+func (c cardRefusingCharger) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, _ domain.ChargeHold, _, _ string) (domain.Invoice, error) {
+	c.store.stampPaymentStatus(inv.ID, domain.PaymentFailed)
+	return inv, &payment.PaymentError{Message: "An error occurred while processing your card.", Card: true}
+}
+
+// A card refusal with no decline code is a decline: the charger has already
+// marked the invoice failed and started dunning, so collection returns no
+// error and the queue flag does not stay set beside it.
+func TestCollect_CardRefusalWithoutDeclineCodeIsADecline(t *testing.T) {
+	e, invoices, _, inv := collectFixture()
+	e.paymentSetups = &fakePaymentSetups{ready: true, stripeCustomerID: "cus_stripe"}
+	e.charger = cardRefusingCharger{store: invoices}
+
+	if _, errs := e.processAutoCharge(postgres.WithLivemode(context.Background(), false), inv, nil, noPMTriggerSweep); len(errs) != 0 {
+		t.Errorf("errors = %v, want none: a card refusal is dunning's, not an error", errs)
+	}
+	if autoChargePending(t, invoices, inv.ID) {
+		t.Error("a definite failure must clear the queue flag: dunning owns the retries")
+	}
+}
+
+// Which collection job fails on a definite refusal with no decline code: a
+// card refusal fails neither (on a clock the advance goes on; in real time
+// the sweep counts no error); an invalid request fails both, as a fault of
+// the request, so the sweep's failed count and a clock's advance show it.
+func TestCollect_RefusalWithoutDeclineCode_WhichJobsFail(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		charger func(*mockInvoices) InvoiceCharger
+		errs    int
+	}{
+		{"a card refusal", func(m *mockInvoices) InvoiceCharger { return cardRefusingCharger{store: m} }, 0},
+		{"an invalid request", func(m *mockInvoices) InvoiceCharger { return refusingCharger{store: m} }, 1},
+	} {
+		t.Run(c.name+", on a clock", func(t *testing.T) {
+			inv, _, _, engine := leftHarness(t)
+			engine.charger = c.charger(inv)
+			if _, errs := engine.RetryPendingChargesForClock(postgres.WithLivemode(context.Background(), false), "t1", "tc_1", 50); len(errs) != c.errs {
+				t.Errorf("errors = %v, want %d", errs, c.errs)
+			}
+		})
+		t.Run(c.name+", in real time", func(t *testing.T) {
+			inv, _, _, engine := leftHarness(t)
+			engine.charger = c.charger(inv)
+			if _, errs := engine.RetryPendingCharges(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) != c.errs {
+				t.Errorf("errors = %v, want %d", errs, c.errs)
+			}
+		})
+	}
 }
