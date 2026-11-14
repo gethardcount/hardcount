@@ -73,6 +73,14 @@ If a job fails, the jobs after it do not run: the clock stops at
 `internal_failure`, and its `last_failure_reason` starts with the job's
 name from this list.
 
+A card charge that Hardcount leaves for later is a failure on a clock. That
+happens when credits could not be applied before the charge, or when Stripe
+was briefly unavailable (a rate limit, an open circuit breaker, a refused
+key). Nothing is charged, the clock stops at `internal_failure`, and Retry
+advance charges the invoice. Outside a clock the next billing run does it
+(hourly, or every 5 minutes when `APP_ENV` is `local`). A card decline is
+not a failure: the invoice goes to dunning.
+
 A clock has no invoice grace period: moving past a period's end makes its
 invoice at once.
 
