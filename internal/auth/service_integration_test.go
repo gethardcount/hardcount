@@ -107,8 +107,8 @@ func TestCreateKey_Secret(t *testing.T) {
 	}
 }
 
-// Publishable keys were removed before v0.9.0: the type is refused on
-// create, and a key with the old hc_pub_ prefix is an unknown key.
+// There is no publishable key type: it is refused on create, and a key with
+// an hc_pub_ prefix is an unknown key.
 func TestCreateKey_RefusesRemovedPublishableType(t *testing.T) {
 	k := newKeyRig(t)
 	_, err := k.svc.CreateKey(liveCtx(t), k.tenantID, auth.CreateKeyInput{Name: "Frontend Key", KeyType: auth.KeyType("publishable")})

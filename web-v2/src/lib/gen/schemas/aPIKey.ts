@@ -23,14 +23,16 @@ export interface APIKey {
   /** The key's id (`hc_key_…`). Use it to revoke or rotate the key. */
   id: string;
   /**
-     * The key's type and mode prefix plus the first 12 characters of
-     * its secret part. Enough to tell keys apart; never the full key.
+     * The key's lookup prefix: its type prefix (type and mode) and the
+     * first 12 hex characters of its secret. Enough to tell keys apart;
+     * never the full key.
      */
   key_prefix: string;
   /**
      * `secret` can read and change everything in its mode of the
-     * account, except team members and the test email, which need a
-     * dashboard sign-in. `ingest` can only send usage events and call
+     * account, except team members, the test email and changing the
+     * account settings (`PUT /v1/settings`), which need a dashboard
+     * sign-in. `ingest` can only send usage events and call
      * `GET /v1/whoami`, for LiteLLM or another gateway.
      */
   key_type: APIKeyKeyType;

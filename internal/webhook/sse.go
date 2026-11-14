@@ -31,19 +31,16 @@ import (
 // caller's tenant tx (RLS), and the EventBus subscriber is keyed by
 // tenant_id so cross-tenant frames never reach this connection.
 //
-// We do NOT poll the DB on a tick. The EventBus is in-memory and
-// per-process: the Service publishes to it synchronously when it creates
-// an event (on the replica that ran the outbox drain or served the replay)
-// and from each delivery attempt (the first on the dispatching replica, a
-// retry on whichever replica won that tick).
-// With two or more replicas, a stream sees only the frames published on
-// its own replica, so the live tail can miss events and status flips.
-// The connect-time snapshot reads Postgres, so a reconnect or page
-// refresh shows the truth. Sticky sessions do not fix this, because
-// retry ticks move between replicas. Cross-replica fan-out (for example
-// Postgres LISTEN/NOTIFY inside EventBus) is deferred: item 8 of
-// docs/dev/records/ha-readiness-2026-07-06.md. It affects only the
-// dashboard's live view, never delivery.
+// After its snapshot the stream does not read Postgres: its frames come from
+// the EventBus, which is in memory and per process. The Service publishes to
+// it when it creates an event (on the replica that ran the outbox drain or
+// served the replay) and from each delivery attempt (the first on the
+// dispatching replica, a retry on whichever replica won that tick). With two
+// or more replicas, a stream sees only the frames published on its own
+// replica, so the live tail can miss events and status changes; the snapshot
+// reads Postgres, so a reconnect or a page refresh shows them. Sticky
+// sessions do not help, because retry ticks move between replicas. This
+// affects only the dashboard's live view, never delivery.
 const sseSnapshotLimit = 50
 
 // streamEvents serves GET /v1/webhook_events/stream (StreamHandler).

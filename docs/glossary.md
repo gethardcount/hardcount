@@ -26,7 +26,7 @@ follows.
 - **test mode and live mode**: Two separate sets of data in one account, as
   in Stripe. Test mode is for trying things, and nothing in it charges real
   money. Live mode is real billing. An API key's mode (the `_test_` or
-  `_live_` in its prefix) or the dashboard's mode switch picks which set you
+  `_live_` in its type prefix) or the dashboard's mode switch picks which set you
   see. Account settings are shared, but each mode has its own Stripe
   connection. [More](api-keys.md)
 - **API key types (secret, usage only)**: The two kinds of key you send as
@@ -34,6 +34,11 @@ follows.
   access to one account and stays on your server. A usage-only key
   (`hc_ingest_`, `ingest` in the API) can only send usage events, for
   LiteLLM or another gateway. [More](api-keys.md)
+- **API key prefixes (type prefix, lookup prefix)**: A key's type prefix,
+  such as `hc_secret_live_`, says its type and mode. Its lookup prefix, the
+  type prefix and the first 12 hex characters of its secret, is what the key
+  list shows and the API returns as `key_prefix`; it tells keys apart
+  without the whole key. [More](api/authentication.md#key-format)
 - **API key status (active, expired, revoked)**: Whether a key works. A
   revoked key is revoked for good; otherwise a key is expired from its
   `expires_at` on, and active until then. Only an active key works or can be

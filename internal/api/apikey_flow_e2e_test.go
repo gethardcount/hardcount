@@ -15,8 +15,7 @@ import (
 // database: create a key from a signed-in session, use it, find it in the
 // list, revoke it and see the same key refused, then rotate the two ways
 // docs/api-keys.md describes. A grace period keeps the old key working;
-// no body retires it at once. Before this test no test called these routes
-// over HTTP: every other test mints its key with a database helper.
+// no body retires it at once.
 func TestE2E_APIKeyLifecycle(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "apikey-flow-bootstrap")
@@ -139,8 +138,8 @@ func TestE2E_APIKeyLifecycle(t *testing.T) {
 		t.Errorf("its replacement: %d, want 200", got)
 	}
 
-	// Publishable keys were removed before v0.9.0. The type is refused, and a
-	// key with the old hc_pub_ prefix is an unknown key: the ordinary 401.
+	// There is no publishable key type: it is refused, and a key with an
+	// hc_pub_ prefix is an unknown key, the ordinary 401.
 	flowDo(t, ts, "POST", "/v1/api-keys", flowReq{cookie: owner, body: map[string]any{
 		"name": "Checkout page", "key_type": "publishable",
 	}}).want(t, 422, "create a key of the removed publishable type")

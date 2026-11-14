@@ -10,6 +10,10 @@ const (
 	APIKeyStatusRevoked = "revoked"
 )
 
+// APIKey is a stored API key as the API returns it, never with its raw value
+// or its hash. KeyPrefix is the key's lookup prefix: its type prefix
+// (hc_secret_live_ and so on) and the first 12 hex characters of its secret,
+// by which a request's key is found and an operator recognizes it.
 type APIKey struct {
 	ID         string     `json:"id"`
 	KeyPrefix  string     `json:"key_prefix"`

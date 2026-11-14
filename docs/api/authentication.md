@@ -14,8 +14,8 @@ Put the key in the `Authorization` header, after `Bearer` and one space:
 curl -s "$HARDCOUNT/v1/whoami" -H "Authorization: Bearer $HARDCOUNT_KEY"
 ```
 
-Hardcount also reads a key from an `X-API-Key` header when the request has
-no `Authorization` header.
+Hardcount also reads a key from an `X-API-Key` header when the
+`Authorization` header does not start with `Bearer `.
 
 `GET /v1/whoami` needs no permission, so it is a good first call. It answers
 with your `tenant_id` (your account's ID), `livemode`, `key_id` and
@@ -25,11 +25,11 @@ Outside your own computer, send keys only over HTTPS.
 
 ## Key format
 
-A key is its prefix followed by 64 lowercase hex characters. Any other
-string is refused as an invalid key. The prefix says the key's type and
-mode:
+A key is its **type prefix** followed by 64 lowercase hex characters. Any
+other string is refused as an invalid key. The type prefix says the key's
+type and mode:
 
-| Prefix | Type | Mode |
+| Type prefix | Type | Mode |
 |---|---|---|
 | `hc_secret_test_` | Secret | Test |
 | `hc_secret_live_` | Secret | Live |
@@ -57,8 +57,9 @@ A usage-only key cannot backfill past usage, release held usage, read usage
 or read the credit balance. Do those with a secret key.
 
 A dashboard session (the cookie the dashboard gets when someone signs in)
-can do what a secret key can, in the mode the dashboard is in. Only a
-session can:
+can do what a secret key can, in the mode the dashboard is in. That holds
+for every member: roles are recorded but not enforced, so any member can
+create a live secret key. Only a session can:
 
 - manage team members (`/v1/members`);
 - change the account settings (`PUT /v1/settings`), which test and live
@@ -146,11 +147,12 @@ retry: a retried create makes a second key
 An `expires_at` that is not in the future is refused with `422`.
 
 **List.** Each key's record has `id`, `name`, `key_type`, `status`,
-`livemode`, `key_prefix` (the prefix and the first 12 hex characters),
+`livemode`, `key_prefix` (the key's **lookup prefix**: its type prefix and
+the first 12 hex characters of its secret, enough to recognize the key),
 `created_at`, and, when set, `expires_at`, `revoked_at` and `last_used_at`.
 `status` is `active`, `expired` (from its `expires_at` on) or `revoked`;
 only an active key works. Revoked keys stay in the list. `last_used_at` is
-updated at most once a minute.
+updated at most once a minute per server, so it can lag a little.
 
 **Rotate.** The new key keeps the old key's name, type, mode and
 `expires_at`. Send `expires_in_seconds` to keep the old key working for a
