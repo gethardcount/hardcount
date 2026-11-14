@@ -111,6 +111,8 @@ Then `grep -rn` for the previous release in `docs/` and `deploy/` finds only his
 
 ## Fresh install and upgrade
 
+- [ ] The release can be verified. Create the release with `gh release create`, which makes the tag and the release together: the tag's CI run then signs both images, checks the signatures, records their build provenance and attaches the API image's SBOM to the release. After that run is green: `gh release view <tag>` lists `hardcount-sbom.spdx.json`, and `gh attestation verify oci://ghcr.io/gethardcount/hardcount:<tag> --repo gethardcount/hardcount` passes.
+
 These prove that the images the quick start pulls work, and that an existing install can move to them. Use a machine that has Docker but no Hardcount containers or volumes, for example a new VM.
 
 ### Fresh install
