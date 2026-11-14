@@ -117,12 +117,11 @@ func applyToCtx(ctx context.Context, s Session) context.Context {
 }
 
 // apiKeyFromHeaders returns the API key r carries: the Authorization Bearer
-// token, or else the X-API-Key header. It is the one place a key is read
-// from a request.
+// token, or "". It is the one place a key is read from a request.
 func apiKeyFromHeaders(r *http.Request) string {
 	h := r.Header.Get("Authorization")
 	if strings.HasPrefix(h, "Bearer ") {
 		return strings.TrimPrefix(h, "Bearer ")
 	}
-	return r.Header.Get("X-API-Key")
+	return ""
 }

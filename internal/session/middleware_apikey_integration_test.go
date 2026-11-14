@@ -64,7 +64,16 @@ func TestMiddlewareOrAPIKey_APIKey(t *testing.T) {
 		}
 	})
 
-	for _, header := range []string{"Authorization", "X-API-Key"} {
+	// A key is read from the Authorization Bearer header only: one sent in
+	// X-API-Key is no credential at all.
+	t.Run("a valid key in X-API-Key", func(t *testing.T) {
+		rec, seen := serve(keys, keyRequest("X-API-Key", created.RawKey))
+		if rec.Code != http.StatusUnauthorized || seen != nil || !strings.Contains(rec.Body.String(), "missing credentials") {
+			t.Errorf("got %d %s (reached=%v), want 401 missing credentials", rec.Code, rec.Body.String(), seen != nil)
+		}
+	})
+
+	for _, header := range []string{"Authorization"} {
 		t.Run("a valid key in "+header, func(t *testing.T) {
 			rec, seen := serve(keys, keyRequest(header, created.RawKey))
 			if rec.Code != http.StatusOK || seen == nil {

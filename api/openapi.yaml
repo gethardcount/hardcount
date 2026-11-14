@@ -82,8 +82,8 @@ components:
       type: http
       scheme: bearer
       description: |
-        An API key, sent as `Authorization: Bearer <key>`. The header
-        `X-API-Key: <key>` works too. A key's prefix says its type and mode:
+        An API key, sent as `Authorization: Bearer <key>`. A key's prefix
+        says its type and mode:
 
         - `hc_secret_test_…` and `hc_secret_live_…`: a secret key. It has full
           access to one account's test or live data, except the team-member
