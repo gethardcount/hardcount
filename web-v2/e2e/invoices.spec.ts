@@ -1,4 +1,4 @@
-import { test, expect, type Locator, type Page } from '@playwright/test'
+import { test, expect, type Locator, type Page, type Route } from '@playwright/test'
 import { api, apiListAll, usd, usdBalance, uniq } from './fixtures/api'
 import { billedCustomer, createCustomer, invoicesFor, subscribedCustomer, waitForClockReady, type Invoice } from './fixtures/seed'
 
@@ -1261,4 +1261,72 @@ test('a credit note recorded from Stripe is tagged, with its refund, on the cred
   await expect(adjustments.getByRole('link', { name: 'Open in Stripe' })).toHaveAttribute('href', 'https://dashboard.stripe.com/test/payments/pi_e2e_dashboard')
   // The page may still be refreshing the stubbed invoice; let the test end without it.
   await page.unrouteAll({ behavior: 'ignoreErrors' })
+})
+
+// An invoice says whether its prices include tax, in the terms fixed when it
+// was created, so its amounts stay readable after the account switches the
+// setting. A draft shows it in the summary and under the price in Add line
+// item, where an operator types amounts; a finalized invoice that carries tax
+// shows it in the summary. The first view is the API's real answer; the other
+// wording comes from the invoice answer with tax_inclusive flipped in the
+// browser (the account's setting is shared by tests running in parallel, so
+// it is not switched).
+test('an invoice shows whether its prices include tax: on a draft and in Add line item, and on a finalized invoice that carries tax', async ({ page }) => {
+  const customer = await createCustomer()
+  const draft = await api<Invoice & { tax_inclusive: boolean }>('POST', '/invoices', {
+    customer_id: customer.id,
+    currency: 'USD',
+    line_items: [{ description: `E2E tax terms ${uniq()}`, line_type: 'add_on', quantity: 1, unit_amount_cents: 3000 }],
+  })
+  const wording = (inclusive: boolean) => (inclusive ? 'Prices include tax' : 'Prices exclude tax')
+  const terms = (scope: Page | Locator, inclusive: boolean) => scope.getByText(wording(inclusive), { exact: true })
+  const anyTerms = (scope: Page | Locator) => scope.getByText(/^Prices (include|exclude) tax$/)
+
+  // The real answer.
+  await page.goto(`/invoices/${draft.id}`)
+  await expect(page.getByRole('heading', { level: 1, name: draft.invoice_number, exact: true })).toBeVisible()
+  await expect(terms(page, draft.tax_inclusive)).toBeVisible()
+  await expect(anyTerms(page)).toHaveCount(1)
+  await terms(page, draft.tax_inclusive).scrollIntoViewIfNeeded()
+  await page.screenshot({ path: test.info().outputPath('tax-terms-draft.png') })
+  await page.getByRole('button', { name: 'Add line item' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Add line item' })
+  await expect(terms(dialog, draft.tax_inclusive)).toBeVisible()
+  await page.screenshot({ path: test.info().outputPath('tax-terms-draft-dialog.png') })
+  await dialog.getByRole('button', { name: 'Cancel' }).click()
+
+  // The other terms.
+  const invoiceRead = (url: URL) => url.pathname === `/v1/invoices/${draft.id}`
+  const flip = async (route: Route, extra: Record<string, unknown> = {}) => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    const answer = await route.fetch({ headers: { ...route.request().headers(), 'sec-fetch-site': 'same-origin' } })
+    const body = await answer.json()
+    await route.fulfill({ response: answer, json: { ...body, invoice: { ...body.invoice, tax_inclusive: !draft.tax_inclusive, ...extra } } })
+  }
+  await page.route(invoiceRead, route => flip(route))
+  await page.reload()
+  await expect(terms(page, !draft.tax_inclusive)).toBeVisible()
+  await expect(anyTerms(page)).toHaveCount(1)
+  await page.getByRole('button', { name: 'Add line item' }).click()
+  await expect(terms(page.getByRole('dialog', { name: 'Add line item' }), !draft.tax_inclusive)).toBeVisible()
+  await page.getByRole('dialog', { name: 'Add line item' }).getByRole('button', { name: 'Cancel' }).click()
+  await page.unroute(invoiceRead)
+
+  // Finalized. This account is on the default manual 0% and charges no tax,
+  // so the summary shows no tax row and leaves the line out; an invoice that
+  // charges tax shows it with its tax row.
+  await api('POST', `/invoices/${draft.id}/finalize`)
+  await page.reload()
+  await expect(page.getByRole('heading', { level: 1, name: draft.invoice_number, exact: true })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Add line item' }), 'the page shows the finalized invoice').toHaveCount(0)
+  await expect(anyTerms(page)).toHaveCount(0)
+  // 3000 at 20% in the flipped terms, so the figures on screen add up.
+  const taxed = !draft.tax_inclusive
+    ? { subtotal_cents: 2500, tax_amount_cents: 500, total_amount_cents: 3000, amount_due_cents: 3000 }
+    : { subtotal_cents: 3000, tax_amount_cents: 600, total_amount_cents: 3600, amount_due_cents: 3600 }
+  await page.route(invoiceRead, route => flip(route, { ...taxed, tax_rate: 20, tax_name: 'VAT' }))
+  await page.reload()
+  await expect(terms(page, !draft.tax_inclusive)).toBeVisible()
+  await terms(page, !draft.tax_inclusive).scrollIntoViewIfNeeded()
+  await page.screenshot({ path: test.info().outputPath('tax-terms-finalized.png') })
 })

@@ -2106,6 +2106,7 @@ components:
         - discount_cents
         - tax_amount_cents
         - tax_rate
+        - tax_inclusive
         - total_amount_cents
         - amount_due_cents
         - amount_paid_cents
@@ -2176,6 +2177,17 @@ components:
           type: number
           format: double
           description: Tax rate as a percent, up to four decimal places (18.5 means 18.5%).
+        tax_inclusive:
+          type: boolean
+          readOnly: true
+          description: |
+            Whether the invoice's prices include tax, fixed when the invoice is
+            created: a subscription invoice takes the account's tax-inclusive
+            setting at the time its lines were priced, a one-off invoice the
+            setting when it was created. The invoice's tax is always worked out
+            in these terms, so a later change to the setting does not change
+            it. Invoices from before this field take the account's setting at
+            the upgrade.
         tax_name:
           type: string
           description: The tax's label, such as `VAT` or `Sales Tax`. Absent when there is none.

@@ -34,6 +34,7 @@
     "subtotal_cents": 10000,
     "tax_amount_cents": 825,
     "tax_country": "US",
+    "tax_inclusive": false,
     "tax_name": "Sales tax",
     "tax_provider": "manual",
     "tax_rate": 8.25,
