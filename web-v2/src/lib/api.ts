@@ -779,13 +779,11 @@ export interface BillingThresholds {
 export interface TestClock {
   id: string
   tenant_id: string
-  livemode: boolean
   name: string
   frozen_time: string
   status: 'ready' | 'advancing' | 'internal_failure'
   created_at: string
   updated_at: string
-  deletes_after?: string | null
   // last_failure_reason is set when status='internal_failure' to
   // explain the prior catchup error. Cleared on retry success or
   // a fresh advance. ADR-018.

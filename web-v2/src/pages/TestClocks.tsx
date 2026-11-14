@@ -10,7 +10,7 @@ import { toast } from 'sonner'
 import { api, formatDate, formatDateTime, type TestClock } from '@/lib/api'
 import { useTenantTimezone } from '@/hooks/useTenantTimezone'
 import { wallClockNow } from '@/lib/effectiveNow'
-import { applyApiError, showApiError } from '@/lib/formErrors'
+import { applyApiError } from '@/lib/formErrors'
 import { formatInTimeZone, fromZonedTime } from 'date-fns-tz'
 import { cn } from '@/lib/utils'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -261,5 +261,3 @@ function CreateClockDialog({ onClose }: { onClose: () => void }) {
   )
 }
 
-// silence unused-import eslint warning when nothing else surfaces it
-void showApiError

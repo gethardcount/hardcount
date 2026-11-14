@@ -21,7 +21,7 @@ import { downloadCSV } from '@/lib/csv'
 import { useNowFor } from '@/hooks/useNow'
 import { useTenantTimezone } from '@/hooks/useTenantTimezone'
 import { pickerDays } from '@/lib/datePickerDays'
-import { TestClockBadge } from '@/components/TestClockBadge'
+import { SimulatedBadge } from '@/components/TestClockBadge'
 import { useSortable, type SortDir } from '@/hooks/useSortable'
 import { useUrlState } from '@/hooks/useUrlState'
 import { cn } from '@/lib/utils'
@@ -330,7 +330,7 @@ export default function CreditsPage() {
                     one badge covers the card, same pattern as the detail
                     pages (clock-design review 2026-07-21). */}
                 {selectedCustomer?.test_clock_id && (
-                  <TestClockBadge testClockId={selectedCustomer.test_clock_id} link />
+                  <SimulatedBadge testClockId={selectedCustomer.test_clock_id} link />
                 )}
               </span>
             </CardTitle>

@@ -14,7 +14,7 @@ import { collectionPausedFlag, subscriptionStatus } from '@/lib/statusLabels'
 import { SUBSCRIPTION_TABS, subscriptionTabEmptyTitle, subscriptionTabParams } from '@/lib/subscriptionListFilters'
 import { StatusBadge } from '@/components/StatusBadge'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
-import { TestClockBadge } from '@/components/TestClockBadge'
+import { SimulatedBadge } from '@/components/TestClockBadge'
 import { CreateSubscriptionDialog } from '@/components/CreateSubscriptionDialog'
 
 import { Button } from '@/components/ui/button'
@@ -323,7 +323,7 @@ export default function SubscriptionsPage() {
                             {sub.display_name}
                           </Link>
                           {sub.test_clock_id && (
-                            <TestClockBadge testClockId={sub.test_clock_id} />
+                            <SimulatedBadge />
                           )}
                         </div>
                       </TableCell>

@@ -14,7 +14,7 @@ import { wallClockNow } from '@/lib/effectiveNow'
 import { showApiError } from '@/lib/formErrors'
 import { LoadError } from '@/components/LoadError'
 import { toast } from 'sonner'
-import { TestClockBadge } from '@/components/TestClockBadge'
+import { SimulatedBadge } from '@/components/TestClockBadge'
 import { HeldUsageNotice } from '@/components/HeldUsageNotice'
 import { cn } from '@/lib/utils'
 import { fillDays, meterModeBadge, meterValueCaption, sparklinePoints } from '@/lib/usageSummary'
@@ -439,7 +439,7 @@ export default function UsageEventsPage() {
                                 clock's simulated instant, not wall-clock ingestion
                                 time (clock-design review 2026-07-21). */}
                             {customerMap[ev.customer_id]?.test_clock_id && (
-                              <TestClockBadge testClockId={customerMap[ev.customer_id].test_clock_id!} />
+                              <SimulatedBadge />
                             )}
                           </span>
                         </TableCell>
