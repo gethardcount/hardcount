@@ -79,3 +79,62 @@ func TestE2E_TaxExclusive_DowngradeCreditsWhatWasPaid(t *testing.T) {
 		map[string]any{"new_plan_id": half, "immediate": true}, http.StatusOK)
 	r.wantNotes("a downgrade to half the price with half the month left", r.baseID, 3000)
 }
+
+// An item removal credits the unused time of the removed item the same way.
+// Ten seats (12000 with tax) and an extra plan at 2000 a month before tax,
+// 2400 with it: the month's invoice is subtotal 12000, tax 2400, total 14400.
+// Removing the extra on Sep 16, with half the month left, credits half of
+// what it was charged: 1200. With tax-inclusive prices the 1200 unused was
+// grossed up a second time, to 1440.
+func newTaxTwoItemRig(t *testing.T, inclusive bool) (r *seatRig, extraItem string) {
+	t.Helper()
+	r = &seatRig{lagRig: newLagRigBare(t, "in_advance", 0)}
+	if _, err := tenant.NewSettingsStore(r.db).Update(postgres.WithLivemode(context.Background(), false), r.tenantID, func(ts *domain.TenantSettings) error {
+		ts.TaxProvider, ts.TaxRate, ts.TaxName, ts.TaxInclusive = "manual", 20, "VAT", inclusive
+		return nil
+	}); err != nil {
+		t.Fatalf("set the tax: %v", err)
+	}
+	seat, extra := int64(1000), int64(2000)
+	if inclusive {
+		seat, extra = 1200, 2400
+	}
+	r.planTeam = r.newPlan("seat", "in_advance", seat)
+	// A base fee only: two plans may not bill the rig's meter.
+	extraPlan := r.must(http.MethodPost, "/v1/plans", ocP0, map[string]any{
+		"code": "extra", "name": "extra", "currency": "USD", "billing_interval": "monthly",
+		"base_amount_cents": extra, "base_bill_timing": "in_advance",
+	}, http.StatusCreated)["id"].(string)
+	sub := r.must(http.MethodPost, "/v1/subscriptions", ocP0, map[string]any{
+		"code": "tax-two-item-sub", "display_name": "Tax Two Item Sub", "customer_id": r.custID, "billing_time": "calendar",
+		"items": []map[string]any{{"plan_id": r.planTeam, "quantity": 10}, {"plan_id": extraPlan, "quantity": 1}},
+	}, http.StatusCreated)
+	r.subID = sub["id"].(string)
+	for _, it := range r.sub().Items {
+		if it.PlanID == extraPlan {
+			extraItem = it.ID
+		} else {
+			r.itemA = it.ID
+		}
+	}
+	r.baseID = r.firstInvoiceID()
+	base := r.invoice(r.baseID)
+	if flowInt(base, "subtotal_cents") != 12000 || flowInt(base, "tax_amount_cents") != 2400 || flowInt(base, "total_amount_cents") != 14400 {
+		t.Fatalf("base invoice = subtotal %d, tax %d, total %d; want 12000, 2400, 14400",
+			flowInt(base, "subtotal_cents"), flowInt(base, "tax_amount_cents"), flowInt(base, "total_amount_cents"))
+	}
+	r.pay(r.baseID, ocP0.Add(1))
+	return r, extraItem
+}
+
+func TestE2E_TaxInclusive_ItemRemovalCreditsWhatWasPaid(t *testing.T) {
+	r, extra := newTaxTwoItemRig(t, true)
+	r.must(http.MethodDelete, "/v1/subscriptions/"+r.subID+"/items/"+extra, ocUp, nil, http.StatusNoContent)
+	r.wantNotes("the extra item removed with half the month left", r.baseID, 1200)
+}
+
+func TestE2E_TaxExclusive_ItemRemovalCreditsWhatWasPaid(t *testing.T) {
+	r, extra := newTaxTwoItemRig(t, false)
+	r.must(http.MethodDelete, "/v1/subscriptions/"+r.subID+"/items/"+extra, ocUp, nil, http.StatusNoContent)
+	r.wantNotes("the extra item removed with half the month left", r.baseID, 1200)
+}
