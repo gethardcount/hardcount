@@ -1545,11 +1545,8 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	paymentMethodsH.SetCooldown(setupLinkCooldown)
 
 	r := chi.NewRouter()
-	// An unknown path and a method the path does not take answer the JSON
-	// error envelope, not chi's plain text. chi hands both handlers down to
-	// every router mounted below. The 405 lists the path's methods in Allow.
-	// door decides each request's time before its handler runs (clockDoor);
-	// its root is the built router, set once every route is registered, below.
+	// The clock door (clockDoor); its root is the built router, set once every
+	// route is registered, below.
 	door := &clockDoor{
 		resolver: engine,
 		creditNoteInvoice: func(ctx context.Context, tenantID, id string) (string, error) {
@@ -1562,6 +1559,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		},
 	}
 	var allow *allowIndex // built once every route is registered, below
+	// An unknown path and a method the path does not take answer the JSON
+	// error envelope, not chi's plain text. chi hands both handlers down to
+	// every router mounted below. The 405 lists the path's methods in Allow.
 	r.NotFound(respond.RouteNotFound)
 	r.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
 		respond.MethodNotAllowed(w, req, allow.methods(req.URL))
@@ -1607,6 +1607,15 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// sets none. The unauthenticated public routes (health, metrics,
 	// auth/login) need no 30s cap, because their handlers finish in
 	// milliseconds or fail fast on their own.
+
+	// The clock door decides each request's time before its handler runs,
+	// and it is the last middleware of every group, mounted below with each:
+	// after authentication, so it reads the named record as the caller's
+	// tenant and mode; after the rate limit, so a refused request pays for no
+	// lookup; after Idempotency, so a replay is answered from the stored
+	// response with no lookup, and the door's 503 for a clock it cannot read
+	// is not stored (errs.Unavailable); and after the timeout, so its lookups
+	// are bounded.
 
 	// Public
 	r.With(door.Middleware).Get("/health", handleHealth)
