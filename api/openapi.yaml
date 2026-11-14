@@ -22107,6 +22107,29 @@ paths:
                   param: send_email
         "429":
           $ref: "#/components/responses/RateLimited"
+        "503":
+          description: |
+            Code `settings_unavailable`: Hardcount could not read the
+            account's time zone, which sets the due date of a draft created
+            before invoices carried their own zone, so the invoice was not
+            finalized.
+            This answer is not stored under the `Idempotency-Key`: send the
+            same request with the same key after `Retry-After`.
+          headers:
+            Retry-After:
+              description: Seconds to wait before you send the request again.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  type: api_error
+                  code: settings_unavailable
+                  message: could not read the account's time zone to set the due date, so the invoice was not finalized — please retry
+                  request_id: req_dbjg652q3gpgqfoq5cd0
 
   /v1/invoices/{id}/retry-tax:
     post:

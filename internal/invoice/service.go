@@ -964,7 +964,9 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	issuedAt := now
 	// Net N runs on the tenant's civil calendar, so the due date stays the
 	// same wall-clock time across a DST change.
-	dueAt := domain.AddDaysIn(now, netDays, billingLoc) // the zone read above: one read
+	// The zone stamped on the invoice: its due date and its zone come from
+	// the same settings read.
+	dueAt := domain.AddDaysIn(now, netDays, billingLoc)
 
 	inv := domain.Invoice{
 		CustomerID:         input.CustomerID,
@@ -1588,15 +1590,6 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 	return inv
 }
 
-// invoiceDisplayLoc resolves the timezone an invoice's period is anchored in:
-// the denormalized snapshot (ADR-077) when present, else the live tenant TZ for
-// ad-hoc/manual invoices with no owning subscription and legacy rows created
-// before the snapshot column existed (preserving their prior display exactly).
-func (s *Service) invoiceDisplayLoc(ctx context.Context, inv domain.Invoice) *time.Location {
-	var tenantLoc *time.Location
-	return s.invoiceDisplayLocCached(ctx, inv, &tenantLoc)
-}
-
 // invoiceZone is the zone a stored date of the invoice is worked out in: its
 // own (ADR-077), else the tenant's for a row from before invoices carried
 // one. Unlike the display zone, a failed tenant read is returned.
@@ -1607,15 +1600,25 @@ func (s *Service) invoiceZone(ctx context.Context, inv domain.Invoice) (*time.Lo
 	return s.tenantZone(ctx, inv.TenantID)
 }
 
-// invoiceDisplayLocCached is invoiceDisplayLoc reading the tenant TZ at most
-// once into *tenantLoc, so a list page of one tenant's invoices pays one
-// settings read, not one per row.
+// invoiceDisplayLocCached resolves the timezone an invoice's period is shown
+// in: the denormalized snapshot (ADR-077) when present, else the live tenant
+// TZ, for ad-hoc/manual invoices with no owning subscription and legacy rows
+// created before the snapshot column existed (preserving their prior display
+// exactly). It reads the tenant TZ at most once into *tenantLoc, so a list
+// page of one tenant's invoices pays one settings read, not one per row.
+//
+// A failed read is shown in UTC: the display is computed on every read and
+// never stored, so the next read shows the tenant's zone again.
 func (s *Service) invoiceDisplayLocCached(ctx context.Context, inv domain.Invoice, tenantLoc **time.Location) *time.Location {
 	if inv.BillingTimezone != "" {
 		return domain.LoadLocationOrUTC(inv.BillingTimezone)
 	}
 	if *tenantLoc == nil {
-		*tenantLoc = s.invoiceLocation(ctx, inv.TenantID)
+		loc, err := s.tenantZone(ctx, inv.TenantID)
+		if err != nil {
+			loc = time.UTC
+		}
+		*tenantLoc = loc
 	}
 	return *tenantLoc
 }
@@ -1629,17 +1632,6 @@ func (s *Service) tenantZone(ctx context.Context, tenantID string) (*time.Locati
 		return nil, fmt.Errorf("read tenant settings for the billing zone: %w", err)
 	}
 	return domain.LoadLocationOrUTC(ts.Timezone), nil
-}
-
-// invoiceLocation is tenantZone for display math, which is computed on read
-// and never stored. It still takes a failed read as UTC; making the read fail
-// instead is its own item.
-func (s *Service) invoiceLocation(ctx context.Context, tenantID string) *time.Location {
-	loc, err := s.tenantZone(ctx, tenantID)
-	if err != nil {
-		return time.UTC
-	}
-	return loc
 }
 
 func (s *Service) List(ctx context.Context, filter ListFilter) ([]domain.Invoice, int, error) {
@@ -1692,7 +1684,8 @@ func (s *Service) Finalize(ctx context.Context, tenantID, id string) (domain.Inv
 		// read is refused, and can be finalized again, instead of being due
 		// on a UTC calendar.
 		if dueLoc, err = s.invoiceZone(ctx, inv); err != nil {
-			return domain.Invoice{}, fmt.Errorf("finalize: %w", err)
+			return domain.Invoice{}, errs.Unavailable("settings_unavailable",
+				"could not read the account's time zone to set the due date, so the invoice was not finalized — please retry", err)
 		}
 		lines, lerr := s.store.ListLineItems(ctx, tenantID, id)
 		if lerr != nil {

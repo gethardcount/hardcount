@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
@@ -53,8 +54,10 @@ func TestCreate_DueDateInTheZoneItRead_ASecondReadCannotFail(t *testing.T) {
 }
 
 // An operator's draft from before invoices carried a zone is finalized when
-// the tenant's settings cannot be read. The finalize fails, and can be
-// retried, instead of working out the due date in UTC.
+// the tenant's settings cannot be read. The finalize is refused as retryable
+// (503), instead of working out the due date in UTC, and once the settings
+// can be read again the same finalize goes through, due on the tenant's
+// calendar.
 func TestFinalize_UnzonedDraft_SettingsUnreadable_Refused(t *testing.T) {
 	settings := &flakySettings{}
 	store := newMemStore()
@@ -74,14 +77,29 @@ func TestFinalize_UnzonedDraft_SettingsUnreadable_Refused(t *testing.T) {
 	store.invoices[inv.ID] = legacy
 	settings.failFrom = settings.calls + 1
 
-	if final, err := svc.Finalize(ctx, "t1", inv.ID); err == nil {
+	final, err := svc.Finalize(ctx, "t1", inv.ID)
+	if err == nil {
 		t.Fatalf("finalize succeeded with due_at %v while the tenant's zone could not be read; want an error", final.DueAt)
+	}
+	if !errors.Is(err, errs.ErrUnavailable) {
+		t.Errorf("finalize error = %v, want the retryable unavailable class (503)", err)
 	}
 	if got := store.invoices[inv.ID]; got.Status != domain.InvoiceDraft {
 		t.Errorf("status = %s, want draft", got.Status)
 	}
 	if taxes.computed != 0 {
 		t.Errorf("tax computations = %d, want 0: the zone is resolved before anything is written", taxes.computed)
+	}
+
+	// The settings can be read again: the retry finalizes it.
+	settings.failFrom = 0
+	svc.SetTaxRetrier(nil)
+	final, err = svc.Finalize(ctx, "t1", inv.ID)
+	if err != nil {
+		t.Fatalf("finalize again: %v", err)
+	}
+	if final.DueAt == nil || !final.DueAt.Equal(zoneTestDue) {
+		t.Errorf("due_at = %v, want %v: Net 30 on the tenant's New York calendar", final.DueAt, zoneTestDue)
 	}
 }
 
@@ -103,6 +121,7 @@ func TestFinalize_ZonedDraft_DueInItsOwnZone_WithoutReadingSettings(t *testing.T
 		t.Fatalf("billing_timezone = %q, want the tenant's at create", inv.BillingTimezone)
 	}
 	settings.failFrom = settings.calls + 1
+	reads := settings.calls
 
 	final, err := svc.Finalize(ctx, "t1", inv.ID)
 	if err != nil {
@@ -110,6 +129,9 @@ func TestFinalize_ZonedDraft_DueInItsOwnZone_WithoutReadingSettings(t *testing.T
 	}
 	if final.DueAt == nil || !final.DueAt.Equal(zoneTestDue) {
 		t.Errorf("due_at = %v, want %v: Net 30 on the invoice's New York calendar", final.DueAt, zoneTestDue)
+	}
+	if settings.calls != reads {
+		t.Errorf("settings reads during the finalize = %d, want 0", settings.calls-reads)
 	}
 }
 

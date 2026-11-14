@@ -55,10 +55,12 @@ func TestInvoice_PeriodDisplay_AnchoredInBillingTZ(t *testing.T) {
 				BillingPeriodStart: start,
 				BillingPeriodEnd:   end,
 			}
-			if got := s.invoiceDisplayLoc(ctx, inv).String(); got != tc.wantLoc {
-				t.Errorf("invoiceDisplayLoc: got %q, want %q", got, tc.wantLoc)
+			var tenantLoc *time.Location
+			loc := s.invoiceDisplayLocCached(ctx, inv, &tenantLoc)
+			if got := loc.String(); got != tc.wantLoc {
+				t.Errorf("invoiceDisplayLocCached: got %q, want %q", got, tc.wantLoc)
 			}
-			got := domain.FormatInclusivePeriod(inv.BillingPeriodStart, inv.BillingPeriodEnd, s.invoiceDisplayLoc(ctx, inv))
+			got := domain.FormatInclusivePeriod(inv.BillingPeriodStart, inv.BillingPeriodEnd, loc)
 			if got != tc.wantDisplay {
 				t.Errorf("billing_period_display: got %q, want %q", got, tc.wantDisplay)
 			}

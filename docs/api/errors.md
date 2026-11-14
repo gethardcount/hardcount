@@ -263,6 +263,7 @@ Each sends a `Retry-After` header with the seconds to wait.
 | `ingest_unavailable` | The usage store did not answer. Nothing was recorded. | Send the same events again |
 | `currency_unavailable` | `POST /v1/invoices` could not read the customer's currency. No invoice was made. | Retry the same request, with the same `Idempotency-Key` if you sent one |
 | `proration_unavailable` | Adding an item, or an immediate quantity or plan change that costs more, could not check whether the current period's invoice is paid. The change was not made. | Retry the same request after `Retry-After` (1 second), with the same `Idempotency-Key` if you sent one |
+| `settings_unavailable` | `POST /v1/invoices/{id}/finalize` could not read the account's time zone, which sets the due date of a draft created before invoices carried their own zone. The invoice was not finalized. | Retry the same request after `Retry-After` (1 second), with the same `Idempotency-Key` if you sent one |
 
 ### 504 Gateway Timeout
 
@@ -285,9 +286,9 @@ Each sends a `Retry-After` header with the seconds to wait.
   the same request with the same key. Nothing ran.
 - **`503` `ingest_unavailable`:** send the same events with the same keys.
   Nothing was recorded.
-- **`503` `currency_unavailable` and `proration_unavailable`:** the change
-  was not made, and a `503` is never stored. Send the same request with the
-  same key.
+- **`503` `currency_unavailable`, `proration_unavailable` and
+  `settings_unavailable`:** the change was not made, and a `503` is never
+  stored. Send the same request with the same key.
 - **`500`, `502` and `504` on a usage route:** send the same events with
   the same keys. A key is never counted twice.
 - **`500`, `502` and `504` on another write sent with an `Idempotency-Key`:**
