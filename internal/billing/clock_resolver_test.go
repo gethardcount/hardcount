@@ -109,6 +109,10 @@ func TestResolvers_UnreadableRecordIsAnError(t *testing.T) {
 		clockErr error
 		resolve  func(*Engine) (clock.Sim, error)
 	}{
+		// One row per error return in the resolver block.
+		{"an invoice that cannot be read", nil, func(e *Engine) (clock.Sim, error) { return e.SimForInvoice(test, "t1", "inv_missing") }},
+		{"a subscription that cannot be read", nil, func(e *Engine) (clock.Sim, error) { return e.SimForSubscription(test, "t1", "sub_missing") }},
+		{"a customer that cannot be read", nil, func(e *Engine) (clock.Sim, error) { return e.SimForCustomer(test, "t1", "cus_missing") }},
 		{"an invoice whose clock cannot be read", clockDown, func(e *Engine) (clock.Sim, error) { return e.SimForInvoice(test, "t1", "inv_1") }},
 		{"an invoice whose subscription is gone", nil, func(e *Engine) (clock.Sim, error) { return e.SimForInvoice(test, "t1", "inv_dangling") }},
 		{"a subscription whose clock cannot be read", clockDown, func(e *Engine) (clock.Sim, error) { return e.SimForSubscription(test, "t1", "sub_1") }},
