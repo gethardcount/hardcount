@@ -112,6 +112,7 @@ type answerCharger struct {
 	keepHold bool
 	stamp    domain.InvoicePaymentStatus
 	paid     bool
+	readErr  error // fails the read of the hold after the charge
 }
 
 func (c *answerCharger) ChargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, _, _ string) (domain.Invoice, error) {
@@ -128,6 +129,7 @@ func (c *answerCharger) ChargeInvoice(ctx context.Context, tenantID string, inv 
 	if !c.keepHold {
 		_ = c.store.ReleaseChargeHold(ctx, tenantID, inv.ID, hold)
 	}
+	c.store.holdReadErr = c.readErr
 	return domain.Invoice{}, c.err
 }
 
@@ -144,17 +146,19 @@ func TestCollect_WhatTheOperatorReads(t *testing.T) {
 		want    string // "" = no error: nothing is left
 	}{
 		{"credits that could not be applied", errors.New("db blip"), nil,
-			"Invoice HC-1 was not charged: its credits could not be applied first. Nothing was charged. Retry advance to charge it."},
+			"Invoice HC-1 was not charged: its credits could not be applied first. Nothing was charged. A later run charges it (on a test clock, Retry advance)."},
 		{"a transient answer, hold released", nil, &answerCharger{err: payment.ErrPaymentTransient},
-			"Invoice HC-1 was not charged: Stripe could not take the charge just then. Nothing was charged. Retry advance to charge it."},
+			"Invoice HC-1 was not charged: Stripe could not take the charge just then. Nothing was charged. A later run charges it (on a test clock, Retry advance)."},
 		{"a refused key before the confirm", nil, &answerCharger{err: keyRefused},
-			"Invoice HC-1 was not charged: Stripe refused this account's API key, or none is connected. Nothing was charged. Fix the key under Settings → Payments, then Retry advance."},
+			"Invoice HC-1 was not charged: Stripe refused this account's API key, or none is connected. Nothing was charged. Fix the key under Settings → Payments; a later run then charges it (on a test clock, Retry advance)."},
 		{"a transient answer that kept the hold (an unclear create)", nil, &answerCharger{err: payment.ErrPaymentTransient, keepHold: true},
-			"Invoice HC-1: an earlier charge attempt is not resolved yet. Hardcount reads its result from Stripe on a later billing run; Retry advance after that."},
+			"Invoice HC-1: an earlier charge attempt is not resolved yet. Hardcount reads its result from Stripe on a later billing run, and a run after that charges what is left (on a test clock, Retry advance)."},
 		{"a key refused at the confirm (the invoice unknown, the hold kept)", nil,
 			&answerCharger{err: &payment.StripeKeyError{Reason: payment.StripeKeyRejected, AtConfirm: true}, keepHold: true, stamp: domain.PaymentUnknown},
-			"Invoice HC-1: Stripe refused this account's API key while charging it, so the result of the charge is not known yet. Fix the key under Settings → Payments; Hardcount then reads the result from Stripe on a later billing run, and Retry advance charges what is left."},
+			"Invoice HC-1: Stripe refused this account's API key while charging it, so the result of the charge is not known yet. Fix the key under Settings → Payments; Hardcount then reads the result from Stripe on a later billing run, and a run after that charges what is left (on a test clock, Retry advance)."},
 		{"a transient answer, the invoice settled meanwhile", nil, &answerCharger{err: payment.ErrPaymentTransient, paid: true}, ""},
+		{"a transient answer, the invoice unreadable afterwards", nil, &answerCharger{err: payment.ErrPaymentTransient, readErr: errors.New("conn reset")},
+			"Invoice HC-1 was not charged: Stripe could not take the charge just then, and the invoice could not be read afterwards. A later run looks at it again (on a test clock, Retry advance)."},
 	} {
 		setup := func(t *testing.T) (*Engine, *mockInvoices) {
 			inv, applier, _, engine := leftHarness(t)

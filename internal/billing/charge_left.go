@@ -49,8 +49,8 @@ func chargeLeftOf(inv domain.Invoice, hold domain.ChargeHoldState) chargeLeft {
 
 // chargeNotMade is a charge a run did not make, and what is left of it. It is
 // domain.ErrLeftForNextRun, joined with why the charge was not made. Its
-// operator message is what a test clock's failure reason shows: what
-// happened, and what to do.
+// operator message says what happened and what to do, true both where a
+// test clock's failure reason shows it and in a real-time run's log.
 type chargeNotMade struct {
 	invoice    string // as the operator knows it: its number, else its id
 	why        string // what stopped the charge, in plain words
@@ -62,31 +62,15 @@ type chargeNotMade struct {
 func (e *chargeNotMade) OperatorSafeMessage() string {
 	switch {
 	case e.left == attemptUnresolved && e.keyRefused:
-		return fmt.Sprintf("Invoice %s: Stripe refused this account's API key while charging it, so the result of the charge is not known yet. Fix the key under Settings → Payments; Hardcount then reads the result from Stripe on a later billing run, and Retry advance charges what is left.", e.invoice)
+		return fmt.Sprintf("Invoice %s: Stripe refused this account's API key while charging it, so the result of the charge is not known yet. Fix the key under Settings → Payments; Hardcount then reads the result from Stripe on a later billing run, and a run after that charges what is left (on a test clock, Retry advance).", e.invoice)
 	case e.left == attemptUnresolved:
-		return fmt.Sprintf("Invoice %s: an earlier charge attempt is not resolved yet. Hardcount reads its result from Stripe on a later billing run; Retry advance after that.", e.invoice)
+		return fmt.Sprintf("Invoice %s: an earlier charge attempt is not resolved yet. Hardcount reads its result from Stripe on a later billing run, and a run after that charges what is left (on a test clock, Retry advance).", e.invoice)
 	case e.left == leftUnreadable:
-		return fmt.Sprintf("Invoice %s was not charged: %s, and its state could not be read just then. Retry advance.", e.invoice, e.why)
+		return fmt.Sprintf("Invoice %s was not charged: %s, and the invoice could not be read afterwards. A later run looks at it again (on a test clock, Retry advance).", e.invoice, e.why)
 	case e.keyRefused:
-		return fmt.Sprintf("Invoice %s was not charged: Stripe refused this account's API key, or none is connected. Nothing was charged. Fix the key under Settings → Payments, then Retry advance.", e.invoice)
+		return fmt.Sprintf("Invoice %s was not charged: Stripe refused this account's API key, or none is connected. Nothing was charged. Fix the key under Settings → Payments; a later run then charges it (on a test clock, Retry advance).", e.invoice)
 	default:
-		return fmt.Sprintf("Invoice %s was not charged: %s. Nothing was charged. Retry advance to charge it.", e.invoice, e.why)
-	}
-}
-
-// nextStep is what happens next, for the logs of a run that goes on.
-func (e *chargeNotMade) nextStep() string {
-	switch {
-	case e.left == attemptUnresolved && e.keyRefused:
-		return "the result of the charge is not known; the payment reconciler reads it from Stripe once the key is fixed under Settings → Payments"
-	case e.left == attemptUnresolved:
-		return "an earlier charge attempt is not resolved; the payment reconciler reads its result from Stripe on a later billing run"
-	case e.left == leftUnreadable:
-		return "its state could not be read; a later auto-charge run looks again"
-	case e.keyRefused:
-		return "the invoice is still queued; charges wait until the Stripe key is fixed under Settings → Payments"
-	default:
-		return "the invoice is still queued, and a later auto-charge run charges it"
+		return fmt.Sprintf("Invoice %s was not charged: %s. Nothing was charged. A later run charges it (on a test clock, Retry advance).", e.invoice, e.why)
 	}
 }
 

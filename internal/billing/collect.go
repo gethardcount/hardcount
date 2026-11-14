@@ -78,7 +78,7 @@ func collectFailureNext(err error) string {
 	var pe *payment.PaymentError
 	switch {
 	case errors.As(err, &notMade):
-		return notMade.nextStep()
+		return notMade.OperatorSafeMessage()
 	case errors.As(err, &pe) && !pe.Unknown:
 		return "Stripe refused the charge, so the invoice is marked failed and out of the auto-charge queue; payment recovery retries it if the account has it on"
 	case errors.As(err, &pe):
