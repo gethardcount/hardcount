@@ -57,12 +57,13 @@ var ingestKeyRoutes = map[string]bool{
 }
 
 // middlewareName matches the closure a middleware constructor returns, as
-// the runtime names it: ".../internal/auth.Require.1", whether or not the
-// compiler inlined the constructor into NewServer. The names are unique in
-// this module: session.MiddlewareOrAPIKey is the one API-key authenticator
-// the router mounts, and auth.Require, RequireMethod and RequireSession are
-// the only functions with those names.
-var middlewareName = regexp.MustCompile(`[./](MiddlewareOrAPIKey|Require|RequireMethod|RequireSession)\.\d+$`)
+// the runtime names it: ".../internal/auth.Require.func1", or
+// ".../internal/auth.Require.1" where the compiler inlined the constructor
+// into its caller. The names are unique in this module:
+// session.MiddlewareOrAPIKey is the one API-key authenticator the router
+// mounts, and auth.Require, RequireMethod and RequireSession are the only
+// functions with those names.
+var middlewareName = regexp.MustCompile(`[./](MiddlewareOrAPIKey|Require|RequireMethod|RequireSession)\.(?:func)?\d+$`)
 
 // middlewareKind returns which of those constructors made mw, or "".
 func middlewareKind(mw func(http.Handler) http.Handler) string {
