@@ -40,6 +40,7 @@ export * from './aPIKey';
 export * from './aPIKeyCreated';
 export * from './aPIKeyKeyType';
 export * from './aPIKeyRotation';
+export * from './aPIKeyStatus';
 export * from './attachStripeRefundToCreditNoteBody';
 export * from './attention';
 export * from './attentionAction';

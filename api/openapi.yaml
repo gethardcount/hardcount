@@ -7971,7 +7971,7 @@ components:
         An API key's details. The key's value is never returned here: only
         `POST /v1/api-keys` and `POST /v1/api-keys/{id}/rotate` show it,
         once, as `raw_key`.
-      required: [id, key_prefix, key_type, livemode, name, tenant_id, created_at]
+      required: [id, key_prefix, key_type, status, livemode, name, tenant_id, created_at]
       properties:
         id:
           type: string
@@ -7991,6 +7991,14 @@ components:
             account, except team members and the test email, which need a
             dashboard sign-in. `ingest` can only send usage events and call
             `GET /v1/whoami`, for LiteLLM or another gateway.
+        status:
+          type: string
+          enum: [active, expired, revoked]
+          description: |
+            `active` keys authenticate. `revoked` once the key is revoked;
+            otherwise `expired` from its `expires_at` on. Expired and
+            revoked keys get 401 and cannot be rotated.
+          example: active
         livemode:
           type: boolean
           description: True for a live-mode key (`…_live_…`), false for a test-mode key. A key reaches only its own mode's data.
@@ -8026,6 +8034,7 @@ components:
         id: hc_key_dajqj1iq3gpgqfoq5ca0
         key_prefix: hc_secret_test_4f9c2a7e1b3d
         key_type: secret
+        status: active
         livemode: false
         name: Backend (test)
         tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
@@ -8052,6 +8061,7 @@ components:
           id: hc_key_dajqj1iq3gpgqfoq5ca0
           key_prefix: hc_secret_test_4f9c2a7e1b3d
           key_type: secret
+          status: active
           livemode: false
           name: Backend (test)
           tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
@@ -8079,6 +8089,7 @@ components:
           id: hc_key_dajqj1iq3gpgqfoq5ca0
           key_prefix: hc_secret_test_4f9c2a7e1b3d
           key_type: secret
+          status: active
           livemode: false
           name: Backend (test)
           tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
@@ -8089,6 +8100,7 @@ components:
           id: hc_key_dajqj1iq3gpgqfoq5cak
           key_prefix: hc_secret_test_a81c4e7f02d9
           key_type: secret
+          status: active
           livemode: false
           name: Backend (test)
           tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
@@ -27452,6 +27464,7 @@ paths:
                   id: hc_key_dajqj1iq3gpgqfoq5ca0
                   key_prefix: hc_secret_test_4f9c2a7e1b3d
                   key_type: secret
+                  status: active
                   livemode: false
                   name: Backend (test)
                   tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
@@ -27522,6 +27535,7 @@ paths:
                   - id: hc_key_dajqj1iq3gpgqfoq5ca0
                     key_prefix: hc_secret_test_4f9c2a7e1b3d
                     key_type: secret
+                    status: active
                     livemode: false
                     name: Backend (test)
                     tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
@@ -27576,6 +27590,7 @@ paths:
                 id: hc_key_dajqj1iq3gpgqfoq5ca0
                 key_prefix: hc_secret_test_4f9c2a7e1b3d
                 key_type: secret
+                status: revoked
                 livemode: false
                 name: Backend (test)
                 tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
@@ -27668,6 +27683,7 @@ paths:
                   id: hc_key_dajqj1iq3gpgqfoq5ca0
                   key_prefix: hc_secret_test_4f9c2a7e1b3d
                   key_type: secret
+                  status: active
                   livemode: false
                   name: Backend (test)
                   tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
@@ -27678,6 +27694,7 @@ paths:
                   id: hc_key_dajqj1iq3gpgqfoq5cak
                   key_prefix: hc_secret_test_a81c4e7f02d9
                   key_type: secret
+                  status: active
                   livemode: false
                   name: Backend (test)
                   tenant_id: hc_ten_dajqj02q3gpgqfoq5c00

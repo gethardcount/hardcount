@@ -12,6 +12,7 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { APIKeyKeyType } from './aPIKeyKeyType';
+import type { APIKeyStatus } from './aPIKeyStatus';
 
 /**
  * An API key's details. The key's value is never returned here: only
@@ -33,6 +34,12 @@ export interface APIKey {
      * `GET /v1/whoami`, for LiteLLM or another gateway.
      */
   key_type: APIKeyKeyType;
+  /**
+     * `active` keys authenticate. `revoked` once the key is revoked;
+     * otherwise `expired` from its `expires_at` on. Expired and
+     * revoked keys get 401 and cannot be rotated.
+     */
+  status: APIKeyStatus;
   /** True for a live-mode key (`…_live_…`), false for a test-mode key. A key reaches only its own mode's data. */
   livemode: boolean;
   /** The label shown in the key list. */

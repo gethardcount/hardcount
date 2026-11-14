@@ -31,11 +31,18 @@ type ListFilter struct {
 
 const keyCols = `id, key_prefix, key_type, livemode, name, tenant_id, created_at, expires_at, revoked_at, last_used_at`
 
-func scanKey(row interface{ Scan(...any) error }) (domain.APIKey, error) {
+// scanKey does two things for every read: it scans one row of keyCols,
+// followed by any extra columns into extra, and it sets the key's status as
+// of now (statusAt).
+func scanKey(row interface{ Scan(...any) error }, extra ...any) (domain.APIKey, error) {
 	var k domain.APIKey
-	err := row.Scan(&k.ID, &k.KeyPrefix, &k.KeyType, &k.Livemode, &k.Name, &k.TenantID,
-		&k.CreatedAt, &k.ExpiresAt, &k.RevokedAt, &k.LastUsedAt)
-	return k, err
+	dest := append([]any{&k.ID, &k.KeyPrefix, &k.KeyType, &k.Livemode, &k.Name, &k.TenantID,
+		&k.CreatedAt, &k.ExpiresAt, &k.RevokedAt, &k.LastUsedAt}, extra...)
+	if err := row.Scan(dest...); err != nil {
+		return domain.APIKey{}, err
+	}
+	k.Status = statusAt(k, time.Now().UTC())
+	return k, nil
 }
 
 // insert stores key on tx and returns the stored row. The table's trigger
@@ -94,8 +101,9 @@ func (s store) scheduleExpiry(ctx context.Context, tx *sql.Tx, id string, expire
 	return k, err
 }
 
-// getByPrefix returns the key that is not revoked and has the given lookup
-// prefix, with its stored salt and hash, or errs.ErrNotFound.
+// getByPrefix returns the key with the given lookup prefix, with its status
+// and its stored salt and hash, or errs.ErrNotFound. The prefix is unique
+// (api_keys_key_prefix_key).
 func (s store) getByPrefix(ctx context.Context, prefix string) (domain.APIKey, storedHash, error) {
 	// The lookup bypasses RLS, because the key must be found before its
 	// tenant is known.
@@ -105,14 +113,12 @@ func (s store) getByPrefix(ctx context.Context, prefix string) (domain.APIKey, s
 	}
 	defer postgres.Rollback(tx)
 
-	var key domain.APIKey
 	var h storedHash
-	err = tx.QueryRowContext(ctx, `
+	key, err := scanKey(tx.QueryRowContext(ctx, `
 		SELECT `+keyCols+`, key_hash, key_salt
 		FROM api_keys
-		WHERE key_prefix = $1 AND revoked_at IS NULL
-	`, prefix).Scan(&key.ID, &key.KeyPrefix, &key.KeyType, &key.Livemode, &key.Name, &key.TenantID,
-		&key.CreatedAt, &key.ExpiresAt, &key.RevokedAt, &key.LastUsedAt, &h.hash, &h.salt)
+		WHERE key_prefix = $1
+	`, prefix), &h.hash, &h.salt)
 	if err == sql.ErrNoRows {
 		return domain.APIKey{}, storedHash{}, errs.ErrNotFound
 	}
