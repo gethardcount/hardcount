@@ -6,7 +6,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { toast } from 'sonner'
-import { api, formatDate, formatDateTime } from '@/lib/api'
+import { api, ApiError, formatDate, formatDateTime } from '@/lib/api'
 import type { APIKey } from '@/lib/gen/schemas/aPIKey'
 import { APIKeyStatus } from '@/lib/gen/schemas/aPIKeyStatus'
 import { timeAgo, sinceMs, wallClockNow, type EffectiveNow } from '@/lib/effectiveNow'
@@ -16,7 +16,6 @@ import { StatusBadge } from '@/components/StatusBadge'
 import { NoticeRow } from '@/components/NoticeRow'
 import type { StatusDisplay } from '@/lib/statusLabels'
 import { TypedConfirmDialog } from '@/components/TypedConfirmDialog'
-import { revokeNeedsTypedWord } from '@/lib/apiKeyRisk'
 import { cn } from '@/lib/utils'
 
 import { Button } from '@/components/ui/button'
@@ -68,8 +67,13 @@ import { API_ORIGIN, DOCS_BASE } from '@/lib/apiOrigin'
 const HEAD = 'h-9 text-xs font-medium text-muted-foreground'
 const ROW = 'h-11'
 
+// A name is 1 to 100 characters once trimmed, counted as the server counts
+// them: by code point, so an emoji is one character.
+const MAX_NAME_CHARS = 100
+
 const createApiKeySchema = z.object({
-  name: z.string().trim().min(1, 'Name is required'),
+  name: z.string().trim().min(1, 'Name is required')
+    .refine(s => [...s].length <= MAX_NAME_CHARS, `Name must be at most ${MAX_NAME_CHARS} characters`),
 })
 
 type CreateApiKeyData = z.infer<typeof createApiKeySchema>
@@ -215,6 +219,14 @@ export default function ApiKeysPage() {
       setRevokeTarget(null)
       queryClient.invalidateQueries({ queryKey: ['api-keys'] })
     } catch (err) {
+      // Someone revoked it first, in another tab or session: the list was out
+      // of date, not the request.
+      if (err instanceof ApiError && err.status === 404) {
+        setRevokeTarget(null)
+        toast.info('That key was already revoked.')
+        queryClient.invalidateQueries({ queryKey: ['api-keys'] })
+        return
+      }
       showApiError(err, 'Failed to revoke key')
     } finally {
       setRevoking(false)
@@ -418,8 +430,10 @@ export default function ApiKeysPage() {
         </ShowOnceSecretDialog>
       )}
 
-      {/* Revoke confirmation: friction follows risk (revokeNeedsTypedWord). */}
-      {revokeTarget && revokeNeedsTypedWord(revokeTarget) && (
+      {/* A live key runs production integrations, and revoking it breaks them
+          at once, so it takes the typed word. A test key gets the plain
+          confirm. */}
+      {revokeTarget?.livemode && (
         <TypedConfirmDialog
           open
           onOpenChange={(open) => { if (!open) setRevokeTarget(null) }}
@@ -431,7 +445,7 @@ export default function ApiKeysPage() {
           loading={revoking}
         />
       )}
-      <AlertDialog open={!!revokeTarget && !revokeNeedsTypedWord(revokeTarget)} onOpenChange={(open) => { if (!open) setRevokeTarget(null) }}>
+      <AlertDialog open={!!revokeTarget && !revokeTarget.livemode} onOpenChange={(open) => { if (!open) setRevokeTarget(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Revoke test API key</AlertDialogTitle>
@@ -562,7 +576,7 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
                 <FormItem>
                   <FormLabel>Name</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g. Production, Staging, CI/CD" maxLength={100} {...field} />
+                    <Input placeholder="e.g. Production, Staging, CI/CD" {...field} />
                   </FormControl>
                   <FormDescription>A descriptive name to identify this key</FormDescription>
                   <FormMessage />

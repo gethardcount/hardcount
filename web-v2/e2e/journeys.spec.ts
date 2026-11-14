@@ -1231,18 +1231,25 @@ const INACTIVE_PAIR = [
   mockKey('hc_key_r', 'Revoked one', 'revoked', { revoked_at: '2026-10-03T00:00:00Z' }),
 ]
 
-test('a blank name is refused before any request, and copying a key the browser refuses says so', async ({ page }) => {
+test('the name is checked as the server checks it, and copying a key the browser refuses says so', async ({ page }) => {
   let creates = 0
   page.on('request', r => { if (r.method() === 'POST' && new URL(r.url()).pathname === '/v1/api-keys') creates++ })
   await page.goto('/api-keys')
   await page.getByRole('button', { name: 'Create API key' }).click()
   const create = page.getByRole('dialog', { name: 'Create API key' })
-  await create.getByPlaceholder('e.g. Production, Staging, CI/CD').fill('   ')
+  const nameField = create.getByPlaceholder('e.g. Production, Staging, CI/CD')
+  // Blank once trimmed, and 101 characters: refused before any request.
+  await nameField.fill('   ')
   await create.getByRole('button', { name: 'Create key' }).click()
   await expect(create.getByText('Name is required')).toBeVisible()
+  await nameField.fill('x'.repeat(101))
+  await create.getByRole('button', { name: 'Create key' }).click()
+  await expect(create.getByText('Name must be at most 100 characters')).toBeVisible()
   expect(creates).toBe(0)
 
-  await create.getByPlaceholder('e.g. Production, Staging, CI/CD').fill(`e2e copy refused ${uniq()}`)
+  // 100 characters that take two UTF-16 units each: the server counts 100,
+  // and so does the form.
+  await nameField.fill('🔑'.repeat(100))
   await create.getByRole('button', { name: 'Create key' }).click()
   const shown = page.getByRole('dialog', { name: 'API key created' })
   await expect(shown).toBeVisible()
@@ -1356,6 +1363,35 @@ test('an expiring key counts the days to the date it shows, and a long name fits
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
   const table = page.getByRole('main').locator('[data-slot="table-container"]')
   expect(await table.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0)
+})
+
+test('revoking a key someone already revoked closes the dialog and shows the list as it is', async ({ page }) => {
+  const key = mockKey('hc_key_gone', 'Gone one', 'active')
+  const revoked: APIKey = { ...key, status: 'revoked', revoked_at: '2026-11-14T12:00:00Z' }
+  let revokedElsewhere = false
+  let lists = 0
+  await page.route(url => url.pathname === '/v1/api-keys', route => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    lists++
+    return route.fulfill({ json: { data: [revokedElsewhere ? revoked : key], total: 1 } })
+  })
+  // Another tab revoked it after this page loaded its list.
+  await page.route(url => url.pathname === '/v1/api-keys/hc_key_gone', route => {
+    revokedElsewhere = true
+    return route.fulfill({ status: 404, json: { error: { type: 'invalid_request_error', code: 'not_found', message: 'api key not found' } } })
+  })
+  await page.goto('/api-keys')
+  const main = page.getByRole('main')
+  await main.getByRole('button', { name: 'Actions for Gone one' }).click()
+  await page.getByRole('menuitem', { name: 'Revoke' }).click()
+  const dialog = page.getByRole('alertdialog', { name: 'Revoke test API key' })
+  const listsBefore = lists
+  await dialog.getByRole('button', { name: 'Revoke key' }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(page.getByText('That key was already revoked.')).toBeVisible()
+  await expect(main.getByRole('row').filter({ hasText: 'No active keys.' })).toBeVisible()
+  await expect(main.getByRole('button', { name: 'Show 1 revoked key' })).toBeVisible()
+  expect(lists).toBeGreaterThan(listsBefore)
 })
 
 test('revoking a test key is a plain confirm; a live key needs the typed word', async ({ page }) => {
