@@ -276,30 +276,31 @@ func (s *Service) SetAuditLogger(a AuditEmitter) { s.audit = a }
 // dated weeks before the invoice it credits.
 func (s *Service) SetResolver(r clock.Resolver) { s.resolver = r }
 
-// decideForInvoice decides a Stripe event's write from the invoice it
-// belongs to: the invoice's clock, or real time for one on no clock. In live
-// mode it does nothing: no live record is on a test clock. An event with no
-// mode on its ctx is a fault and is refused, as the payment events are. A
-// failure is clock.ErrUndecided, which the webhook delivers again.
-func (s *Service) decideForInvoice(ctx context.Context, tenantID, invoiceID string) (context.Context, error) {
-	if s.liveOrUnwired(ctx) {
-		return ctx, nil
-	}
-	if _, err := postgres.Livemode(ctx); err != nil {
-		return ctx, fmt.Errorf("%w: the event's context has no mode", clock.ErrUndecided)
-	}
-	return clock.Decide(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
-}
-
-// liveOrUnwired reports whether a Stripe event's write decides nothing: in
-// live mode, or with no resolver, which only narrow unit tests build
-// (NewServer always wires the engine).
-func (s *Service) liveOrUnwired(ctx context.Context) bool {
+// decidesTime reports whether a Stripe event's write decides its time, in
+// the order the payment events check it (payment.Stripe.decideFor): with no
+// resolver, no; with no mode on ctx, a fault, refused as
+// clock.ErrUndecided (the webhook handler and the restore catch-up both set
+// one); in live mode, no (no live record is on a test clock); else yes.
+func (s *Service) decidesTime(ctx context.Context) (bool, error) {
 	if s.resolver == nil {
-		return true
+		return false, nil // only narrow unit tests build the service without one; NewServer always wires the engine
 	}
 	live, err := postgres.Livemode(ctx)
-	return err == nil && live
+	if err != nil {
+		return false, fmt.Errorf("%w: the event's context has no mode", clock.ErrUndecided)
+	}
+	return !live, nil
+}
+
+// decideForInvoice decides a Stripe event's write from the invoice it
+// belongs to: the invoice's clock, or real time for one on no clock. A
+// failure is clock.ErrUndecided, which the webhook delivers again.
+func (s *Service) decideForInvoice(ctx context.Context, tenantID, invoiceID string) (context.Context, error) {
+	decides, err := s.decidesTime(ctx)
+	if err != nil || !decides {
+		return ctx, err
+	}
+	return clock.Decide(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
 }
 
 // bindForInvoice pins ctx to the source invoice's effective-now, so every
@@ -2679,6 +2680,25 @@ func (s *Service) RetryRefund(ctx context.Context, tenantID, id string) (domain.
 // (pending→succeeded/failed) that the create-call cannot observe. Returns
 // ErrNotFound for an unknown/foreign refund id — the caller decides ack vs retry.
 func (s *Service) ApplyRefundWebhook(ctx context.Context, tenantID, stripeRefundID string, status domain.RefundStatus, failureReason string) error {
+	// The write and its audit row carry the time decided from the invoice of
+	// the credit note holding the refund, read first (a note's invoice never
+	// changes). No note holds it: the write answers ErrNotFound itself.
+	decides, err := s.decidesTime(ctx)
+	if err != nil {
+		return fmt.Errorf("refund %s refused, Stripe delivers it again: %w", stripeRefundID, err)
+	}
+	if decides {
+		invoiceID, err := s.store.InvoiceOfRefundNote(ctx, tenantID, stripeRefundID)
+		switch {
+		case errors.Is(err, errs.ErrNotFound):
+		case err != nil:
+			return fmt.Errorf("read the credit note holding refund %s: %w", stripeRefundID, err)
+		default:
+			if ctx, err = clock.Decide(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID}); err != nil {
+				return fmt.Errorf("refund %s refused, Stripe delivers it again: %w", stripeRefundID, err)
+			}
+		}
+	}
 	// ADR-090 in-tx emission: the refund-status transition and its audit
 	// row commit together; the store fires the emission ONLY when the
 	// monotonic guard actually flipped a row, so stale redeliveries never
@@ -2704,19 +2724,7 @@ func (s *Service) ApplyRefundWebhook(ctx context.Context, tenantID, stripeRefund
 			})
 		}
 	}
-	// The write decides its time from the credit note's invoice, right after
-	// the store finds the note; live mode reads nothing for it.
-	var decide DecideForInvoice
-	if !s.liveOrUnwired(ctx) {
-		decide = func(ctx context.Context, invoiceID string) (context.Context, error) {
-			ctx, err := s.decideForInvoice(ctx, tenantID, invoiceID)
-			if err != nil {
-				return ctx, fmt.Errorf("refund %s: %w", stripeRefundID, err)
-			}
-			return ctx, nil
-		}
-	}
-	return s.store.ApplyRefundWebhookStatusAudited(ctx, tenantID, stripeRefundID, status, decide, emit)
+	return s.store.ApplyRefundWebhookStatusAudited(ctx, tenantID, stripeRefundID, status, emit)
 }
 
 func (s *Service) Void(ctx context.Context, tenantID, id string) (domain.CreditNote, error) {

@@ -8,10 +8,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 )
 
-// DecideForInvoice decides a write's time from the invoice the record it
-// writes belongs to, returning the ctx that carries the decision.
-type DecideForInvoice func(ctx context.Context, invoiceID string) (context.Context, error)
-
 type Store interface {
 	Create(ctx context.Context, tenantID string, cn domain.CreditNote) (domain.CreditNote, error)
 	// CreateUnderInvoiceLock serializes credit-note creation for one invoice:
@@ -107,11 +103,11 @@ type Store interface {
 	ApplyRefundWebhookStatus(ctx context.Context, tenantID, stripeRefundID string, status domain.RefundStatus) error
 	// ApplyRefundWebhookStatusAudited runs the caller-supplied audit
 	// emission on the same tx, ONLY when the monotonic guard actually
-	// flipped a row (ADR-090) — stale redeliveries record nothing. A
-	// non-nil decide is called with the invoice of the credit note holding
-	// the refund, right after that lookup and before the write; its error
-	// is returned with nothing written.
-	ApplyRefundWebhookStatusAudited(ctx context.Context, tenantID, stripeRefundID string, status domain.RefundStatus, decide DecideForInvoice, emit func(tx *sql.Tx, cn domain.CreditNote) error) error
+	// flipped a row (ADR-090) — stale redeliveries record nothing.
+	ApplyRefundWebhookStatusAudited(ctx context.Context, tenantID, stripeRefundID string, status domain.RefundStatus, emit func(tx *sql.Tx, cn domain.CreditNote) error) error
+	// InvoiceOfRefundNote returns the invoice of the credit note holding
+	// stripeRefundID; ErrNotFound when no note holds it.
+	InvoiceOfRefundNote(ctx context.Context, tenantID, stripeRefundID string) (string, error)
 	// UpdateAllocation persists the three-channel allocation
 	// (refund / credit / out-of-band). Used by Issue() to re-derive the
 	// allocation from the current invoice state when a CN created against

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/creditnote"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
@@ -16,19 +17,44 @@ import (
 
 var refundEventFrozen = time.Date(2027, 2, 3, 9, 0, 0, 0, time.UTC)
 
-// refundEventResolver puts every invoice on clock clk_r at refundEventFrozen,
-// or fails with err, and counts the reads.
+// refundEventResolver puts every invoice on clock clk_r at refundEventFrozen
+// (or, with noClock, on no clock: the machine's time, as the engine
+// answers), or fails with err, and counts the reads.
 type refundEventResolver struct {
-	reads int
-	err   error
+	reads   int
+	err     error
+	noClock bool
 }
 
 func (r *refundEventResolver) answer() (clock.Sim, error) {
 	r.reads++
-	if r.err != nil {
+	switch {
+	case r.err != nil:
 		return clock.Sim{}, r.err
+	case r.noClock:
+		return clock.Sim{At: time.Now()}, nil
 	}
 	return clock.Sim{At: refundEventFrozen, TestClockID: "clk_r"}, nil
+}
+
+// auditStamp reads the clock stamp of the newest audit row whose metadata
+// action is action, for the resource id.
+func auditStamp(t *testing.T, db *postgres.DB, resourceID, action string) (*time.Time, string) {
+	t.Helper()
+	tx, err := db.BeginTx(context.Background(), postgres.TxBypass, "")
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	var at *time.Time
+	var clockID string
+	if err := tx.QueryRowContext(context.Background(), `
+		SELECT sim_effective_at, COALESCE(test_clock_id, '') FROM audit_log
+		WHERE resource_id = $1 AND metadata->>'action' = $2 ORDER BY created_at DESC LIMIT 1`, resourceID, action,
+	).Scan(&at, &clockID); err != nil {
+		t.Fatalf("read the %s audit row of %s: %v", action, resourceID, err)
+	}
+	return at, clockID
 }
 func (r *refundEventResolver) SimForCustomer(context.Context, string, string) (clock.Sim, error) {
 	return r.answer()
@@ -41,10 +67,11 @@ func (r *refundEventResolver) SimForInvoice(context.Context, string, string) (cl
 }
 
 // A refund's status event decides its write's time from the invoice of the
-// credit note holding the refund, right after the store finds the note: a
-// clock invoice's note is written at the clock's time. A time that cannot be
-// decided writes nothing and fails with clock.ErrUndecided, which the webhook
-// delivers again. In live mode the event reads no clock.
+// credit note holding the refund, before the write: a clock invoice's note,
+// and the audit row of its status change, carry the clock's time; a note on
+// no clock, real time. A time that cannot be decided writes nothing and fails
+// with clock.ErrUndecided, which the webhook delivers again. In live mode the
+// event reads no clock.
 func TestApplyRefundWebhook_DecidesFromTheNotesInvoice(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	test := postgres.WithLivemode(context.Background(), false)
@@ -53,6 +80,7 @@ func TestApplyRefundWebhook_DecidesFromTheNotesInvoice(t *testing.T) {
 	service := func(res clock.Resolver) *creditnote.Service {
 		svc := creditnote.NewService(store, invoice.NewPostgresStore(db), nil)
 		svc.SetResolver(res)
+		svc.SetAuditLogger(audit.NewLogger(db))
 		return svc
 	}
 
@@ -67,6 +95,26 @@ func TestApplyRefundWebhook_DecidesFromTheNotesInvoice(t *testing.T) {
 		}
 		if got.RefundStatus != domain.RefundSucceeded || !got.UpdatedAt.Equal(refundEventFrozen) {
 			t.Errorf("refund %s, updated_at %s; want succeeded at the clock's %s", got.RefundStatus, got.UpdatedAt, refundEventFrozen)
+		}
+		if at, clockID := auditStamp(t, db, cn.ID, "refund_status_changed"); at == nil || !at.Equal(refundEventFrozen) || clockID != "clk_r" {
+			t.Errorf("the status change's audit row is stamped %v on clock %q; want %s on clk_r", at, clockID, refundEventFrozen)
+		}
+	})
+
+	t.Run("a note on no clock is written at real time", func(t *testing.T) {
+		cn := seedRefundableCN(t, db, tenantID, "evt-noclock", "re_evt_noclock", domain.RefundPending)
+		if err := service(&refundEventResolver{noClock: true}).ApplyRefundWebhook(test, tenantID, "re_evt_noclock", domain.RefundSucceeded, ""); err != nil {
+			t.Fatalf("ApplyRefundWebhook: %v", err)
+		}
+		got, err := store.Get(test, tenantID, cn.ID)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if got.RefundStatus != domain.RefundSucceeded || time.Since(got.UpdatedAt) > time.Minute {
+			t.Errorf("refund %s, updated_at %s; want succeeded at real time", got.RefundStatus, got.UpdatedAt)
+		}
+		if at, clockID := auditStamp(t, db, cn.ID, "refund_status_changed"); at != nil || clockID != "" {
+			t.Errorf("the status change's audit row is stamped %v on clock %q; want no clock stamp", at, clockID)
 		}
 	})
 
@@ -87,18 +135,57 @@ func TestApplyRefundWebhook_DecidesFromTheNotesInvoice(t *testing.T) {
 	})
 
 	t.Run("live mode reads no clock", func(t *testing.T) {
-		res := &refundEventResolver{err: errors.New("connection reset by peer")}
 		live := postgres.WithLivemode(context.Background(), true)
-		_ = service(res).ApplyRefundWebhook(live, tenantID, "re_evt_none", domain.RefundSucceeded, "")
-		if res.reads != 0 {
-			t.Errorf("a live event read the clock %d times; want none", res.reads)
+		cn := seedRefundableCNIn(t, db, live, tenantID, "evt-live", "re_evt_live", domain.RefundPending)
+		res := &refundEventResolver{err: errors.New("connection reset by peer")}
+		if err := service(res).ApplyRefundWebhook(live, tenantID, "re_evt_live", domain.RefundSucceeded, ""); err != nil {
+			t.Fatalf("ApplyRefundWebhook: %v", err)
+		}
+		got, err := store.Get(live, tenantID, cn.ID)
+		if err != nil {
+			t.Fatalf("get: %v", err)
+		}
+		if res.reads != 0 || got.RefundStatus != domain.RefundSucceeded {
+			t.Errorf("clock reads %d, refund %s; want no read and the refund succeeded", res.reads, got.RefundStatus)
 		}
 	})
 }
 
 // A refund made in Stripe decides its time from the invoice that holds its
-// payment, right after that lookup. A time that cannot be decided records
-// nothing and fails with clock.ErrUndecided.
+// payment, right after that lookup: on a clock invoice it is recorded, and
+// audited, at the clock's time.
+func TestRecordStripeRefund_IsRecordedAtTheClocksTime(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "CN Stripe Refund Clock")
+	store := creditnote.NewPostgresStore(db)
+	invStore := invoice.NewPostgresStore(db)
+	_, inv := seedInvoiceForCN(t, db, tenantID, "clockrefund", domain.InvoicePaid, domain.PaymentSucceeded, "pi_clockrefund")
+
+	svc := creditnote.NewService(store, invStore, nil)
+	svc.SetNumberGenerator(&seqNumbers{prefix: "CLKREF"})
+	svc.SetStripeRefundRecording(store, invStore, nopOutbox{})
+	svc.SetAuditLogger(audit.NewLogger(db))
+	svc.SetResolver(&refundEventResolver{})
+
+	made := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+	if _, err := svc.RecordStripeRefund(ctx, tenantID, domain.StripeRefundSnapshot{
+		StripeEventID: "evt_clockrefund", EventAt: made, StripeRefundID: "re_clockrefund",
+		StripePaymentIntentID: "pi_clockrefund", AmountCents: 4000, Currency: "usd",
+		Status: domain.StripeRefundSucceeded, CreatedAt: made,
+	}); err != nil {
+		t.Fatalf("RecordStripeRefund: %v", err)
+	}
+	if recorded, err := store.StripeRefundRecorded(ctx, tenantID, "re_clockrefund"); err != nil || !recorded {
+		t.Fatalf("recorded %v (err %v); want the refund recorded", recorded, err)
+	}
+	if at, clockID := auditStamp(t, db, inv.ID, "refunded_in_stripe"); at == nil || !at.Equal(refundEventFrozen) || clockID != "clk_r" {
+		t.Errorf("the refund's audit row is stamped %v on clock %q; want %s on clk_r", at, clockID, refundEventFrozen)
+	}
+}
+
+// A time that cannot be decided records nothing and fails with
+// clock.ErrUndecided.
 func TestRecordStripeRefund_AnUndecidableTimeRecordsNothing(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)

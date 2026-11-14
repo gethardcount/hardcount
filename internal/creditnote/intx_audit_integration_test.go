@@ -28,7 +28,12 @@ var errInjectedEmit = errors.New("injected audit emission failure")
 // store's own UpdateRefundStatus (Create doesn't persist it).
 func seedRefundableCN(t *testing.T, db *postgres.DB, tenantID, suffix, stripeRefundID string, status domain.RefundStatus) domain.CreditNote {
 	t.Helper()
-	ctx := postgres.WithLivemode(context.Background(), false)
+	return seedRefundableCNIn(t, db, postgres.WithLivemode(context.Background(), false), tenantID, suffix, stripeRefundID, status)
+}
+
+// seedRefundableCNIn is seedRefundableCN in the mode ctx carries.
+func seedRefundableCNIn(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, suffix, stripeRefundID string, status domain.RefundStatus) domain.CreditNote {
+	t.Helper()
 
 	cust, err := customer.NewPostgresStore(db).Create(ctx, tenantID, domain.Customer{
 		ExternalID: "cus_refundaudit_" + suffix, DisplayName: "Refund Audit " + suffix,
@@ -186,7 +191,7 @@ func TestApplyRefundWebhookStatusAudited_SharedFate(t *testing.T) {
 
 		calls := 0
 		if err := store.ApplyRefundWebhookStatusAudited(ctx, tenantID, "re_audit_ok",
-			domain.RefundSucceeded, nil, emitter(&calls, domain.RefundSucceeded, "re_audit_ok")); err != nil {
+			domain.RefundSucceeded, emitter(&calls, domain.RefundSucceeded, "re_audit_ok")); err != nil {
 			t.Fatalf("ApplyRefundWebhookStatusAudited: %v", err)
 		}
 		if calls != 1 {
@@ -220,7 +225,7 @@ func TestApplyRefundWebhookStatusAudited_SharedFate(t *testing.T) {
 		cn := seedRefundableCN(t, db, tenantID, "fail", "re_audit_fail", domain.RefundPending)
 
 		calls := 0
-		err := store.ApplyRefundWebhookStatusAudited(ctx, tenantID, "re_audit_fail", domain.RefundSucceeded, nil,
+		err := store.ApplyRefundWebhookStatusAudited(ctx, tenantID, "re_audit_fail", domain.RefundSucceeded,
 			func(tx *sql.Tx, _ domain.CreditNote) error {
 				calls++
 				return errInjectedEmit
@@ -249,7 +254,7 @@ func TestApplyRefundWebhookStatusAudited_SharedFate(t *testing.T) {
 
 		calls := 0
 		if err := store.ApplyRefundWebhookStatusAudited(ctx, tenantID, "re_audit_same",
-			domain.RefundPending, nil, emitter(&calls, domain.RefundPending, "re_audit_same")); err != nil {
+			domain.RefundPending, emitter(&calls, domain.RefundPending, "re_audit_same")); err != nil {
 			t.Fatalf("a same-value redelivery must be a successful no-op; got %v", err)
 		}
 		if calls != 0 {
@@ -273,7 +278,7 @@ func TestApplyRefundWebhookStatusAudited_SharedFate(t *testing.T) {
 
 		calls := 0
 		if err := store.ApplyRefundWebhookStatusAudited(ctx, tenantID, "re_audit_stale",
-			domain.RefundPending, nil, emitter(&calls, domain.RefundPending, "re_audit_stale")); err != nil {
+			domain.RefundPending, emitter(&calls, domain.RefundPending, "re_audit_stale")); err != nil {
 			t.Fatalf("a stale redelivery must be a successful no-op; got %v", err)
 		}
 		if calls != 0 {
@@ -295,7 +300,7 @@ func TestApplyRefundWebhookStatusAudited_SharedFate(t *testing.T) {
 	t.Run("unknown refund id is ErrNotFound and emits nothing", func(t *testing.T) {
 		calls := 0
 		err := store.ApplyRefundWebhookStatusAudited(ctx, tenantID, "re_audit_unknown",
-			domain.RefundSucceeded, nil, emitter(&calls, domain.RefundSucceeded, "re_audit_unknown"))
+			domain.RefundSucceeded, emitter(&calls, domain.RefundSucceeded, "re_audit_unknown"))
 		if !errors.Is(err, errs.ErrNotFound) {
 			t.Fatalf("unknown stripe_refund_id must return ErrNotFound (caller decides ack vs retry); got %v", err)
 		}

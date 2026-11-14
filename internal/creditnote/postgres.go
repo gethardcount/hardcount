@@ -1109,37 +1109,20 @@ func refundStatusRegression(prior, next domain.RefundStatus) bool {
 }
 
 func (s *PostgresStore) ApplyRefundWebhookStatus(ctx context.Context, tenantID, stripeRefundID string, status domain.RefundStatus) error {
-	return s.ApplyRefundWebhookStatusAudited(ctx, tenantID, stripeRefundID, status, nil, nil)
+	return s.ApplyRefundWebhookStatusAudited(ctx, tenantID, stripeRefundID, status, nil)
 }
 
 // ApplyRefundWebhookStatusAudited is ApplyRefundWebhookStatus with an in-tx
 // audit emission hook (ADR-090). emit fires ONLY when the monotonic guard
 // actually flipped a row — a stale/no-op redelivery records nothing, so the
 // log never claims a transition that didn't happen. The flipped CN's
-// identifiers ride RETURNING so the emission can reference them. A non-nil
-// decide decides the write's time from the invoice of the credit note that
-// holds the refund, read first; no note holding it leaves the time
-// undecided, and the write below answers ErrNotFound as before.
-func (s *PostgresStore) ApplyRefundWebhookStatusAudited(ctx context.Context, tenantID, stripeRefundID string, status domain.RefundStatus, decide DecideForInvoice, emit func(tx *sql.Tx, cn domain.CreditNote) error) error {
+// identifiers ride RETURNING so the emission can reference them.
+func (s *PostgresStore) ApplyRefundWebhookStatusAudited(ctx context.Context, tenantID, stripeRefundID string, status domain.RefundStatus, emit func(tx *sql.Tx, cn domain.CreditNote) error) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return err
 	}
 	defer postgres.Rollback(tx)
-
-	if decide != nil {
-		var invoiceID string
-		err := tx.QueryRowContext(ctx, `SELECT invoice_id FROM credit_notes WHERE stripe_refund_id = $1`, stripeRefundID).Scan(&invoiceID)
-		switch {
-		case errors.Is(err, sql.ErrNoRows):
-		case err != nil:
-			return fmt.Errorf("read the credit note holding refund %s: %w", stripeRefundID, err)
-		default:
-			if ctx, err = decide(ctx, invoiceID); err != nil {
-				return err
-			}
-		}
-	}
 
 	// Monotonic precedence (webhooks have no ordering guarantee):
 	//   failed  > succeeded > pending
@@ -1184,6 +1167,28 @@ func (s *PostgresStore) ApplyRefundWebhookStatusAudited(ctx context.Context, ten
 // zeros, so Issue re-derives it (default: full credit to balance) and
 // persists the result here so the dashboard and any retry observe the
 // same split Issue acted on.
+// InvoiceOfRefundNote returns the invoice of the credit note holding
+// stripeRefundID, the note ApplyRefundWebhookStatusAudited writes;
+// ErrNotFound when no note holds it.
+func (s *PostgresStore) InvoiceOfRefundNote(ctx context.Context, tenantID, stripeRefundID string) (string, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return "", err
+	}
+	defer postgres.Rollback(tx)
+	var invoiceID string
+	err = tx.QueryRowContext(ctx,
+		`SELECT invoice_id FROM credit_notes WHERE stripe_refund_id = $1 ORDER BY created_at LIMIT 1`, stripeRefundID,
+	).Scan(&invoiceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", errs.ErrNotFound
+	}
+	if err != nil {
+		return "", fmt.Errorf("find the credit note holding refund %s: %w", stripeRefundID, err)
+	}
+	return invoiceID, nil
+}
+
 func (s *PostgresStore) UpdateAllocation(ctx context.Context, tenantID, id string, refundCents, creditCents, outOfBandCents int64) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {

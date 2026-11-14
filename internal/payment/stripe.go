@@ -1716,8 +1716,8 @@ func isTransientWebhookError(err error) bool {
 // there: a not-found that is not clock.ErrUndecided. A record whose time
 // could not be decided (its clock could not be read) is not "this event is
 // about nothing we know", even when the cause underneath is a not-found;
-// treated as absent, a payment's or a refund's event would be acknowledged
-// and dropped for good.
+// treated as absent, a payment's, a refund's or a dispute's event would be
+// acknowledged and dropped for good.
 func recordAbsent(err error) bool {
 	return errors.Is(err, errs.ErrNotFound) && !errors.Is(err, clock.ErrUndecided)
 }

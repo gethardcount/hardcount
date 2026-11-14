@@ -210,13 +210,11 @@ func TestHandleWebhook_ALiveEventDecidesNothing(t *testing.T) {
 	}
 }
 
-// A refund or dispute event whose recorder could not decide its time is
-// delivered again, even when old and with a not-found underneath: it is not
-// "no credit note holds this refund" (acknowledged for an old refund), "no
-// invoice holds this payment" (a refund recorded as unmatched, a dispute
-// acknowledged). The dispute recorder decides nothing today (every date it
-// writes is Stripe's or the database's); the case pins the one rule,
-// recordAbsent, for all three paths.
+// A refund event whose recorder could not decide its time is delivered
+// again, even when old and with a not-found underneath: it is not "no credit
+// note holds this refund" (acknowledged for an old refund) nor "no invoice
+// holds this payment" (recorded as unmatched). The dispute case is the next
+// test: one rule, recordAbsent, for the refund paths and the dispute path.
 func TestHandleWebhook_ARecorderWhoseTimeIsUndecidedIsDeliveredAgain(t *testing.T) {
 	undecided := fmt.Errorf("refund re_x: %w: %w", clock.ErrUndecided, fmt.Errorf("read test clock clk_e: %w", errs.ErrNotFound))
 	for _, c := range []struct {
@@ -246,6 +244,10 @@ func TestHandleWebhook_ARecorderWhoseTimeIsUndecidedIsDeliveredAgain(t *testing.
 	}
 }
 
+// A dispute event whose recorder could not decide its time is delivered
+// again, even when old: it is not "names a payment no Hardcount invoice
+// holds". The dispute recorder reads no time from its ctx (every date it
+// writes is Stripe's or the database's), so the case pins the rule.
 func TestHandleWebhook_ADisputeWhoseTimeIsUndecidedIsDeliveredAgain(t *testing.T) {
 	undecided := fmt.Errorf("dispute du_test_1: %w: %w", clock.ErrUndecided, fmt.Errorf("read test clock clk_e: %w", errs.ErrNotFound))
 	webhooks := newMockWebhookStore()

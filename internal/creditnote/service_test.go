@@ -372,7 +372,16 @@ func (m *memStore) UpdateRefundStatusAudited(ctx context.Context, tenantID, id s
 
 // Audited fake mirrors the real store: emit fires only when the status
 // actually flipped; a nil tx is fine for content-level unit tests.
-func (m *memStore) ApplyRefundWebhookStatusAudited(ctx context.Context, tenantID, stripeRefundID string, status domain.RefundStatus, decide DecideForInvoice, emit func(tx *sql.Tx, cn domain.CreditNote) error) error {
+func (m *memStore) InvoiceOfRefundNote(_ context.Context, tenantID, stripeRefundID string) (string, error) {
+	for _, cn := range m.notes {
+		if cn.TenantID == tenantID && cn.StripeRefundID == stripeRefundID {
+			return cn.InvoiceID, nil
+		}
+	}
+	return "", errs.ErrNotFound
+}
+
+func (m *memStore) ApplyRefundWebhookStatusAudited(ctx context.Context, tenantID, stripeRefundID string, status domain.RefundStatus, emit func(tx *sql.Tx, cn domain.CreditNote) error) error {
 	var before domain.RefundStatus
 	var match domain.CreditNote
 	found := false
@@ -380,12 +389,6 @@ func (m *memStore) ApplyRefundWebhookStatusAudited(ctx context.Context, tenantID
 		if cn.TenantID == tenantID && cn.StripeRefundID == stripeRefundID {
 			before, match, found = cn.RefundStatus, cn, true
 			break
-		}
-	}
-	if decide != nil && found {
-		var err error
-		if ctx, err = decide(ctx, match.InvoiceID); err != nil {
-			return err
 		}
 	}
 	if err := m.ApplyRefundWebhookStatus(ctx, tenantID, stripeRefundID, status); err != nil {
