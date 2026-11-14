@@ -102,6 +102,7 @@ original text.
 ### Removed
 
 - **The `HARDCOUNT_TEST_CLOCK_INJECT_FAILURE` setting.** It made the next test-clock advance fail, for manual tests, and a server that had it set by mistake failed every advance. It now does nothing; remove it from your environment ([#1694](https://github.com/gethardcount/hardcount/pull/1694)).
+- **The `X-API-Key` header.** A key is sent in `Authorization: Bearer` only; the `X-API-Key` header is no longer read. A request that sent its key there now gets `401` with the missing-credentials message: send it as `Authorization: Bearer <key>`.
 - **The metric `hardcount_webhook_outbox_enqueue_failures_total` ([#1639](https://github.com/gethardcount/hardcount/pull/1639)).** It counted webhook events lost because they could not be queued after their change was saved. Every event is now saved with its change, and a change whose event cannot be saved fails, so no event is lost this way. Remove any alert on the metric.
 
 ### Fixed
