@@ -136,7 +136,7 @@ func TestWireShape_WebhookEventsStream_SnakeCase(t *testing.T) {
 	// snapshot frames flush — we only care about the bytes written
 	// before the deadline fires.
 	r := chi.NewRouter()
-	r.Get("/v1/webhook_events/stream", h.streamEvents)
+	r.Get("/v1/webhook_events/stream", h.StreamHandler(func(*http.Request) (bool, error) { return false, nil }, StreamHeartbeatInterval))
 
 	streamCtx, cancel := context.WithTimeout(ctx, 150*time.Millisecond)
 	defer cancel()
