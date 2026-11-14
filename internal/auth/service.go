@@ -160,6 +160,20 @@ func (s *Service) CreateKeyTx(ctx context.Context, tx *sql.Tx, tenantID string, 
 	return result, nil
 }
 
+// statusAt is the one rule for a key's status at now: revoked once revoked;
+// otherwise expired at or after its expires_at; otherwise active. Only an
+// active key authenticates (ValidateKey) or can be rotated (RotateKey).
+func statusAt(key domain.APIKey, now time.Time) string {
+	switch {
+	case key.RevokedAt != nil:
+		return domain.APIKeyStatusRevoked
+	case key.ExpiresAt != nil && !now.Before(*key.ExpiresAt):
+		return domain.APIKeyStatusExpired
+	default:
+		return domain.APIKeyStatusActive
+	}
+}
+
 // hashKey returns the stored hash of raw: hex(SHA-256(salt || raw)). Every
 // new key has a fresh 16-byte salt. A key the setup command wrote in v0.9.3
 // or earlier has an empty salt and still validates.
@@ -240,7 +254,7 @@ func (s *Service) checkMintAndInsert(ctx context.Context, tx *sql.Tx, tenantID s
 }
 
 // ErrInvalidKey marks a definitive credential rejection: a bad format, no
-// matching key, a hash mismatch or an expired key. Middlewares map it, and
+// matching key, a hash mismatch, or a key that is expired or revoked. Middlewares map it, and
 // only it, to the generic 401. Any other ValidateKey error means no verdict
 // was reached (a store or database failure), and it must surface as a
 // retryable 5xx. During a database outage, a 401 would tell every
@@ -288,9 +302,8 @@ func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey
 		return domain.APIKey{}, ErrInvalidKey
 	}
 
-	// Check expiration
-	if key.ExpiresAt != nil && time.Now().UTC().After(*key.ExpiresAt) {
-		return domain.APIKey{}, fmt.Errorf("api key expired: %w", ErrInvalidKey)
+	if key.Status != domain.APIKeyStatusActive {
+		return domain.APIKey{}, fmt.Errorf("api key %s: %w", key.Status, ErrInvalidKey)
 	}
 
 	// Write last_used_at, at most once per key per lastUsedTouchInterval, in
@@ -375,13 +388,8 @@ func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input Rota
 		if err != nil {
 			return err
 		}
-		if old.RevokedAt != nil {
-			return errs.InvalidState("cannot rotate a revoked key")
-		}
-		// CreateKey's rule for a new key's expires_at: at or before now is
-		// expired.
-		if old.ExpiresAt != nil && !time.Now().UTC().Before(*old.ExpiresAt) {
-			return errs.InvalidState("cannot rotate an expired key")
+		if old.Status != domain.APIKeyStatusActive {
+			return errs.InvalidState("cannot rotate a " + old.Status + " key")
 		}
 
 		// The replacement takes the old key's name, type and expires_at. A

@@ -116,6 +116,12 @@ cannot be rotated (`409`): create a new key instead.
 To turn a key off without a replacement, click **Revoke**, or call
 `DELETE /v1/api-keys/{id}`. It stops working at once.
 
+## A key's status
+
+Each key in `GET /v1/api-keys` has a `status`: `active`, `expired` (from its
+`expires_at` on) or `revoked`. Only an active key works, and only an active
+key can be rotated.
+
 ## How Hardcount keeps keys safe
 
 Hardcount stores only a salted SHA-256 hash of each key, never the key itself.
