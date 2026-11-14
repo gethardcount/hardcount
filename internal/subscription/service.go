@@ -1201,8 +1201,8 @@ type ProrationDetail struct {
 	ClawbackReason string               `json:"-"`
 	ClawbackMemo   string               `json:"-"`
 	ClawbackPieces []domain.CreditShare `json:"-"`
-	// UncreditedCents (net) is the unused time the invoices had no room left
-	// for. It is not owed; the audit row records it (uncredited_cents).
+	// UncreditedCents is the unused time, in the price's terms, that the
+	// invoices had no room left for. It is not owed; the audit row records it (uncredited_cents).
 	UncreditedCents int64 `json:"-"`
 	// ClawbackDraftIDs are the draft credit notes createClawbackDraftsTx wrote
 	// IN the atomic tx (atomic with the item change). issueClawbackDrafts issues

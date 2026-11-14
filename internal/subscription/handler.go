@@ -2313,8 +2313,8 @@ func unpaidSourceBlocksCharge(ctx context.Context, sub domain.Subscription, spec
 	)).WithCode("unpaid_invoice_blocks_change")
 }
 
-// creditUnusedTime credits netCredit (net, tax excluded) of unused prepaid
-// time for a downgrade, quantity decrease or item removal, by the one
+// creditUnusedTime credits unusedCents of unused prepaid time, a share of
+// the price, for a downgrade, quantity decrease or item removal, by the one
 // crediting rule (domain.AllocateUnusedCredit, ADR-118): the invoices that
 // charged this item, newest first, each capped at its room. A paid invoice's
 // share goes to the customer's balance; an unpaid one's reduces what it still
@@ -2332,7 +2332,7 @@ func unpaidSourceBlocksCharge(ctx context.Context, sub domain.Subscription, spec
 // What does not fit is not owed (every invoice is credited up to its total,
 // or relieved of all it asks for), so the change goes ahead and records it on
 // the detail (UncreditedCents → the audit row's uncredited_cents).
-func (h *Handler) creditUnusedTime(ctx context.Context, tenantID string, sub domain.Subscription, spec itemProrationSpec, detail *ProrationDetail, netCredit int64, memo string) (*ProrationDetail, error) {
+func (h *Handler) creditUnusedTime(ctx context.Context, tenantID string, sub domain.Subscription, spec itemProrationSpec, detail *ProrationDetail, unusedCents int64, memo string) (*ProrationDetail, error) {
 	if h.creditNotes == nil || h.invoices == nil {
 		return nil, fmt.Errorf("credit for unused time: the credit-note issuer is not wired")
 	}
@@ -2362,7 +2362,7 @@ func (h *Handler) creditUnusedTime(ctx context.Context, tenantID string, sub dom
 		}
 		credited[f.ID] = c
 	}
-	shares, unplaced := domain.AllocateUnusedCredit(funding, credited, spec.itemID, netCredit)
+	shares, unplaced := domain.AllocateUnusedCredit(funding, credited, spec.itemID, unusedCents)
 	if src, pending := domain.TaxPendingShare(funding, shares); pending {
 		return nil, errs.InvalidState(fmt.Sprintf(
 			"funding invoice %s is a draft whose tax is still %s; retry once it is calculated", src.ID, src.TaxStatus)).
@@ -2400,7 +2400,7 @@ func (h *Handler) creditUnusedTime(ctx context.Context, tenantID string, sub dom
 		"item_id", spec.itemID,
 		"change_type", spec.changeType,
 		"invoices", len(shares),
-		"net_cents", netCredit,
+		"unused_cents", unusedCents,
 		"gross_cents", gross,
 		"uncredited_cents", unplaced,
 	)
