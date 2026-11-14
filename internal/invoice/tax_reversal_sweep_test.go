@@ -126,7 +126,7 @@ func timePasses(store *memStore, id string) {
 // invoices held the head of the list and no other tenant's tax was committed.
 func TestRetryPendingTaxCommit_AFailedCommitWaits(t *testing.T) {
 	store := newMemStore()
-	svc := NewService(store, nil, nil)
+	svc := NewService(store, nil, newMemNumberer())
 	committer := &recordingTaxCommitter{err: errors.New("stripe: the key cannot write tax transactions")}
 	svc.SetTaxCommitter(committer)
 	ctx := postgres.WithLivemode(context.Background(), true)

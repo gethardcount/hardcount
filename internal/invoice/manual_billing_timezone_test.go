@@ -24,8 +24,7 @@ func (f tzTermsSettings) Get(_ context.Context, _ string) (domain.TenantSettings
 // 2026" on the PDF.
 func TestManualInvoice_StampsTenantBillingTimezone(t *testing.T) {
 	at := time.Date(2026, 10, 17, 1, 0, 0, 0, time.UTC) // Oct 16 18:00 PDT
-	svc := NewService(newMemStore(), clock.NewFake(at), newMemNumberer())
-	svc.SetTenantSettingsReader(tzTermsSettings{tz: "America/Los_Angeles"})
+	svc := NewService(newMemStore(), clock.NewFake(at), newMemNumberer().withSettings(tzTermsSettings{tz: "America/Los_Angeles"}))
 	ctx := context.Background()
 
 	inv, err := svc.Create(ctx, "t1", CreateInput{
@@ -57,8 +56,7 @@ func TestManualInvoice_StampsTenantBillingTimezone(t *testing.T) {
 
 // With no timezone configured the stamp is "UTC", matching the engine.
 func TestManualInvoice_NoTenantTimezoneStampsUTC(t *testing.T) {
-	svc := NewService(newMemStore(), nil, newMemNumberer())
-	svc.SetTenantSettingsReader(tzTermsSettings{})
+	svc := NewService(newMemStore(), nil, newMemNumberer().withSettings(tzTermsSettings{}))
 	inv, err := svc.Create(context.Background(), "t1", CreateInput{CustomerID: "cus_1"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
@@ -73,8 +71,7 @@ func TestManualInvoice_NoTenantTimezoneStampsUTC(t *testing.T) {
 // invoice number is spent.
 func TestManualInvoice_UnreadableSettingsFailsCreateWithExplicitTerms(t *testing.T) {
 	numberer := newMemNumberer()
-	svc := NewService(newMemStore(), nil, numberer)
-	svc.SetTenantSettingsReader(fakeSettingsReader{err: errors.New("settings read: connection reset")})
+	svc := NewService(newMemStore(), nil, numberer.withSettings(fakeSettingsReader{err: errors.New("settings read: connection reset")}))
 	if _, err := svc.Create(context.Background(), "t1", CreateInput{CustomerID: "cus_1", NetPaymentTermDays: intPtr(14)}); err == nil {
 		t.Fatal("create succeeded with unreadable tenant settings; want an error")
 	}

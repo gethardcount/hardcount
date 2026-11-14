@@ -551,6 +551,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	dunningSvc.SetCustomerPolicyReader(customerSvc)
 	webhookH := payment.NewHandler(stripeAdapter, tenantStripeSvc)
 
+	// A manual invoice is created under the tenant's settings: without
+	// net_payment_term_days it takes the configured default, then 30, as the
+	// cycle engine does; it takes the tenant's zone and currency, records
+	// whether its prices include tax, and takes its number from them.
 	invoiceSvc := invoice.NewService(invoiceStore, clk, settingsStore)
 	// Every committed void stops collection at Stripe and closes the invoice's
 	// dunning run (invoice.Service.AfterVoid), whichever path voided it: the
@@ -1053,10 +1057,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// dispute rows and GET /v1/invoices/{id}/disputes.
 	invoiceSvc.SetDisputeReader(invoiceStore)
 	invoiceSvc.SetCreditApplier(creditSvc)
-	// A manual invoice created without net_payment_term_days takes the
-	// tenant's configured default, then 30, as the cycle engine does.
-	// settingsStore satisfies TenantSettingsReader.
-	invoiceSvc.SetTenantSettingsReader(settingsStore)
 	// The currency a manual invoice must agree with, or takes when none is
 	// sent (ADR-100, ADR-129): billing profile, then live subscription plans.
 	invoiceSvc.SetCustomerCurrencyFacts(customerCurrencyFactsAdapter{profiles: customerStore, subs: subStore})

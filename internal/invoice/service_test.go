@@ -332,7 +332,7 @@ func TestRetryProviderConfigErrors_FlushesStuckRows(t *testing.T) {
 	// Stub TaxRetrier that just flips status to ok — equivalent to
 	// the engine succeeding after fresh creds land.
 	stub := &stubTaxRetrier{store: store}
-	svc := NewService(store, nil, nil)
+	svc := NewService(store, nil, newMemNumberer())
 	svc.SetTaxRetrier(stub)
 
 	processed, errs := svc.RetryProviderConfigErrors(context.Background(), "t1", false)
@@ -683,19 +683,51 @@ func (m *memStore) ReleaseChargeHold(_ context.Context, _, _ string, _ domain.Ch
 	return nil
 }
 
-// memNumberer is a deterministic in-memory InvoiceNumberer for tests.
-// Hands out HC-000001, HC-000002, ... so assertions on invoice numbers
-// don't depend on clock or DB state.
+// memNumberer is the tests' TenantSettingsStore: a deterministic in-memory
+// numberer that hands out HC-000001, HC-000002, ... so assertions on invoice
+// numbers don't depend on clock or DB state, and the tenant's settings.
+// Unless withSettings gives others, the tenant is on Net 30, in UTC, in USD,
+// with prices before tax.
 type memNumberer struct {
-	next int
+	next     int
+	settings TenantSettingsReader
 }
 
 func newMemNumberer() *memNumberer { return &memNumberer{} }
+
+// withSettings answers Get from r: a test's own tenant settings, or a read
+// error.
+func (m *memNumberer) withSettings(r TenantSettingsReader) *memNumberer {
+	m.settings = r
+	return m
+}
+
+// Get is the tenant's settings: withSettings's reader, or Net 30, UTC, USD
+// and prices before tax.
+func (m *memNumberer) Get(ctx context.Context, tenantID string) (domain.TenantSettings, error) {
+	if m.settings != nil {
+		return m.settings.Get(ctx, tenantID)
+	}
+	return domain.TenantSettings{NetPaymentTerms: 30, DefaultCurrency: "USD"}, nil
+}
 
 // NextInvoiceNumberTx ignores the tx: the fake keeps its count in memory.
 func (m *memNumberer) NextInvoiceNumberTx(_ context.Context, _ *sql.Tx, _ string) (string, error) {
 	m.next++
 	return fmt.Sprintf("HC-%06d", m.next), nil
+}
+
+// The tenant's settings are required: NewService refuses nil where the
+// service is built, naming the argument, instead of a service that falls
+// back to Net 30, UTC, USD and prices before tax on first use.
+func TestNewService_RefusesNilSettings(t *testing.T) {
+	defer func() {
+		if msg, _ := recover().(string); !strings.Contains(msg, "settings is required") {
+			t.Errorf("panic = %q, want one naming the settings argument", msg)
+		}
+	}()
+	NewService(newMemStore(), nil, nil)
+	t.Fatal("NewService(nil settings) returned")
 }
 
 func TestCreate(t *testing.T) {
@@ -1523,7 +1555,7 @@ func (r *recordingTaxCommitter) CommitTax(_ context.Context, _, invoiceID, _ str
 // transaction id — and leaves already-committed / non-stripe invoices alone.
 func TestRetryPendingTaxCommit(t *testing.T) {
 	store := newMemStore()
-	svc := NewService(store, nil, nil)
+	svc := NewService(store, nil, newMemNumberer())
 	committer := &recordingTaxCommitter{}
 	svc.SetTaxCommitter(committer)
 	ctx := postgres.WithLivemode(context.Background(), true)
@@ -1600,7 +1632,7 @@ func TestRetryTax_AutoFinalize_QueuesForCollection(t *testing.T) {
 		CreatedAt:        now,
 	}
 
-	svc := NewService(store, nil, nil)
+	svc := NewService(store, nil, newMemNumberer())
 	svc.SetTaxRetrier(&stubTaxRetrier{store: store})
 
 	out, err := svc.RetryTax(context.Background(), "t1", "inv_stuck")
@@ -1691,7 +1723,7 @@ func TestRetryTax_AutoFinalize_RespectsPauseCollection(t *testing.T) {
 	t.Run("paused → stays draft, not queued", func(t *testing.T) {
 		store := newMemStore()
 		newStuckInvoice(store)
-		svc := NewService(store, nil, nil)
+		svc := NewService(store, nil, newMemNumberer())
 		svc.SetTaxRetrier(&stubTaxRetrier{store: store})
 		store.pausedSubs = map[string]bool{"sub_1": true}
 
@@ -1715,7 +1747,7 @@ func TestRetryTax_AutoFinalize_RespectsPauseCollection(t *testing.T) {
 	t.Run("not paused → finalizes and queues", func(t *testing.T) {
 		store := newMemStore()
 		newStuckInvoice(store)
-		svc := NewService(store, nil, nil)
+		svc := NewService(store, nil, newMemNumberer())
 		svc.SetTaxRetrier(&stubTaxRetrier{store: store})
 
 		out, err := svc.RetryTax(context.Background(), "t1", "inv_paused")
@@ -1736,7 +1768,7 @@ func TestRetryTax_AutoFinalize_RespectsPauseCollection(t *testing.T) {
 	t.Run("read error → stays a draft with tax pending (never charge on a guess) and RetryTax errors", func(t *testing.T) {
 		store := newMemStore()
 		newStuckInvoice(store)
-		svc := NewService(store, nil, nil)
+		svc := NewService(store, nil, newMemNumberer())
 		svc.SetTaxRetrier(&stubTaxRetrier{store: store})
 		store.pauseErr = errors.New("connection reset")
 
@@ -1782,7 +1814,7 @@ func (f *expiredTaxCommitter) CommitTax(context.Context, string, string, string)
 // because the same age rule blocks its re-commit.
 func TestFinalize_ExpiredTaxCalculationBlocks(t *testing.T) {
 	store := newMemStore()
-	svc := NewService(store, nil, nil)
+	svc := NewService(store, nil, newMemNumberer())
 	committer := &expiredTaxCommitter{}
 	svc.SetTaxCommitter(committer)
 	ctx := context.Background()
@@ -1826,7 +1858,7 @@ func TestFinalize_ExpiredTaxCalculationBlocks(t *testing.T) {
 // beside the committed transaction: double-reported tax.
 func TestFinalize_CommittedCalcSkipsExpiryCheck(t *testing.T) {
 	store := newMemStore()
-	svc := NewService(store, nil, nil)
+	svc := NewService(store, nil, newMemNumberer())
 	committer := &expiredTaxCommitter{} // Check would refuse — must never be consulted
 	svc.SetTaxCommitter(committer)
 
@@ -1868,8 +1900,7 @@ func TestFinalize_CommittedCalcSkipsExpiryCheck(t *testing.T) {
 func TestServiceReads_SetBillingPeriodDisplay(t *testing.T) {
 	ctx := context.Background()
 	store := newMemStore()
-	svc := NewService(store, nil, nil)
-	svc.SetTenantSettingsReader(dispSettings{tz: "America/New_York"})
+	svc := NewService(store, nil, newMemNumberer().withSettings(dispSettings{tz: "America/New_York"}))
 
 	start := time.Date(2026, 5, 1, 18, 30, 0, 0, time.UTC) // May 2 00:00 IST
 	end := time.Date(2026, 5, 31, 18, 30, 0, 0, time.UTC)  // Jun 1 00:00 IST
@@ -1921,7 +1952,7 @@ func TestServiceReads_SetBillingPeriodDisplay(t *testing.T) {
 // no retrier fails the advance; skipping it would end the advance ready with
 // drafts still waiting for tax.
 func TestRetryPendingTaxForClock_NoTaxRetrierIsAnError(t *testing.T) {
-	svc := NewService(newMemStore(), nil, nil)
+	svc := NewService(newMemStore(), nil, newMemNumberer())
 	if _, errs := svc.RetryPendingTaxForClock(context.Background(), "t1", "tc_1", 50); len(errs) != 1 {
 		t.Errorf("errors = %v, want one: the job cannot retry tax", errs)
 	}

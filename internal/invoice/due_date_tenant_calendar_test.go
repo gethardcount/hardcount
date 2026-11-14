@@ -32,8 +32,7 @@ func TestManualInvoice_NetTermsDueDate_UsesTenantCalendarAcrossDST(t *testing.T)
 	want := time.Date(2026, 12, 1, 5, 0, 0, 0, time.UTC) // Dec 1 00:00 EST
 
 	fake := clock.NewFake(at)
-	svc := NewService(newMemStore(), fake, newMemNumberer())
-	svc.SetTenantSettingsReader(tzSettingsReader{tz: "America/New_York", netDays: 30})
+	svc := NewService(newMemStore(), fake, newMemNumberer().withSettings(tzSettingsReader{tz: "America/New_York", netDays: 30}))
 	ctx := context.Background()
 
 	inv, err := svc.Create(ctx, "t1", CreateInput{

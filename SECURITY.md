@@ -70,7 +70,7 @@ Known gaps:
 - **No external penetration test** on record.
 - **No SOC 2 control mapping** until a customer requires one ([Later](docs/roadmap.md#later) in the roadmap).
 
-If you can help close any of these, contributions are welcome via the normal PR process.
+If you can help close any of these, open an issue: [CONTRIBUTING](CONTRIBUTING.md#what-we-accept) says how a proposed change is taken up and credited.
 
 ## Safe-harbor
 

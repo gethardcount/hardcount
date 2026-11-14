@@ -8,6 +8,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/tenant"
 )
 
 // storingCommitter stands in for the engine's CommitTax: the provider call
@@ -84,7 +85,7 @@ func TestCreditNoteOnAnInvoiceCommittedLate_ItsReversalIsMade(t *testing.T) {
 
 	// Day 3: the commit sweep still takes the invoice, and the commit lands.
 	committer := &storingCommitter{invoices: f.invoices, txID: "tx_committed_day_3"}
-	invoices := invoice.NewService(f.invoices, clock.Real(), nil)
+	invoices := invoice.NewService(f.invoices, clock.Real(), tenant.NewSettingsStore(f.db))
 	invoices.SetTaxCommitter(committer)
 	if n, sweepErrs := invoices.RetryPendingTaxCommit(f.ctx, 50); n != 1 || len(sweepErrs) != 0 || committer.commits != 1 {
 		t.Fatalf("day 3 commit sweep: recovered=%d errs=%v commits=%d, want the three-day-old invoice committed once", n, sweepErrs, committer.commits)

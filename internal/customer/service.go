@@ -27,8 +27,17 @@ var countryPattern = regexp.MustCompile(`^[A-Z]{2}$`)
 // currencyPattern: ISO-4217 alpha-3, canonical UPPERCASE (ADR-067 currency guard).
 var currencyPattern = regexp.MustCompile(`^[A-Z]{3}$`)
 
-// StripeSyncer syncs billing profile data to Stripe when a Stripe customer exists.
+// StripeSyncer copies a customer to its linked Stripe customer. Hardcount is
+// the record and Stripe holds a copy, so each call pushes only what the
+// caller holds and has just read. The display name is not synced: the
+// Stripe customer's name is set from it only at create.
 type StripeSyncer interface {
+	// SyncCustomer pushes the customer's email and leaves every other field
+	// at Stripe as it is. An empty email is not sent.
+	SyncCustomer(ctx context.Context, stripeCustomerID, customerEmail string) error
+	// SyncBillingProfile pushes the email and the whole profile. It sets
+	// tax_exempt and deletes every tax ID at Stripe that is not the
+	// profile's, so bp must be a profile just read or saved.
 	SyncBillingProfile(ctx context.Context, stripeCustomerID, customerEmail string, bp domain.CustomerBillingProfile) error
 }
 
@@ -446,6 +455,7 @@ func (s *Service) Update(ctx context.Context, tenantID, id string, input UpdateI
 	}
 
 	var updated domain.Customer
+	var emailChanged bool
 	err := s.store.WithCustomerRulesLock(ctx, tenantID, id, func(tx *sql.Tx, locked domain.Customer) error {
 		next := locked
 		if name != "" {
@@ -519,31 +529,22 @@ func (s *Service) Update(ctx context.Context, tenantID, id string, input UpdateI
 		// A bounce or complaint belonged to the old address, so an email
 		// change clears it in the same write. Left in place, it would make
 		// the suppression gate drop every send to the new address.
+		emailChanged = next.Email != locked.Email
 		var err error
-		updated, err = s.store.UpdateTx(ctx, tx, next, next.Email != locked.Email)
+		updated, err = s.store.UpdateTx(ctx, tx, next, emailChanged)
 		return err
 	})
 	if err != nil {
 		return domain.Customer{}, err
 	}
 
-	// Stripe sync (2026-05-29): propagate email + display_name changes
-	// to the linked Stripe Customer. Pre-fix only UpsertBillingProfile
-	// triggered Stripe sync; customer.Update silently diverged. Best-
-	// effort: local save succeeded, Stripe sync failure logs but doesn't
-	// fail the operator action (matches Lago/Recurly's "local is source
-	// of truth, sync is downstream" model).
-	if s.stripeSyncer != nil && updated.StripeCustomerID != "" {
-		// Pull the billing profile so the full set of Stripe-relevant
-		// fields stay in lockstep. ErrNotFound = no profile yet —
-		// pass an empty BP, SyncBillingProfile gracefully skips the
-		// fields that aren't set.
-		bp, bpErr := s.store.GetBillingProfile(ctx, tenantID, id)
-		if bpErr != nil && !errors.Is(bpErr, errs.ErrNotFound) {
-			slog.WarnContext(ctx, "fetch billing profile for Stripe sync failed",
-				"tenant_id", tenantID, "customer_id", id, "error", bpErr)
-		}
-		if syncErr := s.stripeSyncer.SyncBillingProfile(ctx, updated.StripeCustomerID, updated.Email, bp); syncErr != nil {
+	// The email is the one field an edit changes at Stripe, so only an email
+	// change is pushed. The billing profile is pushed when it is saved, so a
+	// profile sync that failed is not repeated by a customer edit. The edit
+	// has committed: a failed sync is logged, and the next email change
+	// pushes again.
+	if s.stripeSyncer != nil && updated.StripeCustomerID != "" && emailChanged {
+		if syncErr := s.stripeSyncer.SyncCustomer(ctx, updated.StripeCustomerID, updated.Email); syncErr != nil {
 			slog.WarnContext(ctx, "failed to sync customer update to Stripe",
 				"tenant_id", tenantID, "customer_id", id,
 				"stripe_customer_id", updated.StripeCustomerID, "error", syncErr)
@@ -699,7 +700,9 @@ func (s *Service) UpsertBillingProfile(ctx context.Context, tenantID string, bp 
 	// commits, so the check counts one that committed first, and one that
 	// comes later waits and then checks against this profile.
 	var result domain.CustomerBillingProfile
-	err := s.store.WithCustomerRulesLock(ctx, tenantID, bp.CustomerID, func(tx *sql.Tx, _ domain.Customer) error {
+	var cust domain.Customer
+	err := s.store.WithCustomerRulesLock(ctx, tenantID, bp.CustomerID, func(tx *sql.Tx, locked domain.Customer) error {
+		cust = locked
 		if err := s.checkProfileCurrency(ctx, tenantID, bp); err != nil {
 			return err
 		}
@@ -711,23 +714,13 @@ func (s *Service) UpsertBillingProfile(ctx context.Context, tenantID string, bp 
 		return domain.CustomerBillingProfile{}, err
 	}
 
-	// Note: billing-profile.email was removed in migration 0100.
-	// customers.email is now the single canonical recipient (Phase 1 of
-	// the dual-email collapse). The prior BP→customer sync hack is
-	// obsolete. Phase 2 (multi-recipient via customer_email_contacts
-	// table) will be additive when a DP requests it.
-
-	// Sync to Stripe if a Stripe customer exists. Reads from the
-	// canonical mapping on customers.stripe_customer_id (migration
-	// 0096); the legacy customer_payment_setups summary was retired
-	// in 0097.
-	if s.stripeSyncer != nil {
-		if cust, getErr := s.store.Get(ctx, tenantID, bp.CustomerID); getErr == nil && cust.StripeCustomerID != "" {
-			if syncErr := s.stripeSyncer.SyncBillingProfile(ctx, cust.StripeCustomerID, cust.Email, result); syncErr != nil {
-				slog.Warn("failed to sync billing profile to Stripe",
-					"customer_id", bp.CustomerID, "stripe_customer_id", cust.StripeCustomerID, "error", syncErr)
-				// Non-fatal: local save succeeded, Stripe sync is best-effort
-			}
+	// The profile has committed, so a failed Stripe sync is logged and the
+	// next save pushes again.
+	if s.stripeSyncer != nil && cust.StripeCustomerID != "" {
+		if syncErr := s.stripeSyncer.SyncBillingProfile(ctx, cust.StripeCustomerID, cust.Email, result); syncErr != nil {
+			slog.WarnContext(ctx, "failed to sync billing profile to Stripe",
+				"tenant_id", tenantID, "customer_id", bp.CustomerID,
+				"stripe_customer_id", cust.StripeCustomerID, "error", syncErr)
 		}
 	}
 

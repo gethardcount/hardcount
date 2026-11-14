@@ -1,35 +1,40 @@
 # Contributing to Hardcount
 
-Hardcount is a billing system you run yourself, written in Go on PostgreSQL. This page takes you from a fresh clone to a merged pull request.
+Hardcount is a billing system you run yourself, written in Go on PostgreSQL. This page says how to take part, and how a change is built, tested and merged.
 
 Report a security problem privately ([SECURITY.md](SECURITY.md)), and ask questions in [GitHub Discussions](https://github.com/gethardcount/hardcount/discussions).
 
 ## What we accept
 
-1. **Start with an issue.** For anything bigger than a typo or a broken link, open an issue or comment on an existing one, and wait. An issue is agreed when a maintainer says so on it. A pull request opened before that is closed without review.
-2. **Some areas need an invitation.** A change here needs an agreed issue that says an outside pull request is welcome:
-   - money and billing state (invoices, payments, credits, dunning, subscriptions, tax), which follow the [money-path playbook](docs/dev/money-path-robustness-playbook.md);
-   - database migrations;
-   - sign-in, sessions and API keys;
-   - CI and release files (`.github/`);
-   - dependencies (`go.mod`, `web-v2/package.json` and the lock files).
-3. **Send one change. Run it yourself, and be able to explain every line.**
-4. **AI help is fine.** End each commit an AI tool helped with in an `Assisted-by:` line, such as `Assisted-by: Claude Code`.
+**We are not accepting outside pull requests at this time.** One maintainer reviews every change to a system that bills people, so the code comes from maintainers and invited collaborators. On GitHub, only a collaborator can open a pull request here.
 
-**Never accepted:** links that promote you or a product, batches of tiny edits made to collect contributions, and changes to the licence or the credits. A pull request from an account that sends them in bulk to projects it does not use is closed, whatever it changes.
+You can still take part, and you are credited for it:
 
-A pull request below this bar gets one short comment and is closed. You may open an issue and try again. Repeats, or behaviour the [code of conduct](CODE_OF_CONDUCT.md) rules out, lead to a block.
+1. **Report a bug.** Open an issue with the steps that show it. Bugs in money and billing state are looked at first.
+2. **Propose a fix.** In the issue, describe the change, paste a patch, or link a branch on your fork. A maintainer writes the change and uses your code where it fits. Code you post ships under the [MIT licence](LICENSE).
+3. **Say where you got lost.** A doc that misled you or a design you could not follow is worth an issue.
+
+**How you are credited.** A commit that uses your code names you in a `Co-authored-by:` line, so GitHub lists you as one of its authors. The `CHANGELOG.md` entry names who reported the bug or proposed the fix.
+
+**Becoming a collaborator.** A maintainer may invite someone whose issues and patches show they know the codebase. A collaborator opens pull requests, and the rest of this page is for them.
+
+**Not accepted:** issues that promote you or a product, and issues sent in bulk by an account that does not use Hardcount. They are closed. Repeats, or behaviour the [code of conduct](CODE_OF_CONDUCT.md) rules out, lead to a block.
+
+**Rules for every change:**
+
+- **Send one change. Run it yourself, and be able to explain every line.**
+- **Money and billing state** (invoices, payments, credits, dunning, subscriptions, tax) follow the [money-path playbook](docs/dev/money-path-robustness-playbook.md).
+- **AI help is fine.** End each commit an AI tool helped with in an `Assisted-by:` line, such as `Assisted-by: Claude Code`.
 
 ## Development setup
 
 You need Go 1.27 or newer and Docker. Dashboard work and `make gen` also need Node 22 or newer, and the demo needs `jq`.
 
-Fork the repository on GitHub, then:
+Clone the repository, or your fork of it:
 
 ```bash
-git clone https://github.com/<your-user>/hardcount.git
+git clone https://github.com/gethardcount/hardcount.git
 cd hardcount
-git remote add upstream https://github.com/gethardcount/hardcount.git
 cp .env.example .env
 ```
 
@@ -98,13 +103,13 @@ For a second account, run `make bootstrap` again with another `HARDCOUNT_BOOTSTR
 
 The dashboard's setup and checks are in [`web-v2/README.md`](web-v2/README.md). Use npm 10, or 11.6.3 or later: 11.5.0 to 11.6.2 drops an `@emnapi` package from the lockfile, and CI's `npm ci` fails.
 
-## Your first pull request
+## Opening a pull request
 
-1. **Agree the change in an issue.** New here? Pick an open issue, say in a comment what you plan to change and how, and wait for a maintainer to agree. Then, in your fork, branch from `main`.
+1. **Branch from `main`.** A change that fixes an issue names it in the pull request.
 2. **Make the change, with its test.** First read [How Hardcount is built](docs/ENGINEERING.md), [Architecture](docs/architecture.md), the [code standard](docs/dev/code-standard.md) and [How we test](docs/testing.md). [Contributor docs](docs/dev/README.md) lists the rest, with two glossaries.
 3. **Update the docs.** A change a user can see gets a `CHANGELOG.md` entry under `[Unreleased]`. The [writing style](docs/dev/writing-style.md) says how, and which other docs change.
 4. **Open the pull request.** Title it like the commits on `main`: `fix(invoice): what is now true`. Other types: `feat`, `docs`, `test`, `refactor`, `chore`, `ui`, `ci`. The area is optional, and `!` marks a breaking change. The template is the checklist.
-5. **Wait for review.** We answer within two days. CI on a fork's pull request starts when a maintainer approves the run. We squash-merge, and your change ships under the [MIT licence](LICENSE).
+5. **Wait for CI and review.** We squash-merge, and the change ships under the [MIT licence](LICENSE).
 
 ## What CI runs on your PR
 

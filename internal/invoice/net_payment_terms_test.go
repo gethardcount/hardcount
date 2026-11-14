@@ -38,17 +38,13 @@ func TestCreate_NetPaymentTermResolution(t *testing.T) {
 		{"explicit Due-on-receipt (0) is honored, not coerced to 30", intPtr(0), fakeSettingsReader{netTerms: 14}, 0},
 		{"explicit value is honored over the tenant default", intPtr(45), fakeSettingsReader{netTerms: 14}, 45},
 		{"omitted falls back to the tenant default", nil, fakeSettingsReader{netTerms: 14}, 14},
-		{"omitted with no settings reader defaults to 30", nil, nil, 30},
 		{"omitted with tenant Due-on-receipt (0) is honored", nil, fakeSettingsReader{netTerms: 0}, 0},
 		{"explicit negative is clamped to 0", intPtr(-5), nil, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			svc := NewService(newMemStore(), nil, newMemNumberer())
-			if tc.settings != nil {
-				svc.SetTenantSettingsReader(tc.settings)
-			}
+			svc := NewService(newMemStore(), nil, newMemNumberer().withSettings(tc.settings))
 			inv, err := svc.Create(ctx, "t1", CreateInput{
 				CustomerID:         "cus_1",
 				NetPaymentTermDays: tc.input,
@@ -76,8 +72,7 @@ func TestCreate_NetPaymentTermResolution(t *testing.T) {
 func TestCreate_NetTermsUnreadableFailsCreate(t *testing.T) {
 	t.Parallel()
 	numberer := newMemNumberer()
-	svc := NewService(newMemStore(), nil, numberer)
-	svc.SetTenantSettingsReader(fakeSettingsReader{err: errors.New("settings read: connection reset")})
+	svc := NewService(newMemStore(), nil, numberer.withSettings(fakeSettingsReader{err: errors.New("settings read: connection reset")}))
 
 	if _, err := svc.Create(context.Background(), "t1", CreateInput{CustomerID: "cus_1"}); err == nil {
 		t.Fatal("create succeeded with unreadable tenant settings; want an error")

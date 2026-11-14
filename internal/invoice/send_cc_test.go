@@ -74,7 +74,7 @@ func TestSendEmail_CCTriState(t *testing.T) {
 
 	newHandler := func() (*Handler, *ccCapturingSender) {
 		sender := &ccCapturingSender{}
-		h := &Handler{svc: NewService(store, nil, nil)}
+		h := &Handler{svc: NewService(store, nil, newMemNumberer())}
 		h.customers = staticCustomerGetter{cust: domain.Customer{
 			ID: "cus_cc", DisplayName: "CC Co", Email: "ap@acme.test",
 			AdditionalEmails: []string{"finance@acme.test", "eng@acme.test"},
@@ -153,7 +153,7 @@ func TestSendEmail_WrittenOffInvoiceSaysSo(t *testing.T) {
 				t.Fatalf("seed invoice: %v", err)
 			}
 			sender := &ccCapturingSender{}
-			h := &Handler{svc: NewService(store, nil, nil), emailSender: sender, emailConfigured: true}
+			h := &Handler{svc: NewService(store, nil, newMemNumberer()), emailSender: sender, emailConfigured: true}
 			h.customers = staticCustomerGetter{cust: domain.Customer{ID: "cus_cc", DisplayName: "CC Co", Email: "ap@acme.test"}}
 			if rr := sendReq(t, h, inv.ID, `{"email":"ap@acme.test"}`); rr.Code != http.StatusOK {
 				t.Fatalf("status %d; body=%s", rr.Code, rr.Body.String())
@@ -180,7 +180,7 @@ func TestSendEmail_RefusesWhenEmailNotConfigured(t *testing.T) {
 		t.Fatalf("seed invoice: %v", err)
 	}
 	sender := &ccCapturingSender{}
-	h := &Handler{svc: NewService(store, nil, nil), emailSender: sender} // emailConfigured: false
+	h := &Handler{svc: NewService(store, nil, newMemNumberer()), emailSender: sender} // emailConfigured: false
 
 	rr := sendReq(t, h, inv.ID, `{"email":"ap@acme.test"}`)
 	if rr.Code != http.StatusConflict {
@@ -226,7 +226,7 @@ func TestSendEmail_RefusesDraftAndVoided(t *testing.T) {
 				t.Fatalf("seed invoice: %v", err)
 			}
 			sender := &ccCapturingSender{}
-			h := &Handler{svc: NewService(store, nil, nil), emailSender: sender, emailConfigured: true}
+			h := &Handler{svc: NewService(store, nil, newMemNumberer()), emailSender: sender, emailConfigured: true}
 			h.customers = staticCustomerGetter{cust: domain.Customer{ID: "cus_cc", DisplayName: "CC Co", Email: "ap@acme.test"}}
 
 			rr := sendReq(t, h, inv.ID, `{"email":"ap@acme.test"}`)

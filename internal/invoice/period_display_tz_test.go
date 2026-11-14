@@ -32,7 +32,7 @@ func (d dispSettings) Get(_ context.Context, _ string) (domain.TenantSettings, e
 func TestInvoice_PeriodDisplay_AnchoredInBillingTZ(t *testing.T) {
 	ctx := context.Background()
 	// The tenant has SINCE moved its display TZ to New_York.
-	s := &Service{settings: dispSettings{tz: "America/New_York"}}
+	s := &Service{settings: newMemNumberer().withSettings(dispSettings{tz: "America/New_York"})}
 
 	start := time.Date(2026, 5, 1, 18, 30, 0, 0, time.UTC) // May 2 00:00 IST
 	end := time.Date(2026, 5, 31, 18, 30, 0, 0, time.UTC)  // Jun 1 00:00 IST
@@ -55,10 +55,12 @@ func TestInvoice_PeriodDisplay_AnchoredInBillingTZ(t *testing.T) {
 				BillingPeriodStart: start,
 				BillingPeriodEnd:   end,
 			}
-			if got := s.invoiceDisplayLoc(ctx, inv).String(); got != tc.wantLoc {
-				t.Errorf("invoiceDisplayLoc: got %q, want %q", got, tc.wantLoc)
+			var tenantLoc *time.Location
+			loc := s.invoiceDisplayLocCached(ctx, inv, &tenantLoc)
+			if got := loc.String(); got != tc.wantLoc {
+				t.Errorf("invoiceDisplayLocCached: got %q, want %q", got, tc.wantLoc)
 			}
-			got := domain.FormatInclusivePeriod(inv.BillingPeriodStart, inv.BillingPeriodEnd, s.invoiceDisplayLoc(ctx, inv))
+			got := domain.FormatInclusivePeriod(inv.BillingPeriodStart, inv.BillingPeriodEnd, loc)
 			if got != tc.wantDisplay {
 				t.Errorf("billing_period_display: got %q, want %q", got, tc.wantDisplay)
 			}

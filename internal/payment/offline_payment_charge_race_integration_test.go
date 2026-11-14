@@ -13,6 +13,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/payment"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/webhook"
 )
@@ -88,7 +89,7 @@ func TestOfflinePayment_RacedWithCardChargeAtTheStripeCall(t *testing.T) {
 	invStore := invoice.NewPostgresStore(db)
 	outbox := webhook.NewOutboxStore(db)
 	invStore.SetOutboxEnqueuer(outbox)
-	invSvc := invoice.NewService(invStore, nil, nil)
+	invSvc := invoice.NewService(invStore, nil, tenant.NewSettingsStore(db))
 	client := &boundaryStripe{}
 	s := payment.NewStripe(client, invStore, payment.NewPostgresWebhookStore(db), nil)
 	s.SetCardFetcher(settleRaceCard{})

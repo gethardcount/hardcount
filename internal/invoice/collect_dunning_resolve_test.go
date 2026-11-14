@@ -78,7 +78,7 @@ func TestCollect_CreditSettle_ResolvesDunningOnlyWhenPaid(t *testing.T) {
 			if err != nil {
 				t.Fatalf("seed: %v", err)
 			}
-			svc := NewService(store, nil, nil)
+			svc := NewService(store, nil, newMemNumberer())
 			svc.SetCreditApplier(tc.applier(store))
 			charger := &fakeCharger{}
 			dun := &recordingDunning{}
@@ -179,7 +179,7 @@ func TestCollect_CardCharge_ResolvesDunningOnlyWhenPaid(t *testing.T) {
 			dun := &recordingDunning{}
 			audit := &capturingInvoiceAudit{}
 			h := &Handler{
-				svc:     NewService(store, nil, nil),
+				svc:     NewService(store, nil, newMemNumberer()),
 				charger: tc.charger(store),
 				paymentSetups: &fakePaymentSetups{setup: domain.CustomerPaymentSetup{
 					StripeCustomerID: "cus_stripe_1", StripePaymentMethodID: "pm_1", SetupStatus: domain.PaymentSetupReady,
