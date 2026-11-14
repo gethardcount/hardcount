@@ -66,9 +66,10 @@ Known gaps:
 - **No two-factor sign-in.** It is built when a team running Hardcount asks for it, or when a customer's security review requires it ([ADR-095](docs/adr/095-login-security-roadmap-and-mfa.md)). Until then, a team can put the dashboard's sign-in behind its own SSO or VPN.
 - **No built-in rotation** of `HARDCOUNT_ENCRYPTION_KEY` or `HARDCOUNT_EMAIL_BIDX_KEY`.
 - **No static analysis** (SAST, such as CodeQL or Semgrep) in CI.
-- **No threat model document.**
 - **No external penetration test** on record.
 - **No SOC 2 control mapping** until a customer requires one ([Later](docs/roadmap.md#later) in the roadmap).
+
+The attacks Hardcount is built to stop, and your part as the person who runs it: [Threat model](docs/security/threat-model.md). What data it stores, and what leaves your server: [What data Hardcount stores](docs/security/data.md).
 
 If you can help close any of these, open an issue: [CONTRIBUTING](CONTRIBUTING.md#what-we-accept) says how a proposed change is taken up and credited.
 
