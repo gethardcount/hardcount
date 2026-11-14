@@ -44,6 +44,9 @@ type PaymentError struct {
 	// one kind of message Stripe says can be shown to the customer
 	// (cardErrorMessage); empty otherwise.
 	CardMessage string
+	// Card: Stripe answered card_error, so the customer's card refused the
+	// charge, with a decline code or without. An invalid request is not one.
+	Card bool
 }
 
 func (e *PaymentError) Error() string { return e.Message }
@@ -333,10 +336,13 @@ func classifyStripeError(err error) *PaymentError {
 	}
 
 	switch stripeErr.Type {
-	case stripe.ErrorTypeCard,
-		stripe.ErrorTypeInvalidRequest:
-		// Stripe explicitly rejected the request; no charge occurred. (A 409
-		// of these types returned above.)
+	case stripe.ErrorTypeCard:
+		// The card refused the charge; no charge occurred. (A 409 returned
+		// above.)
+		pe.Unknown, pe.Card = false, true
+	case stripe.ErrorTypeInvalidRequest:
+		// Stripe rejected the request itself; no charge occurred. (A 409
+		// returned above.)
 		pe.Unknown = false
 	case stripe.ErrorTypeIdempotency:
 		// AMBIGUOUS, not a rejection — and it used to be grouped with the two

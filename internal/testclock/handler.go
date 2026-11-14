@@ -11,9 +11,9 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// Handler exposes /v1/test-clocks. Auth middleware upstream enforces that the
-// caller holds a test-mode key (livemode=false); the service itself adds a
-// second guard so a misconfigured auth chain can't slip live writes through.
+// Handler exposes /v1/test-clocks. Its requireTestMode answers 403 to a
+// live-mode caller; the table's CHECK (livemode = false) is the second
+// refusal.
 type Handler struct {
 	svc *Service
 }

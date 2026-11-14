@@ -2406,15 +2406,11 @@ func TestRunCycle_SkipsPendingChangeNotYetDue(t *testing.T) {
 	}
 }
 
-// TestEffectiveNow covers the four branches of Engine.simForSub (which
-// effectiveNow is a thin .At wrapper over): no test clock → wall-clock; test
-// clock wired → frozen_time; clock id set but no reader → wall-clock; reader
-// errors → wall-clock. These branches are what makes a test-mode sub bill at
-// simulated time without affecting live subs on the same engine instance.
-//
-// Each fallback branch must also drop the CLOCK ID, not just revert the
-// instant: a Sim carrying "clock tc_1" with a wall-clock At would stamp audit
-// rows into the simulated slice with a real-world timestamp (ADR-090 §5).
+// TestEffectiveNow covers the four branches of Engine.effectiveNow, the
+// instant the engine bills a subscription at: no test clock → real time;
+// a clock it reads → the clock's frozen time; a clock id with no reader →
+// real time; a clock it cannot read → real time (the fallback step 5
+// removes).
 func TestEffectiveNow(t *testing.T) {
 	wall := time.Date(2026, 4, 20, 12, 0, 0, 0, time.UTC)
 	frozen := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -2423,15 +2419,11 @@ func TestEffectiveNow(t *testing.T) {
 	liveSub := domain.Subscription{ID: "s_live", TenantID: "t1"}
 	testSub := domain.Subscription{ID: "s_test", TenantID: "t1", TestClockID: "tc_1"}
 
-	t.Run("no test clock id returns wall clock", func(t *testing.T) {
+	t.Run("no test clock id returns real time", func(t *testing.T) {
 		e := NewEngine(nil, nil, nil, nil, nil, nil, nil, nil, fakeClk)
 		e.SetTestClockReader(&stubClockReader{clk: domain.TestClock{FrozenTime: frozen}})
-		got := e.simForSub(context.Background(), liveSub)
-		if !got.At.Equal(wall) {
-			t.Errorf("wall-clock sub: got %v, want %v", got.At, wall)
-		}
-		if got.Simulated() {
-			t.Errorf("unpinned sub must not be simulated: %+v", got)
+		if got := e.effectiveNow(context.Background(), liveSub); !got.Equal(wall) {
+			t.Errorf("unpinned sub: got %v, want %v", got, wall)
 		}
 	})
 
@@ -2439,39 +2431,26 @@ func TestEffectiveNow(t *testing.T) {
 		reader := &stubClockReader{clk: domain.TestClock{FrozenTime: frozen}}
 		e := NewEngine(nil, nil, nil, nil, nil, nil, nil, nil, fakeClk)
 		e.SetTestClockReader(reader)
-		got := e.simForSub(context.Background(), testSub)
-		if !got.At.Equal(frozen) {
-			t.Errorf("test-mode sub: got %v, want %v", got.At, frozen)
-		}
-		if got.TestClockID != "tc_1" {
-			t.Errorf("test_clock_id: got %q, want tc_1", got.TestClockID)
+		if got := e.effectiveNow(context.Background(), testSub); !got.Equal(frozen) {
+			t.Errorf("test-mode sub: got %v, want %v", got, frozen)
 		}
 		if reader.lastID != "tc_1" || reader.lastTenant != "t1" {
-			t.Errorf("reader lookup: got (%q,%q), want (t1,tc_1)",
-				reader.lastTenant, reader.lastID)
+			t.Errorf("reader lookup: got (%q,%q), want (t1,tc_1)", reader.lastTenant, reader.lastID)
 		}
 	})
 
-	t.Run("test clock id without reader falls back to wall clock", func(t *testing.T) {
+	t.Run("test clock id without reader returns real time", func(t *testing.T) {
 		e := NewEngine(nil, nil, nil, nil, nil, nil, nil, nil, fakeClk)
-		got := e.simForSub(context.Background(), testSub)
-		if !got.At.Equal(wall) {
-			t.Errorf("nil-reader fallback: got %v, want %v", got.At, wall)
-		}
-		if got.Simulated() {
-			t.Errorf("wall-clock fallback must drop the clock id, got %+v", got)
+		if got := e.effectiveNow(context.Background(), testSub); !got.Equal(wall) {
+			t.Errorf("no reader: got %v, want %v", got, wall)
 		}
 	})
 
-	t.Run("reader error falls back to wall clock", func(t *testing.T) {
+	t.Run("a clock it cannot read falls back to real time", func(t *testing.T) {
 		e := NewEngine(nil, nil, nil, nil, nil, nil, nil, nil, fakeClk)
 		e.SetTestClockReader(&stubClockReader{err: errs.ErrNotFound})
-		got := e.simForSub(context.Background(), testSub)
-		if got.Simulated() {
-			t.Errorf("wall-clock fallback must drop the clock id, got %+v", got)
-		}
-		if !got.At.Equal(wall) {
-			t.Errorf("error fallback: got %v, want %v", got.At, wall)
+		if got := e.effectiveNow(context.Background(), testSub); !got.Equal(wall) {
+			t.Errorf("reader error: got %v, want %v", got, wall)
 		}
 	})
 }

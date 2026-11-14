@@ -2,10 +2,9 @@
 // simulator used to walk test-mode subscriptions through full billing
 // lifecycles (trials, cycles, dunning retries) in compressed wall-clock time.
 //
-// Clocks exist only in test mode — the underlying table and its CHECK
-// constraint enforce livemode=false. Live-mode callers cannot create, advance,
-// or attach clocks; attempting to reach the endpoints from a live key produces
-// a 400 from the service guard before the DB even sees the write.
+// Clocks exist only in test mode. A live-mode caller cannot create, advance
+// or attach one: the handler answers 403 to a live key (requireTestMode), and
+// the table's CHECK (livemode = false) refuses a live row.
 package testclock
 
 import (
