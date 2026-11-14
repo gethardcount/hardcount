@@ -142,8 +142,9 @@ func TestListDueRuns_ChargeHoldIsSkipped(t *testing.T) {
 	}
 }
 
-// The sim-time twin of the scan above: same rule, written a second way.
-func TestListDueRunsForClock_ChargeHoldIsSkipped(t *testing.T) {
+// The sim-time twin of the scan above: the clock's list returns a run whose
+// invoice a charge holds, marked as held, and the job does not step it.
+func TestListDueRunsForClock_ChargeHoldIsMarkedHeld(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := "tnt_hold_clock"
@@ -192,18 +193,18 @@ func TestListDueRunsForClock_ChargeHoldIsSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListDueRunsForClock: %v", err)
 	}
-	got := map[string]bool{}
+	got := map[string]domain.ChargeClaimState{}
 	for _, r := range due {
-		got[r.ID] = true
+		got[r.ID] = r.HeldBy
 	}
-	if got["run_clk_held"] {
-		t.Error("a simulated invoice with a charge hold must be excluded from the catchup scan")
+	if s, ok := got["run_clk_held"]; !ok || s != domain.ChargeHeldByAttempt {
+		t.Errorf("a simulated invoice with a charge hold: listed %v, held by %v; want it listed as held by an attempt, so the job does not step it", ok, s)
 	}
-	if !got["run_clk_held_wroff"] {
-		t.Error("a written-off simulated invoice with a hold must still be selected — the terminal branch resolves the run")
+	if s, ok := got["run_clk_held_wroff"]; !ok || s != domain.ChargeClaimable {
+		t.Errorf("a written-off simulated invoice with a hold: listed %v, held by %v; want it listed and not held — the terminal branch resolves the run", ok, s)
 	}
-	if !got["run_clk_free"] {
-		t.Error("an ordinary failed simulated invoice must remain due — the control")
+	if s, ok := got["run_clk_free"]; !ok || s != domain.ChargeClaimable {
+		t.Errorf("an ordinary failed simulated invoice: listed %v, held by %v; want it listed and not held — the control", ok, s)
 	}
 }
 

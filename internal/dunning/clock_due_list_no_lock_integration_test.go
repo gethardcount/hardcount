@@ -153,10 +153,10 @@ func TestListDueRunsForClock_PagesByNextActionAtThenID(t *testing.T) {
 	frozen := seedClockDueRuns(t, db, ctx, tenantID, clockID)
 	store := dunning.NewPostgresStore(db)
 
-	list := func(ctx context.Context, after walk.Key, limit int) ([]domain.InvoiceDunningRun, error) {
+	list := func(ctx context.Context, after walk.Key, limit int) ([]dunning.DueRun, error) {
 		return store.ListDueRunsForClock(ctx, tenantID, clockID, frozen, after, limit)
 	}
-	key := func(r domain.InvoiceDunningRun) walk.Key { return walk.Key{At: *r.NextActionAt, ID: r.ID} }
+	key := func(r dunning.DueRun) walk.Key { return walk.Key{At: *r.NextActionAt, ID: r.ID} }
 	var got []string
 	for run, err := range walk.Walk(ctx, "ListDueRunsForClock", list, key, 1) {
 		if err != nil {

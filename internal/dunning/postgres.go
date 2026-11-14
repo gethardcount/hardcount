@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/platform/leader"
@@ -1284,13 +1285,19 @@ func (s *PostgresStore) ListDueRuns(ctx context.Context, tenantID string, dueBef
 // has elapsed against the clock's frozen_time (passed explicitly so
 // the comparison runs in simulated time, not wall-clock).
 //
+// Every due run comes back once, with what holds it (heldBySQL): nothing,
+// or a charge of its open invoice in flight. The dunning job steps only the
+// runs nothing holds, since the charge claim refuses the others; one list,
+// so a run cannot fall between a list of runs to step and a list of held
+// ones.
+//
 // It takes no lock. A clock has one runner, so a run whose rows another
 // transaction holds is reached and its own conditional writes decide; and
 // a list that locked the run would take it before its invoice, the reverse
 // of the invoice-then-run order every settle uses.
 //
 // It pages by (next_action_at, id), after the key, for walk.Walk.
-func (s *PostgresStore) ListDueRunsForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time, after walk.Key, limit int) ([]domain.InvoiceDunningRun, error) {
+func (s *PostgresStore) ListDueRunsForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time, after walk.Key, limit int) ([]DueRun, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return nil, err
@@ -1304,7 +1311,8 @@ func (s *PostgresStore) ListDueRunsForClock(ctx context.Context, tenantID, clock
 	rows, err := tx.QueryContext(ctx, `
 		SELECT r.id, r.tenant_id, r.invoice_id, COALESCE(r.customer_id,''), r.policy_id, r.state,
 			COALESCE(r.reason,''), r.attempt_count, r.last_attempt_at, r.next_action_at,
-			r.paused, r.resolved_at, COALESCE(r.resolution,''), r.created_at, r.updated_at
+			r.paused, r.resolved_at, COALESCE(r.resolution,''), r.created_at, r.updated_at,
+			COALESCE(i.invoice_number, ''), `+heldBySQL+`
 		FROM invoice_dunning_runs r
 		JOIN invoices i ON i.id = r.invoice_id
 		-- Clock membership resolves through CUSTOMERS (the pin's owner,
@@ -1315,17 +1323,11 @@ func (s *PostgresStore) ListDueRunsForClock(ctx context.Context, tenantID, clock
 		-- A sub's clock always equals its customer's clock (inherit-only,
 		-- immutable), so sub-backed runs behave identically.
 		JOIN customers c ON c.id = i.customer_id
-		WHERE `+clockDueRunsWhere+`
-			-- Payment in flight — the sim-time twin of the wall-clock scan's
-			-- exclusion above; see there for why the claim can never succeed in
-			-- these states, and for why it is scoped to OPEN invoices rather than
-			-- all of them. Expressed against the joined row (1:1) instead of a
-			-- second NOT EXISTS. A clock advance drives many ticks in a burst, so
-			-- the spin this prevents is faster here, not slower: without it one
-			-- in-flight sim invoice can consume the whole catchup budget and stall
-			-- every other run on the clock. HeldDueRunsForClock lists what this
-			-- leaves out.
-			AND NOT `+heldByChargeInFlight+`
+		WHERE r.tenant_id = $1
+			AND c.test_clock_id = $2
+			AND r.next_action_at <= $3
+			AND r.paused = false
+			AND r.state NOT IN ('resolved', 'escalated')
 			AND (r.next_action_at, r.id) > ($5, $6)
 		ORDER BY r.next_action_at ASC, r.id ASC LIMIT $4
 	`, tenantID, clockID, frozenTime, limit, after.At, after.ID)
@@ -1334,12 +1336,12 @@ func (s *PostgresStore) ListDueRunsForClock(ctx context.Context, tenantID, clock
 	}
 	defer func() { _ = rows.Close() }()
 
-	var runs []domain.InvoiceDunningRun
+	var runs []DueRun
 	for rows.Next() {
-		var r domain.InvoiceDunningRun
+		var r DueRun
 		if err := rows.Scan(&r.ID, &r.TenantID, &r.InvoiceID, &r.CustomerID, &r.PolicyID,
 			&r.State, &r.Reason, &r.AttemptCount, &r.LastAttemptAt, &r.NextActionAt,
-			&r.Paused, &r.ResolvedAt, &r.Resolution, &r.CreatedAt, &r.UpdatedAt); err != nil {
+			&r.Paused, &r.ResolvedAt, &r.Resolution, &r.CreatedAt, &r.UpdatedAt, &r.InvoiceNumber, &r.HeldBy); err != nil {
 			return nil, err
 		}
 		runs = append(runs, r)
@@ -1347,63 +1349,16 @@ func (s *PostgresStore) ListDueRunsForClock(ctx context.Context, tenantID, clock
 	return runs, rows.Err()
 }
 
-// clockDueRunsWhere is the clock's due runs, for ListDueRunsForClock and
-// HeldDueRunsForClock: $1 the tenant, $2 the clock, $3 its frozen time.
-// Clock membership resolves through customers (ListDueRunsForClock says
-// why).
-const clockDueRunsWhere = `r.tenant_id = $1
-			AND c.test_clock_id = $2
-			AND r.next_action_at <= $3
-			AND r.paused = false
-			AND r.state NOT IN ('resolved', 'escalated')`
-
-// heldByChargeInFlight is a due run whose open invoice has a charge in
-// flight: ListDueRunsForClock leaves it out, HeldDueRunsForClock lists it.
-// One expression, so between them they list every due run once.
-var heldByChargeInFlight = `(NOT ` + domain.ChargeNotInFlightSQL("i") + `
-			  AND i.status NOT IN ('voided', 'uncollectible'))`
-
-// maxHeldRunsListed bounds HeldDueRunsForClock: each held run becomes one
-// sentence for the operator, and a few say what to wait for.
-const maxHeldRunsListed = 50
-
-// HeldDueRunsForClock lists the clock's due runs that ListDueRunsForClock
-// leaves out because a charge of their invoice is in flight, each with what
-// holds it: domain.ChargeHeldByAttempt (the payment's result is not known
-// yet, or a charge attempt holds the invoice) or
-// domain.ChargePayingOnHostedPage. Up to maxHeldRunsListed, in
-// (next_action_at, id) order. It takes no lock, as ListDueRunsForClock.
-func (s *PostgresStore) HeldDueRunsForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time) ([]HeldRun, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	defer postgres.Rollback(tx)
-
-	rows, err := tx.QueryContext(ctx, `
-		SELECT r.id, r.invoice_id, COALESCE(i.invoice_number, ''), `+domain.ChargeInFlightStateSQL("i")+`
-		FROM invoice_dunning_runs r
-		JOIN invoices i ON i.id = r.invoice_id
-		JOIN customers c ON c.id = i.customer_id
-		WHERE `+clockDueRunsWhere+`
-			AND `+heldByChargeInFlight+`
-		ORDER BY r.next_action_at ASC, r.id ASC LIMIT $4
-	`, tenantID, clockID, frozenTime, maxHeldRunsListed)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var held []HeldRun
-	for rows.Next() {
-		var h HeldRun
-		if err := rows.Scan(&h.RunID, &h.InvoiceID, &h.InvoiceNumber, &h.HeldBy); err != nil {
-			return nil, err
-		}
-		held = append(held, h)
-	}
-	return held, rows.Err()
-}
+// heldBySQL is what holds a due run's retry: a charge of its open invoice in
+// flight, the first of domain.ChargeNotInFlight the invoice fails
+// (domain.ChargeHeldByAttempt or domain.ChargePayingOnHostedPage), else
+// domain.ChargeClaimable. It is the sim-time twin of the wall-clock scan's
+// exclusion above (see there for why the claim can never succeed while a
+// charge is in flight, and why only an OPEN invoice is held): a voided or
+// written-off invoice is never held, because the processing path's terminal
+// branch is what resolves its run.
+var heldBySQL = `CASE WHEN i.status IN ('voided', 'uncollectible') THEN ` + strconv.Itoa(int(domain.ChargeClaimable)) +
+	` ELSE ` + domain.ChargeInFlightStateSQL("i") + ` END`
 
 func (s *PostgresStore) CreateEvent(ctx context.Context, tenantID string, event domain.InvoiceDunningEvent) (domain.InvoiceDunningEvent, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
