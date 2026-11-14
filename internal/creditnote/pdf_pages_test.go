@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/testutil/pdftest"
 )
 
@@ -353,4 +354,28 @@ func TestRenderPDF_AccentedLettersPrintWhole(t *testing.T) {
 	if len(missing) > 0 {
 		t.Errorf("the embedded fonts leave out parts of accented letters:\n%s", strings.Join(missing, "\n"))
 	}
+}
+
+// The footer says when the file was made, in machine time, even for a credit
+// note whose customer is on a test clock: the clock's time is the note's
+// dates, not the file's.
+func TestRenderPDF_GeneratedOnIsMachineTime(t *testing.T) {
+	cn, items := longCreditNote(2, domain.CreditNoteIssued)
+	ctx := clock.WithSim(context.Background(), clock.Sim{At: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC), TestClockID: "hc_tclk_1"})
+	out, err := RenderPDF(ctx, cn, items, longOrig, BillToInfo{Name: "Acme Corp", Country: "US"}, CompanyInfo{Name: "Seller Ltd", Country: "US"})
+	if err != nil {
+		t.Fatalf("render: %v", err)
+	}
+	want := "Generated on " + time.Now().UTC().Format("Jan 2, 2006")
+	for _, p := range pdftest.Read(t, out) {
+		for _, r := range p.Runs {
+			if strings.HasPrefix(r.Text, "Generated on ") {
+				if !strings.HasPrefix(r.Text, want) {
+					t.Errorf("footer %q, want it to start %q", r.Text, want)
+				}
+				return
+			}
+		}
+	}
+	t.Error("Generated on line missing")
 }

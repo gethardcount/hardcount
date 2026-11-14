@@ -445,3 +445,72 @@ func TestWithEffectiveNow_ClearsStaleClock(t *testing.T) {
 		t.Errorf("EffectiveNow = %v, want %v", got, wall)
 	}
 }
+
+// A ctx records one of three answers about its time: nothing decided, real
+// time, or a test clock and its instant. Now reads machine time for the first
+// two; only Decision tells them apart.
+func TestDecision_RecordsOneOfThreeAnswers(t *testing.T) {
+	bare := context.Background()
+	if _, ok := Decision(bare); ok {
+		t.Error("a bare ctx reports a decision")
+	}
+
+	realTime := WithRealTime(bare)
+	if s, ok := Decision(realTime); !ok || s != (Sim{}) {
+		t.Errorf("WithRealTime: Decision = %+v, %v; want the zero Sim, true", s, ok)
+	}
+	if _, ok := SimOf(realTime); ok {
+		t.Error("WithRealTime: SimOf reports a clock")
+	}
+	before := time.Now().UTC()
+	if got := Now(realTime); got.Before(before) || got.After(time.Now().UTC()) {
+		t.Errorf("WithRealTime: Now = %v, want machine time", got)
+	}
+
+	frozen := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	onClock := WithSim(bare, Sim{At: frozen, TestClockID: "hc_tclk_1"})
+	if s, ok := Decision(onClock); !ok || s.TestClockID != "hc_tclk_1" || !s.At.Equal(frozen) {
+		t.Errorf("WithSim: Decision = %+v, %v", s, ok)
+	}
+}
+
+// Decide records the resolver's answer and returns its errors: a clock binds
+// the clock and its instant; an answer with no clock binds real time, not the
+// instant the resolver computed; a failed lookup, no resolver and an empty
+// pin are errors that leave ctx as it was. It replaces an earlier decision.
+func TestDecide(t *testing.T) {
+	frozen := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	pin := Pin{TenantID: "t1", CustomerID: "cus_1"}
+	resolver := func(s Sim, err error) *stubResolver {
+		return &stubResolver{custFunc: func() (Sim, error) { return s, err }}
+	}
+
+	got, err := Decide(context.Background(), resolver(Sim{At: frozen, TestClockID: "hc_tclk_1"}, nil), pin)
+	if s, ok := SimOf(got); err != nil || !ok || s.TestClockID != "hc_tclk_1" || !s.At.Equal(frozen) {
+		t.Errorf("a clock: SimOf = %+v, %v (err %v)", s, ok, err)
+	}
+
+	got, err = Decide(WithSim(context.Background(), Sim{At: frozen, TestClockID: "hc_tclk_old"}), resolver(Sim{At: frozen}, nil), pin)
+	if s, ok := Decision(got); err != nil || !ok || s != (Sim{}) {
+		t.Errorf("no clock: Decision = %+v, %v (err %v); want real time, replacing the earlier clock", s, ok, err)
+	}
+
+	lookup := errors.New("no such customer")
+	for name, c := range map[string]struct {
+		r Resolver
+		p Pin
+	}{
+		"a failed lookup": {resolver(Sim{}, lookup), pin},
+		"no resolver":     {nil, pin},
+		"an empty pin":    {resolver(Sim{}, nil), Pin{TenantID: "t1"}},
+	} {
+		ctx := context.Background()
+		got, err := Decide(ctx, c.r, c.p)
+		if err == nil || got != ctx {
+			t.Errorf("%s: err %v, ctx changed %v; want an error and ctx unchanged", name, err, got != ctx)
+		}
+	}
+	if _, err := Decide(context.Background(), resolver(Sim{}, lookup), pin); !errors.Is(err, lookup) {
+		t.Errorf("a failed lookup: err %v, want it to wrap the resolver's", err)
+	}
+}
