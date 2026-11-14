@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTenantTimezone } from '@/hooks/useTenantTimezone'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
@@ -8,8 +8,9 @@ import { z } from 'zod'
 import { toast } from 'sonner'
 import { api, formatDate, formatDateTime } from '@/lib/api'
 import type { APIKey } from '@/lib/gen/schemas/aPIKey'
-import { timeAgo, sinceMs, daysUntil, wallClockNow, type EffectiveNow } from '@/lib/effectiveNow'
-import { addDaysInTZ, civilDateFrom, endOfDayInTZ, formatExpiryHintInTZ } from '@/lib/dates'
+import { APIKeyStatus } from '@/lib/gen/schemas/aPIKeyStatus'
+import { timeAgo, sinceMs, wallClockNow, type EffectiveNow } from '@/lib/effectiveNow'
+import { addDaysInTZ, calendarDaysUntil, civilDateFrom, endOfDayInTZ, formatExpiryHintInTZ } from '@/lib/dates'
 import { applyApiError, showApiError } from '@/lib/formErrors'
 import { StatusBadge } from '@/components/StatusBadge'
 import { NoticeRow } from '@/components/NoticeRow'
@@ -68,7 +69,7 @@ const HEAD = 'h-9 text-xs font-medium text-muted-foreground'
 const ROW = 'h-11'
 
 const createApiKeySchema = z.object({
-  name: z.string().min(1, 'Name is required'),
+  name: z.string().trim().min(1, 'Name is required'),
 })
 
 type CreateApiKeyData = z.infer<typeof createApiKeySchema>
@@ -109,23 +110,54 @@ const KEY_TYPES: { value: KeyTypeChoice; label: string; hint: string; icon: type
   { value: 'ingest', label: 'Usage only', hint: 'Can only send usage events. Use it in LiteLLM or another gateway.', icon: Activity },
 ]
 
-// keyStatus is the status word a key shows. The server decides the status;
-// an active key in the last week before it expires gets a warning.
-function keyStatus(key: APIKey): StatusDisplay {
+// keyStatus is the status word a key shows. The server decides the status.
+// An active key whose expiry is less than a week away also says how many days
+// are left, in calendar days of the account's zone, so the count agrees with
+// the date in the Expires column. Once that expiry has passed the key says
+// only Active, until the list is fetched again and the server says Expired.
+function keyStatus(key: APIKey, timezone: string, now: EffectiveNow): StatusDisplay {
   if (key.status === 'revoked') return { label: 'Revoked', tone: 'neutral' }
   if (key.status === 'expired') return { label: 'Expired', tone: 'neutral' }
-  if (key.expires_at) {
-    const days = daysUntil(key.expires_at, wallClockNow())
+  if (key.expires_at && Date.parse(key.expires_at) > now) {
+    const days = calendarDaysUntil(key.expires_at, now, timezone)
     if (days <= 7) return { label: days === 0 ? 'Expires today' : `Expires in ${days} day${days === 1 ? '' : 's'}`, tone: 'warning' }
   }
   return { label: 'Active', tone: 'success' }
 }
 
+// inactiveLabel names the keys behind the toggle: "1 expired key",
+// "3 revoked keys", or "2 inactive keys (1 expired, 1 revoked)".
 function inactiveLabel(expired: number, revoked: number): string {
-  const parts: string[] = []
-  if (expired > 0) parts.push(`${expired} expired`)
-  if (revoked > 0) parts.push(`${revoked} revoked`)
-  return `${parts.join(' and ')} key${expired + revoked === 1 ? '' : 's'}`
+  const total = expired + revoked
+  const keys = `key${total === 1 ? '' : 's'}`
+  if (revoked === 0) return `${expired} expired ${keys}`
+  if (expired === 0) return `${revoked} revoked ${keys}`
+  return `${total} inactive ${keys} (${expired} expired, ${revoked} revoked)`
+}
+
+const KNOWN_STATUSES: readonly string[] = Object.values(APIKeyStatus)
+
+// listKeys refuses an answer with a status the page does not know: such a key
+// would fit none of the page's lists and vanish from it.
+async function listKeys() {
+  const res = await api.listApiKeys()
+  if (res.data.some(k => !KNOWN_STATUSES.includes(k.status))) {
+    throw new Error("The server's answer could not be read: a key has a status this page does not know.")
+  }
+  return res
+}
+
+// oldKeySentence says what a rotation did to the old key, from the server's
+// answer: revoked now, or working until its expiry. Anything else, nothing.
+function oldKeySentence(old: APIKey, timezone: string): string {
+  if (old.status === 'revoked') return 'The old key has stopped working.'
+  if (old.status === 'active' && old.expires_at) return `The old key stops working at ${formatDateTime(old.expires_at, timezone)}.`
+  return ''
+}
+
+// revokeSentence is what revoking a key does, the same in both dialogs.
+function revokeSentence(key: APIKey): string {
+  return `"${key.name}" (${key.key_prefix}…) stops working at once: every request made with it is refused. This can't be undone.`
 }
 
 export default function ApiKeysPage() {
@@ -143,10 +175,28 @@ export default function ApiKeysPage() {
 
   const { data: keysData, isLoading: loading, error: loadError, refetch } = useQuery({
     queryKey: ['api-keys'],
-    queryFn: () => api.listApiKeys(),
+    queryFn: listKeys,
   })
 
   const keys = keysData?.data ?? []
+
+  // When an active key's expiry passes, fetch the list once so the server's
+  // Expired replaces it: at that moment if it is within a day, or now for a
+  // key already past it.
+  const refetchedFor = useRef(new Set<string>())
+  useEffect(() => {
+    const due = (keysData?.data ?? []).filter(k => k.status === 'active' && k.expires_at && !refetchedFor.current.has(k.id))
+    if (due.length === 0) return
+    const soonest = Math.min(...due.map(k => Date.parse(k.expires_at!)))
+    const wait = soonest - wallClockNow()
+    if (wait > 86_400_000) return
+    const timer = setTimeout(() => {
+      const now = wallClockNow()
+      due.filter(k => Date.parse(k.expires_at!) <= now).forEach(k => refetchedFor.current.add(k.id))
+      void refetch()
+    }, Math.max(0, wait) + 1000)
+    return () => clearTimeout(timer)
+  }, [keysData, refetch])
 
   const handleRevoke = async () => {
     if (!revokeTarget || revoking) return
@@ -166,6 +216,47 @@ export default function ApiKeysPage() {
   const activeKeys = keys.filter(k => k.status === 'active')
   const expiredKeys = keys.filter(k => k.status === 'expired')
   const revokedKeys = keys.filter(k => k.status === 'revoked')
+  const now = wallClockNow()
+
+  const keyRow = (k: APIKey) => {
+    const active = k.status === 'active'
+    return (
+      <TableRow key={k.id} className={cn(ROW, !active && 'text-muted-foreground')}>
+        <TableCell className={cn('whitespace-normal text-sm font-medium [overflow-wrap:anywhere]', active ? 'text-foreground' : 'text-muted-foreground')}>
+          {k.name}
+        </TableCell>
+        <TableCell className="hidden md:table-cell text-sm text-muted-foreground">{keyTypeLabel(k.key_type)}</TableCell>
+        <TableCell className="hidden md:table-cell">
+          <code className="text-xs font-mono text-muted-foreground">{k.key_prefix}…</code>
+        </TableCell>
+        <TableCell><StatusBadge status={keyStatus(k, tenantTZ, now)} /></TableCell>
+        <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
+          {k.expires_at ? formatDate(k.expires_at, tenantTZ) : 'Never'}
+        </TableCell>
+        <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
+          {k.last_used_at ? relativeTime(k.last_used_at, now) : 'Never'}
+        </TableCell>
+        <TableCell className="text-right">
+          {active && (
+            <DropdownMenu>
+              <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="size-10 md:size-8" aria-label={`Actions for ${k.name}`} />}>
+                <MoreHorizontal size={16} />
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-40">
+                <DropdownMenuItem onClick={() => setRotateTarget(k)}>
+                  <RotateCw size={14} className="mr-2" />
+                  Rotate
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => setRevokeTarget(k)} className="text-destructive focus:text-destructive">
+                  Revoke
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          )}
+        </TableCell>
+      </TableRow>
+    )
+  }
 
   return (
     <>
@@ -237,54 +328,28 @@ export default function ApiKeysPage() {
                     <TableHead className={cn(HEAD, "w-12")}><span className="sr-only">Actions</span></TableHead>
                   </TableRow>
                 </TableHeader>
-                <TableBody id="api-key-rows">
-                  {[...activeKeys, ...(showInactive ? [...expiredKeys, ...revokedKeys] : [])].map(k => {
-                    const active = k.status === 'active'
-                    return (
-                      <TableRow key={k.id} className={cn(ROW, !active && 'text-muted-foreground')}>
-                        <TableCell className={cn('text-sm font-medium', active ? 'text-foreground' : 'text-muted-foreground')}>
-                          {k.name}
-                        </TableCell>
-                        <TableCell className="hidden md:table-cell text-sm text-muted-foreground">{keyTypeLabel(k.key_type)}</TableCell>
-                        <TableCell className="hidden md:table-cell">
-                          <code className="text-xs font-mono text-muted-foreground">{k.key_prefix}…</code>
-                        </TableCell>
-                        <TableCell><StatusBadge status={keyStatus(k)} /></TableCell>
-                        <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
-                          {k.expires_at ? formatDate(k.expires_at, tenantTZ) : 'Never'}
-                        </TableCell>
-                        <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
-                          {k.last_used_at ? relativeTime(k.last_used_at, wallClockNow()) : 'Never'}
-                        </TableCell>
-                        <TableCell className="text-right">
-                          {active && (
-                            <DropdownMenu>
-                              <DropdownMenuTrigger render={<Button variant="ghost" size="icon" className="size-10 md:size-8" aria-label={`Actions for ${k.name}`} />}>
-                                <MoreHorizontal size={16} />
-                              </DropdownMenuTrigger>
-                              <DropdownMenuContent align="end" className="w-40">
-                                <DropdownMenuItem onClick={() => setRotateTarget(k)}>
-                                  <RotateCw size={14} className="mr-2" />
-                                  Rotate
-                                </DropdownMenuItem>
-                                <DropdownMenuItem onClick={() => setRevokeTarget(k)} className="text-destructive focus:text-destructive">
-                                  Revoke
-                                </DropdownMenuItem>
-                              </DropdownMenuContent>
-                            </DropdownMenu>
-                          )}
-                        </TableCell>
-                      </TableRow>
-                    )
-                  })}
+                <TableBody>
+                  {activeKeys.length > 0 ? activeKeys.map(keyRow) : (
+                    <TableRow className={ROW}>
+                      <TableCell colSpan={7} className="whitespace-normal text-sm text-muted-foreground">
+                        No active keys.{' '}
+                        <Button variant="link" size="sm" className="h-auto p-0" onClick={() => setShowCreate(true)}>Create a key</Button>
+                      </TableCell>
+                    </TableRow>
+                  )}
                 </TableBody>
+                {expiredKeys.length + revokedKeys.length > 0 && (
+                  <TableBody id="api-key-inactive-rows" hidden={!showInactive}>
+                    {[...expiredKeys, ...revokedKeys].map(keyRow)}
+                  </TableBody>
+                )}
               </Table>
             </CardContent>
           </Card>
 
           {expiredKeys.length + revokedKeys.length > 0 && (
             <button onClick={() => setShowInactive(!showInactive)}
-              aria-expanded={showInactive} aria-controls="api-key-rows"
+              aria-expanded={showInactive} aria-controls="api-key-inactive-rows"
               className="mt-3 flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors">
               <ChevronDown size={14} className={cn('transition-transform', showInactive && 'rotate-180')} />
               {showInactive ? 'Hide' : 'Show'} {inactiveLabel(expiredKeys.length, revokedKeys.length)}
@@ -323,23 +388,19 @@ export default function ApiKeysPage() {
       {/* The new key, shown once. */}
       {createdKey && (
         <ShowOnceSecretDialog
-          title={createdKey.oldKey ? 'Key rotated' : 'API key created'}
-          label={createdKey.oldKey ? 'New key' : 'Key'}
+          title={createdKey.oldKey ? 'API key rotated' : 'API key created'}
+          label="New key"
           secret={createdKey.key}
           onDone={() => setCreatedKey(null)}
         >
-          {createdKey.oldKey && (
-            <p className="text-sm text-muted-foreground">
-              {createdKey.oldKey.status !== 'active' || !createdKey.oldKey.expires_at
-                ? 'The old key has stopped working.'
-                : `The old key keeps working until ${formatDateTime(createdKey.oldKey.expires_at, tenantTZ)}.`}
-            </p>
+          {createdKey.oldKey && oldKeySentence(createdKey.oldKey, tenantTZ) && (
+            <p className="text-sm text-muted-foreground">{oldKeySentence(createdKey.oldKey, tenantTZ)}</p>
           )}
           <div>
             <p className="text-xs font-medium text-muted-foreground">Try it</p>
             <div className="mt-1.5 flex items-start gap-2">
               <code className="flex-1 break-all rounded bg-muted px-2 py-1 font-mono text-xs text-foreground">{tryItCurl(createdKey.key)}</code>
-              <CopyButton text={tryItCurl(createdKey.key)} />
+              <CopyButton text={tryItCurl(createdKey.key)} name="Copy the try-it command" />
             </div>
             <p className="mt-1.5 text-xs text-muted-foreground">It answers with the account and mode the key belongs to.</p>
           </div>
@@ -352,7 +413,7 @@ export default function ApiKeysPage() {
           open
           onOpenChange={(open) => { if (!open) setRevokeTarget(null) }}
           title="Revoke live API key"
-          description={`Requests using "${revokeTarget.name}" (${revokeTarget.key_prefix}…) will fail from now on, in production. This can't be undone.`}
+          description={revokeSentence(revokeTarget)}
           confirmWord="REVOKE"
           confirmLabel="Revoke key"
           onConfirm={handleRevoke}
@@ -362,13 +423,8 @@ export default function ApiKeysPage() {
       <AlertDialog open={!!revokeTarget && !revokeNeedsTypedWord(revokeTarget)} onOpenChange={(open) => { if (!open) setRevokeTarget(null) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Revoke API key?</AlertDialogTitle>
-            {/* The server refuses the next request made with this key. */}
-            <AlertDialogDescription>
-              {revokeTarget
-                ? `Anything using "${revokeTarget.name}" (${revokeTarget.key_prefix}…) is refused from its next request. This can't be undone.`
-                : ''}
-            </AlertDialogDescription>
+            <AlertDialogTitle>Revoke test API key</AlertDialogTitle>
+            <AlertDialogDescription>{revokeTarget ? revokeSentence(revokeTarget) : ''}</AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel onClick={() => setRevokeTarget(null)}>Cancel</AlertDialogCancel>
@@ -385,9 +441,6 @@ export default function ApiKeysPage() {
 /* --- Create key Dialog --- */
 
 type ExpiryPreset = 'never' | '30d' | '90d' | '1y' | 'custom'
-
-// The date helpers (endOfDayInTZ, addDaysInTZ, formatExpiryHintInTZ) are in
-// @/lib/dates (ADR-010).
 
 // The first call to make with a key: whoami names its account and mode.
 function tryItCurl(key: string): string {
@@ -479,7 +532,6 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
 
   // The custom picker starts tomorrow in the account's zone: a key that
   // expires later today would stop its integrations before anyone notices.
-  // A key is never on a test clock, so now is the wall clock.
   const now = wallClockNow()
   const tomorrow = civilDateFrom(now, 1, tenantTZ)
 
@@ -640,14 +692,14 @@ function RotateKeyDialog({
         <DialogHeader>
           <DialogTitle>Rotate API key</DialogTitle>
           <DialogDescription>
-            A new {keyTypeNoun(target.key_type)} will be issued for "{target.name}". The current key
-            stops working when the grace period ends — immediately if you pick "Now" — so anything
-            still using it must switch to the new key within that window.
+            A new {keyTypeNoun(target.key_type)} will be issued for "{target.name}". The old key
+            stops working at the time you pick, so anything still using it must switch to the new
+            key by then.
           </DialogDescription>
         </DialogHeader>
 
         <div>
-          <Label className="mb-2 block">Expire current key</Label>
+          <Label className="mb-2 block">Old key stops working</Label>
           <div className="flex flex-wrap gap-2">
             {ROTATE_GRACE_PRESETS.map(p => (
               <button

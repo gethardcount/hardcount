@@ -35,7 +35,7 @@ export function ShowOnceSecretDialog({ title, label, secret, children, onDone }:
             <p className="text-xs font-medium text-muted-foreground">{label}</p>
             <div className="mt-1.5 flex items-start gap-2">
               <code className="flex-1 break-all select-all rounded bg-background px-2 py-1 font-mono text-sm text-foreground">{secret}</code>
-              <CopyButton text={secret} />
+              <CopyButton text={secret} name={`Copy ${label.toLowerCase()}`} />
             </div>
           </div>
           {children}
@@ -48,11 +48,14 @@ export function ShowOnceSecretDialog({ title, label, secret, children, onDone }:
   )
 }
 
-export function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
+// CopyButton copies text and says whether it worked. name is its accessible
+// name where a dialog has more than one; it starts with the visible "Copy".
+export function CopyButton({ text, label = 'Copy', name }: { text: string; label?: string; name?: string }) {
   return (
     <Button
       variant="outline"
       size="sm"
+      aria-label={name}
       className="shrink-0"
       onClick={async () => {
         try {
