@@ -137,12 +137,20 @@ function inactiveLabel(expired: number, revoked: number): string {
 
 const KNOWN_STATUSES: readonly string[] = Object.values(APIKeyStatus)
 
+// OutOfDateError is a list the page cannot show because the page and the
+// server are on different versions: a tab left open across an upgrade, or a
+// replica not yet upgraded. Loading the page again is what fixes it.
+class OutOfDateError extends Error {}
+
 // listKeys refuses an answer with a status the page does not know: such a key
-// would fit none of the page's lists and vanish from it.
+// would fit none of the page's lists and vanish from it. The operator is told
+// to reload; the statuses go to the console.
 async function listKeys() {
   const res = await api.listApiKeys()
-  if (res.data.some(k => !KNOWN_STATUSES.includes(k.status))) {
-    throw new Error("The server's answer could not be read: a key has a status this page does not know.")
+  const unknown = [...new Set(res.data.map(k => k.status).filter(s => !KNOWN_STATUSES.includes(s)))]
+  if (unknown.length > 0) {
+    console.error(`API keys: the server sent status ${unknown.join(', ')}; this page knows ${KNOWN_STATUSES.join(', ')}`)
+    throw new OutOfDateError('This page is out of date with the server. Reload it.')
   }
   return res
 }
@@ -287,7 +295,9 @@ export default function ApiKeysPage() {
       {loadError ? (
         <Card className="mt-6">
           <CardContent className="p-0">
-            <LoadError what="API keys" error={loadError} onRetry={() => refetch()} />
+            {loadError instanceof OutOfDateError
+              ? <LoadError what="API keys" error={loadError} onRetry={() => window.location.reload()} retryLabel="Reload" />
+              : <LoadError what="API keys" error={loadError} onRetry={() => refetch()} />}
           </CardContent>
         </Card>
       ) : loading ? (

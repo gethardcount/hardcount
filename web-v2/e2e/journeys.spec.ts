@@ -1327,9 +1327,12 @@ test('a key status the page does not know shows an error, not an empty list', as
   const main = page.getByRole('main')
   const alert = main.getByRole('alert')
   await expect(alert).toContainText("Couldn't load API keys")
-  await expect(alert).toContainText("The server's answer could not be read")
+  await expect(alert).toContainText('This page is out of date with the server. Reload it.')
+  await expect(alert).not.toContainText('status')
   await expect(main.getByRole('row')).toHaveCount(0)
   await shootKeys(page, 'unknown-status')
+  // Its button loads the page again, which a refetch with the same code could not fix.
+  await Promise.all([page.waitForEvent('load'), alert.getByRole('button', { name: 'Reload' }).click()])
 })
 
 test('an expiring key counts the days to the date it shows, and a long name fits a phone', async ({ page }) => {
