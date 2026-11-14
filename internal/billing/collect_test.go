@@ -419,8 +419,8 @@ func TestCycleClose_CollectsAtThePeriodBoundary(t *testing.T) {
 	}
 }
 
-// refusingCharger fails definitely with no decline code (a Stripe
-// invalid_request, or a card_error that carries only a code).
+// refusingCharger fails definitely with no decline code and no card error:
+// a Stripe invalid_request ("No such PaymentMethod").
 // Records payment_status='failed' on store first, as the real charger does.
 type refusingCharger struct{ store *mockInvoices }
 
@@ -429,16 +429,17 @@ func (c refusingCharger) ChargeInvoice(_ context.Context, _ string, inv domain.I
 	return inv, &payment.PaymentError{Message: "No such PaymentMethod"}
 }
 
-// A refusal with no decline code is a decline: the charger has already marked
-// the invoice failed and started dunning, so collection returns no error (a
-// clock's advance goes on) and the queue flag does not stay set beside it.
-func TestCollect_RefusalWithoutDeclineCodeIsADecline(t *testing.T) {
+// Any DEFINITE failure hands the invoice to dunning, not only a decline with a
+// decline_code: the charger has already marked it failed and started dunning,
+// so the queue flag must not stay set beside it.
+func TestCollect_DefiniteFailureWithoutDeclineCode_ClearsFlag(t *testing.T) {
 	e, invoices, _, inv := collectFixture()
 	e.paymentSetups = &fakePaymentSetups{ready: true, stripeCustomerID: "cus_stripe"}
 	e.charger = refusingCharger{store: invoices}
 
-	if _, errs := e.processAutoCharge(postgres.WithLivemode(context.Background(), false), inv, nil, noPMTriggerSweep); len(errs) != 0 {
-		t.Errorf("errors = %v, want none: a refusal is dunning's, not an error", errs)
+	_, errs := e.processAutoCharge(postgres.WithLivemode(context.Background(), false), inv, nil, noPMTriggerSweep)
+	if len(errs) != 1 {
+		t.Errorf("an unusual refusal is surfaced to the caller, got errs=%v", errs)
 	}
 	if autoChargePending(t, invoices, inv.ID) {
 		t.Error("a definite failure must clear the queue flag: dunning owns the retries")
@@ -456,6 +457,7 @@ func TestCollectFailureNext(t *testing.T) {
 		err  error
 		want string
 	}{
+		{"definite refusal", fmt.Errorf("charge invoice inv_1 refused: %w", &payment.PaymentError{Message: "Invalid integer"}), "out of the auto-charge queue"},
 		{"unclear answer", fmt.Errorf("charge invoice inv_1: %w", &payment.PaymentError{Message: "An unknown error occurred", Unknown: true}), "asks Stripe what happened"},
 		{"database error before the charge", fmt.Errorf("reload invoice inv_1 after claim: %w", errors.New("conn reset")), "auto-charge sweep will retry"},
 	} {
@@ -509,21 +511,58 @@ func collectEach(e *Engine, ctx context.Context, invs []domain.Invoice, at *time
 	return charged, errs
 }
 
-// Neither collection job fails on a refusal with no decline code: on a clock
-// the advance goes on, and in real time the sweep counts no error.
-func TestCollect_RefusalWithoutDeclineCode_NeitherJobFails(t *testing.T) {
-	t.Run("on a clock", func(t *testing.T) {
-		inv, _, _, engine := leftHarness(t)
-		engine.charger = refusingCharger{store: inv}
-		if _, errs := engine.RetryPendingChargesForClock(postgres.WithLivemode(context.Background(), false), "t1", "tc_1", 50); len(errs) != 0 {
-			t.Errorf("errors = %v, want none", errs)
-		}
-	})
-	t.Run("in real time", func(t *testing.T) {
-		inv, _, _, engine := leftHarness(t)
-		engine.charger = refusingCharger{store: inv}
-		if _, errs := engine.RetryPendingCharges(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) != 0 {
-			t.Errorf("errors = %v, want none", errs)
-		}
-	})
+// cardRefusingCharger is refused by the card with no decline code (a
+// card_error that carries only a code, such as processing_error). Records
+// payment_status='failed' on store first, as the real charger does.
+type cardRefusingCharger struct{ store *mockInvoices }
+
+func (c cardRefusingCharger) ChargeInvoice(_ context.Context, _ string, inv domain.Invoice, _ domain.ChargeHold, _, _ string) (domain.Invoice, error) {
+	c.store.stampPaymentStatus(inv.ID, domain.PaymentFailed)
+	return inv, &payment.PaymentError{Message: "An error occurred while processing your card.", Card: true}
+}
+
+// A card refusal with no decline code is a decline: the charger has already
+// marked the invoice failed and started dunning, so collection returns no
+// error and the queue flag does not stay set beside it.
+func TestCollect_CardRefusalWithoutDeclineCodeIsADecline(t *testing.T) {
+	e, invoices, _, inv := collectFixture()
+	e.paymentSetups = &fakePaymentSetups{ready: true, stripeCustomerID: "cus_stripe"}
+	e.charger = cardRefusingCharger{store: invoices}
+
+	if _, errs := e.processAutoCharge(postgres.WithLivemode(context.Background(), false), inv, nil, noPMTriggerSweep); len(errs) != 0 {
+		t.Errorf("errors = %v, want none: a card refusal is dunning's, not an error", errs)
+	}
+	if autoChargePending(t, invoices, inv.ID) {
+		t.Error("a definite failure must clear the queue flag: dunning owns the retries")
+	}
+}
+
+// Which collection job fails on a definite refusal with no decline code: a
+// card refusal fails neither (on a clock the advance goes on; in real time
+// the sweep counts no error); an invalid request fails both, as a fault of
+// the request, so the sweep's failed count and a clock's advance show it.
+func TestCollect_RefusalWithoutDeclineCode_WhichJobsFail(t *testing.T) {
+	for _, c := range []struct {
+		name    string
+		charger func(*mockInvoices) InvoiceCharger
+		errs    int
+	}{
+		{"a card refusal", func(m *mockInvoices) InvoiceCharger { return cardRefusingCharger{store: m} }, 0},
+		{"an invalid request", func(m *mockInvoices) InvoiceCharger { return refusingCharger{store: m} }, 1},
+	} {
+		t.Run(c.name+", on a clock", func(t *testing.T) {
+			inv, _, _, engine := leftHarness(t)
+			engine.charger = c.charger(inv)
+			if _, errs := engine.RetryPendingChargesForClock(postgres.WithLivemode(context.Background(), false), "t1", "tc_1", 50); len(errs) != c.errs {
+				t.Errorf("errors = %v, want %d", errs, c.errs)
+			}
+		})
+		t.Run(c.name+", in real time", func(t *testing.T) {
+			inv, _, _, engine := leftHarness(t)
+			engine.charger = c.charger(inv)
+			if _, errs := engine.RetryPendingCharges(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) != c.errs {
+				t.Errorf("errors = %v, want %d", errs, c.errs)
+			}
+		})
+	}
 }

@@ -4890,9 +4890,9 @@ func (e *Engine) emailInvoiceOnce(ctx context.Context, inv domain.Invoice) {
 // trigger labels the no-payment-method email (finalize_no_pm when a finalize
 // site nudges, auto_charge_retry_no_pm from the sweeps).
 //
-// Error classification: a definite refusal (a card decline with a typed
-// decline_code, or a refusal with none) is an EXPECTED business outcome,
-// not a catchup failure. ChargeInvoice already inline-fires StartDunning for the
+// Error classification: a card refusal (a card error, with a typed
+// decline_code or without) is an EXPECTED business outcome, not a catchup
+// failure. ChargeInvoice already inline-fires StartDunning for the
 // declined invoice and stamps invoice.payment_status='failed' →
 // dunning takes over from there. Returning the decline as an error
 // would push the test-clock catchup into 'internal_failure' for what
@@ -5141,17 +5141,21 @@ func (e *Engine) processAutoCharge(ctx context.Context, inv domain.Invoice, at *
 				// and its predicate re-check skips ineligible invoices.
 				slog.Warn("failed to clear auto_charge_pending", "invoice_id", inv.ID, "error", err)
 			}
-			// A refusal is dunning's, with or without a decline code: it is
-			// a normal outcome of collection, not an error, so a clock's
-			// advance goes on. One with no decline code (an invalid_request,
-			// a card error that carries only a code) is logged at Warn, so
-			// the operator sees an unusual refusal.
-			if pe.DeclineCode != "" {
+			// A card refusal is a card error from Stripe, with a decline
+			// code or without: dunning's, a normal outcome of collection, so
+			// it is not an error and a clock's advance goes on. Any other
+			// definite refusal (an invalid request: a wrong parameter, a
+			// customer or payment method Stripe does not know) is a fault,
+			// returned so the sweep counts it and a clock's advance fails.
+			switch {
+			case pe.DeclineCode != "":
 				slog.Info("auto-charge declined; dunning will retry on schedule",
 					"invoice_id", inv.ID, "decline_code", pe.DeclineCode)
-			} else {
-				slog.Warn("auto-charge refused with no decline code; dunning will retry on schedule",
+			case pe.Card:
+				slog.Warn("auto-charge refused by the card with no decline code; dunning will retry on schedule",
 					"invoice_id", inv.ID, "error", err)
+			default:
+				errs = append(errs, fmt.Errorf("charge invoice %s refused: %w", inv.ID, err))
 			}
 			return charged, errs
 		}

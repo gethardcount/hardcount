@@ -46,15 +46,19 @@ func TestClassifyStripeError_RealRejectionsStayDefinite(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		typ  stripe.ErrorType
+		card bool // a card refusal, not a fault of the request
 	}{
-		{"card decline", stripe.ErrorTypeCard},
-		{"invalid request", stripe.ErrorTypeInvalidRequest},
+		{"card decline", stripe.ErrorTypeCard, true},
+		{"invalid request", stripe.ErrorTypeInvalidRequest, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			pe := classifyStripeError(&stripe.Error{Type: tc.typ, Msg: "rejected"})
 			if pe.Unknown {
 				t.Errorf("%s classified as ambiguous — Stripe rejected the request outright, "+
 					"no charge occurred, and dunning should start inline", tc.name)
+			}
+			if pe.Card != tc.card {
+				t.Errorf("%s: Card = %v, want %v", tc.name, pe.Card, tc.card)
 			}
 		})
 	}
