@@ -3274,12 +3274,16 @@ func (s *Service) ProcessExpiredTrialsForClock(ctx context.Context, tenantID, cl
 				// A cancel schedule committed between the snapshot and the
 				// flip — the SQL guard blocked the activation. Route it.
 				fresh, gErr := s.store.Get(bound, tenantID, sub.ID)
-				if gErr == nil {
-					if handled, cErr := s.cancelTrialAtEnd(bound, tenantID, fresh); cErr != nil {
-						batchErrs = append(batchErrs, fmt.Errorf("trial-end cancel sub %s: %w", sub.ID, cErr))
-					} else if handled {
-						processed++
-					}
+				if gErr != nil {
+					// Not domain.ErrLeftForNextRun: nothing was deferred on
+					// purpose, and what is true of the subscription is not known.
+					batchErrs = append(batchErrs, fmt.Errorf("re-read sub %s after its trial-end cancel came due: %w", sub.ID, gErr))
+					continue
+				}
+				if handled, cErr := s.cancelTrialAtEnd(bound, tenantID, fresh); cErr != nil {
+					batchErrs = append(batchErrs, fmt.Errorf("trial-end cancel sub %s: %w", sub.ID, cErr))
+				} else if handled {
+					processed++
 				}
 				continue
 			}
@@ -3393,12 +3397,16 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 				// Schedule committed after the snapshot — the SQL guard
 				// blocked the activation. Route to the free cancel.
 				fresh, gErr := s.store.Get(ctx, sub.TenantID, sub.ID)
-				if gErr == nil {
-					if handled, cErr := s.cancelTrialAtEnd(ctx, sub.TenantID, fresh); cErr != nil {
-						batchErrs = append(batchErrs, fmt.Errorf("trial-end cancel sub %s: %w", sub.ID, cErr))
-					} else if handled {
-						processed++
-					}
+				if gErr != nil {
+					// Not domain.ErrLeftForNextRun: nothing was deferred on
+					// purpose, and what is true of the subscription is not known.
+					batchErrs = append(batchErrs, fmt.Errorf("re-read sub %s after its trial-end cancel came due: %w", sub.ID, gErr))
+					continue
+				}
+				if handled, cErr := s.cancelTrialAtEnd(ctx, sub.TenantID, fresh); cErr != nil {
+					batchErrs = append(batchErrs, fmt.Errorf("trial-end cancel sub %s: %w", sub.ID, cErr))
+				} else if handled {
+					processed++
 				}
 				continue
 			}
