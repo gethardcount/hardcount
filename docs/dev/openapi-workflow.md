@@ -96,8 +96,14 @@ instead, with the reason. Today that is only the methods other than `GET` on
 - a `POST`, `PUT` or `PATCH` route behind the idempotency middleware does
   not list the `IdempotencyKey` parameter in the spec;
 - an operation lists it but the middleware does not run on that route, or
-  skips it (the usage routes, `isIngestPath`), so the server would ignore
-  the header.
+  skips it (the usage routes and `showOnceSecretRoutes`,
+  `skipsIdempotency`), so the server would ignore the header.
+
+A response field that carries a secret shown only in that answer is marked
+`x-show-once: true`. `TestOpenAPISpec_ShowOnceSecretsAreNeverKept` in
+`openapi_show_once_test.go` fails until every operation that answers with
+such a field is kept out of the idempotency layer (`showOnceSecretRoutes` in
+`router.go`), and every route on that list has such a field.
 
 `TestOpenAPISpec_RequestBodies` in `openapi_bodies_test.go` checks request
 bodies. `requestBodies` maps each operation that has a JSON body to the Go
