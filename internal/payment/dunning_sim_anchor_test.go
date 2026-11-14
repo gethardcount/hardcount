@@ -104,10 +104,27 @@ func TestDecline_Webhook_StartsDunningFromThePIAnchor(t *testing.T) {
 	}
 }
 
-// A decline with no anchor (a wall-clock charge, or a PI from before the
-// anchor existed) falls back to the issue instant; StartDunning ignores it
-// for a wall-clock invoice.
-func TestDecline_Webhook_NoAnchorFallsBackToIssue(t *testing.T) {
+// clockAt puts every record on clock clk_1 at the given instant.
+type clockAt time.Time
+
+func (c clockAt) sim() (clock.Sim, error) {
+	return clock.Sim{At: time.Time(c), TestClockID: "clk_1"}, nil
+}
+func (c clockAt) SimForCustomer(context.Context, string, string) (clock.Sim, error) {
+	return c.sim()
+}
+func (c clockAt) SimForSubscription(context.Context, string, string) (clock.Sim, error) {
+	return c.sim()
+}
+func (c clockAt) SimForInvoice(context.Context, string, string) (clock.Sim, error) {
+	return c.sim()
+}
+
+// A decline with no anchor (a PI from before the anchor existed) starts
+// dunning at the time the failure is recorded, as decided for the invoice:
+// the clock's time, not the issue instant, which would put the first retry
+// in the past and run it at once.
+func TestDecline_Webhook_NoAnchorStartsAtTheDecidedTime(t *testing.T) {
 	invoices := newMockInvoiceUpdater()
 	inv := simDraftFinalizedLater()
 	inv.PaymentStatus = domain.PaymentProcessing
@@ -116,15 +133,16 @@ func TestDecline_Webhook_NoAnchorFallsBackToIssue(t *testing.T) {
 	invoices.byPI["pi_old"] = "inv_1"
 	dunning := &recordingDunningStarter{}
 	s := NewStripe(&mockStripeClient{}, invoices, newMockWebhookStore(), nil, dunning)
+	s.SetResolver(clockAt(simCharged))
 
-	if err := s.HandleWebhook(context.Background(), "t1", domain.StripeWebhookEvent{
+	if err := s.HandleWebhook(postgres.WithLivemode(context.Background(), false), "t1", domain.StripeWebhookEvent{
 		StripeEventID: "evt_old", EventType: "payment_intent.payment_failed",
 		PaymentIntentID: "pi_old", FailureMessage: "Your card was declined.",
 	}); err != nil {
 		t.Fatalf("HandleWebhook: %v", err)
 	}
-	if len(dunning.calls) != 1 || !dunning.calls[0].failureAt.Equal(simIssued) {
-		t.Fatalf("StartDunning calls = %+v, want one at the issue instant %v", dunning.calls, simIssued)
+	if len(dunning.calls) != 1 || !dunning.calls[0].failureAt.Equal(simCharged) {
+		t.Fatalf("StartDunning calls = %+v, want one at the clock's time %v (not the issue instant %v)", dunning.calls, simCharged, simIssued)
 	}
 }
 

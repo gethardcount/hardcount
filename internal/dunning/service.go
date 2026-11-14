@@ -372,10 +372,11 @@ func (s *Service) SetCustomerEmailFetcher(fetcher CustomerEmailFetcher) {
 //     inside the window the operator advanced through, as Stripe test clocks
 //     do.
 //
-// simFailedAt is that simulated instant, chosen by the caller: the failed
-// charge's contracted anchor (payment.dunningSimFailedAt), or the issue
-// instant when no charge carried one (the card-less path). Zero when unknown;
-// read only for a clock-pinned invoice.
+// simFailedAt is that simulated instant, chosen by the caller: for a failed
+// charge, the charge's anchor, else the time the failure is recorded
+// (payment.dunningSimFailedAt); for an invoice with no card to charge (the
+// card-less path), its issue instant. Zero when unknown; read only for a
+// clock-pinned invoice.
 //
 // cause is WHY collection needs a run — declared by the caller at write
 // time (decline paths pass payment_failed; the card-less enrollment
