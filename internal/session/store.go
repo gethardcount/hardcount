@@ -9,12 +9,8 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// Store is the persistence interface for dashboard_sessions rows. It is
-// narrow on purpose: the dashboard auth flow needs only Insert, GetByIDHash
-// and Revoke. Any further surface (pruning expired rows, listing for an ops
-// UI) belongs on a sibling type when it ships, not here. Sessions are bound
-// to a user and are independent of the API key lifecycle (ADR-011), so the
-// Store has no method that revokes sessions by key.
+// Store reads and writes dashboard_sessions rows. A session is bound to a
+// user, not to a key (ADR-011), so nothing here revokes sessions by key.
 type Store interface {
 	Insert(ctx context.Context, s Session) error
 	GetByIDHash(ctx context.Context, idHash string) (Session, error)

@@ -17,8 +17,8 @@ const (
 	customerActorKey contextKey = "customer_actor_id"
 )
 
-// Require returns middleware that checks that the authenticated key has a
-// specific permission. Use it to protect individual route groups.
+// Require returns middleware that answers 403 unless the caller's kind of
+// credential holds perm.
 func Require(perm Permission) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -29,8 +29,8 @@ func Require(perm Permission) func(http.Handler) http.Handler {
 	}
 }
 
-// permitted reports whether the request's principal holds perm, and answers
-// 403 when it does not.
+// permitted reports whether the caller's kind of credential holds perm, and
+// answers 403 when it does not.
 func permitted(w http.ResponseWriter, r *http.Request, perm Permission) bool {
 	if HasPermission(GetKeyType(r.Context()), perm) {
 		return true
@@ -39,11 +39,11 @@ func permitted(w http.ResponseWriter, r *http.Request, perm Permission) bool {
 	return false
 }
 
-// RequireSession gates a route or subtree to dashboard-session principals
-// only. Use it for a human act (team membership), where an API key has no
-// user to attribute the action to, and for settings both modes share, which
-// a key, made in one mode, must not change. Any other principal gets a 403
-// that ends "sign in to the dashboard to <task>".
+// RequireSession lets only dashboard sessions through. Use it for a human act
+// (team membership), where an API key has no user to attribute the action
+// to, and for settings both modes share, which a key, made in one mode, must
+// not change. Any other caller gets a 403 that ends "sign in to the dashboard
+// to <task>".
 func RequireSession(task string) func(http.Handler) http.Handler {
 	msg := "this endpoint requires a dashboard session — sign in to the dashboard to " + task
 	return func(next http.Handler) http.Handler {
@@ -92,11 +92,8 @@ func TenantID(ctx context.Context) string {
 	return v
 }
 
-// WithTenantID returns a derived context carrying tenantID. Middleware sets
-// the same key with its own WithValue call. Background workers (the
-// reconciler, the billing engine's charge loop) call WithTenantID to set the
-// tenant before they call clients backed by the Stripe resolver, so the
-// tenant's own credentials can be looked up.
+// WithTenantID returns ctx carrying tenantID. A background job sets it before
+// calling code that needs the tenant, such as the per-tenant Stripe client.
 func WithTenantID(ctx context.Context, tenantID string) context.Context {
 	return context.WithValue(ctx, tenantIDKey, tenantID)
 }
@@ -108,9 +105,8 @@ func KeyID(ctx context.Context) string {
 	return v
 }
 
-// WithKeyID is the setter counterpart to KeyID. Adapters outside the auth
-// package that resolve a credential to a key context themselves call it
-// (currently `internal/session`).
+// WithKeyID returns ctx carrying the id of the key that authenticated the
+// request.
 func WithKeyID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, apiKeyIDKey, id)
 }
@@ -124,22 +120,21 @@ func UserID(ctx context.Context) string {
 	return v
 }
 
-// WithUserID is the setter counterpart to UserID. Called by the
-// session middleware when a cookie resolves to a user-bound session.
+// WithUserID returns ctx carrying the dashboard user of the request's
+// session.
 func WithUserID(ctx context.Context, id string) context.Context {
 	return context.WithValue(ctx, userIDKey, id)
 }
 
-// GetKeyType returns the principal's key type in ctx, or "" when there is
-// none.
+// GetKeyType returns the caller's kind of credential in ctx (KeyType), or ""
+// when there is none.
 func GetKeyType(ctx context.Context) KeyType {
 	v, _ := ctx.Value(keyTypeKey).(KeyType)
 	return v
 }
 
-// WithKeyType lets adapters declare the principal type, so auth.Require
-// keeps working from a single ctx key. `internal/session` calls it when a
-// session resolves to its parent key's type.
+// WithKeyType returns ctx carrying the caller's kind of credential, which
+// Require, RequireMethod and RequireSession check.
 func WithKeyType(ctx context.Context, kt KeyType) context.Context {
 	return context.WithValue(ctx, keyTypeKey, kt)
 }
@@ -154,15 +149,9 @@ func CustomerActorID(ctx context.Context) string {
 	return v
 }
 
-// WithCustomerActor stamps a customer ID as the request's actor, so
-// downstream services (chiefly the audit logger) record who acted.
-//
-// It is in use and needed, so do not remove it as unused. It is the one
-// mechanism that attributes an action to a customer rather than to
-// "system", and the whole of ADR-090's customer-actor story. The
-// hosted-invoice Pay click (hostedinvoice/handler.go) and the payment-update
-// link (payment/public_handler.go) both stamp it. audit.ResolveActor reads
-// it to write actor_type='customer'.
+// WithCustomerActor returns ctx carrying a customer as the request's actor,
+// so the audit row of what a customer did names them (actor_type 'customer')
+// rather than 'system' (ADR-090).
 func WithCustomerActor(ctx context.Context, customerID string) context.Context {
 	return context.WithValue(ctx, customerActorKey, customerID)
 }

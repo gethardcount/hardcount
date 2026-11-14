@@ -15,25 +15,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// RunBootstrap is the ONLY code path that provisions a tenant (ADR-073).
-// The HTTP handler and cmd/hardcount-bootstrap are thin callers — the two
-// writers had already drifted apart once (HTTP minted no owner user, no
-// live key, no settings row: a dashboard dead-end), so the shared
-// sequence is the fix, not doc'd parity.
-//
-// Everything runs in ONE bypass transaction under
-// pg_advisory_xact_lock(LockKeyBootstrap):
-//
-//	guards (first-tenant / owner-email uniqueness, authoritative under
-//	the lock) → tenant → tenant_settings seed → test and live secret key → owner user
-//	→ audit rows → default dunning policy per mode
-//
-// so a failure anywhere leaves ZERO rows behind. The half-bootstrap
-// shape this kills: tenant+keys committed, owner-user create fails on
-// password validation, every retry 409s "already bootstrapped", and the
-// operator is locked out of the dashboard forever. All inputs validate
-// BEFORE the first write for the same reason.
-
 // ErrAlreadyBootstrapped is returned when FirstTenantOnly is set and a
 // tenant already exists. HTTP maps it to 409.
 var ErrAlreadyBootstrapped = errs.InvalidState("bootstrap already completed — tenants exist").WithCode("already_bootstrapped")
@@ -93,6 +74,12 @@ type BootstrapResult struct {
 	LiveSecretKey     string
 }
 
+// RunBootstrap provisions an account: the tenant, its settings, a test and a
+// live secret key, the owner user, the audit rows and a default dunning policy
+// per mode. It is the one path that provisions an account (ADR-073); the HTTP
+// handler and cmd/hardcount-bootstrap call it. It checks every input before
+// the first write and runs in one transaction under the bootstrap advisory
+// lock, so a failure leaves no rows and a retry can succeed.
 func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts BootstrapOpts) (BootstrapResult, error) {
 	if deps.HashPassword == nil || deps.CreateUserTx == nil || deps.CreateKeyTx == nil || deps.SeedDunningTx == nil {
 		return BootstrapResult{}, fmt.Errorf("bootstrap deps not wired")
