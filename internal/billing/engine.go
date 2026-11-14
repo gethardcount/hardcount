@@ -639,6 +639,9 @@ type InvoiceWriter interface {
 	// paths that sent no charge, so the next tick/Advance retries
 	// immediately instead of waiting for the stale-hold sweep.
 	ReleaseChargeHold(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error
+	// ChargeHoldStateOf reads the invoice's hold outside any lock. Only to
+	// say what is left of a charge that was not made; never a gate.
+	ChargeHoldStateOf(ctx context.Context, tenantID, id string) (domain.ChargeHoldState, error)
 	ListAutoChargePending(ctx context.Context, after walk.Key, limit int) ([]domain.Invoice, error)
 	// ListAutoChargePendingForClock is the catchup-path counterpart to
 	// ListAutoChargePending — returns invoices whose owning subscription
@@ -4729,7 +4732,14 @@ func (e *Engine) RetryPendingCharges(ctx context.Context, pageSize int, onPage f
 		listed++
 		n, rowErrs := e.processAutoCharge(ctx, inv, nil, noPMTriggerSweep)
 		charged += n
-		errs = append(errs, rowErrs...)
+		for _, rerr := range rowErrs {
+			// A later run does it.
+			if errors.Is(rerr, domain.ErrLeftForNextRun) {
+				slog.WarnContext(ctx, "auto-charge: left for the next run", "invoice_id", inv.ID, "error", rerr)
+				continue
+			}
+			errs = append(errs, rerr)
+		}
 	}
 	if listed > 0 {
 		slog.Info("auto-charge sweep", "livemode", live, "listed", listed,
@@ -4746,7 +4756,9 @@ func (e *Engine) RetryPendingCharges(ctx context.Context, pageSize int, onPage f
 //
 // Return shape matches RetryPendingCharges (count + per-invoice
 // errors) so the orchestrator can log the same telemetry shape per
-// catchup phase.
+// catchup phase. Unlike the real-time sweep it returns the work a row left
+// for the next run (domain.ErrLeftForNextRun): the advance fails, and Retry
+// advance does that work.
 func (e *Engine) RetryPendingChargesForClock(ctx context.Context, tenantID, clockID string, limit int) (int, []error) {
 	// An advance that skipped collection would end ready with its invoices
 	// uncharged.
@@ -4886,6 +4898,10 @@ func (e *Engine) emailInvoiceOnce(ctx context.Context, inv domain.Invoice) {
 // would push the test-clock catchup into 'internal_failure' for what
 // is supposed to be a normal payment-failure flow.
 //
+// Credits that could not be applied, and a transient answer, return a
+// chargeNotMade (domain.ErrLeftForNextRun) that says what is left: the
+// real-time run logs it, and a clock's job returns it.
+//
 // Only Unknown (5xx, network drop, timeout — outcome unresolved) and
 // non-Stripe errors (config, infrastructure) escalate to the caller.
 // Unknown errors return because the reconciler needs to follow up on
@@ -4946,14 +4962,15 @@ func (e *Engine) processAutoCharge(ctx context.Context, inv domain.Invoice, at *
 	// pre-credit amount). ApplyToInvoiceAt is safe to re-run: it drains
 	// min(amount_due, current balance), so an already-applied invoice or
 	// an empty balance applies nothing. Failure → skip this invoice (flag
-	// stays set; the next sweep retries) rather than charge pre-credit.
+	// stays set; a later run retries) rather than charge pre-credit.
 	if e.credits != nil && inv.AmountDueCents > 0 {
 		if _, err := e.credits.ApplyToInvoiceAt(ctx, inv.TenantID, inv.CustomerID, inv.ID, inv.AmountDueCents, settleAt, inv.InvoiceNumber); err != nil {
-			slog.Warn("auto-charge: credit apply failed — skipping charge to avoid overcharging; will retry next tick",
-				"invoice_id", inv.ID, "error", err)
-			// Provably pre-Stripe: release the hold so the next
-			// tick/Advance retries immediately.
+			// Provably pre-Stripe: release the hold so a later run can
+			// claim the invoice at once.
 			release()
+			if nerr := e.chargeNotMadeFor(ctx, inv, "its credits could not be applied first", fmt.Errorf("apply credits: %w", err)); nerr != nil {
+				errs = append(errs, nerr)
+			}
 			return charged, errs
 		}
 		// Refresh: credits may have reduced (or fully covered) amount_due.
@@ -5136,12 +5153,15 @@ func (e *Engine) processAutoCharge(ctx context.Context, inv domain.Invoice, at *
 			errs = append(errs, fmt.Errorf("charge invoice %s refused: %w", inv.ID, err))
 			return charged, errs
 		}
-		// Transient (breaker open / pre-Stripe timeout): skip
-		// this tick without bumping dunning. The next catchup
-		// will retry.
+		// Transient (an open breaker, a rate limit, unreadable credentials,
+		// a refused Stripe key, an unclear answer before the confirm): no
+		// payment was confirmed and dunning is not bumped. Whether a later
+		// run can claim the invoice depends on what the charger did with its
+		// hold, so chargeNotMadeFor reads the invoice as stored.
 		if errors.Is(err, payment.ErrPaymentTransient) {
-			slog.Info("auto-charge skipped; transient breaker/timeout",
-				"invoice_id", inv.ID)
+			if nerr := e.chargeNotMadeFor(ctx, inv, "Stripe could not take the charge just then", err); nerr != nil {
+				errs = append(errs, nerr)
+			}
 			return charged, errs
 		}
 		// Everything else (Unknown PaymentError or non-Stripe
