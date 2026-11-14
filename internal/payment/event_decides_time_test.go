@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -209,11 +210,14 @@ func TestHandleWebhook_ALiveEventDecidesNothing(t *testing.T) {
 	}
 }
 
-// A refund event whose recorder could not decide its time is delivered
-// again, even for an old refund and with a not-found underneath: it is not
-// "no credit note holds this refund" (acknowledged for an old refund) nor
-// "no invoice holds this payment" (recorded as unmatched).
-func TestHandleWebhook_ARefundWhoseTimeIsUndecidedIsDeliveredAgain(t *testing.T) {
+// A refund or dispute event whose recorder could not decide its time is
+// delivered again, even when old and with a not-found underneath: it is not
+// "no credit note holds this refund" (acknowledged for an old refund), "no
+// invoice holds this payment" (a refund recorded as unmatched, a dispute
+// acknowledged). The dispute recorder decides nothing today (every date it
+// writes is Stripe's or the database's); the case pins the one rule,
+// recordAbsent, for all three paths.
+func TestHandleWebhook_ARecorderWhoseTimeIsUndecidedIsDeliveredAgain(t *testing.T) {
 	undecided := fmt.Errorf("refund re_x: %w: %w", clock.ErrUndecided, fmt.Errorf("read test clock clk_e: %w", errs.ErrNotFound))
 	for _, c := range []struct {
 		name string
@@ -239,5 +243,25 @@ func TestHandleWebhook_ARefundWhoseTimeIsUndecidedIsDeliveredAgain(t *testing.T)
 				t.Errorf("the refused refund event was recorded as processed (%d ingest calls)", webhooks.ingestCalls)
 			}
 		})
+	}
+}
+
+func TestHandleWebhook_ADisputeWhoseTimeIsUndecidedIsDeliveredAgain(t *testing.T) {
+	undecided := fmt.Errorf("dispute du_test_1: %w: %w", clock.ErrUndecided, fmt.Errorf("read test clock clk_e: %w", errs.ErrNotFound))
+	webhooks := newMockWebhookStore()
+	s := NewStripe(&mockStripeClient{}, newMockInvoiceUpdater(), webhooks, nil)
+	s.SetDisputeRecorder(&fakeDisputeRecorder{err: undecided})
+	// created 1790000000: far older than the race window, so a plain
+	// not-found would be acknowledged.
+	event := domain.StripeWebhookEvent{StripeEventID: "evt_du_undecided", EventType: "charge.dispute.created",
+		Payload: map[string]any{"raw": disputeRaw(t, disputeObject("needs_response", "pi_x"))}}
+	err := s.HandleWebhook(postgres.WithLivemode(context.Background(), false), "t1", event)
+	if err == nil || !isTransientWebhookError(err) || webhooks.ingestCalls != 0 {
+		t.Fatalf("err %v, ingest calls %d; want a transient error and nothing recorded, so Stripe delivers it again", err, webhooks.ingestCalls)
+	}
+	// Not the "names a payment no Hardcount invoice holds" branch, which
+	// logs that it acknowledged the dispute.
+	if !strings.Contains(err.Error(), "record dispute du_test_1") {
+		t.Errorf("err %q; want the record-dispute failure, not the no-invoice branch", err)
 	}
 }

@@ -2142,7 +2142,7 @@ func (s *Stripe) handleDispute(ctx context.Context, tenantID string, event domai
 	}
 
 	res, err := s.disputes.RecordStripeDispute(ctx, tenantID, snap)
-	if errors.Is(err, errs.ErrNotFound) {
+	if recordAbsent(err) {
 		// No invoice holds the payment yet. It can be a Hardcount payment whose
 		// record has not committed: a hosted-page payment before its settle,
 		// an off-session charge before its attempt row (written after Stripe
