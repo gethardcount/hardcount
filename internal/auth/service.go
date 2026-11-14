@@ -5,8 +5,6 @@ package auth
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha256"
 	"crypto/subtle"
 	"database/sql"
 	"encoding/hex"
@@ -22,11 +20,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
-)
-
-const (
-	keyPrefixLen = 12 // hex chars used for DB prefix lookup
-	keySecretLen = 32 // random bytes = 64 hex chars
 )
 
 // Service creates, validates, rotates and revokes API keys. A change to a
@@ -196,14 +189,6 @@ func statusAt(key domain.APIKey, now time.Time) string {
 	}
 }
 
-// hashKey returns the stored hash of raw: hex(SHA-256(salt || raw)). Every
-// new key has a fresh 16-byte salt. A key the setup command wrote in v0.9.3
-// or earlier has an empty salt and still validates.
-func hashKey(salt []byte, raw string) string {
-	sum := sha256.Sum256(append(append([]byte{}, salt...), raw...))
-	return hex.EncodeToString(sum[:])
-}
-
 // checkMintAndInsert checks input, mints a key for tenantID in the mode that
 // ctx carries, and inserts it on tx.
 func (s *Service) checkMintAndInsert(ctx context.Context, tx *sql.Tx, tenantID string, input CreateKeyInput) (CreateKeyResult, error) {
@@ -242,32 +227,20 @@ func (s *Service) checkMintAndInsert(ctx context.Context, tx *sql.Tx, tenantID s
 		return CreateKeyResult{}, err
 	}
 
-	// Generate raw key: prefix + random hex
-	secret := make([]byte, keySecretLen)
-	if _, err := rand.Read(secret); err != nil {
-		return CreateKeyResult{}, fmt.Errorf("generate key: %w", err)
-	}
-	secretHex := hex.EncodeToString(secret)
-	prefix := keyPrefix(keyType, livemode)
-	rawKey := prefix + secretHex
-
-	// DB prefix: full mode-aware prefix + first N hex chars (indexed lookup)
-	dbPrefix := prefix + secretHex[:keyPrefixLen]
-
-	salt := make([]byte, 16)
-	if _, err := rand.Read(salt); err != nil {
-		return CreateKeyResult{}, fmt.Errorf("generate salt: %w", err)
+	rawKey, lookup, hash, err := mintKey(keyType, livemode)
+	if err != nil {
+		return CreateKeyResult{}, err
 	}
 
 	key, err := s.store.insert(ctx, tx, domain.APIKey{
 		ID:        postgres.NewID("hc_key"),
-		KeyPrefix: dbPrefix,
+		KeyPrefix: lookup,
 		KeyType:   string(keyType),
 		Livemode:  livemode,
 		Name:      name,
 		TenantID:  tenantID,
 		ExpiresAt: input.ExpiresAt,
-	}, storedHash{salt: hex.EncodeToString(salt), hash: hashKey(salt, rawKey)})
+	}, hash)
 	if err != nil {
 		return CreateKeyResult{}, err
 	}
@@ -294,12 +267,12 @@ var ErrInvalidKey = errors.New("invalid api key")
 func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey, error) {
 	// A string that is not a key is refused before any lookup.
 	rawKey = strings.TrimSpace(rawKey)
-	dbPrefix, ok := lookupPrefix(rawKey)
+	lookup, ok := lookupPrefix(rawKey)
 	if !ok {
 		return domain.APIKey{}, fmt.Errorf("invalid key format: %w", ErrInvalidKey)
 	}
 
-	key, stored, err := s.store.getByPrefix(ctx, dbPrefix)
+	key, stored, err := s.store.getByPrefix(ctx, lookup)
 	if err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
 			return domain.APIKey{}, ErrInvalidKey
