@@ -10,6 +10,8 @@ import (
 	"log/slog"
 	"sync"
 	"time"
+
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // Clock provides the current time. Through ctx, a caller can carry a
@@ -199,6 +201,37 @@ func WithRealTime(ctx context.Context) context.Context {
 	return WithSim(ctx, Sim{})
 }
 
+// DecidesWithoutDoor reports whether work on a record that did not come
+// through the API's clock door (a Stripe event, a job's row, a public page)
+// decides its time. With no resolver, no: only narrow unit tests build their
+// service without one, and the server always wires the engine. With no mode
+// on ctx, a fault, refused as ErrUndecided: every such entry point sets one.
+// In live mode, no: no live record is on a test clock, and live work pays for
+// no lookup. Else yes. A caller that must read the record before it can name
+// it asks this first, so live work reads nothing.
+func DecidesWithoutDoor(ctx context.Context, r Resolver) (bool, error) {
+	if r == nil {
+		return false, nil
+	}
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return false, fmt.Errorf("%w: the context has no mode", ErrUndecided)
+	}
+	return !live, nil
+}
+
+// DecideWithoutDoor decides the time of work on a record that did not come
+// through the API's clock door: when DecidesWithoutDoor says it decides, the
+// record's clock, or real time for a record on no clock (Decide); else ctx
+// unchanged. A failure is ErrUndecided.
+func DecideWithoutDoor(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
+	decides, err := DecidesWithoutDoor(ctx, r)
+	if err != nil || !decides {
+		return ctx, err
+	}
+	return Decide(ctx, r, p)
+}
+
 // Decision returns what was decided for ctx's time, and whether anything
 // was: real time (a zero Sim), a test clock and its instant, or a bare
 // instant from WithEffectiveNow. Unlike SimOf, it tells real time from
@@ -225,6 +258,8 @@ var ErrUndecided = errors.New("the time could not be decided")
 // Unlike BindEffectiveNow it returns the resolver's error, as ErrUndecided,
 // keeps nothing an earlier binding held, and needs a resolver and an id: it
 // is the call that decides, at the entry point of a request or a job's row.
+// Work on a record that did not come through the API's clock door decides
+// with DecideWithoutDoor, which calls it.
 func Decide(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
 	if r == nil {
 		return ctx, errors.New("decide the time: no resolver")
