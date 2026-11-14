@@ -143,10 +143,21 @@ func (s *Service) CreateKey(ctx context.Context, tenantID string, input CreateKe
 
 // CreateKeyTx is CreateKey on a transaction the caller owns, for the setup
 // command, which creates the account and its first keys in one transaction:
-// the key and its audit row commit with tx. tx must set app.tenant_id to
-// tenantID and app.livemode to the mode ctx carries; the table refuses a
-// prefix whose mode differs from the row's.
+// the key and its audit row commit with tx. It sets tx's app.livemode to the
+// mode ctx carries, so the key and its audit row are in that mode, and the
+// setting stays for the rest of tx. tx must set app.tenant_id to tenantID.
 func (s *Service) CreateKeyTx(ctx context.Context, tx *sql.Tx, tenantID string, input CreateKeyInput) (CreateKeyResult, error) {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return CreateKeyResult{}, err
+	}
+	mode := "off"
+	if live {
+		mode = "on"
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', $1, true)`, mode); err != nil {
+		return CreateKeyResult{}, fmt.Errorf("set the key's mode: %w", err)
+	}
 	result, err := s.checkMintAndInsert(ctx, tx, tenantID, input)
 	if err != nil {
 		return CreateKeyResult{}, err
@@ -264,16 +275,11 @@ func (s *Service) checkMintAndInsert(ctx context.Context, tx *sql.Tx, tenantID s
 // holds.
 var ErrInvalidKey = errors.New("invalid api key")
 
-// ValidateKey looks up a key by its prefix, verifies the hash and checks
-// expiry.
-//
-// It accepts three prefix forms, in priority order:
-//  1. "hc_{type}_live_..."
-//  2. "hc_{type}_test_..."
-//  3. "hc_{type}_..." (the older form with no mode, treated as live)
-//
-// Form 3 keeps keys issued before the mode infix working. Newly issued keys
-// always use form 1 or 2.
+// ValidateKey returns the key rawKey is, or ErrInvalidKey. rawKey must have a
+// key's shape (lookupPrefix) and match a stored key's hash, and the key must
+// be neither revoked nor expired. It writes the key's last_used_at at most
+// once per lastUsedTouchInterval; a failed write is logged and does not refuse
+// the key.
 func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey, error) {
 	// A string that is not a key is refused before any lookup.
 	rawKey = strings.TrimSpace(rawKey)

@@ -2,8 +2,9 @@
 -- Checks the API keys already there against the shape 00230 states. Every
 -- key Hardcount wrote has it. A key of another shape was written by hand: it
 -- stops the upgrade here, before any CHECK is validated, and the migration
--- does not delete a credential. The file turns the bypass on for its own
--- transaction, so the count sees every account's keys.
+-- does not delete a credential. 00230 stays applied, so new keys are already
+-- checked. The file turns the bypass on for its own transaction, so the
+-- count sees every account's keys.
 SET LOCAL app.bypass_rls = 'on';
 
 -- +goose StatementBegin
@@ -20,7 +21,7 @@ BEGIN
        OR btrim(name) = '';
     IF n > 0 THEN
         RAISE EXCEPTION 'migration 00231 checks the shape of every API key, and % key(s) in this database do not have it', n
-            USING HINT = 'Hardcount writes every key in this shape, so these rows were written by hand. Delete or fix them, then run the upgrade again: docs/ops/runbook/migration-failed-midway.md#00231-found-api-keys-of-another-shape';
+            USING HINT = 'Hardcount writes every key in this shape, so these rows were written by hand. Delete them, then run the upgrade again: docs/ops/runbook/migration-failed-midway.md#00231-found-api-keys-of-another-shape';
     END IF;
 END
 $$;
