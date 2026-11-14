@@ -69,6 +69,21 @@ func TestChargeClaimStateOf_AgreesWithTheClaim(t *testing.T) {
 			pinToClock(custID, now.Add(5*24*time.Hour))
 			bypassExec(t, db, `UPDATE subscriptions SET pause_collection_behavior = 'keep_as_draft', pause_collection_resumes_at = $1 WHERE id = $2`, now.Add(10*24*time.Hour), subID)
 		}, domain.ChargeCollectionPaused},
+		// Two conditions fail at once: the list's order picks the answer.
+		{"held, with a live hosted page", func(id, _, _ string) {
+			bypassExec(t, db, `UPDATE invoices SET auto_charge_claimed_until = now() + interval '5 minutes' WHERE id = $1`, id)
+			bypassExec(t, db, `INSERT INTO checkout_sessions (id, tenant_id, invoice_id, livemode, stripe_session_id, amount_cents, currency, status, expires_at)
+				VALUES ($1, $2, $3, false, 'cs_' || $1, 5000, 'USD', 'open', now() + interval '50 minutes')`, postgres.NewID("hc_cks"), tenantID, id)
+		}, domain.ChargeHeldByAttempt},
+		{"held, and collection paused", func(id, subID, _ string) {
+			bypassExec(t, db, `UPDATE invoices SET auto_charge_claimed_until = now() + interval '5 minutes' WHERE id = $1`, id)
+			bypassExec(t, db, `UPDATE subscriptions SET pause_collection_behavior = 'keep_as_draft' WHERE id = $1`, subID)
+		}, domain.ChargeHeldByAttempt},
+		{"a live hosted page, and collection paused", func(id, subID, _ string) {
+			bypassExec(t, db, `INSERT INTO checkout_sessions (id, tenant_id, invoice_id, livemode, stripe_session_id, amount_cents, currency, status, expires_at)
+				VALUES ($1, $2, $3, false, 'cs_' || $1, 5000, 'USD', 'open', now() + interval '50 minutes')`, postgres.NewID("hc_cks"), tenantID, id)
+			bypassExec(t, db, `UPDATE subscriptions SET pause_collection_behavior = 'keep_as_draft' WHERE id = $1`, subID)
+		}, domain.ChargePayingOnHostedPage},
 		{"a clock customer, past the pause at the clock's time", func(_, subID, custID string) {
 			pinToClock(custID, now.Add(20*24*time.Hour))
 			bypassExec(t, db, `UPDATE subscriptions SET pause_collection_behavior = 'keep_as_draft', pause_collection_resumes_at = $1 WHERE id = $2`, now.Add(10*24*time.Hour), subID)
