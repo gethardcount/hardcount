@@ -11,6 +11,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -666,7 +667,9 @@ func TestChargeInvoice_DefiniteFailure_InlineStartsDunning(t *testing.T) {
 	dunning := &recordingDunningStarter{}
 	stripe := NewStripe(client, invoices, newMockWebhookStore(), nil, dunning)
 
-	_, err := stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test")
+	// A clock's catch-up charges a cycle invoice at its cycle close.
+	ctx := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: cycleEnd, TestClockID: "clk_cycle"})
+	_, err := stripe.ChargeInvoice(ctx, "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test")
 	if err == nil {
 		t.Fatal("expected definitive failure error")
 	}
