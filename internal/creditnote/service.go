@@ -276,6 +276,33 @@ func (s *Service) SetAuditLogger(a AuditEmitter) { s.audit = a }
 // dated weeks before the invoice it credits.
 func (s *Service) SetResolver(r clock.Resolver) { s.resolver = r }
 
+// decidesTime reports whether a Stripe event's write decides its time, in
+// the order the payment events check it (payment.Stripe.decideFor): with no
+// resolver, no; with no mode on ctx, a fault, refused as
+// clock.ErrUndecided (the webhook handler and the restore catch-up both set
+// one); in live mode, no (no live record is on a test clock); else yes.
+func (s *Service) decidesTime(ctx context.Context) (bool, error) {
+	if s.resolver == nil {
+		return false, nil // only narrow unit tests build the service without one; NewServer always wires the engine
+	}
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return false, fmt.Errorf("%w: the event's context has no mode", clock.ErrUndecided)
+	}
+	return !live, nil
+}
+
+// decideForInvoice decides a Stripe event's write from the invoice it
+// belongs to: the invoice's clock, or real time for one on no clock. A
+// failure is clock.ErrUndecided, which the webhook delivers again.
+func (s *Service) decideForInvoice(ctx context.Context, tenantID, invoiceID string) (context.Context, error) {
+	decides, err := s.decidesTime(ctx)
+	if err != nil || !decides {
+		return ctx, err
+	}
+	return clock.Decide(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
+}
+
 // bindForInvoice pins ctx to the source invoice's effective-now, so every
 // clock.Now(ctx) below — the credit_note row, its line items, the credit-ledger
 // grant, amount_due relief — lands in the invoice's own time domain. Mirrors
@@ -2653,6 +2680,25 @@ func (s *Service) RetryRefund(ctx context.Context, tenantID, id string) (domain.
 // (pending→succeeded/failed) that the create-call cannot observe. Returns
 // ErrNotFound for an unknown/foreign refund id — the caller decides ack vs retry.
 func (s *Service) ApplyRefundWebhook(ctx context.Context, tenantID, stripeRefundID string, status domain.RefundStatus, failureReason string) error {
+	// The write and its audit row carry the time decided from the invoice of
+	// the credit note holding the refund, read first (a note's invoice never
+	// changes). No note holds it: the write answers ErrNotFound itself.
+	decides, err := s.decidesTime(ctx)
+	if err != nil {
+		return fmt.Errorf("refund %s refused, Stripe delivers it again: %w", stripeRefundID, err)
+	}
+	if decides {
+		invoiceID, err := s.store.InvoiceOfRefundNote(ctx, tenantID, stripeRefundID)
+		switch {
+		case errors.Is(err, errs.ErrNotFound):
+		case err != nil:
+			return fmt.Errorf("read the credit note holding refund %s: %w", stripeRefundID, err)
+		default:
+			if ctx, err = clock.Decide(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID}); err != nil {
+				return fmt.Errorf("refund %s refused, Stripe delivers it again: %w", stripeRefundID, err)
+			}
+		}
+	}
 	// ADR-090 in-tx emission: the refund-status transition and its audit
 	// row commit together; the store fires the emission ONLY when the
 	// monotonic guard actually flipped a row, so stale redeliveries never

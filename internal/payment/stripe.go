@@ -1703,20 +1703,23 @@ func (s *Stripe) decideForCustomer(ctx context.Context, tenantID, customerID str
 }
 
 // isTransientWebhookError reports whether a webhook processing error is
-// worth a Stripe redelivery. A missing target entity (errs.ErrNotFound)
+// worth a Stripe redelivery. A missing target entity (recordAbsent)
 // is permanent — the event references an invoice/customer that isn't in
 // our DB, and redelivering won't conjure it — so we ack it. Everything
 // else (DB write failure, contention, a downstream timeout) is treated
 // as transient: return it, respond 5xx, let Stripe redeliver.
 func isTransientWebhookError(err error) bool {
-	// Checked first: a record whose time could not be decided (its clock
-	// could not be read) is not "this event is about nothing we know", even
-	// when the cause underneath is a not-found. Acknowledging it would drop a
-	// payment's event for good.
-	if errors.Is(err, clock.ErrUndecided) {
-		return true
-	}
-	return !errors.Is(err, errs.ErrNotFound)
+	return !recordAbsent(err)
+}
+
+// recordAbsent reports whether err says the record an event names is not
+// there: a not-found that is not clock.ErrUndecided. A record whose time
+// could not be decided (its clock could not be read) is not "this event is
+// about nothing we know", even when the cause underneath is a not-found;
+// treated as absent, a payment's, a refund's or a dispute's event would be
+// acknowledged and dropped for good.
+func recordAbsent(err error) bool {
+	return errors.Is(err, errs.ErrNotFound) && !errors.Is(err, clock.ErrUndecided)
 }
 
 // handleSetupIntentSucceeded re-parses the raw payload to pull out the
@@ -1931,7 +1934,7 @@ func (s *Stripe) handleRefundUpdated(ctx context.Context, tenantID string, event
 
 	status := mapStripeRefundStatus(rf.Status)
 	err := s.refundUpdater.ApplyRefundWebhook(ctx, tenantID, rf.ID, status, rf.FailureReason)
-	if errors.Is(err, errs.ErrNotFound) {
+	if recordAbsent(err) {
 		// No credit note carries this refund id. For Hardcount's own refund
 		// (hardcount_cn_id) the note's id has not been saved yet: a young
 		// refund gets a bounded redelivery so it can land, and an old one is
@@ -2033,7 +2036,7 @@ func (s *Stripe) recordExternalRefund(ctx context.Context, tenantID string, even
 		snap.CreatedAt = time.Unix(created, 0).UTC()
 	}
 	res, err := s.externalRefunds.RecordStripeRefund(ctx, tenantID, snap)
-	if errors.Is(err, errs.ErrNotFound) {
+	if recordAbsent(err) {
 		if young {
 			return fmt.Errorf("%s: refund %s: no invoice holds payment %s yet (recent refund — retry)", event.EventType, refundID, pi)
 		}
@@ -2139,7 +2142,7 @@ func (s *Stripe) handleDispute(ctx context.Context, tenantID string, event domai
 	}
 
 	res, err := s.disputes.RecordStripeDispute(ctx, tenantID, snap)
-	if errors.Is(err, errs.ErrNotFound) {
+	if recordAbsent(err) {
 		// No invoice holds the payment yet. It can be a Hardcount payment whose
 		// record has not committed: a hosted-page payment before its settle,
 		// an off-session charge before its attempt row (written after Stripe

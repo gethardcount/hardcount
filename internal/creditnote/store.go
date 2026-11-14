@@ -105,6 +105,9 @@ type Store interface {
 	// emission on the same tx, ONLY when the monotonic guard actually
 	// flipped a row (ADR-090) — stale redeliveries record nothing.
 	ApplyRefundWebhookStatusAudited(ctx context.Context, tenantID, stripeRefundID string, status domain.RefundStatus, emit func(tx *sql.Tx, cn domain.CreditNote) error) error
+	// InvoiceOfRefundNote returns the invoice of the credit note holding
+	// stripeRefundID; ErrNotFound when no note holds it.
+	InvoiceOfRefundNote(ctx context.Context, tenantID, stripeRefundID string) (string, error)
 	// UpdateAllocation persists the three-channel allocation
 	// (refund / credit / out-of-band). Used by Issue() to re-derive the
 	// allocation from the current invoice state when a CN created against

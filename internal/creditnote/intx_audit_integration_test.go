@@ -28,7 +28,12 @@ var errInjectedEmit = errors.New("injected audit emission failure")
 // store's own UpdateRefundStatus (Create doesn't persist it).
 func seedRefundableCN(t *testing.T, db *postgres.DB, tenantID, suffix, stripeRefundID string, status domain.RefundStatus) domain.CreditNote {
 	t.Helper()
-	ctx := postgres.WithLivemode(context.Background(), false)
+	return seedRefundableCNIn(t, db, postgres.WithLivemode(context.Background(), false), tenantID, suffix, stripeRefundID, status)
+}
+
+// seedRefundableCNIn is seedRefundableCN in the mode ctx carries.
+func seedRefundableCNIn(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, suffix, stripeRefundID string, status domain.RefundStatus) domain.CreditNote {
+	t.Helper()
 
 	cust, err := customer.NewPostgresStore(db).Create(ctx, tenantID, domain.Customer{
 		ExternalID: "cus_refundaudit_" + suffix, DisplayName: "Refund Audit " + suffix,
