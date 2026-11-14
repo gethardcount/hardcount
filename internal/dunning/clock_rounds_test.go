@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
 )
 
 // The clock's dunning job (ProcessDueRunsForClock) works in rounds: each walks
@@ -63,6 +65,14 @@ func TestProcessDueRuns_NoAnswerIsLeftForTheNextRun(t *testing.T) {
 				t.Errorf("error %v: want ErrLeftForNextRun, wrapping ErrTransientSkip", err)
 			}
 		}
+		var safe interface{ OperatorSafeMessage() string }
+		if !errors.As(errs[0], &safe) {
+			t.Fatalf("error %v carries no operator message", errs[0])
+		}
+		const said = ": a payment retry got no definite answer from Stripe, so it is not counted and is tried again (on a test clock, by Retry advance)."
+		if got := safe.OperatorSafeMessage(); !strings.HasPrefix(got, "Invoice inv_") || !strings.HasSuffix(got, said) {
+			t.Errorf("the operator reads %q, want \"Invoice inv_<n>%s\"", got, said)
+		}
 		for _, id := range ids {
 			if got := store.runs[id].AttemptCount; got != 0 {
 				t.Errorf("run %s attempt count = %d, want 0: a retry with no answer is not counted", id, got)
@@ -102,9 +112,12 @@ func TestProcessDueRunsForClock_NoProgressIsAnError(t *testing.T) {
 	svc := NewService(claimAlwaysLost{mem}, &noopRetrier{}, nil)
 	run := exhaustedRun(t, mem, svc)
 
-	_, errs := svc.ProcessDueRunsForClock(context.Background(), "t1", "clk", time.Now().UTC().Add(time.Hour), 20)
-	if len(errs) != 1 || !errors.Is(errs[0], domain.ErrLeftForNextRun) {
-		t.Fatalf("errors = %v, want one ErrLeftForNextRun: the run is still due", errs)
+	_, runErrs := svc.ProcessDueRunsForClock(context.Background(), "t1", "clk", time.Now().UTC().Add(time.Hour), 20)
+	if len(runErrs) != 1 || !errors.Is(runErrs[0], domain.ErrLeftForNextRun) {
+		t.Fatalf("errors = %v, want one ErrLeftForNextRun: the run is still due", runErrs)
+	}
+	if got, want := errs.SummarizeForOperator(runErrs, ""), "1 payment retries due in this advance did not move: each is as its last step found it. Retry advance tries them again."; got != want {
+		t.Errorf("the operator reads %q, want %q", got, want)
 	}
 	if got := mem.runs[run.ID]; got.State != domain.DunningActive || got.AttemptCount != run.AttemptCount {
 		t.Errorf("run = %s at attempt %d, want it as it was", got.State, got.AttemptCount)
@@ -125,49 +138,98 @@ func TestProcessDueRunsForClock_StillDueAfterTheLastRoundIsAnError(t *testing.T)
 	svc := NewService(store, &failingRetrier{}, nil)
 	ids := dueRuns(t, store, svc, 1)
 
-	_, errs := svc.ProcessDueRunsForClock(context.Background(), "t1", "clk", time.Now().UTC().Add(100*24*time.Hour), 20)
-	if len(errs) != 1 || !errors.Is(errs[0], domain.ErrLeftForNextRun) {
-		t.Fatalf("errors = %v, want one ErrLeftForNextRun: the run is still due", errs)
+	_, runErrs := svc.ProcessDueRunsForClock(context.Background(), "t1", "clk", time.Now().UTC().Add(100*24*time.Hour), 20)
+	if len(runErrs) != 1 || !errors.Is(runErrs[0], domain.ErrLeftForNextRun) {
+		t.Fatalf("errors = %v, want one ErrLeftForNextRun: the run is still due", runErrs)
 	}
-	if got := store.runs[ids[0]].AttemptCount; got != maxDunningCatchupIters {
-		t.Errorf("attempt count = %d, want %d: one retry a round", got, maxDunningCatchupIters)
+	if got, want := errs.SummarizeForOperator(runErrs, ""), "1 payment retries are still due after 50 rounds of this advance. Retry advance goes on with them."; got != want {
+		t.Errorf("the operator reads %q, want %q", got, want)
+	}
+	if got := store.runs[ids[0]].AttemptCount; got != maxDunningCatchupRounds {
+		t.Errorf("attempt count = %d, want %d: one retry a round", got, maxDunningCatchupRounds)
 	}
 }
 
-// graceThenAct waits for the invoice grace on its first call and acts on the
-// later ones.
-type graceThenAct struct {
-	until time.Time
-	calls int
+// claimLeftByAnotherWorker is a store whose first exhaustion claim goes to
+// another worker that takes its lease and stops: the run's next_action_at
+// moves to that lease, its attempt count stays. Later claims are the store's.
+type claimLeftByAnotherWorker struct {
+	*memStore
+	taken bool
 }
 
-func (a *graceThenAct) act() error {
-	a.calls++
-	if a.calls == 1 {
-		return &SubscriptionActionNotYet{Until: a.until}
+func (c *claimLeftByAnotherWorker) ClaimExhaustion(ctx context.Context, tenantID, runID string, attempts int, next, lease time.Time) (bool, error) {
+	if !c.taken {
+		c.taken = true
+		run := c.runs[runID]
+		other := next.Add(exhaustLease)
+		run.NextActionAt = &other
+		c.runs[runID] = run
+		return false, nil
 	}
-	return nil
+	return c.memStore.ClaimExhaustion(ctx, tenantID, runID, attempts, next, lease)
 }
 
-func (a *graceThenAct) Cancel(context.Context, string, string) error { return a.act() }
+// A run whose exhaustion another worker claimed and left moves only its
+// next_action_at, to that worker's lease. When the lease ends inside the
+// advance, the next round takes the run again and runs its final action: a
+// moved next_action_at is progress, with the same attempt count.
+func TestProcessDueRunsForClock_ALeaseLeftByAnotherWorkerIsProgress(t *testing.T) {
+	mem := newMemStore()
+	markUncollectiblePolicy(mem)
+	store := &claimLeftByAnotherWorker{memStore: mem}
+	svc := NewService(store, &noopRetrier{}, nil)
+	mover := &capturingUncollect{}
+	svc.SetInvoiceUncollectibleMarker(mover)
+	run := exhaustedRun(t, mem, svc)
 
-// A final action that waits for the invoice grace moves the run's
-// next_action_at and keeps its attempt count. When the grace ends inside the
-// advance, the same advance runs the final action: a moved next_action_at is
-// progress.
-func TestProcessDueRunsForClock_GraceEndingInTheAdvanceRunsTheFinalAction(t *testing.T) {
-	h := newGraceWaitHarness(domain.SubActionCancel)
-	act := &graceThenAct{until: h.action.until}
-	h.svc.SetSubscriptionCanceler(act)
-	run := exhaustedRun(t, h.store, h.svc)
+	if _, errs := svc.ProcessDueRunsForClock(context.Background(), "t1", "clk", time.Now().UTC().Add(time.Hour), 20); len(errs) != 0 {
+		t.Fatalf("errors = %v, want none", errs)
+	}
+	if len(mover.calls) != 1 || mem.runs[run.ID].State != domain.DunningEscalated {
+		t.Errorf("final actions = %d, run %s; want 1 and escalated", len(mover.calls), mem.runs[run.ID].State)
+	}
+}
 
-	if _, errs := h.svc.ProcessDueRunsForClock(context.Background(), "t1", "clk", act.until.Add(time.Hour), 20); len(errs) != 0 {
-		t.Fatalf("errors: %v", errs)
-	}
-	if act.calls != 2 {
-		t.Errorf("final action calls = %d, want 2: the wait, then the action once the grace ended", act.calls)
-	}
-	if got := h.store.runs[run.ID].State; got != domain.DunningEscalated {
-		t.Errorf("run state = %s, want escalated", got)
-	}
+// A final action that fails keeps the run open (action_failed, due a day
+// later). On a clock the job returns it, once, with one attempt at the
+// action, so the advance fails and Retry advance tries it again; it does not
+// try the action once per simulated day inside the advance. In real time the
+// tick logs it and returns nothing.
+func TestProcessDueRunsForClock_AFailedFinalActionFailsTheAdvance(t *testing.T) {
+	t.Run("on a clock", func(t *testing.T) {
+		store := newMemStore()
+		markUncollectiblePolicy(store)
+		svc := NewService(store, &noopRetrier{}, nil)
+		mover := &capturingUncollect{err: errors.New("stripe blip")}
+		svc.SetInvoiceUncollectibleMarker(mover)
+		run := exhaustedRun(t, store, svc)
+
+		_, runErrs := svc.ProcessDueRunsForClock(context.Background(), "t1", "clk", time.Now().UTC().Add(5*24*time.Hour), 20)
+		if len(runErrs) != 1 || !errors.Is(runErrs[0], domain.ErrLeftForNextRun) {
+			t.Fatalf("errors = %v, want one ErrLeftForNextRun", runErrs)
+		}
+		const want = "Invoice inv_1: payment recovery's final action did not finish (its invoice could not be marked uncollectible), so its dunning run stays open. Retry advance tries the action again."
+		if got := errs.SummarizeForOperator(runErrs, ""); got != want {
+			t.Errorf("the operator reads:\n  %q\nwant\n  %q", got, want)
+		}
+		if len(mover.calls) != 1 {
+			t.Errorf("final action attempts = %d, want 1", len(mover.calls))
+		}
+		if got := store.runs[run.ID]; got.State != domain.DunningActive || got.Resolution != domain.ResolutionActionFailed {
+			t.Errorf("run = %s / %s, want active / action_failed", got.State, got.Resolution)
+		}
+	})
+	t.Run("in real time", func(t *testing.T) {
+		store := newMemStore()
+		markUncollectiblePolicy(store)
+		svc := NewService(store, &noopRetrier{}, nil)
+		svc.SetInvoiceUncollectibleMarker(&capturingUncollect{err: errors.New("stripe blip")})
+		exhaustedRun(t, store, svc)
+		// processed counts a step that returned nil, as today: the tick
+		// retries the action a day later and logs no error.
+		if n, runErrs := svc.ProcessDueRuns(context.Background(), "t1", 20); n != 1 || len(runErrs) != 0 {
+			t.Fatalf("processed %d, errors %v; want 1 and none: the tick retries it a day later", n, runErrs)
+		}
+	})
 }

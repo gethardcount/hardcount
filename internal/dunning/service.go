@@ -468,10 +468,9 @@ func (s *Service) StartDunning(ctx context.Context, tenantID string, invoiceID, 
 	return run, nil
 }
 
-// ProcessDueRuns finds runs due for action and executes retries —
-// CRON path. ADR-029 Phase 5: the cron's ListDueRuns excludes
-// dunning runs whose owning invoice's sub is clock-pinned; those go
-// through ProcessDueRunsForClock during catchup.
+// ProcessDueRuns takes each of the tenant's due runs one step, in real time
+// (the scheduler's tick). Runs on a test clock are not listed:
+// ProcessDueRunsForClock moves them when their clock advances.
 func (s *Service) ProcessDueRuns(ctx context.Context, tenantID string, limit int) (int, []error) {
 	if limit <= 0 {
 		limit = 20
@@ -493,10 +492,10 @@ func (s *Service) ProcessDueRuns(ctx context.Context, tenantID string, limit int
 	return processed, kept
 }
 
-// maxDunningCatchupIters is the most rounds a clock's dunning job runs in
+// maxDunningCatchupRounds is the most rounds a clock's dunning job runs in
 // one advance (ProcessDueRunsForClock): each round takes a due run one step,
-// so it is also the most steps one run takes.
-const maxDunningCatchupIters = 50
+// so it is also the most steps one run takes in an advance.
+const maxDunningCatchupRounds = 50
 
 // exhaustLease is how long a run whose retries are exhausted stays hidden from
 // both due-run pickers while its terminal actions run (SB-1/SB-2, 2026-10-08).
@@ -585,22 +584,24 @@ func (s *Service) finalRetryFailedAt(ctx context.Context, tenantID string, run d
 	return at
 }
 
-// ProcessDueRunsForClock is the catchup-path counterpart to ProcessDueRuns
-// (ADR-029 Phase 5): a clock's runs move only when the clock advances,
-// against its frozen_time, through the same step (processRun).
+// ProcessDueRunsForClock is ProcessDueRuns for a test clock's advance: a
+// clock's runs move only when the clock advances, against its frozen_time,
+// through the same step (processRun).
 //
-// One advance can take a run through several steps (retries, the final
-// actions, a grace wait), so the job works in rounds. Each round walks
-// every due run by (next_action_at, id) and takes each one a step, except a
-// run that has not moved since its last step: its attempt count and
-// next_action_at are as that step left them. The job ends when a round
-// finds nothing due. It fails, so the advance fails and Retry advance goes
-// on from there:
-//   - after a round in which a step returned an error;
-//   - when a round finds only runs that have not moved: no progress;
-//   - when runs are still due after maxDunningCatchupIters rounds.
+// One advance can take a run through several steps (retries, then the final
+// actions), so the job works in rounds. Each round walks every due run by
+// (next_action_at, id) and takes each one a step, except a run its last step
+// left as it found it: the same attempt count and next_action_at as when that
+// step began. The job ends when a round finds nothing due. It fails, so the
+// advance fails and Retry advance goes on from there:
+//   - after a round in which a step returned an error, among them a retry
+//     with no definite answer and a final action that failed;
+//   - when a round finds only runs their last step left as it found them;
+//   - when runs are still due after maxDunningCatchupRounds rounds.
 //
-// The last two are work left for the next run (domain.ErrLeftForNextRun).
+// The last two, the unanswered retry and the failed final action are
+// domain.ErrLeftForNextRun, each with a sentence for the operator
+// (leftForNextPass).
 func (s *Service) ProcessDueRunsForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time, limit int) (int, []error) {
 	if limit <= 0 {
 		limit = 20
@@ -608,11 +609,7 @@ func (s *Service) ProcessDueRunsForClock(ctx context.Context, tenantID, clockID 
 	list := func(ctx context.Context, after walk.Key, limit int) ([]domain.InvoiceDunningRun, error) {
 		return s.store.ListDueRunsForClock(ctx, tenantID, clockID, frozenTime, after, limit)
 	}
-	type place struct {
-		attempts int
-		next     int64 // next_action_at, in microseconds
-	}
-	lastStep := map[string]place{} // each run as its last step found it
+	lastStep := map[string]runPlace{} // each run as its last step found it
 	total := 0
 	for round := 0; ; round++ {
 		var due []domain.InvoiceDunningRun
@@ -621,7 +618,7 @@ func (s *Service) ProcessDueRunsForClock(ctx context.Context, tenantID, clockID 
 			if err != nil {
 				return total, []error{fmt.Errorf("list due runs for clock %s: %w", clockID, err)}
 			}
-			if prev, ok := lastStep[run.ID]; ok && prev == (place{run.AttemptCount, run.NextActionAt.UnixMicro()}) {
+			if unchangedSinceLastStep(lastStep, run) {
 				unmoved++
 				continue
 			}
@@ -629,24 +626,42 @@ func (s *Service) ProcessDueRunsForClock(ctx context.Context, tenantID, clockID 
 		}
 		if len(due) == 0 {
 			if unmoved > 0 {
-				return total, []error{fmt.Errorf("dunning for clock %s: %d due runs have not moved since their last step: %w",
-					clockID, unmoved, domain.ErrLeftForNextRun)}
+				return total, []error{&leftForNextPass{say: fmt.Sprintf(
+					"%d payment retries due in this advance did not move: each is as its last step found it. Retry advance tries them again.", unmoved)}}
 			}
 			return total, nil
 		}
-		if round == maxDunningCatchupIters {
-			return total, []error{fmt.Errorf("dunning for clock %s: %d runs still due after %d rounds: %w",
-				clockID, len(due)+unmoved, maxDunningCatchupIters, domain.ErrLeftForNextRun)}
+		if round == maxDunningCatchupRounds {
+			return total, []error{&leftForNextPass{say: fmt.Sprintf(
+				"%d payment retries are still due after %d rounds of this advance. Retry advance goes on with them.", len(due)+unmoved, maxDunningCatchupRounds)}}
 		}
 		for _, run := range due {
-			lastStep[run.ID] = place{run.AttemptCount, run.NextActionAt.UnixMicro()}
+			lastStep[run.ID] = placeOf(run)
 		}
-		n, errs := s.processRunsBatch(ctx, tenantID, due, true /* test-clock catchup */)
+		n, errs := s.processRunsBatch(ctx, tenantID, due, true /* a clock's advance */)
 		total += n
 		if len(errs) > 0 {
 			return total, errs
 		}
 	}
+}
+
+// runPlace is where a due run stands: its attempt count and its
+// next_action_at, in microseconds.
+type runPlace struct {
+	attempts int
+	next     int64
+}
+
+func placeOf(run domain.InvoiceDunningRun) runPlace {
+	return runPlace{run.AttemptCount, run.NextActionAt.UnixMicro()}
+}
+
+// unchangedSinceLastStep reports whether run stands where its last step in
+// this advance found it.
+func unchangedSinceLastStep(lastStep map[string]runPlace, run domain.InvoiceDunningRun) bool {
+	prev, ok := lastStep[run.ID]
+	return ok && prev == placeOf(run)
 }
 
 // dueRunKey is a run's place in the due list, which ListDueRunsForClock
@@ -793,7 +808,7 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 		}
 		stampAt := exhaustStampAt(run, run.NextActionAt, attemptAt, s.finalRetryFailedAt(ctx, tenantID, run))
 		run.NextActionAt = &lease
-		return s.exhaustRun(ctx, tenantID, run, policy, stampAt, attemptAt)
+		return s.exhaustRun(ctx, tenantID, run, policy, stampAt, attemptAt, isCatchup)
 	}
 
 	// Attempt retry
@@ -901,7 +916,11 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 				"final_attempt", run.AttemptCount+1 >= retries, "error", err)
 		}
 		retryPanic.Repanic()
-		return fmt.Errorf("retry run %s: no definite answer, so the attempt is not counted: %w: %w", run.ID, domain.ErrLeftForNextRun, retryErr)
+		return &leftForNextPass{
+			say: fmt.Sprintf("Invoice %s: a payment retry got no definite answer from Stripe, so it is not counted and is tried again (on a test clock, by Retry advance).",
+				invoiceRef(run)),
+			cause: fmt.Errorf("retry run %s: %w", run.ID, retryErr),
+		}
 	}
 
 	// Below Stripe's minimum charge: Stripe refused the amount, not the card,
@@ -933,11 +952,11 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	// invoice. A dunning retry closes the run as recovered only if the
 	// invoice it leaves behind is paid.
 	if errors.Is(retryErr, ErrPaymentInFlight) {
-		return s.retryInFlight(ctx, tenantID, run, policy, retryErr, now)
+		return s.retryInFlight(ctx, tenantID, run, policy, retryErr, now, isCatchup)
 	}
 
 	if retryErr != nil {
-		return s.retryFailed(ctx, tenantID, run, policy, retryErr, now)
+		return s.retryFailed(ctx, tenantID, run, policy, retryErr, now, isCatchup)
 	}
 	return s.retrySucceeded(ctx, tenantID, run, now)
 }
@@ -969,7 +988,7 @@ func nextActionAfterRetry(policy domain.DunningPolicy, attempt int, now time.Tim
 // no card, a card the retry skipped. It records the attempt's event,
 // reschedules the run with the customer's warning email in the same
 // transaction, and on the last attempt runs the final actions inline.
-func (s *Service) retryFailed(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, retryErr error, now time.Time) error {
+func (s *Service) retryFailed(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, retryErr error, now time.Time, isCatchup bool) error {
 	retries := policy.Retries()
 	run.State = domain.DunningActive // Will retry again later
 	slog.Warn("dunning retry failed",
@@ -1087,7 +1106,7 @@ func (s *Service) retryFailed(ctx context.Context, tenantID string, run domain.I
 	// retry that actually triggered the exhaustion, not orchestrator
 	// frozen_time.
 	if run.AttemptCount >= retries {
-		return s.exhaustRun(ctx, tenantID, run, policy, now, now)
+		return s.exhaustRun(ctx, tenantID, run, policy, now, now, isCatchup)
 	}
 	return nil
 }
@@ -1168,7 +1187,7 @@ func (s *Service) resolveAfterRetry(ctx context.Context, tenantID string, run do
 //
 // A settle that landed between the charge and this write (RetryInFlightPaymentMoved)
 // has already decided the attempt; retrySettledFirst reads which way.
-func (s *Service) retryInFlight(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, retryErr error, now time.Time) error {
+func (s *Service) retryInFlight(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, retryErr error, now time.Time, isCatchup bool) error {
 	var pi string
 	var re *RetryError
 	if errors.As(retryErr, &re) {
@@ -1200,7 +1219,7 @@ func (s *Service) retryInFlight(ctx context.Context, tenantID string, run domain
 			"run_id", run.ID, "invoice_id", run.InvoiceID, "payment_intent_id", pi)
 		return nil
 	case RetryInFlightPaymentMoved:
-		return s.retrySettledFirst(ctx, tenantID, run, policy, pi, now)
+		return s.retrySettledFirst(ctx, tenantID, run, policy, pi, now, isCatchup)
 	}
 	slog.Info("dunning retry is processing — the run waits for the payment's outcome",
 		"run_id", run.ID, "invoice_id", run.InvoiceID, "attempt", run.AttemptCount, "payment_intent_id", pi)
@@ -1229,7 +1248,7 @@ var errRetryPaymentFailed = errors.New("payment failed")
 // counted and the run keeps the schedule the pre-charge persist wrote (the
 // next retry, or the final action after the last), and the hold stays for
 // the stale-hold sweep.
-func (s *Service) retrySettledFirst(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, pi string, now time.Time) error {
+func (s *Service) retrySettledFirst(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, pi string, now time.Time, isCatchup bool) error {
 	if s.invoiceGet == nil {
 		return fmt.Errorf("dunning retry %d of run %s: its payment settled before the run write, and no invoice reader is wired to say how", run.AttemptCount, run.ID)
 	}
@@ -1247,7 +1266,7 @@ func (s *Service) retrySettledFirst(ctx context.Context, tenantID string, run do
 				failure = ferr
 			}
 		}
-		return s.retryFailed(ctx, tenantID, run, policy, failure, now)
+		return s.retryFailed(ctx, tenantID, run, policy, failure, now, isCatchup)
 	}
 	return fmt.Errorf("dunning retry %d of run %s: its payment %s left flight before the run write, and the invoice reads %s/%s; the run continues on its schedule",
 		run.AttemptCount, run.ID, pi, inv.Status, inv.PaymentStatus)
@@ -1263,7 +1282,7 @@ func (s *Service) retrySettledFirst(ctx context.Context, tenantID string, run do
 // action_failed re-attempt is scheduled from it, so the cadence never
 // collapses after an outage. Inline after the final retry, both are
 // that retry's instant.
-func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, stampAt, attemptAt time.Time) error {
+func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, stampAt, attemptAt time.Time, onClock bool) error {
 	ctx = s.bindForInvoice(ctx, tenantID, run.InvoiceID)
 	now := stampAt
 	if now.IsZero() {
@@ -1400,6 +1419,18 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 		return fmt.Errorf("dunning exhaust: read invoice %s for the paid re-check", run.InvoiceID)
 	}
 	actionFailed := invReadFailed
+	// failure says, in the operator's words, which part of the final action
+	// failed first; each failure is logged where it happens.
+	failure := ""
+	if invReadFailed {
+		failure = "its invoice could not be read"
+	}
+	fail := func(why string) {
+		if failure == "" {
+			failure = why
+		}
+		actionFailed = true
+	}
 
 	// applied is what the escalation email renders. It records whether each
 	// REQUESTED END STATE HOLDS — not whether this call performed the
@@ -1447,7 +1478,9 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 		} else {
 			subApplied, subFailed, subSettled, subWait := s.applySubscriptionAction(
 				subCtx, tenantID, policy.FinalSubscriptionAction, inv.SubscriptionID, run.InvoiceID)
-			actionFailed = actionFailed || subFailed
+			if subFailed {
+				fail("its subscription action failed")
+			}
 			invoiceSettled = subSettled
 			waitUntil = subWait
 			switch {
@@ -1487,7 +1520,7 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 		switch {
 		case err != nil:
 			slog.Warn("failed to re-read the invoice the dunning pause found settled", "invoice_id", run.InvoiceID, "error", err)
-			actionFailed = true
+			fail("its invoice could not be read again after the pause")
 		case fresh.Status == domain.InvoicePaid || fresh.PaymentStatus == domain.PaymentSucceeded:
 			_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionPaymentRecovered, "payment_recovered", nil)
 			return rerr
@@ -1495,7 +1528,7 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 			_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionInvoiceVoided, "invoice_voided", nil)
 			return rerr
 		default:
-			actionFailed = true
+			fail("the pause found its invoice settled, but it is neither paid nor voided")
 		}
 	}
 
@@ -1519,7 +1552,7 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 		fresh, err := s.invoiceGet.Get(ctx, tenantID, run.InvoiceID)
 		if err != nil {
 			slog.Warn("failed to re-read invoice after the dunning cancel", "invoice_id", run.InvoiceID, "error", err)
-			actionFailed = true
+			fail("its invoice could not be read again after the cancel")
 		} else if fresh.Status == domain.InvoiceVoided {
 			_, rerr := s.resolveListedRun(ctx, tenantID, run, domain.ResolutionInvoiceVoided, "invoice_voided", nil)
 			return rerr
@@ -1563,17 +1596,19 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 		case err != nil:
 			slog.WarnContext(ctx, "failed to mark invoice uncollectible after dunning exhausted",
 				"invoice_id", run.InvoiceID, "error", err)
-			actionFailed = true
+			fail("its invoice could not be marked uncollectible")
 		}
 		outcome.InvoiceWrittenOff = invApplied
 	}
 
 	if actionFailed {
-		// The terminal action errored — keep the run requeryable so the
-		// due-run picker re-attempts it (escalated runs are excluded from
-		// both pickers and would never retry). AttemptCount is unchanged, so
-		// the clock-catchup no-progress guard still exits — no infinite loop
-		// within an advance; the re-attempt lands on a later due tick.
+		// The final action failed. The run stays active, labelled
+		// action_failed, and is due again a day after this attempt: the
+		// due-run pickers skip escalated runs, so an escalated run would never
+		// be tried again. In real time that day is the re-attempt. On a clock
+		// the job returns the failure below, so the advance fails and Retry
+		// advance tries the action again, instead of trying it once per
+		// simulated day inside one advance.
 		run.State = domain.DunningActive
 		run.Resolution = domain.ResolutionActionFailed
 		run.ResolvedAt = nil
@@ -1597,6 +1632,13 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 			"run_id", run.ID, "invoice_id", run.InvoiceID,
 			"final_subscription_action", policy.FinalSubscriptionAction,
 			"final_invoice_action", policy.FinalInvoiceAction)
+		if onClock {
+			return &leftForNextPass{
+				say: fmt.Sprintf("Invoice %s: payment recovery's final action did not finish (%s), so its dunning run stays open. Retry advance tries the action again.",
+					invoiceRef(run), failure),
+				cause: fmt.Errorf("dunning run %s: final action: %s", run.ID, failure),
+			}
+		}
 		return nil
 	}
 
