@@ -26,7 +26,7 @@ test('a failed advance keeps its finished work, counted in plain words on the ca
 
   await page.goto(`/test-clocks/${clock.id}`)
   await expect(page.getByRole('heading', { level: 1, name: clock.name })).toBeVisible()
-  await expect(page.getByText('Work finished before the failure is kept.')).toBeVisible()
+  await expect(page.getByText('The work it finished is kept.')).toBeVisible()
   for (const label of ['Invoices generated', 'Charges attempted', 'Credit notes issued', 'Payment retry steps run']) {
     await expect(page.getByText(label, { exact: true })).toBeVisible()
   }

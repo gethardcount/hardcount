@@ -277,12 +277,12 @@ export default function TestClockDetailPage() {
             <div className="text-sm flex-1 min-w-0">
               <p className="font-medium text-destructive">The last advance stopped before it finished billing the skipped days.</p>
               {clock.last_failure_reason && (
-                <p className="text-xs text-muted-foreground mt-1.5 font-mono break-all">
+                <p className="text-xs text-muted-foreground mt-1.5 font-mono break-words">
                   Reason: {clock.last_failure_reason}
                 </p>
               )}
               <p className="text-muted-foreground mt-2">
-                Work finished before the failure is kept.
+                The work it finished is kept.
                 Click <span className="font-medium text-foreground">Retry advance</span> to carry on from where it stopped, or
                 delete this clock to start over.
               </p>
