@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/leader"
 )
 
@@ -207,4 +208,24 @@ func TestRun_PollsNoSlowerThanMaxPoll(t *testing.T) {
 	// Structural pin — the clamp lives in Run: poll = min(interval, MaxPoll).
 	// Exercised with a real gate in leader's integration tests; here we
 	// pin the constant so a future bump is a conscious change.
+}
+
+// A tick's work runs on a ctx that records real time (clock.Decision), not on
+// one with no decision, so code below it never meets an undecided ctx.
+func TestRun_TickRunsInRealTime(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	decided := make(chan bool, 1)
+	work := func(ctx context.Context) {
+		s, ok := clock.Decision(ctx)
+		select {
+		case decided <- ok && s == (clock.Sim{}):
+		default:
+		}
+		cancel()
+	}
+	Run(ctx, leader.Role("test_worker"), 5*time.Millisecond, leader.AlwaysLead{}, work, nil)
+	if !<-decided {
+		t.Error("the tick's ctx does not record real time")
+	}
 }
