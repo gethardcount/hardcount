@@ -642,6 +642,10 @@ type InvoiceWriter interface {
 	// ChargeHoldStateOf reads the invoice's hold outside any lock. Only to
 	// say what is left of a charge that was not made; never a gate.
 	ChargeHoldStateOf(ctx context.Context, tenantID, id string) (domain.ChargeHoldState, error)
+	// CollectionPausedOf reads, outside any lock, whether the invoice's
+	// subscription has collection paused at the invoice's own now. Only to
+	// say what is left of a charge that was not made; never a gate.
+	CollectionPausedOf(ctx context.Context, tenantID, id string) (bool, error)
 	ListAutoChargePending(ctx context.Context, after walk.Key, limit int) ([]domain.Invoice, error)
 	// ListAutoChargePendingForClock is the catchup-path counterpart to
 	// ListAutoChargePending — returns invoices whose owning subscription
@@ -4935,6 +4939,12 @@ func (e *Engine) processAutoCharge(ctx context.Context, inv domain.Invoice, at *
 		return charged, errs
 	}
 	if !hold.Held() {
+		// Refused: a charge attempt holds the invoice or its result is not
+		// known, or nothing is left to charge (settled, out of the queue,
+		// collection paused). chargeNotMadeFor reads which.
+		if nerr := e.chargeNotMadeFor(ctx, inv, "another charge of it was in progress just then", errChargeClaimRefused); nerr != nil {
+			errs = append(errs, nerr)
+		}
 		return charged, errs
 	}
 	// Every path below that sends no charge releases the hold (by its

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
@@ -198,9 +199,8 @@ func TestCollect_WhatTheOperatorReads(t *testing.T) {
 }
 
 // A charge whose transient answer kept the hold: the next run's claim is
-// refused, and today that run returns nothing and charges nothing (a refused
-// claim is skipped quietly; its own change makes it an error on a clock).
-func TestCollect_KeptHoldIsRefusedQuietlyOnTheNextRun(t *testing.T) {
+// refused, and that run says so too, charging nothing.
+func TestCollect_KeptHoldIsReportedOnTheNextRunToo(t *testing.T) {
 	inv, applier, _, engine := leftHarness(t)
 	applier.applyCents = 0
 	ch := &answerCharger{store: inv, err: payment.ErrPaymentTransient, keepHold: true}
@@ -211,7 +211,83 @@ func TestCollect_KeptHoldIsRefusedQuietlyOnTheNextRun(t *testing.T) {
 		t.Fatalf("first run: errors = %v, want the unresolved attempt", runErrs)
 	}
 	charged, runErrs := engine.RetryPendingChargesForClock(ctx, "t1", "tc_1", 50)
-	if charged != 0 || len(runErrs) != 0 {
-		t.Errorf("next run: charged %d, errors %v; want 0 and none, as the code does today", charged, runErrs)
+	if charged != 0 || len(runErrs) != 1 || !errors.Is(runErrs[0], domain.ErrLeftForNextRun) {
+		t.Errorf("next run: charged %d, errors %v; want 0 and the unresolved attempt", charged, runErrs)
+	}
+}
+
+// claimHook runs before on the store, then claims as the store does, refusing
+// an invoice whose collection is paused as the real claim does.
+type claimHook struct {
+	*mockInvoices
+	before func(*mockInvoices)
+}
+
+func (c *claimHook) ClaimAutoCharge(ctx context.Context, tenantID, id string) (domain.ChargeHold, error) {
+	if c.before != nil {
+		c.before(c.mockInvoices)
+	}
+	if c.paused[id] {
+		return domain.ChargeHold{}, nil
+	}
+	return c.mockInvoices.ClaimAutoCharge(ctx, tenantID, id)
+}
+
+// A run whose claim of a listed invoice is refused says what is left, from the
+// invoice as stored: an earlier attempt that holds it or whose result is not
+// known is an error on a clock, so the advance does not end ready with the
+// invoice uncharged; an invoice settled meanwhile, or whose collection is
+// paused, leaves nothing to do. The real-time run returns none of them.
+func TestCollect_RefusedClaimSaysWhatIsLeft(t *testing.T) {
+	const unresolved = "Invoice HC-1: an earlier charge attempt is not resolved yet. Hardcount reads its result from Stripe on a later billing run, and a run after that charges what is left (on a test clock, Retry advance)."
+	for _, c := range []struct {
+		name   string
+		before func(*mockInvoices)
+		want   string // "" = no error
+	}{
+		{"held by an earlier attempt", func(m *mockInvoices) {
+			if m.claimed == nil {
+				m.claimed = map[string]domain.ChargeHold{}
+			}
+			m.claimed["inv_1"] = domain.ChargeHold{Until: time.Now().Add(domain.ChargeHoldTTL)}
+		}, unresolved},
+		{"its charge outcome unknown", func(m *mockInvoices) { m.stampPaymentStatus("inv_1", domain.PaymentUnknown) }, unresolved},
+		{"paid meanwhile", func(m *mockInvoices) {
+			m.invoices[0].Status, m.invoices[0].PaymentStatus = domain.InvoicePaid, domain.PaymentSucceeded
+		}, ""},
+		{"collection paused", func(m *mockInvoices) { m.paused = map[string]bool{"inv_1": true} }, ""},
+	} {
+		setup := func() (*recordingCharger, *Engine) {
+			inv := &mockInvoices{invoices: []domain.Invoice{pendingInvoice()}, clockQueue: map[string]bool{"inv_1": true}}
+			charger := &recordingCharger{store: inv}
+			pms := &fakePaymentSetups{ready: true, stripeCustomerID: "cus_stripe_1"}
+			engine := wireBaseTax(NewEngine(&mockSubs{cycleUpdated: make(map[string]bool)}, &mockUsage{}, &mockPricing{}, &claimHook{mockInvoices: inv, before: c.before}, nil, &mockSettings{}, pms, charger, billingTestClock()))
+			return charger, engine
+		}
+		t.Run(c.name+", on a clock", func(t *testing.T) {
+			charger, engine := setup()
+			_, runErrs := engine.RetryPendingChargesForClock(postgres.WithLivemode(context.Background(), false), "t1", "tc_1", 50)
+			if len(charger.got) != 0 {
+				t.Fatalf("charged %d times, want none", len(charger.got))
+			}
+			if c.want == "" {
+				if len(runErrs) != 0 {
+					t.Fatalf("errors = %v, want none: nothing is left to charge", runErrs)
+				}
+				return
+			}
+			if len(runErrs) != 1 || !errors.Is(runErrs[0], domain.ErrLeftForNextRun) {
+				t.Fatalf("errors = %v, want one ErrLeftForNextRun", runErrs)
+			}
+			if got := errs.SummarizeForOperator(runErrs, ""); got != c.want {
+				t.Errorf("the operator reads:\n  %q\nwant\n  %q", got, c.want)
+			}
+		})
+		t.Run(c.name+", in real time", func(t *testing.T) {
+			_, engine := setup()
+			if _, runErrs := engine.RetryPendingCharges(postgres.WithLivemode(context.Background(), true), 50, nil); len(runErrs) != 0 {
+				t.Fatalf("errors = %v, want none: the run logs it", runErrs)
+			}
+		})
 	}
 }

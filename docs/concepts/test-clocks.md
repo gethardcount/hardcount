@@ -86,9 +86,10 @@ says what to do.
   jobs after card charges (relief credit notes waiting for a settle,
   payment retries, credit expiry) do not run for that clock.
 - An earlier charge attempt is not resolved yet (Stripe's answer was
-  unclear, or it refused the key while charging): Hardcount reads its
-  result from Stripe on a later billing run, and Retry advance after that
-  charges what is left. If the key was refused, fix it first.
+  unclear, it refused the key while charging, or another charge of the
+  invoice was still holding it): Hardcount reads its result from Stripe on
+  a later billing run, and Retry advance after that charges what is left.
+  If the key was refused, fix it first.
 
 Outside a clock, a later billing run does the same work (hourly, or every 5
 minutes when `APP_ENV` is `local`). A card decline is not a failure: the

@@ -935,11 +935,13 @@ type mockInvoices struct {
 	clockQueue map[string]bool
 	// holdReadErr fails ChargeHoldStateOf.
 	holdReadErr error
-	claimed     map[string]domain.ChargeHold
-	holds       int      // tokens handed out so far
-	released    []string // invoice ids released, in order
-	invoices    []domain.Invoice
-	lineItems   []domain.InvoiceLineItem
+	// paused holds the ids whose collection is paused (CollectionPausedOf).
+	paused    map[string]bool
+	claimed   map[string]domain.ChargeHold
+	holds     int      // tokens handed out so far
+	released  []string // invoice ids released, in order
+	invoices  []domain.Invoice
+	lineItems []domain.InvoiceLineItem
 	// createErr, when set, is returned by CreateInvoiceWithLineItems[Tx] instead
 	// of inserting: it drives the insert-failure tests.
 	createErr error
@@ -1068,6 +1070,13 @@ func (m *mockInvoices) ClaimAutoCharge(_ context.Context, _, id string) (domain.
 		}
 	}
 	return domain.ChargeHold{}, nil
+}
+
+// CollectionPausedOf answers from the fake's paused set.
+func (m *mockInvoices) CollectionPausedOf(_ context.Context, _, id string) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	return m.paused[id], nil
 }
 
 // ChargeHoldStateOf answers from the fake's holds: held is live, else none;

@@ -2775,6 +2775,29 @@ func (s *PostgresStore) ChargeHoldStateOf(ctx context.Context, tenantID, id stri
 	return state, err
 }
 
+// CollectionPausedOf reports, outside any lock, whether the invoice's
+// subscription has collection paused at the invoice's own now: the predicate
+// the claim and the sweeps' lists read (notPausedForCollection at
+// invoiceClockNowSQL). Only to say what is left of a charge that was not
+// made; never a gate.
+func (s *PostgresStore) CollectionPausedOf(ctx context.Context, tenantID, id string) (bool, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return false, err
+	}
+	defer postgres.Rollback(tx)
+	var paused bool
+	if err := tx.QueryRowContext(ctx,
+		`SELECT NOT (`+notPausedForCollection("invoices", invoiceClockNowSQL)+`) FROM invoices WHERE id = $1`, id,
+	).Scan(&paused); err != nil {
+		if err == sql.ErrNoRows {
+			return false, errs.ErrNotFound
+		}
+		return false, fmt.Errorf("read collection pause: %w", err)
+	}
+	return paused, nil
+}
+
 // ConfirmChargeHold is the charge's re-check right before it sends
 // (ADR-127): true only while the owner's hold is still the one it wrote and
 // has at least domain.ChargeSendMargin left, the charge counter is still the

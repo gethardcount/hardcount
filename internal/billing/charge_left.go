@@ -14,9 +14,14 @@ import (
 // not charge it, read from the invoice as it is stored now.
 type chargeLeft int
 
+// errChargeClaimRefused is why a run that found an invoice already held did
+// not charge it.
+var errChargeClaimRefused = errors.New("the invoice's charge claim was refused")
+
 const (
 	// nothingLeft: no later run charges it. It is no longer finalized and
-	// pending (paid, voided, failed into dunning), or it left the queue.
+	// pending (paid, voided, failed into dunning), it left the queue, or its
+	// collection is paused (the run after the pause ends charges it).
 	nothingLeft chargeLeft = iota
 	// claimableAgain: it is queued, pending, with no hold, so a later run
 	// claims and charges it.
@@ -30,9 +35,10 @@ const (
 	leftUnreadable
 )
 
-// chargeLeftOf answers chargeLeft from the invoice and its hold as stored.
-// It is the claim's own predicate (ClaimAutoCharge), read rather than taken.
-func chargeLeftOf(inv domain.Invoice, hold domain.ChargeHoldState) chargeLeft {
+// chargeLeftOf answers chargeLeft from the invoice, its hold and its pause as
+// stored. It is the claim's own predicate (ClaimAutoCharge), read rather than
+// taken.
+func chargeLeftOf(inv domain.Invoice, hold domain.ChargeHoldState, paused bool) chargeLeft {
 	switch {
 	case inv.Status != domain.InvoiceFinalized:
 		return nothingLeft
@@ -42,6 +48,8 @@ func chargeLeftOf(inv domain.Invoice, hold domain.ChargeHoldState) chargeLeft {
 		return nothingLeft
 	case hold != domain.ChargeHoldNone:
 		return attemptUnresolved
+	case paused:
+		return nothingLeft
 	default:
 		return claimableAgain
 	}
@@ -92,11 +100,16 @@ func (e *Engine) chargeNotMadeFor(ctx context.Context, inv domain.Invoice, why s
 		notMade.invoice = inv.ID
 	}
 	fresh, err := e.invoices.GetInvoice(ctx, inv.TenantID, inv.ID)
+	var hold domain.ChargeHoldState
 	if err == nil {
-		var hold domain.ChargeHoldState
-		if hold, err = e.invoices.ChargeHoldStateOf(ctx, inv.TenantID, inv.ID); err == nil {
-			notMade.left = chargeLeftOf(fresh, hold)
-		}
+		hold, err = e.invoices.ChargeHoldStateOf(ctx, inv.TenantID, inv.ID)
+	}
+	var paused bool
+	if err == nil {
+		paused, err = e.invoices.CollectionPausedOf(ctx, inv.TenantID, inv.ID)
+	}
+	if err == nil {
+		notMade.left = chargeLeftOf(fresh, hold, paused)
 	}
 	if err != nil {
 		slog.WarnContext(ctx, "auto-charge: could not read what is left of a charge that was not made", "invoice_id", inv.ID, "error", err)
