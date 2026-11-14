@@ -141,25 +141,35 @@ func TestKeyChange_WritesItsAuditRow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
+	// A rotation with a grace, then one that revokes the old key at once: each
+	// row says what happened to the old key.
 	rotated, err := keys.RotateKey(ctx, tenantID, created.Key.ID, auth.RotateKeyInput{ExpiresInSeconds: 60})
 	if err != nil {
 		t.Fatalf("rotate: %v", err)
 	}
-	if _, err := keys.RevokeKey(ctx, tenantID, rotated.NewKey.ID); err != nil {
+	rotatedNow, err := keys.RotateKey(ctx, tenantID, rotated.NewKey.ID, auth.RotateKeyInput{})
+	if err != nil {
+		t.Fatalf("rotate at once: %v", err)
+	}
+	if _, err := keys.RevokeKey(ctx, tenantID, rotatedNow.NewKey.ID); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
 	// Refused: the key is already revoked.
-	if _, err := keys.RevokeKey(ctx, tenantID, rotated.NewKey.ID); !errors.Is(err, errs.ErrNotFound) {
+	if _, err := keys.RevokeKey(ctx, tenantID, rotatedNow.NewKey.ID); !errors.Is(err, errs.ErrNotFound) {
 		t.Fatalf("revoke a revoked key: got %v, want not found", err)
 	}
-	if _, err := keys.RotateKey(ctx, tenantID, rotated.NewKey.ID, auth.RotateKeyInput{}); !errors.Is(err, errs.ErrInvalidState) {
+	if _, err := keys.RotateKey(ctx, tenantID, rotatedNow.NewKey.ID, auth.RotateKeyInput{}); !errors.Is(err, errs.ErrInvalidState) {
 		t.Fatalf("rotate a revoked key: got %v, want invalid state", err)
 	}
 
+	stamp := func(at *time.Time) string { return at.UTC().Format(time.RFC3339Nano) }
 	want := []auditRow{
 		{action: domain.AuditActionCreate, resourceID: created.Key.ID, label: "CI", metadata: map[string]any{"key_type": "ingest", "livemode": false}},
-		{action: domain.AuditActionRotate, resourceID: rotated.NewKey.ID, label: "CI", metadata: map[string]any{"key_type": "ingest", "old_key_id": created.Key.ID}},
-		{action: domain.AuditActionRevoke, resourceID: rotated.NewKey.ID, label: "CI", metadata: map[string]any{"key_type": "ingest"}},
+		{action: domain.AuditActionRotate, resourceID: rotated.NewKey.ID, label: "CI", metadata: map[string]any{"key_type": "ingest", "old_key_id": created.Key.ID,
+			"old_key_outcome": "expires", "old_key_stops_at": stamp(rotated.OldKey.ExpiresAt)}},
+		{action: domain.AuditActionRotate, resourceID: rotatedNow.NewKey.ID, label: "CI", metadata: map[string]any{"key_type": "ingest", "old_key_id": rotated.NewKey.ID,
+			"old_key_outcome": "revoked", "old_key_stops_at": stamp(rotatedNow.OldKey.RevokedAt)}},
+		{action: domain.AuditActionRevoke, resourceID: rotatedNow.NewKey.ID, label: "CI", metadata: map[string]any{"key_type": "ingest"}},
 	}
 	got := apiKeyAuditRows(t, db, tenantID)
 	if len(got) != len(want) {
@@ -175,8 +185,8 @@ func TestKeyChange_WritesItsAuditRow(t *testing.T) {
 		}
 	}
 
-	secrets := map[string]string{"the first raw key": created.RawKey, "the replacement's raw key": rotated.RawKey}
-	for _, k := range []auth.CreateKeyResult{created, {Key: rotated.NewKey}} {
+	secrets := map[string]string{"the first raw key": created.RawKey, "the replacement's raw key": rotated.RawKey, "the second replacement's raw key": rotatedNow.RawKey}
+	for _, k := range []auth.CreateKeyResult{created, {Key: rotated.NewKey}, {Key: rotatedNow.NewKey}} {
 		hash, salt := storedHashAndSalt(t, db, k.Key.ID)
 		secrets[k.Key.ID+"'s hash"], secrets[k.Key.ID+"'s salt"] = hash, salt
 	}
@@ -186,6 +196,49 @@ func TestKeyChange_WritesItsAuditRow(t *testing.T) {
 				t.Errorf("row %d (%s) holds %s", i, r.action, what)
 			}
 		}
+	}
+}
+
+// A rotation copies the old key's name, type and expiry as they are, and
+// checks none of them again: create's checks are for a create request. An
+// earlier version could store a name with surrounding spaces, or longer than
+// a new key may have; the replacement keeps it unchanged.
+func TestRotateKey_CopiesTheOldKeyAsItIs(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	tenantID := testutil.CreateTestTenant(t, db, "Rotate Copies")
+	ctx := postgres.WithLivemode(t.Context(), false)
+	keys := auth.NewService(db, audit.NewLogger(db))
+
+	expiresAt := time.Now().UTC().Add(48 * time.Hour).Truncate(time.Microsecond)
+	created, err := keys.CreateKey(ctx, tenantID, auth.CreateKeyInput{Name: "CI", KeyType: auth.KeyTypeIngest, ExpiresAt: &expiresAt})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	stored := "  " + strings.Repeat("n", 120) + "  "
+	tx, err := db.BeginTx(t.Context(), postgres.TxBypass, "")
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if _, err := tx.Exec(`UPDATE api_keys SET name = $1 WHERE id = $2`, stored, created.Key.ID); err != nil {
+		postgres.Rollback(tx)
+		t.Fatalf("store the old name: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	rotated, err := keys.RotateKey(ctx, tenantID, created.Key.ID, auth.RotateKeyInput{})
+	if err != nil {
+		t.Fatalf("rotate: %v", err)
+	}
+	if got := rotated.NewKey.Name; got != stored {
+		t.Errorf("the replacement's name is %q, want the old key's %q", got, stored)
+	}
+	if got := rotated.NewKey.KeyType; got != string(auth.KeyTypeIngest) {
+		t.Errorf("the replacement's type is %s, want ingest", got)
+	}
+	if got := rotated.NewKey.ExpiresAt; got == nil || !got.Equal(expiresAt) {
+		t.Errorf("the replacement expires at %v, want the old key's %v", got, expiresAt)
 	}
 }
 

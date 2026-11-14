@@ -27,17 +27,19 @@ type unavailableError struct {
 func (e unavailableError) Error() string { return e.msg + ": " + e.err.Error() }
 func (e unavailableError) Unwrap() error { return e.err }
 
-// Authenticate resolves r's credentials to the caller's context. The
-// session cookie comes first and takes precedence when both are present, so a
-// browser tab with a stale Authorization header cannot bypass session
-// revocation by accident. A cookie that is present but not valid (an ended or
-// unknown session) falls through to the API key (apiKeyFromHeaders), so a
-// stale cookie does not block a valid key on the same request; with no key,
-// Authenticate then returns ErrNoCredentials, as it does when the request
-// carries neither. A key's error is returned as ValidateKey gave it:
-// auth.ErrInvalidKey, wrapped, for a key that is not valid. A store failure,
-// for the cookie or the key, returns an unavailableError: no verdict on the
-// credential.
+// Authenticate resolves r's credentials to the caller's context. A session
+// cookie that resolves is the caller, whatever key the request also carries.
+// A cookie that does not resolve (an ended or unknown session) falls through
+// to the API key (apiKeyFromHeaders), so a stale cookie does not block a valid
+// key on the same request; with no key, Authenticate returns
+// ErrNoCredentials, as it does when the request carries neither. A key's
+// error is returned as ValidateKey gave it: auth.ErrInvalidKey, wrapped, for
+// a key that is not valid. A store failure, for the cookie or the key,
+// returns an unavailableError: no verdict on the credential.
+//
+// The context names one caller: its tenant, and the session's user or the
+// key, the other set to "", whatever r's context carried before. The event
+// stream re-runs Authenticate on its own request and compares the two.
 func Authenticate(r *http.Request, sessSvc *Service, keySvc *auth.Service) (context.Context, error) {
 	ctx := r.Context()
 	if c, err := r.Cookie(CookieName); err == nil && c.Value != "" {
@@ -67,6 +69,7 @@ func Authenticate(r *http.Request, sessSvc *Service, keySvc *auth.Service) (cont
 		return nil, unavailableError{msg: "api key validation unavailable", err: err}
 	}
 	ctx = auth.WithTenantID(ctx, key.TenantID)
+	ctx = auth.WithUserID(ctx, "")
 	ctx = auth.WithKeyID(ctx, key.ID)
 	ctx = auth.WithKeyType(ctx, auth.KeyType(key.KeyType))
 	ctx = postgres.WithLivemode(ctx, key.Livemode)
@@ -105,6 +108,7 @@ func MiddlewareOrAPIKey(sessSvc *Service, keySvc *auth.Service) func(http.Handle
 func applyToCtx(ctx context.Context, s Session) context.Context {
 	ctx = auth.WithTenantID(ctx, s.TenantID)
 	ctx = auth.WithUserID(ctx, s.UserID)
+	ctx = auth.WithKeyID(ctx, "")
 	// A session holds the KeyTypeSession permissions: roles are recorded but
 	// not enforced (ADR-081).
 	ctx = auth.WithKeyType(ctx, auth.KeyTypeSession)

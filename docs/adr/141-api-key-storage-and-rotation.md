@@ -62,7 +62,7 @@ Before this decision, the rules were in several places and some disagreed:
   deleted any answer kept before.
 - **Authentication.** `session.Authenticate` is the one function that turns
   a request's credentials into a caller; the event stream re-runs it every
-  15 seconds and closes on a verdict.
+  15 seconds and closes unless it names the caller that opened the stream.
 
 ## Why this design
 

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"time"
@@ -24,22 +25,34 @@ func eventStreamRoute(h *webhook.Handler, sessSvc *session.Service, authSvc *aut
 	}
 }
 
-// streamCredentialStopped is an open stream's re-check of its credential: it
-// runs session.Authenticate on the stream's request. Two answers are verdicts
-// that the credential stopped working: session.ErrNoCredentials (the session
-// ended and the request sends no key) and auth.ErrInvalidKey (the key was
-// revoked or has expired). Any other error is no verdict, a store failure,
-// and is returned for the stream to log.
+// streamCredentialStopped is an open stream's re-check of its caller: it runs
+// session.Authenticate on the stream's request, and the stream goes on only
+// while the answer is the caller that opened it, the same tenant and the same
+// session user or key. A request can carry a cookie and a key: once the
+// session ends the key answers, and it can be another caller, in another
+// tenant. session.ErrNoCredentials (the session ended and no key was sent)
+// and auth.ErrInvalidKey (the key was revoked or has expired) are verdicts
+// too. Any other error is no verdict, a store failure, and is returned for
+// the stream to log.
 func streamCredentialStopped(sessSvc *session.Service, authSvc *auth.Service) func(*http.Request) (bool, error) {
 	return func(r *http.Request) (bool, error) {
-		_, err := session.Authenticate(r, sessSvc, authSvc)
+		ctx, err := session.Authenticate(r, sessSvc, authSvc)
 		switch {
 		case err == nil:
-			return false, nil
+			return callerOf(ctx) != callerOf(r.Context()), nil
 		case errors.Is(err, session.ErrNoCredentials), errors.Is(err, auth.ErrInvalidKey):
 			return true, nil
 		default:
 			return false, err
 		}
 	}
+}
+
+// streamCaller is who a request's credentials name: the tenant, and the
+// session's user or the key. Authenticate sets all three, the one it does not
+// have as "".
+type streamCaller struct{ tenantID, userID, keyID string }
+
+func callerOf(ctx context.Context) streamCaller {
+	return streamCaller{auth.TenantID(ctx), auth.UserID(ctx), auth.KeyID(ctx)}
 }

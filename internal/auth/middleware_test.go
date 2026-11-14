@@ -22,7 +22,7 @@ func guarded(t *testing.T, mw func(http.Handler) http.Handler, kt KeyType, metho
 }
 
 func TestRequire_SecretKeyHasFullAccess(t *testing.T) {
-	for _, perm := range everyPermission {
+	for _, perm := range allPermissions {
 		t.Run(string(perm), func(t *testing.T) {
 			if code, _, _ := guarded(t, Require(perm), KeyTypeSecret, "GET"); code != http.StatusOK {
 				t.Errorf("secret key should have %s, got status %d", perm, code)
@@ -35,7 +35,7 @@ func TestRequire_SecretKeyHasFullAccess(t *testing.T) {
 // missing-permission 403 on everything else, with the same message a
 // secret key would get for a permission it lacked.
 func TestRequire_IngestKeyOnlySendsUsage(t *testing.T) {
-	for _, perm := range everyPermission {
+	for _, perm := range allPermissions {
 		t.Run(string(perm), func(t *testing.T) {
 			code, body, reached := guarded(t, Require(perm), KeyTypeIngest, "POST")
 			if perm == PermUsageIngest {
@@ -56,23 +56,23 @@ func TestRequire_IngestKeyOnlySendsUsage(t *testing.T) {
 }
 
 func TestRequireMethod_GETUsesReadPOSTUsesWrite(t *testing.T) {
-	// An ingest key holds usage:ingest but NOT customer:write, so
-	// RequireMethod(usage:ingest, customer:write) passes read methods (arg0
-	// held) and 403s write methods (arg1 absent) — isolating
-	// GET/HEAD/OPTIONS→arg0 and POST/PUT/PATCH/DELETE→arg1.
+	// RequireMethod(read, write) checks read for GET, HEAD and OPTIONS and
+	// write for the rest. An ingest key holds usage:ingest and not
+	// customer:write, so with those two the read methods pass and the write
+	// methods get 403.
 	mw := RequireMethod(PermUsageIngest, PermCustomerWrite)
 	cases := []struct {
 		method string
 		want   int
 		why    string
 	}{
-		{"GET", http.StatusOK, "GET → arg0 (usage:ingest) held"},
-		{"HEAD", http.StatusOK, "HEAD → arg0 held"},
-		{"OPTIONS", http.StatusOK, "OPTIONS → arg0 held"},
-		{"POST", http.StatusForbidden, "POST → arg1 (customer:write) absent"},
-		{"PUT", http.StatusForbidden, "PUT → arg1 absent"},
-		{"PATCH", http.StatusForbidden, "PATCH → arg1 absent"},
-		{"DELETE", http.StatusForbidden, "DELETE → arg1 absent"},
+		{"GET", http.StatusOK, "the read permission (usage:ingest) is held"},
+		{"HEAD", http.StatusOK, "the read permission is held"},
+		{"OPTIONS", http.StatusOK, "the read permission is held"},
+		{"POST", http.StatusForbidden, "the write permission (customer:write) is not held"},
+		{"PUT", http.StatusForbidden, "the write permission is not held"},
+		{"PATCH", http.StatusForbidden, "the write permission is not held"},
+		{"DELETE", http.StatusForbidden, "the write permission is not held"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.method+"_"+tc.why, func(t *testing.T) {

@@ -161,6 +161,38 @@ func TestE2E_EventStream_ClosesWhenItsSessionEnds(t *testing.T) {
 	waitClosed(t, lines, "its session ended")
 }
 
+// A stream is its opener's. Opened with the session cookie and, beside it, a
+// key that still works, it ends when the session ends: the key names another
+// caller, whether in another account or in the same one.
+func TestE2E_EventStream_ClosesWhenItsSessionEndsWithAnotherKeyBeside(t *testing.T) {
+	for _, c := range []struct {
+		name  string
+		other func(t *testing.T, db *postgres.DB, rig *streamRig) string
+	}{
+		{"another account's key", func(t *testing.T, db *postgres.DB, _ *streamRig) string {
+			return createAPIKeyWithMode(t, db, testutil.CreateTestTenant(t, db, "Other Co"), false)
+		}},
+		{"a key of the same account", func(t *testing.T, _ *postgres.DB, rig *streamRig) string {
+			_, raw := rig.createKey(t)
+			return raw
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			db := testutil.SetupTestDB(t)
+			rig := newStreamRig(t, db, db)
+			otherKey := c.other(t, db, rig)
+			lines := rig.open(t, func(r *http.Request) {
+				r.AddCookie(rig.owner)
+				r.Header.Set("Authorization", "Bearer "+otherKey)
+			})
+			rig.waitForFrame(t, lines, "evt_before_logout", true)
+
+			flowDo(t, rig.api, "POST", "/v1/auth/logout", flowReq{cookie: rig.owner}).want(t, 204, "log out the stream's session")
+			waitClosed(t, lines, "its session ended")
+		})
+	}
+}
+
 // A check that reaches no verdict does not end the stream. The stream's
 // credential store goes down after it opens (its pool is closed); the next
 // checks fail, and the stream still delivers.
