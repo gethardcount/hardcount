@@ -4532,7 +4532,7 @@ func (e *Engine) planRelief(ctx context.Context, sub domain.Subscription, in can
 		}
 		if voidable {
 			p.voids = append(p.voids, src)
-			totalUnused = max(0, totalUnused-src.SubtotalCents)
+			totalUnused = max(0, totalUnused-src.PricedCents())
 			continue
 		}
 		allocate = append(allocate, src)
