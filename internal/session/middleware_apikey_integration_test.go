@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testutil"
@@ -30,7 +31,7 @@ func keyRequest(header, key string) *http.Request {
 
 func TestMiddlewareOrAPIKey_APIKey(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	keys := auth.NewService(auth.NewPostgresStore(db))
+	keys := auth.NewService(db, audit.NewLogger(db))
 	tenantID := testutil.CreateTestTenant(t, db, "Session API Key")
 	created, err := keys.CreateKey(postgres.WithLivemode(t.Context(), false), tenantID, auth.CreateKeyInput{Name: "CI", KeyType: auth.KeyTypeSecret})
 	if err != nil {
@@ -84,7 +85,7 @@ func TestMiddlewareOrAPIKey_APIKey(t *testing.T) {
 	t.Run("the database is down", func(t *testing.T) {
 		down := testutil.OpenTracedDB(t, nil)
 		_ = down.Pool.Close()
-		rec, seen := serve(auth.NewService(auth.NewPostgresStore(down)), keyRequest("Authorization", created.RawKey))
+		rec, seen := serve(auth.NewService(down, audit.NewLogger(down)), keyRequest("Authorization", created.RawKey))
 		body := rec.Body.String()
 		if rec.Code != http.StatusServiceUnavailable || seen != nil {
 			t.Fatalf("got %d %s (reached=%v), want 503", rec.Code, body, seen != nil)

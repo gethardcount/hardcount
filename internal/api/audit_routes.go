@@ -210,9 +210,9 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 	{"DELETE", "/v1/members/{userID}"}:          explicit("dashmembers.Handler.removeMember → Log(member.removed, user) — revokes the target's sessions."),
 
 	// --- API keys -------------------------------------------------------
-	{"POST", "/v1/api-keys"}:             explicit("auth.Handler.create → Log(create, api_key)."),
-	{"DELETE", "/v1/api-keys/{id}"}:      explicit("auth.Handler.revoke → Log(revoke, api_key)."),
-	{"POST", "/v1/api-keys/{id}/rotate"}: explicit("auth.Handler.rotate → Log(rotate, api_key)."),
+	{"POST", "/v1/api-keys"}:             explicit("auth.Service.CreateKey → LogInTx(create, api_key) on the key's own tx."),
+	{"DELETE", "/v1/api-keys/{id}"}:      explicit("auth.Service.RevokeKey → LogInTx(revoke, api_key) on the revocation's tx."),
+	{"POST", "/v1/api-keys/{id}/rotate"}: explicit("auth.Service.RotateKey → LogInTx(rotate, api_key) on the rotation's one tx."),
 
 	// --- customers ------------------------------------------------------
 	{"POST", "/v1/customers"}:                                  explicit("customer.Service.Create → LogInTx(create, customer) on the customer's own tx."),

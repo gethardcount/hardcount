@@ -60,8 +60,13 @@ type emailSettingsHandler struct {
 	// userEmail resolves the signed-in member's email. The test email goes
 	// only there, so this endpoint cannot be used to mail anyone else.
 	userEmail func(ctx context.Context, userID string) (string, error)
-	audit     auth.AuditWriter
+	audit     emailSettingsAudit
 	timeout   time.Duration
+}
+
+// emailSettingsAudit is the audit call the handler makes (*audit.Logger).
+type emailSettingsAudit interface {
+	Log(ctx context.Context, tenantID, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
 }
 
 // emailLinkEnvs reads the link env vars once at boot: the same values the

@@ -47,6 +47,7 @@ import (
 
 	_ "github.com/jackc/pgx/v5/stdlib"
 
+	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/config"
 	"github.com/gethardcount/hardcount/internal/domain"
@@ -204,7 +205,7 @@ func bootstrapFixtures(ctx context.Context, db *postgres.DB, customers int, live
 // hand-rolled copy here would stop matching without a word on the day that
 // format changes.
 func mintBenchAPIKey(ctx context.Context, db *postgres.DB, live bool) string {
-	svc := auth.NewService(auth.NewPostgresStore(db))
+	svc := auth.NewService(db, audit.NewLogger(db))
 	// Mint the key in the same mode as the fixtures. Otherwise it
 	// authenticates into the other partition and sees no bench data.
 	res, err := svc.CreateKey(postgres.WithLivemode(ctx, live), benchTenant, auth.CreateKeyInput{

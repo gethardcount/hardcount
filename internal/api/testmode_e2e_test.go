@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
@@ -182,7 +183,7 @@ func createAPIKeyWithMode(t *testing.T, db *postgres.DB, tenantID string, livemo
 	if livemode {
 		mode = "live"
 	}
-	created, err := auth.NewService(auth.NewPostgresStore(db)).CreateKey(
+	created, err := auth.NewService(db, audit.NewLogger(db)).CreateKey(
 		postgres.WithLivemode(context.Background(), livemode), tenantID, auth.CreateKeyInput{Name: "E2E " + mode + " key"})
 	if err != nil {
 		t.Fatalf("create %s api key: %v", mode, err)
@@ -193,7 +194,7 @@ func createAPIKeyWithMode(t *testing.T, db *postgres.DB, tenantID string, livemo
 // apiKeyID returns the id of the stored key raw.
 func apiKeyID(t *testing.T, db *postgres.DB, raw string) string {
 	t.Helper()
-	key, err := auth.NewService(auth.NewPostgresStore(db)).ValidateKey(context.Background(), raw)
+	key, err := auth.NewService(db, audit.NewLogger(db)).ValidateKey(context.Background(), raw)
 	if err != nil {
 		t.Fatalf("look up api key: %v", err)
 	}
