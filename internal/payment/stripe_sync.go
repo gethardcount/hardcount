@@ -25,18 +25,35 @@ func NewStripeBillingSync(clients *StripeClients) *StripeBillingSync {
 	return &StripeBillingSync{clients: clients}
 }
 
-// SyncBillingProfile pushes the canonical billing-profile fields to the
-// Stripe customer. customerEmail is the canonical recipient
-// (customers.email) — the billing-profile email column was removed in
-// migration 0100, so the email is now plumbed through as a separate
-// argument by the caller rather than read off bp.
-func (s *StripeBillingSync) SyncBillingProfile(ctx context.Context, stripeCustomerID, customerEmail string, bp domain.CustomerBillingProfile) error {
-	sc, err := s.clients.ResolveCtx(ctx)
-	if err != nil {
-		return fmt.Errorf("stripe billing sync: read Stripe credentials: %w", err)
+// SyncCustomer pushes the customer's email to the Stripe customer and leaves
+// every other field there as it is, the display name included. An empty
+// email sends nothing: Hardcount then holds none, and email= would clear one
+// set at Stripe.
+func (s *StripeBillingSync) SyncCustomer(ctx context.Context, stripeCustomerID, customerEmail string) error {
+	if customerEmail == "" {
+		return nil
 	}
-	if sc == nil {
-		return ErrStripeNotConfigured
+	sc, err := s.client(ctx)
+	if err != nil {
+		return err
+	}
+	if _, err := sc.V1Customers.Update(ctx, stripeCustomerID, &stripe.CustomerUpdateParams{
+		Email: stripe.String(customerEmail),
+	}); err != nil {
+		return fmt.Errorf("stripe customer update: %w", err)
+	}
+	return nil
+}
+
+// SyncBillingProfile makes the Stripe customer match the customer's email
+// and the whole billing profile. It sets tax_exempt from the profile and
+// leaves exactly the profile's tax ID at Stripe, deleting any other. Call it
+// only with a profile just read or saved: an empty profile sets tax_exempt
+// to none and deletes every tax ID.
+func (s *StripeBillingSync) SyncBillingProfile(ctx context.Context, stripeCustomerID, customerEmail string, bp domain.CustomerBillingProfile) error {
+	sc, err := s.client(ctx)
+	if err != nil {
+		return err
 	}
 
 	params := &stripe.CustomerUpdateParams{}
@@ -80,18 +97,24 @@ func (s *StripeBillingSync) SyncBillingProfile(ctx context.Context, stripeCustom
 		return fmt.Errorf("stripe customer update: %w", err)
 	}
 
-	// Reconcile tax_ids[] on the Stripe Customer. Hardcount stores a single
-	// (type, value) on the billing profile; Stripe stores a collection
-	// keyed by id. Reconcile = list existing → delete the ones that
-	// don't match desired → create if desired isn't already present.
-	// Best-effort: failure logs but doesn't unwind the customer update
-	// (per the Hardcount→Stripe sync pattern). Phase 2 of the sync gap-
-	// closure (2026-05-29) — Stripe Dashboard's Tax IDs tab now mirrors
-	// the operator's billing profile, matching Lago/Recurly/Chargebee.
+	// The customer update has gone through, so a failed reconcile returns its
+	// error without undoing it.
 	if err := s.reconcileTaxIDs(ctx, sc, stripeCustomerID, bp.TaxIDType, bp.TaxID); err != nil {
 		return fmt.Errorf("stripe customer tax_ids reconcile: %w", err)
 	}
 	return nil
+}
+
+// client returns the Stripe client for the tenant and mode on ctx.
+func (s *StripeBillingSync) client(ctx context.Context) (*stripe.Client, error) {
+	sc, err := s.clients.ResolveCtx(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("stripe billing sync: read Stripe credentials: %w", err)
+	}
+	if sc == nil {
+		return nil, ErrStripeNotConfigured
+	}
+	return sc, nil
 }
 
 // reconcileTaxIDs aligns the Stripe Customer's tax_ids[] collection
