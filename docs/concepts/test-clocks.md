@@ -91,8 +91,8 @@ says what to do.
   charges what is left. If the key was refused, fix it first.
 
 Outside a clock, a later billing run does the same work (hourly, or every 5
-minutes when `APP_ENV` is `local`). A card decline is not a failure: the
-invoice goes to dunning.
+minutes when `APP_ENV` is `local`). A card refusal is not a failure, with or
+without a decline code: the invoice goes to dunning.
 
 A clock has no invoice grace period: moving past a period's end makes its
 invoice at once.

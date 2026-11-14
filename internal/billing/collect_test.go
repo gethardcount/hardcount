@@ -429,17 +429,16 @@ func (c refusingCharger) ChargeInvoice(_ context.Context, _ string, inv domain.I
 	return inv, &payment.PaymentError{Message: "No such PaymentMethod"}
 }
 
-// Any DEFINITE failure hands the invoice to dunning, not only a decline with a
-// decline_code: the charger has already marked it failed and started dunning,
-// so the queue flag must not stay set beside it.
-func TestCollect_DefiniteFailureWithoutDeclineCode_ClearsFlag(t *testing.T) {
+// A refusal with no decline code is a decline: the charger has already marked
+// the invoice failed and started dunning, so collection returns no error (a
+// clock's advance goes on) and the queue flag does not stay set beside it.
+func TestCollect_RefusalWithoutDeclineCodeIsADecline(t *testing.T) {
 	e, invoices, _, inv := collectFixture()
 	e.paymentSetups = &fakePaymentSetups{ready: true, stripeCustomerID: "cus_stripe"}
 	e.charger = refusingCharger{store: invoices}
 
-	_, errs := e.processAutoCharge(postgres.WithLivemode(context.Background(), false), inv, nil, noPMTriggerSweep)
-	if len(errs) != 1 {
-		t.Errorf("an unusual refusal is surfaced to the caller, got errs=%v", errs)
+	if _, errs := e.processAutoCharge(postgres.WithLivemode(context.Background(), false), inv, nil, noPMTriggerSweep); len(errs) != 0 {
+		t.Errorf("errors = %v, want none: a refusal is dunning's, not an error", errs)
 	}
 	if autoChargePending(t, invoices, inv.ID) {
 		t.Error("a definite failure must clear the queue flag: dunning owns the retries")
@@ -457,7 +456,6 @@ func TestCollectFailureNext(t *testing.T) {
 		err  error
 		want string
 	}{
-		{"definite refusal", fmt.Errorf("charge invoice inv_1 refused: %w", &payment.PaymentError{Message: "Invalid integer"}), "out of the auto-charge queue"},
 		{"unclear answer", fmt.Errorf("charge invoice inv_1: %w", &payment.PaymentError{Message: "An unknown error occurred", Unknown: true}), "asks Stripe what happened"},
 		{"database error before the charge", fmt.Errorf("reload invoice inv_1 after claim: %w", errors.New("conn reset")), "auto-charge sweep will retry"},
 	} {
@@ -509,4 +507,23 @@ func collectEach(e *Engine, ctx context.Context, invs []domain.Invoice, at *time
 		errs = append(errs, rowErrs...)
 	}
 	return charged, errs
+}
+
+// Neither collection job fails on a refusal with no decline code: on a clock
+// the advance goes on, and in real time the sweep counts no error.
+func TestCollect_RefusalWithoutDeclineCode_NeitherJobFails(t *testing.T) {
+	t.Run("on a clock", func(t *testing.T) {
+		inv, _, _, engine := leftHarness(t)
+		engine.charger = refusingCharger{store: inv}
+		if _, errs := engine.RetryPendingChargesForClock(postgres.WithLivemode(context.Background(), false), "t1", "tc_1", 50); len(errs) != 0 {
+			t.Errorf("errors = %v, want none", errs)
+		}
+	})
+	t.Run("in real time", func(t *testing.T) {
+		inv, _, _, engine := leftHarness(t)
+		engine.charger = refusingCharger{store: inv}
+		if _, errs := engine.RetryPendingCharges(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) != 0 {
+			t.Errorf("errors = %v, want none", errs)
+		}
+	})
 }
