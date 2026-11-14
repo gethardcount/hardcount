@@ -157,7 +157,7 @@ Every feature: [What Hardcount does](docs/features.md).
 - **Questions, or evaluating a deployment:** [GitHub Discussions](https://github.com/gethardcount/hardcount/discussions)
 - **Bugs:** [Issues](https://github.com/gethardcount/hardcount/issues). Money-path bugs are triaged first.
 - **Security:** [`SECURITY.md`](SECURITY.md). Report privately, not in a public issue.
-- **Contributing:** [`CONTRIBUTING.md`](CONTRIBUTING.md).
+- **Contributing:** we are not accepting outside pull requests at this time. A bug report or a proposed fix in an issue is welcome, and credited: [`CONTRIBUTING.md`](CONTRIBUTING.md).
 
 ## License
 

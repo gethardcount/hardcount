@@ -2,7 +2,7 @@
 
 ## Linked issue
 
-<!-- An issue a maintainer agreed to. A typo or broken link needs none. See CONTRIBUTING, "What we accept". -->
+<!-- The issue this closes, if there is one. Only collaborators can open a pull request: see CONTRIBUTING, "What we accept". -->
 Closes #
 
 ## What changed, why, and how I checked it
