@@ -378,14 +378,12 @@ export default function TestClockDetailPage() {
             <AlertDialogDescription>
               {attachedCustomers.length > 0 ? (
                 <>
-                  This permanently deletes the clock and everything in its sandbox:{' '}
-                  {attachedCustomers.length === 1 ? 'its customer' : `its ${attachedCustomers.length} customers`}, with
-                  their subscriptions, invoices, usage and credits. This can&apos;t be undone; real data is never touched.
+                  This permanently deletes the clock and{' '}
+                  {attachedCustomers.length === 1 ? 'its 1 customer' : `its ${attachedCustomers.length} customers`}, with
+                  their subscriptions, invoices, usage and credits. This can&apos;t be undone. Live data is not touched.
                 </>
               ) : (
-                <>
-                  This permanently deletes the clock. No customers are on it; nothing else is affected.
-                </>
+                <>This permanently deletes the clock. No customers are on it.</>
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>

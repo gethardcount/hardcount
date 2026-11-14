@@ -21,6 +21,6 @@ test('the advance and delete dialogs count the customers on the clock', async ({
 
   await page.getByRole('button', { name: 'Delete test clock' }).click()
   const del = page.getByRole('alertdialog')
-  await expect(del).toContainText('its customer, with their subscriptions, invoices, usage and credits')
+  await expect(del).toContainText('This permanently deletes the clock and its 1 customer, with their subscriptions, invoices, usage and credits.')
   await del.getByRole('button', { name: 'Cancel' }).click()
 })
