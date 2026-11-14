@@ -243,6 +243,21 @@ components:
               code: unauthorized
               message: invalid or expired API key
               request_id: req_dbjg652q3gpgqfoq5cd0
+    AuthenticationUnavailable:
+      description: |
+        The server could not check the credential: a store it reads, such as
+        the database, did not answer. It is no verdict on the key or session,
+        so retry; a 401 would say the credential is bad when it may be fine.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              type: api_error
+              code: authentication_unavailable
+              message: authentication is temporarily unavailable — retry shortly
+              request_id: req_dbjg652q3gpgqfoq5cd0
     RateLimited:
       description: |
         Too many requests. Wait for the number of seconds in `Retry-After`,
@@ -7980,16 +7995,18 @@ components:
         key_prefix:
           type: string
           description: |
-            The key's type and mode prefix plus the first 12 characters of
-            its secret part. Enough to tell keys apart; never the full key.
+            The key's lookup prefix: its type prefix (type and mode) and the
+            first 12 hex characters of its secret. Enough to tell keys apart;
+            never the full key.
           example: hc_secret_test_4f9c2a7e1b3d
         key_type:
           type: string
           enum: [secret, ingest]
           description: |
             `secret` can read and change everything in its mode of the
-            account, except team members and the test email, which need a
-            dashboard sign-in. `ingest` can only send usage events and call
+            account, except team members, the test email and changing the
+            account settings (`PUT /v1/settings`), which need a dashboard
+            sign-in. `ingest` can only send usage events and call
             `GET /v1/whoami`, for LiteLLM or another gateway.
         status:
           type: string
@@ -27491,7 +27508,7 @@ paths:
                   message: "insufficient permissions: this key type does not have apikey:write access"
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "422":
-          description: "`name` is blank, `key_type` is not `secret` or `ingest`, `expires_at` is not in the future, or the body has an unknown field. `param` names it."
+          description: "`name` is blank or longer than 100 characters, `key_type` is not `secret` or `ingest`, `expires_at` is not in the future, or the body has an unknown field. `param` names it."
           content:
             application/json:
               schema:
@@ -27505,14 +27522,16 @@ paths:
                   param: name
         "429":
           $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/AuthenticationUnavailable"
     get:
       tags: [Auth]
       summary: List API keys
       operationId: listApiKeys
       description: |
         Returns the keys in the caller's mode (test or live), newest first.
-        Revoked and expired keys are included; check `revoked_at` and
-        `expires_at`. Key values are never returned.
+        Revoked and expired keys are included; each key's `status` says
+        whether it works. Key values are never returned.
       parameters:
         - $ref: "#/components/parameters/Limit"
         - $ref: "#/components/parameters/Offset"
@@ -27561,6 +27580,8 @@ paths:
           $ref: "#/components/responses/InvalidPage"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/AuthenticationUnavailable"
 
   /v1/api-keys/{id}:
     delete:
@@ -27633,6 +27654,8 @@ paths:
           $ref: "#/components/responses/BodyNotAllowed"
         "429":
           $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/AuthenticationUnavailable"
 
   /v1/api-keys/{id}/rotate:
     post:
@@ -27715,7 +27738,7 @@ paths:
                 error:
                   type: invalid_request_error
                   code: not_found
-                  message: api_key not found
+                  message: api key not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "403":
           description: |
@@ -27759,6 +27782,8 @@ paths:
                   param: expires_in_seconds
         "429":
           $ref: "#/components/responses/RateLimited"
+        "503":
+          $ref: "#/components/responses/AuthenticationUnavailable"
 
   /v1/settings:
     get:

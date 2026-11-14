@@ -27,6 +27,10 @@ const (
 	PermDunningRead  Permission = "dunning:read"
 	PermDunningWrite Permission = "dunning:write"
 
+	// apikey:read and apikey:write gate more than API keys. apikey:write
+	// gates the API key routes (listing keys included), webhook endpoints
+	// and settings; apikey:read gates webhook events, their stream and the
+	// audit log (router.go).
 	PermAPIKeyRead  Permission = "apikey:read"
 	PermAPIKeyWrite Permission = "apikey:write"
 

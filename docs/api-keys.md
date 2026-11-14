@@ -66,14 +66,17 @@ then; your key is fine, so retry. More:
 Each account has two separate sets of data. The mode in the key's name
 picks the set.
 
-| Mode | Key starts with | What happens |
+| Mode | Type prefix | What happens |
 |---|---|---|
 | Test | `hc_secret_test_` | Works on test data only. Test mode connects only to Stripe test keys (`sk_test_…`), so no real card is charged. |
 | Live | `hc_secret_live_` | Works on live data. Charges real cards once you connect Stripe's live keys. |
 
-A key is its type and mode prefix (`hc_secret_live_`, `hc_secret_test_`,
-`hc_ingest_live_` or `hc_ingest_test_`) followed by 64 lowercase hex
-characters. Any other string is refused as an invalid key.
+A key is its **type prefix**, which says its type and mode
+(`hc_secret_live_`, `hc_secret_test_`, `hc_ingest_live_` or
+`hc_ingest_test_`), followed by 64 lowercase hex characters. Any other string
+is refused as an invalid key. The key list shows each key's **lookup
+prefix**, its type prefix and the first 12 hex characters, so you can tell
+keys apart without the whole key.
 
 Build and try everything with a test key. Switch to a live key when you go
 live. Customers, prices and invoices made in test mode do not appear in live
@@ -94,12 +97,13 @@ keep it out of browsers and out of source control.
 Rotating a key gives you a new key and retires the old one. Do it when a key
 may have leaked, or on a schedule.
 
-1. Open **API keys** and click **Rotate** on the key.
-   **You see:** a dialog that asks when the current key should stop
-   working: **Now**, **In 1 hour**, **In 24 hours** or **In 7 days**.
-2. Pick a time and confirm.
-   **You see:** the new key, shown once, in a dialog titled **Key rotated**.
-   Copy it, then click **I've copied it**.
+1. Open **API keys**, open the key's menu (**…**) and click **Rotate**.
+   **You see:** a dialog that asks when the old key stops working: **Now**,
+   **In 1 hour**, **In 24 hours** (picked) or **In 7 days**.
+2. Pick a time and click **Rotate key**.
+   **You see:** the new key, shown once, in a dialog titled **API key
+   rotated**, which says when the old key stops working. Copy the key, then
+   click **I've copied it**.
 3. Put the new key in your servers' settings and redeploy before the time
    you picked.
    **You see:** your calls keep working. After that time, the old key gets
@@ -110,11 +114,13 @@ Pick **Now** only if you can switch every server at once, or if the key has
 leaked. The new key keeps the old key's name, type and mode.
 
 With the API: `POST /v1/api-keys/{id}/rotate`, with an optional
-`{"expires_in_seconds": 86400}`. The default, `0`, stops the old key at
-once. The longest wait is 7 days (`604800`). A revoked or expired key
+`{"expires_in_seconds": 86400}`. The API's default, `0`, stops the old key
+at once; the dashboard's dialog picks 24 hours instead. The longest wait is
+7 days (`604800`). A revoked or expired key
 cannot be rotated (`409`): create a new key instead.
 
-To turn a key off without a replacement, click **Revoke**, or call
+To turn a key off without a replacement, click **Revoke** in the key's
+menu, or call
 `DELETE /v1/api-keys/{id}`. It stops working at once.
 
 ## A key's status
@@ -126,8 +132,10 @@ key can be rotated.
 ## How Hardcount keeps keys safe
 
 Hardcount stores only a salted SHA-256 hash of each key, never the key itself.
-The two keys the setup command created in v0.9.3 or earlier have no salt;
-they still work, and rotating one replaces it with a salted key.
+The two keys that the setup command (`hardcount-bootstrap`, or
+`POST /v1/bootstrap`, which runs the same steps) created in v0.9.3 or
+earlier have no salt; they still work, and rotating one replaces it with a
+salted key.
 That is why a key is shown only once, when it is created.
 
 **Next:** [make your first API call](api-surface.md#make-your-first-call).

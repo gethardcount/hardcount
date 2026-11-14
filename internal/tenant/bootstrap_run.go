@@ -44,9 +44,9 @@ type BootstrapDeps struct {
 	// without it would never retry a failed payment.
 	SeedDunningTx DunningSeedFunc
 	// Audit records the provisioning inside the bootstrap tx (ADR-090).
-	// Optional (nil => no rows), but the composition root always wires it:
-	// bootstrap mints a LIVE secret key and an owner account, and "where did
-	// this live key come from?" is precisely an audit question.
+	// Optional: nil writes no rows. The server always sets it, so the
+	// account's audit log says when its first live key and its owner were
+	// created.
 	Audit AuditEmitter
 }
 
@@ -123,11 +123,10 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 	}
 	defer postgres.Rollback(tx)
 
-	// Serialize concurrent bootstraps. The old INSERT ... WHERE NOT
-	// EXISTS was NOT race-safe (READ COMMITTED: two statement snapshots
-	// each miss the other's uncommitted row — two tenants, two owner
-	// credential sets). The xact lock releases at commit/rollback and
-	// makes both guards below authoritative.
+	// One bootstrap at a time. Under READ COMMITTED, two runs that each
+	// check for a tenant before inserting would both find none and make two
+	// accounts. The lock is held until commit or rollback, so the guards
+	// below see every committed run.
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock($1)`, postgres.LockKeyBootstrap); err != nil {
 		return BootstrapResult{}, fmt.Errorf("bootstrap lock: %w", err)
 	}
@@ -209,13 +208,10 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 		return BootstrapResult{}, err
 	}
 
-	// ADR-090: record the provisioning in the NEW tenant's own log, on this
-	// same transaction (panel Q6's rule for the platform plane). Bootstrap
-	// mints a LIVE secret key and an owner account with no prior actor to
-	// attribute them to — "who created this live key, and when?" is exactly
-	// the question an auditor asks, and until now the answer was nowhere.
-	// actor = system: there is genuinely no authenticated identity here (the
-	// route runs only while zero tenants exist, gated by a bootstrap token).
+	// Record the provisioning in the new tenant's own log, on this
+	// transaction (ADR-090): when its first live key and its owner were
+	// created. The actor is system: nothing has authenticated here, since the
+	// route runs only while no tenant exists, behind the bootstrap token.
 	if deps.Audit != nil {
 
 		if err := deps.Audit.LogInTx(ctx, tx, audit.Entry{
@@ -223,10 +219,9 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 			ResourceType:  "tenant",
 			ResourceID:    tenantID,
 			ResourceLabel: tenantName,
-			// owner_user_id POINTS AT the account; the address is deliberately NOT
-			// stored beside it. audit_log is append-only (0150 revoked DELETE from
-			// the runtime role), so an email written here could never be erased —
-			// and the reader resolves it from the users row, which can be.
+			// owner_user_id names the account, and the address is not stored:
+			// audit_log is append-only, so an address written here could never
+			// be erased. The reader looks it up in users, where it can be.
 			Metadata: map[string]any{
 				"action":        "bootstrap_provisioned",
 				"owner_user_id": ownerUser.ID,

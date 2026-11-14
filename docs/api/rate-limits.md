@@ -118,7 +118,7 @@ value stops start-up.
 |---|---|---|
 | `HARDCOUNT_RATE_LIMIT_GENERAL_PER_MIN` | `1000` | The API and the dashboard, a minute |
 | `HARDCOUNT_RATE_LIMIT_INGEST_PER_SEC` | `1000` | Usage, a second |
-| `HARDCOUNT_RATE_LIMIT_AUTH_PER_MIN` | `100` | Sign-in, password reset, invites and bootstrap, a minute |
+| `HARDCOUNT_RATE_LIMIT_AUTH_PER_MIN` | `100` | Sign-in, password reset, invites and `/v1/bootstrap`, a minute |
 
 The public-page limit and the setup-link limit cannot be changed. Behind a
 load balancer, set `TRUST_PROXY`, or every client shares the load balancer's

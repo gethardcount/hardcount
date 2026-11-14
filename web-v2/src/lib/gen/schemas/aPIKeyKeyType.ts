@@ -14,8 +14,9 @@
 
 /**
  * `secret` can read and change everything in its mode of the
- * account, except team members and the test email, which need a
- * dashboard sign-in. `ingest` can only send usage events and call
+ * account, except team members, the test email and changing the
+ * account settings (`PUT /v1/settings`), which need a dashboard
+ * sign-in. `ingest` can only send usage events and call
  * `GET /v1/whoami`, for LiteLLM or another gateway.
  */
 export type APIKeyKeyType = typeof APIKeyKeyType[keyof typeof APIKeyKeyType];

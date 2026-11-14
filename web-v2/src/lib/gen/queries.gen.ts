@@ -43,6 +43,7 @@ import type {
   AnalyticsOverview,
   AttachStripeRefundToCreditNoteBody,
   AuditLogFilters,
+  AuthenticationUnavailableResponse,
   BackfillUsageEventBody,
   BodyNotAllowedResponse,
   BootstrapBody,
@@ -16719,7 +16720,7 @@ export const createApiKey = async (createApiKeyBody: CreateApiKeyBody, options?:
 
 
 
-export const getCreateApiKeyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getCreateApiKeyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse | AuthenticationUnavailableResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createApiKey>>, TError,{data: CreateApiKeyBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createApiKey>>, TError,{data: CreateApiKeyBody}, TContext> => {
 
@@ -16748,12 +16749,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateApiKeyMutationResult = NonNullable<Awaited<ReturnType<typeof createApiKey>>>
     export type CreateApiKeyMutationBody = CreateApiKeyBody
-    export type CreateApiKeyMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type CreateApiKeyMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse | AuthenticationUnavailableResponse
 
     /**
  * @summary Create an API key
  */
-export const useCreateApiKey = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useCreateApiKey = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse | AuthenticationUnavailableResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createApiKey>>, TError,{data: CreateApiKeyBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createApiKey>>,
@@ -16781,8 +16782,8 @@ export const getListApiKeysUrl = (params?: ListApiKeysParams,) => {
 
 /**
  * Returns the keys in the caller's mode (test or live), newest first.
- * Revoked and expired keys are included; check `revoked_at` and
- * `expires_at`. Key values are never returned.
+ * Revoked and expired keys are included; each key's `status` says
+ * whether it works. Key values are never returned.
  * @summary List API keys
  */
 export const listApiKeys = async (params?: ListApiKeysParams, options?: RequestInit): Promise<ListApiKeys200> => {
@@ -16807,7 +16808,7 @@ export const getListApiKeysQueryKey = (params?: ListApiKeysParams,) => {
     }
 
 
-export const getListApiKeysQueryOptions = <TData = Awaited<ReturnType<typeof listApiKeys>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(params?: ListApiKeysParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApiKeys>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
+export const getListApiKeysQueryOptions = <TData = Awaited<ReturnType<typeof listApiKeys>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse | AuthenticationUnavailableResponse>(params?: ListApiKeysParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApiKeys>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
 ) => {
 
 const {query: queryOptions, request: requestOptions} = options ?? {};
@@ -16826,10 +16827,10 @@ const {query: queryOptions, request: requestOptions} = options ?? {};
 }
 
 export type ListApiKeysQueryResult = NonNullable<Awaited<ReturnType<typeof listApiKeys>>>
-export type ListApiKeysQueryError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse
+export type ListApiKeysQueryError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse | AuthenticationUnavailableResponse
 
 
-export function useListApiKeys<TData = Awaited<ReturnType<typeof listApiKeys>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListApiKeys<TData = Awaited<ReturnType<typeof listApiKeys>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse | AuthenticationUnavailableResponse>(
  params: undefined |  ListApiKeysParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApiKeys>>, TError, TData>> & Pick<
         DefinedInitialDataOptions<
           Awaited<ReturnType<typeof listApiKeys>>,
@@ -16839,7 +16840,7 @@ export function useListApiKeys<TData = Awaited<ReturnType<typeof listApiKeys>>, 
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListApiKeys<TData = Awaited<ReturnType<typeof listApiKeys>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListApiKeys<TData = Awaited<ReturnType<typeof listApiKeys>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse | AuthenticationUnavailableResponse>(
  params?: ListApiKeysParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApiKeys>>, TError, TData>> & Pick<
         UndefinedInitialDataOptions<
           Awaited<ReturnType<typeof listApiKeys>>,
@@ -16849,7 +16850,7 @@ export function useListApiKeys<TData = Awaited<ReturnType<typeof listApiKeys>>, 
       >, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListApiKeys<TData = Awaited<ReturnType<typeof listApiKeys>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListApiKeys<TData = Awaited<ReturnType<typeof listApiKeys>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse | AuthenticationUnavailableResponse>(
  params?: ListApiKeysParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApiKeys>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
   ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
@@ -16857,7 +16858,7 @@ export function useListApiKeys<TData = Awaited<ReturnType<typeof listApiKeys>>, 
  * @summary List API keys
  */
 
-export function useListApiKeys<TData = Awaited<ReturnType<typeof listApiKeys>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
+export function useListApiKeys<TData = Awaited<ReturnType<typeof listApiKeys>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse | AuthenticationUnavailableResponse>(
  params?: ListApiKeysParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listApiKeys>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient
  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
@@ -16905,7 +16906,7 @@ export const revokeApiKey = async (id: string, options?: RequestInit): Promise<A
 
 
 
-export const getRevokeApiKeyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
+export const getRevokeApiKeyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse | AuthenticationUnavailableResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeApiKey>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof revokeApiKey>>, TError,{id: string}, TContext> => {
 
@@ -16934,12 +16935,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RevokeApiKeyMutationResult = NonNullable<Awaited<ReturnType<typeof revokeApiKey>>>
 
-    export type RevokeApiKeyMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse
+    export type RevokeApiKeyMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse | AuthenticationUnavailableResponse
 
     /**
  * @summary Revoke an API key
  */
-export const useRevokeApiKey = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
+export const useRevokeApiKey = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse | AuthenticationUnavailableResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeApiKey>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof revokeApiKey>>,
@@ -16986,7 +16987,7 @@ export const rotateApiKey = async (id: string,
 
 
 
-export const getRotateApiKeyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getRotateApiKeyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse | AuthenticationUnavailableResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateApiKey>>, TError,{id: string;data?: RotateApiKeyBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof rotateApiKey>>, TError,{id: string;data?: RotateApiKeyBody}, TContext> => {
 
@@ -17015,12 +17016,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RotateApiKeyMutationResult = NonNullable<Awaited<ReturnType<typeof rotateApiKey>>>
     export type RotateApiKeyMutationBody = RotateApiKeyBody | undefined
-    export type RotateApiKeyMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type RotateApiKeyMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse | AuthenticationUnavailableResponse
 
     /**
  * @summary Rotate an API key
  */
-export const useRotateApiKey = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useRotateApiKey = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse | AuthenticationUnavailableResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateApiKey>>, TError,{id: string;data?: RotateApiKeyBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof rotateApiKey>>,

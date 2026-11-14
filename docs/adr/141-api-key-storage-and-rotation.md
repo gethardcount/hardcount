@@ -51,9 +51,12 @@ Before this decision, the rules were in several places and some disagreed:
   `status`, and `ValidateKey` and `RotateKey` decide from it.
 - **Changes.** Create, revoke and rotate each run on one tenant
   transaction that also writes the audit row (`LogInTx`); an audit failure
-  rolls the change back. A rotation locks the old key's row first, so two
-  rotations at once make one replacement. Its grace is `LEAST` of the
-  old expiry and the grace end.
+  rolls the change back. A rotation locks the old key's row first. Two
+  rotations at once that revoke the old key make one replacement: the
+  second finds it revoked and answers `409`. With a grace period the old
+  key stays active, so each rotation makes its own replacement; that is
+  intended, and the idempotency page says what to do after a lost answer.
+  The grace is `LEAST` of the old expiry and the grace end.
 - **Secrets shown once.** Routes whose answer carries a secret shown once
   ignore `Idempotency-Key` (`x-show-once` in the spec), and the upgrade
   deleted any answer kept before.
