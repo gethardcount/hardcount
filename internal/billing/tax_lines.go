@@ -197,26 +197,29 @@ func commitInvoiceSubtotal(lineItems []domain.InvoiceLineItem, subtotal int64) (
 
 // storedTaxBasis is what a recomputation of a stored invoice's tax asks the
 // provider to tax: each line's price, and their sum as the subtotal. It
-// returns copies; the stored lines are not changed.
+// returns copies; the stored lines are not changed. The invoice's own
+// TaxInclusive decides how its lines are read, never the tenant's setting
+// now: the invoice was priced in those terms.
 //
-//   - Tax-exclusive: the price is the stored amount, which tax never
-//     changes, and the subtotal is the stored header's.
-//   - Tax-inclusive, an operator's invoice (inv.OperatorComposed): the
-//     price is the stored amount, which is what was entered. No tax write
-//     changes it (keepEnteredAmounts). The line total is not used: an
-//     earlier version rounded a line's net apart from its tax, so the total
-//     it stored can be a cent off the price.
-//   - Tax-inclusive, billing's invoice: the price is the line total. A
-//     taxed line stores its net in the amount (the carve rewrote it) and its
-//     price in the total. An untaxed line stores its price in both.
+//   - An invoice priced before tax: the price is the stored amount, which
+//     tax never changes, and the subtotal is the stored header's.
+//   - An invoice priced with tax included, an operator's
+//     (inv.OperatorComposed): the price is the stored amount, which is what
+//     was entered. No tax write changes it (keepEnteredAmounts). The line
+//     total is not used: an earlier version rounded a line's net apart from
+//     its tax, so the total it stored can be a cent off the price.
+//   - An invoice priced with tax included, billing's: the price is the line
+//     total. A taxed line stores its net in the amount (the carve rewrote
+//     it) and its price in the total. An untaxed line stores its price in
+//     both.
 //
-// In tax-inclusive mode the header subtotal is the net after any successful
-// calculation, so the subtotal is the sum of the line prices instead. Taxing
-// a stored net carved the tax out a second time: the invoice total fell by
-// the tax.
-func storedTaxBasis(inv domain.Invoice, items []domain.InvoiceLineItem, inclusive bool) ([]domain.InvoiceLineItem, int64, error) {
+// On an invoice priced with tax included the header subtotal is the net
+// after any successful calculation, so the subtotal is the sum of the line
+// prices instead. Taxing a stored net carved the tax out a second time: the
+// invoice total fell by the tax.
+func storedTaxBasis(inv domain.Invoice, items []domain.InvoiceLineItem) ([]domain.InvoiceLineItem, int64, error) {
 	basis := slices.Clone(items)
-	if !inclusive {
+	if !inv.TaxInclusive {
 		return basis, inv.SubtotalCents, nil
 	}
 	var subtotal int64

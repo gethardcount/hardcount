@@ -180,13 +180,20 @@ type inclusiveRefreshRig struct {
 
 func newInclusiveRefreshRig(t *testing.T, db *postgres.DB, name string) *inclusiveRefreshRig {
 	t.Helper()
+	return newRefreshRig(t, db, name, true, 2000)
+}
+
+// newRefreshRig is newInclusiveRefreshRig for a tenant whose prices include
+// tax or not, at a rate in basis points.
+func newRefreshRig(t *testing.T, db *postgres.DB, name string, inclusive bool, rateBP int64) *inclusiveRefreshRig {
+	t.Helper()
 	ctx := postgres.WithLivemode(t.Context(), false)
 	tenantID := testutil.CreateTestTenant(t, db, name)
 
 	settings := tenant.NewSettingsStore(db)
 	if _, err := settings.Update(ctx, tenantID, func(ts *domain.TenantSettings) error {
 		ts.TaxProvider = "stripe_tax"
-		ts.TaxInclusive = true
+		ts.TaxInclusive = inclusive
 		ts.TaxName = "VAT"
 		return nil
 	}); err != nil {
@@ -252,7 +259,7 @@ func newInclusiveRefreshRig(t *testing.T, db *postgres.DB, name string) *inclusi
 		}
 	}
 
-	fake := billing.NewStripeTaxFake(t, 2000) // 20% VAT
+	fake := billing.NewStripeTaxFake(t, rateBP)
 	invoiceStore := invoice.NewPostgresStore(db)
 	creditSvc := credit.NewService(credit.NewPostgresStore(db))
 	engine := billing.NewEngine(
@@ -272,6 +279,7 @@ func newInclusiveRefreshRig(t *testing.T, db *postgres.DB, name string) *inclusi
 
 	// The operator's Retry tax, as the HTTP handler calls it.
 	svc := invoice.NewService(invoiceStore, clock.Real(), settings)
+	svc.SetTenantSettingsReader(settings) // as router.go wires it
 	svc.SetTaxRetrier(engine)
 	svc.SetSubscriptionPauseReader(subs)
 
