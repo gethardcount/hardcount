@@ -933,15 +933,18 @@ type mockInvoices struct {
 	// clockQueue holds the ids ListAutoChargePendingForClock returns (the fake
 	// has no sub→clock mapping). Empty by default.
 	clockQueue map[string]bool
-	// holdReadErr fails ChargeHoldStateOf.
-	holdReadErr error
-	// paused holds the ids whose collection is paused (CollectionPausedOf).
-	paused    map[string]bool
-	claimed   map[string]domain.ChargeHold
-	holds     int      // tokens handed out so far
-	released  []string // invoice ids released, in order
-	invoices  []domain.Invoice
-	lineItems []domain.InvoiceLineItem
+	// claimState is the answer ChargeClaimStateOf gives for an invoice, as
+	// the test sets it; claimStateErr fails the read. The fake does not copy
+	// the claim's rule: the store's SQL is the rule, and
+	// invoice.TestChargeClaimStateOf_AgreesWithTheClaim pins it. A read the
+	// test gave no answer for fails.
+	claimState    map[string]domain.ChargeClaimState
+	claimStateErr error
+	claimed       map[string]domain.ChargeHold
+	holds         int      // tokens handed out so far
+	released      []string // invoice ids released, in order
+	invoices      []domain.Invoice
+	lineItems     []domain.InvoiceLineItem
 	// createErr, when set, is returned by CreateInvoiceWithLineItems[Tx] instead
 	// of inserting: it drives the insert-failure tests.
 	createErr error
@@ -1072,25 +1075,18 @@ func (m *mockInvoices) ClaimAutoCharge(_ context.Context, _, id string) (domain.
 	return domain.ChargeHold{}, nil
 }
 
-// CollectionPausedOf answers from the fake's paused set.
-func (m *mockInvoices) CollectionPausedOf(_ context.Context, _, id string) (bool, error) {
+// ChargeClaimStateOf answers what the test gave (claimState).
+func (m *mockInvoices) ChargeClaimStateOf(_ context.Context, _, id string) (domain.ChargeClaimState, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return m.paused[id], nil
-}
-
-// ChargeHoldStateOf answers from the fake's holds: held is live, else none;
-// holdReadErr, when set, is the read's error.
-func (m *mockInvoices) ChargeHoldStateOf(_ context.Context, _, id string) (domain.ChargeHoldState, error) {
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.holdReadErr != nil {
-		return domain.ChargeHoldNone, m.holdReadErr
+	if m.claimStateErr != nil {
+		return 0, m.claimStateErr
 	}
-	if m.claimed[id].Held() {
-		return domain.ChargeHoldLive, nil
+	state, ok := m.claimState[id]
+	if !ok {
+		return 0, fmt.Errorf("fake: the test gave no claim state for %s", id)
 	}
-	return domain.ChargeHoldNone, nil
+	return state, nil
 }
 
 func (m *mockInvoices) ReleaseChargeHold(_ context.Context, _, id string, hold domain.ChargeHold) error {

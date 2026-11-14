@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strconv"
 	"strings"
 	"time"
 
@@ -2645,10 +2646,51 @@ func (s *PostgresStore) claimChargeHold(ctx context.Context, tenantID, id, eligi
 // 2026-07-06). The list stays claim-blind: a held row is listed and skipped
 // here when its claim fails.
 func (s *PostgresStore) ClaimAutoCharge(ctx context.Context, tenantID, id string) (domain.ChargeHold, error) {
-	return s.claimChargeHold(ctx, tenantID, id, `auto_charge_pending = TRUE
+	return s.claimChargeHold(ctx, tenantID, id, autoChargeQueuedSQL+`
+		  AND `+autoChargeNotPausedSQL)
+}
+
+// autoChargeQueuedSQL and autoChargeNotPausedSQL are ClaimAutoCharge's
+// eligibility. ChargeClaimStateOf reads the same fragments, so the read and
+// the claim cannot drift apart (TestChargeClaimStateOf_AgreesWithTheClaim).
+const autoChargeQueuedSQL = `auto_charge_pending = TRUE
 		  AND payment_status = 'pending'
-		  AND status = 'finalized'
-		  AND `+notPausedForCollection("invoices", invoiceClockNowSQL))
+		  AND status = 'finalized'`
+
+var autoChargeNotPausedSQL = notPausedForCollection("invoices", invoiceClockNowSQL)
+
+// ChargeClaimStateOf says whether ClaimAutoCharge would take the invoice now,
+// and if not, why not, in one read outside any lock, built from the claim's
+// own SQL: its eligibility, chargeHoldFree and noLiveHostedPageSQL. Only to
+// say what is left of a charge a run did not make; never a gate. An invoice
+// RLS does not show, or that does not exist, has nothing to charge, as the
+// claim's row lock finds nothing.
+func (s *PostgresStore) ChargeClaimStateOf(ctx context.Context, tenantID, id string) (domain.ChargeClaimState, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return 0, err
+	}
+	defer postgres.Rollback(tx)
+	is := func(s domain.ChargeClaimState) string { return strconv.Itoa(int(s)) }
+	var state domain.ChargeClaimState
+	err = tx.QueryRowContext(ctx, `
+		SELECT CASE
+		  WHEN status <> 'finalized' THEN `+is(domain.ChargeNothingToCharge)+`
+		  WHEN payment_status IN ('unknown', 'processing') THEN `+is(domain.ChargeHeldByAttempt)+`
+		  WHEN NOT (`+autoChargeQueuedSQL+`) THEN `+is(domain.ChargeNothingToCharge)+`
+		  WHEN NOT (`+chargeHoldFree+`) THEN `+is(domain.ChargeHeldByAttempt)+`
+		  WHEN NOT (`+noLiveHostedPageSQL+`) THEN `+is(domain.ChargePayingOnHostedPage)+`
+		  WHEN NOT (`+autoChargeNotPausedSQL+`) THEN `+is(domain.ChargeCollectionPaused)+`
+		  ELSE `+is(domain.ChargeClaimable)+`
+		END
+		FROM invoices WHERE id = $1`, id).Scan(&state)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.ChargeNothingToCharge, nil
+	}
+	if err != nil {
+		return 0, fmt.Errorf("read the invoice's charge claim: %w", err)
+	}
+	return state, nil
 }
 
 // invoiceClockNowSQL is the invoice's own now, on the database: the frozen
@@ -2773,29 +2815,6 @@ func (s *PostgresStore) ChargeHoldStateOf(ctx context.Context, tenantID, id stri
 	defer postgres.Rollback(tx)
 	state, _, err := s.ChargeHeldTx(ctx, tx, id)
 	return state, err
-}
-
-// CollectionPausedOf reports, outside any lock, whether the invoice's
-// subscription has collection paused at the invoice's own now: the predicate
-// the claim and the sweeps' lists read (notPausedForCollection at
-// invoiceClockNowSQL). Only to say what is left of a charge that was not
-// made; never a gate.
-func (s *PostgresStore) CollectionPausedOf(ctx context.Context, tenantID, id string) (bool, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return false, err
-	}
-	defer postgres.Rollback(tx)
-	var paused bool
-	if err := tx.QueryRowContext(ctx,
-		`SELECT NOT (`+notPausedForCollection("invoices", invoiceClockNowSQL)+`) FROM invoices WHERE id = $1`, id,
-	).Scan(&paused); err != nil {
-		if err == sql.ErrNoRows {
-			return false, errs.ErrNotFound
-		}
-		return false, fmt.Errorf("read collection pause: %w", err)
-	}
-	return paused, nil
 }
 
 // ConfirmChargeHold is the charge's re-check right before it sends

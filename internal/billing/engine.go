@@ -639,13 +639,10 @@ type InvoiceWriter interface {
 	// paths that sent no charge, so the next tick/Advance retries
 	// immediately instead of waiting for the stale-hold sweep.
 	ReleaseChargeHold(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error
-	// ChargeHoldStateOf reads the invoice's hold outside any lock. Only to
-	// say what is left of a charge that was not made; never a gate.
-	ChargeHoldStateOf(ctx context.Context, tenantID, id string) (domain.ChargeHoldState, error)
-	// CollectionPausedOf reads, outside any lock, whether the invoice's
-	// subscription has collection paused at the invoice's own now. Only to
-	// say what is left of a charge that was not made; never a gate.
-	CollectionPausedOf(ctx context.Context, tenantID, id string) (bool, error)
+	// ChargeClaimStateOf says whether ClaimAutoCharge would take the invoice
+	// now, and if not, why not, from the claim's own SQL. Only to say what is
+	// left of a charge a run did not make; never a gate.
+	ChargeClaimStateOf(ctx context.Context, tenantID, id string) (domain.ChargeClaimState, error)
 	ListAutoChargePending(ctx context.Context, after walk.Key, limit int) ([]domain.Invoice, error)
 	// ListAutoChargePendingForClock is the catchup-path counterpart to
 	// ListAutoChargePending — returns invoices whose owning subscription
@@ -4737,12 +4734,14 @@ func (e *Engine) RetryPendingCharges(ctx context.Context, pageSize int, onPage f
 		n, rowErrs := e.processAutoCharge(ctx, inv, nil, noPMTriggerSweep)
 		charged += n
 		for _, rerr := range rowErrs {
-			// A later run does it.
-			if errors.Is(rerr, domain.ErrLeftForNextRun) {
+			switch {
+			case refusedClaim(rerr):
+				slog.DebugContext(ctx, "auto-charge: another charge has the invoice", "invoice_id", inv.ID, "error", rerr)
+			case errors.Is(rerr, domain.ErrLeftForNextRun): // a later run does it
 				slog.WarnContext(ctx, "auto-charge: left for the next run", "invoice_id", inv.ID, "error", rerr)
-				continue
+			default:
+				errs = append(errs, rerr)
 			}
-			errs = append(errs, rerr)
 		}
 	}
 	if listed > 0 {
@@ -4939,10 +4938,10 @@ func (e *Engine) processAutoCharge(ctx context.Context, inv domain.Invoice, at *
 		return charged, errs
 	}
 	if !hold.Held() {
-		// Refused: a charge attempt holds the invoice or its result is not
-		// known, or nothing is left to charge (settled, out of the queue,
-		// collection paused). chargeNotMadeFor reads which.
-		if nerr := e.chargeNotMadeFor(ctx, inv, "another charge of it was in progress just then", errChargeClaimRefused); nerr != nil {
+		// Refused: another charge attempt has not finished, the customer is
+		// paying on the hosted page, collection is paused, or nothing is left
+		// to charge. chargeNotMadeFor asks the store which.
+		if nerr := e.chargeNotMadeFor(ctx, inv, "another charge of it was running just then, and has since stopped", errChargeClaimRefused); nerr != nil {
 			errs = append(errs, nerr)
 		}
 		return charged, errs
