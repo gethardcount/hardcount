@@ -202,8 +202,10 @@ func WithRealTime(ctx context.Context) context.Context {
 }
 
 // DecidesWithoutDoor reports whether work on a record that did not come
-// through the API's clock door (a Stripe event, a job's row, a public page)
-// decides its time. With no resolver, no: only narrow unit tests build their
+// through the API's door decides its time. An API request's time is decided
+// once, before its handler, by the API's door (api.clockDoor); this is for
+// work that does not come through it: a Stripe event, a job's row, a public
+// page. With no resolver, no: only narrow unit tests build their
 // service without one, and the server always wires the engine. With no mode
 // on ctx, a fault, refused as ErrUndecided: every such entry point sets one.
 // In live mode, no: no live record is on a test clock, and live work pays for
@@ -221,7 +223,8 @@ func DecidesWithoutDoor(ctx context.Context, r Resolver) (bool, error) {
 }
 
 // DecideWithoutDoor decides the time of work on a record that did not come
-// through the API's clock door: when DecidesWithoutDoor says it decides, the
+// through the API's door (see DecidesWithoutDoor): when DecidesWithoutDoor
+// says it decides, the
 // record's clock, or real time for a record on no clock (Decide); else ctx
 // unchanged. A failure is ErrUndecided.
 func DecideWithoutDoor(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
