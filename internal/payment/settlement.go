@@ -654,15 +654,21 @@ func settleAnchorFrom(ctx context.Context) (time.Time, bool) {
 // dunningSimFailedAt is the simulated instant a failed charge fired at, which
 // StartDunning reads for a clock-pinned invoice's first retry: the charge's
 // contracted anchor when the report carries it (the inline decline, the
-// webhook's and the reconciler's PI metadata), else the issue instant. The
-// anchor matters when a charge fires on a later Advance than the issue — a
-// card attached after the invoice — where counting from the issue instant
-// would put the first retry in the past and run it at once.
-func dunningSimFailedAt(ctx context.Context, inv domain.Invoice) time.Time {
+// webhook's and the reconciler's PI metadata), else the time the failure is
+// recorded at, as decided for the invoice. The anchor matters when a charge
+// fires on a later Advance than the issue — a card attached after the
+// invoice — where counting from the issue instant would put the first retry
+// in the past and run it at once. Every simulated charge stamps its anchor,
+// so a cycle invoice's charge still anchors at its cycle close and one
+// Advance walks its whole retry schedule (#931). A report without one (a
+// PaymentIntent from before anchors) gets the decided time, not the issue
+// instant, for the same reason: a first retry in the past would run at once.
+// StartDunning never anchors after its now, so no issue floor is needed.
+func dunningSimFailedAt(ctx context.Context, _ domain.Invoice) time.Time {
 	if a, ok := settleAnchorFrom(ctx); ok {
 		return a
 	}
-	return inv.IssuedAtOrZero()
+	return clock.Now(ctx)
 }
 
 // anchorFromEventPayload extracts data.object.metadata.hardcount_anchor_at from
