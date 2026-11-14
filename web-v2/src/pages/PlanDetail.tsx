@@ -12,7 +12,7 @@ import { applyApiError } from '@/lib/formErrors'
 import { LoadError } from '@/components/LoadError'
 import { TestClocksLoadError } from '@/components/TestClocksLoadError'
 import { Callout } from '@/components/Callout'
-import { TestClockBadge } from '@/components/TestClockBadge'
+import { SimulatedBadge } from '@/components/TestClockBadge'
 import { useNowResolver } from '@/hooks/useNow'
 import { collectionPausedFlag, genericStatus, subscriptionStatus } from '@/lib/statusLabels'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -264,7 +264,7 @@ export default function PlanDetailPage() {
                         <Link to={`/subscriptions/${sub.id}`} className="text-sm font-medium text-foreground hover:text-primary transition-colors">
                           {sub.display_name}
                         </Link>
-                        {sub.test_clock_id && <TestClockBadge testClockId={sub.test_clock_id} />}
+                        {sub.test_clock_id && <SimulatedBadge />}
                       </span>
                       <p className="text-xs text-muted-foreground font-mono">{sub.code}</p>
                     </TableCell>

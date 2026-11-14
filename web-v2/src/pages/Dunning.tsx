@@ -15,7 +15,7 @@ import {
 } from '@/lib/api'
 import { sinceMs, untilMs, type EffectiveNow } from '@/lib/effectiveNow'
 import { useNowResolver } from '@/hooks/useNow'
-import { TestClockBadge } from '@/components/TestClockBadge'
+import { SimulatedBadge } from '@/components/TestClockBadge'
 import { dunningReasonLabel } from '@/lib/dunningReasons'
 import { retriesOffNotice } from '@/lib/dunningCoverage'
 import { Callout } from '@/components/Callout'
@@ -407,7 +407,7 @@ function RunsTab() {
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <div className="flex flex-wrap items-center gap-1.5">
                                   <StatusBadge status={dunningRunStatus(run.state)} />
-                                  {run.test_clock_id && <TestClockBadge testClockId={run.test_clock_id} />}
+                                  {run.test_clock_id && <SimulatedBadge />}
                                   {openInvoice}
                                 </div>
                                 {nextStep}
@@ -431,7 +431,7 @@ function RunsTab() {
                                 {invoiceLabel}
                               </Link>
                               {run.test_clock_id && (
-                                <TestClockBadge testClockId={run.test_clock_id} />
+                                <SimulatedBadge />
                               )}
                             </div>
                           </TableCell>

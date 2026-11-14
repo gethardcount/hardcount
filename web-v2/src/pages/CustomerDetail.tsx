@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react'
 import { StaleNotice } from '@/components/StaleNotice'
 import { usePageTitle } from '@/hooks/usePageTitle'
-import { useNowFor } from '@/hooks/useNow'
+import { useNowFor, useTestClocks } from '@/hooks/useNow'
 import { useTenantTimezone } from '@/hooks/useTenantTimezone'
 import { useSingleFlight } from '@/hooks/useSingleFlight'
 import { useNavigate, useParams, Link } from 'react-router-dom'
@@ -194,13 +194,9 @@ export default function CustomerDetailPage() {
     enabled: !!id,
   })
 
-  // Fetch test clocks only when the customer is pinned — used by
-  // CreateSubscriptionDialog to surface the ADR-027 inherit hint.
-  const { data: clocksData } = useQuery({
-    queryKey: ['test-clocks-for-customer-create-sub'],
-    queryFn: () => api.listTestClocks(),
-    enabled: !!customer?.test_clock_id,
-  })
+  // The clock list, the shared read every page uses (refreshTestClocks
+  // refreshes it), for CreateSubscriptionDialog's ADR-027 inherit hint.
+  const { data: clocksData } = useTestClocks()
   const clockNameMap = useMemo(() => {
     const m: Record<string, string> = {}
     ;(clocksData?.data ?? []).forEach(c => { m[c.id] = c.name || c.id })
