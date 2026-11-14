@@ -47,7 +47,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.svc.CreateKey(r.Context(), tenantID, input)
 	if err != nil {
-		respond.FromError(w, r, err, "api_key")
+		respond.FromError(w, r, err, "api key")
 		return
 	}
 
@@ -120,7 +120,7 @@ func (h *Handler) rotate(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.svc.RotateKey(r.Context(), tenantID, id, input)
 	if err != nil {
-		respond.FromError(w, r, err, "api_key")
+		respond.FromError(w, r, err, "api key")
 		return
 	}
 

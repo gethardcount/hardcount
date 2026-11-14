@@ -27439,7 +27439,8 @@ paths:
               properties:
                 name:
                   type: string
-                  description: Label shown in the key list. Must not be blank.
+                  maxLength: 100
+                  description: Label shown in the key list. 1 to 100 characters, not blank.
                 key_type:
                   type: string
                   enum: [secret, ingest]
