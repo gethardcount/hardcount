@@ -94,9 +94,9 @@ says what to do.
 
 Outside a clock, a later billing run does the same work (hourly, or every 5
 minutes when `APP_ENV` is `local`). Not a failure, on a clock or off it: a
-card decline (the invoice goes to dunning), an invoice the customer may be
-paying on the hosted page, one whose collection is paused, and one settled
-meanwhile. Collection waits for the page or the pause, as outside a clock.
+card refusal, with or without a decline code (the invoice goes to dunning),
+an invoice the customer may be paying on the hosted page, one whose
+collection is paused, and one settled meanwhile. Collection waits for the page or the pause, as outside a clock.
 
 Payment retries work the same way. A retry that gets no definite answer
 from Stripe is not counted as an attempt, and on a clock it stops the move

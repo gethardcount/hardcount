@@ -4884,8 +4884,8 @@ func (e *Engine) emailInvoiceOnce(ctx context.Context, inv domain.Invoice) {
 // trigger labels the no-payment-method email (finalize_no_pm when a finalize
 // site nudges, auto_charge_retry_no_pm from the sweeps).
 //
-// Error classification: a card decline (Stripe 402 with a typed
-// decline_code) is an EXPECTED business outcome, not a catchup
+// Error classification: a card refusal (a card error, with a typed
+// decline_code or without) is an EXPECTED business outcome, not a catchup
 // failure. ChargeInvoice already inline-fires StartDunning for the
 // declined invoice and stamps invoice.payment_status='failed' →
 // dunning takes over from there. Returning the decline as an error
@@ -5141,16 +5141,22 @@ func (e *Engine) processAutoCharge(ctx context.Context, inv domain.Invoice, at *
 				// and its predicate re-check skips ineligible invoices.
 				slog.Warn("failed to clear auto_charge_pending", "invoice_id", inv.ID, "error", err)
 			}
-			if pe.DeclineCode != "" {
-				// A card decline is a normal business outcome; don't push
-				// the catchup to internal_failure for it.
+			// A card refusal is a card error from Stripe, with a decline
+			// code or without: dunning's, a normal outcome of collection, so
+			// it is not an error and a clock's advance goes on. Any other
+			// definite refusal (an invalid request: a wrong parameter, a
+			// customer or payment method Stripe does not know) is a fault,
+			// returned so the sweep counts it and a clock's advance fails.
+			switch {
+			case pe.DeclineCode != "":
 				slog.Info("auto-charge declined; dunning will retry on schedule",
 					"invoice_id", inv.ID, "decline_code", pe.DeclineCode)
-				return charged, errs
+			case pe.Card:
+				slog.Warn("auto-charge refused by the card with no decline code; dunning will retry on schedule",
+					"invoice_id", inv.ID, "error", err)
+			default:
+				errs = append(errs, fmt.Errorf("charge invoice %s refused: %w", inv.ID, err))
 			}
-			// No decline code (e.g. an invalid_request): still dunning's,
-			// but surfaced so the operator sees an unusual refusal.
-			errs = append(errs, fmt.Errorf("charge invoice %s refused: %w", inv.ID, err))
 			return charged, errs
 		}
 		// Transient (an open breaker, a rate limit, unreadable credentials,
