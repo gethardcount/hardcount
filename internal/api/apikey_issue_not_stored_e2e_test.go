@@ -54,3 +54,54 @@ func TestE2E_APIKeyIssue_SecretIsNotStoredForReplay(t *testing.T) {
 		t.Errorf("idempotency_keys: %d rows for /v1/api-keys, %d holding a secret key; want none", stored, withSecret)
 	}
 }
+
+// The other requests whose answer carries a secret shown only once: creating
+// a webhook endpoint, rotating its signing secret, and rotating a customer's
+// cost dashboard token. Each sent twice with the same Idempotency-Key runs
+// twice, and no answer is kept. (Creating a card setup session needs a
+// connected Stripe account; its route is pinned by TestAnswersWithShowOnceSecret
+// and TestOpenAPISpec_ShowOnceSecretsAreNeverKept.)
+func TestE2E_ShowOnceSecret_AnswerIsNotKeptForReplay(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "show-once-bootstrap")
+	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
+	defer ts.Close()
+
+	const email, password = "owner@show-once.test", "show-once-pw-1234"
+	flowBootstrap(t, ts, "show-once-bootstrap", email, password)
+	owner := login(t, ts, email, password)
+	twice := func(path, idem string, body any, status int) (first, again map[string]any) {
+		t.Helper()
+		req := flowReq{cookie: owner, header: map[string]string{"Idempotency-Key": idem}, body: body}
+		return flowDo(t, ts, "POST", path, req).want(t, status, path).body,
+			flowDo(t, ts, "POST", path, req).want(t, status, path+" again with the same Idempotency-Key").body
+	}
+
+	ep, epAgain := twice("/v1/webhook-endpoints/endpoints", "show-once-endpoint", map[string]any{"url": "https://example.com/show-once"}, 201)
+	if flowStr(ep, "endpoint", "id") == flowStr(epAgain, "endpoint", "id") || flowStr(ep, "secret") == flowStr(epAgain, "secret") {
+		t.Errorf("webhook endpoint create answered endpoint %s again: replayed, want a second endpoint", flowStr(ep, "endpoint", "id"))
+	}
+	rot, rotAgain := twice("/v1/webhook-endpoints/endpoints/"+flowStr(epAgain, "endpoint", "id")+"/rotate-secret", "show-once-rotate", nil, 200)
+	if flowStr(rot, "secret") == flowStr(rotAgain, "secret") {
+		t.Error("signing secret rotation answered the same secret again: replayed, want a new one")
+	}
+	cust := flowStr(flowDo(t, ts, "POST", "/v1/customers", flowReq{cookie: owner,
+		body: map[string]any{"external_id": "show-once-cus", "display_name": "Show Once"}}).want(t, 201, "create customer").body, "id")
+	dash, dashAgain := twice("/v1/customers/"+cust+"/rotate-cost-dashboard-token", "show-once-dashboard", nil, 200)
+	if flowStr(dash, "token") == flowStr(dashAgain, "token") {
+		t.Error("cost dashboard token rotation answered the same token again: replayed, want a new one")
+	}
+
+	tx, err := db.BeginTx(context.Background(), postgres.TxBypass, "")
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	var kept int
+	if err := tx.QueryRow(`SELECT count(*) FROM idempotency_keys WHERE key LIKE 'show-once-%'`).Scan(&kept); err != nil {
+		t.Fatalf("read idempotency_keys: %v", err)
+	}
+	if kept != 0 {
+		t.Errorf("idempotency_keys holds %d answers for these requests, want none", kept)
+	}
+}

@@ -55,7 +55,7 @@ func TestOpenAPISpec_ShowOnceSecretsAreNeverKept(t *testing.T) {
 	for _, route := range showOnceSecretRoutes {
 		method, pattern, _ := strings.Cut(route, " ")
 		if _, ok := marked[routeShape(method, pattern)]; !ok {
-			t.Errorf("showOnceSecretRoutes lists %q, but its answer in api/openapi.yaml has no x-show-once field", route)
+			t.Errorf("showOnceSecretRoutes lists %q, but its answer in api/openapi.yaml has no x-show-once field. Remove the entry, or mark the field that carries the secret", route)
 		}
 	}
 }
@@ -142,4 +142,40 @@ func specShowOnceOperations(t *testing.T) map[string]string {
 		}
 	}
 	return out
+}
+
+// answersWithShowOnceSecret on real URLs: every listed route with concrete
+// ids, with and without a trailing slash, and the near misses around them.
+func TestAnswersWithShowOnceSecret(t *testing.T) {
+	for _, tc := range []struct {
+		method, path string
+		want         bool
+	}{
+		{"POST", "/v1/api-keys", true},
+		{"POST", "/v1/api-keys/", true},
+		{"POST", "/v1/api-keys/hc_key_dbs004jmajdrc1h3298g/rotate", true},
+		{"POST", "/v1/api-keys/hc_key_dbs004jmajdrc1h3298g/rotate/", true},
+		{"POST", "/v1/customers/hc_cus_dakhnk2q3gpgqfoq5c0g/rotate-cost-dashboard-token", true},
+		{"POST", "/v1/customers/hc_cus_dakhnk2q3gpgqfoq5c0g/payment-methods/setup-session", true},
+		{"POST", "/v1/webhook-endpoints/endpoints", true},
+		{"POST", "/v1/webhook-endpoints/endpoints/hc_whe_danslg2q3gpgqfoq5c80/rotate-secret", true},
+
+		{"GET", "/v1/api-keys", false},
+		{"PATCH", "/v1/api-keys", false},
+		{"DELETE", "/v1/api-keys/hc_key_a", false},
+		{"POST", "/v1/api-keysx", false},
+		{"POST", "/v1/api-keys/hc_key_a", false},
+		{"POST", "/v1/api-keys//rotate", false},
+		{"POST", "/v1/api-keys/hc_key_a/rotate/extra", false},
+		{"POST", "/v1/customers", false},
+		{"POST", "/v1/customers/hc_cus_a/payment-methods", false},
+		{"POST", "/v1/webhook-endpoints/endpoints/hc_whe_a/test", false},
+		{"PATCH", "/v1/webhook-endpoints/endpoints/hc_whe_a", false},
+		{"POST", "/v2/api-keys", false},
+	} {
+		req := &http.Request{Method: tc.method, URL: &url.URL{Path: tc.path}}
+		if got := answersWithShowOnceSecret(req); got != tc.want {
+			t.Errorf("%s %s: %v, want %v", tc.method, tc.path, got, tc.want)
+		}
+	}
 }

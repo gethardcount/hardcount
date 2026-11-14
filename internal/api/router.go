@@ -2168,14 +2168,17 @@ func skipsIdempotency(r *http.Request) bool {
 	return isIngestPath(r) || answersWithShowOnceSecret(r)
 }
 
-// showOnceSecretRoutes are the requests whose answer carries a secret shown
-// only in that answer: the fields marked `x-show-once: true` in
-// api/openapi.yaml. TestOpenAPISpec_ShowOnceSecretsAreNeverKept keeps the
-// list and the marks in step.
+// showOnceSecretRoutes are the requests behind the idempotency layer whose
+// answer carries a secret shown only in that answer: the fields marked
+// `x-show-once: true` in api/openapi.yaml.
+// TestOpenAPISpec_ShowOnceSecretsAreNeverKept keeps the list and the marks
+// in step. /v1/bootstrap's fields are marked too but not listed: it is
+// mounted outside the layer, and the test asserts it stays there.
 var showOnceSecretRoutes = []string{
 	"POST /v1/api-keys",
 	"POST /v1/api-keys/{id}/rotate",
 	"POST /v1/customers/{id}/rotate-cost-dashboard-token",
+	"POST /v1/customers/{customer_id}/payment-methods/setup-session",
 	"POST /v1/webhook-endpoints/endpoints",
 	"POST /v1/webhook-endpoints/endpoints/{id}/rotate-secret",
 }

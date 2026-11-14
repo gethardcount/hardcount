@@ -153,7 +153,8 @@ components:
         The requests whose answer carries a secret shown only once
         (creating or rotating an API key, creating a webhook endpoint or
         rotating its signing secret, rotating a customer's cost dashboard
-        token) do not take it either: Hardcount does not keep that answer.
+        token, creating a card setup session) do not take it either:
+        Hardcount does not keep that answer.
       schema:
         type: string
       example: 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -11353,7 +11354,6 @@ paths:
         `internal_error`.
       operationId: createCustomerPaymentSetupSession
       parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
         - name: customer_id
           in: path
           required: true
@@ -11386,6 +11386,7 @@ paths:
                 properties:
                   url:
                     type: string
+                    x-show-once: true
                     description: Stripe Checkout URL. Expires on Stripe's schedule (about 24 hours).
                   session_id:
                     type: string
