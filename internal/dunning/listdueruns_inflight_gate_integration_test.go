@@ -2,12 +2,10 @@ package dunning_test
 
 import (
 	"context"
-	"testing"
-	"time"
-
 	"github.com/gethardcount/hardcount/internal/platform/leader"
 	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
-	"github.com/gethardcount/hardcount/internal/platform/walk"
+	"testing"
+	"time"
 
 	"github.com/gethardcount/hardcount/internal/customer"
 	"github.com/gethardcount/hardcount/internal/domain"
@@ -261,7 +259,7 @@ func TestListDueRunsForClock_InFlightGate(t *testing.T) {
 		t.Fatalf("commit: %v", err)
 	}
 
-	due, err := dunning.NewPostgresStore(db).ListDueRunsForClock(ctx, tenantID, clockID, frozen, walk.Key{}, 50)
+	due, err := dunning.NewPostgresStore(db).ListDueRunsForClock(ctx, tenantID, clockID, frozen, 50)
 	if err != nil {
 		t.Fatalf("ListDueRunsForClock: %v", err)
 	}

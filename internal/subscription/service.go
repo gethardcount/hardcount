@@ -291,7 +291,13 @@ func (s *Service) SetResolver(r clock.Resolver) {
 // Failing on a dangling pin is worse than stamping wall-clock; on
 // resolver error, returns ctx unchanged (downstream reads wall-clock).
 func (s *Service) bindForCustomer(ctx context.Context, tenantID, customerID string) context.Context {
-	bound, _ := clock.BindEffectiveNow(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID}) // a failed lookup is logged there
+	bound, ok := clock.BindEffectiveNow(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID})
+	if !ok && s.resolver != nil && customerID != "" {
+		// Resolver wired but binding skipped — likely an error during
+		// resolution. Log; don't fail the operator's action.
+		slog.Warn("subscription: customer pin binding skipped, downstream uses wall-clock",
+			"tenant_id", tenantID, "customer_id", customerID)
+	}
 	return bound
 }
 
@@ -299,7 +305,11 @@ func (s *Service) bindForCustomer(ctx context.Context, tenantID, customerID stri
 // per-sub mutation entry point (Activate, ChangeItem, ScheduleCancel,
 // PauseCollection, EndTrial, ExtendTrial, Cancel).
 func (s *Service) bindForSub(ctx context.Context, tenantID, subscriptionID string) context.Context {
-	bound, _ := clock.BindEffectiveNow(ctx, s.resolver, clock.Pin{TenantID: tenantID, SubscriptionID: subscriptionID}) // a failed lookup is logged there
+	bound, ok := clock.BindEffectiveNow(ctx, s.resolver, clock.Pin{TenantID: tenantID, SubscriptionID: subscriptionID})
+	if !ok && s.resolver != nil && subscriptionID != "" {
+		slog.Warn("subscription: sub pin binding skipped, downstream uses wall-clock",
+			"tenant_id", tenantID, "subscription_id", subscriptionID)
+	}
 	return bound
 }
 

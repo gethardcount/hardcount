@@ -370,10 +370,11 @@ func (s escalateAlwaysFails) EscalateRunTx(context.Context, *sql.Tx, string, dom
 
 // TestProcessDueRunsForClock_PersistentExhaustFailure_Terminates: when the
 // escalation can never land, each re-drive only moves the lease 15 simulated
-// minutes, so within one advance the run is due again and again. The job
-// stops after the round whose step failed and returns that error, so the
-// advance fails. The run is left re-drivable, never NULL.
-// Mutation: go on after a round with an error (the run is re-driven again).
+// minutes, so within one advance the run is due again and again. The catchup
+// loop must still stop: the first re-drive counts as progress (count moved
+// Max-1 -> Max between listing and processing), the next sees no progress
+// and exits. The run is left re-drivable, never NULL.
+// Mutation: the no-progress guard `>` -> `>=` (the loop runs to its cap).
 func TestProcessDueRunsForClock_PersistentExhaustFailure_Terminates(t *testing.T) {
 	mem := newMemStore()
 	markUncollectiblePolicy(mem)
@@ -383,16 +384,14 @@ func TestProcessDueRunsForClock_PersistentExhaustFailure_Terminates(t *testing.T
 	run := finalAttemptRun(t, mem, svc)
 
 	frozen := time.Now().UTC().Add(48 * time.Hour)
-	if _, errs := svc.ProcessDueRunsForClock(context.Background(), "t1", "clk", frozen, 20); len(errs) != 1 {
-		t.Fatalf("errors = %v, want the one escalation failure", errs)
-	}
+	svc.ProcessDueRunsForClock(context.Background(), "t1", "clk", frozen, 20)
 
 	got := mem.runs[run.ID]
 	if got.State != domain.DunningActive || got.NextActionAt == nil {
 		t.Fatalf("persistent failure left state=%s next=%v, want active and re-drivable", got.State, got.NextActionAt)
 	}
-	if n := len(mover.calls); n != 1 {
-		t.Fatalf("exhaustion attempted %d times in one advance, want 1: the job stops after the round that failed", n)
+	if n := len(mover.calls); n != 2 {
+		t.Fatalf("exhaustion attempted %d times in one advance, want 2 (inline, then one re-drive) — the no-progress guard did not stop the loop", n)
 	}
 }
 

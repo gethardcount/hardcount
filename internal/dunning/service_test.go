@@ -5,15 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"slices"
-	"strings"
 	"testing"
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
-	"github.com/gethardcount/hardcount/internal/platform/walk"
 )
 
 type memStore struct {
@@ -365,30 +362,12 @@ func (m *memStore) ClaimExhaustion(_ context.Context, _, runID string, expectedA
 }
 
 // ListDueRunsForClock — mirrors ListDueRuns but compares against the
-// caller-supplied frozenTime instead of the cron's wall-clock "now," and
-// pages as the store does: (next_action_at, id) order, after the key.
+// caller-supplied frozenTime instead of the cron's wall-clock "now."
 // Narrow-test version: ignores the clockID filter since memStore has
 // no clock binding (callers pass single-clock fixtures). Postgres
 // integration tests exercise the real SQL.
-func (m *memStore) ListDueRunsForClock(_ context.Context, _, _ string, frozenTime time.Time, after walk.Key, limit int) ([]domain.InvoiceDunningRun, error) {
-	due, _ := m.ListDueRuns(context.Background(), "", frozenTime, len(m.runs))
-	slices.SortFunc(due, func(a, b domain.InvoiceDunningRun) int {
-		if c := a.NextActionAt.Compare(*b.NextActionAt); c != 0 {
-			return c
-		}
-		return strings.Compare(a.ID, b.ID)
-	})
-	var page []domain.InvoiceDunningRun
-	for _, r := range due {
-		if c := r.NextActionAt.Compare(after.At); c < 0 || (c == 0 && r.ID <= after.ID) {
-			continue
-		}
-		page = append(page, r)
-		if len(page) == limit {
-			break
-		}
-	}
-	return page, nil
+func (m *memStore) ListDueRunsForClock(_ context.Context, _, _ string, frozenTime time.Time, limit int) ([]domain.InvoiceDunningRun, error) {
+	return m.ListDueRuns(context.Background(), "", frozenTime, limit)
 }
 
 func (m *memStore) ListDueRuns(_ context.Context, _ string, before time.Time, limit int) ([]domain.InvoiceDunningRun, error) {

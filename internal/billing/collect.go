@@ -100,8 +100,7 @@ func (e *Engine) collectionAt(ctx context.Context, inv domain.Invoice, at *time.
 	}
 	sim, err := e.SimForInvoice(ctx, inv.TenantID, inv.ID)
 	if err != nil {
-		slog.WarnContext(ctx, "collect: could not find the invoice's test clock; collecting at real time",
-			"invoice_id", inv.ID, "error", err)
+		return e.clock.Now(ctx) // ADR-030: injected clock, never bare wall-clock
 	}
-	return sim.At // real time alongside an error
+	return sim.At
 }

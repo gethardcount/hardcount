@@ -14,7 +14,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/leader"
 	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
-	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -188,7 +187,7 @@ func TestListDueRunsForClock_ChargeHoldIsSkipped(t *testing.T) {
 		t.Fatalf("commit: %v", err)
 	}
 
-	due, err := dunning.NewPostgresStore(db).ListDueRunsForClock(ctx, tenantID, clockID, frozen, walk.Key{}, 50)
+	due, err := dunning.NewPostgresStore(db).ListDueRunsForClock(ctx, tenantID, clockID, frozen, 50)
 	if err != nil {
 		t.Fatalf("ListDueRunsForClock: %v", err)
 	}

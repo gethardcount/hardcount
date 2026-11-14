@@ -88,15 +88,11 @@ func (s *Service) simNow(ctx context.Context, tenantID, customerID string) (cloc
 			return clock.Sim{}, err
 		}
 		if !live {
-			sim, err := s.resolver.SimForCustomer(ctx, tenantID, customerID)
-			if err == nil {
+			if sim, err := s.resolver.SimForCustomer(ctx, tenantID, customerID); err == nil {
 				return sim, nil
 			}
-			// Ingest goes on at real time: a customer that cannot be read is
-			// surfaced by ingest's own store call; a clock that cannot be read
-			// is logged here.
-			slog.WarnContext(ctx, "usage: could not find the customer's test clock; ingesting at real time",
-				"customer_id", customerID, "error", err)
+			// Resolver errors mean the customer read failed — ingest's own
+			// store call will surface that; don't block on the clock here.
 		}
 	}
 	return clock.Sim{At: time.Now().UTC()}, nil

@@ -8,7 +8,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/dunning"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
-	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -87,7 +86,7 @@ func TestListDueRunsForClock_IncludesOneOffInvoiceRuns(t *testing.T) {
 	dstore := dunning.NewPostgresStore(db)
 
 	t.Run("ForClock includes one-off runs via the customer pin", func(t *testing.T) {
-		due, err := dstore.ListDueRunsForClock(ctx, tenantID, clockID, frozen, walk.Key{}, 50)
+		due, err := dstore.ListDueRunsForClock(ctx, tenantID, clockID, frozen, 50)
 		if err != nil {
 			t.Fatalf("ListDueRunsForClock: %v", err)
 		}

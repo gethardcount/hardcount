@@ -17,10 +17,11 @@ import (
 // or API key (session.MiddlewareOrAPIKey), the rate limit, the apikey:read
 // permission, then the stream, which re-checks its credential every interval
 // (streamCredentialStopped). router.go passes webhook.StreamHeartbeatInterval.
-func eventStreamRoute(h *webhook.Handler, sessSvc *session.Service, authSvc *auth.Service, rateLimit func(http.Handler) http.Handler, every time.Duration) func(chi.Router) {
+func eventStreamRoute(h *webhook.Handler, sessSvc *session.Service, authSvc *auth.Service, rateLimit, door func(http.Handler) http.Handler, every time.Duration) func(chi.Router) {
 	return func(r chi.Router) {
 		r.Use(session.MiddlewareOrAPIKey(sessSvc, authSvc))
 		r.Use(rateLimit)
+		r.Use(door)
 		r.With(auth.Require(auth.PermAPIKeyRead)).Get("/", h.StreamHandler(streamCredentialStopped(sessSvc, authSvc), every))
 	}
 }
