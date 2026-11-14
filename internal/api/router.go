@@ -201,10 +201,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	pricingStore := pricing.NewPostgresStore(db)
 	webhookStore := payment.NewPostgresWebhookStore(db)
 
-	// Auth
-	authSvc := auth.NewService(auth.NewPostgresStore(db))
-	authH := auth.NewHandler(authSvc)
-
 	// Domain handlers
 	tenantSvc := tenant.NewService(tenant.NewPostgresStore(db))
 	customerStore := customer.NewPostgresStore(db)
@@ -414,6 +410,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// is unset.
 	auditLogger.SetEncryptor(sharedEnc)
 	auditH := audit.NewHandler(auditLogger)
+	// API keys: each key change and its audit row commit in one transaction.
+	// NewService panics without a writer, so authSvc needs no MustWired entry.
+	authSvc := auth.NewService(db, auditLogger)
+	authH := auth.NewHandler(authSvc)
 	// The customer handler's audit logger is currently used to record
 	// cost-dashboard token rotations, without writing the plaintext token to
 	// the audit trail.
@@ -831,10 +831,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// send-setup-email path is wired right after its NewHandler call, so the
 	// declaration and its wiring stay together.
 	//
-	// Handler-side audit for API keys, dunning policies, pricing, the Stripe
-	// connection and the webhook endpoint lifecycle. Each gives operator
-	// state changes an audit trail.
-	authH.SetAuditLogger(auditLogger)
+	// Handler-side audit for dunning policies, pricing, the Stripe connection
+	// and the webhook endpoint lifecycle. Each gives operator state changes an
+	// audit trail.
 	dunningH.SetAuditLogger(auditLogger)
 	pricingH.SetAuditLogger(auditLogger)
 	tenantStripeH.SetAuditLogger(auditLogger)
@@ -1394,7 +1393,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	}
 
 	// Handler emitters are checked at boot too. Most handlers take an audit
-	// interface (auth.AuditWriter, subscription.auditRecorder,
+	// interface (pricing.AuditWriter, subscription.auditRecorder,
 	// invoice.auditWriter, …), so a nil emitter type-checks. Every handler
 	// skips emission when its emitter is nil, including the two that hold a
 	// concrete *audit.Logger (customerH, creditNoteH). So without this check,
@@ -1407,7 +1406,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// paymentMethodsH, dashboardAuthH and membersH are built after the first.
 	audit.MustWired(
 		customerH, settingsH, invoiceH, subH, creditNoteH,
-		authH, dunningH, pricingH, tenantStripeH, webhookOutH,
+		dunningH, pricingH, tenantStripeH, webhookOutH,
 		paymentMethodsH, dashboardAuthH, membersH,
 		emailSettingsH,
 	)

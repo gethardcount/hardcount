@@ -357,6 +357,12 @@ func simColumns(ctx context.Context, metadata map[string]any) (simAt, clockID an
 	return sim.At.UTC(), sim.TestClockID, m
 }
 
+// LogInTxFields is LogInTx with the entry's fields as arguments, for a
+// package that cannot import audit: auth, which audit imports for the actor.
+func (l *Logger) LogInTxFields(ctx context.Context, tx *sql.Tx, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error {
+	return l.LogInTx(ctx, tx, Entry{Action: action, ResourceType: resourceType, ResourceID: resourceID, ResourceLabel: resourceLabel, Metadata: metadata})
+}
+
 // LogInTx writes an audit row on the caller's transaction, so the caller's
 // change and its audit row commit or roll back together (shared fate; see
 // ADR-090). It returns an error only when the insert fails. The caller must

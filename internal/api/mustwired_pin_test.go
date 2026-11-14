@@ -19,7 +19,7 @@ import (
 // THERE ARE NO EXEMPTIONS. There used to be 14 — every handler-level receiver —
 // on the written grounds that "handlers keep the *audit.Logger concrete type and
 // fail loudly at compile time instead." BOTH HALVES OF THAT WERE FALSE. MOST of
-// those handlers take an INTERFACE (auth.AuditWriter, subscription.auditRecorder,
+// those handlers take an INTERFACE (pricing.AuditWriter, subscription.auditRecorder,
 // invoice.auditWriter, dunning.AuditWriter, …), so a nil emitter does not even
 // fail to type-check — and every one of them, INCLUDING the two that do hold the
 // concrete *audit.Logger (customerH, creditNoteH), nil-GUARDS its emission and

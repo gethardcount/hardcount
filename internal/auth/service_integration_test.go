@@ -1,4 +1,4 @@
-package auth
+package auth_test
 
 import (
 	"context"
@@ -10,18 +10,20 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/audit"
+	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// These tests run the Service on the real api_keys table, so its row-level
+// These tests run the auth.Service on the real api_keys table, so its row-level
 // security (tenant and mode), its livemode trigger and its constraints apply
 // as they do in production.
 
 type keyRig struct {
-	svc      *Service
+	svc      *auth.Service
 	db       *postgres.DB
 	tenantID string
 }
@@ -29,13 +31,13 @@ type keyRig struct {
 func newKeyRig(t *testing.T) keyRig {
 	t.Helper()
 	db := testutil.SetupTestDB(t)
-	return keyRig{svc: NewService(NewPostgresStore(db)), db: db, tenantID: testutil.CreateTestTenant(t, db, "API Keys")}
+	return keyRig{svc: auth.NewService(db, audit.NewLogger(db)), db: db, tenantID: testutil.CreateTestTenant(t, db, "API Keys")}
 }
 
 func liveCtx(t *testing.T) context.Context { return postgres.WithLivemode(t.Context(), true) }
 func testCtx(t *testing.T) context.Context { return postgres.WithLivemode(t.Context(), false) }
 
-func (k keyRig) create(t *testing.T, ctx context.Context, in CreateKeyInput) CreateKeyResult {
+func (k keyRig) create(t *testing.T, ctx context.Context, in auth.CreateKeyInput) auth.CreateKeyResult {
 	t.Helper()
 	res, err := k.svc.CreateKey(ctx, k.tenantID, in)
 	if err != nil {
@@ -70,14 +72,14 @@ func wantValidation(t *testing.T, err error, field string) {
 
 func wantInvalidKey(t *testing.T, err error, what string) {
 	t.Helper()
-	if !errors.Is(err, ErrInvalidKey) {
-		t.Fatalf("%s: got %v, want ErrInvalidKey", what, err)
+	if !errors.Is(err, auth.ErrInvalidKey) {
+		t.Fatalf("%s: got %v, want auth.ErrInvalidKey", what, err)
 	}
 }
 
 func TestCreateKey_Secret(t *testing.T) {
 	k := newKeyRig(t)
-	result := k.create(t, liveCtx(t), CreateKeyInput{Name: "Backend Key", KeyType: KeyTypeSecret})
+	result := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "Backend Key", KeyType: auth.KeyTypeSecret})
 
 	if !strings.HasPrefix(result.RawKey, "hc_secret_live_") {
 		t.Errorf("raw key should start with hc_secret_live_, got prefix: %q", result.RawKey[:16])
@@ -109,7 +111,7 @@ func TestCreateKey_Secret(t *testing.T) {
 // create, and a key with the old hc_pub_ prefix is an unknown key.
 func TestCreateKey_RefusesRemovedPublishableType(t *testing.T) {
 	k := newKeyRig(t)
-	_, err := k.svc.CreateKey(liveCtx(t), k.tenantID, CreateKeyInput{Name: "Frontend Key", KeyType: KeyType("publishable")})
+	_, err := k.svc.CreateKey(liveCtx(t), k.tenantID, auth.CreateKeyInput{Name: "Frontend Key", KeyType: auth.KeyType("publishable")})
 	wantValidation(t, err, "key_type")
 }
 
@@ -126,8 +128,8 @@ func TestValidateKey_OldPublishablePrefixIsInvalid(t *testing.T) {
 func TestCreateKey_Ingest(t *testing.T) {
 	k := newKeyRig(t)
 	for _, live := range []bool{true, false} {
-		ctx := WithKeyType(postgres.WithLivemode(t.Context(), live), KeyTypeSession)
-		result := k.create(t, ctx, CreateKeyInput{Name: "LiteLLM proxy", KeyType: KeyTypeIngest})
+		ctx := auth.WithKeyType(postgres.WithLivemode(t.Context(), live), auth.KeyTypeSession)
+		result := k.create(t, ctx, auth.CreateKeyInput{Name: "LiteLLM proxy", KeyType: auth.KeyTypeIngest})
 		want := "hc_ingest_test_"
 		if live {
 			want = "hc_ingest_live_"
@@ -156,11 +158,11 @@ func TestPlatformKeyType_RefusedAtCreateAndParse(t *testing.T) {
 	k := newKeyRig(t)
 	for name, ctx := range map[string]context.Context{
 		"no key type":            liveCtx(t),
-		"secret key":             WithKeyType(liveCtx(t), KeyTypeSecret),
-		"session":                WithKeyType(liveCtx(t), KeyTypeSession),
-		"old platform principal": WithKeyType(liveCtx(t), KeyType("platform")),
+		"secret key":             auth.WithKeyType(liveCtx(t), auth.KeyTypeSecret),
+		"session":                auth.WithKeyType(liveCtx(t), auth.KeyTypeSession),
+		"old platform principal": auth.WithKeyType(liveCtx(t), auth.KeyType("platform")),
 	} {
-		_, err := k.svc.CreateKey(ctx, k.tenantID, CreateKeyInput{Name: "Platform", KeyType: KeyType("platform")})
+		_, err := k.svc.CreateKey(ctx, k.tenantID, auth.CreateKeyInput{Name: "Platform", KeyType: auth.KeyType("platform")})
 		if !errors.Is(err, errs.ErrValidation) {
 			t.Errorf("%s: create with key_type platform: got %v, want a validation error", name, err)
 		}
@@ -175,27 +177,27 @@ func TestPlatformKeyType_RefusedAtCreateAndParse(t *testing.T) {
 
 	_, err := k.svc.ValidateKey(t.Context(), "hc_platform_live_"+strings.Repeat("ab", 32))
 	wantInvalidKey(t, err, "hc_platform_live_…")
-	if p := KeyType("platform").TypePrefix(); p != "" {
+	if p := auth.KeyType("platform").TypePrefix(); p != "" {
 		t.Errorf("platform TypePrefix = %q, want none", p)
 	}
 }
 
 func TestCreateKey_DefaultsToSecret(t *testing.T) {
 	k := newKeyRig(t)
-	if got := k.create(t, liveCtx(t), CreateKeyInput{Name: "Default"}).Key.KeyType; got != "secret" {
+	if got := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "Default"}).Key.KeyType; got != "secret" {
 		t.Errorf("default key_type: got %q, want secret", got)
 	}
 }
 
 func TestCreateKey_InvalidType(t *testing.T) {
 	k := newKeyRig(t)
-	_, err := k.svc.CreateKey(liveCtx(t), k.tenantID, CreateKeyInput{Name: "Bad", KeyType: "admin"})
+	_, err := k.svc.CreateKey(liveCtx(t), k.tenantID, auth.CreateKeyInput{Name: "Bad", KeyType: "admin"})
 	wantValidation(t, err, "key_type")
 }
 
 func TestCreateKey_MissingName(t *testing.T) {
 	k := newKeyRig(t)
-	_, err := k.svc.CreateKey(liveCtx(t), k.tenantID, CreateKeyInput{})
+	_, err := k.svc.CreateKey(liveCtx(t), k.tenantID, auth.CreateKeyInput{})
 	wantValidation(t, err, "name")
 }
 
@@ -204,21 +206,21 @@ func TestCreateKey_PastExpiresAt(t *testing.T) {
 	k := newKeyRig(t)
 	past, now := time.Now().Add(-24*time.Hour), time.Now()
 	for name, at := range map[string]*time.Time{"past expires_at": &past, "expires_at == now": &now} {
-		_, err := k.svc.CreateKey(liveCtx(t), k.tenantID, CreateKeyInput{Name: name, ExpiresAt: at})
+		_, err := k.svc.CreateKey(liveCtx(t), k.tenantID, auth.CreateKeyInput{Name: name, ExpiresAt: at})
 		if !errors.Is(err, errs.ErrValidation) || errs.Field(err) != "expires_at" {
 			t.Errorf("%s: got %v, want a validation error on expires_at", name, err)
 		}
 	}
 	future := time.Now().Add(30 * 24 * time.Hour)
-	k.create(t, liveCtx(t), CreateKeyInput{Name: "future key", ExpiresAt: &future})
-	k.create(t, liveCtx(t), CreateKeyInput{Name: "no expiry"})
+	k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "future key", ExpiresAt: &future})
+	k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "no expiry"})
 }
 
 func TestValidateKey_AllTypes(t *testing.T) {
 	k := newKeyRig(t)
-	for _, kt := range StoredKeyTypes {
+	for _, kt := range auth.StoredKeyTypes {
 		t.Run(string(kt), func(t *testing.T) {
-			result := k.create(t, liveCtx(t), CreateKeyInput{Name: "Test " + string(kt), KeyType: kt})
+			result := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "Test " + string(kt), KeyType: kt})
 			key, err := k.svc.ValidateKey(liveCtx(t), result.RawKey)
 			if err != nil {
 				t.Fatalf("validate %s key: %v", kt, err)
@@ -240,9 +242,9 @@ func TestValidateKey_InvalidFormat(t *testing.T) {
 
 func TestValidateKey_WrongSecret(t *testing.T) {
 	k := newKeyRig(t)
-	result := k.create(t, liveCtx(t), CreateKeyInput{Name: "Real", KeyType: KeyTypeSecret})
+	result := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "Real", KeyType: auth.KeyTypeSecret})
 	// The same lookup prefix with a different secret.
-	fake := result.RawKey[:len("hc_secret_live_")+keyPrefixLen] + strings.Repeat("f", 64-keyPrefixLen)
+	fake := result.Key.KeyPrefix + strings.Repeat("f", len(result.RawKey)-len(result.Key.KeyPrefix))
 	if fake == result.RawKey {
 		t.Skip("astronomically unlikely collision")
 	}
@@ -254,7 +256,7 @@ func TestValidateKey_WrongSecret(t *testing.T) {
 func TestValidateKey_Expired(t *testing.T) {
 	k := newKeyRig(t)
 	soon := time.Now().Add(time.Hour)
-	result := k.create(t, liveCtx(t), CreateKeyInput{Name: "Expiring", KeyType: KeyTypeSecret, ExpiresAt: &soon})
+	result := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "Expiring", KeyType: auth.KeyTypeSecret, ExpiresAt: &soon})
 	// CreateKey refuses an expiry in the past, so the row is aged here.
 	k.bypass(t, func(tx *sql.Tx) error {
 		_, err := tx.Exec(`UPDATE api_keys SET expires_at = now() - interval '1 minute' WHERE id = $1`, result.Key.ID)
@@ -266,7 +268,7 @@ func TestValidateKey_Expired(t *testing.T) {
 
 func TestValidateKey_Revoked(t *testing.T) {
 	k := newKeyRig(t)
-	result := k.create(t, liveCtx(t), CreateKeyInput{Name: "Revokable", KeyType: KeyTypeSecret})
+	result := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "Revokable", KeyType: auth.KeyTypeSecret})
 	if _, err := k.svc.RevokeKey(liveCtx(t), k.tenantID, result.Key.ID); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
@@ -276,7 +278,7 @@ func TestValidateKey_Revoked(t *testing.T) {
 
 func TestCreateKey_TestModeFromCtx(t *testing.T) {
 	k := newKeyRig(t)
-	result := k.create(t, testCtx(t), CreateKeyInput{Name: "Sandbox", KeyType: KeyTypeSecret})
+	result := k.create(t, testCtx(t), auth.CreateKeyInput{Name: "Sandbox", KeyType: auth.KeyTypeSecret})
 	if !strings.HasPrefix(result.RawKey, "hc_secret_test_") {
 		t.Errorf("test-mode key should start with hc_secret_test_, got %q", result.RawKey[:20])
 	}
@@ -322,7 +324,7 @@ func TestValidateKey_LegacyFormat(t *testing.T) {
 func TestRevokeKey_WrongTenant(t *testing.T) {
 	k := newKeyRig(t)
 	other := testutil.CreateTestTenant(t, k.db, "Other")
-	result := k.create(t, liveCtx(t), CreateKeyInput{Name: "Test", KeyType: KeyTypeSecret})
+	result := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "Test", KeyType: auth.KeyTypeSecret})
 	if _, err := k.svc.RevokeKey(liveCtx(t), other, result.Key.ID); !errors.Is(err, errs.ErrNotFound) {
 		t.Fatalf("revoke from another tenant: got %v, want not found", err)
 	}
@@ -337,9 +339,9 @@ func TestRevokeKey_WrongTenant(t *testing.T) {
 func TestRotateKey_ImmediateRevoke(t *testing.T) {
 	k := newKeyRig(t)
 	expiry := time.Now().UTC().Add(90 * 24 * time.Hour).Truncate(time.Second)
-	original := k.create(t, liveCtx(t), CreateKeyInput{Name: "Prod deploy", KeyType: KeyTypeSecret, ExpiresAt: &expiry})
+	original := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "Prod deploy", KeyType: auth.KeyTypeSecret, ExpiresAt: &expiry})
 
-	rotated, err := k.svc.RotateKey(liveCtx(t), k.tenantID, original.Key.ID, RotateKeyInput{})
+	rotated, err := k.svc.RotateKey(liveCtx(t), k.tenantID, original.Key.ID, auth.RotateKeyInput{})
 	if err != nil {
 		t.Fatalf("rotate: %v", err)
 	}
@@ -375,9 +377,9 @@ func TestRotateKey_ImmediateRevoke(t *testing.T) {
 // the new key is valid at once, so both authenticate inside it.
 func TestRotateKey_WithGracePeriod(t *testing.T) {
 	k := newKeyRig(t)
-	original := k.create(t, liveCtx(t), CreateKeyInput{Name: "App", KeyType: KeyTypeSecret})
+	original := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "App", KeyType: auth.KeyTypeSecret})
 
-	rotated, err := k.svc.RotateKey(liveCtx(t), k.tenantID, original.Key.ID, RotateKeyInput{ExpiresInSeconds: 3600})
+	rotated, err := k.svc.RotateKey(liveCtx(t), k.tenantID, original.Key.ID, auth.RotateKeyInput{ExpiresInSeconds: 3600})
 	if err != nil {
 		t.Fatalf("rotate: %v", err)
 	}
@@ -400,25 +402,25 @@ func TestRotateKey_WithGracePeriod(t *testing.T) {
 
 func TestRotateKey_RejectsNegativeGrace(t *testing.T) {
 	k := newKeyRig(t)
-	result := k.create(t, liveCtx(t), CreateKeyInput{Name: "K", KeyType: KeyTypeSecret})
-	_, err := k.svc.RotateKey(liveCtx(t), k.tenantID, result.Key.ID, RotateKeyInput{ExpiresInSeconds: -1})
+	result := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "K", KeyType: auth.KeyTypeSecret})
+	_, err := k.svc.RotateKey(liveCtx(t), k.tenantID, result.Key.ID, auth.RotateKeyInput{ExpiresInSeconds: -1})
 	wantValidation(t, err, "expires_in_seconds")
 }
 
 func TestRotateKey_RejectsExcessiveGrace(t *testing.T) {
 	k := newKeyRig(t)
-	result := k.create(t, liveCtx(t), CreateKeyInput{Name: "K", KeyType: KeyTypeSecret})
-	_, err := k.svc.RotateKey(liveCtx(t), k.tenantID, result.Key.ID, RotateKeyInput{ExpiresInSeconds: MaxRotationGraceSeconds + 1})
+	result := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "K", KeyType: auth.KeyTypeSecret})
+	_, err := k.svc.RotateKey(liveCtx(t), k.tenantID, result.Key.ID, auth.RotateKeyInput{ExpiresInSeconds: auth.MaxRotationGraceSeconds + 1})
 	wantValidation(t, err, "expires_in_seconds")
 }
 
 func TestRotateKey_RejectsAlreadyRevoked(t *testing.T) {
 	k := newKeyRig(t)
-	result := k.create(t, liveCtx(t), CreateKeyInput{Name: "K", KeyType: KeyTypeSecret})
+	result := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "K", KeyType: auth.KeyTypeSecret})
 	if _, err := k.svc.RevokeKey(liveCtx(t), k.tenantID, result.Key.ID); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
-	if _, err := k.svc.RotateKey(liveCtx(t), k.tenantID, result.Key.ID, RotateKeyInput{}); !errors.Is(err, errs.ErrInvalidState) {
+	if _, err := k.svc.RotateKey(liveCtx(t), k.tenantID, result.Key.ID, auth.RotateKeyInput{}); !errors.Is(err, errs.ErrInvalidState) {
 		t.Fatalf("rotate a revoked key: got %v, want invalid state", err)
 	}
 }
@@ -426,8 +428,8 @@ func TestRotateKey_RejectsAlreadyRevoked(t *testing.T) {
 func TestRotateKey_WrongTenant(t *testing.T) {
 	k := newKeyRig(t)
 	other := testutil.CreateTestTenant(t, k.db, "Other")
-	result := k.create(t, liveCtx(t), CreateKeyInput{Name: "K", KeyType: KeyTypeSecret})
-	if _, err := k.svc.RotateKey(liveCtx(t), other, result.Key.ID, RotateKeyInput{}); !errors.Is(err, errs.ErrNotFound) {
+	result := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "K", KeyType: auth.KeyTypeSecret})
+	if _, err := k.svc.RotateKey(liveCtx(t), other, result.Key.ID, auth.RotateKeyInput{}); !errors.Is(err, errs.ErrNotFound) {
 		t.Fatalf("rotate from another tenant: got %v, want not found", err)
 	}
 }
@@ -436,12 +438,12 @@ func TestRotateKey_WrongTenant(t *testing.T) {
 // the other mode the key is not found: row-level security filters by mode.
 func TestRotateKey_InTheKeysOwnMode(t *testing.T) {
 	k := newKeyRig(t)
-	original := k.create(t, testCtx(t), CreateKeyInput{Name: "Sandbox", KeyType: KeyTypeSecret})
+	original := k.create(t, testCtx(t), auth.CreateKeyInput{Name: "Sandbox", KeyType: auth.KeyTypeSecret})
 
-	if _, err := k.svc.RotateKey(liveCtx(t), k.tenantID, original.Key.ID, RotateKeyInput{}); !errors.Is(err, errs.ErrNotFound) {
+	if _, err := k.svc.RotateKey(liveCtx(t), k.tenantID, original.Key.ID, auth.RotateKeyInput{}); !errors.Is(err, errs.ErrNotFound) {
 		t.Fatalf("rotate a test-mode key in live mode: got %v, want not found", err)
 	}
-	rotated, err := k.svc.RotateKey(testCtx(t), k.tenantID, original.Key.ID, RotateKeyInput{})
+	rotated, err := k.svc.RotateKey(testCtx(t), k.tenantID, original.Key.ID, auth.RotateKeyInput{})
 	if err != nil {
 		t.Fatalf("rotate in test mode: %v", err)
 	}
@@ -455,10 +457,10 @@ func TestRotateKey_InTheKeysOwnMode(t *testing.T) {
 // request, not left to run after it.
 func TestValidateKey_WritesLastUsedBeforeItReturns(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	svc := NewService(NewPostgresStore(db))
+	svc := auth.NewService(db, audit.NewLogger(db))
 	ctx := postgres.WithLivemode(t.Context(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Last Used")
-	created, err := svc.CreateKey(ctx, tenantID, CreateKeyInput{Name: "CI"})
+	created, err := svc.CreateKey(ctx, tenantID, auth.CreateKeyInput{Name: "CI"})
 	if err != nil {
 		t.Fatalf("create key: %v", err)
 	}
@@ -489,10 +491,10 @@ func TestValidateKey_WritesLastUsedBeforeItReturns(t *testing.T) {
 // request's time ran out, as it does under lock contention in production.
 func TestValidateKey_AFailedLastUsedWriteDoesNotRefuseTheKey(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	svc := NewService(NewPostgresStore(db))
+	svc := auth.NewService(db, audit.NewLogger(db))
 	ctx := postgres.WithLivemode(t.Context(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Last Used Fails")
-	created, err := svc.CreateKey(ctx, tenantID, CreateKeyInput{Name: "CI"})
+	created, err := svc.CreateKey(ctx, tenantID, auth.CreateKeyInput{Name: "CI"})
 	if err != nil {
 		t.Fatalf("create key: %v", err)
 	}

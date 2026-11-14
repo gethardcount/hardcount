@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/sha256"
 	"crypto/subtle"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -27,10 +28,24 @@ const (
 	keySecretLen = 32 // random bytes = 64 hex chars
 )
 
-// Service creates, validates, rotates and revokes API keys.
+// Service creates, validates, rotates and revokes API keys. A change to a
+// key (create, revoke, rotate) and its audit row commit in one transaction,
+// or neither does.
 type Service struct {
-	store    *PostgresStore
+	db       *postgres.DB
+	store    store
+	audit    AuditWriter
 	lastUsed lastUsedDebounce
+}
+
+// apiKeyResourceType is the resource_type of a key's audit rows.
+const apiKeyResourceType = "api_key"
+
+// AuditWriter writes an audit row on the caller's transaction, so the change
+// and its row commit or roll back together. *audit.Logger is the one
+// implementation; auth cannot import audit, which imports auth for the actor.
+type AuditWriter interface {
+	LogInTxFields(ctx context.Context, tx *sql.Tx, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
 }
 
 // lastUsedTouchInterval is how often, at most, last_used_at is written for
@@ -44,9 +59,34 @@ type Service struct {
 // only add waiters.
 const lastUsedTouchInterval = time.Minute
 
-// NewService returns a Service on store.
-func NewService(store *PostgresStore) *Service {
-	return &Service{store: store}
+// NewService returns a Service on db that writes each key change's audit row
+// with audit. It panics on a nil audit: a key change with no audit row would
+// be invisible on the operator's Audit Log page.
+func NewService(db *postgres.DB, audit AuditWriter) *Service {
+	if audit == nil {
+		panic("auth.NewService: audit writer is required")
+	}
+	return &Service{db: db, store: store{db: db}, audit: audit}
+}
+
+// inTenantTx runs fn in a transaction scoped to tenantID and the mode ctx
+// carries, and commits it when fn succeeds.
+func (s *Service) inTenantTx(ctx context.Context, tenantID string, fn func(tx *sql.Tx) error) error {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return err
+	}
+	defer postgres.Rollback(tx)
+	if err := fn(tx); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// auditKeyChange writes the audit row of a change to key on tx: the key's id
+// and name, and metadata, which never holds the raw key.
+func (s *Service) auditKeyChange(ctx context.Context, tx *sql.Tx, action string, key domain.APIKey, metadata map[string]any) error {
+	return s.audit.LogInTxFields(ctx, tx, action, apiKeyResourceType, key.ID, key.Name, metadata)
 }
 
 // lastUsedDebounce decides when a key's last_used_at is due for a write: at
@@ -86,8 +126,29 @@ type CreateKeyInput struct {
 
 // CreateKey mints a key for tenantID, in the mode that ctx carries, and
 // returns it with its raw value. It refuses an empty name, a key type other
-// than secret or ingest, and an expires_at that is not in the future.
+// than secret or ingest, and an expires_at that is not in the future. The
+// key and its audit row commit together.
 func (s *Service) CreateKey(ctx context.Context, tenantID string, input CreateKeyInput) (CreateKeyResult, error) {
+	var result CreateKeyResult
+	err := s.inTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+		var err error
+		if result, err = s.checkMintAndInsert(ctx, tx, tenantID, input); err != nil {
+			return err
+		}
+		return s.auditKeyChange(ctx, tx, domain.AuditActionCreate, result.Key, map[string]any{
+			"key_type": result.Key.KeyType,
+			"livemode": result.Key.Livemode,
+		})
+	})
+	if err != nil {
+		return CreateKeyResult{}, err
+	}
+	return result, nil
+}
+
+// checkMintAndInsert checks input, mints a key for tenantID in the mode that
+// ctx carries, and inserts it on tx.
+func (s *Service) checkMintAndInsert(ctx context.Context, tx *sql.Tx, tenantID string, input CreateKeyInput) (CreateKeyResult, error) {
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
 		return CreateKeyResult{}, errs.Required("name")
@@ -148,7 +209,7 @@ func (s *Service) CreateKey(ctx context.Context, tenantID string, input CreateKe
 
 	id := postgres.NewID("hc_key")
 
-	key, err := s.store.Create(ctx, domain.APIKey{
+	key, err := s.store.insert(ctx, tx, domain.APIKey{
 		ID:        id,
 		KeyPrefix: dbPrefix,
 		KeyHash:   hashHex,
@@ -219,7 +280,7 @@ func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey
 
 	dbPrefix := fullPrefix + secretPart[:keyPrefixLen]
 
-	key, err := s.store.GetByPrefix(ctx, dbPrefix)
+	key, err := s.store.getByPrefix(ctx, dbPrefix)
 	if err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
 			return domain.APIKey{}, ErrInvalidKey
@@ -250,7 +311,7 @@ func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey
 	// auth decision reads the column.
 	now := time.Now().UTC()
 	if s.lastUsed.due(key.ID, now) {
-		if err := s.store.TouchLastUsed(ctx, key.ID, now); err != nil {
+		if err := s.store.touchLastUsed(ctx, key.ID, now); err != nil {
 			slog.WarnContext(ctx, "write api key last_used_at", "key_id", key.ID, "error", err)
 		}
 	}
@@ -258,9 +319,24 @@ func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey
 	return key, nil
 }
 
-// RevokeKey revokes the tenant's key with id and returns the revoked key.
+// RevokeKey revokes the tenant's key with id and returns the revoked key. The
+// revocation and its audit row commit together. A key that is not found, or
+// already revoked, returns errs.ErrNotFound.
 func (s *Service) RevokeKey(ctx context.Context, tenantID, id string) (domain.APIKey, error) {
-	return s.store.Revoke(ctx, tenantID, id)
+	var key domain.APIKey
+	err := s.inTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+		var err error
+		if key, err = s.store.revoke(ctx, tx, id); err != nil {
+			return err
+		}
+		return s.auditKeyChange(ctx, tx, domain.AuditActionRevoke, key, map[string]any{
+			"key_type": key.KeyType,
+		})
+	})
+	if err != nil {
+		return domain.APIKey{}, err
+	}
+	return key, nil
 }
 
 // MaxRotationGraceSeconds caps how long a caller can keep the old key alive
@@ -292,7 +368,9 @@ type RotateKeyResult struct {
 // livemode and any configured expires_at. The old key is revoked at once
 // (grace 0), or set to expire after input.ExpiresInSeconds seconds; a grace
 // never moves an earlier expires_at later. A revoked or expired key cannot be
-// rotated: create a new key instead.
+// rotated: create a new key instead. The replacement, the old key's change
+// and the audit row commit in one transaction, with the old key's row locked
+// from the first read.
 func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input RotateKeyInput) (RotateKeyResult, error) {
 	if input.ExpiresInSeconds < 0 {
 		return RotateKeyResult{}, errs.Invalid("expires_in_seconds", "must be >= 0")
@@ -302,70 +380,64 @@ func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input Rota
 			fmt.Sprintf("must be <= %d (7 days)", MaxRotationGraceSeconds))
 	}
 
-	old, err := s.store.Get(ctx, tenantID, id)
+	var result RotateKeyResult
+	err := s.inTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+		// Row-level security finds the key only in the caller's mode, so the
+		// replacement, minted on the same transaction, is in the old key's mode.
+		old, err := s.store.getForUpdate(ctx, tx, id)
+		if err != nil {
+			return err
+		}
+		if old.RevokedAt != nil {
+			return errs.InvalidState("cannot rotate a revoked key")
+		}
+		// CreateKey's rule for a new key's expires_at: at or before now is
+		// expired.
+		if old.ExpiresAt != nil && !time.Now().UTC().Before(*old.ExpiresAt) {
+			return errs.InvalidState("cannot rotate an expired key")
+		}
+
+		// The replacement takes the old key's name, type and expires_at. A
+		// rotation is a credential swap, not a reconfiguration.
+		created, err := s.checkMintAndInsert(ctx, tx, tenantID, CreateKeyInput{
+			Name:      old.Name,
+			KeyType:   KeyType(old.KeyType),
+			ExpiresAt: old.ExpiresAt,
+		})
+		if err != nil {
+			return fmt.Errorf("mint replacement key: %w", err)
+		}
+
+		var oldAfter domain.APIKey
+		if input.ExpiresInSeconds == 0 {
+			// The old key stops authenticating on the next ValidateKey. A
+			// request already in flight under it completes.
+			oldAfter, err = s.store.revoke(ctx, tx, id)
+		} else {
+			graceUntil := time.Now().UTC().Add(time.Duration(input.ExpiresInSeconds) * time.Second)
+			oldAfter, err = s.store.scheduleExpiry(ctx, tx, id, graceUntil)
+		}
+		if err != nil {
+			return fmt.Errorf("retire old key: %w", err)
+		}
+
+		if err := s.auditKeyChange(ctx, tx, domain.AuditActionRotate, created.Key, map[string]any{
+			"key_type":   created.Key.KeyType,
+			"old_key_id": id,
+		}); err != nil {
+			return err
+		}
+		result = RotateKeyResult{OldKey: oldAfter, NewKey: created.Key, RawKey: created.RawKey}
+		return nil
+	})
 	if err != nil {
 		return RotateKeyResult{}, err
 	}
-	if old.RevokedAt != nil {
-		return RotateKeyResult{}, errs.InvalidState("cannot rotate a revoked key")
-	}
-	// CreateKey's rule for a new key's expires_at: at or before now is
-	// expired.
-	if old.ExpiresAt != nil && !time.Now().UTC().Before(*old.ExpiresAt) {
-		return RotateKeyResult{}, errs.InvalidState("cannot rotate an expired key")
-	}
-
-	// Mint the replacement through the same CreateKey path, so livemode
-	// handling, hashing and prefix generation stay in one place. The new key
-	// takes the old key's name, type and expires_at. A rotation is a
-	// credential swap, not a reconfiguration.
-	createInput := CreateKeyInput{
-		Name:      old.Name,
-		KeyType:   KeyType(old.KeyType),
-		ExpiresAt: old.ExpiresAt,
-	}
-	// The new key must have the old key's livemode. postgres.Livemode(ctx)
-	// depends on the request ctx, which the caller controls. So ctx is set to
-	// the old key's mode, and a live key rotated by a test-mode caller still
-	// gets a live replacement.
-	created, err := s.CreateKey(postgres.WithLivemode(ctx, old.Livemode), tenantID, createInput)
-	if err != nil {
-		return RotateKeyResult{}, fmt.Errorf("mint replacement key: %w", err)
-	}
-
-	var oldAfter domain.APIKey
-	if input.ExpiresInSeconds == 0 {
-		// Immediate revocation: the old key stops authenticating on the next
-		// ValidateKey call. A request already in flight under the old key
-		// completes, and later ones fail.
-		oldAfter, err = s.store.Revoke(ctx, tenantID, id)
-	} else {
-		graceUntil := time.Now().UTC().Add(time.Duration(input.ExpiresInSeconds) * time.Second)
-		oldAfter, err = s.store.ScheduleExpiry(ctx, tenantID, id, graceUntil)
-	}
-	if err != nil {
-		// The replacement is already stored, but its secret is never
-		// returned, so nobody can use it. The old key is unchanged and still
-		// works. The caller retries the rotation and revokes the leftover
-		// replacement, which shows in the key list. Its id goes in the error
-		// for the log.
-		//
-		// The wording avoids the phrases that respond.FromError's
-		// message-text fallback matches (" must be ", " is required", ...).
-		// So a store failure here is logged and answered as a 500, not sent
-		// to the client as a 422 carrying this text.
-		return RotateKeyResult{}, fmt.Errorf("retire old key after creating replacement %s: %w", created.Key.ID, err)
-	}
-
-	return RotateKeyResult{
-		OldKey: oldAfter,
-		NewKey: created.Key,
-		RawKey: created.RawKey,
-	}, nil
+	return result, nil
 }
 
 // ListKeys returns one page of the keys that filter selects, and how many
 // match.
 func (s *Service) ListKeys(ctx context.Context, filter ListFilter) ([]domain.APIKey, int, error) {
-	return s.store.List(ctx, filter)
+	return s.store.list(ctx, filter)
 }
