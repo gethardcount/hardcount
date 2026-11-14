@@ -8,7 +8,7 @@ safe:
 | Requests | The key | Kept for |
 |---|---|---|
 | Usage events | The `idempotency_key` field in each event | Forever |
-| Every other `POST`, `PUT` and `PATCH` under `/v1` | The `Idempotency-Key` header | 24 hours |
+| Every other `POST`, `PUT` and `PATCH` under `/v1`, except [the routes that ignore it](#routes-that-ignore-the-header) | The `Idempotency-Key` header | 24 hours |
 
 The rule for both is the same: **make the key once for each operation, and
 send the same key on every retry of it.**
@@ -50,7 +50,8 @@ check.
 
 ## Other writes: the `Idempotency-Key` header
 
-Send the header on every `POST`, `PUT` and `PATCH` you may retry, such as
+Send the header on every `POST`, `PUT` and `PATCH` you may retry, except on
+[the routes that ignore it](#routes-that-ignore-the-header), such as
 creating a customer, granting credit or issuing a credit note. Make the key
 once, before the first try, and keep it with the job:
 
@@ -172,6 +173,31 @@ take an API key. These routes ignore it, and run every time:
 - Sign-in, password reset and invites (`/v1/auth…`) and `/v1/bootstrap`.
 - The public pages (`/v1/public/…`).
 - The routes Stripe and Postmark call (`/v1/webhooks…`).
+- The requests whose answer carries a secret shown only once. Hardcount
+  does not keep that answer, so a retry runs the request again. If you lose
+  the answer:
+  - **Create an API key** (`POST /v1/api-keys`): list the keys, revoke the
+    one you did not get, and create a new one.
+  - **Rotate an API key at once** (`POST /v1/api-keys/{id}/rotate` with no
+    grace period): the retry answers `409`, because the old key is already
+    revoked. List the keys, revoke the replacement you did not get, and
+    create a new key.
+  - **Rotate an API key with a grace period**: the retry makes a second
+    replacement. Revoke the first one, which you did not get.
+  - **Create a webhook endpoint** (`POST /v1/webhook-endpoints/endpoints`):
+    the retry makes a second endpoint. Delete the first one, whose secret
+    you did not get.
+  - **Rotate a webhook signing secret**
+    (`POST /v1/webhook-endpoints/endpoints/{id}/rotate-secret`): rotate
+    again and deploy the new secret right away. The second rotation stops
+    the secret your receiver still uses, so its signatures no longer
+    verify; deliveries that fail in between are retried on the
+    [delivery schedule](../webhooks.md#retries).
+  - **Rotate a customer's cost dashboard token**
+    (`POST /v1/customers/{id}/rotate-cost-dashboard-token`): rotate again.
+  - **Create a card setup session**
+    (`POST /v1/customers/{customer_id}/payment-methods/setup-session`):
+    create another.
 
 `GET` and `DELETE` requests do not use it.
 

@@ -150,6 +150,11 @@ components:
         other error cases are in
         [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
         not take it: each usage event carries its own `idempotency_key`.
+        The requests whose answer carries a secret shown only once
+        (creating or rotating an API key, creating a webhook endpoint or
+        rotating its signing secret, rotating a customer's cost dashboard
+        token, creating a card setup session) do not take it either:
+        Hardcount does not keep that answer.
       schema:
         type: string
       example: 5f0c8a2e-7b1d-4c3e-9a6f-2d8b4e1c7a90
@@ -8036,6 +8041,7 @@ components:
           $ref: "#/components/schemas/APIKey"
         raw_key:
           type: string
+          x-show-once: true
           description: |
             The full key: its prefix (`hc_secret_test_`, `hc_ingest_live_`
             and so on) and 64 hex characters. Shown only once; store it now.
@@ -8066,6 +8072,7 @@ components:
           $ref: "#/components/schemas/APIKey"
         raw_key:
           type: string
+          x-show-once: true
           description: The new key's full value. Shown only once; store it now.
       example:
         old_key:
@@ -8463,6 +8470,7 @@ components:
           description: The owner's dashboard sign-in email.
         owner_password:
           type: string
+          x-show-once: true
           description: |
             The owner's dashboard password: the one you sent, or the
             generated one (24 hex characters).
@@ -8471,9 +8479,11 @@ components:
           description: True when Hardcount generated `owner_password` because the request sent none.
         secret_key_test:
           type: string
+          x-show-once: true
           description: Test-mode secret key (`hc_secret_test_...`).
         secret_key_live:
           type: string
+          x-show-once: true
           description: Live-mode secret key (`hc_secret_live_...`).
         message:
           type: string
@@ -9539,6 +9549,7 @@ components:
           $ref: "#/components/schemas/WebhookEndpoint"
         secret:
           type: string
+          x-show-once: true
           description: The signing secret (`whsec_…`). Store it now; Hardcount does not show it again.
       example:
         endpoint:
@@ -9561,6 +9572,7 @@ components:
       properties:
         secret:
           type: string
+          x-show-once: true
           description: The new signing secret (`whsec_…`). Store it now; Hardcount does not show it again.
         secondary_valid_until:
           type: string
@@ -10289,7 +10301,6 @@ paths:
         time you see it: copy it now. The rotation is written to the audit
         log, without the token. Send no body.
       parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -10306,12 +10317,14 @@ paths:
                 properties:
                   token:
                     type: string
+                    x-show-once: true
                     description: |
                       The new token, `hc_pcd_` and 64 hex characters. Shown
                       only in this answer.
                     example: hc_pcd_3f9a1c7e5b2d4f6a8c0e1b3d5f7a9c2e4b6d8f0a1c3e5b7d9f2a4c6e8b0d1f3a
                   public_url:
                     type: string
+                    x-show-once: true
                     description: |
                       `/v1/public/cost-dashboard/` and the token, after the
                       server's `HARDCOUNT_API_BASE_URL` when that is set.
@@ -11341,7 +11354,6 @@ paths:
         `internal_error`.
       operationId: createCustomerPaymentSetupSession
       parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
         - name: customer_id
           in: path
           required: true
@@ -11374,6 +11386,7 @@ paths:
                 properties:
                   url:
                     type: string
+                    x-show-once: true
                     description: Stripe Checkout URL. Expires on Stripe's schedule (about 24 hours).
                   session_id:
                     type: string
@@ -13465,8 +13478,6 @@ paths:
         starts with `invoice.`. An event type Hardcount never sends is
         refused with 422, so a typo cannot leave the endpoint silent. Writes
         an audit row.
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -13805,7 +13816,6 @@ paths:
         switch to the new secret without rejecting events. After that only
         the new secret signs. Writes an audit row, without the secret.
       parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true
@@ -27401,8 +27411,6 @@ paths:
         (`hc_ingest_…`) can only send usage events: give it to LiteLLM or
         another gateway, so the key in its config cannot refund, void or
         read your data. Writes an audit row (never the key value).
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
       requestBody:
         required: true
         content:
@@ -27618,7 +27626,6 @@ paths:
         key working for that many seconds (at most 604800, 7 days), so
         deployed clients can switch without downtime. Writes an audit row.
       parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
         - name: id
           in: path
           required: true

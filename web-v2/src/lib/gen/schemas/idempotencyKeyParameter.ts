@@ -28,5 +28,10 @@
  * other error cases are in
  * [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do
  * not take it: each usage event carries its own `idempotency_key`.
+ * The requests whose answer carries a secret shown only once
+ * (creating or rotating an API key, creating a webhook endpoint or
+ * rotating its signing secret, rotating a customer's cost dashboard
+ * token, creating a card setup session) do not take it either:
+ * Hardcount does not keep that answer.
  */
 export type IdempotencyKeyParameter = string;
