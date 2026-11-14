@@ -1,6 +1,7 @@
 import fs from 'node:fs'
 import path from 'node:path'
-import { test, expect, type Locator } from '@playwright/test'
+import { test, expect, type Locator, type Page } from '@playwright/test'
+import type { APIKey } from '../src/lib/gen/schemas/aPIKey'
 import { env, seedFile } from './fixtures/env'
 import { api, apiListAll, usd, usdBalance, uniq } from './fixtures/api'
 import {
@@ -1183,6 +1184,252 @@ test('a usage-only API key is made from the dialog and shows its type in the lis
   await expect(row.getByRole('cell').nth(1)).toHaveText('Usage only')
   const keys = await api<{ data: { name: string; key_type: string }[] }>('GET', '/api-keys?limit=100')
   expect(keys.data.find(k => k.name === name)?.key_type).toBe('ingest')
+})
+
+// A key made through the API, then found in the list by its name.
+async function apiKeyRow(page: Page, name: string, expiresAt?: string): Promise<Locator> {
+  await api('POST', '/api-keys', { name, key_type: 'secret', ...(expiresAt ? { expires_at: expiresAt } : {}) })
+  await page.goto('/api-keys')
+  return page.getByRole('main').getByRole('row').filter({ hasText: name })
+}
+
+// shootKeys saves the page as it is, at the desktop width and at 390 px, as
+// activity-shots/api-keys-<state>-desktop.png and -390.png (CI uploads the
+// folder), then puts the desktop width back. focus, when given, is scrolled
+// into view at each width.
+async function shootKeys(page: Page, state: string, focus?: Locator) {
+  const desktop = page.viewportSize() ?? { width: 1440, height: 900 }
+  const shots = path.join(import.meta.dirname, '..', 'activity-shots')
+  await focus?.scrollIntoViewIfNeeded()
+  await page.screenshot({ path: path.join(shots, `api-keys-${state}-desktop.png`), animations: 'disabled' })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await focus?.scrollIntoViewIfNeeded()
+  await page.screenshot({ path: path.join(shots, `api-keys-${state}-390.png`), animations: 'disabled' })
+  await page.setViewportSize(desktop)
+}
+
+// A key as the API returns it, for the specs that answer the list
+// themselves. It is the generated APIKey, so a schema change breaks them.
+function mockKey(id: string, name: string, status: APIKey['status'], extra: Partial<APIKey> = {}): APIKey {
+  return {
+    id, name, status, key_type: 'secret', livemode: false, tenant_id: 'hc_ten_e2e',
+    key_prefix: 'hc_secret_test_0123456789ab', created_at: '2026-10-01T08:00:00Z', ...extra,
+  }
+}
+
+// answerKeyList answers the dashboard's GET of the key list, with or without
+// a query string, and lets every other request through.
+async function answerKeyList(page: Page, data: unknown[]) {
+  await page.route(url => url.pathname === '/v1/api-keys', route =>
+    route.request().method() === 'GET'
+      ? route.fulfill({ json: { data, total: data.length } })
+      : route.fallback())
+}
+
+const INACTIVE_PAIR = [
+  mockKey('hc_key_e', 'Expired one', 'expired', { expires_at: '2026-10-02T00:00:00Z' }),
+  mockKey('hc_key_r', 'Revoked one', 'revoked', { revoked_at: '2026-10-03T00:00:00Z' }),
+]
+
+test('the name is checked as the server checks it, and copying a key the browser refuses says so', async ({ page }) => {
+  let creates = 0
+  page.on('request', r => { if (r.method() === 'POST' && new URL(r.url()).pathname === '/v1/api-keys') creates++ })
+  await page.goto('/api-keys')
+  await page.getByRole('button', { name: 'Create API key' }).click()
+  const create = page.getByRole('dialog', { name: 'Create API key' })
+  const nameField = create.getByPlaceholder('e.g. Production, Staging, CI/CD')
+  // Blank once trimmed, and 101 characters: refused before any request.
+  await nameField.fill('   ')
+  await create.getByRole('button', { name: 'Create key' }).click()
+  await expect(create.getByText('Name is required')).toBeVisible()
+  await nameField.fill('x'.repeat(101))
+  await create.getByRole('button', { name: 'Create key' }).click()
+  await expect(create.getByText('Name must be at most 100 characters')).toBeVisible()
+  expect(creates).toBe(0)
+
+  // 100 characters that take two UTF-16 units each: the server counts 100,
+  // and so does the form.
+  await nameField.fill('🔑'.repeat(100))
+  await create.getByRole('button', { name: 'Create key' }).click()
+  const shown = page.getByRole('dialog', { name: 'API key created' })
+  await expect(shown).toBeVisible()
+  expect(creates).toBe(1)
+  // The browser refuses the clipboard, as it does without permission.
+  await page.evaluate(() => {
+    Object.defineProperty(navigator.clipboard, 'writeText', { value: () => Promise.reject(new Error('denied')) })
+  })
+  await shown.getByRole('button', { name: 'Copy new key', exact: true }).click()
+  await expect(page.getByText("Couldn't copy. Select the text and copy it yourself.")).toBeVisible()
+  await expect(page.getByText('Copied to clipboard')).toHaveCount(0)
+  await expect(shown).toBeVisible()
+  await expect(shown.getByRole('button', { name: 'Copy the try-it command', exact: true })).toBeVisible()
+  await shootKeys(page, 'copy-refused')
+  await shown.getByRole('button', { name: "I've copied it" }).click()
+})
+
+test('a rotated key says when the old key stops working', async ({ page }) => {
+  const name = `e2e rotate ${uniq()}`
+  const row = await apiKeyRow(page, name)
+  await expect(row).toHaveCount(1)
+  // The key to rotate is the one that still says Active: after a rotation
+  // with a grace, the old key says when it expires instead.
+  const rotate = async (grace: string) => {
+    await page.getByRole('main').getByRole('row').filter({ hasText: name }).filter({ hasText: 'Active' }).first()
+      .getByRole('button', { name: `Actions for ${name}` }).click()
+    await page.getByRole('menuitem', { name: 'Rotate' }).click()
+    const dialog = page.getByRole('dialog', { name: 'Rotate API key' })
+    await expect(dialog.getByText('Old key stops working', { exact: true })).toBeVisible()
+    await dialog.getByRole('button', { name: grace }).click()
+    await dialog.getByRole('button', { name: 'Rotate key' }).click()
+    return page.getByRole('dialog', { name: 'API key rotated' })
+  }
+  let shown = await rotate('In 24 hours')
+  await expect(shown.getByText(/^The old key stops working at /)).toBeVisible()
+  await shootKeys(page, 'rotated-reveal')
+  await shown.getByRole('button', { name: "I've copied it" }).click()
+
+  shown = await rotate('Now')
+  await expect(shown.getByText('The old key has stopped working.')).toBeVisible()
+  await shown.getByRole('button', { name: "I've copied it" }).click()
+})
+
+test('expired and revoked keys sit behind a toggle and have no actions', async ({ page }) => {
+  // The server decides each status; the page shows it.
+  await answerKeyList(page, [mockKey('hc_key_a', 'Active one', 'active'), ...INACTIVE_PAIR])
+  await page.goto('/api-keys')
+  const main = page.getByRole('main')
+  const toggle = main.getByRole('button', { name: 'Show 2 inactive keys (1 expired, 1 revoked)' })
+  await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+  await expect(main.getByRole('row').filter({ hasText: 'Expired one' })).toHaveCount(0)
+  await toggle.click()
+  const hide = main.getByRole('button', { name: 'Hide 2 inactive keys (1 expired, 1 revoked)' })
+  await expect(hide).toHaveAttribute('aria-expanded', 'true')
+  // The toggle controls the inactive rows, and only those.
+  const controlled = page.locator(`#${await hide.getAttribute('aria-controls')}`)
+  await expect(controlled.getByRole('row')).toHaveCount(2)
+  await expect(controlled).not.toContainText('Active one')
+  for (const [name, status] of [['Expired one', 'Expired'], ['Revoked one', 'Revoked']]) {
+    const row = main.getByRole('row').filter({ hasText: name })
+    await expect(row).toContainText(status)
+    await expect(row.getByRole('button', { name: `Actions for ${name}` })).toHaveCount(0)
+  }
+  await expect(main.getByRole('button', { name: 'Actions for Active one' })).toHaveCount(1)
+  await shootKeys(page, 'inactive-open')
+})
+
+test('with no active key the list says so and still offers Create', async ({ page }) => {
+  await answerKeyList(page, INACTIVE_PAIR)
+  await page.goto('/api-keys')
+  const main = page.getByRole('main')
+  await expect(main.getByRole('row').filter({ hasText: 'No active keys.' })).toBeVisible()
+  await expect(main.getByRole('button', { name: 'Show 2 inactive keys (1 expired, 1 revoked)' })).toBeVisible()
+  await shootKeys(page, 'no-active')
+  await main.getByRole('button', { name: 'Create a key' }).click()
+  await expect(page.getByRole('dialog', { name: 'Create API key' })).toBeVisible()
+})
+
+test('a key status the page does not know shows an error, not an empty list', async ({ page }) => {
+  await answerKeyList(page, [mockKey('hc_key_a', 'Active one', 'active'), { ...mockKey('hc_key_p', 'Paused one', 'active'), status: 'paused' }])
+  await page.goto('/api-keys')
+  const main = page.getByRole('main')
+  const alert = main.getByRole('alert')
+  await expect(alert).toContainText("Couldn't load API keys")
+  await expect(alert).toContainText('This page is out of date with the server. Reload it.')
+  await expect(alert).not.toContainText('status')
+  await expect(main.getByRole('row')).toHaveCount(0)
+  await shootKeys(page, 'unknown-status')
+  // Its button loads the page again, which a refetch with the same code could not fix.
+  await Promise.all([page.waitForEvent('load'), alert.getByRole('button', { name: 'Reload' }).click()])
+})
+
+test('an expiring key counts the days to the date it shows, and a long name fits a phone', async ({ page }) => {
+  // The longest name allowed, with nowhere to break it.
+  const name = `e2e-expiring-${uniq()}-`.padEnd(100, 'x')
+  const zone = await workspaceZone()
+  const expiresAt = new Date(Date.now() + 3 * 86_400_000 + 3_600_000)
+  // Calendar days in the account's zone, as the Expires column prints the date.
+  const dayNumber = (d: Date) => {
+    const [y, m, day] = new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone: zone }).format(d).split('-').map(Number)
+    return Date.UTC(y, m - 1, day) / 86_400_000
+  }
+  const hint = `Expires in ${dayNumber(expiresAt) - dayNumber(new Date())} days`
+  const row = await apiKeyRow(page, name, expiresAt.toISOString())
+  await expect(row).toContainText(hint)
+  await shootKeys(page, 'list-expiring', row)
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(row.getByRole('button', { name: `Actions for ${name}` })).toBeVisible()
+  await expect(row).toContainText(hint)
+  // Neither the page nor the table scrolls sideways.
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
+  const table = page.getByRole('main').locator('[data-slot="table-container"]')
+  expect(await table.evaluate(el => el.scrollWidth - el.clientWidth)).toBeLessThanOrEqual(0)
+})
+
+test('revoking a key someone already revoked closes the dialog and shows the list as it is', async ({ page }) => {
+  const key = mockKey('hc_key_gone', 'Gone one', 'active')
+  const revoked: APIKey = { ...key, status: 'revoked', revoked_at: '2026-11-14T12:00:00Z' }
+  let revokedElsewhere = false
+  let lists = 0
+  await page.route(url => url.pathname === '/v1/api-keys', route => {
+    if (route.request().method() !== 'GET') return route.fallback()
+    lists++
+    return route.fulfill({ json: { data: [revokedElsewhere ? revoked : key], total: 1 } })
+  })
+  // Another tab revoked it after this page loaded its list.
+  await page.route(url => url.pathname === '/v1/api-keys/hc_key_gone', route => {
+    revokedElsewhere = true
+    return route.fulfill({ status: 404, json: { error: { type: 'invalid_request_error', code: 'not_found', message: 'api key not found' } } })
+  })
+  await page.goto('/api-keys')
+  const main = page.getByRole('main')
+  await main.getByRole('button', { name: 'Actions for Gone one' }).click()
+  await page.getByRole('menuitem', { name: 'Revoke' }).click()
+  const dialog = page.getByRole('alertdialog', { name: 'Revoke test API key' })
+  const listsBefore = lists
+  await dialog.getByRole('button', { name: 'Revoke key' }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(page.getByText('That key was already revoked.')).toBeVisible()
+  await expect(main.getByRole('row').filter({ hasText: 'No active keys.' })).toBeVisible()
+  await expect(main.getByRole('button', { name: 'Show 1 revoked key' })).toBeVisible()
+  expect(lists).toBeGreaterThan(listsBefore)
+})
+
+test('revoking a test key is a plain confirm; a live key needs the typed word', async ({ page }) => {
+  const name = `e2e revoke ${uniq()}`
+  const row = await apiKeyRow(page, name)
+  await row.getByRole('button', { name: `Actions for ${name}` }).click()
+  await page.getByRole('menuitem', { name: 'Revoke' }).click()
+  const plain = page.getByRole('alertdialog', { name: 'Revoke test API key' })
+  const sentence = 'stops working at once: every request made with it is refused.'
+  await expect(plain).toContainText(sentence)
+  await expect(plain.getByRole('textbox')).toHaveCount(0)
+  await plain.getByRole('button', { name: 'Revoke key' }).click()
+  await expect(plain).toHaveCount(0)
+  const keys = await apiListAll<APIKey>('/api-keys')
+  expect(keys.find(k => k.name === name)?.status).toBe('revoked')
+
+  // A live key: the dashboard is in test mode, so the list and the revoke are
+  // answered here.
+  const live = mockKey('hc_key_live', 'Live one', 'active', { livemode: true, key_prefix: 'hc_secret_live_0123456789ab' })
+  let revoked = false
+  await answerKeyList(page, [live])
+  await page.route(url => url.pathname === '/v1/api-keys/hc_key_live', route => {
+    revoked = true
+    const answer: APIKey = { ...live, status: 'revoked', revoked_at: '2026-11-14T12:00:00Z' }
+    return route.fulfill({ json: answer })
+  })
+  await page.goto('/api-keys')
+  await page.getByRole('button', { name: 'Actions for Live one' }).click()
+  await page.getByRole('menuitem', { name: 'Revoke' }).click()
+  const typed = page.getByRole('alertdialog', { name: 'Revoke live API key' })
+  await expect(typed).toContainText(sentence)
+  const confirm = typed.getByRole('button', { name: 'Revoke key' })
+  await expect(confirm).toBeDisabled()
+  await shootKeys(page, 'revoke-live')
+  await typed.getByRole('textbox').fill('REVOKE')
+  await confirm.click()
+  await expect(typed).toHaveCount(0)
+  expect(revoked).toBe(true)
 })
 
 test('each Home attention line counts the rows of the list it opens', async ({ page }) => {

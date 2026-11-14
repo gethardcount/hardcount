@@ -12,7 +12,8 @@ import { cn } from '@/lib/utils'
 //
 // Title names what didn't load; the sentence comes from lib/errorCopy (the
 // same words an error toast would use, except a 429, which says the load
-// will try again by itself); Retry runs the load again. The raw
+// will try again by itself); Retry runs the load again, and retryLabel
+// names the button when onRetry does something else (Reload). The raw
 // error and a server fault's request id sit in a collapsed Details, so a
 // screenshot sent to support still carries them. Children, when given, are a
 // line under the sentence that says what the operator can do meanwhile.
@@ -20,6 +21,7 @@ export function LoadError({
   what,
   error,
   onRetry,
+  retryLabel = 'Retry',
   className,
   children,
 }: {
@@ -27,6 +29,7 @@ export function LoadError({
   what: string
   error: unknown
   onRetry?: () => void
+  retryLabel?: string
   className?: string
   children?: ReactNode
 }) {
@@ -40,7 +43,7 @@ export function LoadError({
       {children && <p className="mt-1 max-w-md text-sm text-muted-foreground">{children}</p>}
       {onRetry && (
         <Button variant="outline" size="sm" className="mt-3" onClick={onRetry}>
-          Retry
+          {retryLabel}
         </Button>
       )}
       {(raw || requestId) && (
