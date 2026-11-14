@@ -272,24 +272,24 @@ migration 00230_api_key_shape.sql failed: ERROR: migration 00230 makes an API ke
 bits for each prefix, so these rows were written by hand. The migration does
 not choose which credential to delete, and nothing was changed.
 
-**Fix:** find the keys (as the database owner, in a transaction that
-bypasses row-level security):
+**Fix:** first stop the API, as in [Before anything else](#before-anything-else).
+Then, as the database owner, keep one key for each prefix and delete the
+others. Of each pair, delete a revoked key; if neither is revoked, delete the
+one that is not in use (no recent `last_used_at`). Deleting a key cuts off
+whoever still sends it. Run the whole block in one `psql` session, with the
+`id` of each key that goes:
 
 ```sql
 BEGIN;
 SET LOCAL app.bypass_rls = 'on';
-SELECT id, tenant_id, name, key_prefix, created_at, revoked_at FROM api_keys
+SELECT id, tenant_id, name, key_prefix, created_at, revoked_at, last_used_at FROM api_keys
 WHERE key_prefix IN (SELECT key_prefix FROM api_keys GROUP BY key_prefix HAVING count(*) > 1)
-ORDER BY key_prefix, created_at;
-```
-
-Keep one key for each prefix, delete the others by `id` in the same
-transaction, then commit and run `hardcount migrate` again:
-
-```sql
+ORDER BY key_prefix, revoked_at NULLS FIRST, last_used_at DESC NULLS LAST;
 DELETE FROM api_keys WHERE id = 'hc_key_…';
 COMMIT;
 ```
+
+Then run `hardcount migrate` again.
 
 ## 00231 found API keys of another shape
 
@@ -304,32 +304,30 @@ prefix is `hc_secret_` or `hc_ingest_`, then `live_` or `test_`, then 12
 lowercase hex characters, matching the row's `key_type` and `livemode`; the
 hash is 64 lowercase hex characters; the salt is empty or 32 lowercase hex
 characters; the name is not blank. Hardcount writes every key in this shape,
-so these rows were written by hand. The migration does not delete a
-credential, and no constraint was validated.
+so these rows were written by hand. No row was changed and no constraint was
+validated. Migration 00230 stays applied, so new keys are already checked.
 
-**Fix:** find the rows (as the database owner, in a transaction that
-bypasses row-level security):
+**Fix:** first stop the API, as in [Before anything else](#before-anything-else).
+Then, as the database owner, find the rows and delete them. Deleting a key
+cuts off whoever still sends it: create a new key for each one still needed
+once the upgrade is done. Run the whole block in one `psql` session, with the
+`id` of each key that goes:
 
 ```sql
 BEGIN;
 SET LOCAL app.bypass_rls = 'on';
-SELECT id, tenant_id, name, key_type, livemode, key_prefix FROM api_keys
+SELECT id, tenant_id, name, key_type, livemode, key_prefix, revoked_at, last_used_at FROM api_keys
 WHERE NOT (key_prefix ~ '^hc_(secret|ingest)_(live|test)_[0-9a-f]{12}$'
            AND split_part(key_prefix, '_', 2) = key_type
            AND (split_part(key_prefix, '_', 3) = 'live') = livemode)
    OR key_hash !~ '^[0-9a-f]{64}$'
    OR key_salt !~ '^([0-9a-f]{32})?$'
    OR btrim(name) = '';
-```
-
-A key of another shape cannot be used to sign in. Delete those rows in the
-same transaction, then commit, run `hardcount migrate` again, and create a
-new key for each one you still need:
-
-```sql
 DELETE FROM api_keys WHERE id = 'hc_key_…';
 COMMIT;
 ```
+
+Then run `hardcount migrate` again.
 
 ## It waited 5s for a table lock
 

@@ -238,16 +238,11 @@ func (s *Service) checkMintAndInsert(ctx context.Context, tx *sql.Tx, tenantID s
 // holds.
 var ErrInvalidKey = errors.New("invalid api key")
 
-// ValidateKey looks up a key by its prefix, verifies the hash and checks
-// expiry.
-//
-// It accepts three prefix forms, in priority order:
-//  1. "hc_{type}_live_..."
-//  2. "hc_{type}_test_..."
-//  3. "hc_{type}_..." (the older form with no mode, treated as live)
-//
-// Form 3 keeps keys issued before the mode infix working. Newly issued keys
-// always use form 1 or 2.
+// ValidateKey returns the key rawKey is, or ErrInvalidKey. rawKey must have a
+// key's shape (lookupPrefix) and match a stored key's hash, and the key must
+// be neither revoked nor expired. It writes the key's last_used_at at most
+// once per lastUsedTouchInterval; a failed write is logged and does not refuse
+// the key.
 func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey, error) {
 	// A string that is not a key is refused before any lookup.
 	rawKey = strings.TrimSpace(rawKey)
