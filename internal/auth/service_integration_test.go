@@ -279,6 +279,32 @@ func TestValidateKey_RefusesAStringThatIsNotAKeyBeforeAnyLookup(t *testing.T) {
 	}
 }
 
+// A key the setup command wrote in v0.9.3 or earlier has an empty salt and a
+// hash of SHA-256(key); it still validates, as a live key.
+func TestValidateKey_AnUnsaltedSetupKeyStillValidates(t *testing.T) {
+	k := newKeyRig(t)
+	raw := "hc_secret_live_" + strings.Repeat("5e7a", 16)
+	sum := sha256.Sum256([]byte(raw))
+	// The row as the v0.9.3 setup command wrote it: no salt, mode from the
+	// session setting.
+	k.bypass(t, func(tx *sql.Tx) error {
+		if _, err := tx.Exec(`SELECT set_config('app.livemode', 'on', true)`); err != nil {
+			return err
+		}
+		_, err := tx.Exec(`INSERT INTO api_keys (id, key_prefix, key_hash, key_type, name, tenant_id)
+			VALUES ('hc_key_setup093', $1, $2, 'secret', 'Bootstrap Key (Live)', $3)`,
+			raw[:len("hc_secret_live_")+12], hex.EncodeToString(sum[:]), k.tenantID)
+		return err
+	})
+	key, err := k.svc.ValidateKey(t.Context(), raw)
+	if err != nil {
+		t.Fatalf("validate an unsalted setup key: %v", err)
+	}
+	if key.ID != "hc_key_setup093" || !key.Livemode {
+		t.Errorf("validated %s (live=%v), want hc_key_setup093, live", key.ID, key.Livemode)
+	}
+}
+
 // A key whose expires_at has passed does not validate.
 func TestValidateKey_Expired(t *testing.T) {
 	k := newKeyRig(t)

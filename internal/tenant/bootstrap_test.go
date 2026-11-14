@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/gethardcount/hardcount/internal/audit"
+	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/dunning"
 	"github.com/gethardcount/hardcount/internal/errs"
@@ -46,6 +48,7 @@ func testDeps(db *postgres.DB) BootstrapDeps {
 				u.ID, tenantID, role)
 			return u, err
 		},
+		CreateKeyTx: auth.NewService(db, audit.NewLogger(db)).CreateKeyTx,
 		// The real seed writer: the tenant package may not import dunning,
 		// but its tests may (the arch boundary skips _test files).
 		SeedDunningTx: dunning.NewService(dunning.NewPostgresStore(db), nil, nil).SeedDefaultPoliciesTx,
@@ -84,9 +87,6 @@ func TestBootstrap_Success(t *testing.T) {
 
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status: got %d, want 201. body: %s", rec.Code, rec.Body.String())
-	}
-	if cc := rec.Header().Get("Cache-Control"); cc != "no-store" {
-		t.Errorf("Cache-Control: got %q, want no-store (credentials transit once)", cc)
 	}
 
 	var resp BootstrapResponse

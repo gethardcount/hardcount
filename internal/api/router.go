@@ -1614,6 +1614,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	bootstrapDeps := tenant.BootstrapDeps{
 		HashPassword: user.HashPassword,
 		CreateUserTx: user.NewPostgresStore(db).CreateInTx,
+		CreateKeyTx:  authSvc.CreateKeyTx,
 		// Every new account starts with a default dunning policy per mode
 		// (ADR-123). RunBootstrap refuses to run when this is nil.
 		SeedDunningTx: dunningSvc.SeedDefaultPoliciesTx,

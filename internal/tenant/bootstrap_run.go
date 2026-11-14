@@ -3,13 +3,13 @@ package tenant
 import (
 	"context"
 	"crypto/rand"
-	"crypto/sha256"
 	"database/sql"
 	"encoding/hex"
 	"fmt"
 	"strings"
 
 	"github.com/gethardcount/hardcount/internal/audit"
+	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
@@ -54,6 +54,10 @@ type BootstrapDeps struct {
 	// CreateUserTx inserts the owner user + tenant attachment inside the
 	// bootstrap tx.
 	CreateUserTx func(ctx context.Context, tx *sql.Tx, email, passwordHash, tenantID, role string) (domain.User, error)
+	// CreateKeyTx mints an API key and writes its audit row inside the
+	// bootstrap tx (auth.Service.CreateKeyTx), so the setup keys have the
+	// same shape, salted hash and audit row as every other key. Required.
+	CreateKeyTx func(ctx context.Context, tx *sql.Tx, tenantID string, input auth.CreateKeyInput) (auth.CreateKeyResult, error)
 	// SeedDunningTx writes the account's default dunning policy in each
 	// mode inside the bootstrap tx (ADR-123). Required: an account created
 	// without it would never retry a failed payment.
@@ -90,7 +94,7 @@ type BootstrapResult struct {
 }
 
 func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts BootstrapOpts) (BootstrapResult, error) {
-	if deps.HashPassword == nil || deps.CreateUserTx == nil || deps.SeedDunningTx == nil {
+	if deps.HashPassword == nil || deps.CreateUserTx == nil || deps.CreateKeyTx == nil || deps.SeedDunningTx == nil {
 		return BootstrapResult{}, fmt.Errorf("bootstrap deps not wired")
 	}
 
@@ -125,8 +129,6 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 	}
 
 	tenantID := postgres.NewID("hc_ten")
-	testSecretKey, testSecretPrefix, testSecretID := mintKey("hc_secret_test_")
-	liveSecretKey, liveSecretPrefix, liveSecretID := mintKey("hc_secret_live_")
 
 	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -185,36 +187,36 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 		return BootstrapResult{}, fmt.Errorf("seed tenant settings: %w", err)
 	}
 
-	// Mint paired test + live secret keys.
-	// Per Stripe's pattern you can't mint cross-mode keys post-auth (a
-	// test-mode caller mints test keys), so the only path to a FIRST
-	// live key is here. Operators not charging real money ignore it.
-	//
-	// Migration 0021 installs a BEFORE INSERT trigger on api_keys that
-	// overwrites NEW.livemode from the app.livemode session setting —
-	// TxBypass doesn't set it, so pin it per insert (set_config with
-	// is_local=true is tx-scoped).
-	insertKey := func(id, prefix, rawKey, keyType string, livemode bool, name string) error {
+	// The tx runs under TxBypass (no tenant exists at BEGIN), so it stamps
+	// the settings the writes below read: app.tenant_id for every audit row,
+	// and app.livemode, which the set_livemode trigger copies to each row.
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('app.tenant_id', $1, true)`, tenantID); err != nil {
+		return BootstrapResult{}, fmt.Errorf("stamp tenant: %w", err)
+	}
+
+	// A test and a live secret key. A key mints keys only in its own mode, so
+	// the account's first live key comes from here. Each key and its audit
+	// row are written in the key's mode.
+	mintSecret := func(live bool, name string) (string, error) {
 		mode := "off"
-		if livemode {
+		if live {
 			mode = "on"
 		}
 		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', $1, true)`, mode); err != nil {
-			return fmt.Errorf("set livemode: %w", err)
+			return "", fmt.Errorf("set livemode: %w", err)
 		}
-		hash := sha256.Sum256([]byte(rawKey))
-		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO api_keys (id, key_prefix, key_hash, key_type, livemode, name, tenant_id)
-			VALUES ($1, $2, $3, $4, $5, $6, $7)
-		`, id, prefix, hex.EncodeToString(hash[:]), keyType, livemode, name, tenantID); err != nil {
-			return fmt.Errorf("create %s: %w", name, err)
+		created, err := deps.CreateKeyTx(postgres.WithLivemode(ctx, live), tx, tenantID, auth.CreateKeyInput{Name: name, KeyType: auth.KeyTypeSecret})
+		if err != nil {
+			return "", fmt.Errorf("create %s: %w", name, err)
 		}
-		return nil
+		return created.RawKey, nil
 	}
-	if err := insertKey(testSecretID, testSecretPrefix, testSecretKey, "secret", false, "Bootstrap Key (Test)"); err != nil {
+	testSecretKey, err := mintSecret(false, "Bootstrap Key (Test)")
+	if err != nil {
 		return BootstrapResult{}, err
 	}
-	if err := insertKey(liveSecretID, liveSecretPrefix, liveSecretKey, "secret", true, "Bootstrap Key (Live)"); err != nil {
+	liveSecretKey, err := mintSecret(true, "Bootstrap Key (Live)")
+	if err != nil {
 		return BootstrapResult{}, err
 	}
 
@@ -231,13 +233,7 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 	// actor = system: there is genuinely no authenticated identity here (the
 	// route runs only while zero tenants exist, gated by a bootstrap token).
 	if deps.Audit != nil {
-		// The tx runs under TxBypass (no tenant exists yet at BEGIN), so stamp
-		// the GUCs the audit INSERT reads: tenant_id comes from app.tenant_id
-		// and livemode is trigger-stamped from app.livemode. Account-plane
-		// facts are recorded LIVE.
-		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.tenant_id', $1, true)`, tenantID); err != nil {
-			return BootstrapResult{}, fmt.Errorf("stamp tenant for audit: %w", err)
-		}
+		// Account-plane facts are recorded live.
 		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', 'on', true)`); err != nil {
 			return BootstrapResult{}, fmt.Errorf("stamp livemode for audit: %w", err)
 		}
@@ -257,32 +253,6 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 			},
 		}); err != nil {
 			return BootstrapResult{}, fmt.Errorf("audit bootstrap tenant: %w", err)
-		}
-
-		// One row per minted credential — NEVER the key material, only its
-		// identity, type and mode. Mirrors the vocabulary of an ordinary
-		// api-key mint (auth.Handler.create), so a live-key audit query finds
-		// bootstrap keys and operator-minted keys the same way.
-		for _, k := range []struct {
-			id, name, keyType string
-			livemode          bool
-		}{
-			{testSecretID, "Bootstrap Key (Test)", "secret", false},
-			{liveSecretID, "Bootstrap Key (Live)", "secret", true},
-		} {
-			if err := deps.Audit.LogInTx(ctx, tx, audit.Entry{
-				Action:        domain.AuditActionCreate,
-				ResourceType:  "api_key",
-				ResourceID:    k.id,
-				ResourceLabel: k.name,
-				Metadata: map[string]any{
-					"action":   "bootstrap_provisioned",
-					"key_type": k.keyType,
-					"livemode": k.livemode,
-				},
-			}); err != nil {
-				return BootstrapResult{}, fmt.Errorf("audit bootstrap key %s: %w", k.name, err)
-			}
 		}
 
 		if err := deps.Audit.LogInTx(ctx, tx, audit.Entry{
@@ -328,15 +298,4 @@ func generatePassword() string {
 	b := make([]byte, 12)
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
-}
-
-// mintKey returns a freshly generated raw key with the given mode-aware
-// prefix, its DB lookup prefix (full prefix + first 12 hex chars), and
-// a newly-minted hc_key id — the same indexed-prefix shape
-// auth.Service.CreateKey writes, so ValidateKey finds these rows.
-func mintKey(prefix string) (raw, dbPrefix, id string) {
-	secret := make([]byte, 32)
-	_, _ = rand.Read(secret)
-	secretHex := hex.EncodeToString(secret)
-	return prefix + secretHex, prefix + secretHex[:12], postgres.NewID("hc_key")
 }

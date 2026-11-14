@@ -132,18 +132,40 @@ func (s *Service) CreateKey(ctx context.Context, tenantID string, input CreateKe
 	var result CreateKeyResult
 	err := s.inTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
 		var err error
-		if result, err = s.checkMintAndInsert(ctx, tx, tenantID, input); err != nil {
-			return err
-		}
-		return s.auditKeyChange(ctx, tx, domain.AuditActionCreate, result.Key, map[string]any{
-			"key_type": result.Key.KeyType,
-			"livemode": result.Key.Livemode,
-		})
+		result, err = s.CreateKeyTx(ctx, tx, tenantID, input)
+		return err
 	})
 	if err != nil {
 		return CreateKeyResult{}, err
 	}
 	return result, nil
+}
+
+// CreateKeyTx is CreateKey on a transaction the caller owns, for the setup
+// command, which creates the account and its first keys in one transaction:
+// the key and its audit row commit with tx. tx must set app.tenant_id to
+// tenantID and app.livemode to the mode ctx carries; the table refuses a
+// prefix whose mode differs from the row's.
+func (s *Service) CreateKeyTx(ctx context.Context, tx *sql.Tx, tenantID string, input CreateKeyInput) (CreateKeyResult, error) {
+	result, err := s.checkMintAndInsert(ctx, tx, tenantID, input)
+	if err != nil {
+		return CreateKeyResult{}, err
+	}
+	if err := s.auditKeyChange(ctx, tx, domain.AuditActionCreate, result.Key, map[string]any{
+		"key_type": result.Key.KeyType,
+		"livemode": result.Key.Livemode,
+	}); err != nil {
+		return CreateKeyResult{}, err
+	}
+	return result, nil
+}
+
+// hashKey returns the stored hash of raw: hex(SHA-256(salt || raw)). Every
+// new key has a fresh 16-byte salt. A key the setup command wrote in v0.9.3
+// or earlier has an empty salt and still validates.
+func hashKey(salt []byte, raw string) string {
+	sum := sha256.Sum256(append(append([]byte{}, salt...), raw...))
+	return hex.EncodeToString(sum[:])
 }
 
 // checkMintAndInsert checks input, mints a key for tenantID in the mode that
@@ -196,30 +218,20 @@ func (s *Service) checkMintAndInsert(ctx context.Context, tx *sql.Tx, tenantID s
 	// DB prefix: full mode-aware prefix + first N hex chars (indexed lookup)
 	dbPrefix := prefix + secretHex[:keyPrefixLen]
 
-	// Generate a 16-byte random salt for this key
 	salt := make([]byte, 16)
 	if _, err := rand.Read(salt); err != nil {
 		return CreateKeyResult{}, fmt.Errorf("generate salt: %w", err)
 	}
-	saltHex := hex.EncodeToString(salt)
-
-	// Hash: SHA-256(salt + rawKey)
-	hash := sha256.Sum256(append(salt, []byte(rawKey)...))
-	hashHex := hex.EncodeToString(hash[:])
-
-	id := postgres.NewID("hc_key")
 
 	key, err := s.store.insert(ctx, tx, domain.APIKey{
-		ID:        id,
+		ID:        postgres.NewID("hc_key"),
 		KeyPrefix: dbPrefix,
-		KeyHash:   hashHex,
-		KeySalt:   saltHex,
 		KeyType:   string(keyType),
 		Livemode:  livemode,
 		Name:      name,
 		TenantID:  tenantID,
 		ExpiresAt: input.ExpiresAt,
-	})
+	}, storedHash{salt: hex.EncodeToString(salt), hash: hashKey(salt, rawKey)})
 	if err != nil {
 		return CreateKeyResult{}, err
 	}
@@ -256,7 +268,7 @@ func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey
 		return domain.APIKey{}, fmt.Errorf("invalid key format: %w", ErrInvalidKey)
 	}
 
-	key, err := s.store.getByPrefix(ctx, dbPrefix)
+	key, stored, err := s.store.getByPrefix(ctx, dbPrefix)
 	if err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
 			return domain.APIKey{}, ErrInvalidKey
@@ -266,16 +278,13 @@ func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey
 		return domain.APIKey{}, fmt.Errorf("api key lookup: %w", err)
 	}
 
-	// Verify hash using the stored salt
-	salt, err := hex.DecodeString(key.KeySalt)
+	salt, err := hex.DecodeString(stored.salt)
 	if err != nil {
 		// api_keys_salt_shape_check refuses such a row, so this is a fault in
 		// the store, not a verdict on the key.
 		return domain.APIKey{}, fmt.Errorf("stored key %s has a salt that is not hex: %w", key.ID, err)
 	}
-	hash := sha256.Sum256(append(salt, []byte(rawKey)...))
-	hashHex := hex.EncodeToString(hash[:])
-	if subtle.ConstantTimeCompare([]byte(hashHex), []byte(key.KeyHash)) != 1 {
+	if subtle.ConstantTimeCompare([]byte(hashKey(salt, rawKey)), []byte(stored.hash)) != 1 {
 		return domain.APIKey{}, ErrInvalidKey
 	}
 

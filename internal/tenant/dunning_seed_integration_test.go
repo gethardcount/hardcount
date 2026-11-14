@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/audit"
+	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/customer"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/dunning"
@@ -22,6 +23,7 @@ func bootstrapDeps(db *postgres.DB, seed tenant.DunningSeedFunc) tenant.Bootstra
 	return tenant.BootstrapDeps{
 		HashPassword:  user.HashPassword,
 		CreateUserTx:  user.NewPostgresStore(db).CreateInTx,
+		CreateKeyTx:   auth.NewService(db, audit.NewLogger(db)).CreateKeyTx,
 		SeedDunningTx: seed,
 		Audit:         audit.NewLogger(db),
 	}
