@@ -15,6 +15,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
@@ -134,12 +135,22 @@ func (s *Service) CreateKey(ctx context.Context, tenantID string, input CreateKe
 	return result, nil
 }
 
+// maxKeyNameLen is the most characters a new key's name may have.
+const maxKeyNameLen = 100
+
 // CreateKeyTx is CreateKey on a transaction the caller owns, for the setup
 // command, which creates the account and its first keys in one transaction:
 // the key and its audit row commit with tx. It sets tx's app.livemode to the
 // mode ctx carries, so the key and its audit row are in that mode, and the
 // setting stays for the rest of tx. tx must set app.tenant_id to tenantID.
+//
+// A new key's name is 1 to maxKeyNameLen characters. The limit is checked
+// here, on creation only: a rotation keeps the old key's name, which an
+// earlier version may have stored longer.
 func (s *Service) CreateKeyTx(ctx context.Context, tx *sql.Tx, tenantID string, input CreateKeyInput) (CreateKeyResult, error) {
+	if utf8.RuneCountInString(strings.TrimSpace(input.Name)) > maxKeyNameLen {
+		return CreateKeyResult{}, errs.Invalid("name", fmt.Sprintf("must be at most %d characters", maxKeyNameLen))
+	}
 	live, err := postgres.Livemode(ctx)
 	if err != nil {
 		return CreateKeyResult{}, err
