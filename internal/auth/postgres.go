@@ -141,6 +141,7 @@ func (s *PostgresStore) ScheduleExpiry(ctx context.Context, tenantID, id string,
 	// revoked key makes no sense, and the predicate guards against a revoke
 	// and a rotate racing on the same row.
 	k, err := scanKey(tx.QueryRowContext(ctx, `
+		-- LEAST ignores a NULL, so a key with no expiry takes the grace end.
 		UPDATE api_keys SET expires_at = LEAST(expires_at, $1)
 		WHERE id = $2 AND revoked_at IS NULL
 		RETURNING `+keyCols, expiresAt, id))

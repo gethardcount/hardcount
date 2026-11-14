@@ -306,8 +306,8 @@ func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input Rota
 	if old.RevokedAt != nil {
 		return RotateKeyResult{}, errs.InvalidState("cannot rotate a revoked key")
 	}
-	// The same rule CreateKey applies to a new key's expires_at: at or
-	// before now is expired.
+	// CreateKey's rule for a new key's expires_at: at or before now is
+	// expired.
 	if old.ExpiresAt != nil && !time.Now().UTC().Before(*old.ExpiresAt) {
 		return RotateKeyResult{}, errs.InvalidState("cannot rotate an expired key")
 	}
