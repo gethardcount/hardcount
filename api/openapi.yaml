@@ -1258,9 +1258,8 @@ components:
           description: |
             The current period as text, with the last day included, in your
             account's billing time zone, for example "Oct 1, 2026 – Oct 31,
-            2026". Absent when the subscription has no current period, when
-            the time zone could not be read, and on the rows of
-            `GET /v1/test-clocks/{id}/subscriptions`.
+            2026". Absent when the subscription has no current period, or when
+            the time zone could not be read.
         next_billing_at:
           type: string
           format: date-time
@@ -24476,96 +24475,6 @@ paths:
                   message: unknown field "force"
                   request_id: req_dbjg652q3gpgqfoq5cd0
                   param: force
-        "429":
-          $ref: "#/components/responses/RateLimited"
-
-  /v1/test-clocks/{id}/subscriptions:
-    get:
-      tags: [TestClocks]
-      summary: List a test clock's subscriptions
-      operationId: listTestClockSubscriptions
-      description: |
-        Lists the subscriptions that run on the clock: those of the
-        customers attached to it, oldest first. The rows carry no
-        `current_billing_period_display`. Test mode only.
-      parameters:
-        - in: path
-          name: id
-          required: true
-          description: The clock's ID (`hc_tclk_…`).
-          schema: { type: string }
-        - $ref: "#/components/parameters/Limit"
-        - $ref: "#/components/parameters/Offset"
-      responses:
-        "200":
-          description: Subscriptions
-          content:
-            application/json:
-              schema:
-                type: object
-                required: [data, total]
-                properties:
-                  data:
-                    type: array
-                    items:
-                      $ref: "#/components/schemas/Subscription"
-                  total:
-                    $ref: "#/components/schemas/ListTotal"
-              example:
-                data:
-                  - id: hc_sub_dauq502q3gpgqfoq5c2g
-                    tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-                    code: acme-pro
-                    display_name: Acme Pro
-                    customer_id: hc_cus_dakhnk2q3gpgqfoq5c0g
-                    items:
-                      - id: hc_si_3f9c0e2a1b4d5c6e7f8a9b0c
-                        tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-                        subscription_id: hc_sub_dauq502q3gpgqfoq5c2g
-                        plan_id: hc_pln_dajr5o2q3gpgqfoq5c1g
-                        quantity: 1
-                        created_at: "2026-10-01T00:00:00Z"
-                        updated_at: "2026-10-01T00:00:00Z"
-                    status: active
-                    billing_time: calendar
-                    started_at: "2026-10-01T00:00:00Z"
-                    activated_at: "2026-10-01T00:00:00Z"
-                    cancel_at_period_end: false
-                    current_billing_period_start: "2026-11-01T00:00:00Z"
-                    current_billing_period_end: "2026-12-01T00:00:00Z"
-                    next_billing_at: "2026-12-01T00:00:00Z"
-                    test_clock_id: hc_tclk_8e1f3a5c7b9d0e2f4a6c8b1d
-                    created_at: "2026-10-01T00:00:00Z"
-                    updated_at: "2026-11-01T00:00:00Z"
-                total: 1
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          description: Caller is in live mode, or the key lacks the `testclock:write` permission.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: authentication_error
-                  code: forbidden
-                  message: test clocks are only available in test mode — use a test-mode API key (hc_secret_test_...)
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "404":
-          description: No test clock with this ID in this account.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: not_found
-                  message: test_clock not found
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "422":
-          $ref: "#/components/responses/InvalidPage"
         "429":
           $ref: "#/components/responses/RateLimited"
 

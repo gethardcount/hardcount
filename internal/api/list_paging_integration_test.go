@@ -272,7 +272,6 @@ func TestListRoutes_OnePagingStyle(t *testing.T) {
 		"/v1/subscriptions":                               "/v1/subscriptions",
 		"/v1/test-clocks":                                 "/v1/test-clocks",
 		"/v1/test-clocks/{id}/customers":                  "/v1/test-clocks/" + clk + "/customers",
-		"/v1/test-clocks/{id}/subscriptions":              "/v1/test-clocks/" + clk + "/subscriptions",
 		"/v1/usage-events":                                "/v1/usage-events",
 		"/v1/webhook-endpoints/endpoints":                 "/v1/webhook-endpoints/endpoints",
 		"/v1/webhook-endpoints/endpoints/stats":           "/v1/webhook-endpoints/endpoints/stats",
@@ -566,7 +565,6 @@ func TestLists_ReachRowsPastOldReadCaps(t *testing.T) {
 	}{
 		{"/v1/customers/" + owner + "/payment-methods", cards},
 		{"/v1/test-clocks/" + clk + "/customers", onClock},
-		{"/v1/test-clocks/" + clk + "/subscriptions", onClock},
 	} {
 		t.Run(c.path, func(t *testing.T) {
 			seen := map[string]bool{}
