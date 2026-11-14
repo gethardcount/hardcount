@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -49,7 +50,8 @@ func TestRenderPDF_LinesRenderUnchanged(t *testing.T) {
 		BillingPeriodStart: start, BillingPeriodEnd: issued,
 	}
 	render := func() string {
-		// The footer stamps the render time: pin it.
+		// The footer line says when the file was made, in machine time, so it
+		// is left out of the hash (TestRenderPDF_GeneratedOnIsMachineTime).
 		out, err := RenderPDF(clock.WithEffectiveNow(context.Background(), issued), inv, items, BillToInfo{Name: "Acme Corp"}, nil, CompanyInfo{Name: "Seller Ltd"})
 		if err != nil {
 			t.Fatalf("render: %v", err)
@@ -58,6 +60,9 @@ func TestRenderPDF_LinesRenderUnchanged(t *testing.T) {
 		for i, p := range pdftest.Read(t, out) {
 			_, _ = fmt.Fprintf(h, "page %d %.2fx%.2f\n", i+1, p.Width, p.Height)
 			for _, r := range p.Runs {
+				if strings.HasPrefix(r.Text, "Generated on ") {
+					continue
+				}
 				_, _ = fmt.Fprintf(h, "%.2f %.2f %s %.1f %q\n", r.X, r.Y, r.Font, r.Size, r.Text)
 			}
 		}
@@ -67,7 +72,7 @@ func TestRenderPDF_LinesRenderUnchanged(t *testing.T) {
 	if again := render(); again != got {
 		t.Fatalf("the render is not deterministic: %s then %s", got, again)
 	}
-	const want = "37c8432b5204498407d77add0372b64d0bbc459e799b1e73b75689fde3d516ac"
+	const want = "b7932a323f0bd5bd19ad4fada24daf918a050e81f09693d7af77ba4f48713f7d"
 	if got != want {
 		t.Errorf("PDF sha256 = %s, want %s (what the issued document shows changed)", got, want)
 	}
