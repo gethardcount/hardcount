@@ -6,6 +6,9 @@ on:
     tags: ['v*']
   pull_request:
     branches: [main]
+  # The merge queue's run: main plus the queued pull requests, in the order
+  # they will merge. What passes here is exactly what lands on main.
+  merge_group:
   # Manual/API escape hatch (2026-07-27): during the GitHub Actions
   # event-delivery degradation, pull_request events were silently
   # dropped for hours and no run was ever created — leaving green,
