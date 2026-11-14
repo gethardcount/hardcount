@@ -11,6 +11,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -28,13 +29,8 @@ const (
 
 // Service creates, validates, rotates and revokes API keys.
 type Service struct {
-	store Store
-
-	// lastTouched debounces the last_used_at write per key: unix-nano of the
-	// last touch this process issued, keyed by api key id. See touchLastUsed.
-	lastTouched sync.Map // map[string]*atomic.Int64
-	// now is the clock, injectable for the debounce tests.
-	now func() time.Time
+	store    Store
+	lastUsed lastUsedDebounce
 }
 
 // lastUsedTouchInterval is how often, at most, last_used_at is written for
@@ -45,31 +41,32 @@ type Service struct {
 // would update the same row. A row lock passes to the next writer in about
 // one round trip (~1.75 ms within one availability zone). So one key could
 // not go past ~570 requests/s on any hardware, and more connections would
-// only add waiters (#818).
+// only add waiters.
 const lastUsedTouchInterval = time.Minute
 
 // NewService returns a Service backed by store.
 func NewService(store Store) *Service {
-	return &Service{store: store, now: func() time.Time { return time.Now().UTC() }}
+	return &Service{store: store}
 }
 
-// touchLastUsed writes last_used_at for key id at most once per
-// lastUsedTouchInterval per process. Exactly one caller wins a given interval
-// even under a concurrent burst: the per-key timestamp is advanced with a
-// compare-and-swap, so N simultaneous requests produce one UPDATE, not N
-// goroutines queueing on one row.
-func (s *Service) touchLastUsed(id string) {
-	nowNs := s.now().UnixNano()
-	v, _ := s.lastTouched.LoadOrStore(id, new(atomic.Int64))
+// lastUsedDebounce decides when a key's last_used_at is due for a write: at
+// most once per lastUsedTouchInterval per key, in this process.
+type lastUsedDebounce struct {
+	last sync.Map // key id → *atomic.Int64: unix nanoseconds of the last claimed write
+}
+
+// due reports whether a write of key id's last_used_at is due at now, and
+// claims it. Under a concurrent burst exactly one caller wins an interval:
+// the per-key time is advanced with a compare-and-swap, so simultaneous
+// requests make one write, not one each.
+func (d *lastUsedDebounce) due(id string, now time.Time) bool {
+	v, _ := d.last.LoadOrStore(id, new(atomic.Int64))
 	last := v.(*atomic.Int64)
 	prev := last.Load()
-	if prev != 0 && nowNs-prev < int64(lastUsedTouchInterval) {
-		return
+	if prev != 0 && now.UnixNano()-prev < int64(lastUsedTouchInterval) {
+		return false
 	}
-	if !last.CompareAndSwap(prev, nowNs) {
-		return // another request in this instant won the interval
-	}
-	go func() { _ = s.store.TouchLastUsed(context.Background(), id, time.Unix(0, nowNs).UTC()) }()
+	return last.CompareAndSwap(prev, now.UnixNano())
 }
 
 // CreateKeyResult contains the key record and the raw key, which is shown
@@ -248,9 +245,15 @@ func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey
 		return domain.APIKey{}, fmt.Errorf("api key expired: %w", ErrInvalidKey)
 	}
 
-	// Touch last_used_at, debounced to at most once per key per interval
-	// (#818).
-	s.touchLastUsed(key.ID)
+	// Write last_used_at, at most once per key per lastUsedTouchInterval, in
+	// the request. A failed write is logged and does not refuse the key: no
+	// auth decision reads the column.
+	now := time.Now().UTC()
+	if s.lastUsed.due(key.ID, now) {
+		if err := s.store.TouchLastUsed(ctx, key.ID, now); err != nil {
+			slog.WarnContext(ctx, "write api key last_used_at", "key_id", key.ID, "error", err)
+		}
+	}
 
 	return key, nil
 }
