@@ -94,8 +94,8 @@ var txBypassUsers = map[string]string{
 	"internal/webhook/outbox.go OutboxStore.PendingCount": "metrics",
 
 	// Sign-in, sessions, API key lookup, creating an account.
-	"internal/auth/postgres.go PostgresStore.GetByPrefix":       "signin",
-	"internal/auth/postgres.go PostgresStore.TouchLastUsed":     "signin",
+	"internal/auth/postgres.go store.getByPrefix":               "signin",
+	"internal/auth/postgres.go store.touchLastUsed":             "signin",
 	"internal/session/store.go postgresStore.GetByIDHash":       "signin",
 	"internal/session/store.go postgresStore.Insert":            "signin",
 	"internal/session/store.go postgresStore.Revoke":            "signin",

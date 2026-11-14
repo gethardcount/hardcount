@@ -11,6 +11,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
@@ -48,7 +49,7 @@ func newStreamRig(t *testing.T, db, authDB *postgres.DB) *streamRig {
 	r := chi.NewRouter()
 	noRateLimit := func(next http.Handler) http.Handler { return next }
 	r.Route("/v1/webhook_events/stream", eventStreamRoute(webhook.NewHandler(srv.WebhookOutSvc),
-		session.NewService(session.NewPostgresStore(authDB)), auth.NewService(auth.NewPostgresStore(authDB)),
+		session.NewService(session.NewPostgresStore(authDB)), auth.NewService(authDB, audit.NewLogger(authDB)),
 		noRateLimit, testStreamInterval))
 	stream := httptest.NewServer(r)
 	t.Cleanup(stream.Close)

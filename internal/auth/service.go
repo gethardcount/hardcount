@@ -32,10 +32,14 @@ const (
 // key (create, revoke, rotate) and its audit row commit in one transaction,
 // or neither does.
 type Service struct {
+	db       *postgres.DB
 	store    store
 	audit    AuditWriter
 	lastUsed lastUsedDebounce
 }
+
+// apiKeyResourceType is the resource_type of a key's audit rows.
+const apiKeyResourceType = "api_key"
 
 // AuditWriter writes an audit row on the caller's transaction, so the change
 // and its row commit or roll back together. *audit.Logger is the one
@@ -62,13 +66,13 @@ func NewService(db *postgres.DB, audit AuditWriter) *Service {
 	if audit == nil {
 		panic("auth.NewService: audit writer is required")
 	}
-	return &Service{store: store{db: db}, audit: audit}
+	return &Service{db: db, store: store{db: db}, audit: audit}
 }
 
 // inTenantTx runs fn in a transaction scoped to tenantID and the mode ctx
 // carries, and commits it when fn succeeds.
 func (s *Service) inTenantTx(ctx context.Context, tenantID string, fn func(tx *sql.Tx) error) error {
-	tx, err := s.store.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return err
 	}
@@ -77,6 +81,12 @@ func (s *Service) inTenantTx(ctx context.Context, tenantID string, fn func(tx *s
 		return err
 	}
 	return tx.Commit()
+}
+
+// auditKeyChange writes the audit row of a change to key on tx: the key's id
+// and name, and metadata, which never holds the raw key.
+func (s *Service) auditKeyChange(ctx context.Context, tx *sql.Tx, action string, key domain.APIKey, metadata map[string]any) error {
+	return s.audit.LogInTxFields(ctx, tx, action, apiKeyResourceType, key.ID, key.Name, metadata)
 }
 
 // lastUsedDebounce decides when a key's last_used_at is due for a write: at
@@ -122,11 +132,10 @@ func (s *Service) CreateKey(ctx context.Context, tenantID string, input CreateKe
 	var result CreateKeyResult
 	err := s.inTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
 		var err error
-		if result, err = s.insertKey(ctx, tx, tenantID, input); err != nil {
+		if result, err = s.checkMintAndInsert(ctx, tx, tenantID, input); err != nil {
 			return err
 		}
-		// The row holds the key's id, name, type and mode, never the raw key.
-		return s.audit.LogInTxFields(ctx, tx, domain.AuditActionCreate, "api_key", result.Key.ID, result.Key.Name, map[string]any{
+		return s.auditKeyChange(ctx, tx, domain.AuditActionCreate, result.Key, map[string]any{
 			"key_type": result.Key.KeyType,
 			"livemode": result.Key.Livemode,
 		})
@@ -137,9 +146,9 @@ func (s *Service) CreateKey(ctx context.Context, tenantID string, input CreateKe
 	return result, nil
 }
 
-// insertKey checks input, mints a key for tenantID in the mode that ctx
-// carries, and stores it on tx.
-func (s *Service) insertKey(ctx context.Context, tx *sql.Tx, tenantID string, input CreateKeyInput) (CreateKeyResult, error) {
+// checkMintAndInsert checks input, mints a key for tenantID in the mode that
+// ctx carries, and inserts it on tx.
+func (s *Service) checkMintAndInsert(ctx context.Context, tx *sql.Tx, tenantID string, input CreateKeyInput) (CreateKeyResult, error) {
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
 		return CreateKeyResult{}, errs.Required("name")
@@ -320,7 +329,7 @@ func (s *Service) RevokeKey(ctx context.Context, tenantID, id string) (domain.AP
 		if key, err = s.store.revoke(ctx, tx, id); err != nil {
 			return err
 		}
-		return s.audit.LogInTxFields(ctx, tx, domain.AuditActionRevoke, "api_key", key.ID, key.Name, map[string]any{
+		return s.auditKeyChange(ctx, tx, domain.AuditActionRevoke, key, map[string]any{
 			"key_type": key.KeyType,
 		})
 	})
@@ -390,7 +399,7 @@ func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input Rota
 
 		// The replacement takes the old key's name, type and expires_at. A
 		// rotation is a credential swap, not a reconfiguration.
-		created, err := s.insertKey(ctx, tx, tenantID, CreateKeyInput{
+		created, err := s.checkMintAndInsert(ctx, tx, tenantID, CreateKeyInput{
 			Name:      old.Name,
 			KeyType:   KeyType(old.KeyType),
 			ExpiresAt: old.ExpiresAt,
@@ -412,8 +421,7 @@ func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input Rota
 			return fmt.Errorf("retire old key: %w", err)
 		}
 
-		// As in CreateKey, the row holds no raw key.
-		if err := s.audit.LogInTxFields(ctx, tx, domain.AuditActionRotate, "api_key", created.Key.ID, created.Key.Name, map[string]any{
+		if err := s.auditKeyChange(ctx, tx, domain.AuditActionRotate, created.Key, map[string]any{
 			"key_type":   created.Key.KeyType,
 			"old_key_id": id,
 		}); err != nil {

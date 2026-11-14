@@ -410,7 +410,8 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// is unset.
 	auditLogger.SetEncryptor(sharedEnc)
 	auditH := audit.NewHandler(auditLogger)
-	// API keys: each key change writes its audit row in its own transaction.
+	// API keys: each key change and its audit row commit in one transaction.
+	// NewService panics without a writer, so authSvc needs no MustWired entry.
 	authSvc := auth.NewService(db, auditLogger)
 	authH := auth.NewHandler(authSvc)
 	// The customer handler's audit logger is currently used to record
@@ -1405,7 +1406,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// paymentMethodsH, dashboardAuthH and membersH are built after the first.
 	audit.MustWired(
 		customerH, settingsH, invoiceH, subH, creditNoteH,
-		authSvc, dunningH, pricingH, tenantStripeH, webhookOutH,
+		dunningH, pricingH, tenantStripeH, webhookOutH,
 		paymentMethodsH, dashboardAuthH, membersH,
 		emailSettingsH,
 	)
