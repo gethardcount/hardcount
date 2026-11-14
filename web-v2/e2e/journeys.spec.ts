@@ -303,7 +303,7 @@ test('a failed advance shows its reason, and Retry advance retries it', async ({
     const res = await route.fetch()
     // A pass that failed at its first job: its summary counts nothing.
     const summary = {
-      advanced_from: clock.frozen_time, advanced_to: clock.frozen_time, had_errors: true,
+      advanced_from: clock.frozen_time, advanced_to: clock.frozen_time,
       invoices_generated: 0, trials_activated: 0, pauses_resumed: 0, thresholds_fired: 0, tax_retried: 0,
       charges_retried: 0, clawbacks_issued: 0, credits_expired: 0, dunning_advanced: 0,
     }
@@ -317,9 +317,10 @@ test('a failed advance shows its reason, and Retry advance retries it', async ({
   await page.goto(`/test-clocks/${clock.id}`)
   await expect(page.getByText('The last advance stopped before it finished billing the skipped days.')).toBeVisible()
   await expect(page.getByText(`Reason: ${reason}`)).toBeVisible()
-  // The results card says only that the advance failed: nothing was done,
-  // and "nothing was due" would be false.
-  await expect(page.getByText('This advance ended with an error before any billing work was done.')).toBeVisible()
+  // The banner says the work the advance finished is kept; the results card
+  // has no error line of its own, and "nothing was due" would be false.
+  await expect(page.getByText('The work it finished is kept.', { exact: false })).toBeVisible()
+  await expect(page.getByText(/ended with an error/)).toHaveCount(0)
   await expect(page.getByText(/No billing activity/)).toHaveCount(0)
   // CI uploads activity-shots/ on every run, so a reviewer can see the banner
   // and the results card.
