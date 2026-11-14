@@ -1315,11 +1315,7 @@ func (s *PostgresStore) ListDueRunsForClock(ctx context.Context, tenantID, clock
 		-- A sub's clock always equals its customer's clock (inherit-only,
 		-- immutable), so sub-backed runs behave identically.
 		JOIN customers c ON c.id = i.customer_id
-		WHERE r.tenant_id = $1
-			AND c.test_clock_id = $2
-			AND r.next_action_at <= $3
-			AND r.paused = false
-			AND r.state NOT IN ('resolved', 'escalated')
+		WHERE `+clockDueRunsWhere+`
 			-- Payment in flight — the sim-time twin of the wall-clock scan's
 			-- exclusion above; see there for why the claim can never succeed in
 			-- these states, and for why it is scoped to OPEN invoices rather than
@@ -1327,11 +1323,9 @@ func (s *PostgresStore) ListDueRunsForClock(ctx context.Context, tenantID, clock
 			-- second NOT EXISTS. A clock advance drives many ticks in a burst, so
 			-- the spin this prevents is faster here, not slower: without it one
 			-- in-flight sim invoice can consume the whole catchup budget and stall
-			-- every other run on the clock.
-			AND NOT (
-			  NOT `+domain.ChargeNotInFlightSQL("i")+`
-			  AND i.status NOT IN ('voided', 'uncollectible')
-			)
+			-- every other run on the clock. HeldDueRunsForClock lists what this
+			-- leaves out.
+			AND NOT `+heldByChargeInFlight+`
 			AND (r.next_action_at, r.id) > ($5, $6)
 		ORDER BY r.next_action_at ASC, r.id ASC LIMIT $4
 	`, tenantID, clockID, frozenTime, limit, after.At, after.ID)
@@ -1351,6 +1345,64 @@ func (s *PostgresStore) ListDueRunsForClock(ctx context.Context, tenantID, clock
 		runs = append(runs, r)
 	}
 	return runs, rows.Err()
+}
+
+// clockDueRunsWhere is the clock's due runs, for ListDueRunsForClock and
+// HeldDueRunsForClock: $1 the tenant, $2 the clock, $3 its frozen time.
+// Clock membership resolves through customers (ListDueRunsForClock says
+// why).
+const clockDueRunsWhere = `r.tenant_id = $1
+			AND c.test_clock_id = $2
+			AND r.next_action_at <= $3
+			AND r.paused = false
+			AND r.state NOT IN ('resolved', 'escalated')`
+
+// heldByChargeInFlight is a due run whose open invoice has a charge in
+// flight: ListDueRunsForClock leaves it out, HeldDueRunsForClock lists it.
+// One expression, so between them they list every due run once.
+var heldByChargeInFlight = `(NOT ` + domain.ChargeNotInFlightSQL("i") + `
+			  AND i.status NOT IN ('voided', 'uncollectible'))`
+
+// maxHeldRunsListed bounds HeldDueRunsForClock: each held run becomes one
+// sentence for the operator, and a few say what to wait for.
+const maxHeldRunsListed = 50
+
+// HeldDueRunsForClock lists the clock's due runs that ListDueRunsForClock
+// leaves out because a charge of their invoice is in flight, each with what
+// holds it: domain.ChargeHeldByAttempt (the payment's result is not known
+// yet, or a charge attempt holds the invoice) or
+// domain.ChargePayingOnHostedPage. Up to maxHeldRunsListed, in
+// (next_action_at, id) order. It takes no lock, as ListDueRunsForClock.
+func (s *PostgresStore) HeldDueRunsForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time) ([]HeldRun, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	defer postgres.Rollback(tx)
+
+	rows, err := tx.QueryContext(ctx, `
+		SELECT r.id, r.invoice_id, COALESCE(i.invoice_number, ''), `+domain.ChargeInFlightStateSQL("i")+`
+		FROM invoice_dunning_runs r
+		JOIN invoices i ON i.id = r.invoice_id
+		JOIN customers c ON c.id = i.customer_id
+		WHERE `+clockDueRunsWhere+`
+			AND `+heldByChargeInFlight+`
+		ORDER BY r.next_action_at ASC, r.id ASC LIMIT $4
+	`, tenantID, clockID, frozenTime, maxHeldRunsListed)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var held []HeldRun
+	for rows.Next() {
+		var h HeldRun
+		if err := rows.Scan(&h.RunID, &h.InvoiceID, &h.InvoiceNumber, &h.HeldBy); err != nil {
+			return nil, err
+		}
+		held = append(held, h)
+	}
+	return held, rows.Err()
 }
 
 func (s *PostgresStore) CreateEvent(ctx context.Context, tenantID string, event domain.InvoiceDunningEvent) (domain.InvoiceDunningEvent, error) {

@@ -324,3 +324,116 @@ func TestListDueRunsForClock_InFlightGate(t *testing.T) {
 		t.Error("a simulated invoice a charge attempt holds must be excluded — its charge claim refuses a set hold")
 	}
 }
+
+// HeldDueRunsForClock lists exactly the clock's due runs that the due list
+// leaves out for a charge in flight, each with what holds it: the first of
+// domain.ChargeNotInFlight its invoice fails. Between them the two lists hold
+// every due run once; a run not yet due, or paused, is in neither.
+func TestHeldDueRunsForClock_ListsWhatTheDueListLeavesOut(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := "tnt_held_clock"
+	const clockID = "hc_tclk_held"
+	frozen := time.Date(2027, 6, 1, 0, 0, 0, 0, time.UTC)
+
+	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	mustExec := func(q string, args ...any) {
+		t.Helper()
+		if _, err := tx.ExecContext(ctx, q, args...); err != nil {
+			t.Fatalf("seed: %v", err)
+		}
+	}
+	mustExec(`SELECT set_config('app.livemode', 'off', true)`)
+	mustExec(`INSERT INTO tenants (id, name, status) VALUES ($1, 'Held Clock', 'active')`, tenantID)
+	mustExec(`INSERT INTO test_clocks (id, tenant_id, name, frozen_time, status, livemode)
+		VALUES ($1, $2, 'held', $3, 'ready', false)`, clockID, tenantID, frozen)
+	mustExec(`INSERT INTO customers (id, tenant_id, external_id, display_name, email, test_clock_id, created_at, updated_at)
+		VALUES ('cus_held_clk', $1, 'held_clk', 'Held', '', $2, $3, $3)`, tenantID, clockID, frozen)
+	mustExec(`INSERT INTO dunning_policies (id, tenant_id, name, enabled, is_default, retry_days, final_subscription_action, final_invoice_action, livemode)
+		VALUES ('dpol_held', $1, 'P', true, true, '[3, 3, 3]', 'pause', 'none', false)`, tenantID)
+	seed := func(invID, runID, payStatus, invStatus string, next time.Time, paused bool) {
+		mustExec(`INSERT INTO invoices (id, tenant_id, customer_id, invoice_number,
+			status, payment_status, is_simulated, currency,
+			subtotal_cents, total_amount_cents, amount_due_cents, tax_status,
+			billing_period_start, billing_period_end, created_at, updated_at)
+		VALUES ($1, $2, 'cus_held_clk', 'N-' || $1, $3, $4, true, 'USD', 2500, 2500, 2500, 'ok', $5, $5, $5, $5)`,
+			invID, tenantID, invStatus, payStatus, frozen.Add(-24*time.Hour))
+		mustExec(`INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, reason, attempt_count, next_action_at, paused, created_at, updated_at, livemode)
+		VALUES ($1, $2, $3, 'cus_held_clk', 'dpol_held', 'active', 'payment_failed', 0, $4, $5, $6, $6, false)`,
+			runID, tenantID, invID, next, paused, frozen.Add(-24*time.Hour))
+	}
+	due := frozen.Add(-time.Hour)
+	seed("inv_h_unknown", "run_h_unknown", "unknown", "finalized", due, false)
+	seed("inv_h_proc", "run_h_proc", "processing", "finalized", due, false)
+	seed("inv_h_hold", "run_h_hold", "failed", "finalized", due, false)
+	seed("inv_h_hosted", "run_h_hosted", "failed", "finalized", due, false)
+	seed("inv_h_both", "run_h_both", "processing", "finalized", due, false)
+	seed("inv_h_wroff", "run_h_wroff", "unknown", "uncollectible", due, false)
+	seed("inv_h_failed", "run_h_failed", "failed", "finalized", due, false)
+	seed("inv_h_later", "run_h_later", "processing", "finalized", frozen.Add(time.Hour), false)
+	seed("inv_h_paused", "run_h_paused", "processing", "finalized", due, true)
+	mustExec(`UPDATE invoices SET auto_charge_claimed_until = now() - interval '1 hour' WHERE id = 'inv_h_hold'`)
+	for _, inv := range []string{"inv_h_hosted", "inv_h_both"} {
+		mustExec(`INSERT INTO checkout_sessions (id, tenant_id, invoice_id, livemode, stripe_session_id, amount_cents, currency, status, expires_at)
+			VALUES ('cks_' || $2, $1, $2, false, 'cs_' || $2, 2500, 'USD', 'open', now() + interval '50 minutes')`, tenantID, inv)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+
+	store := dunning.NewPostgresStore(db)
+	held, err := store.HeldDueRunsForClock(ctx, tenantID, clockID, frozen)
+	if err != nil {
+		t.Fatalf("HeldDueRunsForClock: %v", err)
+	}
+	gotHeld := map[string]domain.ChargeClaimState{}
+	for _, h := range held {
+		gotHeld[h.RunID] = h.HeldBy
+		if h.InvoiceNumber != "N-"+h.InvoiceID {
+			t.Errorf("run %s: invoice number %q, want %q", h.RunID, h.InvoiceNumber, "N-"+h.InvoiceID)
+		}
+	}
+	want := map[string]domain.ChargeClaimState{
+		"run_h_unknown": domain.ChargeHeldByAttempt,
+		"run_h_proc":    domain.ChargeHeldByAttempt,
+		"run_h_hold":    domain.ChargeHeldByAttempt,
+		"run_h_hosted":  domain.ChargePayingOnHostedPage,
+		// A payment processing and a live hosted page: the first condition,
+		// the payment's, says what holds it.
+		"run_h_both": domain.ChargeHeldByAttempt,
+	}
+	if len(gotHeld) != len(want) {
+		t.Errorf("held %v; want %v", gotHeld, want)
+	}
+	for run, state := range want {
+		if got, ok := gotHeld[run]; !ok || got != state {
+			t.Errorf("run %s: held %v (listed %v), want %v", run, got, ok, state)
+		}
+	}
+
+	dueRuns, err := store.ListDueRunsForClock(ctx, tenantID, clockID, frozen, walk.Key{}, 50)
+	if err != nil {
+		t.Fatalf("ListDueRunsForClock: %v", err)
+	}
+	seen := map[string]int{}
+	for _, r := range dueRuns {
+		seen[r.ID]++
+	}
+	for _, h := range held {
+		seen[h.RunID]++
+	}
+	for _, run := range []string{"run_h_unknown", "run_h_proc", "run_h_hold", "run_h_hosted", "run_h_both", "run_h_wroff", "run_h_failed"} {
+		if seen[run] != 1 {
+			t.Errorf("due run %s is in %d of the two lists, want exactly one", run, seen[run])
+		}
+	}
+	for _, run := range []string{"run_h_later", "run_h_paused"} {
+		if seen[run] != 0 {
+			t.Errorf("run %s is not due, yet a list has it", run)
+		}
+	}
+}

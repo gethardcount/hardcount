@@ -599,8 +599,14 @@ func (s *Service) finalRetryFailedAt(ctx context.Context, tenantID string, run d
 //   - when a round finds only runs their last step left as it found them;
 //   - when runs are still due after maxDunningCatchupRounds rounds.
 //
-// The last two, the unanswered retry and the failed final action are
-// domain.ErrLeftForNextRun, each with a sentence for the operator
+// When a round finds nothing due, the job also fails for each due run that
+// the due list left out because an earlier charge attempt of its invoice has
+// not finished (heldRunsLeft): the advance would otherwise end ready with
+// that retry not made. A run whose customer may be paying on the hosted page
+// is not reported: the customer, not Hardcount, finishes that payment.
+//
+// The last two, the held runs, the unanswered retry and the failed final
+// action are domain.ErrLeftForNextRun, each with a sentence for the operator
 // (leftForNextPass).
 func (s *Service) ProcessDueRunsForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time, limit int) (int, []error) {
 	if limit <= 0 {
@@ -625,11 +631,16 @@ func (s *Service) ProcessDueRunsForClock(ctx context.Context, tenantID, clockID 
 			due = append(due, run)
 		}
 		if len(due) == 0 {
+			var left []error
 			if unmoved > 0 {
-				return total, []error{&leftForNextPass{say: fmt.Sprintf(
-					"%d payment retries due in this advance did not move: each is as its last step found it. Retry advance tries them again.", unmoved)}}
+				left = append(left, &leftForNextPass{say: fmt.Sprintf(
+					"%d payment retries due in this advance did not move: each is as its last step found it. Retry advance tries them again.", unmoved)})
 			}
-			return total, nil
+			held, err := s.heldRunsLeft(ctx, tenantID, clockID, frozenTime)
+			if err != nil {
+				return total, append(left, err)
+			}
+			return total, append(left, held...)
 		}
 		if round == maxDunningCatchupRounds {
 			return total, []error{&leftForNextPass{say: fmt.Sprintf(
@@ -644,6 +655,30 @@ func (s *Service) ProcessDueRunsForClock(ctx context.Context, tenantID, clockID 
 			return total, errs
 		}
 	}
+}
+
+// heldRunsLeft is one leftForNextPass for each of the clock's due runs that
+// an earlier charge attempt of its invoice holds back: its retry cannot be
+// made until that attempt is done, since the invoice cannot be charged
+// twice. A run whose customer may be paying on the hosted page is left out.
+func (s *Service) heldRunsLeft(ctx context.Context, tenantID, clockID string, frozenTime time.Time) ([]error, error) {
+	held, err := s.store.HeldDueRunsForClock(ctx, tenantID, clockID, frozenTime)
+	if err != nil {
+		return nil, fmt.Errorf("list the held runs of clock %s: %w", clockID, err)
+	}
+	var left []error
+	for _, h := range held {
+		if h.HeldBy != domain.ChargeHeldByAttempt {
+			continue
+		}
+		ref := h.InvoiceNumber
+		if ref == "" {
+			ref = h.InvoiceID
+		}
+		left = append(left, &leftForNextPass{say: fmt.Sprintf(
+			"Invoice %s: a payment retry is waiting for an earlier charge attempt to finish: it cannot be charged twice. Hardcount checks that attempt on a billing run, within the hour. Retry advance once the attempt is done.", ref)})
+	}
+	return left, nil
 }
 
 // runPlace is where a due run stands: its attempt count and its

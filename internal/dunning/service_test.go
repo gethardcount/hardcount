@@ -24,7 +24,10 @@ type memStore struct {
 	defaultID string
 	runs      map[string]domain.InvoiceDunningRun
 	events    []domain.InvoiceDunningEvent
-	hookErrs  []error // errors returned by UpdateRunIfActive `then` hooks (non-vetoing)
+	// held is what HeldDueRunsForClock answers, and heldErr its error.
+	held     []HeldRun
+	heldErr  error
+	hookErrs []error // errors returned by UpdateRunIfActive `then` hooks (non-vetoing)
 	// started records the dunning.started payloads StartRun enqueued (the
 	// PostgresStore's in-tx outbox row).
 	started []map[string]any
@@ -370,6 +373,10 @@ func (m *memStore) ClaimExhaustion(_ context.Context, _, runID string, expectedA
 // Narrow-test version: ignores the clockID filter since memStore has
 // no clock binding (callers pass single-clock fixtures). Postgres
 // integration tests exercise the real SQL.
+func (m *memStore) HeldDueRunsForClock(context.Context, string, string, time.Time) ([]HeldRun, error) {
+	return m.held, m.heldErr
+}
+
 func (m *memStore) ListDueRunsForClock(_ context.Context, _, _ string, frozenTime time.Time, after walk.Key, limit int) ([]domain.InvoiceDunningRun, error) {
 	due, _ := m.ListDueRuns(context.Background(), "", frozenTime, len(m.runs))
 	slices.SortFunc(due, func(a, b domain.InvoiceDunningRun) int {

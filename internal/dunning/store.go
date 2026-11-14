@@ -9,6 +9,14 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/walk"
 )
 
+// HeldRun is a due run on a clock that a charge of its invoice in flight
+// holds back, and what holds it (domain.ChargeHeldByAttempt or
+// domain.ChargePayingOnHostedPage).
+type HeldRun struct {
+	RunID, InvoiceID, InvoiceNumber string
+	HeldBy                          domain.ChargeClaimState
+}
+
 type Store interface {
 	// Policy (ADR-036 campaigns model — see methods at bottom of
 	// interface for the multi-policy-per-tenant resolution path).
@@ -102,6 +110,11 @@ type Store interface {
 	// wall-clock cron tick. It returns up to limit due runs after the key,
 	// in (next_action_at, id) order, for walk.Walk.
 	ListDueRunsForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time, after walk.Key, limit int) ([]domain.InvoiceDunningRun, error)
+
+	// HeldDueRunsForClock lists the clock's due runs ListDueRunsForClock
+	// leaves out because a charge of their invoice is in flight, with what
+	// holds each.
+	HeldDueRunsForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time) ([]HeldRun, error)
 
 	// Events
 	CreateEvent(ctx context.Context, tenantID string, event domain.InvoiceDunningEvent) (domain.InvoiceDunningEvent, error)
