@@ -14,4 +14,8 @@
 # Never list a field to make a changed amount, line, status, number or tax
 # pass: that is a money finding, and the upgrade is what needs fixing.
 #
-# No entries on 2026-10-30, upgrading from v0.9.1.
+
+# Whether the invoice's prices include tax, recorded when it was priced and
+# shown on the API from #1730; invoices from before 00228 take the account's
+# setting at the upgrade. It says how the amounts were read and changes none.
+invoice tax_inclusive

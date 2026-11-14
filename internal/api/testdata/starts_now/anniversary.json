@@ -48,6 +48,7 @@
         "subtotal_cents": 5000,
         "supplier_snapshot": {},
         "tax_amount_cents": 0,
+        "tax_inclusive": false,
         "tax_provider": "manual",
         "tax_rate": 0,
         "tax_status": "ok",

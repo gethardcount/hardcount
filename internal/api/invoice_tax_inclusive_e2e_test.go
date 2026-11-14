@@ -249,3 +249,23 @@ func TestInvoiceTaxInclusive_WrittenOnceAndNeverUpdated(t *testing.T) {
 		}
 	})
 }
+
+// The invoice answers with tax_inclusive, read-only: the terms it was
+// created in, under both settings.
+func TestInvoiceTaxInclusive_OnTheAPI(t *testing.T) {
+	for _, inclusive := range []bool{false, true} {
+		t.Run(fmt.Sprintf("inclusive=%v", inclusive), func(t *testing.T) {
+			r := newTaxFlagRig(t, "in_advance", inclusive)
+			inv := r.must(http.MethodPost, "/v1/invoices", lagP0, map[string]any{
+				"customer_id": r.custID,
+				"line_items":  []map[string]any{{"description": "setup", "quantity": 1, "unit_amount_cents": 5000}},
+			}, http.StatusCreated)
+			if got := inv["tax_inclusive"]; got != inclusive {
+				t.Errorf("POST answers tax_inclusive %v, want %v", got, inclusive)
+			}
+			if got := r.invoice(inv["id"].(string))["tax_inclusive"]; got != inclusive {
+				t.Errorf("GET answers tax_inclusive %v, want %v", got, inclusive)
+			}
+		})
+	}
+}
