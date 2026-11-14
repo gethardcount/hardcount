@@ -39,7 +39,9 @@ func seedClockDueRuns(t *testing.T, db *postgres.DB, ctx context.Context, tenant
 		VALUES ('cus_due_held', $1, 'due_held', 'Held', '', $2, $3, $3)`, tenantID, clockID, frozen)
 	mustExec(`INSERT INTO dunning_policies (id, tenant_id, name, enabled, is_default, retry_days, final_subscription_action, final_invoice_action, livemode)
 		VALUES ('dpol_due_held', $1, 'P', true, true, '[3, 3, 3]', 'pause', 'none', false)`, tenantID)
-	for _, n := range []string{"1", "2", "3"} {
+	// Inserted in reverse id order: a list that does not break the tie by id
+	// would hand them back in insert order, not id order.
+	for _, n := range []string{"3", "2", "1"} {
 		mustExec(`INSERT INTO invoices (id, tenant_id, customer_id, invoice_number, status, payment_status, is_simulated, currency,
 			subtotal_cents, total_amount_cents, amount_due_cents, tax_status, billing_period_start, billing_period_end, created_at, updated_at)
 			VALUES ($1, $2, 'cus_due_held', $1, 'finalized', 'failed', true, 'USD', 2500, 2500, 2500, 'ok', $3, $3, $3, $3)`,
