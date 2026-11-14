@@ -10,6 +10,12 @@ to work out tax. It does not use Stripe Billing or Stripe Invoices: the
 invoice is Hardcount's. To connect Stripe, see
 [Connect Stripe and take card payments](../guides/connect-stripe.md).
 
+When a customer first sets up a card or pays an invoice, Hardcount creates
+a customer for them at Stripe and keeps it up to date. When you change the customer's email, Hardcount sets
+it at Stripe. When you save a billing profile, Hardcount also sets the
+Stripe customer's name, address, phone, tax status and tax ID, and removes
+any other tax ID there. A change to the display name does not reach Stripe.
+
 ## The flow
 
 1. **The customer saves a card.** They enter it on a Stripe page, never on
