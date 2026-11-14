@@ -46,6 +46,9 @@ the [quick start](quick-start.md).
   [Set up email](ops/email-setup.md) ·
   [Payment failure handling](payments.md) ·
   [Runbook](ops/runbook/index.md).
+- **Security:** [Security policy](../SECURITY.md) ·
+  [Threat model](security/threat-model.md) ·
+  [What data Hardcount stores](security/data.md).
 - **Internals:** [Architecture](architecture.md) ·
   [How we test](testing.md) · [How Hardcount keeps a bill right](ENGINEERING.md) ·
   Benchmarks: [correctness under failure](benchmarks/failure-correctness.md)
