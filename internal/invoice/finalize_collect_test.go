@@ -72,7 +72,7 @@ func TestFinalize_QueuesThenCollectsThroughTheOneCollector(t *testing.T) {
 		t.Fatalf("seed invoice: %v", err)
 	}
 	collector := &recordingCollector{store: store}
-	h := &Handler{svc: NewService(store, nil, nil)}
+	h := &Handler{svc: NewService(store, nil, newMemNumberer())}
 	h.SetCollector(collector)
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/invoices/"+inv.ID+"/finalize", nil)
@@ -116,7 +116,7 @@ func TestSettleZeroDue_DraftIsNotSettled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("seed invoice: %v", err)
 	}
-	svc := NewService(store, nil, nil)
+	svc := NewService(store, nil, newMemNumberer())
 
 	out, err := svc.SettleZeroDue(context.Background(), "t1", inv.ID)
 	if err != nil {
@@ -188,7 +188,7 @@ func TestApplyCreditBalance_FinalizedOnly(t *testing.T) {
 				t.Fatalf("seed: %v", err)
 			}
 			applier := &fakeInvCreditApplier{store: store, applyCents: 2000}
-			svc := NewService(store, nil, nil)
+			svc := NewService(store, nil, newMemNumberer())
 			svc.SetCreditApplier(applier)
 
 			if _, err := svc.ApplyCreditBalance(context.Background(), "t1", inv.ID); err != nil {

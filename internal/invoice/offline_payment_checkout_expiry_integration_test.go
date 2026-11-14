@@ -8,6 +8,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -25,7 +26,7 @@ func TestRecordOfflinePayment_ExpiresCheckoutSessions(t *testing.T) {
 	inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-OFFLINE-EXPIRE")
 
 	rec := &stopperRecorder{}
-	svc := invoice.NewService(invoice.NewPostgresStore(db), nil, nil)
+	svc := invoice.NewService(invoice.NewPostgresStore(db), nil, tenant.NewSettingsStore(db))
 	svc.SetCollectionStopper(rec)
 
 	if _, err := svc.RecordOfflinePayment(ctx, tenantID, inv.ID, "wire"); err != nil {
@@ -60,7 +61,7 @@ func TestRecordOfflinePayment_CallerContextEnds_ExpiryStillRuns(t *testing.T) {
 	ctx, cancel := context.WithCancel(base)
 	defer cancel()
 	stopper := &endingStopper{endCaller: cancel}
-	svc := invoice.NewService(invoice.NewPostgresStore(db), nil, nil)
+	svc := invoice.NewService(invoice.NewPostgresStore(db), nil, tenant.NewSettingsStore(db))
 	svc.SetCollectionStopper(stopper)
 	// The caller's context ends while the audit row is written, just before
 	// the expiry.
@@ -121,7 +122,7 @@ func TestRecordOfflinePayment_ClosesDunningBeforeTheExpiry(t *testing.T) {
 	defer cancel()
 	var steps []step
 	resolver := &stepResolver{steps: &steps}
-	svc := invoice.NewService(invoice.NewPostgresStore(db), nil, nil)
+	svc := invoice.NewService(invoice.NewPostgresStore(db), nil, tenant.NewSettingsStore(db))
 	svc.SetDunningResolver(resolver)
 	svc.SetCollectionStopper(&stepStopper{steps: &steps})
 	// The caller's context ends while the audit row is written, after the

@@ -51,7 +51,7 @@ func TestCollectPayment_ChargesInTheInvoicesClock(t *testing.T) {
 		t.Fatalf("seed invoice: %v", err)
 	}
 	frozen := time.Date(2027, 6, 5, 0, 0, 0, 0, time.UTC)
-	svc := NewService(store, nil, nil)
+	svc := NewService(store, nil, newMemNumberer())
 	svc.SetResolver(pinnedResolver{sim: clock.Sim{At: frozen, TestClockID: "clk_1"}})
 	charger := &ctxCapturingCharger{}
 	h := &Handler{

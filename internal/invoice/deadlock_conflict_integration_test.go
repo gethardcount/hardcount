@@ -20,6 +20,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/webhook"
 )
@@ -103,7 +104,7 @@ func newDeadlockInvoiceRig(t *testing.T, db *postgres.DB, name string) *deadlock
 	pg := invoice.NewPostgresStore(db)
 	pg.SetOutboxEnqueuer(webhook.NewOutboxStore(db))
 	store := &deadlockOnceInvoices{PostgresStore: pg}
-	svc := invoice.NewService(store, nil, nil)
+	svc := invoice.NewService(store, nil, tenant.NewSettingsStore(db))
 	svc.SetCreditApplier(credit.NewService(credit.NewPostgresStore(db)))
 	h := invoice.NewHandler(svc, nil, nil, invoice.HandlerDeps{Charger: &collectCharger{}, PaymentSetups: readyPaymentSetup{}})
 	return &deadlockInvoiceRig{

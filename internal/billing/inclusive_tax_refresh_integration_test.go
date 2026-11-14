@@ -279,7 +279,6 @@ func newRefreshRig(t *testing.T, db *postgres.DB, name string, inclusive bool, r
 
 	// The operator's Retry tax, as the HTTP handler calls it.
 	svc := invoice.NewService(invoiceStore, clock.Real(), settings)
-	svc.SetTenantSettingsReader(settings) // as router.go wires it
 	svc.SetTaxRetrier(engine)
 	svc.SetSubscriptionPauseReader(subs)
 

@@ -11,6 +11,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -92,7 +93,7 @@ func TestChargeHold_RefusesVoidWriteOffAndOfflinePayment(t *testing.T) {
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Charge Hold Guard")
 	store := invoice.NewPostgresStore(db)
-	svc := invoice.NewService(store, nil, nil)
+	svc := invoice.NewService(store, nil, tenant.NewSettingsStore(db))
 
 	for i, a := range heldChargeActions {
 		num := func(tag string) string { return "INV-HOLD-" + tag + "-" + string(rune('A'+i)) }
@@ -163,7 +164,7 @@ func TestChargeHold_ParkedInvoice_WriteOffWaitsForALiveHold(t *testing.T) {
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Charge Hold Parked")
 	store := invoice.NewPostgresStore(db)
-	svc := invoice.NewService(store, nil, nil)
+	svc := invoice.NewService(store, nil, tenant.NewSettingsStore(db))
 
 	inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-HOLD-PARKED")
 	claimAuto(t, store, ctx, tenantID, inv.ID)
@@ -215,7 +216,7 @@ func TestChargeHold_StaleReadIsRefusedUnderTheLock(t *testing.T) {
 		t.Run(a.name+"/hold taken after the service read the invoice", func(t *testing.T) {
 			inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-HOLD-STALE-"+suffix)
 			racer := &raceAfterGet{PostgresStore: store, race: func() { claimAuto(t, store, ctx, tenantID, inv.ID) }}
-			svc := invoice.NewService(racer, nil, nil)
+			svc := invoice.NewService(racer, nil, tenant.NewSettingsStore(db))
 			got, err := a.run(ctx, svc, tenantID, inv.ID)
 			if !racer.done {
 				t.Fatal("the race never ran")
@@ -230,7 +231,7 @@ func TestChargeHold_StaleReadIsRefusedUnderTheLock(t *testing.T) {
 			racer := &raceAfterGet{PostgresStore: store, race: func() {
 				stampOutcome(t, store, ctx, tenantID, inv.ID, domain.PaymentProcessing, "pi_stale_"+suffix, "")
 			}}
-			svc := invoice.NewService(racer, nil, nil)
+			svc := invoice.NewService(racer, nil, tenant.NewSettingsStore(db))
 			got, err := a.run(ctx, svc, tenantID, inv.ID)
 			if !racer.done {
 				t.Fatal("the race never ran")
@@ -270,7 +271,7 @@ func TestChargeHold_ReliefVoidRefused(t *testing.T) {
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Charge Hold Relief Void")
 	store := invoice.NewPostgresStore(db)
-	svc := invoice.NewService(store, nil, nil)
+	svc := invoice.NewService(store, nil, tenant.NewSettingsStore(db))
 
 	reliefVoid := func(t *testing.T, id string) (domain.Invoice, error) {
 		t.Helper()
@@ -338,7 +339,7 @@ func TestRecordOfflinePayment_CardSettledAfterReadIsRefused(t *testing.T) {
 			t.Fatalf("card settle: ok=%v err=%v", ok, err)
 		}
 	}}
-	svc := invoice.NewService(racer, nil, nil)
+	svc := invoice.NewService(racer, nil, tenant.NewSettingsStore(db))
 
 	_, err := svc.RecordOfflinePayment(ctx, tenantID, inv.ID, "wire")
 	if !racer.done {

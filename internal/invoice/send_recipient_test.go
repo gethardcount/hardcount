@@ -27,7 +27,7 @@ func TestSendEmail_RefusesNonBareRecipient(t *testing.T) {
 	}
 	newHandler := func() (*Handler, *ccCapturingSender) {
 		sender := &ccCapturingSender{}
-		h := &Handler{svc: NewService(store, nil, nil)}
+		h := &Handler{svc: NewService(store, nil, newMemNumberer())}
 		h.customers = staticCustomerGetter{cust: domain.Customer{ID: "cus_to", DisplayName: "To Co", Email: "ap@acme.test"}}
 		h.emailSender = sender
 		h.emailConfigured = true

@@ -72,7 +72,6 @@ func TestCommitTax_PurchaseUntaxed_UsageTaxedOnce_E2E(t *testing.T) {
 	// funds the commit grant in the finalize tx, the engine computes tax.
 	lf.invStore.SetCommitFunder(lf.creditSvc)
 	invSvc := invoice.NewService(lf.invStore, clock.Real(), lf.settings)
-	invSvc.SetTenantSettingsReader(lf.settings) // as router.go wires it
 	invSvc.SetTaxRetrier(lf.engine)
 
 	// 1. The purchase: a commit invoice carries no tax.
@@ -157,7 +156,6 @@ func TestCommitRelief_TaxedPurchase_StillReversesItsTax(t *testing.T) {
 	invStore := invoice.NewPostgresStore(db)
 	invStore.SetCommitFunder(creditSvc)
 	invSvc := invoice.NewService(invStore, clock.Real(), settings)
-	invSvc.SetTenantSettingsReader(settings) // as router.go wires it
 
 	draft := createCommitInvoice(t, ctx, invSvc, tenantID, cust.ID, 10000, 10000)
 	if _, err := invSvc.Finalize(ctx, tenantID, draft.ID); err != nil {
@@ -218,7 +216,6 @@ func TestCommitTax_InclusiveDraftComputedBeforeTheChange_E2E(t *testing.T) {
 
 	lf.invStore.SetCommitFunder(lf.creditSvc)
 	invSvc := invoice.NewService(lf.invStore, clock.Real(), lf.settings)
-	invSvc.SetTenantSettingsReader(lf.settings) // as router.go wires it
 	invSvc.SetTaxRetrier(lf.engine)
 
 	draft := createCommitInvoice(t, ctx, invSvc, lf.tenantID, lf.customerID, 11800, 11800)

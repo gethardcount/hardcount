@@ -48,7 +48,7 @@ func TestRetryTax_FinalizeFailure_NothingIsSaved(t *testing.T) {
 	t.Run("RetryTax returns the error; the row is as it was", func(t *testing.T) {
 		mem := newMemStore()
 		mem.invoices["inv_1"] = taxPendingCycleDraft("inv_1")
-		svc := NewService(finalizeFailingStore{mem}, nil, nil)
+		svc := NewService(finalizeFailingStore{mem}, nil, newMemNumberer())
 		svc.SetTaxRetrier(&stubTaxRetrier{store: mem})
 
 		out, err := svc.RetryTax(context.Background(), "t1", "inv_1")
@@ -67,7 +67,7 @@ func TestRetryTax_FinalizeFailure_NothingIsSaved(t *testing.T) {
 	t.Run("RetryPendingTax counts it as an error, not as advanced", func(t *testing.T) {
 		mem := newMemStore()
 		mem.invoices["inv_1"] = taxPendingCycleDraft("inv_1")
-		svc := NewService(finalizeFailingStore{mem}, nil, nil)
+		svc := NewService(finalizeFailingStore{mem}, nil, newMemNumberer())
 		svc.SetTaxRetrier(&stubTaxRetrier{store: mem})
 
 		processed, errs := svc.RetryPendingTax(postgres.WithLivemode(context.Background(), true), 50)
@@ -107,7 +107,7 @@ func TestRetryTaxHandler_FinalizeFailure_NoAuditRow(t *testing.T) {
 			draft := taxPendingCycleDraft("inv_1")
 			draft.InvoiceNumber = "INV-001"
 			mem.invoices["inv_1"] = draft
-			svc := NewService(c.store(mem), nil, nil)
+			svc := NewService(c.store(mem), nil, newMemNumberer())
 			svc.SetTaxRetrier(&stubTaxRetrier{store: mem})
 			aud := &capturingInvoiceAudit{}
 			h := &Handler{svc: svc, auditLogger: aud}
@@ -210,7 +210,7 @@ func TestTaxRetryLoops_StopBetweenRowsOnceCtxIsDone(t *testing.T) {
 			for _, inv := range rows {
 				mem.invoices[inv.ID] = inv
 			}
-			svc := NewService(mem, nil, nil)
+			svc := NewService(mem, nil, newMemNumberer())
 			f := &cancellingRetrier{store: mem, cancel: cancel}
 			svc.SetTaxRetrier(f)
 			n, errs := svc.processTaxRetryBatch(ctx, rows)
@@ -222,7 +222,7 @@ func TestTaxRetryLoops_StopBetweenRowsOnceCtxIsDone(t *testing.T) {
 			for _, inv := range rows {
 				mem.invoices[inv.ID] = inv
 			}
-			svc := NewService(mem, nil, nil)
+			svc := NewService(mem, nil, newMemNumberer())
 			f := &cancellingRetrier{store: mem, cancel: cancel}
 			svc.SetTaxRetrier(f)
 			n, errs := svc.retryStuck(ctx, "t1", rows)
@@ -236,7 +236,7 @@ func TestTaxRetryLoops_StopBetweenRowsOnceCtxIsDone(t *testing.T) {
 					TaxFacts: domain.TaxFacts{TaxStatus: domain.InvoiceTaxOK, TaxProvider: "stripe_tax", TaxCalculationID: "taxcalc_" + id},
 				}
 			}
-			svc := NewService(mem, nil, nil)
+			svc := NewService(mem, nil, newMemNumberer())
 			f := &cancellingCommitter{cancel: cancel}
 			svc.SetTaxCommitter(f)
 			n, errs := svc.RetryPendingTaxCommit(ctx, 50)
@@ -251,7 +251,7 @@ func TestTaxRetryLoops_StopBetweenRowsOnceCtxIsDone(t *testing.T) {
 					TaxTransactionID: "tx_" + id, TotalAmountCents: 1000, AmountDueCents: 1000,
 				}
 			}
-			svc := NewService(mem, nil, nil)
+			svc := NewService(mem, nil, newMemNumberer())
 			f := &cancellingReverser{cancel: cancel}
 			svc.SetTaxReverser(f)
 			n, errs := svc.RetryPendingTaxReversal(ctx, 50)

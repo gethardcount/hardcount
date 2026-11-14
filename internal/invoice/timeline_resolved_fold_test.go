@@ -87,7 +87,7 @@ func TestPaymentTimeline_ResolvedRowFoldsIntoCauseRow(t *testing.T) {
 		created.VoidedAt = inv.VoidedAt
 		created.PaidAt = inv.PaidAt
 		store.invoices[created.ID] = created
-		h := &Handler{svc: NewService(store, nil, nil)}
+		h := &Handler{svc: NewService(store, nil, newMemNumberer())}
 		h.dunningTimeline = &dunningEventsLaneFake{
 			runs: []domain.InvoiceDunningRun{{ID: "run_1"}},
 			events: []domain.InvoiceDunningEvent{

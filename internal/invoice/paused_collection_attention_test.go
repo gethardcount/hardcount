@@ -51,7 +51,7 @@ func TestAttention_PausedCollectionReadsTheOpenRun(t *testing.T) {
 			if tc.run != nil {
 				runs["inv_1"] = *tc.run
 			}
-			svc := NewService(store, nil, nil)
+			svc := NewService(store, nil, newMemNumberer())
 			svc.SetPaymentMethodReader(&countingPMReader{ready: map[string]bool{"cus_1": tc.hasCard}})
 			svc.SetCustomerReader(&countingCustomers{email: map[string]string{"cus_1": "a@acme.test"}})
 			svc.SetSubscriptionPauseReader(&countingPauses{paused: map[string]bool{"sub_1": true}})

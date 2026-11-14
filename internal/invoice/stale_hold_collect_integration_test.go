@@ -12,6 +12,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -97,7 +98,7 @@ func TestCollect_StaleHold_RefusedWith409AndNoCharge(t *testing.T) {
 	setHoldAgo(t, db, inv.ID, 11*time.Minute)
 
 	charger := &collectCharger{}
-	h := invoice.NewHandler(invoice.NewService(store, nil, nil), nil, nil, invoice.HandlerDeps{Charger: charger, PaymentSetups: readyPaymentSetup{}})
+	h := invoice.NewHandler(invoice.NewService(store, nil, tenant.NewSettingsStore(db)), nil, nil, invoice.HandlerDeps{Charger: charger, PaymentSetups: readyPaymentSetup{}})
 	rr := postCollect(t, h, tenantID, inv.ID)
 
 	if charger.calls != 0 {
@@ -125,7 +126,7 @@ func TestCollect_CreditsCoverIt_SettledAndHoldReleased(t *testing.T) {
 	store := invoice.NewPostgresStore(db)
 	inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-COLLECT-CREDIT")
 
-	svc := invoice.NewService(store, nil, nil)
+	svc := invoice.NewService(store, nil, tenant.NewSettingsStore(db))
 	svc.SetCreditApplier(creditsCoverAll{db: db})
 	charger := &collectCharger{}
 	h := invoice.NewHandler(svc, nil, nil, invoice.HandlerDeps{Charger: charger, PaymentSetups: readyPaymentSetup{}})

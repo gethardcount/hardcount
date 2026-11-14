@@ -110,7 +110,7 @@ func wireHandler(t *testing.T, c wireCase) (*Handler, string) {
 		inv.CreatedAt = c.inv.CreatedAt
 	}
 	mem.invoices[created.ID] = inv
-	svc := NewService(&attemptsStore{memStore: mem, attempts: c.attempts}, nil, nil)
+	svc := NewService(&attemptsStore{memStore: mem, attempts: c.attempts}, nil, newMemNumberer())
 	if c.disputes != nil {
 		svc.SetDisputeReader(&disputesFake{disputes: c.disputes})
 	}

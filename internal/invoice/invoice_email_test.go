@@ -25,7 +25,7 @@ func emailerFixture(t *testing.T, status domain.InvoiceStatus, cust domain.Custo
 	}
 	sender := &ccCapturingSender{}
 	aud := &capturingInvoiceAudit{}
-	h := &Handler{svc: NewService(store, nil, nil), customers: staticCustomerGetter{cust: cust},
+	h := &Handler{svc: NewService(store, nil, newMemNumberer()), customers: staticCustomerGetter{cust: cust},
 		emailSender: sender, auditLogger: aud, emailConfigured: true}
 	return h, sender, aud, inv
 }

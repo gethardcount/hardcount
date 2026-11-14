@@ -11,6 +11,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -78,7 +79,7 @@ func TestRetryPendingTax_ScansTheDeclaredSingleSource(t *testing.T) {
 		want[inv.ID] = code
 	}
 
-	svc := invoice.NewService(invStore, nil, nil)
+	svc := invoice.NewService(invStore, nil, tenant.NewSettingsStore(db))
 	rec := &recordingTaxRetrier{}
 	svc.SetTaxRetrier(rec)
 
