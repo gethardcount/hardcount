@@ -5,6 +5,8 @@ package clock
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"sync"
 	"time"
 )
@@ -186,6 +188,59 @@ func Now(ctx context.Context) time.Time {
 		return t
 	}
 	return time.Now().UTC()
+}
+
+// WithRealTime records on ctx that real time was decided for it: it is in no
+// test clock's world. Now(ctx) then reads machine time, as on an undecided
+// ctx, but Decision reports the decision. A request in live mode, a job's
+// tick, and an entity on no clock are decided this way.
+func WithRealTime(ctx context.Context) context.Context {
+	return WithSim(ctx, Sim{})
+}
+
+// Decision returns what was decided for ctx's time, and whether anything
+// was: real time (a zero Sim), a test clock and its instant, or a bare
+// instant from WithEffectiveNow. Unlike SimOf, it tells real time from
+// nothing decided.
+func Decision(ctx context.Context) (Sim, bool) {
+	if ctx == nil {
+		return Sim{}, false
+	}
+	s, ok := ctx.Value(simKey).(Sim)
+	return s, ok
+}
+
+// Decide resolves p through r and records the answer on ctx: the entity's
+// test clock and its instant, or real time when the entity is on no clock
+// (an answer without a clock id binds real time, never a frozen instant).
+// Unlike BindEffectiveNow it returns the resolver's error, keeps nothing an
+// earlier binding held, and needs a resolver and an id: it is the call that
+// decides, at the entry point of a request or a job's row.
+func Decide(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
+	if r == nil {
+		return ctx, errors.New("decide the time: no resolver")
+	}
+	var (
+		sim Sim
+		err error
+	)
+	switch {
+	case p.InvoiceID != "":
+		sim, err = r.SimForInvoice(ctx, p.TenantID, p.InvoiceID)
+	case p.SubscriptionID != "":
+		sim, err = r.SimForSubscription(ctx, p.TenantID, p.SubscriptionID)
+	case p.CustomerID != "":
+		sim, err = r.SimForCustomer(ctx, p.TenantID, p.CustomerID)
+	default:
+		return ctx, errors.New("decide the time: the pin names no customer, subscription or invoice")
+	}
+	if err != nil {
+		return ctx, fmt.Errorf("decide the time: %w", err)
+	}
+	if !sim.Simulated() {
+		return WithRealTime(ctx), nil
+	}
+	return WithSim(ctx, sim), nil
 }
 
 // Resolver maps an entity to its simulated-time context. That is the clock
