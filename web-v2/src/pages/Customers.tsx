@@ -11,7 +11,7 @@ import { toast } from 'sonner'
 import { api, formatDate } from '@/lib/api'
 import type { Customer } from '@/lib/api'
 import { applyApiError } from '@/lib/formErrors'
-import { TestClockBadge } from '@/components/TestClockBadge'
+import { SimulatedBadge } from '@/components/TestClockBadge'
 import { useAuth } from '@/contexts/AuthContext'
 import { useTestClocks } from '@/hooks/useNow'
 import { Combobox } from '@/components/Combobox'
@@ -343,7 +343,7 @@ export default function CustomersPage() {
                                   in simulation without drilling into each
                                   detail page. Mirrors Stripe's customer
                                   list. */}
-                              {c.test_clock_id && <TestClockBadge testClockId={c.test_clock_id} />}
+                              {c.test_clock_id && <SimulatedBadge />}
                             </div>
                             <p className="text-xs text-muted-foreground font-mono truncate max-w-[220px]" title={c.external_id}>{c.external_id}</p>
                           </div>

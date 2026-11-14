@@ -900,7 +900,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	testClockSvc := testclock.NewService(testClockStore, testclock.Deps{
 		Billing:      engine,
 		Customers:    customerSvc,
-		Subs:         subStore,
 		Trials:       subSvc,
 		Pauses:       subSvc,
 		Tax:          invoiceSvc,

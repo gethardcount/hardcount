@@ -630,7 +630,6 @@ export const api = {
   deleteTestClock: (id: string) =>
     apiRequest<{ status: string }>('DELETE', `/test-clocks/${id}`),
   listAttachedCustomers: (id: string) => listAll<Customer>(`/test-clocks/${id}/customers`),
-  listSubscriptionsOnClock: (id: string) => listAll<Subscription>(`/test-clocks/${id}/subscriptions`),
 
   // API Keys
   listApiKeys: () => listAll<APIKey>('/api-keys'),
@@ -779,13 +778,11 @@ export interface BillingThresholds {
 export interface TestClock {
   id: string
   tenant_id: string
-  livemode: boolean
   name: string
   frozen_time: string
   status: 'ready' | 'advancing' | 'internal_failure'
   created_at: string
   updated_at: string
-  deletes_after?: string | null
   // last_failure_reason is set when status='internal_failure' to
   // explain the prior catchup error. Cleared on retry success or
   // a fresh advance. ADR-018.

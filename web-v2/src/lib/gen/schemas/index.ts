@@ -332,8 +332,6 @@ export * from './listTestClockCustomers200';
 export * from './listTestClockCustomersParams';
 export * from './listTestClocks200';
 export * from './listTestClocksParams';
-export * from './listTestClockSubscriptions200';
-export * from './listTestClockSubscriptionsParams';
 export * from './listTotal';
 export * from './listUsageEvents200';
 export * from './listUsageEventsParams';

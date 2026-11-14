@@ -159,23 +159,4 @@ func TestReadRoutesHonest(t *testing.T) {
 		}
 	})
 
-	// D-07: the test clock's subscription list returns the same subscription
-	// the subscription read does: name, billing time and items included.
-	t.Run("test clock subscriptions are whole", func(t *testing.T) {
-		list := flowList(call("GET", "/v1/test-clocks/"+clockID+"/subscriptions", nil).want(t, 200, "list clock subscriptions").body, "data")
-		if len(list) != 1 {
-			t.Fatalf("clock lists %d subscriptions, want 1", len(list))
-		}
-		got := list[0]
-		if s := flowStr(got, "display_name"); s != "Honest Subscription" {
-			t.Errorf("display_name = %q, want Honest Subscription", s)
-		}
-		if s := flowStr(got, "billing_time"); s != "anniversary" {
-			t.Errorf("billing_time = %q, want anniversary", s)
-		}
-		items, _ := got["items"].([]any)
-		if len(items) != 1 {
-			t.Errorf("items = %v, want the one item", got["items"])
-		}
-	})
 }

@@ -36,7 +36,7 @@ import (
 func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 	opts := cors.Options{
 		AllowedMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete},
-		AllowedHeaders: []string{"Authorization", "Content-Type", "X-API-Key", "Idempotency-Key"},
+		AllowedHeaders: []string{"Authorization", "Content-Type", "Idempotency-Key"},
 		ExposedHeaders: []string{"Hardcount-Version", "Hardcount-Request-Id", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "Retry-After"},
 		MaxAge:         86400,
 	}

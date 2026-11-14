@@ -61,14 +61,6 @@ type CustomerReader interface {
 	ListByTestClockID(ctx context.Context, tenantID, clockID string, limit, offset int) ([]domain.Customer, int, error)
 }
 
-// SubscriptionLister returns the subscriptions pinned to a clock in the same
-// shape as every other subscription read (name, billing time, items and the
-// rest). Implemented by the subscription store; the clock's own narrow scan
-// left most fields empty.
-type SubscriptionLister interface {
-	ListByTestClock(ctx context.Context, tenantID, clockID string, limit, offset int) ([]domain.Subscription, int, error)
-}
-
 // TrialExpirer is the narrow hook the catchup orchestrator uses to
 // flip trialing subs whose `trial_end_at` has elapsed in sim time to
 // active — at `trial_end_at`, not at the later cycle close.
@@ -144,7 +136,6 @@ type Service struct {
 	store         Store
 	billing       BillingRunner
 	customers     CustomerReader
-	subs          SubscriptionLister
 	trialExpirer  TrialExpirer
 	pauseResumer  PauseResumer
 	taxRetry      TaxRetrier
@@ -162,10 +153,8 @@ type Deps struct {
 	// Billing closes the clock's due periods, collects their invoices and
 	// fires spend thresholds.
 	Billing BillingRunner
-	// Customers and Subs read the clock's customers and subscriptions for
-	// its detail page.
+	// Customers reads the clock's customers for its detail page.
 	Customers CustomerReader
-	Subs      SubscriptionLister
 	// Trials ends the trials due by the clock's time; without it a
 	// subscription stays trialing until its next period closes.
 	Trials TrialExpirer
@@ -202,8 +191,6 @@ func NewService(store Store, d Deps) *Service {
 		missing("Deps.Billing")
 	case d.Customers == nil:
 		missing("Deps.Customers")
-	case d.Subs == nil:
-		missing("Deps.Subs")
 	case d.Trials == nil:
 		missing("Deps.Trials")
 	case d.Pauses == nil:
@@ -222,7 +209,7 @@ func NewService(store Store, d Deps) *Service {
 		missing("Deps.PassDeadline")
 	}
 	return &Service{
-		store: store, billing: d.Billing, customers: d.Customers, subs: d.Subs,
+		store: store, billing: d.Billing, customers: d.Customers,
 		trialExpirer: d.Trials, pauseResumer: d.Pauses, taxRetry: d.Tax,
 		clawback: d.Relief, creditExpirer: d.Credits, dunning: d.Dunning,
 		audit: d.Audit, passDeadline: d.PassDeadline,
@@ -283,17 +270,6 @@ func (s *Service) Delete(ctx context.Context, tenantID, id string) error {
 	return s.store.Delete(ctx, tenantID, id, s.auditRow(ctx, domain.AuditActionDelete, func(domain.TestClock) map[string]any {
 		return map[string]any{"action": "teardown"}
 	}))
-}
-
-// ListSubscriptions returns one page of the subscriptions pinned to the
-// given clock, and their total. Verifies the clock exists first so a
-// missing-clock id surfaces as 404 rather than an empty list (which would
-// look like an empty clock).
-func (s *Service) ListSubscriptions(ctx context.Context, tenantID, clockID string, limit, offset int) ([]domain.Subscription, int, error) {
-	if _, err := s.store.Get(ctx, tenantID, clockID); err != nil {
-		return nil, 0, err
-	}
-	return s.subs.ListByTestClock(ctx, tenantID, clockID, limit, offset)
 }
 
 // ListAttachedCustomers returns one page of the customers pinned to this

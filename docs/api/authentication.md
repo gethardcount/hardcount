@@ -14,9 +14,6 @@ Put the key in the `Authorization` header, after `Bearer` and one space:
 curl -s "$HARDCOUNT/v1/whoami" -H "Authorization: Bearer $HARDCOUNT_KEY"
 ```
 
-Hardcount also reads a key from an `X-API-Key` header when the
-`Authorization` header does not start with `Bearer `.
-
 `GET /v1/whoami` needs no permission, so it is a good first call. It answers
 with your `tenant_id` (your account's ID), `livemode`, `key_id` and
 `key_type`.
@@ -100,7 +97,7 @@ when. Each change and its audit row are saved together.
 
 | Status | `code` | `message` | Why |
 |---|---|---|---|
-| `401` | `unauthorized` | `missing credentials — sign in at /login or send Authorization: Bearer hc_secret_...` | No key was sent: no `Authorization: Bearer <key>` and no `X-API-Key` |
+| `401` | `unauthorized` | `missing credentials — sign in at /login or send Authorization: Bearer hc_secret_...` | No key was sent in `Authorization: Bearer <key>` |
 | `401` | `unauthorized` | `invalid or expired API key` | The key is wrong, revoked or past its `expires_at`. The message is the same in each case, so it does not tell anyone whether a key exists. |
 | `403` | `forbidden` | `insufficient permissions: this key type does not have customer:read access` | The key's type cannot call this route; the message names the permission |
 | `403` | `forbidden` | `this endpoint requires a dashboard session — sign in to the dashboard to manage team membership` | `/v1/members` takes only a dashboard session |

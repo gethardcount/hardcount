@@ -104,7 +104,9 @@ original text.
 
 ### Removed
 
+- **`GET /v1/test-clocks/{id}/subscriptions` and the clock page's subscription list.** They listed the same subscriptions the clock's customers have. Open a customer from the clock's customer list (`GET /v1/test-clocks/{id}/customers`) to see its subscriptions. The clock page's advance and delete dialogs count customers ([#1769](https://github.com/gethardcount/hardcount/pull/1769)).
 - **The `HARDCOUNT_TEST_CLOCK_INJECT_FAILURE` setting.** It made the next test-clock advance fail, for manual tests, and a server that had it set by mistake failed every advance. It now does nothing; remove it from your environment ([#1694](https://github.com/gethardcount/hardcount/pull/1694)).
+- **The `X-API-Key` header.** A key is sent in `Authorization: Bearer` only; the `X-API-Key` header is no longer read. A request that sent its key there now gets `401` with the missing-credentials message: send it as `Authorization: Bearer <key>` ([#1766](https://github.com/gethardcount/hardcount/pull/1766)).
 - **The metric `hardcount_webhook_outbox_enqueue_failures_total` ([#1639](https://github.com/gethardcount/hardcount/pull/1639)).** It counted webhook events lost because they could not be queued after their change was saved. Every event is now saved with its change, and a change whose event cannot be saved fails, so no event is lost this way. Remove any alert on the metric.
 
 ### Fixed
@@ -189,7 +191,7 @@ original text.
 
 ### Security
 
-- **Release images carry build provenance, and a release carries its SBOM.** From the next release, each image has a signed record of the workflow run and commit that built it (`gh attestation verify oci://ghcr.io/gethardcount/hardcount:<tag> --repo gethardcount/hardcount`), CI checks the Cosign signatures it makes, and the API image's SBOM is attached to the GitHub release. CI's own GitHub Actions are pinned to exact commits ([#1758](https://github.com/gethardcount/hardcount/pull/1758)).
+- **Release images carry build provenance, and a release carries its SBOM.** From the next release, each image has a signed record of the workflow run and commit that built it (`gh attestation verify oci://ghcr.io/gethardcount/hardcount:<tag> --repo gethardcount/hardcount`), CI checks the Cosign signatures it makes, and the API image's SBOM is attached to the GitHub release. CI's own GitHub Actions are pinned to exact commits. The checks are on [Verify a release](docs/ops/verify-a-release.md) ([#1758](https://github.com/gethardcount/hardcount/pull/1758)).
 - **The keys the setup command creates are minted like every other key.** They are stored with a salted SHA-256 hash, and the test key's audit row is in the test-mode log. Setup keys created in v0.9.3 or earlier have no salt and still work; rotating one replaces it with a salted key ([#1740](https://github.com/gethardcount/hardcount/pull/1740)).
 - **An API key is refused unless it has Hardcount's exact shape.** A key is `hc_secret_` or `hc_ingest_`, then `live_` or `test_`, then 64 lowercase hex characters; any other string is refused before it is looked up. The database now refuses a stored key of another shape, and two keys with one prefix ([#1739](https://github.com/gethardcount/hardcount/pull/1739)).
 - **The webhook event stream closes when its credential stops working.** `GET /v1/webhook_events/stream` checks its API key or session again every 15 seconds. Once the key is revoked or expires, or the session ends, it closes with no final frame, and a reconnect with that credential answers `401`. A credential-store failure does not close it ([#1736](https://github.com/gethardcount/hardcount/pull/1736)).

@@ -16,7 +16,7 @@ import (
 func Deps(billing testclock.BillingRunner) testclock.Deps {
 	n := noJobs{}
 	return testclock.Deps{
-		Billing: billing, Customers: n, Subs: n, Trials: n, Pauses: n,
+		Billing: billing, Customers: n, Trials: n, Pauses: n,
 		Tax: n, Relief: n, Credits: n, Dunning: n, Audit: n,
 		PassDeadline: testclock.CatchupPassDeadline,
 	}
@@ -36,9 +36,6 @@ func (noJobs) ScanThresholdsForClock(context.Context, string, string, int) (int,
 	return 0, nil
 }
 func (noJobs) ListByTestClockID(context.Context, string, string, int, int) ([]domain.Customer, int, error) {
-	return nil, 0, nil
-}
-func (noJobs) ListByTestClock(context.Context, string, string, int, int) ([]domain.Subscription, int, error) {
 	return nil, 0, nil
 }
 func (noJobs) ProcessExpiredTrialsForClock(context.Context, string, string, time.Time) (int, []error) {

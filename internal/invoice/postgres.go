@@ -2536,7 +2536,7 @@ func collectionQueuedAtFinalize(status domain.InvoiceStatus, paymentStatus domai
 // noLiveHostedPageSQL keeps every Hardcount charge off an invoice the customer
 // may be paying on the hosted page: one payer at a time
 // (domain.HostedCheckoutLiveSQL says when a page counts as live).
-var noLiveHostedPageSQL = "NOT " + domain.HostedCheckoutLiveSQL("invoices.id")
+var noLiveHostedPageSQL = domain.NoLiveHostedPageSQL("invoices")
 
 // lockInvoiceForChargeClaim takes the invoice row lock before a charge
 // claim's UPDATE. Without it the UPDATE could miss a hosted session created
@@ -2561,7 +2561,7 @@ func lockInvoiceForChargeClaim(ctx context.Context, tx *sql.Tx, id string) (bool
 // records the result (ADR-137). A claim that took an expired hold as free
 // would charge again an invoice whose charge was interrupted (#976). Shared
 // by every claim so they cannot drift apart.
-const chargeHoldFree = `auto_charge_claimed_until IS NULL`
+var chargeHoldFree = domain.ChargeHoldFreeSQL("invoices")
 
 // chargeHoldReleaseTimeout bounds a release detached from its caller's
 // context (ReleaseChargeHold): one UPDATE, so a stalled database cannot hold
@@ -2680,7 +2680,7 @@ type claimConditions []claimCondition
 var autoChargeClaim = claimConditions{
 	{`status = 'finalized'`, domain.ChargeNothingToCharge},
 	// A charge whose result is not known yet holds the invoice.
-	{`payment_status NOT IN ('unknown', 'processing')`, domain.ChargeHeldByAttempt},
+	{domain.PaymentNotInFlightSQL("invoices"), domain.ChargeHeldByAttempt},
 	{`payment_status = 'pending'`, domain.ChargeNothingToCharge},
 	{`auto_charge_pending = TRUE`, domain.ChargeNothingToCharge},
 	{chargeHoldFree, domain.ChargeHeldByAttempt},

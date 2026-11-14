@@ -48,7 +48,8 @@ the [quick start](quick-start.md).
   [Runbook](ops/runbook/index.md).
 - **Security:** [Security policy](../SECURITY.md) ·
   [Threat model](security/threat-model.md) ·
-  [What data Hardcount stores](security/data.md).
+  [What data Hardcount stores](security/data.md) ·
+  [Verify a release](ops/verify-a-release.md).
 - **Internals:** [Architecture](architecture.md) ·
   [How we test](testing.md) · [How Hardcount keeps a bill right](ENGINEERING.md) ·
   Benchmarks: [correctness under failure](benchmarks/failure-correctness.md)

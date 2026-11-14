@@ -16,7 +16,7 @@ import (
 func testDeps(billing BillingRunner) Deps {
 	n := noJobs{}
 	return Deps{
-		Billing: billing, Customers: n, Subs: n, Trials: n, Pauses: n,
+		Billing: billing, Customers: n, Trials: n, Pauses: n,
 		Tax: n, Relief: n, Credits: n, Dunning: n, Audit: n,
 		PassDeadline: CatchupPassDeadline,
 	}
@@ -36,9 +36,6 @@ func (noJobs) ScanThresholdsForClock(context.Context, string, string, int) (int,
 	return 0, nil
 }
 func (noJobs) ListByTestClockID(context.Context, string, string, int, int) ([]domain.Customer, int, error) {
-	return nil, 0, nil
-}
-func (noJobs) ListByTestClock(context.Context, string, string, int, int) ([]domain.Subscription, int, error) {
 	return nil, 0, nil
 }
 func (noJobs) ProcessExpiredTrialsForClock(context.Context, string, string, time.Time) (int, []error) {
@@ -67,7 +64,6 @@ func TestNewService_RefusesAMissingDependency(t *testing.T) {
 	cases := map[string]func(*Deps){
 		"Deps.Billing":      func(d *Deps) { d.Billing = nil },
 		"Deps.Customers":    func(d *Deps) { d.Customers = nil },
-		"Deps.Subs":         func(d *Deps) { d.Subs = nil },
 		"Deps.Trials":       func(d *Deps) { d.Trials = nil },
 		"Deps.Pauses":       func(d *Deps) { d.Pauses = nil },
 		"Deps.Tax":          func(d *Deps) { d.Tax = nil },
