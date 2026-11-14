@@ -50,7 +50,7 @@ In place:
 
 - **Account isolation:** row-level security on most API requests; the exceptions are listed in [Architecture](docs/architecture.md#design-rules). Hardcount refuses to start if its request-time database user can bypass it.
 - **Secrets at rest:** AES-256-GCM encryption for Stripe keys, webhook signing secrets and customer personal data, required in production; an HMAC blind index (a keyed hash) to find a customer by email without storing the address in plain text.
-- **Credentials:** passwords as bcrypt (cost 12); sessions, API keys and one-time tokens stored only as SHA-256 hashes.
+- **Credentials:** passwords as bcrypt (cost 12); sessions and one-time tokens stored only as SHA-256 hashes, and API keys as salted SHA-256 hashes.
 - **Sign-in** ([who can sign in](docs/production-one-vm.md#who-can-sign-in-to-the-dashboard)):
   - about 30,000 common leaked passwords are refused when a password is set;
   - repeated wrong passwords slow down instead of locking the account;

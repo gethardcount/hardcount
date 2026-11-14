@@ -34,6 +34,10 @@ follows.
   access to one account and stays on your server. A usage-only key
   (`hc_ingest_`, `ingest` in the API) can only send usage events, for
   LiteLLM or another gateway. [More](api-keys.md)
+- **API key status (active, expired, revoked)**: Whether a key works. A
+  revoked key is revoked for good; otherwise a key is expired from its
+  `expires_at` on, and active until then. Only an active key works or can be
+  rotated. The API returns it as `status`. [More](api-keys.md#a-keys-status)
 
 ## Pricing and usage
 

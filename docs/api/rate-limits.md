@@ -30,7 +30,9 @@ After that, one request's allowance comes back every period ÷ limit: every
 60 ms at 1,000 a minute, every second at 60 a minute.
 
 **A request with a bad key is refused before it is counted.** It gets `401`
-(see [Authentication](authentication.md#when-a-key-is-refused)).
+(see [Authentication](authentication.md#when-a-key-is-refused)). Nothing in
+Hardcount limits repeated bad keys from one address; if you need that, put
+the limit in front of Hardcount, in your load balancer or proxy.
 
 ## The headers
 
