@@ -276,29 +276,37 @@ func (s *Service) SetAuditLogger(a AuditEmitter) { s.audit = a }
 // dated weeks before the invoice it credits.
 func (s *Service) SetResolver(r clock.Resolver) { s.resolver = r }
 
+// decideForInvoice decides a Stripe event's write from the invoice it
+// belongs to: the invoice's clock, or real time for one on no clock. In live
+// mode it does nothing: no live record is on a test clock. An event with no
+// mode on its ctx is a fault and is refused, as the payment events are. A
+// failure is clock.ErrUndecided, which the webhook delivers again.
+func (s *Service) decideForInvoice(ctx context.Context, tenantID, invoiceID string) (context.Context, error) {
+	if s.liveOrUnwired(ctx) {
+		return ctx, nil
+	}
+	if _, err := postgres.Livemode(ctx); err != nil {
+		return ctx, fmt.Errorf("%w: the event's context has no mode", clock.ErrUndecided)
+	}
+	return clock.Decide(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
+}
+
+// liveOrUnwired reports whether a Stripe event's write decides nothing: in
+// live mode, or with no resolver, which only narrow unit tests build
+// (NewServer always wires the engine).
+func (s *Service) liveOrUnwired(ctx context.Context) bool {
+	if s.resolver == nil {
+		return true
+	}
+	live, err := postgres.Livemode(ctx)
+	return err == nil && live
+}
+
 // bindForInvoice pins ctx to the source invoice's effective-now, so every
 // clock.Now(ctx) below — the credit_note row, its line items, the credit-ledger
 // grant, amount_due relief — lands in the invoice's own time domain. Mirrors
 // invoice.Service.bindForInvoice. Unresolvable pin or unwired resolver leaves
 // ctx untouched (wall-clock), which is correct for a non-simulated invoice.
-// decideForInvoice decides a Stripe event's write from the invoice it
-// belongs to (test-clock step 3): the invoice's clock, or real time. In live
-// mode it does nothing: no live record is on a test clock. A failure is
-// clock.ErrUndecided, which the webhook delivers again.
-func (s *Service) decideForInvoice(ctx context.Context, tenantID, invoiceID string) (context.Context, error) {
-	if !s.decidesTime(ctx) {
-		return ctx, nil
-	}
-	return clock.Decide(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
-}
-
-// decidesTime reports whether a Stripe event's write decides its time: in
-// test mode, or with no mode on ctx, when a resolver is wired.
-func (s *Service) decidesTime(ctx context.Context) bool {
-	live, err := postgres.Livemode(ctx)
-	return s.resolver != nil && (err != nil || !live)
-}
-
 func (s *Service) bindForInvoice(ctx context.Context, tenantID, invoiceID string) context.Context {
 	if s.resolver == nil || invoiceID == "" {
 		return ctx
@@ -2699,7 +2707,7 @@ func (s *Service) ApplyRefundWebhook(ctx context.Context, tenantID, stripeRefund
 	// The write decides its time from the credit note's invoice, right after
 	// the store finds the note; live mode reads nothing for it.
 	var decide DecideForInvoice
-	if s.decidesTime(ctx) {
+	if !s.liveOrUnwired(ctx) {
 		decide = func(ctx context.Context, invoiceID string) (context.Context, error) {
 			ctx, err := s.decideForInvoice(ctx, tenantID, invoiceID)
 			if err != nil {

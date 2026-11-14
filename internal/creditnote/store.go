@@ -9,8 +9,7 @@ import (
 )
 
 // DecideForInvoice decides a write's time from the invoice the record it
-// writes belongs to (test-clock step 3), returning the ctx that carries the
-// decision.
+// writes belongs to, returning the ctx that carries the decision.
 type DecideForInvoice func(ctx context.Context, invoiceID string) (context.Context, error)
 
 type Store interface {
