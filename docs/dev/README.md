@@ -4,7 +4,7 @@ For people changing Hardcount. To use or run it, see [docs/README.md](../README.
 
 ## Read in this order
 
-1. [CONTRIBUTING](../../CONTRIBUTING.md): set up, test, open a pull request.
+1. [CONTRIBUTING](../../CONTRIBUTING.md): what we accept, set up, test, open a pull request.
 2. [How Hardcount is built](../ENGINEERING.md): the principles.
 3. [Architecture](../architecture.md): the packages and design rules.
 4. [Code standard](code-standard.md) and [Code comments](code-comments.md).
