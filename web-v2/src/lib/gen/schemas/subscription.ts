@@ -147,9 +147,8 @@ export interface Subscription {
   /**
      * The current period as text, with the last day included, in your
      * account's billing time zone, for example "Oct 1, 2026 – Oct 31,
-     * 2026". Absent when the subscription has no current period, when
-     * the time zone could not be read, and on the rows of
-     * `GET /v1/test-clocks/{id}/subscriptions`.
+     * 2026". Absent when the subscription has no current period, or when
+     * the time zone could not be read.
      */
   current_billing_period_display?: string;
   /**

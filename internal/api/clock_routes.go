@@ -188,7 +188,6 @@ var clockRoutes = map[routeKey]clockDecl{
 	{"POST", "/v1/test-clocks/{id}/advance"}:       realTime(),
 	{"POST", "/v1/test-clocks/{id}/retry-advance"}: realTime(),
 	{"GET", "/v1/test-clocks/{id}/customers"}:      realTime(),
-	{"GET", "/v1/test-clocks/{id}/subscriptions"}:  realTime(),
 	// Bills the tenant's due subscriptions, which never include a clock's.
 	{"POST", "/v1/billing/run"}: realTime(),
 

@@ -182,8 +182,6 @@ import type {
   ListSubscriptionsParams,
   ListTestClockCustomers200,
   ListTestClockCustomersParams,
-  ListTestClockSubscriptions200,
-  ListTestClockSubscriptionsParams,
   ListTestClocks200,
   ListTestClocksParams,
   ListUsageEvents200,
@@ -13370,125 +13368,6 @@ export const useDeleteTestClock = <TError = InvalidBodyResponse | UnauthorizedRe
       > => {
       return useMutation(getDeleteTestClockMutationOptions(options), queryClient);
     }
-
-export const getListTestClockSubscriptionsUrl = (id: string,
-    params?: ListTestClockSubscriptionsParams,) => {
-  const normalizedParams = new URLSearchParams();
-
-  Object.entries(params || {}).forEach(([key, value]) => {
-
-    if (value !== undefined) {
-      normalizedParams.append(key, value === null ? 'null' : String(value))
-    }
-  });
-
-  const stringifiedParams = normalizedParams.toString();
-
-  return stringifiedParams.length > 0 ? `/v1/test-clocks/${id}/subscriptions?${stringifiedParams}` : `/v1/test-clocks/${id}/subscriptions`
-}
-
-/**
- * Lists the subscriptions that run on the clock: those of the
- * customers attached to it, oldest first. The rows carry no
- * `current_billing_period_display`. Test mode only.
- * @summary List a test clock's subscriptions
- */
-export const listTestClockSubscriptions = async (id: string,
-    params?: ListTestClockSubscriptionsParams, options?: RequestInit): Promise<ListTestClockSubscriptions200> => {
-
-  return orvalClient<ListTestClockSubscriptions200>(getListTestClockSubscriptionsUrl(id,params),
-  {
-    ...options,
-    method: 'GET'
-
-
-  }
-);}
-
-
-
-
-
-export const getListTestClockSubscriptionsQueryKey = (id: string,
-    params?: ListTestClockSubscriptionsParams,) => {
-    return [
-    `/v1/test-clocks/${id}/subscriptions`, ...(params ? [params] : [])
-    ] as const;
-    }
-
-
-export const getListTestClockSubscriptionsQueryOptions = <TData = Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(id: string,
-    params?: ListTestClockSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
-) => {
-
-const {query: queryOptions, request: requestOptions} = options ?? {};
-
-  const queryKey =  queryOptions?.queryKey ?? getListTestClockSubscriptionsQueryKey(id,params);
-
-
-
-    const queryFn: QueryFunction<Awaited<ReturnType<typeof listTestClockSubscriptions>>> = () => listTestClockSubscriptions(id,params, requestOptions);
-
-
-
-
-
-   return  { queryKey, queryFn, enabled: id !== null && id !== undefined, ...queryOptions} as UseQueryOptions<Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError, TData> & { queryKey: DataTag<QueryKey, TData, TError> }
-}
-
-export type ListTestClockSubscriptionsQueryResult = NonNullable<Awaited<ReturnType<typeof listTestClockSubscriptions>>>
-export type ListTestClockSubscriptionsQueryError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse
-
-
-export function useListTestClockSubscriptions<TData = Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
- id: string,
-    params: undefined |  ListTestClockSubscriptionsParams, options: { query:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError, TData>> & Pick<
-        DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listTestClockSubscriptions>>,
-          TError,
-          Awaited<ReturnType<typeof listTestClockSubscriptions>>
-        > , 'initialData'
-      >, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  DefinedUseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListTestClockSubscriptions<TData = Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
- id: string,
-    params?: ListTestClockSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError, TData>> & Pick<
-        UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof listTestClockSubscriptions>>,
-          TError,
-          Awaited<ReturnType<typeof listTestClockSubscriptions>>
-        > , 'initialData'
-      >, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-export function useListTestClockSubscriptions<TData = Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
- id: string,
-    params?: ListTestClockSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
-  ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> }
-/**
- * @summary List a test clock's subscriptions
- */
-
-export function useListTestClockSubscriptions<TData = Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError = UnauthorizedResponse | Error | InvalidPageResponse | RateLimitedResponse>(
- id: string,
-    params?: ListTestClockSubscriptionsParams, options?: { query?:Partial<UseQueryOptions<Awaited<ReturnType<typeof listTestClockSubscriptions>>, TError, TData>>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient
- ):  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> } {
-
-  const queryOptions = getListTestClockSubscriptionsQueryOptions(id,params,options)
-
-  const query = useQuery(queryOptions, queryClient) as  UseQueryResult<TData, TError> & { queryKey: DataTag<QueryKey, TData, TError> };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
-
-
-
-
-
-
 
 export const getAdvanceTestClockUrl = (id: string,) => {
 

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { genericStatus, subscriptionStatus } from '@/lib/statusLabels'
+import { genericStatus } from '@/lib/statusLabels'
 import { StatusBadge as StatusPill } from '@/components/StatusBadge'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { Link, useNavigate, useParams } from 'react-router-dom'
@@ -143,16 +143,10 @@ export default function TestClockDetailPage() {
     refetchInterval: q => (q.state.data?.status === 'advancing' ? 1500 : false),
   })
 
-  const subsQ = useQuery({
-    queryKey: ['test-clocks', id, 'subscriptions'],
-    queryFn: () => api.listSubscriptionsOnClock(id!),
-    enabled: !!id && !!user && !user.livemode,
-  })
-
   // ADR-027: customer-level attach. Detail page mirrors Stripe's
   // "attached customers" surface — operators primarily think in
-  // customers (a simulation is a customer's simulated timeline),
-  // not subs. Subs remain visible below for drill-down.
+  // customers (a simulation is a customer's simulated timeline); each
+  // customer's page lists its subscriptions.
   const customersQ = useQuery({
     queryKey: ['test-clocks', id, 'customers'],
     queryFn: () => api.listAttachedCustomers(id!),
@@ -160,7 +154,6 @@ export default function TestClockDetailPage() {
   })
 
   const clock = clockQ.data
-  const subs = subsQ.data?.data ?? []
   const attachedCustomers = customersQ.data?.data ?? []
 
   // Only this page polls the clock while it advances. When the poll sees the
@@ -370,50 +363,9 @@ export default function TestClockDetailPage() {
         )}
       </div>
 
-      {/* Subscriptions on this clock — drill-down view; same data
-          as the customers list but at sub granularity for operators
-          tracking specific billing cycles. */}
-      <div className="mt-8">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-foreground">Subscriptions on this clock</h2>
-          <p className="text-xs text-muted-foreground">{subs.length} attached</p>
-        </div>
-        {subsQ.isLoading ? (
-          <Card><CardContent className="p-8 text-center text-sm text-muted-foreground">Loading…</CardContent></Card>
-        ) : subs.length === 0 ? (
-          <Card>
-            <CardContent className="p-8 text-center">
-              <p className="text-sm text-muted-foreground">No subscriptions yet — create one for an attached customer above.</p>
-            </CardContent>
-          </Card>
-        ) : (
-          <div className="space-y-2">
-            {subs.map(s => (
-              <Link key={s.id} to={`/subscriptions/${s.id}`}>
-                <Card className="hover:bg-accent/30 transition-colors">
-                  <CardContent className="px-6 py-3 flex items-center gap-4">
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <p className="text-sm font-medium text-foreground truncate">{s.display_name || s.code}</p>
-                        <StatusPill status={subscriptionStatus(s)} />
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-0.5 font-mono">{s.id}</p>
-                    </div>
-                    <div className="text-xs text-muted-foreground shrink-0 text-right">
-                      {s.next_billing_at ? <>Next bill: {formatDateTime(s.next_billing_at)}</> : 'No next-bill'}
-                    </div>
-                  </CardContent>
-                </Card>
-              </Link>
-            ))}
-          </div>
-        )}
-      </div>
-
       {showAdvance && (
         <AdvanceClockDialog
           clock={clock}
-          subs={subs}
           customerCount={attachedCustomers.length}
           onClose={() => setShowAdvance(false)}
         />
@@ -424,25 +376,14 @@ export default function TestClockDetailPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete test clock?</AlertDialogTitle>
             <AlertDialogDescription>
-              {attachedCustomers.length > 0 || subs.length > 0 ? (
+              {attachedCustomers.length > 0 ? (
                 <>
-                  This permanently deletes the clock and everything in its sandbox
-                  {attachedCustomers.length > 0 && (
-                    <> — {attachedCustomers.length === 1 ? '1 customer' : `${attachedCustomers.length} customers`}
-                    {subs.length > 0 && (
-                      <> and {subs.length === 1 ? 'their subscription' : `their ${subs.length} subscriptions`}</>
-                    )}</>
-                  )}
-                  {attachedCustomers.length === 0 && subs.length > 0 && (
-                    <> — {subs.length === 1 ? '1 subscription' : `${subs.length} subscriptions`}</>
-                  )}
-                  {' '}— along with every simulated invoice, usage record, and credit created on it.
-                  This can't be undone; real data is never touched.
+                  This permanently deletes the clock and{' '}
+                  {attachedCustomers.length === 1 ? 'its 1 customer' : `its ${attachedCustomers.length} customers`}, with
+                  their subscriptions, invoices, usage and credits. This can&apos;t be undone. Live data is not touched.
                 </>
               ) : (
-                <>
-                  This permanently deletes the clock. No customers or subscriptions are pinned to it; nothing else is affected.
-                </>
+                <>This permanently deletes the clock. No customers are on it.</>
               )}
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -458,16 +399,12 @@ export default function TestClockDetailPage() {
   )
 }
 
-type Sub = NonNullable<ReturnType<typeof api.listSubscriptionsOnClock> extends Promise<{ data: infer T }> ? T : never>[number]
-
 function AdvanceClockDialog({
   clock,
-  subs,
   customerCount,
   onClose,
 }: {
   clock: TestClock
-  subs: Sub[]
   customerCount: number
   onClose: () => void
 }) {
@@ -540,7 +477,7 @@ function AdvanceClockDialog({
 
   // Soft hint — surfaced when the jump is large but still inside the
   // +1y cap. Reminds the operator catchup will close many cycles.
-  const overlongWarning = subs.length > 0 && targetIso !== null && !exceedsMaxWindow && (() => {
+  const overlongWarning = customerCount > 0 && targetIso !== null && !exceedsMaxWindow && (() => {
     const jumpMs = new Date(targetIso).getTime() - new Date(clock.frozen_time).getTime()
     return jumpMs > 31 * 24 * 60 * 60 * 1000
   })()
@@ -585,8 +522,7 @@ function AdvanceClockDialog({
             <strong className="text-foreground">
               {customerCount === 1 ? '1 customer' : `all ${customerCount} customers`}
             </strong>{' '}
-            ({subs.length === 1 ? '1 subscription' : `${subs.length} subscriptions`}) on this
-            clock, and runs the billing each of them was due in the skipped days.
+            on this clock, and runs the billing each of them was due in the skipped days.
           </DialogDescription>
         </DialogHeader>
 

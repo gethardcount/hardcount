@@ -54,6 +54,9 @@ func TestRemovedRoutes_AnswerNotFound(t *testing.T) {
 		"items":        []map[string]any{{"plan_id": planID, "quantity": 1}},
 		"billing_time": "anniversary",
 	}).want(t, 201, "create subscription").body, "id")
+	clockID := flowStr(call("POST", "/v1/test-clocks", map[string]any{
+		"name": "Removed Routes Clock", "frozen_time": "2026-01-01T00:00:00Z",
+	}).want(t, 201, "create test clock").body, "id")
 
 	// An outbound event for the two webhook cases. Events reach the table
 	// through the outbox worker, which this server does not run, so the
@@ -103,6 +106,11 @@ func TestRemovedRoutes_AnswerNotFound(t *testing.T) {
 			name:   "customer invoice sub-list",
 			method: "GET", path: "/v1/customers/" + customerID + "/invoices",
 			keptMethod: "GET", kept: "/v1/invoices?customer_id=" + customerID,
+		},
+		{
+			name:   "test clock subscription list",
+			method: "GET", path: "/v1/test-clocks/" + clockID + "/subscriptions",
+			keptMethod: "GET", kept: "/v1/test-clocks/" + clockID + "/customers",
 		},
 		{
 			name:   "customer subscription sub-list",

@@ -630,7 +630,6 @@ export const api = {
   deleteTestClock: (id: string) =>
     apiRequest<{ status: string }>('DELETE', `/test-clocks/${id}`),
   listAttachedCustomers: (id: string) => listAll<Customer>(`/test-clocks/${id}/customers`),
-  listSubscriptionsOnClock: (id: string) => listAll<Subscription>(`/test-clocks/${id}/subscriptions`),
 
   // API Keys
   listApiKeys: () => listAll<APIKey>('/api-keys'),
