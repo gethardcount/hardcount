@@ -2,12 +2,16 @@ package dunning_test
 
 import (
 	"context"
+	"errors"
+	"slices"
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/dunning"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -77,7 +81,7 @@ func TestListDueRunsForClock_ReturnsARunWhoseInvoiceIsHeld(t *testing.T) {
 			t.Fatalf("hold the %s: %v", held.name, err)
 		}
 		listCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		due, err := dunning.NewPostgresStore(db).ListDueRunsForClock(listCtx, tenantID, clockID, frozen, 50)
+		due, err := dunning.NewPostgresStore(db).ListDueRunsForClock(listCtx, tenantID, clockID, frozen, walk.Key{}, 50)
 		cancel()
 		postgres.Rollback(holder)
 		if err != nil {
@@ -113,8 +117,9 @@ func TestProcessDueRunsForClock_RunsThatStayListed(t *testing.T) {
 	runCtx, cancel := context.WithTimeout(ctx, time.Minute)
 	defer cancel()
 	done := make(chan struct{})
+	var errs []error
 	go func() {
-		_, _ = svc.ProcessDueRunsForClock(runCtx, tenantID, clockID, frozen, 50)
+		_, errs = svc.ProcessDueRunsForClock(runCtx, tenantID, clockID, frozen, 50)
 		close(done)
 	}()
 	select {
@@ -124,5 +129,40 @@ func TestProcessDueRunsForClock_RunsThatStayListed(t *testing.T) {
 	}
 	if retrier.calls != 3 {
 		t.Errorf("retries = %d, want 3: each run once", retrier.calls)
+	}
+	// Each is left for the next run, so the advance fails.
+	if len(errs) != 3 {
+		t.Fatalf("errors = %v, want 3", errs)
+	}
+	for _, err := range errs {
+		if !errors.Is(err, domain.ErrLeftForNextRun) {
+			t.Errorf("error %v: want ErrLeftForNextRun", err)
+		}
+	}
+}
+
+// The clock's due list pages by (next_action_at, id): one run a page reaches
+// each run once, in that order, though all three are due at the same instant.
+func TestListDueRunsForClock_PagesByNextActionAtThenID(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := "tnt_clock_due_pages"
+	const clockID = "hc_tclk_due_pages"
+	frozen := seedClockDueRuns(t, db, ctx, tenantID, clockID)
+	store := dunning.NewPostgresStore(db)
+
+	list := func(ctx context.Context, after walk.Key, limit int) ([]domain.InvoiceDunningRun, error) {
+		return store.ListDueRunsForClock(ctx, tenantID, clockID, frozen, after, limit)
+	}
+	key := func(r domain.InvoiceDunningRun) walk.Key { return walk.Key{At: *r.NextActionAt, ID: r.ID} }
+	var got []string
+	for run, err := range walk.Walk(ctx, "ListDueRunsForClock", list, key, 1) {
+		if err != nil {
+			t.Fatalf("walk: %v", err)
+		}
+		got = append(got, run.ID)
+	}
+	if want := []string{"run_due_held_1", "run_due_held_2", "run_due_held_3"}; !slices.Equal(got, want) {
+		t.Errorf("walked %v, want %v", got, want)
 	}
 }

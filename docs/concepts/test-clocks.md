@@ -94,6 +94,13 @@ Outside a clock, a later billing run does the same work (hourly, or every 5
 minutes when `APP_ENV` is `local`). A card decline is not a failure: the
 invoice goes to dunning.
 
+Payment retries work the same way. A retry that gets no definite answer
+from Stripe is not counted as an attempt, and on a clock it stops the move
+at `internal_failure`; Retry advance tries it again. One move takes each
+dunning run through every step due in it (retries, the final actions, the
+wait for an invoice's grace period), up to 50 steps a run. A run still due
+after that, or one that stops moving, also stops the move.
+
 A clock has no invoice grace period: moving past a period's end makes its
 invoice at once.
 

@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/walk"
 )
 
 type Store interface {
@@ -98,8 +99,9 @@ type Store interface {
 	// ListDueRunsForClock is the catchup-path counterpart to ListDueRuns.
 	// ADR-029 Phase 5: clock-pinned dunning advances fire only on
 	// operator Advance, against the clock's frozen_time, never on the
-	// wall-clock cron tick.
-	ListDueRunsForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time, limit int) ([]domain.InvoiceDunningRun, error)
+	// wall-clock cron tick. It returns up to limit due runs after the key,
+	// in (next_action_at, id) order, for walk.Walk.
+	ListDueRunsForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time, after walk.Key, limit int) ([]domain.InvoiceDunningRun, error)
 
 	// Events
 	CreateEvent(ctx context.Context, tenantID string, event domain.InvoiceDunningEvent) (domain.InvoiceDunningEvent, error)

@@ -13,6 +13,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/activity"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/scheduler"
+	"github.com/gethardcount/hardcount/internal/platform/walk"
 )
 
 // RetryError is the adapter's decline wrapper: it carries the Stripe
@@ -479,33 +480,22 @@ func (s *Service) ProcessDueRuns(ctx context.Context, tenantID string, limit int
 	if err != nil {
 		return 0, []error{fmt.Errorf("list due runs: %w", err)}
 	}
-	return s.processRunsBatch(ctx, tenantID, dueRuns, false /* wall-clock cron */)
+	processed, errs := s.processRunsBatch(ctx, tenantID, dueRuns, false /* wall-clock cron */)
+	kept := errs[:0]
+	for _, err := range errs {
+		// The next tick retries it; the run is as it was before this one.
+		if errors.Is(err, domain.ErrLeftForNextRun) {
+			slog.InfoContext(ctx, "dunning retry left for the next tick", "tenant_id", tenantID, "error", err)
+			continue
+		}
+		kept = append(kept, err)
+	}
+	return processed, kept
 }
 
-// ProcessDueRunsForClock is the catchup-path counterpart. ADR-029
-// Phase 5: clock-pinned dunning runs advance only on operator Advance,
-// against the clock's frozen_time. The dunning state machine itself
-// (processRun) is identical between paths — only the candidate-fetch
-// scope differs.
-//
-// Loops until ListDueRunsForClock returns zero rows or the safety cap
-// hits — required because one run can advance through multiple retries
-// in a single Advance click. Pre-fix, a single batch only fired the
-// retry that was due at query time; the new next_action_at written
-// by processRun was never re-queried, so the operator saw at most
-// one retry per click even when several were due in the simulated
-// window. Stripe Test Clocks parity: one Advance walks every
-// time-driven action to completion.
-//
-// The re-query is bounded by:
-//   - maxDunningCatchupIters: prevents pathological infinite loops if
-//     processRun leaves a run in a non-progressing state (e.g.
-//     persistent transient skip that rewinds attempt_count without
-//     advancing next_action_at — would otherwise yield the same row
-//     every iteration).
-//   - Per-iteration progress check: if a run reappears with the same
-//     attempt_count it had on the previous iteration, it didn't
-//     advance — bail to avoid spinning.
+// maxDunningCatchupIters is the most rounds a clock's dunning job runs in
+// one advance (ProcessDueRunsForClock): each round takes a due run one step,
+// so it is also the most steps one run takes.
 const maxDunningCatchupIters = 50
 
 // exhaustLease is how long a run whose retries are exhausted stays hidden from
@@ -595,48 +585,74 @@ func (s *Service) finalRetryFailedAt(ctx context.Context, tenantID string, run d
 	return at
 }
 
+// ProcessDueRunsForClock is the catchup-path counterpart to ProcessDueRuns
+// (ADR-029 Phase 5): a clock's runs move only when the clock advances,
+// against its frozen_time, through the same step (processRun).
+//
+// One advance can take a run through several steps (retries, the final
+// actions, a grace wait), so the job works in rounds. Each round walks
+// every due run by (next_action_at, id) and takes each one a step, except a
+// run that has not moved since its last step: its attempt count and
+// next_action_at are as that step left them. The job ends when a round
+// finds nothing due. It fails, so the advance fails and Retry advance goes
+// on from there:
+//   - after a round in which a step returned an error;
+//   - when a round finds only runs that have not moved: no progress;
+//   - when runs are still due after maxDunningCatchupIters rounds.
+//
+// The last two are work left for the next run (domain.ErrLeftForNextRun).
 func (s *Service) ProcessDueRunsForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time, limit int) (int, []error) {
 	if limit <= 0 {
 		limit = 20
 	}
-	total := 0
-	var allErrs []error
-	seen := make(map[string]int) // run_id → last-iteration attempt_count
-	for iter := range maxDunningCatchupIters {
-		if err := ctx.Err(); err != nil {
-			return total, append(allErrs, fmt.Errorf("dunning catchup ctx done: %w", err))
-		}
-		dueRuns, err := s.store.ListDueRunsForClock(ctx, tenantID, clockID, frozenTime, limit)
-		if err != nil {
-			return total, append(allErrs, fmt.Errorf("list due runs for clock %s: %w", clockID, err))
-		}
-		if len(dueRuns) == 0 {
-			return total, allErrs
-		}
-		if iter > 0 {
-			anyProgress := false
-			for _, r := range dueRuns {
-				if r.AttemptCount > seen[r.ID] {
-					anyProgress = true
-					break
-				}
-			}
-			if !anyProgress {
-				slog.Warn("dunning catchup loop made no progress — exiting",
-					"clock_id", clockID, "iter", iter, "remaining_due", len(dueRuns))
-				return total, allErrs
-			}
-		}
-		for _, r := range dueRuns {
-			seen[r.ID] = r.AttemptCount
-		}
-		n, errs := s.processRunsBatch(ctx, tenantID, dueRuns, true /* test-clock catchup */)
-		total += n
-		allErrs = append(allErrs, errs...)
+	list := func(ctx context.Context, after walk.Key, limit int) ([]domain.InvoiceDunningRun, error) {
+		return s.store.ListDueRunsForClock(ctx, tenantID, clockID, frozenTime, after, limit)
 	}
-	slog.Warn("dunning catchup loop hit safety cap — remaining runs deferred to next Advance",
-		"clock_id", clockID, "cap", maxDunningCatchupIters, "processed", total)
-	return total, allErrs
+	type place struct {
+		attempts int
+		next     int64 // next_action_at, in microseconds
+	}
+	lastStep := map[string]place{} // each run as its last step found it
+	total := 0
+	for round := 0; ; round++ {
+		var due []domain.InvoiceDunningRun
+		unmoved := 0
+		for run, err := range walk.Walk(ctx, "ListDueRunsForClock", list, dueRunKey, limit) {
+			if err != nil {
+				return total, []error{fmt.Errorf("list due runs for clock %s: %w", clockID, err)}
+			}
+			if prev, ok := lastStep[run.ID]; ok && prev == (place{run.AttemptCount, run.NextActionAt.UnixMicro()}) {
+				unmoved++
+				continue
+			}
+			due = append(due, run)
+		}
+		if len(due) == 0 {
+			if unmoved > 0 {
+				return total, []error{fmt.Errorf("dunning for clock %s: %d due runs have not moved since their last step: %w",
+					clockID, unmoved, domain.ErrLeftForNextRun)}
+			}
+			return total, nil
+		}
+		if round == maxDunningCatchupIters {
+			return total, []error{fmt.Errorf("dunning for clock %s: %d runs still due after %d rounds: %w",
+				clockID, len(due)+unmoved, maxDunningCatchupIters, domain.ErrLeftForNextRun)}
+		}
+		for _, run := range due {
+			lastStep[run.ID] = place{run.AttemptCount, run.NextActionAt.UnixMicro()}
+		}
+		n, errs := s.processRunsBatch(ctx, tenantID, due, true /* test-clock catchup */)
+		total += n
+		if len(errs) > 0 {
+			return total, errs
+		}
+	}
+}
+
+// dueRunKey is a run's place in the due list, which ListDueRunsForClock
+// orders by (next_action_at, id). A due run always has a next_action_at.
+func dueRunKey(run domain.InvoiceDunningRun) walk.Key {
+	return walk.Key{At: *run.NextActionAt, ID: run.ID}
 }
 
 // processRunsBatch is the shared per-run body of ProcessDueRuns and
@@ -885,9 +901,7 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 				"final_attempt", run.AttemptCount+1 >= retries, "error", err)
 		}
 		retryPanic.Repanic()
-		slog.Info("dunning retry skipped — no definite answer",
-			"run_id", run.ID, "invoice_id", run.InvoiceID)
-		return nil
+		return fmt.Errorf("retry run %s: no definite answer, so the attempt is not counted: %w: %w", run.ID, domain.ErrLeftForNextRun, retryErr)
 	}
 
 	// Below Stripe's minimum charge: Stripe refused the amount, not the card,
