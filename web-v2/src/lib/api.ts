@@ -9,6 +9,9 @@ import type { EmailSettingsStatus } from './emailSettings'
 // review. Type-only imports, so no runtime cycle with gen/ (whose client
 // delegates back to apiRequest here).
 import type { ListRecipes200 } from './gen/schemas/listRecipes200'
+import type { APIKey } from './gen/schemas/aPIKey'
+import type { APIKeyCreated } from './gen/schemas/aPIKeyCreated'
+import type { APIKeyRotation } from './gen/schemas/aPIKeyRotation'
 import type { RecipeDetail } from './gen/schemas/recipeDetail'
 import type { RecipePreviewResult } from './gen/schemas/recipePreviewResult'
 import type { RecipeInstance } from './gen/schemas/recipeInstance'
@@ -630,11 +633,11 @@ export const api = {
   listSubscriptionsOnClock: (id: string) => listAll<Subscription>(`/test-clocks/${id}/subscriptions`),
 
   // API Keys
-  listApiKeys: () => listAll<ApiKeyInfo>('/api-keys'),
-  createApiKey: (data: { name: string; key_type: string; expires_at?: string }) => apiRequest<{ key: ApiKeyInfo; raw_key: string }>('POST', '/api-keys', data),
-  revokeApiKey: (id: string) => apiRequest<ApiKeyInfo>('DELETE', `/api-keys/${id}`),
+  listApiKeys: () => listAll<APIKey>('/api-keys'),
+  createApiKey: (data: { name: string; key_type: string; expires_at?: string }) => apiRequest<APIKeyCreated>('POST', '/api-keys', data),
+  revokeApiKey: (id: string) => apiRequest<APIKey>('DELETE', `/api-keys/${id}`),
   rotateApiKey: (id: string, expires_in_seconds?: number) =>
-    apiRequest<{ old_key: ApiKeyInfo; new_key: ApiKeyInfo; raw_key: string }>(
+    apiRequest<APIKeyRotation>(
       'POST',
       `/api-keys/${id}/rotate`,
       expires_in_seconds !== undefined ? { expires_in_seconds } : undefined,
@@ -1798,17 +1801,6 @@ export interface WebhookDeliveryView {
 export interface WebhookDeliveriesResponse {
   root_event_id: string
   deliveries: WebhookDeliveryView[]
-}
-
-export interface ApiKeyInfo {
-  id: string
-  key_prefix: string
-  key_type: string
-  name: string
-  created_at: string
-  expires_at?: string
-  revoked_at?: string
-  last_used_at?: string
 }
 
 // Matches OverviewResponse in internal/analytics/overview.go. All money is

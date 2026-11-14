@@ -12,8 +12,8 @@ import {
 
 /**
  * Shows a secret the server returns once (a new API key, a webhook signing
- * secret). It closes only from "I've copied it": Esc, a click outside and a
- * close button used to dismiss it, and the secret was gone for good (B-08).
+ * secret). It closes only from "I've copied it", so Esc or a click outside
+ * cannot lose the secret by accident.
  */
 export function ShowOnceSecretDialog({ title, label, secret, children, onDone }: {
   title: string
@@ -35,7 +35,7 @@ export function ShowOnceSecretDialog({ title, label, secret, children, onDone }:
             <p className="text-xs font-medium text-muted-foreground">{label}</p>
             <div className="mt-1.5 flex items-start gap-2">
               <code className="flex-1 break-all select-all rounded bg-background px-2 py-1 font-mono text-sm text-foreground">{secret}</code>
-              <CopyButton text={secret} />
+              <CopyButton text={secret} name={`Copy ${label.toLowerCase()}`} />
             </div>
           </div>
           {children}
@@ -48,15 +48,22 @@ export function ShowOnceSecretDialog({ title, label, secret, children, onDone }:
   )
 }
 
-export function CopyButton({ text, label = 'Copy' }: { text: string; label?: string }) {
+// CopyButton copies text and says whether it worked. name is its accessible
+// name where a dialog has more than one; it starts with the visible "Copy".
+export function CopyButton({ text, label = 'Copy', name }: { text: string; label?: string; name?: string }) {
   return (
     <Button
       variant="outline"
       size="sm"
+      aria-label={name}
       className="shrink-0"
-      onClick={() => {
-        void navigator.clipboard.writeText(text)
-        toast.success('Copied to clipboard')
+      onClick={async () => {
+        try {
+          await navigator.clipboard.writeText(text)
+          toast.success('Copied to clipboard')
+        } catch {
+          toast.error("Couldn't copy. Select the text and copy it yourself.")
+        }
       }}
     >
       {label}
