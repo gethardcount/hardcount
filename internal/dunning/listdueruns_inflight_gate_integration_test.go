@@ -282,6 +282,7 @@ func TestListDueRunsForClock_SaysWhatHoldsEachRun(t *testing.T) {
 		{"inv_h_voided", "run_h_voided", "processing", "pi_sim_4", "voided", "active", due, false, clockID},
 		{"inv_h_failed", "run_h_failed", "failed", "", "finalized", "active", due, false, clockID},
 		{"inv_h_paid", "run_h_paid", "succeeded", "pi_sim_5", "paid", "resolved", due, false, clockID},
+		{"inv_h_paid_active", "run_h_paid_active", "succeeded", "pi_sim_8", "paid", "active", due, false, clockID},
 		{"inv_h_later", "run_h_later", "processing", "pi_sim_6", "finalized", "active", frozen.Add(time.Hour), false, clockID},
 		{"inv_h_paused", "run_h_paused", "processing", "pi_sim_7", "finalized", "active", due, true, clockID},
 		{"inv_h_other", "run_h_other", "failed", "", "finalized", "active", due, false, otherClockID},
@@ -337,9 +338,12 @@ func TestListDueRunsForClock_SaysWhatHoldsEachRun(t *testing.T) {
 		"run_h_voided": domain.ChargeClaimable,
 		// The control.
 		"run_h_failed": domain.ChargeClaimable,
+		// A paid invoice whose run is still active: no payment in flight, so
+		// it is listed and not held; its step resolves the run.
+		"run_h_paid_active": domain.ChargeClaimable,
 	}
 	if len(got) != len(want) {
-		t.Errorf("listed %v; want %v (not run_h_paid, run_h_later, run_h_paused or run_h_other)", got, want)
+		t.Errorf("listed %v; want %v (not run_h_paid, whose run is resolved, run_h_later, run_h_paused or run_h_other)", got, want)
 	}
 	for run, state := range want {
 		if s, ok := got[run]; !ok || s != state {

@@ -103,9 +103,17 @@ from Stripe is not counted as an attempt, and on a clock it stops the move
 at `internal_failure`; Retry advance tries it again. One move takes each
 dunning run through every step due in it (its retries, then the final
 actions), up to 50 steps a run. A final action that fails, a run still due
-after 50 steps, or one that stops moving also stops the move. A retry whose
-invoice an earlier charge attempt still holds waits for that attempt to
-finish; the move does not stop for it.
+after 50 steps, or one that stops moving also stops the move. So does a
+retry whose invoice has an earlier payment that has not finished (a charge
+whose result is not known yet, or one still being sent): it cannot be
+charged twice. Hardcount checks that payment on its next billing run
+(hourly by default); Retry advance once it is done, or void or write off
+the invoice to stop waiting.
+
+While a customer has an invoice's payment page open (up to about a day of
+real time, not clock time), that invoice's payment retries and final action
+wait, and the move does not stop for them. They run on the first move after
+the page is paid or closes.
 
 A clock has no invoice grace period: moving past a period's end makes its
 invoice at once.

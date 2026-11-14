@@ -592,18 +592,18 @@ func (s *Service) finalRetryFailedAt(ctx context.Context, tenantID string, run d
 // actions), so the job works in rounds. Each round walks every due run by
 // (next_action_at, id) and takes a step on each run nothing holds, except a
 // run its last step left as it found it (the same attempt count and
-// next_action_at as when that step began). A run held by an earlier charge
-// attempt of its invoice is not stepped, since the invoice cannot be charged
-// twice; nor is a run whose customer may be paying on the hosted page, a
-// payment the customer, not Hardcount, finishes.
+// next_action_at as when that step began). A run whose invoice has an
+// earlier payment that has not finished is not stepped, since the invoice
+// cannot be charged twice; nor is a run whose customer may be paying on the
+// hosted page, a payment the customer, not Hardcount, finishes.
 //
 // The job ends, in this order:
 //  1. with the errors of a round in which a step returned one, among them a
 //     retry with no definite answer and a final action that failed;
 //  2. when a round has nothing to step: with one error for the runs their
 //     last step left as they found them, if any, and one for each run an
-//     earlier charge attempt holds, all seen in that round's walk; with no
-//     error when there are none;
+//     earlier payment of its invoice holds, all seen in that round's walk;
+//     with no error when there are none;
 //  3. with an error when runs are still due after maxDunningCatchupRounds
 //     rounds.
 //
@@ -646,8 +646,8 @@ func (s *Service) ProcessDueRunsForClock(ctx context.Context, tenantID, clockID 
 			}
 			for _, run := range heldByAttempt {
 				left = append(left, &leftForNextPass{say: fmt.Sprintf(
-					"Invoice %s: a payment retry is waiting for an earlier charge attempt to finish: it cannot be charged twice. "+
-						"Hardcount checks that attempt on its next billing run (hourly by default). Retry advance once the attempt is done.", invoiceRef(run))})
+					"Invoice %s: a payment retry is waiting for an earlier payment of this invoice to finish: it cannot be charged twice. "+
+						"Hardcount checks it on its next billing run (hourly by default). Retry advance once it is done; to stop waiting, void or write off the invoice.", invoiceRef(run))})
 			}
 			return total, left
 		}
