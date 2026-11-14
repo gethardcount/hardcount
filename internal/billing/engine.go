@@ -1540,16 +1540,36 @@ func (e *Engine) effectiveNow(ctx context.Context, sub domain.Subscription) time
 // clock-less Sim over an inherited one for exactly this reason; read its guard
 // before changing either side.
 func (e *Engine) simForSub(ctx context.Context, sub domain.Subscription) clock.Sim {
+	sim, _ := e.clockOfSub(ctx, sub) // logged there; real time on an error
+	return sim
+}
+
+// clockOfSub is the time of the subscription's test clock, or real time when
+// it is on none. A clock that cannot be read is an error, logged here.
+func (e *Engine) clockOfSub(ctx context.Context, sub domain.Subscription) (clock.Sim, error) {
 	if sub.TestClockID == "" || e.testClocks == nil {
-		return clock.Sim{At: e.clock.Now(ctx)}
+		return e.realTime(ctx), nil
 	}
 	tc, err := e.testClocks.Get(ctx, sub.TenantID, sub.TestClockID)
 	if err != nil {
-		slog.Warn("test clock lookup failed, falling back to wall clock",
+		slog.WarnContext(ctx, "test clock lookup failed during clock resolution",
 			"subscription_id", sub.ID, "test_clock_id", sub.TestClockID, "error", err)
-		return clock.Sim{At: e.clock.Now(ctx)}
+		return e.realTime(ctx), fmt.Errorf("read test clock %s of subscription %s: %w", sub.TestClockID, sub.ID, err)
 	}
-	return clock.Sim{At: tc.FrozenTime, TestClockID: sub.TestClockID}
+	return clock.Sim{At: tc.FrozenTime, TestClockID: sub.TestClockID}, nil
+}
+
+// realTime is the answer for a record on no clock: the machine's time, never
+// a zero instant, since a caller may settle at it and write it as paid_at.
+// The resolvers return it alongside an error too.
+func (e *Engine) realTime(ctx context.Context) clock.Sim { return clock.Sim{At: e.clock.Now(ctx)} }
+
+// inLiveMode reports whether ctx is in live mode. No record there is on a
+// test clock (a database CHECK keeps clocks in test mode), so the resolvers
+// answer real time without reading anything.
+func inLiveMode(ctx context.Context) bool {
+	live, err := postgres.Livemode(ctx)
+	return err == nil && live
 }
 
 // SimForInvoice resolves the simulated-time context for any per-invoice
@@ -1567,14 +1587,16 @@ func (e *Engine) simForSub(ctx context.Context, sub domain.Subscription) clock.S
 // It also carries the clock id, which is what lets every audit emission
 // downstream of a pin resolution land on the sim axis (ADR-090 §5).
 //
-// Errors fall back to wall-clock with a warn — same safety stance as
-// simForSub: a dangling subscription / clock pointer can't stall an
-// operator-triggered retry. The fallback may stamp the wrong domain
-// for clock-pinned runs, but failing the operator's action is worse.
+// In live mode it answers real time and reads nothing. A record it cannot
+// read (the invoice, its subscription, its clock) is an error, with At still
+// the machine's time (realTime).
 func (e *Engine) SimForInvoice(ctx context.Context, tenantID, invoiceID string) (clock.Sim, error) {
+	if inLiveMode(ctx) {
+		return e.realTime(ctx), nil
+	}
 	inv, err := e.invoices.GetInvoice(ctx, tenantID, invoiceID)
 	if err != nil {
-		return clock.Sim{At: e.clock.Now(ctx)}, fmt.Errorf("get invoice for clock resolution: %w", err)
+		return e.realTime(ctx), fmt.Errorf("get invoice for clock resolution: %w", err)
 	}
 	if inv.SubscriptionID == "" {
 		// One-off invoice: customer may still be clock-pinned (ADR-027).
@@ -1582,23 +1604,27 @@ func (e *Engine) SimForInvoice(ctx context.Context, tenantID, invoiceID string) 
 	}
 	sub, err := e.subs.Get(ctx, tenantID, inv.SubscriptionID)
 	if err != nil {
-		slog.Warn("subscription lookup failed during clock resolution, falling back to wall clock",
+		slog.WarnContext(ctx, "subscription lookup failed during clock resolution",
 			"invoice_id", invoiceID, "subscription_id", inv.SubscriptionID, "error", err)
-		return clock.Sim{At: e.clock.Now(ctx)}, nil
+		return e.realTime(ctx), fmt.Errorf("get subscription %s of invoice %s for clock resolution: %w", inv.SubscriptionID, invoiceID, err)
 	}
-	return e.simForSub(ctx, sub), nil
+	return e.clockOfSub(ctx, sub)
 }
 
 // SimForSubscription resolves the simulated-time context for an
 // operator-triggered action on an existing subscription (Activate,
-// ChangeItem, etc.). Loads the sub, then delegates to simForSub.
-// Wall-clock fallback on error mirrors the other resolvers.
+// ChangeItem, etc.): the subscription's clock, or real time when it is on
+// none. In live mode it answers real time and reads nothing. A subscription
+// or clock it cannot read is an error, with At still the machine's time.
 func (e *Engine) SimForSubscription(ctx context.Context, tenantID, subscriptionID string) (clock.Sim, error) {
+	if inLiveMode(ctx) {
+		return e.realTime(ctx), nil
+	}
 	sub, err := e.subs.Get(ctx, tenantID, subscriptionID)
 	if err != nil {
-		return clock.Sim{At: e.clock.Now(ctx)}, fmt.Errorf("get subscription for clock resolution: %w", err)
+		return e.realTime(ctx), fmt.Errorf("get subscription for clock resolution: %w", err)
 	}
-	return e.simForSub(ctx, sub), nil
+	return e.clockOfSub(ctx, sub)
 }
 
 // SimForCustomer resolves the simulated-time context for an
@@ -1609,26 +1635,26 @@ func (e *Engine) SimForSubscription(ctx context.Context, tenantID, subscriptionI
 // is authoritative for any (yet-to-be-created or one-off) entity in
 // that customer's orbit.
 //
-// Wall-clock fallback when the engine isn't wired with a customer
-// reader (narrow unit tests) or when the customer / clock lookup
-// fails. Same safety stance as the other resolvers: never block an
-// operator action on a dangling pin.
+// In live mode it answers real time and reads nothing. A customer or clock
+// it cannot read is an error, with At still the machine's time. An engine
+// wired with no customer or clock reader (narrow unit tests) answers real
+// time.
 func (e *Engine) SimForCustomer(ctx context.Context, tenantID, customerID string) (clock.Sim, error) {
-	if e.customers == nil {
-		return clock.Sim{At: e.clock.Now(ctx)}, nil
+	if inLiveMode(ctx) || e.customers == nil {
+		return e.realTime(ctx), nil
 	}
 	cust, err := e.customers.Get(ctx, tenantID, customerID)
 	if err != nil {
-		return clock.Sim{At: e.clock.Now(ctx)}, fmt.Errorf("get customer for clock resolution: %w", err)
+		return e.realTime(ctx), fmt.Errorf("get customer for clock resolution: %w", err)
 	}
 	if cust.TestClockID == "" || e.testClocks == nil {
-		return clock.Sim{At: e.clock.Now(ctx)}, nil
+		return e.realTime(ctx), nil
 	}
 	tc, err := e.testClocks.Get(ctx, tenantID, cust.TestClockID)
 	if err != nil {
-		slog.Warn("test clock lookup failed during customer clock resolution, falling back to wall clock",
+		slog.WarnContext(ctx, "test clock lookup failed during customer clock resolution",
 			"customer_id", customerID, "test_clock_id", cust.TestClockID, "error", err)
-		return clock.Sim{At: e.clock.Now(ctx)}, nil
+		return e.realTime(ctx), fmt.Errorf("read test clock %s of customer %s: %w", cust.TestClockID, customerID, err)
 	}
 	return clock.Sim{At: tc.FrozenTime, TestClockID: cust.TestClockID}, nil
 }
