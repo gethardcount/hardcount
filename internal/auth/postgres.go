@@ -127,8 +127,9 @@ func (s *PostgresStore) Revoke(ctx context.Context, tenantID, id string) (domain
 	return k, nil
 }
 
-// ScheduleExpiry sets expires_at on a key that is not revoked, and returns
-// the updated row or errs.ErrNotFound.
+// ScheduleExpiry sets expires_at on a key that is not revoked to expiresAt,
+// or keeps the key's own expires_at if it is earlier, and returns the updated
+// row or errs.ErrNotFound.
 func (s *PostgresStore) ScheduleExpiry(ctx context.Context, tenantID, id string, expiresAt time.Time) (domain.APIKey, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -140,7 +141,7 @@ func (s *PostgresStore) ScheduleExpiry(ctx context.Context, tenantID, id string,
 	// revoked key makes no sense, and the predicate guards against a revoke
 	// and a rotate racing on the same row.
 	k, err := scanKey(tx.QueryRowContext(ctx, `
-		UPDATE api_keys SET expires_at = $1
+		UPDATE api_keys SET expires_at = LEAST(expires_at, $1)
 		WHERE id = $2 AND revoked_at IS NULL
 		RETURNING `+keyCols, expiresAt, id))
 	if err == sql.ErrNoRows {

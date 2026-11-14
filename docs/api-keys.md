@@ -96,14 +96,16 @@ may have leaked, or on a schedule.
 3. Put the new key in your servers' settings and redeploy before the time
    you picked.
    **You see:** your calls keep working. After that time, the old key gets
-   `401`.
+   `401`. A key that was already set to expire sooner stops at its own
+   time.
 
 Pick **Now** only if you can switch every server at once, or if the key has
 leaked. The new key keeps the old key's name, type and mode.
 
 With the API: `POST /v1/api-keys/{id}/rotate`, with an optional
 `{"expires_in_seconds": 86400}`. The default, `0`, stops the old key at
-once. The longest wait is 7 days (`604800`).
+once. The longest wait is 7 days (`604800`). A revoked or expired key
+cannot be rotated (`409`): create a new key instead.
 
 To turn a key off without a replacement, click **Revoke**, or call
 `DELETE /v1/api-keys/{id}`. It stops working at once.
