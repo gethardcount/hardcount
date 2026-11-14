@@ -35,7 +35,9 @@ const (
 	PermTestClockWrite Permission = "testclock:write"
 )
 
-// KeyType determines the prefix and permission set for an API key.
+// KeyType is a caller's kind of credential, which sets its permissions: a
+// stored key type (secret or ingest), or KeyTypeSession for a dashboard
+// session, which no key backs.
 type KeyType string
 
 const (
@@ -73,11 +75,8 @@ var keyPermissions = map[KeyType]map[Permission]bool{
 	KeyTypeIngest: {
 		PermUsageIngest: true,
 	},
-	// Dashboard sessions get the full secret-key permission set. Roles are
-	// recorded but, on purpose, not enforced (ADR-081). user_tenants.role
-	// records owner, admin or member for a later split, and every session
-	// still gets this full set. When role-scoped permissions are built, a
-	// per-role lookup on user_tenants.role replaces this map.
+	// Every dashboard session gets the full set: roles are recorded in
+	// user_tenants.role but not enforced (ADR-081).
 	KeyTypeSession: fullAccess,
 }
 

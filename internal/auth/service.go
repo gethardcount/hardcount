@@ -1,6 +1,7 @@
-// Package auth issues and validates API keys, decides what each key type may
-// do, and carries the authenticated principal (tenant, key, user and key
-// type) in the request context.
+// Package auth issues and validates API keys, decides what each kind of
+// credential may do, and carries the authenticated caller in the request
+// context: its tenant, its key or user, and its kind of credential (a stored
+// key type, or a dashboard session).
 package auth
 
 import (
@@ -44,13 +45,9 @@ type AuditWriter interface {
 
 // lastUsedTouchInterval is how often, at most, last_used_at is written for
 // one key. The column feeds "Last used 3 minutes ago" on the API-keys page and
-// nothing else. No auth decision reads it, so minute granularity is fine.
-//
-// It is not written on every request, because then every request of one key
-// would update the same row. A row lock passes to the next writer in about
-// one round trip (~1.75 ms within one availability zone). So one key could
-// not go past ~570 requests/s on any hardware, and more connections would
-// only add waiters.
+// no auth decision, so a minute is precise enough. Writing it on every request
+// would make every request of one key update the same row, one row lock at a
+// time.
 const lastUsedTouchInterval = time.Minute
 
 // NewService returns a Service on db that writes each key change's audit row
@@ -201,27 +198,23 @@ func (s *Service) checkMintAndInsert(ctx context.Context, tx *sql.Tx, tenantID s
 	if keyType == "" {
 		keyType = KeyTypeSecret
 	}
-	// Only the stored types can be issued (ADR-133). Each holds no more
-	// than the secret key or session that mints it (PermAPIKeyWrite), so
-	// key_type from the request body cannot raise the caller's access.
+	// Only the stored types can be issued (ADR-133). Each holds no more than
+	// the secret key or session that mints it, so key_type cannot raise the
+	// caller's access.
 	if keyType != KeyTypeSecret && keyType != KeyTypeIngest {
 		return CreateKeyResult{}, errs.Invalid("key_type", "must be one of: secret, ingest")
 	}
 
-	// Reject an expires_at in the past. A key that has already expired at
-	// creation is dead on arrival: every auth attempt fails with `api key
-	// expired`. Stripe also rejects a past expiry on credentials. API keys
-	// belong to the tenant and are used outside any customer's test clock
-	// (simulated time), so the wall clock is the right reference.
+	// A key that expires at or before now could never be used. Keys belong to
+	// the account, outside any customer's test clock, so the wall clock
+	// decides.
 	if input.ExpiresAt != nil && !input.ExpiresAt.After(time.Now().UTC()) {
 		return CreateKeyResult{}, errs.Invalid("expires_at",
 			"must be in the future — a key that expires at or before now is dead on arrival")
 	}
 
-	// The mode comes from the caller's ctx, as in Stripe: a test-mode key
-	// creates test-mode keys, and a live-mode key creates live ones. No path
-	// creates a key in the other mode. To switch mode, the caller must
-	// authenticate in that mode.
+	// A key is minted in the caller's mode: no path creates a key in the other
+	// mode.
 	livemode, err := postgres.Livemode(ctx)
 	if err != nil {
 		return CreateKeyResult{}, err
@@ -248,15 +241,12 @@ func (s *Service) checkMintAndInsert(ctx context.Context, tx *sql.Tx, tenantID s
 	return CreateKeyResult{Key: key, RawKey: rawKey}, nil
 }
 
-// ErrInvalidKey marks a definitive credential rejection: a bad format, no
-// matching key, a hash mismatch, or a key that is expired or revoked. Middlewares map it, and
-// only it, to the generic 401. Any other ValidateKey error means no verdict
-// was reached (a store or database failure), and it must surface as a
-// retryable 5xx. During a database outage, a 401 would tell every
-// integrator that their key went bad and to start rotating credentials,
-// which is false about the key (#560). A 503 for every caller reveals
-// nothing about any one key, so ADR-026's rule against key enumeration
-// holds.
+// ErrInvalidKey is a verdict that a credential is not valid: a bad format, no
+// matching key, a wrong secret, or a key that is expired or revoked. Callers
+// answer it, and only it, with the generic 401. Any other ValidateKey error
+// reached no verdict (a store failed) and is answered with a retryable 503:
+// a 401 would tell every caller to replace a key that is fine. The 503 says
+// nothing about any one key (ADR-026).
 var ErrInvalidKey = errors.New("invalid api key")
 
 // ValidateKey returns the key rawKey is, or ErrInvalidKey. rawKey must have a
@@ -296,9 +286,6 @@ func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey
 		return domain.APIKey{}, fmt.Errorf("api key %s: %w", key.Status, ErrInvalidKey)
 	}
 
-	// Write last_used_at, at most once per key per lastUsedTouchInterval, in
-	// the request. A failed write is logged and does not refuse the key: no
-	// auth decision reads the column.
 	now := time.Now().UTC()
 	if s.lastUsed.due(key.ID, now) {
 		if err := s.store.touchLastUsed(ctx, key.ID, now); err != nil {
@@ -329,11 +316,9 @@ func (s *Service) RevokeKey(ctx context.Context, tenantID, id string) (domain.AP
 	return key, nil
 }
 
-// MaxRotationGraceSeconds caps how long a caller can keep the old key alive
-// during a rotation. Seven days matches the longest grace window Stripe
-// offers in its dashboard "roll key" flow. It is long enough for a scheduled
-// deploy cycle, and short enough that a forgotten rotation still ends on its
-// own.
+// MaxRotationGraceSeconds caps how long a rotation keeps the old key working:
+// long enough for a scheduled deploy, short enough that a forgotten rotation
+// still ends on its own.
 const MaxRotationGraceSeconds = 7 * 24 * 60 * 60
 
 // RotateKeyInput sets how a rotation treats the old key. ExpiresInSeconds=0

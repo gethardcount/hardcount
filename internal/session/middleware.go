@@ -27,7 +27,7 @@ type unavailableError struct {
 func (e unavailableError) Error() string { return e.msg + ": " + e.err.Error() }
 func (e unavailableError) Unwrap() error { return e.err }
 
-// Authenticate resolves r's credentials to the principal's context. The
+// Authenticate resolves r's credentials to the caller's context. The
 // session cookie comes first and takes precedence when both are present, so a
 // browser tab with a stale Authorization header cannot bypass session
 // revocation by accident. A cookie that is present but not valid (an ended or
@@ -47,7 +47,7 @@ func Authenticate(r *http.Request, sessSvc *Service, keySvc *auth.Service) (cont
 		}
 		if !errors.Is(err, ErrNotFound) {
 			// A store failure is no verdict on the cookie, so it does not
-			// fall through to "missing credentials" (#560).
+			// fall through to "missing credentials".
 			return nil, unavailableError{msg: "session resolve unavailable", err: err}
 		}
 		// The cookie is present but invalid. Fall through to the API key, so
@@ -63,7 +63,7 @@ func Authenticate(r *http.Request, sessSvc *Service, keySvc *auth.Service) (cont
 		if errors.Is(err, auth.ErrInvalidKey) {
 			return nil, err
 		}
-		// An infrastructure failure, not a verdict on the credential (#560).
+		// A store failure, not a verdict on the credential.
 		return nil, unavailableError{msg: "api key validation unavailable", err: err}
 	}
 	ctx = auth.WithTenantID(ctx, key.TenantID)
@@ -105,11 +105,8 @@ func MiddlewareOrAPIKey(sessSvc *Service, keySvc *auth.Service) func(http.Handle
 func applyToCtx(ctx context.Context, s Session) context.Context {
 	ctx = auth.WithTenantID(ctx, s.TenantID)
 	ctx = auth.WithUserID(ctx, s.UserID)
-	// Requests on a session use the KeyTypeSession permission set (full
-	// operator access). Roles are recorded but not enforced (ADR-081):
-	// every member, the owner or an invited 'member', gets the same full
-	// set. When roles diverge, resolve the user's role from the
-	// user_tenants row here and pick a permission set per role.
+	// A session holds the KeyTypeSession permissions: roles are recorded but
+	// not enforced (ADR-081).
 	ctx = auth.WithKeyType(ctx, auth.KeyTypeSession)
 	ctx = postgres.WithLivemode(ctx, s.Livemode)
 	return ctx
