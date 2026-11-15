@@ -483,10 +483,10 @@ func replayExistingKey(w http.ResponseWriter, r *http.Request, db *postgres.DB, 
 		// caller or another request: answer 422 before anything else. The
 		// reservation stores the fingerprint, so this holds while the first
 		// request still runs too, and another caller never waits on it or
-		// learns how it ended. A row with no fingerprint matches nothing,
-		// since it cannot be shown to be this caller's.
-		if found && (len(c.Fingerprint) == 0 ||
-			subtle.ConstantTimeCompare(c.Fingerprint, fingerprint) != 1) {
+		// learns how it ended. A row with no fingerprint matches nothing: it
+		// cannot be shown to be this caller's, and the comparison is false
+		// for it, since a request's fingerprint is never empty.
+		if found && subtle.ConstantTimeCompare(c.Fingerprint, fingerprint) != 1 {
 			idempotencyError(w, r, http.StatusUnprocessableEntity, "idempotency_error",
 				"This Idempotency-Key was first used by another caller or with a different request. Use a new key for a new request.")
 			return
