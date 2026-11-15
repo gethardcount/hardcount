@@ -36,8 +36,8 @@ type SubscriptionLister interface {
 // domain.ComputeAmountCents — already exists in the engine's one rater
 // (rateUsageWindows, rate.go). This
 // service is a thin composition: customer existence → subscription
-// resolution → period resolution → defer to engine.previewWithWindow for
-// the actual line generation.
+// resolution → the subscription's time decided → period resolution → defer
+// to engine.previewWithWindow for the actual line generation.
 //
 // We deliberately compose against Engine (rather than reimplementing the
 // per-(meter, rule) walk here) so create_preview rates usage with the
@@ -88,8 +88,9 @@ type CreatePreviewRequest struct {
 // next billing event. Composition order:
 //  1. Customer existence (RLS makes cross-tenant IDs return ErrNotFound).
 //  2. Subscription resolution (explicit ID, or pick primary active sub).
-//  3. Period resolution (explicit window, or sub's current cycle).
-//  4. Defer to the engine: previewCycle (mirrors the cycle close) for the
+//  3. The subscription's time decided (its clock, or real time).
+//  4. Period resolution (explicit window, or sub's current cycle).
+//  5. Defer to the engine: previewCycle (mirrors the cycle close) for the
 //     default window, previewWithWindow for an explicit one.
 //
 // Returns a PreviewResult, the one wire shape the subscription page and the
@@ -110,10 +111,9 @@ func (s *PreviewService) CreatePreview(ctx context.Context, tenantID string, req
 	}
 
 	// The preview's time is decided from the subscription it previews
-	// (clock.DecideOrRealTime: the body names the customer, so the API's
-	// door left the request at real time): generated_at and every read below
-	// are at the subscription's clock time. A clock that cannot be read
-	// refuses the preview (503).
+	// (clock.DecideOrRealTime): the decision gives the preview its
+	// generated_at, and any later read of now, at the subscription's clock
+	// time. A clock that cannot be read refuses the preview (503).
 	ctx, err = clock.DecideOrRealTime(ctx, s.engine, clock.Pin{TenantID: tenantID, SubscriptionID: sub.ID})
 	if err != nil {
 		return PreviewResult{}, errs.Unavailable("test_clock_unavailable",

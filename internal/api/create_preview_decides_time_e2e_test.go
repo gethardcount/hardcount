@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"strings"
 	"testing"
 	"time"
 
@@ -30,22 +31,28 @@ func TestE2E_CreatePreviewIsAtTheSubscriptionsClockTime(t *testing.T) {
 	cust := flowStr(r.call("POST", "/v1/customers", flowReq{body: map[string]any{
 		"external_id": "preview-time", "display_name": "Preview time", "test_clock_id": clockID,
 	}}).want(t, 201, "create clock customer").body, "id")
-	r.call("POST", "/v1/subscriptions", flowReq{body: map[string]any{
+	sub := flowStr(r.call("POST", "/v1/subscriptions", flowReq{body: map[string]any{
 		"code": "preview-time", "display_name": "Preview time", "customer_id": cust,
 		"items": []map[string]any{{"plan_id": r.planID, "quantity": 1}}, "billing_time": "anniversary", "trial_days": 14,
-	}}).want(t, 201, "create subscription")
+	}}).want(t, 201, "create subscription").body, "id")
 	preview := flowReq{body: map[string]any{"customer_id": cust}}
 
-	got := r.call("POST", "/v1/invoices/create_preview", preview).want(t, 200, "preview").body
-	if at, err := time.Parse(time.RFC3339Nano, flowStr(got, "generated_at")); err != nil || !at.Equal(frozen) {
-		t.Errorf("generated_at %q (%v); want the clock's %s", flowStr(got, "generated_at"), err, frozen)
+	// With the subscription picked from the customer, and named in the body.
+	for name, req := range map[string]flowReq{
+		"picked": preview,
+		"named":  {body: map[string]any{"customer_id": cust, "subscription_id": sub}},
+	} {
+		got := r.call("POST", "/v1/invoices/create_preview", req).want(t, 200, "preview, "+name).body
+		if at, err := time.Parse(time.RFC3339Nano, flowStr(got, "generated_at")); err != nil || !at.Equal(frozen) {
+			t.Errorf("%s: generated_at %q (%v); want the clock's %s", name, flowStr(got, "generated_at"), err, frozen)
+		}
 	}
 
 	clocks := &unreadableClocks{TestClockReader: testclock.NewPostgresStore(r.db)}
 	r.srv.BillingEngine.SetTestClockReader(clocks)
 	clocks.fail.Store(true)
-	if got := r.call("POST", "/v1/invoices/create_preview", preview); got.status != 503 {
-		t.Errorf("preview while the clock cannot be read: %d %s; want 503", got.status, got.raw)
+	if got := r.call("POST", "/v1/invoices/create_preview", preview); got.status != 503 || !strings.Contains(string(got.raw), "test_clock_unavailable") {
+		t.Errorf("preview while the clock cannot be read: %d %s; want 503 test_clock_unavailable", got.status, got.raw)
 	}
 
 	r.srv.BillingEngine.SetTestClockReader(goneClocks{})
