@@ -239,7 +239,8 @@ func (h *Handler) spend(w http.ResponseWriter, r *http.Request) {
 		case errors.Is(err, clock.ErrUndecided):
 			// The call's customer's test clock could not be read: nothing is
 			// recorded for that call, and the whole batch is refused so
-			// LiteLLM retries it.
+			// LiteLLM retries it. Checked before errIngestUnavailable, which
+			// persist wraps this error in.
 			slog.ErrorContext(r.Context(), "litellm spend: a customer's test clock could not be read — batch aborted for client retry",
 				"tenant_id", tenantID,
 				"accepted", resp.Accepted,
@@ -322,10 +323,6 @@ func (h *Handler) persist(ctx context.Context, tenantID string, m Mapping) (call
 		Legacy:     callEvents(m.Legacy),
 		LegacyKey:  m.LegacyKey,
 	})
-	if errors.Is(err, clock.ErrUndecided) {
-		// The customer's test clock could not be read: refused as itself.
-		return callOutcome{}, err
-	}
 	if err != nil {
 		// Verdicts on the call itself stay per-row: a bad payload must
 		// never 503, or LiteLLM retries it until max_retries is spent.
