@@ -19,6 +19,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/activity"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/timeline"
 )
 
@@ -550,11 +551,12 @@ func (h *Handler) finalize(w http.ResponseWriter, r *http.Request) {
 	// Collect now through the billing engine's one collector (credits, then
 	// the card, or the setup-link email). The finalize write already queued
 	// the invoice, so if this is unwired or the process dies mid-call the
-	// auto-charge sweep collects it on its next tick. Bind first (ADR-030 /
-	// ADR-104): the setup-link email it may enqueue must carry the invoice's
-	// billing anchor, and this runs on the handler's raw ctx.
+	// auto-charge sweep collects it on its next tick. It runs on the action's
+	// time (see Service.clock), so the setup-link email it may enqueue carries
+	// the invoice's billing anchor (ADR-104). h.svc.clock is the server's
+	// clock, the one the service's entry points read real time from.
 	if h.collector != nil {
-		h.collector.CollectInvoice(h.svc.bindForInvoice(r.Context(), tenantID, inv.ID), tenantID, inv.ID, nil)
+		h.collector.CollectInvoice(clock.EnsureEffectiveNow(r.Context(), h.svc.clock), tenantID, inv.ID, nil)
 		// Respond with the post-collection state (paid, failed, or still
 		// queued), as the caller saw it before collection moved here.
 		if collected, err := h.svc.Get(r.Context(), tenantID, inv.ID); err == nil {
@@ -657,9 +659,9 @@ func (h *Handler) resendSetupLink(w http.ResponseWriter, r *http.Request) {
 	}
 	// The TRUE cause: an operator clicked Resend. The row used to say
 	// "finalize_no_pm" — a finalize that never ran.
-	// Operator entry point on a clock-pinned entity — bind so the resent
-	// setup-link email carries the invoice's billing anchor (ADR-030).
-	resendCtx := h.svc.bindForInvoice(r.Context(), tenantID, inv.ID)
+	// On the action's time (see Service.clock), so the resent setup-link
+	// email carries the invoice's billing anchor (ADR-030).
+	resendCtx := clock.EnsureEffectiveNow(r.Context(), h.svc.clock)
 	outcome, err := h.noPMNotifier.NotifyNoPaymentMethod(resendCtx, tenantID, inv, "operator_resend")
 	if err != nil {
 		respond.FromError(w, r, err, "invoice")
@@ -681,7 +683,7 @@ func (h *Handler) resendSetupLink(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.auditLogger != nil {
-		_ = h.auditLogger.Log(h.svc.AuditCtx(r.Context(), inv), tenantID, domain.AuditActionSend, "invoice", inv.ID, inv.InvoiceNumber, map[string]any{
+		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionSend, "invoice", inv.ID, inv.InvoiceNumber, map[string]any{
 			"action":         "resend_setup_link",
 			"invoice_number": inv.InvoiceNumber,
 			"customer_id":    inv.CustomerID,
@@ -740,8 +742,8 @@ type RecordPaymentInput struct {
 //
 // Body shape: { "note": "Cheque #1234" } — single optional string.
 // Amount is implicit (full amount_due); partial payments deferred to
-// when a customer asks. Date stamps as clock.Now (sim-time on
-// clock-pinned invoices).
+// when a customer asks. paid_at is the request's time, a clock invoice's
+// clock time.
 //
 // The service closes the invoice's dunning run and expires its open
 // Checkout page after the commit.
@@ -807,7 +809,7 @@ func (h *Handler) rotatePublicToken(w http.ResponseWriter, r *http.Request) {
 		// plaintext tokens in the audit log would turn the log into an
 		// attractive target for credential harvesting. Record only that
 		// a rotation happened.
-		_ = h.auditLogger.Log(h.svc.AuditCtx(r.Context(), inv), tenantID, domain.AuditActionRotate, "invoice", inv.ID, inv.InvoiceNumber, map[string]any{
+		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionRotate, "invoice", inv.ID, inv.InvoiceNumber, map[string]any{
 			"invoice_number":           inv.InvoiceNumber,
 			"customer_id":              inv.CustomerID,
 			"field":                    "public_token",
@@ -1077,12 +1079,11 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Bound to the invoice's clock, as finalize binds its collect: on a
-	// clock-pinned invoice the charge records its simulated instant (the PI's
+	// On the action's time (see Service.clock), as finalize's collect: on a
+	// clock invoice the charge records its clock's instant (the PI's
 	// hardcount_anchor_at), which dates paid_at and a decline's first dunning
-	// retry. Unbound, a Collect on a later Advance dated the retry from the
-	// issue instant, in the past. A wall-clock invoice binds nothing.
-	charged, err := h.charger.ChargeInvoiceNow(h.svc.bindForInvoice(r.Context(), tenantID, id), tenantID, inv, hold, ps.StripeCustomerID, ps.StripePaymentMethodID)
+	// retry.
+	charged, err := h.charger.ChargeInvoiceNow(clock.EnsureEffectiveNow(r.Context(), h.svc.clock), tenantID, inv, hold, ps.StripeCustomerID, ps.StripePaymentMethodID)
 	if err != nil {
 		// ADR-026 boundary sanitization: ChargeInvoice wraps a
 		// *payment.PaymentError which respond.FromError detects and
@@ -1113,7 +1114,7 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 	// declined Collect returns above and writes no row here; its charge
 	// attempt records the actor.
 	if h.auditLogger != nil {
-		_ = h.auditLogger.Log(h.svc.AuditCtx(r.Context(), charged), tenantID, domain.AuditActionCollect, "invoice", charged.ID, charged.InvoiceNumber, map[string]any{
+		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionCollect, "invoice", charged.ID, charged.InvoiceNumber, map[string]any{
 			"invoice_number": charged.InvoiceNumber,
 			"amount_cents":   inv.AmountDueCents,
 			"currency":       inv.Currency,
@@ -1165,7 +1166,7 @@ func (h *Handler) auditNoChargeCollect(ctx context.Context, tenantID string, set
 	if h.auditLogger == nil {
 		return
 	}
-	_ = h.auditLogger.Log(h.svc.AuditCtx(ctx, settled), tenantID, domain.AuditActionCollect, "invoice", settled.ID, settled.InvoiceNumber, map[string]any{
+	_ = h.auditLogger.Log(ctx, tenantID, domain.AuditActionCollect, "invoice", settled.ID, settled.InvoiceNumber, map[string]any{
 		"invoice_number":        settled.InvoiceNumber,
 		"credits_applied_cents": settled.CreditsAppliedCents,
 		"currency":              settled.Currency,
@@ -1257,26 +1258,19 @@ func (h *Handler) refund(w http.ResponseWriter, r *http.Request) {
 
 	if h.auditLogger != nil {
 		// Label the row with the invoice number so it reads "Refunded
-		// INV-NNN" (a money-out action), matching finalize/void rows. The same
-		// read supplies the sim axis (AuditCtx) — a refund issued inside a
-		// simulation belongs to that clock's timeline.
+		// INV-NNN" (a money-out action), matching finalize/void rows. The row
+		// is on the time the door decided from the invoice, so a refund on a
+		// clock invoice belongs to that clock's timeline.
 		refundLabel := ""
-		auditCtx := r.Context()
 		if refInv, gErr := h.svc.Get(r.Context(), tenantID, id); gErr == nil {
 			refundLabel = refInv.InvoiceNumber
-			auditCtx = h.svc.AuditCtx(auditCtx, refInv)
 		} else {
 			// The refund ALREADY happened — money moved — so the row is written
-			// either way; dropping it would be worse than an unlabelled one. But
-			// without the invoice we cannot resolve its clock, so a refund issued
-			// inside a simulation lands with NULL sim columns and silently
-			// disappears from ?test_clock_id=. Say so, loudly: a row missing from
-			// a filtered timeline is indistinguishable from an action that never
-			// happened, and this is the only place that knows it went missing.
-			slog.WarnContext(r.Context(), "refund audit row will be unstamped and unlabelled: invoice re-read failed",
+			// either way, unlabelled; dropping it would be worse.
+			slog.WarnContext(r.Context(), "refund audit row will be unlabelled: invoice re-read failed",
 				"invoice_id", id, "credit_note_id", cn.ID, "error", gErr)
 		}
-		_ = h.auditLogger.Log(auditCtx, tenantID, domain.AuditActionRefund, "invoice", id, refundLabel, map[string]any{
+		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionRefund, "invoice", id, refundLabel, map[string]any{
 			"invoice_id":          id,
 			"credit_note_id":      cn.ID,
 			"credit_note_number":  cn.CreditNoteNumber,
@@ -1332,7 +1326,7 @@ func (h *Handler) retryTax(w http.ResponseWriter, r *http.Request) {
 		if inv.Attention != nil {
 			afterReason = string(inv.Attention.Reason)
 		}
-		_ = h.auditLogger.Log(h.svc.AuditCtx(r.Context(), inv), tenantID, domain.AuditActionRetryTax, "invoice", inv.ID, inv.InvoiceNumber, map[string]any{
+		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionRetryTax, "invoice", inv.ID, inv.InvoiceNumber, map[string]any{
 			"invoice_number":   inv.InvoiceNumber,
 			"customer_id":      inv.CustomerID,
 			"tax_status":       inv.TaxStatus,
