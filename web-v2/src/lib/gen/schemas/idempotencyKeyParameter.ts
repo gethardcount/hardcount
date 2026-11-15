@@ -15,17 +15,18 @@
 /**
  * Makes the call safe to retry. Send a unique value (a UUID works) and
  * the same value on every retry. Keys are kept per account and mode.
- * For 24 hours, a repeat from the same API key or dashboard user, with
- * the same key, method, path, query string and body, gets
- * the first response again, byte for byte, with an
+ * For 24 hours, a repeat from the same caller (the same API key or the
+ * same dashboard user) with the same key, method, path, query string
+ * and body gets the first response again, byte for byte, with an
  * `Idempotent-Replayed: true` header, instead of running again. A
  * first answer of 409, 422 or 503, or a 400 `invalid JSON body`, is
  * not kept, so a retry with the same key runs again.
  * A repeat sent while the first request is still running waits up to
  * 5 seconds for its answer; if there is none by then, it gets 409
- * with code `conflict_idempotency`. The same key from another
- * credential, or with a different method, path, query string or body,
- * is a 422 with code `idempotency_error`. After
+ * with code `conflict_idempotency`. The same key from another caller,
+ * or with a different method, path, query string or body, is a 422
+ * with code `idempotency_error` at once, even while the first request
+ * runs. The query string must match byte for byte. After
  * 24 hours the key is free, and a request with it runs as new. The
  * other error cases are in
  * [Idempotency](https://gethardcount.com/docs/api/idempotency/). The usage routes do

@@ -9,26 +9,23 @@ import (
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// TestE2E_IdempotencyKey_AnswersOnlyTheCredentialThatMadeTheRequest sends
-// one Idempotency-Key from several callers of one account and mode, over the
-// real router and database. The idempotency layer runs before each route's
-// permission check, so a stored answer must go back only to the caller that
-// made the request: a secret key's retry replays it, while an ingest key, a
-// dashboard session, or the same key with another query string gets the
-// existing key-reuse 422 and none of the stored body. A dashboard user who
+// TestE2E_IdempotencyKey_AnswersOnlyTheCallerThatMadeTheRequest sends one
+// Idempotency-Key from several callers of one account and mode, over the
+// real router and database. The caller is the API key, or the dashboard
+// user, that made the request. The idempotency layer runs before each
+// route's permission check, so a stored answer must go back only to the
+// caller that made the request: a secret key's retry replays it, while an
+// ingest key, a dashboard user, or the same key with another query string
+// gets the key-reuse 422 and none of the stored body. A dashboard user who
 // signs in again is still the same caller, so the retry replays.
-//
-// Mutation: drop the caller or the query string from fingerprintRequest's
-// input, or fingerprint a session by its session id instead of its user, and
-// this fails.
-func TestE2E_IdempotencyKey_AnswersOnlyTheCredentialThatMadeTheRequest(t *testing.T) {
+func TestE2E_IdempotencyKey_AnswersOnlyTheCallerThatMadeTheRequest(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "idem-credential-bootstrap")
+	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "idem-caller-bootstrap")
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
 	defer ts.Close()
 
-	const email, password = "owner@idem-credential.test", "idem-credential-pw-12"
-	flowBootstrap(t, ts, "idem-credential-bootstrap", email, password)
+	const email, password = "owner@idem-caller.test", "idem-caller-pw-12"
+	flowBootstrap(t, ts, "idem-caller-bootstrap", email, password)
 	owner := login(t, ts, email, password)
 	newKey := func(keyType string) string {
 		t.Helper()
@@ -40,7 +37,7 @@ func TestE2E_IdempotencyKey_AnswersOnlyTheCredentialThatMadeTheRequest(t *testin
 
 	reuse := func(r flowResp, who, firstID string) {
 		t.Helper()
-		const msg = "Keys for idempotent requests can only be used with the same parameters they were first used with."
+		const msg = "This Idempotency-Key was first used by another caller or with a different request. Use a new key for a new request."
 		if r.status != 422 || r.errCode() != "idempotency_error" || r.errMessage() != msg {
 			t.Errorf("%s: %d %s, want 422 idempotency_error %q", who, r.status, r.raw, msg)
 		}
@@ -61,7 +58,7 @@ func TestE2E_IdempotencyKey_AnswersOnlyTheCredentialThatMadeTheRequest(t *testin
 		return flowDo(t, ts, "POST", path, req)
 	}
 
-	// A secret key creates a customer; another credential of the same
+	// A secret key creates a customer; another caller of the same
 	// account and mode sends the same method, path, body and key.
 	first := create(flowReq{bearer: secret}, "/v1/customers", "k-cred").want(t, 201, "secret key creates a customer")
 	firstID := flowStr(first.body, "id")

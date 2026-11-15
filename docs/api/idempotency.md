@@ -77,11 +77,15 @@ runs again and gets `409` too. Use an `external_id` you have not used yet.
   fewer: Hardcount does not check the length, but a very long key can fail
   to be stored.
 - **A key belongs to one account and one mode, and a retry must come from
-  the same credential:** the same API key, or the same dashboard user. A
-  retry with another credential of the account gets `422`
-  `idempotency_error`, not the stored answer.
-- **Hardcount matches a retry on its credential, its method, its path, its
-  query string and its body,** the same body byte for byte.
+  the same caller:** the API key, or the dashboard user, that made the
+  request. A retry from another API key or another user of the account gets
+  `422` `idempotency_error`, never the stored answer and never a second run.
+- **A rotated API key is a new caller.** A retry sent with the replacement
+  key gets `422` `idempotency_error`. Read the resource to see whether the
+  change happened.
+- **Hardcount matches a retry on its caller, its method, its path, its
+  query string and its body.** The query string and the body must be the
+  same byte for byte, so `?a=1&b=2` and `?b=2&a=1` are different requests.
 
 ### What a retry with the same key gets
 
@@ -89,8 +93,8 @@ runs again and gets `409` too. Use an `external_id` you have not used yet.
 |---|---|
 | Finished with any status except `409`, `422`, `503` or `400` `invalid JSON body`, including other `4xx` and `5xx` answers | The first status and body, plus `Idempotent-Replayed: true`. The request does not run again. A crash is the exception: see [A key Hardcount could not finish](#a-key-hardcount-could-not-finish). |
 | Finished with `409`, `422`, `503` or `400` `invalid JSON body` | A new run. These answers are not stored, so the key is free again. |
-| Is still running | Hardcount waits up to 5 seconds for it, then answers `409` `conflict_idempotency`. Retry later with the same key. |
-| Finished, but the retry's credential, method, path, query string or body differs | `422` `idempotency_error`. Your code reused a key for a different request. |
+| Is still running, and the retry is the same request from the same caller | Hardcount waits up to 5 seconds for it, then answers `409` `conflict_idempotency`. Retry later with the same key. |
+| Is still running or has finished, and the retry's caller, method, path, query string or body differs | `422` `idempotency_error` at once. The key was first used by another caller or for a different request: use a new key for a new request. |
 | Started more than 5 minutes ago and never recorded an answer | `409` `conflict_idempotency_unresolved`. See [A key Hardcount could not finish](#a-key-hardcount-could-not-finish). |
 
 A replay sends the first response's status and body only. The body's
@@ -166,8 +170,9 @@ request, even after 24 hours.
 
 ### Routes that ignore the header
 
-The header works on `POST`, `PUT` and `PATCH` requests to `/v1` routes that
-take an API key. These routes ignore it, and run every time:
+The header works on `POST`, `PUT` and `PATCH` requests to `/v1` routes,
+sent with an API key or from a dashboard session. These routes ignore it,
+and run every time:
 
 - The usage routes: `/v1/usage-events…` and `/v1/integrations/litellm…`. Use
   each event's `idempotency_key`.

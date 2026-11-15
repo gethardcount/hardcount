@@ -65,10 +65,19 @@ func TestFingerprintRequest(t *testing.T) {
 		}
 	}
 
-	// A separator between the parts keeps a caller "key:k" with body "bc"
-	// apart from a caller "key:kb" with body "c".
-	if bytes.Equal(fp(in{"POST", "/v1/a", "key:k", []byte("bc")}), fp(in{"POST", "/v1/a", "key:kb", []byte("c")})) {
-		t.Error("the separator must keep the caller and the body apart")
+	// A zero byte separates each part from the next, so moving one byte
+	// across a boundary changes the hash.
+	for _, c := range []struct {
+		boundary string
+		a, b     in
+	}{
+		{"method and uri", in{"POS", "T/v1/a", "key:k", []byte("b")}, in{"POST", "/v1/a", "key:k", []byte("b")}},
+		{"uri and caller", in{"POST", "/v1/a", "key:k", []byte("b")}, in{"POST", "/v1/ak", "ey:k", []byte("b")}},
+		{"caller and body", in{"POST", "/v1/a", "key:k", []byte("b")}, in{"POST", "/v1/a", "key:kb", nil}},
+	} {
+		if bytes.Equal(fp(c.a), fp(c.b)) {
+			t.Errorf("%s: moving a byte across the boundary must change the fingerprint", c.boundary)
+		}
 	}
 }
 
