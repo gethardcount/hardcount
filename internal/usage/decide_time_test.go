@@ -109,7 +109,7 @@ func TestIngest_ACustomerOnNoClockIsRecordedAtRealTime(t *testing.T) {
 
 // A request whose clock was already decided (a route that named the
 // customer) is not decided again.
-func TestIngest_AClockDecidedUpstreamIsNotDecidedAgain(t *testing.T) {
+func TestIngest_AClockAlreadyDecidedIsNotDecidedAgain(t *testing.T) {
 	frozen := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
 	res := &answerResolver{err: errors.New("must not be read")}
 	svc := NewService(newMemStore())
@@ -117,7 +117,7 @@ func TestIngest_AClockDecidedUpstreamIsNotDecidedAgain(t *testing.T) {
 	ctx := clock.WithSim(testMode(), clock.Sim{At: frozen, TestClockID: "clk_up"})
 	e, err := svc.Ingest(ctx, "t1", IngestInput{CustomerID: "cus_1", MeterID: "mtr_1", Quantity: dec(1)})
 	if err != nil || !e.Timestamp.Equal(frozen) || res.reads != 0 {
-		t.Errorf("err %v, timestamp %v, reads %d; want the upstream clock's %v and no read", err, e.Timestamp, res.reads, frozen)
+		t.Errorf("err %v, timestamp %v, reads %d; want the decided clock's %v and no read", err, e.Timestamp, res.reads, frozen)
 	}
 }
 
