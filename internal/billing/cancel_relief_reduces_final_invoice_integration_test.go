@@ -83,6 +83,7 @@ func (c *invoiceCharger) charges(invoiceID string) []int64 {
 
 type reliefCancelRig struct {
 	ctx        context.Context
+	clockID    string // the test clock the subscription is on, if any; its frozen time is cancelAt
 	db         *postgres.DB
 	tenantID   string
 	customerID string
@@ -272,9 +273,15 @@ func newReliefCancelRig(t *testing.T, db *postgres.DB, name string, o reliefRigO
 	}
 }
 
-// cancel is the operator's or API's immediate cancel at cancelAt, unchecked.
+// cancel is the operator's or API's immediate cancel at cancelAt, unchecked,
+// decided as the API's door decides it: on the subscription's clock when it
+// is on one, else at the instant cancelAt.
 func (r *reliefCancelRig) cancel() (domain.Subscription, int64, error) {
-	return r.subSvc.Cancel(clock.WithEffectiveNow(r.ctx, r.cancelAt), r.tenantID, r.subID)
+	ctx := clock.WithEffectiveNow(r.ctx, r.cancelAt)
+	if r.clockID != "" {
+		ctx = clock.WithSim(r.ctx, clock.Sim{At: r.cancelAt, TestClockID: r.clockID})
+	}
+	return r.subSvc.Cancel(ctx, r.tenantID, r.subID)
 }
 
 // cancelImmediately is cancel, checked.
