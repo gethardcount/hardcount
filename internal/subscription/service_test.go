@@ -3666,7 +3666,12 @@ func TestClockResolver_StampsFrozenDomain(t *testing.T) {
 		svc := NewService(store, nil)
 		svc.SetResolver(resolver)
 
-		sub, err := svc.Create(context.Background(), "t1", CreateInput{
+		// The caller decides the time, as the create route does.
+		ctx, err := svc.DecideForCustomer(postgres.WithLivemode(context.Background(), false), "t1", "cus_pinned")
+		if err != nil {
+			t.Fatalf("decide: %v", err)
+		}
+		sub, err := svc.Create(ctx, "t1", CreateInput{
 			Code:        "sub-pinned",
 			DisplayName: "Pinned",
 			CustomerID:  "cus_pinned",

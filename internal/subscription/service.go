@@ -286,13 +286,27 @@ func (s *Service) SetResolver(r clock.Resolver) {
 	s.resolver = r
 }
 
-// bindForCustomer binds effective-now from a customer pin. Used by
-// Create, where the sub doesn't exist yet but the customer does.
-// Failing on a dangling pin is worse than stamping wall-clock; on
-// resolver error, returns ctx unchanged (downstream reads wall-clock).
-func (s *Service) bindForCustomer(ctx context.Context, tenantID, customerID string) context.Context {
-	bound, _ := clock.BindEffectiveNow(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID}) // a failed lookup is logged there
-	return bound
+// DecideForCustomer decides the time of a subscription created for
+// customerID, whose body names the customer (POST /v1/subscriptions: the
+// API's door left the request at real time), with clock.DecideWithoutDoor.
+// The handler decides once, before anything runs, so the create and its
+// audit row share the decision. A not-found is the customer, or, in a race
+// with its clock's deletion, its clock: real time is right in both. A clock
+// that cannot be read refuses the create (503), with nothing written. No
+// customer id decides nothing: the create answers the missing field.
+func (s *Service) DecideForCustomer(ctx context.Context, tenantID, customerID string) (context.Context, error) {
+	if customerID == "" {
+		return ctx, nil
+	}
+	decided, err := clock.DecideWithoutDoor(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID})
+	switch {
+	case errors.Is(err, errs.ErrNotFound):
+		return clock.WithRealTime(ctx), nil
+	case err != nil:
+		return ctx, errs.Unavailable("test_clock_unavailable",
+			"The customer's test clock could not be read. Nothing was created; send the request again.", err)
+	}
+	return decided, nil
 }
 
 // bindForSub binds effective-now from a sub pin. Used by every
@@ -832,12 +846,9 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	}
 
 	status := domain.SubscriptionDraft
-	// Bind effective-now from the customer's test_clock pin (if any).
-	// Every downstream s.clock.Now(ctx) — including in the postgres
-	// store's created_at / updated_at writes — inherits the simulated
-	// time. Mirrors Stripe's "no semantic change" guarantee at
-	// resource-create.
-	ctx = s.bindForCustomer(ctx, tenantID, input.CustomerID)
+	// The caller decided the subscription's time (DecideForCustomer, in the
+	// handler); every s.clock.Now(ctx) below, the store's created_at and
+	// updated_at among them, reads that decision.
 	now := s.clock.Now(ctx)
 
 	var trialStart, trialEnd *time.Time
