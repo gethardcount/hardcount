@@ -29,9 +29,9 @@ their SDKs aligned with their HTTP surface.
    - the shared error answers where they apply:
      `$ref: "#/components/responses/Unauthorized"` (401) on a route that
      needs a key, `RateLimited` (429) on a rate-limited route, and
-     `InvalidBody` (400) on a route with a JSON body. Give any other error
-     status the `Error` schema and an example with the handler's real code
-     and message.
+     `InvalidBody` (400) and `PayloadTooLarge` (413) on a route with a JSON
+     body. Give any other error status the `Error` schema and an example
+     with the handler's real code and message.
 
    A route only the dashboard calls gets `tags: [Dashboard]`,
    `x-internal: true`, and the first description line "Used by the

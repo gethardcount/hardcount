@@ -141,8 +141,8 @@ retry with the same key runs normally after them:
 - `401` (no key or a bad key) and `429` `rate_limited` (the
   [rate limit](rate-limits.md)).
 - `403` for a browser request from another site.
-- `400` for a body over 1 MB: Hardcount reads the body to match it, and
-  stops there.
+- `413` `payload_too_large` for a body over 1 MB: Hardcount reads the body
+  to match it, and stops there.
 - `503` `authentication_unavailable`.
 - `503` `idempotency_unavailable`: Hardcount could not record the key, so it
   ran nothing. Retry with the same key; `Retry-After` is `1`.

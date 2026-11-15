@@ -350,8 +350,7 @@ components:
       description: |
         The body is not one valid JSON value, it is not a JSON object, it
         is empty where the operation needs one, or a field has the wrong
-        JSON type (such as a string where a number belongs). A body over
-        1 MB gets 400 too, unless the operation lists a 413. This answer
+        JSON type (such as a string where a number belongs). This answer
         is not kept for an `Idempotency-Key`: send the corrected request
         with the same key.
       content:
@@ -363,6 +362,21 @@ components:
               type: invalid_request_error
               code: invalid_request
               message: invalid JSON body
+              request_id: req_dbjg652q3gpgqfoq5cd0
+    PayloadTooLarge:
+      description: |
+        The body is over the 1 MB limit. Send a smaller body. The answer is
+        the same with or without an `Idempotency-Key`, and it is not kept
+        for the key: the same key works for the smaller request.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              type: invalid_request_error
+              code: payload_too_large
+              message: The request body is larger than the 1 MB limit. Send a smaller body.
               request_id: req_dbjg652q3gpgqfoq5cd0
 
   schemas:
@@ -10172,6 +10186,8 @@ paths:
                   message: customer with external_id "acme-42" already exists
                   request_id: req_dbjg652q3gpgqfoq5cd0
                   param: external_id
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             A field failed validation (`validation_error`, `param` names it):
@@ -10373,6 +10389,8 @@ paths:
                   code: not_found
                   message: customer not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             The request has a body with a field. This route takes no body
@@ -11454,6 +11472,8 @@ paths:
                   code: stripe_not_connected
                   message: Stripe is not connected for this mode. Connect it under Settings, then try again.
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: The body has an unknown field (`param` names it).
           content:
@@ -11531,6 +11551,8 @@ paths:
                   code: not_found
                   message: payment_method not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             The request has a body with a field. This route takes no body
@@ -11609,6 +11631,8 @@ paths:
                   code: not_found
                   message: payment_method not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             The request has a body with a field. This route takes no body
@@ -12166,6 +12190,8 @@ paths:
                   code: not_payable
                   message: invoice is not in a payable state
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: The request has a body with a field. This route takes no body (`param` names the field).
           content:
@@ -12360,6 +12386,8 @@ paths:
                   code: online_payment_unavailable
                   message: Adding a card online isn't available for this account right now. Please contact your billing administrator.
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             The request has a body with a field. This route takes no body
@@ -12481,6 +12509,8 @@ paths:
                   message: a meter with event_name "tokens" already exists
                   request_id: req_dbjg652q3gpgqfoq5cd0
                   param: event_name
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             A field failed validation (`validation_error`, `param` names it):
@@ -12639,6 +12669,8 @@ paths:
                   code: meter_has_usage
                   message: 'Meter "tokens" has usage events, so its aggregation stays sum: its events are counted under it. To count differently, make a new meter with another event name.'
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             A field failed validation (`validation_error`, `param` names it):
@@ -12929,6 +12961,8 @@ paths:
                   code: invalid_state
                   message: cannot create credit notes for voided invoices
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             Code `validation_error`, with `param` naming the field: a missing
@@ -13553,6 +13587,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             `url` is missing, is not `https://` (only a loopback URL
@@ -13752,6 +13788,8 @@ paths:
                   code: not_found
                   message: webhook endpoint not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             `url` is empty, is not `https://` (only a loopback URL outside
@@ -13822,6 +13860,8 @@ paths:
                   code: not_found
                   message: endpoint not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/BodyNotAllowed"
         "429":
@@ -13873,6 +13913,8 @@ paths:
                   code: not_found
                   message: webhook endpoint not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/BodyNotAllowed"
         "429":
@@ -14016,6 +14058,8 @@ paths:
                   code: invalid_state
                   message: endpoint is paused — resume it before replaying deliveries
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/BodyNotAllowed"
         "429":
@@ -14284,6 +14328,8 @@ paths:
                   code: not_found
                   message: webhook event not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/BodyNotAllowed"
         "429":
@@ -14726,6 +14772,8 @@ paths:
                   message: plan code "pro" already exists
                   request_id: req_dbjg652q3gpgqfoq5cd0
                   param: code
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             A field failed validation (a price names an unknown meter, a rate
@@ -15437,6 +15485,8 @@ paths:
                   code: not_found
                   message: price not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             The request has a body with a field. This route takes no body
@@ -15630,6 +15680,8 @@ paths:
                   message: subscription code "acme-pro" already exists
                   request_id: req_dbjg652q3gpgqfoq5cd0
                   param: code
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             A field failed validation (`param` names it), for example
@@ -15896,6 +15948,8 @@ paths:
                   code: invalid_state
                   message: Only a draft subscription can be activated. This one is active.
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             The request has a body with a field (`param` names it). This
@@ -16049,6 +16103,8 @@ paths:
                   code: billing_not_failing
                   message: billing is not failing on this subscription; there is nothing to retry
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             The request has a body with a field (`param` names it). This
@@ -16241,6 +16297,8 @@ paths:
                   code: invalid_state
                   message: cannot cancel canceled subscription (already terminated)
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             The request has a body with a field (`param` names it). This
@@ -16487,6 +16545,8 @@ paths:
                   code: invalid_state
                   message: the scheduled cancel already took effect when the billing period ended; the subscription is canceled
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             The request has a body with a field (`param` names it). This
@@ -16743,6 +16803,8 @@ paths:
                   code: unbilled_period
                   message: this subscription has a billing period that ended and is not invoiced yet; retry billing for this subscription, then try again
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             The request has a body with a field (`param` names it). This
@@ -16848,6 +16910,8 @@ paths:
                   code: invalid_state
                   message: This subscription is scheduled to cancel. Undo the scheduled cancellation first, then end the trial.
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             The request has a body with a field (`param` names it). This
@@ -17230,6 +17294,8 @@ paths:
                   code: not_found
                   message: subscription not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             The request has a body with a field (`param` names it). This
@@ -17712,6 +17778,8 @@ paths:
                   code: invalid_state
                   message: A subscription needs at least one item. To stop billing, cancel the subscription instead.
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             The request has a body with a field (`param` names it). This
@@ -17804,6 +17872,8 @@ paths:
                   code: invalid_state
                   message: the pending plan change already took effect when the billing period ended
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             The request has a body with a field (`param` names it). This
@@ -18056,6 +18126,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             Validation failed and nothing was stored. `param` names the
@@ -18727,6 +18799,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             `validation_error`: `external_customer_id` is missing; no
@@ -18794,6 +18868,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: "`validation_error`: `external_customer_id` is missing, or the body has an unknown field (`param` names it; the body must use only the fields listed here)."
           content:
@@ -19211,6 +19287,8 @@ paths:
                   code: not_found
                   message: customer not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             Validation error: missing `customer_id`, an unsupported currency,
@@ -19381,6 +19459,8 @@ paths:
                   code: not_found
                   message: customer or subscription not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             Validation error. Missing `customer_id`; a subscription of
@@ -19681,6 +19761,8 @@ paths:
                   code: invoice_not_sendable
                   message: a draft invoice can't be emailed because it isn't issued yet. Finalize it first, then email it
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: "`email` is missing or invalid, a copied address is invalid (`param` `additional_emails`), or the body has an unknown field (`param` names it)."
           content:
@@ -19785,6 +19867,8 @@ paths:
                   code: invoice_not_manual
                   message: "Lines can be added only to an invoice you create. This draft was made by billing for a subscription, so it keeps billing's lines and tax. For a one-off charge, create a separate invoice."
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             Validation error: the invoice is not a draft, a line field is
@@ -19933,6 +20017,8 @@ paths:
                   code: invalid_state
                   message: cannot void a paid invoice — issue a credit note instead
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: The request has a body with a field. This route takes no body (`param` names the field).
           content:
@@ -20024,6 +20110,8 @@ paths:
                   code: no_email_on_file
                   message: customer has no email on file — add one on the customer record, or copy the setup link from the customer page and share it directly
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: The request has a body with a field. This route takes no body (`param` names the field).
           content:
@@ -20184,6 +20272,8 @@ paths:
                   code: invalid_state
                   message: cannot mark paid invoice uncollectible — issue a credit note instead
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: The request has a body with a field. This route takes no body (`param` names the field).
           content:
@@ -20336,6 +20426,8 @@ paths:
                   code: invalid_state
                   message: invoice is already paid
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: The body has a field other than `note` (`param` names it).
           content:
@@ -20452,6 +20544,8 @@ paths:
                   code: not_found
                   message: invoice not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             The invoice is a draft (code `invalid_state`); finalize it first.
@@ -20623,6 +20717,8 @@ paths:
                   code: payment_in_flight
                   message: A charge on this invoice is being confirmed with Stripe. Try again in a few minutes; an interrupted charge is confirmed within about an hour.
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             Code `validation_error`. The invoice is not finalized or is
@@ -20809,6 +20905,8 @@ paths:
                   code: invalid_state
                   message: can only refund paid invoices
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             Validation error: missing or unknown `reason`, a negative
@@ -21181,6 +21279,8 @@ paths:
                   code: invalid_state
                   message: only a refund that needs review can be dismissed
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: Missing or too long `note` (`param` `note`), or an unknown field.
           content:
@@ -21320,6 +21420,8 @@ paths:
                   code: email_not_configured
                   message: Email isn't set up on this server, so nothing was sent.
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: "The note is not issued (draft or voided), `email` is missing or invalid, a copied address is invalid (`param` `additional_emails`), or the body has an unknown field (`param` names it)."
           content:
@@ -21542,6 +21644,8 @@ paths:
                   code: invalid_state
                   message: can only issue draft credit notes
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: The request has a body with a field. This route takes no body (`param` names the field).
           content:
@@ -21674,6 +21778,8 @@ paths:
                   code: invalid_state
                   message: a refund made in Stripe can be attached only to an issued credit note whose card refund failed
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: Code `validation_error`. `stripe_refund_id` is missing; Stripe has no such refund in this mode; the refund is not of this invoice's payment, was made by Hardcount, has not succeeded, or is in another currency or of another amount (`param` `stripe_refund_id`); or the body has an unknown field.
           content:
@@ -21817,6 +21923,8 @@ paths:
                   code: invalid_state
                   message: refund already succeeded — nothing to retry
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: The request has a body with a field. This route takes no body (`param` names the field).
           content:
@@ -21930,6 +22038,8 @@ paths:
                   code: invalid_state
                   message: cannot void an issued credit note — issued credit notes are final financial documents
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: The request has a body with a field. This route takes no body (`param` names the field).
           content:
@@ -22152,6 +22262,8 @@ paths:
                   code: invalid_state
                   message: "can only finalize draft invoices, current status: finalized"
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             Code `validation_error`. The request has a body with a field: this
@@ -22345,6 +22457,8 @@ paths:
                   code: invalid_state
                   message: "tax retry only valid on draft invoices (current: finalized)"
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: The request has a body with a field. This route takes no body (`param` names the field).
           content:
@@ -22472,6 +22586,8 @@ paths:
                   code: invalid_state
                   message: user has no tenant membership; contact your administrator
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: "`email` or `password` is empty, or the body has an unknown field. `param` names it."
           content:
@@ -22565,6 +22681,8 @@ paths:
                   code: forbidden
                   message: cross-site request blocked
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/BodyNotAllowed"
         "429":
@@ -22656,6 +22774,8 @@ paths:
                   code: forbidden
                   message: cross-site request blocked
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: The body has an unknown field (`param` names it).
           content:
@@ -22744,6 +22864,8 @@ paths:
                   code: forbidden
                   message: cross-site request blocked
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: "`email` is empty, or the body has an unknown field. `param` names it."
           content:
@@ -22825,6 +22947,8 @@ paths:
                   code: forbidden
                   message: cross-site request blocked
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             `token` or `password` is empty, the password fails the check
@@ -23067,6 +23191,8 @@ paths:
                   code: forbidden
                   message: cross-site request blocked
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             The token is unknown, expired, revoked or already used
@@ -23258,6 +23384,8 @@ paths:
                   message: a pending invitation for this email already exists — revoke it first to re-send
                   request_id: req_dbjg652q3gpgqfoq5cd0
                   param: email
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: "`email` is empty or not one plain address, or the body has an unknown field. `param` names it."
           content:
@@ -23330,6 +23458,8 @@ paths:
                   code: not_found
                   message: invitation not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/BodyNotAllowed"
         "429":
@@ -23404,6 +23534,8 @@ paths:
                   code: invalid_state
                   message: you cannot remove yourself — another member must remove you
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/BodyNotAllowed"
         "429":
@@ -23560,6 +23692,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             The request has a body with a field (`param` names it). This
@@ -23716,6 +23850,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             `validation_error`: a required field is missing (`param` then
@@ -23778,6 +23914,8 @@ paths:
                   code: not_found
                   message: provider_cost_rate not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             The request has a body with a field. This route takes no body
@@ -24016,6 +24154,8 @@ paths:
                   code: not_found
                   message: customer not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             A field failed validation (`param` names it): `customer_id` or
@@ -24293,6 +24433,8 @@ paths:
                   code: forbidden
                   message: test clocks are only available in test mode — use a test-mode API key (hc_secret_test_...)
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             `frozen_time` is missing, or `name` is longer than 200 bytes
@@ -24453,6 +24595,8 @@ paths:
                   code: not_found
                   message: test_clock not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             The request has a body with a field (`param` names it). This
@@ -24593,6 +24737,8 @@ paths:
                   code: invalid_state
                   message: clock is advancing, must be ready to advance
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             `frozen_time` is missing, not strictly after the current
@@ -24700,6 +24846,8 @@ paths:
                   code: invalid_state
                   message: "retry only valid on clocks in internal_failure (current: ready)"
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             The request has a body with a field (`param` names it). This
@@ -25254,6 +25402,8 @@ paths:
                   code: not_found
                   message: recipe not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             An override failed the recipe's rules, or the body has an unknown
@@ -25383,6 +25533,8 @@ paths:
                   message: 'Meter "gpu_seconds" already exists and adds up usage another way (usage aggregation: recipe wants sum, existing is max), so the recipe can''t use it. Its aggregation can change only until the meter has a usage event; after that it is fixed.'
                   request_id: req_dbjg652q3gpgqfoq5cd0
                   param: meter
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             An override failed the recipe's rules, or the body has an unknown
@@ -26435,6 +26587,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             `validation_error`, with `param` naming the field: a replaced
@@ -26576,6 +26730,8 @@ paths:
                   code: not_found
                   message: dunning_policy not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: Same validation as create.
           content:
@@ -26655,6 +26811,8 @@ paths:
                   code: invalid_state
                   message: cannot delete policy — 2 customer(s) still assigned; reassign them first
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: The request has a body with a field. This route takes no body (`param` names the field).
           content:
@@ -26722,6 +26880,8 @@ paths:
                   code: not_found
                   message: dunning_policy not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: The request has a body with a field. This route takes no body (`param` names the field).
           content:
@@ -27043,6 +27203,8 @@ paths:
                   code: not_found
                   message: price_override not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             The request has a body with a field. This route takes no body
@@ -27291,6 +27453,8 @@ paths:
                   code: forbidden
                   message: "insufficient permissions: this key type does not have apikey:write access"
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: "`name` is blank or longer than 100 characters, `key_type` is not `secret` or `ingest`, `expires_at` is not in the future, or the body has an unknown field. `param` names it."
           content:
@@ -27434,6 +27598,8 @@ paths:
                   code: not_found
                   message: api key not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/BodyNotAllowed"
         "429":
@@ -27551,6 +27717,8 @@ paths:
                   code: invalid_state
                   message: cannot rotate a revoked key
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: "`expires_in_seconds` is negative or over 604800 (`param: expires_in_seconds`), or the body has an unknown field."
           content:
@@ -27742,6 +27910,8 @@ paths:
                   code: forbidden
                   message: this endpoint requires a dashboard session — sign in to the dashboard to change account settings
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: A field failed validation, the body sends a field the server sets, or it has an unknown field. `error.param` names the field.
           content:
@@ -27900,6 +28070,8 @@ paths:
                   code: email_not_configured
                   message: "This server can't send email: SMTP_HOST is not set. Set the SMTP_* variables and restart the server."
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/BodyNotAllowed"
         "429":
@@ -27997,6 +28169,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/StripeConnectionForbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             A key is missing or has the wrong prefix for the mode,
@@ -28221,6 +28395,8 @@ paths:
                   code: not_found
                   message: stripe_credentials not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           $ref: "#/components/responses/BodyNotAllowed"
         "429":
@@ -28327,6 +28503,8 @@ paths:
                   code: already_bootstrapped
                   message: bootstrap already completed — tenants exist
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: "`owner_email` is not one plain email address (`param: owner_email`), `owner_password` fails the check (`param: password`), or the body has an unknown field. Nothing was written."
           content:

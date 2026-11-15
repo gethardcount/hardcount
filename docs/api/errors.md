@@ -59,7 +59,7 @@ the API has one.
 
 | `code` | When | What to do |
 |---|---|---|
-| `invalid_request` | The body is not one JSON value, or a field has the wrong JSON type (`invalid JSON body`). The body is over 1 MB. A usage batch has no events or more than 1,000. | Fix the request |
+| `invalid_request` | The body is not one JSON value, or a field has the wrong JSON type (`invalid JSON body`). A usage batch has no events or more than 1,000. | Fix the request |
 
 ### 401 Unauthorized
 
@@ -211,7 +211,7 @@ the credit ledger, and report it if the state looks wrong:
 | `code` | When | What to do |
 |---|---|---|
 | `batch_too_large` | A `POST /v1/usage-events/batch` body is over 1 MB, or a `POST /v1/integrations/litellm/spend` body is over 32 MB. Nothing was saved. | Send smaller batches |
-| `payload_too_large` | A Stripe webhook body is over 64 KB | Nothing; Stripe's events are smaller |
+| `payload_too_large` | The body is over the 1 MB limit, with or without an `Idempotency-Key`. Nothing was changed, and the answer is not kept for the key. A Stripe webhook body over 64 KB gets it too. | Send a smaller body. For a Stripe webhook, nothing: Stripe's events are smaller. |
 
 ### 422 Unprocessable Entity
 
@@ -335,9 +335,9 @@ A request body may hold only the fields its operation lists in the
   exceptions: they take their sender's body as it comes.
 
 Bodies are limited to 1 MB, LiteLLM callback bodies to 32 MB, and Stripe
-webhook bodies to 64 KB. Only the usage batch, the LiteLLM callback and the
-Stripe webhook answer `413`. Most other routes answer a larger body with `400`
-`invalid_request`.
+webhook bodies to 64 KB. A larger body gets `413`: `batch_too_large` from
+the usage batch and the LiteLLM callback, `payload_too_large` from the
+other routes. The Postmark webhook is the exception below.
 
 ## Answers in another shape
 

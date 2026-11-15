@@ -3,10 +3,12 @@ package middleware
 import (
 	"bytes"
 	"context"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"testing/iotest"
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/auth"
@@ -204,5 +206,42 @@ func TestRateLimiter_HealthSkipped(t *testing.T) {
 	}
 	if rec.Header().Get("X-RateLimit-Limit") != "" {
 		t.Error("health check should not have rate limit headers")
+	}
+}
+
+// The body is read before the key is reserved. A body over the router's cap
+// gets the decoder's 413, and a body that fails to read for another reason
+// keeps its 400. Neither runs the handler or touches the store: the store is
+// nil here, so a reserve would panic.
+func TestIdempotency_BodyReadErrorAnsweredBeforeTheReserve(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		body     func(http.ResponseWriter) io.ReadCloser
+		wantCode int
+		wantErr  string
+	}{
+		{"over the cap", func(w http.ResponseWriter) io.ReadCloser {
+			return http.MaxBytesReader(w, io.NopCloser(strings.NewReader(`{"a":"bcdefgh"}`)), 8)
+		}, http.StatusRequestEntityTooLarge, "payload_too_large"},
+		{"another read error", func(http.ResponseWriter) io.ReadCloser {
+			return io.NopCloser(iotest.ErrReader(io.ErrUnexpectedEOF))
+		}, http.StatusBadRequest, "invalid_request"},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			var calls int
+			handler := Idempotency(nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+			}))
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest("POST", "/v1/customers", nil)
+			req.Body = c.body(rec)
+			req.Header.Set("Idempotency-Key", "idem-body-read")
+			ctx := auth.WithUserID(auth.WithKeyID(auth.WithTenantID(req.Context(), "t1"), "key_a"), "")
+			handler.ServeHTTP(rec, req.WithContext(postgres.WithLivemode(ctx, false)))
+
+			if rec.Code != c.wantCode || !strings.Contains(rec.Body.String(), `"code":"`+c.wantErr+`"`) || calls != 0 {
+				t.Errorf("answer %d %s with the handler run %d time(s), want %d %s and 0", rec.Code, rec.Body, calls, c.wantCode, c.wantErr)
+			}
+		})
 	}
 }
