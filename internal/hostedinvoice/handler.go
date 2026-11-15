@@ -49,6 +49,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/invoice"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -125,7 +126,12 @@ type Handler struct {
 	// noBaseWarned makes the "no address" warning print once per process,
 	// not on every page view.
 	noBaseWarned sync.Once
+	// resolver decides the page's time from its invoice (decide).
+	resolver clock.Resolver
 }
+
+// SetResolver wires the clock resolver the page decides its time with.
+func (h *Handler) SetResolver(r clock.Resolver) { h.resolver = r }
 
 type Deps struct {
 	Invoices    InvoiceResolver
@@ -341,8 +347,29 @@ func (h *Handler) resolveInvoice(w http.ResponseWriter, r *http.Request) (domain
 	// 500 to the customer who clicked the email CTA. GetByPublicToken
 	// itself is mode-agnostic (TxBypass per the package doc); the pin
 	// has to happen here, after we know the row's livemode.
-	*r = *r.WithContext(postgres.WithLivemode(r.Context(), livemode))
+	ctx, err := h.decide(postgres.WithLivemode(r.Context(), livemode), inv)
+	if err != nil {
+		slog.WarnContext(r.Context(), "hostedinvoice: the invoice's test clock could not be read", "invoice_id", inv.ID, "error", err)
+		respond.FromError(w, r, errs.Unavailable("test_clock_unavailable",
+			"This invoice can't be opened right now. Please try again in a moment.", err), "invoice")
+		return domain.Invoice{}, false
+	}
+	*r = *r.WithContext(ctx)
 	return inv, true
+}
+
+// decide decides the page's time from the invoice its token names
+// (clock.DecideWithoutDoor: a public page does not come through the API's
+// door). The checkout it opens, and that checkout's audit row, carry the
+// decision. A not-found is the invoice, or, in a race with its clock's
+// deletion, its clock: real time is right in both. Any other failure is
+// clock.ErrUndecided, and the page answers 503 with nothing done.
+func (h *Handler) decide(ctx context.Context, inv domain.Invoice) (context.Context, error) {
+	decided, err := clock.DecideWithoutDoor(ctx, h.resolver, clock.Pin{TenantID: inv.TenantID, InvoiceID: inv.ID})
+	if errors.Is(err, errs.ErrNotFound) {
+		return clock.WithRealTime(ctx), nil
+	}
+	return decided, err
 }
 
 func (h *Handler) viewInvoice(w http.ResponseWriter, r *http.Request) {

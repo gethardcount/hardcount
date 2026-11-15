@@ -106,8 +106,8 @@ var clockRoutes = map[routeKey]clockDecl{
 	{"GET", "/v1/public/invoices/{token}"}:                  decidedIn("hostedinvoice.Handler.resolveInvoice"),
 	{"POST", "/v1/public/invoices/{token}/checkout"}:        decidedIn("hostedinvoice.Handler.resolveInvoice"),
 	{"GET", "/v1/public/invoices/{token}/pdf"}:              decidedIn("hostedinvoice.Handler.resolveInvoice"),
-	{"GET", "/v1/public/payment-updates/{token}"}:           decidedIn("payment.PublicPaymentHandler.validateToken"),
-	{"POST", "/v1/public/payment-updates/{token}/checkout"}: decidedIn("payment.PublicPaymentHandler.createCheckoutSession"),
+	{"GET", "/v1/public/payment-updates/{token}"}:           realTime(), // writes nothing
+	{"POST", "/v1/public/payment-updates/{token}/checkout"}: realTime(), // two audit rows, no money
 	{"GET", "/v1/public/cost-dashboard/{token}"}:            decidedIn("usage.CostDashboardAssembler.GetByToken"),
 
 	// --- tenant-wide reads and streams: each row by its stored dates ------
