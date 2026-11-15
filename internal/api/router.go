@@ -329,6 +329,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// Payment, webhook, checkout and refund handlers.
 	stripeRefunder := payment.NewStripeRefunder(stripeClients)
 	creditNoteSvc := creditnote.NewService(creditNoteStore, invoiceStore, stripeRefunder, &creditGrantAdapter{svc: creditSvc})
+	creditNoteSvc.SetClock(clk)
 	creditNoteSvc.SetNumberGenerator(settingsStore)
 	creditNoteH := creditnote.NewHandler(creditNoteSvc, creditnote.HandlerDeps{
 		Customers: customerStore,

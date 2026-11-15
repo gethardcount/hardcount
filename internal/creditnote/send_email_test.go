@@ -47,12 +47,18 @@ func (s cnStaticInvoices) Get(context.Context, string, string) (domain.Invoice, 
 	return s.inv, nil
 }
 
-func cnSendReq(t *testing.T, h *Handler, id, body string) *httptest.ResponseRecorder {
+// cnSendReq sends a credit note's email through the handler, on base when one
+// is given (the time the API's door decided), else on a plain request context.
+func cnSendReq(t *testing.T, h *Handler, id, body string, base ...context.Context) *httptest.ResponseRecorder {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/v1/credit-notes/"+id+"/send", bytes.NewBufferString(body))
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", id)
-	reqCtx := auth.WithTenantID(req.Context(), "t1")
+	parent := req.Context()
+	if len(base) > 0 {
+		parent = base[0]
+	}
+	reqCtx := auth.WithTenantID(parent, "t1")
 	reqCtx = context.WithValue(reqCtx, chi.RouteCtxKey, rctx)
 	req = req.WithContext(reqCtx)
 	rr := httptest.NewRecorder()

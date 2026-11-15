@@ -42,7 +42,15 @@ type Service struct {
 	auditLogger AuditEmitter
 	customers   CustomerReader
 	live        LiveBalanceReader
-	clock       clock.Clock
+	// clock is the server's clock: the router's clk, the one the engine
+	// bills by. A credit action's time is decided before it reaches the
+	// service: a request's by the API's door (api.clockDoor), from the
+	// customer in its URL, or for a grant or an adjustment by the service
+	// itself from the customer its body names (decideForCustomer); the
+	// engine's reads on the time of the work that makes them. Each entry
+	// point keeps that decision and, when it carries no instant (real time),
+	// reads this clock once (clock.EnsureEffectiveNow).
+	clock clock.Clock
 }
 
 func NewService(store Store) *Service {
@@ -122,11 +130,6 @@ func (s *Service) decideForCustomer(ctx context.Context, tenantID, customerID st
 			"The customer's test clock could not be read. Nothing was changed; send the request again.", err)
 	}
 	return clock.EnsureEffectiveNow(decided, s.clock), nil
-}
-
-func (s *Service) bindForCustomer(ctx context.Context, tenantID, customerID string) context.Context {
-	bound, _ := clock.BindEffectiveNow(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID})
-	return bound
 }
 
 type GrantInput struct {
@@ -793,11 +796,11 @@ func (s *Service) GetBalance(ctx context.Context, tenantID, customerID string) (
 
 // SpendableBalance is the credit a draw could use right now, per currency:
 // the ledger balance less any grant past its expiry that the sweep has not
-// written off yet. "Now" is the customer's own clock (the frozen time of a
-// test clock the customer is pinned to), the same instant a draw would judge
-// expiry at.
+// written off yet. "Now" is the time its caller decided (for a customer on
+// a test clock, that clock's frozen time), the same instant a draw would
+// judge expiry at.
 func (s *Service) SpendableBalance(ctx context.Context, tenantID, customerID string) (map[string]int64, error) {
-	ctx = s.bindForCustomer(ctx, tenantID, customerID)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	return s.store.GetSpendableBalance(ctx, tenantID, customerID, clock.Now(ctx))
 }
 

@@ -269,9 +269,10 @@ type Entry struct {
 // no filter at all:
 //
 //   - Two CREDIT-NOTE rows. The operator credit-note routes are otherwise
-//     covered: creditnote.Service binds the source invoice's pin
-//     (bindForInvoice) at Create, Issue, Void, RetryRefund, CreateRefund and
-//     CreateAndIssueCommitRelief, so their in-tx rows carry the sim axis. The
+//     covered: each is decided from its credit note or invoice (the API's
+//     door; a create, from the invoice its body names), and creditnote.Service
+//     keeps that decision at Create, Issue, Void, RetryRefund, CreateRefund
+//     and CreateAndIssueCommitRelief, so their in-tx rows carry the sim axis. The
 //     two exceptions: (a) the "send" row, which the handler emits on the
 //     unbound r.Context() although it sends the email on the bound ctx; and
 //     (b) the refund-status row of a Stripe refund webhook (ApplyRefundWebhook),

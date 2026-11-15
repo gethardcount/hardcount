@@ -15,6 +15,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
 // CustomerGetter resolves customer IDs to display names and billing profiles
@@ -627,11 +628,7 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Operator entry point on a clock-pinned entity (ADR-030): bind from
-	// the SOURCE INVOICE — the same rule the credit note's own timestamps
-	// follow — so the enqueued email carries the invoice's billing anchor
-	// (ADR-104) instead of enqueuing unanchored.
-	ctx := h.svc.bindForInvoice(r.Context(), tenantID, cn.InvoiceID)
+	ctx := clock.EnsureEffectiveNow(r.Context(), h.svc.clock) // the action's time: see Service.clock
 
 	bt, ci, orig := h.assemblePDFContext(ctx, tenantID, cn)
 	pdfBytes, err := RenderPDF(ctx, cn, items, orig, bt, ci)

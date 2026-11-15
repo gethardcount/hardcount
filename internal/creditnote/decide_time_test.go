@@ -122,9 +122,9 @@ func (a *answersOnce) SimForCustomer(context.Context, string, string) (clock.Sim
 	return clock.Sim{}, errors.New("not used")
 }
 
-// The route's decision stands for the whole create and issue: when the
-// lookups inside Create and Issue fail after the handler's succeeded, the
-// note is still created and issued at the decided clock's time.
+// The route's decision stands for the whole create and issue: the note is
+// created and issued at the decided clock's time, and nothing inside Create
+// or Issue looks the clock up again (the resolver would fail any second read).
 func TestCreateRoute_TheDecisionStandsForCreateAndIssue(t *testing.T) {
 	frozen := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
 	store := newMemStore()
@@ -150,8 +150,8 @@ func TestCreateRoute_TheDecisionStandsForCreateAndIssue(t *testing.T) {
 	if !cn.CreatedAt.Equal(frozen) || cn.IssuedAt == nil || !cn.IssuedAt.Equal(frozen) {
 		t.Errorf("created_at %v, issued_at %v; want both at the decided clock's %v", cn.CreatedAt, cn.IssuedAt, frozen)
 	}
-	if len(res.read) < 2 {
-		t.Errorf("lookups %v; want the handler's and at least one inside, which failed", res.read)
+	if len(res.read) != 1 {
+		t.Errorf("lookups %v; want only the route's", res.read)
 	}
 }
 
