@@ -17,9 +17,10 @@ import (
 // error answers (respond.InternalError), and logs the panic with its stack.
 // It replaces chi's Recoverer, which answered an empty 500.
 //
-// The log line's path is path(r), never the raw path: some public routes
-// carry a token in the path that works like a password, and path must
-// leave it out (the router passes the same function to TraceRequestAttrs).
+// The log line's path is path(r), never the raw path, because some public
+// links carry a link token in the path that works like a password.
+// path(r) must return a path that holds no link token. The router passes
+// loggablePath, the function it also gives TraceRequestAttrs.
 //
 // http.ErrAbortHandler is re-panicked, as net/http expects: it aborts the
 // response on purpose. A panic after the handler has started its answer

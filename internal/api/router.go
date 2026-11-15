@@ -2119,17 +2119,23 @@ func useRequestEdge(r chi.Router, trustProxy string) {
 	r.Use(mw.TraceRequestAttrs(loggablePath))
 }
 
-// loggablePath returns the request path with capability tokens removed.
-// Four routes carry a secret in the path that works like a bearer token:
-// hosted invoices, payment updates, the public cost dashboard and the team
-// invite preview. Logging the raw path would write live credentials into
-// every log sink. It prefers chi's matched route pattern
-// ("/v1/public/invoices/{token}"). When no pattern matched (a 404, or a
-// CORS preflight answered before routing), it redacts the segment after
-// any known token prefix instead, because an unmatched request on those
-// prefixes may still hold a secret. A new {token} route adds its prefix
-// here, and to deploy/compose/nginx-log-redact.conf, which keeps it out of
-// the Compose stack's nginx access logs.
+// loggablePath returns a path that holds no link token, for logs and
+// traces. Four routes carry a link token in the path that works like a
+// password: hosted invoices, payment updates, the public cost dashboard
+// and the team invite preview. It returns one of three things:
+//
+//   - When a route or a mount matched, chi's pattern, such as
+//     "/v1/public/invoices/{token}" or, for a miss under a mount,
+//     "/v1/public/invoices/*".
+//   - When nothing matched (a panic or a CORS preflight before routing, or
+//     a path outside every mount) and the path starts with one of the four
+//     routes' prefixes, the path with the segment after the prefix
+//     replaced by "[redacted]".
+//   - Any other path that matched nothing, as the client sent it.
+//
+// A new {token} route adds its prefix here, and to
+// deploy/compose/nginx-log-redact.conf, which keeps it out of the Compose
+// stack's nginx access logs.
 func loggablePath(r *http.Request) string {
 	if rctx := chi.RouteContext(r.Context()); rctx != nil {
 		if pat := rctx.RoutePattern(); pat != "" {
