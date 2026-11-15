@@ -249,7 +249,6 @@ func TestCollector_FirstRetryCountsFromTheFailure_RealStore(t *testing.T) {
 	before := time.Now().UTC().Truncate(time.Microsecond) // the engine's clock is fixed when it is built
 	svc := dunning.NewService(dstore, nil, nil)
 	e := h.newEng(testPaymentSetupsNoPM{}, testChargerSentinel{}, dunningServiceStarter{svc: svc})
-	svc.SetResolver(e)
 
 	cust, err := customer.NewPostgresStore(h.db).Create(h.ctx, h.tenantID, domain.Customer{ExternalID: "cus_anchor", DisplayName: "Anchor"})
 	if err != nil {
@@ -299,7 +298,6 @@ func TestStartDunning_ClockPinnedInvoiceCountsFromIssue_RealStore(t *testing.T) 
 	resolver := h.newEng(testPaymentSetupsNoPM{}, testChargerSentinel{}, nil)
 	resolver.SetCustomerReader(customer.NewPostgresStore(h.db)) // as api/router.go wires it
 	resolver.SetTestClockReader(testclock.NewPostgresStore(h.db))
-	svc.SetResolver(resolver)
 
 	frozen := time.Date(2027, 3, 20, 0, 0, 0, 0, time.UTC)
 	clockID := postgres.NewID("hc_tclk")
@@ -340,12 +338,11 @@ func (decliningRetrier) RetryPayment(context.Context, string, string, string) er
 	return fmt.Errorf("card declined")
 }
 
-// A wall-clock retry that runs late — the scheduler was down, or its first
+// A retry at real time that runs late — the scheduler was down, or its first
 // retry was mis-anchored in the past — schedules the next one from when it
-// ran, not from when it was due. With the production resolver wired, every
-// run used to read as simulated, so each later retry was dated in the past
-// too and fired on the next tick (VLX-000081: "Oct 4" then "Oct 7", both on
-// Oct 11).
+// ran, not from when it was due. Had a run at real time read as on a test
+// clock, each later retry would be dated in the past too and fire on the next
+// tick.
 func TestProcessDueRuns_LateWallClockRetryKeepsCadence_RealStore(t *testing.T) {
 	h := newCollectHarness(t)
 	dstore := dunning.NewPostgresStore(h.db)
@@ -360,7 +357,6 @@ func TestProcessDueRuns_LateWallClockRetryKeepsCadence_RealStore(t *testing.T) {
 	resolver := h.newEng(testPaymentSetupsNoPM{}, testChargerSentinel{}, nil)
 	resolver.SetCustomerReader(customer.NewPostgresStore(h.db))
 	resolver.SetTestClockReader(testclock.NewPostgresStore(h.db))
-	svc.SetResolver(resolver)
 
 	inv := h.seed(t, "INV-CADENCE-1")
 	// The invoice is on no clock: the failure that starts dunning is decided at real time.
@@ -408,7 +404,6 @@ func TestStartDunning_ClockPinnedChargedLater_OneRetryNotTheCampaign_RealStore(t
 	resolver := h.newEng(testPaymentSetupsNoPM{}, testChargerSentinel{}, nil)
 	resolver.SetCustomerReader(customer.NewPostgresStore(h.db))
 	resolver.SetTestClockReader(testclock.NewPostgresStore(h.db))
-	svc.SetResolver(resolver)
 
 	issued := time.Date(2027, 5, 1, 0, 0, 0, 0, time.UTC)  // cycle close; paused → draft
 	charged := time.Date(2027, 6, 1, 0, 0, 0, 0, time.UTC) // finalized and declined on a later Advance
@@ -471,7 +466,6 @@ func TestCollector_CardlessDraftCollectedLater_CountsFromCollection_RealStore(t 
 	e := h.newEng(testPaymentSetupsNoPM{}, testChargerSentinel{}, dunningServiceStarter{svc: svc})
 	e.SetCustomerReader(customer.NewPostgresStore(h.db))
 	e.SetTestClockReader(testclock.NewPostgresStore(h.db))
-	svc.SetResolver(e)
 
 	issued := time.Date(2027, 5, 1, 0, 0, 0, 0, time.UTC)
 	frozen := time.Date(2027, 6, 5, 0, 0, 0, 0, time.UTC) // the Advance that collects it
