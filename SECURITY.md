@@ -59,7 +59,7 @@ In place:
 - **Logs:** the token in a link, such as a hosted invoice or invite link, is redacted from the API's access log and traces, and from the Compose stack's nginx access logs.
 - **Webhooks:** outbound events signed with HMAC-SHA256; inbound Stripe events verified.
 - **Audit log:** append-only; a database trigger refuses any update or delete.
-- **Supply chain:** CI runs `govulncheck` and scans the images with Trivy; release images carry an SBOM and are signed ([Verify a release](docs/ops/verify-a-release.md)). GitHub secret scanning and push protection are on, so a commit that holds a known secret format is refused before it is public.
+- **Supply chain:** CI runs `govulncheck`, scans the code with CodeQL and scans the images with Trivy; release images carry an SBOM and are signed ([Verify a release](docs/ops/verify-a-release.md)). GitHub secret scanning and push protection are on, so a commit that holds a known secret format is refused before it is public.
 
 Known gaps:
 
