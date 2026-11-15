@@ -240,6 +240,13 @@ while Hardcount keeps serving: installs upgrade with their data in place.
   `SET LOCAL app.livemode = 'on'` (live rows) or `'off'` (test rows) first.
   The table's `set_livemode` trigger stamps each new row's mode from that
   setting, and refuses the insert when it is unset.
+- **Remove a table or a column.** Merge the code that stops reading and
+  writing it first. Then drop it in a normal file whose Down creates the
+  table or column again, empty. The rows are not kept. Hardcount has no
+  known production install yet, so a removal has no step that copies its
+  data elsewhere, no release that still accepts the removed field and no
+  check that stops the upgrade. The `CHANGELOG.md` entry names what was
+  removed. This changes with the first production install.
 
 **Never edit a file once it is merged.** A database that already ran it
 has recorded its number and never runs it again, so an edit reaches only
