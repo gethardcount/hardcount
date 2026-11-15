@@ -966,7 +966,8 @@ func TestCancel_SnapshotMoved_ReplansOnce_SwapReanchorsThePeriod(t *testing.T) {
 		time.Sleep(time.Until(swapAt))
 	}
 
-	canceled, _, err := r.subSvc.Cancel(r.ctx, r.tenantID, r.sub.ID)
+	// The subscription is on no clock: the API's door decides real time.
+	canceled, _, err := r.subSvc.Cancel(clock.WithRealTime(r.ctx), r.tenantID, r.sub.ID)
 	if err != nil {
 		t.Fatalf("cancel: %v", err)
 	}

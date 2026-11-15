@@ -268,7 +268,7 @@ func TestCollector_FirstRetryCountsFromTheFailure_RealStore(t *testing.T) {
 		t.Fatalf("create invoice: %v", err)
 	}
 
-	e.RetryPendingCharges(h.ctx, 50, nil)
+	e.RetryPendingCharges(clock.WithRealTime(h.ctx), 50, nil) // a job's tick, decided at real time as the scheduler decides it
 	after := time.Now().UTC()
 
 	run, err := dstore.GetRunByInvoice(h.ctx, h.tenantID, inv.ID)
@@ -324,7 +324,8 @@ func TestStartDunning_ClockPinnedInvoiceCountsFromIssue_RealStore(t *testing.T) 
 		t.Fatalf("create invoice: %v", err)
 	}
 
-	run, err := svc.StartDunning(h.ctx, h.tenantID, inv.ID, cust.ID, issued, domain.DunningCausePaymentFailed)
+	// The failure that starts dunning is decided at the invoice's clock.
+	run, err := svc.StartDunning(testutil.DecidedFor(t, resolver, clock.Pin{TenantID: h.tenantID, InvoiceID: inv.ID}), h.tenantID, inv.ID, cust.ID, issued, domain.DunningCausePaymentFailed)
 	if err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}
@@ -362,7 +363,8 @@ func TestProcessDueRuns_LateWallClockRetryKeepsCadence_RealStore(t *testing.T) {
 	svc.SetResolver(resolver)
 
 	inv := h.seed(t, "INV-CADENCE-1")
-	run, err := svc.StartDunning(h.ctx, h.tenantID, inv.ID, inv.CustomerID, inv.IssuedAtOrZero(), domain.DunningCausePaymentFailed)
+	// The invoice is on no clock: the failure that starts dunning is decided at real time.
+	run, err := svc.StartDunning(clock.WithRealTime(h.ctx), h.tenantID, inv.ID, inv.CustomerID, inv.IssuedAtOrZero(), domain.DunningCausePaymentFailed)
 	if err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}
@@ -370,7 +372,7 @@ func TestProcessDueRuns_LateWallClockRetryKeepsCadence_RealStore(t *testing.T) {
 	overdue := time.Now().UTC().Add(-10 * 24 * time.Hour)
 	execTx(t, h.db, h.ctx, h.tenantID, `UPDATE invoice_dunning_runs SET next_action_at = $1 WHERE id = $2`, overdue, run.ID)
 
-	tick := leadertest.Token(t, testutil.AdminPool(t), h.ctx, leader.RoleDunning) // a led dunning tick, as the scheduler runs it
+	tick := leadertest.Token(t, testutil.AdminPool(t), clock.WithRealTime(h.ctx), leader.RoleDunning) // a led dunning tick, as the scheduler runs and decides it
 	if _, errs := svc.ProcessDueRuns(tick, h.tenantID, 20); len(errs) > 0 {
 		t.Fatalf("process due runs: %v", errs)
 	}
@@ -429,7 +431,8 @@ func TestStartDunning_ClockPinnedChargedLater_OneRetryNotTheCampaign_RealStore(t
 		t.Fatalf("create invoice: %v", err)
 	}
 
-	run, err := svc.StartDunning(h.ctx, h.tenantID, inv.ID, cust.ID, charged, domain.DunningCausePaymentFailed)
+	// The failure that starts dunning is decided at the invoice's clock.
+	run, err := svc.StartDunning(testutil.DecidedFor(t, resolver, clock.Pin{TenantID: h.tenantID, InvoiceID: inv.ID}), h.tenantID, inv.ID, cust.ID, charged, domain.DunningCausePaymentFailed)
 	if err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}
@@ -437,7 +440,8 @@ func TestStartDunning_ClockPinnedChargedLater_OneRetryNotTheCampaign_RealStore(t
 		t.Fatalf("first retry = %v, want %v (charge + 3d)", run.NextActionAt, want)
 	}
 
-	if _, errs := svc.ProcessDueRunsForClock(h.ctx, h.tenantID, clockID, frozen, 50); len(errs) > 0 {
+	// The clock's catch-up decides the clock before it runs dunning.
+	if _, errs := svc.ProcessDueRunsForClock(clock.WithSim(h.ctx, clock.Sim{At: frozen, TestClockID: clockID}), h.tenantID, clockID, frozen, 50); len(errs) > 0 {
 		t.Fatalf("process due runs for clock: %v", errs)
 	}
 	got, err := dstore.GetRunByInvoice(h.ctx, h.tenantID, inv.ID)

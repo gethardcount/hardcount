@@ -141,7 +141,9 @@ func newZeroDueDunningRig(t *testing.T, name string) *zeroDueDunningRig {
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)
 	t.Cleanup(cancel)
 	ctx = leadertest.Token(t, testutil.AdminPool(t), ctx, leader.RoleDunning)
-	r := &zeroDueDunningRig{t: t, ctx: ctx, db: db, srv: NewServer(db, clock.Real(), nil),
+	// Decided at real time: the dunning tick decides it, and the credit note's
+	// invoice is on no clock, so its route decides the same.
+	r := &zeroDueDunningRig{t: t, ctx: clock.WithRealTime(ctx), db: db, srv: NewServer(db, clock.Real(), nil),
 		tenantID: testutil.CreateTestTenant(t, db, name), invoices: invoice.NewPostgresStore(db), runs: dunning.NewPostgresStore(db)}
 
 	policy, err := r.srv.DunningSvc.UpsertPolicy(ctx, r.tenantID, dunning.DefaultSeedPolicy())

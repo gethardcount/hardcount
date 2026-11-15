@@ -218,7 +218,15 @@ func runScheduleCase(t *testing.T, tc scheduleCase, arm string) {
 		t.Fatalf("set default policy: %v", err)
 	}
 
-	run, err := svc.StartDunning(ctx, tenantID, inv.ID, cust.ID, diffFailedAt, domain.DunningCausePaymentFailed)
+	// The failure that starts dunning is decided at the invoice's time: its
+	// clock on the clock arm, real time on the wall-clock arm.
+	failCtx := clock.WithRealTime(ctx)
+	if onClock {
+		if failCtx, err = clock.Decide(ctx, resolver, clock.Pin{TenantID: tenantID, InvoiceID: inv.ID}); err != nil {
+			t.Fatalf("decide the failure's time: %v", err)
+		}
+	}
+	run, err := svc.StartDunning(failCtx, tenantID, inv.ID, cust.ID, diffFailedAt, domain.DunningCausePaymentFailed)
 	if err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}

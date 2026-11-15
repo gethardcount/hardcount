@@ -325,7 +325,7 @@ production-shaped resolver) and
 `TestSucceeded_SignedWebhook_PaidAtIsThePIAnchor`,
 `TestStartDunning_ClockPinnedChargedLater_OneRetryNotTheCampaign_RealStore`,
 `TestCollector_CardlessDraftCollectedLater_CountsFromCollection_RealStore`
-and `TestCollectPayment_ChargesInTheInvoicesClock`.
+and `TestCollectPayment_ChargesOnTheDecidedClock`.
 Each is mutation-verified against the code it replaced. The last one, run
 with the issue instant, shows the old failure: retry 1 at May 4 and the run
 escalated within one Advance.

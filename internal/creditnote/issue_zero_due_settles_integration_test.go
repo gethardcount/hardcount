@@ -122,7 +122,12 @@ func newZeroDueRig(t *testing.T, name string, payment domain.InvoicePaymentStatu
 	notes.SetNumberGenerator(settings)
 	at := time.Date(2026, 9, 14, 10, 30, 0, 0, time.UTC)
 	notes.SetResolver(pinnedClock{at: at})
-	return &zeroDueRig{ctx: ctx, db: db, tenantID: tenantID, inv: inv, invStore: invStore, notes: notes, at: at}
+	// The notes' time, as their routes decide it from the invoice.
+	decided, err := clock.Decide(ctx, pinnedClock{at: at}, clock.Pin{TenantID: tenantID, InvoiceID: inv.ID})
+	if err != nil {
+		t.Fatalf("decide the notes' time: %v", err)
+	}
+	return &zeroDueRig{ctx: decided, db: db, tenantID: tenantID, inv: inv, invStore: invStore, notes: notes, at: at}
 }
 
 func (r *zeroDueRig) draft(t *testing.T, cents int64) domain.CreditNote {

@@ -493,6 +493,6 @@ removes an asymmetry rather than creating one — previously two identical
 credit notes on the same simulated invoice were treated differently based
 on who created them.
 
-Regression: `TestOperatorCreditNote_StampsSimulatedTime` (mutation-verified)
+Regression: `TestOperatorCreditNote_StampsTheDecidedTime` (mutation-verified)
 plus an unpinned negative; `TestCreate_IsSimulated`'s middle case amended
 from "operator HTTP issue → wall-clock" to "→ simulated".
