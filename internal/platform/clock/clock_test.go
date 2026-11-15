@@ -580,3 +580,42 @@ func TestDecideWithoutDoor(t *testing.T) {
 		})
 	}
 }
+
+// DecideOrRealTime: the record's clock; a not-found is real time; any other
+// failure is ErrUndecided; live mode and no resolver decide nothing.
+func TestDecideOrRealTime(t *testing.T) {
+	frozen := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
+	testMode := postgres.WithLivemode(context.Background(), false)
+	answer := func(s Sim, err error) *stubResolver {
+		return &stubResolver{custFunc: func() (Sim, error) { return s, err }}
+	}
+	pin := Pin{TenantID: "t1", CustomerID: "cus_1"}
+	for _, c := range []struct {
+		name      string
+		ctx       context.Context
+		r         Resolver
+		wantClock string
+		wantReal  bool
+		wantErr   bool
+	}{
+		{"the record's clock", testMode, answer(Sim{At: frozen, TestClockID: "clk_1"}, nil), "clk_1", false, false},
+		{"a record on no clock is real time", testMode, answer(Sim{At: frozen}, nil), "", true, false},
+		{"a not-found is real time", testMode, answer(Sim{}, fmt.Errorf("read test clock clk_gone: %w", errs.ErrNotFound)), "", true, false},
+		{"any other failure is undecided", testMode, answer(Sim{}, errors.New("connection reset by peer")), "", false, true},
+		{"live mode decides nothing", postgres.WithLivemode(context.Background(), true), answer(Sim{}, errors.New("must not be read")), "", false, false},
+		{"no resolver decides nothing", testMode, nil, "", false, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			ctx, err := DecideOrRealTime(c.ctx, c.r, pin)
+			if c.wantErr != (err != nil) || (c.wantErr && !errors.Is(err, ErrUndecided)) {
+				t.Fatalf("err %v; want error %v (ErrUndecided)", err, c.wantErr)
+			}
+			if sim, _ := SimOf(ctx); sim.TestClockID != c.wantClock {
+				t.Errorf("clock %q; want %q", sim.TestClockID, c.wantClock)
+			}
+			if d, ok := Decision(ctx); c.wantReal && (!ok || !d.At.IsZero() || d.TestClockID != "") {
+				t.Errorf("decision %+v (%v); want real time", d, ok)
+			}
+		})
+	}
+}

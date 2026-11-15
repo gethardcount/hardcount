@@ -1675,18 +1675,14 @@ func (s *Stripe) decideFor(ctx context.Context, pin clock.Pin) (context.Context,
 	return clock.DecideWithoutDoor(ctx, s.resolver, pin)
 }
 
-// decideForCustomer is decideFor for an event that names a customer it has
-// not read. Any not-found gets real time, and the handler's own path answers
-// the event as before: either the customer does not exist, or it exists and
+// decideForCustomer decides an event that names a customer it has not read,
+// with clock.DecideOrRealTime. Any not-found gets real time, and the
+// handler's own path answers the event as before: either the customer does not exist, or it exists and
 // its clock was not found, which can only be a race with that clock's
 // deletion (customers.test_clock_id is ON DELETE SET NULL), after which the
 // customer is on no clock and real time is right.
 func (s *Stripe) decideForCustomer(ctx context.Context, tenantID, customerID string) (context.Context, error) {
-	decided, err := s.decideFor(ctx, clock.Pin{TenantID: tenantID, CustomerID: customerID})
-	if errors.Is(err, errs.ErrNotFound) {
-		return clock.WithRealTime(ctx), nil
-	}
-	return decided, err
+	return clock.DecideOrRealTime(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID})
 }
 
 // isTransientWebhookError reports whether a webhook processing error is

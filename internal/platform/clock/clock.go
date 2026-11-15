@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -225,13 +226,29 @@ func DecidesWithoutDoor(ctx context.Context, r Resolver) (bool, error) {
 // DecideWithoutDoor decides the time of work on a record that did not come
 // through the API's door (see DecidesWithoutDoor). When DecidesWithoutDoor
 // says it decides: the record's clock, or real time for a record on no clock
-// (Decide); else ctx unchanged. A failure is ErrUndecided.
+// (Decide); else ctx unchanged. A failure is ErrUndecided. A request or a
+// page that names its record calls DecideOrRealTime, for which a not-found
+// means going on at real time; an event or a job's row calls this, for which
+// a not-found means the record is not here yet, or is gone.
 func DecideWithoutDoor(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
 	decides, err := DecidesWithoutDoor(ctx, r)
 	if err != nil || !decides {
 		return ctx, err
 	}
 	return Decide(ctx, r, p)
+}
+
+// DecideOrRealTime is DecideWithoutDoor for a request or a page that names
+// its record. A not-found is the record, or, in a race with its clock's
+// deletion, its clock: real time is right in both. Any other failure is
+// returned (ErrUndecided over its cause), for the caller to refuse with its
+// own message: what it did not record, create or show.
+func DecideOrRealTime(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
+	decided, err := DecideWithoutDoor(ctx, r, p)
+	if errors.Is(err, errs.ErrNotFound) {
+		return WithRealTime(ctx), nil
+	}
+	return decided, err
 }
 
 // Decision returns what was decided for ctx's time, and whether anything
