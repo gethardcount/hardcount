@@ -1575,7 +1575,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	r.Use(mw.CORS(allowedOrigins))
 	r.Use(mw.Metrics())
 	r.Use(requestLogger)
-	r.Use(mw.Recoverer)
+	r.Use(mw.Recoverer(loggablePath))
 
 	// Cap every request body (limitRequestBody): 1 MB, or the LiteLLM
 	// adapter's own larger cap.
