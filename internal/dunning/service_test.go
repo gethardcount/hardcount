@@ -10,6 +10,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/testutil"
+
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
@@ -1128,7 +1130,7 @@ func TestClockResolver_StampsFrozenDomain(t *testing.T) {
 		svc := NewService(store, &noopRetrier{}, nil)
 		svc.SetResolver(resolver)
 
-		run, err := svc.StartDunning(context.Background(), "t1", "inv_1", "cus_1", frozen, domain.DunningCausePaymentFailed)
+		run, err := svc.StartDunning(testutil.DecidedFor(t, resolver, clock.Pin{TenantID: "t1", InvoiceID: "inv_1"}), "t1", "inv_1", "cus_1", frozen, domain.DunningCausePaymentFailed)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -1156,7 +1158,7 @@ func TestClockResolver_StampsFrozenDomain(t *testing.T) {
 		store := newMemStore()
 		svc := NewService(store, &failingRetrier{}, nil)
 		svc.SetResolver(resolver)
-		ctx := context.Background()
+		ctx := testutil.DecidedFor(t, resolver, clock.Pin{TenantID: "t1", InvoiceID: "inv_1"})
 
 		run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", frozen, domain.DunningCausePaymentFailed)
 		// Mark run as due so processRun picks it up.
@@ -1187,7 +1189,7 @@ func TestClockResolver_StampsFrozenDomain(t *testing.T) {
 		store := newMemStore()
 		svc := NewService(store, &noopRetrier{}, nil)
 		svc.SetResolver(resolver)
-		ctx := context.Background()
+		ctx := testutil.DecidedFor(t, resolver, clock.Pin{TenantID: "t1", InvoiceID: "inv_1"})
 
 		run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", frozen, domain.DunningCausePaymentFailed)
 		resolved, err := svc.ResolveRun(ctx, "t1", run.ID, domain.ResolutionPaymentRecovered)
@@ -1233,7 +1235,7 @@ func TestClockResolver_ErrorFallback(t *testing.T) {
 	svc.SetResolver(&stubClockResolver{err: fmt.Errorf("invoice gone")})
 
 	before := time.Now().UTC()
-	run, err := svc.StartDunning(context.Background(), "t1", "inv_1", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
+	run, err := svc.StartDunning(testutil.AtRealTime(), "t1", "inv_1", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
 	after := time.Now().UTC()
 	if err != nil {
 		t.Fatalf("StartDunning should not fail on resolver error: %v", err)

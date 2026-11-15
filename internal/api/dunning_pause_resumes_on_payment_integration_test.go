@@ -41,7 +41,8 @@ type pauseRig struct {
 func newPauseRig(t *testing.T, name string, invoiceAction domain.DunningInvoiceAction) *pauseRig {
 	t.Helper()
 	r := &pauseRig{datesRig: newDatesRig(t, name), admin: testutil.AdminPool(t)}
-	r.ctx = leadertest.Token(t, r.admin, postgres.WithLivemode(context.Background(), false), leader.RoleDunning)
+	// The dunning tick's root, decided at real time as the scheduler decides it.
+	r.ctx = clock.WithRealTime(leadertest.Token(t, r.admin, postgres.WithLivemode(context.Background(), false), leader.RoleDunning))
 	r.invs = invoice.NewPostgresStore(r.db)
 	r.runs = dunning.NewPostgresStore(r.db)
 	pol, err := r.srv.DunningSvc.UpsertPolicy(r.ctx, r.tenantID, domain.DunningPolicy{

@@ -13,6 +13,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 type memStore struct {
@@ -1464,7 +1465,8 @@ func TestOperatorCreditNote_StampsSimulatedTime(t *testing.T) {
 	svc.SetNumberGenerator(&fakeCNNumbers{})
 	svc.SetResolver(&simResolver{at: simAt})
 
-	cn, err := svc.Create(context.Background(), "t1", CreateInput{
+	// The note's time, as its route's handler decides it from the invoice.
+	cn, err := svc.Create(testutil.DecidedFor(t, svc.resolver, clock.Pin{TenantID: "t1", InvoiceID: "inv_sim"}), "t1", CreateInput{
 		InvoiceID: "inv_sim",
 		Reason:    "Goodwill credit",
 		Lines:     []CreditLineInput{{Description: "adjustment", Quantity: 1, UnitAmountCents: 500}},

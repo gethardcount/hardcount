@@ -12,6 +12,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // ctxCapturingCharger records the ctx the charge ran under.
@@ -64,7 +65,8 @@ func TestCollectPayment_ChargesInTheInvoicesClock(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/invoices/"+inv.ID+"/collect", nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", inv.ID)
-	reqCtx := auth.WithTenantID(req.Context(), "t1")
+	// The request's time, as the API's door decides it for the invoice.
+	reqCtx := auth.WithTenantID(testutil.DecidedFor(t, svc.resolver, clock.Pin{TenantID: "t1", InvoiceID: inv.ID}), "t1")
 	reqCtx = context.WithValue(reqCtx, chi.RouteCtxKey, rctx)
 	rr := httptest.NewRecorder()
 	h.collectPayment(rr, req.WithContext(reqCtx))

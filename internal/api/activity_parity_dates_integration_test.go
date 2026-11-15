@@ -391,7 +391,11 @@ func TestActivityDates_HostedPageAttempts(t *testing.T) {
 		req.bearer = key
 		return flowDo(t, ts, method, path, req)
 	}
-	webhook := postgres.WithLivemode(context.Background(), false) // a webhook carries no clock
+	// A webhook's time, decided from the invoice it names, as its handler
+	// decides it.
+	webhook := func(t *testing.T, invoiceID string) context.Context {
+		return testutil.DecidedFor(t, srv.BillingEngine, clock.Pin{TenantID: hr.tenantID, InvoiceID: invoiceID})
+	}
 
 	frozen := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
 	clockID := flowStr(call("POST", "/v1/test-clocks", flowReq{body: map[string]any{
@@ -428,7 +432,7 @@ func TestActivityDates_HostedPageAttempts(t *testing.T) {
 	}
 	hostedFailure := func(invoiceID, pi, purpose string) {
 		t.Helper()
-		if err := hr.charger.SettleFailed(webhook, hr.tenantID, hr.invoice(invoiceID), payment.PaymentFailure{
+		if err := hr.charger.SettleFailed(webhook(t, invoiceID), hr.tenantID, hr.invoice(invoiceID), payment.PaymentFailure{
 			PaymentIntentID: pi, Purpose: purpose, Message: "Your card was declined.", DeclineCode: "generic_decline",
 		}, payment.SourceWebhook); err != nil {
 			t.Fatalf("settle failed %s: %v", pi, err)
@@ -466,7 +470,7 @@ func TestActivityDates_HostedPageAttempts(t *testing.T) {
 
 	t.Run("test clock: a hosted-page payment succeeds", func(t *testing.T) {
 		id := newInvoice("pay", clockID)
-		if err := hr.charger.SettleSucceeded(webhook, hr.tenantID, hr.invoice(id), "pi_hosted_ok", 4900, payment.SourceWebhook); err != nil {
+		if err := hr.charger.SettleSucceeded(webhook(t, id), hr.tenantID, hr.invoice(id), "pi_hosted_ok", 4900, payment.SourceWebhook); err != nil {
 			t.Fatalf("settle succeeded: %v", err)
 		}
 		inv := hr.invoice(id)

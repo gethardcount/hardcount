@@ -2,9 +2,11 @@ package dunning
 
 import (
 	"context"
-	"github.com/gethardcount/hardcount/internal/domain"
 	"testing"
 	"time"
+
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/testutil"
 
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
@@ -50,7 +52,7 @@ func testWallClockCadenceAfterDowntime(t *testing.T, withResolver bool) {
 	if withResolver {
 		svc.SetResolver(wallClockResolver{now: recoveryNow})
 	}
-	ctx := context.Background()
+	ctx := testutil.AtRealTime() // where the scheduler's tick starts
 
 	run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", recoveryNow.Add(-30*24*time.Hour), domain.DunningCausePaymentFailed)
 	// Simulate multi-interval scheduler downtime: this run was due 10 days ago

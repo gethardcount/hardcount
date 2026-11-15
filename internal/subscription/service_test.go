@@ -15,6 +15,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // memStore is an in-memory Store implementation used across the subscription
@@ -3749,6 +3750,11 @@ func TestSubMutators_StampSimTimeOnClockPinnedSub(t *testing.T) {
 	// Helper: build a fresh service + clock-pinned sub for each case.
 	// The resolver looks up by sub id; subID is the same string the
 	// mem store mints (hc_sub_1) so the resolver always resolves.
+	// decided is the request's time, as the API's door decides it for the
+	// subscription: its clock.
+	decided := func(t *testing.T, svc *Service, sub domain.Subscription) context.Context {
+		return testutil.DecidedFor(t, svc.resolver, clock.Pin{TenantID: "t1", SubscriptionID: sub.ID})
+	}
 	newPinned := func(t *testing.T, status domain.SubscriptionStatus) (*Service, domain.Subscription) {
 		t.Helper()
 		store := newMemStore()
@@ -3780,7 +3786,7 @@ func TestSubMutators_StampSimTimeOnClockPinnedSub(t *testing.T) {
 	// CanceledAt) on the returned domain object must equal frozen.
 	t.Run("Cancel", func(t *testing.T) {
 		svc, sub := newPinned(t, domain.SubscriptionActive)
-		out, _, err := svc.Cancel(context.Background(), "t1", sub.ID)
+		out, _, err := svc.Cancel(decided(t, svc, sub), "t1", sub.ID)
 		if err != nil {
 			t.Fatalf("Cancel: %v", err)
 		}
@@ -3794,7 +3800,7 @@ func TestSubMutators_StampSimTimeOnClockPinnedSub(t *testing.T) {
 
 	t.Run("AddItem", func(t *testing.T) {
 		svc, sub := newPinned(t, domain.SubscriptionActive)
-		item, err := svc.AddItem(context.Background(), "t1", sub.ID, AddItemInput{PlanID: "pln_2", Quantity: 1})
+		item, err := svc.AddItem(decided(t, svc, sub), "t1", sub.ID, AddItemInput{PlanID: "pln_2", Quantity: 1})
 		if err != nil {
 			t.Fatalf("AddItem: %v", err)
 		}
@@ -3806,11 +3812,11 @@ func TestSubMutators_StampSimTimeOnClockPinnedSub(t *testing.T) {
 	t.Run("RemoveItem", func(t *testing.T) {
 		// Two items on the sub so RemoveItem isn't rejected as last-item.
 		svc, sub := newPinned(t, domain.SubscriptionActive)
-		extra, err := svc.AddItem(context.Background(), "t1", sub.ID, AddItemInput{PlanID: "pln_2", Quantity: 1})
+		extra, err := svc.AddItem(decided(t, svc, sub), "t1", sub.ID, AddItemInput{PlanID: "pln_2", Quantity: 1})
 		if err != nil {
 			t.Fatalf("seed extra item: %v", err)
 		}
-		if err := svc.RemoveItem(context.Background(), "t1", sub.ID, extra.ID); err != nil {
+		if err := svc.RemoveItem(decided(t, svc, sub), "t1", sub.ID, extra.ID); err != nil {
 			t.Fatalf("RemoveItem: %v", err)
 		}
 		// RemoveItem returns no row — assert by reading the parent sub
@@ -3827,7 +3833,7 @@ func TestSubMutators_StampSimTimeOnClockPinnedSub(t *testing.T) {
 		if err != nil {
 			t.Fatalf("seed pending plan: %v", err)
 		}
-		item, _, err := svc.CancelPendingItemChange(context.Background(), "t1", sub.ID, sub.Items[0].ID)
+		item, _, err := svc.CancelPendingItemChange(decided(t, svc, sub), "t1", sub.ID, sub.Items[0].ID)
 		if err != nil {
 			t.Fatalf("CancelPendingItemChange: %v", err)
 		}

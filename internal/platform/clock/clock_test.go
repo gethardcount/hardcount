@@ -1,13 +1,17 @@
 package clock
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"github.com/gethardcount/hardcount/internal/errs"
-	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"log/slog"
+	"strings"
 	"testing"
 	"time"
+
+	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // TestRealClock_FallbackAndBinding covers the two branches of Real()
@@ -138,6 +142,7 @@ func TestEffectiveNow(t *testing.T) {
 // sub → customer), the resolver-error fallback, and the no-resolver
 // shortcut.
 func TestBindEffectiveNow(t *testing.T) {
+	checksAsInProduction(t) // these cases are what production does when a check fails
 	frozen := time.Date(2024, 2, 1, 12, 0, 0, 0, time.UTC)
 
 	t.Run("nil resolver returns ctx unchanged", func(t *testing.T) {
@@ -261,6 +266,7 @@ func TestBindEffectiveNow(t *testing.T) {
 // Services re-bind under catchup all the time (dunning, payment reconciler,
 // invoice, subscription), so this is the common path, not an edge case.
 func TestBindEffectiveNow_NeverDowngradesAnInheritedBinding(t *testing.T) {
+	checksAsInProduction(t) // these cases are what production does when a check fails
 	frozen := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
 	catchup := WithSim(context.Background(), Sim{At: frozen, TestClockID: "hc_tclk_1"})
 
@@ -320,6 +326,7 @@ func TestBindEffectiveNow_NeverDowngradesAnInheritedBinding(t *testing.T) {
 // answer frozen_time, so taking it dated every effect below the rebind at the
 // advance's target (P-5 in the activity line standard).
 func TestBindEffectiveNow_KeepsAContractedInstantOnTheSameClock(t *testing.T) {
+	checksAsInProduction(t) // these cases are what production does when a check fails
 	frozen := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
 	slot := frozen.Add(-9 * 24 * time.Hour)
 	resolvesTo := func(s Sim) *stubResolver {
@@ -662,5 +669,78 @@ func TestEnsureEffectiveNow(t *testing.T) {
 				t.Errorf("a second read gives %v; want the bound %v", again, at)
 			}
 		})
+	}
+}
+
+// checksAsInProduction turns BindEffectiveNow's transitional checks into
+// what production does with them (log, and go on) for the rest of the test.
+func checksAsInProduction(t *testing.T) {
+	t.Helper()
+	nestedLookupsAreFatal = false
+	t.Cleanup(func() { nestedLookupsAreFatal = testing.Testing() })
+}
+
+// panics reports whether f panics.
+func panics(f func()) (did bool) {
+	defer func() { did = recover() != nil }()
+	f()
+	return false
+}
+
+// Under go test, a nested lookup that disagrees with the decision on the
+// context, or runs in test mode with none, panics. It compares clocks, never
+// instants; a bare instant names no clock and is not compared; live mode
+// needs no decision.
+func TestBindEffectiveNow_ChecksPanicUnderTests(t *testing.T) {
+	frozen := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
+	testMode := postgres.WithLivemode(context.Background(), false)
+	onClock := func(id string) *stubResolver {
+		return &stubResolver{subFunc: func() (Sim, error) { return Sim{At: frozen, TestClockID: id}, nil }}
+	}
+	onNone := &stubResolver{subFunc: func() (Sim, error) { return Sim{At: frozen}, nil }}
+	pin := Pin{TenantID: "t1", SubscriptionID: "sub_1"}
+	for _, c := range []struct {
+		name  string
+		ctx   context.Context
+		r     Resolver
+		fatal bool
+	}{
+		{"another clock than the decided one", WithSim(testMode, Sim{At: frozen, TestClockID: "clk_1"}), onClock("clk_2"), true},
+		{"no clock under a decided clock", WithSim(testMode, Sim{At: frozen, TestClockID: "clk_1"}), onNone, true},
+		{"a clock under decided real time", WithRealTime(testMode), onClock("clk_1"), true},
+		{"test mode, nothing decided", testMode, onClock("clk_1"), true},
+		{"no mode, nothing decided", context.Background(), onNone, true},
+		{"the decided clock", WithSim(testMode, Sim{At: frozen.Add(-time.Hour), TestClockID: "clk_1"}), onClock("clk_1"), false},
+		{"real time, record on no clock", WithRealTime(testMode), onNone, false},
+		{"a bare instant names no clock", WithEffectiveNow(testMode, frozen), onClock("clk_1"), false},
+		{"live mode, nothing decided", postgres.WithLivemode(context.Background(), true), onNone, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			if got := panics(func() { BindEffectiveNow(c.ctx, c.r, pin) }); got != c.fatal {
+				t.Errorf("panicked %v; want %v", got, c.fatal)
+			}
+		})
+	}
+}
+
+// In production a failed check logs an error and BindEffectiveNow returns
+// what it did before the checks: here, a record on another clock than the
+// decided one binds the record's clock.
+func TestBindEffectiveNow_ChecksLogInProduction(t *testing.T) {
+	checksAsInProduction(t)
+	frozen := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
+	var logged bytes.Buffer
+	prev := slog.Default()
+	slog.SetDefault(slog.New(slog.NewTextHandler(&logged, nil)))
+	t.Cleanup(func() { slog.SetDefault(prev) })
+
+	decided := WithSim(postgres.WithLivemode(context.Background(), false), Sim{At: frozen, TestClockID: "clk_1"})
+	r := &stubResolver{subFunc: func() (Sim, error) { return Sim{At: frozen, TestClockID: "clk_2"}, nil }}
+	got, ok := BindEffectiveNow(decided, r, Pin{TenantID: "t1", SubscriptionID: "sub_1"})
+	if sim, _ := SimOf(got); !ok || sim.TestClockID != "clk_2" {
+		t.Errorf("bound %+v (ok %v); want the record's clk_2, as before the checks", sim, ok)
+	}
+	if out := logged.String(); !strings.Contains(out, "level=ERROR") || !strings.Contains(out, "decided_clock=clk_1") || !strings.Contains(out, "record_clock=clk_2") {
+		t.Errorf("log %q; want an error naming both clocks", out)
 	}
 }
