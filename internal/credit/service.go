@@ -42,7 +42,19 @@ type Service struct {
 	auditLogger AuditEmitter
 	customers   CustomerReader
 	live        LiveBalanceReader
-	clock       clock.Clock
+	// clock is the server's clock: the router's clk, the one the engine
+	// bills by. Every credit action runs on a time decided on a test clock or
+	// at real time (see the clock package's doc). Who decides it:
+	//   - a request, the API's door (api.clockDoor), from the customer in its
+	//     URL; a grant or an adjustment, the service itself, from the customer
+	//     its body names (decideForCustomer);
+	//   - the engine's reads (a balance, a draw), the time of the work that
+	//     makes them.
+	// Each entry point keeps that time and, when it carries no instant (real
+	// time), reads this clock once (clock.EnsureEffectiveNow). Without that
+	// read, two reads of the time in one action could differ, and a store's
+	// stamp could fall on another time than the action's.
+	clock clock.Clock
 }
 
 func NewService(store Store) *Service {
@@ -122,11 +134,6 @@ func (s *Service) decideForCustomer(ctx context.Context, tenantID, customerID st
 			"The customer's test clock could not be read. Nothing was changed; send the request again.", err)
 	}
 	return clock.EnsureEffectiveNow(decided, s.clock), nil
-}
-
-func (s *Service) bindForCustomer(ctx context.Context, tenantID, customerID string) context.Context {
-	bound, _ := clock.BindEffectiveNow(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID})
-	return bound
 }
 
 type GrantInput struct {
@@ -484,8 +491,8 @@ type CreditNoteReturnInput struct {
 // never fires; if it does, the invariant is broken.
 //
 // It runs GrantTx's checks and writes the same in-tx "grant" audit row
-// (ADR-090). It does not rebind the clock: the caller bound ctx to the
-// invoice, which is on the customer's clock.
+// (ADR-090). It runs on its caller's time, a credit note's Issue on the
+// invoice's time, and looks no clock up.
 func (s *Service) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, creditNoteID string, input CreditNoteReturnInput) (domain.CreditReturn, error) {
 	if creditNoteID == "" {
 		return domain.CreditReturn{}, errs.Required("credit_note_id")
@@ -592,13 +599,13 @@ func (s *Service) ApplyToInvoiceAt(ctx context.Context, tenantID, customerID, in
 // so the error (code credit_reversal_source_taken) is returned, not
 // swallowed: the caller must fail, not carry on.
 //
-// It binds no clock: both callers carry the invoice's time before they open
-// tx (invoice.Service.Void keeps the time its caller decided; the cancel and
-// the plan swap bind it through the subscription's bindForSub), and a
-// bind here would read the customer's clock on another connection while tx
-// holds the invoice row (ADR-139). clock.Now(ctx) stamps the grant in
-// simulated time when the customer is clock-pinned, and the same instant
-// decides which source grants are past their expiry.
+// It looks no clock up: both callers carry the invoice's time before they
+// open tx (invoice.Service.Void keeps the time its caller decided; the cancel
+// and the plan swap run on the subscription action's time), and a lookup here
+// would read the customer's clock on another connection while tx holds the
+// invoice row (ADR-139). clock.Now(ctx) stamps the grant at that time (on a
+// test clock, its frozen time), and the same instant decides which source
+// grants are past their expiry.
 func (s *Service) ReverseForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber string) (domain.CreditReturn, error) {
 	sums, err := s.store.InvoiceCreditsTx(ctx, tx, tenantID, customerID, invoiceID)
 	if err != nil {
@@ -793,11 +800,11 @@ func (s *Service) GetBalance(ctx context.Context, tenantID, customerID string) (
 
 // SpendableBalance is the credit a draw could use right now, per currency:
 // the ledger balance less any grant past its expiry that the sweep has not
-// written off yet. "Now" is the customer's own clock (the frozen time of a
-// test clock the customer is pinned to), the same instant a draw would judge
-// expiry at.
+// written off yet. "Now" is the time its caller decided (for a customer on
+// a test clock, that clock's frozen time), the same instant a draw would
+// judge expiry at.
 func (s *Service) SpendableBalance(ctx context.Context, tenantID, customerID string) (map[string]int64, error) {
-	ctx = s.bindForCustomer(ctx, tenantID, customerID)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	return s.store.GetSpendableBalance(ctx, tenantID, customerID, clock.Now(ctx))
 }
 

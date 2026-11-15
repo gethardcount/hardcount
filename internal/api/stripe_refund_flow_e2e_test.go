@@ -75,8 +75,14 @@ func newRefundFlow(t *testing.T, db *postgres.DB, ts *httptest.Server, name stri
 // refund and tax-reversal calls through the flows registered on it.
 func newRefundServer(t *testing.T) (*postgres.DB, *httptest.Server, *stripeStub, func(*refundFlow)) {
 	t.Helper()
+	return newRefundServerOn(t, clock.Real())
+}
+
+// newRefundServerOn is newRefundServer with the server built on clk.
+func newRefundServerOn(t *testing.T, clk clock.Clock) (*postgres.DB, *httptest.Server, *stripeStub, func(*refundFlow)) {
+	t.Helper()
 	db := testutil.SetupTestDB(t)
-	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
+	ts := httptest.NewServer(NewServer(db, clk, nil))
 	t.Cleanup(ts.Close)
 	stub := installStripeStub(t)
 	var flows []*refundFlow

@@ -224,14 +224,33 @@ type CreditGrantInput struct {
 }
 
 type Service struct {
-	store           Store
-	invoices        InvoiceReader
-	refunder        Refunder
-	credits         CreditGranter
-	numbers         NumberGenerator
-	taxRev          TaxReverser
-	audit           AuditEmitter
-	resolver        clock.Resolver
+	store    Store
+	invoices InvoiceReader
+	refunder Refunder
+	credits  CreditGranter
+	numbers  NumberGenerator
+	taxRev   TaxReverser
+	audit    AuditEmitter
+	resolver clock.Resolver
+	// clock is the server's clock: the router's clk, the one the engine
+	// bills by. Every credit-note action runs on a time decided on a test
+	// clock or at real time (see the clock package's doc). Who decides it:
+	//   - a request, the API's door (api.clockDoor), from the credit note or
+	//     invoice in its URL; a create, the route itself, from the invoice its
+	//     body names (DecideForInvoice);
+	//   - a Stripe refund event, the service itself, from the invoice the
+	//     refund is on (RecordStripeRefund, ApplyRefundWebhook);
+	//   - the relief at a subscription's cancel or plan swap and a
+	//     subscription's clawback drafts, the subscription action's time; a
+	//     finalize's held relief, the finalize's time;
+	//   - the clawback job retries at real time (its list excludes notes on a
+	//     test clock), and a test clock's catch-up retries its own on that
+	//     clock.
+	// Each entry point keeps that time and, when it carries no instant (real
+	// time), reads this clock once (clock.EnsureEffectiveNow). Without that
+	// read, two reads of the time in one action could differ, and a store's
+	// stamp could fall on another time than the action's.
+	clock           clock.Clock
 	dunning         DunningResolver
 	checkoutExpirer CheckoutExpirer
 	// Refunds made in Stripe outside Hardcount (ADR-134): see
@@ -250,7 +269,7 @@ type AuditEmitter interface {
 }
 
 func NewService(store Store, invoices InvoiceReader, refunder Refunder, credits ...CreditGranter) *Service {
-	s := &Service{store: store, invoices: invoices, refunder: refunder}
+	s := &Service{store: store, invoices: invoices, refunder: refunder, clock: clock.Real()}
 	if len(credits) > 0 {
 		s.credits = credits[0]
 	}
@@ -261,20 +280,14 @@ func NewService(store Store, invoices InvoiceReader, refunder Refunder, credits 
 // Optional — nil skips emission (unit-test fakes).
 func (s *Service) SetAuditLogger(a AuditEmitter) { s.audit = a }
 
-// SetResolver wires the ADR-030 time provider. Without it every operator
-// entry point here stamps WALL-CLOCK time onto rows that belong to a
-// clock-pinned invoice — the exact leak ADR-030 exists to close ("bind
-// effective-now at every operator entry point on a clock-pinned entity";
-// credit notes and their CreditGrant ledger rows are named as simulated-when-
-// pinned in its table).
-//
-// The engine-driven clawback paths were already correct because their CALLERS
-// bind (billOnePeriod's in-band downgrade, and RetryPendingClawbackIssueForClock
-// which is handed frozen_time explicitly). Only the operator-initiated entry
-// points were unbound, which is why an engine clawback landed on the simulated
-// axis while an operator credit note on the SAME invoice landed on wall-clock —
-// dated weeks before the invoice it credits.
+// SetResolver wires the clock resolver the service decides a time with where
+// no caller decided one: the create route's invoice (DecideForInvoice) and a
+// Stripe refund event's invoice. Nil (narrow unit tests) decides nothing.
 func (s *Service) SetResolver(r clock.Resolver) { s.resolver = r }
+
+// SetClock wires the server's clock (see the clock field). The router passes
+// the clock the server bills by; the default is the machine's.
+func (s *Service) SetClock(c clock.Clock) { s.clock = c }
 
 // DecideForInvoice decides a credit note's time from the invoice its body
 // names (clock.DecideOrRealTime): the create route calls it before anything
@@ -291,19 +304,6 @@ func (s *Service) DecideForInvoice(ctx context.Context, tenantID, invoiceID stri
 			"The invoice's test clock could not be read. Nothing was created; send the request again.", err)
 	}
 	return decided, nil
-}
-
-// bindForInvoice pins ctx to the source invoice's effective-now, so every
-// clock.Now(ctx) below — the credit_note row, its line items, the credit-ledger
-// grant, amount_due relief — lands in the invoice's own time domain. Mirrors
-// invoice.Service.bindForInvoice. Unresolvable pin or unwired resolver leaves
-// ctx untouched (wall-clock), which is correct for a non-simulated invoice.
-func (s *Service) bindForInvoice(ctx context.Context, tenantID, invoiceID string) context.Context {
-	if s.resolver == nil || invoiceID == "" {
-		return ctx
-	}
-	bound, _ := clock.BindEffectiveNow(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
-	return bound
 }
 
 // SetDunningResolver wires the dunning service, so a credit note that marks
@@ -386,10 +386,7 @@ type CreditLineInput struct {
 }
 
 func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput) (domain.CreditNote, error) {
-	// The create route decides the note's time first; this bind keeps a
-	// decision already made, and gives the invoice's time to the callers that
-	// do not decide (CreateRefund, the adjustment, the clawback jobs).
-	ctx = s.bindForInvoice(ctx, tenantID, input.InvoiceID)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	// In-flight payment gate. An OPERATOR credit note must not reduce an
 	// invoice's amount_due while its payment is in flight (processing/unknown):
 	// at settle, MarkPaid records amount_paid off the now-lower amount_due
@@ -1126,19 +1123,11 @@ func (s *Service) buildCreditNote(ctx context.Context, tx *sql.Tx, tenantID stri
 		OutOfBandAmountCents: outOfBandAmount,
 		Currency:             inv.Currency,
 		RefundStatus:         domain.RefundNone,
-		// Simulated iff the SOURCE INVOICE is — the clock belongs to the
-		// entity, not to whoever acted on it. This used to also require
-		// input.IsSimulated, i.e. "operator HTTP issuance is always
-		// wall-clock", which contradicted ADR-030: its only always-wall-clock
-		// carve-out is the audit log, and its table names credit notes and
-		// their CreditGrant rows as simulated-when-pinned.
-		//
-		// The old rule produced a row stamped in simulated time (once the
-		// entry points bound ctx) but flagged is_simulated=false — so it
-		// rendered in the "Real times — not the test clock's dates" lane while
-		// displaying the test clock's date, stayed visible to wall-clock
-		// reconcilers that skip simulated rows, and would survive the ADR-086
-		// teardown that deletes a clock's data.
+		// Simulated iff the source invoice is: the clock belongs to the
+		// invoice, not to whoever acted on it. A note flagged otherwise would
+		// show the clock's date in the real-time lane, stay visible to the
+		// real-time jobs that skip simulated rows, and survive the teardown
+		// that deletes a clock's data (ADR-086).
 		IsSimulated: inv.IsSimulated,
 		// IssuePending: an auto-issue clawback draft to be issued post-commit and
 		// retried by the reconciler if Issue() fails (migration 0121). Only the
@@ -1216,8 +1205,7 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 		return domain.CreditNote{}, fmt.Errorf("credit granter not wired (pass it to NewService)")
 	}
 
-	// ADR-030: relief rows belong to the source invoice's time domain.
-	ctx = s.bindForInvoice(ctx, tenantID, input.InvoiceID)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 
 	inv, err := s.invoices.Get(ctx, tenantID, input.InvoiceID)
 	if err != nil {
@@ -1428,9 +1416,7 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 			CommitRetiredCents:   r,
 			Currency:             inv.Currency,
 			RefundStatus:         domain.RefundNone,
-			// Same rule as buildCreditNote: the source invoice's pin decides.
-			// This path never set the flag at all, so a commit-relief note on a
-			// clock-pinned invoice was left unflagged.
+			// Same rule as buildCreditNote: simulated iff the source invoice is.
 			IsSimulated: inv.IsSimulated,
 		}
 		line := domain.CreditNoteLineItem{
@@ -1521,8 +1507,7 @@ func (s *Service) CreateRefund(ctx context.Context, tenantID string, input Refun
 		return domain.CreditNote{}, errs.Required("reason")
 	}
 
-	// ADR-030: refund rows belong to the source invoice's time domain.
-	ctx = s.bindForInvoice(ctx, tenantID, input.InvoiceID)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 
 	inv, err := s.invoices.Get(ctx, tenantID, input.InvoiceID)
 	if err != nil {
@@ -1766,11 +1751,7 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 	if cn.Status != domain.CreditNoteDraft {
 		return domain.CreditNote{}, errs.InvalidState("can only issue draft credit notes")
 	}
-	// Issue moves the money (the ledger grant, the amount due, the tax
-	// reversal) at the invoice's time: this bind keeps a decision already made
-	// (the create route's, for an auto-issued note) and gives the invoice's
-	// time to the callers that do not decide.
-	ctx = s.bindForInvoice(ctx, tenantID, cn.InvoiceID)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 
 	// A first read of the source invoice, outside any transaction. It only
 	// spares a transaction when the note plainly cannot issue yet; the row
@@ -2073,6 +2054,7 @@ func (s *Service) IssueHeldReliefTx(ctx context.Context, tx *sql.Tx, tenantID st
 // note marked the invoice paid, closing its dunning run. Best-effort like
 // Issue's: each leg is recorded and recovered by its own sweep.
 func (s *Service) FinishHeldRelief(ctx context.Context, tenantID string, issued []HeldRelief) {
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	for _, h := range issued {
 		cn, err := s.store.Get(ctx, tenantID, h.CreditNoteID)
 		if err != nil {
@@ -2080,7 +2062,6 @@ func (s *Service) FinishHeldRelief(ctx context.Context, tenantID string, issued 
 				"credit_note_id", h.CreditNoteID, "error", err)
 			continue
 		}
-		ctx := s.bindForInvoice(ctx, tenantID, cn.InvoiceID)
 		inv, err := s.invoices.Get(ctx, tenantID, cn.InvoiceID)
 		if err != nil {
 			slog.WarnContext(ctx, "held relief issued at finalize, but reading its invoice failed; the reversal sweep retries it",
@@ -2365,8 +2346,7 @@ func (s *Service) RetryRefund(ctx context.Context, tenantID, id string) (domain.
 	if err != nil {
 		return domain.CreditNote{}, err
 	}
-	// ADR-030: same time domain as the credit note being retried.
-	ctx = s.bindForInvoice(ctx, tenantID, cn.InvoiceID)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	if cn.Status != domain.CreditNoteIssued {
 		return domain.CreditNote{}, errs.InvalidState(fmt.Sprintf(
 			"can only retry refund on issued credit notes (current status: %s)", cn.Status))
@@ -2722,8 +2702,7 @@ func (s *Service) Void(ctx context.Context, tenantID, id string) (domain.CreditN
 	if err != nil {
 		return domain.CreditNote{}, err
 	}
-	// ADR-030: the void's updated_at belongs to the invoice's time domain.
-	ctx = s.bindForInvoice(ctx, tenantID, cn.InvoiceID)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	if cn.Status == domain.CreditNoteVoided {
 		return domain.CreditNote{}, errs.InvalidState("credit note is already voided")
 	}

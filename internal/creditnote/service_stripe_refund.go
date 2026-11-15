@@ -124,10 +124,10 @@ func (s *Service) RecordStripeRefund(ctx context.Context, tenantID string, snap 
 	if err != nil {
 		return domain.StripeRefundRecordResult{}, err
 	}
-	// ADR-030: a recorded note is dated on the invoice's clock, as every
-	// credit note is. The time is decided here, right after the invoice is
-	// found; one that cannot be decided fails the event, which Stripe
-	// delivers again. The decision reads the invoice and its clock on other
+	// A recorded note is dated on its invoice's time, as every credit note
+	// is (on a test clock, its frozen time). The time is decided here, right
+	// after the invoice is found; one that cannot be decided fails the event,
+	// which Stripe delivers again. The decision reads the invoice and its clock on other
 	// connections while this transaction is open.
 	if ctx, err = clock.DecideWithoutDoor(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID}); err != nil {
 		return domain.StripeRefundRecordResult{}, fmt.Errorf("refund %s refused, Stripe delivers it again: %w", snap.StripeRefundID, err)
@@ -546,7 +546,7 @@ func (s *Service) DismissStripeRefund(ctx context.Context, tenantID, invoiceID, 
 	if utf8.RuneCountInString(note) > maxDismissNoteLen {
 		return domain.InvoiceStripeRefund{}, errs.Invalid("note", fmt.Sprintf("must be at most %d characters", maxDismissNoteLen))
 	}
-	ctx = s.bindForInvoice(ctx, tenantID, invoiceID)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	tx, err := s.store.BeginTx(ctx, tenantID)
 	if err != nil {
 		return domain.InvoiceStripeRefund{}, err
@@ -805,7 +805,7 @@ func (s *Service) AttachStripeRefund(ctx context.Context, tenantID, creditNoteID
 	if err != nil {
 		return domain.CreditNote{}, err
 	}
-	ctx = s.bindForInvoice(ctx, tenantID, cn.InvoiceID)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	if cn.Status != domain.CreditNoteIssued || cn.RefundStatus != domain.RefundFailed || cn.RefundAmountCents <= 0 {
 		return domain.CreditNote{}, errs.InvalidState("a refund made in Stripe can be attached only to an issued credit note whose card refund failed")
 	}
