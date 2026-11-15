@@ -101,13 +101,18 @@ func (s *Service) requireCustomer(ctx context.Context, tenantID, customerID stri
 
 // decideForCustomer decides the time of a grant or an adjustment from the
 // customer its body names (clock.DecideOrRealTime: the API's door left the
-// request at real time), before anything is written. A clock that cannot be
-// read refuses the request (503), with nothing written.
+// request at real time), before anything is written, and binds one instant
+// for the whole request: a real-time decision carries none, so the expiry
+// check and the ledger entry's created_at read the same instant. A clock
+// that cannot be read refuses the request (503), with nothing written.
 func (s *Service) decideForCustomer(ctx context.Context, tenantID, customerID string) (context.Context, error) {
 	decided, err := clock.DecideOrRealTime(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID})
 	if err != nil {
 		return ctx, errs.Unavailable("test_clock_unavailable",
 			"The customer's test clock could not be read. Nothing was changed; send the request again.", err)
+	}
+	if _, ok := clock.EffectiveNow(decided); !ok {
+		decided = clock.WithEffectiveNow(decided, clock.Now(decided))
 	}
 	return decided, nil
 }

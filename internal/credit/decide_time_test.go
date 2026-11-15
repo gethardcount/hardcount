@@ -101,3 +101,22 @@ func TestGrantAndAdjust_DecideFromTheCustomer(t *testing.T) {
 		})
 	}
 }
+
+// A grant or an adjustment reads one instant: the decision binds one when
+// the customer is on no clock, or in live mode, so the expiry check and the
+// ledger entry read the same instant.
+func TestDecideForCustomer_BindsOneInstant(t *testing.T) {
+	for name, ctx := range map[string]context.Context{
+		"on no clock": postgres.WithLivemode(context.Background(), false),
+		"live mode":   postgres.WithLivemode(context.Background(), true),
+	} {
+		t.Run(name, func(t *testing.T) {
+			svc := NewService(newMemStore())
+			svc.SetResolver(&customerAnswer{sim: clock.Sim{At: time.Now().UTC()}})
+			decided, err := svc.decideForCustomer(ctx, "t1", "cus_1")
+			if _, ok := clock.EffectiveNow(decided); err != nil || !ok {
+				t.Errorf("err %v, instant bound %v; want one instant bound", err, ok)
+			}
+		})
+	}
+}
