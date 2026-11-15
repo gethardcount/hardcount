@@ -483,6 +483,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 
 	stripeAdapter := payment.NewStripe(stripeClient, invoiceStore, webhookStore, paymentSetupStore, dunningSvc)
 	stripeAdapter.SetCardFetcher(stripeClient)
+	stripeAdapter.SetClock(clk)
 	// Payment anomalies are stored on the invoice (ADR-068). The settle path
 	// records a duplicate charge, an amount mismatch, a charge in another
 	// currency or a paid voided invoice on the invoice row, and the invoice
@@ -615,6 +616,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// the reconciler spends an extra API call.
 	paymentReconciler := payment.NewReconciler(stripeClient, invoiceStore, 60*time.Second)
 	paymentReconciler.SetBreaker(stripeBreaker)
+	paymentReconciler.SetClock(clk)
 	// The reconciler settles a recovered final outcome through the shared
 	// settlement primitive (ADR-049 Phase 2). So a recovery from a dropped
 	// webhook starts dunning, notifies and emits the event, instead of only

@@ -96,6 +96,10 @@ type Reconciler struct {
 	// clock invoice is settled on its clock. Wired via SetResolver from
 	// router.go. Nil (narrow unit tests) decides nothing.
 	resolver clock.Resolver
+	// clock is the server's clock: the no-settler branch reads real time
+	// from it when the row's decision carries no instant. Wired via SetClock
+	// from router.go; the default is the machine's.
+	clock clock.Clock
 	// hostedLedger + hostedReader drive the hosted-page sweep
 	// (reconciler_hosted.go). Nil-tolerant: unwired, that sweep is skipped.
 	hostedLedger HostedSessionLedger
@@ -116,6 +120,7 @@ func NewReconciler(client StripeClient, invoices ReconcileInvoiceStore, olderTha
 		olderThan:           olderThan,
 		olderThanProcessing: 30 * time.Minute,
 		now:                 func() time.Time { return time.Now().UTC() },
+		clock:               clock.Real(),
 	}
 }
 
@@ -145,6 +150,9 @@ func (r *Reconciler) SetBreaker(b *breaker.Breaker) {
 // (decideRow), so a clock invoice's paid_at, failed stamp and dunning start
 // are on its clock.
 func (r *Reconciler) SetResolver(res clock.Resolver) { r.resolver = res }
+
+// SetClock wires the server's clock (see the clock field).
+func (r *Reconciler) SetClock(c clock.Clock) { r.clock = c }
 
 // Run reconciles unresolved payments against Stripe:
 //   - stale charge holds (ADR-127, ADR-137, reconciler_stale_hold.go): holds
@@ -553,7 +561,7 @@ func (r *Reconciler) settle(ctx context.Context, inv domain.Invoice, piID string
 		"invoice_id", inv.ID, "terminal_succeeded", kind == terminalSucceeded)
 	switch kind {
 	case terminalSucceeded:
-		markCtx := clock.EnsureEffectiveNow(ctx, clock.Real())
+		markCtx := clock.EnsureEffectiveNow(ctx, r.clock)
 		now := clock.Now(markCtx)
 		if _, err := r.invoices.MarkPaid(markCtx, inv.TenantID, inv.ID, piID, now); err != nil {
 			return false, fmt.Errorf("mark paid (legacy): %w", err)

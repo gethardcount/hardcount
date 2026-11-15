@@ -136,3 +136,57 @@ func TestSettle_LiveReadsNoClock(t *testing.T) {
 		})
 	}
 }
+
+// With no instant decided (live, or real time) a settle reads real time from
+// the server's clock, the one the router passes and the engine bills by, not
+// the machine's: paid_at, the failed stamp and dunning's start are at the
+// server's now.
+func TestSettle_RealTimeIsTheServersClock(t *testing.T) {
+	serverNow := time.Date(2025, 6, 3, 10, 0, 0, 0, time.UTC)
+	live := func() context.Context { return postgres.WithLivemode(context.Background(), true) }
+
+	t.Run("paid", func(t *testing.T) {
+		invoices, webhooks := processingInvoice()
+		s := NewStripe(&mockStripeClient{}, invoices, webhooks, nil)
+		s.SetClock(clock.NewFake(serverNow))
+		if err := s.SettleSucceeded(live(), "t1", invoices.invoices["inv_1"], "pi_ev", 0, SourceWebhook); err != nil {
+			t.Fatalf("SettleSucceeded: %v", err)
+		}
+		if got := invoices.invoices["inv_1"]; got.PaidAt == nil || !got.PaidAt.Equal(serverNow) {
+			t.Errorf("paid_at %v; want the server's %v", got.PaidAt, serverNow)
+		}
+	})
+
+	t.Run("failed", func(t *testing.T) {
+		inv := unknownClockInvoice()
+		updater := &stampTimeUpdater{mockInvoiceUpdater: newMockInvoiceUpdater()}
+		updater.invoices[inv.ID] = inv
+		dunning := &recordingDunningStarter{}
+		s := NewStripe(&mockStripeClient{}, updater, newMockWebhookStore(), nil, dunning)
+		s.SetClock(clock.NewFake(serverNow))
+		if err := s.SettleFailed(live(), "t1", inv, PaymentFailure{PaymentIntentID: "pi_sweep", Message: "card declined"}, SourceWebhook); err != nil {
+			t.Fatalf("SettleFailed: %v", err)
+		}
+		if !updater.failedAt.Equal(serverNow) {
+			t.Errorf("failed stamp at %v; want the server's %v", updater.failedAt, serverNow)
+		}
+		if len(dunning.calls) != 1 || !dunning.calls[0].failureAt.Equal(serverNow) {
+			t.Errorf("dunning starts %+v; want one at the server's %v", dunning.calls, serverNow)
+		}
+	})
+
+	t.Run("paid by a reconciler with no settler", func(t *testing.T) {
+		inv := unknownClockInvoice()
+		store := newMockReconcileStore(inv)
+		r := NewReconciler(&mockStripeClient{piStates: map[string]PaymentIntentResult{
+			"pi_sweep": {ID: "pi_sweep", Status: "succeeded", AmountReceivedCents: inv.AmountDueCents},
+		}}, store, time.Second)
+		r.SetClock(clock.NewFake(serverNow))
+		if _, errs := r.Run(live(), 10); len(errs) != 0 {
+			t.Fatalf("errors: %v", errs)
+		}
+		if got := store.byID[inv.ID]; got.PaidAt == nil || !got.PaidAt.Equal(serverNow) {
+			t.Errorf("paid_at %v; want the server's %v", got.PaidAt, serverNow)
+		}
+	})
+}

@@ -124,7 +124,8 @@ type Stripe struct {
 	refundUpdater      RefundStatusUpdater        // optional; applies async refund-webhook status to a CN
 	disputes           DisputeRecorder            // optional; records charge.dispute.* against the invoice (#979)
 	externalRefunds    ExternalRefundRecorder     // optional; records refunds made in Stripe outside Hardcount (ADR-134)
-	resolver           clock.Resolver             // optional; binds effective-now from invoice
+	resolver           clock.Resolver             // optional; an event decides its time with it (decideFor)
+	clock              clock.Clock                // the server's clock: real time, for a settle with no instant decided
 	anomalies          PaymentAnomalyRecorder     // required; writes the anomaly marker (ADR-068) and queues its webhook event (MustHaveAnomalyRecorder)
 	checkoutSessions   *CheckoutSessionStore      // optional; claim-ledger truth-sync + settle-time expire (ADR-068)
 	sessionClients     *StripeClients             // optional; raw mode-keyed clients for session expire calls
@@ -209,6 +210,13 @@ func (s *Stripe) SetCheckoutSessionStore(cs *CheckoutSessionStore, clients *Stri
 // (narrow unit tests) decides nothing.
 func (s *Stripe) SetResolver(r clock.Resolver) {
 	s.resolver = r
+}
+
+// SetClock wires the server's clock, which a settle reads real time from
+// when its caller decided no instant (live, or real time). The router passes
+// the clock the server bills by; the default is the machine's.
+func (s *Stripe) SetClock(c clock.Clock) {
+	s.clock = c
 }
 
 // StripeClient is the interface for Stripe API calls.
@@ -390,7 +398,7 @@ type WebhookStore interface {
 }
 
 func NewStripe(client StripeClient, invoices InvoiceUpdater, webhooks WebhookStore, paymentSetups PaymentSetupStore, dunning ...DunningStarter) *Stripe {
-	s := &Stripe{client: client, invoices: invoices, webhooks: webhooks, paymentSetups: paymentSetups}
+	s := &Stripe{client: client, invoices: invoices, webhooks: webhooks, paymentSetups: paymentSetups, clock: clock.Real()}
 	if len(dunning) > 0 {
 		s.dunning = dunning[0]
 	}

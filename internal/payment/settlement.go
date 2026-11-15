@@ -91,7 +91,7 @@ func (s *Stripe) SettleSucceeded(ctx context.Context, tenantID string, inv domai
 	// A clock invoice is paid on its clock. With no instant on ctx (live, or
 	// real time) the server's clock is read once, so every stamp of the
 	// settle has the same instant.
-	ctx = clock.EnsureEffectiveNow(ctx, clock.Real())
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	now := clock.Now(ctx)
 	// The charge's contracted instant beats the decided time: a clock's
 	// decided time is its current frozen_time, which during or after a wide
@@ -356,7 +356,7 @@ func (s *Stripe) settleFailed(ctx context.Context, tenantID string, inv domain.I
 	// The caller decided the time from the invoice, so the failed stamp and
 	// dunning's start are on a clock invoice's clock. With no instant on ctx
 	// (live, or real time) the server's clock is read once.
-	ctx = clock.EnsureEffectiveNow(ctx, clock.Real())
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	// Detached before the tx: the stamp, payment.failed and the email commit
 	// together, and a webhook disconnect must not cut the dunning start that
 	// follows them. Values (the simulated clock) survive WithoutCancel.
