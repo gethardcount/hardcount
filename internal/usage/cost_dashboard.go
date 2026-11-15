@@ -249,15 +249,11 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 	// API's door). A not-found is the customer, or, in a race with its
 	// clock's deletion, its clock: real time is right in both. A clock that
 	// cannot be read answers 503 with nothing shown.
-	decided, err := clock.DecideWithoutDoor(ctx, a.resolver, clock.Pin{TenantID: cust.TenantID, CustomerID: cust.ID})
-	switch {
-	case errors.Is(err, errs.ErrNotFound):
-		ctx = clock.WithRealTime(ctx)
-	case err != nil:
+	decided, err := clock.DecideOrRealTime(ctx, a.resolver, clock.Pin{TenantID: cust.TenantID, CustomerID: cust.ID})
+	if err != nil {
 		return nil, errs.Unavailable("test_clock_unavailable", costDashboardUnavailable, err)
-	default:
-		ctx = decided
 	}
+	ctx = decided
 	// The usage view and the live credit figure below aggregate the same
 	// meters over the same period; the memo makes that one scan, not two.
 	ctx, _ = WithAggregationMemo(ctx)

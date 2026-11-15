@@ -359,17 +359,12 @@ func (h *Handler) resolveInvoice(w http.ResponseWriter, r *http.Request) (domain
 }
 
 // decide decides the page's time from the invoice its token names
-// (clock.DecideWithoutDoor: a public page does not come through the API's
+// (clock.DecideOrRealTime: a public page does not come through the API's
 // door). The checkout it opens, and that checkout's audit row, carry the
-// decision. A not-found is the invoice, or, in a race with its clock's
-// deletion, its clock: real time is right in both. Any other failure is
-// clock.ErrUndecided, and the page answers 503 with nothing done.
+// decision. A failure is clock.ErrUndecided, and the page answers 503 with
+// nothing done.
 func (h *Handler) decide(ctx context.Context, inv domain.Invoice) (context.Context, error) {
-	decided, err := clock.DecideWithoutDoor(ctx, h.resolver, clock.Pin{TenantID: inv.TenantID, InvoiceID: inv.ID})
-	if errors.Is(err, errs.ErrNotFound) {
-		return clock.WithRealTime(ctx), nil
-	}
-	return decided, err
+	return clock.DecideOrRealTime(ctx, h.resolver, clock.Pin{TenantID: inv.TenantID, InvoiceID: inv.ID})
 }
 
 func (h *Handler) viewInvoice(w http.ResponseWriter, r *http.Request) {

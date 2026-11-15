@@ -83,12 +83,10 @@ func (s *Service) SetResolver(r clock.Resolver) {
 //   - an instant already bound (a clock decided for this request, with its
 //     id, or a bare instant): ctx as it is, with no read;
 //   - no customer id: real time;
-//   - else the customer's clock is decided here (clock.DecideWithoutDoor:
+//   - else the customer's clock is decided here (clock.DecideOrRealTime:
 //     the customer is named in the body, so the API's door left the request
 //     at real time). Live mode reads nothing and is real time, as is a
-//     customer on no clock;
-//   - a not-found is the customer, or, in a race with its clock's deletion,
-//     its clock: real time is right in both (ingest's own store call answers
+//     customer on no clock, and a not-found (ingest's own store call answers
 //     a missing customer);
 //   - a clock that cannot be read refuses the event (503): nothing is
 //     recorded, and the client sends it again.
@@ -101,13 +99,8 @@ func (s *Service) decide(ctx context.Context, tenantID, customerID string) (cont
 	if customerID == "" {
 		return clock.WithEffectiveNow(ctx, s.clock.Now(ctx)), nil
 	}
-	decided, err := clock.DecideWithoutDoor(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID})
-	switch {
-	case errors.Is(err, errs.ErrNotFound):
-		// The customer, or, in a race with its clock's deletion, its clock:
-		// real time is right in both.
-		return clock.WithEffectiveNow(ctx, s.clock.Now(ctx)), nil
-	case err != nil:
+	decided, err := clock.DecideOrRealTime(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID})
+	if err != nil {
 		return ctx, errs.Unavailable("test_clock_unavailable",
 			"The customer's test clock could not be read. Nothing was recorded; send the event again.", err)
 	}
