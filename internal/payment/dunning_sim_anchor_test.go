@@ -155,8 +155,7 @@ func TestDecline_Reconciler_CarriesThePIAnchor(t *testing.T) {
 		"pi_late": {ID: "pi_late", Status: "requires_payment_method", AnchorAt: simCharged},
 	}}
 	settler := &anchorCapturingSettler{}
-	r := NewReconciler(client, store, time.Second)
-	r.SetSettler(settler)
+	r := NewReconciler(client, store, settler, time.Second)
 
 	if _, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10); len(errs) != 0 {
 		t.Fatalf("errs: %v", errs)

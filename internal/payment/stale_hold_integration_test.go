@@ -125,8 +125,7 @@ func newSHRig(t *testing.T, name string) *shRig {
 	r.stripe.SetAnomalyRecorder(r.invoices)
 	r.stripe.SetEmailReceipt(sender, emails)
 	r.stripe.SetEmailPaymentFailed(sender, emails)
-	r.rec = NewReconciler(r.fake, r.invoices, time.Minute)
-	r.rec.SetSettler(r.stripe)
+	r.rec = NewReconciler(r.fake, r.invoices, r.stripe, time.Minute)
 	r.checkout = NewCheckoutSessionStore(db)
 	return r
 }
@@ -1021,8 +1020,7 @@ func TestStaleHold_Concurrency(t *testing.T) {
 		r.fake.queue(fakeMode{kind: fakeCrashBeforeSend})
 		crash(func() { _, _ = r.chargeAs(r.ctx, autoCharge, inv.ID, "pm_card_1") })
 		r.ageHold(inv.ID, staleSweepAge)
-		other := NewReconciler(r.fake, r.invoices, time.Minute)
-		other.SetSettler(r.stripe)
+		other := NewReconciler(r.fake, r.invoices, r.stripe, time.Minute)
 
 		var wg sync.WaitGroup
 		start := make(chan struct{})

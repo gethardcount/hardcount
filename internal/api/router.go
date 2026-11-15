@@ -614,9 +614,8 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// The reconciler resolves PaymentUnknown invoices, whose Stripe outcome is
 	// ambiguous. A 60s cool-off lets a webhook resolve the state first, before
 	// the reconciler spends an extra API call.
-	paymentReconciler := payment.NewReconciler(stripeClient, invoiceStore, 60*time.Second)
+	paymentReconciler := payment.NewReconciler(stripeClient, invoiceStore, stripeAdapter, 60*time.Second)
 	paymentReconciler.SetBreaker(stripeBreaker)
-	paymentReconciler.SetClock(clk)
 	// The reconciler settles a recovered final outcome through the shared
 	// settlement primitive (ADR-049 Phase 2). So a recovery from a dropped
 	// webhook starts dunning, notifies and emits the event, instead of only
@@ -625,7 +624,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// processing cool-off lets the webhook win the common race, because a
 	// healthy card PaymentIntent settles in seconds. A webhook that was truly
 	// dropped is still resolved within about one extra tick.
-	paymentReconciler.SetSettler(stripeAdapter)
 	paymentReconciler.SetProcessingReconcileAfter(30 * time.Minute)
 	if stripeClient != nil {
 		// It also finds finished hosted sessions that no webhook reported

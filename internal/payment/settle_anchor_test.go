@@ -158,8 +158,7 @@ func TestReconciler_RecoversChargeAnchorFromPI(t *testing.T) {
 		"pi_1": {ID: "pi_1", Status: "succeeded", AmountReceivedCents: 5000, AnchorAt: contracted},
 	}}
 	settler := &anchorCapturingSettler{}
-	r := NewReconciler(client, store, time.Second)
-	r.SetSettler(settler)
+	r := NewReconciler(client, store, settler, time.Second)
 
 	if _, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10); len(errs) != 0 {
 		t.Fatalf("errs: %v", errs)
@@ -186,8 +185,7 @@ func TestReconciler_WallChargeSettlesWithoutAnchor(t *testing.T) {
 		"pi_1": {ID: "pi_1", Status: "succeeded", AmountReceivedCents: 5000},
 	}}
 	settler := &anchorCapturingSettler{}
-	r := NewReconciler(client, store, time.Second)
-	r.SetSettler(settler)
+	r := NewReconciler(client, store, settler, time.Second)
 
 	if _, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10); len(errs) != 0 {
 		t.Fatalf("errs: %v", errs)

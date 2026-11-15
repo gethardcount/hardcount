@@ -61,8 +61,7 @@ func sweepHarness(inv domain.Invoice, client *mockStripeClient) (*Reconciler, *s
 	dunning := &recordingDunningStarter{}
 	settler := NewStripe(client, updater, newMockWebhookStore(), nil, dunning)
 	settler.SetResolver(onClock{})
-	r := NewReconciler(client, newMockReconcileStore(inv), time.Second)
-	r.SetSettler(settler)
+	r := NewReconciler(client, newMockReconcileStore(inv), settler, time.Second)
 	r.SetResolver(onClock{})
 	return r, updater, dunning
 }

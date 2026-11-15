@@ -51,8 +51,7 @@ func TestReconciler_RecoveredFailureRoutesThroughSettler(t *testing.T) {
 		"pi_1": {ID: "pi_1", Status: "canceled", Charged: true},
 	}}
 	rec := &recordingSettler{}
-	r := NewReconciler(client, store, time.Second)
-	r.SetSettler(rec)
+	r := NewReconciler(client, store, rec, time.Second)
 
 	resolved, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10)
 	if len(errs) != 0 {
@@ -84,8 +83,7 @@ func TestReconciler_DunningRetryFailureSuppressesEmail(t *testing.T) {
 		"pi_dr": {ID: "pi_dr", Status: "requires_payment_method", Purpose: "dunning_retry"},
 	}}
 	rec := &recordingSettler{}
-	r := NewReconciler(client, store, time.Second)
-	r.SetSettler(rec)
+	r := NewReconciler(client, store, rec, time.Second)
 
 	if _, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10); len(errs) != 0 {
 		t.Fatalf("errs: %v", errs)
@@ -107,8 +105,7 @@ func TestReconciler_StaleProcessingSweptToSucceeded(t *testing.T) {
 		"pi_p": {ID: "pi_p", Status: "succeeded"},
 	}}
 	rec := &recordingSettler{}
-	r := NewReconciler(client, store, time.Second)
-	r.SetSettler(rec)
+	r := NewReconciler(client, store, rec, time.Second)
 
 	resolved, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10)
 	if len(errs) != 0 {
@@ -130,8 +127,7 @@ func TestReconciler_StillInFlightProcessingSkipped(t *testing.T) {
 		"pi_p": {ID: "pi_p", Status: "processing"},
 	}}
 	rec := &recordingSettler{}
-	r := NewReconciler(client, store, time.Second)
-	r.SetSettler(rec)
+	r := NewReconciler(client, store, rec, time.Second)
 
 	resolved, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10)
 	if len(errs) != 0 {
@@ -161,8 +157,7 @@ func TestReconciler_RaceGuardSkipsWebhookWinner(t *testing.T) {
 		"pi_1": {ID: "pi_1", Status: "canceled", Charged: true}, // Stripe says failed, but the webhook already settled it paid
 	}}
 	rec := &recordingSettler{}
-	r := NewReconciler(client, store, time.Second)
-	r.SetSettler(rec)
+	r := NewReconciler(client, store, rec, time.Second)
 
 	resolved, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10)
 	if len(errs) != 0 {
