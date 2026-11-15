@@ -41,17 +41,18 @@ func accessLogPath(t *testing.T, req *http.Request) string {
 }
 
 // The access log of the production router holds the route's pattern when
-// a route or a mount matched, and only the first two segments of a path
-// that matched nothing.
-func TestAccessLog_PathIsAPatternOrTheFirstTwoSegments(t *testing.T) {
+// a route or a mount matched, and only the first segment of a path that
+// matched nothing.
+func TestAccessLog_PathIsAPatternOrTheFirstSegment(t *testing.T) {
 	cases := []struct {
 		name string
 		path string
 		want string
 	}{
-		{"a path outside every mount keeps two segments, upper case", "/V1/public/invoices/" + fakeLinkToken, "/V1/public/…"},
-		{"a path outside every mount keeps two segments, another version", "/v2/public/invoices/" + fakeLinkToken, "/v2/public/…"},
-		{"a short path outside every mount is logged whole", "/v2/" + "nothing", "/v2/nothing"},
+		{"the hosted invoice page's address keeps its first segment", "/invoice/" + fakeLinkToken, "/invoice/…"},
+		{"a path outside every mount keeps one segment, upper case", "/V1/public/invoices/" + fakeLinkToken, "/V1/…"},
+		{"a path outside every mount keeps one segment, another version", "/v2/public/invoices/" + fakeLinkToken, "/v2/…"},
+		{"a one-segment path outside every mount is logged whole", "/healthz", "/healthz"},
 		{"a mistyped path under v1 logs the mount pattern", "/v1/custmers/" + fakeLinkToken, "/v1/*"},
 		{"a miss under a link-token mount logs the mount pattern", "/v1/public/invoices/" + fakeLinkToken + "/no-such-page", "/v1/public/invoices/*"},
 	}
@@ -66,8 +67,8 @@ func TestAccessLog_PathIsAPatternOrTheFirstTwoSegments(t *testing.T) {
 }
 
 // A CORS preflight is answered before routing, so it never reaches the
-// access log; its span's url.path keeps only the first two segments.
-func TestRequestEdge_PreflightSpanKeepsTwoSegments(t *testing.T) {
+// access log; its span's url.path keeps only the first segment.
+func TestRequestEdge_PreflightSpanKeepsTheFirstSegment(t *testing.T) {
 	rec := tracetest.NewSpanRecorder()
 	prev := otel.GetTracerProvider()
 	otel.SetTracerProvider(sdktrace.NewTracerProvider(sdktrace.WithSpanProcessor(rec)))
@@ -84,7 +85,7 @@ func TestRequestEdge_PreflightSpanKeepsTwoSegments(t *testing.T) {
 		t.Fatalf("got %d spans, want 1", len(spans))
 	}
 	attrs := spanAttrs(spans[0])
-	if got, want := attrs["url.path"], "/v1/public/…"; got != want {
+	if got, want := attrs["url.path"], "/v1/…"; got != want {
 		t.Errorf("url.path = %q, want %q", got, want)
 	}
 	for k, v := range attrs {

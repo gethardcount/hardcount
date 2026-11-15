@@ -172,16 +172,16 @@ func TestRequestEdge_SpanCarriesRouteAndTrustedIP_NotToken(t *testing.T) {
 func TestRequestEdge_UnroutedSpanHasNoToken(t *testing.T) {
 	// Every route that carries a link token in the path. A CORS preflight
 	// is answered before routing, so its span has no route pattern and
-	// keeps only the path's first two segments.
+	// keeps only the path's first segment.
 	cases := []struct {
 		name string
 		path string
 		want string
 	}{
-		{"invoice", "/v1/public/invoices/" + edgeTestToken + "/pdf", "/v1/public/…"},
-		{"card update", "/v1/public/payment-updates/" + edgeTestToken, "/v1/public/…"},
-		{"cost dashboard", "/v1/public/cost-dashboard/" + edgeTestToken, "/v1/public/…"},
-		{"invite", "/v1/auth/invite/" + edgeTestToken, "/v1/auth/…"},
+		{"invoice", "/v1/public/invoices/" + edgeTestToken + "/pdf", "/v1/…"},
+		{"card update", "/v1/public/payment-updates/" + edgeTestToken, "/v1/…"},
+		{"cost dashboard", "/v1/public/cost-dashboard/" + edgeTestToken, "/v1/…"},
+		{"invite", "/v1/auth/invite/" + edgeTestToken, "/v1/…"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
