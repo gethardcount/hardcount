@@ -58,16 +58,15 @@ func (h *Handler) invoiceEmailRefusal(inv domain.Invoice) error {
 // "Email invoice" (sendEmail) and the collector's automatic send (Emailer):
 // the refusals, the CC list (ADR-082: nil ccOverride means the customer's
 // stored additional_emails), the PDF from the shared context builder, the
-// send, and the audit row. ctx is the caller's, not yet bound to the
-// invoice's clock; trigger is empty for the operator's send.
+// send, and the audit row. ctx carries the time its caller decided; trigger
+// is empty for the operator's send.
 func (h *Handler) emailInvoice(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, to string, ccOverride *[]string, trigger string) error {
 	if err := h.invoiceEmailRefusal(inv); err != nil {
 		return err
 	}
-	// On the time the caller decided (the door from this invoice, or the
-	// collect that finalized it), read once from the server's clock when
-	// there is none, so the enqueued email carries the invoice's billing
-	// anchor and lands on the invoice's own calendar (ADR-030, ADR-104).
+	// On the action's time (see Service.clock), so the enqueued email carries
+	// the invoice's billing anchor and lands on the invoice's own calendar
+	// (ADR-030, ADR-104).
 	bound := clock.EnsureEffectiveNow(ctx, h.svc.clock)
 
 	cc, err := resolveSendCC(bound, h.customers, tenantID, inv.CustomerID, to, ccOverride)

@@ -277,12 +277,12 @@ func (s *OutboxStore) Enqueue(ctx context.Context, tx *sql.Tx, tenantID, emailTy
 	}
 
 	id := postgres.NewID("hc_emob")
-	// Billing-axis anchor (ADR-104): record WHICH simulated instant caused
-	// this send, read from the bound ctx at the only moment the fact exists.
-	// Every invoice-caused enqueue site already binds (settle → receipt,
-	// finalize/sweeps → setup-link, catchup → reminders, operator actions →
-	// the API door's decision), so this single chokepoint anchors them all; unbound
-	// ctx (live-mode mail, password resets, invites) records NULL — the two
+	// Billing-axis anchor (ADR-104): record which test clock and instant
+	// caused this send, read from ctx at the only moment the fact exists.
+	// Every invoice-caused send runs on its invoice's decided time (a settle,
+	// a sweep, the catch-up, or a request decided by the API's door from its
+	// record), so this one place anchors them all. A ctx on no clock
+	// (live-mode mail, password resets, invites) records NULL: the two
 	// calendars coincide and there is nothing to say. created_at stays SQL
 	// now() on purpose: it is the real-world dispatch record (the
 	// "Recorded …" subline), not the story position.

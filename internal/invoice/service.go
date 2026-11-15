@@ -189,7 +189,17 @@ type CreditReverser interface {
 }
 
 type Service struct {
-	store          Store
+	store Store
+	// clock is the server's clock: the router's clk, the one the engine
+	// bills by. Every invoice action runs on a time decided before it
+	// reaches the service: a request's by the API's door (api.clockDoor),
+	// from the invoice in its URL; a test clock's catch-up, on that clock;
+	// a real-time job, whose lists exclude clock invoices; dunning's final
+	// action, from its run's invoice. Each entry point keeps that decision
+	// and, when it carries no instant (real time), reads this clock once
+	// (clock.EnsureEffectiveNow). Without that read, two reads of the time
+	// in one action could differ, and a store's stamp could fall on another
+	// time than the action's.
 	clock          clock.Clock
 	resolver       clock.Resolver
 	settings       TenantSettingsStore
@@ -539,7 +549,7 @@ func (s *Service) SetCustomerSearcher(c CustomerSearcher) {
 //
 // Returns the two figures separately because only one of them is recoverable:
 // drawable is what void still cancels, consumed is gone for good. `now` is the
-// caller's resolver-bound instant, not wall-clock, so a clock-pinned invoice
+// action's time (see Service.clock), not the machine's, so a clock invoice
 // judges its grant's expiry on the same axis the drawdown does.
 type CommitGrantReader interface {
 	CommitGrantExposure(ctx context.Context, tenantID, invoiceID string, now time.Time) (drawableCents, consumedCents int64, err error)
@@ -1062,9 +1072,7 @@ func (s *Service) SetCreditApplier(c CreditApplier) {
 // finalize. An apply error is returned for the caller to route to the
 // retry sweep, which re-applies atomically before its own charge.
 func (s *Service) ApplyCreditBalance(ctx context.Context, tenantID, id string) (domain.Invoice, error) {
-	// The caller decided the time (the door, from this invoice); with none on
-	// ctx, the server's clock is read once.
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	inv, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -1092,9 +1100,7 @@ func (s *Service) ApplyCreditBalance(ctx context.Context, tenantID, id string) (
 // racing tax-pending draft can never jump to paid through here. paid_at is
 // at the time the caller decided, so a clock invoice settles on its clock.
 func (s *Service) SettleZeroDue(ctx context.Context, tenantID, id string) (domain.Invoice, error) {
-	// The caller decided the time (the door, from this invoice); with none on
-	// ctx, the server's clock is read once.
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	inv, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -1121,9 +1127,7 @@ func (s *Service) SettleZeroDue(ctx context.Context, tenantID, id string) (domai
 // taken the money. paid reports whether this call settled the invoice, so
 // the caller fires its effects once.
 func (s *Service) SettleZeroDueWithoutClaim(ctx context.Context, tenantID, id string) (domain.Invoice, bool, error) {
-	// The caller decided the time (the door, from this invoice); with none on
-	// ctx, the server's clock is read once.
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	return s.store.SettleZeroDue(ctx, tenantID, id, s.clock.Now(ctx))
 }
 
@@ -1635,9 +1639,7 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]domain.Invoice
 // A tax retry finalizes an engine draft through RetryTax instead, inside its
 // tax write's transaction; both use finalizeHook and afterFinalize.
 func (s *Service) Finalize(ctx context.Context, tenantID, id string) (domain.Invoice, error) {
-	// The caller decided the time (the door, from this invoice); with none on
-	// ctx, the server's clock is read once.
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	inv, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -1971,9 +1973,7 @@ func (s *Service) markTaxReversed(ctx context.Context, tenantID, invoiceID strin
 }
 
 func (s *Service) Void(ctx context.Context, tenantID, id string) (domain.Invoice, error) {
-	// The caller decided the time (the door, from this invoice); with none on
-	// ctx, the server's clock is read once.
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	inv, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -2234,9 +2234,7 @@ func (s *Service) MarkUncollectible(ctx context.Context, tenantID, id string) (d
 // (ADR-112 amendment 2026-11-09). then reads nothing outside tx: the row
 // lock is held while it runs.
 func (s *Service) MarkUncollectibleThen(ctx context.Context, tenantID, id string, then func(tx *sql.Tx) error) (domain.Invoice, error) {
-	// The caller decided the time (the door, from this invoice); with none on
-	// ctx, the server's clock is read once.
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	inv, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -2372,9 +2370,7 @@ func (s *Service) MarkUncollectibleThen(ctx context.Context, tenantID, id string
 // Checkout page still open for it, so every caller (the invoice page, and
 // dunning's "payment recovered" resolve) gets both.
 func (s *Service) RecordOfflinePayment(ctx context.Context, tenantID, id, note string) (domain.Invoice, error) {
-	// The caller decided the time (the door, from this invoice); with none on
-	// ctx, the server's clock is read once.
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	inv, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -2566,9 +2562,7 @@ type AddLineItemInput struct {
 }
 
 func (s *Service) AddLineItem(ctx context.Context, tenantID, invoiceID string, input AddLineItemInput) (domain.InvoiceLineItem, error) {
-	// The caller decided the time (the door, from this invoice); with none on
-	// ctx, the server's clock is read once.
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	// Currency is left empty here — AddLineItemAtomicAudited stamps it from the
 	// invoice row it locks. The atomic-create path passes the resolved
 	// currency instead, since the header isn't persisted yet.
@@ -2704,10 +2698,10 @@ func buildLineItem(input AddLineItemInput, currency string) (domain.InvoiceLineI
 // finalize's steps and the $0 settle run on a stepsBudget ctx. Manual
 // invoices stay drafts. An error comes back with no invoice.
 func (s *Service) RetryTax(ctx context.Context, tenantID, invoiceID string) (domain.Invoice, error) {
-	// The caller decided the time: the door from this invoice (the Retry tax
-	// button), the connect fan-out per invoice, the billing-profile fan-out
-	// from its customer, a tax sweep at real time or in its clock's catch-up.
-	// With none on ctx, the server's clock is read once.
+	// The action's time (see Service.clock). Besides the door (the Retry tax
+	// button) and the tax sweeps, RetryTax is called by the connect fan-out,
+	// which decides each invoice's time, and the billing-profile fan-out,
+	// whose route decides from the customer all its invoices belong to.
 	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	if s.taxRetrier == nil {
 		return domain.Invoice{}, errs.InvalidState("tax retry is not configured")

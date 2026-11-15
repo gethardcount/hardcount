@@ -551,10 +551,10 @@ func (h *Handler) finalize(w http.ResponseWriter, r *http.Request) {
 	// Collect now through the billing engine's one collector (credits, then
 	// the card, or the setup-link email). The finalize write already queued
 	// the invoice, so if this is unwired or the process dies mid-call the
-	// auto-charge sweep collects it on its next tick. It runs on the time the
-	// door decided from the invoice (its clock's, for a clock invoice), read
-	// once from the server's clock when there is none, so the setup-link email
-	// it may enqueue carries the invoice's billing anchor (ADR-104).
+	// auto-charge sweep collects it on its next tick. It runs on the action's
+	// time (see Service.clock), so the setup-link email it may enqueue carries
+	// the invoice's billing anchor (ADR-104). h.svc.clock is the server's
+	// clock, the one the service's entry points read real time from.
 	if h.collector != nil {
 		h.collector.CollectInvoice(clock.EnsureEffectiveNow(r.Context(), h.svc.clock), tenantID, inv.ID, nil)
 		// Respond with the post-collection state (paid, failed, or still
@@ -659,7 +659,7 @@ func (h *Handler) resendSetupLink(w http.ResponseWriter, r *http.Request) {
 	}
 	// The TRUE cause: an operator clicked Resend. The row used to say
 	// "finalize_no_pm" — a finalize that never ran.
-	// On the time the door decided from the invoice, so the resent setup-link
+	// On the action's time (see Service.clock), so the resent setup-link
 	// email carries the invoice's billing anchor (ADR-030).
 	resendCtx := clock.EnsureEffectiveNow(r.Context(), h.svc.clock)
 	outcome, err := h.noPMNotifier.NotifyNoPaymentMethod(resendCtx, tenantID, inv, "operator_resend")
@@ -754,8 +754,8 @@ type RecordPaymentInput struct {
 //
 // Body shape: { "note": "Cheque #1234" } — single optional string.
 // Amount is implicit (full amount_due); partial payments deferred to
-// when a customer asks. Date stamps as clock.Now (sim-time on
-// clock-pinned invoices).
+// when a customer asks. paid_at is the request's time, a clock invoice's
+// clock time.
 //
 // The service closes the invoice's dunning run and expires its open
 // Checkout page after the commit.
@@ -1091,10 +1091,10 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// On the time the door decided from the invoice, as finalize's collect: on
-	// a clock invoice the charge records its clock's instant (the PI's
+	// On the action's time (see Service.clock), as finalize's collect: on a
+	// clock invoice the charge records its clock's instant (the PI's
 	// hardcount_anchor_at), which dates paid_at and a decline's first dunning
-	// retry. With no time on ctx, the server's clock is read once.
+	// retry.
 	charged, err := h.charger.ChargeInvoiceNow(clock.EnsureEffectiveNow(r.Context(), h.svc.clock), tenantID, inv, hold, ps.StripeCustomerID, ps.StripePaymentMethodID)
 	if err != nil {
 		// ADR-026 boundary sanitization: ChargeInvoice wraps a
