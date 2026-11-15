@@ -8,6 +8,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/subscription"
 )
 
@@ -106,6 +107,17 @@ func (s *PreviewService) CreatePreview(ctx context.Context, tenantID string, req
 	sub, err := s.resolveSubscription(ctx, tenantID, customerID, req.SubscriptionID)
 	if err != nil {
 		return PreviewResult{}, err
+	}
+
+	// The preview's time is decided from the subscription it previews
+	// (clock.DecideOrRealTime: the body names the customer, so the API's
+	// door left the request at real time): generated_at and every read below
+	// are at the subscription's clock time. A clock that cannot be read
+	// refuses the preview (503).
+	ctx, err = clock.DecideOrRealTime(ctx, s.engine, clock.Pin{TenantID: tenantID, SubscriptionID: sub.ID})
+	if err != nil {
+		return PreviewResult{}, errs.Unavailable("test_clock_unavailable",
+			"The subscription's test clock could not be read. Try again in a moment.", err)
 	}
 
 	from, to, err := resolveCreatePreviewPeriod(req.Period, sub)
