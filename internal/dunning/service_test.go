@@ -1069,7 +1069,6 @@ func TestDunning_StampsTheDecidedTime(t *testing.T) {
 	t.Run("StartDunning stamps frozen", func(t *testing.T) {
 		store := newMemStore()
 		svc := NewService(store, &noopRetrier{}, nil)
-		svc.SetResolver(resolver)
 
 		run, err := svc.StartDunning(testutil.DecidedFor(t, resolver, clock.Pin{TenantID: "t1", InvoiceID: "inv_1"}), "t1", "inv_1", "cus_1", frozen, domain.DunningCausePaymentFailed)
 		if err != nil {
@@ -1098,7 +1097,6 @@ func TestDunning_StampsTheDecidedTime(t *testing.T) {
 		// fields with no per-row simulated-time source (e.g. resolved_at).
 		store := newMemStore()
 		svc := NewService(store, &failingRetrier{}, nil)
-		svc.SetResolver(resolver)
 		ctx := testutil.DecidedFor(t, resolver, clock.Pin{TenantID: "t1", InvoiceID: "inv_1"})
 
 		run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", frozen, domain.DunningCausePaymentFailed)
@@ -1129,7 +1127,6 @@ func TestDunning_StampsTheDecidedTime(t *testing.T) {
 	t.Run("ResolveByInvoice stamps frozen", func(t *testing.T) {
 		store := newMemStore()
 		svc := NewService(store, &noopRetrier{}, nil)
-		svc.SetResolver(resolver)
 		ctx := testutil.DecidedFor(t, resolver, clock.Pin{TenantID: "t1", InvoiceID: "inv_1"})
 
 		run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", frozen, domain.DunningCausePaymentFailed)
@@ -1163,27 +1160,6 @@ func TestClockResolver_NotWired(t *testing.T) {
 	}
 	if run.CreatedAt.Before(before) || run.CreatedAt.After(after) {
 		t.Errorf("created_at: got %v, want between %v and %v (wall-clock fallback)", run.CreatedAt, before, after)
-	}
-}
-
-// TestClockResolver_ErrorFallback confirms dunning's own lookup of the
-// invoice's clock, when it fails, leaves the time its caller decided (real
-// time here) and does not fail the operation. Once that lookup is removed
-// (the delete PR for dunning), this tests nothing and goes with it.
-func TestClockResolver_ErrorFallback(t *testing.T) {
-	store := newMemStore()
-	svc := NewService(store, &noopRetrier{}, nil)
-	svc.SetResolver(&stubClockResolver{err: fmt.Errorf("invoice gone")})
-
-	before := time.Now().UTC()
-	run, err := svc.StartDunning(testutil.AtRealTime(), "t1", "inv_1", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
-	after := time.Now().UTC()
-	if err != nil {
-		t.Fatalf("StartDunning should not fail on resolver error: %v", err)
-	}
-	if run.CreatedAt.Before(before) || run.CreatedAt.After(after) {
-		t.Errorf("created_at on resolver error: got %v, want wall-clock fallback between %v and %v",
-			run.CreatedAt, before, after)
 	}
 }
 
