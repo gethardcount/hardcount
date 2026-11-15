@@ -422,8 +422,6 @@ export * from './requestPasswordReset200EmailDelivery';
 export * from './requestPasswordResetBody';
 export * from './resendInvoiceSetupLink200';
 export * from './resendInvoiceSetupLink200Status';
-export * from './resolveDunningRunBody';
-export * from './resolveDunningRunBodyResolution';
 export * from './retrySubscriptionBilling200';
 export * from './rotateApiKeyBody';
 export * from './rotateCustomerCostDashboardToken200';

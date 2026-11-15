@@ -89,7 +89,6 @@ import type {
   DismissInvoiceStripeRefundBody,
   DunningPolicy,
   DunningPolicyInput,
-  DunningRun,
   DunningRunDetail,
   DunningStats,
   Error,
@@ -223,7 +222,6 @@ import type {
   RequestPasswordReset200,
   RequestPasswordResetBody,
   ResendInvoiceSetupLink200,
-  ResolveDunningRunBody,
   RetrySubscriptionBilling200,
   RotateApiKeyBody,
   RotateCustomerCostDashboardToken200,
@@ -15461,92 +15459,6 @@ export function useGetDunningRun<TData = Awaited<ReturnType<typeof getDunningRun
 
 
 
-
-export const getResolveDunningRunUrl = (id: string,) => {
-
-
-
-
-  return `/v1/dunning/runs/${id}/resolve`
-}
-
-/**
- * Stops payment retries for a run and applies the chosen outcome to
- * its invoice first:
- * - `payment_recovered`: records an offline payment for the full
- *   amount due, as `POST /v1/invoices/{id}/record-payment` does.
- * - `invoice_voided`: voids the invoice and stops collection at
- *   Stripe, as `POST /v1/invoices/{id}/void` does.
- * - `invoice_not_collectible`: writes the invoice off, as
- *   `POST /v1/invoices/{id}/mark-uncollectible` does.
- *
- * If the invoice step fails, the run stays open and the error is
- * returned. If the invoice is already in the requested state, that
- * step is skipped. Fires the `dunning.resolved` webhook event once.
- * The other two resolutions, `retries_exhausted` and
- * `action_failed`, are set only by Hardcount.
- * @summary Resolve a dunning run
- */
-export const resolveDunningRun = async (id: string,
-    resolveDunningRunBody: ResolveDunningRunBody, options?: RequestInit): Promise<DunningRun> => {
-
-  return orvalClient<DunningRun>(getResolveDunningRunUrl(id),
-  {
-    ...options,
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...options?.headers },
-    body: JSON.stringify(resolveDunningRunBody)
-  }
-);}
-
-
-
-
-
-export const getResolveDunningRunMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveDunningRun>>, TError,{id: string;data: ResolveDunningRunBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
-): UseMutationOptions<Awaited<ReturnType<typeof resolveDunningRun>>, TError,{id: string;data: ResolveDunningRunBody}, TContext> => {
-
-const mutationKey = ['resolveDunningRun'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof resolveDunningRun>>, {id: string;data: ResolveDunningRunBody}> = (props) => {
-          const {id,data} = props ?? {};
-
-          return  resolveDunningRun(id,data,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type ResolveDunningRunMutationResult = NonNullable<Awaited<ReturnType<typeof resolveDunningRun>>>
-    export type ResolveDunningRunMutationBody = ResolveDunningRunBody
-    export type ResolveDunningRunMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
-
-    /**
- * @summary Resolve a dunning run
- */
-export const useResolveDunningRun = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resolveDunningRun>>, TError,{id: string;data: ResolveDunningRunBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof resolveDunningRun>>,
-        TError,
-        {id: string;data: ResolveDunningRunBody},
-        TContext
-      > => {
-      return useMutation(getResolveDunningRunMutationOptions(options), queryClient);
-    }
 
 export const getGetDunningStatsUrl = () => {
 

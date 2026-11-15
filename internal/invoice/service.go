@@ -2237,7 +2237,7 @@ func (s *Service) AfterVoid(ctx context.Context, tenantID string, voided domain.
 	_ = s.reverseInvoiceTax(ctx, tenantID, voided, "inv_taxrev_"+voided.ID)
 	if s.dunningResolver != nil {
 		if err := s.dunningResolver.ResolveByInvoice(ctx, tenantID, voided.ID, domain.ResolutionInvoiceVoided); err != nil {
-			slog.WarnContext(ctx, "resolve the voided invoice's dunning run failed; its next dunning tick resolves it",
+			slog.WarnContext(ctx, "the invoice is voided but closing its dunning run failed; an active run closes at its next retry; an escalated one stays open until resolved by hand (runbook: Force-resolve a stuck dunning run)",
 				"invoice_id", voided.ID, "error", err)
 		}
 	}
@@ -2505,7 +2505,7 @@ func (s *Service) RecordOfflinePayment(ctx context.Context, tenantID, id, note s
 	// the Stripe call below, which can be slow.
 	if s.dunningResolver != nil {
 		if err := s.dunningResolver.ResolveByInvoice(stepsCtx, tenantID, updated.ID, domain.ResolutionPaymentRecovered); err != nil {
-			slog.WarnContext(ctx, "the offline payment is recorded but closing the invoice's dunning run failed; an active run closes at its next retry, an escalated one needs Resolve",
+			slog.WarnContext(ctx, "the offline payment is recorded but closing the invoice's dunning run failed; an active run closes at its next retry; an escalated one stays open until resolved by hand (runbook: Force-resolve a stuck dunning run)",
 				"invoice_id", updated.ID, "error", err)
 		}
 	}

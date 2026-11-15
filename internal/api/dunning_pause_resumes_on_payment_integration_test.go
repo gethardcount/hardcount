@@ -338,10 +338,6 @@ func TestDunningPause_PaymentResumesCollection(t *testing.T) {
 		{"offline payment", func(r *pauseRig, _ domain.InvoiceDunningRun, invoiceID string, _ int64) {
 			r.payOffline(invoiceID)
 		}},
-		{"dunning run resolved as recovered", func(r *pauseRig, run domain.InvoiceDunningRun, _ string, _ int64) {
-			r.call("POST", "/v1/dunning/runs/"+run.ID+"/resolve", flowReq{body: map[string]any{"resolution": "payment_recovered"}}).
-				want(r.t, 200, "resolve run")
-		}},
 		{"credit note for everything due", func(r *pauseRig, _ domain.InvoiceDunningRun, invoiceID string, due int64) {
 			r.creditNote(invoiceID, due)
 		}},

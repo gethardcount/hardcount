@@ -57,6 +57,20 @@ func TestRemovedRoutes_AnswerNotFound(t *testing.T) {
 	clockID := flowStr(call("POST", "/v1/test-clocks", map[string]any{
 		"name": "Removed Routes Clock", "frozen_time": "2026-01-01T00:00:00Z",
 	}).want(t, 201, "create test clock").body, "id")
+	// A dunning policy, so finalizing an invoice with no card opens a run.
+	call("POST", "/v1/dunning/policies", map[string]any{
+		"name": "Removed routes policy", "enabled": true, "retry_days": []int{3, 3},
+	}).want(t, 201, "create dunning policy")
+	dunnedID := flowStr(call("POST", "/v1/invoices", map[string]any{
+		"customer_id": customerID,
+		"line_items":  []map[string]any{{"description": "Dunned service", "quantity": 1, "unit_amount_cents": 4200}},
+	}).want(t, 201, "create invoice").body, "id")
+	call("POST", "/v1/invoices/"+dunnedID+"/finalize", nil).want(t, 200, "finalize")
+	runs := flowList(call("GET", "/v1/dunning/runs?invoice_id="+dunnedID, nil).want(t, 200, "list dunning runs").body, "data")
+	if len(runs) != 1 {
+		t.Fatalf("invoice %s has %d dunning runs, want 1", dunnedID, len(runs))
+	}
+	runID := flowStr(runs[0], "id")
 
 	// An outbound event for the two webhook cases. Events reach the table
 	// through the outbox worker, which this server does not run, so the
@@ -145,6 +159,13 @@ func TestRemovedRoutes_AnswerNotFound(t *testing.T) {
 			name:   "all meter pricing rules",
 			method: "GET", path: "/v1/meter-pricing-rules",
 			keptMethod: "GET", kept: "/v1/plans/" + planID + "/prices",
+		},
+		// A run is closed on its invoice: record a payment, void, or write off.
+		{
+			name:   "dunning run resolve",
+			method: "POST", path: "/v1/dunning/runs/" + runID + "/resolve",
+			body:       map[string]any{"resolution": "invoice_voided"},
+			keptMethod: "POST", kept: "/v1/invoices/" + dunnedID + "/void",
 		},
 	}
 	for _, tc := range cases {

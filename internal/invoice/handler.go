@@ -1198,8 +1198,9 @@ func (h *Handler) releaseCollectHold(ctx context.Context, tenantID, invoiceID st
 
 // resolveDunningRecovered closes the invoice's active dunning run, if any, as
 // payment_recovered after collect settled it, whether by card or from credit.
-// Best-effort: the payment has already committed, so a failure logs and the
-// dunning tick's paid check resolves the run when it next comes due.
+// Best-effort: the payment has already committed, so a failure logs. An active
+// run then closes at its next retry; an escalated one stays open until resolved
+// by hand (the runbook's Force-resolve a stuck dunning run).
 func (h *Handler) resolveDunningRecovered(ctx context.Context, tenantID, invoiceID string) {
 	if h.dunning == nil {
 		return

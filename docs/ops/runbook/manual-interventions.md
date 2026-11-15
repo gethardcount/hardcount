@@ -9,16 +9,22 @@ hand: keep your own record of what you ran, when and why. Back to the [runbook i
 A dunning run is Hardcount's schedule of retries for one unpaid invoice.
 Resolve it on the run's invoice in the dashboard (the Dunning page's
 **Open invoice**): **Record offline payment**, **Void invoice** or **Mark
-uncollectible** each close the run. Or call
-`POST /v1/dunning/runs/{id}/resolve` with a `resolution` (one of the three
-below). Both make the matching change to the invoice and send
-`dunning.resolved`. Use the SQL below only when the run must stop before
-you can reach the dashboard or the API: for example, when its next retry
-would charge a customer who has already paid.
+uncollectible** each close the run, an escalated one too, and send
+`dunning.resolved`. The API does the same with
+`POST /v1/invoices/{id}/record-payment`, `/void` or `/mark-uncollectible`.
+Use the SQL below only when the invoice action cannot close the run:
+- the run must stop before you can reach the dashboard or the API, for
+  example when its next retry would charge a customer who has already paid;
+- or the invoice is already paid, voided or uncollectible and its run is
+  still open or escalated: the run's resolve failed after the invoice
+  changed (the server logged a warning naming the invoice). An active run is
+  closed by its next dunning retry; an escalated run has none, so it waits
+  for this SQL.
 
 1. **Pick the resolution that says what actually happened to the invoice.**
    Finance later reads this column to answer "why did we stop collecting
-   this?", and this SQL skips the endpoint that would otherwise check it.
+   this?", and this SQL skips the invoice actions that would otherwise set
+   it.
 
    | Invoice ended up | Use |
    |---|---|

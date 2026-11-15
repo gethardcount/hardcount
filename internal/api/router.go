@@ -587,7 +587,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// the raw store. The service is the one void writer: it runs the guards,
 	// the in-flight block, the tax reversal and the invoice.voided event. Like
 	// the marker above, it is wired late, once invoiceSvc exists.
-	dunningH.SetInvoiceVoider(invoiceSvc)
 	// The tax retry after a Stripe connect (ADR-019). When an operator
 	// connects or reconnects Stripe in Settings → Payments, the tenantstripe
 	// service starts a goroutine that retries every invoice stuck on
@@ -945,7 +944,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// The dunning handler's resolveRun binds the clock from the invoice
 	// before MarkPaid, so `invoice.paid_at` is in simulated time on a
 	// clock-pinned invoice, not in wall-clock time.
-	dunningH.SetResolver(engine)
 	// The payment reconciler is the scheduled fallback that resolves invoices
 	// stuck in PaymentUnknown by polling Stripe for the real outcome. Without
 	// the resolver, paid_at on a clock-pinned invoice would be wall-clock
