@@ -965,6 +965,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// entry's created_at in simulated time. Then the dashboard's "credit
 	// granted on …" line matches the rest of the simulated timeline.
 	creditSvc.SetResolver(engine)
+	creditSvc.SetClock(clk)
 	// Usage ingest for a clock-pinned customer defaults event times to the
 	// clock's frozen_time and checks them against it. So usage in simulated
 	// time can be ingested onto an advanced clock. Every ingest path goes

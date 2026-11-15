@@ -42,11 +42,18 @@ type Service struct {
 	auditLogger AuditEmitter
 	customers   CustomerReader
 	live        LiveBalanceReader
+	clock       clock.Clock
 }
 
 func NewService(store Store) *Service {
-	return &Service{store: store}
+	return &Service{store: store, clock: clock.Real()}
 }
+
+// SetClock sets the clock real time is read from: the server's clock, the one
+// the billing engine bills by. The service is handed it because a decision
+// for a customer on no clock carries no instant, so the service reads real
+// time itself. Without it, real time is the machine's.
+func (s *Service) SetClock(c clock.Clock) { s.clock = c }
 
 // SetAuditLogger wires in-tx audit emission for operator-facing credit
 // mutations (grant / adjust). Moved here from the handler (ADR-090): the
@@ -57,11 +64,10 @@ func NewService(store Store) *Service {
 // classes unrepresentable.
 func (s *Service) SetAuditLogger(a AuditEmitter) { s.auditLogger = a }
 
-// SetResolver wires the unified clock.Resolver. Customer-scoped credit
-// mutations (Grant, ApplyToInvoice, etc.) bind effective-now from the
-// customer pin so the ledger entry's created_at lands in simulated
-// time on clock-pinned customers — same architectural rule as
-// subscription / invoice / dunning.
+// SetResolver wires the clock.Resolver that Grant and Adjust decide their
+// time with (decideForCustomer), and that the customer reads below look the
+// customer's time up with. Optional: nil decides nothing, and every read is
+// real time (narrow tests).
 func (s *Service) SetResolver(r clock.Resolver) {
 	s.resolver = r
 }
@@ -99,10 +105,14 @@ func (s *Service) requireCustomer(ctx context.Context, tenantID, customerID stri
 	return nil
 }
 
-// decideForCustomer decides the time of a grant or an adjustment from the
-// customer its body names (clock.DecideOrRealTime: the API's door left the
-// request at real time), before anything is written, and binds one instant
-// for the whole request: a real-time decision carries none, so the expiry
+// decideForCustomer decides a grant's or an adjustment's time from the
+// customer its body names (clock.DecideOrRealTime), after the customer is
+// read (a customer that does not exist answers 404 first) and before
+// anything is written. The decision is made here rather than in the handler,
+// as subscriptions and credit notes do, because Grant and Adjust are each
+// the one call their route makes, with nothing after it. It binds one
+// instant for the whole request: for a customer on no clock, or in live
+// mode, it reads real time once from the service's clock, so the expiry
 // check and the ledger entry's created_at read the same instant. A clock
 // that cannot be read refuses the request (503), with nothing written.
 func (s *Service) decideForCustomer(ctx context.Context, tenantID, customerID string) (context.Context, error) {
@@ -112,7 +122,7 @@ func (s *Service) decideForCustomer(ctx context.Context, tenantID, customerID st
 			"The customer's test clock could not be read. Nothing was changed; send the request again.", err)
 	}
 	if _, ok := clock.EffectiveNow(decided); !ok {
-		decided = clock.WithEffectiveNow(decided, clock.Now(decided))
+		decided = clock.WithEffectiveNow(decided, s.clock.Now(decided))
 	}
 	return decided, nil
 }
@@ -201,9 +211,9 @@ func (s *Service) Grant(ctx context.Context, tenantID string, input GrantInput) 
 	// wrong year/date. Industry parity: Stripe credit-grant API
 	// returns 422 on past expires_at.
 	//
-	// Compare against clock.Now(ctx) so clock-pinned customers
-	// (bindForCustomer above seeded ctx with the sim clock) evaluate
-	// against simulated time, not wall-clock. Internal engine callers
+	// Compare against the request's decided instant (decideForCustomer
+	// above), so a clock customer's expiry is checked against its clock's
+	// time. Internal engine callers
 	// (cancel / plan-swap relief, CN Issue) don't set
 	// ExpiresAt on their grants, so this gate doesn't affect refund
 	// flows — only operator-driven and SDK-driven Grant calls.
@@ -368,9 +378,8 @@ func (s *Service) RetireCommitGrantForInvoiceTx(ctx context.Context, tx *sql.Tx,
 // ledger entry via the store's AppendEntryTx so it shares the caller's
 // tx. ADR-030 atomic-proration follow-through (2026-05-29).
 //
-// Note: skips the bindForCustomer call (the caller is expected to have
-// already bound effective-now from the affected entity's pin via the
-// handler's resolver — passing the bound ctx through to us).
+// It decides no time of its own: it runs inside its caller's transaction,
+// on the ctx its caller decided.
 func (s *Service) GrantTx(ctx context.Context, tx *sql.Tx, tenantID string, input GrantInput) (domain.CreditLedgerEntry, error) {
 	if input.CustomerID == "" {
 		return domain.CreditLedgerEntry{}, errs.Required("customer_id")
