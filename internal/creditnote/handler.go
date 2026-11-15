@@ -176,7 +176,8 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	// still leaves a draft and logs nothing; it shows as a draft in the
 	// credit notes list. A plain create is one transaction on the request.
 	// The body's invoice decides the note's time here, before the create and
-	// the issue, so both run on it; the steps ctx below keeps its values.
+	// the issue, so both run on it; the detached context below (for
+	// auto_issue) carries the decision with it.
 	ctx, err := h.svc.DecideForInvoice(r.Context(), tenantID, input.InvoiceID)
 	if err != nil {
 		respond.FromError(w, r, err, "credit_note")

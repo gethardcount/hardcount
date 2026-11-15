@@ -276,12 +276,11 @@ func (s *Service) SetAuditLogger(a AuditEmitter) { s.audit = a }
 // dated weeks before the invoice it credits.
 func (s *Service) SetResolver(r clock.Resolver) { s.resolver = r }
 
-// DecideForInvoice decides the time of a credit note created from a body
-// that names its invoice (POST /v1/credit-notes: the API's door left the
-// request at real time), before its create and its issue, with
-// clock.DecideOrRealTime. A clock that cannot be read refuses the request
-// (503), with nothing written. No invoice id decides nothing: the create
-// answers the missing field.
+// DecideForInvoice decides a credit note's time from the invoice its body
+// names (clock.DecideOrRealTime): the create route calls it before anything
+// runs, and it is on the service because the service holds the resolver. A
+// clock that cannot be read refuses the request (503), with nothing written;
+// no invoice id decides nothing, and the create answers the missing field.
 func (s *Service) DecideForInvoice(ctx context.Context, tenantID, invoiceID string) (context.Context, error) {
 	if invoiceID == "" {
 		return ctx, nil
@@ -387,9 +386,9 @@ type CreditLineInput struct {
 }
 
 func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput) (domain.CreditNote, error) {
-	// ADR-030: pin ctx to the source invoice's clock before anything is
-	// written, so a credit note against a clock-pinned invoice is stamped in
-	// that invoice's own time domain rather than wall-clock.
+	// The create route decides the note's time first; this bind keeps a
+	// decision already made, and gives the invoice's time to the callers that
+	// do not decide (CreateRefund, the adjustment, the clawback jobs).
 	ctx = s.bindForInvoice(ctx, tenantID, input.InvoiceID)
 	// In-flight payment gate. An OPERATOR credit note must not reduce an
 	// invoice's amount_due while its payment is in flight (processing/unknown):
@@ -1767,10 +1766,10 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 	if cn.Status != domain.CreditNoteDraft {
 		return domain.CreditNote{}, errs.InvalidState("can only issue draft credit notes")
 	}
-	// ADR-030: Issue is where the money moves (ledger grant / amount_due
-	// relief / tax reversal), so it must run in the source invoice's time
-	// domain. Bound here rather than at the top because the invoice id comes
-	// off the credit note we just loaded.
+	// Issue moves the money (the ledger grant, the amount due, the tax
+	// reversal) at the invoice's time: this bind keeps a decision already made
+	// (the create route's, for an auto-issued note) and gives the invoice's
+	// time to the callers that do not decide.
 	ctx = s.bindForInvoice(ctx, tenantID, cn.InvoiceID)
 
 	// A first read of the source invoice, outside any transaction. It only
