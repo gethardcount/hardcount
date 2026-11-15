@@ -74,13 +74,14 @@ func (s *Service) SetResolver(r clock.Resolver) {
 	s.resolver = r
 }
 
-// simNow is the time for the customer's event: every ingest shape reaches it
-// once per event (single, each event of a batch, backfill, a LiteLLM call, a
-// held release), and so do the reads whose window defaults to the
-// customer's now (customer usage, margin). The cases, in the order taken:
-//   - a clock already decided for this request (a backfill's own decision,
-//     or a route that named the customer): its time, with no read;
-//   - an instant already bound, with no clock: that instant;
+// decide returns ctx with the customer's time decided and its instant bound,
+// so all work below reads one instant, and audit rows the clock. Every ingest
+// shape reaches it once per event or call (single, each event of a batch,
+// backfill, a LiteLLM call, a held release), and so do the reads whose window
+// defaults to the customer's now (customer usage, margin). The cases, in the
+// order taken:
+//   - an instant already bound (a clock decided for this request, with its
+//     id, or a bare instant): ctx as it is, with no read;
 //   - no customer id: real time;
 //   - else the customer's clock is decided here (clock.DecideWithoutDoor:
 //     the customer is named in the body, so the API's door left the request
@@ -92,38 +93,38 @@ func (s *Service) SetResolver(r clock.Resolver) {
 //   - a clock that cannot be read refuses the event (503): nothing is
 //     recorded, and the client sends it again.
 //
-// Real time is read from the service's clock (SetClock).
-func (s *Service) simNow(ctx context.Context, tenantID, customerID string) (clock.Sim, error) {
-	if sim, ok := clock.SimOf(ctx); ok {
-		return sim, nil
-	}
-	if t, ok := clock.EffectiveNow(ctx); ok {
-		return clock.Sim{At: t}, nil
+// Real time is read once from the service's clock (SetClock) and bound.
+func (s *Service) decide(ctx context.Context, tenantID, customerID string) (context.Context, error) {
+	if _, ok := clock.EffectiveNow(ctx); ok {
+		return ctx, nil
 	}
 	if customerID == "" {
-		return clock.Sim{At: s.clock.Now(ctx)}, nil
+		return clock.WithEffectiveNow(ctx, s.clock.Now(ctx)), nil
 	}
 	decided, err := clock.DecideWithoutDoor(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID})
 	switch {
 	case errors.Is(err, errs.ErrNotFound):
 		// The customer, or, in a race with its clock's deletion, its clock:
 		// real time is right in both.
-		return clock.Sim{At: s.clock.Now(ctx)}, nil
+		return clock.WithEffectiveNow(ctx, s.clock.Now(ctx)), nil
 	case err != nil:
-		return clock.Sim{}, errs.Unavailable("test_clock_unavailable",
+		return ctx, errs.Unavailable("test_clock_unavailable",
 			"The customer's test clock could not be read. Nothing was recorded; send the event again.", err)
 	}
-	if sim, ok := clock.SimOf(decided); ok {
-		return sim, nil
+	if _, ok := clock.SimOf(decided); ok {
+		return decided, nil
 	}
-	return clock.Sim{At: s.clock.Now(ctx)}, nil
+	return clock.WithEffectiveNow(ctx, s.clock.Now(ctx)), nil
 }
 
-// effectiveNow is simNow's instant — the value the ingest gates and
-// timestamps use.
+// effectiveNow is the customer's now, decide's instant: the value the ingest
+// gates and timestamps use.
 func (s *Service) effectiveNow(ctx context.Context, tenantID, customerID string) (time.Time, error) {
-	sim, err := s.simNow(ctx, tenantID, customerID)
-	return sim.At, err
+	decided, err := s.decide(ctx, tenantID, customerID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	return s.clock.Now(decided), nil
 }
 
 // IngestInput is the internal service input — uses resolved internal IDs only.
@@ -178,19 +179,16 @@ func (s *Service) Backfill(ctx context.Context, tenantID string, input IngestInp
 	// makes strict past-only brittle to verify, and the 'backfill' origin
 	// tag already distinguishes these rows from live POST traffic for
 	// audit purposes.
-	sim, err := s.simNow(ctx, tenantID, input.CustomerID)
+	bound, err := s.decide(ctx, tenantID, input.CustomerID)
 	if err != nil {
 		return domain.UsageEvent{}, err
 	}
-	if input.Timestamp.After(sim.At) {
+	if input.Timestamp.After(s.clock.Now(bound)) {
 		return domain.UsageEvent{}, errs.Invalid("timestamp", "must not be in the future for backfill — use POST /usage-events for real-time ingest")
 	}
-	// Carry the resolved sim context downstream so ingest doesn't re-resolve —
-	// and so the audit emission inherits the CLOCK, not just the instant. The
-	// emission closure must be built from the BOUND ctx (it was previously
-	// built from the outer one, which is why an operator backdating usage into
-	// a simulation left an audit row with no sim axis).
-	bound := clock.WithSim(ctx, sim)
+	// The decided ctx goes downstream, so ingest does not decide again and
+	// the audit emission, built from it, carries the clock, not just the
+	// instant.
 	return s.ingestAudited(bound, tenantID, input, domain.UsageOriginBackfill, s.backfillEmission(bound))
 }
 
