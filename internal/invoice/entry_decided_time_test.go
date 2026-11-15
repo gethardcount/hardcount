@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
@@ -288,6 +289,8 @@ func TestEntryPoints_AtRealTimeReadTheServersClockOnce(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create: %v", err)
 		}
+		aud := &instantAudit{}
+		svc.SetAuditLogger(aud)
 		final, err := svc.Finalize(realTime(), "t1", draft.ID)
 		if err != nil {
 			t.Fatalf("finalize: %v", err)
@@ -295,6 +298,11 @@ func TestEntryPoints_AtRealTimeReadTheServersClockOnce(t *testing.T) {
 		once(t, server, final.IssuedAt, "issued_at")
 		if final.DueAt == nil || final.DueAt.Before(*final.IssuedAt) {
 			t.Errorf("due_at %v before issued_at %v: the due date must count from the one instant", final.DueAt, final.IssuedAt)
+		}
+		// The finalize's audit row is written in its transaction from its
+		// ctx; with no instant bound there, its stamp would be another read.
+		if final.IssuedAt == nil || !aud.at.Equal(*final.IssuedAt) {
+			t.Errorf("finalize audit row at %v; want issued_at %v, the one instant", aud.at, final.IssuedAt)
 		}
 	})
 
@@ -366,4 +374,16 @@ func (r *instantSeeingRetrier) RetryTaxForInvoice(ctx context.Context, tenantID,
 ) (domain.Invoice, error) {
 	r.at, _ = clock.EffectiveNow(ctx)
 	return r.stubTaxRetrier.RetryTaxForInvoice(ctx, tenantID, invoiceID, then)
+}
+
+// instantAudit records the instant an in-transaction audit row's ctx carries
+// (the audit store stamps the row with it).
+type instantAudit struct{ at time.Time }
+
+func (a *instantAudit) Log(context.Context, string, string, string, string, string, map[string]any) error {
+	return nil
+}
+func (a *instantAudit) LogInTx(ctx context.Context, _ *sql.Tx, _ audit.Entry) error {
+	a.at, _ = clock.EffectiveNow(ctx)
+	return nil
 }
