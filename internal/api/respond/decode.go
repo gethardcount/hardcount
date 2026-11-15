@@ -180,6 +180,11 @@ func decodeBody(r *http.Request, v any, rule decodeRule) error {
 		return &BodyError{Err: err}
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		// Keep a read error, such as the router's cap, so the caller can
+		// answer it (BodyTooLarge).
+		if err != nil {
+			return &BodyError{Err: fmt.Errorf("data after the JSON value: %w", err)}
+		}
 		return &BodyError{Err: errors.New("data after the JSON value")}
 	}
 	return decodeValue(raw, v, rule)

@@ -248,6 +248,21 @@ func TestDecodeBody_KeepsTheCause(t *testing.T) {
 		t.Fatalf("err = %v, want the MaxBytesError in the chain", err)
 	}
 
+	// A whole value that ends inside the cap, followed by bytes past it,
+	// keeps the cap error too.
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("POST", "/", strings.NewReader(`{"code":"a"}`+strings.Repeat(" ", 64)))
+	req.Body = http.MaxBytesReader(rec, req.Body, 32)
+	if err := DecodeBody(req, &strictBody{}); !errors.As(err, &maxErr) {
+		t.Fatalf("trailing bytes past the cap: err = %v, want the MaxBytesError in the chain", err)
+	}
+
+	// Real data after the value, inside the cap, is still invalid JSON.
+	req = httptest.NewRequest("POST", "/", strings.NewReader(`{"code":"a"} {"code":"b"}`))
+	if err := DecodeBody(req, &strictBody{}); err == nil || err.Error() != "invalid JSON body" || errors.As(err, &maxErr) {
+		t.Errorf("trailing data: err = %v, want invalid JSON body", err)
+	}
+
 	req = httptest.NewRequest("POST", "/", io.NopCloser(strings.NewReader(`{`)))
 	if err := DecodeBody(req, &strictBody{}); err == nil || err.Error() != "invalid JSON body" {
 		t.Errorf("err = %v, want invalid JSON body", err)

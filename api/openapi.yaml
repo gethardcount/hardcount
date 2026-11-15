@@ -10609,6 +10609,8 @@ paths:
                   code: invalid_state
                   message: This customer has 1 subscription that still bills (Acme Pro). Cancel it first; archiving doesn't stop billing.
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             A field failed validation (`validation_error`, `param` names it):
@@ -10755,6 +10757,8 @@ paths:
                   code: invalid_state
                   message: billing profile currency EUR conflicts with subscription acme-pro's plan currency USD — invoices would relabel plan prices in EUR without conversion; cancel the subscription or keep the currency
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             A field failed validation, or the body has a key the profile does
@@ -11314,6 +11318,8 @@ paths:
                   code: email_not_configured
                   message: Email isn't set up on this server, so nothing was sent.
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             `note_too_long` (more than 2000 bytes), `missing_email` (the
@@ -13321,6 +13327,8 @@ paths:
                   code: not_found
                   message: customer not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: Validation failed (see description), or an unknown field (`param` names it; the body must use only the fields listed here).
           content:
@@ -15068,6 +15076,8 @@ paths:
                   code: invalid_state
                   message: This plan changed while the request was running. Refresh the page and try again.
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             `validation_error`: the base fee changed while subscriptions that
@@ -15289,6 +15299,8 @@ paths:
                   message: Price hc_prc_dajr672q3gpgqfoq5c2a already prices this meter with the same dimension_match. Edit that price instead.
                   request_id: req_dbjg652q3gpgqfoq5cd0
                   param: dimension_match
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             `validation_error`: an unknown meter, a label that is not a string
@@ -15396,6 +15408,8 @@ paths:
                   code: not_found
                   message: price not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             `validation_error`: a rate outside its limits, a price shape that
@@ -16440,6 +16454,8 @@ paths:
                   code: invalid_state
                   message: A canceled subscription can't be scheduled to cancel.
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             Code `validation_error`: neither or both of `at_period_end` and
@@ -16700,6 +16716,8 @@ paths:
                   code: invalid_state
                   message: Collection can't be paused on a canceled subscription.
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             Code `validation_error`: `behavior` is missing or not
@@ -17041,6 +17059,8 @@ paths:
                   code: invalid_state
                   message: Only a trialing subscription's trial can be extended. This one is active.
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             `trial_end` is missing, in the past, not after the current
@@ -17209,6 +17229,8 @@ paths:
                   code: invalid_state
                   message: Spend thresholds can't be set on a canceled subscription.
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             Neither `amount_gte` nor `item_thresholds` is set;
@@ -17439,6 +17461,8 @@ paths:
                   message: subscription already has an item for plan "hc_pln_dajr5o2q3gpgqfoq5c3k"
                   request_id: req_dbjg652q3gpgqfoq5cd0
                   param: plan_id
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             Code `validation_error`: `plan_id` is missing
@@ -17654,6 +17678,8 @@ paths:
                   code: invalid_state
                   message: Items can only be changed on an active subscription. This one is trialing.
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             Code `validation_error`: neither or both of `quantity` and
@@ -18642,6 +18668,8 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           $ref: "#/components/responses/Forbidden"
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             `validation_error`: a missing, empty or whitespace-only
@@ -27064,6 +27092,8 @@ paths:
                   code: invalid_state
                   message: Price hc_prc_dajr672q3gpgqfoq5c20 was removed from its plan, so it takes no part from now on. Override a price the plan has.
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: |
             `validation_error`: a missing field, an unknown price, a rate that
@@ -28322,6 +28352,8 @@ paths:
                   code: not_found
                   message: stripe_credentials not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "413":
+          $ref: "#/components/responses/PayloadTooLarge"
         "422":
           description: "`webhook_secret` is missing or does not start with `whsec_`, or the body has an unknown field"
           content:

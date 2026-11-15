@@ -58,6 +58,16 @@ func TestE2E_BodyOverTheCap_Answers413WithOrWithoutIdempotencyKey(t *testing.T) 
 	tooLarge(createCustomer(over, ""), "one byte over the cap, no Idempotency-Key")
 	tooLarge(createCustomer(over, "k-big"), "one byte over the cap, with an Idempotency-Key")
 
+	// A whole value inside the cap followed by spaces past it is over the
+	// cap too. Real data after the value is invalid JSON.
+	valid := []byte(`{"external_id":"body-cap-trail","display_name":"Acme"}`)
+	trailing := append(append([]byte{}, valid...), bytes.Repeat([]byte(" "), maxRequestBodyBytes+1-len(valid))...)
+	tooLarge(createCustomer(trailing, ""), "a value followed by spaces past the cap, no Idempotency-Key")
+	tooLarge(createCustomer(trailing, "k-trail"), "a value followed by spaces past the cap, with an Idempotency-Key")
+	if r := createCustomer(append(append([]byte{}, valid...), ` {}`...), ""); r.status != 400 || r.errMessage() != "invalid JSON body" {
+		t.Errorf("data after the value inside the cap: %d %s, want 400 invalid JSON body", r.status, r.raw)
+	}
+
 	// A body exactly at the cap is read whole. The long name then fails its
 	// own check, which is not a 413.
 	atCap := customerBodyOfSize(t, maxRequestBodyBytes)

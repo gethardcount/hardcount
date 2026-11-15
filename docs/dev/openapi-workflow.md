@@ -28,10 +28,12 @@ their SDKs aligned with their HTTP surface.
      each 2xx JSON response's `schema`, with values the handler accepts;
    - the shared error answers where they apply:
      `$ref: "#/components/responses/Unauthorized"` (401) on a route that
-     needs a key, `RateLimited` (429) on a rate-limited route, and
-     `InvalidBody` (400) and `PayloadTooLarge` (413) on a route with a JSON
-     body. Give any other error status the `Error` schema and an example
-     with the handler's real code and message.
+     needs a key, `RateLimited` (429) on a rate-limited route,
+     `InvalidBody` (400) on a route with a JSON body, and `PayloadTooLarge`
+     (413) on every operation with a JSON request body, except those listed
+     with a reason in `payloadTooLargeNotListed`. Give any other error
+     status the `Error` schema and an example with the handler's real code
+     and message.
 
    A route only the dashboard calls gets `tags: [Dashboard]`,
    `x-internal: true`, and the first description line "Used by the
@@ -104,6 +106,11 @@ A response field that carries a secret shown only in that answer is marked
 `openapi_show_once_test.go` fails until every operation that answers with
 such a field is kept out of the idempotency layer (`showOnceSecretRoutes` in
 `router.go`), and every route on that list has such a field.
+
+`TestOpenAPISpec_EveryJSONBodyListsPayloadTooLarge` in
+`openapi_payload_too_large_test.go` fails when an operation with a JSON
+request body does not list `PayloadTooLarge` (413), unless
+`payloadTooLargeNotListed` names it with the reason.
 
 `TestOpenAPISpec_RequestBodies` in `openapi_bodies_test.go` checks request
 bodies. `requestBodies` maps each operation that has a JSON body to the Go
