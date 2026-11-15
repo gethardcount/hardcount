@@ -121,10 +121,7 @@ func (s *Service) decideForCustomer(ctx context.Context, tenantID, customerID st
 		return ctx, errs.Unavailable("test_clock_unavailable",
 			"The customer's test clock could not be read. Nothing was changed; send the request again.", err)
 	}
-	if _, ok := clock.EffectiveNow(decided); !ok {
-		decided = clock.WithEffectiveNow(decided, s.clock.Now(decided))
-	}
-	return decided, nil
+	return clock.EnsureEffectiveNow(decided, s.clock), nil
 }
 
 func (s *Service) bindForCustomer(ctx context.Context, tenantID, customerID string) context.Context {

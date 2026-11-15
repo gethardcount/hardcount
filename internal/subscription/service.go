@@ -843,9 +843,7 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	// real-time decision does not, so the one read is bound here, and every
 	// s.clock.Now(ctx) below, the store's created_at and updated_at among
 	// them, reads it.
-	if _, ok := clock.EffectiveNow(ctx); !ok {
-		ctx = clock.WithEffectiveNow(ctx, s.clock.Now(ctx))
-	}
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	now := s.clock.Now(ctx)
 
 	var trialStart, trialEnd *time.Time

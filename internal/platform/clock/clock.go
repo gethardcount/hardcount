@@ -164,6 +164,18 @@ func WithEffectiveNow(ctx context.Context, t time.Time) context.Context {
 	return WithSim(ctx, Sim{At: t})
 }
 
+// EnsureEffectiveNow returns ctx with an effective now bound: the one ctx
+// carries (a clock's decision, or an instant bound earlier), else c's now,
+// read once and bound. A decision of real time carries no instant, so work
+// that read the clock more than once would stamp several instants on one
+// piece of work; binding here gives everything below one instant.
+func EnsureEffectiveNow(ctx context.Context, c Clock) context.Context {
+	if _, ok := EffectiveNow(ctx); ok {
+		return ctx
+	}
+	return WithEffectiveNow(ctx, c.Now(ctx))
+}
+
 // EffectiveNow returns the bound instant and true when ctx carries any
 // binding, from WithEffectiveNow or WithSim. Otherwise it returns the zero
 // time and false.

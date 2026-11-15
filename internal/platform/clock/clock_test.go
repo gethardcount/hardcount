@@ -619,3 +619,48 @@ func TestDecideOrRealTime(t *testing.T) {
 		})
 	}
 }
+
+// countingClock answers a fixed instant and counts the reads it answers.
+type countingClock struct {
+	at    time.Time
+	reads int
+}
+
+func (c *countingClock) Now(context.Context) time.Time {
+	c.reads++
+	return c.at
+}
+
+// EnsureEffectiveNow keeps the instant ctx carries, a clock's decision or a
+// bare instant, and reads no clock; otherwise, real time decided or nothing
+// decided, it reads the clock once and binds that instant.
+func TestEnsureEffectiveNow(t *testing.T) {
+	frozen := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
+	server := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
+	testMode := postgres.WithLivemode(context.Background(), false)
+	for _, c := range []struct {
+		name      string
+		ctx       context.Context
+		want      time.Time
+		wantClock string
+		wantReads int
+	}{
+		{"a clock's decision is kept", WithSim(testMode, Sim{At: frozen, TestClockID: "clk_1"}), frozen, "clk_1", 0},
+		{"a bare instant is kept", WithEffectiveNow(testMode, frozen), frozen, "", 0},
+		{"real time is read once and bound", WithRealTime(testMode), server, "", 1},
+		{"nothing decided is read once and bound", testMode, server, "", 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			cc := &countingClock{at: server}
+			got := EnsureEffectiveNow(c.ctx, cc)
+			at, ok := EffectiveNow(got)
+			sim, _ := SimOf(got)
+			if !ok || !at.Equal(c.want) || sim.TestClockID != c.wantClock || cc.reads != c.wantReads {
+				t.Errorf("instant %v (bound %v), clock %q, reads %d; want %v, clock %q, %d reads", at, ok, sim.TestClockID, cc.reads, c.want, c.wantClock, c.wantReads)
+			}
+			if again := Now(got); !again.Equal(at) {
+				t.Errorf("a second read gives %v; want the bound %v", again, at)
+			}
+		})
+	}
+}
