@@ -99,6 +99,19 @@ func (s *Service) requireCustomer(ctx context.Context, tenantID, customerID stri
 	return nil
 }
 
+// decideForCustomer decides the time of a grant or an adjustment from the
+// customer its body names (clock.DecideOrRealTime: the API's door left the
+// request at real time), before anything is written. A clock that cannot be
+// read refuses the request (503), with nothing written.
+func (s *Service) decideForCustomer(ctx context.Context, tenantID, customerID string) (context.Context, error) {
+	decided, err := clock.DecideOrRealTime(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID})
+	if err != nil {
+		return ctx, errs.Unavailable("test_clock_unavailable",
+			"The customer's test clock could not be read. Nothing was changed; send the request again.", err)
+	}
+	return decided, nil
+}
+
 func (s *Service) bindForCustomer(ctx context.Context, tenantID, customerID string) context.Context {
 	bound, _ := clock.BindEffectiveNow(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID})
 	return bound
@@ -159,7 +172,9 @@ func (s *Service) Grant(ctx context.Context, tenantID string, input GrantInput) 
 	if err := s.requireCustomer(ctx, tenantID, input.CustomerID); err != nil {
 		return domain.CreditLedgerEntry{}, err
 	}
-	ctx = s.bindForCustomer(ctx, tenantID, input.CustomerID)
+	if ctx, err = s.decideForCustomer(ctx, tenantID, input.CustomerID); err != nil {
+		return domain.CreditLedgerEntry{}, err
+	}
 	if input.AmountCents <= 0 {
 		return domain.CreditLedgerEntry{}, errs.Invalid("amount_cents", "must be greater than 0")
 	}
@@ -828,14 +843,12 @@ func (s *Service) Adjust(ctx context.Context, tenantID string, input AdjustInput
 	if err := s.requireCustomer(ctx, tenantID, input.CustomerID); err != nil {
 		return domain.CreditLedgerEntry{}, err
 	}
-	// Bind effective-now from the customer pin so a deduct/credit on a
-	// clock-pinned customer stamps the ledger entry's created_at in
-	// simulated time — same shape as Grant (line 77). Without this, the
-	// AdjustAtomic path falls back to clock.Now(ctx) = wall-clock and the
-	// deduction row appears out-of-band on the customer's Credits tab.
-	// Audit follow-up to feedback_ctx_attr_audit (2026-05-24): Grant
-	// bound, Adjust didn't.
-	ctx = s.bindForCustomer(ctx, tenantID, input.CustomerID)
+	// An adjustment, positive or negative, is decided as a whole from its
+	// customer, before anything is written: the ledger entry and its audit
+	// row carry the customer's time.
+	if ctx, err = s.decideForCustomer(ctx, tenantID, input.CustomerID); err != nil {
+		return domain.CreditLedgerEntry{}, err
+	}
 	if input.AmountCents == 0 {
 		return domain.CreditLedgerEntry{}, errs.Invalid("amount_cents", "cannot be zero")
 	}

@@ -11,6 +11,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -116,7 +117,7 @@ func (m *memStore) AdjustAtomicAudited(ctx context.Context, tenantID, customerID
 	return out, nil
 }
 
-func (m *memStore) AppendEntry(_ context.Context, tenantID string, entry domain.CreditLedgerEntry) (domain.CreditLedgerEntry, error) {
+func (m *memStore) AppendEntry(ctx context.Context, tenantID string, entry domain.CreditLedgerEntry) (domain.CreditLedgerEntry, error) {
 	// Emulate the proration dedup partial unique index. Without this, tests
 	// exercising retry-after-partial-failure paths silently double-insert
 	// rows the real DB would have rejected.
@@ -154,9 +155,9 @@ func (m *memStore) AppendEntry(_ context.Context, tenantID string, entry domain.
 	entry.TenantID = tenantID
 	// Honor caller-supplied CreatedAt (mirrors PostgresStore.AppendEntry
 	// which lets the credit-expiry path stamp the row at the grant's
-	// expires_at, not wall-clock now). Fall back when zero.
+	// expires_at). Fall back, as it does, to ctx's time when zero.
 	if entry.CreatedAt.IsZero() {
-		entry.CreatedAt = time.Now().UTC()
+		entry.CreatedAt = clock.Now(ctx)
 	}
 	m.entries = append(m.entries, entry)
 	return entry, nil
@@ -749,28 +750,24 @@ func TestAdjust(t *testing.T) {
 		}
 	})
 
-	// Adjust on a clock-pinned customer must bind effective-now from
-	// the customer pin so the ledger entry's created_at lands in
-	// simulated time, not wall-clock. Symptom of the missing bind
-	// (caught 2026-05-24): a deduct row on a clock-pinned customer
-	// appeared at wall-clock-now on the Credits tab, out-of-band with
-	// the surrounding sim-time activity.
+	// Adjust on a clock-pinned customer stamps the ledger entry's
+	// created_at at the customer's clock time. Test mode, as every caller
+	// has: a pinned customer is test-mode only.
 	t.Run("clock-pinned customer stamps ledger at sim time", func(t *testing.T) {
 		svc := NewService(newMemStore())
 		simNow := time.Date(2028, 6, 15, 12, 0, 0, 0, time.UTC)
 		svc.SetResolver(&stubResolverForCustomer{pinned: map[string]time.Time{"cus_sim": simNow}})
+		testMode := postgres.WithLivemode(context.Background(), false)
 
 		// Seed a grant first so the deduct has balance to pull from.
-		// Grant already binds — leverage it to verify the resolver
-		// wiring works end-to-end before exercising Adjust.
-		if _, err := svc.Grant(context.Background(), "t1", GrantInput{
+		if _, err := svc.Grant(testMode, "t1", GrantInput{
 			Currency:   "USD",
 			CustomerID: "cus_sim", AmountCents: 10000, Description: "seed",
 		}); err != nil {
 			t.Fatalf("seed grant: %v", err)
 		}
 
-		entry, err := svc.Adjust(context.Background(), "t1", AdjustInput{
+		entry, err := svc.Adjust(testMode, "t1", AdjustInput{
 			Currency:   "USD",
 			CustomerID: "cus_sim", AmountCents: -3000, Description: "Deduct",
 		})
