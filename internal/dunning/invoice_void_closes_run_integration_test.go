@@ -2,16 +2,9 @@ package dunning_test
 
 import (
 	"context"
-	"encoding/json"
-	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
-	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/customer"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/dunning"
@@ -33,19 +26,16 @@ func (c *countingStopper) StopCollection(_ context.Context, _ string, inv domain
 // ExpireCheckoutSessions is a write-off's leg; these tests void.
 func (*countingStopper) ExpireCheckoutSessions(context.Context, string, domain.Invoice) {}
 
-// An operator resolves a dunning run as invoice_voided. The dunning handler
-// voids through the real invoice service, whose post-commit legs stop
-// collection at Stripe and close the run (one void path, ADR-118 amendment
-// 2026-10-22). The handler's own ResolveRun then loses the resolve CAS and
-// answers with the run the void resolved: one resolved event, one
-// dunning.resolved, one StopCollection.
-//
-// A void the invoice service refuses (a charge holds the invoice) stops
-// nothing and leaves the run open: the invoice is still collectible.
-func TestResolveRun_InvoiceVoided_OneVoidPathStopsAndResolvesOnce(t *testing.T) {
+// The invoice's void (POST /v1/invoices/{id}/void calls Service.Void) closes
+// its dunning run on the real dunning service: one StopCollection at Stripe,
+// the run resolved as invoice_voided, one resolved timeline row and one
+// dunning.resolved. A void the invoice service refuses (a charge holds the
+// invoice) stops nothing and leaves the run open: the invoice is still
+// collectible.
+func TestInvoiceVoid_ClosesTheRunOnce_ARefusedVoidLeavesItOpen(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
-	tenantID := testutil.CreateTestTenant(t, db, "Resolve Void One Path")
+	tenantID := testutil.CreateTestTenant(t, db, "Invoice Void Closes Run")
 
 	dstore := dunning.NewPostgresStore(db)
 	dstore.SetOutboxEnqueuer(webhook.NewOutboxStore(db))
@@ -55,19 +45,19 @@ func TestResolveRun_InvoiceVoided_OneVoidPathStopsAndResolvesOnce(t *testing.T) 
 		inv     domain.Invoice
 		run     domain.InvoiceDunningRun
 		stopper *countingStopper
-		router  chi.Router
+		svc     *invoice.Service
 	}
 	newRig := func(t *testing.T, tag string) rig {
 		t.Helper()
 		cust, err := customer.NewPostgresStore(db).Create(ctx, tenantID, domain.Customer{
-			ExternalID: "cus_resolve_void_" + tag, DisplayName: "Resolve Void " + tag,
+			ExternalID: "cus_void_closes_" + tag, DisplayName: "Void Closes " + tag,
 		})
 		if err != nil {
 			t.Fatalf("create customer: %v", err)
 		}
 		dsvc := dunning.NewService(dstore, nil, clock.Real())
 		policy, err := dsvc.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
-			Name: "resolve-void-" + tag, Enabled: true, RetryDays: []int{3, 3, 3},
+			Name: "void-closes-" + tag, Enabled: true, RetryDays: []int{3, 3, 3},
 			FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 		})
 		if err != nil {
@@ -76,14 +66,12 @@ func TestResolveRun_InvoiceVoided_OneVoidPathStopsAndResolvesOnce(t *testing.T) 
 		if err := dsvc.SetDefaultPolicy(ctx, tenantID, policy.ID); err != nil {
 			t.Fatalf("set default policy: %v", err)
 		}
-
 		stopper := &countingStopper{}
 		invSvc := invoice.NewService(invStore, clock.Real(), tenant.NewSettingsStore(db))
 		invSvc.SetCollectionStopper(stopper)
 		invSvc.SetDunningResolver(dsvc)
-
 		inv, err := invStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
-			CustomerID: cust.ID, InvoiceNumber: "INV-RESOLVE-VOID-" + tag,
+			CustomerID: cust.ID, InvoiceNumber: "INV-VOID-CLOSES-" + tag,
 			Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed, Currency: "USD",
 			SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
 			BillingPeriodStart: time.Now().UTC().Add(-30 * 24 * time.Hour), BillingPeriodEnd: time.Now().UTC(),
@@ -91,18 +79,12 @@ func TestResolveRun_InvoiceVoided_OneVoidPathStopsAndResolvesOnce(t *testing.T) 
 		if err != nil {
 			t.Fatalf("create invoice: %v", err)
 		}
-		run, err := dsvc.StartDunning(ctx, tenantID, inv.ID, cust.ID, time.Time{}, domain.DunningCausePaymentFailed)
+		run, err := dsvc.StartDunning(clock.WithRealTime(ctx), tenantID, inv.ID, cust.ID, time.Time{}, domain.DunningCausePaymentFailed)
 		if err != nil || run.State != domain.DunningActive {
 			t.Fatalf("start dunning: state %s, %v", run.State, err)
 		}
-
-		h := dunning.NewHandler(dsvc)
-		h.SetInvoiceVoider(invSvc)
-		router := chi.NewRouter()
-		router.Mount("/v1/dunning", h.Routes())
-		return rig{inv: inv, run: run, stopper: stopper, router: router}
+		return rig{inv: inv, run: run, stopper: stopper, svc: invSvc}
 	}
-	// resolvedWebhooks counts the queued dunning.resolved events about the run.
 	resolvedWebhooks := func(t *testing.T, runID string) int {
 		t.Helper()
 		tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
@@ -118,14 +100,6 @@ func TestResolveRun_InvoiceVoided_OneVoidPathStopsAndResolvesOnce(t *testing.T) 
 		}
 		return n
 	}
-	resolve := func(r rig) *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodPost, "/v1/dunning/runs/"+r.run.ID+"/resolve",
-			strings.NewReader(`{"resolution":"invoice_voided"}`))
-		req = req.WithContext(auth.WithTenantID(ctx, tenantID))
-		rec := httptest.NewRecorder()
-		r.router.ServeHTTP(rec, req)
-		return rec
-	}
 	resolvedEvents := func(t *testing.T, runID string) int {
 		t.Helper()
 		evs, err := dstore.ListEvents(ctx, tenantID, runID)
@@ -140,22 +114,13 @@ func TestResolveRun_InvoiceVoided_OneVoidPathStopsAndResolvesOnce(t *testing.T) 
 		}
 		return n
 	}
+	// The door decides a void at its invoice's time: real time here.
+	opCtx := clock.WithRealTime(ctx)
 
-	t.Run("void succeeds: one stop, one resolve, 200 with the resolved run", func(t *testing.T) {
+	t.Run("void succeeds: one stop, the run resolved once", func(t *testing.T) {
 		r := newRig(t, "OK")
-		rec := resolve(r)
-		if rec.Code != http.StatusOK {
-			t.Fatalf("resolve: %d %s", rec.Code, rec.Body.String())
-		}
-		var body domain.InvoiceDunningRun
-		if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-			t.Fatalf("decode: %v", err)
-		}
-		if body.State != domain.DunningResolved || body.Resolution != domain.ResolutionInvoiceVoided {
-			t.Errorf("response run state=%s resolution=%q, want resolved/invoice_voided", body.State, body.Resolution)
-		}
-		if got, err := invStore.Get(ctx, tenantID, r.inv.ID); err != nil || got.Status != domain.InvoiceVoided {
-			t.Fatalf("invoice %s (%v), want voided", got.Status, err)
+		if _, err := r.svc.Void(opCtx, tenantID, r.inv.ID); err != nil {
+			t.Fatalf("void: %v", err)
 		}
 		if len(r.stopper.stopped) != 1 || r.stopper.stopped[0] != r.inv.ID {
 			t.Errorf("StopCollection calls = %v, want exactly one for %s", r.stopper.stopped, r.inv.ID)
@@ -168,7 +133,7 @@ func TestResolveRun_InvoiceVoided_OneVoidPathStopsAndResolvesOnce(t *testing.T) 
 			t.Errorf("run state=%s resolution=%q, want resolved/invoice_voided", run.State, run.Resolution)
 		}
 		if n := resolvedEvents(t, r.run.ID); n != 1 {
-			t.Errorf("resolved timeline events = %d, want 1 (the void's resolve and the handler's collide on the CAS)", n)
+			t.Errorf("resolved timeline events = %d, want 1", n)
 		}
 		if n := resolvedWebhooks(t, r.run.ID); n != 1 {
 			t.Errorf("dunning.resolved events = %d, want 1", n)
@@ -181,8 +146,8 @@ func TestResolveRun_InvoiceVoided_OneVoidPathStopsAndResolvesOnce(t *testing.T) 
 		if h, err := invStore.ClaimChargeForManualCollect(ctx, tenantID, r.inv.ID); err != nil || !h.Held() {
 			t.Fatalf("claim: held=%v %v", h.Held(), err)
 		}
-		if rec := resolve(r); rec.Code != http.StatusConflict {
-			t.Fatalf("resolve while a charge holds the invoice: %d %s, want 409", rec.Code, rec.Body.String())
+		if _, err := r.svc.Void(opCtx, tenantID, r.inv.ID); err == nil {
+			t.Fatal("void while a charge holds the invoice: want refused")
 		}
 		if len(r.stopper.stopped) != 0 {
 			t.Errorf("StopCollection ran on a refused void: %v", r.stopper.stopped)

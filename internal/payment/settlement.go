@@ -199,7 +199,7 @@ func (s *Stripe) SettleSucceeded(ctx context.Context, tenantID string, inv domai
 	// resolver firing synchronously here re-reads the FULL attempt_count (not one low).
 	if s.dunningResolver != nil {
 		if err := s.dunningResolver.ResolveByInvoice(ctx, tenantID, inv.ID, domain.ResolutionPaymentRecovered); err != nil {
-			slog.Warn("payment succeeded: resolve dunning run failed; the run stays visible in dunning until its next scheduled retry, when the sweep's paid check will resolve it",
+			slog.Warn("payment succeeded but closing the invoice's dunning run failed; an active run closes at its next retry; an escalated one stays open until resolved by hand (runbook: Force-resolve a stuck dunning run)",
 				"invoice_id", inv.ID, "error", err)
 		}
 	}

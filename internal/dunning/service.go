@@ -236,7 +236,7 @@ func (s *Service) SetResolver(r clock.Resolver) {
 
 // bindForInvoice binds effective-now from an invoice id at every
 // dunning state-machine entry point (StartDunning, processRun,
-// exhaustRun, ResolveRun, ResolveByInvoice). Returns ctx unchanged on
+// exhaustRun, ResolveByInvoice). Returns ctx unchanged on
 // resolver error or no resolver — wall-clock fallback.
 func (s *Service) bindForInvoice(ctx context.Context, tenantID, invoiceID string) context.Context {
 	bound, _ := clock.BindEffectiveNow(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
@@ -1987,68 +1987,6 @@ func (s *Service) applyInvoiceAction(ctx context.Context, tenantID, invoiceID st
 	}
 }
 
-// ResolveRun marks a dunning run as resolved (e.g., after manual payment).
-//
-// When resolution is invoice_not_collectible, the underlying invoice is
-// ALSO flipped to status=uncollectible — same downstream contract as
-// the automated mark_uncollectible final-action. Pre-fix the two flows
-// diverged: an operator picking "Write off invoice" in the resolve
-// dialog only updated the dunning_runs row, leaving the invoice in
-// status=finalized + payment_status=failed and every UI gate keyed
-// off invoice.status still treating it as live. Cross-flow audit per
-// feedback_audit_overlapping_flows: same operator intent ("we're not
-// collecting"), same end state required.
-//
-// The invoice write-off runs first; if it fails (e.g. the invoice was paid
-// via webhook between dialog open and submit) the error is returned and the
-// run stays open. If the run update then fails, a retry finds the invoice
-// already written off and only resolves the run.
-func (s *Service) ResolveRun(ctx context.Context, tenantID, runID string, resolution domain.DunningResolution) (domain.InvoiceDunningRun, error) {
-	run, err := s.store.GetRun(ctx, tenantID, runID)
-	if err != nil {
-		return domain.InvoiceDunningRun{}, err
-	}
-
-	// The write-off runs BEFORE the run is resolved, like the operator's
-	// recovered/voided actions: resolving first and then failing the write-off
-	// left a resolved run beside an invoice still open, which nothing revisits.
-	// An invoice already written off (a race with the automated terminal
-	// action) is the requested end state, so it proceeds to resolve.
-	if resolution == domain.ResolutionInvoiceNotCollectible && s.invoiceUncollect != nil && run.InvoiceID != "" {
-		done, err := s.invoiceIn(ctx, tenantID, run.InvoiceID, domain.InvoiceUncollectible)
-		if err != nil {
-			return domain.InvoiceDunningRun{}, err
-		}
-		if !done {
-			if err := s.invoiceUncollect.MarkUncollectible(ctx, tenantID, run.InvoiceID, nil); err != nil {
-				return domain.InvoiceDunningRun{}, fmt.Errorf("mark invoice uncollectible: %w", err)
-			}
-		}
-	}
-
-	// Resolve via the shared CAS path so an operator resolve racing an automated
-	// resolver (a card settle or the scheduler) fires dunning.resolved exactly once —
-	// the CAS winner's transaction queues the outbound webhook, and the winner
-	// writes the timeline row.
-	return s.resolveRunNow(ctx, tenantID, run, resolution, string(resolution))
-}
-
-// invoiceIn reports whether the invoice is already in status want — an
-// operator resolution whose invoice side already happened (a retry after the
-// run update failed, or a race with a webhook or the automated action) is
-// done, not an error. Without an invoice reader wired it reports false and
-// the writer's own state check decides.
-func (s *Service) invoiceIn(ctx context.Context, tenantID, invoiceID string, want domain.InvoiceStatus) (bool, error) {
-	if s.invoiceGet == nil {
-		return false, nil
-	}
-	inv, err := s.invoiceGet.Get(ctx, tenantID, invoiceID)
-	if err != nil {
-		return false, fmt.Errorf("read invoice %s: %w", invoiceID, err)
-	}
-	return inv.Status == want, nil
-}
-
 // resolveRunNow transitions an already-loaded run to resolved with the given
 // resolution: stamps state/resolution/resolved_at, clears next_action_at,
 // persists (the store queues EventDunningResolved in that transaction), and
@@ -2096,7 +2034,7 @@ func (s *Service) resolveRunAt(ctx context.Context, tenantID string, run domain.
 	}
 	if !won {
 		// Already resolved by another path — return the ACTUAL persisted state so a
-		// caller (Service.ResolveRun) doesn't report a resolution it didn't apply.
+		// caller doesn't report a resolution it didn't apply.
 		if current, gerr := s.store.GetRun(ctx, tenantID, run.ID); gerr == nil {
 			return current, nil
 		}

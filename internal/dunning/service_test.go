@@ -903,17 +903,18 @@ func TestProcessDueRunsForClock_EnqueuesEscalationEmailOnExhaust(t *testing.T) {
 	}
 }
 
-func TestResolveRun(t *testing.T) {
+// An invoice paid outside dunning resolves its open run.
+func TestResolveByInvoice_ResolvesAnActiveRun(t *testing.T) {
 	store := newMemStore()
 	svc := NewService(store, &noopRetrier{}, nil)
 	ctx := context.Background()
 
 	run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
 
-	resolved, err := svc.ResolveRun(ctx, "t1", run.ID, domain.ResolutionPaymentRecovered)
-	if err != nil {
+	if err := svc.ResolveByInvoice(ctx, "t1", "inv_1", domain.ResolutionPaymentRecovered); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
+	resolved := store.runs[run.ID]
 	if resolved.State != domain.DunningResolved {
 		t.Errorf("state: got %q, want resolved", resolved.State)
 	}
@@ -945,65 +946,6 @@ func (c *capturingUncollect) MarkUncollectible(_ context.Context, _, invoiceID s
 		return then(nil)
 	}
 	return nil
-}
-
-// TestResolveRun_InvoiceNotCollectible_CascadesToInvoice locks in the
-// cross-flow contract: picking "Write off invoice" in the resolve
-// dialog must reach Invoice.MarkUncollectible so the underlying
-// invoice transitions to status=uncollectible — not just update the
-// dunning_runs row. Pre-fix the two flows diverged, leaving the
-// invoice in finalized+failed state with every UI gate still treating
-// it as live.
-func TestResolveRun_InvoiceNotCollectible_CascadesToInvoice(t *testing.T) {
-	store := newMemStore()
-	svc := NewService(store, &noopRetrier{}, nil)
-	uncollect := &capturingUncollect{}
-	svc.SetInvoiceUncollectibleMarker(uncollect)
-	ctx := context.Background()
-
-	run, _ := svc.StartDunning(ctx, "t1", "inv_42", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
-
-	resolved, err := svc.ResolveRun(ctx, "t1", run.ID, domain.ResolutionInvoiceNotCollectible)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if resolved.Resolution != domain.ResolutionInvoiceNotCollectible {
-		t.Errorf("resolution: got %q, want invoice_not_collectible", resolved.Resolution)
-	}
-	if len(uncollect.calls) != 1 || uncollect.calls[0] != "inv_42" {
-		t.Errorf("MarkUncollectible calls: got %v, want [inv_42]", uncollect.calls)
-	}
-}
-
-// TestResolveRun_OtherResolutionsDoNotCascade ensures the cross-flow
-// branch is gated exclusively to invoice_not_collectible. The other
-// resolutions (payment_recovered, invoice_voided, retries_exhausted)
-// must leave the invoice alone — they're audit signals, not state
-// transitions on the invoice.
-//
-// invoice_voided is here deliberately post-0170: ResolveRun must NOT
-// mark-uncollectible on it. Its void propagation lives in the handler, and a
-// cross-flow branch that fired on both would write two terminal states.
-func TestResolveRun_OtherResolutionsDoNotCascade(t *testing.T) {
-	store := newMemStore()
-	svc := NewService(store, &noopRetrier{}, nil)
-	uncollect := &capturingUncollect{}
-	svc.SetInvoiceUncollectibleMarker(uncollect)
-	ctx := context.Background()
-
-	for _, res := range []domain.DunningResolution{
-		domain.ResolutionPaymentRecovered,
-		domain.ResolutionInvoiceVoided,
-		domain.ResolutionRetriesExhausted,
-	} {
-		run, _ := svc.StartDunning(ctx, "t1", "inv_"+string(res), "cus_1", time.Now(), domain.DunningCausePaymentFailed)
-		if _, err := svc.ResolveRun(ctx, "t1", run.ID, res); err != nil {
-			t.Fatalf("ResolveRun(%s): %v", res, err)
-		}
-	}
-	if len(uncollect.calls) != 0 {
-		t.Errorf("non-uncollectible resolutions leaked into MarkUncollectible: %v", uncollect.calls)
-	}
 }
 
 func TestUpsertPolicy(t *testing.T) {
@@ -1184,17 +1126,17 @@ func TestDunning_StampsTheDecidedTime(t *testing.T) {
 		}
 	})
 
-	t.Run("ResolveRun stamps frozen", func(t *testing.T) {
+	t.Run("ResolveByInvoice stamps frozen", func(t *testing.T) {
 		store := newMemStore()
 		svc := NewService(store, &noopRetrier{}, nil)
 		svc.SetResolver(resolver)
 		ctx := testutil.DecidedFor(t, resolver, clock.Pin{TenantID: "t1", InvoiceID: "inv_1"})
 
 		run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", frozen, domain.DunningCausePaymentFailed)
-		resolved, err := svc.ResolveRun(ctx, "t1", run.ID, domain.ResolutionPaymentRecovered)
-		if err != nil {
+		if err := svc.ResolveByInvoice(ctx, "t1", "inv_1", domain.ResolutionPaymentRecovered); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
+		resolved := store.runs[run.ID]
 		if resolved.ResolvedAt == nil {
 			t.Fatal("resolved_at should be set")
 		}

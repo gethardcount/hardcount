@@ -115,6 +115,7 @@ original text.
 
 ### Removed
 
+- **`POST /v1/dunning/runs/{id}/resolve`.** It now answers `404`. Close a run on its invoice instead: recording a payment, voiding or writing off an open invoice (`POST /v1/invoices/{id}/record-payment`, `/void`, `/mark-uncollectible`) closes its run, an escalated one too, and sends `dunning.resolved`. The route could also relabel the escalated run of an invoice already written off; nothing does that now, and it needs nothing. The dashboard has not used the route since [#1470](https://github.com/gethardcount/hardcount/pull/1470).
 - **`GET /v1/test-clocks/{id}/subscriptions` and the clock page's subscription list.** They listed the same subscriptions the clock's customers have. Open a customer from the clock's customer list (`GET /v1/test-clocks/{id}/customers`) to see its subscriptions. The clock page's advance and delete dialogs count customers ([#1769](https://github.com/gethardcount/hardcount/pull/1769)).
 - **The `HARDCOUNT_TEST_CLOCK_INJECT_FAILURE` setting.** It made the next test-clock advance fail, for manual tests, and a server that had it set by mistake failed every advance. It now does nothing; remove it from your environment ([#1694](https://github.com/gethardcount/hardcount/pull/1694)).
 - **The `X-API-Key` header.** A key is sent in `Authorization: Bearer` only; the `X-API-Key` header is no longer read. A request that sent its key there now gets `401` with the missing-credentials message: send it as `Authorization: Bearer <key>` ([#1766](https://github.com/gethardcount/hardcount/pull/1766)).

@@ -137,14 +137,14 @@ func TestE2E_CustomerIDIsTenantAndModeScoped(t *testing.T) {
 type scopeRefs struct {
 	cus, ext, price, meter, meterKey, plan, plan2, plan3 string
 	sub, item, activeSub, activeItem                     string
-	draftInv, finalInv, creditNote, dunningRun           string
+	draftInv, finalInv, creditNote                       string
 	policy, override, hook, rate, apiKey                 string
 }
 
 func (r scopeRefs) ids() []string {
 	return []string{
 		r.cus, r.ext, r.price, r.meter, r.meterKey, r.plan, r.plan2, r.plan3, r.sub, r.item, r.activeSub, r.activeItem,
-		r.draftInv, r.finalInv, r.creditNote, r.dunningRun, r.policy, r.override, r.hook, r.rate, r.apiKey,
+		r.draftInv, r.finalInv, r.creditNote, r.policy, r.override, r.hook, r.rate, r.apiKey,
 	}
 }
 
@@ -264,11 +264,6 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 		r.creditNote = id(create("POST", "/v1/credit-notes", map[string]any{
 			"invoice_id": r.finalInv, "reason": "seed", "lines": []map[string]any{{"description": "x", "quantity": 1, "unit_amount_cents": 100}},
 		}))
-		bypass(func(q func(string, ...any) *sqlRow) {
-			if err := q(`SELECT id FROM invoice_dunning_runs WHERE invoice_id = $1`, r.finalInv).Scan(&r.dunningRun); err != nil {
-				t.Fatalf("seed %s: dunning run: %v", tag, err)
-			}
-		})
 		r.override = id(create("POST", "/v1/price-overrides", map[string]any{
 			"customer_id": cus2, "price_id": r.price, "mode": "per_unit", "unit_amount_cents": "50",
 		}))
@@ -290,7 +285,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 			cus: "hc_cus_missing", ext: "missing_cus", price: "hc_prc_missing", meter: "hc_mtr_missing", meterKey: "missing_meter",
 			plan: "hc_pln_missing", plan2: "hc_pln_missing2", plan3: "hc_pln_missing3",
 			sub: "hc_sub_missing", item: "hc_si_missing", activeSub: "hc_sub_missing2", activeItem: "hc_si_missing2",
-			draftInv: "hc_inv_missing", finalInv: "hc_inv_missing2", creditNote: "hc_cn_missing", dunningRun: "hc_drun_missing",
+			draftInv: "hc_inv_missing", finalInv: "hc_inv_missing2", creditNote: "hc_cn_missing",
 			policy: "hc_dpol_missing", override: "hc_cpo_missing", hook: "hc_whe_missing", rate: "hc_pcr_missing", apiKey: "hc_key_missing",
 		}},
 	}
@@ -406,9 +401,6 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 		}, 404, "dunning policy not found", 200},
 		{"dunning policy set default [path policy]", "POST", at("/v1/dunning/policies/%s/set-default", policy), none, 404, "", 200},
 		{"dunning policy delete [path policy]", "DELETE", at("/v1/dunning/policies/%s", policy), none, 404, "", 0},
-		{"dunning run resolve [path run]", "POST", at("/v1/dunning/runs/%s/resolve", func(f scopeRefs) string { return f.dunningRun }), func(_, _ scopeRefs) any {
-			return map[string]any{"resolution": "invoice_voided"}
-		}, 404, "", 0},
 
 		// --- meter and price ids ---
 		{"plan create [prices[].meter_id]", "POST", fixed("/v1/plans"), func(_, f scopeRefs) any {

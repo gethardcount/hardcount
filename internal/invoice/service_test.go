@@ -1257,7 +1257,7 @@ func TestUncollectibleThenVoid_ReversesExactlyOnce(t *testing.T) {
 
 // TestMarkUncollectible_WritesAudit locks in the audit row of a write-off,
 // so Activity shows the transition. It is written in the service, so every
-// caller (HTTP handler, dunning final-action adapter, ResolveRun cross-flow)
+// caller (HTTP handler, dunning final-action adapter)
 // gets it. The store queues invoice.marked_uncollectible
 // (TestMarkUncollectible_ProcessStopsAfterCommit_EventIsQueued).
 func TestMarkUncollectible_WritesAudit(t *testing.T) {

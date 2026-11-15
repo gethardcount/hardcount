@@ -506,7 +506,6 @@ export const api = {
   // many runs exist (the paginated /runs list can't be trusted as
   // the source for counts).
   getDunningStats: () => apiRequest<DunningStats>('GET', '/dunning/stats'),
-  resolveDunningRun: (id: string, resolution: string) => apiRequest<DunningRun>('POST', `/dunning/runs/${id}/resolve`, { resolution }),
 
   // Credit Notes
   listCreditNotes: (params?: string) => apiRequest<ListPage<CreditNote>>('GET', `/credit-notes${params ? '?' + params : ''}`),
