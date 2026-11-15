@@ -3,6 +3,9 @@ package clock
 import (
 	"context"
 	"errors"
+	"fmt"
+	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"testing"
 	"time"
 )
@@ -512,5 +515,68 @@ func TestDecide(t *testing.T) {
 	}
 	if _, err := Decide(context.Background(), resolver(Sim{}, lookup), pin); !errors.Is(err, lookup) || !errors.Is(err, ErrUndecided) {
 		t.Errorf("a failed lookup: err %v, want ErrUndecided wrapping the resolver's", err)
+	}
+}
+
+// Work that did not come through the door decides in one order: no resolver
+// decides nothing; no mode is refused; live decides nothing and reads
+// nothing; test mode decides the record's clock, or fails as ErrUndecided
+// over the resolver's error (a not-found among them).
+func TestDecideWithoutDoor(t *testing.T) {
+	frozen := time.Date(2027, 4, 2, 10, 0, 0, 0, time.UTC)
+	notFound := fmt.Errorf("read test clock clk_w: %w", errs.ErrNotFound)
+	test := postgres.WithLivemode(context.Background(), false)
+	live := postgres.WithLivemode(context.Background(), true)
+	pin := Pin{TenantID: "t1", CustomerID: "cus_1"}
+	for _, c := range []struct {
+		name      string
+		ctx       context.Context
+		answer    func() (Sim, error)
+		noRes     bool
+		wantReads int
+		wantSim   *Sim // nil: nothing decided
+		wantErr   []error
+	}{
+		{name: "no resolver: nothing", ctx: test, noRes: true},
+		{name: "no mode: refused", ctx: context.Background(), wantErr: []error{ErrUndecided}},
+		{name: "live: nothing, no read", ctx: live},
+		{name: "test, a clock: its time", ctx: test, answer: func() (Sim, error) { return Sim{At: frozen, TestClockID: "clk_w"}, nil },
+			wantReads: 1, wantSim: &Sim{At: frozen, TestClockID: "clk_w"}},
+		{name: "test, no clock: real time", ctx: test, answer: func() (Sim, error) { return Sim{At: frozen}, nil },
+			wantReads: 1, wantSim: &Sim{}},
+		{name: "test, unreadable: ErrUndecided", ctx: test, answer: func() (Sim, error) { return Sim{}, errors.New("db down") },
+			wantReads: 1, wantErr: []error{ErrUndecided}},
+		{name: "test, not found: ErrUndecided over it", ctx: test, answer: func() (Sim, error) { return Sim{}, notFound },
+			wantReads: 1, wantErr: []error{ErrUndecided, errs.ErrNotFound}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			reads := 0
+			var r Resolver = &stubResolver{custFunc: func() (Sim, error) {
+				reads++
+				if c.answer == nil {
+					return Sim{}, errors.New("not stubbed")
+				}
+				return c.answer()
+			}}
+			if c.noRes {
+				r = nil
+			}
+			got, err := DecideWithoutDoor(c.ctx, r, pin)
+			for _, want := range c.wantErr {
+				if !errors.Is(err, want) {
+					t.Errorf("err %v; want it to be %v", err, want)
+				}
+			}
+			if len(c.wantErr) == 0 && err != nil {
+				t.Errorf("err %v; want none", err)
+			}
+			if reads != c.wantReads {
+				t.Errorf("%d resolver reads, want %d", reads, c.wantReads)
+			}
+			sim, decided := Decision(got)
+			if c.wantSim == nil && decided || c.wantSim != nil && (!decided || sim != *c.wantSim) {
+				t.Errorf("decided %v, %+v; want %v", decided, sim, c.wantSim)
+			}
+		})
 	}
 }

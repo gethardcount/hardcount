@@ -129,7 +129,7 @@ func (s *Service) RecordStripeRefund(ctx context.Context, tenantID string, snap 
 	// found; one that cannot be decided fails the event, which Stripe
 	// delivers again. The decision reads the invoice and its clock on other
 	// connections while this transaction is open.
-	if ctx, err = s.decideForInvoice(ctx, tenantID, invoiceID); err != nil {
+	if ctx, err = clock.DecideWithoutDoor(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID}); err != nil {
 		return domain.StripeRefundRecordResult{}, fmt.Errorf("refund %s refused, Stripe delivers it again: %w", snap.StripeRefundID, err)
 	}
 
