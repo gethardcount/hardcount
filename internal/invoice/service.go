@@ -136,9 +136,7 @@ type StripeChecker interface {
 //     for manual one-off invoices. This is the WRITE-time capture, NOT the
 //     read-time snapshot heuristic ADR-030 bans: we record whether the
 //     customer was pinned at the instant the invoice was born, then persist
-//     it. (We can't use clock.IsSimulated(ctx) here — bindForCreate binds ctx
-//     to the resolver's effective-now even for UNPINNED customers, so "ctx is
-//     bound" doesn't mean "on a test clock".)
+//     it, from the pin itself rather than from the ctx's time.
 //   - attachAttention reads the customer's email presence to pick the honest
 //     no_payment_method banner variant (emailed-a-link vs no-address).
 //
@@ -429,22 +427,29 @@ func (s *Service) SetResolver(r clock.Resolver) {
 	s.resolver = r
 }
 
-// bindForCreate binds effective-now at invoice-create time. Prefers
-// the subscription pin when set (more specific), else falls back to
-// the customer pin. Returns ctx unchanged on resolver error or
-// missing ids — wall-clock fallback at every downstream callsite.
-func (s *Service) bindForCreate(ctx context.Context, tenantID string, input CreateInput) context.Context {
-	pin := clock.Pin{TenantID: tenantID}
-	switch {
-	case input.SubscriptionID != "":
-		pin.SubscriptionID = input.SubscriptionID
-	case input.CustomerID != "":
-		pin.CustomerID = input.CustomerID
-	default:
-		return ctx
+// decideCreate decides a new invoice's time from its subscription when the
+// body names one, else from its customer (clock.DecideOrRealTime: the body
+// names them, so the API's door left the request at real time). A clock that
+// cannot be read refuses the create (503), with nothing written.
+func (s *Service) decideCreate(ctx context.Context, tenantID string, input CreateInput) (context.Context, error) {
+	pin := clock.Pin{TenantID: tenantID, SubscriptionID: input.SubscriptionID, CustomerID: input.CustomerID}
+	decided, err := clock.DecideOrRealTime(ctx, s.resolver, pin)
+	if err != nil {
+		return ctx, errs.Unavailable("test_clock_unavailable",
+			"The test clock this invoice would be on could not be read. Nothing was created; send the request again.", err)
 	}
-	bound, _ := clock.BindEffectiveNow(ctx, s.resolver, pin)
-	return bound
+	return decided, nil
+}
+
+// decideInvoice decides an invoice's time, per invoice, for the connect
+// fan-out (clock.DecideOrRealTime: the fan-out names each invoice it
+// retries). A clock that cannot be read leaves the invoice as it was.
+func (s *Service) decideInvoice(ctx context.Context, tenantID, invoiceID string) (context.Context, error) {
+	decided, err := clock.DecideOrRealTime(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
+	if err != nil {
+		return ctx, fmt.Errorf("its test clock could not be read, so its tax was not retried; it stays in the needs-attention list: %w", err)
+	}
+	return decided, nil
 }
 
 // bindForInvoice binds effective-now from an invoice id. Used by
@@ -914,7 +919,12 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		netDays = ts.NetPaymentTerms
 	}
 
-	ctx = s.bindForCreate(ctx, tenantID, input)
+	// Decided before any write: every s.clock.Now(ctx) below, the store's
+	// stamps among them, reads the decision.
+	ctx, err = s.decideCreate(ctx, tenantID, input)
+	if err != nil {
+		return domain.Invoice{}, err
+	}
 	now := s.clock.Now(ctx)
 
 	// Validate and build every line before the create transaction opens.
@@ -993,10 +1003,7 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		// Persist whether this draft is born on a frozen test clock, from the
 		// customer's pin (manual invoices have no subscription to look through).
 		// This is the authoritative write-time capture — the same direct field
-		// check the engine uses for cycle invoices (sub.TestClockID) — NOT
-		// clock.IsSimulated(ctx): bindForCreate binds ctx to the resolver's
-		// effective-now even for UNPINNED customers (it returns wall-clock), so
-		// "ctx is bound" would mis-flag every manual invoice as simulated.
+		// check the engine uses for cycle invoices (sub.TestClockID).
 		IsSimulated: onClock,
 	}
 
@@ -2854,7 +2861,7 @@ func (s *Service) RetryProviderConfigErrors(ctx context.Context, tenantID string
 	if err != nil {
 		return 0, []error{fmt.Errorf("list stuck provider-config invoices: %w", err)}
 	}
-	return s.retryStuck(ctx, tenantID, stuck)
+	return s.retryStuck(ctx, tenantID, stuck, true)
 }
 
 // RetryCustomerDataErrors fans out a tax retry across every draft
@@ -2881,13 +2888,19 @@ func (s *Service) RetryCustomerDataErrors(ctx context.Context, tenantID, custome
 	if err != nil {
 		return 0, []error{fmt.Errorf("list customer-data-invalid invoices: %w", err)}
 	}
-	return s.retryStuck(ctx, tenantID, stuck)
+	return s.retryStuck(ctx, tenantID, stuck, false)
 }
 
 // retryStuck is the shared per-row body of RetryProviderConfigErrors
 // and RetryCustomerDataErrors. The candidate list shape differs by
 // trigger; the per-invoice retry call is identical.
-func (s *Service) retryStuck(ctx context.Context, tenantID string, stuck []domain.Invoice) (int, []error) {
+//
+// decideEach decides each invoice's time before its whole retry (the tax,
+// the finalize and what follows it): the connect fan-out's request was
+// decided at real time, and its invoices may each be on a clock of their
+// own. The billing-profile fan-out is one customer's invoices, already
+// decided by its route.
+func (s *Service) retryStuck(ctx context.Context, tenantID string, stuck []domain.Invoice, decideEach bool) (int, []error) {
 	var (
 		processed int
 		errs      []error
@@ -2901,7 +2914,16 @@ func (s *Service) retryStuck(ctx context.Context, tenantID string, stuck []domai
 		if err := ctx.Err(); err != nil {
 			return processed, append(errs, fmt.Errorf("stopped before %d of %d invoices: %w", len(stuck)-i, len(stuck), err))
 		}
-		if _, retryErr := s.RetryTax(ctx, tenantID, inv.ID); retryErr != nil {
+		rowCtx := ctx
+		if decideEach {
+			decided, err := s.decideInvoice(ctx, tenantID, inv.ID)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("invoice %s: %w", inv.ID, err))
+				continue
+			}
+			rowCtx = decided
+		}
+		if _, retryErr := s.RetryTax(rowCtx, tenantID, inv.ID); retryErr != nil {
 			errs = append(errs, fmt.Errorf("invoice %s: %w", inv.ID, retryErr))
 			continue
 		}
