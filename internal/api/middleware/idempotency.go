@@ -22,9 +22,9 @@ import (
 )
 
 // maxIdempotentBodyBytes caps how much of the request body is hashed into the
-// fingerprint. A larger request, such as a bulk import, skips the body part of
-// the fingerprint and falls back to method and path. Such endpoints are rare,
-// and the risk of reusing a key with a different body is low.
+// fingerprint. A larger request, such as a bulk import, has only its first
+// maxIdempotentBodyBytes hashed. Such endpoints are rare, and the risk of
+// reusing a key with a different body is low.
 const maxIdempotentBodyBytes = 1 << 20 // 1 MiB
 
 // statusPending marks an idempotency row that is reserved but not yet
@@ -66,11 +66,12 @@ const (
 // the same key was processed before, it returns the cached response.
 //
 // The rules match Stripe's:
-//   - Same key, same method, path and body: replay the cached response, with
-//     the header Idempotent-Replayed: true.
-//   - Same key, different method, path or body: 422 idempotency_error. This
-//     catches a client bug that reuses a key across operations, such as a
-//     retry of POST /invoices with a changed amount under the old key.
+//   - Same key, same caller, method, path, query string and body: replay
+//     the cached response, with the header Idempotent-Replayed: true.
+//   - Same key, any of those different: 422 idempotency_error. This catches
+//     a client bug that reuses a key across operations, such as a retry of
+//     POST /invoices with a changed amount under the old key. It also keeps
+//     a stored answer from reaching another credential of the account.
 //
 // ignore names the requests that skip this middleware, and nil means none.
 // It names the usage routes, whose dedup rule is the idempotency_key each
@@ -101,6 +102,24 @@ func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Han
 				return
 			}
 
+			// The caller is part of the fingerprint, so a stored answer goes
+			// back only to the credential that made the request. This
+			// middleware runs before each route's permission check, so
+			// without it another credential of the same account and mode,
+			// such as an ingest key, could read a secret key's stored
+			// answer by sending the same key, path and body.
+			// Authentication runs first and puts exactly one caller on the
+			// context. A request without one means the router is wired
+			// wrong, so it is refused rather than fingerprinted with no
+			// caller.
+			caller, ok := requestCaller(r.Context())
+			if !ok {
+				slog.ErrorContext(r.Context(), "idempotency: no caller on the request context; authentication must run before this middleware",
+					"tenant_id", tenantID, "path", r.URL.Path)
+				respond.InternalError(w, r)
+				return
+			}
+
 			// Capture livemode from the request ctx, so the cache write
 			// after the response carries the same mode. That write runs on
 			// context.Background, not r.Context, so it survives a client
@@ -123,9 +142,9 @@ func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Han
 			}
 			_ = r.Body.Close()
 			if len(bodyBytes) > maxIdempotentBodyBytes {
-				// The body is over the hash cap. Hash the method, the path
-				// and the first maxIdempotentBodyBytes of the body instead
-				// of refusing, so large requests still work. The
+				// The body is over the hash cap. Hash only its first
+				// maxIdempotentBodyBytes instead of refusing, so large
+				// requests still work. The
 				// fingerprint is weaker, because two bodies with the same
 				// first 1 MiB match. Such requests are rare, so that is
 				// acceptable.
@@ -133,7 +152,7 @@ func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Han
 			}
 			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
-			fingerprint := fingerprintRequest(r.Method, r.URL.Path, bodyBytes)
+			fingerprint := fingerprintRequest(r.Method, r.URL.RequestURI(), caller, bodyBytes)
 
 			// Reserve the key before running the handler. reserveKey's one
 			// conditional INSERT ... ON CONFLICT DO UPDATE, which resets only
@@ -228,17 +247,35 @@ func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Han
 	}
 }
 
-// fingerprintRequest returns a stable hash of the request's identifying
-// parameters. Method+path keeps a key bound to a single endpoint; body keeps
-// the same endpoint bound to the same payload.
-func fingerprintRequest(method, path string, body []byte) []byte {
+// fingerprintRequest returns a stable hash of what makes two requests the
+// same request: the method, the path with its query string (uri), the caller
+// (requestCaller) and the body. A retry whose hash differs from the stored
+// one reused the key for another request and gets 422 idempotency_error.
+func fingerprintRequest(method, uri, caller string, body []byte) []byte {
 	h := sha256.New()
 	h.Write([]byte(method))
 	h.Write([]byte{0})
-	h.Write([]byte(path))
+	h.Write([]byte(uri))
+	h.Write([]byte{0})
+	h.Write([]byte(caller))
 	h.Write([]byte{0})
 	h.Write(body)
 	return h.Sum(nil)
+}
+
+// requestCaller names who is calling, from what authentication put on ctx:
+// the API key's id, or the dashboard user's id for a session. It is the user
+// and not the session, so a person who signs in again and retries is the
+// same caller. ok is false unless exactly one of the two is set.
+func requestCaller(ctx context.Context) (caller string, ok bool) {
+	keyID, userID := auth.KeyID(ctx), auth.UserID(ctx)
+	switch {
+	case keyID != "" && userID == "":
+		return "key:" + keyID, true
+	case userID != "" && keyID == "":
+		return "user:" + userID, true
+	}
+	return "", false
 }
 
 type cachedResponse struct {

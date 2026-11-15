@@ -265,12 +265,13 @@ func invokeWithKey(t *testing.T, h http.Handler, tenantID, key, body string) *ht
 	req := httptest.NewRequest("POST", "/v1/invoices", strings.NewReader(body))
 	req.Header.Set("Idempotency-Key", key)
 	req.Header.Set("Content-Type", "application/json")
-	// Tenant + livemode pinned on ctx the same way the real auth
+	// Tenant, caller and livemode pinned on ctx the same way the real auth
 	// middleware does in production. Without WithLivemode, BeginTx
 	// trips the strict-mode panic ("TxTenant opened without ctx
 	// livemode") — that diagnostic is the contract every entry point
 	// must satisfy, including test fixtures.
 	ctx := auth.WithTenantID(req.Context(), tenantID)
+	ctx = auth.WithKeyID(ctx, "key_test")
 	ctx = postgres.WithLivemode(ctx, false)
 	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()

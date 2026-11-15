@@ -76,11 +76,12 @@ runs again and gets `409` too. Use an `external_id` you have not used yet.
 - **Use a UUID,** or another unique string. Keep it to 255 characters or
   fewer: Hardcount does not check the length, but a very long key can fail
   to be stored.
-- **A key belongs to one account and one mode,** not to one API key. A
-  retry with another key of the same account and mode gets the same stored
-  answer.
-- **Hardcount matches a retry on its method, its path and its body,** the
-  same body byte for byte. The query string is not part of the match.
+- **A key belongs to one account and one mode, and a retry must come from
+  the same credential:** the same API key, or the same dashboard user. A
+  retry with another credential of the account gets `422`
+  `idempotency_error`, not the stored answer.
+- **Hardcount matches a retry on its credential, its method, its path, its
+  query string and its body,** the same body byte for byte.
 
 ### What a retry with the same key gets
 
@@ -89,7 +90,7 @@ runs again and gets `409` too. Use an `external_id` you have not used yet.
 | Finished with any status except `409`, `422`, `503` or `400` `invalid JSON body`, including other `4xx` and `5xx` answers | The first status and body, plus `Idempotent-Replayed: true`. The request does not run again. A crash is the exception: see [A key Hardcount could not finish](#a-key-hardcount-could-not-finish). |
 | Finished with `409`, `422`, `503` or `400` `invalid JSON body` | A new run. These answers are not stored, so the key is free again. |
 | Is still running | Hardcount waits up to 5 seconds for it, then answers `409` `conflict_idempotency`. Retry later with the same key. |
-| Finished, but the retry's method, path or body differs | `422` `idempotency_error`. Your code reused a key for a different request. |
+| Finished, but the retry's credential, method, path, query string or body differs | `422` `idempotency_error`. Your code reused a key for a different request. |
 | Started more than 5 minutes ago and never recorded an answer | `409` `conflict_idempotency_unresolved`. See [A key Hardcount could not finish](#a-key-hardcount-could-not-finish). |
 
 A replay sends the first response's status and body only. The body's

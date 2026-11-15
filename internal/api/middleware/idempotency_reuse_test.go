@@ -115,7 +115,7 @@ func seedExpiredKey(t *testing.T, db *postgres.DB, tenantID, key string, status 
 	defer postgres.Rollback(tx)
 	// The fingerprint is another body's, so a replay of this row would be a
 	// 422 idempotency_error rather than the new request's 201.
-	old := fingerprintRequest("POST", "/v1/invoices", []byte(`{"amount":5}`))
+	old := fingerprintRequest("POST", "/v1/invoices", "key:key_test", []byte(`{"amount":5}`))
 	if _, err := tx.ExecContext(ctx,
 		`INSERT INTO idempotency_keys (key, tenant_id, http_method, http_path, request_fingerprint, status_code, response_body, created_at, expires_at)
 		 VALUES ($1, $2, 'POST', '/v1/invoices', $3, $4, '{"id":"old"}'::bytea, now() - interval '25 hours', now() - interval '1 hour')`,

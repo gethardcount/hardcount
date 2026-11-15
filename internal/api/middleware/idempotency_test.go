@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 func TestIdempotency_NoCaching_WithoutKey(t *testing.T) {
@@ -32,37 +34,85 @@ func TestIdempotency_NoCaching_WithoutKey(t *testing.T) {
 	}
 }
 
+// TestFingerprintRequest holds what makes two requests the same request: the
+// method, the path with its query string, the caller and the body. Equal
+// inputs hash equal, and changing any one of them changes the hash.
 func TestFingerprintRequest(t *testing.T) {
-	base := fingerprintRequest("POST", "/v1/invoices", []byte(`{"amount":100}`))
+	type in struct {
+		method, uri, caller string
+		body                []byte
+	}
+	fp := func(i in) []byte { return fingerprintRequest(i.method, i.uri, i.caller, i.body) }
+	base := in{"POST", "/v1/invoices?expand=lines", "key:key_a", []byte(`{"amount":100}`)}
 
-	cases := []struct {
-		name   string
-		method string
-		path   string
-		body   []byte
+	if !bytes.Equal(fp(base), fp(in{"POST", "/v1/invoices?expand=lines", "key:key_a", []byte(`{"amount":100}`)})) {
+		t.Error("equal inputs must give equal fingerprints")
+	}
+	for _, c := range []struct {
+		name string
+		in   in
 	}{
-		{"same inputs", "POST", "/v1/invoices", []byte(`{"amount":100}`)},
-		{"different method", "PUT", "/v1/invoices", []byte(`{"amount":100}`)},
-		{"different path", "POST", "/v1/customers", []byte(`{"amount":100}`)},
-		{"different body", "POST", "/v1/invoices", []byte(`{"amount":200}`)},
-	}
-
-	if !bytes.Equal(base, fingerprintRequest(cases[0].method, cases[0].path, cases[0].body)) {
-		t.Error("same inputs must produce same fingerprint")
-	}
-	for _, c := range cases[1:] {
-		if bytes.Equal(base, fingerprintRequest(c.method, c.path, c.body)) {
-			t.Errorf("%s: fingerprint should differ from base", c.name)
+		{"another method", in{"PUT", base.uri, base.caller, base.body}},
+		{"another path", in{base.method, "/v1/customers?expand=lines", base.caller, base.body}},
+		{"another query string", in{base.method, "/v1/invoices?expand=customer", base.caller, base.body}},
+		{"no query string", in{base.method, "/v1/invoices", base.caller, base.body}},
+		{"another API key", in{base.method, base.uri, "key:key_b", base.body}},
+		{"a dashboard user", in{base.method, base.uri, "user:usr_a", base.body}},
+		{"another body", in{base.method, base.uri, base.caller, []byte(`{"amount":200}`)}},
+	} {
+		if bytes.Equal(fp(base), fp(c.in)) {
+			t.Errorf("%s: the fingerprint must differ from the base request's", c.name)
 		}
 	}
 
-	// Field-boundary safety: "A" + "BC" must not hash the same as "AB" + "C".
-	// The null-byte separator prevents this classic concat-collision.
-	if bytes.Equal(
-		fingerprintRequest("POST", "/v1/a", []byte("bc")),
-		fingerprintRequest("POST", "/v1/ab", []byte("c")),
-	) {
-		t.Error("null separator should prevent field-boundary collisions")
+	// A separator between the parts keeps a caller "key:k" with body "bc"
+	// apart from a caller "key:kb" with body "c".
+	if bytes.Equal(fp(in{"POST", "/v1/a", "key:k", []byte("bc")}), fp(in{"POST", "/v1/a", "key:kb", []byte("c")})) {
+		t.Error("the separator must keep the caller and the body apart")
+	}
+}
+
+// TestRequestCaller holds who the fingerprint names as the caller: the API
+// key's id for a key, and the dashboard user's id for a session, so a person
+// who signs in again is the same caller. A context with neither, or with both,
+// names no caller.
+func TestRequestCaller(t *testing.T) {
+	bg := context.Background()
+	for _, c := range []struct {
+		name   string
+		ctx    context.Context
+		want   string
+		wantOK bool
+	}{
+		{"API key", auth.WithUserID(auth.WithKeyID(bg, "key_a"), ""), "key:key_a", true},
+		{"dashboard session", auth.WithKeyID(auth.WithUserID(bg, "usr_a"), ""), "user:usr_a", true},
+		{"no caller", bg, "", false},
+		{"both", auth.WithUserID(auth.WithKeyID(bg, "key_a"), "usr_a"), "", false},
+	} {
+		got, ok := requestCaller(c.ctx)
+		if got != c.want || ok != c.wantOK {
+			t.Errorf("%s: requestCaller = %q, %v; want %q, %v", c.name, got, ok, c.want, c.wantOK)
+		}
+	}
+}
+
+// A request that reaches the middleware with a tenant but no caller means
+// authentication did not run first. It is refused with 500 and runs nothing,
+// rather than being stored under a fingerprint that names no caller.
+func TestIdempotency_NoCallerIsRefused(t *testing.T) {
+	var calls int
+	handler := Idempotency(nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		w.WriteHeader(http.StatusCreated)
+	}))
+	req := httptest.NewRequest("POST", "/v1/customers", strings.NewReader(`{}`))
+	req.Header.Set("Idempotency-Key", "idem-no-caller")
+	req = req.WithContext(postgres.WithLivemode(auth.WithTenantID(req.Context(), "t1"), false))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusInternalServerError || calls != 0 {
+		t.Errorf("status %d with the handler run %d time(s), want 500 and 0", rec.Code, calls)
 	}
 }
 
