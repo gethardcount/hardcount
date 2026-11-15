@@ -292,7 +292,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 			meta["additional_emails_changed"] = true
 			meta["additional_emails_count"] = len(customer.AdditionalEmails)
 		}
-		_ = h.auditLogger.Log(h.svc.AuditCtx(r.Context(), tenantID, customer.ID), tenantID, domain.AuditActionUpdate, "customer", customer.ID, customer.DisplayName, meta)
+		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionUpdate, "customer", customer.ID, customer.DisplayName, meta)
 	}
 
 	respond.JSON(w, r, http.StatusOK, customer)
@@ -328,7 +328,7 @@ func (h *Handler) upsertBillingProfile(w http.ResponseWriter, r *http.Request) {
 	// — a regressed invoice tax line is often traced back to a
 	// billing-profile edit.
 	if h.auditLogger != nil {
-		_ = h.auditLogger.Log(h.svc.AuditCtx(r.Context(), tenantID, customerID), tenantID, domain.AuditActionUpdate, "customer", customerID, profile.LegalName, map[string]any{
+		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionUpdate, "customer", customerID, profile.LegalName, map[string]any{
 			"action":     "billing_profile_upserted",
 			"tax_status": string(profile.TaxStatus),
 			// tax_id is a personal identifier for sole proprietors — record
@@ -389,7 +389,7 @@ func (h *Handler) rotateCostDashboardToken(w http.ResponseWriter, r *http.Reques
 	}
 
 	if h.auditLogger != nil {
-		_ = h.auditLogger.Log(h.svc.AuditCtx(r.Context(), tenantID, id), tenantID, domain.AuditActionRotate, "customer", id, "", map[string]any{
+		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionRotate, "customer", id, "", map[string]any{
 			"surface": "cost_dashboard_token",
 		})
 	}
