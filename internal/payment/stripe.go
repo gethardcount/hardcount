@@ -1668,33 +1668,11 @@ func (s *Stripe) processEvent(ctx context.Context, tenantID string, event domain
 }
 
 // decideFor decides an event's time from the record it names, right after
-// the handler has read that record: the record's clock, or real time for a
-// record on no clock. In live mode it does nothing: no live record is on a
-// test clock. An event with no mode on its ctx is a fault (the webhook
-// handler and the restore catch-up both set one), so it is refused. A
-// failure is clock.ErrUndecided, which isTransientWebhookError delivers
-// again.
+// the handler has read that record (clock.DecideWithoutDoor: the event did
+// not come through the API's door). A failure is clock.ErrUndecided, which
+// isTransientWebhookError delivers again.
 func (s *Stripe) decideFor(ctx context.Context, pin clock.Pin) (context.Context, error) {
-	return decideTime(ctx, s.resolver, pin)
-}
-
-// decideTime is the package's one decision: with no resolver, nothing (only
-// narrow unit tests build the adapter or the reconciler without one;
-// NewServer always wires the engine); with no mode on ctx, a fault, refused
-// as clock.ErrUndecided; in live mode, nothing; else the record's clock, or
-// real time for a record on no clock.
-func decideTime(ctx context.Context, resolver clock.Resolver, pin clock.Pin) (context.Context, error) {
-	if resolver == nil {
-		return ctx, nil
-	}
-	live, err := postgres.Livemode(ctx)
-	if err != nil {
-		return ctx, fmt.Errorf("%w: the context has no mode", clock.ErrUndecided)
-	}
-	if live {
-		return ctx, nil
-	}
-	return clock.Decide(ctx, resolver, pin)
+	return clock.DecideWithoutDoor(ctx, s.resolver, pin)
 }
 
 // decideForCustomer is decideFor for an event that names a customer it has

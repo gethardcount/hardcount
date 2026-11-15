@@ -262,14 +262,14 @@ func (r *Reconciler) sweep(ctx context.Context, label string, list func(context.
 }
 
 // decideRow decides a row's time from its invoice, right after the sweep
-// listed it (decideTime), and the settle keeps that decision
+// listed it (clock.DecideWithoutDoor), and the settle keeps that decision
 // (BindEffectiveNow keeps a same-clock one). gone is true on a not-found:
 // the invoice, or, in a race with its clock's deletion, its clock; there is
 // nothing to settle, and the caller stamps the row so the list moves on.
 // Any other failure is clock.ErrUndecided: the row is checked again on the
 // next run.
 func (r *Reconciler) decideRow(ctx context.Context, tenantID, invoiceID string) (context.Context, bool, error) {
-	decided, err := decideTime(ctx, r.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
+	decided, err := clock.DecideWithoutDoor(ctx, r.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
 	if errors.Is(err, errs.ErrNotFound) {
 		slog.InfoContext(ctx, "reconcile: the invoice or its test clock is gone; nothing to settle",
 			"invoice_id", invoiceID, "tenant_id", tenantID)
