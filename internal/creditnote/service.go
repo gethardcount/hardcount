@@ -276,6 +276,24 @@ func (s *Service) SetAuditLogger(a AuditEmitter) { s.audit = a }
 // dated weeks before the invoice it credits.
 func (s *Service) SetResolver(r clock.Resolver) { s.resolver = r }
 
+// DecideForInvoice decides the time of a credit note created from a body
+// that names its invoice (POST /v1/credit-notes: the API's door left the
+// request at real time), before its create and its issue, with
+// clock.DecideOrRealTime. A clock that cannot be read refuses the request
+// (503), with nothing written. No invoice id decides nothing: the create
+// answers the missing field.
+func (s *Service) DecideForInvoice(ctx context.Context, tenantID, invoiceID string) (context.Context, error) {
+	if invoiceID == "" {
+		return ctx, nil
+	}
+	decided, err := clock.DecideOrRealTime(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
+	if err != nil {
+		return ctx, errs.Unavailable("test_clock_unavailable",
+			"The invoice's test clock could not be read. Nothing was created; send the request again.", err)
+	}
+	return decided, nil
+}
+
 // bindForInvoice pins ctx to the source invoice's effective-now, so every
 // clock.Now(ctx) below — the credit_note row, its line items, the credit-ledger
 // grant, amount_due relief — lands in the invoice's own time domain. Mirrors

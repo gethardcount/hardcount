@@ -153,7 +153,13 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		if relief.Reason == "" {
 			relief.Reason = req.Reason
 		}
-		cn, err := h.svc.CreateAndIssueCommitRelief(r.Context(), tenantID, relief)
+		// The relief's invoice decides its time, before anything is written.
+		ctx, err := h.svc.DecideForInvoice(r.Context(), tenantID, relief.InvoiceID)
+		if err != nil {
+			respond.FromError(w, r, err, "credit_note")
+			return
+		}
+		cn, err := h.svc.CreateAndIssueCommitRelief(ctx, tenantID, relief)
 		if err != nil {
 			respond.FromError(w, r, err, "credit_note")
 			return
@@ -169,7 +175,13 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	// (settleFailedIssue). A server stop between the create and the issue
 	// still leaves a draft and logs nothing; it shows as a draft in the
 	// credit notes list. A plain create is one transaction on the request.
-	ctx := r.Context()
+	// The body's invoice decides the note's time here, before the create and
+	// the issue, so both run on it; the steps ctx below keeps its values.
+	ctx, err := h.svc.DecideForInvoice(r.Context(), tenantID, input.InvoiceID)
+	if err != nil {
+		respond.FromError(w, r, err, "credit_note")
+		return
+	}
 	if input.AutoIssue {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), stepsBudget)

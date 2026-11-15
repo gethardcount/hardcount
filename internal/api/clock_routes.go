@@ -268,7 +268,7 @@ var clockRoutes = map[routeKey]clockDecl{
 	// --- credit notes -------------------------------------------------------
 	{"GET", "/v1/credit-notes"}:                            realTime(),
 	{"GET", "/v1/credit-notes/stats"}:                      realTime(),
-	{"POST", "/v1/credit-notes"}:                           decidedIn("creditnote.Service.Create"), // the body names the invoice
+	{"POST", "/v1/credit-notes"}:                           decidedIn("creditnote.Handler.create"), // the body names the invoice
 	{"GET", "/v1/credit-notes/{id}"}:                       ofCreditNote(),
 	{"POST", "/v1/credit-notes/{id}/attach-stripe-refund"}: ofCreditNote(),
 	{"POST", "/v1/credit-notes/{id}/issue"}:                ofCreditNote(),
