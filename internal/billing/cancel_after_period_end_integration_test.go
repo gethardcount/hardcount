@@ -712,9 +712,11 @@ func TestImmediateCancel_TestClock_AfterPeriodEnd(t *testing.T) {
 	r.exec(t, `UPDATE subscriptions SET test_clock_id = $1 WHERE id = $2`, clockID, r.f.subID)
 	r.f.engine.SetTestClockReader(testclock.NewPostgresStore(r.f.db))
 	r.f.subSvc.SetResolver(r.f.engine)
+	// The request's time, as the API's door decides it for the subscription.
+	onClock := testutil.DecidedFor(t, r.f.engine, clock.Pin{TenantID: r.f.tenantID, SubscriptionID: r.f.subID})
 
 	r.f.invAdapter.createTxErr = errors.New("invoice insert refused (test)")
-	_, _, err := r.f.subSvc.Cancel(r.base, r.f.tenantID, r.f.subID)
+	_, _, err := r.f.subSvc.Cancel(onClock, r.f.tenantID, r.f.subID)
 	wantUnbilledPeriod(t, err)
 	if !strings.Contains(err.Error(), "finish or retry the clock advance, then cancel again") {
 		t.Fatalf("refusal on a clock subscription = %v, want the clock's next step", err)
@@ -727,7 +729,7 @@ func TestImmediateCancel_TestClock_AfterPeriodEnd(t *testing.T) {
 	}
 
 	r.f.invAdapter.createTxErr = nil
-	canceled, _, err := r.f.subSvc.Cancel(r.base, r.f.tenantID, r.f.subID)
+	canceled, _, err := r.f.subSvc.Cancel(onClock, r.f.tenantID, r.f.subID)
 	if err != nil {
 		t.Fatalf("cancel: %v", err)
 	}

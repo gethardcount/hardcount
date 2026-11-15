@@ -9,6 +9,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // The cancel's attempts (ADR-139), with the memory store and a fake biller
@@ -136,9 +137,10 @@ func (r *steppingResolver) SimForInvoice(ctx context.Context, _, _ string) (cloc
 	return r.sim(ctx), nil
 }
 
-// Each attempt binds its instant from the caller's context. On the API's
-// unbound context the second plan is at a new instant; binding again on the
-// first attempt's context would give the first instant back.
+// Each attempt binds its instant from the caller's context. On the request's
+// context, which the API's door decided at real time (the subscription is on
+// no clock), the second plan is at a new instant; binding again on the first
+// attempt's context would give the first instant back.
 //
 // Mutation M7 (bind once, outside the attempts) → both plans at one instant.
 func TestCancel_EachAttemptBindsFromTheCallersContext(t *testing.T) {
@@ -149,7 +151,7 @@ func TestCancel_EachAttemptBindsFromTheCallersContext(t *testing.T) {
 	svc.SetResolver(&steppingResolver{base: time.Now().UTC().Add(time.Hour)})
 	fb.writeMoved = 1
 
-	if _, _, err := svc.Cancel(context.Background(), "t1", id); err != nil {
+	if _, _, err := svc.Cancel(testutil.AtRealTime(), "t1", id); err != nil {
 		t.Fatalf("Cancel: %v", err)
 	}
 	if len(fb.planAts) != 2 || !fb.planAts[1].After(fb.planAts[0]) {
