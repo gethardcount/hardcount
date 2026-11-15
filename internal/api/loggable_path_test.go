@@ -9,54 +9,40 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// P12: the request logger wrote raw URL paths — the public surfaces
-// carry bearer-equivalent capability tokens IN the path, so every
-// hosted-invoice view and payment-update click deposited a live
-// payment credential into the log sink.
-//
-// Mutation-verify: return r.URL.Path directly from loggablePath — the
-// token-absence assertions fail.
-func TestLoggablePath_NeverContainsTokens(t *testing.T) {
-	const token = "tok_2f8a9bc31c4d5e6f708192a3b4c5d6e7"
-
-	// Matched route: chi's pattern replaces the token segment.
+// loggablePath returns the matched pattern when there is one, and
+// otherwise only the first segment of the path.
+func TestLoggablePath_IsAPatternOrTheFirstSegment(t *testing.T) {
 	rctx := chi.NewRouteContext()
 	rctx.RoutePatterns = []string{"/v1/public/invoices/{token}"}
-	req := httptest.NewRequest("GET", "/v1/public/invoices/"+token, nil)
+	req := httptest.NewRequest("GET", "/v1/public/invoices/"+fakeLinkToken, nil)
 	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-	if got := loggablePath(req); strings.Contains(got, token) {
-		t.Errorf("matched-route path leaks the token: %q", got)
+	if got, want := loggablePath(req), "/v1/public/invoices/{token}"; got != want {
+		t.Errorf("matched route: loggablePath = %q, want %q", got, want)
 	}
 
-	// Unmatched probe (no chi pattern, e.g. a 404 with a candidate
-	// token): known public prefixes are redacted.
-	for _, path := range []string{
-		"/v1/public/invoices/" + token,
-		"/v1/public/invoices/" + token + "/pdf",
-		"/v1/public/payment-updates/" + token,
-		"/v1/public/cost-dashboard/" + token,
-		"/v1/auth/invite/" + token,
+	for _, tc := range []struct{ name, path, want string }{
+		{"a link under v1 keeps one segment", "/v1/public/invoices/" + fakeLinkToken + "/pdf", "/v1/…"},
+		{"the hosted invoice page's address keeps one segment", "/invoice/" + fakeLinkToken, "/invoice/…"},
+		{"an upper-case version keeps one segment", "/V1/public/invoices/" + fakeLinkToken, "/V1/…"},
+		{"a path starting with two slashes keeps its empty first segment", "//a/b/c", "//…"},
+		{"an encoded slash is cut after it decodes", "/a/b%2Fc/d", "/a/…"},
+		{"a two-segment path keeps one segment", "/v1/customers", "/v1/…"},
+		{"a one-segment path is logged whole", "/a", "/a"},
+		{"a one-segment path with a trailing slash is logged whole", "/a/", "/a/"},
+		{"the root is logged whole", "/", "/"},
+		{"an empty path is logged whole", "", ""},
 	} {
-		req := httptest.NewRequest("GET", path, nil)
-		got := loggablePath(req)
-		if strings.Contains(got, token) {
-			t.Errorf("unmatched path leaks the token: %q -> %q", path, got)
-		}
-		if !strings.Contains(got, "[redacted]") {
-			t.Errorf("unmatched public path not redacted: %q -> %q", path, got)
-		}
-	}
-
-	// Sub-path after the token survives (operational value, no secret).
-	req = httptest.NewRequest("GET", "/v1/public/invoices/"+token+"/pdf", nil)
-	if got := loggablePath(req); !strings.HasSuffix(got, "/pdf") {
-		t.Errorf("sub-path lost in redaction: %q", got)
-	}
-
-	// Ordinary paths pass through untouched.
-	req = httptest.NewRequest("GET", "/v1/customers", nil)
-	if got := loggablePath(req); got != "/v1/customers" {
-		t.Errorf("ordinary path altered: %q", got)
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequest("GET", "/", nil)
+			if tc.path != "" {
+				req = httptest.NewRequest("GET", tc.path, nil)
+			} else {
+				req.URL.Path = ""
+			}
+			if got := loggablePath(req); got != tc.want {
+				t.Errorf("loggablePath(%q) = %q, want %q", tc.path, got, tc.want)
+			}
+		})
 	}
 }
 

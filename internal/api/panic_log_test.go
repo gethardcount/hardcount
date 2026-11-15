@@ -50,22 +50,36 @@ type panickingWriter struct{ *httptest.ResponseRecorder }
 
 func (panickingWriter) WriteHeader(int) { panic("writing the status") }
 
-// The production router logs a panic on a link-token route with the
-// route's pattern, never the token. The 404 under the hosted invoice mount
-// is the answer that panics: it is the one a router built on an empty
-// database gives on that path without touching the database.
-func TestPanicLog_RealRouterLogsThePatternNotTheLinkToken(t *testing.T) {
-	srv := newTestServer()
-	logs := captureLogs(t)
-	w := panickingWriter{httptest.NewRecorder()}
-	srv.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "/v1/public/invoices/"+fakeLinkToken+"/no-such-page", nil))
-
-	line := panicLine(t, logs)
-	if strings.Contains(logs.String(), fakeLinkToken) {
-		t.Errorf("the log holds the link token:\n%s", line)
+// The production router logs a panic on a link-token address with a path
+// that holds no token. The 404 is the answer that panics: it is the one a
+// router built on an empty database gives on these paths without touching
+// the database.
+func TestPanicLog_RealRouterLogsNoLinkToken(t *testing.T) {
+	cases := []struct {
+		name string
+		path string
+		want string
+	}{
+		{"a miss under the hosted invoice mount logs the mount pattern",
+			"/v1/public/invoices/" + fakeLinkToken + "/no-such-page", "/v1/public/invoices/*"},
+		{"the hosted invoice page's address keeps its first segment",
+			"/invoice/" + fakeLinkToken, "/invoice/…"},
 	}
-	if !strings.HasSuffix(line, " path=/v1/public/invoices/*") {
-		t.Errorf("the panic line does not hold the mount's pattern:\n%s", line)
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := newTestServer()
+			logs := captureLogs(t)
+			w := panickingWriter{httptest.NewRecorder()}
+			srv.ServeHTTP(w, httptest.NewRequest(http.MethodGet, tc.path, nil))
+
+			line := panicLine(t, logs)
+			if strings.Contains(logs.String(), fakeLinkToken) {
+				t.Errorf("the log holds the link token:\n%s", line)
+			}
+			if !strings.HasSuffix(line, " path="+tc.want) {
+				t.Errorf("panic line path is not %q:\n%s", tc.want, line)
+			}
+		})
 	}
 }
 
@@ -105,14 +119,16 @@ func TestPanicLog_LogsASafePath(t *testing.T) {
 			"/v1/public/invoices/" + fakeLinkToken, "/v1/public/invoices/{token}"},
 		{"a miss under a mount logs the mount's pattern", false,
 			"/v1/public/invoices/" + fakeLinkToken + "/no-such-page", "/v1/public/invoices/*"},
-		{"before routing an invoice link is redacted", true,
-			"/v1/public/invoices/" + fakeLinkToken + "/pdf", "/v1/public/invoices/[redacted]/pdf"},
-		{"before routing a card update link is redacted", true,
-			"/v1/public/payment-updates/" + fakeLinkToken, "/v1/public/payment-updates/[redacted]"},
-		{"before routing a cost dashboard link is redacted", true,
-			"/v1/public/cost-dashboard/" + fakeLinkToken, "/v1/public/cost-dashboard/[redacted]"},
-		{"before routing an invite link is redacted", true,
-			"/v1/auth/invite/" + fakeLinkToken, "/v1/auth/invite/[redacted]"},
+		{"before routing an invoice link keeps one segment", true,
+			"/v1/public/invoices/" + fakeLinkToken + "/pdf", "/v1/…"},
+		{"before routing a card update link keeps one segment", true,
+			"/v1/public/payment-updates/" + fakeLinkToken, "/v1/…"},
+		{"before routing a cost dashboard link keeps one segment", true,
+			"/v1/public/cost-dashboard/" + fakeLinkToken, "/v1/…"},
+		{"before routing an invite link keeps one segment", true,
+			"/v1/auth/invite/" + fakeLinkToken, "/v1/…"},
+		{"before routing the hosted invoice page's address keeps one segment", true,
+			"/invoice/" + fakeLinkToken, "/invoice/…"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
