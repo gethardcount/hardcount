@@ -59,13 +59,12 @@ In place:
 - **Logs:** the token in a link, such as a hosted invoice or invite link, is redacted from the API's access log and traces, and from the Compose stack's nginx access logs.
 - **Webhooks:** outbound events signed with HMAC-SHA256; inbound Stripe events verified.
 - **Audit log:** append-only; a database trigger refuses any update or delete.
-- **Supply chain:** CI runs `govulncheck` and scans the images with Trivy; release images carry an SBOM and are signed ([Verify a release](docs/ops/verify-a-release.md)). GitHub secret scanning and push protection are on, so a commit that holds a known secret format is refused before it is public.
+- **Supply chain:** CI runs `govulncheck`, scans the code with CodeQL and scans the images with Trivy; release images carry an SBOM and are signed ([Verify a release](docs/ops/verify-a-release.md)). GitHub secret scanning and push protection are on, so a commit that holds a known secret format is refused before it is public.
 
 Known gaps:
 
 - **No two-factor sign-in.** It is built when a team running Hardcount asks for it, or when a customer's security review requires it ([ADR-095](docs/adr/095-login-security-roadmap-and-mfa.md)). Until then, a team can put the dashboard's sign-in behind its own SSO or VPN.
 - **No built-in rotation** of `HARDCOUNT_ENCRYPTION_KEY` or `HARDCOUNT_EMAIL_BIDX_KEY`.
-- **No static analysis** (SAST, such as CodeQL or Semgrep) in CI.
 - **No external penetration test** on record.
 - **No SOC 2 control mapping** until a customer requires one ([Later](docs/roadmap.md#later) in the roadmap).
 
