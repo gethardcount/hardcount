@@ -16,6 +16,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/usage"
 )
 
@@ -235,6 +236,19 @@ func (h *Handler) spend(w http.ResponseWriter, r *http.Request) {
 			// path — but counting them as accepted told an operator
 			// reconciling spend that a replay had recorded fresh usage.
 			resp.Deduplicated += res.Deduplicated
+		case errors.Is(err, clock.ErrUndecided):
+			// The call's customer's test clock could not be read: nothing is
+			// recorded for that call, and the whole batch is refused so
+			// LiteLLM retries it.
+			slog.ErrorContext(r.Context(), "litellm spend: a customer's test clock could not be read — batch aborted for client retry",
+				"tenant_id", tenantID,
+				"accepted", resp.Accepted,
+				"deduplicated", resp.Deduplicated,
+				"error", err,
+			)
+			respond.FromError(w, r, errs.Unavailable("test_clock_unavailable",
+				"A customer's test clock could not be read, so nothing was recorded for that call. Retry the whole batch; calls already recorded replay as deduplicated.", err), "usage_event")
+			return
 		case errors.Is(err, errIngestUnavailable):
 			// Non-verdict: abort the whole batch for client retry.
 			// The raw error is logged, never sent to the caller (ADR-026).
@@ -308,6 +322,10 @@ func (h *Handler) persist(ctx context.Context, tenantID string, m Mapping) (call
 		Legacy:     callEvents(m.Legacy),
 		LegacyKey:  m.LegacyKey,
 	})
+	if errors.Is(err, clock.ErrUndecided) {
+		// The customer's test clock could not be read: refused as itself.
+		return callOutcome{}, err
+	}
 	if err != nil {
 		// Verdicts on the call itself stay per-row: a bad payload must
 		// never 503, or LiteLLM retries it until max_retries is spent.

@@ -4,16 +4,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/gethardcount/hardcount/internal/errs"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"sort"
 	"strings"
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/subscription"
 )
+
+// costDashboardUnavailable is the page's answer when the customer's test
+// clock cannot be read.
+const costDashboardUnavailable = "This page can't be shown right now. Please try again in a moment."
 
 // CostDashboardAssembler builds the sanitized projection served by
 // GET /v1/public/cost-dashboard/{token}. Two responsibilities:
@@ -250,7 +254,7 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 	case errors.Is(err, errs.ErrNotFound):
 		ctx = clock.WithRealTime(ctx)
 	case err != nil:
-		return nil, errs.Unavailable("test_clock_unavailable", "This page can't be shown right now. Please try again in a moment.", err)
+		return nil, errs.Unavailable("test_clock_unavailable", costDashboardUnavailable, err)
 	default:
 		ctx = decided
 	}
@@ -307,6 +311,11 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 	}
 
 	res, err := a.usageService.Get(ctx, cust.TenantID, cust.ID, CustomerUsagePeriod{})
+	if errors.Is(err, clock.ErrUndecided) {
+		// For a customer on no clock the usage view reads the customer's now
+		// again; its refusal is this page's.
+		return nil, errs.Unavailable("test_clock_unavailable", costDashboardUnavailable, err)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("compose usage: %w", err)
 	}

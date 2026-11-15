@@ -55,8 +55,10 @@ func (s *Service) SetAuditLogger(a AuditEmitter) { s.audit = a }
 // unwired, nothing is flagged (narrow tests).
 func (s *Service) SetOpenPeriodReader(r OpenPeriodReader) { s.periods = r }
 
-// SetClock sets the clock real time is read from: the server's, the one the
-// billing engine bills by. Without it, the machine's.
+// SetClock sets the clock real time is read from: the server's clock, the one
+// the billing engine bills by. The service is handed it because a decision
+// for a customer on no clock carries no instant, so the service reads real
+// time itself. Without it, real time is the machine's.
 func (s *Service) SetClock(c clock.Clock) { s.clock = c }
 
 // SetResolver wires the unified clock.Resolver (implemented by
@@ -72,23 +74,30 @@ func (s *Service) SetResolver(r clock.Resolver) {
 	s.resolver = r
 }
 
-// simNow is the time an event for the customer is recorded at, decided once
-// per event at the point every ingest shape shares (single, batch, backfill,
-// a LiteLLM call, a held release). A clock decided upstream wins: a
-// backfill's own decision, or a request whose route named the customer. Else
-// the customer's own clock is decided here (clock.DecideWithoutDoor): the
-// customer is named in the body, so the API's door left the request at real
-// time. Live mode reads nothing. A not-found is the customer, or, in a race
-// with its clock's deletion, its clock: real time is right in both, and
-// ingest's own store call answers a missing customer. A clock that cannot be
-// read refuses the event (503): nothing is recorded, and the client sends it
-// again.
+// simNow is the time for the customer's event: every ingest shape reaches it
+// once per event (single, each event of a batch, backfill, a LiteLLM call, a
+// held release), and so do the reads whose window defaults to the
+// customer's now (customer usage, margin). The cases, in the order taken:
+//   - a clock already decided for this request (a backfill's own decision,
+//     or a route that named the customer): its time, with no read;
+//   - an instant already bound, with no clock: that instant;
+//   - no customer id: real time;
+//   - else the customer's clock is decided here (clock.DecideWithoutDoor:
+//     the customer is named in the body, so the API's door left the request
+//     at real time). Live mode reads nothing and is real time, as is a
+//     customer on no clock;
+//   - a not-found is the customer, or, in a race with its clock's deletion,
+//     its clock: real time is right in both (ingest's own store call answers
+//     a missing customer);
+//   - a clock that cannot be read refuses the event (503): nothing is
+//     recorded, and the client sends it again.
+//
+// Real time is read from the service's clock (SetClock).
 func (s *Service) simNow(ctx context.Context, tenantID, customerID string) (clock.Sim, error) {
 	if sim, ok := clock.SimOf(ctx); ok {
 		return sim, nil
 	}
 	if t, ok := clock.EffectiveNow(ctx); ok {
-		// Bound instant whose clock is unknown — keep the instant, claim no clock.
 		return clock.Sim{At: t}, nil
 	}
 	if customerID == "" {
@@ -97,13 +106,15 @@ func (s *Service) simNow(ctx context.Context, tenantID, customerID string) (cloc
 	decided, err := clock.DecideWithoutDoor(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID})
 	switch {
 	case errors.Is(err, errs.ErrNotFound):
+		// The customer, or, in a race with its clock's deletion, its clock:
+		// real time is right in both.
+		return clock.Sim{At: s.clock.Now(ctx)}, nil
 	case err != nil:
 		return clock.Sim{}, errs.Unavailable("test_clock_unavailable",
 			"The customer's test clock could not be read. Nothing was recorded; send the event again.", err)
-	default:
-		if sim, ok := clock.SimOf(decided); ok {
-			return sim, nil
-		}
+	}
+	if sim, ok := clock.SimOf(decided); ok {
+		return sim, nil
 	}
 	return clock.Sim{At: s.clock.Now(ctx)}, nil
 }
@@ -486,6 +497,11 @@ func (s *Service) BatchIngest(ctx context.Context, tenantID string, events []Ing
 	var batchErrs []error
 	for i, input := range events {
 		ev, err := s.prepare(ctx, tenantID, input, domain.UsageOriginAPI)
+		if errors.Is(err, errs.ErrUnavailable) {
+			// An event refused for retry (its customer's test clock could
+			// not be read) refuses the whole batch: the rest are not read.
+			return BatchResult{}, []error{fmt.Errorf("event[%d]: %w", i, err)}
+		}
 		if err != nil {
 			batchErrs = append(batchErrs, fmt.Errorf("event[%d]: %w", i, err))
 			continue
