@@ -86,20 +86,20 @@ type Reconciler struct {
 	// async methods (which legitimately sit in processing for days) aren't
 	// hammered every tick. Defaults to 30m (ADR-049 Phase 2).
 	olderThanProcessing time.Duration
-	now                 func() time.Time // injectable for tests
+	now                 func() time.Time // the cutoffs for stale rows only (when a row counts as stale); no settle writes it
 	breaker             *breaker.Breaker // optional; skip reconcile ticks when breaker is open
 	// settler routes recovered terminals through the shared settlement
 	// primitive so they fire the full side-effects (dunning/event/email).
 	// Nil-tolerant: see Settler.
 	settler Settler
-	// resolver binds ctx to effective-now from the invoice's pin before
-	// MarkPaid so clock-pinned invoices stamp `paid_at` in simulated
-	// time. Wired via SetResolver from router.go (same pattern as
-	// payment.Stripe + dunning.Handler). Nil-tolerant: when unwired
-	// (tests, bare construction) paid_at falls back to r.now() wall-
-	// clock — that's the legacy behavior, preserved so the constructor
-	// stays zero-arg.
+	// resolver decides each row's time from its invoice (decideRow), so a
+	// clock invoice is settled on its clock. Wired via SetResolver from
+	// router.go. Nil (narrow unit tests) decides nothing.
 	resolver clock.Resolver
+	// clock is the server's clock: the no-settler branch reads real time
+	// from it when the row's decision carries no instant. Wired via SetClock
+	// from router.go; the default is the machine's.
+	clock clock.Clock
 	// hostedLedger + hostedReader drive the hosted-page sweep
 	// (reconciler_hosted.go). Nil-tolerant: unwired, that sweep is skipped.
 	hostedLedger HostedSessionLedger
@@ -120,6 +120,7 @@ func NewReconciler(client StripeClient, invoices ReconcileInvoiceStore, olderTha
 		olderThan:           olderThan,
 		olderThanProcessing: 30 * time.Minute,
 		now:                 func() time.Time { return time.Now().UTC() },
+		clock:               clock.Real(),
 	}
 }
 
@@ -145,13 +146,13 @@ func (r *Reconciler) SetBreaker(b *breaker.Breaker) {
 	r.breaker = b
 }
 
-// SetResolver wires the clock resolver so `paid_at` writes land in
-// simulated time on clock-pinned invoices. Without this the reconciler
-// would call MarkPaid with wall-clock — leaking wall-clock onto an
-// invoice whose every other timestamp (issued_at, due_at, billing
-// period) lives on the simulated timeline. Same shape as
-// payment.Stripe.SetResolver + dunning.Handler.SetResolver.
+// SetResolver wires the clock resolver each row's time is decided with
+// (decideRow), so a clock invoice's paid_at, failed stamp and dunning start
+// are on its clock.
 func (r *Reconciler) SetResolver(res clock.Resolver) { r.resolver = res }
+
+// SetClock wires the server's clock (see the clock field).
+func (r *Reconciler) SetClock(c clock.Clock) { r.clock = c }
 
 // Run reconciles unresolved payments against Stripe:
 //   - stale charge holds (ADR-127, ADR-137, reconciler_stale_hold.go): holds
@@ -262,8 +263,8 @@ func (r *Reconciler) sweep(ctx context.Context, label string, list func(context.
 }
 
 // decideRow decides a row's time from its invoice, right after the sweep
-// listed it (clock.DecideWithoutDoor), and the settle keeps that decision
-// (BindEffectiveNow keeps a same-clock one). gone is true on a not-found:
+// listed it (clock.DecideWithoutDoor), and the settle keeps that decision.
+// gone is true on a not-found:
 // the invoice, or, in a race with its clock's deletion, its clock; there is
 // nothing to settle, and the caller stamps the row so the list moves on.
 // Any other failure is clock.ErrUndecided: the row is checked again on the
@@ -356,11 +357,12 @@ func (r *Reconciler) reconcileOne(ctx context.Context, inv domain.Invoice) (bool
 		// and its webhook records it first. One refunded at Stripe since is
 		// still a payment: the refund is recorded by its own webhook as a
 		// refund made in Stripe (ADR-134).
-		// Carry the charge's contracted instant into the settle, exactly as the
-		// inline and webhook paths do. Without it SettleSucceeded falls back to
-		// the invoice pin, which resolves the clock's CURRENT frozen_time — so a
-		// recovery running after an advance stamped paid_at on the advance
-		// target instead of the instant the charge fired. This path recovers
+		// Carry the charge's anchor (the instant the charge was made at) into
+		// the settle, exactly as the inline and webhook paths do. Without it
+		// SettleSucceeded uses the row's decided time, the clock's current
+		// frozen time, so a recovery running after a wide advance would stamp
+		// paid_at at the advance's target instead of the instant the charge
+		// was made at. This path recovers
 		// dropped webhooks, so it must reproduce what the dropped webhook would
 		// have written, not a fresher answer.
 		settleCtx := ctx
@@ -560,10 +562,7 @@ func (r *Reconciler) settle(ctx context.Context, inv domain.Invoice, piID string
 		"invoice_id", inv.ID, "terminal_succeeded", kind == terminalSucceeded)
 	switch kind {
 	case terminalSucceeded:
-		markCtx := ctx
-		if r.resolver != nil {
-			markCtx, _ = clock.BindEffectiveNow(markCtx, r.resolver, clock.Pin{TenantID: inv.TenantID, InvoiceID: inv.ID})
-		}
+		markCtx := clock.EnsureEffectiveNow(ctx, r.clock)
 		now := clock.Now(markCtx)
 		if _, err := r.invoices.MarkPaid(markCtx, inv.TenantID, inv.ID, piID, now); err != nil {
 			return false, fmt.Errorf("mark paid (legacy): %w", err)

@@ -124,7 +124,8 @@ type Stripe struct {
 	refundUpdater      RefundStatusUpdater        // optional; applies async refund-webhook status to a CN
 	disputes           DisputeRecorder            // optional; records charge.dispute.* against the invoice (#979)
 	externalRefunds    ExternalRefundRecorder     // optional; records refunds made in Stripe outside Hardcount (ADR-134)
-	resolver           clock.Resolver             // optional; binds effective-now from invoice
+	resolver           clock.Resolver             // optional; an event decides its time with it (decideFor)
+	clock              clock.Clock                // ctx carries the decided time; a settle reads real time here, the server's clock, when ctx carries none
 	anomalies          PaymentAnomalyRecorder     // required; writes the anomaly marker (ADR-068) and queues its webhook event (MustHaveAnomalyRecorder)
 	checkoutSessions   *CheckoutSessionStore      // optional; claim-ledger truth-sync + settle-time expire (ADR-068)
 	sessionClients     *StripeClients             // optional; raw mode-keyed clients for session expire calls
@@ -204,24 +205,18 @@ func (s *Stripe) SetCheckoutSessionStore(cs *CheckoutSessionStore, clients *Stri
 	s.sessionClients = clients
 }
 
-// SetResolver wires the unified clock.Resolver. Webhook handlers fire
-// in their own goroutine with no inherited ctx binding — they bind
-// effective-now from the invoice they're processing so MarkPaid /
-// the failed stamp / StartDunning all stamp simulated time on
-// clock-pinned invoices. Without this, webhook-driven writes leak
-// wall-clock back into the simulation. Optional: nil leaves binding
-// off (test default).
+// SetResolver wires the clock resolver a Stripe event decides its time with,
+// from the record it names (decideFor), before anything is written. Nil
+// (narrow unit tests) decides nothing.
 func (s *Stripe) SetResolver(r clock.Resolver) {
 	s.resolver = r
 }
 
-// bindForInvoice resolves effective-now from the invoice and binds
-// ctx for downstream stamps. Returns ctx unchanged on resolver error
-// or no resolver — webhook handlers must never fail their inbound
-// event on a transient resolution issue.
-func (s *Stripe) bindForInvoice(ctx context.Context, tenantID, invoiceID string) context.Context {
-	bound, _ := clock.BindEffectiveNow(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
-	return bound
+// SetClock wires the server's clock, which a settle reads real time from
+// when its caller decided no instant (live, or real time). The router passes
+// the clock the server bills by; the default is the machine's.
+func (s *Stripe) SetClock(c clock.Clock) {
+	s.clock = c
 }
 
 // StripeClient is the interface for Stripe API calls.
@@ -271,12 +266,12 @@ type PaymentIntentResult struct {
 	// the webhook-drop backstop path (the settle skips the truth-check
 	// when capturedCents == 0).
 	AmountReceivedCents int64
-	// AnchorAt is the charge's CONTRACTED simulated instant, read back from
-	// the PI's hardcount_anchor_at metadata. It exists for the same reason the
-	// webhook path reads that key: SettleSucceeded's invoice-pin binding
-	// resolves the clock's CURRENT frozen_time, so a settle that lands after
-	// an advance stamps paid_at on the advance target rather than the instant
-	// the charge actually fired.
+	// AnchorAt is the charge's anchor (the instant the charge was made at on
+	// its clock), read back from the PI's hardcount_anchor_at metadata. It
+	// exists for the same reason the webhook path reads that key: a settle's
+	// decided time is the clock's current frozen time, so a settle that lands
+	// after a wide advance would stamp paid_at at the advance's target rather
+	// than the instant the charge was made at.
 	//
 	// The reconciler is the THIRD settle path and was the only one without
 	// it — which is backwards, because it runs precisely when the webhook
@@ -403,7 +398,7 @@ type WebhookStore interface {
 }
 
 func NewStripe(client StripeClient, invoices InvoiceUpdater, webhooks WebhookStore, paymentSetups PaymentSetupStore, dunning ...DunningStarter) *Stripe {
-	s := &Stripe{client: client, invoices: invoices, webhooks: webhooks, paymentSetups: paymentSetups}
+	s := &Stripe{client: client, invoices: invoices, webhooks: webhooks, paymentSetups: paymentSetups, clock: clock.Real()}
 	if len(dunning) > 0 {
 		s.dunning = dunning[0]
 	}

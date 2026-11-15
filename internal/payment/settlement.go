@@ -31,8 +31,8 @@ const (
 )
 
 // SettleSucceeded transitions an invoice to PAID and fires the complete
-// success side-effect set: bind sim-time so paid_at lands on a clock-pinned
-// invoice's timeline, MarkPaid (zero amount_due, record PI + paid_at), stamp
+// success side-effect set, at the time its caller decided (a clock invoice's
+// clock time): MarkPaid (zero amount_due, record PI + paid_at), stamp
 // the charged card for the activity timeline, fire payment.succeeded, and
 // enqueue the receipt email.
 //
@@ -86,19 +86,23 @@ func (s *Stripe) SettleSucceeded(ctx context.Context, tenantID string, inv domai
 		return nil
 	}
 
-	// Bind effective-now from the invoice so paid_at lands in simulated time
-	// on clock-pinned invoices. Stripe's webhook fires in wall-clock 2026 even
-	// when the invoice belongs to a clock frozen at 2024-04 — without binding,
-	// paid_at would leak wall-clock and the dashboard would show "Paid on
-	// 2026-05-08" for a simulation-2024 invoice.
-	ctx = s.bindForInvoice(ctx, tenantID, inv.ID)
+	// The time was decided before the settle, by whoever called it: a Stripe
+	// event from the invoice it names (decideFor), a reconciler row from its
+	// invoice (decideRow), or, for a charge settled inline, the request,
+	// catch-up or tick that made the charge. On a test clock it is the
+	// clock's time. When ctx carries no time (live, and a test invoice on no
+	// clock: both take this same path), the server's clock is read here once,
+	// so every stamp of this settle has the same time.
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	now := clock.Now(ctx)
-	// The charge's CONTRACTED instant beats the bind: the pin resolves the
-	// clock's CURRENT frozen_time — during (or after) a wide advance that's
-	// the advance TARGET, not the retry/boundary the charge fired at, so a
-	// sim-Mar-7 dunning recovery stamped "paid Apr 1". The inline settle
-	// hands the anchor over on ctx; the webhook path recovers it from the
-	// PI's hardcount_anchor_at metadata. Wall charges carry no anchor.
+	// The charge's anchor, when it has one, beats the decided time. The
+	// anchor is the instant the charge was made at on its clock, carried with
+	// the charge: the inline settle hands it over on ctx, and the webhook path
+	// reads it from the PaymentIntent's hardcount_anchor_at. A clock's
+	// decided time is its current frozen time, and after a wide advance that
+	// is the advance's target: a dunning retry made on the 7th and settled
+	// after an advance to the 1st of next month would otherwise be paid on
+	// the 1st. Real-time charges carry no anchor.
 	if a, ok := settleAnchorFrom(ctx); ok {
 		now = a
 	}
@@ -352,10 +356,11 @@ func (s *Stripe) settleFailed(ctx context.Context, tenantID string, inv domain.I
 		return inv, domain.PaymentFailureResult{}, nil
 	}
 
-	// Bind effective-now so the failed stamp and StartDunning land in
-	// simulated time on clock-pinned invoices. Inside an Advance the ctx
-	// already carries the clock; binding refines it, never erases it.
-	ctx = s.bindForInvoice(ctx, tenantID, inv.ID)
+	// The time was decided by the caller, as for SettleSucceeded, so the
+	// failed stamp and dunning's start are on a clock invoice's clock. When
+	// ctx carries no time (live, and a test invoice on no clock: the same
+	// path), the server's clock is read here once.
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	// Detached before the tx: the stamp, payment.failed and the email commit
 	// together, and a webhook disconnect must not cut the dunning start that
 	// follows them. Values (the simulated clock) survive WithoutCancel.
@@ -631,12 +636,14 @@ func (s *Stripe) expireCheckoutSessionsBestEffort(ctx context.Context, tenantID 
 	}
 }
 
-// settleAnchorKey carries the charge's contracted instant from the charge
-// site (inline) or the PI metadata (webhook, reconciler) into SettleSucceeded
-// (paid_at) and SettleFailed (dunning's first retry, dunningSimFailedAt). Both
-// rebind ctx to the invoice's clock, which resolves its CURRENT frozen_time —
-// the advance target, not the instant the charge fired — so the anchor has to
-// travel separately. Package-private: the anchor is a payment-internal
+// settleAnchorKey carries the charge's anchor (the instant the charge was
+// made at on its clock, carried with it) from the charge site (inline) or the
+// PaymentIntent's metadata (webhook, reconciler) into SettleSucceeded
+// (paid_at) and SettleFailed (dunning's first retry, dunningSimFailedAt). A
+// Stripe event and a reconciler row decide their time from the invoice, which
+// on a clock is the clock's current frozen time; after a wide advance that is
+// the advance's target, not the instant the charge was made at, so the anchor
+// travels separately. Package-private: the anchor is a payment-internal
 // contract between the charge and its settle.
 type settleAnchorKeyType struct{}
 
@@ -666,9 +673,8 @@ func dunningSimFailedAt(ctx context.Context) time.Time {
 
 // anchorFromEventPayload extracts data.object.metadata.hardcount_anchor_at from
 // a Stripe webhook event. Returns false on absence or parse failure — the
-// settle then falls back to the invoice-pin binding (paid_at) or the issue
-// instant (dunning), never errors: a malformed anchor must not block a
-// settlement.
+// settle then uses the decided time (paid_at, and dunning's start), never
+// errors: a malformed anchor must not block a settlement.
 //
 // It reads the event body from Payload["raw"], the only shape the webhook
 // handler builds (handler.go). It used to read a parsed Payload["data"] that
