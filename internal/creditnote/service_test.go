@@ -1441,17 +1441,11 @@ func (r *simResolver) SimForInvoice(_ context.Context, _, _ string) (clock.Sim, 
 	return clock.Sim{At: r.at, TestClockID: "hc_tclk_test"}, nil
 }
 
-// TestOperatorCreditNote_StampsSimulatedTime pins ADR-030 on the operator
-// credit-note path: "bind effective-now at every operator entry point on a
-// clock-pinned entity", with credit notes and their CreditGrant rows named as
-// simulated-when-pinned.
-//
-// Pre-fix, creditnote.Service held no resolver at all, so only the ENGINE's
-// clawback landed on the simulated axis (its callers bind) while an operator
-// credit note on the same invoice was stamped wall-clock — producing a credit
-// note dated weeks BEFORE the invoice it credits, and a ledger grant the
-// clock-scoped catchup scans compare against frozen_time.
-func TestOperatorCreditNote_StampsSimulatedTime(t *testing.T) {
+// TestOperatorCreditNote_StampsTheDecidedTime: an operator credit note is
+// stamped at the time its route decided from the invoice (DecideForInvoice,
+// in the create route), so a note on a clock invoice is dated on the
+// invoice's clock, not before the invoice it credits.
+func TestOperatorCreditNote_StampsTheDecidedTime(t *testing.T) {
 	simAt := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
 	store := newMemStore()
 	invoices := &memInvoiceReader{invoices: map[string]domain.Invoice{

@@ -1115,13 +1115,12 @@ func (s *stubClockResolver) SimForSubscription(_ context.Context, _, _ string) (
 	return clock.Sim{}, fmt.Errorf("not used by dunning tests")
 }
 
-// TestClockResolver_StampsFrozenDomain locks in the ADR-029 follow-up:
-// when the clock resolver is wired, every per-invoice timestamp dunning
-// writes (next_action_at, last_attempt_at, resolved_at, created_at)
-// lands in the resolver's domain — not s.clock.Now(). Without this,
-// clock-pinned runs whose stamps land in wall-clock get stranded
-// against a catchup window that compares to frozen_time.
-func TestClockResolver_StampsFrozenDomain(t *testing.T) {
+// TestDunning_StampsTheDecidedTime: every per-invoice timestamp dunning
+// writes (next_action_at, last_attempt_at, resolved_at, created_at) is at
+// the time its caller decided. A clock-pinned invoice's run, decided at the
+// invoice's clock, is stamped at frozen_time, so the clock's catch-up finds
+// it in its window.
+func TestDunning_StampsTheDecidedTime(t *testing.T) {
 	frozen := time.Date(2024, 2, 1, 12, 0, 0, 0, time.UTC)
 	resolver := &stubClockResolver{byInvoice: map[string]time.Time{"inv_1": frozen}}
 
@@ -1225,10 +1224,10 @@ func TestClockResolver_NotWired(t *testing.T) {
 	}
 }
 
-// TestClockResolver_ErrorFallback confirms a resolver error doesn't
-// fail the operation — falls back to wall-clock with a warn. Failing
-// the operator's retry / resolve is worse than a stamp in the wrong
-// domain on a dangling-pointer row.
+// TestClockResolver_ErrorFallback confirms dunning's own lookup of the
+// invoice's clock, when it fails, leaves the time its caller decided (real
+// time here) and does not fail the operation. Once that lookup is removed
+// (the delete PR for dunning), this tests nothing and goes with it.
 func TestClockResolver_ErrorFallback(t *testing.T) {
 	store := newMemStore()
 	svc := NewService(store, &noopRetrier{}, nil)

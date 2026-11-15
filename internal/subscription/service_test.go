@@ -3733,18 +3733,13 @@ func TestClockResolver_NotWired(t *testing.T) {
 	}
 }
 
-// TestSubMutators_StampSimTimeOnClockPinnedSub enumerates every public
-// Service mutator that touches a subscription row, and asserts each
-// stamps simulated time (not wall-clock) on a clock-pinned sub. The
-// pattern under test is bindForSub — every entry point must bind
-// effective-now from the sub pin before delegating to the store, or
-// the store's clock.Now(ctx) falls back to wall-clock and stamps the
-// wrong domain (feedback_ctx_attr_audit class).
-//
-// Failure here means a new mutator was added without the binding —
-// fix is one line: ctx = s.bindForSub(ctx, tenantID, id) before the
-// store call. Add the new method to the table below to lock it in.
-func TestSubMutators_StampSimTimeOnClockPinnedSub(t *testing.T) {
+// TestSubMutators_StampTheDecidedTime enumerates every public Service
+// mutator that touches a subscription row, and asserts each stamps its
+// writes at the request's decided time: the API's door decides a
+// subscription route from the subscription's clock, and the mutator's
+// writes (updated_at, canceled_at) read that decision. Failure means a
+// mutator writes on a time of its own. Add a new mutator to the table below.
+func TestSubMutators_StampTheDecidedTime(t *testing.T) {
 	frozen := time.Date(2024, 4, 15, 12, 0, 0, 0, time.UTC)
 
 	// Helper: build a fresh service + clock-pinned sub for each case.

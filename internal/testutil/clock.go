@@ -19,6 +19,10 @@ func AtRealTime() context.Context {
 // API's door decides a request on it: the record's clock, or real time. A
 // test is an entry point, so it decides where production would. It fails the
 // test when the time cannot be decided.
+//
+// Both helpers start a fresh test-mode context. A test that already holds a
+// context it needs (a leader token, a timeout) decides on that context with
+// clock.WithRealTime or clock.Decide instead.
 func DecidedFor(t testing.TB, r clock.Resolver, p clock.Pin) context.Context {
 	t.Helper()
 	ctx, err := clock.Decide(postgres.WithLivemode(context.Background(), false), r, p)

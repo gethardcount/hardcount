@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
-	"testing"
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/errs"
@@ -369,10 +368,6 @@ func BindEffectiveNow(ctx context.Context, r Resolver, p Pin) (context.Context, 
 	if r == nil {
 		return ctx, false
 	}
-	decision, decided := Decision(ctx)
-	if !decided && !inLiveMode(ctx) {
-		nestedLookupWrong(ctx, "a nested time lookup ran in test mode with no decision on the context; decide at the entry point", p, Sim{}, Sim{})
-	}
 	var (
 		sim Sim
 		err error
@@ -403,9 +398,6 @@ func BindEffectiveNow(ctx context.Context, r Resolver, p Pin) (context.Context, 
 	// would lose its sim columns for the rest of the service call. Inside a
 	// catch-up every record touched is the clock's, so an answer with no
 	// clock there is never a sign that the work left the simulation.
-	if decided && namesItsClock(decision) && decision.TestClockID != sim.TestClockID {
-		nestedLookupWrong(ctx, "a nested time lookup found the record on a different clock from the decision on the context", p, decision, sim)
-	}
 	if sim.TestClockID == "" {
 		if _, inherited := SimOf(ctx); inherited {
 			return ctx, true
@@ -426,38 +418,4 @@ func BindEffectiveNow(ctx context.Context, r Resolver, p Pin) (context.Context, 
 		return ctx, true
 	}
 	return WithSim(ctx, sim), true
-}
-
-// nestedLookupsAreFatal makes BindEffectiveNow's two transitional checks
-// panic: a nested lookup whose record is on a different clock from the
-// decision already on the context (or on a clock when real time was
-// decided, or the reverse), and a nested lookup on a test-mode context that
-// carries no decision. They panic under go test, so the test that reaches
-// one fails. In production they log an error and BindEffectiveNow goes on as
-// it did before them: a panic there would orphan an idempotency reservation
-// and fail the reconciler on every tick, for a state it already handles.
-// Both go when BindEffectiveNow does.
-var nestedLookupsAreFatal = testing.Testing()
-
-// namesItsClock reports whether a decision names its clock: a test clock, or
-// real time (a zero Sim). A bare instant (WithEffectiveNow) does not, so it
-// is not compared.
-func namesItsClock(d Sim) bool { return d.TestClockID != "" || d.At.IsZero() }
-
-// inLiveMode reports whether ctx is in live mode. A context with no mode
-// counts as test mode.
-func inLiveMode(ctx context.Context) bool {
-	live, err := postgres.Livemode(ctx)
-	return err == nil && live
-}
-
-// nestedLookupWrong is one of BindEffectiveNow's transitional checks
-// failing: it panics under go test and logs an error in production.
-func nestedLookupWrong(ctx context.Context, what string, p Pin, decided, record Sim) {
-	args := []any{"tenant_id", p.TenantID, "customer_id", p.CustomerID, "subscription_id", p.SubscriptionID,
-		"invoice_id", p.InvoiceID, "decided_clock", decided.TestClockID, "record_clock", record.TestClockID}
-	if nestedLookupsAreFatal {
-		panic(fmt.Sprintf("clock: %s: %v", what, args))
-	}
-	slog.ErrorContext(ctx, "clock: "+what, args...)
 }

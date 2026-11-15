@@ -36,12 +36,12 @@ func (p pinnedResolver) SimForSubscription(context.Context, string, string) (clo
 	return p.sim, nil
 }
 
-// Collect on a clock-pinned invoice charges inside the invoice's simulated
-// time, as finalize's collect does. The charge stamps that instant on the PI
-// (hardcount_anchor_at); paid_at and a decline's first dunning retry are dated
-// from it. Unbound, a Collect on a later Advance dated the first retry from
-// the issue instant — in the past — and one Advance ran the whole campaign.
-func TestCollectPayment_ChargesInTheInvoicesClock(t *testing.T) {
+// Collect charges on the request's decided clock: the API's door decides
+// POST /v1/invoices/{id}/collect from the invoice (ofInvoice), and the charge
+// runs on that decision. The charge stamps its instant on the PaymentIntent
+// (hardcount_anchor_at); paid_at and a decline's first dunning retry are
+// dated from it.
+func TestCollectPayment_ChargesOnTheDecidedClock(t *testing.T) {
 	ctx := context.Background()
 	store := newMemStore()
 	inv, err := store.Create(ctx, "t1", domain.Invoice{
