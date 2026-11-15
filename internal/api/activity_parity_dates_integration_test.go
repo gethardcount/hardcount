@@ -37,8 +37,14 @@ type datesRig struct {
 
 func newDatesRig(t *testing.T, name string) *datesRig {
 	t.Helper()
+	return newDatesRigOn(t, name, clock.Real())
+}
+
+// newDatesRigOn is newDatesRig with the server built on clk.
+func newDatesRigOn(t *testing.T, name string, clk clock.Clock) *datesRig {
+	t.Helper()
 	db := testutil.SetupTestDB(t)
-	srv := NewServer(db, clock.Real(), nil)
+	srv := NewServer(db, clk, nil)
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
 	tenantID := testutil.CreateTestTenant(t, db, name)

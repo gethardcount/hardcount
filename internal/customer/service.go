@@ -130,10 +130,21 @@ type Service struct {
 	stripeSyncer  StripeSyncer
 	clocks        TestClockChecker
 	taxFlusher    TaxFlusher
-	resolver      clock.Resolver
 	subChecker    SubscriptionChecker
 	auditLogger   AuditEmitter
 	dunningPolicy DunningPolicyReader
+
+	// clock is the server's clock: the router's clk, the one the engine
+	// bills by. Every customer change runs on a time decided on a test clock
+	// or at real time (see the clock package's doc). Who decides it:
+	//   - a request, the API's door (api.clockDoor), from the customer in its
+	//     URL;
+	//   - a create, Create itself, from the test clock its body names.
+	// Each entry point keeps that time and, when it carries no instant (real
+	// time), reads this clock once (clock.EnsureEffectiveNow). Without that
+	// read, two reads of the time in one action could differ, and a store's
+	// stamp could fall on another time than the action's.
+	clock clock.Clock
 }
 
 // DunningPolicyReader fetches a dunning policy by id on a tenant- and
@@ -149,8 +160,12 @@ type DunningPolicyReader interface {
 func (s *Service) SetDunningPolicyReader(r DunningPolicyReader) { s.dunningPolicy = r }
 
 func NewService(store Store) *Service {
-	return &Service{store: store}
+	return &Service{store: store, clock: clock.Real()}
 }
+
+// SetClock wires the server's clock (see the clock field). The router passes
+// the clock the server bills by; the default is the machine's.
+func (s *Service) SetClock(c clock.Clock) { s.clock = c }
 
 // SetAuditLogger wires in-tx audit emission for customer creation (ADR-090).
 // Nil-safe: unwired services skip emission, which keeps narrow unit tests
@@ -158,52 +173,6 @@ func NewService(store Store) *Service {
 // still used by update / billing-profile / token-rotate) — the same
 // *audit.Logger satisfies both.
 func (s *Service) SetAuditLogger(a AuditEmitter) { s.auditLogger = a }
-
-// SetResolver wires the unified clock.Resolver. At Update /
-// UpsertBillingProfile and other customer-scoped mutations, ctx is
-// bound to the customer's effective-now so downstream postgres
-// timestamp writes (updated_at on customer row, billing_profile
-// updates, etc.) land in simulated time on clock-pinned customers.
-//
-// Customer.Create can't bind from the customer pin (the customer doesn't
-// exist yet), so it binds from the CLOCK directly — see the TestClockID
-// branch in Create, which resolves and binds in one read via
-// TestClockChecker. The resolver is not involved there and cannot be.
-func (s *Service) SetResolver(r clock.Resolver) {
-	s.resolver = r
-}
-
-// bindForCustomer binds effective-now from a customer pin for any
-// post-create mutation (Update, UpsertBillingProfile, ArchiveCustomer).
-// Returns ctx unchanged on resolver error or no resolver.
-func (s *Service) bindForCustomer(ctx context.Context, tenantID, customerID string) context.Context {
-	bound, _ := clock.BindEffectiveNow(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID})
-	return bound
-}
-
-// AuditCtx binds the customer's simulated-time context (its test clock + that
-// clock's frozen instant) for a HANDLER-level audit emission, so the row lands
-// on the sim axis (audit_log.sim_effective_at / test_clock_id) and survives
-// ADR-086 teardown, which hard-deletes the customer itself.
-//
-// The handler needs its own bind because the service's internal bindForCustomer
-// binds a ctx the handler never sees. Exported here rather than wiring a second
-// clock.Resolver into the handler: one resolver per domain, one pin resolution,
-// no chance of the two disagreeing.
-//
-// A live customer can never be clock-pinned (DB CHECK on
-// test_clocks.livemode), so the bind finds no clock and leaves ctx as is;
-// no-op when ctx is already bound. created_at stays wall-clock (ADR-030);
-// this is the second axis.
-func (s *Service) AuditCtx(ctx context.Context, tenantID, customerID string) context.Context {
-	if s.resolver == nil || customerID == "" {
-		return ctx
-	}
-	if _, ok := clock.SimOf(ctx); ok {
-		return ctx
-	}
-	return s.bindForCustomer(ctx, tenantID, customerID)
-}
 
 // SetStripeSyncer configures Stripe sync (optional, breaks circular dep).
 func (s *Service) SetStripeSyncer(syncer StripeSyncer) {
@@ -301,9 +270,9 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	//
 	// The same read gives us the clock's instant, and we BIND it: this create
 	// is the moment the customer joins the simulation, so its audit row belongs
-	// on the sim axis. Nothing else can put it there. Create cannot bind from
-	// the customer pin the way every later mutation does (bindForCustomer) —
-	// the customer does not exist yet — so without this the origin row of every
+	// on the sim axis. Nothing else can put it there. Every later change is
+	// decided from the customer by the API's door; a create cannot be, since
+	// the customer does not exist yet, so without this the origin row of every
 	// simulation is the one row missing from ?test_clock_id=. It matters more
 	// than the rest: ADR-086 teardown HARD-DELETES the customer, leaving this
 	// row as the only surviving evidence the customer was ever in the clock's
@@ -376,7 +345,6 @@ func (s *Service) Get(ctx context.Context, tenantID, id string) (domain.Customer
 // entropy makes brute-force infeasible, same shape as the hosted-
 // invoice public_token).
 func (s *Service) RotateCostDashboardToken(ctx context.Context, tenantID, customerID string) (string, error) {
-	ctx = s.bindForCustomer(ctx, tenantID, customerID)
 	if _, err := s.store.Get(ctx, tenantID, customerID); err != nil {
 		return "", err
 	}
@@ -435,7 +403,7 @@ type UpdateInput struct {
 // create are ordered the same way. An email change clears the bounce state
 // in the same write. The Stripe sync runs after the commit.
 func (s *Service) Update(ctx context.Context, tenantID, id string, input UpdateInput) (domain.Customer, error) {
-	ctx = s.bindForCustomer(ctx, tenantID, id)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 
 	// Checks that read only the input run before the lock.
 	name := strings.TrimSpace(input.DisplayName)
@@ -607,7 +575,7 @@ func (s *Service) UpsertBillingProfile(ctx context.Context, tenantID string, bp 
 		}
 		return domain.CustomerBillingProfile{}, fmt.Errorf("get customer: %w", err)
 	}
-	ctx = s.bindForCustomer(ctx, tenantID, bp.CustomerID)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	if phone := strings.TrimSpace(bp.Phone); phone != "" {
 		if !phonePattern.MatchString(phone) {
 			return domain.CustomerBillingProfile{}, errs.Invalid("phone", "must be 7-20 characters and contain only digits, spaces, +, -, (, )")

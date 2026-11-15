@@ -279,6 +279,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	pricingSvc.SetSubscriptionPlanUsageReader(subStore)
 	pricingSvc.SetCustomerReader(customerStore)
 	customerSvc := customer.NewService(customerStore)
+	customerSvc.SetClock(clk)
 	customerSvc.SetStripeSyncer(payment.NewStripeBillingSync(stripeClients))
 	customerH := customer.NewHandler(customerSvc)
 	pricingH := pricing.NewHandler(pricingSvc)
@@ -941,10 +942,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// payment-failure stamp, the dunning-run create) in simulated time on a
 	// clock-pinned invoice, not in wall-clock time.
 	stripeAdapter.SetResolver(engine)
-	// Customer-service writes (Update, UpsertBillingProfile and others) bind
-	// the effective now from the customer's clock, so updated_at on a
-	// clock-pinned customer's row is in simulated time.
-	customerSvc.SetResolver(engine)
 	// A credit grant for a clock-pinned customer must stamp the ledger
 	// entry's created_at in simulated time. Then the dashboard's "credit
 	// granted on …" line matches the rest of the simulated timeline.
