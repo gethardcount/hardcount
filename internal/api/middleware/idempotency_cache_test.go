@@ -262,15 +262,22 @@ func TestIdempotency_ConcurrentSameKey_RunsOnce(t *testing.T) {
 
 func invokeWithKey(t *testing.T, h http.Handler, tenantID, key, body string) *httptest.ResponseRecorder {
 	t.Helper()
+	return invokeWithKeyAs(t, h, tenantID, "key_test", key, body)
+}
+
+// invokeWithKeyAs is invokeWithKey sent by the API key keyID.
+func invokeWithKeyAs(t *testing.T, h http.Handler, tenantID, keyID, key, body string) *httptest.ResponseRecorder {
+	t.Helper()
 	req := httptest.NewRequest("POST", "/v1/invoices", strings.NewReader(body))
 	req.Header.Set("Idempotency-Key", key)
 	req.Header.Set("Content-Type", "application/json")
-	// Tenant + livemode pinned on ctx the same way the real auth
+	// Tenant, caller and livemode pinned on ctx the same way the real auth
 	// middleware does in production. Without WithLivemode, BeginTx
 	// trips the strict-mode panic ("TxTenant opened without ctx
 	// livemode") — that diagnostic is the contract every entry point
 	// must satisfy, including test fixtures.
 	ctx := auth.WithTenantID(req.Context(), tenantID)
+	ctx = auth.WithKeyID(ctx, keyID)
 	ctx = postgres.WithLivemode(ctx, false)
 	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()
@@ -296,9 +303,12 @@ func TestIdempotency_OrphanedReservation_AnswersUnresolved(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The row holds the fingerprint of the request below, as a reservation
+	// by the same caller would.
+	fp := fingerprintRequest("POST", "/v1/invoices", "key:key_test", []byte(`{"amount":100}`))
 	if _, err := tx.ExecContext(seedCtx,
 		`INSERT INTO idempotency_keys (key, tenant_id, http_method, http_path, request_fingerprint, status_code, response_body, created_at)
-		 VALUES ('idem-orphan', $1, 'POST', '/v1/invoices', '\x'::bytea, 0, ''::bytea, now() - interval '10 minutes')`, tenantID); err != nil {
+		 VALUES ('idem-orphan', $1, 'POST', '/v1/invoices', $2, 0, ''::bytea, now() - interval '10 minutes')`, tenantID, fp); err != nil {
 		t.Fatalf("seed orphaned reservation: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -371,5 +381,94 @@ func TestIdempotency_IngestRoutesIgnoreTheHeader(t *testing.T) {
 	}
 	if stored != 0 {
 		t.Fatalf("%d idempotency_keys rows stored, want 0", stored)
+	}
+}
+
+// Another caller that sends a key whose request is still running gets 422 at
+// once. It does not wait on the first caller's request, so it cannot learn
+// when that request finished or how. The caller that made the request still
+// waits for its answer and gets it replayed.
+func TestIdempotency_AnotherCallerDoesNotWaitOnAPendingKey(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	tenantID := testutil.CreateTestTenant(t, db, "Idempotency Pending Other Caller")
+
+	entered, release := make(chan struct{}), make(chan struct{})
+	var calls atomic.Int64
+	handler := Idempotency(db, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		if calls.Add(1) == 1 {
+			close(entered)
+			<-release
+		}
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":"first"}`))
+	}))
+
+	first := make(chan *httptest.ResponseRecorder, 1)
+	go func() { first <- invokeWithKeyAs(t, handler, tenantID, "key_a", "idem-pending", `{"amount":100}`) }()
+	<-entered
+
+	start := time.Now()
+	other := invokeWithKeyAs(t, handler, tenantID, "key_b", "idem-pending", `{"amount":100}`)
+	if took := time.Since(start); took > time.Second {
+		t.Errorf("another caller waited %s on the pending key, want an answer at once", took)
+	}
+	if other.Code != http.StatusUnprocessableEntity || !strings.Contains(other.Body.String(), "idempotency_error") {
+		t.Errorf("another caller: %d %s, want 422 idempotency_error", other.Code, other.Body.String())
+	}
+
+	const hold = 300 * time.Millisecond
+	retry := make(chan *httptest.ResponseRecorder, 1)
+	start = time.Now()
+	go func() { retry <- invokeWithKeyAs(t, handler, tenantID, "key_a", "idem-pending", `{"amount":100}`) }()
+	time.Sleep(hold)
+	close(release)
+	got := <-retry
+	if took := time.Since(start); took < hold {
+		t.Errorf("the same caller's retry answered after %s, before the first request finished", took)
+	}
+	if got.Code != http.StatusCreated || got.Header().Get("Idempotent-Replayed") != "true" || got.Body.String() != `{"id":"first"}` {
+		t.Errorf("the same caller's retry: %d %q %s, want the replayed 201", got.Code, got.Header().Get("Idempotent-Replayed"), got.Body.String())
+	}
+	if rec := <-first; rec.Code != http.StatusCreated {
+		t.Errorf("first request: %d, want 201", rec.Code)
+	}
+	if n := calls.Load(); n != 1 {
+		t.Errorf("the handler ran %d times, want 1", n)
+	}
+}
+
+// A stored row with no fingerprint matches no request: it answers 422 and
+// never replays its body. Every write stores a fingerprint, so such a row
+// cannot be shown to be this caller's.
+func TestIdempotency_RowWithoutFingerprintIsAMismatch(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	tenantID := testutil.CreateTestTenant(t, db, "Idempotency No Fingerprint")
+	handler := Idempotency(db, nil)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		t.Error("the handler ran for a key that is already stored")
+		w.WriteHeader(http.StatusCreated)
+	}))
+
+	for _, c := range []struct{ key, fingerprint string }{
+		{"idem-null-fp", "NULL"},
+		{"idem-empty-fp", "'\\x'::bytea"},
+	} {
+		seedCtx := postgres.WithLivemode(context.Background(), false)
+		tx, err := db.BeginTx(seedCtx, postgres.TxTenant, tenantID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := tx.ExecContext(seedCtx,
+			`INSERT INTO idempotency_keys (key, tenant_id, http_method, http_path, request_fingerprint, status_code, response_body)
+			 VALUES ($1, $2, 'POST', '/v1/invoices', `+c.fingerprint+`, 201, '{"id":"stored"}'::bytea)`, c.key, tenantID); err != nil {
+			t.Fatalf("seed %s: %v", c.key, err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatal(err)
+		}
+
+		rec := invokeWithKey(t, handler, tenantID, c.key, `{"amount":100}`)
+		if rec.Code != http.StatusUnprocessableEntity || strings.Contains(rec.Body.String(), "stored") {
+			t.Errorf("%s: %d %s, want 422 without the stored body", c.key, rec.Code, rec.Body.String())
+		}
 	}
 }

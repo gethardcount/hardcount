@@ -41,7 +41,7 @@ func TestCreateCreditNote_UnknownFieldRefused(t *testing.T) {
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Idempotency-Key", key)
 		rr := httptest.NewRecorder()
-		srv.ServeHTTP(rr, req.WithContext(auth.WithTenantID(ctx, tenantID)))
+		srv.ServeHTTP(rr, req.WithContext(auth.WithKeyID(auth.WithTenantID(ctx, tenantID), "key_test")))
 		return rr
 	}
 	state := func() (notes, nextSeq int) {

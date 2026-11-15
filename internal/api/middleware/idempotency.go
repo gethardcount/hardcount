@@ -22,9 +22,9 @@ import (
 )
 
 // maxIdempotentBodyBytes caps how much of the request body is hashed into the
-// fingerprint. A larger request, such as a bulk import, skips the body part of
-// the fingerprint and falls back to method and path. Such endpoints are rare,
-// and the risk of reusing a key with a different body is low.
+// fingerprint. A larger request, such as a bulk import, has only its first
+// maxIdempotentBodyBytes hashed. Such endpoints are rare, and the risk of
+// reusing a key with a different body is low.
 const maxIdempotentBodyBytes = 1 << 20 // 1 MiB
 
 // statusPending marks an idempotency row that is reserved but not yet
@@ -44,20 +44,23 @@ const (
 	idempotencyPollTimeout  = 5 * time.Second
 
 	// idempotencyOrphanAfter is the age at which a pending reservation has
-	// no live owner. The longest handlers this middleware wraps are the
-	// 5-minute export group (router.go) and a refund (POST
+	// no live owner: the owner died (OOM, SIGKILL, node loss) or panicked
+	// (Recoverer is mounted outside this middleware) between reserving and
+	// finalizing. Without this limit, the row would sit at status 0 for its
+	// 24 h life, and every retry on any replica would poll 5 s and be told
+	// "please retry" (S2 in docs/dev/records/ha-readiness-2026-07-06.md).
+	//
+	// It is 5 minutes because that is the longest any handler here runs:
+	// the export group (router.go), and a refund (POST
 	// /v1/invoices/{id}/refund, or POST /v1/credit-notes with auto_issue),
-	// whose work runs on its own 5-minute budget past the request timeout, so
-	// a resend just past this limit can be told the owner may have died while
-	// it is still finishing; every other one gets 30 s. The
-	// owner died (OOM, SIGKILL, node loss) or panicked (Recoverer is mounted
-	// outside this middleware) between reserving and finalizing. Without
-	// this limit, the row would sit at status 0 for its 24 h TTL, and every
-	// retry on any replica would poll 5 s and be told "please retry" (S2 in
-	// docs/dev/records/ha-readiness-2026-07-06.md). Whether the side effect
-	// committed is unknown: the handler's transaction may have committed
-	// before the kill. So the reservation is never released for a second
-	// run, and the client is told the truth and how to find out.
+	// whose work runs on its own 5-minute budget past the request timeout.
+	// Every other handler gets 30 s. So a retry just past this limit may be
+	// told the owner died while a refund is still finishing.
+	//
+	// Past the limit, a retry is told that the outcome is unknown and how
+	// to find out (conflict_idempotency_unresolved). The reservation is
+	// never released for a second run, because the handler's transaction
+	// may have committed before the owner died.
 	idempotencyOrphanAfter = 5 * time.Minute
 )
 
@@ -65,12 +68,17 @@ const (
 // PATCH requests that carry an Idempotency-Key header. When a request with
 // the same key was processed before, it returns the cached response.
 //
-// The rules match Stripe's:
-//   - Same key, same method, path and body: replay the cached response, with
-//     the header Idempotent-Replayed: true.
-//   - Same key, different method, path or body: 422 idempotency_error. This
-//     catches a client bug that reuses a key across operations, such as a
-//     retry of POST /invoices with a changed amount under the old key.
+// The rules, where the caller is the API key, or the dashboard user, that
+// made the request:
+//   - Same key, same caller, method, path, query string and body: replay
+//     the cached response, with the header Idempotent-Replayed: true. While
+//     the first request still runs, wait for its answer.
+//   - Same key, any of those different: 422 idempotency_error at once,
+//     whether the first request has finished or not. This catches a client
+//     bug that reuses a key across operations, such as a retry of
+//     POST /invoices with a changed amount under the old key. It also keeps
+//     a stored answer, and the state of a running request, from reaching
+//     another caller of the account.
 //
 // ignore names the requests that skip this middleware, and nil means none.
 // It names the usage routes, whose dedup rule is the idempotency_key each
@@ -101,6 +109,22 @@ func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Han
 				return
 			}
 
+			// The caller is part of the fingerprint, so a stored answer is
+			// returned only to the caller that made the request. That
+			// matters because this middleware runs before each route's
+			// permission check: a replay does not pass that check again.
+			// Authentication runs first and puts exactly one caller on the
+			// context. A request without one means the router is wired
+			// wrong, so it is refused rather than fingerprinted with no
+			// caller.
+			caller, ok := requestCaller(r.Context())
+			if !ok {
+				slog.ErrorContext(r.Context(), "idempotency: no caller on the request context; authentication must run before this middleware",
+					"tenant_id", tenantID, "path", r.URL.Path)
+				respond.InternalError(w, r)
+				return
+			}
+
 			// Capture livemode from the request ctx, so the cache write
 			// after the response carries the same mode. That write runs on
 			// context.Background, not r.Context, so it survives a client
@@ -123,9 +147,9 @@ func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Han
 			}
 			_ = r.Body.Close()
 			if len(bodyBytes) > maxIdempotentBodyBytes {
-				// The body is over the hash cap. Hash the method, the path
-				// and the first maxIdempotentBodyBytes of the body instead
-				// of refusing, so large requests still work. The
+				// The body is over the hash cap. Hash only its first
+				// maxIdempotentBodyBytes instead of refusing, so large
+				// requests still work. The
 				// fingerprint is weaker, because two bodies with the same
 				// first 1 MiB match. Such requests are rare, so that is
 				// acceptable.
@@ -133,7 +157,7 @@ func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Han
 			}
 			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
-			fingerprint := fingerprintRequest(r.Method, r.URL.Path, bodyBytes)
+			fingerprint := fingerprintRequest(r.Method, r.URL.RequestURI(), caller, bodyBytes)
 
 			// Reserve the key before running the handler. reserveKey's one
 			// conditional INSERT ... ON CONFLICT DO UPDATE, which resets only
@@ -228,17 +252,38 @@ func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Han
 	}
 }
 
-// fingerprintRequest returns a stable hash of the request's identifying
-// parameters. Method+path keeps a key bound to a single endpoint; body keeps
-// the same endpoint bound to the same payload.
-func fingerprintRequest(method, path string, body []byte) []byte {
+// fingerprintRequest returns a stable hash of what makes two requests the
+// same request: the method, the path with its query string (uri), the caller
+// (requestCaller) and the body. A retry whose hash differs from the stored
+// one reused the key for another request and gets 422 idempotency_error.
+// A zero byte separates the parts, so moving a byte across a boundary
+// changes the hash: uri "/v1/a" with caller "bc" is not uri "/v1/ab" with
+// caller "c".
+func fingerprintRequest(method, uri, caller string, body []byte) []byte {
 	h := sha256.New()
 	h.Write([]byte(method))
 	h.Write([]byte{0})
-	h.Write([]byte(path))
+	h.Write([]byte(uri))
+	h.Write([]byte{0})
+	h.Write([]byte(caller))
 	h.Write([]byte{0})
 	h.Write(body)
 	return h.Sum(nil)
+}
+
+// requestCaller names who is calling, from what authentication put on ctx:
+// the API key's id, or the dashboard user's id for a session. It is the user
+// and not the session, so a person who signs in again and retries is the
+// same caller. ok is false unless exactly one of the two is set.
+func requestCaller(ctx context.Context) (caller string, ok bool) {
+	keyID, userID := auth.KeyID(ctx), auth.UserID(ctx)
+	switch {
+	case keyID != "" && userID == "":
+		return "key:" + keyID, true
+	case userID != "" && keyID == "":
+		return "user:" + userID, true
+	}
+	return "", false
 }
 
 type cachedResponse struct {
@@ -416,9 +461,9 @@ func readKey(ctx context.Context, db *postgres.DB, tenantID, key string) (c cach
 }
 
 // replayExistingKey resolves a request that lost the reserve race. It
-// enforces the fingerprint rule (422 on a parameter mismatch), replays the
-// stored response once the owner finalizes, and polls briefly while the owner
-// is still in flight. If the owner does not finalize within the poll window,
+// answers 422 at once when the row's fingerprint is not this request's,
+// replays the stored response once the owner finalizes, and polls briefly
+// while the owner is still in flight. If the owner does not finalize within the poll window,
 // because it died or the operation is too slow to block on, it returns 409
 // conflict_idempotency, which tells the client to retry.
 func replayExistingKey(w http.ResponseWriter, r *http.Request, db *postgres.DB, tenantID, key string, fingerprint []byte) {
@@ -434,15 +479,19 @@ func replayExistingKey(w http.ResponseWriter, r *http.Request, db *postgres.DB, 
 				"A request with this idempotency key is being processed. Please retry.")
 			return
 		}
+		// A row whose fingerprint is not this request's belongs to another
+		// caller or another request: answer 422 before anything else. The
+		// reservation stores the fingerprint, so this holds while the first
+		// request still runs too, and another caller never waits on it or
+		// learns how it ended. A row with no fingerprint matches nothing: it
+		// cannot be shown to be this caller's, and the comparison is false
+		// for it, since a request's fingerprint is never empty.
+		if found && subtle.ConstantTimeCompare(c.Fingerprint, fingerprint) != 1 {
+			idempotencyError(w, r, http.StatusUnprocessableEntity, "idempotency_error",
+				"This Idempotency-Key was first used by another caller or with a different request. Use a new key for a new request.")
+			return
+		}
 		if found && !pending {
-			// A fingerprint mismatch means the key was reused with other
-			// parameters. Stripe returns 422 idempotency_error here.
-			if len(c.Fingerprint) > 0 &&
-				subtle.ConstantTimeCompare(c.Fingerprint, fingerprint) != 1 {
-				idempotencyError(w, r, http.StatusUnprocessableEntity, "idempotency_error",
-					"Keys for idempotent requests can only be used with the same parameters they were first used with.")
-				return
-			}
 			// A replay runs no handler and makes no mutation. It hands back
 			// the first request's response, and that request wrote the audit
 			// row. Mark this request accounted for, so the audit-coverage

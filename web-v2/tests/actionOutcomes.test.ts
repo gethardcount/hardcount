@@ -244,7 +244,7 @@ test('Issue credit note: a refusal is a known failure in the server sentence, an
 })
 
 test('Issue credit note: other values under a kept key are refused, and the sentence says why in plain words', () => {
-  const err = apiError('Keys for idempotent requests can only be used with the same parameters they were first used with.', 422, 'idempotency_error')
+  const err = apiError('This Idempotency-Key was first used by another caller or with a different request. Use a new key for a new request.', 422, 'idempotency_error')
   assert.deepEqual(issueCreditFailure(err, true), { unknown: false, settles: true, message: ISSUE_CREDIT_VALUES_DIFFER })
   assert.doesNotMatch(ISSUE_CREDIT_VALUES_DIFFER, /idempotent|parameters/i)
 })
