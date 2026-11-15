@@ -7,11 +7,21 @@ first. Every shipped change, with its date, is in the
 
 ## Now
 
-The items planned right after v0.9.0 have shipped ([Shipped recently](#shipped-recently)). What comes next is below.
+Making the billing path simpler to read and harder to get wrong, one part at
+a time. A part is finished when each thing is done one way, nothing falls
+back silently, and what nobody uses is gone.
+
+- **Done:** API keys.
+- **In progress:** test clocks. A request's time is decided once, and an
+  advance finishes its work or fails and says what is left.
+- **After that:** the path of a request, signing in, then subscriptions,
+  invoices, payments and dunning.
+
+The items under [Next](#next) follow this work.
 
 ## Next
 
-**v0.10.0**, planned after v0.9.0:
+**v0.10.0**, planned after the work under [Now](#now):
 
 - **Spend alerts.** An alert level on each subscription, checked
   against usage as it arrives, with an optional repeat. It is not the
