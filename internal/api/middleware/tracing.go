@@ -29,13 +29,14 @@ func Tracing() func(http.Handler) http.Handler {
 }
 
 // TraceRequestAttrs corrects the request span before it ends. otelhttp sets
-// url.path to the raw path, which on the public pages carries a capability
+// url.path to the raw path, which on the public pages carries a link
 // token, and client.address to the left-most X-Forwarded-For entry, which
 // any client can write. After the handler returns, this sets:
 //
 //   - the span name to "{method} {route}" (method alone when nothing routed),
 //   - http.route to chi's route pattern,
-//   - url.path to path(r), which must leave no token in the path,
+//   - url.path to path(r). path(r) must return a path that holds no link
+//     token.
 //   - client.address to audit.ExtractClientIP, the trusted client IP.
 //
 // Mount it after Tracing and TrustedClientIP and before anything that can

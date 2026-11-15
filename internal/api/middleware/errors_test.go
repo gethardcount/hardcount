@@ -19,9 +19,12 @@ func errorCode(t *testing.T, rec *httptest.ResponseRecorder) string {
 	return body.Error.Code
 }
 
+// rawPath is the path function for tests whose paths hold no secret.
+func rawPath(r *http.Request) string { return r.URL.Path }
+
 // A panic answers the JSON 500, not chi's empty one.
 func TestRecoverer_PanicAnswersTheEnvelope(t *testing.T) {
-	h := Recoverer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("boom") }))
+	h := Recoverer(rawPath)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("boom") }))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	if rec.Code != http.StatusInternalServerError || errorCode(t, rec) != "internal_error" {
@@ -31,7 +34,7 @@ func TestRecoverer_PanicAnswersTheEnvelope(t *testing.T) {
 
 // A panic after the handler started its answer leaves that answer alone.
 func TestRecoverer_PanicAfterWriteKeepsTheAnswer(t *testing.T) {
-	h := Recoverer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	h := Recoverer(rawPath)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"id":"x"}`))
 		panic("late")
@@ -45,7 +48,7 @@ func TestRecoverer_PanicAfterWriteKeepsTheAnswer(t *testing.T) {
 
 // net/http's abort sentinel is passed on, not turned into a 500.
 func TestRecoverer_RepanicsAbortHandler(t *testing.T) {
-	h := Recoverer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic(http.ErrAbortHandler) }))
+	h := Recoverer(rawPath)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic(http.ErrAbortHandler) }))
 	defer func() {
 		if r := recover(); r != http.ErrAbortHandler { //nolint:errorlint // the sentinel itself
 			t.Errorf("recovered %v, want http.ErrAbortHandler re-panicked", r)

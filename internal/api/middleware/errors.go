@@ -17,27 +17,34 @@ import (
 // error answers (respond.InternalError), and logs the panic with its stack.
 // It replaces chi's Recoverer, which answered an empty 500.
 //
+// The log line's path is path(r), never the raw path, because some public
+// links carry a link token in the path that works like a password.
+// path(r) must return a path that holds no link token. The router passes
+// loggablePath, the function it also gives TraceRequestAttrs.
+//
 // http.ErrAbortHandler is re-panicked, as net/http expects: it aborts the
 // response on purpose. A panic after the handler has started its answer
 // cannot change that answer, but the log still records the panic.
-func Recoverer(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
-		defer func() {
-			rvr := recover()
-			if rvr == nil {
-				return
-			}
-			if rvr == http.ErrAbortHandler { //nolint:errorlint // net/http compares the sentinel itself
-				panic(rvr)
-			}
-			slog.ErrorContext(r.Context(), "handler panic", "panic", rvr, "method", r.Method, "path", r.URL.Path, "stack", string(debug.Stack()))
-			if ww.Status() == 0 && r.Header.Get("Connection") != "Upgrade" {
-				respond.InternalError(w, r)
-			}
-		}()
-		next.ServeHTTP(ww, r)
-	})
+func Recoverer(path func(*http.Request) string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
+			defer func() {
+				rvr := recover()
+				if rvr == nil {
+					return
+				}
+				if rvr == http.ErrAbortHandler { //nolint:errorlint // net/http compares the sentinel itself
+					panic(rvr)
+				}
+				slog.ErrorContext(r.Context(), "handler panic", "panic", rvr, "method", r.Method, "path", path(r), "stack", string(debug.Stack()))
+				if ww.Status() == 0 && r.Header.Get("Connection") != "Upgrade" {
+					respond.InternalError(w, r)
+				}
+			}()
+			next.ServeHTTP(ww, r)
+		})
+	}
 }
 
 // Timeout ends the request's context after d. A handler that has written

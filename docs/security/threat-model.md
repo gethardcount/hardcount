@@ -23,7 +23,7 @@ This page is for whoever evaluates or runs Hardcount. It says what Hardcount pro
 | Password guessing | A rate limit per address on sign-in; repeated wrong passwords slow down; bcrypt; common leaked passwords refused | [`throttle.go`](../../internal/user/throttle.go), [Who can sign in](../production-one-vm.md#who-can-sign-in-to-the-dashboard) | Partial: no two-factor sign-in |
 | A webhook URL aimed at your own network | Only `https://`, except `localhost` outside production; private, link-local and cloud metadata addresses refused everywhere, loopback refused in production; checked when the endpoint is saved and on every connection | [`internal/webhook/service.go`](../../internal/webhook/service.go) | In place |
 | A forged Hardcount webhook at your receiver | Each event signed with HMAC-SHA256 and a timestamp | [`internal/webhook/service.go`](../../internal/webhook/service.go), [Receive webhooks](../guides/receive-webhooks.md) | In place |
-| A link token leaked through logs | Tokens removed from the access log, traces and the Compose stack's nginx log | [`internal/api/router.go`](../../internal/api/router.go) | In place |
+| A link token leaked through logs | Tokens removed from the access log, the panic log, traces and the Compose stack's nginx log | [`internal/api/router.go`](../../internal/api/router.go) | In place |
 
 ## Your job as the operator
 
