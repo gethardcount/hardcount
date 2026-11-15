@@ -30,8 +30,8 @@ func (r *shRig) timePasses(invoiceID string, d time.Duration) {
 
 // A confirm whose answer never arrived on a test-clock invoice whose clock is
 // ahead of real time (the ordinary use of a test clock: advance a month).
-// The charge runs with the clock bound on ctx (Collect binds it with
-// bindForInvoice, catch-up with WithSim), so StampPendingConfirm writes
+// The charge runs on the invoice's clock (the API's door decides Collect
+// from the invoice, the catch-up runs on its clock), so StampPendingConfirm writes
 // updated_at = the simulated instant. The unknown sweep's cool-off compares
 // updated_at with the real clock, so the invoice is not listed until real
 // time reaches the simulated instant: it stays unknown, refusing every

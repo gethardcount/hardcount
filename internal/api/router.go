@@ -927,14 +927,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	creditSvc.SetLiveBalanceReader(engine)
 	costDashboardSvc.SetLiveBalanceReader(engine)
 	costDashboardSvc.SetResolver(engine)
-	// Dunning resolves "now" through the engine. Every per-invoice time it
-	// writes (next_action_at, last_attempt_at, resolved_at, created_at) then
-	// uses the clock that the catch-up query reads: frozen_time for a
-	// clock-pinned run, the wall clock otherwise. Without it, a clock-pinned
-	// run's times land in wall-clock 2026, and the catch-up window, which
-	// compares against the frozen_time the operator advances through, never
-	// reaches the run (ADR-029).
-	dunningSvc.SetResolver(engine)
 	// The payment reconciler is the scheduled fallback that resolves invoices
 	// stuck in PaymentUnknown by polling Stripe for the real outcome. Without
 	// the resolver, paid_at on a clock-pinned invoice would be wall-clock

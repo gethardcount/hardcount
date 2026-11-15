@@ -221,26 +221,23 @@ type Service struct {
 	emailNotifier    EmailNotifier
 	customerEmail    CustomerEmailFetcher
 	custPolicy       CustomerPolicyReader
-	resolver         clock.Resolver
-	clock            clock.Clock
-}
-
-// SetResolver wires the unified clock.Resolver. Once bound on ctx via
-// clock.BindEffectiveNow at the entry point of any per-invoice
-// dunning operation, every downstream s.clock.Now(ctx) reads
-// frozen_time on clock-pinned invoices. Optional: nil leaves binding
-// off and every callsite reads wall-clock.
-func (s *Service) SetResolver(r clock.Resolver) {
-	s.resolver = r
-}
-
-// bindForInvoice binds effective-now from an invoice id at every
-// dunning state-machine entry point (StartDunning, processRun,
-// exhaustRun, ResolveByInvoice). Returns ctx unchanged on
-// resolver error or no resolver — wall-clock fallback.
-func (s *Service) bindForInvoice(ctx context.Context, tenantID, invoiceID string) context.Context {
-	bound, _ := clock.BindEffectiveNow(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
-	return bound
+	// clock is the server's clock: the router's clk, the one the engine
+	// bills by. Every dunning action runs on a time that was decided before
+	// it reaches the service: on a test clock, or at real time (see the
+	// clock package's doc). Who decides it:
+	//   - a failed payment starts a run on the time of the payment's settle;
+	//   - an invoice finalized with no card starts one on the finalize's time;
+	//   - the scheduled job retries due runs at real time (its list excludes
+	//     invoices on a test clock), and a test clock's catch-up retries its
+	//     own on that clock;
+	//   - an invoice action that closes the run (a void, a write-off, a
+	//     payment, a credit note) runs on that action's time, which the API's
+	//     door (api.clockDoor) decides for a request.
+	// Each entry point keeps that time and, when it carries no instant (real
+	// time), reads this clock once (clock.EnsureEffectiveNow). Without that
+	// read, two reads of the time in one action could differ, and a store's
+	// stamp could fall on another time than the action's.
+	clock clock.Clock
 }
 
 func NewService(store Store, retrier PaymentRetrier, clk clock.Clock) *Service {
@@ -435,7 +432,7 @@ func (s *Service) StartDunning(ctx context.Context, tenantID string, invoiceID, 
 		return domain.InvoiceDunningRun{}, fmt.Errorf("dunning policy %s has no retries", policy.ID)
 	}
 
-	ctx = s.bindForInvoice(ctx, tenantID, invoiceID)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	failureAt := s.clock.Now(ctx)
 	if _, simulated := clock.SimOf(ctx); simulated && !simFailedAt.IsZero() && simFailedAt.Before(failureAt) {
 		failureAt = simFailedAt
@@ -796,14 +793,12 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 		return nil // Skip paused runs
 	}
 
-	ctx, _ = clock.BindEffectiveNow(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: run.InvoiceID})
-	// Simulated means a test clock is bound, not merely that the resolver
-	// bound an instant: BindEffectiveNow reports true for a wall-clock invoice
-	// too (the engine resolves it to a clock-less Sim at now). Keying on that
-	// bool made every production run look simulated, so anchorInstant's
-	// downtime clamp never ran and a late retry left every later retry in the
-	// past, fired one per tick (found walking FLOW I10, 2026-10-11: VLX-000081
-	// retried "Oct 4" then "Oct 7" on consecutive ticks on Oct 11).
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
+	// Simulated means a test clock is decided, not merely that an instant is
+	// bound: EnsureEffectiveNow binds one at real time too. Keyed on a bound
+	// instant, every production run would look simulated, anchorInstant's
+	// downtime clamp would never run, and a late retry would leave every later
+	// retry in the past, fired one per tick.
 	_, simulated := clock.SimOf(ctx)
 
 	// Retries exhausted on entry: an exhaustion that was interrupted after the
@@ -845,13 +840,13 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	// Everything downstream of this retry — the charge (which stamps the
 	// anchor into PI metadata for the webhook settle), credit applies,
 	// the inline settle's paid_at — inherits the CONTRACTED instant
-	// instead of the catchup's advance-end frozen_time. Wall-clock runs
-	// carry no Sim binding and are untouched.
+	// instead of the catchup's advance-end frozen_time. A run at real time
+	// is on no test clock and keeps the instant processRun bound.
 	if sim, ok := clock.SimOf(ctx); ok {
 		ctx = clock.WithSim(ctx, clock.Sim{At: now, TestClockID: sim.TestClockID})
 	}
 
-	// Record the attempt BEFORE the charge (record-before-effect): a resolver that
+	// Record the attempt BEFORE the charge (record-before-effect): a settle that
 	// fires synchronously inside RetryPayment — a card success that settles this
 	// invoice — re-reads the run from the store, so it must see the FULL
 	// attempt_count; and a crash mid-charge then cannot lose the attempt (we won't
@@ -1302,9 +1297,10 @@ func (s *Service) retrySettledFirst(ctx context.Context, tenantID string, run do
 // attemptAt is when this exhaustion is actually being attempted; an
 // action_failed re-attempt is scheduled from it, so the cadence never
 // collapses after an outage. Inline after the final retry, both are
-// that retry's instant.
+// that retry's instant. A caller must pass a ctx with the action's time
+// bound (processRun does).
 func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, policy domain.DunningPolicy, stampAt, attemptAt time.Time, onClock bool) error {
-	ctx = s.bindForInvoice(ctx, tenantID, run.InvoiceID)
+	// Its caller, processRun, decided the time and bound an instant.
 	now := stampAt
 	if now.IsZero() {
 		now = s.clock.Now(ctx)
@@ -1990,10 +1986,10 @@ func (s *Service) applyInvoiceAction(ctx context.Context, tenantID, invoiceID st
 // resolveRunNow transitions an already-loaded run to resolved with the given
 // resolution: stamps state/resolution/resolved_at, clears next_action_at,
 // persists (the store queues EventDunningResolved in that transaction), and
-// writes the DunningEventResolved row. Binds
-// the clock to the invoice so resolved_at lands in simulated time on clock-pinned
-// invoices. Shared by ResolveByInvoice, the processRun success branch, and the
-// processRun paid-pre-check so the transition is identical across all of them.
+// writes the DunningEventResolved row, on its caller's time (see
+// Service.clock). Shared by ResolveByInvoice, the processRun success branch,
+// and the processRun paid-pre-check so the transition is identical across all
+// of them.
 func (s *Service) resolveRunNow(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, resolution domain.DunningResolution, eventReason string) (domain.InvoiceDunningRun, error) {
 	return s.resolveRunAt(ctx, tenantID, run, resolution, eventReason, nil, false)
 }
@@ -2005,15 +2001,15 @@ func (s *Service) resolveListedRun(ctx context.Context, tenantID string, run dom
 	return s.resolveRunAt(ctx, tenantID, run, resolution, eventReason, at, true)
 }
 
-// resolveRunAt is resolveRunNow with an explicit resolve instant. at nil
-// derives the clock (settle/operator paths — their contract IS "now");
-// the retry-success path passes its anchored contracted instant
-// (run.NextActionAt at fire time) so resolved_at and the resolved
-// timeline row land on the retry that recovered the invoice, not on
-// wherever the clock advance happened to end (ADR-030 contracted-instant
-// rule; same split as trial flips, scheduled cancels, pause resumes).
+// resolveRunAt is resolveRunNow with an explicit resolve instant. With at
+// nil the resolve is at the action's time (see Service.clock): a settle's or
+// an invoice action's. The retry-success path passes the instant the retry
+// was scheduled for (run.NextActionAt when it fired), so resolved_at and the
+// resolved timeline row land on the retry that recovered the invoice, not on
+// wherever a test clock's advance happened to end (the same split as trial
+// flips, scheduled cancels and pause resumes).
 func (s *Service) resolveRunAt(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, resolution domain.DunningResolution, eventReason string, at *time.Time, fromActiveOnly bool) (domain.InvoiceDunningRun, error) {
-	ctx = s.bindForInvoice(ctx, tenantID, run.InvoiceID)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	now := s.clock.Now(ctx)
 	if at != nil {
 		now = *at

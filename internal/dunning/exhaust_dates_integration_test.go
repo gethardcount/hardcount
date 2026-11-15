@@ -191,7 +191,6 @@ func TestExhaust_TestClock_FinalActionsDatedAtTheEscalation(t *testing.T) {
 			retrier := &declinedRetry{invoices: invoices}
 			runs := dunning.NewPostgresStore(db)
 			svc := dunning.NewService(runs, retrier, nil)
-			svc.SetResolver(resolver)
 			policy, err := svc.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
 				Name: "two retries", Enabled: true, RetryDays: []int{3, 3},
 				FinalSubscriptionAction: tc.sub, FinalInvoiceAction: domain.InvActionMarkUncollectible,

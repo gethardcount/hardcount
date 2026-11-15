@@ -189,9 +189,7 @@ func runScheduleCase(t *testing.T, tc scheduleCase, arm string) {
 	retrier := &declinedRetry{invoices: invoices}
 	svc := dunning.NewService(runs, retrier, wall)
 	svcClock := clock.Clock(clock.Real())
-	if onClock {
-		svc.SetResolver(resolver)
-	} else {
+	if !onClock {
 		svcClock = wall
 	}
 	subSvc := subscription.NewService(subStore, svcClock)
