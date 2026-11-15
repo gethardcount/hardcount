@@ -14,6 +14,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
 // ---- In-memory fakes ----
@@ -23,6 +24,7 @@ import (
 type fakeInvoices struct {
 	byToken   map[string]domain.Invoice // token → invoice
 	lineItems map[string][]domain.InvoiceLineItem
+	live      bool // the livemode GetByPublicToken answers
 }
 
 func newFakeInvoices() *fakeInvoices {
@@ -37,7 +39,7 @@ func (f *fakeInvoices) GetByPublicToken(_ context.Context, token string) (domain
 	if !ok {
 		return domain.Invoice{}, false, errs.ErrNotFound
 	}
-	return inv, false, nil
+	return inv, f.live, nil
 }
 
 func (f *fakeInvoices) GetWithLineItems(_ context.Context, tenantID, id string) (domain.Invoice, []domain.InvoiceLineItem, error) {
@@ -106,9 +108,14 @@ type fakeCheckout struct {
 	lastTenant  string
 	err         error
 	url         string
+	// decision is the time decided on the ctx the checkout was opened with,
+	// and decided whether there was one.
+	decision clock.Sim
+	decided  bool
 }
 
-func (f *fakeCheckout) CreateInvoicePaymentSession(_ context.Context, tenantID string, inv domain.Invoice, successURL, cancelURL string) (string, error) {
+func (f *fakeCheckout) CreateInvoicePaymentSession(ctx context.Context, tenantID string, inv domain.Invoice, successURL, cancelURL string) (string, error) {
+	f.decision, f.decided = clock.Decision(ctx)
 	f.lastInvoice = inv
 	f.lastSuccess = successURL
 	f.lastCancel = cancelURL

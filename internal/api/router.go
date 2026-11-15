@@ -950,6 +950,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// time, disagreeing with issued_at, due_at and billing_period on the same
 	// row (ADR-030).
 	paymentReconciler.SetResolver(engine)
+	hostedInvoiceH.SetResolver(engine)
 	// The Stripe webhook handlers (handlePaymentSucceeded,
 	// handlePaymentFailed) run asynchronously, with no clock bound on their
 	// ctx. The resolver puts every write a webhook drives (paid_at, the
