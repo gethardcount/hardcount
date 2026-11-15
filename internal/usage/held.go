@@ -15,7 +15,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
 // Held usage (#1044, ADR-122).
@@ -222,17 +221,17 @@ func (s *Service) Release(ctx context.Context, tenantID string, in ReleaseInput)
 	if err != nil {
 		return ReleaseResult{}, err
 	}
-	sim, err := s.simNow(ctx, tenantID, in.CustomerID)
+	decided, err := s.decide(ctx, tenantID, in.CustomerID)
 	if err != nil {
 		return ReleaseResult{}, err
 	}
-	auditEmit := s.releaseEmission(clock.WithSim(ctx, sim), in)
+	auditEmit := s.releaseEmission(decided, in)
 	var buckets map[string]MeterBuckets
 	res, err := s.held.ReleaseHeld(ctx, tenantID, ReleaseHeldInput{
 		ExternalCustomerID: in.ExternalCustomerID,
 		CustomerID:         in.CustomerID,
 		MeterIDs:           in.MeterIDs,
-		NotAfter:           sim.At,
+		NotAfter:           s.clock.Now(decided),
 	}, func(tx *sql.Tx, res ReleaseHeldResult) error {
 		b, err := s.releaseBuckets(ctx, tx, in, periods, res)
 		if err != nil {

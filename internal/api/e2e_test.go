@@ -125,7 +125,10 @@ func TestE2E_FullBillingCycle(t *testing.T) {
 		}
 	})
 
-	// 7. Ingest usage events WITH timestamps inside the billing period
+	// 7. Ingest usage events WITH timestamps inside the billing period. They
+	// are reported after they happen: the server's clock, which ingest
+	// checks timestamps against, reads March 16.
+	clk.Set(time.Date(2026, 3, 16, 0, 0, 0, 0, time.UTC))
 	t.Run("ingest usage", func(t *testing.T) {
 		for i := 0; i < 3; i++ {
 			resp := doPost(t, ts, "/v1/usage-events", auth, map[string]any{

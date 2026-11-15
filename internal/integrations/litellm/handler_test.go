@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/usage"
 )
 
@@ -127,6 +129,26 @@ func TestSpend_StoreUnavailableIs503(t *testing.T) {
 	}
 	if ing.calls != 1 {
 		t.Fatalf("fail-fast: ingester called %d times for a 2-payload batch, want 1", ing.calls)
+	}
+}
+
+// A call whose customer's test clock cannot be read refuses the batch as
+// what it is (503 test_clock_unavailable), so LiteLLM retries it; nothing
+// after that call is attempted, and the cause never reaches the body.
+func TestSpend_AnUnreadableTestClockIs503(t *testing.T) {
+	unreadable := errs.Unavailable("test_clock_unavailable", "The customer's test clock could not be read.",
+		fmt.Errorf("%w: %w", clock.ErrUndecided, errInfra))
+	ing := &fakeIngester{errs: []error{unreadable, nil}}
+	h := New(fakeCustomers{}, fakeMeters{}, ing, &fakeHolder{})
+	code, body := postSpend(t, h, spendPayload("a"), spendPayload("b"))
+	if code != http.StatusServiceUnavailable || !strings.Contains(body, "test_clock_unavailable") || strings.Contains(body, "ingest_unavailable") {
+		t.Fatalf("status %d, body %s; want 503 test_clock_unavailable", code, body)
+	}
+	if strings.Contains(body, "5432") {
+		t.Fatalf("cause leaked to the caller: %s", body)
+	}
+	if ing.calls != 1 {
+		t.Fatalf("ingester called %d times for a 2-payload batch, want 1", ing.calls)
 	}
 }
 

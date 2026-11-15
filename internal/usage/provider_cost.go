@@ -349,12 +349,11 @@ func NewMarginAssembler(store *PostgresStore, usageSvc *CustomerUsageService) *M
 	return &MarginAssembler{store: store, usageSvc: usageSvc}
 }
 
-// effectiveNow is the customer's current time for the default margin
-// window: the usage Service's effectiveNow (test-clock frozen_time when
-// the customer is pinned, wall-clock otherwise).
+// effectiveNow is the customer's now for the default margin window, as
+// customer usage reads it (CustomerUsageService.customerNow).
 func (a *MarginAssembler) effectiveNow(ctx context.Context, tenantID, customerID string) (time.Time, error) {
 	if a != nil && a.usageSvc != nil && a.usageSvc.usage != nil {
-		return a.usageSvc.usage.effectiveNow(ctx, tenantID, customerID)
+		return a.usageSvc.customerNow(ctx, tenantID, customerID)
 	}
 	return time.Now().UTC(), nil
 }
@@ -664,6 +663,11 @@ func (h *ProviderCostHandler) Margin(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	customerID := chi.URLParam(r, "id")
 	from, to, err := h.marginWindow(r, tenantID, customerID)
+	if errors.Is(err, errs.ErrUnavailable) {
+		// The customer's test clock could not be read: refused for retry.
+		respond.FromError(w, r, err, "customer")
+		return
+	}
 	if err != nil {
 		respond.BadRequest(w, r, err.Error())
 		return

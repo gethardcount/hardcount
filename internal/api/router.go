@@ -931,6 +931,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	customerUsageSvc.SetRater(engine)
 	creditSvc.SetLiveBalanceReader(engine)
 	costDashboardSvc.SetLiveBalanceReader(engine)
+	costDashboardSvc.SetResolver(engine)
 	// Dunning resolves "now" through the engine. Every per-invoice time it
 	// writes (next_action_at, last_attempt_at, resolved_at, created_at) then
 	// uses the clock that the catch-up query reads: frozen_time for a
@@ -970,6 +971,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// through here: live POST, batch, backfill and LiteLLM. Live mode never
 	// pays for the lookup, because a DB CHECK keeps test clocks in test mode.
 	usageSvc.SetResolver(engine)
+	usageSvc.SetClock(clk)
 	// Ingest reads the customer's open periods before it writes an event. It
 	// flags an event whose period was already invoiced (billing_status
 	// "after_close", ADR-120). The held-usage release reads them too, to say

@@ -2,6 +2,7 @@ package usage
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"strings"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/subscription"
 )
 
@@ -186,6 +188,18 @@ type CustomerUsageBucket struct {
 	PerMeter    map[string]decimal.Decimal `json:"per_meter"`
 }
 
+// customerNow is the customer's now for a read whose window defaults to it
+// (customer usage, margin). A test clock that cannot be read refuses the
+// read (503); a read changes nothing, so the message only says to retry.
+func (s *CustomerUsageService) customerNow(ctx context.Context, tenantID, customerID string) (time.Time, error) {
+	t, err := s.usage.effectiveNow(ctx, tenantID, customerID)
+	if errors.Is(err, clock.ErrUndecided) {
+		return time.Time{}, errs.Unavailable("test_clock_unavailable",
+			"The customer's test clock could not be read. Try again in a moment.", err)
+	}
+	return t, err
+}
+
 // Get composes the customer-usage view (ADR-130 §10). Order:
 //  1. Customer existence (RLS makes cross-tenant IDs return ErrNotFound).
 //  2. Active+trialing subscriptions for the customer.
@@ -225,7 +239,7 @@ func (s *CustomerUsageService) Get(ctx context.Context, tenantID, customerID str
 	activeSubs := filterActiveSubs(subs)
 
 	from, to, source, err := resolvePeriod(period, activeSubs, func() (time.Time, error) {
-		return s.usage.effectiveNow(ctx, tenantID, customerID)
+		return s.customerNow(ctx, tenantID, customerID)
 	})
 	if err != nil {
 		return CustomerUsageResult{}, err
