@@ -86,7 +86,7 @@ type Reconciler struct {
 	// async methods (which legitimately sit in processing for days) aren't
 	// hammered every tick. Defaults to 30m (ADR-049 Phase 2).
 	olderThanProcessing time.Duration
-	now                 func() time.Time // injectable for tests
+	now                 func() time.Time // the cutoffs for stale rows only (when a row counts as stale); no settle writes it
 	breaker             *breaker.Breaker // optional; skip reconcile ticks when breaker is open
 	// settler routes recovered terminals through the shared settlement
 	// primitive so they fire the full side-effects (dunning/event/email).
@@ -357,11 +357,12 @@ func (r *Reconciler) reconcileOne(ctx context.Context, inv domain.Invoice) (bool
 		// and its webhook records it first. One refunded at Stripe since is
 		// still a payment: the refund is recorded by its own webhook as a
 		// refund made in Stripe (ADR-134).
-		// Carry the charge's contracted instant into the settle, exactly as the
-		// inline and webhook paths do. Without it SettleSucceeded falls back to
-		// the invoice pin, which resolves the clock's CURRENT frozen_time — so a
-		// recovery running after an advance stamped paid_at on the advance
-		// target instead of the instant the charge fired. This path recovers
+		// Carry the charge's anchor (the instant the charge was made at) into
+		// the settle, exactly as the inline and webhook paths do. Without it
+		// SettleSucceeded uses the row's decided time, the clock's current
+		// frozen time, so a recovery running after a wide advance would stamp
+		// paid_at at the advance's target instead of the instant the charge
+		// was made at. This path recovers
 		// dropped webhooks, so it must reproduce what the dropped webhook would
 		// have written, not a fresher answer.
 		settleCtx := ctx

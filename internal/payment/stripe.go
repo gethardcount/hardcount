@@ -125,7 +125,7 @@ type Stripe struct {
 	disputes           DisputeRecorder            // optional; records charge.dispute.* against the invoice (#979)
 	externalRefunds    ExternalRefundRecorder     // optional; records refunds made in Stripe outside Hardcount (ADR-134)
 	resolver           clock.Resolver             // optional; an event decides its time with it (decideFor)
-	clock              clock.Clock                // the server's clock: real time, for a settle with no instant decided
+	clock              clock.Clock                // ctx carries the decided time; a settle reads real time here, the server's clock, when ctx carries none
 	anomalies          PaymentAnomalyRecorder     // required; writes the anomaly marker (ADR-068) and queues its webhook event (MustHaveAnomalyRecorder)
 	checkoutSessions   *CheckoutSessionStore      // optional; claim-ledger truth-sync + settle-time expire (ADR-068)
 	sessionClients     *StripeClients             // optional; raw mode-keyed clients for session expire calls
@@ -266,12 +266,12 @@ type PaymentIntentResult struct {
 	// the webhook-drop backstop path (the settle skips the truth-check
 	// when capturedCents == 0).
 	AmountReceivedCents int64
-	// AnchorAt is the charge's CONTRACTED simulated instant, read back from
-	// the PI's hardcount_anchor_at metadata. It exists for the same reason the
-	// webhook path reads that key: SettleSucceeded's invoice-pin binding
-	// resolves the clock's CURRENT frozen_time, so a settle that lands after
-	// an advance stamps paid_at on the advance target rather than the instant
-	// the charge actually fired.
+	// AnchorAt is the charge's anchor (the instant the charge was made at on
+	// its clock), read back from the PI's hardcount_anchor_at metadata. It
+	// exists for the same reason the webhook path reads that key: a settle's
+	// decided time is the clock's current frozen time, so a settle that lands
+	// after a wide advance would stamp paid_at at the advance's target rather
+	// than the instant the charge was made at.
 	//
 	// The reconciler is the THIRD settle path and was the only one without
 	// it — which is backwards, because it runs precisely when the webhook

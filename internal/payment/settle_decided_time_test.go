@@ -8,6 +8,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/scheduler"
 )
 
 // decidedAt is an instant on clock clk_e before its frozen time, eventFrozen:
@@ -74,11 +75,33 @@ func TestSettle_RunsOnTheDecidedTime(t *testing.T) {
 	})
 }
 
-// In live mode no record is on a test clock, so no settle reads one: not a
-// failed payment's event (a paid one is TestHandleWebhook_ALiveEventDecidesNothing),
-// not the reconciler's sweep, and not a charge settled inline.
+// In live mode no record is on a test clock, so no settle reads one: a live
+// payment must never wait on a clock read, nor be refused when one fails.
+// Not a failed payment's event (a paid one is
+// TestHandleWebhook_ALiveEventDecidesNothing), not the reconciler's sweeps,
+// and not a charge settled inline.
 func TestSettle_LiveReadsNoClock(t *testing.T) {
 	live := func() context.Context { return postgres.WithLivemode(context.Background(), true) }
+
+	t.Run("the hosted-session sweep, paid", func(t *testing.T) {
+		res := &eventResolver{}
+		inv := finalizedPendingInvoice()
+		r, updater, _ := sweepHarness(inv, &mockStripeClient{piStates: map[string]PaymentIntentResult{
+			"pi_hosted": {ID: "pi_hosted", Status: "succeeded", AmountReceivedCents: inv.AmountDueCents},
+		}})
+		r.SetResolver(res)
+		r.settler.(*Stripe).SetResolver(res)
+		r.SetHostedSessions(
+			&fakeHostedLedger{rows: []CheckoutClaim{{ID: "cks_1", TenantID: "t1", InvoiceID: inv.ID, StripeSessionID: "cs_1", Status: "completed"}}},
+			fakeSessionReader{"cs_1": {Status: "complete", PaymentStatus: "paid", PaymentIntentID: "pi_hosted"}},
+			nil)
+		if _, errs := r.sweepHostedSessions(live(), 50, new(scheduler.Panics)); len(errs) != 0 {
+			t.Fatalf("errors: %v", errs)
+		}
+		if got := updater.invoices[inv.ID]; got.Status != domain.InvoicePaid || res.reads != 0 {
+			t.Errorf("status %s, clock reads %d; want paid, none", got.Status, res.reads)
+		}
+	})
 
 	t.Run("a failed payment's event", func(t *testing.T) {
 		res := &eventResolver{}

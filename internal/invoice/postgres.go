@@ -3527,9 +3527,10 @@ func (s *PostgresStore) ListProcessingPayments(ctx context.Context, olderThan ti
 // exception — PaymentIntent truth lives at Stripe on real time, even for
 // clock-pinned invoices), and the test-clock catch-up has no payment-sync phase,
 // so excluding simulated rows here would strand an ambiguous simulated charge
-// in unknown/processing forever. The settle path re-binds simulated time via
-// BindEffectiveNow + the hardcount_anchor_at PI anchor, so recovered outcomes
-// still stamp the simulated instant. See the ADR-030 wall-plane note.
+// in unknown/processing forever. The reconciler decides each row's time from
+// its invoice (decideRow) and the settle keeps it, with the
+// hardcount_anchor_at PI anchor, so recovered outcomes still stamp the
+// simulated instant. See the ADR-030 wall-plane note.
 func (s *PostgresStore) listInflightPayments(ctx context.Context, status domain.InvoicePaymentStatus, olderThan time.Time, limit int) ([]domain.Invoice, error) {
 	live, err := postgres.Livemode(ctx)
 	if err != nil {
