@@ -124,7 +124,7 @@ original text.
 
 ### Fixed
 
-- **A request body over the 1 MB limit is answered `413` `payload_too_large`, with or without an `Idempotency-Key`.** It was answered `400`: `invalid JSON body` without a key and `failed to read body` with one. The usage batch and the LiteLLM callback keep their `413` `batch_too_large`.
+- **A request body over the 1 MB limit is answered `413` `payload_too_large`, with or without an `Idempotency-Key`.** It was answered `400`: `invalid JSON body` without a key and `failed to read body` with one. The usage batch and the LiteLLM callback keep their `413` `batch_too_large` ([#1802](https://github.com/gethardcount/hardcount/pull/1802)).
 - **Test clocks: a credit grant or adjustment for a customer whose test clock cannot be read is refused with `503` `test_clock_unavailable`, and nothing is changed; send the request again.** It used to be written at real time ([#1787](https://github.com/gethardcount/hardcount/pull/1787)).
 - **Rotating an API key with a grace period never keeps the old key working past its own expiry.** A key set to expire in an hour, rotated with 7 days of grace, used to keep working for 7 days. It now stops at its own time, and a key with no expiry stops when the grace ends, as before ([#1733](https://github.com/gethardcount/hardcount/pull/1733)).
 - **An API key's last-used time is written during the request that used it.** It was written after the answer, by a task the server did not wait for, so it could lag, be lost at shutdown, and fail without a log line. It is still written at most once a minute per key, and a failed write is now logged ([#1735](https://github.com/gethardcount/hardcount/pull/1735)).
