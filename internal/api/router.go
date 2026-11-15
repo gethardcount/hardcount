@@ -583,10 +583,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// charge starts while it cancels or pauses the subscription, and it does
 	// not run while a lost charge waits for the stale-hold sweep.
 	dunningSvc.SetChargeHoldClaimer(invoiceStore)
-	// The dunning manual-resolve void goes through the invoice service, not
-	// the raw store. The service is the one void writer: it runs the guards,
-	// the in-flight block, the tax reversal and the invoice.voided event. Like
-	// the marker above, it is wired late, once invoiceSvc exists.
 	// The tax retry after a Stripe connect (ADR-019). When an operator
 	// connects or reconnects Stripe in Settings → Payments, the tenantstripe
 	// service starts a goroutine that retries every invoice stuck on
@@ -853,9 +849,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// future caller).
 	subSvc.SetAuditLogger(auditLogger)
 	// The invoice service audits its own transitions. MarkUncollectible is
-	// reachable from the operator dashboard, from dunning's terminal action
-	// and from ResolveRun(invoice_not_collectible). All three go through the
-	// service, so each gives one audit row, whatever the trigger. The
+	// reachable from the operator dashboard and from dunning's terminal
+	// action. Both go through the service, so each gives one audit row,
+	// whatever the trigger. The
 	// invoice.* webhook events are queued by the invoice store, in the
 	// transaction of each change (invoiceStore.SetOutboxEnqueuer above).
 	invoiceSvc.SetAuditLogger(auditLogger)
@@ -939,9 +935,6 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// compares against the frozen_time the operator advances through, never
 	// reaches the run (ADR-029).
 	dunningSvc.SetResolver(engine)
-	// The dunning handler's resolveRun binds the clock from the invoice
-	// before MarkPaid, so `invoice.paid_at` is in simulated time on a
-	// clock-pinned invoice, not in wall-clock time.
 	// The payment reconciler is the scheduled fallback that resolves invoices
 	// stuck in PaymentUnknown by polling Stripe for the real outcome. Without
 	// the resolver, paid_at on a clock-pinned invoice would be wall-clock

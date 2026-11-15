@@ -277,9 +277,8 @@ func (s *Service) SetDunningResolver(d DunningResolver) { s.dunningResolver = d 
 
 // AuditLogger is the narrow audit-write interface the service uses to
 // record state-changing operations that are reachable from multiple
-// entry points (HTTP handler + dunning adapter MarkUncollectible
-// final-action + the ResolveRun(invoice_not_collectible) operator
-// flow). Same pattern as subscription.Service — single canonical
+// entry points (the HTTP handler and dunning's MarkUncollectible final
+// action). Same pattern as subscription.Service — single canonical
 // audit row regardless of which path triggered the transition.
 type AuditLogger interface {
 	Log(ctx context.Context, tenantID, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
@@ -2399,8 +2398,7 @@ func (s *Service) MarkUncollectibleThen(ctx context.Context, tenantID, id string
 // customer-facing payloads. Empty string is permitted.
 //
 // After the commit it closes the invoice's dunning run and expires any
-// Checkout page still open for it, so every caller (the invoice page, and
-// dunning's "payment recovered" resolve) gets both.
+// Checkout page still open for it.
 func (s *Service) RecordOfflinePayment(ctx context.Context, tenantID, id, note string) (domain.Invoice, error) {
 	ctx = s.bindForInvoice(ctx, tenantID, id)
 	inv, err := s.store.Get(ctx, tenantID, id)

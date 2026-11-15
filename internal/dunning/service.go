@@ -236,7 +236,7 @@ func (s *Service) SetResolver(r clock.Resolver) {
 
 // bindForInvoice binds effective-now from an invoice id at every
 // dunning state-machine entry point (StartDunning, processRun,
-// exhaustRun, ResolveRun, ResolveByInvoice). Returns ctx unchanged on
+// exhaustRun, ResolveByInvoice). Returns ctx unchanged on
 // resolver error or no resolver — wall-clock fallback.
 func (s *Service) bindForInvoice(ctx context.Context, tenantID, invoiceID string) context.Context {
 	bound, _ := clock.BindEffectiveNow(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
@@ -2034,7 +2034,7 @@ func (s *Service) resolveRunAt(ctx context.Context, tenantID string, run domain.
 	}
 	if !won {
 		// Already resolved by another path — return the ACTUAL persisted state so a
-		// caller (Service.ResolveRun) doesn't report a resolution it didn't apply.
+		// caller doesn't report a resolution it didn't apply.
 		if current, gerr := s.store.GetRun(ctx, tenantID, run.ID); gerr == nil {
 			return current, nil
 		}

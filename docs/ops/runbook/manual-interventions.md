@@ -7,24 +7,49 @@ hand: keep your own record of what you ran, when and why. Back to the [runbook i
 ## Force-resolve a stuck dunning run
 
 A dunning run is Hardcount's schedule of retries for one unpaid invoice.
-Resolve it on the run's invoice in the dashboard (the Dunning page's
-**Open invoice**): **Record offline payment**, **Void invoice** or **Mark
-uncollectible** each close the run, an escalated one too, and send
-`dunning.resolved`. The API does the same with
+Close it on the run's invoice in the dashboard (the Dunning page's **Open
+invoice**): **Record offline payment**, **Void invoice** or **Mark
+uncollectible** on an open invoice each close its run, an escalated one too,
+and send `dunning.resolved`. The API does the same with
 `POST /v1/invoices/{id}/record-payment`, `/void` or `/mark-uncollectible`.
-Use the SQL below only when the invoice action cannot close the run:
-- the run must stop before you can reach the dashboard or the API, for
-  example when its next retry would charge a customer who has already paid;
-- or the invoice is already paid, voided or uncollectible and its run is
-  still open or escalated: the run's resolve failed after the invoice
-  changed (the server logged a warning naming the invoice). An active run is
-  closed by its next dunning retry; an escalated run has none, so it waits
-  for this SQL.
 
-1. **Pick the resolution that says what actually happened to the invoice.**
-   Finance later reads this column to answer "why did we stop collecting
-   this?", and this SQL skips the invoice actions that would otherwise set
-   it.
+An escalated run beside an uncollectible invoice needs nothing: it is how a
+policy whose final action writes the invoice off ends. Leave it.
+
+Use the SQL below only in two cases:
+- **The run must stop before you can reach the dashboard or the API**, for
+  example when its next retry would charge a customer who has already paid.
+  Step 5 then changes the invoice once the dashboard or the API is back.
+- **The invoice is already paid or voided, and its run is still open or
+  escalated.** This happens when closing the run failed just after the
+  invoice was paid or voided: the server logged a warning naming the invoice
+  ("closing its dunning run failed"). An active run closes at its next
+  retry, so it needs nothing either. An escalated run has no next retry, so
+  it stays escalated until this SQL closes it.
+
+The SQL changes the run only. It queues no `dunning.resolved` event, sends
+no email and writes no audit row, and the times it stamps are the machine's,
+even for a run on a test clock.
+
+1. **Check the run and its invoice.** Step 3 needs the account, the invoice
+   and the mode. For `livemode`, `true` is a live run, `false` a test run:
+
+   ```sql
+   SET app.bypass_rls = 'on';
+   SELECT r.tenant_id, r.invoice_id, r.livemode, r.state AS run_state, i.status AS invoice_status
+   FROM invoice_dunning_runs r JOIN invoices i ON i.id = r.invoice_id
+   WHERE r.id = '<run_id>';
+   ```
+
+   Go on only if `run_state` is `active` or `escalated`, and either you are
+   stopping the run before you can reach the dashboard (the first case
+   above), or `invoice_status` is `paid` or `voided`. If `run_state` is
+   `resolved`, the run is already closed. If `invoice_status` is
+   `uncollectible` and `run_state` is `escalated`, leave it (see above).
+
+2. **Pick the resolution that says what happened to the invoice.** Finance
+   later reads this column to answer "why did we stop collecting this?", and
+   this SQL skips the invoice actions that would otherwise set it.
 
    | Invoice ended up | Use |
    |---|---|
@@ -32,18 +57,10 @@ Use the SQL below only when the invoice action cannot close the run:
    | annulled or billed in error | `invoice_voided` |
    | written off as bad debt | `invoice_not_collectible` |
 
-2. **Find the run's account, invoice and mode.** Step 3 needs all three.
-   For `livemode`, `true` is a live run, `false` a test run:
-
-   ```sql
-   SET app.bypass_rls = 'on';
-   SELECT tenant_id, invoice_id, livemode FROM invoice_dunning_runs WHERE id = '<run_id>';
-   ```
-
 3. **Resolve the run.** Set `app.livemode` to `'on'` for a live run or
    `'off'` for a test run. The event row takes its mode from this setting,
    and the insert is refused without it. The example uses `invoice_voided`:
-   replace it with the resolution from step 1 in both places, the UPDATE and
+   replace it with the resolution from step 2 in both places, the UPDATE and
    the INSERT.
 
    ```sql
@@ -54,20 +71,35 @@ Use the SQL below only when the invoice action cannot close the run:
    UPDATE invoice_dunning_runs
    SET state = 'resolved', resolution = 'invoice_voided',  -- see table above
        resolved_at = now(), next_action_at = NULL
-   WHERE id = '<run_id>';
+   WHERE id = '<run_id>' AND state <> 'resolved';
+   ```
 
+   The UPDATE must report `UPDATE 1`. If it reports `UPDATE 0`, the run was
+   closed meanwhile: run `ROLLBACK;` and stop. Otherwise add its timeline
+   row and commit:
+
+   ```sql
    INSERT INTO invoice_dunning_events (tenant_id, run_id, invoice_id, event_type, state, reason)
    VALUES ('<tenant_id>', '<run_id>', '<invoice_id>', 'resolved', 'resolved', 'invoice_voided');
    COMMIT;
    ```
 
-4. **Change the invoice too.** This SQL resolves the run only; it does not
-   touch the invoice. The endpoint makes the matching invoice change (void,
-   mark uncollectible, or record a payment), and this SQL does not. If you
-   skip this step, the run and the invoice disagree. No safe SQL makes this
-   change: make it from the dashboard or the API once one is back
-   (**Void invoice**, **Mark uncollectible** or **Record offline payment**
-   on the invoice).
+4. **Check it worked.**
+
+   ```sql
+   SET app.bypass_rls = 'on';
+   SELECT state, resolution, resolved_at, next_action_at FROM invoice_dunning_runs WHERE id = '<run_id>';
+   SELECT count(*) FROM invoice_dunning_events WHERE run_id = '<run_id>' AND event_type = 'resolved';
+   ```
+
+   The run reads `resolved`, your resolution, a `resolved_at`, and no
+   `next_action_at`; the count is 1.
+
+5. **In the first case only, change the invoice too,** once the dashboard or
+   the API is back: **Void invoice**, **Mark uncollectible** or **Record
+   offline payment** on the invoice. The SQL did not touch it, and until you
+   do, the run and the invoice disagree. No safe SQL makes this change. In
+   the second case the invoice already changed; there is nothing more to do.
 
 ## Mark an invoice paid (offline payment received)
 

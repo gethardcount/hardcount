@@ -34,8 +34,8 @@ func (r *recordingDunningResolver) ResolveByInvoice(_ context.Context, _, invoic
 }
 
 // Every committed void stops collection at Stripe and closes the invoice's
-// dunning run, whichever entry voided it: the operator and dunning-resolve
-// void (Service.Void) and the cancel or plan swap's relief void
+// dunning run, whichever entry voided it: the operator's void
+// (Service.Void) and the cancel or plan swap's relief void
 // (VoidUnchangedTx, then AfterVoid once the change commits). Before, only the
 // two HTTP handlers ran these legs, so a relief void left the invoice payable
 // on a live Checkout session and its dunning run active.
