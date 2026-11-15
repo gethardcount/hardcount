@@ -21,12 +21,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// maxIdempotentBodyBytes caps how much of the request body is hashed into the
-// fingerprint. A larger request, such as a bulk import, has only its first
-// maxIdempotentBodyBytes hashed. Such endpoints are rare, and the risk of
-// reusing a key with a different body is low.
-const maxIdempotentBodyBytes = 1 << 20 // 1 MiB
-
 // statusPending marks an idempotency row that is reserved but not yet
 // completed. The request that claims the key writes it before running the
 // handler. A concurrent request that finds it polls until the owner writes
@@ -138,23 +132,19 @@ func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Han
 				return
 			}
 
-			// Read the body to hash it for the fingerprint, then give the
-			// next handler a fresh reader.
-			bodyBytes, err := io.ReadAll(io.LimitReader(r.Body, maxIdempotentBodyBytes+1))
+			// Read the whole body to hash it for the fingerprint, then give
+			// the next handler a fresh reader. The router caps the body
+			// (limitRequestBody), so a body over the cap is answered here
+			// with the 413 the handler's decoder gives without a key. The
+			// key is not reserved yet, so nothing is stored for it.
+			bodyBytes, err := io.ReadAll(r.Body)
 			if err != nil {
-				respond.BadRequest(w, r, "failed to read body")
+				if !respond.BodyTooLarge(w, r, err) {
+					respond.BadRequest(w, r, "failed to read body")
+				}
 				return
 			}
 			_ = r.Body.Close()
-			if len(bodyBytes) > maxIdempotentBodyBytes {
-				// The body is over the hash cap. Hash only its first
-				// maxIdempotentBodyBytes instead of refusing, so large
-				// requests still work. The
-				// fingerprint is weaker, because two bodies with the same
-				// first 1 MiB match. Such requests are rare, so that is
-				// acceptable.
-				bodyBytes = bodyBytes[:maxIdempotentBodyBytes]
-			}
 			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
 
 			fingerprint := fingerprintRequest(r.Method, r.URL.RequestURI(), caller, bodyBytes)

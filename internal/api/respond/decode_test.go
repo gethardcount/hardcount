@@ -3,6 +3,7 @@ package respond
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -247,6 +248,21 @@ func TestDecodeBody_KeepsTheCause(t *testing.T) {
 		t.Fatalf("err = %v, want the MaxBytesError in the chain", err)
 	}
 
+	// A whole value that ends inside the cap, followed by bytes past it,
+	// keeps the cap error too.
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest("POST", "/", strings.NewReader(`{"code":"a"}`+strings.Repeat(" ", 64)))
+	req.Body = http.MaxBytesReader(rec, req.Body, 32)
+	if err := DecodeBody(req, &strictBody{}); !errors.As(err, &maxErr) {
+		t.Fatalf("trailing bytes past the cap: err = %v, want the MaxBytesError in the chain", err)
+	}
+
+	// Real data after the value, inside the cap, is still invalid JSON.
+	req = httptest.NewRequest("POST", "/", strings.NewReader(`{"code":"a"} {"code":"b"}`))
+	if err := DecodeBody(req, &strictBody{}); err == nil || err.Error() != "invalid JSON body" || errors.As(err, &maxErr) {
+		t.Errorf("trailing data: err = %v, want invalid JSON body", err)
+	}
+
 	req = httptest.NewRequest("POST", "/", io.NopCloser(strings.NewReader(`{`)))
 	if err := DecodeBody(req, &strictBody{}); err == nil || err.Error() != "invalid JSON body" {
 		t.Errorf("err = %v, want invalid JSON body", err)
@@ -286,6 +302,71 @@ func TestNoBody(t *testing.T) {
 			}
 			if p := decodeError(t, rec).Param; p != tc.wantParam {
 				t.Errorf("param: got %q, want %q", p, tc.wantParam)
+			}
+		})
+	}
+}
+
+// A read that stopped at the router's cap is a 413 naming the cap, also when
+// the cap error is wrapped. Any other error is left to the caller, with
+// nothing written.
+func TestBodyTooLarge(t *testing.T) {
+	capErr := &http.MaxBytesError{Limit: 1 << 20}
+	for _, c := range []struct {
+		name    string
+		err     error
+		wantMsg string
+	}{
+		{"the cap error", capErr, "The request body is larger than the 1 MB limit. Send a smaller body."},
+		{"wrapped", fmt.Errorf("read: %w", capErr), "The request body is larger than the 1 MB limit. Send a smaller body."},
+		{"in a BodyError", &BodyError{Err: capErr}, "The request body is larger than the 1 MB limit. Send a smaller body."},
+		{"a cap in bytes", &http.MaxBytesError{Limit: 1000}, "The request body is larger than the 1000 bytes limit. Send a smaller body."},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			if !BodyTooLarge(rec, httptest.NewRequest("POST", "/", nil), c.err) {
+				t.Fatal("BodyTooLarge = false, want true")
+			}
+			var body ErrorBody
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("decode %s: %v", rec.Body, err)
+			}
+			if rec.Code != http.StatusRequestEntityTooLarge || body.Error.Type != "invalid_request_error" ||
+				body.Error.Code != "payload_too_large" || body.Error.Message != c.wantMsg {
+				t.Errorf("answer %d %+v, want 413 invalid_request_error payload_too_large %q", rec.Code, body.Error, c.wantMsg)
+			}
+		})
+	}
+
+	rec := httptest.NewRecorder()
+	if BodyTooLarge(rec, httptest.NewRequest("POST", "/", nil), io.ErrUnexpectedEOF) {
+		t.Error("BodyTooLarge(another read error) = true, want false")
+	}
+	if rec.Body.Len() != 0 {
+		t.Errorf("BodyTooLarge wrote %q for another read error, want nothing", rec.Body)
+	}
+}
+
+// DecodeStrict answers a body over the cap with the 413, and a body that is
+// not JSON with the 400 it always had.
+func TestDecodeStrict_BodyOverTheCapIs413(t *testing.T) {
+	for _, c := range []struct {
+		name     string
+		body     string
+		wantCode int
+	}{
+		{"over the cap", `{"code":"aaaaaaaaaaaaaaaa"}`, http.StatusRequestEntityTooLarge},
+		{"not JSON", `{"co`, http.StatusBadRequest},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest("POST", "/", strings.NewReader(c.body))
+			req.Body = http.MaxBytesReader(rec, req.Body, 8)
+			if DecodeStrict(rec, req, &strictBody{}) {
+				t.Fatal("DecodeStrict = true, want a refusal")
+			}
+			if rec.Code != c.wantCode {
+				t.Errorf("status %d %s, want %d", rec.Code, rec.Body, c.wantCode)
 			}
 		})
 	}

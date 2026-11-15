@@ -199,6 +199,7 @@ import type {
   MemberInvitation,
   Meter,
   PauseSubscriptionCollectionBody,
+  PayloadTooLargeResponse,
   PaymentMethod,
   PlanDetail,
   PreviewRecipeBody,
@@ -636,7 +637,7 @@ export const createCustomer = async (createCustomerBody: CreateCustomerBody, opt
 
 
 
-export const getCreateCustomerMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getCreateCustomerMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCustomer>>, TError,{data: CreateCustomerBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createCustomer>>, TError,{data: CreateCustomerBody}, TContext> => {
 
@@ -665,12 +666,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateCustomerMutationResult = NonNullable<Awaited<ReturnType<typeof createCustomer>>>
     export type CreateCustomerMutationBody = CreateCustomerBody
-    export type CreateCustomerMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type CreateCustomerMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Create a customer
  */
-export const useCreateCustomer = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useCreateCustomer = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCustomer>>, TError,{data: CreateCustomerBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createCustomer>>,
@@ -828,7 +829,7 @@ export const rotateCustomerCostDashboardToken = async (id: string, options?: Req
 
 
 
-export const getRotateCustomerCostDashboardTokenMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getRotateCustomerCostDashboardTokenMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateCustomerCostDashboardToken>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof rotateCustomerCostDashboardToken>>, TError,{id: string}, TContext> => {
 
@@ -857,12 +858,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RotateCustomerCostDashboardTokenMutationResult = NonNullable<Awaited<ReturnType<typeof rotateCustomerCostDashboardToken>>>
 
-    export type RotateCustomerCostDashboardTokenMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type RotateCustomerCostDashboardTokenMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Rotate the customer's public cost-dashboard link
  */
-export const useRotateCustomerCostDashboardToken = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useRotateCustomerCostDashboardToken = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateCustomerCostDashboardToken>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof rotateCustomerCostDashboardToken>>,
@@ -1028,7 +1029,7 @@ export const updateCustomer = async (id: string,
 
 
 
-export const getUpdateCustomerMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const getUpdateCustomerMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCustomer>>, TError,{id: string;data: UpdateCustomerBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateCustomer>>, TError,{id: string;data: UpdateCustomerBody}, TContext> => {
 
@@ -1057,12 +1058,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdateCustomerMutationResult = NonNullable<Awaited<ReturnType<typeof updateCustomer>>>
     export type UpdateCustomerMutationBody = UpdateCustomerBody
-    export type UpdateCustomerMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
+    export type UpdateCustomerMutationError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Update a customer
  */
-export const useUpdateCustomer = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const useUpdateCustomer = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateCustomer>>, TError,{id: string;data: UpdateCustomerBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateCustomer>>,
@@ -1126,7 +1127,7 @@ export const upsertCustomerBillingProfile = async (id: string,
 
 
 
-export const getUpsertCustomerBillingProfileMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const getUpsertCustomerBillingProfileMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertCustomerBillingProfile>>, TError,{id: string;data: CustomerBillingProfileInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof upsertCustomerBillingProfile>>, TError,{id: string;data: CustomerBillingProfileInput}, TContext> => {
 
@@ -1155,12 +1156,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpsertCustomerBillingProfileMutationResult = NonNullable<Awaited<ReturnType<typeof upsertCustomerBillingProfile>>>
     export type UpsertCustomerBillingProfileMutationBody = CustomerBillingProfileInput
-    export type UpsertCustomerBillingProfileMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
+    export type UpsertCustomerBillingProfileMutationError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Create or replace the customer's billing profile
  */
-export const useUpsertCustomerBillingProfile = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const useUpsertCustomerBillingProfile = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertCustomerBillingProfile>>, TError,{id: string;data: CustomerBillingProfileInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof upsertCustomerBillingProfile>>,
@@ -1788,7 +1789,7 @@ export const sendCustomerPaymentSetupEmail = async (customerId: string,
 
 
 
-export const getSendCustomerPaymentSetupEmailMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse,
+export const getSendCustomerPaymentSetupEmailMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendCustomerPaymentSetupEmail>>, TError,{customerId: string;data?: SendCustomerPaymentSetupEmailBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof sendCustomerPaymentSetupEmail>>, TError,{customerId: string;data?: SendCustomerPaymentSetupEmailBody}, TContext> => {
 
@@ -1817,12 +1818,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SendCustomerPaymentSetupEmailMutationResult = NonNullable<Awaited<ReturnType<typeof sendCustomerPaymentSetupEmail>>>
     export type SendCustomerPaymentSetupEmailMutationBody = SendCustomerPaymentSetupEmailBody | undefined
-    export type SendCustomerPaymentSetupEmailMutationError = Error | UnauthorizedResponse | ForbiddenResponse
+    export type SendCustomerPaymentSetupEmailMutationError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse
 
     /**
  * @summary Email the customer a link to add a payment method
  */
-export const useSendCustomerPaymentSetupEmail = <TError = Error | UnauthorizedResponse | ForbiddenResponse,
+export const useSendCustomerPaymentSetupEmail = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendCustomerPaymentSetupEmail>>, TError,{customerId: string;data?: SendCustomerPaymentSetupEmailBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof sendCustomerPaymentSetupEmail>>,
@@ -1869,7 +1870,7 @@ export const createCustomerPaymentSetupSession = async (customerId: string,
 
 
 
-export const getCreateCustomerPaymentSetupSessionMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getCreateCustomerPaymentSetupSessionMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCustomerPaymentSetupSession>>, TError,{customerId: string;data?: CreateCustomerPaymentSetupSessionBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createCustomerPaymentSetupSession>>, TError,{customerId: string;data?: CreateCustomerPaymentSetupSessionBody}, TContext> => {
 
@@ -1898,12 +1899,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateCustomerPaymentSetupSessionMutationResult = NonNullable<Awaited<ReturnType<typeof createCustomerPaymentSetupSession>>>
     export type CreateCustomerPaymentSetupSessionMutationBody = CreateCustomerPaymentSetupSessionBody | undefined
-    export type CreateCustomerPaymentSetupSessionMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type CreateCustomerPaymentSetupSessionMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Create a link for the customer to add a payment method
  */
-export const useCreateCustomerPaymentSetupSession = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useCreateCustomerPaymentSetupSession = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCustomerPaymentSetupSession>>, TError,{customerId: string;data?: CreateCustomerPaymentSetupSessionBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createCustomerPaymentSetupSession>>,
@@ -1948,7 +1949,7 @@ export const detachCustomerPaymentMethod = async (customerId: string,
 
 
 
-export const getDetachCustomerPaymentMethodMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getDetachCustomerPaymentMethodMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof detachCustomerPaymentMethod>>, TError,{customerId: string;pmID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof detachCustomerPaymentMethod>>, TError,{customerId: string;pmID: string}, TContext> => {
 
@@ -1977,12 +1978,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DetachCustomerPaymentMethodMutationResult = NonNullable<Awaited<ReturnType<typeof detachCustomerPaymentMethod>>>
 
-    export type DetachCustomerPaymentMethodMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type DetachCustomerPaymentMethodMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Detach a payment method
  */
-export const useDetachCustomerPaymentMethod = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useDetachCustomerPaymentMethod = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof detachCustomerPaymentMethod>>, TError,{customerId: string;pmID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof detachCustomerPaymentMethod>>,
@@ -2025,7 +2026,7 @@ export const setCustomerDefaultPaymentMethod = async (customerId: string,
 
 
 
-export const getSetCustomerDefaultPaymentMethodMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getSetCustomerDefaultPaymentMethodMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setCustomerDefaultPaymentMethod>>, TError,{customerId: string;pmID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof setCustomerDefaultPaymentMethod>>, TError,{customerId: string;pmID: string}, TContext> => {
 
@@ -2054,12 +2055,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SetCustomerDefaultPaymentMethodMutationResult = NonNullable<Awaited<ReturnType<typeof setCustomerDefaultPaymentMethod>>>
 
-    export type SetCustomerDefaultPaymentMethodMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type SetCustomerDefaultPaymentMethodMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Make a payment method the default
  */
-export const useSetCustomerDefaultPaymentMethod = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useSetCustomerDefaultPaymentMethod = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setCustomerDefaultPaymentMethod>>, TError,{customerId: string;pmID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof setCustomerDefaultPaymentMethod>>,
@@ -2432,7 +2433,7 @@ export const createHostedInvoiceCheckout = async (token: string, options?: Reque
 
 
 
-export const getCreateHostedInvoiceCheckoutMutationOptions = <TError = InvalidBodyResponse | Error,
+export const getCreateHostedInvoiceCheckoutMutationOptions = <TError = InvalidBodyResponse | Error | PayloadTooLargeResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHostedInvoiceCheckout>>, TError,{token: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createHostedInvoiceCheckout>>, TError,{token: string}, TContext> => {
 
@@ -2461,12 +2462,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateHostedInvoiceCheckoutMutationResult = NonNullable<Awaited<ReturnType<typeof createHostedInvoiceCheckout>>>
 
-    export type CreateHostedInvoiceCheckoutMutationError = InvalidBodyResponse | Error
+    export type CreateHostedInvoiceCheckoutMutationError = InvalidBodyResponse | Error | PayloadTooLargeResponse
 
     /**
  * @summary Start paying the invoice in Stripe Checkout
  */
-export const useCreateHostedInvoiceCheckout = <TError = InvalidBodyResponse | Error,
+export const useCreateHostedInvoiceCheckout = <TError = InvalidBodyResponse | Error | PayloadTooLargeResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createHostedInvoiceCheckout>>, TError,{token: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createHostedInvoiceCheckout>>,
@@ -2625,7 +2626,7 @@ export const createPublicPaymentUpdateCheckout = async (token: string, options?:
 
 
 
-export const getCreatePublicPaymentUpdateCheckoutMutationOptions = <TError = InvalidBodyResponse | Error | RateLimitedResponse,
+export const getCreatePublicPaymentUpdateCheckoutMutationOptions = <TError = InvalidBodyResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPublicPaymentUpdateCheckout>>, TError,{token: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createPublicPaymentUpdateCheckout>>, TError,{token: string}, TContext> => {
 
@@ -2654,12 +2655,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreatePublicPaymentUpdateCheckoutMutationResult = NonNullable<Awaited<ReturnType<typeof createPublicPaymentUpdateCheckout>>>
 
-    export type CreatePublicPaymentUpdateCheckoutMutationError = InvalidBodyResponse | Error | RateLimitedResponse
+    export type CreatePublicPaymentUpdateCheckoutMutationError = InvalidBodyResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Start adding a card in Stripe Checkout
  */
-export const useCreatePublicPaymentUpdateCheckout = <TError = InvalidBodyResponse | Error | RateLimitedResponse,
+export const useCreatePublicPaymentUpdateCheckout = <TError = InvalidBodyResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPublicPaymentUpdateCheckout>>, TError,{token: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createPublicPaymentUpdateCheckout>>,
@@ -2701,7 +2702,7 @@ export const createMeter = async (createMeterBody: CreateMeterBody, options?: Re
 
 
 
-export const getCreateMeterMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getCreateMeterMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createMeter>>, TError,{data: CreateMeterBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createMeter>>, TError,{data: CreateMeterBody}, TContext> => {
 
@@ -2730,12 +2731,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateMeterMutationResult = NonNullable<Awaited<ReturnType<typeof createMeter>>>
     export type CreateMeterMutationBody = CreateMeterBody
-    export type CreateMeterMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type CreateMeterMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Create a meter
  */
-export const useCreateMeter = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useCreateMeter = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createMeter>>, TError,{data: CreateMeterBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createMeter>>,
@@ -2893,7 +2894,7 @@ export const updateMeter = async (id: string,
 
 
 
-export const getUpdateMeterMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getUpdateMeterMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateMeter>>, TError,{id: string;data: UpdateMeterBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateMeter>>, TError,{id: string;data: UpdateMeterBody}, TContext> => {
 
@@ -2922,12 +2923,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdateMeterMutationResult = NonNullable<Awaited<ReturnType<typeof updateMeter>>>
     export type UpdateMeterMutationBody = UpdateMeterBody
-    export type UpdateMeterMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type UpdateMeterMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Update a meter
  */
-export const useUpdateMeter = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useUpdateMeter = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateMeter>>, TError,{id: string;data: UpdateMeterBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateMeter>>,
@@ -3099,7 +3100,7 @@ export const createCreditNote = async (createCreditNoteBody: CreateCreditNoteBod
 
 
 
-export const getCreateCreditNoteMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getCreateCreditNoteMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCreditNote>>, TError,{data: CreateCreditNoteBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createCreditNote>>, TError,{data: CreateCreditNoteBody}, TContext> => {
 
@@ -3128,12 +3129,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateCreditNoteMutationResult = NonNullable<Awaited<ReturnType<typeof createCreditNote>>>
     export type CreateCreditNoteMutationBody = CreateCreditNoteBody
-    export type CreateCreditNoteMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type CreateCreditNoteMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Create a credit note
  */
-export const useCreateCreditNote = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useCreateCreditNote = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createCreditNote>>, TError,{data: CreateCreditNoteBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createCreditNote>>,
@@ -3425,7 +3426,7 @@ export const adjustCredits = async (adjustCreditsBody: AdjustCreditsBody, option
 
 
 
-export const getAdjustCreditsMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const getAdjustCreditsMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof adjustCredits>>, TError,{data: AdjustCreditsBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof adjustCredits>>, TError,{data: AdjustCreditsBody}, TContext> => {
 
@@ -3454,12 +3455,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type AdjustCreditsMutationResult = NonNullable<Awaited<ReturnType<typeof adjustCredits>>>
     export type AdjustCreditsMutationBody = AdjustCreditsBody
-    export type AdjustCreditsMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
+    export type AdjustCreditsMutationError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Add or remove credit
  */
-export const useAdjustCredits = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const useAdjustCredits = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof adjustCredits>>, TError,{data: AdjustCreditsBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof adjustCredits>>,
@@ -3744,7 +3745,7 @@ export const createWebhookEndpoint = async (createWebhookEndpointBody: CreateWeb
 
 
 
-export const getCreateWebhookEndpointMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getCreateWebhookEndpointMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createWebhookEndpoint>>, TError,{data: CreateWebhookEndpointBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createWebhookEndpoint>>, TError,{data: CreateWebhookEndpointBody}, TContext> => {
 
@@ -3773,12 +3774,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateWebhookEndpointMutationResult = NonNullable<Awaited<ReturnType<typeof createWebhookEndpoint>>>
     export type CreateWebhookEndpointMutationBody = CreateWebhookEndpointBody
-    export type CreateWebhookEndpointMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type CreateWebhookEndpointMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse
 
     /**
  * @summary Create a webhook endpoint
  */
-export const useCreateWebhookEndpoint = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useCreateWebhookEndpoint = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createWebhookEndpoint>>, TError,{data: CreateWebhookEndpointBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createWebhookEndpoint>>,
@@ -4038,7 +4039,7 @@ export const updateWebhookEndpoint = async (id: string,
 
 
 
-export const getUpdateWebhookEndpointMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getUpdateWebhookEndpointMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateWebhookEndpoint>>, TError,{id: string;data: UpdateWebhookEndpointBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateWebhookEndpoint>>, TError,{id: string;data: UpdateWebhookEndpointBody}, TContext> => {
 
@@ -4067,12 +4068,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdateWebhookEndpointMutationResult = NonNullable<Awaited<ReturnType<typeof updateWebhookEndpoint>>>
     export type UpdateWebhookEndpointMutationBody = UpdateWebhookEndpointBody
-    export type UpdateWebhookEndpointMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type UpdateWebhookEndpointMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Update a webhook endpoint
  */
-export const useUpdateWebhookEndpoint = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useUpdateWebhookEndpoint = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateWebhookEndpoint>>, TError,{id: string;data: UpdateWebhookEndpointBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateWebhookEndpoint>>,
@@ -4114,7 +4115,7 @@ export const deleteWebhookEndpoint = async (id: string, options?: RequestInit): 
 
 
 
-export const getDeleteWebhookEndpointMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
+export const getDeleteWebhookEndpointMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteWebhookEndpoint>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteWebhookEndpoint>>, TError,{id: string}, TContext> => {
 
@@ -4143,12 +4144,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DeleteWebhookEndpointMutationResult = NonNullable<Awaited<ReturnType<typeof deleteWebhookEndpoint>>>
 
-    export type DeleteWebhookEndpointMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | BodyNotAllowedResponse | RateLimitedResponse
+    export type DeleteWebhookEndpointMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse
 
     /**
  * @summary Delete a webhook endpoint
  */
-export const useDeleteWebhookEndpoint = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
+export const useDeleteWebhookEndpoint = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteWebhookEndpoint>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteWebhookEndpoint>>,
@@ -4190,7 +4191,7 @@ export const rotateWebhookEndpointSecret = async (id: string, options?: RequestI
 
 
 
-export const getRotateWebhookEndpointSecretMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
+export const getRotateWebhookEndpointSecretMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateWebhookEndpointSecret>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof rotateWebhookEndpointSecret>>, TError,{id: string}, TContext> => {
 
@@ -4219,12 +4220,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RotateWebhookEndpointSecretMutationResult = NonNullable<Awaited<ReturnType<typeof rotateWebhookEndpointSecret>>>
 
-    export type RotateWebhookEndpointSecretMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | BodyNotAllowedResponse | RateLimitedResponse
+    export type RotateWebhookEndpointSecretMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse
 
     /**
  * @summary Rotate a webhook endpoint's signing secret
  */
-export const useRotateWebhookEndpointSecret = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
+export const useRotateWebhookEndpointSecret = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateWebhookEndpointSecret>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof rotateWebhookEndpointSecret>>,
@@ -4389,7 +4390,7 @@ export const replayWebhookDelivery = async (id: string,
 
 
 
-export const getReplayWebhookDeliveryMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
+export const getReplayWebhookDeliveryMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replayWebhookDelivery>>, TError,{id: string;deliveryID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof replayWebhookDelivery>>, TError,{id: string;deliveryID: string}, TContext> => {
 
@@ -4418,12 +4419,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ReplayWebhookDeliveryMutationResult = NonNullable<Awaited<ReturnType<typeof replayWebhookDelivery>>>
 
-    export type ReplayWebhookDeliveryMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | BodyNotAllowedResponse | RateLimitedResponse
+    export type ReplayWebhookDeliveryMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse
 
     /**
  * @summary Resend one delivery to its endpoint
  */
-export const useReplayWebhookDelivery = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
+export const useReplayWebhookDelivery = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replayWebhookDelivery>>, TError,{id: string;deliveryID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof replayWebhookDelivery>>,
@@ -4799,7 +4800,7 @@ export const replayWebhookEvent = async (id: string, options?: RequestInit): Pro
 
 
 
-export const getReplayWebhookEventMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
+export const getReplayWebhookEventMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replayWebhookEvent>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof replayWebhookEvent>>, TError,{id: string}, TContext> => {
 
@@ -4828,12 +4829,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ReplayWebhookEventMutationResult = NonNullable<Awaited<ReturnType<typeof replayWebhookEvent>>>
 
-    export type ReplayWebhookEventMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse
+    export type ReplayWebhookEventMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse
 
     /**
  * @summary Replay an event to all matching endpoints
  */
-export const useReplayWebhookEvent = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
+export const useReplayWebhookEvent = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof replayWebhookEvent>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof replayWebhookEvent>>,
@@ -5173,7 +5174,7 @@ export const createPlan = async (createPlanBody: CreatePlanBody, options?: Reque
 
 
 
-export const getCreatePlanMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getCreatePlanMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPlan>>, TError,{data: CreatePlanBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createPlan>>, TError,{data: CreatePlanBody}, TContext> => {
 
@@ -5202,12 +5203,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreatePlanMutationResult = NonNullable<Awaited<ReturnType<typeof createPlan>>>
     export type CreatePlanMutationBody = CreatePlanBody
-    export type CreatePlanMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type CreatePlanMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Create a plan
  */
-export const useCreatePlan = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useCreatePlan = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPlan>>, TError,{data: CreatePlanBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createPlan>>,
@@ -5466,7 +5467,7 @@ export const updatePlan = async (id: string,
 
 
 
-export const getUpdatePlanMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const getUpdatePlanMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePlan>>, TError,{id: string;data: UpdatePlanBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updatePlan>>, TError,{id: string;data: UpdatePlanBody}, TContext> => {
 
@@ -5495,12 +5496,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdatePlanMutationResult = NonNullable<Awaited<ReturnType<typeof updatePlan>>>
     export type UpdatePlanMutationBody = UpdatePlanBody
-    export type UpdatePlanMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
+    export type UpdatePlanMutationError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Update a plan
  */
-export const useUpdatePlan = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const useUpdatePlan = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePlan>>, TError,{id: string;data: UpdatePlanBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updatePlan>>,
@@ -5665,7 +5666,7 @@ export const addPlanPrice = async (id: string,
 
 
 
-export const getAddPlanPriceMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const getAddPlanPriceMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addPlanPrice>>, TError,{id: string;data: PriceInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof addPlanPrice>>, TError,{id: string;data: PriceInput}, TContext> => {
 
@@ -5694,12 +5695,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type AddPlanPriceMutationResult = NonNullable<Awaited<ReturnType<typeof addPlanPrice>>>
     export type AddPlanPriceMutationBody = PriceInput
-    export type AddPlanPriceMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
+    export type AddPlanPriceMutationError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Add a price to a plan
  */
-export const useAddPlanPrice = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const useAddPlanPrice = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addPlanPrice>>, TError,{id: string;data: PriceInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof addPlanPrice>>,
@@ -5748,7 +5749,7 @@ export const updatePlanPrice = async (id: string,
 
 
 
-export const getUpdatePlanPriceMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const getUpdatePlanPriceMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePlanPrice>>, TError,{id: string;priceId: string;data: PriceShape}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updatePlanPrice>>, TError,{id: string;priceId: string;data: PriceShape}, TContext> => {
 
@@ -5777,12 +5778,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdatePlanPriceMutationResult = NonNullable<Awaited<ReturnType<typeof updatePlanPrice>>>
     export type UpdatePlanPriceMutationBody = PriceShape
-    export type UpdatePlanPriceMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
+    export type UpdatePlanPriceMutationError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Change a price's rate
  */
-export const useUpdatePlanPrice = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const useUpdatePlanPrice = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updatePlanPrice>>, TError,{id: string;priceId: string;data: PriceShape}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updatePlanPrice>>,
@@ -5830,7 +5831,7 @@ export const removePlanPrice = async (id: string,
 
 
 
-export const getRemovePlanPriceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getRemovePlanPriceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removePlanPrice>>, TError,{id: string;priceId: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof removePlanPrice>>, TError,{id: string;priceId: string}, TContext> => {
 
@@ -5859,12 +5860,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RemovePlanPriceMutationResult = NonNullable<Awaited<ReturnType<typeof removePlanPrice>>>
 
-    export type RemovePlanPriceMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type RemovePlanPriceMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Remove a price from a plan
  */
-export const useRemovePlanPrice = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useRemovePlanPrice = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removePlanPrice>>, TError,{id: string;priceId: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof removePlanPrice>>,
@@ -5924,7 +5925,7 @@ export const createSubscription = async (createSubscriptionBody: CreateSubscript
 
 
 
-export const getCreateSubscriptionMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getCreateSubscriptionMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSubscription>>, TError,{data: CreateSubscriptionBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createSubscription>>, TError,{data: CreateSubscriptionBody}, TContext> => {
 
@@ -5953,12 +5954,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateSubscriptionMutationResult = NonNullable<Awaited<ReturnType<typeof createSubscription>>>
     export type CreateSubscriptionMutationBody = CreateSubscriptionBody
-    export type CreateSubscriptionMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type CreateSubscriptionMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Create a subscription
  */
-export const useCreateSubscription = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useCreateSubscription = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createSubscription>>, TError,{data: CreateSubscriptionBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createSubscription>>,
@@ -6115,7 +6116,7 @@ export const activateSubscription = async (id: string, options?: RequestInit): P
 
 
 
-export const getActivateSubscriptionMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getActivateSubscriptionMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof activateSubscription>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof activateSubscription>>, TError,{id: string}, TContext> => {
 
@@ -6144,12 +6145,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ActivateSubscriptionMutationResult = NonNullable<Awaited<ReturnType<typeof activateSubscription>>>
 
-    export type ActivateSubscriptionMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type ActivateSubscriptionMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Activate a draft subscription
  */
-export const useActivateSubscription = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useActivateSubscription = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof activateSubscription>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof activateSubscription>>,
@@ -6213,7 +6214,7 @@ export const retrySubscriptionBilling = async (id: string, options?: RequestInit
 
 
 
-export const getRetrySubscriptionBillingMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getRetrySubscriptionBillingMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retrySubscriptionBilling>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof retrySubscriptionBilling>>, TError,{id: string}, TContext> => {
 
@@ -6242,12 +6243,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RetrySubscriptionBillingMutationResult = NonNullable<Awaited<ReturnType<typeof retrySubscriptionBilling>>>
 
-    export type RetrySubscriptionBillingMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type RetrySubscriptionBillingMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Retry a subscription's failed billing
  */
-export const useRetrySubscriptionBilling = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useRetrySubscriptionBilling = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retrySubscriptionBilling>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof retrySubscriptionBilling>>,
@@ -6407,7 +6408,7 @@ export const cancelSubscription = async (id: string, options?: RequestInit): Pro
 
 
 
-export const getCancelSubscriptionMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getCancelSubscriptionMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelSubscription>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof cancelSubscription>>, TError,{id: string}, TContext> => {
 
@@ -6436,12 +6437,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CancelSubscriptionMutationResult = NonNullable<Awaited<ReturnType<typeof cancelSubscription>>>
 
-    export type CancelSubscriptionMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type CancelSubscriptionMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Cancel a subscription now
  */
-export const useCancelSubscription = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useCancelSubscription = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelSubscription>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof cancelSubscription>>,
@@ -6495,7 +6496,7 @@ export const scheduleSubscriptionCancel = async (id: string,
 
 
 
-export const getScheduleSubscriptionCancelMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const getScheduleSubscriptionCancelMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof scheduleSubscriptionCancel>>, TError,{id: string;data: ScheduleSubscriptionCancelBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof scheduleSubscriptionCancel>>, TError,{id: string;data: ScheduleSubscriptionCancelBody}, TContext> => {
 
@@ -6524,12 +6525,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ScheduleSubscriptionCancelMutationResult = NonNullable<Awaited<ReturnType<typeof scheduleSubscriptionCancel>>>
     export type ScheduleSubscriptionCancelMutationBody = ScheduleSubscriptionCancelBody
-    export type ScheduleSubscriptionCancelMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
+    export type ScheduleSubscriptionCancelMutationError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Schedule a cancel
  */
-export const useScheduleSubscriptionCancel = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const useScheduleSubscriptionCancel = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof scheduleSubscriptionCancel>>, TError,{id: string;data: ScheduleSubscriptionCancelBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof scheduleSubscriptionCancel>>,
@@ -6573,7 +6574,7 @@ export const clearSubscriptionScheduledCancel = async (id: string, options?: Req
 
 
 
-export const getClearSubscriptionScheduledCancelMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getClearSubscriptionScheduledCancelMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearSubscriptionScheduledCancel>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof clearSubscriptionScheduledCancel>>, TError,{id: string}, TContext> => {
 
@@ -6602,12 +6603,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ClearSubscriptionScheduledCancelMutationResult = NonNullable<Awaited<ReturnType<typeof clearSubscriptionScheduledCancel>>>
 
-    export type ClearSubscriptionScheduledCancelMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type ClearSubscriptionScheduledCancelMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Clear a scheduled cancel
  */
-export const useClearSubscriptionScheduledCancel = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useClearSubscriptionScheduledCancel = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearSubscriptionScheduledCancel>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof clearSubscriptionScheduledCancel>>,
@@ -6666,7 +6667,7 @@ export const pauseSubscriptionCollection = async (id: string,
 
 
 
-export const getPauseSubscriptionCollectionMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const getPauseSubscriptionCollectionMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pauseSubscriptionCollection>>, TError,{id: string;data: PauseSubscriptionCollectionBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof pauseSubscriptionCollection>>, TError,{id: string;data: PauseSubscriptionCollectionBody}, TContext> => {
 
@@ -6695,12 +6696,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type PauseSubscriptionCollectionMutationResult = NonNullable<Awaited<ReturnType<typeof pauseSubscriptionCollection>>>
     export type PauseSubscriptionCollectionMutationBody = PauseSubscriptionCollectionBody
-    export type PauseSubscriptionCollectionMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
+    export type PauseSubscriptionCollectionMutationError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Pause collection
  */
-export const usePauseSubscriptionCollection = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const usePauseSubscriptionCollection = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof pauseSubscriptionCollection>>, TError,{id: string;data: PauseSubscriptionCollectionBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof pauseSubscriptionCollection>>,
@@ -6746,7 +6747,7 @@ export const resumeSubscriptionCollection = async (id: string, options?: Request
 
 
 
-export const getResumeSubscriptionCollectionMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getResumeSubscriptionCollectionMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resumeSubscriptionCollection>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof resumeSubscriptionCollection>>, TError,{id: string}, TContext> => {
 
@@ -6775,12 +6776,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ResumeSubscriptionCollectionMutationResult = NonNullable<Awaited<ReturnType<typeof resumeSubscriptionCollection>>>
 
-    export type ResumeSubscriptionCollectionMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type ResumeSubscriptionCollectionMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Resume collection
  */
-export const useResumeSubscriptionCollection = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useResumeSubscriptionCollection = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resumeSubscriptionCollection>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof resumeSubscriptionCollection>>,
@@ -6824,7 +6825,7 @@ export const endSubscriptionTrial = async (id: string, options?: RequestInit): P
 
 
 
-export const getEndSubscriptionTrialMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getEndSubscriptionTrialMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof endSubscriptionTrial>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof endSubscriptionTrial>>, TError,{id: string}, TContext> => {
 
@@ -6853,12 +6854,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type EndSubscriptionTrialMutationResult = NonNullable<Awaited<ReturnType<typeof endSubscriptionTrial>>>
 
-    export type EndSubscriptionTrialMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type EndSubscriptionTrialMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary End a trial now
  */
-export const useEndSubscriptionTrial = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useEndSubscriptionTrial = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof endSubscriptionTrial>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof endSubscriptionTrial>>,
@@ -6903,7 +6904,7 @@ export const extendSubscriptionTrial = async (id: string,
 
 
 
-export const getExtendSubscriptionTrialMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const getExtendSubscriptionTrialMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof extendSubscriptionTrial>>, TError,{id: string;data: ExtendSubscriptionTrialBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof extendSubscriptionTrial>>, TError,{id: string;data: ExtendSubscriptionTrialBody}, TContext> => {
 
@@ -6932,12 +6933,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ExtendSubscriptionTrialMutationResult = NonNullable<Awaited<ReturnType<typeof extendSubscriptionTrial>>>
     export type ExtendSubscriptionTrialMutationBody = ExtendSubscriptionTrialBody
-    export type ExtendSubscriptionTrialMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
+    export type ExtendSubscriptionTrialMutationError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Extend a trial
  */
-export const useExtendSubscriptionTrial = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const useExtendSubscriptionTrial = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof extendSubscriptionTrial>>, TError,{id: string;data: ExtendSubscriptionTrialBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof extendSubscriptionTrial>>,
@@ -6991,7 +6992,7 @@ export const setSubscriptionBillingThresholds = async (id: string,
 
 
 
-export const getSetSubscriptionBillingThresholdsMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const getSetSubscriptionBillingThresholdsMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setSubscriptionBillingThresholds>>, TError,{id: string;data: SetSubscriptionBillingThresholdsBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof setSubscriptionBillingThresholds>>, TError,{id: string;data: SetSubscriptionBillingThresholdsBody}, TContext> => {
 
@@ -7020,12 +7021,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SetSubscriptionBillingThresholdsMutationResult = NonNullable<Awaited<ReturnType<typeof setSubscriptionBillingThresholds>>>
     export type SetSubscriptionBillingThresholdsMutationBody = SetSubscriptionBillingThresholdsBody
-    export type SetSubscriptionBillingThresholdsMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
+    export type SetSubscriptionBillingThresholdsMutationError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Set spend thresholds
  */
-export const useSetSubscriptionBillingThresholds = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const useSetSubscriptionBillingThresholds = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setSubscriptionBillingThresholds>>, TError,{id: string;data: SetSubscriptionBillingThresholdsBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof setSubscriptionBillingThresholds>>,
@@ -7064,7 +7065,7 @@ export const clearSubscriptionBillingThresholds = async (id: string, options?: R
 
 
 
-export const getClearSubscriptionBillingThresholdsMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getClearSubscriptionBillingThresholdsMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearSubscriptionBillingThresholds>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof clearSubscriptionBillingThresholds>>, TError,{id: string}, TContext> => {
 
@@ -7093,12 +7094,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ClearSubscriptionBillingThresholdsMutationResult = NonNullable<Awaited<ReturnType<typeof clearSubscriptionBillingThresholds>>>
 
-    export type ClearSubscriptionBillingThresholdsMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type ClearSubscriptionBillingThresholdsMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Clear spend thresholds
  */
-export const useClearSubscriptionBillingThresholds = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useClearSubscriptionBillingThresholds = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof clearSubscriptionBillingThresholds>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof clearSubscriptionBillingThresholds>>,
@@ -7153,7 +7154,7 @@ export const addSubscriptionItem = async (id: string,
 
 
 
-export const getAddSubscriptionItemMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const getAddSubscriptionItemMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addSubscriptionItem>>, TError,{id: string;data: AddSubscriptionItemBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof addSubscriptionItem>>, TError,{id: string;data: AddSubscriptionItemBody}, TContext> => {
 
@@ -7182,12 +7183,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type AddSubscriptionItemMutationResult = NonNullable<Awaited<ReturnType<typeof addSubscriptionItem>>>
     export type AddSubscriptionItemMutationBody = AddSubscriptionItemBody
-    export type AddSubscriptionItemMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
+    export type AddSubscriptionItemMutationError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Add an item to a subscription
  */
-export const useAddSubscriptionItem = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const useAddSubscriptionItem = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addSubscriptionItem>>, TError,{id: string;data: AddSubscriptionItemBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof addSubscriptionItem>>,
@@ -7260,7 +7261,7 @@ export const updateSubscriptionItem = async (id: string,
 
 
 
-export const getUpdateSubscriptionItemMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const getUpdateSubscriptionItemMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateSubscriptionItem>>, TError,{id: string;itemID: string;data: UpdateSubscriptionItemBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateSubscriptionItem>>, TError,{id: string;itemID: string;data: UpdateSubscriptionItemBody}, TContext> => {
 
@@ -7289,12 +7290,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdateSubscriptionItemMutationResult = NonNullable<Awaited<ReturnType<typeof updateSubscriptionItem>>>
     export type UpdateSubscriptionItemMutationBody = UpdateSubscriptionItemBody
-    export type UpdateSubscriptionItemMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
+    export type UpdateSubscriptionItemMutationError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Change a subscription item
  */
-export const useUpdateSubscriptionItem = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const useUpdateSubscriptionItem = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateSubscriptionItem>>, TError,{id: string;itemID: string;data: UpdateSubscriptionItemBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateSubscriptionItem>>,
@@ -7348,7 +7349,7 @@ export const removeSubscriptionItem = async (id: string,
 
 
 
-export const getRemoveSubscriptionItemMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getRemoveSubscriptionItemMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeSubscriptionItem>>, TError,{id: string;itemID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof removeSubscriptionItem>>, TError,{id: string;itemID: string}, TContext> => {
 
@@ -7377,12 +7378,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RemoveSubscriptionItemMutationResult = NonNullable<Awaited<ReturnType<typeof removeSubscriptionItem>>>
 
-    export type RemoveSubscriptionItemMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type RemoveSubscriptionItemMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Remove a subscription item
  */
-export const useRemoveSubscriptionItem = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useRemoveSubscriptionItem = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeSubscriptionItem>>, TError,{id: string;itemID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof removeSubscriptionItem>>,
@@ -7428,7 +7429,7 @@ export const cancelSubscriptionItemPendingChange = async (id: string,
 
 
 
-export const getCancelSubscriptionItemPendingChangeMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getCancelSubscriptionItemPendingChangeMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelSubscriptionItemPendingChange>>, TError,{id: string;itemID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof cancelSubscriptionItemPendingChange>>, TError,{id: string;itemID: string}, TContext> => {
 
@@ -7457,12 +7458,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CancelSubscriptionItemPendingChangeMutationResult = NonNullable<Awaited<ReturnType<typeof cancelSubscriptionItemPendingChange>>>
 
-    export type CancelSubscriptionItemPendingChangeMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type CancelSubscriptionItemPendingChangeMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Cancel a scheduled plan change
  */
-export const useCancelSubscriptionItemPendingChange = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useCancelSubscriptionItemPendingChange = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof cancelSubscriptionItemPendingChange>>, TError,{id: string;itemID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof cancelSubscriptionItemPendingChange>>,
@@ -7622,7 +7623,7 @@ export const createUsageEvent = async (createUsageEventBody: CreateUsageEventBod
 
 
 
-export const getCreateUsageEventMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getCreateUsageEventMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | PayloadTooLargeResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createUsageEvent>>, TError,{data: CreateUsageEventBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createUsageEvent>>, TError,{data: CreateUsageEventBody}, TContext> => {
 
@@ -7651,12 +7652,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateUsageEventMutationResult = NonNullable<Awaited<ReturnType<typeof createUsageEvent>>>
     export type CreateUsageEventMutationBody = CreateUsageEventBody
-    export type CreateUsageEventMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type CreateUsageEventMutationError = InvalidBodyResponse | UnauthorizedResponse | PayloadTooLargeResponse | Error | RateLimitedResponse
 
     /**
  * @summary Send a usage event
  */
-export const useCreateUsageEvent = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useCreateUsageEvent = <TError = InvalidBodyResponse | UnauthorizedResponse | PayloadTooLargeResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createUsageEvent>>, TError,{data: CreateUsageEventBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createUsageEvent>>,
@@ -7911,7 +7912,7 @@ export const backfillUsageEvent = async (backfillUsageEventBody: BackfillUsageEv
 
 
 
-export const getBackfillUsageEventMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const getBackfillUsageEventMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof backfillUsageEvent>>, TError,{data: BackfillUsageEventBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof backfillUsageEvent>>, TError,{data: BackfillUsageEventBody}, TContext> => {
 
@@ -7940,12 +7941,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type BackfillUsageEventMutationResult = NonNullable<Awaited<ReturnType<typeof backfillUsageEvent>>>
     export type BackfillUsageEventMutationBody = BackfillUsageEventBody
-    export type BackfillUsageEventMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
+    export type BackfillUsageEventMutationError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Backfill a past usage event
  */
-export const useBackfillUsageEvent = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const useBackfillUsageEvent = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof backfillUsageEvent>>, TError,{data: BackfillUsageEventBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof backfillUsageEvent>>,
@@ -8105,7 +8106,7 @@ export const releaseHeldUsage = async (releaseHeldUsageBody: ReleaseHeldUsageBod
 
 
 
-export const getReleaseHeldUsageMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getReleaseHeldUsageMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof releaseHeldUsage>>, TError,{data: ReleaseHeldUsageBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof releaseHeldUsage>>, TError,{data: ReleaseHeldUsageBody}, TContext> => {
 
@@ -8134,12 +8135,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ReleaseHeldUsageMutationResult = NonNullable<Awaited<ReturnType<typeof releaseHeldUsage>>>
     export type ReleaseHeldUsageMutationBody = ReleaseHeldUsageBody
-    export type ReleaseHeldUsageMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type ReleaseHeldUsageMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse
 
     /**
  * @summary Release held usage
  */
-export const useReleaseHeldUsage = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useReleaseHeldUsage = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof releaseHeldUsage>>, TError,{data: ReleaseHeldUsageBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof releaseHeldUsage>>,
@@ -8180,7 +8181,7 @@ export const discardHeldUsage = async (discardHeldUsageBody: DiscardHeldUsageBod
 
 
 
-export const getDiscardHeldUsageMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getDiscardHeldUsageMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof discardHeldUsage>>, TError,{data: DiscardHeldUsageBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof discardHeldUsage>>, TError,{data: DiscardHeldUsageBody}, TContext> => {
 
@@ -8209,12 +8210,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DiscardHeldUsageMutationResult = NonNullable<Awaited<ReturnType<typeof discardHeldUsage>>>
     export type DiscardHeldUsageMutationBody = DiscardHeldUsageBody
-    export type DiscardHeldUsageMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type DiscardHeldUsageMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse
 
     /**
  * @summary Discard held usage
  */
-export const useDiscardHeldUsage = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useDiscardHeldUsage = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof discardHeldUsage>>, TError,{data: DiscardHeldUsageBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof discardHeldUsage>>,
@@ -8506,7 +8507,7 @@ export const createInvoice = async (invoiceCreateRequest: InvoiceCreateRequest, 
 
 
 
-export const getCreateInvoiceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getCreateInvoiceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createInvoice>>, TError,{data: InvoiceCreateRequest}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createInvoice>>, TError,{data: InvoiceCreateRequest}, TContext> => {
 
@@ -8535,12 +8536,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateInvoiceMutationResult = NonNullable<Awaited<ReturnType<typeof createInvoice>>>
     export type CreateInvoiceMutationBody = InvoiceCreateRequest
-    export type CreateInvoiceMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type CreateInvoiceMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Create a draft invoice
  */
-export const useCreateInvoice = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useCreateInvoice = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createInvoice>>, TError,{data: InvoiceCreateRequest}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createInvoice>>,
@@ -8594,7 +8595,7 @@ export const createInvoicePreview = async (createInvoicePreviewBody: CreateInvoi
 
 
 
-export const getCreateInvoicePreviewMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getCreateInvoicePreviewMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createInvoicePreview>>, TError,{data: CreateInvoicePreviewBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createInvoicePreview>>, TError,{data: CreateInvoicePreviewBody}, TContext> => {
 
@@ -8623,12 +8624,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateInvoicePreviewMutationResult = NonNullable<Awaited<ReturnType<typeof createInvoicePreview>>>
     export type CreateInvoicePreviewMutationBody = CreateInvoicePreviewBody
-    export type CreateInvoicePreviewMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type CreateInvoicePreviewMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Preview a customer's next invoice
  */
-export const useCreateInvoicePreview = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useCreateInvoicePreview = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createInvoicePreview>>, TError,{data: CreateInvoicePreviewBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createInvoicePreview>>,
@@ -8890,7 +8891,7 @@ export const sendInvoice = async (id: string,
 
 
 
-export const getSendInvoiceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getSendInvoiceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendInvoice>>, TError,{id: string;data: SendInvoiceBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof sendInvoice>>, TError,{id: string;data: SendInvoiceBody}, TContext> => {
 
@@ -8919,12 +8920,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SendInvoiceMutationResult = NonNullable<Awaited<ReturnType<typeof sendInvoice>>>
     export type SendInvoiceMutationBody = SendInvoiceBody
-    export type SendInvoiceMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type SendInvoiceMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Email an invoice to the customer
  */
-export const useSendInvoice = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useSendInvoice = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendInvoice>>, TError,{id: string;data: SendInvoiceBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof sendInvoice>>,
@@ -8971,7 +8972,7 @@ export const addInvoiceLineItem = async (id: string,
 
 
 
-export const getAddInvoiceLineItemMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getAddInvoiceLineItemMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addInvoiceLineItem>>, TError,{id: string;data: InvoiceLineItemInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof addInvoiceLineItem>>, TError,{id: string;data: InvoiceLineItemInput}, TContext> => {
 
@@ -9000,12 +9001,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type AddInvoiceLineItemMutationResult = NonNullable<Awaited<ReturnType<typeof addInvoiceLineItem>>>
     export type AddInvoiceLineItemMutationBody = InvoiceLineItemInput
-    export type AddInvoiceLineItemMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type AddInvoiceLineItemMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Add a line item to a draft invoice
  */
-export const useAddInvoiceLineItem = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useAddInvoiceLineItem = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof addInvoiceLineItem>>, TError,{id: string;data: InvoiceLineItemInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof addInvoiceLineItem>>,
@@ -9062,7 +9063,7 @@ export const voidInvoice = async (id: string, options?: RequestInit): Promise<In
 
 
 
-export const getVoidInvoiceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getVoidInvoiceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof voidInvoice>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof voidInvoice>>, TError,{id: string}, TContext> => {
 
@@ -9091,12 +9092,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type VoidInvoiceMutationResult = NonNullable<Awaited<ReturnType<typeof voidInvoice>>>
 
-    export type VoidInvoiceMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type VoidInvoiceMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Void an invoice
  */
-export const useVoidInvoice = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useVoidInvoice = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof voidInvoice>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof voidInvoice>>,
@@ -9144,7 +9145,7 @@ export const resendInvoiceSetupLink = async (id: string, options?: RequestInit):
 
 
 
-export const getResendInvoiceSetupLinkMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getResendInvoiceSetupLinkMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resendInvoiceSetupLink>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof resendInvoiceSetupLink>>, TError,{id: string}, TContext> => {
 
@@ -9173,12 +9174,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ResendInvoiceSetupLinkMutationResult = NonNullable<Awaited<ReturnType<typeof resendInvoiceSetupLink>>>
 
-    export type ResendInvoiceSetupLinkMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type ResendInvoiceSetupLinkMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Resend the payment-method setup link
  */
-export const useResendInvoiceSetupLink = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useResendInvoiceSetupLink = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof resendInvoiceSetupLink>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof resendInvoiceSetupLink>>,
@@ -9252,7 +9253,7 @@ export const markInvoiceUncollectible = async (id: string, options?: RequestInit
 
 
 
-export const getMarkInvoiceUncollectibleMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getMarkInvoiceUncollectibleMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markInvoiceUncollectible>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof markInvoiceUncollectible>>, TError,{id: string}, TContext> => {
 
@@ -9281,12 +9282,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type MarkInvoiceUncollectibleMutationResult = NonNullable<Awaited<ReturnType<typeof markInvoiceUncollectible>>>
 
-    export type MarkInvoiceUncollectibleMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type MarkInvoiceUncollectibleMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Write off an invoice as uncollectible
  */
-export const useMarkInvoiceUncollectible = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useMarkInvoiceUncollectible = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof markInvoiceUncollectible>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof markInvoiceUncollectible>>,
@@ -9339,7 +9340,7 @@ export const recordInvoicePayment = async (id: string,
 
 
 
-export const getRecordInvoicePaymentMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getRecordInvoicePaymentMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordInvoicePayment>>, TError,{id: string;data?: RecordInvoicePaymentBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof recordInvoicePayment>>, TError,{id: string;data?: RecordInvoicePaymentBody}, TContext> => {
 
@@ -9368,12 +9369,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RecordInvoicePaymentMutationResult = NonNullable<Awaited<ReturnType<typeof recordInvoicePayment>>>
     export type RecordInvoicePaymentMutationBody = RecordInvoicePaymentBody | undefined
-    export type RecordInvoicePaymentMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type RecordInvoicePaymentMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Record a payment made outside Stripe
  */
-export const useRecordInvoicePayment = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useRecordInvoicePayment = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordInvoicePayment>>, TError,{id: string;data?: RecordInvoicePaymentBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof recordInvoicePayment>>,
@@ -9415,7 +9416,7 @@ export const rotateInvoicePublicToken = async (id: string, options?: RequestInit
 
 
 
-export const getRotateInvoicePublicTokenMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getRotateInvoicePublicTokenMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateInvoicePublicToken>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof rotateInvoicePublicToken>>, TError,{id: string}, TContext> => {
 
@@ -9444,12 +9445,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RotateInvoicePublicTokenMutationResult = NonNullable<Awaited<ReturnType<typeof rotateInvoicePublicToken>>>
 
-    export type RotateInvoicePublicTokenMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type RotateInvoicePublicTokenMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Replace the hosted invoice link
  */
-export const useRotateInvoicePublicToken = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useRotateInvoicePublicToken = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateInvoicePublicToken>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof rotateInvoicePublicToken>>,
@@ -9511,7 +9512,7 @@ export const collectInvoicePayment = async (id: string, options?: RequestInit): 
 
 
 
-export const getCollectInvoicePaymentMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getCollectInvoicePaymentMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof collectInvoicePayment>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof collectInvoicePayment>>, TError,{id: string}, TContext> => {
 
@@ -9540,12 +9541,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CollectInvoicePaymentMutationResult = NonNullable<Awaited<ReturnType<typeof collectInvoicePayment>>>
 
-    export type CollectInvoicePaymentMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type CollectInvoicePaymentMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Charge a finalized invoice now
  */
-export const useCollectInvoicePayment = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useCollectInvoicePayment = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof collectInvoicePayment>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof collectInvoicePayment>>,
@@ -9604,7 +9605,7 @@ export const refundInvoice = async (id: string,
 
 
 
-export const getRefundInvoiceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getRefundInvoiceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refundInvoice>>, TError,{id: string;data: RefundInvoiceBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof refundInvoice>>, TError,{id: string;data: RefundInvoiceBody}, TContext> => {
 
@@ -9633,12 +9634,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RefundInvoiceMutationResult = NonNullable<Awaited<ReturnType<typeof refundInvoice>>>
     export type RefundInvoiceMutationBody = RefundInvoiceBody
-    export type RefundInvoiceMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type RefundInvoiceMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Refund a paid invoice
  */
-export const useRefundInvoice = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useRefundInvoice = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof refundInvoice>>, TError,{id: string;data: RefundInvoiceBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof refundInvoice>>,
@@ -10051,7 +10052,7 @@ export const dismissInvoiceStripeRefund = async (id: string,
 
 
 
-export const getDismissInvoiceStripeRefundMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getDismissInvoiceStripeRefundMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dismissInvoiceStripeRefund>>, TError,{id: string;stripeRefundId: string;data: DismissInvoiceStripeRefundBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof dismissInvoiceStripeRefund>>, TError,{id: string;stripeRefundId: string;data: DismissInvoiceStripeRefundBody}, TContext> => {
 
@@ -10080,12 +10081,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DismissInvoiceStripeRefundMutationResult = NonNullable<Awaited<ReturnType<typeof dismissInvoiceStripeRefund>>>
     export type DismissInvoiceStripeRefundMutationBody = DismissInvoiceStripeRefundBody
-    export type DismissInvoiceStripeRefundMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type DismissInvoiceStripeRefundMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Dismiss a refund made in Stripe
  */
-export const useDismissInvoiceStripeRefund = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useDismissInvoiceStripeRefund = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof dismissInvoiceStripeRefund>>, TError,{id: string;stripeRefundId: string;data: DismissInvoiceStripeRefundBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof dismissInvoiceStripeRefund>>,
@@ -10234,7 +10235,7 @@ export const sendCreditNote = async (id: string,
 
 
 
-export const getSendCreditNoteMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getSendCreditNoteMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendCreditNote>>, TError,{id: string;data: SendCreditNoteBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof sendCreditNote>>, TError,{id: string;data: SendCreditNoteBody}, TContext> => {
 
@@ -10263,12 +10264,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SendCreditNoteMutationResult = NonNullable<Awaited<ReturnType<typeof sendCreditNote>>>
     export type SendCreditNoteMutationBody = SendCreditNoteBody
-    export type SendCreditNoteMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type SendCreditNoteMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Email a credit note to the customer
  */
-export const useSendCreditNote = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useSendCreditNote = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendCreditNote>>, TError,{id: string;data: SendCreditNoteBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof sendCreditNote>>,
@@ -10433,7 +10434,7 @@ export const issueCreditNote = async (id: string, options?: RequestInit): Promis
 
 
 
-export const getIssueCreditNoteMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getIssueCreditNoteMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof issueCreditNote>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof issueCreditNote>>, TError,{id: string}, TContext> => {
 
@@ -10462,12 +10463,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type IssueCreditNoteMutationResult = NonNullable<Awaited<ReturnType<typeof issueCreditNote>>>
 
-    export type IssueCreditNoteMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type IssueCreditNoteMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Issue a draft credit note
  */
-export const useIssueCreditNote = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useIssueCreditNote = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof issueCreditNote>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof issueCreditNote>>,
@@ -10515,7 +10516,7 @@ export const attachStripeRefundToCreditNote = async (id: string,
 
 
 
-export const getAttachStripeRefundToCreditNoteMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getAttachStripeRefundToCreditNoteMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof attachStripeRefundToCreditNote>>, TError,{id: string;data: AttachStripeRefundToCreditNoteBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof attachStripeRefundToCreditNote>>, TError,{id: string;data: AttachStripeRefundToCreditNoteBody}, TContext> => {
 
@@ -10544,12 +10545,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type AttachStripeRefundToCreditNoteMutationResult = NonNullable<Awaited<ReturnType<typeof attachStripeRefundToCreditNote>>>
     export type AttachStripeRefundToCreditNoteMutationBody = AttachStripeRefundToCreditNoteBody
-    export type AttachStripeRefundToCreditNoteMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type AttachStripeRefundToCreditNoteMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Attach a refund made in Stripe to a credit note
  */
-export const useAttachStripeRefundToCreditNote = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useAttachStripeRefundToCreditNote = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof attachStripeRefundToCreditNote>>, TError,{id: string;data: AttachStripeRefundToCreditNoteBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof attachStripeRefundToCreditNote>>,
@@ -10596,7 +10597,7 @@ export const retryCreditNoteRefund = async (id: string, options?: RequestInit): 
 
 
 
-export const getRetryCreditNoteRefundMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getRetryCreditNoteRefundMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryCreditNoteRefund>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof retryCreditNoteRefund>>, TError,{id: string}, TContext> => {
 
@@ -10625,12 +10626,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RetryCreditNoteRefundMutationResult = NonNullable<Awaited<ReturnType<typeof retryCreditNoteRefund>>>
 
-    export type RetryCreditNoteRefundMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type RetryCreditNoteRefundMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Retry a failed credit-note refund
  */
-export const useRetryCreditNoteRefund = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useRetryCreditNoteRefund = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryCreditNoteRefund>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof retryCreditNoteRefund>>,
@@ -10670,7 +10671,7 @@ export const voidCreditNote = async (id: string, options?: RequestInit): Promise
 
 
 
-export const getVoidCreditNoteMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getVoidCreditNoteMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof voidCreditNote>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof voidCreditNote>>, TError,{id: string}, TContext> => {
 
@@ -10699,12 +10700,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type VoidCreditNoteMutationResult = NonNullable<Awaited<ReturnType<typeof voidCreditNote>>>
 
-    export type VoidCreditNoteMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type VoidCreditNoteMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Void a draft credit note
  */
-export const useVoidCreditNote = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useVoidCreditNote = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof voidCreditNote>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof voidCreditNote>>,
@@ -10894,7 +10895,7 @@ export const finalizeInvoice = async (id: string, options?: RequestInit): Promis
 
 
 
-export const getFinalizeInvoiceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getFinalizeInvoiceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof finalizeInvoice>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof finalizeInvoice>>, TError,{id: string}, TContext> => {
 
@@ -10923,12 +10924,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type FinalizeInvoiceMutationResult = NonNullable<Awaited<ReturnType<typeof finalizeInvoice>>>
 
-    export type FinalizeInvoiceMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type FinalizeInvoiceMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Finalize a draft invoice
  */
-export const useFinalizeInvoice = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useFinalizeInvoice = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof finalizeInvoice>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof finalizeInvoice>>,
@@ -10988,7 +10989,7 @@ export const retryInvoiceTax = async (id: string, options?: RequestInit): Promis
 
 
 
-export const getRetryInvoiceTaxMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getRetryInvoiceTaxMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryInvoiceTax>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof retryInvoiceTax>>, TError,{id: string}, TContext> => {
 
@@ -11017,12 +11018,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RetryInvoiceTaxMutationResult = NonNullable<Awaited<ReturnType<typeof retryInvoiceTax>>>
 
-    export type RetryInvoiceTaxMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type RetryInvoiceTaxMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Retry tax calculation on a draft invoice
  */
-export const useRetryInvoiceTax = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useRetryInvoiceTax = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryInvoiceTax>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof retryInvoiceTax>>,
@@ -11075,7 +11076,7 @@ export const login = async (loginBody: LoginBody, options?: RequestInit): Promis
 
 
 
-export const getLoginMutationOptions = <TError = InvalidBodyResponse | Error,
+export const getLoginMutationOptions = <TError = InvalidBodyResponse | Error | PayloadTooLargeResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof login>>, TError,{data: LoginBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof login>>, TError,{data: LoginBody}, TContext> => {
 
@@ -11104,12 +11105,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type LoginMutationResult = NonNullable<Awaited<ReturnType<typeof login>>>
     export type LoginMutationBody = LoginBody
-    export type LoginMutationError = InvalidBodyResponse | Error
+    export type LoginMutationError = InvalidBodyResponse | Error | PayloadTooLargeResponse
 
     /**
  * @summary Sign in to the dashboard with email and password
  */
-export const useLogin = <TError = InvalidBodyResponse | Error,
+export const useLogin = <TError = InvalidBodyResponse | Error | PayloadTooLargeResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof login>>, TError,{data: LoginBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof login>>,
@@ -11155,7 +11156,7 @@ export const logout = async ( options?: RequestInit): Promise<void> => {
 
 
 
-export const getLogoutMutationOptions = <TError = InvalidBodyResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
+export const getLogoutMutationOptions = <TError = InvalidBodyResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof logout>>, TError,void, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof logout>>, TError,void, TContext> => {
 
@@ -11184,12 +11185,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type LogoutMutationResult = NonNullable<Awaited<ReturnType<typeof logout>>>
 
-    export type LogoutMutationError = InvalidBodyResponse | Error | BodyNotAllowedResponse | RateLimitedResponse
+    export type LogoutMutationError = InvalidBodyResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse
 
     /**
  * @summary Sign out of the dashboard
  */
-export const useLogout = <TError = InvalidBodyResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
+export const useLogout = <TError = InvalidBodyResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof logout>>, TError,void, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof logout>>,
@@ -11234,7 +11235,7 @@ export const switchSessionMode = async (switchSessionModeBody: SwitchSessionMode
 
 
 
-export const getSwitchSessionModeMutationOptions = <TError = InvalidBodyResponse | Error | RateLimitedResponse,
+export const getSwitchSessionModeMutationOptions = <TError = InvalidBodyResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof switchSessionMode>>, TError,{data: SwitchSessionModeBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof switchSessionMode>>, TError,{data: SwitchSessionModeBody}, TContext> => {
 
@@ -11263,12 +11264,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SwitchSessionModeMutationResult = NonNullable<Awaited<ReturnType<typeof switchSessionMode>>>
     export type SwitchSessionModeMutationBody = SwitchSessionModeBody
-    export type SwitchSessionModeMutationError = InvalidBodyResponse | Error | RateLimitedResponse
+    export type SwitchSessionModeMutationError = InvalidBodyResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Switch the dashboard session between test and live mode
  */
-export const useSwitchSessionMode = <TError = InvalidBodyResponse | Error | RateLimitedResponse,
+export const useSwitchSessionMode = <TError = InvalidBodyResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof switchSessionMode>>, TError,{data: SwitchSessionModeBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof switchSessionMode>>,
@@ -11319,7 +11320,7 @@ export const requestPasswordReset = async (requestPasswordResetBody: RequestPass
 
 
 
-export const getRequestPasswordResetMutationOptions = <TError = InvalidBodyResponse | Error | RateLimitedResponse,
+export const getRequestPasswordResetMutationOptions = <TError = InvalidBodyResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestPasswordReset>>, TError,{data: RequestPasswordResetBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof requestPasswordReset>>, TError,{data: RequestPasswordResetBody}, TContext> => {
 
@@ -11348,12 +11349,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RequestPasswordResetMutationResult = NonNullable<Awaited<ReturnType<typeof requestPasswordReset>>>
     export type RequestPasswordResetMutationBody = RequestPasswordResetBody
-    export type RequestPasswordResetMutationError = InvalidBodyResponse | Error | RateLimitedResponse
+    export type RequestPasswordResetMutationError = InvalidBodyResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Request a password reset link
  */
-export const useRequestPasswordReset = <TError = InvalidBodyResponse | Error | RateLimitedResponse,
+export const useRequestPasswordReset = <TError = InvalidBodyResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof requestPasswordReset>>, TError,{data: RequestPasswordResetBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof requestPasswordReset>>,
@@ -11398,7 +11399,7 @@ export const confirmPasswordReset = async (confirmPasswordResetBody: ConfirmPass
 
 
 
-export const getConfirmPasswordResetMutationOptions = <TError = InvalidBodyResponse | Error | RateLimitedResponse,
+export const getConfirmPasswordResetMutationOptions = <TError = InvalidBodyResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmPasswordReset>>, TError,{data: ConfirmPasswordResetBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof confirmPasswordReset>>, TError,{data: ConfirmPasswordResetBody}, TContext> => {
 
@@ -11427,12 +11428,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ConfirmPasswordResetMutationResult = NonNullable<Awaited<ReturnType<typeof confirmPasswordReset>>>
     export type ConfirmPasswordResetMutationBody = ConfirmPasswordResetBody
-    export type ConfirmPasswordResetMutationError = InvalidBodyResponse | Error | RateLimitedResponse
+    export type ConfirmPasswordResetMutationError = InvalidBodyResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Set a new password using a reset token
  */
-export const useConfirmPasswordReset = <TError = InvalidBodyResponse | Error | RateLimitedResponse,
+export const useConfirmPasswordReset = <TError = InvalidBodyResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof confirmPasswordReset>>, TError,{data: ConfirmPasswordResetBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof confirmPasswordReset>>,
@@ -11712,7 +11713,7 @@ export const acceptInvitation = async (acceptInvitationBody: AcceptInvitationBod
 
 
 
-export const getAcceptInvitationMutationOptions = <TError = InvalidBodyResponse | Error | RateLimitedResponse,
+export const getAcceptInvitationMutationOptions = <TError = InvalidBodyResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptInvitation>>, TError,{data: AcceptInvitationBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof acceptInvitation>>, TError,{data: AcceptInvitationBody}, TContext> => {
 
@@ -11741,12 +11742,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type AcceptInvitationMutationResult = NonNullable<Awaited<ReturnType<typeof acceptInvitation>>>
     export type AcceptInvitationMutationBody = AcceptInvitationBody
-    export type AcceptInvitationMutationError = InvalidBodyResponse | Error | RateLimitedResponse
+    export type AcceptInvitationMutationError = InvalidBodyResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Accept a team invitation
  */
-export const useAcceptInvitation = <TError = InvalidBodyResponse | Error | RateLimitedResponse,
+export const useAcceptInvitation = <TError = InvalidBodyResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof acceptInvitation>>, TError,{data: AcceptInvitationBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof acceptInvitation>>,
@@ -11903,7 +11904,7 @@ export const inviteMember = async (inviteMemberBody: InviteMemberBody, options?:
 
 
 
-export const getInviteMemberMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getInviteMemberMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof inviteMember>>, TError,{data: InviteMemberBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof inviteMember>>, TError,{data: InviteMemberBody}, TContext> => {
 
@@ -11932,12 +11933,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type InviteMemberMutationResult = NonNullable<Awaited<ReturnType<typeof inviteMember>>>
     export type InviteMemberMutationBody = InviteMemberBody
-    export type InviteMemberMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type InviteMemberMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Invite a teammate by email
  */
-export const useInviteMember = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useInviteMember = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof inviteMember>>, TError,{data: InviteMemberBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof inviteMember>>,
@@ -11980,7 +11981,7 @@ export const revokeMemberInvitation = async (id: string, options?: RequestInit):
 
 
 
-export const getRevokeMemberInvitationMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
+export const getRevokeMemberInvitationMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeMemberInvitation>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof revokeMemberInvitation>>, TError,{id: string}, TContext> => {
 
@@ -12009,12 +12010,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RevokeMemberInvitationMutationResult = NonNullable<Awaited<ReturnType<typeof revokeMemberInvitation>>>
 
-    export type RevokeMemberInvitationMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse
+    export type RevokeMemberInvitationMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse
 
     /**
  * @summary Revoke an invitation
  */
-export const useRevokeMemberInvitation = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
+export const useRevokeMemberInvitation = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeMemberInvitation>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof revokeMemberInvitation>>,
@@ -12058,7 +12059,7 @@ export const removeMember = async (userID: string, options?: RequestInit): Promi
 
 
 
-export const getRemoveMemberMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
+export const getRemoveMemberMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeMember>>, TError,{userID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof removeMember>>, TError,{userID: string}, TContext> => {
 
@@ -12087,12 +12088,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RemoveMemberMutationResult = NonNullable<Awaited<ReturnType<typeof removeMember>>>
 
-    export type RemoveMemberMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse
+    export type RemoveMemberMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse
 
     /**
  * @summary Remove a member from the account
  */
-export const useRemoveMember = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
+export const useRemoveMember = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof removeMember>>, TError,{userID: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof removeMember>>,
@@ -12250,7 +12251,7 @@ export const runBilling = async ( options?: RequestInit): Promise<RunBilling200 
 
 
 
-export const getRunBillingMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getRunBillingMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runBilling>>, TError,void, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof runBilling>>, TError,void, TContext> => {
 
@@ -12279,12 +12280,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RunBillingMutationResult = NonNullable<Awaited<ReturnType<typeof runBilling>>>
 
-    export type RunBillingMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type RunBillingMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse
 
     /**
  * @summary Run billing now
  */
-export const useRunBilling = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useRunBilling = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof runBilling>>, TError,void, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof runBilling>>,
@@ -12439,7 +12440,7 @@ export const upsertProviderCost = async (upsertProviderCostBody: UpsertProviderC
 
 
 
-export const getUpsertProviderCostMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getUpsertProviderCostMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertProviderCost>>, TError,{data: UpsertProviderCostBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof upsertProviderCost>>, TError,{data: UpsertProviderCostBody}, TContext> => {
 
@@ -12468,12 +12469,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpsertProviderCostMutationResult = NonNullable<Awaited<ReturnType<typeof upsertProviderCost>>>
     export type UpsertProviderCostMutationBody = UpsertProviderCostBody
-    export type UpsertProviderCostMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type UpsertProviderCostMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse
 
     /**
  * @summary Create or update a provider cost rate
  */
-export const useUpsertProviderCost = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useUpsertProviderCost = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof upsertProviderCost>>, TError,{data: UpsertProviderCostBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof upsertProviderCost>>,
@@ -12516,7 +12517,7 @@ export const deleteProviderCost = async (id: string, options?: RequestInit): Pro
 
 
 
-export const getDeleteProviderCostMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getDeleteProviderCostMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteProviderCost>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteProviderCost>>, TError,{id: string}, TContext> => {
 
@@ -12545,12 +12546,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DeleteProviderCostMutationResult = NonNullable<Awaited<ReturnType<typeof deleteProviderCost>>>
 
-    export type DeleteProviderCostMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type DeleteProviderCostMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Delete a provider cost rate
  */
-export const useDeleteProviderCost = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useDeleteProviderCost = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteProviderCost>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteProviderCost>>,
@@ -12721,7 +12722,7 @@ export const grantCredits = async (grantCreditsBody: GrantCreditsBody, options?:
 
 
 
-export const getGrantCreditsMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getGrantCreditsMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof grantCredits>>, TError,{data: GrantCreditsBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof grantCredits>>, TError,{data: GrantCreditsBody}, TContext> => {
 
@@ -12750,12 +12751,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type GrantCreditsMutationResult = NonNullable<Awaited<ReturnType<typeof grantCredits>>>
     export type GrantCreditsMutationBody = GrantCreditsBody
-    export type GrantCreditsMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type GrantCreditsMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Grant credit to a customer
  */
-export const useGrantCredits = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useGrantCredits = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof grantCredits>>, TError,{data: GrantCreditsBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof grantCredits>>,
@@ -13130,7 +13131,7 @@ export const createTestClock = async (createTestClockBody: CreateTestClockBody, 
 
 
 
-export const getCreateTestClockMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getCreateTestClockMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTestClock>>, TError,{data: CreateTestClockBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createTestClock>>, TError,{data: CreateTestClockBody}, TContext> => {
 
@@ -13159,12 +13160,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateTestClockMutationResult = NonNullable<Awaited<ReturnType<typeof createTestClock>>>
     export type CreateTestClockMutationBody = CreateTestClockBody
-    export type CreateTestClockMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type CreateTestClockMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Create a test clock
  */
-export const useCreateTestClock = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useCreateTestClock = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createTestClock>>, TError,{data: CreateTestClockBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createTestClock>>,
@@ -13322,7 +13323,7 @@ export const deleteTestClock = async (id: string, options?: RequestInit): Promis
 
 
 
-export const getDeleteTestClockMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getDeleteTestClockMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteTestClock>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteTestClock>>, TError,{id: string}, TContext> => {
 
@@ -13351,12 +13352,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DeleteTestClockMutationResult = NonNullable<Awaited<ReturnType<typeof deleteTestClock>>>
 
-    export type DeleteTestClockMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type DeleteTestClockMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Delete a test clock and its simulated data
  */
-export const useDeleteTestClock = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useDeleteTestClock = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteTestClock>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteTestClock>>,
@@ -13429,7 +13430,7 @@ export const advanceTestClock = async (id: string,
 
 
 
-export const getAdvanceTestClockMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getAdvanceTestClockMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof advanceTestClock>>, TError,{id: string;data: AdvanceTestClockBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof advanceTestClock>>, TError,{id: string;data: AdvanceTestClockBody}, TContext> => {
 
@@ -13458,12 +13459,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type AdvanceTestClockMutationResult = NonNullable<Awaited<ReturnType<typeof advanceTestClock>>>
     export type AdvanceTestClockMutationBody = AdvanceTestClockBody
-    export type AdvanceTestClockMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type AdvanceTestClockMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Advance a test clock
  */
-export const useAdvanceTestClock = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useAdvanceTestClock = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof advanceTestClock>>, TError,{id: string;data: AdvanceTestClockBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof advanceTestClock>>,
@@ -13508,7 +13509,7 @@ export const retryTestClockAdvance = async (id: string, options?: RequestInit): 
 
 
 
-export const getRetryTestClockAdvanceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getRetryTestClockAdvanceMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryTestClockAdvance>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof retryTestClockAdvance>>, TError,{id: string}, TContext> => {
 
@@ -13537,12 +13538,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RetryTestClockAdvanceMutationResult = NonNullable<Awaited<ReturnType<typeof retryTestClockAdvance>>>
 
-    export type RetryTestClockAdvanceMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type RetryTestClockAdvanceMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Retry a failed test clock advance
  */
-export const useRetryTestClockAdvance = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useRetryTestClockAdvance = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof retryTestClockAdvance>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof retryTestClockAdvance>>,
@@ -14026,7 +14027,7 @@ export const previewRecipe = async (key: string,
 
 
 
-export const getPreviewRecipeMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getPreviewRecipeMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewRecipe>>, TError,{key: string;data?: PreviewRecipeBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof previewRecipe>>, TError,{key: string;data?: PreviewRecipeBody}, TContext> => {
 
@@ -14055,12 +14056,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type PreviewRecipeMutationResult = NonNullable<Awaited<ReturnType<typeof previewRecipe>>>
     export type PreviewRecipeMutationBody = PreviewRecipeBody | undefined
-    export type PreviewRecipeMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type PreviewRecipeMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Preview a recipe
  */
-export const usePreviewRecipe = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const usePreviewRecipe = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof previewRecipe>>, TError,{key: string;data?: PreviewRecipeBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof previewRecipe>>,
@@ -14113,7 +14114,7 @@ export const instantiateRecipe = async (key: string,
 
 
 
-export const getInstantiateRecipeMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getInstantiateRecipeMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof instantiateRecipe>>, TError,{key: string;data?: InstantiateRecipeBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof instantiateRecipe>>, TError,{key: string;data?: InstantiateRecipeBody}, TContext> => {
 
@@ -14142,12 +14143,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type InstantiateRecipeMutationResult = NonNullable<Awaited<ReturnType<typeof instantiateRecipe>>>
     export type InstantiateRecipeMutationBody = InstantiateRecipeBody | undefined
-    export type InstantiateRecipeMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type InstantiateRecipeMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Install a recipe
  */
-export const useInstantiateRecipe = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useInstantiateRecipe = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof instantiateRecipe>>, TError,{key: string;data?: InstantiateRecipeBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof instantiateRecipe>>,
@@ -15717,7 +15718,7 @@ export const createDunningPolicy = async (dunningPolicyInput: DunningPolicyInput
 
 
 
-export const getCreateDunningPolicyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getCreateDunningPolicyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDunningPolicy>>, TError,{data: DunningPolicyInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createDunningPolicy>>, TError,{data: DunningPolicyInput}, TContext> => {
 
@@ -15746,12 +15747,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateDunningPolicyMutationResult = NonNullable<Awaited<ReturnType<typeof createDunningPolicy>>>
     export type CreateDunningPolicyMutationBody = DunningPolicyInput
-    export type CreateDunningPolicyMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type CreateDunningPolicyMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse
 
     /**
  * @summary Create a dunning policy
  */
-export const useCreateDunningPolicy = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useCreateDunningPolicy = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createDunningPolicy>>, TError,{data: DunningPolicyInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createDunningPolicy>>,
@@ -15898,7 +15899,7 @@ export const updateDunningPolicy = async (id: string,
 
 
 
-export const getUpdateDunningPolicyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getUpdateDunningPolicyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateDunningPolicy>>, TError,{id: string;data: DunningPolicyInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateDunningPolicy>>, TError,{id: string;data: DunningPolicyInput}, TContext> => {
 
@@ -15927,12 +15928,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdateDunningPolicyMutationResult = NonNullable<Awaited<ReturnType<typeof updateDunningPolicy>>>
     export type UpdateDunningPolicyMutationBody = DunningPolicyInput
-    export type UpdateDunningPolicyMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type UpdateDunningPolicyMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Replace a dunning policy's settings
  */
-export const useUpdateDunningPolicy = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useUpdateDunningPolicy = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateDunningPolicy>>, TError,{id: string;data: DunningPolicyInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateDunningPolicy>>,
@@ -15973,7 +15974,7 @@ export const deleteDunningPolicy = async (id: string, options?: RequestInit): Pr
 
 
 
-export const getDeleteDunningPolicyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getDeleteDunningPolicyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDunningPolicy>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deleteDunningPolicy>>, TError,{id: string}, TContext> => {
 
@@ -16002,12 +16003,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DeleteDunningPolicyMutationResult = NonNullable<Awaited<ReturnType<typeof deleteDunningPolicy>>>
 
-    export type DeleteDunningPolicyMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type DeleteDunningPolicyMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Delete a dunning policy
  */
-export const useDeleteDunningPolicy = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useDeleteDunningPolicy = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deleteDunningPolicy>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deleteDunningPolicy>>,
@@ -16048,7 +16049,7 @@ export const setDefaultDunningPolicy = async (id: string, options?: RequestInit)
 
 
 
-export const getSetDefaultDunningPolicyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getSetDefaultDunningPolicyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setDefaultDunningPolicy>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof setDefaultDunningPolicy>>, TError,{id: string}, TContext> => {
 
@@ -16077,12 +16078,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SetDefaultDunningPolicyMutationResult = NonNullable<Awaited<ReturnType<typeof setDefaultDunningPolicy>>>
 
-    export type SetDefaultDunningPolicyMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type SetDefaultDunningPolicyMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Make a dunning policy the default
  */
-export const useSetDefaultDunningPolicy = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useSetDefaultDunningPolicy = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setDefaultDunningPolicy>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof setDefaultDunningPolicy>>,
@@ -16136,7 +16137,7 @@ export const createPriceOverride = async (createPriceOverrideBody: CreatePriceOv
 
 
 
-export const getCreatePriceOverrideMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const getCreatePriceOverrideMutationOptions = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPriceOverride>>, TError,{data: CreatePriceOverrideBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createPriceOverride>>, TError,{data: CreatePriceOverrideBody}, TContext> => {
 
@@ -16165,12 +16166,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreatePriceOverrideMutationResult = NonNullable<Awaited<ReturnType<typeof createPriceOverride>>>
     export type CreatePriceOverrideMutationBody = CreatePriceOverrideBody
-    export type CreatePriceOverrideMutationError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse
+    export type CreatePriceOverrideMutationError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Create a customer price override
  */
-export const useCreatePriceOverride = <TError = Error | UnauthorizedResponse | ForbiddenResponse | RateLimitedResponse,
+export const useCreatePriceOverride = <TError = Error | UnauthorizedResponse | ForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createPriceOverride>>, TError,{data: CreatePriceOverrideBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createPriceOverride>>,
@@ -16323,7 +16324,7 @@ export const deletePriceOverride = async (id: string, options?: RequestInit): Pr
 
 
 
-export const getDeletePriceOverrideMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const getDeletePriceOverrideMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deletePriceOverride>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof deletePriceOverride>>, TError,{id: string}, TContext> => {
 
@@ -16352,12 +16353,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DeletePriceOverrideMutationResult = NonNullable<Awaited<ReturnType<typeof deletePriceOverride>>>
 
-    export type DeletePriceOverrideMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+    export type DeletePriceOverrideMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary End a customer price override
  */
-export const useDeletePriceOverride = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+export const useDeletePriceOverride = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof deletePriceOverride>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof deletePriceOverride>>,
@@ -16511,7 +16512,7 @@ export const createApiKey = async (createApiKeyBody: CreateApiKeyBody, options?:
 
 
 
-export const getCreateApiKeyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse | AuthenticationUnavailableResponse,
+export const getCreateApiKeyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | RateLimitedResponse | AuthenticationUnavailableResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createApiKey>>, TError,{data: CreateApiKeyBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof createApiKey>>, TError,{data: CreateApiKeyBody}, TContext> => {
 
@@ -16540,12 +16541,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type CreateApiKeyMutationResult = NonNullable<Awaited<ReturnType<typeof createApiKey>>>
     export type CreateApiKeyMutationBody = CreateApiKeyBody
-    export type CreateApiKeyMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse | AuthenticationUnavailableResponse
+    export type CreateApiKeyMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | RateLimitedResponse | AuthenticationUnavailableResponse
 
     /**
  * @summary Create an API key
  */
-export const useCreateApiKey = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse | AuthenticationUnavailableResponse,
+export const useCreateApiKey = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | RateLimitedResponse | AuthenticationUnavailableResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof createApiKey>>, TError,{data: CreateApiKeyBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof createApiKey>>,
@@ -16697,7 +16698,7 @@ export const revokeApiKey = async (id: string, options?: RequestInit): Promise<A
 
 
 
-export const getRevokeApiKeyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse | AuthenticationUnavailableResponse,
+export const getRevokeApiKeyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse | AuthenticationUnavailableResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeApiKey>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof revokeApiKey>>, TError,{id: string}, TContext> => {
 
@@ -16726,12 +16727,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RevokeApiKeyMutationResult = NonNullable<Awaited<ReturnType<typeof revokeApiKey>>>
 
-    export type RevokeApiKeyMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse | AuthenticationUnavailableResponse
+    export type RevokeApiKeyMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse | AuthenticationUnavailableResponse
 
     /**
  * @summary Revoke an API key
  */
-export const useRevokeApiKey = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse | AuthenticationUnavailableResponse,
+export const useRevokeApiKey = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse | AuthenticationUnavailableResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof revokeApiKey>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof revokeApiKey>>,
@@ -16778,7 +16779,7 @@ export const rotateApiKey = async (id: string,
 
 
 
-export const getRotateApiKeyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse | AuthenticationUnavailableResponse,
+export const getRotateApiKeyMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | RateLimitedResponse | AuthenticationUnavailableResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateApiKey>>, TError,{id: string;data?: RotateApiKeyBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof rotateApiKey>>, TError,{id: string;data?: RotateApiKeyBody}, TContext> => {
 
@@ -16807,12 +16808,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type RotateApiKeyMutationResult = NonNullable<Awaited<ReturnType<typeof rotateApiKey>>>
     export type RotateApiKeyMutationBody = RotateApiKeyBody | undefined
-    export type RotateApiKeyMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse | AuthenticationUnavailableResponse
+    export type RotateApiKeyMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | RateLimitedResponse | AuthenticationUnavailableResponse
 
     /**
  * @summary Rotate an API key
  */
-export const useRotateApiKey = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse | AuthenticationUnavailableResponse,
+export const useRotateApiKey = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | RateLimitedResponse | AuthenticationUnavailableResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof rotateApiKey>>, TError,{id: string;data?: RotateApiKeyBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof rotateApiKey>>,
@@ -16988,7 +16989,7 @@ export const updateTenantSettings = async (tenantSettingsInput: TenantSettingsIn
 
 
 
-export const getUpdateTenantSettingsMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const getUpdateTenantSettingsMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateTenantSettings>>, TError,{data: TenantSettingsInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof updateTenantSettings>>, TError,{data: TenantSettingsInput}, TContext> => {
 
@@ -17017,12 +17018,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type UpdateTenantSettingsMutationResult = NonNullable<Awaited<ReturnType<typeof updateTenantSettings>>>
     export type UpdateTenantSettingsMutationBody = TenantSettingsInput
-    export type UpdateTenantSettingsMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse
+    export type UpdateTenantSettingsMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Update account settings
  */
-export const useUpdateTenantSettings = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | RateLimitedResponse,
+export const useUpdateTenantSettings = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof updateTenantSettings>>, TError,{data: TenantSettingsInput}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof updateTenantSettings>>,
@@ -17171,7 +17172,7 @@ export const sendTestEmail = async ( options?: RequestInit): Promise<SendTestEma
 
 
 
-export const getSendTestEmailMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
+export const getSendTestEmailMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendTestEmail>>, TError,void, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof sendTestEmail>>, TError,void, TContext> => {
 
@@ -17200,12 +17201,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SendTestEmailMutationResult = NonNullable<Awaited<ReturnType<typeof sendTestEmail>>>
 
-    export type SendTestEmailMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse
+    export type SendTestEmailMutationError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse
 
     /**
  * @summary Send a test email
  */
-export const useSendTestEmail = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | BodyNotAllowedResponse | RateLimitedResponse,
+export const useSendTestEmail = <TError = InvalidBodyResponse | UnauthorizedResponse | Error | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof sendTestEmail>>, TError,void, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof sendTestEmail>>,
@@ -17261,7 +17262,7 @@ export const connectStripe = async (connectStripeBody: ConnectStripeBody, option
 
 
 
-export const getConnectStripeMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | StripeConnectionForbiddenResponse | Error | RateLimitedResponse,
+export const getConnectStripeMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | StripeConnectionForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectStripe>>, TError,{data: ConnectStripeBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof connectStripe>>, TError,{data: ConnectStripeBody}, TContext> => {
 
@@ -17290,12 +17291,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type ConnectStripeMutationResult = NonNullable<Awaited<ReturnType<typeof connectStripe>>>
     export type ConnectStripeMutationBody = ConnectStripeBody
-    export type ConnectStripeMutationError = InvalidBodyResponse | UnauthorizedResponse | StripeConnectionForbiddenResponse | Error | RateLimitedResponse
+    export type ConnectStripeMutationError = InvalidBodyResponse | UnauthorizedResponse | StripeConnectionForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse
 
     /**
  * @summary Connect a Stripe account
  */
-export const useConnectStripe = <TError = InvalidBodyResponse | UnauthorizedResponse | StripeConnectionForbiddenResponse | Error | RateLimitedResponse,
+export const useConnectStripe = <TError = InvalidBodyResponse | UnauthorizedResponse | StripeConnectionForbiddenResponse | PayloadTooLargeResponse | Error | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof connectStripe>>, TError,{data: ConnectStripeBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof connectStripe>>,
@@ -17447,7 +17448,7 @@ export const setStripeWebhookSecret = async (mode: 'test' | 'live',
 
 
 
-export const getSetStripeWebhookSecretMutationOptions = <TError = Error | UnauthorizedResponse | StripeConnectionForbiddenResponse | RateLimitedResponse,
+export const getSetStripeWebhookSecretMutationOptions = <TError = Error | UnauthorizedResponse | StripeConnectionForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setStripeWebhookSecret>>, TError,{mode: 'test' | 'live';data: SetStripeWebhookSecretBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof setStripeWebhookSecret>>, TError,{mode: 'test' | 'live';data: SetStripeWebhookSecretBody}, TContext> => {
 
@@ -17476,12 +17477,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type SetStripeWebhookSecretMutationResult = NonNullable<Awaited<ReturnType<typeof setStripeWebhookSecret>>>
     export type SetStripeWebhookSecretMutationBody = SetStripeWebhookSecretBody
-    export type SetStripeWebhookSecretMutationError = Error | UnauthorizedResponse | StripeConnectionForbiddenResponse | RateLimitedResponse
+    export type SetStripeWebhookSecretMutationError = Error | UnauthorizedResponse | StripeConnectionForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Set the Stripe webhook signing secret
  */
-export const useSetStripeWebhookSecret = <TError = Error | UnauthorizedResponse | StripeConnectionForbiddenResponse | RateLimitedResponse,
+export const useSetStripeWebhookSecret = <TError = Error | UnauthorizedResponse | StripeConnectionForbiddenResponse | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof setStripeWebhookSecret>>, TError,{mode: 'test' | 'live';data: SetStripeWebhookSecretBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof setStripeWebhookSecret>>,
@@ -17527,7 +17528,7 @@ export const disconnectStripe = async (mode: 'test' | 'live', options?: RequestI
 
 
 
-export const getDisconnectStripeMutationOptions = <TError = Error | UnauthorizedResponse | StripeConnectionForbiddenResponse | BodyNotAllowedResponse | RateLimitedResponse,
+export const getDisconnectStripeMutationOptions = <TError = Error | UnauthorizedResponse | StripeConnectionForbiddenResponse | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectStripe>>, TError,{mode: 'test' | 'live'}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof disconnectStripe>>, TError,{mode: 'test' | 'live'}, TContext> => {
 
@@ -17556,12 +17557,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type DisconnectStripeMutationResult = NonNullable<Awaited<ReturnType<typeof disconnectStripe>>>
 
-    export type DisconnectStripeMutationError = Error | UnauthorizedResponse | StripeConnectionForbiddenResponse | BodyNotAllowedResponse | RateLimitedResponse
+    export type DisconnectStripeMutationError = Error | UnauthorizedResponse | StripeConnectionForbiddenResponse | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse
 
     /**
  * @summary Disconnect Stripe for one mode
  */
-export const useDisconnectStripe = <TError = Error | UnauthorizedResponse | StripeConnectionForbiddenResponse | BodyNotAllowedResponse | RateLimitedResponse,
+export const useDisconnectStripe = <TError = Error | UnauthorizedResponse | StripeConnectionForbiddenResponse | PayloadTooLargeResponse | BodyNotAllowedResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof disconnectStripe>>, TError,{mode: 'test' | 'live'}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof disconnectStripe>>,
@@ -17616,7 +17617,7 @@ export const bootstrap = async (bootstrapBody?: BootstrapBody, options?: Request
 
 
 
-export const getBootstrapMutationOptions = <TError = InvalidBodyResponse | Error | RateLimitedResponse,
+export const getBootstrapMutationOptions = <TError = InvalidBodyResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof bootstrap>>, TError,{data?: BootstrapBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
 ): UseMutationOptions<Awaited<ReturnType<typeof bootstrap>>, TError,{data?: BootstrapBody}, TContext> => {
 
@@ -17645,12 +17646,12 @@ const {mutation: mutationOptions, request: requestOptions} = options ?
 
     export type BootstrapMutationResult = NonNullable<Awaited<ReturnType<typeof bootstrap>>>
     export type BootstrapMutationBody = BootstrapBody | undefined
-    export type BootstrapMutationError = InvalidBodyResponse | Error | RateLimitedResponse
+    export type BootstrapMutationError = InvalidBodyResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
 
     /**
  * @summary Set up a new installation
  */
-export const useBootstrap = <TError = InvalidBodyResponse | Error | RateLimitedResponse,
+export const useBootstrap = <TError = InvalidBodyResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
     TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof bootstrap>>, TError,{data?: BootstrapBody}, TContext>, request?: SecondParameter<typeof orvalClient>}
  , queryClient?: QueryClient): UseMutationResult<
         Awaited<ReturnType<typeof bootstrap>>,

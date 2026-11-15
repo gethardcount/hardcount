@@ -21,6 +21,7 @@ import (
 // senders add fields when they like. The rule:
 //
 //   - The body is one JSON value. Anything else is a 400 "invalid JSON body".
+//   - A body over the router's cap is a 413 payload_too_large.
 //   - A key the request type does not declare, at any depth, is a 422 with
 //     param set to the key. A key matches its field exactly, in its case.
 //   - A key the server sets (ReadOnly) is a 422 with param set to the key.
@@ -108,12 +109,16 @@ func DecodeBody(r *http.Request, v any, opts ...DecodeOption) error {
 	return decodeBody(r, v, rule)
 }
 
-// WriteBodyError writes the response for a DecodeBody error: a 422 naming
-// the field for a refused key, otherwise a 400 "invalid JSON body". It
-// marks the request as refused for TrackBodyRefusal.
+// WriteBodyError writes the response for a DecodeBody error: a 413 for a
+// body over the router's cap (BodyTooLarge), a 422 naming the field for a
+// refused key, otherwise a 400 "invalid JSON body". It marks the request as
+// refused for TrackBodyRefusal.
 func WriteBodyError(w http.ResponseWriter, r *http.Request, err error) {
 	if refused, ok := r.Context().Value(bodyRefusalKey{}).(*atomic.Bool); ok {
 		refused.Store(true)
+	}
+	if BodyTooLarge(w, r, err) {
+		return
 	}
 	var be *BodyError
 	if errors.As(err, &be) && be.Field != "" {
@@ -121,6 +126,26 @@ func WriteBodyError(w http.ResponseWriter, r *http.Request, err error) {
 		return
 	}
 	BadRequest(w, r, "invalid JSON body")
+}
+
+// BodyTooLarge answers a body read that stopped at the router's cap
+// (http.MaxBytesReader). If err holds an *http.MaxBytesError, it writes 413
+// payload_too_large naming the cap and returns true. Otherwise it writes
+// nothing and returns false, and the caller answers err its own way. An
+// over-cap body is valid input cut short, so a 400 for malformed JSON or a
+// failed read would not tell the client to send less.
+func BodyTooLarge(w http.ResponseWriter, r *http.Request, err error) bool {
+	var tooBig *http.MaxBytesError
+	if !errors.As(err, &tooBig) {
+		return false
+	}
+	limit := fmt.Sprintf("%d bytes", tooBig.Limit)
+	if tooBig.Limit%(1<<20) == 0 {
+		limit = fmt.Sprintf("%d MB", tooBig.Limit>>20)
+	}
+	Error(w, r, http.StatusRequestEntityTooLarge, "invalid_request_error", "payload_too_large",
+		fmt.Sprintf("The request body is larger than the %s limit. Send a smaller body.", limit))
+	return true
 }
 
 // bodyRefusalKey holds the flag that WriteBodyError sets on a request that
@@ -155,6 +180,11 @@ func decodeBody(r *http.Request, v any, rule decodeRule) error {
 		return &BodyError{Err: err}
 	}
 	if _, err := dec.Token(); !errors.Is(err, io.EOF) {
+		// Keep a read error, such as the router's cap, so the caller can
+		// answer it (BodyTooLarge).
+		if err != nil {
+			return &BodyError{Err: fmt.Errorf("data after the JSON value: %w", err)}
+		}
 		return &BodyError{Err: errors.New("data after the JSON value")}
 	}
 	return decodeValue(raw, v, rule)

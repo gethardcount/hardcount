@@ -16,8 +16,7 @@ import type { Error } from './error';
 /**
  * The body is not one valid JSON value, it is not a JSON object, it
  * is empty where the operation needs one, or a field has the wrong
- * JSON type (such as a string where a number belongs). A body over
- * 1 MB gets 400 too, unless the operation lists a 413. This answer
+ * JSON type (such as a string where a number belongs). This answer
  * is not kept for an `Idempotency-Key`: send the corrected request
  * with the same key.
  */
