@@ -249,7 +249,10 @@ func TestE2E_PlanPrices_NeverUsedAgainForgetsRemovedPrices(t *testing.T) {
 	frozen := time.Now().UTC().AddDate(0, 0, -45).Truncate(time.Second)
 	clk := r.clock("used", frozen)
 	r.clockSub("pp-nr", clk, plan)
-	other := r.clock("other", time.Now().UTC().AddDate(0, 0, -20).Truncate(time.Second))
+	// Noon, not the time of day the test runs at: the usage below is sent an
+	// hour into the period, which starts at the clock's midnight, so a clock
+	// frozen before 01:00 would have that usage in its future.
+	other := r.clock("other", time.Now().UTC().AddDate(0, 0, -20).Truncate(24*time.Hour).Add(12*time.Hour))
 	r.editTo(plan, edited, "3", "next_period")
 	r.must(time.Time{}, http.MethodDelete, "/v1/plans/"+plan+"/prices/"+removed, nil, http.StatusOK)
 	if n := r.count(`SELECT count(*) FROM plan_price_version_clocks WHERE test_clock_id = $1`, other); n != 2 {
