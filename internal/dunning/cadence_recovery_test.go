@@ -22,10 +22,10 @@ import (
 // recovery instant.
 func TestProcessDueRuns_WallClockCadenceAfterDowntime(t *testing.T) {
 	t.Run("real time, no instant bound", func(t *testing.T) { testWallClockCadenceAfterDowntime(t, false) })
-	// A run at real time carries an instant from the server's clock (the
-	// tick's EnsureEffectiveNow, or processRun's own). The clamp must still
-	// apply: keyed on "an instant is bound", every production run would look
-	// simulated, and it never would.
+	// A run at real time carries an instant from the server's clock, which
+	// each processRun binds. The clamp must still apply: keyed on "an instant
+	// is bound", every production run would look simulated, and it never
+	// would.
 	t.Run("real time, an instant bound", func(t *testing.T) { testWallClockCadenceAfterDowntime(t, true) })
 }
 

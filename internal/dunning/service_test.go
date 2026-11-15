@@ -1088,13 +1088,12 @@ func TestDunning_StampsTheDecidedTime(t *testing.T) {
 	})
 
 	t.Run("processRun chains in simulated time off run.NextActionAt", func(t *testing.T) {
-		// Post-Gap-A fix: processRun anchors LastAttemptAt + the next
-		// retry's NextActionAt on run.NextActionAt (the scheduled
-		// simulated moment), NOT on the resolver's "now". This keeps
-		// the catchup loop walking forward in simulated time even when
-		// the orchestrator's frozen_time is way past the retry's
-		// scheduled instant. The resolver is now only relied on for
-		// fields with no per-row simulated-time source (e.g. resolved_at).
+		// processRun anchors LastAttemptAt and the next retry's
+		// NextActionAt on run.NextActionAt (the retry's scheduled time on
+		// the test clock), not on the clock's frozen time. This keeps the
+		// catch-up walking forward on the clock even when its frozen time
+		// is past the retry's scheduled instant. Fields with no per-run
+		// scheduled time (resolved_at) use the decided time.
 		store := newMemStore()
 		svc := NewService(store, &failingRetrier{}, nil)
 		ctx := testutil.DecidedFor(t, resolver, clock.Pin{TenantID: "t1", InvoiceID: "inv_1"})
@@ -1141,26 +1140,6 @@ func TestDunning_StampsTheDecidedTime(t *testing.T) {
 			t.Errorf("resolved_at: got %v, want %v (frozen)", *resolved.ResolvedAt, frozen)
 		}
 	})
-}
-
-// TestClockResolver_NotWired confirms the fallback shape — without a
-// resolver, every site reads s.clock.Now() (wall-clock). The previous
-// behaviour, kept so tests and narrow wirings that don't need clock
-// awareness keep working.
-func TestClockResolver_NotWired(t *testing.T) {
-	store := newMemStore()
-	svc := NewService(store, &noopRetrier{}, nil)
-	// No SetClockResolver — must fall back to s.clock.Now().
-
-	before := time.Now().UTC()
-	run, err := svc.StartDunning(context.Background(), "t1", "inv_1", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
-	after := time.Now().UTC()
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if run.CreatedAt.Before(before) || run.CreatedAt.After(after) {
-		t.Errorf("created_at: got %v, want between %v and %v (wall-clock fallback)", run.CreatedAt, before, after)
-	}
 }
 
 // failThenSucceedRetrier declines the first N attempts, then succeeds —

@@ -136,3 +136,43 @@ func (s *instantStore) CreateEvent(ctx context.Context, tenantID string, event d
 	s.saw(ctx, "CreateEvent")
 	return s.memStore.CreateEvent(ctx, tenantID, event)
 }
+
+// The scheduled job lists due runs on one read of the server's clock and
+// then works each run on its own read: with two due runs, each run's attempt
+// is at its own instant, not the list's and not the other run's.
+func TestDunning_TheCronWorksEachRunOnItsOwnInstant(t *testing.T) {
+	past := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
+	store := &instantStore{memStore: newMemStore()}
+	server := &steppingClock{at: past}
+	svc := NewService(store, &failingRetrier{}, server)
+	started := clock.EnsureEffectiveNow(testutil.AtRealTime(), clock.NewFake(past.Add(-48*time.Hour)))
+	due := past.Add(-time.Hour)
+	var ids []string
+	for _, inv := range []string{"inv_1", "inv_2"} {
+		run, err := svc.StartDunning(started, "t1", inv, "cus_1", time.Time{}, domain.DunningCausePaymentFailed)
+		if err != nil {
+			t.Fatalf("StartDunning %s: %v", inv, err)
+		}
+		run.NextActionAt = &due
+		store.runs[run.ID] = run
+		ids = append(ids, run.ID)
+	}
+	if _, errs := svc.ProcessDueRuns(testutil.AtRealTime(), "t1", 10); len(errs) != 0 {
+		t.Fatalf("ProcessDueRuns: %v", errs)
+	}
+	if server.reads != 3 {
+		t.Fatalf("server clock read %d times; want three (the list, then one per run)", server.reads)
+	}
+	seen := map[time.Time]bool{}
+	for _, id := range ids {
+		got := store.runs[id]
+		if got.LastAttemptAt == nil {
+			t.Fatalf("run %s: no attempt recorded", id)
+		}
+		at := *got.LastAttemptAt
+		if at.Equal(past.Add(time.Second)) || seen[at] {
+			t.Errorf("run %s attempted at %v: want its own read, not the list's (%v) or the other run's", id, at, past.Add(time.Second))
+		}
+		seen[at] = true
+	}
+}

@@ -338,12 +338,11 @@ func (decliningRetrier) RetryPayment(context.Context, string, string, string) er
 	return fmt.Errorf("card declined")
 }
 
-// A wall-clock retry that runs late — the scheduler was down, or its first
+// A retry at real time that runs late — the scheduler was down, or its first
 // retry was mis-anchored in the past — schedules the next one from when it
-// ran, not from when it was due. With the production resolver wired, every
-// run used to read as simulated, so each later retry was dated in the past
-// too and fired on the next tick (VLX-000081: "Oct 4" then "Oct 7", both on
-// Oct 11).
+// ran, not from when it was due. Had a run at real time read as on a test
+// clock, each later retry would be dated in the past too and fire on the next
+// tick.
 func TestProcessDueRuns_LateWallClockRetryKeepsCadence_RealStore(t *testing.T) {
 	h := newCollectHarness(t)
 	dstore := dunning.NewPostgresStore(h.db)
