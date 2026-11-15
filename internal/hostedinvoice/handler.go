@@ -37,7 +37,6 @@ package hostedinvoice
 import (
 	"context"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -359,27 +358,14 @@ func (h *Handler) resolveInvoice(w http.ResponseWriter, r *http.Request) (domain
 	return inv, true
 }
 
-// decide decides the page's time from the invoice its token names, in the
-// order every Stripe event decides its own: with no resolver, nothing (only
-// narrow unit tests build the handler without one; NewServer always wires
-// the engine); in live mode, nothing (no live record is on a test clock);
-// else the invoice's clock, or real time for one on no clock. The checkout
-// it opens, and that checkout's audit row, carry the decision. A not-found
-// is the invoice, or, in a race with its clock's deletion, its clock: real
-// time is right in both. Any other failure is clock.ErrUndecided, and the
-// page answers 503 with nothing done.
+// decide decides the page's time from the invoice its token names
+// (clock.DecideWithoutDoor: a public page does not come through the API's
+// door). The checkout it opens, and that checkout's audit row, carry the
+// decision. A not-found is the invoice, or, in a race with its clock's
+// deletion, its clock: real time is right in both. Any other failure is
+// clock.ErrUndecided, and the page answers 503 with nothing done.
 func (h *Handler) decide(ctx context.Context, inv domain.Invoice) (context.Context, error) {
-	if h.resolver == nil {
-		return ctx, nil
-	}
-	live, err := postgres.Livemode(ctx)
-	if err != nil {
-		return ctx, fmt.Errorf("%w: the context has no mode", clock.ErrUndecided)
-	}
-	if live {
-		return ctx, nil
-	}
-	decided, err := clock.Decide(ctx, h.resolver, clock.Pin{TenantID: inv.TenantID, InvoiceID: inv.ID})
+	decided, err := clock.DecideWithoutDoor(ctx, h.resolver, clock.Pin{TenantID: inv.TenantID, InvoiceID: inv.ID})
 	if errors.Is(err, errs.ErrNotFound) {
 		return clock.WithRealTime(ctx), nil
 	}
