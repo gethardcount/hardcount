@@ -124,10 +124,10 @@ func (s *Service) RecordStripeRefund(ctx context.Context, tenantID string, snap 
 	if err != nil {
 		return domain.StripeRefundRecordResult{}, err
 	}
-	// ADR-030: a recorded note is dated on the invoice's clock, as every
-	// credit note is. The time is decided here, right after the invoice is
-	// found; one that cannot be decided fails the event, which Stripe
-	// delivers again. The decision reads the invoice and its clock on other
+	// A recorded note is dated on its invoice's time, as every credit note
+	// is (on a test clock, its frozen time). The time is decided here, right
+	// after the invoice is found; one that cannot be decided fails the event,
+	// which Stripe delivers again. The decision reads the invoice and its clock on other
 	// connections while this transaction is open.
 	if ctx, err = clock.DecideWithoutDoor(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID}); err != nil {
 		return domain.StripeRefundRecordResult{}, fmt.Errorf("refund %s refused, Stripe delivers it again: %w", snap.StripeRefundID, err)

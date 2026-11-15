@@ -628,6 +628,7 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	// The handler has no clock of its own: it reads the service's, the server's.
 	ctx := clock.EnsureEffectiveNow(r.Context(), h.svc.clock) // the action's time: see Service.clock
 
 	bt, ci, orig := h.assemblePDFContext(ctx, tenantID, cn)

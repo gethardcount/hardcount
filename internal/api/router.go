@@ -1188,12 +1188,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// providers get the call and do nothing.
 	creditNoteSvc.SetTaxReverser(engine)
 
-	// The credit-note service resolves "now" through the engine (ADR-030).
-	// Its operator entry points (Create, Issue, Void, refund, commit relief)
-	// then stamp simulated time on rows owned by a clock-pinned invoice.
-	// Otherwise an operator credit note could be dated weeks before the
-	// invoice it credits. The engine's own clawback paths are correct without
-	// it, because their callers bind the clock.
+	// The credit-note service decides a time itself in two places: a create,
+	// from the invoice its body names, and a Stripe refund event, from the
+	// refund's invoice. Everything else it runs comes decided (see
+	// creditnote.Service.clock).
 	creditNoteSvc.SetResolver(engine)
 
 	// Proration invoices use the billing engine's tax resolution, so a plan

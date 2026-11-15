@@ -43,13 +43,17 @@ type Service struct {
 	customers   CustomerReader
 	live        LiveBalanceReader
 	// clock is the server's clock: the router's clk, the one the engine
-	// bills by. A credit action's time is decided before it reaches the
-	// service: a request's by the API's door (api.clockDoor), from the
-	// customer in its URL, or for a grant or an adjustment by the service
-	// itself from the customer its body names (decideForCustomer); the
-	// engine's reads on the time of the work that makes them. Each entry
-	// point keeps that decision and, when it carries no instant (real time),
-	// reads this clock once (clock.EnsureEffectiveNow).
+	// bills by. Every credit action runs on a time decided on a test clock or
+	// at real time (see the clock package's doc). Who decides it:
+	//   - a request, the API's door (api.clockDoor), from the customer in its
+	//     URL; a grant or an adjustment, the service itself, from the customer
+	//     its body names (decideForCustomer);
+	//   - the engine's reads (a balance, a draw), the time of the work that
+	//     makes them.
+	// Each entry point keeps that time and, when it carries no instant (real
+	// time), reads this clock once (clock.EnsureEffectiveNow). Without that
+	// read, two reads of the time in one action could differ, and a store's
+	// stamp could fall on another time than the action's.
 	clock clock.Clock
 }
 
@@ -487,8 +491,8 @@ type CreditNoteReturnInput struct {
 // never fires; if it does, the invariant is broken.
 //
 // It runs GrantTx's checks and writes the same in-tx "grant" audit row
-// (ADR-090). It does not rebind the clock: the caller bound ctx to the
-// invoice, which is on the customer's clock.
+// (ADR-090). It runs on its caller's time, a credit note's Issue on the
+// invoice's time, and looks no clock up.
 func (s *Service) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, creditNoteID string, input CreditNoteReturnInput) (domain.CreditReturn, error) {
 	if creditNoteID == "" {
 		return domain.CreditReturn{}, errs.Required("credit_note_id")
@@ -595,13 +599,13 @@ func (s *Service) ApplyToInvoiceAt(ctx context.Context, tenantID, customerID, in
 // so the error (code credit_reversal_source_taken) is returned, not
 // swallowed: the caller must fail, not carry on.
 //
-// It binds no clock: both callers carry the invoice's time before they open
-// tx (invoice.Service.Void keeps the time its caller decided; the cancel and
-// the plan swap bind it through the subscription's bindForSub), and a
-// bind here would read the customer's clock on another connection while tx
-// holds the invoice row (ADR-139). clock.Now(ctx) stamps the grant in
-// simulated time when the customer is clock-pinned, and the same instant
-// decides which source grants are past their expiry.
+// It looks no clock up: both callers carry the invoice's time before they
+// open tx (invoice.Service.Void keeps the time its caller decided; the cancel
+// and the plan swap run on the subscription action's time), and a lookup here
+// would read the customer's clock on another connection while tx holds the
+// invoice row (ADR-139). clock.Now(ctx) stamps the grant at that time (on a
+// test clock, its frozen time), and the same instant decides which source
+// grants are past their expiry.
 func (s *Service) ReverseForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber string) (domain.CreditReturn, error) {
 	sums, err := s.store.InvoiceCreditsTx(ctx, tx, tenantID, customerID, invoiceID)
 	if err != nil {

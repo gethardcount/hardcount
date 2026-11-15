@@ -11,8 +11,10 @@ import (
 )
 
 // cnDecidedAt is an instant on clock clk_d before its frozen time, as a
-// request decided before an advance would carry. laterOnSameClock answers
-// that clock's frozen time, three days later, and counts its reads.
+// request decided before an advance would carry. laterOnSameClock answers a
+// later time on that same clock (its frozen time, three days on) on purpose:
+// an entry point that asked it would stamp that later time, so a row that
+// sees cnDecidedAt and no reads shows the resolver was never asked.
 var cnDecidedAt = time.Date(2027, 3, 4, 10, 0, 0, 0, time.UTC)
 
 func cnOnDecidedClock() context.Context {
@@ -107,17 +109,22 @@ func cnEntries() []cnEntry {
 	}
 }
 
-func newCNSvc(clk clock.Clock) (*Service, *memStore, *laterOnSameClock) {
-	store := newMemStore()
-	invoices := &memInvoiceReader{invoices: map[string]domain.Invoice{"inv_card": cardInvoice()}}
-	svc := NewService(store, invoices, &fakeRefunder{})
+// cnService builds the service every time row uses: inv behind it, a number
+// generator, the resolver res, and clk as the server's clock when one is
+// given (else the default, the machine's).
+func cnService(store Store, inv domain.Invoice, clk clock.Clock, res clock.Resolver) *Service {
+	svc := NewService(store, &memInvoiceReader{invoices: map[string]domain.Invoice{inv.ID: inv}}, &fakeRefunder{})
 	svc.SetNumberGenerator(&fakeCNNumbers{})
-	res := &laterOnSameClock{}
 	svc.SetResolver(res)
 	if clk != nil {
 		svc.SetClock(clk)
 	}
-	return svc, store, res
+	return svc
+}
+
+func newCNSvc(clk clock.Clock) (*Service, *memStore, *laterOnSameClock) {
+	store, res := newMemStore(), &laterOnSameClock{}
+	return cnService(store, cardInvoice(), clk, res), store, res
 }
 
 // Each credit-note entry point runs on the time its caller decided and reads

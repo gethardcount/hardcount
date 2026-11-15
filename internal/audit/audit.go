@@ -256,6 +256,13 @@ type Entry struct {
 // subscription, customer — including CREATE, which binds from the clock it is
 // handed because the customer pin does not exist yet — dunning), and the
 // test-clock service, which binds each change's row to the clock it changes.
+// Credit notes are covered on every route: each request is decided from its
+// credit note or invoice (the API's door; a create, from the invoice its body
+// names) and creditnote.Service keeps that decision, so the in-tx rows and
+// the handler's "send" row, emitted on the request's context, carry the sim
+// axis; a Stripe refund webhook's refund-status row (ApplyRefundWebhook) runs
+// on the time the service decides from the invoice of the note holding the
+// refund.
 //
 // A note on what "covered" means, so this list cannot quietly become a lie: a
 // path is covered if it EMITS and its emission runs under a binding. Credit
@@ -268,16 +275,6 @@ type Entry struct {
 // NOT COVERED — stated because a filter that omits rows silently is worse than
 // no filter at all:
 //
-//   - Two CREDIT-NOTE rows. The operator credit-note routes are otherwise
-//     covered: each is decided from its credit note or invoice (the API's
-//     door; a create, from the invoice its body names), and creditnote.Service
-//     keeps that decision at Create, Issue, Void, RetryRefund, CreateRefund
-//     and CreateAndIssueCommitRelief, so their in-tx rows carry the sim axis. The
-//     two exceptions: (a) the "send" row, which the handler emits on the
-//     unbound r.Context() although it sends the email on the bound ctx; and
-//     (b) the refund-status row of a Stripe refund webhook (ApplyRefundWebhook),
-//     which binds nothing, like the checkout rows below. Closure: (a) emits on
-//     the ctx the send already binds; (b) closes with the checkout rows.
 //   - Operator-driven PRICE-OVERRIDE routes (create/delete a customer price
 //     override). internal/pricing has no clock.Resolver at all, so the handler
 //     emits on an unbound r.Context() and the row lands with NULL sim columns.

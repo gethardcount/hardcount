@@ -233,17 +233,23 @@ type Service struct {
 	audit    AuditEmitter
 	resolver clock.Resolver
 	// clock is the server's clock: the router's clk, the one the engine
-	// bills by. Every credit-note action runs on a time decided before it
-	// reaches the service: a request's by the API's door (api.clockDoor),
-	// from the credit note or invoice in its URL, or for a create by the
-	// route itself (DecideForInvoice); the engine's relief on its
-	// subscription's time; a finalize's held relief on the finalize's time;
-	// the clawback sweeps at real time (their list excludes simulated
-	// invoices) or in a clock's catch-up. Each entry point keeps that
-	// decision and, when it carries no instant (real time), reads this clock
-	// once (clock.EnsureEffectiveNow). Without that read, two reads of the
-	// time in one action could differ, and a store's stamp could fall on
-	// another time than the action's.
+	// bills by. Every credit-note action runs on a time decided on a test
+	// clock or at real time (see the clock package's doc). Who decides it:
+	//   - a request, the API's door (api.clockDoor), from the credit note or
+	//     invoice in its URL; a create, the route itself, from the invoice its
+	//     body names (DecideForInvoice);
+	//   - a Stripe refund event, the service itself, from the invoice the
+	//     refund is on (RecordStripeRefund, ApplyRefundWebhook);
+	//   - the relief at a subscription's cancel or plan swap and a
+	//     subscription's clawback drafts, the subscription action's time; a
+	//     finalize's held relief, the finalize's time;
+	//   - the clawback job retries at real time (its list excludes notes on a
+	//     test clock), and a test clock's catch-up retries its own on that
+	//     clock.
+	// Each entry point keeps that time and, when it carries no instant (real
+	// time), reads this clock once (clock.EnsureEffectiveNow). Without that
+	// read, two reads of the time in one action could differ, and a store's
+	// stamp could fall on another time than the action's.
 	clock           clock.Clock
 	dunning         DunningResolver
 	checkoutExpirer CheckoutExpirer
@@ -1117,19 +1123,11 @@ func (s *Service) buildCreditNote(ctx context.Context, tx *sql.Tx, tenantID stri
 		OutOfBandAmountCents: outOfBandAmount,
 		Currency:             inv.Currency,
 		RefundStatus:         domain.RefundNone,
-		// Simulated iff the SOURCE INVOICE is — the clock belongs to the
-		// entity, not to whoever acted on it. This used to also require
-		// input.IsSimulated, i.e. "operator HTTP issuance is always
-		// wall-clock", which contradicted ADR-030: its only always-wall-clock
-		// carve-out is the audit log, and its table names credit notes and
-		// their CreditGrant rows as simulated-when-pinned.
-		//
-		// The old rule produced a row stamped in simulated time (once the
-		// entry points bound ctx) but flagged is_simulated=false — so it
-		// rendered in the "Real times — not the test clock's dates" lane while
-		// displaying the test clock's date, stayed visible to wall-clock
-		// reconcilers that skip simulated rows, and would survive the ADR-086
-		// teardown that deletes a clock's data.
+		// Simulated iff the source invoice is: the clock belongs to the
+		// invoice, not to whoever acted on it. A note flagged otherwise would
+		// show the clock's date in the real-time lane, stay visible to the
+		// real-time jobs that skip simulated rows, and survive the teardown
+		// that deletes a clock's data (ADR-086).
 		IsSimulated: inv.IsSimulated,
 		// IssuePending: an auto-issue clawback draft to be issued post-commit and
 		// retried by the reconciler if Issue() fails (migration 0121). Only the
@@ -1418,9 +1416,7 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 			CommitRetiredCents:   r,
 			Currency:             inv.Currency,
 			RefundStatus:         domain.RefundNone,
-			// Same rule as buildCreditNote: the source invoice's pin decides.
-			// This path never set the flag at all, so a commit-relief note on a
-			// clock-pinned invoice was left unflagged.
+			// Same rule as buildCreditNote: simulated iff the source invoice is.
 			IsSimulated: inv.IsSimulated,
 		}
 		line := domain.CreditNoteLineItem{
@@ -2058,6 +2054,7 @@ func (s *Service) IssueHeldReliefTx(ctx context.Context, tx *sql.Tx, tenantID st
 // note marked the invoice paid, closing its dunning run. Best-effort like
 // Issue's: each leg is recorded and recovered by its own sweep.
 func (s *Service) FinishHeldRelief(ctx context.Context, tenantID string, issued []HeldRelief) {
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	for _, h := range issued {
 		cn, err := s.store.Get(ctx, tenantID, h.CreditNoteID)
 		if err != nil {
@@ -2065,7 +2062,6 @@ func (s *Service) FinishHeldRelief(ctx context.Context, tenantID string, issued 
 				"credit_note_id", h.CreditNoteID, "error", err)
 			continue
 		}
-		ctx := clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 		inv, err := s.invoices.Get(ctx, tenantID, cn.InvoiceID)
 		if err != nil {
 			slog.WarnContext(ctx, "held relief issued at finalize, but reading its invoice failed; the reversal sweep retries it",
