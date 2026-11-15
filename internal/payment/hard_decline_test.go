@@ -283,8 +283,7 @@ func TestReconciler_DeclinedPI_CarriesDeclineCodeAndCard(t *testing.T) {
 		"pi_rec": {ID: "pi_rec", Status: "requires_payment_method", DeclineCode: "lost_card", PaymentMethodID: "pm_lost"},
 	}}
 	rec := &recordingSettler{}
-	r := NewReconciler(client, store, time.Second)
-	r.SetSettler(rec)
+	r := NewReconciler(client, store, rec, time.Second)
 
 	if _, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10); len(errs) != 0 {
 		t.Fatalf("errs: %v", errs)

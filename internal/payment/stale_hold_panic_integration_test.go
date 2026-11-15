@@ -51,8 +51,7 @@ func TestStaleHold_PanickingCheck_RestOfTheRunGoesOn(t *testing.T) {
 	paid := r.fake.addPI(stripeCustomerOf(u), u.ID, "", "succeeded", shDue)
 	r.exec(`UPDATE invoices SET payment_status = 'unknown', stripe_payment_intent_id = $2, updated_at = now() - interval '2 hours' WHERE id = $1`, u.ID, paid.id)
 
-	rec := NewReconciler(r.fake, panicOnClear{ReconcileInvoiceStore: r.invoices, id: h1}, time.Minute)
-	rec.SetSettler(r.stripe)
+	rec := NewReconciler(r.fake, panicOnClear{ReconcileInvoiceStore: r.invoices, id: h1}, r.stripe, time.Minute)
 	recovered := func() (p any) {
 		defer func() { p = recover() }()
 		_, _ = rec.Run(r.ctx, 50)

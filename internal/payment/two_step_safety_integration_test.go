@@ -62,7 +62,7 @@ func (r *shRig) rewire(c StripeClient) {
 	r.stripe.SetAnomalyRecorder(r.invoices)
 	r.stripe.SetEmailReceipt(sender, emails)
 	r.stripe.SetEmailPaymentFailed(sender, emails)
-	r.rec.SetSettler(r.stripe)
+	r.rec = NewReconciler(r.fake, r.invoices, r.stripe, time.Minute)
 }
 
 // succeededFor lists the invoice's PaymentIntents at Stripe that took money.

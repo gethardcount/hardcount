@@ -47,8 +47,7 @@ func TestReconcile_CancelRefused_RowRotates_QueueNotStarved(t *testing.T) {
 	r.exec(`UPDATE invoices SET payment_status = 'unknown', stripe_payment_intent_id = $2,
 		updated_at = now() - interval '10 minutes', provider_synced_at = NULL WHERE id = $1`, newer.ID, newerPI.id)
 
-	rec := NewReconciler(&r3CancelRefuser{fakeStripe: r.fake, refuse: map[string]bool{stuckPI.id: true}}, r.invoices, time.Minute)
-	rec.SetSettler(r.stripe)
+	rec := NewReconciler(&r3CancelRefuser{fakeStripe: r.fake, refuse: map[string]bool{stuckPI.id: true}}, r.invoices, r.stripe, time.Minute)
 	for i := 0; i < 3; i++ { // three ticks, page size 1
 		_, _ = rec.Run(r.ctx, 1)
 	}
@@ -181,8 +180,7 @@ func TestReconcile_DeclineBeforeCancel_RecordedAsTheDecline(t *testing.T) {
 	pi := r.fake.onlyPI()
 	r.ageUpdated(inv.ID, 5*time.Minute)
 
-	rec := NewReconciler(&r3DeclineThenCancel{fakeStripe: r.fake, declineCode: "stolen_card"}, r.invoices, time.Minute)
-	rec.SetSettler(r.stripe)
+	rec := NewReconciler(&r3DeclineThenCancel{fakeStripe: r.fake, declineCode: "stolen_card"}, r.invoices, r.stripe, time.Minute)
 	_, _ = rec.Run(r.ctx, 50)
 
 	got := r.get(inv.ID)

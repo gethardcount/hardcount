@@ -54,25 +54,6 @@ func TestSettle_RunsOnTheDecidedTime(t *testing.T) {
 			t.Errorf("dunning starts %+v; want one at %v", dunning.calls, decidedAt)
 		}
 	})
-
-	// With no settler (narrow unit tests only) the reconciler marks the
-	// invoice paid itself, at the time its row was decided: one read, the
-	// row's decision.
-	t.Run("paid by a reconciler with no settler", func(t *testing.T) {
-		res := &eventResolver{}
-		inv := unknownClockInvoice()
-		store := newMockReconcileStore(inv)
-		r := NewReconciler(&mockStripeClient{piStates: map[string]PaymentIntentResult{
-			"pi_sweep": {ID: "pi_sweep", Status: "succeeded", AmountReceivedCents: inv.AmountDueCents},
-		}}, store, time.Second)
-		r.SetResolver(res)
-		if _, errs := r.Run(tickCtx(), 10); len(errs) != 0 {
-			t.Fatalf("errors: %v", errs)
-		}
-		if got := store.byID[inv.ID]; got.PaidAt == nil || !got.PaidAt.Equal(eventFrozen) || res.reads != 1 {
-			t.Errorf("paid_at %v, clock reads %d; want the row's decided %v, one", got.PaidAt, res.reads, eventFrozen)
-		}
-	})
 }
 
 // In live mode no record is on a test clock, so no settle reads one: a live
@@ -195,21 +176,6 @@ func TestSettle_RealTimeIsTheServersClock(t *testing.T) {
 		}
 		if len(dunning.calls) != 1 || !dunning.calls[0].failureAt.Equal(serverNow) {
 			t.Errorf("dunning starts %+v; want one at the server's %v", dunning.calls, serverNow)
-		}
-	})
-
-	t.Run("paid by a reconciler with no settler", func(t *testing.T) {
-		inv := unknownClockInvoice()
-		store := newMockReconcileStore(inv)
-		r := NewReconciler(&mockStripeClient{piStates: map[string]PaymentIntentResult{
-			"pi_sweep": {ID: "pi_sweep", Status: "succeeded", AmountReceivedCents: inv.AmountDueCents},
-		}}, store, time.Second)
-		r.SetClock(clock.NewFake(serverNow))
-		if _, errs := r.Run(live(), 10); len(errs) != 0 {
-			t.Fatalf("errors: %v", errs)
-		}
-		if got := store.byID[inv.ID]; got.PaidAt == nil || !got.PaidAt.Equal(serverNow) {
-			t.Errorf("paid_at %v; want the server's %v", got.PaidAt, serverNow)
 		}
 	})
 }
