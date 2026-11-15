@@ -91,23 +91,21 @@ func (s *Service) SetResolver(r clock.Resolver) {
 //   - a clock that cannot be read refuses the event (503): nothing is
 //     recorded, and the client sends it again.
 //
-// Real time is read once from the service's clock (SetClock) and bound.
+// Real time is read once from the service's clock (SetClock) and bound
+// (clock.EnsureEffectiveNow).
 func (s *Service) decide(ctx context.Context, tenantID, customerID string) (context.Context, error) {
 	if _, ok := clock.EffectiveNow(ctx); ok {
 		return ctx, nil
 	}
-	if customerID == "" {
-		return clock.WithEffectiveNow(ctx, s.clock.Now(ctx)), nil
+	decided := ctx
+	if customerID != "" {
+		var err error
+		if decided, err = clock.DecideOrRealTime(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID}); err != nil {
+			return ctx, errs.Unavailable("test_clock_unavailable",
+				"The customer's test clock could not be read. Nothing was recorded; send the event again.", err)
+		}
 	}
-	decided, err := clock.DecideOrRealTime(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID})
-	if err != nil {
-		return ctx, errs.Unavailable("test_clock_unavailable",
-			"The customer's test clock could not be read. Nothing was recorded; send the event again.", err)
-	}
-	if _, ok := clock.SimOf(decided); ok {
-		return decided, nil
-	}
-	return clock.WithEffectiveNow(ctx, s.clock.Now(ctx)), nil
+	return clock.EnsureEffectiveNow(decided, s.clock), nil
 }
 
 // effectiveNow is the customer's now, decide's instant: the value the ingest

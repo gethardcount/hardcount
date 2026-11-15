@@ -932,9 +932,7 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	// One instant for the whole create. A clock decision carries one; a
 	// real-time decision does not, so the one read is bound here, and the
 	// store's created_at reads it as the period, issue and due dates do.
-	if _, ok := clock.EffectiveNow(ctx); !ok {
-		ctx = clock.WithEffectiveNow(ctx, s.clock.Now(ctx))
-	}
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	now := s.clock.Now(ctx)
 
 	// Validate and build every line before the create transaction opens.
