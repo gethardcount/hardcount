@@ -9,8 +9,8 @@ import (
 
 // On the real chain: a credit note on a clock invoice whose clock cannot be
 // read is refused for retry (503) and creates nothing. Once the clock reads
-// again, the same request with auto_issue creates and issues it, both at the
-// clock's time.
+// again, the same request, with the same Idempotency-Key, creates and issues
+// one note, both at the clock's time.
 func TestE2E_CreditNoteCreateForAnUnreadableClockIsRefusedForRetry(t *testing.T) {
 	r := newDatesRig(t, "Credit Note Time Co")
 	frozen := time.Date(2025, 3, 1, 12, 0, 0, 0, time.UTC)
@@ -28,7 +28,9 @@ func TestE2E_CreditNoteCreateForAnUnreadableClockIsRefusedForRetry(t *testing.T)
 	r.srv.BillingEngine.SetTestClockReader(clocks)
 	clocks.fail.Store(true)
 
-	note := flowReq{body: map[string]any{
+	// The same Idempotency-Key on the refused request and its retry: the 503
+	// releases the key, so the retry creates, and issues, one note.
+	note := flowReq{header: map[string]string{"Idempotency-Key": "cn-retry-1"}, body: map[string]any{
 		"invoice_id": inv, "reason": "Billing error", "auto_issue": true,
 		"lines": []map[string]any{{"description": "Billing error", "quantity": 1, "unit_amount_cents": 1000}},
 	}}
@@ -41,6 +43,9 @@ func TestE2E_CreditNoteCreateForAnUnreadableClockIsRefusedForRetry(t *testing.T)
 
 	clocks.fail.Store(false)
 	cn := r.call("POST", "/v1/credit-notes", note).want(t, 201, "the same credit note once the clock reads").body
+	if notes := flowList(r.call("GET", "/v1/credit-notes?invoice_id="+inv, flowReq{}).want(t, 200, "list credit notes").body, "data"); len(notes) != 1 {
+		t.Errorf("%d credit notes after the retry; want one", len(notes))
+	}
 	for _, field := range []string{"created_at", "issued_at"} {
 		if at, err := time.Parse(time.RFC3339Nano, flowStr(cn, field)); err != nil || !at.Equal(frozen) {
 			t.Errorf("%s %q (%v); want the clock's %s", field, flowStr(cn, field), err, frozen)

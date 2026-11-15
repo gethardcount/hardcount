@@ -2,6 +2,7 @@ package creditnote
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http/httptest"
@@ -10,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
@@ -96,5 +98,90 @@ func TestCreateRoute_DecidesBeforeEitherShape(t *testing.T) {
 				t.Errorf("%d %s; want 503 test_clock_unavailable", rec.Code, rec.Body.String())
 			}
 		})
+	}
+}
+
+// answersOnce answers each invoice's first lookup with clock clk_1 at frozen
+// and fails every later one, recording the invoices looked up.
+type answersOnce struct {
+	frozen time.Time
+	read   []string
+}
+
+func (a *answersOnce) SimForInvoice(_ context.Context, _, invoiceID string) (clock.Sim, error) {
+	a.read = append(a.read, invoiceID)
+	if len(a.read) == 1 {
+		return clock.Sim{At: a.frozen, TestClockID: "clk_1"}, nil
+	}
+	return clock.Sim{}, errors.New("connection reset by peer")
+}
+func (a *answersOnce) SimForSubscription(context.Context, string, string) (clock.Sim, error) {
+	return clock.Sim{}, errors.New("not used")
+}
+func (a *answersOnce) SimForCustomer(context.Context, string, string) (clock.Sim, error) {
+	return clock.Sim{}, errors.New("not used")
+}
+
+// The route's decision stands for the whole create and issue: when the
+// lookups inside Create and Issue fail after the handler's succeeded, the
+// note is still created and issued at the decided clock's time.
+func TestCreateRoute_TheDecisionStandsForCreateAndIssue(t *testing.T) {
+	frozen := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
+	store := newMemStore()
+	invoices := &memInvoiceReader{invoices: map[string]domain.Invoice{
+		"inv_1": {ID: "inv_1", TenantID: "t1", Status: domain.InvoiceFinalized, Currency: "USD", TotalAmountCents: 10000, AmountDueCents: 10000},
+	}}
+	svc := NewService(store, invoices, nil)
+	svc.SetNumberGenerator(&fakeCNNumbers{})
+	res := &answersOnce{frozen: frozen}
+	svc.SetResolver(res)
+	body := `{"invoice_id":"inv_1","reason":"Billing error","auto_issue":true,"lines":[{"description":"x","quantity":1,"unit_amount_cents":1000}]}`
+	req := httptest.NewRequest("POST", "/", strings.NewReader(body))
+	req = req.WithContext(auth.WithTenantID(postgres.WithLivemode(req.Context(), false), "t1"))
+	rec := httptest.NewRecorder()
+	NewHandler(svc, HandlerDeps{}).create(rec, req)
+	if rec.Code != 201 {
+		t.Fatalf("%d %s; want 201", rec.Code, rec.Body.String())
+	}
+	var cn domain.CreditNote
+	if err := json.Unmarshal(rec.Body.Bytes(), &cn); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !cn.CreatedAt.Equal(frozen) || cn.IssuedAt == nil || !cn.IssuedAt.Equal(frozen) {
+		t.Errorf("created_at %v, issued_at %v; want both at the decided clock's %v", cn.CreatedAt, cn.IssuedAt, frozen)
+	}
+	if len(res.read) < 2 {
+		t.Errorf("lookups %v; want the handler's and at least one inside, which failed", res.read)
+	}
+}
+
+// recordingFailure fails every invoice lookup and records the invoices
+// looked up.
+type recordingFailure struct{ read []string }
+
+func (r *recordingFailure) SimForInvoice(_ context.Context, _, invoiceID string) (clock.Sim, error) {
+	r.read = append(r.read, invoiceID)
+	return clock.Sim{}, errors.New("connection reset by peer")
+}
+func (r *recordingFailure) SimForSubscription(context.Context, string, string) (clock.Sim, error) {
+	return clock.Sim{}, errors.New("not used")
+}
+func (r *recordingFailure) SimForCustomer(context.Context, string, string) (clock.Sim, error) {
+	return clock.Sim{}, errors.New("not used")
+}
+
+// A commit relief that names its own invoice decides from that invoice, not
+// from the body's top-level one.
+func TestCreateRoute_AReliefDecidesFromItsOwnInvoice(t *testing.T) {
+	res := &recordingFailure{}
+	svc := NewService(nil, nil, nil)
+	svc.SetResolver(res)
+	body := `{"invoice_id":"inv_top","reason":"Retire","commit_relief":{"invoice_id":"inv_relief","retire_all":true}}`
+	req := httptest.NewRequest("POST", "/", strings.NewReader(body))
+	req = req.WithContext(auth.WithTenantID(postgres.WithLivemode(req.Context(), false), "t1"))
+	rec := httptest.NewRecorder()
+	NewHandler(svc, HandlerDeps{}).create(rec, req)
+	if rec.Code != 503 || len(res.read) != 1 || res.read[0] != "inv_relief" {
+		t.Errorf("%d, invoices looked up %v; want 503 after one lookup of inv_relief", rec.Code, res.read)
 	}
 }
