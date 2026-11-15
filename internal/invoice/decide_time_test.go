@@ -63,16 +63,19 @@ func stuckDraft(id, customerID, code string) domain.Invoice {
 }
 
 // The connect fan-out decides each invoice's time before its whole retry:
-// each runs on its own clock, or on none (a not-found is real time too), and
-// an invoice whose clock cannot be read is left as it was, with the others
-// retried.
+// invoices on two clocks each run, finalize and settle on their own clock; one on
+// none, or whose clock is not found, at real time; one whose clock cannot be
+// read is left as it was, with the others retried.
 func TestRetryProviderConfigErrors_DecidesEachInvoice(t *testing.T) {
+	frozenA := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
+	frozenE := time.Date(2027, 8, 20, 6, 0, 0, 0, time.UTC)
 	store := newMemStore()
 	for _, inv := range []domain.Invoice{
 		stuckDraft("inv_a", "cus_a", "provider_not_configured"),
 		stuckDraft("inv_b", "cus_b", "provider_not_configured"),
 		stuckDraft("inv_c", "cus_c", "provider_auth"),
 		stuckDraft("inv_d", "cus_d", "provider_not_configured"),
+		stuckDraft("inv_e", "cus_e", "provider_not_configured"),
 	} {
 		store.invoices[inv.ID] = inv
 	}
@@ -80,18 +83,27 @@ func TestRetryProviderConfigErrors_DecidesEachInvoice(t *testing.T) {
 	svc := NewService(store, nil, newMemNumberer())
 	svc.SetTaxRetrier(retrier)
 	svc.SetResolver(&invoiceAnswers{sims: map[string]clock.Sim{
-		"inv_a": {At: time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC), TestClockID: "clk_a"},
+		"inv_a": {At: frozenA, TestClockID: "clk_a"},
 		"inv_b": {At: time.Now().UTC()}, // on no clock
+		"inv_e": {At: frozenE, TestClockID: "clk_e"},
 	}, errs: map[string]error{
 		"inv_d": fmt.Errorf("read test clock clk_gone: %w", errs.ErrNotFound),
 	}})
 
 	processed, retryErrs := svc.RetryProviderConfigErrors(postgres.WithLivemode(context.Background(), false), "t1", false)
-	if processed != 3 || len(retryErrs) != 1 || !strings.Contains(retryErrs[0].Error(), "inv_c") || !strings.Contains(retryErrs[0].Error(), "could not be read") {
-		t.Fatalf("processed %d, errors %v; want 3 retried and inv_c's clock refused", processed, retryErrs)
+	if processed != 4 || len(retryErrs) != 1 || !strings.Contains(retryErrs[0].Error(), "inv_c") || !strings.Contains(retryErrs[0].Error(), "could not be read") {
+		t.Fatalf("processed %d, errors %v; want 4 retried and inv_c's clock refused", processed, retryErrs)
 	}
-	if got := retrier.clocks; len(got) != 3 || got["inv_a"] != "clk_a" || got["inv_b"] != "" || got["inv_d"] != "" {
-		t.Errorf("clocks the retries ran on: %v; want inv_a on clk_a, inv_b and inv_d on none, inv_c not retried", got)
+	if got := retrier.clocks; len(got) != 4 || got["inv_a"] != "clk_a" || got["inv_e"] != "clk_e" || got["inv_b"] != "" || got["inv_d"] != "" {
+		t.Errorf("clocks the retries ran on: %v; want inv_a on clk_a, inv_e on clk_e, inv_b and inv_d on none, inv_c not retried", got)
+	}
+	// A retry that resolves the tax finalizes the draft, and these $0 drafts
+	// are then settled by the finalize's steps: paid_at is the instant those
+	// ran at, each invoice's own clock.
+	for id, at := range map[string]time.Time{"inv_a": frozenA, "inv_e": frozenE} {
+		if inv := store.invoices[id]; inv.Status != domain.InvoicePaid || inv.PaidAt == nil || !inv.PaidAt.Equal(at) {
+			t.Errorf("%s: status %s, paid_at %v; want finalized and settled at its clock's %v", id, inv.Status, inv.PaidAt, at)
+		}
 	}
 	if store.invoices["inv_c"].TaxStatus != domain.InvoiceTaxPending {
 		t.Errorf("inv_c tax status %q; want it left pending", store.invoices["inv_c"].TaxStatus)

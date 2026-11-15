@@ -23,11 +23,10 @@ import (
 //
 //   - The FLAG (invoice.is_simulated) is captured at write time from the
 //     customer's test-clock pin (invoiceSvc.SetCustomerReader → the same
-//     authoritative customer.TestClockID check the engine uses on subs). This
-//     is NOT inferred from the ctx clock-binding: bindForCreate binds ctx to
-//     the resolver's effective-now even for UNPINNED customers (it returns
-//     wall-clock), so a binding-based check would mis-flag EVERY manual
-//     invoice as simulated — the bug this test pins shut.
+//     authoritative customer.TestClockID check the engine uses on subs). It
+//     is not inferred from the ctx's time: a create binds an instant even for
+//     an UNPINNED customer, so a check on the ctx's binding would mis-flag
+//     EVERY manual invoice as simulated, the bug this test pins shut.
 //   - The TIMESTAMPS (issued_at) ride the resolver-bound frozen time
 //     (invoiceSvc.SetResolver(engine) → EffectiveNowForCustomer).
 //
@@ -87,9 +86,9 @@ func TestManualInvoice_IsSimulatedFromCustomerPin(t *testing.T) {
 		t.Error("reloaded pinned-customer invoice: is_simulated=false, want true (did not persist)")
 	}
 
-	// (2) UNPINNED customer → is_simulated=false. This is the case the
-	// binding-based check got WRONG (bindForCreate binds ctx to wall-clock for
-	// unpinned customers, so a ctx-binding check returned true).
+	// (2) UNPINNED customer → is_simulated=false. A check on the ctx's
+	// binding gets this case wrong: a create binds an instant for an unpinned
+	// customer too.
 	plain, err := customerStore.Create(ctx, tenantID, domain.Customer{
 		ExternalID: "cus_plain", DisplayName: "Plain Customer",
 	})

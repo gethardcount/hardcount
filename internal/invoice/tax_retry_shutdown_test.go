@@ -225,7 +225,7 @@ func TestTaxRetryLoops_StopBetweenRowsOnceCtxIsDone(t *testing.T) {
 			svc := NewService(mem, nil, newMemNumberer())
 			f := &cancellingRetrier{store: mem, cancel: cancel}
 			svc.SetTaxRetrier(f)
-			n, errs := svc.retryStuck(ctx, "t1", rows, true)
+			n, errs := svc.retryStuck(ctx, "t1", rows, svc.decideInvoice)
 			return n, errs, f.calls
 		}, true},
 		{"RetryPendingTaxCommit (tax_commit sweep)", func(ctx context.Context, cancel context.CancelFunc) (int, []error, int) {
