@@ -1442,7 +1442,7 @@ func (s *Stripe) stampFailedWithoutPayment(ctx context.Context, tenantID string,
 			"invoice_id", inv.ID, "status", current.Status)
 		return
 	}
-	if _, derr := startDunningWithRetry(ctx, s.dunning, tenantID, inv.ID, inv.CustomerID, dunningSimFailedAt(ctx, inv), domain.DunningCausePaymentFailed); derr != nil {
+	if _, derr := startDunningWithRetry(ctx, s.dunning, tenantID, inv.ID, inv.CustomerID, dunningSimFailedAt(ctx), domain.DunningCausePaymentFailed); derr != nil {
 		slog.Error("inline StartDunning after a failed charge failed — for a wall-clock invoice the dunning backfill sweep starts the run on a later scheduler tick",
 			"invoice_id", inv.ID, "customer_id", inv.CustomerID, "error", derr)
 	}
@@ -1668,24 +1668,11 @@ func (s *Stripe) processEvent(ctx context.Context, tenantID string, event domain
 }
 
 // decideFor decides an event's time from the record it names, right after
-// the handler has read that record: the record's clock, or real time for a
-// record on no clock. In live mode it does nothing: no live record is on a
-// test clock. An event with no mode on its ctx is a fault (the webhook
-// handler and the restore catch-up both set one), so it is refused. A
-// failure is clock.ErrUndecided, which isTransientWebhookError delivers
-// again.
+// the handler has read that record (clock.DecideWithoutDoor: the event did
+// not come through the API's door). A failure is clock.ErrUndecided, which
+// isTransientWebhookError delivers again.
 func (s *Stripe) decideFor(ctx context.Context, pin clock.Pin) (context.Context, error) {
-	if s.resolver == nil {
-		return ctx, nil // only narrow unit tests build the adapter without one; NewServer always wires the engine
-	}
-	live, err := postgres.Livemode(ctx)
-	if err != nil {
-		return ctx, fmt.Errorf("%w: the event's context has no mode", clock.ErrUndecided)
-	}
-	if live {
-		return ctx, nil
-	}
-	return clock.Decide(ctx, s.resolver, pin)
+	return clock.DecideWithoutDoor(ctx, s.resolver, pin)
 }
 
 // decideForCustomer is decideFor for an event that names a customer it has

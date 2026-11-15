@@ -10,6 +10,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/payment/breaker"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
@@ -234,9 +235,17 @@ func (r *Reconciler) sweep(ctx context.Context, label string, list func(context.
 		errs     []error
 	)
 	for _, inv := range invoices {
+		rowCtx, gone, err := r.decideRow(ctx, inv.TenantID, inv.ID)
+		if gone || err != nil {
+			// Stamped like a failed check, so the list moves on past it.
+			r.recordSync(ctx, inv, inv.ProviderPaymentStatus)
+			if err != nil {
+				errs = append(errs, fmt.Errorf("invoice %s: checked again on the next run; no payment is lost: %w", inv.ID, err))
+			}
+			continue
+		}
 		var changed bool
-		var err error
-		if guardRow(panics, func() { changed, err = r.reconcileOne(ctx, inv) },
+		if guardRow(panics, func() { changed, err = r.reconcileOne(rowCtx, inv) },
 			"step", "reconcile_"+label, "invoice_id", inv.ID, "tenant_id", inv.TenantID) {
 			r.recordSync(ctx, inv, inv.ProviderPaymentStatus)
 			continue
@@ -250,6 +259,23 @@ func (r *Reconciler) sweep(ctx context.Context, label string, list func(context.
 		}
 	}
 	return resolved, errs
+}
+
+// decideRow decides a row's time from its invoice, right after the sweep
+// listed it (clock.DecideWithoutDoor), and the settle keeps that decision
+// (BindEffectiveNow keeps a same-clock one). gone is true on a not-found:
+// the invoice, or, in a race with its clock's deletion, its clock; there is
+// nothing to settle, and the caller stamps the row so the list moves on.
+// Any other failure is clock.ErrUndecided: the row is checked again on the
+// next run.
+func (r *Reconciler) decideRow(ctx context.Context, tenantID, invoiceID string) (context.Context, bool, error) {
+	decided, err := clock.DecideWithoutDoor(ctx, r.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
+	if errors.Is(err, errs.ErrNotFound) {
+		slog.InfoContext(ctx, "reconcile: the invoice or its test clock is gone; nothing to settle",
+			"invoice_id", invoiceID, "tenant_id", tenantID)
+		return ctx, true, nil
+	}
+	return decided, false, err
 }
 
 type terminalKind int

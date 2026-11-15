@@ -441,7 +441,7 @@ func (s *Stripe) settleFailed(ctx context.Context, tenantID string, inv domain.I
 	// with no run; the next report of this PaymentIntent re-drives it (see
 	// above), and for wall-clock invoices the dunning_backfill reconciler
 	// (billing.Engine.EnrollFailedWithoutDunning) does too.
-	if started, err := startDunningWithRetry(ctx, s.dunning, tenantID, fresh.ID, fresh.CustomerID, dunningSimFailedAt(ctx, fresh), domain.DunningCausePaymentFailed); err != nil {
+	if started, err := startDunningWithRetry(ctx, s.dunning, tenantID, fresh.ID, fresh.CustomerID, dunningSimFailedAt(ctx), domain.DunningCausePaymentFailed); err != nil {
 		slog.Error("payment failure StartDunning failed after retries — the next report of this payment intent retries it, and for a wall-clock invoice the dunning backfill sweep does on a later scheduler tick",
 			"invoice_id", fresh.ID, "customer_id", fresh.CustomerID, "error", err)
 	} else if started {
@@ -651,18 +651,17 @@ func settleAnchorFrom(ctx context.Context) (time.Time, bool) {
 	return t, ok && !t.IsZero()
 }
 
-// dunningSimFailedAt is the simulated instant a failed charge fired at, which
-// StartDunning reads for a clock-pinned invoice's first retry: the charge's
-// contracted anchor when the report carries it (the inline decline, the
-// webhook's and the reconciler's PI metadata), else the issue instant. The
-// anchor matters when a charge fires on a later Advance than the issue — a
-// card attached after the invoice — where counting from the issue instant
-// would put the first retry in the past and run it at once.
-func dunningSimFailedAt(ctx context.Context, inv domain.Invoice) time.Time {
+// dunningSimFailedAt is the instant a clock invoice's failed charge counts
+// from, which StartDunning reads for its first retry. A charge's anchor is
+// the instant the charge was made at on its clock, carried on the
+// PaymentIntent (and handed straight to an inline settle). Dunning starts at
+// the charge's anchor, else at the decided time: the time the failure is
+// recorded at on the invoice's clock.
+func dunningSimFailedAt(ctx context.Context) time.Time {
 	if a, ok := settleAnchorFrom(ctx); ok {
 		return a
 	}
-	return inv.IssuedAtOrZero()
+	return clock.Now(ctx)
 }
 
 // anchorFromEventPayload extracts data.object.metadata.hardcount_anchor_at from

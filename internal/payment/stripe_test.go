@@ -11,6 +11,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -649,38 +650,57 @@ func TestChargeInvoice_DefiniteFailure_InlineStartsDunning(t *testing.T) {
 			Unknown:         false, // DEFINITIVE failure
 		},
 	}
-	invoices := newMockInvoiceUpdater()
-	cycleClose := time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC)
-	cycleEnd := cycleClose
-	cycleStart := cycleEnd.Add(-30 * 24 * time.Hour)
-	invoices.invoices["inv_1"] = domain.Invoice{
-		ID: "inv_1", TenantID: "t1", CustomerID: "cus_1",
-		Status:             domain.InvoiceFinalized,
-		AmountDueCents:     5000,
-		Currency:           "USD",
-		IssuedAt:           &cycleEnd,
-		BillingPeriodStart: cycleStart,
-		BillingPeriodEnd:   cycleEnd,
+	issued := time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC)     // the invoice's issue instant
+	chargedAt := time.Date(2024, 5, 4, 0, 0, 0, 0, time.UTC)  // the charge's anchor: a card attached on a later move
+	advanceTo := time.Date(2024, 5, 20, 0, 0, 0, 0, time.UTC) // the clock's frozen time: the move's target
+	newInvoice := func() (*mockInvoiceUpdater, domain.Invoice) {
+		invoices := newMockInvoiceUpdater()
+		invoices.invoices["inv_1"] = domain.Invoice{
+			ID: "inv_1", TenantID: "t1", CustomerID: "cus_1",
+			Status:             domain.InvoiceFinalized,
+			AmountDueCents:     5000,
+			Currency:           "USD",
+			IssuedAt:           &issued,
+			BillingPeriodStart: issued.Add(-30 * 24 * time.Hour),
+			BillingPeriodEnd:   issued,
+		}
+		return invoices, invoices.invoices["inv_1"]
 	}
 
-	dunning := &recordingDunningStarter{}
-	stripe := NewStripe(client, invoices, newMockWebhookStore(), nil, dunning)
+	t.Run("on a clock", func(t *testing.T) {
+		invoices, inv := newInvoice()
+		dunning := &recordingDunningStarter{}
+		stripe := NewStripe(client, invoices, newMockWebhookStore(), nil, dunning)
+		stripe.SetResolver(clockAt(advanceTo))
+		// A clock's move charges at the instant the charge belongs to, so the
+		// charge's anchor differs from both the issue and the move's target.
+		ctx := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: chargedAt, TestClockID: "clk_1"})
+		if _, err := stripe.ChargeInvoice(ctx, "t1", inv, testHold, "cus_stripe_abc", "pm_test"); err == nil {
+			t.Fatal("expected definitive failure error")
+		}
+		if len(dunning.calls) != 1 {
+			t.Fatalf("StartDunning calls: got %d, want 1 (inline trigger on definitive failure — closes Phase 3 → Phase 5 webhook race)", len(dunning.calls))
+		}
+		call := dunning.calls[0]
+		if call.tenantID != "t1" || call.invoiceID != "inv_1" || call.customerID != "cus_1" {
+			t.Errorf("StartDunning args: got %+v, want {t1, inv_1, cus_1, ...}", call)
+		}
+		if !call.failureAt.Equal(chargedAt) {
+			t.Errorf("failureAt: got %v, want the charge's anchor %v (not the issue %v or the move's target %v)", call.failureAt, chargedAt, issued, advanceTo)
+		}
+	})
 
-	_, err := stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test")
-	if err == nil {
-		t.Fatal("expected definitive failure error")
-	}
-
-	if len(dunning.calls) != 1 {
-		t.Fatalf("StartDunning calls: got %d, want 1 (inline trigger on definitive failure — closes Phase 3 → Phase 5 webhook race)", len(dunning.calls))
-	}
-	call := dunning.calls[0]
-	if call.tenantID != "t1" || call.invoiceID != "inv_1" || call.customerID != "cus_1" {
-		t.Errorf("StartDunning args: got %+v, want {t1, inv_1, cus_1, ...}", call)
-	}
-	if !call.failureAt.Equal(cycleEnd) {
-		t.Errorf("failureAt: got %v, want %v (= invoice cycle close — anchors dunning chain on simulated time, not advance-end frozen_time)", call.failureAt, cycleEnd)
-	}
+	t.Run("live", func(t *testing.T) {
+		invoices, inv := newInvoice()
+		dunning := &recordingDunningStarter{}
+		stripe := NewStripe(client, invoices, newMockWebhookStore(), nil, dunning)
+		if _, err := stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", inv, testHold, "cus_stripe_abc", "pm_test"); err == nil {
+			t.Fatal("expected definitive failure error")
+		}
+		if len(dunning.calls) != 1 || time.Since(dunning.calls[0].failureAt) > time.Minute {
+			t.Fatalf("StartDunning calls: %+v; want one, at the time the failure is recorded", dunning.calls)
+		}
+	})
 }
 
 // TestChargeInvoice_UnknownOutcome_NoInlineDunning locks in the
