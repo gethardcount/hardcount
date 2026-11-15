@@ -126,6 +126,7 @@ func TestCancel_ReliefNotIssued_OnATestClock_TheAdvanceChargesNetOfTheRelief(t *
 	r.engine.SetTestClockReader(clocks)
 	r.subSvc.SetResolver(r.engine)
 	r.engine.SetCreditNoteAdjuster(&failingFirstIssue{CreditNoteAdjuster: r.cn})
+	r.clockID = clockID
 
 	r.cancelImmediately(t)
 	final := r.finalInvoice(t)
