@@ -2119,45 +2119,31 @@ func useRequestEdge(r chi.Router, trustProxy string) {
 	r.Use(mw.TraceRequestAttrs(loggablePath))
 }
 
-// loggablePath returns a path that holds no link token, for logs and
-// traces. Four routes carry a link token in the path that works like a
-// password: hosted invoices, payment updates, the public cost dashboard
-// and the team invite preview. It returns one of three things:
+// loggablePath returns a path that holds no link token, for the access
+// log, the panic log and the trace's url.path. Some public links carry a
+// link token in the path that works like a password, and a token pasted
+// into a wrong address sits in the same place: after the first two
+// segments. It returns one of two things:
 //
 //   - When a route or a mount matched, chi's pattern, such as
 //     "/v1/public/invoices/{token}" or, for a miss under a mount,
 //     "/v1/public/invoices/*".
 //   - When nothing matched (a panic or a CORS preflight before routing, or
-//     a path outside every mount) and the path starts with one of the four
-//     routes' prefixes, the path with the segment after the prefix
-//     replaced by "[redacted]".
-//   - Any other path that matched nothing, as the client sent it.
-//
-// A new {token} route adds its prefix here, and to
-// deploy/compose/nginx-log-redact.conf, which keeps it out of the Compose
-// stack's nginx access logs.
+//     a path outside every mount), the first two segments followed by
+//     "/…", such as "/V1/public/…". A path of two segments or fewer is
+//     returned whole. Two segments are enough to see scans and broken
+//     clients, and the rule needs no list of routes to keep in step.
 func loggablePath(r *http.Request) string {
 	if rctx := chi.RouteContext(r.Context()); rctx != nil {
 		if pat := rctx.RoutePattern(); pat != "" {
 			return pat
 		}
 	}
-	path := r.URL.Path
-	for _, prefix := range []string{
-		"/v1/public/invoices/",
-		"/v1/public/payment-updates/",
-		"/v1/public/cost-dashboard/",
-		"/v1/auth/invite/",
-	} {
-		if rest, ok := strings.CutPrefix(path, prefix); ok && rest != "" {
-			// Keep any sub-path (e.g. /pdf, /checkout) after the token.
-			if i := strings.IndexByte(rest, '/'); i >= 0 {
-				return prefix + "[redacted]" + rest[i:]
-			}
-			return prefix + "[redacted]"
-		}
+	segs := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/"), "/", 3)
+	if len(segs) < 3 || segs[2] == "" {
+		return r.URL.Path
 	}
-	return path
+	return "/" + segs[0] + "/" + segs[1] + "/…"
 }
 
 // maxRequestBodyBytes caps a request body on every route but the LiteLLM

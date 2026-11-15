@@ -105,14 +105,14 @@ func TestPanicLog_LogsASafePath(t *testing.T) {
 			"/v1/public/invoices/" + fakeLinkToken, "/v1/public/invoices/{token}"},
 		{"a miss under a mount logs the mount's pattern", false,
 			"/v1/public/invoices/" + fakeLinkToken + "/no-such-page", "/v1/public/invoices/*"},
-		{"before routing an invoice link is redacted", true,
-			"/v1/public/invoices/" + fakeLinkToken + "/pdf", "/v1/public/invoices/[redacted]/pdf"},
-		{"before routing a card update link is redacted", true,
-			"/v1/public/payment-updates/" + fakeLinkToken, "/v1/public/payment-updates/[redacted]"},
-		{"before routing a cost dashboard link is redacted", true,
-			"/v1/public/cost-dashboard/" + fakeLinkToken, "/v1/public/cost-dashboard/[redacted]"},
-		{"before routing an invite link is redacted", true,
-			"/v1/auth/invite/" + fakeLinkToken, "/v1/auth/invite/[redacted]"},
+		{"before routing an invoice link keeps two segments", true,
+			"/v1/public/invoices/" + fakeLinkToken + "/pdf", "/v1/public/…"},
+		{"before routing a card update link keeps two segments", true,
+			"/v1/public/payment-updates/" + fakeLinkToken, "/v1/public/…"},
+		{"before routing a cost dashboard link keeps two segments", true,
+			"/v1/public/cost-dashboard/" + fakeLinkToken, "/v1/public/…"},
+		{"before routing an invite link keeps two segments", true,
+			"/v1/auth/invite/" + fakeLinkToken, "/v1/auth/…"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

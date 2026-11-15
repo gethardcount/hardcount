@@ -170,20 +170,21 @@ func TestRequestEdge_SpanCarriesRouteAndTrustedIP_NotToken(t *testing.T) {
 // A request answered before routing (a CORS preflight) has no route
 // pattern; its span must still not carry the token.
 func TestRequestEdge_UnroutedSpanHasNoToken(t *testing.T) {
-	// Every route that carries a capability token in the path. A CORS
-	// preflight is answered before routing, so its span has no route
-	// pattern and relies on loggablePath's prefix redaction.
+	// Every route that carries a link token in the path. A CORS preflight
+	// is answered before routing, so its span has no route pattern and
+	// keeps only the path's first two segments.
 	cases := []struct {
+		name string
 		path string
 		want string
 	}{
-		{"/v1/public/invoices/" + edgeTestToken + "/pdf", "/v1/public/invoices/[redacted]/pdf"},
-		{"/v1/public/payment-updates/" + edgeTestToken, "/v1/public/payment-updates/[redacted]"},
-		{"/v1/public/cost-dashboard/" + edgeTestToken, "/v1/public/cost-dashboard/[redacted]"},
-		{"/v1/auth/invite/" + edgeTestToken, "/v1/auth/invite/[redacted]"},
+		{"invoice", "/v1/public/invoices/" + edgeTestToken + "/pdf", "/v1/public/…"},
+		{"card update", "/v1/public/payment-updates/" + edgeTestToken, "/v1/public/…"},
+		{"cost dashboard", "/v1/public/cost-dashboard/" + edgeTestToken, "/v1/public/…"},
+		{"invite", "/v1/auth/invite/" + edgeTestToken, "/v1/auth/…"},
 	}
 	for _, tc := range cases {
-		t.Run(tc.want, func(t *testing.T) {
+		t.Run(tc.name, func(t *testing.T) {
 			h, rec, _ := edgeRouter(t, "")
 			req := httptest.NewRequest(http.MethodOptions, tc.path, nil)
 			req.RemoteAddr = "203.0.113.9:5555"
