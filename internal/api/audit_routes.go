@@ -297,7 +297,6 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 	{"PATCH", "/v1/dunning/policies/{id}"}:            explicit("dunning.Handler.updatePolicy → Log(update, dunning_policy)."),
 	{"DELETE", "/v1/dunning/policies/{id}"}:           explicit("dunning.Handler.deletePolicy → Log(delete, dunning_policy)."),
 	{"POST", "/v1/dunning/policies/{id}/set-default"}: explicit("dunning.Handler.setDefaultPolicy → Log(update, dunning_policy: set_default)."),
-	{"POST", "/v1/dunning/runs/{id}/resolve"}:         explicit("dunning.Handler.resolveRun → Log(update, dunning_run) — operator's manual resolution."),
 
 	// --- webhook endpoints / events --------------------------------------
 	{"POST", "/v1/webhook-endpoints/endpoints"}:                                     explicit("webhook.Handler.createEndpoint → Log(create, webhook_endpoint)."),

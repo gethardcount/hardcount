@@ -53,14 +53,6 @@ func TestOfflinePayment_LeavesNoPaymentIntent_EveryReader(t *testing.T) {
 		call("POST", "/v1/invoices/"+id+"/finalize", flowReq{}).want(t, 200, "finalize: "+desc)
 		return id
 	}
-	runID := func(invoiceID string) string {
-		t.Helper()
-		runs := flowList(call("GET", "/v1/dunning/runs?invoice_id="+invoiceID, flowReq{}).want(t, 200, "list dunning runs").body, "data")
-		if len(runs) != 1 {
-			t.Fatalf("invoice %s has %d dunning runs, want 1", invoiceID, len(runs))
-		}
-		return flowStr(runs[0], "id")
-	}
 	// column reads what the database holds, past any reader's COALESCE.
 	column := func(invoiceID string) (pi *string, attempts int) {
 		t.Helper()
@@ -83,15 +75,10 @@ func TestOfflinePayment_LeavesNoPaymentIntent_EveryReader(t *testing.T) {
 	call("POST", "/v1/invoices/"+byRecordPayment+"/record-payment", flowReq{body: map[string]any{"note": "Wire ref 1042"}}).
 		want(t, 200, "record offline payment")
 
-	byDunningResolve := newInvoice("Paid by cheque, recovery resolved")
-	call("POST", "/v1/dunning/runs/"+runID(byDunningResolve)+"/resolve", flowReq{body: map[string]any{"resolution": "payment_recovered"}}).
-		want(t, 200, "resolve recovery as payment_recovered")
-
 	for _, c := range []struct {
 		name, id, note string
 	}{
 		{"record-payment", byRecordPayment, "Wire ref 1042"},
-		{"payment recovery resolved as payment_recovered", byDunningResolve, "Recovered via dunning resolution"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			resp := call("GET", "/v1/invoices/"+c.id, flowReq{}).want(t, 200, "get invoice")

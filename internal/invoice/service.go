@@ -287,9 +287,8 @@ func (s *Service) SetDunningResolver(d DunningResolver) { s.dunningResolver = d 
 
 // AuditLogger is the narrow audit-write interface the service uses to
 // record state-changing operations that are reachable from multiple
-// entry points (HTTP handler + dunning adapter MarkUncollectible
-// final-action + the ResolveRun(invoice_not_collectible) operator
-// flow). Same pattern as subscription.Service — single canonical
+// entry points (the HTTP handler and dunning's MarkUncollectible final
+// action). Same pattern as subscription.Service — single canonical
 // audit row regardless of which path triggered the transition.
 type AuditLogger interface {
 	Log(ctx context.Context, tenantID, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
@@ -2205,7 +2204,7 @@ func (s *Service) AfterVoid(ctx context.Context, tenantID string, voided domain.
 	_ = s.reverseInvoiceTax(ctx, tenantID, voided, "inv_taxrev_"+voided.ID)
 	if s.dunningResolver != nil {
 		if err := s.dunningResolver.ResolveByInvoice(ctx, tenantID, voided.ID, domain.ResolutionInvoiceVoided); err != nil {
-			slog.WarnContext(ctx, "resolve the voided invoice's dunning run failed; its next dunning tick resolves it",
+			slog.WarnContext(ctx, "the invoice is voided but closing its dunning run failed; an active run closes at its next retry; an escalated one stays open until resolved by hand (runbook: Force-resolve a stuck dunning run)",
 				"invoice_id", voided.ID, "error", err)
 		}
 	}
@@ -2367,8 +2366,7 @@ func (s *Service) MarkUncollectibleThen(ctx context.Context, tenantID, id string
 // customer-facing payloads. Empty string is permitted.
 //
 // After the commit it closes the invoice's dunning run and expires any
-// Checkout page still open for it, so every caller (the invoice page, and
-// dunning's "payment recovered" resolve) gets both.
+// Checkout page still open for it.
 func (s *Service) RecordOfflinePayment(ctx context.Context, tenantID, id, note string) (domain.Invoice, error) {
 	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	inv, err := s.store.Get(ctx, tenantID, id)
@@ -2473,7 +2471,7 @@ func (s *Service) RecordOfflinePayment(ctx context.Context, tenantID, id, note s
 	// the Stripe call below, which can be slow.
 	if s.dunningResolver != nil {
 		if err := s.dunningResolver.ResolveByInvoice(stepsCtx, tenantID, updated.ID, domain.ResolutionPaymentRecovered); err != nil {
-			slog.WarnContext(ctx, "the offline payment is recorded but closing the invoice's dunning run failed; an active run closes at its next retry, an escalated one needs Resolve",
+			slog.WarnContext(ctx, "the offline payment is recorded but closing the invoice's dunning run failed; an active run closes at its next retry; an escalated one stays open until resolved by hand (runbook: Force-resolve a stuck dunning run)",
 				"invoice_id", updated.ID, "error", err)
 		}
 	}

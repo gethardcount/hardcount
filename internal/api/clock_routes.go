@@ -287,7 +287,6 @@ var clockRoutes = map[routeKey]clockDecl{
 	{"GET", "/v1/credits/ledger/{customer_id}"}:       ofCustomer("customer_id"),
 
 	// --- dunning runs -------------------------------------------------------
-	{"GET", "/v1/dunning/runs"}:               realTime(),
-	{"GET", "/v1/dunning/runs/{id}"}:          ofDunningRun(),
-	{"POST", "/v1/dunning/runs/{id}/resolve"}: ofDunningRun(),
+	{"GET", "/v1/dunning/runs"}:      realTime(),
+	{"GET", "/v1/dunning/runs/{id}"}: ofDunningRun(),
 }

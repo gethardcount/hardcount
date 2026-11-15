@@ -1899,7 +1899,7 @@ func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.Credit
 	// like every other settle path's resolve.
 	if settled && s.dunning != nil {
 		if err := s.dunning.ResolveByInvoice(ctx, tenantID, cn.InvoiceID, domain.ResolutionPaymentRecovered); err != nil {
-			slog.WarnContext(ctx, "credit note marked the invoice paid but closing its dunning run failed; an active run closes at its next retry, an escalated one needs Resolve",
+			slog.WarnContext(ctx, "credit note marked the invoice paid but closing its dunning run failed; an active run closes at its next retry; an escalated one stays open until resolved by hand (runbook: Force-resolve a stuck dunning run)",
 				"credit_note_id", cn.ID, "invoice_id", cn.InvoiceID, "error", err)
 		}
 	}

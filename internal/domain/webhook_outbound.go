@@ -100,8 +100,8 @@ const (
 	// EventInvoiceMarkedUncollectible matches Stripe's event of the same name
 	// (https://docs.stripe.com/api/events/types#event_types-invoice.marked_uncollectible).
 	// It fires when an invoice moves to status=uncollectible: through
-	// dunning's mark_uncollectible final action, through the operator's
-	// ResolveRun(invoice_not_collectible), or through the direct API call.
+	// dunning's mark_uncollectible final action, or through
+	// POST /v1/invoices/{id}/mark-uncollectible.
 	// Subscribers should treat it as a bad-debt write-off: stop expecting
 	// payment, and leave the invoice out of receivables and revenue
 	// rollups.

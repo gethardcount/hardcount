@@ -101,7 +101,7 @@ func TestClockDoor_DecidesFromTheRouteTable(t *testing.T) {
 		{"a subscription's route", "POST", "/v1/subscriptions/sub_1/cancel", onClock, "subscription:sub_1"},
 		{"an invoice's route", "GET", "/v1/invoices/inv_1/pdf", onClock, "invoice:inv_1"},
 		{"a credit note's route, by its invoice", "GET", "/v1/credit-notes/cn_1", onClock, "invoice:inv_of_note"},
-		{"a dunning run's route, by its invoice", "POST", "/v1/dunning/runs/run_1/resolve", onClock, "invoice:inv_of_run"},
+		{"a dunning run's route, by its invoice", "GET", "/v1/dunning/runs/run_1", onClock, "invoice:inv_of_run"},
 		{"a route that names no record", "GET", "/v1/whoami", clock.Sim{}, ""},
 		{"a route its function decides", "POST", "/v1/customers", clock.Sim{}, ""},
 		{"a route the router does not have", "GET", "/v1/nothing-here", clock.Sim{}, ""},
@@ -168,7 +168,7 @@ func TestClockDoor_DecidesFromTheRouteTable(t *testing.T) {
 	for _, c := range []struct{ name, method, path string }{
 		{"a customer", "GET", "/v1/customers/cus_gone"},
 		{"a credit note", "GET", "/v1/credit-notes/cn_gone"},
-		{"a dunning run", "POST", "/v1/dunning/runs/run_gone/resolve"},
+		{"a dunning run", "GET", "/v1/dunning/runs/run_gone"},
 	} {
 		t.Run(c.name+" that does not exist: the handler answers it, at real time", func(t *testing.T) {
 			d := doorRig(t, &spyResolver{err: fmt.Errorf("read: %w", errs.ErrNotFound)})
@@ -189,7 +189,7 @@ func TestClockDoor_DecidesFromTheRouteTable(t *testing.T) {
 	for _, c := range []struct{ name, method, path, record string }{
 		{"a customer", "GET", "/v1/customers/cus_1", "customer cus_1"},
 		{"a credit note", "GET", "/v1/credit-notes/cn_1", "credit note cn_1"},
-		{"a dunning run", "POST", "/v1/dunning/runs/run_1/resolve", "dunning run run_1"},
+		{"a dunning run", "GET", "/v1/dunning/runs/run_1", "dunning run run_1"},
 	} {
 		t.Run(c.name+" whose clock cannot be read: 503, not served", func(t *testing.T) {
 			got := through(doorRig(t, &spyResolver{err: errors.New("db down")}), test, c.method, c.path)

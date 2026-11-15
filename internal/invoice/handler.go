@@ -693,19 +693,11 @@ func (h *Handler) resendSetupLink(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, map[string]string{"status": "sent"})
 }
 
-// markUncollectible is the operator-driven Stripe-parity bad-debt
-// write-off. Service-layer write + event already happen inside
-// invoice.Service.MarkUncollectible (so the dunning automated path
-// and ResolveRun(invoice_not_collectible) get the same contract);
-// this handler adds the side-effects that only fire on the direct
-// operator action: resolve any active dunning run so retry
-// automation halts immediately.
-//
-// Industry parity: Stripe + Recurly both halt all dunning activity
-// when an invoice is marked uncollectible / failed. We resolve the
-// active dunning run with ResolutionRetriesExhausted-shape semantics
-// (NOT invoice_not_collectible, which would loop back into the
-// "also mark invoice uncollectible" branch we just executed).
+// markUncollectible is the operator's bad-debt write-off. The write and its
+// event happen in invoice.Service.MarkUncollectible, the writer dunning's
+// final action uses too. This handler also closes the invoice's dunning run,
+// open or escalated, as invoice_not_collectible, so retries stop at once
+// (Stripe and Recurly stop dunning on a write-off too).
 func (h *Handler) markUncollectible(w http.ResponseWriter, r *http.Request) {
 	if !respond.NoBody(w, r) {
 		return
@@ -724,18 +716,14 @@ func (h *Handler) markUncollectible(w http.ResponseWriter, r *http.Request) {
 	// used to live here — added under the mistaken belief no row existed — made
 	// every operator mark-uncollectible produce TWO identical audit rows.
 
-	// Halt dunning automation. Best-effort — failure is logged not
-	// surfaced; the invoice transition is the authoritative state
-	// change, and dunning runs scan the invoice status on next tick
-	// anyway.
-	//
-	// The resolution names this outcome. It cannot recurse: the cross-flow
-	// branch that calls MarkUncollectible lives on ResolveRun, and this calls
-	// ResolveByInvoice, which has no such branch. Pinned by
-	// TestMarkUncollectible_ResolvesRunAsNotCollectible.
+	// Close the invoice's dunning run. Best-effort: the write-off has
+	// committed, so a failure is logged. An active run then closes at its next
+	// retry; an escalated one stays escalated, which beside a written-off
+	// invoice is how a write-off policy ends too and needs nothing.
 	if h.dunning != nil {
 		if err := h.dunning.ResolveByInvoice(r.Context(), tenantID, id, domain.ResolutionInvoiceNotCollectible); err != nil {
-			slog.WarnContext(r.Context(), "failed to resolve dunning on mark-uncollectible", "invoice_id", id, "error", err)
+			slog.WarnContext(r.Context(), "the invoice is written off but closing its dunning run failed; an active run closes at its next retry; an escalated one stays escalated, which beside a written-off invoice needs nothing",
+				"invoice_id", id, "error", err)
 		}
 	}
 
@@ -1199,8 +1187,9 @@ func (h *Handler) releaseCollectHold(ctx context.Context, tenantID, invoiceID st
 
 // resolveDunningRecovered closes the invoice's active dunning run, if any, as
 // payment_recovered after collect settled it, whether by card or from credit.
-// Best-effort: the payment has already committed, so a failure logs and the
-// dunning tick's paid check resolves the run when it next comes due.
+// Best-effort: the payment has already committed, so a failure is logged: an
+// active run closes at its next retry; an escalated one stays open until
+// resolved by hand (runbook: Force-resolve a stuck dunning run).
 func (h *Handler) resolveDunningRecovered(ctx context.Context, tenantID, invoiceID string) {
 	if h.dunning == nil {
 		return

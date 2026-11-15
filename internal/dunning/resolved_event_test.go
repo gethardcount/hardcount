@@ -74,18 +74,16 @@ func TestResolveRunNow_Idempotent_FiresEventOnce(t *testing.T) {
 	}
 }
 
-// TestServiceResolveRun_Idempotent_AfterAutomatedResolve locks that the operator
-// manual-resolve (Service.ResolveRun) also goes through the resolve CAS: if the run
-// was already resolved by an automated path (a card settle / the scheduler), an
-// operator resolve on the same run does NOT fire a second dunning.resolved.
-func TestServiceResolveRun_Idempotent_AfterAutomatedResolve(t *testing.T) {
+// A run resolved by one path (a card settle) and then by another (the
+// operator voids the invoice) fires dunning.resolved once: the second resolve
+// finds no open run.
+func TestResolveByInvoice_ASecondResolveFiresNoSecondEvent(t *testing.T) {
 	store := newMemStore()
 	svc := NewService(store, &noopRetrier{}, nil)
 	disp := &store.webhooks
 	ctx := context.Background()
 
-	run, err := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
-	if err != nil {
+	if _, err := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", time.Now(), domain.DunningCausePaymentFailed); err != nil {
 		t.Fatalf("StartDunning: %v", err)
 	}
 
@@ -93,41 +91,22 @@ func TestServiceResolveRun_Idempotent_AfterAutomatedResolve(t *testing.T) {
 	if err := svc.ResolveByInvoice(ctx, "t1", "inv_1", domain.ResolutionPaymentRecovered); err != nil {
 		t.Fatalf("automated resolve: %v", err)
 	}
-	// The operator then hits Resolve on the same (now-resolved) run — must no-op, not
-	// fire a second webhook.
-	if _, err := svc.ResolveRun(ctx, "t1", run.ID, domain.ResolutionInvoiceVoided); err != nil {
-		t.Fatalf("operator ResolveRun must no-op, not error: %v", err)
+	// The operator then voids the invoice: no run is open, so nothing fires.
+	if err := svc.ResolveByInvoice(ctx, "t1", "inv_1", domain.ResolutionInvoiceVoided); err != nil {
+		t.Fatalf("second resolve must no-op, not error: %v", err)
 	}
 
 	if got := disp.countOf(domain.EventDunningResolved); got != 1 {
-		t.Fatalf("dunning.resolved dispatched %d times, want exactly 1 (operator resolve after an automated resolve must not double-fire)", got)
+		t.Fatalf("dunning.resolved dispatched %d times, want exactly 1", got)
 	}
 }
 
 // TestDunningResolved_EventFires covers the medium-severity audit finding:
 // dunning.resolved was advertised in the event catalog but never dispatched,
 // silently dropping the payment-recovery signal that integrators subscribe to.
-// Both operator-facing resolution paths (ResolveRun, ResolveByInvoice) must
-// fire it, carrying the resolved run (ADR-131).
+// The invoice's own actions resolve a run through ResolveByInvoice, which
+// must fire it, carrying the resolved run (ADR-131).
 func TestDunningResolved_EventFires(t *testing.T) {
-	t.Run("ResolveRun", func(t *testing.T) {
-		store := newMemStore()
-		svc := NewService(store, &noopRetrier{}, nil)
-		disp := &store.webhooks
-		ctx := context.Background()
-
-		run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
-		if _, err := svc.ResolveRun(ctx, "t1", run.ID, domain.ResolutionPaymentRecovered); err != nil {
-			t.Fatalf("ResolveRun: %v", err)
-		}
-
-		payload, ok := disp.firstOf(domain.EventDunningResolved)
-		if !ok {
-			t.Fatalf("dunning.resolved not dispatched; got %+v", disp.events)
-		}
-		assertResolvedPayload(t, payload, "inv_1", "cus_1", string(domain.ResolutionPaymentRecovered))
-	})
-
 	t.Run("ResolveByInvoice", func(t *testing.T) {
 		store := newMemStore()
 		svc := NewService(store, &noopRetrier{}, nil)

@@ -338,8 +338,8 @@ To recover the customer, swap the card via step 2b with `4242`, then wait for
 the next scheduled dunning retry. Once the payment succeeds, the run resolves
 automatically.
 
-`POST /v1/dunning/runs/{id}/resolve` is the operator action to close a run
-manually. There is no per-attempt force-retry endpoint.
+To close a run by hand, act on its invoice: record an offline payment, void
+it or mark it uncollectible. There is no per-attempt force-retry endpoint.
 
 ---
 

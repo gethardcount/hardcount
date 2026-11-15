@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -16,24 +15,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/activity"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
-
-// InvoiceVoider routes dunning resolution outcomes through the invoice
-// SERVICE (not the raw store), so they inherit the service's status guards,
-// the in-flight payment guard, the tax reversal, and the single-writer
-// webhook events. Before this, resolveRun called the raw store's
-// UpdateStatus(Voided) directly — a second, less-guarded void writer that
-// reversed no tax and emitted no event (an overlapping-flow hole). The
-// payment_recovered leg had the same hole until 2026-07-26: a raw
-// MarkPaid("") skipped the out-of-band record, the in-flight guard, and
-// the invoice.payment_recorded webhook that the Record-offline-payment
-// dialog's path emits — two offline-payment writers with different
-// evidence trails for the same operator action.
-type InvoiceVoider interface {
-	Void(ctx context.Context, tenantID, id string) (domain.Invoice, error)
-	RecordOfflinePayment(ctx context.Context, tenantID, id, note string) (domain.Invoice, error)
-}
 
 // EventLiner words a payment-recovery run's events as activity lines
 // (ADR-128): the lines the invoice's Activity card shows for the same
@@ -46,11 +28,9 @@ type EventLiner interface {
 }
 
 type Handler struct {
-	svc           *Service
-	invoiceVoider InvoiceVoider
-	auditLogger   AuditWriter
-	resolver      clock.Resolver
-	eventLiner    EventLiner
+	svc         *Service
+	auditLogger AuditWriter
+	eventLiner  EventLiner
 }
 
 // SetEventLiner wires the words of the recovery timeline (lazy: the invoice
@@ -64,28 +44,11 @@ type AuditWriter interface {
 	Log(ctx context.Context, tenantID, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
 }
 
-// SetAuditLogger wires the audit logger so dunning policy CRUD and
-// run resolution mutations land in audit_log. Without this, operator-
-// triggered resolution of a dunning run (a money decision: customer
-// no longer pays vs grace extension vs write-off) was invisible.
+// SetAuditLogger wires the audit logger so dunning policy changes land in
+// audit_log.
 func (h *Handler) SetAuditLogger(a AuditWriter) {
 	h.auditLogger = a
 }
-
-// SetResolver wires the clock resolver so resolveRun can bind ctx
-// from the invoice's pin before invoices.MarkPaid. Without this,
-// `invoice.paid_at` stamps wall-clock on clock-pinned invoices —
-// inconsistent with every other invoice timestamp on the same row
-// and breaks ADR-030's "no wall-clock leakage on pinned entities"
-// guarantee at the dunning-resolution seam.
-func (h *Handler) SetResolver(r clock.Resolver) { h.resolver = r }
-
-// SetInvoiceVoider wires the invoice service so a manually-resolved dunning
-// run voids through invoice.Service.Void (status guards + in-flight guard +
-// tax reversal + single-writer invoice.voided event) instead of the raw
-// store's UpdateStatus. Wired post-construction (the invoice service is built
-// after the dunning handler), mirroring SetInvoiceUncollectibleMarker.
-func (h *Handler) SetInvoiceVoider(v InvoiceVoider) { h.invoiceVoider = v }
 
 func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
@@ -111,7 +74,6 @@ func (h *Handler) Routes() chi.Router {
 	r.Route("/runs", func(r chi.Router) {
 		r.Get("/", h.listRuns)
 		r.Get("/{id}", h.getRun)
-		r.Post("/{id}/resolve", h.resolveRun)
 	})
 
 	// /stats backs the dashboard's stat cards. Aggregate query — no
@@ -425,137 +387,3 @@ type RunEvent struct {
 // differentiation is now expressed as `customers.dunning_policy_id`
 // assignment; mutation goes through PATCH /v1/customers/{id} on the
 // customer handler.
-
-type ResolveInput struct {
-	Resolution string `json:"resolution"`
-}
-
-func (h *Handler) resolveRun(w http.ResponseWriter, r *http.Request) {
-	tenantID := auth.TenantID(r.Context())
-	id := chi.URLParam(r, "id")
-
-	var input ResolveInput
-	if !respond.DecodeStrict(w, r, &input) {
-		return
-	}
-
-	// Only the three operator-choosable outcomes are legal here.
-	// retries_exhausted / action_failed are engine-written states —
-	// accepting them (or any free-text string) from the API fabricates
-	// engine outcomes and used to store the bogus value verbatim
-	// (resolution has a CHECK constraint since migration 0158, but the
-	// column is written by multiple flows, so the operator endpoint
-	// rejects early with a teaching message).
-	switch domain.DunningResolution(input.Resolution) {
-	case domain.ResolutionPaymentRecovered, domain.ResolutionInvoiceVoided, domain.ResolutionInvoiceNotCollectible:
-	default:
-		respond.ValidationField(w, r, "resolution", "resolution must be one of payment_recovered, invoice_voided, invoice_not_collectible")
-		return
-	}
-
-	// The invoice action runs BEFORE the run is resolved. Resolving first
-	// and then failing the invoice action (logged, 200) left a resolved run
-	// beside an unpaid / un-voided invoice: dunning had stopped, so nothing
-	// would ever collect or void it. This way a failed action leaves the run
-	// open and the operator sees the error. If the resolve itself fails after
-	// a successful action, the operator's retry finds the invoice already in
-	// the requested state, skips the action and resolves the run (an
-	// escalated run has no tick to do it for them).
-	pending, err := h.svc.store.GetRun(r.Context(), tenantID, id)
-	if err != nil {
-		respond.FromError(w, r, err, "dunning_run")
-		return
-	}
-	if err := h.applyResolutionToInvoice(r.Context(), tenantID, pending.InvoiceID, domain.DunningResolution(input.Resolution)); err != nil {
-		respond.FromError(w, r, err, "invoice")
-		return
-	}
-
-	run, err := h.svc.ResolveRun(r.Context(), tenantID, id, domain.DunningResolution(input.Resolution))
-	if err != nil {
-		respond.FromError(w, r, err, "dunning_run")
-		return
-	}
-
-	// Money-decision audit: operator chose how to close out a failing
-	// invoice's collection cycle (payment recovered / manual resolve /
-	// write-off). Critical for finance reconciliation — "why was this
-	// invoice marked recovered when no payment came in?".
-	if h.auditLogger != nil {
-		// Bind the invoice's clock so an operator resolving a dunning run inside
-		// a simulation lands on the sim axis. The dunning_run row itself is
-		// hard-deleted by ADR-086 teardown, so this row is the only surviving
-		// record of WHY collection was closed out ("marked recovered when no
-		// payment came in") — precisely the question the comment above says
-		// finance asks. A live invoice has no clock, so the bind leaves ctx as is.
-		auditCtx := r.Context()
-		if h.resolver != nil && run.InvoiceID != "" {
-			auditCtx, _ = clock.BindEffectiveNow(auditCtx, h.resolver, clock.Pin{TenantID: tenantID, InvoiceID: run.InvoiceID})
-		}
-		_ = h.auditLogger.Log(auditCtx, tenantID, domain.AuditActionUpdate, "dunning_run", run.ID, "", map[string]any{
-			"action":     "resolved",
-			"resolution": input.Resolution,
-			"invoice_id": run.InvoiceID,
-		})
-	}
-
-	respond.JSON(w, r, http.StatusOK, run)
-}
-
-// applyResolutionToInvoice carries an operator's dunning resolution to the
-// invoice: payment_recovered records an offline payment, invoice_voided
-// voids it. invoice_not_collectible is written by ResolveRun itself. An unwired writer is a known-degraded
-// construction and skips with a warning; a writer ERROR is returned.
-func (h *Handler) applyResolutionToInvoice(ctx context.Context, tenantID, invoiceID string, resolution domain.DunningResolution) error {
-	if invoiceID == "" {
-		return nil
-	}
-	target := map[domain.DunningResolution]domain.InvoiceStatus{
-		domain.ResolutionPaymentRecovered: domain.InvoicePaid,
-		domain.ResolutionInvoiceVoided:    domain.InvoiceVoided,
-	}[resolution]
-	if target != "" {
-		done, err := h.svc.invoiceIn(ctx, tenantID, invoiceID, target)
-		if err != nil {
-			return err
-		}
-		if done {
-			return nil // already paid / voided: the requested end state
-		}
-	}
-	switch resolution {
-	case domain.ResolutionPaymentRecovered:
-		// Route through the invoice service's offline-payment writer —
-		// the same path the invoice page's Record-offline-payment dialog
-		// uses — so the recovery is recorded as paid out of band, with
-		// the in-flight-charge guard, the payment_recorded audit
-		// row, and the invoice.payment_recorded webhook. A raw MarkPaid
-		// here was a second offline-payment writer with a thinner
-		// evidence trail for the same operator action. The service binds
-		// the invoice's clock itself (ADR-030), so sim-pinned invoices
-		// land paid_at on the sim axis without a bind here.
-		if h.invoiceVoider == nil {
-			slog.WarnContext(ctx, "invoice service unwired; skipping dunning payment-recovered mark-paid", "invoice_id", invoiceID)
-			return nil
-		}
-		if _, err := h.invoiceVoider.RecordOfflinePayment(ctx, tenantID, invoiceID, "Recovered via dunning resolution"); err != nil {
-			return fmt.Errorf("record the recovered payment: %w", err)
-		}
-	case domain.ResolutionInvoiceVoided:
-		// Void through the invoice SERVICE, the one void path: the in-flight
-		// guard, the status flip with the credit reversal and invoice.voided,
-		// then every void's post-commit legs (AfterVoid): stop collection at
-		// Stripe, reverse the tax, and resolve this run. A refused void runs
-		// none of them, so a charge in flight keeps its PaymentIntent.
-		// ResolveRun below then loses the resolve CAS and returns the run
-		// the void resolved.
-		if h.invoiceVoider == nil {
-			slog.WarnContext(ctx, "invoice voider unwired; skipping dunning manual-resolve void", "invoice_id", invoiceID)
-			return nil
-		}
-		if _, err := h.invoiceVoider.Void(ctx, tenantID, invoiceID); err != nil {
-			return fmt.Errorf("void the invoice: %w", err)
-		}
-	}
-	return nil
-}

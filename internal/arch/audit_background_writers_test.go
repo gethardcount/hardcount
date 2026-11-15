@@ -72,7 +72,7 @@ var residualOwnTxAuditWriters = map[string]int{
 var requestScopedOwnTxWriters = map[string]int{
 	"billing/run":    1,
 	"dunning/create": 1,
-	"dunning/update": 3,
+	"dunning/update": 2,
 	"dunning/delete": 1,
 	"webhook/create": 1,
 	// update ×3: endpoint PATCH, the event replay, and the single-receiver

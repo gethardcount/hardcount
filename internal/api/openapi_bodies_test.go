@@ -19,7 +19,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/customer"
 	"github.com/gethardcount/hardcount/internal/dashmembers"
 	"github.com/gethardcount/hardcount/internal/domain"
-	"github.com/gethardcount/hardcount/internal/dunning"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/paymentmethods"
 	"github.com/gethardcount/hardcount/internal/pricing"
@@ -114,7 +113,6 @@ var requestBodies = map[string]requestBody{
 	"POST /v1/test-clocks/{id}/advance":                                 {body: testclock.AdvanceInput{}},
 	"POST /v1/recipes/{key}/preview":                                    {body: recipe.PreviewRequest{}},
 	"POST /v1/recipes/{key}/instantiate":                                {body: recipe.InstantiateRequest{}},
-	"POST /v1/dunning/runs/{id}/resolve":                                {body: dunning.ResolveInput{}},
 	"POST /v1/dunning/policies":                                         {body: domain.DunningPolicy{}, undocumented: dunningPolicyReadOnly},
 	"PATCH /v1/dunning/policies/{id}":                                   {body: domain.DunningPolicy{}, undocumented: dunningPolicyReadOnly},
 	"POST /v1/api-keys":                                                 {body: auth.CreateKeyInput{}},

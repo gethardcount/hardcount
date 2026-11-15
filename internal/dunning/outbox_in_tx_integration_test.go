@@ -365,19 +365,16 @@ func TestExhaust_WriteOff_StoppedAfterWriteOff_EscalatesWithEmail(t *testing.T) 
 func TestDunningEvents_ContextEndsAfterCommit_EventIsQueued(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 
-	t.Run("resolved by the operator's write-off", func(t *testing.T) {
+	t.Run("resolved by a write-off", func(t *testing.T) {
 		f := newEventFixture(t, db, "Outbox Dunning Write-off", "", writeOffPolicy)
 		ctx, stop := f.stopped(domain.DunningEventResolved)
-		_, err := f.svc.ResolveRun(ctx, f.tenantID, f.runID, domain.ResolutionInvoiceNotCollectible)
+		err := f.svc.ResolveByInvoice(ctx, f.tenantID, f.invoiceID, domain.ResolutionInvoiceNotCollectible)
 		stop()
 		if err != nil {
 			t.Fatalf("resolve: %v", err)
 		}
 		if run := f.run(t); run.State != domain.DunningResolved || run.Resolution != domain.ResolutionInvoiceNotCollectible {
 			t.Fatalf("run state=%s resolution=%q, want resolved / invoice_not_collectible", run.State, run.Resolution)
-		}
-		if got := f.invoiceStatus(t); got != domain.InvoiceUncollectible {
-			t.Fatalf("invoice is %s, want uncollectible", got)
 		}
 		f.checkOneEvent(t, domain.EventDunningResolved, nil)
 	})
@@ -398,7 +395,7 @@ func TestDunningEvents_ContextEndsAfterCommit_EventIsQueued(t *testing.T) {
 }
 
 // TestDunningResolved_TwoResolversAtOnce_OneEvent: a payment's resolve and an
-// operator's resolve of one run collide. A held row lock makes both read the
+// operator's void of the invoice collide on one run. A held row lock makes both read the
 // active run before either writes. The resolve's compare-and-set lets one
 // win, and only the winner's transaction queues dunning.resolved.
 func TestDunningResolved_TwoResolversAtOnce_OneEvent(t *testing.T) {
@@ -428,7 +425,7 @@ func TestDunningResolved_TwoResolversAtOnce_OneEvent(t *testing.T) {
 	}()
 	go func() {
 		defer wg.Done()
-		_, errs[1] = f.svc.ResolveRun(f.ctx, f.tenantID, f.runID, domain.ResolutionPaymentRecovered)
+		errs[1] = f.svc.ResolveByInvoice(f.ctx, f.tenantID, f.invoiceID, domain.ResolutionInvoiceVoided)
 	}()
 	testutil.WaitForLockWaiters(t, f.ctx, testutil.AdminPool(t), "invoice_dunning_runs", 2)
 	if err := tx.Commit(); err != nil {
