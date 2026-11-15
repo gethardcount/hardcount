@@ -3,6 +3,7 @@ package usage
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -14,7 +15,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
-	"github.com/gethardcount/hardcount/internal/platform/postgres"
 
 	"log/slog"
 
@@ -24,7 +24,10 @@ import (
 type Service struct {
 	store    Store
 	resolver clock.Resolver
-	audit    AuditEmitter
+	// clock is real time: the server's clock (SetClock), the one the
+	// engine bills by.
+	clock clock.Clock
+	audit AuditEmitter
 	// held keeps usage rows that could not be ingested yet (#1044). Taken
 	// from the store when it implements HeldStore (PostgresStore does).
 	held HeldStore
@@ -34,7 +37,7 @@ type Service struct {
 }
 
 func NewService(store Store) *Service {
-	s := &Service{store: store}
+	s := &Service{store: store, clock: clock.Real()}
 	if h, ok := store.(HeldStore); ok {
 		s.held = h
 	}
@@ -52,6 +55,10 @@ func (s *Service) SetAuditLogger(a AuditEmitter) { s.audit = a }
 // unwired, nothing is flagged (narrow tests).
 func (s *Service) SetOpenPeriodReader(r OpenPeriodReader) { s.periods = r }
 
+// SetClock sets the clock real time is read from: the server's, the one the
+// billing engine bills by. Without it, the machine's.
+func (s *Service) SetClock(c clock.Clock) { s.clock = c }
+
 // SetResolver wires the unified clock.Resolver (implemented by
 // *billing.Engine). Ingest timestamps default to and gate against the
 // CUSTOMER's effective now — a test clock's frozen_time when the
@@ -65,15 +72,17 @@ func (s *Service) SetResolver(r clock.Resolver) {
 	s.resolver = r
 }
 
-// simNow returns the customer's simulated-time context: the ctx-bound one
-// if an upstream entry point already bound it, else the customer's own pin
-// (frozen_time + clock id when pinned to a test clock), else a bare
-// wall-clock Sim.
-//
-// Live mode skips the resolver lookup entirely — test clocks are
-// test-mode-only (DB CHECK on test_clocks.livemode), so a live
-// customer can never be pinned and the high-volume production ingest
-// path stays at zero extra queries.
+// simNow is the time an event for the customer is recorded at, decided once
+// per event at the point every ingest shape shares (single, batch, backfill,
+// a LiteLLM call, a held release). A clock decided upstream wins: a
+// backfill's own decision, or a request whose route named the customer. Else
+// the customer's own clock is decided here (clock.DecideWithoutDoor): the
+// customer is named in the body, so the API's door left the request at real
+// time. Live mode reads nothing. A not-found is the customer, or, in a race
+// with its clock's deletion, its clock: real time is right in both, and
+// ingest's own store call answers a missing customer. A clock that cannot be
+// read refuses the event (503): nothing is recorded, and the client sends it
+// again.
 func (s *Service) simNow(ctx context.Context, tenantID, customerID string) (clock.Sim, error) {
 	if sim, ok := clock.SimOf(ctx); ok {
 		return sim, nil
@@ -82,24 +91,21 @@ func (s *Service) simNow(ctx context.Context, tenantID, customerID string) (cloc
 		// Bound instant whose clock is unknown — keep the instant, claim no clock.
 		return clock.Sim{At: t}, nil
 	}
-	if s.resolver != nil && customerID != "" {
-		live, err := postgres.Livemode(ctx)
-		if err != nil {
-			return clock.Sim{}, err
-		}
-		if !live {
-			sim, err := s.resolver.SimForCustomer(ctx, tenantID, customerID)
-			if err == nil {
-				return sim, nil
-			}
-			// Ingest goes on at real time: a customer that cannot be read is
-			// surfaced by ingest's own store call; a clock that cannot be read
-			// is logged here.
-			slog.WarnContext(ctx, "usage: could not find the customer's test clock; ingesting at real time",
-				"customer_id", customerID, "error", err)
+	if customerID == "" {
+		return clock.Sim{At: s.clock.Now(ctx)}, nil
+	}
+	decided, err := clock.DecideWithoutDoor(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID})
+	switch {
+	case errors.Is(err, errs.ErrNotFound):
+	case err != nil:
+		return clock.Sim{}, errs.Unavailable("test_clock_unavailable",
+			"The customer's test clock could not be read. Nothing was recorded; send the event again.", err)
+	default:
+		if sim, ok := clock.SimOf(decided); ok {
+			return sim, nil
 		}
 	}
-	return clock.Sim{At: time.Now().UTC()}, nil
+	return clock.Sim{At: s.clock.Now(ctx)}, nil
 }
 
 // effectiveNow is simNow's instant — the value the ingest gates and

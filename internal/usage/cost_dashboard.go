@@ -2,7 +2,10 @@ package usage
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"sort"
 	"strings"
 	"time"
@@ -28,7 +31,12 @@ type CostDashboardAssembler struct {
 	subscriptions SubscriptionLister
 	credits       CostDashboardCreditReader
 	live          CostDashboardLiveBalance
+	// resolver decides the page's time from the customer its token names.
+	resolver clock.Resolver
 }
+
+// SetResolver wires the clock resolver the page decides its time with.
+func (a *CostDashboardAssembler) SetResolver(r clock.Resolver) { a.resolver = r }
 
 // CostDashboardLiveBalance computes the customer's live credit figure. It is
 // the same function the secret-key read GET /v1/credits/balance/{id}/live
@@ -232,6 +240,20 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 	// The token lookup runs under TxBypass and is the only place we learn
 	// the customer's mode, so we propagate it here.
 	ctx = postgres.WithLivemode(ctx, cust.Livemode)
+	// The page's time is decided from the customer its token names
+	// (clock.DecideWithoutDoor: a public page does not come through the
+	// API's door). A not-found is the customer, or, in a race with its
+	// clock's deletion, its clock: real time is right in both. A clock that
+	// cannot be read answers 503 with nothing shown.
+	decided, err := clock.DecideWithoutDoor(ctx, a.resolver, clock.Pin{TenantID: cust.TenantID, CustomerID: cust.ID})
+	switch {
+	case errors.Is(err, errs.ErrNotFound):
+		ctx = clock.WithRealTime(ctx)
+	case err != nil:
+		return nil, errs.Unavailable("test_clock_unavailable", "This page can't be shown right now. Please try again in a moment.", err)
+	default:
+		ctx = decided
+	}
 	// The usage view and the live credit figure below aggregate the same
 	// meters over the same period; the memo makes that one scan, not two.
 	ctx, _ = WithAggregationMemo(ctx)

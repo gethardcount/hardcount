@@ -628,6 +628,12 @@ func (h *Handler) batchIngest(w http.ResponseWriter, r *http.Request) {
 				respondIngestUnavailable(w, r, tenantID, e)
 				return
 			}
+			// An event whose customer's test clock could not be read: the
+			// batch is refused for retry, with nothing written.
+			if errors.Is(e, errs.ErrUnavailable) {
+				respond.FromError(w, r, e, "usage_event")
+				return
+			}
 		}
 		errStrings := make([]string, len(ingestErrs))
 		for i, e := range ingestErrs {
