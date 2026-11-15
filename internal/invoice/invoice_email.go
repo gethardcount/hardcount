@@ -8,6 +8,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
 // errInvoicePDF marks a failure to render the invoice PDF, which the
@@ -63,11 +64,11 @@ func (h *Handler) emailInvoice(ctx context.Context, tenantID string, inv domain.
 	if err := h.invoiceEmailRefusal(inv); err != nil {
 		return err
 	}
-	// Bind once here so the enqueued email carries the invoice's billing
+	// On the time the caller decided (the door from this invoice, or the
+	// collect that finalized it), read once from the server's clock when
+	// there is none, so the enqueued email carries the invoice's billing
 	// anchor and lands on the invoice's own calendar (ADR-030, ADR-104).
-	// Without this the row enqueues unanchored and sorts by real send time —
-	// the exact gap the 2026-07-29 walk caught after the anchor shipped.
-	bound := h.svc.bindForInvoice(ctx, tenantID, inv.ID)
+	bound := clock.EnsureEffectiveNow(ctx, h.svc.clock)
 
 	cc, err := resolveSendCC(bound, h.customers, tenantID, inv.CustomerID, to, ccOverride)
 	if err != nil {
@@ -105,7 +106,7 @@ func (h *Handler) emailInvoice(ctx context.Context, tenantID string, inv domain.
 		if trigger != "" {
 			meta["trigger"] = trigger
 		}
-		_ = h.auditLogger.Log(h.svc.AuditCtx(ctx, inv), tenantID, domain.AuditActionSend, "invoice", inv.ID, inv.InvoiceNumber, meta)
+		_ = h.auditLogger.Log(ctx, tenantID, domain.AuditActionSend, "invoice", inv.ID, inv.InvoiceNumber, meta)
 	}
 	return nil
 }

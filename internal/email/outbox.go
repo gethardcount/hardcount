@@ -281,7 +281,7 @@ func (s *OutboxStore) Enqueue(ctx context.Context, tx *sql.Tx, tenantID, emailTy
 	// this send, read from the bound ctx at the only moment the fact exists.
 	// Every invoice-caused enqueue site already binds (settle → receipt,
 	// finalize/sweeps → setup-link, catchup → reminders, operator actions →
-	// bindForInvoice), so this single chokepoint anchors them all; unbound
+	// the API door's decision), so this single chokepoint anchors them all; unbound
 	// ctx (live-mode mail, password resets, invites) records NULL — the two
 	// calendars coincide and there is nothing to say. created_at stays SQL
 	// now() on purpose: it is the real-world dispatch record (the

@@ -21,8 +21,8 @@ import (
 //
 // Prose didn't hold the rule, so this does: a call passing r.Context()
 // straight into an email-sending method is the exact shape of the bug.
-// Bind first (h.svc.bindForInvoice(r.Context(), …)) and pass the bound
-// ctx.
+// Pass the request's decided time with an instant bound
+// (clock.EnsureEffectiveNow(r.Context(), …)).
 var emailSendCallRe = regexp.MustCompile(
 	`\.(Send[A-Za-z]*|Notify[A-Za-z]*)\(\s*r\.Context\(\)`)
 
@@ -58,8 +58,8 @@ func TestHandlerEmailEnqueuesBindTheEntityClock(t *testing.T) {
 			if emailSendCallRe.MatchString(line) {
 				t.Errorf("%s:%d passes the raw request ctx to an email/notify call — the "+
 					"enqueued row gets no billing anchor and falls off the entity's calendar "+
-					"(ADR-030 / ADR-104). Bind first: ctx := h.svc.bindForInvoice(r.Context(), "+
-					"tenantID, inv.ID).\n    %s", path, i+1, trimmed)
+					"(ADR-030 / ADR-104). Pass the decided time with an instant bound: "+
+					"ctx := clock.EnsureEffectiveNow(r.Context(), clk).\n    %s", path, i+1, trimmed)
 			}
 		}
 	}

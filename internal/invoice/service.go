@@ -413,16 +413,10 @@ func (s *Service) SetCreditReverser(r CreditReverser) {
 	s.creditReverser = r
 }
 
-// SetResolver wires the unified clock.Resolver used to bind
-// effective-now at invoice service entry points. Once bound on ctx
-// via clock.BindEffectiveNow, every downstream s.clock.Now(ctx)
-// (including in the postgres store's INSERT-time stamps) reads
-// frozen_time on clock-pinned entities. Optional: nil leaves binding
-// off and every callsite reads wall-clock — the test-friendly default.
-//
-// Replaces the per-service ClockResolver pattern shipped during the
-// post-ADR-029 patches; matches Stripe's "no semantic change"
-// guarantee for billing-engine resources.
+// SetResolver wires the clock resolver the service decides a time with
+// where no caller decided one: a new invoice's customer or subscription
+// (decideCreate) and each invoice of the connect fan-out (decideInvoice).
+// Nil (narrow unit tests) decides nothing.
 func (s *Service) SetResolver(r clock.Resolver) {
 	s.resolver = r
 }
@@ -450,40 +444,6 @@ func (s *Service) decideInvoice(ctx context.Context, tenantID, invoiceID string)
 		return ctx, fmt.Errorf("its test clock could not be read, so its tax was not retried; it stays marked Needs attention: click Retry tax on it, or it is retried on the next connect: %w", err)
 	}
 	return decided, nil
-}
-
-// bindForInvoice binds effective-now from an invoice id. Used by
-// every per-invoice mutation entry point (Finalize, Void,
-// RecordPayment, RetryTax, etc.) so downstream stamps
-// inherit simulated time.
-func (s *Service) bindForInvoice(ctx context.Context, tenantID, invoiceID string) context.Context {
-	bound, _ := clock.BindEffectiveNow(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
-	return bound
-}
-
-// AuditCtx binds the invoice's simulated-time context (its test clock + that
-// clock's frozen instant) for a HANDLER-level audit emission — collect, refund,
-// send, rotate-token, retry-tax — so those rows land on the sim axis
-// (audit_log.sim_effective_at / test_clock_id).
-//
-// Without it the money-movement rows would be the ONE class of clock-driven
-// evidence missing from the clock filter: the service binds a ctx the handler
-// never sees, so "operator collected payment on INV-1042 during the simulation"
-// would be invisible to a clock-scoped forensic view — and after ADR-086
-// teardown deletes the invoice, invisible everywhere.
-//
-// The gate is the invoice's OWN is_simulated flag: exact, and free on the
-// wall-clock path (no resolver round-trip for the 99% case). domain.Invoice
-// carries no test_clock_id — the pin lives on the customer/sub (ADR-027) — so
-// the clock id itself still comes from one pin resolution, never guessed.
-func (s *Service) AuditCtx(ctx context.Context, inv domain.Invoice) context.Context {
-	if !inv.IsSimulated || s.resolver == nil {
-		return ctx
-	}
-	if _, ok := clock.SimOf(ctx); ok {
-		return ctx
-	}
-	return s.bindForInvoice(ctx, inv.TenantID, inv.ID)
 }
 
 // SetTaxRetrier wires the orchestrator behind the retry-tax endpoint.
@@ -1095,15 +1055,16 @@ func (s *Service) SetCreditApplier(c CreditApplier) {
 }
 
 // ApplyCreditBalance drains the customer's credit balance against a
-// FINALIZED invoice and returns the refreshed row (ADR-088). Clock-bound:
-// the ledger entry's timestamp rides the invoice's test clock for pinned
-// customers (bindForInvoice), mirroring the engine's SimForInvoice.
+// FINALIZED invoice and returns the refreshed row (ADR-088). The ledger
+// entry is at the time the caller decided, a clock invoice's clock time.
 // No-op (invoice returned unchanged) when no applier is wired, nothing is
 // due, or the invoice isn't finalized — a draft's credits wait for
 // finalize. An apply error is returned for the caller to route to the
 // retry sweep, which re-applies atomically before its own charge.
 func (s *Service) ApplyCreditBalance(ctx context.Context, tenantID, id string) (domain.Invoice, error) {
-	ctx = s.bindForInvoice(ctx, tenantID, id)
+	// The caller decided the time (the door, from this invoice); with none on
+	// ctx, the server's clock is read once.
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	inv, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -1129,10 +1090,11 @@ func (s *Service) ApplyCreditBalance(ctx context.Context, tenantID, id string) (
 // still-pending, zero-due invoice settles — the store's MarkPaid guard
 // additionally rejects drafts and non-ok tax (the DEMO-000906 class), so a
 // racing tax-pending draft can never jump to paid through here. paid_at is
-// clock-bound (bindForInvoice) so clock-pinned customers settle in simulated
-// time.
+// at the time the caller decided, so a clock invoice settles on its clock.
 func (s *Service) SettleZeroDue(ctx context.Context, tenantID, id string) (domain.Invoice, error) {
-	ctx = s.bindForInvoice(ctx, tenantID, id)
+	// The caller decided the time (the door, from this invoice); with none on
+	// ctx, the server's clock is read once.
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	inv, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -1159,7 +1121,9 @@ func (s *Service) SettleZeroDue(ctx context.Context, tenantID, id string) (domai
 // taken the money. paid reports whether this call settled the invoice, so
 // the caller fires its effects once.
 func (s *Service) SettleZeroDueWithoutClaim(ctx context.Context, tenantID, id string) (domain.Invoice, bool, error) {
-	ctx = s.bindForInvoice(ctx, tenantID, id)
+	// The caller decided the time (the door, from this invoice); with none on
+	// ctx, the server's clock is read once.
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	return s.store.SettleZeroDue(ctx, tenantID, id, s.clock.Now(ctx))
 }
 
@@ -1671,7 +1635,9 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]domain.Invoice
 // A tax retry finalizes an engine draft through RetryTax instead, inside its
 // tax write's transaction; both use finalizeHook and afterFinalize.
 func (s *Service) Finalize(ctx context.Context, tenantID, id string) (domain.Invoice, error) {
-	ctx = s.bindForInvoice(ctx, tenantID, id)
+	// The caller decided the time (the door, from this invoice); with none on
+	// ctx, the server's clock is read once.
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	inv, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -1770,9 +1736,9 @@ func (s *Service) Finalize(ctx context.Context, tenantID, id string) (domain.Inv
 	// Anchor issue + due dates to the finalize moment for operator-composed
 	// (manual) invoices, mirroring Stripe's finalized_at: a manual draft is
 	// "issued" when the operator finalizes it — possibly on a later test-clock
-	// instant than draft-create — and Net terms run from issuance. ctx is
-	// already bound to the invoice's clock (bindForInvoice above), so
-	// clock.Now is simulated time for clock-pinned customers. Net term is the
+	// instant than draft-create — and Net terms run from issuance. ctx
+	// carries the time the caller decided (a clock invoice's clock time),
+	// so clock.Now is that time. Net term is the
 	// value the draft was created with. A cycle draft keeps the dates the
 	// engine built it with (the FinalizeDraft branch).
 	var finishRelief func(context.Context)
@@ -2005,7 +1971,9 @@ func (s *Service) markTaxReversed(ctx context.Context, tenantID, invoiceID strin
 }
 
 func (s *Service) Void(ctx context.Context, tenantID, id string) (domain.Invoice, error) {
-	ctx = s.bindForInvoice(ctx, tenantID, id)
+	// The caller decided the time (the door, from this invoice); with none on
+	// ctx, the server's clock is read once.
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	inv, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -2266,7 +2234,9 @@ func (s *Service) MarkUncollectible(ctx context.Context, tenantID, id string) (d
 // (ADR-112 amendment 2026-11-09). then reads nothing outside tx: the row
 // lock is held while it runs.
 func (s *Service) MarkUncollectibleThen(ctx context.Context, tenantID, id string, then func(tx *sql.Tx) error) (domain.Invoice, error) {
-	ctx = s.bindForInvoice(ctx, tenantID, id)
+	// The caller decided the time (the door, from this invoice); with none on
+	// ctx, the server's clock is read once.
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	inv, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -2402,7 +2372,9 @@ func (s *Service) MarkUncollectibleThen(ctx context.Context, tenantID, id string
 // Checkout page still open for it, so every caller (the invoice page, and
 // dunning's "payment recovered" resolve) gets both.
 func (s *Service) RecordOfflinePayment(ctx context.Context, tenantID, id, note string) (domain.Invoice, error) {
-	ctx = s.bindForInvoice(ctx, tenantID, id)
+	// The caller decided the time (the door, from this invoice); with none on
+	// ctx, the server's clock is read once.
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	inv, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -2594,7 +2566,9 @@ type AddLineItemInput struct {
 }
 
 func (s *Service) AddLineItem(ctx context.Context, tenantID, invoiceID string, input AddLineItemInput) (domain.InvoiceLineItem, error) {
-	ctx = s.bindForInvoice(ctx, tenantID, invoiceID)
+	// The caller decided the time (the door, from this invoice); with none on
+	// ctx, the server's clock is read once.
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	// Currency is left empty here — AddLineItemAtomicAudited stamps it from the
 	// invoice row it locks. The atomic-create path passes the resolved
 	// currency instead, since the header isn't persisted yet.
@@ -2603,9 +2577,9 @@ func (s *Service) AddLineItem(ctx context.Context, tenantID, invoiceID string, i
 		return domain.InvoiceLineItem{}, err
 	}
 	// Compose-time expiry sanity (ADR-078): a commit whose expiry already
-	// passed would grant dead-on-arrival credits. Checked against the
-	// invoice's clock (bindForInvoice above) so clock-pinned customers
-	// evaluate simulated time. Re-checked at finalize — the line may sit
+	// passed would grant dead-on-arrival credits. Checked against the time
+	// the caller decided, a clock invoice's clock time. Re-checked at
+	// finalize — the line may sit
 	// in draft past its expiry.
 	if li.CommitExpiresAt != nil && !li.CommitExpiresAt.After(s.clock.Now(ctx)) {
 		return domain.InvoiceLineItem{}, errs.Invalid("commit_expires_at", "must be in the future")
@@ -2730,11 +2704,11 @@ func buildLineItem(input AddLineItemInput, currency string) (domain.InvoiceLineI
 // finalize's steps and the $0 settle run on a stepsBudget ctx. Manual
 // invoices stay drafts. An error comes back with no invoice.
 func (s *Service) RetryTax(ctx context.Context, tenantID, invoiceID string) (domain.Invoice, error) {
-	// The invoice's time, for callers that did not decide it. A caller that
-	// did (the door, for the Retry tax button; the connect fan-out) keeps its
-	// decision: the bind keeps an instant already bound on the same clock,
-	// and a lookup that fails leaves it.
-	ctx = s.bindForInvoice(ctx, tenantID, invoiceID)
+	// The caller decided the time: the door from this invoice (the Retry tax
+	// button), the connect fan-out per invoice, the billing-profile fan-out
+	// from its customer, a tax sweep at real time or in its clock's catch-up.
+	// With none on ctx, the server's clock is read once.
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	if s.taxRetrier == nil {
 		return domain.Invoice{}, errs.InvalidState("tax retry is not configured")
 	}
