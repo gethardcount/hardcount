@@ -48,8 +48,7 @@ func TestPaymentFailedEmail_Reconciler_ShowsOnlyStripesCardMessage(t *testing.T)
 			invoices.invoices["inv_1"] = unknown
 			client := NewLiveStripeClient(NewStripeClients(fixedCreds{}))
 			s, email, _ := newDeclineStripe(&mockStripeClient{}, invoices)
-			r := NewReconciler(client, newMockReconcileStore(unknown), time.Second)
-			r.SetSettler(s)
+			r := NewReconciler(client, newMockReconcileStore(unknown), s, time.Second)
 
 			if _, errs := r.Run(auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), 10); len(errs) != 0 {
 				t.Fatalf("reconciler errors: %v", errs)
@@ -72,8 +71,7 @@ func TestPaymentFailedEmail_Reconciler_CanceledWithNoChargeSendsNone(t *testing.
 	invoices := newMockInvoiceUpdater()
 	invoices.invoices["inv_1"] = unknown
 	s, email, _ := newDeclineStripe(&mockStripeClient{}, invoices)
-	r := NewReconciler(NewLiveStripeClient(NewStripeClients(fixedCreds{})), newMockReconcileStore(unknown), time.Second)
-	r.SetSettler(s)
+	r := NewReconciler(NewLiveStripeClient(NewStripeClients(fixedCreds{})), newMockReconcileStore(unknown), s, time.Second)
 	if _, errs := r.Run(auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1"), 10); len(errs) != 0 {
 		t.Fatalf("reconciler errors: %v", errs)
 	}

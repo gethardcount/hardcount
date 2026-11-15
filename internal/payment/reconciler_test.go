@@ -2,7 +2,6 @@ package payment
 
 import (
 	"context"
-	"database/sql"
 	"fmt"
 	"testing"
 	"time"
@@ -62,37 +61,6 @@ func (m *mockReconcileStore) ListUnknownPayments(_ context.Context, _ time.Time,
 	return out, nil
 }
 
-func (m *mockReconcileStore) MarkPaymentFailedReportingTransition(_ context.Context, _, id string, report domain.PaymentFailureReport, _ func(tx *sql.Tx, fresh domain.Invoice) error) (domain.Invoice, domain.PaymentFailureResult, error) {
-	inv, ok := m.byID[id]
-	if !ok {
-		return domain.Invoice{}, domain.PaymentFailureResult{}, errs.ErrNotFound
-	}
-	if !report.MovesInvoice(inv.Status, inv.PaymentStatus, inv.StripePaymentIntentID, inv.ChargeAttemptSeq, domain.AttemptNotHardcount) {
-		return *inv, domain.PaymentFailureResult{}, nil
-	}
-	first := inv.PaymentStatus != domain.PaymentFailed || inv.StripePaymentIntentID != report.PaymentIntentID
-	inv.PaymentStatus = domain.PaymentFailed
-	inv.StripePaymentIntentID = report.PaymentIntentID
-	inv.LastPaymentError = report.Message
-	if first {
-		inv.ChargeAttemptSeq++
-	}
-	return *inv, domain.PaymentFailureResult{Recorded: true, FirstNotice: first}, nil
-}
-
-func (m *mockReconcileStore) MarkPaid(_ context.Context, _, id string, piID string, paidAt time.Time) (domain.Invoice, error) {
-	inv, ok := m.byID[id]
-	if !ok {
-		return domain.Invoice{}, errs.ErrNotFound
-	}
-	inv.PaymentStatus = domain.PaymentSucceeded
-	inv.Status = domain.InvoicePaid
-	inv.StripePaymentIntentID = piID
-	inv.PaidAt = &paidAt
-	inv.AmountDueCents = 0
-	return *inv, nil
-}
-
 // RecordProviderSync MUTATES the stored invoice, matching the real store's
 // narrow UPDATE rather than swallowing the call. A no-op fake here would let a
 // test assert "the reconciler recorded the observation" against a double that
@@ -144,7 +112,8 @@ func TestReconciler_SucceededResolvesUnknown(t *testing.T) {
 			"pi_ambig_1": {ID: "pi_ambig_1", Status: "succeeded"},
 		},
 	}
-	r := NewReconciler(client, store, time.Second)
+	settler := &recordingSettler{}
+	r := NewReconciler(client, store, settler, time.Second)
 
 	resolved, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10)
 	if len(errs) != 0 {
@@ -153,12 +122,8 @@ func TestReconciler_SucceededResolvesUnknown(t *testing.T) {
 	if resolved != 1 {
 		t.Errorf("resolved: got %d, want 1", resolved)
 	}
-	got := store.byID["inv_1"]
-	if got.PaymentStatus != domain.PaymentSucceeded {
-		t.Errorf("payment_status: got %q, want succeeded", got.PaymentStatus)
-	}
-	if got.Status != domain.InvoicePaid {
-		t.Errorf("status: got %q, want paid", got.Status)
+	if len(settler.succeeded) != 1 || settler.succeeded[0] != (settledCall{invoiceID: "inv_1", piID: "pi_ambig_1"}) || len(settler.failed) != 0 {
+		t.Errorf("settled %+v paid, %+v failed; want inv_1 paid by pi_ambig_1 through the settler", settler.succeeded, settler.failed)
 	}
 }
 
@@ -172,7 +137,8 @@ func TestReconciler_CanceledMarksFailed(t *testing.T) {
 			"pi_ambig_2": {ID: "pi_ambig_2", Status: "canceled", Charged: true},
 		},
 	}
-	r := NewReconciler(client, store, time.Second)
+	settler := &recordingSettler{}
+	r := NewReconciler(client, store, settler, time.Second)
 
 	resolved, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10)
 	if len(errs) != 0 {
@@ -181,8 +147,8 @@ func TestReconciler_CanceledMarksFailed(t *testing.T) {
 	if resolved != 1 {
 		t.Errorf("resolved: got %d, want 1", resolved)
 	}
-	if got := store.byID["inv_2"].PaymentStatus; got != domain.PaymentFailed {
-		t.Errorf("payment_status: got %q, want failed", got)
+	if len(settler.failed) != 1 || settler.failed[0].invoiceID != "inv_2" || settler.failed[0].piID != "pi_ambig_2" || len(settler.succeeded) != 0 {
+		t.Errorf("settled %+v failed, %+v paid; want inv_2 failed on pi_ambig_2 through the settler", settler.failed, settler.succeeded)
 	}
 }
 
@@ -196,7 +162,7 @@ func TestReconciler_StillInFlightSkipped(t *testing.T) {
 			"pi_ambig_3": {ID: "pi_ambig_3", Status: "processing"},
 		},
 	}
-	r := NewReconciler(client, store, time.Second)
+	r := NewReconciler(client, store, &recordingSettler{}, time.Second)
 
 	resolved, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10)
 	if len(errs) != 0 {
@@ -225,7 +191,7 @@ func TestReconciler_NoPaymentIntentIDStaysUnknown(t *testing.T) {
 	store := newMockReconcileStore(domain.Invoice{
 		ID: "inv_4", TenantID: "t1", PaymentStatus: domain.PaymentUnknown,
 	})
-	r := NewReconciler(&mockStripeClient{}, store, time.Second)
+	r := NewReconciler(&mockStripeClient{}, store, &recordingSettler{}, time.Second)
 
 	resolved, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10)
 	if len(errs) != 0 {
@@ -252,7 +218,7 @@ func TestReconciler_StripeErrorLeavesUnknown(t *testing.T) {
 		ID: "inv_5", TenantID: "t1", PaymentStatus: domain.PaymentUnknown,
 		StripePaymentIntentID: "pi_ambig_5",
 	})
-	r := NewReconciler(&errStripeClient{}, store, time.Second)
+	r := NewReconciler(&errStripeClient{}, store, &recordingSettler{}, time.Second)
 
 	resolved, errs := r.Run(context.Background(), 10)
 	if resolved != 0 {

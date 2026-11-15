@@ -77,8 +77,7 @@ func TestHostedSweep_SettlesPaidSessionsEvenOnAPaidInvoice(t *testing.T) {
 		"cs_unpaid": {Status: "complete", PaymentStatus: "unpaid"},
 	}
 	settler := &recordingSettler{}
-	r := NewReconciler(client, store, time.Second)
-	r.SetSettler(settler)
+	r := NewReconciler(client, store, settler, time.Second)
 	r.SetHostedSessions(ledger, reader, nil)
 
 	resolved, errs := r.sweepHostedSessions(context.Background(), 50, new(scheduler.Panics))
@@ -123,8 +122,7 @@ func TestHostedSweep_OneAlertPerCharge(t *testing.T) {
 		{ID: "cks_1", TenantID: "t1", InvoiceID: "inv_paid", StripeSessionID: "cs_1", Status: "invoice_settled"},
 	}}
 	settler := &recordingSettler{}
-	r := NewReconciler(client, store, time.Second)
-	r.SetSettler(settler)
+	r := NewReconciler(client, store, settler, time.Second)
 	r.SetHostedSessions(ledger, fakeSessionReader{"cs_1": {Status: "complete", PaymentStatus: "paid", PaymentIntentID: "pi_hosted"}}, nil)
 
 	if n, errs := r.sweepHostedSessions(context.Background(), 50, new(scheduler.Panics)); n != 1 || len(errs) != 0 {
@@ -134,20 +132,6 @@ func TestHostedSweep_OneAlertPerCharge(t *testing.T) {
 		t.Fatalf("settled again: %+v — a second alert for a payment already escalated", settler.succeeded)
 	}
 	assertIDs(t, "completed", ledger.completed, "cks_1")
-}
-
-// TestHostedSweep_UnwiredDoesNothing: without a settler the sweep cannot
-// record a payment correctly, so it must not touch anything.
-func TestHostedSweep_UnwiredDoesNothing(t *testing.T) {
-	ledger := &fakeHostedLedger{rows: []CheckoutClaim{{ID: "cks_1", TenantID: "t1", StripeSessionID: "cs_1"}}}
-	r := NewReconciler(&mockStripeClient{}, newMockReconcileStore(), time.Second)
-	r.SetHostedSessions(ledger, fakeSessionReader{"cs_1": {Status: "expired"}}, nil)
-	if n, errs := r.sweepHostedSessions(context.Background(), 50, new(scheduler.Panics)); n != 0 || len(errs) != 0 {
-		t.Fatalf("n=%d errs=%v", n, errs)
-	}
-	if len(ledger.expired)+len(ledger.completed)+len(ledger.touched) != 0 {
-		t.Fatalf("unwired sweep wrote: %+v", ledger)
-	}
 }
 
 func assertIDs(t *testing.T, what string, got []string, want ...string) {
@@ -180,6 +164,27 @@ func (r *recordingCardRecorder) RecordCheckoutCard(_ context.Context, tenantID, 
 	return r.err
 }
 
+// TestHostedSweep_NothingToDoTouchesNothing: with no hosted sessions wired
+// (the router wires them only when Stripe is configured) the sweep returns at
+// once, and with nothing listed it writes nothing.
+func TestHostedSweep_NothingToDoTouchesNothing(t *testing.T) {
+	unwired := NewReconciler(&mockStripeClient{}, newMockReconcileStore(), &recordingSettler{}, time.Second)
+	if n, errs := unwired.sweepHostedSessions(context.Background(), 50, new(scheduler.Panics)); n != 0 || len(errs) != 0 {
+		t.Fatalf("no sessions wired: n=%d errs=%v", n, errs)
+	}
+
+	ledger := &fakeHostedLedger{}
+	settler := &recordingSettler{}
+	r := NewReconciler(&mockStripeClient{}, newMockReconcileStore(), settler, time.Second)
+	r.SetHostedSessions(ledger, fakeSessionReader{}, nil)
+	if n, errs := r.sweepHostedSessions(context.Background(), 50, new(scheduler.Panics)); n != 0 || len(errs) != 0 {
+		t.Fatalf("nothing listed: n=%d errs=%v", n, errs)
+	}
+	if len(ledger.expired)+len(ledger.completed)+len(ledger.touched)+len(settler.succeeded)+len(settler.failed) != 0 {
+		t.Fatalf("nothing listed, yet the sweep wrote: ledger %+v, settler %+v", ledger, settler)
+	}
+}
+
 // A paid hosted session whose webhooks were all lost: the sweep records the
 // payment AND the card the session saved (ADR-021), for the invoice's
 // customer and the session's Stripe customer. Without the card, the next
@@ -190,8 +195,7 @@ func TestHostedSweep_RecordsTheSessionsCard(t *testing.T) {
 		store := newMockReconcileStore(domain.Invoice{ID: "inv_1", TenantID: "t1", CustomerID: "cus_hardcount", Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed})
 		client := &mockStripeClient{piStates: map[string]PaymentIntentResult{"pi_hosted": {ID: "pi_hosted", Status: "succeeded", AmountReceivedCents: 5000}}}
 		ledger := &fakeHostedLedger{rows: []CheckoutClaim{{ID: "cks_1", TenantID: "t1", InvoiceID: "inv_1", StripeSessionID: "cs_1", Status: "open"}}}
-		r := NewReconciler(client, store, time.Second)
-		r.SetSettler(&recordingSettler{})
+		r := NewReconciler(client, store, &recordingSettler{}, time.Second)
 		r.SetHostedSessions(ledger, fakeSessionReader{"cs_1": {Status: "complete", PaymentStatus: "paid", PaymentIntentID: "pi_hosted", CustomerID: "cus_stripe"}}, rec)
 		return r, ledger
 	}
@@ -243,8 +247,7 @@ func TestHostedSweep_PanickingSessionRotatesAndTheRestGoesOn(t *testing.T) {
 		{ID: "cks_panic", TenantID: "t1", InvoiceID: "inv_open", StripeSessionID: "cs_panic", Status: "open"},
 		{ID: "cks_exp", TenantID: "t1", InvoiceID: "inv_open", StripeSessionID: "cs_exp", Status: "open"},
 	}}
-	r := NewReconciler(&mockStripeClient{}, store, time.Second)
-	r.SetSettler(&recordingSettler{})
+	r := NewReconciler(&mockStripeClient{}, store, &recordingSettler{}, time.Second)
 	r.SetHostedSessions(ledger, panickingSessionReader{fakeSessionReader{"cs_exp": {Status: "expired"}}, "cs_panic"}, nil)
 
 	recovered := func() (p any) {

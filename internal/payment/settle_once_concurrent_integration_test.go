@@ -163,8 +163,7 @@ func newSettleRaceRig(t *testing.T) *settleRaceRig {
 
 	// The unknown sweep's cool-off is the only knob: 1ns so the row stamped a
 	// moment ago is due. The settler is the same adapter, as in router.go.
-	rec := payment.NewReconciler(client, invStore, time.Nanosecond)
-	rec.SetSettler(s)
+	rec := payment.NewReconciler(client, invStore, s, time.Nanosecond)
 
 	return &settleRaceRig{db: db, ctx: ctx, invStore: invStore, customers: customers,
 		counting: counting, stripe: s, client: client, reconcile: rec}

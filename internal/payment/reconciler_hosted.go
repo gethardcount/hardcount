@@ -78,7 +78,7 @@ func (r *Reconciler) SetHostedSessions(ledger HostedSessionLedger, reader Checko
 //
 // A check that panics is touched like one that failed (guardRow).
 func (r *Reconciler) sweepHostedSessions(ctx context.Context, limit int, panics *scheduler.Panics) (int, []error) {
-	if r.hostedLedger == nil || r.hostedReader == nil || r.settler == nil {
+	if r.hostedLedger == nil || r.hostedReader == nil {
 		return 0, nil
 	}
 	rows, err := r.hostedLedger.ListHostedToReconcile(ctx, r.now().Add(-hostedSweepGrace), limit)
