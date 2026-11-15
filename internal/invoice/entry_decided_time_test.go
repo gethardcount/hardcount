@@ -53,14 +53,16 @@ func (r *simSeeingRetrier) RetryTaxForInvoice(ctx context.Context, tenantID, inv
 	return r.stubTaxRetrier.RetryTaxForInvoice(ctx, tenantID, invoiceID, then)
 }
 
-// atRecordingApplier records the instant a credit is applied at.
+// atRecordingApplier records the instant a credit is applied at, and the
+// instant its ctx carries (the ledger stamps its row from it).
 type atRecordingApplier struct {
 	*fakeInvCreditApplier
-	at time.Time
+	at, ctxAt time.Time
 }
 
 func (a *atRecordingApplier) ApplyToInvoiceAt(ctx context.Context, tenantID, customerID, invoiceID string, amountCents int64, at time.Time, extra ...string) (int64, error) {
 	a.at = at
+	a.ctxAt, _ = clock.EffectiveNow(ctx)
 	return a.fakeInvCreditApplier.ApplyToInvoiceAt(ctx, tenantID, customerID, invoiceID, amountCents, at, extra...)
 }
 
@@ -229,12 +231,12 @@ func (c *steppingClock) Now(ctx context.Context) time.Time {
 func TestEntryPoints_AtRealTimeReadTheServersClockOnce(t *testing.T) {
 	past := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
 	realTime := func() context.Context { return clock.WithRealTime(postgres.WithLivemode(context.Background(), false)) }
-	newSvc := func() (*Service, *memStore, *steppingClock) {
-		store := newMemStore()
+	newSvc := func() (*Service, *instantStore, *steppingClock) {
+		store := &instantStore{memStore: newMemStore()}
 		server := &steppingClock{at: past}
 		return NewService(store, server, newMemNumberer()), store, server
 	}
-	seed := func(t *testing.T, store *memStore, inv domain.Invoice) domain.Invoice {
+	seed := func(t *testing.T, store *instantStore, inv domain.Invoice) domain.Invoice {
 		t.Helper()
 		inv.CustomerID = "cus_1"
 		created, err := store.Create(context.Background(), "t1", inv)
@@ -242,6 +244,14 @@ func TestEntryPoints_AtRealTimeReadTheServersClockOnce(t *testing.T) {
 			t.Fatalf("seed: %v", err)
 		}
 		return created
+	}
+	// The database store stamps its own columns (updated_at, the event row)
+	// from the ctx the write runs on: it must carry the action's instant.
+	storeSaw := func(t *testing.T, store *instantStore, stamp *time.Time) {
+		t.Helper()
+		if stamp == nil || !store.at.Equal(*stamp) {
+			t.Errorf("the store's write ran at %v; want %v, the action's one instant", store.at, stamp)
+		}
 	}
 	once := func(t *testing.T, server *steppingClock, stamp *time.Time, what string) {
 		t.Helper()
@@ -258,6 +268,7 @@ func TestEntryPoints_AtRealTimeReadTheServersClockOnce(t *testing.T) {
 			t.Fatalf("SettleZeroDue: %v", err)
 		}
 		once(t, server, got.PaidAt, "paid_at")
+		storeSaw(t, store, got.PaidAt)
 	})
 
 	t.Run("a zero-due settle with no charge claim reads the server's clock once", func(t *testing.T) {
@@ -268,6 +279,7 @@ func TestEntryPoints_AtRealTimeReadTheServersClockOnce(t *testing.T) {
 			t.Fatalf("SettleZeroDueWithoutClaim: %v", err)
 		}
 		once(t, server, got.PaidAt, "paid_at")
+		storeSaw(t, store, got.PaidAt)
 	})
 
 	t.Run("an offline payment reads the server's clock once", func(t *testing.T) {
@@ -278,6 +290,7 @@ func TestEntryPoints_AtRealTimeReadTheServersClockOnce(t *testing.T) {
 			t.Fatalf("RecordOfflinePayment: %v", err)
 		}
 		once(t, server, got.PaidAt, "paid_at")
+		storeSaw(t, store, got.PaidAt)
 	})
 
 	t.Run("a finalize reads the server's clock once", func(t *testing.T) {
@@ -309,12 +322,15 @@ func TestEntryPoints_AtRealTimeReadTheServersClockOnce(t *testing.T) {
 	t.Run("a credit apply reads the server's clock once", func(t *testing.T) {
 		svc, store, server := newSvc()
 		inv := seed(t, store, domain.Invoice{Status: domain.InvoiceFinalized, AmountDueCents: 5000})
-		applier := &atRecordingApplier{fakeInvCreditApplier: &fakeInvCreditApplier{store: store, applyCents: 2000}}
+		applier := &atRecordingApplier{fakeInvCreditApplier: &fakeInvCreditApplier{store: store.memStore, applyCents: 2000}}
 		svc.SetCreditApplier(applier)
 		if _, err := svc.ApplyCreditBalance(realTime(), "t1", inv.ID); err != nil {
 			t.Fatalf("ApplyCreditBalance: %v", err)
 		}
 		once(t, server, &applier.at, "the credit")
+		if !applier.ctxAt.Equal(applier.at) {
+			t.Errorf("the credit's write ran at %v; want %v, the action's one instant", applier.ctxAt, applier.at)
+		}
 	})
 
 	t.Run("an added line reads the server's clock once", func(t *testing.T) {
@@ -331,7 +347,7 @@ func TestEntryPoints_AtRealTimeReadTheServersClockOnce(t *testing.T) {
 	t.Run("a tax retry reads the server's clock once", func(t *testing.T) {
 		svc, store, server := newSvc()
 		inv := seed(t, store, stuckDraft("", "cus_1", "provider_unavailable"))
-		retrier := &instantSeeingRetrier{stubTaxRetrier: &stubTaxRetrier{store: store}}
+		retrier := &instantSeeingRetrier{stubTaxRetrier: &stubTaxRetrier{store: store.memStore}}
 		svc.SetTaxRetrier(retrier)
 		if _, err := svc.RetryTax(realTime(), "t1", inv.ID); err != nil {
 			t.Fatalf("RetryTax: %v", err)
@@ -386,4 +402,26 @@ func (a *instantAudit) Log(context.Context, string, string, string, string, stri
 func (a *instantAudit) LogInTx(ctx context.Context, _ *sql.Tx, _ audit.Entry) error {
 	a.at, _ = clock.EffectiveNow(ctx)
 	return nil
+}
+
+// instantStore records the instant the ctx of a paying write carries: the
+// database store stamps its own columns from it.
+type instantStore struct {
+	*memStore
+	at time.Time
+}
+
+func (s *instantStore) SettleZeroDue(ctx context.Context, tenantID, id string, paidAt time.Time) (domain.Invoice, bool, error) {
+	s.at, _ = clock.EffectiveNow(ctx)
+	return s.memStore.SettleZeroDue(ctx, tenantID, id, paidAt)
+}
+
+func (s *instantStore) MarkPaidOffline(ctx context.Context, tenantID, id string, paidAt time.Time, check func(tx *sql.Tx, locked domain.Invoice) error) (domain.Invoice, error) {
+	s.at, _ = clock.EffectiveNow(ctx)
+	return s.memStore.MarkPaidOffline(ctx, tenantID, id, paidAt, check)
+}
+
+func (s *instantStore) MarkPaid(ctx context.Context, tenantID, id, stripeID string, paidAt time.Time) (domain.Invoice, error) {
+	s.at, _ = clock.EffectiveNow(ctx)
+	return s.memStore.MarkPaid(ctx, tenantID, id, stripeID, paidAt)
 }
