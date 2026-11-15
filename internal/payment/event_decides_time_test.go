@@ -179,11 +179,9 @@ func TestHandleWebhook_ACustomerEventWithANotFoundGoesOnAtRealTime(t *testing.T)
 	}
 }
 
-// In live mode no record is on a test clock: the decide step reads no clock,
-// so a clock that cannot be read never refuses a live event. A card attach
-// reads none at all. A payment reads one, the settle's own bind, which every
-// settle caller has and which the engine answers in live mode without a
-// lookup.
+// In live mode no record is on a test clock: neither the decide step nor the
+// settle reads a clock, so a clock that cannot be read never refuses a live
+// event, and a card attach reads none either.
 func TestHandleWebhook_ALiveEventDecidesNothing(t *testing.T) {
 	invoices, webhooks := processingInvoice()
 	payRes := &eventResolver{err: errors.New("connection reset by peer")}
@@ -193,8 +191,8 @@ func TestHandleWebhook_ALiveEventDecidesNothing(t *testing.T) {
 	if err := s.HandleWebhook(live, "t1", succeeded); err != nil {
 		t.Fatalf("payment: %v", err)
 	}
-	if got := invoices.invoices["inv_1"]; got.Status != domain.InvoicePaid || payRes.reads != 1 {
-		t.Errorf("payment: status %s, clock reads %d; want paid, one read (the settle's bind)", got.Status, payRes.reads)
+	if got := invoices.invoices["inv_1"]; got.Status != domain.InvoicePaid || payRes.reads != 0 {
+		t.Errorf("payment: status %s, clock reads %d; want paid, no read", got.Status, payRes.reads)
 	}
 
 	cardRes := &eventResolver{err: errors.New("connection reset by peer")}

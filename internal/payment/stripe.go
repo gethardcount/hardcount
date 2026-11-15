@@ -204,24 +204,11 @@ func (s *Stripe) SetCheckoutSessionStore(cs *CheckoutSessionStore, clients *Stri
 	s.sessionClients = clients
 }
 
-// SetResolver wires the unified clock.Resolver. Webhook handlers fire
-// in their own goroutine with no inherited ctx binding — they bind
-// effective-now from the invoice they're processing so MarkPaid /
-// the failed stamp / StartDunning all stamp simulated time on
-// clock-pinned invoices. Without this, webhook-driven writes leak
-// wall-clock back into the simulation. Optional: nil leaves binding
-// off (test default).
+// SetResolver wires the clock resolver a Stripe event decides its time with,
+// from the record it names (decideFor), before anything is written. Nil
+// (narrow unit tests) decides nothing.
 func (s *Stripe) SetResolver(r clock.Resolver) {
 	s.resolver = r
-}
-
-// bindForInvoice resolves effective-now from the invoice and binds
-// ctx for downstream stamps. Returns ctx unchanged on resolver error
-// or no resolver — webhook handlers must never fail their inbound
-// event on a transient resolution issue.
-func (s *Stripe) bindForInvoice(ctx context.Context, tenantID, invoiceID string) context.Context {
-	bound, _ := clock.BindEffectiveNow(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
-	return bound
 }
 
 // StripeClient is the interface for Stripe API calls.

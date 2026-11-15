@@ -92,13 +92,9 @@ type Reconciler struct {
 	// primitive so they fire the full side-effects (dunning/event/email).
 	// Nil-tolerant: see Settler.
 	settler Settler
-	// resolver binds ctx to effective-now from the invoice's pin before
-	// MarkPaid so clock-pinned invoices stamp `paid_at` in simulated
-	// time. Wired via SetResolver from router.go (same pattern as
-	// payment.Stripe + dunning.Handler). Nil-tolerant: when unwired
-	// (tests, bare construction) paid_at falls back to r.now() wall-
-	// clock — that's the legacy behavior, preserved so the constructor
-	// stays zero-arg.
+	// resolver decides each row's time from its invoice (decideRow), so a
+	// clock invoice is settled on its clock. Wired via SetResolver from
+	// router.go. Nil (narrow unit tests) decides nothing.
 	resolver clock.Resolver
 	// hostedLedger + hostedReader drive the hosted-page sweep
 	// (reconciler_hosted.go). Nil-tolerant: unwired, that sweep is skipped.
@@ -145,12 +141,9 @@ func (r *Reconciler) SetBreaker(b *breaker.Breaker) {
 	r.breaker = b
 }
 
-// SetResolver wires the clock resolver so `paid_at` writes land in
-// simulated time on clock-pinned invoices. Without this the reconciler
-// would call MarkPaid with wall-clock — leaking wall-clock onto an
-// invoice whose every other timestamp (issued_at, due_at, billing
-// period) lives on the simulated timeline. Same shape as
-// payment.Stripe.SetResolver + dunning.Handler.SetResolver.
+// SetResolver wires the clock resolver each row's time is decided with
+// (decideRow), so a clock invoice's paid_at, failed stamp and dunning start
+// are on its clock.
 func (r *Reconciler) SetResolver(res clock.Resolver) { r.resolver = res }
 
 // Run reconciles unresolved payments against Stripe:
@@ -262,8 +255,8 @@ func (r *Reconciler) sweep(ctx context.Context, label string, list func(context.
 }
 
 // decideRow decides a row's time from its invoice, right after the sweep
-// listed it (clock.DecideWithoutDoor), and the settle keeps that decision
-// (BindEffectiveNow keeps a same-clock one). gone is true on a not-found:
+// listed it (clock.DecideWithoutDoor), and the settle keeps that decision.
+// gone is true on a not-found:
 // the invoice, or, in a race with its clock's deletion, its clock; there is
 // nothing to settle, and the caller stamps the row so the list moves on.
 // Any other failure is clock.ErrUndecided: the row is checked again on the
@@ -560,10 +553,7 @@ func (r *Reconciler) settle(ctx context.Context, inv domain.Invoice, piID string
 		"invoice_id", inv.ID, "terminal_succeeded", kind == terminalSucceeded)
 	switch kind {
 	case terminalSucceeded:
-		markCtx := ctx
-		if r.resolver != nil {
-			markCtx, _ = clock.BindEffectiveNow(markCtx, r.resolver, clock.Pin{TenantID: inv.TenantID, InvoiceID: inv.ID})
-		}
+		markCtx := clock.EnsureEffectiveNow(ctx, clock.Real())
 		now := clock.Now(markCtx)
 		if _, err := r.invoices.MarkPaid(markCtx, inv.TenantID, inv.ID, piID, now); err != nil {
 			return false, fmt.Errorf("mark paid (legacy): %w", err)

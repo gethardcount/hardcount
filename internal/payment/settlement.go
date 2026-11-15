@@ -86,19 +86,20 @@ func (s *Stripe) SettleSucceeded(ctx context.Context, tenantID string, inv domai
 		return nil
 	}
 
-	// Bind effective-now from the invoice so paid_at lands in simulated time
-	// on clock-pinned invoices. Stripe's webhook fires in wall-clock 2026 even
-	// when the invoice belongs to a clock frozen at 2024-04 — without binding,
-	// paid_at would leak wall-clock and the dashboard would show "Paid on
-	// 2026-05-08" for a simulation-2024 invoice.
-	ctx = s.bindForInvoice(ctx, tenantID, inv.ID)
+	// The caller decided the time from the invoice: the webhook and the
+	// sweeps from the invoice they name, the charge from its caller's record.
+	// A clock invoice is paid on its clock. With no instant on ctx (live, or
+	// real time) the server's clock is read once, so every stamp of the
+	// settle has the same instant.
+	ctx = clock.EnsureEffectiveNow(ctx, clock.Real())
 	now := clock.Now(ctx)
-	// The charge's CONTRACTED instant beats the bind: the pin resolves the
-	// clock's CURRENT frozen_time — during (or after) a wide advance that's
-	// the advance TARGET, not the retry/boundary the charge fired at, so a
-	// sim-Mar-7 dunning recovery stamped "paid Apr 1". The inline settle
-	// hands the anchor over on ctx; the webhook path recovers it from the
-	// PI's hardcount_anchor_at metadata. Wall charges carry no anchor.
+	// The charge's contracted instant beats the decided time: a clock's
+	// decided time is its current frozen_time, which during or after a wide
+	// advance is the advance's target, not the retry or boundary the charge
+	// was made at (a dunning recovery on the 7th would be "paid" on the 1st
+	// of next month). The inline settle hands the anchor over on ctx; the
+	// webhook path recovers it from the PaymentIntent's hardcount_anchor_at.
+	// Real-time charges carry no anchor.
 	if a, ok := settleAnchorFrom(ctx); ok {
 		now = a
 	}
@@ -352,10 +353,10 @@ func (s *Stripe) settleFailed(ctx context.Context, tenantID string, inv domain.I
 		return inv, domain.PaymentFailureResult{}, nil
 	}
 
-	// Bind effective-now so the failed stamp and StartDunning land in
-	// simulated time on clock-pinned invoices. Inside an Advance the ctx
-	// already carries the clock; binding refines it, never erases it.
-	ctx = s.bindForInvoice(ctx, tenantID, inv.ID)
+	// The caller decided the time from the invoice, so the failed stamp and
+	// dunning's start are on a clock invoice's clock. With no instant on ctx
+	// (live, or real time) the server's clock is read once.
+	ctx = clock.EnsureEffectiveNow(ctx, clock.Real())
 	// Detached before the tx: the stamp, payment.failed and the email commit
 	// together, and a webhook disconnect must not cut the dunning start that
 	// follows them. Values (the simulated clock) survive WithoutCancel.
