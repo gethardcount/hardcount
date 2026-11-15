@@ -272,27 +272,34 @@ func (e *InsideInvoiceGraceError) Error() string {
 	return "the subscription's ended period is inside its invoice grace until " + e.Until.UTC().Format(time.RFC3339Nano)
 }
 
-// SetResolver wires the unified clock.Resolver used to bind
-// effective-now at operator entry points on clock-pinned entities.
-// Once bound on ctx via clock.BindEffectiveNow, every downstream
-// s.clock.Now(ctx) (including in the postgres store) returns
-// frozen_time. Optional: nil leaves binding off and every callsite
-// reads wall-clock — the test-friendly default.
-//
-// Replaces the per-service ClockResolver pattern shipped during the
-// post-ADR-029 patches; now matches Stripe's model — entity pin is
-// resolved once at the boundary, simulated time inherits down.
+// SetResolver wires the clock.Resolver the service decides a new
+// subscription's time with (DecideForCustomer) and looks up a subscription's
+// time with in the mutators. Optional: nil decides nothing, and every read is
+// real time (narrow tests).
 func (s *Service) SetResolver(r clock.Resolver) {
 	s.resolver = r
 }
 
-// bindForCustomer binds effective-now from a customer pin. Used by
-// Create, where the sub doesn't exist yet but the customer does.
-// Failing on a dangling pin is worse than stamping wall-clock; on
-// resolver error, returns ctx unchanged (downstream reads wall-clock).
-func (s *Service) bindForCustomer(ctx context.Context, tenantID, customerID string) context.Context {
-	bound, _ := clock.BindEffectiveNow(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID}) // a failed lookup is logged there
-	return bound
+// DecideForCustomer decides a new subscription's time from the customer its
+// body names (clock.DecideWithoutDoor): the customer's clock, or real time. A
+// not-found is the customer, or, in a race with its clock's deletion, its
+// clock: real time is right in both. A clock that cannot be read refuses the
+// create (503), with nothing written; no customer id decides nothing. The
+// create route calls it on the service because the service holds the
+// resolver.
+func (s *Service) DecideForCustomer(ctx context.Context, tenantID, customerID string) (context.Context, error) {
+	if customerID == "" {
+		return ctx, nil
+	}
+	decided, err := clock.DecideWithoutDoor(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID})
+	switch {
+	case errors.Is(err, errs.ErrNotFound):
+		return clock.WithRealTime(ctx), nil
+	case err != nil:
+		return ctx, errs.Unavailable("test_clock_unavailable",
+			"The customer's test clock could not be read. Nothing was created; send the request again.", err)
+	}
+	return decided, nil
 }
 
 // bindForSub binds effective-now from a sub pin. Used by every
@@ -693,6 +700,11 @@ type CreateInput struct {
 // including one sent empty or null (the handler refuses those).
 const createStatusMessage = `must be "draft" or left out; a subscription starts now unless it is created as a draft`
 
+// Create creates a subscription, and bills its first in-advance period when
+// it starts now. Its caller decides the time first (DecideForCustomer, as the
+// create route does), and Create reads every instant from ctx: a caller that
+// did not decide would stamp a clock customer's subscription at real time,
+// not at its clock's.
 func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput) (domain.Subscription, error) {
 	code := strings.TrimSpace(input.Code)
 	displayName := strings.TrimSpace(input.DisplayName)
@@ -832,12 +844,13 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	}
 
 	status := domain.SubscriptionDraft
-	// Bind effective-now from the customer's test_clock pin (if any).
-	// Every downstream s.clock.Now(ctx) — including in the postgres
-	// store's created_at / updated_at writes — inherits the simulated
-	// time. Mirrors Stripe's "no semantic change" guarantee at
-	// resource-create.
-	ctx = s.bindForCustomer(ctx, tenantID, input.CustomerID)
+	// One instant for the whole create. A clock decision carries one; a
+	// real-time decision does not, so the one read is bound here, and every
+	// s.clock.Now(ctx) below, the store's created_at and updated_at among
+	// them, reads it.
+	if _, ok := clock.EffectiveNow(ctx); !ok {
+		ctx = clock.WithEffectiveNow(ctx, s.clock.Now(ctx))
+	}
 	now := s.clock.Now(ctx)
 
 	var trialStart, trialEnd *time.Time
