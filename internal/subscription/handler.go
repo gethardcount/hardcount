@@ -433,11 +433,10 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Explicit audit row — created_at is wall-clock for forensics
-	// (ADR-030 line 131, post-2026-05-28 amendment). For clock-pinned
-	// subs, h.auditCtx binds the clock so the writer stamps the sim axis
-	// (sim_effective_at + test_clock_id columns, mirrored into metadata for
-	// the UI subline).
+	// The create's audit row, on the create's decision: its created_at is
+	// real time (when the operator acted), and for a clock subscription the
+	// writer stamps the sim axis (sim_effective_at, test_clock_id) from the
+	// decision.
 	if h.auditLogger != nil {
 		_ = h.auditLogger.Log(h.auditCtx(ctx, tenantID, sub.ID), tenantID, domain.AuditActionCreate, "subscription", sub.ID, sub.Code, map[string]any{
 			"customer_id": sub.CustomerID,
