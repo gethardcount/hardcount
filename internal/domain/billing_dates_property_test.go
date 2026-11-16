@@ -107,7 +107,7 @@ func TestProperty_NextBillingPeriodEnd_NeverSkipsAMonth(t *testing.T) {
 			risky := genRiskyDate(r, loc)
 
 			// Calendar: period ends are month boundaries.
-			calStart := BeginningOfMonthIn(risky, loc)
+			calStart := beginningOfMonthIn(risky, loc)
 			calNext := NextBillingPeriodEnd(calStart, BillingTimeCalendar, BillingMonthly, loc, 0)
 			if d := calNext.Sub(calStart).Hours() / 24; d < 27 || d > 32 {
 				t.Fatalf("calendar boundary is not one month away: start=%s zone=%s next=%s gap=%.2f days",
@@ -155,7 +155,7 @@ func TestProperty_NextBillingPeriodEnd_CalendarLandsOnTheFirst(t *testing.T) {
 			// NEXT month. ADR-058's bug landed on the 1st of the month AFTER
 			// next (Jan 31 -> Mar 1), skipping February entirely, so an
 			// assertion that only checks the day-of-month cannot see it.
-			wantMonth := BeginningOfMonthIn(start, loc).In(loc).AddDate(0, 1, 0).Month()
+			wantMonth := beginningOfMonthIn(start, loc).In(loc).AddDate(0, 1, 0).Month()
 			if got := next.In(loc).Month(); got != wantMonth {
 				t.Fatalf("calendar boundary skipped a month: start=%s zone=%s next=%s (month %s, want %s)",
 					start.Format(time.RFC3339), loc, next.In(loc).Format(time.RFC3339), got, wantMonth)

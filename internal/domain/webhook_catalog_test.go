@@ -127,28 +127,28 @@ func TestWebhookCatalog_DashboardPickerMatches(t *testing.T) {
 }
 
 // TestWebhookPayload_EveryCatalogEventHasARule: every event in the catalog
-// belongs to a family with a resource, and WebhookEventExtras lists its
+// belongs to a family with a resource, and webhookEventExtras lists its
 // extra keys (an empty list for none). An event without a rule would send
 // whatever its emitter happened to put together.
 func TestWebhookPayload_EveryCatalogEventHasARule(t *testing.T) {
 	for _, v := range sortedKeys(KnownWebhookEventTypes) {
 		if WebhookEventResource(v) == "" {
-			t.Errorf("%q: its family %q has no resource in webhookFamilyResource", v, WebhookEventFamily(v))
+			t.Errorf("%q: its family %q has no resource in webhookFamilyResource", v, webhookEventFamily(v))
 		}
-		if _, ok := WebhookEventExtras[v]; !ok {
-			t.Errorf("%q: missing from WebhookEventExtras", v)
+		if _, ok := webhookEventExtras[v]; !ok {
+			t.Errorf("%q: missing from webhookEventExtras", v)
 		}
 	}
-	for _, v := range sortedKeys(WebhookEventExtras) {
+	for _, v := range sortedKeys(webhookEventExtras) {
 		if !KnownWebhookEventTypes[v] {
-			t.Errorf("WebhookEventExtras has %q, which is not in KnownWebhookEventTypes", v)
+			t.Errorf("webhookEventExtras has %q, which is not in KnownWebhookEventTypes", v)
 		}
 	}
 	resources := map[string]bool{}
 	for _, r := range webhookFamilyResource {
 		resources[r] = true
 	}
-	for _, extras := range WebhookEventExtras {
+	for _, extras := range webhookEventExtras {
 		for _, e := range extras {
 			if resources[e] {
 				t.Errorf("extra key %q is also a resource key", e)

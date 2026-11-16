@@ -125,7 +125,7 @@ func TestExhaust_SeedPolicy_ChangesNothing(t *testing.T) {
 	if len(emails.outcomes) != 1 {
 		t.Fatalf("escalation emails: got %d, want 1", len(emails.outcomes))
 	}
-	if emails.outcomes[0].Any() {
+	if emails.outcomes[0].Reason() != "" {
 		t.Fatalf("escalation email claims %q; the seed changes nothing", emails.outcomes[0].Reason())
 	}
 }

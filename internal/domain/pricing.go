@@ -34,7 +34,7 @@ type RatingTier struct {
 	// the previous bound. Only the last tier is open, and it must be.
 	UpTo *int64 `json:"up_to"`
 	// UnitAmountCents is the per-unit price in cents, carried as a decimal
-	// (RateLimits: at most 12 places on write). So sub-cent unit prices bill
+	// (rateLimits: at most 12 places on write). So sub-cent unit prices bill
 	// linearly and exactly, for example $3.00 per 1,000,000 tokens = 0.0003
 	// cents/token. This is Stripe's `unit_amount_decimal` model. It marshals
 	// to and from JSON as a string (shopspring/decimal). Invoice line amounts
@@ -59,7 +59,7 @@ func (t RatingTiers) MarshalJSON() ([]byte, error) {
 // PriceShape is how a price bills a quantity: its mode and the mode's
 // fields (ADR-130 §3). A plan price, a price version and a customer's
 // override each carry one. Every amount is in the currency's minor unit and
-// carries decimals (RateLimits on write), so a sub-cent price bills exactly:
+// carries decimals (rateLimits on write), so a sub-cent price bills exactly:
 // $0.002 per 1,000 tokens is a package of 1000 at "0.2" (Stripe's
 // unit_amount_decimal model). PackageSize is a whole number of meter units.
 type PriceShape struct {
@@ -89,9 +89,9 @@ type PlanPrice struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// Specificity is the number of labels the price names. Of the prices whose
+// specificity is the number of labels the price names. Of the prices whose
 // match an event's labels contain, the one with the most labels takes it.
-func (p PlanPrice) Specificity() int { return len(p.DimensionMatch) }
+func (p PlanPrice) specificity() int { return len(p.DimensionMatch) }
 
 // The limits of a dimension_match (ADR-130 §1), checked at the one store
 // writer and by the plan_prices CHECK.
@@ -138,7 +138,7 @@ func SameMatch(a, b map[string]string) bool {
 // on every read.
 func ClaimOrder(prices []PlanPrice) {
 	sort.SliceStable(prices, func(i, j int) bool {
-		if a, b := prices[i].Specificity(), prices[j].Specificity(); a != b {
+		if a, b := prices[i].specificity(), prices[j].specificity(); a != b {
 			return a > b
 		}
 		if !prices[i].CreatedAt.Equal(prices[j].CreatedAt) {
@@ -326,10 +326,10 @@ type ClaimedUsage struct {
 	Quantity decimal.Decimal `json:"quantity"`
 }
 
-// ErrInvalidPricingConfig is returned when a price cannot bill a quantity:
+// errInvalidPricingConfig is returned when a price cannot bill a quantity:
 // an unknown mode, a negative quantity or amount, a bad tier table, or a
 // package size that is not above 0.
-var ErrInvalidPricingConfig = errors.New("invalid pricing config")
+var errInvalidPricingConfig = errors.New("invalid pricing config")
 
 // ErrAmountOverflow is returned when a pricing computation would exceed
 // int64. Callers must treat it as a hard failure, because a silent wrap
@@ -367,13 +367,13 @@ func NominalUnitAmountDecimal(rule PriceShape) *decimal.Decimal {
 // 754 default. It keeps systematic bias low on bulk invoices.
 func ComputeAmountCents(rule PriceShape, quantity decimal.Decimal) (int64, error) {
 	if quantity.IsNegative() {
-		return 0, ErrInvalidPricingConfig
+		return 0, errInvalidPricingConfig
 	}
 
 	switch rule.Mode {
 	case PricingPerUnit:
 		if rule.UnitAmountCents.IsNegative() {
-			return 0, ErrInvalidPricingConfig
+			return 0, errInvalidPricingConfig
 		}
 		if quantity.IsZero() {
 			return 0, nil
@@ -382,15 +382,15 @@ func ComputeAmountCents(rule PriceShape, quantity decimal.Decimal) (int64, error
 		return decimalToCents(total)
 
 	case PricingGraduated:
-		if err := CheckTiers(rule.Tiers); err != nil {
-			return 0, ErrInvalidPricingConfig
+		if err := checkTiers(rule.Tiers); err != nil {
+			return 0, errInvalidPricingConfig
 		}
 		remaining := quantity
 		lastUpper := int64(0)
 		amount := decimal.Zero
 		for _, tier := range rule.Tiers {
 			if tier.UnitAmountCents.IsNegative() {
-				return 0, ErrInvalidPricingConfig
+				return 0, errInvalidPricingConfig
 			}
 			if remaining.IsZero() {
 				break
@@ -409,7 +409,7 @@ func ComputeAmountCents(rule PriceShape, quantity decimal.Decimal) (int64, error
 
 	case PricingPackage:
 		if rule.PackageSize <= 0 || rule.PackageAmountCents.IsNegative() {
-			return 0, ErrInvalidPricingConfig
+			return 0, errInvalidPricingConfig
 		}
 		// A part package bills as a whole one: ceil(quantity / size).
 		// QuoRem counts the whole packages exactly; Div would round the
@@ -421,7 +421,7 @@ func ComputeAmountCents(rule PriceShape, quantity decimal.Decimal) (int64, error
 		return decimalToCents(packages.Mul(rule.PackageAmountCents))
 
 	default:
-		return 0, ErrInvalidPricingConfig
+		return 0, errInvalidPricingConfig
 	}
 }
 
@@ -436,7 +436,7 @@ func (e *PriceFieldError) Error() string { return e.Field + ": " + e.Reason }
 
 // CheckPriceShape checks that a price has its mode's fields and only those.
 // per_unit uses unit_amount_cents. graduated uses tiers, which must pass
-// CheckTiers. package uses package_size, above 0, and package_amount_cents.
+// checkTiers. package uses package_size, above 0, and package_amount_cents.
 // A field the mode does not use must be zero, and tiers empty, so a stored
 // price holds only what bills it. Every authoring path runs this one check:
 // both API routes, the recipe parser and the recipe save path. The amounts'
@@ -463,7 +463,7 @@ func CheckPriceShape(mode PricingMode, unit decimal.Decimal, tiers []RatingTier,
 	}
 	switch mode {
 	case PricingGraduated:
-		if err := CheckTiers(tiers); err != nil {
+		if err := checkTiers(tiers); err != nil {
 			return &PriceFieldError{Field: "tiers", Reason: err.Error()}
 		}
 	case PricingPackage:
@@ -474,41 +474,41 @@ func CheckPriceShape(mode PricingMode, unit decimal.Decimal, tiers []RatingTier,
 	return nil
 }
 
-// TierShapeError says what is wrong with a tier table. Index is the tier's
+// tierShapeError says what is wrong with a tier table. Index is the tier's
 // position, from 0.
-type TierShapeError struct {
+type tierShapeError struct {
 	Index  int
 	Reason string
 }
 
 // Error returns the reason.
-func (e *TierShapeError) Error() string { return e.Reason }
+func (e *tierShapeError) Error() string { return e.Reason }
 
-// CheckTiers checks a graduated tier table's shape: at least one tier, each
+// checkTiers checks a graduated tier table's shape: at least one tier, each
 // bound a whole number above the one before it (the first above 0), and
 // only the last tier open (`up_to: null`), which it must be. An open last
 // tier is what makes every quantity priceable; a bounded one would leave
 // the usage past it with no price and stop the invoice. The rates are
 // CheckRate's. Authoring and rating run this one check, so a table the API
 // accepts always rates.
-func CheckTiers(tiers []RatingTier) error {
+func checkTiers(tiers []RatingTier) error {
 	if len(tiers) == 0 {
-		return &TierShapeError{Index: -1, Reason: "at least one pricing tier is required"}
+		return &tierShapeError{Index: -1, Reason: "at least one pricing tier is required"}
 	}
 	last := len(tiers) - 1
 	lastUpper := int64(0)
 	for i, t := range tiers {
 		if t.UpTo == nil {
 			if i != last {
-				return &TierShapeError{Index: i, Reason: fmt.Sprintf("tier %d: only the last tier is open (up_to: null); give it an up_to above %d", i+1, lastUpper)}
+				return &tierShapeError{Index: i, Reason: fmt.Sprintf("tier %d: only the last tier is open (up_to: null); give it an up_to above %d", i+1, lastUpper)}
 			}
 			continue
 		}
 		if i == last {
-			return &TierShapeError{Index: i, Reason: fmt.Sprintf("tier %d: the last tier must be open (up_to: null), so usage above %d still has a price; to invoice early when usage runs high, set a spend threshold on the subscription", i+1, *t.UpTo)}
+			return &tierShapeError{Index: i, Reason: fmt.Sprintf("tier %d: the last tier must be open (up_to: null), so usage above %d still has a price; to invoice early when usage runs high, set a spend threshold on the subscription", i+1, *t.UpTo)}
 		}
 		if *t.UpTo <= lastUpper {
-			return &TierShapeError{Index: i, Reason: fmt.Sprintf("tier %d: up_to (%d) must be greater than %d", i+1, *t.UpTo, lastUpper)}
+			return &tierShapeError{Index: i, Reason: fmt.Sprintf("tier %d: up_to (%d) must be greater than %d", i+1, *t.UpTo, lastUpper)}
 		}
 		lastUpper = *t.UpTo
 	}
@@ -528,7 +528,7 @@ func decimalToCents(d decimal.Decimal) (int64, error) {
 	// >= 0), so a negative here is a logic error. Fail loudly instead of
 	// billing a negative.
 	if rounded.IsNegative() {
-		return 0, ErrInvalidPricingConfig
+		return 0, errInvalidPricingConfig
 	}
 	if rounded.GreaterThan(maxInt64Decimal) {
 		return 0, ErrAmountOverflow

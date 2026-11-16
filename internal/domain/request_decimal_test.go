@@ -15,7 +15,7 @@ import (
 // requestLimits are the three limit sets request decimals use.
 var requestLimits = map[string]DecimalLimits{
 	"quantity":      QuantityLimits,
-	"rate":          RateLimits,
+	"rate":          rateLimits,
 	"provider cost": ProviderCostLimits,
 }
 
@@ -104,8 +104,8 @@ func TestCheckDecimal_MessagesNameTheFieldAndTheLimit(t *testing.T) {
 		lim     DecimalLimits
 		message string
 	}{
-		{"1e18", RateLimits, "unit_amount_cents is too large: it must be under 10^18"},
-		{"1e-13", RateLimits, "unit_amount_cents has more than 12 decimal places"},
+		{"1e18", rateLimits, "unit_amount_cents is too large: it must be under 10^18"},
+		{"1e-13", rateLimits, "unit_amount_cents has more than 12 decimal places"},
 		{"10000000000", ProviderCostLimits, "unit_amount_cents is too large: it must be under 10^10"},
 		{"-1e26", QuantityLimits, "unit_amount_cents is too large: it must be under 10^26"},
 	}
@@ -118,7 +118,7 @@ func TestCheckDecimal_MessagesNameTheFieldAndTheLimit(t *testing.T) {
 	}
 }
 
-// CheckRate is CheckDecimal with RateLimits plus a sign rule: 0 or more.
+// CheckRate is CheckDecimal with rateLimits plus a sign rule: 0 or more.
 func TestCheckRate(t *testing.T) {
 	for _, s := range []string{"0", "0.000000000001", "999999999999999999.999999999999", "1.5"} {
 		got, err := CheckRate("r", decimal.RequireFromString(s))

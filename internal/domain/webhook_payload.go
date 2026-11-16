@@ -16,7 +16,7 @@ import (
 // when the event was created. Every event of a family carries the same
 // resource. The few facts the resource does not hold (who did it, the
 // charge that raised an anomaly, the dispute) sit beside it as named keys,
-// listed per event in WebhookEventExtras. Nothing else is in data.
+// listed per event in webhookEventExtras. Nothing else is in data.
 //
 // Fields the API works out at read time for the dashboard are left out:
 // they describe the moment of the read, not the event (see the *WebhookData
@@ -45,9 +45,9 @@ var webhookFamilyResource = map[string]string{
 	"credit":         WebhookResourceCreditBalance,
 }
 
-// WebhookEventFamily returns an event type's family: the part before the
+// webhookEventFamily returns an event type's family: the part before the
 // first dot ("subscription" for "subscription.item.added").
-func WebhookEventFamily(eventType string) string {
+func webhookEventFamily(eventType string) string {
 	family, _, _ := strings.Cut(eventType, ".")
 	return family
 }
@@ -55,14 +55,14 @@ func WebhookEventFamily(eventType string) string {
 // WebhookEventResource returns the resource key an event type's data
 // carries, or "" for a type outside every family.
 func WebhookEventResource(eventType string) string {
-	return webhookFamilyResource[WebhookEventFamily(eventType)]
+	return webhookFamilyResource[webhookEventFamily(eventType)]
 }
 
-// WebhookEventExtras lists, for every event type in the catalog, the keys
+// webhookEventExtras lists, for every event type in the catalog, the keys
 // its data may carry beside the resource. An empty list means the event
 // carries the resource alone. docs/api/webhook-events.md shows the same list
 // per event, and webhook_events_doc_test.go fails when the two differ.
-var WebhookEventExtras = map[string][]string{
+var webhookEventExtras = map[string][]string{
 	EventInvoiceFinalized:           {},
 	EventInvoicePaid:                {},
 	EventInvoiceVoided:              {},
@@ -246,9 +246,9 @@ func CheckWebhookData(eventType string, data map[string]any) error {
 	if key == "" {
 		return fmt.Errorf("%s: no webhook family", eventType)
 	}
-	extras, ok := WebhookEventExtras[eventType]
+	extras, ok := webhookEventExtras[eventType]
 	if !ok {
-		return fmt.Errorf("%s: not in WebhookEventExtras", eventType)
+		return fmt.Errorf("%s: not in webhookEventExtras", eventType)
 	}
 	if _, ok := data[key].(map[string]any); !ok {
 		return fmt.Errorf("%s: data.%s is missing or not an object (keys %v)", eventType, key, sortedDataKeys(data))

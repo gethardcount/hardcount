@@ -84,7 +84,7 @@ func TestComputeAmountCents_RejectsMisorderedCatchAllTiers(t *testing.T) {
 		}
 		rule := PriceShape{Mode: PricingGraduated, Tiers: tiers}
 		if _, err := computeInt(rule, 150); err == nil {
-			t.Errorf("%s: expected ErrInvalidPricingConfig, got nil", name)
+			t.Errorf("%s: expected errInvalidPricingConfig, got nil", name)
 		}
 	}
 }
@@ -164,8 +164,8 @@ func TestComputeAmountCents_Package(t *testing.T) {
 func TestComputeAmountCents_Flat_NegativeUnitPrice(t *testing.T) {
 	rule := PriceShape{Mode: PricingPerUnit, UnitAmountCents: decimal.NewFromInt(-1)}
 	_, err := computeInt(rule, 10)
-	if err != ErrInvalidPricingConfig {
-		t.Fatalf("expected ErrInvalidPricingConfig for negative flat price, got %v", err)
+	if err != errInvalidPricingConfig {
+		t.Fatalf("expected errInvalidPricingConfig for negative flat price, got %v", err)
 	}
 }
 
@@ -314,8 +314,8 @@ func TestComputeAmountCents_Graduated_InsufficientTiers(t *testing.T) {
 		},
 	}
 	_, err := computeInt(rule, 200)
-	if err != ErrInvalidPricingConfig {
-		t.Fatalf("expected ErrInvalidPricingConfig for insufficient tiers, got %v", err)
+	if err != errInvalidPricingConfig {
+		t.Fatalf("expected errInvalidPricingConfig for insufficient tiers, got %v", err)
 	}
 }
 
@@ -325,8 +325,8 @@ func TestComputeAmountCents_Graduated_EmptyTiers(t *testing.T) {
 		Tiers: nil,
 	}
 	_, err := computeInt(rule, 10)
-	if err != ErrInvalidPricingConfig {
-		t.Fatalf("expected ErrInvalidPricingConfig for empty tiers, got %v", err)
+	if err != errInvalidPricingConfig {
+		t.Fatalf("expected errInvalidPricingConfig for empty tiers, got %v", err)
 	}
 }
 
@@ -338,8 +338,8 @@ func TestComputeAmountCents_Graduated_NegativeUnitPrice(t *testing.T) {
 		},
 	}
 	_, err := computeInt(rule, 10)
-	if err != ErrInvalidPricingConfig {
-		t.Fatalf("expected ErrInvalidPricingConfig for negative unit price in tier, got %v", err)
+	if err != errInvalidPricingConfig {
+		t.Fatalf("expected errInvalidPricingConfig for negative unit price in tier, got %v", err)
 	}
 }
 
@@ -351,8 +351,8 @@ func TestComputeAmountCents_Graduated_NegativeUpTo(t *testing.T) {
 		},
 	}
 	_, err := computeInt(rule, 5)
-	if err != ErrInvalidPricingConfig {
-		t.Fatalf("expected ErrInvalidPricingConfig for negative UpTo, got %v", err)
+	if err != errInvalidPricingConfig {
+		t.Fatalf("expected errInvalidPricingConfig for negative UpTo, got %v", err)
 	}
 }
 
@@ -451,8 +451,8 @@ func TestComputeAmountCents_Package_ZeroPackageSize(t *testing.T) {
 		PackageAmountCents: decimal.NewFromInt(1000),
 	}
 	_, err := computeInt(rule, 10)
-	if err != ErrInvalidPricingConfig {
-		t.Fatalf("expected ErrInvalidPricingConfig for zero package size, got %v", err)
+	if err != errInvalidPricingConfig {
+		t.Fatalf("expected errInvalidPricingConfig for zero package size, got %v", err)
 	}
 }
 
@@ -463,8 +463,8 @@ func TestComputeAmountCents_Package_NegativePackageSize(t *testing.T) {
 		PackageAmountCents: decimal.NewFromInt(1000),
 	}
 	_, err := computeInt(rule, 10)
-	if err != ErrInvalidPricingConfig {
-		t.Fatalf("expected ErrInvalidPricingConfig for negative package size, got %v", err)
+	if err != errInvalidPricingConfig {
+		t.Fatalf("expected errInvalidPricingConfig for negative package size, got %v", err)
 	}
 }
 
@@ -475,8 +475,8 @@ func TestComputeAmountCents_Package_NegativePackagePrice(t *testing.T) {
 		PackageAmountCents: decimal.NewFromInt(-500),
 	}
 	_, err := computeInt(rule, 10)
-	if err != ErrInvalidPricingConfig {
-		t.Fatalf("expected ErrInvalidPricingConfig for negative package price, got %v", err)
+	if err != errInvalidPricingConfig {
+		t.Fatalf("expected errInvalidPricingConfig for negative package price, got %v", err)
 	}
 }
 
@@ -487,8 +487,8 @@ func TestComputeAmountCents_Package_NegativePackagePrice(t *testing.T) {
 func TestComputeAmountCents_UnknownMode(t *testing.T) {
 	rule := PriceShape{Mode: "volume"}
 	_, err := computeInt(rule, 10)
-	if err != ErrInvalidPricingConfig {
-		t.Fatalf("expected ErrInvalidPricingConfig for unknown mode, got %v", err)
+	if err != errInvalidPricingConfig {
+		t.Fatalf("expected errInvalidPricingConfig for unknown mode, got %v", err)
 	}
 }
 
@@ -513,8 +513,8 @@ func TestComputeAmountCents_NegativeQuantity_AllModes(t *testing.T) {
 	for _, m := range modes {
 		t.Run(m.name, func(t *testing.T) {
 			_, err := computeInt(m.rule, -1)
-			if err != ErrInvalidPricingConfig {
-				t.Fatalf("expected ErrInvalidPricingConfig for negative quantity in %s mode, got %v", m.name, err)
+			if err != errInvalidPricingConfig {
+				t.Fatalf("expected errInvalidPricingConfig for negative quantity in %s mode, got %v", m.name, err)
 			}
 		})
 	}
@@ -533,7 +533,7 @@ func TestComputeAmountCents_Graduated_EmptyTiers_Validation(t *testing.T) {
 	qty := decimal.NewFromInt(100)
 	_, err := ComputeAmountCents(emptyRule, qty)
 
-	if err != ErrInvalidPricingConfig {
-		t.Errorf("expected ErrInvalidPricingConfig for empty tiers, got %v", err)
+	if err != errInvalidPricingConfig {
+		t.Errorf("expected errInvalidPricingConfig for empty tiers, got %v", err)
 	}
 }

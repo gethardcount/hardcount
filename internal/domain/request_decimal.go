@@ -28,7 +28,7 @@ var (
 	// QuantityLimits fit the NUMERIC(38,12) quantity columns: usage
 	// quantities and item usage thresholds.
 	QuantityLimits = DecimalLimits{IntDigits: 26, Scale: 12}
-	// RateLimits bound a price amount in cents: a per-unit rate, a tier
+	// rateLimits bound a price amount in cents: a per-unit rate, a tier
 	// rate or a package amount. A rate under 10^18 cents prices one unit
 	// (or one package) inside int64 cents, the type every invoice amount
 	// is held in. The 12 places are Stripe's unit_amount_decimal precision.
@@ -36,16 +36,16 @@ var (
 	// invoice's sum and its total with tax are each refused with
 	// ErrAmountOverflow when they do not fit int64 (ComputeAmountCents,
 	// billing.ApplyTaxToLineItems).
-	RateLimits = DecimalLimits{IntDigits: 18, Scale: 12}
+	rateLimits = DecimalLimits{IntDigits: 18, Scale: 12}
 	// ProviderCostLimits fit provider_cost_rates.unit_cost_cents,
 	// NUMERIC(22,12) (cents per token).
 	ProviderCostLimits = DecimalLimits{IntDigits: 10, Scale: 12}
 )
 
-// MaxDecimalChars is the longest text a request decimal may be written in.
+// maxDecimalChars is the longest text a request decimal may be written in.
 // Any value inside the limits above, written plainly, is under 45
 // characters. Only padding with zeros reaches 100.
-const MaxDecimalChars = 100
+const maxDecimalChars = 100
 
 // CheckDecimal refuses a value outside lim and returns the value to store.
 //
@@ -74,11 +74,11 @@ func CheckDecimal(field string, d decimal.Decimal, lim DecimalLimits) (decimal.D
 
 // CheckRate checks a price amount in cents (a plan price's or a price
 // override's unit_amount_cents, tier unit_amount_cents and
-// package_amount_cents): inside RateLimits and 0 or more. A negative
+// package_amount_cents): inside rateLimits and 0 or more. A negative
 // rate is a discount written the wrong way. Credits are the discount
 // primitive (ADR-039).
 func CheckRate(field string, d decimal.Decimal) (decimal.Decimal, error) {
-	d, err := CheckDecimal(field, d, RateLimits)
+	d, err := CheckDecimal(field, d, rateLimits)
 	if err != nil {
 		return decimal.Decimal{}, err
 	}
@@ -138,8 +138,8 @@ func ParseDecimalString(field, s string) (decimal.Decimal, error) {
 }
 
 func parseDecimalText(field, text string, notNumber error) (decimal.Decimal, error) {
-	if len(text) > MaxDecimalChars {
-		return decimal.Decimal{}, errs.Invalid(field, fmt.Sprintf("%s is too long: it must be at most %d characters", field, MaxDecimalChars))
+	if len(text) > maxDecimalChars {
+		return decimal.Decimal{}, errs.Invalid(field, fmt.Sprintf("%s is too long: it must be at most %d characters", field, maxDecimalChars))
 	}
 	d, err := decimal.NewFromString(text)
 	if err != nil {

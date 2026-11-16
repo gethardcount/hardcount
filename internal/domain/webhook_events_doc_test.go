@@ -153,7 +153,7 @@ func TestWebhookEventsDoc_OneSectionPerEvent(t *testing.T) {
 
 // TestWebhookEventsDoc_ResourceAndExtras: each event's section sits under
 // the heading of its family's resource ("## … `data.invoice`"), and its
-// "Also in `data`:" line names exactly the keys WebhookEventExtras gives it,
+// "Also in `data`:" line names exactly the keys webhookEventExtras gives it,
 // or "nothing".
 func TestWebhookEventsDoc_ResourceAndExtras(t *testing.T) {
 	events, _ := parseWebhookEventsDoc(t)
@@ -168,7 +168,7 @@ func TestWebhookEventsDoc_ResourceAndExtras(t *testing.T) {
 			t.Errorf("%s: %s has no \"**Also in `data`:**\" line", webhookEventsDoc, ev.name)
 			continue
 		}
-		want := append([]string(nil), WebhookEventExtras[ev.name]...)
+		want := append([]string(nil), webhookEventExtras[ev.name]...)
 		sort.Strings(want)
 		if strings.Join(ev.extras, ",") != strings.Join(want, ",") {
 			t.Errorf("%s: %s lists %v beside the resource, the code sends %v", webhookEventsDoc, ev.name, ev.extras, want)

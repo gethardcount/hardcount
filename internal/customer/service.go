@@ -555,9 +555,8 @@ func (s *Service) GetDunningPolicyID(ctx context.Context, tenantID, customerID s
 // already hard-rejects above, so a stored profile always satisfies its own
 // tax_status requirements.
 //
-// BillingProfileMissing is not reachable here: it means "no profile row at
-// all", which the API surfaces as a 404 from GetBillingProfile, not as a
-// status on an existing row.
+// A customer with no profile row has no status: GetBillingProfile answers
+// 404 for it.
 func deriveProfileStatus(bp domain.CustomerBillingProfile) domain.BillingProfileStatus {
 	for _, required := range []string{bp.LegalName, bp.AddressLine1, bp.City, bp.Country} {
 		if strings.TrimSpace(required) == "" {

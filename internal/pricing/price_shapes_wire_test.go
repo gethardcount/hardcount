@@ -16,7 +16,7 @@ import (
 // A package amount takes the limits of every request decimal (#1378's
 // domain.ParseDecimal and domain.CheckRate).
 //
-// Mutation-verify: let the last tier carry a bound (domain.CheckTiers) →
+// Mutation-verify: let the last tier carry a bound (domain's checkTiers) →
 // TestPriceShapes_TierTableCheckedWhenSaved goes red.
 
 // shapeDoor posts one price body to one of the two routes, on a fresh store.

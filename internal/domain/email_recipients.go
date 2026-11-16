@@ -8,10 +8,10 @@ import (
 	"github.com/gethardcount/hardcount/internal/errs"
 )
 
-// MaxAdditionalEmails caps a customer's CC list (ADR-082). The service layer
+// maxAdditionalEmails caps a customer's CC list (ADR-082). The service layer
 // enforces it, because the column stores ciphertext and no database CHECK
 // can count the entries.
-const MaxAdditionalEmails = 10
+const maxAdditionalEmails = 10
 
 // ValidateEmail is the one syntax check for every email address Hardcount
 // accepts or sends to. It returns the address net/mail parsed, which
@@ -79,8 +79,8 @@ func NormalizeAdditionalEmails(list []string, primaryEmail string) ([]string, er
 		seen[norm] = true
 		out = append(out, norm)
 	}
-	if len(out) > MaxAdditionalEmails {
-		return nil, errs.Invalid("additional_emails", fmt.Sprintf("at most %d additional emails are allowed", MaxAdditionalEmails))
+	if len(out) > maxAdditionalEmails {
+		return nil, errs.Invalid("additional_emails", fmt.Sprintf("at most %d additional emails are allowed", maxAdditionalEmails))
 	}
 	if len(out) == 0 {
 		return nil, nil

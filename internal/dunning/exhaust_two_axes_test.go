@@ -221,7 +221,7 @@ func TestExhaust_OneOffInvoice_ClaimsNothing(t *testing.T) {
 	if len(emails.outcomes) != 1 {
 		t.Fatalf("escalation emails: got %d, want 1", len(emails.outcomes))
 	}
-	if emails.outcomes[0].Any() {
+	if emails.outcomes[0].Reason() != "" {
 		t.Errorf("escalation claimed %q on a one-off invoice — the debtor must never read that a subscription was canceled when none existed", emails.outcomes[0].Reason())
 	}
 }

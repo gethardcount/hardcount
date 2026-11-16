@@ -476,9 +476,9 @@ func receiptAmountCents(capturedCents int64, fresh domain.Invoice) int64 {
 // dashboard attention banner reads (operators — the load-bearing surface:
 // with auto-refund deferred, the operator IS the refund mechanism) and the
 // per-cause webhook event (integrators), in one transaction, once per kind
-// and charge (PaymentAnomalyRecorder). extra holds the event's other keys
-// (domain.WebhookEventExtras), such as currency_mismatch's charge_currency;
-// nil for none.
+// and charge (PaymentAnomalyRecorder). extra holds the event's other keys,
+// which package domain lists per event (ADR-131), such as
+// currency_mismatch's charge_currency; nil for none.
 //
 // A failed write returns the error, and the caller returns it: the webhook
 // answers 5xx and Stripe delivers the charge again, or the reconciler retries

@@ -50,12 +50,12 @@ func SameCalendarDayIn(a, b time.Time, loc *time.Location) bool {
 	return ay == by && am == bm && ad == bd
 }
 
-// BeginningOfMonthIn snaps `t` to the first-of-month-at-00:00 in `loc`,
+// beginningOfMonthIn snaps `t` to the first-of-month-at-00:00 in `loc`,
 // returned as UTC. Calendar-billing anchor helper. Shared between
 // subscription.Service (initial activation / trial-end / reset) and
 // billing.Engine (cycle close re-anchoring) so both compute the same
 // boundary from the same inputs. loc=nil falls back to UTC.
-func BeginningOfMonthIn(t time.Time, loc *time.Location) time.Time {
+func beginningOfMonthIn(t time.Time, loc *time.Location) time.Time {
 	if loc == nil {
 		loc = time.UTC
 	}
@@ -181,7 +181,7 @@ func NextBillingPeriodEnd(periodEnd time.Time, billingTime SubscriptionBillingTi
 		// Mar 1, silently skipping February (ADR-058 Root C). Adding the
 		// month in `loc` also keeps the boundary in the tenant's zone.
 		// anchorDay is irrelevant here — calendar always lands on the 1st.
-		return addIntervalIn(BeginningOfMonthIn(periodEnd, loc), BillingMonthly, loc)
+		return addIntervalIn(beginningOfMonthIn(periodEnd, loc), BillingMonthly, loc)
 	}
 	// Anniversary monthly: advance to the same day-of-month, clamped to the
 	// target month's last day (ADR-055). Computed from the stored anchorDay,
@@ -561,10 +561,10 @@ var ErrTrialNotDue = errors.New("the trial has not ended yet")
 // canceled. The caller treats the sub as NOT handled this pass.
 var ErrTrialCancelConflict = errors.New("trial-end cancel conflicted — re-read and route")
 
-// BillingStartedAt is the instant the subscription began to bill: its trial
+// billingStartedAt is the instant the subscription began to bill: its trial
 // end when it had a trial (trial usage is free), else its start. Nil before
 // it started (a draft).
-func (s Subscription) BillingStartedAt() *time.Time {
+func (s Subscription) billingStartedAt() *time.Time {
 	if s.TrialEndAt != nil {
 		return s.TrialEndAt
 	}
@@ -582,7 +582,7 @@ func (s Subscription) BillingStartedAt() *time.Time {
 // its created_at.
 func (s Subscription) PlanJoinedAt(itemCreatedAt, from time.Time) time.Time {
 	at := from
-	if b := s.BillingStartedAt(); b != nil && b.After(at) {
+	if b := s.billingStartedAt(); b != nil && b.After(at) {
 		at = *b
 	}
 	if itemCreatedAt.After(s.CreatedAt) && itemCreatedAt.After(at) {

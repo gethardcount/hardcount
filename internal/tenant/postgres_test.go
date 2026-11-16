@@ -72,17 +72,19 @@ func TestPostgresStore_UpdateStatus(t *testing.T) {
 
 	id := testutil.CreateTestTenant(t, db, "Test")
 
-	updated, err := store.UpdateStatus(ctx, id, domain.TenantStatusSuspended)
+	// A status the tenants CHECK allows; nothing in Hardcount sets it.
+	const suspended = domain.TenantStatus("suspended")
+	updated, err := store.UpdateStatus(ctx, id, suspended)
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
-	if updated.Status != domain.TenantStatusSuspended {
+	if updated.Status != suspended {
 		t.Errorf("status: got %q, want suspended", updated.Status)
 	}
 
 	// Verify persisted
 	got, _ := store.Get(ctx, id)
-	if got.Status != domain.TenantStatusSuspended {
+	if got.Status != suspended {
 		t.Errorf("persisted status: got %q, want suspended", got.Status)
 	}
 }

@@ -32,8 +32,8 @@ func TestEffectiveUnitAmountDecimal(t *testing.T) {
 				qd = decimal.RequireFromString(tc.qtyDec)
 			}
 			li := InvoiceLineItem{AmountCents: tc.amount, Quantity: tc.qty, QuantityDecimal: qd}
-			if got := li.EffectiveUnitAmountDecimal().String(); got != tc.want {
-				t.Fatalf("EffectiveUnitAmountDecimal: got %q want %q", got, tc.want)
+			if got := li.effectiveUnitAmountDecimal().String(); got != tc.want {
+				t.Fatalf("effectiveUnitAmountDecimal: got %q want %q", got, tc.want)
 			}
 		})
 	}

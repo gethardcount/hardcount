@@ -31,8 +31,8 @@ func TestLogInTx_TotalityAndVocabulary(t *testing.T) {
 	// money tx (the enum+CHECK-constraint-sync bug class).
 	vocabulary := []string{
 		domain.AuditActionCreate, domain.AuditActionUpdate, domain.AuditActionDelete,
-		domain.AuditActionActivate, domain.AuditActionCancel, domain.AuditActionPause,
-		domain.AuditActionResume, domain.AuditActionFinalize, domain.AuditActionVoid,
+		domain.AuditActionActivate, domain.AuditActionCancel,
+		domain.AuditActionFinalize, domain.AuditActionVoid,
 		domain.AuditActionRevoke, domain.AuditActionGrant, domain.AuditActionRefund,
 		domain.AuditActionCollect, domain.AuditActionSend, domain.AuditActionRetryTax,
 		domain.AuditActionRotate, domain.AuditActionRun,

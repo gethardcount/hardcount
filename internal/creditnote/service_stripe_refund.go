@@ -322,7 +322,8 @@ type stripeRefundDecision struct {
 //  3. the invoice is paid, with payment status succeeded;
 //  4. its currency is the invoice's;
 //  5. the invoice holds no prepaid-commit line (ADR-078 D4);
-//  6. Hardcount first saw it within StripeRefundLateAfter of its creation;
+//  6. Hardcount first saw it soon enough after its creation
+//     (domain.StripeRefundSeenLate);
 //  7. no credit note on the invoice has a card refund that failed (the
 //     refund may replace it, and only the operator can say);
 //  8. it fits both caps: what the card payment has left to refund after the

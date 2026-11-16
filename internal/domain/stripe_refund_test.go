@@ -55,18 +55,17 @@ func TestInvoiceStripeRefund_SupersededBy(t *testing.T) {
 	}
 }
 
-func TestStripeRefundSnapshot_SeenLate(t *testing.T) {
+func TestStripeRefundSeenLate(t *testing.T) {
 	created := time.Date(2026, 10, 1, 9, 0, 0, 0, time.UTC)
 	for _, tc := range []struct {
 		after time.Duration
 		want  bool
-	}{{time.Minute, false}, {StripeRefundLateAfter, false}, {StripeRefundLateAfter + time.Second, true}, {72 * time.Hour, true}} {
-		s := StripeRefundSnapshot{CreatedAt: created, EventAt: created.Add(tc.after)}
-		if got := s.SeenLate(); got != tc.want {
-			t.Errorf("seen %s after creation: SeenLate = %v, want %v", tc.after, got, tc.want)
+	}{{time.Minute, false}, {stripeRefundLateAfter, false}, {stripeRefundLateAfter + time.Second, true}, {72 * time.Hour, true}} {
+		if got := StripeRefundSeenLate(created, created.Add(tc.after)); got != tc.want {
+			t.Errorf("seen %s after creation: StripeRefundSeenLate = %v, want %v", tc.after, got, tc.want)
 		}
 	}
-	if (StripeRefundSnapshot{EventAt: created}).SeenLate() {
+	if StripeRefundSeenLate(time.Time{}, created) {
 		t.Error("a refund of unknown age is not late")
 	}
 }
