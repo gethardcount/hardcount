@@ -13,8 +13,9 @@ printed a test key and saved it in
 To make a new key in the dashboard:
 
 1. Open **API keys** and click **Create API key**.
-   **You see:** a dialog with a name field, two key types, **Secret**
-   (picked) and **Usage only**, and an expiry choice.
+   **You see:** a dialog that says which mode the key will work in, with a
+   name field, two key types, **Secret** (picked) and **Usage only**, and an
+   expiration choice.
 2. Give the key a name, such as `Production server`, pick its type (see
    [Key types](#key-types)), and click **Create key**.
    **You see:** the full key, with "Copy it now. Hardcount shows it only
