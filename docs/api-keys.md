@@ -110,8 +110,11 @@ may have leaked, or on a schedule.
    `401`.
 
 Pick **Now** only if you can switch every server at once, or if the key has
-leaked. The new key keeps the old key's name, type, mode and `expires_at`.
-The old key never works past its own `expires_at`, whatever time you pick.
+leaked: the dialog warns that anything still using the old key fails until
+it has the new one. The new key keeps the old key's name, type, mode and
+`expires_at`, so rotating does not extend a key that is about to expire:
+[create a new key](#get-a-key) for that. The old key never works past its
+own `expires_at`, whatever time you pick.
 
 With the API: `POST /v1/api-keys/{id}/rotate`, with an optional
 `{"expires_in_seconds": 86400}`. The API's default, `0`, revokes the old
