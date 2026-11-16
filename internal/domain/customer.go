@@ -65,16 +65,8 @@ type Customer struct {
 	EmailStatus        CustomerEmailStatus `json:"email_status,omitempty"`
 	EmailLastBouncedAt *time.Time          `json:"email_last_bounced_at,omitempty"`
 	EmailBounceReason  string              `json:"email_bounce_reason,omitempty"`
-	// Customer deliberately has no CostDashboardToken field. The public
-	// cost-dashboard credential is stored only as a SHA-256 blind index (a
-	// hash that a lookup can match), so a read has no plaintext to fill in.
-	// The raw token exists in the process only for the length of one rotate
-	// response. A field here with a json tag would disclose the credential
-	// again on every authenticated customer GET and List. The field is
-	// absent, not just untagged, so nobody can bring that leak back by adding
-	// a tag. Resolve a presented token with
-	// customer.Store.GetByCostDashboardToken, which hashes before it
-	// compares.
+	// A field here for the cost-dashboard token, with a json tag, would
+	// disclose that credential on every authenticated customer GET and List.
 
 	// TestClockID pins this customer to a test clock, as in Stripe (ADR-027).
 	// It is set at create time, and then every subscription and invoice of
@@ -121,17 +113,9 @@ const (
 // CustomerBillingProfile is a customer's billing details: legal name, phone,
 // address, currency and tax settings.
 type CustomerBillingProfile struct {
-	CustomerID string `json:"customer_id"`
-	TenantID   string `json:"tenant_id,omitempty"`
-	LegalName  string `json:"legal_name,omitempty"`
-	// The billing profile has no email of its own. customers.email is the one
-	// canonical recipient, and customers.additional_emails is the CC list
-	// (ADR-082). A second copy of the address on the profile could drift from
-	// customers.email and break the bounce-tracking key. ADR-082 also records
-	// when a customer_email_contacts table (per-contact names, routing per
-	// email type, per-contact deliverability) would be added: when a design
-	// partner asks for per-recipient preferences.
-
+	CustomerID   string `json:"customer_id"`
+	TenantID     string `json:"tenant_id,omitempty"`
+	LegalName    string `json:"legal_name,omitempty"`
 	Phone        string `json:"phone,omitempty"`
 	AddressLine1 string `json:"address_line1,omitempty"`
 	AddressLine2 string `json:"address_line2,omitempty"`

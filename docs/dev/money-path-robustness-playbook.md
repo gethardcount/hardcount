@@ -91,7 +91,7 @@ An invoice with no card was retried for auto-charge forever.
 
 A staleness check compared test-clock time with the database's `now()`.
 
-14. **Does every time come from the right clock?** A month or year step goes through `domain.AddBillingInterval` with the tenant's time zone, never the host's ([ADR-058](../adr/058-billing-date-math-tenant-timezone.md)). A compare has the same clock on both sides: never test-clock time against the database's `now()` or a Stripe timestamp.
+14. **Does every time come from the right clock?** A billing period's month or year step goes through `domain.NextBillingPeriodEnd`, and the length a proration divides by through `domain.CyclePeriod.CycleDays`, with the tenant's time zone, never the host's ([ADR-058](../adr/058-billing-date-math-tenant-timezone.md)). A compare has the same clock on both sides: never test-clock time against the database's `now()` or a Stripe timestamp.
 15. **Is the money math exact?** Whole cents, no floats ([code standard](code-standard.md)), and currency codes in upper case.
 
 ### J. Stamped late

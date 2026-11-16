@@ -3,10 +3,10 @@ package domain
 import "time"
 
 // User is a dashboard operator account. Hardcount stores the email and a
-// password hash, and sessions are bound to the user (see ADR-011). Operators
-// are set up outside the app (`make bootstrap`), and there is no public
-// sign-up. Invite flows for more users wait until a design partner (DP) asks
-// for them.
+// password hash, and sessions are bound to the user (see ADR-011). There is no
+// public sign-up: the one-time bootstrap creates the first operator
+// (tenant.RunBootstrap), and a member invites the others by email
+// (internal/dashmembers, ADR-081).
 type User struct {
 	ID           string     `json:"id"`
 	Email        string     `json:"email"`
@@ -15,9 +15,9 @@ type User struct {
 	LastLoginAt  *time.Time `json:"last_login_at,omitempty"`
 }
 
-// UserTenant binds a user to a tenant with a role. v1 has only the `owner`
-// role. The column shape can hold other roles, such as member or viewer,
-// once invite flows exist.
+// UserTenant binds a user to a tenant with a role. The role is recorded and
+// not enforced: every member has full access (ADR-081). Bootstrap writes
+// `owner`, and an accepted invitation writes `member`.
 type UserTenant struct {
 	UserID   string `json:"user_id"`
 	TenantID string `json:"tenant_id"`

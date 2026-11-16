@@ -334,13 +334,6 @@ func (r InvoiceDunningRun) RetryScheduled() bool {
 	return r.State == DunningActive && !r.Paused && r.AttemptCount < r.MaxRetryAttempts
 }
 
-// There is no CustomerDunningOverride (ADR-036). A partial per-customer
-// override (the retry count, the first wait and the terminal action, with
-// the rest of the schedule inherited) has no industry precedent. Stripe,
-// Lago, Orb and Recurly all assign whole named templates. A customer gets
-// its own schedule through `customers.dunning_policy_id`, which names a
-// DunningPolicy row.
-
 // InvoiceDunningEvent is one entry in a dunning run's history.
 type InvoiceDunningEvent struct {
 	ID           string           `json:"id"`
