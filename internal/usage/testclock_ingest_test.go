@@ -162,8 +162,10 @@ func TestBackfill_TestClockPinnedCustomer(t *testing.T) {
 	})
 }
 
-// A clock already decided for the work (the catch-up's, or a caller's on a
-// test clock) is the ingest's time: the resolver is not asked again.
+// A clock already decided on the context is the time used: the resolver is
+// not asked again. Today only the three reads reach decide under a clock
+// (customer usage, margin, cost dashboard); this pins the rule through an
+// ingest.
 func TestIngest_AClocksDecisionWins(t *testing.T) {
 	resolver := &fakeResolver{}
 	svc := NewService(newMemStore())
@@ -185,8 +187,8 @@ func TestIngest_AClocksDecisionWins(t *testing.T) {
 	}
 }
 
-// A real instant on the context (one with no clock, as the API's door will
-// bind for every request) does not hide the customer's clock: an ingest for
+// A real instant on the context (bound above the service, with no clock id)
+// does not hide the customer's clock: an ingest for
 // a customer on a test clock is at that clock's frozen time, and for a
 // customer on no clock at the inherited instant, read once.
 func TestIngest_ARealInstantDoesNotHideTheCustomersClock(t *testing.T) {
