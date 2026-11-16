@@ -127,6 +127,7 @@ original text.
 
 ### Fixed
 
+- **The API keys page says when a rotated key's old key stops, which mode a new key works in, and each key's type on a phone.** The rotate dialog promised the time you picked even when the old key expires sooner ([#1827](https://github.com/gethardcount/hardcount/pull/1827)).
 - **The Team tab shows the day each member joined the workspace, and lists only invitations that are pending or expired.** It showed the day the person's account was created, and kept revoked invitations in the list. The invitation email tells someone who already has an account to sign in, not to set one up ([#1828](https://github.com/gethardcount/hardcount/pull/1828)).
 - **`GET /v1/whoami` answers an error when the signed-in user cannot be read.** It answered `200` without `email`. Three API key validation messages are plainer ([#1825](https://github.com/gethardcount/hardcount/pull/1825)).
 - **An expired invitation no longer blocks a new one to the same address.** Inviting someone whose earlier invitation expired answered `409` and the dashboard offered no way to clear it; the new invitation now replaces the expired one ([#1817](https://github.com/gethardcount/hardcount/pull/1817)).
