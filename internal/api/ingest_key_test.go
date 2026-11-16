@@ -27,12 +27,13 @@ import (
 // TestE2E_IngestKey_SendsUsageAndNothingElse walks an ingest key (ADR-133)
 // over the real router and database, the way a LiteLLM proxy uses one. The
 // owner creates it from the dashboard session; it sends usage through all
-// three ingest routes and the events land; every other call it makes gets
-// the ordinary missing-permission 403 and changes nothing, including a
-// refund, a void and minting a key. A rotation keeps its type.
+// three ingest routes and the events land; minting a secret key, the example
+// of a call it may not make, gets the ordinary missing-permission 403 and
+// makes no key (TestIngestKey_RefusedOnEveryRouteButUsage checks every
+// route). A rotation keeps its type.
 //
-// Mutation: give the ingest key usage:write or customer:read, or gate the
-// LiteLLM callback on usage:write again, and this fails.
+// Mutation: give the ingest key apikey:write, or gate the LiteLLM callback
+// on usage:write, and this fails.
 func TestE2E_IngestKey_SendsUsageAndNothingElse(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "ingest-key-flow-bootstrap")
@@ -104,46 +105,17 @@ func TestE2E_IngestKey_SendsUsageAndNothingElse(t *testing.T) {
 		t.Errorf("the owner sees %d usage events, want 5 (1 single, 2 batch, 2 from LiteLLM): %s", got, events.raw)
 	}
 
-	// Everything else: the ordinary missing-permission 403, and nothing
-	// changes.
-	finalInvoice := "hc_inv_ingest_probe"
-	for _, c := range []struct {
-		method, path string
-		body         any
-		perm         string
-	}{
-		{"GET", "/v1/customers", nil, "customer:read"},
-		{"POST", "/v1/customers", map[string]any{"external_id": "sneaky", "display_name": "Sneaky"}, "customer:write"},
-		{"GET", "/v1/usage-events", nil, "usage:read"},
-		{"POST", "/v1/usage-events/backfill", event("ingest-backfill"), "usage:write"},
-		{"POST", "/v1/usage-events/held/release", map[string]any{"external_customer_id": "acme-ingest"}, "usage:write"},
-		{"POST", "/v1/invoices/" + finalInvoice + "/void", nil, "invoice:write"},
-		{"POST", "/v1/credit-notes", map[string]any{"invoice_id": finalInvoice, "reason": "duplicate", "refund_type": "refund"}, "invoice:write"},
-		{"POST", "/v1/api-keys", map[string]any{"name": "escalation", "key_type": "secret"}, "apikey:write"},
-		{"POST", "/v1/api-keys/" + keyID + "/rotate", nil, "apikey:write"},
-		{"DELETE", "/v1/api-keys/" + keyID, nil, "apikey:write"},
-		{"GET", "/v1/settings", nil, "apikey:write"},
-		{"POST", "/v1/billing/run", nil, "invoice:write"},
-		{"GET", "/v1/exports/customers.csv", nil, "customer:read"},
-		{"GET", "/v1/webhook_events/stream", nil, "apikey:read"},
-	} {
-		got := as(c.method, c.path, c.body)
-		want := "insufficient permissions: this key type does not have " + c.perm + " access"
-		if got.status != 403 || got.errCode() != "forbidden" || got.errMessage() != want {
-			t.Errorf("%s %s with the ingest key: %d %s, want 403 forbidden %q", c.method, c.path, got.status, got.raw, want)
-		}
-	}
-	custs := asOwner("GET", "/v1/customers", nil).want(t, 200, "owner lists customers")
-	if n := len(flowList(custs.body, "data")); n != 1 {
-		t.Errorf("the owner sees %d customers, want 1: the refused create wrote one", n)
+	// A call it may not make, minting a secret key: the ordinary
+	// missing-permission 403, and no key is made.
+	refused := as("POST", "/v1/api-keys", map[string]any{"name": "escalation", "key_type": "secret"})
+	want := "insufficient permissions: this key type does not have apikey:write access"
+	if refused.status != 403 || refused.errCode() != "forbidden" || refused.errMessage() != want {
+		t.Errorf("POST /v1/api-keys with the ingest key: %d %s, want 403 forbidden %q", refused.status, refused.raw, want)
 	}
 	keys := asOwner("GET", "/v1/api-keys", nil).want(t, 200, "owner lists keys")
 	for _, k := range flowList(keys.body, "data") {
 		if flowStr(k, "name") == "escalation" {
 			t.Errorf("the ingest key minted a key: %v", k)
-		}
-		if flowStr(k, "id") == keyID && flowStr(k, "revoked_at") != "" {
-			t.Error("the ingest key revoked itself")
 		}
 	}
 
@@ -193,13 +165,9 @@ var ingestKeyRoutes = map[string]bool{
 	"POST /v1/meters":                    false,
 }
 
-// middlewareName matches the closure a middleware constructor returns, as
-// the runtime names it: ".../internal/auth.Require.func1", or
-// ".../internal/auth.Require.1" where the compiler inlined the constructor
-// into its caller. The names are unique in this module:
-// session.RequireCaller is the one API-key authenticator the router
-// mounts, and auth.Require, RequireMethod and RequireSession are the only
-// functions with those names.
+// middlewareName finds a middleware's constructor in its closure's runtime
+// name (".../auth.Require.func1", or ".../auth.Require.1" when inlined):
+// chi.Walk reports middlewares as bare funcs. Any package's Require matches.
 var middlewareName = regexp.MustCompile(`[./](RequireCaller|Require|RequireMethod|RequireSession)\.(?:func)?\d+$`)
 
 // middlewareKind returns which of those constructors made mw, or "".
@@ -220,8 +188,8 @@ func middlewareKind(mw func(http.Handler) http.Handler) string {
 // at all lets the key through and fails here unless it is listed, so a new
 // route cannot open to ingest keys by forgetting its permission.
 //
-// It also checks that a secret key and a dashboard session still pass every
-// gate they passed before, so the change takes nothing from them.
+// It also checks that a dashboard session passes every gate, and a secret
+// key every gate but a session-only one.
 //
 // Mutation: give the ingest key any other permission (usage:read, say), or
 // gate the usage routes on usage:write again, and this fails.
@@ -292,7 +260,7 @@ func TestIngestKey_RefusedOnEveryRouteButUsage(t *testing.T) {
 				// that a secret key is refused on PUT /v1/settings.
 			default:
 				if !reached {
-					t.Errorf("%s: a %s principal is refused (%d); ADR-133 takes nothing from it", key, kt, rec.Code)
+					t.Errorf("%s: a %s principal is refused (%d), want it let through", key, kt, rec.Code)
 				}
 			}
 		}

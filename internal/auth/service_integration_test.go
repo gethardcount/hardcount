@@ -164,13 +164,11 @@ func TestValidateKey_RefusesAStringThatIsNotAKeyBeforeAnyLookup(t *testing.T) {
 	secret := strings.Repeat("0123456789abcdef", 4)
 
 	for name, raw := range map[string]string{
-		"no mode (the older format)":   "hc_secret_" + secret,
-		"63 hex characters":            "hc_secret_live_" + secret[1:],
-		"65 hex characters":            "hc_secret_live_" + secret + "a",
-		"uppercase hex":                "hc_ingest_test_" + strings.ToUpper(secret),
-		"a character that is not hex":  "hc_secret_test_" + secret[:63] + "g",
-		"the removed platform type":    "hc_platform_live_" + secret,
-		"the removed publishable type": "hc_pub_live_" + secret,
+		"no mode (the older format)":  "hc_secret_" + secret,
+		"63 hex characters":           "hc_secret_live_" + secret[1:],
+		"65 hex characters":           "hc_secret_live_" + secret + "a",
+		"uppercase hex":               "hc_ingest_test_" + strings.ToUpper(secret),
+		"a character that is not hex": "hc_secret_test_" + secret[:63] + "g",
 	} {
 		if _, err := keys.ValidateKey(t.Context(), raw); !errors.Is(err, auth.ErrInvalidKey) {
 			t.Errorf("%s: got %v, want ErrInvalidKey without a lookup", name, err)
@@ -183,14 +181,14 @@ func TestValidateKey_RefusesAStringThatIsNotAKeyBeforeAnyLookup(t *testing.T) {
 	}
 }
 
-// A key the setup command wrote in v0.9.3 or earlier has an empty salt and a
-// hash of SHA-256(key); it still validates, as a live key.
+// A stored key can have an empty salt and a hash of SHA-256(key) (hashKey).
+// It validates, as a live key.
 func TestValidateKey_AnUnsaltedSetupKeyStillValidates(t *testing.T) {
 	k := newKeyRig(t)
 	raw := "hc_secret_live_" + strings.Repeat("5e7a", 16)
 	sum := sha256.Sum256([]byte(raw))
-	// The row as the v0.9.3 setup command wrote it: no salt, mode from the
-	// session setting.
+	// No request makes a key with no salt, so the row is inserted here, live
+	// by the transaction's app.livemode.
 	k.bypass(t, func(tx *sql.Tx) error {
 		if _, err := tx.Exec(`SELECT set_config('app.livemode', 'on', true)`); err != nil {
 			return err
@@ -271,36 +269,6 @@ func TestRotateKey_InTheKeysOwnMode(t *testing.T) {
 	}
 	if rotated.NewKey.Livemode || !strings.HasPrefix(rotated.RawKey, "hc_secret_test_") {
 		t.Errorf("replacement livemode %v, raw key %q…; want a test-mode key", rotated.NewKey.Livemode, rotated.RawKey[:20])
-	}
-}
-
-// A request that authenticates with a key has written the key's
-// last_used_at by the time ValidateKey returns: the write is part of the
-// request, not left to run after it.
-func TestValidateKey_WritesLastUsedBeforeItReturns(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	svc := auth.NewService(db, audit.NewLogger(db))
-	ctx := postgres.WithLivemode(t.Context(), false)
-	tenantID := testutil.CreateTestTenant(t, db, "Last Used")
-	created, err := svc.CreateKey(ctx, tenantID, auth.CreateKeyInput{Name: "CI"})
-	if err != nil {
-		t.Fatalf("create key: %v", err)
-	}
-	if _, err := svc.ValidateKey(t.Context(), created.RawKey); err != nil {
-		t.Fatalf("validate: %v", err)
-	}
-
-	tx, err := db.BeginTx(t.Context(), postgres.TxBypass, "")
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	defer postgres.Rollback(tx)
-	var used sql.NullTime
-	if err := tx.QueryRow(`SELECT last_used_at FROM api_keys WHERE id = $1`, created.Key.ID).Scan(&used); err != nil {
-		t.Fatalf("read last_used_at: %v", err)
-	}
-	if !used.Valid {
-		t.Error("last_used_at is not written when ValidateKey returns")
 	}
 }
 

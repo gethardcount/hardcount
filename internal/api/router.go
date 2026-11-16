@@ -1758,14 +1758,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// Tenant routes take a dashboard session cookie or `Authorization: Bearer
 	// <key>`; session.Authenticate decides which.
 	r.Route("/v1", func(r chi.Router) {
-		// CSRF: this group serves both the cookie dashboard and bearer SDK
-		// and API callers. The guard checks the origin of unsafe requests on
-		// the cookie path, and exempts a bearer request that carries no
-		// session cookie: a credential that the browser does not attach on
-		// its own cannot be used for CSRF (mw.CSRFGuard). It runs
-		// before auth, so a cross-site browser write is refused before it
-		// touches session state. Safe methods and the SSE and export GET
-		// siblings are unaffected.
+		// The CSRF guard refuses a cross-site browser write before auth reads
+		// the session cookie. A Bearer request with no session cookie is
+		// exempt: a browser does not attach a key on its own.
 		r.Use(mw.CSRFGuard(allowedOrigins))
 		r.Use(session.RequireCaller(sessionSvc, authSvc))
 		// After auth, so the tenant ID is available for the bucket key. Ingest
@@ -1775,11 +1770,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// shown only once, ignore the Idempotency-Key header
 		// (skipsIdempotency).
 		r.Use(mw.Idempotency(db, skipsIdempotency))
-		// No audit middleware here. The code that owns a write emits its
-		// audit row inside its transaction (audit.Logger.LogInTx). Every
-		// mutating route declares in the route-audit registry
-		// (audit_routes.go) where its evidence comes from. The root-mounted
-		// mw.AuditCoverage detector reports any route that stops emitting.
+		// No audit middleware here: the code that owns a write emits its
+		// audit row in its own transaction (audit.Logger.LogInTx), and
+		// audit_routes.go declares each mutating route's row, or why it has
+		// none.
 		//
 		// A per-request timeout for ordinary CRUD endpoints. The SSE stream
 		// is mounted above this block, on the sibling

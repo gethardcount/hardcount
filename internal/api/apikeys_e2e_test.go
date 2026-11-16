@@ -64,8 +64,8 @@ func TestE2E_APIKeyLifecycle(t *testing.T) {
 		t.Fatalf("GET /v1/customers with the new key: %d, want 200", got)
 	}
 
-	// List: the key is there with its prefix, and the list never holds the
-	// secret itself.
+	// List: the key is there with its prefix and, since it was just used,
+	// its last use. The list never holds the secret itself.
 	list := flowDo(t, ts, "GET", "/v1/api-keys", flowReq{cookie: owner}).want(t, 200, "list keys")
 	listed := false
 	for _, k := range flowList(list.body, "data") {
@@ -73,6 +73,9 @@ func TestE2E_APIKeyLifecycle(t *testing.T) {
 			listed = true
 			if p := flowStr(k, "key_prefix"); p == "" || !strings.HasPrefix(rawKey, p) {
 				t.Errorf("listed key_prefix %q is not the start of the raw key", p)
+			}
+			if flowStr(k, "last_used_at") == "" {
+				t.Errorf("the key was used and its last_used_at is empty: %v", k)
 			}
 		}
 	}
