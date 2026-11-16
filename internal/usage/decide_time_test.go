@@ -12,6 +12,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/shopspring/decimal"
+
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
@@ -263,11 +265,15 @@ func TestCostDashboard_AFailedSecondClockReadIsThePagesRefusal(t *testing.T) {
 	}
 }
 
-// The order of answers on a single ingest and a batch: an invalid event (no
-// meter named) whose customer's clock cannot be read is refused as invalid,
-// with no clock read, as before its time was read inside build.
+// Every entry checks the event before it decides the customer's time: an
+// invalid event is refused as invalid, with no clock read, even when the
+// customer's clock cannot be read. Besides a missing meter, the rows a real
+// caller can reach (its handler resolves the meter first): a backfill with
+// bad dimensions or a quantity of 13 decimal places, and a LiteLLM call
+// whose Legacy mapping alone is invalid.
 func TestUsage_AnInvalidEventIsRefusedBeforeItsClockIsRead(t *testing.T) {
 	unreadable := errors.New("connection reset by peer")
+	past := time.Now().UTC().Add(-time.Hour)
 	for _, c := range []struct {
 		name   string
 		ingest func(*Service) error
@@ -283,6 +289,30 @@ func TestUsage_AnInvalidEventIsRefusedBeforeItsClockIsRead(t *testing.T) {
 			}
 			return batchErrs[0]
 		}},
+		{"backfill", func(s *Service) error {
+			_, err := s.Backfill(testMode(), "t1", IngestInput{CustomerID: "cus_1", Quantity: dec(1), Timestamp: &past})
+			return err
+		}},
+		{"a LiteLLM call", func(s *Service) error {
+			_, err := s.IngestCall(testMode(), "t1", CallInput{CustomerID: "cus_1", Events: []CallEvent{{Quantity: dec(1), IdempotencyKey: "c:input"}}})
+			return err
+		}},
+		{"backfill, bad dimensions", func(s *Service) error {
+			_, err := s.Backfill(testMode(), "t1", IngestInput{CustomerID: "cus_1", MeterID: "mtr_1", Quantity: dec(1), Timestamp: &past,
+				Dimensions: map[string]any{"model": map[string]any{"nested": "object"}}})
+			return err
+		}},
+		{"backfill, a quantity of 13 decimal places", func(s *Service) error {
+			_, err := s.Backfill(testMode(), "t1", IngestInput{CustomerID: "cus_1", MeterID: "mtr_1", Quantity: decimal.RequireFromString("1.0000000000001"), Timestamp: &past})
+			return err
+		}},
+		{"a LiteLLM call whose Legacy mapping alone is invalid", func(s *Service) error {
+			_, err := s.IngestCall(testMode(), "t1", CallInput{CustomerID: "cus_1", MeterID: "mtr_1",
+				Events:    []CallEvent{{Quantity: dec(1), IdempotencyKey: "c:input"}},
+				Legacy:    []CallEvent{{Quantity: dec(1), IdempotencyKey: "c:input", Dimensions: map[string]any{"model": []any{"a", "b"}}}},
+				LegacyKey: "c:input"})
+			return err
+		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			svc := NewService(&heldMemStore{memStore: newMemStore()})
@@ -293,6 +323,24 @@ func TestUsage_AnInvalidEventIsRefusedBeforeItsClockIsRead(t *testing.T) {
 				t.Errorf("err %v, %d clock reads; want invalid (not unavailable), and no read", err, res.reads)
 			}
 		})
+	}
+}
+
+// A LiteLLM call checks every event of both mappings before it builds any:
+// a call with a future timestamp in Events and bad dimensions in Legacy is
+// refused for the dimensions (a check), not for the timestamp (which build
+// refuses). Both are invalid (422); the error's field is the dimensions.
+func TestIngestCall_ChecksBothMappingsBeforeBuilding(t *testing.T) {
+	svc := NewService(&heldMemStore{memStore: newMemStore()})
+	svc.SetResolver(&answerResolver{sim: clock.Sim{At: time.Now().UTC()}})
+	future := time.Now().UTC().Add(48 * time.Hour)
+	_, err := svc.IngestCall(testMode(), "t1", CallInput{CustomerID: "cus_1", MeterID: "mtr_1",
+		Events:    []CallEvent{{Quantity: dec(1), IdempotencyKey: "c:input", Timestamp: &future}},
+		Legacy:    []CallEvent{{Quantity: dec(1), IdempotencyKey: "c:input", Dimensions: map[string]any{"model": []any{"a", "b"}}}},
+		LegacyKey: "c:input"})
+	var de *errs.DomainError
+	if !errors.Is(err, errs.ErrValidation) || !errors.As(err, &de) || de.Field != "dimensions" {
+		t.Errorf("err %v; want invalid, on the field dimensions", err)
 	}
 }
 

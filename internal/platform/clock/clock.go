@@ -97,10 +97,10 @@ func (c *Fake) Advance(d time.Duration) {
 // audit log it would be stamped into is append-only. So the type keeps the
 // pair together, and no caller has to remember to.
 //
-// TestClockID == "" means the path is in no simulation. At is then
-// wall-clock time, or a bare WithEffectiveNow binding whose clock is not
-// known. Nothing is then stamped on the sim axis (the audit_log columns
-// sim_effective_at and test_clock_id).
+// TestClockID == "" means the path is in no simulation: real time with no
+// instant (a zero Sim), or a real instant (At set). Nothing is then stamped on
+// the sim axis (the audit_log columns sim_effective_at and test_clock_id).
+// The states a context can carry are defined once, on Decision.
 type Sim struct {
 	At          time.Time
 	TestClockID string
@@ -139,9 +139,9 @@ func WithSim(ctx context.Context, s Sim) context.Context {
 }
 
 // SimOf returns the bound simulated-time context. ok is true only for a
-// complete binding on a known test clock (see Sim.Simulated). A bare
-// WithEffectiveNow binding reports false: its clock is unknown, and
-// inventing one would put false evidence in an append-only log.
+// clock and its instant (see Sim.Simulated). A real instant reports false:
+// it names no clock, and inventing one would put false evidence in an
+// append-only log.
 func SimOf(ctx context.Context) (Sim, bool) {
 	if ctx == nil {
 		return Sim{}, false
@@ -153,22 +153,23 @@ func SimOf(ctx context.Context) (Sim, bool) {
 	return s, true
 }
 
-// WithEffectiveNow binds an effective-now instant whose clock is unknown.
+// WithEffectiveNow binds a real instant (At set, no clock id; see Decision).
 // Every Clock.Now(ctx) below reads this value instead of wall-clock time.
 //
-// It clears any clock id already bound on ctx, on purpose. A bare instant
-// means this path's time no longer comes from a clock it can name. Keeping
-// the old clock id would stamp rows with a clock the new instant does not
-// belong to. Callers that know the clock call WithSim.
+// It clears any clock id already bound on ctx, on purpose: a real instant
+// names no clock, and keeping the old clock id would stamp rows with a clock
+// the new instant does not belong to. Callers that know the clock call
+// WithSim.
 func WithEffectiveNow(ctx context.Context, t time.Time) context.Context {
 	return WithSim(ctx, Sim{At: t})
 }
 
 // EnsureEffectiveNow returns ctx with an effective now bound: the one ctx
-// carries (a clock's decision, or an instant bound earlier), else c's now,
-// read once and bound. A decision of real time carries no instant, so work
-// that read the clock more than once would stamp several instants on one
-// piece of work; binding here gives everything below one instant.
+// carries (a clock and its instant, or a real instant), else c's now, read
+// once and bound as a real instant. A decision of real time may carry no
+// instant (WithRealTime), so work that read the clock more than once would
+// stamp several instants on one piece of work; binding here gives everything
+// below one instant.
 func EnsureEffectiveNow(ctx context.Context, c Clock) context.Context {
 	if _, ok := EffectiveNow(ctx); ok {
 		return ctx
@@ -209,7 +210,8 @@ func Now(ctx context.Context) time.Time {
 // WithRealTime records on ctx that real time was decided for it: it is in no
 // test clock's world. Now(ctx) then reads machine time, as on an undecided
 // ctx, but Decision reports the decision. A request in live mode, a job's
-// tick, and an entity on no clock are decided this way.
+// tick, and an entity on no clock are decided this way; for an entity on no
+// clock, a real instant ctx already carries is kept instead (keepOrRealTime).
 func WithRealTime(ctx context.Context) context.Context {
 	return WithSim(ctx, Sim{})
 }
@@ -258,15 +260,32 @@ func DecideWithoutDoor(ctx context.Context, r Resolver, p Pin) (context.Context,
 func DecideOrRealTime(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
 	decided, err := DecideWithoutDoor(ctx, r, p)
 	if errors.Is(err, errs.ErrNotFound) {
-		return WithRealTime(ctx), nil
+		return keepOrRealTime(ctx), nil
 	}
 	return decided, err
 }
 
-// Decision returns what was decided for ctx's time, and whether anything
-// was: real time (a zero Sim), a test clock and its instant, or a bare
-// instant from WithEffectiveNow. Unlike SimOf, it tells real time from
-// nothing decided.
+// keepOrRealTime is the decision for a record on no clock. An instant with no
+// clock id (a real instant) is the work's time, read once by whoever bound
+// it, and is kept so the work stays on one instant. Anything else becomes
+// real time with no instant (WithRealTime): a clock's instant is not kept,
+// because the record is on no clock.
+func keepOrRealTime(ctx context.Context) context.Context {
+	if s, ok := Decision(ctx); ok && s.TestClockID == "" && !s.At.IsZero() {
+		return ctx
+	}
+	return WithRealTime(ctx)
+}
+
+// Decision returns what ctx carries for its time. A context carries one of
+// four states, named the same everywhere:
+//   - nothing decided: no binding (ok is false);
+//   - real time with no instant: a zero Sim (WithRealTime);
+//   - a real instant: At set, no clock id (WithEffectiveNow,
+//     EnsureEffectiveNow);
+//   - a clock and its instant: a clock id and At (WithSim).
+//
+// Unlike SimOf, it tells real time from nothing decided.
 func Decision(ctx context.Context) (Sim, bool) {
 	if ctx == nil {
 		return Sim{}, false
@@ -283,12 +302,13 @@ func Decision(ctx context.Context) (Sim, bool) {
 // record whose time could not be read is not a record that is missing.
 var ErrUndecided = errors.New("the time could not be decided")
 
-// Decide resolves p through r and records the answer on ctx: the entity's
-// test clock and its instant, or real time when the entity is on no clock
-// (an answer without a clock id binds real time, never a frozen instant).
-// Unlike BindEffectiveNow it returns the resolver's error, as ErrUndecided,
-// keeps nothing an earlier binding held, and needs a resolver and an id: it
-// is the call that decides, at the entry point of a request or a job's row.
+// Decide resolves p through r and records the answer on ctx. Unlike
+// BindEffectiveNow it returns the resolver's error, as ErrUndecided, and
+// needs a resolver and an id: it is the call that decides, at the entry point
+// of a request or a job's row. A clock is decided as the record's clock. For
+// a record on no clock the result is real time, except that a real instant
+// ctx already carries is kept; a clock's instant is dropped
+// (keepOrRealTime).
 // Work on a record that did not come through the API's clock door decides
 // with DecideWithoutDoor, which calls it.
 func Decide(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
@@ -313,7 +333,7 @@ func Decide(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
 		return ctx, fmt.Errorf("%w: %w", ErrUndecided, err)
 	}
 	if !sim.Simulated() {
-		return WithRealTime(ctx), nil
+		return keepOrRealTime(ctx), nil
 	}
 	return WithSim(ctx, sim), nil
 }
