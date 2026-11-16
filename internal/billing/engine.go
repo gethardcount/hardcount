@@ -2143,11 +2143,16 @@ func (e *Engine) drainDue(ctx context.Context, batchSize int, fetch dueFetch, on
 				panics.Repanic()
 				return generated, failures
 			}
+			// The row's one instant (see the clock package's doc): a
+			// catch-up's clock, or a request's instant, is kept; a tick's
+			// row reads the server's clock once, so every stamp of the row
+			// shares it and the next row reads its own.
+			rowCtx := clock.EnsureEffectiveNow(ctx, e.clock)
 			if attempted[sub.ID] {
 				exclude = append(exclude, sub.ID)
 				// The page's row is the freshest read of a sub that was
 				// attempted cleanly and is still due.
-				e.reportBillFailure(ctx, sub, 0, errStillDue, logArgs...)
+				e.reportBillFailure(rowCtx, sub, 0, errStillDue, logArgs...)
 				failures = append(failures, SubBillError{SubscriptionID: sub.ID, Err: errStillDue})
 				continue
 			}
@@ -2157,7 +2162,7 @@ func (e *Engine) drainDue(ctx context.Context, batchSize int, fetch dueFetch, on
 			n, err := 0, errBillPanic
 			func() {
 				defer panics.Guard(append([]any{"subscription_id", sub.ID, "tenant_id", sub.TenantID}, logArgs...)...)
-				n, err = e.attemptSub(ctx, sub, grace, logArgs...)
+				n, err = e.attemptSub(rowCtx, sub, grace, logArgs...)
 			}()
 			generated += n
 			if errors.Is(err, errBillingGated) {
