@@ -325,10 +325,14 @@ func (s *PostgresStore) ListMembers(ctx context.Context, tenantID string) ([]Mem
 // passes its clock's now. The member's sessions, which then ends, are
 // stamped by the session store's own clock.
 //
-// It refuses with a 403 when actorUserID is not a member, returns
-// errs.ErrNotFound when userID is not one, and changes nothing in both cases.
-// The service refuses self-removal before calling.
+// It refuses a caller who removes themselves, and with a 403 a caller who is
+// not a member, so the caller is a member who stays and a workspace is never
+// left with none. It returns errs.ErrNotFound when userID is not a member.
+// It changes nothing in all three cases.
 func (s *PostgresStore) RemoveMember(ctx context.Context, tenantID, actorUserID, userID string, at time.Time, then func(tx *sql.Tx, revokedInvitationIDs []string) error) error {
+	if actorUserID == userID {
+		return errs.InvalidState("you cannot remove yourself — another member must remove you")
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return err

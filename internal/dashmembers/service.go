@@ -288,17 +288,11 @@ func (s *Service) Revoke(ctx context.Context, tenantID, actorUserID, invitationI
 // there are none. If any step fails, nothing changes. The user's sessions in
 // other workspaces are not touched.
 //
-// Guards: no self-removal (someone else must remove you, so nobody locks
-// themselves out by mistake), and actorUserID must be a member of the
-// workspace, which the store checks in the transaction that deletes. The
-// caller is therefore a member who stays: a workspace with no member cannot
-// be signed in to again.
+// The store refuses a caller who removes themselves or is not a member
+// (PostgresStore.RemoveMember), so a workspace always keeps one.
 func (s *Service) RemoveMember(ctx context.Context, tenantID, actorUserID, targetUserID string) error {
 	if targetUserID == "" {
 		return errs.Required("user_id")
-	}
-	if actorUserID != "" && actorUserID == targetUserID {
-		return errs.InvalidState("you cannot remove yourself — another member must remove you")
 	}
 	return s.store.RemoveMember(ctx, tenantID, actorUserID, targetUserID, s.clock.Now(ctx), func(tx *sql.Tx, revokedInvitationIDs []string) error {
 		if err := s.sessions.EndForMemberTx(ctx, tx, targetUserID, tenantID); err != nil {
