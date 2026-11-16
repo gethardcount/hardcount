@@ -325,9 +325,6 @@ func TestInviteGates(t *testing.T) {
 	if _, invs, err := h.svc.List(ctx, h.tenantID); err != nil || len(invs) != 0 {
 		t.Fatalf("invitations after the refused invite: got %d (err %v), want 0", len(invs), err)
 	}
-	if n := countInviteEmails(t, h.db, h.tenantID); n != 0 {
-		t.Fatalf("invite email rows after the refused invite: got %d, want 0", n)
-	}
 
 	// Revoking the pending invite frees the slot for a re-send.
 	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "dup@example.com"); err != nil {

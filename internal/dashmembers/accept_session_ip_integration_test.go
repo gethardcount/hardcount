@@ -21,8 +21,7 @@ import (
 // new account signs the invitee in, and the session row records the address
 // TrustedClientIP resolved, the same one as the member.joined audit row. The
 // client sends a forged X-Forwarded-For entry through a trusted proxy, which
-// appends the real address. Until 2026-10-18 the session row stored the
-// forged left-most entry, 6.6.6.6.
+// appends the real address.
 func TestAcceptInvite_SessionIPIsTheTrustedClientIP(t *testing.T) {
 	h := newHarness(t, "Team Forwarded")
 	ctx := postgres.WithLivemode(context.Background(), false)

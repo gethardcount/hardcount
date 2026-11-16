@@ -125,11 +125,7 @@ func (it loginIT) sessionRows(t *testing.T) int {
 // liveSession issues a session for the user: the one the browser holds.
 func (it loginIT) liveSession(t *testing.T) string {
 	t.Helper()
-	raw, _, err := it.sessSvc.Issue(t.Context(), session.IssueInput{UserID: it.userID, TenantID: it.tenantID})
-	if err != nil {
-		t.Fatalf("issue the browser's session: %v", err)
-	}
-	return raw
+	return issueTestSession(t, it.db, it.sessSvc, session.IssueInput{UserID: it.userID, TenantID: it.tenantID})
 }
 
 // loginMetadata is the metadata of each login audit row, oldest first.

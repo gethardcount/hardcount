@@ -97,7 +97,6 @@ var txBypassUsers = map[string]string{
 	"internal/auth/postgres.go store.getByPrefix":              "signin",
 	"internal/auth/postgres.go store.touchLastUsed":            "signin",
 	"internal/session/store.go postgresStore.GetByIDHash":      "signin",
-	"internal/session/store.go postgresStore.Insert":           "signin",
 	"internal/session/store.go postgresStore.EndWith":          "signin",
 	"internal/session/store.go postgresStore.SetLivemodeWith":  "signin",
 	"internal/tenant/bootstrap_run.go RunBootstrap":            "signin",

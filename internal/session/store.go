@@ -13,7 +13,6 @@ import (
 // Store reads and writes dashboard_sessions rows. A session is bound to a
 // user, not to a key (ADR-011), so nothing here revokes sessions by key.
 type Store interface {
-	Insert(ctx context.Context, s Session) error
 	InsertTx(ctx context.Context, tx *sql.Tx, s Session) error
 	GetByIDHash(ctx context.Context, idHash string) (Session, error)
 	RevokeTx(ctx context.Context, tx *sql.Tx, idHash string) (bool, error)
@@ -33,19 +32,6 @@ type postgresStore struct {
 // TxBypass, because the session id is itself the auth boundary.
 func NewPostgresStore(db *postgres.DB) Store {
 	return &postgresStore{db: db}
-}
-
-func (s *postgresStore) Insert(ctx context.Context, sess Session) error {
-	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
-	if err != nil {
-		return err
-	}
-	defer postgres.Rollback(tx)
-
-	if err := s.InsertTx(ctx, tx, sess); err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 // InsertTx inserts a session row on the caller's transaction. It does not

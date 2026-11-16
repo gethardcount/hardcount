@@ -11705,9 +11705,9 @@ export const getAcceptInvitationUrl = () => {
  * A new account's password is checked before the token is used up:
  * if it fails the check (422, `param: password`), the invitation can
  * still be accepted. The membership, a new account's session and the
- * audit row are saved together: if any of them cannot be saved, the
- * route answers `500`, nothing changes and the invitation can be
- * accepted again.
+ * audit row are saved together: if the session or the audit row cannot
+ * be saved the accept answers `500`, nothing changes and the
+ * invitation can be accepted again.
  * @summary Accept a team invitation
  */
 export const acceptInvitation = async (acceptInvitationBody: AcceptInvitationBody, options?: RequestInit): Promise<AcceptInvitation200> => {

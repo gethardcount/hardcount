@@ -5,6 +5,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/session"
 )
 
 // CreateTestUser adds an account that belongs to tenantID with role, the
@@ -30,4 +31,23 @@ func CreateTestUser(t *testing.T, db *postgres.DB, email, password, tenantID, ro
 		t.Fatalf("commit user %s: %v", email, err)
 	}
 	return u
+}
+
+// issueTestSession creates a session on its own bypass transaction and returns
+// its cookie value.
+func issueTestSession(t *testing.T, db *postgres.DB, svc *session.Service, in session.IssueInput) string {
+	t.Helper()
+	tx, err := db.BeginTx(t.Context(), postgres.TxBypass, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer postgres.Rollback(tx)
+	raw, _, err := svc.IssueTx(t.Context(), tx, in)
+	if err != nil {
+		t.Fatalf("issue a session for %s in %s (live=%v): %v", in.UserID, in.TenantID, in.Livemode, err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	return raw
 }

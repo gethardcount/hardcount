@@ -85,10 +85,6 @@ type recordingSessionStore struct {
 	revoked  []string // id hashes
 }
 
-func (r *recordingSessionStore) Insert(ctx context.Context, s session.Session) error {
-	r.inserted = append(r.inserted, s)
-	return nil
-}
 func (r *recordingSessionStore) InsertTx(ctx context.Context, tx *sql.Tx, s session.Session) error {
 	r.inserted = append(r.inserted, s)
 	return nil

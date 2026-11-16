@@ -23183,9 +23183,9 @@ paths:
         A new account's password is checked before the token is used up:
         if it fails the check (422, `param: password`), the invitation can
         still be accepted. The membership, a new account's session and the
-        audit row are saved together: if any of them cannot be saved, the
-        route answers `500`, nothing changes and the invitation can be
-        accepted again.
+        audit row are saved together: if the session or the audit row cannot
+        be saved the accept answers `500`, nothing changes and the
+        invitation can be accepted again.
       requestBody:
         required: true
         content:
@@ -23255,6 +23255,23 @@ paths:
                   code: forbidden
                   message: cross-site request blocked
                   request_id: req_dbjg652q3gpgqfoq5cd0
+        "409":
+          description: |
+            Another invitation to the same email created its account while
+            this accept ran (code `already_exists`, `param: email`). Nothing
+            changed, and the invitation can be accepted again, now as an
+            existing account.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  type: invalid_request_error
+                  code: already_exists
+                  message: an account with this email already exists
+                  request_id: req_dbjg652q3gpgqfoq5cd0
+                  param: email
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
@@ -23420,8 +23437,8 @@ paths:
         "403":
           description: |
             The caller is not a dashboard session (an API key), is no longer
-            a member of the account (`you are no longer a member of this
-            workspace`), or a browser page on another site sent the request
+            a member of the account (message `you are no longer a member of
+            this workspace`), or a browser page on another site sent the request
             (`cross-site request blocked`).
           content:
             application/json:

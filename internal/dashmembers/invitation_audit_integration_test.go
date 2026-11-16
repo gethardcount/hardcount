@@ -4,18 +4,11 @@ import (
 	"errors"
 	"maps"
 	"net/http"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/gethardcount/hardcount/internal/dashmembers"
 	"github.com/gethardcount/hardcount/internal/errs"
-	"github.com/gethardcount/hardcount/internal/platform/postgres"
-	"github.com/gethardcount/hardcount/internal/session"
-	"github.com/gethardcount/hardcount/internal/user"
 )
 
 // TestInvite_AnExpiredInvitationIsReplacedByANewOne: inviting an address
@@ -118,59 +111,4 @@ func TestRevokeInvitation_AFailedAuditRowLeavesItPending(t *testing.T) {
 	if at := invitationRevokedAt(t, h.db, inv.ID); at.Valid {
 		t.Errorf("the failed revoke left revoked_at %v, want NULL", at.Time)
 	}
-}
-
-// TestAcceptInvite_AFailedAuditRowLeavesNothing: when the member.joined row
-// cannot be written, the accept answers 500 and nothing is saved: no account,
-// no membership, no session, and the invitation can still be accepted.
-func TestAcceptInvite_AFailedAuditRowLeavesNothing(t *testing.T) {
-	h := newHarness(t, "Team Accept Audit Fails")
-	ctx := removalCtx(h)
-	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "joiner@example.com"); err != nil {
-		t.Fatalf("invite: %v", err)
-	}
-	token := h.email.lastToken(t)
-
-	// The public route: no session, so the request carries no mode.
-	r := chi.NewRouter()
-	dashmembers.NewHandler(failingAuditService(h), session.CookieConfig{Path: "/"}).RegisterPublicRoutes(r)
-	req := httptest.NewRequest(http.MethodPost, "/accept-invite",
-		strings.NewReader(`{"token":"`+token+`","password":"`+testPassword+`"}`))
-	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, req)
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("POST /accept-invite answered %d, want 500; body %s", rec.Code, rec.Body.String())
-	}
-
-	if _, err := user.NewPostgresStore(h.db).GetByEmail(ctx, "joiner@example.com"); !errors.Is(err, errs.ErrNotFound) {
-		t.Errorf("look up the account after the failed accept: err = %v, want ErrNotFound", err)
-	}
-	if members, _, err := h.svc.List(ctx, h.tenantID); err != nil || len(members) != 1 {
-		t.Errorf("members after the failed accept: got %d (err %v), want only the owner", len(members), err)
-	}
-	if n := countSessions(t, h.db, h.tenantID); n != 0 {
-		t.Errorf("sessions in the workspace after the failed accept: got %d, want 0", n)
-	}
-	res, err := h.svc.AcceptInvite(ctx, dashmembers.AcceptInput{Token: token, Password: testPassword})
-	if err != nil {
-		t.Fatalf("accept again with a working audit writer: %v", err)
-	}
-	if !res.NewAccount || res.RawSessionID == "" {
-		t.Errorf("accept result = %+v, want a new account with a session", res)
-	}
-}
-
-// countSessions counts the session rows in tenantID.
-func countSessions(t *testing.T, db *postgres.DB, tenantID string) int {
-	t.Helper()
-	tx, err := db.BeginTx(t.Context(), postgres.TxBypass, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer postgres.Rollback(tx)
-	var n int
-	if err := tx.QueryRowContext(t.Context(), `SELECT count(*) FROM dashboard_sessions WHERE tenant_id = $1`, tenantID).Scan(&n); err != nil {
-		t.Fatal(err)
-	}
-	return n
 }

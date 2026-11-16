@@ -13,20 +13,9 @@ import (
 	"github.com/gethardcount/hardcount/internal/session"
 )
 
-// Handler wires the team-membership endpoints.
-//
-// Authed (mounted at /v1/members, behind the standard auth chain):
-//
-//	GET    /                  — members + invitations
-//	POST   /invite            — create invitation + send email
-//	DELETE /invitations/{id}  — revoke a pending invitation
-//	DELETE /{userID}          — remove a member
-//
-// Public (registered on the /v1/auth block, no auth — token IS the
-// credential, mirroring password-reset):
-//
-//	GET  /invite/{token}   — preview for the accept page
-//	POST /accept-invite    — consume token; mint session for new accounts
+// Handler serves team membership. Routes is mounted at /v1/members behind the
+// auth chain. RegisterPublicRoutes adds the accept endpoints to the /v1/auth
+// block: the token is the credential, as in a password reset.
 type Handler struct {
 	svc     *Service
 	cookie  session.CookieConfig
@@ -243,7 +232,7 @@ func (h *Handler) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		"livemode":       false,
 		"expires_at":     "",
 	}
-	if res.RawSessionID != "" {
+	if res.NewAccount {
 		h.cookie.SetCookie(w, res.RawSessionID, res.Session.ExpiresAt)
 		if h.signIns != nil {
 			if err := h.signIns.InboxProved(w, r, res.Email); err != nil {

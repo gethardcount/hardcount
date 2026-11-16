@@ -48,11 +48,7 @@ func newResetIT(t *testing.T) resetIT {
 	sessSvc := session.NewService(session.NewPostgresStore(db))
 	it := resetIT{db: db, tenantID: tenantID, userID: u.ID, sessSvc: sessSvc}
 	for i, live := range []bool{false, true} {
-		raw, _, err := sessSvc.Issue(t.Context(), session.IssueInput{UserID: u.ID, TenantID: tenantID, Livemode: live})
-		if err != nil {
-			t.Fatalf("issue session (live=%v): %v", live, err)
-		}
-		it.sessions[i] = raw
+		it.sessions[i] = issueTestSession(t, db, sessSvc, session.IssueInput{UserID: u.ID, TenantID: tenantID, Livemode: live})
 	}
 	token, _, _, err := it.service(sessSvc, audit.NewLogger(db)).IssueResetToken(t.Context(), resetITEmail)
 	if err != nil || token == "" {
@@ -247,10 +243,7 @@ func TestConfirmReset_EndsSessionsInEveryWorkspace(t *testing.T) {
 	if err := tx.Commit(); err != nil {
 		t.Fatal(err)
 	}
-	other, _, err := it.sessSvc.Issue(t.Context(), session.IssueInput{UserID: it.userID, TenantID: second, Livemode: false})
-	if err != nil {
-		t.Fatalf("issue a session in the second workspace: %v", err)
-	}
+	other := issueTestSession(t, it.db, it.sessSvc, session.IssueInput{UserID: it.userID, TenantID: second})
 
 	if rec := it.confirm(t, resetITNewPassword, it.sessSvc, audit.NewLogger(it.db)); rec.Code != http.StatusOK {
 		t.Fatalf("confirm: status %d, want 200; body %s", rec.Code, rec.Body.String())

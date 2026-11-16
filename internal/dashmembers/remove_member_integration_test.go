@@ -51,9 +51,17 @@ func attachMember(t *testing.T, db *postgres.DB, userID, tenantID string) {
 // cookie value.
 func issue(t *testing.T, h *harness, userID, tenantID string, live bool) string {
 	t.Helper()
-	raw, _, err := h.sessions.Issue(context.Background(), session.IssueInput{UserID: userID, TenantID: tenantID, Livemode: live})
+	tx, err := h.db.BeginTx(t.Context(), postgres.TxBypass, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer postgres.Rollback(tx)
+	raw, _, err := h.sessions.IssueTx(t.Context(), tx, session.IssueInput{UserID: userID, TenantID: tenantID, Livemode: live})
 	if err != nil {
 		t.Fatalf("issue a session for %s in %s (live=%v): %v", userID, tenantID, live, err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
 	}
 	return raw
 }
@@ -347,5 +355,53 @@ func assertRemovalFailsWhole(t *testing.T, h *harness, svc *dashmembers.Service)
 	}
 	if at := invitationRevokedAt(t, h.db, pending.ID); at.Valid {
 		t.Errorf("the failed removal left revoked_at %v on the invitation, want NULL", at.Time.Format(time.RFC3339))
+	}
+}
+
+// blockingEmail queues the invite email and then waits for release, holding
+// the invite's transaction open after its membership read.
+type blockingEmail struct {
+	*capturingEmail
+	entered, release chan struct{}
+}
+
+func (b blockingEmail) SendMemberInviteTx(ctx context.Context, tx *sql.Tx, tenantID, to, inviterEmail, tenantName, acceptURL string) error {
+	close(b.entered)
+	<-b.release
+	return b.capturingEmail.SendMemberInviteTx(ctx, tx, tenantID, to, inviterEmail, tenantName, acceptURL)
+}
+
+// TestRemoveMember_WaitsForTheirInviteAndRevokesIt: an invite locks its
+// sender's membership row until it commits, so removing the sender meanwhile
+// waits, then revokes the new invitation.
+func TestRemoveMember_WaitsForTheirInviteAndRevokesIt(t *testing.T) {
+	h := newHarness(t, "Team Invite Lock")
+	ctx := removalCtx(h)
+	u := createUser(t, h.db, "sender@example.com", h.tenantID, "member")
+	email := blockingEmail{capturingEmail: h.email, entered: make(chan struct{}), release: make(chan struct{})}
+	svc := dashmembers.NewService(dashmembers.NewPostgresStore(h.db), userDirAdapter{user.NewPostgresStore(h.db)},
+		h.sessions, h.audit, email, staticTenantNamer{name: "Team Invite Lock"}, h.clk, "http://dash.test")
+	svc.SetEmailConfigured(true)
+
+	invited := make(chan dashmembers.Invitation, 1)
+	go func() {
+		inv, err := svc.Invite(ctx, h.tenantID, u.ID, "late@example.com")
+		if err != nil {
+			t.Errorf("invite: %v", err)
+		}
+		invited <- inv
+	}()
+	<-email.entered
+	removed, done := make(chan error, 1), make(chan struct{})
+	go func() { removed <- h.svc.RemoveMember(ctx, h.tenantID, h.owner, u.ID); close(done) }()
+	testutil.WaitForLockWaitersOrDone(t, ctx, testutil.AdminPool(t), "DELETE FROM user_tenants", 1, done)
+	close(email.release)
+
+	inv := <-invited
+	if err := <-removed; err != nil {
+		t.Fatalf("remove the sender: %v", err)
+	}
+	if at := invitationRevokedAt(t, h.db, inv.ID); !at.Valid {
+		t.Error("the invitation the removed member sent is still open, want revoked_at set")
 	}
 }
