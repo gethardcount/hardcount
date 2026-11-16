@@ -171,6 +171,13 @@ func TestRemoveMember_EndsTheInvitationsTheySent(t *testing.T) {
 		`UPDATE member_invitations SET expires_at = now() - interval '1 day' WHERE id = $1`, expired.ID); err != nil {
 		t.Fatalf("expire the invitation: %v", err)
 	}
+	accepted, err := h.svc.Invite(ctx, h.tenantID, u.ID, "joined@example.com")
+	if err != nil {
+		t.Fatalf("invite joined: %v", err)
+	}
+	if _, err := h.svc.AcceptInvite(ctx, h.email.lastToken(t), testPassword); err != nil {
+		t.Fatalf("accept the invitation before the removal: %v", err)
+	}
 	owners, err := h.svc.Invite(ctx, h.tenantID, h.owner, "owners@example.com")
 	if err != nil {
 		t.Fatalf("invite from the owner: %v", err)
@@ -197,6 +204,11 @@ func TestRemoveMember_EndsTheInvitationsTheySent(t *testing.T) {
 	}
 	if at := invitationRevokedAt(t, h.db, owners.ID); at.Valid {
 		t.Errorf("the owner's invitation got revoked_at %v, want NULL", at.Time)
+	}
+	// An invitation accepted before the removal is history, not authority:
+	// it stays accepted and is not listed below.
+	if at := invitationRevokedAt(t, h.db, accepted.ID); at.Valid {
+		t.Errorf("the removed member's accepted invitation got revoked_at %v, want NULL", at.Time)
 	}
 	if _, err := h.svc.PreviewInvite(ctx, ownersToken); err != nil {
 		t.Errorf("preview the owner's invitation: %v, want it still pending", err)
