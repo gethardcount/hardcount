@@ -32,3 +32,22 @@ func TestConfirmReset_ADeadLinkIsRefusedBeforeTheHash(t *testing.T) {
 		}
 	}
 }
+
+// TestConfirmReset_ALinkSpentAfterTheLookIsADeadLink: the link was live when
+// ConfirmReset looked at it and was used by another request before the
+// transaction spent it. The answer is the same token error.
+func TestConfirmReset_ALinkSpentAfterTheLookIsADeadLink(t *testing.T) {
+	store := &fakeUserStore{liveLink: true, resetErr: errResetLinkDead}
+	h := NewHandler(newFakeService(store), session.NewService(&recordingSessionStore{}),
+		session.CookieConfig{Path: "/"}, stubEmailSender{}, "", false)
+	body, _ := json.Marshal(ConfirmResetReq{Token: "a-live-token", Password: "a-valid-looking-password-42"})
+	rec := httptest.NewRecorder()
+	h.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/password-reset/confirm", strings.NewReader(string(body))))
+
+	if got := errParam(t, rec); got != "token" {
+		t.Errorf("error param = %q, want token; body %s", got, rec.Body.String())
+	}
+	if store.resetCalls != 1 {
+		t.Errorf("ResetPassword called %d times, want 1", store.resetCalls)
+	}
+}

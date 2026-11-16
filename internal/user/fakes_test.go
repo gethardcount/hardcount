@@ -16,7 +16,7 @@ import (
 // fakeUserStore is an in-memory Store for the handler tests that sign in or
 // request a reset. The password reset itself is tested on the real store
 // (confirm_reset_integration_test.go), so ResetPassword here only counts its
-// calls and refuses.
+// calls and answers resetErr, or refuses.
 type fakeUserStore struct {
 	// loginUser, when set, is returned by GetByEmail on a matching email so the
 	// login path can run end-to-end; tenants is returned by TenantsForUser.
@@ -26,6 +26,10 @@ type fakeUserStore struct {
 	// store returns ErrResetSendCapped there once the account is over its
 	// per-window send budget.
 	createTokenErr error
+	// liveLink makes LookupResetToken find a live token.
+	liveLink bool
+	// resetErr, when set, is what ResetPassword returns.
+	resetErr error
 	// resetCalls counts ResetPassword calls.
 	resetCalls int
 }
@@ -53,9 +57,15 @@ func (f *fakeUserStore) CreateResetToken(ctx context.Context, userID, tokenHash 
 }
 func (f *fakeUserStore) ResetPassword(context.Context, string, string, func(*sql.Tx, string) error) (domain.User, error) {
 	f.resetCalls++
+	if f.resetErr != nil {
+		return domain.User{}, f.resetErr
+	}
 	return domain.User{}, errors.New("fakeUserStore: the password reset is tested on the real store")
 }
 func (f *fakeUserStore) LookupResetToken(ctx context.Context, tokenHash string) (string, error) {
+	if f.liveLink {
+		return "usr_1", nil
+	}
 	return "", errs.ErrNotFound
 }
 

@@ -296,6 +296,13 @@ func TestConfirmReset_UserWithNoWorkspaceGetsTheDeadLinkAnswer(t *testing.T) {
 		t.Errorf("confirm error param = %q, want token", got)
 	}
 
+	// The transaction refuses by itself too: a membership can be removed
+	// between the look at the link and the spend.
+	if _, err := NewPostgresStore(it.db).ResetPassword(t.Context(), hashResetToken(it.token), "$2a$12$unused-hash-for-this-test",
+		func(*sql.Tx, string) error { return nil }); !errors.Is(err, errResetLinkDead) {
+		t.Errorf("ResetPassword for a user with no workspace: %v, want the dead-link error", err)
+	}
+
 	// The link now checks dead by rule, so look at the token row itself.
 	var usedAt sql.NullTime
 	tx, err = it.db.BeginTx(t.Context(), postgres.TxBypass, "")
