@@ -195,11 +195,13 @@ type Service struct {
 	// reaches the service: a request's by the API's door (api.clockDoor),
 	// from the invoice in its URL; a test clock's catch-up, on that clock;
 	// a real-time job, whose lists exclude clock invoices; dunning's final
-	// action, from its run's invoice. Each entry point keeps that decision
-	// and, when it carries no instant (real time), reads this clock once
-	// (clock.EnsureEffectiveNow). Without that read, two reads of the time
-	// in one action could differ, and a store's stamp could fall on another
-	// time than the action's.
+	// action, from its run's invoice. Each entry point keeps that decision.
+	// Work that arrives with no instant bound (a job's row, or a function that
+	// decides its own time, before it binds) reads this clock once
+	// (clock.EnsureEffectiveNow); a request on a real-time or a record route
+	// arrives with the door's instant. Without that read, two reads of the
+	// time in one action could differ, and a store's stamp could fall on
+	// another time than the action's.
 	clock          clock.Clock
 	resolver       clock.Resolver
 	settings       TenantSettingsStore

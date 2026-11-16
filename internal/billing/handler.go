@@ -10,6 +10,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/api/respond"
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
 // The entries POST /v1/billing/run puts in `errors`. api/openapi.yaml names
@@ -53,7 +54,10 @@ func (h *Handler) triggerCycle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	generated, failures := h.engine.RunCycleForTenant(r.Context(), tenantID, 50)
+	// The run is a job: each subscription is billed on its own time, as the
+	// scheduled run bills it, so it starts with no instant (the door's is
+	// dropped; a tenant run lists no subscription on a clock).
+	generated, failures := h.engine.RunCycleForTenant(clock.WithRealTime(r.Context()), tenantID, 50)
 
 	// Full detail (pq constraint names, Stripe internals) goes to the server log
 	// only; the API caller gets its own subscription ids + a generic class. Even

@@ -1,14 +1,16 @@
 package api
 
 // ---------------------------------------------------------------------------
-// The clock route table (test-clock step 3: decide the time at the door).
+// The clock route table: how the API's door decides each request's time.
 //
 // Every route states how a request's time is decided, once, before its
-// handler runs. It is real time, or the time of the test clock the request's
-// record is on, or, where the request does not name its record by a path
-// parameter, the time a named function decides after it reads the record.
-// Only test mode has clocks, so a live request is always real time; the
-// table says what a test-mode request gets.
+// handler runs. It is one read of the server's clock, or the time of the test
+// clock the request's record is on, or, where the request does not name its
+// record by a path parameter, the time a named function decides after it
+// reads the record. Only test mode has clocks: a live request on a real-time
+// or a record route gets one read of the server's clock and no record is
+// read, and a live request on a decidedIn route gets nothing from the door
+// (api.clockDoor says the rest).
 //
 // The door looks a request up by (method, canonical route pattern), from
 // Find on the built router: Find gives every route's pattern and fills its
