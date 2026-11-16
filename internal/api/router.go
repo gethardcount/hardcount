@@ -1756,14 +1756,17 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 
 	// Tenant-scoped routes accept an httpOnly session cookie (the dashboard,
 	// created by /v1/auth/login) or `Authorization: Bearer <api_key>` (SDKs,
-	// curl, server-to-server). The cookie wins when both are present, so a
-	// stale Bearer header cannot bypass session revocation. Both paths set
-	// the same auth ctx keys, so handlers do not branch.
+	// curl, server-to-server). A cookie that resolves to a live session is
+	// the caller, whatever key the request also carries. A cookie that does
+	// not resolve (an ended or unknown session) falls through to the key, so
+	// a stale cookie does not block a valid key (session.Authenticate). Both
+	// paths set the same auth ctx keys, so handlers do not branch.
 	r.Route("/v1", func(r chi.Router) {
 		// CSRF: this group serves both the cookie dashboard and bearer SDK
 		// and API callers. The guard checks the origin of unsafe requests on
-		// the cookie path, and exempts bearer requests: a credential that the
-		// browser does not attach on its own cannot be used for CSRF. It runs
+		// the cookie path, and exempts a bearer request that carries no
+		// session cookie: a credential that the browser does not attach on
+		// its own cannot be used for CSRF (mw.CSRFGuard). It runs
 		// before auth, so a cross-site browser write is refused before it
 		// touches session state. Safe methods and the SSE and export GET
 		// siblings are unaffected.
