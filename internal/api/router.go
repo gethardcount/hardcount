@@ -1283,12 +1283,12 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	sessionSvc := session.NewService(session.NewPostgresStore(db))
 
 	// User accounts: email and password sign-in for the dashboard (ADR-011).
-	// The auth handler serves /v1/auth/login, /v1/auth/logout and the
-	// password-reset flow.
+	// The auth handler serves sign-in, sign-out, the mode switch and the
+	// password-reset flow under /v1/auth.
 	userStore := user.NewPostgresStore(db)
-	// A sign-in creates its session and a password reset ends the user's
-	// sessions, each with its audit row on its own transaction, through
-	// sessionSvc and auditLogger.
+	// A sign-in creates its session, a sign-out ends it, a mode switch
+	// changes it and a password reset ends the user's sessions, each with its
+	// audit row on one transaction, through sessionSvc and auditLogger.
 	userSvc := user.NewService(userStore, nil, sessionSvc, auditLogger)
 	// Password-reset emails use the same email path as every other
 	// transactional email. The user.EmailSender interface is narrower than
@@ -1310,15 +1310,16 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		slog.Warn("DASHBOARD_BASE_URL NOT SET — password-reset emails will NOT be sent (the reset link origin is never derived from request headers, to prevent host-header poisoning / token theft). Set this to your canonical dashboard URL (e.g. http://localhost:5173 in dev) to enable password-reset emails.")
 	}
 	dashboardAuthH := user.NewHandler(
-		userSvc, sessionSvc, session.DefaultCookieConfig(o.appEnv),
+		userSvc, session.DefaultCookieConfig(o.appEnv),
 		&passwordResetEmailAdapter{sender: passwordResetEmail},
 		dashboardBaseURL,
 		emailSender.IsConfigured(),
 	)
-	// Audit the signed-in auth events: logout, mode change and the
-	// password-reset request. Failed logins go to the structured security
-	// log instead, not to the per-tenant audit_log. This is the dashboard
-	// (session) auth handler, not authH, the API-key handler wired above.
+	// Audit the password-reset request. The sign-in, sign-out, mode switch
+	// and completed reset write their rows on their own transactions, through
+	// userSvc. Failed logins go to the structured security log instead, not
+	// to the per-tenant audit_log. This is the dashboard (session) auth
+	// handler, not authH, the API-key handler wired above.
 	dashboardAuthH.SetAuditLogger(auditLogger)
 
 	// The sign-in throttle (ADR-094, amended 2026-10-18) lives only in
@@ -1841,14 +1842,12 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		r.With(auth.RequireSession("manage team membership")).Mount("/members", membersH.Routes())
 		// The /customers subtree mixes reads (GET list, get, billing-profile)
 		// and writes (POST create, PATCH update, PUT billing-profile, GDPR
-		// delete-data). RequireMethod picks the permission by HTTP method,
-		// so a read-tier key can list and get but cannot create, update or
-		// delete.
+		// delete-data). RequireMethod picks the permission by HTTP method:
+		// customer:read for a read, customer:write for a write.
 		r.With(auth.RequireMethod(auth.PermCustomerRead, auth.PermCustomerWrite)).Mount("/customers", customerH.Routes())
 		// The customer-scoped usage view combines usage totals with customer,
-		// subscription and pricing reads. It needs only PermUsageRead, so the
-		// dashboard's read-only secret-tier key can call it without gaining
-		// customer write access.
+		// subscription and pricing reads. It is gated on PermUsageRead alone,
+		// not on the /customers permissions.
 		r.Mount("/customers/{id}/usage", customerUsageH.CustomerUsageRoutes(
 			auth.Require(auth.PermUsageRead),
 		))

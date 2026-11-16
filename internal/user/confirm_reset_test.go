@@ -18,8 +18,7 @@ import (
 func TestConfirmReset_ADeadLinkIsRefusedBeforeTheHash(t *testing.T) {
 	for _, password := range []string{"a-valid-looking-password-42", "short"} {
 		store := &fakeUserStore{} // LookupResetToken finds no live token
-		h := NewHandler(newFakeService(store), session.NewService(&recordingSessionStore{}),
-			session.CookieConfig{Path: "/"}, stubEmailSender{}, "", false)
+		h := NewHandler(newFakeService(store), session.CookieConfig{Path: "/"}, stubEmailSender{}, "", false)
 		body, _ := json.Marshal(ConfirmResetReq{Token: "made-up-token", Password: password})
 		rec := httptest.NewRecorder()
 		h.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/password-reset/confirm", strings.NewReader(string(body))))
@@ -38,8 +37,7 @@ func TestConfirmReset_ADeadLinkIsRefusedBeforeTheHash(t *testing.T) {
 // transaction spent it. The answer is the same token error.
 func TestConfirmReset_ALinkSpentAfterTheLookIsADeadLink(t *testing.T) {
 	store := &fakeUserStore{liveLink: true, resetErr: errResetLinkDead}
-	h := NewHandler(newFakeService(store), session.NewService(&recordingSessionStore{}),
-		session.CookieConfig{Path: "/"}, stubEmailSender{}, "", false)
+	h := NewHandler(newFakeService(store), session.CookieConfig{Path: "/"}, stubEmailSender{}, "", false)
 	body, _ := json.Marshal(ConfirmResetReq{Token: "a-live-token", Password: "a-valid-looking-password-42"})
 	rec := httptest.NewRecorder()
 	h.Routes().ServeHTTP(rec, httptest.NewRequest(http.MethodPost, "/password-reset/confirm", strings.NewReader(string(body))))

@@ -13,7 +13,9 @@
 // a context with no instant, and the job binds one per row. A fan-out that
 // runs after the request has answered, over rows that may each be on their
 // own clock, does not bind one instant for all of them: it decides each row,
-// and the row's work binds its own.
+// and the row's work binds its own. A charge's result is its own event,
+// recorded when it arrives (AtArrival), whether Stripe answers in the same
+// call or by webhook, not at the instant of the action that asked for it.
 package clock
 
 import (
@@ -188,6 +190,17 @@ func EnsureEffectiveNow(ctx context.Context, c Clock) context.Context {
 		return ctx
 	}
 	return WithEffectiveNow(ctx, c.Now(ctx))
+}
+
+// AtArrival returns ctx for recording a result that arrives from outside, such
+// as Stripe's answer to a charge. On a test clock ctx is kept: its clock and
+// instant. On no clock c is read once, and that read replaces any real instant
+// ctx carries, so the result is dated when it arrived.
+func AtArrival(ctx context.Context, c Clock) context.Context {
+	if _, ok := SimOf(ctx); ok {
+		return ctx
+	}
+	return WithEffectiveNow(ctx, c.Now(WithRealTime(ctx)))
 }
 
 // EffectiveNow returns the bound instant and true when ctx carries any

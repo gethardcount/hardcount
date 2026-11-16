@@ -100,15 +100,17 @@ func (r *recordingSessionStore) RevokeTx(ctx context.Context, tx *sql.Tx, idHash
 func (r *recordingSessionStore) GetByIDHash(ctx context.Context, idHash string) (session.Session, error) {
 	return session.Session{}, session.ErrNotFound
 }
-func (r *recordingSessionStore) Revoke(ctx context.Context, idHash string) error { return nil }
 func (r *recordingSessionStore) EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID string) error {
 	return nil
 }
 func (r *recordingSessionStore) EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, tenantID string) error {
 	return nil
 }
-func (r *recordingSessionStore) UpdateLivemode(ctx context.Context, idHash string, livemode bool) error {
-	return nil
+func (r *recordingSessionStore) EndWith(context.Context, string, func(*sql.Tx, session.Session) error) (session.Session, bool, error) {
+	return session.Session{}, false, errors.New("recordingSessionStore: the sign-out is tested on the real store")
+}
+func (r *recordingSessionStore) SetLivemodeWith(context.Context, string, bool, func(*sql.Tx, session.Session) error) (session.Session, bool, error) {
+	return session.Session{}, false, errors.New("recordingSessionStore: the mode switch is tested on the real store")
 }
 
 // recordingAuditTx satisfies AuditTxWriter and records each row with the

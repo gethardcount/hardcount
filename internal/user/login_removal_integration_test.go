@@ -99,7 +99,7 @@ func signInMember(h http.Handler) *httptest.ResponseRecorder {
 }
 
 func (it removalIT) handler(store user.Store) http.Handler {
-	return user.NewHandler(it.service(store, audit.NewLogger(it.db)), it.sessSvc,
+	return user.NewHandler(it.service(store, audit.NewLogger(it.db)),
 		session.CookieConfig{Path: "/"}, nil, "", false).Routes()
 }
 

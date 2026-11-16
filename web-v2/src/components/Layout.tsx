@@ -287,7 +287,12 @@ export function Layout() {
   const liveBanner = liveStripeBanner(liveStripe)
 
   const handleLogout = async () => {
-    await logout()
+    try {
+      await logout()
+    } catch {
+      toast.error("Couldn't sign out. You are still signed in. Try again.")
+      return
+    }
     navigate('/login', { replace: true })
   }
 

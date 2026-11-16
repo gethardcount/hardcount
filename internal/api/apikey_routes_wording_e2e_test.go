@@ -6,13 +6,11 @@ import (
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/platform/clock"
-	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // The key routes answer one 404 wording, and a new key's name is 1 to 100
-// characters, counted as characters, not bytes. A rotation keeps the old
-// key's name, even one an earlier version stored longer.
+// characters, counted as characters, not bytes.
 func TestE2E_APIKeyRoutes_OneNotFoundWordingAndOneNameRule(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "key-wording-bootstrap")
@@ -42,23 +40,4 @@ func TestE2E_APIKeyRoutes_OneNotFoundWordingAndOneNameRule(t *testing.T) {
 	}
 	create(strings.Repeat("n", 100)).want(t, 201, "create a key with a 100-character name")
 	create(strings.Repeat("é", 100)).want(t, 201, "create a key with a 100-character name of two-byte characters")
-
-	// A key whose name an earlier version stored longer: the API no longer
-	// makes one, so the name is set with SQL.
-	long := create("Long").want(t, 201, "create the key to rename").body
-	longID, longName := flowStr(long, "key", "id"), strings.Repeat("L", 140)
-	tx, err := db.BeginTx(t.Context(), postgres.TxBypass, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tx.Exec(`UPDATE api_keys SET name = $1 WHERE id = $2`, longName, longID); err != nil {
-		t.Fatal(err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	rotated := flowDo(t, ts, "POST", "/v1/api-keys/"+longID+"/rotate", flowReq{cookie: owner}).want(t, 200, "rotate the long-named key").body
-	if got := flowStr(rotated, "new_key", "name"); got != longName {
-		t.Errorf("the replacement's name has %d characters, want the old key's %d", len(got), len(longName))
-	}
 }

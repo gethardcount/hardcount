@@ -14,9 +14,9 @@ import (
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// TestE2E_TestModeIsolation validates FEAT-8's core contract end-to-end: a
-// test-mode API key and a live-mode API key, both belonging to the same
-// tenant, see completely disjoint data. Customers, webhook endpoints, and
+// TestE2E_TestModeIsolation checks, end to end, that a test-mode API key and
+// a live-mode API key, both belonging to the same tenant, see completely
+// disjoint data. Customers, webhook endpoints, and
 // test clocks created in one mode are invisible to the other. This is the
 // guarantee a customer relies on to run synthetic load against their test
 // keys without risk to the live production partition.
