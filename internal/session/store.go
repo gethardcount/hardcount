@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
@@ -15,11 +16,11 @@ type Store interface {
 	Insert(ctx context.Context, s Session) error
 	InsertTx(ctx context.Context, tx *sql.Tx, s Session) error
 	GetByIDHash(ctx context.Context, idHash string) (Session, error)
-	Revoke(ctx context.Context, idHash string) error
 	RevokeTx(ctx context.Context, tx *sql.Tx, idHash string) (bool, error)
 	EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID string) error
 	EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, tenantID string) error
-	UpdateLivemode(ctx context.Context, idHash string, livemode bool) error
+	EndWith(ctx context.Context, idHash string, then func(tx *sql.Tx, sess Session) error) (Session, bool, error)
+	SetLivemodeWith(ctx context.Context, idHash string, livemode bool, then func(tx *sql.Tx, sess Session) error) (Session, bool, error)
 }
 
 type postgresStore struct {
@@ -62,29 +63,20 @@ func (s *postgresStore) InsertTx(ctx context.Context, tx *sql.Tx, sess Session) 
 	return err
 }
 
-func (s *postgresStore) GetByIDHash(ctx context.Context, idHash string) (Session, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
-	if err != nil {
-		return Session{}, err
-	}
-	defer postgres.Rollback(tx)
+// sessionCols are the columns scanSession reads, in its order.
+const sessionCols = `id_hash, user_id, tenant_id, livemode, created_at,
+	last_seen_at, expires_at, revoked_at, user_agent, ip`
 
+// scanSession reads one row of sessionCols.
+func scanSession(row *sql.Row) (Session, error) {
 	var sess Session
 	var ua, ip sql.NullString
 	var revokedAt sql.NullTime
-	err = tx.QueryRowContext(ctx, `
-		SELECT id_hash, user_id, tenant_id, livemode, created_at,
-		       last_seen_at, expires_at, revoked_at, user_agent, ip
-		FROM dashboard_sessions WHERE id_hash = $1
-	`, idHash).Scan(
+	if err := row.Scan(
 		&sess.IDHash, &sess.UserID, &sess.TenantID, &sess.Livemode,
 		&sess.CreatedAt, &sess.LastSeenAt, &sess.ExpiresAt, &revokedAt,
 		&ua, &ip,
-	)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Session{}, ErrNotFound
-	}
-	if err != nil {
+	); err != nil {
 		return Session{}, err
 	}
 	if revokedAt.Valid {
@@ -92,23 +84,28 @@ func (s *postgresStore) GetByIDHash(ctx context.Context, idHash string) (Session
 	}
 	sess.UserAgent = ua.String
 	sess.IP = ip.String
+	return sess, nil
+}
+
+func (s *postgresStore) GetByIDHash(ctx context.Context, idHash string) (Session, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
+	if err != nil {
+		return Session{}, err
+	}
+	defer postgres.Rollback(tx)
+
+	sess, err := scanSession(tx.QueryRowContext(ctx,
+		`SELECT `+sessionCols+` FROM dashboard_sessions WHERE id_hash = $1`, idHash))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Session{}, ErrNotFound
+	}
+	if err != nil {
+		return Session{}, err
+	}
 	if err := tx.Commit(); err != nil {
 		return Session{}, err
 	}
 	return sess, nil
-}
-
-func (s *postgresStore) Revoke(ctx context.Context, idHash string) error {
-	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
-	if err != nil {
-		return err
-	}
-	defer postgres.Rollback(tx)
-
-	if _, err := s.RevokeTx(ctx, tx, idHash); err != nil {
-		return err
-	}
-	return tx.Commit()
 }
 
 // RevokeTx revokes the session whose hash is idHash on the caller's
@@ -158,27 +155,90 @@ func (s *postgresStore) EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, 
 	return err
 }
 
-func (s *postgresStore) UpdateLivemode(ctx context.Context, idHash string, livemode bool) error {
+// EndWith ends a live session in one bypass transaction and returns it,
+// ended. A live session is not revoked and not expired, the rule
+// Service.Resolve applies. When the session whose hash is idHash is live, it
+// stamps revoked_at, stamps app.tenant_id with the session's tenant and
+// app.livemode off for an audit row, and calls then. then runs last, on the
+// same transaction, with the session. It must not commit or roll back tx; an
+// error it returns rolls the sign-out back and is returned.
+//
+// The bool reports whether a live session was found. When none was (an
+// unknown, revoked or expired hash), nothing changes and then is not called.
+func (s *postgresStore) EndWith(ctx context.Context, idHash string, then func(tx *sql.Tx, sess Session) error) (Session, bool, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
-		return err
+		return Session{}, false, err
 	}
 	defer postgres.Rollback(tx)
 
-	res, err := tx.ExecContext(ctx, `
+	now := time.Now().UTC()
+	sess, err := scanSession(tx.QueryRowContext(ctx, `
+		UPDATE dashboard_sessions
+		SET revoked_at = $1
+		WHERE id_hash = $2 AND revoked_at IS NULL AND expires_at > $1
+		RETURNING `+sessionCols, now, idHash))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Session{}, false, nil
+	}
+	if err != nil {
+		return Session{}, false, fmt.Errorf("end session: %w", err)
+	}
+	if err := auditThenCommit(ctx, tx, sess, then); err != nil {
+		return Session{}, false, err
+	}
+	return sess, true, nil
+}
+
+// SetLivemodeWith switches a live session to livemode in one bypass
+// transaction and returns it in its new mode. A live session is not revoked
+// and not expired, the rule Service.Resolve applies. When the session whose
+// hash is idHash is live, it writes the mode, stamps app.tenant_id with the
+// session's tenant and app.livemode off for an audit row, whatever the new
+// mode, and calls then. then runs last, on the same transaction, with the
+// session. It must not commit or roll back tx; an error it returns rolls the
+// switch back and is returned.
+//
+// The bool reports whether a live session was found. When none was (an
+// unknown, revoked or expired hash), nothing changes and then is not called.
+func (s *postgresStore) SetLivemodeWith(ctx context.Context, idHash string, livemode bool, then func(tx *sql.Tx, sess Session) error) (Session, bool, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
+	if err != nil {
+		return Session{}, false, err
+	}
+	defer postgres.Rollback(tx)
+
+	sess, err := scanSession(tx.QueryRowContext(ctx, `
 		UPDATE dashboard_sessions
 		SET livemode = $1
-		WHERE id_hash = $2 AND revoked_at IS NULL
-	`, livemode, idHash)
-	if err != nil {
-		return err
+		WHERE id_hash = $2 AND revoked_at IS NULL AND expires_at > $3
+		RETURNING `+sessionCols, livemode, idHash, time.Now().UTC()))
+	if errors.Is(err, sql.ErrNoRows) {
+		return Session{}, false, nil
 	}
-	n, err := res.RowsAffected()
 	if err != nil {
-		return err
+		return Session{}, false, fmt.Errorf("set session mode: %w", err)
 	}
-	if n == 0 {
-		return ErrNotFound
+	if err := auditThenCommit(ctx, tx, sess, then); err != nil {
+		return Session{}, false, err
+	}
+	return sess, true, nil
+}
+
+// auditThenCommit finishes EndWith's and SetLivemodeWith's transaction: it
+// stamps app.tenant_id with the session's tenant and app.livemode off, calls
+// then and commits.
+func auditThenCommit(ctx context.Context, tx *sql.Tx, sess Session, then func(tx *sql.Tx, sess Session) error) error {
+	// audit.Logger.LogInTx reads the row's tenant from app.tenant_id and its
+	// mode from app.livemode. Account events are filed in test mode.
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('app.tenant_id', $1, true)`, sess.TenantID); err != nil {
+		return fmt.Errorf("stamp tenant: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', 'off', true)`); err != nil {
+		return fmt.Errorf("stamp livemode: %w", err)
+	}
+	if err := then(tx, sess); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

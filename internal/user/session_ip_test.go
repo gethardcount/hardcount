@@ -43,8 +43,7 @@ func TestLogin_SessionIPIsTheTrustedClientIP(t *testing.T) {
 			u := domain.User{ID: "usr_1", Email: "op@acme.com", PasswordHash: string(hash)}
 			store := &fakeUserStore{loginUser: &u, tenants: []domain.UserTenant{{UserID: "usr_1", TenantID: "ten_acme"}}}
 			svc, sessions, auditor := newRecordingService(store)
-			h := NewHandler(svc, session.NewService(&recordingSessionStore{}),
-				session.DefaultCookieConfig("local"), stubEmailSender{}, "", false)
+			h := NewHandler(svc, session.DefaultCookieConfig("local"), stubEmailSender{}, "", false)
 			// The router mounts TrustedClientIP globally, ahead of /v1/auth.
 			srv := mw.TrustedClientIP(mw.ParseTrustedProxies(c.trustProxy))(h.Routes())
 

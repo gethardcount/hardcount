@@ -59,9 +59,9 @@ func (it loginIT) handler(store Store, auditor AuditTxWriter, throttle *LoginThr
 
 // handlerWith is handler with sessions for the steps inside the sign-in's
 // transaction.
-func (it loginIT) handlerWith(store Store, sessions SessionTxWriter, auditor AuditTxWriter, throttle *LoginThrottle) http.Handler {
+func (it loginIT) handlerWith(store Store, sessions SessionWriter, auditor AuditTxWriter, throttle *LoginThrottle) http.Handler {
 	svc := NewService(store, clock.Real(), sessions, auditor)
-	h := NewHandler(svc, it.sessSvc, session.CookieConfig{Path: "/"}, stubEmailSender{}, "", false)
+	h := NewHandler(svc, session.CookieConfig{Path: "/"}, stubEmailSender{}, "", false)
 	if throttle != nil {
 		h.SetLoginThrottle(throttle)
 	}
@@ -249,12 +249,12 @@ func TestLogin_AFailedSignInKeepsTheBrowsersSession(t *testing.T) {
 	cases := []struct {
 		name     string
 		password string
-		sessions func(*session.Service) SessionTxWriter
+		sessions func(*session.Service) SessionWriter
 		status   int
 	}{
-		{"wrong password", "wrong-password-123", func(s *session.Service) SessionTxWriter { return s }, http.StatusUnauthorized},
-		{"ending the old session fails", loginITPassword, func(s *session.Service) SessionTxWriter { return endThenFailTx{s} }, http.StatusInternalServerError},
-		{"creating the new session fails", loginITPassword, func(s *session.Service) SessionTxWriter { return issueThenFailTx{s} }, http.StatusInternalServerError},
+		{"wrong password", "wrong-password-123", func(s *session.Service) SessionWriter { return s }, http.StatusUnauthorized},
+		{"ending the old session fails", loginITPassword, func(s *session.Service) SessionWriter { return endThenFailTx{s} }, http.StatusInternalServerError},
+		{"creating the new session fails", loginITPassword, func(s *session.Service) SessionWriter { return issueThenFailTx{s} }, http.StatusInternalServerError},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

@@ -30,16 +30,19 @@ import (
 type Service struct {
 	store    Store
 	clock    clock.Clock
-	sessions SessionTxWriter
+	sessions SessionWriter
 	audit    AuditTxWriter
 }
 
-// SessionTxWriter creates and ends sessions on the caller's transaction.
+// SessionWriter changes sessions. The Tx methods write on the caller's
+// transaction. End and SetLivemode open their own and run a hook on it.
 // *session.Service satisfies it.
-type SessionTxWriter interface {
+type SessionWriter interface {
 	IssueTx(ctx context.Context, tx *sql.Tx, in session.IssueInput) (rawID string, sess session.Session, err error)
 	EndTx(ctx context.Context, tx *sql.Tx, rawID string) (ended bool, err error)
 	EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID string) error
+	End(ctx context.Context, rawID string, then func(tx *sql.Tx, sess session.Session) error) (session.Session, bool, error)
+	SetLivemode(ctx context.Context, rawID string, livemode bool, then func(tx *sql.Tx, sess session.Session) error) (session.Session, bool, error)
 }
 
 // AuditTxWriter writes an audit row on the caller's transaction.
@@ -48,10 +51,10 @@ type AuditTxWriter interface {
 	LogInTx(ctx context.Context, tx *sql.Tx, e audit.Entry) error
 }
 
-// NewService returns a Service. sessions and auditor join the sign-in's and
-// the password reset's transactions, so the session changes and the audit
-// row commit with the rest of each.
-func NewService(store Store, clk clock.Clock, sessions SessionTxWriter, auditor AuditTxWriter) *Service {
+// NewService returns a Service. sessions and auditor join the transactions
+// of the sign-in, the sign-out, the mode switch and the password reset, so
+// the session changes and the audit row commit with the rest of each.
+func NewService(store Store, clk clock.Clock, sessions SessionWriter, auditor AuditTxWriter) *Service {
 	if clk == nil {
 		clk = clock.Real()
 	}
@@ -280,6 +283,47 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (LoginResult, error)
 	}
 	u.LastLoginAt = &now
 	return LoginResult{User: u, TenantID: tenantID, RawSessionID: rawID, Session: sess}, nil
+}
+
+// Logout ends the session rawSessionCookie names and writes the logout audit
+// row on the same transaction, so both happen or neither does. It returns the
+// ended session and whether a live session was found; when none was (no
+// cookie value, an unknown, ended or expired session), nothing is written.
+// The row is filed in test mode, as every account event is.
+func (s *Service) Logout(ctx context.Context, rawSessionCookie string) (session.Session, bool, error) {
+	return s.sessions.End(ctx, rawSessionCookie, func(tx *sql.Tx, sess session.Session) error {
+		// The session's user is the actor. The client address and the request
+		// id are already on ctx (the root audit-coverage and request-id
+		// middlewares put them there).
+		if err := s.audit.LogInTx(auth.WithUserID(ctx, sess.UserID), tx, audit.Entry{
+			Action:       "logout",
+			ResourceType: "user",
+			ResourceID:   sess.UserID,
+		}); err != nil {
+			return fmt.Errorf("write the audit row: %w", err)
+		}
+		return nil
+	})
+}
+
+// SetMode switches the session rawSessionCookie names to livemode and writes
+// the mode_changed audit row on the same transaction, so both happen or
+// neither does. It returns the session in its new mode and whether a live
+// session was found; when none was, nothing changes. The row is filed in
+// test mode whatever the new mode, as every account event is, and records
+// the new mode in its metadata.
+func (s *Service) SetMode(ctx context.Context, rawSessionCookie string, livemode bool) (session.Session, bool, error) {
+	return s.sessions.SetLivemode(ctx, rawSessionCookie, livemode, func(tx *sql.Tx, sess session.Session) error {
+		if err := s.audit.LogInTx(auth.WithUserID(ctx, sess.UserID), tx, audit.Entry{
+			Action:       "mode_changed",
+			ResourceType: "user",
+			ResourceID:   sess.UserID,
+			Metadata:     map[string]any{"livemode": livemode},
+		}); err != nil {
+			return fmt.Errorf("write the audit row: %w", err)
+		}
+		return nil
+	})
 }
 
 // IssueResetToken generates a fresh reset token for the user with the

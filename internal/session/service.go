@@ -9,7 +9,7 @@ import (
 // Service is the auth-flow facade over Store. Issue mints a session for an
 // authenticated user (the caller has already verified the password).
 // Resolve looks up a raw cookie value and returns the Session if it is still
-// active. Revoke handles logout.
+// active. End handles sign-out, and SetLivemode the test/live switch.
 type Service struct {
 	store Store
 }
@@ -89,19 +89,23 @@ func (s *Service) Resolve(ctx context.Context, rawID string) (Session, error) {
 	if err != nil {
 		return Session{}, err
 	}
-	if !sess.IsActive(time.Now()) {
+	if !sess.IsActive(time.Now().UTC()) {
 		return Session{}, ErrNotFound
 	}
 	return sess, nil
 }
 
-// Revoke marks the session row as revoked. It is idempotent: revoking an
-// already-revoked or missing row does nothing.
-func (s *Service) Revoke(ctx context.Context, rawID string) error {
+// End ends the live session whose raw cookie value is rawID and calls then
+// on the same transaction, so the sign-out and then's writes, such as its
+// audit row, commit or roll back together (Store.EndWith states then's
+// contract). It returns the ended session and whether a live session was
+// found. An empty, unknown, ended or expired rawID finds none and changes
+// nothing.
+func (s *Service) End(ctx context.Context, rawID string, then func(tx *sql.Tx, sess Session) error) (Session, bool, error) {
 	if rawID == "" {
-		return nil
+		return Session{}, false, nil
 	}
-	return s.store.Revoke(ctx, HashID(rawID))
+	return s.store.EndWith(ctx, HashID(rawID), then)
 }
 
 // EndTx ends the session whose raw cookie value is rawID on the caller's
@@ -135,12 +139,17 @@ func (s *Service) EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, tenant
 	return s.store.EndForMemberTx(ctx, tx, userID, tenantID)
 }
 
-// SetLivemode switches the active mode (test or live) on the cookie session.
-// The same operator switches modes without signing in again, and every later
-// request gets the new mode through session.Resolve.
-func (s *Service) SetLivemode(ctx context.Context, rawID string, livemode bool) error {
+// SetLivemode switches the live session whose raw cookie value is rawID to
+// livemode (test or live) and calls then on the same transaction, so the
+// switch and then's writes, such as its audit row, commit or roll back
+// together (Store.SetLivemodeWith states then's contract). The same operator
+// switches modes without signing in again, and every later request gets the
+// new mode through Resolve. It returns the session in its new mode and
+// whether a live session was found. An empty, unknown, ended or expired
+// rawID finds none and changes nothing.
+func (s *Service) SetLivemode(ctx context.Context, rawID string, livemode bool, then func(tx *sql.Tx, sess Session) error) (Session, bool, error) {
 	if rawID == "" {
-		return ErrNotFound
+		return Session{}, false, nil
 	}
-	return s.store.UpdateLivemode(ctx, HashID(rawID), livemode)
+	return s.store.SetLivemodeWith(ctx, HashID(rawID), livemode, then)
 }
