@@ -107,8 +107,9 @@ func (s *Service) Revoke(ctx context.Context, rawID string) error {
 // EndTx ends the session whose raw cookie value is rawID on the caller's
 // transaction, whoever it belongs to, so the sign-out commits or rolls back
 // with the caller's change, and reports whether it ended one. An empty,
-// unknown or already ended rawID ends nothing. It does not commit. tx must be a bypass transaction: a tenant
-// transaction's row-level security hides the session in the other mode.
+// unknown or already ended rawID ends nothing. It does not commit. tx must
+// be a bypass transaction: a tenant transaction's row-level security hides
+// the session in the other mode.
 func (s *Service) EndTx(ctx context.Context, tx *sql.Tx, rawID string) (bool, error) {
 	if rawID == "" {
 		return false, nil

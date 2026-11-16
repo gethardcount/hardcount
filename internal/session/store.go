@@ -113,8 +113,8 @@ func (s *postgresStore) Revoke(ctx context.Context, idHash string) error {
 
 // RevokeTx revokes the session whose hash is idHash on the caller's
 // transaction, whoever it belongs to, and reports whether it revoked one. A
-// revoked or unknown hash changes nothing. It does not commit. The caller's transaction must see the row in
-// either mode: a bypass transaction does.
+// revoked or unknown hash changes nothing. It does not commit. The caller's
+// transaction must see the row in either mode: a bypass transaction does.
 func (s *postgresStore) RevokeTx(ctx context.Context, tx *sql.Tx, idHash string) (bool, error) {
 	res, err := tx.ExecContext(ctx, `
 		UPDATE dashboard_sessions
