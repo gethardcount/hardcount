@@ -31,15 +31,15 @@ const (
 	CustomerStatusArchived CustomerStatus = "archived"
 )
 
-// CustomerEmailStatus mirrors the CHECK constraint on customers.email_status.
+// CustomerEmailStatus is the value of customers.email_status.
 // 'unknown' is the default: no delivery outcome has been seen. 'bounced' is
 // set by Sender on an SMTP 5xx, or later by provider webhooks (SES/SendGrid)
-// that plug into the same customer.MarkEmailBounced code path.
+// that plug into the same customer.MarkEmailBounced code path. The column's
+// CHECK also allows 'ok', which nothing writes.
 type CustomerEmailStatus string
 
 const (
 	EmailStatusUnknown    CustomerEmailStatus = "unknown"
-	EmailStatusOK         CustomerEmailStatus = "ok"
 	EmailStatusBounced    CustomerEmailStatus = "bounced"
 	EmailStatusComplained CustomerEmailStatus = "complained"
 )
@@ -100,12 +100,11 @@ type Customer struct {
 	UpdatedAt time.Time `json:"updated_at"`
 }
 
-// BillingProfileStatus says whether a customer's billing profile is missing,
+// BillingProfileStatus says whether a customer's billing profile is
 // incomplete or ready.
 type BillingProfileStatus string
 
 const (
-	BillingProfileMissing    BillingProfileStatus = "missing"
 	BillingProfileIncomplete BillingProfileStatus = "incomplete"
 	BillingProfileReady      BillingProfileStatus = "ready"
 )
@@ -145,7 +144,6 @@ const (
 	PaymentSetupMissing PaymentSetupStatus = "missing"
 	PaymentSetupPending PaymentSetupStatus = "pending"
 	PaymentSetupReady   PaymentSetupStatus = "ready"
-	PaymentSetupError   PaymentSetupStatus = "error"
 )
 
 // CustomerPaymentSetup is a customer's payment setup: its status, whether a

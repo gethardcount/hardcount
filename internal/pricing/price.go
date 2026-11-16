@@ -134,8 +134,8 @@ func checkRates(unit decimal.Decimal, tiers []domain.RatingTier, pkg decimal.Dec
 // validatePricingShape enforces the shape of a price at authoring time,
 // shared by prices and customer overrides. It is domain.CheckPriceShape: the
 // mode's fields and only those (a field the mode does not use must be zero,
-// tiers empty). The tier rules are domain.CheckTiers, the same check
-// ComputeAmountCents runs, so a table authoring accepts always rates.
+// tiers empty). Its tier rules are the check ComputeAmountCents runs, so a
+// table authoring accepts always rates.
 //
 // Zero is a legal amount: "this dimension is free", and a zero-price tier
 // expresses an included allowance, "first 1M tokens free, then $2/M".

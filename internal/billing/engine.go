@@ -2806,7 +2806,7 @@ func (e *Engine) handleTrialState(ctx context.Context, sub domain.Subscription, 
 // captures the negotiated rate, not list price — reading the price back would
 // yield list price because the override keeps the price id. Returns nil for
 // graduated/package modes: no single nominal rate exists, so those correctly
-// fall back to EffectiveUnitAmountDecimal (the honest blend).
+// fall back to EffectiveUnitAmountDecimalFor (the honest blend).
 func nominalRate(price domain.PlanPrice) *decimal.Decimal {
 	// Single source: the usage Activity panel and the public cost dashboard
 	// stamp the same nominal via domain.DisplayUnitAmountDecimalFor, so the

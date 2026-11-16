@@ -437,7 +437,6 @@ type Invoice struct {
 	ProviderPaymentStatus string     `json:"provider_payment_status,omitempty"`
 	ProviderSyncedAt      *time.Time `json:"provider_synced_at,omitempty"`
 
-	PDFObjectKey string `json:"-"`
 	// PublicToken is the credential in the hosted invoice URL, like Stripe's
 	// hosted_invoice_url. It is generated at finalize, and drafts have an
 	// empty token. The rotate-public-token endpoint replaces it if the URL
@@ -618,7 +617,7 @@ type InvoiceLineItem struct {
 	DimensionMatch map[string]string `json:"dimension_match,omitempty"`
 	// NominalUnitAmountDecimal is the configured per-unit rate that was
 	// billed (decimal cents) on per_unit usage lines. It is the clean
-	// rate-card figure (0.0003 = $0.000003/token). EffectiveUnitAmountDecimal
+	// rate-card figure (0.0003 = $0.000003/token). effectiveUnitAmountDecimal
 	// (amount÷quantity) differs by the cent rounding of the line total: 6,000
 	// tokens billed 2¢ give an effective 0.00033¢ and a nominal 0.0003¢.
 	//
@@ -669,7 +668,7 @@ func (li InvoiceLineItem) IsCommitLine() bool {
 // taxed when it is invoiced (ADR-078 amendment 2026-10-19).
 const TaxReasonPrepaidCreditPurchase = "prepaid_credit_purchase"
 
-// EffectiveUnitAmountDecimal is the per-unit price in decimal cents, derived
+// effectiveUnitAmountDecimal is the per-unit price in decimal cents, derived
 // from the line's amount and quantity (amount_cents / quantity). It is the
 // full-precision unit price that reconciles with the rounded line amount
 // (quantity × unit ≈ amount). Unlike the whole-cent UnitAmountCents, it
@@ -681,7 +680,7 @@ const TaxReasonPrepaidCreditPurchase = "prepaid_credit_purchase"
 // Precision is capped at 12 decimal places, like Stripe's
 // unit_amount_decimal. It returns 0 when the quantity is 0, where a
 // per-unit price means nothing.
-func (li InvoiceLineItem) EffectiveUnitAmountDecimal() decimal.Decimal {
+func (li InvoiceLineItem) effectiveUnitAmountDecimal() decimal.Decimal {
 	return EffectiveUnitAmountDecimalFor(li.AmountCents, li.ExactQuantity())
 }
 
@@ -737,7 +736,7 @@ func (li InvoiceLineItem) DisplayUnitAmountDecimal() decimal.Decimal {
 	if li.NominalUnitAmountDecimal != nil {
 		return *li.NominalUnitAmountDecimal
 	}
-	return li.EffectiveUnitAmountDecimal()
+	return li.effectiveUnitAmountDecimal()
 }
 
 // MarshalJSON gives the line one quantity and one unit price on the wire

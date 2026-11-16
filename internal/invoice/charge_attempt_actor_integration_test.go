@@ -210,8 +210,22 @@ func TestChargeNowAttempt_CountsAsHardcountsOwn(t *testing.T) {
 	}
 }
 
+// chargeAttemptTriggers and chargeAttemptOutcomes list every
+// domain.ChargeAttemptTrigger and domain.ChargeAttemptOutcome constant. Add a
+// new constant here and to the CHECK in the same change.
+var (
+	chargeAttemptTriggers = []domain.ChargeAttemptTrigger{
+		domain.ChargeTriggerAutoCharge, domain.ChargeTriggerChargeNow,
+		domain.ChargeTriggerDunningRetry, domain.ChargeTriggerExternal,
+	}
+	chargeAttemptOutcomes = []domain.ChargeAttemptOutcome{
+		domain.ChargeAttemptPending, domain.ChargeAttemptUnknown, domain.ChargeAttemptFailed,
+		domain.ChargeAttemptSucceeded, domain.ChargeAttemptBelowMinimum,
+	}
+)
+
 // TestChargeAttemptTriggers_MatchCheckConstraint keeps
-// domain.ChargeAttemptTriggers and invoice_charge_attempts' CHECK equal (the
+// chargeAttemptTriggers and invoice_charge_attempts' CHECK equal (the
 // enum and CHECK sync rule): a trigger the CHECK does not list fails the
 // attempt's insert, and the charge call's write is best effort, so the
 // attempt would be lost without a word.
@@ -227,7 +241,7 @@ func TestChargeAttemptTriggers_MatchCheckConstraint(t *testing.T) {
 	for _, m := range regexp.MustCompile(`'(\w+)'`).FindAllStringSubmatch(def, -1) {
 		inCheck[m[1]] = true
 	}
-	for _, tr := range domain.ChargeAttemptTriggers() {
+	for _, tr := range chargeAttemptTriggers {
 		if !inCheck[string(tr)] {
 			t.Errorf("trigger %q is not in the CHECK (%s)", tr, def)
 		}
@@ -239,7 +253,7 @@ func TestChargeAttemptTriggers_MatchCheckConstraint(t *testing.T) {
 }
 
 // TestChargeAttemptOutcomes_MatchCheckConstraint is the same rule for
-// domain.ChargeAttemptOutcomes and the outcome CHECK: a below-minimum
+// chargeAttemptOutcomes and the outcome CHECK: a below-minimum
 // refusal's attempt row would otherwise fail its insert and the timeline
 // would lose it without a word.
 func TestChargeAttemptOutcomes_MatchCheckConstraint(t *testing.T) {
@@ -254,7 +268,7 @@ func TestChargeAttemptOutcomes_MatchCheckConstraint(t *testing.T) {
 	for _, m := range regexp.MustCompile(`'(\w+)'`).FindAllStringSubmatch(def, -1) {
 		inCheck[m[1]] = true
 	}
-	for _, o := range domain.ChargeAttemptOutcomes() {
+	for _, o := range chargeAttemptOutcomes {
 		if !inCheck[string(o)] {
 			t.Errorf("outcome %q is not in the CHECK (%s)", o, def)
 		}

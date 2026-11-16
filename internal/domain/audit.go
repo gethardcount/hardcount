@@ -49,8 +49,6 @@ const (
 	AuditActionDelete   = "delete"
 	AuditActionActivate = "activate"
 	AuditActionCancel   = "cancel"
-	AuditActionPause    = "pause"
-	AuditActionResume   = "resume"
 	AuditActionFinalize = "finalize"
 	AuditActionVoid     = "void"
 	AuditActionRevoke   = "revoke"

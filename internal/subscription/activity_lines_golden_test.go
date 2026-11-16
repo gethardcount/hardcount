@@ -33,11 +33,33 @@ const goldenPath = "testdata/activity_lines.golden.json"
 //
 // B2 was a writer's token (triggered_by=schedule) and the renderer's switch
 // drifting apart. The golden cases and the no-fallback test range over the
-// domain lists, and TestSubscriptionAuditWriters_UseTheVocabulary proves the
-// lists are exactly what the writers emit: every subscription audit row in
-// the code is written with a domain constant, never a literal, and every
+// two lists below, and TestSubscriptionAuditWriters_UseTheVocabulary proves
+// the lists are exactly what the writers emit: every subscription audit row
+// in the code is written with a domain constant, never a literal, and every
 // constant in the lists has a writer, except the retired ones
 // (retiredAuditActions).
+
+// subscriptionAuditActions lists every action a subscription audit row is
+// written with.
+func subscriptionAuditActions() []string {
+	return []string{
+		domain.AuditActionCreate, domain.AuditActionActivate, domain.AuditActionCancel, domain.AuditActionUpdate,
+		domain.AuditActionSubscriptionItemUpdated, domain.AuditActionSubscriptionPendingChangeApplied,
+		domain.AuditActionSubscriptionThresholdCrossed, domain.AuditActionSubscriptionThresholdDeferred,
+		domain.AuditActionSubscriptionProrationFailed, domain.AuditActionSubscriptionNetNegativeUsage,
+	}
+}
+
+// subscriptionAuditSubActions lists every metadata "action" a subscription
+// audit row is written with.
+func subscriptionAuditSubActions() []string {
+	return []string{
+		domain.SubAuditCancelScheduled, domain.SubAuditCancelCleared, domain.SubAuditCollectionPaused, domain.SubAuditCollectionResumed,
+		domain.SubAuditTrialEnded, domain.SubAuditTrialExtended, domain.SubAuditBillingRetried, domain.SubAuditThresholdsSet,
+		domain.SubAuditThresholdsCleared, domain.SubAuditItemAdded, domain.SubAuditItemRemoved, domain.SubAuditPendingPlanChangeCanceled,
+		domain.SubAuditTrialEndCancel, domain.SubAuditItemPlanChanged, domain.SubAuditItemQuantityChanged,
+	}
+}
 
 // repoRoot is the module root, two levels above this package.
 func repoRoot(t *testing.T) string {
@@ -239,12 +261,12 @@ func TestSubscriptionAuditWriters_UseTheVocabulary(t *testing.T) {
 		}
 		for v, at := range written {
 			if !in[v] {
-				t.Errorf("%s %q is written (%s) but not listed in domain, so the timeline tests do not cover it", what, v, strings.Join(at, ", "))
+				t.Errorf("%s %q is written (%s) but not in subscriptionAuditActions or subscriptionAuditSubActions, so the timeline tests do not cover it", what, v, strings.Join(at, ", "))
 			}
 		}
 	}
-	check("audit action", w.actions, domain.SubscriptionAuditActions())
-	check("metadata action", w.subActions, domain.SubscriptionAuditSubActions())
+	check("audit action", w.actions, subscriptionAuditActions())
+	check("metadata action", w.subActions, subscriptionAuditSubActions())
 }
 
 // subActionParent is the audit action each metadata "action" rides.
@@ -344,7 +366,7 @@ func goldenActionCases(t *testing.T) []actionCase {
 	}
 	sort.Strings(proNames)
 
-	for _, action := range domain.SubscriptionAuditActions() {
+	for _, action := range subscriptionAuditActions() {
 		switch action {
 		case domain.AuditActionCreate, domain.AuditActionActivate:
 			add(action, action, map[string]any{"customer_id": "cus_1"})
@@ -387,7 +409,7 @@ func goldenActionCases(t *testing.T) []actionCase {
 		}
 	}
 
-	for _, sub := range domain.SubscriptionAuditSubActions() {
+	for _, sub := range subscriptionAuditSubActions() {
 		parent := subActionParent(sub)
 		name := parent + "/" + sub
 		m := func(extra map[string]any) map[string]any { return with(map[string]any{"action": sub}, extra) }

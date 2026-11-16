@@ -113,7 +113,7 @@ const (
 	// stays spendable until commit relief retires it.
 	StripeRefundReviewPrepaidCommit StripeRefundReviewReason = "prepaid_commit"
 	// StripeRefundReviewSeenLate: Hardcount first saw the refund more than
-	// StripeRefundLateAfter after Stripe made it, so the operator may already
+	// stripeRefundLateAfter after Stripe made it, so the operator may already
 	// have recorded it by hand.
 	StripeRefundReviewSeenLate StripeRefundReviewReason = "seen_late"
 	// StripeRefundReviewCreditNoteRefundFailed: a credit note on the invoice
@@ -133,14 +133,14 @@ const (
 	StripeRefundReviewExceedsCreditable StripeRefundReviewReason = "exceeds_creditable"
 )
 
-// StripeRefundLateAfter is how long after Stripe made a refund Hardcount may
+// stripeRefundLateAfter is how long after Stripe made a refund Hardcount may
 // first see it and still record it as a credit note (ADR-134). A refund seen
 // later is flagged instead. After an upgrade, Stripe can send refund.updated
 // for a refund made before the upgrade. The operator may already have
 // recorded that refund by hand, and a second credit note would count it
 // twice. Both instants are Stripe's: the event's creation time and the
 // refund's.
-const StripeRefundLateAfter = 24 * time.Hour
+const stripeRefundLateAfter = 24 * time.Hour
 
 // InvoiceStripeRefund is a refund made in Stripe outside Hardcount on one of
 // the invoice's payments (ADR-134). There is one row per Stripe refund. Each
@@ -209,17 +209,11 @@ type StripeRefundSnapshot struct {
 	Young bool
 }
 
-// SeenLate reports whether this event, the first Hardcount sees for the
-// refund, came more than StripeRefundLateAfter after Stripe made it.
-func (s StripeRefundSnapshot) SeenLate() bool {
-	return StripeRefundSeenLate(s.CreatedAt, s.EventAt)
-}
-
 // StripeRefundSeenLate reports whether Hardcount first saw a refund (the
-// creation time of its first event) more than StripeRefundLateAfter after
+// creation time of its first event) more than stripeRefundLateAfter after
 // Stripe made it. An unknown creation time is not late.
 func StripeRefundSeenLate(created, firstSeen time.Time) bool {
-	return !created.IsZero() && firstSeen.Sub(created) > StripeRefundLateAfter
+	return !created.IsZero() && firstSeen.Sub(created) > stripeRefundLateAfter
 }
 
 // SupersededBy reports whether snapshot s is newer than what the row holds.

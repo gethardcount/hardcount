@@ -168,9 +168,9 @@ func (s SnapshotScanner[T]) Scan(src any) error {
 	return nil
 }
 
-// FieldCipher encrypts and decrypts one stored string. *crypto.Encryptor
+// fieldCipher encrypts and decrypts one stored string. *crypto.Encryptor
 // satisfies it. With no key, it passes plaintext through.
-type FieldCipher interface {
+type fieldCipher interface {
 	Encrypt(plaintext string) (string, error)
 	Decrypt(stored string) (string, error)
 }
@@ -179,14 +179,14 @@ type FieldCipher interface {
 // (display name, email, legal name, tax ID), so the issued copy holds no
 // more plaintext PII than the rows it was copied from. Address fields stay
 // plaintext, as they are on the billing profile.
-func (b DocumentBillTo) Seal(c FieldCipher) (DocumentBillTo, error) {
+func (b DocumentBillTo) Seal(c fieldCipher) (DocumentBillTo, error) {
 	return b.mapPII(c.Encrypt)
 }
 
 // Open is the inverse of Seal. It also decrypts the raw customer and
 // billing-profile columns DocumentPartiesSQL reads, which hold the same
 // fields encrypted. A plaintext value passes through unchanged.
-func (b DocumentBillTo) Open(c FieldCipher) (DocumentBillTo, error) {
+func (b DocumentBillTo) Open(c fieldCipher) (DocumentBillTo, error) {
 	return b.mapPII(c.Decrypt)
 }
 

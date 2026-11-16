@@ -4,9 +4,10 @@ package domain
 // vocabulary, and ADR-128). The subscription activity timeline reads these
 // rows and words each one as an activity line, so a writer and the timeline
 // must name a row the same way. Every writer uses these constants. The
-// timeline's golden and no-fallback tests range over the lists below, so a
-// new row kind that has no words fails a test instead of reaching the screen
-// as "Subscription changed".
+// timeline's tests list them (subscriptionAuditActions and
+// subscriptionAuditSubActions in internal/subscription), so a new row kind
+// that has no words fails a test instead of reaching the screen as
+// "Subscription changed".
 //
 // The wire strings are frozen: audit rows already written carry them.
 
@@ -37,17 +38,6 @@ const (
 	AuditActionSubscriptionNetNegativeUsage = "subscription.net_negative_usage"
 )
 
-// SubscriptionAuditActions lists every action a subscription audit row is
-// written with.
-func SubscriptionAuditActions() []string {
-	return []string{
-		AuditActionCreate, AuditActionActivate, AuditActionCancel, AuditActionUpdate,
-		AuditActionSubscriptionItemUpdated, AuditActionSubscriptionPendingChangeApplied,
-		AuditActionSubscriptionThresholdCrossed, AuditActionSubscriptionThresholdDeferred,
-		AuditActionSubscriptionProrationFailed, AuditActionSubscriptionNetNegativeUsage,
-	}
-}
-
 // Values of a subscription audit row's metadata "action", which says what an
 // AuditActionUpdate, AuditActionCancel or AuditActionSubscriptionItemUpdated
 // row did.
@@ -72,14 +62,3 @@ const (
 	SubAuditItemPlanChanged     = "item_plan_changed"
 	SubAuditItemQuantityChanged = "item_quantity_changed"
 )
-
-// SubscriptionAuditSubActions lists every metadata "action" a subscription
-// audit row is written with.
-func SubscriptionAuditSubActions() []string {
-	return []string{
-		SubAuditCancelScheduled, SubAuditCancelCleared, SubAuditCollectionPaused, SubAuditCollectionResumed,
-		SubAuditTrialEnded, SubAuditTrialExtended, SubAuditBillingRetried, SubAuditThresholdsSet,
-		SubAuditThresholdsCleared, SubAuditItemAdded, SubAuditItemRemoved, SubAuditPendingPlanChangeCanceled,
-		SubAuditTrialEndCancel, SubAuditItemPlanChanged, SubAuditItemQuantityChanged,
-	}
-}

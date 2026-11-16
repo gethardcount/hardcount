@@ -26,13 +26,6 @@ const (
 // there (ADR-137).
 const AttemptReasonNeverConfirmed = "The charge never reached Stripe; nothing was charged."
 
-// ChargeAttemptOutcomes lists every outcome, so a test can hold the list and
-// invoice_charge_attempts' CHECK constraint equal: an outcome the CHECK does
-// not list fails the attempt's insert.
-func ChargeAttemptOutcomes() []ChargeAttemptOutcome {
-	return []ChargeAttemptOutcome{ChargeAttemptPending, ChargeAttemptUnknown, ChargeAttemptFailed, ChargeAttemptSucceeded, ChargeAttemptBelowMinimum}
-}
-
 // ChargeAttemptTrigger names the writer that made the attempt.
 type ChargeAttemptTrigger string
 
@@ -56,13 +49,6 @@ const (
 	// attempts).
 	ChargeTriggerExternal ChargeAttemptTrigger = "external"
 )
-
-// ChargeAttemptTriggers lists every trigger, so a test can hold the list and
-// invoice_charge_attempts' CHECK constraint equal: a trigger the CHECK does
-// not list fails the attempt's insert.
-func ChargeAttemptTriggers() []ChargeAttemptTrigger {
-	return []ChargeAttemptTrigger{ChargeTriggerAutoCharge, ChargeTriggerChargeNow, ChargeTriggerDunningRetry, ChargeTriggerExternal}
-}
 
 // InvoiceChargeAttempt is one charge attempt on an invoice, a billing fact of
 // its own (ADR-102). It is written when the PaymentIntent is created, and

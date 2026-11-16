@@ -70,11 +70,12 @@ func TestService_Get(t *testing.T) {
 func TestService_UpdateStatus(t *testing.T) {
 	svc := NewService(newMemoryStore())
 
-	updated, err := svc.UpdateStatus(context.Background(), "hc_ten_test", domain.TenantStatusSuspended)
+	const suspended = domain.TenantStatus("suspended")
+	updated, err := svc.UpdateStatus(context.Background(), "hc_ten_test", suspended)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if updated.Status != domain.TenantStatusSuspended {
-		t.Errorf("got status %q, want %q", updated.Status, domain.TenantStatusSuspended)
+	if updated.Status != suspended {
+		t.Errorf("got status %q, want %q", updated.Status, suspended)
 	}
 }

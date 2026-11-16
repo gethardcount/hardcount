@@ -111,11 +111,6 @@ func (o DunningEscalationOutcome) Reason() string {
 	return strings.Join(parts, "+")
 }
 
-// Any reports whether exhaustion changed anything at all.
-func (o DunningEscalationOutcome) Any() bool {
-	return o.SubscriptionPaused || o.SubscriptionCanceled || o.InvoiceWrittenOff
-}
-
 // DunningRunState is where a dunning run stands: active, resolved, or
 // escalated (every retry failed and the final action was taken).
 type DunningRunState string
