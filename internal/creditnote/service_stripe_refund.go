@@ -132,8 +132,8 @@ func (s *Service) RecordStripeRefund(ctx context.Context, tenantID string, snap 
 	if ctx, err = clock.DecideWithoutDoor(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID}); err != nil {
 		return domain.StripeRefundRecordResult{}, fmt.Errorf("refund %s refused, Stripe delivers it again: %w", snap.StripeRefundID, err)
 	}
-	// The event's one instant, bound once: the note, its line, its issue and
-	// the tax stamp after the commit all read it.
+	// Bind the decision (see the clock package's doc): the note, its line, its
+	// issue and the tax stamp after the commit read one instant.
 	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 
 	inv, err := s.invoices.LockForCreditNoteTx(ctx, tx, tenantID, invoiceID)

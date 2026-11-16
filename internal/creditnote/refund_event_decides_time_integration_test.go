@@ -8,6 +8,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/creditnote"
+	"github.com/gethardcount/hardcount/internal/customer"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
@@ -214,7 +215,9 @@ func TestRecordStripeRefund_AnUndecidableTimeRecordsNothing(t *testing.T) {
 }
 
 // refundServer is the server's clock: it moves a second each time it answers
-// a read itself (no instant bound), and counts those reads.
+// a read itself (no instant bound), and counts those reads. It is this
+// file's own because the package's cnSteppingClock is in its internal tests,
+// which this external test package cannot see.
 type refundServer struct {
 	at    time.Time
 	reads int
@@ -229,44 +232,93 @@ func (c *refundServer) Now(ctx context.Context) time.Time {
 	return c.at
 }
 
-// A refund made in Stripe on an invoice on no clock is recorded on the
-// event's one instant: the note, its line and its issue all carry one read of
-// the server's clock, the time bound right after the decision.
-func TestRecordStripeRefund_AtRealTimeIsRecordedOnOneInstant(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	ctx := postgres.WithLivemode(context.Background(), false)
-	tenantID := testutil.CreateTestTenant(t, db, "CN Stripe Refund One Instant")
-	store := creditnote.NewPostgresStore(db)
-	invStore := invoice.NewPostgresStore(db)
-	_, inv := seedInvoiceForCN(t, db, tenantID, "oneinstant", domain.InvoicePaid, domain.PaymentSucceeded, "pi_oneinstant")
+// seedPaidInvoiceIn is a customer and a paid invoice holding paymentIntentID,
+// in the mode ctx carries (seedInvoiceForCN's, for either mode).
+func seedPaidInvoiceIn(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, suffix, paymentIntentID string) domain.Invoice {
+	t.Helper()
+	cust, err := customer.NewPostgresStore(db).Create(ctx, tenantID, domain.Customer{ExternalID: "cus_one_" + suffix, DisplayName: "One " + suffix})
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	now := time.Now().UTC()
+	inv, err := invoice.NewPostgresStore(db).CreateWithLineItems(ctx, tenantID, domain.Invoice{
+		CustomerID: cust.ID, InvoiceNumber: "INV-ONE-" + suffix, Status: domain.InvoicePaid,
+		PaymentStatus: domain.PaymentSucceeded, Currency: "USD", SubtotalCents: 10000, TotalAmountCents: 10000,
+		AmountPaidCents: 10000, BillingPeriodStart: now.Add(-30 * 24 * time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
+	}, nil)
+	if err != nil {
+		t.Fatalf("create invoice: %v", err)
+	}
+	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	if _, err := tx.ExecContext(ctx, `UPDATE invoices SET stripe_payment_intent_id = $1 WHERE id = $2`, paymentIntentID, inv.ID); err != nil {
+		t.Fatalf("stamp payment intent: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	return inv
+}
 
-	svc := creditnote.NewService(store, invStore, nil)
-	svc.SetNumberGenerator(&seqNumbers{prefix: "ONEREF"})
-	svc.SetStripeRefundRecording(store, invStore, nopOutbox{})
-	svc.SetResolver(&refundEventResolver{noClock: true})
-	server := &refundServer{at: time.Now().UTC().Truncate(time.Second)}
-	svc.SetClock(server)
+// A refund made in Stripe is recorded on the event's one instant, bound right
+// after its decision: the note, its line and its issue all carry it. On a
+// clock invoice, the clock's time with no read of the server's clock; on an
+// invoice on no clock, and in live mode, one read of the server's clock.
+func TestRecordStripeRefund_IsRecordedOnOneInstant(t *testing.T) {
+	for _, c := range []struct {
+		name            string
+		live            bool
+		res             *refundEventResolver
+		onClock         bool
+		wantServerReads int
+	}{
+		{"a clock invoice", false, &refundEventResolver{}, true, 0},
+		{"an invoice on no clock", false, &refundEventResolver{noClock: true}, false, 1},
+		{"live mode", true, &refundEventResolver{err: errors.New("must not be read")}, false, 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			db := testutil.SetupTestDB(t)
+			ctx := postgres.WithLivemode(context.Background(), c.live)
+			tenantID := testutil.CreateTestTenant(t, db, "CN Stripe Refund One Instant")
+			store := creditnote.NewPostgresStore(db)
+			invStore := invoice.NewPostgresStore(db)
+			inv := seedPaidInvoiceIn(t, db, ctx, tenantID, "oneinstant", "pi_oneinstant")
 
-	made := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
-	if _, err := svc.RecordStripeRefund(ctx, tenantID, domain.StripeRefundSnapshot{
-		StripeEventID: "evt_oneinstant", EventAt: made, StripeRefundID: "re_oneinstant",
-		StripePaymentIntentID: "pi_oneinstant", AmountCents: 4000, Currency: "usd",
-		Status: domain.StripeRefundSucceeded, CreatedAt: made,
-	}); err != nil {
-		t.Fatalf("RecordStripeRefund: %v", err)
-	}
-	notes, err := store.ListIssuedByInvoice(ctx, tenantID, inv.ID)
-	if err != nil || len(notes) != 1 {
-		t.Fatalf("issued notes %d, %v; want the recorded one", len(notes), err)
-	}
-	cn := notes[0]
-	lines, err := store.ListLineItems(ctx, tenantID, cn.ID)
-	if err != nil || len(lines) == 0 {
-		t.Fatalf("lines %d, %v; want the note's line", len(lines), err)
-	}
-	want := server.at
-	if server.reads != 1 || !cn.CreatedAt.Equal(want) || cn.IssuedAt == nil || !cn.IssuedAt.Equal(want) || !lines[0].CreatedAt.Equal(want) {
-		t.Errorf("%d server reads; created %v, issued %v, line %v; want all at the one read %v",
-			server.reads, cn.CreatedAt, cn.IssuedAt, lines[0].CreatedAt, want)
+			svc := creditnote.NewService(store, invStore, nil)
+			svc.SetNumberGenerator(&seqNumbers{prefix: "ONEREF"})
+			svc.SetStripeRefundRecording(store, invStore, nopOutbox{})
+			svc.SetResolver(c.res)
+			server := &refundServer{at: time.Now().UTC().Truncate(time.Second)}
+			svc.SetClock(server)
+
+			made := time.Now().Add(-time.Hour).UTC().Truncate(time.Second)
+			if _, err := svc.RecordStripeRefund(ctx, tenantID, domain.StripeRefundSnapshot{
+				StripeEventID: "evt_oneinstant", EventAt: made, StripeRefundID: "re_oneinstant",
+				StripePaymentIntentID: "pi_oneinstant", AmountCents: 4000, Currency: "usd",
+				Status: domain.StripeRefundSucceeded, CreatedAt: made,
+			}); err != nil {
+				t.Fatalf("RecordStripeRefund: %v", err)
+			}
+			notes, err := store.ListIssuedByInvoice(ctx, tenantID, inv.ID)
+			if err != nil || len(notes) != 1 {
+				t.Fatalf("issued notes %d, %v; want the recorded one", len(notes), err)
+			}
+			cn := notes[0]
+			lines, err := store.ListLineItems(ctx, tenantID, cn.ID)
+			if err != nil || len(lines) == 0 {
+				t.Fatalf("lines %d, %v; want the note's line", len(lines), err)
+			}
+			want := server.at
+			if c.onClock {
+				want = refundEventFrozen
+			}
+			if server.reads != c.wantServerReads || !cn.CreatedAt.Equal(want) || cn.IssuedAt == nil || !cn.IssuedAt.Equal(want) || !lines[0].CreatedAt.Equal(want) {
+				t.Errorf("%d server reads; created %v, issued %v, line %v; want %d reads, all at %v",
+					server.reads, cn.CreatedAt, cn.IssuedAt, lines[0].CreatedAt, c.wantServerReads, want)
+			}
+		})
 	}
 }

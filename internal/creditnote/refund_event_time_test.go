@@ -9,6 +9,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
@@ -119,5 +120,24 @@ func TestApplyRefundWebhook_RunsOnOneInstant(t *testing.T) {
 					rows.at, server.reads, c.decisions(), c.wantAt, c.wantServerReads, c.wantDecisions)
 			}
 		})
+	}
+}
+
+// A refund status event that no note holds is answered not-found by the
+// write; its decision found no invoice, so it binds one read of the service's
+// clock, and nothing is written or audited.
+func TestApplyRefundWebhook_NoNoteBindsOneReadAndWritesNothing(t *testing.T) {
+	past := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	store := newMemStore()
+	svc := NewService(store, &memInvoiceReader{invoices: map[string]domain.Invoice{}}, nil)
+	res := &countingResolver{}
+	svc.SetResolver(res)
+	server := &cnSteppingClock{at: past}
+	svc.SetClock(server)
+	rows := &instantAudit{}
+	svc.SetAuditLogger(rows)
+	err := svc.ApplyRefundWebhook(postgres.WithLivemode(context.Background(), false), "t1", "re_nobody", domain.RefundSucceeded, "")
+	if !errors.Is(err, errs.ErrNotFound) || res.reads != 0 || server.reads != 1 || len(rows.at) != 0 {
+		t.Errorf("err %v, %d resolver reads, %d server reads, audit rows %v; want not-found, none, one, none", err, res.reads, server.reads, rows.at)
 	}
 }

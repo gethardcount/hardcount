@@ -295,11 +295,12 @@ func (s *Service) SetResolver(r clock.Resolver) {
 }
 
 // DecideForCustomer decides a new subscription's time from the customer its
-// body names (clock.DecideOrRealTime) and binds it: the customer's clock and
-// its instant, or one read of the server's clock (s.clock). A clock that
-// cannot be read refuses the create (503), with nothing written; no customer
-// id decides nothing and binds the server's time. The create route calls it
-// on the service because the service holds the resolver.
+// body names (clock.DecideOrRealTime) and binds it (see the clock package's
+// doc). A clock that cannot be read refuses the create (503), with nothing
+// written. No customer id names no record to decide from: it binds one read
+// of the service's clock, and the create answers the missing field. The
+// create route calls it on the service because the service holds the
+// resolver.
 func (s *Service) DecideForCustomer(ctx context.Context, tenantID, customerID string) (context.Context, error) {
 	if customerID == "" {
 		return clock.EnsureEffectiveNow(ctx, s.clock), nil

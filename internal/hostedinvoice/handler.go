@@ -368,9 +368,8 @@ func (h *Handler) resolveInvoice(w http.ResponseWriter, r *http.Request) (domain
 
 // decide decides the page's time from the invoice its token names
 // (clock.DecideOrRealTime: a public page does not come through the API's
-// door) and binds it: the invoice's clock and its instant, or one read of
-// the server's clock. The checkout it opens, and that checkout's audit row,
-// carry the decision. A failure is clock.ErrUndecided, and the page answers
+// door) and binds it (see the clock package's doc). The checkout it opens,
+// and that checkout's audit row, carry the decision. A failure is clock.ErrUndecided, and the page answers
 // 503 with nothing done.
 func (h *Handler) decide(ctx context.Context, inv domain.Invoice) (context.Context, error) {
 	decided, err := clock.DecideOrRealTime(ctx, h.resolver, clock.Pin{TenantID: inv.TenantID, InvoiceID: inv.ID})

@@ -129,9 +129,9 @@ func (s *PreviewService) CreatePreview(ctx context.Context, tenantID string, req
 }
 
 // decide decides the preview's time from the subscription it previews
-// (clock.DecideOrRealTime) and binds it: the subscription's clock and its
-// instant, or one read of the server's clock (the engine's). The preview's
-// generated_at, and any later read of now, then read that one instant. A
+// (clock.DecideOrRealTime) and binds it (see the clock package's doc), with
+// the engine's clock. The preview's generated_at, and any later read of now,
+// then read that one instant. A
 // clock that cannot be read refuses the preview (503).
 func (s *PreviewService) decide(ctx context.Context, tenantID, subscriptionID string) (context.Context, error) {
 	decided, err := clock.DecideOrRealTime(ctx, s.engine, clock.Pin{TenantID: tenantID, SubscriptionID: subscriptionID})

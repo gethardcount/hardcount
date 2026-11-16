@@ -35,21 +35,6 @@ func (c *customerAnswer) SimForInvoice(context.Context, string, string) (clock.S
 	return clock.Sim{}, errors.New("not used")
 }
 
-// serverClock is the server's clock in a test: it answers a fixed time and
-// counts the reads it answers itself (a bound instant is not a read).
-type serverClock struct {
-	at    time.Time
-	reads int
-}
-
-func (c *serverClock) Now(ctx context.Context) time.Time {
-	if at, ok := clock.EffectiveNow(ctx); ok {
-		return at
-	}
-	c.reads++
-	return c.at
-}
-
 // A new subscription's time is decided from the customer its body names and
 // bound, so the create and everything it runs read one instant: the
 // customer's clock and its frozen time, with no read of the server's clock;
@@ -58,7 +43,8 @@ func (c *serverClock) Now(ctx context.Context) time.Time {
 // binds nothing.
 func TestDecideForCustomer(t *testing.T) {
 	frozen := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
-	server := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	past := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	server := past.Add(time.Second) // the stepping clock's first answer
 	testMode := postgres.WithLivemode(context.Background(), false)
 	for _, c := range []struct {
 		name            string
@@ -78,7 +64,7 @@ func TestDecideForCustomer(t *testing.T) {
 		{"no customer id reads no clock record, and the server's clock once", testMode, "", customerAnswer{err: errors.New("must not be read")}, 0, "", server, 1, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			srv := &serverClock{at: server}
+			srv := &subSteppingClock{at: past}
 			svc := NewService(newMemStore(), srv)
 			res := c.answer
 			svc.SetResolver(&res)

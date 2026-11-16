@@ -3,13 +3,14 @@
 // instant instead of the system time.
 //
 // One piece of work runs on one time. A function that decides its own time
-// (a route whose body names its record, a public page, a Stripe event)
-// binds it right after it decides: the record's clock and its instant, or,
-// for a record on no clock, one read of the server's clock. Everything the
-// work does below then reads that one instant. Work detached from its
-// request, which outlives it, must not start on the request's instant: it
-// decides and reads each of its rows by itself (the connect fan-out,
-// invoice.Service.RetryProviderConfigErrors).
+// (a route whose body names its record, a public page, a Stripe event) calls
+// EnsureEffectiveNow right after it decides, with the service's Clock: a
+// clock's instant is kept, and a record on no clock gets one read of that
+// Clock bound as a real instant (the states are named on Decision). Every
+// read of the clock below then answers that instant. A fan-out that runs
+// after the request has answered, over rows that may each be on their own
+// clock, does not bind one instant for all of them: it decides each row, and
+// the row's work binds its own.
 package clock
 
 import (

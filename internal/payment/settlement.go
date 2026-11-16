@@ -86,13 +86,12 @@ func (s *Stripe) SettleSucceeded(ctx context.Context, tenantID string, inv domai
 		return nil
 	}
 
-	// The time was decided before the settle, by whoever called it: a Stripe
-	// event from the invoice it names (decideFor), a reconciler row from its
-	// invoice (decideRow), or, for a charge settled inline, the request,
-	// catch-up or tick that made the charge. On a test clock it is the
-	// clock's time. When ctx carries no time (live, and a test invoice on no
-	// clock: both take this same path), the server's clock is read here once,
-	// so every stamp of this settle has the same time.
+	// The time was decided before the settle, by whoever called it. A Stripe
+	// event arrives with its decision bound (decideFor): the invoice's clock
+	// and its instant, or one read of the server's clock. A reconciler row
+	// (decideRow) and a charge settled inline (the request, catch-up or tick
+	// that made it) can arrive with no instant: for them the server's clock
+	// is read here once, so every stamp of this settle has the same time.
 	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	now := clock.Now(ctx)
 	// The charge's anchor, when it has one, beats the decided time. The
@@ -357,9 +356,10 @@ func (s *Stripe) settleFailed(ctx context.Context, tenantID string, inv domain.I
 	}
 
 	// The time was decided by the caller, as for SettleSucceeded, so the
-	// failed stamp and dunning's start are on a clock invoice's clock. When
-	// ctx carries no time (live, and a test invoice on no clock: the same
-	// path), the server's clock is read here once.
+	// failed stamp and dunning's start are on a clock invoice's clock. A
+	// Stripe event arrives with its decision bound; a reconciler row or an
+	// inline charge can arrive with no instant, and for them the server's
+	// clock is read here once.
 	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	// Detached before the tx: the stamp, payment.failed and the email commit
 	// together, and a webhook disconnect must not cut the dunning start that

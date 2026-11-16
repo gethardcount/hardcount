@@ -212,9 +212,10 @@ func (s *Stripe) SetResolver(r clock.Resolver) {
 	s.resolver = r
 }
 
-// SetClock wires the server's clock, which a settle reads real time from
-// when its caller decided no instant (live, or real time). The router passes
-// the clock the server bills by; the default is the machine's.
+// SetClock wires the server's clock. An event's decision binds real time
+// from it (decideFor), and a settle whose caller bound no instant reads it.
+// The router passes the clock the server bills by; the default is the
+// machine's.
 func (s *Stripe) SetClock(c clock.Clock) {
 	s.clock = c
 }
@@ -1664,10 +1665,10 @@ func (s *Stripe) processEvent(ctx context.Context, tenantID string, event domain
 
 // decideFor decides an event's time from the record it names, right after
 // the handler has read that record (clock.DecideWithoutDoor: the event did
-// not come through the API's door), and binds it: the record's clock and its
-// instant, or one read of the server's clock (s.clock), live included. Every
-// action the event runs then reads that one instant. A failure is
-// clock.ErrUndecided, which isTransientWebhookError delivers again.
+// not come through the API's door), and binds it (see the clock package's
+// doc), live included, so every action the event runs reads one instant. A
+// failure is clock.ErrUndecided, which isTransientWebhookError delivers
+// again.
 func (s *Stripe) decideFor(ctx context.Context, pin clock.Pin) (context.Context, error) {
 	decided, err := clock.DecideWithoutDoor(ctx, s.resolver, pin)
 	if err != nil {
@@ -1678,10 +1679,11 @@ func (s *Stripe) decideFor(ctx context.Context, pin clock.Pin) (context.Context,
 
 // decideForCustomer decides an event that names a customer it has not read,
 // with clock.DecideOrRealTime. Any not-found gets real time, and the
-// handler's own path answers the event as before: either the customer does not exist, or it exists and
-// its clock was not found, which can only be a race with that clock's
-// deletion (customers.test_clock_id is ON DELETE SET NULL), after which the
-// customer is on no clock and real time is right. It binds as decideFor does.
+// handler's own path answers the event: either the customer does not exist,
+// or it exists and its clock was not found, which can only be a race with
+// that clock's deletion (customers.test_clock_id is ON DELETE SET NULL),
+// after which the customer is on no clock and real time is right. It binds
+// as decideFor does.
 func (s *Stripe) decideForCustomer(ctx context.Context, tenantID, customerID string) (context.Context, error) {
 	decided, err := clock.DecideOrRealTime(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID})
 	if err != nil {

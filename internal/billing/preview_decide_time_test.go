@@ -72,6 +72,9 @@ func TestPreviewDecide_BindsOneInstant(t *testing.T) {
 		wantErr         bool
 	}{
 		{"a subscription on a clock", testMode, domain.Subscription{ID: "sub_1", TenantID: "t1", TestClockID: "clk_1"}, nil, frozen, "clk_1", 0, 1, false},
+		// Two reads: the engine's answer for a subscription on no clock reads
+		// the server's clock (realTime), and the decision drops that answer;
+		// the bind then reads once, and that second read is the one bound.
 		{"a subscription on no clock", testMode, domain.Subscription{ID: "sub_1", TenantID: "t1"}, nil, past.Add(2 * time.Second), "", 2, 1, false},
 		{"live mode", postgres.WithLivemode(context.Background(), true), domain.Subscription{ID: "sub_1", TenantID: "t1"}, nil, past.Add(time.Second), "", 1, 0, false},
 		{"a subscription that cannot be read", testMode, domain.Subscription{ID: "sub_1", TenantID: "t1"}, errors.New("connection reset by peer"), time.Time{}, "", 1, 1, true},

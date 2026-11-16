@@ -28,7 +28,7 @@ func newMemoryStore() *memoryStore {
 	}
 }
 
-func (m *memoryStore) Create(_ context.Context, tenantID string, c domain.Customer) (domain.Customer, error) {
+func (m *memoryStore) Create(ctx context.Context, tenantID string, c domain.Customer) (domain.Customer, error) {
 	for _, existing := range m.customers {
 		if existing.TenantID == tenantID && existing.ExternalID == c.ExternalID {
 			return domain.Customer{}, fmt.Errorf("%w: customer with external_id %q already exists", errs.ErrAlreadyExists, c.ExternalID)
@@ -37,6 +37,9 @@ func (m *memoryStore) Create(_ context.Context, tenantID string, c domain.Custom
 	c.ID = fmt.Sprintf("hc_cus_%d", len(m.customers)+1)
 	c.TenantID = tenantID
 	c.Status = domain.CustomerStatusActive
+	// Stamped as the Postgres store stamps them, from ctx's time.
+	now := clock.Now(ctx)
+	c.CreatedAt, c.UpdatedAt = now, now
 	m.customers[c.ID] = c
 	return c, nil
 }
@@ -672,13 +675,15 @@ func TestCreate_RunsOnOneInstant(t *testing.T) {
 			spy := &instantCapturingAudit{}
 			svc.SetAuditLogger(spy)
 			svc.SetTestClockChecker(stubClockChecker{exists: true, frozen: frozen})
-			if _, err := svc.Create(context.Background(), "tenant1", CreateInput{
+			created, err := svc.Create(context.Background(), "tenant1", CreateInput{
 				ExternalID: "cus_one", DisplayName: "One", TestClockID: c.clockID,
-			}); err != nil {
+			})
+			if err != nil {
 				t.Fatalf("create: %v", err)
 			}
-			if !spy.at.Equal(c.wantAt) || server.reads != c.wantServerReads {
-				t.Errorf("audit row at %v after %d server reads; want %v after %d", spy.at, server.reads, c.wantAt, c.wantServerReads)
+			if !spy.at.Equal(c.wantAt) || !created.CreatedAt.Equal(c.wantAt) || !created.UpdatedAt.Equal(c.wantAt) || server.reads != c.wantServerReads {
+				t.Errorf("row created %v, updated %v, audit row %v after %d server reads; want all at %v after %d",
+					created.CreatedAt, created.UpdatedAt, spy.at, server.reads, c.wantAt, c.wantServerReads)
 			}
 		})
 	}
