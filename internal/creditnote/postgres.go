@@ -1178,7 +1178,7 @@ func (s *PostgresStore) InvoiceOfRefundNote(ctx context.Context, tenantID, strip
 	defer postgres.Rollback(tx)
 	var invoiceID string
 	err = tx.QueryRowContext(ctx,
-		`SELECT invoice_id FROM credit_notes WHERE stripe_refund_id = $1 ORDER BY created_at LIMIT 1`, stripeRefundID,
+		`SELECT invoice_id FROM credit_notes WHERE stripe_refund_id = $1 ORDER BY created_at, id LIMIT 1`, stripeRefundID,
 	).Scan(&invoiceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", errs.ErrNotFound
@@ -1330,7 +1330,7 @@ func (s *PostgresStore) ListLineItems(ctx context.Context, tenantID, creditNoteI
 		SELECT id, credit_note_id, tenant_id, COALESCE(invoice_line_item_id,''),
 			description, quantity, unit_amount_cents, amount_cents, created_at
 		FROM credit_note_line_items WHERE credit_note_id = $1
-		ORDER BY created_at ASC
+		ORDER BY created_at ASC, id ASC
 	`, creditNoteID)
 	if err != nil {
 		return nil, err

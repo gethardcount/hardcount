@@ -1820,7 +1820,7 @@ func (s *PostgresStore) ListLineItemsTx(ctx context.Context, tx *sql.Tx, _ strin
 			metadata, created_at, tax_jurisdiction, tax_code, tax_reason, quantity_decimal,
 			commit_granted_cents, commit_expires_at, nominal_unit_amount_decimal, COALESCE(meter_unit,''), dimension_match
 		FROM invoice_line_items WHERE invoice_id = $1
-		ORDER BY created_at ASC
+		ORDER BY created_at ASC, id ASC
 	`, invoiceID)
 	if err != nil {
 		return nil, err
@@ -3993,7 +3993,8 @@ func (s *PostgresStore) ListPendingTaxRetryForClock(ctx context.Context, tenantI
 // fan-out per ADR-019. Tenant-scoped via TxTenant + WithLivemode on
 // the request ctx; the per-mode filter is also explicit in the WHERE
 // so a misconfigured ctx can't accidentally surface the wrong mode's
-// rows.
+// rows. Oldest first; invoices that share a created_at sort by id, so the
+// order, and which rows the 1,000-row cap keeps, are the same on every read.
 func (s *PostgresStore) ListProviderConfigErrors(ctx context.Context, tenantID string, livemode bool) ([]domain.Invoice, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -4007,7 +4008,7 @@ func (s *PostgresStore) ListProviderConfigErrors(ctx context.Context, tenantID s
 		  AND status = 'draft'
 		  AND tax_status = 'pending'
 		  AND COALESCE(tax_error_code, '') IN ('provider_not_configured', 'provider_auth')
-		ORDER BY created_at ASC
+		ORDER BY created_at ASC, id ASC
 		LIMIT 1000
 	`, livemode)
 	return s.scanInvoiceRows(rows, err)
@@ -4020,6 +4021,7 @@ func (s *PostgresStore) ListProviderConfigErrors(ctx context.Context, tenantID s
 // the operator updates a customer's address/postal/state/tax_id so
 // any of that customer's stuck invoices auto-retry without
 // per-invoice clicking. Same surgical-filter principle as ADR-019.
+// Ordered as ListProviderConfigErrors is.
 func (s *PostgresStore) ListCustomerDataInvalidErrors(ctx context.Context, tenantID, customerID string) ([]domain.Invoice, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -4033,7 +4035,7 @@ func (s *PostgresStore) ListCustomerDataInvalidErrors(ctx context.Context, tenan
 		  AND status = 'draft'
 		  AND tax_status = 'pending'
 		  AND COALESCE(tax_error_code, '') = 'customer_data_invalid'
-		ORDER BY created_at ASC
+		ORDER BY created_at ASC, id ASC
 		LIMIT 1000
 	`, customerID)
 	return s.scanInvoiceRows(rows, err)
@@ -4299,7 +4301,10 @@ const baseFundsPeriod = `i.status <> 'voided'`
 // an upgrade over it is refused as over an unpaid one (ADR-050 amendment
 // 2026-10-23). ORDER BY created_at DESC + LIMIT 1 surfaces the
 // most-recent matching invoice (relevant for plan-swap chains within
-// the same period that re-issued the base line).
+// the same period that re-issued the base line). Invoices that share a
+// created_at sort by id, the later id first: an id is an xid, so within one
+// server process it follows creation order, and the answer is the same on
+// every read.
 //
 // For in_advance plans, the cycle-close invoice from the prior period (or
 // BillOnCreate's day-1 invoice for new subs) carries the base line whose
@@ -4326,7 +4331,7 @@ func (s *PostgresStore) FindBaseInvoiceForPeriod(ctx context.Context, tenantID, 
 		      AND li.line_type = 'base_fee'
 		      AND li.billing_period_start = $2
 		  )
-		ORDER BY i.created_at DESC
+		ORDER BY i.created_at DESC, i.id DESC
 		LIMIT 1
 	`, subscriptionID, periodStart).Scan(s.scanInvDest(&inv)...)
 	if err == sql.ErrNoRows {
@@ -4361,7 +4366,8 @@ func (s *PostgresStore) FindBaseInvoiceForPeriod(ctx context.Context, tenantID, 
 // credits it as it credits an unpaid one, lowering what it asks for, and a
 // later payment pays only the time used (ADR-050 amendment 2026-10-23).
 //
-// Ordered base-first (subscription_update sorts last) then created_at ASC, so a
+// Ordered base-first (subscription_update sorts last) then created_at ASC, then
+// id for invoices that share a created_at, so a
 // caller allocating a fixed total across the set has a deterministic order for
 // residual-cent assignment. Returns ErrNotFound when nothing funded the period
 // (trial / pure in_arrears) so callers keep their existing no-op behavior.
@@ -4393,7 +4399,7 @@ func (s *PostgresStore) FindFundingInvoicesForPeriod(ctx context.Context, tenant
 		      AND i.billing_period_end = $3
 		    )
 		  )
-		ORDER BY (i.billing_reason = 'subscription_update'), i.created_at ASC
+		ORDER BY (i.billing_reason = 'subscription_update'), i.created_at ASC, i.id ASC
 	`, subscriptionID, periodStart, periodEnd)
 	if err != nil {
 		return nil, err
