@@ -151,7 +151,7 @@ func (r *instantRig) cycleInvoices() [][2]*time.Time {
 	if err != nil {
 		r.t.Fatalf("read invoices: %v", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 	var out [][2]*time.Time
 	for rows.Next() {
 		var created time.Time
