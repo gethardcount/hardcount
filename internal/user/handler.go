@@ -69,8 +69,8 @@ type AuditRecorder interface {
 }
 
 // SetAuditLogger wires the audit recorder used to log authenticated auth events
-// (login, logout, mode change, password-reset request). Without it those events are not
-// audited. Failed logins are NOT routed here — they're pre-auth (no tenant to
+// (login, logout, mode change, password-reset request). Without it those
+// events are not audited. Failed logins are NOT routed here — they're pre-auth (no tenant to
 // scope a per-tenant audit row, and surfacing email-existence in the log would
 // be an enumeration oracle), so they go to the structured security log instead.
 func (h *Handler) SetAuditLogger(a AuditRecorder) { h.auditLogger = a }

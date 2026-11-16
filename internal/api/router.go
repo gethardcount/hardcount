@@ -1322,9 +1322,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		emailSender.IsConfigured(),
 	)
 	// Audit the signed-in auth events: login, logout, mode change and the
-	// password-reset request. Failed logins go to the structured security log instead, not to
-	// the per-tenant audit_log. This is the dashboard (session) auth handler,
-	// not authH, the API-key handler wired above.
+	// password-reset request. Failed logins go to the structured security
+	// log instead, not to the per-tenant audit_log. This is the dashboard
+	// (session) auth handler, not authH, the API-key handler wired above.
 	dashboardAuthH.SetAuditLogger(auditLogger)
 
 	// The sign-in throttle (ADR-094, amended 2026-10-18) lives only in
