@@ -180,8 +180,10 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 	}
 
 	// A test and a live secret key. A key mints keys only in its own mode, so
-	// the account's first live key comes from here. Each key and its audit row
-	// take their mode from app.livemode, so it is set before each key.
+	// the account's first live key comes from here. The mode is set in two
+	// places that must agree (auth.Service.CreateKeyTx): app.livemode gives
+	// the key's row and its audit row their mode, and ctx gives the key its
+	// prefix.
 	mintSecret := func(live bool, name string) (string, error) {
 		mode := "off"
 		if live {
@@ -217,10 +219,10 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 
 	// Record the provisioning in the new tenant's own log, on this
 	// transaction (ADR-090): when its first live key and its owner were
-	// created. The actor is system: nothing has authenticated here, since the
-	// route runs only while no tenant exists, behind the bootstrap token.
+	// created. The actor is system, because no caller has authenticated: the
+	// HTTP route checks the bootstrap token, and the setup command connects
+	// to the database itself.
 	if deps.Audit != nil {
-
 		if err := deps.Audit.LogInTx(ctx, tx, audit.Entry{
 			Action:        domain.AuditActionCreate,
 			ResourceType:  "tenant",

@@ -11,8 +11,8 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// store reads and writes api_keys. Writes run on the caller's transaction;
-// reads open their own.
+// store reads and writes api_keys. A method that takes a tx runs on the
+// caller's transaction; the others open and end their own.
 type store struct {
 	db *postgres.DB
 }

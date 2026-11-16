@@ -122,7 +122,8 @@ func applyToCtx(ctx context.Context, s Session) context.Context {
 }
 
 // bearerToken returns the API key r carries: the Authorization Bearer token,
-// or "". It is the one place a key is read from a request.
+// or "". Nothing else reads a key's value from a request, and Authenticate is
+// its only caller.
 func bearerToken(r *http.Request) string {
 	if token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
 		return strings.TrimSpace(token)

@@ -64,7 +64,7 @@ at the first billing run after its time is up.
 | A usage event's `quantity` | At most 12 decimal places, below 10^26, at most 100 characters as written |
 | A usage event's `timestamp` | At most 5 minutes after the customer's current time. A customer on a test clock uses the clock's time. |
 | One credit grant | At most 100,000,000 in the currency's smallest unit ($1,000,000) |
-| Keeping an old API key working after a rotation | 0 to 604,800 seconds (7 days); 0 by default ([keys](authentication.md#manage-keys-with-the-api)) |
+| Keeping an old API key working after a rotation | 0 to 604,800 seconds (7 days); 0 by default ([rotate a key](../api-keys.md#rotate-a-key)) |
 
 ## Webhooks Hardcount sends
 
