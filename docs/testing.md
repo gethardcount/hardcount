@@ -27,6 +27,12 @@ Most tests belong in layer 1. Use layer 3 or 4 only when no Go test can prove th
 
 A Playwright test checks that the screen shows what the API returned. Arithmetic stays in Go tests.
 
+## Where a test goes
+
+- A test goes in the file for the code it tests: `service.go` and `service_test.go`. A test that needs Postgres goes in the file's database twin, `service_integration_test.go`.
+- End-to-end tests in `internal/api` go in one file per flow: `apikeys_e2e_test.go`, not a file per fix.
+- Add a test to the existing file for its subject. A new test file needs a new subject, not a new bug.
+
 ## Writing tests
 
 We follow the Go wiki's [test comments](https://go.dev/wiki/TestComments) and Playwright's [best practices](https://playwright.dev/docs/best-practices). The rules below are ours, and review checks them. Older tests do not all follow them yet: some sleep, match an error's text, insert rows with raw SQL or find elements by CSS selector.
