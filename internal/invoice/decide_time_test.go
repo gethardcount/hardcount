@@ -110,6 +110,55 @@ func TestRetryProviderConfigErrors_DecidesEachInvoice(t *testing.T) {
 	}
 }
 
+// The connect fan-out is detached from the connect request and outlives it,
+// so it starts on no instant (the connect route is decidedIn: the door binds
+// none) and each invoice's retry reads the server's clock by itself: two
+// invoices on no clock are settled at two instants, in both modes, and one on
+// a clock at its clock's time.
+func TestRetryProviderConfigErrors_EachInvoiceReadsItsOwnTime(t *testing.T) {
+	frozen := time.Date(2027, 8, 20, 6, 0, 0, 0, time.UTC)
+	past := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	for _, c := range []struct {
+		name string
+		ctx  context.Context
+		live bool
+	}{
+		{"test mode, as the door leaves a decidedIn route", clock.WithRealTime(postgres.WithLivemode(context.Background(), false)), false},
+		{"live", postgres.WithLivemode(context.Background(), true), true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			store := newMemStore()
+			for _, inv := range []domain.Invoice{
+				stuckDraft("inv_1", "cus_1", "provider_not_configured"),
+				stuckDraft("inv_2", "cus_2", "provider_not_configured"),
+				stuckDraft("inv_c", "cus_c", "provider_not_configured"),
+			} {
+				store.invoices[inv.ID] = inv
+			}
+			server := &steppingClock{at: past}
+			svc := NewService(store, server, newMemNumberer())
+			svc.SetTaxRetrier(&stubTaxRetrier{store: store})
+			svc.SetResolver(&invoiceAnswers{sims: map[string]clock.Sim{
+				"inv_1": {At: time.Now().UTC()}, // on no clock
+				"inv_2": {At: time.Now().UTC()},
+				"inv_c": {At: frozen, TestClockID: "clk_c"},
+			}})
+			if processed, retryErrs := svc.RetryProviderConfigErrors(c.ctx, "t1", false); processed != 3 || len(retryErrs) != 0 {
+				t.Fatalf("processed %d, errors %v; want all three retried", processed, retryErrs)
+			}
+			a, b := store.invoices["inv_1"].PaidAt, store.invoices["inv_2"].PaidAt
+			if a == nil || b == nil || a.Equal(*b) || a.Before(past) || b.Before(past) {
+				t.Errorf("paid at %v and %v; want two instants, each read from the server's clock", a, b)
+			}
+			// Live mode decides nothing: no live record is on a clock, so
+			// the clock invoice is retried at real time too.
+			if pc := store.invoices["inv_c"].PaidAt; pc == nil || (!c.live && !pc.Equal(frozen)) {
+				t.Errorf("the clock invoice paid at %v; want its clock's %v in test mode", pc, frozen)
+			}
+		})
+	}
+}
+
 // The billing-profile fan-out is one customer's invoices, already decided by
 // its route: it reads no invoice clock of its own, so a lookup that would
 // fail does not stop its retries, and they run on the route's clock.

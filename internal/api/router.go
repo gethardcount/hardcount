@@ -1528,6 +1528,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// route is registered, below.
 	door := &clockDoor{
 		resolver: engine,
+		clock:    clk,
 		creditNoteInvoice: func(ctx context.Context, tenantID, id string) (string, error) {
 			cn, err := creditNoteStore.Get(ctx, tenantID, id)
 			return cn.InvoiceID, err

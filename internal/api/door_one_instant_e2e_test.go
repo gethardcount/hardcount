@@ -1,0 +1,247 @@
+package api
+
+import (
+	"bytes"
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"sync"
+	"testing"
+	"time"
+
+	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/testutil"
+)
+
+// runClock is the server's clock in these tests. While the fixtures are
+// built it stands still (each fixture request binds its own instant). Once
+// stepping, it moves a second on every read it answers itself and counts
+// those reads, so a request that reads it twice stamps two instants.
+type runClock struct {
+	mu    sync.Mutex
+	at    time.Time
+	step  bool
+	reads int
+}
+
+func (c *runClock) Now(ctx context.Context) time.Time {
+	if at, ok := clock.EffectiveNow(ctx); ok {
+		return at
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.step {
+		c.reads++
+		c.at = c.at.Add(time.Second)
+	}
+	return c.at
+}
+
+// stepFrom starts stepping from at, with no reads counted yet.
+func (c *runClock) stepFrom(at time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.at, c.step, c.reads = at, true, 0
+}
+
+func (c *runClock) count() (time.Time, int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.at, c.reads
+}
+
+// instantRig is a server on a runClock, in one mode, with an in-arrears
+// monthly plan whose subscriptions start on lagP0 and end their first period
+// on lagB. No invoice grace: a period is due once it has ended.
+type instantRig struct {
+	t        *testing.T
+	db       *postgres.DB
+	clk      *runClock
+	srv      *Server
+	auth     string
+	tenantID string
+	live     bool
+	planID   string
+}
+
+func newInstantRig(t *testing.T, live bool) *instantRig {
+	t.Helper()
+	db := testutil.SetupTestDB(t)
+	clk := &runClock{at: lagP0}
+	r := &instantRig{t: t, db: db, clk: clk, srv: NewServer(db, clk, nil, WithInvoiceGrace(0)), live: live}
+	r.tenantID = testutil.CreateTestTenant(t, db, "door one instant")
+	r.auth = "Bearer " + createAPIKeyWithMode(t, db, r.tenantID, live)
+	plan := r.must(http.MethodPost, "/v1/plans", lagP0, map[string]any{
+		"code": "one-instant", "name": "One instant", "currency": "USD", "billing_interval": "monthly",
+		"base_amount_cents": 3000, "base_bill_timing": "in_arrears", "prices": []map[string]any{},
+	}, http.StatusCreated)
+	r.planID = plan["id"].(string)
+	return r
+}
+
+// subscribe creates a customer and its subscription, starting on lagP0.
+func (r *instantRig) subscribe(name string) string {
+	r.t.Helper()
+	cust := r.must(http.MethodPost, "/v1/customers", lagP0, map[string]any{
+		"external_id": "cus_" + name, "display_name": name, "email": name + "@example.test",
+	}, http.StatusCreated)
+	sub := r.must(http.MethodPost, "/v1/subscriptions", lagP0, map[string]any{
+		"code": "sub-" + name, "display_name": name, "customer_id": cust["id"],
+		"items": []map[string]any{{"plan_id": r.planID, "quantity": 1}},
+	}, http.StatusCreated)
+	return sub["id"].(string)
+}
+
+// do serves one request. A non-zero at binds that instant on the request, as
+// the fixtures do; the zero time leaves the time to the door.
+func (r *instantRig) do(method, path string, at time.Time, body any) (int, []byte) {
+	r.t.Helper()
+	var buf bytes.Buffer
+	if body != nil {
+		_ = json.NewEncoder(&buf).Encode(body)
+	}
+	ctx := context.Background()
+	if !at.IsZero() {
+		ctx = clock.WithEffectiveNow(ctx, at)
+	}
+	req := httptest.NewRequest(method, path, &buf).WithContext(ctx)
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", r.auth)
+	rec := httptest.NewRecorder()
+	r.srv.ServeHTTP(rec, req)
+	return rec.Code, rec.Body.Bytes()
+}
+
+func (r *instantRig) must(method, path string, at time.Time, body any, want int) map[string]any {
+	r.t.Helper()
+	code, raw := r.do(method, path, at, body)
+	if code != want {
+		r.t.Fatalf("%s %s: %d %s, want %d", method, path, code, raw, want)
+	}
+	out := map[string]any{}
+	_ = json.Unmarshal(raw, &out)
+	return out
+}
+
+// cycleInvoices returns the created_at and issued_at of the tenant's
+// cycle invoices, one pair per invoice.
+func (r *instantRig) cycleInvoices() [][2]*time.Time {
+	r.t.Helper()
+	tx, err := r.db.BeginTx(postgres.WithLivemode(context.Background(), r.live), postgres.TxTenant, r.tenantID)
+	if err != nil {
+		r.t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	rows, err := tx.Query(`SELECT created_at, issued_at FROM invoices WHERE billing_reason = 'subscription_cycle' ORDER BY id`)
+	if err != nil {
+		r.t.Fatalf("read invoices: %v", err)
+	}
+	defer rows.Close()
+	var out [][2]*time.Time
+	for rows.Next() {
+		var created time.Time
+		var issued *time.Time
+		if err := rows.Scan(&created, &issued); err != nil {
+			r.t.Fatalf("scan: %v", err)
+		}
+		c := created.UTC()
+		out = append(out, [2]*time.Time{&c, issued})
+	}
+	return out
+}
+
+// The manual billing run is a real-time route: the door reads the server's
+// clock once, and the whole run decides on that instant: the due scan, and
+// every subscription's "has its due instant come" check. Before, each check
+// read the clock again (nine reads for two subscriptions here). The closes
+// themselves run at each period's due instant, so the invoices are dated at
+// the boundary, as before. In both modes.
+func TestBillingRun_TheWholeRunDecidesOnOneInstant(t *testing.T) {
+	for _, live := range []bool{false, true} {
+		t.Run(map[bool]string{false: "test mode", true: "live"}[live], func(t *testing.T) {
+			r := newInstantRig(t, live)
+			r.subscribe("run_a")
+			r.subscribe("run_b")
+			r.clk.stepFrom(lagB.Add(time.Hour))
+			r.must(http.MethodPost, "/v1/billing/run", time.Time{}, nil, http.StatusOK)
+			_, reads := r.clk.count()
+			invs := r.cycleInvoices()
+			if len(invs) != 2 || reads != 1 {
+				t.Fatalf("%d cycle invoices after %d server reads; want 2 after one", len(invs), reads)
+			}
+			for i, inv := range invs {
+				if !inv[0].Equal(lagB) || inv[1] == nil || !inv[1].UTC().Equal(lagB) {
+					t.Errorf("invoice %d created %v, issued %v; want both at the period's boundary %v", i, inv[0], inv[1], lagB)
+				}
+			}
+		})
+	}
+}
+
+// A subscription write closes an ended period first, then plans from the new
+// one. On a subscription's route the door binds one instant, so the close
+// and the schedule share it, where each read the server's clock before. Live:
+// one read. Test mode: two, because the decision for a subscription on no
+// clock reads the server's clock too, inside the engine's answer, and does
+// not keep it; the request's work all reads the door's. The ended period's
+// invoice is dated at its boundary, as before.
+func TestScheduleCancel_TheCloseAndTheScheduleShareOneInstant(t *testing.T) {
+	for _, c := range []struct {
+		live  bool
+		reads int
+	}{{false, 2}, {true, 1}} {
+		t.Run(map[bool]string{false: "test mode", true: "live"}[c.live], func(t *testing.T) {
+			r := newInstantRig(t, c.live)
+			subID := r.subscribe("sched")
+			r.clk.stepFrom(lagB.Add(time.Hour))
+			r.must(http.MethodPost, "/v1/subscriptions/"+subID+"/schedule-cancel", time.Time{}, map[string]any{"at_period_end": true}, http.StatusOK)
+			_, reads := r.clk.count()
+			invs := r.cycleInvoices()
+			if reads != c.reads || len(invs) != 1 || !invs[0][0].Equal(lagB) {
+				t.Errorf("%d server reads, closing invoices %v; want %d reads and the ended period's invoice at its boundary %v", reads, invs, c.reads, lagB)
+			}
+		})
+	}
+}
+
+// Finalize collects right after it finalizes. On an invoice's route the door
+// binds one instant, so an invoice that credits cover is issued and paid at
+// that one time, where the finalize and the settle read the server's clock
+// apart before. Live: one read. Test mode: two, the second inside the
+// engine's answer for an invoice on no clock, which the decision does not
+// keep.
+func TestFinalize_ACreditCoveredInvoiceIsIssuedAndPaidAtOneInstant(t *testing.T) {
+	for _, c := range []struct {
+		live  bool
+		reads int
+	}{{false, 2}, {true, 1}} {
+		t.Run(map[bool]string{false: "test mode", true: "live"}[c.live], func(t *testing.T) {
+			r := newInstantRig(t, c.live)
+			cust := r.must(http.MethodPost, "/v1/customers", lagP0, map[string]any{
+				"external_id": "cus_fin", "display_name": "Fin", "email": "fin@example.test",
+			}, http.StatusCreated)
+			r.must(http.MethodPost, "/v1/credits/grant", lagP0, map[string]any{
+				"customer_id": cust["id"], "currency": "USD", "amount_cents": 3000, "description": "covers the invoice",
+			}, http.StatusCreated)
+			inv := r.must(http.MethodPost, "/v1/invoices", lagP0, map[string]any{
+				"customer_id": cust["id"], "currency": "USD",
+				"line_items": []map[string]any{{"description": "one-off", "quantity": 1, "unit_amount_cents": 3000}},
+			}, http.StatusCreated)
+			id := inv["id"].(string)
+			start := lagP0.Add(time.Hour)
+			r.clk.stepFrom(start)
+			r.must(http.MethodPost, "/v1/invoices/"+id+"/finalize", time.Time{}, nil, http.StatusOK)
+			_, reads := r.clk.count()
+			want := start.Add(time.Duration(c.reads) * time.Second) // the door's read is the request's last
+			got := r.must(http.MethodGet, "/v1/invoices/"+id, lagP0, nil, http.StatusOK)
+			issued, _ := time.Parse(time.RFC3339Nano, flowStr(got, "invoice", "issued_at"))
+			paid, _ := time.Parse(time.RFC3339Nano, flowStr(got, "invoice", "paid_at"))
+			if reads != c.reads || flowStr(got, "invoice", "status") != "paid" || !issued.Equal(want) || !paid.Equal(want) {
+				t.Errorf("%d server reads; status %v, issued %v, paid %v; want %d reads, paid, both at %v",
+					reads, flowStr(got, "invoice", "status"), issued, paid, c.reads, want)
+			}
+		})
+	}
+}
