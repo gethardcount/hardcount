@@ -69,18 +69,90 @@ func (s *PostgresStore) GetByID(ctx context.Context, id string) (domain.User, er
 	return u, err
 }
 
-func (s *PostgresStore) TouchLastLogin(ctx context.Context, id string, at time.Time) error {
+// errPasswordChanged is SignIn's answer when the user's password hash is no
+// longer the one the caller verified: the password changed, or the user was
+// deleted, while the sign-in ran. The service answers it as a wrong
+// password.
+var errPasswordChanged = errors.New("user: the password changed after it was verified")
+
+// errNoWorkspace is SignIn's answer for a user who belongs to no workspace.
+var errNoWorkspace = errors.New("user: the user belongs to no workspace")
+
+// SignIn records a sign-in in one bypass transaction. In order, it locks the
+// user's row and checks that its password hash is still verifiedHash, reads
+// the user's first-joined workspace (the order TenantsForUser uses) with a
+// lock on that membership row, writes at as last_login_at, stamps
+// app.tenant_id with the workspace and app.livemode off for an audit row,
+// and calls then. then runs last, on the same transaction, with the
+// workspace. It must not commit or roll back tx; an error it returns rolls
+// the whole sign-in back and is returned.
+//
+// It returns errPasswordChanged when the hash is no longer verifiedHash or
+// the user's row is gone, and errNoWorkspace when the user belongs to no workspace, and changes nothing
+// in both cases.
+//
+// The row locks are what keep the sign-in true when it commits. A password
+// reset updates the user's row, so the lock waits for a reset in flight and
+// the check then sees its new hash. A member removal deletes the membership
+// row and ends the member's sessions in its own transaction: either the
+// lock waits for the removal and then finds no row, or the removal waits for
+// this commit and its sign-out then ends the session then created. FOR
+// UPDATE, not FOR SHARE, on the user's row: this transaction updates the
+// row, and two sign-ins of one user that each held a share lock would
+// deadlock on that update.
+func (s *PostgresStore) SignIn(ctx context.Context, userID, verifiedHash string, at time.Time, then func(tx *sql.Tx, tenantID string) error) (string, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
-		return err
+		return "", err
 	}
 	defer postgres.Rollback(tx)
-	_, err = tx.ExecContext(ctx,
-		`UPDATE users SET last_login_at = $1 WHERE id = $2`, at, id)
-	if err != nil {
-		return err
+
+	var hash string
+	err = tx.QueryRowContext(ctx, `SELECT password_hash FROM users WHERE id = $1 FOR UPDATE`, userID).Scan(&hash)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", errPasswordChanged
 	}
-	return tx.Commit()
+	if err != nil {
+		return "", fmt.Errorf("lock user: %w", err)
+	}
+	if hash != verifiedHash {
+		return "", errPasswordChanged
+	}
+
+	var tenantID string
+	err = tx.QueryRowContext(ctx, `
+		SELECT tenant_id FROM user_tenants WHERE user_id = $1
+		ORDER BY created_at ASC, tenant_id ASC
+		LIMIT 1
+		FOR KEY SHARE
+	`, userID).Scan(&tenantID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return "", errNoWorkspace
+	}
+	if err != nil {
+		return "", fmt.Errorf("find workspace: %w", err)
+	}
+
+	if _, err := tx.ExecContext(ctx, `UPDATE users SET last_login_at = $1 WHERE id = $2`, at, userID); err != nil {
+		return "", fmt.Errorf("stamp last sign-in: %w", err)
+	}
+
+	// audit.Logger.LogInTx reads the row's tenant from app.tenant_id and its
+	// mode from app.livemode. Account events are filed in test mode.
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('app.tenant_id', $1, true)`, tenantID); err != nil {
+		return "", fmt.Errorf("stamp tenant: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', 'off', true)`); err != nil {
+		return "", fmt.Errorf("stamp livemode: %w", err)
+	}
+
+	if err := then(tx, tenantID); err != nil {
+		return "", err
+	}
+	if err := tx.Commit(); err != nil {
+		return "", err
+	}
+	return tenantID, nil
 }
 
 // CreateInTx inserts a user and their tenant attachment inside the

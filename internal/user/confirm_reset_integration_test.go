@@ -62,17 +62,17 @@ func newResetIT(t *testing.T) resetIT {
 	return it
 }
 
-func (it resetIT) service(sessions SessionEnder, auditor AuditTxWriter) *Service {
+func (it resetIT) service(sessions SessionTxWriter, auditor AuditTxWriter) *Service {
 	return NewService(NewPostgresStore(it.db), clock.Real(), sessions, auditor)
 }
 
-func (it resetIT) handler(sessions SessionEnder, auditor AuditTxWriter) http.Handler {
+func (it resetIT) handler(sessions SessionTxWriter, auditor AuditTxWriter) http.Handler {
 	return NewHandler(it.service(sessions, auditor), it.sessSvc, session.CookieConfig{Path: "/"}, stubEmailSender{}, "", false).Routes()
 }
 
 // confirm posts the reset form with password to a handler whose service
 // uses sessions and auditor for the steps inside the reset's transaction.
-func (it resetIT) confirm(t *testing.T, password string, sessions SessionEnder, auditor AuditTxWriter) *httptest.ResponseRecorder {
+func (it resetIT) confirm(t *testing.T, password string, sessions SessionTxWriter, auditor AuditTxWriter) *httptest.ResponseRecorder {
 	t.Helper()
 	body, _ := json.Marshal(ConfirmResetReq{Token: it.token, Password: password})
 	req := httptest.NewRequest(http.MethodPost, "/password-reset/confirm", strings.NewReader(string(body)))
@@ -152,7 +152,7 @@ func (it resetIT) assertNothingChanged(t *testing.T) {
 	t.Helper()
 	it.assertPasswordAndLinkUnchanged(t)
 	svc := it.service(it.sessSvc, audit.NewLogger(it.db))
-	if _, _, err := svc.Authenticate(context.Background(), resetITEmail, resetITOldPassword); err != nil {
+	if _, err := svc.Login(context.Background(), LoginInput{Email: resetITEmail, Password: resetITOldPassword}); err != nil {
 		t.Errorf("sign in with the old password: %v, want success", err)
 	}
 	for i, raw := range it.sessions {
@@ -170,17 +170,17 @@ func (failingAuditTx) LogInTx(context.Context, *sql.Tx, audit.Entry) error {
 
 // endThenFail ends the sessions on the transaction, then fails, so a test
 // sees whether the sign-out itself rolls back.
-type endThenFail struct{ real *session.Service }
+type endThenFail struct{ *session.Service }
 
 func (e endThenFail) EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID string) error {
-	if err := e.real.EndAllForUserTx(ctx, tx, userID); err != nil {
+	if err := e.Service.EndAllForUserTx(ctx, tx, userID); err != nil {
 		return err
 	}
 	return errors.New("session sign-out failed")
 }
 
 // notFoundEnder fails inside the reset's transaction with a not-found.
-type notFoundEnder struct{}
+type notFoundEnder struct{ SessionTxWriter }
 
 func (notFoundEnder) EndAllForUserTx(context.Context, *sql.Tx, string) error {
 	return errs.ErrNotFound

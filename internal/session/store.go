@@ -13,8 +13,10 @@ import (
 // user, not to a key (ADR-011), so nothing here revokes sessions by key.
 type Store interface {
 	Insert(ctx context.Context, s Session) error
+	InsertTx(ctx context.Context, tx *sql.Tx, s Session) error
 	GetByIDHash(ctx context.Context, idHash string) (Session, error)
 	Revoke(ctx context.Context, idHash string) error
+	RevokeTx(ctx context.Context, tx *sql.Tx, idHash string) error
 	EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID string) error
 	EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, tenantID string) error
 	UpdateLivemode(ctx context.Context, idHash string, livemode bool) error
@@ -39,17 +41,25 @@ func (s *postgresStore) Insert(ctx context.Context, sess Session) error {
 	}
 	defer postgres.Rollback(tx)
 
-	if _, err := tx.ExecContext(ctx, `
+	if err := s.InsertTx(ctx, tx, sess); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// InsertTx inserts a session row on the caller's transaction. It does not
+// commit. The caller's transaction must be a bypass transaction: a session
+// row is written before any tenant context exists.
+func (s *postgresStore) InsertTx(ctx context.Context, tx *sql.Tx, sess Session) error {
+	_, err := tx.ExecContext(ctx, `
 		INSERT INTO dashboard_sessions
 			(id_hash, user_id, tenant_id, livemode, created_at,
 			 last_seen_at, expires_at, user_agent, ip)
 		VALUES ($1, $2, $3, $4, $5, $5, $6, $7, $8)
 	`, sess.IDHash, sess.UserID, sess.TenantID, sess.Livemode,
 		sess.CreatedAt, sess.ExpiresAt, nullStr(sess.UserAgent), nullStr(sess.IP),
-	); err != nil {
-		return err
-	}
-	return tx.Commit()
+	)
+	return err
 }
 
 func (s *postgresStore) GetByIDHash(ctx context.Context, idHash string) (Session, error) {
@@ -95,14 +105,23 @@ func (s *postgresStore) Revoke(ctx context.Context, idHash string) error {
 	}
 	defer postgres.Rollback(tx)
 
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE dashboard_sessions
-		SET revoked_at = $1
-		WHERE id_hash = $2 AND revoked_at IS NULL
-	`, time.Now().UTC(), idHash); err != nil {
+	if err := s.RevokeTx(ctx, tx, idHash); err != nil {
 		return err
 	}
 	return tx.Commit()
+}
+
+// RevokeTx revokes the session whose hash is idHash on the caller's
+// transaction, whoever it belongs to. A revoked or unknown hash changes
+// nothing. It does not commit. The caller's transaction must see the row in
+// either mode: a bypass transaction does.
+func (s *postgresStore) RevokeTx(ctx context.Context, tx *sql.Tx, idHash string) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE dashboard_sessions
+		SET revoked_at = $1
+		WHERE id_hash = $2 AND revoked_at IS NULL
+	`, time.Now().UTC(), idHash)
+	return err
 }
 
 // EndAllForUserTx revokes every active session of a user, in every workspace

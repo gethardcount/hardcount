@@ -19,9 +19,8 @@ func NewService(store Store) *Service {
 	return &Service{store: store}
 }
 
-// IssueInput is the contract for Issue. Callers (the login handler) pass
-// everything needed to mint a session row. The user has already been
-// authenticated by user.Service.Authenticate.
+// IssueInput is the contract for Issue and IssueTx: everything needed to
+// mint a session row for a user whose password the caller has verified.
 type IssueInput struct {
 	UserID    string
 	TenantID  string
@@ -34,12 +33,39 @@ type IssueInput struct {
 // should set on the response. The raw value is shown to the caller exactly
 // once. The database stores sha256(raw), so a snapshot cannot be replayed.
 func (s *Service) Issue(ctx context.Context, in IssueInput) (rawID string, sess Session, err error) {
-	rawID, err = newRawID()
+	rawID, sess, err = newSession(in)
+	if err != nil {
+		return "", Session{}, err
+	}
+	if err := s.store.Insert(ctx, sess); err != nil {
+		return "", Session{}, err
+	}
+	return rawID, sess, nil
+}
+
+// IssueTx is Issue on the caller's transaction, so the session commits or
+// rolls back with the caller's change. It does not commit. tx must be a
+// bypass transaction: a session row is written before any tenant context
+// exists.
+func (s *Service) IssueTx(ctx context.Context, tx *sql.Tx, in IssueInput) (rawID string, sess Session, err error) {
+	rawID, sess, err = newSession(in)
+	if err != nil {
+		return "", Session{}, err
+	}
+	if err := s.store.InsertTx(ctx, tx, sess); err != nil {
+		return "", Session{}, err
+	}
+	return rawID, sess, nil
+}
+
+// newSession returns a new raw cookie value and the session row for it.
+func newSession(in IssueInput) (string, Session, error) {
+	rawID, err := newRawID()
 	if err != nil {
 		return "", Session{}, err
 	}
 	now := time.Now().UTC()
-	sess = Session{
+	return rawID, Session{
 		IDHash:     HashID(rawID),
 		UserID:     in.UserID,
 		TenantID:   in.TenantID,
@@ -49,11 +75,7 @@ func (s *Service) Issue(ctx context.Context, in IssueInput) (rawID string, sess 
 		ExpiresAt:  now.Add(DefaultTTL),
 		UserAgent:  in.UserAgent,
 		IP:         in.IP,
-	}
-	if err := s.store.Insert(ctx, sess); err != nil {
-		return "", Session{}, err
-	}
-	return rawID, sess, nil
+	}, nil
 }
 
 // Resolve looks up a raw cookie value and returns the Session if it is
@@ -80,6 +102,18 @@ func (s *Service) Revoke(ctx context.Context, rawID string) error {
 		return nil
 	}
 	return s.store.Revoke(ctx, HashID(rawID))
+}
+
+// EndTx ends the session whose raw cookie value is rawID on the caller's
+// transaction, whoever it belongs to, so the sign-out commits or rolls back
+// with the caller's change. An empty, unknown or already ended rawID ends
+// nothing. It does not commit. tx must be a bypass transaction: a tenant
+// transaction's row-level security hides the session in the other mode.
+func (s *Service) EndTx(ctx context.Context, tx *sql.Tx, rawID string) error {
+	if rawID == "" {
+		return nil
+	}
+	return s.store.RevokeTx(ctx, tx, HashID(rawID))
 }
 
 // EndAllForUserTx ends every session of a user, in every workspace and mode,

@@ -199,7 +199,7 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 	{"POST", "/v1/recipes/{key}/preview"}:   exempt(reasonNonMutatingPreview, "Read-only recipe render — returns the objects an instantiate WOULD create. Writes nothing (recipe/handler.go calls audit.MarkSkip)."),
 
 	// --- auth / session -------------------------------------------------
-	{"POST", "/v1/auth/login"}:                  explicit("user.Handler.login → Log(login, user). Failed logins are pre-auth: no tenant to scope a row to, so they stay in the security log."),
+	{"POST", "/v1/auth/login"}:                  explicit("user.Service.Login → LogInTx(login, user), on the transaction that creates the session, ends the session the request's cookie named and stamps last_login_at. Failed logins are pre-auth: no tenant to scope a row to, so they stay in the security log."),
 	{"POST", "/v1/auth/logout"}:                 explicit("user.Handler.logout → Log(logout, user). A stale/absent cookie revokes nothing and declares MarkSkip."),
 	{"POST", "/v1/auth/mode"}:                   explicit("user.Handler.setMode → Log(mode_changed, user) — live/test plane switch."),
 	{"POST", "/v1/auth/password-reset/request"}: explicit("user.Handler.requestPasswordReset → Log(password_reset_requested) on a matched account. A non-match (and the per-address throttle) writes nothing and declares MarkSkip — the fixed 200 is the enumeration defence."),

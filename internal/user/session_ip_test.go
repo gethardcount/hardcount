@@ -42,11 +42,9 @@ func TestLogin_SessionIPIsTheTrustedClientIP(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			u := domain.User{ID: "usr_1", Email: "op@acme.com", PasswordHash: string(hash)}
 			store := &fakeUserStore{loginUser: &u, tenants: []domain.UserTenant{{UserID: "usr_1", TenantID: "ten_acme"}}}
-			sessions := &recordingSessionStore{}
-			h := NewHandler(newFakeService(store), session.NewService(sessions),
+			svc, sessions, auditor := newRecordingService(store)
+			h := NewHandler(svc, session.NewService(&recordingSessionStore{}),
 				session.DefaultCookieConfig("local"), stubEmailSender{}, "", false)
-			rec := &recordingAuditRecorder{}
-			h.SetAuditLogger(rec)
 			// The router mounts TrustedClientIP globally, ahead of /v1/auth.
 			srv := mw.TrustedClientIP(mw.ParseTrustedProxies(c.trustProxy))(h.Routes())
 
@@ -68,10 +66,10 @@ func TestLogin_SessionIPIsTheTrustedClientIP(t *testing.T) {
 			if got := sessions.inserted[0].IP; got != c.want {
 				t.Errorf("session row IP = %q, want %q", got, c.want)
 			}
-			if len(rec.calls) != 1 {
-				t.Fatalf("audit calls = %d, want 1", len(rec.calls))
+			if len(auditor.rows) != 1 {
+				t.Fatalf("audit rows = %d, want 1", len(auditor.rows))
 			}
-			if got := rec.calls[0].ip; got != sessions.inserted[0].IP {
+			if got := auditor.rows[0].ip; got != sessions.inserted[0].IP {
 				t.Errorf("audit row IP = %q but session row IP = %q; both must record the same address", got, sessions.inserted[0].IP)
 			}
 		})

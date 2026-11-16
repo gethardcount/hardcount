@@ -44,8 +44,16 @@ type Store interface {
 	// GetByID loads the user by id.
 	GetByID(ctx context.Context, id string) (domain.User, error)
 
-	// TouchLastLogin updates last_login_at on successful login.
-	TouchLastLogin(ctx context.Context, id string, at time.Time) error
+	// SignIn locks the user's row, checks that its password hash is still
+	// verifiedHash, locks the user's first-joined membership, writes at as
+	// last_login_at and stamps the transaction for an audit row in that
+	// workspace. then runs last, on the same transaction, with the
+	// workspace. It must not commit or roll back tx; an error it returns
+	// rolls the whole sign-in back and is returned. Returns
+	// errPasswordChanged when the hash is no longer verifiedHash, and
+	// errNoWorkspace when the user belongs to no workspace, and changes
+	// nothing in both cases.
+	SignIn(ctx context.Context, userID, verifiedHash string, at time.Time, then func(tx *sql.Tx, tenantID string) error) (tenantID string, err error)
 
 	// TenantsForUser returns the tenant memberships for a user. v1 has
 	// 1:1 user:tenant; the shape supports growth.
