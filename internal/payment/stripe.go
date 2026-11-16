@@ -1180,6 +1180,7 @@ func (s *Stripe) RecordCheckoutBelowMinimum(ctx context.Context, tenantID string
 // ending the invoice's payment recovery with resolution
 // amount_below_minimum.
 func (s *Stripe) markBelowMinimum(ctx context.Context, tenantID string, inv domain.Invoice, bm *BelowMinimumError, endRecovery bool) {
+	ctx = clock.AtArrival(ctx, s.clock) // Stripe's refusal is a result: see SettleFailed
 	current, applied, serr := stampBelowMinimumWithRetry(ctx, s.invoices, tenantID, inv, bm.Message)
 	switch {
 	case serr != nil:
