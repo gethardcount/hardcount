@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTenantTimezone } from '@/hooks/useTenantTimezone'
+import { useAuth } from '@/contexts/AuthContext'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -115,7 +116,7 @@ const KEY_TYPES: { value: KeyTypeChoice; label: string; hint: string; icon: type
 ]
 
 // keyStatus is the status word a key shows. The server decides the status.
-// An active key whose expiry is less than a week away also says how many days
+// An active key whose expiry is 7 days away or fewer also says how many days
 // are left, in calendar days of the account's zone, so the count agrees with
 // the date in the Expires column. Once that expiry has passed the key says
 // only Active, until the list is fetched again and the server says Expired.
@@ -244,6 +245,8 @@ export default function ApiKeysPage() {
       <TableRow key={k.id} className={cn(ROW, !active && 'text-muted-foreground')}>
         <TableCell className={cn('whitespace-normal text-sm font-medium [overflow-wrap:anywhere]', active ? 'text-foreground' : 'text-muted-foreground')}>
           {k.name}
+          {/* On a phone the Type column is hidden, so the type goes here. */}
+          <span className="block text-xs font-normal text-muted-foreground md:hidden">{keyTypeLabel(k.key_type)}</span>
         </TableCell>
         <TableCell className="hidden md:table-cell text-sm text-muted-foreground">{keyTypeLabel(k.key_type)}</TableCell>
         <TableCell className="hidden md:table-cell">
@@ -283,7 +286,7 @@ export default function ApiKeysPage() {
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div className="min-w-0 flex-1 basis-72">
           <h1 className="text-2xl font-semibold text-foreground">API keys</h1>
-          <p className="text-sm text-muted-foreground mt-1">Keys your app uses to call the Hardcount API{activeKeys.length > 0 ? ` · ${activeKeys.length} active` : ''}</p>
+          <p className="text-sm text-muted-foreground mt-1">Keys your server uses to call the Hardcount API{activeKeys.length > 0 ? ` · ${activeKeys.length} active` : ''}</p>
         </div>
         <Button size="sm" onClick={() => setShowCreate(true)}>
           <Plus size={16} className="mr-2" />
@@ -322,7 +325,7 @@ export default function ApiKeysPage() {
             <EmptyState
               icon={Key}
               title="No API keys yet"
-              description="Create an API key to start using the Hardcount API from your backend or CLI."
+              description="Create an API key to start using the Hardcount API from your server."
               action={{
                 label: 'Create API key',
                 icon: Plus,
@@ -503,6 +506,34 @@ function QuickStart() {
   )
 }
 
+// PresetButtons offers a few fixed choices as a row of buttons and marks the
+// picked one.
+function PresetButtons<T extends string | number>({ presets, value, onChange }: {
+  presets: readonly { value: T; label: string }[]
+  value: T
+  onChange: (value: T) => void
+}) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {presets.map(p => (
+        <button
+          key={p.value}
+          type="button"
+          onClick={() => onChange(p.value)}
+          className={cn(
+            'px-3 py-1.5 rounded-lg text-sm border transition-colors',
+            value === p.value
+              ? 'border-primary bg-primary/5 text-primary font-medium'
+              : 'border-border text-muted-foreground hover:text-foreground hover:border-border/80'
+          )}
+        >
+          {p.label}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (rawKey: string) => void }) {
   const [keyType, setKeyType] = useState<KeyTypeChoice>('secret')
   const [expiryPreset, setExpiryPreset] = useState<ExpiryPreset>('never')
@@ -511,6 +542,8 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
 
   // Date picks use the account's timezone, from its settings.
   const tenantTZ = useTenantTimezone()
+  // The server gives a new key the mode of the dashboard session.
+  const { user } = useAuth()
 
   const form = useForm<CreateApiKeyData>({
     resolver: zodResolver(createApiKeySchema),
@@ -559,13 +592,14 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
   // expires later today would stop its integrations before anyone notices.
   const now = wallClockNow()
   const tomorrow = civilDateFrom(now, 1, tenantTZ)
+  const expiresAt = getExpiresAt()
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Create API key</DialogTitle>
-          <DialogDescription>Generate a new key for programmatic API access</DialogDescription>
+          {user && <DialogDescription>{`This key will work in ${user.livemode ? 'live' : 'test'} mode only.`}</DialogDescription>}
         </DialogHeader>
         <Form {...form}>
           <form onSubmit={onSubmit} noValidate className="space-y-4">
@@ -615,23 +649,7 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
 
             <div>
               <Label className="mb-2 block">Expiration</Label>
-              <div className="flex flex-wrap gap-2">
-                {presets.map(p => (
-                  <button
-                    key={p.value}
-                    type="button"
-                    onClick={() => setExpiryPreset(p.value)}
-                    className={cn(
-                      'px-3 py-1.5 rounded-lg text-sm border transition-colors',
-                      expiryPreset === p.value
-                        ? 'border-primary bg-primary/5 text-primary font-medium'
-                        : 'border-border text-muted-foreground hover:text-foreground hover:border-border/80'
-                    )}
-                  >
-                    {p.label}
-                  </button>
-                ))}
-              </div>
+              <PresetButtons presets={presets} value={expiryPreset} onChange={setExpiryPreset} />
               {expiryPreset === 'custom' && (
                 <div className="mt-3">
                   <DatePicker
@@ -645,14 +663,9 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
                   />
                 </div>
               )}
-              {expiryPreset !== 'never' && expiryPreset !== 'custom' && (
+              {expiresAt && (
                 <p className="text-xs text-muted-foreground mt-2">
-                  Key will expire on {formatExpiryHintInTZ(getExpiresAt()!, tenantTZ)}
-                </p>
-              )}
-              {expiryPreset === 'custom' && customDate && (
-                <p className="text-xs text-muted-foreground mt-2">
-                  Key will expire on {formatExpiryHintInTZ(getExpiresAt()!, tenantTZ)}
+                  Key will expire on {formatExpiryHintInTZ(expiresAt, tenantTZ)}
                 </p>
               )}
               {customDateError && <p className="text-destructive text-sm mt-2">{customDateError}</p>}
@@ -662,7 +675,7 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
               <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
               <Button type="submit" disabled={form.formState.isSubmitting}>
                 {form.formState.isSubmitting ? (
-                  <><Loader2 size={14} className="animate-spin mr-2" /> Creating...</>
+                  <><Loader2 size={14} className="animate-spin mr-2" /> Creating…</>
                 ) : (
                   'Create key'
                 )}
@@ -678,8 +691,8 @@ function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreate
 /* --- Rotate key Dialog --- */
 
 // Rotate replaces a key: the old key keeps working for the chosen grace
-// window, so deployed clients can switch, then expires. "Now" revokes the old
-// key as the new one is made.
+// window, or until its own expiry if that is sooner, so deployed clients can
+// switch. "Now" revokes the old key as the new one is made.
 const ROTATE_GRACE_PRESETS: { value: number; label: string }[] = [
   { value: 0, label: 'Now' },
   { value: 60 * 60, label: 'In 1 hour' },
@@ -717,37 +730,22 @@ function RotateKeyDialog({
         <DialogHeader>
           <DialogTitle>Rotate API key</DialogTitle>
           <DialogDescription>
-            A new {keyTypeNoun(target.key_type)} will be issued for "{target.name}". The old key
-            stops working at the time you pick, so anything still using it must switch to the new
-            key by then.
+            Rotating "{target.name}" issues a new {keyTypeNoun(target.key_type)} with the same name
+            and expiration. The old key stops working at the time you
+            pick{target.expires_at ? ', or when it expires if that is sooner' : ''}. Anything still
+            using it must switch to the new key by then.
           </DialogDescription>
         </DialogHeader>
 
         <div>
           <Label className="mb-2 block">Old key stops working</Label>
-          <div className="flex flex-wrap gap-2">
-            {ROTATE_GRACE_PRESETS.map(p => (
-              <button
-                key={p.value}
-                type="button"
-                onClick={() => setGrace(p.value)}
-                className={cn(
-                  'px-3 py-1.5 rounded-lg text-sm border transition-colors',
-                  grace === p.value
-                    ? 'border-primary bg-primary/5 text-primary font-medium'
-                    : 'border-border text-muted-foreground hover:text-foreground hover:border-border/80'
-                )}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
+          <PresetButtons presets={ROTATE_GRACE_PRESETS} value={grace} onChange={setGrace} />
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={submitting}>Cancel</Button>
           <Button onClick={handleSubmit} disabled={submitting}>
-            {submitting ? <><Loader2 size={14} className="animate-spin mr-2" /> Rotating...</> : 'Rotate key'}
+            {submitting ? <><Loader2 size={14} className="animate-spin mr-2" /> Rotating…</> : 'Rotate key'}
           </Button>
         </DialogFooter>
       </DialogContent>
