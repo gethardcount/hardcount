@@ -7,9 +7,9 @@ import (
 
 // Each stored key type has a permission entry, and the session type, which
 // no key backs, is not stored. Mutation: add a type to storedKeyTypes without
-// an entry in keyPermissions, and this fails. Its type prefixes are checked
-// against the parser and the table in TestKeyShape_ParserAndTableAgree.
-func TestStoredKeyTypes_EachHasPrefixesAndPermissions(t *testing.T) {
+// an entry in keyPermissions, and this fails. TestKeyShape_ParserAndTableAgree
+// checks each type's prefixes.
+func TestStoredKeyTypes_EachHasPermissions(t *testing.T) {
 	for _, kt := range storedKeyTypes {
 		if _, ok := keyPermissions[kt]; !ok {
 			t.Errorf("%s has no permission entry", kt)

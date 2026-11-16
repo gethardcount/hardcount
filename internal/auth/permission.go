@@ -49,9 +49,9 @@ const (
 
 // storedKeyTypes are the types a key can be issued and stored as. The type
 // prefixes (typePrefixes) and the create check (checkCreateInput) both come
-// from this list, and TestStoredKeyTypes_EachHasPrefixesAndPermissions fails
-// for a type here with no permission entry. A new type also needs the
-// api_keys CHECKs widened by a migration.
+// from this list. A new type needs a permission entry
+// (TestStoredKeyTypes_EachHasPermissions) and a migration that widens the
+// api_keys CHECKs (TestKeyShape_ParserAndTableAgree).
 var storedKeyTypes = []KeyType{KeyTypeSecret, KeyTypeIngest}
 
 // allPermissions is every permission a route can require.

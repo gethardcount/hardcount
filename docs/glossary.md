@@ -42,7 +42,7 @@ follows.
 - **API key status (active, expired, revoked)**: Whether a key works. A
   revoked key is revoked for good; otherwise a key is expired from its
   `expires_at` on, and active until then. Only an active key works or can be
-  rotated. The API returns it as `status`. [More](api-keys.md#a-keys-status)
+  rotated. The API returns it as `status`. [More](api/authentication.md#a-keys-status)
 
 ## Pricing and usage
 

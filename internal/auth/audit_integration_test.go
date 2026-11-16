@@ -200,9 +200,9 @@ func TestKeyChange_WritesItsAuditRow(t *testing.T) {
 }
 
 // A rotation copies the old key's name, type and expiry as they are, and
-// checks none of them again: create's checks are for a create request. An
-// earlier version could store a name with surrounding spaces, or longer than
-// a new key may have; the replacement keeps it unchanged.
+// checks none of them again: create's checks are for a create request. The
+// old key's name here has surrounding spaces and is longer than a new key's
+// may be, and the replacement keeps it unchanged.
 func TestRotateKey_CopiesTheOldKeyAsItIs(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	tenantID := testutil.CreateTestTenant(t, db, "Rotate Copies")

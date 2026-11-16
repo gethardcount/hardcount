@@ -41,11 +41,8 @@ type AuditWriter interface {
 	LogInTxFields(ctx context.Context, tx *sql.Tx, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
 }
 
-// lastUsedTouchInterval is how often, at most, last_used_at is written for
-// one key. The column feeds "Last used 3 minutes ago" on the API-keys page and
-// no auth decision, so a minute is precise enough. Writing it on every request
-// would make every request of one key update the same row, one row lock at a
-// time.
+// lastUsedTouchInterval is the least time between writes of a key's
+// last_used_at: no auth decision reads it, and each write locks the key's row.
 const lastUsedTouchInterval = time.Minute
 
 // NewService returns a Service on db that writes each key change's audit row
@@ -114,8 +111,7 @@ type CreateKeyInput struct {
 }
 
 // CreateKey mints a key for tenantID, in the mode that ctx carries, and
-// returns it with its raw value. It refuses an empty name, a key type other
-// than secret or ingest, and an expires_at that is not in the future.
+// returns it with its raw value. checkCreateInput says what it refuses.
 func (s *Service) CreateKey(ctx context.Context, tenantID string, input CreateKeyInput) (CreateKeyResult, error) {
 	var result CreateKeyResult
 	err := s.inTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
@@ -132,8 +128,12 @@ func (s *Service) CreateKey(ctx context.Context, tenantID string, input CreateKe
 // maxKeyNameLen is the most characters a new key's name may have.
 const maxKeyNameLen = 100
 
-// CreateKeyTx is CreateKey on the caller's transaction, for the setup command.
-// tx must have app.tenant_id and app.livemode set.
+// CreateKeyTx is CreateKey on the caller's transaction, for account setup
+// (tenant.RunBootstrap). tx must have app.tenant_id set to tenantID and
+// app.livemode set, and ctx must carry the same mode (postgres.WithLivemode):
+// the row and its audit row take their mode from tx, the key's prefix takes
+// it from ctx, and api_keys_prefix_shape_check refuses a key where they
+// differ.
 func (s *Service) CreateKeyTx(ctx context.Context, tx *sql.Tx, tenantID string, input CreateKeyInput) (CreateKeyResult, error) {
 	k, err := checkCreateInput(input, time.Now().UTC())
 	if err != nil {
@@ -232,9 +232,9 @@ var ErrInvalidKey = errors.New("invalid api key")
 
 // ValidateKey returns the key rawKey is, or ErrInvalidKey. rawKey must have a
 // key's shape (lookupPrefix) and match a stored key's hash, and the key must
-// be active (statusAt). It writes the key's last_used_at at most
-// once per lastUsedTouchInterval; a failed write is logged and does not refuse
-// the key.
+// be active (statusAt). It writes the key's last_used_at at most once per
+// lastUsedTouchInterval; a failed write is logged and does not refuse the
+// key.
 func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey, error) {
 	lookup, ok := lookupPrefix(rawKey)
 	if !ok {
@@ -299,8 +299,8 @@ func (s *Service) RevokeKey(ctx context.Context, tenantID, id string) (domain.AP
 // ends on its own.
 const maxRotationGrace = 7 * 24 * time.Hour
 
-// RotateKeyInput.ExpiresInSeconds is how long the old key keeps working; 0
-// revokes it at once.
+// RotateKeyInput is the request to rotate a key. ExpiresInSeconds is how long
+// the old key keeps working; 0 revokes it at once.
 type RotateKeyInput struct {
 	ExpiresInSeconds int64 `json:"expires_in_seconds,omitempty"`
 }

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -25,10 +26,6 @@ func TestKeyShape_ParserAndTableAgree(t *testing.T) {
 		valid  bool
 	}
 	cases := []shapeCase{
-		{"hc_secret_live_0123456789ab", true},
-		{"hc_secret_test_0123456789ab", true},
-		{"hc_ingest_live_0123456789ab", true},
-		{"hc_ingest_test_0123456789ab", true},
 		{"hc_secret_0123456789ab", false},        // no mode
 		{"hc_secret_prod_0123456789ab", false},   // not a mode
 		{"hc_secret_live_0123456789a", false},    // 11 hex characters
@@ -37,8 +34,8 @@ func TestKeyShape_ParserAndTableAgree(t *testing.T) {
 		{"hc_platform_live_0123456789ab", false}, // a removed type
 		{"hc_pub_live_0123456789ab", false},      // a removed type
 	}
-	// Each stored type's prefixes, so a type added to storedKeyTypes fails here
-	// until a migration widens the CHECK.
+	// The valid prefixes: each stored type's, live and test. A type added to
+	// storedKeyTypes fails here until a migration widens the CHECK.
 	for _, kt := range storedKeyTypes {
 		for _, live := range []bool{true, false} {
 			cases = append(cases, shapeCase{typePrefix(kt, live) + "0123456789ab", true})
@@ -81,7 +78,7 @@ func tableAcceptsPrefix(t *testing.T, db *postgres.DB, tenantID string, i int, p
 		t.Fatal(err)
 	}
 	_, err = tx.Exec(`INSERT INTO api_keys (id, key_prefix, key_hash, key_type, name, tenant_id)
-		VALUES ($1, $2, $3, $4, 'Shape', $5)`, "hc_key_shape_"+string(rune('a'+i)), prefix, strings.Repeat("ab", 32), keyType, tenantID)
+		VALUES ($1, $2, $3, $4, 'Shape', $5)`, fmt.Sprintf("hc_key_shape_%02d", i), prefix, strings.Repeat("ab", 32), keyType, tenantID)
 	var pg *pgconn.PgError
 	switch {
 	case err == nil:

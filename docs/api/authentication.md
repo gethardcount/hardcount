@@ -2,8 +2,8 @@
 
 Every API request names its account with an API key. The key also picks the
 mode, test or live, and what the request may do. This page is the reference:
-the header, the key types, the answers when a key is refused, and the key
-routes. To make or rotate a key in the dashboard, see
+the header, the key's format, the key types, the answers when a key is
+refused, and the key routes. To make, rotate or revoke a key, see
 [API keys](../api-keys.md).
 
 ## Send the key
@@ -32,6 +32,16 @@ type and mode:
 | `hc_secret_live_` | Secret | Live |
 | `hc_ingest_test_` | Usage only | Test |
 | `hc_ingest_live_` | Usage only | Live |
+
+A key's **lookup prefix** is its type prefix and the first 12 hex
+characters. The key list shows it, and the API returns it as `key_prefix`,
+so you can tell keys apart without the whole key.
+
+Hardcount stores only a salted SHA-256 hash of each key, never the key
+itself, so the full key is shown only once, when it is made. Keys that the
+setup command (`hardcount-bootstrap` or `POST /v1/bootstrap`) made in v0.9.3
+or earlier have no salt. They still work, and rotating one replaces it with
+a salted key.
 
 **The mode is fixed by the key.** Each account has two separate sets of
 data, test and live. A test key reads and writes only test data, and a live
@@ -78,15 +88,15 @@ without touching the others, and each has its own
 
 - **A secret key** can read and change everything in its account and mode:
   customers, invoices, refunds, credit, webhooks, its mode's Stripe keys
-  and API keys. It can read the account settings. Rotate it with **Now** at
-  once (see
-  [Rotate a key](../api-keys.md#rotate-a-key)).
+  and API keys. It can read the account settings. Rotate it right away,
+  with **Now** ([Rotate a key](../api-keys.md#rotate-a-key)).
 - **A usage-only key** can send usage for any customer in its mode. Usage
   can raise a bill, and a negative quantity can lower one. It cannot read
   anything, except an event it sends again: a repeated `idempotency_key`
   answers with the first event. Rotate it too.
 
-A leaked test key exposes test data and the account settings, which both modes share. Test mode cannot charge a real card.
+A leaked test key exposes test data and the account settings, which both
+modes share. Test mode cannot charge a real card.
 
 The account's Audit Log shows who created, rotated and revoked each key, and
 when.
@@ -95,7 +105,7 @@ when.
 
 | Status | `code` | `message` | Why |
 |---|---|---|---|
-| `401` | `unauthorized` | `missing credentials — sign in at /login or send Authorization: Bearer hc_secret_...` | No key was sent in `Authorization: Bearer <key>` |
+| `401` | `unauthorized` | `missing credentials — sign in at /login or send Authorization: Bearer hc_secret_...` | No key was sent in `Authorization: Bearer <key>`, and the request has no dashboard session, or one that has ended |
 | `401` | `unauthorized` | `invalid or expired API key` | The key is wrong, revoked or past its `expires_at`. The message is the same in each case, so it does not tell anyone whether a key exists. |
 | `403` | `forbidden` | `insufficient permissions: this key type does not have customer:read access` | The key's type cannot call this route; the message names the permission |
 | `403` | `forbidden` | `this endpoint requires a dashboard session — sign in to the dashboard to manage team membership` | `/v1/members` takes only a dashboard session |
@@ -118,48 +128,24 @@ answers `401`.
 ## Manage keys with the API
 
 The key routes take a secret key or a dashboard session. Each works on the
-keys of the caller's mode.
+keys of the caller's mode. [API keys](../api-keys.md) says what each one
+takes and does.
 
 | Method | Path | What it does |
 |---|---|---|
-| `POST` | `/v1/api-keys` | Create a key |
+| `POST` | `/v1/api-keys` | [Create a key](../api-keys.md#get-a-key) |
 | `GET` | `/v1/api-keys` | List keys, newest first, 50 to a page ([pagination](pagination.md)) |
-| `POST` | `/v1/api-keys/{id}/rotate` | Make a new key and retire the old one |
-| `DELETE` | `/v1/api-keys/{id}` | Revoke a key at once |
+| `POST` | `/v1/api-keys/{id}/rotate` | [Rotate a key](../api-keys.md#rotate-a-key) |
+| `DELETE` | `/v1/api-keys/{id}` | [Revoke a key](../api-keys.md#revoke-a-key) |
 
-**Create.** Send `name` (required), `key_type` (`secret`, the default, or
-`ingest`) and an optional `expires_at`, a time in the future in RFC 3339
-form:
+Each key's record has `id`, `name`, `key_type`, `status`, `livemode`,
+`key_prefix`, `created_at`, and, when set, `expires_at`, `revoked_at` and
+`last_used_at`. `last_used_at` is updated at most once a minute per server,
+so it can lag a little.
 
-```bash
-curl -s -X POST "$HARDCOUNT/v1/api-keys" \
-  -H "Authorization: Bearer $HARDCOUNT_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "LiteLLM proxy", "key_type": "ingest", "expires_at": "2027-01-01T00:00:00Z"}'
-```
+### A key's status
 
-The `201` answer has `key` (the key's record) and `raw_key` (the full key).
-`raw_key` is shown only this once: Hardcount stores only a salted SHA-256
-hash. This route ignores `Idempotency-Key`, so the key is never kept for a
-retry: a retried create makes a second key
-([Routes that ignore the header](idempotency.md#routes-that-ignore-the-header)).
-An `expires_at` that is not in the future is refused with `422`.
-
-**List.** Each key's record has `id`, `name`, `key_type`, `status`,
-`livemode`, `key_prefix` (the key's **lookup prefix**: its type prefix and
-the first 12 hex characters of its secret, enough to recognize the key),
-`created_at`, and, when set, `expires_at`, `revoked_at` and `last_used_at`.
-`status` is `active`, `expired` (from its `expires_at` on) or `revoked`;
-only an active key works. Revoked keys stay in the list. `last_used_at` is
-updated at most once a minute per server, so it can lag a little.
-
-**Rotate.** The new key keeps the old key's name, type, mode and
-`expires_at`. Send `expires_in_seconds` to keep the old key working for a
-while: `0`, the default, stops it at once, and the most is `604800` (7
-days). The old key never works past its own `expires_at`, whatever the
-grace. The answer has `old_key`, `new_key` and `raw_key`. A revoked or
-expired key cannot be rotated: that is a `409`. Like create, rotate ignores
-`Idempotency-Key`.
-
-**Revoke.** The key stops working on the next request. Revoking it a second
-time answers `404`.
+`status` is `revoked` once the key is revoked. Otherwise it is `expired`
+from the key's `expires_at` on, and `active` until then. Only an active key
+works, and only an active key can be rotated. Expired and revoked keys stay
+in the list.

@@ -13,8 +13,9 @@ printed a test key and saved it in
 To make a new key in the dashboard:
 
 1. Open **API keys** and click **Create API key**.
-   **You see:** a dialog with a name field, two key types, **Secret**
-   (picked) and **Usage only**, and an expiry choice.
+   **You see:** a dialog that says which mode the key will work in, with a
+   name field, two key types, **Secret** (picked) and **Usage only**, and an
+   expiration choice.
 2. Give the key a name, such as `Production server`, pick its type (see
    [Key types](#key-types)), and click **Create key**.
    **You see:** the full key, with "Copy it now. Hardcount shows it only
@@ -26,16 +27,26 @@ The new key gets the mode the dashboard is in. In test mode you get a
 `hc_secret_test_…` key (`hc_ingest_test_…` for a usage-only key); switch to
 live mode first to get a `hc_secret_live_…` key.
 
-You can also create a key with the API: `POST /v1/api-keys` with
-`{"name": "…", "key_type": "secret"}`, or `"key_type": "ingest"` for a
-usage-only key. The name is 1 to 100 characters. Add
-`"expires_at": "2027-01-01T00:00:00Z"` for a key that stops working at that
-time. The response's `raw_key` is the full key, and it
-is shown only this once; if you lose that answer, see
+With the API, send `name` (1 to 100 characters), `key_type` (`secret`, the
+default, or `ingest`) and an optional `expires_at`: a time in the future,
+in RFC 3339 form, when the key stops working. [Send it](#send-it) sets the
+two variables.
+
+```bash
+curl -s -X POST "$HARDCOUNT/v1/api-keys" \
+  -H "Authorization: Bearer $HARDCOUNT_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "LiteLLM proxy", "key_type": "ingest", "expires_at": "2027-01-01T00:00:00Z"}'
+```
+
+**You see:** `201` with `key`, the key's
+[record](api/authentication.md#manage-keys-with-the-api), and `raw_key`, the
+full key, shown only this once. An `expires_at` that is not in the future
+gets `422`. The route ignores `Idempotency-Key`, so a retried create makes a
+second key; if you lose the answer, see
 [Routes that ignore the header](api/idempotency.md#routes-that-ignore-the-header).
-`GET /v1/api-keys` lists the keys of your mode,
-without the keys themselves. Every field and answer:
-[Authentication and keys](api/authentication.md#manage-keys-with-the-api).
+
+`GET /v1/api-keys` lists the keys of your mode, without the keys themselves.
 
 ## Send it
 
@@ -54,43 +65,32 @@ curl -s "$HARDCOUNT/v1/whoami" -H "Authorization: Bearer $HARDCOUNT_KEY"
 false` for a test key, and `"key_type": "secret"` (`"ingest"` for a
 usage-only key).
 
-A call with no key gets `401` and the message `missing credentials — sign
-in at /login or send Authorization: Bearer hc_secret_...`. A wrong, revoked
-or expired key gets `401` and `invalid or expired API key`. A `503` with code
-`authentication_unavailable` means Hardcount could not check the key just
-then; your key is fine, so retry. More:
+If the call is refused, see
 [When a key is refused](api/authentication.md#when-a-key-is-refused).
 
 ## Test mode and live mode
 
-Each account has two separate sets of data. The mode in the key's name
-picks the set.
+Each account has two separate sets of data, and the mode in the key's name
+picks the set. Build and try everything with a test key, and switch to a
+live key when you go live: customers, prices and invoices made in test mode
+do not appear in live mode.
 
 | Mode | Type prefix | What happens |
 |---|---|---|
 | Test | `hc_secret_test_` | Works on test data only. Test mode connects only to Stripe test keys (`sk_test_…`), so no real card is charged. |
 | Live | `hc_secret_live_` | Works on live data. Charges real cards once you connect Stripe's live keys. |
 
-A key is its **type prefix**, which says its type and mode
-(`hc_secret_live_`, `hc_secret_test_`, `hc_ingest_live_` or
-`hc_ingest_test_`), followed by 64 lowercase hex characters. Any other string
-is refused as an invalid key. The key list shows each key's **lookup
-prefix**, its type prefix and the first 12 hex characters, so you can tell
-keys apart without the whole key.
-
-Build and try everything with a test key. Switch to a live key when you go
-live. Customers, prices and invoices made in test mode do not appear in live
-mode.
+A key starts with its type and mode, and Hardcount stores only a hash of
+it, so the full key is shown only once
+([Key format](api/authentication.md#key-format)).
 
 ## Key types
 
 There are two: a **secret** key (`hc_secret_…`) for your own server, and a
 **usage-only** key (`hc_ingest_…`, `ingest` in the API) for LiteLLM or
 another gateway that only sends usage. What each one can call, and which
-one goes where: [Key types](api/authentication.md#key-types).
-
-A secret key can read and change everything in its account and mode, so
-keep it out of browsers and out of source control.
+one goes where: [Key types](api/authentication.md#key-types). Keep a secret
+key out of browsers and out of source control.
 
 ## Rotate a key
 
@@ -107,36 +107,35 @@ may have leaked, or on a schedule.
 3. Put the new key in your servers' settings and redeploy before the time
    you picked.
    **You see:** your calls keep working. After that time, the old key gets
-   `401`. A key that was already set to expire sooner stops at its own
-   time.
+   `401`.
 
 Pick **Now** only if you can switch every server at once, or if the key has
-leaked. The new key keeps the old key's name, type and mode.
+leaked. The new key keeps the old key's name, type, mode and `expires_at`.
+The old key never works past its own `expires_at`, whatever time you pick.
 
 With the API: `POST /v1/api-keys/{id}/rotate`, with an optional
-`{"expires_in_seconds": 86400}`. The API's default, `0`, stops the old key
-at once; the dashboard's dialog picks 24 hours instead. The longest wait is
-7 days (`604800`). A revoked or expired key
-cannot be rotated (`409`): create a new key instead.
+`{"expires_in_seconds": 86400}`. The API's default, `0`, revokes the old
+key; the dashboard's dialog picks 24 hours instead. The longest wait is 7
+days (`604800`). The answer has `old_key`, `new_key` and `raw_key`, and like
+create, the route ignores `Idempotency-Key`. A revoked or expired key cannot
+be rotated (`409`): create a new key instead.
 
-To turn a key off without a replacement, click **Revoke** in the key's
-menu, or call
-`DELETE /v1/api-keys/{id}`. It stops working at once.
+## Revoke a key
 
-## A key's status
+Revoking turns a key off for good, with no replacement. The key is refused
+from the next request; a request already running finishes.
 
-Each key in `GET /v1/api-keys` has a `status`: `active`, `expired` (from its
-`expires_at` on) or `revoked`. Only an active key works, and only an active
-key can be rotated.
+1. Open **API keys**, open the key's menu (**…**) and click **Revoke**.
+   **You see:** a dialog that names the key. For a live key it says "Type
+   REVOKE to confirm".
+2. Type `REVOKE` if asked, and click **Revoke key**.
+   **You see:** "API key revoked", and the key leaves the table. A link
+   under the table, such as **Show 1 revoked key**, shows the
+   [expired and revoked](api/authentication.md#a-keys-status) keys.
 
-## How Hardcount keeps keys safe
-
-Hardcount stores only a salted SHA-256 hash of each key, never the key itself.
-The two keys that the setup command (`hardcount-bootstrap`, or
-`POST /v1/bootstrap`, which runs the same steps) created in v0.9.3 or
-earlier have no salt; they still work, and rotating one replaces it with a
-salted key.
-That is why a key is shown only once, when it is created.
+With the API: `DELETE /v1/api-keys/{id}`. Revoking a key a second time
+answers `404`. An open event stream closes within 15 seconds of the revoke
+([When a key is refused](api/authentication.md#when-a-key-is-refused)).
 
 **Next:** [make your first API call](api-surface.md#make-your-first-call).
 The whole key reference: [Authentication and keys](api/authentication.md).

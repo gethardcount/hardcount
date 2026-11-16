@@ -18,9 +18,9 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
-// Routes returns the key routes: POST / creates a key, GET / lists keys,
-// DELETE /{id} revokes one and POST /{id}/rotate rotates one. They are
-// mounted behind session.RequireCaller, which sets the tenant.
+// Routes returns the key routes. The router mounts them behind
+// session.RequireCaller, which puts the caller's tenant and mode in ctx, and
+// auth.Require(PermAPIKeyWrite), which refuses an ingest key.
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Post("/", h.create)
