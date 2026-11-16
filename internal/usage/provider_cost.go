@@ -692,27 +692,18 @@ func (h *ProviderCostHandler) Margin(w http.ResponseWriter, r *http.Request) {
 // with missing ones defaulted around the report's instant, the one ctx
 // carries.
 func (h *ProviderCostHandler) marginWindow(ctx context.Context, r *http.Request) (time.Time, time.Time, error) {
-	return parseWindow(r, func() (time.Time, error) {
-		return clock.Now(ctx), nil
-	})
+	return parseWindow(r, clock.Now(ctx))
 }
 
 // parseWindow reads from/to (RFC3339); a missing bound defaults to the
-// last 30 days ending at now(). now is the CUSTOMER's effective now —
-// frozen_time for a customer pinned to a test clock — so a bare request
-// for a clock-pinned customer covers the simulated last 30 days, the
-// same timeline customer usage follows. It is
-// called only when a bound is missing, so an explicit window costs no
-// clock lookup.
-func parseWindow(r *http.Request, now func() (time.Time, error)) (time.Time, time.Time, error) {
+// last 30 days ending at now, the report's instant: frozen_time for a
+// customer on a test clock, so a bare request for that customer covers the
+// simulated last 30 days, the same timeline customer usage follows.
+func parseWindow(r *http.Request, now time.Time) (time.Time, time.Time, error) {
 	q := r.URL.Query()
 	var from, to time.Time
 	if q.Get("from") == "" || q.Get("to") == "" {
-		n, err := now()
-		if err != nil {
-			return time.Time{}, time.Time{}, err
-		}
-		from, to = n.AddDate(0, 0, -30), n
+		from, to = now.AddDate(0, 0, -30), now
 	}
 	if v := r.URL.Query().Get("from"); v != "" {
 		t, err := time.Parse(time.RFC3339, v)

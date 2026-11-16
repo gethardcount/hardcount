@@ -74,6 +74,9 @@ type CustomerTokenLookup interface {
 // NewCostDashboardAssembler wires the public-projection assembler.
 // All four deps are required, and so is SetLiveBalanceReader before serving.
 func NewCostDashboardAssembler(customers CustomerTokenLookup, usageSvc *CustomerUsageService, subs SubscriptionLister, credits CostDashboardCreditReader) *CostDashboardAssembler {
+	if usageSvc == nil {
+		panic("usage.NewCostDashboardAssembler: the customer usage service is required")
+	}
 	return &CostDashboardAssembler{
 		customers:     customers,
 		usageService:  usageSvc,
@@ -252,7 +255,10 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 	if err != nil {
 		return nil, errs.Unavailable("test_clock_unavailable", costDashboardUnavailable, err)
 	}
-	ctx = decided
+	// One instant for the whole page: the credit figures and the usage view
+	// all read it. A clock's decision carries its instant; at real time the
+	// server's clock is read here once.
+	ctx = a.usageService.readTime(decided)
 	// The usage view and the live credit figure below aggregate the same
 	// meters over the same period; the memo makes that one scan, not two.
 	ctx, _ = WithAggregationMemo(ctx)

@@ -240,7 +240,7 @@ func TestResolvePeriod(t *testing.T) {
 			if now.IsZero() {
 				now = jun1 // after every default-case cycle start above
 			}
-			from, to, source, err := resolvePeriod(tc.period, tc.subs, func() (time.Time, error) { return now, nil })
+			from, to, source, err := resolvePeriod(tc.period, tc.subs, now)
 			if tc.wantSource == "" {
 				if err == nil {
 					t.Fatalf("expected error, got from=%v to=%v source=%s", from, to, source)

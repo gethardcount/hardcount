@@ -92,9 +92,11 @@ func (s *Service) SetResolver(r clock.Resolver) {
 //
 // A real instant ctx already carries is kept for a customer on no clock and
 // for a not-found (clock.DecideOrRealTime keeps it). A clock already on ctx
-// does not stop the decision: the customer's own decision replaces it. No
-// caller passes one: only HTTP handlers call the ingest entries, and the
-// API's door binds no clock on usage's routes.
+// is replaced by the customer's own decision in test mode with a resolver
+// and a customer id; in live mode, with no resolver, or with no customer id,
+// ctx is kept as it is. None of those cases can carry a clock: only HTTP
+// handlers call the ingest entries, the API's door binds no clock on usage's
+// routes, and no live record is on a test clock.
 //
 // Real time is read once from the service's clock (SetClock) and bound
 // (clock.EnsureEffectiveNow).

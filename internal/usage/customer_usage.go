@@ -241,9 +241,7 @@ func (s *CustomerUsageService) Get(ctx context.Context, tenantID, customerID str
 	}
 	activeSubs := filterActiveSubs(subs)
 
-	from, to, source, err := resolvePeriod(period, activeSubs, func() (time.Time, error) {
-		return clock.Now(ctx), nil
-	})
+	from, to, source, err := resolvePeriod(period, activeSubs, clock.Now(ctx))
 	if err != nil {
 		return CustomerUsageResult{}, err
 	}
@@ -402,9 +400,9 @@ func composeDailyBuckets(rows []DailyBucketRow, from, to time.Time) []CustomerUs
 //
 // Returns a DomainError so the handler maps to 422 with the right code.
 //
-// now is the customer's effective now (test-clock frozen_time when pinned).
-// It is read only for the default, to skip cycles that have not started.
-func resolvePeriod(period CustomerUsagePeriod, subs []domain.Subscription, now func() (time.Time, error)) (time.Time, time.Time, string, error) {
+// now is the read's instant (test-clock frozen_time when pinned). The
+// default uses it to skip cycles that have not started.
+func resolvePeriod(period CustomerUsagePeriod, subs []domain.Subscription, now time.Time) (time.Time, time.Time, string, error) {
 	hasFrom := !period.From.IsZero()
 	hasTo := !period.To.IsZero()
 
@@ -435,10 +433,6 @@ func resolvePeriod(period CustomerUsagePeriod, subs []domain.Subscription, now f
 	// Only when NO cycle has started (e.g. the customer's only sub is
 	// trialing) do we fall back to the latest-start pick across all subs,
 	// which is the long-standing behaviour for that case.
-	n, err := now()
-	if err != nil {
-		return time.Time{}, time.Time{}, "", err
-	}
 	var primary, primaryAny *domain.Subscription
 	for i := range subs {
 		sub := &subs[i]
@@ -448,7 +442,7 @@ func resolvePeriod(period CustomerUsagePeriod, subs []domain.Subscription, now f
 		if primaryAny == nil || sub.CurrentBillingPeriodStart.After(*primaryAny.CurrentBillingPeriodStart) {
 			primaryAny = sub
 		}
-		if sub.CurrentBillingPeriodStart.After(n) {
+		if sub.CurrentBillingPeriodStart.After(now) {
 			continue
 		}
 		if primary == nil || sub.CurrentBillingPeriodStart.After(*primary.CurrentBillingPeriodStart) {
