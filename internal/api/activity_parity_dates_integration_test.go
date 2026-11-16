@@ -493,9 +493,9 @@ func TestActivityDates_HostedPageAttempts(t *testing.T) {
 		id := newInvoice("collide", clockID)
 		slot := frozen.Add(-36 * time.Hour) // the retry's contracted instant, inside the advance
 		hostedFailure(id, "pi_retry_collide", "dunning_retry")
-		if err := hr.invoices.RecordChargeAttempt(hr.ctx, hr.tenantID, domain.InvoiceChargeAttempt{
+		if err := hr.invoices.RecordChargeAttempt(clock.WithEffectiveNow(hr.ctx, slot), hr.tenantID, domain.InvoiceChargeAttempt{
 			InvoiceID: id, StripePaymentIntentID: "pi_retry_collide", Trigger: domain.ChargeTriggerDunningRetry,
-			Outcome: domain.ChargeAttemptFailed, AmountCents: 4900, OccurredAt: time.Now().UTC(), EffectiveAt: slot,
+			Outcome: domain.ChargeAttemptFailed, AmountCents: 4900, OccurredAt: time.Now().UTC(),
 		}); err != nil {
 			t.Fatalf("record attempt: %v", err)
 		}

@@ -60,14 +60,14 @@ func TestRenderChargeAttempts(t *testing.T) {
 		t.Fatalf("a decline code wins over the provider's text: %q", out[0].Line.Problem)
 	}
 
-	// No dunning row → the attempt renders itself, on the billing axis
-	// when it carries a sim anchor.
+	// No dunning row → the attempt renders itself, on the test clock's
+	// calendar on a simulated invoice.
 	out = renderChargeAttempts(nil, []domain.InvoiceChargeAttempt{failed("pi_2", true)}, domain.Invoice{IsSimulated: true})
 	if count(out, "payment") != 1 {
 		t.Fatalf("unowned attempt must render: %+v", out)
 	}
 	if !out[0].IsSimulated || !out[0].sortAt.Equal(simT) {
-		t.Fatalf("sim-anchored attempt must render on the billing axis: sim=%v at %v", out[0].IsSimulated, out[0].sortAt)
+		t.Fatalf("an attempt on a simulated invoice must render on its clock's calendar: sim=%v at %v", out[0].IsSimulated, out[0].sortAt)
 	}
 	// A wall-stamped attempt keeps wall time.
 	out = renderChargeAttempts(nil, []domain.InvoiceChargeAttempt{failed("pi_3", false)}, domain.Invoice{})

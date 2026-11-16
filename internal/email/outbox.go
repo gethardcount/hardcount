@@ -44,10 +44,7 @@ type OutboxRow struct {
 	// (ListByInvoice/ListByCustomer/GetByID); the dispatcher's claim
 	// path leaves it zero — dispatch never reads it.
 	DeliveryState string
-	// EffectiveAt is the instant the send's action decided, stamped at
-	// enqueue from ctx in both modes: where the email sits on a timeline.
-	// TestClockID names the action's test clock, or is empty. CreatedAt
-	// stays the real-world record (the database's clock).
+	// See activity.Email.
 	EffectiveAt time.Time
 	TestClockID string
 	// SkipReason is why a 'skipped' row was not sent: the final state its
@@ -277,11 +274,9 @@ func (s *OutboxStore) Enqueue(ctx context.Context, tx *sql.Tx, tenantID, emailTy
 	}
 
 	id := postgres.NewID("hc_emob")
-	// The send's place on a timeline is the instant its action decided,
-	// read from ctx at the only moment the fact exists, in both modes; its
-	// test clock, when there is one, beside it (ADR-104). created_at stays
-	// SQL now() on purpose: it is the real-world record (the "Recorded …"
-	// subline) and the queue's own order, not the story position.
+	// effective_at is the instant the send's action decided, read from ctx now
+	// because it is not known later. created_at stays SQL now(): the queue's
+	// own order and the "Recorded" time (ADR-104).
 	effectiveAt := clock.Now(ctx).UTC()
 	var clockID any
 	if sim, ok := clock.SimOf(ctx); ok {
@@ -293,8 +288,8 @@ func (s *OutboxStore) Enqueue(ctx context.Context, tx *sql.Tx, tenantID, emailTy
 	// the operator or API key whose finalize led to a charge that sends a
 	// receipt or a failure email. Only work no request started (the cycle
 	// scheduler, dunning, a webhook, the reconciler) records the system.
-	// Stamped here for the same reason as the sim anchor: this is the one
-	// insert, and the only moment the request identity is in hand.
+	// Stamped here: this is the one insert, and the only moment the request
+	// identity is in hand.
 	actorType, actorID := audit.ResolveActor(ctx)
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO email_outbox (id, tenant_id, email_type, payload, status, attempts, next_attempt_at,

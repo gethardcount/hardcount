@@ -728,7 +728,6 @@ func (s *Stripe) sendCharge(ctx context.Context, tenantID string, inv domain.Inv
 		StripePaymentMethodID: params.PaymentMethodID,
 		AmountCents:           params.AmountCents,
 		OccurredAt:            time.Now().UTC(),
-		EffectiveAt:           clock.Now(ctx).UTC(),
 	}, hold, inv.ChargeAttemptSeq)
 	if err != nil {
 		return chargeSent{}, fmt.Errorf("%w: %w %s: %w", errNothingConfirmed, errStampFailed, created.ID, err)
@@ -1525,13 +1524,6 @@ func persistChargeOutcomeWithRetry(ctx context.Context, invoices InvoiceUpdater,
 	return domain.Invoice{}, false, fmt.Errorf("persist charge outcome failed after %d attempts: %w", len(delays), lastErr)
 }
 
-// recordChargeAttempt best-effort writes the ADR-102 attempt fact. The
-// sim anchor comes from the Advance ctx when present — that is the
-// billing-axis instant the attempt belongs to; wall-clock callers leave
-// it nil and the fact stays on the wall axis. Best-effort: the
-// timeline's precedence chain (dunning row → attempt row → webhook row)
-// falls back to the webhook row when this write is lost, so failure
-// degrades display, never money.
 // chargedCard is what the charge call knows about the card on an attempt: the
 // card it charged and, for a decline, the bank's decline code (#966).
 type chargedCard struct {
@@ -1539,6 +1531,11 @@ type chargedCard struct {
 	declineCode     string
 }
 
+// recordChargeAttempt best-effort writes the ADR-102 attempt fact, dated by
+// the store at ctx's instant: the charge's action. Best-effort: the
+// timeline's precedence chain (dunning row → attempt row → webhook row)
+// falls back to the webhook row when this write is lost, so failure
+// degrades display, never money.
 func recordChargeAttempt(ctx context.Context, invoices InvoiceUpdater, tenantID string, inv domain.Invoice, piID string, trigger domain.ChargeAttemptTrigger, outcome domain.ChargeAttemptOutcome, reason string, card chargedCard) {
 	a := domain.InvoiceChargeAttempt{
 		InvoiceID:             inv.ID,
@@ -1550,7 +1547,6 @@ func recordChargeAttempt(ctx context.Context, invoices InvoiceUpdater, tenantID 
 		StripePaymentMethodID: card.paymentMethodID,
 		AmountCents:           inv.AmountDueCents,
 		OccurredAt:            time.Now().UTC(),
-		EffectiveAt:           clock.Now(ctx).UTC(),
 	}
 	if err := invoices.RecordChargeAttempt(ctx, tenantID, a); err != nil {
 		slog.Warn("record charge attempt failed — timeline falls back to the webhook row",

@@ -88,8 +88,8 @@ type InvoiceChargeAttempt struct {
 	// (IsAuthenticationRequired).
 	StripePaymentMethodID string
 	AmountCents           int64
-	OccurredAt            time.Time // wall-clock
-	EffectiveAt           time.Time // the instant the attempt's action decided, in both modes
+	OccurredAt            time.Time // real time the row was written
+	EffectiveAt           time.Time // the instant the attempt's action decided, in both modes; the store stamps it from ctx
 	Livemode              bool
 	CreatedAt             time.Time
 	UpdatedAt             time.Time

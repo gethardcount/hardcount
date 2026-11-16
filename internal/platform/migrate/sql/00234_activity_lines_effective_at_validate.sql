@@ -1,6 +1,6 @@
 -- +goose Up
--- Checks the rows already there against the CHECKs 00232 added NOT VALID,
--- then makes effective_at NOT NULL. Every row passes: 00232 filled each one,
+-- Checks the rows already there against the CHECKs 00233 added NOT VALID,
+-- then makes effective_at NOT NULL. Every row passes: 00233 filled each one,
 -- and every row written since carries it.
 SET LOCAL app.bypass_rls = 'on';
 ALTER TABLE email_outbox VALIDATE CONSTRAINT email_outbox_effective_at_not_null;

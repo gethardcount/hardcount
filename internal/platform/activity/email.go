@@ -95,9 +95,10 @@ type Email struct {
 	// server took it. Both are real-world instants.
 	CreatedAt    time.Time
 	DispatchedAt *time.Time
-	// EffectiveAt is the instant the email's action decided (ADR-104), in
-	// both modes, and TestClockID names that action's test clock, or is
-	// empty.
+	// EffectiveAt is the line's date: the instant the email's action decided,
+	// in both modes (ADR-104). CreatedAt and DispatchedAt are real-world times
+	// and become the Recorded time on a test clock. TestClockID names the
+	// action's test clock, or is empty.
 	EffectiveAt time.Time
 	TestClockID string
 }
@@ -235,10 +236,9 @@ func EmailClause(e Email) string {
 	return name + " " + Outcome(e).Word
 }
 
-// EmailInstant places an email on the entity's calendar (ADR-104): at the
-// instant its action decided, like every other line of that action. An email
-// caused on a test clock is pinned, and its real send time is its Recorded
-// time: when the mail server took it, or else when it was queued.
+// EmailInstant dates an email at the instant its action decided. Caused on a
+// test clock, it is pinned, and its Recorded time is when the mail server took
+// it, else when it was queued (ADR-104).
 func EmailInstant(e Email) (occurred, recorded time.Time, pinned bool) {
 	if e.TestClockID == "" {
 		return e.EffectiveAt, time.Time{}, false

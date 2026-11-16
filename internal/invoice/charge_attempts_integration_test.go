@@ -8,6 +8,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/customer"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/pricing"
 	"github.com/gethardcount/hardcount/internal/subscription"
@@ -69,20 +70,20 @@ func TestRecordChargeAttempt_UpsertContract(t *testing.T) {
 	simAt := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
 	wall := time.Now().UTC()
 
-	// Chokepoint insert: pending, sim-anchored, auto_charge.
-	if err := store.RecordChargeAttempt(ctx, tenantID, domain.InvoiceChargeAttempt{
+	// Chokepoint insert: pending, auto_charge, its action at simAt.
+	if err := store.RecordChargeAttempt(clock.WithEffectiveNow(ctx, simAt), tenantID, domain.InvoiceChargeAttempt{
 		InvoiceID: inv.ID, StripePaymentIntentID: "pi_attempt_1",
 		Trigger: domain.ChargeTriggerAutoCharge, Outcome: domain.ChargeAttemptPending,
-		AmountCents: 3100, OccurredAt: wall, EffectiveAt: simAt,
+		AmountCents: 3100, OccurredAt: wall,
 	}); err != nil {
 		t.Fatalf("insert attempt: %v", err)
 	}
-	// Settle-path failure resolution: wall-clock, external trigger — the
-	// upsert must flip the outcome and reason but keep trigger + sim anchor.
+	// Settle-path failure resolution at real time, external trigger: the
+	// upsert must flip the outcome and reason but keep trigger and effective_at.
 	if err := store.RecordChargeAttempt(ctx, tenantID, domain.InvoiceChargeAttempt{
 		InvoiceID: inv.ID, StripePaymentIntentID: "pi_attempt_1",
 		Trigger: domain.ChargeTriggerExternal, Outcome: domain.ChargeAttemptFailed,
-		ProviderReason: "Your card was declined.", OccurredAt: wall.Add(time.Second), EffectiveAt: wall.Add(time.Second),
+		ProviderReason: "Your card was declined.", OccurredAt: wall.Add(time.Second),
 	}); err != nil {
 		t.Fatalf("upsert failed outcome: %v", err)
 	}
@@ -218,13 +219,13 @@ func TestChargeAttempt_SettleTransitionsResolveOutcomeAtomically(t *testing.T) {
 	}
 
 	// SUCCEEDED settle resolves an existing chokepoint row in place —
-	// insert-time identity (trigger, sim anchor) must survive.
+	// insert-time identity (trigger, effective_at) must survive.
 	paid := mk("HC-ATOMIC-PAID")
 	simAt := ps.AddDate(0, 0, 3)
-	if err := store.RecordChargeAttempt(ctx, tenantID, domain.InvoiceChargeAttempt{
+	if err := store.RecordChargeAttempt(clock.WithEffectiveNow(ctx, simAt), tenantID, domain.InvoiceChargeAttempt{
 		InvoiceID: paid.ID, StripePaymentIntentID: "pi_atomic_ok",
 		Trigger: domain.ChargeTriggerDunningRetry, Outcome: domain.ChargeAttemptPending,
-		AmountCents: 2500, OccurredAt: time.Now().UTC(), EffectiveAt: simAt,
+		AmountCents: 2500, OccurredAt: time.Now().UTC(),
 	}); err != nil {
 		t.Fatalf("chokepoint insert: %v", err)
 	}

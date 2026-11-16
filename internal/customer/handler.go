@@ -95,8 +95,7 @@ type SentEmailOutboxRow struct {
 	// SkipReason is the state the invoice reached that made Hardcount skip a
 	// queued email, or empty.
 	SkipReason string
-	// EffectiveAt is the instant the send's action decided, and TestClockID
-	// that action's test clock or empty (ADR-104).
+	// See activity.Email.
 	EffectiveAt time.Time
 	TestClockID string
 }
