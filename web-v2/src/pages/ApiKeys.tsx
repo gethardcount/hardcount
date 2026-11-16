@@ -730,10 +730,10 @@ function RotateKeyDialog({
         <DialogHeader>
           <DialogTitle>Rotate API key</DialogTitle>
           <DialogDescription>
-            Rotating "{target.name}" issues a new {keyTypeNoun(target.key_type)} with the same name
-            and expiration. The old key stops working at the time you
-            pick{target.expires_at ? ', or when it expires if that is sooner' : ''}. Anything still
-            using it must switch to the new key by then.
+            Rotating "{target.name}" issues a new {keyTypeNoun(target.key_type)} with the same
+            name{target.expires_at ? ' and expiration' : ''}. The old key stops working at the time
+            you pick{target.expires_at ? ', or when it expires if that is sooner' : ''}. Anything
+            still using it must switch to the new key by then.
           </DialogDescription>
         </DialogHeader>
 
