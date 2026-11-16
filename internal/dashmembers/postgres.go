@@ -84,22 +84,14 @@ func scanInvitation(scan func(...any) error) (Invitation, error) {
 var ErrPendingInviteExists = errs.AlreadyExists("email", "a pending invitation for this email already exists — revoke it first to re-send")
 
 // CreateInvitation creates a pending invitation in one tenant transaction.
-// In order, it revokes the workspace's invitation to the same address when
-// that one has expired and is not yet accepted or revoked, inserts inv, and
-// calls then with the stored row and the id of the invitation it revoked (""
-// when there was none). then runs last, on the same transaction. It must not
-// commit or roll back tx; an error it returns rolls the whole invite back and
-// is returned.
-//
-// at is the time written as revoked_at, and an invitation counts as expired
-// when its expires_at is at or before it, the same boundary the accept uses.
-// The service passes its clock's now. An invitation to the address that has
-// not expired keeps its slot: the insert then returns ErrPendingInviteExists
-// and nothing changes.
-//
-// ctx must carry the mode (postgres.WithLivemode). BeginTx stamps
-// app.tenant_id and app.livemode on a tenant transaction, and the
-// email_outbox and audit_log inserts take their mode from it.
+// An invitation to the same address that has expired (expires_at at or
+// before at, the accept's boundary) is revoked first, so only one that can
+// still be accepted answers ErrPendingInviteExists. then runs last, on the
+// same transaction, with the stored row and the id of the invitation it
+// replaced ("" for none). It must not commit or roll back tx; its error rolls
+// the invite back and is returned. ctx must carry the mode
+// (postgres.WithLivemode): the email and the audit row take theirs from the
+// transaction.
 func (s *PostgresStore) CreateInvitation(ctx context.Context, inv Invitation, at time.Time, then func(tx *sql.Tx, inv Invitation, replacedID string) error) (Invitation, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, inv.TenantID)
 	if err != nil {
@@ -197,16 +189,12 @@ func (s *PostgresStore) GetInvitationByTokenHash(ctx context.Context, tokenHash 
 	return inv, nil
 }
 
-// RevokeInvitation revokes invitation id of tenantID in one bypass
-// transaction. In order, it writes at as revoked_at when the invitation is
-// not yet accepted or revoked, stamps app.tenant_id with tenantID and
-// app.livemode with the request's mode (postgres.Livemode) for an audit row,
-// and calls then. then runs last, on the same transaction. It must not commit
-// or roll back tx; an error it returns rolls the revoke back and is returned.
-//
-// An accepted or already revoked invitation, or one of another workspace, is
-// errs.ErrNotFound and nothing changes. The compare-and-set keeps a revoke
-// racing an accept honest: exactly one wins.
+// RevokeInvitation revokes an invitation that is not yet accepted or
+// revoked, in one bypass transaction, and calls then on it under
+// CreateInvitation's contract. Before then, it sets what an audit row reads:
+// app.tenant_id, and app.livemode from the request's mode. An accepted or
+// revoked invitation, or one of another workspace, is errs.ErrNotFound, so
+// of a revoke and an accept racing, exactly one wins.
 func (s *PostgresStore) RevokeInvitation(ctx context.Context, tenantID, id string, at time.Time, then func(tx *sql.Tx) error) error {
 	live, err := postgres.Livemode(ctx)
 	if err != nil {
