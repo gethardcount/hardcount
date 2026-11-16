@@ -884,10 +884,10 @@ export default function SubscriptionDetailPage() {
                     </TooltipTrigger>
                     <TooltipContent className="max-w-xs">
                       <p className="text-xs">
-                        <strong>{sub.billing_time === 'anniversary' ? 'Anniversary' : 'Calendar'}</strong> is the alignment chosen at activation.{' '}
+                        <strong>{sub.billing_time === 'anniversary' ? 'Anniversary' : 'Calendar'}</strong> is the alignment chosen when the subscription was created.{' '}
                         {sub.billing_time === 'calendar'
-                          ? 'For monthly plans, the first period runs from the activation day to the next 1st of the month, then bills on the 1st thereafter.'
-                          : 'The period anchors on the activation day-of-month and rolls forward by the plan interval.'}
+                          ? 'For monthly plans, the first period runs from the day billing starts to the next 1st of the month, then bills on the 1st thereafter.'
+                          : 'The period anchors on the day of the month billing started and rolls forward by the plan interval.'}
                         {' '}Scheduled plan-interval changes (immediate=false) preserve the existing day-of-month anchor at the boundary. Immediate cross-interval swaps (e.g. yearly → monthly with immediate=true) re-anchor the cycle on the swap day.
                       </p>
                     </TooltipContent>
