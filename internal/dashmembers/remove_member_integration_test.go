@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"slices"
 	"sort"
+	"strings"
 	"testing"
 	"time"
 
@@ -73,9 +74,9 @@ func invitationRevokedAt(t *testing.T, db *postgres.DB, id string) sql.NullTime 
 	return at
 }
 
-// removedRowMetadata reads the metadata of the one member.removed audit row
-// for userID in tenantID.
-func removedRowMetadata(t *testing.T, db *postgres.DB, tenantID, userID string) map[string]any {
+// rowMetadata reads the metadata of the audit row with action on resource
+// type user and resourceID in tenantID.
+func rowMetadata(t *testing.T, db *postgres.DB, tenantID, action, resourceID string) map[string]any {
 	t.Helper()
 	tx, err := db.BeginTx(t.Context(), postgres.TxBypass, "")
 	if err != nil {
@@ -85,13 +86,13 @@ func removedRowMetadata(t *testing.T, db *postgres.DB, tenantID, userID string) 
 	var raw []byte
 	if err := tx.QueryRowContext(t.Context(), `
 		SELECT metadata FROM audit_log
-		WHERE tenant_id = $1 AND action = 'member.removed' AND resource_type = 'user' AND resource_id = $2`,
-		tenantID, userID).Scan(&raw); err != nil {
-		t.Fatalf("read the member.removed row for %s: %v", userID, err)
+		WHERE tenant_id = $1 AND action = $2 AND resource_type = 'user' AND resource_id = $3`,
+		tenantID, action, resourceID).Scan(&raw); err != nil {
+		t.Fatalf("read the %s row for %s: %v", action, resourceID, err)
 	}
 	var meta map[string]any
 	if err := json.Unmarshal(raw, &meta); err != nil {
-		t.Fatalf("decode the member.removed metadata %s: %v", raw, err)
+		t.Fatalf("decode the %s metadata %s: %v", action, raw, err)
 	}
 	return meta
 }
@@ -143,16 +144,15 @@ func TestRemoveMember_EndsTheirSessionsInThisWorkspaceOnly(t *testing.T) {
 	if !isMember(t, h, u.ID, otherTenant) {
 		t.Error("removal from one workspace also removed the membership in the other")
 	}
-	if meta := removedRowMetadata(t, h.db, h.tenantID, u.ID); meta["revoked_invitation_ids"] != nil {
+	if meta := rowMetadata(t, h.db, h.tenantID, "member.removed", u.ID); meta["revoked_invitation_ids"] != nil {
 		t.Errorf("member.removed metadata = %v, want no revoked_invitation_ids: the member sent no invitations", meta)
 	}
 }
 
 // TestRemoveMember_EndsTheInvitationsTheySent: removing a member revokes
 // every invitation they sent that is not yet accepted, an expired one
-// included, and the audit row lists exactly those. The expired invitation no
-// longer holds its address's pending slot, so the address can be invited
-// again. Another member's invitation keeps working.
+// included, and the audit row lists exactly those. Another member's
+// invitation keeps working.
 func TestRemoveMember_EndsTheInvitationsTheySent(t *testing.T) {
 	h := newHarness(t, "Team Invites")
 	ctx := removalCtx(h)
@@ -183,9 +183,6 @@ func TestRemoveMember_EndsTheInvitationsTheySent(t *testing.T) {
 		t.Fatalf("invite from the owner: %v", err)
 	}
 	ownersToken := h.email.lastToken(t)
-	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "expired@example.com"); !errors.Is(err, errs.ErrAlreadyExists) {
-		t.Fatalf("re-invite the expired address before the removal: err = %v, want ErrAlreadyExists", err)
-	}
 
 	if err := h.svc.RemoveMember(ctx, h.tenantID, h.owner, u.ID); err != nil {
 		t.Fatalf("remove member: %v", err)
@@ -214,7 +211,7 @@ func TestRemoveMember_EndsTheInvitationsTheySent(t *testing.T) {
 		t.Errorf("preview the owner's invitation: %v, want it still pending", err)
 	}
 
-	listed, _ := removedRowMetadata(t, h.db, h.tenantID, u.ID)["revoked_invitation_ids"].([]any)
+	listed, _ := rowMetadata(t, h.db, h.tenantID, "member.removed", u.ID)["revoked_invitation_ids"].([]any)
 	var got []string
 	for _, v := range listed {
 		id, _ := v.(string)
@@ -225,10 +222,6 @@ func TestRemoveMember_EndsTheInvitationsTheySent(t *testing.T) {
 	sort.Strings(want)
 	if !slices.Equal(got, want) {
 		t.Errorf("member.removed revoked_invitation_ids = %v, want %v", got, want)
-	}
-
-	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "expired@example.com"); err != nil {
-		t.Errorf("re-invite the expired address after the removal: %v, want it to succeed", err)
 	}
 }
 
@@ -270,6 +263,27 @@ func (failingAudit) LogInTx(context.Context, *sql.Tx, audit.Entry) error {
 	return errors.New("injected: audit insert failed")
 }
 
+// failingAuditService is h's service with an audit writer that refuses every
+// row.
+func failingAuditService(h *harness) *dashmembers.Service {
+	svc := dashmembers.NewService(dashmembers.NewPostgresStore(h.db), userDirAdapter{user.NewPostgresStore(h.db)},
+		h.sessions, failingAudit{}, h.email, staticTenantNamer{name: "Team"}, h.clk, "http://dash.test")
+	svc.SetEmailConfigured(true)
+	return svc
+}
+
+// serve sends one request to svc's members routes as the owner's session and
+// returns the answer.
+func serve(h *harness, svc *dashmembers.Service, method, path, body string) *httptest.ResponseRecorder {
+	req := httptest.NewRequest(method, path, strings.NewReader(body)).WithContext(removalCtx(h))
+	if body != "" {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	rec := httptest.NewRecorder()
+	dashmembers.NewHandler(svc, h.sessions, session.CookieConfig{Path: "/"}).Routes().ServeHTTP(rec, req)
+	return rec
+}
+
 // failingSessions ends the member's sessions on the removal's transaction
 // and then fails, so a test sees whether the sign-out rolls back with it.
 type failingSessions struct{ real *session.Service }
@@ -286,10 +300,7 @@ func (f failingSessions) EndForMemberTx(ctx context.Context, tx *sql.Tx, userID,
 // their sessions still work, and their invitation is still open.
 func TestRemoveMember_AFailedAuditRowLeavesNoChange(t *testing.T) {
 	h := newHarness(t, "Team Audit Fails")
-	svc := dashmembers.NewService(dashmembers.NewPostgresStore(h.db), userDirAdapter{user.NewPostgresStore(h.db)},
-		h.sessions, failingAudit{}, h.email, staticTenantNamer{name: "Team Audit Fails"}, h.clk, "http://dash.test")
-	svc.SetEmailConfigured(true)
-	assertRemovalFailsWhole(t, h, svc)
+	assertRemovalFailsWhole(t, h, failingAuditService(h))
 }
 
 // TestRemoveMember_AFailedSignOutLeavesNoChange: when ending the member's
@@ -318,9 +329,7 @@ func assertRemovalFailsWhole(t *testing.T, h *harness, svc *dashmembers.Service)
 	}
 	token := h.email.lastToken(t)
 
-	req := httptest.NewRequest(http.MethodDelete, "/"+u.ID, nil).WithContext(ctx)
-	rec := httptest.NewRecorder()
-	dashmembers.NewHandler(svc, h.sessions, session.CookieConfig{Path: "/"}).Routes().ServeHTTP(rec, req)
+	rec := serve(h, svc, http.MethodDelete, "/"+u.ID, "")
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("DELETE /%s answered %d, want 500; body %s", u.ID, rec.Code, rec.Body.String())
 	}

@@ -45,8 +45,9 @@ type SignInRecorder interface {
 	InboxProved(w http.ResponseWriter, r *http.Request, email string) error
 }
 
-// AuditRecorder is the narrow audit surface (same shape as the auth
-// handler's) so dashmembers doesn't import *audit.Logger's full type.
+// AuditRecorder is the narrow audit surface the accept route writes its
+// member.joined row through, after the accept commits. *audit.Logger
+// satisfies it.
 type AuditRecorder interface {
 	Log(ctx context.Context, tenantID, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
 }
@@ -55,9 +56,9 @@ func NewHandler(svc *Service, sessions *session.Service, cookie session.CookieCo
 	return &Handler{svc: svc, sessions: sessions, cookie: cookie}
 }
 
-// SetAuditLogger wires audit rows for the invite, revoke-invitation and
-// accept routes. Optional: nil skips audit writes. A removal's row is written
-// by Service.RemoveMember, on the removal's transaction.
+// SetAuditLogger wires the accept route's member.joined audit row. Optional:
+// nil skips it. The invite, revoke and removal rows are written by the
+// Service, each on its change's transaction.
 func (h *Handler) SetAuditLogger(a AuditRecorder) { h.audit = a }
 
 // SetSignInRecorder wires the sign-in throttle. Optional: nil skips it, and
@@ -170,11 +171,6 @@ func (h *Handler) invite(w http.ResponseWriter, r *http.Request) {
 		respond.FromError(w, r, err, "invitation")
 		return
 	}
-	// No email in the label: resource_id is the invitation id and the reader resolves
-	// the address from member_invitations, which is erasable. audit_log is not.
-	h.auditEvent(ctx, tenantID, "member.invited", inv.ID, "", map[string]any{
-		"expires_at": inv.ExpiresAt.Format(rfc3339),
-	})
 	respond.JSON(w, r, http.StatusCreated, h.invitationView(inv, h.svc.clock.Now(ctx)))
 }
 
@@ -189,7 +185,6 @@ func (h *Handler) revokeInvitation(w http.ResponseWriter, r *http.Request) {
 		respond.FromError(w, r, err, "invitation")
 		return
 	}
-	h.auditEvent(ctx, tenantID, "member.invite_revoked", id, "", nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -304,15 +299,4 @@ func (h *Handler) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	respond.JSON(w, r, http.StatusOK, out)
-}
-
-// auditEvent writes one membership audit row (actor comes from the
-// session ctx the auth middleware populated). Best-effort.
-func (h *Handler) auditEvent(ctx context.Context, tenantID, action, resourceID, label string, meta map[string]any) {
-	if h.audit == nil {
-		return
-	}
-	if err := h.audit.Log(ctx, tenantID, action, "user", resourceID, label, meta); err != nil {
-		slog.ErrorContext(ctx, "audit: membership event write failed", "action", action, "error", err)
-	}
 }
