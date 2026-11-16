@@ -104,7 +104,7 @@ Notes on three rows:
 
 ### Info (dashboards, no alert)
 
-- `hardcount_billing_cycles_total`: cycle throughput
+- `hardcount_billing_cycles_total`: billing passes run (a cycle runs two: live, then test)
 - `hardcount_invoices_generated_total`: invoice volume
 - `hardcount_usage_events_ingested_total`: usage ingest rate
 - `hardcount_billing_cycle_duration_seconds`: cycle latency

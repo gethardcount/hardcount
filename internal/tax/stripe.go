@@ -26,7 +26,7 @@ import (
 // Labels:
 //
 //	outcome ∈ {deferred}            (post-ADR-041; legacy "fallback" cut 2026-05-30)
-//	reason  ∈ {no_country, no_client_for_mode, api_error}
+//	reason  ∈ {credentials_unreadable, no_client_for_mode, no_country, api_error}
 //
 // Happy-path calculations (successful Stripe Tax calls, exempt, reverse-charge)
 // are not counted here — this vector is intentionally a failure-mode signal.

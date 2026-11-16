@@ -84,14 +84,14 @@
     },
     {
       "datasource": "Prometheus",
-      "title": "Billing cycles per minute",
+      "title": "Billing passes per minute (a cycle runs two: live, then test)",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 16 },
       "id": 4,
       "targets": [
         {
           "expr": "sum(rate(hardcount_billing_cycles_total[1m])) * 60",
-          "legendFormat": "cycles/min",
+          "legendFormat": "passes/min",
           "refId": "A"
         }
       ]
