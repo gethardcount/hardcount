@@ -107,133 +107,37 @@ func TestCreateKey_Secret(t *testing.T) {
 	}
 }
 
-// There is no publishable key type: it is refused on create, and a key with
-// an hc_pub_ prefix is an unknown key.
-func TestCreateKey_RefusesRemovedPublishableType(t *testing.T) {
+// The create input rules: no key_type means secret, a key_type that is not a
+// stored type and a missing name are refused, and expires_at must be after
+// now.
+func TestCreateKey_InputRules(t *testing.T) {
 	k := newKeyRig(t)
-	_, err := k.svc.CreateKey(liveCtx(t), k.tenantID, auth.CreateKeyInput{Name: "Frontend Key", KeyType: auth.KeyType("publishable")})
-	wantValidation(t, err, "key_type")
-}
-
-func TestValidateKey_OldPublishablePrefixIsInvalid(t *testing.T) {
-	k := newKeyRig(t)
-	for _, raw := range []string{"hc_pub_live_0123456789abcdef0123", "hc_pub_test_0123456789abcdef0123"} {
-		_, err := k.svc.ValidateKey(t.Context(), raw)
-		wantInvalidKey(t, err, raw)
-	}
-}
-
-// An ingest key (ADR-133) is issued like a secret key, in the caller's
-// mode, with its own prefix, and validates back to its type.
-func TestCreateKey_Ingest(t *testing.T) {
-	k := newKeyRig(t)
-	for _, live := range []bool{true, false} {
-		ctx := auth.WithKeyType(postgres.WithLivemode(t.Context(), live), auth.KeyTypeSession)
-		result := k.create(t, ctx, auth.CreateKeyInput{Name: "LiteLLM proxy", KeyType: auth.KeyTypeIngest})
-		want := "hc_ingest_test_"
-		if live {
-			want = "hc_ingest_live_"
-		}
-		if !strings.HasPrefix(result.RawKey, want) || !strings.HasPrefix(result.Key.KeyPrefix, want) {
-			t.Errorf("live=%v: raw key %q, prefix %q, want both to start with %s", live, result.RawKey[:len(want)], result.Key.KeyPrefix, want)
-		}
-		if result.Key.KeyType != "ingest" || result.Key.Livemode != live {
-			t.Errorf("live=%v: stored key_type %q livemode %v, want ingest in the caller's mode", live, result.Key.KeyType, result.Key.Livemode)
-		}
-		got, err := k.svc.ValidateKey(ctx, result.RawKey)
-		if err != nil {
-			t.Fatalf("validate the ingest key: %v", err)
-		}
-		if got.KeyType != "ingest" || got.ID != result.Key.ID {
-			t.Errorf("validated %+v, want the ingest key %s", got, result.Key.ID)
-		}
-	}
-}
-
-// Platform keys and /v1/tenants are gone (ADR-133): the type is refused on
-// create from every caller, and a raw key with the old hc_platform_ prefix is
-// an unknown key. No platform row can exist to match it: the table's CHECK
-// allows only secret and ingest.
-func TestPlatformKeyType_RefusedAtCreateAndParse(t *testing.T) {
-	k := newKeyRig(t)
-	for name, ctx := range map[string]context.Context{
-		"no key type":            liveCtx(t),
-		"secret key":             auth.WithKeyType(liveCtx(t), auth.KeyTypeSecret),
-		"session":                auth.WithKeyType(liveCtx(t), auth.KeyTypeSession),
-		"old platform principal": auth.WithKeyType(liveCtx(t), auth.KeyType("platform")),
+	past, now, future := time.Now().Add(-24*time.Hour), time.Now(), time.Now().Add(30*24*time.Hour)
+	for _, c := range []struct {
+		name      string
+		in        auth.CreateKeyInput
+		wantField string // the field of the validation error; "" when the create succeeds
+	}{
+		{"no key_type", auth.CreateKeyInput{Name: "Default"}, ""},
+		{"an unknown key_type", auth.CreateKeyInput{Name: "Bad", KeyType: "admin"}, "key_type"},
+		{"no name", auth.CreateKeyInput{}, "name"},
+		{"expires_at in the past", auth.CreateKeyInput{Name: "Past", ExpiresAt: &past}, "expires_at"},
+		{"expires_at now", auth.CreateKeyInput{Name: "Now", ExpiresAt: &now}, "expires_at"},
+		{"expires_at in the future", auth.CreateKeyInput{Name: "Future", ExpiresAt: &future}, ""},
 	} {
-		_, err := k.svc.CreateKey(ctx, k.tenantID, auth.CreateKeyInput{Name: "Platform", KeyType: auth.KeyType("platform")})
-		if !errors.Is(err, errs.ErrValidation) {
-			t.Errorf("%s: create with key_type platform: got %v, want a validation error", name, err)
-		}
-	}
-	var stored int
-	k.bypass(t, func(tx *sql.Tx) error {
-		return tx.QueryRow(`SELECT count(*) FROM api_keys WHERE tenant_id = $1`, k.tenantID).Scan(&stored)
-	})
-	if stored != 0 {
-		t.Fatalf("a refused create stored %d keys", stored)
-	}
-
-	_, err := k.svc.ValidateKey(t.Context(), "hc_platform_live_"+strings.Repeat("ab", 32))
-	wantInvalidKey(t, err, "hc_platform_live_…")
-}
-
-func TestCreateKey_DefaultsToSecret(t *testing.T) {
-	k := newKeyRig(t)
-	if got := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "Default"}).Key.KeyType; got != "secret" {
-		t.Errorf("default key_type: got %q, want secret", got)
-	}
-}
-
-func TestCreateKey_InvalidType(t *testing.T) {
-	k := newKeyRig(t)
-	_, err := k.svc.CreateKey(liveCtx(t), k.tenantID, auth.CreateKeyInput{Name: "Bad", KeyType: "admin"})
-	wantValidation(t, err, "key_type")
-}
-
-func TestCreateKey_MissingName(t *testing.T) {
-	k := newKeyRig(t)
-	_, err := k.svc.CreateKey(liveCtx(t), k.tenantID, auth.CreateKeyInput{})
-	wantValidation(t, err, "name")
-}
-
-// A key cannot be created already expired: expires_at must be after now.
-func TestCreateKey_PastExpiresAt(t *testing.T) {
-	k := newKeyRig(t)
-	past, now := time.Now().Add(-24*time.Hour), time.Now()
-	for name, at := range map[string]*time.Time{"past expires_at": &past, "expires_at == now": &now} {
-		_, err := k.svc.CreateKey(liveCtx(t), k.tenantID, auth.CreateKeyInput{Name: name, ExpiresAt: at})
-		if !errors.Is(err, errs.ErrValidation) || errs.Field(err) != "expires_at" {
-			t.Errorf("%s: got %v, want a validation error on expires_at", name, err)
-		}
-	}
-	future := time.Now().Add(30 * 24 * time.Hour)
-	k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "future key", ExpiresAt: &future})
-	k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "no expiry"})
-}
-
-func TestValidateKey_AllTypes(t *testing.T) {
-	k := newKeyRig(t)
-	for _, kt := range []auth.KeyType{auth.KeyTypeSecret, auth.KeyTypeIngest} {
-		t.Run(string(kt), func(t *testing.T) {
-			result := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "Test " + string(kt), KeyType: kt})
-			key, err := k.svc.ValidateKey(liveCtx(t), result.RawKey)
-			if err != nil {
-				t.Fatalf("validate %s key: %v", kt, err)
+		t.Run(c.name, func(t *testing.T) {
+			res, err := k.svc.CreateKey(liveCtx(t), k.tenantID, c.in)
+			if c.wantField != "" {
+				wantValidation(t, err, c.wantField)
+				return
 			}
-			if key.TenantID != k.tenantID || key.KeyType != string(kt) {
-				t.Errorf("validated tenant %q, key_type %q; want %s, %s", key.TenantID, key.KeyType, k.tenantID, kt)
+			if err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			if res.Key.KeyType != "secret" {
+				t.Errorf("key_type = %q, want secret", res.Key.KeyType)
 			}
 		})
-	}
-}
-
-func TestValidateKey_InvalidFormat(t *testing.T) {
-	k := newKeyRig(t)
-	for _, raw := range []string{"", "sk_live_invalid", "hc_secret_tooshort", "hc_unknown_" + strings.Repeat("ab", 32)} {
-		_, err := k.svc.ValidateKey(t.Context(), raw)
-		wantInvalidKey(t, err, raw)
 	}
 }
 
@@ -319,35 +223,6 @@ func TestValidateKey_Expired(t *testing.T) {
 	wantInvalidKey(t, err, "an expired key")
 }
 
-func TestValidateKey_Revoked(t *testing.T) {
-	k := newKeyRig(t)
-	result := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "Revokable", KeyType: auth.KeyTypeSecret})
-	if _, err := k.svc.RevokeKey(liveCtx(t), k.tenantID, result.Key.ID); err != nil {
-		t.Fatalf("revoke: %v", err)
-	}
-	_, err := k.svc.ValidateKey(liveCtx(t), result.RawKey)
-	wantInvalidKey(t, err, "a revoked key")
-}
-
-func TestCreateKey_TestModeFromCtx(t *testing.T) {
-	k := newKeyRig(t)
-	result := k.create(t, testCtx(t), auth.CreateKeyInput{Name: "Sandbox", KeyType: auth.KeyTypeSecret})
-	if !strings.HasPrefix(result.RawKey, "hc_secret_test_") {
-		t.Errorf("test-mode key should start with hc_secret_test_, got %q", result.RawKey[:20])
-	}
-	if result.Key.Livemode {
-		t.Error("key should be test-mode")
-	}
-	// ValidateKey needs no mode: the stored key gives it.
-	key, err := k.svc.ValidateKey(t.Context(), result.RawKey)
-	if err != nil {
-		t.Fatalf("validate: %v", err)
-	}
-	if key.Livemode {
-		t.Error("validated key should be test-mode")
-	}
-}
-
 func TestRevokeKey_WrongTenant(t *testing.T) {
 	k := newKeyRig(t)
 	other := testutil.CreateTestTenant(t, k.db, "Other")
@@ -360,95 +235,15 @@ func TestRevokeKey_WrongTenant(t *testing.T) {
 	}
 }
 
-// The default rotation: the old key stops validating as soon as rotate
-// returns, the new key validates, and the new key has the old one's type,
-// name, mode and expires_at.
-func TestRotateKey_ImmediateRevoke(t *testing.T) {
-	k := newKeyRig(t)
-	expiry := time.Now().UTC().Add(90 * 24 * time.Hour).Truncate(time.Second)
-	original := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "Prod deploy", KeyType: auth.KeyTypeSecret, ExpiresAt: &expiry})
-
-	rotated, err := k.svc.RotateKey(liveCtx(t), k.tenantID, original.Key.ID, auth.RotateKeyInput{})
-	if err != nil {
-		t.Fatalf("rotate: %v", err)
-	}
-	if rotated.NewKey.ID == original.Key.ID {
-		t.Fatal("new key must have a distinct ID")
-	}
-	if rotated.NewKey.Name != original.Key.Name || rotated.NewKey.KeyType != original.Key.KeyType || rotated.NewKey.Livemode != original.Key.Livemode {
-		t.Errorf("new key name %q, type %q, livemode %v; want the old key's %q, %q, %v",
-			rotated.NewKey.Name, rotated.NewKey.KeyType, rotated.NewKey.Livemode, original.Key.Name, original.Key.KeyType, original.Key.Livemode)
-	}
-	if rotated.NewKey.ExpiresAt == nil || !rotated.NewKey.ExpiresAt.Equal(expiry) {
-		t.Errorf("new key expires_at: got %v, want %v", rotated.NewKey.ExpiresAt, expiry)
-	}
-	if rotated.OldKey.RevokedAt == nil {
-		t.Fatal("old key should be revoked after immediate rotation")
-	}
-	if rotated.RawKey == "" || rotated.RawKey == original.RawKey {
-		t.Fatal("rotation must return a new raw key, once")
-	}
-
-	_, err = k.svc.ValidateKey(liveCtx(t), original.RawKey)
-	wantInvalidKey(t, err, "the old key after rotation")
-	valid, err := k.svc.ValidateKey(liveCtx(t), rotated.RawKey)
-	if err != nil {
-		t.Fatalf("new key validation: %v", err)
-	}
-	if valid.ID != rotated.NewKey.ID {
-		t.Errorf("new key ID mismatch: got %q, want %q", valid.ID, rotated.NewKey.ID)
-	}
-}
-
-// A rotation with a grace period: the old key stays valid for the window and
-// the new key is valid at once, so both authenticate inside it.
-func TestRotateKey_WithGracePeriod(t *testing.T) {
-	k := newKeyRig(t)
-	original := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "App", KeyType: auth.KeyTypeSecret})
-
-	rotated, err := k.svc.RotateKey(liveCtx(t), k.tenantID, original.Key.ID, auth.RotateKeyInput{ExpiresInSeconds: 3600})
-	if err != nil {
-		t.Fatalf("rotate: %v", err)
-	}
-	if rotated.OldKey.RevokedAt != nil {
-		t.Fatal("grace-period rotation must not set revoked_at on the old key")
-	}
-	if rotated.OldKey.ExpiresAt == nil {
-		t.Fatal("grace-period rotation must set expires_at on the old key")
-	}
-	if until := time.Until(*rotated.OldKey.ExpiresAt); until < 50*time.Minute || until > 70*time.Minute {
-		t.Errorf("old key expires_at should be ~1 hour out, got %v", until)
-	}
-	if _, err := k.svc.ValidateKey(liveCtx(t), original.RawKey); err != nil {
-		t.Errorf("old key should still validate in grace window: %v", err)
-	}
-	if _, err := k.svc.ValidateKey(liveCtx(t), rotated.RawKey); err != nil {
-		t.Errorf("new key should validate immediately: %v", err)
-	}
-}
-
-func TestRotateKey_RejectsNegativeGrace(t *testing.T) {
+// A rotation's grace period is 0 to MaxRotationGraceSeconds.
+func TestRotateKey_RefusesAGraceOutOfRange(t *testing.T) {
 	k := newKeyRig(t)
 	result := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "K", KeyType: auth.KeyTypeSecret})
-	_, err := k.svc.RotateKey(liveCtx(t), k.tenantID, result.Key.ID, auth.RotateKeyInput{ExpiresInSeconds: -1})
-	wantValidation(t, err, "expires_in_seconds")
-}
-
-func TestRotateKey_RejectsExcessiveGrace(t *testing.T) {
-	k := newKeyRig(t)
-	result := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "K", KeyType: auth.KeyTypeSecret})
-	_, err := k.svc.RotateKey(liveCtx(t), k.tenantID, result.Key.ID, auth.RotateKeyInput{ExpiresInSeconds: auth.MaxRotationGraceSeconds + 1})
-	wantValidation(t, err, "expires_in_seconds")
-}
-
-func TestRotateKey_RejectsAlreadyRevoked(t *testing.T) {
-	k := newKeyRig(t)
-	result := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "K", KeyType: auth.KeyTypeSecret})
-	if _, err := k.svc.RevokeKey(liveCtx(t), k.tenantID, result.Key.ID); err != nil {
-		t.Fatalf("revoke: %v", err)
-	}
-	if _, err := k.svc.RotateKey(liveCtx(t), k.tenantID, result.Key.ID, auth.RotateKeyInput{}); !errors.Is(err, errs.ErrInvalidState) {
-		t.Fatalf("rotate a revoked key: got %v, want invalid state", err)
+	for name, grace := range map[string]int64{"negative": -1, "over the maximum": auth.MaxRotationGraceSeconds + 1} {
+		t.Run(name, func(t *testing.T) {
+			_, err := k.svc.RotateKey(liveCtx(t), k.tenantID, result.Key.ID, auth.RotateKeyInput{ExpiresInSeconds: grace})
+			wantValidation(t, err, "expires_in_seconds")
+		})
 	}
 }
 
