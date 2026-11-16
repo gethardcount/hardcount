@@ -205,7 +205,7 @@ func TestLogin_NoWorkspace(t *testing.T) {
 		go func() { removeDone <- it.remove(context.Background()) }()
 
 		// The removal's DELETE waits on the membership row the sign-in locked.
-		user.WaitForLockWait(t, it.db, "%DELETE FROM user_tenants%")
+		testutil.WaitForLockWaiter(t, t.Context(), testutil.AdminPool(t), "DELETE FROM user_tenants")
 		select {
 		case err := <-removeDone:
 			t.Fatalf("the removal finished while the sign-in held the membership: err %v", err)
@@ -243,7 +243,7 @@ func TestLogin_NoWorkspace(t *testing.T) {
 		h := it.handler(user.NewPostgresStore(it.db))
 		go func() { signInDone <- signInMember(h) }()
 
-		user.WaitForLockWait(t, it.db, "%FROM user_tenants%")
+		testutil.WaitForLockWaiter(t, t.Context(), testutil.AdminPool(t), "FROM user_tenants")
 		gate.Open()
 		if err := user.Receive(t, removeDone, "the removal"); err != nil {
 			t.Fatalf("removal: %v", err)

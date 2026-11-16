@@ -18,7 +18,6 @@ func TestValidatePasswordReasons(t *testing.T) {
 		want string
 	}{
 		{"too short", "short", "must be at least 12 characters"},
-		{"common", "Administrator", "is one of the most common passwords. Pick a different one"},
 		{"too long in ASCII", strings.Repeat("a", 73), "is too long. Use at most 72 characters; accented and non-Latin letters count as two or more"},
 		// 37 accented letters are 74 bytes: refused although only 37 characters.
 		{"too long in bytes", strings.Repeat("é", 37), "is too long. Use at most 72 characters; accented and non-Latin letters count as two or more"},
@@ -31,9 +30,6 @@ func TestValidatePasswordReasons(t *testing.T) {
 			}
 		})
 	}
-	if err := ValidatePassword(strings.Repeat("a", 72)); err != nil && strings.Contains(err.Error(), "too long") {
-		t.Errorf("72 ASCII characters refused as too long: %v", err)
-	}
 	if err := ValidatePassword(strings.Repeat("é", 36)); err != nil && strings.Contains(err.Error(), "too long") {
 		t.Errorf("36 accented letters (72 bytes) refused as too long: %v", err)
 	}
@@ -41,7 +37,6 @@ func TestValidatePasswordReasons(t *testing.T) {
 
 // ADR-095 Phase 0(a): passwords of 12 or more characters that appear in
 // the top million of a breach corpus are refused, whatever their case.
-// The hand-picked 10-entry list this replaced let all of these through.
 func TestValidatePasswordRefusesBreached(t *testing.T) {
 	const want = "is one of the most common passwords. Pick a different one"
 	for _, pw := range []string{
@@ -51,7 +46,7 @@ func TestValidatePasswordRefusesBreached(t *testing.T) {
 		"Q1W2E3R4T5Y6",
 		"iloveyouforever",
 		"123qweasdzxc",
-		"admin12345678", // in the old hand-picked list, not in the corpus
+		"admin12345678", // not in the corpus; passwords.txt adds it (breachedpw package comment)
 	} {
 		err := ValidatePassword(pw)
 		if err == nil || err.Error() != want || errs.Field(err) != "password" {

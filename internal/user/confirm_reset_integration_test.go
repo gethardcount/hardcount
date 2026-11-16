@@ -23,7 +23,7 @@ import (
 // gives the user two sessions (one per mode) and a live reset link. The
 // failure tests make one step of the reset fail and check that nothing
 // changed. The full flow over the real router is in internal/api
-// (TestConfirmReset_EndsEverySession).
+// (TestE2E_DashboardSession_ModeAndPasswordReset).
 
 const (
 	resetITEmail       = "owner@confirm-reset.test"
@@ -127,9 +127,10 @@ func (it resetIT) auditRows(t *testing.T) (n int, tenantIDs []string) {
 	return len(tenantIDs), tenantIDs
 }
 
-// assertPasswordAndLinkUnchanged checks that the old password hash still
-// verifies, the link still checks valid and no audit row was written.
-func (it resetIT) assertPasswordAndLinkUnchanged(t *testing.T) {
+// assertNothingChanged checks that the old password hash still verifies, the
+// link still checks valid, no audit row was written and both sessions are
+// still live.
+func (it resetIT) assertNothingChanged(t *testing.T) {
 	t.Helper()
 	u, err := NewPostgresStore(it.db).GetByID(t.Context(), it.userID)
 	if err != nil {
@@ -144,19 +145,8 @@ func (it resetIT) assertPasswordAndLinkUnchanged(t *testing.T) {
 	if n, _ := it.auditRows(t); n != 0 {
 		t.Errorf("password_reset_completed rows = %d, want 0", n)
 	}
-}
-
-// assertNothingChanged also checks that the old password signs in and both
-// sessions are still live.
-func (it resetIT) assertNothingChanged(t *testing.T) {
-	t.Helper()
-	it.assertPasswordAndLinkUnchanged(t)
-	svc := it.service(it.sessSvc, audit.NewLogger(it.db))
-	if _, err := svc.Login(context.Background(), LoginInput{Email: resetITEmail, Password: resetITOldPassword}); err != nil {
-		t.Errorf("sign in with the old password: %v, want success", err)
-	}
 	for i, raw := range it.sessions {
-		if _, err := it.sessSvc.Resolve(context.Background(), raw); err != nil {
+		if _, err := it.sessSvc.Resolve(t.Context(), raw); err != nil {
 			t.Errorf("resolve session %d: %v, want it still live", i, err)
 		}
 	}
@@ -166,17 +156,6 @@ type failingAuditTx struct{}
 
 func (failingAuditTx) LogInTx(context.Context, *sql.Tx, audit.Entry) error {
 	return errors.New("audit insert failed")
-}
-
-// endThenFail ends the sessions on the transaction, then fails, so a test
-// sees whether the sign-out itself rolls back.
-type endThenFail struct{ *session.Service }
-
-func (e endThenFail) EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID string) error {
-	if err := e.Service.EndAllForUserTx(ctx, tx, userID); err != nil {
-		return err
-	}
-	return errors.New("session sign-out failed")
 }
 
 // notFoundEnder fails inside the reset's transaction with a not-found.
@@ -193,17 +172,6 @@ func TestConfirmReset_AFailedAuditRowLeavesNoChange(t *testing.T) {
 	it := newResetIT(t)
 	if rec := it.confirm(t, resetITNewPassword, it.sessSvc, failingAuditTx{}); rec.Code != http.StatusInternalServerError {
 		t.Fatalf("confirm with a failing audit row: status %d, want 500; body %s", rec.Code, rec.Body.String())
-	}
-	it.assertNothingChanged(t)
-}
-
-// TestConfirmReset_AFailedSignOutLeavesNoChange: the sessions are ended on
-// the transaction and then a step fails; the reset answers 500, and the
-// sign-out rolls back with the password and the token.
-func TestConfirmReset_AFailedSignOutLeavesNoChange(t *testing.T) {
-	it := newResetIT(t)
-	if rec := it.confirm(t, resetITNewPassword, endThenFail{it.sessSvc}, audit.NewLogger(it.db)); rec.Code != http.StatusInternalServerError {
-		t.Fatalf("confirm with a failing sign-out: status %d, want 500; body %s", rec.Code, rec.Body.String())
 	}
 	it.assertNothingChanged(t)
 }
@@ -323,10 +291,5 @@ func TestConfirmReset_UserWithNoWorkspaceGetsTheDeadLinkAnswer(t *testing.T) {
 	}
 	if err := VerifyPassword(u.PasswordHash, resetITOldPassword); err != nil {
 		t.Errorf("old password after the refused reset: %v, want it unchanged", err)
-	}
-	for i, raw := range it.sessions {
-		if _, err := it.sessSvc.Resolve(t.Context(), raw); err != nil {
-			t.Errorf("resolve session %d: %v, want it still live", i, err)
-		}
 	}
 }

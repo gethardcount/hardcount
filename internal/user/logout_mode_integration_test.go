@@ -8,7 +8,6 @@ import (
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/audit"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/session"
 )
@@ -17,23 +16,6 @@ import (
 // session change and its audit row commit together, and a session that is
 // unknown, ended or expired changes nothing. The routes over the real router
 // are in internal/api (TestE2E_SignIn_ModeSwitch_SignOut_AuditRows).
-
-// authHandler is the dashboard auth handler on the real stores, with auditor
-// writing the audit rows.
-func (it loginIT) authHandler(auditor AuditTxWriter) http.Handler {
-	svc := NewService(NewPostgresStore(it.db), clock.Real(), it.sessSvc, auditor)
-	return NewHandler(svc, session.CookieConfig{Path: "/"}, stubEmailSender{}, "", false).Routes()
-}
-
-// sessionIn issues a session for the user in the given mode.
-func (it loginIT) sessionIn(t *testing.T, live bool) string {
-	t.Helper()
-	raw, _, err := it.sessSvc.Issue(t.Context(), session.IssueInput{UserID: it.userID, TenantID: it.tenantID, Livemode: live})
-	if err != nil {
-		t.Fatalf("issue a session (live=%v): %v", live, err)
-	}
-	return raw
-}
 
 // expire moves the session's expiry into the past.
 func (it loginIT) expire(t *testing.T, raw string) {
@@ -128,7 +110,7 @@ func TestLogout_AFailedAuditRowLeavesTheSessionSignedIn(t *testing.T) {
 	it := newLoginIT(t)
 	raw := it.sessionIn(t, false)
 
-	rr := postAuth(it.authHandler(failingAuditTx{}), "/logout", raw, "")
+	rr := postAuth(it.handler(NewPostgresStore(it.db), failingAuditTx{}, nil), "/logout", raw, "")
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("sign-out with a failing audit row: status %d, want 500; body %s", rr.Code, rr.Body.String())
 	}
@@ -150,7 +132,7 @@ func TestLogout_AFailedAuditRowLeavesTheSessionSignedIn(t *testing.T) {
 func TestLogout_EndsTheSessionAndWritesOneRow(t *testing.T) {
 	it := newLoginIT(t)
 	raw := it.sessionIn(t, true)
-	h := it.authHandler(audit.NewLogger(it.db))
+	h := it.handler(NewPostgresStore(it.db), audit.NewLogger(it.db), nil)
 
 	rr := postAuth(h, "/logout", raw, "")
 	if rr.Code != http.StatusNoContent {
@@ -187,7 +169,7 @@ func TestLogout_WithNoLiveSessionWritesNothing(t *testing.T) {
 	it := newLoginIT(t)
 	expired := it.sessionIn(t, false)
 	it.expire(t, expired)
-	h := it.authHandler(audit.NewLogger(it.db))
+	h := it.handler(NewPostgresStore(it.db), audit.NewLogger(it.db), nil)
 
 	for _, c := range []struct{ name, cookie string }{
 		{"expired session", expired},
@@ -220,7 +202,7 @@ func TestSetMode_AFailedAuditRowLeavesTheMode(t *testing.T) {
 	it := newLoginIT(t)
 	raw := it.sessionIn(t, false)
 
-	rr := postAuth(it.authHandler(failingAuditTx{}), "/mode", raw, `{"livemode": true}`)
+	rr := postAuth(it.handler(NewPostgresStore(it.db), failingAuditTx{}, nil), "/mode", raw, `{"livemode": true}`)
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("switch with a failing audit row: status %d, want 500; body %s", rr.Code, rr.Body.String())
 	}
@@ -242,7 +224,7 @@ func TestSetMode_AFailedAuditRowLeavesTheMode(t *testing.T) {
 // metadata. An expired, signed-out or unknown session gets 401 and no row.
 func TestSetMode(t *testing.T) {
 	it := newLoginIT(t)
-	h := it.authHandler(audit.NewLogger(it.db))
+	h := it.handler(NewPostgresStore(it.db), audit.NewLogger(it.db), nil)
 
 	live := it.sessionIn(t, true)
 	rr := postAuth(h, "/mode", live, `{}`)
