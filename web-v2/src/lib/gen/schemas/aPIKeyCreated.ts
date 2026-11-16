@@ -14,7 +14,7 @@
 import type { APIKey } from './aPIKey';
 
 /**
- * A new API key and its full value. `raw_key` appears only in this answer.
+ * A new API key and its full value.
  */
 export interface APIKeyCreated {
   key: APIKey;

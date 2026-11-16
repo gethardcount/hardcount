@@ -50,11 +50,6 @@ func RequireSession(task string) func(http.Handler) http.Handler {
 // method: GET, HEAD and OPTIONS check read, and POST, PUT, PATCH and DELETE
 // check write. Put it in front of a chi.Mount whose subrouter has both reads
 // and writes, where one Require would let a caller that may read also write.
-//
-// Usage:
-//
-//	r.With(auth.RequireMethod(auth.PermCustomerRead, auth.PermCustomerWrite)).
-//	    Mount("/customers", customerH.Routes())
 func RequireMethod(read, write Permission) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

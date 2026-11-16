@@ -2,11 +2,9 @@ package auth
 
 import "context"
 
-// The caller values a request's context carries: who authenticated it
-// (session.Authenticate sets the tenant, the session's user or the key, and
-// the kind of credential) and, on a public customer page, the customer who
-// acted.
-
+// contextKey keys the caller values a request's context carries.
+// session.Authenticate sets them from a cookie or a key; a public customer
+// page sets the customer actor.
 type contextKey string
 
 const (

@@ -328,7 +328,7 @@ func chainIndex(mws []func(http.Handler) http.Handler, name string) int {
 }
 
 const (
-	authMW        = "session.MiddlewareOrAPIKey."
+	authMW        = "session.RequireCaller."
 	timeoutMW     = "middleware.Timeout."
 	idempotencyMW = "middleware.Idempotency."
 	doorMW        = "clockDoor).Middleware"

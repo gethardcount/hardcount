@@ -180,9 +180,16 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 	}
 
 	// A test and a live secret key. A key mints keys only in its own mode, so
-	// the account's first live key comes from here. CreateKeyTx writes each
-	// key and its audit row in the key's mode.
+	// the account's first live key comes from here. Each key and its audit row
+	// take their mode from app.livemode, so it is set before each key.
 	mintSecret := func(live bool, name string) (string, error) {
+		mode := "off"
+		if live {
+			mode = "on"
+		}
+		if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', $1, true)`, mode); err != nil {
+			return "", fmt.Errorf("create %s: set livemode: %w", name, err)
+		}
 		created, err := deps.CreateKeyTx(postgres.WithLivemode(ctx, live), tx, tenantID, auth.CreateKeyInput{Name: name, KeyType: auth.KeyTypeSecret})
 		if err != nil {
 			return "", fmt.Errorf("create %s: %w", name, err)

@@ -79,7 +79,7 @@ function humanizeError(msg: string): string {
 // attaches automatically via `credentials: 'include'` — no Authorization
 // header, no credential in JS-reachable storage. SDK / curl callers
 // reach the same endpoints with a Bearer header instead, which the
-// server's MiddlewareOrAPIKey accepts as a fallback when the cookie is
+// server's RequireCaller accepts as a fallback when the cookie is
 // missing.
 // DEFAULT_REQUEST_TIMEOUT_MS bounds every API call. A request that never
 // receives a response — a stalled dev proxy, a reset/half-open connection, a

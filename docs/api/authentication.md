@@ -16,7 +16,7 @@ curl -s "$HARDCOUNT/v1/whoami" -H "Authorization: Bearer $HARDCOUNT_KEY"
 
 `GET /v1/whoami` needs no permission, so it is a good first call. It answers
 with your `tenant_id` (your account's ID), `livemode`, `key_id` and
-`key_type`.
+`key_type`, among other fields.
 
 Outside your own computer, send keys only over HTTPS.
 
@@ -37,11 +37,9 @@ type and mode:
 data, test and live. A test key reads and writes only test data, and a live
 key only live data. A key made in test mode is a test key.
 
-The Stripe connection follows the same rule. Each mode has its own, and a
-key sees and changes only its own mode's connection
-(`/v1/settings/stripe`). A test key that names live mode gets `403`. The
-dashboard works the same way: **Settings → Payments** shows the connection
-of the mode the dashboard is in, and the Test/Live toggle switches it.
+The Stripe connection is per mode too: a key sees and changes only its own
+mode's (`/v1/settings/stripe`), and the dashboard's Test/Live toggle
+switches it.
 
 ## Key types
 
@@ -91,7 +89,7 @@ without touching the others, and each has its own
 A leaked test key exposes test data and the account settings, which both modes share. Test mode cannot charge a real card.
 
 The account's Audit Log shows who created, rotated and revoked each key, and
-when. Each change and its audit row are saved together.
+when.
 
 ## When a key is refused
 
@@ -159,9 +157,8 @@ updated at most once a minute per server, so it can lag a little.
 `expires_at`. Send `expires_in_seconds` to keep the old key working for a
 while: `0`, the default, stops it at once, and the most is `604800` (7
 days). The old key never works past its own `expires_at`, whatever the
-grace. The answer has `old_key`, `new_key` and `raw_key`; the new key, the
-old key's change and the audit row are saved together. A revoked or expired
-key cannot be rotated: that is a `409`. Like create, rotate ignores
+grace. The answer has `old_key`, `new_key` and `raw_key`. A revoked or
+expired key cannot be rotated: that is a `409`. Like create, rotate ignores
 `Idempotency-Key`.
 
 **Revoke.** The key stops working on the next request. Revoking it a second

@@ -13,7 +13,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// The API key half of MiddlewareOrAPIKey, on real Postgres: what a request
+// The API key half of RequireCaller, on real Postgres: what a request
 // with a key that is not valid, a valid key in the Authorization header or in
 // X-API-Key, a valid key beside a stale session cookie, and a key checked
 // while the database is down each get.
@@ -30,7 +30,7 @@ func keyRequest(header, key string) *http.Request {
 	return req
 }
 
-func TestMiddlewareOrAPIKey_APIKey(t *testing.T) {
+func TestRequireCaller_APIKey(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	keys := auth.NewService(db, audit.NewLogger(db))
 	tenantID := testutil.CreateTestTenant(t, db, "Session API Key")
@@ -44,7 +44,7 @@ func TestMiddlewareOrAPIKey_APIKey(t *testing.T) {
 		t.Helper()
 		var seen *http.Request
 		rec := httptest.NewRecorder()
-		MiddlewareOrAPIKey(sessions, svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		RequireCaller(sessions, svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			seen = r
 			w.WriteHeader(http.StatusOK)
 		})).ServeHTTP(rec, req)

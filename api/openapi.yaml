@@ -8019,11 +8019,8 @@ components:
           type: string
           enum: [secret, ingest]
           description: |
-            `secret` can read and change everything in its mode of the
-            account, except team members, the test email and changing the
-            account settings (`PUT /v1/settings`), which need a dashboard
-            sign-in. `ingest` can only send usage events and call
-            `GET /v1/whoami`, for LiteLLM or another gateway.
+            `secret`: every route of its account and mode. `ingest`: only
+            sends usage events and calls `GET /v1/whoami`.
         status:
           type: string
           enum: [active, expired, revoked]
@@ -8076,7 +8073,7 @@ components:
 
     APIKeyCreated:
       type: object
-      description: A new API key and its full value. `raw_key` appears only in this answer.
+      description: A new API key and its full value.
       required: [key, raw_key]
       properties:
         key:
@@ -27459,13 +27456,10 @@ paths:
       summary: Create an API key
       operationId: createApiKey
       description: |
-        Creates a key in the caller's mode: a test-mode caller gets a test
-        key, a live-mode caller gets a live key. The full key (`raw_key`)
-        is returned once and is never shown again. Hardcount stores only a
-        salted hash. `key_type` defaults to `secret`. An `ingest` key
-        (`hc_ingest_…`) can only send usage events: give it to LiteLLM or
-        another gateway, so the key in its config cannot refund, void or
-        read your data. Writes an audit row (never the key value).
+        Creates a key in the caller's mode. The full key (`raw_key`) appears
+        in this answer only; Hardcount keeps a salted hash. An `ingest` key
+        can only send usage events: give it to LiteLLM or another gateway.
+        Writes an audit row.
       requestBody:
         required: true
         content:
@@ -27492,7 +27486,7 @@ paths:
               key_type: secret
       responses:
         "201":
-          description: Key created. `raw_key` is shown only in this response.
+          description: Key created.
           content:
             application/json:
               schema:
@@ -27513,20 +27507,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: |
-            The caller lacks the `apikey:write` permission (a usage-only key), or
-            a browser page on another site sent the request
-            (`cross-site request blocked`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: authentication_error
-                  code: forbidden
-                  message: "insufficient permissions: this key type does not have apikey:write access"
-                  request_id: req_dbjg652q3gpgqfoq5cd0
+          $ref: "#/components/responses/Forbidden"
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":
@@ -27587,17 +27568,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: The caller lacks the `apikey:write` permission (a usage-only key).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: authentication_error
-                  code: forbidden
-                  message: "insufficient permissions: this key type does not have apikey:write access"
-                  request_id: req_dbjg652q3gpgqfoq5cd0
+          $ref: "#/components/responses/Forbidden"
         "422":
           $ref: "#/components/responses/InvalidPage"
         "429":
@@ -27613,8 +27584,7 @@ paths:
       description: |
         Sets `revoked_at` to now. The key fails authentication on its next
         use. A caller may revoke the key it is using; its next request
-        then gets 401. Dashboard sessions are not tied to API keys, so
-        they are not affected. Writes an audit row.
+        then gets 401. Writes an audit row.
       parameters:
         - name: id
           in: path
@@ -27646,20 +27616,7 @@ paths:
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          description: |
-            The caller lacks the `apikey:write` permission (a usage-only key), or
-            a browser page on another site sent the request
-            (`cross-site request blocked`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: authentication_error
-                  code: forbidden
-                  message: "insufficient permissions: this key type does not have apikey:write access"
-                  request_id: req_dbjg652q3gpgqfoq5cd0
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No key with this id in this mode, or it is already revoked.
           content:
@@ -27721,7 +27678,7 @@ paths:
               expires_in_seconds: 86400
       responses:
         "200":
-          description: Rotation done. `raw_key` is the new key, shown only in this response.
+          description: Rotation done.
           content:
             application/json:
               schema:
@@ -27752,6 +27709,8 @@ paths:
           $ref: "#/components/responses/InvalidBody"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "404":
           description: No key with this id in this mode.
           content:
@@ -27763,21 +27722,6 @@ paths:
                   type: invalid_request_error
                   code: not_found
                   message: api key not found
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "403":
-          description: |
-            The caller lacks the `apikey:write` permission (a usage-only key), or
-            a browser page on another site sent the request
-            (`cross-site request blocked`).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: authentication_error
-                  code: forbidden
-                  message: "insufficient permissions: this key type does not have apikey:write access"
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "409":
           description: The key is revoked or has expired (code `invalid_state`). Create a new key instead.
