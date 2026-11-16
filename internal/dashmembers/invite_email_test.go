@@ -16,7 +16,7 @@ import (
 // enough here.
 func TestInvite_RefusesNonBareEmail(t *testing.T) {
 	ctx := context.Background()
-	svc := NewService(nil, nil, nil, nil, nil, nil, "")
+	svc := NewService(nil, nil, nil, nil, nil, nil, nil, "")
 	for _, in := range []string{
 		`"x@evil.example> NOTIFY=NEVER"@example.com`,
 		`"bob"@acme.test`,

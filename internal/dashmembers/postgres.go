@@ -264,11 +264,29 @@ func (s *PostgresStore) ListMembers(ctx context.Context, tenantID string) ([]Mem
 // add a member back.
 var ErrLastMember = errs.InvalidState("cannot remove the last member of the workspace")
 
-// RemoveMember deletes the (user, tenant) membership unless it is the
-// tenant's last one. It returns ErrLastMember for the last member, and
-// errs.ErrNotFound when userID is not a member. The service refuses
-// self-removal before calling.
-func (s *PostgresStore) RemoveMember(ctx context.Context, tenantID, userID string) error {
+// RemoveMember removes a member from the workspace in one bypass
+// transaction. In order, it deletes the (user, tenant) membership unless it
+// is the workspace's last one, revokes the invitations the user sent in this
+// workspace that can still be accepted (expired ones stay as they are),
+// stamps app.tenant_id with tenantID and app.livemode with the request's mode
+// (postgres.Livemode) for an audit row, and calls then. then runs last, on
+// the same transaction. It must not commit or roll back tx; an error it
+// returns rolls the whole removal back and is returned. at is the revocation
+// time, from the same clock as RevokeInvitation's.
+//
+// It returns ErrLastMember for the last member, and errs.ErrNotFound when
+// userID is not a member, and changes nothing in both cases. The service
+// refuses self-removal before calling.
+func (s *PostgresStore) RemoveMember(ctx context.Context, tenantID, userID string, at time.Time, then func(tx *sql.Tx) error) error {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return err
+	}
+	livemode := "off"
+	if live {
+		livemode = "on"
+	}
+
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return err
@@ -308,6 +326,30 @@ func (s *PostgresStore) RemoveMember(ctx context.Context, tenantID, userID strin
 			return ErrLastMember
 		}
 		return errs.ErrNotFound
+	}
+
+	// An invitation carries its sender's authority: accepting it joins the
+	// workspace. Once the sender is no longer a member, their open
+	// invitations end with them.
+	if _, err := tx.ExecContext(ctx, `
+		UPDATE member_invitations SET revoked_at = $1
+		WHERE tenant_id = $2 AND invited_by_user_id = $3
+		  AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > $1`,
+		at, tenantID, userID); err != nil {
+		return fmt.Errorf("revoke the member's invitations: %w", err)
+	}
+
+	// audit.Logger.LogInTx reads the row's tenant from app.tenant_id and its
+	// mode from app.livemode.
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('app.tenant_id', $1, true)`, tenantID); err != nil {
+		return fmt.Errorf("stamp tenant: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', $1, true)`, livemode); err != nil {
+		return fmt.Errorf("stamp livemode: %w", err)
+	}
+
+	if err := then(tx); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

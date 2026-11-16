@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
@@ -45,11 +46,17 @@ type UserDirectory interface {
 	AttachTenantInTx(ctx context.Context, tx *sql.Tx, userID, tenantID, role string) error
 }
 
-// SessionRevoker kills every session of a removed member — session rows
-// pin (user, tenant), so without this an active session keeps operating
-// after the membership row is gone.
-type SessionRevoker interface {
-	RevokeAllForUser(ctx context.Context, userID string) error
+// SessionEnder ends a user's sessions in one workspace on the caller's
+// transaction. A session row pins (user, tenant), so a removed member's
+// sessions there end with the membership. *session.Service satisfies it.
+type SessionEnder interface {
+	EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, tenantID string) error
+}
+
+// AuditTxWriter writes an audit row on the caller's transaction.
+// *audit.Logger satisfies it.
+type AuditTxWriter interface {
+	LogInTx(ctx context.Context, tx *sql.Tx, e audit.Entry) error
 }
 
 // InviteEmailSender queues the invite email in email_outbox on the caller's
@@ -66,7 +73,8 @@ type TenantNamer interface {
 type Service struct {
 	store    *PostgresStore
 	users    UserDirectory
-	sessions SessionRevoker
+	sessions SessionEnder
+	audit    AuditTxWriter
 	email    InviteEmailSender
 	tenants  TenantNamer
 	clock    clock.Clock
@@ -100,12 +108,15 @@ func (s *Service) CanInvite() bool {
 	return s.dashboardBaseURL != "" && s.emailConfigured
 }
 
-func NewService(store *PostgresStore, users UserDirectory, sessions SessionRevoker, email InviteEmailSender, tenants TenantNamer, clk clock.Clock, dashboardBaseURL string) *Service {
+// NewService returns a Service. sessions and auditor join the removal's
+// transaction, so the removed member's sign-out and its audit row commit with
+// the removal.
+func NewService(store *PostgresStore, users UserDirectory, sessions SessionEnder, auditor AuditTxWriter, email InviteEmailSender, tenants TenantNamer, clk clock.Clock, dashboardBaseURL string) *Service {
 	if clk == nil {
 		clk = clock.Real()
 	}
 	return &Service{
-		store: store, users: users, sessions: sessions, email: email, tenants: tenants,
+		store: store, users: users, sessions: sessions, audit: auditor, email: email, tenants: tenants,
 		clock: clk, dashboardBaseURL: strings.TrimRight(strings.TrimSpace(dashboardBaseURL), "/"),
 	}
 }
@@ -249,13 +260,17 @@ func (s *Service) Revoke(ctx context.Context, tenantID, invitationID string) err
 	return s.store.RevokeInvitation(ctx, tenantID, invitationID, s.clock.Now(ctx))
 }
 
-// RemoveMember detaches a user from the tenant and revokes their
-// sessions (session rows pin the tenant, so an active session would
-// otherwise keep full access after the membership row is gone).
-// Guards: no self-removal (lockout footgun — someone else must remove
-// you) and never the last member (ErrLastMember: an ownerless workspace is
-// unrecoverable without psql). The store checks the last-member rule in the
-// transaction that deletes, so two concurrent removals cannot both pass it.
+// RemoveMember removes a user from the workspace. In one transaction it
+// deletes the membership, revokes the open invitations the user sent here,
+// ends the user's sessions in this workspace (both modes), and writes the
+// member.removed audit row. If any step fails, nothing changes. The user's
+// sessions in other workspaces are not touched.
+//
+// Guards: no self-removal (someone else must remove you, so nobody locks
+// themselves out by mistake), and never the last member (ErrLastMember: a
+// workspace with no member cannot be signed in to again). The store checks
+// the last-member rule in the transaction that deletes, so two concurrent
+// removals cannot both pass it.
 func (s *Service) RemoveMember(ctx context.Context, tenantID, actorUserID, targetUserID string) error {
 	if targetUserID == "" {
 		return errs.Required("user_id")
@@ -263,19 +278,22 @@ func (s *Service) RemoveMember(ctx context.Context, tenantID, actorUserID, targe
 	if actorUserID != "" && actorUserID == targetUserID {
 		return errs.InvalidState("you cannot remove yourself — another member must remove you")
 	}
-	if err := s.store.RemoveMember(ctx, tenantID, targetUserID); err != nil {
-		return err
-	}
-	if s.sessions != nil {
-		if err := s.sessions.RevokeAllForUser(ctx, targetUserID); err != nil {
-			// Membership is gone (login re-derives memberships), but an
-			// EXISTING session pins the tenant and would keep working
-			// until expiry — loud, because this is the actual lockout.
-			slog.ErrorContext(ctx, "member removed but session revocation failed — their active sessions keep access until expiry",
-				"user_id", targetUserID, "error", err)
+	return s.store.RemoveMember(ctx, tenantID, targetUserID, s.clock.Now(ctx), func(tx *sql.Tx) error {
+		if err := s.sessions.EndForMemberTx(ctx, tx, targetUserID, tenantID); err != nil {
+			return fmt.Errorf("end sessions: %w", err)
 		}
-	}
-	return nil
+		// The actor, the client address and the request id are already on
+		// ctx (the session middleware and the root middlewares put them
+		// there).
+		if err := s.audit.LogInTx(ctx, tx, audit.Entry{
+			Action:       "member.removed",
+			ResourceType: "user",
+			ResourceID:   targetUserID,
+		}); err != nil {
+			return fmt.Errorf("write the audit row: %w", err)
+		}
+		return nil
+	})
 }
 
 // InvitePreview drives the accept page: whose workspace, which email,

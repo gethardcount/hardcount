@@ -82,22 +82,22 @@ func (s *Service) Revoke(ctx context.Context, rawID string) error {
 	return s.store.Revoke(ctx, HashID(rawID))
 }
 
-// RevokeAllForUser revokes every active session of a user, on its own
-// transaction. It is idempotent: with no active sessions it does nothing.
-func (s *Service) RevokeAllForUser(ctx context.Context, userID string) error {
-	if userID == "" {
-		return nil
-	}
-	return s.store.RevokeAllForUser(ctx, userID)
-}
-
-// EndAllForUserTx is the variant of RevokeAllForUser that joins the
-// caller's transaction, so the sign-out commits or rolls back with the
+// EndAllForUserTx ends every session of a user, in every workspace and mode,
+// on the caller's transaction, so the sign-out commits or rolls back with the
 // caller's change. It does not commit. tx must be a bypass transaction: a
 // tenant transaction's row-level security hides the user's sessions in
 // other workspaces and in the other mode.
 func (s *Service) EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID string) error {
 	return s.store.EndAllForUserTx(ctx, tx, userID)
+}
+
+// EndForMemberTx ends every session of a user in one workspace, in both
+// modes, on the caller's transaction, so the sign-out commits or rolls back
+// with the caller's change. Sessions in other workspaces are not touched. It
+// does not commit. tx must be a bypass transaction: a tenant transaction's
+// row-level security hides the user's sessions in the other mode.
+func (s *Service) EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, tenantID string) error {
+	return s.store.EndForMemberTx(ctx, tx, userID, tenantID)
 }
 
 // SetLivemode switches the active mode (test or live) on the cookie session.
