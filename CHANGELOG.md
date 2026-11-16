@@ -209,6 +209,7 @@ original text.
 
 ### Security
 
+- **A sign-in creates its session and writes its audit row in one transaction, and ends the session the browser held before.** If the audit row cannot be written the sign-in answers `500` and no session exists. A sign-in whose password changed while it was running is refused as a wrong password ([#1813](https://github.com/gethardcount/hardcount/pull/1813)).
 - **Removing a member signs them out of that workspace and ends the invitations they sent that were not yet accepted, with the audit row, in one transaction.** Before, it signed them out of every workspace. If any step fails the removal answers `500` and nothing changes ([#1810](https://github.com/gethardcount/hardcount/pull/1810)).
 - **A password reset signs out every session of the user, in both modes, in one transaction with the password change and its audit row.** If any step fails the reset answers `500` and nothing changes. A user who belongs to no workspace gets the expired-link answer ([#1806](https://github.com/gethardcount/hardcount/pull/1806)).
 - **A request that matched no route or mount is logged with only the first segment of its path, such as `/v2/…`.** This holds for the access log, the panic log and traces. A mistyped address under `/v1` still logs `/v1/*`, the mount's pattern. Before, only four known link addresses had their token replaced by `[redacted]`, and any other path was logged as sent ([#1801](https://github.com/gethardcount/hardcount/pull/1801)).

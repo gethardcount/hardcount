@@ -241,7 +241,7 @@ func TestInviteAcceptNewUser(t *testing.T) {
 	}
 
 	// The new account can authenticate with the password it set.
-	if _, _, err := h.users.Authenticate(ctx, "newbie@example.com", testPassword); err != nil {
+	if _, err := h.users.Login(ctx, user.LoginInput{Email: "newbie@example.com", Password: testPassword}); err != nil {
 		t.Errorf("new member must be able to log in: %v", err)
 	}
 

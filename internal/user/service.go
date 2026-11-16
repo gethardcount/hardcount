@@ -17,6 +17,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/session"
 	"github.com/gethardcount/hardcount/internal/user/breachedpw"
 )
 
@@ -24,18 +25,20 @@ import (
 //
 // The recipe is intentionally boring: bcrypt cost 12 for hashing,
 // crypto/rand for tokens, sha256 for token storage. The sign-in throttle
-// (throttle.go, ADR-094) runs in the handler before Authenticate. All of this
+// (throttle.go, ADR-094) runs in the handler before Login. All of this
 // is well-trodden Go stdlib + x/crypto territory.
 type Service struct {
 	store    Store
 	clock    clock.Clock
-	sessions SessionEnder
+	sessions SessionTxWriter
 	audit    AuditTxWriter
 }
 
-// SessionEnder ends every session of a user on the caller's transaction.
+// SessionTxWriter creates and ends sessions on the caller's transaction.
 // *session.Service satisfies it.
-type SessionEnder interface {
+type SessionTxWriter interface {
+	IssueTx(ctx context.Context, tx *sql.Tx, in session.IssueInput) (rawID string, sess session.Session, err error)
+	EndTx(ctx context.Context, tx *sql.Tx, rawID string) (ended bool, err error)
 	EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID string) error
 }
 
@@ -45,10 +48,10 @@ type AuditTxWriter interface {
 	LogInTx(ctx context.Context, tx *sql.Tx, e audit.Entry) error
 }
 
-// NewService returns a Service. sessions and auditor join the password
-// reset's transaction, so the sign-out and its audit row commit with the
-// new password.
-func NewService(store Store, clk clock.Clock, sessions SessionEnder, auditor AuditTxWriter) *Service {
+// NewService returns a Service. sessions and auditor join the sign-in's and
+// the password reset's transactions, so the session changes and the audit
+// row commit with the rest of each.
+func NewService(store Store, clk clock.Clock, sessions SessionTxWriter, auditor AuditTxWriter) *Service {
 	if clk == nil {
 		clk = clock.Real()
 	}
@@ -161,18 +164,49 @@ func (s *Service) GetByID(ctx context.Context, id string) (domain.User, error) {
 	return s.store.GetByID(ctx, id)
 }
 
-// Authenticate verifies email + password and returns the user + their tenant
-// memberships. Returns ErrBadCredentials for a missing user OR a wrong password —
-// the same error, with identical timing on both paths (the not-found path runs a
-// dummy bcrypt), so response timing can't be used to enumerate registered emails.
-// On success: stamps last_login_at.
+// LoginInput is what a sign-in needs: the typed email and password, and
+// the request's user agent, client address and session cookie.
+type LoginInput struct {
+	Email     string
+	Password  string
+	UserAgent string
+	IP        string
+	// SessionCookie is the raw value of the session cookie the request
+	// carried, or "" when it carried none. That session ends when the
+	// sign-in commits, because the new cookie replaces it in the browser.
+	SessionCookie string
+}
+
+// LoginResult is a committed sign-in: the user, the workspace the session
+// is in, the raw session id for the cookie and the session.
+type LoginResult struct {
+	User         domain.User
+	TenantID     string
+	RawSessionID string
+	Session      session.Session
+}
+
+// Login verifies email and password and signs the user in to their
+// first-joined workspace. It returns ErrBadCredentials for a missing user
+// or a wrong password: the same error, with the same timing on both paths
+// (the not-found path runs a dummy bcrypt), so response timing cannot be
+// used to enumerate registered emails.
+//
+// The account read and the bcrypt run outside any transaction, so bcrypt
+// holds no row lock. One transaction (PostgresStore.SignIn) then first checks
+// that the password is still the one verified and finds the user's
+// first-joined workspace, and after those checks stamps last_login_at, ends
+// the session the request's cookie named, creates the new session and
+// writes the login audit row, so either all of it happens or none of it
+// does. A password changed while the sign-in ran gets ErrBadCredentials; a
+// user with no workspace gets errs.InvalidState, a 409.
 //
 // There is no account-lock check, and there never is: the sign-in throttle
 // (throttle.go) slows guesses before this runs and does not lock an account
 // (ADR-094). An account under active attack is handled by password reset /
 // session revocation, not by refusing login.
-func (s *Service) Authenticate(ctx context.Context, email, plaintext string) (domain.User, []domain.UserTenant, error) {
-	u, err := s.store.GetByEmail(ctx, email)
+func (s *Service) Login(ctx context.Context, in LoginInput) (LoginResult, error) {
+	u, err := s.store.GetByEmail(ctx, in.Email)
 	if err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
 			// Run a dummy bcrypt compare so the not-found timing
@@ -180,34 +214,72 @@ func (s *Service) Authenticate(ctx context.Context, email, plaintext string) (do
 			// email-enumeration-by-timing attacks.
 			_ = bcrypt.CompareHashAndPassword(
 				[]byte("$2a$12$AAAAAAAAAAAAAAAAAAAAAOgmlgqkZ7T3cZ6h7xQpqQ6VUCRZx0Aa"),
-				[]byte(plaintext))
-			return domain.User{}, nil, ErrBadCredentials
+				[]byte(in.Password))
+			return LoginResult{}, ErrBadCredentials
 		}
-		return domain.User{}, nil, err
+		return LoginResult{}, err
 	}
 
-	if err := VerifyPassword(u.PasswordHash, plaintext); err != nil {
+	if err := VerifyPassword(u.PasswordHash, in.Password); err != nil {
 		if errors.Is(err, ErrBadCredentials) {
-			return domain.User{}, nil, &wrongPasswordError{userID: u.ID}
+			return LoginResult{}, &wrongPasswordError{userID: u.ID}
 		}
-		return domain.User{}, nil, err
-	}
-
-	tenants, err := s.store.TenantsForUser(ctx, u.ID)
-	if err != nil {
-		return domain.User{}, nil, fmt.Errorf("load tenants: %w", err)
-	}
-	if len(tenants) == 0 {
-		// User exists but has no tenant — operator data corruption.
-		// Refuse login rather than mint a session into nothing.
-		return domain.User{}, nil, errs.InvalidState(
-			"user has no tenant membership; contact your administrator")
+		return LoginResult{}, err
 	}
 
 	now := s.clock.Now(ctx)
-	_ = s.store.TouchLastLogin(ctx, u.ID, now)
+	var rawID string
+	var sess session.Session
+	tenantID, err := s.store.SignIn(ctx, u.ID, u.PasswordHash, now, func(tx *sql.Tx, tenantID string) error {
+		// The browser's cookie is about to be replaced, so the session it
+		// named ends here, whoever it belongs to.
+		ended, err := s.sessions.EndTx(ctx, tx, in.SessionCookie)
+		if err != nil {
+			return fmt.Errorf("end the previous session: %w", err)
+		}
+		rawID, sess, err = s.sessions.IssueTx(ctx, tx, session.IssueInput{
+			UserID:    u.ID,
+			TenantID:  tenantID,
+			Livemode:  false, // dashboard sessions start in test mode
+			UserAgent: in.UserAgent,
+			IP:        in.IP,
+		})
+		if err != nil {
+			return fmt.Errorf("create the session: %w", err)
+		}
+		// The user is the actor. The row records the address the session
+		// row records. No email in the label: resource_id is the user id,
+		// and audit_log is append-only, so an email written here could
+		// never be erased. previous_session_ended says the sign-in ended
+		// the session the browser held, without naming whose it was.
+		meta := map[string]any{"livemode": sess.Livemode}
+		if ended {
+			meta["previous_session_ended"] = true
+		}
+		actx := audit.WithClientIP(auth.WithUserID(ctx, u.ID), in.IP)
+		if err := s.audit.LogInTx(actx, tx, audit.Entry{
+			Action:       "login",
+			ResourceType: "user",
+			ResourceID:   u.ID,
+			Metadata:     meta,
+		}); err != nil {
+			return fmt.Errorf("write the audit row: %w", err)
+		}
+		return nil
+	})
+	if errors.Is(err, errPasswordChanged) {
+		return LoginResult{}, &wrongPasswordError{userID: u.ID}
+	}
+	if errors.Is(err, errNoWorkspace) {
+		// Refuse rather than mint a session into nothing.
+		return LoginResult{}, errs.InvalidState(
+			"user has no tenant membership; contact your administrator")
+	}
+	if err != nil {
+		return LoginResult{}, err
+	}
 	u.LastLoginAt = &now
-	return u, tenants, nil
+	return LoginResult{User: u, TenantID: tenantID, RawSessionID: rawID, Session: sess}, nil
 }
 
 // IssueResetToken generates a fresh reset token for the user with the
@@ -237,7 +309,7 @@ func (s *Service) IssueResetToken(ctx context.Context, email string) (plaintext,
 	}
 	if len(tenants) == 0 {
 		// User exists but isn't attached to any tenant — same posture
-		// as Authenticate's "no tenant memberships" check. Refuse to
+		// as Login's "no tenant memberships" refusal. Refuse to
 		// mint a token rather than enqueue an email with empty
 		// tenant_id (which the outbox FK would reject anyway).
 		return "", "", "", nil

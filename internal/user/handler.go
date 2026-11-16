@@ -29,7 +29,6 @@ import (
 // concrete *session.Service. A guarantee you cannot write a failing test for is a
 // guarantee you do not have.
 type SessionService interface {
-	Issue(ctx context.Context, in session.IssueInput) (string, session.Session, error)
 	Resolve(ctx context.Context, rawID string) (session.Session, error)
 	Revoke(ctx context.Context, rawID string) error
 	SetLivemode(ctx context.Context, rawID string, livemode bool) error
@@ -62,19 +61,20 @@ func (h *Handler) SetLoginThrottle(t *LoginThrottle) { h.throttle = t }
 // AuditRecorder is the narrow audit surface the auth handler needs — kept here
 // (not an import of *audit.Logger) so internal/user stays decoupled. Production
 // wires *audit.Logger via SetAuditLogger in router.go. Optional: nil = the
-// handler skips audit writes (login, logout and the reset request still work;
-// they just leave no row), which is the safe default for the unit tests that
-// build a bare handler.
+// handler skips audit writes (logout, the mode switch and the reset request
+// still work; they just leave no row), which is the safe default for the unit
+// tests that build a bare handler.
 type AuditRecorder interface {
 	Log(ctx context.Context, tenantID, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
 }
 
 // SetAuditLogger wires the audit recorder used to log authenticated auth
-// events (login, logout, mode change, password-reset request). Without it
-// those events are not audited. Failed logins are NOT routed here — they're
-// pre-auth (no tenant to scope a per-tenant audit row, and surfacing
-// email-existence in the log would be an enumeration oracle), so they go to
-// the structured security log instead.
+// events (logout, mode change, password-reset request). Without it those
+// events are not audited. A sign-in writes its row on its own transaction
+// (Service.Login), not through this recorder. Failed logins are NOT routed
+// here — they're pre-auth (no tenant to scope a per-tenant audit row, and
+// surfacing email-existence in the log would be an enumeration oracle), so
+// they go to the structured security log instead.
 func (h *Handler) SetAuditLogger(a AuditRecorder) { h.auditLogger = a }
 
 // auditAuthEvent writes one audit row for an authenticated auth event. It
@@ -90,11 +90,12 @@ func (h *Handler) SetAuditLogger(a AuditRecorder) { h.auditLogger = a }
 // session middleware, so the ctx carries no livemode and the audit writer's TxTenant
 // would refuse to open (every auth audit row silently failed this way until 2026-07-06).
 //
-// Auth events are ACCOUNT-PLANE — a login is a login, not a "test-mode login" — so
-// they are ALL filed in the canonical (test) partition, whatever the session's mode.
+// Auth events are ACCOUNT-PLANE — a sign-out is a sign-out, not a "test-mode
+// sign-out" — so they are ALL filed in the canonical (test) partition, whatever the
+// session's mode. A sign-in files its row the same way, in PostgresStore.SignIn.
 // They used to inherit the session's mode, which meant the same event landed in a
 // different partition depending on which way the operator's Test/Live toggle
-// happened to be pointing, and "when did they last sign in?" had no reliable answer.
+// happened to be pointing, and "when did they last sign out?" had no reliable answer.
 //
 // Accepted loss, stated rather than glossed: an operator viewing the audit log in
 // LIVE mode does not see these rows. See the note in tenant/settings.go for why the
@@ -175,7 +176,9 @@ type LoginResponse struct {
 // login authenticates the operator's email + password and mints a
 // session cookie. Failures collapse into a single 401 with a
 // constant-time bcrypt check on the not-found path so we don't leak
-// account existence via response timing.
+// account existence via response timing. The session, the end of the
+// session the request's cookie named, last_login_at and the login audit
+// row commit together (Service.Login).
 func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	var req LoginReq
 	if !respond.DecodeStrict(w, r, &req) {
@@ -219,7 +222,19 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	u, tenants, err := h.users.Authenticate(r.Context(), req.Email, req.Password)
+	// The session the request's cookie named ends in the sign-in's
+	// transaction: the new cookie replaces it in this browser.
+	var oldSession string
+	if c, err := r.Cookie(session.CookieName); err == nil {
+		oldSession = c.Value
+	}
+	res, err := h.users.Login(r.Context(), LoginInput{
+		Email:         req.Email,
+		Password:      req.Password,
+		UserAgent:     r.UserAgent(),
+		IP:            ip,
+		SessionCookie: oldSession,
+	})
 	if err != nil {
 		if errors.Is(err, ErrBadCredentials) {
 			// Failed logins are a SOC-2 CC6.1 signal (brute force / credential
@@ -249,45 +264,23 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.throttle != nil {
-		// The right password marks this browser and clears the counts this
-		// attempt was held by (LoginThrottle.SignedIn). A failure here does
-		// not undo the sign-in; the counts fade within a day.
+		// The committed sign-in marks this browser and clears the counts this
+		// attempt was held by (LoginThrottle.SignedIn). It runs after the
+		// commit, so a sign-in that rolled back clears nothing. A failure here
+		// does not undo the sign-in; the counts fade within a day.
 		if err := h.throttle.SignedIn(w, r, req.Email, verdict); err != nil {
-			slog.ErrorContext(r.Context(), "auth: sign-in throttle not cleared after a sign-in", "user_id", u.ID, "error", err)
+			slog.ErrorContext(r.Context(), "auth: sign-in throttle not cleared after a sign-in", "user_id", res.User.ID, "error", err)
 		}
 	}
 
-	// V1: each user belongs to exactly one tenant. The Authenticate
-	// call already errored out on zero tenants. Pick the first.
-	tenant := tenants[0]
-
-	rawID, sess, err := h.sessions.Issue(r.Context(), session.IssueInput{
-		UserID:    u.ID,
-		TenantID:  tenant.TenantID,
-		Livemode:  false, // dashboard sessions default to test mode; bearer for live
-		UserAgent: r.UserAgent(),
-		IP:        ip,
-	})
-	if err != nil {
-		slog.Error("session: issue failed", "err", err, "user_id", u.ID)
-		recordLogin("error")
-		respond.InternalError(w, r)
-		return
-	}
-
 	recordLogin("ok")
-	h.cookie.SetCookie(w, rawID, sess.ExpiresAt)
-	// No email in the label: resource_id IS the user id, and the reader resolves the
-	// address from the (erasable) users row. audit_log is append-only — an email
-	// written here could never be deleted.
-	h.auditAuthEvent(r.Context(), r, u.ID, tenant.TenantID, "login", u.ID, "",
-		map[string]any{"livemode": sess.Livemode})
+	h.cookie.SetCookie(w, res.RawSessionID, res.Session.ExpiresAt)
 	respond.JSON(w, r, http.StatusOK, LoginResponse{
-		UserID:    u.ID,
-		TenantID:  tenant.TenantID,
-		Email:     u.Email,
-		Livemode:  sess.Livemode,
-		ExpiresAt: sess.ExpiresAt.Format("2006-01-02T15:04:05Z07:00"),
+		UserID:    res.User.ID,
+		TenantID:  res.TenantID,
+		Email:     res.User.Email,
+		Livemode:  res.Session.Livemode,
+		ExpiresAt: res.Session.ExpiresAt.Format("2006-01-02T15:04:05Z07:00"),
 	})
 }
 

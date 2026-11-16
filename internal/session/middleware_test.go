@@ -25,7 +25,11 @@ type fakeSessionStore struct {
 	outage   bool
 }
 
-func (f *fakeSessionStore) Insert(context.Context, Session) error { return nil }
+func (f *fakeSessionStore) Insert(context.Context, Session) error            { return nil }
+func (f *fakeSessionStore) InsertTx(context.Context, *sql.Tx, Session) error { return nil }
+func (f *fakeSessionStore) RevokeTx(context.Context, *sql.Tx, string) (bool, error) {
+	return false, nil
+}
 func (f *fakeSessionStore) GetByIDHash(_ context.Context, idHash string) (Session, error) {
 	if f.outage {
 		return Session{}, errors.New("checkout conn: dial tcp 127.0.0.1:5432: connect: connection refused")
