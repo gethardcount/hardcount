@@ -30,7 +30,7 @@ Everything below is in your Postgres database. Besides it, Hardcount keeps only 
 | Card details | `payment_methods`: brand, last 4 digits, expiry month and year, Stripe fingerprint and ID; `invoices.payment_card_brand`, `.payment_card_last4` | Plain | Dashboard, API |
 | Invoice contents | `invoices`, `invoice_line_items`, `credit_notes` | Plain | Invoice CSV export, PDFs, emails, outbound webhooks |
 | Usage events | `usage_events`, with your `properties` JSON | Plain | Usage CSV export |
-| IP addresses | `audit_log.ip_address`, `dashboard_sessions.ip` (with the browser's user agent) | Plain | Sign-in log lines, traces (with the user agent), the Compose stack's nginx log (with the user agent) |
+| IP addresses | `audit_log.ip_address`, `dashboard_sessions.ip` (with the browser's user agent) | Plain | The access log (one line per request), sign-in log lines, traces (with the user agent), the Compose stack's nginx log (with the user agent) |
 | Dashboard users' emails | `users.email`, `member_invitations.email` | Plain | Audit log display (joined when read, not stored there), email queue (plain), server log |
 | Passwords | `users.password_hash` | bcrypt, cost 12 | Nowhere |
 | Sign-in cookie | `dashboard_sessions.id_hash` | SHA-256 | The browser holds the raw value in an `HttpOnly`, `SameSite=Lax` cookie, `Secure` in staging and production |
@@ -69,7 +69,7 @@ Hardcount sends nothing to its maintainers: no usage statistics and no update ch
 
 Logs are JSON on standard output. Where they go, and how long they stay, is up to you.
 
-- **One line per request:** method, route (or the path, when no route matched), status, duration and request ID. No query strings, request bodies or names. Link tokens are removed from paths ([SECURITY.md](../../SECURITY.md#hardening-status)). The line also has `actor_type`, `actor_id` and `ip` fields, which are not filled in yet: they say `system` and hold no address or account.
+- **One line per request:** method, route (or the path, when no route matched), status, duration and request ID. No query strings, request bodies or names. Link tokens are removed from paths ([SECURITY.md](../../SECURITY.md#hardening-status)). Every line holds the client IP (`ip`). A request made with an API key or a dashboard session also names the caller, by ID only: `actor_type` (`api_key` or `user`), `actor_id` and the account (`tenant_id`). Any other request, such as a payment page, a webhook, a sign-in or one refused with `401`, says `anonymous`.
 - **One line per email sent or failed:** it names the recipient's address and the subject. A refused CC address is logged too.
 - **Sign-in lines:** a failed or throttled sign-in names the client IP, the user ID when the email has an account, and a short hash of the email, never the email itself.
 - **The Compose stack's nginx log:** client IP, method, path with link tokens removed, status, referrer, user agent and `X-Forwarded-For`.

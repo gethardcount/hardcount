@@ -9,6 +9,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -85,6 +86,13 @@ func TestMiddlewareOrAPIKey_APIKey(t *testing.T) {
 			}
 			if live, err := postgres.Livemode(ctx); err != nil || live {
 				t.Errorf("livemode = %v (%v), want test mode", live, err)
+			}
+			// The layer above reads the caller from the request's record.
+			outer := request.WithRecord(t.Context())
+			serve(keys, keyRequest(header, created.RawKey).WithContext(outer))
+			want := request.Caller{ActorType: "api_key", ActorID: created.Key.ID, TenantID: tenantID}
+			if got := request.CallerOf(outer); got != want {
+				t.Errorf("caller on the record = %+v, want %+v", got, want)
 			}
 		})
 	}

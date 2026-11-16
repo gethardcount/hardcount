@@ -317,6 +317,7 @@ func (h *Handler) setMode(w http.ResponseWriter, r *http.Request) {
 		respond.Unauthorized(w, r, "invalid or expired session")
 		return
 	}
+	session.NameCaller(r.Context(), sess)
 
 	if err := h.sessions.SetLivemode(r.Context(), c.Value, req.Livemode); err != nil {
 		if errors.Is(err, session.ErrNotFound) {
@@ -383,6 +384,9 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	// Resolve BEFORE revoke: after it, the token no longer names anyone, and an
 	// audit row with no actor is barely a row at all.
 	sess, rerr := h.sessions.Resolve(r.Context(), c.Value)
+	if rerr == nil {
+		session.NameCaller(r.Context(), sess)
+	}
 
 	if revokeErr := h.sessions.Revoke(r.Context(), c.Value); revokeErr != nil {
 		// The session is still live. Clearing the cookie here would hand the user a

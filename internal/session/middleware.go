@@ -11,6 +11,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/platform/logging"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
 // ErrNoCredentials means the request carries neither a session cookie that
@@ -87,6 +88,8 @@ func MiddlewareOrAPIKey(sessSvc *Service, keySvc *auth.Service) func(http.Handle
 			var unavailable unavailableError
 			switch {
 			case err == nil:
+				// The access log wraps this middleware and cannot see ctx.
+				request.SetCaller(ctx, callerIn(ctx))
 				next.ServeHTTP(w, r.WithContext(ctx))
 			case errors.Is(err, ErrNoCredentials):
 				respond.Unauthorized(w, r, "missing credentials — sign in at /login or send Authorization: Bearer hc_secret_...")
@@ -103,6 +106,26 @@ func MiddlewareOrAPIKey(sessSvc *Service, keySvc *auth.Service) func(http.Handle
 			}
 		})
 	}
+}
+
+// callerIn names the one caller Authenticate's context carries: a session's
+// user or an API key. It repeats audit.ResolveActor's names for the two,
+// because session may not import audit (internal/arch/boundaries_test.go);
+// TestCallerIn_APIKey and TestMiddlewareOrAPIKey_NamesTheCallerOnTheRecord
+// fail if the two differ.
+func callerIn(ctx context.Context) request.Caller {
+	c := request.Caller{ActorType: "api_key", ActorID: auth.KeyID(ctx), TenantID: auth.TenantID(ctx)}
+	if userID := auth.UserID(ctx); userID != "" {
+		c.ActorType, c.ActorID = "user", userID
+	}
+	return c
+}
+
+// NameCaller names s's user on the request's record, for the access log. It
+// is for a handler that resolves the session cookie itself (sign-out and the
+// mode switch); MiddlewareOrAPIKey names the caller of every route behind it.
+func NameCaller(ctx context.Context, s Session) {
+	request.SetCaller(ctx, request.Caller{ActorType: "user", ActorID: s.UserID, TenantID: s.TenantID})
 }
 
 func applyToCtx(ctx context.Context, s Session) context.Context {

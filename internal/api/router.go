@@ -39,6 +39,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/crypto"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 	"github.com/gethardcount/hardcount/internal/pricing"
 	"github.com/gethardcount/hardcount/internal/recipe"
 	"github.com/gethardcount/hardcount/internal/session"
@@ -2030,15 +2031,19 @@ func handleDeepHealth(db *postgres.DB) http.HandlerFunc {
 	}
 }
 
-// requestLogger writes the access log. Each line says who made the request
-// and which tenant it touched, not only the method, path, status and
-// duration. So after an incident the log can answer "what did this actor
-// do" and "which tenant was affected". The request_id on each line joins
-// it to the audit row that the same request wrote.
+// requestLogger writes the access log. Each line says who made the request,
+// which tenant it touched and from which address, not only the method, path,
+// status and duration. So after an incident the log can answer "what did this
+// caller do" and "which tenant was affected". The request_id on each line
+// joins it to the audit row that the same request wrote.
 //
-// The identity fields come from audit.ResolveActor, the resolver the audit
-// rows use, so a request cannot be one actor in the log and another in the
-// evidence.
+// The caller is the API key or dashboard session the request was made with,
+// under the audit log's names for it. session.MiddlewareOrAPIKey names it;
+// sign-out and the mode switch read the session cookie themselves and name
+// it too (session.NameCaller). Any other request is "anonymous": a public
+// page, a webhook, a sign-in, or one refused before a caller was accepted. A
+// public token page and a webhook learn their account inside the handler, so
+// their lines have no tenant_id.
 //
 // Only the actor id is logged, not the name. A user actor's name is an
 // email, and logs go to sinks that cannot erase data. For the same reason,
@@ -2047,32 +2052,28 @@ func requestLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
+		// Authentication runs inside this middleware and hands its handler a
+		// new request, so r's context never learns the caller. Authentication
+		// writes the caller on this record.
+		ctx := request.WithRecord(r.Context())
+		r = r.WithContext(ctx)
 		next.ServeHTTP(ww, r)
-
-		// Read the identity after the handler. Auth runs after this
-		// middleware, so before ServeHTTP the context is still anonymous.
-		ctx := r.Context()
-		actorType, actorID := audit.ResolveActor(ctx)
 
 		attrs := []any{
 			"method", r.Method,
 			"path", loggablePath(r),
 			"status", ww.Status(),
 			"duration_ms", time.Since(start).Milliseconds(),
-			"actor_type", actorType,
-			// Never empty. ResolveActor answers "system"/"system" for an
-			// unauthenticated request. That is a real answer, not a missing
-			// one, and the audit row would record the same.
-			"actor_id", actorID,
 			// Joins this line to the audit row the same request wrote.
 			"request_id", middleware.GetReqID(ctx),
-			"ip", audit.ClientIP(ctx),
+			"ip", audit.ExtractClientIP(r),
 		}
-		// Omit the field rather than log it empty. An unauthenticated request
-		// has no tenant, and a blank field reads as "we lost it" instead of
-		// "there wasn't one".
-		if tenantID := auth.TenantID(ctx); tenantID != "" {
-			attrs = append(attrs, "tenant_id", tenantID)
+		if caller := request.CallerOf(ctx); caller != (request.Caller{}) {
+			attrs = append(attrs, "actor_type", caller.ActorType, "actor_id", caller.ActorID, "tenant_id", caller.TenantID)
+		} else {
+			// No actor_id or tenant_id: a blank field reads as "we lost it",
+			// not "there was none".
+			attrs = append(attrs, "actor_type", "anonymous")
 		}
 		slog.Info("request", attrs...)
 	})
