@@ -167,9 +167,10 @@ func (r *instantRig) cycleInvoices() [][2]*time.Time {
 
 // The manual billing run is a job that a request starts, so it runs as the
 // scheduled run does: its handler drops the door's instant, and each
-// subscription is billed on its own reads of the server's clock, none of
-// them the door's. The door reads once (a real-time route); the run reads as
-// on main. The invoices are dated at their period's boundary. In both modes.
+// subscription is billed on its own instant, none of them the door's. Four
+// reads of the server's clock: the door's (a real-time route), the run's due
+// cutoff, then one per subscription. The invoices are dated at their
+// period's boundary. In both modes.
 func TestBillingRun_EachSubscriptionIsBilledOnItsOwnTime(t *testing.T) {
 	for _, live := range []bool{false, true} {
 		t.Run(map[bool]string{false: "test mode", true: "live"}[live], func(t *testing.T) {
@@ -180,11 +181,11 @@ func TestBillingRun_EachSubscriptionIsBilledOnItsOwnTime(t *testing.T) {
 			r.clk.stepFrom(start)
 			r.must(http.MethodPost, "/v1/billing/run", time.Time{}, nil, http.StatusOK)
 			_, reads := r.clk.count()
-			door := start.Add(time.Second) // the request's first read
 			up := r.subsUpdated(a, b)
-			if reads <= 3 || up[0].Equal(up[1]) || up[0].Equal(door) || up[1].Equal(door) {
-				t.Errorf("%d server reads; closed periods updated %v and %v; want the run to read on its own (more than the door's read and one per row), each row apart, neither at the door's %v",
-					reads, up[0], up[1], door)
+			rows := map[time.Time]bool{start.Add(3 * time.Second): true, start.Add(4 * time.Second): true}
+			if reads != 4 || up[0].Equal(up[1]) || !rows[up[0]] || !rows[up[1]] {
+				t.Errorf("%d server reads; closed periods updated %v and %v; want 4 reads (door, cutoff, one per row), each row at its own read (%v)",
+					reads, up[0], up[1], rows)
 			}
 			for i, inv := range r.cycleInvoices() {
 				if !inv[0].Equal(lagB) || inv[1] == nil || !inv[1].UTC().Equal(lagB) {
