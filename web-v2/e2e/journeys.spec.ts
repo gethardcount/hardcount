@@ -1167,6 +1167,8 @@ test('a usage-only API key is made from the dialog and shows its type in the lis
   await page.goto('/api-keys')
   await page.getByRole('button', { name: 'Create API key' }).click()
   const dialog = page.getByRole('dialog', { name: 'Create API key' })
+  // The dashboard is in test mode, and the key made below is a test key.
+  await expect(dialog.getByText('This key will work in test mode only.')).toBeVisible()
   // Secret stays the default; the operator picks the other type.
   await expect(dialog.getByRole('radio', { name: /^Secret/ })).toHaveAttribute('aria-checked', 'true')
   await dialog.getByRole('radio', { name: /^Usage only/ }).click()
@@ -1482,7 +1484,7 @@ test('list pages say what each one is for', async ({ page }) => {
   const pages: [string, string][] = [
     ['/credit-notes', 'A credit note takes money off an invoice.'],
     ['/webhooks', 'Hardcount calls a URL in your app when something happens'],
-    ['/api-keys', 'Keys your app uses to call the Hardcount API'],
+    ['/api-keys', 'Keys your server uses to call the Hardcount API'],
     ['/settings', 'Your business details, invoice defaults, tax and payment setup'],
   ]
   for (const [path, text] of pages) {
