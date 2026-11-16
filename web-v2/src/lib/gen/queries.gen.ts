@@ -7234,8 +7234,8 @@ export const getRemoveSubscriptionItemUrl = (id: string,
 }
 
 /**
- * Removes an item from the subscription. The last item of an active
- * subscription cannot be removed; cancel the subscription instead. A
+ * Removes an item from the subscription. A subscription's last item
+ * cannot be removed; cancel the subscription instead. A
  * period that ended and is not invoiced yet is billed first. Takes
  * no body.
  *
