@@ -293,7 +293,8 @@ func (h *Handler) setMode(w http.ResponseWriter, r *http.Request) {
 
 	sess, found, err := h.users.SetMode(r.Context(), c.Value, *req.Livemode)
 	if err != nil {
-		slog.Error("session: set livemode failed", "err", err)
+		// The session keeps its mode.
+		slog.ErrorContext(r.Context(), "mode switch failed; the session keeps its mode", "error", err)
 		respond.InternalError(w, r)
 		return
 	}
@@ -339,8 +340,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	sess, found, err := h.users.Logout(r.Context(), c.Value)
 	if err != nil {
 		// The session still works, so the cookie stays.
-		slog.ErrorContext(r.Context(), "session revoke failed; logout NOT performed",
-			"error", err)
+		slog.ErrorContext(r.Context(), "sign-out failed; the session is still signed in", "error", err)
 		respond.InternalError(w, r)
 		return
 	}
