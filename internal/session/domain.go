@@ -1,9 +1,10 @@
 // Package session implements dashboard sessions, issued by the email and
 // password login (ADR-011). The browser holds an httpOnly cookie with a random
-// id; the database stores only its hash (HashID). Service.Issue mints a
-// session, Resolve turns a cookie into its session, End, EndTx,
-// EndAllForUserTx and EndForMemberTx end sessions, and SetLivemode switches a
-// session's mode.
+// id; the database stores only its hash (HashID). A session is live while it
+// is not revoked and not expired, and every method here applies that rule.
+// Service.Issue and IssueTx mint a session, Resolve turns a cookie into its
+// session, End, EndTx, EndAllForUserTx and EndForMemberTx end sessions, and
+// SetLivemode switches a session's mode.
 package session
 
 import (

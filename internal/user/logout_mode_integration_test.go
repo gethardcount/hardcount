@@ -58,9 +58,9 @@ func (it loginIT) expire(t *testing.T, raw string) {
 
 // authRow is one audit row of the user, in the fields these tests check.
 type authRow struct {
-	actorType, actorID string
-	livemode           bool
-	metadata           string
+	tenantID, actorType, actorID string
+	livemode                     bool
+	metadata                     string
 }
 
 // authRows is every audit row with action whose resource is the user,
@@ -73,7 +73,7 @@ func (it loginIT) authRows(t *testing.T, action string) []authRow {
 	}
 	defer postgres.Rollback(tx)
 	rows, err := tx.QueryContext(t.Context(), `
-		SELECT actor_type, actor_id, livemode, metadata::text FROM audit_log
+		SELECT tenant_id, actor_type, actor_id, livemode, metadata::text FROM audit_log
 		WHERE action = $1 AND resource_type = 'user' AND resource_id = $2
 		ORDER BY created_at, id`, action, it.userID)
 	if err != nil {
@@ -83,7 +83,7 @@ func (it loginIT) authRows(t *testing.T, action string) []authRow {
 	var out []authRow
 	for rows.Next() {
 		var r authRow
-		if err := rows.Scan(&r.actorType, &r.actorID, &r.livemode, &r.metadata); err != nil {
+		if err := rows.Scan(&r.tenantID, &r.actorType, &r.actorID, &r.livemode, &r.metadata); err != nil {
 			t.Fatal(err)
 		}
 		out = append(out, r)
@@ -162,9 +162,9 @@ func TestLogout_EndsTheSessionAndWritesOneRow(t *testing.T) {
 	if _, err := it.sessSvc.Resolve(t.Context(), raw); !errors.Is(err, session.ErrNotFound) {
 		t.Errorf("resolve the session after the sign-out: err = %v, want session.ErrNotFound", err)
 	}
-	want := []authRow{{actorType: "user", actorID: it.userID, livemode: false, metadata: "{}"}}
-	if got := it.authRows(t, "logout"); len(got) != 1 || got[0] != want[0] {
-		t.Fatalf("logout rows = %+v, want %+v", got, want)
+	want := authRow{tenantID: it.tenantID, actorType: "user", actorID: it.userID, livemode: false, metadata: "{}"}
+	if got := it.authRows(t, "logout"); len(got) != 1 || got[0] != want {
+		t.Fatalf("logout rows = %+v, want [%+v]", got, want)
 	}
 
 	rr = postAuth(h, "/logout", raw, "")
@@ -179,10 +179,11 @@ func TestLogout_EndsTheSessionAndWritesOneRow(t *testing.T) {
 	}
 }
 
-// TestLogout_AnExpiredOrUnknownSessionWritesNothing: a cookie for an expired
-// or unknown session gets 204, the cookie cleared and no row. A request with
-// no cookie gets 204 and no Set-Cookie at all.
-func TestLogout_AnExpiredOrUnknownSessionWritesNothing(t *testing.T) {
+// TestLogout_WithNoLiveSessionWritesNothing: a cookie for an expired or
+// unknown session gets 204, the cookie cleared and no row. A request with no
+// cookie gets 204 and no Set-Cookie at all, so a cross-site request cannot
+// clear the browser's cookie.
+func TestLogout_WithNoLiveSessionWritesNothing(t *testing.T) {
 	it := newLoginIT(t)
 	expired := it.sessionIn(t, false)
 	it.expire(t, expired)
@@ -235,11 +236,11 @@ func TestSetMode_AFailedAuditRowLeavesTheMode(t *testing.T) {
 	}
 }
 
-// TestSetMode_RequiresLivemode: a body without livemode is a 422 on param
-// livemode and leaves the mode. {"livemode": true} switches the session to
-// live mode and writes one mode_changed row, filed in test mode, with the new
-// mode in its metadata. An expired or unknown session gets 401 and no row.
-func TestSetMode_RequiresLivemode(t *testing.T) {
+// TestSetMode: a body without livemode is a 422 on param livemode and leaves
+// the mode. {"livemode": true} switches the session to live mode and writes
+// one mode_changed row, filed in test mode, with the new mode in its
+// metadata. An expired, signed-out or unknown session gets 401 and no row.
+func TestSetMode(t *testing.T) {
 	it := newLoginIT(t)
 	h := it.authHandler(audit.NewLogger(it.db))
 
@@ -266,15 +267,20 @@ func TestSetMode_RequiresLivemode(t *testing.T) {
 	if sess, err := it.sessSvc.Resolve(t.Context(), raw); err != nil || !sess.Livemode {
 		t.Errorf("session after the switch: livemode %v, err %v; want live mode, no error", sess.Livemode, err)
 	}
-	want := authRow{actorType: "user", actorID: it.userID, livemode: false, metadata: `{"livemode": true}`}
+	want := authRow{tenantID: it.tenantID, actorType: "user", actorID: it.userID, livemode: false, metadata: `{"livemode": true}`}
 	if got := it.authRows(t, "mode_changed"); len(got) != 1 || got[0] != want {
 		t.Fatalf("mode_changed rows = %+v, want [%+v]", got, want)
 	}
 
 	expired := it.sessionIn(t, false)
 	it.expire(t, expired)
+	signedOut := it.sessionIn(t, false)
+	if rr := postAuth(h, "/logout", signedOut, ""); rr.Code != http.StatusNoContent {
+		t.Fatalf("sign-out: status %d, want 204", rr.Code)
+	}
 	for _, c := range []struct{ name, cookie string }{
 		{"expired session", expired},
+		{"signed-out session", signedOut},
 		{"unknown session", "not-a-session-id"},
 	} {
 		rr := postAuth(h, "/mode", c.cookie, `{"livemode": true}`)

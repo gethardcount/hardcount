@@ -1283,8 +1283,8 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	sessionSvc := session.NewService(session.NewPostgresStore(db))
 
 	// User accounts: email and password sign-in for the dashboard (ADR-011).
-	// The auth handler serves /v1/auth/login, /v1/auth/logout and the
-	// password-reset flow.
+	// The auth handler serves sign-in, sign-out, the mode switch and the
+	// password-reset flow under /v1/auth.
 	userStore := user.NewPostgresStore(db)
 	// A sign-in creates its session, a sign-out ends it, a mode switch
 	// changes it and a password reset ends the user's sessions, each with its

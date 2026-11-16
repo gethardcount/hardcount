@@ -35,7 +35,7 @@ type Service struct {
 }
 
 // SessionWriter changes sessions. The Tx methods write on the caller's
-// transaction. End and SetLivemode open their own and run a hook on it.
+// transaction. End and SetLivemode open their own transaction and run a hook on it.
 // *session.Service satisfies it.
 type SessionWriter interface {
 	IssueTx(ctx context.Context, tx *sql.Tx, in session.IssueInput) (rawID string, sess session.Session, err error)
@@ -51,9 +51,9 @@ type AuditTxWriter interface {
 	LogInTx(ctx context.Context, tx *sql.Tx, e audit.Entry) error
 }
 
-// NewService returns a Service. sessions and auditor join the transactions
-// of the sign-in, the sign-out, the mode switch and the password reset, so
-// the session changes and the audit row commit with the rest of each.
+// NewService returns a Service. sessions and auditor write on the sign-in's
+// and the password reset's transactions. For a sign-out and a mode switch,
+// sessions owns the transaction and calls a hook that writes the audit row.
 func NewService(store Store, clk clock.Clock, sessions SessionWriter, auditor AuditTxWriter) *Service {
 	if clk == nil {
 		clk = clock.Real()

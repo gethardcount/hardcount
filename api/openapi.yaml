@@ -22801,8 +22801,8 @@ paths:
           description: |
             The request has no session cookie
             (`missing session — sign in at /login`), or its session has ended
-            (`invalid or expired session`). The cookie is checked before the
-            body.
+            (`invalid or expired session`). A missing cookie is answered
+            before the body is read; an ended session after it.
           content:
             application/json:
               schema:

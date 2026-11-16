@@ -138,13 +138,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, [])
 
   const logout = useCallback(async () => {
-    try {
-      await authApi.logout()
-    } catch (err) {
-      // Cookie may already be expired server-side; treat as a local
-      // clear and keep going.
-      console.warn('logout request failed:', err)
-    }
+    // A failed sign-out throws and keeps the user: the server still holds
+    // the session, so the screen must not say it is gone.
+    await authApi.logout()
     setUser(null)
   }, [])
 

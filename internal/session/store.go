@@ -108,15 +108,15 @@ func (s *postgresStore) GetByIDHash(ctx context.Context, idHash string) (Session
 	return sess, nil
 }
 
-// RevokeTx revokes the session whose hash is idHash on the caller's
-// transaction, whoever it belongs to, and reports whether it revoked one. A
-// revoked or unknown hash changes nothing. It does not commit. The caller's
+// RevokeTx ends the live session whose hash is idHash on the caller's
+// transaction, whoever it belongs to, and reports whether it ended one. A
+// revoked, expired or unknown hash changes nothing. It does not commit. The caller's
 // transaction must see the row in either mode: a bypass transaction does.
 func (s *postgresStore) RevokeTx(ctx context.Context, tx *sql.Tx, idHash string) (bool, error) {
 	res, err := tx.ExecContext(ctx, `
 		UPDATE dashboard_sessions
 		SET revoked_at = $1
-		WHERE id_hash = $2 AND revoked_at IS NULL
+		WHERE id_hash = $2 AND revoked_at IS NULL AND expires_at > $1
 	`, time.Now().UTC(), idHash)
 	if err != nil {
 		return false, err
@@ -155,16 +155,11 @@ func (s *postgresStore) EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, 
 	return err
 }
 
-// EndWith ends a live session in one bypass transaction and returns it,
-// ended. A live session is not revoked and not expired, the rule
-// Service.Resolve applies. When the session whose hash is idHash is live, it
-// stamps revoked_at, stamps app.tenant_id with the session's tenant and
-// app.livemode off for an audit row, and calls then. then runs last, on the
-// same transaction, with the session. It must not commit or roll back tx; an
-// error it returns rolls the sign-out back and is returned.
-//
-// The bool reports whether a live session was found. When none was (an
-// unknown, revoked or expired hash), nothing changes and then is not called.
+// EndWith ends the live session whose hash is idHash and calls then on the
+// same bypass transaction, so the sign-out and then's writes commit or roll
+// back together. It returns the ended session and whether one was found; with
+// none, nothing changes and then is not called. then must not commit or roll
+// back tx; its error rolls the sign-out back and is returned.
 func (s *postgresStore) EndWith(ctx context.Context, idHash string, then func(tx *sql.Tx, sess Session) error) (Session, bool, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -190,17 +185,9 @@ func (s *postgresStore) EndWith(ctx context.Context, idHash string, then func(tx
 	return sess, true, nil
 }
 
-// SetLivemodeWith switches a live session to livemode in one bypass
-// transaction and returns it in its new mode. A live session is not revoked
-// and not expired, the rule Service.Resolve applies. When the session whose
-// hash is idHash is live, it writes the mode, stamps app.tenant_id with the
-// session's tenant and app.livemode off for an audit row, whatever the new
-// mode, and calls then. then runs last, on the same transaction, with the
-// session. It must not commit or roll back tx; an error it returns rolls the
-// switch back and is returned.
-//
-// The bool reports whether a live session was found. When none was (an
-// unknown, revoked or expired hash), nothing changes and then is not called.
+// SetLivemodeWith switches the live session whose hash is idHash to livemode
+// and calls then, under EndWith's contract. It returns the session in its new
+// mode.
 func (s *postgresStore) SetLivemodeWith(ctx context.Context, idHash string, livemode bool, then func(tx *sql.Tx, sess Session) error) (Session, bool, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -225,12 +212,11 @@ func (s *postgresStore) SetLivemodeWith(ctx context.Context, idHash string, live
 	return sess, true, nil
 }
 
-// auditThenCommit finishes EndWith's and SetLivemodeWith's transaction: it
-// stamps app.tenant_id with the session's tenant and app.livemode off, calls
-// then and commits.
+// auditThenCommit finishes EndWith's and SetLivemodeWith's transaction. It
+// sets what audit.Logger.LogInTx reads for the row (app.tenant_id, the
+// session's tenant, and app.livemode off: account events are filed in test
+// mode), calls then and commits.
 func auditThenCommit(ctx context.Context, tx *sql.Tx, sess Session, then func(tx *sql.Tx, sess Session) error) error {
-	// audit.Logger.LogInTx reads the row's tenant from app.tenant_id and its
-	// mode from app.livemode. Account events are filed in test mode.
 	if _, err := tx.ExecContext(ctx, `SELECT set_config('app.tenant_id', $1, true)`, sess.TenantID); err != nil {
 		return fmt.Errorf("stamp tenant: %w", err)
 	}

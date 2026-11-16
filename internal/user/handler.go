@@ -43,55 +43,33 @@ type Handler struct {
 // one checks every password, as before the throttle.
 func (h *Handler) SetLoginThrottle(t *LoginThrottle) { h.throttle = t }
 
-// AuditRecorder is the narrow audit surface the auth handler needs — kept here
-// (not an import of *audit.Logger) so internal/user stays decoupled. Production
-// wires *audit.Logger via SetAuditLogger in router.go. Optional: nil = the
-// handler skips the reset request's audit row (the request still works; it
-// just leaves no row), which is the safe default for the unit tests that
-// build a bare handler.
+// AuditRecorder writes the audit row of the password-reset request. A nil
+// recorder leaves that request with no row, which the unit tests that build
+// a bare handler rely on.
 type AuditRecorder interface {
 	Log(ctx context.Context, tenantID, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
 }
 
-// SetAuditLogger wires the audit recorder used to log the password-reset
-// request. Without it that event is not audited. A sign-in, a sign-out, a
-// mode switch and a completed reset write their row on their own transaction
-// (Service.Login, Logout, SetMode, ConfirmReset), not through this recorder.
-// Failed logins are NOT routed
-// here — they're pre-auth (no tenant to scope a per-tenant audit row, and
-// surfacing email-existence in the log would be an enumeration oracle), so
-// they go to the structured security log instead.
+// SetAuditLogger wires the recorder for the password-reset request. A
+// sign-in, a sign-out, a mode switch and a completed reset write their row
+// on their own transaction (Service.Login, Logout, SetMode, ConfirmReset).
+// A failed sign-in writes no row: it has no workspace to file one under, and
+// a row would say the address exists. It goes to the security log.
 func (h *Handler) SetAuditLogger(a AuditRecorder) { h.auditLogger = a }
 
-// auditAuthEvent writes one audit row for an auth event outside a
-// transaction. Only the password-reset request uses it. It stamps the actor
-// when actorUserID is not "" and the client IP (the one TrustedClientIP
-// resolved, via audit.ExtractClientIP) onto the ctx the recorder reads. With
-// actorUserID "" the actor stays unresolved and is recorded as 'system': any
-// unauthenticated party can request a reset. Best-effort: a write failure is
-// logged, never surfaced.
-//
-// It also sets the row's mode on the ctx. These endpoints run outside session
-// middleware, so the ctx carries no livemode, and the audit writer's TxTenant
-// refuses to open without one.
-//
-// Auth events are account events, so they are all filed in test mode,
-// whatever the session's mode. The sign-in, sign-out, mode switch and
-// completed reset file their rows the same way, on their own transactions.
-// An operator viewing the audit log in live mode does not see these rows.
-// See the note in tenant/settings.go for why an OR arm on livemode is not
-// the answer.
-func (h *Handler) auditAuthEvent(ctx context.Context, r *http.Request, actorUserID, tenantID, action, resourceID, label string, meta map[string]any) {
+// auditResetRequest writes the audit row of a password-reset request for the
+// account userID, outside a transaction. The row has no actor (anyone can ask
+// for a reset) and is filed in test mode, as every account event is: the
+// route has no session, so ctx carries no mode. A failed write is logged and
+// the request still answers.
+func (h *Handler) auditResetRequest(ctx context.Context, r *http.Request, tenantID, userID string) {
 	if h.auditLogger == nil || tenantID == "" {
 		return
 	}
-	if actorUserID != "" {
-		ctx = auth.WithUserID(ctx, actorUserID)
-	}
 	ctx = audit.WithClientIP(ctx, audit.ExtractClientIP(r))
-	ctx = postgres.WithLivemode(ctx, false) // account-plane: canonical partition
-	if err := h.auditLogger.Log(ctx, tenantID, action, "user", resourceID, label, meta); err != nil {
-		slog.ErrorContext(ctx, "audit: auth event write failed", "action", action, "tenant_id", tenantID, "error", err)
+	ctx = postgres.WithLivemode(ctx, false)
+	if err := h.auditLogger.Log(ctx, tenantID, "password_reset_requested", "user", userID, "", nil); err != nil {
+		slog.ErrorContext(ctx, "audit: password reset request row not written", "tenant_id", tenantID, "error", err)
 	}
 }
 
@@ -413,7 +391,7 @@ func (h *Handler) requestPasswordReset(w http.ResponseWriter, r *http.Request) {
 			// account-plane, and the production email path is the outbox, whose
 			// TxTenant refuses to open without a livemode — so without this the
 			// send failed and the operator never got the link. Same gap the audit
-			// write below already handles (auditAuthEvent sets it too). Canonical
+			// write below already handles (auditResetRequest sets it too). Canonical
 			// (test) partition, like every account-plane row.
 			sendCtx := postgres.WithLivemode(r.Context(), false)
 			if sendErr := h.email.SendPasswordReset(sendCtx, tenantID, req.Email, resetLink); sendErr != nil {
@@ -430,7 +408,7 @@ func (h *Handler) requestPasswordReset(w http.ResponseWriter, r *http.Request) {
 		// STORE its address — neither in the label nor in metadata, where it used
 		// to sit twice. audit_log is append-only, so an email written here could
 		// never be erased; the reader resolves it from the users row, which can.
-		h.auditAuthEvent(r.Context(), r, "", tenantID, "password_reset_requested", targetUserID, "", nil)
+		h.auditResetRequest(r.Context(), r, tenantID, targetUserID)
 	} else {
 		// No account matched (or issuance failed): no token exists, nothing was
 		// mutated, and deliberately nothing is written — a row here would turn

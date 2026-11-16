@@ -111,7 +111,7 @@ func (s *Service) End(ctx context.Context, rawID string, then func(tx *sql.Tx, s
 // EndTx ends the session whose raw cookie value is rawID on the caller's
 // transaction, whoever it belongs to, so the sign-out commits or rolls back
 // with the caller's change, and reports whether it ended one. An empty,
-// unknown or already ended rawID ends nothing. It does not commit. tx must
+// unknown, ended or expired rawID ends nothing. It does not commit. tx must
 // be a bypass transaction: a tenant transaction's row-level security hides
 // the session in the other mode.
 func (s *Service) EndTx(ctx context.Context, tx *sql.Tx, rawID string) (bool, error) {
@@ -140,13 +140,9 @@ func (s *Service) EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, tenant
 }
 
 // SetLivemode switches the live session whose raw cookie value is rawID to
-// livemode (test or live) and calls then on the same transaction, so the
-// switch and then's writes, such as its audit row, commit or roll back
-// together (Store.SetLivemodeWith states then's contract). The same operator
-// switches modes without signing in again, and every later request gets the
-// new mode through Resolve. It returns the session in its new mode and
-// whether a live session was found. An empty, unknown, ended or expired
-// rawID finds none and changes nothing.
+// livemode (test or live) and calls then on the same transaction, under
+// End's contract. It returns the session in its new mode and whether a live
+// session was found.
 func (s *Service) SetLivemode(ctx context.Context, rawID string, livemode bool, then func(tx *sql.Tx, sess Session) error) (Session, bool, error) {
 	if rawID == "" {
 		return Session{}, false, nil
