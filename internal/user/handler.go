@@ -14,37 +14,21 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/api/respond"
 	"github.com/gethardcount/hardcount/internal/audit"
-	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/session"
 )
-
-// SessionService is the narrow seam the handler needs from *session.Service.
-//
-// It exists so the FAILURE paths can be tested. logout used to write its audit row
-// BEFORE revoking, log a revoke error to stderr, and return 204 regardless — a
-// permanent append-only row asserting a logout that never happened, and a live
-// session behind a browser told it was signed out. That survived an end-to-end
-// audit because nothing could inject a failing Revoke: the dependency was a
-// concrete *session.Service. A guarantee you cannot write a failing test for is a
-// guarantee you do not have.
-type SessionService interface {
-	Resolve(ctx context.Context, rawID string) (session.Session, error)
-	Revoke(ctx context.Context, rawID string) error
-	SetLivemode(ctx context.Context, rawID string, livemode bool) error
-}
 
 // Handler wires the dashboard auth endpoints. ADR-011.
 //
 // Routes (mounted under /v1/auth):
 //
-//	POST /login                     — email + password → mint cookie
-//	POST /logout                    — clear cookie + revoke session
-//	POST /password-reset/request    — email → send reset link
-//	POST /password-reset/confirm    — token + new password → set
+//	POST /login                     email + password → mint cookie
+//	POST /logout                    end the session, clear the cookie
+//	POST /mode                      switch the session's mode
+//	POST /password-reset/request    email → send reset link
+//	POST /password-reset/confirm    token + new password → set
 type Handler struct {
 	users            *Service
-	sessions         SessionService
 	cookie           session.CookieConfig
 	email            EmailSender // required — production always wires the adapter
 	dashboardBaseURL string      // canonical dashboard origin for reset links; never from request headers. empty => reset emails disabled
@@ -58,59 +42,33 @@ type Handler struct {
 // one checks every password, as before the throttle.
 func (h *Handler) SetLoginThrottle(t *LoginThrottle) { h.throttle = t }
 
-// AuditRecorder is the narrow audit surface the auth handler needs — kept here
-// (not an import of *audit.Logger) so internal/user stays decoupled. Production
-// wires *audit.Logger via SetAuditLogger in router.go. Optional: nil = the
-// handler skips audit writes (logout, the mode switch and the reset request
-// still work; they just leave no row), which is the safe default for the unit
-// tests that build a bare handler.
+// AuditRecorder writes the audit row of the password-reset request. A nil
+// recorder leaves that request with no row, which the unit tests that build
+// a bare handler rely on.
 type AuditRecorder interface {
 	Log(ctx context.Context, tenantID, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
 }
 
-// SetAuditLogger wires the audit recorder used to log authenticated auth
-// events (logout, mode change, password-reset request). Without it those
-// events are not audited. A sign-in writes its row on its own transaction
-// (Service.Login), not through this recorder. Failed logins are NOT routed
-// here — they're pre-auth (no tenant to scope a per-tenant audit row, and
-// surfacing email-existence in the log would be an enumeration oracle), so
-// they go to the structured security log instead.
+// SetAuditLogger wires the recorder for the password-reset request. A
+// sign-in, a sign-out, a mode switch and a completed reset write their row
+// on their own transaction (Service.Login, Logout, SetMode, ConfirmReset).
+// A failed sign-in writes no row: it has no workspace to file one under, and
+// a row would say the address exists. It goes to the security log.
 func (h *Handler) SetAuditLogger(a AuditRecorder) { h.auditLogger = a }
 
-// auditAuthEvent writes one audit row for an authenticated auth event. It
-// stamps the actor (the operator's user id, since these endpoints run outside
-// session middleware so the ctx carries no identity) and the client IP (the
-// one TrustedClientIP resolved, via audit.ExtractClientIP) onto the ctx the recorder reads. When
-// actorUserID is "" the actor stays unresolved → recorded as 'system' (used for
-// a password-reset REQUEST, which any unauthenticated party can trigger).
-// Best-effort: a write failure is logged, never surfaced — auth must not fail
-// because the audit row didn't land.
-//
-// It also sets the row's RLS mode partition on the ctx. These endpoints run OUTSIDE
-// session middleware, so the ctx carries no livemode and the audit writer's TxTenant
-// would refuse to open (every auth audit row silently failed this way until 2026-07-06).
-//
-// Auth events are ACCOUNT-PLANE — a sign-out is a sign-out, not a "test-mode
-// sign-out" — so they are ALL filed in the canonical (test) partition, whatever the
-// session's mode. A sign-in files its row the same way, in PostgresStore.SignIn.
-// They used to inherit the session's mode, which meant the same event landed in a
-// different partition depending on which way the operator's Test/Live toggle
-// happened to be pointing, and "when did they last sign out?" had no reliable answer.
-//
-// Accepted loss, stated rather than glossed: an operator viewing the audit log in
-// LIVE mode does not see these rows. See the note in tenant/settings.go for why the
-// obvious fix (an OR arm on livemode) is the one thing we must not do.
-func (h *Handler) auditAuthEvent(ctx context.Context, r *http.Request, actorUserID, tenantID, action, resourceID, label string, meta map[string]any) {
+// auditResetRequest writes the audit row of a password-reset request for the
+// account userID, outside a transaction. The row has no actor (anyone can ask
+// for a reset) and is filed in test mode, as every account event is: the
+// route has no session, so ctx carries no mode. A failed write is logged and
+// the request still answers.
+func (h *Handler) auditResetRequest(ctx context.Context, r *http.Request, tenantID, userID string) {
 	if h.auditLogger == nil || tenantID == "" {
 		return
 	}
-	if actorUserID != "" {
-		ctx = auth.WithUserID(ctx, actorUserID)
-	}
 	ctx = audit.WithClientIP(ctx, audit.ExtractClientIP(r))
-	ctx = postgres.WithLivemode(ctx, false) // account-plane: canonical partition
-	if err := h.auditLogger.Log(ctx, tenantID, action, "user", resourceID, label, meta); err != nil {
-		slog.ErrorContext(ctx, "audit: auth event write failed", "action", action, "tenant_id", tenantID, "error", err)
+	ctx = postgres.WithLivemode(ctx, false)
+	if err := h.auditLogger.Log(ctx, tenantID, "password_reset_requested", "user", userID, "", nil); err != nil {
+		slog.ErrorContext(ctx, "audit: password reset request row not written", "tenant_id", tenantID, "error", err)
 	}
 }
 
@@ -130,10 +88,9 @@ type EmailSender interface {
 // poisoning / token theft. When empty, password-reset emails are not sent
 // (requestPasswordReset fails safe). Set it to your dashboard URL — in
 // split-origin dev (Vite on :5173 vs API on :8080) that's the SPA URL.
-func NewHandler(users *Service, sessions SessionService, cookie session.CookieConfig, emailSender EmailSender, dashboardBaseURL string, smtpConfigured bool) *Handler {
+func NewHandler(users *Service, cookie session.CookieConfig, emailSender EmailSender, dashboardBaseURL string, smtpConfigured bool) *Handler {
 	return &Handler{
 		users:            users,
-		sessions:         sessions,
 		cookie:           cookie,
 		email:            emailSender,
 		dashboardBaseURL: strings.TrimRight(strings.TrimSpace(dashboardBaseURL), "/"),
@@ -284,13 +241,17 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// SetModeReq is POST /v1/auth/mode's body. Livemode is required: a pointer,
+// so a body without it is told apart from false.
 type SetModeReq struct {
-	Livemode bool `json:"livemode"`
+	Livemode *bool `json:"livemode"`
 }
 
-// setMode flips the active mode (test/live) on the cookie session.
-// Same operator switches between modes without re-authenticating.
-// Returns 401 if the cookie is missing or the session is gone.
+// setMode switches the cookie session between test and live mode. The same
+// operator switches without signing in again. The switch and its
+// mode_changed audit row commit together (Service.SetMode): if the row
+// cannot be written the answer is 500 and the mode is unchanged. A missing
+// cookie, or a session that is unknown, ended or expired, is a 401.
 func (h *Handler) setMode(w http.ResponseWriter, r *http.Request) {
 	c, err := r.Cookie(session.CookieName)
 	if err != nil || c.Value == "" {
@@ -302,104 +263,70 @@ func (h *Handler) setMode(w http.ResponseWriter, r *http.Request) {
 	if !respond.DecodeStrict(w, r, &req) {
 		return
 	}
+	if req.Livemode == nil {
+		respond.ValidationField(w, r, "livemode", "livemode is required")
+		return
+	}
 
-	// Resolve BEFORE the mutation. The audit row needs the session's identity,
-	// and resolving afterwards made the emission conditional on a second
-	// lookup succeeding — so a resolve failure left the mode SWITCHED with no
-	// record of who switched it. An unresolvable session is a 401 anyway.
-	sess, rerr := h.sessions.Resolve(r.Context(), c.Value)
-	if rerr != nil {
+	sess, found, err := h.users.SetMode(r.Context(), c.Value, *req.Livemode)
+	if err != nil {
+		// The session keeps its mode.
+		slog.ErrorContext(r.Context(), "mode switch failed; the session keeps its mode", "error", err)
+		respond.InternalError(w, r)
+		return
+	}
+	if !found {
 		respond.Unauthorized(w, r, "invalid or expired session")
 		return
 	}
 	session.NameCaller(r.Context(), sess)
 
-	if err := h.sessions.SetLivemode(r.Context(), c.Value, req.Livemode); err != nil {
-		if errors.Is(err, session.ErrNotFound) {
-			respond.Unauthorized(w, r, "invalid or expired session")
-			return
-		}
-		slog.Error("session: set livemode failed", "err", err)
-		respond.InternalError(w, r)
-		return
-	}
-
-	// Like every auth event, the row lands in the test partition whichever
-	// way the operator switched; the new mode is recorded in its metadata.
-	h.auditAuthEvent(r.Context(), r, sess.UserID, sess.TenantID, "mode_changed", sess.UserID, "",
-		map[string]any{"livemode": req.Livemode})
-
 	respond.JSON(w, r, http.StatusOK, map[string]any{
-		"livemode": req.Livemode,
+		"livemode": sess.Livemode,
 	})
 }
 
-// logout revokes the session row matching the cookie and clears the
-// cookie on the response. Idempotent — missing cookie is a no-op.
-// logout revokes the session, THEN records it.
-//
-// The order is the whole point. This used to write the audit row first, revoke
-// second, log a revoke failure to stderr, and return 204 either way. So a failed
-// revoke produced: a browser told it was logged out, a session still LIVE on the
-// server, and a permanent append-only row asserting a logout that never happened.
-// Two bugs wearing one coat — a false compliance record, and a silent
-// security-relevant failure on the one action a user takes when they no longer
-// trust the machine they are on.
-//
-// Now: resolve (identity is unreadable after revoke), revoke, and emit ONLY if the
-// revoke actually succeeded. A revoke that fails is a 500 — the caller must not be
-// told they are logged out when they are not.
+// logout ends the session the cookie names and clears the cookie. The
+// sign-out and its logout audit row commit together (Service.Logout). If
+// they cannot, the answer is 500 and the cookie stays: a browser is never
+// told it signed out while its session still works. A cookie for a session
+// that is unknown, ended or expired ends nothing, writes nothing and still
+// clears the cookie.
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	if !respond.NoBody(w, r) {
 		return
 	}
 	c, err := r.Cookie(session.CookieName)
 	if err != nil || c.Value == "" {
-		// No cookie: this logout revoked no session, so there is no server-side
-		// mutation to audit. Say so explicitly. To an observer at the transport a
-		// 204 with no audit row is otherwise indistinguishable from a real logout
-		// that LOST its row, and the audit-coverage detector would (correctly, on
-		// the evidence available to it) report it as an uncovered mutation.
+		// No cookie: nothing to end and nothing to audit. Say so, or the
+		// audit-coverage detector reads a 204 with no row as a mutation that
+		// lost its row.
 		audit.MarkSkip(r.Context())
-		// Deliberately NO ClearCookie here. "No cookie arrived" does not mean the
-		// browser holds none — SameSite=Lax withholds it from every cross-site
-		// request, so this branch is exactly what an attacker's cross-site POST
-		// lands in. Clearing here emitted Set-Cookie: hardcount_session=; Max-Age=0,
-		// which the browser honours: any website could force-logout any operator
-		// (drive-by, via an auto-submitting form) while the session it could not
-		// see stayed LIVE server-side for its full TTL — an orphaned credential
-		// and a repeatable nuisance-DoS. Lax already blocks the real revoke; this
-		// branch must not mutate client state for a request it cannot authenticate.
-		// When a cookie genuinely is absent, clearing it was a no-op anyway.
-		// The real sign-out clears below, on the far side of a revoke that worked.
+		// Deliberately no ClearCookie here. "No cookie arrived" does not mean
+		// the browser holds none: SameSite=Lax withholds it from every
+		// cross-site request, so this branch is exactly where an attacker's
+		// cross-site POST lands. A Set-Cookie that clears it would let any
+		// website sign any operator out of the dashboard while the session it
+		// cannot see stays live on the server. A request that cannot be
+		// authenticated must not change the browser's cookies. When a cookie
+		// is truly absent, clearing it would change nothing anyway.
 		w.WriteHeader(http.StatusNoContent)
 		return
 	}
 
-	// Resolve BEFORE revoke: after it, the token no longer names anyone, and an
-	// audit row with no actor is barely a row at all.
-	sess, rerr := h.sessions.Resolve(r.Context(), c.Value)
-	if rerr == nil {
-		session.NameCaller(r.Context(), sess)
-	}
-
-	if revokeErr := h.sessions.Revoke(r.Context(), c.Value); revokeErr != nil {
-		// The session is still live. Clearing the cookie here would hand the user a
-		// 204 and a cleared browser while the token they were trying to kill keeps
-		// working server-side — the exact failure the user was defending against.
-		slog.ErrorContext(r.Context(), "session revoke failed; logout NOT performed",
-			"error", revokeErr)
+	sess, found, err := h.users.Logout(r.Context(), c.Value)
+	if err != nil {
+		// The session still works, so the cookie stays.
+		slog.ErrorContext(r.Context(), "sign-out failed; the session is still signed in", "error", err)
 		respond.InternalError(w, r)
 		return
 	}
-
-	if rerr != nil {
-		// A stale or already-expired cookie: the revoke was a no-op on a session
-		// that was not there. Nothing mutated, nothing to record.
-		audit.MarkSkip(r.Context())
+	if found {
+		session.NameCaller(r.Context(), sess)
 	} else {
-		// The row is written only now, on the far side of a revoke that WORKED.
-		h.auditAuthEvent(r.Context(), r, sess.UserID, sess.TenantID, "logout", sess.UserID, "", nil)
+		// An unknown, ended or expired session: nothing changed, nothing to
+		// record.
+		audit.MarkSkip(r.Context())
 	}
 
 	h.cookie.ClearCookie(w)
@@ -463,7 +390,7 @@ func (h *Handler) requestPasswordReset(w http.ResponseWriter, r *http.Request) {
 			// account-plane, and the production email path is the outbox, whose
 			// TxTenant refuses to open without a livemode — so without this the
 			// send failed and the operator never got the link. Same gap the audit
-			// write below already handles (auditAuthEvent sets it too). Canonical
+			// write below already handles (auditResetRequest sets it too). Canonical
 			// (test) partition, like every account-plane row.
 			sendCtx := postgres.WithLivemode(r.Context(), false)
 			if sendErr := h.email.SendPasswordReset(sendCtx, tenantID, req.Email, resetLink); sendErr != nil {
@@ -480,7 +407,7 @@ func (h *Handler) requestPasswordReset(w http.ResponseWriter, r *http.Request) {
 		// STORE its address — neither in the label nor in metadata, where it used
 		// to sit twice. audit_log is append-only, so an email written here could
 		// never be erased; the reader resolves it from the users row, which can.
-		h.auditAuthEvent(r.Context(), r, "", tenantID, "password_reset_requested", targetUserID, "", nil)
+		h.auditResetRequest(r.Context(), r, tenantID, targetUserID)
 	} else {
 		// No account matched (or issuance failed): no token exists, nothing was
 		// mutated, and deliberately nothing is written — a row here would turn

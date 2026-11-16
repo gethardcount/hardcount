@@ -62,17 +62,17 @@ func newResetIT(t *testing.T) resetIT {
 	return it
 }
 
-func (it resetIT) service(sessions SessionTxWriter, auditor AuditTxWriter) *Service {
+func (it resetIT) service(sessions SessionWriter, auditor AuditTxWriter) *Service {
 	return NewService(NewPostgresStore(it.db), clock.Real(), sessions, auditor)
 }
 
-func (it resetIT) handler(sessions SessionTxWriter, auditor AuditTxWriter) http.Handler {
-	return NewHandler(it.service(sessions, auditor), it.sessSvc, session.CookieConfig{Path: "/"}, stubEmailSender{}, "", false).Routes()
+func (it resetIT) handler(sessions SessionWriter, auditor AuditTxWriter) http.Handler {
+	return NewHandler(it.service(sessions, auditor), session.CookieConfig{Path: "/"}, stubEmailSender{}, "", false).Routes()
 }
 
 // confirm posts the reset form with password to a handler whose service
 // uses sessions and auditor for the steps inside the reset's transaction.
-func (it resetIT) confirm(t *testing.T, password string, sessions SessionTxWriter, auditor AuditTxWriter) *httptest.ResponseRecorder {
+func (it resetIT) confirm(t *testing.T, password string, sessions SessionWriter, auditor AuditTxWriter) *httptest.ResponseRecorder {
 	t.Helper()
 	body, _ := json.Marshal(ConfirmResetReq{Token: it.token, Password: password})
 	req := httptest.NewRequest(http.MethodPost, "/password-reset/confirm", strings.NewReader(string(body)))
@@ -180,7 +180,7 @@ func (e endThenFail) EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID str
 }
 
 // notFoundEnder fails inside the reset's transaction with a not-found.
-type notFoundEnder struct{ SessionTxWriter }
+type notFoundEnder struct{ SessionWriter }
 
 func (notFoundEnder) EndAllForUserTx(context.Context, *sql.Tx, string) error {
 	return errs.ErrNotFound

@@ -45,8 +45,7 @@ func TestRequestPasswordReset_CappedAccountIsSilentlySkipped(t *testing.T) {
 		createTokenErr: ErrResetSendCapped,
 	}
 	sender := &countingResetEmail{}
-	h := NewHandler(newFakeService(userStore), session.NewService(&recordingSessionStore{}),
-		session.DefaultCookieConfig("local"), sender, "https://dash.example.test", true)
+	h := NewHandler(newFakeService(userStore), session.DefaultCookieConfig("local"), sender, "https://dash.example.test", true)
 
 	// Capture logs for the level assertion; restore the default after.
 	var logs bytes.Buffer
@@ -75,8 +74,7 @@ func TestRequestPasswordReset_CappedAccountIsSilentlySkipped(t *testing.T) {
 	// can be capped — any distinguishable reply would be a reliable
 	// account-existence oracle (four requests and an attacker knows).
 	unknownStore := &fakeUserStore{}
-	unknownH := NewHandler(newFakeService(unknownStore), session.NewService(&recordingSessionStore{}),
-		session.DefaultCookieConfig("local"), &countingResetEmail{}, "https://dash.example.test", true)
+	unknownH := NewHandler(newFakeService(unknownStore), session.DefaultCookieConfig("local"), &countingResetEmail{}, "https://dash.example.test", true)
 	unknownBody, _ := json.Marshal(map[string]string{"email": "nobody@example.com"})
 	unknownReq := httptest.NewRequest(http.MethodPost, "/password-reset/request", strings.NewReader(string(unknownBody)))
 	unknownReq.Header.Set("Content-Type", "application/json")

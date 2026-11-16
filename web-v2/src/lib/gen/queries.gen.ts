@@ -11138,11 +11138,14 @@ export const getLogoutUrl = () => {
  *
  * Ends the session named by the `hardcount_session` cookie on the
  * server, then clears the cookie. A cookie for a session that already
- * ended also gets 204. A request with no cookie gets 204 and changes
- * nothing, not even a cookie. If the session cannot be ended, the
- * answer is 500 and the cookie stays, so a browser is never told it
- * signed out while its session still works. Writes an audit row when
- * a session ended.
+ * ended or expired also gets 204, and the cookie is cleared. A request
+ * with no cookie gets 204 and changes nothing, not even a cookie.
+ *
+ * A sign-out writes a `logout` audit row, filed in test mode. The
+ * sign-out and its row are saved together: if they cannot be saved,
+ * the answer is 500, the session is still signed in and the cookie
+ * stays, so a browser is never told it signed out while its session
+ * still works.
  * @summary Sign out of the dashboard
  */
 export const logout = async ( options?: RequestInit): Promise<void> => {
@@ -11220,8 +11223,12 @@ export const getSwitchSessionModeUrl = () => {
  * request with this session reads and writes that mode's data:
  * customers, invoices, subscriptions, API keys and the rest. No
  * request needs its own mode parameter, and the user does not sign
- * in again. A body without `livemode` switches to test mode. Writes
- * an audit row, filed in test mode whichever mode is chosen.
+ * in again.
+ *
+ * A switch writes a `mode_changed` audit row, filed in test mode
+ * whichever mode is chosen. The switch and its row are saved
+ * together: if they cannot be saved, the answer is 500 and the
+ * session keeps its mode.
  * @summary Switch the dashboard session between test and live mode
  */
 export const switchSessionMode = async (switchSessionModeBody: SwitchSessionModeBody, options?: RequestInit): Promise<SwitchSessionMode200> => {
