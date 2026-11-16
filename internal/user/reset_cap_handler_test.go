@@ -12,7 +12,6 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/session"
 )
 
@@ -41,13 +40,12 @@ func TestRequestPasswordReset_CappedAccountIsSilentlySkipped(t *testing.T) {
 	const email = "victim@example.com"
 	target := domain.User{ID: "usr_capped", Email: email}
 	userStore := &fakeUserStore{
-		user:           target,
 		loginUser:      &target,
 		tenants:        []domain.UserTenant{{TenantID: "ten_1"}},
 		createTokenErr: ErrResetSendCapped,
 	}
 	sender := &countingResetEmail{}
-	h := NewHandler(NewService(userStore, clock.Real()), session.NewService(&recordingSessionStore{}),
+	h := NewHandler(newFakeService(userStore), session.NewService(&recordingSessionStore{}),
 		session.DefaultCookieConfig("local"), sender, "https://dash.example.test", true)
 
 	// Capture logs for the level assertion; restore the default after.
@@ -77,7 +75,7 @@ func TestRequestPasswordReset_CappedAccountIsSilentlySkipped(t *testing.T) {
 	// can be capped — any distinguishable reply would be a reliable
 	// account-existence oracle (four requests and an attacker knows).
 	unknownStore := &fakeUserStore{}
-	unknownH := NewHandler(NewService(unknownStore, clock.Real()), session.NewService(&recordingSessionStore{}),
+	unknownH := NewHandler(newFakeService(unknownStore), session.NewService(&recordingSessionStore{}),
 		session.DefaultCookieConfig("local"), &countingResetEmail{}, "https://dash.example.test", true)
 	unknownBody, _ := json.Marshal(map[string]string{"email": "nobody@example.com"})
 	unknownReq := httptest.NewRequest(http.MethodPost, "/password-reset/request", strings.NewReader(string(unknownBody)))

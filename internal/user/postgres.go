@@ -83,20 +83,6 @@ func (s *PostgresStore) TouchLastLogin(ctx context.Context, id string, at time.T
 	return tx.Commit()
 }
 
-func (s *PostgresStore) SetPassword(ctx context.Context, id, passwordHash string) error {
-	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
-	if err != nil {
-		return err
-	}
-	defer postgres.Rollback(tx)
-	_, err = tx.ExecContext(ctx,
-		`UPDATE users SET password_hash = $1 WHERE id = $2`, passwordHash, id)
-	if err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 // CreateInTx inserts a user and their tenant attachment inside the
 // CALLER's transaction — the seam tenant.RunBootstrap needs so the
 // owner user commits (or rolls back) atomically with the tenant, keys,
@@ -212,44 +198,51 @@ func (s *PostgresStore) CreateResetToken(ctx context.Context, userID, tokenHash 
 	return t, nil
 }
 
-func (s *PostgresStore) ConsumeResetToken(ctx context.Context, tokenHash string) (string, error) {
+// errResetLinkDead is ResetPassword's answer for a link that cannot be
+// used: the token is unknown, expired or used, or its user belongs to no
+// workspace. Only this error becomes the dead-link answer; any other error,
+// including one from the hook, is a fault.
+var errResetLinkDead = errors.New("user: reset link cannot be used")
+
+// ResetPassword redeems a reset token and sets the user's password hash in
+// one bypass transaction. In order, it spends the token, voids the user's
+// other unused tokens, writes passwordHash, finds the user's first-joined
+// workspace (the one login picks), stamps app.tenant_id with it and
+// app.livemode off for an audit row, and calls then. then runs last, on the
+// same transaction, with the token's owner. It must not commit or roll back
+// tx; an error it returns rolls the whole reset back and is returned.
+//
+// It returns errResetLinkDead, and changes nothing, when the token is
+// unknown, expired or used, or when the user belongs to no workspace: such a
+// user cannot sign in, and an audit row has no tenant to go to.
+func (s *PostgresStore) ResetPassword(ctx context.Context, tokenHash, passwordHash string, then func(tx *sql.Tx, userID string) error) (domain.User, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
-		return "", err
+		return domain.User{}, err
 	}
 	defer postgres.Rollback(tx)
 
-	// Single UPDATE-RETURNING: stamps used_at and returns user_id only
-	// if the token row is currently un-used and un-expired. Atomic so
-	// concurrent redeems both can't succeed.
-	row := tx.QueryRowContext(ctx, `
+	// The conditional UPDATE is the single-use guard: of two concurrent
+	// redeems, only one sees the row unused.
+	var userID string
+	err = tx.QueryRowContext(ctx, `
 		UPDATE password_reset_tokens
 		SET used_at = now()
 		WHERE token_hash = $1
 		  AND used_at IS NULL
 		  AND expires_at > now()
 		RETURNING user_id
-	`, tokenHash)
-	var userID string
-	if err := row.Scan(&userID); err != nil {
-		if errors.Is(err, sql.ErrNoRows) {
-			return "", errs.ErrNotFound
-		}
-		return "", err
+	`, tokenHash).Scan(&userID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.User{}, errResetLinkDead
+	}
+	if err != nil {
+		return domain.User{}, fmt.Errorf("spend reset token: %w", err)
 	}
 
-	// Void every OTHER outstanding token for this user, in the same tx.
-	// Single-use per token was never enough: reset is requestable by
-	// anyone who knows the email, so a user can hold several live tokens
-	// at once. Redeeming one left the siblings redeemable for the rest of
-	// their hour — meaning whoever obtained an earlier token (a since-
-	// recovered mailbox, a forwarded link) could re-flip the password of
-	// the account that authorizes charges and refunds, AFTER the rightful
-	// owner had just reset it. Voiding here rather than after SetPassword
-	// keeps the failure direction safe: if the hash write then fails, every
-	// token is dead and the user must request a fresh one — no window is
-	// left open by a partial failure. (OWASP: invalidate all outstanding
-	// reset tokens on password change.)
+	// Anyone who knows the email can request a reset, so a user can hold
+	// several live tokens. Once one resets the password, an earlier link
+	// (from a mailbox since recovered, or forwarded) must not reset it again.
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE password_reset_tokens
 		SET used_at = now()
@@ -257,19 +250,52 @@ func (s *PostgresStore) ConsumeResetToken(ctx context.Context, tokenHash string)
 		  AND token_hash <> $2
 		  AND used_at IS NULL
 	`, userID, tokenHash); err != nil {
-		return "", err
+		return domain.User{}, fmt.Errorf("void other reset tokens: %w", err)
 	}
 
-	if err := tx.Commit(); err != nil {
-		return "", err
+	u, err := scanUser(tx.QueryRowContext(ctx, `
+		UPDATE users SET password_hash = $1 WHERE id = $2
+		RETURNING `+userCols, passwordHash, userID))
+	if err != nil {
+		return domain.User{}, fmt.Errorf("set password: %w", err)
 	}
-	return userID, nil
+
+	// Same order as TenantsForUser, so this is the workspace login picks.
+	var tenantID string
+	err = tx.QueryRowContext(ctx, `
+		SELECT tenant_id FROM user_tenants WHERE user_id = $1
+		ORDER BY created_at ASC, tenant_id ASC
+		LIMIT 1
+	`, userID).Scan(&tenantID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.User{}, errResetLinkDead
+	}
+	if err != nil {
+		return domain.User{}, fmt.Errorf("find workspace: %w", err)
+	}
+
+	// audit.Logger.LogInTx reads the row's tenant from app.tenant_id and its
+	// mode from app.livemode. Account events are filed in test mode.
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('app.tenant_id', $1, true)`, tenantID); err != nil {
+		return domain.User{}, fmt.Errorf("stamp tenant: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', 'off', true)`); err != nil {
+		return domain.User{}, fmt.Errorf("stamp livemode: %w", err)
+	}
+
+	if err := then(tx, userID); err != nil {
+		return domain.User{}, err
+	}
+	if err := tx.Commit(); err != nil {
+		return domain.User{}, err
+	}
+	return u, nil
 }
 
-// LookupResetToken is the read-only counterpart — same validity gate
-// (un-used, un-expired) but no UPDATE. Used by the reset-password
-// page on mount to decide between rendering the form vs. an "this
-// link is no longer valid" message.
+// LookupResetToken returns the user id of a reset link that can still be
+// used: the token is unused and unexpired, and its user belongs to a
+// workspace. That is the rule ResetPassword applies, without spending the
+// token. Returns errs.ErrNotFound otherwise.
 func (s *PostgresStore) LookupResetToken(ctx context.Context, tokenHash string) (string, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -278,10 +304,11 @@ func (s *PostgresStore) LookupResetToken(ctx context.Context, tokenHash string) 
 	defer postgres.Rollback(tx)
 	var userID string
 	row := tx.QueryRowContext(ctx, `
-		SELECT user_id FROM password_reset_tokens
-		WHERE token_hash = $1
-		  AND used_at IS NULL
-		  AND expires_at > now()
+		SELECT t.user_id FROM password_reset_tokens t
+		WHERE t.token_hash = $1
+		  AND t.used_at IS NULL
+		  AND t.expires_at > now()
+		  AND EXISTS (SELECT 1 FROM user_tenants ut WHERE ut.user_id = t.user_id)
 	`, tokenHash)
 	if err := row.Scan(&userID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

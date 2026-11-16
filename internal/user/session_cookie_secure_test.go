@@ -10,7 +10,6 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/gethardcount/hardcount/internal/domain"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/session"
 )
 
@@ -53,7 +52,7 @@ func TestLogin_SessionCookieSecurePerEnvironment(t *testing.T) {
 			t.Run("APP_ENV="+e.appEnv+"/"+p.name, func(t *testing.T) {
 				u := domain.User{ID: "usr_1", Email: "op@acme.com", PasswordHash: string(hash)}
 				store := &fakeUserStore{loginUser: &u, tenants: []domain.UserTenant{{UserID: "usr_1", TenantID: "ten_acme"}}}
-				h := NewHandler(NewService(store, clock.Real()), session.NewService(&recordingSessionStore{}),
+				h := NewHandler(newFakeService(store), session.NewService(&recordingSessionStore{}),
 					session.DefaultCookieConfig(e.appEnv), stubEmailSender{}, "", false)
 
 				body, _ := json.Marshal(LoginReq{Email: "op@acme.com", Password: "a-good-password-123"})

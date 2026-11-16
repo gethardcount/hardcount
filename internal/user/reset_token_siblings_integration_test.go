@@ -2,6 +2,8 @@ package user_test
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"testing"
 	"time"
 
@@ -10,23 +12,16 @@ import (
 	"github.com/gethardcount/hardcount/internal/user"
 )
 
-// TestConsumeResetToken_VoidsSiblingTokens: redeeming one password-reset
-// token must kill every OTHER outstanding token for that user, in the same
-// transaction.
+// TestResetPassword_VoidsSiblingTokens: redeeming one password-reset token
+// voids every other unused token of that user, in the same transaction.
+// Anyone who knows the email can request a reset, so one account can hold
+// several live tokens; an earlier link must not reset the password again
+// after the owner has reset it.
 //
-// Single-use per token was never sufficient. Reset is requestable by anyone
-// who knows the email, so one account can hold several live tokens at once —
-// and before this fix, redeeming one left its siblings valid for the rest of
-// their hour. Whoever held an earlier token (a since-recovered mailbox, a
-// link forwarded in a support thread) could re-flip the password of the
-// account that authorizes charges and refunds, immediately AFTER the rightful
-// owner reset it.
-//
-// Real Postgres because the guarantee is one SQL statement's WHERE clause,
-// and a fake store would only prove the fake. The second arm is the control:
-// a DIFFERENT user's live token must survive, or the fix is a denial-of-
-// service on every concurrent reset in the tenant.
-func TestConsumeResetToken_VoidsSiblingTokens(t *testing.T) {
+// Real Postgres because the guarantee is one SQL statement's WHERE clause.
+// The control: a different user's live token survives, or every concurrent
+// reset in the tenant would be cancelled.
+func TestResetPassword_VoidsSiblingTokens(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	tenantID := testutil.CreateTestTenant(t, db, "Reset Siblings")
@@ -40,28 +35,28 @@ func TestConsumeResetToken_VoidsSiblingTokens(t *testing.T) {
 			t.Fatalf("issue token %s: %v", hash, err)
 		}
 	}
-	// Three live tokens on the victim (a plausible "clicked reset twice, then
-	// once more" history) and one on an unrelated user.
+	// Three live tokens on the victim and one on an unrelated user.
 	issue(victim, "hash_redeemed")
 	issue(victim, "hash_sibling_a")
 	issue(victim, "hash_sibling_b")
 	issue(bystander, "hash_bystander")
 
-	if _, err := store.ConsumeResetToken(ctx, "hash_redeemed"); err != nil {
-		t.Fatalf("consume: %v", err)
+	redeem := func(hash string) error {
+		_, err := store.ResetPassword(ctx, hash, "$2a$12$unused-hash-for-this-test", func(*sql.Tx, string) error { return nil })
+		return err
+	}
+	if err := redeem("hash_redeemed"); err != nil {
+		t.Fatalf("redeem: %v", err)
 	}
 
-	// Treatment: both siblings must now be dead — proven by trying to REDEEM
-	// them, not by reading a column, because redemption is the capability an
-	// attacker actually needs.
+	// Proven by trying to redeem them: redemption is what a second holder
+	// of a link needs.
 	for _, h := range []string{"hash_sibling_a", "hash_sibling_b"} {
-		if _, err := store.ConsumeResetToken(ctx, h); err == nil {
-			t.Errorf("sibling token %s is still redeemable after another token reset the password — a second holder can re-flip the operator password", h)
+		if err := redeem(h); !errors.Is(err, user.ErrResetLinkDeadForTest) {
+			t.Errorf("redeem sibling token %s after another token reset the password: err = %v, want the dead-link error", h, err)
 		}
 	}
-	// Control: an unrelated user's token must be untouched, or this fix
-	// would cancel every concurrent reset in the tenant.
-	if _, err := store.ConsumeResetToken(ctx, "hash_bystander"); err != nil {
-		t.Errorf("another user's live token was voided (%v) — the void must be scoped to the redeeming user", err)
+	if err := redeem("hash_bystander"); err != nil {
+		t.Errorf("another user's live token was voided (%v); the void must be scoped to the redeeming user", err)
 	}
 }

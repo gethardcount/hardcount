@@ -13,7 +13,6 @@ import (
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/session"
 	"github.com/gethardcount/hardcount/internal/testutil"
@@ -52,7 +51,7 @@ func throttleIT(t *testing.T) (*postgres.DB, *lookupCounter) {
 // itHandler is the dashboard auth handler on the real store. throttle may be
 // nil: the handler then checks every password, as it did before.
 func itHandler(store Store, throttle *LoginThrottle) http.Handler {
-	h := NewHandler(NewService(store, clock.Real()), session.NewService(&recordingSessionStore{}),
+	h := NewHandler(newFakeService(store), session.NewService(&recordingSessionStore{}),
 		session.CookieConfig{Path: "/"}, stubEmailSender{}, "", false)
 	if throttle != nil {
 		h.SetLoginThrottle(throttle)

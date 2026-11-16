@@ -9,7 +9,6 @@ import (
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/domain"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/session"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
@@ -48,7 +47,7 @@ func TestRequestPasswordReset_SendsWithCanonicalLivemode(t *testing.T) {
 	}
 	email := &capturingEmailSender{}
 	// Non-empty dashboardBaseURL so buildResetLink succeeds (else no send).
-	h := NewHandler(NewService(store, clock.Real()), session.NewService(&recordingSessionStore{}),
+	h := NewHandler(newFakeService(store), session.NewService(&recordingSessionStore{}),
 		session.DefaultCookieConfig("local"), email, "https://app.example.com", true)
 	h.SetAuditLogger(&recordingAuditRecorder{})
 
