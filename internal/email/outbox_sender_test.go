@@ -102,6 +102,7 @@ func TestOutboxMessage_EveryPayloadKeyIsClassified(t *testing.T) {
 		"next_retry_date": true, "reason": true, "failure_reason": true,
 		"escalation_outcome": true, "operator_note": true, "inviter_email": true,
 		"tenant_name": true, "invoice_written_off": true,
+		"invitee_has_account": true,
 		// A yes/no on which warning copy was sent (#966): no link, no token.
 		"card_needs_replacing": true,
 		"decline_ask":          true,

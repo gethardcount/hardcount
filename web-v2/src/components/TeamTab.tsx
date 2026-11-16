@@ -58,10 +58,8 @@ export function TeamTab() {
   })
 
   const members = data?.members ?? []
+  // The server lists only pending and expired invitations.
   const invitations = data?.invitations ?? []
-  // Accepted invites already show up as members; showing the historical
-  // rows too would double-list people, so keep pending/expired/revoked.
-  const openInvitations = invitations.filter(i => i.status !== 'accepted')
 
   const invalidate = () => queryClient.invalidateQueries({ queryKey: ['members'] })
 
@@ -211,12 +209,12 @@ export function TeamTab() {
           </Card>
 
           {/* Invitations */}
-          {openInvitations.length > 0 && (
+          {invitations.length > 0 && (
             <Card>
               <CardContent className="px-6 py-5">
                 <h3 className="text-sm font-medium text-foreground mb-4">Invitations</h3>
                 <div className="divide-y divide-border">
-                  {openInvitations.map(inv => (
+                  {invitations.map(inv => (
                     <div key={inv.id} className="flex items-center justify-between py-3 first:pt-0 last:pb-0">
                       <div>
                         <div className="flex items-center gap-2">

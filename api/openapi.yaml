@@ -456,7 +456,8 @@ components:
       description: |
         An invitation for a teammate to join this account's dashboard.
         `POST /v1/members/invite` returns it, and `GET /v1/members` lists
-        every invitation the account has sent, newest first.
+        the ones that are pending or expired, newest first. An accepted or
+        revoked invitation is not returned.
       required: [id, email, role, status, expires_at, created_at]
       properties:
         id:
@@ -473,11 +474,10 @@ components:
             enforced yet: every member can do everything in the dashboard.
         status:
           type: string
-          enum: [pending, accepted, revoked, expired]
+          enum: [pending, expired]
           description: |
-            `pending` until the invitation is accepted or revoked, or until
-            `expires_at` passes (`expired`). The server works it out each
-            time it answers.
+            `pending` until `expires_at` passes, then `expired`. The server
+            works it out each time it answers.
         invited_by_email:
           type: string
           description: The sign-in email of the member who sent the invitation. Absent when that user no longer exists.
@@ -489,14 +489,6 @@ components:
           type: string
           format: date-time
           description: When the invitation was created and its email queued.
-        accepted_at:
-          type: string
-          format: date-time
-          description: When the invitee accepted. Absent until then.
-        revoked_at:
-          type: string
-          format: date-time
-          description: When a member revoked the invitation. Absent unless it was revoked.
       example:
         id: hc_minv_davn542q3gpgqfoq5ccg
         email: sam@northwind.example
@@ -23301,11 +23293,12 @@ paths:
       description: |
         Used by the dashboard; not part of the integration API.
 
-        Lists the account's members, oldest user first, and every
-        invitation the account has sent, newest first. Only a dashboard
-        session can call it: an API key gets 403, because a team change is
-        made by a person. Roles are recorded but not enforced yet: every
-        member can do everything in the dashboard.
+        Lists the account's members, the earliest to join first, and its
+        invitations that are pending or expired, newest first. An accepted
+        or revoked invitation is not listed. Only a dashboard session can
+        call it: an API key gets 403, because a team change is made by a
+        person. Roles are recorded but not enforced yet: every member can
+        do everything in the dashboard.
       responses:
         "200":
           description: Members and invitations
@@ -23333,10 +23326,7 @@ paths:
                         joined_at:
                           type: string
                           format: date-time
-                          description: |
-                            When the user's sign-in account was created. For
-                            someone who already had an account when invited,
-                            this is earlier than the day they joined.
+                          description: When the person joined this account.
                   invitations:
                     type: array
                     items:
