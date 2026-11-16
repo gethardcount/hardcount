@@ -147,4 +147,4 @@ when it is gone. A removal's caller is a member and not the one removed, so
 one member always stays. That replaces the member count in the `DELETE` and
 the "cannot remove the last member" refusal of the 2026-11-10 amendment. Of
 two members removing each other at once, the second waits for the first and
-gets the `403` ([#PRNUM](https://github.com/gethardcount/hardcount/pull/PRNUM)).
+gets the `403` ([#1834](https://github.com/gethardcount/hardcount/pull/1834)).
