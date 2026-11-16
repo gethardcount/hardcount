@@ -12,7 +12,9 @@ import (
 // TestE2E_Login_AuditRowAndLastSignIn: over the real router, each sign-in
 // writes one login audit row on its own transaction: actor the user, in
 // test mode, with the client address and the request id of that sign-in.
-// last_login_at is set. The rolled-back case (a failed audit row leaves no
+// last_login_at is set. The client address round-trips because
+// throttleServer trusts the loopback proxy (TRUST_PROXY=127.0.0.1/32), so
+// the X-Forwarded-For entry is the client address. The rolled-back case (a failed audit row leaves no
 // session and does not clear the sign-in throttle) is in internal/user,
 // login_integration_test.go.
 func TestE2E_Login_AuditRowAndLastSignIn(t *testing.T) {

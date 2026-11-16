@@ -38,7 +38,7 @@ type Service struct {
 // *session.Service satisfies it.
 type SessionTxWriter interface {
 	IssueTx(ctx context.Context, tx *sql.Tx, in session.IssueInput) (rawID string, sess session.Session, err error)
-	EndTx(ctx context.Context, tx *sql.Tx, rawID string) error
+	EndTx(ctx context.Context, tx *sql.Tx, rawID string) (ended bool, err error)
 	EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID string) error
 }
 
@@ -172,7 +172,8 @@ type LoginInput struct {
 	UserAgent string
 	IP        string
 	// SessionCookie is the raw value of the session cookie the request
-	// carried, or "" when it carried none.
+	// carried, or "" when it carried none. That session ends when the
+	// sign-in commits, because the new cookie replaces it in the browser.
 	SessionCookie string
 }
 
@@ -192,12 +193,13 @@ type LoginResult struct {
 // used to enumerate registered emails.
 //
 // The account read and the bcrypt run outside any transaction, so bcrypt
-// holds no row lock. One transaction then checks that the password is still
-// the one verified and that the user still belongs to the workspace, ends
-// the session the request's cookie named, creates the new session, stamps
-// last_login_at and writes the login audit row, so either all of it happens
-// or none of it does. A password changed while the sign-in ran gets
-// ErrBadCredentials; a user with no workspace gets a refusal.
+// holds no row lock. One transaction (PostgresStore.SignIn) then first checks
+// that the password is still the one verified and finds the user's
+// first-joined workspace, and after those checks stamps last_login_at, ends
+// the session the request's cookie named, creates the new session and
+// writes the login audit row, so either all of it happens or none of it
+// does. A password changed while the sign-in ran gets ErrBadCredentials; a
+// user with no workspace gets errs.InvalidState, a 409.
 //
 // There is no account-lock check, and there never is: the sign-in throttle
 // (throttle.go) slows guesses before this runs and does not lock an account
@@ -231,10 +233,10 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (LoginResult, error)
 	tenantID, err := s.store.SignIn(ctx, u.ID, u.PasswordHash, now, func(tx *sql.Tx, tenantID string) error {
 		// The browser's cookie is about to be replaced, so the session it
 		// named ends here, whoever it belongs to.
-		if err := s.sessions.EndTx(ctx, tx, in.SessionCookie); err != nil {
+		ended, err := s.sessions.EndTx(ctx, tx, in.SessionCookie)
+		if err != nil {
 			return fmt.Errorf("end the previous session: %w", err)
 		}
-		var err error
 		rawID, sess, err = s.sessions.IssueTx(ctx, tx, session.IssueInput{
 			UserID:    u.ID,
 			TenantID:  tenantID,
@@ -248,13 +250,18 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (LoginResult, error)
 		// The user is the actor. The row records the address the session
 		// row records. No email in the label: resource_id is the user id,
 		// and audit_log is append-only, so an email written here could
-		// never be erased.
+		// never be erased. previous_session_ended says the sign-in ended
+		// the session the browser held, without naming whose it was.
+		meta := map[string]any{"livemode": sess.Livemode}
+		if ended {
+			meta["previous_session_ended"] = true
+		}
 		actx := audit.WithClientIP(auth.WithUserID(ctx, u.ID), in.IP)
 		if err := s.audit.LogInTx(actx, tx, audit.Entry{
 			Action:       "login",
 			ResourceType: "user",
 			ResourceID:   u.ID,
-			Metadata:     map[string]any{"livemode": sess.Livemode},
+			Metadata:     meta,
 		}); err != nil {
 			return fmt.Errorf("write the audit row: %w", err)
 		}

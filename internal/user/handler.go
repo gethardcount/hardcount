@@ -90,11 +90,12 @@ func (h *Handler) SetAuditLogger(a AuditRecorder) { h.auditLogger = a }
 // session middleware, so the ctx carries no livemode and the audit writer's TxTenant
 // would refuse to open (every auth audit row silently failed this way until 2026-07-06).
 //
-// Auth events are ACCOUNT-PLANE — a login is a login, not a "test-mode login" — so
-// they are ALL filed in the canonical (test) partition, whatever the session's mode.
+// Auth events are ACCOUNT-PLANE — a sign-out is a sign-out, not a "test-mode
+// sign-out" — so they are ALL filed in the canonical (test) partition, whatever the
+// session's mode. A sign-in files its row the same way, in PostgresStore.SignIn.
 // They used to inherit the session's mode, which meant the same event landed in a
 // different partition depending on which way the operator's Test/Live toggle
-// happened to be pointing, and "when did they last sign in?" had no reliable answer.
+// happened to be pointing, and "when did they last sign out?" had no reliable answer.
 //
 // Accepted loss, stated rather than glossed: an operator viewing the audit log in
 // LIVE mode does not see these rows. See the note in tenant/settings.go for why the

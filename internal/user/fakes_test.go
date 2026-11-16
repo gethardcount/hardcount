@@ -93,9 +93,9 @@ func (r *recordingSessionStore) InsertTx(ctx context.Context, tx *sql.Tx, s sess
 	r.inserted = append(r.inserted, s)
 	return nil
 }
-func (r *recordingSessionStore) RevokeTx(ctx context.Context, tx *sql.Tx, idHash string) error {
+func (r *recordingSessionStore) RevokeTx(ctx context.Context, tx *sql.Tx, idHash string) (bool, error) {
 	r.revoked = append(r.revoked, idHash)
-	return nil
+	return false, nil
 }
 func (r *recordingSessionStore) GetByIDHash(ctx context.Context, idHash string) (session.Session, error) {
 	return session.Session{}, session.ErrNotFound

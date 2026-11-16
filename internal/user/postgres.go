@@ -94,12 +94,18 @@ var errNoWorkspace = errors.New("user: the user belongs to no workspace")
 // The row locks are what keep the sign-in true when it commits. A password
 // reset updates the user's row, so the lock waits for a reset in flight and
 // the check then sees its new hash. A member removal deletes the membership
-// row and ends the member's sessions in its own transaction: either the
-// lock waits for the removal and then finds no row, or the removal waits for
-// this commit and its sign-out then ends the session then created. FOR
-// UPDATE, not FOR SHARE, on the user's row: this transaction updates the
+// row and ends the member's sessions in its own transaction. Either the lock
+// waits for the removal, and the read then finds the user's next membership
+// (a user with one workspace has none and gets errNoWorkspace; a user with
+// more signs in to the next one), or the removal waits for this commit and
+// its sign-out ends the session this sign-in created.
+//
+// FOR UPDATE, not FOR SHARE, on the user's row: this transaction updates the
 // row, and two sign-ins of one user that each held a share lock would
-// deadlock on that update.
+// deadlock on that update. FOR KEY SHARE on the membership row: it conflicts
+// with the removal's delete, and not with another sign-in or an update that
+// leaves the row's key alone, so sign-ins of one workspace's members do not
+// queue behind each other.
 func (s *PostgresStore) SignIn(ctx context.Context, userID, verifiedHash string, at time.Time, then func(tx *sql.Tx, tenantID string) error) (string, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {

@@ -16,7 +16,7 @@ type Store interface {
 	InsertTx(ctx context.Context, tx *sql.Tx, s Session) error
 	GetByIDHash(ctx context.Context, idHash string) (Session, error)
 	Revoke(ctx context.Context, idHash string) error
-	RevokeTx(ctx context.Context, tx *sql.Tx, idHash string) error
+	RevokeTx(ctx context.Context, tx *sql.Tx, idHash string) (bool, error)
 	EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID string) error
 	EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, tenantID string) error
 	UpdateLivemode(ctx context.Context, idHash string, livemode bool) error
@@ -105,23 +105,30 @@ func (s *postgresStore) Revoke(ctx context.Context, idHash string) error {
 	}
 	defer postgres.Rollback(tx)
 
-	if err := s.RevokeTx(ctx, tx, idHash); err != nil {
+	if _, err := s.RevokeTx(ctx, tx, idHash); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
 // RevokeTx revokes the session whose hash is idHash on the caller's
-// transaction, whoever it belongs to. A revoked or unknown hash changes
-// nothing. It does not commit. The caller's transaction must see the row in
+// transaction, whoever it belongs to, and reports whether it revoked one. A
+// revoked or unknown hash changes nothing. It does not commit. The caller's transaction must see the row in
 // either mode: a bypass transaction does.
-func (s *postgresStore) RevokeTx(ctx context.Context, tx *sql.Tx, idHash string) error {
-	_, err := tx.ExecContext(ctx, `
+func (s *postgresStore) RevokeTx(ctx context.Context, tx *sql.Tx, idHash string) (bool, error) {
+	res, err := tx.ExecContext(ctx, `
 		UPDATE dashboard_sessions
 		SET revoked_at = $1
 		WHERE id_hash = $2 AND revoked_at IS NULL
 	`, time.Now().UTC(), idHash)
-	return err
+	if err != nil {
+		return false, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return false, err
+	}
+	return n > 0, nil
 }
 
 // EndAllForUserTx revokes every active session of a user, in every workspace

@@ -11059,6 +11059,10 @@ export const getLoginUrl = () => {
  *
  * A wrong password and an unknown email get the same 401, so the
  * answer does not reveal which emails have accounts.
+ *
+ * If the request carries a session cookie, that session ends when the
+ * new one starts. A sign-in writes a `login` audit row; if it cannot
+ * be written the sign-in answers `500` and no session exists.
  * @summary Sign in to the dashboard with email and password
  */
 export const login = async (loginBody: LoginBody, options?: RequestInit): Promise<Login200> => {
