@@ -23,30 +23,16 @@ const (
 	AttentionSeverityCritical AttentionSeverity = "critical"
 )
 
-// AttentionReason is the closed, typed code naming *why* an invoice
-// needs operator attention. Public-API contract — once shipped, codes
-// are never repurposed; deprecations keep the code reserved and add a
-// successor.
+// AttentionReason is the closed code naming why an invoice needs operator
+// attention. It is part of the public API (the AttentionReason enum in
+// api/openapi.yaml): a code is never given another meaning, and a retired
+// code stays reserved. The dashboard switches on it. The open code,
+// Attention.Code, names the exact cause (for example
+// tax.customer_data_invalid).
 //
-// Closed enum so the dashboard can switch on it for icon, copy, and
-// CTA layout. The open variant — Attention.Code — carries the
-// underlying provider-specific reason (e.g. tax.customer_data_invalid)
-// for programmatic clients.
-//
-// Anchored to industry precedent: Stripe's invoice event-name
-// granularity (invoice.payment_failed, invoice.finalization_failed),
-// Chargebee's dunning_status, Lago's payment_status. Five codes today
-// matching the signal we actually have; the enum is open for
-// extension as we ship dunning, disputes, and 3DS support.
-//
-// Reserved-but-not-yet-emitted (planned, do not reuse):
-//
-//	finalization_failed         — non-tax finalization error
-//	payment_action_required     — 3DS / SCA pending
-//	payment_method_required     — no PM on file
-//	dunning_exhausted           — shipped 2026-07-22 (payment-surfacing audit)
-//	dispute_lost                — shipped 2026-10-19 (#979)
-//	refunded_in_stripe          — shipped 2026-10-30 (ADR-134)
+// ADR-009 reserves three codes that are never sent: finalization_failed,
+// payment_action_required and payment_method_required. Do not use them for
+// another meaning.
 type AttentionReason string
 
 const (
@@ -381,12 +367,10 @@ type Attention struct {
 	DueBy *time.Time `json:"due_by,omitempty"`
 }
 
-// AttentionContext carries ancillary signals needed by the classifier
-// that aren't durable on the Invoice row itself. Today this is just
-// the customer's payment-method state, but the struct is the seam for
-// future signals (dunning policy retry schedule, collection mode, etc).
-// Zero-value is safe — classifier falls back to existing behaviour
-// when callers don't have the signal available.
+// AttentionContext carries the facts the classifier needs that are not on
+// the invoice row: about the customer, the tenant's and this server's setup,
+// the subscription, the dunning run and the invoice's payments. The invoice
+// service fills it when it reads an invoice.
 type AttentionContext struct {
 	// HasPaymentMethod is true when the customer has a PaymentSetup
 	// row in `ready` state with a stripe_customer_id. Distinguishes
@@ -600,33 +584,13 @@ func docURL(slug string) string {
 	return ""
 }
 
-// ClassifyInvoiceAttention returns the most-pressing reason this
-// invoice needs operator attention, or nil if everything is healthy.
+// ClassifyInvoiceAttention returns the one notice an invoice shows its
+// operator, or nil when it needs none. classifyAttentionCause picks the
+// cause: its first matching branch wins, in the order written there.
+// withCommitExposure then adds the prepaid credit an unpaid invoice bought,
+// or raises a notice for that alone.
 //
-// Priority order (first match wins, descending urgency):
-//  1. Tax failed          — blocks finalize, Critical
-//  2. Payment failed      — money flow broken, Critical
-//  3. Tax pending         — engine retrying, Warning
-//  4. Payment unconfirmed — reconciler resolves, Info
-//  5. Payment processing  — charge in flight at provider, Info
-//  6. Payment scheduled   — auto-charge will fire on next tick, Info
-//  7. Awaiting payment    — finalized, no charge attempted yet, Info
-//
-// Terminal-state invoices (paid, voided) never raise attention.
-// Drafts also skip — the page itself communicates draft state and
-// adding a banner would be redundant noise.
-//
-// Pure function — no I/O, deterministic on the input Invoice +
-// AttentionContext. Tested in invoice_attention_test.go across the
-// cartesian product of (status, tax_status, tax_error_code,
-// payment_status, auto_charge_pending, has_payment_method).
-//
-// The atc.HasPaymentMethod signal distinguishes two awaiting sub-
-// states: a no-PM invoice (operator-actionable, the engine has nothing
-// scheduled) vs a has-PM race window (transient, engine will fire on
-// next sweep). Without the context, callers fall through to the
-// generic awaiting_payment classification — backwards-compat for
-// internal call sites that don't have a PaymentMethodReader handy.
+// It reads only its arguments and does no I/O.
 func ClassifyInvoiceAttention(inv Invoice, atc AttentionContext) *Attention {
 	return withCommitExposure(classifyAttentionCause(inv, atc), inv, atc)
 }
@@ -936,34 +900,11 @@ func hasAttentionAction(actions []AttentionActionItem, code AttentionAction) boo
 	return false
 }
 
-// classifyTaxAttention branches on the typed tax_error_code persisted
-// by internal/tax.Classify. Sub-cases differ in three dimensions:
-// Reason (location-vs-generic), action verbs, and `param` pointer. The
-// open `code` carries the full granularity (one per error_code value).
-//
-// Provenance routing per typed code (ADR-025):
-//   - provider_not_configured: pre-flight failure, we never called the
-//     provider. tax_pending_reason holds Hardcount's own string ("no client
-//     configured for livemode=…"). Both Detail and ProviderResponse
-//     stay empty — the headline + code + Connect Stripe action are the
-//     whole UI; surfacing the internal string under "Provider response"
-//     would mislead operators into thinking we got a 4xx from Stripe.
-//   - provider_auth / provider_outage / customer_data_invalid /
-//     jurisdiction_unsupported: we made the call and got a response.
-//     tax_pending_reason holds the upstream payload (Stripe Tax JSON
-//     envelope, prefixed with "stripe_tax: "). Goes into
-//     ProviderResponse.
-//   - unknown: routes to ProviderResponse — the safer slot for
-//     unclassified content. If it turns out to be Hardcount-internal, we'd
-//     just be mis-labelling it as a provider response, which is the
-//     same as today's behaviour for known cases.
-//
 // MaxTaxRetryAttempts is the reconciler's hard cap on automatic tax
 // retries (the SQL predicate lives in billing/tax_retry.go, which
 // sources this const). The attention banner asserts this policy to
 // operators, so the classifier and the reconciler must share one
-// number — a banner promising retries the reconciler stopped making
-// was the 2026-07-19 truth-audit finding this closes.
+// number.
 const MaxTaxRetryAttempts = 8
 
 // TaxRetryableErrorCodes is the single source for WHICH tax error
@@ -988,6 +929,27 @@ func TaxErrorCodeRetryable(code string) bool {
 	return false
 }
 
+// classifyTaxAttention branches on the typed tax_error_code persisted
+// by internal/tax.Classify. Sub-cases differ in three dimensions:
+// Reason (location-vs-generic), action verbs, and `param` pointer. The
+// open `code` carries the full granularity (one per error_code value).
+//
+// Provenance routing per typed code (ADR-025):
+//   - provider_not_configured: pre-flight failure, we never called the
+//     provider. tax_pending_reason holds Hardcount's own string ("no client
+//     configured for livemode=…"). Both Detail and ProviderResponse
+//     stay empty — the headline + code + Connect Stripe action are the
+//     whole UI; surfacing the internal string under "Provider response"
+//     would mislead operators into thinking we got a 4xx from Stripe.
+//   - provider_auth / provider_outage / customer_data_invalid /
+//     jurisdiction_unsupported: we made the call and got a response.
+//     tax_pending_reason holds the upstream payload (Stripe Tax JSON
+//     envelope, prefixed with "stripe_tax: "). Goes into
+//     ProviderResponse.
+//   - unknown: routes to ProviderResponse — the safer slot for
+//     unclassified content. If it turns out to be Hardcount-internal, we'd
+//     just be mis-labelling it as a provider response, which is the
+//     same as today's behaviour for known cases.
 func classifyTaxAttention(inv Invoice, atc AttentionContext) *Attention {
 	errorCode := inv.TaxErrorCode
 	if errorCode == "" {

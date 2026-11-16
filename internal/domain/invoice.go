@@ -97,10 +97,10 @@ func (s InvoicePaymentStatus) IsInFlight() bool {
 // write-off, offline payment, credit notes, Collect, invoice emails, the
 // hosted Pay button, proration's credit path and dunning's final action.
 //
-// Today the answer is the payment status alone (IsInFlight). It lives on the
-// invoice, not on the status, so that a fact stored elsewhere on the invoice
-// row can join it here once, not at each caller. #976 adds such a fact: a
-// record of a charge sent to Stripe whose result is not saved yet.
+// The answer is the payment status alone (IsInFlight). It does not read the
+// charge hold, which a charge writes on the invoice before its PaymentIntent
+// is there. PaymentBlocksActionHeld adds the hold for void, write-off and
+// offline payment.
 func (i Invoice) PaymentInFlight() bool {
 	return i.PaymentStatus.IsInFlight()
 }
@@ -180,11 +180,12 @@ func (i Invoice) IssuedAtOrZero() time.Time {
 	return *i.IssuedAt
 }
 
-// Provider PaymentIntent statuses, verbatim from Stripe. These name the
-// values that can land in Invoice.ProviderPaymentStatus (migration 0167), so
-// stored data and tests read against symbols, not loose string literals. No
-// logic branches on them today. The column is recorded for queue ordering
-// and for diagnosing a long-running payment.
+// Provider PaymentIntent statuses, verbatim from Stripe: the status a read of
+// a PaymentIntent returns (payment.PaymentIntentResult.Status), and the value
+// stored in Invoice.ProviderPaymentStatus. The payment reconciler decides
+// from this status whether a charge was paid, failed or is still open, and
+// ConfirmPaymentIntent reads it when Stripe refuses a confirm for the
+// PaymentIntent's state.
 const (
 	ProviderPIRequiresPaymentMethod = "requires_payment_method"
 	ProviderPIRequiresConfirmation  = "requires_confirmation"

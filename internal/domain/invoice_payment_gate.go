@@ -204,15 +204,6 @@ func inFlightMessage(action InvoiceAction) string {
 	}
 }
 
-// There is no RecoveryBlocksCharge: nothing charges a written-off invoice
-// (ADR-113), so no check for that lives here. Charging in place would aim
-// money at an invoice that carries stale state. A customer who returns later
-// gets a fresh recovery invoice on the normal payment paths, and a fresh
-// invoice carries no stale state.
-// RecoveryWarnsOnOfflinePayment below still applies: recording money that
-// already arrived is never refused, but the operator is told when it will
-// not reconcile.
-
 // RecoveryWarnsOnOfflinePayment returns what an operator must be told before
 // recording an offline payment on a written-off invoice. The rule for this
 // area is:
