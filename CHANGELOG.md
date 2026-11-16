@@ -125,7 +125,7 @@ original text.
 
 ### Fixed
 
-- **`GET /v1/whoami` answers an error when the signed-in user cannot be read.** It answered `200` without `email`. Three API key validation messages are plainer ([#PRNUM](https://github.com/gethardcount/hardcount/pull/PRNUM)).
+- **`GET /v1/whoami` answers an error when the signed-in user cannot be read.** It answered `200` without `email`. Three API key validation messages are plainer ([#1825](https://github.com/gethardcount/hardcount/pull/1825)).
 - **An expired invitation no longer blocks a new one to the same address.** Inviting someone whose earlier invitation expired answered `409` and the dashboard offered no way to clear it; the new invitation now replaces the expired one ([#1817](https://github.com/gethardcount/hardcount/pull/1817)).
 - **An invoice finalized through the API and paid at once from credits has `paid_at` equal to `issued_at`.** The timestamps one API request writes now share one time; `paid_at` was read a moment later before ([#1815](https://github.com/gethardcount/hardcount/pull/1815)).
 - **A card payment's `paid_at` is the time Stripe's answer arrived, in the same call or by its event; a declined card's payment recovery starts at that time too.** Neither is dated before its charge. On a test clock both stay on the clock's time ([#1819](https://github.com/gethardcount/hardcount/pull/1819)).
