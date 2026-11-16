@@ -720,11 +720,6 @@ func (s *Stripe) sendCharge(ctx context.Context, tenantID string, inv domain.Inv
 		}
 		return chargeSent{}, fmt.Errorf("%w: create: %w", errNothingConfirmed, err)
 	}
-	var simAt *time.Time
-	if sim, ok := clock.SimOf(ctx); ok {
-		t := sim.At
-		simAt = &t
-	}
 	stamped, ok, err := s.invoices.StampPendingConfirm(ctx, tenantID, domain.InvoiceChargeAttempt{
 		InvoiceID:             inv.ID,
 		StripePaymentIntentID: created.ID,
@@ -733,7 +728,7 @@ func (s *Stripe) sendCharge(ctx context.Context, tenantID string, inv domain.Inv
 		StripePaymentMethodID: params.PaymentMethodID,
 		AmountCents:           params.AmountCents,
 		OccurredAt:            time.Now().UTC(),
-		SimEffectiveAt:        simAt,
+		EffectiveAt:           clock.Now(ctx).UTC(),
 	}, hold, inv.ChargeAttemptSeq)
 	if err != nil {
 		return chargeSent{}, fmt.Errorf("%w: %w %s: %w", errNothingConfirmed, errStampFailed, created.ID, err)
@@ -1545,11 +1540,6 @@ type chargedCard struct {
 }
 
 func recordChargeAttempt(ctx context.Context, invoices InvoiceUpdater, tenantID string, inv domain.Invoice, piID string, trigger domain.ChargeAttemptTrigger, outcome domain.ChargeAttemptOutcome, reason string, card chargedCard) {
-	var simAt *time.Time
-	if sim, ok := clock.SimOf(ctx); ok {
-		t := sim.At
-		simAt = &t
-	}
 	a := domain.InvoiceChargeAttempt{
 		InvoiceID:             inv.ID,
 		StripePaymentIntentID: piID,
@@ -1560,7 +1550,7 @@ func recordChargeAttempt(ctx context.Context, invoices InvoiceUpdater, tenantID 
 		StripePaymentMethodID: card.paymentMethodID,
 		AmountCents:           inv.AmountDueCents,
 		OccurredAt:            time.Now().UTC(),
-		SimEffectiveAt:        simAt,
+		EffectiveAt:           clock.Now(ctx).UTC(),
 	}
 	if err := invoices.RecordChargeAttempt(ctx, tenantID, a); err != nil {
 		slog.Warn("record charge attempt failed — timeline falls back to the webhook row",

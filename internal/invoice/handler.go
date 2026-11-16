@@ -183,11 +183,10 @@ type EmailEventRow struct {
 	// auto_charge_retry_no_pm / operator_resend. Empty for legacy rows
 	// and types that carry no trigger.
 	Trigger string
-	// SimEffectiveAt is the billing-axis anchor stamped at enqueue
-	// (ADR-104): the simulated instant that caused the send. Nil for
-	// live-mode mail and for legacy rows enqueued before the anchor
-	// existed — those render at their wall stamp.
-	SimEffectiveAt *time.Time
+	// EffectiveAt is the instant the send's action decided, and TestClockID
+	// that action's test clock or empty (ADR-104).
+	EffectiveAt time.Time
+	TestClockID string
 	// SendFailure classifies a failed row's error into one the activity
 	// line can name in plain words (activity.SendFailure*); empty when the
 	// row did not fail or its error has no plain-words name. The raw error
@@ -1366,6 +1365,9 @@ const (
 	rankEscalated         = 50
 	rankLifecycleTerminal = 60 // paid / voided / uncollectible
 	rankCreditNote        = 70
+	// A credit note that left nothing due marks the invoice paid in its own
+	// transaction: the paid row follows the note that caused it.
+	rankPaidByNote = 71
 	// A refund made in Stripe follows the payment it refunds (ADR-134).
 	rankStripeRefund = 72
 	// A dispute opens after the payment it disputes, and closes after it
@@ -1590,7 +1592,7 @@ func renderChargeAttempts(events []TimelineEvent, attempts []domain.InvoiceCharg
 				// occurred_at is the only real-world stamp the paid row
 				// can honestly carry; ADR-104 Invariant A). Lift it when
 				// the audit join left the row bare.
-				if a.SimEffectiveAt != nil {
+				if inv.IsSimulated {
 					for i := range events {
 						if events[i].EventType == "invoice.paid" && events[i].Source == "lifecycle" && events[i].RecordedAt == "" {
 							events[i].RecordedAt = a.OccurredAt.Format(time.RFC3339)
@@ -1624,18 +1626,14 @@ func renderChargeAttempts(events []TimelineEvent, attempts []domain.InvoiceCharg
 	return events
 }
 
-// chargeAttemptRow renders one attempt fact. A simulated attempt's
-// PRIMARY position is its billing-axis instant, with the wall instant
-// kept as RecordedAt (Invariant A); an unanchored attempt keeps its
-// wall stamp — same fallback as legacy emails (ADR-104).
+// chargeAttemptRow renders one attempt fact at the instant its action
+// decided (effective_at), in both modes. On a simulated invoice the wall
+// instant is kept as RecordedAt (Invariant A, ADR-104).
 func chargeAttemptRow(a domain.InvoiceChargeAttempt, inv domain.Invoice) TimelineEvent {
-	ts := a.OccurredAt
-	sim := false
+	ts, sim := a.EffectiveAt, inv.IsSimulated
 	var recorded time.Time
-	if a.SimEffectiveAt != nil {
-		ts = *a.SimEffectiveAt
+	if sim {
 		recorded = a.OccurredAt
-		sim = true
 	}
 	return TimelineEvent{
 		ID:              "attempt:" + a.ID,
@@ -2050,7 +2048,11 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 		if actor == nil {
 			actor = byNoteActor
 		}
-		i := addLifecycle("paid", "invoice.paid", *inv.PaidAt, rankLifecycleTerminal,
+		rank := rankLifecycleTerminal
+		if byNote != nil {
+			rank = rankPaidByNote
+		}
+		i := addLifecycle("paid", "invoice.paid", *inv.PaidAt, rank,
 			paidLine(inv, retries, note, actor, byNote))
 		events[i].AttemptCount = retries
 	}

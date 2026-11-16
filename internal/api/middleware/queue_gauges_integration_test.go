@@ -278,8 +278,8 @@ func TestOutboxGauges_StallAndRelayBroken(t *testing.T) {
 	// Times are offsets from the database clock, in seconds.
 	email := func(id, status string, attempts int, createdAgo, dueIn int, lastError string) {
 		t.Helper()
-		mustExec(`INSERT INTO email_outbox (id, tenant_id, email_type, payload, status, attempts, next_attempt_at, created_at, last_error)
-			VALUES ($1, $2, 'invoice', '{"to":"a@b.test"}', $3, $4, now() + make_interval(secs => $5), now() - make_interval(secs => $6), NULLIF($7, ''))`,
+		mustExec(`INSERT INTO email_outbox (id, tenant_id, email_type, payload, status, attempts, next_attempt_at, created_at, effective_at, last_error)
+			VALUES ($1, $2, 'invoice', '{"to":"a@b.test"}', $3, $4, now() + make_interval(secs => $5), now() - make_interval(secs => $6), now() - make_interval(secs => $6), NULLIF($7, ''))`,
 			id, tenantID, status, attempts, dueIn, createdAgo, lastError)
 	}
 	webhook := func(id, status string, createdAgo int) {

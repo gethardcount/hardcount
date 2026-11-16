@@ -170,16 +170,15 @@ func TestEmailInstant(t *testing.T) {
 	dispatched := created.Add(time.Minute)
 	sim := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
 
-	// Real clock: the real send time, else the queue time; not pinned.
-	if occ, rec, pinned := EmailInstant(Email{CreatedAt: created}); !occ.Equal(created) || !rec.IsZero() || pinned {
-		t.Errorf("queued: %v %v %v", occ, rec, pinned)
+	action := created.Add(-time.Second) // the instant the send's action decided
+	// Real clock: the action's instant, whatever the queue and send times;
+	// not pinned.
+	if occ, rec, pinned := EmailInstant(Email{CreatedAt: created, DispatchedAt: &dispatched, EffectiveAt: action}); !occ.Equal(action) || !rec.IsZero() || pinned {
+		t.Errorf("real clock: %v %v %v", occ, rec, pinned)
 	}
-	if occ, rec, pinned := EmailInstant(Email{CreatedAt: created, DispatchedAt: &dispatched}); !occ.Equal(dispatched) || !rec.IsZero() || pinned {
-		t.Errorf("sent: %v %v %v", occ, rec, pinned)
-	}
-	// Test clock: the instant that caused it, with the real send time as
-	// its Recorded time.
-	if occ, rec, pinned := EmailInstant(Email{CreatedAt: created, DispatchedAt: &dispatched, SimEffectiveAt: &sim}); !occ.Equal(sim) || !rec.Equal(dispatched) || !pinned {
+	// Test clock: the clock's instant, with the real send time as its
+	// Recorded time.
+	if occ, rec, pinned := EmailInstant(Email{CreatedAt: created, DispatchedAt: &dispatched, EffectiveAt: sim, TestClockID: "clk_1"}); !occ.Equal(sim) || !rec.Equal(dispatched) || !pinned {
 		t.Errorf("test clock: %v %v %v", occ, rec, pinned)
 	}
 }

@@ -97,6 +97,10 @@ func TestSentEmails_EveryRowHasALine(t *testing.T) {
 		{ID: "emob_5", EmailType: "payment_receipt", Recipient: "billing@acme.test", Status: "dispatched", DeliveryState: "complained",
 			CreatedAt: created, DispatchedAt: &dispatched, InvoiceNumber: "HC-000123"},
 	}
+	action := created.Add(-time.Second) // the instant each send's action decided
+	for i := range rows {
+		rows[i].EffectiveAt = action
+	}
 	got := fetchSentEmails(t, rows)
 	if len(got) != len(rows) {
 		t.Fatalf("%d rows, want %d", len(got), len(rows))
@@ -127,14 +131,10 @@ func TestSentEmails_EveryRowHasALine(t *testing.T) {
 		if l["id"] != "email:"+fmt.Sprint(row["id"]) {
 			t.Errorf("row %v: line id %v", row["id"], l["id"])
 		}
-		// A real-clock email is dated when it went out (else when it was
-		// queued) and has no Recorded time.
-		at := created
-		if rows[i].DispatchedAt != nil {
-			at = dispatched
-		}
-		if occ, _ := time.Parse(time.RFC3339Nano, fmt.Sprint(l["occurred_at"])); !occ.Equal(at) {
-			t.Errorf("row %v occurred_at %v, want %v", row["id"], l["occurred_at"], at)
+		// A real-clock email is dated at its action's instant, whatever its
+		// queue and send times, and has no Recorded time.
+		if occ, _ := time.Parse(time.RFC3339Nano, fmt.Sprint(l["occurred_at"])); !occ.Equal(action) {
+			t.Errorf("row %v occurred_at %v, want %v", row["id"], l["occurred_at"], action)
 		}
 		if l["recorded_at"] != nil {
 			t.Errorf("row %v on the real clock has recorded_at %v", row["id"], l["recorded_at"])

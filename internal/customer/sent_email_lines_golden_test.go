@@ -84,7 +84,7 @@ func TestSentEmailLinesGolden(t *testing.T) {
 	sim := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
 	base := SentEmailOutboxRow{
 		ID: "hc_emob_1", Recipient: "billing@acme.test", Status: "dispatched", DeliveryState: "delivered",
-		CreatedAt: created, DispatchedAt: &dispatched, InvoiceNumber: "HC-000123", InvoiceID: "hc_inv_1",
+		CreatedAt: created, DispatchedAt: &dispatched, EffectiveAt: created, InvoiceNumber: "HC-000123", InvoiceID: "hc_inv_1",
 	}
 
 	var cases []sentEmailGoldenCase
@@ -141,7 +141,7 @@ func TestSentEmailLinesGolden(t *testing.T) {
 	// On a test clock: dated at the instant that caused it, with the real
 	// send time as its Recorded time.
 	onClock := base
-	onClock.EmailType, onClock.SimEffectiveAt = "payment_receipt", &sim
+	onClock.EmailType, onClock.EffectiveAt, onClock.TestClockID = "payment_receipt", sim, "clk_1"
 	add("test clock", onClock)
 
 	var buf bytes.Buffer

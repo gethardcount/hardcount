@@ -20,9 +20,8 @@ import (
 //     resolution land on the same row (partial-unique upsert);
 //   - 'succeeded' is terminal (a stale failed webhook can't downgrade it)
 //     while failed → succeeded IS allowed (3DS second try on one PI);
-//   - the insert-time identity (trigger_source, sim_effective_at) survives
-//     wall-clock settle upserts — the settle path must not strip the
-//     billing-axis anchor;
+//   - the insert-time identity (trigger_source, effective_at) survives a
+//     settle's upsert: the writer that made the attempt owns its date;
 //   - empty-PI attempts (the PI create itself failed) insert-only: two
 //     such attempts are two rows, and each renders (no twin exists).
 func TestRecordChargeAttempt_UpsertContract(t *testing.T) {
@@ -74,7 +73,7 @@ func TestRecordChargeAttempt_UpsertContract(t *testing.T) {
 	if err := store.RecordChargeAttempt(ctx, tenantID, domain.InvoiceChargeAttempt{
 		InvoiceID: inv.ID, StripePaymentIntentID: "pi_attempt_1",
 		Trigger: domain.ChargeTriggerAutoCharge, Outcome: domain.ChargeAttemptPending,
-		AmountCents: 3100, OccurredAt: wall, SimEffectiveAt: &simAt,
+		AmountCents: 3100, OccurredAt: wall, EffectiveAt: simAt,
 	}); err != nil {
 		t.Fatalf("insert attempt: %v", err)
 	}
@@ -83,7 +82,7 @@ func TestRecordChargeAttempt_UpsertContract(t *testing.T) {
 	if err := store.RecordChargeAttempt(ctx, tenantID, domain.InvoiceChargeAttempt{
 		InvoiceID: inv.ID, StripePaymentIntentID: "pi_attempt_1",
 		Trigger: domain.ChargeTriggerExternal, Outcome: domain.ChargeAttemptFailed,
-		ProviderReason: "Your card was declined.", OccurredAt: wall.Add(time.Second),
+		ProviderReason: "Your card was declined.", OccurredAt: wall.Add(time.Second), EffectiveAt: wall.Add(time.Second),
 	}); err != nil {
 		t.Fatalf("upsert failed outcome: %v", err)
 	}
@@ -101,8 +100,8 @@ func TestRecordChargeAttempt_UpsertContract(t *testing.T) {
 	if a.Trigger != domain.ChargeTriggerAutoCharge {
 		t.Fatalf("settle upsert overwrote trigger: %s", a.Trigger)
 	}
-	if a.SimEffectiveAt == nil || !a.SimEffectiveAt.Equal(simAt) {
-		t.Fatalf("settle upsert stripped the sim anchor: %v", a.SimEffectiveAt)
+	if !a.EffectiveAt.Equal(simAt) {
+		t.Fatalf("settle upsert replaced the maker's effective_at: %v", a.EffectiveAt)
 	}
 	if a.AmountCents != 3100 {
 		t.Fatalf("zero-amount upsert overwrote amount: %d", a.AmountCents)
@@ -225,7 +224,7 @@ func TestChargeAttempt_SettleTransitionsResolveOutcomeAtomically(t *testing.T) {
 	if err := store.RecordChargeAttempt(ctx, tenantID, domain.InvoiceChargeAttempt{
 		InvoiceID: paid.ID, StripePaymentIntentID: "pi_atomic_ok",
 		Trigger: domain.ChargeTriggerDunningRetry, Outcome: domain.ChargeAttemptPending,
-		AmountCents: 2500, OccurredAt: time.Now().UTC(), SimEffectiveAt: &simAt,
+		AmountCents: 2500, OccurredAt: time.Now().UTC(), EffectiveAt: simAt,
 	}); err != nil {
 		t.Fatalf("chokepoint insert: %v", err)
 	}
@@ -245,7 +244,7 @@ func TestChargeAttempt_SettleTransitionsResolveOutcomeAtomically(t *testing.T) {
 	if got[0].Trigger != domain.ChargeTriggerDunningRetry {
 		t.Fatalf("settle overwrote the chokepoint's trigger: %s", got[0].Trigger)
 	}
-	if got[0].SimEffectiveAt == nil || !got[0].SimEffectiveAt.Equal(simAt) {
-		t.Fatalf("settle stripped the billing-axis anchor: %v", got[0].SimEffectiveAt)
+	if !got[0].EffectiveAt.Equal(simAt) {
+		t.Fatalf("settle replaced the maker's effective_at: %v", got[0].EffectiveAt)
 	}
 }

@@ -88,8 +88,8 @@ type InvoiceChargeAttempt struct {
 	// (IsAuthenticationRequired).
 	StripePaymentMethodID string
 	AmountCents           int64
-	OccurredAt            time.Time  // wall-clock
-	SimEffectiveAt        *time.Time // billing-axis instant under a test clock; nil = wall-clock fact
+	OccurredAt            time.Time // wall-clock
+	EffectiveAt           time.Time // the instant the attempt's action decided, in both modes
 	Livemode              bool
 	CreatedAt             time.Time
 	UpdatedAt             time.Time

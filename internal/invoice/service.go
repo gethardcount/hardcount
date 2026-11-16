@@ -1499,8 +1499,9 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 	if inv.IsSimulated && inv.PaymentStatus == domain.PaymentFailed && inv.ID != "" {
 		if attempts, err := s.store.ListChargeAttemptsByInvoice(ctx, inv.TenantID, inv.ID); err == nil {
 			for i := len(attempts) - 1; i >= 0; i-- {
-				if attempts[i].Outcome == domain.ChargeAttemptFailed && attempts[i].SimEffectiveAt != nil {
-					atc.LastFailedChargeAt = attempts[i].SimEffectiveAt
+				if attempts[i].Outcome == domain.ChargeAttemptFailed {
+					at := attempts[i].EffectiveAt
+					atc.LastFailedChargeAt = &at
 					break
 				}
 			}

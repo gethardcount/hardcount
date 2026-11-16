@@ -123,7 +123,7 @@ func TestEmailRowInstant(t *testing.T) {
 
 	t.Run("anchored email positions at the billing instant, keeps wall as Recorded", func(t *testing.T) {
 		ts, recorded, isSim := emailRowInstant(EmailEventRow{
-			CreatedAt: wall, DispatchedAt: &dispatched, SimEffectiveAt: &sim,
+			CreatedAt: wall, DispatchedAt: &dispatched, EffectiveAt: sim, TestClockID: "clk_1",
 		})
 		if !ts.Equal(sim) {
 			t.Errorf("primary instant = %s, want the billing anchor %s", ts, sim)
@@ -136,10 +136,11 @@ func TestEmailRowInstant(t *testing.T) {
 		}
 	})
 
-	t.Run("unanchored (live-mode / legacy) email keeps its wall stamp with no subline", func(t *testing.T) {
-		ts, recorded, isSim := emailRowInstant(EmailEventRow{CreatedAt: wall})
-		if !ts.Equal(wall) {
-			t.Errorf("primary instant = %s, want wall %s", ts, wall)
+	t.Run("an email on no clock sits at its action's instant with no subline", func(t *testing.T) {
+		action := wall.Add(-time.Second)
+		ts, recorded, isSim := emailRowInstant(EmailEventRow{CreatedAt: wall, DispatchedAt: &dispatched, EffectiveAt: action})
+		if !ts.Equal(action) {
+			t.Errorf("primary instant = %s, want the action's %s", ts, action)
 		}
 		if !recorded.IsZero() || isSim {
 			t.Errorf("unanchored row must carry no Recorded subline and stay unflagged (recorded=%s sim=%v) — the calendars coincide", recorded, isSim)

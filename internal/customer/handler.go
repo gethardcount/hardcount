@@ -95,9 +95,10 @@ type SentEmailOutboxRow struct {
 	// SkipReason is the state the invoice reached that made Hardcount skip a
 	// queued email, or empty.
 	SkipReason string
-	// SimEffectiveAt is the instant on the customer's test clock that
-	// caused the email (ADR-104); nil when not caused on a test clock.
-	SimEffectiveAt *time.Time
+	// EffectiveAt is the instant the send's action decided, and TestClockID
+	// that action's test clock or empty (ADR-104).
+	EffectiveAt time.Time
+	TestClockID string
 }
 
 func NewHandler(svc *Service) *Handler {
@@ -481,7 +482,7 @@ func sentEmailLine(row SentEmailOutboxRow) (activity.Line, bool) {
 	e := activity.Email{
 		Type: row.EmailType, Status: row.Status, DeliveryState: row.DeliveryState,
 		SendFailure: row.SendFailure, SkipReason: row.SkipReason, Trigger: row.Trigger, To: row.Recipient,
-		CreatedAt: row.CreatedAt, DispatchedAt: row.DispatchedAt, SimEffectiveAt: row.SimEffectiveAt,
+		CreatedAt: row.CreatedAt, DispatchedAt: row.DispatchedAt, EffectiveAt: row.EffectiveAt, TestClockID: row.TestClockID,
 	}
 	var about []activity.Segment
 	if row.InvoiceNumber != "" {

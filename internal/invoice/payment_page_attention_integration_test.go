@@ -108,7 +108,7 @@ func TestGet_SimulatedFailureBannerDatesFromTheCharge_RealStore(t *testing.T) {
 			InvoiceID: inv.ID, StripePaymentIntentID: "pi_" + at.Format("0102"),
 			Trigger: domain.ChargeTriggerAutoCharge, Outcome: domain.ChargeAttemptFailed,
 			ProviderReason: "Your card was declined.", AmountCents: 5000,
-			OccurredAt: time.Now().UTC(), SimEffectiveAt: &at,
+			OccurredAt: time.Now().UTC(), EffectiveAt: at,
 		}); err != nil {
 			t.Fatalf("record attempt: %v", err)
 		}

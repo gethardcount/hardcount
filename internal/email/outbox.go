@@ -44,12 +44,12 @@ type OutboxRow struct {
 	// (ListByInvoice/ListByCustomer/GetByID); the dispatcher's claim
 	// path leaves it zero — dispatch never reads it.
 	DeliveryState string
-	// SimEffectiveAt / TestClockID are the billing-axis anchor (ADR-104):
-	// the simulated instant that CAUSED this send, stamped at enqueue from
-	// the bound ctx. Nil for unbound enqueues (live-mode mail) — the two
-	// calendars coincide. CreatedAt stays the real-world dispatch record.
-	SimEffectiveAt *time.Time
-	TestClockID    string
+	// EffectiveAt is the instant the send's action decided, stamped at
+	// enqueue from ctx in both modes: where the email sits on a timeline.
+	// TestClockID names the action's test clock, or is empty. CreatedAt
+	// stays the real-world record (the database's clock).
+	EffectiveAt time.Time
+	TestClockID string
 	// SkipReason is why a 'skipped' row was not sent: the final state its
 	// invoice reached while it waited (one of the SkipReason constants).
 	// Empty on every other row, and on rows skipped before migration 00187
@@ -277,19 +277,14 @@ func (s *OutboxStore) Enqueue(ctx context.Context, tx *sql.Tx, tenantID, emailTy
 	}
 
 	id := postgres.NewID("hc_emob")
-	// Billing-axis anchor (ADR-104): record which test clock and instant
-	// caused this send, read from ctx at the only moment the fact exists.
-	// Every invoice-caused send runs on its invoice's decided time (a settle,
-	// a sweep, the catch-up, or a request decided by the API's door from its
-	// record), so this one place anchors them all. A ctx on no clock
-	// (live-mode mail, password resets, invites) records NULL: the two
-	// calendars coincide and there is nothing to say. created_at stays SQL
-	// now() on purpose: it is the real-world dispatch record (the
-	// "Recorded …" subline), not the story position.
-	var simAt any
+	// The send's place on a timeline is the instant its action decided,
+	// read from ctx at the only moment the fact exists, in both modes; its
+	// test clock, when there is one, beside it (ADR-104). created_at stays
+	// SQL now() on purpose: it is the real-world record (the "Recorded …"
+	// subline) and the queue's own order, not the story position.
+	effectiveAt := clock.Now(ctx).UTC()
 	var clockID any
 	if sim, ok := clock.SimOf(ctx); ok {
-		simAt = sim.At.UTC()
 		clockID = sim.TestClockID
 	}
 	// Who caused this email (ADR-128 §4), resolved exactly as the audit log
@@ -303,9 +298,9 @@ func (s *OutboxStore) Enqueue(ctx context.Context, tx *sql.Tx, tenantID, emailTy
 	actorType, actorID := audit.ResolveActor(ctx)
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO email_outbox (id, tenant_id, email_type, payload, status, attempts, next_attempt_at,
-			sim_effective_at, test_clock_id, actor_type, actor_id)
+			effective_at, test_clock_id, actor_type, actor_id)
 		VALUES ($1, $2, $3, $4, 'pending', 0, now(), $5, $6, $7, $8)
-	`, id, tenantID, emailType, payloadJSON, simAt, clockID, actorType, actorID)
+	`, id, tenantID, emailType, payloadJSON, effectiveAt, clockID, actorType, actorID)
 	if err != nil {
 		return "", fmt.Errorf("email outbox: insert: %w", err)
 	}
@@ -739,7 +734,7 @@ func (s *OutboxStore) ListByInvoice(ctx context.Context, tenantID, invoiceNumber
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, tenant_id, livemode, email_type, payload, status, attempts,
 		       next_attempt_at, COALESCE(last_error,''), created_at, dispatched_at,
-		       delivery_state, sim_effective_at, COALESCE(test_clock_id,''),
+		       delivery_state, effective_at, COALESCE(test_clock_id,''),
 		       COALESCE(skip_reason,'')
 		FROM email_outbox
 		WHERE email_type IN ('invoice', 'payment_receipt', 'payment_failed',
@@ -757,15 +752,11 @@ func (s *OutboxStore) ListByInvoice(ctx context.Context, tenantID, invoiceNumber
 	for rows.Next() {
 		var r OutboxRow
 		var payload []byte
-		var dispatchedAt, simAt sql.NullTime
+		var dispatchedAt sql.NullTime
 		if err := rows.Scan(&r.ID, &r.TenantID, &r.Livemode, &r.EmailType, &payload, &r.Status,
 			&r.Attempts, &r.NextAttemptAt, &r.LastError, &r.CreatedAt, &dispatchedAt,
-			&r.DeliveryState, &simAt, &r.TestClockID, &r.SkipReason); err != nil {
+			&r.DeliveryState, &r.EffectiveAt, &r.TestClockID, &r.SkipReason); err != nil {
 			return nil, err
-		}
-		if simAt.Valid {
-			t := simAt.Time
-			r.SimEffectiveAt = &t
 		}
 		if err := json.Unmarshal(payload, &r.Payload); err != nil {
 			return nil, fmt.Errorf("decode payload for %s: %w", r.ID, err)
@@ -804,7 +795,7 @@ func (s *OutboxStore) ListByCustomer(ctx context.Context, tenantID, customerID s
 		SELECT eo.id, eo.tenant_id, eo.livemode, eo.email_type, eo.payload, eo.status,
 		       eo.attempts, eo.next_attempt_at, COALESCE(eo.last_error,''),
 		       eo.created_at, eo.dispatched_at, eo.delivery_state,
-		       eo.sim_effective_at, COALESCE(eo.test_clock_id,''), COALESCE(eo.skip_reason,''),
+		       eo.effective_at, COALESCE(eo.test_clock_id,''), COALESCE(eo.skip_reason,''),
 		       i.id, COALESCE(cn.id,'')
 		FROM email_outbox eo
 		JOIN invoices i
@@ -819,7 +810,7 @@ func (s *OutboxStore) ListByCustomer(ctx context.Context, tenantID, customerID s
 		                        'dunning_escalation', 'credit_note')
 		  AND i.customer_id = $1
 		  AND eo.created_at >= now() - interval '30 days'
-		ORDER BY COALESCE(eo.dispatched_at, eo.created_at) DESC, eo.id DESC
+		ORDER BY eo.effective_at DESC, eo.id DESC
 	`, customerID)
 	if err != nil {
 		return nil, err
@@ -830,16 +821,12 @@ func (s *OutboxStore) ListByCustomer(ctx context.Context, tenantID, customerID s
 	for rows.Next() {
 		var r OutboxRow
 		var payload []byte
-		var dispatchedAt, simAt sql.NullTime
+		var dispatchedAt sql.NullTime
 		if err := rows.Scan(&r.ID, &r.TenantID, &r.Livemode, &r.EmailType, &payload, &r.Status,
 			&r.Attempts, &r.NextAttemptAt, &r.LastError, &r.CreatedAt, &dispatchedAt,
-			&r.DeliveryState, &simAt, &r.TestClockID, &r.SkipReason,
+			&r.DeliveryState, &r.EffectiveAt, &r.TestClockID, &r.SkipReason,
 			&r.InvoiceID, &r.CreditNoteID); err != nil {
 			return nil, err
-		}
-		if simAt.Valid {
-			t := simAt.Time
-			r.SimEffectiveAt = &t
 		}
 		if err := json.Unmarshal(payload, &r.Payload); err != nil {
 			return nil, fmt.Errorf("decode payload for %s: %w", r.ID, err)

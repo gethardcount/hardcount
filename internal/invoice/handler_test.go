@@ -22,8 +22,9 @@ func TestRenderChargeAttempts(t *testing.T) {
 			StripePaymentIntentID: pi, Outcome: domain.ChargeAttemptFailed,
 			ProviderReason: "Your card was declined.", AmountCents: 440, OccurredAt: wallT,
 		}
+		a.EffectiveAt = wallT
 		if sim {
-			a.SimEffectiveAt = &simT
+			a.EffectiveAt = simT
 		}
 		return a
 	}
@@ -61,7 +62,7 @@ func TestRenderChargeAttempts(t *testing.T) {
 
 	// No dunning row → the attempt renders itself, on the billing axis
 	// when it carries a sim anchor.
-	out = renderChargeAttempts(nil, []domain.InvoiceChargeAttempt{failed("pi_2", true)}, domain.Invoice{})
+	out = renderChargeAttempts(nil, []domain.InvoiceChargeAttempt{failed("pi_2", true)}, domain.Invoice{IsSimulated: true})
 	if count(out, "payment") != 1 {
 		t.Fatalf("unowned attempt must render: %+v", out)
 	}
