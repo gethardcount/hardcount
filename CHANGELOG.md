@@ -21,6 +21,7 @@ original text.
 
 **Before upgrading:**
 
+- `POST /v1/auth/mode` requires `livemode`. A body without it answered `200` and switched to test mode; it now answers `422` (`param: livemode`) ([#1816](https://github.com/gethardcount/hardcount/pull/1816)).
 - `POST /v1/api-keys` refuses a name over 100 characters (`422`, `param: name`). An unknown key on `POST /v1/api-keys/{id}/rotate` now answers `api key not found`, the wording `DELETE` already used. A key whose name is already longer keeps it when rotated ([#1742](https://github.com/gethardcount/hardcount/pull/1742)).
 - Two migrations run on start: `00230_api_key_shape` and `00231_api_key_shape_validate` make the database state an API key's shape and make its prefix unique. Every key Hardcount wrote has that shape. A key written by hand that does not stops the upgrade, with the fix in [the runbook](docs/ops/runbook/migration-failed-midway.md#00231-found-api-keys-of-another-shape) ([#1739](https://github.com/gethardcount/hardcount/pull/1739)).
 - `POST /v1/api-keys/{id}/rotate` on an expired key now answers `409` `invalid_state`, as for a revoked key, instead of `422` `validation_error` on `expires_at`, a field the request did not send. Create a new key instead ([#1733](https://github.com/gethardcount/hardcount/pull/1733)).
@@ -210,6 +211,7 @@ original text.
 
 ### Security
 
+- **A sign-out and a test/live mode switch are saved together with their audit row.** If the row cannot be written the request answers `500` and nothing changes: the session stays signed in, or keeps its mode ([#1816](https://github.com/gethardcount/hardcount/pull/1816)).
 - **A sign-in creates its session and writes its audit row in one transaction, and ends the session the browser held before.** If the audit row cannot be written the sign-in answers `500` and no session exists. A sign-in whose password changed while it was running is refused as a wrong password ([#1813](https://github.com/gethardcount/hardcount/pull/1813)).
 - **Removing a member signs them out of that workspace and ends the invitations they sent that were not yet accepted, with the audit row, in one transaction.** Before, it signed them out of every workspace. If any step fails the removal answers `500` and nothing changes ([#1810](https://github.com/gethardcount/hardcount/pull/1810)).
 - **A password reset signs out every session of the user, in both modes, in one transaction with the password change and its audit row.** If any step fails the reset answers `500` and nothing changes. A user who belongs to no workspace gets the expired-link answer ([#1806](https://github.com/gethardcount/hardcount/pull/1806)).

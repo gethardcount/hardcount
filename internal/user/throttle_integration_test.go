@@ -51,8 +51,7 @@ func throttleIT(t *testing.T) (*postgres.DB, *lookupCounter) {
 // itHandler is the dashboard auth handler on the real store. throttle may be
 // nil: the handler then checks every password, as it did before.
 func itHandler(store Store, throttle *LoginThrottle) http.Handler {
-	h := NewHandler(newFakeService(store), session.NewService(&recordingSessionStore{}),
-		session.CookieConfig{Path: "/"}, stubEmailSender{}, "", false)
+	h := NewHandler(newFakeService(store), session.CookieConfig{Path: "/"}, stubEmailSender{}, "", false)
 	if throttle != nil {
 		h.SetLoginThrottle(throttle)
 	}

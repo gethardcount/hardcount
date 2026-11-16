@@ -35,7 +35,7 @@ import (
 // writer the author forgot to add to a list.
 
 // auditEmitCall matches a call that writes an audit row, in any of its shapes.
-var auditEmitCall = regexp.MustCompile(`(?:\.Log|\.LogInTx|auditEvent|auditAuthEvent|auditInvoiceFinalized)\(`)
+var auditEmitCall = regexp.MustCompile(`(?:\.Log|\.LogInTx|auditEvent|auditResetRequest|auditInvoiceFinalized)\(`)
 
 // emailBearingArg matches an expression that is an email ADDRESS rather than an id:
 // `u.Email`, `res.Email`, `inv.Email`, `req.Email`, `ownerEmail`, `"email":`.
