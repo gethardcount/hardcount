@@ -151,16 +151,21 @@ func newLagRigBare(t *testing.T, timing string, grantCents int64, opts ...Server
 func (r *lagRig) do(method, path string, at time.Time, body any) (int, []byte) {
 	r.t.Helper()
 	r.clk.Set(at)
+	return serveJSON(r.srv, r.auth, method, path, clock.WithEffectiveNow(context.Background(), at), body)
+}
+
+// serveJSON serves one JSON request through srv with the bearer auth, on ctx,
+// and returns the status and the body.
+func serveJSON(srv *Server, auth, method, path string, ctx context.Context, body any) (int, []byte) {
 	var buf bytes.Buffer
 	if body != nil {
 		_ = json.NewEncoder(&buf).Encode(body)
 	}
-	req := httptest.NewRequest(method, path, &buf)
-	req = req.WithContext(clock.WithEffectiveNow(context.Background(), at))
+	req := httptest.NewRequest(method, path, &buf).WithContext(ctx)
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", r.auth)
+	req.Header.Set("Authorization", auth)
 	rec := httptest.NewRecorder()
-	r.srv.ServeHTTP(rec, req)
+	srv.ServeHTTP(rec, req)
 	return rec.Code, rec.Body.Bytes()
 }
 

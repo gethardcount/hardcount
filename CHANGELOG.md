@@ -21,6 +21,7 @@ original text.
 
 **Before upgrading:**
 
+- `POST /v1/auth/mode` requires `livemode`. A body without it answered `200` and switched to test mode; it now answers `422` (`param: livemode`) ([#1816](https://github.com/gethardcount/hardcount/pull/1816)).
 - `POST /v1/api-keys` refuses a name over 100 characters (`422`, `param: name`). An unknown key on `POST /v1/api-keys/{id}/rotate` now answers `api key not found`, the wording `DELETE` already used. A key whose name is already longer keeps it when rotated ([#1742](https://github.com/gethardcount/hardcount/pull/1742)).
 - Two migrations run on start: `00230_api_key_shape` and `00231_api_key_shape_validate` make the database state an API key's shape and make its prefix unique. Every key Hardcount wrote has that shape. A key written by hand that does not stops the upgrade, with the fix in [the runbook](docs/ops/runbook/migration-failed-midway.md#00231-found-api-keys-of-another-shape) ([#1739](https://github.com/gethardcount/hardcount/pull/1739)).
 - `POST /v1/api-keys/{id}/rotate` on an expired key now answers `409` `invalid_state`, as for a revoked key, instead of `422` `validation_error` on `expires_at`, a field the request did not send. Create a new key instead ([#1733](https://github.com/gethardcount/hardcount/pull/1733)).
@@ -124,6 +125,7 @@ original text.
 
 ### Fixed
 
+- **An invoice finalized through the API and paid at once, from credits or by a card that succeeds in the same request, has `paid_at` equal to `issued_at`.** The timestamps one API request writes now share one time; `paid_at` was read a moment later before. A payment Stripe confirms later still settles through its event ([#1815](https://github.com/gethardcount/hardcount/pull/1815)).
 - **A credit note created with `auto_issue` has `created_at` equal to `issued_at`.** They differed by a few milliseconds before. A refund made in Stripe is likewise recorded with one time on its credit note, the note's line and its issue date ([#1812](https://github.com/gethardcount/hardcount/pull/1812)).
 - **A usage backfill or a LiteLLM spend call with an invalid event answers `422` even when the customer's test clock cannot be read.** It answered `503`, asking for a retry that could not help. The event is now checked before the clock is read, as a single ingest and a batch already did ([#1808](https://github.com/gethardcount/hardcount/pull/1808)).
 - **Each access log line names the caller, the account and the client address.** A request made with an API key or a dashboard session logs `actor_type` (`api_key` or `user`), `actor_id`, `tenant_id` and `ip`; any other logs `anonymous` and `ip`. Before, every line said `system`, with no account and no address. The log now holds client IPs: [Logs](docs/security/data.md#logs) ([#1805](https://github.com/gethardcount/hardcount/pull/1805)).
@@ -209,6 +211,7 @@ original text.
 
 ### Security
 
+- **A sign-out and a test/live mode switch are saved together with their audit row.** If the row cannot be written the request answers `500` and nothing changes: the session stays signed in, or keeps its mode ([#1816](https://github.com/gethardcount/hardcount/pull/1816)).
 - **A sign-in creates its session and writes its audit row in one transaction, and ends the session the browser held before.** If the audit row cannot be written the sign-in answers `500` and no session exists. A sign-in whose password changed while it was running is refused as a wrong password ([#1813](https://github.com/gethardcount/hardcount/pull/1813)).
 - **Removing a member signs them out of that workspace and ends the invitations they sent that were not yet accepted, with the audit row, in one transaction.** Before, it signed them out of every workspace. If any step fails the removal answers `500` and nothing changes ([#1810](https://github.com/gethardcount/hardcount/pull/1810)).
 - **A password reset signs out every session of the user, in both modes, in one transaction with the password change and its audit row.** If any step fails the reset answers `500` and nothing changes. A user who belongs to no workspace gets the expired-link answer ([#1806](https://github.com/gethardcount/hardcount/pull/1806)).

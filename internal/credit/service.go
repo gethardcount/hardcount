@@ -50,10 +50,12 @@ type Service struct {
 	//     its body names (decideForCustomer);
 	//   - the engine's reads (a balance, a draw), the time of the work that
 	//     makes them.
-	// Each entry point keeps that time and, when it carries no instant (real
-	// time), reads this clock once (clock.EnsureEffectiveNow). Without that
-	// read, two reads of the time in one action could differ, and a store's
-	// stamp could fall on another time than the action's.
+	// Each entry point keeps that time. Work that arrives with no instant
+	// bound (a job's row, or a function that decides its own time, before it
+	// binds) reads this clock once (clock.EnsureEffectiveNow); a request on a
+	// real-time or a record route arrives with the door's instant. Without
+	// that read, two reads of the time in one action could differ, and a
+	// store's stamp could fall on another time than the action's.
 	clock clock.Clock
 }
 

@@ -47,8 +47,7 @@ func TestRequestPasswordReset_SendsWithCanonicalLivemode(t *testing.T) {
 	}
 	email := &capturingEmailSender{}
 	// Non-empty dashboardBaseURL so buildResetLink succeeds (else no send).
-	h := NewHandler(newFakeService(store), session.NewService(&recordingSessionStore{}),
-		session.DefaultCookieConfig("local"), email, "https://app.example.com", true)
+	h := NewHandler(newFakeService(store), session.DefaultCookieConfig("local"), email, "https://app.example.com", true)
 	h.SetAuditLogger(&recordingAuditRecorder{})
 
 	body, _ := json.Marshal(RequestResetReq{Email: "op@acme.com"})

@@ -18,37 +18,51 @@ import (
 )
 
 // clockDoor is "the door": one middleware, the last of every route group,
-// that decides the time a request runs at before its handler runs. That time
-// is the test clock of the record the request's route names, or real time.
+// that runs before a request's handler. On a real-time route and a record's
+// route it decides the request's time and binds it, so everything the
+// request does reads one instant. On a decidedIn route it binds nothing: the
+// route names its record in the body or by a token, so the door cannot know
+// that record's clock, and the named function reads the record, then decides
+// and binds.
 //
-// In live mode the door does nothing. Test clocks exist only in test mode (a
-// CHECK on test_clocks), so no live record is on one: live time is real time,
-// and live traffic pays for no lookup. A request with no mode on its context
-// yet (the routes before authentication, whose mode comes from what they
-// read) is decided as in test mode.
+// It decides in this order:
+//   - It finds the request's route in the router (Find: an in-memory lookup,
+//     no database read) and the route's entry in clockRoutes.
+//   - A route the router does not have, and a decidedIn route: in test mode
+//     the door records real time with no instant (clock.WithRealTime, one of
+//     the states named on clock.Decision); in live mode it leaves the
+//     context as it is. The router answers an unknown route with 404 or 405.
+//   - Live mode, on a real-time or a record route: a real instant, one read
+//     of the server's clock, and no record is read. Test clocks exist only
+//     in test mode (a CHECK on test_clocks), so no live record is on one.
+//   - Test mode, on a real-time route (one that names no record on a
+//     clock): a real instant, one read of the server's clock.
+//   - Test mode, on a record's route (the customer, subscription or invoice
+//     its path names, or a credit note's or a dunning run's invoice): that
+//     record's test clock and its frozen time, with no read of the server's
+//     clock. A record on no clock, a not-found, or an empty id or one
+//     Postgres cannot read (a NUL, or bytes that are not UTF-8): a real
+//     instant, one read of the server's clock.
 //
-// In test mode the route's entry in clockRoutes says how to decide:
-//   - real time, for a route that names no record on a clock;
-//   - the clock of the customer, subscription or invoice its path names, or
-//     of a credit note's or a dunning run's invoice; a record on no clock
-//     gets real time;
-//   - a decidedIn entry: real time here; the named function decides once it
-//     has read its record.
+// A request with no mode on its context yet (the routes before
+// authentication, whose mode comes from what they read) is decided as in
+// test mode.
 //
 // A not-found is the record itself, or, in a race with a clock's deletion,
-// its clock, after which the record is on no clock: real time is right in
-// both, and the handler answers a missing record with its own 404 after its
-// own checks. So does an empty id, or one Postgres cannot read (a NUL, or
-// bytes that are not UTF-8): the door decides real time without a lookup. A
-// record whose clock cannot be read is answered 503 (errs.Unavailable),
-// which the client retries and the idempotency layer does not store; the
-// handler does not run.
+// its clock, after which the record is on no clock: a real instant is right
+// in both, and the handler answers a missing record with its own 404 after
+// its own checks. A record whose clock cannot be read is answered 503
+// (errs.Unavailable), which the client retries and the idempotency layer
+// does not store; nothing is bound, and the handler does not run.
 type clockDoor struct {
 	// root is the built router: the door finds a request's route and its
 	// path parameters with Find before the mounted sub-router runs. Set once
 	// every route is registered.
 	root     chi.Routes
 	resolver clock.Resolver
+	// clock is the server's clock, the router's: the door reads real time
+	// from it once per request.
+	clock clock.Clock
 	// creditNoteInvoice and dunningRunInvoice read the invoice a credit note
 	// or a dunning run belongs to.
 	creditNoteInvoice func(ctx context.Context, tenantID, id string) (string, error)
@@ -59,41 +73,72 @@ type clockDoor struct {
 // why.
 func (d *clockDoor) Middleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if live, err := postgres.Livemode(r.Context()); err == nil && live {
+		decl, params, routed := d.route(r)
+		// No mode on the context yet (a route before authentication) is
+		// treated as test mode.
+		live, err := postgres.Livemode(r.Context())
+		live = err == nil && live
+		if !routed || decl.Source == clockDecidedIn {
+			// The router answers an unknown route itself; a decidedIn
+			// route's function decides and binds once it has read its
+			// record.
+			if !live {
+				r = r.WithContext(clock.WithRealTime(r.Context()))
+			}
 			next.ServeHTTP(w, r)
 			return
 		}
+		if live {
+			// No live record is on a test clock: a real instant, one read of
+			// the server's clock, and no record is read.
+			next.ServeHTTP(w, r.WithContext(clock.EnsureEffectiveNow(r.Context(), d.clock)))
+			return
+		}
 		ctx := clock.WithRealTime(r.Context())
-		pin, record, err := d.pinFor(r)
+		pin, record, err := d.pinFor(r.Context(), decl, params)
 		if err == nil && pin != (clock.Pin{}) {
 			ctx, err = clock.Decide(r.Context(), d.resolver, pin)
 		}
 		switch {
+		case errors.Is(err, errUnknownClockSource):
+			// A route table entry the door does not know: a server fault.
+			respond.InternalError(w, r)
+			return
 		case errors.Is(err, errs.ErrNotFound):
 			ctx = clock.WithRealTime(r.Context())
 		case err != nil:
+			// The clock could not be read: refuse, so the work never runs on
+			// a time nobody decided.
 			respond.FromError(w, r, errs.Unavailable("test_clock_unavailable",
 				fmt.Sprintf("The test clock of %s could not be read. Nothing was done; send the request again.", record), err), "record")
 			return
 		}
-		next.ServeHTTP(w, r.WithContext(ctx))
+		// A record's clock carries its instant; otherwise a real instant,
+		// one read of the server's clock.
+		next.ServeHTTP(w, r.WithContext(clock.EnsureEffectiveNow(ctx, d.clock)))
 	})
 }
 
-// pinFor works out the record whose clock decides the request: its pin, and
-// its label for the error answer. The zero pin means real time: the route
-// names no record on a clock, its entry is decidedIn, the router has no such
-// route, or the id is empty or one Postgres cannot read.
-func (d *clockDoor) pinFor(r *http.Request) (clock.Pin, string, error) {
-	ctx := r.Context()
+// route finds the request's entry in clockRoutes and its path parameters,
+// reading nothing: false when the router has no such route.
+func (d *clockDoor) route(r *http.Request) (clockDecl, *chi.Context, bool) {
 	rctx := chi.NewRouteContext()
 	pattern := canonicalRoute(d.root.Find(rctx, r.Method, routedPath(r)))
-	entry, ok := clockRoutes[routeKey{Method: r.Method, Pattern: pattern}]
-	if !ok {
-		// No such route: the router answers 404 or 405 itself.
-		return clock.Pin{}, "", nil
-	}
-	tenantID, id := auth.TenantID(ctx), rctx.URLParam(entry.Param)
+	decl, ok := clockRoutes[routeKey{Method: r.Method, Pattern: pattern}]
+	return decl, rctx, ok
+}
+
+// errUnknownClockSource is pinFor's answer for a route table entry whose
+// source the door does not know: a fault in the table or the door, answered
+// as a server error, never as a clock that could not be read.
+var errUnknownClockSource = errors.New("clock door: unknown clock source")
+
+// pinFor works out the record whose clock decides a test-mode request on a
+// real-time or a record route: its pin, and its label for the error answer.
+// The zero pin means a real instant: the route names no record on a clock,
+// or the id is empty or one Postgres cannot read.
+func (d *clockDoor) pinFor(ctx context.Context, entry clockDecl, params *chi.Context) (clock.Pin, string, error) {
+	tenantID, id := auth.TenantID(ctx), params.URLParam(entry.Param)
 	if entry.Param != "" && !readableID(id) {
 		return clock.Pin{}, "", nil
 	}
@@ -112,8 +157,10 @@ func (d *clockDoor) pinFor(r *http.Request) (clock.Pin, string, error) {
 	case clockOfDunningRun:
 		invoiceID, err := d.dunningRunInvoice(ctx, tenantID, id)
 		return clock.Pin{TenantID: tenantID, InvoiceID: invoiceID}, "dunning run " + id, err
-	default: // real time, and decidedIn entries
+	case clockRealTime:
 		return clock.Pin{}, "", nil
+	default:
+		return clock.Pin{}, "", fmt.Errorf("%w: %d", errUnknownClockSource, entry.Source)
 	}
 }
 

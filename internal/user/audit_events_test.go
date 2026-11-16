@@ -38,8 +38,7 @@ func (r *recordingAuditRecorder) Log(ctx context.Context, tenantID, action, reso
 func newAuthHandler(t *testing.T, store *fakeUserStore) (*Handler, *recordingAuditRecorder, *recordingAuditTx) {
 	t.Helper()
 	svc, _, auditor := newRecordingService(store)
-	h := NewHandler(svc, session.NewService(&recordingSessionStore{}),
-		session.DefaultCookieConfig("local"), stubEmailSender{}, "", false)
+	h := NewHandler(svc, session.DefaultCookieConfig("local"), stubEmailSender{}, "", false)
 	rec := &recordingAuditRecorder{}
 	h.SetAuditLogger(rec)
 	return h, rec, auditor

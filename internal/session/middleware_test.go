@@ -39,12 +39,16 @@ func (f *fakeSessionStore) GetByIDHash(_ context.Context, idHash string) (Sessio
 	}
 	return s, nil
 }
-func (f *fakeSessionStore) Revoke(context.Context, string) error                   { return nil }
 func (f *fakeSessionStore) EndAllForUserTx(context.Context, *sql.Tx, string) error { return nil }
 func (f *fakeSessionStore) EndForMemberTx(context.Context, *sql.Tx, string, string) error {
 	return nil
 }
-func (f *fakeSessionStore) UpdateLivemode(context.Context, string, bool) error { return nil }
+func (f *fakeSessionStore) EndWith(context.Context, string, func(*sql.Tx, Session) error) (Session, bool, error) {
+	return Session{}, false, nil
+}
+func (f *fakeSessionStore) SetLivemodeWith(context.Context, string, bool, func(*sql.Tx, Session) error) (Session, bool, error) {
+	return Session{}, false, nil
+}
 
 func sessionRequest(cookie string) *http.Request {
 	req := httptest.NewRequest("GET", "/", nil)
