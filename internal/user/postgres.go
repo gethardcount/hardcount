@@ -88,8 +88,8 @@ var errNoWorkspace = errors.New("user: the user belongs to no workspace")
 // the whole sign-in back and is returned.
 //
 // It returns errPasswordChanged when the hash is no longer verifiedHash or
-// the user's row is gone, and errNoWorkspace when the user belongs to no workspace, and changes nothing
-// in both cases.
+// the user's row is gone, and errNoWorkspace when the user belongs to no
+// workspace, and changes nothing in both cases.
 //
 // The row locks are what keep the sign-in true when it commits. A password
 // reset updates the user's row, so the lock waits for a reset in flight and
