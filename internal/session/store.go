@@ -15,8 +15,8 @@ type Store interface {
 	Insert(ctx context.Context, s Session) error
 	GetByIDHash(ctx context.Context, idHash string) (Session, error)
 	Revoke(ctx context.Context, idHash string) error
-	RevokeAllForUser(ctx context.Context, userID string) error
 	EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID string) error
+	EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, tenantID string) error
 	UpdateLivemode(ctx context.Context, idHash string, livemode bool) error
 }
 
@@ -105,27 +105,6 @@ func (s *postgresStore) Revoke(ctx context.Context, idHash string) error {
 	return tx.Commit()
 }
 
-// RevokeAllForUser revokes every active session of a user in one statement,
-// on its own transaction. It uses idx_dashboard_sessions_user. It is
-// idempotent, because the revoked_at IS NULL guard skips rows already
-// revoked.
-func (s *postgresStore) RevokeAllForUser(ctx context.Context, userID string) error {
-	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
-	if err != nil {
-		return err
-	}
-	defer postgres.Rollback(tx)
-
-	if _, err := tx.ExecContext(ctx, `
-		UPDATE dashboard_sessions
-		SET revoked_at = $1
-		WHERE user_id = $2 AND revoked_at IS NULL
-	`, time.Now().UTC(), userID); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 // EndAllForUserTx revokes every active session of a user, in every workspace
 // and mode, on the caller's transaction. It does not commit. The caller's
 // transaction must see every session row: a bypass transaction does, while a
@@ -137,6 +116,19 @@ func (s *postgresStore) EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID 
 		SET revoked_at = $1
 		WHERE user_id = $2 AND revoked_at IS NULL
 	`, time.Now().UTC(), userID)
+	return err
+}
+
+// EndForMemberTx revokes every active session of a user in one workspace, in
+// both modes, on the caller's transaction. It does not commit. The caller's
+// transaction must see the sessions of both modes: a bypass transaction does,
+// while a tenant transaction's row-level security hides the other mode.
+func (s *postgresStore) EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, tenantID string) error {
+	_, err := tx.ExecContext(ctx, `
+		UPDATE dashboard_sessions
+		SET revoked_at = $1
+		WHERE user_id = $2 AND tenant_id = $3 AND revoked_at IS NULL
+	`, time.Now().UTC(), userID, tenantID)
 	return err
 }
 

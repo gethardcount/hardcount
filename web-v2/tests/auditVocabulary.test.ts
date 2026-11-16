@@ -97,7 +97,7 @@ test('membership + auth events render as operator-readable copy, not dotted stri
 })
 
 test('member.removed carries destructive styling; a plain invite does not', () => {
-  // It revokes the target's sessions — same blast radius as revoking an API key.
+  // It signs the member out of that workspace, as consequential as revoking an API key.
   assert.ok(HIGH_SEVERITY.has('member.removed'), 'member.removed must be high severity')
   assert.ok(MEDIUM_SEVERITY.has('member.invite_revoked'))
   assert.ok(!HIGH_SEVERITY.has('member.invited') && !MEDIUM_SEVERITY.has('member.invited'),

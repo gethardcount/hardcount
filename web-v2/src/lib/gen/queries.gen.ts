@@ -12037,11 +12037,15 @@ export const getRemoveMemberUrl = (userID: string,) => {
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Removes the user from the account and ends all of their sessions,
- * so a browser they are signed in on loses access at once. You
- * cannot remove yourself (another member must do it), and the
+ * Removes the user from the account, ends their sessions in this
+ * account (test and live mode), and revokes the invitations they sent
+ * that were not yet accepted. Their sessions in other accounts are not
+ * touched. These steps and the audit row commit together; if one
+ * fails the route answers `500` and nothing changes.
+ *
+ * You cannot remove yourself (another member must do it), and the
  * account's last member cannot be removed. The user's sign-in
- * account itself is kept. Writes an audit row.
+ * account itself is kept.
  * @summary Remove a member from the account
  */
 export const removeMember = async (userID: string, options?: RequestInit): Promise<void> => {

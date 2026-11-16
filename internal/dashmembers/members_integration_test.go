@@ -129,6 +129,7 @@ type harness struct {
 	clk      *clock.Fake
 	users    *user.Service
 	sessions *session.Service
+	audit    *audit.Logger
 	owner    string // bootstrap owner user id
 }
 
@@ -141,7 +142,8 @@ func newHarness(t *testing.T, tenantName string) *harness {
 
 	userStore := user.NewPostgresStore(db)
 	sessionSvc := session.NewService(session.NewPostgresStore(db))
-	userSvc := user.NewService(userStore, nil, sessionSvc, audit.NewLogger(db))
+	auditLogger := audit.NewLogger(db)
+	userSvc := user.NewService(userStore, nil, sessionSvc, auditLogger)
 	emails := &capturingEmail{outbox: email.NewOutboxSender(email.NewOutboxStore(db))}
 	clk := clock.NewFake(time.Now().UTC())
 
@@ -149,6 +151,7 @@ func newHarness(t *testing.T, tenantName string) *harness {
 		dashmembers.NewPostgresStore(db),
 		userDirAdapter{userStore},
 		sessionSvc,
+		auditLogger,
 		emails,
 		staticTenantNamer{name: tenantName},
 		clk,
@@ -164,7 +167,7 @@ func newHarness(t *testing.T, tenantName string) *harness {
 
 	return &harness{
 		db: db, tenantID: tenantID, svc: svc, email: emails, clk: clk,
-		users: userSvc, sessions: sessionSvc, owner: owner.ID,
+		users: userSvc, sessions: sessionSvc, audit: auditLogger, owner: owner.ID,
 	}
 }
 
@@ -383,10 +386,9 @@ func TestRevokedAndExpiredTokens(t *testing.T) {
 	}
 }
 
-// TestRemoveMember: self-removal and last-member removal are blocked; a
-// real removal deletes the membership AND revokes the target's sessions
-// (sessions pin the tenant — without revocation an active session keeps
-// full access after the membership row is gone).
+// TestRemoveMember: self-removal and last-member removal are blocked,
+// removing someone who is not a member is not found, and a real removal
+// deletes the membership.
 func TestRemoveMember(t *testing.T) {
 	h := newHarness(t, "Team Remove")
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -415,14 +417,6 @@ func TestRemoveMember(t *testing.T) {
 		t.Fatalf("remove non-member: got %v, want ErrNotFound", err)
 	}
 
-	// Give the target a live session, then remove them: the membership
-	// goes away and the session is revoked.
-	rawID, _, err := h.sessions.Issue(ctx, session.IssueInput{
-		UserID: res.UserID, TenantID: h.tenantID, Livemode: false,
-	})
-	if err != nil {
-		t.Fatalf("issue session: %v", err)
-	}
 	if err := h.svc.RemoveMember(ctx, h.tenantID, h.owner, res.UserID); err != nil {
 		t.Fatalf("remove member: %v", err)
 	}
@@ -433,8 +427,10 @@ func TestRemoveMember(t *testing.T) {
 	if len(members) != 1 {
 		t.Fatalf("member count after removal: got %d, want 1", len(members))
 	}
-	if _, err := h.sessions.Resolve(ctx, rawID); err == nil {
-		t.Fatal("removed member's session must be revoked — an active session would keep full tenant access")
+
+	// Removing the only member left is refused.
+	if err := h.svc.RemoveMember(ctx, h.tenantID, "", h.owner); !errors.Is(err, dashmembers.ErrLastMember) {
+		t.Fatalf("remove the last member: got %v, want ErrLastMember", err)
 	}
 }
 

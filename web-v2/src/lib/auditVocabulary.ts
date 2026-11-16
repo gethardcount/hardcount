@@ -9,7 +9,7 @@ import { formatCents, formatCentsBare } from './money'
 // mirror can drift: before this sweep, every ADR-081 membership and auth event
 // (member.joined, login, mode_changed, …) fell through to the default arm and
 // rendered as a raw dotted string like "member.joined sagar@example.com", and
-// member.removed — which revokes the target's sessions — got no destructive
+// member.removed, which signs the member out of that workspace, got no destructive
 // styling at all.
 //
 // The list below was swept from the actual .Log / .LogInTx call sites. When you
@@ -147,8 +147,8 @@ export function describeAction(entry: AuditEntry): string {
 }
 
 // Destructive or irreversible actions — rendered with the danger accent.
-// member.removed belongs here: it strips a person's access and revokes their
-// live sessions, which is as consequential as revoking an API key.
+// member.removed belongs here: it strips a person's access and signs them out
+// of that workspace, which is as consequential as revoking an API key.
 export const HIGH_SEVERITY = new Set([
   'void', 'cancel', 'delete', 'revoke', 'credit.deduction', 'refund',
   'member.removed',

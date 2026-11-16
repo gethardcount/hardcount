@@ -55,8 +55,9 @@ func NewHandler(svc *Service, sessions *session.Service, cookie session.CookieCo
 	return &Handler{svc: svc, sessions: sessions, cookie: cookie}
 }
 
-// SetAuditLogger wires audit rows for membership changes (invite,
-// revoke, remove, accept). Optional: nil skips audit writes.
+// SetAuditLogger wires audit rows for the invite, revoke-invitation and
+// accept routes. Optional: nil skips audit writes. A removal's row is written
+// by Service.RemoveMember, on the removal's transaction.
 func (h *Handler) SetAuditLogger(a AuditRecorder) { h.audit = a }
 
 // SetSignInRecorder wires the sign-in throttle. Optional: nil skips it, and
@@ -203,7 +204,6 @@ func (h *Handler) removeMember(w http.ResponseWriter, r *http.Request) {
 		respond.FromError(w, r, err, "member")
 		return
 	}
-	h.auditEvent(ctx, tenantID, "member.removed", targetUserID, "", nil)
 	w.WriteHeader(http.StatusNoContent)
 }
 

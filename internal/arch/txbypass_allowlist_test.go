@@ -99,7 +99,6 @@ var txBypassUsers = map[string]string{
 	"internal/session/store.go postgresStore.GetByIDHash":      "signin",
 	"internal/session/store.go postgresStore.Insert":           "signin",
 	"internal/session/store.go postgresStore.Revoke":           "signin",
-	"internal/session/store.go postgresStore.RevokeAllForUser": "signin",
 	"internal/session/store.go postgresStore.UpdateLivemode":   "signin",
 	"internal/tenant/bootstrap_run.go RunBootstrap":            "signin",
 	"internal/user/postgres.go PostgresStore.CreateResetToken": "signin",

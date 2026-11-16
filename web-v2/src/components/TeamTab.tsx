@@ -272,7 +272,7 @@ export function TeamTab() {
             <AlertDialogTitle>Remove member</AlertDialogTitle>
             <AlertDialogDescription>
               {removeTarget
-                ? `Remove ${removeTarget.email} from this workspace? They'll be signed out everywhere and lose access immediately. You can invite them back later.`
+                ? `Remove ${removeTarget.email} from this workspace? They'll be signed out of it and lose access immediately, and invitations they sent will stop working. You can invite them back later.`
                 : ''}
             </AlertDialogDescription>
           </AlertDialogHeader>

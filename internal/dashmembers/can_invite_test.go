@@ -29,7 +29,7 @@ func TestCanInviteAgreesWithInvite(t *testing.T) {
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
-			svc := NewService(nil, nil, nil, nil, nil, nil, c.baseURL)
+			svc := NewService(nil, nil, nil, nil, nil, nil, nil, c.baseURL)
 			svc.SetEmailConfigured(c.email)
 			if got := svc.CanInvite(); got != c.wantCan {
 				t.Fatalf("CanInvite() = %v, want %v", got, c.wantCan)
