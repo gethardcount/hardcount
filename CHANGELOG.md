@@ -127,7 +127,7 @@ original text.
 
 ### Fixed
 
-- **Removing a member and revoking an invitation are refused once the caller is no longer a member of the workspace.** Both now check the caller's membership inside the same transaction as the change ([#PRNUM](https://github.com/gethardcount/hardcount/pull/PRNUM)).
+- **A person who has been removed from a workspace can no longer remove a member or revoke an invitation there.** A request they made at the moment of their removal could still go through; it now answers `403` ([#PRNUM](https://github.com/gethardcount/hardcount/pull/PRNUM)).
 - **The API keys page says when a rotated key's old key stops, which mode a new key works in, and each key's type on a phone.** The rotate dialog promised the time you picked even when the old key expires sooner ([#1827](https://github.com/gethardcount/hardcount/pull/1827)).
 - **The Team tab shows the day each member joined the workspace, and lists only invitations that are pending or expired.** It showed the day the person's account was created, and kept revoked invitations in the list. The invitation email tells someone who already has an account to sign in, not to set one up ([#1828](https://github.com/gethardcount/hardcount/pull/1828)).
 - **`GET /v1/whoami` answers an error when the signed-in user cannot be read.** It answered `200` without `email`. Three API key validation messages are plainer ([#1825](https://github.com/gethardcount/hardcount/pull/1825)).

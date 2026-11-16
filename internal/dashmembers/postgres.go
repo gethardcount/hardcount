@@ -71,12 +71,15 @@ func scanInvitation(scan func(...any) error) (Invitation, error) {
 	return inv, err
 }
 
-// lockMembership refuses with a 403 unless userID is a member of tenantID. A
-// request's session is checked before its write, and a removal can commit in
-// between, so the write checks the membership on its own transaction. The row
-// lock is held to commit: a removal of the member waits for this transaction
-// and then sees what it wrote, or this transaction waits for the removal and
-// then finds no row. Callers take it before any invitation row.
+// lockMembership refuses with a 403 unless userID is a member of tenantID.
+// Every write only a member may make calls it first. The session middleware
+// checked the session before the write began, and a removal can commit in
+// between, so the write checks the membership on its own transaction.
+//
+// The row lock is held to commit, and a removal's DELETE waits for it: either
+// the removal runs after this write and sees it, or this write runs after the
+// removal and finds no row. It is taken before any invitation row, the order
+// RemoveMember uses, so the two never wait on each other.
 func lockMembership(ctx context.Context, tx *sql.Tx, tenantID, userID string) error {
 	var member int
 	err := tx.QueryRowContext(ctx, `
@@ -97,8 +100,8 @@ func lockMembership(ctx context.Context, tx *sql.Tx, tenantID, userID string) er
 // that can still be accepted causes it.
 var ErrPendingInviteExists = errs.AlreadyExists("email", "a pending invitation for this email already exists — revoke it first to re-send")
 
-// CreateInvitation creates a pending invitation in one tenant transaction. It
-// refuses with a 403 when the inviter has no membership row. An invitation to
+// CreateInvitation creates a pending invitation in one tenant transaction, for
+// an inviter who is a member (lockMembership). An invitation to
 // the same address that expired (expires_at <= at, the accept's boundary) is
 // revoked first, so only one that can still be accepted answers
 // ErrPendingInviteExists. then receives the stored row and the id of the
@@ -325,31 +328,31 @@ func (s *PostgresStore) ListMembers(ctx context.Context, tenantID string) ([]Mem
 // passes its clock's now. The member's sessions, which then ends, are
 // stamped by the session store's own clock.
 //
-// It refuses a caller who removes themselves, and with a 403 a caller who is
-// not a member, so the caller is a member who stays and a workspace is never
-// left with none. It returns errs.ErrNotFound when userID is not a member.
-// It changes nothing in all three cases.
+// The caller must be a member (lockMembership, 403) and not the one removed
+// (409), so the caller is a member who stays and a workspace is never left
+// with none. A userID that is not a member is errs.ErrNotFound. Nothing
+// changes in any of the three cases.
 func (s *PostgresStore) RemoveMember(ctx context.Context, tenantID, actorUserID, userID string, at time.Time, then func(tx *sql.Tx, revokedInvitationIDs []string) error) error {
-	if actorUserID == userID {
-		return errs.InvalidState("you cannot remove yourself — another member must remove you")
-	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return err
 	}
 	defer postgres.Rollback(tx)
 
-	// One removal at a time per tenant. Otherwise two members removing each
-	// other at once each lock their own membership and wait for the other's
-	// row, and Postgres ends one with a deadlock error. Behind the lock, the
-	// second starts after the first commits and is refused, its caller no
-	// longer a member. The lock is held to commit.
+	// One removal at a time per tenant, taken before any row lock. Otherwise
+	// two members removing each other at once each lock their caller's row
+	// and wait to delete the other's, and Postgres ends one with a deadlock
+	// error. Behind the lock, the second starts after the first commits and
+	// is refused, its caller no longer a member. The lock is held to commit.
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
 		"user_tenants:"+tenantID); err != nil {
 		return fmt.Errorf("acquire membership lock: %w", err)
 	}
 	if err := lockMembership(ctx, tx, tenantID, actorUserID); err != nil {
 		return err
+	}
+	if actorUserID == userID {
+		return errs.InvalidState("you cannot remove yourself — another member must remove you")
 	}
 	res, err := tx.ExecContext(ctx, `
 		DELETE FROM user_tenants

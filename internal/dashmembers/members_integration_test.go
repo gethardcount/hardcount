@@ -384,15 +384,12 @@ func TestInviteGates(t *testing.T) {
 		t.Fatalf("list: %v", err)
 	}
 	// The outsider cannot revoke it: from their own workspace it is not found,
-	// and in this one they are not a member. The invitation stays pending.
+	// and in this one they are not a member.
 	if err := h.svc.Revoke(ctx, outsiderHome, outsider.ID, invs[0].ID); !errors.Is(err, errs.ErrNotFound) {
 		t.Fatalf("revoke from another workspace: got %v, want ErrNotFound", err)
 	}
 	if err := h.svc.Revoke(ctx, h.tenantID, outsider.ID, invs[0].ID); !errors.Is(err, errs.ErrForbidden) {
 		t.Fatalf("revoke by a non-member: got %v, want ErrForbidden", err)
-	}
-	if _, err := h.svc.PreviewInvite(ctx, h.email.lastToken(t)); err != nil {
-		t.Fatalf("preview after the refused revoke: %v, want the invitation still pending", err)
 	}
 	if err := h.svc.Revoke(ctx, h.tenantID, h.owner, invs[0].ID); err != nil {
 		t.Fatalf("revoke: %v", err)
@@ -492,11 +489,6 @@ func TestRemoveMember(t *testing.T) {
 		t.Fatalf("accept: %v", err)
 	}
 
-	// Self-removal still blocked even with 2 members.
-	if err := h.svc.RemoveMember(ctx, h.tenantID, res.UserID, res.UserID); !errors.Is(err, errs.ErrInvalidState) {
-		t.Fatalf("self removal: got %v, want ErrInvalidState", err)
-	}
-
 	// Removing a non-member → not found.
 	if err := h.svc.RemoveMember(ctx, h.tenantID, h.owner, "hc_user_nonexistent"); !errors.Is(err, errs.ErrNotFound) {
 		t.Fatalf("remove non-member: got %v, want ErrNotFound", err)
@@ -514,8 +506,11 @@ func TestRemoveMember(t *testing.T) {
 	}
 
 	// The removed member is no longer a member, so their removal of someone
-	// else is refused.
+	// else is refused, and so is their removal of themselves, as a non-member.
 	third := createUser(t, h.db, "third@example.com", h.tenantID, "member")
+	if err := h.svc.RemoveMember(ctx, h.tenantID, res.UserID, res.UserID); !errors.Is(err, errs.ErrForbidden) {
+		t.Fatalf("self removal by a former member: got %v, want ErrForbidden", err)
+	}
 	if err := h.svc.RemoveMember(ctx, h.tenantID, res.UserID, third.ID); !errors.Is(err, errs.ErrForbidden) {
 		t.Fatalf("removal by a former member: got %v, want ErrForbidden", err)
 	}

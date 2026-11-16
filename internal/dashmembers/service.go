@@ -265,8 +265,8 @@ func (s *Service) List(ctx context.Context, tenantID string) ([]Member, []Invita
 
 // Revoke revokes an invitation that is not yet accepted or revoked, and
 // writes the member.invite_revoked audit row on the same transaction. If the
-// row cannot be written, the invitation stays as it was. actorUserID must be
-// a member of the workspace.
+// row cannot be written, the invitation stays as it was. A caller who is not
+// a member of the workspace gets a 403.
 func (s *Service) Revoke(ctx context.Context, tenantID, actorUserID, invitationID string) error {
 	return s.store.RevokeInvitation(ctx, tenantID, actorUserID, invitationID, s.clock.Now(ctx), func(tx *sql.Tx) error {
 		if err := s.audit.LogInTx(ctx, tx, audit.Entry{

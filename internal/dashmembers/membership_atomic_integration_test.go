@@ -24,8 +24,8 @@ import (
 // and is refused: its caller is no longer a member.
 //
 // Mutation: drop the caller's membership check from the removal, and both
-// succeed: zero members. Drop the per-tenant lock, and one removal ends with
-// a deadlock error.
+// succeed: zero members. Drop the per-tenant lock, and one removal usually
+// ends with a deadlock error where it should be refused.
 func TestRemoveMember_ConcurrentRemovalsKeepOneMember(t *testing.T) {
 	h := newHarness(t, "Team Mutual Removal")
 	ctx := postgres.WithLivemode(context.Background(), false)
