@@ -2,15 +2,18 @@
 // instant, such as a test clock's frozen_time, and Now then returns that
 // instant instead of the system time.
 //
-// One piece of work runs on one time. A function that decides its own time
-// (a route whose body names its record, a public page, a Stripe event) calls
-// EnsureEffectiveNow right after it decides, with the service's Clock: a
-// clock's instant is kept, and a record on no clock gets one read of that
-// Clock bound as a real instant (the states are named on Decision). Every
-// read of the clock below then answers that instant. A fan-out that runs
-// after the request has answered, over rows that may each be on their own
-// clock, does not bind one instant for all of them: it decides each row, and
-// the row's work binds its own.
+// One piece of work runs on one time. On a real-time or a record route the
+// API's door (api.clockDoor) binds the request's instant before the handler
+// runs. A function that decides its own time (a route whose body names its
+// record, a public page, a Stripe event) calls EnsureEffectiveNow right after
+// it decides, with the service's Clock: a clock's instant is kept, and a
+// record on no clock gets one read of that Clock bound as a real instant (the
+// states are named on Decision). Every read of the clock below then answers
+// that instant. A request that starts a job over many records hands the job
+// a context with no instant, and the job binds one per row. A fan-out that
+// runs after the request has answered, over rows that may each be on their
+// own clock, does not bind one instant for all of them: it decides each row,
+// and the row's work binds its own.
 package clock
 
 import (
@@ -217,20 +220,22 @@ func Now(ctx context.Context) time.Time {
 	return time.Now().UTC()
 }
 
-// WithRealTime records on ctx that real time was decided for it: it is in no
-// test clock's world. Now(ctx) then reads machine time, as on an undecided
-// ctx, but Decision reports the decision. A request in live mode, a job's
-// tick, and an entity on no clock are decided this way; for an entity on no
-// clock, a real instant ctx already carries is kept instead (keepOrRealTime).
+// WithRealTime records on ctx that real time was decided for it, with no
+// instant: it is in no test clock's world. Now(ctx) then reads machine time,
+// as on an undecided ctx, but Decision reports the decision. A job's tick, a
+// test-mode request on a decidedIn route (until its function decides and
+// binds), and an entity on no clock with nothing bound are decided this way;
+// for an entity on no clock, a real instant ctx already carries is kept
+// instead (keepOrRealTime).
 func WithRealTime(ctx context.Context) context.Context {
 	return WithSim(ctx, Sim{})
 }
 
-// DecidesWithoutDoor reports whether work on a record that did not come
-// through the API's door decides its time. An API request's time is decided
-// once, before its handler, by the API's door (api.clockDoor); this is for
-// work that does not come through it: a Stripe event, a job's row, a public
-// page. With no resolver, no: only narrow unit tests build their service
+// DecidesWithoutDoor reports whether work on a record that the API's door
+// did not decide decides its time. On a real-time or a record route the
+// door (api.clockDoor) decides and binds the request's time before its
+// handler; this is for work the door does not decide: a decidedIn route's
+// function, a Stripe event, a job's row, a public page. With no resolver, no: only narrow unit tests build their service
 // without one, and the server always wires the engine. With no mode
 // on ctx, a fault, refused as ErrUndecided: every such entry point sets one.
 // In live mode, no: no live record is on a test clock, and live work pays for

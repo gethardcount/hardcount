@@ -146,14 +146,21 @@ func TestRetryProviderConfigErrors_EachInvoiceReadsItsOwnTime(t *testing.T) {
 			if processed, retryErrs := svc.RetryProviderConfigErrors(c.ctx, "t1", false); processed != 3 || len(retryErrs) != 0 {
 				t.Fatalf("processed %d, errors %v; want all three retried", processed, retryErrs)
 			}
-			a, b := store.invoices["inv_1"].PaidAt, store.invoices["inv_2"].PaidAt
-			if a == nil || b == nil || a.Equal(*b) || a.Before(past) || b.Before(past) {
-				t.Errorf("paid at %v and %v; want two instants, each read from the server's clock", a, b)
+			reads := map[time.Time]bool{} // the server's clock's answers: past+1s, +2s, +3s
+			for i := 1; i <= 3; i++ {
+				reads[past.Add(time.Duration(i)*time.Second)] = true
 			}
-			// Live mode decides nothing: no live record is on a clock, so
-			// the clock invoice is retried at real time too.
-			if pc := store.invoices["inv_c"].PaidAt; pc == nil || (!c.live && !pc.Equal(frozen)) {
-				t.Errorf("the clock invoice paid at %v; want its clock's %v in test mode", pc, frozen)
+			a, b, pc := store.invoices["inv_1"].PaidAt, store.invoices["inv_2"].PaidAt, store.invoices["inv_c"].PaidAt
+			if a == nil || b == nil || pc == nil || a.Equal(*b) || !reads[*a] || !reads[*b] {
+				t.Fatalf("paid at %v, %v, %v; want the two invoices on no clock at two reads of the server's clock", a, b, pc)
+			}
+			switch {
+			case !c.live && !pc.Equal(frozen):
+				t.Errorf("the clock invoice paid at %v; want its clock's %v", pc, frozen)
+			case c.live && (!reads[*pc] || pc.Equal(*a) || pc.Equal(*b)):
+				// Live decides nothing (no live record is on a clock): the
+				// third invoice reads the server's clock by itself too.
+				t.Errorf("live: the third invoice paid at %v; want its own read of the server's clock, apart from %v and %v", pc, a, b)
 			}
 		})
 	}

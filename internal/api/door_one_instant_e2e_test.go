@@ -1,11 +1,9 @@
 package api
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"net/http"
-	"net/http/httptest"
 	"sync"
 	"testing"
 	"time"
@@ -16,9 +14,13 @@ import (
 )
 
 // runClock is the server's clock in these tests. While the fixtures are
-// built it stands still (each fixture request binds its own instant). Once
-// stepping, it moves a second on every read it answers itself and counts
-// those reads, so a request that reads it twice stamps two instants.
+// built it stands still at lagP0, and each fixture request carries lagP0
+// bound on its context. In live mode the door keeps that instant. In test
+// mode, on a real-time route, the door replaces it with one read of this
+// clock, which is lagP0 too. So every fixture write is at lagP0 either way.
+// Once stepping, the clock moves a second on every read it answers itself
+// and counts those reads, so a request that reads it twice stamps two
+// instants.
 type runClock struct {
 	mu    sync.Mutex
 	at    time.Time
@@ -54,7 +56,8 @@ func (c *runClock) count() (time.Time, int) {
 
 // instantRig is a server on a runClock, in one mode, with an in-arrears
 // monthly plan whose subscriptions start on lagP0 and end their first period
-// on lagB. No invoice grace: a period is due once it has ended.
+// on lagB (both from close_lag_e2e_test.go: April 1 and May 1, 2026). No
+// invoice grace: a period is due once it has ended.
 type instantRig struct {
 	t        *testing.T
 	db       *postgres.DB
@@ -98,20 +101,11 @@ func (r *instantRig) subscribe(name string) string {
 // the fixtures do; the zero time leaves the time to the door.
 func (r *instantRig) do(method, path string, at time.Time, body any) (int, []byte) {
 	r.t.Helper()
-	var buf bytes.Buffer
-	if body != nil {
-		_ = json.NewEncoder(&buf).Encode(body)
-	}
 	ctx := context.Background()
 	if !at.IsZero() {
 		ctx = clock.WithEffectiveNow(ctx, at)
 	}
-	req := httptest.NewRequest(method, path, &buf).WithContext(ctx)
-	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", r.auth)
-	rec := httptest.NewRecorder()
-	r.srv.ServeHTTP(rec, req)
-	return rec.Code, rec.Body.Bytes()
+	return serveJSON(r.srv, r.auth, method, path, ctx, body)
 }
 
 func (r *instantRig) must(method, path string, at time.Time, body any, want int) map[string]any {
@@ -122,6 +116,25 @@ func (r *instantRig) must(method, path string, at time.Time, body any, want int)
 	}
 	out := map[string]any{}
 	_ = json.Unmarshal(raw, &out)
+	return out
+}
+
+// subsUpdated returns each subscription's updated_at, which the period close
+// stamps from the context's clock.
+func (r *instantRig) subsUpdated(ids ...string) []time.Time {
+	r.t.Helper()
+	tx, err := r.db.BeginTx(postgres.WithLivemode(context.Background(), r.live), postgres.TxTenant, r.tenantID)
+	if err != nil {
+		r.t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	out := make([]time.Time, len(ids))
+	for i, id := range ids {
+		if err := tx.QueryRow(`SELECT updated_at FROM subscriptions WHERE id = $1`, id).Scan(&out[i]); err != nil {
+			r.t.Fatalf("read subscription %s: %v", id, err)
+		}
+		out[i] = out[i].UTC()
+	}
 	return out
 }
 
@@ -152,26 +165,28 @@ func (r *instantRig) cycleInvoices() [][2]*time.Time {
 	return out
 }
 
-// The manual billing run is a real-time route: the door reads the server's
-// clock once, and the whole run decides on that instant: the due scan, and
-// every subscription's "has its due instant come" check. Before, each check
-// read the clock again (nine reads for two subscriptions here). The closes
-// themselves run at each period's due instant, so the invoices are dated at
-// the boundary, as before. In both modes.
-func TestBillingRun_TheWholeRunDecidesOnOneInstant(t *testing.T) {
+// The manual billing run is a job that a request starts, so it runs as the
+// scheduled run does: its handler drops the door's instant, and each
+// subscription is billed on its own reads of the server's clock, none of
+// them the door's. The door reads once (a real-time route); the run reads as
+// on main. The invoices are dated at their period's boundary. In both modes.
+func TestBillingRun_EachSubscriptionIsBilledOnItsOwnTime(t *testing.T) {
 	for _, live := range []bool{false, true} {
 		t.Run(map[bool]string{false: "test mode", true: "live"}[live], func(t *testing.T) {
 			r := newInstantRig(t, live)
-			r.subscribe("run_a")
-			r.subscribe("run_b")
-			r.clk.stepFrom(lagB.Add(time.Hour))
+			a := r.subscribe("run_a")
+			b := r.subscribe("run_b")
+			start := lagB.Add(time.Hour)
+			r.clk.stepFrom(start)
 			r.must(http.MethodPost, "/v1/billing/run", time.Time{}, nil, http.StatusOK)
 			_, reads := r.clk.count()
-			invs := r.cycleInvoices()
-			if len(invs) != 2 || reads != 1 {
-				t.Fatalf("%d cycle invoices after %d server reads; want 2 after one", len(invs), reads)
+			door := start.Add(time.Second) // the request's first read
+			up := r.subsUpdated(a, b)
+			if reads <= 3 || up[0].Equal(up[1]) || up[0].Equal(door) || up[1].Equal(door) {
+				t.Errorf("%d server reads; closed periods updated %v and %v; want the run to read on its own (more than the door's read and one per row), each row apart, neither at the door's %v",
+					reads, up[0], up[1], door)
 			}
-			for i, inv := range invs {
+			for i, inv := range r.cycleInvoices() {
 				if !inv[0].Equal(lagB) || inv[1] == nil || !inv[1].UTC().Equal(lagB) {
 					t.Errorf("invoice %d created %v, issued %v; want both at the period's boundary %v", i, inv[0], inv[1], lagB)
 				}
@@ -181,12 +196,12 @@ func TestBillingRun_TheWholeRunDecidesOnOneInstant(t *testing.T) {
 }
 
 // A subscription write closes an ended period first, then plans from the new
-// one. On a subscription's route the door binds one instant, so the close
-// and the schedule share it, where each read the server's clock before. Live:
-// one read. Test mode: two, because the decision for a subscription on no
-// clock reads the server's clock too, inside the engine's answer, and does
-// not keep it; the request's work all reads the door's. The ended period's
-// invoice is dated at its boundary, as before.
+// one. On a subscription's route the door binds one instant, and the close
+// and the schedule both read it. Live: one read of the server's clock. Test
+// mode: two, because the decision for a subscription on no clock reads the
+// server's clock too, inside the engine's answer, and does not keep it; the
+// request's work all reads the door's. The ended period's invoice is dated at
+// its boundary.
 func TestScheduleCancel_TheCloseAndTheScheduleShareOneInstant(t *testing.T) {
 	for _, c := range []struct {
 		live  bool
@@ -207,11 +222,10 @@ func TestScheduleCancel_TheCloseAndTheScheduleShareOneInstant(t *testing.T) {
 }
 
 // Finalize collects right after it finalizes. On an invoice's route the door
-// binds one instant, so an invoice that credits cover is issued and paid at
-// that one time, where the finalize and the settle read the server's clock
-// apart before. Live: one read. Test mode: two, the second inside the
-// engine's answer for an invoice on no clock, which the decision does not
-// keep.
+// binds one instant, and the finalize and the settle both read it, so an
+// invoice that credits cover is issued and paid at that one time. Live: one
+// read of the server's clock. Test mode: two, the second inside the engine's
+// answer for an invoice on no clock, which the decision does not keep.
 func TestFinalize_ACreditCoveredInvoiceIsIssuedAndPaidAtOneInstant(t *testing.T) {
 	for _, c := range []struct {
 		live  bool

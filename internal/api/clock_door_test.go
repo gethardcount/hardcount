@@ -20,11 +20,13 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// spyResolver answers every record on clock clk_1 at doorFrozen, or err, and
-// records what it was asked.
+// spyResolver answers every record on clock clk_1 at doorFrozen (or, with
+// noClock, on no clock, as the engine answers: the machine's time and no
+// clock id), or err, and records what it was asked.
 type spyResolver struct {
-	asked []string
-	err   error
+	asked   []string
+	err     error
+	noClock bool
 }
 
 var doorFrozen = time.Date(2025, 3, 1, 12, 0, 0, 0, time.UTC)
@@ -33,6 +35,9 @@ func (s *spyResolver) answer(kind, id string) (clock.Sim, error) {
 	s.asked = append(s.asked, kind+":"+id)
 	if s.err != nil {
 		return clock.Sim{}, s.err
+	}
+	if s.noClock {
+		return clock.Sim{At: time.Now().UTC()}, nil
 	}
 	return clock.Sim{At: doorFrozen, TestClockID: "clk_1"}, nil
 }
@@ -103,14 +108,14 @@ func through(d *clockDoor, ctx context.Context, method, path string) seen {
 	return got
 }
 
-// The door decides each request's time from the route's entry and binds it.
-// In test mode: the clock of the record the path names (directly, or through
-// a credit note's or a dunning run's invoice) and its frozen time, with no
-// read of the server's clock; a route that names no record, one read of the
-// server's clock. A decidedIn route, and a route the router does not have,
-// get nothing new: real time with no instant, no read. In live mode no record
-// is read: a real-time or a record route gets one read of the server's
-// clock, and a decidedIn route nothing.
+// The door decides each request's time from the route's entry. Test mode:
+// the clock of the record the path names (directly, or through a credit
+// note's or a dunning run's invoice) and its frozen time, with no read of
+// the server's clock; a record on no clock, and a route that names no
+// record, one read of the server's clock. A decidedIn route and a route the
+// router does not have: real time with no instant, and no read. Live: no
+// record is read; a real-time or a record route gets one read of the
+// server's clock, and a decidedIn route or an unknown one nothing.
 func TestClockDoor_DecidesFromTheRouteTable(t *testing.T) {
 	test := auth.WithTenantID(postgres.WithLivemode(context.Background(), false), "t1")
 	onClock := clock.Sim{At: doorFrozen, TestClockID: "clk_1"}
@@ -120,26 +125,28 @@ func TestClockDoor_DecidesFromTheRouteTable(t *testing.T) {
 		want               clock.Sim // the zero Sim is real time with no instant
 		asked              string
 		serverReads        int
+		noClock            bool
 	}{
-		{"a customer's route", "GET", "/v1/customers/cus_1", onClock, "customer:cus_1", 0},
-		{"a customer's route by customer_id", "GET", "/v1/credits/balance/cus_2/live", onClock, "customer:cus_2", 0},
-		{"a subscription's route", "POST", "/v1/subscriptions/sub_1/cancel", onClock, "subscription:sub_1", 0},
-		{"an invoice's route", "GET", "/v1/invoices/inv_1/pdf", onClock, "invoice:inv_1", 0},
-		{"a credit note's route, by its invoice", "GET", "/v1/credit-notes/cn_1", onClock, "invoice:inv_of_note", 0},
-		{"a dunning run's route, by its invoice", "GET", "/v1/dunning/runs/run_1", onClock, "invoice:inv_of_run", 0},
-		{"a route that names no record", "GET", "/v1/whoami", realInstant, "", 1},
-		{"a route its function decides", "POST", "/v1/customers", clock.Sim{}, "", 0},
+		{"a customer's route", "GET", "/v1/customers/cus_1", onClock, "customer:cus_1", 0, false},
+		{"a customer on no clock", "GET", "/v1/customers/cus_1", realInstant, "customer:cus_1", 1, true},
+		{"a customer's route by customer_id", "GET", "/v1/credits/balance/cus_2/live", onClock, "customer:cus_2", 0, false},
+		{"a subscription's route", "POST", "/v1/subscriptions/sub_1/cancel", onClock, "subscription:sub_1", 0, false},
+		{"an invoice's route", "GET", "/v1/invoices/inv_1/pdf", onClock, "invoice:inv_1", 0, false},
+		{"a credit note's route, by its invoice", "GET", "/v1/credit-notes/cn_1", onClock, "invoice:inv_of_note", 0, false},
+		{"a dunning run's route, by its invoice", "GET", "/v1/dunning/runs/run_1", onClock, "invoice:inv_of_run", 0, false},
+		{"a route that names no record", "GET", "/v1/whoami", realInstant, "", 1, false},
+		{"a route its function decides", "POST", "/v1/customers", clock.Sim{}, "", 0, false},
 		// Usage's entries decide and bind themselves; usage's build refuses a
 		// context with no instant, which the door must leave to fire.
-		{"usage ingest", "POST", "/v1/usage-events", clock.Sim{}, "", 0},
-		{"usage batch", "POST", "/v1/usage-events/batch", clock.Sim{}, "", 0},
-		{"usage backfill", "POST", "/v1/usage-events/backfill", clock.Sim{}, "", 0},
-		{"usage held release", "POST", "/v1/usage-events/held/release", clock.Sim{}, "", 0},
-		{"a LiteLLM spend call", "POST", "/v1/integrations/litellm/spend", clock.Sim{}, "", 0},
-		{"a route the router does not have", "GET", "/v1/nothing-here", clock.Sim{}, "", 0},
+		{"usage ingest", "POST", "/v1/usage-events", clock.Sim{}, "", 0, false},
+		{"usage batch", "POST", "/v1/usage-events/batch", clock.Sim{}, "", 0, false},
+		{"usage backfill", "POST", "/v1/usage-events/backfill", clock.Sim{}, "", 0, false},
+		{"usage held release", "POST", "/v1/usage-events/held/release", clock.Sim{}, "", 0, false},
+		{"a LiteLLM spend call", "POST", "/v1/integrations/litellm/spend", clock.Sim{}, "", 0, false},
+		{"a route the router does not have", "GET", "/v1/nothing-here", clock.Sim{}, "", 0, false},
 	} {
-		t.Run(c.name, func(t *testing.T) {
-			res := &spyResolver{}
+		t.Run("test mode, "+c.name, func(t *testing.T) {
+			res := &spyResolver{noClock: c.noClock}
 			d := doorRig(t, res)
 			got := through(d, test, c.method, c.path)
 			if !got.reached || !got.decided || got.decision != c.want || serverOf(d).reads != c.serverReads {
@@ -155,7 +162,10 @@ func TestClockDoor_DecidesFromTheRouteTable(t *testing.T) {
 	live := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1")
 	for _, c := range []struct{ name, method, path string }{
 		{"a customer's route", "GET", "/v1/customers/cus_1"},
+		{"a subscription's route", "POST", "/v1/subscriptions/sub_1/cancel"},
+		{"an invoice's route", "GET", "/v1/invoices/inv_1/pdf"},
 		{"a credit note's route", "GET", "/v1/credit-notes/cn_1"},
+		{"a dunning run's route", "GET", "/v1/dunning/runs/run_1"},
 		{"a route that names no record", "GET", "/v1/whoami"},
 	} {
 		t.Run("live mode, "+c.name+": one read of the server's clock, nothing looked up", func(t *testing.T) {
@@ -163,6 +173,7 @@ func TestClockDoor_DecidesFromTheRouteTable(t *testing.T) {
 			d := doorRig(t, res)
 			looked := 0
 			d.creditNoteInvoice = func(context.Context, string, string) (string, error) { looked++; return "inv_of_note", nil }
+			d.dunningRunInvoice = func(context.Context, string, string) (string, error) { looked++; return "inv_of_run", nil }
 			got := through(d, live, c.method, c.path)
 			if !got.reached || got.decision != realInstant || serverOf(d).reads != 1 || len(res.asked) != 0 || looked != 0 {
 				t.Errorf("reached %v, %+v after %d server reads, asked %v, %d record lookups; want %+v after one, nothing asked or looked up",
@@ -170,8 +181,8 @@ func TestClockDoor_DecidesFromTheRouteTable(t *testing.T) {
 			}
 		})
 	}
-	for _, path := range []string{"/v1/customers", "/v1/usage-events", "/v1/integrations/litellm/spend"} {
-		t.Run("live mode, a route its function decides ("+path+"): nothing decided, nothing read", func(t *testing.T) {
+	for _, path := range []string{"/v1/customers", "/v1/usage-events", "/v1/integrations/litellm/spend", "/v1/nothing-here"} {
+		t.Run("live mode, a decidedIn or an unknown route ("+path+"): nothing decided, nothing read", func(t *testing.T) {
 			res := &spyResolver{}
 			d := doorRig(t, res)
 			got := through(d, live, "POST", path)
@@ -182,7 +193,17 @@ func TestClockDoor_DecidesFromTheRouteTable(t *testing.T) {
 		})
 	}
 
-	t.Run("no mode yet (a public page): real time, nothing read", func(t *testing.T) {
+	t.Run("no mode yet, a route before authentication (POST /v1/auth/login): one read of the server's clock", func(t *testing.T) {
+		res := &spyResolver{}
+		d := doorRig(t, res)
+		got := through(d, context.Background(), "POST", "/v1/auth/login")
+		if !got.reached || got.decision != realInstant || len(res.asked) != 0 || serverOf(d).reads != 1 {
+			t.Errorf("reached %v, %+v, asked %v, %d server reads; want %+v after one, nothing asked",
+				got.reached, got.decision, res.asked, serverOf(d).reads, realInstant)
+		}
+	})
+
+	t.Run("no mode yet, a decidedIn route (a public page): real time with no instant, nothing read", func(t *testing.T) {
 		res := &spyResolver{}
 		d := doorRig(t, res)
 		got := through(d, context.Background(), "GET", "/v1/public/invoices/tok_1")
@@ -196,7 +217,7 @@ func TestClockDoor_DecidesFromTheRouteTable(t *testing.T) {
 	// an escaped slash finds the same route, and the same parameter, as the
 	// handler gets. Matched on the unescaped path, it would find no route and
 	// decide real time with no lookup.
-	t.Run("an escaped slash in a path parameter: the route chi routes on", func(t *testing.T) {
+	t.Run("test mode, an escaped slash in a path parameter: the route chi routes on", func(t *testing.T) {
 		res := &spyResolver{}
 		got := through(doorRig(t, res), test, "GET", "/v1/customers/cus%2F1")
 		if !got.reached || got.decision.TestClockID != "clk_1" || strings.Join(res.asked, ",") != "customer:cus%2F1" {
@@ -213,7 +234,7 @@ func TestClockDoor_DecidesFromTheRouteTable(t *testing.T) {
 		{"an id with a NUL", "GET", "/v1/customers/cus%001"},
 		{"an id that is not UTF-8", "GET", "/v1/invoices/%FF/pdf"},
 	} {
-		t.Run(c.name+": the handler answers it, at one read of the server's clock, with no lookup", func(t *testing.T) {
+		t.Run("test mode, "+c.name+": the handler answers it, at one read of the server's clock, with no lookup", func(t *testing.T) {
 			res := &spyResolver{err: errors.New("invalid byte sequence for encoding UTF8")}
 			d := doorRig(t, res)
 			got := through(d, test, c.method, c.path)
@@ -229,7 +250,7 @@ func TestClockDoor_DecidesFromTheRouteTable(t *testing.T) {
 		{"a credit note", "GET", "/v1/credit-notes/cn_gone"},
 		{"a dunning run", "GET", "/v1/dunning/runs/run_gone"},
 	} {
-		t.Run(c.name+" that does not exist: the handler answers it, at one read of the server's clock", func(t *testing.T) {
+		t.Run("test mode, "+c.name+" that does not exist: the handler answers it, at one read of the server's clock", func(t *testing.T) {
 			d := doorRig(t, &spyResolver{err: fmt.Errorf("read: %w", errs.ErrNotFound)})
 			gone := func(context.Context, string, string) (string, error) {
 				return "", fmt.Errorf("read: %w", errs.ErrNotFound)
@@ -250,7 +271,7 @@ func TestClockDoor_DecidesFromTheRouteTable(t *testing.T) {
 		{"a credit note", "GET", "/v1/credit-notes/cn_1", "credit note cn_1"},
 		{"a dunning run", "GET", "/v1/dunning/runs/run_1", "dunning run run_1"},
 	} {
-		t.Run(c.name+" whose clock cannot be read: 503, not served", func(t *testing.T) {
+		t.Run("test mode, "+c.name+" whose clock cannot be read: 503, not served", func(t *testing.T) {
 			d := doorRig(t, &spyResolver{err: errors.New("db down")})
 			got := through(d, test, c.method, c.path)
 			if serverOf(d).reads != 0 {
@@ -398,5 +419,24 @@ func TestClockDoor_EveryRecordEntryNamesAParameterOfItsRoute(t *testing.T) {
 	}
 	if len(wrong) > 0 {
 		t.Errorf("%d entries name a parameter their route does not have:\n  %s", len(wrong), strings.Join(wrong, "\n  "))
+	}
+}
+
+// A route table entry whose source the door does not know is a fault in the
+// table or the door: pinFor says so, and the door answers 500, never the 503
+// that says a clock could not be read, and binds nothing.
+func TestClockDoor_AnUnknownClockSourceIsAServerFault(t *testing.T) {
+	d := doorRig(t, &spyResolver{})
+	if _, _, err := d.pinFor(context.Background(), clockDecl{Source: clockSource(99)}, chi.NewRouteContext()); !errors.Is(err, errUnknownClockSource) {
+		t.Fatalf("pinFor: %v; want errUnknownClockSource", err)
+	}
+	key := routeKey{Method: "GET", Pattern: "/v1/whoami"}
+	saved := clockRoutes[key]
+	clockRoutes[key] = clockDecl{Source: clockSource(99)}
+	t.Cleanup(func() { clockRoutes[key] = saved })
+	got := through(d, auth.WithTenantID(postgres.WithLivemode(context.Background(), false), "t1"), "GET", "/v1/whoami")
+	if got.reached || got.code != http.StatusInternalServerError || strings.Contains(got.body, "test_clock_unavailable") || serverOf(d).reads != 0 {
+		t.Errorf("reached %v, code %d, body %s, %d server reads; want not reached, 500, no clock refusal, no read",
+			got.reached, got.code, got.body, serverOf(d).reads)
 	}
 }

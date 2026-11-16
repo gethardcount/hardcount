@@ -929,10 +929,10 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// One instant for the whole route: the door's decision or, at real time,
-	// one read of the server's clock (the handler takes the service's), so the
-	// handler's own reads (the proration days, the period close, changeAt)
-	// and the service's agree.
+	// One instant for the whole route: the door binds it (the subscription's
+	// clock and its instant, or one read of the server's clock), and
+	// EnsureEffectiveNow keeps it, so the handler's own reads (the proration
+	// days, the period close, changeAt) and the service's agree.
 	ctx := clock.EnsureEffectiveNow(r.Context(), h.svc.clock) // the action's time: see Service.clock
 	r = r.WithContext(ctx)
 
