@@ -167,6 +167,7 @@ func TestMiddlewareOrAPIKey_NamesTheCallerOnTheRecord(t *testing.T) {
 		}
 	})
 
+	// An unknown cookie and no API key: 401 for missing credentials.
 	t.Run("refused", func(t *testing.T) {
 		outer, seen, status := serve("sess_unknown")
 		if status != http.StatusUnauthorized || seen != nil {
@@ -187,5 +188,19 @@ func TestCallerIn_APIKey(t *testing.T) {
 	}
 	if actorType, actorID := audit.ResolveActor(ctx); actorType != want.ActorType || actorID != want.ActorID {
 		t.Errorf("the audit log names this caller %s/%s, callerIn %s/%s", actorType, actorID, want.ActorType, want.ActorID)
+	}
+}
+
+// NameCaller and the audit log name a session's user the same way.
+func TestNameCaller(t *testing.T) {
+	ctx := request.WithRecord(t.Context())
+	sess := Session{UserID: "usr_owner", TenantID: "ten_1"}
+	NameCaller(ctx, sess)
+	want := request.Caller{ActorType: "user", ActorID: "usr_owner", TenantID: "ten_1"}
+	if got := request.CallerOf(ctx); got != want {
+		t.Errorf("caller on the record = %+v, want %+v", got, want)
+	}
+	if actorType, actorID := audit.ResolveActor(applyToCtx(t.Context(), sess)); actorType != want.ActorType || actorID != want.ActorID {
+		t.Errorf("the audit log names this session %s/%s, NameCaller %s/%s", actorType, actorID, want.ActorType, want.ActorID)
 	}
 }

@@ -3,16 +3,16 @@ package api
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// The access log through the whole server: a request made with an API key,
-// one made with a dashboard session and one with no credentials each get a
-// line that names the caller the server accepted and the address it came
-// from.
+// The access log through the whole server: each request's line names the API
+// key or dashboard session it was made with and the address it came from,
+// and says "anonymous" when no caller was accepted.
 func TestAccessLog_ThroughTheServer(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "access-log-bootstrap")
@@ -26,27 +26,36 @@ func TestAccessLog_ThroughTheServer(t *testing.T) {
 	created := flowDo(t, ts, "POST", "/v1/api-keys", flowReq{cookie: owner,
 		body: map[string]any{"name": "Access log", "key_type": "secret"}}).want(t, 201, "create key").body
 	keyID, rawKey := flowStr(created, "key", "id"), flowStr(created, "raw_key")
-	if tenantID == "" || userID == "" || keyID == "" {
-		t.Fatalf("setup: tenant %q, user %q, key %q", tenantID, userID, keyID)
+	ingest := flowDo(t, ts, "POST", "/v1/api-keys", flowReq{cookie: owner,
+		body: map[string]any{"name": "Access log ingest", "key_type": "ingest"}}).want(t, 201, "create ingest key").body
+	ingestKeyID, ingestKey := flowStr(ingest, "key", "id"), flowStr(ingest, "raw_key")
+	if tenantID == "" || userID == "" || keyID == "" || ingestKeyID == "" {
+		t.Fatalf("setup: tenant %q, user %q, key %q, ingest key %q", tenantID, userID, keyID, ingestKeyID)
 	}
 
 	lines := captureAccessLog(t)
-	// list calls GET /v1/customers with the credential setAuth adds and
-	// returns that request's line, found by the request id in its answer.
-	list := func(t *testing.T, wantStatus int, setAuth func(*http.Request)) map[string]string {
+	// Every request below comes from this machine with no proxy in front
+	// (TRUST_PROXY unset), so its address is 127.0.0.1.
+	//
+	// call makes one request with the credential setAuth adds and returns
+	// that request's line, found by the request id in its answer.
+	call := func(t *testing.T, method, path, body string, wantStatus int, setAuth func(*http.Request)) map[string]string {
 		t.Helper()
-		req, err := http.NewRequest("GET", ts.URL+"/v1/customers", nil)
+		req, err := http.NewRequest(method, ts.URL+path, strings.NewReader(body))
 		if err != nil {
 			t.Fatal(err)
+		}
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
 		}
 		setAuth(req)
 		res, err := http.DefaultClient.Do(req)
 		if err != nil {
-			t.Fatalf("GET /v1/customers: %v", err)
+			t.Fatalf("%s %s: %v", method, path, err)
 		}
 		_ = res.Body.Close()
 		if res.StatusCode != wantStatus {
-			t.Fatalf("GET /v1/customers: status %d, want %d", res.StatusCode, wantStatus)
+			t.Fatalf("%s %s: status %d, want %d", method, path, res.StatusCode, wantStatus)
 		}
 		id := res.Header.Get("Hardcount-Request-Id")
 		if id == "" {
@@ -54,6 +63,10 @@ func TestAccessLog_ThroughTheServer(t *testing.T) {
 		}
 		return lines.byRequestID(t, id)
 	}
+	bearer := func(key string) func(*http.Request) {
+		return func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+key) }
+	}
+	cookie := func(r *http.Request) { r.AddCookie(owner) }
 	wantLine := func(t *testing.T, line map[string]string, want map[string]string) {
 		t.Helper()
 		for key, w := range want {
@@ -63,23 +76,49 @@ func TestAccessLog_ThroughTheServer(t *testing.T) {
 		}
 	}
 
+	wantAnonymous := func(t *testing.T, line map[string]string, status string) {
+		t.Helper()
+		wantLine(t, line, map[string]string{"actor_type": "anonymous", "ip": "127.0.0.1", "status": status})
+		for _, key := range []string{"actor_id", "tenant_id"} {
+			if got, ok := line[key]; ok {
+				t.Errorf("%s = %q, want the field left out: no caller was accepted", key, got)
+			}
+		}
+	}
+	asKey := map[string]string{"actor_type": "api_key", "actor_id": keyID, "tenant_id": tenantID, "ip": "127.0.0.1"}
+	asUser := map[string]string{"actor_type": "user", "actor_id": userID, "tenant_id": tenantID, "ip": "127.0.0.1"}
+
 	t.Run("an API key", func(t *testing.T) {
-		line := list(t, 200, func(r *http.Request) { r.Header.Set("Authorization", "Bearer "+rawKey) })
-		wantLine(t, line, map[string]string{"actor_type": "api_key", "actor_id": keyID, "tenant_id": tenantID, "ip": "127.0.0.1", "status": "200"})
+		wantLine(t, call(t, "GET", "/v1/customers", "", 200, bearer(rawKey)), asKey)
 	})
 
 	t.Run("a dashboard session", func(t *testing.T) {
-		line := list(t, 200, func(r *http.Request) { r.AddCookie(owner) })
-		wantLine(t, line, map[string]string{"actor_type": "user", "actor_id": userID, "tenant_id": tenantID, "ip": "127.0.0.1", "status": "200"})
+		wantLine(t, call(t, "GET", "/v1/customers", "", 200, cookie), asUser)
+	})
+
+	// A caller that was accepted and then refused is still named.
+	t.Run("an API key refused by its permissions", func(t *testing.T) {
+		line := call(t, "GET", "/v1/customers", "", 403, bearer(ingestKey))
+		wantLine(t, line, map[string]string{"actor_type": "api_key", "actor_id": ingestKeyID, "tenant_id": tenantID, "status": "403"})
 	})
 
 	t.Run("no credentials", func(t *testing.T) {
-		line := list(t, 401, func(*http.Request) {})
-		wantLine(t, line, map[string]string{"actor_type": "anonymous", "ip": "127.0.0.1", "status": "401"})
-		for _, key := range []string{"actor_id", "tenant_id"} {
-			if got, ok := line[key]; ok {
-				t.Errorf("%s = %q, want the field left out: nobody signed in", key, got)
-			}
-		}
+		wantAnonymous(t, call(t, "GET", "/v1/customers", "", 401, func(*http.Request) {}), "401")
+	})
+
+	t.Run("a key that is not valid", func(t *testing.T) {
+		wantAnonymous(t, call(t, "GET", "/v1/customers", "", 401, bearer("hc_secret_test_"+strings.Repeat("0", 64))), "401")
+	})
+
+	// The mode switch and sign-out read the session cookie themselves, with
+	// no authentication middleware in front.
+	t.Run("the mode switch", func(t *testing.T) {
+		wantLine(t, call(t, "POST", "/v1/auth/mode", `{"livemode":false}`, 200, cookie), asUser)
+	})
+
+	t.Run("sign-out", func(t *testing.T) {
+		wantLine(t, call(t, "POST", "/v1/auth/logout", "", 204, cookie), asUser)
+		// The session is gone: the same cookie now names nobody.
+		wantAnonymous(t, call(t, "GET", "/v1/customers", "", 401, cookie), "401")
 	})
 }

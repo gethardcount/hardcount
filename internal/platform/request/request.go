@@ -7,17 +7,23 @@
 // outer layer puts one record on the context (WithRecord), the layer that
 // learns a fact writes it there, and the outer layer reads it once the
 // handler has returned.
+//
+// Use it only to tell a fact to a layer that wraps you. A fact for the
+// layers inside goes on the context as usual (auth.WithTenantID).
 package request
 
 import "context"
 
-// Caller is who made a request.
+// Caller is who made a request, as the layer that authenticated it names
+// them.
 type Caller struct {
 	// ActorType and ActorID are the audit log's names for the caller
-	// (audit.ResolveActor): "user" with a user id, or "api_key" with a key id.
+	// (audit.ResolveActor). Authentication writes "user" with a user id, or
+	// "api_key" with a key id.
 	ActorType string
 	ActorID   string
-	TenantID  string
+	// TenantID is the account the caller signed in to.
+	TenantID string
 }
 
 // record is one request's record. It has no lock: every write and read is on

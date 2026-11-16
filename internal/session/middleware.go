@@ -108,14 +108,24 @@ func MiddlewareOrAPIKey(sessSvc *Service, keySvc *auth.Service) func(http.Handle
 	}
 }
 
-// callerIn names the one caller Authenticate's context carries, as the audit
-// log names it (audit.ResolveActor).
+// callerIn names the one caller Authenticate's context carries: a session's
+// user or an API key. It repeats audit.ResolveActor's names for the two,
+// because session may not import audit (internal/arch/boundaries_test.go);
+// TestCallerIn_APIKey and TestMiddlewareOrAPIKey_NamesTheCallerOnTheRecord
+// fail if the two differ.
 func callerIn(ctx context.Context) request.Caller {
 	c := request.Caller{ActorType: "api_key", ActorID: auth.KeyID(ctx), TenantID: auth.TenantID(ctx)}
 	if userID := auth.UserID(ctx); userID != "" {
 		c.ActorType, c.ActorID = "user", userID
 	}
 	return c
+}
+
+// NameCaller names s's user on the request's record, for the access log. It
+// is for a handler that resolves the session cookie itself (sign-out and the
+// mode switch); MiddlewareOrAPIKey names the caller of every route behind it.
+func NameCaller(ctx context.Context, s Session) {
+	request.SetCaller(ctx, request.Caller{ActorType: "user", ActorID: s.UserID, TenantID: s.TenantID})
 }
 
 func applyToCtx(ctx context.Context, s Session) context.Context {

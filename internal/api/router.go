@@ -2035,9 +2035,13 @@ func handleDeepHealth(db *postgres.DB) http.HandlerFunc {
 // caller do" and "which tenant was affected". The request_id on each line
 // joins it to the audit row that the same request wrote.
 //
-// The caller is the one authentication accepted (session.MiddlewareOrAPIKey),
-// under the audit log's names for it. A request nobody signed in for is
-// "anonymous": a public page, a webhook, a sign-in, or one refused with 401.
+// The caller is the API key or dashboard session the request was made with,
+// under the audit log's names for it. session.MiddlewareOrAPIKey names it;
+// sign-out and the mode switch read the session cookie themselves and name
+// it too (session.NameCaller). Any other request is "anonymous": a public
+// page, a webhook, a sign-in, or one refused before a caller was accepted. A
+// public token page and a webhook learn their account inside the handler, so
+// their lines have no tenant_id.
 //
 // Only the actor id is logged, not the name. A user actor's name is an
 // email, and logs go to sinks that cannot erase data. For the same reason,
