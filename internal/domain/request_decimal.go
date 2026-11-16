@@ -16,8 +16,8 @@ import (
 // with CheckDecimal. So each field's limits are stated once, and they hold at
 // every entry point.
 
-// decimalLimits is the range a request decimal must fall in.
-type decimalLimits struct {
+// DecimalLimits is the range a request decimal must fall in.
+type DecimalLimits struct {
 	// IntDigits: the magnitude is under 10^IntDigits.
 	IntDigits int64
 	// Scale: at most Scale decimal places (trailing zeros do not count).
@@ -27,7 +27,7 @@ type decimalLimits struct {
 var (
 	// QuantityLimits fit the NUMERIC(38,12) quantity columns: usage
 	// quantities and item usage thresholds.
-	QuantityLimits = decimalLimits{IntDigits: 26, Scale: 12}
+	QuantityLimits = DecimalLimits{IntDigits: 26, Scale: 12}
 	// rateLimits bound a price amount in cents: a per-unit rate, a tier
 	// rate or a package amount. A rate under 10^18 cents prices one unit
 	// (or one package) inside int64 cents, the type every invoice amount
@@ -36,10 +36,10 @@ var (
 	// invoice's sum and its total with tax are each refused with
 	// ErrAmountOverflow when they do not fit int64 (ComputeAmountCents,
 	// billing.ApplyTaxToLineItems).
-	rateLimits = decimalLimits{IntDigits: 18, Scale: 12}
+	rateLimits = DecimalLimits{IntDigits: 18, Scale: 12}
 	// ProviderCostLimits fit provider_cost_rates.unit_cost_cents,
 	// NUMERIC(22,12) (cents per token).
-	ProviderCostLimits = decimalLimits{IntDigits: 10, Scale: 12}
+	ProviderCostLimits = DecimalLimits{IntDigits: 10, Scale: 12}
 )
 
 // maxDecimalChars is the longest text a request decimal may be written in.
@@ -53,7 +53,7 @@ const maxDecimalChars = 100
 // coefficient's digit count and the exponent, before any comparison or
 // rounding. A zero passes both limits whatever its exponent, so it is
 // returned as plain 0.
-func CheckDecimal(field string, d decimal.Decimal, lim decimalLimits) (decimal.Decimal, error) {
+func CheckDecimal(field string, d decimal.Decimal, lim DecimalLimits) (decimal.Decimal, error) {
 	if d.IsZero() {
 		return decimal.New(0, 0), nil
 	}

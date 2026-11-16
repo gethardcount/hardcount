@@ -13,7 +13,7 @@ import (
 )
 
 // requestLimits are the three limit sets request decimals use.
-var requestLimits = map[string]decimalLimits{
+var requestLimits = map[string]DecimalLimits{
 	"quantity":      QuantityLimits,
 	"rate":          rateLimits,
 	"provider cost": ProviderCostLimits,
@@ -101,7 +101,7 @@ func TestCheckDecimal_ExtremeExponents(t *testing.T) {
 func TestCheckDecimal_MessagesNameTheFieldAndTheLimit(t *testing.T) {
 	cases := []struct {
 		d       string
-		lim     decimalLimits
+		lim     DecimalLimits
 		message string
 	}{
 		{"1e18", rateLimits, "unit_amount_cents is too large: it must be under 10^18"},

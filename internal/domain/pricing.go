@@ -43,13 +43,13 @@ type RatingTier struct {
 	UnitAmountCents decimal.Decimal `json:"unit_amount_cents"`
 }
 
-// ratingTiers is a rule's graduated tiers. It marshals as [] when there are
+// RatingTiers is a rule's graduated tiers. It marshals as [] when there are
 // none: a per_unit or package rule, whose stored tiers read back as nil, sent
 // null, and strict clients type the field as an array.
-type ratingTiers []RatingTier
+type RatingTiers []RatingTier
 
 // MarshalJSON writes nil tiers as [] and other tiers as a plain array.
-func (t ratingTiers) MarshalJSON() ([]byte, error) {
+func (t RatingTiers) MarshalJSON() ([]byte, error) {
 	if t == nil {
 		return []byte("[]"), nil
 	}
@@ -65,7 +65,7 @@ func (t ratingTiers) MarshalJSON() ([]byte, error) {
 type PriceShape struct {
 	Mode               PricingMode     `json:"mode"`
 	UnitAmountCents    decimal.Decimal `json:"unit_amount_cents"`
-	Tiers              ratingTiers     `json:"tiers"`
+	Tiers              RatingTiers     `json:"tiers"`
 	PackageSize        int64           `json:"package_size"`
 	PackageAmountCents decimal.Decimal `json:"package_amount_cents"`
 }
