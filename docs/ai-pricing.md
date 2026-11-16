@@ -72,7 +72,7 @@ dimension. A LiteLLM proxy does this for you: Hardcount turns a name such as
 The two AI recipes share the `tokens` meter, so you can apply both. Each
 adds its own plan with its own prices, in the plan's currency. One customer
 cannot be on both plans at once. Two subscriptions of one customer that are
-not canceled (draft, trialing or active) cannot price the same meter, so
+not canceled (trialing or active) cannot price the same meter, so
 usage is never billed twice. Hardcount refuses the second subscription
 with 409. It also refuses, with 409 `meter_overlap`, a price that would add
 the meter to a plan when a customer on that plan has another subscription

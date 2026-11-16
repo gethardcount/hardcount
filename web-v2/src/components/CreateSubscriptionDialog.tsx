@@ -122,18 +122,13 @@ export function CreateSubscriptionDialog({
     }),
     onSuccess: (created) => {
       onCreated(created)
-      // Shift-left note (2026-07-22 audit, P1-5): a just-started
-      // subscription with no card on file will try to auto-charge a
-      // card that isn't there. Non-blocking — the sub IS created (we
-      // never gate creation on a card, matching every reference
-      // platform). A started trial gets the nudge too — the card is due
-      // before trial end, and the customer/subscription pages warn on
-      // trialing subs for the same reason.
+      // No card on file: warn, and never block the create. Without a card
+      // no invoice is collected automatically, after a trial or without one.
       void api.listCustomerPaymentMethods(created.customer_id)
         .then(res => {
           if (!hasUsableCard(res.data ?? [])) {
             toast.warning('No payment method on file', {
-              description: "This customer's first invoice can't be collected automatically. Add a card to turn on automatic billing.",
+              description: "This customer's invoices can't be collected automatically. Add a card to turn on automatic billing.",
             })
           }
         })

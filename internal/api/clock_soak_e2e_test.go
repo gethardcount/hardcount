@@ -134,7 +134,7 @@ func TestE2E_ClockSoak_MonthEndAnchorThroughYearBoundary(t *testing.T) {
 		}
 	}
 
-	// Activation must open the first period ending Feb 28.
+	// Creating the subscription must open the first period ending Feb 28.
 	assertPeriodEndDay(0, ends[0])
 
 	countInvoices := func() int {

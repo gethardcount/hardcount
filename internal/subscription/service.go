@@ -91,7 +91,7 @@ type Biller interface {
 	// BillOnCreateTx is the in-tx variant of BillOnCreate: it inserts the day-1
 	// in_advance invoice on the caller's tx (no finalize). ok=false means there
 	// was nothing to bill (no in_advance items / zero subtotal) or an idempotent
-	// skip. Used by create, activate and the trial flip. startAt is the
+	// skip. Used by create and the trial flip. startAt is the
 	// instant the billed period began (the trial end on a trial flip, the
 	// request's now otherwise); the pause is read as it stood then.
 	BillOnCreateTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription, startAt time.Time) (domain.Invoice, bool, error)
@@ -342,7 +342,7 @@ func (s *Service) tenantLocation(ctx context.Context, tenantID string) (*time.Lo
 // beginningOfDayIn is a package-local alias for domain.BeginningOfDayIn
 // so existing callers in this file don't need updates. Calendar-month
 // snapping flows through domain.NextBillingPeriodEnd (called via
-// firstPeriodForActivate / firstPeriodAfterTrial), so no local
+// firstPeriodFromStart / firstPeriodAfterTrial), so no local
 // beginningOfMonthIn helper is needed.
 func beginningOfDayIn(t time.Time, loc *time.Location) time.Time {
 	return domain.BeginningOfDayIn(t, loc)
@@ -382,7 +382,7 @@ func firstPeriodAfterTrial(trialEnd time.Time, billingTime domain.SubscriptionBi
 	return ps, pe, anchorDay
 }
 
-// firstPeriodForActivate computes the first billing period when a sub
+// firstPeriodFromStart computes the first billing period when a sub
 // starts paid billing at `at`: a Create without a trial, or End trial.
 //
 // Yearly billing: always anniversary semantics — period begins at `at`
@@ -393,7 +393,7 @@ func firstPeriodAfterTrial(trialEnd time.Time, billingTime domain.SubscriptionBi
 // boundary (proration handled by billOnePeriod).
 //
 // Monthly + anniversary: full month from `at`.
-func firstPeriodForActivate(at time.Time, billingTime domain.SubscriptionBillingTime, interval domain.BillingInterval, loc *time.Location) (time.Time, time.Time, int) {
+func firstPeriodFromStart(at time.Time, billingTime domain.SubscriptionBillingTime, interval domain.BillingInterval, loc *time.Location) (time.Time, time.Time, int) {
 	ps := beginningOfDayIn(at, loc)
 	anchorDay := domain.AnchorDayFor(ps, billingTime, interval, loc)
 	pe := domain.NextBillingPeriodEnd(ps, billingTime, interval, loc, anchorDay)
@@ -498,8 +498,8 @@ func (s *Service) guardSwapCurrency(ctx context.Context, tenantID string, sub do
 }
 
 // rejectCurrencyMismatch is the ADR-100 customer currency pin, enforced at
-// every write that binds a plan to a subscription (create, add-item, swap,
-// activate). The invoice engine attaches rule-computed cents to ONE currency
+// every write that binds a plan to a subscription (create, add-item, swap).
+// The invoice engine attaches rule-computed cents to ONE currency
 // label without conversion, so every currency source in a customer's billing
 // must agree: the candidate plans among themselves, the outgoing plan on a
 // swap (proration subtracts old cents from new cents raw), the customer's
@@ -888,7 +888,7 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		if err != nil {
 			return domain.Subscription{}, err
 		}
-		ps, pe, anchorDay := firstPeriodForActivate(now, billingTime, interval, loc)
+		ps, pe, anchorDay := firstPeriodFromStart(now, billingTime, interval, loc)
 		periodStart = &ps
 		periodEnd = &pe
 		nextBilling = &pe
@@ -2975,7 +2975,7 @@ func (s *Service) EndTrial(ctx context.Context, tenantID, id string) (domain.Sub
 	if err != nil {
 		return domain.Subscription{}, err
 	}
-	ps, pe, anchorDay := firstPeriodForActivate(now, sub.BillingTime, interval, loc)
+	ps, pe, anchorDay := firstPeriodFromStart(now, sub.BillingTime, interval, loc)
 
 	// ADR-031 / ADR-056: in_advance items get a day-1 invoice covering the first
 	// paid period (now → period_end). Build it IN THE SAME tx as the

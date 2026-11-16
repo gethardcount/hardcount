@@ -416,7 +416,7 @@ func (r *lockOrderRig) twoMeterPlans(t *testing.T, key string) (m1, m2 string, p
 
 // TestPlanLockOrder_NoDeadlockAcrossTwoPlanWriters is C10 for the writers
 // whose two plans the API lets onto one subscription only when they bill
-// different meters: create, draft activation, trial conversion and early
+// different meters: create, trial conversion and early
 // trial end. Plans p < mid < q; p bills m1, mid bills m1 and m2, q bills m2.
 // The writer references p and q, and reaches q first when nothing orders its
 // plan locks. Three transactions can then wait on each other:

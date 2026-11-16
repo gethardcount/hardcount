@@ -24,11 +24,9 @@ import (
 // A subscription starts when it is created: it is active now, or its trial
 // starts now. No field of the create chooses another start.
 //
-// The golden files under testdata/starts_now were written on 210646e8 by a
-// create that sent "start_now": true through the same rig and the same
-// normalization (TestCreateSubscription_StartNowTrueMatchesGolden, removed
-// with start_now). A create with no flag must produce those bytes exactly:
-// the same subscription and the same day-1 in_advance invoice.
+// A create that names no start must produce the bytes of the golden files
+// under testdata/starts_now exactly: the subscription and its day-1
+// in_advance invoice.
 //
 // The rig is the close-lag rig: the real server over HTTP, every collaborator
 // wired as in production, each request served at a chosen instant. Plans are
@@ -287,17 +285,16 @@ func TestCreateSubscription_ZeroTrialDaysIsNoTrial(t *testing.T) {
 	}
 }
 
-// TestCreateSubscription_RefusesAmbiguousStart: a field that used to choose
-// the start is a 422 naming it, and nothing is written.
+// TestCreateSubscription_RefusesAmbiguousStart: a create has no field that
+// chooses another start, so a body that sends one (start_now, status) is a
+// 422 naming it, and nothing is written. Ignoring "status": "draft" would
+// start and bill a subscription the caller asked to hold back.
 func TestCreateSubscription_RefusesAmbiguousStart(t *testing.T) {
 	r := newLagRigBare(t, "in_advance", 0)
 	cases := []struct {
 		name, param string
 		extra       map[string]any
 	}{
-		// The create has no start_now and no status field. A caller still
-		// sending one is told, not ignored: a body that asks for a draft
-		// must not start and bill a subscription.
 		{"start_now true", "start_now", map[string]any{"start_now": true}},
 		{"start_now false", "start_now", map[string]any{"start_now": false}},
 		{"status draft", "status", map[string]any{"status": "draft"}},
@@ -319,7 +316,7 @@ func TestCreateSubscription_RefusesAmbiguousStart(t *testing.T) {
 	}
 }
 
-// TestCreateSubscription_RetryCreatesOneAndBillsOnce: the create now bills on
+// TestCreateSubscription_RetryCreatesOneAndBillsOnce: the create bills on
 // day 1, so a retried create must not make a second subscription or a second
 // invoice. With the same Idempotency-Key the retry (serial or concurrent) gets
 // the first answer; without a key the same code is refused with 409. Either

@@ -24,7 +24,9 @@
  *   invoiced when each period ends; a base fee billed in advance
  *   when its period starts.
  * - `canceled`: ended at `canceled_at`. It bills nothing more,
- *   and no route makes it `active` again.
+ *   and no route makes it `active` again. A subscription
+ *   canceled before it started has no `started_at` and no
+ *   billing period.
  *
  * A paused collection is not a status: see `pause_collection`.
  */

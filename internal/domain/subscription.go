@@ -51,7 +51,7 @@ func SameCalendarDayIn(a, b time.Time, loc *time.Location) bool {
 
 // beginningOfMonthIn snaps `t` to the first-of-month-at-00:00 in `loc`,
 // returned as UTC. Calendar-billing anchor helper. Shared between
-// subscription.Service (initial activation / trial-end / reset) and
+// subscription.Service (creation / trial end / reset) and
 // billing.Engine (cycle close re-anchoring) so both compute the same
 // boundary from the same inputs. loc=nil falls back to UTC.
 func beginningOfMonthIn(t time.Time, loc *time.Location) time.Time {
@@ -146,7 +146,7 @@ func FormatInclusivePeriod(start, end time.Time, loc *time.Location) string {
 //   - Calendar monthly: snap to first-of-next-month in tenant TZ, so the
 //     boundary is always the 1st regardless of the input day-of-month
 //     (anchorDay is unused on this path). A high day-of-month only reaches
-//     here transiently — the first-period stub when a sub is activated on
+//     here transiently — the first-period stub when a sub is created on
 //     the 29th/30th/31st (cross-interval plan swaps re-anchor to `now`, they
 //     do NOT carry an anniversary day onto a calendar sub).
 //   - Anniversary monthly: advance to the anchor day-of-month, clamped to the
@@ -561,9 +561,9 @@ var ErrTrialNotDue = errors.New("the trial has not ended yet")
 var ErrTrialCancelConflict = errors.New("trial-end cancel conflicted — re-read and route")
 
 // billingStartedAt is the instant the subscription began to bill: its trial
-// end when it had a trial (trial usage is free), else its start. Nil for a
-// subscription canceled as a draft (rows written before draft subscriptions
-// were removed).
+// end when it had a trial (trial usage is free), else its start. Nil when
+// neither is set: a subscription canceled before it ever started (a draft in
+// earlier releases, or canceled by migration 00235) has no start and no period.
 func (s Subscription) billingStartedAt() *time.Time {
 	if s.TrialEndAt != nil {
 		return s.TrialEndAt

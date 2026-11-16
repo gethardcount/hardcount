@@ -76,8 +76,8 @@ func TestOverview_HomeCountsAndBaselines(t *testing.T) {
 	e := mkCust("cus_e", "")
 	mkSub(e, "sub-e1", "active", p(daysAgo(60)), p(daysAgo(60)), nil, "")
 	mkSub(e, "sub-e2", "active", p(daysAgo(60)), p(daysAgo(60)), nil, "")
-	// F was canceled as a draft: a row written before draft subscriptions
-	// were removed.
+	// F was canceled before it ever started (a draft in earlier releases, or
+	// canceled by migration 00235): it has no start and no period.
 	f := mkCust("cus_f", "")
 	mkSub(f, "sub-f", "canceled", nil, nil, p(daysAgo(10)), "")
 	g := mkCust("cus_g", "")

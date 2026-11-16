@@ -58,7 +58,7 @@ func TestFromError_ValidationMessage(t *testing.T) {
 	cases := []string{
 		"customer_id is required",
 		"quantity must be positive",
-		"can only activate draft subscriptions",
+		"one of at_period_end or cancel_at must be set",
 		"cannot void a paid invoice",
 		"invalid billing_interval",
 	}

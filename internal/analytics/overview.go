@@ -169,8 +169,9 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 		{"live_customers", &resp.LiveCustomers,
 			`SELECT COUNT(DISTINCT customer_id) FROM subscriptions WHERE status IN ('active', 'trialing')` + notSimSubBare, nil},
 		// Live at the window start: started (trial or paid) at or before it
-		// and not canceled by then. A subscription canceled as a draft has
-		// no start (rows written before draft subscriptions were removed).
+		// and not canceled by then. A subscription canceled before it ever
+		// started (a draft in earlier releases, or canceled by migration
+		// 00235) has no start and no period.
 		{"live_customers_prev", &resp.LiveCustomersPrev,
 			`SELECT COUNT(DISTINCT customer_id) FROM subscriptions
 			 WHERE COALESCE(started_at, activated_at) IS NOT NULL

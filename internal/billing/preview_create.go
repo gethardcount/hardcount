@@ -237,8 +237,8 @@ func resolveCreatePreviewPeriod(period CreatePreviewPeriod, sub domain.Subscript
 		return period.From, period.To, nil
 	}
 
-	// Only a subscription canceled as a draft has no period (rows written
-	// before draft subscriptions were removed).
+	// Only a subscription canceled before it ever started (a draft in earlier
+	// releases, or canceled by migration 00235) has no start and no period.
 	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
 		return time.Time{}, time.Time{}, errs.Invalid(
 			"period",

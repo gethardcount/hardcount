@@ -269,7 +269,7 @@ shipped with Hardcount.
 ## Step 4 — Check the immediate invoice and PaymentIntent
 
 The flat-fee charge for the first cycle fires the moment the subscription
-activates.
+is created.
 
 ```bash
 curl -s "http://localhost:8080/v1/invoices?customer_id=<hc_cus_...>" \

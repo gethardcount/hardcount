@@ -95,7 +95,7 @@ func intervalOpen(ctx context.Context, tx *sql.Tx, ic intervalSubCtx, itemID, pl
 
 // intervalOpenForItems opens one interval per item at the subscription's
 // current_billing_period_start — the creation/trial-end writer. The stored period start is used AS IS: it is already
-// day-snapped where policy says so (firstPeriodForActivate /
+// day-snapped where policy says so (firstPeriodFromStart /
 // firstPeriodAfterTrial), and deliberately mid-day at TZ-seam and
 // trial-stub starts — re-snapping here would re-introduce the
 // derive-at-read bug class this table exists to end.

@@ -12,7 +12,8 @@ package domain
 // The wire strings are frozen: audit rows already written carry them.
 
 // Audit actions of subscription rows, besides the generic AuditActionCreate,
-// AuditActionActivate, AuditActionCancel and AuditActionUpdate.
+// AuditActionCancel and AuditActionUpdate. AuditActionActivate has no writer:
+// only rows written by earlier releases carry it.
 const (
 	// AuditActionSubscriptionItemUpdated: an item's plan or quantity changed,
 	// or a plan change was scheduled. Its metadata "action" says which

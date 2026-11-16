@@ -2447,15 +2447,10 @@ func TestProcessExpiredTrials(t *testing.T) {
 	})
 }
 
-// TestPeriodAnchoring locks in the post-Bug-1/2/11 contract for how the
-// first billing period anchors across every entry point (Create with
-// trial / Create that starts now / Activate from draft / EndTrial-early /
-// ExtendTrial). Calendar billing must produce a stub period bounded by
-// the next calendar month; anniversary must produce a full cycle from
-// the anchor instant. Pre-fix Create+trial+calendar dropped the stub
-// silently (revenue leak); pre-fix Activate hardcoded calendar and
-// backdated to month-start; pre-fix EndTrial / ExtendTrial left
-// period boundaries pointing at the original (now-wrong) anchor.
+// TestPeriodAnchoring: the first billing period anchors the same way from
+// every entry point (Create with a trial, Create that starts now, End trial,
+// Extend trial). Calendar billing gives a stub period that ends at the next
+// calendar month; anniversary gives a full cycle from the anchor instant.
 func TestPeriodAnchoring(t *testing.T) {
 	// Pick a mid-month "now" so the calendar-billing branch produces a
 	// non-trivial stub. UTC for all snaps — no tenant TZ surprises.

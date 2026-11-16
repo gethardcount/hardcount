@@ -16,9 +16,8 @@ import (
 // currency pin. The engine relabels rule-computed cents under one invoice
 // currency without conversion, so every write that binds a plan to a
 // subscription must keep the customer's billing in ONE currency. Each clause is proven
-// in both directions (refusal + coherent twin), including the two bypass
-// windows the design panel found: profile-set-first ordering and the
-// pre-existing divergent draft at Activate.
+// in both directions (refusal + coherent twin), including the
+// profile-set-first ordering.
 func TestCurrencyPin(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)

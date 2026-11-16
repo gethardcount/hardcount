@@ -1418,7 +1418,7 @@ func (s *PostgresStore) classifyActivationConflict(ctx context.Context, tx *sql.
 // that the operator ended the trial before its scheduled end), and
 // resets the period anchor to (periodStart, periodEnd) so the first
 // chargeable cycle starts immediately. The caller (Service.EndTrial)
-// computes periodStart/periodEnd via firstPeriodForActivate so the
+// computes periodStart/periodEnd via firstPeriodFromStart so the
 // reset honors billing_time. Returns errs.InvalidState if status is
 // not 'trialing' at UPDATE time.
 func (s *PostgresStore) EndTrialEarly(ctx context.Context, tenantID, id string, at, periodStart, periodEnd, nextBilling time.Time, anchorDay int) (domain.Subscription, error) {

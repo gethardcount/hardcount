@@ -19,7 +19,9 @@ billed by the plan's prices, whatever the quantity.
 
 A subscription starts when it is created, so there is no status for one
 that is set up now and billed later. Create the subscription when it should
-bill, or give it a trial, which starts billing by itself when it ends.
+bill, or give it a trial, which starts billing by itself when it ends. A
+plan billed in advance is invoiced when the subscription is created. With
+`trial_days`, nothing is billed until the trial ends.
 
 Paused collection is not a status. A subscription whose collection is
 paused stays `active` and keeps making invoices; see
@@ -154,8 +156,7 @@ $50.00 of base fee.
   in arrears for those days. For a base fee billed in advance, the days
   left are given back. The share already paid goes to the customer's
   credit balance. The share not paid yet lowers what the open invoice asks
-  for. A trial
-  that never became active gets no final invoice.
+  for. A trial that never became active gets no final invoice.
 - **Later:** `POST /v1/subscriptions/{id}/schedule-cancel`, with
   `{"at_period_end": true}` or `{"cancel_at": "2026-09-30T00:00:00Z"}`.
   Until then the subscription bills as usual. On a trial, `at_period_end`

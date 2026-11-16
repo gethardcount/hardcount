@@ -82,15 +82,15 @@ func TestListCustomerMeterCoverageEnds(t *testing.T) {
 	}
 	cancel(trial.ID, 11)
 
-	// Not counted: a still-open interval; a subscription canceled as a draft
-	// (it never covered anything); another customer's cancel; a cancel past
+	// Not counted: a still-open interval; a subscription canceled before it
+	// ever started (it covered nothing); another customer's cancel; a cancel past
 	// the period end (sealed AT the period end, the window's bound); a
 	// zero-width row (an item added on day 10 under a cancel backdated to
 	// day 8).
 	ivActiveSub(t, store, ctx, tenantID, cust, "cov-open", items(planO))
-	// No writer makes a draft now, so a row canceled as one (written before
-	// draft subscriptions were removed) is set by hand: canceled, never
-	// started, no trial end.
+	// A subscription canceled before it ever started (a draft in earlier
+	// releases, or canceled by migration 00235) has no start and no period.
+	// No writer makes one, so it is set by hand.
 	draft, err := store.Create(ctx, tenantID, domain.Subscription{
 		Code: "cov-draft", DisplayName: "cov-draft", CustomerID: cust,
 		Status: domain.SubscriptionTrialing, BillingTime: domain.BillingTimeCalendar,
@@ -99,7 +99,7 @@ func TestListCustomerMeterCoverageEnds(t *testing.T) {
 		Items: items(planM),
 	})
 	if err != nil {
-		t.Fatalf("create the row to cancel as a draft: %v", err)
+		t.Fatalf("create the row to cancel before it started: %v", err)
 	}
 	if err := store.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
 		_, err := tx.ExecContext(ctx, `
@@ -109,7 +109,7 @@ func TestListCustomerMeterCoverageEnds(t *testing.T) {
 			WHERE id = $2`, day(12), draft.ID)
 		return err
 	}); err != nil {
-		t.Fatalf("cancel it as a draft: %v", err)
+		t.Fatalf("cancel it before it started: %v", err)
 	}
 	other := ivActiveSub(t, store, ctx, tenantID, otherCust, "cov-other", items(planM))
 	cancel(other.ID, 6)

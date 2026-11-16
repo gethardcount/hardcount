@@ -91,7 +91,8 @@ export function describeAction(entry: AuditEntry): string {
       if (entry.resource_type === 'dunning_policy') return `Deleted dunning policy`
       if (entry.resource_type === 'stripe_credentials') return `Disconnected Stripe (${(entry.metadata?.livemode as boolean) ? 'live' : 'test'})`
       return `Deleted ${label || entry.resource_type}`
-    // Rows written before draft subscriptions were removed.
+    // Written only by earlier releases, when a draft subscription was
+    // activated. Kept so those rows still read.
     case 'activate': return `Activated ${label || 'subscription'}`
     case 'cancel': return `Canceled ${label || 'subscription'}`
     case 'pause': return `Paused ${label || 'subscription'}`
@@ -220,6 +221,9 @@ export const DEFAULT_RESOURCE_TYPES = [
   'audit_log',
 ]
 
+// The filter's fallback while the account's log is empty or its actions have
+// not loaded. Otherwise the filter lists the actions the account has recorded
+// (GET /v1/audit-log/filters), a retired one such as 'activate' among them.
 export const DEFAULT_ACTIONS = [
   'create', 'update', 'delete', 'cancel', 'pause', 'resume',
   'finalize', 'void', 'run', 'grant', 'revoke',

@@ -60,7 +60,9 @@ export interface Subscription {
      *   invoiced when each period ends; a base fee billed in advance
      *   when its period starts.
      * - `canceled`: ended at `canceled_at`. It bills nothing more,
-     *   and no route makes it `active` again.
+     *   and no route makes it `active` again. A subscription
+     *   canceled before it started has no `started_at` and no
+     *   billing period.
      *
      * A paused collection is not a status: see `pause_collection`.
      */
@@ -89,7 +91,12 @@ export interface Subscription {
      * trial.
      */
   trial_end_at?: string;
-  /** When the subscription started: when it was created. */
+  /**
+     * The moment the subscription was created. Its trial begins
+     * then, or, without a trial, its billing. A subscription that an
+     * earlier release activated from a draft has the moment of that
+     * activation instead.
+     */
   started_at?: string;
   /**
      * When the subscription became `active`: at creation without a
