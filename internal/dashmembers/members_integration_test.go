@@ -301,8 +301,7 @@ func TestInviteAcceptExistingUser(t *testing.T) {
 
 // TestInviteGates: inviter identity required (API-key callers have none),
 // a revoked invitation frees its address, already-a-member blocked, bad
-// email blocked. The pending-invitation conflict is in
-// TestInvite_APendingInvitationStillBlocksANewOne.
+// email blocked.
 func TestInviteGates(t *testing.T) {
 	h := newHarness(t, "Team Gates")
 	ctx := postgres.WithLivemode(context.Background(), false)

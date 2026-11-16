@@ -108,10 +108,9 @@ func (s *Service) CanInvite() bool {
 	return s.dashboardBaseURL != "" && s.emailConfigured
 }
 
-// NewService returns a Service. auditor is required to invite, revoke an
-// invitation and remove a member: each writes its audit row on its own
-// transaction. sessions is required to remove a member: the removed member's
-// sign-out commits with the removal. Accepting uses neither.
+// NewService returns a Service. Inviting, revoking an invitation and removing
+// a member write their audit row through auditor, on their own transaction;
+// removing a member also ends sessions through sessions.
 func NewService(store *PostgresStore, users UserDirectory, sessions SessionEnder, auditor AuditTxWriter, email InviteEmailSender, tenants TenantNamer, clk clock.Clock, dashboardBaseURL string) *Service {
 	if clk == nil {
 		clk = clock.Real()
@@ -211,9 +210,9 @@ func (s *Service) Invite(ctx context.Context, tenantID, inviterUserID, email str
 	acceptURL := s.dashboardBaseURL + "/accept-invite?token=" + rawToken
 	now := s.clock.Now(ctx)
 	// The invitation, its email and its audit row commit together. A pending
-	// invitation with no email is a dead end for the invitee, and it blocks
-	// the operator's retry through the pending-unique index. So a failed
-	// enqueue or audit row fails the invite and writes nothing.
+	// invitation with no email is a dead end for the invitee and blocks the
+	// retry, so a failed enqueue or audit row fails the invite and writes
+	// nothing.
 	return s.store.CreateInvitation(ctx, Invitation{
 		TenantID:        tenantID,
 		Email:           email,
@@ -233,9 +232,7 @@ func (s *Service) Invite(ctx context.Context, tenantID, inviterUserID, email str
 		}
 		// No email in the label: resource_id is the invitation id and the
 		// reader resolves the address from member_invitations, which is
-		// erasable. audit_log is not. The actor, the client address and the
-		// request id are already on ctx (the session middleware and the root
-		// middlewares put them there).
+		// erasable. audit_log is not.
 		if err := s.audit.LogInTx(ctx, tx, audit.Entry{
 			Action:       "member.invited",
 			ResourceType: "user",

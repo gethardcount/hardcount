@@ -11887,7 +11887,8 @@ export const getInviteMemberUrl = () => {
  * invitation that can still be accepted: revoke it to send a new one.
  * An expired invitation to the same email is revoked and replaced by
  * the new one. The invitation, its email and its audit row are saved
- * together; if one fails the route answers `500` and nothing changes.
+ * together; if the email or the audit row cannot be saved, the route
+ * answers `500` and nothing changes.
  *
  * Nothing is created when the server cannot deliver the link: the
  * answer is 409 with code `invalid_state` when `DASHBOARD_BASE_URL`
