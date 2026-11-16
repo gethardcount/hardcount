@@ -53,9 +53,11 @@ type Invitation struct {
 
 // Member is one (user, tenant) membership row for the members list.
 type Member struct {
-	UserID   string
-	Email    string
-	Role     string
+	UserID string
+	Email  string
+	Role   string
+	// JoinedAt is when the user joined this tenant, not when their account
+	// was created.
 	JoinedAt time.Time
 }
 
@@ -142,6 +144,9 @@ func (s *PostgresStore) CreateInvitation(ctx context.Context, inv Invitation, at
 	return inv, nil
 }
 
+// ListInvitations returns the tenant's invitations that are neither accepted
+// nor revoked, newest first. An expired one is listed: its invitee has not
+// joined, and a new invitation to the same address replaces it.
 func (s *PostgresStore) ListInvitations(ctx context.Context, tenantID string) ([]Invitation, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -153,7 +158,7 @@ func (s *PostgresStore) ListInvitations(ctx context.Context, tenantID string) ([
 		SELECT `+invCols+`
 		FROM member_invitations mi
 		LEFT JOIN users u ON u.id = mi.invited_by_user_id
-		WHERE mi.tenant_id = $1
+		WHERE mi.tenant_id = $1 AND mi.accepted_at IS NULL AND mi.revoked_at IS NULL
 		ORDER BY mi.created_at DESC`, tenantID)
 	if err != nil {
 		return nil, err
@@ -267,7 +272,7 @@ func (s *PostgresStore) AcceptInvitation(ctx context.Context, id string, at time
 	return tx.Commit()
 }
 
-// ListMembers returns every user attached to the tenant, oldest account first.
+// ListMembers returns the tenant's members, the earliest to join first.
 func (s *PostgresStore) ListMembers(ctx context.Context, tenantID string) ([]Member, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -276,11 +281,11 @@ func (s *PostgresStore) ListMembers(ctx context.Context, tenantID string) ([]Mem
 	defer postgres.Rollback(tx)
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT ut.user_id, u.email::text, ut.role, u.created_at
+		SELECT ut.user_id, u.email::text, ut.role, ut.created_at
 		FROM user_tenants ut
 		JOIN users u ON u.id = ut.user_id
 		WHERE ut.tenant_id = $1
-		ORDER BY u.created_at ASC`, tenantID)
+		ORDER BY ut.created_at ASC, ut.user_id ASC`, tenantID)
 	if err != nil {
 		return nil, err
 	}

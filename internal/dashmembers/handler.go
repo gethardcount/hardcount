@@ -64,29 +64,20 @@ type MemberView struct {
 	JoinedAt string `json:"joined_at"`
 }
 
-// InvitationView mirrors members.ts InvitationView. status is derived
-// server-side; clients treat it as authoritative.
+// InvitationView mirrors members.ts InvitationView. The routes answer only
+// invitations that are neither accepted nor revoked, so status is pending
+// or expired. The server derives it; clients treat it as authoritative.
 type InvitationView struct {
-	ID             string  `json:"id"`
-	Email          string  `json:"email"`
-	Role           string  `json:"role"`
-	Status         string  `json:"status"`
-	InvitedByEmail string  `json:"invited_by_email,omitempty"`
-	ExpiresAt      string  `json:"expires_at"`
-	CreatedAt      string  `json:"created_at"`
-	AcceptedAt     *string `json:"accepted_at,omitempty"`
-	RevokedAt      *string `json:"revoked_at,omitempty"`
+	ID             string `json:"id"`
+	Email          string `json:"email"`
+	Role           string `json:"role"`
+	Status         string `json:"status"`
+	InvitedByEmail string `json:"invited_by_email,omitempty"`
+	ExpiresAt      string `json:"expires_at"`
+	CreatedAt      string `json:"created_at"`
 }
 
 const rfc3339 = "2006-01-02T15:04:05Z07:00"
-
-func fmtTimePtr(t *time.Time) *string {
-	if t == nil {
-		return nil
-	}
-	s := t.Format(rfc3339)
-	return &s
-}
 
 func (h *Handler) invitationView(inv Invitation, now time.Time) InvitationView {
 	return InvitationView{
@@ -97,8 +88,6 @@ func (h *Handler) invitationView(inv Invitation, now time.Time) InvitationView {
 		InvitedByEmail: inv.InvitedByEmail,
 		ExpiresAt:      inv.ExpiresAt.Format(rfc3339),
 		CreatedAt:      inv.CreatedAt.Format(rfc3339),
-		AcceptedAt:     fmtTimePtr(inv.AcceptedAt),
-		RevokedAt:      fmtTimePtr(inv.RevokedAt),
 	}
 }
 

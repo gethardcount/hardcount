@@ -8,19 +8,17 @@ export interface MemberView {
   joined_at: string
 }
 
-// Mirrors invitationView in internal/dashmembers/handler.go. `status` is
-// derived server-side from accepted_at/revoked_at/expires_at; the client
-// should treat it as authoritative rather than re-deriving.
+// Mirrors InvitationView in internal/dashmembers/handler.go. The server
+// answers only invitations that are neither accepted nor revoked, and
+// derives `status` from expires_at; the client treats it as authoritative.
 export interface InvitationView {
   id: string
   email: string
   role: string
-  status: 'pending' | 'accepted' | 'revoked' | 'expired'
+  status: 'pending' | 'expired'
   invited_by_email?: string
   expires_at: string
   created_at: string
-  accepted_at?: string
-  revoked_at?: string
 }
 
 export interface MembersListResp {
