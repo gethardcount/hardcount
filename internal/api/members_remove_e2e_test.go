@@ -1,8 +1,8 @@
 package api
 
 import (
-	"database/sql"
 	"net/http/httptest"
+	"slices"
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/platform/clock"
@@ -14,7 +14,8 @@ import (
 // removing a member answers 204, writes one member.removed row with the
 // remover as actor, the client address, the request id and the remover's
 // session mode, signs the removed member out, and ends the invitation they
-// had sent.
+// had sent. An invite and its revoke write one row each, attributed the same
+// way.
 func TestRemoveMember_OneAuditRowAndTheMemberSignedOut(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "remove-member-bootstrap")
@@ -45,12 +46,21 @@ func TestRemoveMember_OneAuditRowAndTheMemberSignedOut(t *testing.T) {
 	friendToken := flowEmailLinkToken(t, db, "member_invite", "invite_url")
 
 	flowDo(t, ts, "POST", "/v1/auth/mode", flowReq{cookie: ownerCookie, body: map[string]any{"livemode": true}}).want(t, 200, "switch the owner to live")
-	flowDo(t, ts, "DELETE", "/v1/members/"+memberID, flowReq{cookie: ownerCookie}).want(t, 204, "remove the teammate")
+	invite := postWithCookie(t, ts, "/v1/members/invite", ownerCookie, map[string]any{"email": "sam@remove-member.test"})
+	assertStatus(t, invite, 201)
+	invitationID, _ := readJSON(t, invite)["id"].(string)
+	_ = invite.Body.Close()
+	revoke := deleteWithCookie(t, ts, "/v1/members/invitations/"+invitationID, ownerCookie)
+	assertStatus(t, revoke, 204)
+	_ = revoke.Body.Close()
+	remove := deleteWithCookie(t, ts, "/v1/members/"+memberID, ownerCookie)
+	assertStatus(t, remove, 204)
+	_ = remove.Body.Close()
 
 	type row struct {
-		actorType, actorID, tenantID string
-		livemode                     bool
-		ip, requestID                sql.NullString
+		action, actorType, actorID, tenantID string
+		livemode                             bool
+		ip, requestID                        string
 	}
 	var rows []row
 	func() {
@@ -60,16 +70,18 @@ func TestRemoveMember_OneAuditRowAndTheMemberSignedOut(t *testing.T) {
 		}
 		defer postgres.Rollback(tx)
 		rs, err := tx.QueryContext(t.Context(), `
-			SELECT actor_type, actor_id, tenant_id, livemode, ip_address::text, request_id
+			SELECT action, actor_type, actor_id, tenant_id, livemode, coalesce(ip_address, ''), coalesce(request_id, '')
 			FROM audit_log
-			WHERE action = 'member.removed' AND resource_type = 'user' AND resource_id = $1`, memberID)
+			WHERE action IN ('member.invited', 'member.invite_revoked', 'member.removed')
+			  AND resource_type = 'user' AND resource_id IN ($1, $2)
+			ORDER BY created_at, id`, invitationID, memberID)
 		if err != nil {
 			t.Fatal(err)
 		}
 		defer func() { _ = rs.Close() }()
 		for rs.Next() {
 			var r row
-			if err := rs.Scan(&r.actorType, &r.actorID, &r.tenantID, &r.livemode, &r.ip, &r.requestID); err != nil {
+			if err := rs.Scan(&r.action, &r.actorType, &r.actorID, &r.tenantID, &r.livemode, &r.ip, &r.requestID); err != nil {
 				t.Fatal(err)
 			}
 			rows = append(rows, r)
@@ -78,12 +90,13 @@ func TestRemoveMember_OneAuditRowAndTheMemberSignedOut(t *testing.T) {
 			t.Fatal(err)
 		}
 	}()
-	if len(rows) != 1 {
-		t.Fatalf("member.removed rows for %s = %d, want 1: %+v", memberID, len(rows), rows)
+	want := []row{
+		{"member.invited", "user", ownerID, tenantID, true, "127.0.0.1", invite.Header.Get("Hardcount-Request-Id")},
+		{"member.invite_revoked", "user", ownerID, tenantID, true, "127.0.0.1", revoke.Header.Get("Hardcount-Request-Id")},
+		{"member.removed", "user", ownerID, tenantID, true, "127.0.0.1", remove.Header.Get("Hardcount-Request-Id")},
 	}
-	if r := rows[0]; r.actorType != "user" || r.actorID != ownerID || r.tenantID != tenantID || !r.livemode ||
-		!r.ip.Valid || r.ip.String == "" || !r.requestID.Valid || r.requestID.String == "" {
-		t.Errorf("audit row = %+v, want actor user/%s, tenant %s, live mode, the client IP and the request id", r, ownerID, tenantID)
+	if !slices.Equal(rows, want) {
+		t.Errorf("audit rows =\n%+v\nwant\n%+v", rows, want)
 	}
 
 	flowDo(t, ts, "GET", "/v1/whoami", flowReq{cookie: memberCookie}).want(t, 401, "the removed teammate's whoami")

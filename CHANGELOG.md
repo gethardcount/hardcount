@@ -125,6 +125,7 @@ original text.
 
 ### Fixed
 
+- **An expired invitation no longer blocks a new one to the same address.** Inviting someone whose earlier invitation expired answered `409` and the dashboard offered no way to clear it; the new invitation now replaces the expired one ([#1817](https://github.com/gethardcount/hardcount/pull/1817)).
 - **An invoice finalized through the API and paid at once, from credits or by a card that succeeds in the same request, has `paid_at` equal to `issued_at`.** The timestamps one API request writes now share one time; `paid_at` was read a moment later before. A payment Stripe confirms later still settles through its event ([#1815](https://github.com/gethardcount/hardcount/pull/1815)).
 - **A credit note created with `auto_issue` has `created_at` equal to `issued_at`.** They differed by a few milliseconds before. A refund made in Stripe is likewise recorded with one time on its credit note, the note's line and its issue date ([#1812](https://github.com/gethardcount/hardcount/pull/1812)).
 - **A usage backfill or a LiteLLM spend call with an invalid event answers `422` even when the customer's test clock cannot be read.** It answered `503`, asking for a retry that could not help. The event is now checked before the clock is read, as a single ingest and a batch already did ([#1808](https://github.com/gethardcount/hardcount/pull/1808)).
@@ -211,6 +212,7 @@ original text.
 
 ### Security
 
+- **An invitation, and the revoking of one, are saved together with their audit row.** If the row cannot be written the request answers `500` and nothing changes ([#1817](https://github.com/gethardcount/hardcount/pull/1817)).
 - **A sign-out and a test/live mode switch are saved together with their audit row.** If the row cannot be written the request answers `500` and nothing changes: the session stays signed in, or keeps its mode ([#1816](https://github.com/gethardcount/hardcount/pull/1816)).
 - **A sign-in creates its session and writes its audit row in one transaction, and ends the session the browser held before.** If the audit row cannot be written the sign-in answers `500` and no session exists. A sign-in whose password changed while it was running is refused as a wrong password ([#1813](https://github.com/gethardcount/hardcount/pull/1813)).
 - **Removing a member signs them out of that workspace and ends the invitations they sent that were not yet accepted, with the audit row, in one transaction.** Before, it signed them out of every workspace. If any step fails the removal answers `500` and nothing changes ([#1810](https://github.com/gethardcount/hardcount/pull/1810)).

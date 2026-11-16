@@ -300,7 +300,8 @@ func TestInviteAcceptExistingUser(t *testing.T) {
 }
 
 // TestInviteGates: inviter identity required (API-key callers have none),
-// duplicate pending blocked, already-a-member blocked, bad email blocked.
+// a revoked invitation frees its address, already-a-member blocked, bad
+// email blocked.
 func TestInviteGates(t *testing.T) {
 	h := newHarness(t, "Team Gates")
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -315,18 +316,17 @@ func TestInviteGates(t *testing.T) {
 		t.Fatal("malformed email must be rejected")
 	}
 
-	// Duplicate pending invite → typed conflict.
+	// Revoking the pending invite frees the slot for a re-send.
 	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "dup@example.com"); err != nil {
 		t.Fatalf("first invite: %v", err)
 	}
-	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "dup@example.com"); !errors.Is(err, errs.ErrAlreadyExists) {
-		t.Fatalf("duplicate pending invite: got %v, want ErrAlreadyExists", err)
-	}
-
-	// Revoking the pending invite frees the slot for a re-send.
 	_, invs, err := h.svc.List(ctx, h.tenantID)
 	if err != nil {
 		t.Fatalf("list: %v", err)
+	}
+	other := testutil.CreateTestTenant(t, h.db, "Another Workspace")
+	if err := h.svc.Revoke(ctx, other, invs[0].ID); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("revoke from another workspace: got %v, want ErrNotFound", err)
 	}
 	if err := h.svc.Revoke(ctx, h.tenantID, invs[0].ID); err != nil {
 		t.Fatalf("revoke: %v", err)
