@@ -316,10 +316,10 @@ func AddBillingInterval(t time.Time, interval BillingInterval, loc *time.Locatio
 	return advanceAnchored(t, interval, loc, anchorDay)
 }
 
-// PauseCollectionBehavior controls what the engine does with the invoice it
-// would normally finalize during a paused-collection cycle. v1 supports
-// only KeepAsDraft; the other Stripe modes (mark_uncollectible, void) need
-// an "uncollectible" invoice status that doesn't exist in Hardcount yet.
+// PauseCollectionBehavior says what happens to the invoice a cycle builds
+// while collection is paused. KeepAsDraft is the only one: the invoice stays
+// a draft. Stripe's other two modes, mark_uncollectible and void, are not
+// built, and the API refuses them.
 type PauseCollectionBehavior string
 
 const (
@@ -527,12 +527,8 @@ type Subscription struct {
 	// calendar-monthly subs (always the 1st) and legacy/unset rows (the
 	// advance then falls back to the historical path). Recomputed whenever the
 	// cycle re-anchors to "now" (a cross-interval swap).
-	BillingAnchorDay int `json:"billing_anchor_day,omitempty"`
-	// Subscriptions have no per-sub billing timezone: every sub in a tenant
-	// bills in the one org timezone (default UTC), resolved live from tenant
-	// settings at compute time and denormalized onto the INVOICE at issue for
-	// historical stability (ADR-077, superseding the ADR-074 per-sub snapshot).
-	TestClockID string `json:"test_clock_id,omitempty"` // Test mode only — attached simulator clock
+	BillingAnchorDay int    `json:"billing_anchor_day,omitempty"`
+	TestClockID      string `json:"test_clock_id,omitempty"` // Test mode only — attached simulator clock
 	// BillingFailure is set while the billing run is failing on the work
 	// this subscription has due now, and nil otherwise (ADR-119). Composed at
 	// the store's row scan; never written through this struct.

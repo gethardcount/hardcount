@@ -2,7 +2,7 @@ package domain
 
 import "github.com/gethardcount/hardcount/internal/errs"
 
-// BelowMinimumCode names one fact everywhere it shows: Stripe refused to
+// BelowMinimumCode is Hardcount's code for one refusal: Stripe would not
 // charge an invoice because its amount is below Stripe's minimum charge.
 // Stripe's error code for it is amount_too_small. The minimum is $0.50 for
 // USD, and a per-currency amount for the rest

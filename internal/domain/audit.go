@@ -119,10 +119,9 @@ type TenantSettings struct {
 	TaxRate                        float64 `json:"tax_rate"` // Percent rate (4-decimal precision via NUMERIC(7,4)). 7.25 = 7.25%. ADR-042/043.
 	TaxName                        string  `json:"tax_name,omitempty"`
 	TaxInclusive                   bool    `json:"tax_inclusive"`
-	// TaxProvider selects the backend that computes tax. 'none' skips tax
-	// entirely, and 'manual' uses the flat tenant-level rate below. Future
-	// providers (for example 'stripe_tax') will be added once their
-	// integrations are verified end to end.
+	// TaxProvider selects the backend that computes tax (internal/tax):
+	// 'none' charges no tax, 'manual' applies the flat TaxRate above, and
+	// 'stripe_tax' asks Stripe Tax.
 	TaxProvider string `json:"tax_provider"`
 	// TaxOnFailure is "block" (ADR-041 removed "fallback_manual"). It is
 	// kept for forward compatibility. When the provider fails, the invoice
@@ -172,16 +171,9 @@ type TenantSettings struct {
 	// hosted invoice page. Each invoice keeps the footer it was issued with
 	// (copied into invoices.footer at issue, ADR-109), so an edit applies to
 	// invoices issued after it. A draft shows the current text.
-	InvoiceFooter string `json:"invoice_footer,omitempty"`
-	// There is no audit_fail_closed setting (ADR-089), and migration 0149
-	// dropped its column. The setting swapped the response to a committed
-	// change for a 503. The idempotency layer caches that 503, which leaves
-	// the change behind an error permanently. Fail-closed comes from the
-	// design instead of a setting: audit rows commit in the business
-	// transaction (ADR-090, LogInTx). So there is no window after commit to
-	// guard, and nothing to opt into.
-	CreatedAt time.Time `json:"created_at"`
-	UpdatedAt time.Time `json:"updated_at"`
+	InvoiceFooter string    `json:"invoice_footer,omitempty"`
+	CreatedAt     time.Time `json:"created_at"`
+	UpdatedAt     time.Time `json:"updated_at"`
 }
 
 // StripeProviderCredentials holds a tenant's connection to its own Stripe
