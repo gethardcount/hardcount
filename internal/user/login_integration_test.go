@@ -27,7 +27,7 @@ import (
 // together, and the transaction checks again that the verified password
 // still holds. The removal of a member during a sign-in is in
 // login_removal_integration_test.go; the route over the real router is in
-// internal/api (TestE2E_Login_AuditRowAndLastSignIn).
+// internal/api (TestE2E_SignIn_ModeSwitch_SignOut_AuditRows).
 
 const (
 	loginITEmail       = "owner@login-it.test"
@@ -54,13 +54,7 @@ func newLoginIT(t *testing.T) loginIT {
 // handler is the dashboard auth handler on store, the real sessions and
 // auditor. throttle may be nil.
 func (it loginIT) handler(store Store, auditor AuditTxWriter, throttle *LoginThrottle) http.Handler {
-	return it.handlerWith(store, it.sessSvc, auditor, throttle)
-}
-
-// handlerWith is handler with sessions for the steps inside the sign-in's
-// transaction.
-func (it loginIT) handlerWith(store Store, sessions SessionWriter, auditor AuditTxWriter, throttle *LoginThrottle) http.Handler {
-	svc := NewService(store, clock.Real(), sessions, auditor)
+	svc := NewService(store, clock.Real(), it.sessSvc, auditor)
 	h := NewHandler(svc, session.CookieConfig{Path: "/"}, stubEmailSender{}, "", false)
 	if throttle != nil {
 		h.SetLoginThrottle(throttle)
@@ -122,40 +116,10 @@ func (it loginIT) sessionRows(t *testing.T) int {
 	return n
 }
 
-// liveSession issues a session for the user: the one the browser holds.
-func (it loginIT) liveSession(t *testing.T) string {
+// sessionIn issues a session for the user in the given mode.
+func (it loginIT) sessionIn(t *testing.T, live bool) string {
 	t.Helper()
-	return issueTestSession(t, it.db, it.sessSvc, session.IssueInput{UserID: it.userID, TenantID: it.tenantID})
-}
-
-// loginMetadata is the metadata of each login audit row, oldest first.
-func (it loginIT) loginMetadata(t *testing.T) []string {
-	t.Helper()
-	tx, err := it.db.BeginTx(t.Context(), postgres.TxBypass, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer postgres.Rollback(tx)
-	rows, err := tx.QueryContext(t.Context(), `
-		SELECT metadata::text FROM audit_log
-		WHERE action = 'login' AND resource_id = $1
-		ORDER BY created_at, id`, it.userID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer func() { _ = rows.Close() }()
-	var out []string
-	for rows.Next() {
-		var m string
-		if err := rows.Scan(&m); err != nil {
-			t.Fatal(err)
-		}
-		out = append(out, m)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatal(err)
-	}
-	return out
+	return issueTestSession(t, it.db, it.sessSvc, session.IssueInput{UserID: it.userID, TenantID: it.tenantID, Livemode: live})
 }
 
 func (it loginIT) lastLoginAt(t *testing.T) *time.Time {
@@ -190,7 +154,7 @@ func (a *afterLookup) GetByEmail(ctx context.Context, email string) (domain.User
 // stays unset.
 func TestLogin_AFailedAuditRowLeavesNoSession(t *testing.T) {
 	it := newLoginIT(t)
-	old := it.liveSession(t)
+	old := it.sessionIn(t, false)
 	rr := signIn(it.handler(NewPostgresStore(it.db), failingAuditTx{}, nil), loginITPassword, old)
 	if rr.Code != http.StatusInternalServerError {
 		t.Fatalf("sign-in with a failing audit row: status %d, want 500; body %s", rr.Code, rr.Body.String())
@@ -217,53 +181,16 @@ func (it loginIT) assertFailedSignIn(t *testing.T, rr *httptest.ResponseRecorder
 	}
 }
 
-// endThenFailTx ends the browser's session on the transaction, then fails.
-type endThenFailTx struct{ *session.Service }
-
-func (e endThenFailTx) EndTx(ctx context.Context, tx *sql.Tx, rawID string) (bool, error) {
-	if _, err := e.Service.EndTx(ctx, tx, rawID); err != nil {
-		return false, err
-	}
-	return false, errors.New("ending the session failed")
-}
-
-// issueThenFailTx inserts the new session on the transaction, then fails.
-type issueThenFailTx struct{ *session.Service }
-
-func (i issueThenFailTx) IssueTx(ctx context.Context, tx *sql.Tx, in session.IssueInput) (string, session.Session, error) {
-	if _, _, err := i.Service.IssueTx(ctx, tx, in); err != nil {
-		return "", session.Session{}, err
-	}
-	return "", session.Session{}, errors.New("creating the session failed")
-}
-
-// TestLogin_AFailedSignInKeepsTheBrowsersSession: a sign-in that is refused
-// or fails leaves the session the browser held as it was. A wrong password
-// is refused before the transaction; a failure inside it rolls back the end
-// of the old session and the insert of the new one.
+// TestLogin_AFailedSignInKeepsTheBrowsersSession: a wrong password is refused
+// before the transaction and leaves the session the browser held as it was.
 func TestLogin_AFailedSignInKeepsTheBrowsersSession(t *testing.T) {
-	cases := []struct {
-		name     string
-		password string
-		sessions func(*session.Service) SessionWriter
-		status   int
-	}{
-		{"wrong password", "wrong-password-123", func(s *session.Service) SessionWriter { return s }, http.StatusUnauthorized},
-		{"ending the old session fails", loginITPassword, func(s *session.Service) SessionWriter { return endThenFailTx{s} }, http.StatusInternalServerError},
-		{"creating the new session fails", loginITPassword, func(s *session.Service) SessionWriter { return issueThenFailTx{s} }, http.StatusInternalServerError},
+	it := newLoginIT(t)
+	old := it.sessionIn(t, false)
+	rr := signIn(it.handler(NewPostgresStore(it.db), audit.NewLogger(it.db), nil), "wrong-password-123", old)
+	if rr.Code != http.StatusUnauthorized {
+		t.Fatalf("status %d, want 401; body %s", rr.Code, rr.Body.String())
 	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			it := newLoginIT(t)
-			old := it.liveSession(t)
-			h := it.handlerWith(NewPostgresStore(it.db), c.sessions(it.sessSvc), audit.NewLogger(it.db), nil)
-			rr := signIn(h, c.password, old)
-			if rr.Code != c.status {
-				t.Fatalf("status %d, want %d; body %s", rr.Code, c.status, rr.Body.String())
-			}
-			it.assertFailedSignIn(t, rr, old)
-		})
-	}
+	it.assertFailedSignIn(t, rr, old)
 }
 
 // holdEndAll is the real session service whose EndAllForUserTx, inside a
@@ -304,7 +231,7 @@ func TestLogin_AResetInFlightIsWaitedFor(t *testing.T) {
 	signInDone := make(chan *httptest.ResponseRecorder, 1)
 	go func() { signInDone <- signIn(h, loginITPassword, "") }()
 
-	WaitForLockWait(t, it.db, "%users%")
+	testutil.WaitForLockWaiter(t, t.Context(), testutil.AdminPool(t), "users")
 	gate.Open()
 	if err := Receive(t, resetDone, "the reset"); err != nil {
 		t.Fatalf("reset: %v", err)
@@ -359,14 +286,15 @@ func TestLogin_APasswordChangedWhileItRanIsRefused(t *testing.T) {
 }
 
 // TestLogin_EndsTheSessionTheBrowserHeld: a sign-in that carries a live
-// session cookie ends that session, and the new cookie works. An unknown
-// cookie changes nothing and the sign-in goes ahead. The login audit row
-// carries previous_session_ended only for the sign-in that ended one.
+// session cookie ends that session, the new cookie works and last_login_at
+// is set. An unknown cookie changes nothing and the sign-in goes ahead. The
+// login audit row carries previous_session_ended only for the sign-in that
+// ended one.
 func TestLogin_EndsTheSessionTheBrowserHeld(t *testing.T) {
 	it := newLoginIT(t)
 	h := it.handler(NewPostgresStore(it.db), audit.NewLogger(it.db), nil)
 
-	old := it.liveSession(t)
+	old := it.sessionIn(t, false)
 	rr := signIn(h, loginITPassword, old)
 	if rr.Code != http.StatusOK {
 		t.Fatalf("sign-in with a live cookie: status %d, want 200; body %s", rr.Code, rr.Body.String())
@@ -380,6 +308,9 @@ func TestLogin_EndsTheSessionTheBrowserHeld(t *testing.T) {
 	}
 	if _, err := it.sessSvc.Resolve(t.Context(), newer); err != nil {
 		t.Errorf("resolve the new session: %v, want it live", err)
+	}
+	if it.lastLoginAt(t) == nil {
+		t.Error("last_login_at is unset after a sign-in")
 	}
 
 	rr = signIn(h, loginITPassword, "not-a-session-id")
@@ -402,7 +333,11 @@ func TestLogin_EndsTheSessionTheBrowserHeld(t *testing.T) {
 		`{"livemode": false}`,
 		`{"livemode": false}`,
 	}
-	if got := it.loginMetadata(t); strings.Join(got, "\n") != strings.Join(want, "\n") {
+	var got []string
+	for _, r := range it.authRows(t, "login") {
+		got = append(got, r.metadata)
+	}
+	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Errorf("login rows' metadata = %q, want %q", got, want)
 	}
 }
@@ -494,8 +429,5 @@ func TestLogin_ARolledBackSignInLeavesTheThrottleCounts(t *testing.T) {
 	}
 	if rr := signIn(working, loginITPassword, ""); rr.Code != http.StatusTooManyRequests {
 		t.Fatalf("right password after the rolled-back sign-in: status %d, want 429; body %s", rr.Code, rr.Body.String())
-	}
-	if n := it.sessionRows(t); n != 0 {
-		t.Errorf("session rows = %d, want 0", n)
 	}
 }

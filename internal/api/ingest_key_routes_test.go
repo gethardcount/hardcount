@@ -60,10 +60,10 @@ var ingestKeyRoutes = map[string]bool{
 // the runtime names it: ".../internal/auth.Require.func1", or
 // ".../internal/auth.Require.1" where the compiler inlined the constructor
 // into its caller. The names are unique in this module:
-// session.MiddlewareOrAPIKey is the one API-key authenticator the router
+// session.RequireCaller is the one API-key authenticator the router
 // mounts, and auth.Require, RequireMethod and RequireSession are the only
 // functions with those names.
-var middlewareName = regexp.MustCompile(`[./](MiddlewareOrAPIKey|Require|RequireMethod|RequireSession)\.(?:func)?\d+$`)
+var middlewareName = regexp.MustCompile(`[./](RequireCaller|Require|RequireMethod|RequireSession)\.(?:func)?\d+$`)
 
 // middlewareKind returns which of those constructors made mw, or "".
 func middlewareKind(mw func(http.Handler) http.Handler) string {
@@ -103,7 +103,7 @@ func TestIngestKey_RefusedOnEveryRouteButUsage(t *testing.T) {
 		var gates []func(http.Handler) http.Handler
 		for _, mw := range mws {
 			switch middlewareKind(mw) {
-			case "MiddlewareOrAPIKey":
+			case "RequireCaller":
 				authed = true
 			case "RequireSession":
 				sessionOnly = true

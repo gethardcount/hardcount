@@ -2,12 +2,9 @@ package user
 
 import "testing"
 
-// TestBuildResetLink covers the medium-severity [security] audit finding:
-// the password-reset link origin was derived from the request Host header,
-// so a poisoned Host would email the victim a link pointing at an attacker
-// domain, leaking the single-use reset token. The fix removes the request
-// parameter entirely — the link can only come from the configured
-// DASHBOARD_BASE_URL — so header poisoning is structurally impossible.
+// TestBuildResetLink: the reset link is built only from DASHBOARD_BASE_URL,
+// never from the request, so a poisoned Host header cannot send the token to
+// another domain. With the setting unset, no link is built.
 func TestBuildResetLink(t *testing.T) {
 	t.Run("uses configured base url", func(t *testing.T) {
 		h := &Handler{dashboardBaseURL: "https://app.hardcount.dev"}

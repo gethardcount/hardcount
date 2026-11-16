@@ -14,8 +14,9 @@ import (
 // engine.MustValidate after it wires the engine, so every test that calls
 // this also proves that no engine collaborator is missing.
 func newTestServer() *Server {
-	// Create server with nil DB — handlers that don't touch DB will work,
-	// auth middleware will reject (no valid keys), which is what we want to test.
+	// A zero DB has no connection, so a test may only send requests that are
+	// answered without the database, such as /health or one with no
+	// credentials, which gets 401.
 	db := &postgres.DB{}
 	return NewServer(db, nil, nil)
 }

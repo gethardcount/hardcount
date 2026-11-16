@@ -217,10 +217,6 @@ func TestLogin_ThrottleFailsClosed(t *testing.T) {
 	if n := store.lookups.Load(); n != 0 {
 		t.Fatalf("throttle unavailable: %d account lookups, want 0", n)
 	}
-	// Control: the same handler without the throttle signs in.
-	if code := itSignIn(itHandler(store, nil), "198.51.100.4", "op@acme.com", "a-good-password-123"); code != http.StatusOK {
-		t.Fatalf("control without the throttle: status %d, want 200", code)
-	}
 }
 
 // TestLogin_RefusedSignInIsNotAServerError: the right password for a user

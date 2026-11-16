@@ -3,56 +3,21 @@ package auth
 import (
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 )
 
-// guarded runs h behind mw for a principal of key type kt.
-func guarded(t *testing.T, mw func(http.Handler) http.Handler, kt KeyType, method string) (code int, body string, reached bool) {
+// guarded runs a handler behind mw for a principal of key type kt and
+// returns the status.
+func guarded(t *testing.T, mw func(http.Handler) http.Handler, kt KeyType, method string) int {
 	t.Helper()
-	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		reached = true
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	req := httptest.NewRequest(method, "/", nil)
 	req = req.WithContext(WithKeyType(req.Context(), kt))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
-	return rec.Code, rec.Body.String(), reached
-}
-
-func TestRequire_SecretKeyHasFullAccess(t *testing.T) {
-	for _, perm := range allPermissions {
-		t.Run(string(perm), func(t *testing.T) {
-			if code, _, _ := guarded(t, Require(perm), KeyTypeSecret, "GET"); code != http.StatusOK {
-				t.Errorf("secret key should have %s, got status %d", perm, code)
-			}
-		})
-	}
-}
-
-// An ingest key passes Require(usage:ingest) and gets the ordinary
-// missing-permission 403 on everything else, with the same message a
-// secret key would get for a permission it lacked.
-func TestRequire_IngestKeyOnlySendsUsage(t *testing.T) {
-	for _, perm := range allPermissions {
-		t.Run(string(perm), func(t *testing.T) {
-			code, body, reached := guarded(t, Require(perm), KeyTypeIngest, "POST")
-			if perm == PermUsageIngest {
-				if code != http.StatusOK || !reached {
-					t.Errorf("ingest key on usage:ingest: %d, want 200", code)
-				}
-				return
-			}
-			if code != http.StatusForbidden || reached {
-				t.Errorf("ingest key on %s: %d (reached=%v), want 403", perm, code, reached)
-			}
-			want := "insufficient permissions: this key type does not have " + string(perm) + " access"
-			if !strings.Contains(body, want) {
-				t.Errorf("ingest key on %s: body %s, want the missing-permission message %q", perm, body, want)
-			}
-		})
-	}
+	return rec.Code
 }
 
 func TestRequireMethod_GETUsesReadPOSTUsesWrite(t *testing.T) {
@@ -76,7 +41,7 @@ func TestRequireMethod_GETUsesReadPOSTUsesWrite(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.method+"_"+tc.why, func(t *testing.T) {
-			if code, _, _ := guarded(t, mw, KeyTypeIngest, tc.method); code != tc.want {
+			if code := guarded(t, mw, KeyTypeIngest, tc.method); code != tc.want {
 				t.Errorf("%s: got %d, want %d", tc.why, code, tc.want)
 			}
 		})

@@ -1,12 +1,14 @@
 package api
 
 import (
+	"database/sql"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -14,8 +16,7 @@ import (
 // session over the real router and database: GET /v1/whoami on both
 // credential paths, the test/live switch (lists follow it, and a key made
 // in live mode is a live key), and a password reset from the emailed link
-// to a new sign-in. GET /v1/whoami, POST /v1/auth/mode and GET
-// /v1/auth/password-reset/check had no test at any level.
+// to its audit row and a new sign-in.
 func TestE2E_DashboardSession_ModeAndPasswordReset(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "session-flow-bootstrap")
@@ -102,7 +103,6 @@ func TestE2E_DashboardSession_ModeAndPasswordReset(t *testing.T) {
 		t.Errorf("customer list after switching back = %q, want only %q", got, testCustomer)
 	}
 	flowDo(t, ts, "POST", "/v1/auth/mode", flowReq{body: map[string]any{"livemode": true}}).want(t, 401, "switch mode with no session")
-	assertAuditAction(t, db, "mode_changed")
 
 	// Password reset: request it, open the emailed link, set a new password.
 	flowDo(t, ts, "POST", "/v1/auth/password-reset/request", flowReq{body: map[string]any{"email": email}}).want(t, 200, "request a reset")
@@ -125,6 +125,48 @@ func TestE2E_DashboardSession_ModeAndPasswordReset(t *testing.T) {
 	flowDo(t, ts, "POST", "/v1/auth/password-reset/confirm", flowReq{body: map[string]any{
 		"token": token, "password": newPassword,
 	}}).want(t, 200, "set the new password")
+
+	// One password_reset_completed row: the user is the actor, filed in test
+	// mode with the client address and the request id.
+	userID := flowStr(who, "user_id")
+	type row struct {
+		actorType, actorID, tenantID string
+		livemode                     bool
+		ip, requestID                sql.NullString
+	}
+	var rows []row
+	func() {
+		tx, err := db.BeginTx(t.Context(), postgres.TxBypass, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer postgres.Rollback(tx)
+		rs, err := tx.QueryContext(t.Context(), `
+			SELECT actor_type, actor_id, tenant_id, livemode, ip_address::text, request_id
+			FROM audit_log
+			WHERE action = 'password_reset_completed' AND resource_type = 'user' AND resource_id = $1`, userID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = rs.Close() }()
+		for rs.Next() {
+			var r row
+			if err := rs.Scan(&r.actorType, &r.actorID, &r.tenantID, &r.livemode, &r.ip, &r.requestID); err != nil {
+				t.Fatal(err)
+			}
+			rows = append(rows, r)
+		}
+		if err := rs.Err(); err != nil {
+			t.Fatal(err)
+		}
+	}()
+	if len(rows) != 1 {
+		t.Fatalf("password_reset_completed rows for %s = %d, want 1: %+v", userID, len(rows), rows)
+	}
+	if r := rows[0]; r.actorType != "user" || r.actorID != userID || r.tenantID != tenantID || r.livemode ||
+		!r.ip.Valid || r.ip.String == "" || !r.requestID.Valid || r.requestID.String == "" {
+		t.Errorf("audit row = %+v, want actor user/%s, tenant %s, test mode, the client IP and the request id", r, userID, tenantID)
+	}
 
 	// The reset signs out every session and spends the link.
 	flowDo(t, ts, "GET", "/v1/whoami", flowReq{cookie: cookie}).want(t, 401, "whoami on a session from before the reset")

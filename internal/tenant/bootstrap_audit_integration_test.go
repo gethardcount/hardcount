@@ -15,12 +15,10 @@ import (
 	"github.com/gethardcount/hardcount/internal/user"
 )
 
-// Bootstrap provisions a tenant, an owner account and THREE api keys — one of
-// them a LIVE secret that can move money — with no prior actor to attribute
-// them to. Until ADR-090's uninstall it left no audit trail at all, behind a
-// registry note that claimed otherwise. "Who created this live key, and when?"
-// must have an answer, so the provisioning writes its rows into the new
-// tenant's own log, on bootstrap's own transaction.
+// Bootstrap provisions a tenant, an owner account and two API keys, a test
+// and a live secret key, with no earlier actor to name. It writes a row for
+// each into the new tenant's own audit log, on its own transaction, so "who
+// created this live key, and when?" has an answer.
 func TestBootstrap_AuditsItsProvisioning(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)

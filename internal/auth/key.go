@@ -8,16 +8,16 @@ import (
 	"strings"
 )
 
-// A key is its type prefix, hc_{type}_{mode}_, then a secret of secretBytes
-// random bytes in lowercase hex: hc_secret_live_ and 64 hex characters. The
-// table stores the key's lookup prefix, its type prefix and the first
-// lookupHexLen hex characters of the secret, by which a request's key is
-// found, and a salted hash of the whole key (hashKey). The table's
-// api_keys_prefix_shape_check states the same shape for the lookup prefix.
+// A key is a type prefix, hc_{type}_{mode}_, then secretBytes random bytes in
+// lowercase hex. Its lookup prefix (the type prefix and the first lookupHexLen
+// hex characters) finds its row, which holds a salted hash of the whole key
+// (hashKey). api_keys_prefix_shape_check states the same shape.
 const (
 	secretBytes  = 32
 	lookupHexLen = 12
 )
+
+const saltBytes = 16
 
 // typePrefix returns a key's type prefix, "hc_{type}_{mode}_": hc_secret_live_,
 // hc_ingest_test_ and so on. The visible mode lets an operator spot a test
@@ -63,13 +63,13 @@ type storedHash struct {
 }
 
 // mintKey returns a new raw key of kt in mode livemode, its lookup prefix,
-// and its stored hash with a fresh 16-byte salt.
+// and its stored hash.
 func mintKey(kt KeyType, livemode bool) (raw, lookup string, h storedHash, err error) {
 	secret := make([]byte, secretBytes)
 	if _, err := rand.Read(secret); err != nil {
 		return "", "", storedHash{}, fmt.Errorf("generate key: %w", err)
 	}
-	salt := make([]byte, 16)
+	salt := make([]byte, saltBytes)
 	if _, err := rand.Read(salt); err != nil {
 		return "", "", storedHash{}, fmt.Errorf("generate salt: %w", err)
 	}
@@ -79,9 +79,8 @@ func mintKey(kt KeyType, livemode bool) (raw, lookup string, h storedHash, err e
 	return raw, p + secretHex[:lookupHexLen], storedHash{salt: hex.EncodeToString(salt), hash: hashKey(salt, raw)}, nil
 }
 
-// hashKey returns the stored hash of raw: hex(SHA-256(salt || raw)). Every
-// new key has a fresh 16-byte salt. A key the setup command wrote in v0.9.3
-// or earlier has an empty salt and still validates.
+// hashKey returns hex(SHA-256(salt || raw)). An empty salt is valid: keys the
+// setup command made before salts were added have none.
 func hashKey(salt []byte, raw string) string {
 	sum := sha256.Sum256(append(append([]byte{}, salt...), raw...))
 	return hex.EncodeToString(sum[:])

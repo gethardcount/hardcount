@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/audit"
@@ -56,13 +55,12 @@ func sessionRequest(cookie string) *http.Request {
 	return req
 }
 
-// TestMiddlewareOrAPIKey_CookieOutageDoesNotFallThrough: pre-#560 an infra
-// failure on the cookie lookup fell through to the bearer branch and, with
-// no header present, surfaced as "missing credentials" — a second flavor of
-// the same lie. The outage must stop the request with a 503.
-func TestMiddlewareOrAPIKey_CookieOutageDoesNotFallThrough(t *testing.T) {
+// A session store that fails is no verdict on the cookie: the request stops
+// with a 503 and does not go on to the API key, where with no key it would
+// get a 401 for missing credentials.
+func TestRequireCaller_CookieOutageDoesNotFallThrough(t *testing.T) {
 	svc := NewService(&fakeSessionStore{outage: true})
-	handler := MiddlewareOrAPIKey(svc, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := RequireCaller(svc, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("should not reach handler")
 	}))
 
@@ -82,13 +80,13 @@ func (*canceledStore) GetByIDHash(context.Context, string) (Session, error) {
 	return Session{}, fmt.Errorf("get session: %w", context.Canceled)
 }
 
-// TestMiddlewareOrAPIKey_ClientGoneLogsAtWarn: when the session lookup fails
+// TestRequireCaller_ClientGoneLogsAtWarn: when the session lookup fails
 // because the client went away (a closed browser tab), the 503 is logged at
 // WARN. The same error on a live request stays at ERROR, the level operators
 // alert on.
-func TestMiddlewareOrAPIKey_ClientGoneLogsAtWarn(t *testing.T) {
+func TestRequireCaller_ClientGoneLogsAtWarn(t *testing.T) {
 	svc := NewService(&canceledStore{})
-	handler := MiddlewareOrAPIKey(svc, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := RequireCaller(svc, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("should not reach handler")
 	}))
 	gone, cancel := context.WithCancel(context.Background())
@@ -121,32 +119,10 @@ func TestMiddlewareOrAPIKey_ClientGoneLogsAtWarn(t *testing.T) {
 	}
 }
 
-// TestMiddlewareOrAPIKey_StaleCookieStillFallsThrough pins the deliberate
-// pre-existing behavior the outage branch must not widen: a cookie the store
-// definitively rejects falls through to the bearer branch (here: absent →
-// the generic missing-credentials 401), so a stale cookie never blocks a
-// valid Authorization header.
-func TestMiddlewareOrAPIKey_StaleCookieStillFallsThrough(t *testing.T) {
-	svc := NewService(&fakeSessionStore{sessions: map[string]Session{}})
-	handler := MiddlewareOrAPIKey(svc, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("should not reach handler")
-	}))
-
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, sessionRequest("sess_deadbeef"))
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status: got %d, want 401 from the bearer branch", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "missing credentials") {
-		t.Errorf("expected the bearer branch's missing-credentials message, got: %s", rec.Body.String())
-	}
-}
-
-// The access log wraps MiddlewareOrAPIKey and cannot see the context it hands
+// The access log wraps RequireCaller and cannot see the context it hands
 // its handler. So the middleware names the caller it accepted on the request's
 // record, under the names the audit log gives the same context.
-func TestMiddlewareOrAPIKey_NamesTheCallerOnTheRecord(t *testing.T) {
+func TestRequireCaller_NamesTheCallerOnTheRecord(t *testing.T) {
 	store := &fakeSessionStore{sessions: map[string]Session{}}
 	sessions := NewService(store)
 	rawSession, sess, err := sessions.IssueTx(t.Context(), nil, IssueInput{UserID: "usr_owner", TenantID: "ten_1"})
@@ -158,7 +134,7 @@ func TestMiddlewareOrAPIKey_NamesTheCallerOnTheRecord(t *testing.T) {
 	serve := func(cookie string) (outer context.Context, seen *http.Request, status int) {
 		outer = request.WithRecord(t.Context())
 		rec := httptest.NewRecorder()
-		MiddlewareOrAPIKey(sessions, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		RequireCaller(sessions, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			seen = r
 		})).ServeHTTP(rec, sessionRequest(cookie).WithContext(outer))
 		return outer, seen, rec.Code

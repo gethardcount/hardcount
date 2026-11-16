@@ -1738,7 +1738,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// the compliance export is itself an audited event, and it uses the same
 	// permission as the audit-log read route below.
 	r.Route("/v1/exports", func(r chi.Router) {
-		r.Use(session.MiddlewareOrAPIKey(sessionSvc, authSvc))
+		r.Use(session.RequireCaller(sessionSvc, authSvc))
 		r.Use(rateLimiter.Middleware())
 		// The handler moves each response's write deadline to match this
 		// timeout (extendExportWriteDeadline), because the server's
@@ -1755,13 +1755,8 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		))
 	})
 
-	// Tenant-scoped routes accept an httpOnly session cookie (the dashboard,
-	// created by /v1/auth/login) or `Authorization: Bearer <api_key>` (SDKs,
-	// curl, server-to-server). A cookie that resolves to a live session is
-	// the caller, whatever key the request also carries. A cookie that does
-	// not resolve (an ended or unknown session) falls through to the key, so
-	// a stale cookie does not block a valid key (session.Authenticate). Both
-	// paths set the same auth ctx keys, so handlers do not branch.
+	// Tenant routes take a dashboard session cookie or `Authorization: Bearer
+	// <key>`; session.Authenticate decides which.
 	r.Route("/v1", func(r chi.Router) {
 		// CSRF: this group serves both the cookie dashboard and bearer SDK
 		// and API callers. The guard checks the origin of unsafe requests on
@@ -1772,7 +1767,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		// touches session state. Safe methods and the SSE and export GET
 		// siblings are unaffected.
 		r.Use(mw.CSRFGuard(allowedOrigins))
-		r.Use(session.MiddlewareOrAPIKey(sessionSvc, authSvc))
+		r.Use(session.RequireCaller(sessionSvc, authSvc))
 		// After auth, so the tenant ID is available for the bucket key. Ingest
 		// paths use their own, much larger bucket (see ingestLimiter).
 		r.Use(mw.SplitRateLimit(isIngestPath, ingestLimiter, rateLimiter))
@@ -1793,18 +1788,8 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		r.Use(mw.Timeout(30 * time.Second))
 		r.Use(door.Middleware)
 
-		// /v1/whoami resolves the active credential to its tenant context,
-		// with no specific permission required. The cookie path returns
-		// user_id and email (dashboard). The Bearer path returns key_id and
-		// key_type (SDK, curl). Both always return tenant_id and livemode.
-		// The dashboard's AuthContext needs user_id on the cookie path:
-		// without it, refresh() silently signs the operator out.
-		//
-		// can_email_setup_links is the server's own setting (SMTP and
-		// PAYMENT_UPDATE_URL). The invoice page offers "Email a
-		// payment-method link" on a written-off invoice only when it is
-		// true, because that invoice carries no attention notice to decide
-		// it on the server.
+		// whoami needs no permission. A key gets key_id and key_type; a session
+		// gets user_id and email, which the dashboard needs to stay signed in.
 		r.Get("/whoami", func(w http.ResponseWriter, req *http.Request) {
 			ctx := req.Context()
 			live, err := postgres.Livemode(ctx)
@@ -1813,8 +1798,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 				return
 			}
 			out := map[string]any{
-				"tenant_id":             auth.TenantID(ctx),
-				"livemode":              live,
+				"tenant_id": auth.TenantID(ctx),
+				"livemode":  live,
+				// can_email_setup_links lets the invoice page offer "Email a payment-method link".
 				"can_email_setup_links": setupLinksEmailable,
 				"can_send_invites":      membersSvc.CanInvite(),
 				// smtp_configured lets any page show one global "email is
@@ -1841,14 +1827,12 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		r.With(auth.RequireSession("manage team membership")).Mount("/members", membersH.Routes())
 		// The /customers subtree mixes reads (GET list, get, billing-profile)
 		// and writes (POST create, PATCH update, PUT billing-profile, GDPR
-		// delete-data). RequireMethod picks the permission by HTTP method,
-		// so a read-tier key can list and get but cannot create, update or
-		// delete.
+		// delete-data). RequireMethod picks the permission by HTTP method:
+		// customer:read for a read, customer:write for a write.
 		r.With(auth.RequireMethod(auth.PermCustomerRead, auth.PermCustomerWrite)).Mount("/customers", customerH.Routes())
 		// The customer-scoped usage view combines usage totals with customer,
-		// subscription and pricing reads. It needs only PermUsageRead, so the
-		// dashboard's read-only secret-tier key can call it without gaining
-		// customer write access.
+		// subscription and pricing reads. It is gated on PermUsageRead alone,
+		// not on the /customers permissions.
 		r.Mount("/customers/{id}/usage", customerUsageH.CustomerUsageRoutes(
 			auth.Require(auth.PermUsageRead),
 		))
@@ -2037,7 +2021,7 @@ func handleDeepHealth(db *postgres.DB) http.HandlerFunc {
 // joins it to the audit row that the same request wrote.
 //
 // The caller is the API key or dashboard session the request was made with,
-// under the audit log's names for it. session.MiddlewareOrAPIKey names it;
+// under the audit log's names for it. session.RequireCaller names it;
 // sign-out and the mode switch read the session cookie themselves and name
 // it too (session.NameCaller). Any other request is "anonymous": a public
 // page, a webhook, a sign-in, or one refused before a caller was accepted. A

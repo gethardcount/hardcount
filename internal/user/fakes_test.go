@@ -17,8 +17,7 @@ import (
 // request a reset. The sign-in's and the password reset's transactions are
 // tested on the real store (login_integration_test.go,
 // confirm_reset_integration_test.go). SignIn here runs its hook with no
-// transaction; ResetPassword only counts its calls and answers resetErr, or
-// refuses.
+// transaction; ResetPassword answers resetErr, or refuses.
 type fakeUserStore struct {
 	// loginUser, when set, is returned by GetByEmail on a matching email so the
 	// login path can run end-to-end; tenants is returned by TenantsForUser,
@@ -33,8 +32,6 @@ type fakeUserStore struct {
 	liveLink bool
 	// resetErr, when set, is what ResetPassword returns.
 	resetErr error
-	// resetCalls counts ResetPassword calls.
-	resetCalls int
 }
 
 func (f *fakeUserStore) GetByEmail(ctx context.Context, email string) (domain.User, error) {
@@ -65,7 +62,6 @@ func (f *fakeUserStore) CreateResetToken(ctx context.Context, userID, tokenHash 
 	return domain.PasswordResetToken{}, nil
 }
 func (f *fakeUserStore) ResetPassword(context.Context, string, string, func(*sql.Tx, string) error) (domain.User, error) {
-	f.resetCalls++
 	if f.resetErr != nil {
 		return domain.User{}, f.resetErr
 	}
@@ -78,68 +74,54 @@ func (f *fakeUserStore) LookupResetToken(ctx context.Context, tokenHash string) 
 	return "", errs.ErrNotFound
 }
 
-// recordingSessionStore satisfies session.Store and records the sessions
-// the login path inserts and revokes.
-type recordingSessionStore struct {
-	inserted []session.Session
-	revoked  []string // id hashes
-}
+// stubSessionStore satisfies session.Store and keeps nothing: the sessions
+// of the sign-in, the sign-out and the mode switch are tested on the real
+// store.
+type stubSessionStore struct{}
 
-func (r *recordingSessionStore) InsertTx(ctx context.Context, tx *sql.Tx, s session.Session) error {
-	r.inserted = append(r.inserted, s)
+func (stubSessionStore) InsertTx(context.Context, *sql.Tx, session.Session) error {
 	return nil
 }
-func (r *recordingSessionStore) RevokeTx(ctx context.Context, tx *sql.Tx, idHash string) (bool, error) {
-	r.revoked = append(r.revoked, idHash)
+func (stubSessionStore) RevokeTx(context.Context, *sql.Tx, string) (bool, error) {
 	return false, nil
 }
-func (r *recordingSessionStore) GetByIDHash(ctx context.Context, idHash string) (session.Session, error) {
+func (stubSessionStore) GetByIDHash(context.Context, string) (session.Session, error) {
 	return session.Session{}, session.ErrNotFound
 }
-func (r *recordingSessionStore) EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID string) error {
+func (stubSessionStore) EndAllForUserTx(context.Context, *sql.Tx, string) error { return nil }
+func (stubSessionStore) EndForMemberTx(context.Context, *sql.Tx, string, string) error {
 	return nil
 }
-func (r *recordingSessionStore) EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, tenantID string) error {
-	return nil
+func (stubSessionStore) EndWith(context.Context, string, func(*sql.Tx, session.Session) error) (session.Session, bool, error) {
+	return session.Session{}, false, errors.New("stubSessionStore: the sign-out is tested on the real store")
 }
-func (r *recordingSessionStore) EndWith(context.Context, string, func(*sql.Tx, session.Session) error) (session.Session, bool, error) {
-	return session.Session{}, false, errors.New("recordingSessionStore: the sign-out is tested on the real store")
-}
-func (r *recordingSessionStore) SetLivemodeWith(context.Context, string, bool, func(*sql.Tx, session.Session) error) (session.Session, bool, error) {
-	return session.Session{}, false, errors.New("recordingSessionStore: the mode switch is tested on the real store")
+func (stubSessionStore) SetLivemodeWith(context.Context, string, bool, func(*sql.Tx, session.Session) error) (session.Session, bool, error) {
+	return session.Session{}, false, errors.New("stubSessionStore: the mode switch is tested on the real store")
 }
 
-// recordingAuditTx satisfies AuditTxWriter and records each row with the
-// actor and the client address on its ctx, read the way audit.Logger.LogInTx
-// reads them.
+// recordingAuditTx satisfies AuditTxWriter and records each row it is asked
+// to write.
 type recordingAuditTx struct {
-	rows []recordedAuditTx
+	rows []audit.Entry
 }
 
-type recordedAuditTx struct {
-	entry              audit.Entry
-	actorType, actorID string
-	ip                 string
-}
-
-func (r *recordingAuditTx) LogInTx(ctx context.Context, _ *sql.Tx, e audit.Entry) error {
-	at, aid := audit.ResolveActor(ctx)
-	r.rows = append(r.rows, recordedAuditTx{entry: e, actorType: at, actorID: aid, ip: audit.ClientIP(ctx)})
+func (r *recordingAuditTx) LogInTx(_ context.Context, _ *sql.Tx, e audit.Entry) error {
+	r.rows = append(r.rows, e)
 	return nil
 }
 
-// newFakeService is a Service on store whose sessions and audit rows are
-// only recorded.
+// newFakeService is a Service on store whose sessions are kept nowhere and
+// whose audit rows are only recorded.
 func newFakeService(store Store) *Service {
-	svc, _, _ := newRecordingService(store)
+	svc, _ := newRecordingService(store)
 	return svc
 }
 
-// newRecordingService is newFakeService that also returns the recorders.
-func newRecordingService(store Store) (*Service, *recordingSessionStore, *recordingAuditTx) {
-	sessions := &recordingSessionStore{}
+// newRecordingService is newFakeService that also returns the audit
+// recorder.
+func newRecordingService(store Store) (*Service, *recordingAuditTx) {
 	auditor := &recordingAuditTx{}
-	return NewService(store, clock.Real(), session.NewService(sessions), auditor), sessions, auditor
+	return NewService(store, clock.Real(), session.NewService(stubSessionStore{}), auditor), auditor
 }
 
 // stubEmailSender satisfies the handler's EmailSender dependency.

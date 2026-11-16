@@ -131,7 +131,8 @@ func (s signInTry) want(t *testing.T, status int, what string) signInTry {
 	return s
 }
 
-// wantWrongPassword checks the answer every wrong password gets: today's 401.
+// wantWrongPassword checks the answer every wrong password gets: a 401 with
+// the generic message and no Retry-After.
 func (s signInTry) wantWrongPassword(t *testing.T, what string) signInTry {
 	t.Helper()
 	s.want(t, http.StatusUnauthorized, what)
