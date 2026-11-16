@@ -110,14 +110,8 @@ func (s *PreviewService) CreatePreview(ctx context.Context, tenantID string, req
 		return PreviewResult{}, err
 	}
 
-	// The preview's time is decided from the subscription it previews
-	// (clock.DecideOrRealTime): the decision gives the preview its
-	// generated_at, and any later read of now, at the subscription's clock
-	// time. A clock that cannot be read refuses the preview (503).
-	ctx, err = clock.DecideOrRealTime(ctx, s.engine, clock.Pin{TenantID: tenantID, SubscriptionID: sub.ID})
-	if err != nil {
-		return PreviewResult{}, errs.Unavailable("test_clock_unavailable",
-			"The subscription's test clock could not be read. Try again in a moment.", err)
+	if ctx, err = s.decide(ctx, tenantID, sub.ID); err != nil {
+		return PreviewResult{}, err
 	}
 
 	from, to, err := resolveCreatePreviewPeriod(req.Period, sub)
@@ -132,6 +126,20 @@ func (s *PreviewService) CreatePreview(ctx context.Context, tenantID string, req
 		return s.engine.previewCycle(ctx, sub)
 	}
 	return s.engine.previewWithWindow(ctx, sub, from, to)
+}
+
+// decide decides the preview's time from the subscription it previews
+// (clock.DecideOrRealTime) and binds it: the subscription's clock and its
+// instant, or one read of the server's clock (the engine's). The preview's
+// generated_at, and any later read of now, then read that one instant. A
+// clock that cannot be read refuses the preview (503).
+func (s *PreviewService) decide(ctx context.Context, tenantID, subscriptionID string) (context.Context, error) {
+	decided, err := clock.DecideOrRealTime(ctx, s.engine, clock.Pin{TenantID: tenantID, SubscriptionID: subscriptionID})
+	if err != nil {
+		return ctx, errs.Unavailable("test_clock_unavailable",
+			"The subscription's test clock could not be read. Try again in a moment.", err)
+	}
+	return clock.EnsureEffectiveNow(decided, s.engine.clock), nil
 }
 
 // resolveSubscription picks the subscription the preview will run

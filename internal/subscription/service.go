@@ -295,20 +295,21 @@ func (s *Service) SetResolver(r clock.Resolver) {
 }
 
 // DecideForCustomer decides a new subscription's time from the customer its
-// body names (clock.DecideOrRealTime): the customer's clock, or real time. A
-// clock that cannot be read refuses the create (503), with nothing written;
-// no customer id decides nothing. The create route calls it on the service
-// because the service holds the resolver.
+// body names (clock.DecideOrRealTime) and binds it: the customer's clock and
+// its instant, or one read of the server's clock (s.clock). A clock that
+// cannot be read refuses the create (503), with nothing written; no customer
+// id decides nothing and binds the server's time. The create route calls it
+// on the service because the service holds the resolver.
 func (s *Service) DecideForCustomer(ctx context.Context, tenantID, customerID string) (context.Context, error) {
 	if customerID == "" {
-		return ctx, nil
+		return clock.EnsureEffectiveNow(ctx, s.clock), nil
 	}
 	decided, err := clock.DecideOrRealTime(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID})
 	if err != nil {
 		return ctx, errs.Unavailable("test_clock_unavailable",
 			"The customer's test clock could not be read. Nothing was created; send the request again.", err)
 	}
-	return decided, nil
+	return clock.EnsureEffectiveNow(decided, s.clock), nil
 }
 
 // tenantLocation resolves the tenant's billing timezone (ADR-077). The zone

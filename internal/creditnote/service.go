@@ -290,20 +290,23 @@ func (s *Service) SetResolver(r clock.Resolver) { s.resolver = r }
 func (s *Service) SetClock(c clock.Clock) { s.clock = c }
 
 // DecideForInvoice decides a credit note's time from the invoice its body
-// names (clock.DecideOrRealTime): the create route calls it before anything
-// runs, and it is on the service because the service holds the resolver. A
-// clock that cannot be read refuses the request (503), with nothing written;
-// no invoice id decides nothing, and the create answers the missing field.
+// names (clock.DecideOrRealTime) and binds it: the invoice's clock and its
+// instant, or one read of the server's clock (s.clock). The create routes
+// call it before anything runs, so a create, and the issue that auto_issue
+// runs after it, share one instant. It is on the service because the service
+// holds the resolver. A clock that cannot be read refuses the request (503),
+// with nothing written; no invoice id decides nothing and binds the server's
+// time, and the create answers the missing field.
 func (s *Service) DecideForInvoice(ctx context.Context, tenantID, invoiceID string) (context.Context, error) {
 	if invoiceID == "" {
-		return ctx, nil
+		return clock.EnsureEffectiveNow(ctx, s.clock), nil
 	}
 	decided, err := clock.DecideOrRealTime(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
 	if err != nil {
 		return ctx, errs.Unavailable("test_clock_unavailable",
 			"The invoice's test clock could not be read. Nothing was created; send the request again.", err)
 	}
-	return decided, nil
+	return clock.EnsureEffectiveNow(decided, s.clock), nil
 }
 
 // SetDunningResolver wires the dunning service, so a credit note that marks
@@ -2669,6 +2672,9 @@ func (s *Service) ApplyRefundWebhook(ctx context.Context, tenantID, stripeRefund
 			}
 		}
 	}
+	// The event's one instant: the clock's, or one read of the server's clock
+	// (live, a note on no clock, or no note).
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	// ADR-090 in-tx emission: the refund-status transition and its audit
 	// row commit together; the store fires the emission ONLY when the
 	// monotonic guard actually flipped a row, so stale redeliveries never

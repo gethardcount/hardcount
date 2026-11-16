@@ -2,10 +2,12 @@ package creditnote
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
@@ -62,6 +64,59 @@ func TestApplyRefundWebhook_ReadsAClockInTestModeOnly(t *testing.T) {
 			}
 			if got := store.notes["cn_u"].RefundStatus; c.wantErr && got != domain.RefundPending {
 				t.Errorf("a refused event moved the refund to %s", got)
+			}
+		})
+	}
+}
+
+// instantAudit records the instant each audit row is written on (zero when
+// none is bound).
+type instantAudit struct{ at []time.Time }
+
+func (a *instantAudit) LogInTx(ctx context.Context, _ *sql.Tx, _ audit.Entry) error {
+	at, _ := clock.EffectiveNow(ctx)
+	a.at = append(a.at, at)
+	return nil
+}
+
+// A refund's status event runs on one instant: the note's invoice's clock,
+// with no read of the server's clock; for an invoice on no clock, and in
+// live mode, one read of the server's clock. The status write's audit row
+// shows it.
+func TestApplyRefundWebhook_RunsOnOneInstant(t *testing.T) {
+	frozen := time.Date(2027, 2, 3, 9, 0, 0, 0, time.UTC)
+	past := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	onClock := &countingResolver{}
+	noClock := &invoiceAnswer{sim: clock.Sim{At: time.Now()}}
+	live := &countingResolver{err: errors.New("must not be read")}
+	for _, c := range []struct {
+		name            string
+		ctx             context.Context
+		res             clock.Resolver
+		decisions       func() int
+		wantAt          time.Time
+		wantServerReads int
+		wantDecisions   int
+	}{
+		{"an invoice on a clock", postgres.WithLivemode(context.Background(), false), onClock, func() int { return onClock.reads }, frozen, 0, 1},
+		{"an invoice on no clock", postgres.WithLivemode(context.Background(), false), noClock, func() int { return noClock.reads }, past.Add(time.Second), 1, 1},
+		{"live mode", postgres.WithLivemode(context.Background(), true), live, func() int { return live.reads }, past.Add(time.Second), 1, 0},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			store := newMemStore()
+			store.notes["cn_u"] = domain.CreditNote{ID: "cn_u", TenantID: "t1", InvoiceID: "inv_u", StripeRefundID: "re_u", RefundStatus: domain.RefundPending}
+			svc := NewService(store, &memInvoiceReader{invoices: map[string]domain.Invoice{}}, nil)
+			svc.SetResolver(c.res)
+			server := &cnSteppingClock{at: past}
+			svc.SetClock(server)
+			rows := &instantAudit{}
+			svc.SetAuditLogger(rows)
+			if err := svc.ApplyRefundWebhook(c.ctx, "t1", "re_u", domain.RefundSucceeded, ""); err != nil {
+				t.Fatalf("ApplyRefundWebhook: %v", err)
+			}
+			if len(rows.at) != 1 || !rows.at[0].Equal(c.wantAt) || server.reads != c.wantServerReads || c.decisions() != c.wantDecisions {
+				t.Errorf("audit rows at %v after %d server reads and %d decisions; want one at %v after %d and %d",
+					rows.at, server.reads, c.decisions(), c.wantAt, c.wantServerReads, c.wantDecisions)
 			}
 		})
 	}

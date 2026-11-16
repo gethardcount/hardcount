@@ -35,31 +35,51 @@ func (c *customerAnswer) SimForInvoice(context.Context, string, string) (clock.S
 	return clock.Sim{}, errors.New("not used")
 }
 
-// A new subscription's time is decided from the customer its body names:
-// the customer's clock; a not-found is real time; a clock that cannot be
-// read refuses the create; live mode, and a body naming no customer, read
-// nothing.
+// serverClock is the server's clock in a test: it answers a fixed time and
+// counts the reads it answers itself (a bound instant is not a read).
+type serverClock struct {
+	at    time.Time
+	reads int
+}
+
+func (c *serverClock) Now(ctx context.Context) time.Time {
+	if at, ok := clock.EffectiveNow(ctx); ok {
+		return at
+	}
+	c.reads++
+	return c.at
+}
+
+// A new subscription's time is decided from the customer its body names and
+// bound, so the create and everything it runs read one instant: the
+// customer's clock and its frozen time, with no read of the server's clock;
+// for a not-found, in live mode, and for a body naming no customer, one read
+// of the server's clock. A clock that cannot be read refuses the create and
+// binds nothing.
 func TestDecideForCustomer(t *testing.T) {
 	frozen := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
+	server := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
 	testMode := postgres.WithLivemode(context.Background(), false)
 	for _, c := range []struct {
-		name       string
-		ctx        context.Context
-		customerID string
-		answer     customerAnswer
-		wantReads  int
-		wantClock  string
-		wantReal   bool
-		wantErr    bool
+		name            string
+		ctx             context.Context
+		customerID      string
+		answer          customerAnswer
+		wantReads       int
+		wantClock       string
+		wantAt          time.Time
+		wantServerReads int
+		wantErr         bool
 	}{
-		{"the customer's clock", testMode, "cus_1", customerAnswer{sim: clock.Sim{At: frozen, TestClockID: "clk_cus"}}, 1, "clk_cus", false, false},
-		{"a not-found is real time", testMode, "cus_1", customerAnswer{err: fmt.Errorf("read test clock clk_gone: %w", errs.ErrNotFound)}, 1, "", true, false},
-		{"an unreadable clock refuses", testMode, "cus_1", customerAnswer{err: errors.New("connection reset by peer")}, 1, "", false, true},
-		{"live mode reads nothing", postgres.WithLivemode(context.Background(), true), "cus_1", customerAnswer{err: errors.New("must not be read")}, 0, "", false, false},
-		{"no customer id reads nothing", testMode, "", customerAnswer{err: errors.New("must not be read")}, 0, "", false, false},
+		{"the customer's clock", testMode, "cus_1", customerAnswer{sim: clock.Sim{At: frozen, TestClockID: "clk_cus"}}, 1, "clk_cus", frozen, 0, false},
+		{"a not-found is one read of the server's clock", testMode, "cus_1", customerAnswer{err: fmt.Errorf("read test clock clk_gone: %w", errs.ErrNotFound)}, 1, "", server, 1, false},
+		{"an unreadable clock refuses", testMode, "cus_1", customerAnswer{err: errors.New("connection reset by peer")}, 1, "", time.Time{}, 0, true},
+		{"live mode reads no clock record, and the server's clock once", postgres.WithLivemode(context.Background(), true), "cus_1", customerAnswer{err: errors.New("must not be read")}, 0, "", server, 1, false},
+		{"no customer id reads no clock record, and the server's clock once", testMode, "", customerAnswer{err: errors.New("must not be read")}, 0, "", server, 1, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			svc := NewService(newMemStore(), nil)
+			srv := &serverClock{at: server}
+			svc := NewService(newMemStore(), srv)
 			res := c.answer
 			svc.SetResolver(&res)
 			ctx, err := svc.DecideForCustomer(c.ctx, "t1", c.customerID)
@@ -67,13 +87,13 @@ func TestDecideForCustomer(t *testing.T) {
 				t.Fatalf("err %v; want error %v (unavailable over clock.ErrUndecided)", err, c.wantErr)
 			}
 			if res.reads != c.wantReads {
-				t.Errorf("%d reads; want %d", res.reads, c.wantReads)
+				t.Errorf("%d resolver reads; want %d", res.reads, c.wantReads)
 			}
 			if sim, _ := clock.SimOf(ctx); sim.TestClockID != c.wantClock {
 				t.Errorf("clock %q; want %q", sim.TestClockID, c.wantClock)
 			}
-			if d, ok := clock.Decision(ctx); c.wantReal && (!ok || !d.At.IsZero() || d.TestClockID != "") {
-				t.Errorf("decision %+v (%v); want real time", d, ok)
+			if at, _ := clock.EffectiveNow(ctx); !at.Equal(c.wantAt) || srv.reads != c.wantServerReads {
+				t.Errorf("bound %v after %d server reads; want %v after %d", at, srv.reads, c.wantAt, c.wantServerReads)
 			}
 		})
 	}

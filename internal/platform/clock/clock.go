@@ -1,6 +1,15 @@
 // Package clock gives code the current time. A ctx may carry a bound
 // instant, such as a test clock's frozen_time, and Now then returns that
 // instant instead of the system time.
+//
+// One piece of work runs on one time. A function that decides its own time
+// (a route whose body names its record, a public page, a Stripe event)
+// binds it right after it decides: the record's clock and its instant, or,
+// for a record on no clock, one read of the server's clock. Everything the
+// work does below then reads that one instant. Work detached from its
+// request, which outlives it, must not start on the request's instant: it
+// decides and reads each of its rows by itself (the connect fan-out,
+// invoice.Service.RetryProviderConfigErrors).
 package clock
 
 import (

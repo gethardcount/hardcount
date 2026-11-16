@@ -447,6 +447,9 @@ func (s *Service) decideCreate(ctx context.Context, tenantID string, input Creat
 // decideInvoice is the connect fan-out's: it decides each invoice's time
 // (clock.DecideOrRealTime) before that invoice's retry. When the invoice's
 // clock cannot be read, the fan-out skips the invoice and writes nothing.
+// It binds no instant, on purpose: the fan-out is detached from the connect
+// request and outlives it, so each invoice's retry reads the server's clock
+// by itself (the exception the clock package's doc names).
 func (s *Service) decideInvoice(ctx context.Context, tenantID, invoiceID string) (context.Context, error) {
 	decided, err := clock.DecideOrRealTime(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
 	if err != nil {
