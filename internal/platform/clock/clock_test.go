@@ -480,7 +480,8 @@ func TestDecision_RecordsOneOfThreeAnswers(t *testing.T) {
 // Decide records the resolver's answer and returns its errors: a clock binds
 // the clock and its instant; an answer with no clock binds real time, not the
 // instant the resolver computed; a failed lookup, no resolver and an empty
-// pin are errors that leave ctx as it was. It replaces an earlier decision.
+// pin are errors that leave ctx as it was. It replaces an earlier decision,
+// except a real instant for a record on no clock (TestDecide_EveryCase).
 func TestDecide(t *testing.T) {
 	frozen := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
 	pin := Pin{TenantID: "t1", CustomerID: "cus_1"}
@@ -515,6 +516,124 @@ func TestDecide(t *testing.T) {
 	}
 	if _, err := Decide(context.Background(), resolver(Sim{}, lookup), pin); !errors.Is(err, lookup) || !errors.Is(err, ErrUndecided) {
 		t.Errorf("a failed lookup: err %v, want ErrUndecided wrapping the resolver's", err)
+	}
+}
+
+// Every case of Decide and DecideOrRealTime, in test mode. Where TestDecide
+// and TestDecideOrRealTime start from an empty context, this crosses each
+// record (on a clock, on no clock, not found) with each state a context can
+// carry: a clock and its instant, a real instant, a clock id with a zero
+// instant (a partial binding), and nothing decided. A record's clock always
+// wins; for a record on no clock (and DecideOrRealTime's not-found) a real
+// instant is kept and anything else becomes real time with no instant;
+// Decide refuses a not-found as ErrUndecided, leaving ctx as it is.
+func TestDecide_EveryCase(t *testing.T) {
+	frozen := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	inherited := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
+	test := postgres.WithLivemode(context.Background(), false)
+	pin := Pin{TenantID: "t1", CustomerID: "cus_1"}
+	notFound := fmt.Errorf("read customer cus_1: %w", errs.ErrNotFound)
+	records := map[string]func() (Sim, error){
+		"on a clock":  func() (Sim, error) { return Sim{At: frozen, TestClockID: "clk_rec"}, nil },
+		"on no clock": func() (Sim, error) { return Sim{At: frozen}, nil },
+		"not found":   func() (Sim, error) { return Sim{}, notFound },
+		"unreadable":  func() (Sim, error) { return Sim{}, errors.New("connection reset by peer") },
+	}
+	contexts := map[string]context.Context{
+		"a clock's instant":                    WithSim(test, Sim{At: inherited, TestClockID: "clk_old"}),
+		"a real instant":                       WithEffectiveNow(test, inherited),
+		"a partial binding":                    WithSim(test, Sim{TestClockID: "clk_old"}),
+		"real time, no instant":                WithRealTime(test),
+		"the same clock at an earlier instant": WithSim(test, Sim{At: frozen.Add(-72 * time.Hour), TestClockID: "clk_rec"}),
+		"nothing":                              test,
+	}
+	recClock := Sim{At: frozen, TestClockID: "clk_rec"}
+	kept, real := Sim{At: inherited}, Sim{}
+	for _, c := range []struct {
+		fn, record, ctx string
+		want            Sim
+		wantErr         bool
+	}{
+		{"Decide", "on a clock", "a clock's instant", recClock, false},
+		{"Decide", "on a clock", "a real instant", recClock, false},
+		{"Decide", "on a clock", "nothing", recClock, false},
+		{"Decide", "on no clock", "a clock's instant", real, false},
+		{"Decide", "on no clock", "a real instant", kept, false},
+		{"Decide", "on no clock", "nothing", real, false},
+		{"Decide", "on a clock", "a partial binding", recClock, false},
+		{"Decide", "on no clock", "a partial binding", real, false},
+		{"Decide", "not found", "a partial binding", Sim{}, true},
+		{"Decide", "not found", "a clock's instant", Sim{}, true},
+		{"Decide", "not found", "a real instant", Sim{}, true},
+		{"Decide", "not found", "nothing", Sim{}, true},
+		{"DecideOrRealTime", "on a clock", "a clock's instant", recClock, false},
+		{"DecideOrRealTime", "on a clock", "a real instant", recClock, false},
+		{"DecideOrRealTime", "on a clock", "nothing", recClock, false},
+		{"DecideOrRealTime", "on no clock", "a clock's instant", real, false},
+		{"DecideOrRealTime", "on no clock", "a real instant", kept, false},
+		{"DecideOrRealTime", "on no clock", "nothing", real, false},
+		{"DecideOrRealTime", "not found", "a clock's instant", real, false},
+		{"DecideOrRealTime", "not found", "a real instant", kept, false},
+		{"DecideOrRealTime", "not found", "nothing", real, false},
+		{"DecideOrRealTime", "on a clock", "a partial binding", recClock, false},
+		{"DecideOrRealTime", "on no clock", "a partial binding", real, false},
+		{"DecideOrRealTime", "not found", "a partial binding", real, false},
+		// Real time with no instant (WithRealTime): nothing to keep.
+		{"Decide", "on a clock", "real time, no instant", recClock, false},
+		{"Decide", "on no clock", "real time, no instant", real, false},
+		{"DecideOrRealTime", "on a clock", "real time, no instant", recClock, false},
+		{"DecideOrRealTime", "on no clock", "real time, no instant", real, false},
+		{"Decide", "not found", "real time, no instant", Sim{}, true},
+		{"DecideOrRealTime", "not found", "real time, no instant", real, false},
+		// A clock at an earlier instant: the record's own clock is replaced
+		// by its frozen time (as on main), and dropped for any other record.
+		{"Decide", "on a clock", "the same clock at an earlier instant", recClock, false},
+		{"Decide", "on no clock", "the same clock at an earlier instant", real, false},
+		{"Decide", "not found", "the same clock at an earlier instant", Sim{}, true},
+		{"DecideOrRealTime", "on a clock", "the same clock at an earlier instant", recClock, false},
+		{"DecideOrRealTime", "on no clock", "the same clock at an earlier instant", real, false},
+		{"DecideOrRealTime", "not found", "the same clock at an earlier instant", real, false},
+		// A resolver error under a real instant: refused, ctx as it was.
+		{"Decide", "unreadable", "a real instant", Sim{}, true},
+		{"DecideOrRealTime", "unreadable", "a real instant", Sim{}, true},
+	} {
+		t.Run(c.fn+", the record "+c.record+", ctx carrying "+c.ctx, func(t *testing.T) {
+			r := &stubResolver{custFunc: records[c.record]}
+			ctx := contexts[c.ctx]
+			var (
+				got context.Context
+				err error
+			)
+			if c.fn == "Decide" {
+				got, err = Decide(ctx, r, pin)
+			} else {
+				got, err = DecideOrRealTime(ctx, r, pin)
+			}
+			if c.wantErr {
+				if !errors.Is(err, ErrUndecided) || got != ctx {
+					t.Errorf("err %v, ctx changed %v; want ErrUndecided and ctx as it was", err, got != ctx)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("err %v", err)
+			}
+			if d, ok := Decision(got); !ok || !d.At.Equal(c.want.At) || d.TestClockID != c.want.TestClockID {
+				t.Errorf("decision %+v (%v); want %+v", d, ok, c.want)
+			}
+		})
+	}
+}
+
+// In live mode DecideOrRealTime decides nothing and reads nothing: a real
+// instant the context carries stays as it is.
+func TestDecideOrRealTime_LiveKeepsARealInstant(t *testing.T) {
+	inherited := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
+	ctx := WithEffectiveNow(postgres.WithLivemode(context.Background(), true), inherited)
+	r := &stubResolver{custFunc: func() (Sim, error) { return Sim{}, errors.New("must not be read") }}
+	got, err := DecideOrRealTime(ctx, r, Pin{TenantID: "t1", CustomerID: "cus_1"})
+	if err != nil || got != ctx {
+		t.Errorf("err %v, ctx changed %v; want ctx as it was", err, got != ctx)
 	}
 }
 

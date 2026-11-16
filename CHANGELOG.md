@@ -124,6 +124,7 @@ original text.
 
 ### Fixed
 
+- **A usage backfill or a LiteLLM spend call with an invalid event answers `422` even when the customer's test clock cannot be read.** It answered `503`, asking for a retry that could not help. The event is now checked before the clock is read, as a single ingest and a batch already did ([#1808](https://github.com/gethardcount/hardcount/pull/1808)).
 - **Each access log line names the caller, the account and the client address.** A request made with an API key or a dashboard session logs `actor_type` (`api_key` or `user`), `actor_id`, `tenant_id` and `ip`; any other logs `anonymous` and `ip`. Before, every line said `system`, with no account and no address. The log now holds client IPs: [Logs](docs/security/data.md#logs) ([#1805](https://github.com/gethardcount/hardcount/pull/1805)).
 - **A request body over the 1 MB limit is answered `413` `payload_too_large`, with or without an `Idempotency-Key`.** It was answered `400`: `invalid JSON body` without a key and `failed to read body` with one. The usage batch and the LiteLLM callback keep their `413` `batch_too_large` ([#1802](https://github.com/gethardcount/hardcount/pull/1802)).
 - **Test clocks: a credit grant or adjustment for a customer whose test clock cannot be read is refused with `503` `test_clock_unavailable`, and nothing is changed; send the request again.** It used to be written at real time ([#1787](https://github.com/gethardcount/hardcount/pull/1787)).

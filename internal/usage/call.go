@@ -102,21 +102,15 @@ func (s *Service) IngestCall(ctx context.Context, tenantID string, in CallInput)
 	if s.held == nil {
 		return CallResult{}, ErrHoldUnavailable
 	}
-	// One decision for the call: build reads the bound instant.
-	ctx, err := s.decide(ctx, tenantID, in.CustomerID)
-	if err != nil {
-		return CallResult{}, err
-	}
-	// Both mappings are built, the store writes one, and only that one is
-	// recorded as late: a replay would otherwise count rows never written.
-	prep := func(evs []CallEvent) ([]domain.UsageEvent, []domain.UsageEvent, error) {
+	// decideEvent's rule, for a call's events: every event's own checks, in
+	// both mappings, come before the call's one decision.
+	check := func(evs []CallEvent) ([]IngestInput, error) {
 		if evs == nil {
-			return nil, nil, nil
+			return nil, nil
 		}
-		out := make([]domain.UsageEvent, 0, len(evs))
-		var late []domain.UsageEvent
+		out := make([]IngestInput, 0, len(evs))
 		for _, e := range evs {
-			ev, isLate, err := s.build(ctx, tenantID, IngestInput{
+			input, err := checkInput(IngestInput{
 				CustomerID:         in.CustomerID,
 				MeterID:            in.MeterID,
 				Quantity:           e.Quantity,
@@ -124,7 +118,37 @@ func (s *Service) IngestCall(ctx context.Context, tenantID string, in CallInput)
 				IdempotencyKey:     e.IdempotencyKey,
 				Timestamp:          e.Timestamp,
 				ObservedCostMicros: e.ObservedCostMicros,
-			}, domain.UsageOriginAPI)
+			})
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, input)
+		}
+		return out, nil
+	}
+	eventInputs, err := check(in.Events)
+	if err != nil {
+		return CallResult{}, err
+	}
+	legacyInputs, err := check(in.Legacy)
+	if err != nil {
+		return CallResult{}, err
+	}
+	// One decision for the call: build reads the bound instant.
+	ctx, err = s.decide(ctx, tenantID, in.CustomerID)
+	if err != nil {
+		return CallResult{}, err
+	}
+	// Both mappings are built, the store writes one, and only that one is
+	// recorded as late: a replay would otherwise count rows never written.
+	prep := func(inputs []IngestInput) ([]domain.UsageEvent, []domain.UsageEvent, error) {
+		if inputs == nil {
+			return nil, nil, nil
+		}
+		out := make([]domain.UsageEvent, 0, len(inputs))
+		var late []domain.UsageEvent
+		for _, input := range inputs {
+			ev, isLate, err := s.build(ctx, tenantID, input, domain.UsageOriginAPI)
 			if err != nil {
 				return nil, nil, err
 			}
@@ -135,11 +159,11 @@ func (s *Service) IngestCall(ctx context.Context, tenantID string, in CallInput)
 		}
 		return out, late, nil
 	}
-	events, eventsLate, err := prep(in.Events)
+	events, eventsLate, err := prep(eventInputs)
 	if err != nil {
 		return CallResult{}, err
 	}
-	legacy, legacyLate, err := prep(in.Legacy)
+	legacy, legacyLate, err := prep(legacyInputs)
 	if err != nil {
 		return CallResult{}, err
 	}
