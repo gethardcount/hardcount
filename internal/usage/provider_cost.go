@@ -18,8 +18,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/shopspring/decimal"
 
 	"github.com/gethardcount/hardcount/internal/api/respond"
@@ -27,6 +25,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -347,8 +346,20 @@ type MarginAssembler struct {
 	usageSvc *CustomerUsageService
 }
 
+// NewMarginAssembler requires the customer usage service: the report rates
+// its usage through it, and takes its instant from it (reportTime).
 func NewMarginAssembler(store *PostgresStore, usageSvc *CustomerUsageService) *MarginAssembler {
+	if usageSvc == nil {
+		panic("usage.NewMarginAssembler: the customer usage service is required")
+	}
 	return &MarginAssembler{store: store, usageSvc: usageSvc}
+}
+
+// reportTime returns ctx with the report's one instant bound, as customer
+// usage binds its read's (CustomerUsageService.readTime): the default window
+// and the rated usage then agree.
+func (a *MarginAssembler) reportTime(ctx context.Context) context.Context {
+	return a.usageSvc.readTime(ctx)
 }
 
 func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, from, to time.Time) (MarginReport, error) {
@@ -468,7 +479,12 @@ type ProviderCostHandler struct {
 	auditLogger AuditEmitter
 }
 
+// NewProviderCostHandler requires the margin assembler, which serves the
+// margin report.
 func NewProviderCostHandler(store *PostgresStore, margin *MarginAssembler) *ProviderCostHandler {
+	if margin == nil {
+		panic("usage.NewProviderCostHandler: the margin assembler is required")
+	}
 	return &ProviderCostHandler{store: store, margin: margin}
 }
 
@@ -655,10 +671,9 @@ func providerCostLabel(r domain.ProviderCostRate) string {
 func (h *ProviderCostHandler) Margin(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	customerID := chi.URLParam(r, "id")
-	// One instant for the report: the API's door decided it from the customer
-	// in the URL, and at real time (no instant bound) the server's clock is
-	// read here once, so the default window and the rated usage agree.
-	ctx := clock.EnsureEffectiveNow(r.Context(), h.margin.usageSvc.usage.clock)
+	// One instant for the report: the API's door decided its time from the
+	// customer in the URL.
+	ctx := h.margin.reportTime(r.Context())
 	from, to, err := h.marginWindow(ctx, r)
 	if err != nil {
 		respond.BadRequest(w, r, err.Error())

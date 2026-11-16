@@ -62,7 +62,8 @@ func newProviderCostAuditFixture(t *testing.T) *providerCostAuditFixture {
 // an uncovered mutation).
 func (f *providerCostAuditFixture) serve(t *testing.T, emitter usage.AuditEmitter, method, target, body string) (*httptest.ResponseRecorder, context.Context) {
 	t.Helper()
-	h := usage.NewProviderCostHandler(f.store, nil)
+	margin := usage.NewMarginAssembler(f.store, usage.NewCustomerUsageService(usage.NewService(f.store), nil, nil, nil))
+	h := usage.NewProviderCostHandler(f.store, margin)
 	if emitter != nil {
 		h.SetAuditLogger(emitter)
 	}

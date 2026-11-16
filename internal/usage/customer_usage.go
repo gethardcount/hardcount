@@ -66,12 +66,27 @@ func NewCustomerUsageService(
 	subscriptions SubscriptionLister,
 	pricing PricingReader,
 ) *CustomerUsageService {
+	if usageSvc == nil {
+		panic("usage.NewCustomerUsageService: the usage service is required")
+	}
 	return &CustomerUsageService{
 		usage:         usageSvc,
 		customers:     customers,
 		subscriptions: subscriptions,
 		pricing:       pricing,
 	}
+}
+
+// readTime returns ctx with the read's one instant bound. The read's time is
+// decided before it: the API's door decides it from the customer in the URL,
+// and the public cost dashboard decides its own (GetByToken). A clock's
+// decision carries its instant. A decision of real time may carry none, and
+// then the server's clock (the usage service's) is read here once, so the
+// window, the rater and the buckets all read one instant. The constructors
+// guarantee the chain: NewCustomerUsageService requires the usage service,
+// and NewService gives it the real clock until SetClock replaces it.
+func (s *CustomerUsageService) readTime(ctx context.Context) context.Context {
+	return clock.EnsureEffectiveNow(ctx, s.usage.clock)
 }
 
 // SetRater wires the billing rater. The engine is built after this service,
@@ -211,12 +226,7 @@ func (s *CustomerUsageService) Get(ctx context.Context, tenantID, customerID str
 	if s.rater == nil {
 		return CustomerUsageResult{}, fmt.Errorf("customer usage: rater not wired")
 	}
-	// The read's time is decided before it: the API's door decides it from
-	// the customer in the URL, and the public cost dashboard decides its own
-	// (GetByToken). At real time the door binds no instant, so the server's
-	// clock is read here once, and the window, the rater and the buckets all
-	// read that one instant.
-	ctx = clock.EnsureEffectiveNow(ctx, s.usage.clock)
+	ctx = s.readTime(ctx)
 
 	if _, err := s.customers.Get(ctx, tenantID, customerID); err != nil {
 		return CustomerUsageResult{}, err

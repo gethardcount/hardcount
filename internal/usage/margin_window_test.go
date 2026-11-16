@@ -65,3 +65,24 @@ func TestMarginDefaultWindow_FollowsTheDecidedTime(t *testing.T) {
 		}
 	})
 }
+
+// The margin handler takes the report's instant from the usage service's
+// clock, through the margin assembler and customer usage. Each constructor on
+// that chain refuses a missing link, so no wiring can build a handler that
+// would fail on its first margin request.
+func TestMarginChain_EachConstructorRequiresItsLink(t *testing.T) {
+	for name, build := range map[string]func(){
+		"customer usage without the usage service":    func() { NewCustomerUsageService(nil, nil, nil, nil) },
+		"the margin assembler without customer usage": func() { NewMarginAssembler(nil, nil) },
+		"the handler without the margin assembler":    func() { NewProviderCostHandler(nil, nil) },
+	} {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				if recover() == nil {
+					t.Error("built with a missing link; want a panic naming it")
+				}
+			}()
+			build()
+		})
+	}
+}
