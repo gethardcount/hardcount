@@ -16,6 +16,7 @@ package dashmembers
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
@@ -30,7 +31,8 @@ import (
 // application layer; the table still carries the 0006 RLS fence
 // (bypass-admitting, m0139) as the structural backstop for any future
 // tenant-scoped query. CreateInvitation runs under TxTenant instead: the
-// invite email's outbox row commits on its transaction and needs the mode.
+// invite email's outbox row and the audit row commit on its transaction and
+// need the mode.
 type PostgresStore struct {
 	db *postgres.DB
 }
@@ -76,20 +78,45 @@ func scanInvitation(scan func(...any) error) (Invitation, error) {
 }
 
 // ErrPendingInviteExists surfaces the partial-unique conflict (one
-// pending invite per tenant+email) as a clean 409.
+// invitation per tenant+email that is not accepted or revoked) as a clean
+// 409. CreateInvitation revokes an expired one first, so only an invitation
+// that can still be accepted causes it.
 var ErrPendingInviteExists = errs.AlreadyExists("email", "a pending invitation for this email already exists — revoke it first to re-send")
 
-// CreateInvitation inserts a pending invitation and calls send on the same
-// transaction with the stored row, so the invitation and its email commit
-// together or not at all. When send fails, nothing is written and its error
-// is returned. ctx must carry the mode (postgres.WithLivemode): this is a
-// tenant transaction, and the email_outbox insert takes its mode from it.
-func (s *PostgresStore) CreateInvitation(ctx context.Context, inv Invitation, send func(tx *sql.Tx, inv Invitation) error) (Invitation, error) {
+// CreateInvitation creates a pending invitation in one tenant transaction.
+// In order, it revokes the workspace's invitation to the same address when
+// that one has expired and is not yet accepted or revoked, inserts inv, and
+// calls then with the stored row and the id of the invitation it revoked (""
+// when there was none). then runs last, on the same transaction. It must not
+// commit or roll back tx; an error it returns rolls the whole invite back and
+// is returned.
+//
+// at is the time written as revoked_at, and an invitation counts as expired
+// when its expires_at is at or before it, the same boundary the accept uses.
+// The service passes its clock's now. An invitation to the address that has
+// not expired keeps its slot: the insert then returns ErrPendingInviteExists
+// and nothing changes.
+//
+// ctx must carry the mode (postgres.WithLivemode). BeginTx stamps
+// app.tenant_id and app.livemode on a tenant transaction, and the
+// email_outbox and audit_log inserts take their mode from it.
+func (s *PostgresStore) CreateInvitation(ctx context.Context, inv Invitation, at time.Time, then func(tx *sql.Tx, inv Invitation, replacedID string) error) (Invitation, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, inv.TenantID)
 	if err != nil {
 		return Invitation{}, err
 	}
 	defer postgres.Rollback(tx)
+
+	var replacedID string
+	err = tx.QueryRowContext(ctx, `
+		UPDATE member_invitations SET revoked_at = $3
+		WHERE tenant_id = $1 AND email = $2
+		  AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at <= $3
+		RETURNING id`,
+		inv.TenantID, inv.Email, at).Scan(&replacedID)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return Invitation{}, fmt.Errorf("revoke the expired invitation: %w", err)
+	}
 
 	id := postgres.NewID("hc_minv")
 	err = tx.QueryRowContext(ctx, `
@@ -108,7 +135,7 @@ func (s *PostgresStore) CreateInvitation(ctx context.Context, inv Invitation, se
 		}
 		return Invitation{}, fmt.Errorf("create invitation: %w", err)
 	}
-	if err := send(tx, inv); err != nil {
+	if err := then(tx, inv, replacedID); err != nil {
 		return Invitation{}, err
 	}
 	if err := tx.Commit(); err != nil {
@@ -170,10 +197,26 @@ func (s *PostgresStore) GetInvitationByTokenHash(ctx context.Context, tokenHash 
 	return inv, nil
 }
 
-// RevokeInvitation stamps revoked_at on a PENDING invite (tenant-scoped).
-// Already-accepted or already-revoked rows are not-found — the CAS keeps
-// revoke racing accept honest: exactly one wins.
-func (s *PostgresStore) RevokeInvitation(ctx context.Context, tenantID, id string, at time.Time) error {
+// RevokeInvitation revokes invitation id of tenantID in one bypass
+// transaction. In order, it writes at as revoked_at when the invitation is
+// not yet accepted or revoked, stamps app.tenant_id with tenantID and
+// app.livemode with the request's mode (postgres.Livemode) for an audit row,
+// and calls then. then runs last, on the same transaction. It must not commit
+// or roll back tx; an error it returns rolls the revoke back and is returned.
+//
+// An accepted or already revoked invitation, or one of another workspace, is
+// errs.ErrNotFound and nothing changes. The compare-and-set keeps a revoke
+// racing an accept honest: exactly one wins.
+func (s *PostgresStore) RevokeInvitation(ctx context.Context, tenantID, id string, at time.Time, then func(tx *sql.Tx) error) error {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return err
+	}
+	livemode := "off"
+	if live {
+		livemode = "on"
+	}
+
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return err
@@ -187,8 +230,25 @@ func (s *PostgresStore) RevokeInvitation(ctx context.Context, tenantID, id strin
 	if err != nil {
 		return err
 	}
-	if n, _ := res.RowsAffected(); n == 0 {
+	n, err := res.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
 		return errs.ErrNotFound
+	}
+
+	// audit.Logger.LogInTx reads the row's tenant from app.tenant_id and its
+	// mode from app.livemode.
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('app.tenant_id', $1, true)`, tenantID); err != nil {
+		return fmt.Errorf("stamp tenant: %w", err)
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', $1, true)`, livemode); err != nil {
+		return fmt.Errorf("stamp livemode: %w", err)
+	}
+
+	if err := then(tx); err != nil {
+		return err
 	}
 	return tx.Commit()
 }

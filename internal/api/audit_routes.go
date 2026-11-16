@@ -205,8 +205,8 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 	{"POST", "/v1/auth/password-reset/request"}: explicit("user.Handler.requestPasswordReset → Log(password_reset_requested) on a matched account. A non-match (and the per-address throttle) writes nothing and declares MarkSkip — the fixed 200 is the enumeration defence."),
 	{"POST", "/v1/auth/password-reset/confirm"}: explicit("user.Service.ConfirmReset → LogInTx(password_reset_completed, user), on the transaction that sets the password and ends every session."),
 	{"POST", "/v1/auth/accept-invite"}:          explicit("dashmembers.Handler.acceptInvite → Log(member.joined, user)."),
-	{"POST", "/v1/members/invite"}:              explicit("dashmembers.Handler.invite → Log(member.invited, user)."),
-	{"DELETE", "/v1/members/invitations/{id}"}:  explicit("dashmembers.Handler.revokeInvitation → Log(member.invite_revoked, user)."),
+	{"POST", "/v1/members/invite"}:              explicit("dashmembers.Service.Invite → LogInTx(member.invited, user), on the transaction that revokes the address's expired invitation, creates the invitation and queues its email."),
+	{"DELETE", "/v1/members/invitations/{id}"}:  explicit("dashmembers.Service.Revoke → LogInTx(member.invite_revoked, user), on the transaction that revokes the invitation."),
 	{"DELETE", "/v1/members/{userID}"}:          explicit("dashmembers.Service.RemoveMember → LogInTx(member.removed, user), on the transaction that deletes the membership, revokes the invitations the member sent that are not yet accepted, and ends their sessions in the workspace."),
 
 	// --- API keys -------------------------------------------------------

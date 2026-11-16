@@ -11884,8 +11884,10 @@ export const getInviteMemberUrl = () => {
  * Creates an invitation that works for 7 days and queues an email
  * with the accept link. The link is built from `DASHBOARD_BASE_URL`,
  * never from the request's headers. An email can have only one
- * invitation that is not accepted or revoked, even an expired one:
- * revoke it to send a new one. Writes an audit row.
+ * invitation that can still be accepted: revoke it to send a new one.
+ * An expired invitation to the same email is revoked and replaced by
+ * the new one. The invitation, its email and its audit row are saved
+ * together; if one fails the route answers `500` and nothing changes.
  *
  * Nothing is created when the server cannot deliver the link: the
  * answer is 409 with code `invalid_state` when `DASHBOARD_BASE_URL`
@@ -11967,7 +11969,9 @@ export const getRevokeMemberInvitationUrl = (id: string,) => {
  * Revokes an invitation that is not accepted or revoked yet, an
  * expired one included. Its accept link stops working at once; if an
  * accept races the revoke, only one of them wins. An accepted or
- * already revoked invitation is a 404. Writes an audit row.
+ * already revoked invitation is a 404. The revoke and its audit row
+ * are saved together; if the row cannot be written the route answers
+ * `500` and the invitation is not revoked.
  * @summary Revoke an invitation
  */
 export const revokeMemberInvitation = async (id: string, options?: RequestInit): Promise<void> => {

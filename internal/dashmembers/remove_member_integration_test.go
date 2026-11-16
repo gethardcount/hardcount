@@ -150,9 +150,8 @@ func TestRemoveMember_EndsTheirSessionsInThisWorkspaceOnly(t *testing.T) {
 
 // TestRemoveMember_EndsTheInvitationsTheySent: removing a member revokes
 // every invitation they sent that is not yet accepted, an expired one
-// included, and the audit row lists exactly those. The expired invitation no
-// longer holds its address's pending slot, so the address can be invited
-// again. Another member's invitation keeps working.
+// included, and the audit row lists exactly those. Another member's
+// invitation keeps working.
 func TestRemoveMember_EndsTheInvitationsTheySent(t *testing.T) {
 	h := newHarness(t, "Team Invites")
 	ctx := removalCtx(h)
@@ -183,9 +182,6 @@ func TestRemoveMember_EndsTheInvitationsTheySent(t *testing.T) {
 		t.Fatalf("invite from the owner: %v", err)
 	}
 	ownersToken := h.email.lastToken(t)
-	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "expired@example.com"); !errors.Is(err, errs.ErrAlreadyExists) {
-		t.Fatalf("re-invite the expired address before the removal: err = %v, want ErrAlreadyExists", err)
-	}
 
 	if err := h.svc.RemoveMember(ctx, h.tenantID, h.owner, u.ID); err != nil {
 		t.Fatalf("remove member: %v", err)
@@ -225,10 +221,6 @@ func TestRemoveMember_EndsTheInvitationsTheySent(t *testing.T) {
 	sort.Strings(want)
 	if !slices.Equal(got, want) {
 		t.Errorf("member.removed revoked_invitation_ids = %v, want %v", got, want)
-	}
-
-	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "expired@example.com"); err != nil {
-		t.Errorf("re-invite the expired address after the removal: %v, want it to succeed", err)
 	}
 }
 
