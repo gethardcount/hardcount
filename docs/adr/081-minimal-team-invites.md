@@ -1,7 +1,7 @@
 # ADR-081: Minimal team invites (no RBAC)
 
 Date: 2026-07-06
-Status: Accepted (amended 2026-11-10)
+Status: Accepted (amended 2026-11-10, amended 2026-11-16)
 Amends: ADR-011 (which shipped single-user auth and deferred invites)
 Trigger: DP-readiness cut-reinstatement #2 ("Single dashboard seat" in the
 DP-readiness register, maintained in the internal `velox-ops` repo) — a
@@ -112,3 +112,10 @@ transaction.
   `email_outbox` row is written on the invitation's transaction, which
   runs under `TxTenant` so the row gets the mode. A failed queue writes no
   invitation, and the revoke is gone.
+
+## Amendment 2026-11-16: removal ends sessions in that workspace only
+
+Removing a member ends their sessions in that workspace only, revokes the
+invitations they sent that were not yet accepted, and writes its audit row,
+in one transaction ([#1810](https://github.com/gethardcount/hardcount/pull/1810)).
+`RevokeAllForUser` no longer exists.

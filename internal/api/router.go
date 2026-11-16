@@ -1341,6 +1341,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		dashmembers.NewPostgresStore(db),
 		memberUserDirectoryAdapter{PostgresStore: userStore},
 		sessionSvc,
+		auditLogger,
 		outboxSender,
 		&memberTenantNamerAdapter{svc: tenantSvc},
 		nil, // real clock

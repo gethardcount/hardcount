@@ -80,7 +80,7 @@ Logs are JSON on standard output. Where they go, and how long they stay, is up t
 |---|---|
 | Customers | Never deleted: archiving keeps every field. Deleting a test clock deletes its test-mode customers with their invoices, subscriptions, usage, billing profiles and emails; their audit log rows and outbound webhook events stay. |
 | Accounts | No delete path. |
-| Dashboard users | Removing a member deletes the membership and ends their sessions. The user row, with email and password hash, stays. |
+| Dashboard users | Removing a member deletes the membership and ends their sessions in that workspace. The user row, with email and password hash, stays. |
 | Invoices and credit notes | Never deleted, outside test clocks. The buyer details are fixed when the invoice is issued. |
 | Audit log | Kept for good. A trigger refuses any update or delete. |
 | Usage events, outbound webhook events and deliveries, Stripe events, tax records | Kept. No cleanup job. |

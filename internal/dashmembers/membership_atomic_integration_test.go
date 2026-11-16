@@ -136,7 +136,7 @@ func TestAcceptInvite_FailedJoinKeepsTheInvite(t *testing.T) {
 
 			failing := dashmembers.NewService(dashmembers.NewPostgresStore(h.db),
 				joinFailsDirectory{userDirAdapter{userStore}},
-				h.sessions, h.email, staticTenantNamer{name: "Team Join Fails"}, h.clk, "http://dash.test")
+				h.sessions, h.audit, h.email, staticTenantNamer{name: "Team Join Fails"}, h.clk, "http://dash.test")
 			if _, err := failing.AcceptInvite(ctx, token, testPassword); err == nil {
 				t.Fatal("accept must fail when the membership cannot be written")
 			}

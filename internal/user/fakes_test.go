@@ -83,10 +83,10 @@ func (r *recordingSessionStore) GetByIDHash(ctx context.Context, idHash string) 
 	return session.Session{}, session.ErrNotFound
 }
 func (r *recordingSessionStore) Revoke(ctx context.Context, idHash string) error { return nil }
-func (r *recordingSessionStore) RevokeAllForUser(ctx context.Context, userID string) error {
+func (r *recordingSessionStore) EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID string) error {
 	return nil
 }
-func (r *recordingSessionStore) EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID string) error {
+func (r *recordingSessionStore) EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, tenantID string) error {
 	return nil
 }
 func (r *recordingSessionStore) UpdateLivemode(ctx context.Context, idHash string, livemode bool) error {
