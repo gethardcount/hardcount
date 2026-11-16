@@ -95,9 +95,12 @@ type Email struct {
 	// server took it. Both are real-world instants.
 	CreatedAt    time.Time
 	DispatchedAt *time.Time
-	// SimEffectiveAt is the instant on the entity's test clock that caused
-	// the email (ADR-104), or nil for an email not caused on a test clock.
-	SimEffectiveAt *time.Time
+	// EffectiveAt is the line's date: the instant the email's action decided,
+	// in both modes (ADR-104). CreatedAt and DispatchedAt are real-world times
+	// and become the Recorded time on a test clock. TestClockID names the
+	// action's test clock, or is empty.
+	EffectiveAt time.Time
+	TestClockID string
 }
 
 // EmailOutcome is what happened to one email, in the words every surface
@@ -233,18 +236,16 @@ func EmailClause(e Email) string {
 	return name + " " + Outcome(e).Word
 }
 
-// EmailInstant places an email on the entity's calendar (ADR-104). The
-// instant is the one on the entity's test clock that caused the send. The
-// real send time is its Recorded time: when the mail server took it, or else
-// when it was queued. An email not caused on a test clock is dated at its
-// real send time and is not pinned.
+// EmailInstant dates an email at the instant its action decided. Caused on a
+// test clock, it is pinned, and its Recorded time is when the mail server took
+// it, else when it was queued (ADR-104).
 func EmailInstant(e Email) (occurred, recorded time.Time, pinned bool) {
-	wall := e.CreatedAt
+	if e.TestClockID == "" {
+		return e.EffectiveAt, time.Time{}, false
+	}
+	recorded = e.CreatedAt
 	if e.DispatchedAt != nil {
-		wall = *e.DispatchedAt
+		recorded = *e.DispatchedAt
 	}
-	if e.SimEffectiveAt != nil {
-		return *e.SimEffectiveAt, wall, true
-	}
-	return wall, time.Time{}, false
+	return e.EffectiveAt, recorded, true
 }

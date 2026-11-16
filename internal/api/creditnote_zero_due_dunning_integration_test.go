@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http/httptest"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -86,13 +87,19 @@ func TestCreditNoteToZero_PaidRowNamesTheNote(t *testing.T) {
 
 	events := flowList(call("GET", "/v1/invoices/"+r.inv.ID+"/payment-timeline", flowReq{}).want(t, 200, "timeline").body, "events")
 	var paid map[string]any
+	var kinds []string
 	for _, l := range linesOf(t, events) {
+		kinds = append(kinds, fmt.Sprint(l["kind"]))
 		if l["kind"] == "invoice.paid" {
 			paid = l
 		}
 	}
 	if paid == nil {
 		t.Fatalf("no invoice.paid row on the waived invoice's activity")
+	}
+	// One request issues the note and marks the invoice paid, at one instant.
+	if n, p := slices.Index(kinds, "credit_note.issued"), slices.Index(kinds, "invoice.paid"); n < 0 || n > p {
+		t.Errorf("activity order %v: want the credit note before the paid row it caused", kinds)
 	}
 	var text strings.Builder
 	var links []string

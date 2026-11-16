@@ -265,7 +265,7 @@ func (evt EmailEventRow) email() activity.Email {
 	return activity.Email{
 		Type: evt.EmailType, Status: evt.Status, DeliveryState: evt.DeliveryState,
 		SendFailure: evt.SendFailure, SkipReason: evt.SkipReason, Trigger: evt.Trigger, To: evt.To,
-		CreatedAt: evt.CreatedAt, DispatchedAt: evt.DispatchedAt, SimEffectiveAt: evt.SimEffectiveAt,
+		CreatedAt: evt.CreatedAt, DispatchedAt: evt.DispatchedAt, EffectiveAt: evt.EffectiveAt, TestClockID: evt.TestClockID,
 	}
 }
 

@@ -8,6 +8,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/customer"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/testutil"
@@ -104,11 +105,11 @@ func TestGet_SimulatedFailureBannerDatesFromTheCharge_RealStore(t *testing.T) {
 	}
 	for _, at := range []time.Time{declined, retried} {
 		at := at
-		if err := store.RecordChargeAttempt(ctx, tenantID, domain.InvoiceChargeAttempt{
+		if err := store.RecordChargeAttempt(clock.WithEffectiveNow(ctx, at), tenantID, domain.InvoiceChargeAttempt{
 			InvoiceID: inv.ID, StripePaymentIntentID: "pi_" + at.Format("0102"),
 			Trigger: domain.ChargeTriggerAutoCharge, Outcome: domain.ChargeAttemptFailed,
 			ProviderReason: "Your card was declined.", AmountCents: 5000,
-			OccurredAt: time.Now().UTC(), SimEffectiveAt: &at,
+			OccurredAt: time.Now().UTC(),
 		}); err != nil {
 			t.Fatalf("record attempt: %v", err)
 		}

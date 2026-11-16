@@ -126,8 +126,8 @@ func TestOfflinePayment_MarkerBecomesPaidOutOfBand(t *testing.T) {
 		`UPDATE invoices SET stripe_payment_intent_id = 'out_of_band:2026-08-05T00:00:00Z' WHERE id = 'inv_open'`,
 		`UPDATE invoices SET stripe_payment_intent_id = 'pi_late' WHERE id = 'inv_oob'`,
 		`UPDATE invoices SET paid_out_of_band = true WHERE id = 'inv_card'`,
-		`INSERT INTO invoice_charge_attempts (tenant_id, invoice_id, stripe_payment_intent_id, trigger_source, outcome, amount_cents, occurred_at)
-			VALUES ('ten_oob', 'inv_open', 'out_of_band:2026-08-05T00:00:00Z', 'external', 'succeeded', 700, now())`,
+		`INSERT INTO invoice_charge_attempts (tenant_id, invoice_id, stripe_payment_intent_id, trigger_source, outcome, amount_cents, occurred_at, effective_at)
+			VALUES ('ten_oob', 'inv_open', 'out_of_band:2026-08-05T00:00:00Z', 'external', 'succeeded', 700, now(), now())`,
 	} {
 		if err := execErr(bad); err == nil {
 			t.Errorf("accepted: %s", oneLine(bad))

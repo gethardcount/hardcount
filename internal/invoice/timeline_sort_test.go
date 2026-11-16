@@ -115,38 +115,6 @@ func TestSortInvoiceTimeline_FullLifeAtOneInstant(t *testing.T) {
 	}
 }
 
-// TestEmailRowInstant pins the ADR-104 anchoring decision per row shape.
-func TestEmailRowInstant(t *testing.T) {
-	wall := time.Date(2026, 7, 29, 5, 40, 0, 0, time.UTC)
-	dispatched := wall.Add(3 * time.Second)
-	sim := time.Date(2026, 9, 2, 12, 0, 0, 0, time.UTC)
-
-	t.Run("anchored email positions at the billing instant, keeps wall as Recorded", func(t *testing.T) {
-		ts, recorded, isSim := emailRowInstant(EmailEventRow{
-			CreatedAt: wall, DispatchedAt: &dispatched, SimEffectiveAt: &sim,
-		})
-		if !ts.Equal(sim) {
-			t.Errorf("primary instant = %s, want the billing anchor %s", ts, sim)
-		}
-		if !recorded.Equal(dispatched) {
-			t.Errorf("recorded = %s, want the real dispatch instant %s", recorded, dispatched)
-		}
-		if !isSim {
-			t.Error("anchored row must be flagged simulated")
-		}
-	})
-
-	t.Run("unanchored (live-mode / legacy) email keeps its wall stamp with no subline", func(t *testing.T) {
-		ts, recorded, isSim := emailRowInstant(EmailEventRow{CreatedAt: wall})
-		if !ts.Equal(wall) {
-			t.Errorf("primary instant = %s, want wall %s", ts, wall)
-		}
-		if !recorded.IsZero() || isSim {
-			t.Errorf("unanchored row must carry no Recorded subline and stay unflagged (recorded=%s sim=%v) — the calendars coincide", recorded, isSim)
-		}
-	})
-}
-
 // TestLifecycleAuditRows pins the audit→lifecycle join (ADR-104
 // Invariant A, corrected boundary №2 — operator nudge, same day as the
 // credit-note one; ADR-128 reads the same rows for the actor). Exact keys,

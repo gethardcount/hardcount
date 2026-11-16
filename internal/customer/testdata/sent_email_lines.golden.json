@@ -22,7 +22,7 @@
         ]
       ],
       "tone": "neutral",
-      "occurred_at": "2026-10-19T10:02:00Z"
+      "occurred_at": "2026-10-19T10:00:00Z"
     },
     "text": [
       "Credit note email delivered",
@@ -56,7 +56,7 @@
         "kind": "automatic"
       },
       "tone": "neutral",
-      "occurred_at": "2026-10-19T10:02:00Z"
+      "occurred_at": "2026-10-19T10:00:00Z"
     },
     "text": [
       "Final notice delivered",
@@ -90,7 +90,7 @@
         "kind": "automatic"
       },
       "tone": "neutral",
-      "occurred_at": "2026-10-19T10:02:00Z"
+      "occurred_at": "2026-10-19T10:00:00Z"
     },
     "text": [
       "Payment reminder email delivered",
@@ -121,7 +121,7 @@
         ]
       ],
       "tone": "neutral",
-      "occurred_at": "2026-10-19T10:02:00Z"
+      "occurred_at": "2026-10-19T10:00:00Z"
     },
     "text": [
       "Invoice email delivered",
@@ -155,7 +155,7 @@
         "kind": "automatic"
       },
       "tone": "neutral",
-      "occurred_at": "2026-10-19T10:02:00Z"
+      "occurred_at": "2026-10-19T10:00:00Z"
     },
     "text": [
       "Failed payment notice delivered",
@@ -189,7 +189,7 @@
         "kind": "automatic"
       },
       "tone": "neutral",
-      "occurred_at": "2026-10-19T10:02:00Z"
+      "occurred_at": "2026-10-19T10:00:00Z"
     },
     "text": [
       "Receipt email delivered",
@@ -220,7 +220,7 @@
         ]
       ],
       "tone": "neutral",
-      "occurred_at": "2026-10-19T10:02:00Z"
+      "occurred_at": "2026-10-19T10:00:00Z"
     },
     "text": [
       "Payment setup email delivered",
@@ -586,7 +586,7 @@
         "kind": "automatic"
       },
       "tone": "neutral",
-      "occurred_at": "2026-10-19T10:02:00Z"
+      "occurred_at": "2026-10-19T10:00:00Z"
     },
     "text": [
       "Payment setup email delivered",
@@ -625,7 +625,7 @@
         "kind": "automatic"
       },
       "tone": "neutral",
-      "occurred_at": "2026-10-19T10:02:00Z"
+      "occurred_at": "2026-10-19T10:00:00Z"
     },
     "text": [
       "Payment setup email delivered",
@@ -661,7 +661,7 @@
         ]
       ],
       "tone": "neutral",
-      "occurred_at": "2026-10-19T10:02:00Z"
+      "occurred_at": "2026-10-19T10:00:00Z"
     },
     "text": [
       "Payment setup email delivered",
@@ -701,7 +701,7 @@
         ]
       ],
       "tone": "neutral",
-      "occurred_at": "2026-10-19T10:02:00Z"
+      "occurred_at": "2026-10-19T10:00:00Z"
     },
     "text": [
       "Credit note email delivered",
@@ -737,7 +737,7 @@
         ]
       ],
       "tone": "neutral",
-      "occurred_at": "2026-10-19T10:02:00Z"
+      "occurred_at": "2026-10-19T10:00:00Z"
     },
     "text": [
       "Credit note email delivered",
@@ -764,7 +764,7 @@
         ]
       ],
       "tone": "neutral",
-      "occurred_at": "2026-10-19T10:02:00Z"
+      "occurred_at": "2026-10-19T10:00:00Z"
     },
     "text": [
       "Invoice email delivered",

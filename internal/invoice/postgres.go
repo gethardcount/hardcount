@@ -1018,7 +1018,7 @@ func (s *PostgresStore) MarkPaymentFailedReportingTransition(ctx context.Context
 		// only write. A paid invoice's attempt row still records the failure —
 		// the attempt did fail.
 		if err := upsertChargeAttemptTx(ctx, tx, tenantID, id, pi,
-			domain.ChargeAttemptFailed, report.Message, amountDue, report.DeclineCode, report.PaymentMethodID, simAtOf(ctx)); err != nil {
+			domain.ChargeAttemptFailed, report.Message, amountDue, report.DeclineCode, report.PaymentMethodID); err != nil {
 			return domain.Invoice{}, domain.PaymentFailureResult{}, err
 		}
 		var inv domain.Invoice
@@ -1098,7 +1098,7 @@ func (s *PostgresStore) MarkPaymentFailedReportingTransition(ctx context.Context
 	// ADR-103: the attempt's outcome lands in THIS tx, so the timeline's
 	// single payment owner can never disagree with the invoice's state.
 	if err := upsertChargeAttemptTx(ctx, tx, tenantID, inv.ID, pi,
-		domain.ChargeAttemptFailed, report.Message, inv.AmountDueCents, report.DeclineCode, report.PaymentMethodID, simAtOf(ctx)); err != nil {
+		domain.ChargeAttemptFailed, report.Message, inv.AmountDueCents, report.DeclineCode, report.PaymentMethodID); err != nil {
 		return domain.Invoice{}, domain.PaymentFailureResult{}, err
 	}
 	// The money email rides THIS transaction (ADR-040 amendment): enqueued
@@ -1522,14 +1522,9 @@ func (s *PostgresStore) markPaidLockedTx(ctx context.Context, tx *sql.Tx, tenant
 		}
 	}
 	// ADR-103: same-tx outcome resolution (see upsertChargeAttemptTx).
-	// amount_paid_cents is what this PaymentIntent actually settled. On a
-	// test clock the attempt is dated where the invoice says it was paid.
-	var attemptSimAt *time.Time
-	if _, ok := clock.SimOf(ctx); ok {
-		attemptSimAt = &paidAt
-	}
+	// amount_paid_cents is what this PaymentIntent actually settled.
 	if err := upsertChargeAttemptTx(ctx, tx, tenantID, inv.ID, stripePaymentIntentID,
-		domain.ChargeAttemptSucceeded, "", inv.AmountPaidCents, "", "", attemptSimAt); err != nil {
+		domain.ChargeAttemptSucceeded, "", inv.AmountPaidCents, "", ""); err != nil {
 		return domain.Invoice{}, err
 	}
 	// A dunning pause set for this invoice lifts in this transaction, so
@@ -4843,25 +4838,22 @@ func (s *PostgresStore) StreamForExport(ctx context.Context, tenantID string, fr
 // never disagree, which is what lets the timeline render payments from
 // ONE owner and drop the Stripe-webhook fallback tier.
 //
-// Insert-time identity (trigger_source, sim_effective_at, the actor) is
+// Insert-time identity (trigger_source, effective_at, the actor) is
 // preserved by the ON CONFLICT — the chokepoint knows those; a settle does
 // not. A settle for a PaymentIntent Hardcount never minted (hosted checkout)
 // INSERTS here, and that row is the only record of the attempt. It records
 // no actor: the report does not know who paid, and its ctx (a webhook, the
 // reconciler) would name the system, which did not.
 //
-// simAt dates that inserted row on the invoice's test clock (ADR-128
-// decision 7, reversing ADR-102's wall-clock rule for hosted-page
-// attempts): a customer paying is an act on the invoice, like any other.
-// Callers pass the settle's own instant when ctx carries a test clock, nil
-// on the wall clock. If RecordChargeAttempt's insert comes second, the
-// trigger_source rule there decides whose date the row keeps.
+// That inserted row is dated at the settle's time, read from ctx, on the
+// invoice's test clock or not (ADR-128 decision 7): a customer paying is an
+// act on the invoice, like any other.
 //
 // declineCode and paymentMethodID are what the report knows about a decline
 // (#966); an empty value keeps what an earlier writer recorded, so a source
 // that did not say (a reconciler read, a success) never erases a hard
 // decline another source put on record.
-func upsertChargeAttemptTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, piID string, outcome domain.ChargeAttemptOutcome, reason string, amountCents int64, declineCode, paymentMethodID string, simAt *time.Time) error {
+func upsertChargeAttemptTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, piID string, outcome domain.ChargeAttemptOutcome, reason string, amountCents int64, declineCode, paymentMethodID string) error {
 	if piID == "" {
 		return nil
 	}
@@ -4869,7 +4861,7 @@ func upsertChargeAttemptTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID,
 		INSERT INTO invoice_charge_attempts
 			(tenant_id, invoice_id, stripe_payment_intent_id, trigger_source,
 			 outcome, provider_reason, amount_cents, occurred_at,
-			 decline_code, stripe_payment_method_id, sim_effective_at)
+			 decline_code, stripe_payment_method_id, effective_at)
 		VALUES ($1, $2, $3, 'external', $4, $5, $6, now(), $7, $8, $9)
 		ON CONFLICT (tenant_id, stripe_payment_intent_id)
 			WHERE stripe_payment_intent_id <> ''
@@ -4885,22 +4877,11 @@ func upsertChargeAttemptTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID,
 			stripe_payment_method_id = CASE WHEN EXCLUDED.stripe_payment_method_id <> ''
 				THEN EXCLUDED.stripe_payment_method_id ELSE invoice_charge_attempts.stripe_payment_method_id END,
 			updated_at = now()`,
-		tenantID, invoiceID, piID, outcome, reason, amountCents, declineCode, paymentMethodID, postgres.NullableTime(simAt))
+		tenantID, invoiceID, piID, outcome, reason, amountCents, declineCode, paymentMethodID, clock.Now(ctx).UTC())
 	if err != nil {
 		return fmt.Errorf("upsert charge attempt in settle tx: %w", err)
 	}
 	return nil
-}
-
-// simAtOf is ctx's test-clock instant for an attempt row, or nil on the wall
-// clock. A settle's ctx is bound to the charge's anchor or to the invoice's
-// clock (payment.settlement), so this is when the attempt happened there.
-func simAtOf(ctx context.Context) *time.Time {
-	sim, ok := clock.SimOf(ctx)
-	if !ok {
-		return nil
-	}
-	return &sim.At
 }
 
 // RecordChargeAttempt writes one charge attempt (ADR-102), upserting by
@@ -4909,15 +4890,11 @@ func simAtOf(ctx context.Context) *time.Time {
 // place — one attempt, one row. Monotonicity: 'succeeded' is terminal
 // (a settle can never un-succeed an attempt); every other outcome may
 // advance, including failed → succeeded (3DS second try on one PI).
-// sim_effective_at is set at insert and never overwritten — the settle
-// path's wall-clock context must not strip an attempt's billing-axis
-// anchor. trigger_source is likewise kept, except that this writer replaces
-// an 'external' left by a report that arrived first: the charge call made
-// the attempt, so its trigger is the truth. The writer that made the
-// attempt owns its date the same way: over an 'external' row, this writer's
-// sim_effective_at (a dunning retry's slot) wins over the date the early
-// report stamped (the invoice's clock at settle, ADR-128 decision 7). Empty-PI attempts (the PI create
-// itself failed) insert-only; there is no twin to dedup against.
+// effective_at and trigger_source are kept on conflict, except over an
+// 'external' row left by a report that arrived first: the charge call made
+// the attempt, so its values win. effective_at is ctx's instant: the
+// charge's action. Empty-PI attempts (the PI create itself failed)
+// insert-only; there is no twin to dedup against.
 //
 // The actor (ADR-128 §4) is whoever's request led to the charge, resolved
 // from ctx as the audit log resolves it. That is the operator or API key
@@ -5002,6 +4979,7 @@ func (s *PostgresStore) StampPendingConfirm(ctx context.Context, tenantID string
 // rules) inside tx.
 func recordChargeAttemptTx(ctx context.Context, tx *sql.Tx, tenantID string, a domain.InvoiceChargeAttempt) error {
 	actorType, actorID := audit.ResolveActor(ctx)
+	effectiveAt := clock.Now(ctx).UTC()
 	var err error
 
 	// Lock order: the invoice row first, then the attempt row. A settle for
@@ -5017,18 +4995,18 @@ func recordChargeAttemptTx(ctx context.Context, tx *sql.Tx, tenantID string, a d
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO invoice_charge_attempts
 				(tenant_id, invoice_id, stripe_payment_intent_id, trigger_source,
-				 outcome, provider_reason, amount_cents, occurred_at, sim_effective_at,
+				 outcome, provider_reason, amount_cents, occurred_at, effective_at,
 				 decline_code, stripe_payment_method_id, actor_type, actor_id)
 			VALUES ($1, $2, '', $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)`,
 			tenantID, a.InvoiceID, a.Trigger, a.Outcome, a.ProviderReason,
-			a.AmountCents, a.OccurredAt, postgres.NullableTime(a.SimEffectiveAt),
+			a.AmountCents, a.OccurredAt, effectiveAt,
 			a.DeclineCode, a.StripePaymentMethodID, actorType, actorID,
 		)
 	} else {
 		_, err = tx.ExecContext(ctx, `
 			INSERT INTO invoice_charge_attempts
 				(tenant_id, invoice_id, stripe_payment_intent_id, trigger_source,
-				 outcome, provider_reason, amount_cents, occurred_at, sim_effective_at,
+				 outcome, provider_reason, amount_cents, occurred_at, effective_at,
 				 decline_code, stripe_payment_method_id, actor_type, actor_id)
 			VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 			ON CONFLICT (tenant_id, stripe_payment_intent_id)
@@ -5054,11 +5032,10 @@ func recordChargeAttemptTx(ctx context.Context, tx *sql.Tx, tenantID string, a d
 					THEN EXCLUDED.stripe_payment_method_id ELSE invoice_charge_attempts.stripe_payment_method_id END,
 				-- The writer that made the attempt owns its date, by the same
 				-- trigger_source rule as below: an early report's settle stamps
-				-- the invoice's clock, this writer stamps the charge's own
+				-- the settle's time, this writer stamps the charge's own
 				-- instant (a dunning retry's slot).
-				sim_effective_at = CASE WHEN invoice_charge_attempts.trigger_source = 'external'
-					THEN COALESCE(EXCLUDED.sim_effective_at, invoice_charge_attempts.sim_effective_at)
-					ELSE COALESCE(invoice_charge_attempts.sim_effective_at, EXCLUDED.sim_effective_at) END,
+				effective_at = CASE WHEN invoice_charge_attempts.trigger_source = 'external'
+					THEN EXCLUDED.effective_at ELSE invoice_charge_attempts.effective_at END,
 				-- A report that beat this writer (its webhook arrived first)
 				-- inserted the row as 'external'. This writer made the attempt,
 				-- so its trigger is the truth: the timeline label and the
@@ -5073,7 +5050,7 @@ func recordChargeAttemptTx(ctx context.Context, tx *sql.Tx, tenantID string, a d
 					THEN EXCLUDED.actor_id ELSE invoice_charge_attempts.actor_id END,
 				updated_at = now()`,
 			tenantID, a.InvoiceID, a.StripePaymentIntentID, a.Trigger, a.Outcome,
-			a.ProviderReason, a.AmountCents, a.OccurredAt, postgres.NullableTime(a.SimEffectiveAt),
+			a.ProviderReason, a.AmountCents, a.OccurredAt, effectiveAt,
 			a.DeclineCode, a.StripePaymentMethodID, actorType, actorID,
 		)
 	}
@@ -5221,7 +5198,7 @@ func (s *PostgresStore) ListChargeAttemptsByInvoice(ctx context.Context, tenantI
 
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, tenant_id, invoice_id, stripe_payment_intent_id, trigger_source,
-		       outcome, provider_reason, amount_cents, occurred_at, sim_effective_at,
+		       outcome, provider_reason, amount_cents, occurred_at, effective_at,
 		       livemode, created_at, updated_at, decline_code, stripe_payment_method_id
 		FROM invoice_charge_attempts
 		WHERE invoice_id = $1
@@ -5236,15 +5213,10 @@ func (s *PostgresStore) ListChargeAttemptsByInvoice(ctx context.Context, tenantI
 	var out []domain.InvoiceChargeAttempt
 	for rows.Next() {
 		var a domain.InvoiceChargeAttempt
-		var simAt sql.NullTime
 		if err := rows.Scan(&a.ID, &a.TenantID, &a.InvoiceID, &a.StripePaymentIntentID,
 			&a.Trigger, &a.Outcome, &a.ProviderReason, &a.AmountCents, &a.OccurredAt,
-			&simAt, &a.Livemode, &a.CreatedAt, &a.UpdatedAt, &a.DeclineCode, &a.StripePaymentMethodID); err != nil {
+			&a.EffectiveAt, &a.Livemode, &a.CreatedAt, &a.UpdatedAt, &a.DeclineCode, &a.StripePaymentMethodID); err != nil {
 			return nil, err
-		}
-		if simAt.Valid {
-			t := simAt.Time
-			a.SimEffectiveAt = &t
 		}
 		out = append(out, a)
 	}

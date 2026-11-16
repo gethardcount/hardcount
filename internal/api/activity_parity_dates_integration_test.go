@@ -383,8 +383,8 @@ func TestActivityDates_BornFinalized(t *testing.T) {
 // the charge call records its attempt. The early report stamps the invoice's
 // clock (frozen_time); the retry's own write carries its slot and must win,
 // because the writer that made the attempt owns its facts (the trigger_source
-// rule). Mutation check: keep COALESCE(existing, new) for sim_effective_at in
-// RecordChargeAttempt and the collision arm fails.
+// rule). Mutation check: keep the existing effective_at in RecordChargeAttempt
+// and the collision arm fails.
 func TestActivityDates_HostedPageAttempts(t *testing.T) {
 	hr := newHardDeclineRig(t, "Activity Dates Hosted")
 	srv := NewServer(hr.db, clock.Real(), nil)
@@ -452,8 +452,8 @@ func TestActivityDates_HostedPageAttempts(t *testing.T) {
 		after := time.Now().UTC()
 
 		a := attempt(id, "pi_hosted_fail")
-		if a.SimEffectiveAt == nil || !a.SimEffectiveAt.Equal(frozen) {
-			t.Errorf("attempt sim_effective_at = %v, want the invoice's clock %v", a.SimEffectiveAt, frozen)
+		if !a.EffectiveAt.Equal(frozen) {
+			t.Errorf("attempt effective_at = %v, want the invoice's clock %v", a.EffectiveAt, frozen)
 		}
 		events := flowList(call("GET", "/v1/invoices/"+id+"/payment-timeline", flowReq{}).want(t, 200, "timeline").body, "events")
 		lines := linesOf(t, events)
@@ -484,8 +484,8 @@ func TestActivityDates_HostedPageAttempts(t *testing.T) {
 			t.Fatalf("invoice status %s with no paid_at, want paid", inv.Status)
 		}
 		a := attempt(id, "pi_hosted_ok")
-		if a.SimEffectiveAt == nil || !a.SimEffectiveAt.Equal(*inv.PaidAt) {
-			t.Errorf("attempt sim_effective_at = %v, want the invoice's paid_at %v", a.SimEffectiveAt, inv.PaidAt)
+		if !a.EffectiveAt.Equal(*inv.PaidAt) {
+			t.Errorf("attempt effective_at = %v, want the invoice's paid_at %v", a.EffectiveAt, inv.PaidAt)
 		}
 	})
 
@@ -493,9 +493,9 @@ func TestActivityDates_HostedPageAttempts(t *testing.T) {
 		id := newInvoice("collide", clockID)
 		slot := frozen.Add(-36 * time.Hour) // the retry's contracted instant, inside the advance
 		hostedFailure(id, "pi_retry_collide", "dunning_retry")
-		if err := hr.invoices.RecordChargeAttempt(hr.ctx, hr.tenantID, domain.InvoiceChargeAttempt{
+		if err := hr.invoices.RecordChargeAttempt(clock.WithEffectiveNow(hr.ctx, slot), hr.tenantID, domain.InvoiceChargeAttempt{
 			InvoiceID: id, StripePaymentIntentID: "pi_retry_collide", Trigger: domain.ChargeTriggerDunningRetry,
-			Outcome: domain.ChargeAttemptFailed, AmountCents: 4900, OccurredAt: time.Now().UTC(), SimEffectiveAt: &slot,
+			Outcome: domain.ChargeAttemptFailed, AmountCents: 4900, OccurredAt: time.Now().UTC(),
 		}); err != nil {
 			t.Fatalf("record attempt: %v", err)
 		}
@@ -503,16 +503,8 @@ func TestActivityDates_HostedPageAttempts(t *testing.T) {
 		if a.Trigger != domain.ChargeTriggerDunningRetry {
 			t.Errorf("attempt trigger = %s, want dunning_retry", a.Trigger)
 		}
-		if a.SimEffectiveAt == nil || !a.SimEffectiveAt.Equal(slot) {
-			t.Errorf("attempt sim_effective_at = %v, want the retry's slot %v (the report that arrived first stamped the clock's frozen_time)", a.SimEffectiveAt, slot)
-		}
-	})
-
-	t.Run("real clock: a hosted-page payment fails", func(t *testing.T) {
-		id := newInvoice("wall", "")
-		hostedFailure(id, "pi_hosted_wall", payment.PurposeHostedInvoicePay)
-		if a := attempt(id, "pi_hosted_wall"); a.SimEffectiveAt != nil {
-			t.Errorf("real-clock attempt sim_effective_at = %v, want none", a.SimEffectiveAt)
+		if !a.EffectiveAt.Equal(slot) {
+			t.Errorf("attempt effective_at = %v, want the retry's slot %v (the report that arrived first stamped the clock's frozen_time)", a.EffectiveAt, slot)
 		}
 	})
 }

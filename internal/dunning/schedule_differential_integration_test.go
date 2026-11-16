@@ -329,7 +329,8 @@ func runScheduleCase(t *testing.T, tc scheduleCase, arm string) {
 	}
 	wantEmails = append(wantEmails, escalation)
 
-	rows, err := admin.Query(`SELECT email_type, payload, sim_effective_at FROM email_outbox
+	rows, err := admin.Query(`SELECT email_type, payload,
+			CASE WHEN test_clock_id IS NOT NULL THEN effective_at END FROM email_outbox
 		WHERE tenant_id = $1 AND email_type IN ($2, $3) ORDER BY created_at, id`,
 		tenantID, email.TypeDunningWarning, email.TypeDunningEscalation)
 	if err != nil {
@@ -410,8 +411,8 @@ func instants(ts []time.Time) []string {
 	return out
 }
 
-// simStamp is the email row's sim_effective_at: the simulated instant on a
-// test clock, none on the wall clock.
+// simStamp is the email row's effective_at on a test clock: the simulated
+// instant; none is compared on the wall clock.
 func simStamp(onClock bool, at time.Time) string {
 	if !onClock {
 		return ""
