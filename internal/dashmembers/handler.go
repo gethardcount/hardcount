@@ -143,7 +143,7 @@ func (h *Handler) revokeInvitation(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	tenantID := auth.TenantID(ctx)
 	id := chi.URLParam(r, "id")
-	if err := h.svc.Revoke(ctx, tenantID, id); err != nil {
+	if err := h.svc.Revoke(ctx, tenantID, auth.UserID(ctx), id); err != nil {
 		respond.FromError(w, r, err, "invitation")
 		return
 	}

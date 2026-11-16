@@ -18,14 +18,14 @@ import (
 // other at the same moment, and one member remains. A workspace with no
 // member has nobody who can sign in to it, and only psql can add one back.
 //
-// The test locks both membership rows, so a DELETE that reaches its row waits
-// there with its snapshot, and its count, already taken. Both removals queue,
-// on the row lock or on each other, then the test lets them go together. The
-// losing removal must answer the "last member" refusal.
+// The test locks both membership rows, so the first removal waits for its
+// caller's row and the second waits behind it for the per-tenant lock, then
+// the test lets them go. The second removal starts after the first commits
+// and is refused: its caller is no longer a member.
 //
-// Mutation: drop the per-tenant lock, or count the members outside it (the
-// service's ListMembers before the store's DELETE), and both removals
-// succeed: zero members.
+// Mutation: drop the caller's membership check from the removal, and both
+// succeed: zero members. Drop the per-tenant lock, and one removal usually
+// ends with a deadlock error where it should be refused.
 func TestRemoveMember_ConcurrentRemovalsKeepOneMember(t *testing.T) {
 	h := newHarness(t, "Team Mutual Removal")
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -66,7 +66,7 @@ func TestRemoveMember_ConcurrentRemovalsKeepOneMember(t *testing.T) {
 		switch err := <-results; {
 		case err == nil:
 			removed++
-		case errors.Is(err, errs.ErrInvalidState):
+		case errors.Is(err, errs.ErrForbidden):
 			refused++
 		default:
 			t.Errorf("removal: unexpected error %v", err)
