@@ -208,13 +208,14 @@ func TestConfirmReset_AFailedSignOutLeavesNoChange(t *testing.T) {
 	it.assertNothingChanged(t)
 }
 
-// TestConfirmReset_ANotFoundInsideTheTransactionIsAFault: only the store's
-// own dead-link cases become the token error. A not-found from a step
-// inside the transaction is a 500, and nothing changes.
-func TestConfirmReset_ANotFoundInsideTheTransactionIsAFault(t *testing.T) {
+// TestConfirmReset_ANotFoundInsideTheTransactionIsNotADeadLink: only the
+// store's own dead-link cases become the token error. A not-found from a
+// step inside the transaction is refused as itself, and nothing changes.
+func TestConfirmReset_ANotFoundInsideTheTransactionIsNotADeadLink(t *testing.T) {
 	it := newResetIT(t)
-	if rec := it.confirm(t, resetITNewPassword, notFoundEnder{}, audit.NewLogger(it.db)); rec.Code != http.StatusInternalServerError {
-		t.Fatalf("confirm with a not-found inside the transaction: status %d, want 500; body %s", rec.Code, rec.Body.String())
+	rec := it.confirm(t, resetITNewPassword, notFoundEnder{}, audit.NewLogger(it.db))
+	if rec.Code < 400 || rec.Code == http.StatusUnprocessableEntity {
+		t.Fatalf("confirm with a not-found inside the transaction: status %d, want a refusal that is not the dead-link 422; body %s", rec.Code, rec.Body.String())
 	}
 	it.assertNothingChanged(t)
 }

@@ -291,11 +291,9 @@ func (s *Service) ConfirmReset(ctx context.Context, plaintext, newPassword strin
 	if err != nil {
 		return domain.User{}, err
 	}
-	// A step's error is formatted with %v, not wrapped: whatever it carries,
-	// such as a not-found, it is a fault and answers 500.
 	u, err := s.store.ResetPassword(ctx, hashResetToken(plaintext), hash, func(tx *sql.Tx, userID string) error {
 		if err := s.sessions.EndAllForUserTx(ctx, tx, userID); err != nil {
-			return fmt.Errorf("end sessions: %v", err)
+			return fmt.Errorf("end sessions: %w", err)
 		}
 		// The account owner held the token, so they are the actor. The client
 		// address and the request id are already on ctx (the root
@@ -305,7 +303,7 @@ func (s *Service) ConfirmReset(ctx context.Context, plaintext, newPassword strin
 			ResourceType: "user",
 			ResourceID:   userID,
 		}); err != nil {
-			return fmt.Errorf("write the audit row: %v", err)
+			return fmt.Errorf("write the audit row: %w", err)
 		}
 		return nil
 	})
