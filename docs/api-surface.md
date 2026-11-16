@@ -178,9 +178,8 @@ A subscription puts a customer on a plan.
 | `POST` | `/v1/customers` | Create a customer |
 | `GET` | `/v1/customers/{id}` | Read a customer |
 | `GET` | `/v1/customers?external_id=…` | Find a customer by your own ID |
-| `POST` | `/v1/subscriptions` | Create a subscription. It starts now (or starts its trial now). Send `"status": "draft"` to create it without starting it. |
+| `POST` | `/v1/subscriptions` | Create a subscription. It starts now (or starts its trial now). |
 | `GET` | `/v1/subscriptions/{id}` | Read a subscription, with its items |
-| `POST` | `/v1/subscriptions/{id}/activate` | Start a draft subscription now |
 | `POST` | `/v1/subscriptions/{id}/items` | Add a plan to the subscription |
 | `PATCH` | `/v1/subscriptions/{id}/items/{itemID}` | Change the plan or quantity. A change that takes effect now is prorated (charged or credited for the part of the period left). |
 | `DELETE` | `/v1/subscriptions/{id}/items/{itemID}` | Remove a plan from the subscription |
@@ -336,8 +335,8 @@ that the event will be billed.
   period end whose invoice is not built yet is not checked, nor is time
   after a trial's end before Hardcount ends the trial.
 - A later change can change the outcome either way: a subscription
-  created, activated or changed, a trial extended, a scheduled cancel
-  undone, or a price added.
+  created or changed, a trial extended, a scheduled cancel undone, or a
+  price added.
 - The invoice is the final answer.
 
 A present status can be wrong in two cases:

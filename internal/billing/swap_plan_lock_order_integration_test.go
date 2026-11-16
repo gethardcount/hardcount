@@ -26,8 +26,8 @@ import (
 // its plans before that write. Otherwise three requests can wait on each
 // other:
 //
-//   - W, a draft activation on plan hi, holds hi and is about to number its
-//     day-1 invoice;
+//   - W, a subscription create on plan hi, holds hi and is about to number
+//     its day-1 invoice;
 //   - a writer of plan content that takes both plans in ascending id, in one
 //     statement (ADR-130 §8 step 2), holds lo and waits for hi;
 //   - the swap off lo holds the sequence row and waits for lo;
@@ -121,18 +121,10 @@ func TestCrossIntervalSwap_PlansLockedBeforeTheNumberRow(t *testing.T) {
 		t.Fatalf("mark paid: %v", err)
 	}
 
-	// W's subscription: a draft on hi, activated with a day-1 invoice.
+	// W's customer: W creates a subscription on hi with a day-1 invoice.
 	custB, err := customerStore.Create(ctx, tenantID, domain.Customer{ExternalID: "cus_swap_lockord_b", DisplayName: "Swap B"})
 	if err != nil {
 		t.Fatalf("create customer: %v", err)
-	}
-	draft, err := subStore.Create(ctx, tenantID, domain.Subscription{
-		Code: "sub-swap-lockord-draft", DisplayName: "Draft", CustomerID: custB.ID,
-		Items:  []domain.SubscriptionItem{{PlanID: hi.ID, Quantity: 1}},
-		Status: domain.SubscriptionDraft, BillingTime: domain.BillingTimeCalendar,
-	})
-	if err != nil {
-		t.Fatalf("create draft: %v", err)
 	}
 
 	subSvc := subscription.NewService(subStore, clock.NewFake(swapAt))
@@ -140,11 +132,18 @@ func TestCrossIntervalSwap_PlansLockedBeforeTheNumberRow(t *testing.T) {
 	subSvc.SetBiller(e)
 	opCtx := clock.WithEffectiveNow(ctx, swapAt)
 
-	// 1. W activates the draft: it holds hi and stops before its invoice.
+	// 1. W creates its subscription: it holds hi and stops before its invoice.
 	wHolds, wGo := make(chan struct{}), make(chan struct{})
 	wDone := make(chan error, 1)
 	go func() {
-		_, err := subStore.ActivateDraftWithBill(opCtx, tenantID, draft.ID, swapAt, swapAt, periodEnd, 1, func(tx *sql.Tx, a domain.Subscription) error {
+		_, err := subStore.CreateWithBill(opCtx, tenantID, domain.Subscription{
+			Code: "sub-swap-lockord-w", DisplayName: "W", CustomerID: custB.ID,
+			Items:  []domain.SubscriptionItem{{PlanID: hi.ID, Quantity: 1}},
+			Status: domain.SubscriptionActive, BillingTime: domain.BillingTimeCalendar,
+			StartedAt: &swapAt, ActivatedAt: &swapAt,
+			CurrentBillingPeriodStart: &swapAt, CurrentBillingPeriodEnd: &periodEnd, NextBillingAt: &periodEnd,
+			BillingAnchorDay: 1,
+		}, func(tx *sql.Tx, a domain.Subscription) error {
 			close(wHolds)
 			<-wGo
 			_, _, err := e.BillOnCreateTx(opCtx, tx, a, swapAt)
@@ -155,9 +154,9 @@ func TestCrossIntervalSwap_PlansLockedBeforeTheNumberRow(t *testing.T) {
 	select {
 	case <-wHolds:
 	case err := <-wDone:
-		t.Fatalf("activation finished before its invoice: %v", err)
+		t.Fatalf("W's create finished before its invoice: %v", err)
 	case <-time.After(15 * time.Second):
-		t.Fatal("the activation never reached its invoice")
+		t.Fatal("W's create never reached its invoice")
 	}
 
 	// 2. The plan writer locks lo and waits for hi.
@@ -206,14 +205,14 @@ func TestCrossIntervalSwap_PlansLockedBeforeTheNumberRow(t *testing.T) {
 		case editErr = <-editDone:
 		case swapErr = <-swapDone:
 		case <-time.After(20 * time.Second):
-			t.Fatal("the activation, the plan writer or the swap never finished")
+			t.Fatal("W's create, the plan writer or the swap never finished")
 		}
 	}
 	if postgres.IsDeadlock(wErr) || postgres.IsDeadlock(editErr) || postgres.IsDeadlock(swapErr) {
-		t.Fatalf("deadlock (40P01): activation err=%v, plan writer err=%v, swap err=%v", wErr, editErr, swapErr)
+		t.Fatalf("deadlock (40P01): W's create err=%v, plan writer err=%v, swap err=%v", wErr, editErr, swapErr)
 	}
 	if wErr != nil {
-		t.Fatalf("activation: %v", wErr)
+		t.Fatalf("W's create: %v", wErr)
 	}
 	if swapErr != nil {
 		t.Fatalf("swap: %v", swapErr)

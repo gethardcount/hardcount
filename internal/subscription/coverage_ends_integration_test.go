@@ -82,19 +82,35 @@ func TestListCustomerMeterCoverageEnds(t *testing.T) {
 	}
 	cancel(trial.ID, 11)
 
-	// Not counted: a still-open interval; a canceled draft (it never covered
-	// anything); another customer's cancel; a cancel past the period end
-	// (sealed AT the period end, the window's bound); a zero-width row (an
-	// item added on day 10 under a cancel backdated to day 8).
+	// Not counted: a still-open interval; a subscription canceled before it
+	// ever started (it covered nothing); another customer's cancel; a cancel past
+	// the period end (sealed AT the period end, the window's bound); a
+	// zero-width row (an item added on day 10 under a cancel backdated to
+	// day 8).
 	ivActiveSub(t, store, ctx, tenantID, cust, "cov-open", items(planO))
+	// A subscription canceled before it ever started (a draft in earlier
+	// releases, or canceled by migration 00235) has no start and no period.
+	// No writer makes one, so it is set by hand.
 	draft, err := store.Create(ctx, tenantID, domain.Subscription{
 		Code: "cov-draft", DisplayName: "cov-draft", CustomerID: cust,
-		Status: domain.SubscriptionDraft, BillingTime: domain.BillingTimeCalendar, Items: items(planM),
+		Status: domain.SubscriptionTrialing, BillingTime: domain.BillingTimeCalendar,
+		TrialStartAt: &ivPS, TrialEndAt: &trialEnd, StartedAt: &ivPS,
+		CurrentBillingPeriodStart: &trialEnd, CurrentBillingPeriodEnd: bivPE(trialEnd), NextBillingAt: bivPE(trialEnd),
+		Items: items(planM),
 	})
 	if err != nil {
-		t.Fatalf("create draft: %v", err)
+		t.Fatalf("create the row to cancel before it started: %v", err)
 	}
-	cancel(draft.ID, 12)
+	if err := store.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(ctx, `
+			UPDATE subscriptions
+			SET status = 'canceled', canceled_at = $1, started_at = NULL, trial_start_at = NULL, trial_end_at = NULL,
+			    current_billing_period_start = NULL, current_billing_period_end = NULL, next_billing_at = NULL
+			WHERE id = $2`, day(12), draft.ID)
+		return err
+	}); err != nil {
+		t.Fatalf("cancel it before it started: %v", err)
+	}
 	other := ivActiveSub(t, store, ctx, tenantID, otherCust, "cov-other", items(planM))
 	cancel(other.ID, 6)
 	late := ivActiveSub(t, store, ctx, tenantID, cust, "cov-late", items(planM))

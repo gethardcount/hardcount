@@ -1598,7 +1598,7 @@ func (e *Engine) SimForInvoice(ctx context.Context, tenantID, invoiceID string) 
 }
 
 // SimForSubscription is the time answer for an action on a subscription
-// (Activate, ChangeItem and the like): its clock's.
+// (EndTrial, ChangeItem and the like): its clock's.
 func (e *Engine) SimForSubscription(ctx context.Context, tenantID, subscriptionID string) (clock.Sim, error) {
 	if inLiveMode(ctx) {
 		return e.realTime(ctx), nil
@@ -3318,14 +3318,14 @@ func (e *Engine) nextInvoiceNumber(ctx context.Context, tx *sql.Tx, tenantID str
 // inserts the day-1 in_advance invoice on the caller's tx but does NOT finalize
 // (audit / tax-commit / auto-charge are external and must run after the tx
 // commits). The caller commits, then calls FinalizeOnCreateInvoice post-commit.
-// Used by create, activate and the trial flip, so the day-1 invoice commits
+// Used by create and the trial flip, so the day-1 invoice commits
 // atomically with the subscription write. (The cross-interval plan swap uses
 // BillOnPlanSwapTx, which also bills the old period's usage.)
 // Returns ok=false (nil error) for the no-op cases (no in_advance items / zero
 // subtotal). A unique violation is an error: it poisons the caller's tx.
 //
 // startAt is the instant the billed period began for this subscription: the
-// trial end on a trial flip, the request's now on create, activate and early
+// trial end on a trial flip, the request's now on create and early
 // trial end (and the swap instant for BillOnPlanSwapTx). The pause is read as it stood then, because a trial
 // flip can run after resumes_at for a period that began while still paused.
 func (e *Engine) BillOnCreateTx(ctx context.Context, tx *sql.Tx, sub domain.Subscription, startAt time.Time) (domain.Invoice, bool, error) {
@@ -3504,7 +3504,7 @@ func (e *Engine) buildOnCreateInvoice(ctx context.Context, sub domain.Subscripti
 	}
 
 	// The invoice is issued when its period began. Every caller passes that
-	// instant: effective-now for create, activate, early trial end and the
+	// instant: effective-now for create, early trial end and the
 	// plan swap; trial_end_at for the trial-expiry scans; the cycle close for
 	// the engine's own trial flip. Reading the clock here instead dated a
 	// day-1 invoice swept by a long advance at the advance's target, after

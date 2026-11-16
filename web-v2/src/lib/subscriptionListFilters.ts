@@ -9,7 +9,6 @@ export const SUBSCRIPTION_TABS = [
   { value: 'active', label: 'Active' },
   { value: 'paused', label: 'Collection paused' },
   { value: 'canceled', label: 'Canceled' },
-  { value: 'draft', label: 'Draft' },
   { value: 'billing_failing', label: 'Billing failing' },
 ] as const
 

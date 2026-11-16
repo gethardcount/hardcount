@@ -144,37 +144,6 @@ func TestIntervals_CreateActiveOpensPerItem(t *testing.T) {
 	}
 }
 
-func TestIntervals_DraftOpensNothing_ActivateOpens(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	ctx := postgres.WithLivemode(context.Background(), false)
-	tenantID := testutil.CreateTestTenant(t, db, "IV Draft")
-	cust := ivCustomer(t, db, ctx, tenantID, "cus_iv_draft")
-	planA := ivPlan(t, db, ctx, tenantID, "iv-draft-a", 1000)
-	store := NewPostgresStore(db)
-
-	sub, err := store.Create(ctx, tenantID, domain.Subscription{
-		Code: "sub-iv-draft", DisplayName: "d", CustomerID: cust,
-		Status: domain.SubscriptionDraft, BillingTime: domain.BillingTimeCalendar,
-		Items: []domain.SubscriptionItem{{PlanID: planA.ID, Quantity: 3}},
-	})
-	if err != nil {
-		t.Fatalf("create draft: %v", err)
-	}
-	itemID := sub.Items[0].ID
-	if got := readItemIntervals(t, db, ctx, tenantID, itemID); len(got) != 0 {
-		t.Fatalf("draft create must open nothing, got %d intervals", len(got))
-	}
-
-	at := ivPS.Add(26 * time.Hour)
-	if _, err := store.ActivateDraftWithBill(ctx, tenantID, sub.ID, at, ivPS, ivPE, 1, nil); err != nil {
-		t.Fatalf("activate draft: %v", err)
-	}
-	ivs := readItemIntervals(t, db, ctx, tenantID, itemID)
-	if len(ivs) != 1 || !ivs[0].startsAt.Equal(ivPS) || ivs[0].endsAt != nil || ivs[0].source != "activate" || ivs[0].quantity != 3 {
-		t.Fatalf("activation must open at the period start: %+v", ivs)
-	}
-}
-
 func TestIntervals_TrialOpensNothing_ConvertOpensAtStampedPeriod(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)

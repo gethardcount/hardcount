@@ -87,8 +87,8 @@ export default function SubscriptionDetailPage() {
   // doesn't escalate. Operator picks "immediately" deliberately.
   const [cancelMode, setCancelMode] = useState<'period_end' | 'immediately'>('period_end')
   const [showPauseConfirm, setShowPauseConfirm] = useState(false)
-  // Activate and End trial start paid billing at once, so each asks first.
-  const [confirmStart, setConfirmStart] = useState<'activate' | 'end_trial' | null>(null)
+  // End trial starts paid billing at once, so it asks first.
+  const [confirmEndTrial, setConfirmEndTrial] = useState(false)
   const [showExtendTrial, setShowExtendTrial] = useState(false)
   const [extendTrialDate, setExtendTrialDate] = useState('')
   const [extendTrialTime, setExtendTrialTime] = useState('')
@@ -112,13 +112,12 @@ export default function SubscriptionDetailPage() {
   // Shift-left no-card warning (2026-07-22 audit, P1-5): fetch the
   // customer's payment methods only when this subscription actually
   // auto-charges — a paused/terminal sub won't, so no query and no
-  // warning. One existing call, no new endpoint. A draft reads it too: the
-  // Activate confirm says whether a card is charged at once.
+  // warning. One existing call, no new endpoint.
   const subAutoCharges = !!sub && subscriptionWillAutoCharge(sub)
   const { data: subCustomerPMs } = useQuery({
     queryKey: ['customer-payment-methods', sub?.customer_id],
     queryFn: () => api.listCustomerPaymentMethods(sub!.customer_id),
-    enabled: !!sub?.customer_id && (subAutoCharges || sub?.status === 'draft'),
+    enabled: !!sub?.customer_id && subAutoCharges,
   })
   const subNeedsCard = subAutoCharges && !!subCustomerPMs && !hasUsableCard(subCustomerPMs.data ?? [])
 
@@ -176,7 +175,7 @@ export default function SubscriptionDetailPage() {
   })
   const activityTimeline = activityTimelineData?.events ?? []
   // Backend caps the feed at the 100 newest audit rows; when true, the
-  // earliest events (create/activate) are missing from the top of the list.
+  // earliest events (the create first) are missing from the top of the list.
   const activityTimelineTruncated = activityTimelineData?.truncated ?? false
   // The backend now 500s when the audit store is down (it used to return an
   // empty 200) — the whole point is that "couldn't load history" must not
@@ -206,12 +205,6 @@ export default function SubscriptionDetailPage() {
     // proration — refresh the balance-bearing families (2026-07-21 audit).
     invalidateMoneySurfaces(queryClient, { customerId: sub?.customer_id })
   }
-
-  const activateMutation = useMutation({
-    mutationFn: () => api.activateSubscription(id!),
-    onSuccess: () => { invalidateAll(); setConfirmStart(null); toast.success('Subscription activated') },
-    onError: (err) => { setConfirmStart(null); showApiError(err, 'Failed to activate') },
-  })
 
   const retryBillingMutation = useMutation({
     mutationFn: () => api.retrySubscriptionBilling(id!),
@@ -285,8 +278,8 @@ export default function SubscriptionDetailPage() {
 
   const endTrialMutation = useMutation({
     mutationFn: () => api.endSubscriptionTrial(id!),
-    onSuccess: () => { invalidateAll(); setConfirmStart(null); toast.success('Trial ended — subscription is now active') },
-    onError: (err) => { setConfirmStart(null); showApiError(err, 'Failed to end trial') },
+    onSuccess: () => { invalidateAll(); setConfirmEndTrial(false); toast.success('Trial ended — subscription is now active') },
+    onError: (err) => { setConfirmEndTrial(false); showApiError(err, 'Failed to end trial') },
   })
 
   const extendTrialMutation = useMutation({
@@ -308,7 +301,6 @@ export default function SubscriptionDetailPage() {
   })
 
   const acting =
-    activateMutation.isPending ||
     cancelMutation.isPending ||
     scheduleCancelMutation.isPending ||
     clearScheduledCancelMutation.isPending ||
@@ -454,11 +446,6 @@ export default function SubscriptionDetailPage() {
             <History size={16} className="mr-1.5" />
             Audit log
           </Button>
-          {sub.status === 'draft' && (
-            <Button onClick={() => setConfirmStart('activate')} disabled={acting}>
-              {activateMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Activating…</> : 'Activate'}
-            </Button>
-          )}
           {sub.status === 'active' && (
             <>
               {/* Pause hidden when collection is already paused — the
@@ -500,7 +487,7 @@ export default function SubscriptionDetailPage() {
               <Button
                 variant="outline"
                 className="border-primary text-primary hover:bg-primary/10"
-                onClick={() => setConfirmStart('end_trial')}
+                onClick={() => setConfirmEndTrial(true)}
                 disabled={acting || !!(sub.cancel_at_period_end || sub.cancel_at)}
                 title={sub.cancel_at_period_end || sub.cancel_at ? 'Clear the scheduled cancellation first' : undefined}
               >
@@ -897,10 +884,10 @@ export default function SubscriptionDetailPage() {
                     </TooltipTrigger>
                     <TooltipContent className="max-w-xs">
                       <p className="text-xs">
-                        <strong>{sub.billing_time === 'anniversary' ? 'Anniversary' : 'Calendar'}</strong> is the alignment chosen at activation.{' '}
+                        <strong>{sub.billing_time === 'anniversary' ? 'Anniversary' : 'Calendar'}</strong> is the alignment chosen when the subscription was created.{' '}
                         {sub.billing_time === 'calendar'
-                          ? 'For monthly plans, the first period runs from the activation day to the next 1st of the month, then bills on the 1st thereafter.'
-                          : 'The period anchors on the activation day-of-month and rolls forward by the plan interval.'}
+                          ? 'For monthly plans, the first period runs from the day billing starts to the next 1st of the month, then bills on the 1st thereafter.'
+                          : 'The period anchors on the day of the month billing started and rolls forward by the plan interval.'}
                         {' '}Scheduled plan-interval changes (immediate=false) preserve the existing day-of-month anchor at the boundary. Immediate cross-interval swaps (e.g. yearly → monthly with immediate=true) re-anchor the cycle on the swap day.
                       </p>
                     </TooltipContent>
@@ -947,7 +934,7 @@ export default function SubscriptionDetailPage() {
       {sub.status !== 'canceled' && (() => {
         const view = previewable
           ? previewView(preview, previewError, firstItemPlan?.currency ?? 'USD')
-          : { kind: 'none' as const, message: 'Activate the subscription to see its next invoice.' }
+          : { kind: 'none' as const, message: 'This subscription has no items, so it has no next invoice.' }
         return (
           <Card className="mt-6">
             <CardHeader>
@@ -1181,19 +1168,18 @@ export default function SubscriptionDetailPage() {
           auto-clears pause_collection at that timestamp. Matches
           Stripe's dashboard UX where the same modal exposes both
           options. */}
-      {/* Activate / End trial confirm: both start the first paid period at
-          once, and an in-advance plan is invoiced and charged on the spot. */}
-      <AlertDialog open={confirmStart !== null} onOpenChange={(open) => { if (!open && !activateMutation.isPending && !endTrialMutation.isPending) setConfirmStart(null) }}>
+      {/* End trial confirm: the first paid period starts at once, and an
+          in-advance plan is invoiced and charged on the spot. */}
+      <AlertDialog open={confirmEndTrial} onOpenChange={(open) => { if (!open && !endTrialMutation.isPending) setConfirmEndTrial(false) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{confirmStart === 'end_trial' ? 'End the trial now?' : 'Activate this subscription?'}</AlertDialogTitle>
+            <AlertDialogTitle>End the trial now?</AlertDialogTitle>
             <AlertDialogDescription>
               {customer?.display_name || 'This customer'} on {items.map(i => planById(i.plan_id)?.name).filter(Boolean).join(', ') || 'this plan'}.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="space-y-2 text-sm text-muted-foreground">
             {startBillingLines({
-              trial: confirmStart === 'end_trial',
               inAdvance: items.length > 0 && items.every(i => planById(i.plan_id))
                 ? items.some(i => planById(i.plan_id)?.base_bill_timing === 'in_advance')
                 : undefined,
@@ -1201,14 +1187,14 @@ export default function SubscriptionDetailPage() {
             }).map(line => <p key={line}>{line}</p>)}
           </div>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={activateMutation.isPending || endTrialMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={endTrialMutation.isPending}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              onClick={() => (confirmStart === 'end_trial' ? endTrialMutation.mutate() : activateMutation.mutate())}
-              disabled={activateMutation.isPending || endTrialMutation.isPending}
+              onClick={() => endTrialMutation.mutate()}
+              disabled={endTrialMutation.isPending}
             >
-              {activateMutation.isPending || endTrialMutation.isPending
-                ? <><Loader2 size={14} className="animate-spin mr-1.5" />{confirmStart === 'end_trial' ? 'Ending trial…' : 'Activating…'}</>
-                : confirmStart === 'end_trial' ? 'End trial' : 'Activate'}
+              {endTrialMutation.isPending
+                ? <><Loader2 size={14} className="animate-spin mr-1.5" />Ending trial…</>
+                : 'End trial'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

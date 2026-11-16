@@ -16,9 +16,8 @@ import (
 // currency pin. The engine relabels rule-computed cents under one invoice
 // currency without conversion, so every write that binds a plan to a
 // subscription must keep the customer's billing in ONE currency. Each clause is proven
-// in both directions (refusal + coherent twin), including the two bypass
-// windows the design panel found: profile-set-first ordering and the
-// pre-existing divergent draft at Activate.
+// in both directions (refusal + coherent twin), including the
+// profile-set-first ordering.
 func TestCurrencyPin(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -110,34 +109,4 @@ func TestCurrencyPin(t *testing.T) {
 	// proration): schedule a swap of the EUR sub's item to a USD plan.
 	_, err = svc.UpdateItem(ctx, tenantID, subEUR.ID, subEUR.Items[0].ID, UpdateItemInput{NewPlanID: usdB.ID})
 	wantRefusal(err, "current plan", "cross-currency swap")
-
-	// Pre-existing divergent DRAFT cannot activate: build the draft while
-	// coherent (no profile), then diverge the profile store-level (pre-ring
-	// data), then Activate refuses.
-	if _, err := custStore.UpsertBillingProfile(ctx, tenantID, domain.CustomerBillingProfile{
-		CustomerID: cust.ID, Currency: "", ProfileStatus: domain.BillingProfileIncomplete,
-	}); err != nil {
-		t.Fatalf("clear profile: %v", err)
-	}
-	cust2, err := custStore.Create(ctx, tenantID, domain.Customer{
-		ExternalID: "cus_pin_draft", DisplayName: "Pin Draft",
-	})
-	if err != nil {
-		t.Fatalf("customer 2: %v", err)
-	}
-	draft, err := svc.Create(ctx, tenantID, CreateInput{
-		Code: "pin-draft", DisplayName: "pin-draft", CustomerID: cust2.ID,
-		Items:       []CreateItemInput{{PlanID: usdA.ID, Quantity: 1}},
-		BillingTime: domain.BillingTimeAnniversary, Status: domain.SubscriptionDraft,
-	})
-	if err != nil {
-		t.Fatalf("draft create: %v", err)
-	}
-	if _, err := custStore.UpsertBillingProfile(ctx, tenantID, domain.CustomerBillingProfile{
-		CustomerID: cust2.ID, Currency: "EUR", ProfileStatus: domain.BillingProfileIncomplete,
-	}); err != nil {
-		t.Fatalf("diverge profile: %v", err)
-	}
-	_, err = svc.Activate(ctx, tenantID, draft.ID)
-	wantRefusal(err, "billing profile", "divergent draft activate")
 }

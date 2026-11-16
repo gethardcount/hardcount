@@ -123,22 +123,22 @@ test('remove card: only card, default with others left, non-default', () => {
   assert.match(removeCardSentence({ onlyCard: false, isDefault: false }), /default card stays the same/)
 })
 
-// Activate and End trial bill day 1: the confirm says when the first invoice
-// comes and whether a card is charged now, and guesses nothing it hasn't
-// loaded.
+// End trial bills day 1: the confirm says when the first invoice comes and
+// whether a card is charged now, and guesses nothing it hasn't loaded.
 test('startBillingLines says when the first period is invoiced and charged', () => {
-  assert.deepEqual(startBillingLines({ trial: false, inAdvance: true, hasCard: true }), [
-    'The first billing period starts now.',
+  const starts = 'The trial ends now, and the first paid billing period starts.'
+  assert.deepEqual(startBillingLines({ inAdvance: true, hasCard: true }), [
+    starts,
     "It is invoiced now and charged to the customer's card at once.",
   ])
-  assert.deepEqual(startBillingLines({ trial: true, inAdvance: true, hasCard: false }), [
-    'The trial ends now, and the first paid billing period starts.',
+  assert.deepEqual(startBillingLines({ inAdvance: true, hasCard: false }), [
+    starts,
     'It is invoiced now. The customer has no card on file, so nothing is charged until they add one.',
   ])
-  assert.deepEqual(startBillingLines({ trial: false, inAdvance: false, hasCard: true }), [
-    'The first billing period starts now.',
+  assert.deepEqual(startBillingLines({ inAdvance: false, hasCard: true }), [
+    starts,
     'It is invoiced at the end of the period, with any usage.',
   ])
-  assert.deepEqual(startBillingLines({ trial: false }), ['The first billing period starts now.'])
-  assert.deepEqual(startBillingLines({ trial: false, inAdvance: true }), ['The first billing period starts now.', 'It is invoiced now.'])
+  assert.deepEqual(startBillingLines({}), [starts])
+  assert.deepEqual(startBillingLines({ inAdvance: true }), [starts, 'It is invoiced now.'])
 })

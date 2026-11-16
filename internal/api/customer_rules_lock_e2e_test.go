@@ -13,16 +13,16 @@ import (
 )
 
 // The customer-rules lock over HTTP (ADR-130 §8 step 1a). Subscription
-// creates, item changes, draft activations, customer updates and
-// billing-profile writes each take one per-customer lock before they check a
-// customer-scoped rule, and hold it until they commit. So of two such writes
-// at once, the second checks against what the first committed.
+// creates, item changes, customer updates and billing-profile writes each
+// take one per-customer lock before they check a customer-scoped rule, and
+// hold it until they commit. So of two such writes at once, the second
+// checks against what the first committed.
 //
 // Two seams make the races deterministic:
 //   - The number-row hold: a test transaction locks the tenant's number row
-//     (tenant_settings). A create or an activation that bills a day-1 invoice
-//     then waits at its invoice number, inside its transaction, past its
-//     checks, holding the customer-rules lock.
+//     (tenant_settings). A create that bills a day-1 invoice then waits at
+//     its invoice number, inside its transaction, past its checks, holding
+//     the customer-rules lock.
 //   - The row hold: a test transaction updates the customer row. A customer
 //     update then waits at its final UPDATE, holding the customer-rules lock.
 //
@@ -123,11 +123,11 @@ func (r *lagRig) createBody(code, planID string) map[string]any {
 	}
 }
 
-// liveSubs counts the customer's draft, trialing and active subscriptions.
+// liveSubs counts the customer's trialing and active subscriptions.
 func (r *lagRig) liveSubs(customerID string) int {
 	r.t.Helper()
 	return flowCount(r.t, r.db, `SELECT count(*) FROM subscriptions
-		WHERE customer_id = $1 AND status IN ('draft', 'trialing', 'active')`, customerID)
+		WHERE customer_id = $1 AND status IN ('trialing', 'active')`, customerID)
 }
 
 // customerField reads one field of the customer as GET returns it.
@@ -372,143 +372,5 @@ func TestE2E_CustomerUpdate_ConcurrentEditsKeepBothFields(t *testing.T) {
 				}
 			}
 		})
-	}
-}
-
-// TestE2E_Activate_ArchivedCustomerRefused: archive skips drafts (ADR-067),
-// so a customer with only a draft can be archived. Activating that draft
-// would then start billing a customer the operator retired. Activation reads
-// the customer's status under the customer-rules lock and refuses.
-//
-// Mutation-verify: drop the archived refusal from ActivateDraftWithBill →
-// the activation answers 200 and bills a day-1 invoice.
-func TestE2E_Activate_ArchivedCustomerRefused(t *testing.T) {
-	r := newLagRigBare(t, "in_advance", 0)
-	body := r.createBody("draft", r.planA)
-	body["status"] = "draft"
-	subID := r.must(http.MethodPost, "/v1/subscriptions", lagP0, body, http.StatusCreated)["id"].(string)
-	r.must(http.MethodPatch, "/v1/customers/"+r.custID, lagP0, map[string]any{"status": "archived"}, http.StatusOK)
-
-	code, raw := r.do(http.MethodPost, "/v1/subscriptions/"+subID+"/activate", lagP0, nil)
-	if errCode, msg := apiErr(raw); code != http.StatusConflict || errCode != "invalid_state" || !strings.Contains(msg, "customer is archived") {
-		t.Fatalf("activate a draft of an archived customer = %d %s, want 409 invalid_state: customer is archived", code, raw)
-	}
-	r.subID = subID
-	if s := r.sub(); s.Status != "draft" {
-		t.Fatalf("subscription status = %s, want draft", s.Status)
-	}
-	if _, invoices := r.customerCounts(); invoices != 0 {
-		t.Fatalf("%d invoices for the archived customer, want 0", invoices)
-	}
-}
-
-// TestE2E_CustomerLock_ArchiveRacesActivate: an archive and a draft's
-// activation for one customer at the same moment. A draft does not block an
-// archive, and an archived customer's draft cannot be activated. Whichever
-// takes the customer-rules lock first, the other sees it: the customer never
-// ends archived with a subscription that bills.
-//
-// Mutation-verify: drop the lock from ActivateDraftWithBill and keep its
-// status read → both subtests fail.
-func TestE2E_CustomerLock_ArchiveRacesActivate(t *testing.T) {
-	// The activation holds the lock while it waits at its invoice number.
-	// The archive waits for the lock, then counts the subscription as active.
-	// Without the lock the archive reads the draft, which does not block it.
-	t.Run("activate_first", func(t *testing.T) {
-		r := newLagRigBare(t, "in_advance", 0)
-		ctx := t.Context()
-		admin := testutil.AdminPool(t)
-		body := r.createBody("pro-seat", r.planA)
-		body["status"] = "draft"
-		subID := r.must(http.MethodPost, "/v1/subscriptions", lagP0, body, http.StatusCreated)["id"].(string)
-
-		gate := holdTenantNumberRow(t, ctx, admin, r.tenantID)
-		activate := r.start(http.MethodPost, "/v1/subscriptions/"+subID+"/activate", lagP0, nil)
-		testutil.WaitForLockWaitersOrDone(t, ctx, admin, "tenant_settings", 1, activate.done)
-		archive := r.start(http.MethodPatch, "/v1/customers/"+r.custID, lagP0, map[string]any{"status": "archived"})
-		testutil.WaitForLockWaitersOrDone(t, ctx, admin, "", 2, archive.done)
-		release(t, gate)
-
-		codeS, rawS := activate.wait(t, "the activation")
-		codeA, rawA := archive.wait(t, "the archive")
-		if codeS != http.StatusOK {
-			t.Fatalf("the activation = %d %s, want 200", codeS, rawS)
-		}
-		if errCode, msg := apiErr(rawA); codeA != http.StatusConflict || errCode != "invalid_state" || !strings.Contains(msg, "(pro-seat)") {
-			t.Fatalf("the archive = %d %s, want 409 invalid_state naming subscription pro-seat", codeA, rawA)
-		}
-		if got := r.customerField(r.custID, "status"); got != "active" {
-			t.Fatalf("customer status = %v, want active: it was archived with a subscription that bills", got)
-		}
-	})
-
-	// The archive holds the lock while it waits at its UPDATE. The
-	// activation waits for the lock, then reads the customer as archived and
-	// refuses. Without the lock it reads the status before the archive
-	// commits, and activates.
-	t.Run("archive_first", func(t *testing.T) {
-		r := newLagRigBare(t, "in_advance", 0)
-		ctx := t.Context()
-		admin := testutil.AdminPool(t)
-		body := r.createBody("pro-seat", r.planA)
-		body["status"] = "draft"
-		subID := r.must(http.MethodPost, "/v1/subscriptions", lagP0, body, http.StatusCreated)["id"].(string)
-
-		hold := holdCustomerRow(t, ctx, admin, r.custID)
-		archive := r.start(http.MethodPatch, "/v1/customers/"+r.custID, lagP0, map[string]any{"status": "archived"})
-		testutil.WaitForLockWaitersOrDone(t, ctx, admin, "UPDATE customers", 1, archive.done)
-		activate := r.start(http.MethodPost, "/v1/subscriptions/"+subID+"/activate", lagP0, nil)
-		testutil.WaitForLockWaitersOrDone(t, ctx, admin, "", 2, activate.done)
-		release(t, hold)
-
-		codeA, rawA := archive.wait(t, "the archive")
-		codeS, rawS := activate.wait(t, "the activation")
-		if codeA != http.StatusOK {
-			t.Fatalf("the archive = %d %s, want 200", codeA, rawA)
-		}
-		if errCode, msg := apiErr(rawS); codeS != http.StatusConflict || errCode != "invalid_state" || !strings.Contains(msg, "customer is archived") {
-			t.Fatalf("the activation = %d %s, want 409 invalid_state: customer is archived", codeS, rawS)
-		}
-		r.subID = subID
-		if st := r.sub().Status; st != "draft" {
-			t.Fatalf("subscription status = %s, want draft: it bills an archived customer", st)
-		}
-	})
-}
-
-// TestE2E_Activate_CustomerLockedBeforeTheNumberRow pins where activation
-// takes the customer-rules lock: before its invoice number. An activation
-// waits at the tenant's number row; a create for the same customer then
-// waits for the activation's lock. Both must commit. A deadlock here is not
-// answered as a retryable 409 (ADR-136 converts neither create nor activate),
-// so the loser would get a stored 500.
-//
-// Passes on main too: it guards the lock order.
-//
-// Mutation-verify: take the lock in ActivateDraftWithBill after billFn → the
-// activation holds the number row and waits for the create's lock while the
-// create waits for the number row; Postgres aborts one with 40P01.
-func TestE2E_Activate_CustomerLockedBeforeTheNumberRow(t *testing.T) {
-	r := newLagRigBare(t, "in_advance", 0)
-	ctx := t.Context()
-	admin := testutil.AdminPool(t)
-	body := r.createBody("draft", r.planA)
-	body["status"] = "draft"
-	subID := r.must(http.MethodPost, "/v1/subscriptions", lagP0, body, http.StatusCreated)["id"].(string)
-
-	gate := holdTenantNumberRow(t, ctx, admin, r.tenantID)
-	activate := r.start(http.MethodPost, "/v1/subscriptions/"+subID+"/activate", lagP0, nil)
-	testutil.WaitForLockWaitersOrDone(t, ctx, admin, "tenant_settings", 1, activate.done)
-	// plan_c bills no meter and is in USD, so the create passes its checks
-	// beside the draft on plan_a.
-	create := r.start(http.MethodPost, "/v1/subscriptions", lagP0, r.createBody("add-on", r.planC))
-	testutil.WaitForLockWaitersOrDone(t, ctx, admin, "", 2, create.done)
-	release(t, gate)
-
-	if code, raw := activate.wait(t, "the activation"); code != http.StatusOK {
-		t.Fatalf("the activation = %d %s, want 200", code, raw)
-	}
-	if code, raw := create.wait(t, "the create"); code != http.StatusCreated {
-		t.Fatalf("the create = %d %s, want 201", code, raw)
 	}
 }

@@ -307,8 +307,8 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// customer-level value, which is the canonical one.
 	subSvc.SetCustomerReader(customerStore)
 	subSvc.SetProfileReader(customerStore)
-	// Period anchoring knows about yearly plans. At Create, Activate, EndTrial
-	// and ExtendTrial, the subscription service reads the first item's plan to
+	// Period anchoring knows about yearly plans. At Create, EndTrial and
+	// ExtendTrial, the subscription service reads the first item's plan to
 	// find its BillingInterval. Without the plan reader, the period helpers
 	// use fixed monthly math, and a yearly subscription with a trial gets a
 	// one-month first cycle instead of a full year.

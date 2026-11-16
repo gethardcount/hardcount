@@ -190,20 +190,6 @@ func subEntries() []subEntry {
 			}
 			return store.last(t)
 		}},
-		{"Activate", domain.SubscriptionDraft, 0, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, _ time.Time) time.Time {
-			// The day-1 invoice is billed in the activation's transaction and
-			// finalized after the commit on the activation's ctx: its
-			// finalize is what the time the ctx carries decides.
-			b := &reliefTimeBiller{fakeBiller: &fakeBiller{createTxOK: true, createTxInv: domain.Invoice{ID: "inv_day1", Currency: "USD"}}}
-			svc.SetBiller(b)
-			if _, err := svc.Activate(ctx, "t1", sub.ID); err != nil {
-				t.Fatalf("Activate: %v", err)
-			}
-			if len(b.finalizeAt) != 1 {
-				t.Fatalf("%d day-1 finalizes; want 1", len(b.finalizeAt))
-			}
-			return b.finalizeAt[0]
-		}},
 		{"PauseCollection", domain.SubscriptionActive, 0, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, _ time.Time) time.Time {
 			out, err := svc.PauseCollection(ctx, "t1", sub.ID, PauseCollectionInput{Behavior: domain.PauseCollectionKeepAsDraft})
 			if err != nil {
@@ -328,18 +314,10 @@ func TestSubscriptionEntryPoints_AtRealTimeReadTheServersClockOnce(t *testing.T)
 
 // reliefTimeBiller is the fake biller that also records the instant the ctx
 // of each relief's finish carries (the relief credit note is issued on that
-// ctx: creditnote.Service.Issue stamps issued_at from its time), and of each
-// day-1 invoice's finalize.
+// ctx: creditnote.Service.Issue stamps issued_at from its time).
 type reliefTimeBiller struct {
 	*fakeBiller
-	at         []time.Time
-	finalizeAt []time.Time
-}
-
-func (b *reliefTimeBiller) FinalizeOnCreateInvoice(ctx context.Context, sub domain.Subscription, inv domain.Invoice) {
-	at, _ := clock.EffectiveNow(ctx)
-	b.finalizeAt = append(b.finalizeAt, at)
-	b.fakeBiller.FinalizeOnCreateInvoice(ctx, sub, inv)
+	at []time.Time
 }
 
 func (b *reliefTimeBiller) FinishRelief(ctx context.Context, sub domain.Subscription, r domain.Relief) error {

@@ -21,7 +21,7 @@ import (
 
 // TestLifecycleEvents_EnqueuedInTransitionTx is the real-Postgres proof of
 // the DispatchTx subscription subset (2026-07-05): subscription.created /
-// .activated / .canceled / .trial_ended are enqueued into webhook_outbox
+// .canceled / .trial_ended are enqueued into webhook_outbox
 // INSIDE the transition tx by the store's writers — so a crash after commit
 // can no longer silently drop a lifecycle event (a dropped emission left no
 // row anywhere: nothing to replay, nothing to reconcile). Also proves the
@@ -113,24 +113,12 @@ func TestLifecycleEvents_EnqueuedInTransitionTx(t *testing.T) {
 	}
 
 	// (1) created — rides the create tx.
-	sub := newSub("lc-created", domain.SubscriptionDraft, nil)
+	sub := newSub("lc-created", domain.SubscriptionActive, nil)
 	if n, p := events(domain.EventSubscriptionCreated); n != 1 || resource(p)["id"] != sub.ID {
 		t.Fatalf("created: got n=%d payload=%v", n, p)
 	}
 
-	// (2) activated — ActivateDraftWithBill is Activate's draft→active
-	// writer; the event rides its tx (the enqueue once lived in a store
-	// Update method that lost its last caller, so this event silently
-	// stopped firing while this test stayed green against the dead path).
-	actAt := time.Date(2027, 4, 1, 0, 0, 0, 0, time.UTC)
-	if _, err := store.ActivateDraftWithBill(ctx, tenantID, sub.ID, actAt, actAt, actAt.AddDate(0, 1, 0), 1, nil); err != nil {
-		t.Fatalf("activate: %v", err)
-	}
-	if n, p := events(domain.EventSubscriptionActivated); n != 1 || resource(p)["status"] != "active" {
-		t.Fatalf("activated: got n=%d payload=%v", n, p)
-	}
-
-	// (3) canceled (operator) — CancelAtomic; a second cancel (CAS loser)
+	// (2) canceled (operator) — CancelAtomic; a second cancel (CAS loser)
 	// must not enqueue a second event. canceled_by is no longer hardcoded:
 	// it derives from the request identity (cancelActorLabel), the same rule
 	// the ADR-090 audit row uses, so the webhook and the audit evidence in
@@ -147,7 +135,7 @@ func TestLifecycleEvents_EnqueuedInTransitionTx(t *testing.T) {
 		t.Fatalf("canceled(operator): got n=%d payload=%v", n, p)
 	}
 
-	// (4) canceled (schedule) — FireScheduledCancellation on an active sub.
+	// (3) canceled (schedule) — FireScheduledCancellation on an active sub.
 	subB := newSub("lc-sched", domain.SubscriptionActive, nil)
 	freshB, err := store.Get(ctx, tenantID, subB.ID)
 	if err != nil {
@@ -163,7 +151,7 @@ func TestLifecycleEvents_EnqueuedInTransitionTx(t *testing.T) {
 		t.Fatalf("canceled(schedule): got n=%d payload=%v", n, p)
 	}
 
-	// (5) canceled (trial_end_cancel) — CancelAtTrialEnd on a trialing sub
+	// (4) canceled (trial_end_cancel) — CancelAtTrialEnd on a trialing sub
 	// carrying a due schedule.
 	trialEnd := time.Now().UTC().Add(-time.Hour).Truncate(time.Microsecond)
 	subC := newSub("lc-trialcancel", domain.SubscriptionTrialing, func(s *domain.Subscription) {
@@ -180,7 +168,7 @@ func TestLifecycleEvents_EnqueuedInTransitionTx(t *testing.T) {
 		t.Fatalf("canceled(trial_end): got n=%d payload=%v", n, p)
 	}
 
-	// (6) trial_ended (schedule) — ActivateAfterTrial.
+	// (5) trial_ended (schedule) — ActivateAfterTrial.
 	subD := newSub("lc-trialflip", domain.SubscriptionTrialing, func(s *domain.Subscription) {
 		s.TrialEndAt = &trialEnd
 	})
@@ -191,7 +179,7 @@ func TestLifecycleEvents_EnqueuedInTransitionTx(t *testing.T) {
 		t.Fatalf("trial_ended(schedule): got n=%d payload=%v", n, p)
 	}
 
-	// (7) trial_ended (operator) — EndTrialEarly.
+	// (6) trial_ended (operator) — EndTrialEarly.
 	subE := newSub("lc-trialearly", domain.SubscriptionTrialing, func(s *domain.Subscription) {
 		future := time.Now().UTC().Add(72 * time.Hour)
 		s.TrialEndAt = &future
@@ -204,7 +192,7 @@ func TestLifecycleEvents_EnqueuedInTransitionTx(t *testing.T) {
 		t.Fatalf("trial_ended(operator): got n=%d payload=%v", n, p)
 	}
 
-	// (8) Atomicity: a failing billFn inside CancelAtomicWithBill rolls the
+	// (7) Atomicity: a failing billFn inside CancelAtomicWithBill rolls the
 	// cancel AND its event back together.
 	subF := newSub("lc-rollback", domain.SubscriptionActive, nil)
 	sentinel := errors.New("bill failed")

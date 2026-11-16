@@ -162,7 +162,7 @@ type Store interface {
 	// revenue leak — no final-on-cancel reconciler exists). billFn may be nil.
 	//
 	// Its first statement is a compare-and-set (ADR-115, ADR-139): the UPDATE
-	// matches only a draft, trialing or active row that still holds
+	// matches only a trialing or active row that still holds
 	// `expected` (status, period start, next_billing_at), the row the caller
 	// planned the bill from. 0 rows → ErrNotFound (row gone), InvalidState
 	// "already terminated" (canceled), or ErrWatermarkMoved (the period or
@@ -218,8 +218,8 @@ type Store interface {
 	// The hard pause (Service.Pause/PauseAtomic) was removed in PR-8 /
 	// migration 0090, and no status 'paused' remains: pause_collection keeps
 	// the cycle running but neuters the financial side; the row's status
-	// field is not touched. Permitted on any status but canceled (draft,
-	// trialing, active). Service layer enforces behavior whitelist.
+	// field is not touched. Permitted on any status but canceled (trialing,
+	// active). Service layer enforces behavior whitelist.
 	//
 	// A lifted pause still on the row (its resumes_at has passed) is
 	// resumed first, in the same transaction, with its own trigger: this
@@ -313,19 +313,6 @@ type Store interface {
 	// rolls the activation back rather than leaving an active sub with no
 	// first-period invoice (revenue leak). billFn may be nil.
 	ActivateAfterTrialWithBill(ctx context.Context, tenantID, id string, at time.Time, billFn func(tx *sql.Tx, activated domain.Subscription) error) (domain.Subscription, error)
-
-	// ActivateDraftWithBill atomically flips a DRAFT subscription to active —
-	// stamping activation instants, the first billing period, and the anchor
-	// day — AND runs billFn (the day-1 in_advance invoice) in the SAME tx.
-	// The draft→activate sibling of ActivateAfterTrialWithBill: pre-fix the
-	// plain Activate flipped status without ever billing, so a draft-then-
-	// activated in_advance sub's first base fee was silently never invoiced
-	// (the revenue-leak class ADR-056 fixed for trial→active). A billFn error
-	// rolls the activation back — never an active sub with a lost invoice.
-	// Right after the flip it takes the customer-rules lock and refuses a
-	// draft whose customer is archived (InvalidState), before the plans and
-	// billFn's invoice number.
-	ActivateDraftWithBill(ctx context.Context, tenantID, id string, at, periodStart, periodEnd time.Time, anchorDay int, billFn func(tx *sql.Tx, activated domain.Subscription) error) (domain.Subscription, error)
 
 	// EndTrialEarlyWithBill flips trialing→active (resetting the period anchor)
 	// AND runs billFn (the day-1 in_advance invoice insert) in the SAME
@@ -432,7 +419,7 @@ type Store interface {
 	EnqueueEventTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID, eventType string, extra map[string]any) error
 
 	// FindMeterConflicts returns, for each candidate meter, the live
-	// (draft / trialing / active) subscriptions of the customer whose
+	// (trialing / active) subscriptions of the customer whose
 	// items' plans already bill that meter — including scheduled
 	// pending_plan_id swaps, which will start billing at the next cycle
 	// boundary. excludeItemID skips one item (the item being plan-swapped;

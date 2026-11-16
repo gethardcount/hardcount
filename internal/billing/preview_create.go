@@ -192,8 +192,8 @@ func (s *PreviewService) resolveSubscription(ctx context.Context, tenantID, cust
 
 // pickPrimarySubscription mirrors customer-usage's "primary active
 // subscription" heuristic: filter to active or trialing, pick the most
-// recent current_period_start. Subs without a current cycle (paused,
-// canceled, draft) are excluded — they have no projected bill to preview.
+// recent current_period_start. A canceled sub is excluded: it has no
+// projected bill to preview.
 func pickPrimarySubscription(subs []domain.Subscription) (domain.Subscription, bool) {
 	var primary *domain.Subscription
 	for i := range subs {
@@ -237,6 +237,8 @@ func resolveCreatePreviewPeriod(period CreatePreviewPeriod, sub domain.Subscript
 		return period.From, period.To, nil
 	}
 
+	// Only a subscription canceled before it ever started (a draft in earlier
+	// releases, or canceled by migration 00235) has no start and no period.
 	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodEnd == nil {
 		return time.Time{}, time.Time{}, errs.Invalid(
 			"period",

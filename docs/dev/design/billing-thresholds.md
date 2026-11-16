@@ -315,7 +315,7 @@ The existing `billSubscription` accepts a new `billingReason` parameter; existin
 - `TestThresholdResetFalseKeepsOriginalCycle` — `reset_billing_cycle=false`. Threshold fires, `current_billing_period_start` is unchanged, the cycle scan at period end still produces a second invoice.
 - `TestThresholdMultiDimRespectsRules` — multi-dim meter with two rules (input @3¢, output @5¢), `amount_gte=1000`. Push usage that totals 1100 across both rules; threshold fires. Assert the threshold-fired invoice's lines mirror the cycle scan's per-rule line set.
 - `TestThresholdSkipsTerminalSubscription` — a canceled sub with thresholds set is skipped by the scan tick.
-- `TestThresholdSkipsTrialingSubscription` — a trialing sub with thresholds set is skipped (no current period until activated).
+- `TestThresholdSkipsTrialingSubscription` — a trialing sub with thresholds set is skipped (no current period until its trial ends).
 
 ## Performance
 

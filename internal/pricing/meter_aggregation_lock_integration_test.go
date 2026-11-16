@@ -145,7 +145,7 @@ func TestMeterAggregation_FixedOnceTheMeterHasEvents(t *testing.T) {
 // subscriptions use the meter: no usage has been counted under the old one.
 func TestMeterAggregation_ChangesBeforeAnyEvent(t *testing.T) {
 	f := newMeterEditFixture(t)
-	for _, status := range []string{"draft", "trialing", "active"} {
+	for _, status := range []string{"trialing", "active"} {
 		t.Run("a "+status+" subscription uses the meter", func(t *testing.T) {
 			m := f.meter(t, "agg_before_"+status)
 			p := f.plan(t, "agg_before_plan_"+status, m.ID)

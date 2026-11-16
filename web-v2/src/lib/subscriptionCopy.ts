@@ -124,15 +124,14 @@ export function removeItemText(timing: BillTiming): string {
   return ''
 }
 
-// startBillingLines says what Activate (a draft) and End trial now do: the
-// first paid period starts now (internal/subscription Activate and EndTrial
-// both bill day 1 in the same transaction, ADR-056). A plan billed in advance
-// is invoiced at once and charged to the card on file; one billed in arrears
-// is invoiced at the period's end. inAdvance and hasCard are undefined while
-// the page has not loaded them, and the line that needs them is left out
-// rather than guessed.
-export function startBillingLines(o: { trial: boolean; inAdvance?: boolean; hasCard?: boolean }): string[] {
-  const lines = [o.trial ? 'The trial ends now, and the first paid billing period starts.' : 'The first billing period starts now.']
+// startBillingLines says what End trial now does: the first paid period
+// starts now (internal/subscription EndTrial bills day 1 in the same
+// transaction, ADR-056). A plan billed in advance is invoiced at once and
+// charged to the card on file; one billed in arrears is invoiced at the
+// period's end. inAdvance and hasCard are undefined while the page has not
+// loaded them, and the line that needs them is left out rather than guessed.
+export function startBillingLines(o: { inAdvance?: boolean; hasCard?: boolean }): string[] {
+  const lines = ['The trial ends now, and the first paid billing period starts.']
   if (o.inAdvance === true) {
     if (o.hasCard === true) lines.push('It is invoiced now and charged to the customer\'s card at once.')
     else if (o.hasCard === false) lines.push('It is invoiced now. The customer has no card on file, so nothing is charged until they add one.')

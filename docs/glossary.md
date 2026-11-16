@@ -140,7 +140,7 @@ follows.
 
 - **subscription**: A customer's agreement to pay for one or more plans,
   period after period. It holds items (each a plan and a quantity). Its
-  status is draft, trialing, active or canceled.
+  status is trialing, active or canceled.
   [More](concepts/subscriptions.md)
 - **billing period**: The dates one subscription invoice covers. The start
   day is included and the end is not. Periods start and end at midnight in

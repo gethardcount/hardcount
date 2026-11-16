@@ -237,9 +237,11 @@ func scanSubscriptionAuditWriters(t *testing.T) writerScan {
 // retiredAuditActions are listed audit actions that no code writes any more.
 // The timeline still renders the rows earlier versions wrote with them.
 // subscription.proration_failed is one: an item change and its proration now
-// commit together or not at all.
+// commit together or not at all. activate is the other: a subscription
+// starts when it is created.
 var retiredAuditActions = map[string]bool{
 	domain.AuditActionSubscriptionProrationFailed: true,
+	domain.AuditActionActivate:                    true,
 }
 
 func TestSubscriptionAuditWriters_UseTheVocabulary(t *testing.T) {

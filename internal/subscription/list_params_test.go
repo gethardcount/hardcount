@@ -25,12 +25,12 @@ func TestListHandler_StatusAndCollectionParams(t *testing.T) {
 
 	for query, want := range map[string]int{
 		"":                                 http.StatusOK,
-		"?status=draft":                    http.StatusOK,
 		"?status=trialing":                 http.StatusOK,
 		"?status=active":                   http.StatusOK,
 		"?status=canceled":                 http.StatusOK,
 		"?billing=failing":                 http.StatusOK,
 		"?status=archived":                 http.StatusUnprocessableEntity,
+		"?status=draft":                    http.StatusUnprocessableEntity,
 		"?status=paused":                   http.StatusUnprocessableEntity,
 		"?status=past_due":                 http.StatusUnprocessableEntity,
 		"?status=Active":                   http.StatusUnprocessableEntity,
@@ -104,7 +104,7 @@ func TestListHandler_FilterMessageListsAllowedValues(t *testing.T) {
 	for _, tc := range []struct {
 		query, want string
 	}{
-		{"?status=archived", "draft, trialing, active, canceled"},
+		{"?status=archived", "trialing, active, canceled"},
 		{`?collection=running`, "paused"},
 		{`?billing=ok`, "failing"},
 	} {

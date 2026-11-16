@@ -552,9 +552,8 @@ components:
           type: string
           enum: [active, archived]
           description: |
-            `archived` blocks new subscriptions for the customer and
-            activating its draft subscriptions. Its unpaid invoices stay
-            collectible.
+            `archived` blocks new subscriptions for the customer. Its
+            unpaid invoices stay collectible.
         created_at:
           type: string
           format: date-time
@@ -1124,9 +1123,9 @@ components:
         All its items share one billing interval and one base-fee timing.
         Usage, and a base fee billed in arrears, are invoiced when a period
         ends. A base fee billed in advance is invoiced when its period
-        starts: the first one in the same transaction that creates or
-        activates the subscription or ends its trial, each later one on the
-        invoice that closes the period before.
+        starts: the first one in the same transaction that creates the
+        subscription or ends its trial, each later one on the invoice that
+        closes the period before.
       required: [id, code, display_name, customer_id, status, billing_time, cancel_at_period_end, created_at, updated_at]
       properties:
         id:
@@ -1153,13 +1152,10 @@ components:
             $ref: "#/components/schemas/SubscriptionItem"
         status:
           type: string
-          enum: [draft, trialing, active, canceled]
+          enum: [trialing, active, canceled]
           description: |
             Where the subscription is in its life.
 
-            - `draft`: created with `status: draft`. It has no billing
-              period and bills nothing until you activate it with
-              `POST /v1/subscriptions/{id}/activate`.
             - `trialing`: in a free trial until `trial_end_at`. Usage in
               the trial is not billed. When the trial ends, Hardcount makes
               the subscription `active` and its first paid period starts.
@@ -1169,7 +1165,9 @@ components:
               invoiced when each period ends; a base fee billed in advance
               when its period starts.
             - `canceled`: ended at `canceled_at`. It bills nothing more,
-              and no route makes it `active` again.
+              and no route makes it `active` again. A subscription
+              canceled before it started has no `started_at` and no
+              billing period.
 
             A paused collection is not a status: see `pause_collection`.
         billing_time:
@@ -1177,8 +1175,8 @@ components:
           enum: [calendar, anniversary]
           description: |
             How monthly periods line up. The first period starts on the day
-            the subscription starts to bill: the day it is created or
-            activated, or, with a trial, the day the trial ends.
+            the subscription starts to bill: the day it is created, or,
+            with a trial, the day the trial ends.
             `calendar`: every period ends on the 1st of a month, in your
             account's billing time zone, so the first period runs from that
             day to the next 1st. `anniversary`: each period starts on the
@@ -1204,15 +1202,16 @@ components:
           type: string
           format: date-time
           description: |
-            When the subscription started: when it was created, or, for a
-            draft, when it was activated. Absent on a draft.
+            The moment the subscription was created. Its trial begins
+            then, or, without a trial, its billing. A subscription that an
+            earlier release activated from a draft has the moment of that
+            activation instead.
         activated_at:
           type: string
           format: date-time
           description: |
             When the subscription became `active`: at creation without a
-            trial, at activation of a draft, or when its trial ended.
-            Absent on a draft and while it trials.
+            trial, or when its trial ended. Absent while it trials.
         canceled_at:
           type: string
           format: date-time
@@ -1252,16 +1251,14 @@ components:
             the beginning of the day the trial ends, not `trial_end_at`
             itself. After an immediate change to a plan with another billing
             interval, a period can start or end at the instant of the
-            change. Absent on a draft. On a canceled subscription it keeps
-            its last value.
+            change. On a canceled subscription it keeps its last value.
         current_billing_period_end:
           type: string
           format: date-time
           description: |
             End of the current period (exclusive): the start of the next
             one. While the subscription trials, the end of the first paid
-            period. Absent on a draft. On a canceled subscription it keeps
-            its last value.
+            period. On a canceled subscription it keeps its last value.
         current_billing_period_display:
           type: string
           description: |
@@ -1275,15 +1272,15 @@ components:
           description: |
             When the current period's invoice is due to be built: the end
             of the current period. The billing run builds it once the
-            invoice grace after that time has passed. Absent on a draft. A
-            canceled subscription keeps its last value, and nothing is
-            billed at that time.
+            invoice grace after that time has passed. A canceled
+            subscription keeps its last value, and nothing is billed at
+            that time.
         billing_anchor_day:
           type: integer
           description: |
             Day of the month the subscription bills on (1-31): the day its
             first period started, or the day of its last immediate change to
-            a plan with another billing interval. Absent on a draft and for
+            a plan with another billing interval. Absent for
             calendar-monthly subscriptions.
         test_clock_id:
           type: string
@@ -1509,7 +1506,7 @@ components:
         customer's current billing periods: time after a period end whose
         invoice is not built yet is not checked, nor is time after a trial's
         end before Hardcount ends the trial. A later change can change the
-        outcome either way: a subscription created, activated or changed, a
+        outcome either way: a subscription created or changed, a
         trial extended, a scheduled cancel undone, or a price added. The
         invoice is the final answer.
 
@@ -5733,7 +5730,7 @@ components:
             Uppercase or lowercase ISO 4217 code; it is stored uppercase. It
             must be the customer's currency (see the 409). Defaults to the
             billing profile's currency, then the plan currency of the
-            customer's draft, trialing and active subscriptions, then the
+            customer's trialing and active subscriptions, then the
             account's default
             currency. Currencies with no minor unit (such as JPY) are
             refused.
@@ -10509,9 +10506,8 @@ paths:
                   type: string
                   enum: [active, archived]
                   description: |
-                    `archived` blocks new subscriptions for the customer
-                    and activating its draft subscriptions. `active` lifts
-                    that.
+                    `archived` blocks new subscriptions for the customer.
+                    `active` lifts that.
                 dunning_policy_id:
                   type: string
                   description: Policy ID, or `""` to use the account's default policy.
@@ -10644,7 +10640,7 @@ paths:
 
         Country, currency and tax ID are stored in upper case.
 
-        A currency that differs from the plan currency of a draft, trialing or
+        A currency that differs from the plan currency of a trialing or
         active subscription is refused with 409 `invalid_state`, because
         invoices would show plan prices in the new currency without
         conversion.
@@ -10731,7 +10727,7 @@ paths:
         "409":
           description: |
             The currency differs from the plan currency of one of the
-            customer's draft, trialing or active subscriptions
+            customer's trialing or active subscriptions
             (`invalid_state`). Code `concurrent_change`: Postgres stopped the
             write because of another change to the same records (it broke a
             deadlock, or ended a wait for a lock), so the profile is unchanged;
@@ -15515,16 +15511,15 @@ paths:
       operationId: createSubscription
       description: |
         Creates a subscription that bills a customer for one or more plans.
-        Leave out `status` and it starts now: `active` from today, or
-        `trialing` when `trial_days` is above 0. Send `status: draft` to
-        create it without starting it.
+        It starts now: `active` from today, or `trialing` when `trial_days`
+        is above 0.
 
         All the plans must share one billing interval, one base-fee timing
         (in advance or in arrears) and one currency. The currency must also
         match the customer's billing profile and the customer's other
-        `draft`, `trialing` and `active` subscriptions; canceled ones do not
+        `trialing` and `active` subscriptions; canceled ones do not
         count. No two of the plans may bill the same meter, and none may
-        bill a meter that another `draft`, `trialing` or `active`
+        bill a meter that another `trialing` or `active`
         subscription of the customer bills. The customer and the plans must
         not be archived.
 
@@ -15584,23 +15579,13 @@ paths:
                   minimum: 0
                   maximum: 730
                   description: |
-                    Days of free trial; 0 means no trial. Above 0, the
+                    Days of free trial; 0 means no trial. At 0, the
+                    subscription is `active`, its first period starts today
+                    in the account's billing time zone (the clock's day for
+                    a customer on a test clock), and a non-zero base fee
+                    billed in advance is invoiced now. Above 0, the
                     subscription is `trialing` from now and its first paid
                     period starts on the day the trial ends.
-                status:
-                  type: string
-                  enum: [draft]
-                  description: |
-                    Leave it out and the subscription starts now. Without
-                    `trial_days` it is `active`, its first period starts
-                    today in the account's billing time zone (the clock's
-                    day for a customer on a test clock), and a non-zero base
-                    fee billed in advance is invoiced now. With `trial_days`
-                    above 0 it is `trialing` from now. Send `draft` to create it
-                    without starting it: it bills nothing until you activate
-                    it with `POST /v1/subscriptions/{id}/activate`. A draft
-                    cannot have a trial (`trial_days` above 0). An empty or
-                    null `status` is refused.
             example:
               code: acme-pro
               display_name: Acme Pro
@@ -15664,10 +15649,10 @@ paths:
             Code `already_exists` (`param: code`): another subscription in
             this account and mode has this `code`. Code `invalid_state`: the
             customer or a plan is archived; a plan bills a meter that another
-            `draft`, `trialing` or `active` subscription of the customer
+            `trialing` or `active` subscription of the customer
             already bills; or the plans' currency differs from each other,
             from the customer's billing profile or from the customer's other
-            `draft`, `trialing` or `active` subscriptions. Code
+            `trialing` or `active` subscriptions. Code
             `concurrent_change`: Postgres stopped the create because of another
             change to the same records (it broke a deadlock, or ended a wait for
             a lock), so nothing was created; send the same request again, with
@@ -15688,17 +15673,15 @@ paths:
         "422":
           description: |
             A field failed validation (`param` names it), for example
-            `trial_days` outside 0 to 730, `status` other than `draft`
-            (empty and null included), or `trial_days` above 0 with
-            `status: draft`. Also: `code`, `display_name`, `customer_id` or
-            `items` missing; a `code` with other characters; a repeated or
-            unknown plan, plans with different billing intervals or
-            base-fee timings, or two plans that bill the same meter
-            (`param: items`); a `quantity` below 1. Or the
+            `trial_days` outside 0 to 730. Also: `code`, `display_name`,
+            `customer_id` or `items` missing; a `code` with other
+            characters; a repeated or unknown plan, plans with different
+            billing intervals or base-fee timings, or two plans that bill
+            the same meter (`param: items`); a `quantity` below 1. Or the
             body has an unknown field (`param` names it; the body must use
-            only the fields listed here). `start_now` is such a field since
-            2026-10-23: a subscription starts now unless `status` is
-            `draft`.
+            only the fields listed here). `status` and `start_now` are such
+            fields: a subscription always starts, or starts its trial, when
+            it is created.
           content:
             application/json:
               schema:
@@ -15738,7 +15721,7 @@ paths:
             a status: use `collection=paused`.
           schema:
             type: string
-            enum: [draft, trialing, active, canceled]
+            enum: [trialing, active, canceled]
         - name: billing
           in: query
           description: |
@@ -15851,123 +15834,9 @@ paths:
                 error:
                   type: invalid_request_error
                   code: validation_error
-                  message: "status must be one of draft, trialing, active, canceled; paused collection is not a status, use collection=paused"
+                  message: "status must be one of trialing, active, canceled; paused collection is not a status, use collection=paused"
                   request_id: req_dbjg652q3gpgqfoq5cd0
                   param: status
-        "429":
-          $ref: "#/components/responses/RateLimited"
-
-  /v1/subscriptions/{id}/activate:
-    post:
-      tags: [Subscriptions]
-      summary: Activate a draft subscription
-      operationId: activateSubscription
-      description: |
-        Starts a `draft` subscription: it becomes `active` now, and its
-        first period starts today in your account's billing time zone (the
-        clock's day for a customer on a test clock). A non-zero base fee
-        billed in advance is invoiced in the same database transaction as
-        the activation: both are saved, or neither is. The plans'
-        currency must still match the customer's billing profile and the
-        customer's other `draft`, `trialing` and `active` subscriptions,
-        and the customer must not be archived. Takes no body.
-
-        Sends the `subscription.activated` webhook event.
-      parameters:
-        - $ref: "#/components/parameters/IdempotencyKey"
-        - name: id
-          in: path
-          required: true
-          description: The subscription's ID (`hc_sub_…`).
-          schema:
-            type: string
-      responses:
-        "200":
-          description: Subscription activated
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Subscription"
-              example:
-                id: hc_sub_dauq502q3gpgqfoq5c2g
-                tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-                code: acme-pro
-                display_name: Acme Pro
-                customer_id: hc_cus_dakhnk2q3gpgqfoq5c0g
-                items:
-                  - id: hc_si_3f9c0e2a1b4d5c6e7f8a9b0c
-                    tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
-                    subscription_id: hc_sub_dauq502q3gpgqfoq5c2g
-                    plan_id: hc_pln_dajr5o2q3gpgqfoq5c1g
-                    quantity: 1
-                    created_at: "2026-09-28T16:20:00Z"
-                    updated_at: "2026-09-28T16:20:00Z"
-                status: active
-                billing_time: calendar
-                started_at: "2026-10-01T09:12:44Z"
-                activated_at: "2026-10-01T09:12:44Z"
-                cancel_at_period_end: false
-                current_billing_period_start: "2026-10-01T00:00:00Z"
-                current_billing_period_end: "2026-11-01T00:00:00Z"
-                current_billing_period_display: "Oct 1, 2026 – Oct 31, 2026"
-                next_billing_at: "2026-11-01T00:00:00Z"
-                created_at: "2026-09-28T16:20:00Z"
-                updated_at: "2026-10-01T09:12:44Z"
-        "400":
-          $ref: "#/components/responses/InvalidBody"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "403":
-          $ref: "#/components/responses/Forbidden"
-        "404":
-          description: No subscription with this ID in this account and mode.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: not_found
-                  message: subscription not found
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "409":
-          description: |
-            Code `invalid_state`: the subscription is not a `draft`, its
-            plans' currency differs from the customer's billing profile or
-            from the customer's other `draft`, `trialing` or `active`
-            subscriptions, or the customer is archived. Code
-            `concurrent_change`: Postgres stopped the activation because of
-            another change to the same records (it broke a deadlock, or ended a
-            wait for a lock), so the subscription is still a `draft`; send the
-            same request again, with the same `Idempotency-Key`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: invalid_state
-                  message: Only a draft subscription can be activated. This one is active.
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-        "413":
-          $ref: "#/components/responses/PayloadTooLarge"
-        "422":
-          description: |
-            The request has a body with a field (`param` names it). This
-            route takes no body: send none, `{}` or `null`.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: validation_error
-                  message: unknown field "start_at"
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-                  param: start_at
         "429":
           $ref: "#/components/responses/RateLimited"
 
@@ -16196,8 +16065,8 @@ paths:
       summary: Cancel a subscription now
       operationId: cancelSubscription
       description: |
-        Cancels the subscription immediately. Works on `draft`, `trialing`
-        and `active` subscriptions. Takes no body.
+        Cancels the subscription immediately. Works on `trialing` and
+        `active` subscriptions. Takes no body.
 
         In the transaction that cancels it, Hardcount writes the final
         invoice for the part of the current period that has been used
@@ -17334,7 +17203,7 @@ paths:
         Adds a plan to the subscription as a new item. The plan must use
         the same billing interval, base-fee timing and currency as the
         other items. It must not bill a meter that another item of this
-        subscription, or another `draft`, `trialing` or `active`
+        subscription, or another `trialing` or `active`
         subscription of the customer, bills. A period that ended and is
         not invoiced yet is billed first. The subscription must not be
         `canceled`.
@@ -17425,9 +17294,9 @@ paths:
             this plan. Code `invalid_state`: the subscription is `canceled`;
             the plan is archived; the plan's meters (the meters it has a
             price for) overlap another item of this subscription or another
-            `draft`, `trialing` or `active` subscription of the customer; or
+            `trialing` or `active` subscription of the customer; or
             the plan's currency differs from the subscription's, the
-            customer's billing profile or the customer's other `draft`,
+            customer's billing profile or the customer's other
             `trialing` or `active` subscriptions.
             Code
             `unpaid_invoice_blocks_change`: the invoice for the current
@@ -17633,11 +17502,11 @@ paths:
           description: |
             Code `invalid_state`: the subscription is not `active`, the new
             plan is archived, its meters (the meters it has a price for)
-            overlap another item of this subscription or another `draft`,
+            overlap another item of this subscription or another
             `trialing` or `active` subscription of the customer, or its
             currency differs from the item's current plan, the other items,
             the customer's billing profile or the customer's other
-            subscriptions (`draft`, `trialing` or `active`). Code
+            subscriptions (`trialing` or `active`). Code
             `unpaid_invoice_blocks_change`: an increase would charge against
             an unpaid invoice for the current period (a written-off invoice
             is unpaid); settle or void it first. Code `subscription_period_moved`: the billing period
@@ -19214,13 +19083,13 @@ paths:
 
         A manual invoice uses the customer's currency. A `currency` that
         differs from the customer's billing-profile currency, or from the
-        plan currency of any of the customer's draft, trialing or active
+        plan currency of any of the customer's trialing or active
         subscriptions, is refused with 409. A customer with neither
         may be invoiced in any supported currency.
 
         Defaults when a field is left out:
         - `currency`: the customer's billing-profile currency, then the plan
-          currency of the customer's draft, trialing or active
+          currency of the customer's trialing or active
           subscriptions, then the account's default currency.
         - `net_payment_term_days`: the account's net payment terms. A
           negative value is stored as 0 (due on receipt).

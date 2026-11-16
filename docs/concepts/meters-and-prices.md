@@ -80,7 +80,7 @@ More: [AI pricing reference](../ai-pricing.md#how-hardcount-picks-the-price-for-
 
 Each plan has its own prices, so two plans can charge different rates for
 one meter. One customer cannot have two subscriptions that are not canceled
-(draft, trialing or active) and price the same meter, so no usage is billed
+(trialing or active) and price the same meter, so no usage is billed
 twice. Hardcount refuses the second subscription with `409`. It also
 refuses, with `409 meter_overlap`, a new price that would add the meter to
 a plan when a customer on that plan has another subscription that prices

@@ -9,11 +9,10 @@ test('the plans of subscriptions that can still bill, with scheduled moves', () 
   const ids = customerPlanIds([
     { status: 'active', items: [{ plan_id: 'pln_a' }, { plan_id: 'pln_b', pending_plan_id: 'pln_c' }] },
     { status: 'trialing', items: [{ plan_id: 'pln_d' }] },
-    { status: 'draft', items: [{ plan_id: 'pln_e' }] },
     { status: 'canceled', items: [{ plan_id: 'pln_x' }] },
     { status: 'active' },
   ])
-  assert.deepEqual([...ids].sort(), ['pln_a', 'pln_b', 'pln_c', 'pln_d', 'pln_e'])
+  assert.deepEqual([...ids].sort(), ['pln_a', 'pln_b', 'pln_c', 'pln_d'])
 })
 
 test("the customer's plans come first, each group in its own order", () => {

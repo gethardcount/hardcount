@@ -89,8 +89,7 @@ var webhookEventExtras = map[string][]string{
 	EventPaymentMethodAttached: {"stripe_payment_method_id"},
 	EventPaymentMethodUpdated:  {"stripe_customer_id"},
 
-	EventSubscriptionCreated:   {},
-	EventSubscriptionActivated: {},
+	EventSubscriptionCreated: {},
 	// reason is set only on a cancel at trial end (trial_end_cancel).
 	EventSubscriptionCanceled:               {"canceled_by", "reason"},
 	EventSubscriptionTrialEnded:             {"ended_at", "triggered_by"},

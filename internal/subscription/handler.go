@@ -3,7 +3,6 @@ package subscription
 import (
 	"context"
 	"database/sql"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -294,7 +293,6 @@ func (h *Handler) Routes() chi.Router {
 	r.Post("/", h.create)
 	r.Get("/", h.list)
 	r.Get("/{id}", h.get)
-	r.Post("/{id}/activate", h.activate)
 	r.Post("/{id}/cancel", h.cancel)
 	r.Post("/{id}/schedule-cancel", h.scheduleCancel)
 	r.Delete("/{id}/scheduled-cancel", h.clearScheduledCancel)
@@ -320,44 +318,13 @@ func (h *Handler) Routes() chi.Router {
 	return r
 }
 
-// createBody is CreateInput as the API reads it. Its status hides the
-// embedded one so the handler can tell a field left out (start now) from one
-// sent empty or null (refused).
-type createBody struct {
-	CreateInput
-	Status sentStatus `json:"status"`
-}
-
-// sentStatus records whether "status" was in the body at all. encoding/json
-// calls UnmarshalJSON for a JSON null too, so null counts as sent.
-type sentStatus struct {
-	value domain.SubscriptionStatus
-	sent  bool
-}
-
-func (s *sentStatus) UnmarshalJSON(b []byte) error {
-	s.sent = true
-	if string(b) == "null" {
-		return nil
-	}
-	return json.Unmarshal(b, &s.value)
-}
-
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 
-	var body createBody
-	if !respond.DecodeStrict(w, r, &body) {
+	var input CreateInput
+	if !respond.DecodeStrict(w, r, &input) {
 		return
 	}
-	// "status": "" and "status": null are not "left out": a template whose
-	// value was unset must not start and bill the subscription.
-	if body.Status.sent && body.Status.value == "" {
-		respond.FromError(w, r, errs.Invalid("status", createStatusMessage), "subscription")
-		return
-	}
-	input := body.CreateInput
-	input.Status = body.Status.value
 
 	// The body's customer decides the subscription's time here, once, before
 	// anything runs: the create and its audit row both run on it.
@@ -421,10 +388,9 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	// always empty (sweep E6).
 	status := r.URL.Query().Get("status")
 	switch domain.SubscriptionStatus(status) {
-	case "", domain.SubscriptionDraft, domain.SubscriptionTrialing, domain.SubscriptionActive,
-		domain.SubscriptionCanceled:
+	case "", domain.SubscriptionTrialing, domain.SubscriptionActive, domain.SubscriptionCanceled:
 	default:
-		msg := "status must be one of draft, trialing, active, canceled"
+		msg := "status must be one of trialing, active, canceled"
 		if status == "paused" {
 			msg += `; paused collection is not a status, use collection=paused`
 		}
@@ -481,36 +447,6 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 		slog.ErrorContext(r.Context(), "get subscription", "error", err)
 		return
 	}
-
-	h.respondSub(w, r, http.StatusOK, sub)
-}
-
-func (h *Handler) activate(w http.ResponseWriter, r *http.Request) {
-	if !respond.NoBody(w, r) {
-		return
-	}
-	tenantID := auth.TenantID(r.Context())
-	id := chi.URLParam(r, "id")
-
-	sub, err := h.svc.Activate(r.Context(), tenantID, id)
-	if err != nil {
-		// An activation that lost a deadlock or a lock wait may be sent
-		// again: nothing commits before its one transaction, and once that
-		// commits it returns no error (ADR-136).
-		respond.FromError(w, r, respond.ConcurrentChangeAsConflict(r, err), "subscription")
-		return
-	}
-
-	// Wall-clock created_at + sim metadata on clock-pinned subs — same
-	// pattern as the create handler above.
-	if h.auditLogger != nil {
-		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionActivate, "subscription", sub.ID, sub.Code, map[string]any{
-			"customer_id": sub.CustomerID,
-		})
-	}
-
-	// subscription.activated is enqueued IN the activation tx (store-level
-	// DispatchTx subset) — do not also fire it here.
 
 	h.respondSub(w, r, http.StatusOK, sub)
 }
@@ -2452,8 +2388,8 @@ func max64(a, b int64) int64 {
 // a chronological feed of everything that happened to a subscription so
 // a CS rep responding to "why was my sub cancelled?" lands on the right
 // page with the right story already written. We source it from the
-// audit_log — every lifecycle mutation (create/activate/pause/resume/
-// cancel, item add/remove/update) is already captured there with the
+// audit_log — every lifecycle mutation (create/pause/resume/cancel,
+// item add/remove/update) is already captured there with the
 // actor, timestamp, and a metadata blob. No new instrumentation needed,
 // and no RLS gap since audit.Logger.Query already runs under the
 // tenant-scoped tx.
@@ -2714,7 +2650,7 @@ func (h *Handler) activityTimeline(w http.ResponseWriter, r *http.Request) {
 		// count tells us whether the sub outgrew it; the response carries
 		// an explicit `truncated` flag so >100-row histories can't
 		// silently start mid-life (the DESC query keeps the NEWEST rows,
-		// so it's the earliest events — create/activate — that drop).
+		// so it's the earliest events, the create first, that drop).
 		//
 		// The filter is deliberately pinned to this one subscription
 		// (ResourceType+ResourceID): the timeline is an object-scoped

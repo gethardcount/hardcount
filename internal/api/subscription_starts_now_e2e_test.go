@@ -21,16 +21,12 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// A subscription starts now unless the caller asks for a draft (simplification
-// audit D2, 2026-10-23). Before, POST /v1/subscriptions without start_now and
-// without a trial made a draft that billed nothing until someone activated it,
-// so a forgotten flag silently billed nothing.
+// A subscription starts when it is created: it is active now, or its trial
+// starts now. No field of the create chooses another start.
 //
-// The golden files under testdata/starts_now were written on 210646e8 (before
-// this change) by a create that sent "start_now": true through the same rig
-// and the same normalization (TestCreateSubscription_StartNowTrueMatchesGolden,
-// removed with start_now). A create with no flag must now produce those bytes
-// exactly: the same subscription and the same day-1 in_advance invoice.
+// A create that names no start must produce the bytes of the golden files
+// under testdata/starts_now exactly: the subscription and its day-1
+// in_advance invoice.
 //
 // The rig is the close-lag rig: the real server over HTTP, every collaborator
 // wired as in production, each request served at a chosen instant. Plans are
@@ -273,95 +269,35 @@ func TestCreateSubscription_TrialStartsNow(t *testing.T) {
 // TestCreateSubscription_ZeroTrialDaysIsNoTrial: trial_days 0 is accepted and
 // means no trial. A form whose trial field defaults to 0 sends it, so the spec
 // says "trial_days above 0" makes a trialing subscription: with 0 the create
-// is active and bills day 1, and with status "draft" it is a plain draft.
+// is active and bills day 1.
 func TestCreateSubscription_ZeroTrialDaysIsNoTrial(t *testing.T) {
-	t.Run("start now", func(t *testing.T) {
-		r := newLagRigBare(t, "in_advance", 0)
-		out := r.must(http.MethodPost, "/v1/subscriptions", startsNowAt, r.startsNowBody("zero-trial", "calendar", map[string]any{"trial_days": 0}), http.StatusCreated)
-		if got := flowStr(out, "status"); got != string(domain.SubscriptionActive) {
-			t.Fatalf("status = %q, want active", got)
-		}
-		r.subID = flowStr(out, "id")
-		if s := r.sub(); s.TrialStartAt != nil || s.TrialEndAt != nil {
-			t.Fatalf("trial = [%v, %v), want none", s.TrialStartAt, s.TrialEndAt)
-		}
-		if subs, invs := r.customerCounts(); subs != 1 || invs != 1 {
-			t.Fatalf("%d subscriptions and %d invoices, want 1 and 1 (day-1 bill)", subs, invs)
-		}
-	})
-	t.Run("draft", func(t *testing.T) {
-		r := newLagRigBare(t, "in_advance", 0)
-		out := r.must(http.MethodPost, "/v1/subscriptions", startsNowAt, r.startsNowBody("zero-trial-draft", "calendar", map[string]any{"status": "draft", "trial_days": 0}), http.StatusCreated)
-		if got := flowStr(out, "status"); got != string(domain.SubscriptionDraft) {
-			t.Fatalf("status = %q, want draft", got)
-		}
-		if subs, invs := r.customerCounts(); subs != 1 || invs != 0 {
-			t.Fatalf("%d subscriptions and %d invoices, want 1 and 0", subs, invs)
-		}
-	})
-}
-
-// TestCreateSubscription_ExplicitDraftBillsNothingUntilActivated: status
-// "draft" is the one way to create a subscription that does not start. It has
-// no period, no billing run bills it, and activating it bills day 1 from the
-// activation instant (Activate's ActivateDraftWithBill, unchanged).
-func TestCreateSubscription_ExplicitDraftBillsNothingUntilActivated(t *testing.T) {
 	r := newLagRigBare(t, "in_advance", 0)
-	out := r.must(http.MethodPost, "/v1/subscriptions", startsNowAt, r.startsNowBody("draft-1", "calendar", map[string]any{"status": "draft"}), http.StatusCreated)
+	out := r.must(http.MethodPost, "/v1/subscriptions", startsNowAt, r.startsNowBody("zero-trial", "calendar", map[string]any{"trial_days": 0}), http.StatusCreated)
+	if got := flowStr(out, "status"); got != string(domain.SubscriptionActive) {
+		t.Fatalf("status = %q, want active", got)
+	}
 	r.subID = flowStr(out, "id")
-	s := r.sub()
-	if s.Status != domain.SubscriptionDraft {
-		t.Fatalf("status = %s, want draft", s.Status)
+	if s := r.sub(); s.TrialStartAt != nil || s.TrialEndAt != nil {
+		t.Fatalf("trial = [%v, %v), want none", s.TrialStartAt, s.TrialEndAt)
 	}
-	if s.CurrentBillingPeriodStart != nil || s.NextBillingAt != nil || s.StartedAt != nil || s.ActivatedAt != nil {
-		t.Fatalf("a draft carries period %v next %v started %v activated %v, want none", s.CurrentBillingPeriodStart, s.NextBillingAt, s.StartedAt, s.ActivatedAt)
-	}
-
-	// A billing run a month later bills nothing for the draft.
-	later := time.Date(2026, 5, 12, 9, 0, 0, 0, time.UTC)
-	r.run(later)
-	if _, invs := r.customerCounts(); invs != 0 {
-		t.Fatalf("a draft was billed: %d invoices, want 0", invs)
-	}
-
-	// Activation starts it and bills day 1 from the activation instant.
-	act := r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/activate", later, nil, http.StatusOK)
-	if got := flowStr(act, "status"); got != string(domain.SubscriptionActive) {
-		t.Fatalf("status after activate = %q, want active", got)
-	}
-	invs := r.invoices()
-	if len(invs) != 1 {
-		r.logInvoices(invs)
-		t.Fatalf("after activate: %d invoices, want 1", len(invs))
-	}
-	if want := time.Date(2026, 5, 12, 0, 0, 0, 0, time.UTC); !invs[0].start.Equal(want) {
-		t.Fatalf("day-1 invoice starts %v, want the activation day %v", invs[0].start, want)
+	if subs, invs := r.customerCounts(); subs != 1 || invs != 1 {
+		t.Fatalf("%d subscriptions and %d invoices, want 1 and 1 (day-1 bill)", subs, invs)
 	}
 }
 
-// TestCreateSubscription_RefusesAmbiguousStart: a field that used to choose
-// the start, or a start the API cannot honor, is a 422 naming it, and nothing
-// is written.
+// TestCreateSubscription_RefusesAmbiguousStart: a create has no field that
+// chooses another start, so a body that sends one (start_now, status) is a
+// 422 naming it, and nothing is written. Ignoring "status": "draft" would
+// start and bill a subscription the caller asked to hold back.
 func TestCreateSubscription_RefusesAmbiguousStart(t *testing.T) {
 	r := newLagRigBare(t, "in_advance", 0)
 	cases := []struct {
 		name, param string
 		extra       map[string]any
 	}{
-		// start_now is gone: true is now the default and false is spelled
-		// status "draft". A caller still sending it is told, not ignored.
 		{"start_now true", "start_now", map[string]any{"start_now": true}},
 		{"start_now false", "start_now", map[string]any{"start_now": false}},
-		// A draft does not start, so it cannot start a trial; activating a
-		// draft starts billing at once.
-		{"draft with a trial", "trial_days", map[string]any{"status": "draft", "trial_days": 14}},
-		// status takes only "draft" on create.
-		{"status active", "status", map[string]any{"status": "active"}},
-		{"status trialing", "status", map[string]any{"status": "trialing"}},
-		// An empty or null status is not a third way to say "start now": a
-		// template that left the value unset must not start and bill.
-		{"status empty", "status", map[string]any{"status": ""}},
-		{"status null", "status", map[string]any{"status": nil}},
+		{"status draft", "status", map[string]any{"status": "draft"}},
 	}
 	for i, tc := range cases {
 		code, raw := r.do(http.MethodPost, "/v1/subscriptions", startsNowAt, r.startsNowBody(fmt.Sprintf("refused-%d", i), "calendar", tc.extra))
@@ -380,7 +316,7 @@ func TestCreateSubscription_RefusesAmbiguousStart(t *testing.T) {
 	}
 }
 
-// TestCreateSubscription_RetryCreatesOneAndBillsOnce: the create now bills on
+// TestCreateSubscription_RetryCreatesOneAndBillsOnce: the create bills on
 // day 1, so a retried create must not make a second subscription or a second
 // invoice. With the same Idempotency-Key the retry (serial or concurrent) gets
 // the first answer; without a key the same code is refused with 409. Either

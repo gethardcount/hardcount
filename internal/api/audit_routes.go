@@ -246,7 +246,6 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 
 	// --- subscriptions ---------------------------------------------------
 	{"POST", "/v1/subscriptions"}:                                      explicit("subscription.Handler.create → Log(create, subscription)."),
-	{"POST", "/v1/subscriptions/{id}/activate"}:                        explicit("subscription.Handler.activate → Log(activate, subscription)."),
 	{"POST", "/v1/subscriptions/{id}/cancel"}:                          explicit("subscription.Service.Cancel → LogInTx(cancel, subscription) on the cancel tx (single writer: operator route AND dunning's terminal cancel)."),
 	{"POST", "/v1/subscriptions/{id}/schedule-cancel"}:                 explicit("subscription.Handler.scheduleCancel → Log(update, subscription: cancel_scheduled)."),
 	{"DELETE", "/v1/subscriptions/{id}/scheduled-cancel"}:              explicit("subscription.Handler.clearScheduledCancel → Log(update, subscription; metadata action=cancel_cleared)."),

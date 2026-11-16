@@ -350,20 +350,18 @@ func TestBillingStatus_AnotherSubscriptionsGraceIsNotChecked(t *testing.T) {
 	}
 }
 
-// TestBillingStatus_OutsideSubscription_DraftActivatedLaterThatDay pins a
-// later change, activation: a draft created the day before and
-// activated at 15:00 on day D starts its first period at midnight of D
-// (ADR-012), so it bills an event answered outside_subscription at 09:00
-// that day (review round 4 on #1390).
-func TestBillingStatus_OutsideSubscription_DraftActivatedLaterThatDay(t *testing.T) {
+// TestBillingStatus_OutsideSubscription_CreatedLaterThatDay pins a later
+// change, a create: a subscription created at 15:00 on day D starts its
+// first period at midnight of D (ADR-012), so it bills an event answered
+// outside_subscription at 09:00 that day.
+func TestBillingStatus_OutsideSubscription_CreatedLaterThatDay(t *testing.T) {
 	r := newLagRigBare(t, "in_arrears", 0)
-	r.newSub("draft", r.planA, dayAt(-6, 0), map[string]any{"status": "draft"})
 	out := r.postLabelled("calls", "d-0900", dayAt(9, 0), dayAt(9, 5), 9, nil)
-	wantStatus(t, "event while the subscription is a draft", out, "outside_subscription")
+	wantStatus(t, "event before the subscription is created", out, "outside_subscription")
 
-	r.must(http.MethodPost, "/v1/subscriptions/"+r.subID+"/activate", dayAt(15, 0), nil, http.StatusOK)
+	r.newSub("later", r.planA, dayAt(15, 0), nil)
 	if s := r.sub(); s.CurrentBillingPeriodStart == nil || !s.CurrentBillingPeriodStart.Equal(uwDay) {
-		t.Fatalf("period start after the activation = %v, want midnight of the day %v", s.CurrentBillingPeriodStart, uwDay)
+		t.Fatalf("period start after the create = %v, want midnight of the day %v", s.CurrentBillingPeriodStart, uwDay)
 	}
 	if got := r.closePeriod(uwDay).sum("usage"); got != 9 {
 		t.Errorf("first invoice usage = %dc, want 9c: the 09:00 event is in the first period", got)

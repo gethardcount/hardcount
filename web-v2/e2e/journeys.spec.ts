@@ -179,7 +179,7 @@ test('create a subscription for a customer', async ({ page }) => {
 })
 
 // A plan billed in advance: a subscription that starts bills its first month
-// at once, so "bills nothing" below is something the test can see.
+// at once.
 function createAdvancePlan(): Promise<Plan> {
   const id = uniq()
   return api<Plan>('POST', '/plans', {
@@ -195,7 +195,6 @@ test('a new subscription starts now and bills its first month', async ({ page })
   await page.goto(`/customers/${customer.id}`)
   await page.getByRole('button', { name: 'Create subscription' }).click()
   const dialog = page.getByRole('dialog', { name: 'Create subscription' })
-  await expect(dialog.getByRole('checkbox', { name: 'Create as draft' })).not.toBeChecked()
   await dialog.getByLabel('Display name').fill(`UI Now ${id}`)
   await dialog.getByLabel('Code').fill(`ui-now-${id}`)
   await dialog.getByLabel('Plan', { exact: true }).selectOption({ label: plan.name })
@@ -204,44 +203,6 @@ test('a new subscription starts now and bills its first month', async ({ page })
 
   const subs = await api<{ data: Subscription[] }>('GET', `/subscriptions?customer_id=${customer.id}`)
   expect(subs.data.map(s => s.status)).toEqual(['active'])
-  expect(await invoicesFor(customer.id)).toHaveLength(1)
-})
-
-test('a subscription created as a draft bills nothing until it is activated', async ({ page }) => {
-  const plan = await createAdvancePlan()
-  const customer = await createCustomer()
-  const id = uniq()
-  await page.goto(`/customers/${customer.id}`)
-  await page.getByRole('button', { name: 'Create subscription' }).click()
-  const dialog = page.getByRole('dialog', { name: 'Create subscription' })
-  await dialog.getByLabel('Display name').fill(`UI Draft ${id}`)
-  await dialog.getByLabel('Code').fill(`ui-draft-${id}`)
-  await dialog.getByLabel('Plan', { exact: true }).selectOption({ label: plan.name })
-  await dialog.getByRole('checkbox', { name: 'Create as draft' }).click()
-  // A draft does not start, so it cannot start a trial.
-  await expect(dialog.getByLabel('Trial period')).toBeDisabled()
-  await dialog.getByRole('button', { name: 'Create subscription' }).click()
-  await expect(dialog).toBeHidden()
-
-  const subs = await api<{ data: Subscription[] }>('GET', `/subscriptions?customer_id=${customer.id}`)
-  expect(subs.data.map(s => s.status)).toEqual(['draft'])
-  expect(await invoicesFor(customer.id)).toHaveLength(0)
-
-  await page.goto(`/subscriptions/${subs.data[0].id}`)
-  // Activate asks first: billing starts now, and this plan is billed in
-  // advance, so the first period is invoiced at once. Cancel changes nothing.
-  await page.getByRole('button', { name: 'Activate' }).click()
-  const activateConfirm = page.getByRole('alertdialog', { name: 'Activate this subscription?' })
-  await expect(activateConfirm).toContainText('The first billing period starts now.')
-  await expect(activateConfirm).toContainText('It is invoiced now')
-  await activateConfirm.getByRole('button', { name: 'Cancel' }).click()
-  await expect(activateConfirm).toBeHidden()
-  expect((await api<Subscription>('GET', `/subscriptions/${subs.data[0].id}`)).status).toBe('draft')
-  await page.getByRole('button', { name: 'Activate' }).click()
-  await activateConfirm.getByRole('button', { name: 'Activate', exact: true }).click()
-  await expect(page.getByRole('region', { name: /^Notifications/ }).getByText('Subscription activated', { exact: true })).toBeVisible()
-  const after = await api<Subscription>('GET', `/subscriptions/${subs.data[0].id}`)
-  expect(after.status).toBe('active')
   expect(await invoicesFor(customer.id)).toHaveLength(1)
 })
 

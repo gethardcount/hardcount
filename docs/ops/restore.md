@@ -254,7 +254,7 @@ DELETE FROM stripe_provider_credentials WHERE tenant_id = 'hc_ten_…' AND livem
 2. **Decide on the [queued emails and webhooks](#queued-emails-and-webhooks)** before you start: they go out when Hardcount starts.
 3. **Hold what can charge a card,** until step 3 of [Redo the changes made after the backup](#redo-the-changes-made-after-the-backup) ends the holds. Hardcount takes payments as soon as it starts, and the restored invoices do not yet show the voids, write-offs and payments made after the backup, or the credit for a listed payment. A customer who paid by bank transfer after the backup could pay the same invoice again by card.
    - **Block the payment pages,** the paths that start with `/v1/public/`, at your proxy. The pay links in queued emails lead there too. With the one-VM Caddy, add `respond /v1/public/* 503` inside the site block of `/etc/caddy/Caddyfile`, above `reverse_proxy`, and run `sudo systemctl reload caddy`.
-   - **Hold your app's calls that charge or refund.** These are creating, activating or changing a subscription, a billing run (`POST /v1/billing/run`), finalizing an invoice or collecting its payment (`POST /v1/invoices/{id}/collect`), and credit notes. Usage events can go on.
+   - **Hold your app's calls that charge or refund.** These are creating or changing a subscription, a billing run (`POST /v1/billing/run`), finalizing an invoice or collecting its payment (`POST /v1/invoices/{id}/collect`), and credit notes. Usage events can go on.
    - **Keep your team out of the dashboard.** Only the person doing this restore uses it, for the steps of this page. Its buttons, such as **Charge now**, **Collect payment** and **Finalize**, charge cards.
 4. **Start it.** On one VM:
 

@@ -70,7 +70,7 @@ test('trialBadgeEndsAt: only a subscription still in its trial shows a trial bad
   assert.equal(trialBadgeEndsAt({ status: 'trialing', trial_end_at: end }), end)
   // A trial that ended (or was ended now) leaves trial_end_at behind: an
   // active, paying subscription read a red "Expired" badge (sweep E5).
-  for (const status of ['active', 'canceled', 'paused', 'draft']) {
+  for (const status of ['active', 'canceled', 'paused']) {
     assert.equal(trialBadgeEndsAt({ status, trial_end_at: end }), null, status)
   }
   assert.equal(trialBadgeEndsAt({ status: 'trialing' }), null)

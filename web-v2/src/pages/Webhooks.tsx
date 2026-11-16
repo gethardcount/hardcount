@@ -381,7 +381,6 @@ const EVENT_GROUPS: { label: string; events: { type: string; description: string
     label: 'Subscription',
     events: [
       { type: 'subscription.created', description: 'Subscription created' },
-      { type: 'subscription.activated', description: 'Subscription activated' },
       { type: 'subscription.canceled', description: 'Subscription canceled' },
       { type: 'subscription.cancel_scheduled', description: 'Cancellation scheduled for the period end' },
       { type: 'subscription.cancel_cleared', description: 'A scheduled cancellation was cleared' },

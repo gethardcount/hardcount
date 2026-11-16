@@ -79,7 +79,7 @@ func TestFirstPlanInterval_ReadErrorIsAnError(t *testing.T) {
 	}
 }
 
-// TestAnchoringPlanReadError_EachCallerStops: each of the five callers of
+// TestAnchoringPlanReadError_EachCallerStops: each caller of
 // firstPlanInterval returns the plan read error and writes nothing. Before
 // #1449 each anchored the period as monthly and went on: a yearly plan got a
 // one-month first period, billed as a month.
@@ -89,9 +89,9 @@ func TestAnchoringPlanReadError_EachCallerStops(t *testing.T) {
 	ctx := context.Background()
 	now := time.Date(2025, 11, 29, 10, 0, 0, 0, time.UTC)
 	yearly := map[string]domain.Plan{"p": {ID: "p", BillingInterval: domain.BillingYearly}}
-	input := func(code string, trialDays int, status domain.SubscriptionStatus) CreateInput {
+	input := func(code string, trialDays int) CreateInput {
 		return CreateInput{Code: code, DisplayName: "n", CustomerID: "c",
-			Items: []CreateItemInput{{PlanID: "p"}}, TrialDays: trialDays, Status: status}
+			Items: []CreateItemInput{{PlanID: "p"}}, TrialDays: trialDays}
 	}
 	// setup builds a subscription with a working reader, then breaks the
 	// anchoring read for the call under test.
@@ -119,7 +119,7 @@ func TestAnchoringPlanReadError_EachCallerStops(t *testing.T) {
 		mem := newMemStore()
 		svc := NewService(mem, clock.NewFake(now))
 		svc.SetPlanReader(&anchorReadFails{fakePlanReader: fakePlanReader{plans: yearly}, err: errPlanReadDown})
-		_, err := svc.Create(ctx, "t1", input("trial", 14, ""))
+		_, err := svc.Create(ctx, "t1", input("trial", 14))
 		wantReadErr(t, err)
 		if len(mem.subs) != 0 {
 			t.Fatalf("%d subscriptions written, want none", len(mem.subs))
@@ -130,24 +130,15 @@ func TestAnchoringPlanReadError_EachCallerStops(t *testing.T) {
 		mem := newMemStore()
 		svc := NewService(mem, clock.NewFake(now))
 		svc.SetPlanReader(&anchorReadFails{fakePlanReader: fakePlanReader{plans: yearly}, err: errPlanReadDown})
-		_, err := svc.Create(ctx, "t1", input("now", 0, ""))
+		_, err := svc.Create(ctx, "t1", input("now", 0))
 		wantReadErr(t, err)
 		if len(mem.subs) != 0 {
 			t.Fatalf("%d subscriptions written, want none", len(mem.subs))
 		}
 	})
 
-	t.Run("Activate a draft", func(t *testing.T) {
-		svc, mem, _, sub := setup(t, input("draft", 0, domain.SubscriptionDraft))
-		_, err := svc.Activate(ctx, "t1", sub.ID)
-		wantReadErr(t, err)
-		if got := mem.subs[sub.ID]; got.Status != domain.SubscriptionDraft || got.CurrentBillingPeriodStart != nil {
-			t.Fatalf("after the failed activate: status %q, period %v; want an unchanged draft", got.Status, got.CurrentBillingPeriodStart)
-		}
-	})
-
 	t.Run("EndTrial", func(t *testing.T) {
-		svc, mem, _, sub := setup(t, input("end-trial", 14, ""))
+		svc, mem, _, sub := setup(t, input("end-trial", 14))
 		_, err := svc.EndTrial(ctx, "t1", sub.ID)
 		wantReadErr(t, err)
 		if got := mem.subs[sub.ID]; got.Status != domain.SubscriptionTrialing {
@@ -156,7 +147,7 @@ func TestAnchoringPlanReadError_EachCallerStops(t *testing.T) {
 	})
 
 	t.Run("ExtendTrial", func(t *testing.T) {
-		svc, mem, _, sub := setup(t, input("extend-trial", 14, ""))
+		svc, mem, _, sub := setup(t, input("extend-trial", 14))
 		_, err := svc.ExtendTrial(ctx, "t1", sub.ID, sub.TrialEndAt.AddDate(0, 0, 7))
 		wantReadErr(t, err)
 		if got := mem.subs[sub.ID]; !got.TrialEndAt.Equal(*sub.TrialEndAt) {

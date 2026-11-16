@@ -100,21 +100,19 @@ type SubscriptionCurrency struct {
 // store in api/router.go.
 //
 // The service calls it under the customer-rules lock
-// (Store.WithCustomerRulesLock). Subscription creates and draft activations
-// hold the same lock, so the answer counts every one that committed first.
+// (Store.WithCustomerRulesLock). Subscription creates hold the same lock, so
+// the answer counts every one that committed first.
 // A trial that ends does not take the lock; the implementation must still
 // count that subscription when it moves from trialing to active between its
 // reads.
 type SubscriptionChecker interface {
 	// NonTerminalForCustomer returns the subscriptions that still bill:
 	// active or trialing, including an active one with a scheduled cancel
-	// (it bills until the boundary). A draft is left out, so an abandoned
-	// draft never blocks an archive.
+	// (it bills until the boundary).
 	NonTerminalForCustomer(ctx context.Context, tenantID, customerID string) ([]NonTerminalSubscription, error)
-	// PlanCurrencies returns the plan currencies of every draft, trialing
-	// and active subscription of the customer, however many, a pending plan
-	// change's plan included. A draft counts: it bills from its activation
-	// (ADR-100).
+	// PlanCurrencies returns the plan currencies of every trialing and
+	// active subscription of the customer, however many, a pending plan
+	// change's plan included (ADR-100).
 	PlanCurrencies(ctx context.Context, tenantID, customerID string) ([]SubscriptionCurrency, error)
 }
 
@@ -446,9 +444,9 @@ func (s *Service) Update(ctx context.Context, tenantID, id string, input UpdateI
 			// Archive only hides the customer + blocks NEW subscriptions;
 			// existing unpaid invoices remain collectible and dunning continues
 			// (both are invoice-driven). The operator cancels subs first, then
-			// archives. The check runs under the lock, so a create or an
-			// activation that committed before it is counted, and one that
-			// comes later waits and then sees the archive.
+			// archives. The check runs under the lock, so a create that
+			// committed before it is counted, and one that comes later waits
+			// and then sees the archive.
 			if status == domain.CustomerStatusArchived && locked.Status != domain.CustomerStatusArchived {
 				if s.subChecker == nil {
 					// Fail closed: an unenforced archive silently keeps charging
@@ -669,9 +667,9 @@ func (s *Service) UpsertBillingProfile(ctx context.Context, tenantID string, bp 
 	bp.ProfileStatus = deriveProfileStatus(bp)
 
 	// The currency check and the write run under the customer-rules lock. A
-	// subscription create or activation holds the same lock until it
-	// commits, so the check counts one that committed first, and one that
-	// comes later waits and then checks against this profile.
+	// subscription create holds the same lock until it commits, so the check
+	// counts one that committed first, and one that comes later waits and
+	// then checks against this profile.
 	var result domain.CustomerBillingProfile
 	var cust domain.Customer
 	err := s.store.WithCustomerRulesLock(ctx, tenantID, bp.CustomerID, func(tx *sql.Tx, locked domain.Customer) error {
@@ -725,7 +723,7 @@ func (s *Service) UpsertBillingProfile(ctx context.Context, tenantID string, bp 
 }
 
 // checkProfileCurrency refuses a profile currency that differs from a plan
-// currency of the customer's draft, trialing or active subscriptions
+// currency of the customer's trialing or active subscriptions
 // (InvalidState). The profile currency replaces the plan currency on every
 // invoice, so a mismatch would relabel plan prices without conversion
 // ($100 invoiced as €100). An empty currency checks nothing, and a currency

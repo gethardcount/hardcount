@@ -94,9 +94,8 @@ func intervalOpen(ctx context.Context, tx *sql.Tx, ic intervalSubCtx, itemID, pl
 }
 
 // intervalOpenForItems opens one interval per item at the subscription's
-// current_billing_period_start — the creation/activation/trial-convert
-// writer. The stored period start is used AS IS: it is already
-// day-snapped where policy says so (firstPeriodForActivate /
+// current_billing_period_start — the creation/trial-end writer. The stored period start is used AS IS: it is already
+// day-snapped where policy says so (firstPeriodFromStart /
 // firstPeriodAfterTrial), and deliberately mid-day at TZ-seam and
 // trial-stub starts — re-snapping here would re-introduce the
 // derive-at-read bug class this table exists to end.
@@ -117,9 +116,8 @@ func intervalOpenForItems(ctx context.Context, tx *sql.Tx, sub domain.Subscripti
 // (ADR-012 amendment 2026-07-26): an item added on the period-start
 // calendar day (tenant TZ) bills from periodStart itself — the same rule
 // the engine's itemBaseSegments applies to the item's first 'add'; any
-// other day opens at the raw instant. Draft/trialing subs open NOTHING —
-// their activation writer owns the open (there is no billable lifetime
-// before activation).
+// other day opens at the raw instant. A trialing sub opens NOTHING: the
+// trial's end owns the open (there is no billable lifetime before it).
 func intervalOpenForAdd(ctx context.Context, tx *sql.Tx, itemID, subscriptionID, planID string, qty int64, now time.Time) error {
 	ic, err := intervalSubContext(ctx, tx, subscriptionID)
 	if err != nil {
@@ -132,7 +130,7 @@ func intervalOpenForAdd(ctx context.Context, tx *sql.Tx, itemID, subscriptionID,
 			openAt = *ic.periodStart
 		}
 		return intervalOpen(ctx, tx, ic, itemID, planID, qty, openAt, "add")
-	case domain.SubscriptionDraft, domain.SubscriptionTrialing:
+	case domain.SubscriptionTrialing:
 		return nil
 	default:
 		return errs.InvalidState(fmt.Sprintf("cannot add item to %s subscription %s", ic.status, subscriptionID))
@@ -190,9 +188,9 @@ func intervalTransition(ctx context.Context, tx *sql.Tx, itemID, subscriptionID 
 	}
 
 	if len(ivs) == 0 {
-		// Never-activated subs have no intervals — their items' plan and
-		// quantity are still just draft/trial configuration, and the
-		// activation writer opens with whatever values hold at the flip.
+		// A trialing sub has no intervals: its items' plan and quantity are
+		// still trial configuration, and the trial's end opens with whatever
+		// values hold at the flip.
 		if ic.status == domain.SubscriptionActive {
 			return fmt.Errorf("interval transition (%s): active subscription %s item %s has no billing intervals", source, subscriptionID, itemID)
 		}
@@ -300,8 +298,8 @@ func intervalCloseForRemove(ctx context.Context, tx *sql.Tx, itemID, subscriptio
 // contracted-retroactive floor: a cancel instant predating an interval's
 // open (the remediation-cohort shape) zero-widths that interval rather
 // than minting a negative range — the earlier, already-billed intervals
-// keep their history. Draft/trialing cancels sweep zero rows (nothing
-// ever opened), which is correct, not an error.
+// keep their history. A trialing cancel sweeps zero rows (nothing ever
+// opened), which is correct, not an error.
 func intervalCloseAllForCancel(ctx context.Context, tx *sql.Tx, sub domain.Subscription, canceledAt time.Time) error {
 	closeAt := canceledAt
 	if sub.CurrentBillingPeriodEnd != nil && sub.CurrentBillingPeriodEnd.Before(closeAt) {

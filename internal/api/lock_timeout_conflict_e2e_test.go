@@ -23,10 +23,10 @@ import (
 // request with the same Idempotency-Key then runs once (ADR-136, amended
 // 2026-11-10).
 //
-// The six new routes, with the item change that already converted a
-// deadlock, are the request-path takers of the customer-rules lock:
-// subscription create and activate, item add and item remove (both branches
-// of each), and customer update and billing profile. A second session holds
+// These routes, with the item change that already converted a deadlock, are
+// the request-path takers of the customer-rules lock: subscription create,
+// item add and item remove (both branches of each), and customer update and
+// billing profile. A second session holds
 // that lock. The cancel, a route that already converted a deadlock, waits for
 // the subscription row instead. Manual invoice create (a bare header, and
 // with lines) waits for the account's invoice-number row, which it takes in
@@ -164,27 +164,6 @@ func TestE2E_LockWaitEnded_AnswersConflict_SameKeyRunsAgain(t *testing.T) {
 			once: func(t *testing.T, r *lagRig) {
 				if subs, invs := r.customerCounts(); subs != 1 || invs != 1 {
 					t.Fatalf("%d subscriptions and %d invoices, want one of each", subs, invs)
-				}
-			},
-		},
-		{
-			name: "subscription_activate", rig: createdRig(false, map[string]any{"status": "draft"}), hold: holdCustomerRules,
-			method: http.MethodPost, path: func(r *lagRig) string { return "/v1/subscriptions/" + r.subID + "/activate" },
-			at: lagP0, want: http.StatusOK,
-			unchanged: func(t *testing.T, r *lagRig) {
-				if s := r.sub(); s.Status != domain.SubscriptionDraft {
-					t.Fatalf("subscription %s, want draft", s.Status)
-				}
-				if _, invs := r.customerCounts(); invs != 0 {
-					t.Fatalf("%d invoices, want none", invs)
-				}
-			},
-			once: func(t *testing.T, r *lagRig) {
-				if s := r.sub(); s.Status != domain.SubscriptionActive {
-					t.Fatalf("subscription %s, want active", s.Status)
-				}
-				if _, invs := r.customerCounts(); invs != 1 {
-					t.Fatalf("%d invoices, want the one first invoice", invs)
 				}
 			},
 		},

@@ -131,8 +131,6 @@ Recipe, meter and test clock: [quick start](quick-start.md#words-on-this-page).
 4. **Put the customer on the plan.** This makes a subscription. It starts
    when you create it: its first month starts at 00:00 on the clock's day,
    in your account's billing time zone.
-   (To set one up that bills nothing yet, send `"status": "draft"` and
-   activate it later.)
 
    <!-- docs-run: command -->
    ```bash

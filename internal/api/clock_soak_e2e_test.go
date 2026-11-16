@@ -90,12 +90,10 @@ func TestE2E_ClockSoak_MonthEndAnchorThroughYearBoundary(t *testing.T) {
 
 	resp = doPost(t, ts, "/v1/subscriptions", auth, map[string]any{
 		"code": "soak-sub", "display_name": "Soak Sub", "customer_id": custID,
-		"items": []map[string]any{{"plan_id": planID}}, "billing_time": "anniversary", "status": "draft",
+		"items": []map[string]any{{"plan_id": planID}}, "billing_time": "anniversary",
 	})
 	assertStatus(t, resp, 201)
 	subID := readJSON(t, resp)["id"].(string)
-	resp = doPost(t, ts, "/v1/subscriptions/"+subID+"/activate", auth, nil)
-	assertStatus(t, resp, 200)
 
 	// The expected period-end DATES for a day-31 anchor (ADR-055 clamp):
 	// Feb 28 '26, Mar 31, Apr 30, May 31, Jun 30, Jul 31, Aug 31, Sep 30,
@@ -136,7 +134,7 @@ func TestE2E_ClockSoak_MonthEndAnchorThroughYearBoundary(t *testing.T) {
 		}
 	}
 
-	// Activation must open the first period ending Feb 28.
+	// Creating the subscription must open the first period ending Feb 28.
 	assertPeriodEndDay(0, ends[0])
 
 	countInvoices := func() int {

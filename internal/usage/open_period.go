@@ -87,9 +87,8 @@ import (
 //
 // A subscription's first period starts at the start of its first day, and
 // an item added on a period's first day bills from the period start
-// (ADR-012). So a subscription created or activated (a draft), or such an
-// item added, later on the event's day can bill an event flagged earlier
-// that day. That is a later change: the flag was true when the event
+// (ADR-012). So a subscription created, or such an item added, later on the
+// event's day can bill an event flagged earlier that day. That is a later change: the flag was true when the event
 // arrived.
 //
 // The meter's aggregation is read the other way round: on the write's own

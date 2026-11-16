@@ -3,7 +3,6 @@ package subscription
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"fmt"
 	"maps"
 	"sort"
@@ -507,32 +506,6 @@ func (m *memStore) activateAfterTrial(ctx context.Context, tenantID, id string, 
 	return s, nil
 }
 
-func (m *memStore) ActivateDraftWithBill(ctx context.Context, tenantID, id string, at, periodStart, periodEnd time.Time, anchorDay int, billFn func(tx *sql.Tx, activated domain.Subscription) error) (domain.Subscription, error) {
-	prev, existed := m.subs[id]
-	s, ok := m.subs[id]
-	if !ok || s.TenantID != tenantID {
-		return domain.Subscription{}, errs.ErrNotFound
-	}
-	if s.Status != domain.SubscriptionDraft {
-		return domain.Subscription{}, errs.InvalidState("Only a draft subscription can be activated.")
-	}
-	s.Status = domain.SubscriptionActive
-	s.ActivatedAt, s.StartedAt = &at, &at
-	s.CurrentBillingPeriodStart, s.CurrentBillingPeriodEnd = &periodStart, &periodEnd
-	s.NextBillingAt = &periodEnd
-	s.BillingAnchorDay = anchorDay
-	m.subs[id] = s
-	if billFn != nil {
-		if err := billFn(nil, s); err != nil {
-			if existed {
-				m.subs[id] = prev
-			}
-			return domain.Subscription{}, err
-		}
-	}
-	return s, nil
-}
-
 func (m *memStore) ActivateAfterTrialWithBill(ctx context.Context, tenantID, id string, at time.Time, billFn func(tx *sql.Tx, activated domain.Subscription) error) (domain.Subscription, error) {
 	prev, existed := m.subs[id]
 	activated, err := m.activateAfterTrial(ctx, tenantID, id, at)
@@ -955,30 +928,6 @@ func TestCreate(t *testing.T) {
 	svc := NewService(newMemStore(), nil)
 	ctx := context.Background()
 
-	t.Run("draft only when asked", func(t *testing.T) {
-		sub, err := svc.Create(ctx, "t1", CreateInput{
-			Code: "sub-001", DisplayName: "Pro Monthly",
-			CustomerID: "cus_1",
-			Items:      []CreateItemInput{{PlanID: "pln_1"}},
-			Status:     domain.SubscriptionDraft,
-		})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if sub.Status != domain.SubscriptionDraft {
-			t.Errorf("got status %q, want draft", sub.Status)
-		}
-		if sub.StartedAt != nil || sub.ActivatedAt != nil || sub.CurrentBillingPeriodStart != nil || sub.NextBillingAt != nil {
-			t.Errorf("a draft must not start: started %v activated %v period %v next %v", sub.StartedAt, sub.ActivatedAt, sub.CurrentBillingPeriodStart, sub.NextBillingAt)
-		}
-		if sub.BillingTime != domain.BillingTimeCalendar {
-			t.Errorf("got billing_time %q, want calendar", sub.BillingTime)
-		}
-		if len(sub.Items) != 1 || sub.Items[0].PlanID != "pln_1" || sub.Items[0].Quantity != 1 {
-			t.Errorf("items: got %+v, want single pln_1 qty=1", sub.Items)
-		}
-	})
-
 	t.Run("multiple items", func(t *testing.T) {
 		sub, err := svc.Create(ctx, "t1", CreateInput{
 			Code: "sub-multi", DisplayName: "Bundle",
@@ -993,30 +942,6 @@ func TestCreate(t *testing.T) {
 		}
 		if len(sub.Items) != 2 {
 			t.Fatalf("items count: got %d, want 2", len(sub.Items))
-		}
-	})
-
-	t.Run("status other than draft is refused", func(t *testing.T) {
-		for _, st := range []domain.SubscriptionStatus{domain.SubscriptionActive, domain.SubscriptionTrialing, domain.SubscriptionCanceled, "later"} {
-			_, err := svc.Create(ctx, "t1", CreateInput{
-				Code: "sub-bad-status", DisplayName: "Bad", CustomerID: "cus_1",
-				Items: []CreateItemInput{{PlanID: "pln_1"}}, Status: st,
-			})
-			var de *errs.DomainError
-			if !errors.As(err, &de) || de.Field != "status" {
-				t.Errorf("status %q: got %v, want a validation error on status", st, err)
-			}
-		}
-	})
-
-	t.Run("a draft with a trial is refused", func(t *testing.T) {
-		_, err := svc.Create(ctx, "t1", CreateInput{
-			Code: "sub-draft-trial", DisplayName: "Draft trial", CustomerID: "cus_1",
-			Items: []CreateItemInput{{PlanID: "pln_1"}}, Status: domain.SubscriptionDraft, TrialDays: 14,
-		})
-		var de *errs.DomainError
-		if !errors.As(err, &de) || de.Field != "trial_days" {
-			t.Errorf("got %v, want a validation error on trial_days", err)
 		}
 	})
 
@@ -1043,6 +968,12 @@ func TestCreate(t *testing.T) {
 			t.Error("a start-now create must stamp activated_at (else invisible to MRR movement)")
 		} else if sub.StartedAt != nil && !sub.ActivatedAt.Equal(*sub.StartedAt) {
 			t.Errorf("activated_at %v should equal started_at %v on a start-now create", *sub.ActivatedAt, *sub.StartedAt)
+		}
+		if sub.BillingTime != domain.BillingTimeCalendar {
+			t.Errorf("got billing_time %q, want calendar", sub.BillingTime)
+		}
+		if len(sub.Items) != 1 || sub.Items[0].PlanID != "pln_1" || sub.Items[0].Quantity != 1 {
+			t.Errorf("items: got %+v, want single pln_1 qty=1", sub.Items)
 		}
 	})
 
@@ -1575,87 +1506,13 @@ func TestPeriod_DayGradeSnap(t *testing.T) {
 	}
 }
 
-var errWiring = errors.New("injected bill failure")
-
-func TestActivateAndCancel(t *testing.T) {
+func TestCancel_ActiveThenCanceled(t *testing.T) {
 	svc := NewService(newMemStore(), nil)
 	ctx := context.Background()
 
 	sub, _ := svc.Create(ctx, "t1", CreateInput{
 		Code: "sub-act", DisplayName: "Test", CustomerID: "c",
-		Items: []CreateItemInput{{PlanID: "p"}}, Status: domain.SubscriptionDraft,
-	})
-
-	t.Run("activate draft", func(t *testing.T) {
-		activated, err := svc.Activate(ctx, "t1", sub.ID)
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if activated.Status != domain.SubscriptionActive {
-			t.Errorf("got status %q, want active", activated.Status)
-		}
-	})
-
-	t.Run("cannot activate again", func(t *testing.T) {
-		_, err := svc.Activate(ctx, "t1", sub.ID)
-		if err == nil {
-			t.Fatal("expected error activating non-draft")
-		}
-	})
-
-	t.Run("activating a draft BILLS day-1 in the flip tx (ADR-056 sibling)", func(t *testing.T) {
-		// Pre-fix: Activate flipped status without ever calling the biller —
-		// the first in_advance base fee of a draft-then-activated sub was
-		// never invoiced by any path (revenue leak).
-		svcB := NewService(newMemStore(), nil)
-		fb := &fakeBiller{createTxOK: true, createTxInv: domain.Invoice{ID: "inv_day1"}}
-		svcB.SetBiller(fb)
-		draft, err := svcB.Create(ctx, "t1", CreateInput{
-			Code: "sub-act-bill", DisplayName: "ActBill", CustomerID: "c",
-			Items: []CreateItemInput{{PlanID: "p"}}, Status: domain.SubscriptionDraft,
-		})
-		if err != nil {
-			t.Fatalf("create draft: %v", err)
-		}
-		if fb.createTxCalls != 0 {
-			t.Fatalf("draft create must not bill, got %d", fb.createTxCalls)
-		}
-		activated, err := svcB.Activate(ctx, "t1", draft.ID)
-		if err != nil {
-			t.Fatalf("activate: %v", err)
-		}
-		if fb.createTxCalls != 1 {
-			t.Errorf("BillOnCreateTx calls = %d, want 1 (day-1 rides the flip tx)", fb.createTxCalls)
-		}
-		if fb.finalizeCalls != 1 {
-			t.Errorf("FinalizeOnCreateInvoice calls = %d, want 1 (post-commit external leg)", fb.finalizeCalls)
-		}
-		if activated.CurrentBillingPeriodStart == nil || activated.NextBillingAt == nil {
-			t.Error("activation must stamp the first billing period before billing")
-		}
-	})
-
-	t.Run("bill failure rolls the activation back — never an active sub with a lost invoice", func(t *testing.T) {
-		svcB := NewService(newMemStore(), nil)
-		fb := &fakeBiller{createTxErr: errWiring}
-		svcB.SetBiller(fb)
-		draft, err := svcB.Create(ctx, "t1", CreateInput{
-			Code: "sub-act-fail", DisplayName: "ActFail", CustomerID: "c",
-			Items: []CreateItemInput{{PlanID: "p"}}, Status: domain.SubscriptionDraft,
-		})
-		if err != nil {
-			t.Fatalf("create draft: %v", err)
-		}
-		if _, err := svcB.Activate(ctx, "t1", draft.ID); err == nil {
-			t.Fatal("expected activation to fail when the day-1 bill fails")
-		}
-		got, err := svcB.Get(ctx, "t1", draft.ID)
-		if err != nil {
-			t.Fatalf("get: %v", err)
-		}
-		if got.Status != domain.SubscriptionDraft {
-			t.Errorf("status = %s, want draft (atomic rollback)", got.Status)
-		}
+		Items: []CreateItemInput{{PlanID: "p"}},
 	})
 
 	t.Run("cancel active", func(t *testing.T) {
@@ -1679,33 +1536,10 @@ func TestActivateAndCancel(t *testing.T) {
 // TestCancel_NonTerminalStatuses locks in the industry-aligned cancel
 // state machine (Stripe / Lago / Recurly / Chargebee parity): cancel
 // works from every non-terminal status. Pre-fix, Hardcount rejected cancel
-// from draft and trialing — the trialing case is the dominant cancel
-// path (customer abandons during trial), so the rejection silently
-// trapped operators in the dashboard.
+// from trialing — the dominant cancel path (customer abandons during
+// trial), so the rejection silently trapped operators in the dashboard.
 func TestCancel_NonTerminalStatuses(t *testing.T) {
 	ctx := context.Background()
-
-	t.Run("cancel from draft", func(t *testing.T) {
-		svc := NewService(newMemStore(), nil)
-		sub, _ := svc.Create(ctx, "t1", CreateInput{
-			Code: "sub-draft", DisplayName: "Draft", CustomerID: "c",
-			Items:  []CreateItemInput{{PlanID: "p"}},
-			Status: domain.SubscriptionDraft,
-		})
-		if sub.Status != domain.SubscriptionDraft {
-			t.Fatalf("setup: expected draft, got %q", sub.Status)
-		}
-		canceled, _, err := svc.Cancel(ctx, "t1", sub.ID)
-		if err != nil {
-			t.Fatalf("cancel from draft: %v", err)
-		}
-		if canceled.Status != domain.SubscriptionCanceled {
-			t.Errorf("status: got %q, want canceled", canceled.Status)
-		}
-		if canceled.CanceledAt == nil {
-			t.Error("canceled_at must be set")
-		}
-	})
 
 	t.Run("cancel from trialing", func(t *testing.T) {
 		svc := NewService(newMemStore(), nil)
@@ -1979,7 +1813,6 @@ func TestScheduleCancel(t *testing.T) {
 			Code: "sub-sched", DisplayName: "Test", CustomerID: "c",
 			Items: []CreateItemInput{{PlanID: "p"}},
 		})
-		_, _ = svc.Activate(context.Background(), "t1", sub.ID)
 		// Stamp a billing period so cancel_at validation has something to compare against.
 		stored, _ := svc.Get(context.Background(), "t1", sub.ID)
 		stored.CurrentBillingPeriodStart = &periodStart
@@ -2104,7 +1937,6 @@ func TestPauseCollection(t *testing.T) {
 			Code: "sub-pause", DisplayName: "Test", CustomerID: "c",
 			Items: []CreateItemInput{{PlanID: "p"}},
 		})
-		_, _ = svc.Activate(context.Background(), "t1", sub.ID)
 		stored, _ := svc.Get(context.Background(), "t1", sub.ID)
 		return svc, stored
 	}
@@ -2615,15 +2447,10 @@ func TestProcessExpiredTrials(t *testing.T) {
 	})
 }
 
-// TestPeriodAnchoring locks in the post-Bug-1/2/11 contract for how the
-// first billing period anchors across every entry point (Create with
-// trial / Create that starts now / Activate from draft / EndTrial-early /
-// ExtendTrial). Calendar billing must produce a stub period bounded by
-// the next calendar month; anniversary must produce a full cycle from
-// the anchor instant. Pre-fix Create+trial+calendar dropped the stub
-// silently (revenue leak); pre-fix Activate hardcoded calendar and
-// backdated to month-start; pre-fix EndTrial / ExtendTrial left
-// period boundaries pointing at the original (now-wrong) anchor.
+// TestPeriodAnchoring: the first billing period anchors the same way from
+// every entry point (Create with a trial, Create that starts now, End trial,
+// Extend trial). Calendar billing gives a stub period that ends at the next
+// calendar month; anniversary gives a full cycle from the anchor instant.
 func TestPeriodAnchoring(t *testing.T) {
 	// Pick a mid-month "now" so the calendar-billing branch produces a
 	// non-trivial stub. UTC for all snaps — no tenant TZ surprises.
@@ -2699,55 +2526,46 @@ func TestPeriodAnchoring(t *testing.T) {
 		}
 	})
 
-	t.Run("Activate draft + calendar → period starts at activation day, NOT month start", func(t *testing.T) {
-		// Pre-fix Activate hardcoded beginningOfMonth(now) for period_start,
-		// backdating to Nov 1 and billing the customer for the full Nov
-		// cycle including days the sub was a draft.
+	t.Run("Create + calendar → period starts on the create day, NOT month start", func(t *testing.T) {
 		svc := NewService(newMemStore(), clock.NewFake(now))
-		sub, _ := svc.Create(ctx, "t1", CreateInput{
+		sub, err := svc.Create(ctx, "t1", CreateInput{
 			Code: "s", DisplayName: "n", CustomerID: "c",
 			Items:       []CreateItemInput{{PlanID: "p"}},
 			BillingTime: domain.BillingTimeCalendar,
-			Status:      domain.SubscriptionDraft,
 		})
-		if sub.Status != domain.SubscriptionDraft {
-			t.Fatalf("precondition: want draft, got %q", sub.Status)
-		}
-		activated, err := svc.Activate(ctx, "t1", sub.ID)
 		if err != nil {
-			t.Fatalf("Activate: %v", err)
+			t.Fatalf("Create: %v", err)
 		}
-		// period_start = day-snapped activation instant (Nov 29 00:00),
-		// NOT beginningOfMonth (Nov 1).
+		// period_start = the create instant snapped to its day (Nov 29
+		// 00:00), NOT the start of the month (Nov 1): the customer is not
+		// billed for days before the subscription existed.
 		wantPeriodStart := time.Date(2025, 11, 29, 0, 0, 0, 0, time.UTC)
 		wantPeriodEnd := time.Date(2025, 12, 1, 0, 0, 0, 0, time.UTC)
-		if !activated.CurrentBillingPeriodStart.Equal(wantPeriodStart) {
-			t.Errorf("period_start: got %v, want %v (NOT backdated to Nov 1)", activated.CurrentBillingPeriodStart, wantPeriodStart)
+		if !sub.CurrentBillingPeriodStart.Equal(wantPeriodStart) {
+			t.Errorf("period_start: got %v, want %v (NOT backdated to Nov 1)", sub.CurrentBillingPeriodStart, wantPeriodStart)
 		}
-		if !activated.CurrentBillingPeriodEnd.Equal(wantPeriodEnd) {
-			t.Errorf("period_end: got %v, want %v", activated.CurrentBillingPeriodEnd, wantPeriodEnd)
+		if !sub.CurrentBillingPeriodEnd.Equal(wantPeriodEnd) {
+			t.Errorf("period_end: got %v, want %v", sub.CurrentBillingPeriodEnd, wantPeriodEnd)
 		}
 	})
 
-	t.Run("Activate draft + anniversary → period starts at activation day, ends +1 month", func(t *testing.T) {
-		// Pre-fix Activate ignored sub.BillingTime entirely — an
-		// anniversary draft activated mid-month still got calendar-
-		// anchored periods. Lock the fix.
+	t.Run("Create + anniversary → period starts on the create day, ends +1 month", func(t *testing.T) {
 		svc := NewService(newMemStore(), clock.NewFake(now))
-		sub, _ := svc.Create(ctx, "t1", CreateInput{
+		sub, err := svc.Create(ctx, "t1", CreateInput{
 			Code: "s", DisplayName: "n", CustomerID: "c",
 			Items:       []CreateItemInput{{PlanID: "p"}},
 			BillingTime: domain.BillingTimeAnniversary,
-			Status:      domain.SubscriptionDraft,
 		})
-		activated, _ := svc.Activate(ctx, "t1", sub.ID)
+		if err != nil {
+			t.Fatalf("Create: %v", err)
+		}
 		wantPeriodStart := time.Date(2025, 11, 29, 0, 0, 0, 0, time.UTC)
 		wantPeriodEnd := time.Date(2025, 12, 29, 0, 0, 0, 0, time.UTC)
-		if !activated.CurrentBillingPeriodStart.Equal(wantPeriodStart) {
-			t.Errorf("period_start: got %v, want %v", activated.CurrentBillingPeriodStart, wantPeriodStart)
+		if !sub.CurrentBillingPeriodStart.Equal(wantPeriodStart) {
+			t.Errorf("period_start: got %v, want %v", sub.CurrentBillingPeriodStart, wantPeriodStart)
 		}
-		if !activated.CurrentBillingPeriodEnd.Equal(wantPeriodEnd) {
-			t.Errorf("period_end: got %v, want %v (anniversary cycle, NOT calendar)", activated.CurrentBillingPeriodEnd, wantPeriodEnd)
+		if !sub.CurrentBillingPeriodEnd.Equal(wantPeriodEnd) {
+			t.Errorf("period_end: got %v, want %v (anniversary cycle, NOT calendar)", sub.CurrentBillingPeriodEnd, wantPeriodEnd)
 		}
 	})
 

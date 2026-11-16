@@ -13,7 +13,6 @@
  */
 import type { CreateSubscriptionBodyBillingTime } from './createSubscriptionBodyBillingTime';
 import type { CreateSubscriptionBodyItemsItem } from './createSubscriptionBodyItemsItem';
-import type { CreateSubscriptionBodyStatus } from './createSubscriptionBodyStatus';
 
 export type CreateSubscriptionBody = {
   /**
@@ -33,24 +32,15 @@ export type CreateSubscriptionBody = {
   /** How monthly periods line up. See the subscription's `billing_time`. */
   billing_time?: CreateSubscriptionBodyBillingTime;
   /**
-     * Days of free trial; 0 means no trial. Above 0, the
+     * Days of free trial; 0 means no trial. At 0, the
+     * subscription is `active`, its first period starts today
+     * in the account's billing time zone (the clock's day for
+     * a customer on a test clock), and a non-zero base fee
+     * billed in advance is invoiced now. Above 0, the
      * subscription is `trialing` from now and its first paid
      * period starts on the day the trial ends.
      * @minimum 0
      * @maximum 730
      */
   trial_days?: number;
-  /**
-     * Leave it out and the subscription starts now. Without
-     * `trial_days` it is `active`, its first period starts
-     * today in the account's billing time zone (the clock's
-     * day for a customer on a test clock), and a non-zero base
-     * fee billed in advance is invoiced now. With `trial_days`
-     * above 0 it is `trialing` from now. Send `draft` to create it
-     * without starting it: it bills nothing until you activate
-     * it with `POST /v1/subscriptions/{id}/activate`. A draft
-     * cannot have a trial (`trial_days` above 0). An empty or
-     * null `status` is refused.
-     */
-  status?: CreateSubscriptionBodyStatus;
 };

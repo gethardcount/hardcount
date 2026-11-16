@@ -89,7 +89,6 @@ export * from './createPublicPaymentUpdateCheckout201';
 export * from './createSubscriptionBody';
 export * from './createSubscriptionBodyBillingTime';
 export * from './createSubscriptionBodyItemsItem';
-export * from './createSubscriptionBodyStatus';
 export * from './createTestClockBody';
 export * from './createUsageEventBatch422';
 export * from './createUsageEventBatchBodyItem';

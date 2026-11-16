@@ -84,7 +84,6 @@ export function subscriptionStatus(sub: SubscriptionStatusInput): StatusDisplay 
     case 'active': return { label: 'Active', tone: 'success' }
     case 'trialing': return { label: 'Trialing', tone: 'info' }
     case 'canceled': return { label: 'Canceled', tone: 'neutral' }
-    case 'draft': return { label: 'Draft', tone: 'neutral' }
   }
   return { label: humanizeStatus(sub.status), tone: 'neutral' }
 }

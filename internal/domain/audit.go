@@ -44,9 +44,11 @@ type AuditEntry struct {
 
 // Well-known audit actions.
 const (
-	AuditActionCreate   = "create"
-	AuditActionUpdate   = "update"
-	AuditActionDelete   = "delete"
+	AuditActionCreate = "create"
+	AuditActionUpdate = "update"
+	AuditActionDelete = "delete"
+	// AuditActionActivate has no writer: it is on rows written before draft
+	// subscriptions were removed.
 	AuditActionActivate = "activate"
 	AuditActionCancel   = "cancel"
 	AuditActionFinalize = "finalize"

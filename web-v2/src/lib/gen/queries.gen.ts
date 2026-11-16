@@ -1101,7 +1101,7 @@ export const getUpsertCustomerBillingProfileUrl = (id: string,) => {
  *
  * Country, currency and tax ID are stored in upper case.
  *
- * A currency that differs from the plan currency of a draft, trialing or
+ * A currency that differs from the plan currency of a trialing or
  * active subscription is refused with 409 `invalid_state`, because
  * invoices would show plan prices in the new currency without
  * conversion.
@@ -5886,16 +5886,15 @@ export const getCreateSubscriptionUrl = () => {
 
 /**
  * Creates a subscription that bills a customer for one or more plans.
- * Leave out `status` and it starts now: `active` from today, or
- * `trialing` when `trial_days` is above 0. Send `status: draft` to
- * create it without starting it.
+ * It starts now: `active` from today, or `trialing` when `trial_days`
+ * is above 0.
  *
  * All the plans must share one billing interval, one base-fee timing
  * (in advance or in arrears) and one currency. The currency must also
  * match the customer's billing profile and the customer's other
- * `draft`, `trialing` and `active` subscriptions; canceled ones do not
+ * `trialing` and `active` subscriptions; canceled ones do not
  * count. No two of the plans may bill the same meter, and none may
- * bill a meter that another `draft`, `trialing` or `active`
+ * bill a meter that another `trialing` or `active`
  * subscription of the customer bills. The customer and the plans must
  * not be archived.
  *
@@ -6079,87 +6078,6 @@ export function useListSubscriptions<TData = Awaited<ReturnType<typeof listSubsc
 
 
 
-
-export const getActivateSubscriptionUrl = (id: string,) => {
-
-
-
-
-  return `/v1/subscriptions/${id}/activate`
-}
-
-/**
- * Starts a `draft` subscription: it becomes `active` now, and its
- * first period starts today in your account's billing time zone (the
- * clock's day for a customer on a test clock). A non-zero base fee
- * billed in advance is invoiced in the same database transaction as
- * the activation: both are saved, or neither is. The plans'
- * currency must still match the customer's billing profile and the
- * customer's other `draft`, `trialing` and `active` subscriptions,
- * and the customer must not be archived. Takes no body.
- *
- * Sends the `subscription.activated` webhook event.
- * @summary Activate a draft subscription
- */
-export const activateSubscription = async (id: string, options?: RequestInit): Promise<Subscription> => {
-
-  return orvalClient<Subscription>(getActivateSubscriptionUrl(id),
-  {
-    ...options,
-    method: 'POST'
-
-
-  }
-);}
-
-
-
-
-
-export const getActivateSubscriptionMutationOptions = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof activateSubscription>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
-): UseMutationOptions<Awaited<ReturnType<typeof activateSubscription>>, TError,{id: string}, TContext> => {
-
-const mutationKey = ['activateSubscription'];
-const {mutation: mutationOptions, request: requestOptions} = options ?
-      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
-      options
-      : {...options, mutation: {...options.mutation, mutationKey}}
-      : {mutation: { mutationKey, }, request: undefined};
-
-
-
-
-      const mutationFn: MutationFunction<Awaited<ReturnType<typeof activateSubscription>>, {id: string}> = (props) => {
-          const {id} = props ?? {};
-
-          return  activateSubscription(id,requestOptions)
-        }
-
-
-
-
-
-
-  return  { mutationFn, ...mutationOptions }}
-
-    export type ActivateSubscriptionMutationResult = NonNullable<Awaited<ReturnType<typeof activateSubscription>>>
-
-    export type ActivateSubscriptionMutationError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse
-
-    /**
- * @summary Activate a draft subscription
- */
-export const useActivateSubscription = <TError = InvalidBodyResponse | UnauthorizedResponse | ForbiddenResponse | Error | PayloadTooLargeResponse | RateLimitedResponse,
-    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof activateSubscription>>, TError,{id: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
- , queryClient?: QueryClient): UseMutationResult<
-        Awaited<ReturnType<typeof activateSubscription>>,
-        TError,
-        {id: string},
-        TContext
-      > => {
-      return useMutation(getActivateSubscriptionMutationOptions(options), queryClient);
-    }
 
 export const getRetrySubscriptionBillingUrl = (id: string,) => {
 
@@ -6370,8 +6288,8 @@ export const getCancelSubscriptionUrl = (id: string,) => {
 }
 
 /**
- * Cancels the subscription immediately. Works on `draft`, `trialing`
- * and `active` subscriptions. Takes no body.
+ * Cancels the subscription immediately. Works on `trialing` and
+ * `active` subscriptions. Takes no body.
  *
  * In the transaction that cancels it, Hardcount writes the final
  * invoice for the part of the current period that has been used
@@ -7122,7 +7040,7 @@ export const getAddSubscriptionItemUrl = (id: string,) => {
  * Adds a plan to the subscription as a new item. The plan must use
  * the same billing interval, base-fee timing and currency as the
  * other items. It must not bill a meter that another item of this
- * subscription, or another `draft`, `trialing` or `active`
+ * subscription, or another `trialing` or `active`
  * subscription of the customer, bills. A period that ended and is
  * not invoiced yet is billed first. The subscription must not be
  * `canceled`.
@@ -8474,13 +8392,13 @@ export const getCreateInvoiceUrl = () => {
  *
  * A manual invoice uses the customer's currency. A `currency` that
  * differs from the customer's billing-profile currency, or from the
- * plan currency of any of the customer's draft, trialing or active
+ * plan currency of any of the customer's trialing or active
  * subscriptions, is refused with 409. A customer with neither
  * may be invoiced in any supported currency.
  *
  * Defaults when a field is left out:
  * - `currency`: the customer's billing-profile currency, then the plan
- *   currency of the customer's draft, trialing or active
+ *   currency of the customer's trialing or active
  *   subscriptions, then the account's default currency.
  * - `net_payment_term_days`: the account's net payment terms. A
  *   negative value is stored as 0 (due on receipt).

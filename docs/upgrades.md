@@ -103,6 +103,53 @@ expected here. On a database you restored from a backup, do not start the
 previous version: see
 [A backup with a charge in progress](ops/restore.md#a-backup-with-a-charge-in-progress).
 
+### Migration 00235: draft subscriptions are canceled
+
+The release with migration `00235_no_draft_subscriptions` removes draft
+subscriptions: a subscription starts, or starts its trial, when it is
+created. The migration does three things:
+
+- It cancels every draft subscription. A draft has billed nothing, so there
+  is no invoice. No `subscription.canceled` webhook is sent for these
+  subscriptions, and no audit log entry is written.
+- It deletes a webhook endpoint that listened only to
+  `subscription.activated`, the event an activation sent.
+- It removes `subscription.activated` from every other endpoint's event
+  list.
+
+Before you upgrade, on the release you run now, activate the drafts that
+should bill:
+
+1. List them in the database shell
+   (`docker compose exec postgres psql -U hardcount -d hardcount` on one
+   VM). The dashboard shows the same rows on the **Draft** tab of the
+   Subscriptions page, one account and mode at a time.
+
+   ```sql
+   SET app.bypass_rls = 'on';
+   SELECT id, tenant_id, livemode, code, created_at FROM subscriptions WHERE status = 'draft';
+   ```
+
+   **You see:** one row for each draft subscription, or `(0 rows)`.
+2. Activate each one that should bill: **Activate** on the subscription's
+   page, or `POST /v1/subscriptions/{id}/activate` with an API key of its
+   account and mode.
+
+   **You see:** the subscription's status is `active`.
+3. Let the server run for one minute after the last activation, so that its
+   `subscription.activated` webhook goes out. Then take the backup (step 2
+   of [Before you upgrade](#before-you-upgrade)) and upgrade as the rest of
+   this page says.
+
+The upgrade cancels a draft you did not activate. To bill it afterwards,
+create the subscription again: it starts billing when it is created, exactly
+as an activation would have. Give it a new `code`: the canceled subscription
+keeps its own.
+
+Run one version at a time for this upgrade. A copy of the previous version
+that keeps running can no longer create a draft: the database refuses the
+row.
+
 ### Coming from Velox
 
 Hardcount was called Velox before v0.9.0. v0.9.0 installs fresh only: it
