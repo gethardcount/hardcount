@@ -140,15 +140,15 @@ func hashInviteToken(plaintext string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// InvitationStatus derives the lifecycle state the client treats as
-// authoritative.
+// Status is the invitation's state at now: revoked, accepted, expired from
+// its expires_at on (the instant the accept starts to refuse), else pending.
 func (inv Invitation) Status(now time.Time) string {
 	switch {
 	case inv.RevokedAt != nil:
 		return "revoked"
 	case inv.AcceptedAt != nil:
 		return "accepted"
-	case now.After(inv.ExpiresAt):
+	case !now.Before(inv.ExpiresAt):
 		return "expired"
 	default:
 		return "pending"

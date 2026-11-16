@@ -425,12 +425,13 @@ func TestRevokedAndExpiredTokens(t *testing.T) {
 		t.Fatalf("accept revoked: got %v, want ErrValidation", err)
 	}
 
-	// Expired: advance the fake clock past the 7-day TTL.
+	// Expired: the clock stands on the expiry instant itself, where the accept
+	// already refuses.
 	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "late@example.com"); err != nil {
 		t.Fatalf("invite: %v", err)
 	}
 	lateToken := h.email.lastToken(t)
-	h.clk.Advance(dashmembers.InviteTTL + time.Hour)
+	h.clk.Advance(dashmembers.InviteTTL)
 	if _, err := h.svc.PreviewInvite(ctx, lateToken); !errors.Is(err, errs.ErrValidation) {
 		t.Fatalf("preview expired: got %v, want ErrValidation", err)
 	}
