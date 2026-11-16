@@ -16,7 +16,6 @@ export type ListSubscriptionsStatus = typeof ListSubscriptionsStatus[keyof typeo
 
 
 export const ListSubscriptionsStatus = {
-  draft: 'draft',
   trialing: 'trialing',
   active: 'active',
   canceled: 'canceled',

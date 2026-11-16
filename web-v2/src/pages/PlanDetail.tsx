@@ -124,8 +124,8 @@ export default function PlanDetailPage() {
   [subscriptions])
 
   // The server's count of subscriptions that keep the base fee fixed (not
-  // this page's own 'active' filter, which misses trialing, paused and draft
-  // subscriptions the lock counts).
+  // this page's own 'active' filter, which misses the trialing subscriptions
+  // the lock counts).
   const liveSubscriptions = plan?.live_subscription_count ?? 0
   const locked = liveSubscriptions > 0
 

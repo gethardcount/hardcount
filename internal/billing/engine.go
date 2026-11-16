@@ -1598,7 +1598,7 @@ func (e *Engine) SimForInvoice(ctx context.Context, tenantID, invoiceID string) 
 }
 
 // SimForSubscription is the time answer for an action on a subscription
-// (Activate, ChangeItem and the like): its clock's.
+// (EndTrial, ChangeItem and the like): its clock's.
 func (e *Engine) SimForSubscription(ctx context.Context, tenantID, subscriptionID string) (clock.Sim, error) {
 	if inLiveMode(ctx) {
 		return e.realTime(ctx), nil

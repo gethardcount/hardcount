@@ -773,7 +773,7 @@ func (a *subscriptionStateAdapter) GetTerminalState(ctx context.Context, tenantI
 	}
 	// Terminated marks the state in which both actions, cancel and pause,
 	// refuse. The cancel's compare-and-set (CancelAtomicWithBill) matches
-	// only a draft, trialing or active row, and SetPauseCollection rejects
+	// only a trialing or active row, and SetPauseCollection rejects
 	// canceled outright.
 	st := dunning.SubscriptionTerminalState{
 		Terminated: sub.Status == domain.SubscriptionCanceled,
@@ -1774,8 +1774,8 @@ type subscriptionReader interface {
 
 // NonTerminalForCustomer reads one status at a time: trialing, then active.
 // The customer service calls it under the customer-rules lock, which creates
-// and draft activations also take, so those cannot move a subscription into
-// the set between the reads. A trial end (trialing to active) takes no
+// also take, so those cannot move a subscription into the set between the
+// reads. A trial end (trialing to active) takes no
 // customer lock. Reading trialing first finds such a subscription in the
 // first read if the trial has not ended, and in the second if it has; an id
 // already collected is skipped.
@@ -1809,7 +1809,7 @@ func (a *subscriptionCheckerAdapter) NonTerminalForCustomer(ctx context.Context,
 }
 
 // PlanCurrencies is the currency pin's own query (ADR-100 G3): one read of
-// every draft, trialing and active subscription of the customer, with no
+// every trialing and active subscription of the customer, with no
 // page, so the profile guard and the pin judge the same set. One statement
 // sees one snapshot, so a trial that ends meanwhile is still in it.
 func (a *subscriptionCheckerAdapter) PlanCurrencies(ctx context.Context, tenantID, customerID string) ([]customer.SubscriptionCurrency, error) {

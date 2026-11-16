@@ -95,8 +95,9 @@ func (s *PostgresStore) ListItemIntervalsTx(ctx context.Context, tx *sql.Tx, sub
 //     immediate or scheduled cancel, an item removal and a plan swap away.
 //   - a never-activated trial that was canceled in the window, on its live
 //     items' plans. A trial writes no billing_intervals, and its usage is
-//     free, so its cancel instant is where its coverage ended. A draft never
-//     covered anything and has no trial end.
+//     free, so its cancel instant is where its coverage ended. A row with
+//     no trial end was canceled as a draft and covered nothing (rows written
+//     before draft subscriptions were removed).
 func (s *PostgresStore) ListCustomerMeterCoverageEnds(ctx context.Context, tenantID, customerID, excludeSubID string, from, to time.Time) ([]domain.MeterCoverageEnd, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {

@@ -91,6 +91,7 @@ export function describeAction(entry: AuditEntry): string {
       if (entry.resource_type === 'dunning_policy') return `Deleted dunning policy`
       if (entry.resource_type === 'stripe_credentials') return `Disconnected Stripe (${(entry.metadata?.livemode as boolean) ? 'live' : 'test'})`
       return `Deleted ${label || entry.resource_type}`
+    // Rows written before draft subscriptions were removed.
     case 'activate': return `Activated ${label || 'subscription'}`
     case 'cancel': return `Canceled ${label || 'subscription'}`
     case 'pause': return `Paused ${label || 'subscription'}`
@@ -220,7 +221,7 @@ export const DEFAULT_RESOURCE_TYPES = [
 ]
 
 export const DEFAULT_ACTIONS = [
-  'create', 'update', 'delete', 'activate', 'cancel', 'pause', 'resume',
+  'create', 'update', 'delete', 'cancel', 'pause', 'resume',
   'finalize', 'void', 'run', 'grant', 'revoke',
   // Read egress — the CSV exports. The only action that records a READ, and the
   // one an auditor asks for by name.

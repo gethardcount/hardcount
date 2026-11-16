@@ -215,7 +215,6 @@ var clockRoutes = map[routeKey]clockDecl{
 	{"GET", "/v1/subscriptions"}:                                       realTime(),
 	{"POST", "/v1/subscriptions"}:                                      decidedIn("subscription.Handler.create"), // the body names the customer
 	{"GET", "/v1/subscriptions/{id}"}:                                  ofSubscription(),
-	{"POST", "/v1/subscriptions/{id}/activate"}:                        ofSubscription(),
 	{"PUT", "/v1/subscriptions/{id}/billing-thresholds"}:               ofSubscription(),
 	{"DELETE", "/v1/subscriptions/{id}/billing-thresholds"}:            ofSubscription(),
 	{"POST", "/v1/subscriptions/{id}/cancel"}:                          ofSubscription(),

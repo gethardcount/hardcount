@@ -14,8 +14,8 @@
 
 /**
  * How monthly periods line up. The first period starts on the day
- * the subscription starts to bill: the day it is created or
- * activated, or, with a trial, the day the trial ends.
+ * the subscription starts to bill: the day it is created, or,
+ * with a trial, the day the trial ends.
  * `calendar`: every period ends on the 1st of a month, in your
  * account's billing time zone, so the first period runs from that
  * day to the next 1st. `anniversary`: each period starts on the

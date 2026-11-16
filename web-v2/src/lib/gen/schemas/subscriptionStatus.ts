@@ -15,9 +15,6 @@
 /**
  * Where the subscription is in its life.
  *
- * - `draft`: created with `status: draft`. It has no billing
- *   period and bills nothing until you activate it with
- *   `POST /v1/subscriptions/{id}/activate`.
  * - `trialing`: in a free trial until `trial_end_at`. Usage in
  *   the trial is not billed. When the trial ends, Hardcount makes
  *   the subscription `active` and its first paid period starts.
@@ -35,7 +32,6 @@ export type SubscriptionStatus = typeof SubscriptionStatus[keyof typeof Subscrip
 
 
 export const SubscriptionStatus = {
-  draft: 'draft',
   trialing: 'trialing',
   active: 'active',
   canceled: 'canceled',

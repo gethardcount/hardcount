@@ -45,7 +45,7 @@ const (
 // a customer's subscriptions takes it: one live subscription item per meter,
 // one currency, no new business on an archived customer, and a customer
 // update read and written as one step. Those are subscription creates, item
-// changes, draft activations, customer updates and billing-profile writes.
+// changes, customer updates and billing-profile writes.
 // Each one reads the state its rule checks after it gets the lock, so it sees
 // every earlier holder's commit. A price write is plan-scoped and takes no
 // customer lock, so a price added to a plan the customer already uses is not

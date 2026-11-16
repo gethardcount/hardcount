@@ -224,7 +224,7 @@ export const api = {
   // Subscriptions
   listSubscriptions: (params?: string) =>
     apiRequest<{ data: Subscription[]; total: number }>('GET', `/subscriptions${params ? '?' + params : ''}`),
-  createSubscription: (data: { code: string; display_name: string; customer_id: string; items: { plan_id: string; quantity?: number }[]; status?: 'draft'; billing_time?: string; trial_days?: number }) =>
+  createSubscription: (data: { code: string; display_name: string; customer_id: string; items: { plan_id: string; quantity?: number }[]; billing_time?: string; trial_days?: number }) =>
     apiRequest<Subscription>('POST', '/subscriptions', data),
 
   // Pricing
@@ -421,8 +421,6 @@ export const api = {
   // Subscription detail
   getSubscription: (id: string) =>
     apiRequest<Subscription>('GET', `/subscriptions/${id}`),
-  activateSubscription: (id: string) =>
-    apiRequest<Subscription>('POST', `/subscriptions/${id}/activate`),
   cancelSubscription: (id: string) =>
     apiRequest<Subscription>('POST', `/subscriptions/${id}/cancel`),
   retrySubscriptionBilling: (id: string) =>

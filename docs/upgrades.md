@@ -103,6 +103,42 @@ expected here. On a database you restored from a backup, do not start the
 previous version: see
 [A backup with a charge in progress](ops/restore.md#a-backup-with-a-charge-in-progress).
 
+### Migration 00235: activate or cancel draft subscriptions
+
+The release with migration `00235_no_draft_subscriptions` removes draft
+subscriptions: a subscription starts, or starts its trial, when it is
+created. The migration refuses to run while a subscription has the status
+`draft`, because the new version cannot start or cancel one.
+
+1. With the previous version still running, list them in the database
+   shell (`docker compose exec postgres psql -U hardcount -d hardcount` on
+   one VM):
+
+   ```sql
+   SET app.bypass_rls = 'on';
+   SELECT id, tenant_id, livemode, code, created_at FROM subscriptions WHERE status = 'draft';
+   ```
+
+   **You see:** one row for each draft subscription, or `(0 rows)`.
+2. Activate or cancel each one, with an API key of its account and mode.
+   `POST /v1/subscriptions/{id}/activate` starts billing now, and
+   **Activate** on the subscription's page does the same.
+   `POST /v1/subscriptions/{id}/cancel` ends it with no invoice.
+3. At `(0 rows)`: take the backup (step 2 of
+   [Before you upgrade](#before-you-upgrade)) and upgrade as the rest of
+   this page says.
+
+If the upgrade stops with `migration 00235 removes draft subscriptions`,
+that migration changed nothing, and the error names the first five drafts.
+Start the previous version again (on one VM, the steps in
+[Upgrade on one VM](#upgrade-on-one-vm) with its version number), then do
+steps 1 to 3. If the release's other migrations ran, the previous version
+logs that the database is newer than it; that is expected here.
+
+The migration also takes `subscription.activated`, the event an activation
+sent, out of each webhook endpoint's event list. An endpoint that listed
+nothing else is turned off.
+
 ### Coming from Velox
 
 Hardcount was called Velox before v0.9.0. v0.9.0 installs fresh only: it

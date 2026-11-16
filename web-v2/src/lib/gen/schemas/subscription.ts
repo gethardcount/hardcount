@@ -28,9 +28,9 @@ import type { SubscriptionStatus } from './subscriptionStatus';
  * All its items share one billing interval and one base-fee timing.
  * Usage, and a base fee billed in arrears, are invoiced when a period
  * ends. A base fee billed in advance is invoiced when its period
- * starts: the first one in the same transaction that creates or
- * activates the subscription or ends its trial, each later one on the
- * invoice that closes the period before.
+ * starts: the first one in the same transaction that creates the
+ * subscription or ends its trial, each later one on the invoice that
+ * closes the period before.
  */
 export interface Subscription {
   /** The subscription's ID (`hc_sub_…`). */
@@ -51,9 +51,6 @@ export interface Subscription {
   /**
      * Where the subscription is in its life.
      *
-     * - `draft`: created with `status: draft`. It has no billing
-     *   period and bills nothing until you activate it with
-     *   `POST /v1/subscriptions/{id}/activate`.
      * - `trialing`: in a free trial until `trial_end_at`. Usage in
      *   the trial is not billed. When the trial ends, Hardcount makes
      *   the subscription `active` and its first paid period starts.
@@ -70,8 +67,8 @@ export interface Subscription {
   status: SubscriptionStatus;
   /**
      * How monthly periods line up. The first period starts on the day
-     * the subscription starts to bill: the day it is created or
-     * activated, or, with a trial, the day the trial ends.
+     * the subscription starts to bill: the day it is created, or,
+     * with a trial, the day the trial ends.
      * `calendar`: every period ends on the 1st of a month, in your
      * account's billing time zone, so the first period runs from that
      * day to the next 1st. `anniversary`: each period starts on the
@@ -92,15 +89,11 @@ export interface Subscription {
      * trial.
      */
   trial_end_at?: string;
-  /**
-     * When the subscription started: when it was created, or, for a
-     * draft, when it was activated. Absent on a draft.
-     */
+  /** When the subscription started: when it was created. */
   started_at?: string;
   /**
      * When the subscription became `active`: at creation without a
-     * trial, at activation of a draft, or when its trial ended.
-     * Absent on a draft and while it trials.
+     * trial, or when its trial ended. Absent while it trials.
      */
   activated_at?: string;
   /** When the subscription was canceled. Absent until then. */
@@ -133,15 +126,13 @@ export interface Subscription {
      * the beginning of the day the trial ends, not `trial_end_at`
      * itself. After an immediate change to a plan with another billing
      * interval, a period can start or end at the instant of the
-     * change. Absent on a draft. On a canceled subscription it keeps
-     * its last value.
+     * change. On a canceled subscription it keeps its last value.
      */
   current_billing_period_start?: string;
   /**
      * End of the current period (exclusive): the start of the next
      * one. While the subscription trials, the end of the first paid
-     * period. Absent on a draft. On a canceled subscription it keeps
-     * its last value.
+     * period. On a canceled subscription it keeps its last value.
      */
   current_billing_period_end?: string;
   /**
@@ -154,15 +145,15 @@ export interface Subscription {
   /**
      * When the current period's invoice is due to be built: the end
      * of the current period. The billing run builds it once the
-     * invoice grace after that time has passed. Absent on a draft. A
-     * canceled subscription keeps its last value, and nothing is
-     * billed at that time.
+     * invoice grace after that time has passed. A canceled
+     * subscription keeps its last value, and nothing is billed at
+     * that time.
      */
   next_billing_at?: string;
   /**
      * Day of the month the subscription bills on (1-31): the day its
      * first period started, or the day of its last immediate change to
-     * a plan with another billing interval. Absent on a draft and for
+     * a plan with another billing interval. Absent for
      * calendar-monthly subscriptions.
      */
   billing_anchor_day?: number;

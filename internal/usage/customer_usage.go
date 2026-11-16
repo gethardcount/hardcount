@@ -577,10 +577,9 @@ func unitAmountOf(rows []domain.RatedUsage, planID, priceID string, amount int64
 	return rate.String()
 }
 
-// filterActiveSubs returns only active and trialing subs. Paused / canceled
-// / draft / archived subs don't contribute to "what is this customer using
-// right now" — their events are still queryable via /v1/usage-events with
-// an explicit window.
+// filterActiveSubs returns only active and trialing subs. A canceled sub
+// doesn't contribute to "what is this customer using right now"; its events
+// are still queryable via /v1/usage-events with an explicit window.
 func filterActiveSubs(subs []domain.Subscription) []domain.Subscription {
 	out := make([]domain.Subscription, 0, len(subs))
 	for _, sub := range subs {

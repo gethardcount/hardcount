@@ -105,7 +105,7 @@ decide.
 
 These routes answer `concurrent_change`:
 
-- Subscriptions: create, activate, cancel, and add, change or remove an item.
+- Subscriptions: create, cancel, and add, change or remove an item.
 - Customers: update, and write the billing profile.
 - Invoices: create, record payment, and collect when it settles the invoice
   without a card charge.

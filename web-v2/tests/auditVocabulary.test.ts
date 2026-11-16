@@ -40,7 +40,7 @@ function entry(over: Partial<AuditEntry> = {}): AuditEntry {
 // internal/audit/logintx_integration_test.go.
 const EMITTED_ACTIONS = [
   // domain.AuditAction* constants
-  'create', 'update', 'delete', 'activate', 'cancel', 'pause', 'resume',
+  'create', 'update', 'delete', 'cancel', 'pause', 'resume',
   'finalize', 'void', 'revoke', 'grant', 'refund', 'collect', 'send',
   'retry_tax', 'rotate', 'run',
   // credit ledger + credit notes
@@ -56,8 +56,11 @@ const EMITTED_ACTIONS = [
   'password_reset_requested', 'password_reset_completed',
 ]
 
+// Actions no writer emits now. Rows written before still carry them.
+const RETIRED_ACTIONS = ['activate']
+
 test('describeAction has a real case for every action the backend emits', () => {
-  for (const action of EMITTED_ACTIONS) {
+  for (const action of [...EMITTED_ACTIONS, ...RETIRED_ACTIONS]) {
     const got = describeAction(entry({ action, resource_label: '' }))
     // The default arm echoes the wire string back. A dotted action surviving
     // into the UI is the exact regression this guards.

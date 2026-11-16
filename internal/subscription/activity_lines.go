@@ -72,6 +72,7 @@ func describeSubscriptionAction(action string, meta map[string]any, lb lineLabel
 	case domain.AuditActionCreate:
 		l.Kind, l.Title = kindCreated, "Subscription created"
 	case domain.AuditActionActivate:
+		// Rows written before draft subscriptions were removed.
 		l.Kind, l.Title = kindActivated, "Subscription activated"
 	case domain.AuditActionCancel:
 		l.Kind, l.Title = kindCanceled, "Subscription canceled"

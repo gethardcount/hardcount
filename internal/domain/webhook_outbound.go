@@ -170,7 +170,6 @@ const (
 	// it as for any refund.
 	EventPaymentRefundedInStripe            = "payment.refunded_in_stripe"
 	EventSubscriptionCreated                = "subscription.created"
-	EventSubscriptionActivated              = "subscription.activated"
 	EventSubscriptionCanceled               = "subscription.canceled"
 	EventSubscriptionItemAdded              = "subscription.item.added"
 	EventSubscriptionItemUpdated            = "subscription.item.updated"
@@ -261,7 +260,6 @@ var KnownWebhookEventTypes = map[string]bool{
 	EventPaymentMethodAttached:              true,
 	EventPaymentMethodUpdated:               true,
 	EventSubscriptionCreated:                true,
-	EventSubscriptionActivated:              true,
 	EventSubscriptionCanceled:               true,
 	EventSubscriptionItemAdded:              true,
 	EventSubscriptionItemUpdated:            true,

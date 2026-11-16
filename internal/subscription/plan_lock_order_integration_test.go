@@ -289,14 +289,6 @@ var twoMeterWriters = []lockOrderWriter{
 			return err
 		}
 	}},
-	{"draft activation", func(t *testing.T, r *lockOrderRig, lo, hi domain.Plan) func(context.Context) error {
-		sub := r.sub(t, "draft", domain.SubscriptionDraft, hi, lo)
-		return func(ctx context.Context) error {
-			at := lockOrderPS.Add(2 * time.Hour)
-			_, err := r.store.ActivateDraftWithBill(ctx, r.tenantID, sub.ID, at, at, lockOrderPE, 1, nil)
-			return err
-		}
-	}},
 	{"trial conversion", func(t *testing.T, r *lockOrderRig, lo, hi domain.Plan) func(context.Context) error {
 		sub := r.sub(t, "trial", domain.SubscriptionTrialing, hi, lo)
 		return func(ctx context.Context) error {

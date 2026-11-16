@@ -127,7 +127,7 @@ type DueBiller interface {
 }
 
 // PlanReader (defined in handler.go) is also used at sub-lifecycle
-// entry points (Create / Activate / EndTrial / ExtendTrial) to read
+// entry points (Create / EndTrial / ExtendTrial) to read
 // BillingInterval for yearly-aware period anchoring (Bug #10).
 // Optional: nil-safe — the period helpers default to monthly math
 // when the reader isn't wired.
@@ -233,8 +233,8 @@ func (s *Service) SetProfileReader(r ProfileCurrencyReader) {
 }
 
 // SetPlanReader wires the plan fetcher used to read BillingInterval
-// at sub-lifecycle entry points (Create / Activate / EndTrial /
-// ExtendTrial) for yearly-aware period anchoring. Optional —
+// at sub-lifecycle entry points (Create / EndTrial / ExtendTrial) for
+// yearly-aware period anchoring. Optional —
 // nil-safe; without it, the period helpers default to monthly math
 // (pre-Bug-#10 behavior). Production wires the pricing store via
 // router.go.
@@ -382,9 +382,8 @@ func firstPeriodAfterTrial(trialEnd time.Time, billingTime domain.SubscriptionBi
 	return ps, pe, anchorDay
 }
 
-// firstPeriodForActivate computes the first billing period when a sub is
-// activated without a trial — either by a start-now Create, or by the
-// operator's Activate on a draft sub.
+// firstPeriodForActivate computes the first billing period when a sub
+// starts paid billing at `at`: a Create without a trial, or End trial.
 //
 // Yearly billing: always anniversary semantics — period begins at `at`
 // (day-snapped) and ends at `at + 1 year`. Stripe doesn't ship calendar
@@ -577,8 +576,8 @@ func (s *Service) rejectCurrencyMismatch(ctx context.Context, tenantID, customer
 	return nil
 }
 
-// rejectMeterOverlap is the double-billing guard: no two live (draft /
-// trialing / active) subscriptions of a customer may bill the same meter,
+// rejectMeterOverlap is the double-billing guard: no two live (trialing /
+// active) subscriptions of a customer may bill the same meter,
 // and no two items on one subscription may either. Usage aggregation is
 // customer+meter scoped with NO subscription filter (engine.go
 // AggregateForBillingPeriodByAgg), so overlapping meter sets would invoice
@@ -694,22 +693,13 @@ type CreateInput struct {
 	Items       []CreateItemInput              `json:"items"`
 	BillingTime domain.SubscriptionBillingTime `json:"billing_time"`
 	TrialDays   int                            `json:"trial_days,omitempty"`
-	// Status is empty (the subscription starts now, or starts its trial now)
-	// or "draft" (it bills nothing until Activate). A start is the default,
-	// as in Stripe and Lago, because a forgotten flag used to make a draft
-	// that silently billed nothing (simplification audit D2, 2026-10-23).
-	Status domain.SubscriptionStatus `json:"status,omitempty"`
 }
 
-// createStatusMessage is the 422 for a create's status other than "draft",
-// including one sent empty or null (the handler refuses those).
-const createStatusMessage = `must be "draft" or left out; a subscription starts now unless it is created as a draft`
-
-// Create creates a subscription, and bills its first in-advance period when
-// it starts now. Its caller decides the time first (DecideForCustomer, as the
-// create route does), and Create reads every instant from ctx: a caller that
-// did not decide would stamp a clock customer's subscription at real time,
-// not at its clock's.
+// Create creates a subscription that starts now, or starts its trial now,
+// and bills its first in-advance period when it has no trial. Its caller
+// decides the time first (DecideForCustomer, as the create route does), and
+// Create reads every instant from ctx: a caller that did not decide would
+// stamp a clock customer's subscription at real time, not at its clock's.
 func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput) (domain.Subscription, error) {
 	code := strings.TrimSpace(input.Code)
 	displayName := strings.TrimSpace(input.DisplayName)
@@ -766,20 +756,6 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 	if input.TrialDays < 0 || input.TrialDays > maxTrialDays {
 		return domain.Subscription{}, errs.Invalid("trial_days", fmt.Sprintf("must be between 0 and %d", maxTrialDays))
 	}
-	draft := false
-	switch input.Status {
-	case "":
-	case domain.SubscriptionDraft:
-		draft = true
-	default:
-		return domain.Subscription{}, errs.Invalid("status", createStatusMessage)
-	}
-	// A draft does not start, so it has no trial to start; Activate starts
-	// billing at once. Refused, not ignored.
-	if draft && input.TrialDays > 0 {
-		return domain.Subscription{}, errs.Invalid("trial_days", "a draft cannot have a trial; leave out status to start the trial now")
-	}
-
 	// Reject mixed billing intervals across items (Stripe / Lago parity).
 	// All items on a sub must share an interval — the period anchor is
 	// per-sub, so a monthly + yearly mix has no coherent cycle. Skipped
@@ -848,7 +824,7 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		}
 	}
 
-	status := domain.SubscriptionDraft
+	status := domain.SubscriptionActive
 	// One instant for the whole create. A clock decision carries one; a
 	// real-time decision does not, so the one read is bound here, and every
 	// s.clock.Now(ctx) below, the store's created_at and updated_at among
@@ -902,18 +878,11 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		periodEnd = &pe
 		nextBilling = &pe
 		billingAnchorDay = anchorDay
-	} else if !draft {
-		status = domain.SubscriptionActive
+	} else {
 		startedAt = &now
-		// Immediate activation IS an activation — stamp activated_at so
-		// the sub is visible to MRR movement / point-in-time / churn,
-		// which key on activated_at as the MRR-start event. The operator
-		// Activate() and trial-end ActivateAfterTrial() paths already do
-		// this; the start-now create path used to leave it NULL, so
-		// every no-trial sub was counted in headline MRR (status='active')
-		// but invisible to New/Net movement — the dashboard never
-		// reconciled. Trialing subs are NOT activated here (their
-		// activated_at is stamped at trial-end).
+		// MRR movement, point-in-time MRR and churn key on activated_at as
+		// the MRR-start event, so a subscription that starts now is stamped
+		// here. A trialing one is stamped when its trial ends.
 		activatedAt = &now
 		interval, err := s.firstPlanInterval(ctx, tenantID, items)
 		if err != nil {
@@ -958,8 +927,8 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		// other, the profile currency, and the customer's other live subs.
 		// It runs here, on the create's transaction after the store took
 		// the customer-rules lock. Every writer of those inputs (a create,
-		// an activation, a profile write) holds that lock until it commits,
-		// so these reads on other connections see each of them.
+		// a profile write) holds that lock until it commits, so these reads
+		// on other connections see each of them.
 		if err := s.rejectCurrencyMismatch(ctx, tenantID, created.CustomerID, created.ID, planIDs, ""); err != nil {
 			return err
 		}
@@ -994,86 +963,6 @@ func (s *Service) Get(ctx context.Context, tenantID, id string) (domain.Subscrip
 
 func (s *Service) List(ctx context.Context, filter ListFilter) ([]domain.Subscription, int, error) {
 	return s.store.List(ctx, filter)
-}
-
-func (s *Service) Activate(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
-	sub, err := s.store.Get(ctx, tenantID, id)
-	if err != nil {
-		return domain.Subscription{}, err
-	}
-	if sub.Status != domain.SubscriptionDraft {
-		return domain.Subscription{}, errs.InvalidState(fmt.Sprintf("Only a draft subscription can be activated. This one is %s.", sub.Status))
-	}
-
-	// Currency pin (ADR-100): drafts predating the pin (or created while a
-	// divergent profile existed) must not start billing in a currency that
-	// conflicts with the profile or the customer's other live subs.
-	if len(sub.Items) > 0 {
-		pin := make([]string, 0, len(sub.Items))
-		for _, it := range sub.Items {
-			pin = append(pin, it.PlanID)
-		}
-		if err := s.rejectCurrencyMismatch(ctx, tenantID, sub.CustomerID, id, pin, ""); err != nil {
-			return domain.Subscription{}, err
-		}
-	}
-
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
-	now := s.clock.Now(ctx)
-
-	// First-period math: same helper as Create's start-now branch — period
-	// begins at `now` (day-snapped) and ends at the next calendar boundary
-	// (calendar billing) or `now + 1 month` (anniversary). (The historical
-	// beginningOfMonth backdating bug and its fix are recorded on
-	// firstPeriodForActivate.) A draft that already carries a period (e.g.
-	// seeded by an earlier flow) keeps it unchanged.
-	ps, pe := sub.CurrentBillingPeriodStart, sub.CurrentBillingPeriodEnd
-	anchorDay := sub.BillingAnchorDay
-	if ps == nil {
-		loc, err := s.tenantLocation(ctx, sub.TenantID)
-		if err != nil {
-			return domain.Subscription{}, err
-		}
-		interval, err := s.firstPlanInterval(ctx, tenantID, sub.Items)
-		if err != nil {
-			return domain.Subscription{}, err
-		}
-		p1, p2, a := firstPeriodForActivate(now, sub.BillingTime, interval, loc)
-		ps, pe, anchorDay = &p1, &p2, a
-	}
-
-	// Atomic flip + day-1 bill (ADR-056 pattern, draft sibling): the
-	// in_advance first invoice rides the SAME tx as the activation. Pre-fix
-	// Activate flipped status without ever billing — the first base fee of a
-	// draft-then-activated in_advance sub was silently never invoiced by any
-	// path (BillOnCreate only runs on create; the first cycle close bills the
-	// NEXT period in advance). A bill failure rolls the activation back.
-	var firstInv domain.Invoice
-	var haveInv bool
-	activated, err := s.store.ActivateDraftWithBill(ctx, tenantID, id, now, *ps, *pe, anchorDay, func(tx *sql.Tx, a domain.Subscription) error {
-		if s.biller == nil {
-			return nil
-		}
-		inv, ok, billErr := s.biller.BillOnCreateTx(ctx, tx, a, now)
-		if billErr != nil {
-			return fmt.Errorf("first-invoice-on-activate: %w", billErr)
-		}
-		firstInv, haveInv = inv, ok
-		return nil
-	})
-	if err != nil {
-		return domain.Subscription{}, err
-	}
-
-	// Post-commit external steps (tax commit + auto-charge) — mirrors Create:
-	// Stripe calls never ride a DB tx; the invoice is durable + atomic with
-	// the flip, and failures here are recovered by the tax-commit reconciler /
-	// auto-charge retry sweep.
-	if haveInv {
-		s.biller.FinalizeOnCreateInvoice(ctx, activated, firstInv)
-	}
-
-	return activated, nil
 }
 
 // ---- Items ----
@@ -2451,9 +2340,9 @@ func (s *Service) cancel(ctx context.Context, tenantID, id string, grace time.Du
 	return domain.Subscription{}, 0, err
 }
 
-// errAlreadyTerminated is a cancel's answer for a row that is not draft,
-// trialing or active. The store gives the same answer when its
-// compare-and-set finds the row so.
+// errAlreadyTerminated is a cancel's answer for a row that is not trialing
+// or active. The store gives the same answer when its compare-and-set finds
+// the row so.
 func errAlreadyTerminated(status domain.SubscriptionStatus) error {
 	return errs.InvalidState(fmt.Sprintf("cannot cancel %s subscription (already terminated)", status))
 }
@@ -2545,7 +2434,7 @@ func (s *Service) cancelOnce(callerCtx context.Context, tenantID, id string, gra
 	// compare-and-set passes on that row: the subscription would be canceled
 	// with the new period unrelieved. So that row is not planned; the next
 	// attempt reads a new instant (on the API's unbound context, normally at
-	// or after the new period's start). A trialing or draft row is planned:
+	// or after the new period's start). A trialing row is planned:
 	// an instant before the first paid period is the free trial cancel
 	// (ADR-069).
 	at := clock.Now(ctx)

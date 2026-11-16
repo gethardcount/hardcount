@@ -23,7 +23,7 @@ import (
 //	C  one sub started 60d ago, canceled 10d ago  not live now, live at t
 //	D  no subscription                            never live
 //	E  two active subs, started 60d ago           counted once, now and at t
-//	F  one draft sub                              never live
+//	F  one sub canceled 10d ago, never started    never live
 //	G  one sub started 90d ago, canceled 40d ago  not live now, not at t
 //	S  test-clock customer with a trialing sub    excluded everywhere
 //
@@ -76,8 +76,10 @@ func TestOverview_HomeCountsAndBaselines(t *testing.T) {
 	e := mkCust("cus_e", "")
 	mkSub(e, "sub-e1", "active", p(daysAgo(60)), p(daysAgo(60)), nil, "")
 	mkSub(e, "sub-e2", "active", p(daysAgo(60)), p(daysAgo(60)), nil, "")
+	// F was canceled as a draft: a row written before draft subscriptions
+	// were removed.
 	f := mkCust("cus_f", "")
-	mkSub(f, "sub-f", "draft", nil, nil, nil, "")
+	mkSub(f, "sub-f", "canceled", nil, nil, p(daysAgo(10)), "")
 	g := mkCust("cus_g", "")
 	mkSub(g, "sub-g", "canceled", p(daysAgo(90)), p(daysAgo(90)), p(daysAgo(40)), "")
 	clockID := seedClock(t, db, tenantID)

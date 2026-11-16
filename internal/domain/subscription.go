@@ -11,7 +11,6 @@ import (
 type SubscriptionStatus string
 
 const (
-	SubscriptionDraft    SubscriptionStatus = "draft"
 	SubscriptionTrialing SubscriptionStatus = "trialing"
 	SubscriptionActive   SubscriptionStatus = "active"
 	SubscriptionCanceled SubscriptionStatus = "canceled"
@@ -562,8 +561,9 @@ var ErrTrialNotDue = errors.New("the trial has not ended yet")
 var ErrTrialCancelConflict = errors.New("trial-end cancel conflicted — re-read and route")
 
 // billingStartedAt is the instant the subscription began to bill: its trial
-// end when it had a trial (trial usage is free), else its start. Nil before
-// it started (a draft).
+// end when it had a trial (trial usage is free), else its start. Nil for a
+// subscription canceled as a draft (rows written before draft subscriptions
+// were removed).
 func (s Subscription) billingStartedAt() *time.Time {
 	if s.TrialEndAt != nil {
 		return s.TrialEndAt

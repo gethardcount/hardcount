@@ -579,16 +579,6 @@ func TestE2E_WebhookPayloads_Subscription(t *testing.T) {
 	if ev.Data["triggered_by"] != "operator" || flowStr(ev.Data, "ended_at") == "" {
 		t.Errorf("subscription.trial_ended extras = %v / %v, want operator and the end time", ev.Data["triggered_by"], ev.Data["ended_at"])
 	}
-
-	// A draft, activated.
-	draft := call("POST", "/v1/subscriptions", flowReq{body: map[string]any{
-		"code": "wp-draft", "display_name": "WP Draft", "customer_id": customerID, "status": "draft",
-		"items": []map[string]any{{"plan_id": starter, "quantity": 1}}, "billing_time": "anniversary",
-	}}).want(t, 201, "create draft").body
-	draftID := flowStr(draft, "id")
-	events.next("create draft", domain.EventSubscriptionCreated)
-	ev = step("activate", domain.EventSubscriptionActivated, "POST", "/v1/subscriptions/"+draftID+"/activate", nil, 200)
-	checkEventResource(t, "subscription.activated", ev, getSub(draftID))
 }
 
 // TestE2E_WebhookPayloads_CreditBalance drives the credit.balance_*

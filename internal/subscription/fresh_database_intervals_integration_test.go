@@ -23,7 +23,7 @@ import (
 //   - every item of a subscription that was ever active has an interval, and
 //     every live item of an active subscription has exactly one open one;
 //   - the only items with no interval are those whose subscription never
-//     became active (a draft, a trial, a trial canceled before it converted).
+//     became active (a trial, a trial canceled before it converted).
 //
 // Mutation check: drop the intervalOpenForAdd call in addItemInTx, or the
 // intervalOpenForItems call in activateAfterTrialInTx, and this fails.
@@ -70,24 +70,6 @@ func TestIntervals_FreshDatabaseNeedsNoBackfill(t *testing.T) {
 		t.Fatalf("cancel: %v", err)
 	}
 
-	// A draft that is activated, and one that stays a draft.
-	draftSub := func(code string) domain.Subscription {
-		s, err := store.Create(ctx, tenantID, domain.Subscription{
-			Code: code, DisplayName: code, CustomerID: cust,
-			Status: domain.SubscriptionDraft, BillingTime: domain.BillingTimeCalendar,
-			Items: []domain.SubscriptionItem{{PlanID: planB.ID, Quantity: 1}},
-		})
-		if err != nil {
-			t.Fatalf("create draft %s: %v", code, err)
-		}
-		return s
-	}
-	activatedDraft := draftSub("sub-fresh-draft-activated")
-	if _, err := store.ActivateDraftWithBill(ctx, tenantID, activatedDraft.ID, ivPS.Add(2*time.Hour), ivPS, ivPE, 1, nil); err != nil {
-		t.Fatalf("activate draft: %v", err)
-	}
-	stillDraft := draftSub("sub-fresh-draft")
-
 	// Trials: one converts at its end, one ends early, one stays a trial
 	// (with an item added during it), one is canceled before it converts.
 	trialStart := ivPS
@@ -124,7 +106,7 @@ func TestIntervals_FreshDatabaseNeedsNoBackfill(t *testing.T) {
 		t.Fatalf("cancel trial: %v", err)
 	}
 
-	neverActive := map[string]bool{stillDraft.ID: true, stillTrial.ID: true, canceledTrial.ID: true}
+	neverActive := map[string]bool{stillTrial.ID: true, canceledTrial.ID: true}
 
 	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -167,7 +149,7 @@ func TestIntervals_FreshDatabaseNeedsNoBackfill(t *testing.T) {
 	if err := rows.Err(); err != nil {
 		t.Fatalf("rows: %v", err)
 	}
-	if items != 11 {
-		t.Fatalf("read %d items, want 11 (the fixture changed; recount)", items)
+	if items != 9 {
+		t.Fatalf("read %d items, want 9 (the fixture changed; recount)", items)
 	}
 }

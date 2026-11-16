@@ -124,13 +124,13 @@ func AlreadyExists(field, message string) *DomainError {
 }
 
 // InvalidState rejects an operation because the target resource is in a
-// state that disallows it (such as "can only activate draft subscriptions").
+// state that disallows it (such as "cannot rotate a revoked key").
 // It maps to HTTP 409, because the input is fine and the resource's state is
 // the conflict. A 422 would mean "fix your input" (see respond/errors.go).
 // These errors are not about a specific form field. The user usually needs a
 // toast or an inline banner, not a field highlight.
 //
-//	return errs.InvalidState("can only activate draft subscriptions")
+//	return errs.InvalidState("cannot rotate a revoked key")
 func InvalidState(message string) *DomainError {
 	return &DomainError{
 		Kind:    ErrInvalidState,

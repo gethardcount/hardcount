@@ -13,10 +13,13 @@ billed by the plan's prices, whatever the quantity.
 
 | Status | What it means | What you do |
 |---|---|---|
-| `draft` | Set up, but not started. Bills nothing. | Start it with `POST /v1/subscriptions/{id}/activate`. A draft of an archived customer cannot start: unarchive the customer first. |
 | `trialing` | In a free trial. The trial bills nothing. | Nothing. It becomes `active` when the trial ends. |
 | `active` | Billing, period after period. | Nothing. |
 | `canceled` | Ended. It never bills again, and it cannot be restarted. | Create a new subscription to bill the customer again. |
+
+A subscription starts when it is created, so there is no status for one
+that is set up now and billed later. Create the subscription when it should
+bill, or give it a trial, which starts billing by itself when it ends.
 
 Paused collection is not a status. A subscription whose collection is
 paused stays `active` and keeps making invoices; see
@@ -31,13 +34,11 @@ All the routes are under `/v1/subscriptions`. Each change sends a
 |---|---|---|---|
 | (new) | `POST /` | `subscription.created` | `active` |
 | (new) | `POST /` with `trial_days` | `subscription.created` | `trialing` |
-| (new) | `POST /` with `"status": "draft"` | `subscription.created` | `draft` |
-| `draft` | `POST /{id}/activate` | `subscription.activated` | `active` |
 | `trialing` | Hardcount, when `trial_end_at` passes | `subscription.trial_ended` | `active` |
 | `trialing` | `POST /{id}/end-trial` | `subscription.trial_ended` | `active` |
 | `trialing` | `POST /{id}/extend-trial`, with a later `trial_end` | `subscription.trial_extended` | `trialing` |
-| `draft`, `trialing`, `active` | `POST /{id}/cancel` | `subscription.canceled` | `canceled` |
-| `draft`, `trialing`, `active` | `POST /{id}/schedule-cancel` | `subscription.cancel_scheduled` | no change yet |
+| `trialing`, `active` | `POST /{id}/cancel` | `subscription.canceled` | `canceled` |
+| `trialing`, `active` | `POST /{id}/schedule-cancel` | `subscription.cancel_scheduled` | no change yet |
 | `trialing`, `active` | Hardcount, when the scheduled cancel is due | `subscription.canceled` | `canceled` |
 | `trialing`, `active` | `DELETE /{id}/scheduled-cancel` | `subscription.cancel_cleared` | no change |
 | `active` | Hardcount, when the payment retries for an unpaid invoice (dunning) run out and the dunning policy says cancel | `subscription.canceled` | `canceled` |

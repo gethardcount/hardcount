@@ -13,9 +13,8 @@
  */
 
 /**
- * `archived` blocks new subscriptions for the customer
- * and activating its draft subscriptions. `active` lifts
- * that.
+ * `archived` blocks new subscriptions for the customer.
+ * `active` lifts that.
  */
 export type UpdateCustomerBodyStatus = typeof UpdateCustomerBodyStatus[keyof typeof UpdateCustomerBodyStatus];
 

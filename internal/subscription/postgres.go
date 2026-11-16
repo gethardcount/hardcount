@@ -288,8 +288,8 @@ func (s *PostgresStore) createInTx(ctx context.Context, tx *sql.Tx, tenantID str
 	}
 
 	// ADR-101: a start-now create IS the items' billable open — one interval
-	// per item at the (already day-snapped) period start, same tx. Draft and
-	// trialing creates open nothing; their activation writer owns it.
+	// per item at the (already day-snapped) period start, same tx. A
+	// trialing create opens nothing; the trial's end opens them.
 	if sub.Status == domain.SubscriptionActive {
 		if err := intervalOpenForItems(ctx, tx, sub, "create"); err != nil {
 			return domain.Subscription{}, err
@@ -475,14 +475,13 @@ func (s *PostgresStore) ListLiveByCustomer(ctx context.Context, tenantID, custom
 // the one subscription.canceled carries, is the retired one (finishCancelTx).
 //
 // The first statement is a compare-and-set (ADR-115, ADR-139). It matches a
-// draft, trialing or active row only: draft (an operator scrapping a
-// never-activated row), trialing (a customer leaving during a trial; Stripe,
-// Lago, Recurly and Chargebee all allow it) and active. It also requires the
-// row to still hold `expected`, the status, period start and next_billing_at
-// the caller priced the bill from. Zero rows resolve to ErrNotFound (row
-// gone), InvalidState "already terminated" (canceled, today's answer to a
-// second cancel), or ErrWatermarkMoved (anything else moved; nothing was
-// written, and the caller plans again from the new row).
+// trialing or active row only: trialing (a customer leaving during a trial;
+// Stripe, Lago, Recurly and Chargebee all allow it) and active. It also
+// requires the row to still hold `expected`, the status, period start and
+// next_billing_at the caller priced the bill from. Zero rows resolve to
+// ErrNotFound (row gone), InvalidState "already terminated" (canceled,
+// today's answer to a second cancel), or ErrWatermarkMoved (anything else
+// moved; nothing was written, and the caller plans again from the new row).
 func (s *PostgresStore) CancelAtomicWithBill(ctx context.Context, tenantID, id string, expected PeriodSnapshot, at time.Time, billFn func(tx *sql.Tx, canceled domain.Subscription) error) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -495,7 +494,7 @@ func (s *PostgresStore) CancelAtomicWithBill(ctx context.Context, tenantID, id s
 		UPDATE subscriptions
 		SET status = 'canceled', canceled_at = $1, updated_at = $1
 		WHERE id = $2
-		  AND status IN ('draft', 'trialing', 'active')
+		  AND status IN ('trialing', 'active')
 		  AND status = $3
 		  AND current_billing_period_start IS NOT DISTINCT FROM $4
 		  AND next_billing_at              IS NOT DISTINCT FROM $5
@@ -895,8 +894,8 @@ func (s *PostgresStore) FireScheduledCancellationWithBill(ctx context.Context, t
 // its audit row). Rejects a
 // canceled row since collection-pause on a terminated sub has no meaning —
 // the engine wouldn't observe the row anyway, but failing loudly here keeps
-// the API honest. Draft, trialing and active are allowed; there is no
-// paused status.
+// the API honest. Trialing and active are allowed; there is no paused
+// status.
 func (s *PostgresStore) SetPauseCollection(ctx context.Context, tenantID, id string, pc domain.PauseCollection, onResume ResumeAudit) (domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -1305,80 +1304,6 @@ func (s *PostgresStore) ResumeLiftedPause(ctx context.Context, tenantID string, 
 // status when no row matches.
 func (s *PostgresStore) ActivateAfterTrial(ctx context.Context, tenantID, id string, at time.Time) (domain.Subscription, error) {
 	return s.ActivateAfterTrialWithBill(ctx, tenantID, id, at, nil)
-}
-
-// ActivateDraftWithBill — see the Store interface doc. Draft→active flip +
-// period/anchor stamps + day-1 bill in one tx (the ADR-056 pattern applied to
-// the plain-draft path).
-func (s *PostgresStore) ActivateDraftWithBill(ctx context.Context, tenantID, id string, at, periodStart, periodEnd time.Time, anchorDay int, billFn func(tx *sql.Tx, activated domain.Subscription) error) (domain.Subscription, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.Subscription{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	var sub domain.Subscription
-	err = scanSubRow(tx.QueryRowContext(ctx, `
-		UPDATE subscriptions
-		SET status = 'active',
-		    activated_at = $1,
-		    started_at = $1,
-		    current_billing_period_start = $2,
-		    current_billing_period_end = $3,
-		    next_billing_at = $3,
-		    billing_anchor_day = $4,
-		    updated_at = $1
-		WHERE id = $5 AND status = 'draft'
-		RETURNING `+subCols,
-		at, periodStart, periodEnd, anchorDay, id,
-	), &sub)
-	if err == sql.ErrNoRows {
-		// Row exists in another status (or not at all) — surface the same
-		// typed error the pre-fix service check produced.
-		return domain.Subscription{}, errs.InvalidState("Only a draft subscription can be activated.")
-	}
-	if err != nil {
-		return domain.Subscription{}, err
-	}
-	// The customer-rules lock, before the plans and billFn's invoice
-	// number: an archive that committed before it is seen here, and one
-	// that comes later waits for this activation and then sees it billing.
-	status, err := lockCustomerRulesTx(ctx, tx, tenantID, sub.CustomerID)
-	if err != nil {
-		return domain.Subscription{}, err
-	}
-	if status == domain.CustomerStatusArchived {
-		return domain.Subscription{}, errs.InvalidState("customer is archived — unarchive the customer before activating this subscription")
-	}
-	if err := hydrateSubChildrenTx(ctx, tx, &sub); err != nil {
-		return domain.Subscription{}, err
-	}
-	if err := lockPlansTx(ctx, tx, itemPlanIDs(sub.Items)); err != nil {
-		return domain.Subscription{}, err
-	}
-	// ADR-101: activation IS the items' billable open.
-	if err := intervalOpenForItems(ctx, tx, sub, "activate"); err != nil {
-		return domain.Subscription{}, err
-	}
-	// The CAS above admits only draft rows, so reaching here IS the
-	// draft→active activation transition — enqueue subscription.activated
-	// in-tx (shared fate with the transition AND the day-1 bill below: a
-	// billFn failure rolls the event back with everything else). This
-	// enqueue previously lived in the store's Update method, which lost its
-	// last caller when Activate migrated here — the event silently stopped
-	// firing while Update's outbox test stayed green against the dead path.
-	if err := s.enqueueLifecycle(ctx, tx, domain.EventSubscriptionActivated, sub, nil); err != nil {
-		return domain.Subscription{}, err
-	}
-	if billFn != nil {
-		if err := billFn(tx, sub); err != nil {
-			return domain.Subscription{}, err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return domain.Subscription{}, err
-	}
-	return sub, nil
 }
 
 // ActivateAfterTrialWithBill flips 'trialing' → 'active' AND runs billFn (the
@@ -2184,8 +2109,8 @@ func (s *PostgresStore) ClearBillingFailure(ctx context.Context, tenantID, id st
 // foreign-key check free.
 //
 // Every writer of a subscription's state takes this row first. A service item
-// change (LockForItemChangeTx) and a draft activation take the customer-rules
-// lock next (lockCustomerRulesTx). A writer that references more than one
+// change (LockForItemChangeTx) takes the customer-rules lock next
+// (lockCustomerRulesTx). A writer that references more than one
 // plan takes them after that (lockPlansTx); item rows, billing_intervals and
 // invoices come after. The dunning pause takes the same
 // order: its write (SetDunningPause) and the payment that lifts it
@@ -2212,9 +2137,9 @@ func lockSubscriptionRow(ctx context.Context, tx *sql.Tx, subscriptionID string)
 // committed before the lock. ErrNotFound when RLS shows no such customer.
 //
 // Every writer of a customer-scoped rule takes this lock: a create after its
-// clock read, an item writer (LockForItemChangeTx) and a draft activation
-// right after their subscription row. Each takes it before its plans and
-// before any invoice, credit note or number.
+// clock read, and an item writer (LockForItemChangeTx) right after its
+// subscription row. Each takes it before its plans and before any invoice,
+// credit note or number.
 func lockCustomerRulesTx(ctx context.Context, tx *sql.Tx, tenantID, customerID string) (domain.CustomerStatus, error) {
 	if err := postgres.LockCustomerRulesTx(ctx, tx, tenantID, customerID); err != nil {
 		return "", err
@@ -2344,7 +2269,7 @@ func refuseMeterOverlapTx(ctx context.Context, tx *sql.Tx, items []itemPlan) err
 		JOIN subscription_items ni ON ni.id = n.item_id
 		JOIN subscriptions own ON own.id = ni.subscription_id
 		JOIN plan_prices pp ON pp.plan_id = n.plan_id
-		JOIN subscriptions s2 ON s2.customer_id = own.customer_id AND s2.status IN ('draft', 'trialing', 'active')
+		JOIN subscriptions s2 ON s2.customer_id = own.customer_id AND s2.status IN ('trialing', 'active')
 		JOIN subscription_items b ON b.subscription_id = s2.id AND b.deleted_at IS NULL AND b.id <> n.item_id
 		JOIN plan_prices pb ON pb.meter_id = pp.meter_id AND (pb.plan_id = b.plan_id OR pb.plan_id = b.pending_plan_id)
 		ORDER BY pp.meter_id, s2.code
@@ -2912,7 +2837,7 @@ func (s *PostgresStore) removeItemInTx(ctx context.Context, tx *sql.Tx, itemID s
 }
 
 // FindMeterConflicts implements the double-billing guard's conflict scan:
-// one query walks the customer's live (draft/trialing/active) subs → live
+// one query walks the customer's live (trialing/active) subs → live
 // items → the meters their plans have ever priced, intersected with the
 // candidate set. pending_plan_id joins too — a scheduled swap starts billing
 // its meters at the next cycle boundary, so admitting an overlap against it
@@ -2940,7 +2865,7 @@ func (s *PostgresStore) FindMeterConflicts(ctx context.Context, tenantID, custom
 		JOIN plan_prices m
 		  ON m.plan_id = si.plan_id OR m.plan_id = si.pending_plan_id
 		WHERE sub.customer_id = $1
-		  AND sub.status IN ('draft', 'trialing', 'active')
+		  AND sub.status IN ('trialing', 'active')
 		  AND si.id <> $2
 		  AND m.meter_id IN (SELECT jsonb_array_elements_text($3::jsonb))
 		ORDER BY m.meter_id, sub.code`,
@@ -3738,9 +3663,8 @@ func buildSubWhere(f ListFilter) (string, []any) {
 // field mutations — once any live sub attaches, the plan's base
 // price / timing / meter set is frozen.
 //
-// "Live" excludes canceled. Draft, trialing and active all qualify
-// because they can still produce future invoices and need
-// deterministic terms.
+// "Live" excludes canceled. Trialing and active both qualify because they
+// can still produce future invoices and need deterministic terms.
 func (s *PostgresStore) CountLiveSubsByPlan(ctx context.Context, tenantID, planID string) (int, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -3958,7 +3882,7 @@ func (s *PostgresStore) CustomerSubPlanCurrencies(ctx context.Context, tenantID,
 		JOIN plans p
 		  ON p.id = si.plan_id OR p.id = si.pending_plan_id
 		WHERE sub.customer_id = $1
-		  AND sub.status IN ('draft', 'trialing', 'active')
+		  AND sub.status IN ('trialing', 'active')
 		  AND sub.id <> $2
 		ORDER BY sub.code`,
 		customerID, excludeSubID)
