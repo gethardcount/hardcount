@@ -96,9 +96,9 @@ func TestHandler_UpdateItem_PlanChangeAuditCarriesSimContext(t *testing.T) {
 
 	// The clock stands still at a simulated instant that is NOT wall-clock now —
 	// the whole point of the second axis. It sits inside the sub's current
-	// billing period, because wiring the resolver also binds the proration math
-	// to simulated time (that is the ADR-029 contract, and this test asserts the
-	// proration outcome below).
+	// billing period, because the proration math runs on the decided time too
+	// (that is the ADR-029 contract, and this test asserts the proration
+	// outcome below).
 	frozen := ps.Add(5 * 24 * time.Hour)
 
 	svc := NewService(store, nil)
@@ -107,12 +107,6 @@ func TestHandler_UpdateItem_PlanChangeAuditCarriesSimContext(t *testing.T) {
 		"plan_new": {ID: "plan_new", Name: "Pro", BaseAmountCents: 3000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
 	}}
 	h := NewHandler(svc)
-	// The clock resolver is what turns the sub's pin into (frozen_time, clock id)
-	// — production wires the billing engine here (router.go).
-	h.SetResolver(&stubClockResolver{
-		bySub:   map[string]time.Time{subID: frozen},
-		clockID: "tclk_1",
-	})
 	// Paid current-period prebill so the immediate upgrade proceeds (an upgrade
 	// against an UNPAID source is blocked per ADR-050 — not what these audit
 	// tests are exercising).
@@ -121,7 +115,10 @@ func TestHandler_UpdateItem_PlanChangeAuditCarriesSimContext(t *testing.T) {
 	h.SetAuditLogger(rec)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
-	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
+	// The route is ofSubscription: the API's door decides the sub's clock at
+	// its frozen time before the handler runs.
+	decided := clock.WithSim(auth.WithTenantID(ctx, tenantID), clock.Sim{At: frozen, TestClockID: "tclk_1"})
+	req := updateItemURL(decided, subID, itemID, body)
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
 	if rr.Code != http.StatusOK {

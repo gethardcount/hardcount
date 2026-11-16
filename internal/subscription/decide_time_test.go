@@ -122,7 +122,6 @@ func TestCreateRoute_OneDecisionForTheCreateAndItsAuditRow(t *testing.T) {
 	svc := NewService(newMemStore(), nil)
 	svc.SetResolver(clocks)
 	h := NewHandler(svc)
-	h.SetResolver(clocks)
 	audits := &capturingAudit{}
 	h.SetAuditLogger(audits)
 	body := `{"code":"sub-time","display_name":"Time","customer_id":"cus_1","items":[{"plan_id":"pln_1"}]}`

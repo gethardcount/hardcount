@@ -194,13 +194,6 @@ type Handler struct {
 	// born finalized. Its name holds "audit" so audit.MustWired refuses to
 	// boot without it; nil (narrow tests) writes none.
 	finalizeAudit InvoiceFinalizeRecorder
-	// Resolver binds effective-now from the sub pin at handler entry
-	// for proration math + changeAt stamping (PR-12, ADR-030 follow-
-	// through). Without it, mid-cycle plan changes on clock-pinned
-	// subs computed proration against wall-clock now — wrong factor
-	// for the simulated state. Optional: nil-safe; without it the
-	// proration paths fall back to wall-clock (pre-PR-12 behavior).
-	resolver clock.Resolver
 	// invoiceLabels names the invoices activity rows link to (ADR-128).
 	// Optional: unset, rows name no invoice by link.
 	invoiceLabels InvoiceLabeler
@@ -216,56 +209,6 @@ func (h *Handler) SetAuditLogger(l auditRecorder) { h.auditLogger = l }
 // SetInvoiceFinalizeRecorder wires the finalize audit row for proration
 // invoices (the billing engine; router.go).
 func (h *Handler) SetInvoiceFinalizeRecorder(r InvoiceFinalizeRecorder) { h.finalizeAudit = r }
-
-// SetResolver wires the clock.Resolver used to bind effective-now at
-// proration entry points so wall-clock-time computations on
-// clock-pinned subs use simulated time. Implemented by *billing.Engine
-// (same resolver the Service uses internally).
-func (h *Handler) SetResolver(r clock.Resolver) { h.resolver = r }
-
-// bindForSub returns ctx with effective-now bound from the sub pin
-// when the resolver is wired. Used at proration handler entries so
-// daysLeftInPeriod / changeAt stamps land in simulated time on
-// clock-pinned subs. Falls through unchanged when resolver isn't set
-// or the sub isn't clock-pinned (resolver returns wall-clock).
-func (h *Handler) bindForSub(ctx context.Context, tenantID, subID string) context.Context {
-	if h.resolver == nil {
-		return ctx
-	}
-	bound, _ := clock.BindEffectiveNow(ctx, h.resolver, clock.Pin{TenantID: tenantID, SubscriptionID: subID})
-	return bound
-}
-
-// auditCtx binds the sub's simulated-time context — its test clock and that
-// clock's frozen instant — onto ctx for an audit emission, so the row lands
-// on the sim axis (audit_log.sim_effective_at / test_clock_id) and the clock
-// filter can find it after ADR-086 teardown deletes the sub itself.
-//
-// It replaces auditMetaForSub, which merged the same pair into the metadata
-// bag from TWO sources: the clock id off the entity, the instant off
-// sub.UpdatedAt. That pairing is only true when this request is what last
-// wrote the row — on subscription.proration_failed (nothing written) and on
-// the change-plan rows (sub rewritten later) it stamped a STALE sim instant.
-// One resolution of the pin yields both halves, consistent by construction
-// (clock.Sim).
-//
-// A live subscription can hold no clock (DB CHECK on test_clocks.livemode),
-// so the bind finds none and leaves ctx as is. It is also a no-op when ctx is
-// already bound — the service-layer entry points (bindForSub) bind before we
-// get here on most routes.
-//
-// ADR-030 still holds: created_at stays WALL-clock ("when the operator
-// clicked"). This is the second axis, not a replacement for the first.
-func (h *Handler) auditCtx(ctx context.Context, tenantID, subID string) context.Context {
-	if h.resolver == nil || subID == "" {
-		return ctx
-	}
-	if _, ok := clock.SimOf(ctx); ok {
-		return ctx
-	}
-	bound, _ := clock.BindEffectiveNow(ctx, h.resolver, clock.Pin{TenantID: tenantID, SubscriptionID: subID})
-	return bound
-}
 
 // planIDsForAudit projects a sub's items into the audit metadata
 // shape — same as the cancel handler's existing payload, so audit
@@ -438,7 +381,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	// writer stamps the sim axis (sim_effective_at, test_clock_id) from the
 	// decision.
 	if h.auditLogger != nil {
-		_ = h.auditLogger.Log(h.auditCtx(ctx, tenantID, sub.ID), tenantID, domain.AuditActionCreate, "subscription", sub.ID, sub.Code, map[string]any{
+		_ = h.auditLogger.Log(ctx, tenantID, domain.AuditActionCreate, "subscription", sub.ID, sub.Code, map[string]any{
 			"customer_id": sub.CustomerID,
 			"plan_ids":    planIDsForAudit(sub),
 		})
@@ -561,7 +504,7 @@ func (h *Handler) activate(w http.ResponseWriter, r *http.Request) {
 	// Wall-clock created_at + sim metadata on clock-pinned subs — same
 	// pattern as the create handler above.
 	if h.auditLogger != nil {
-		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, sub.ID), tenantID, domain.AuditActionActivate, "subscription", sub.ID, sub.Code, map[string]any{
+		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionActivate, "subscription", sub.ID, sub.Code, map[string]any{
 			"customer_id": sub.CustomerID,
 		})
 	}
@@ -645,7 +588,7 @@ func (h *Handler) scheduleCancel(w http.ResponseWriter, r *http.Request) {
 			meta["cancel_effective_at"] = sub.CancelEffectiveAt.UTC()
 		}
 		meta["status"] = string(sub.Status)
-		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, sub.ID), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, meta)
+		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, meta)
 	}
 
 	// subscription.cancel_scheduled is queued in the schedule's transaction
@@ -702,7 +645,7 @@ func (h *Handler) endTrial(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.auditLogger != nil {
-		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, sub.ID), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
+		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
 			"action":      domain.SubAuditTrialEnded,
 			"customer_id": sub.CustomerID,
 		})
@@ -775,7 +718,7 @@ func (h *Handler) extendTrial(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.auditLogger != nil {
-		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, sub.ID), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
+		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
 			"action":      domain.SubAuditTrialExtended,
 			"customer_id": sub.CustomerID,
 			"trial_end":   body.TrialEnd.UTC(),
@@ -904,7 +847,7 @@ func (h *Handler) setBillingThresholds(w http.ResponseWriter, r *http.Request) {
 		if thresholdCurrency != "" {
 			meta["currency"] = thresholdCurrency
 		}
-		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, sub.ID), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, meta)
+		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, meta)
 	}
 
 	h.respondSub(w, r, http.StatusOK, sub)
@@ -928,7 +871,7 @@ func (h *Handler) clearBillingThresholds(w http.ResponseWriter, r *http.Request)
 	}
 
 	if h.auditLogger != nil {
-		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, sub.ID), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
+		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
 			"action":      domain.SubAuditThresholdsCleared,
 			"customer_id": sub.CustomerID,
 		})
@@ -961,7 +904,7 @@ func (h *Handler) clearScheduledCancel(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if h.auditLogger != nil {
-		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, sub.ID), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
+		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionUpdate, "subscription", sub.ID, sub.Code, map[string]any{
 			"action":      domain.SubAuditCancelCleared,
 			"customer_id": sub.CustomerID,
 		})
@@ -986,12 +929,8 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Bind effective-now from the sub pin so proration math runs in
-	// simulated time on clock-pinned subs (ADR-030). Without binding,
-	// `daysLeftInPeriod(sub, time.Now())` would compute the
-	// wrong ratio for a clock-pinned sub whose current_period is in
-	// the simulated future. PR-12.
-	ctx := h.bindForSub(r.Context(), tenantID, id)
+	// The handler has no clock of its own: it reads the service's, the server's.
+	ctx := clock.EnsureEffectiveNow(r.Context(), h.svc.clock) // the action's time: see Service.clock
 	r = r.WithContext(ctx)
 
 	// Close an ended, unbilled period first, so the snapshot below is the
@@ -1059,7 +998,7 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 			"quantity": item.Quantity,
 		}
 		addProrationMeta(payload, addProration, h.planCurrency(ctx, tenantID, item.PlanID))
-		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, id), tenantID, domain.AuditActionUpdate, "subscription", id, subBefore.Code, payload)
+		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionUpdate, "subscription", id, subBefore.Code, payload)
 	}
 
 	// subscription.item.added is queued in the add's transaction
@@ -1082,9 +1021,8 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Bind effective-now from the sub pin so proration math + changeAt
-	// stamps run in simulated time on clock-pinned subs (PR-12).
-	ctx := h.bindForSub(r.Context(), tenantID, subID)
+	// The handler has no clock of its own: it reads the service's, the server's.
+	ctx := clock.EnsureEffectiveNow(r.Context(), h.svc.clock) // the action's time: see Service.clock
 	r = r.WithContext(ctx)
 
 	// Close an ended, unbilled period first, so the change (and its
@@ -1226,7 +1164,7 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 		if s, err := h.svc.Get(ctx, tenantID, subID); err == nil {
 			auditSub = s
 		}
-		_ = h.auditLogger.Log(h.auditCtx(ctx, tenantID, subID), tenantID, domain.AuditActionSubscriptionItemUpdated, "subscription", subID, auditSub.Code, payload)
+		_ = h.auditLogger.Log(ctx, tenantID, domain.AuditActionSubscriptionItemUpdated, "subscription", subID, auditSub.Code, payload)
 	}
 
 	// subscription.item.updated, or subscription.pending_change.scheduled
@@ -1264,7 +1202,7 @@ func (h *Handler) cancelPendingItemChange(w http.ResponseWriter, r *http.Request
 	}
 
 	if h.auditLogger != nil {
-		_ = h.auditLogger.Log(h.auditCtx(r.Context(), tenantID, subID), tenantID, domain.AuditActionUpdate, "subscription", subID, "", map[string]any{
+		_ = h.auditLogger.Log(r.Context(), tenantID, domain.AuditActionUpdate, "subscription", subID, "", map[string]any{
 			"action":  domain.SubAuditPendingPlanChangeCanceled,
 			"item_id": item.ID,
 		})
@@ -1281,8 +1219,8 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 	subID := chi.URLParam(r, "id")
 	itemID := chi.URLParam(r, "itemID")
 
-	// Bind effective-now from the sub pin (PR-12).
-	ctx := h.bindForSub(r.Context(), tenantID, subID)
+	// The handler has no clock of its own: it reads the service's, the server's.
+	ctx := clock.EnsureEffectiveNow(r.Context(), h.svc.clock) // the action's time: see Service.clock
 	r = r.WithContext(ctx)
 
 	// Close an ended, unbilled period first, so the snapshot below is the
@@ -1357,7 +1295,7 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 			"plan_id": removedPlanID,
 		}
 		addProrationMeta(payload, removeProration, h.planCurrency(ctx, tenantID, removedPlanID))
-		_ = h.auditLogger.Log(h.auditCtx(ctx, tenantID, subID), tenantID, domain.AuditActionUpdate, "subscription", subID, subBefore.Code, payload)
+		_ = h.auditLogger.Log(ctx, tenantID, domain.AuditActionUpdate, "subscription", subID, subBefore.Code, payload)
 	}
 
 	// subscription.item.removed is queued in the removal's transaction
@@ -1716,16 +1654,15 @@ func (h *Handler) atomicRemoveItemWithProration(
 // for a proration invoice born finalized, on the transaction that inserts it.
 // nil when no recorder is wired. A draft gets no row here: it gets one from
 // invoice.Service.Finalize when it finalizes.
-func (h *Handler) finalizeAuditEmit(ctx context.Context, tenantID, subID string) func(tx *sql.Tx, out domain.Invoice) error {
+func (h *Handler) finalizeAuditEmit(ctx context.Context) func(tx *sql.Tx, out domain.Invoice) error {
 	if h.finalizeAudit == nil {
 		return nil
 	}
-	actx := h.auditCtx(ctx, tenantID, subID)
 	return func(tx *sql.Tx, out domain.Invoice) error {
 		if out.Status != domain.InvoiceFinalized {
 			return nil
 		}
-		return h.finalizeAudit.EmitFinalizeAuditTx(actx, tx, out)
+		return h.finalizeAudit.EmitFinalizeAuditTx(ctx, tx, out)
 	}
 }
 
@@ -1982,8 +1919,8 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 	}
 
 	if proratedCents > 0 {
-		// Honors ctx-bound effective-now (PR-12) so proration invoice
-		// IssuedAt/DueAt land in sim-time on clock-pinned subs.
+		// The action's time, so the proration invoice's issued and due
+		// dates are on it (on a test clock, its frozen time).
 		now := clock.Now(ctx)
 		// Tenant-configured Net terms, same resolution as the engine's
 		// cycle/create invoices. Pre-fix this hardcoded 30, so a Net-15
@@ -2208,7 +2145,7 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 
 		// The finalize audit row commits with the invoice on the caller's tx
 		// (ADR-090 shared fate). Its failure rolls the item change back.
-		emit := h.finalizeAuditEmit(ctx, tenantID, sub.ID)
+		emit := h.finalizeAuditEmit(ctx)
 		inv, err := h.invoices.CreateInvoiceWithLineItemsTx(ctx, tx, tenantID, invoice, lineItems)
 		if err == nil && emit != nil {
 			if aerr := emit(tx, inv); aerr != nil {

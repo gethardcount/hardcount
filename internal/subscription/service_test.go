@@ -3814,11 +3814,9 @@ func TestSubMutators_StampTheDecidedTime(t *testing.T) {
 		if err := svc.RemoveItem(decided(t, svc, sub), "t1", sub.ID, extra.ID); err != nil {
 			t.Fatalf("RemoveItem: %v", err)
 		}
-		// RemoveItem returns no row — assert by reading the parent sub
-		// indirectly. Since the postgres-store's hidden behavior here
-		// is "DELETE" with no timestamp write, this case just locks in
-		// that bindForSub was called (no panic + no wall-clock stamp on
-		// any incidental write).
+		// RemoveItem returns no row, and the store's DELETE writes no
+		// timestamp: this case only locks in that the removal runs on the
+		// decided context without error.
 	})
 
 	t.Run("CancelPendingItemChange", func(t *testing.T) {
