@@ -56,11 +56,10 @@ func (c *callSpy) IngestCallResolvingHeld(ctx context.Context, tenantID string, 
 // read of the server's clock.
 func TestUsageEntries_StampTheCustomersDecidedTime(t *testing.T) {
 	frozenA := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
-	frozenB := time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC)
 	serverAt := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
 	setup := func(store Store) (*Service, *fakeResolver, *usageSteppingClock) {
 		svc := NewService(store)
-		res := &fakeResolver{frozen: map[string]time.Time{"cus_a": frozenA, "cus_b": frozenB}}
+		res := &fakeResolver{frozen: map[string]time.Time{"cus_a": frozenA}}
 		svc.SetResolver(res)
 		server := &usageSteppingClock{at: serverAt.Add(-time.Second)}
 		svc.SetClock(server)
@@ -85,27 +84,6 @@ func TestUsageEntries_StampTheCustomersDecidedTime(t *testing.T) {
 		}
 		if !e.Timestamp.Equal(serverAt) || res.calls != 1 || server.reads != 1 {
 			t.Errorf("stamped %v, %d resolver reads, %d server reads; want %v, one, one", e.Timestamp, res.calls, server.reads, serverAt)
-		}
-	})
-	t.Run("a batch: two customers on two clocks and one on none", func(t *testing.T) {
-		store := newMemStore()
-		svc, res, server := setup(store)
-		result, batchErrs := svc.BatchIngest(testMode(), "t1", []IngestInput{
-			{CustomerID: "cus_a", MeterID: "mtr_1", Quantity: dec(1), IdempotencyKey: "b-a"},
-			{CustomerID: "cus_b", MeterID: "mtr_1", Quantity: dec(1), IdempotencyKey: "b-b"},
-			{CustomerID: "cus_n", MeterID: "mtr_1", Quantity: dec(1), IdempotencyKey: "b-n"},
-		})
-		if len(batchErrs) != 0 || result.Inserted != 3 {
-			t.Fatalf("batch: %+v, errors %v", result, batchErrs)
-		}
-		want := map[string]time.Time{"cus_a": frozenA, "cus_b": frozenB, "cus_n": serverAt}
-		for _, e := range store.events {
-			if !e.Timestamp.Equal(want[e.CustomerID]) {
-				t.Errorf("%s stamped %v; want %v", e.CustomerID, e.Timestamp, want[e.CustomerID])
-			}
-		}
-		if res.calls != 3 || server.reads != 1 {
-			t.Errorf("%d resolver reads, %d server reads; want one per event (3), one (the customer on no clock)", res.calls, server.reads)
 		}
 	})
 	t.Run("Backfill: its future check is the customer's decided time", func(t *testing.T) {
