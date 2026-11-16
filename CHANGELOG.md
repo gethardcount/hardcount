@@ -127,7 +127,7 @@ original text.
 
 ### Fixed
 
-- **The "Billing cycles per minute" dashboard panel is titled for what it counts: billing passes.** `hardcount_billing_cycles_total` counts one pass per mode, two per cycle; its help text, the monitoring page and the panel now say so. The help text of `hardcount_webhook_outbox_dead_lettered_total` names its `cause` label ([#PRNUM](https://github.com/gethardcount/hardcount/pull/PRNUM)).
+- **The "Billing cycles per minute" dashboard panel is titled for what it counts: billing passes.** `hardcount_billing_cycles_total` counts one pass per mode, two per cycle; its help text, the monitoring page and the panel now say so. The help text of `hardcount_webhook_outbox_dead_lettered_total` names its `cause` label ([#1831](https://github.com/gethardcount/hardcount/pull/1831)).
 - **The API keys page says when a rotated key's old key stops, which mode a new key works in, and each key's type on a phone.** The rotate dialog promised the time you picked even when the old key expires sooner ([#1827](https://github.com/gethardcount/hardcount/pull/1827)).
 - **`GET /v1/whoami` answers an error when the signed-in user cannot be read.** It answered `200` without `email`. Three API key validation messages are plainer ([#1825](https://github.com/gethardcount/hardcount/pull/1825)).
 - **An expired invitation no longer blocks a new one to the same address.** Inviting someone whose earlier invitation expired answered `409` and the dashboard offered no way to clear it; the new invitation now replaces the expired one ([#1817](https://github.com/gethardcount/hardcount/pull/1817)).
