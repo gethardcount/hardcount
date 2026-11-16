@@ -75,11 +75,11 @@ func (s *Service) SetResolver(r clock.Resolver) {
 }
 
 // decide returns ctx with the customer's time decided and its instant bound,
-// so all work below reads one instant, and audit rows the clock. Every ingest
-// shape reaches it once per event or call (single, each event of a batch,
-// backfill, a LiteLLM call, a held release), and so do the reads whose window
-// defaults to the customer's now (customer usage, margin). The cases, in the
-// order taken:
+// so all work below reads one instant, and audit rows the clock. Each ingest
+// entry calls it once, before it goes down: Ingest (per event), each event of
+// a batch, Backfill, a LiteLLM call (IngestCall), a held release (Release).
+// Nothing below an entry decides: build reads the decided instant. The cases,
+// in the order taken:
 //   - an instant already bound (a clock decided for this request, with its
 //     id, or a bare instant): ctx as it is, with no read;
 //   - no customer id: real time;
@@ -108,8 +108,9 @@ func (s *Service) decide(ctx context.Context, tenantID, customerID string) (cont
 	return clock.EnsureEffectiveNow(decided, s.clock), nil
 }
 
-// effectiveNow is the customer's now, decide's instant: the value the ingest
-// gates and timestamps use.
+// effectiveNow is the customer's now, decide's instant, for a read that is an
+// entry itself: the customer usage and margin reads, whose window defaults to
+// it.
 func (s *Service) effectiveNow(ctx context.Context, tenantID, customerID string) (time.Time, error) {
 	decided, err := s.decide(ctx, tenantID, customerID)
 	if err != nil {
@@ -177,9 +178,8 @@ func (s *Service) Backfill(ctx context.Context, tenantID string, input IngestInp
 	if input.Timestamp.After(s.clock.Now(bound)) {
 		return domain.UsageEvent{}, errs.Invalid("timestamp", "must not be in the future for backfill — use POST /usage-events for real-time ingest")
 	}
-	// The decided ctx goes downstream, so ingest does not decide again and
-	// the audit emission, built from it, carries the clock, not just the
-	// instant.
+	// The decided ctx goes downstream: ingest reads its instant, and the
+	// audit emission, built from it, carries the clock, not just the instant.
 	return s.ingestAudited(bound, tenantID, input, domain.UsageOriginBackfill, s.backfillEmission(bound))
 }
 
@@ -227,6 +227,32 @@ const usageFutureSkew = 5 * time.Minute
 // returns the value to store. Before B5 the column rounded a 13th decimal
 // place away, so the event billed a quantity the caller never sent, and a
 // value too large made Postgres reject the INSERT, a 500.
+// checkInput is an event's own checks, which read no clock: the customer and
+// the meter are named, and the dimensions and the quantity are valid. It
+// returns the quantity to record.
+func checkInput(input IngestInput) (decimal.Decimal, error) {
+	if strings.TrimSpace(input.CustomerID) == "" {
+		return decimal.Decimal{}, errs.Required("customer_id")
+	}
+	if strings.TrimSpace(input.MeterID) == "" {
+		return decimal.Decimal{}, errs.Required("meter_id")
+	}
+	if err := validateDimensions(input.Dimensions); err != nil {
+		return decimal.Decimal{}, err
+	}
+	// quantity == 0 stays 0 — PRESENCE semantics (the HTTP doors refuse a
+	// missing quantity; parseQuantity).
+	// The old code silently coerced it to 1: an integrator emitting
+	// zero-usage heartbeats ("request happened, zero tokens billed") was
+	// billed one unit per event on sum-aggregated meters — a money bug
+	// invisible until the invoice. Count meters count the event row
+	// regardless of quantity, so they are unaffected; sum/max meters now
+	// honestly contribute nothing. (Stripe parity: meter events carry an
+	// explicit value; there is no silent default.) Negative values remain
+	// allowed as usage corrections.
+	return checkQuantity(input.Quantity)
+}
+
 func checkQuantity(q decimal.Decimal) (decimal.Decimal, error) {
 	return domain.CheckDecimal("quantity", q, domain.QuantityLimits)
 }
@@ -253,6 +279,17 @@ func validateDimensions(dims map[string]any) error {
 }
 
 func (s *Service) ingest(ctx context.Context, tenantID string, input IngestInput, origin domain.UsageEventOrigin) (domain.UsageEvent, error) {
+	// The event's own checks run before its customer is decided, so the order
+	// of answers is as before: on this entry and the batch, an invalid event
+	// is refused before its clock is read (build checks again; Backfill and a
+	// LiteLLM call decide first, as before).
+	if _, err := checkInput(input); err != nil {
+		return domain.UsageEvent{}, err
+	}
+	ctx, err := s.decide(ctx, tenantID, input.CustomerID)
+	if err != nil {
+		return domain.UsageEvent{}, err
+	}
 	return s.ingestAudited(ctx, tenantID, input, origin, nil)
 }
 
@@ -361,32 +398,13 @@ func recordLate(ctx context.Context, ev domain.UsageEvent) {
 // is late. A caller that builds rows it may not write (IngestCall builds a
 // call's two mappings and writes one) records only the rows it wrote.
 func (s *Service) build(ctx context.Context, tenantID string, input IngestInput, origin domain.UsageEventOrigin) (domain.UsageEvent, bool, error) {
-	if strings.TrimSpace(input.CustomerID) == "" {
-		return domain.UsageEvent{}, false, errs.Required("customer_id")
-	}
-	if strings.TrimSpace(input.MeterID) == "" {
-		return domain.UsageEvent{}, false, errs.Required("meter_id")
-	}
-	if err := validateDimensions(input.Dimensions); err != nil {
-		return domain.UsageEvent{}, false, err
-	}
-	// quantity == 0 stays 0 — PRESENCE semantics (the HTTP doors refuse a
-	// missing quantity; parseQuantity).
-	// The old code silently coerced it to 1: an integrator emitting
-	// zero-usage heartbeats ("request happened, zero tokens billed") was
-	// billed one unit per event on sum-aggregated meters — a money bug
-	// invisible until the invoice. Count meters count the event row
-	// regardless of quantity, so they are unaffected; sum/max meters now
-	// honestly contribute nothing. (Stripe parity: meter events carry an
-	// explicit value; there is no silent default.) Negative values remain
-	// allowed as usage corrections.
-	quantity, err := checkQuantity(input.Quantity)
+	quantity, err := checkInput(input)
 	if err != nil {
 		return domain.UsageEvent{}, false, err
 	}
 
-	// "Now" is the CUSTOMER's effective now — a test clock's frozen_time
-	// when the customer is pinned (Stripe Test Clocks shape: meter events
+	// "Now" is the CUSTOMER's now, the instant its entry decided (decide) — a
+	// test clock's frozen_time when the customer is pinned (Stripe Test Clocks shape: meter events
 	// on a pinned customer live on the simulated timeline). Two effects:
 	// events without a timestamp land at frozen_time (inside the simulated
 	// current billing period, where the next Advance bills them), and the
@@ -394,10 +412,7 @@ func (s *Service) build(ctx context.Context, tenantID string, input IngestInput,
 	// compared against wall-clock, so on a clock advanced into the future
 	// every sim-timestamped event was rejected as "in the future" and the
 	// flagship advance-and-bill-usage demo broke at ingest.
-	now, err := s.effectiveNow(ctx, tenantID, input.CustomerID)
-	if err != nil {
-		return domain.UsageEvent{}, false, err
-	}
+	now := s.clock.Now(ctx)
 	ts := now
 	if input.Timestamp != nil {
 		// Reject future-dated live events (a small clock-skew tolerance keeps
@@ -485,7 +500,18 @@ func (s *Service) BatchIngest(ctx context.Context, tenantID string, events []Ing
 	prepared := make([]domain.UsageEvent, 0, len(events))
 	var batchErrs []error
 	for i, input := range events {
-		ev, err := s.prepare(ctx, tenantID, input, domain.UsageOriginAPI)
+		// Each event is decided for its own customer, after its own checks
+		// (see ingest for why they run here and again in build).
+		ev, err := func() (domain.UsageEvent, error) {
+			if _, err := checkInput(input); err != nil {
+				return domain.UsageEvent{}, err
+			}
+			evCtx, err := s.decide(ctx, tenantID, input.CustomerID)
+			if err != nil {
+				return domain.UsageEvent{}, err
+			}
+			return s.prepare(evCtx, tenantID, input, domain.UsageOriginAPI)
+		}()
 		if errors.Is(err, errs.ErrUnavailable) {
 			// An event refused for retry (its customer's test clock could
 			// not be read) refuses the whole batch: the rest are not read.
