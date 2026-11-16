@@ -16,7 +16,8 @@ import type { MemberInvitationStatus } from './memberInvitationStatus';
 /**
  * An invitation for a teammate to join this account's dashboard.
  * `POST /v1/members/invite` returns it, and `GET /v1/members` lists
- * every invitation the account has sent, newest first.
+ * the ones that are pending or expired, newest first. An accepted or
+ * revoked invitation is not returned.
  */
 export interface MemberInvitation {
   /** The invitation's id (`hc_minv_…`). */
@@ -29,9 +30,8 @@ export interface MemberInvitation {
      */
   role: string;
   /**
-     * `pending` until the invitation is accepted or revoked, or until
-     * `expires_at` passes (`expired`). The server works it out each
-     * time it answers.
+     * `pending` until `expires_at` passes, then `expired`. The server
+     * works it out each time it answers.
      */
   status: MemberInvitationStatus;
   /** The sign-in email of the member who sent the invitation. Absent when that user no longer exists. */
@@ -40,8 +40,4 @@ export interface MemberInvitation {
   expires_at: string;
   /** When the invitation was created and its email queued. */
   created_at: string;
-  /** When the invitee accepted. Absent until then. */
-  accepted_at?: string;
-  /** When a member revoked the invitation. Absent unless it was revoked. */
-  revoked_at?: string;
 }

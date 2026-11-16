@@ -19,10 +19,6 @@ export type ListMembers200MembersItem = {
   email: string;
   /** `owner` for the user created at setup, `member` for an invited one. Not enforced yet. */
   role: string;
-  /**
-     * When the user's sign-in account was created. For
-     * someone who already had an account when invited,
-     * this is earlier than the day they joined.
-     */
+  /** When the person joined this account. */
   joined_at: string;
 };

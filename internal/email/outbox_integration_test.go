@@ -486,7 +486,7 @@ func (f *fakeDeliverer) SendPasswordReset(_ context.Context, tenantID, to, name,
 	f.lastUpdateURL = url
 	return nil
 }
-func (f *fakeDeliverer) SendMemberInvite(_ context.Context, tenantID, to, inviter, tenantName, url string) error {
+func (f *fakeDeliverer) SendMemberInvite(_ context.Context, tenantID, to, inviter, tenantName, url string, _ bool) error {
 	f.calls++
 	f.lastType, f.lastTenant, f.lastTo, f.lastName = email.TypeMemberInvite, tenantID, to, inviter
 	f.lastUpdateURL = url

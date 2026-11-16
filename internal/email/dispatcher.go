@@ -45,7 +45,7 @@ type EmailDeliverer interface {
 	SendPaymentSetupRequest(ctx context.Context, tenantID, to, customerName, invoiceNumber string, amountDueCents int64, currency, updateURL string, writtenOff bool, trigger string) error
 	SendPaymentSetupLink(ctx context.Context, tenantID, to, customerName, operatorNote, setupURL string) error
 	SendPasswordReset(ctx context.Context, tenantID, to, displayName, resetURL string) error
-	SendMemberInvite(ctx context.Context, tenantID, to, inviterEmail, tenantName, acceptURL string) error
+	SendMemberInvite(ctx context.Context, tenantID, to, inviterEmail, tenantName, acceptURL string, hasAccount bool) error
 }
 
 // Dispatcher drains the email_outbox by deserialising each row's payload and
@@ -248,7 +248,7 @@ func (d *Dispatcher) handle(ctx context.Context, row OutboxRow) error {
 	case TypePasswordReset:
 		return d.sender.SendPasswordReset(ctx, row.TenantID, msg.To, msg.CustomerName, msg.PasswordResetURL)
 	case TypeMemberInvite:
-		return d.sender.SendMemberInvite(ctx, row.TenantID, msg.To, msg.InviterEmail, msg.TenantName, msg.InviteURL)
+		return d.sender.SendMemberInvite(ctx, row.TenantID, msg.To, msg.InviterEmail, msg.TenantName, msg.InviteURL, msg.InviteeHasAccount)
 	case TypeCreditNote:
 		return d.sender.SendCreditNote(ctx, row.TenantID, msg.To, msg.Cc, msg.CustomerName,
 			msg.CreditNoteNumber, msg.InvoiceNumber, msg.AmountCents, msg.Currency, msg.PDF)

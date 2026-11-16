@@ -106,8 +106,11 @@ func TestWireFormat_EverySendPath(t *testing.T) {
 			return s.SendPasswordReset(ctx, "", "ap@acme.test", "Jürgen", "https://app.example.com/reset?t=abc")
 		}, []string{"Jürgen", "https://app.example.com/reset?t=abc", "— Hardcount"}},
 		{"member-invite", func() error {
-			return s.SendMemberInvite(ctx, "", "ap@acme.test", "owner@acme.test", "Müller GmbH", "https://app.example.com/invite?t=abc")
-		}, []string{"Müller GmbH", "https://app.example.com/invite?t=abc"}},
+			return s.SendMemberInvite(ctx, "", "ap@acme.test", "owner@acme.test", "Müller GmbH", "https://app.example.com/invite?t=abc", false)
+		}, []string{"Müller GmbH", "https://app.example.com/invite?t=abc", "to set a password and join:"}},
+		{"member-invite-has-account", func() error {
+			return s.SendMemberInvite(ctx, "", "ap@acme.test", "owner@acme.test", "Müller GmbH", "https://app.example.com/invite?t=abc", true)
+		}, []string{"Müller GmbH", "https://app.example.com/invite?t=abc", "to accept, then sign in with your existing password:"}},
 		{"test-email", func() error {
 			return s.SendTestEmail(ctx, "", "ap@acme.test")
 		}, []string{"This is a test email from Hardcount.", "— Hardcount"}},
