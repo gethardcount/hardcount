@@ -961,18 +961,10 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// which released rows an invoice counts. The invoice store supplies the
 	// threshold watermarks.
 	usageSvc.SetOpenPeriodReader(usageOpenPeriods{subs: subStore, pricing: pricingStore, thresholds: invoiceStore})
-	// subscription.Service uses the resolver at Create, Activate, ChangeItem,
-	// ScheduleCancel, PauseCollection, EndTrial and ExtendTrial, so every
-	// subscription time the operator writes uses the right clock. Without it,
-	// a clock-pinned subscription created today on a clock left idle for a
-	// month gets a wall-clock 2026 next_billing_at against a 2026-04
-	// frozen_time. Catch-up then never reaches it, as with dunning runs above.
+	// The subscription service decides a time itself for a create only (from
+	// the customer its body names); every other action gets its time from the
+	// door or from the job that runs it (see subscription.Service.clock).
 	subSvc.SetResolver(engine)
-	// The handler uses the resolver for proration math and changeAt stamps on
-	// clock-pinned subscriptions. Without it, daysLeftInPeriod and
-	// handleItemProration would use the wall clock even when the subscription
-	// is in simulated time.
-	subH.SetResolver(engine)
 	// The proration denominator (domain.CyclePeriod.CycleDays) is anchored in the
 	// tenant's billing timezone, the zone the engine advances period
 	// boundaries in (ADR-058). So the cycle length cannot disagree with the

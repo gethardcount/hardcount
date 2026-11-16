@@ -133,7 +133,22 @@ type DueBiller interface {
 // when the reader isn't wired.
 
 type Service struct {
-	store     Store
+	store Store
+	// clock is the server's clock: the router's clk, the one the engine
+	// bills by. Every subscription action runs on a time decided on a test
+	// clock or at real time (see clock.Decide and clock.WithRealTime). Who
+	// decides it:
+	//   - a request, the API's door (api.clockDoor), from the subscription in
+	//     its URL; a create, the service itself, from the customer its body
+	//     names (DecideForCustomer);
+	//   - the billing run at real time (its lists exclude subscriptions on a
+	//     test clock), and a test clock's catch-up on that clock (period
+	//     closes, due cancels, trial ends);
+	//   - dunning's final action (a pause or a cancel), its run's time.
+	// Each entry point keeps that time and, when it carries no instant (real
+	// time), reads this clock once (clock.EnsureEffectiveNow). Without that
+	// read, two reads of the time in one action could differ, and a store's
+	// stamp could fall on another time than the action's.
 	clock     clock.Clock
 	settings  SettingsReader
 	customers CustomerReader
@@ -273,9 +288,8 @@ func (e *InsideInvoiceGraceError) Error() string {
 }
 
 // SetResolver wires the clock.Resolver the service decides a new
-// subscription's time with (DecideForCustomer) and looks up a subscription's
-// time with in the mutators. Optional: nil decides nothing, and every read is
-// real time (narrow tests).
+// subscription's time with (DecideForCustomer). Optional: nil decides
+// nothing, and a create is at real time (narrow tests).
 func (s *Service) SetResolver(r clock.Resolver) {
 	s.resolver = r
 }
@@ -295,14 +309,6 @@ func (s *Service) DecideForCustomer(ctx context.Context, tenantID, customerID st
 			"The customer's test clock could not be read. Nothing was created; send the request again.", err)
 	}
 	return decided, nil
-}
-
-// bindForSub binds effective-now from a sub pin. Used by every
-// per-sub mutation entry point (Activate, ChangeItem, ScheduleCancel,
-// PauseCollection, EndTrial, ExtendTrial, Cancel).
-func (s *Service) bindForSub(ctx context.Context, tenantID, subscriptionID string) context.Context {
-	bound, _ := clock.BindEffectiveNow(ctx, s.resolver, clock.Pin{TenantID: tenantID, SubscriptionID: subscriptionID}) // a failed lookup is logged there
-	return bound
 }
 
 // tenantLocation resolves the tenant's billing timezone (ADR-077). The zone
@@ -1008,11 +1014,7 @@ func (s *Service) Activate(ctx context.Context, tenantID, id string) (domain.Sub
 		}
 	}
 
-	// Bind effective-now via the sub's TestClockID; downstream stamps
-	// inherit. Activate's writes (activated_at, started_at, period
-	// bounds, next_billing_at, updated_at on the sub row) all land in
-	// simulated time on clock-pinned subs.
-	ctx = s.bindForSub(ctx, tenantID, id)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	now := s.clock.Now(ctx)
 
 	// First-period math: same helper as Create's start-now branch — period
@@ -1319,7 +1321,7 @@ func (s *Service) AddItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscript
 	if err != nil {
 		return ItemChangeResult{}, err
 	}
-	ctx = s.bindForSub(ctx, tenantID, subscriptionID)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	sub, err := s.store.LockForItemChangeTx(ctx, tx, tenantID, subscriptionID)
 	if err != nil {
 		return ItemChangeResult{}, err
@@ -1427,7 +1429,7 @@ func (s *Service) checkItemChange(ctx context.Context, tenantID, subscriptionID,
 	if sub.Status != domain.SubscriptionActive {
 		return ctx, checkedItemChange{}, errs.InvalidState(fmt.Sprintf("Items can only be changed on an active subscription. This one is %s.", sub.Status))
 	}
-	ctx = s.bindForSub(ctx, tenantID, subscriptionID)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	c := checkedItemChange{sub: sub, item: item, now: s.clock.Now(ctx)}
 
 	if input.Quantity != nil {
@@ -2042,7 +2044,7 @@ func (s *Service) CancelPendingItemChange(ctx context.Context, tenantID, subscri
 	if item.PendingPlanID == "" {
 		return item, false, nil
 	}
-	ctx = s.bindForSub(ctx, tenantID, subscriptionID)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	// A pending change due at a boundary that has passed has taken effect,
 	// even if the billing run has not closed the period yet: the close runs
 	// first and applies it, and the cancel is then refused rather than
@@ -2114,7 +2116,7 @@ func (s *Service) RemoveItem(ctx context.Context, tenantID, subscriptionID, item
 // handler prices the removal credit from them. subscription.item.removed is
 // queued on tx.
 func (s *Service) RemoveItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID, itemID string) (ItemChangeResult, error) {
-	ctx = s.bindForSub(ctx, tenantID, subscriptionID)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	sub, item, err := s.lockItemForChange(ctx, tx, tenantID, subscriptionID, itemID)
 	if err != nil {
 		return ItemChangeResult{}, err
@@ -2199,7 +2201,7 @@ func CancelOrigin(ctx context.Context) string {
 // ErrWatermarkMoved with nothing written; billSubscription re-reads once and
 // fires again.
 func (s *Service) FireDueScheduledCancel(ctx context.Context, tenantID, id string, at time.Time) error {
-	ctx = s.bindForSub(ctx, tenantID, id)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 
 	sub, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
@@ -2375,7 +2377,7 @@ func (s *Service) CloseEndedPeriodFirst(ctx context.Context, tenantID, id string
 // closeEndedPeriods). A period inside its grace answers
 // *InsideInvoiceGraceError.
 func (s *Service) closeEndedPeriodFirstWithin(ctx context.Context, tenantID, id string, grace time.Duration) (domain.Subscription, error) {
-	ctx = s.bindForSub(ctx, tenantID, id)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	sub, _, err := s.closeEndedPeriods(ctx, tenantID, id, grace)
 	if err != nil {
 		return domain.Subscription{}, err
@@ -2508,7 +2510,7 @@ func (pc plannedCancel) writeTx(ctx context.Context, tx *sql.Tx, store Store, lo
 // transaction. ErrWatermarkMoved means nothing was written and the cancel can
 // plan again.
 func (s *Service) cancelOnce(callerCtx context.Context, tenantID, id string, grace time.Duration) (domain.Subscription, int64, error) {
-	ctx := s.bindForSub(callerCtx, tenantID, id)
+	ctx := clock.EnsureEffectiveNow(callerCtx, s.clock) // the action's time: see Service.clock
 
 	// A cancel can arrive after the period ended and before the billing run
 	// closed it. No run bills a canceled subscription, so the ended periods
@@ -2584,12 +2586,8 @@ func (s *Service) cancelOnce(callerCtx context.Context, tenantID, id string, gra
 				"canceled_by": cancelActorLabel(ctx),
 			}
 			addReliefMeta(meta, r, currency)
-			// No sim field: Cancel's entry points bind the sub's pin onto ctx
-			// (bindForSub), and the Logger derives the sim axis from that
-			// binding. The hand-rolled pairing this replaces read the clock id
-			// off the ENTITY and the instant off clock.Now(ctx) — two sources,
-			// so an unbound ctx (dunning's terminal cancel reaches Cancel from
-			// its own path) produced "clock C at wall-clock now".
+			// No sim field: the Logger derives the sim axis from the clock
+			// the cancel's time was decided on (see Service.clock).
 			if auditErr := s.audit.LogInTx(ctx, tx, audit.Entry{
 				Action:        domain.AuditActionCancel,
 				ResourceType:  "subscription",
@@ -2784,11 +2782,9 @@ func (s *Service) ScheduleCancel(ctx context.Context, tenantID, id string, input
 		return domain.Subscription{}, err
 	}
 
-	// Future-check the operator-supplied cancel_at against simulated
-	// time on clock-pinned subs. Without this, an operator who set
-	// cancel_at = "1 month from frozen_now" would be rejected as past
-	// because wall-clock has drifted ahead of frozen_time.
-	ctx = s.bindForSub(ctx, tenantID, id)
+	// cancel_at must be after this time: on a test clock its frozen time,
+	// not the machine's, which may be far ahead of it.
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	now := s.clock.Now(ctx)
 	var cancelAt *time.Time
 	if input.CancelAt != nil {
@@ -2840,7 +2836,7 @@ func (s *Service) ScheduleCancel(ctx context.Context, tenantID, id string, input
 // billing run has not closed the period yet: the close runs first and fires
 // it, and the clear is then refused rather than reported as a clear.
 func (s *Service) ClearScheduledCancel(ctx context.Context, tenantID, id string) (domain.Subscription, bool, error) {
-	ctx = s.bindForSub(ctx, tenantID, id)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	before, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return domain.Subscription{}, false, err
@@ -2914,13 +2910,7 @@ func (s *Service) PauseCollection(ctx context.Context, tenantID, id string, inpu
 			"only 'keep_as_draft' is supported today — paused cycles keep drafting invoices without collecting; the 'void' and 'mark_uncollectible' pause behaviors (auto-resolving each cycle's draft) are not implemented yet")
 	}
 
-	// Bind to the sub pin upfront so the store's sub.UpdatedAt stamp +
-	// any downstream clock.Now reads honor simulated time on
-	// clock-pinned subs. Pre-fix the bind was only inside the
-	// `if input.ResumesAt != nil` branch, so the common no-resumes_at
-	// path stamped wall-clock UpdatedAt — which then propagated through
-	// auditCtxForSub to wall-clock audit rows.
-	ctx = s.bindForSub(ctx, tenantID, id)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 
 	// The ended period's invoice follows the pause state at its end, so a
 	// pause landing after the boundary must not turn it into a draft.
@@ -2976,7 +2966,7 @@ func (s *Service) PauseCollection(ctx context.Context, tenantID, id string, inpu
 // PostgresStore.ReleaseDunningPauseTx). Dunning never resumes collection
 // itself.
 func (s *Service) PauseCollectionForDunning(ctx context.Context, tenantID, id, invoiceID string) (bool, error) {
-	ctx = s.bindForSub(ctx, tenantID, id)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	// The ended period's invoice follows the pause state at its end, as
 	// for an operator's pause. Unlike the operator's, this close waits for
 	// the invoice grace: inside it nothing is paused, the answer is
@@ -3025,7 +3015,7 @@ func (s *Service) PauseCollectionForDunning(ctx context.Context, tenantID, id, i
 // their own row (triggered_by "schedule", or "payment" for a dunning pause
 // a payment released) and do not call this method.
 func (s *Service) ResumeCollection(ctx context.Context, tenantID, id string) (domain.Subscription, bool, error) {
-	ctx = s.bindForSub(ctx, tenantID, id)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	// A period that ended while paused keeps a draft invoice; the resume
 	// applies from the period that is running.
 	if _, err := s.CloseEndedPeriodFirst(ctx, tenantID, id); err != nil {
@@ -3059,7 +3049,7 @@ func (s *Service) ResumeCollection(ctx context.Context, tenantID, id string) (do
 // after a sales call. Idempotent at the SQL level (the store atomic
 // returns errs.InvalidState if the row is already active or terminal).
 func (s *Service) EndTrial(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
-	ctx = s.bindForSub(ctx, tenantID, id)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	now := s.clock.Now(ctx)
 
 	// Read sub for billing_time + status validation. Early-end resets
@@ -3234,9 +3224,8 @@ func (s *Service) ProcessExpiredTrialsForClock(ctx context.Context, tenantID, cl
 		// below does. Every branch runs on this ctx: the flip's audit
 		// row, the day-1 invoice (issued at trial_end_at, see
 		// buildOnCreateInvoice), its finalize row and collection, and the
-		// free cancel's row. Nested binds of the same clock inherit it
-		// (clock.BindEffectiveNow).
-		bound := clock.WithSim(s.bindForSub(ctx, tenantID, sub.ID), clock.Sim{At: trialEndAt, TestClockID: clockID})
+		// free cancel's row.
+		bound := clock.WithSim(ctx, clock.Sim{At: trialEndAt, TestClockID: clockID})
 		// A due cancel schedule means cancel free, never activate-and-bill
 		// (ADR-069). The SQL guard on the activation UPDATE is the
 		// atomic backstop for a schedule landing after this snapshot.
@@ -3588,7 +3577,7 @@ func (s *Service) resumeAudit() ResumeAudit {
 // The store atomic enforces status='trialing' so this can't race the
 // cycle-scan auto-flip.
 func (s *Service) ExtendTrial(ctx context.Context, tenantID, id string, newTrialEnd time.Time) (domain.Subscription, error) {
-	ctx = s.bindForSub(ctx, tenantID, id)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	now := s.clock.Now(ctx)
 	if !newTrialEnd.After(now) {
 		return domain.Subscription{}, errs.Invalid("trial_end", "must be in the future")
@@ -3681,7 +3670,7 @@ func (s *Service) SetBillingThresholds(ctx context.Context, tenantID, id string,
 		return domain.Subscription{}, errs.Invalid("amount_gte", "must be > 0")
 	}
 
-	ctx = s.bindForSub(ctx, tenantID, id)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	sub, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return domain.Subscription{}, err
@@ -3741,7 +3730,7 @@ func (s *Service) SetBillingThresholds(ctx context.Context, tenantID, id string,
 // subscription. Idempotent — clearing on a sub that has no threshold returns
 // the unchanged subscription.
 func (s *Service) ClearBillingThresholds(ctx context.Context, tenantID, id string) (domain.Subscription, error) {
-	ctx = s.bindForSub(ctx, tenantID, id)
+	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	return s.store.ClearBillingThresholds(ctx, tenantID, id)
 }
 

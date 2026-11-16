@@ -3,7 +3,6 @@ package subscription
 import (
 	"context"
 	"errors"
-	"sync"
 	"testing"
 	"time"
 
@@ -105,38 +104,6 @@ func TestCancel_TrialActivatedWhilePriced_PlansAgainFromTheActiveRow(t *testing.
 	}
 }
 
-// steppingResolver resolves a wall-clock subscription as the engine does
-// (Engine.SimForSubscription): on a context with no bound instant, to the
-// clock's now, here a new instant on each call, as a later moment; on a bound
-// context, to the bound instant.
-type steppingResolver struct {
-	mu   sync.Mutex
-	base time.Time
-	n    int
-}
-
-func (r *steppingResolver) sim(ctx context.Context) clock.Sim {
-	if at, ok := clock.EffectiveNow(ctx); ok {
-		return clock.Sim{At: at}
-	}
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	r.n++
-	return clock.Sim{At: r.base.Add(time.Duration(r.n) * time.Second)}
-}
-
-func (r *steppingResolver) SimForSubscription(ctx context.Context, _, _ string) (clock.Sim, error) {
-	return r.sim(ctx), nil
-}
-
-func (r *steppingResolver) SimForCustomer(ctx context.Context, _, _ string) (clock.Sim, error) {
-	return r.sim(ctx), nil
-}
-
-func (r *steppingResolver) SimForInvoice(ctx context.Context, _, _ string) (clock.Sim, error) {
-	return r.sim(ctx), nil
-}
-
 // Each attempt binds its instant from the caller's context. On the request's
 // context, which the API's door decided at real time (the subscription is on
 // no clock), the second plan is at a new instant; binding again on the first
@@ -144,18 +111,18 @@ func (r *steppingResolver) SimForInvoice(ctx context.Context, _, _ string) (cloc
 //
 // Mutation M7 (bind once, outside the attempts) → both plans at one instant.
 func TestCancel_EachAttemptBindsFromTheCallersContext(t *testing.T) {
-	svc := NewService(newMemStore(), nil)
+	server := &subSteppingClock{at: time.Now().UTC().Add(time.Hour)}
+	svc := NewService(newMemStore(), server)
 	fb := &fakeBiller{}
 	svc.SetBiller(fb)
 	id := seedActiveSub(t, svc, fb)
-	svc.SetResolver(&steppingResolver{base: time.Now().UTC().Add(time.Hour)})
 	fb.writeMoved = 1
 
 	if _, _, err := svc.Cancel(testutil.AtRealTime(), "t1", id); err != nil {
 		t.Fatalf("Cancel: %v", err)
 	}
-	if len(fb.planAts) != 2 || !fb.planAts[1].After(fb.planAts[0]) {
-		t.Errorf("plan instants = %v, want two, the second later: each attempt binds anew", fb.planAts)
+	if len(fb.planAts) != 2 || !fb.planAts[1].Equal(fb.planAts[0].Add(time.Second)) {
+		t.Errorf("plan instants = %v, want two, the second one read of the server's clock after the first: each attempt binds anew", fb.planAts)
 	}
 }
 

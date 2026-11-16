@@ -24,10 +24,14 @@ type finalizeRecorderMock struct {
 	audits   []domain.Invoice
 	auditTxs []*sql.Tx
 	calls    []string
+	// sims is the clock and instant each finalize row's ctx carries.
+	sims []clock.Sim
 }
 
-func (m *finalizeRecorderMock) EmitFinalizeAuditTx(_ context.Context, tx *sql.Tx, inv domain.Invoice) error {
+func (m *finalizeRecorderMock) EmitFinalizeAuditTx(ctx context.Context, tx *sql.Tx, inv domain.Invoice) error {
 	m.calls = append(m.calls, "audit")
+	sim, _ := clock.SimOf(ctx)
+	m.sims = append(m.sims, sim)
 	if m.auditErr != nil {
 		return m.auditErr
 	}
@@ -154,5 +158,22 @@ func TestProration_AuditFailure_RollsBack(t *testing.T) {
 	}
 	if item.PlanID != "plan_basic" {
 		t.Errorf("item plan after a failed finalize audit = %q, want plan_basic (the change rolls back)", item.PlanID)
+	}
+}
+
+// The finalize audit row of a proration invoice born finalized is written on
+// the item route's decided context: on a test clock, that clock at the
+// decided instant, as every other audit row of the route.
+func TestProration_FinalizedInvoice_AuditOnTheDecidedClock(t *testing.T) {
+	r := newProrationFinalizeRig(t)
+	ctx := auth.WithTenantID(clock.WithSim(context.Background(), clock.Sim{At: proNow, TestClockID: "tclk_1"}), "t1")
+	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_pro", Immediate: true})
+	rr := httptest.NewRecorder()
+	r.h.updateItem(rr, updateItemURL(ctx, r.subID, r.itemID, body))
+	if rr.Code != http.StatusOK {
+		t.Fatalf("upgrade: %d %s", rr.Code, rr.Body.String())
+	}
+	if len(r.rec.sims) != 1 || r.rec.sims[0].TestClockID != "tclk_1" || !r.rec.sims[0].At.Equal(proNow) {
+		t.Errorf("finalize row on %+v; want tclk_1 at %v", r.rec.sims, proNow)
 	}
 }
