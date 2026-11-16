@@ -270,27 +270,6 @@ func (b blockingAudit) LogInTxFields(ctx context.Context, tx *sql.Tx, action, re
 	return b.inner.LogInTxFields(ctx, tx, action, resourceType, resourceID, resourceLabel, metadata)
 }
 
-// waitForLockWait returns once a backend of this database is waiting on a
-// lock in a statement on api_keys.
-func waitForLockWait(t *testing.T, db *postgres.DB) {
-	t.Helper()
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		var waiting int
-		if err := db.Pool.QueryRowContext(t.Context(), `SELECT count(*) FROM pg_stat_activity
-			WHERE datname = current_database() AND wait_event_type = 'Lock' AND query ILIKE '%api_keys%'`).Scan(&waiting); err != nil {
-			t.Fatalf("read pg_stat_activity: %v", err)
-		}
-		if waiting > 0 {
-			return
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("no statement on api_keys waited on a lock within 10s")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-}
-
 // Two immediate rotations of one key at once make one replacement. The first
 // locks the key's row and holds its transaction open; the second waits on
 // the lock, then finds the key revoked and answers invalid state (409).
@@ -331,7 +310,7 @@ func TestRotateKey_ConcurrentRotationsMakeOneReplacement(t *testing.T) {
 		t.Fatal("the first rotation did not reach its audit write in 10s")
 	}
 	go rotate(keys, secondDone)
-	waitForLockWait(t, db)
+	testutil.WaitForLockWaiter(t, t.Context(), testutil.AdminPool(t), "api_keys")
 	release()
 
 	wait := func(done <-chan outcome, which string) outcome {

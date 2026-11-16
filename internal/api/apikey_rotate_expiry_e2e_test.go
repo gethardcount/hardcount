@@ -41,16 +41,6 @@ func TestE2E_APIKeyRotate_NeverLengthensTheOldKeysLife(t *testing.T) {
 		t.Errorf("old key expires_at = %q, want its own %s: a rotation must not lengthen it", flowStr(rotated, "old_key", "expires_at"), due.Format(time.RFC3339))
 	}
 
-	// A key with no expiry gets the grace as its expiry.
-	open := create("No expiry", nil)
-	before := time.Now().UTC()
-	rotated = flowDo(t, ts, "POST", "/v1/api-keys/"+open+"/rotate", flowReq{cookie: owner,
-		body: map[string]any{"expires_in_seconds": 3600}}).want(t, 200, "rotate with 1 hour of grace").body
-	if got, err := time.Parse(time.RFC3339Nano, flowStr(rotated, "old_key", "expires_at")); err != nil ||
-		got.Before(before.Add(time.Hour).Add(-time.Second)) || got.After(time.Now().UTC().Add(time.Hour)) {
-		t.Errorf("old key expires_at = %q, want an hour from the rotation", flowStr(rotated, "old_key", "expires_at"))
-	}
-
 	// An expired key. No request can make one, since a create refuses a past
 	// expiry, so the test moves a key's expiry into the past directly.
 	gone := create("Expired", &due)

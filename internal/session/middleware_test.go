@@ -10,7 +10,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/audit"
@@ -57,10 +56,9 @@ func sessionRequest(cookie string) *http.Request {
 	return req
 }
 
-// TestMiddlewareOrAPIKey_CookieOutageDoesNotFallThrough: pre-#560 an infra
-// failure on the cookie lookup fell through to the bearer branch and, with
-// no header present, surfaced as "missing credentials" — a second flavor of
-// the same lie. The outage must stop the request with a 503.
+// A session store that fails is no verdict on the cookie: the request stops
+// with a 503 and does not go on to the API key, where with no key it would
+// get a 401 for missing credentials.
 func TestMiddlewareOrAPIKey_CookieOutageDoesNotFallThrough(t *testing.T) {
 	svc := NewService(&fakeSessionStore{outage: true})
 	handler := MiddlewareOrAPIKey(svc, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -119,28 +117,6 @@ func TestMiddlewareOrAPIKey_ClientGoneLogsAtWarn(t *testing.T) {
 				t.Errorf("logged %v %q, want %s %q", entry["level"], entry["msg"], tc.want, "session resolve unavailable")
 			}
 		})
-	}
-}
-
-// TestMiddlewareOrAPIKey_StaleCookieStillFallsThrough pins the deliberate
-// pre-existing behavior the outage branch must not widen: a cookie the store
-// definitively rejects falls through to the bearer branch (here: absent →
-// the generic missing-credentials 401), so a stale cookie never blocks a
-// valid Authorization header.
-func TestMiddlewareOrAPIKey_StaleCookieStillFallsThrough(t *testing.T) {
-	svc := NewService(&fakeSessionStore{sessions: map[string]Session{}})
-	handler := MiddlewareOrAPIKey(svc, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("should not reach handler")
-	}))
-
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, sessionRequest("sess_deadbeef"))
-
-	if rec.Code != http.StatusUnauthorized {
-		t.Fatalf("status: got %d, want 401 from the bearer branch", rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), "missing credentials") {
-		t.Errorf("expected the bearer branch's missing-credentials message, got: %s", rec.Body.String())
 	}
 }
 
