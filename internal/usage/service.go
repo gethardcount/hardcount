@@ -81,21 +81,22 @@ func (s *Service) SetResolver(r clock.Resolver) {
 // Nothing below an ingest entry decides: build reads the decided instant. (The
 // customer usage, margin and cost dashboard reads still decide again, through
 // effectiveNow; see there.) The cases, in the order taken:
-//   - an instant already bound (a clock decided for this request, with its
-//     id, or a bare instant): ctx as it is, with no read;
+//   - a clock already decided for this work (clock.SimOf: the catch-up's, or
+//     a caller's on a test clock): ctx as it is, with no read. A bare instant
+//     does not count: it names no clock, and the customer may be on one;
 //   - no customer id: real time;
 //   - else the customer's clock is decided here (clock.DecideOrRealTime:
 //     the customer is named in the body, so the API's door left the request
 //     at real time). Live mode reads nothing and is real time, as is a
 //     customer on no clock, and a not-found (ingest's own store call answers
-//     a missing customer);
+//     a missing customer); a real instant ctx already carries is kept then;
 //   - a clock that cannot be read refuses the event (503): nothing is
 //     recorded, and the client sends it again.
 //
 // Real time is read once from the service's clock (SetClock) and bound
 // (clock.EnsureEffectiveNow).
 func (s *Service) decide(ctx context.Context, tenantID, customerID string) (context.Context, error) {
-	if _, ok := clock.EffectiveNow(ctx); ok {
+	if _, ok := clock.SimOf(ctx); ok {
 		return ctx, nil
 	}
 	decided := ctx
@@ -176,7 +177,7 @@ func (s *Service) Backfill(ctx context.Context, tenantID string, input IngestInp
 	// makes strict past-only brittle to verify, and the 'backfill' origin
 	// tag already distinguishes these rows from live POST traffic for
 	// audit purposes.
-	bound, err := s.decide(ctx, tenantID, input.CustomerID)
+	bound, input, err := s.decideEvent(ctx, tenantID, input)
 	if err != nil {
 		return domain.UsageEvent{}, err
 	}
@@ -234,16 +235,16 @@ var errBuildUndecided = errors.New("usage: an event was built with no decided ti
 
 // checkInput is an event's own checks, which read no clock: the customer and
 // the meter are named, and the dimensions and the quantity are valid. It
-// returns the quantity to record.
-func checkInput(input IngestInput) (decimal.Decimal, error) {
+// returns the input with its quantity as it is recorded.
+func checkInput(input IngestInput) (IngestInput, error) {
 	if strings.TrimSpace(input.CustomerID) == "" {
-		return decimal.Decimal{}, errs.Required("customer_id")
+		return input, errs.Required("customer_id")
 	}
 	if strings.TrimSpace(input.MeterID) == "" {
-		return decimal.Decimal{}, errs.Required("meter_id")
+		return input, errs.Required("meter_id")
 	}
 	if err := validateDimensions(input.Dimensions); err != nil {
-		return decimal.Decimal{}, err
+		return input, err
 	}
 	// quantity == 0 stays 0 — PRESENCE semantics (the HTTP doors refuse a
 	// missing quantity; parseQuantity).
@@ -255,7 +256,12 @@ func checkInput(input IngestInput) (decimal.Decimal, error) {
 	// honestly contribute nothing. (Stripe parity: meter events carry an
 	// explicit value; there is no silent default.) Negative values remain
 	// allowed as usage corrections.
-	return checkQuantity(input.Quantity)
+	q, err := checkQuantity(input.Quantity)
+	if err != nil {
+		return input, err
+	}
+	input.Quantity = q
+	return input, nil
 }
 
 // checkQuantity refuses a quantity the NUMERIC(38,12) column cannot store
@@ -289,23 +295,26 @@ func validateDimensions(dims map[string]any) error {
 }
 
 func (s *Service) ingest(ctx context.Context, tenantID string, input IngestInput, origin domain.UsageEventOrigin) (domain.UsageEvent, error) {
-	ctx, err := s.decideEvent(ctx, tenantID, input)
+	ctx, input, err := s.decideEvent(ctx, tenantID, input)
 	if err != nil {
 		return domain.UsageEvent{}, err
 	}
 	return s.ingestAudited(ctx, tenantID, input, origin, nil)
 }
 
-// decideEvent runs an event's own checks, then decides its customer's time.
-// The checks come first so the order of answers is as before: an invalid
-// event is refused before its customer's clock is read. A single ingest and
-// each event of a batch go through it; build runs the checks again, and
-// Backfill and a LiteLLM call decide first, as before.
-func (s *Service) decideEvent(ctx context.Context, tenantID string, input IngestInput) (context.Context, error) {
-	if _, err := checkInput(input); err != nil {
-		return ctx, err
+// decideEvent is the one rule of every ingest entry: an event's own checks
+// (checkInput), then its customer's time (decide), so an invalid event is
+// refused as invalid before its customer's clock is read. It returns the
+// checked input; build, below it, checks nothing. A single ingest, each event
+// of a batch and Backfill go through it; a LiteLLM call checks all its events
+// the same way before its one decision.
+func (s *Service) decideEvent(ctx context.Context, tenantID string, input IngestInput) (context.Context, IngestInput, error) {
+	input, err := checkInput(input)
+	if err != nil {
+		return ctx, input, err
 	}
-	return s.decide(ctx, tenantID, input.CustomerID)
+	ctx, err = s.decide(ctx, tenantID, input.CustomerID)
+	return ctx, input, err
 }
 
 // ingestAudited is ingest with an optional in-tx audit emission. Only backfill
@@ -413,10 +422,6 @@ func recordLate(ctx context.Context, ev domain.UsageEvent) {
 // is late. A caller that builds rows it may not write (IngestCall builds a
 // call's two mappings and writes one) records only the rows it wrote.
 func (s *Service) build(ctx context.Context, tenantID string, input IngestInput, origin domain.UsageEventOrigin) (domain.UsageEvent, bool, error) {
-	quantity, err := checkInput(input)
-	if err != nil {
-		return domain.UsageEvent{}, false, err
-	}
 
 	// "Now" is the CUSTOMER's now, the instant its entry decided — a test
 	// clock's frozen_time when the customer is pinned (Stripe Test Clocks
@@ -464,7 +469,7 @@ func (s *Service) build(ctx context.Context, tenantID string, input IngestInput,
 	return domain.UsageEvent{
 		CustomerID:     input.CustomerID,
 		MeterID:        input.MeterID,
-		Quantity:       quantity,
+		Quantity:       input.Quantity,
 		Dimensions:     input.Dimensions,
 		IdempotencyKey: input.IdempotencyKey,
 		Timestamp:      ts,
@@ -523,7 +528,7 @@ func (s *Service) BatchIngest(ctx context.Context, tenantID string, events []Ing
 	for i, input := range events {
 		// Each event is decided for its own customer.
 		var ev domain.UsageEvent
-		evCtx, err := s.decideEvent(ctx, tenantID, input)
+		evCtx, input, err := s.decideEvent(ctx, tenantID, input)
 		if err == nil {
 			ev, err = s.prepare(evCtx, tenantID, input, domain.UsageOriginAPI)
 		}

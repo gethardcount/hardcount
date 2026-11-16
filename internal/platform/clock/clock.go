@@ -258,9 +258,20 @@ func DecideWithoutDoor(ctx context.Context, r Resolver, p Pin) (context.Context,
 func DecideOrRealTime(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
 	decided, err := DecideWithoutDoor(ctx, r, p)
 	if errors.Is(err, errs.ErrNotFound) {
-		return WithRealTime(ctx), nil
+		return realTime(ctx), nil
 	}
 	return decided, err
+}
+
+// realTime records on ctx that real time was decided for a record on no
+// clock. A real instant ctx already carries (one on no clock: the work's
+// time, read once) is kept, so the work stays on that one instant. A clock's
+// instant is not kept: the record is on no clock.
+func realTime(ctx context.Context) context.Context {
+	if s, ok := Decision(ctx); ok && s.TestClockID == "" && !s.At.IsZero() {
+		return ctx
+	}
+	return WithRealTime(ctx)
 }
 
 // Decision returns what was decided for ctx's time, and whether anything
@@ -287,8 +298,10 @@ var ErrUndecided = errors.New("the time could not be decided")
 // test clock and its instant, or real time when the entity is on no clock
 // (an answer without a clock id binds real time, never a frozen instant).
 // Unlike BindEffectiveNow it returns the resolver's error, as ErrUndecided,
-// keeps nothing an earlier binding held, and needs a resolver and an id: it
-// is the call that decides, at the entry point of a request or a job's row.
+// and needs a resolver and an id: it is the call that decides, at the entry
+// point of a request or a job's row. It keeps nothing an earlier binding
+// held, with one exception: for a record on no clock, a real instant ctx
+// already carries is kept (see realTime).
 // Work on a record that did not come through the API's clock door decides
 // with DecideWithoutDoor, which calls it.
 func Decide(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
@@ -313,7 +326,7 @@ func Decide(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
 		return ctx, fmt.Errorf("%w: %w", ErrUndecided, err)
 	}
 	if !sim.Simulated() {
-		return WithRealTime(ctx), nil
+		return realTime(ctx), nil
 	}
 	return WithSim(ctx, sim), nil
 }

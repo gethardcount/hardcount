@@ -162,15 +162,14 @@ func TestBackfill_TestClockPinnedCustomer(t *testing.T) {
 	})
 }
 
-// TestIngest_CtxBoundEffectiveNowWins: an upstream entry point that
-// already bound effective-now (clock.WithEffectiveNow) short-circuits
-// the resolver — binding at the boundary, inheritance below it.
-func TestIngest_CtxBoundEffectiveNowWins(t *testing.T) {
+// A clock already decided for the work (the catch-up's, or a caller's on a
+// test clock) is the ingest's time: the resolver is not asked again.
+func TestIngest_AClocksDecisionWins(t *testing.T) {
 	resolver := &fakeResolver{}
 	svc := NewService(newMemStore())
 	svc.SetResolver(resolver)
 	bound := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
-	ctx := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), bound)
+	ctx := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: bound, TestClockID: "tc_up"})
 
 	e, err := svc.Ingest(ctx, "t1", IngestInput{
 		CustomerID: "cus_any", MeterID: "mtr_1", Quantity: dec(1),
@@ -179,9 +178,39 @@ func TestIngest_CtxBoundEffectiveNowWins(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 	if !e.Timestamp.Equal(bound) {
-		t.Errorf("timestamp: got %v, want ctx-bound %v", e.Timestamp, bound)
+		t.Errorf("timestamp: got %v, want the decided clock's %v", e.Timestamp, bound)
 	}
 	if resolver.calls != 0 {
-		t.Errorf("ctx-bound effective-now must skip the resolver, got %d calls", resolver.calls)
+		t.Errorf("a clock's decision must skip the resolver, got %d calls", resolver.calls)
+	}
+}
+
+// A real instant on the context (one with no clock, as the API's door will
+// bind for every request) does not hide the customer's clock: an ingest for
+// a customer on a test clock is at that clock's frozen time, and for a
+// customer on no clock at the inherited instant, read once.
+func TestIngest_ARealInstantDoesNotHideTheCustomersClock(t *testing.T) {
+	real := time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC)
+	frozen := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		name, customer string
+		want           time.Time
+	}{
+		{"a customer on a test clock: the clock's time", "cus_clk", frozen},
+		{"a customer on no clock: the inherited instant", "cus_any", real},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			resolver := &fakeResolver{frozen: map[string]time.Time{"cus_clk": frozen}}
+			svc := NewService(newMemStore())
+			svc.SetResolver(resolver)
+			ctx := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), real)
+			e, err := svc.Ingest(ctx, "t1", IngestInput{CustomerID: c.customer, MeterID: "mtr_1", Quantity: dec(1)})
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if !e.Timestamp.Equal(c.want) || resolver.calls != 1 {
+				t.Errorf("timestamp %v, %d resolver reads; want %v, one", e.Timestamp, resolver.calls, c.want)
+			}
+		})
 	}
 }

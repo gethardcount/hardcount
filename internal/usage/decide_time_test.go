@@ -263,11 +263,13 @@ func TestCostDashboard_AFailedSecondClockReadIsThePagesRefusal(t *testing.T) {
 	}
 }
 
-// The order of answers on a single ingest and a batch: an invalid event (no
-// meter named) whose customer's clock cannot be read is refused as invalid,
-// with no clock read, as before its time was read inside build.
+// Every entry checks the event before it decides the customer's time: an
+// invalid event (no meter named) is refused as invalid, with no clock read,
+// even when the customer's clock cannot be read. Backfill and a LiteLLM call
+// used to decide first and answer unavailable (503) in that corner.
 func TestUsage_AnInvalidEventIsRefusedBeforeItsClockIsRead(t *testing.T) {
 	unreadable := errors.New("connection reset by peer")
+	past := time.Now().UTC().Add(-time.Hour)
 	for _, c := range []struct {
 		name   string
 		ingest func(*Service) error
@@ -282,6 +284,14 @@ func TestUsage_AnInvalidEventIsRefusedBeforeItsClockIsRead(t *testing.T) {
 				return fmt.Errorf("%d errors: %v", len(batchErrs), batchErrs)
 			}
 			return batchErrs[0]
+		}},
+		{"backfill", func(s *Service) error {
+			_, err := s.Backfill(testMode(), "t1", IngestInput{CustomerID: "cus_1", Quantity: dec(1), Timestamp: &past})
+			return err
+		}},
+		{"a LiteLLM call", func(s *Service) error {
+			_, err := s.IngestCall(testMode(), "t1", CallInput{CustomerID: "cus_1", Events: []CallEvent{{Quantity: dec(1), IdempotencyKey: "c:input"}}})
+			return err
 		}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
