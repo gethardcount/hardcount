@@ -139,9 +139,9 @@ func WithSim(ctx context.Context, s Sim) context.Context {
 }
 
 // SimOf returns the bound simulated-time context. ok is true only for a
-// complete binding on a known test clock (see Sim.Simulated). A bare
-// WithEffectiveNow binding reports false: its clock is unknown, and
-// inventing one would put false evidence in an append-only log.
+// clock and its instant (see Sim.Simulated). A real instant reports false:
+// it names no clock, and inventing one would put false evidence in an
+// append-only log.
 func SimOf(ctx context.Context) (Sim, bool) {
 	if ctx == nil {
 		return Sim{}, false
@@ -153,13 +153,13 @@ func SimOf(ctx context.Context) (Sim, bool) {
 	return s, true
 }
 
-// WithEffectiveNow binds an effective-now instant whose clock is unknown.
+// WithEffectiveNow binds a real instant (At set, no clock id; see Decision).
 // Every Clock.Now(ctx) below reads this value instead of wall-clock time.
 //
-// It clears any clock id already bound on ctx, on purpose. A real instant
-// means this path's time no longer comes from a clock it can name. Keeping
-// the old clock id would stamp rows with a clock the new instant does not
-// belong to. Callers that know the clock call WithSim.
+// It clears any clock id already bound on ctx, on purpose: a real instant
+// names no clock, and keeping the old clock id would stamp rows with a clock
+// the new instant does not belong to. Callers that know the clock call
+// WithSim.
 func WithEffectiveNow(ctx context.Context, t time.Time) context.Context {
 	return WithSim(ctx, Sim{At: t})
 }
