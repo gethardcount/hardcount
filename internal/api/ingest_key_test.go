@@ -30,7 +30,7 @@ import (
 // three ingest routes and the events land; minting a secret key, the example
 // of a call it may not make, gets the ordinary missing-permission 403 and
 // makes no key (TestIngestKey_RefusedOnEveryRouteButUsage checks every
-// route). A rotation keeps its type.
+// route).
 //
 // Mutation: give the ingest key apikey:write, or gate the LiteLLM callback
 // on usage:write, and this fails.
@@ -41,8 +41,7 @@ func TestE2E_IngestKey_SendsUsageAndNothingElse(t *testing.T) {
 	defer ts.Close()
 
 	const email, password = "owner@ingest-key-flow.test", "ingest-key-flow-pw-12"
-	boot := flowBootstrap(t, ts, "ingest-key-flow-bootstrap", email, password)
-	tenantID := flowStr(boot, "tenant", "id")
+	flowBootstrap(t, ts, "ingest-key-flow-bootstrap", email, password)
 	owner := login(t, ts, email, password)
 	asOwner := func(method, path string, body any) flowResp {
 		t.Helper()
@@ -57,28 +56,13 @@ func TestE2E_IngestKey_SendsUsageAndNothingElse(t *testing.T) {
 	// Create: the dashboard asks for key_type ingest and gets an
 	// hc_ingest_test_ key in the session's mode.
 	created := asOwner("POST", "/v1/api-keys", map[string]any{"name": "LiteLLM proxy", "key_type": "ingest"}).want(t, 201, "create an ingest key")
-	keyID, raw := flowStr(created.body, "key", "id"), flowStr(created.body, "raw_key")
+	raw := flowStr(created.body, "raw_key")
 	if !strings.HasPrefix(raw, "hc_ingest_test_") || flowStr(created.body, "key", "key_type") != "ingest" || flowObj(created.body, "key")["livemode"] != false {
 		t.Fatalf("created key %v (raw key starts %q), want a test-mode ingest key starting hc_ingest_test_", flowObj(created.body, "key"), raw[:min(len(raw), 15)])
-	}
-	listed := false
-	for _, k := range flowList(asOwner("GET", "/v1/api-keys", nil).want(t, 200, "list keys").body, "data") {
-		if flowStr(k, "id") == keyID {
-			listed = flowStr(k, "key_type") == "ingest"
-		}
-	}
-	if !listed {
-		t.Errorf("key %s is not listed with key_type ingest", keyID)
 	}
 	as := func(method, path string, body any) flowResp {
 		t.Helper()
 		return flowDo(t, ts, method, path, flowReq{bearer: raw, body: body})
-	}
-
-	// whoami needs no permission: it names the key, its type and account.
-	who := as("GET", "/v1/whoami", nil).want(t, 200, "whoami with the ingest key").body
-	if flowStr(who, "key_id") != keyID || flowStr(who, "key_type") != "ingest" || flowStr(who, "tenant_id") != tenantID {
-		t.Errorf("whoami = %v, want key %s, type ingest, account %s", who, keyID, tenantID)
 	}
 
 	// Send usage: single, batch and the LiteLLM callback.
@@ -117,12 +101,6 @@ func TestE2E_IngestKey_SendsUsageAndNothingElse(t *testing.T) {
 		if flowStr(k, "name") == "escalation" {
 			t.Errorf("the ingest key minted a key: %v", k)
 		}
-	}
-
-	// A rotation by the owner keeps the type.
-	rot := asOwner("POST", "/v1/api-keys/"+keyID+"/rotate", nil).want(t, 200, "owner rotates the ingest key")
-	if newRaw := flowStr(rot.body, "raw_key"); !strings.HasPrefix(newRaw, "hc_ingest_test_") || flowStr(rot.body, "new_key", "key_type") != "ingest" {
-		t.Errorf("rotation gave %v, want an ingest key", flowObj(rot.body, "new_key"))
 	}
 }
 

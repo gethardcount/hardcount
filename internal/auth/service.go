@@ -232,9 +232,9 @@ var ErrInvalidKey = errors.New("invalid api key")
 
 // ValidateKey returns the key rawKey is, or ErrInvalidKey. rawKey must have a
 // key's shape (lookupPrefix) and match a stored key's hash, and the key must
-// be active (statusAt). It writes the key's last_used_at at most once per
-// lastUsedTouchInterval; a failed write is logged and does not refuse the
-// key.
+// be active: scanKey sets its Status from statusAt when the row is read. It
+// writes the key's last_used_at at most once per lastUsedTouchInterval; a
+// failed write is logged and does not refuse the key.
 func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey, error) {
 	lookup, ok := lookupPrefix(rawKey)
 	if !ok {
@@ -337,6 +337,7 @@ func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input Rota
 		if err != nil {
 			return err
 		}
+		// scanKey sets Status from statusAt when the row is read.
 		if old.Status != domain.APIKeyStatusActive {
 			return errs.InvalidState("cannot rotate a " + old.Status + " key")
 		}
