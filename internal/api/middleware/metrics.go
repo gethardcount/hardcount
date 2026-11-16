@@ -44,7 +44,7 @@ var (
 	billingCyclesTotal = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "hardcount_billing_cycles_total",
-			Help: "Total billing cycles executed.",
+			Help: "Billing passes run. A cycle runs one pass per mode, live then test.",
 		},
 	)
 
@@ -212,7 +212,7 @@ var (
 	webhookOutboxDeadLettered = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "hardcount_webhook_outbox_dead_lettered_total",
-			Help: "Webhook outbox rows given up on (webhook_outbox status='failed') after 15 tries over about 52 hours, by mode: the event and its deliveries were never written, so no endpoint gets it. Endpoint failures are hardcount_webhook_deliveries_total{status=\"failed\"}.",
+			Help: "Webhook outbox rows given up on (webhook_outbox status='failed') after 15 tries over about 52 hours, by cause (always max_attempts) and mode: the event and its deliveries were never written, so no endpoint gets it. Endpoint failures are hardcount_webhook_deliveries_total{status=\"failed\"}.",
 		},
 		[]string{"cause", "mode"},
 	)
@@ -450,7 +450,8 @@ func RecordStripeKeyUnusable(reason string) {
 	stripeKeyUnusable.WithLabelValues(reason).Inc()
 }
 
-// RecordWebhookDelivery records a webhook delivery status ("succeeded", "failed", or "pending").
+// RecordWebhookDelivery records a finished webhook delivery attempt by status
+// ("succeeded" or "failed").
 func RecordWebhookDelivery(status string) {
 	webhookDeliveries.WithLabelValues(status).Inc()
 }
@@ -462,7 +463,8 @@ func RecordDunningRun(outcome string) {
 	dunningRunsProcessed.WithLabelValues(outcome).Inc()
 }
 
-// RecordCreditOperation records a credit operation by type ("grant", "usage", "expiry", "adjustment").
+// RecordCreditOperation records a credit operation by type ("grant",
+// "adjustment" or "expiry").
 func RecordCreditOperation(opType string) {
 	creditOperations.WithLabelValues(opType).Inc()
 }
