@@ -127,7 +127,7 @@ original text.
 
 ### Fixed
 
-- **The "Remove member" dialog says that API keys are not changed.** It said the person loses access immediately; a key they copied keeps working until it is rotated. The dialog, the API keys guide and the data page now say to rotate it ([#PRNUM](https://github.com/gethardcount/hardcount/pull/PRNUM)).
+- **The "Remove member" dialog says that API keys are not changed.** It said the person loses access immediately; a key they copied keeps working until it is rotated. The dialog, the API keys guide and the data page now say to rotate it ([#1836](https://github.com/gethardcount/hardcount/pull/1836)).
 - **Rotating an API key with "Now" warns that the old key stops at once.** The dialog said nothing more for "Now" than for a grace period; it now says that anything still using the old key fails until it has the new one ([#1830](https://github.com/gethardcount/hardcount/pull/1830)).
 - **The API keys page says when a rotated key's old key stops, which mode a new key works in, and each key's type on a phone.** The rotate dialog promised the time you picked even when the old key expires sooner ([#1827](https://github.com/gethardcount/hardcount/pull/1827)).
 - **The Team tab shows the day each member joined the workspace, and lists only invitations that are pending or expired.** It showed the day the person's account was created, and kept revoked invitations in the list. The invitation email tells someone who already has an account to sign in, not to set one up ([#1828](https://github.com/gethardcount/hardcount/pull/1828)).
