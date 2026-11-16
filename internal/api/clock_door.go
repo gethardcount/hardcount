@@ -29,14 +29,17 @@ import (
 //   - the clock of the customer, subscription or invoice its path names, or
 //     of a credit note's or a dunning run's invoice, and its frozen time; a
 //     record on no clock gets one read of the server's clock;
-//   - a decidedIn entry: nothing here (real time with no instant in test
-//     mode, as before); the named function decides and binds once it has
-//     read its record.
+//   - a decidedIn entry: no instant here. In test mode the door marks the
+//     request real time with no instant (WithRealTime); in live mode it
+//     leaves the context as it is. The named function decides and binds
+//     once it has read its record.
 //
 // In live mode the door reads no record: test clocks exist only in test mode
-// (a CHECK on test_clocks), so no live record is on one. A live request on a
-// real-time or a record route gets one read of the server's clock; a
-// decidedIn route gets nothing. A request with no mode on its context yet
+// (a CHECK on test_clocks), so no live record is on one. It still finds the
+// request's route, an in-memory lookup in the router with no database read,
+// to tell a decidedIn route from the others. A live request on a real-time or
+// a record route gets one read of the server's clock; a decidedIn route, and
+// a route the router does not have, get nothing. A request with no mode on its context yet
 // (the routes before authentication, whose mode comes from what they read)
 // is decided as in test mode.
 //
