@@ -86,8 +86,8 @@ func TestE2E_MemberInviteAcceptRemove(t *testing.T) {
 	})
 	assertStatus(t, acceptResp, 200)
 	accept := readJSON(t, acceptResp)
-	if accept["session_minted"] != true {
-		t.Fatalf("accept session_minted: %v", accept["session_minted"])
+	if accept["session_minted"] != true || accept["livemode"] != false {
+		t.Fatalf("accept: session_minted %v, livemode %v; want a session in test mode", accept["session_minted"], accept["livemode"])
 	}
 	var memberCookie *http.Cookie
 	for _, c := range acceptResp.Cookies() {

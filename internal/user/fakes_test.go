@@ -79,7 +79,6 @@ func (f *fakeUserStore) LookupResetToken(ctx context.Context, tokenHash string) 
 // store.
 type stubSessionStore struct{}
 
-func (stubSessionStore) Insert(context.Context, session.Session) error { return nil }
 func (stubSessionStore) InsertTx(context.Context, *sql.Tx, session.Session) error {
 	return nil
 }

@@ -19,7 +19,7 @@ export type AcceptInvitation200 = {
   email: string;
   /** The account the member joined. */
   tenant_id: string;
-  /** True when this answer signed the new account in and set the session cookie. */
+  /** True for a new account, which this answer signed in by setting the session cookie. False for an existing account, which signs in with its own password. */
   session_minted: boolean;
   /** The new session's mode. Always false (test). */
   livemode: boolean;

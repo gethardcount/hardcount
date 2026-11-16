@@ -33,7 +33,7 @@ func TestRemoveMember_ConcurrentRemovalsKeepOneMember(t *testing.T) {
 	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "second@example.com"); err != nil {
 		t.Fatalf("invite: %v", err)
 	}
-	second, err := h.svc.AcceptInvite(ctx, h.email.lastToken(t), testPassword)
+	second, err := h.svc.AcceptInvite(ctx, dashmembers.AcceptInput{Token: h.email.lastToken(t), Password: testPassword})
 	if err != nil {
 		t.Fatalf("accept: %v", err)
 	}
@@ -104,21 +104,23 @@ func (d joinFailsDirectory) AttachTenantInTx(ctx context.Context, tx *sql.Tx, us
 	return errors.New("injected: membership attach failed")
 }
 
-// TestAcceptInvite_FailedJoinKeepsTheInvite: when the membership cannot be
-// written, the accept leaves nothing behind. There is no user row, and the
-// invitation is still pending, so the invitee's retry works. A burned token
-// means asking the operator for a new invite, and a user row with no
-// membership would send the retry down the existing-account path, which
-// signs nobody in.
+// TestAcceptInvite_FailedJoinKeepsTheInvite: when the membership or the
+// audit row cannot be written, the accept leaves nothing behind. There is no
+// user row and no session, and the invitation is still pending, so the
+// invitee's retry works. A burned token means asking the operator for a new
+// invite, and a user row with no membership would send the retry down the
+// existing-account path, which signs nobody in.
 //
 // Mutation: commit the claim before join runs, and the invitation is used up.
 func TestAcceptInvite_FailedJoinKeepsTheInvite(t *testing.T) {
 	for _, tc := range []struct {
-		name     string
-		existing bool
+		name      string
+		existing  bool
+		failAudit bool
 	}{
 		{name: "new account"},
 		{name: "existing account", existing: true},
+		{name: "new account, audit row fails", failAudit: true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			h := newHarness(t, "Team Join Fails")
@@ -137,7 +139,10 @@ func TestAcceptInvite_FailedJoinKeepsTheInvite(t *testing.T) {
 			failing := dashmembers.NewService(dashmembers.NewPostgresStore(h.db),
 				joinFailsDirectory{userDirAdapter{userStore}},
 				h.sessions, h.audit, h.email, staticTenantNamer{name: "Team Join Fails"}, h.clk, "http://dash.test")
-			if _, err := failing.AcceptInvite(ctx, token, testPassword); err == nil {
+			if tc.failAudit {
+				failing = failingAuditService(h)
+			}
+			if _, err := failing.AcceptInvite(ctx, dashmembers.AcceptInput{Token: token, Password: testPassword}); err == nil {
 				t.Fatal("accept must fail when the membership cannot be written")
 			}
 
@@ -149,10 +154,13 @@ func TestAcceptInvite_FailedJoinKeepsTheInvite(t *testing.T) {
 			if members, _, err := h.svc.List(ctx, h.tenantID); err != nil || len(members) != 1 {
 				t.Errorf("members after the failed accept: got %d (err %v), want only the owner", len(members), err)
 			}
+			if n := countSessions(t, h.db, h.tenantID); n != 0 {
+				t.Errorf("sessions in the workspace after the failed accept: got %d, want 0", n)
+			}
 			if _, err := h.svc.PreviewInvite(ctx, token); err != nil {
 				t.Fatalf("a failed accept used up the invitation: %v", err)
 			}
-			res, err := h.svc.AcceptInvite(ctx, token, testPassword)
+			res, err := h.svc.AcceptInvite(ctx, dashmembers.AcceptInput{Token: token, Password: testPassword})
 			if err != nil {
 				t.Fatalf("retry with a working directory: %v", err)
 			}
@@ -168,4 +176,19 @@ func TestAcceptInvite_FailedJoinKeepsTheInvite(t *testing.T) {
 			}
 		})
 	}
+}
+
+// countSessions counts the session rows in tenantID.
+func countSessions(t *testing.T, db *postgres.DB, tenantID string) int {
+	t.Helper()
+	tx, err := db.BeginTx(t.Context(), postgres.TxBypass, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer postgres.Rollback(tx)
+	var n int
+	if err := tx.QueryRowContext(t.Context(), `SELECT count(*) FROM dashboard_sessions WHERE tenant_id = $1`, tenantID).Scan(&n); err != nil {
+		t.Fatal(err)
+	}
+	return n
 }

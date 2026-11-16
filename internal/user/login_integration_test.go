@@ -119,11 +119,7 @@ func (it loginIT) sessionRows(t *testing.T) int {
 // sessionIn issues a session for the user in the given mode.
 func (it loginIT) sessionIn(t *testing.T, live bool) string {
 	t.Helper()
-	raw, _, err := it.sessSvc.Issue(t.Context(), session.IssueInput{UserID: it.userID, TenantID: it.tenantID, Livemode: live})
-	if err != nil {
-		t.Fatalf("issue a session (live=%v): %v", live, err)
-	}
-	return raw
+	return issueTestSession(t, it.db, it.sessSvc, session.IssueInput{UserID: it.userID, TenantID: it.tenantID, Livemode: live})
 }
 
 func (it loginIT) lastLoginAt(t *testing.T) *time.Time {

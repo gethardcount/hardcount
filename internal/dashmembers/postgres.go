@@ -1,17 +1,9 @@
-// Package dashmembers implements the minimal team-membership surface
-// (DP-readiness cut-reinstatement #2, 2026-07-06): invite by email,
-// tokenized accept, member list, revoke, remove. Deliberately NO RBAC —
-// every member gets the full owner permission set (auth.KeyTypeSession);
-// the role column is recorded for the future role split but not enforced
-// (internal/session/middleware.go documents the seam). The point is to
-// kill the shared-password reality: per-person credentials and honest
-// audit-log actor attribution on a revenue system.
-//
-// Storage: member_invitations (migration 0139 — an earlier 0035 version
-// belonged to the cut Members feature and was dropped in 0068). sha256
-// token hashes mirroring password_reset_tokens; one invitation per (tenant,
-// email) that is not accepted or revoked; CreateInvitation revokes an expired
-// one before it inserts.
+// Package dashmembers is the minimal team-membership surface: invite by
+// email, tokenized accept, list, revoke, remove. There is no RBAC (ADR-081):
+// every member has the owner's permissions, and role is recorded, not
+// enforced. member_invitations stores sha256 token hashes, as
+// password_reset_tokens does, with at most one open invitation per (tenant,
+// email).
 package dashmembers
 
 import (
@@ -26,14 +18,15 @@ import (
 )
 
 // PostgresStore persists invitations and reads memberships. Most queries run
-// under TxBypass like the sibling auth tables (users, sessions,
-// password_reset_tokens): the accept path runs before any tenant context
-// exists. tenant_id predicates scope every tenant-shaped query at the
-// application layer; the table still carries the 0006 RLS fence
-// (bypass-admitting, m0139) as the structural backstop for any future
-// tenant-scoped query. CreateInvitation runs under TxTenant instead: the
-// invite email's outbox row and the audit row commit on its transaction and
-// need the mode.
+// under TxBypass, like the other auth tables (users, sessions,
+// password_reset_tokens), because the accept runs before any tenant context
+// exists; each query filters by tenant_id itself. CreateInvitation runs under
+// TxTenant: the invite email's outbox row and the audit row take the mode
+// from its transaction.
+//
+// A method that takes a hook (then, join) calls it last, on its transaction,
+// after its own writes. The hook must not commit or roll back; an error it
+// returns rolls everything back and is returned.
 type PostgresStore struct {
 	db *postgres.DB
 }
@@ -54,9 +47,7 @@ type Invitation struct {
 	AcceptedAt      *time.Time
 	RevokedAt       *time.Time
 	CreatedAt       time.Time
-	// InvitedByEmail is hydrated by the list/lookup joins (users has no
-	// display_name — email is the identity, per the audit-hardening
-	// convention).
+	// InvitedByEmail is the inviter's email, filled by the joins.
 	InvitedByEmail string
 }
 
@@ -84,20 +75,35 @@ func scanInvitation(scan func(...any) error) (Invitation, error) {
 // that can still be accepted causes it.
 var ErrPendingInviteExists = errs.AlreadyExists("email", "a pending invitation for this email already exists — revoke it first to re-send")
 
-// CreateInvitation creates a pending invitation in one tenant transaction.
-// An invitation to the same address that has expired (expires_at <= at, the
-// boundary the accept uses) is revoked first, so only one that can still be
-// accepted answers ErrPendingInviteExists. then gets the stored row and the
-// id of the invitation it replaced ("" for none). then runs last, on tx. It
-// must not commit or roll back tx; an error it returns rolls everything back
-// and is returned. ctx must carry the mode (postgres.WithLivemode): the email
-// and the audit row take theirs from the transaction.
+// CreateInvitation creates a pending invitation in one tenant transaction. It
+// refuses with a 403 when the inviter has no membership row. An invitation to
+// the same address that expired (expires_at <= at, the accept's boundary) is
+// revoked first, so only one that can still be accepted answers
+// ErrPendingInviteExists. then receives the stored row and the id of the
+// replaced invitation ("" for none). ctx must carry the mode
+// (postgres.WithLivemode): the email and the audit row take theirs from the
+// transaction.
 func (s *PostgresStore) CreateInvitation(ctx context.Context, inv Invitation, at time.Time, then func(tx *sql.Tx, inv Invitation, replacedID string) error) (Invitation, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, inv.TenantID)
 	if err != nil {
 		return Invitation{}, err
 	}
 	defer postgres.Rollback(tx)
+
+	// An invitation carries its sender's authority, so it is created only while
+	// the sender is a member. The row lock is held to commit: a removal of the
+	// sender waits for this invite and then revokes it, or this invite waits
+	// for the removal and then finds no row.
+	var member int
+	err = tx.QueryRowContext(ctx, `
+		SELECT 1 FROM user_tenants WHERE tenant_id = $1 AND user_id = $2 FOR KEY SHARE`,
+		inv.TenantID, inv.InvitedByUserID).Scan(&member)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Invitation{}, errs.Forbidden("you are no longer a member of this workspace")
+	}
+	if err != nil {
+		return Invitation{}, fmt.Errorf("lock the inviter's membership: %w", err)
+	}
 
 	var replacedID string
 	err = tx.QueryRowContext(ctx, `
@@ -189,11 +195,10 @@ func (s *PostgresStore) GetInvitationByTokenHash(ctx context.Context, tokenHash 
 	return inv, nil
 }
 
-// RevokeInvitation revokes an invitation that is not yet accepted or
-// revoked, in one bypass transaction, stamps it for an audit row
-// (stampForAudit) and calls then. then runs last, as in CreateInvitation. An
-// accepted or revoked invitation, or one of another workspace, is
-// errs.ErrNotFound; of a revoke and an accept racing, exactly one wins.
+// RevokeInvitation revokes an invitation that is not yet accepted or revoked,
+// in one bypass transaction, stamps it for an audit row (stampForAudit) and
+// calls then. An accepted or revoked invitation, or one of another workspace,
+// is errs.ErrNotFound; of a revoke and an accept racing, exactly one wins.
 func (s *PostgresStore) RevokeInvitation(ctx context.Context, tenantID, id string, at time.Time, then func(tx *sql.Tx) error) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -227,12 +232,11 @@ func (s *PostgresStore) RevokeInvitation(ctx context.Context, tenantID, id strin
 }
 
 // AcceptInvitation claims a pending, unexpired invite with a CAS on
-// accepted_at, then calls join on the same transaction to write the account
-// and the membership. The claim and the membership commit together or not at
-// all. The CAS is the exactly-once gate: a replayed link, or a concurrent
-// second accept, gets errs.ErrNotFound and join does not run. When join
-// fails, nothing is written and its error is returned, so the invitation
-// stays pending and the invitee can try again.
+// accepted_at in one bypass transaction, stamps it for an audit row in the
+// invitation's workspace (stampForAudit), and calls join. The CAS is the
+// exactly-once gate: a replayed link, or a concurrent second accept, gets
+// errs.ErrNotFound and join does not run. When join fails, nothing is
+// written, so the invitation stays pending and the invitee can try again.
 func (s *PostgresStore) AcceptInvitation(ctx context.Context, id string, at time.Time, join func(tx *sql.Tx) error) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -240,29 +244,30 @@ func (s *PostgresStore) AcceptInvitation(ctx context.Context, id string, at time
 	}
 	defer postgres.Rollback(tx)
 
-	res, err := tx.ExecContext(ctx, `
+	var tenantID string
+	err = tx.QueryRowContext(ctx, `
 		UPDATE member_invitations SET accepted_at = $1
-		WHERE id = $2 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > $1`,
-		at, id)
-	if err != nil {
-		return err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
+		WHERE id = $2 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > $1
+		RETURNING tenant_id`,
+		at, id).Scan(&tenantID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return errs.ErrNotFound
 	}
+	if err != nil {
+		return err
+	}
+
+	if err := stampForAudit(ctx, tx, tenantID); err != nil {
+		return err
+	}
+
 	if err := join(tx); err != nil {
 		return err
 	}
 	return tx.Commit()
 }
 
-// ListMembers returns every user attached to the tenant. users has NO
-// display_name column (audit-hardening convention: the email IS the
-// identity), so the view carries email only.
+// ListMembers returns every user attached to the tenant, oldest account first.
 func (s *PostgresStore) ListMembers(ctx context.Context, tenantID string) ([]Member, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -297,12 +302,12 @@ func (s *PostgresStore) ListMembers(ctx context.Context, tenantID string) ([]Mem
 // add a member back.
 var ErrLastMember = errs.InvalidState("cannot remove the last member of the workspace")
 
-// RemoveMember removes a member from the workspace in one bypass
-// transaction. In order, it deletes the (user, tenant) membership unless it
-// is the workspace's last one, revokes every invitation the user sent in this
-// workspace that is not yet accepted or revoked, expired or not, stamps
-// the transaction for an audit row (stampForAudit), and calls then with the
-// ids of the invitations it revoked. then runs last, as in CreateInvitation.
+// RemoveMember removes a member from the workspace in one bypass transaction.
+// In order, it deletes the (user, tenant) membership unless it is the
+// workspace's last one, revokes every invitation the user sent in this
+// workspace that is not yet accepted or revoked, expired or not, stamps the
+// transaction for an audit row (stampForAudit), and calls then with the ids
+// of the invitations it revoked.
 //
 // at is the time written as revoked_at on the invitations; the service
 // passes its clock's now. The member's sessions, which then ends, are

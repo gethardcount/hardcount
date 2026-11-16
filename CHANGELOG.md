@@ -217,6 +217,7 @@ original text.
 
 ### Security
 
+- **Accepting an invitation saves the membership, the new account's session and the audit row together.** If the session or the audit row cannot be saved the accept answers `500`, nothing changes and the invitation can be accepted again. An invitation can be created only by someone who is still a member of the workspace ([#1821](https://github.com/gethardcount/hardcount/pull/1821)).
 - **An invitation, and the revoking of one, are saved together with their audit row.** If the row cannot be written the request answers `500` and nothing changes ([#1817](https://github.com/gethardcount/hardcount/pull/1817)).
 - **A sign-out and a test/live mode switch are saved together with their audit row.** If the row cannot be written the request answers `500` and nothing changes: the session stays signed in, or keeps its mode ([#1816](https://github.com/gethardcount/hardcount/pull/1816)).
 - **A sign-in creates its session and writes its audit row in one transaction, and ends the session the browser held before.** If the audit row cannot be written the sign-in answers `500` and no session exists. A sign-in whose password changed while it was running is refused as a wrong password ([#1813](https://github.com/gethardcount/hardcount/pull/1813)).

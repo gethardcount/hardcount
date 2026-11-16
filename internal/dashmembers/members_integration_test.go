@@ -206,12 +206,12 @@ func TestInviteAcceptNewUser(t *testing.T) {
 		t.Errorf("preview tenant name: got %q", preview.TenantName)
 	}
 
-	res, err := h.svc.AcceptInvite(ctx, token, testPassword)
+	res, err := h.svc.AcceptInvite(ctx, dashmembers.AcceptInput{Token: token, Password: testPassword})
 	if err != nil {
 		t.Fatalf("accept: %v", err)
 	}
-	if !res.MintSession || !res.NewAccount {
-		t.Errorf("new-account accept must mint a session: got %+v", res)
+	if !res.NewAccount || res.RawSessionID == "" {
+		t.Errorf("new-account accept must start a session: got %+v", res)
 	}
 	if res.TenantID != h.tenantID {
 		t.Errorf("accept tenant: got %q, want %q", res.TenantID, h.tenantID)
@@ -246,7 +246,7 @@ func TestInviteAcceptNewUser(t *testing.T) {
 	}
 
 	// Single-use: replaying the same link is rejected with the generic error.
-	if _, err := h.svc.AcceptInvite(ctx, token, testPassword); err == nil {
+	if _, err := h.svc.AcceptInvite(ctx, dashmembers.AcceptInput{Token: token, Password: testPassword}); err == nil {
 		t.Fatal("second accept of the same token must fail")
 	}
 	if _, err := h.svc.PreviewInvite(ctx, token); err == nil {
@@ -279,12 +279,12 @@ func TestInviteAcceptExistingUser(t *testing.T) {
 	}
 
 	// Password field is ignored on the existing-account path.
-	res, err := h.svc.AcceptInvite(ctx, token, "")
+	res, err := h.svc.AcceptInvite(ctx, dashmembers.AcceptInput{Token: token, Password: ""})
 	if err != nil {
 		t.Fatalf("accept: %v", err)
 	}
-	if res.MintSession || res.NewAccount {
-		t.Errorf("existing-account accept must NOT mint a session: %+v", res)
+	if res.NewAccount || res.RawSessionID != "" {
+		t.Errorf("existing-account accept must NOT start a session: %+v", res)
 	}
 	if res.UserID != existing.ID {
 		t.Errorf("accept user: got %q, want existing %q", res.UserID, existing.ID)
@@ -300,8 +300,8 @@ func TestInviteAcceptExistingUser(t *testing.T) {
 }
 
 // TestInviteGates: inviter identity required (API-key callers have none),
-// a revoked invitation frees its address, already-a-member blocked, bad
-// email blocked.
+// an inviter who is not a member refused, a revoked invitation frees its
+// address, already-a-member blocked, bad email blocked.
 func TestInviteGates(t *testing.T) {
 	h := newHarness(t, "Team Gates")
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -314,6 +314,16 @@ func TestInviteGates(t *testing.T) {
 	// Malformed email.
 	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "not-an-email"); err == nil {
 		t.Fatal("malformed email must be rejected")
+	}
+
+	// An account of another workspace cannot invite here, and nothing is
+	// written.
+	outsider := createUser(t, h.db, "outsider@example.com", testutil.CreateTestTenant(t, h.db, "Outsider Home"), "owner")
+	if _, err := h.svc.Invite(ctx, h.tenantID, outsider.ID, "a@example.com"); !errors.Is(err, errs.ErrForbidden) {
+		t.Fatalf("invite by a non-member: got %v, want ErrForbidden", err)
+	}
+	if _, invs, err := h.svc.List(ctx, h.tenantID); err != nil || len(invs) != 0 {
+		t.Fatalf("invitations after the refused invite: got %d (err %v), want 0", len(invs), err)
 	}
 
 	// Revoking the pending invite frees the slot for a re-send.
@@ -339,7 +349,7 @@ func TestInviteGates(t *testing.T) {
 	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "member2@example.com"); err != nil {
 		t.Fatalf("invite member2: %v", err)
 	}
-	if _, err := h.svc.AcceptInvite(ctx, h.email.lastToken(t), testPassword); err != nil {
+	if _, err := h.svc.AcceptInvite(ctx, dashmembers.AcceptInput{Token: h.email.lastToken(t), Password: testPassword}); err != nil {
 		t.Fatalf("accept member2: %v", err)
 	}
 	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "member2@example.com"); !errors.Is(err, errs.ErrAlreadyExists) {
@@ -363,7 +373,7 @@ func TestRevokedAndExpiredTokens(t *testing.T) {
 	if err := h.svc.Revoke(ctx, h.tenantID, invs[0].ID); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
-	if _, err := h.svc.AcceptInvite(ctx, revokedToken, testPassword); !errors.Is(err, errs.ErrValidation) {
+	if _, err := h.svc.AcceptInvite(ctx, dashmembers.AcceptInput{Token: revokedToken, Password: testPassword}); !errors.Is(err, errs.ErrValidation) {
 		t.Fatalf("accept revoked: got %v, want ErrValidation", err)
 	}
 
@@ -376,12 +386,12 @@ func TestRevokedAndExpiredTokens(t *testing.T) {
 	if _, err := h.svc.PreviewInvite(ctx, lateToken); !errors.Is(err, errs.ErrValidation) {
 		t.Fatalf("preview expired: got %v, want ErrValidation", err)
 	}
-	if _, err := h.svc.AcceptInvite(ctx, lateToken, testPassword); !errors.Is(err, errs.ErrValidation) {
+	if _, err := h.svc.AcceptInvite(ctx, dashmembers.AcceptInput{Token: lateToken, Password: testPassword}); !errors.Is(err, errs.ErrValidation) {
 		t.Fatalf("accept expired: got %v, want ErrValidation", err)
 	}
 
 	// Garbage token → same generic error, not a distinguishable one.
-	if _, err := h.svc.AcceptInvite(ctx, "deadbeef", testPassword); !errors.Is(err, errs.ErrValidation) {
+	if _, err := h.svc.AcceptInvite(ctx, dashmembers.AcceptInput{Token: "deadbeef", Password: testPassword}); !errors.Is(err, errs.ErrValidation) {
 		t.Fatalf("accept garbage: got %v, want ErrValidation", err)
 	}
 }
@@ -402,7 +412,7 @@ func TestRemoveMember(t *testing.T) {
 	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "second@example.com"); err != nil {
 		t.Fatalf("invite: %v", err)
 	}
-	res, err := h.svc.AcceptInvite(ctx, h.email.lastToken(t), testPassword)
+	res, err := h.svc.AcceptInvite(ctx, dashmembers.AcceptInput{Token: h.email.lastToken(t), Password: testPassword})
 	if err != nil {
 		t.Fatalf("accept: %v", err)
 	}
@@ -520,7 +530,7 @@ func TestConcurrentAccept(t *testing.T) {
 	results := make(chan outcome, 2)
 	for range 2 {
 		go func() {
-			res, err := h.svc.AcceptInvite(ctx, token, testPassword)
+			res, err := h.svc.AcceptInvite(ctx, dashmembers.AcceptInput{Token: token, Password: testPassword})
 			results <- outcome{res, err}
 		}()
 	}
@@ -563,7 +573,7 @@ func TestAcceptInvite_RejectedPasswordKeepsTheInvite(t *testing.T) {
 	token := h.email.lastToken(t)
 
 	for _, bad := range []string{"short", strings.Repeat("x", 73)} {
-		_, err := h.svc.AcceptInvite(ctx, token, bad)
+		_, err := h.svc.AcceptInvite(ctx, dashmembers.AcceptInput{Token: token, Password: bad})
 		if !errors.Is(err, errs.ErrValidation) || errs.Field(err) != "password" {
 			t.Fatalf("accept with %d-char password: err = %v, want a password validation error", len(bad), err)
 		}
@@ -571,11 +581,11 @@ func TestAcceptInvite_RejectedPasswordKeepsTheInvite(t *testing.T) {
 	if _, err := h.svc.PreviewInvite(ctx, token); err != nil {
 		t.Fatalf("the invitation must still be pending after a rejected password: %v", err)
 	}
-	res, err := h.svc.AcceptInvite(ctx, token, testPassword)
+	res, err := h.svc.AcceptInvite(ctx, dashmembers.AcceptInput{Token: token, Password: testPassword})
 	if err != nil {
 		t.Fatalf("accept with a good password after a rejected one: %v", err)
 	}
-	if !res.NewAccount || !res.MintSession {
+	if !res.NewAccount || res.RawSessionID == "" {
 		t.Errorf("accept result = %+v, want a new account with a session", res)
 	}
 }

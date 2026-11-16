@@ -2,6 +2,7 @@ package dashmembers_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -11,26 +12,16 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	mw "github.com/gethardcount/hardcount/internal/api/middleware"
-	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/dashmembers"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/session"
 )
 
-// ipAuditRecorder keeps the client IP each audit write carried.
-type ipAuditRecorder struct{ ips []string }
-
-func (r *ipAuditRecorder) Log(ctx context.Context, _, _, _, _, _ string, _ map[string]any) error {
-	r.ips = append(r.ips, audit.ClientIP(ctx))
-	return nil
-}
-
 // TestAcceptInvite_SessionIPIsTheTrustedClientIP: accepting an invite as a
 // new account signs the invitee in, and the session row records the address
 // TrustedClientIP resolved, the same one as the member.joined audit row. The
 // client sends a forged X-Forwarded-For entry through a trusted proxy, which
-// appends the real address. Until 2026-10-18 the session row stored the
-// forged left-most entry, 6.6.6.6.
+// appends the real address.
 func TestAcceptInvite_SessionIPIsTheTrustedClientIP(t *testing.T) {
 	h := newHarness(t, "Team Forwarded")
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -40,9 +31,7 @@ func TestAcceptInvite_SessionIPIsTheTrustedClientIP(t *testing.T) {
 	}
 	token := h.email.lastToken(t)
 
-	handler := dashmembers.NewHandler(h.svc, h.sessions, session.CookieConfig{Path: "/"})
-	rec := &ipAuditRecorder{}
-	handler.SetAuditLogger(rec)
+	handler := dashmembers.NewHandler(h.svc, session.CookieConfig{Path: "/"})
 	r := chi.NewRouter()
 	// The router mounts TrustedClientIP globally, ahead of /v1/auth.
 	r.Use(mw.TrustedClientIP(mw.ParseTrustedProxies("10.0.0.0/8")))
@@ -74,7 +63,38 @@ func TestAcceptInvite_SessionIPIsTheTrustedClientIP(t *testing.T) {
 	if sess.IP != "198.51.100.7" {
 		t.Errorf("session row IP = %q, want 198.51.100.7 (the address the trusted proxy added)", sess.IP)
 	}
-	if len(rec.ips) != 1 || rec.ips[0] != sess.IP {
-		t.Errorf("audit IPs = %q, want exactly one equal to the session row IP %q", rec.ips, sess.IP)
+	if ips := joinedRowIPs(t, h, sess.UserID); len(ips) != 1 || ips[0] != "198.51.100.7" {
+		t.Errorf("member.joined row IPs = %q, want exactly one, 198.51.100.7", ips)
 	}
+}
+
+// joinedRowIPs reads the ip_address of each member.joined row for userID in
+// h's workspace.
+func joinedRowIPs(t *testing.T, h *harness, userID string) []string {
+	t.Helper()
+	tx, err := h.db.BeginTx(t.Context(), postgres.TxBypass, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer postgres.Rollback(tx)
+	rows, err := tx.QueryContext(t.Context(), `
+		SELECT ip_address FROM audit_log
+		WHERE tenant_id = $1 AND action = 'member.joined' AND resource_id = $2`,
+		h.tenantID, userID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = rows.Close() }()
+	var ips []string
+	for rows.Next() {
+		var ip sql.NullString
+		if err := rows.Scan(&ip); err != nil {
+			t.Fatal(err)
+		}
+		ips = append(ips, ip.String)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatal(err)
+	}
+	return ips
 }

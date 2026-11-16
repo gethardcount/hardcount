@@ -12,7 +12,7 @@ user, undercutting a feature the README sells.
 
 ## Summary
 
-Teammates join an account through a single-use email invite (`POST /v1/members/invite`) valid for 7 days, so people stop sharing one password and audit rows name the real person. There is no role-based access control: every member has full access, and the recorded role is not enforced. Only a signed-in dashboard user can invite or remove members, because an API key has no person to attribute the act to. Removing a member ends all their sessions, and nobody can remove themselves or the last member, even when two removals run at once. An invitation is saved with its email, and an accept saves the account and the membership with its claim on the invitation, so a failure leaves nothing half done (amendment 2026-11-10). Status: active, amending [ADR-011](011-email-password-auth-and-clean-api-keys.md); roles, MFA and SSO are not built.
+Teammates join an account through a single-use email invite (`POST /v1/members/invite`) valid for 7 days, so people stop sharing one password and audit rows name the real person. There is no role-based access control: every member has full access, and the recorded role is not enforced. Only a signed-in dashboard user can invite or remove members, because an API key has no person to attribute the act to. Removing a member ends all their sessions, and nobody can remove themselves or the last member, even when two removals run at once. An invitation is saved with its email, and an accept saves the account and the membership with its claim on the invitation, so a failure leaves nothing half done (amendment 2026-11-10), and a new account's session and the audit row join that transaction while only a current member can invite (amendment 2026-11-16). Status: active, amending [ADR-011](011-email-password-auth-and-clean-api-keys.md); roles, MFA and SSO are not built.
 
 ## Decision
 
@@ -35,7 +35,9 @@ Ship the smallest thing that kills the shared password; keep RBAC cut.
 
 3. **Membership endpoints are dashboard-session-only** (`auth.RequireSession`).
    Inviting and removing humans is a human act; API keys carry no user
-   identity to attribute it to, and the audit trail needs a person.
+   identity to attribute it to, and the audit trail needs a person. The
+   inviter must still be a member when the invitation is saved (amendment
+   2026-11-16).
 
 4. **Accept is trust-tiered.** A NEW account sets its password during
    accept and gets a session minted (same trust as a completed password
@@ -127,3 +129,12 @@ one in the same transaction, so an expired invitation no longer blocks the
 address. The invite's and the revoke's audit rows are written in the
 transaction that makes the change
 ([#1817](https://github.com/gethardcount/hardcount/pull/1817)).
+
+## Amendment 2026-11-16: the accept is one transaction; only a member can invite
+
+The accept writes a new account's session and the `member.joined` audit row
+in the transaction that claims the invitation, so a failure leaves the
+invitation usable and no session behind. The invite reads the inviter's
+membership row `FOR KEY SHARE` in its transaction, so an invite and the
+removal of its sender cannot both commit with the invitation still open
+([#1821](https://github.com/gethardcount/hardcount/pull/1821)).

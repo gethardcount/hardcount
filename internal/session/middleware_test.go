@@ -24,7 +24,6 @@ type fakeSessionStore struct {
 	outage   bool
 }
 
-func (f *fakeSessionStore) Insert(context.Context, Session) error            { return nil }
 func (f *fakeSessionStore) InsertTx(context.Context, *sql.Tx, Session) error { return nil }
 func (f *fakeSessionStore) RevokeTx(context.Context, *sql.Tx, string) (bool, error) {
 	return false, nil
@@ -126,11 +125,11 @@ func TestRequireCaller_ClientGoneLogsAtWarn(t *testing.T) {
 func TestRequireCaller_NamesTheCallerOnTheRecord(t *testing.T) {
 	store := &fakeSessionStore{sessions: map[string]Session{}}
 	sessions := NewService(store)
-	rawSession, sess, err := sessions.Issue(t.Context(), IssueInput{UserID: "usr_owner", TenantID: "ten_1"})
+	rawSession, sess, err := sessions.IssueTx(t.Context(), nil, IssueInput{UserID: "usr_owner", TenantID: "ten_1"})
 	if err != nil {
 		t.Fatalf("issue session: %v", err)
 	}
-	store.sessions[sess.IDHash] = sess // the fake's Insert keeps nothing
+	store.sessions[sess.IDHash] = sess // the fake's InsertTx keeps nothing
 
 	serve := func(cookie string) (outer context.Context, seen *http.Request, status int) {
 		outer = request.WithRecord(t.Context())

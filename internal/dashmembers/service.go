@@ -13,16 +13,17 @@ import (
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/audit"
+	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/session"
 )
 
-// InviteTTL: 7 days — long enough for a colleague on PTO, short enough
-// that a stale link in an inbox isn't a standing credential. (Password
-// reset is 1h because it targets an EXISTING account; an invite mints a
-// new one and the pending-unique index caps exposure to one live link
-// per address.)
+// InviteTTL is how long an invitation can be accepted: long enough for a
+// colleague on leave, short enough that a forgotten link is not a standing
+// credential.
 const InviteTTL = 7 * 24 * time.Hour
 
 // UserDirectory is the narrow slice of the user package the invite flow
@@ -46,10 +47,12 @@ type UserDirectory interface {
 	AttachTenantInTx(ctx context.Context, tx *sql.Tx, userID, tenantID, role string) error
 }
 
-// SessionEnder ends a user's sessions in one workspace on the caller's
-// transaction. A session row pins (user, tenant), so a removed member's
-// sessions there end with the membership. *session.Service satisfies it.
-type SessionEnder interface {
+// SessionWriter starts and ends sessions on the caller's transaction: an
+// accept starts a new account's session, and a removal ends the member's
+// sessions in the workspace (a session row pins (user, tenant)).
+// *session.Service satisfies it.
+type SessionWriter interface {
+	IssueTx(ctx context.Context, tx *sql.Tx, in session.IssueInput) (rawID string, sess session.Session, err error)
 	EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, tenantID string) error
 }
 
@@ -73,15 +76,14 @@ type TenantNamer interface {
 type Service struct {
 	store    *PostgresStore
 	users    UserDirectory
-	sessions SessionEnder
+	sessions SessionWriter
 	audit    AuditTxWriter
 	email    InviteEmailSender
 	tenants  TenantNamer
 	clock    clock.Clock
-	// dashboardBaseURL builds accept links; mirrors the password-reset
-	// posture — never derived from request headers (host-header
-	// poisoning steals tokens). Empty = invites are created but no email
-	// goes out (loud in the response is wrong — loud at CREATE: see Invite).
+	// dashboardBaseURL builds the accept link. It comes from
+	// DASHBOARD_BASE_URL, never from request headers (a forged Host would
+	// send the token to another site). Empty makes Invite refuse.
 	dashboardBaseURL string
 	// emailConfigured is whether this server can send email (SMTP_HOST
 	// set). The accept link exists only in the email, so an invite on a
@@ -108,10 +110,8 @@ func (s *Service) CanInvite() bool {
 	return s.dashboardBaseURL != "" && s.emailConfigured
 }
 
-// NewService returns a Service. Inviting, revoking an invitation and removing
-// a member write their audit row through auditor, on their own transaction;
-// removing a member also ends sessions through sessions.
-func NewService(store *PostgresStore, users UserDirectory, sessions SessionEnder, auditor AuditTxWriter, email InviteEmailSender, tenants TenantNamer, clk clock.Clock, dashboardBaseURL string) *Service {
+// NewService returns a Service.
+func NewService(store *PostgresStore, users UserDirectory, sessions SessionWriter, auditor AuditTxWriter, email InviteEmailSender, tenants TenantNamer, clk clock.Clock, dashboardBaseURL string) *Service {
 	if clk == nil {
 		clk = clock.Real()
 	}
@@ -153,11 +153,11 @@ func (inv Invitation) Status(now time.Time) string {
 	}
 }
 
-// Invite creates a pending invitation and enqueues the accept email.
-// inviterUserID must be a real dashboard user (API-key callers have no
-// user identity — inviting is a human act and the audit trail needs a
-// person). Role is recorded as 'member' but grants the full permission
-// set in v1 (no RBAC yet — documented at the session middleware seam).
+// Invite creates a pending invitation and queues its accept email.
+// inviterUserID must be a dashboard user who is still a member of the
+// workspace (an API key has no user to name in the audit row). The role is
+// recorded as 'member' and grants the full permission set until roles exist
+// (ADR-081).
 func (s *Service) Invite(ctx context.Context, tenantID, inviterUserID, email string) (Invitation, error) {
 	if inviterUserID == "" {
 		return Invitation{}, errs.InvalidState("inviting requires a dashboard session — API keys have no user identity to attribute the invite to")
@@ -173,15 +173,8 @@ func (s *Service) Invite(ctx context.Context, tenantID, inviterUserID, email str
 		return Invitation{}, err
 	}
 	if s.dashboardBaseURL == "" {
-		// Same fail-loud posture as password reset: without a canonical
-		// dashboard origin there is no safe way to build the accept link
-		// (deriving it from request headers invites host-header token
-		// theft). Refuse rather than mint an invite nobody can accept.
 		return Invitation{}, errs.InvalidState(InvitesOffNoDashboardURL)
 	}
-
-	// The accept link is delivered only by email; without email there is
-	// nothing the invitee can act on. Refuse before the invitation row exists.
 	if !s.emailConfigured {
 		return Invitation{}, errs.EmailNotConfigured()
 	}
@@ -209,10 +202,9 @@ func (s *Service) Invite(ctx context.Context, tenantID, inviterUserID, email str
 	tenantName := s.tenantName(ctx, tenantID)
 	acceptURL := s.dashboardBaseURL + "/accept-invite?token=" + rawToken
 	now := s.clock.Now(ctx)
-	// The invitation, its email and its audit row commit together. A pending
-	// invitation with no email is a dead end for the invitee and blocks the
-	// retry, so a failed enqueue or audit row fails the invite and writes
-	// nothing.
+	// A pending invitation with no email is a dead end for the invitee and
+	// blocks the retry, so a failed enqueue or audit row fails the invite and
+	// writes nothing.
 	return s.store.CreateInvitation(ctx, Invitation{
 		TenantID:        tenantID,
 		Email:           email,
@@ -221,10 +213,8 @@ func (s *Service) Invite(ctx context.Context, tenantID, inviterUserID, email str
 		Role:            "member",
 		ExpiresAt:       now.Add(InviteTTL),
 	}, now, func(tx *sql.Tx, inv Invitation, replacedID string) error {
-		if s.email != nil {
-			if err := s.email.SendMemberInviteTx(ctx, tx, tenantID, email, inv.InvitedByEmail, tenantName, acceptURL); err != nil {
-				return fmt.Errorf("enqueue invite email: %w", err)
-			}
+		if err := s.email.SendMemberInviteTx(ctx, tx, tenantID, email, inv.InvitedByEmail, tenantName, acceptURL); err != nil {
+			return fmt.Errorf("enqueue invite email: %w", err)
 		}
 		meta := map[string]any{"expires_at": inv.ExpiresAt.Format(rfc3339)}
 		if replacedID != "" {
@@ -246,9 +236,6 @@ func (s *Service) Invite(ctx context.Context, tenantID, inviterUserID, email str
 }
 
 func (s *Service) tenantName(ctx context.Context, tenantID string) string {
-	if s.tenants == nil {
-		return ""
-	}
 	name, err := s.tenants.GetTenantName(ctx, tenantID)
 	if err != nil {
 		slog.WarnContext(ctx, "invite: tenant name lookup failed (email header falls back to generic)", "error", err)
@@ -363,29 +350,42 @@ func (s *Service) PreviewInvite(ctx context.Context, token string) (InvitePrevie
 	}, nil
 }
 
-// AcceptResult reports who joined where, and whether a session should be
-// minted (new accounts only — they just set their password, the same
-// trust level as a completed password reset. An EXISTING account is NOT
-// logged in by email possession alone: the invitee signs in with their
-// own password afterwards).
-type AcceptResult struct {
-	UserID      string
-	Email       string
-	TenantID    string
-	MintSession bool
-	NewAccount  bool
+// AcceptInput is an accept request: the invite token, the new account's
+// password, and the browser's user agent and client address for the session
+// and the audit row.
+type AcceptInput struct {
+	Token     string
+	Password  string
+	UserAgent string
+	IP        string
 }
 
-// AcceptInvite consumes the token (single-use CAS) and attaches the
-// membership — creating the account first when none exists (password
-// required and validated in that case; ignored otherwise). The claim, the
-// account and the membership commit in one transaction: when any of them
-// fails, nothing is written and the invitation stays usable.
-func (s *Service) AcceptInvite(ctx context.Context, token, password string) (AcceptResult, error) {
-	inv, err := s.lookupPending(ctx, token)
+// AcceptResult is a committed accept: who joined which workspace.
+// RawSessionID, the cookie value shown this once, and Session are set only
+// for a new account (see Handler.acceptInvite).
+type AcceptResult struct {
+	UserID       string
+	Email        string
+	TenantID     string
+	NewAccount   bool
+	RawSessionID string
+	Session      session.Session
+}
+
+// AcceptInvite consumes the token and attaches the membership, creating the
+// account first when none exists (password required and checked in that
+// case; ignored otherwise). In one transaction it claims the invitation,
+// writes the account or the membership, starts a new account's session, and
+// writes the member.joined audit row. When any of them fails, nothing is
+// written and the invitation stays usable.
+func (s *Service) AcceptInvite(ctx context.Context, in AcceptInput) (AcceptResult, error) {
+	inv, err := s.lookupPending(ctx, in.Token)
 	if err != nil {
 		return AcceptResult{}, err
 	}
+	// The route has no session; account events are filed in test mode, and
+	// the new session starts in it.
+	ctx = postgres.WithLivemode(ctx, false)
 
 	existing, lookupErr := s.users.GetByEmail(ctx, inv.Email)
 	isNew := errors.Is(lookupErr, errs.ErrNotFound)
@@ -397,24 +397,45 @@ func (s *Service) AcceptInvite(ctx context.Context, token, password string) (Acc
 	// (too short, too long, breached) leaves the invitation pending.
 	var passwordHash string
 	if isNew {
-		passwordHash, err = s.users.HashPassword(password)
+		passwordHash, err = s.users.HashPassword(in.Password)
 		if err != nil {
 			return AcceptResult{}, err
 		}
 	}
 
-	// The CAS is the exactly-once gate: a concurrent second accept, or a
-	// revoke racing this one, loses there and join does not run.
-	res := AcceptResult{UserID: existing.ID, Email: inv.Email, TenantID: inv.TenantID, MintSession: isNew, NewAccount: isNew}
+	res := AcceptResult{UserID: existing.ID, Email: inv.Email, TenantID: inv.TenantID, NewAccount: isNew}
 	err = s.store.AcceptInvitation(ctx, inv.ID, s.clock.Now(ctx), func(tx *sql.Tx) error {
-		if !isNew {
-			return s.users.AttachTenantInTx(ctx, tx, existing.ID, inv.TenantID, inv.Role)
-		}
-		u, err := s.users.CreateInTx(ctx, tx, inv.Email, passwordHash, inv.TenantID, inv.Role)
-		if err != nil {
+		if isNew {
+			u, err := s.users.CreateInTx(ctx, tx, inv.Email, passwordHash, inv.TenantID, inv.Role)
+			if err != nil {
+				return err
+			}
+			res.UserID = u.ID
+			res.RawSessionID, res.Session, err = s.sessions.IssueTx(ctx, tx, session.IssueInput{
+				UserID:    u.ID,
+				TenantID:  inv.TenantID,
+				Livemode:  false,
+				UserAgent: in.UserAgent,
+				IP:        in.IP,
+			})
+			if err != nil {
+				return fmt.Errorf("create the session: %w", err)
+			}
+		} else if err := s.users.AttachTenantInTx(ctx, tx, existing.ID, inv.TenantID, inv.Role); err != nil {
 			return err
 		}
-		res.UserID = u.ID
+		// The route has no session, so the accepting user is the actor and
+		// the row carries the client address. resource_id names the user, not
+		// the email: audit_log cannot be erased.
+		actx := audit.WithClientIP(auth.WithUserID(ctx, res.UserID), in.IP)
+		if err := s.audit.LogInTx(actx, tx, audit.Entry{
+			Action:       "member.joined",
+			ResourceType: "user",
+			ResourceID:   res.UserID,
+			Metadata:     map[string]any{"new_account": isNew},
+		}); err != nil {
+			return fmt.Errorf("write the audit row: %w", err)
+		}
 		return nil
 	})
 	if errors.Is(err, errs.ErrNotFound) {
@@ -426,19 +447,23 @@ func (s *Service) AcceptInvite(ctx context.Context, token, password string) (Acc
 	return res, nil
 }
 
+// errLinkInvalid is the one answer for a token that is unknown, expired,
+// revoked or used, so the answer tells a guesser nothing.
+var errLinkInvalid = errs.Invalid("token", "this invitation link is invalid, expired, revoked, or already used")
+
 func (s *Service) lookupPending(ctx context.Context, token string) (Invitation, error) {
 	if token == "" {
-		return Invitation{}, errs.Invalid("token", "this invitation link is invalid, expired, revoked, or already used")
+		return Invitation{}, errLinkInvalid
 	}
 	inv, err := s.store.GetInvitationByTokenHash(ctx, hashInviteToken(token))
+	if errors.Is(err, errs.ErrNotFound) {
+		return Invitation{}, errLinkInvalid
+	}
 	if err != nil {
-		if errors.Is(err, errs.ErrNotFound) {
-			return Invitation{}, errs.Invalid("token", "this invitation link is invalid, expired, revoked, or already used")
-		}
 		return Invitation{}, err
 	}
 	if inv.Status(s.clock.Now(ctx)) != "pending" {
-		return Invitation{}, errs.Invalid("token", "this invitation link is invalid, expired, revoked, or already used")
+		return Invitation{}, errLinkInvalid
 	}
 	return inv, nil
 }

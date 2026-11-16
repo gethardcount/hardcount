@@ -19,7 +19,7 @@ func NewService(store Store) *Service {
 	return &Service{store: store}
 }
 
-// IssueInput is the contract for Issue and IssueTx: everything needed to
+// IssueInput is the contract for IssueTx: everything needed to
 // mint a session row for a user whose password the caller has verified.
 type IssueInput struct {
 	UserID    string
@@ -29,24 +29,12 @@ type IssueInput struct {
 	IP        string
 }
 
-// Issue creates a session row and returns the raw cookie value the caller
-// should set on the response. The raw value is shown to the caller exactly
-// once. The database stores sha256(raw), so a snapshot cannot be replayed.
-func (s *Service) Issue(ctx context.Context, in IssueInput) (rawID string, sess Session, err error) {
-	rawID, sess, err = newSession(in)
-	if err != nil {
-		return "", Session{}, err
-	}
-	if err := s.store.Insert(ctx, sess); err != nil {
-		return "", Session{}, err
-	}
-	return rawID, sess, nil
-}
-
-// IssueTx is Issue on the caller's transaction, so the session commits or
-// rolls back with the caller's change. It does not commit. tx must be a
-// bypass transaction: a session row is written before any tenant context
-// exists.
+// IssueTx creates a session row on the caller's transaction, so the session
+// commits or rolls back with the caller's change, and returns the raw cookie
+// value the caller should set on the response. The raw value is shown to the
+// caller exactly once. The database stores sha256(raw), so a snapshot cannot
+// be replayed. It does not commit. tx must be a bypass transaction: a session
+// row is written before any tenant context exists.
 func (s *Service) IssueTx(ctx context.Context, tx *sql.Tx, in IssueInput) (rawID string, sess Session, err error) {
 	rawID, sess, err = newSession(in)
 	if err != nil {

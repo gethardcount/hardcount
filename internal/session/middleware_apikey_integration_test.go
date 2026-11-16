@@ -133,11 +133,11 @@ func TestAuthenticate_NamesOneCaller(t *testing.T) {
 	}
 	store := &fakeSessionStore{sessions: map[string]Session{}}
 	sessions := NewService(store)
-	rawSession, sess, err := sessions.Issue(t.Context(), IssueInput{UserID: "usr_owner", TenantID: tenantID})
+	rawSession, sess, err := sessions.IssueTx(t.Context(), nil, IssueInput{UserID: "usr_owner", TenantID: tenantID})
 	if err != nil {
 		t.Fatalf("issue session: %v", err)
 	}
-	store.sessions[sess.IDHash] = sess // the fake's Insert keeps nothing
+	store.sessions[sess.IDHash] = sess // the fake's InsertTx keeps nothing
 	held := auth.WithKeyID(auth.WithUserID(t.Context(), "usr_held"), "hc_key_held")
 
 	t.Run("a key", func(t *testing.T) {
