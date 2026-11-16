@@ -46,7 +46,7 @@ Each step queues its webhook events and emails for the [background jobs](#backgr
 
 **Stripe charges the card. Hardcount owns the invoice.** Hardcount uses Stripe PaymentIntents, and Checkout Sessions for hosted pages that take a payment or save a card, never Stripe Billing or Stripe Invoices.
 
-**Two ways to sign in.** Dashboard users sign in with an email and password and get a session cookie. API callers send a Bearer key, and the cookie wins when a request carries both ([ADR-011](adr/011-email-password-auth-and-clean-api-keys.md)). A session has a secret key's permissions. Every dashboard member holds that full set: a role is recorded but not enforced, and removing a member ends their sessions in that workspace ([ADR-081](adr/081-minimal-team-invites.md)).
+**Two ways to sign in.** Dashboard users sign in with an email and password and get a session cookie. API callers send a Bearer key. When a request carries both, a cookie for a live session wins, and a cookie for an ended session falls through to the key ([ADR-011](adr/011-email-password-auth-and-clean-api-keys.md)). A session has a secret key's permissions. Every dashboard member holds that full set: a role is recorded but not enforced, and removing a member ends their sessions in that workspace ([ADR-081](adr/081-minimal-team-invites.md)).
 
 **The audit log only grows.** Triggers refuse any update, delete or truncate, and the limited database user (`hardcount_app`) has no right to make one. A database owner could still remove the triggers.
 
