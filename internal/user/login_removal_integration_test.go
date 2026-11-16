@@ -38,6 +38,7 @@ const (
 type removalIT struct {
 	db       *postgres.DB
 	tenantID string
+	ownerID  string
 	memberID string
 	sessSvc  *session.Service
 }
@@ -46,10 +47,10 @@ func newRemovalIT(t *testing.T) removalIT {
 	t.Helper()
 	db := testutil.SetupTestDB(t)
 	tenantID := testutil.CreateTestTenant(t, db, "Login Removal")
-	// The owner stays, so the member is not the workspace's last member.
-	user.CreateTestUser(t, db, "owner@login-removal.test", "login-removal-owner-pw", tenantID, "owner")
+	// The owner removes the member: only a member can.
+	o := user.CreateTestUser(t, db, "owner@login-removal.test", "login-removal-owner-pw", tenantID, "owner")
 	m := user.CreateTestUser(t, db, removalMemberEmail, removalMemberPassword, tenantID, "member")
-	return removalIT{db: db, tenantID: tenantID, memberID: m.ID, sessSvc: session.NewService(session.NewPostgresStore(db))}
+	return removalIT{db: db, tenantID: tenantID, ownerID: o.ID, memberID: m.ID, sessSvc: session.NewService(session.NewPostgresStore(db))}
 }
 
 // remove removes the member the way the members route does: the
@@ -62,7 +63,7 @@ func (it removalIT) remove(ctx context.Context) error {
 // removeHolding is remove, waiting at gate (when not nil) inside the
 // removal's transaction, after its DELETE and before the sign-out.
 func (it removalIT) removeHolding(ctx context.Context, gate *user.Gate) error {
-	return dashmembers.NewPostgresStore(it.db).RemoveMember(postgres.WithLivemode(ctx, false), it.tenantID, it.memberID, time.Now().UTC(),
+	return dashmembers.NewPostgresStore(it.db).RemoveMember(postgres.WithLivemode(ctx, false), it.tenantID, it.ownerID, it.memberID, time.Now().UTC(),
 		func(tx *sql.Tx, _ []string) error {
 			if gate != nil {
 				gate.Hold()

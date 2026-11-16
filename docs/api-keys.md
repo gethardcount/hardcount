@@ -95,7 +95,8 @@ key out of browsers and out of source control.
 ## Rotate a key
 
 Rotating a key gives you a new key and retires the old one. Do it when a key
-may have leaked, or on a schedule.
+may have leaked, when someone who had the key leaves your team (removing a
+member does not change API keys), or on a schedule.
 
 1. Open **API keys**, open the key's menu (**…**) and click **Rotate**.
    **You see:** a dialog that asks when the old key stops working: **Now**,

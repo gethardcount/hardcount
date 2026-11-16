@@ -23371,8 +23371,9 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: |
-            The caller is not a dashboard session (an API key), or a browser
-            page on another site sent the request
+            The caller is not a dashboard session (an API key), is no longer
+            a member of the account (message `you are no longer a member of
+            this workspace`), or a browser page on another site sent the request
             (`cross-site request blocked`).
           content:
             application/json:
@@ -23420,8 +23421,8 @@ paths:
         touched. These steps and the audit row commit together; if one
         fails the route answers `500` and nothing changes.
 
-        You cannot remove yourself (another member must do it), and the
-        account's last member cannot be removed. The user's sign-in
+        You cannot remove yourself (another member must do it), so an
+        account always keeps at least one member. The user's sign-in
         account itself is kept.
       parameters:
         - name: userID
@@ -23439,8 +23440,9 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: |
-            The caller is not a dashboard session (an API key), or a browser
-            page on another site sent the request
+            The caller is not a dashboard session (an API key), is no longer
+            a member of the account (message `you are no longer a member of
+            this workspace`), or a browser page on another site sent the request
             (`cross-site request blocked`).
           content:
             application/json:
@@ -23465,7 +23467,7 @@ paths:
                   message: member not found
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "409":
-          description: You tried to remove yourself, or the account's last member. Code `invalid_state`.
+          description: You tried to remove yourself. Code `invalid_state`.
           content:
             application/json:
               schema:

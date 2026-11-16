@@ -1820,7 +1820,8 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/api-keys", authH.Routes())
 		// Team membership is for dashboard sessions only. An API key is a
 		// machine credential with no user to attribute an invite or removal
-		// to, so it gets 403 here. The service checks again on invite.
+		// to, so it gets 403 here. The store checks the caller's membership on
+		// each write.
 		r.With(auth.RequireSession("manage team membership")).Mount("/members", membersH.Routes())
 		// The /customers subtree mixes reads (GET list, get, billing-profile)
 		// and writes (POST create, PATCH update, PUT billing-profile, GDPR
