@@ -17588,8 +17588,9 @@ paths:
       summary: Remove a subscription item
       operationId: removeSubscriptionItem
       description: |
-        Removes an item from the subscription. A subscription's last item
-        cannot be removed; cancel the subscription instead. A
+        Removes an item from a trialing or active subscription. A
+        subscription's last item cannot be removed; cancel the subscription
+        instead. A
         period that ended and is not invoiced yet is billed first. Takes
         no body.
 
@@ -17642,8 +17643,9 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "409":
           description: |
-            Code `invalid_state`: this is the subscription's last item; to
-            stop billing, cancel the subscription. Code `unbilled_period`: a billing period ended and
+            Code `invalid_state`: the subscription is canceled, or this is its
+            last item (to stop billing, cancel the subscription). Code
+            `unbilled_period`: a billing period ended and
             could not be invoiced; retry billing first. Code
             `funding_invoice_tax_pending`: an invoice the credit would go on
             is a draft whose tax is not calculated yet; retry once it is.
