@@ -24,18 +24,10 @@ func (c *countingResetEmail) SendPasswordReset(context.Context, string, string, 
 	return nil
 }
 
-// TestRequestPasswordReset_CappedAccountIsSilentlySkipped: when the store
-// reports the account is over its send budget, the endpoint sends nothing,
-// declares the request accounted-for, and returns the SAME fixed generic 200
-// it returns for a delivered link and for an address with no account — that
-// fixedness is the enumeration defence.
-//
-// It also asserts the LOG LEVEL, which is the one thing the capped arm
-// uniquely owns: hitting a 3-per-hour cap is routine and expected, so it logs
-// WARN. Without the arm the error falls through to `slog.Error("password
-// reset issue failed")` and every capped send looks like a system failure to
-// anyone alerting on error rate. Mutation check: disable the
-// ErrResetSendCapped arm → an ERROR record appears → this fails.
+// TestRequestPasswordReset_CappedAccountIsSilentlySkipped: an account over
+// its send budget gets no email and the same 200 as an address with no
+// account, so the reply does not reveal the account. The cap is routine, so
+// it logs at WARN, not ERROR, and the request is marked as audited.
 func TestRequestPasswordReset_CappedAccountIsSilentlySkipped(t *testing.T) {
 	const email = "victim@example.com"
 	target := domain.User{ID: "usr_capped", Email: email}

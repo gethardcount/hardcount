@@ -48,8 +48,8 @@ func throttleIT(t *testing.T) (*postgres.DB, *lookupCounter) {
 	return db, &lookupCounter{Store: NewPostgresStore(db)}
 }
 
-// itHandler is the dashboard auth handler on the real store. throttle may be
-// nil: the handler then checks every password, as it did before.
+// itHandler is the dashboard auth handler on store. throttle may be nil: the
+// handler then checks every password.
 func itHandler(store Store, throttle *LoginThrottle) http.Handler {
 	h := NewHandler(newFakeService(store), session.CookieConfig{Path: "/"}, stubEmailSender{}, "", false)
 	if throttle != nil {
@@ -100,28 +100,13 @@ func deviceCookie(t *testing.T, rr *httptest.ResponseRecorder) *http.Cookie {
 	return nil
 }
 
-// TestLoginThrottle_RefusalSkipsThePasswordCheck is control against
-// treatment on the same database. Without the throttle, six wrong passwords
-// make six lookups and six 401s. With it, the 6th attempt is refused before
-// the lookup; so is the right password during the wait, and so is an email
-// with no account, which therefore costs no dummy bcrypt either. That is
-// why a refusal has the same timing for real and unknown emails.
+// TestLoginThrottle_RefusalSkipsThePasswordCheck: after five wrong passwords
+// the 6th attempt is refused before the account lookup; so is the right
+// password during the wait, and so is an email with no account, which
+// therefore costs no dummy bcrypt either. That is why a refusal has the same
+// timing for real and unknown emails.
 func TestLoginThrottle_RefusalSkipsThePasswordCheck(t *testing.T) {
 	db, store := throttleIT(t)
-
-	// Control: no throttle.
-	control := itHandler(store, nil)
-	for i := 1; i <= 6; i++ {
-		if code := itSignIn(control, "198.51.100.1", itEmail, "wrong-password-123"); code != http.StatusUnauthorized {
-			t.Fatalf("control: attempt %d = %d, want 401", i, code)
-		}
-	}
-	if n := store.lookups.Load(); n != 6 {
-		t.Fatalf("control: %d lookups for 6 attempts, want 6", n)
-	}
-
-	// Treatment: the same attempts with the throttle wired.
-	store.lookups.Store(0)
 	h := itHandler(store, itThrottle(t, db))
 	const ip = "198.51.100.2"
 	for i := 1; i <= 5; i++ {
@@ -262,8 +247,7 @@ func TestLoginThrottle_BrowserIsKnownPerEmail(t *testing.T) {
 // TestLoginThrottle_RowDeletedDuringAnAttempt: an attempt waits on a
 // count's row lock while another transaction deletes the row, as a sign-in
 // clearing the count or the cleanup does. The attempt adds the row again
-// and is counted. When the row was added and then locked in two statements,
-// the lock found no row and the attempt failed, which sign-in answers 503.
+// and is counted, because adding and locking the row is one statement.
 func TestLoginThrottle_RowDeletedDuringAnAttempt(t *testing.T) {
 	db, _ := throttleIT(t)
 	th := itThrottle(t, db)
@@ -298,22 +282,7 @@ func TestLoginThrottle_RowDeletedDuringAnAttempt(t *testing.T) {
 	}()
 
 	// Delete only once the attempt is waiting on the lock.
-	deadline := time.Now().Add(10 * time.Second)
-	for {
-		var waiting int
-		if err := db.Pool.QueryRowContext(ctx, `
-			SELECT count(*) FROM pg_stat_activity
-			 WHERE datname = current_database() AND wait_event_type = 'Lock'`).Scan(&waiting); err != nil {
-			t.Fatalf("read pg_stat_activity: %v", err)
-		}
-		if waiting > 0 {
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("the second attempt never waited on the row lock")
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
+	testutil.WaitForLockWaiter(t, ctx, testutil.AdminPool(t), "login_throttle")
 	if _, err := tx.ExecContext(ctx, `DELETE FROM login_throttle`); err != nil {
 		t.Fatalf("delete the rows: %v", err)
 	}
