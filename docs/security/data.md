@@ -69,7 +69,7 @@ Hardcount sends nothing to its maintainers: no usage statistics and no update ch
 
 Logs are JSON on standard output. Where they go, and how long they stay, is up to you.
 
-- **One line per request:** method, route (or the path, when no route matched), status, duration and request ID. No query strings, request bodies or names. Link tokens are removed from paths ([SECURITY.md](../../SECURITY.md#hardening-status)). The line also has `actor_type`, `actor_id` and `ip` fields, which are not filled in yet: they say `system` and hold no address or account.
+- **One line per request:** method, route (or the path, when no route matched), status, duration and request ID. No query strings, request bodies or names. Link tokens are removed from paths ([SECURITY.md](../../SECURITY.md#hardening-status)). The line also names the caller, by ID only: `actor_type` (`user` or `api_key`), `actor_id`, the account (`tenant_id`) and the client IP (`ip`). A request nobody signed in for, such as a payment page or a refused request, says `anonymous` and holds the client IP.
 - **One line per email sent or failed:** it names the recipient's address and the subject. A refused CC address is logged too.
 - **Sign-in lines:** a failed or throttled sign-in names the client IP, the user ID when the email has an account, and a short hash of the email, never the email itself.
 - **The Compose stack's nginx log:** client IP, method, path with link tokens removed, status, referrer, user agent and `X-Forwarded-For`.

@@ -11,6 +11,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/platform/logging"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
 // ErrNoCredentials means the request carries neither a session cookie that
@@ -87,6 +88,8 @@ func MiddlewareOrAPIKey(sessSvc *Service, keySvc *auth.Service) func(http.Handle
 			var unavailable unavailableError
 			switch {
 			case err == nil:
+				// The access log wraps this middleware and cannot see ctx.
+				request.SetCaller(ctx, callerIn(ctx))
 				next.ServeHTTP(w, r.WithContext(ctx))
 			case errors.Is(err, ErrNoCredentials):
 				respond.Unauthorized(w, r, "missing credentials — sign in at /login or send Authorization: Bearer hc_secret_...")
@@ -103,6 +106,16 @@ func MiddlewareOrAPIKey(sessSvc *Service, keySvc *auth.Service) func(http.Handle
 			}
 		})
 	}
+}
+
+// callerIn names the one caller Authenticate's context carries, as the audit
+// log names it (audit.ResolveActor).
+func callerIn(ctx context.Context) request.Caller {
+	c := request.Caller{ActorType: "api_key", ActorID: auth.KeyID(ctx), TenantID: auth.TenantID(ctx)}
+	if userID := auth.UserID(ctx); userID != "" {
+		c.ActorType, c.ActorID = "user", userID
+	}
+	return c
 }
 
 func applyToCtx(ctx context.Context, s Session) context.Context {

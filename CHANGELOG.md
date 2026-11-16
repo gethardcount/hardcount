@@ -124,6 +124,7 @@ original text.
 
 ### Fixed
 
+- **Each access log line names the caller, the account and the client address.** A request made with an API key or a dashboard session logs `actor_type` (`api_key` or `user`), `actor_id`, `tenant_id` and `ip`. Any other request logs `actor_type` `anonymous` and `ip`. Before, every line said `system`, with no account and no address. The log now holds client IPs: [Logs](docs/security/data.md#logs) ([#PRNUM](https://github.com/gethardcount/hardcount/pull/PRNUM)).
 - **A request body over the 1 MB limit is answered `413` `payload_too_large`, with or without an `Idempotency-Key`.** It was answered `400`: `invalid JSON body` without a key and `failed to read body` with one. The usage batch and the LiteLLM callback keep their `413` `batch_too_large` ([#1802](https://github.com/gethardcount/hardcount/pull/1802)).
 - **Test clocks: a credit grant or adjustment for a customer whose test clock cannot be read is refused with `503` `test_clock_unavailable`, and nothing is changed; send the request again.** It used to be written at real time ([#1787](https://github.com/gethardcount/hardcount/pull/1787)).
 - **Rotating an API key with a grace period never keeps the old key working past its own expiry.** A key set to expire in an hour, rotated with 7 days of grace, used to keep working for 7 days. It now stops at its own time, and a key with no expiry stops when the grace ends, as before ([#1733](https://github.com/gethardcount/hardcount/pull/1733)).

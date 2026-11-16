@@ -5,158 +5,158 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/netip"
 	"strings"
+	"sync"
 	"testing"
 
 	chimw "github.com/go-chi/chi/v5/middleware"
 
-	"github.com/gethardcount/hardcount/internal/audit"
-	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
-// capture collects the attributes of the one "request" record requestLogger emits.
-type capture struct {
-	slog.Handler
-	attrs map[string]string
-	msg   string
+// accessLines collects the attributes of every "request" line written while
+// it is the default logger. A server writes them from its own goroutines.
+type accessLines struct {
+	mu    sync.Mutex
+	lines []map[string]string
 }
 
-func (c *capture) Enabled(context.Context, slog.Level) bool { return true }
-func (c *capture) Handle(_ context.Context, r slog.Record) error {
-	c.msg = r.Message
+func (c *accessLines) Enabled(context.Context, slog.Level) bool { return true }
+func (c *accessLines) Handle(_ context.Context, r slog.Record) error {
+	if r.Message != "request" {
+		return nil
+	}
+	line := map[string]string{}
 	r.Attrs(func(a slog.Attr) bool {
-		c.attrs[a.Key] = a.Value.String()
+		line[a.Key] = a.Value.String()
 		return true
 	})
+	c.mu.Lock()
+	c.lines = append(c.lines, line)
+	c.mu.Unlock()
 	return nil
 }
-func (c *capture) WithAttrs([]slog.Attr) slog.Handler { return c }
-func (c *capture) WithGroup(string) slog.Handler      { return c }
+func (c *accessLines) WithAttrs([]slog.Attr) slog.Handler { return c }
+func (c *accessLines) WithGroup(string) slog.Handler      { return c }
 
-// serveThroughLogger runs one request through requestLogger. The identity is stamped
-// INSIDE the handler, mirroring production: auth middleware runs downstream of the
-// logger, so at the moment requestLogger is entered the context is still anonymous.
-// A logger that read identity before calling the next handler would log nothing —
-// which is exactly the bug that would make this test pass while the field stays
-// empty in prod.
-func serveThroughLogger(t *testing.T, stamp func(context.Context) context.Context) *capture {
+// byRequestID returns the one line of the request with this id.
+func (c *accessLines) byRequestID(t *testing.T, id string) map[string]string {
 	t.Helper()
-	cap := &capture{attrs: map[string]string{}}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, line := range c.lines {
+		if line["request_id"] == id {
+			return line
+		}
+	}
+	t.Fatalf("no access log line for request %q among %d lines", id, len(c.lines))
+	return nil
+}
+
+// captureAccessLog makes the default logger collect access log lines until
+// the test ends.
+func captureAccessLog(t *testing.T) *accessLines {
+	t.Helper()
+	lines := &accessLines{}
 	prev := slog.Default()
-	slog.SetDefault(slog.New(cap))
+	slog.SetDefault(slog.New(lines))
 	t.Cleanup(func() { slog.SetDefault(prev) })
+	return lines
+}
+
+// serveThroughLogger runs one request through requestLogger and returns its
+// line. inside stands for the layers the logger wraps. Like authentication,
+// it gets a context made from the logger's, never the logger's own.
+func serveThroughLogger(t *testing.T, inside func(context.Context)) map[string]string {
+	t.Helper()
+	lines := captureAccessLog(t)
+	type insideKey struct{}
 
 	h := requestLogger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		*r = *r.WithContext(stamp(r.Context()))
+		inside(context.WithValue(r.Context(), insideKey{}, "added inside the logger"))
 		w.WriteHeader(http.StatusOK)
 	}))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/invoices", nil)
-	req = req.WithContext(context.WithValue(req.Context(), chimw.RequestIDKey, "hc_req_abc123"))
-	h.ServeHTTP(httptest.NewRecorder(), req)
-	return cap
+	ctx := context.WithValue(req.Context(), chimw.RequestIDKey, "hc_req_abc123")
+	// The edge resolves the client address before the logger runs
+	// (useRequestEdge); chi keeps it under this helper's key.
+	ctx = clientIPContext(t, ctx, "203.0.113.9")
+	h.ServeHTTP(httptest.NewRecorder(), req.WithContext(ctx))
+	return lines.byRequestID(t, "hc_req_abc123")
 }
 
-// TestAccessLog_RecordsWhoNotJustWhat is the regression lock for an access log that
-// could not answer any question worth asking.
-//
-// It logged method, path, status and duration — and nothing else. So after an
-// incident it could tell you a 500 happened on POST /v1/invoices, and it could not
-// tell you which tenant was affected, which operator did it, or from where. Worse,
-// with no request_id on the line, a log entry could not be joined to the audit row
-// the same request had just written — even though the audit row has carried
-// request_id all along. The two halves of the evidence existed and could not be
-// put together.
-func TestAccessLog_RecordsWhoNotJustWhat(t *testing.T) {
-	cap := serveThroughLogger(t, func(ctx context.Context) context.Context {
-		ctx = auth.WithTenantID(ctx, "hc_ten_42")
-		ctx = auth.WithUserID(ctx, "hc_usr_7")
-		return audit.WithClientIP(ctx, "203.0.113.9")
+// clientIPContext returns ctx as chi's client-IP middleware leaves it for a
+// request from ip.
+func clientIPContext(t *testing.T, ctx context.Context, ip string) context.Context {
+	t.Helper()
+	var out context.Context
+	req := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(ctx)
+	req.RemoteAddr = netip.AddrPortFrom(netip.MustParseAddr(ip), 4711).String()
+	chimw.ClientIPFromRemoteAddr(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		out = r.Context()
+	})).ServeHTTP(httptest.NewRecorder(), req)
+	if out == nil {
+		t.Fatal("chi's client-IP middleware did not reach its handler")
+	}
+	return out
+}
+
+// A line says who made the request, which tenant it touched and from where,
+// and carries the request id that joins it to the request's audit row.
+func TestAccessLog_NamesTheCaller(t *testing.T) {
+	line := serveThroughLogger(t, func(ctx context.Context) {
+		request.SetCaller(ctx, request.Caller{ActorType: "user", ActorID: "hc_usr_7", TenantID: "hc_ten_42"})
 	})
 
-	if cap.msg != "request" {
-		t.Fatalf("log message = %q, want %q", cap.msg, "request")
-	}
 	for key, want := range map[string]string{
 		"tenant_id":  "hc_ten_42",
 		"actor_id":   "hc_usr_7",
 		"actor_type": "user",
-		"request_id": "hc_req_abc123", // the join key to the audit row
+		"request_id": "hc_req_abc123",
 		"ip":         "203.0.113.9",
 		"status":     "200",
 		"method":     "POST",
 	} {
-		if got := cap.attrs[key]; got != want {
+		if got := line[key]; got != want {
 			t.Errorf("access log %s = %q, want %q", key, got, want)
 		}
 	}
 }
 
-// TestAccessLog_AgreesWithTheAuditRowsActor pins the two to ONE resolver.
-//
-// The access log and the audit row must never disagree about who made a request.
-// If the log resolved identity its own way, a request could be one actor in the log
-// and a different actor in the evidence — and the log is what an investigator reaches
-// for first. Both call audit.ResolveActor; this fails if someone forks that.
-func TestAccessLog_AgreesWithTheAuditRowsActor(t *testing.T) {
-	// An API key, not a user: the precedence order inside ResolveActor is the part
-	// most likely to be reimplemented subtly differently by a second copy.
-	stamp := func(ctx context.Context) context.Context {
-		return auth.WithKeyID(auth.WithTenantID(ctx, "hc_ten_1"), "hc_key_9")
-	}
-	cap := serveThroughLogger(t, stamp)
+// A request nobody signed in for is "anonymous", with no actor id and no
+// tenant: an empty field would read as "we lost it".
+func TestAccessLog_NobodySignedIn(t *testing.T) {
+	line := serveThroughLogger(t, func(context.Context) {})
 
-	wantType, wantID := audit.ResolveActor(stamp(context.Background()))
-	if cap.attrs["actor_type"] != wantType || cap.attrs["actor_id"] != wantID {
-		t.Errorf("access log actor = %s/%s, audit row would record %s/%s — the log and the evidence disagree about who did this",
-			cap.attrs["actor_type"], cap.attrs["actor_id"], wantType, wantID)
+	if got := line["actor_type"]; got != "anonymous" {
+		t.Errorf("actor_type = %q, want anonymous", got)
 	}
-}
-
-// TestAccessLog_NeverLogsAnActorName keeps emails out of the log sink.
-//
-// Actor names are emails for user actors. Logs ship to sinks with no erasure story,
-// which is the same reason the append-only audit_log stores no addresses (0150
-// revoked DELETE, so anything written there is unerasable by construction). The log
-// carries the actor ID; the name is resolved at read time, from a table that can
-// still honour a deletion request.
-func TestAccessLog_NeverLogsAnActorName(t *testing.T) {
-	cap := serveThroughLogger(t, func(ctx context.Context) context.Context {
-		return auth.WithUserID(auth.WithTenantID(ctx, "hc_ten_1"), "hc_usr_7")
-	})
-	for k, v := range cap.attrs {
-		if strings.Contains(v, "@") {
-			t.Errorf("access log attr %s = %q looks like an email address — logs have no erasure path", k, v)
+	for _, key := range []string{"actor_id", "tenant_id"} {
+		if got, ok := line[key]; ok {
+			t.Errorf("%s = %q, want the field left out", key, got)
 		}
 	}
-	if _, ok := cap.attrs["actor_name"]; ok {
-		t.Error("access log records actor_name; names are emails, and this sink cannot erase them")
+	for _, key := range []string{"request_id", "ip"} {
+		if line[key] == "" {
+			t.Errorf("%s is empty; every line carries it, signed in or not", key)
+		}
 	}
 }
 
-// TestAccessLog_OmitsIdentityItDoesNotHave: an unauthenticated request has no
-// tenant. Logging an empty string reads as "we lost it"; omitting the key reads as
-// "there wasn't one", which is the truth.
-//
-// It DOES have an actor — ResolveActor answers system/system — so actor stays on the
-// line. That asymmetry is the point: omit what does not exist, log what does.
-func TestAccessLog_OmitsIdentityItDoesNotHave(t *testing.T) {
-	cap := serveThroughLogger(t, func(ctx context.Context) context.Context { return ctx })
-
-	if _, ok := cap.attrs["tenant_id"]; ok {
-		t.Errorf("anonymous request logged tenant_id = %q, want the key omitted", cap.attrs["tenant_id"])
+// A user's name is an email address, and the log goes to sinks that cannot
+// erase data. The line carries the actor's id only.
+func TestAccessLog_NeverLogsAnActorName(t *testing.T) {
+	line := serveThroughLogger(t, func(ctx context.Context) {
+		request.SetCaller(ctx, request.Caller{ActorType: "user", ActorID: "hc_usr_7", TenantID: "hc_ten_1"})
+	})
+	for k, v := range line {
+		if strings.Contains(v, "@") {
+			t.Errorf("access log %s = %q looks like an email address", k, v)
+		}
 	}
-	// actor_id/actor_type still resolve: "system" is a real answer, not a missing
-	// one, and it is exactly what the audit row would record for the same request.
-	// (An `if actorID != ""` guard here would be dead code — ResolveActor never
-	// returns empty — and a branch that cannot run is a gate that cannot hold.)
-	if cap.attrs["actor_id"] != "system" {
-		t.Errorf("anonymous actor_id = %q, want system", cap.attrs["actor_id"])
-	}
-	if cap.attrs["actor_type"] != "system" {
-		t.Errorf("actor_type = %q, want system", cap.attrs["actor_type"])
-	}
-	if cap.attrs["request_id"] == "" {
-		t.Error("request_id missing — every line must be joinable, authenticated or not")
+	if _, ok := line["actor_name"]; ok {
+		t.Error("access log has actor_name; a user's name is an email address")
 	}
 }

@@ -77,7 +77,7 @@ Under `internal/`:
 - **Telling people:** `webhook` (outbound, HMAC-signed), `email`, `audit`, `analytics` (dashboard numbers).
 - **Checking:** `testclock`, `doctor`, `arch` (tests for the rules on this page), `testutil`.
 - **Shared:** `api` (builds every store, service and handler, and mounts the routes), `domain` (shared data types, in the package `internal/domain`; it imports no store, service or other business package), `errs`, `config`, `pdffonts`, `version`.
-- **`platform/`:** `postgres` (transactions and RLS), `migrate`, `leader`, `scheduler` (the loop for leased jobs), `clock` (real or test-clock time), `money` (integer-cents math), `crypto`, `telemetry`, `logging`, `listorder`, `activity`, `timeline`.
+- **`platform/`:** `postgres` (transactions and RLS), `migrate`, `leader`, `scheduler` (the loop for leased jobs), `clock` (real or test-clock time), `money` (integer-cents math), `crypto`, `telemetry`, `logging`, `request` (what one request's inner layers tell the outer ones, such as its caller), `listorder`, `activity`, `timeline`.
 
 ## Background work
 
