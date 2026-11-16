@@ -198,8 +198,7 @@ func checkCreateInput(input CreateKeyInput, now time.Time) (CreateKeyInput, erro
 	}
 
 	if input.ExpiresAt != nil && !input.ExpiresAt.After(now) {
-		return CreateKeyInput{}, errs.Invalid("expires_at",
-			"must be in the future — a key that expires at or before now is dead on arrival")
+		return CreateKeyInput{}, errs.Invalid("expires_at", "must be in the future")
 	}
 	return CreateKeyInput{Name: name, KeyType: keyType, ExpiresAt: input.ExpiresAt}, nil
 }
@@ -323,11 +322,11 @@ type RotateKeyResult struct {
 func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input RotateKeyInput) (RotateKeyResult, error) {
 	maxGraceSeconds := int64(maxRotationGrace / time.Second)
 	if input.ExpiresInSeconds < 0 {
-		return RotateKeyResult{}, errs.Invalid("expires_in_seconds", "must be >= 0")
+		return RotateKeyResult{}, errs.Invalid("expires_in_seconds", "must be 0 or more")
 	}
 	if input.ExpiresInSeconds > maxGraceSeconds {
 		return RotateKeyResult{}, errs.Invalid("expires_in_seconds",
-			fmt.Sprintf("must be <= %d (7 days)", maxGraceSeconds))
+			fmt.Sprintf("must be at most %d seconds (7 days)", maxGraceSeconds))
 	}
 
 	var result RotateKeyResult
