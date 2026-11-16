@@ -2,7 +2,6 @@ package usage
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"maps"
 	"strings"
@@ -67,12 +66,27 @@ func NewCustomerUsageService(
 	subscriptions SubscriptionLister,
 	pricing PricingReader,
 ) *CustomerUsageService {
+	if usageSvc == nil {
+		panic("usage.NewCustomerUsageService: the usage service is required")
+	}
 	return &CustomerUsageService{
 		usage:         usageSvc,
 		customers:     customers,
 		subscriptions: subscriptions,
 		pricing:       pricing,
 	}
+}
+
+// readTime returns ctx with the read's one instant bound. The read's time is
+// decided before it: the API's door decides it from the customer in the URL,
+// and the public cost dashboard decides its own (GetByToken). A clock's
+// decision carries its instant. A decision of real time may carry none, and
+// then the server's clock (the usage service's) is read here once, so the
+// window, the rater and the buckets all read one instant. The constructors
+// guarantee the chain: NewCustomerUsageService requires the usage service,
+// and NewService gives it the real clock until SetClock replaces it.
+func (s *CustomerUsageService) readTime(ctx context.Context) context.Context {
+	return clock.EnsureEffectiveNow(ctx, s.usage.clock)
 }
 
 // SetRater wires the billing rater. The engine is built after this service,
@@ -188,18 +202,6 @@ type CustomerUsageBucket struct {
 	PerMeter    map[string]decimal.Decimal `json:"per_meter"`
 }
 
-// customerNow is the customer's now for a read whose window defaults to it
-// (customer usage, margin). A test clock that cannot be read refuses the
-// read (503); a read changes nothing, so the message only says to retry.
-func (s *CustomerUsageService) customerNow(ctx context.Context, tenantID, customerID string) (time.Time, error) {
-	t, err := s.usage.effectiveNow(ctx, tenantID, customerID)
-	if errors.Is(err, clock.ErrUndecided) {
-		return time.Time{}, errs.Unavailable("test_clock_unavailable",
-			"The customer's test clock could not be read. Try again in a moment.", err)
-	}
-	return t, err
-}
-
 // Get composes the customer-usage view (ADR-130 §10). Order:
 //  1. Customer existence (RLS makes cross-tenant IDs return ErrNotFound).
 //  2. Active+trialing subscriptions for the customer.
@@ -224,6 +226,7 @@ func (s *CustomerUsageService) Get(ctx context.Context, tenantID, customerID str
 	if s.rater == nil {
 		return CustomerUsageResult{}, fmt.Errorf("customer usage: rater not wired")
 	}
+	ctx = s.readTime(ctx)
 
 	if _, err := s.customers.Get(ctx, tenantID, customerID); err != nil {
 		return CustomerUsageResult{}, err
@@ -238,9 +241,7 @@ func (s *CustomerUsageService) Get(ctx context.Context, tenantID, customerID str
 	}
 	activeSubs := filterActiveSubs(subs)
 
-	from, to, source, err := resolvePeriod(period, activeSubs, func() (time.Time, error) {
-		return s.customerNow(ctx, tenantID, customerID)
-	})
+	from, to, source, err := resolvePeriod(period, activeSubs, clock.Now(ctx))
 	if err != nil {
 		return CustomerUsageResult{}, err
 	}
@@ -399,9 +400,9 @@ func composeDailyBuckets(rows []DailyBucketRow, from, to time.Time) []CustomerUs
 //
 // Returns a DomainError so the handler maps to 422 with the right code.
 //
-// now is the customer's effective now (test-clock frozen_time when pinned).
-// It is read only for the default, to skip cycles that have not started.
-func resolvePeriod(period CustomerUsagePeriod, subs []domain.Subscription, now func() (time.Time, error)) (time.Time, time.Time, string, error) {
+// now is the read's instant (test-clock frozen_time when pinned). The
+// default uses it to skip cycles that have not started.
+func resolvePeriod(period CustomerUsagePeriod, subs []domain.Subscription, now time.Time) (time.Time, time.Time, string, error) {
 	hasFrom := !period.From.IsZero()
 	hasTo := !period.To.IsZero()
 
@@ -432,10 +433,6 @@ func resolvePeriod(period CustomerUsagePeriod, subs []domain.Subscription, now f
 	// Only when NO cycle has started (e.g. the customer's only sub is
 	// trialing) do we fall back to the latest-start pick across all subs,
 	// which is the long-standing behaviour for that case.
-	n, err := now()
-	if err != nil {
-		return time.Time{}, time.Time{}, "", err
-	}
 	var primary, primaryAny *domain.Subscription
 	for i := range subs {
 		sub := &subs[i]
@@ -445,7 +442,7 @@ func resolvePeriod(period CustomerUsagePeriod, subs []domain.Subscription, now f
 		if primaryAny == nil || sub.CurrentBillingPeriodStart.After(*primaryAny.CurrentBillingPeriodStart) {
 			primaryAny = sub
 		}
-		if sub.CurrentBillingPeriodStart.After(n) {
+		if sub.CurrentBillingPeriodStart.After(now) {
 			continue
 		}
 		if primary == nil || sub.CurrentBillingPeriodStart.After(*primary.CurrentBillingPeriodStart) {

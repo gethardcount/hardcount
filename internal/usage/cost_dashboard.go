@@ -2,7 +2,6 @@ package usage
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"strings"
@@ -75,6 +74,9 @@ type CustomerTokenLookup interface {
 // NewCostDashboardAssembler wires the public-projection assembler.
 // All four deps are required, and so is SetLiveBalanceReader before serving.
 func NewCostDashboardAssembler(customers CustomerTokenLookup, usageSvc *CustomerUsageService, subs SubscriptionLister, credits CostDashboardCreditReader) *CostDashboardAssembler {
+	if usageSvc == nil {
+		panic("usage.NewCostDashboardAssembler: the customer usage service is required")
+	}
 	return &CostDashboardAssembler{
 		customers:     customers,
 		usageService:  usageSvc,
@@ -253,7 +255,10 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 	if err != nil {
 		return nil, errs.Unavailable("test_clock_unavailable", costDashboardUnavailable, err)
 	}
-	ctx = decided
+	// One instant for the whole page: the credit figures and the usage view
+	// all read it. A clock's decision carries its instant; at real time the
+	// server's clock is read here once.
+	ctx = a.usageService.readTime(decided)
 	// The usage view and the live credit figure below aggregate the same
 	// meters over the same period; the memo makes that one scan, not two.
 	ctx, _ = WithAggregationMemo(ctx)
@@ -307,11 +312,6 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 	}
 
 	res, err := a.usageService.Get(ctx, cust.TenantID, cust.ID, CustomerUsagePeriod{})
-	if errors.Is(err, clock.ErrUndecided) {
-		// For a customer on no clock the usage view reads the customer's now
-		// again; its refusal is this page's.
-		return nil, errs.Unavailable("test_clock_unavailable", costDashboardUnavailable, err)
-	}
 	if err != nil {
 		return nil, fmt.Errorf("compose usage: %w", err)
 	}

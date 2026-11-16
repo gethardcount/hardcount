@@ -78,16 +78,9 @@ func (s *Service) SetResolver(r clock.Resolver) {
 // so all work below reads one instant, and audit rows the clock. Each ingest
 // entry calls it once, before it goes down: Ingest (per event), each event of
 // a batch, Backfill, a LiteLLM call (IngestCall), a held release (Release).
-// Nothing below an ingest entry decides: build reads the decided instant. (The
-// customer usage, margin and cost dashboard reads still decide again, through
-// effectiveNow; see there.) The cases, in the order taken:
-//   - a clock already decided for this work (clock.SimOf): ctx as it is,
-//     with no read. Only HTTP handlers call the ingest entries, and their
-//     door binds no clock (usage's routes are decided in), so today only the
-//     three reads (customer usage, margin, cost dashboard, through
-//     effectiveNow) reach this case, under the clock their route or page
-//     decided. A real instant does not count: it names no clock, and the
-//     customer may be on one;
+// Nothing below an ingest entry decides: build reads the decided instant. The
+// customer usage, margin and cost dashboard reads do not call it: their time
+// is decided before them. The cases, in the order taken:
 //   - no customer id: real time;
 //   - else the customer's clock is decided here (clock.DecideOrRealTime:
 //     the customer is named in the body, so the API's door left the request
@@ -97,14 +90,17 @@ func (s *Service) SetResolver(r clock.Resolver) {
 //   - a clock that cannot be read refuses the event (503): nothing is
 //     recorded, and the client sends it again.
 //
-// In every case but under a clock, a real instant ctx already carries is kept.
+// A real instant ctx already carries is kept for a customer on no clock and
+// for a not-found (clock.DecideOrRealTime keeps it). A clock already on ctx
+// is replaced by the customer's own decision in test mode with a resolver
+// and a customer id; in live mode, with no resolver, or with no customer id,
+// ctx is kept as it is. None of those cases can carry a clock: only HTTP
+// handlers call the ingest entries, the API's door binds no clock on usage's
+// routes, and no live record is on a test clock.
 //
 // Real time is read once from the service's clock (SetClock) and bound
 // (clock.EnsureEffectiveNow).
 func (s *Service) decide(ctx context.Context, tenantID, customerID string) (context.Context, error) {
-	if _, ok := clock.SimOf(ctx); ok {
-		return ctx, nil
-	}
 	decided := ctx
 	if customerID != "" {
 		var err error
@@ -114,21 +110,6 @@ func (s *Service) decide(ctx context.Context, tenantID, customerID string) (cont
 		}
 	}
 	return clock.EnsureEffectiveNow(decided, s.clock), nil
-}
-
-// effectiveNow decides the customer's time again for the reads whose window
-// defaults to the customer's now: customer usage (CustomerUsageService
-// .customerNow), margin (through MarginAssembler.effectiveNow) and the public
-// cost dashboard (through the customer usage read). None is an entry: each
-// sits under a decision already made (the door's, from the customer, or the
-// cost dashboard's own in GetByToken), and for a customer on no clock it reads
-// the resolver a second time. It is removed in the next PR.
-func (s *Service) effectiveNow(ctx context.Context, tenantID, customerID string) (time.Time, error) {
-	decided, err := s.decide(ctx, tenantID, customerID)
-	if err != nil {
-		return time.Time{}, err
-	}
-	return s.clock.Now(decided), nil
 }
 
 // IngestInput is the internal service input — uses resolved internal IDs only.

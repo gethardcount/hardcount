@@ -25,6 +25,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -345,17 +346,20 @@ type MarginAssembler struct {
 	usageSvc *CustomerUsageService
 }
 
+// NewMarginAssembler requires the customer usage service: the report rates
+// its usage through it, and takes its instant from it (reportTime).
 func NewMarginAssembler(store *PostgresStore, usageSvc *CustomerUsageService) *MarginAssembler {
+	if usageSvc == nil {
+		panic("usage.NewMarginAssembler: the customer usage service is required")
+	}
 	return &MarginAssembler{store: store, usageSvc: usageSvc}
 }
 
-// effectiveNow is the customer's now for the default margin window, as
-// customer usage reads it (CustomerUsageService.customerNow).
-func (a *MarginAssembler) effectiveNow(ctx context.Context, tenantID, customerID string) (time.Time, error) {
-	if a != nil && a.usageSvc != nil && a.usageSvc.usage != nil {
-		return a.usageSvc.customerNow(ctx, tenantID, customerID)
-	}
-	return time.Now().UTC(), nil
+// reportTime returns ctx with the report's one instant bound, as customer
+// usage binds its read's (CustomerUsageService.readTime): the default window
+// and the rated usage then agree.
+func (a *MarginAssembler) reportTime(ctx context.Context) context.Context {
+	return a.usageSvc.readTime(ctx)
 }
 
 func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, from, to time.Time) (MarginReport, error) {
@@ -475,7 +479,12 @@ type ProviderCostHandler struct {
 	auditLogger AuditEmitter
 }
 
+// NewProviderCostHandler requires the margin assembler, which serves the
+// margin report.
 func NewProviderCostHandler(store *PostgresStore, margin *MarginAssembler) *ProviderCostHandler {
+	if margin == nil {
+		panic("usage.NewProviderCostHandler: the margin assembler is required")
+	}
 	return &ProviderCostHandler{store: store, margin: margin}
 }
 
@@ -662,17 +671,15 @@ func providerCostLabel(r domain.ProviderCostRate) string {
 func (h *ProviderCostHandler) Margin(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	customerID := chi.URLParam(r, "id")
-	from, to, err := h.marginWindow(r, tenantID, customerID)
-	if errors.Is(err, errs.ErrUnavailable) {
-		// The customer's test clock could not be read: refused for retry.
-		respond.FromError(w, r, err, "customer")
-		return
-	}
+	// One instant for the report: the API's door decided its time from the
+	// customer in the URL.
+	ctx := h.margin.reportTime(r.Context())
+	from, to, err := h.marginWindow(ctx, r)
 	if err != nil {
 		respond.BadRequest(w, r, err.Error())
 		return
 	}
-	rep, err := h.margin.Get(r.Context(), tenantID, customerID, from, to)
+	rep, err := h.margin.Get(ctx, tenantID, customerID, from, to)
 	if err != nil {
 		// The one not-found the report can hit is the customer's.
 		respond.FromError(w, r, err, "customer")
@@ -682,29 +689,21 @@ func (h *ProviderCostHandler) Margin(w http.ResponseWriter, r *http.Request) {
 }
 
 // marginWindow is the Margin handler's [from, to): the request's bounds,
-// with missing ones defaulted around the customer's effective now.
-func (h *ProviderCostHandler) marginWindow(r *http.Request, tenantID, customerID string) (time.Time, time.Time, error) {
-	return parseWindow(r, func() (time.Time, error) {
-		return h.margin.effectiveNow(r.Context(), tenantID, customerID)
-	})
+// with missing ones defaulted around the report's instant, the one ctx
+// carries.
+func (h *ProviderCostHandler) marginWindow(ctx context.Context, r *http.Request) (time.Time, time.Time, error) {
+	return parseWindow(r, clock.Now(ctx))
 }
 
 // parseWindow reads from/to (RFC3339); a missing bound defaults to the
-// last 30 days ending at now(). now is the CUSTOMER's effective now —
-// frozen_time for a customer pinned to a test clock — so a bare request
-// for a clock-pinned customer covers the simulated last 30 days, the
-// same timeline customer usage follows. It is
-// called only when a bound is missing, so an explicit window costs no
-// clock lookup.
-func parseWindow(r *http.Request, now func() (time.Time, error)) (time.Time, time.Time, error) {
+// last 30 days ending at now, the report's instant: frozen_time for a
+// customer on a test clock, so a bare request for that customer covers the
+// simulated last 30 days, the same timeline customer usage follows.
+func parseWindow(r *http.Request, now time.Time) (time.Time, time.Time, error) {
 	q := r.URL.Query()
 	var from, to time.Time
 	if q.Get("from") == "" || q.Get("to") == "" {
-		n, err := now()
-		if err != nil {
-			return time.Time{}, time.Time{}, err
-		}
-		from, to = n.AddDate(0, 0, -30), n
+		from, to = now.AddDate(0, 0, -30), now
 	}
 	if v := r.URL.Query().Get("from"); v != "" {
 		t, err := time.Parse(time.RFC3339, v)

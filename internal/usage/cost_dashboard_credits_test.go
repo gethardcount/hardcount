@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -27,9 +29,13 @@ func (f *fakeCredits) CreditSummary(ctx context.Context, tenantID, customerID st
 }
 
 // fakeLive answers the live credit figure and records what it was asked for.
+// Given a clock, it reads it as the engine's live read does for ComputedAt,
+// and records the instant it read.
 type fakeLive struct {
 	live        domain.CreditLiveBalance
 	err         error
+	clock       clock.Clock
+	at          time.Time
 	gotTenant   string
 	gotCustomer string
 	gotLivemode bool
@@ -37,7 +43,17 @@ type fakeLive struct {
 
 func (f *fakeLive) LiveCreditBalance(ctx context.Context, tenantID, customerID string) (domain.CreditLiveBalance, error) {
 	f.gotTenant, f.gotCustomer, f.gotLivemode = tenantID, customerID, testutil.MustLivemode(ctx)
+	if f.clock != nil {
+		f.at = f.clock.Now(ctx)
+	}
 	return f.live, f.err
+}
+
+// usageViewForTest is a customer usage view over an empty store. The page
+// takes its instant from it; the paths these tests drive end before the
+// usage read.
+func usageViewForTest() *CustomerUsageService {
+	return NewCustomerUsageService(NewService(newMemStore()), nil, nil, nil)
 }
 
 // TestCostDashboard_CarriesCreditBalance pins issue #86: the public cost
@@ -48,7 +64,7 @@ func TestCostDashboard_CarriesCreditBalance(t *testing.T) {
 
 	t.Run("a customer with no subscription still sees the balance", func(t *testing.T) {
 		credits := &fakeCredits{summary: []CostDashboardCredits{{Currency: "USD", BalanceCents: 7500, CommitRemainingCents: 5000, PromotionalRemainingCents: 2500}}}
-		a := NewCostDashboardAssembler(lookup, nil, &recordingLister{}, credits)
+		a := NewCostDashboardAssembler(lookup, usageViewForTest(), &recordingLister{}, credits)
 		a.SetLiveBalanceReader(&fakeLive{live: domain.CreditLiveBalance{Balances: []domain.CreditLiveCurrency{
 			{Currency: "USD", BalanceCents: 7500, EstimatedRemainingCents: 7500},
 		}}})
@@ -74,7 +90,7 @@ func TestCostDashboard_CarriesCreditBalance(t *testing.T) {
 
 	t.Run("a failed credit read fails the response, it does not show zero", func(t *testing.T) {
 		boom := errors.New("credit store unavailable")
-		a := NewCostDashboardAssembler(lookup, nil, &recordingLister{}, &fakeCredits{err: boom})
+		a := NewCostDashboardAssembler(lookup, usageViewForTest(), &recordingLister{}, &fakeCredits{err: boom})
 		a.SetLiveBalanceReader(&fakeLive{})
 
 		_, err := a.GetByToken(context.Background(), "hc_pcd_x")
@@ -101,7 +117,7 @@ func TestCostDashboard_LiveFiguresComeFromTheLiveRead(t *testing.T) {
 			{Currency: "EUR", BalanceCents: 0, UnbilledUsageCents: 700, EstimatedRemainingCents: 0},
 			{Currency: "USD", BalanceCents: 4000, UnbilledUsageCents: 1000, EstimatedRemainingCents: 3000},
 		}}}
-		a := NewCostDashboardAssembler(lookup, nil, &recordingLister{}, credits)
+		a := NewCostDashboardAssembler(lookup, usageViewForTest(), &recordingLister{}, credits)
 		a.SetLiveBalanceReader(live)
 
 		got, err := a.GetByToken(context.Background(), "hc_pcd_x")
@@ -131,7 +147,7 @@ func TestCostDashboard_LiveFiguresComeFromTheLiveRead(t *testing.T) {
 
 	t.Run("a failed live read fails the response", func(t *testing.T) {
 		boom := errors.New("aggregation failed")
-		a := NewCostDashboardAssembler(lookup, nil, &recordingLister{}, &fakeCredits{})
+		a := NewCostDashboardAssembler(lookup, usageViewForTest(), &recordingLister{}, &fakeCredits{})
 		a.SetLiveBalanceReader(&fakeLive{err: boom})
 
 		if _, err := a.GetByToken(context.Background(), "hc_pcd_x"); !errors.Is(err, boom) {
@@ -140,7 +156,7 @@ func TestCostDashboard_LiveFiguresComeFromTheLiveRead(t *testing.T) {
 	})
 
 	t.Run("an unwired live read fails the response", func(t *testing.T) {
-		a := NewCostDashboardAssembler(lookup, nil, &recordingLister{}, &fakeCredits{})
+		a := NewCostDashboardAssembler(lookup, usageViewForTest(), &recordingLister{}, &fakeCredits{})
 
 		if _, err := a.GetByToken(context.Background(), "hc_pcd_x"); err == nil {
 			t.Fatal("want an error when no live reader is wired, got a response")
