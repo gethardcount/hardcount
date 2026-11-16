@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/dashmembers"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/email"
@@ -139,8 +140,8 @@ func newHarness(t *testing.T, tenantName string) *harness {
 	tenantID := testutil.CreateTestTenant(t, db, tenantName)
 
 	userStore := user.NewPostgresStore(db)
-	userSvc := user.NewService(userStore, nil)
 	sessionSvc := session.NewService(session.NewPostgresStore(db))
+	userSvc := user.NewService(userStore, nil, sessionSvc, audit.NewLogger(db))
 	emails := &capturingEmail{outbox: email.NewOutboxSender(email.NewOutboxStore(db))}
 	clk := clock.NewFake(time.Now().UTC())
 

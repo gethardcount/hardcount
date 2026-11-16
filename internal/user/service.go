@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/sha256"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -11,6 +12,8 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 
+	"github.com/gethardcount/hardcount/internal/audit"
+	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
@@ -24,15 +27,32 @@ import (
 // (throttle.go, ADR-094) runs in the handler before Authenticate. All of this
 // is well-trodden Go stdlib + x/crypto territory.
 type Service struct {
-	store Store
-	clock clock.Clock
+	store    Store
+	clock    clock.Clock
+	sessions SessionEnder
+	audit    AuditTxWriter
 }
 
-func NewService(store Store, clk clock.Clock) *Service {
+// SessionEnder ends every session of a user on the caller's transaction.
+// *session.Service satisfies it.
+type SessionEnder interface {
+	EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID string) error
+}
+
+// AuditTxWriter writes an audit row on the caller's transaction.
+// *audit.Logger satisfies it.
+type AuditTxWriter interface {
+	LogInTx(ctx context.Context, tx *sql.Tx, e audit.Entry) error
+}
+
+// NewService returns a Service. sessions and auditor join the password
+// reset's transaction, so the sign-out and its audit row commit with the
+// new password.
+func NewService(store Store, clk clock.Clock, sessions SessionEnder, auditor AuditTxWriter) *Service {
 	if clk == nil {
 		clk = clock.Real()
 	}
-	return &Service{store: store, clock: clk}
+	return &Service{store: store, clock: clk, sessions: sessions, audit: auditor}
 }
 
 const (
@@ -70,10 +90,8 @@ func HashPassword(plaintext string) (string, error) {
 	return string(hash), nil
 }
 
-// ValidatePassword runs the complexity checks without hashing — used
-// at the start of HashPassword and exposed for the password-reset
-// confirm endpoint to give an early 422 on bad input before doing any
-// crypto work.
+// ValidatePassword runs the complexity checks without hashing.
+// HashPassword runs it first.
 func ValidatePassword(plaintext string) error {
 	if len(plaintext) < MinPasswordLength {
 		return errs.Invalid("password",
@@ -192,22 +210,6 @@ func (s *Service) Authenticate(ctx context.Context, email, plaintext string) (do
 	return u, tenants, nil
 }
 
-// TenantForUser returns the user's (single, v1) tenant id. The auth handler
-// needs it to scope a password-reset-completed audit row, where it holds only
-// the domain.User (which carries no tenant). Returns "" + nil when the user has
-// no tenant membership — the caller treats that as "nothing to audit," not an
-// error worth failing the reset over.
-func (s *Service) TenantForUser(ctx context.Context, userID string) (string, error) {
-	tenants, err := s.store.TenantsForUser(ctx, userID)
-	if err != nil {
-		return "", err
-	}
-	if len(tenants) == 0 {
-		return "", nil
-	}
-	return tenants[0].TenantID, nil
-}
-
 // IssueResetToken generates a fresh reset token for the user with the
 // given email, persists the hash, and returns the plaintext (caller
 // emails it to the user via the reset link) along with the user's
@@ -253,7 +255,7 @@ func (s *Service) IssueResetToken(ctx context.Context, email string) (plaintext,
 }
 
 // CheckResetToken is the non-consuming counterpart of
-// ConsumeResetToken. The reset-password page calls it on mount and
+// ConfirmReset. The reset-password page calls it on mount and
 // renders the form only when nil is returned; otherwise it shows
 // "this link is no longer valid". Stops the operator from filling
 // in the form and only learning at submit-time that the token was
@@ -273,31 +275,33 @@ func (s *Service) CheckResetToken(ctx context.Context, plaintext string) error {
 	return nil
 }
 
-// ConsumeResetToken validates the token, sets the new password, and
-// returns the user it belonged to. Single-use: the token is stamped
-// used_at atomically inside ConsumeResetToken, so a concurrent second
-// redeem fails.
-func (s *Service) ConsumeResetToken(ctx context.Context, plaintext, newPassword string) (domain.User, error) {
-	if err := ValidatePassword(newPassword); err != nil {
-		return domain.User{}, err
-	}
-	tokenHash := hashResetToken(plaintext)
-	userID, err := s.store.ConsumeResetToken(ctx, tokenHash)
-	if err != nil {
-		if errors.Is(err, errs.ErrNotFound) {
-			return domain.User{}, errs.Invalid("token",
-				"reset token is invalid, expired, or already used")
-		}
-		return domain.User{}, err
-	}
+// ConfirmReset sets newPassword for the user whose reset token is
+// plaintext, and returns that user. The password is checked and hashed
+// before the transaction opens, so a password that fails the check leaves
+// the token unspent and bcrypt holds no row lock. One transaction then
+// spends the token, voids the user's other tokens, sets the hash, ends every
+// session of the user and writes the password_reset_completed audit row, so
+// either all of it happens or none of it does. A token that is unknown,
+// expired or used, or a user with no workspace, gets the same token error.
+func (s *Service) ConfirmReset(ctx context.Context, plaintext, newPassword string) (domain.User, error) {
 	hash, err := HashPassword(newPassword)
 	if err != nil {
 		return domain.User{}, err
 	}
-	if err := s.store.SetPassword(ctx, userID, hash); err != nil {
-		return domain.User{}, err
+	u, err := s.store.ResetPassword(ctx, hashResetToken(plaintext), hash, func(tx *sql.Tx, userID string) error {
+		if err := s.sessions.EndAllForUserTx(ctx, tx, userID); err != nil {
+			return fmt.Errorf("end sessions: %w", err)
+		}
+		// The account owner held the token, so they are the actor.
+		return s.audit.LogInTx(auth.WithUserID(ctx, userID), tx, audit.Entry{
+			Action:       "password_reset_completed",
+			ResourceType: "user",
+			ResourceID:   userID,
+		})
+	})
+	if errors.Is(err, errs.ErrNotFound) {
+		return domain.User{}, errs.Invalid("token", "reset token is invalid, expired, or already used")
 	}
-	u, err := s.store.GetByID(ctx, userID)
 	if err != nil {
 		return domain.User{}, err
 	}

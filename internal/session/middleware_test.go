@@ -3,6 +3,7 @@ package session
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -31,9 +32,10 @@ func (f *fakeSessionStore) GetByIDHash(_ context.Context, idHash string) (Sessio
 	}
 	return s, nil
 }
-func (f *fakeSessionStore) Revoke(context.Context, string) error               { return nil }
-func (f *fakeSessionStore) RevokeAllForUser(context.Context, string) error     { return nil }
-func (f *fakeSessionStore) UpdateLivemode(context.Context, string, bool) error { return nil }
+func (f *fakeSessionStore) Revoke(context.Context, string) error                   { return nil }
+func (f *fakeSessionStore) RevokeAllForUser(context.Context, string) error         { return nil }
+func (f *fakeSessionStore) EndAllForUserTx(context.Context, *sql.Tx, string) error { return nil }
+func (f *fakeSessionStore) UpdateLivemode(context.Context, string, bool) error     { return nil }
 
 func sessionRequest(cookie string) *http.Request {
 	req := httptest.NewRequest("GET", "/", nil)

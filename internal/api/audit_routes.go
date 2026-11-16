@@ -203,7 +203,7 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 	{"POST", "/v1/auth/logout"}:                 explicit("user.Handler.logout → Log(logout, user). A stale/absent cookie revokes nothing and declares MarkSkip."),
 	{"POST", "/v1/auth/mode"}:                   explicit("user.Handler.setMode → Log(mode_changed, user) — live/test plane switch."),
 	{"POST", "/v1/auth/password-reset/request"}: explicit("user.Handler.requestPasswordReset → Log(password_reset_requested) on a matched account. A non-match (and the per-address throttle) writes nothing and declares MarkSkip — the fixed 200 is the enumeration defence."),
-	{"POST", "/v1/auth/password-reset/confirm"}: explicit("user.Handler.confirmPasswordReset → Log(password_reset_completed, user)."),
+	{"POST", "/v1/auth/password-reset/confirm"}: explicit("user.Service.ConfirmReset → LogInTx(password_reset_completed, user) on the reset's tx, with the new password and the sign-out of every session of the user."),
 	{"POST", "/v1/auth/accept-invite"}:          explicit("dashmembers.Handler.acceptInvite → Log(member.joined, user)."),
 	{"POST", "/v1/members/invite"}:              explicit("dashmembers.Handler.invite → Log(member.invited, user)."),
 	{"DELETE", "/v1/members/invitations/{id}"}:  explicit("dashmembers.Handler.revokeInvitation → Log(member.invite_revoked, user)."),

@@ -1292,7 +1292,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// The auth handler serves /v1/auth/login, /v1/auth/logout and the
 	// password-reset flow.
 	userStore := user.NewPostgresStore(db)
-	userSvc := user.NewService(userStore, nil)
+	// The password reset ends the user's sessions and writes its audit row on
+	// its own transaction, through sessionSvc and auditLogger.
+	userSvc := user.NewService(userStore, nil, sessionSvc, auditLogger)
 	// Password-reset emails use the same email path as every other
 	// transactional email. The user.EmailSender interface is narrower than
 	// email.OutboxSender: at password-reset time there is no tenant or display
@@ -1318,8 +1320,8 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		dashboardBaseURL,
 		emailSender.IsConfigured(),
 	)
-	// Audit the signed-in auth events: login, logout, mode change and password
-	// reset. Failed logins go to the structured security log instead, not to
+	// Audit the signed-in auth events: login, logout, mode change and the
+	// password-reset request. Failed logins go to the structured security log instead, not to
 	// the per-tenant audit_log. This is the dashboard (session) auth handler,
 	// not authH, the API-key handler wired above.
 	dashboardAuthH.SetAuditLogger(auditLogger)

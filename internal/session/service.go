@@ -2,6 +2,7 @@ package session
 
 import (
 	"context"
+	"database/sql"
 	"time"
 )
 
@@ -81,15 +82,21 @@ func (s *Service) Revoke(ctx context.Context, rawID string) error {
 	return s.store.Revoke(ctx, HashID(rawID))
 }
 
-// RevokeAllForUser revokes every active session of a user. The
-// password-reset flow calls it after the new password is set, so a session
-// minted from a stolen cookie cannot outlive the credential change. It is
-// idempotent: with no active sessions it does nothing.
+// RevokeAllForUser revokes every active session of a user, on its own
+// transaction. It is idempotent: with no active sessions it does nothing.
 func (s *Service) RevokeAllForUser(ctx context.Context, userID string) error {
 	if userID == "" {
 		return nil
 	}
 	return s.store.RevokeAllForUser(ctx, userID)
+}
+
+// EndAllForUserTx revokes every active session of a user on the caller's
+// transaction, so the sign-out commits or rolls back with the caller's
+// change. The password reset calls it. See postgresStore.EndAllForUserTx for
+// what the transaction must see.
+func (s *Service) EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID string) error {
+	return s.store.EndAllForUserTx(ctx, tx, userID)
 }
 
 // SetLivemode switches the active mode (test or live) on the cookie session.

@@ -12,7 +12,6 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/session"
 )
 
@@ -38,7 +37,7 @@ func (r *recordingAuditRecorder) Log(ctx context.Context, tenantID, action, reso
 
 func newAuthHandler(t *testing.T, store *fakeUserStore) (*Handler, *recordingAuditRecorder) {
 	t.Helper()
-	h := NewHandler(NewService(store, clock.Real()), session.NewService(&recordingSessionStore{}),
+	h := NewHandler(newFakeService(store), session.NewService(&recordingSessionStore{}),
 		session.DefaultCookieConfig("local"), stubEmailSender{}, "", false)
 	rec := &recordingAuditRecorder{}
 	h.SetAuditLogger(rec)
@@ -92,34 +91,5 @@ func TestLogin_FailureNotInAuditLog(t *testing.T) {
 	}
 	if len(rec.calls) != 0 {
 		t.Errorf("failed login wrote %d audit rows, want 0 (security slog only): %+v", len(rec.calls), rec.calls)
-	}
-}
-
-// TestConfirmPasswordReset_Audits: a completed password reset writes a
-// password_reset_completed row attributed to the account owner, scoped to their
-// tenant (resolved via TenantForUser since domain.User carries none).
-func TestConfirmPasswordReset_Audits(t *testing.T) {
-	const userID = "usr_reset"
-	plaintext := "reset-token-plaintext-0123456789abcdef"
-	store := &fakeUserStore{
-		user:           domain.User{ID: userID, Email: "op@acme.com"},
-		resetTokenHash: hashResetToken(plaintext),
-		tenants:        []domain.UserTenant{{UserID: userID, TenantID: "ten_acme"}},
-	}
-	h, rec := newAuthHandler(t, store)
-
-	body, _ := json.Marshal(ConfirmResetReq{Token: plaintext, Password: "a-sufficiently-long-password"})
-	req := httptest.NewRequest(http.MethodPost, "/password-reset/confirm", strings.NewReader(string(body)))
-	rr := httptest.NewRecorder()
-	h.Routes().ServeHTTP(rr, req)
-
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200: %s", rr.Code, rr.Body.String())
-	}
-	if len(rec.calls) != 1 || rec.calls[0].action != "password_reset_completed" {
-		t.Fatalf("audit calls = %+v, want one password_reset_completed", rec.calls)
-	}
-	if rec.calls[0].actorType != "user" || rec.calls[0].actorID != userID {
-		t.Errorf("actor = %s/%s, want user/%s", rec.calls[0].actorType, rec.calls[0].actorID, userID)
 	}
 }

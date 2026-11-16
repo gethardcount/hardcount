@@ -34,7 +34,6 @@ func (f *fakeSessions) Revoke(context.Context, string) error {
 	f.revoked = true
 	return nil
 }
-func (f *fakeSessions) RevokeAllForUser(context.Context, string) error { return nil }
 func (f *fakeSessions) SetLivemode(context.Context, string, bool) error {
 	return nil
 }
