@@ -44,7 +44,7 @@ func (r *recordingDeliverer) SendPasswordReset(_ context.Context, _, _, _, _ str
 	r.sent = append(r.sent, TypePasswordReset)
 	return nil
 }
-func (r *recordingDeliverer) SendMemberInvite(_ context.Context, _, _, _, _, _ string) error {
+func (r *recordingDeliverer) SendMemberInvite(_ context.Context, _, _, _, _, _ string, _ bool) error {
 	r.sent = append(r.sent, TypeMemberInvite)
 	return nil
 }

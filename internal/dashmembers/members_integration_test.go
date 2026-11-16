@@ -36,16 +36,17 @@ type capturingEmail struct {
 
 type capturedInvite struct {
 	tenantID, to, inviterEmail, tenantName, acceptURL string
+	hasAccount                                        bool
 }
 
-func (c *capturingEmail) SendMemberInviteTx(ctx context.Context, tx *sql.Tx, tenantID, to, inviterEmail, tenantName, acceptURL string) error {
-	if err := c.outbox.SendMemberInviteTx(ctx, tx, tenantID, to, inviterEmail, tenantName, acceptURL); err != nil {
+func (c *capturingEmail) SendMemberInviteTx(ctx context.Context, tx *sql.Tx, tenantID, to, inviterEmail, tenantName, acceptURL string, hasAccount bool) error {
+	if err := c.outbox.SendMemberInviteTx(ctx, tx, tenantID, to, inviterEmail, tenantName, acceptURL, hasAccount); err != nil {
 		return err
 	}
 	if c.fail {
 		return errors.New("injected enqueue failure")
 	}
-	c.sent = append(c.sent, capturedInvite{tenantID, to, inviterEmail, tenantName, acceptURL})
+	c.sent = append(c.sent, capturedInvite{tenantID, to, inviterEmail, tenantName, acceptURL, hasAccount})
 	return nil
 }
 
@@ -93,6 +94,23 @@ type userDirAdapter struct{ *user.PostgresStore }
 
 func (userDirAdapter) HashPassword(plaintext string) (string, error) {
 	return user.HashPassword(plaintext)
+}
+
+// backdateAccount moves the account's created_at back by age.
+func backdateAccount(t *testing.T, db *postgres.DB, userID string, age time.Duration) {
+	t.Helper()
+	tx, err := db.BeginTx(t.Context(), postgres.TxBypass, "")
+	if err != nil {
+		t.Fatalf("begin tx: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	if _, err := tx.ExecContext(t.Context(), `UPDATE users SET created_at = created_at - make_interval(secs => $2) WHERE id = $1`,
+		userID, age.Seconds()); err != nil {
+		t.Fatalf("backdate account %s: %v", userID, err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
 }
 
 // createUser adds an account with testPassword that belongs to tenantID
@@ -174,8 +192,9 @@ func newHarness(t *testing.T, tenantName string) *harness {
 // --- tests ----------------------------------------------------------------
 
 // TestInviteAcceptNewUser is the golden path: invite → email captured →
-// preview says new account → accept with password → member listed, token
-// burned (single-use), second accept and stale preview both rejected.
+// preview says new account → accept with password → member listed and the
+// invitation gone from the list, token burned (single-use), second accept
+// and stale preview both rejected.
 func TestInviteAcceptNewUser(t *testing.T) {
 	h := newHarness(t, "Team Golden")
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -194,6 +213,9 @@ func TestInviteAcceptNewUser(t *testing.T) {
 		t.Error("InvitedByEmail must be hydrated from the inviter join")
 	}
 	token := h.email.lastToken(t)
+	if h.email.sent[0].hasAccount {
+		t.Error("the invite email of a person with no account says they have one")
+	}
 
 	preview, err := h.svc.PreviewInvite(ctx, token)
 	if err != nil {
@@ -236,8 +258,8 @@ func TestInviteAcceptNewUser(t *testing.T) {
 	if !foundNew {
 		t.Error("accepted invitee must appear in the member list")
 	}
-	if len(invs) != 1 || invs[0].Status(h.clk.Now(ctx)) != "accepted" {
-		t.Errorf("invitation must read accepted after use: %+v", invs)
+	if len(invs) != 0 {
+		t.Errorf("invitations listed after the accept = %+v, want none: the invitee is a member now", invs)
 	}
 
 	// The new account can authenticate with the password it set.
@@ -256,7 +278,9 @@ func TestInviteAcceptNewUser(t *testing.T) {
 
 // TestInviteAcceptExistingUser: accepting with an email that already has
 // an account attaches the membership WITHOUT minting a session — email
-// possession alone must not log into an already-privileged account.
+// possession alone must not log into an already-privileged account. The
+// invite email is worded for someone with an account, and the members list
+// dates them from the day they joined this workspace.
 func TestInviteAcceptExistingUser(t *testing.T) {
 	h := newHarness(t, "Team Existing")
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -264,11 +288,17 @@ func TestInviteAcceptExistingUser(t *testing.T) {
 	// The invitee already has an account on ANOTHER workspace.
 	otherTenant := testutil.CreateTestTenant(t, h.db, "Other Workspace")
 	existing := createUser(t, h.db, "veteran@example.com", otherTenant, "owner")
+	// The account is a month older than this workspace's owner. Production
+	// writes created_at as now(), so only SQL can age it.
+	backdateAccount(t, h.db, existing.ID, 30*24*time.Hour)
 
 	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "veteran@example.com"); err != nil {
 		t.Fatalf("invite: %v", err)
 	}
 	token := h.email.lastToken(t)
+	if !h.email.sent[0].hasAccount {
+		t.Error("the invite email of a person with an account says they have none")
+	}
 
 	preview, err := h.svc.PreviewInvite(ctx, token)
 	if err != nil {
@@ -296,6 +326,23 @@ func TestInviteAcceptExistingUser(t *testing.T) {
 	}
 	if len(tenants) != 2 {
 		t.Fatalf("existing user must now belong to 2 tenants, got %d", len(tenants))
+	}
+
+	// The list is in joining order, and the older account joined last.
+	members, _, err := h.svc.List(ctx, h.tenantID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	if len(members) != 2 {
+		t.Fatalf("member count after accept: got %d, want 2", len(members))
+	}
+	if members[0].UserID != h.owner || members[1].UserID != existing.ID {
+		t.Errorf("members = %+v, want the owner, then the invitee who joined after", members)
+	}
+	for _, m := range members {
+		if age := time.Since(m.JoinedAt); m.UserID == existing.ID && age > 24*time.Hour {
+			t.Errorf("the invitee joined %v ago, want today: that is the age of their account, not of this membership", age.Round(time.Hour))
+		}
 	}
 }
 
@@ -359,7 +406,8 @@ func TestInviteGates(t *testing.T) {
 
 // TestRevokedAndExpiredTokens: a revoked invite's link stops working; an
 // expired invite's link stops working; both collapse into the same
-// generic validation error (no state oracle).
+// generic validation error (no state oracle). The list keeps the expired
+// invitation and drops the revoked one.
 func TestRevokedAndExpiredTokens(t *testing.T) {
 	h := newHarness(t, "Team Tokens")
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -377,12 +425,13 @@ func TestRevokedAndExpiredTokens(t *testing.T) {
 		t.Fatalf("accept revoked: got %v, want ErrValidation", err)
 	}
 
-	// Expired: advance the fake clock past the 7-day TTL.
+	// Expired: the clock stands on the expiry instant itself, where the accept
+	// already refuses.
 	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "late@example.com"); err != nil {
 		t.Fatalf("invite: %v", err)
 	}
 	lateToken := h.email.lastToken(t)
-	h.clk.Advance(dashmembers.InviteTTL + time.Hour)
+	h.clk.Advance(dashmembers.InviteTTL)
 	if _, err := h.svc.PreviewInvite(ctx, lateToken); !errors.Is(err, errs.ErrValidation) {
 		t.Fatalf("preview expired: got %v, want ErrValidation", err)
 	}
@@ -393,6 +442,23 @@ func TestRevokedAndExpiredTokens(t *testing.T) {
 	// Garbage token → same generic error, not a distinguishable one.
 	if _, err := h.svc.AcceptInvite(ctx, dashmembers.AcceptInput{Token: "deadbeef", Password: testPassword}); !errors.Is(err, errs.ErrValidation) {
 		t.Fatalf("accept garbage: got %v, want ErrValidation", err)
+	}
+
+	// The list holds the invitations someone can still act on: the expired
+	// one and a pending one, not the revoked one.
+	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "waiting@example.com"); err != nil {
+		t.Fatalf("invite: %v", err)
+	}
+	_, invs, err := h.svc.List(ctx, h.tenantID)
+	if err != nil {
+		t.Fatalf("list: %v", err)
+	}
+	listed := map[string]string{}
+	for _, inv := range invs {
+		listed[inv.Email] = inv.Status(h.clk.Now(ctx))
+	}
+	if len(listed) != 2 || listed["late@example.com"] != "expired" || listed["waiting@example.com"] != "pending" {
+		t.Errorf("invitations listed = %v, want late@example.com expired and waiting@example.com pending", listed)
 	}
 }
 
