@@ -33,7 +33,7 @@ func TestRemoveMember_ConcurrentRemovalsKeepOneMember(t *testing.T) {
 	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "second@example.com"); err != nil {
 		t.Fatalf("invite: %v", err)
 	}
-	second, err := h.svc.AcceptInvite(ctx, h.email.lastToken(t), testPassword)
+	second, err := h.svc.AcceptInvite(ctx, dashmembers.AcceptInput{Token: h.email.lastToken(t), Password: testPassword})
 	if err != nil {
 		t.Fatalf("accept: %v", err)
 	}
@@ -137,7 +137,7 @@ func TestAcceptInvite_FailedJoinKeepsTheInvite(t *testing.T) {
 			failing := dashmembers.NewService(dashmembers.NewPostgresStore(h.db),
 				joinFailsDirectory{userDirAdapter{userStore}},
 				h.sessions, h.audit, h.email, staticTenantNamer{name: "Team Join Fails"}, h.clk, "http://dash.test")
-			if _, err := failing.AcceptInvite(ctx, token, testPassword); err == nil {
+			if _, err := failing.AcceptInvite(ctx, dashmembers.AcceptInput{Token: token, Password: testPassword}); err == nil {
 				t.Fatal("accept must fail when the membership cannot be written")
 			}
 
@@ -152,7 +152,7 @@ func TestAcceptInvite_FailedJoinKeepsTheInvite(t *testing.T) {
 			if _, err := h.svc.PreviewInvite(ctx, token); err != nil {
 				t.Fatalf("a failed accept used up the invitation: %v", err)
 			}
-			res, err := h.svc.AcceptInvite(ctx, token, testPassword)
+			res, err := h.svc.AcceptInvite(ctx, dashmembers.AcceptInput{Token: token, Password: testPassword})
 			if err != nil {
 				t.Fatalf("retry with a working directory: %v", err)
 			}

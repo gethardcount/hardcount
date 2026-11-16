@@ -84,8 +84,13 @@ func scanInvitation(scan func(...any) error) (Invitation, error) {
 // that can still be accepted causes it.
 var ErrPendingInviteExists = errs.AlreadyExists("email", "a pending invitation for this email already exists — revoke it first to re-send")
 
+// ErrInviterNotMember is CreateInvitation's refusal when the inviter no longer
+// belongs to the workspace.
+var ErrInviterNotMember = errs.Forbidden("you are no longer a member of this workspace")
+
 // CreateInvitation creates a pending invitation in one tenant transaction.
-// An invitation to the same address that has expired (expires_at <= at, the
+// It first locks the inviter's membership row, and answers
+// ErrInviterNotMember when there is none. An invitation to the same address that has expired (expires_at <= at, the
 // boundary the accept uses) is revoked first, so only one that can still be
 // accepted answers ErrPendingInviteExists. then gets the stored row and the
 // id of the invitation it replaced ("" for none). then runs last, on tx. It
@@ -98,6 +103,21 @@ func (s *PostgresStore) CreateInvitation(ctx context.Context, inv Invitation, at
 		return Invitation{}, err
 	}
 	defer postgres.Rollback(tx)
+
+	// An invitation carries its sender's authority, so it is created only while
+	// the sender is a member. The row lock is held to commit: a removal of the
+	// sender waits for this invite and then revokes it, or this invite waits
+	// for the removal and then finds no row.
+	var member int
+	err = tx.QueryRowContext(ctx, `
+		SELECT 1 FROM user_tenants WHERE tenant_id = $1 AND user_id = $2 FOR KEY SHARE`,
+		inv.TenantID, inv.InvitedByUserID).Scan(&member)
+	if errors.Is(err, sql.ErrNoRows) {
+		return Invitation{}, ErrInviterNotMember
+	}
+	if err != nil {
+		return Invitation{}, fmt.Errorf("lock the inviter's membership: %w", err)
+	}
 
 	var replacedID string
 	err = tx.QueryRowContext(ctx, `
@@ -190,8 +210,8 @@ func (s *PostgresStore) GetInvitationByTokenHash(ctx context.Context, tokenHash 
 }
 
 // RevokeInvitation revokes an invitation that is not yet accepted or
-// revoked, in one bypass transaction, stamps it for an audit row
-// (stampForAudit) and calls then. then runs last, as in CreateInvitation. An
+// revoked, in one bypass transaction, stamps it for an audit row in the
+// request's mode (stampForAudit) and calls then. then runs last, as in CreateInvitation. An
 // accepted or revoked invitation, or one of another workspace, is
 // errs.ErrNotFound; of a revoke and an accept racing, exactly one wins.
 func (s *PostgresStore) RevokeInvitation(ctx context.Context, tenantID, id string, at time.Time, then func(tx *sql.Tx) error) error {
@@ -216,7 +236,11 @@ func (s *PostgresStore) RevokeInvitation(ctx context.Context, tenantID, id strin
 		return errs.ErrNotFound
 	}
 
-	if err := stampForAudit(ctx, tx, tenantID); err != nil {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return err
+	}
+	if err := stampForAudit(ctx, tx, tenantID, live); err != nil {
 		return err
 	}
 
@@ -227,12 +251,13 @@ func (s *PostgresStore) RevokeInvitation(ctx context.Context, tenantID, id strin
 }
 
 // AcceptInvitation claims a pending, unexpired invite with a CAS on
-// accepted_at, then calls join on the same transaction to write the account
-// and the membership. The claim and the membership commit together or not at
-// all. The CAS is the exactly-once gate: a replayed link, or a concurrent
-// second accept, gets errs.ErrNotFound and join does not run. When join
-// fails, nothing is written and its error is returned, so the invitation
-// stays pending and the invitee can try again.
+// accepted_at in one bypass transaction, stamps it for an audit row in the
+// invitation's workspace and in test mode, where account events are filed
+// (stampForAudit), and calls join. join runs last, as then does in
+// CreateInvitation. The CAS is the exactly-once gate: a replayed link, or a
+// concurrent second accept, gets errs.ErrNotFound and join does not run. When
+// join fails, nothing is written, so the invitation stays pending and the
+// invitee can try again.
 func (s *PostgresStore) AcceptInvitation(ctx context.Context, id string, at time.Time, join func(tx *sql.Tx) error) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -240,20 +265,23 @@ func (s *PostgresStore) AcceptInvitation(ctx context.Context, id string, at time
 	}
 	defer postgres.Rollback(tx)
 
-	res, err := tx.ExecContext(ctx, `
+	var tenantID string
+	err = tx.QueryRowContext(ctx, `
 		UPDATE member_invitations SET accepted_at = $1
-		WHERE id = $2 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > $1`,
-		at, id)
-	if err != nil {
-		return err
-	}
-	n, err := res.RowsAffected()
-	if err != nil {
-		return err
-	}
-	if n == 0 {
+		WHERE id = $2 AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > $1
+		RETURNING tenant_id`,
+		at, id).Scan(&tenantID)
+	if errors.Is(err, sql.ErrNoRows) {
 		return errs.ErrNotFound
 	}
+	if err != nil {
+		return err
+	}
+
+	if err := stampForAudit(ctx, tx, tenantID, false); err != nil {
+		return err
+	}
+
 	if err := join(tx); err != nil {
 		return err
 	}
@@ -301,7 +329,8 @@ var ErrLastMember = errs.InvalidState("cannot remove the last member of the work
 // transaction. In order, it deletes the (user, tenant) membership unless it
 // is the workspace's last one, revokes every invitation the user sent in this
 // workspace that is not yet accepted or revoked, expired or not, stamps
-// the transaction for an audit row (stampForAudit), and calls then with the
+// the transaction for an audit row in the request's mode (stampForAudit), and
+// calls then with the
 // ids of the invitations it revoked. then runs last, as in CreateInvitation.
 //
 // at is the time written as revoked_at on the invitations; the service
@@ -382,7 +411,11 @@ func (s *PostgresStore) RemoveMember(ctx context.Context, tenantID, userID strin
 		return fmt.Errorf("revoke the member's invitations: %w", err)
 	}
 
-	if err := stampForAudit(ctx, tx, tenantID); err != nil {
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return err
+	}
+	if err := stampForAudit(ctx, tx, tenantID, live); err != nil {
 		return err
 	}
 
@@ -394,12 +427,8 @@ func (s *PostgresStore) RemoveMember(ctx context.Context, tenantID, userID strin
 
 // stampForAudit sets what audit.Logger.LogInTx reads on a bypass
 // transaction: the row's tenant from app.tenant_id, and its mode from
-// app.livemode, which takes the request's mode (postgres.Livemode).
-func stampForAudit(ctx context.Context, tx *sql.Tx, tenantID string) error {
-	live, err := postgres.Livemode(ctx)
-	if err != nil {
-		return err
-	}
+// app.livemode.
+func stampForAudit(ctx context.Context, tx *sql.Tx, tenantID string, live bool) error {
 	livemode := "off"
 	if live {
 		livemode = "on"

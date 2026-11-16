@@ -175,7 +175,7 @@ func TestRemoveMember_EndsTheInvitationsTheySent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("invite joined: %v", err)
 	}
-	if _, err := h.svc.AcceptInvite(ctx, h.email.lastToken(t), testPassword); err != nil {
+	if _, err := h.svc.AcceptInvite(ctx, dashmembers.AcceptInput{Token: h.email.lastToken(t), Password: testPassword}); err != nil {
 		t.Fatalf("accept the invitation before the removal: %v", err)
 	}
 	owners, err := h.svc.Invite(ctx, h.tenantID, h.owner, "owners@example.com")
@@ -191,7 +191,7 @@ func TestRemoveMember_EndsTheInvitationsTheySent(t *testing.T) {
 	if _, err := h.svc.PreviewInvite(ctx, openToken); !errors.Is(err, errs.ErrValidation) {
 		t.Errorf("preview the removed member's invitation: err = %v, want ErrValidation", err)
 	}
-	if _, err := h.svc.AcceptInvite(ctx, openToken, testPassword); !errors.Is(err, errs.ErrValidation) {
+	if _, err := h.svc.AcceptInvite(ctx, dashmembers.AcceptInput{Token: openToken, Password: testPassword}); !errors.Is(err, errs.ErrValidation) {
 		t.Errorf("accept the removed member's invitation: err = %v, want ErrValidation", err)
 	}
 	for _, inv := range []struct{ name, id string }{{"open", open.ID}, {"expired", expired.ID}} {
@@ -280,16 +280,16 @@ func serve(h *harness, svc *dashmembers.Service, method, path, body string) *htt
 		req.Header.Set("Content-Type", "application/json")
 	}
 	rec := httptest.NewRecorder()
-	dashmembers.NewHandler(svc, h.sessions, session.CookieConfig{Path: "/"}).Routes().ServeHTTP(rec, req)
+	dashmembers.NewHandler(svc, session.CookieConfig{Path: "/"}).Routes().ServeHTTP(rec, req)
 	return rec
 }
 
 // failingSessions ends the member's sessions on the removal's transaction
 // and then fails, so a test sees whether the sign-out rolls back with it.
-type failingSessions struct{ real *session.Service }
+type failingSessions struct{ *session.Service }
 
 func (f failingSessions) EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, tenantID string) error {
-	if err := f.real.EndForMemberTx(ctx, tx, userID, tenantID); err != nil {
+	if err := f.Service.EndForMemberTx(ctx, tx, userID, tenantID); err != nil {
 		return err
 	}
 	return errors.New("injected: sign-out failed")
@@ -309,7 +309,7 @@ func TestRemoveMember_AFailedAuditRowLeavesNoChange(t *testing.T) {
 func TestRemoveMember_AFailedSignOutLeavesNoChange(t *testing.T) {
 	h := newHarness(t, "Team Sign-out Fails")
 	svc := dashmembers.NewService(dashmembers.NewPostgresStore(h.db), userDirAdapter{user.NewPostgresStore(h.db)},
-		failingSessions{real: h.sessions}, h.audit, h.email, staticTenantNamer{name: "Team Sign-out Fails"}, h.clk, "http://dash.test")
+		failingSessions{h.sessions}, h.audit, h.email, staticTenantNamer{name: "Team Sign-out Fails"}, h.clk, "http://dash.test")
 	svc.SetEmailConfigured(true)
 	assertRemovalFailsWhole(t, h, svc)
 }

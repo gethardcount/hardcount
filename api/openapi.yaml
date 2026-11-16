@@ -23180,11 +23180,12 @@ paths:
           open an existing account. The user signs in with their own
           password afterwards, and `password` is ignored.
 
-        The token is used up before the new account is created. If the new
-        account's password fails the check (422, `param: password`), the
-        invitation stays used and the inviter has to send a new one. If
-        only the session cannot be started, the membership still stands and
-        `session_minted` is false. Writes an audit row.
+        A new account's password is checked before the token is used up:
+        if it fails the check (422, `param: password`), the invitation can
+        still be accepted. The membership, a new account's session and the
+        audit row are saved together: if any of them cannot be saved, the
+        route answers `500`, nothing changes and the invitation can be
+        accepted again.
       requestBody:
         required: true
         content:
@@ -23226,7 +23227,7 @@ paths:
                     description: The account the member joined.
                   session_minted:
                     type: boolean
-                    description: True when this answer signed the new account in and set the session cookie.
+                    description: True for a new account, which this answer signed in by setting the session cookie. False for an existing account, which signs in with its own password.
                   livemode:
                     type: boolean
                     description: The new session's mode. Always false (test).
@@ -23418,8 +23419,9 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: |
-            The caller is not a dashboard session (an API key), or a browser
-            page on another site sent the request
+            The caller is not a dashboard session (an API key), is no longer
+            a member of the account (`you are no longer a member of this
+            workspace`), or a browser page on another site sent the request
             (`cross-site request blocked`).
           content:
             application/json:

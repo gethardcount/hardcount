@@ -1,7 +1,6 @@
 package dashmembers
 
 import (
-	"context"
 	"log/slog"
 	"net/http"
 	"time"
@@ -11,7 +10,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/api/respond"
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/auth"
-	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/session"
 )
 
@@ -30,11 +28,9 @@ import (
 //	GET  /invite/{token}   — preview for the accept page
 //	POST /accept-invite    — consume token; mint session for new accounts
 type Handler struct {
-	svc      *Service
-	sessions *session.Service
-	cookie   session.CookieConfig
-	audit    AuditRecorder
-	signIns  SignInRecorder
+	svc     *Service
+	cookie  session.CookieConfig
+	signIns SignInRecorder
 }
 
 // SignInRecorder is told when an invite accept signs a new member in. The
@@ -45,21 +41,9 @@ type SignInRecorder interface {
 	InboxProved(w http.ResponseWriter, r *http.Request, email string) error
 }
 
-// AuditRecorder is the narrow audit surface the accept route writes its
-// member.joined row through, after the accept commits. *audit.Logger
-// satisfies it.
-type AuditRecorder interface {
-	Log(ctx context.Context, tenantID, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
+func NewHandler(svc *Service, cookie session.CookieConfig) *Handler {
+	return &Handler{svc: svc, cookie: cookie}
 }
-
-func NewHandler(svc *Service, sessions *session.Service, cookie session.CookieConfig) *Handler {
-	return &Handler{svc: svc, sessions: sessions, cookie: cookie}
-}
-
-// SetAuditLogger wires the accept route's member.joined audit row. Optional:
-// nil skips it. The invite, revoke and removal rows are written by the
-// Service, each on its change's transaction.
-func (h *Handler) SetAuditLogger(a AuditRecorder) { h.audit = a }
 
 // SetSignInRecorder wires the sign-in throttle. Optional: nil skips it, and
 // the member's browser is then marked at their first sign-in instead.
@@ -227,41 +211,28 @@ type AcceptInviteReq struct {
 	Password string `json:"password"`
 }
 
-// acceptInvite consumes the token. New account → create + mint a session
-// cookie (they just proved control of the invited inbox AND set their
-// password — same trust as a completed password reset). Existing account
-// → attach only; they sign in with their own password (email possession
-// alone must not open an ALREADY-privileged account).
+// acceptInvite consumes the token. A new account is signed in: the invitee
+// just proved control of the invited inbox and set the password, the same
+// trust as a completed password reset. An existing account is only attached
+// and signs in with its own password: holding the email alone must not open
+// an account that already exists.
 func (h *Handler) acceptInvite(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	var req AcceptInviteReq
 	if !respond.DecodeStrict(w, r, &req) {
 		return
 	}
-	res, err := h.svc.AcceptInvite(ctx, req.Token, req.Password)
+	res, err := h.svc.AcceptInvite(ctx, AcceptInput{
+		Token:     req.Token,
+		Password:  req.Password,
+		UserAgent: r.UserAgent(),
+		// The address TrustedClientIP resolved, never a forwarding header
+		// the client wrote.
+		IP: audit.ExtractClientIP(r),
+	})
 	if err != nil {
 		respond.FromError(w, r, err, "invitation")
 		return
-	}
-
-	// The audit row and the session row record the same address: the one
-	// TrustedClientIP resolved, never a forwarding header the client wrote.
-	ip := audit.ExtractClientIP(r)
-
-	// Accept happens pre-auth, so stamp the accepting user as the actor
-	// and livemode=false (the mode the fresh session starts in — without
-	// it the audit writer's TxTenant refuses to open; same pattern as
-	// the auth handler's audit).
-	if h.audit != nil {
-		actx := auth.WithUserID(ctx, res.UserID)
-		actx = audit.WithClientIP(actx, ip)
-		actx = postgres.WithLivemode(actx, false)
-		// resource_id IS the new member's user id; the reader resolves the address from
-		// the (erasable) users row. Storing it would make it permanent.
-		if err := h.audit.Log(actx, res.TenantID, "member.joined", "user", res.UserID, "",
-			map[string]any{"new_account": res.NewAccount}); err != nil {
-			slog.ErrorContext(ctx, "audit: member.joined write failed", "error", err)
-		}
 	}
 
 	out := map[string]any{
@@ -272,31 +243,16 @@ func (h *Handler) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		"livemode":       false,
 		"expires_at":     "",
 	}
-	if res.MintSession && h.sessions != nil {
-		rawID, sess, err := h.sessions.Issue(ctx, session.IssueInput{
-			UserID:    res.UserID,
-			TenantID:  res.TenantID,
-			Livemode:  false, // dashboard sessions start in test mode, same as login
-			UserAgent: r.UserAgent(),
-			IP:        ip,
-		})
-		if err != nil {
-			// The membership is committed — the account works; only the
-			// convenience auto-login failed. Return success and let the
-			// login page take it from here.
-			slog.ErrorContext(ctx, "accept-invite: session issue failed — user must log in manually",
-				"user_id", res.UserID, "error", err)
-		} else {
-			h.cookie.SetCookie(w, rawID, sess.ExpiresAt)
-			if h.signIns != nil {
-				if err := h.signIns.InboxProved(w, r, res.Email); err != nil {
-					slog.ErrorContext(ctx, "accept-invite: sign-in throttle did not mark the browser", "user_id", res.UserID, "error", err)
-				}
+	if res.RawSessionID != "" {
+		h.cookie.SetCookie(w, res.RawSessionID, res.Session.ExpiresAt)
+		if h.signIns != nil {
+			if err := h.signIns.InboxProved(w, r, res.Email); err != nil {
+				slog.ErrorContext(ctx, "accept-invite: sign-in throttle did not mark the browser", "user_id", res.UserID, "error", err)
 			}
-			out["session_minted"] = true
-			out["livemode"] = sess.Livemode
-			out["expires_at"] = sess.ExpiresAt.Format(rfc3339)
 		}
+		out["session_minted"] = true
+		out["livemode"] = res.Session.Livemode
+		out["expires_at"] = res.Session.ExpiresAt.Format(rfc3339)
 	}
 	respond.JSON(w, r, http.StatusOK, out)
 }

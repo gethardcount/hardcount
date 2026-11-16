@@ -11702,11 +11702,12 @@ export const getAcceptInvitationUrl = () => {
  *   open an existing account. The user signs in with their own
  *   password afterwards, and `password` is ignored.
  *
- * The token is used up before the new account is created. If the new
- * account's password fails the check (422, `param: password`), the
- * invitation stays used and the inviter has to send a new one. If
- * only the session cannot be started, the membership still stands and
- * `session_minted` is false. Writes an audit row.
+ * A new account's password is checked before the token is used up:
+ * if it fails the check (422, `param: password`), the invitation can
+ * still be accepted. The membership, a new account's session and the
+ * audit row are saved together: if any of them cannot be saved, the
+ * route answers `500`, nothing changes and the invitation can be
+ * accepted again.
  * @summary Accept a team invitation
  */
 export const acceptInvitation = async (acceptInvitationBody: AcceptInvitationBody, options?: RequestInit): Promise<AcceptInvitation200> => {

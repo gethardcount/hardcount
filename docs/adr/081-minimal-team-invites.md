@@ -126,4 +126,6 @@ A new invitation to an address whose invitation expired revokes the expired
 one in the same transaction, so an expired invitation no longer blocks the
 address. The invite's and the revoke's audit rows are written in the
 transaction that makes the change
-([#1817](https://github.com/gethardcount/hardcount/pull/1817)).
+([#1817](https://github.com/gethardcount/hardcount/pull/1817)). The accept
+writes a new account's session and the member.joined audit row in the
+transaction that claims the invitation.

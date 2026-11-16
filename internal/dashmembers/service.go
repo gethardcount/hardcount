@@ -13,9 +13,11 @@ import (
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/audit"
+	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/session"
 )
 
 // InviteTTL: 7 days — long enough for a colleague on PTO, short enough
@@ -46,10 +48,12 @@ type UserDirectory interface {
 	AttachTenantInTx(ctx context.Context, tx *sql.Tx, userID, tenantID, role string) error
 }
 
-// SessionEnder ends a user's sessions in one workspace on the caller's
-// transaction. A session row pins (user, tenant), so a removed member's
-// sessions there end with the membership. *session.Service satisfies it.
-type SessionEnder interface {
+// SessionWriter starts and ends sessions on the caller's transaction: an
+// accept starts a new account's session, and a removal ends the member's
+// sessions in the workspace (a session row pins (user, tenant)).
+// *session.Service satisfies it.
+type SessionWriter interface {
+	IssueTx(ctx context.Context, tx *sql.Tx, in session.IssueInput) (rawID string, sess session.Session, err error)
 	EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, tenantID string) error
 }
 
@@ -73,7 +77,7 @@ type TenantNamer interface {
 type Service struct {
 	store    *PostgresStore
 	users    UserDirectory
-	sessions SessionEnder
+	sessions SessionWriter
 	audit    AuditTxWriter
 	email    InviteEmailSender
 	tenants  TenantNamer
@@ -108,10 +112,11 @@ func (s *Service) CanInvite() bool {
 	return s.dashboardBaseURL != "" && s.emailConfigured
 }
 
-// NewService returns a Service. Inviting, revoking an invitation and removing
-// a member write their audit row through auditor, on their own transaction;
-// removing a member also ends sessions through sessions.
-func NewService(store *PostgresStore, users UserDirectory, sessions SessionEnder, auditor AuditTxWriter, email InviteEmailSender, tenants TenantNamer, clk clock.Clock, dashboardBaseURL string) *Service {
+// NewService returns a Service. Inviting, revoking an invitation, accepting
+// one and removing a member write their audit row through auditor, on their
+// own transaction; accepting starts a new account's session and removing a
+// member ends sessions, through sessions.
+func NewService(store *PostgresStore, users UserDirectory, sessions SessionWriter, auditor AuditTxWriter, email InviteEmailSender, tenants TenantNamer, clk clock.Clock, dashboardBaseURL string) *Service {
 	if clk == nil {
 		clk = clock.Real()
 	}
@@ -156,7 +161,7 @@ func (inv Invitation) Status(now time.Time) string {
 // Invite creates a pending invitation and enqueues the accept email.
 // inviterUserID must be a real dashboard user (API-key callers have no
 // user identity — inviting is a human act and the audit trail needs a
-// person). Role is recorded as 'member' but grants the full permission
+// person) who is still a member of the workspace (ErrInviterNotMember). Role is recorded as 'member' but grants the full permission
 // set in v1 (no RBAC yet — documented at the session middleware seam).
 func (s *Service) Invite(ctx context.Context, tenantID, inviterUserID, email string) (Invitation, error) {
 	if inviterUserID == "" {
@@ -363,26 +368,36 @@ func (s *Service) PreviewInvite(ctx context.Context, token string) (InvitePrevie
 	}, nil
 }
 
-// AcceptResult reports who joined where, and whether a session should be
-// minted (new accounts only — they just set their password, the same
-// trust level as a completed password reset. An EXISTING account is NOT
-// logged in by email possession alone: the invitee signs in with their
-// own password afterwards).
-type AcceptResult struct {
-	UserID      string
-	Email       string
-	TenantID    string
-	MintSession bool
-	NewAccount  bool
+// AcceptInput is an accept request: the invite token, the new account's
+// password, and the browser's user agent and client address for the session
+// and the audit row.
+type AcceptInput struct {
+	Token     string
+	Password  string
+	UserAgent string
+	IP        string
 }
 
-// AcceptInvite consumes the token (single-use CAS) and attaches the
-// membership — creating the account first when none exists (password
-// required and validated in that case; ignored otherwise). The claim, the
-// account and the membership commit in one transaction: when any of them
-// fails, nothing is written and the invitation stays usable.
-func (s *Service) AcceptInvite(ctx context.Context, token, password string) (AcceptResult, error) {
-	inv, err := s.lookupPending(ctx, token)
+// AcceptResult is a committed accept: who joined which workspace. A new
+// account also gets RawSessionID, the cookie value shown this once, and its
+// Session; an existing account gets neither (see Handler.acceptInvite).
+type AcceptResult struct {
+	UserID       string
+	Email        string
+	TenantID     string
+	NewAccount   bool
+	RawSessionID string
+	Session      session.Session
+}
+
+// AcceptInvite consumes the token and attaches the membership, creating the
+// account first when none exists (password required and checked in that
+// case; ignored otherwise). In one transaction it claims the invitation,
+// writes the account or the membership, starts a new account's session, and
+// writes the member.joined audit row. When any of them fails, nothing is
+// written and the invitation stays usable.
+func (s *Service) AcceptInvite(ctx context.Context, in AcceptInput) (AcceptResult, error) {
+	inv, err := s.lookupPending(ctx, in.Token)
 	if err != nil {
 		return AcceptResult{}, err
 	}
@@ -397,24 +412,45 @@ func (s *Service) AcceptInvite(ctx context.Context, token, password string) (Acc
 	// (too short, too long, breached) leaves the invitation pending.
 	var passwordHash string
 	if isNew {
-		passwordHash, err = s.users.HashPassword(password)
+		passwordHash, err = s.users.HashPassword(in.Password)
 		if err != nil {
 			return AcceptResult{}, err
 		}
 	}
 
-	// The CAS is the exactly-once gate: a concurrent second accept, or a
-	// revoke racing this one, loses there and join does not run.
-	res := AcceptResult{UserID: existing.ID, Email: inv.Email, TenantID: inv.TenantID, MintSession: isNew, NewAccount: isNew}
+	res := AcceptResult{UserID: existing.ID, Email: inv.Email, TenantID: inv.TenantID, NewAccount: isNew}
 	err = s.store.AcceptInvitation(ctx, inv.ID, s.clock.Now(ctx), func(tx *sql.Tx) error {
-		if !isNew {
-			return s.users.AttachTenantInTx(ctx, tx, existing.ID, inv.TenantID, inv.Role)
-		}
-		u, err := s.users.CreateInTx(ctx, tx, inv.Email, passwordHash, inv.TenantID, inv.Role)
-		if err != nil {
+		if isNew {
+			u, err := s.users.CreateInTx(ctx, tx, inv.Email, passwordHash, inv.TenantID, inv.Role)
+			if err != nil {
+				return err
+			}
+			res.UserID = u.ID
+			res.RawSessionID, res.Session, err = s.sessions.IssueTx(ctx, tx, session.IssueInput{
+				UserID:    u.ID,
+				TenantID:  inv.TenantID,
+				Livemode:  false, // dashboard sessions start in test mode
+				UserAgent: in.UserAgent,
+				IP:        in.IP,
+			})
+			if err != nil {
+				return fmt.Errorf("create the session: %w", err)
+			}
+		} else if err := s.users.AttachTenantInTx(ctx, tx, existing.ID, inv.TenantID, inv.Role); err != nil {
 			return err
 		}
-		res.UserID = u.ID
+		// The accepting user is the actor: the route has no session. The row
+		// records the address the session row records. No email in the
+		// label: resource_id is the user id, and audit_log cannot be erased.
+		actx := audit.WithClientIP(auth.WithUserID(ctx, res.UserID), in.IP)
+		if err := s.audit.LogInTx(actx, tx, audit.Entry{
+			Action:       "member.joined",
+			ResourceType: "user",
+			ResourceID:   res.UserID,
+			Metadata:     map[string]any{"new_account": isNew},
+		}); err != nil {
+			return fmt.Errorf("write the audit row: %w", err)
+		}
 		return nil
 	})
 	if errors.Is(err, errs.ErrNotFound) {

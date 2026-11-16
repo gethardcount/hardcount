@@ -1351,8 +1351,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		dashboardBaseURL,
 	)
 	membersSvc.SetEmailConfigured(emailSender.IsConfigured())
-	membersH := dashmembers.NewHandler(membersSvc, sessionSvc, session.DefaultCookieConfig(o.appEnv))
-	membersH.SetAuditLogger(auditLogger)
+	membersH := dashmembers.NewHandler(membersSvc, session.DefaultCookieConfig(o.appEnv))
 	// An accepted invite counts as a sign-in for the throttle.
 	membersH.SetSignInRecorder(loginThrottle)
 
@@ -1384,11 +1383,11 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	//
 	// MustWired finds the audit field of any struct by reflection, so it
 	// takes handlers as well as services. This is the second call because
-	// paymentMethodsH, dashboardAuthH and membersH are built after the first.
+	// paymentMethodsH, dashboardAuthH and membersSvc are built after the first.
 	audit.MustWired(
 		customerH, settingsH, invoiceH, subH, creditNoteH,
 		dunningH, pricingH, tenantStripeH, webhookOutH,
-		paymentMethodsH, dashboardAuthH, membersH,
+		paymentMethodsH, dashboardAuthH, membersSvc,
 		emailSettingsH,
 	)
 
