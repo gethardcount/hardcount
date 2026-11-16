@@ -71,6 +71,26 @@ func scanInvitation(scan func(...any) error) (Invitation, error) {
 	return inv, err
 }
 
+// lockMembership refuses with a 403 unless userID is a member of tenantID. A
+// request's session is checked before its write, and a removal can commit in
+// between, so the write checks the membership on its own transaction. The row
+// lock is held to commit: a removal of the member waits for this transaction
+// and then sees what it wrote, or this transaction waits for the removal and
+// then finds no row. Callers take it before any invitation row.
+func lockMembership(ctx context.Context, tx *sql.Tx, tenantID, userID string) error {
+	var member int
+	err := tx.QueryRowContext(ctx, `
+		SELECT 1 FROM user_tenants WHERE tenant_id = $1 AND user_id = $2 FOR KEY SHARE`,
+		tenantID, userID).Scan(&member)
+	if errors.Is(err, sql.ErrNoRows) {
+		return errs.Forbidden("you are no longer a member of this workspace")
+	}
+	if err != nil {
+		return fmt.Errorf("lock the membership: %w", err)
+	}
+	return nil
+}
+
 // ErrPendingInviteExists surfaces the partial-unique conflict (one
 // invitation per tenant+email that is not accepted or revoked) as a clean
 // 409. CreateInvitation revokes an expired one first, so only an invitation
@@ -92,19 +112,8 @@ func (s *PostgresStore) CreateInvitation(ctx context.Context, inv Invitation, at
 	}
 	defer postgres.Rollback(tx)
 
-	// An invitation carries its sender's authority, so it is created only while
-	// the sender is a member. The row lock is held to commit: a removal of the
-	// sender waits for this invite and then revokes it, or this invite waits
-	// for the removal and then finds no row.
-	var member int
-	err = tx.QueryRowContext(ctx, `
-		SELECT 1 FROM user_tenants WHERE tenant_id = $1 AND user_id = $2 FOR KEY SHARE`,
-		inv.TenantID, inv.InvitedByUserID).Scan(&member)
-	if errors.Is(err, sql.ErrNoRows) {
-		return Invitation{}, errs.Forbidden("you are no longer a member of this workspace")
-	}
-	if err != nil {
-		return Invitation{}, fmt.Errorf("lock the inviter's membership: %w", err)
+	if err := lockMembership(ctx, tx, inv.TenantID, inv.InvitedByUserID); err != nil {
+		return Invitation{}, err
 	}
 
 	var replacedID string
@@ -202,15 +211,19 @@ func (s *PostgresStore) GetInvitationByTokenHash(ctx context.Context, tokenHash 
 
 // RevokeInvitation revokes an invitation that is not yet accepted or revoked,
 // in one bypass transaction, stamps it for an audit row (stampForAudit) and
-// calls then. An accepted or revoked invitation, or one of another workspace,
+// calls then. It refuses with a 403 when actorUserID is not a member of the
+// workspace. An accepted or revoked invitation, or one of another workspace,
 // is errs.ErrNotFound; of a revoke and an accept racing, exactly one wins.
-func (s *PostgresStore) RevokeInvitation(ctx context.Context, tenantID, id string, at time.Time, then func(tx *sql.Tx) error) error {
+func (s *PostgresStore) RevokeInvitation(ctx context.Context, tenantID, actorUserID, id string, at time.Time, then func(tx *sql.Tx) error) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return err
 	}
 	defer postgres.Rollback(tx)
 
+	if err := lockMembership(ctx, tx, tenantID, actorUserID); err != nil {
+		return err
+	}
 	res, err := tx.ExecContext(ctx, `
 		UPDATE member_invitations SET revoked_at = $1
 		WHERE id = $2 AND tenant_id = $3 AND accepted_at IS NULL AND revoked_at IS NULL`,
@@ -302,46 +315,41 @@ func (s *PostgresStore) ListMembers(ctx context.Context, tenantID string) ([]Mem
 	return out, rows.Err()
 }
 
-// ErrLastMember is RemoveMember's refusal to remove a workspace's only
-// member. Nobody could sign in to the workspace again, and only psql could
-// add a member back.
-var ErrLastMember = errs.InvalidState("cannot remove the last member of the workspace")
-
 // RemoveMember removes a member from the workspace in one bypass transaction.
-// In order, it deletes the (user, tenant) membership unless it is the
-// workspace's last one, revokes every invitation the user sent in this
-// workspace that is not yet accepted or revoked, expired or not, stamps the
-// transaction for an audit row (stampForAudit), and calls then with the ids
-// of the invitations it revoked.
+// In order, it deletes the (user, tenant) membership, revokes every
+// invitation the user sent in this workspace that is not yet accepted or
+// revoked, expired or not, stamps the transaction for an audit row
+// (stampForAudit), and calls then with the ids of the invitations it revoked.
 //
 // at is the time written as revoked_at on the invitations; the service
 // passes its clock's now. The member's sessions, which then ends, are
 // stamped by the session store's own clock.
 //
-// It returns ErrLastMember for the last member, and errs.ErrNotFound when
-// userID is not a member, and changes nothing in both cases. The service
-// refuses self-removal before calling.
-func (s *PostgresStore) RemoveMember(ctx context.Context, tenantID, userID string, at time.Time, then func(tx *sql.Tx, revokedInvitationIDs []string) error) error {
+// It refuses with a 403 when actorUserID is not a member, returns
+// errs.ErrNotFound when userID is not one, and changes nothing in both cases.
+// The service refuses self-removal before calling.
+func (s *PostgresStore) RemoveMember(ctx context.Context, tenantID, actorUserID, userID string, at time.Time, then func(tx *sql.Tx, revokedInvitationIDs []string) error) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return err
 	}
 	defer postgres.Rollback(tx)
 
-	// One removal at a time per tenant, with the count inside the DELETE.
-	// Otherwise two members removing each other at once each count two
-	// members in their own snapshot, each delete the other, and leave none.
-	// Behind the lock, the second DELETE starts after the first commits, so
-	// its count sees one member and it deletes nothing. The lock is held to
-	// commit.
+	// One removal at a time per tenant. Otherwise two members removing each
+	// other at once each lock their own membership and wait for the other's
+	// row, and Postgres ends one with a deadlock error. Behind the lock, the
+	// second starts after the first commits and is refused, its caller no
+	// longer a member. The lock is held to commit.
 	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
 		"user_tenants:"+tenantID); err != nil {
 		return fmt.Errorf("acquire membership lock: %w", err)
 	}
+	if err := lockMembership(ctx, tx, tenantID, actorUserID); err != nil {
+		return err
+	}
 	res, err := tx.ExecContext(ctx, `
 		DELETE FROM user_tenants
-		WHERE tenant_id = $1 AND user_id = $2
-		  AND (SELECT count(*) FROM user_tenants WHERE tenant_id = $1) > 1`,
+		WHERE tenant_id = $1 AND user_id = $2`,
 		tenantID, userID)
 	if err != nil {
 		return err
@@ -351,15 +359,6 @@ func (s *PostgresStore) RemoveMember(ctx context.Context, tenantID, userID strin
 		return err
 	}
 	if n == 0 {
-		var member bool
-		if err := tx.QueryRowContext(ctx, `
-			SELECT EXISTS (SELECT 1 FROM user_tenants WHERE tenant_id = $1 AND user_id = $2)`,
-			tenantID, userID).Scan(&member); err != nil {
-			return err
-		}
-		if member {
-			return ErrLastMember
-		}
 		return errs.ErrNotFound
 	}
 

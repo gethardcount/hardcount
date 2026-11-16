@@ -12061,8 +12061,8 @@ export const getRemoveMemberUrl = (userID: string,) => {
  * touched. These steps and the audit row commit together; if one
  * fails the route answers `500` and nothing changes.
  *
- * You cannot remove yourself (another member must do it), and the
- * account's last member cannot be removed. The user's sign-in
+ * You cannot remove yourself (another member must do it), so an
+ * account always keeps at least one member. The user's sign-in
  * account itself is kept.
  * @summary Remove a member from the account
  */

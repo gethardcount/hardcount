@@ -265,9 +265,10 @@ func (s *Service) List(ctx context.Context, tenantID string) ([]Member, []Invita
 
 // Revoke revokes an invitation that is not yet accepted or revoked, and
 // writes the member.invite_revoked audit row on the same transaction. If the
-// row cannot be written, the invitation stays as it was.
-func (s *Service) Revoke(ctx context.Context, tenantID, invitationID string) error {
-	return s.store.RevokeInvitation(ctx, tenantID, invitationID, s.clock.Now(ctx), func(tx *sql.Tx) error {
+// row cannot be written, the invitation stays as it was. actorUserID must be
+// a member of the workspace.
+func (s *Service) Revoke(ctx context.Context, tenantID, actorUserID, invitationID string) error {
+	return s.store.RevokeInvitation(ctx, tenantID, actorUserID, invitationID, s.clock.Now(ctx), func(tx *sql.Tx) error {
 		if err := s.audit.LogInTx(ctx, tx, audit.Entry{
 			Action:       "member.invite_revoked",
 			ResourceType: "user",
@@ -288,10 +289,10 @@ func (s *Service) Revoke(ctx context.Context, tenantID, invitationID string) err
 // other workspaces are not touched.
 //
 // Guards: no self-removal (someone else must remove you, so nobody locks
-// themselves out by mistake), and never the last member (ErrLastMember: a
-// workspace with no member cannot be signed in to again). The store checks
-// the last-member rule in the transaction that deletes, so two concurrent
-// removals cannot both pass it.
+// themselves out by mistake), and actorUserID must be a member of the
+// workspace, which the store checks in the transaction that deletes. The
+// caller is therefore a member who stays: a workspace with no member cannot
+// be signed in to again.
 func (s *Service) RemoveMember(ctx context.Context, tenantID, actorUserID, targetUserID string) error {
 	if targetUserID == "" {
 		return errs.Required("user_id")
@@ -299,7 +300,7 @@ func (s *Service) RemoveMember(ctx context.Context, tenantID, actorUserID, targe
 	if actorUserID != "" && actorUserID == targetUserID {
 		return errs.InvalidState("you cannot remove yourself — another member must remove you")
 	}
-	return s.store.RemoveMember(ctx, tenantID, targetUserID, s.clock.Now(ctx), func(tx *sql.Tx, revokedInvitationIDs []string) error {
+	return s.store.RemoveMember(ctx, tenantID, actorUserID, targetUserID, s.clock.Now(ctx), func(tx *sql.Tx, revokedInvitationIDs []string) error {
 		if err := s.sessions.EndForMemberTx(ctx, tx, targetUserID, tenantID); err != nil {
 			return fmt.Errorf("end sessions: %w", err)
 		}

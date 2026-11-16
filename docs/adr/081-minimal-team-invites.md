@@ -1,7 +1,7 @@
 # ADR-081: Minimal team invites (no RBAC)
 
 Date: 2026-07-06
-Status: Accepted (amended 2026-11-10, amended 2026-11-16)
+Status: Accepted (amended 2026-11-10, amended 2026-11-16, amended 2026-11-17)
 Amends: ADR-011 (which shipped single-user auth and deferred invites)
 Trigger: DP-readiness cut-reinstatement #2 ("Single dashboard seat" in the
 DP-readiness register, maintained in the internal `velox-ops` repo) — a
@@ -12,7 +12,7 @@ user, undercutting a feature the README sells.
 
 ## Summary
 
-Teammates join an account through a single-use email invite (`POST /v1/members/invite`) valid for 7 days, so people stop sharing one password and audit rows name the real person. There is no role-based access control: every member has full access, and the recorded role is not enforced. Only a signed-in dashboard user can invite or remove members, because an API key has no person to attribute the act to. Removing a member ends all their sessions, and nobody can remove themselves or the last member, even when two removals run at once. An invitation is saved with its email, and an accept saves the account and the membership with its claim on the invitation, so a failure leaves nothing half done (amendment 2026-11-10), and a new account's session and the audit row join that transaction while only a current member can invite (amendment 2026-11-16). Status: active, amending [ADR-011](011-email-password-auth-and-clean-api-keys.md); roles, MFA and SSO are not built.
+Teammates join an account through a single-use email invite (`POST /v1/members/invite`) valid for 7 days, so people stop sharing one password and audit rows name the real person. There is no role-based access control: every member has full access, and the recorded role is not enforced. Only a signed-in dashboard user can invite or remove members, because an API key has no person to attribute the act to. Removing a member ends all their sessions, and nobody can remove themselves or the last member, even when two removals run at once. An invitation is saved with its email, and an accept saves the account and the membership with its claim on the invitation, so a failure leaves nothing half done (amendment 2026-11-10), and a new account's session and the audit row join that transaction while only a current member can invite (amendment 2026-11-16), revoke an invitation or remove a member (amendment 2026-11-17). Status: active, amending [ADR-011](011-email-password-auth-and-clean-api-keys.md); roles, MFA and SSO are not built.
 
 ## Decision
 
@@ -138,3 +138,13 @@ invitation usable and no session behind. The invite reads the inviter's
 membership row `FOR KEY SHARE` in its transaction, so an invite and the
 removal of its sender cannot both commit with the invitation still open
 ([#1821](https://github.com/gethardcount/hardcount/pull/1821)).
+
+## Amendment 2026-11-17: only a member can revoke an invitation or remove a member
+
+`RevokeInvitation` and `RemoveMember` read the caller's membership row
+`FOR KEY SHARE` in their transaction, as the invite does, and answer `403`
+when it is gone. A removal's caller is then a member other than the one
+removed, so one member always stays: the member count in the `DELETE` and
+the "cannot remove the last member" refusal are gone. Of two members
+removing each other at once, the second waits for the first and gets the
+`403` ([#PRNUM](https://github.com/gethardcount/hardcount/pull/PRNUM)).

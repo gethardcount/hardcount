@@ -347,8 +347,9 @@ func TestInviteAcceptExistingUser(t *testing.T) {
 }
 
 // TestInviteGates: inviter identity required (API-key callers have none),
-// an inviter who is not a member refused, a revoked invitation frees its
-// address, already-a-member blocked, bad email blocked.
+// an inviter who is not a member refused, a revoke by a non-member refused,
+// a revoked invitation frees its address, already-a-member blocked, bad
+// email blocked.
 func TestInviteGates(t *testing.T) {
 	h := newHarness(t, "Team Gates")
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -365,7 +366,8 @@ func TestInviteGates(t *testing.T) {
 
 	// An account of another workspace cannot invite here, and nothing is
 	// written.
-	outsider := createUser(t, h.db, "outsider@example.com", testutil.CreateTestTenant(t, h.db, "Outsider Home"), "owner")
+	outsiderHome := testutil.CreateTestTenant(t, h.db, "Outsider Home")
+	outsider := createUser(t, h.db, "outsider@example.com", outsiderHome, "owner")
 	if _, err := h.svc.Invite(ctx, h.tenantID, outsider.ID, "a@example.com"); !errors.Is(err, errs.ErrForbidden) {
 		t.Fatalf("invite by a non-member: got %v, want ErrForbidden", err)
 	}
@@ -381,11 +383,18 @@ func TestInviteGates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
-	other := testutil.CreateTestTenant(t, h.db, "Another Workspace")
-	if err := h.svc.Revoke(ctx, other, invs[0].ID); !errors.Is(err, errs.ErrNotFound) {
+	// The outsider cannot revoke it: from their own workspace it is not found,
+	// and in this one they are not a member. The invitation stays pending.
+	if err := h.svc.Revoke(ctx, outsiderHome, outsider.ID, invs[0].ID); !errors.Is(err, errs.ErrNotFound) {
 		t.Fatalf("revoke from another workspace: got %v, want ErrNotFound", err)
 	}
-	if err := h.svc.Revoke(ctx, h.tenantID, invs[0].ID); err != nil {
+	if err := h.svc.Revoke(ctx, h.tenantID, outsider.ID, invs[0].ID); !errors.Is(err, errs.ErrForbidden) {
+		t.Fatalf("revoke by a non-member: got %v, want ErrForbidden", err)
+	}
+	if _, err := h.svc.PreviewInvite(ctx, h.email.lastToken(t)); err != nil {
+		t.Fatalf("preview after the refused revoke: %v, want the invitation still pending", err)
+	}
+	if err := h.svc.Revoke(ctx, h.tenantID, h.owner, invs[0].ID); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
 	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "dup@example.com"); err != nil {
@@ -418,7 +427,7 @@ func TestRevokedAndExpiredTokens(t *testing.T) {
 	}
 	revokedToken := h.email.lastToken(t)
 	_, invs, _ := h.svc.List(ctx, h.tenantID)
-	if err := h.svc.Revoke(ctx, h.tenantID, invs[0].ID); err != nil {
+	if err := h.svc.Revoke(ctx, h.tenantID, h.owner, invs[0].ID); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
 	if _, err := h.svc.AcceptInvite(ctx, dashmembers.AcceptInput{Token: revokedToken, Password: testPassword}); !errors.Is(err, errs.ErrValidation) {
@@ -462,16 +471,16 @@ func TestRevokedAndExpiredTokens(t *testing.T) {
 	}
 }
 
-// TestRemoveMember: self-removal and last-member removal are blocked,
-// removing someone who is not a member is not found, and a real removal
-// deletes the membership.
+// TestRemoveMember: self-removal is blocked, removing someone who is not a
+// member is not found, a real removal deletes the membership, and a removal
+// by someone who is no longer a member is refused and removes nobody.
 func TestRemoveMember(t *testing.T) {
 	h := newHarness(t, "Team Remove")
 	ctx := postgres.WithLivemode(context.Background(), false)
 
-	// Last member: the bootstrap owner can't be removed.
+	// The only member cannot remove themselves.
 	if err := h.svc.RemoveMember(ctx, h.tenantID, h.owner, h.owner); !errors.Is(err, errs.ErrInvalidState) {
-		t.Fatalf("self+last removal: got %v, want ErrInvalidState", err)
+		t.Fatalf("self removal of the only member: got %v, want ErrInvalidState", err)
 	}
 
 	// Bring in a second member.
@@ -504,9 +513,14 @@ func TestRemoveMember(t *testing.T) {
 		t.Fatalf("member count after removal: got %d, want 1", len(members))
 	}
 
-	// Removing the only member left is refused.
-	if err := h.svc.RemoveMember(ctx, h.tenantID, "", h.owner); !errors.Is(err, dashmembers.ErrLastMember) {
-		t.Fatalf("remove the last member: got %v, want ErrLastMember", err)
+	// The removed member is no longer a member, so their removal of someone
+	// else is refused.
+	third := createUser(t, h.db, "third@example.com", h.tenantID, "member")
+	if err := h.svc.RemoveMember(ctx, h.tenantID, res.UserID, third.ID); !errors.Is(err, errs.ErrForbidden) {
+		t.Fatalf("removal by a former member: got %v, want ErrForbidden", err)
+	}
+	if !isMember(t, h, third.ID, h.tenantID) {
+		t.Error("the refused removal deleted the membership")
 	}
 }
 
