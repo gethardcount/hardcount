@@ -266,18 +266,22 @@ var ErrLastMember = errs.InvalidState("cannot remove the last member of the work
 
 // RemoveMember removes a member from the workspace in one bypass
 // transaction. In order, it deletes the (user, tenant) membership unless it
-// is the workspace's last one, revokes the invitations the user sent in this
-// workspace that can still be accepted (expired ones stay as they are),
-// stamps app.tenant_id with tenantID and app.livemode with the request's mode
-// (postgres.Livemode) for an audit row, and calls then. then runs last, on
-// the same transaction. It must not commit or roll back tx; an error it
-// returns rolls the whole removal back and is returned. at is the revocation
-// time, from the same clock as RevokeInvitation's.
+// is the workspace's last one, revokes every invitation the user sent in this
+// workspace that is not yet accepted or revoked, expired or not, stamps
+// app.tenant_id with tenantID and app.livemode with the request's mode
+// (postgres.Livemode) for an audit row, and calls then with the ids of the
+// invitations it revoked. then runs last, on the same transaction. It must
+// not commit or roll back tx; an error it returns rolls the whole removal
+// back and is returned.
+//
+// at is the time written as revoked_at on the invitations; the service
+// passes its clock's now. The member's sessions, which then ends, are
+// stamped by the session store's own clock.
 //
 // It returns ErrLastMember for the last member, and errs.ErrNotFound when
 // userID is not a member, and changes nothing in both cases. The service
 // refuses self-removal before calling.
-func (s *PostgresStore) RemoveMember(ctx context.Context, tenantID, userID string, at time.Time, then func(tx *sql.Tx) error) error {
+func (s *PostgresStore) RemoveMember(ctx context.Context, tenantID, userID string, at time.Time, then func(tx *sql.Tx, revokedInvitationIDs []string) error) error {
 	live, err := postgres.Livemode(ctx)
 	if err != nil {
 		return err
@@ -329,13 +333,32 @@ func (s *PostgresStore) RemoveMember(ctx context.Context, tenantID, userID strin
 	}
 
 	// An invitation carries its sender's authority: accepting it joins the
-	// workspace. Once the sender is no longer a member, their open
-	// invitations end with them.
-	if _, err := tx.ExecContext(ctx, `
+	// workspace. Once the sender is no longer a member, every invitation they
+	// sent that is not yet accepted ends with them. Expired ones are revoked
+	// too, so the rule needs no clock and an expired invitation does not keep
+	// its address's pending slot.
+	rows, err := tx.QueryContext(ctx, `
 		UPDATE member_invitations SET revoked_at = $1
 		WHERE tenant_id = $2 AND invited_by_user_id = $3
-		  AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > $1`,
-		at, tenantID, userID); err != nil {
+		  AND accepted_at IS NULL AND revoked_at IS NULL
+		RETURNING id`,
+		at, tenantID, userID)
+	if err != nil {
+		return fmt.Errorf("revoke the member's invitations: %w", err)
+	}
+	var revoked []string
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("revoke the member's invitations: %w", err)
+		}
+		revoked = append(revoked, id)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("revoke the member's invitations: %w", err)
+	}
+	if err := rows.Err(); err != nil {
 		return fmt.Errorf("revoke the member's invitations: %w", err)
 	}
 
@@ -348,7 +371,7 @@ func (s *PostgresStore) RemoveMember(ctx context.Context, tenantID, userID strin
 		return fmt.Errorf("stamp livemode: %w", err)
 	}
 
-	if err := then(tx); err != nil {
+	if err := then(tx, revoked); err != nil {
 		return err
 	}
 	return tx.Commit()

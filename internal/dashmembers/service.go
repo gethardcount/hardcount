@@ -108,9 +108,10 @@ func (s *Service) CanInvite() bool {
 	return s.dashboardBaseURL != "" && s.emailConfigured
 }
 
-// NewService returns a Service. sessions and auditor join the removal's
-// transaction, so the removed member's sign-out and its audit row commit with
-// the removal.
+// NewService returns a Service. sessions and auditor are required to remove
+// a member: they join the removal's transaction, so the removed member's
+// sign-out and its audit row commit with the removal. Inviting and accepting
+// do not use them.
 func NewService(store *PostgresStore, users UserDirectory, sessions SessionEnder, auditor AuditTxWriter, email InviteEmailSender, tenants TenantNamer, clk clock.Clock, dashboardBaseURL string) *Service {
 	if clk == nil {
 		clk = clock.Real()
@@ -261,10 +262,12 @@ func (s *Service) Revoke(ctx context.Context, tenantID, invitationID string) err
 }
 
 // RemoveMember removes a user from the workspace. In one transaction it
-// deletes the membership, revokes the open invitations the user sent here,
-// ends the user's sessions in this workspace (both modes), and writes the
-// member.removed audit row. If any step fails, nothing changes. The user's
-// sessions in other workspaces are not touched.
+// deletes the membership, revokes the invitations the user sent here that
+// are not yet accepted, ends the user's sessions in this workspace (both
+// modes), and writes the member.removed audit row. The row lists the revoked
+// invitations' ids under revoked_invitation_ids, and has no such key when
+// there are none. If any step fails, nothing changes. The user's sessions in
+// other workspaces are not touched.
 //
 // Guards: no self-removal (someone else must remove you, so nobody locks
 // themselves out by mistake), and never the last member (ErrLastMember: a
@@ -278,17 +281,22 @@ func (s *Service) RemoveMember(ctx context.Context, tenantID, actorUserID, targe
 	if actorUserID != "" && actorUserID == targetUserID {
 		return errs.InvalidState("you cannot remove yourself — another member must remove you")
 	}
-	return s.store.RemoveMember(ctx, tenantID, targetUserID, s.clock.Now(ctx), func(tx *sql.Tx) error {
+	return s.store.RemoveMember(ctx, tenantID, targetUserID, s.clock.Now(ctx), func(tx *sql.Tx, revokedInvitationIDs []string) error {
 		if err := s.sessions.EndForMemberTx(ctx, tx, targetUserID, tenantID); err != nil {
 			return fmt.Errorf("end sessions: %w", err)
 		}
 		// The actor, the client address and the request id are already on
 		// ctx (the session middleware and the root middlewares put them
 		// there).
+		var meta map[string]any
+		if len(revokedInvitationIDs) > 0 {
+			meta = map[string]any{"revoked_invitation_ids": revokedInvitationIDs}
+		}
 		if err := s.audit.LogInTx(ctx, tx, audit.Entry{
 			Action:       "member.removed",
 			ResourceType: "user",
 			ResourceID:   targetUserID,
+			Metadata:     meta,
 		}); err != nil {
 			return fmt.Errorf("write the audit row: %w", err)
 		}

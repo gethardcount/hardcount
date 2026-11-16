@@ -120,10 +120,9 @@ func (s *postgresStore) EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID 
 }
 
 // EndForMemberTx revokes every active session of a user in one workspace, in
-// both modes, on the caller's transaction. Sessions in other workspaces are
-// not touched. It does not commit. The caller's transaction must see the
-// sessions of both modes: a bypass transaction does, while a tenant
-// transaction's row-level security hides the other mode.
+// both modes, on the caller's transaction. It does not commit. The caller's
+// transaction must see the sessions of both modes: a bypass transaction does,
+// while a tenant transaction's row-level security hides the other mode.
 func (s *postgresStore) EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, tenantID string) error {
 	_, err := tx.ExecContext(ctx, `
 		UPDATE dashboard_sessions

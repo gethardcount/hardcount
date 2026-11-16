@@ -207,7 +207,7 @@ var auditRouteRegistry = map[routeKey]auditDecl{
 	{"POST", "/v1/auth/accept-invite"}:          explicit("dashmembers.Handler.acceptInvite → Log(member.joined, user)."),
 	{"POST", "/v1/members/invite"}:              explicit("dashmembers.Handler.invite → Log(member.invited, user)."),
 	{"DELETE", "/v1/members/invitations/{id}"}:  explicit("dashmembers.Handler.revokeInvitation → Log(member.invite_revoked, user)."),
-	{"DELETE", "/v1/members/{userID}"}:          explicit("dashmembers.Service.RemoveMember → LogInTx(member.removed, user), on the transaction that deletes the membership, revokes the member's open invitations and ends their sessions in the workspace."),
+	{"DELETE", "/v1/members/{userID}"}:          explicit("dashmembers.Service.RemoveMember → LogInTx(member.removed, user), on the transaction that deletes the membership, revokes the invitations the member sent that are not yet accepted, and ends their sessions in the workspace."),
 
 	// --- API keys -------------------------------------------------------
 	{"POST", "/v1/api-keys"}:             explicit("auth.Service.CreateKey → LogInTx(create, api_key) on the key's own tx."),

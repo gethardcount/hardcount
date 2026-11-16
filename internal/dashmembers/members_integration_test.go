@@ -428,7 +428,7 @@ func TestRemoveMember(t *testing.T) {
 		t.Fatalf("member count after removal: got %d, want 1", len(members))
 	}
 
-	// The last member left is still refused, now by the store's count.
+	// Removing the only member left is refused.
 	if err := h.svc.RemoveMember(ctx, h.tenantID, "", h.owner); !errors.Is(err, dashmembers.ErrLastMember) {
 		t.Fatalf("remove the last member: got %v, want ErrLastMember", err)
 	}

@@ -3,9 +3,12 @@ package dashmembers_test
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"slices"
+	"sort"
 	"testing"
 	"time"
 
@@ -54,9 +57,8 @@ func issue(t *testing.T, h *harness, userID, tenantID string, live bool) string 
 	return raw
 }
 
-// invitationRevokedAt reads the revoked_at of the tenant's invitation to
-// address.
-func invitationRevokedAt(t *testing.T, db *postgres.DB, tenantID, address string) sql.NullTime {
+// invitationRevokedAt reads the revoked_at of invitation id.
+func invitationRevokedAt(t *testing.T, db *postgres.DB, id string) sql.NullTime {
 	t.Helper()
 	tx, err := db.BeginTx(t.Context(), postgres.TxBypass, "")
 	if err != nil {
@@ -65,11 +67,33 @@ func invitationRevokedAt(t *testing.T, db *postgres.DB, tenantID, address string
 	defer postgres.Rollback(tx)
 	var at sql.NullTime
 	if err := tx.QueryRowContext(t.Context(),
-		`SELECT revoked_at FROM member_invitations WHERE tenant_id = $1 AND email = $2`,
-		tenantID, address).Scan(&at); err != nil {
-		t.Fatalf("read the invitation to %s: %v", address, err)
+		`SELECT revoked_at FROM member_invitations WHERE id = $1`, id).Scan(&at); err != nil {
+		t.Fatalf("read invitation %s: %v", id, err)
 	}
 	return at
+}
+
+// removedRowMetadata reads the metadata of the one member.removed audit row
+// for userID in tenantID.
+func removedRowMetadata(t *testing.T, db *postgres.DB, tenantID, userID string) map[string]any {
+	t.Helper()
+	tx, err := db.BeginTx(t.Context(), postgres.TxBypass, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer postgres.Rollback(tx)
+	var raw []byte
+	if err := tx.QueryRowContext(t.Context(), `
+		SELECT metadata FROM audit_log
+		WHERE tenant_id = $1 AND action = 'member.removed' AND resource_type = 'user' AND resource_id = $2`,
+		tenantID, userID).Scan(&raw); err != nil {
+		t.Fatalf("read the member.removed row for %s: %v", userID, err)
+	}
+	var meta map[string]any
+	if err := json.Unmarshal(raw, &meta); err != nil {
+		t.Fatalf("decode the member.removed metadata %s: %v", raw, err)
+	}
+	return meta
 }
 
 // isMember reports whether userID belongs to tenantID.
@@ -119,32 +143,42 @@ func TestRemoveMember_EndsTheirSessionsInThisWorkspaceOnly(t *testing.T) {
 	if !isMember(t, h, u.ID, otherTenant) {
 		t.Error("removal from one workspace also removed the membership in the other")
 	}
+	if meta := removedRowMetadata(t, h.db, h.tenantID, u.ID); meta["revoked_invitation_ids"] != nil {
+		t.Errorf("member.removed metadata = %v, want no revoked_invitation_ids: the member sent no invitations", meta)
+	}
 }
 
-// TestRemoveMember_EndsTheInvitationsTheySent: removing a member revokes the
-// invitations they sent that could still be accepted. An expired one is left
-// as it is, and another member's invitation keeps working.
+// TestRemoveMember_EndsTheInvitationsTheySent: removing a member revokes
+// every invitation they sent that is not yet accepted, an expired one
+// included, and the audit row lists exactly those. The expired invitation no
+// longer holds its address's pending slot, so the address can be invited
+// again. Another member's invitation keeps working.
 func TestRemoveMember_EndsTheInvitationsTheySent(t *testing.T) {
 	h := newHarness(t, "Team Invites")
 	ctx := removalCtx(h)
 	u := createUser(t, h.db, "leaver@example.com", h.tenantID, "member")
 
-	if _, err := h.svc.Invite(ctx, h.tenantID, u.ID, "open@example.com"); err != nil {
+	open, err := h.svc.Invite(ctx, h.tenantID, u.ID, "open@example.com")
+	if err != nil {
 		t.Fatalf("invite open: %v", err)
 	}
 	openToken := h.email.lastToken(t)
-	if _, err := h.svc.Invite(ctx, h.tenantID, u.ID, "expired@example.com"); err != nil {
+	expired, err := h.svc.Invite(ctx, h.tenantID, u.ID, "expired@example.com")
+	if err != nil {
 		t.Fatalf("invite expired: %v", err)
 	}
 	if _, err := testutil.AdminPool(t).ExecContext(ctx,
-		`UPDATE member_invitations SET expires_at = now() - interval '1 day' WHERE tenant_id = $1 AND email = $2`,
-		h.tenantID, "expired@example.com"); err != nil {
+		`UPDATE member_invitations SET expires_at = now() - interval '1 day' WHERE id = $1`, expired.ID); err != nil {
 		t.Fatalf("expire the invitation: %v", err)
 	}
-	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "owners@example.com"); err != nil {
+	owners, err := h.svc.Invite(ctx, h.tenantID, h.owner, "owners@example.com")
+	if err != nil {
 		t.Fatalf("invite from the owner: %v", err)
 	}
 	ownersToken := h.email.lastToken(t)
+	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "expired@example.com"); !errors.Is(err, errs.ErrAlreadyExists) {
+		t.Fatalf("re-invite the expired address before the removal: err = %v, want ErrAlreadyExists", err)
+	}
 
 	if err := h.svc.RemoveMember(ctx, h.tenantID, h.owner, u.ID); err != nil {
 		t.Fatalf("remove member: %v", err)
@@ -156,14 +190,64 @@ func TestRemoveMember_EndsTheInvitationsTheySent(t *testing.T) {
 	if _, err := h.svc.AcceptInvite(ctx, openToken, testPassword); !errors.Is(err, errs.ErrValidation) {
 		t.Errorf("accept the removed member's invitation: err = %v, want ErrValidation", err)
 	}
-	if at := invitationRevokedAt(t, h.db, h.tenantID, "open@example.com"); !at.Valid {
-		t.Error("the removed member's open invitation has revoked_at NULL, want it set")
+	for _, inv := range []struct{ name, id string }{{"open", open.ID}, {"expired", expired.ID}} {
+		if at := invitationRevokedAt(t, h.db, inv.id); !at.Valid {
+			t.Errorf("the removed member's %s invitation has revoked_at NULL, want it set", inv.name)
+		}
 	}
-	if at := invitationRevokedAt(t, h.db, h.tenantID, "expired@example.com"); at.Valid {
-		t.Errorf("the expired invitation got revoked_at %v, want NULL", at.Time)
+	if at := invitationRevokedAt(t, h.db, owners.ID); at.Valid {
+		t.Errorf("the owner's invitation got revoked_at %v, want NULL", at.Time)
 	}
 	if _, err := h.svc.PreviewInvite(ctx, ownersToken); err != nil {
 		t.Errorf("preview the owner's invitation: %v, want it still pending", err)
+	}
+
+	listed, _ := removedRowMetadata(t, h.db, h.tenantID, u.ID)["revoked_invitation_ids"].([]any)
+	var got []string
+	for _, v := range listed {
+		id, _ := v.(string)
+		got = append(got, id)
+	}
+	sort.Strings(got)
+	want := []string{open.ID, expired.ID}
+	sort.Strings(want)
+	if !slices.Equal(got, want) {
+		t.Errorf("member.removed revoked_invitation_ids = %v, want %v", got, want)
+	}
+
+	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "expired@example.com"); err != nil {
+		t.Errorf("re-invite the expired address after the removal: %v, want it to succeed", err)
+	}
+}
+
+// TestRemoveMember_KeepsTheirInvitationsInOtherWorkspaces: removing a member
+// from one workspace leaves the invitations they sent in another workspace
+// they belong to.
+func TestRemoveMember_KeepsTheirInvitationsInOtherWorkspaces(t *testing.T) {
+	h := newHarness(t, "Team Invites A")
+	ctx := removalCtx(h)
+	otherTenant := testutil.CreateTestTenant(t, h.db, "Team Invites B")
+	u := createUser(t, h.db, "in-both@example.com", h.tenantID, "member")
+	attachMember(t, h.db, u.ID, otherTenant)
+
+	if _, err := h.svc.Invite(ctx, h.tenantID, u.ID, "to-a@example.com"); err != nil {
+		t.Fatalf("invite in the first workspace: %v", err)
+	}
+	inB, err := h.svc.Invite(ctx, otherTenant, u.ID, "to-b@example.com")
+	if err != nil {
+		t.Fatalf("invite in the second workspace: %v", err)
+	}
+	tokenB := h.email.lastToken(t)
+
+	if err := h.svc.RemoveMember(ctx, h.tenantID, h.owner, u.ID); err != nil {
+		t.Fatalf("remove member: %v", err)
+	}
+
+	if at := invitationRevokedAt(t, h.db, inB.ID); at.Valid {
+		t.Errorf("the invitation in the other workspace got revoked_at %v, want NULL", at.Time)
+	}
+	if _, err := h.svc.PreviewInvite(ctx, tokenB); err != nil {
+		t.Errorf("preview the invitation in the other workspace: %v, want it still pending", err)
 	}
 }
 
@@ -216,7 +300,8 @@ func assertRemovalFailsWhole(t *testing.T, h *harness, svc *dashmembers.Service)
 	u := createUser(t, h.db, "stays@example.com", h.tenantID, "member")
 	testSession := issue(t, h, u.ID, h.tenantID, false)
 	liveSession := issue(t, h, u.ID, h.tenantID, true)
-	if _, err := h.svc.Invite(ctx, h.tenantID, u.ID, "pending@example.com"); err != nil {
+	pending, err := h.svc.Invite(ctx, h.tenantID, u.ID, "pending@example.com")
+	if err != nil {
 		t.Fatalf("invite: %v", err)
 	}
 	token := h.email.lastToken(t)
@@ -239,7 +324,7 @@ func assertRemovalFailsWhole(t *testing.T, h *harness, svc *dashmembers.Service)
 	if _, err := h.svc.PreviewInvite(ctx, token); err != nil {
 		t.Errorf("preview the member's invitation after the failed removal: %v, want it still pending", err)
 	}
-	if at := invitationRevokedAt(t, h.db, h.tenantID, "pending@example.com"); at.Valid {
+	if at := invitationRevokedAt(t, h.db, pending.ID); at.Valid {
 		t.Errorf("the failed removal left revoked_at %v on the invitation, want NULL", at.Time.Format(time.RFC3339))
 	}
 }
