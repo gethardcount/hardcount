@@ -2,7 +2,6 @@ package usage
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"maps"
 	"strings"
@@ -188,18 +187,6 @@ type CustomerUsageBucket struct {
 	PerMeter    map[string]decimal.Decimal `json:"per_meter"`
 }
 
-// customerNow is the customer's now for a read whose window defaults to it
-// (customer usage, margin). A test clock that cannot be read refuses the
-// read (503); a read changes nothing, so the message only says to retry.
-func (s *CustomerUsageService) customerNow(ctx context.Context, tenantID, customerID string) (time.Time, error) {
-	t, err := s.usage.effectiveNow(ctx, tenantID, customerID)
-	if errors.Is(err, clock.ErrUndecided) {
-		return time.Time{}, errs.Unavailable("test_clock_unavailable",
-			"The customer's test clock could not be read. Try again in a moment.", err)
-	}
-	return t, err
-}
-
 // Get composes the customer-usage view (ADR-130 §10). Order:
 //  1. Customer existence (RLS makes cross-tenant IDs return ErrNotFound).
 //  2. Active+trialing subscriptions for the customer.
@@ -224,6 +211,12 @@ func (s *CustomerUsageService) Get(ctx context.Context, tenantID, customerID str
 	if s.rater == nil {
 		return CustomerUsageResult{}, fmt.Errorf("customer usage: rater not wired")
 	}
+	// The read's time is decided before it: the API's door decides it from
+	// the customer in the URL, and the public cost dashboard decides its own
+	// (GetByToken). At real time the door binds no instant, so the server's
+	// clock is read here once, and the window, the rater and the buckets all
+	// read that one instant.
+	ctx = clock.EnsureEffectiveNow(ctx, s.usage.clock)
 
 	if _, err := s.customers.Get(ctx, tenantID, customerID); err != nil {
 		return CustomerUsageResult{}, err
@@ -239,7 +232,7 @@ func (s *CustomerUsageService) Get(ctx context.Context, tenantID, customerID str
 	activeSubs := filterActiveSubs(subs)
 
 	from, to, source, err := resolvePeriod(period, activeSubs, func() (time.Time, error) {
-		return s.customerNow(ctx, tenantID, customerID)
+		return clock.Now(ctx), nil
 	})
 	if err != nil {
 		return CustomerUsageResult{}, err

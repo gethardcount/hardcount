@@ -18,6 +18,8 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/shopspring/decimal"
 
 	"github.com/gethardcount/hardcount/internal/api/respond"
@@ -349,15 +351,6 @@ func NewMarginAssembler(store *PostgresStore, usageSvc *CustomerUsageService) *M
 	return &MarginAssembler{store: store, usageSvc: usageSvc}
 }
 
-// effectiveNow is the customer's now for the default margin window, as
-// customer usage reads it (CustomerUsageService.customerNow).
-func (a *MarginAssembler) effectiveNow(ctx context.Context, tenantID, customerID string) (time.Time, error) {
-	if a != nil && a.usageSvc != nil && a.usageSvc.usage != nil {
-		return a.usageSvc.customerNow(ctx, tenantID, customerID)
-	}
-	return time.Now().UTC(), nil
-}
-
 func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, from, to time.Time) (MarginReport, error) {
 	rep := MarginReport{CustomerID: customerID, From: from, To: to, CostCurrency: "USD", ByModel: []MarginModelRow{}}
 
@@ -662,17 +655,16 @@ func providerCostLabel(r domain.ProviderCostRate) string {
 func (h *ProviderCostHandler) Margin(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	customerID := chi.URLParam(r, "id")
-	from, to, err := h.marginWindow(r, tenantID, customerID)
-	if errors.Is(err, errs.ErrUnavailable) {
-		// The customer's test clock could not be read: refused for retry.
-		respond.FromError(w, r, err, "customer")
-		return
-	}
+	// One instant for the report: the API's door decided it from the customer
+	// in the URL, and at real time (no instant bound) the server's clock is
+	// read here once, so the default window and the rated usage agree.
+	ctx := clock.EnsureEffectiveNow(r.Context(), h.margin.usageSvc.usage.clock)
+	from, to, err := h.marginWindow(ctx, r)
 	if err != nil {
 		respond.BadRequest(w, r, err.Error())
 		return
 	}
-	rep, err := h.margin.Get(r.Context(), tenantID, customerID, from, to)
+	rep, err := h.margin.Get(ctx, tenantID, customerID, from, to)
 	if err != nil {
 		// The one not-found the report can hit is the customer's.
 		respond.FromError(w, r, err, "customer")
@@ -682,10 +674,11 @@ func (h *ProviderCostHandler) Margin(w http.ResponseWriter, r *http.Request) {
 }
 
 // marginWindow is the Margin handler's [from, to): the request's bounds,
-// with missing ones defaulted around the customer's effective now.
-func (h *ProviderCostHandler) marginWindow(r *http.Request, tenantID, customerID string) (time.Time, time.Time, error) {
+// with missing ones defaulted around the report's instant, the one ctx
+// carries.
+func (h *ProviderCostHandler) marginWindow(ctx context.Context, r *http.Request) (time.Time, time.Time, error) {
 	return parseWindow(r, func() (time.Time, error) {
-		return h.margin.effectiveNow(r.Context(), tenantID, customerID)
+		return clock.Now(ctx), nil
 	})
 }
 

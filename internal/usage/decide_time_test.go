@@ -4,14 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
-	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/shopspring/decimal"
 
 	"github.com/gethardcount/hardcount/internal/domain"
@@ -109,20 +104,6 @@ func TestIngest_ACustomerOnNoClockIsRecordedAtRealTime(t *testing.T) {
 	}
 }
 
-// A request whose clock was already decided (a route that named the
-// customer) is not decided again.
-func TestIngest_AClockAlreadyDecidedIsNotDecidedAgain(t *testing.T) {
-	frozen := time.Date(2026, 3, 1, 12, 0, 0, 0, time.UTC)
-	res := &answerResolver{err: errors.New("must not be read")}
-	svc := NewService(newMemStore())
-	svc.SetResolver(res)
-	ctx := clock.WithSim(testMode(), clock.Sim{At: frozen, TestClockID: "clk_up"})
-	e, err := svc.Ingest(ctx, "t1", IngestInput{CustomerID: "cus_1", MeterID: "mtr_1", Quantity: dec(1)})
-	if err != nil || !e.Timestamp.Equal(frozen) || res.reads != 0 {
-		t.Errorf("err %v, timestamp %v, reads %d; want the decided clock's %v and no read", err, e.Timestamp, res.reads, frozen)
-	}
-}
-
 // customerResolver answers each customer from its own entry, fails for a
 // customer with none (an unreadable clock), and counts the reads.
 type customerResolver struct {
@@ -212,24 +193,6 @@ func TestBatchIngest_StopsAtTheFirstUnreadableClock(t *testing.T) {
 	}
 }
 
-// A read whose window defaults to the customer's now (margin; customer usage
-// shares customerNow) is refused for retry when the clock cannot be read,
-// with a 503 that carries no cause.
-func TestMargin_AnUnreadableClockIsRefusedForRetry(t *testing.T) {
-	svc := NewService(newMemStore())
-	svc.SetResolver(&answerResolver{err: errors.New("connection reset by peer")})
-	h := NewProviderCostHandler(nil, NewMarginAssembler(nil, NewCustomerUsageService(svc, nil, nil, nil)))
-	route := chi.NewRouteContext()
-	route.URLParams.Add("id", "cus_1")
-	ctx := context.WithValue(auth.WithTenantID(testMode(), "t1"), chi.RouteCtxKey, route)
-	rec := httptest.NewRecorder()
-	h.Margin(rec, httptest.NewRequest("GET", "/v1/customers/cus_1/margin", nil).WithContext(ctx))
-	body := rec.Body.String()
-	if rec.Code != 503 || !strings.Contains(body, "test_clock_unavailable") || !strings.Contains(body, "Try again in a moment") || strings.Contains(body, "connection reset") {
-		t.Errorf("margin: %d %s; want 503 test_clock_unavailable, a read's message, no cause", rec.Code, body)
-	}
-}
-
 // secondReadFails answers its first read with a customer on no clock and
 // fails every later one.
 type secondReadFails struct{ reads int }
@@ -248,20 +211,19 @@ func (r *secondReadFails) SimForInvoice(context.Context, string, string) (clock.
 	return clock.Sim{}, errors.New("not used")
 }
 
-// For a customer on no clock the cost dashboard's usage view reads the
-// customer's now a second time; when that read fails, the page answers with
-// its own plain refusal, not the usage read's.
-func TestCostDashboard_AFailedSecondClockReadIsThePagesRefusal(t *testing.T) {
+// The cost dashboard decides its time once, from the customer its token
+// names, and its usage view reads that decision: for a customer on no clock,
+// with a resolver that would fail any second read, the page renders and the
+// resolver was read once.
+func TestCostDashboard_DecidesOnce(t *testing.T) {
 	cu, _, subs := usageFixture(domain.RatedSubscription{})
 	res := &secondReadFails{}
 	cu.usage.SetResolver(res)
 	a := NewCostDashboardAssembler(fakeTokenLookup{cust: domain.Customer{ID: "cus_1", TenantID: "t1"}}, cu, subs, &fakeCredits{})
 	a.SetLiveBalanceReader(&fakeLive{})
 	a.SetResolver(res)
-	_, err := a.GetByToken(context.Background(), "hc_pcd_x")
-	var de *errs.DomainError
-	if !errors.Is(err, errs.ErrUnavailable) || !errors.As(err, &de) || de.Message != costDashboardUnavailable || res.reads != 2 {
-		t.Fatalf("err %v, reads %d; want the page's refusal after the second read", err, res.reads)
+	if _, err := a.GetByToken(context.Background(), "hc_pcd_x"); err != nil || res.reads != 1 {
+		t.Fatalf("err %v, reads %d; want the page, and one read", err, res.reads)
 	}
 }
 

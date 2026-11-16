@@ -162,28 +162,35 @@ func TestBackfill_TestClockPinnedCustomer(t *testing.T) {
 	})
 }
 
-// A clock already decided on the context is the time used: the resolver is
-// not asked again. Today only the three reads reach decide under a clock
-// (customer usage, margin, cost dashboard); this pins the rule through an
-// ingest.
-func TestIngest_AClocksDecisionWins(t *testing.T) {
-	resolver := &fakeResolver{}
-	svc := NewService(newMemStore())
-	svc.SetResolver(resolver)
-	bound := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
-	ctx := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: bound, TestClockID: "tc_up"})
-
-	e, err := svc.Ingest(ctx, "t1", IngestInput{
-		CustomerID: "cus_any", MeterID: "mtr_1", Quantity: dec(1),
-	})
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !e.Timestamp.Equal(bound) {
-		t.Errorf("timestamp: got %v, want the decided clock's %v", e.Timestamp, bound)
-	}
-	if resolver.calls != 0 {
-		t.Errorf("a clock's decision must skip the resolver, got %d calls", resolver.calls)
+// A clock already on the context does not stop usage deciding the customer:
+// the customer's own decision replaces it, with one resolver read. A customer
+// on a test clock gets its clock's frozen time; one on no clock gets real
+// time from the service's clock, and the context's clock instant is dropped.
+func TestIngest_AClockOnTheContextIsReplacedByTheCustomers(t *testing.T) {
+	frozenA := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
+	other := time.Date(2025, 2, 1, 0, 0, 0, 0, time.UTC)
+	serverAt := time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		name, customer string
+		want           time.Time
+	}{
+		{"a customer on a test clock: its clock's time", "cus_a", frozenA},
+		{"a customer on no clock: real time", "cus_n", serverAt},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			resolver := &fakeResolver{frozen: map[string]time.Time{"cus_a": frozenA}}
+			svc := NewService(newMemStore())
+			svc.SetResolver(resolver)
+			svc.SetClock(clock.NewFake(serverAt))
+			ctx := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: other, TestClockID: "tc_other"})
+			e, err := svc.Ingest(ctx, "t1", IngestInput{CustomerID: c.customer, MeterID: "mtr_1", Quantity: dec(1)})
+			if err != nil {
+				t.Fatalf("Ingest: %v", err)
+			}
+			if !e.Timestamp.Equal(c.want) || resolver.calls != 1 {
+				t.Errorf("stamped %v, %d resolver reads; want %v, one", e.Timestamp, resolver.calls, c.want)
+			}
+		})
 	}
 }
 
