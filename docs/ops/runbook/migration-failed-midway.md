@@ -329,23 +329,6 @@ COMMIT;
 
 Then run `hardcount migrate` again.
 
-## 00235 found draft subscriptions
-
-**Symptom:**
-
-```
-migration 00235_no_draft_subscriptions.sql failed: ERROR: migration 00235 removes draft subscriptions, and this database has 2 of them: hc_sub_… (tenant hc_ten_…), hc_sub_… (tenant hc_ten_…)
-```
-
-**Why:** from this release a subscription starts, or starts its trial, when
-it is created. The status `draft` and `POST /v1/subscriptions/{id}/activate`
-are removed, so this release cannot start or cancel a draft. The error names
-the first five. Nothing was changed.
-
-**Fix:** start the previous version again, activate or cancel each draft
-subscription, then upgrade again
-([Migration 00235: activate or cancel draft subscriptions](../../upgrades.md#migration-00235-activate-or-cancel-draft-subscriptions)).
-
 ## It waited 5s for a table lock
 
 First stop the API: see [Before anything else](#before-anything-else).

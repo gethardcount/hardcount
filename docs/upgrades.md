@@ -103,16 +103,27 @@ expected here. On a database you restored from a backup, do not start the
 previous version: see
 [A backup with a charge in progress](ops/restore.md#a-backup-with-a-charge-in-progress).
 
-### Migration 00235: activate or cancel draft subscriptions
+### Migration 00235: draft subscriptions are canceled
 
 The release with migration `00235_no_draft_subscriptions` removes draft
 subscriptions: a subscription starts, or starts its trial, when it is
-created. The migration refuses to run while a subscription has the status
-`draft`, because the new version cannot start or cancel one.
+created. The migration does three things:
 
-1. With the previous version still running, list them in the database
-   shell (`docker compose exec postgres psql -U hardcount -d hardcount` on
-   one VM):
+- It cancels every draft subscription. A draft has billed nothing, so there
+  is no invoice. No `subscription.canceled` webhook is sent for these
+  subscriptions, and no audit log entry is written.
+- It deletes a webhook endpoint that listened only to
+  `subscription.activated`, the event an activation sent.
+- It removes `subscription.activated` from every other endpoint's event
+  list.
+
+Before you upgrade, on the release you run now, activate the drafts that
+should bill:
+
+1. List them in the database shell
+   (`docker compose exec postgres psql -U hardcount -d hardcount` on one
+   VM). The dashboard shows the same rows on the **Draft** tab of the
+   Subscriptions page, one account and mode at a time.
 
    ```sql
    SET app.bypass_rls = 'on';
@@ -120,24 +131,24 @@ created. The migration refuses to run while a subscription has the status
    ```
 
    **You see:** one row for each draft subscription, or `(0 rows)`.
-2. Activate or cancel each one, with an API key of its account and mode.
-   `POST /v1/subscriptions/{id}/activate` starts billing now, and
-   **Activate** on the subscription's page does the same.
-   `POST /v1/subscriptions/{id}/cancel` ends it with no invoice.
-3. At `(0 rows)`: take the backup (step 2 of
-   [Before you upgrade](#before-you-upgrade)) and upgrade as the rest of
+2. Activate each one that should bill: **Activate** on the subscription's
+   page, or `POST /v1/subscriptions/{id}/activate` with an API key of its
+   account and mode.
+
+   **You see:** the subscription's status is `active`.
+3. Let the server run for one minute after the last activation, so that its
+   `subscription.activated` webhook goes out. Then take the backup (step 2
+   of [Before you upgrade](#before-you-upgrade)) and upgrade as the rest of
    this page says.
 
-If the upgrade stops with `migration 00235 removes draft subscriptions`,
-that migration changed nothing, and the error names the first five drafts.
-Start the previous version again (on one VM, the steps in
-[Upgrade on one VM](#upgrade-on-one-vm) with its version number), then do
-steps 1 to 3. If the release's other migrations ran, the previous version
-logs that the database is newer than it; that is expected here.
+The upgrade cancels a draft you did not activate. To bill it afterwards,
+create the subscription again: it starts billing when it is created, exactly
+as an activation would have. Give it a new `code`: the canceled subscription
+keeps its own.
 
-The migration also takes `subscription.activated`, the event an activation
-sent, out of each webhook endpoint's event list. An endpoint that listed
-nothing else is turned off.
+Run one version at a time for this upgrade. A copy of the previous version
+that keeps running can no longer create a draft: the database refuses the
+row.
 
 ### Coming from Velox
 
