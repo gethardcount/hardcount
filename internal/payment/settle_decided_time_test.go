@@ -19,9 +19,10 @@ func decidedOnClock() context.Context {
 	return clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: decidedAt, TestClockID: "clk_e"})
 }
 
-// A settle runs on the time its caller decided and reads no clock of its
-// own: paid_at, the failed stamp and dunning's start are at the decided
-// instant, and the resolver is never asked.
+// On a test clock a settle runs on the time its caller decided and reads no
+// clock of its own: paid_at, the failed stamp and dunning's start are at the
+// decided instant, and the resolver is never asked. (On no clock it reads the
+// time its result arrived: TestChargeInvoice_AnInlineResultIsRecordedWhenItArrives.)
 func TestSettle_RunsOnTheDecidedTime(t *testing.T) {
 	t.Run("paid", func(t *testing.T) {
 		res := &eventResolver{}

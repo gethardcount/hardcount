@@ -86,14 +86,11 @@ func (s *Stripe) SettleSucceeded(ctx context.Context, tenantID string, inv domai
 		return nil
 	}
 
-	// The time was decided before the settle, by whoever called it. A Stripe
-	// event arrives with its decision bound (decideFor): the invoice's clock
-	// and its instant, or one read of the server's clock; so does a charge a
-	// request makes on a real-time or a record route (the door's instant). A
-	// reconciler row (decideRow) and a charge a job makes can arrive with no
-	// instant: for them the server's clock is read here once, so every stamp
-	// of this settle has the same time.
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
+	// A charge's result is its own event (see the clock package): on no
+	// clock, paid_at and every stamp of this settle read the server's clock
+	// once, now that the result is in hand, whatever instant the charge's
+	// action carries. On a test clock, the invoice's clock and its instant.
+	ctx = clock.AtArrival(ctx, s.clock)
 	now := clock.Now(ctx)
 	// The charge's anchor, when it has one, beats the decided time. The
 	// anchor is the instant the charge was made at on its clock, carried with
@@ -356,12 +353,10 @@ func (s *Stripe) settleFailed(ctx context.Context, tenantID string, inv domain.I
 		return inv, domain.PaymentFailureResult{}, nil
 	}
 
-	// The time was decided by the caller, as for SettleSucceeded, so the
-	// failed stamp and dunning's start are on a clock invoice's clock. A
-	// Stripe event, and a charge a request makes, arrive with an instant
-	// bound; a reconciler row or a charge a job makes can arrive with none,
-	// and for them the server's clock is read here once.
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
+	// The result's time, as for SettleSucceeded: the failed stamp and
+	// dunning's start read the server's clock once, now, on no clock, and are
+	// on a clock invoice's clock otherwise.
+	ctx = clock.AtArrival(ctx, s.clock)
 	// Detached before the tx: the stamp, payment.failed and the email commit
 	// together, and a webhook disconnect must not cut the dunning start that
 	// follows them. Values (the simulated clock) survive WithoutCancel.

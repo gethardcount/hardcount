@@ -125,7 +125,7 @@ type Stripe struct {
 	disputes           DisputeRecorder            // optional; records charge.dispute.* against the invoice (#979)
 	externalRefunds    ExternalRefundRecorder     // optional; records refunds made in Stripe outside Hardcount (ADR-134)
 	resolver           clock.Resolver             // optional; an event decides its time with it (decideFor)
-	clock              clock.Clock                // ctx carries the decided time; a settle reads real time here, the server's clock, when ctx carries none
+	clock              clock.Clock                // the server's clock: an event's decision, and a result's time on no clock (clock.AtArrival)
 	anomalies          PaymentAnomalyRecorder     // required; writes the anomaly marker (ADR-068) and queues its webhook event (MustHaveAnomalyRecorder)
 	checkoutSessions   *CheckoutSessionStore      // optional; claim-ledger truth-sync + settle-time expire (ADR-068)
 	sessionClients     *StripeClients             // optional; raw mode-keyed clients for session expire calls
@@ -213,9 +213,9 @@ func (s *Stripe) SetResolver(r clock.Resolver) {
 }
 
 // SetClock wires the server's clock. An event's decision binds real time
-// from it (decideFor), and a settle whose caller bound no instant reads it.
-// The router passes the clock the server bills by; the default is the
-// machine's.
+// from it (decideFor), and a settle on no clock reads the result's time from
+// it (clock.AtArrival). The router passes the clock the server bills by; the
+// default is the machine's.
 func (s *Stripe) SetClock(c clock.Clock) {
 	s.clock = c
 }
@@ -1410,6 +1410,7 @@ func startDunningWithRetry(ctx context.Context, dunning DunningStarter, tenantID
 // so the invoice is stamped failed with no PaymentIntent through the counter
 // compare-and-set (P13), and dunning starts.
 func (s *Stripe) stampFailedWithoutPayment(ctx context.Context, tenantID string, inv domain.Invoice, message, sentKey string) {
+	ctx = clock.AtArrival(ctx, s.clock) // Stripe's refusal is a result: see SettleFailed
 	// current is the invoice as it stands after the write, which is refused
 	// if another outcome was recorded during the call (P13). The dunning gate
 	// below keys off it, not off the snapshot.

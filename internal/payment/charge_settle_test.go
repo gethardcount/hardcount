@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -59,6 +60,57 @@ func TestChargeInvoice_SyncSuccessSettlesInline(t *testing.T) {
 	// A successful charge does not start dunning.
 	if len(dunning.calls) != 0 {
 		t.Errorf("dunning started on a successful charge: %+v", dunning.calls)
+	}
+}
+
+// answersLater is Stripe answering a minute after it was asked, on the
+// server's clock.
+type answersLater struct {
+	*mockStripeClient
+	server *clock.Fake
+}
+
+func (a answersLater) CreateUnconfirmedPaymentIntent(ctx context.Context, p PaymentIntentParams) (PaymentIntentResult, error) {
+	a.server.Advance(time.Minute)
+	return a.mockStripeClient.CreateUnconfirmedPaymentIntent(ctx, p)
+}
+
+// A charge's result is its own event: on no clock it is recorded when it
+// arrives, not at the instant the charge's action carries. An inline success
+// is paid then; a decline, or a refusal with no PaymentIntent, starts payment
+// recovery then.
+func TestChargeInvoice_AnInlineResultIsRecordedWhenItArrives(t *testing.T) {
+	action := time.Date(2026, 11, 16, 23, 59, 58, 0, time.UTC)
+	arrived := action.Add(time.Minute)
+	for _, c := range []struct {
+		name   string
+		client *mockStripeClient
+		paid   bool
+	}{
+		{"a success", &mockStripeClient{piID: "pi_ok", chargeStatus: "succeeded"}, true},
+		{"a decline", &mockStripeClient{shouldFail: true}, false},
+		{"a refusal with no PaymentIntent", &mockStripeClient{shouldFail: true, failErr: &PaymentError{Message: "invalid payment method"}}, false},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			invoices := newMockInvoiceUpdater()
+			invoices.invoices["inv_1"] = finalizedPendingInvoice()
+			dunning := &recordingDunningStarter{}
+			server := clock.NewFake(action)
+			s := NewStripe(answersLater{c.client, server}, invoices, newMockWebhookStore(), nil, dunning)
+			s.SetClock(server)
+
+			ctx := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), true), action)
+			_, _ = s.ChargeInvoice(ctx, "t1", invoices.invoices["inv_1"], testHold, "cus_stripe_abc", "pm_test")
+			if c.paid {
+				if paid := invoices.invoices["inv_1"].PaidAt; paid == nil || !paid.Equal(arrived) {
+					t.Errorf("paid_at %v, want %v, when Stripe's answer arrived", paid, arrived)
+				}
+				return
+			}
+			if len(dunning.calls) != 1 || !dunning.calls[0].failureAt.Equal(arrived) {
+				t.Errorf("StartDunning calls %+v, want one at %v, when Stripe's answer arrived", dunning.calls, arrived)
+			}
+		})
 	}
 }
 
