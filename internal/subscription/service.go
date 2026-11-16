@@ -136,7 +136,8 @@ type Service struct {
 	store Store
 	// clock is the server's clock: the router's clk, the one the engine
 	// bills by. Every subscription action runs on a time decided on a test
-	// clock or at real time (see the clock package's doc). Who decides it:
+	// clock or at real time (see clock.Decide and clock.WithRealTime). Who
+	// decides it:
 	//   - a request, the API's door (api.clockDoor), from the subscription in
 	//     its URL; a create, the service itself, from the customer its body
 	//     names (DecideForCustomer);

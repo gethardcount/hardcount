@@ -34,12 +34,13 @@ func (c *issueTimeCN) Issue(ctx context.Context, tenantID, id string) (domain.Cr
 type handlerEntry struct {
 	name      string
 	wantNotes int
-	run       func(t *testing.T, ctx context.Context, server clock.Clock) (*capturingAudit, []time.Time)
+	run       func(t *testing.T, ctx context.Context, server clock.Clock, res clock.Resolver) (*capturingAudit, []time.Time)
 }
 
 func handlerEntries() []handlerEntry {
 	const tenantID = "t1"
-	wire := func(svc *Service, plans map[string]domain.Plan, src domain.Invoice) (*Handler, *capturingAudit, *issueTimeCN) {
+	wire := func(svc *Service, res clock.Resolver, plans map[string]domain.Plan, src domain.Invoice) (*Handler, *capturingAudit, *issueTimeCN) {
+		svc.SetResolver(res)
 		h := NewHandler(svc)
 		h.SetProrationDeps(&plansMock{plans: plans}, &invoicesMock{sourceInvoice: src})
 		cn := &issueTimeCN{fakeCNIssuer: &fakeCNIssuer{}}
@@ -53,10 +54,10 @@ func handlerEntries() []handlerEntry {
 		return domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded, SubtotalCents: subtotal, TotalAmountCents: subtotal}
 	}
 	return []handlerEntry{
-		{"updateItem: plan downgrade", 1, func(t *testing.T, ctx context.Context, server clock.Clock) (*capturingAudit, []time.Time) {
+		{"updateItem: plan downgrade", 1, func(t *testing.T, ctx context.Context, server clock.Clock, res clock.Resolver) (*capturingAudit, []time.Time) {
 			store := newMemStore()
 			subID, itemID := seedSubWithItemAt(t, store, tenantID, "cus_1", "plan_pro", proPeriodStart, proPeriodEnd)
-			h, audits, cn := wire(NewService(store, server), map[string]domain.Plan{
+			h, audits, cn := wire(NewService(store, server), res, map[string]domain.Plan{
 				"plan_pro":   {ID: "plan_pro", Name: "Pro", BaseAmountCents: 6000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
 				"plan_basic": {ID: "plan_basic", Name: "Basic", BaseAmountCents: 2000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
 			}, paid(6000))
@@ -68,14 +69,14 @@ func handlerEntries() []handlerEntry {
 			}
 			return audits, cn.at
 		}},
-		{"updateItem: seat decrease", 1, func(t *testing.T, ctx context.Context, server clock.Clock) (*capturingAudit, []time.Time) {
+		{"updateItem: seat decrease", 1, func(t *testing.T, ctx context.Context, server clock.Clock, res clock.Resolver) (*capturingAudit, []time.Time) {
 			store := newMemStore()
 			subID, itemID := seedSubWithItemAt(t, store, tenantID, "cus_1", "plan_seats", proPeriodStart, proPeriodEnd)
 			svc := NewService(store, server)
 			if _, err := svc.UpdateItem(seedAt, tenantID, subID, itemID, UpdateItemInput{Quantity: int64Ptr(3)}); err != nil {
 				t.Fatalf("seed qty=3: %v", err)
 			}
-			h, audits, cn := wire(svc, map[string]domain.Plan{
+			h, audits, cn := wire(svc, res, map[string]domain.Plan{
 				"plan_seats": {ID: "plan_seats", Name: "Seat", BaseAmountCents: 1000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
 			}, paid(3000))
 			body, _ := json.Marshal(UpdateItemInput{Quantity: int64Ptr(1)})
@@ -86,14 +87,14 @@ func handlerEntries() []handlerEntry {
 			}
 			return audits, cn.at
 		}},
-		{"removeItem", 1, func(t *testing.T, ctx context.Context, server clock.Clock) (*capturingAudit, []time.Time) {
+		{"removeItem", 1, func(t *testing.T, ctx context.Context, server clock.Clock, res clock.Resolver) (*capturingAudit, []time.Time) {
 			store := newMemStore()
 			subID, itemID := seedSubWithItemAt(t, store, tenantID, "cus_1", "plan_a", proPeriodStart, proPeriodEnd)
 			svc := NewService(store, server)
 			if _, err := svc.AddItem(seedAt, tenantID, subID, AddItemInput{PlanID: "plan_b", Quantity: 1}); err != nil {
 				t.Fatalf("seed second item: %v", err)
 			}
-			h, audits, cn := wire(svc, map[string]domain.Plan{
+			h, audits, cn := wire(svc, res, map[string]domain.Plan{
 				"plan_a": {ID: "plan_a", Name: "Base A", BaseAmountCents: 2000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
 				"plan_b": {ID: "plan_b", Name: "Base B", BaseAmountCents: 1000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
 			}, paid(3000))
@@ -104,7 +105,7 @@ func handlerEntries() []handlerEntry {
 			}
 			return audits, cn.at
 		}},
-		{"updateItem: cross-interval plan swap (its relief)", 1, func(t *testing.T, ctx context.Context, server clock.Clock) (*capturingAudit, []time.Time) {
+		{"updateItem: cross-interval plan swap (its relief)", 1, func(t *testing.T, ctx context.Context, server clock.Clock, res clock.Resolver) (*capturingAudit, []time.Time) {
 			store := newMemStore()
 			subID, itemID := seedSubWithItemAt(t, store, tenantID, "cus_1", "p_yearly_adv", proPeriodStart, proPeriodEnd)
 			plans := map[string]domain.Plan{
@@ -115,7 +116,7 @@ func handlerEntries() []handlerEntry {
 			svc.SetPlanReader(&fakePlanReader{plans: plans})
 			b := &reliefTimeBiller{fakeBiller: &fakeBiller{createTxOK: true, swapDraftIDs: []string{"cn_swap_1"}}}
 			svc.SetBiller(b)
-			h, audits, _ := wire(svc, plans, paid(120000))
+			h, audits, _ := wire(svc, res, plans, paid(120000))
 			body, _ := json.Marshal(UpdateItemInput{NewPlanID: "p_monthly_adv", Immediate: true})
 			rr := httptest.NewRecorder()
 			h.updateItem(rr, updateItemURL(ctx, subID, itemID, body))
@@ -124,10 +125,12 @@ func handlerEntries() []handlerEntry {
 			}
 			return audits, b.at
 		}},
-		{"addItem", 0, func(t *testing.T, ctx context.Context, server clock.Clock) (*capturingAudit, []time.Time) {
+		// addItem issues no credit note (it bills a proration invoice): its rows
+		// assert the server clock's read count and the audit rows' clock.
+		{"addItem", 0, func(t *testing.T, ctx context.Context, server clock.Clock, res clock.Resolver) (*capturingAudit, []time.Time) {
 			store := newMemStore()
 			subID, _ := seedSubWithItemAt(t, store, tenantID, "cus_1", "plan_a", proPeriodStart, proPeriodEnd)
-			h, audits, cn := wire(NewService(store, server), map[string]domain.Plan{
+			h, audits, cn := wire(NewService(store, server), res, map[string]domain.Plan{
 				"plan_a": {ID: "plan_a", Name: "Base A", BaseAmountCents: 2000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
 				"plan_b": {ID: "plan_b", Name: "Base B", BaseAmountCents: 1000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
 			}, paid(2000))
@@ -150,10 +153,11 @@ func TestItemRoutes_RunOnTheDecidedTime(t *testing.T) {
 	for _, e := range handlerEntries() {
 		t.Run(e.name, func(t *testing.T) {
 			server := &subSteppingClock{at: proNow.Add(30 * 24 * time.Hour)}
+			res := &subLaterOnSameClock{}
 			ctx := clock.WithSim(auth.WithTenantID(postgres.WithLivemode(context.Background(), false), "t1"), clock.Sim{At: proNow, TestClockID: "tclk_1"})
-			audits, notes := e.run(t, ctx, server)
-			if len(notes) != e.wantNotes || !allTimesAt(notes, proNow) || server.reads != 0 {
-				t.Errorf("notes issued at %v, server clock reads %d; want %d at %v, none", notes, server.reads, e.wantNotes, proNow)
+			audits, notes := e.run(t, ctx, server, res)
+			if len(notes) != e.wantNotes || !allTimesAt(notes, proNow) || server.reads != 0 || res.reads != 0 {
+				t.Errorf("notes issued at %v, server clock reads %d, resolver reads %d; want %d at %v, none, none", notes, server.reads, res.reads, e.wantNotes, proNow)
 			}
 			if len(audits.entries) == 0 {
 				t.Fatal("no audit rows")
@@ -174,10 +178,14 @@ func TestItemRoutes_AtRealTimeReadTheServersClockOnce(t *testing.T) {
 	for _, e := range handlerEntries() {
 		t.Run(e.name, func(t *testing.T) {
 			server := &subSteppingClock{at: proNow.Add(-time.Second)}
+			res := &subLaterOnSameClock{}
 			ctx := clock.WithRealTime(auth.WithTenantID(postgres.WithLivemode(context.Background(), false), "t1"))
-			audits, notes := e.run(t, ctx, server)
-			if server.reads != 1 || len(notes) != e.wantNotes || !allTimesAt(notes, proNow) {
-				t.Errorf("server clock read %d times, notes issued at %v; want one read, %d at %v", server.reads, notes, e.wantNotes, proNow)
+			audits, notes := e.run(t, ctx, server, res)
+			if server.reads != 1 || len(notes) != e.wantNotes || !allTimesAt(notes, proNow) || res.reads != 0 {
+				t.Errorf("server clock read %d times, resolver reads %d, notes issued at %v; want one read, none, %d at %v", server.reads, res.reads, notes, e.wantNotes, proNow)
+			}
+			if len(audits.entries) == 0 {
+				t.Fatal("no audit rows")
 			}
 			for _, a := range audits.entries {
 				if a.sim.TestClockID != "" {

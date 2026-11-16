@@ -960,10 +960,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 	// which released rows an invoice counts. The invoice store supplies the
 	// threshold watermarks.
 	usageSvc.SetOpenPeriodReader(usageOpenPeriods{subs: subStore, pricing: pricingStore, thresholds: invoiceStore})
-	// The subscription service decides a time itself in one place: a create,
-	// from the customer its body names. Every other subscription action gets
-	// its time from the door or from the job that runs it (see
-	// subscription.Service.clock).
+	// The subscription service decides a time itself for a create only (from
+	// the customer its body names); every other action gets its time from the
+	// door or from the job that runs it (see subscription.Service.clock).
 	subSvc.SetResolver(engine)
 	// The proration denominator (domain.CyclePeriod.CycleDays) is anchored in the
 	// tenant's billing timezone, the zone the engine advances period

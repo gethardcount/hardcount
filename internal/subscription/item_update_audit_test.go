@@ -200,11 +200,11 @@ func TestHandler_UpdateItem_ScheduledPlanChangeAuditNamesBothPlans(t *testing.T)
 	}
 }
 
-// A plan change on a WALL-CLOCK (non-pinned) subscription must NOT inject
-// sim-time context — h.auditCtx is a no-op there, so the row's sim columns stay
-// NULL and it never appears in the simulated slice.
+// A plan change on a subscription on no test clock: the door decides real
+// time for it, so the row's sim columns stay NULL and it never appears in the
+// simulated slice.
 func TestHandler_UpdateItem_PlanChangeAuditNoSimContextWhenUnpinned(t *testing.T) {
-	ctx := context.Background()
+	ctx := clock.WithRealTime(context.Background())
 	tenantID := "t1"
 
 	store := newMemStore()

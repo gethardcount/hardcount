@@ -3804,21 +3804,6 @@ func TestSubMutators_StampTheDecidedTime(t *testing.T) {
 		}
 	})
 
-	t.Run("RemoveItem", func(t *testing.T) {
-		// Two items on the sub so RemoveItem isn't rejected as last-item.
-		svc, sub := newPinned(t, domain.SubscriptionActive)
-		extra, err := svc.AddItem(decided(t, svc, sub), "t1", sub.ID, AddItemInput{PlanID: "pln_2", Quantity: 1})
-		if err != nil {
-			t.Fatalf("seed extra item: %v", err)
-		}
-		if err := svc.RemoveItem(decided(t, svc, sub), "t1", sub.ID, extra.ID); err != nil {
-			t.Fatalf("RemoveItem: %v", err)
-		}
-		// RemoveItem returns no row, and the store's DELETE writes no
-		// timestamp: this case only locks in that the removal runs on the
-		// decided context without error.
-	})
-
 	t.Run("CancelPendingItemChange", func(t *testing.T) {
 		svc, sub := newPinned(t, domain.SubscriptionActive)
 		// Schedule a plan change so there's something to cancel.

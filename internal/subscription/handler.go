@@ -929,7 +929,10 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The handler has no clock of its own: it reads the service's, the server's.
+	// One instant for the whole route: the door's decision or, at real time,
+	// one read of the server's clock (the handler takes the service's), so the
+	// handler's own reads (the proration days, the period close, changeAt)
+	// and the service's agree.
 	ctx := clock.EnsureEffectiveNow(r.Context(), h.svc.clock) // the action's time: see Service.clock
 	r = r.WithContext(ctx)
 
@@ -1021,7 +1024,7 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The handler has no clock of its own: it reads the service's, the server's.
+	// One instant for the whole route: see addItem.
 	ctx := clock.EnsureEffectiveNow(r.Context(), h.svc.clock) // the action's time: see Service.clock
 	r = r.WithContext(ctx)
 
@@ -1219,7 +1222,7 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 	subID := chi.URLParam(r, "id")
 	itemID := chi.URLParam(r, "itemID")
 
-	// The handler has no clock of its own: it reads the service's, the server's.
+	// One instant for the whole route: see addItem.
 	ctx := clock.EnsureEffectiveNow(r.Context(), h.svc.clock) // the action's time: see Service.clock
 	r = r.WithContext(ctx)
 
