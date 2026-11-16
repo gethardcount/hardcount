@@ -519,6 +519,7 @@ function PresetButtons<T extends string | number>({ presets, value, onChange }: 
         <button
           key={p.value}
           type="button"
+          aria-pressed={value === p.value}
           onClick={() => onChange(p.value)}
           className={cn(
             'px-3 py-1.5 rounded-lg text-sm border transition-colors',
@@ -740,6 +741,12 @@ function RotateKeyDialog({
         <div>
           <Label className="mb-2 block">Old key stops working</Label>
           <PresetButtons presets={ROTATE_GRACE_PRESETS} value={grace} onChange={setGrace} />
+          {grace === 0 && (
+            <p className={cn('text-sm mt-2', target.livemode ? 'text-destructive' : 'text-muted-foreground')}>
+              The old key stops working as soon as you click Rotate key. Anything still using it
+              fails until it has the new key.
+            </p>
+          )}
         </div>
 
         <DialogFooter>
