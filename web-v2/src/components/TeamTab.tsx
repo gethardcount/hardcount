@@ -270,7 +270,7 @@ export function TeamTab() {
             <AlertDialogTitle>Remove member</AlertDialogTitle>
             <AlertDialogDescription>
               {removeTarget
-                ? `Remove ${removeTarget.email} from this workspace? They'll be signed out of it and lose access immediately, and invitations they sent will stop working. You can invite them back later.`
+                ? `Remove ${removeTarget.email} from this workspace? They are signed out of it at once and can no longer sign in to it, and invitations they sent stop working. API keys stay as they are: rotate any key they may have copied. You can invite them back later.`
                 : ''}
             </AlertDialogDescription>
           </AlertDialogHeader>
