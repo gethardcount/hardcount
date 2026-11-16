@@ -8,8 +8,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/api/respond"
 )
 
-// Handler serves the API key routes. The Service writes each change's audit
-// row.
+// Handler serves the API key routes.
 type Handler struct {
 	svc *Service
 }
@@ -21,9 +20,7 @@ func NewHandler(svc *Service) *Handler {
 
 // Routes returns the key routes: POST / creates a key, GET / lists keys,
 // DELETE /{id} revokes one and POST /{id}/rotate rotates one. They are
-// mounted behind session.MiddlewareOrAPIKey, which sets the tenant. A caller
-// may revoke or rotate the key it calls with; a dashboard session is not
-// tied to a key (ADR-011).
+// mounted behind session.RequireCaller, which sets the tenant.
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Post("/", h.create)
@@ -73,7 +70,6 @@ func (h *Handler) revoke(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) rotate(w http.ResponseWriter, r *http.Request) {
-	// The body is optional: with none, the old key is revoked at once.
 	var input RotateKeyInput
 	if !respond.DecodeStrict(w, r, &input, respond.EmptyBodyOK) {
 		return

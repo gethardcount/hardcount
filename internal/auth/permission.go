@@ -15,10 +15,8 @@ const (
 
 	PermUsageRead  Permission = "usage:read"
 	PermUsageWrite Permission = "usage:write"
-	// PermUsageIngest sends usage events: POST /v1/usage-events, its
-	// /batch, and the LiteLLM callback. It is the only permission an
-	// ingest key holds (ADR-133). Backfill and the held-usage release and
-	// discard need PermUsageWrite.
+	// PermUsageIngest sends usage events. It is the only permission an
+	// ingest key holds.
 	PermUsageIngest Permission = "usage:ingest"
 
 	PermInvoiceRead  Permission = "invoice:read"
@@ -34,8 +32,7 @@ const (
 	PermAPIKeyRead  Permission = "apikey:read"
 	PermAPIKeyWrite Permission = "apikey:write"
 
-	// PermTestClockWrite grants create / advance / delete on test_clocks.
-	// Secret keys and dashboard sessions hold it; ingest keys do not.
+	// PermTestClockWrite gates the /test-clocks routes.
 	PermTestClockWrite Permission = "testclock:write"
 )
 
@@ -45,7 +42,7 @@ const (
 type KeyType string
 
 const (
-	KeyTypeSecret  KeyType = "secret"  // hc_secret_ — full access to one tenant
+	KeyTypeSecret  KeyType = "secret"  // hc_secret_ — full access to one account
 	KeyTypeIngest  KeyType = "ingest"  // hc_ingest_ — sends usage events only (ADR-133)
 	KeyTypeSession KeyType = "session" // dashboard cookie session, never stored in api_keys
 )
@@ -95,9 +92,5 @@ var keyPermissions = map[KeyType]map[Permission]bool{
 // HasPermission reports whether keyType holds perm. An unknown key type
 // holds no permission.
 func HasPermission(keyType KeyType, perm Permission) bool {
-	perms, ok := keyPermissions[keyType]
-	if !ok {
-		return false
-	}
-	return perms[perm]
+	return keyPermissions[keyType][perm]
 }

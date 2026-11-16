@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
@@ -10,8 +11,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// store reads and writes the api_keys table. The writes run on the caller's
-// transaction, so a key change commits with its audit row (Service); the
+// store reads and writes api_keys. Writes run on the caller's transaction;
 // reads open their own.
 type store struct {
 	db *postgres.DB
@@ -26,9 +26,7 @@ type ListFilter struct {
 
 const keyCols = `id, key_prefix, key_type, livemode, name, tenant_id, created_at, expires_at, revoked_at, last_used_at`
 
-// scanKey does two things for every read: it scans one row of keyCols,
-// followed by any extra columns into extra, and it sets the key's status as
-// of now (statusAt).
+// scanKey scans keyCols, then extra, and sets Status as of now (statusAt).
 func scanKey(row interface{ Scan(...any) error }, extra ...any) (domain.APIKey, error) {
 	var k domain.APIKey
 	dest := append([]any{&k.ID, &k.KeyPrefix, &k.KeyType, &k.Livemode, &k.Name, &k.TenantID,
@@ -38,6 +36,14 @@ func scanKey(row interface{ Scan(...any) error }, extra ...any) (domain.APIKey, 
 	}
 	k.Status = statusAt(k, time.Now().UTC())
 	return k, nil
+}
+
+// notFound returns errs.ErrNotFound for a query that matched no row.
+func notFound(k domain.APIKey, err error) (domain.APIKey, error) {
+	if errors.Is(err, sql.ErrNoRows) {
+		return domain.APIKey{}, errs.ErrNotFound
+	}
+	return k, err
 }
 
 // insert stores key on tx and returns the stored row. The table's trigger
@@ -57,43 +63,26 @@ func (s store) insert(ctx context.Context, tx *sql.Tx, key domain.APIKey, h stor
 // returns errs.ErrNotFound. Row-level security limits it to the
 // transaction's tenant and mode.
 func (s store) getForUpdate(ctx context.Context, tx *sql.Tx, id string) (domain.APIKey, error) {
-	k, err := scanKey(tx.QueryRowContext(ctx, `SELECT `+keyCols+` FROM api_keys WHERE id = $1 FOR UPDATE`, id))
-	if err == sql.ErrNoRows {
-		return domain.APIKey{}, errs.ErrNotFound
-	}
-	return k, err
+	return notFound(scanKey(tx.QueryRowContext(ctx, `SELECT `+keyCols+` FROM api_keys WHERE id = $1 FOR UPDATE`, id)))
 }
 
 // revoke sets revoked_at on the key with id and returns the row. A key
 // already revoked returns errs.ErrNotFound: the UPDATE matches no row.
-//
-// Revoking the tenant's last key is allowed. The operator signs in with
-// email and password (ADR-011), so revoking every API key does not lock the
-// tenant out: the operator can still sign in and create new keys.
 func (s store) revoke(ctx context.Context, tx *sql.Tx, id string) (domain.APIKey, error) {
-	k, err := scanKey(tx.QueryRowContext(ctx, `
+	return notFound(scanKey(tx.QueryRowContext(ctx, `
 		UPDATE api_keys SET revoked_at = $1
 		WHERE id = $2 AND revoked_at IS NULL
-		RETURNING `+keyCols, time.Now().UTC(), id))
-	if err == sql.ErrNoRows {
-		return domain.APIKey{}, errs.ErrNotFound
-	}
-	return k, err
+		RETURNING `+keyCols, time.Now().UTC(), id)))
 }
 
-// scheduleExpiry sets expires_at on the key with id, if it is not revoked, to
-// expiresAt, or keeps the key's own expires_at if it is earlier, and returns
-// the row or errs.ErrNotFound.
+// scheduleExpiry moves the unrevoked key's expires_at to expiresAt, never
+// later, and returns the row or errs.ErrNotFound.
 func (s store) scheduleExpiry(ctx context.Context, tx *sql.Tx, id string, expiresAt time.Time) (domain.APIKey, error) {
-	k, err := scanKey(tx.QueryRowContext(ctx, `
+	return notFound(scanKey(tx.QueryRowContext(ctx, `
 		-- LEAST ignores a NULL, so a key with no expiry takes the grace end.
 		UPDATE api_keys SET expires_at = LEAST(expires_at, $1)
 		WHERE id = $2 AND revoked_at IS NULL
-		RETURNING `+keyCols, expiresAt, id))
-	if err == sql.ErrNoRows {
-		return domain.APIKey{}, errs.ErrNotFound
-	}
-	return k, err
+		RETURNING `+keyCols, expiresAt, id)))
 }
 
 // getByPrefix returns the key with the given lookup prefix, with its status
@@ -109,14 +98,11 @@ func (s store) getByPrefix(ctx context.Context, prefix string) (domain.APIKey, s
 	defer postgres.Rollback(tx)
 
 	var h storedHash
-	key, err := scanKey(tx.QueryRowContext(ctx, `
+	key, err := notFound(scanKey(tx.QueryRowContext(ctx, `
 		SELECT `+keyCols+`, key_hash, key_salt
 		FROM api_keys
 		WHERE key_prefix = $1
-	`, prefix), &h.hash, &h.salt)
-	if err == sql.ErrNoRows {
-		return domain.APIKey{}, storedHash{}, errs.ErrNotFound
-	}
+	`, prefix), &h.hash, &h.salt))
 	if err != nil {
 		return domain.APIKey{}, storedHash{}, err
 	}
@@ -136,7 +122,6 @@ func (s store) list(ctx context.Context, filter ListFilter) ([]domain.APIKey, in
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM api_keys`).Scan(&total); err != nil {
 		return nil, 0, err
 	}
-	// The handler sends a limit of 1 to 100 (respond.ParsePage).
 	rows, err := tx.QueryContext(ctx, `SELECT `+keyCols+` FROM api_keys
 		ORDER BY created_at DESC, id DESC LIMIT $1 OFFSET $2`, filter.Limit, filter.Offset)
 	if err != nil {

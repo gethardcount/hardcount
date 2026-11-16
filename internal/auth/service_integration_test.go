@@ -235,11 +235,11 @@ func TestRevokeKey_WrongTenant(t *testing.T) {
 	}
 }
 
-// A rotation's grace period is 0 to MaxRotationGraceSeconds.
+// A rotation's grace period is 0 to 604800 seconds (7 days).
 func TestRotateKey_RefusesAGraceOutOfRange(t *testing.T) {
 	k := newKeyRig(t)
 	result := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "K", KeyType: auth.KeyTypeSecret})
-	for name, grace := range map[string]int64{"negative": -1, "over the maximum": auth.MaxRotationGraceSeconds + 1} {
+	for name, grace := range map[string]int64{"negative": -1, "over the maximum": 604801} {
 		t.Run(name, func(t *testing.T) {
 			_, err := k.svc.RotateKey(liveCtx(t), k.tenantID, result.Key.ID, auth.RotateKeyInput{ExpiresInSeconds: grace})
 			wantValidation(t, err, "expires_in_seconds")
