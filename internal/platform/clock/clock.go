@@ -1,6 +1,16 @@
 // Package clock gives code the current time. A ctx may carry a bound
 // instant, such as a test clock's frozen_time, and Now then returns that
 // instant instead of the system time.
+//
+// One piece of work runs on one time. A function that decides its own time
+// (a route whose body names its record, a public page, a Stripe event) calls
+// EnsureEffectiveNow right after it decides, with the service's Clock: a
+// clock's instant is kept, and a record on no clock gets one read of that
+// Clock bound as a real instant (the states are named on Decision). Every
+// read of the clock below then answers that instant. A fan-out that runs
+// after the request has answered, over rows that may each be on their own
+// clock, does not bind one instant for all of them: it decides each row, and
+// the row's work binds its own.
 package clock
 
 import (

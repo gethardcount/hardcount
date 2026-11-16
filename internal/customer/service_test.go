@@ -28,7 +28,7 @@ func newMemoryStore() *memoryStore {
 	}
 }
 
-func (m *memoryStore) Create(_ context.Context, tenantID string, c domain.Customer) (domain.Customer, error) {
+func (m *memoryStore) Create(ctx context.Context, tenantID string, c domain.Customer) (domain.Customer, error) {
 	for _, existing := range m.customers {
 		if existing.TenantID == tenantID && existing.ExternalID == c.ExternalID {
 			return domain.Customer{}, fmt.Errorf("%w: customer with external_id %q already exists", errs.ErrAlreadyExists, c.ExternalID)
@@ -37,6 +37,9 @@ func (m *memoryStore) Create(_ context.Context, tenantID string, c domain.Custom
 	c.ID = fmt.Sprintf("hc_cus_%d", len(m.customers)+1)
 	c.TenantID = tenantID
 	c.Status = domain.CustomerStatusActive
+	// Stamped as the Postgres store stamps them, from ctx's time.
+	now := clock.Now(ctx)
+	c.CreatedAt, c.UpdatedAt = now, now
 	m.customers[c.ID] = c
 	return c, nil
 }
@@ -627,4 +630,61 @@ func TestCustomerService_BillingProfile(t *testing.T) {
 			t.Errorf("country = %q, want normalized %q", bp.Country, "US")
 		}
 	})
+}
+
+// createServer is the server's clock: a fixed time, counting the reads it
+// answers itself (a bound instant is not a read).
+type createServer struct{ reads int }
+
+var createServerAt = time.Date(2026, 7, 8, 9, 10, 11, 0, time.UTC)
+
+func (c *createServer) Now(ctx context.Context) time.Time {
+	if at, ok := clock.EffectiveNow(ctx); ok {
+		return at
+	}
+	c.reads++
+	return createServerAt
+}
+
+// instantCapturingAudit records the instant the emission runs on.
+type instantCapturingAudit struct{ at time.Time }
+
+func (a *instantCapturingAudit) LogInTx(ctx context.Context, _ *sql.Tx, _ audit.Entry) error {
+	a.at, _ = clock.EffectiveNow(ctx)
+	return nil
+}
+
+// A create runs on one instant: pinned into a clock, the clock's frozen
+// time, with no read of the server's clock; naming no clock, one read of the
+// server's clock, which the row and its audit row both carry.
+func TestCreate_RunsOnOneInstant(t *testing.T) {
+	frozen := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
+	for _, c := range []struct {
+		name            string
+		clockID         string
+		wantAt          time.Time
+		wantServerReads int
+	}{
+		{"pinned into a clock", "hc_tclk_one", frozen, 0},
+		{"naming no clock", "", createServerAt, 1},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			svc := NewService(newMemoryStore())
+			server := &createServer{}
+			svc.SetClock(server)
+			spy := &instantCapturingAudit{}
+			svc.SetAuditLogger(spy)
+			svc.SetTestClockChecker(stubClockChecker{exists: true, frozen: frozen})
+			created, err := svc.Create(context.Background(), "tenant1", CreateInput{
+				ExternalID: "cus_one", DisplayName: "One", TestClockID: c.clockID,
+			})
+			if err != nil {
+				t.Fatalf("create: %v", err)
+			}
+			if !spy.at.Equal(c.wantAt) || !created.CreatedAt.Equal(c.wantAt) || !created.UpdatedAt.Equal(c.wantAt) || server.reads != c.wantServerReads {
+				t.Errorf("row created %v, updated %v, audit row %v after %d server reads; want all at %v after %d",
+					created.CreatedAt, created.UpdatedAt, spy.at, server.reads, c.wantAt, c.wantServerReads)
+			}
+		})
+	}
 }

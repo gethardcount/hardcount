@@ -128,10 +128,17 @@ type Handler struct {
 	noBaseWarned sync.Once
 	// resolver decides the page's time from its invoice (decide).
 	resolver clock.Resolver
+	// clock is the server's clock: decide reads real time from it once, for
+	// a page whose invoice is on no clock.
+	clock clock.Clock
 }
 
 // SetResolver wires the clock resolver the page decides its time with.
 func (h *Handler) SetResolver(r clock.Resolver) { h.resolver = r }
+
+// SetClock wires the server's clock (see the clock field). The router passes
+// the clock the server bills by; the default is the machine's.
+func (h *Handler) SetClock(c clock.Clock) { h.clock = c }
 
 type Deps struct {
 	Invoices    InvoiceResolver
@@ -153,6 +160,7 @@ func New(deps Deps) *Handler {
 		stripe:      deps.Stripe,
 		stripeReady: deps.StripeReady,
 		baseURL:     deps.BaseURL,
+		clock:       clock.Real(),
 	}
 }
 
@@ -360,11 +368,15 @@ func (h *Handler) resolveInvoice(w http.ResponseWriter, r *http.Request) (domain
 
 // decide decides the page's time from the invoice its token names
 // (clock.DecideOrRealTime: a public page does not come through the API's
-// door). The checkout it opens, and that checkout's audit row, carry the
-// decision. A failure is clock.ErrUndecided, and the page answers 503 with
-// nothing done.
+// door) and binds it (see the clock package's doc). The checkout it opens,
+// and that checkout's audit row, carry the decision. A failure is clock.ErrUndecided, and the page answers
+// 503 with nothing done.
 func (h *Handler) decide(ctx context.Context, inv domain.Invoice) (context.Context, error) {
-	return clock.DecideOrRealTime(ctx, h.resolver, clock.Pin{TenantID: inv.TenantID, InvoiceID: inv.ID})
+	decided, err := clock.DecideOrRealTime(ctx, h.resolver, clock.Pin{TenantID: inv.TenantID, InvoiceID: inv.ID})
+	if err != nil {
+		return ctx, err
+	}
+	return clock.EnsureEffectiveNow(decided, h.clock), nil
 }
 
 func (h *Handler) viewInvoice(w http.ResponseWriter, r *http.Request) {
