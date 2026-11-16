@@ -91,10 +91,11 @@ func (s *Service) RevokeAllForUser(ctx context.Context, userID string) error {
 	return s.store.RevokeAllForUser(ctx, userID)
 }
 
-// EndAllForUserTx revokes every active session of a user on the caller's
-// transaction, so the sign-out commits or rolls back with the caller's
-// change. The password reset calls it. See postgresStore.EndAllForUserTx for
-// what the transaction must see.
+// EndAllForUserTx is the variant of RevokeAllForUser that joins the
+// caller's transaction, so the sign-out commits or rolls back with the
+// caller's change. It does not commit. tx must be a bypass transaction: a
+// tenant transaction's row-level security hides the user's sessions in
+// other workspaces and in the other mode.
 func (s *Service) EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID string) error {
 	return s.store.EndAllForUserTx(ctx, tx, userID)
 }

@@ -7,7 +7,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/user"
@@ -53,8 +52,8 @@ func TestResetPassword_VoidsSiblingTokens(t *testing.T) {
 	// Proven by trying to redeem them: redemption is what a second holder
 	// of a link needs.
 	for _, h := range []string{"hash_sibling_a", "hash_sibling_b"} {
-		if err := redeem(h); !errors.Is(err, errs.ErrNotFound) {
-			t.Errorf("redeem sibling token %s after another token reset the password: err = %v, want errs.ErrNotFound", h, err)
+		if err := redeem(h); !errors.Is(err, user.ErrResetLinkDeadForTest) {
+			t.Errorf("redeem sibling token %s after another token reset the password: err = %v, want the dead-link error", h, err)
 		}
 	}
 	if err := redeem("hash_bystander"); err != nil {

@@ -90,8 +90,8 @@ func HashPassword(plaintext string) (string, error) {
 	return string(hash), nil
 }
 
-// ValidatePassword runs the complexity checks without hashing.
-// HashPassword runs it first.
+// ValidatePassword runs the password rules without hashing. HashPassword
+// calls it.
 func ValidatePassword(plaintext string) error {
 	if len(plaintext) < MinPasswordLength {
 		return errs.Invalid("password",
@@ -254,13 +254,11 @@ func (s *Service) IssueResetToken(ctx context.Context, email string) (plaintext,
 	return rawToken, tenants[0].TenantID, u.ID, nil
 }
 
-// CheckResetToken is the non-consuming counterpart of
-// ConfirmReset. The reset-password page calls it on mount and
-// renders the form only when nil is returned; otherwise it shows
-// "this link is no longer valid". Stops the operator from filling
-// in the form and only learning at submit-time that the token was
-// already used (e.g. they reset earlier and clicked the email link
-// from history).
+// CheckResetToken returns nil when the reset link can still be used: the
+// token is unused and unexpired, and its user belongs to a workspace, the
+// same rule ConfirmReset applies. Otherwise it returns the token error. It
+// spends nothing; the reset-password page calls it before it shows the
+// form, and ConfirmReset calls it before the slow hash.
 func (s *Service) CheckResetToken(ctx context.Context, plaintext string) error {
 	if plaintext == "" {
 		return errs.Invalid("token", "reset token is invalid, expired, or already used")
@@ -276,30 +274,42 @@ func (s *Service) CheckResetToken(ctx context.Context, plaintext string) error {
 }
 
 // ConfirmReset sets newPassword for the user whose reset token is
-// plaintext, and returns that user. The password is checked and hashed
-// before the transaction opens, so a password that fails the check leaves
-// the token unspent and bcrypt holds no row lock. One transaction then
-// spends the token, voids the user's other tokens, sets the hash, ends every
-// session of the user and writes the password_reset_completed audit row, so
-// either all of it happens or none of it does. A token that is unknown,
-// expired or used, or a user with no workspace, gets the same token error.
+// plaintext, and returns that user. It checks the link first and answers a
+// dead link with the token error before any bcrypt work, so a dead link sent
+// with a bad password gets the token error. It then checks and hashes the
+// password outside any transaction: a refused password spends nothing, and
+// bcrypt holds no row lock. One transaction then spends the token, voids the
+// user's other tokens, sets the hash, ends every session of the user and
+// writes the password_reset_completed audit row, so either all of it happens
+// or none of it does. A link used up between the check and the transaction
+// still gets the token error.
 func (s *Service) ConfirmReset(ctx context.Context, plaintext, newPassword string) (domain.User, error) {
+	if err := s.CheckResetToken(ctx, plaintext); err != nil {
+		return domain.User{}, err
+	}
 	hash, err := HashPassword(newPassword)
 	if err != nil {
 		return domain.User{}, err
 	}
+	// A step's error is formatted with %v, not wrapped: whatever it carries,
+	// such as a not-found, it is a fault and answers 500.
 	u, err := s.store.ResetPassword(ctx, hashResetToken(plaintext), hash, func(tx *sql.Tx, userID string) error {
 		if err := s.sessions.EndAllForUserTx(ctx, tx, userID); err != nil {
-			return fmt.Errorf("end sessions: %w", err)
+			return fmt.Errorf("end sessions: %v", err)
 		}
-		// The account owner held the token, so they are the actor.
-		return s.audit.LogInTx(auth.WithUserID(ctx, userID), tx, audit.Entry{
+		// The account owner held the token, so they are the actor. The client
+		// address and the request id are already on ctx (the root
+		// audit-coverage and request-id middlewares put them there).
+		if err := s.audit.LogInTx(auth.WithUserID(ctx, userID), tx, audit.Entry{
 			Action:       "password_reset_completed",
 			ResourceType: "user",
 			ResourceID:   userID,
-		})
+		}); err != nil {
+			return fmt.Errorf("write the audit row: %v", err)
+		}
+		return nil
 	})
-	if errors.Is(err, errs.ErrNotFound) {
+	if errors.Is(err, errResetLinkDead) {
 		return domain.User{}, errs.Invalid("token", "reset token is invalid, expired, or already used")
 	}
 	if err != nil {

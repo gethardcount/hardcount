@@ -62,17 +62,19 @@ func (h *Handler) SetLoginThrottle(t *LoginThrottle) { h.throttle = t }
 // AuditRecorder is the narrow audit surface the auth handler needs — kept here
 // (not an import of *audit.Logger) so internal/user stays decoupled. Production
 // wires *audit.Logger via SetAuditLogger in router.go. Optional: nil = the
-// handler skips audit writes (login/logout/reset still work; they just leave no
-// row), which is the safe default for the unit tests that build a bare handler.
+// handler skips audit writes (login, logout and the reset request still work;
+// they just leave no row), which is the safe default for the unit tests that
+// build a bare handler.
 type AuditRecorder interface {
 	Log(ctx context.Context, tenantID, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
 }
 
-// SetAuditLogger wires the audit recorder used to log authenticated auth events
-// (login, logout, mode change, password-reset request). Without it those
-// events are not audited. Failed logins are NOT routed here — they're pre-auth (no tenant to
-// scope a per-tenant audit row, and surfacing email-existence in the log would
-// be an enumeration oracle), so they go to the structured security log instead.
+// SetAuditLogger wires the audit recorder used to log authenticated auth
+// events (login, logout, mode change, password-reset request). Without it
+// those events are not audited. Failed logins are NOT routed here — they're
+// pre-auth (no tenant to scope a per-tenant audit row, and surfacing
+// email-existence in the log would be an enumeration oracle), so they go to
+// the structured security log instead.
 func (h *Handler) SetAuditLogger(a AuditRecorder) { h.auditLogger = a }
 
 // auditAuthEvent writes one audit row for an authenticated auth event. It

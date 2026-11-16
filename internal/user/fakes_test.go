@@ -15,7 +15,8 @@ import (
 
 // fakeUserStore is an in-memory Store for the handler tests that sign in or
 // request a reset. The password reset itself is tested on the real store
-// (confirm_reset_integration_test.go), so ResetPassword here refuses.
+// (confirm_reset_integration_test.go), so ResetPassword here only counts its
+// calls and refuses.
 type fakeUserStore struct {
 	// loginUser, when set, is returned by GetByEmail on a matching email so the
 	// login path can run end-to-end; tenants is returned by TenantsForUser.
@@ -25,6 +26,8 @@ type fakeUserStore struct {
 	// store returns ErrResetSendCapped there once the account is over its
 	// per-window send budget.
 	createTokenErr error
+	// resetCalls counts ResetPassword calls.
+	resetCalls int
 }
 
 func (f *fakeUserStore) GetByEmail(ctx context.Context, email string) (domain.User, error) {
@@ -49,6 +52,7 @@ func (f *fakeUserStore) CreateResetToken(ctx context.Context, userID, tokenHash 
 	return domain.PasswordResetToken{}, nil
 }
 func (f *fakeUserStore) ResetPassword(context.Context, string, string, func(*sql.Tx, string) error) (domain.User, error) {
+	f.resetCalls++
 	return domain.User{}, errors.New("fakeUserStore: the password reset is tested on the real store")
 }
 func (f *fakeUserStore) LookupResetToken(ctx context.Context, tokenHash string) (string, error) {
@@ -80,7 +84,9 @@ func (r *recordingSessionStore) UpdateLivemode(ctx context.Context, idHash strin
 }
 
 // refusingAuditTx satisfies AuditTxWriter for handler tests whose route
-// writes no in-transaction audit row.
+// writes no in-transaction audit row. It refuses rather than accepts, so a
+// test that does reach the reset's transaction fails loudly instead of
+// passing without an audit row.
 type refusingAuditTx struct{}
 
 func (refusingAuditTx) LogInTx(context.Context, *sql.Tx, audit.Entry) error {

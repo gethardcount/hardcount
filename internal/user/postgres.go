@@ -198,14 +198,21 @@ func (s *PostgresStore) CreateResetToken(ctx context.Context, userID, tokenHash 
 	return t, nil
 }
 
+// errResetLinkDead is ResetPassword's answer for a link that cannot be
+// used: the token is unknown, expired or used, or its user belongs to no
+// workspace. Only this error becomes the dead-link answer; any other error,
+// including one from the hook, is a fault.
+var errResetLinkDead = errors.New("user: reset link cannot be used")
+
 // ResetPassword redeems a reset token and sets the user's password hash in
 // one bypass transaction. In order, it spends the token, voids the user's
 // other unused tokens, writes passwordHash, finds the user's first-joined
 // workspace (the one login picks), stamps app.tenant_id with it and
-// app.livemode off for an audit row, and calls then on the transaction.
-// It commits only if then returns nil.
+// app.livemode off for an audit row, and calls then. then runs last, on the
+// same transaction, with the token's owner. It must not commit or roll back
+// tx; an error it returns rolls the whole reset back and is returned.
 //
-// It returns errs.ErrNotFound, and changes nothing, when the token is
+// It returns errResetLinkDead, and changes nothing, when the token is
 // unknown, expired or used, or when the user belongs to no workspace: such a
 // user cannot sign in, and an audit row has no tenant to go to.
 func (s *PostgresStore) ResetPassword(ctx context.Context, tokenHash, passwordHash string, then func(tx *sql.Tx, userID string) error) (domain.User, error) {
@@ -227,7 +234,7 @@ func (s *PostgresStore) ResetPassword(ctx context.Context, tokenHash, passwordHa
 		RETURNING user_id
 	`, tokenHash).Scan(&userID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return domain.User{}, errs.ErrNotFound
+		return domain.User{}, errResetLinkDead
 	}
 	if err != nil {
 		return domain.User{}, fmt.Errorf("spend reset token: %w", err)
@@ -261,7 +268,7 @@ func (s *PostgresStore) ResetPassword(ctx context.Context, tokenHash, passwordHa
 		LIMIT 1
 	`, userID).Scan(&tenantID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return domain.User{}, errs.ErrNotFound
+		return domain.User{}, errResetLinkDead
 	}
 	if err != nil {
 		return domain.User{}, fmt.Errorf("find workspace: %w", err)
@@ -285,10 +292,10 @@ func (s *PostgresStore) ResetPassword(ctx context.Context, tokenHash, passwordHa
 	return u, nil
 }
 
-// LookupResetToken is the read-only counterpart — same validity gate
-// (un-used, un-expired) but no UPDATE. Used by the reset-password
-// page on mount to decide between rendering the form vs. an "this
-// link is no longer valid" message.
+// LookupResetToken returns the user id of a reset link that can still be
+// used: the token is unused and unexpired, and its user belongs to a
+// workspace. That is the rule ResetPassword applies, without spending the
+// token. Returns errs.ErrNotFound otherwise.
 func (s *PostgresStore) LookupResetToken(ctx context.Context, tokenHash string) (string, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -297,10 +304,11 @@ func (s *PostgresStore) LookupResetToken(ctx context.Context, tokenHash string) 
 	defer postgres.Rollback(tx)
 	var userID string
 	row := tx.QueryRowContext(ctx, `
-		SELECT user_id FROM password_reset_tokens
-		WHERE token_hash = $1
-		  AND used_at IS NULL
-		  AND expires_at > now()
+		SELECT t.user_id FROM password_reset_tokens t
+		WHERE t.token_hash = $1
+		  AND t.used_at IS NULL
+		  AND t.expires_at > now()
+		  AND EXISTS (SELECT 1 FROM user_tenants ut WHERE ut.user_id = t.user_id)
 	`, tokenHash)
 	if err := row.Scan(&userID); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {

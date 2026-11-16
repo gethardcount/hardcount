@@ -51,7 +51,7 @@ func TestConfirmReset_EndsEverySession(t *testing.T) {
 	type row struct {
 		actorType, actorID, tenantID string
 		livemode                     bool
-		ip                           sql.NullString
+		ip, requestID                sql.NullString
 	}
 	var rows []row
 	func() {
@@ -61,7 +61,7 @@ func TestConfirmReset_EndsEverySession(t *testing.T) {
 		}
 		defer postgres.Rollback(tx)
 		rs, err := tx.QueryContext(t.Context(), `
-			SELECT actor_type, actor_id, tenant_id, livemode, ip_address::text
+			SELECT actor_type, actor_id, tenant_id, livemode, ip_address::text, request_id
 			FROM audit_log
 			WHERE action = 'password_reset_completed' AND resource_type = 'user' AND resource_id = $1`, userID)
 		if err != nil {
@@ -70,7 +70,7 @@ func TestConfirmReset_EndsEverySession(t *testing.T) {
 		defer func() { _ = rs.Close() }()
 		for rs.Next() {
 			var r row
-			if err := rs.Scan(&r.actorType, &r.actorID, &r.tenantID, &r.livemode, &r.ip); err != nil {
+			if err := rs.Scan(&r.actorType, &r.actorID, &r.tenantID, &r.livemode, &r.ip, &r.requestID); err != nil {
 				t.Fatal(err)
 			}
 			rows = append(rows, r)
@@ -82,8 +82,9 @@ func TestConfirmReset_EndsEverySession(t *testing.T) {
 	if len(rows) != 1 {
 		t.Fatalf("password_reset_completed rows for %s = %d, want 1: %+v", userID, len(rows), rows)
 	}
-	if r := rows[0]; r.actorType != "user" || r.actorID != userID || r.tenantID != tenantID || r.livemode || !r.ip.Valid || r.ip.String == "" {
-		t.Errorf("audit row = %+v, want actor user/%s, tenant %s, test mode, and the client IP", r, userID, tenantID)
+	if r := rows[0]; r.actorType != "user" || r.actorID != userID || r.tenantID != tenantID || r.livemode ||
+		!r.ip.Valid || r.ip.String == "" || !r.requestID.Valid || r.requestID.String == "" {
+		t.Errorf("audit row = %+v, want actor user/%s, tenant %s, test mode, the client IP and the request id", r, userID, tenantID)
 	}
 
 	flowDo(t, ts, "POST", "/v1/auth/login", flowReq{body: map[string]any{"email": email, "password": oldPassword}}).want(t, 401, "sign in with the old password")
