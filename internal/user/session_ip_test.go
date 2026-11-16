@@ -11,7 +11,6 @@ import (
 
 	mw "github.com/gethardcount/hardcount/internal/api/middleware"
 	"github.com/gethardcount/hardcount/internal/domain"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/session"
 )
 
@@ -44,7 +43,7 @@ func TestLogin_SessionIPIsTheTrustedClientIP(t *testing.T) {
 			u := domain.User{ID: "usr_1", Email: "op@acme.com", PasswordHash: string(hash)}
 			store := &fakeUserStore{loginUser: &u, tenants: []domain.UserTenant{{UserID: "usr_1", TenantID: "ten_acme"}}}
 			sessions := &recordingSessionStore{}
-			h := NewHandler(NewService(store, clock.Real()), session.NewService(sessions),
+			h := NewHandler(newFakeService(store), session.NewService(sessions),
 				session.DefaultCookieConfig("local"), stubEmailSender{}, "", false)
 			rec := &recordingAuditRecorder{}
 			h.SetAuditLogger(rec)

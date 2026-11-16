@@ -32,7 +32,6 @@ type SessionService interface {
 	Issue(ctx context.Context, in session.IssueInput) (string, session.Session, error)
 	Resolve(ctx context.Context, rawID string) (session.Session, error)
 	Revoke(ctx context.Context, rawID string) error
-	RevokeAllForUser(ctx context.Context, userID string) error
 	SetLivemode(ctx context.Context, rawID string, livemode bool) error
 }
 
@@ -63,17 +62,19 @@ func (h *Handler) SetLoginThrottle(t *LoginThrottle) { h.throttle = t }
 // AuditRecorder is the narrow audit surface the auth handler needs — kept here
 // (not an import of *audit.Logger) so internal/user stays decoupled. Production
 // wires *audit.Logger via SetAuditLogger in router.go. Optional: nil = the
-// handler skips audit writes (login/logout/reset still work; they just leave no
-// row), which is the safe default for the unit tests that build a bare handler.
+// handler skips audit writes (login, logout and the reset request still work;
+// they just leave no row), which is the safe default for the unit tests that
+// build a bare handler.
 type AuditRecorder interface {
 	Log(ctx context.Context, tenantID, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
 }
 
-// SetAuditLogger wires the audit recorder used to log authenticated auth events
-// (login, logout, mode change, password reset). Without it those events are not
-// audited. Failed logins are NOT routed here — they're pre-auth (no tenant to
-// scope a per-tenant audit row, and surfacing email-existence in the log would
-// be an enumeration oracle), so they go to the structured security log instead.
+// SetAuditLogger wires the audit recorder used to log authenticated auth
+// events (login, logout, mode change, password-reset request). Without it
+// those events are not audited. Failed logins are NOT routed here — they're
+// pre-auth (no tenant to scope a per-tenant audit row, and surfacing
+// email-existence in the log would be an enumeration oracle), so they go to
+// the structured security log instead.
 func (h *Handler) SetAuditLogger(a AuditRecorder) { h.auditLogger = a }
 
 // auditAuthEvent writes one audit row for an authenticated auth event. It
@@ -532,15 +533,10 @@ func (h *Handler) checkPasswordResetToken(w http.ResponseWriter, r *http.Request
 	respond.JSON(w, r, http.StatusOK, map[string]any{"valid": true})
 }
 
-// confirmPasswordReset validates the reset token, applies the new
-// password, and revokes every active session for the user (forces a
-// fresh login). Revoking matters for the threat the reset is most
-// often run against: a thief who already has a live hardcount_session
-// cookie. Without the fan-out revoke the stolen cookie would ride out
-// its 7-day TTL even after the operator resets. Surface the
-// password-validation error inline (e.g. "must be at least 12
-// characters") so the dashboard can highlight the field; collapse
-// token failures into a single 422.
+// confirmPasswordReset sets a new password from a reset link. The password
+// change, the sign-out of every session of the user and the audit row commit
+// together (Service.ConfirmReset). A password that fails the check is a 422
+// on param password; a dead link is a 422 on param token.
 func (h *Handler) confirmPasswordReset(w http.ResponseWriter, r *http.Request) {
 	var req ConfirmResetReq
 	if !respond.DecodeStrict(w, r, &req) {
@@ -555,24 +551,10 @@ func (h *Handler) confirmPasswordReset(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	u, err := h.users.ConsumeResetToken(r.Context(), req.Token, req.Password)
+	u, err := h.users.ConfirmReset(r.Context(), req.Token, req.Password)
 	if err != nil {
-		// errs.Invalid (password validation) and errs.NotFound (token
-		// invalid/expired/used) both map cleanly; let respond.FromError
-		// do the routing.
 		respond.FromError(w, r, err, "password_reset")
 		return
-	}
-
-	// Revoke any sessions minted before the reset — including one a
-	// thief opened from a stolen cookie, which is exactly the case the
-	// operator is resetting to shut down. Failure here is logged but
-	// not surfaced: the password is already changed, so the reset
-	// succeeded; we don't want a transient session-store error to make
-	// the operator think it didn't.
-	if revokeErr := h.sessions.RevokeAllForUser(r.Context(), u.ID); revokeErr != nil {
-		slog.Error("session: revoke-all-for-user after password reset failed",
-			"user_id", u.ID, "err", revokeErr)
 	}
 
 	// The reset link proved the inbox. It marks this browser, so a person
@@ -584,14 +566,6 @@ func (h *Handler) confirmPasswordReset(w http.ResponseWriter, r *http.Request) {
 		if err := h.throttle.InboxProved(w, r, u.Email); err != nil {
 			slog.ErrorContext(r.Context(), "auth: sign-in throttle did not mark the browser after a password reset", "user_id", u.ID, "error", err)
 		}
-	}
-
-	// Audit the completed reset — a password change + all-session revocation is
-	// a high-value account-takeover signal. Actor is the account owner (they
-	// held the token); tenant resolved separately since domain.User carries none.
-	if tenantID, terr := h.users.TenantForUser(r.Context(), u.ID); terr == nil {
-		// resource_id = the user id; the reader resolves the address. Not stored.
-		h.auditAuthEvent(r.Context(), r, u.ID, tenantID, "password_reset_completed", u.ID, "", nil)
 	}
 
 	respond.JSON(w, r, http.StatusOK, map[string]string{

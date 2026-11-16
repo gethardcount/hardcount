@@ -2,6 +2,7 @@ package user
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"time"
 
@@ -46,31 +47,28 @@ type Store interface {
 	// TouchLastLogin updates last_login_at on successful login.
 	TouchLastLogin(ctx context.Context, id string, at time.Time) error
 
-	// SetPassword updates the password_hash. Used by the reset flow.
-	SetPassword(ctx context.Context, id, passwordHash string) error
-
 	// TenantsForUser returns the tenant memberships for a user. v1 has
 	// 1:1 user:tenant; the shape supports growth.
 	TenantsForUser(ctx context.Context, userID string) ([]domain.UserTenant, error)
 
 	// CreateResetToken enforces the per-account send cap and inserts a row
-	// whose token_hash matches the
-	// caller-provided hash. Plaintext token never enters the DB.
+	// whose token_hash matches the caller-provided hash. Plaintext token
+	// never enters the DB. Over the cap it returns ErrResetSendCapped and
+	// writes nothing; the caller sends no email and answers with the same
+	// fixed generic body.
 	CreateResetToken(ctx context.Context, userID, tokenHash string, expiresAt time.Time) (domain.PasswordResetToken, error)
-	// Over the cap it returns ErrResetSendCapped and writes nothing — the
-	// caller sends no email and answers with the same fixed generic body.
 
-	// ConsumeResetToken atomically looks up the token by hash, asserts
-	// it isn't used or expired, and stamps used_at. Returns the token's
-	// owning user_id.
-	ConsumeResetToken(ctx context.Context, tokenHash string) (string, error)
+	// ResetPassword spends the token whose hash is tokenHash, voids the
+	// user's other tokens, sets passwordHash and stamps the transaction for
+	// an audit row in the user's first-joined workspace. then runs last, on
+	// the same transaction, with the token's owner. It must not commit or
+	// roll back tx; an error it returns rolls the whole reset back and is
+	// returned. Returns errResetLinkDead, and changes nothing, for a token
+	// that is unknown, expired or used, or a user with no workspace.
+	ResetPassword(ctx context.Context, tokenHash, passwordHash string, then func(tx *sql.Tx, userID string) error) (domain.User, error)
 
-	// LookupResetToken is the non-consuming counterpart of
-	// ConsumeResetToken — returns the owning user_id if the token is
-	// currently valid (not used, not expired) without flipping
-	// used_at. Backs the page-mount validity check on the reset-
-	// password screen so the operator who clicks an already-used
-	// email link gets "this link is no longer valid" instead of a
-	// form that rejects them at submit time.
+	// LookupResetToken returns the owning user_id when ResetPassword would
+	// accept the token: unused, unexpired, and its user belongs to a
+	// workspace. It changes nothing. Returns errs.ErrNotFound otherwise.
 	LookupResetToken(ctx context.Context, tokenHash string) (string, error)
 }
