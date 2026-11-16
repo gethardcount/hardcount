@@ -39,7 +39,7 @@ export type GetWhoami200 = {
   smtp_configured: boolean;
   /** Dashboard session only. The signed-in user's id (`hc_usr_…`). */
   user_id?: string;
-  /** Dashboard session only. The user's sign-in email; absent if it could not be read. */
+  /** Dashboard session only. The user's sign-in email. */
   email?: string;
   /** API key only. The key's id (`hc_key_…`). */
   key_id?: string;

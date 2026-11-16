@@ -23661,7 +23661,7 @@ paths:
                     description: Dashboard session only. The signed-in user's id (`hc_usr_…`).
                   email:
                     type: string
-                    description: Dashboard session only. The user's sign-in email; absent if it could not be read.
+                    description: Dashboard session only. The user's sign-in email.
                   key_id:
                     type: string
                     description: API key only. The key's id (`hc_key_…`).
@@ -27747,7 +27747,7 @@ paths:
                 error:
                   type: invalid_request_error
                   code: validation_error
-                  message: must be <= 604800 (7 days)
+                  message: must be at most 604800 seconds (7 days)
                   request_id: req_dbjg652q3gpgqfoq5cd0
                   param: expires_in_seconds
         "429":

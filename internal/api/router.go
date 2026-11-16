@@ -1809,10 +1809,13 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 				"smtp_configured": emailSender.IsConfigured(),
 			}
 			if uid := auth.UserID(ctx); uid != "" {
-				out["user_id"] = uid
-				if u, err := userSvc.GetByID(ctx, uid); err == nil {
-					out["email"] = u.Email
+				u, err := userSvc.GetByID(ctx, uid)
+				if err != nil {
+					respond.FromError(w, req, err, "whoami")
+					return
 				}
+				out["user_id"] = uid
+				out["email"] = u.Email
 			}
 			if kid := auth.KeyID(ctx); kid != "" {
 				out["key_id"] = kid
