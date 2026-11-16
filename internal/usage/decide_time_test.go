@@ -152,11 +152,12 @@ func TestBatchIngest_EachEventIsDatedByItsOwnCustomer(t *testing.T) {
 	store := newMemStore()
 	svc := NewService(store)
 	svc.SetClock(clock.NewFake(serverNow))
-	svc.SetResolver(&customerResolver{sims: map[string]clock.Sim{
+	res := &customerResolver{sims: map[string]clock.Sim{
 		"cus_a": {At: frozenA, TestClockID: "clk_a"},
 		"cus_b": {At: serverNow.Add(-7 * time.Hour)}, // on no clock
 		"cus_c": {At: frozenC, TestClockID: "clk_c"},
-	}})
+	}}
+	svc.SetResolver(res)
 	want := map[string]time.Time{}
 	var events []IngestInput
 	for i, c := range []struct {
@@ -177,6 +178,9 @@ func TestBatchIngest_EachEventIsDatedByItsOwnCustomer(t *testing.T) {
 		if !e.Timestamp.Equal(want[e.IdempotencyKey]) {
 			t.Errorf("%s (%s) at %v; want %v", e.IdempotencyKey, e.CustomerID, e.Timestamp, want[e.IdempotencyKey])
 		}
+	}
+	if res.reads != len(events) {
+		t.Errorf("%d resolver reads; want one per event (%d)", res.reads, len(events))
 	}
 }
 
@@ -256,5 +260,53 @@ func TestCostDashboard_AFailedSecondClockReadIsThePagesRefusal(t *testing.T) {
 	var de *errs.DomainError
 	if !errors.Is(err, errs.ErrUnavailable) || !errors.As(err, &de) || de.Message != costDashboardUnavailable || res.reads != 2 {
 		t.Fatalf("err %v, reads %d; want the page's refusal after the second read", err, res.reads)
+	}
+}
+
+// The order of answers on a single ingest and a batch: an invalid event (no
+// meter named) whose customer's clock cannot be read is refused as invalid,
+// with no clock read, as before its time was read inside build.
+func TestUsage_AnInvalidEventIsRefusedBeforeItsClockIsRead(t *testing.T) {
+	unreadable := errors.New("connection reset by peer")
+	for _, c := range []struct {
+		name   string
+		ingest func(*Service) error
+	}{
+		{"single", func(s *Service) error {
+			_, err := s.Ingest(testMode(), "t1", IngestInput{CustomerID: "cus_1", Quantity: dec(1)})
+			return err
+		}},
+		{"batch", func(s *Service) error {
+			_, batchErrs := s.BatchIngest(testMode(), "t1", []IngestInput{{CustomerID: "cus_1", Quantity: dec(1)}})
+			if len(batchErrs) != 1 {
+				return fmt.Errorf("%d errors: %v", len(batchErrs), batchErrs)
+			}
+			return batchErrs[0]
+		}},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			svc := NewService(&heldMemStore{memStore: newMemStore()})
+			res := &answerResolver{err: unreadable}
+			svc.SetResolver(res)
+			err := c.ingest(svc)
+			if !errors.Is(err, errs.ErrValidation) || errors.Is(err, errs.ErrUnavailable) || res.reads != 0 {
+				t.Errorf("err %v, %d clock reads; want invalid (not unavailable), and no read", err, res.reads)
+			}
+		})
+	}
+}
+
+// build's caller decides; on a context nobody decided, build refuses with an
+// internal error, and the ingest writes nothing, rather than stamp the
+// machine's time.
+func TestBuild_RefusesAnUndecidedContext(t *testing.T) {
+	store := newMemStore()
+	svc := NewService(store)
+	_, err := svc.ingestAudited(testMode(), "t1", IngestInput{CustomerID: "cus_1", MeterID: "mtr_1", Quantity: dec(1)}, domain.UsageOriginAPI, nil)
+	if !errors.Is(err, errBuildUndecided) {
+		t.Fatalf("err %v; want errBuildUndecided", err)
+	}
+	if len(store.events) != 0 {
+		t.Errorf("%d events written; want none", len(store.events))
 	}
 }
