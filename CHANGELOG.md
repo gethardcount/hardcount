@@ -127,7 +127,7 @@ original text.
 
 ### Fixed
 
-- **The API keys page says when a rotated key's old key stops, which mode a new key works in, and each key's type on a phone.** The rotate dialog promised the time you picked even when the old key expires sooner ([#PRNUM](https://github.com/gethardcount/hardcount/pull/PRNUM)).
+- **The API keys page says when a rotated key's old key stops, which mode a new key works in, and each key's type on a phone.** The rotate dialog promised the time you picked even when the old key expires sooner ([#1827](https://github.com/gethardcount/hardcount/pull/1827)).
 - **`GET /v1/whoami` answers an error when the signed-in user cannot be read.** It answered `200` without `email`. Three API key validation messages are plainer ([#1825](https://github.com/gethardcount/hardcount/pull/1825)).
 - **An expired invitation no longer blocks a new one to the same address.** Inviting someone whose earlier invitation expired answered `409` and the dashboard offered no way to clear it; the new invitation now replaces the expired one ([#1817](https://github.com/gethardcount/hardcount/pull/1817)).
 - **An invoice finalized through the API and paid at once from credits has `paid_at` equal to `issued_at`.** The timestamps one API request writes now share one time; `paid_at` was read a moment later before ([#1815](https://github.com/gethardcount/hardcount/pull/1815)).
