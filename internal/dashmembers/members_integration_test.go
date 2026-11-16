@@ -324,6 +324,10 @@ func TestInviteGates(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list: %v", err)
 	}
+	other := testutil.CreateTestTenant(t, h.db, "Another Workspace")
+	if err := h.svc.Revoke(ctx, other, invs[0].ID); !errors.Is(err, errs.ErrNotFound) {
+		t.Fatalf("revoke from another workspace: got %v, want ErrNotFound", err)
+	}
 	if err := h.svc.Revoke(ctx, h.tenantID, invs[0].ID); err != nil {
 		t.Fatalf("revoke: %v", err)
 	}
