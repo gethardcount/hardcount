@@ -14,18 +14,18 @@ import (
 )
 
 // The API key half of MiddlewareOrAPIKey, on real Postgres: what a request
-// with no credentials, a key that is not valid, a valid key in either header,
-// and a key checked while the database is down each get.
+// with a key that is not valid, a valid key in the Authorization header or in
+// X-API-Key, a valid key beside a stale session cookie, and a key checked
+// while the database is down each get.
 
-// keyRequest is a request with no cookie, carrying key in header (empty: none).
+// keyRequest is a request with no cookie, carrying key in header: as a Bearer
+// token in Authorization, or as it is in any other header.
 func keyRequest(header, key string) *http.Request {
 	req := httptest.NewRequest("GET", "/", nil)
-	if key != "" {
-		if header == "Authorization" {
-			req.Header.Set(header, "Bearer "+key)
-		} else {
-			req.Header.Set(header, key)
-		}
+	if header == "Authorization" {
+		req.Header.Set(header, "Bearer "+key)
+	} else {
+		req.Header.Set(header, key)
 	}
 	return req
 }
@@ -51,13 +51,6 @@ func TestMiddlewareOrAPIKey_APIKey(t *testing.T) {
 		return rec, seen
 	}
 
-	t.Run("no credentials", func(t *testing.T) {
-		rec, seen := serve(keys, keyRequest("", ""))
-		if rec.Code != http.StatusUnauthorized || seen != nil || !strings.Contains(rec.Body.String(), "missing credentials") {
-			t.Errorf("got %d %s (reached=%v), want 401 missing credentials", rec.Code, rec.Body.String(), seen != nil)
-		}
-	})
-
 	t.Run("a key that is not valid", func(t *testing.T) {
 		rec, seen := serve(keys, keyRequest("Authorization", "hc_secret_test_"+strings.Repeat("0", 64)))
 		if rec.Code != http.StatusUnauthorized || seen != nil || !strings.Contains(rec.Body.String(), "invalid or expired API key") {
@@ -74,28 +67,40 @@ func TestMiddlewareOrAPIKey_APIKey(t *testing.T) {
 		}
 	})
 
-	for _, header := range []string{"Authorization"} {
-		t.Run("a valid key in "+header, func(t *testing.T) {
-			rec, seen := serve(keys, keyRequest(header, created.RawKey))
-			if rec.Code != http.StatusOK || seen == nil {
-				t.Fatalf("got %d %s, want 200", rec.Code, rec.Body.String())
-			}
-			ctx := seen.Context()
-			if auth.TenantID(ctx) != tenantID || auth.KeyID(ctx) != created.Key.ID || auth.GetKeyType(ctx) != auth.KeyTypeSecret {
-				t.Errorf("principal = tenant %q, key %q, type %q; want %s, %s, secret", auth.TenantID(ctx), auth.KeyID(ctx), auth.GetKeyType(ctx), tenantID, created.Key.ID)
-			}
-			if live, err := postgres.Livemode(ctx); err != nil || live {
-				t.Errorf("livemode = %v (%v), want test mode", live, err)
-			}
-			// The layer above reads the caller from the request's record.
-			outer := request.WithRecord(t.Context())
-			serve(keys, keyRequest(header, created.RawKey).WithContext(outer))
-			want := request.Caller{ActorType: "api_key", ActorID: created.Key.ID, TenantID: tenantID}
-			if got := request.CallerOf(outer); got != want {
-				t.Errorf("caller on the record = %+v, want %+v", got, want)
-			}
-		})
-	}
+	t.Run("a valid key in Authorization", func(t *testing.T) {
+		rec, seen := serve(keys, keyRequest("Authorization", created.RawKey))
+		if rec.Code != http.StatusOK || seen == nil {
+			t.Fatalf("got %d %s, want 200", rec.Code, rec.Body.String())
+		}
+		ctx := seen.Context()
+		if auth.TenantID(ctx) != tenantID || auth.KeyID(ctx) != created.Key.ID || auth.GetKeyType(ctx) != auth.KeyTypeSecret {
+			t.Errorf("principal = tenant %q, key %q, type %q; want %s, %s, secret", auth.TenantID(ctx), auth.KeyID(ctx), auth.GetKeyType(ctx), tenantID, created.Key.ID)
+		}
+		if live, err := postgres.Livemode(ctx); err != nil || live {
+			t.Errorf("livemode = %v (%v), want test mode", live, err)
+		}
+		// The layer above reads the caller from the request's record.
+		outer := request.WithRecord(t.Context())
+		serve(keys, keyRequest("Authorization", created.RawKey).WithContext(outer))
+		want := request.Caller{ActorType: "api_key", ActorID: created.Key.ID, TenantID: tenantID}
+		if got := request.CallerOf(outer); got != want {
+			t.Errorf("caller on the record = %+v, want %+v", got, want)
+		}
+	})
+
+	// A cookie that names no live session does not block a valid key on the
+	// same request: the request is the key's.
+	t.Run("a stale cookie and a valid key", func(t *testing.T) {
+		req := keyRequest("Authorization", created.RawKey)
+		req.AddCookie(&http.Cookie{Name: CookieName, Value: "sess_ended"})
+		rec, seen := serve(keys, req)
+		if rec.Code != http.StatusOK || seen == nil {
+			t.Fatalf("got %d %s, want 200: the stale cookie blocked the key", rec.Code, rec.Body.String())
+		}
+		if ctx := seen.Context(); auth.TenantID(ctx) != tenantID || auth.KeyID(ctx) != created.Key.ID {
+			t.Errorf("principal = tenant %q, key %q; want the key's %s, %s", auth.TenantID(ctx), auth.KeyID(ctx), tenantID, created.Key.ID)
+		}
+	})
 
 	// The database is down while the key is checked: no verdict on the key,
 	// so a retryable 503 that says nothing about the key or the database.

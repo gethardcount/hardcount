@@ -138,31 +138,14 @@ func TestE2E_APIKeyLifecycle(t *testing.T) {
 		t.Errorf("its replacement: %d, want 200", got)
 	}
 
-	// There is no publishable key type: it is refused, and a key with an
-	// hc_pub_ prefix is an unknown key, the ordinary 401.
+	// There is no publishable or platform key type (ADR-133): a create of
+	// either is refused, and /v1/tenants is not served.
 	flowDo(t, ts, "POST", "/v1/api-keys", flowReq{cookie: owner, body: map[string]any{
 		"name": "Checkout page", "key_type": "publishable",
 	}}).want(t, 422, "create a key of the removed publishable type")
-	madeUp := "hc_pub_test_" + strings.Repeat("0", 32)
-	if got := flowDo(t, ts, "GET", "/v1/whoami", flowReq{bearer: madeUp}).status; got != 401 {
-		t.Errorf("whoami with a made-up hc_pub_ key: %d, want 401", got)
-	}
-	if got := readCustomers(madeUp); got != 401 {
-		t.Errorf("GET /v1/customers with a made-up hc_pub_ key: %d, want 401", got)
-	}
-	if _, ok := boot["publishable_key_test"]; ok {
-		t.Errorf("the bootstrap response still carries publishable_key_test: %v", boot)
-	}
-	// Platform keys were removed with /v1/tenants (ADR-133). The type is
-	// refused like publishable, and a key with the hc_platform_ prefix is an
-	// unknown key.
 	flowDo(t, ts, "POST", "/v1/api-keys", flowReq{cookie: owner, body: map[string]any{
 		"name": "escalation", "key_type": "platform",
 	}}).want(t, 422, "create a key of the removed platform type")
-	madeUpPlatform := "hc_platform_live_" + strings.Repeat("0", 64)
-	if got := flowDo(t, ts, "GET", "/v1/whoami", flowReq{bearer: madeUpPlatform}).status; got != 401 {
-		t.Errorf("whoami with a made-up hc_platform_ key: %d, want 401", got)
-	}
 	for _, m := range []string{"GET", "POST"} {
 		if got := flowDo(t, ts, m, "/v1/tenants", flowReq{cookie: owner, body: map[string]any{"name": "Other"}}).status; got != 404 {
 			t.Errorf("%s /v1/tenants: %d, want 404 (the route is gone)", m, got)

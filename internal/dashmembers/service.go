@@ -108,10 +108,9 @@ func (s *Service) CanInvite() bool {
 	return s.dashboardBaseURL != "" && s.emailConfigured
 }
 
-// NewService returns a Service. sessions and auditor are required to remove
-// a member: they join the removal's transaction, so the removed member's
-// sign-out and its audit row commit with the removal. Inviting and accepting
-// do not use them.
+// NewService returns a Service. Inviting, revoking an invitation and removing
+// a member write their audit row through auditor, on their own transaction;
+// removing a member also ends sessions through sessions.
 func NewService(store *PostgresStore, users UserDirectory, sessions SessionEnder, auditor AuditTxWriter, email InviteEmailSender, tenants TenantNamer, clk clock.Clock, dashboardBaseURL string) *Service {
 	if clk == nil {
 		clk = clock.Real()
@@ -209,23 +208,38 @@ func (s *Service) Invite(ctx context.Context, tenantID, inviterUserID, email str
 	}
 	tenantName := s.tenantName(ctx, tenantID)
 	acceptURL := s.dashboardBaseURL + "/accept-invite?token=" + rawToken
-	// The invitation and its email commit together. A pending invitation
-	// with no email is a dead end for the invitee, and it blocks the
-	// operator's retry through the pending-unique index. So a failed enqueue
-	// fails the invite and writes nothing.
+	now := s.clock.Now(ctx)
+	// The invitation, its email and its audit row commit together. A pending
+	// invitation with no email is a dead end for the invitee and blocks the
+	// retry, so a failed enqueue or audit row fails the invite and writes
+	// nothing.
 	return s.store.CreateInvitation(ctx, Invitation{
 		TenantID:        tenantID,
 		Email:           email,
 		TokenHash:       tokenHash,
 		InvitedByUserID: inviterUserID,
 		Role:            "member",
-		ExpiresAt:       s.clock.Now(ctx).Add(InviteTTL),
-	}, func(tx *sql.Tx, inv Invitation) error {
-		if s.email == nil {
-			return nil
+		ExpiresAt:       now.Add(InviteTTL),
+	}, now, func(tx *sql.Tx, inv Invitation, replacedID string) error {
+		if s.email != nil {
+			if err := s.email.SendMemberInviteTx(ctx, tx, tenantID, email, inv.InvitedByEmail, tenantName, acceptURL); err != nil {
+				return fmt.Errorf("enqueue invite email: %w", err)
+			}
 		}
-		if err := s.email.SendMemberInviteTx(ctx, tx, tenantID, email, inv.InvitedByEmail, tenantName, acceptURL); err != nil {
-			return fmt.Errorf("enqueue invite email: %w", err)
+		meta := map[string]any{"expires_at": inv.ExpiresAt.Format(rfc3339)}
+		if replacedID != "" {
+			meta["replaced_invitation_id"] = replacedID
+		}
+		// No email in the label: resource_id is the invitation id and the
+		// reader resolves the address from member_invitations, which is
+		// erasable. audit_log is not.
+		if err := s.audit.LogInTx(ctx, tx, audit.Entry{
+			Action:       "member.invited",
+			ResourceType: "user",
+			ResourceID:   inv.ID,
+			Metadata:     meta,
+		}); err != nil {
+			return fmt.Errorf("write the audit row: %w", err)
 		}
 		return nil
 	})
@@ -256,9 +270,20 @@ func (s *Service) List(ctx context.Context, tenantID string) ([]Member, []Invita
 	return members, invs, nil
 }
 
-// Revoke cancels a pending invitation.
+// Revoke revokes an invitation that is not yet accepted or revoked, and
+// writes the member.invite_revoked audit row on the same transaction. If the
+// row cannot be written, the invitation stays as it was.
 func (s *Service) Revoke(ctx context.Context, tenantID, invitationID string) error {
-	return s.store.RevokeInvitation(ctx, tenantID, invitationID, s.clock.Now(ctx))
+	return s.store.RevokeInvitation(ctx, tenantID, invitationID, s.clock.Now(ctx), func(tx *sql.Tx) error {
+		if err := s.audit.LogInTx(ctx, tx, audit.Entry{
+			Action:       "member.invite_revoked",
+			ResourceType: "user",
+			ResourceID:   invitationID,
+		}); err != nil {
+			return fmt.Errorf("write the audit row: %w", err)
+		}
+		return nil
+	})
 }
 
 // RemoveMember removes a user from the workspace. In one transaction it

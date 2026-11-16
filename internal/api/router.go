@@ -1842,14 +1842,12 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 		r.With(auth.RequireSession("manage team membership")).Mount("/members", membersH.Routes())
 		// The /customers subtree mixes reads (GET list, get, billing-profile)
 		// and writes (POST create, PATCH update, PUT billing-profile, GDPR
-		// delete-data). RequireMethod picks the permission by HTTP method,
-		// so a read-tier key can list and get but cannot create, update or
-		// delete.
+		// delete-data). RequireMethod picks the permission by HTTP method:
+		// customer:read for a read, customer:write for a write.
 		r.With(auth.RequireMethod(auth.PermCustomerRead, auth.PermCustomerWrite)).Mount("/customers", customerH.Routes())
 		// The customer-scoped usage view combines usage totals with customer,
-		// subscription and pricing reads. It needs only PermUsageRead, so the
-		// dashboard's read-only secret-tier key can call it without gaining
-		// customer write access.
+		// subscription and pricing reads. It is gated on PermUsageRead alone,
+		// not on the /customers permissions.
 		r.Mount("/customers/{id}/usage", customerUsageH.CustomerUsageRoutes(
 			auth.Require(auth.PermUsageRead),
 		))
