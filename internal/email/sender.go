@@ -766,28 +766,32 @@ If you didn't request this, you can safely ignore this email — your current pa
 	return s.sendPlain(ctx, tenantID, to, "", subject, body)
 }
 
-func (s *Sender) SendMemberInvite(ctx context.Context, tenantID, to, inviterEmail, tenantName, acceptURL string) error {
+// SendMemberInvite emails a team invitation's accept link. hasAccount is
+// whether the invitee already has a sign-in account. The accept page asks
+// only a new person for a password, and the email says the same.
+func (s *Sender) SendMemberInvite(ctx context.Context, tenantID, to, inviterEmail, tenantName, acceptURL string, hasAccount bool) error {
 	if acceptURL == "" {
 		return fmt.Errorf("accept_url required: refusing to send member-invite email with no link")
 	}
-	// The invite service WARNs "falls back to generic" when the tenant-name
-	// lookup fails and hands us "" — this guard IS that fallback (2026-07-19
-	// truth audit: the claim predated the mechanism; a "" interpolation
-	// produced 'invited to  on Hardcount' in a real customer inbox).
+	// The name is empty when the invite could not read it.
 	if strings.TrimSpace(tenantName) == "" {
 		tenantName = "your team"
 	}
 	subject := fmt.Sprintf("You've been invited to %s on Hardcount", tenantName)
+	nextStep := "Open the link below within the next 7 days to set a password and join:"
+	if hasAccount {
+		nextStep = "You already have a Hardcount account. Open the link below within the next 7 days to accept, then sign in with your existing password:"
+	}
 	body := fmt.Sprintf(`Hi,
 
-%s invited you to join %s on Hardcount. Click the link below within the next 7 days to set up your account:
+%s invited you to join %s on Hardcount. %s
 
 %s
 
 If you weren't expecting this invitation, you can safely ignore this email.
 
 — Hardcount
-`, inviterEmail, tenantName, acceptURL)
+`, inviterEmail, tenantName, nextStep, acceptURL)
 	return s.sendPlain(ctx, tenantID, to, "", subject, body)
 }
 

@@ -365,10 +365,10 @@ type blockingEmail struct {
 	entered, release chan struct{}
 }
 
-func (b blockingEmail) SendMemberInviteTx(ctx context.Context, tx *sql.Tx, tenantID, to, inviterEmail, tenantName, acceptURL string) error {
+func (b blockingEmail) SendMemberInviteTx(ctx context.Context, tx *sql.Tx, tenantID, to, inviterEmail, tenantName, acceptURL string, hasAccount bool) error {
 	close(b.entered)
 	<-b.release
-	return b.capturingEmail.SendMemberInviteTx(ctx, tx, tenantID, to, inviterEmail, tenantName, acceptURL)
+	return b.capturingEmail.SendMemberInviteTx(ctx, tx, tenantID, to, inviterEmail, tenantName, acceptURL, hasAccount)
 }
 
 // TestRemoveMember_WaitsForTheirInviteAndRevokesIt: an invite locks its

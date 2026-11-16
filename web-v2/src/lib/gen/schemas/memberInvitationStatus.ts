@@ -13,16 +13,13 @@
  */
 
 /**
- * `pending` until the invitation is accepted or revoked, or until
- * `expires_at` passes (`expired`). The server works it out each
- * time it answers.
+ * `pending` until `expires_at` passes, then `expired`. The server
+ * works it out each time it answers.
  */
 export type MemberInvitationStatus = typeof MemberInvitationStatus[keyof typeof MemberInvitationStatus];
 
 
 export const MemberInvitationStatus = {
   pending: 'pending',
-  accepted: 'accepted',
-  revoked: 'revoked',
   expired: 'expired',
 } as const;

@@ -121,6 +121,9 @@ type outboxMessage struct {
 	InviteURL        string `json:"invite_url,omitempty"`
 	InviterEmail     string `json:"inviter_email,omitempty"`
 	TenantName       string `json:"tenant_name,omitempty"`
+	// InviteeHasAccount picks the invite email's words: an invitee with a
+	// sign-in account is told to sign in, a new one to set a password.
+	InviteeHasAccount bool `json:"invitee_has_account,omitempty"`
 	// PublicToken is the Stripe-equivalent hosted_invoice_url credential
 	// (T0-17). Carried on invoice-related email types so the dispatcher
 	// can build the hosted-invoice CTA URL for the rendered HTML body.
@@ -427,17 +430,19 @@ func (s *OutboxSender) SendPasswordReset(ctx context.Context, tenantID, to, disp
 
 // SendMemberInviteTx enqueues a team-invite email on the caller's
 // transaction, so the invitation and its email commit together. The URL
-// carries the raw invite token. Unlike the other flows this is
-// tenant-initiated (inviter sits inside tenantID) rather than
+// carries the raw invite token. hasAccount is whether the invitee already
+// has a sign-in account (Sender.SendMemberInvite). Unlike the other flows
+// this is tenant-initiated (inviter sits inside tenantID) rather than
 // system-initiated. Satisfies dashmembers.InviteEmailSender.
-func (s *OutboxSender) SendMemberInviteTx(ctx context.Context, tx *sql.Tx, tenantID, to, inviterEmail, tenantName, acceptURL string) error {
+func (s *OutboxSender) SendMemberInviteTx(ctx context.Context, tx *sql.Tx, tenantID, to, inviterEmail, tenantName, acceptURL string, hasAccount bool) error {
 	if acceptURL == "" {
 		return fmt.Errorf("accept_url required: refusing to enqueue member-invite email with no link")
 	}
 	return s.enqueueTx(ctx, tx, tenantID, TypeMemberInvite, outboxMessage{
-		To:           to,
-		InviterEmail: inviterEmail,
-		TenantName:   tenantName,
-		InviteURL:    acceptURL,
+		To:                to,
+		InviterEmail:      inviterEmail,
+		TenantName:        tenantName,
+		InviteURL:         acceptURL,
+		InviteeHasAccount: hasAccount,
 	})
 }

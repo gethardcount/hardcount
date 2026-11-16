@@ -63,9 +63,11 @@ type AuditTxWriter interface {
 }
 
 // InviteEmailSender queues the invite email in email_outbox on the caller's
-// transaction, so the email commits with the invitation.
+// transaction, so the email commits with the invitation. hasAccount is
+// whether the invitee already has a sign-in account: the email then tells
+// them to sign in, not to set a password.
 type InviteEmailSender interface {
-	SendMemberInviteTx(ctx context.Context, tx *sql.Tx, tenantID, to, inviterEmail, tenantName, acceptURL string) error
+	SendMemberInviteTx(ctx context.Context, tx *sql.Tx, tenantID, to, inviterEmail, tenantName, acceptURL string, hasAccount bool) error
 }
 
 // TenantNamer resolves the workspace name for the accept-page header.
@@ -138,15 +140,15 @@ func hashInviteToken(plaintext string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// InvitationStatus derives the lifecycle state the client treats as
-// authoritative.
+// Status is the invitation's state at now: revoked, accepted, expired from
+// its expires_at on (the instant the accept starts to refuse), else pending.
 func (inv Invitation) Status(now time.Time) string {
 	switch {
 	case inv.RevokedAt != nil:
 		return "revoked"
 	case inv.AcceptedAt != nil:
 		return "accepted"
-	case now.After(inv.ExpiresAt):
+	case !now.Before(inv.ExpiresAt):
 		return "expired"
 	default:
 		return "pending"
@@ -179,20 +181,23 @@ func (s *Service) Invite(ctx context.Context, tenantID, inviterUserID, email str
 		return Invitation{}, errs.EmailNotConfigured()
 	}
 
-	// Already a member? The unique index can't see this (memberships live
-	// in user_tenants), so check explicitly for a clean 409.
-	if existing, err := s.users.GetByEmail(ctx, email); err == nil {
-		tenants, terr := s.users.TenantsForUser(ctx, existing.ID)
-		if terr != nil {
-			return Invitation{}, fmt.Errorf("check memberships: %w", terr)
+	existing, err := s.users.GetByEmail(ctx, email)
+	if err != nil && !errors.Is(err, errs.ErrNotFound) {
+		return Invitation{}, err
+	}
+	hasAccount := err == nil
+	// A member is refused here: the invitations' unique index cannot see
+	// memberships, which are in user_tenants.
+	if hasAccount {
+		tenants, err := s.users.TenantsForUser(ctx, existing.ID)
+		if err != nil {
+			return Invitation{}, fmt.Errorf("check memberships: %w", err)
 		}
 		for _, t := range tenants {
 			if t.TenantID == tenantID {
 				return Invitation{}, errs.AlreadyExists("email", "this person is already a member of the workspace")
 			}
 		}
-	} else if !errors.Is(err, errs.ErrNotFound) {
-		return Invitation{}, err
 	}
 
 	rawToken, tokenHash, err := generateInviteToken()
@@ -213,7 +218,7 @@ func (s *Service) Invite(ctx context.Context, tenantID, inviterUserID, email str
 		Role:            "member",
 		ExpiresAt:       now.Add(InviteTTL),
 	}, now, func(tx *sql.Tx, inv Invitation, replacedID string) error {
-		if err := s.email.SendMemberInviteTx(ctx, tx, tenantID, email, inv.InvitedByEmail, tenantName, acceptURL); err != nil {
+		if err := s.email.SendMemberInviteTx(ctx, tx, tenantID, email, inv.InvitedByEmail, tenantName, acceptURL, hasAccount); err != nil {
 			return fmt.Errorf("enqueue invite email: %w", err)
 		}
 		meta := map[string]any{"expires_at": inv.ExpiresAt.Format(rfc3339)}
@@ -244,7 +249,8 @@ func (s *Service) tenantName(ctx context.Context, tenantID string) string {
 	return name
 }
 
-// List returns members + all invitations for the tenant.
+// List returns the tenant's members and its invitations that are neither
+// accepted nor revoked.
 func (s *Service) List(ctx context.Context, tenantID string) ([]Member, []Invitation, error) {
 	members, err := s.store.ListMembers(ctx, tenantID)
 	if err != nil {

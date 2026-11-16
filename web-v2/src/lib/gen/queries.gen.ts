@@ -11781,11 +11781,12 @@ export const getListMembersUrl = () => {
 /**
  * Used by the dashboard; not part of the integration API.
  *
- * Lists the account's members, oldest user first, and every
- * invitation the account has sent, newest first. Only a dashboard
- * session can call it: an API key gets 403, because a team change is
- * made by a person. Roles are recorded but not enforced yet: every
- * member can do everything in the dashboard.
+ * Lists the account's members, the earliest to join first, and its
+ * invitations that are pending or expired, newest first. An accepted
+ * or revoked invitation is not listed. Only a dashboard session can
+ * call it: an API key gets 403, because a team change is made by a
+ * person. Roles are recorded but not enforced yet: every member can
+ * do everything in the dashboard.
  * @summary List team members and invitations
  */
 export const listMembers = async ( options?: RequestInit): Promise<ListMembers200> => {
