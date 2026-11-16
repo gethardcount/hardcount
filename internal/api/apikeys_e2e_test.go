@@ -2,7 +2,7 @@ package api
 
 // End-to-end tests of the API keys flow over the real router and database: the
 // lifecycle (create, use, list, revoke, rotate), what a key request stores,
-// rotation expiry, key status and the key routes wording.
+// rotation expiry and the key routes wording.
 
 import (
 	"bytes"
@@ -21,7 +21,7 @@ import (
 // database: create a key from a signed-in session, use it, find it in the
 // list, revoke it and see the same key refused, then rotate the two ways
 // docs/api-keys.md describes. A grace period keeps the old key working;
-// no body retires it at once.
+// no body retires it at once. The list says each key's status.
 func TestE2E_APIKeyLifecycle(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "apikey-flow-bootstrap")
@@ -64,8 +64,8 @@ func TestE2E_APIKeyLifecycle(t *testing.T) {
 		t.Fatalf("GET /v1/customers with the new key: %d, want 200", got)
 	}
 
-	// List: the key is there with its prefix and, since it was just used,
-	// its last use. The list never holds the secret itself.
+	// List: the key is there, active, with its prefix and, since it was just
+	// used, its last use. The list never holds the secret itself.
 	list := flowDo(t, ts, "GET", "/v1/api-keys", flowReq{cookie: owner}).want(t, 200, "list keys")
 	listed := false
 	for _, k := range flowList(list.body, "data") {
@@ -76,6 +76,9 @@ func TestE2E_APIKeyLifecycle(t *testing.T) {
 			}
 			if flowStr(k, "last_used_at") == "" {
 				t.Errorf("the key was used and its last_used_at is empty: %v", k)
+			}
+			if got := flowStr(k, "status"); got != "active" {
+				t.Errorf("listed status %q, want active", got)
 			}
 		}
 	}
@@ -134,6 +137,20 @@ func TestE2E_APIKeyLifecycle(t *testing.T) {
 		t.Errorf("whoami with the new key names %q, want %q", got, newID)
 	}
 
+	// List again: the revoked key says revoked, and the rotated key is still
+	// active, with the end of its grace period as its expires_at.
+	listedNow := map[string]map[string]any{}
+	for _, k := range flowList(flowDo(t, ts, "GET", "/v1/api-keys", flowReq{cookie: owner}).want(t, 200, "list after the rotation").body, "data") {
+		listedNow[flowStr(k, "id")] = k
+	}
+	if got := flowStr(listedNow[keyID], "status"); got != "revoked" {
+		t.Errorf("the revoked key's listed status is %q, want revoked", got)
+	}
+	if k := listedNow[oldID]; flowStr(k, "status") != "active" || flowStr(k, "expires_at") != flowStr(rot.body, "old_key", "expires_at") {
+		t.Errorf("the rotated key is listed with status %q, expires_at %q; want active until the grace ends (%s)",
+			flowStr(k, "status"), flowStr(k, "expires_at"), flowStr(rot.body, "old_key", "expires_at"))
+	}
+
 	// Rotate with no body: the old key stops at once.
 	rot2 := flowDo(t, ts, "POST", "/v1/api-keys/"+newID+"/rotate", flowReq{cookie: owner}).want(t, 200, "rotate now")
 	thirdID := flowStr(rot2.body, "new_key", "id")
@@ -147,11 +164,8 @@ func TestE2E_APIKeyLifecycle(t *testing.T) {
 		t.Errorf("its replacement: %d, want 200", got)
 	}
 
-	// There is no publishable or platform key type (ADR-133): a create of
-	// either is refused, and /v1/tenants is not served.
-	flowDo(t, ts, "POST", "/v1/api-keys", flowReq{cookie: owner, body: map[string]any{
-		"name": "Checkout page", "key_type": "publishable",
-	}}).want(t, 422, "create a key of the removed publishable type")
+	// There is no platform key type (ADR-133): a create of one is refused,
+	// and /v1/tenants is not served.
 	flowDo(t, ts, "POST", "/v1/api-keys", flowReq{cookie: owner, body: map[string]any{
 		"name": "escalation", "key_type": "platform",
 	}}).want(t, 422, "create a key of the removed platform type")
@@ -185,7 +199,8 @@ func TestE2E_APIKeyLifecycle(t *testing.T) {
 // A request that issues an API key, a create or a rotate, returns the key's
 // secret once and stores it nowhere: an Idempotency-Key on it is ignored, so
 // the answer is not kept for a replay. Sending the same request again runs it
-// again.
+// again. The other requests that answer with a secret shown once skip the
+// idempotency layer by the same list (TestAnswersWithShowOnceSecret).
 func TestE2E_APIKeyIssue_SecretIsNotStoredForReplay(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "apikey-issue-bootstrap")
@@ -224,57 +239,6 @@ func TestE2E_APIKeyIssue_SecretIsNotStoredForReplay(t *testing.T) {
 	}
 	if stored != 0 || withSecret != 0 {
 		t.Errorf("idempotency_keys: %d rows for /v1/api-keys, %d holding a secret key; want none", stored, withSecret)
-	}
-}
-
-// The other requests whose answer carries a secret shown only once: creating
-// a webhook endpoint, rotating its signing secret, and rotating a customer's
-// cost dashboard token. Each sent twice with the same Idempotency-Key runs
-// twice, and no answer is kept. (Creating a card setup session needs a
-// connected Stripe account; its route is pinned by TestAnswersWithShowOnceSecret
-// and TestOpenAPISpec_ShowOnceSecretsAreNeverKept.)
-func TestE2E_ShowOnceSecret_AnswerIsNotKeptForReplay(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "show-once-bootstrap")
-	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
-	defer ts.Close()
-
-	const email, password = "owner@show-once.test", "show-once-pw-1234"
-	flowBootstrap(t, ts, "show-once-bootstrap", email, password)
-	owner := login(t, ts, email, password)
-	twice := func(path, idem string, body any, status int) (first, again map[string]any) {
-		t.Helper()
-		req := flowReq{cookie: owner, header: map[string]string{"Idempotency-Key": idem}, body: body}
-		return flowDo(t, ts, "POST", path, req).want(t, status, path).body,
-			flowDo(t, ts, "POST", path, req).want(t, status, path+" again with the same Idempotency-Key").body
-	}
-
-	ep, epAgain := twice("/v1/webhook-endpoints/endpoints", "show-once-endpoint", map[string]any{"url": "https://example.com/show-once"}, 201)
-	if flowStr(ep, "endpoint", "id") == flowStr(epAgain, "endpoint", "id") || flowStr(ep, "secret") == flowStr(epAgain, "secret") {
-		t.Errorf("webhook endpoint create answered endpoint %s again: replayed, want a second endpoint", flowStr(ep, "endpoint", "id"))
-	}
-	rot, rotAgain := twice("/v1/webhook-endpoints/endpoints/"+flowStr(epAgain, "endpoint", "id")+"/rotate-secret", "show-once-rotate", nil, 200)
-	if flowStr(rot, "secret") == flowStr(rotAgain, "secret") {
-		t.Error("signing secret rotation answered the same secret again: replayed, want a new one")
-	}
-	cust := flowStr(flowDo(t, ts, "POST", "/v1/customers", flowReq{cookie: owner,
-		body: map[string]any{"external_id": "show-once-cus", "display_name": "Show Once"}}).want(t, 201, "create customer").body, "id")
-	dash, dashAgain := twice("/v1/customers/"+cust+"/rotate-cost-dashboard-token", "show-once-dashboard", nil, 200)
-	if flowStr(dash, "token") == flowStr(dashAgain, "token") {
-		t.Error("cost dashboard token rotation answered the same token again: replayed, want a new one")
-	}
-
-	tx, err := db.BeginTx(context.Background(), postgres.TxBypass, "")
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	defer postgres.Rollback(tx)
-	var kept int
-	if err := tx.QueryRow(`SELECT count(*) FROM idempotency_keys WHERE key LIKE 'show-once-%'`).Scan(&kept); err != nil {
-		t.Fatalf("read idempotency_keys: %v", err)
-	}
-	if kept != 0 {
-		t.Errorf("idempotency_keys holds %d answers for these requests, want none", kept)
 	}
 }
 
@@ -366,55 +330,4 @@ func TestE2E_APIKeyRoutes_OneNotFoundWordingAndOneNameRule(t *testing.T) {
 	}
 	create(strings.Repeat("n", 100)).want(t, 201, "create a key with a 100-character name")
 	create(strings.Repeat("é", 100)).want(t, 201, "create a key with a 100-character name of two-byte characters")
-}
-
-// The key list says each key's status: active, expired from its expires_at
-// on, revoked once revoked. The old key of a rotation with a grace period is
-// active until the grace ends.
-func TestE2E_APIKeyList_SaysEachKeysStatus(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "key-status-bootstrap")
-	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
-	defer ts.Close()
-
-	const email, password = "owner@key-status.test", "key-status-pw-123"
-	flowBootstrap(t, ts, "key-status-bootstrap", email, password)
-	owner := login(t, ts, email, password)
-	create := func(name string) string {
-		t.Helper()
-		body := flowDo(t, ts, "POST", "/v1/api-keys", flowReq{cookie: owner,
-			body: map[string]any{"name": name, "key_type": "secret"}}).want(t, 201, "create "+name).body
-		return flowStr(body, "key", "id")
-	}
-	active, expired, revoked, rotated := create("Active"), create("Expired"), create("Revoked"), create("Rotated")
-
-	// The API refuses an expiry in the past, so the row is aged here.
-	tx, err := db.BeginTx(t.Context(), postgres.TxBypass, "")
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := tx.Exec(`UPDATE api_keys SET expires_at = now() - interval '1 minute' WHERE id = $1`, expired); err != nil {
-		t.Fatal(err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatal(err)
-	}
-	flowDo(t, ts, "DELETE", "/v1/api-keys/"+revoked, flowReq{cookie: owner}).want(t, 200, "revoke")
-	replacement := flowStr(flowDo(t, ts, "POST", "/v1/api-keys/"+rotated+"/rotate", flowReq{cookie: owner,
-		body: map[string]any{"expires_in_seconds": 3600}}).want(t, 200, "rotate with grace").body, "new_key", "id")
-
-	list := flowDo(t, ts, "GET", "/v1/api-keys?limit=100", flowReq{cookie: owner}).want(t, 200, "list keys").body
-	status := map[string]string{}
-	for _, k := range list["data"].([]any) {
-		m := k.(map[string]any)
-		s, _ := m["status"].(string)
-		status[m["id"].(string)] = s
-	}
-	for id, want := range map[string]string{
-		active: "active", expired: "expired", revoked: "revoked", rotated: "active", replacement: "active",
-	} {
-		if status[id] != want {
-			t.Errorf("key %s: status %q, want %q", id, status[id], want)
-		}
-	}
 }

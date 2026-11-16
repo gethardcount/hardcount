@@ -221,15 +221,21 @@ func TestValidateKey_Expired(t *testing.T) {
 	wantInvalidKey(t, err, "an expired key")
 }
 
-func TestRevokeKey_WrongTenant(t *testing.T) {
+// Another tenant's revoke or rotate does not find the key, and the key still
+// validates.
+func TestRevokeAndRotateKey_WrongTenant(t *testing.T) {
 	k := newKeyRig(t)
 	other := testutil.CreateTestTenant(t, k.db, "Other")
 	result := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "Test", KeyType: auth.KeyTypeSecret})
-	if _, err := k.svc.RevokeKey(liveCtx(t), other, result.Key.ID); !errors.Is(err, errs.ErrNotFound) {
-		t.Fatalf("revoke from another tenant: got %v, want not found", err)
+	_, revokeErr := k.svc.RevokeKey(liveCtx(t), other, result.Key.ID)
+	_, rotateErr := k.svc.RotateKey(liveCtx(t), other, result.Key.ID, auth.RotateKeyInput{})
+	for name, err := range map[string]error{"revoke": revokeErr, "rotate": rotateErr} {
+		if !errors.Is(err, errs.ErrNotFound) {
+			t.Errorf("%s from another tenant: got %v, want not found", name, err)
+		}
 	}
 	if _, err := k.svc.ValidateKey(liveCtx(t), result.RawKey); err != nil {
-		t.Fatalf("the key stopped validating after another tenant's revoke: %v", err)
+		t.Fatalf("the key stopped validating after another tenant's revoke and rotate: %v", err)
 	}
 }
 
@@ -242,15 +248,6 @@ func TestRotateKey_RefusesAGraceOutOfRange(t *testing.T) {
 			_, err := k.svc.RotateKey(liveCtx(t), k.tenantID, result.Key.ID, auth.RotateKeyInput{ExpiresInSeconds: grace})
 			wantValidation(t, err, "expires_in_seconds")
 		})
-	}
-}
-
-func TestRotateKey_WrongTenant(t *testing.T) {
-	k := newKeyRig(t)
-	other := testutil.CreateTestTenant(t, k.db, "Other")
-	result := k.create(t, liveCtx(t), auth.CreateKeyInput{Name: "K", KeyType: auth.KeyTypeSecret})
-	if _, err := k.svc.RotateKey(liveCtx(t), other, result.Key.ID, auth.RotateKeyInput{}); !errors.Is(err, errs.ErrNotFound) {
-		t.Fatalf("rotate from another tenant: got %v, want not found", err)
 	}
 }
 

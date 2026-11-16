@@ -50,7 +50,7 @@ Before this decision, the rules were in several places and some disagreed:
 - **Status.** `statusAt` is the one rule; every key the API returns carries
   `status`, and `ValidateKey` and `RotateKey` decide from it.
 - **Changes.** Create, revoke and rotate each run on one tenant
-  transaction that also writes the audit row (`LogInTx`); an audit failure
+  transaction that also writes the audit row (`LogInTxFields`); an audit failure
   rolls the change back. A rotation locks the old key's row first. Two
   rotations at once that revoke the old key make one replacement: the
   second finds it revoked and answers `409`. With a grace period the old
