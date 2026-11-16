@@ -89,7 +89,7 @@ func (s *PostgresStore) InvoiceForStripeRefundTx(ctx context.Context, tx *sql.Tx
 		return "", fmt.Errorf("read refund %s: %w", stripeRefundID, err)
 	}
 	err = tx.QueryRowContext(ctx,
-		`SELECT invoice_id FROM credit_notes WHERE stripe_refund_id = $1 ORDER BY created_at LIMIT 1`, stripeRefundID,
+		`SELECT invoice_id FROM credit_notes WHERE stripe_refund_id = $1 ORDER BY created_at, id LIMIT 1`, stripeRefundID,
 	).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", errs.ErrNotFound
@@ -118,7 +118,7 @@ func (s *PostgresStore) CreditNoteByStripeRefundTx(ctx context.Context, tx *sql.
 	var cn domain.CreditNote
 	var metaJSON []byte
 	err := tx.QueryRowContext(ctx, `SELECT `+cnReadCols+`
-		FROM credit_notes WHERE stripe_refund_id = $1 ORDER BY created_at LIMIT 1`, stripeRefundID,
+		FROM credit_notes WHERE stripe_refund_id = $1 ORDER BY created_at, id LIMIT 1`, stripeRefundID,
 	).Scan(s.cnScanDest(&cn, &metaJSON)...)
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.CreditNote{}, false, nil
