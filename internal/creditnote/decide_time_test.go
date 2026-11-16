@@ -36,30 +36,38 @@ func (a *invoiceAnswer) SimForCustomer(context.Context, string, string) (clock.S
 	return clock.Sim{}, errors.New("not used")
 }
 
-// A credit note's time is decided from the invoice its body names: the
-// invoice's clock; a not-found is real time; a clock that cannot be read
-// refuses the request; live mode, and a body naming no invoice, read nothing.
+// A credit note's time is decided from the invoice its body names and bound,
+// so a create, and the issue auto_issue runs after it, read one instant: the
+// invoice's clock and its frozen time, with no read of the server's clock;
+// for a not-found, in live mode, and for a body naming no invoice, one read
+// of the server's clock. A clock that cannot be read refuses the request and
+// binds nothing.
 func TestDecideForInvoice(t *testing.T) {
 	frozen := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
+	past := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	served := past.Add(time.Second) // the stepping clock's first answer
 	testMode := postgres.WithLivemode(context.Background(), false)
 	for _, c := range []struct {
-		name      string
-		ctx       context.Context
-		invoiceID string
-		answer    invoiceAnswer
-		wantReads int
-		wantClock string
-		wantReal  bool
-		wantErr   bool
+		name            string
+		ctx             context.Context
+		invoiceID       string
+		answer          invoiceAnswer
+		wantReads       int
+		wantClock       string
+		wantAt          time.Time
+		wantServerReads int
+		wantErr         bool
 	}{
-		{"the invoice's clock", testMode, "inv_1", invoiceAnswer{sim: clock.Sim{At: frozen, TestClockID: "clk_inv"}}, 1, "clk_inv", false, false},
-		{"a not-found is real time", testMode, "inv_1", invoiceAnswer{err: fmt.Errorf("read test clock clk_gone: %w", errs.ErrNotFound)}, 1, "", true, false},
-		{"an unreadable clock refuses", testMode, "inv_1", invoiceAnswer{err: errors.New("connection reset by peer")}, 1, "", false, true},
-		{"live mode reads nothing", postgres.WithLivemode(context.Background(), true), "inv_1", invoiceAnswer{err: errors.New("must not be read")}, 0, "", false, false},
-		{"no invoice id reads nothing", testMode, "", invoiceAnswer{err: errors.New("must not be read")}, 0, "", false, false},
+		{"the invoice's clock", testMode, "inv_1", invoiceAnswer{sim: clock.Sim{At: frozen, TestClockID: "clk_inv"}}, 1, "clk_inv", frozen, 0, false},
+		{"a not-found is one read of the server's clock", testMode, "inv_1", invoiceAnswer{err: fmt.Errorf("read test clock clk_gone: %w", errs.ErrNotFound)}, 1, "", served, 1, false},
+		{"an unreadable clock refuses", testMode, "inv_1", invoiceAnswer{err: errors.New("connection reset by peer")}, 1, "", time.Time{}, 0, true},
+		{"live mode reads no clock record, and the server's clock once", postgres.WithLivemode(context.Background(), true), "inv_1", invoiceAnswer{err: errors.New("must not be read")}, 0, "", served, 1, false},
+		{"no invoice id reads no clock record, and the server's clock once", testMode, "", invoiceAnswer{err: errors.New("must not be read")}, 0, "", served, 1, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			svc := NewService(nil, nil, nil)
+			srv := &cnSteppingClock{at: past}
+			svc.SetClock(srv)
 			res := c.answer
 			svc.SetResolver(&res)
 			ctx, err := svc.DecideForInvoice(c.ctx, "t1", c.invoiceID)
@@ -67,13 +75,13 @@ func TestDecideForInvoice(t *testing.T) {
 				t.Fatalf("err %v; want error %v (unavailable over clock.ErrUndecided)", err, c.wantErr)
 			}
 			if res.reads != c.wantReads {
-				t.Errorf("%d reads; want %d", res.reads, c.wantReads)
+				t.Errorf("%d resolver reads; want %d", res.reads, c.wantReads)
 			}
 			if sim, _ := clock.SimOf(ctx); sim.TestClockID != c.wantClock {
 				t.Errorf("clock %q; want %q", sim.TestClockID, c.wantClock)
 			}
-			if d, ok := clock.Decision(ctx); c.wantReal && (!ok || !d.At.IsZero() || d.TestClockID != "") {
-				t.Errorf("decision %+v (%v); want real time", d, ok)
+			if at, _ := clock.EffectiveNow(ctx); !at.Equal(c.wantAt) || srv.reads != c.wantServerReads {
+				t.Errorf("bound %v after %d server reads; want %v after %d", at, srv.reads, c.wantAt, c.wantServerReads)
 			}
 		})
 	}
@@ -183,5 +191,39 @@ func TestCreateRoute_AReliefDecidesFromItsOwnInvoice(t *testing.T) {
 	NewHandler(svc, HandlerDeps{}).create(rec, req)
 	if rec.Code != 503 || len(res.read) != 1 || res.read[0] != "inv_relief" {
 		t.Errorf("%d, invoices looked up %v; want 503 after one lookup of inv_relief", rec.Code, res.read)
+	}
+}
+
+// At real time (an invoice on no clock) a create with auto_issue reads the
+// server's clock once: the create and the issue share that instant, so the
+// note is created and issued at the same time.
+func TestCreateRoute_AtRealTimeCreateAndIssueShareOneInstant(t *testing.T) {
+	past := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	store := newMemStore()
+	invoices := &memInvoiceReader{invoices: map[string]domain.Invoice{
+		"inv_1": {ID: "inv_1", TenantID: "t1", Status: domain.InvoiceFinalized, Currency: "USD", TotalAmountCents: 10000, AmountDueCents: 10000},
+	}}
+	svc := NewService(store, invoices, nil)
+	svc.SetNumberGenerator(&fakeCNNumbers{})
+	res := &invoiceAnswer{sim: clock.Sim{At: time.Now()}} // no clock id: the invoice is on no clock
+	svc.SetResolver(res)
+	server := &cnSteppingClock{at: past}
+	svc.SetClock(server)
+	body := `{"invoice_id":"inv_1","reason":"Billing error","auto_issue":true,"lines":[{"description":"x","quantity":1,"unit_amount_cents":1000}]}`
+	req := httptest.NewRequest("POST", "/", strings.NewReader(body))
+	req = req.WithContext(auth.WithTenantID(postgres.WithLivemode(req.Context(), false), "t1"))
+	rec := httptest.NewRecorder()
+	NewHandler(svc, HandlerDeps{}).create(rec, req)
+	if rec.Code != 201 {
+		t.Fatalf("%d %s; want 201", rec.Code, rec.Body.String())
+	}
+	var cn domain.CreditNote
+	if err := json.Unmarshal(rec.Body.Bytes(), &cn); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	want := past.Add(time.Second)
+	if server.reads != 1 || res.reads != 1 || !cn.CreatedAt.Equal(want) || cn.IssuedAt == nil || !cn.IssuedAt.Equal(want) {
+		t.Errorf("%d server reads, %d resolver reads; created %v, issued %v; want one each, both at %v",
+			server.reads, res.reads, cn.CreatedAt, cn.IssuedAt, want)
 	}
 }

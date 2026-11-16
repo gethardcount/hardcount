@@ -1085,6 +1085,8 @@ type recordingAttacher struct {
 	// asked the attach to queue in its transaction.
 	eventType  string
 	eventExtra map[string]any
+	// at is the instant the attach ran on (zero when none was bound).
+	at time.Time
 }
 
 func (r *recordingAttacher) AttachForWebhook(ctx context.Context, tenantID, customerID, pmID string, makeDefault bool, eventType string, extra map[string]any) (*domain.PaymentMethodView, error) {
@@ -1093,6 +1095,7 @@ func (r *recordingAttacher) AttachForWebhook(ctx context.Context, tenantID, cust
 	r.makeDefault = makeDefault
 	r.eventType, r.eventExtra = eventType, extra
 	r.actorType, r.actorID = audit.ResolveActor(ctx)
+	r.at, _ = clock.EffectiveNow(ctx)
 	if r.err != nil {
 		return nil, r.err
 	}

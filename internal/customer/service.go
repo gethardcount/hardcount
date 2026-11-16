@@ -289,6 +289,10 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 			return domain.Customer{}, errs.Invalid("test_clock_id", "test clock not found")
 		}
 		ctx = clock.WithSim(ctx, sim)
+	} else {
+		// No clock named: the create's one instant is one read of the
+		// server's clock.
+		ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	}
 
 	cc, err := normalizeAdditionalEmails(input.AdditionalEmails, input.Email)
