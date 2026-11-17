@@ -18,7 +18,7 @@ import (
 // audit row, through the REAL router stack — not just at the middleware.
 //
 // The unit test (middleware.TestRequestID_HeaderSetForNonRespondResponses) pins that
-// mw.RequestID ignores the inbound header. This one closes the rest of the
+// mw.RequestID ignores the inbound header and puts its own id on the context. This one closes the rest of the
 // chain: router mounts it → handler runs → the audit writer stamps
 // audit_log.request_id from that ctx. A regression anywhere along it (someone
 // re-mounts chi's middleware.RequestID, or an emitter starts reading a header)

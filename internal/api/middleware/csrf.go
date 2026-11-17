@@ -28,8 +28,9 @@ import (
 //     passes: every browser sends one of them on a cross-site write, and page
 //     script cannot remove them, so it did not come from a browser.
 //
-// allowedOrigins is CORS_ALLOWED_ORIGINS, matched as CORS matches it. Mount
-// the guard on every group that accepts the session cookie.
+// allowedOrigins is CORS_ALLOWED_ORIGINS: each listed origin matches as in
+// CORS (originSet), and a bare "*" allows no origin here. Mount the guard on
+// every group that accepts the session cookie. ADR-093 has the threat model.
 func CSRFGuard(allowedOrigins []string) func(http.Handler) http.Handler {
 	allow := newOriginSet(allowedOrigins)
 	return func(next http.Handler) http.Handler {
@@ -56,8 +57,8 @@ func (c CrossSiteCheck) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	c.next.ServeHTTP(w, r)
 }
 
-// isSafeMethod reports whether method is one of HTTP's safe methods, which
-// change no state.
+// isSafeMethod reports whether method is one of HTTP's safe methods. No route
+// may change state on one: a cross-site top-level GET carries the Lax cookie.
 func isSafeMethod(method string) bool {
 	switch method {
 	case http.MethodGet, http.MethodHead, http.MethodOptions, http.MethodTrace:

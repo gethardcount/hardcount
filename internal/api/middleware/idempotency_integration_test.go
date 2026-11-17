@@ -354,6 +354,12 @@ func TestIdempotency_UnreadableBodyIsNotStored(t *testing.T) {
 	if retry := invokeWithKey(t, handler, tenantID, "idem-malformed", `{"amount":100}`); retry.Code != http.StatusCreated || retry.Header().Get("Idempotent-Replayed") != "true" {
 		t.Fatalf("retry of the corrected request: %d (replayed %q), want the stored 201", retry.Code, retry.Header().Get("Idempotent-Replayed"))
 	}
+	// The body is part of what a key stands for: the same key with another
+	// amount is refused, never answered with the stored 201.
+	changed := invokeWithKey(t, handler, tenantID, "idem-malformed", `{"amount":200}`)
+	if changed.Code != http.StatusUnprocessableEntity || !strings.Contains(changed.Body.String(), "idempotency_error") || strings.Contains(changed.Body.String(), `"amount":100`) {
+		t.Fatalf("same key, another body: %d %s, want 422 idempotency_error with none of the stored answer", changed.Code, changed.Body.String())
+	}
 	if got := runs.Load(); got != 1 {
 		t.Fatalf("handler ran %d times past the decode, want 1", got)
 	}

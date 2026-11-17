@@ -15,7 +15,7 @@ import (
 // mounts them in the ingest group, which has no mw.Idempotency): each event's own
 // idempotency_key is the one dedup rule there. So all four are stored, no
 // answer is a replay, and no idempotency_keys row is written. Only this test
-// sees that wiring.
+// sees the behaviour; the router's chain test sees the wiring.
 //
 // Mutation-verify: add mw.Idempotency to the ingest group in router.go → the
 // second event on each route answers 422 idempotency_error, and rows are written.
