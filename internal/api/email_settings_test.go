@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/config"
 	"github.com/gethardcount/hardcount/internal/email"
 )
 
@@ -36,10 +37,9 @@ func (f *fakeAudit) Log(_ context.Context, _, action, resourceType, resourceID, 
 }
 
 func newEmailSettingsTestHandler(s *fakeEmailSender, a *fakeAudit) http.Handler {
-	env := map[string]string{"HOSTED_INVOICE_BASE_URL": "https://pay.example.com"}
 	h := &emailSettingsHandler{
 		sender: s,
-		links:  emailLinkEnvs(func(k string) string { return env[k] }),
+		links:  emailLinkEnvs(config.Server{HostedInvoiceBaseURL: "https://pay.example.com"}),
 		userEmail: func(_ context.Context, userID string) (string, error) {
 			return userID + "@team.example.com", nil
 		},

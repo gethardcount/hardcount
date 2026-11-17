@@ -37,3 +37,27 @@ func TestNewServer_AppEnvComesFromTheOption(t *testing.T) {
 		t.Errorf("no WithAppEnv: /health sent HSTS %q; want none, as in local", hsts)
 	}
 }
+
+// TestNewServer_MetricsTokenComesFromTheEnvironment: NewServer reads
+// METRICS_TOKEN through config.ServerFromEnv and hands it to /metrics, which
+// then refuses a scrape without the token and serves one with it.
+func TestNewServer_MetricsTokenComesFromTheEnvironment(t *testing.T) {
+	t.Setenv("METRICS_TOKEN", " s3cret-scrape ")
+	srv := NewServer(&postgres.DB{}, nil, nil)
+	scrape := func(authorization string) int {
+		t.Helper()
+		req := httptest.NewRequest(http.MethodGet, "/metrics", nil)
+		if authorization != "" {
+			req.Header.Set("Authorization", authorization)
+		}
+		rec := httptest.NewRecorder()
+		srv.ServeHTTP(rec, req)
+		return rec.Code
+	}
+	if code := scrape(""); code != http.StatusUnauthorized {
+		t.Errorf("/metrics without the token = %d, want 401", code)
+	}
+	if code := scrape("Bearer s3cret-scrape"); code != http.StatusOK {
+		t.Errorf("/metrics with the token = %d, want 200", code)
+	}
+}

@@ -24,7 +24,7 @@ var requestBodyReaders = map[string]string{
 
 	// Reads the bytes to fingerprint the request and puts them back; the
 	// handler decodes them.
-	"internal/api/middleware/idempotency.go Idempotency": "replay fingerprint",
+	"internal/api/middleware/idempotency.go IdempotencyGuard.ServeHTTP": "replay fingerprint",
 
 	// Senders Hardcount does not control. They add fields when they like, so
 	// these read only what they need and ignore the rest.

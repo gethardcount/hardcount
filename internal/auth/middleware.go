@@ -6,15 +6,45 @@ import (
 	"github.com/gethardcount/hardcount/internal/api/respond"
 )
 
+// PermissionCheck answers 403 unless the caller holds the permission its
+// request needs: write is what POST, PUT, PATCH and DELETE need, read what
+// every other method needs. Require (read = write) and RequireMethod make it.
+type PermissionCheck struct {
+	read, write Permission
+	next        http.Handler
+}
+
+func (c PermissionCheck) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	perm := c.read
+	switch r.Method {
+	case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+		perm = c.write
+	}
+	if permitted(w, r, perm) {
+		c.next.ServeHTTP(w, r)
+	}
+}
+
+// SessionRequired lets only dashboard sessions through. RequireSession makes
+// it; its doc has the rule.
+type SessionRequired struct {
+	refusal string
+	next    http.Handler
+}
+
+func (c SessionRequired) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if !CallerOf(r.Context()).IsSession() {
+		respond.Forbidden(w, r, c.refusal)
+		return
+	}
+	c.next.ServeHTTP(w, r)
+}
+
 // Require returns middleware that answers 403 unless the caller holds perm
 // (hasPermission).
 func Require(perm Permission) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if permitted(w, r, perm) {
-				next.ServeHTTP(w, r)
-			}
-		})
+		return PermissionCheck{read: perm, write: perm, next: next}
 	}
 }
 
@@ -36,31 +66,16 @@ func permitted(w http.ResponseWriter, r *http.Request, perm Permission) bool {
 func RequireSession(task string) func(http.Handler) http.Handler {
 	msg := "this endpoint requires a dashboard session — sign in to the dashboard to " + task
 	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !CallerOf(r.Context()).IsSession() {
-				respond.Forbidden(w, r, msg)
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
+		return SessionRequired{refusal: msg, next: next}
 	}
 }
 
 // RequireMethod returns middleware that picks the permission from the HTTP
-// method: GET, HEAD and OPTIONS check read, and POST, PUT, PATCH and DELETE
-// check write. Put it in front of a chi.Mount whose subrouter has both reads
+// method: POST, PUT, PATCH and DELETE check write, and every other method
+// checks read. Put it in front of a chi.Mount whose subrouter has both reads
 // and writes, where one Require would let a caller that may read also write.
 func RequireMethod(read, write Permission) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			perm := read
-			switch r.Method {
-			case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
-				perm = write
-			}
-			if permitted(w, r, perm) {
-				next.ServeHTTP(w, r)
-			}
-		})
+		return PermissionCheck{read: read, write: write, next: next}
 	}
 }

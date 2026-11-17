@@ -7,13 +7,14 @@ import (
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/audit"
+	"github.com/gethardcount/hardcount/internal/config"
 )
 
 // TestTrustedClientIP: the client IP comes from chi's ClientIPFrom*
 // middleware, read through audit.ExtractClientIP. X-Forwarded-For counts only
 // when the TCP peer is a trusted proxy, and r.RemoteAddr is left as the peer.
 func TestTrustedClientIP(t *testing.T) {
-	trusted := ParseTrustedProxies("10.0.0.0/8,127.0.0.1")
+	trusted, _ := config.ParseTrustProxy("10.0.0.0/8,127.0.0.1")
 
 	run := func(remoteAddr, xff, xrealip string, nets []*net.IPNet) (ip, remote string) {
 		h := TrustedClientIP(nets)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
@@ -54,23 +55,5 @@ func TestTrustedClientIP(t *testing.T) {
 				t.Errorf("r.RemoteAddr = %q, want it left as the peer %q", remote, tc.remoteAddr)
 			}
 		})
-	}
-}
-
-func TestParseTrustedProxies(t *testing.T) {
-	nets := ParseTrustedProxies("10.0.0.0/8, 127.0.0.1 , , bogus")
-	if len(nets) != 2 {
-		t.Fatalf("parsed %d nets, want 2 (CIDR + bare IP; blank/bogus skipped)", len(nets))
-	}
-}
-
-func TestParseTrustedProxies_NoneMeansNoProxy(t *testing.T) {
-	for _, spec := range []string{"none", " NONE ", "None"} {
-		if got := ParseTrustedProxies(spec); got != nil {
-			t.Fatalf("ParseTrustedProxies(%q) = %v, want nil", spec, got)
-		}
-	}
-	if got := ParseTrustedProxies("10.0.0.0/8"); len(got) != 1 {
-		t.Fatalf("a CIDR must still parse, got %v", got)
 	}
 }

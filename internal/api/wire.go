@@ -4,8 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"os"
-	"strings"
 	"time"
 
 	mw "github.com/gethardcount/hardcount/internal/api/middleware"
@@ -95,6 +93,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	for _, opt := range opts {
 		opt(&o)
 	}
+	srv := config.ServerFromEnv()
 
 	// Stores
 	invoiceStore := invoice.NewPostgresStore(db)
@@ -113,7 +112,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	// reaches all of them. Without a key they are stored as plaintext.
 	// config.go already requires the key in production.
 	var sharedEnc *crypto.Encryptor
-	if encKey := strings.TrimSpace(os.Getenv("HARDCOUNT_ENCRYPTION_KEY")); encKey != "" {
+	if encKey := srv.EncryptionKey; encKey != "" {
 		enc, err := crypto.NewEncryptor(encKey)
 		if err != nil {
 			slog.Error("invalid HARDCOUNT_ENCRYPTION_KEY, encryption at rest disabled", "error", err)
@@ -163,7 +162,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	// the customer to when the caller passes no return_url. It has no
 	// default: an address that is wrong for this install would strand the
 	// customer, so without it those setup sessions are refused.
-	customerPortalURL := strings.TrimSpace(os.Getenv("CUSTOMER_PORTAL_URL"))
+	customerPortalURL := srv.CustomerPortalURL
 	if customerPortalURL == "" {
 		slog.Warn("CUSTOMER_PORTAL_URL NOT SET — setup links (Send setup link, and setup sessions with no return_url) are refused with return_address_not_set, because Stripe would have no page to send the customer back to. Set this to your dashboard's address, e.g. https://app.example.com")
 	}
@@ -314,7 +313,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	// Building an origin from the request would be a guess, because the API
 	// origin is not the dashboard origin. So the setting stays explicit, and
 	// the warning stays.
-	if base := strings.TrimSpace(os.Getenv("HARDCOUNT_API_BASE_URL")); base != "" {
+	if base := srv.APIBaseURL; base != "" {
 		customerH.SetAPIBaseURL(base)
 	} else {
 		slog.Warn("HARDCOUNT_API_BASE_URL NOT SET — the public cost-dashboard URL operators copy will be a relative path, not a shareable link. Set this to your public API origin (e.g. https://api.example.com).")
@@ -516,7 +515,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	// PAYMENT_UPDATE_RETURN_URL is where Stripe returns a customer who added a
 	// card from the "add a payment method" email. It has no default. Without
 	// it the page refuses to add the card, so the email is not sent either.
-	paymentUpdateReturnURL := strings.TrimSpace(os.Getenv("PAYMENT_UPDATE_RETURN_URL"))
+	paymentUpdateReturnURL := srv.PaymentUpdateReturnURL
 	if paymentUpdateReturnURL == "" {
 		slog.Warn("PAYMENT_UPDATE_RETURN_URL NOT SET — \"add a payment method\" emails are not sent, and an existing link's page refuses to add the card, because Stripe would have no page to send the customer back to. Set this to your dashboard's /payment-method-added page, e.g. https://app.example.com/payment-method-added")
 	}
@@ -547,7 +546,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	//
 	// The adapter is a named variable, not an inline literal, so the ADR-090
 	// boot gate below can check that its audit emitter is wired.
-	hostedInvoiceBaseURL := strings.TrimSpace(os.Getenv("HOSTED_INVOICE_BASE_URL"))
+	hostedInvoiceBaseURL := srv.HostedInvoiceBaseURL
 	hostedInvoiceStripe := &hostedInvoiceStripeAdapter{clients: stripeClients, ensurer: paymentMethodsStripe, sessions: checkoutSessionStore, audit: auditLogger, belowMinimum: stripeAdapter}
 
 	hostedInvoiceH := hostedinvoice.New(hostedinvoice.Deps{
@@ -614,8 +613,8 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	// own account, there is no per-tenant secret. The tenant and livemode come
 	// from the stamped outbox row. The suppressor is attached inside the
 	// blinder branch below.
-	postmarkWebhookUser := strings.TrimSpace(os.Getenv("POSTMARK_WEBHOOK_USER"))
-	postmarkWebhookPass := strings.TrimSpace(os.Getenv("POSTMARK_WEBHOOK_PASS"))
+	postmarkWebhookUser := srv.PostmarkWebhookUser
+	postmarkWebhookPass := srv.PostmarkWebhookPass
 	postmarkH := email.NewPostmarkHandler(emailOutboxStore, postmarkWebhookUser, postmarkWebhookPass)
 	if postmarkWebhookUser == "" || postmarkWebhookPass == "" {
 		slog.Warn("POSTMARK_WEBHOOK_USER/POSTMARK_WEBHOOK_PASS not set — /v1/webhooks/postmark rejects all posts (401); delivery/bounce webhooks will not ingest")
@@ -647,7 +646,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	dunningSvc.SetEmailNotifier(dunningEmail)
 	dunningSvc.SetCustomerEmailFetcher(customerEmailAdapter)
 	stripeAdapter.SetEmailReceipt(receiptEmail, customerEmailAdapter)
-	paymentUpdateURL := strings.TrimSpace(os.Getenv("PAYMENT_UPDATE_URL"))
+	paymentUpdateURL := srv.PaymentUpdateURL
 	if paymentUpdateURL == "" {
 		slog.Warn("PAYMENT_UPDATE_URL NOT SET — payment-setup-request emails (no-PM-at-finalize) will fail at send time. Set this to your customer-portal payment-update page URL.")
 	}
@@ -1094,7 +1093,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	// recipient-suppression gate. Its HMAC key is separate from
 	// HARDCOUNT_ENCRYPTION_KEY, so leaking one does not reveal the other.
 	// Without it, both fail closed.
-	if bidxKey := strings.TrimSpace(os.Getenv("HARDCOUNT_EMAIL_BIDX_KEY")); bidxKey != "" {
+	if bidxKey := srv.EmailBlindIndexKey; bidxKey != "" {
 		b, err := crypto.NewBlinder(bidxKey)
 		if err != nil {
 			slog.Error("invalid HARDCOUNT_EMAIL_BIDX_KEY — bounce-report and suppression lookups will fail closed", "error", err)
@@ -1185,7 +1184,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	// (:8080) are different origins. Without it there, the reset link points
 	// at the API server, which serves no /reset-password route, and the
 	// operator gets a 404 from the email link.
-	dashboardBaseURL := strings.TrimSpace(os.Getenv("DASHBOARD_BASE_URL"))
+	dashboardBaseURL := srv.DashboardBaseURL
 	if dashboardBaseURL == "" {
 		slog.Warn("DASHBOARD_BASE_URL NOT SET — password-reset emails will NOT be sent (the reset link origin is never derived from request headers, to prevent host-header poisoning / token theft). Set this to your canonical dashboard URL (e.g. http://localhost:5173 in dev) to enable password-reset emails.")
 	}
@@ -1207,7 +1206,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	// Its HMAC key is derived from HARDCOUNT_ENCRYPTION_KEY, which production
 	// requires and config validates. With no key, in local development, it
 	// uses a fixed one.
-	throttleKey, err := user.ThrottleKey(strings.TrimSpace(os.Getenv("HARDCOUNT_ENCRYPTION_KEY")))
+	throttleKey, err := user.ThrottleKey(srv.EncryptionKey)
 	if err != nil {
 		slog.Error("invalid HARDCOUNT_ENCRYPTION_KEY: the sign-in throttle uses the local development key", "error", err)
 		throttleKey, _ = user.ThrottleKey("")
@@ -1239,7 +1238,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	// send to the signed-in member.
 	emailSettingsH := &emailSettingsHandler{
 		sender:             emailSender,
-		links:              emailLinkEnvs(os.Getenv),
+		links:              emailLinkEnvs(srv),
 		canEmailSetupLinks: setupLinksEmailable,
 		canSendInvites:     membersSvc.CanInvite(),
 		userEmail: func(ctx context.Context, userID string) (string, error) {
@@ -1448,5 +1447,6 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	s.ingestLimiter = ingestLimiter
 	s.hostedInvoiceRL = hostedInvoiceRL
 	s.opts = o
+	s.settings = srv
 	return s
 }
