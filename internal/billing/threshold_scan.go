@@ -333,7 +333,7 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 	unpriced := unpricedUsage{}
 	for _, u := range eval.Unpriced {
 		slog.Warn("threshold: usage matched no price of its plan — not billed",
-			"meter", u.EventName, "quantity", u.Quantity.String(),
+			"meter_id", u.MeterID, "meter", u.EventName, "quantity", u.Quantity.String(),
 			"subscription_id", sub.ID)
 		unpriced.add(u.MeterID, u.Quantity)
 	}

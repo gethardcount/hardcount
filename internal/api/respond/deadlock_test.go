@@ -22,10 +22,7 @@ import (
 // nothing of the cause, and the raw error goes to the log at WARN with the
 // route, on a line that names which of the two it was. Every other error
 // passes through unchanged.
-//
-// Mutation-verify: drop the 55P03 branch of ConcurrentChangeAsConflict and
-// lock_timeout fails (500, no WARN line).
-func TestConcurrentChangeAsConflict(t *testing.T) {
+func TestConcurrentChangeAsConflict_DeadlockAndLockWaitAnswer409(t *testing.T) {
 	deadlock := fmt.Errorf("cancel proration relief: %w", &pgconn.PgError{
 		Code:    "40P01",
 		Message: "deadlock detected",
@@ -80,8 +77,8 @@ func TestConcurrentChangeAsConflict(t *testing.T) {
 				t.Fatalf("status: got %d, want 409", rec.Code)
 			}
 			body := decodeError(t, rec)
-			if body.Type != "invalid_request_error" || body.Code != CodeConcurrentChange {
-				t.Errorf("body: got %+v, want invalid_request_error %s", body, CodeConcurrentChange)
+			if body.Type != "invalid_request_error" || body.Code != "concurrent_change" {
+				t.Errorf("body: got %+v, want invalid_request_error concurrent_change", body)
 			}
 			if body.Message != concurrentChangeMessage {
 				t.Errorf("message: got %q, want %q", body.Message, concurrentChangeMessage)

@@ -6,7 +6,8 @@ import (
 	"testing"
 )
 
-func TestDomainError_Error(t *testing.T) {
+// Error is the Message, then the Cause when there is one.
+func TestDomainError_ErrorIsMessageThenCause(t *testing.T) {
 	t.Run("without cause", func(t *testing.T) {
 		err := &DomainError{Message: "something went wrong"}
 		if err.Error() != "something went wrong" {
@@ -23,7 +24,8 @@ func TestDomainError_Error(t *testing.T) {
 	})
 }
 
-func TestDomainError_Unwrap(t *testing.T) {
+// errors.Is and errors.As look through a DomainError to its Cause.
+func TestDomainError_UnwrapsToItsCause(t *testing.T) {
 	cause := fmt.Errorf("original error")
 	err := &DomainError{Message: "wrapped", Cause: cause}
 
@@ -32,7 +34,8 @@ func TestDomainError_Unwrap(t *testing.T) {
 	}
 }
 
-func TestCode(t *testing.T) {
+// Code finds a DomainError's Code anywhere in the chain, and is "" without one.
+func TestCode_FindsTheCodeAnywhereInTheChain(t *testing.T) {
 	t.Run("extracts code from DomainError", func(t *testing.T) {
 		err := Invalid("url", "must start with https://").WithCode("url_not_https")
 		if Code(err) != "url_not_https" {
@@ -62,43 +65,41 @@ func TestCode(t *testing.T) {
 	})
 }
 
-func TestRequired(t *testing.T) {
-	err := Required("external_id")
-	if err.Field != "external_id" {
-		t.Errorf("field: got %q", err.Field)
+// Each constructor makes a DomainError of its kind, and of no other, with
+// the field, message and code it is given.
+func TestConstructors_SetKindFieldMessageAndCode(t *testing.T) {
+	kinds := []error{ErrNotFound, ErrAlreadyExists, ErrInvalidState, ErrForbidden, ErrValidation, ErrUnavailable}
+	cause := errors.New("connection reset")
+	cases := []struct {
+		name                 string
+		err                  *DomainError
+		kind                 error
+		field, message, code string
+	}{
+		{"Required", Required("external_id"), ErrValidation, "external_id", "external_id is required", ""},
+		{"Invalid", Invalid("email", "must contain @"), ErrValidation, "email", "must contain @", ""},
+		{"AlreadyExists", AlreadyExists("code", `plan code "acme-pro" already exists`), ErrAlreadyExists, "code", `plan code "acme-pro" already exists`, ""},
+		{"InvalidState", InvalidState("cannot rotate a revoked key"), ErrInvalidState, "", "cannot rotate a revoked key", ""},
+		{"Forbidden", Forbidden("this key cannot do that"), ErrForbidden, "", "this key cannot do that", ""},
+		{"NotFound", NotFound("customer"), ErrNotFound, "", "customer not found", "not_found"},
+		{"Unavailable", Unavailable("proration_unavailable", "please retry", cause), ErrUnavailable, "", "please retry", "proration_unavailable"},
 	}
-	if err.Error() != "external_id is required" {
-		t.Errorf("message: got %q", err.Error())
-	}
-	if !errors.Is(err, ErrValidation) {
-		t.Error("Required should be an ErrValidation")
-	}
-}
-
-func TestInvalid(t *testing.T) {
-	err := Invalid("email", "must contain @")
-	if err.Field != "email" {
-		t.Errorf("field: got %q", err.Field)
-	}
-	if err.Error() != "must contain @" {
-		t.Errorf("message: got %q", err.Error())
-	}
-	if !errors.Is(err, ErrValidation) {
-		t.Error("Invalid should be an ErrValidation")
-	}
-}
-
-func TestAlreadyExists(t *testing.T) {
-	err := AlreadyExists("code", "plan code \"acme-pro\" already exists")
-	if err.Field != "code" {
-		t.Errorf("field: got %q", err.Field)
-	}
-	if !errors.Is(err, ErrAlreadyExists) {
-		t.Error("AlreadyExists should be an ErrAlreadyExists")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if tc.err.Field != tc.field || tc.err.Message != tc.message || tc.err.Code != tc.code {
+				t.Errorf("got field %q message %q code %q, want %q %q %q", tc.err.Field, tc.err.Message, tc.err.Code, tc.field, tc.message, tc.code)
+			}
+			for _, k := range kinds {
+				if got, want := errors.Is(tc.err, k), k == tc.kind; got != want {
+					t.Errorf("errors.Is(err, %v) = %v, want %v", k, got, want)
+				}
+			}
+		})
 	}
 }
 
-func TestField(t *testing.T) {
+// Field finds a DomainError's Field anywhere in the chain, and is "" without one.
+func TestField_FindsTheFieldAnywhereInTheChain(t *testing.T) {
 	t.Run("extracts field from DomainError", func(t *testing.T) {
 		if Field(Required("foo")) != "foo" {
 			t.Errorf("got %q, want foo", Field(Required("foo")))
@@ -123,24 +124,4 @@ func TestField(t *testing.T) {
 			t.Error("nil should have no field")
 		}
 	})
-}
-
-func TestSentinelErrors(t *testing.T) {
-	tests := []struct {
-		name     string
-		err      error
-		sentinel error
-	}{
-		{"NotFound", fmt.Errorf("customer: %w", ErrNotFound), ErrNotFound},
-		{"AlreadyExists", fmt.Errorf("dup: %w", ErrAlreadyExists), ErrAlreadyExists},
-		{"InvalidState", fmt.Errorf("state: %w", ErrInvalidState), ErrInvalidState},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			if !errors.Is(tt.err, tt.sentinel) {
-				t.Errorf("errors.Is should match %v", tt.sentinel)
-			}
-		})
-	}
 }

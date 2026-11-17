@@ -5,12 +5,11 @@ import (
 	"fmt"
 )
 
-// DomainError is a structured error. It carries machine-readable metadata
-// (Kind for HTTP status routing, Code for business-rule codes, Field for the
-// offending form input) and a human-readable Message. The API layer turns it
-// into an HTTP response by matching on Kind first. It then puts Field on the
-// response envelope, so the frontend can show the message at the right
-// input. Cause is optional and used only for internal and log context.
+// DomainError is an error the API can answer: Kind picks the status, Code
+// replaces the status's default code where the status takes one, Field names
+// the input at fault and Message is the error's text. Cause is for the log;
+// only Unavailable sets it. With no Kind it is a server fault and shows
+// nothing. respond.FromError has the mapping, row by row.
 type DomainError struct {
 	Kind    error
 	Code    string
@@ -30,23 +29,19 @@ func (e *DomainError) Error() string {
 // Unwrap returns Cause, so errors.Is and errors.As look through it.
 func (e *DomainError) Unwrap() error { return e.Cause }
 
-// WithCode attaches a stable, machine-readable error code to a DomainError.
-// Use it to add a domain-specific code (such as "invoice_number_taken") on
-// top of the generic Kind routing. It is safe to chain onto any constructor:
+// WithCode sets e's Code and returns e, to chain onto a constructor:
 //
 //	return errs.AlreadyExists("invoice_number", "invoice number taken").WithCode("invoice_number_taken")
 //
-// Promised codes are part of the public API, because integrators switch on
-// them. Change the code string only when the underlying failure semantics
-// change.
+// A code is part of the API, because clients switch on it: change one only
+// when the failure it names changes.
 func (e *DomainError) WithCode(code string) *DomainError {
 	e.Code = code
 	return e
 }
 
-// Is lets errors.Is match against this error's Kind sentinel. This is how
-// respond.FromError routes DomainError{Kind: ErrValidation} to a 422 response
-// without the caller needing to wrap manually.
+// Is reports whether target is e's Kind, so errors.Is(err, ErrValidation)
+// finds a DomainError of that kind anywhere in err's chain.
 func (e *DomainError) Is(target error) bool {
 	if e.Kind == nil {
 		return false
@@ -63,9 +58,7 @@ func Code(err error) string {
 	return ""
 }
 
-// Field extracts the offending field name from a DomainError anywhere in the
-// error chain, or returns "". Used by respond.FromError to populate
-// ErrorDetail.Param on the response envelope.
+// Field returns the Field of a DomainError anywhere in the error chain, or "".
 func Field(err error) string {
 	var de *DomainError
 	if errors.As(err, &de) {
@@ -74,8 +67,8 @@ func Field(err error) string {
 	return ""
 }
 
-// Required returns a validation error indicating a required field is missing.
-// Maps to HTTP 422 with Param=field so the client can highlight the input.
+// Required is the validation error for a missing field: "<field> is
+// required", with field as its param.
 //
 //	return errs.Required("external_id")
 func Required(field string) *DomainError {
@@ -86,10 +79,9 @@ func Required(field string) *DomainError {
 	}
 }
 
-// Invalid returns a validation error for a field that was provided but failed
-// a semantic check (a bad format, out of range and so on). The reason is
-// shown to the user verbatim. Phrase it as a complete sentence fragment that
-// reads naturally under the field, such as "must be a valid email address".
+// Invalid is the validation error for a field that was sent but failed a
+// check. The client shows reason under the field, so phrase it to read there,
+// such as "must be a valid email address".
 //
 //	return errs.Invalid("company_email", "must contain @ and a domain")
 func Invalid(field, reason string) *DomainError {
@@ -100,9 +92,8 @@ func Invalid(field, reason string) *DomainError {
 	}
 }
 
-// AlreadyExists marks a duplicate resource, optionally naming the offending
-// field. Maps to HTTP 409. Use when a user-submitted value collides with an
-// existing record (customer.external_id, plan.code, etc.).
+// AlreadyExists is the error for a value that must be unique and is taken,
+// such as a customer's external_id. field, when set, is its param.
 //
 //	return errs.AlreadyExists("code", fmt.Sprintf("plan code %q already exists", code))
 func AlreadyExists(field, message string) *DomainError {
@@ -113,12 +104,10 @@ func AlreadyExists(field, message string) *DomainError {
 	}
 }
 
-// InvalidState rejects an operation because the target resource is in a
-// state that disallows it (such as "cannot rotate a revoked key").
-// It maps to HTTP 409, because the input is fine and the resource's state is
-// the conflict. A 422 would mean "fix your input" (see respond/errors.go).
-// These errors are not about a specific form field. The user usually needs a
-// toast or an inline banner, not a field highlight.
+// InvalidState refuses an action the resource's current state does not
+// allow, such as rotating a revoked key. It is a 409, not a 422: the input
+// is fine, and the client must wait or change the resource, not fix the
+// request.
 //
 //	return errs.InvalidState("cannot rotate a revoked key")
 func InvalidState(message string) *DomainError {
@@ -128,12 +117,8 @@ func InvalidState(message string) *DomainError {
 	}
 }
 
-// Forbidden marks an authorization denial: the caller is authenticated but
-// not permitted to perform this action. It differs from Invalid, which is bad
-// input, and from a 401 for missing authentication. It maps to HTTP 403. Use
-// it in the service layer when an authorization rule must hold whichever
-// handler or route the call came through, so no future caller can bypass
-// the rule.
+// Forbidden refuses an authenticated caller who may not do this. A service
+// returns it for a rule that must hold on every route that reaches it.
 //
 //	return errs.Forbidden("this key cannot do that")
 func Forbidden(message string) *DomainError {
@@ -143,12 +128,11 @@ func Forbidden(message string) *DomainError {
 	}
 }
 
-// NotFound marks a referenced resource that does not exist for the caller.
-// Maps to HTTP 404 with the message "<resource> not found". Use it when the
-// missing thing is not the resource the endpoint is named after (a
-// customer_id in the body of a credit grant), so the response names what was
-// actually missing. A row hidden by tenant or mode isolation reports the same
-// way as one that does not exist.
+// NotFound is the error for a resource the request names that does not
+// exist for the caller, such as the customer_id of a credit grant. Its
+// message, "<resource> not found", names what was missing even when it is
+// not the resource the route is named after. A row of another account or
+// mode is reported the same way.
 //
 //	return errs.NotFound("customer")
 func NotFound(resource string) *DomainError {
@@ -160,11 +144,10 @@ func NotFound(resource string) *DomainError {
 }
 
 // Unavailable refuses a request because something it needed failed, such as
-// a database read. It maps to HTTP 503 with Retry-After, and the idempotency
-// layer does not store a 503, so the client sends the same request again
-// with the same key. Return it only when a second run is safe: nothing the
-// request committed would be done twice. code names what was unavailable.
-// cause goes to the server log, never to the client.
+// a database read. The idempotency layer does not store the 503, so the
+// client sends the same request again with the same key: return it only when
+// nothing the request committed would be done twice. code names what was
+// unavailable; cause goes to the log, never to the client.
 //
 //	return errs.Unavailable("proration_unavailable", "could not read this period's invoice — please retry", err)
 func Unavailable(code, message string, cause error) *DomainError {
@@ -176,39 +159,33 @@ func Unavailable(code, message string, cause error) *DomainError {
 	}
 }
 
-// CodeEmailNotConfigured is the stable code an operator-initiated email
-// action answers with when this server has no SMTP_HOST. Sends are queued
-// and delivered later. Without this refusal, the action would report "sent"
-// while the queued row failed with "SMTP not configured", unseen by the
-// operator.
+// CodeEmailNotConfigured is the code of EmailNotConfigured.
 const CodeEmailNotConfigured = "email_not_configured"
 
-// EmailNotConfigured is the 409 every operator email action returns when the
-// server cannot send email. Callers return it before doing anything that
-// cannot be undone (minting a link, creating an invitation).
+// EmailNotConfigured is the 409 an operator's email action returns on a
+// server with no SMTP_HOST. Email is queued and sent later, so without it the
+// action would say "sent" while the queued email failed unseen. Return it
+// before anything that cannot be undone, such as minting a link.
 func EmailNotConfigured() *DomainError {
 	return InvalidState("Email isn't set up on this server, so nothing was sent.").WithCode(CodeEmailNotConfigured)
 }
 
-// CodeStripeNotConnected is the stable code an operator action that needs
-// Stripe answers with when the account has no Stripe keys for the mode.
+// CodeStripeNotConnected is the code of StripeNotConnected.
 const CodeStripeNotConnected = "stripe_not_connected"
 
 // StripeNotConnected is the 409 for an operator action that needs Stripe in
-// a mode the account has not connected. It is the caller's state to fix, so
-// it is not a 500. A failure to read the credentials is a different thing
-// and stays an error (a 500).
+// a mode the account has not connected. A failure to read the keys is a
+// server fault, not this.
 func StripeNotConnected() *DomainError {
 	return InvalidState("Stripe is not connected for this mode. Connect it under Settings, then try again.").WithCode(CodeStripeNotConnected)
 }
 
-// CodeReturnAddressNotSet is the stable code an operator action that sends a
-// customer to Stripe answers with when this server has no address for Stripe
-// to send the customer back to. Without the address there is no page that
-// works, so the action is refused before any Stripe call.
+// CodeReturnAddressNotSet is the code of ReturnAddressNotSet.
 const CodeReturnAddressNotSet = "return_address_not_set"
 
-// ReturnAddressNotSet is the 409 for that state. setting names the server
+// ReturnAddressNotSet is the 409 for an operator action that would send a
+// customer to Stripe from a server with no address for Stripe to send them
+// back to. It is returned before any Stripe call. setting names the server
 // setting that holds the address, such as CUSTOMER_PORTAL_URL.
 func ReturnAddressNotSet(setting string) *DomainError {
 	return InvalidState(setting + " isn't set on this server, so Stripe has no page to send the customer back to. Set it to your dashboard's address, then restart.").WithCode(CodeReturnAddressNotSet)
@@ -238,27 +215,16 @@ const (
 // under the aggregation it has.
 const CodeMeterHasUsage = "meter_has_usage"
 
-// Sentinel errors for store and service layers.
+// The kinds. A store or service returns one, usually through a constructor
+// above, and respond.FromError picks the status from it.
 var (
 	ErrNotFound      = errors.New("not found")
 	ErrAlreadyExists = errors.New("already exists")
 	ErrInvalidState  = errors.New("invalid state")
-	// ErrForbidden marks an authorization denial (authenticated but not
-	// permitted). respond.FromError maps it to HTTP 403. Prefer
-	// errs.Forbidden.
-	ErrForbidden = errors.New("forbidden")
-	// ErrValidation marks an error caused by bad caller input (a missing
-	// field, a malformed value). New code should prefer errs.Required,
-	// errs.Invalid or errs.AlreadyExists, which set the Field metadata the UI
-	// uses. The older wrapper form still works:
-	//
-	//   return fmt.Errorf("%w: customer_id is required", errs.ErrValidation)
-	//
-	// But it leaves the frontend with only a toast, and no field highlight.
-	ErrValidation = errors.New("validation error")
-	// ErrUnavailable marks a request refused because something it needed
-	// failed, when a second run of it is safe. respond.FromError maps it to
-	// HTTP 503. Use errs.Unavailable, which carries the code and the cause.
+	ErrForbidden     = errors.New("forbidden")
+	// ErrValidation is bad input. Required and Invalid also set the field,
+	// which the client shows the message under.
+	ErrValidation  = errors.New("validation error")
 	ErrUnavailable = errors.New("unavailable")
 )
 
