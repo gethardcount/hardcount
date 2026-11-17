@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"net"
 	"os"
 	"strings"
@@ -70,16 +71,29 @@ func ServerFromEnv() Server {
 	}
 }
 
-// TrustedProxies is TrustProxy parsed. An entry that does not parse is left
-// out; Load refuses to start on one.
+// Check refuses a set TRUST_PROXY or CORS_ALLOWED_ORIGINS the server could not
+// use, with the setting's name: an entry that does not parse, or a value that
+// names nothing. Load calls it, and so does api.NewServer, so a server built
+// without Load refuses the same values instead of dropping them.
+func (s Server) Check() error {
+	if _, err := ParseTrustProxy(s.TrustProxy); err != nil {
+		return fmt.Errorf("%w — set TRUST_PROXY to the balancer/ingress IP(s) or CIDR(s), comma-separated (e.g. 10.0.0.0/8,127.0.0.1), or TRUST_PROXY=none if replicas accept client connections directly (docs/ops/high-availability.md)", err)
+	}
+	if _, err := ParseCORSOrigins(s.CORSAllowedOrigins); err != nil {
+		return fmt.Errorf("%w (docs/settings.md)", err)
+	}
+	return nil
+}
+
+// TrustedProxies is TrustProxy parsed. Check refuses a value with an entry
+// that does not parse.
 func (s Server) TrustedProxies() []*net.IPNet {
 	nets, _ := ParseTrustProxy(s.TrustProxy)
 	return nets
 }
 
 // CORSOrigins is CORSAllowedOrigins parsed, or the local default when it is
-// unset or empty. An entry that does not parse is left out; Load refuses to
-// start on one.
+// unset or empty. Check refuses a value it could not use.
 func (s Server) CORSOrigins() []string {
 	raw := s.CORSAllowedOrigins
 	if raw == "" {

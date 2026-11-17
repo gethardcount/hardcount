@@ -85,7 +85,7 @@ func (stubSessionStore) InsertTx(context.Context, *sql.Tx, session.Session) erro
 func (stubSessionStore) EndTx(context.Context, *sql.Tx, string) (bool, error) {
 	return false, nil
 }
-func (stubSessionStore) GetByIDHash(context.Context, string) (session.Session, error) {
+func (stubSessionStore) GetByIDHash(context.Context, string, time.Time) (session.Session, error) {
 	return session.Session{}, session.ErrNotFound
 }
 func (stubSessionStore) EndAllForUserTx(context.Context, *sql.Tx, string) error { return nil }

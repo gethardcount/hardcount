@@ -3499,8 +3499,9 @@ components:
         created_by:
           type: string
           description: |
-            The ID of the API key that installed the recipe. Absent for an
-            install from a dashboard session.
+            The ID of the API key (`hc_key_…`) or dashboard user (`hc_usr_…`)
+            that installed the recipe. Absent for an install from a dashboard
+            session made by an earlier version of Hardcount.
       example:
         id: hc_rec_6b1d3f5a7c9e0b2d4f6a8c1e
         tenant_id: hc_ten_dajqj02q3gpgqfoq5c00

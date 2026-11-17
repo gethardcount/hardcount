@@ -11,7 +11,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/audit"
@@ -28,7 +27,7 @@ func (f *fakeSessionStore) InsertTx(context.Context, *sql.Tx, Session) error { r
 func (f *fakeSessionStore) EndTx(context.Context, *sql.Tx, string) (bool, error) {
 	return false, nil
 }
-func (f *fakeSessionStore) GetByIDHash(_ context.Context, idHash string) (Session, error) {
+func (f *fakeSessionStore) GetByIDHash(_ context.Context, idHash string, _ time.Time) (Session, error) {
 	s, ok := f.sessions[idHash]
 	if !ok {
 		return Session{}, ErrNotFound
@@ -56,7 +55,7 @@ func sessionRequest(cookie string) *http.Request {
 // request's context is cancelled mid-query.
 type canceledStore struct{ fakeSessionStore }
 
-func (*canceledStore) GetByIDHash(context.Context, string) (Session, error) {
+func (*canceledStore) GetByIDHash(context.Context, string, time.Time) (Session, error) {
 	return Session{}, fmt.Errorf("get session: %w", context.Canceled)
 }
 
@@ -150,21 +149,6 @@ func TestSessionUserNamedOnTheRecord(t *testing.T) {
 			t.Errorf("%s: actor on the record = %+v, want none: nobody signed in", name, got)
 		}
 	}
-
-	// An expired session is no session: one whose expires_at is now or earlier
-	// answers 401, like an unknown cookie. synctest stops the clock, so "now"
-	// is the instant Resolve reads.
-	synctest.Test(t, func(t *testing.T) {
-		for raw, expires := range map[string]time.Time{"sess_expires_now": time.Now(), "sess_expired": time.Now().Add(-time.Second)} {
-			store.sessions[HashID(raw)] = Session{UserID: "usr_owner", TenantID: "ten_1", ExpiresAt: expires}
-			_, rec := recordOf(RequireCaller(sessions, nil)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-				t.Errorf("%s: reached the handler", raw)
-			})), sessionRequest(raw))
-			if rec.Code != http.StatusUnauthorized {
-				t.Errorf("%s: status = %d, want 401", raw, rec.Code)
-			}
-		}
-	})
 }
 
 // recordOf serves req through h under the server's root, so the request has

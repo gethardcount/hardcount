@@ -35,8 +35,9 @@ export interface RecipeInstance {
   /** When the recipe was installed. */
   created_at: string;
   /**
-     * The ID of the API key that installed the recipe. Absent for an
-     * install from a dashboard session.
+     * The ID of the API key (`hc_key_…`) or dashboard user (`hc_usr_…`)
+     * that installed the recipe. Absent for an install from a dashboard
+     * session made by an earlier version of Hardcount.
      */
   created_by?: string;
 }

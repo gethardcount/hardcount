@@ -515,9 +515,10 @@ func TestLoad_TrustProxyMustParse(t *testing.T) {
 
 // An origin with a * inside it, such as https://*.example.com, is not a
 // pattern: Hardcount matches origins exactly, so it would allow nothing. "*"
-// beside other origins turns the sign-in cookie off for them too. Both stop
-// start-up, in every environment.
-func TestLoad_CORSAllowedOriginsRefusesPatterns(t *testing.T) {
+// beside other origins turns the sign-in cookie off for them too. A set value
+// with no origin in it would allow none. All three stop start-up, in every
+// environment.
+func TestLoad_CORSAllowedOriginsMustBeUsable(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
 	t.Setenv("APP_DATABASE_URL", "postgres://app:app@localhost/test")
 	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", strings.Repeat("ab", 32))
@@ -526,7 +527,7 @@ func TestLoad_CORSAllowedOriginsRefusesPatterns(t *testing.T) {
 
 	for _, env := range []string{"production", "local"} {
 		t.Setenv("APP_ENV", env)
-		for _, bad := range []string{"https://*.example.com", "h*", "https://app.example.com,*.example.com", "**", "*,https://app.example.com", "https://app.example.com, *"} {
+		for _, bad := range []string{"https://*.example.com", "h*", "https://app.example.com,*.example.com", "**", "*,https://app.example.com", "https://app.example.com, *", "   ", " , "} {
 			t.Setenv("CORS_ALLOWED_ORIGINS", bad)
 			_, err := Load()
 			if err == nil || !strings.Contains(err.Error(), "CORS_ALLOWED_ORIGINS") {
@@ -551,7 +552,7 @@ func TestParseCORSOrigins(t *testing.T) {
 		err  string
 	}{
 		{"", nil, ""},
-		{" , ", nil, ""},
+		{" , ", nil, "names no origin"},
 		{" https://a.example.com , https://b.example.com ,", []string{"https://a.example.com", "https://b.example.com"}, ""},
 		{" * ", []string{"*"}, ""},
 		{"*,*", []string{"*"}, ""},

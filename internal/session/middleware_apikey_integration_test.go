@@ -1,10 +1,12 @@
 package session
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/auth"
@@ -132,6 +134,42 @@ func TestAuthenticate_NamesOneCaller(t *testing.T) {
 		}
 		if got := auth.CallerOf(ctx).UserID; got != "" {
 			t.Errorf("user id = %q, want none for a key", got)
+		}
+	})
+
+	// The store refuses a session that is not live, in its SQL, at the instant
+	// its caller passes: one expiring at that instant is expired.
+	t.Run("an expired session", func(t *testing.T) {
+		store := NewPostgresStore(db)
+		expires := time.Now().UTC().Add(-time.Second).Truncate(time.Microsecond)
+		tx, err := db.BeginTx(t.Context(), postgres.TxBypass, "")
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer postgres.Rollback(tx)
+		var userID string
+		if err := tx.QueryRowContext(t.Context(), `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
+			"expired-"+tenantID+"@example.com").Scan(&userID); err != nil {
+			t.Fatalf("insert user: %v", err)
+		}
+		expired := Session{IDHash: HashID("sess_expired"), UserID: userID, TenantID: tenantID, CreatedAt: expires.Add(-time.Hour), ExpiresAt: expires}
+		if err := store.InsertTx(t.Context(), tx, expired); err != nil {
+			t.Fatalf("insert session: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+
+		req := httptest.NewRequest("GET", "/", nil)
+		req.AddCookie(&http.Cookie{Name: CookieName, Value: "sess_expired"})
+		if _, err := Authenticate(req, NewService(store), keys); !errors.Is(err, ErrNoCredentials) {
+			t.Errorf("an expired session: err = %v, want ErrNoCredentials", err)
+		}
+		if _, err := store.GetByIDHash(t.Context(), expired.IDHash, expires); !errors.Is(err, ErrNotFound) {
+			t.Errorf("at its expiry instant: err = %v, want ErrNotFound", err)
+		}
+		if _, err := store.GetByIDHash(t.Context(), expired.IDHash, expires.Add(-time.Microsecond)); err != nil {
+			t.Errorf("a microsecond before its expiry: err = %v, want the session", err)
 		}
 	})
 

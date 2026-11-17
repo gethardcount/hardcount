@@ -61,14 +61,7 @@ func (s *Service) Resolve(ctx context.Context, rawID string) (Session, error) {
 	if rawID == "" {
 		return Session{}, ErrNotFound
 	}
-	sess, err := s.store.GetByIDHash(ctx, HashID(rawID))
-	if err != nil {
-		return Session{}, err
-	}
-	if sess.RevokedAt != nil || !time.Now().UTC().Before(sess.ExpiresAt) {
-		return Session{}, ErrNotFound
-	}
-	return sess, nil
+	return s.store.GetByIDHash(ctx, HashID(rawID), time.Now().UTC())
 }
 
 // End ends the live session whose raw cookie value is rawID and calls then on

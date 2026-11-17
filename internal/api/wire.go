@@ -91,8 +91,12 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 		opt(&o)
 	}
 	// docs/settings.md describes each setting. A warning below names what an
-	// unset one turns off.
+	// unset one turns off. Check refuses a value the server cannot use, as
+	// config.Load does.
 	srv := config.ServerFromEnv()
+	if err := srv.Check(); err != nil {
+		panic(err.Error())
+	}
 
 	invoiceStore := invoice.NewPostgresStore(db)
 	subStore := subscription.NewPostgresStore(db)

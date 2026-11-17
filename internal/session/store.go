@@ -14,7 +14,7 @@ import (
 // and Service's methods state each contract.
 type Store interface {
 	InsertTx(ctx context.Context, tx *sql.Tx, s Session) error
-	GetByIDHash(ctx context.Context, idHash string) (Session, error)
+	GetByIDHash(ctx context.Context, idHash string, now time.Time) (Session, error)
 	EndTx(ctx context.Context, tx *sql.Tx, idHash string) (bool, error)
 	EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID string) error
 	EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, tenantID string) error
@@ -69,17 +69,19 @@ func scanSession(row *sql.Row) (Session, error) {
 	return sess, nil
 }
 
-// GetByIDHash returns the row whatever its state; Resolve refuses revoked and
-// expired ones.
-func (s *postgresStore) GetByIDHash(ctx context.Context, idHash string) (Session, error) {
+// GetByIDHash returns the session whose hash is idHash if it is live at now,
+// and ErrNotFound otherwise. now is the caller's, so a test can name the
+// instant.
+func (s *postgresStore) GetByIDHash(ctx context.Context, idHash string, now time.Time) (Session, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		return Session{}, err
 	}
 	defer postgres.Rollback(tx)
 
-	sess, err := scanSession(tx.QueryRowContext(ctx,
-		`SELECT `+sessionCols+` FROM dashboard_sessions WHERE id_hash = $1`, idHash))
+	sess, err := scanSession(tx.QueryRowContext(ctx, `
+		SELECT `+sessionCols+` FROM dashboard_sessions
+		WHERE id_hash = $1 AND revoked_at IS NULL AND expires_at > $2`, idHash, now))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Session{}, ErrNotFound
 	}

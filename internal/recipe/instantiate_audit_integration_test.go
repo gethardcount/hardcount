@@ -3,6 +3,7 @@ package recipe
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -150,6 +151,28 @@ func TestRecipeInstantiate_AuditSharedFate(t *testing.T) {
 				t.Errorf("no-op re-apply over HTTP recorded an extra row: got %d", len(rows))
 			}
 		})
+	})
+
+	// An install from a dashboard session records the user's id, as an install
+	// with a key records the key's: created_by names the caller the audit row
+	// names.
+	t.Run("an install from a session records its user", func(t *testing.T) {
+		tenantID := testutil.CreateTestTenant(t, f.db, "Recipe Installed By A User")
+		f.svc.SetAuditLogger(logger)
+		reqCtx := requesttest.Context(auth.WithCaller(ctx, auth.Caller{TenantID: tenantID, UserID: "hc_usr_installer"}))
+		req := httptest.NewRequest(http.MethodPost, "/anthropic_style/instantiate", strings.NewReader(`{}`)).WithContext(reqCtx)
+		rec := httptest.NewRecorder()
+		NewHandler(f.svc).Routes().ServeHTTP(rec, req)
+		if rec.Code != http.StatusCreated {
+			t.Fatalf("instantiate: got %d, want 201; body=%s", rec.Code, rec.Body.String())
+		}
+		var inst domain.RecipeInstance
+		if err := json.Unmarshal(rec.Body.Bytes(), &inst); err != nil {
+			t.Fatalf("decode: %v", err)
+		}
+		if inst.CreatedBy != "hc_usr_installer" {
+			t.Errorf("created_by = %q, want the session's user hc_usr_installer", inst.CreatedBy)
+		}
 	})
 }
 
