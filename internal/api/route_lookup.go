@@ -5,54 +5,46 @@ import (
 	"net/http"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
-// matchedRoute is the route a request matched, found once at the root
-// (routeLookup): its method and canonical pattern, which key routeTable, and
-// its path parameters. A path that matches no route has an empty pattern; a
-// mount point asked for a method its sub-router lacks has the mount's
-// pattern, which the table does not hold.
-type matchedRoute struct {
-	key    routeKey
-	params *chi.Context
-}
-
-type matchedRouteKey struct{}
-
-// routeOf is the route the request matched (routeLookup). It panics when the
-// lookup has not run: that is a mis-wired server, and no reader may take
-// "not looked up" for "matched no route". The Recoverer answers 500 and logs
-// it.
-func routeOf(ctx context.Context) matchedRoute {
-	m, ok := ctx.Value(matchedRouteKey{}).(matchedRoute)
-	if !ok {
-		panic("api: the route lookup did not run: routeLookup.Middleware must be on the root router, above every reader of routeOf")
-	}
-	return m
-}
-
-// routeLookup finds each request's route once, at the root, before any
-// group's middleware runs. Find on the built router gives the route's
-// pattern and fills its path parameters before the mounted sub-routers run
-// (TestRouteLookup_FindsEveryRouteAndItsParams). It runs for every request
-// but a CORS preflight, which mw.CORS answers before it. The clock door, the
-// idempotency layer's show-once check (answersWithShowOnceSecret) and the
-// audit detector (auditRoute) read it through routeOf.
-type routeLookup struct {
+// routeFinder finds each request's route for its record (request.Begin):
+// one Find on the built router, which gives the route's pattern and fills
+// its path parameters before any group's middleware or mounted sub-router
+// runs (TestRouteLookup_FindsEveryRouteAndItsParams). The pattern is kept
+// only when routeTable holds the route, so a path that matches no route,
+// and a mount asked for a method its sub-router lacks, have none.
+//
+// It runs at the root above the Recoverer, as do three of the record's
+// readers: the trace attributes, the metrics and the access log. A panic
+// there is not recovered by ours, and net/http drops the connection. So it
+// must not be able to panic for a request: Find on the built router reads
+// only the method and the path, and nothing here is nil that a request can
+// make nil. A missing record in those readers can only be a mis-wired
+// server, and request.Of logs it before it panics.
+type routeFinder struct {
 	// root is the built router, set once every route is registered.
 	root chi.Routes
 }
 
-func (l *routeLookup) Middleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		rctx := chi.NewRouteContext()
-		m := matchedRoute{params: rctx, key: routeKey{Method: r.Method}}
-		// A miss keys as "", not as canonicalRoute(""), which is "/".
-		if pattern := l.root.Find(rctx, r.Method, routedPath(r)); pattern != "" {
-			m.key.Pattern = canonicalRoute(pattern)
+func (f *routeFinder) route(r *http.Request) request.Route {
+	rctx := chi.NewRouteContext()
+	rt := request.Route{Method: r.Method, Params: rctx}
+	// A miss keys as "", not as canonicalRoute(""), which is "/".
+	if pattern := f.root.Find(rctx, r.Method, routedPath(r)); pattern != "" {
+		key := routeKey{Method: r.Method, Pattern: canonicalRoute(pattern)}
+		if _, ok := routeTable[key]; ok {
+			rt.Pattern = key.Pattern
 		}
-		next.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), matchedRouteKey{}, m)))
-	})
+	}
+	return rt
+}
+
+// routeKeyOf is the request's key in routeTable, from its record.
+func routeKeyOf(ctx context.Context) routeKey {
+	rt := request.Of(ctx).Route()
+	return routeKey{Method: rt.Method, Pattern: rt.Pattern}
 }
 
 // routedPath is the path chi routes the request on: the escaped path when

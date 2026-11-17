@@ -8,8 +8,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-	chimw "github.com/go-chi/chi/v5/middleware"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -399,10 +398,9 @@ func Metrics() func(http.Handler) http.Handler {
 			defer httpRequestsInFlight.Dec()
 
 			start := time.Now()
-			ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
-			next.ServeHTTP(ww, r)
+			next.ServeHTTP(w, r)
 
-			status := strconv.Itoa(ww.Status())
+			status := strconv.Itoa(request.Of(r.Context()).Status())
 			path := routeLabel(r)
 			method := methodLabel(r.Method)
 			duration := time.Since(start).Seconds()
@@ -506,22 +504,17 @@ func RecordScheduledCleanup(table string, rows int) {
 // for the same case.
 const unmatchedRoute = "unmatched"
 
-// routeLabel returns the chi route pattern for the request, such as
-// /v1/customers/{id}. The set is closed: the registered patterns, one
-// "prefix/*" per Mount, and unmatchedRoute. Read it synchronously after
-// next.ServeHTTP, while the *chi.Context is still checked out. chi puts it
-// back in the pool only after the mux handler returns. router.go's
-// requestLogger and audit_detector.go read it the same way.
+// routeLabel returns the request's route pattern from its record, such as
+// /v1/customers/{id}, or unmatchedRoute when it matched none. The set is
+// closed: the route table's patterns and unmatchedRoute.
 //
 // The label is never the raw path. client_golang never evicts vec children,
 // so every distinct label value holds about 2 KB of heap for the life of the
 // process. The raw path would give every client-chosen path, such as each
 // 404 probe, its own series: memory growth that an attacker controls.
 func routeLabel(r *http.Request) string {
-	if rctx := chi.RouteContext(r.Context()); rctx != nil {
-		if p := rctx.RoutePattern(); p != "" {
-			return p
-		}
+	if p := request.Of(r.Context()).Route().Pattern; p != "" {
+		return p
 	}
 	return unmatchedRoute
 }

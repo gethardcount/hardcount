@@ -2,22 +2,24 @@ package api
 
 import (
 	"context"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
-	"github.com/go-chi/chi/v5"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
-// loggablePath returns the matched pattern when there is one, and
-// otherwise only the first segment of the path.
+// loggablePath returns the matched route's pattern when there is one
+// (TestAccessLog_PathIsAPatternOrTheFirstSegment), and otherwise only the first
+// segment of the path.
 func TestLoggablePath_IsAPatternOrTheFirstSegment(t *testing.T) {
-	rctx := chi.NewRouteContext()
-	rctx.RoutePatterns = []string{"/v1/public/invoices/{token}"}
-	req := httptest.NewRequest("GET", "/v1/public/invoices/"+fakeLinkToken, nil)
-	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
-	if got, want := loggablePath(req), "/v1/public/invoices/{token}"; got != want {
-		t.Errorf("matched route: loggablePath = %q, want %q", got, want)
+	logged := func(req *http.Request) string {
+		var got string
+		request.Begin(func(r *http.Request) request.Route { return request.Route{Method: r.Method} })(
+			http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { got = loggablePath(r) })).
+			ServeHTTP(httptest.NewRecorder(), req)
+		return got
 	}
 
 	for _, tc := range []struct{ name, path, want string }{
@@ -39,7 +41,7 @@ func TestLoggablePath_IsAPatternOrTheFirstSegment(t *testing.T) {
 			} else {
 				req.URL.Path = ""
 			}
-			if got := loggablePath(req); got != tc.want {
+			if got := logged(req); got != tc.want {
 				t.Errorf("loggablePath(%q) = %q, want %q", tc.path, got, tc.want)
 			}
 		})

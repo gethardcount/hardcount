@@ -14,6 +14,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/config"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
 // A 64-hex capability token, the shape the public invoice and
@@ -33,7 +34,11 @@ func edgeRouter(t *testing.T, trustProxy string) (http.Handler, *tracetest.SpanR
 
 	var seenIP string
 	r := chi.NewRouter()
-	useRequestEdge(r, trustProxy, config.Server{TrustProxy: trustProxy}.TrustedProxies())
+	// The record's route, as the server's routeFinder finds it on this router.
+	route := func(req *http.Request) request.Route {
+		return request.Route{Method: req.Method, Pattern: r.Find(chi.NewRouteContext(), req.Method, req.URL.Path)}
+	}
+	useRequestEdge(r, trustProxy, config.Server{TrustProxy: trustProxy}.TrustedProxies(), request.Begin(route))
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if req.Method == http.MethodOptions {

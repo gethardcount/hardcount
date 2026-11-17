@@ -5,10 +5,9 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/logging"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
 // SafeMessageError is an alias for errs.SafeMessageError, the opt-in marker
@@ -159,12 +158,8 @@ func ownMessage(err error) string {
 	return err.Error()
 }
 
-// routePattern returns the matched chi route pattern (for example
-// "/v1/api-keys/{id}/rotate"), or "" when the request did not come through a
-// chi router.
+// routePattern returns the request's route pattern from its record (for
+// example "/v1/api-keys/{id}/rotate"), or "" when it matched none.
 func routePattern(r *http.Request) string {
-	if rctx := chi.RouteContext(r.Context()); rctx != nil {
-		return rctx.RoutePattern()
-	}
-	return ""
+	return request.Of(r.Context()).Route().Pattern
 }

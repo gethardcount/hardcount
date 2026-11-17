@@ -81,10 +81,10 @@ func TestRequireCaller_APIKey(t *testing.T) {
 			t.Errorf("livemode = %v (%v), want test mode", live, err)
 		}
 		// The layer above reads the caller from the request's record.
-		outer := request.WithRecord(t.Context())
-		serve(keys, keyRequest("Authorization", created.RawKey).WithContext(outer))
+		record, _ := recordOf(RequireCaller(sessions, keys)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})),
+			keyRequest("Authorization", created.RawKey))
 		onRecord := request.Actor{Type: "api_key", ID: created.Key.ID, TenantID: tenantID}
-		if got := request.ActorOf(outer); got != onRecord {
+		if got := record.Actor(); got != onRecord {
 			t.Errorf("actor on the record = %+v, want %+v", got, onRecord)
 		}
 	})

@@ -10,6 +10,7 @@ import (
 	dto "github.com/prometheus/client_model/go"
 
 	"github.com/gethardcount/hardcount/internal/audit"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
 // auditUncoveredMutations counts mutating requests that succeeded (2xx), left
@@ -52,13 +53,8 @@ var auditUncoveredMutations = promauto.NewCounterVec(
 //     24h, which strands the real response (ADR-089). Telemetry never
 //     overwrites the answer of a committed money mutation.
 //
-//  2. It never buffers the body. chi's WrapResponseWriter records the status
-//     with a pass-through Write. Only Tee() buffers, and this code never
-//     calls it. WrapResponseWriter's typed wrappers keep http.Flusher,
-//     http.Hijacker and io.ReaderFrom. A buffer without those interfaces
-//     would make a streaming route collect its response in memory instead.
-//     The CSV exports are such a route: they get a 5-minute timeout because
-//     they stream.
+//  2. It never buffers the body. It wraps nothing: it reads the status
+//     from the request's record (request.Begin).
 //
 // route gives the request's route pattern, which labels the counter, and
 // whether the registry declares the route exempt. It is passed in because
@@ -77,8 +73,7 @@ func AuditCoverage(route func(*http.Request) (pattern string, exempt bool)) func
 			ctx = audit.WithClientIP(ctx, audit.ExtractClientIP(r))
 			r = r.WithContext(ctx)
 
-			ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
-			next.ServeHTTP(ww, r)
+			next.ServeHTTP(w, r)
 
 			if !isMutating(r.Method) {
 				return
@@ -86,7 +81,8 @@ func AuditCoverage(route func(*http.Request) (pattern string, exempt bool)) func
 			// Only a successful mutation must leave evidence. Any 2xx counts:
 			// several routes answer 204 (deletes) or 202 (async advance), and
 			// the billing run answers 206 on a partial cycle.
-			if status := ww.Status(); status < 200 || status >= 300 {
+			status := request.Of(r.Context()).Status()
+			if status < 200 || status >= 300 {
 				return
 			}
 			// Covered: the request wrote an audit row (Log and LogInTx mark
@@ -108,7 +104,7 @@ func AuditCoverage(route func(*http.Request) (pattern string, exempt bool)) func
 			slog.ErrorContext(r.Context(), "UNCOVERED MUTATION — a state change committed with no audit row",
 				"method", r.Method,
 				"route", pattern,
-				"status", ww.Status(),
+				"status", status,
 				"request_id", chimw.GetReqID(r.Context()),
 				"remedy", "emit the row in the business transaction (audit.Logger.LogInTx) and declare the route in internal/api/route_table.go")
 		})

@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
 // A request that lost a database deadlock, or whose lock wait Postgres ended,
@@ -39,6 +40,9 @@ func TestConcurrentChangeAsConflict(t *testing.T) {
 	// ConcurrentChangeAsConflict and FromError, as a handler does.
 	serve := func(err error) *httptest.ResponseRecorder {
 		router := chi.NewRouter()
+		router.Use(request.Begin(func(r *http.Request) request.Route {
+			return request.Route{Method: r.Method, Pattern: router.Find(chi.NewRouteContext(), r.Method, r.URL.Path)}
+		}))
 		router.Post("/v1/things/{id}", func(w http.ResponseWriter, r *http.Request) {
 			FromError(w, r, ConcurrentChangeAsConflict(r, err), "thing")
 		})

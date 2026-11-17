@@ -100,8 +100,7 @@ func through(d *clockDoor, ctx context.Context, method, path string) seen {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	rec := httptest.NewRecorder()
-	lookup := &routeLookup{root: builtRouter()}
-	lookup.Middleware(d.Middleware(next)).ServeHTTP(rec, httptest.NewRequest(method, path, nil).WithContext(ctx))
+	begin()(d.Middleware(next)).ServeHTTP(rec, httptest.NewRequest(method, path, nil).WithContext(ctx))
 	got.code, got.body, got.header = rec.Code, rec.Body.String(), rec.Header()
 	return got
 }

@@ -8,6 +8,7 @@ import (
 	"sync"
 	"testing"
 
+	"github.com/gethardcount/hardcount/internal/platform/request"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -15,12 +16,17 @@ import (
 // requests up on it.
 var builtRouter = sync.OnceValue(func() chi.Routes { return newTestServer().router })
 
-// lookedUp is the request as the middleware after the lookup at the root
-// sees it (routeLookup on the built router).
+// begin is the server's root middleware that makes each request's record,
+// on the built router.
+func begin() func(http.Handler) http.Handler {
+	return request.Begin((&routeFinder{root: builtRouter()}).route)
+}
+
+// lookedUp is the request as the middleware after the root sees it: with its
+// record, and the route found on the built router.
 func lookedUp(method, path string) *http.Request {
 	var got *http.Request
-	lookup := &routeLookup{root: builtRouter()}
-	lookup.Middleware(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { got = r })).
+	begin()(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { got = r })).
 		ServeHTTP(httptest.NewRecorder(), httptest.NewRequest(method, path, nil))
 	return got
 }
@@ -43,13 +49,13 @@ func TestRouteLookup_FindsEveryRouteAndItsParams(t *testing.T) {
 			return nil
 		}
 		path := param.ReplaceAllString(route, "p_$1")
-		m := routeOf(lookedUp(method, path).Context())
-		if m.key != (routeKey{Method: method, Pattern: route}) {
-			t.Errorf("%s %s: looked up as %v, want %s %s", method, path, m.key, method, route)
+		rt := request.Of(lookedUp(method, path).Context()).Route()
+		if rt.Method != method || rt.Pattern != route {
+			t.Errorf("%s %s: found as %s %s, want %s %s", method, path, rt.Method, rt.Pattern, method, route)
 			return nil
 		}
 		for _, p := range param.FindAllStringSubmatch(route, -1) {
-			if got := m.params.URLParam(p[1]); got != "p_"+p[1] {
+			if got := rt.Params.URLParam(p[1]); got != "p_"+p[1] {
 				t.Errorf("%s %s: param %s = %q, want %q", method, route, p[1], got, "p_"+p[1])
 			}
 		}
@@ -62,7 +68,7 @@ func TestRouteLookup_FindsEveryRouteAndItsParams(t *testing.T) {
 	if checked < 150 {
 		t.Fatalf("checked %d routes, want every route of the router (190 today)", checked)
 	}
-	if got := routeOf(lookedUp(http.MethodPost, "/v1/not/a/route").Context()).key.Pattern; got != "" {
+	if got := request.Of(lookedUp(http.MethodPost, "/v1/not/a/route").Context()).Route().Pattern; got != "" {
 		t.Errorf("a path the router does not have: pattern %q, want none", got)
 	}
 }
