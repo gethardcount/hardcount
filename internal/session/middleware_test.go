@@ -11,7 +11,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"testing/synctest"
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/audit"
@@ -19,7 +18,8 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 )
 
-// fakeSessionStore serves the sessions it holds by hash.
+// fakeSessionStore serves the sessions it holds by hash. It holds only live
+// sessions, so GetByIDHash ignores the instant it is given.
 type fakeSessionStore struct {
 	sessions map[string]Session
 }
@@ -28,7 +28,7 @@ func (f *fakeSessionStore) InsertTx(context.Context, *sql.Tx, Session) error { r
 func (f *fakeSessionStore) EndTx(context.Context, *sql.Tx, string) (bool, error) {
 	return false, nil
 }
-func (f *fakeSessionStore) GetByIDHash(_ context.Context, idHash string) (Session, error) {
+func (f *fakeSessionStore) GetByIDHash(_ context.Context, idHash string, _ time.Time) (Session, error) {
 	s, ok := f.sessions[idHash]
 	if !ok {
 		return Session{}, ErrNotFound
@@ -46,6 +46,9 @@ func (f *fakeSessionStore) SetLivemodeWith(context.Context, string, bool, func(*
 	return Session{}, false, nil
 }
 
+// unknownSession is a well-formed session id that names no session.
+var unknownSession = strings.Repeat("ab", 32)
+
 func sessionRequest(cookie string) *http.Request {
 	req := httptest.NewRequest("GET", "/", nil)
 	req.AddCookie(&http.Cookie{Name: CookieName, Value: cookie})
@@ -56,7 +59,7 @@ func sessionRequest(cookie string) *http.Request {
 // request's context is cancelled mid-query.
 type canceledStore struct{ fakeSessionStore }
 
-func (*canceledStore) GetByIDHash(context.Context, string) (Session, error) {
+func (*canceledStore) GetByIDHash(context.Context, string, time.Time) (Session, error) {
 	return Session{}, fmt.Errorf("get session: %w", context.Canceled)
 }
 
@@ -88,7 +91,7 @@ func TestRequireCaller_SessionStoreFails(t *testing.T) {
 			t.Cleanup(func() { slog.SetDefault(prev) })
 
 			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, sessionRequest("sess_deadbeef").WithContext(tc.ctx))
+			handler.ServeHTTP(rec, sessionRequest(unknownSession).WithContext(tc.ctx))
 
 			if rec.Code != http.StatusServiceUnavailable {
 				t.Errorf("status = %d, want 503 (no fall-through to the API key)", rec.Code)
@@ -101,6 +104,15 @@ func TestRequireCaller_SessionStoreFails(t *testing.T) {
 				t.Errorf("logged %v %q, want %s %q", entry["level"], entry["msg"], tc.want, "session resolve unavailable")
 			}
 		})
+	}
+
+	// A cookie of the wrong shape is no cookie: it is never looked up, so the
+	// failing store is not reached and the answer is the 401 for no
+	// credential, not the 503.
+	rec := httptest.NewRecorder()
+	RequireCaller(svc, nil)(http.NotFoundHandler()).ServeHTTP(rec, sessionRequest("sess_deadbeef"))
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("a cookie of the wrong shape: status = %d, want 401 with no lookup", rec.Code)
 	}
 }
 
@@ -140,7 +152,7 @@ func TestSessionUserNamedOnTheRecord(t *testing.T) {
 	// X-API-Key is none (with a nil key service, reading it would panic).
 	keyInOtherHeader := httptest.NewRequest("GET", "/", nil)
 	keyInOtherHeader.Header.Set("X-API-Key", "hc_secret_test_"+strings.Repeat("0", 64))
-	for name, req := range map[string]*http.Request{"unknown cookie": sessionRequest("sess_unknown"), "key in X-API-Key": keyInOtherHeader} {
+	for name, req := range map[string]*http.Request{"unknown cookie": sessionRequest(unknownSession), "key in X-API-Key": keyInOtherHeader} {
 		seen = nil
 		record, rec := recordOf(RequireCaller(sessions, nil)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { seen = r })), req)
 		if rec.Code != http.StatusUnauthorized || seen != nil || !strings.Contains(rec.Body.String(), "missing credentials") {
@@ -150,21 +162,6 @@ func TestSessionUserNamedOnTheRecord(t *testing.T) {
 			t.Errorf("%s: actor on the record = %+v, want none: nobody signed in", name, got)
 		}
 	}
-
-	// An expired session is no session: one whose expires_at is now or earlier
-	// answers 401, like an unknown cookie. synctest stops the clock, so "now"
-	// is the instant Resolve reads.
-	synctest.Test(t, func(t *testing.T) {
-		for raw, expires := range map[string]time.Time{"sess_expires_now": time.Now(), "sess_expired": time.Now().Add(-time.Second)} {
-			store.sessions[HashID(raw)] = Session{UserID: "usr_owner", TenantID: "ten_1", ExpiresAt: expires}
-			_, rec := recordOf(RequireCaller(sessions, nil)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-				t.Errorf("%s: reached the handler", raw)
-			})), sessionRequest(raw))
-			if rec.Code != http.StatusUnauthorized {
-				t.Errorf("%s: status = %d, want 401", raw, rec.Code)
-			}
-		}
-	})
 }
 
 // recordOf serves req through h under the server's root, so the request has

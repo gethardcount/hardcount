@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/redis/go-redis/v9"
 
+	mw "github.com/gethardcount/hardcount/internal/api/middleware"
 	"github.com/gethardcount/hardcount/internal/config"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
@@ -104,5 +106,42 @@ func TestPreSignInRoutes_UseTheAuthLimit(t *testing.T) {
 	}
 	if got := send("/v1/auth/login", "198.51.100.21:4000").Code; got != http.StatusTooManyRequests {
 		t.Fatalf("login 4: status %d, want 429", got)
+	}
+}
+
+// In production each limiter does what its traffic needs while Redis is
+// down: the general limit, first setup and the public pages refuse; sign-in
+// counts in this process; usage ingest lets requests through. With no Redis
+// client every limiter follows its outage mode, so a probe tells them apart:
+// a refusal at once fails closed, a refusal once the limit is spent counts
+// locally.
+func TestLimiters_OutageModesInProduction(t *testing.T) {
+	limits := config.RateLimits{GeneralPerMinute: 3, AuthPerMinute: 3, IngestPerSecond: 3}
+	srv := NewServer(&postgres.DB{}, nil, nil, WithAppEnv("production"), WithRateLimits(limits))
+	mode := func(l *mw.RateLimiter, limit int) string {
+		for i := 0; i <= limit; i++ {
+			if _, _, ok := l.AllowKey(context.Background(), "198.51.100.30"); !ok {
+				if i == 0 {
+					return "fails closed"
+				}
+				return "counts locally"
+			}
+		}
+		return "fails open"
+	}
+	for name, tc := range map[string]struct {
+		limiter *mw.RateLimiter
+		limit   int
+		want    string
+	}{
+		"general":      {srv.rateLimiter, 3, "fails closed"},
+		"bootstrap":    {srv.bootstrapLimiter, 3, "fails closed"},
+		"public pages": {srv.publicPageLimiter, 60, "fails closed"},
+		"sign-in":      {srv.authLimiter, 3, "counts locally"},
+		"ingest":       {srv.ingestLimiter, 3, "fails open"},
+	} {
+		if got := mode(tc.limiter, tc.limit); got != tc.want {
+			t.Errorf("%s limiter without Redis in production: %s, want %s", name, got, tc.want)
+		}
 	}
 }

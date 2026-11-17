@@ -175,7 +175,7 @@ func TestLogout_WithNoLiveSessionWritesNothing(t *testing.T) {
 
 	for _, c := range []struct{ name, cookie string }{
 		{"expired session", expired},
-		{"unknown session", "not-a-session-id"},
+		{"unknown session", strings.Repeat("ab", 32)},
 	} {
 		rr := postAuth(h, "/logout", c.cookie, "")
 		if rr.Code != http.StatusNoContent {
@@ -275,7 +275,7 @@ func TestSetMode(t *testing.T) {
 	for _, c := range []struct{ name, cookie string }{
 		{"expired session", expired},
 		{"signed-out session", signedOut},
-		{"unknown session", "not-a-session-id"},
+		{"unknown session", strings.Repeat("ab", 32)},
 	} {
 		rr := postAuth(h, "/mode", c.cookie, `{"livemode": true}`)
 		if rr.Code != http.StatusUnauthorized {

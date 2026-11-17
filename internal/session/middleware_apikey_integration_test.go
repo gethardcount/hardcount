@@ -1,10 +1,12 @@
 package session
 
 import (
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/auth"
@@ -74,7 +76,7 @@ func TestRequireCaller_APIKey(t *testing.T) {
 	// same request: the request is the key's.
 	t.Run("a stale cookie and a valid key", func(t *testing.T) {
 		req := keyRequest(created.RawKey)
-		req.AddCookie(&http.Cookie{Name: CookieName, Value: "sess_ended"})
+		req.AddCookie(&http.Cookie{Name: CookieName, Value: unknownSession})
 		rec, seen, _ := serve(keys, req)
 		if rec.Code != http.StatusOK || seen == nil {
 			t.Fatalf("got %d %s, want 200: the stale cookie blocked the key", rec.Code, rec.Body.String())
@@ -104,7 +106,8 @@ func TestRequireCaller_APIKey(t *testing.T) {
 // The context Authenticate returns names one caller, whatever the request's
 // context already held: a key with no user, or a session with no key. The
 // event stream re-runs Authenticate on a request whose context holds the
-// caller that opened it, and compares the two.
+// caller that opened it, and compares the two. A session that is not live
+// names no caller: the store refuses it at the instant it is given.
 func TestAuthenticate_NamesOneCaller(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	keys := auth.NewService(db, audit.NewLogger(db))
@@ -132,6 +135,43 @@ func TestAuthenticate_NamesOneCaller(t *testing.T) {
 		}
 		if got := auth.CallerOf(ctx).UserID; got != "" {
 			t.Errorf("user id = %q, want none for a key", got)
+		}
+	})
+
+	// The store refuses a session that is not live, in its SQL, at the instant
+	// its caller passes: one expiring at that instant is expired.
+	t.Run("an expired session", func(t *testing.T) {
+		store := NewPostgresStore(db)
+		expires := time.Now().UTC().Add(-time.Second).Truncate(time.Microsecond)
+		tx, err := db.BeginTx(t.Context(), postgres.TxBypass, "")
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer postgres.Rollback(tx)
+		var userID string
+		if err := tx.QueryRowContext(t.Context(), `INSERT INTO users (email, password_hash) VALUES ($1, 'x') RETURNING id`,
+			"expired-"+tenantID+"@example.com").Scan(&userID); err != nil {
+			t.Fatalf("insert user: %v", err)
+		}
+		rawExpired := strings.Repeat("ef", 32)
+		expired := Session{IDHash: HashID(rawExpired), UserID: userID, TenantID: tenantID, CreatedAt: expires.Add(-time.Hour), ExpiresAt: expires}
+		if err := store.InsertTx(t.Context(), tx, expired); err != nil {
+			t.Fatalf("insert session: %v", err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+
+		req := httptest.NewRequest("GET", "/", nil)
+		req.AddCookie(&http.Cookie{Name: CookieName, Value: rawExpired})
+		if _, err := Authenticate(req, NewService(store), keys); !errors.Is(err, ErrNoCredentials) {
+			t.Errorf("an expired session: err = %v, want ErrNoCredentials", err)
+		}
+		if _, err := store.GetByIDHash(t.Context(), expired.IDHash, expires); !errors.Is(err, ErrNotFound) {
+			t.Errorf("at its expiry instant: err = %v, want ErrNotFound", err)
+		}
+		if _, err := store.GetByIDHash(t.Context(), expired.IDHash, expires.Add(-time.Microsecond)); err != nil {
+			t.Errorf("a microsecond before its expiry: err = %v, want the session", err)
 		}
 	})
 

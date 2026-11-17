@@ -202,19 +202,10 @@ func (c Config) validateFatal() error {
 		return fmt.Errorf("TRUST_PROXY is required in production — behind a load balancer or ingress every request's client address is the balancer's, so the per-IP limits on the public pay pages (60/min) and on /v1/auth (100/min) become ONE bucket shared by every customer and operator of the install; set TRUST_PROXY to the balancer/ingress CIDR(s), or TRUST_PROXY=none if replicas accept client connections directly (docs/ops/high-availability.md)")
 	}
 
-	// A set value must mean what it says in every environment: the router
-	// skips an entry it cannot parse, so a typo would pass the check above
-	// and then behave exactly as unset.
-	if _, err := ParseTrustProxy(c.Server.TrustProxy); err != nil {
-		return fmt.Errorf("%w — set TRUST_PROXY to the balancer/ingress IP(s) or CIDR(s), comma-separated (e.g. 10.0.0.0/8,127.0.0.1), or TRUST_PROXY=none if replicas accept client connections directly (docs/ops/high-availability.md)", err)
-	}
-
-	// Refuse a CORS_ALLOWED_ORIGINS value that ParseCORSOrigins rejects, in
-	// every environment. Otherwise a pattern meant to allow a dashboard would
-	// allow nothing, or a * beside it would keep it from signing in, and the
-	// operator would not know why.
-	if _, err := ParseCORSOrigins(c.Server.CORSAllowedOrigins); err != nil {
-		return fmt.Errorf("%w (docs/settings.md)", err)
+	// A set TRUST_PROXY or CORS_ALLOWED_ORIGINS must mean what it says, in
+	// every environment.
+	if err := c.Server.Check(); err != nil {
+		return err
 	}
 
 	// Refuse an unknown SMTP_TLS, in every environment and with or without
@@ -534,7 +525,9 @@ func ParseTrustProxy(spec string) ([]*net.IPNet, error) {
 // CSRF guard, so a value cannot pass the first and mean something else to
 // the others.
 //
-// Two values are errors:
+// Three values are errors:
+//   - A set value with no origin in it, such as spaces or a lone comma: it
+//     would allow no origin, where unset allows the local dashboard's.
 //   - An entry with a * inside it, such as https://*.example.com. Both
 //     consumers match origins exactly, so it would allow nothing.
 //   - "*" beside other origins. "*" allows every origin without the sign-in
@@ -563,6 +556,9 @@ func ParseCORSOrigins(spec string) ([]string, error) {
 	}
 	if wildcard {
 		return []string{"*"}, nil
+	}
+	if spec != "" && len(origins) == 0 {
+		return nil, fmt.Errorf("CORS_ALLOWED_ORIGINS=%q names no origin: list the origins, or leave it unset for the local dashboard's", spec)
 	}
 	return origins, nil
 }
