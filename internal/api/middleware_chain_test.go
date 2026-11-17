@@ -7,16 +7,26 @@ import (
 	"github.com/gethardcount/hardcount/internal/session"
 )
 
-// handlersOf applies each middleware to a stub on its own, not nested, and
+// chainStub is the handler the tests apply middleware to. It is a pointer,
+// so two handlers made around it compare equal when their fields do.
+var chainStub = new(struct{ http.Handler })
+
+// handlersOf applies each middleware to the stub on its own, not nested, and
 // returns the handlers they make, in order. chi.Walk reports middleware as
 // funcs; the handler a middleware returns has the type that says what it does.
 func handlersOf(mws []func(http.Handler) http.Handler) []http.Handler {
-	stub := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
 	out := make([]http.Handler, len(mws))
 	for i, m := range mws {
-		out[i] = m(stub)
+		out[i] = m(chainStub)
 	}
 	return out
+}
+
+// makesSame reports whether m makes the same handler as want: the same type
+// with the same fields, such as an mw.RateLimited on the same limiter or an
+// mw.TimeLimit of the same length. Only for types that compare.
+func makesSame(m, want func(http.Handler) http.Handler) bool {
+	return m(chainStub) == want(chainStub)
 }
 
 // is reports whether h is a T.
@@ -32,6 +42,7 @@ type chainStep struct {
 }
 
 var (
+	csrfMW        = chainStep{"the CSRF guard", is[mw.CrossSiteCheck]}
 	authMW        = chainStep{"authentication", is[session.CallerRequired]}
 	timeoutMW     = chainStep{"the timeout", is[mw.TimeLimit]}
 	idempotencyMW = chainStep{"Idempotency", is[mw.IdempotencyGuard]}

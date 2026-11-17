@@ -154,8 +154,12 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 // routes registers every route and its middleware, and returns the router.
 func (s *Server) routes() chi.Router {
 	r := chi.NewRouter()
-	// The clock door (clockDoor); its root is the built router, set once every
-	// route is registered, below.
+	// The clock door (clockDoor) runs last in every group, after
+	// authentication, the limiter and the timeout, so it reads a named record
+	// as the caller's tenant and mode, a replay costs no lookup, and its
+	// lookups are bounded. A route's own permission check runs after it, so a
+	// caller without the permission can meet the door's 503 before its 403.
+	// Its root is the built router, set once every route is registered, below.
 	door := &clockDoor{
 		resolver: s.BillingEngine,
 		clock:    s.clk,
@@ -205,26 +209,8 @@ func (s *Server) routes() chi.Router {
 	// audit emission carries the request id and the real client IP.
 	r.Use(mw.AuditCoverage(auditRouteExempt))
 
-	// There is no global request timeout. The SSE stream needs a connection
-	// with no time limit, because clients tail webhook events for hours. So
-	// each authenticated route block sets its own timeout, and the SSE block
-	// sets none. The unauthenticated public routes (health, metrics,
-	// auth/login) need no 30s cap, because their handlers finish in
-	// milliseconds or fail fast on their own.
-
-	// The clock door (clockDoor) decides each request's time before its
-	// handler runs. It is the last middleware of every group below, after
-	// what that group has: on /v1, the CSRF guard, authentication, the rate
-	// limit, Idempotency and the timeout; on /v1/exports, authentication, the
-	// rate limit and the timeout; on the event stream, authentication and the
-	// rate limit; on bootstrap, /v1/auth and the public pages, their limiter
-	// and the timeout; on the Stripe webhooks, the timeout; on /health and
-	// /metrics, nothing. So it reads a named record as the caller's tenant and
-	// mode, a refused request pays for no lookup, a replay is answered from
-	// the stored response with no lookup (and the door's 503 is not stored),
-	// and its lookups are bounded. A route's own permission check runs after
-	// it, so a caller without the permission can meet the door's 503 before
-	// its 403.
+	// No global timeout: each group sets its own, and the event stream sets
+	// none.
 
 	// Public
 	r.With(door.Middleware).Get("/health", handleHealth)
@@ -331,9 +317,11 @@ func (s *Server) routes() chi.Router {
 	})
 
 	// Tenant routes take a dashboard session cookie or `Authorization: Bearer
-	// <key>`; session.Authenticate decides which. Every /v1 route passes the
-	// CSRF guard and authentication. The four groups below differ in their
-	// rate limit, idempotency and timeout.
+	// <key>`; session.Authenticate decides which. Every route in this block
+	// passes the CSRF guard and authentication. The four groups below differ
+	// in their rate limit, idempotency and timeout. chi runs a group's
+	// middleware only once a route matches, so a path no route here matches
+	// answers its 404 or 405 after authentication alone.
 	r.Route("/v1", func(r chi.Router) {
 		// The CSRF guard refuses a cross-site browser write before auth reads
 		// the session cookie. A Bearer request with no session cookie is
@@ -341,41 +329,18 @@ func (s *Server) routes() chi.Router {
 		r.Use(mw.CSRFGuard(allowedOrigins))
 		r.Use(session.RequireCaller(s.sessionSvc, s.authSvc))
 
-		// The real-time webhook event stream (SSE) has no timeout: the 30s one
-		// would cut a long-lived EventSource connection. It has no idempotency
-		// either: the stream is GET-only and read-only, with no body to key and
-		// nothing to audit beyond the access log. Every 15 seconds the stream
-		// checks its credential again: once the key is revoked or expires, or
-		// the session ends, it closes with no final frame, and a reconnect with
-		// the same credential answers 401. A store failure does not close it
-		// (eventStreamRoute).
+		// The event stream: no timeout (an EventSource stays open for hours),
+		// and no Idempotency (GET only).
 		r.Group(func(r chi.Router) {
 			r.Use(s.rateLimiter.Middleware())
 			r.Use(door.Middleware)
 			r.Route("/webhook_events/stream", eventStreamRoute(s.webhookOutH, s.sessionSvc, s.authSvc, webhook.StreamHeartbeatInterval))
 		})
 
-		// Streaming CSV exports get a five-minute timeout instead of the 30s
-		// CRUD cap. A full usage-events export can stream for longer than 30s,
-		// and a 30s cap would cut it off mid-file (see exportAbort). They are
-		// GET-only, so they skip idempotency. Each endpoint requires the
-		// matching *Read permission.
-		//
-		// Nothing between the handler and the socket buffers the response.
-		// exports.go streams through http.Flusher, and a buffering wrapper would
-		// hide the Flusher and hold the whole CSV in memory instead (ADR-090).
-		//
-		// Every export writes an action=export audit row before it streams, and
-		// refuses to stream if that row cannot be written (ADR-090 §7, read
-		// egress). A tamper-evidence system that cannot show who copied the
-		// evidence has a hole in its chain of custody. audit-log.csv is here too:
-		// the compliance export is itself an audited event, and it uses the same
-		// permission as the audit-log read route below.
+		// The CSV exports: five minutes (a full export outlasts 30 s), and no
+		// Idempotency (GET only).
 		r.Group(func(r chi.Router) {
 			r.Use(s.rateLimiter.Middleware())
-			// The handler moves each response's write deadline to match this
-			// timeout (extendExportWriteDeadline), because the server's
-			// WriteTimeout is 35 s.
 			r.Use(mw.Timeout(exportTimeout))
 			r.Use(door.Middleware)
 			exportsH := newExportsHandler(s.customerStore, s.invoiceStore, s.subStore, s.usageStore, s.auditLogger, s.auditLogger)
@@ -388,13 +353,11 @@ func (s *Server) routes() chi.Router {
 			))
 		})
 
-		// Usage ingest has its own, much larger bucket (ingestLimiter): one
-		// callback per LLM call must never be squeezed through the operator-CRUD
-		// bucket. It ignores the Idempotency-Key header: each event's
-		// idempotency_key, or the held row moving only once, is its dedup. The
-		// group holds the routes a path-prefix test used to pick out: the
-		// /usage-events mount, its reads included, the backfill and the LiteLLM
-		// mount.
+		// Usage ingest: its own, much larger bucket (ingestLimiter), because
+		// LiteLLM drops a rate-limited event for good, and no Idempotency,
+		// because each event's own key (or the held row moving once) is its
+		// dedup. The LiteLLM body cap is still chosen by path prefix, in
+		// limitRequestBody.
 		r.Group(func(r chi.Router) {
 			r.Use(s.ingestLimiter.Middleware())
 			r.Use(mw.Timeout(30 * time.Second))
@@ -419,19 +382,13 @@ func (s *Server) routes() chi.Router {
 				litellm.New(s.customerStore, s.pricingSvc, s.usageSvc, s.usageSvc).Routes())
 		})
 
-		// Everything else.
+		// Ordinary routes: replayable by Idempotency-Key, 30 s.
 		r.Group(func(r chi.Router) {
 			r.Use(s.rateLimiter.Middleware())
 			// A request whose answer carries a secret shown only once ignores
 			// the Idempotency-Key header (answersWithShowOnceSecret): that
 			// answer is never kept for a replay.
 			r.Use(mw.Idempotency(s.db, answersWithShowOnceSecret))
-			// No audit middleware here: the code that owns a write emits its
-			// audit row in its own transaction (audit.Logger.LogInTx), and
-			// audit_routes.go declares each mutating route's row, or why it has
-			// none.
-			//
-			// A per-request timeout for ordinary CRUD endpoints.
 			r.Use(mw.Timeout(30 * time.Second))
 			r.Use(door.Middleware)
 
@@ -488,9 +445,8 @@ func (s *Server) routes() chi.Router {
 			r.With(auth.RequireMethod(auth.PermDunningRead, auth.PermDunningWrite)).Mount("/dunning", s.dunningH.Routes())
 			r.With(auth.Require(auth.PermInvoiceWrite)).Mount("/billing", s.billingH.Routes())
 			r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/webhook-endpoints", s.webhookOutH.Routes())
-			// The real-time event UI's replay and deliveries timeline live here.
-			// The SSE stream itself is mounted above /v1, because chi's 30s
-			// middleware.Timeout would kill long-lived streams. The path uses an
+			// The real-time event UI's replay and deliveries timeline live here;
+			// the stream has its own group above. The path uses an
 			// underscore (webhook_events) on purpose, to match Stripe's
 			// /v1/events convention and not collide with the
 			// /webhook-endpoints/events list.
@@ -519,12 +475,6 @@ func (s *Server) routes() chi.Router {
 			// means only the removed self-serve portal (ADR-051).
 			customerDetail := newCustomerDetailHandler(s.customerStore, s.subStore, s.invoiceStore)
 			r.With(auth.Require(auth.PermCustomerRead)).Get("/customers/{customer_id}/overview", customerDetail.overview)
-			// A card is added through one of two Stripe Checkout setup sessions.
-			// The operator's goes through paymentmethods.Service.CreateSetupSession:
-			// POST /v1/customers/{id}/payment-methods/send-setup-email (email) or
-			// POST /v1/customers/{id}/payment-methods/setup-session (copy-link).
-			// The customer's comes from the payment-update email link:
-			// POST /v1/public/payment-updates/{token}/checkout.
 		})
 	})
 
