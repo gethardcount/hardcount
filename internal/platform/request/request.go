@@ -88,11 +88,5 @@ func Of(ctx context.Context) *Record {
 	return rec
 }
 
-// SetActor names the request's actor on its record. With no record it does
-// nothing: authentication's own tests mount it without the server's root,
-// and nothing there reads the actor.
-func SetActor(ctx context.Context, a Actor) {
-	if rec, ok := ctx.Value(ctxKey{}).(*Record); ok {
-		rec.actor = a
-	}
-}
+// SetActor names the request's actor on its record.
+func SetActor(ctx context.Context, a Actor) { Of(ctx).actor = a }

@@ -44,10 +44,11 @@ func TestRequireCaller_APIKey(t *testing.T) {
 		t.Helper()
 		var seen *http.Request
 		rec := httptest.NewRecorder()
-		RequireCaller(sessions, svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			seen = r
-			w.WriteHeader(http.StatusOK)
-		})).ServeHTTP(rec, req)
+		request.Begin(func(r *http.Request) request.Route { return request.Route{Method: r.Method} })(
+			RequireCaller(sessions, svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				seen = r
+				w.WriteHeader(http.StatusOK)
+			}))).ServeHTTP(rec, req)
 		return rec, seen
 	}
 

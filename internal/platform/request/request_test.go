@@ -42,8 +42,3 @@ func TestOf_PanicsWithNoRecord(t *testing.T) {
 	}()
 	Of(t.Context())
 }
-
-// A writer with no record does nothing, and does not panic.
-func TestSetActor_NoRecord(t *testing.T) {
-	SetActor(t.Context(), Actor{Type: "user", ID: "hc_usr_1", TenantID: "hc_ten_1"})
-}
