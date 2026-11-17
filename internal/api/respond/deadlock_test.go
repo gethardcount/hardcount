@@ -21,10 +21,7 @@ import (
 // nothing of the cause, and the raw error goes to the log at WARN with the
 // route, on a line that names which of the two it was. Every other error
 // passes through unchanged.
-//
-// Mutation-verify: drop the 55P03 branch of ConcurrentChangeAsConflict and
-// lock_timeout fails (500, no WARN line).
-func TestConcurrentChangeAsConflict(t *testing.T) {
+func TestConcurrentChangeAsConflict_DeadlockAndLockWaitAnswer409(t *testing.T) {
 	deadlock := fmt.Errorf("cancel proration relief: %w", &pgconn.PgError{
 		Code:    "40P01",
 		Message: "deadlock detected",

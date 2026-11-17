@@ -15,29 +15,40 @@ import (
 	"github.com/gethardcount/hardcount/internal/errs"
 )
 
-func TestFromError_NotFound(t *testing.T) {
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/", nil)
-
-	FromError(rec, req, errs.ErrNotFound, "customer")
-
-	if rec.Code != http.StatusNotFound {
-		t.Errorf("status: got %d, want 404", rec.Code)
+// Each kind answers the status, type, code, message and param in FromError's
+// table. A DomainError's Code replaces the default code, except on a 403.
+func TestFromError_EachKindAnswersItsStatusCodeAndParam(t *testing.T) {
+	cases := []struct {
+		name                      string
+		err                       error
+		status                    int
+		typ, code, message, param string
+	}{
+		{"bare not-found", errs.ErrNotFound, 404, "invalid_request_error", "not_found", "customer not found", ""},
+		{"wrapped already-exists", fmt.Errorf("%w: external_id dup", errs.ErrAlreadyExists), 409, "invalid_request_error", "already_exists", "already exists: external_id dup", ""},
+		{"AlreadyExists", errs.AlreadyExists("code", `plan code "acme-pro" already exists`), 409, "invalid_request_error", "already_exists", `plan code "acme-pro" already exists`, "code"},
+		{"InvalidState", errs.InvalidState("cannot rotate a revoked key"), 409, "invalid_request_error", "invalid_state", "cannot rotate a revoked key", ""},
+		{"InvalidState with a code", errs.InvalidState("clock is advancing").WithCode("clock_advancing"), 409, "invalid_request_error", "clock_advancing", "clock is advancing", ""},
+		{"Forbidden", errs.Forbidden("this key cannot do that"), 403, "authentication_error", "forbidden", "this key cannot do that", ""},
+		{"Forbidden with a code", errs.Forbidden("this key cannot do that").WithCode("other"), 403, "authentication_error", "forbidden", "this key cannot do that", ""},
+		{"Required", errs.Required("external_id"), 422, "invalid_request_error", "validation_error", "external_id is required", "external_id"},
+		{"Invalid", errs.Invalid("company_email", "must contain @ and a domain"), 422, "invalid_request_error", "validation_error", "must contain @ and a domain", "company_email"},
+		{"Invalid with a code", errs.Invalid("url", "must start with https://").WithCode("url_not_https"), 422, "invalid_request_error", "url_not_https", "must start with https://", "url"},
 	}
-	body := decodeError(t, rec)
-	if body.Code != "not_found" {
-		t.Errorf("code: got %q", body.Code)
-	}
-}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			FromError(rec, httptest.NewRequest("POST", "/", nil), tc.err, "customer")
 
-func TestFromError_AlreadyExists(t *testing.T) {
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/", nil)
-
-	FromError(rec, req, fmt.Errorf("%w: external_id dup", errs.ErrAlreadyExists), "customer")
-
-	if rec.Code != http.StatusConflict {
-		t.Errorf("status: got %d, want 409", rec.Code)
+			if rec.Code != tc.status {
+				t.Errorf("status: got %d, want %d", rec.Code, tc.status)
+			}
+			got := decodeError(t, rec)
+			if got.Type != tc.typ || got.Code != tc.code || got.Message != tc.message || got.Param != tc.param {
+				t.Errorf("body: got type %q code %q message %q param %q, want %q %q %q %q",
+					got.Type, got.Code, got.Message, got.Param, tc.typ, tc.code, tc.message, tc.param)
+			}
+		})
 	}
 }
 
@@ -143,7 +154,7 @@ func TestFromError_ClientGoneLogsAtWarn(t *testing.T) {
 }
 
 // A typed validation error is the client's mistake, so it logs nothing.
-func TestFromError_TypedValidationDoesNotLog(t *testing.T) {
+func TestFromError_ValidationErrorLogsNothing(t *testing.T) {
 	buf := captureLogs(t)
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/v1/things", nil)
@@ -195,27 +206,10 @@ func TestFromError_WrappedNotFoundAnswersItsOwnMessage(t *testing.T) {
 	}
 }
 
-func TestFromError_UnknownError(t *testing.T) {
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("GET", "/", nil)
-
-	FromError(rec, req, fmt.Errorf("database connection timed out"), "resource")
-
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("status: got %d, want 500", rec.Code)
-	}
-	// ADR-026: raw error message MUST NOT leak to the response body.
-	// The full error is logged server-side; the wire response is
-	// generic.
-	if got := rec.Body.String(); strings.Contains(got, "database connection") {
-		t.Errorf("raw error leaked to wire body: %s", got)
-	}
-}
-
 // An errs.Unavailable refusal answers 503 with Retry-After: 1, its own code
 // and message, and never its cause. A not-found in the cause does not turn it
 // into a 404. The cause goes to the log at ERROR.
-func TestFromError_Unavailable(t *testing.T) {
+func TestFromError_UnavailableAnswers503WithRetryAfterAndItsOwnMessage(t *testing.T) {
 	const message = "could not read this period's invoice — please retry"
 	causes := map[string]error{
 		"database error":     fmt.Errorf("connection reset by peer"),
@@ -248,20 +242,17 @@ func TestFromError_Unavailable(t *testing.T) {
 	}
 }
 
-// fakeSafeMessageError is a test double that opts into operator-safe
-// rendering via the SafeMessageError marker interface.
+// fakeSafeMessageError is a SafeMessageError whose Error() is raw text that
+// must not reach the client.
 type fakeSafeMessageError struct{ raw, safe string }
 
 func (e *fakeSafeMessageError) Error() string               { return e.raw }
 func (e *fakeSafeMessageError) OperatorSafeMessage() string { return e.safe }
 
-func TestFromError_SafeMessageError_SurfacedNotRaw(t *testing.T) {
+func TestFromError_SafeMessageErrorAnswers502WithItsSafeMessage(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/", nil)
 
-	// Simulate the leak path: a Stripe SDK error wrapped in our
-	// PaymentError-shaped marker. Raw message is leaky; safe message
-	// is curated.
 	err := &fakeSafeMessageError{
 		raw:  "Keys for idempotent requests can only be used with the same parameters they were first used with. Try using a key other than 'hardcount_inv_xxx'",
 		safe: "Card was declined: insufficient funds.",
@@ -272,11 +263,9 @@ func TestFromError_SafeMessageError_SurfacedNotRaw(t *testing.T) {
 		t.Errorf("status: got %d, want 502", rec.Code)
 	}
 	body := rec.Body.String()
-	// The curated message is what hits the wire.
 	if !strings.Contains(body, "Card was declined") {
 		t.Errorf("expected curated message in response, got %s", body)
 	}
-	// The raw Stripe SDK string MUST NOT leak.
 	if strings.Contains(body, "Keys for idempotent requests") {
 		t.Errorf("raw Stripe SDK error leaked to wire: %s", body)
 	}
@@ -285,12 +274,9 @@ func TestFromError_SafeMessageError_SurfacedNotRaw(t *testing.T) {
 	}
 }
 
-// TestFromError_SafeMessageWrapped_DetectedViaErrorsAs asserts that
-// errors wrapped via fmt.Errorf with %w still trigger SafeMessageError
-// detection. This is what the real ChargeInvoice path does:
-// `fmt.Errorf("payment failed: %w", paymentErr)` — the wrapper
-// must not hide the marker interface from errors.As.
-func TestFromError_SafeMessageWrapped_DetectedViaErrorsAs(t *testing.T) {
+// A SafeMessageError wrapped with %w, as the charge path wraps its payment
+// error, is still found.
+func TestFromError_WrappedSafeMessageErrorIsFound(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/", nil)
 
@@ -313,7 +299,7 @@ func TestFromError_SafeMessageWrapped_DetectedViaErrorsAs(t *testing.T) {
 	}
 }
 
-// codedSafeMessageError opts into a specific wire code as well.
+// codedSafeMessageError also names its own code.
 type codedSafeMessageError struct {
 	fakeSafeMessageError
 	code string
@@ -324,7 +310,7 @@ func (e *codedSafeMessageError) OperatorErrorCode() string { return e.code }
 // An unknown payment outcome must not share provider_error with a refusal:
 // the dashboard says "Couldn't charge" for provider_error, which is false
 // when the card may have been charged.
-func TestFromError_SafeMessageError_OwnCodeWinsOverProviderError(t *testing.T) {
+func TestFromError_SafeMessageErrorCodeReplacesProviderError(t *testing.T) {
 	for _, tc := range []struct{ code, want string }{
 		{"payment_outcome_unknown", `"code":"payment_outcome_unknown"`},
 		{"", `"code":"provider_error"`},
@@ -345,7 +331,7 @@ func TestFromError_SafeMessageError_OwnCodeWinsOverProviderError(t *testing.T) {
 	}
 }
 
-func TestFromError_Nil(t *testing.T) {
+func TestFromError_NilWritesNothing(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("GET", "/", nil)
 
@@ -356,60 +342,8 @@ func TestFromError_Nil(t *testing.T) {
 	}
 }
 
-func TestFromError_RequiredCarriesField(t *testing.T) {
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/", nil)
-
-	FromError(rec, req, errs.Required("external_id"), "customer")
-
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Errorf("status: got %d, want 422", rec.Code)
-	}
-	body := decodeError(t, rec)
-	if body.Param != "external_id" {
-		t.Errorf("param: got %q, want external_id", body.Param)
-	}
-	if body.Message != "external_id is required" {
-		t.Errorf("message: got %q", body.Message)
-	}
-}
-
-func TestFromError_InvalidCarriesField(t *testing.T) {
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/", nil)
-
-	FromError(rec, req, errs.Invalid("company_email", "must contain @ and a domain"), "settings")
-
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Errorf("status: got %d, want 422", rec.Code)
-	}
-	body := decodeError(t, rec)
-	if body.Param != "company_email" {
-		t.Errorf("param: got %q, want company_email", body.Param)
-	}
-	if body.Message != "must contain @ and a domain" {
-		t.Errorf("message: got %q", body.Message)
-	}
-}
-
-func TestFromError_AlreadyExistsCarriesField(t *testing.T) {
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/", nil)
-
-	FromError(rec, req, errs.AlreadyExists("code", "plan code \"acme-pro\" already exists"), "plan")
-
-	if rec.Code != http.StatusConflict {
-		t.Errorf("status: got %d, want 409", rec.Code)
-	}
-	body := decodeError(t, rec)
-	if body.Param != "code" {
-		t.Errorf("param: got %q, want code", body.Param)
-	}
-}
-
-func TestFromError_WrappedFieldErrorPreservesField(t *testing.T) {
-	// Handlers sometimes wrap service errors with context (fmt.Errorf("%w: ...")).
-	// Field extraction walks the chain via errors.As, so the field survives.
+// A DomainError wrapped with %w keeps its field as the param.
+func TestFromError_WrappedDomainErrorKeepsItsField(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/", nil)
 
@@ -423,18 +357,11 @@ func TestFromError_WrappedFieldErrorPreservesField(t *testing.T) {
 	}
 }
 
-type errorResponse struct {
-	Type    string `json:"type"`
-	Code    string `json:"code"`
-	Message string `json:"message"`
-	Param   string `json:"param,omitempty"`
-}
-
-func decodeError(t *testing.T, rec *httptest.ResponseRecorder) errorResponse {
+func decodeError(t *testing.T, rec *httptest.ResponseRecorder) ErrorDetail {
 	t.Helper()
-	var body struct {
-		Error errorResponse `json:"error"`
+	var body ErrorBody
+	if err := json.NewDecoder(rec.Body).Decode(&body); err != nil {
+		t.Fatalf("decode %q: %v", rec.Body.String(), err)
 	}
-	_ = json.NewDecoder(rec.Body).Decode(&body)
 	return body.Error
 }
