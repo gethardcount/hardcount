@@ -11,9 +11,8 @@ import {
 } from '@/components/ui/dialog'
 
 /**
- * Shows a secret the server returns once (a new API key, a webhook signing
- * secret). It closes only from "I've copied it", so Esc or a click outside
- * cannot lose the secret by accident.
+ * Shows a secret the server returns only once. It closes only from "I've
+ * copied it", so Esc or a click outside cannot lose the secret.
  */
 export function ShowOnceSecretDialog({ title, label, secret, children, onDone }: {
   title: string
@@ -23,7 +22,6 @@ export function ShowOnceSecretDialog({ title, label, secret, children, onDone }:
   onDone: () => void
 }) {
   return (
-    // Ignores every close request but the button's.
     <Dialog open onOpenChange={() => {}}>
       <DialogContent className="sm:max-w-md" showCloseButton={false}>
         <DialogHeader>
@@ -48,9 +46,11 @@ export function ShowOnceSecretDialog({ title, label, secret, children, onDone }:
   )
 }
 
-// CopyButton copies text and says whether it worked. name is its accessible
-// name where a dialog has more than one; it starts with the visible "Copy".
-export function CopyButton({ text, label = 'Copy', name }: { text: string; label?: string; name?: string }) {
+/**
+ * Copies text and says whether it worked. name is its accessible name where a
+ * dialog has more than one; it starts with the visible "Copy".
+ */
+export function CopyButton({ text, name }: { text: string; name?: string }) {
   return (
     <Button
       variant="outline"
@@ -66,7 +66,7 @@ export function CopyButton({ text, label = 'Copy', name }: { text: string; label
         }
       }}
     >
-      {label}
+      Copy
     </Button>
   )
 }
