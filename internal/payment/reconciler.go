@@ -257,7 +257,12 @@ func (r *Reconciler) decideRow(ctx context.Context, tenantID, invoiceID string) 
 			"invoice_id", invoiceID, "tenant_id", tenantID)
 		return ctx, true, nil
 	}
-	return decided, false, err
+	if err != nil {
+		return decided, false, err
+	}
+	// Bound as decideFor binds an event's time. clock.Real() is the server's
+	// clock, which a row on no clock reads; a row on a test clock keeps its own.
+	return clock.EnsureEffectiveNow(decided, clock.Real()), false, nil
 }
 
 type terminalKind int

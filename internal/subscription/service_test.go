@@ -2524,6 +2524,36 @@ func TestProcessExpiredTrials(t *testing.T) {
 	})
 }
 
+// The real-time pause scan resumes each subscription on its own instant: the
+// tick binds none, so a row reads the server's clock once.
+func TestProcessExpiredPauseCollections_EachSubscriptionOnItsOwnInstant(t *testing.T) {
+	createdAt := time.Date(2025, 11, 29, 12, 0, 0, 0, time.UTC)
+	ctx := postgres.WithLivemode(context.Background(), true)
+	svc := NewService(newMemStore(), clock.NewFake(createdAt))
+	mem := svc.store.(*memStore)
+	resumes := createdAt.Add(24 * time.Hour)
+	var ids []string
+	for _, code := range []string{"sub-pause-1", "sub-pause-2"} {
+		sub, err := svc.Create(ctx, "t1", CreateInput{Code: code, DisplayName: "Paused", CustomerID: "c", Items: []CreateItemInput{{PlanID: "p"}}})
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		paused := mem.subs[sub.ID]
+		paused.PauseCollection = &domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft, ResumesAt: &resumes, SetBy: domain.PauseSetByOperator}
+		mem.subs[sub.ID] = paused
+		ids = append(ids, sub.ID)
+	}
+
+	server := &steppingClock{at: resumes.Add(time.Hour)}
+	if n, errs := NewService(mem, server).ProcessExpiredPauseCollections(ctx, 100); n != 2 || len(errs) != 0 {
+		t.Fatalf("resumed %d, errors %v; want 2", n, errs)
+	}
+	first, second := mem.subs[ids[0]].UpdatedAt, mem.subs[ids[1]].UpdatedAt
+	if !slices.Contains(server.issued[1:], first) || !slices.Contains(server.issued[1:], second) || first.Equal(second) {
+		t.Errorf("resumed at %v and %v; want each on its own read of the server's clock after the list's (reads %v)", first, second, server.issued)
+	}
+}
+
 // steppingClock reads one second later each time and keeps every read.
 type steppingClock struct {
 	at     time.Time

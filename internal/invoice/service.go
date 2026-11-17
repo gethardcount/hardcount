@@ -2900,16 +2900,16 @@ func (s *Service) retryStuck(ctx context.Context, tenantID string, stuck []domai
 		if err := ctx.Err(); err != nil {
 			return processed, append(errs, fmt.Errorf("stopped before %d of %d invoices: %w", len(stuck)-i, len(stuck), err))
 		}
-		rowCtx := ctx
+		ctx := ctx
 		if decide != nil {
 			decided, err := decide(ctx, tenantID, inv.ID)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("invoice %s: %w", inv.ID, err))
 				continue
 			}
-			rowCtx = decided
+			ctx = decided
 		}
-		if _, retryErr := s.RetryTax(rowCtx, tenantID, inv.ID); retryErr != nil {
+		if _, retryErr := s.RetryTax(ctx, tenantID, inv.ID); retryErr != nil {
 			errs = append(errs, fmt.Errorf("invoice %s: %w", inv.ID, retryErr))
 			continue
 		}
@@ -3017,6 +3017,7 @@ func (s *Service) RetryPendingTaxCommit(ctx context.Context, batch int) (int, []
 		if ctx.Err() != nil {
 			return recovered, errsOut // see processTaxRetryBatch
 		}
+		ctx := clock.EnsureEffectiveNow(ctx, s.clock) // one instant for this invoice's work; the tick binds none
 		if err := s.taxCommitter.CommitTax(ctx, inv.TenantID, inv.ID, inv.TaxCalculationID); err != nil {
 			errsOut = append(errsOut, fmt.Errorf("re-commit tax for invoice %s: %w", inv.ID, err))
 			s.deferTaxWork(ctx, inv)
@@ -3096,6 +3097,7 @@ func (s *Service) RetryPendingTaxReversal(ctx context.Context, batch int) (int, 
 		if ctx.Err() != nil {
 			return recovered, errsOut // see processTaxRetryBatch
 		}
+		ctx := clock.EnsureEffectiveNow(ctx, s.clock) // one instant for this invoice's work; the tick binds none
 		// reverseInvoiceTax already logs an ERROR + leaves tax_reversed_at NULL
 		// on failure (re-scanned once its wait is over); aggregate the error
 		// for the return.

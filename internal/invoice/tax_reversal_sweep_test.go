@@ -175,3 +175,45 @@ func TestNextTaxWorkAttempt(t *testing.T) {
 		}
 	}
 }
+
+// Each tax sweep works each invoice on its own instant: the tick binds none,
+// so a row reads the server's clock once and its tax write is dated then.
+func TestTaxSweeps_EachInvoiceOnItsOwnInstant(t *testing.T) {
+	ctx := postgres.WithLivemode(context.Background(), true)
+	base := time.Date(2026, 1, 5, 9, 0, 0, 0, time.UTC)
+	check := func(t *testing.T, at []time.Time) {
+		t.Helper()
+		if len(at) != 2 || at[0].Equal(at[1]) || !at[0].Before(base.Add(time.Hour)) || !at[1].Before(base.Add(time.Hour)) {
+			t.Errorf("tax calls at %v: want two, each its own read of the server's clock (from %v)", at, base)
+		}
+	}
+	t.Run("commit", func(t *testing.T) {
+		store := newMemStore()
+		svc := NewService(store, &steppingClock{at: base}, newMemNumberer())
+		committer := &recordingTaxCommitter{}
+		svc.SetTaxCommitter(committer)
+		for _, id := range []string{"orphan_1", "orphan_2"} {
+			store.invoices[id] = domain.Invoice{ID: id, TenantID: "t1", Status: domain.InvoiceFinalized,
+				TaxFacts: domain.TaxFacts{TaxStatus: domain.InvoiceTaxOK, TaxProvider: "stripe_tax", TaxCalculationID: "taxcalc_" + id}}
+		}
+		if _, errs := svc.RetryPendingTaxCommit(ctx, 50); len(errs) != 0 {
+			t.Fatalf("errors: %v", errs)
+		}
+		check(t, committer.at)
+	})
+	t.Run("reversal", func(t *testing.T) {
+		store := newMemStore()
+		svc := NewService(store, &steppingClock{at: base}, newMemNumberer())
+		rev := &fakeTaxReverser{}
+		svc.SetTaxReverser(rev)
+		for _, id := range []string{"inv_rev_1", "inv_rev_2"} {
+			store.invoices[id] = domain.Invoice{ID: id, TenantID: "t1", CustomerID: "c", Status: domain.InvoiceVoided,
+				TaxFacts:         domain.TaxFacts{TaxProvider: "stripe_tax", TaxStatus: domain.InvoiceTaxOK},
+				TaxTransactionID: "tx_" + id, TotalAmountCents: 1000, AmountDueCents: 1000}
+		}
+		if _, errs := svc.RetryPendingTaxReversal(ctx, 50); len(errs) != 0 {
+			t.Fatalf("errors: %v", errs)
+		}
+		check(t, rev.at)
+	})
+}

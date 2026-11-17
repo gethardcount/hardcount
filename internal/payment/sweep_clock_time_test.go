@@ -235,6 +235,21 @@ func TestRealTimeSweep_AnInvoiceOnNoClockIsPaidAtRealTime(t *testing.T) {
 	}
 }
 
+// A row on no clock is bound to one read of the server's clock, as decideFor
+// binds an event, so what the row's work stamps is that instant, not a
+// later read each time.
+func TestRealTimeSweep_ARowOnNoClockIsBoundToOneInstant(t *testing.T) {
+	r, _, _ := sweepHarness(unknownClockInvoice(), &mockStripeClient{})
+	r.SetResolver(noClock{})
+	decided, gone, err := r.decideRow(tickCtx(), "t1", "inv_x")
+	if err != nil || gone {
+		t.Fatalf("decideRow: gone %v, err %v", gone, err)
+	}
+	if _, ok := clock.EffectiveNow(decided); !ok {
+		t.Error("the row's ctx carries no instant: each stamp would read the clock again")
+	}
+}
+
 // The hosted-session sweep decides each row's time too: a session whose
 // invoice's clock cannot be read is not settled, its error is reported, and
 // the session is touched so the queue rotates.
