@@ -253,7 +253,7 @@
           "refId": "A"
         }
       ],
-      "description": "Scrape-time gauge (RegisterQueueDepthGauges, shipped 2026-07-06): counts invoice_dunning_runs WHERE state='active'. A value of -1 means the count query itself failed."
+      "description": "Scrape-time gauge (cmd/hardcount's queue-depth gauges, shipped 2026-07-06): counts invoice_dunning_runs WHERE state='active'. A value of -1 means the count query itself failed."
     },
     {
       "collapsed": false,
@@ -294,7 +294,7 @@
           "refId": "B"
         }
       ],
-      "description": "Scrape-time gauges (RegisterQueueDepthGauges, shipped 2026-07-06): pending email/webhook outbox rows. A value of -1 means the count query itself failed. The runbook alerts at > 1000."
+      "description": "Scrape-time gauges (cmd/hardcount's queue-depth gauges, shipped 2026-07-06): pending email/webhook outbox rows. A value of -1 means the count query itself failed. The runbook alerts at > 1000."
     },
     {
       "collapsed": false,

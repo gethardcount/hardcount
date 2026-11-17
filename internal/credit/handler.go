@@ -8,7 +8,6 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	mw "github.com/gethardcount/hardcount/internal/api/middleware"
 	"github.com/gethardcount/hardcount/internal/api/respond"
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
@@ -70,7 +69,7 @@ func (h *Handler) grant(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mw.RecordCreditOperation("grant")
+	recordCreditOperation("grant")
 
 	respond.JSON(w, r, http.StatusCreated, entry)
 }
@@ -89,7 +88,7 @@ func (h *Handler) adjust(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mw.RecordCreditOperation("adjustment")
+	recordCreditOperation("adjustment")
 
 	respond.JSON(w, r, http.StatusCreated, entry)
 }

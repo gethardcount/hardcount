@@ -359,7 +359,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 		Interval:         60 * time.Second,
 		Countable:        payment.IsUnknownPaymentFailure,
 		OnStateChange: func(_, to breaker.State) {
-			mw.RecordStripeBreakerState(string(to))
+			payment.RecordStripeBreakerState(string(to))
 		},
 	})
 

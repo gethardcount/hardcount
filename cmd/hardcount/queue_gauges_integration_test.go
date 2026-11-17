@@ -1,4 +1,4 @@
-package middleware_test
+package main
 
 import (
 	"context"
@@ -10,7 +10,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	mw "github.com/gethardcount/hardcount/internal/api/middleware"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	vtestutil "github.com/gethardcount/hardcount/internal/testutil"
@@ -36,7 +35,7 @@ var (
 func registerGauges(db *postgres.DB) {
 	gaugeDB, gaugeFailed = db, nil
 	gaugeOnce.Do(func() {
-		mw.RegisterQueueDepthGauges(prometheus.DefaultRegisterer, time.Hour, func(query string) (float64, error) {
+		registerQueueDepthGauges(prometheus.DefaultRegisterer, time.Hour, func(query string) (float64, error) {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 			tx, err := gaugeDB.BeginTx(ctx, postgres.TxBypass, "")
@@ -222,7 +221,7 @@ func TestBillingGauges_DueAndFailingPartition(t *testing.T) {
 		t.Fatalf("count by domain predicate: %v", err)
 	}
 	if byDomain != retrying+parked {
-		t.Errorf("gauge predicate counts %v failing, domain.SubscriptionBillingFailingSQL counts %v: the hand copy in metrics.go has drifted", retrying+parked, byDomain)
+		t.Errorf("gauge predicate counts %v failing, domain.SubscriptionBillingFailingSQL counts %v: the hand copy in queue_gauges.go has drifted", retrying+parked, byDomain)
 	}
 }
 

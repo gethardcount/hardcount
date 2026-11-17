@@ -169,7 +169,7 @@ func serve() {
 	// claim statement re-checks the lease token in SQL. Every statement stands alone, so the gate is
 	// safe behind a transaction-mode pooler.
 	gate := leader.New(appPool, func(role leader.Role, reason string) {
-		mw.RecordLeaderLeaseLost(string(role), reason)
+		leader.RecordLeaseLost(string(role), reason)
 	})
 
 	// Production refuses to start without a reachable Redis. Without Redis

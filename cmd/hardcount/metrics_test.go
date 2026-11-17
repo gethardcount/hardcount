@@ -137,3 +137,39 @@ func missing(want, have map[string]bool) []string {
 	sort.Strings(out)
 	return out
 }
+
+// TestAlertedCounterSeries_ExistAtZero: every dead-letter and unpriced-usage
+// series an alert reads is exported at 0 from boot. A counter series born at
+// 1 has no earlier sample, so increase() reads it as 0 and the alert misses
+// the first lost email or the first usage left off an invoice. Prometheus: "export a default value such
+// as 0 for any time series you know may exist".
+func TestAlertedCounterSeries_ExistAtZero(t *testing.T) {
+	families, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatalf("gather: %v", err)
+	}
+	have := map[string]bool{}
+	for _, f := range families {
+		for _, m := range f.GetMetric() {
+			key := f.GetName()
+			for _, l := range m.GetLabel() {
+				key += "," + l.GetName() + "=" + l.GetValue()
+			}
+			have[key] = true
+		}
+	}
+	for _, want := range []string{
+		"hardcount_email_outbox_dead_lettered_total,cause=permanent,mode=live",
+		"hardcount_email_outbox_dead_lettered_total,cause=permanent,mode=test",
+		"hardcount_email_outbox_dead_lettered_total,cause=max_attempts,mode=live",
+		"hardcount_email_outbox_dead_lettered_total,cause=max_attempts,mode=test",
+		"hardcount_webhook_outbox_dead_lettered_total,cause=max_attempts,mode=live",
+		"hardcount_webhook_outbox_dead_lettered_total,cause=max_attempts,mode=test",
+		"hardcount_usage_unpriced_quantity_total,mode=live",
+		"hardcount_usage_unpriced_quantity_total,mode=test",
+	} {
+		if !have[want] {
+			t.Errorf("series %s is not exported before its first increment", want)
+		}
+	}
+}

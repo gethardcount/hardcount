@@ -6,8 +6,8 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/collectors"
 
-	mw "github.com/gethardcount/hardcount/internal/api/middleware"
 	"github.com/gethardcount/hardcount/internal/platform/leader"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
@@ -21,28 +21,20 @@ func registerMetrics(reg prometheus.Registerer, appPool *sql.DB, db *postgres.DB
 	// appPool serves every request and background job, so its waits are the
 	// ones an operator needs to see. The start-up pool, when it is a separate
 	// pool, is not exported.
-	mw.RegisterDBPoolStats(reg, appPool)
+	registerPoolStats(reg, appPool)
 
 	roles := make([]string, 0, len(leader.Roles))
 	for _, r := range leader.Roles {
 		roles = append(roles, string(r))
 	}
-	mw.InitLeaderLeaseLost(roles...)
-	mw.RegisterLeaderStatus(reg, func(ctx context.Context) ([]mw.LeaderStatusRow, error) {
-		rows, err := leader.Status(ctx, appPool)
-		if err != nil {
-			return nil, err
-		}
-		out := make([]mw.LeaderStatusRow, 0, len(rows))
-		for _, r := range rows {
-			out = append(out, mw.LeaderStatusRow{Role: string(r.Role), Held: r.Held, HasTicked: r.HasTicked, LastTickAgeSeconds: r.LastTickAgeS, Paused: r.Paused})
-		}
-		return out, nil
+	leader.InitLeaseLost(roles...)
+	leader.RegisterStatusMetrics(reg, func(ctx context.Context) ([]leader.StatusRow, error) {
+		return leader.Status(ctx, appPool)
 	})
 
 	// The counts run on a TxBypass transaction because they span tenants.
 	// Under the app role's RLS they would always report a healthy-looking 0.
-	mw.RegisterQueueDepthGauges(reg, invoiceGrace, func(query string) (float64, error) {
+	registerQueueDepthGauges(reg, invoiceGrace, func(query string) (float64, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer cancel()
 		tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
@@ -56,4 +48,14 @@ func registerMetrics(reg prometheus.Registerer, appPool *sql.DB, db *postgres.DB
 		}
 		return n, nil
 	})
+}
+
+// registerPoolStats exports the connection-pool counters of pool on /metrics,
+// as the go_sql_* series with db_name="app". go_sql_wait_count_total counts
+// the callers that had to wait for a free connection. It stays flat while
+// DB_MAX_OPEN_CONNS is enough, so the runbook alerts on its rate. The series
+// are database/sql's own counters: a scrape reads them from memory and runs
+// no query.
+func registerPoolStats(reg prometheus.Registerer, pool *sql.DB) {
+	reg.MustRegister(collectors.NewDBStatsCollector(pool, "app"))
 }

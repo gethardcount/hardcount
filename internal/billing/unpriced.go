@@ -3,7 +3,6 @@ package billing
 import (
 	"github.com/shopspring/decimal"
 
-	mw "github.com/gethardcount/hardcount/internal/api/middleware"
 	"github.com/gethardcount/hardcount/internal/domain"
 )
 
@@ -36,7 +35,7 @@ func (u unpricedUsage) record(live bool, sub domain.Subscription) {
 		return
 	}
 	for _, qty := range u {
-		mw.RecordUsageUnpriced(live, qty.InexactFloat64())
+		recordUsageUnpriced(live, qty.InexactFloat64())
 	}
 }
 
