@@ -164,11 +164,14 @@ func TestFromError_CodeWithoutKindIsServerFault(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/", nil)
 
-	err := errs.New("billing_setup_incomplete", "stripe connection required")
+	err := &errs.DomainError{Code: "billing_setup_incomplete", Message: "stripe connection required"}
 	FromError(rec, req, err, "billing")
 
 	if rec.Code != http.StatusInternalServerError {
 		t.Errorf("status: got %d, want 500", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "stripe connection required") {
+		t.Errorf("the body carries the error's message: %s", rec.Body.String())
 	}
 	if body := decodeError(t, rec); body.Code != "internal_error" {
 		t.Errorf("code: got %q, want internal_error", body.Code)

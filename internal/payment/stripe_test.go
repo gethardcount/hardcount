@@ -588,8 +588,9 @@ func TestChargeInvoice_NotFinalized(t *testing.T) {
 
 	inv := domain.Invoice{Status: domain.InvoiceDraft, AmountDueCents: 100}
 	_, err := stripe.ChargeInvoice(context.Background(), "t1", inv, testHold, "cus_stripe", "pm_test")
-	if err == nil {
-		t.Fatal("expected error for non-finalized invoice")
+	// A validation error: Charge now answers it 422 with this message.
+	if !errors.Is(err, errs.ErrValidation) || err.Error() != "can only charge a finalized invoice, current status: draft" {
+		t.Fatalf("err = %v, want a validation error naming the status", err)
 	}
 }
 
