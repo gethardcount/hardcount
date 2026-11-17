@@ -157,11 +157,12 @@ func (s *Server) routes() chi.Router {
 	r := chi.NewRouter()
 	// Finds each request's route for its record (request.Begin).
 	finder := &routeFinder{}
-	// The clock door (clockDoor) runs last in every group, after
-	// authentication, the limiter and the timeout, so it reads a named record
-	// as the caller's tenant and mode, a replay costs no lookup, and its
-	// lookups are bounded. A route's own permission check runs after it, so a
-	// caller without the permission can meet the door's 503 before its 403.
+	// The clock door (clockDoor) runs last in every group: after
+	// authentication, so it looks up the record the request names in the
+	// caller's tenant and mode; after Idempotency, so a replayed request never
+	// reaches it; inside the time limit, so its lookups are bounded. A route's
+	// own permission check runs after it, so a caller without the permission
+	// can meet the door's 503 before its 403.
 	door := &clockDoor{
 		resolver: s.BillingEngine,
 		clock:    s.clk,

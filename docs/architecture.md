@@ -15,6 +15,91 @@ CI and `docker compose` run PostgreSQL 16. Versions 15 to 18 are expected to wor
 
 Each step queues its webhook events and emails for the [background jobs](#background-work). Every invoice status is in [Invoices](concepts/invoices.md#statuses).
 
+## The path of a request
+
+Every request passes the root chain, then one group's chain, then its route's own checks and its handler. `internal/api/router.go` builds all three, and `routes()` says why each root step sits where it does.
+
+**The root chain**, in order:
+
+1. **Trace span** (`mw.Tracing`) starts the request's span.
+2. **Request id** (`mw.RequestID`) is minted by the server, never taken from the client. The access log line and the request's audit rows carry it.
+3. **Client address** (`mw.TrustedClientIP`) reads `X-Forwarded-For` only from a proxy listed in `TRUST_PROXY`; otherwise it is the TCP peer.
+4. **The record** (`request.Begin`), [below](#the-record). Every later step reads it.
+5. **Span correction** (`mw.TraceRequestAttrs`) names the span by the route and keeps the link token out of `url.path`.
+6. **Metrics** come above the Recoverer, so a recovered panic is still counted as its 500, and above CORS, so a preflight is counted.
+7. **The access log** sits there for the same reason.
+8. **Recoverer** answers a panic with the JSON 500 and logs its stack.
+9. **CORS** answers a preflight itself.
+10. **Body cap** (`limitRequestBody`): 1 MB, or the LiteLLM adapter's larger cap.
+11. **Security headers.**
+12. **Audit detector** (`mw.AuditCoverage`) only observes: it reports a mutating 2xx that wrote no audit row and is not declared exempt.
+
+**The groups.** chi then routes the request into one group, which adds its own steps. Each group ends with **the clock door**. It decides the instant the request runs on, from the route's entry in the [route table](#the-route-table): real time, or the time of the test clock that the record the request names is on. The handler reads that instant from the context.
+
+| Group | Steps, in order |
+|---|---|
+| `/health`, `/metrics` | the clock door (`/metrics` also checks its token) |
+| `/v1/bootstrap` | bootstrap rate limit, 30 s, the clock door |
+| `/v1/auth` | CSRF guard, sign-in rate limit, 30 s, the clock door |
+| `/v1/webhooks` | 30 s, the clock door; each provider's own check (Stripe's signature, Postmark's credentials) runs in its handler |
+| `/v1/public/…` (hosted invoice, payment update, cost dashboard) | public-page rate limit, 30 s, the clock door |
+| every other `/v1` route: | CSRF guard, authentication, then one of: |
+| — ordinary | general rate limit, Idempotency, 30 s, the clock door |
+| — usage ingest | ingest rate limit, 30 s, the clock door |
+| — exports | general rate limit, 5 minutes, the clock door |
+| — the event stream | general rate limit, the clock door |
+
+The door is last for three reasons:
+- after authentication, so it looks up the record the request names in the caller's tenant and mode;
+- after Idempotency, so a replayed request never reaches it;
+- inside the time limit, so its lookups are bounded.
+
+A route's own permission check runs after the door, so a caller without the permission can meet the door's 503 before its 403.
+
+### The record
+
+`request.Begin` makes one record per request, at the root (`internal/platform/request`). It holds the request's route (found once; `unmatched` when no route in the route table matches), its client address, and the writer that records its status. Authentication adds the caller, and an audit row or `audit.MarkSkip` sets its audit mark.
+
+- **One accessor:** every layer reads the record through `request.Of`, which panics when the root made none, as only a mis-wired server can.
+- **What belongs on it:** a fact about the request that more than one layer reads. What a callee needs to do its work (the tenant, the mode, the instant) stays on the context.
+- **The audit exception:** a job or the CLI writes audit rows with no request, so the audit package alone uses two calls that accept a missing record (`request.MarkAudited`, `request.ClientIPIfAny`).
+
+### The route table
+
+`internal/api/route_table.go` has one line per route, saying:
+- how its time is decided (the clock door reads this);
+- where its audit evidence comes from, when it changes state or exports (the audit detector);
+- whether its answer carries a secret shown once (Idempotency never keeps that answer).
+
+`TestRouteTable_MatchesLiveRoutes` walks the router and fails on a route with no entry, an entry with no route, or a missing audit.
+
+### Where a refusal comes from
+
+The access log and the metrics name each request by its route's pattern when it matched a route. Otherwise they name it `unmatched`, and the log keeps only the path's first segment.
+
+| Answer | From | When |
+|---|---|---|
+| `404`, `405` | the router | no route matches the path or the method (inside `/v1`, after authentication) |
+| `413` | the body cap | a body over its cap, when it is read: by Idempotency first, on a request it guards (a write with an `Idempotency-Key`), else by the handler |
+| `403` cross-site request blocked | the CSRF guard | a write from another site that does not carry only an API key |
+| `401` | authentication | `missing credentials`: no key, and no session cookie that is still signed in (an expired or signed-out session included); `invalid or expired API key`: a key that is not valid |
+| `503 authentication_unavailable` | authentication | the session or key store could not be read |
+| `429` | the group's rate limit | over the bucket, or any request while a fail-closed limiter cannot reach Redis |
+| `409 conflict_idempotency` | Idempotency | the first request with the key is still running after the wait |
+| `409 conflict_idempotency_unresolved` | Idempotency | the first request's owner died before it stored an answer, so the outcome is unknown |
+| `422 idempotency_error` | Idempotency | the key reused for another request, or by another caller |
+| `503 idempotency_unavailable` | Idempotency | the key could not be recorded; its other answers are a `400` (a body it cannot read), the `413` above, and a `500` when no caller is on the request (a mis-wired router) |
+| `504 timeout` | the time limit | the handler wrote nothing in time |
+| `503 test_clock_unavailable`, `500` | the clock door | the record's test clock could not be read; a route entry the door does not know |
+| `403` | the route's permission check | the caller lacks the route's permission, or the route takes only a dashboard session |
+| `500 internal_error` | the Recoverer | a panic before anything was written |
+
+### The answer
+
+- **Writing:** a handler answers through `respond`, which writes every body and sets `Hardcount-Version`. `Hardcount-Request-Id` is set at the root.
+- **Errors:** an error becomes an answer by its kind, in one place, `respond.FromError`; its doc holds the table. An error with no kind answers `500` and is logged.
+- **Audit:** an action that changes rows writes its audit row in the same transaction as the change ([ADR-090](adr/090-audit-in-tx-emission.md)), so the change and its evidence commit together. The audit detector at the root reports one that did not.
+
 ## Design rules
 
 **One package per domain.** A business domain is one part of billing, such as invoices or payments. Its package under `internal/` usually holds a handler (`handler.go`), a service (`service.go`) and a store (`store.go`, `postgres.go`). The handler decodes the request, calls the service and writes the response. Transactions, money math and state changes live in the service, and SQL lives in the store.
