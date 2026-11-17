@@ -223,7 +223,7 @@ func TestListRoutes_OnePagingStyle(t *testing.T) {
 		}).want(t, 201, "credit grant")
 	}
 	endpoint := ""
-	for i, u := range []string{"https://example.com/paging-1", "https://example.com/paging-2"} {
+	for i, u := range []string{"http://localhost:9001/paging-1", "http://localhost:9001/paging-2"} {
 		ep := call("POST", "/v1/webhook-endpoints/endpoints", map[string]any{"url": u}).want(t, 201, "webhook endpoint").body
 		endpoint = flowStr(flowObj(ep, "endpoint"), "id")
 		// Deliveries give the stats list a row for each endpoint, and the

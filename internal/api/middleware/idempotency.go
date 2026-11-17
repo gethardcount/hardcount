@@ -19,6 +19,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/platform/logging"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/version"
 )
 
 // statusPending marks an idempotency row that is reserved but not yet
@@ -496,6 +497,7 @@ func replayExistingKey(w http.ResponseWriter, r *http.Request, db *postgres.DB, 
 			audit.MarkSkip(ctx)
 
 			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Hardcount-Version", version.Version)
 			w.Header().Set("Idempotent-Replayed", "true")
 			w.WriteHeader(c.StatusCode)
 			_, _ = w.Write(c.Body)
