@@ -43,12 +43,26 @@ func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 	if slices.Contains(allowedOrigins, "*") {
 		opts.AllowedOrigins = []string{"*"}
 	} else {
-		allow := make(map[string]bool, len(allowedOrigins))
-		for _, o := range allowedOrigins {
-			allow[strings.ToLower(o)] = true
-		}
-		opts.AllowOriginFunc = func(origin string) bool { return allow[strings.ToLower(origin)] }
+		opts.AllowOriginFunc = newOriginSet(allowedOrigins).has
 		opts.AllowCredentials = true
 	}
 	return cors.New(opts).Handler
+}
+
+// originSet holds the listed origins, which CORS and CSRFGuard match alike:
+// exactly, ignoring case. A "*" entry is no origin and matches nothing.
+type originSet map[string]bool
+
+func newOriginSet(origins []string) originSet {
+	set := make(originSet, len(origins))
+	for _, o := range origins {
+		if o = strings.ToLower(strings.TrimSpace(o)); o != "" && o != "*" {
+			set[o] = true
+		}
+	}
+	return set
+}
+
+func (s originSet) has(origin string) bool {
+	return s[strings.ToLower(strings.TrimSpace(origin))]
 }

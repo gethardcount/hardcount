@@ -141,10 +141,7 @@ func (l RateLimited) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// (61s at any per-minute limit), although one request's
 		// token refills in period/rate. A client that honors the
 		// header would wait a minute for nothing.
-		retryAfter := int(math.Ceil(retryIn.Seconds()))
-		if retryAfter < 1 {
-			retryAfter = 1
-		}
+		retryAfter := max(int(math.Ceil(retryIn.Seconds())), 1)
 		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
 		respond.RateLimited(w, r)
 		return

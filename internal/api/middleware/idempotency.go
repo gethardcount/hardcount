@@ -60,6 +60,9 @@ const (
 	// never released for a second run, because the handler's transaction
 	// may have committed before the owner died.
 	idempotencyOrphanAfter = 5 * time.Minute
+
+	// keyQueryTimeout bounds each transaction on idempotency_keys.
+	keyQueryTimeout = 2 * time.Second
 )
 
 // Idempotency returns middleware that caches responses for POST, PUT and
@@ -99,23 +102,10 @@ type IdempotencyGuard struct {
 }
 
 func (g IdempotencyGuard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" && r.Method != "PUT" && r.Method != "PATCH" {
-		g.next.ServeHTTP(w, r)
-		return
-	}
-	if g.ignore != nil && g.ignore(r) {
-		g.next.ServeHTTP(w, r)
-		return
-	}
-
+	writes := r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch
 	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
-	if key == "" {
-		g.next.ServeHTTP(w, r)
-		return
-	}
-
 	tenantID := auth.TenantID(r.Context())
-	if tenantID == "" {
+	if !writes || (g.ignore != nil && g.ignore(r)) || key == "" || tenantID == "" {
 		g.next.ServeHTTP(w, r)
 		return
 	}
@@ -293,11 +283,11 @@ func requestCaller(ctx context.Context) (caller string, ok bool) {
 	return "", false
 }
 
-type cachedResponse struct {
+type keyRow struct {
 	StatusCode  int
 	Body        []byte
 	Fingerprint []byte
-	CreatedAt   time.Time // when the key was reserved — a pending row's age
+	ReservedAt  time.Time
 }
 
 // reserveKey claims the idempotency key atomically. It inserts a pending row
@@ -320,7 +310,7 @@ type cachedResponse struct {
 // row lands in the mode partition the request runs under. The conflict
 // resolves against the (tenant_id, livemode, key) primary key.
 func reserveKey(ctx context.Context, db *postgres.DB, tenantID, key, method, path string, fingerprint []byte) (bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, keyQueryTimeout)
 	defer cancel()
 
 	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
@@ -365,7 +355,7 @@ func reserveKey(ctx context.Context, db *postgres.DB, tenantID, key, method, pat
 // owning request always overwrites its own pending row, so an unconditional
 // UPDATE on (tenant_id, key) is correct.
 func finalizeKey(ctx context.Context, db *postgres.DB, tenantID, key string, statusCode int, body []byte) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, keyQueryTimeout)
 	defer cancel()
 
 	// A finalize failure leaves the row pending with no response stored. A
@@ -407,7 +397,7 @@ func finalizeKey(ctx context.Context, db *postgres.DB, tenantID, key string, sta
 // reservation is older than idempotencyOrphanAfter). So each failure is
 // counted and logged, like a finalize failure.
 func releaseKey(ctx context.Context, db *postgres.DB, tenantID, key string, statusCode int) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, keyQueryTimeout)
 	defer cancel()
 
 	fail := func(stage string, err error) {
@@ -436,17 +426,16 @@ func releaseKey(ctx context.Context, db *postgres.DB, tenantID, key string, stat
 }
 
 // readKey loads the current state of a reserved or completed idempotency row.
-// pending reports whether the owner has not finalized it yet (status_code ==
-// statusPending). found is false when no row exists, because the owner
-// released it. It is called only after reserveKey found the row unexpired,
-// so it applies no expiry rule of its own.
-func readKey(ctx context.Context, db *postgres.DB, tenantID, key string) (c cachedResponse, found, pending bool, err error) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+// found is false when no row exists, because the owner released it. It is
+// called only after reserveKey found the row unexpired, so it applies no
+// expiry rule of its own.
+func readKey(ctx context.Context, db *postgres.DB, tenantID, key string) (c keyRow, found bool, err error) {
+	ctx, cancel := context.WithTimeout(ctx, keyQueryTimeout)
 	defer cancel()
 
 	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return cachedResponse{}, false, false, err
+		return keyRow{}, false, err
 	}
 	defer postgres.Rollback(tx)
 
@@ -454,17 +443,17 @@ func readKey(ctx context.Context, db *postgres.DB, tenantID, key string) (c cach
 		`SELECT status_code, response_body, request_fingerprint, created_at FROM idempotency_keys
 		WHERE tenant_id = $1 AND key = $2`,
 		tenantID, key,
-	).Scan(&c.StatusCode, &c.Body, &c.Fingerprint, &c.CreatedAt)
+	).Scan(&c.StatusCode, &c.Body, &c.Fingerprint, &c.ReservedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return cachedResponse{}, false, false, nil
+		return keyRow{}, false, nil
 	}
 	if err != nil {
-		return cachedResponse{}, false, false, err
+		return keyRow{}, false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return cachedResponse{}, false, false, err
+		return keyRow{}, false, err
 	}
-	return c, true, c.StatusCode == statusPending, nil
+	return c, true, nil
 }
 
 // replayExistingKey resolves a request that lost the reserve race. It
@@ -477,7 +466,7 @@ func replayExistingKey(w http.ResponseWriter, r *http.Request, db *postgres.DB, 
 	ctx := r.Context()
 	deadline := time.Now().Add(idempotencyPollTimeout)
 	for {
-		c, found, pending, err := readKey(ctx, db, tenantID, key)
+		c, found, err := readKey(ctx, db, tenantID, key)
 		if err != nil {
 			// On a database error while resolving the conflict, do not fail
 			// open: the side effect may already be running. Answer a 409 that
@@ -498,7 +487,7 @@ func replayExistingKey(w http.ResponseWriter, r *http.Request, db *postgres.DB, 
 				"This Idempotency-Key was first used by another caller or with a different request. Use a new key for a new request.")
 			return
 		}
-		if found && !pending {
+		if found && c.StatusCode != statusPending {
 			// A replay runs no handler and makes no mutation. It hands back
 			// the first request's response, and that request wrote the audit
 			// row. Mark this request accounted for, so the audit-coverage
@@ -532,7 +521,7 @@ func replayExistingKey(w http.ResponseWriter, r *http.Request, db *postgres.DB, 
 		// Still pending. A reservation older than any route's time budget
 		// has no live owner: the owner died or panicked. Say so at once,
 		// because the outcome is unknown and polling cannot resolve it.
-		if age := time.Since(c.CreatedAt); age > idempotencyOrphanAfter {
+		if age := time.Since(c.ReservedAt); age > idempotencyOrphanAfter {
 			respond.Error(w, r, http.StatusConflict, "conflict_idempotency_unresolved",
 				fmt.Sprintf("A request with this idempotency key started %s ago and never recorded an outcome — the replica handling it may have died mid-request. Whether its side effect committed is unknown: fetch the resource to check, then retry with a NEW idempotency key only if it does not exist.", age.Round(time.Minute)))
 			return

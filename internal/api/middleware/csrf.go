@@ -68,13 +68,7 @@ import (
 // the public payment and invoice routes too: they need no sign-in, so they
 // carry no operator session to abuse.
 func CSRFGuard(allowedOrigins []string) func(http.Handler) http.Handler {
-	allow := make(map[string]bool, len(allowedOrigins))
-	for _, o := range allowedOrigins {
-		if o = strings.ToLower(strings.TrimSpace(o)); o != "" && o != "*" {
-			allow[o] = true
-		}
-	}
-
+	allow := newOriginSet(allowedOrigins)
 	return func(next http.Handler) http.Handler {
 		return CrossSiteCheck{allow: allow, next: next}
 	}
@@ -83,7 +77,7 @@ func CSRFGuard(allowedOrigins []string) func(http.Handler) http.Handler {
 // CrossSiteCheck refuses a cross-site browser write. CSRFGuard makes it; its
 // doc has the rule.
 type CrossSiteCheck struct {
-	allow map[string]bool
+	allow originSet
 	next  http.Handler
 }
 
@@ -130,7 +124,7 @@ func isExemptBearerRequest(r *http.Request) bool {
 // from a browser page on a site other than the trusted dashboard. CSRFGuard
 // gives the reason for each branch: why same-site needs an allowlisted
 // Origin, and why a request with no signal at all is allowed.
-func isCrossSiteBrowserRequest(r *http.Request, allow map[string]bool) bool {
+func isCrossSiteBrowserRequest(r *http.Request, allow originSet) bool {
 	switch r.Header.Get("Sec-Fetch-Site") {
 	case "same-origin", "none":
 		return false
@@ -138,7 +132,7 @@ func isCrossSiteBrowserRequest(r *http.Request, allow map[string]bool) bool {
 		// Same registrable domain, different origin. Trust it only when the
 		// Origin is an allowlisted dashboard origin, so a sibling subdomain
 		// cannot use the same-site label for a cookie-authenticated mutation.
-		return !originAllowed(r, allow)
+		return !allow.has(r.Header.Get("Origin"))
 	case "cross-site":
 		return true
 	}
@@ -149,13 +143,5 @@ func isCrossSiteBrowserRequest(r *http.Request, allow map[string]bool) bool {
 	if strings.TrimSpace(r.Header.Get("Origin")) == "" {
 		return false
 	}
-	return !originAllowed(r, allow)
-}
-
-// originAllowed reports whether the request's Origin header exactly matches a
-// trusted dashboard origin (case-insensitive). An absent or "null" Origin is
-// not allowed.
-func originAllowed(r *http.Request, allow map[string]bool) bool {
-	origin := strings.ToLower(strings.TrimSpace(r.Header.Get("Origin")))
-	return origin != "" && allow[origin]
+	return !allow.has(r.Header.Get("Origin"))
 }
