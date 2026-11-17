@@ -12,7 +12,6 @@ import (
 	"github.com/prometheus/client_golang/prometheus/testutil"
 
 	"github.com/gethardcount/hardcount/internal/domain"
-	"github.com/gethardcount/hardcount/internal/errs"
 )
 
 var (
@@ -480,8 +479,8 @@ func TestIngest_AfterCloseCountsWrittenRowsOnly(t *testing.T) {
 		t.Fatalf("ingest: %+v %v", ev, err)
 	}
 	ev, err := svc.Ingest(context.Background(), "t1", in)
-	if !errors.Is(err, errs.ErrDuplicateKey) || ev.BillingStatus != "" {
-		t.Fatalf("replay: %+v %v, want ErrDuplicateKey and no status", ev, err)
+	if !errors.Is(err, errDuplicateKey) || ev.BillingStatus != "" {
+		t.Fatalf("replay: %+v %v, want errDuplicateKey and no status", ev, err)
 	}
 	if got := testutil.ToFloat64(c) - before; got != 1 {
 		t.Errorf("counter moved by %v, want 1", got)

@@ -13,6 +13,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/tax"
@@ -893,14 +894,16 @@ func TestFinalizeAndVoid(t *testing.T) {
 // provider.
 type fakeTaxReverser struct {
 	calls   []tax.ReversalRequest
+	at      []time.Time // the instant each reversal ran on
 	failErr error
 	// empty returns a result naming no transaction, with no error: what the
 	// engine answers when it resolves no provider.
 	empty bool
 }
 
-func (f *fakeTaxReverser) ReverseTax(_ context.Context, _ string, req tax.ReversalRequest) (*tax.ReversalResult, error) {
+func (f *fakeTaxReverser) ReverseTax(ctx context.Context, _ string, req tax.ReversalRequest) (*tax.ReversalResult, error) {
 	f.calls = append(f.calls, req)
+	f.at = append(f.at, clock.Now(ctx))
 	if f.failErr != nil {
 		return nil, f.failErr
 	}
@@ -1534,7 +1537,8 @@ func TestMarkPaid_StoreGate_RejectsDraftAndTaxPending(t *testing.T) {
 
 // recordingTaxCommitter captures CommitTax calls for the reconciler test.
 type recordingTaxCommitter struct {
-	calls []string // invoice ids
+	calls []string    // invoice ids
+	at    []time.Time // the instant each commit ran on
 	err   error
 }
 
@@ -1545,7 +1549,8 @@ func (r *recordingTaxCommitter) CheckTaxCalculationUsable(context.Context, strin
 	return nil
 }
 
-func (r *recordingTaxCommitter) CommitTax(_ context.Context, _, invoiceID, _ string) error {
+func (r *recordingTaxCommitter) CommitTax(ctx context.Context, _, invoiceID, _ string) error {
+	r.at = append(r.at, clock.Now(ctx))
 	r.calls = append(r.calls, invoiceID)
 	return r.err
 }
@@ -1596,6 +1601,24 @@ func TestRetryPendingTaxCommit(t *testing.T) {
 	if len(committer.calls) != 1 || committer.calls[0] != "orphan" {
 		t.Errorf("CommitTax calls = %v, want exactly [orphan]", committer.calls)
 	}
+}
+
+// The commit sweep works each invoice on its own instant: the tick binds none,
+// so a row reads the server's clock once and its commit is dated then.
+func TestRetryPendingTaxCommit_EachInvoiceOnItsOwnInstant(t *testing.T) {
+	base := time.Date(2026, 1, 5, 9, 0, 0, 0, time.UTC)
+	store := newMemStore()
+	svc := NewService(store, &steppingClock{at: base}, newMemNumberer())
+	committer := &recordingTaxCommitter{}
+	svc.SetTaxCommitter(committer)
+	for _, id := range []string{"orphan_1", "orphan_2"} {
+		store.invoices[id] = domain.Invoice{ID: id, TenantID: "t1", Status: domain.InvoiceFinalized,
+			TaxFacts: domain.TaxFacts{TaxStatus: domain.InvoiceTaxOK, TaxProvider: "stripe_tax", TaxCalculationID: "taxcalc_" + id}}
+	}
+	if _, errs := svc.RetryPendingTaxCommit(postgres.WithLivemode(context.Background(), true), 50); len(errs) != 0 {
+		t.Fatalf("errors: %v", errs)
+	}
+	checkOwnInstants(t, committer.at, base)
 }
 
 // TestRetryTax_AutoFinalize_QueuesForCollection pins the handoff between the

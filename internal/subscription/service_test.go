@@ -3923,6 +3923,41 @@ func (m *memStore) CustomerSubPlanCurrencies(_ context.Context, _, _, _ string) 
 	return nil, nil
 }
 
+// The real-time pause scan resumes each subscription on its own instant: the
+// tick binds none, so a row reads the server's clock once.
+func TestProcessExpiredPauseCollections_EachSubscriptionOnItsOwnInstant(t *testing.T) {
+	createdAt := time.Date(2025, 11, 29, 12, 0, 0, 0, time.UTC)
+	ctx := postgres.WithLivemode(context.Background(), true)
+	svc := NewService(newMemStore(), clock.NewFake(createdAt))
+	mem := svc.store.(*memStore)
+	resumes := createdAt.Add(24 * time.Hour)
+	var ids []string
+	for _, code := range []string{"sub-pause-1", "sub-pause-2"} {
+		sub, err := svc.Create(ctx, "t1", CreateInput{Code: code, DisplayName: "Paused", CustomerID: "c", Items: []CreateItemInput{{PlanID: "p"}}})
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		paused := mem.subs[sub.ID]
+		paused.PauseCollection = &domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft, ResumesAt: &resumes, SetBy: domain.PauseSetByOperator}
+		mem.subs[sub.ID] = paused
+		ids = append(ids, sub.ID)
+	}
+
+	server := &steppingClock{at: resumes.Add(time.Hour)}
+	if n, errs := NewService(mem, server).ProcessExpiredPauseCollections(ctx, 100); n != 2 || len(errs) != 0 {
+		t.Fatalf("resumed %d, errors %v; want 2", n, errs)
+	}
+	first, second := mem.subs[ids[0]].UpdatedAt, mem.subs[ids[1]].UpdatedAt
+	for _, at := range []time.Time{first, second} {
+		if !slices.Contains(server.issued, at) || !at.After(server.issued[0]) {
+			t.Errorf("resumed at %v: want a read of the server's clock after the list's %v", at, server.issued[0])
+		}
+	}
+	if first.Equal(second) {
+		t.Errorf("both resumed at %v: want each subscription on its own read", first)
+	}
+}
+
 // TestProcessExpiredPauseCollections_AlreadyClearedAnnouncesNothing pins the
 // hazard-5 root fix at the service seam: when the store reports the pause was
 // already cleared (a sibling leader won the CAS), the cron counts nothing and

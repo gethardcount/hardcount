@@ -97,7 +97,7 @@ func (h *Handler) handleStripeWebhook(w http.ResponseWriter, r *http.Request) {
 			"tenant_id", lookup.TenantID,
 			"cap_bytes", maxWebhookBodySize,
 		)
-		respond.Error(w, r, http.StatusRequestEntityTooLarge, "invalid_request_error", "payload_too_large",
+		respond.Error(w, r, http.StatusRequestEntityTooLarge, "payload_too_large",
 			"webhook body exceeds the size cap")
 		return
 	}

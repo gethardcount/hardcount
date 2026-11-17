@@ -363,7 +363,7 @@ func (h *Handler) Routes() chi.Router {
 func currencyUnavailable(w http.ResponseWriter, r *http.Request, tenantID, customerID string, err error) {
 	slog.ErrorContext(r.Context(), "invoice create: could not read the currency to use; refusing rather than guessing",
 		"tenant_id", tenantID, "customer_id", customerID, "error", err)
-	respond.Error(w, r, http.StatusServiceUnavailable, "api_error", "currency_unavailable",
+	respond.Error(w, r, http.StatusServiceUnavailable, "currency_unavailable",
 		"could not load the customer's billing currency — please retry")
 }
 
@@ -784,7 +784,7 @@ func (h *Handler) rotatePublicToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if inv.Status == domain.InvoiceDraft {
-		respond.Error(w, r, http.StatusUnprocessableEntity, "invalid_request_error", "invalid_state",
+		respond.Error(w, r, http.StatusUnprocessableEntity, "invalid_state",
 			"draft invoices do not have a public token — finalize first")
 		return
 	}

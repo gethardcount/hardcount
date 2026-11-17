@@ -80,7 +80,7 @@ func RequireCaller(sessSvc *Service, keySvc *auth.Service) func(http.Handler) ht
 				respond.Unauthorized(w, r, "missing credentials — sign in at /login or send Authorization: Bearer hc_secret_...")
 			case errors.As(err, &unavailable):
 				slog.Log(r.Context(), logging.ErrorLevel(r.Context(), unavailable.err), unavailable.msg, "error", unavailable.err)
-				respond.Error(w, r, http.StatusServiceUnavailable, "api_error",
+				respond.Error(w, r, http.StatusServiceUnavailable,
 					"authentication_unavailable",
 					"authentication is temporarily unavailable — retry shortly")
 			default:

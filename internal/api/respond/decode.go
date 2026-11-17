@@ -143,7 +143,7 @@ func BodyTooLarge(w http.ResponseWriter, r *http.Request, err error) bool {
 	if tooBig.Limit%(1<<20) == 0 {
 		limit = fmt.Sprintf("%d MB", tooBig.Limit>>20)
 	}
-	Error(w, r, http.StatusRequestEntityTooLarge, "invalid_request_error", "payload_too_large",
+	Error(w, r, http.StatusRequestEntityTooLarge, "payload_too_large",
 		fmt.Sprintf("The request body is larger than the %s limit. Send a smaller body.", limit))
 	return true
 }

@@ -166,7 +166,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 			// Fail closed: sign-in needs the database anyway.
 			slog.ErrorContext(r.Context(), "auth: sign-in throttle failed; sign-in refused", "ip", ip, "error", err)
 			recordLogin("error")
-			respond.Error(w, r, http.StatusServiceUnavailable, "api_error", "authentication_unavailable",
+			respond.Error(w, r, http.StatusServiceUnavailable, "authentication_unavailable",
 				"Sign-in is unavailable right now. Try again in a minute.")
 			return
 		}
@@ -504,7 +504,7 @@ func writeLoginThrottled(w http.ResponseWriter, r *http.Request, wait time.Durat
 		unit = "minute"
 	}
 	w.Header().Set("Retry-After", strconv.Itoa(secs))
-	respond.Error(w, r, http.StatusTooManyRequests, "rate_limit_error", "login_throttled",
+	respond.Error(w, r, http.StatusTooManyRequests, "login_throttled",
 		fmt.Sprintf("Too many sign-in attempts. Try again in %d %s.", minutes, unit))
 }
 

@@ -43,17 +43,6 @@ func TestFromError_AlreadyExists(t *testing.T) {
 	}
 }
 
-func TestFromError_DuplicateKey(t *testing.T) {
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/", nil)
-
-	FromError(rec, req, fmt.Errorf("%w: idempotency_key", errs.ErrDuplicateKey), "usage_event")
-
-	if rec.Code != http.StatusConflict {
-		t.Errorf("status: got %d, want 409", rec.Code)
-	}
-}
-
 func TestFromError_ValidationMessage(t *testing.T) {
 	cases := []string{
 		"customer_id is required",
