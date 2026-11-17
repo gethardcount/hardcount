@@ -2014,7 +2014,10 @@ func (s *Service) RemoveItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscr
 	if err != nil {
 		return ItemChangeResult{}, err
 	}
-	if sub.Status == domain.SubscriptionActive && len(sub.Items) <= 1 {
+	if sub.Status == domain.SubscriptionCanceled {
+		return ItemChangeResult{}, errs.InvalidState("Items can't be removed from a canceled subscription.")
+	}
+	if len(sub.Items) <= 1 {
 		return ItemChangeResult{}, errs.InvalidState("A subscription needs at least one item. To stop billing, cancel the subscription instead.")
 	}
 	now := s.clock.Now(ctx)
