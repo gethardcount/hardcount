@@ -95,10 +95,10 @@ func TestRequestCaller(t *testing.T) {
 		want   string
 		wantOK bool
 	}{
-		{"API key", auth.WithUserID(auth.WithKeyID(bg, "key_a"), ""), "key:key_a", true},
-		{"dashboard session", auth.WithKeyID(auth.WithUserID(bg, "usr_a"), ""), "user:usr_a", true},
+		{"API key", auth.WithCaller(bg, auth.Caller{KeyID: "key_a"}), "key:key_a", true},
+		{"dashboard session", auth.WithCaller(bg, auth.Caller{UserID: "usr_a"}), "user:usr_a", true},
 		{"no caller", bg, "", false},
-		{"both", auth.WithUserID(auth.WithKeyID(bg, "key_a"), "usr_a"), "", false},
+		{"both", auth.WithCaller(bg, auth.Caller{UserID: "usr_a", KeyID: "key_a"}), "", false},
 	} {
 		got, ok := requestCaller(c.ctx)
 		if got != c.want || ok != c.wantOK {
@@ -236,7 +236,7 @@ func TestIdempotency_BodyReadErrorAnsweredBeforeTheReserve(t *testing.T) {
 			req := httptest.NewRequest("POST", "/v1/customers", nil)
 			req.Body = c.body(rec)
 			req.Header.Set("Idempotency-Key", "idem-body-read")
-			ctx := auth.WithUserID(auth.WithKeyID(auth.WithTenantID(req.Context(), "t1"), "key_a"), "")
+			ctx := auth.WithCaller(req.Context(), auth.Caller{TenantID: "t1", KeyID: "key_a"})
 			handler.ServeHTTP(rec, req.WithContext(postgres.WithLivemode(ctx, false)))
 
 			if rec.Code != c.wantCode || !strings.Contains(rec.Body.String(), `"code":"`+c.wantErr+`"`) || calls != 0 {

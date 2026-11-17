@@ -36,23 +36,20 @@ const (
 	PermTestClockWrite Permission = "testclock:write"
 )
 
-// KeyType is a caller's kind of credential, which sets its permissions: a
-// stored key type (secret or ingest), or KeyTypeSession for a dashboard
-// session, which no key backs.
+// KeyType is an API key's type, which sets the key's permissions
+// (keyPermissions).
 type KeyType string
 
 const (
-	KeyTypeSecret  KeyType = "secret"  // hc_secret_ — full access to one account
-	KeyTypeIngest  KeyType = "ingest"  // hc_ingest_ — sends usage events only (ADR-133)
-	KeyTypeSession KeyType = "session" // dashboard cookie session, never stored in api_keys
+	KeyTypeSecret KeyType = "secret" // hc_secret_ — full access to one account
+	KeyTypeIngest KeyType = "ingest" // hc_ingest_ — sends usage events only (ADR-133)
 )
 
-// storedKeyTypes are the types a key can be issued and stored as. The type
-// prefixes (typePrefixes) and the create check (checkCreateInput) both come
-// from this list. A new type needs a permission entry
-// (TestStoredKeyTypes_EachHasPermissions) and a migration that widens the
-// api_keys CHECKs (TestKeyShape_ParserAndTableAgree).
-var storedKeyTypes = []KeyType{KeyTypeSecret, KeyTypeIngest}
+// keyTypes is every KeyType. The type prefixes (typePrefixes) and the create
+// check (checkCreateInput) both come from this list. A new type needs a
+// permission entry (TestKeyTypes_EachHasPermissions) and a migration that
+// widens the api_keys CHECKs (TestKeyShape_ParserAndTableAgree).
+var keyTypes = []KeyType{KeyTypeSecret, KeyTypeIngest}
 
 // allPermissions is every permission a route can require.
 var allPermissions = []Permission{
@@ -66,8 +63,7 @@ var allPermissions = []Permission{
 	PermTestClockWrite,
 }
 
-// fullAccess is every permission. A secret key and a dashboard session
-// hold it.
+// fullAccess is every permission. A secret key holds it.
 var fullAccess = func() map[Permission]bool {
 	m := make(map[Permission]bool, len(allPermissions))
 	for _, p := range allPermissions {
@@ -76,6 +72,7 @@ var fullAccess = func() map[Permission]bool {
 	return m
 }()
 
+// keyPermissions is what a key of each type may do.
 var keyPermissions = map[KeyType]map[Permission]bool{
 	KeyTypeSecret: fullAccess,
 	// An ingest key sends usage and nothing else (ADR-133). A LiteLLM proxy
@@ -84,13 +81,15 @@ var keyPermissions = map[KeyType]map[Permission]bool{
 	KeyTypeIngest: {
 		PermUsageIngest: true,
 	},
-	// Every dashboard session gets the full set: roles are recorded in
-	// user_tenants.role but not enforced (ADR-081).
-	KeyTypeSession: fullAccess,
 }
 
-// HasPermission reports whether keyType holds perm. An unknown key type
-// holds no permission.
-func HasPermission(keyType KeyType, perm Permission) bool {
-	return keyPermissions[keyType][perm]
+// HasPermission reports whether c holds perm. A session holds every
+// permission: roles are recorded in user_tenants.role but not enforced
+// (ADR-081). A key holds its type's permissions. A caller that is neither,
+// or a key of an unknown type, holds none.
+func HasPermission(c Caller, perm Permission) bool {
+	if c.UserID != "" {
+		return true
+	}
+	return keyPermissions[c.KeyType][perm]
 }

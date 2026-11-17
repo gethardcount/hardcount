@@ -1812,7 +1812,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 			}
 			if kid := auth.KeyID(ctx); kid != "" {
 				out["key_id"] = kid
-				out["key_type"] = string(auth.GetKeyType(ctx))
+				out["key_type"] = string(auth.CallerOf(ctx).KeyType)
 			}
 			respond.JSON(w, req, http.StatusOK, out)
 		})

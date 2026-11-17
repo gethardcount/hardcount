@@ -443,8 +443,8 @@ func (l *Logger) LogInTx(ctx context.Context, tx *sql.Tx, e Entry) error {
 // ResolveActor determines who performed an audited action from the request
 // context, in priority order:
 //   - customer — a stamped customer actor (public token flows, auth.WithCustomerActor)
-//   - user     — a dashboard operator on a session cookie (auth.WithUserID, ADR-011)
-//   - api_key  — an SDK / curl caller on a Bearer hc_… key (auth.WithKeyID)
+//   - user     — a dashboard operator on a session cookie (auth.UserID, ADR-011)
+//   - api_key  — an SDK / curl caller on a Bearer hc_… key (auth.KeyID)
 //   - system   — background workers / cron with no request identity
 //
 // A new kind must also be added to every actor_type CHECK (audit_log,
@@ -452,12 +452,7 @@ func (l *Logger) LogInTx(ctx context.Context, tx *sql.Tx, e Entry) error {
 // TestResolveActorKinds_MatchEveryActorCheck.
 //
 // Every audit write path calls this, so the actor resolves identically on all of
-// them: the post-hoc Logger.Log and the in-tx LogInTx. (There used to be a third
-// — the catch-all AuditLog middleware — which ADR-090 deleted.) Before this, both read only auth.KeyID — and
-// session.applyToCtx sets WithUserID but never WithKeyID — so every dashboard
-// (session-cookie) operator action recorded actor_type='system'/'system', and
-// the log could not answer "who did this?" for the primary UI. The 'user'
-// value the audit_log CHECK constraint reserves was never written.
+// them: the post-hoc Logger.Log and the in-tx LogInTx.
 func ResolveActor(ctx context.Context) (actorType, actorID string) {
 	if custID := auth.CustomerActorID(ctx); custID != "" {
 		return "customer", custID

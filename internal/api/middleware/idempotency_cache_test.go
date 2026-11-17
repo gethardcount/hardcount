@@ -276,8 +276,7 @@ func invokeWithKeyAs(t *testing.T, h http.Handler, tenantID, keyID, key, body st
 	// trips the strict-mode panic ("TxTenant opened without ctx
 	// livemode") — that diagnostic is the contract every entry point
 	// must satisfy, including test fixtures.
-	ctx := auth.WithTenantID(req.Context(), tenantID)
-	ctx = auth.WithKeyID(ctx, keyID)
+	ctx := auth.WithCaller(req.Context(), auth.Caller{TenantID: tenantID, KeyID: keyID})
 	ctx = postgres.WithLivemode(ctx, false)
 	req = req.WithContext(ctx)
 	rec := httptest.NewRecorder()

@@ -35,7 +35,7 @@ func TestIdempotency_ReserveErrorRefusesAndRunsNothing(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/credits/grant", strings.NewReader(`{"amount_cents":5000}`))
 	req.Header.Set("Idempotency-Key", "grant-abc123")
-	req = req.WithContext(postgres.WithLivemode(auth.WithKeyID(auth.WithTenantID(req.Context(), "t1"), "key_test"), false))
+	req = req.WithContext(postgres.WithLivemode(auth.WithCaller(req.Context(), auth.Caller{TenantID: "t1", KeyID: "key_test"}), false))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 

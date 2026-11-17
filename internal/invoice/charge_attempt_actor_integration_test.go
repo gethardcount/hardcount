@@ -115,7 +115,7 @@ func TestRecordChargeAttempt_StampsActor(t *testing.T) {
 		want    [2]string
 	}{
 		{"operator Charge now", auth.WithUserID(r.ctx, "hc_usr_op"), domain.ChargeTriggerChargeNow, [2]string{"user", "hc_usr_op"}},
-		{"API collect", auth.WithKeyID(r.ctx, "hc_key_op"), domain.ChargeTriggerChargeNow, [2]string{"api_key", "hc_key_op"}},
+		{"API collect", auth.WithCaller(r.ctx, auth.Caller{KeyID: "hc_key_op"}), domain.ChargeTriggerChargeNow, [2]string{"api_key", "hc_key_op"}},
 		{"engine auto-charge", r.ctx, domain.ChargeTriggerAutoCharge, [2]string{"system", "system"}},
 		// POST /v1/invoices/{id}/finalize collects on the request's ctx, so
 		// its auto_charge names the operator who finalized, as the audit log

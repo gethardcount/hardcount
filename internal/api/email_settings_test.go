@@ -50,10 +50,7 @@ func newEmailSettingsTestHandler(s *fakeEmailSender, a *fakeAudit) http.Handler 
 
 func sessionReq(method, path string) *http.Request {
 	r := httptest.NewRequest(method, path, nil)
-	ctx := auth.WithTenantID(r.Context(), "hc_ten_1")
-	ctx = auth.WithUserID(ctx, "ops")
-	ctx = auth.WithKeyType(ctx, auth.KeyTypeSession)
-	return r.WithContext(ctx)
+	return r.WithContext(auth.WithCaller(r.Context(), auth.Caller{TenantID: "hc_ten_1", UserID: "ops"}))
 }
 
 // The status lists every link env var, set or not, so the page can name the
@@ -132,7 +129,7 @@ func TestEmailSettings_SendTest(t *testing.T) {
 	t.Run("an API key can't send a test email", func(t *testing.T) {
 		s := &fakeEmailSender{configured: true}
 		r := httptest.NewRequest("POST", "/test", nil)
-		r = r.WithContext(auth.WithKeyType(auth.WithTenantID(r.Context(), "hc_ten_1"), auth.KeyTypeSecret))
+		r = r.WithContext(auth.WithCaller(r.Context(), auth.Caller{TenantID: "hc_ten_1", KeyID: "hc_key_1", KeyType: auth.KeyTypeSecret}))
 		rr := httptest.NewRecorder()
 		newEmailSettingsTestHandler(s, &fakeAudit{}).ServeHTTP(rr, r)
 		if rr.Code != http.StatusForbidden || len(s.sentTo) != 0 {

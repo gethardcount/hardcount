@@ -119,7 +119,7 @@ func (r *deadlockInvoiceRig) post(action, key, body string) *httptest.ResponseRe
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Idempotency-Key", key)
 	rr := httptest.NewRecorder()
-	r.srv.ServeHTTP(rr, req.WithContext(auth.WithKeyID(auth.WithTenantID(r.ctx, r.tenantID), "key_test")))
+	r.srv.ServeHTTP(rr, req.WithContext(auth.WithCaller(r.ctx, auth.Caller{TenantID: r.tenantID, KeyID: "key_test"})))
 	return rr
 }
 

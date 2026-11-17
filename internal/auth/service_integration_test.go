@@ -108,8 +108,7 @@ func TestCreateKey_Secret(t *testing.T) {
 }
 
 // The create input rules: no key_type means secret, a key_type that is not a
-// stored type and a missing name are refused, and expires_at must be after
-// now.
+// key type and a missing name are refused, and expires_at must be after now.
 func TestCreateKey_InputRules(t *testing.T) {
 	k := newKeyRig(t)
 	past, now, future := time.Now().Add(-24*time.Hour), time.Now(), time.Now().Add(30*24*time.Hour)

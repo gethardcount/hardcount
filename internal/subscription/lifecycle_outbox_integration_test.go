@@ -124,7 +124,7 @@ func TestLifecycleEvents_EnqueuedInTransitionTx(t *testing.T) {
 	// the ADR-090 audit row uses, so the webhook and the audit evidence in
 	// one tx can't disagree. An OPERATOR cancel is therefore one whose ctx
 	// carries operator identity — a bare ctx is a background actor.
-	opCtx := auth.WithKeyID(ctx, "hc_key_lifecycle_obx")
+	opCtx := auth.WithCaller(ctx, auth.Caller{KeyID: "hc_key_lifecycle_obx"})
 	if _, err := subscriptiontest.Cancel(opCtx, store, tenantID, sub.ID); err != nil {
 		t.Fatalf("cancel: %v", err)
 	}

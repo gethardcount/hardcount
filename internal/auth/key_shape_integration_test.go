@@ -34,9 +34,9 @@ func TestKeyShape_ParserAndTableAgree(t *testing.T) {
 		{"hc_platform_live_0123456789ab", false}, // a removed type
 		{"hc_pub_live_0123456789ab", false},      // a removed type
 	}
-	// The valid prefixes: each stored type's, live and test. A type added to
-	// storedKeyTypes fails here until a migration widens the CHECK.
-	for _, kt := range storedKeyTypes {
+	// The valid prefixes: each key type's, live and test. A type added to
+	// keyTypes fails here until a migration widens the CHECK.
+	for _, kt := range keyTypes {
 		for _, live := range []bool{true, false} {
 			cases = append(cases, shapeCase{typePrefix(kt, live) + "0123456789ab", true})
 		}

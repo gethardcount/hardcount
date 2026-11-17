@@ -43,8 +43,7 @@ func TestRateLimitKey_APIKeyWinsOverTenant(t *testing.T) {
 	// keying is already per-mode. It takes precedence so one runaway
 	// integration can't starve the tenant's dashboard.
 	r := httptest.NewRequest("GET", "/v1/customers", nil)
-	ctx := auth.WithTenantID(r.Context(), "ten_abc")
-	ctx = auth.WithKeyID(ctx, "hc_key_123")
+	ctx := auth.WithCaller(r.Context(), auth.Caller{TenantID: "ten_abc", KeyID: "hc_key_123"})
 	ctx = postgres.WithLivemode(ctx, true)
 
 	if got, want := mustRateLimitKey(t, r.WithContext(ctx)), "key:hc_key_123"; got != want {

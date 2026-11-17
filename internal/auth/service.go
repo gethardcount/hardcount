@@ -1,7 +1,6 @@
-// Package auth issues and validates API keys, decides what each kind of
-// credential may do, and carries the authenticated caller in the request
-// context: its tenant, its key or user, and its kind of credential (a stored
-// key type, or a dashboard session).
+// Package auth issues and validates API keys, decides what each caller may
+// do, and carries the caller in the request context (Caller): a dashboard
+// user's session, or an API key.
 package auth
 
 import (
@@ -171,9 +170,9 @@ func statusAt(key domain.APIKey, now time.Time) string {
 }
 
 // checkCreateInput checks a create request and returns the key to mint: a
-// name of 1 to maxKeyNameLen characters once trimmed, a stored key type
-// (secret when empty), and an expires_at after now. Keys belong to the
-// account, outside any customer's test clock, so now is the wall clock.
+// name of 1 to maxKeyNameLen characters once trimmed, a key type (secret
+// when empty), and an expires_at after now. Keys belong to the account,
+// outside any customer's test clock, so now is the wall clock.
 func checkCreateInput(input CreateKeyInput, now time.Time) (CreateKeyInput, error) {
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
@@ -189,9 +188,9 @@ func checkCreateInput(input CreateKeyInput, now time.Time) (CreateKeyInput, erro
 	}
 	// An ingest key holds less than any caller that can mint one, so key_type
 	// cannot raise access.
-	if !slices.Contains(storedKeyTypes, keyType) {
-		names := make([]string, len(storedKeyTypes))
-		for i, kt := range storedKeyTypes {
+	if !slices.Contains(keyTypes, keyType) {
+		names := make([]string, len(keyTypes))
+		for i, kt := range keyTypes {
 			names[i] = string(kt)
 		}
 		return CreateKeyInput{}, errs.Invalid("key_type", "must be one of: "+strings.Join(names, ", "))

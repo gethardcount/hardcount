@@ -10,8 +10,14 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-func principal(kt hardcountauth.KeyType, live bool) context.Context {
-	return hardcountauth.WithKeyType(postgres.WithLivemode(context.Background(), live), kt)
+var (
+	aKey     = hardcountauth.Caller{KeyID: "hc_key_1", KeyType: hardcountauth.KeyTypeSecret}
+	aSession = hardcountauth.Caller{UserID: "hc_usr_1"}
+)
+
+// inMode is a request context for the caller c in the mode live.
+func inMode(c hardcountauth.Caller, live bool) context.Context {
+	return hardcountauth.WithCaller(postgres.WithLivemode(context.Background(), live), c)
 }
 
 // TestCheckMode pins who manages which mode's Stripe connection. Every caller
@@ -25,16 +31,16 @@ func TestCheckMode(t *testing.T) {
 		target bool
 		want   error
 	}{
-		{"test key, test connection", principal(hardcountauth.KeyTypeSecret, false), false, nil},
-		{"test key, live connection", principal(hardcountauth.KeyTypeSecret, false), true, errs.ErrForbidden},
-		{"live key, live connection", principal(hardcountauth.KeyTypeSecret, true), true, nil},
-		{"live key, test connection", principal(hardcountauth.KeyTypeSecret, true), false, errs.ErrForbidden},
-		{"test-mode session, test connection", principal(hardcountauth.KeyTypeSession, false), false, nil},
-		{"test-mode session, live connection", principal(hardcountauth.KeyTypeSession, false), true, errs.ErrForbidden},
-		{"live-mode session, live connection", principal(hardcountauth.KeyTypeSession, true), true, nil},
-		{"live-mode session, test connection", principal(hardcountauth.KeyTypeSession, true), false, errs.ErrForbidden},
-		{"key with no mode", hardcountauth.WithKeyType(context.Background(), hardcountauth.KeyTypeSecret), false, postgres.ErrLivemodeUnset},
-		{"session with no mode", hardcountauth.WithKeyType(context.Background(), hardcountauth.KeyTypeSession), true, postgres.ErrLivemodeUnset},
+		{"test key, test connection", inMode(aKey, false), false, nil},
+		{"test key, live connection", inMode(aKey, false), true, errs.ErrForbidden},
+		{"live key, live connection", inMode(aKey, true), true, nil},
+		{"live key, test connection", inMode(aKey, true), false, errs.ErrForbidden},
+		{"test-mode session, test connection", inMode(aSession, false), false, nil},
+		{"test-mode session, live connection", inMode(aSession, false), true, errs.ErrForbidden},
+		{"live-mode session, live connection", inMode(aSession, true), true, nil},
+		{"live-mode session, test connection", inMode(aSession, true), false, errs.ErrForbidden},
+		{"key with no mode", hardcountauth.WithCaller(context.Background(), aKey), false, postgres.ErrLivemodeUnset},
+		{"session with no mode", hardcountauth.WithCaller(context.Background(), aSession), true, postgres.ErrLivemodeUnset},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -60,10 +66,10 @@ func TestService_RefusesOtherModeBeforeWriting(t *testing.T) {
 	svc := NewService(nil, nil)
 	const tenantID = "hc_ten_mode_scope"
 	for _, tc := range []struct {
-		name string
-		kt   hardcountauth.KeyType
-	}{{"test key", hardcountauth.KeyTypeSecret}, {"test-mode session", hardcountauth.KeyTypeSession}} {
-		ctx := principal(tc.kt, false)
+		name   string
+		caller hardcountauth.Caller
+	}{{"test key", aKey}, {"test-mode session", aSession}} {
+		ctx := inMode(tc.caller, false)
 		_, err := svc.Connect(ctx, tenantID, ConnectInput{Livemode: true, SecretKey: fakeSKLive, PublishableKey: fakePKLive})
 		if !errors.Is(err, errs.ErrForbidden) {
 			t.Errorf("Connect live with a %s = %v, want ErrForbidden", tc.name, err)

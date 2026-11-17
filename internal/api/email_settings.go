@@ -112,7 +112,7 @@ func (h *emailSettingsHandler) sendTest(w http.ResponseWriter, r *http.Request) 
 	ctx := r.Context()
 	tenantID := auth.TenantID(ctx)
 	userID := auth.UserID(ctx)
-	if auth.GetKeyType(ctx) != auth.KeyTypeSession || userID == "" {
+	if userID == "" {
 		// An API key has no address of its own to send to.
 		respond.Forbidden(w, r, "Sign in to the dashboard to send a test email. It goes to your own address.")
 		return

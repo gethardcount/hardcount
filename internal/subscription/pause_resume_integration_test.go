@@ -230,7 +230,7 @@ func TestLiftedPause_AResumeCallAnnouncesTheLift(t *testing.T) {
 	// The operator's request writes the resume's row, so the row names the
 	// request's actor, as every audit row does (audit.ResolveActor). Its
 	// cause is the payment (triggered_by), as for a test-clock cancel.
-	opCtx := auth.WithKeyID(r.ctx, "hc_key_operator")
+	opCtx := auth.WithCaller(r.ctx, auth.Caller{KeyID: "hc_key_operator"})
 	sub, resumed, err := svc.ResumeCollection(opCtx, r.tenantID, r.subID)
 	if err != nil {
 		t.Fatalf("resume call: %v", err)

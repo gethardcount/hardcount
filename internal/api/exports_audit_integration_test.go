@@ -399,8 +399,7 @@ func TestExportsAudit_FailClosed_NoBytesStreamWhenTheRowCannotBeWritten(t *testi
 	for name, tc := range exports {
 		t.Run(name, func(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, tc.path, nil)
-			ctx := auth.WithTenantID(req.Context(), "hc_tnt_failclosed")
-			ctx = auth.WithKeyID(ctx, "hc_key_failclosed")
+			ctx := auth.WithCaller(req.Context(), auth.Caller{TenantID: "hc_tnt_failclosed", KeyID: "hc_key_failclosed"})
 			ctx = postgres.WithLivemode(ctx, testKeyLivemode)
 			rec := httptest.NewRecorder()
 

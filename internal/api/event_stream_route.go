@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"time"
@@ -41,20 +40,11 @@ func streamCredentialStopped(sessSvc *session.Service, authSvc *auth.Service) fu
 		ctx, err := session.Authenticate(r, sessSvc, authSvc)
 		switch {
 		case err == nil:
-			return callerOf(ctx) != callerOf(r.Context()), nil
+			return auth.CallerOf(ctx) != auth.CallerOf(r.Context()), nil
 		case errors.Is(err, session.ErrNoCredentials), errors.Is(err, auth.ErrInvalidKey):
 			return true, nil
 		default:
 			return false, err
 		}
 	}
-}
-
-// streamCaller is who a request's credentials name: the tenant, and the
-// session's user or the key. Authenticate sets all three, the one it does not
-// have as "".
-type streamCaller struct{ tenantID, userID, keyID string }
-
-func callerOf(ctx context.Context) streamCaller {
-	return streamCaller{auth.TenantID(ctx), auth.UserID(ctx), auth.KeyID(ctx)}
 }
