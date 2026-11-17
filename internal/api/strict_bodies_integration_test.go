@@ -263,7 +263,7 @@ func TestStrictBodies_PatchRefusesFieldsItCannotChange(t *testing.T) {
 		"final_subscription_action": "pause", "final_invoice_action": "none",
 	}), "id")
 	hook := flowStr(create("POST", "/v1/webhook-endpoints/endpoints", map[string]any{
-		"url": "https://example.com/strict-bodies",
+		"url": "http://localhost:9001/strict-bodies",
 	})["endpoint"].(map[string]any), "id")
 
 	cases := []struct {
