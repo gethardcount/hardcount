@@ -76,10 +76,9 @@ const (
 //     another caller of the account.
 //
 // ignore names the requests that skip this middleware, and nil means none.
-// It names the usage routes, whose dedup rule is the idempotency_key each
-// event carries (stored once, kept forever). A second cache at the header
-// level would only add a 24 h answer replay and a 1 MB body read for the
-// fingerprint. So those routes run as if no header was sent.
+// The server names the requests whose answer carries a secret shown only
+// once, which must never be kept for a replay. Those requests run as if no
+// header was sent.
 func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return IdempotencyGuard{db: db, ignore: ignore, next: next}

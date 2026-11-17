@@ -46,11 +46,11 @@ func newStreamRig(t *testing.T, db, authDB *postgres.DB) *streamRig {
 	const email, password = "owner@stream-credential.test", "stream-credential-pw-12"
 	tenantID := flowStr(flowBootstrap(t, api, "stream-credential-bootstrap", email, password), "tenant", "id")
 
+	sessions := session.NewService(session.NewPostgresStore(authDB))
+	keys := auth.NewService(authDB, audit.NewLogger(authDB))
 	r := chi.NewRouter()
-	noRateLimit := func(next http.Handler) http.Handler { return next }
-	r.Route("/v1/webhook_events/stream", eventStreamRoute(webhook.NewHandler(srv.WebhookOutSvc),
-		session.NewService(session.NewPostgresStore(authDB)), auth.NewService(authDB, audit.NewLogger(authDB)),
-		noRateLimit, noRateLimit, testStreamInterval))
+	r.Use(session.RequireCaller(sessions, keys)) // the /v1 group's authentication, as router.go mounts the stream
+	r.Route("/v1/webhook_events/stream", eventStreamRoute(webhook.NewHandler(srv.WebhookOutSvc), sessions, keys, testStreamInterval))
 	stream := httptest.NewServer(r)
 	t.Cleanup(stream.Close)
 

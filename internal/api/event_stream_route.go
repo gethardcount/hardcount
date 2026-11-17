@@ -12,16 +12,16 @@ import (
 	"github.com/gethardcount/hardcount/internal/webhook"
 )
 
-// eventStreamRoute mounts GET /v1/webhook_events/stream: the session cookie
-// or API key (session.RequireCaller), rateLimit, the clock door (door), the
-// apikey:read permission, then the stream. The stream checks its caller again
-// (streamCredentialStopped) at the interval every, for which router.go passes
-// webhook.StreamHeartbeatInterval.
-func eventStreamRoute(h *webhook.Handler, sessSvc *session.Service, authSvc *auth.Service, rateLimit, door func(http.Handler) http.Handler, every time.Duration) func(chi.Router) {
+// eventStreamRoute mounts GET /v1/webhook_events/stream behind the
+// apikey:read permission; the /v1 group in router.go authenticates the caller
+// and rate-limits first. Every interval every the stream checks its caller
+// again (streamCredentialStopped): once the key is revoked or expires, or the
+// session ends, it closes with no final frame, and a reconnect with the same
+// credential answers 401. A store failure does not close it. router.go passes
+// webhook.StreamHeartbeatInterval; it is a function, not inline in router.go,
+// so the stream's credential test can mount it with a short interval.
+func eventStreamRoute(h *webhook.Handler, sessSvc *session.Service, authSvc *auth.Service, every time.Duration) func(chi.Router) {
 	return func(r chi.Router) {
-		r.Use(session.RequireCaller(sessSvc, authSvc))
-		r.Use(rateLimit)
-		r.Use(door)
 		r.With(auth.Require(auth.PermAPIKeyRead)).Get("/", h.StreamHandler(streamCredentialStopped(sessSvc, authSvc), every))
 	}
 }

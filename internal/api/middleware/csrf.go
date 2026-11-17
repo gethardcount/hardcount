@@ -76,18 +76,27 @@ func CSRFGuard(allowedOrigins []string) func(http.Handler) http.Handler {
 	}
 
 	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if isSafeMethod(r.Method) || isExemptBearerRequest(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
-			if isCrossSiteBrowserRequest(r, allow) {
-				respond.Forbidden(w, r, "cross-site request blocked")
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
+		return CrossSiteCheck{allow: allow, next: next}
 	}
+}
+
+// CrossSiteCheck refuses a cross-site browser write. CSRFGuard makes it; its
+// doc has the rule.
+type CrossSiteCheck struct {
+	allow map[string]bool
+	next  http.Handler
+}
+
+func (c CrossSiteCheck) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if isSafeMethod(r.Method) || isExemptBearerRequest(r) {
+		c.next.ServeHTTP(w, r)
+		return
+	}
+	if isCrossSiteBrowserRequest(r, c.allow) {
+		respond.Forbidden(w, r, "cross-site request blocked")
+		return
+	}
+	c.next.ServeHTTP(w, r)
 }
 
 // isSafeMethod reports whether the HTTP method changes no state. The guard

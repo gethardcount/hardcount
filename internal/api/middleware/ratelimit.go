@@ -241,25 +241,3 @@ func rateLimitKey(r *http.Request) (string, error) {
 	}
 	return "ip:" + audit.ExtractClientIP(r), nil
 }
-
-// SplitRateLimit routes each request to one of two limiters: special when
-// match(r) is true, and base otherwise. It splits ingest from CRUD. The
-// ingest routes (usage events and LiteLLM callbacks, one POST per LLM call)
-// need a bucket orders of magnitude larger than the operator CRUD default.
-// Through the general bucket, revenue data would be dropped without a word:
-// LiteLLM retries only on 5xx, so every 429 is an event lost for good.
-func SplitRateLimit(match func(*http.Request) bool, special, base *RateLimiter) func(http.Handler) http.Handler {
-	specialMW := special.Middleware()
-	baseMW := base.Middleware()
-	return func(next http.Handler) http.Handler {
-		sp := specialMW(next)
-		bs := baseMW(next)
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if match(r) {
-				sp.ServeHTTP(w, r)
-				return
-			}
-			bs.ServeHTTP(w, r)
-		})
-	}
-}

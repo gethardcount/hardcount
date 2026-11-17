@@ -34,7 +34,7 @@ func TestOpenAPISpec_ShowOnceSecretsAreNeverKept(t *testing.T) {
 				break
 			}
 		}
-		kept[routeShape(method, route)] = behind && !skipsIdempotency(&http.Request{Method: method, URL: &url.URL{Path: route}})
+		kept[routeShape(method, route)] = behind && !answersWithShowOnceSecret(&http.Request{Method: method, URL: &url.URL{Path: route}})
 		return nil
 	})
 	if err != nil {
