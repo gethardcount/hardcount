@@ -4,7 +4,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
 	dto "github.com/prometheus/client_model/go"
@@ -92,9 +91,8 @@ func AuditCoverage(route func(*http.Request) (pattern string, exempt bool)) func
 			auditUncoveredMutations.WithLabelValues(pattern).Inc()
 			slog.ErrorContext(r.Context(), "UNCOVERED MUTATION — a state change committed with no audit row",
 				"method", r.Method,
-				"route", pattern,
+				"path", pattern,
 				"status", status,
-				"request_id", chimw.GetReqID(r.Context()),
 				"remedy", "emit the row in the business transaction (audit.Logger.LogInTx) and declare the route in internal/api/route_table.go")
 		})
 	}

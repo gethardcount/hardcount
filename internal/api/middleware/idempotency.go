@@ -14,11 +14,14 @@ import (
 	"strings"
 	"time"
 
+	chimw "github.com/go-chi/chi/v5/middleware"
+
 	"github.com/gethardcount/hardcount/internal/api/respond"
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/platform/logging"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 	"github.com/gethardcount/hardcount/internal/version"
 )
 
@@ -128,7 +131,7 @@ func (g IdempotencyGuard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	caller, ok := requestCaller(r.Context())
 	if !ok {
 		slog.ErrorContext(r.Context(), "idempotency: no caller on the request context; authentication must run before this middleware",
-			"tenant_id", tenantID, "path", r.URL.Path)
+			"path", request.Of(r.Context()).Route().Pattern)
 		respond.InternalError(w, r)
 		return
 	}
@@ -185,7 +188,7 @@ func (g IdempotencyGuard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// answers a failed idempotency check the same way.
 		idempotencyCacheErrors.WithLabelValues("reserve").Inc()
 		slog.Log(r.Context(), logging.ErrorLevel(r.Context(), err), "idempotency reserve failed; refusing the request (503) rather than running it unprotected",
-			"tenant_id", tenantID, "path", r.URL.Path, "error", err)
+			"path", request.Of(r.Context()).Route().Pattern, "error", err)
 		w.Header().Set("Retry-After", "1")
 		respond.Error(w, r, http.StatusServiceUnavailable, "idempotency_unavailable", "could not record the idempotency key — retry the request with the same key")
 		return
@@ -211,7 +214,9 @@ func (g IdempotencyGuard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// captured livemode, so the write survives a client disconnect.
 	// When the connection drops after the side effect committed, the
 	// response must still be stored, or the retry runs it again.
-	bgCtx := postgres.WithLivemode(context.Background(), livemode)
+	// It carries the request's id too, so the lines finalize and release
+	// write join the request's other lines.
+	bgCtx := context.WithValue(postgres.WithLivemode(context.Background(), livemode), chimw.RequestIDKey, chimw.GetReqID(r.Context()))
 
 	// Cache every status except 409, 422 and 503, and every refused
 	// body. Above all, a retry after a transient 500 must not run

@@ -61,8 +61,8 @@ of three things, most likely first:
    walks every route fails the build, unless someone edited the route list
    (`route_table.go`) to silence it.
 
-**Check:** find the route from the `route` label and the
-`UNCOVERED MUTATION` error log.
+**Check:** find the route from the counter's `route` label, or from the
+`path` field of the `UNCOVERED MUTATION` error log.
 
 **Fix:** fix the code path that skipped the audit row, or add the missing
 declaration. Do not add an exemption without recording what is being given

@@ -44,7 +44,7 @@ func ConcurrentChangeAsConflict(r *http.Request, err error) error {
 		slog.WarnContext(r.Context(), "request's lock wait ended at the lock limit; answering 409",
 			"error", err,
 			"method", r.Method,
-			"route", routePattern(r),
+			"path", routePattern(r),
 		)
 		return ConcurrentChange()
 	}
@@ -60,7 +60,7 @@ func ConcurrentChangeAsConflict(r *http.Request, err error) error {
 		"error", err,
 		"detail", detail,
 		"method", r.Method,
-		"route", routePattern(r),
+		"path", routePattern(r),
 	)
 	return ConcurrentChange()
 }
