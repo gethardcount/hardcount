@@ -15,8 +15,7 @@ const (
 
 	PermUsageRead  Permission = "usage:read"
 	PermUsageWrite Permission = "usage:write"
-	// PermUsageIngest sends usage events. It is the only permission an
-	// ingest key holds.
+	// PermUsageIngest sends usage events.
 	PermUsageIngest Permission = "usage:ingest"
 
 	PermInvoiceRead  Permission = "invoice:read"
@@ -45,10 +44,9 @@ const (
 	KeyTypeIngest KeyType = "ingest" // hc_ingest_ — sends usage events only (ADR-133)
 )
 
-// keyTypes is every KeyType. The type prefixes (typePrefixes) and the create
-// check (checkCreateInput) both come from this list. A new type needs a
-// permission entry (TestKeyTypes_EachHasPermissions) and a migration that
-// widens the api_keys CHECKs (TestKeyShape_ParserAndTableAgree).
+// keyTypes is every KeyType; typePrefixes and checkCreateInput derive from it.
+// A new type needs a keyPermissions entry and a migration widening the
+// api_keys CHECKs.
 var keyTypes = []KeyType{KeyTypeSecret, KeyTypeIngest}
 
 // allPermissions is every permission a route can require.
@@ -83,12 +81,12 @@ var keyPermissions = map[KeyType]map[Permission]bool{
 	},
 }
 
-// HasPermission reports whether c holds perm. A session holds every
+// hasPermission reports whether c holds perm. A session holds every
 // permission: roles are recorded in user_tenants.role but not enforced
 // (ADR-081). A key holds its type's permissions, whoever else is named on
 // the caller. A caller that is neither, or a key of an unknown type, holds
 // none.
-func HasPermission(c Caller, perm Permission) bool {
+func hasPermission(c Caller, perm Permission) bool {
 	if c.IsSession() {
 		return true
 	}

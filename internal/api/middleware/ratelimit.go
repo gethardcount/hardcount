@@ -215,7 +215,7 @@ func (rl *RateLimiter) bucketKey(key string) string {
 //     sign-in at all: bootstrap, /v1/auth and the public token pages. That
 //     way a flood with no sign-in cannot bypass the limiter.
 func rateLimitKey(r *http.Request) (string, error) {
-	if keyID := auth.KeyID(r.Context()); keyID != "" {
+	if keyID := auth.CallerOf(r.Context()).KeyID; keyID != "" {
 		return "key:" + keyID, nil
 	}
 	if tenantID := auth.TenantID(r.Context()); tenantID != "" {

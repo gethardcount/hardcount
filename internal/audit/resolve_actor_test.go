@@ -8,11 +8,8 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 )
 
-// TestResolveActor pins the actor-attribution priority that makes the audit log
-// able to answer "who did this?" — customer > user > api_key > system. The
-// load-bearing case is `user`: a dashboard operator on a session cookie
-// (auth.WithUserID, no key id) must resolve to actor_type='user', not the
-// 'system' fallback that the pre-fix KeyID-only path produced.
+// TestResolveActor pins who the audit log names: a customer first, then the
+// caller as auth.Caller.Actor names it, then system.
 func TestResolveActor(t *testing.T) {
 	cases := []struct {
 		name      string
@@ -45,16 +42,16 @@ func TestResolveActor(t *testing.T) {
 			wantActor: "system",
 		},
 		{
-			name:      "customer beats user beats key",
+			name:      "customer beats the caller",
 			ctx:       auth.WithCustomerActor(auth.WithCaller(context.Background(), auth.Caller{UserID: "usr_1", KeyID: "hc_key"}), "hc_cus_1"),
 			wantType:  "customer",
 			wantActor: "hc_cus_1",
 		},
 		{
-			name:      "user beats key when both present",
+			name:      "a key beats a user named on it",
 			ctx:       auth.WithCaller(context.Background(), auth.Caller{UserID: "usr_2", KeyID: "hc_key_2"}),
-			wantType:  "user",
-			wantActor: "usr_2",
+			wantType:  "api_key",
+			wantActor: "hc_key_2",
 		},
 	}
 	for _, tc := range cases {

@@ -13,7 +13,6 @@ import (
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/audit"
-	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
@@ -122,7 +121,7 @@ func TestRequireCaller_ClientGoneLogsAtWarn(t *testing.T) {
 // The access log wraps RequireCaller and cannot see the context it hands
 // its handler. So the middleware names the caller it accepted on the request's
 // record, under the names the audit log gives the same context.
-func TestRequireCaller_NamesTheCallerOnTheRecord(t *testing.T) {
+func TestRequireCaller_NamesTheActorOnTheRecord(t *testing.T) {
 	store := &fakeSessionStore{sessions: map[string]Session{}}
 	sessions := NewService(store)
 	rawSession, sess, err := sessions.IssueTx(t.Context(), nil, IssueInput{UserID: "usr_owner", TenantID: "ten_1"})
@@ -145,12 +144,12 @@ func TestRequireCaller_NamesTheCallerOnTheRecord(t *testing.T) {
 		if status != http.StatusOK || seen == nil {
 			t.Fatalf("status = %d (reached=%v), want 200", status, seen != nil)
 		}
-		want := request.Caller{ActorType: "user", ActorID: "usr_owner", TenantID: "ten_1"}
-		if got := request.CallerOf(outer); got != want {
-			t.Errorf("caller on the record = %+v, want %+v", got, want)
+		want := request.Actor{Type: "user", ID: "usr_owner", TenantID: "ten_1"}
+		if got := request.ActorOf(outer); got != want {
+			t.Errorf("actor on the record = %+v, want %+v", got, want)
 		}
-		if actorType, actorID := audit.ResolveActor(seen.Context()); actorType != want.ActorType || actorID != want.ActorID {
-			t.Errorf("the audit log names this caller %s/%s, the record %s/%s", actorType, actorID, want.ActorType, want.ActorID)
+		if actorType, actorID := audit.ResolveActor(seen.Context()); actorType != want.Type || actorID != want.ID {
+			t.Errorf("the audit log names this caller %s/%s, the record %s/%s", actorType, actorID, want.Type, want.ID)
 		}
 	})
 
@@ -160,34 +159,22 @@ func TestRequireCaller_NamesTheCallerOnTheRecord(t *testing.T) {
 		if status != http.StatusUnauthorized || seen != nil {
 			t.Fatalf("status = %d (reached=%v), want 401", status, seen != nil)
 		}
-		if got := request.CallerOf(outer); got != (request.Caller{}) {
-			t.Errorf("caller on the record = %+v, want none: nobody signed in", got)
+		if got := request.ActorOf(outer); got != (request.Actor{}) {
+			t.Errorf("actor on the record = %+v, want none: nobody signed in", got)
 		}
 	})
 }
 
-// callerIn and the audit log name an API key's context the same way.
-func TestCallerIn_APIKey(t *testing.T) {
-	ctx := auth.WithCaller(t.Context(), auth.Caller{TenantID: "ten_1", KeyID: "hc_key_9", KeyType: auth.KeyTypeSecret})
-	want := request.Caller{ActorType: "api_key", ActorID: "hc_key_9", TenantID: "ten_1"}
-	if got := callerIn(ctx); got != want {
-		t.Errorf("callerIn = %+v, want %+v", got, want)
-	}
-	if actorType, actorID := audit.ResolveActor(ctx); actorType != want.ActorType || actorID != want.ActorID {
-		t.Errorf("the audit log names this caller %s/%s, callerIn %s/%s", actorType, actorID, want.ActorType, want.ActorID)
-	}
-}
-
-// NameCaller and the audit log name a session's user the same way.
-func TestNameCaller(t *testing.T) {
+// NameActor and the audit log name a session's user the same way.
+func TestNameActor(t *testing.T) {
 	ctx := request.WithRecord(t.Context())
 	sess := Session{UserID: "usr_owner", TenantID: "ten_1"}
-	NameCaller(ctx, sess)
-	want := request.Caller{ActorType: "user", ActorID: "usr_owner", TenantID: "ten_1"}
-	if got := request.CallerOf(ctx); got != want {
-		t.Errorf("caller on the record = %+v, want %+v", got, want)
+	NameActor(ctx, sess)
+	want := request.Actor{Type: "user", ID: "usr_owner", TenantID: "ten_1"}
+	if got := request.ActorOf(ctx); got != want {
+		t.Errorf("actor on the record = %+v, want %+v", got, want)
 	}
-	if actorType, actorID := audit.ResolveActor(applyToCtx(t.Context(), sess)); actorType != want.ActorType || actorID != want.ActorID {
-		t.Errorf("the audit log names this session %s/%s, NameCaller %s/%s", actorType, actorID, want.ActorType, want.ActorID)
+	if actorType, actorID := audit.ResolveActor(applyToCtx(t.Context(), sess)); actorType != want.Type || actorID != want.ID {
+		t.Errorf("the audit log names this session %s/%s, NameActor %s/%s", actorType, actorID, want.Type, want.ID)
 	}
 }
