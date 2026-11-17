@@ -1,5 +1,5 @@
-// Package auth issues API keys and decides who may do what. Service creates,
-// validates, rotates and revokes keys, and Handler serves their routes.
+// Package auth issues API keys and decides who may do what. Service manages
+// the keys, and Handler serves their routes.
 // Caller is who a request acts as, a dashboard session or a key, and Require,
 // RequireMethod and RequireSession refuse a caller what it may not do.
 package auth
@@ -36,7 +36,7 @@ type Service struct {
 
 // AuditWriter writes an audit row on the caller's transaction, so the change
 // and its row commit or roll back together. *audit.Logger implements it;
-// auth cannot import audit, which imports auth to name the actor.
+// auth cannot import audit, which imports auth.
 type AuditWriter interface {
 	LogInTxFields(ctx context.Context, tx *sql.Tx, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
 }
@@ -72,8 +72,10 @@ func statusAt(key domain.APIKey, now time.Time) string {
 	}
 }
 
-// CreateKeyResult is a new key and its raw value. The raw value is not
-// stored, so no later answer can show it.
+// CreateKeyResult is a new key and its raw value. No later answer can show
+// the raw value: the table holds only its hash, and the routes that answer
+// with it are showsSecretOnce (internal/api/route_table.go), so the
+// idempotency layer keeps no copy.
 type CreateKeyResult struct {
 	Key    domain.APIKey `json:"key"`
 	RawKey string        `json:"raw_key"`

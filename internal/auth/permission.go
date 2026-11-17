@@ -16,7 +16,7 @@ const (
 	PermUsageRead  Permission = "usage:read"
 	PermUsageWrite Permission = "usage:write"
 	// PermUsageIngest sends usage events, one at a time, in a batch or from
-	// the LiteLLM callback.
+	// the LiteLLM callback. A backfill needs PermUsageWrite.
 	PermUsageIngest Permission = "usage:ingest"
 
 	PermInvoiceRead  Permission = "invoice:read"

@@ -68,7 +68,7 @@ create a live secret key. Only a session can:
 
 - manage team members (`/v1/members`);
 - change the account settings (`PUT /v1/settings`), which test and live
-  mode share. A key can read them;
+  mode share. A secret key can read them;
 - send the test email (`POST /v1/settings/email/test`), which goes to the
   signed-in member's own address.
 
@@ -91,9 +91,9 @@ without touching the others, and each has its own
   and API keys. It can read the account settings. Rotate it right away,
   with **Now** ([Rotate a key](../api-keys.md#rotate-a-key)).
 - **A usage-only key** can send usage for any customer in its mode. Usage
-  can raise a bill, and a negative quantity can lower one. It can read only
-  `GET /v1/whoami` and an event it sends again: a repeated `idempotency_key`
-  answers with the first event. Rotate it too.
+  can raise a bill, and a negative quantity can lower one. It can read
+  `GET /v1/whoami`. A repeated `idempotency_key` answers with the event
+  that first used that key in its mode. Rotate it too.
 
 A leaked secret test key exposes test data and the account settings, which
 both modes share. Test mode cannot charge a real card.
