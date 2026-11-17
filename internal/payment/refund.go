@@ -47,7 +47,7 @@ func (e *RefundError) OutcomeUnknown() bool { return e.Unknown }
 // RequestNotRun reports whether Stripe ran nothing for this request.
 func (e *RefundError) RequestNotRun() bool { return e.NotRun }
 
-// OperatorSafeMessage implements respond.SafeMessageError (ADR-026): a
+// OperatorSafeMessage implements errs.SafeMessageError (ADR-026): a
 // curated sentence, never Stripe's raw text.
 func (e *RefundError) OperatorSafeMessage() string {
 	if e.Unknown {
