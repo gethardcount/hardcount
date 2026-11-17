@@ -42,10 +42,10 @@ func TenantID(ctx context.Context) string {
 	return CallerOf(ctx).TenantID
 }
 
-// WithTenantID returns ctx with tenantID as the caller's tenant, for code no
-// session or key authenticated: a background job, or a public route that
-// finds the tenant itself, sets it before calling code that needs the
-// tenant, such as the per-tenant Stripe client.
+// WithTenantID returns ctx with tenantID as the caller's tenant; the rest of
+// the caller is kept. A background job, or a public route that finds the
+// tenant itself, sets it before calling code that needs the tenant, such as
+// the per-tenant Stripe client.
 func WithTenantID(ctx context.Context, tenantID string) context.Context {
 	c := CallerOf(ctx)
 	c.TenantID = tenantID
@@ -66,9 +66,9 @@ func UserID(ctx context.Context) string {
 }
 
 // WithUserID returns ctx with id as the caller's user. The account routes
-// that session.RequireCaller does not guard (a sign-in, a sign-out, an
-// accepted invitation, a password reset) set it, so their audit row names
-// the user.
+// that session.RequireCaller does not guard (a sign-in, a sign-out, a mode
+// switch, an accepted invitation, a password reset) set it, so their audit
+// row names the user. The result counts as that user's session.
 func WithUserID(ctx context.Context, id string) context.Context {
 	c := CallerOf(ctx)
 	c.UserID = id
