@@ -54,20 +54,6 @@ func NewService(db *postgres.DB, audit AuditWriter) *Service {
 	return &Service{db: db, store: store{db: db}, audit: audit}
 }
 
-// inTenantTx runs fn in a transaction scoped to tenantID and the mode ctx
-// carries, and commits it when fn succeeds.
-func (s *Service) inTenantTx(ctx context.Context, tenantID string, fn func(tx *sql.Tx) error) error {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return err
-	}
-	defer postgres.Rollback(tx)
-	if err := fn(tx); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
 // auditKeyChange writes the audit row of a change to key on tx: the key's id
 // and name, and metadata, which never holds the raw key.
 func (s *Service) auditKeyChange(ctx context.Context, tx *sql.Tx, action string, key domain.APIKey, metadata map[string]any) error {
@@ -113,7 +99,7 @@ type CreateKeyInput struct {
 // returns it with its raw value. checkCreateInput says what it refuses.
 func (s *Service) CreateKey(ctx context.Context, tenantID string, input CreateKeyInput) (CreateKeyResult, error) {
 	var result CreateKeyResult
-	err := s.inTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+	err := s.db.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
 		var err error
 		result, err = s.CreateKeyTx(ctx, tx, tenantID, input)
 		return err
@@ -278,7 +264,7 @@ func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey
 // still sign in and make a new one (ADR-011).
 func (s *Service) RevokeKey(ctx context.Context, tenantID, id string) (domain.APIKey, error) {
 	var key domain.APIKey
-	err := s.inTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+	err := s.db.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
 		var err error
 		if key, err = s.store.revoke(ctx, tx, id); err != nil {
 			return err
@@ -329,7 +315,7 @@ func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input Rota
 	}
 
 	var result RotateKeyResult
-	err := s.inTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+	err := s.db.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
 		// Row-level security finds the key only in the caller's mode, so the
 		// replacement, minted on the same transaction, is in the old key's mode.
 		old, err := s.store.getForUpdate(ctx, tx, id)
