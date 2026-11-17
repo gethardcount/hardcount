@@ -46,6 +46,21 @@ func HashID(raw string) string {
 	return hex.EncodeToString(sum[:])
 }
 
+// wellFormed reports whether raw has the shape newRawID mints: 64 lowercase
+// hex characters. A value of any other shape cannot be a session, so it is
+// treated as no cookie, with no database read.
+func wellFormed(raw string) bool {
+	if len(raw) != 64 {
+		return false
+	}
+	for i := 0; i < len(raw); i++ {
+		if c := raw[i]; (c < '0' || c > '9') && (c < 'a' || c > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
 // newRawID mints a 256-bit random id encoded as 64 hex chars.
 func newRawID() (string, error) {
 	b := make([]byte, 32)

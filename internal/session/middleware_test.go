@@ -45,6 +45,9 @@ func (f *fakeSessionStore) SetLivemodeWith(context.Context, string, bool, func(*
 	return Session{}, false, nil
 }
 
+// unknownSession is a well-formed session id that names no session.
+var unknownSession = strings.Repeat("ab", 32)
+
 func sessionRequest(cookie string) *http.Request {
 	req := httptest.NewRequest("GET", "/", nil)
 	req.AddCookie(&http.Cookie{Name: CookieName, Value: cookie})
@@ -87,7 +90,7 @@ func TestRequireCaller_SessionStoreFails(t *testing.T) {
 			t.Cleanup(func() { slog.SetDefault(prev) })
 
 			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, sessionRequest("sess_deadbeef").WithContext(tc.ctx))
+			handler.ServeHTTP(rec, sessionRequest(unknownSession).WithContext(tc.ctx))
 
 			if rec.Code != http.StatusServiceUnavailable {
 				t.Errorf("status = %d, want 503 (no fall-through to the API key)", rec.Code)
@@ -100,6 +103,15 @@ func TestRequireCaller_SessionStoreFails(t *testing.T) {
 				t.Errorf("logged %v %q, want %s %q", entry["level"], entry["msg"], tc.want, "session resolve unavailable")
 			}
 		})
+	}
+
+	// A cookie of the wrong shape is no cookie: it is never looked up, so the
+	// failing store is not reached and the answer is the 401 for no
+	// credential, not the 503.
+	rec := httptest.NewRecorder()
+	RequireCaller(svc, nil)(http.NotFoundHandler()).ServeHTTP(rec, sessionRequest("sess_deadbeef"))
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("a cookie of the wrong shape: status = %d, want 401 with no lookup", rec.Code)
 	}
 }
 
@@ -139,7 +151,7 @@ func TestSessionUserNamedOnTheRecord(t *testing.T) {
 	// X-API-Key is none (with a nil key service, reading it would panic).
 	keyInOtherHeader := httptest.NewRequest("GET", "/", nil)
 	keyInOtherHeader.Header.Set("X-API-Key", "hc_secret_test_"+strings.Repeat("0", 64))
-	for name, req := range map[string]*http.Request{"unknown cookie": sessionRequest("sess_unknown"), "key in X-API-Key": keyInOtherHeader} {
+	for name, req := range map[string]*http.Request{"unknown cookie": sessionRequest(unknownSession), "key in X-API-Key": keyInOtherHeader} {
 		seen = nil
 		record, rec := recordOf(RequireCaller(sessions, nil)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { seen = r })), req)
 		if rec.Code != http.StatusUnauthorized || seen != nil || !strings.Contains(rec.Body.String(), "missing credentials") {

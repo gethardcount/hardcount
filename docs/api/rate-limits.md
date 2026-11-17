@@ -30,9 +30,13 @@ After that, one request's allowance comes back every period ÷ limit: every
 60 ms at 1,000 a minute, every second at 60 a minute.
 
 **A request with a bad key is refused before it is counted.** It gets `401`
-(see [Authentication](authentication.md#when-a-key-is-refused)). Nothing in
-Hardcount limits repeated bad keys from one address; if you need that, put
-the limit in front of Hardcount, in your load balancer or proxy.
+(see [Authentication](authentication.md#when-a-key-is-refused)). A key or
+session cookie of the wrong shape is refused without reading the database;
+a well-formed one that matches nothing costs one read. Hardcount does not
+limit how many requests one address sends before they are authenticated:
+on `/v1`, or on the Stripe and Postmark webhooks under `/v1/webhooks`,
+which are checked by their signature or password. Put a per-address limit
+on both in front of Hardcount, in your load balancer or proxy.
 
 ## The headers
 

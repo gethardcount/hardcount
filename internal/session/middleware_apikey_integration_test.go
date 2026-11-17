@@ -76,7 +76,7 @@ func TestRequireCaller_APIKey(t *testing.T) {
 	// same request: the request is the key's.
 	t.Run("a stale cookie and a valid key", func(t *testing.T) {
 		req := keyRequest(created.RawKey)
-		req.AddCookie(&http.Cookie{Name: CookieName, Value: "sess_ended"})
+		req.AddCookie(&http.Cookie{Name: CookieName, Value: unknownSession})
 		rec, seen, _ := serve(keys, req)
 		if rec.Code != http.StatusOK || seen == nil {
 			t.Fatalf("got %d %s, want 200: the stale cookie blocked the key", rec.Code, rec.Body.String())
@@ -152,7 +152,8 @@ func TestAuthenticate_NamesOneCaller(t *testing.T) {
 			"expired-"+tenantID+"@example.com").Scan(&userID); err != nil {
 			t.Fatalf("insert user: %v", err)
 		}
-		expired := Session{IDHash: HashID("sess_expired"), UserID: userID, TenantID: tenantID, CreatedAt: expires.Add(-time.Hour), ExpiresAt: expires}
+		rawExpired := strings.Repeat("ef", 32)
+		expired := Session{IDHash: HashID(rawExpired), UserID: userID, TenantID: tenantID, CreatedAt: expires.Add(-time.Hour), ExpiresAt: expires}
 		if err := store.InsertTx(t.Context(), tx, expired); err != nil {
 			t.Fatalf("insert session: %v", err)
 		}
@@ -161,7 +162,7 @@ func TestAuthenticate_NamesOneCaller(t *testing.T) {
 		}
 
 		req := httptest.NewRequest("GET", "/", nil)
-		req.AddCookie(&http.Cookie{Name: CookieName, Value: "sess_expired"})
+		req.AddCookie(&http.Cookie{Name: CookieName, Value: rawExpired})
 		if _, err := Authenticate(req, NewService(store), keys); !errors.Is(err, ErrNoCredentials) {
 			t.Errorf("an expired session: err = %v, want ErrNoCredentials", err)
 		}

@@ -53,12 +53,13 @@ func (s *Service) IssueTx(ctx context.Context, tx *sql.Tx, in IssueInput) (rawID
 	return rawID, sess, nil
 }
 
-// Resolve returns the live session for a raw cookie value. An empty, unknown,
-// revoked or expired value returns ErrNotFound, which Authenticate treats as
+// Resolve returns the live session for a raw cookie value. A value of the
+// wrong shape (wellFormed), an unknown one, or a revoked or expired session
+// returns ErrNotFound, which Authenticate treats as
 // no cookie, so these cases cannot be told apart and session ids cannot be
 // enumerated.
 func (s *Service) Resolve(ctx context.Context, rawID string) (Session, error) {
-	if rawID == "" {
+	if !wellFormed(rawID) {
 		return Session{}, ErrNotFound
 	}
 	return s.store.GetByIDHash(ctx, HashID(rawID), time.Now().UTC())
@@ -71,7 +72,7 @@ func (s *Service) Resolve(ctx context.Context, rawID string) (Session, error) {
 // ended session and whether a live one was found; with none, nothing changes
 // and then is not called.
 func (s *Service) End(ctx context.Context, rawID string, then func(tx *sql.Tx, sess Session) error) (Session, bool, error) {
-	if rawID == "" {
+	if !wellFormed(rawID) {
 		return Session{}, false, nil
 	}
 	return s.store.EndWith(ctx, HashID(rawID), then)
@@ -82,7 +83,7 @@ func (s *Service) End(ctx context.Context, rawID string, then func(tx *sql.Tx, s
 // It does not commit. tx must be a bypass transaction, to reach the session
 // whoever it belongs to, in either mode.
 func (s *Service) EndTx(ctx context.Context, tx *sql.Tx, rawID string) (bool, error) {
-	if rawID == "" {
+	if !wellFormed(rawID) {
 		return false, nil
 	}
 	return s.store.EndTx(ctx, tx, HashID(rawID))
@@ -110,7 +111,7 @@ func (s *Service) EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, tenant
 // session already in that mode is returned as it is, and then is not called:
 // nothing changed, so there is nothing to record.
 func (s *Service) SetLivemode(ctx context.Context, rawID string, livemode bool, then func(tx *sql.Tx, sess Session) error) (Session, bool, error) {
-	if rawID == "" {
+	if !wellFormed(rawID) {
 		return Session{}, false, nil
 	}
 	return s.store.SetLivemodeWith(ctx, HashID(rawID), livemode, then)
