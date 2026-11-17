@@ -107,7 +107,7 @@ func clientIPContext(t *testing.T, ctx context.Context, ip string) context.Conte
 // and carries the request id that joins it to the request's audit row.
 func TestAccessLog_NamesTheCaller(t *testing.T) {
 	line := serveThroughLogger(t, func(ctx context.Context) {
-		request.SetCaller(ctx, request.Caller{ActorType: "user", ActorID: "hc_usr_7", TenantID: "hc_ten_42"})
+		request.SetActor(ctx, request.Actor{Type: "user", ID: "hc_usr_7", TenantID: "hc_ten_42"})
 	})
 
 	for key, want := range map[string]string{
@@ -149,7 +149,7 @@ func TestAccessLog_NobodySignedIn(t *testing.T) {
 // erase data. The line carries the actor's id only.
 func TestAccessLog_NeverLogsAnActorName(t *testing.T) {
 	line := serveThroughLogger(t, func(ctx context.Context) {
-		request.SetCaller(ctx, request.Caller{ActorType: "user", ActorID: "hc_usr_7", TenantID: "hc_ten_1"})
+		request.SetActor(ctx, request.Actor{Type: "user", ID: "hc_usr_7", TenantID: "hc_ten_1"})
 	})
 	for k, v := range line {
 		if strings.Contains(v, "@") {

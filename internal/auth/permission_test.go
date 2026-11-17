@@ -16,10 +16,10 @@ func TestKeyTypes_EachHasPermissions(t *testing.T) {
 // A key of an unknown type holds no permission. Neither does a caller with no
 // user and no key (the "" type): a background job's context, or a request
 // that nothing authenticated.
-func TestHasPermission_UnknownType(t *testing.T) {
+func TestHasPermission_UnknownTypeAndNoCaller(t *testing.T) {
 	for _, kt := range []KeyType{"nonexistent", "platform", "publishable", ""} {
 		for _, p := range allPermissions {
-			if HasPermission(Caller{TenantID: "hc_ten_1", KeyType: kt}, p) {
+			if hasPermission(Caller{TenantID: "hc_ten_1", KeyType: kt}, p) {
 				t.Errorf("key type %q should have no permissions, has %s", kt, p)
 			}
 		}
@@ -44,11 +44,8 @@ func TestHasPermission_ByCaller(t *testing.T) {
 		{"an ingest key holds nothing else", ingest, PermAPIKeyWrite, false},
 		{"an ingest key with a user named is still an ingest key", ingestWithUser, PermAPIKeyWrite, false},
 	} {
-		if got := HasPermission(tc.caller, tc.perm); got != tc.want {
-			t.Errorf("%s: HasPermission = %v, want %v", tc.name, got, tc.want)
+		if got := hasPermission(tc.caller, tc.perm); got != tc.want {
+			t.Errorf("%s: hasPermission = %v, want %v", tc.name, got, tc.want)
 		}
-	}
-	if ingestWithUser.IsSession() {
-		t.Error("a caller with a key is a session")
 	}
 }

@@ -279,12 +279,12 @@ func fingerprintRequest(method, uri, caller string, body []byte) []byte {
 // and not the session, so a person who signs in again and retries is the
 // same caller. ok is false unless exactly one of the two is set.
 func requestCaller(ctx context.Context) (caller string, ok bool) {
-	keyID, userID := auth.KeyID(ctx), auth.UserID(ctx)
+	c := auth.CallerOf(ctx)
 	switch {
-	case keyID != "" && userID == "":
-		return "key:" + keyID, true
-	case userID != "" && keyID == "":
-		return "user:" + userID, true
+	case c.KeyID != "" && c.UserID == "":
+		return "key:" + c.KeyID, true
+	case c.IsSession():
+		return "user:" + c.UserID, true
 	}
 	return "", false
 }

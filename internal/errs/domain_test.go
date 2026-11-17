@@ -8,7 +8,7 @@ import (
 
 func TestDomainError_Error(t *testing.T) {
 	t.Run("without cause", func(t *testing.T) {
-		err := New("test_code", "something went wrong")
+		err := &DomainError{Message: "something went wrong"}
 		if err.Error() != "something went wrong" {
 			t.Errorf("got %q", err.Error())
 		}
@@ -16,7 +16,7 @@ func TestDomainError_Error(t *testing.T) {
 
 	t.Run("with cause", func(t *testing.T) {
 		cause := fmt.Errorf("db connection failed")
-		err := Wrap(cause, "db_error", "database unavailable")
+		err := &DomainError{Message: "database unavailable", Cause: cause}
 		if err.Error() != "database unavailable: db connection failed" {
 			t.Errorf("got %q", err.Error())
 		}
@@ -25,7 +25,7 @@ func TestDomainError_Error(t *testing.T) {
 
 func TestDomainError_Unwrap(t *testing.T) {
 	cause := fmt.Errorf("original error")
-	err := Wrap(cause, "code", "wrapped")
+	err := &DomainError{Message: "wrapped", Cause: cause}
 
 	if !errors.Is(err, cause) {
 		t.Error("Unwrap should return cause")
@@ -34,14 +34,14 @@ func TestDomainError_Unwrap(t *testing.T) {
 
 func TestCode(t *testing.T) {
 	t.Run("extracts code from DomainError", func(t *testing.T) {
-		err := New("billing_setup_incomplete", "needs stripe")
-		if Code(err) != "billing_setup_incomplete" {
+		err := Invalid("url", "must start with https://").WithCode("url_not_https")
+		if Code(err) != "url_not_https" {
 			t.Errorf("got %q", Code(err))
 		}
 	})
 
 	t.Run("extracts code from wrapped DomainError", func(t *testing.T) {
-		inner := New("inner_code", "inner")
+		inner := NotFound("plan").WithCode("inner_code")
 		outer := fmt.Errorf("outer: %w", inner)
 		if Code(outer) != "inner_code" {
 			t.Errorf("got %q", Code(outer))

@@ -41,7 +41,7 @@ func (c SessionRequired) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // Require returns middleware that answers 403 unless the caller holds perm
-// (HasPermission).
+// (hasPermission).
 func Require(perm Permission) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return PermissionCheck{read: perm, write: perm, next: next}
@@ -51,7 +51,7 @@ func Require(perm Permission) func(http.Handler) http.Handler {
 // permitted reports whether the caller holds perm, and answers 403 when it
 // does not.
 func permitted(w http.ResponseWriter, r *http.Request, perm Permission) bool {
-	if HasPermission(CallerOf(r.Context()), perm) {
+	if hasPermission(CallerOf(r.Context()), perm) {
 		return true
 	}
 	respond.Forbidden(w, r, "insufficient permissions: this key type does not have "+string(perm)+" access")

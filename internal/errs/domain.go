@@ -54,16 +54,6 @@ func (e *DomainError) Is(target error) bool {
 	return e.Kind == target
 }
 
-// New returns a DomainError with code and message, and no Kind.
-func New(code, message string) *DomainError {
-	return &DomainError{Code: code, Message: message}
-}
-
-// Wrap returns a DomainError with code and message that wraps cause.
-func Wrap(cause error, code, message string) *DomainError {
-	return &DomainError{Code: code, Message: message, Cause: cause}
-}
-
 // Code returns the Code of a DomainError anywhere in the error chain, or "".
 func Code(err error) string {
 	var de *DomainError
@@ -281,15 +271,4 @@ var (
 const (
 	CodeInvoiceBillingPeriodTaken  = "invoice_billing_period_taken"
 	CodeInvoiceThresholdCycleTaken = "invoice_threshold_cycle_taken"
-)
-
-// Error code constants.
-const (
-	CodeBillingSetupIncomplete = "billing_setup_incomplete"
-	CodeInvoiceFetchFailed     = "invoice_fetch_failed"
-	CodePaymentRetryFailed     = "payment_retry_failed"
-	CodeSubscriptionInvalid    = "subscription_invalid"
-	CodePricingUnsupported     = "pricing_unsupported"
-	CodeUsageSyncFailed        = "usage_sync_failed"
-	CodeAdapterNotConfigured   = "adapter_not_configured"
 )

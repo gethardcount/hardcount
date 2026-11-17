@@ -4,7 +4,6 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
-	"strings"
 
 	"github.com/go-chi/chi/v5"
 
@@ -62,7 +61,7 @@ func FromError(w http.ResponseWriter, r *http.Request, err error, resource strin
 
 	case errors.Is(err, errs.ErrNotFound):
 		if code != "" {
-			NotFoundCoded(w, r, code, err.Error())
+			NotFoundCoded(w, r, code, ownMessage(err))
 		} else {
 			NotFound(w, r, resource)
 		}
@@ -97,13 +96,6 @@ func FromError(w http.ResponseWriter, r *http.Request, err error, resource strin
 		ValidationCoded(w, r, field, code, err.Error())
 
 	default:
-		// A DomainError with an explicit code is treated as validation. Such
-		// errors are business-rule refusals, like billing_setup_incomplete.
-		if code != "" {
-			ValidationCoded(w, r, field, code, err.Error())
-			return
-		}
-
 		// An error that opts into its own operator-safe rendering, such as a
 		// PaymentError with a DeclineCode, has a curated message, so show it.
 		// The status is 502 because the request reached an upstream provider
@@ -123,35 +115,9 @@ func FromError(w http.ResponseWriter, r *http.Request, err error, resource strin
 			return
 		}
 
-		// Legacy fallback, for services that still return fmt.Errorf("... is
-		// required") without wrapping errs.ErrValidation. The match is
-		// conservative on purpose (anchored prefixes, not substrings). A
-		// database error containing "invalid" must not become a 422 that
-		// leaks its raw message to the client.
-		//
-		// The match still classifies by text, so a server fault whose
-		// message happens to match is answered as a 422 carrying that
-		// message. The warning makes every use visible, so the remaining
-		// sites can be found and given typed errors. It logs the matched
-		// route pattern, not the path, because some public paths carry a
-		// token.
-		//
-		// TODO: migrate every service-layer validation site to wrap
-		// errs.ErrValidation, then delete this fallback. See
-		// internal/errs/domain.go for the pattern.
-		if looksLikeValidationError(err.Error()) {
-			slog.WarnContext(r.Context(), "untyped error answered as 422 by message text",
-				"error", err,
-				"resource", resource,
-				"method", r.Method,
-				"route", routePattern(r),
-			)
-			Validation(w, r, err.Error())
-			return
-		}
-
-		// Default: log the full error on the server and return a generic
-		// body. This is the sanitizing boundary: raw database, Stripe and Go
+		// Any other error has no kind, so it is a server fault whatever its
+		// text says, and a DomainError with a code but no kind is one too.
+		// Log it and return a generic body: raw database, Stripe and Go
 		// errors never reach operators. Support finds the full error in the
 		// logs by the request ID in the response header.
 		slog.Log(r.Context(), logging.ErrorLevel(r.Context(), err), "unhandled error",
@@ -182,6 +148,17 @@ func unavailable(w http.ResponseWriter, r *http.Request, err error, code, resour
 	Error(w, r, http.StatusServiceUnavailable, code, message)
 }
 
+// ownMessage returns the message of the DomainError in err's chain, without
+// the prefixes its callers added when they wrapped it: those name internal
+// steps and ids. With no DomainError it returns err.Error().
+func ownMessage(err error) string {
+	var de *errs.DomainError
+	if errors.As(err, &de) && de.Message != "" {
+		return de.Message
+	}
+	return err.Error()
+}
+
 // routePattern returns the matched chi route pattern (for example
 // "/v1/api-keys/{id}/rotate"), or "" when the request did not come through a
 // chi router.
@@ -190,39 +167,4 @@ func routePattern(r *http.Request) string {
 		return rctx.RoutePattern()
 	}
 	return ""
-}
-
-// looksLikeValidationError uses anchored prefixes, not substrings, to
-// classify service-layer validation messages. A substring match would catch
-// database errors like `pq: invalid input syntax for type uuid` and leak
-// them as 422 bodies. Anchoring on the prefix limits false positives to
-// services that start their error message with these phrases, a narrow and
-// intentional pattern.
-func looksLikeValidationError(msg string) bool {
-	prefixes := []string{
-		"invalid ",
-		"missing ",
-		"cannot ",
-		"can only ",
-	}
-	msgLower := strings.ToLower(msg)
-	for _, p := range prefixes {
-		if strings.HasPrefix(msgLower, p) {
-			return true
-		}
-	}
-	// The common "<field> is required" and "<field> must be ..." shapes of
-	// Go service errors.
-	substrings := []string{
-		" is required",
-		" must be ",
-		" can only ",
-		" at least ",
-	}
-	for _, s := range substrings {
-		if strings.Contains(msgLower, s) {
-			return true
-		}
-	}
-	return false
 }

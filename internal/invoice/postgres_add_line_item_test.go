@@ -2,6 +2,7 @@ package invoice_test
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"testing"
 	"time"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/customer"
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/pricing"
@@ -211,8 +213,9 @@ func TestAddLineItemAtomicAudited_RejectsNonDraft(t *testing.T) {
 		AmountCents:      500,
 		TotalAmountCents: 500,
 	}, nil)
-	if err == nil {
-		t.Fatal("expected error adding line item to finalized invoice, got nil")
+	// A validation error: the route answers it 422 with this message.
+	if !errors.Is(err, errs.ErrValidation) || err.Error() != "can only add line items to draft invoices, current status: finalized" {
+		t.Fatalf("err = %v, want a validation error naming the status", err)
 	}
 }
 

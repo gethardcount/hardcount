@@ -279,7 +279,7 @@ func (h *Handler) setMode(w http.ResponseWriter, r *http.Request) {
 		respond.Unauthorized(w, r, "invalid or expired session")
 		return
 	}
-	session.NameCaller(r.Context(), sess)
+	session.NameActor(r.Context(), sess)
 
 	respond.JSON(w, r, http.StatusOK, map[string]any{
 		"livemode": sess.Livemode,
@@ -322,7 +322,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if found {
-		session.NameCaller(r.Context(), sess)
+		session.NameActor(r.Context(), sess)
 	} else {
 		// An unknown, ended or expired session: nothing changed, nothing to
 		// record.

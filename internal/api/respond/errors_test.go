@@ -12,8 +12,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"github.com/gethardcount/hardcount/internal/errs"
 )
 
@@ -43,24 +41,36 @@ func TestFromError_AlreadyExists(t *testing.T) {
 	}
 }
 
-func TestFromError_ValidationMessage(t *testing.T) {
+// An error with no kind is a server fault, even when its text reads like a
+// validation message: 500 internal_error, a generic body, and the error in the
+// log at ERROR.
+func TestFromError_UntypedErrorIsServerFault(t *testing.T) {
 	cases := []string{
+		"amount must be at least 50",
 		"customer_id is required",
-		"quantity must be positive",
-		"one of at_period_end or cancel_at must be set",
 		"cannot void a paid invoice",
 		"invalid billing_interval",
 	}
-
 	for _, msg := range cases {
 		t.Run(msg, func(t *testing.T) {
+			buf := captureLogs(t)
 			rec := httptest.NewRecorder()
 			req := httptest.NewRequest("POST", "/", nil)
 
 			FromError(rec, req, fmt.Errorf("%s", msg), "resource")
 
-			if rec.Code != http.StatusUnprocessableEntity {
-				t.Errorf("'%s' → status: got %d, want 422", msg, rec.Code)
+			if rec.Code != http.StatusInternalServerError {
+				t.Fatalf("status: got %d, want 500", rec.Code)
+			}
+			if body := decodeError(t, rec); body.Code != "internal_error" || strings.Contains(body.Message, msg) {
+				t.Errorf("body: got code %q message %q, want internal_error and a generic message", body.Code, body.Message)
+			}
+			var entry map[string]any
+			if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
+				t.Fatalf("want exactly one JSON log line, got %q: %v", buf.String(), err)
+			}
+			if entry["level"] != "ERROR" || entry["msg"] != "unhandled error" || entry["error"] != msg {
+				t.Errorf("logged %v %q error=%v, want ERROR \"unhandled error\" error=%q", entry["level"], entry["msg"], entry["error"], msg)
 			}
 		})
 	}
@@ -132,46 +142,7 @@ func TestFromError_ClientGoneLogsAtWarn(t *testing.T) {
 	}
 }
 
-// The message-text fallback is the one branch that answers from an untyped
-// error's text, so each use must leave a log line naming the route.
-func TestFromError_TextFallbackLogsWarning(t *testing.T) {
-	buf := captureLogs(t)
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/v1/things/tok_123", nil)
-
-	router := chi.NewRouter()
-	router.Post("/v1/things/{id}", func(w http.ResponseWriter, r *http.Request) {
-		FromError(w, r, fmt.Errorf("quantity must be positive"), "thing")
-	})
-	router.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Fatalf("status: got %d, want 422", rec.Code)
-	}
-	var entry map[string]any
-	if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
-		t.Fatalf("want exactly one JSON log line, got %q: %v", buf.String(), err)
-	}
-	if entry["level"] != "WARN" {
-		t.Errorf("level: got %v, want WARN", entry["level"])
-	}
-	for k, want := range map[string]string{
-		"error":    "quantity must be positive",
-		"resource": "thing",
-		"method":   "POST",
-		"route":    "/v1/things/{id}",
-	} {
-		if entry[k] != want {
-			t.Errorf("log attr %s: got %v, want %q", k, entry[k], want)
-		}
-	}
-	// The path can carry a token on public routes; only the pattern is logged.
-	if strings.Contains(buf.String(), "tok_123") {
-		t.Errorf("log line carries the raw path: %s", buf.String())
-	}
-}
-
-// A typed validation error does not go through the fallback and logs nothing.
+// A typed validation error is the client's mistake, so it logs nothing.
 func TestFromError_TypedValidationDoesNotLog(t *testing.T) {
 	buf := captureLogs(t)
 	rec := httptest.NewRecorder()
@@ -187,15 +158,40 @@ func TestFromError_TypedValidationDoesNotLog(t *testing.T) {
 	}
 }
 
-func TestFromError_DomainError(t *testing.T) {
+// A DomainError with a code and no kind has no status of its own, so it is a
+// server fault: its code and message stay in the log.
+func TestFromError_CodeWithoutKindIsServerFault(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest("POST", "/", nil)
 
-	err := errs.New("billing_setup_incomplete", "stripe connection required")
+	err := &errs.DomainError{Code: "billing_setup_incomplete", Message: "stripe connection required"}
 	FromError(rec, req, err, "billing")
 
-	if rec.Code != http.StatusUnprocessableEntity {
-		t.Errorf("status: got %d, want 422", rec.Code)
+	if rec.Code != http.StatusInternalServerError {
+		t.Errorf("status: got %d, want 500", rec.Code)
+	}
+	if strings.Contains(rec.Body.String(), "stripe connection required") {
+		t.Errorf("the body carries the error's message: %s", rec.Body.String())
+	}
+	if body := decodeError(t, rec); body.Code != "internal_error" {
+		t.Errorf("code: got %q, want internal_error", body.Code)
+	}
+}
+
+// A wrapped NotFound answers with its own message. The prefixes its callers
+// added name internal steps and ids, and stay in the log.
+func TestFromError_WrappedNotFoundAnswersItsOwnMessage(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest("GET", "/", nil)
+
+	err := fmt.Errorf("get current plan sub_123: %w", errs.NotFound("plan"))
+	FromError(rec, req, err, "subscription")
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status: got %d, want 404", rec.Code)
+	}
+	if body := decodeError(t, rec); body.Code != "not_found" || body.Message != "plan not found" {
+		t.Errorf("body: got code %q message %q, want not_found and %q", body.Code, body.Message, "plan not found")
 	}
 }
 

@@ -18,8 +18,9 @@ func (s *Server) handleWhoami(w http.ResponseWriter, req *http.Request) {
 		respond.FromError(w, req, err, "whoami")
 		return
 	}
+	c := auth.CallerOf(ctx)
 	out := map[string]any{
-		"tenant_id": auth.TenantID(ctx),
+		"tenant_id": c.TenantID,
 		"livemode":  live,
 		// can_email_setup_links lets the invoice page offer "Email a payment-method link".
 		"can_email_setup_links": s.setupLinksEmailable,
@@ -28,18 +29,18 @@ func (s *Server) handleWhoami(w http.ResponseWriter, req *http.Request) {
 		// off" notice instead of repeating it on every record.
 		"smtp_configured": s.EmailSender.IsConfigured(),
 	}
-	if uid := auth.UserID(ctx); uid != "" {
-		u, err := s.userSvc.GetByID(ctx, uid)
+	if c.UserID != "" {
+		u, err := s.userSvc.GetByID(ctx, c.UserID)
 		if err != nil {
 			respond.FromError(w, req, err, "whoami")
 			return
 		}
-		out["user_id"] = uid
+		out["user_id"] = c.UserID
 		out["email"] = u.Email
 	}
-	if kid := auth.KeyID(ctx); kid != "" {
-		out["key_id"] = kid
-		out["key_type"] = string(auth.CallerOf(ctx).KeyType)
+	if c.KeyID != "" {
+		out["key_id"] = c.KeyID
+		out["key_type"] = string(c.KeyType)
 	}
 	respond.JSON(w, req, http.StatusOK, out)
 }

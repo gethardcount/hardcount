@@ -441,27 +441,21 @@ func (l *Logger) LogInTx(ctx context.Context, tx *sql.Tx, e Entry) error {
 }
 
 // ResolveActor determines who performed an audited action from the request
-// context, in priority order:
-//   - customer — a stamped customer actor (public token flows, auth.WithCustomerActor)
-//   - user     — a dashboard operator on a session cookie (auth.UserID, ADR-011)
-//   - api_key  — an SDK / curl caller on a Bearer hc_… key (auth.KeyID)
-//   - system   — background workers / cron with no request identity
+// context, in this order:
+//   - customer: a stamped customer actor (public token flows, auth.WithCustomerActor)
+//   - the caller, as auth.Caller.Actor names it: user for a session, api_key
+//     for any caller with a key
+//   - system: a background job, with no caller
 //
 // A new kind must also be added to every actor_type CHECK (audit_log,
 // email_outbox, invoice_charge_attempts) and to the contexts in
 // TestResolveActorKinds_MatchEveryActorCheck.
-//
-// Every audit write path calls this, so the actor resolves identically on all of
-// them: the post-hoc Logger.Log and the in-tx LogInTx.
 func ResolveActor(ctx context.Context) (actorType, actorID string) {
 	if custID := auth.CustomerActorID(ctx); custID != "" {
 		return "customer", custID
 	}
-	if userID := auth.UserID(ctx); userID != "" {
-		return "user", userID
-	}
-	if keyID := auth.KeyID(ctx); keyID != "" {
-		return "api_key", keyID
+	if kind, id := auth.CallerOf(ctx).Actor(); kind != "" {
+		return kind, id
 	}
 	return "system", "system"
 }
