@@ -43,7 +43,7 @@ func SecurityHeaders(appEnv string) func(http.Handler) http.Handler {
 // data and costs database queries, and an address allowlist in front of it
 // stops holding once a load balancer makes every caller a private address.
 // It refuses the scrape rather than the boot, so an install that does not
-// scrape metrics keeps billing through the upgrade. appEnv is
+// scrape metrics still starts. appEnv is
 // config.Config.Env, and token is METRICS_TOKEN (config.Server.MetricsToken).
 func MetricsAuth(appEnv, token string, next http.Handler) http.Handler {
 	prod := appEnv == "production"

@@ -1,6 +1,5 @@
-// Package middleware provides HTTP middleware for the Hardcount API server.
-// It includes rate limiting, idempotency keys, Prometheus metrics, CORS and
-// cursor-based pagination helpers.
+// Package middleware holds the HTTP middleware of the API server. "The path
+// of a request" in docs/architecture.md says where each one runs and why.
 package middleware
 
 import (
@@ -11,28 +10,25 @@ import (
 	"github.com/rs/cors"
 )
 
-// CORS lets browser pages on the allowed origins call the API and read the
-// response. github.com/rs/cors answers preflights and sets the headers; Hardcount
-// only decides which origins match.
+// CORS lets browser pages on the allowed origins call the API and read its
+// answers. github.com/rs/cors answers preflights and sets the headers;
+// Hardcount decides which origins match. allowedOrigins comes from
+// config.ParseCORSOrigins:
 //
-// allowedOrigins comes from config.ParseCORSOrigins, the parser behind the
-// boot check. Two shapes:
+//   - A bare "*" allows every origin without credentials, so browsers send
+//     no sign-in cookie: another site's page can call the API with a key but
+//     cannot read a signed-in operator's data.
+//   - Otherwise each listed origin matches as in CSRFGuard (originSet) and
+//     may send the sign-in cookie, so a dashboard on another address can
+//     sign in.
 //
-//   - A bare "*" allows every origin, without credentials. The answer is a
-//     literal "*" with no Access-Control-Allow-Credentials, so browsers send
-//     no sign-in cookie: a page on another site can call the API with an API
-//     key but cannot read a signed-in operator's data.
-//   - Listed origins match exactly, ignoring case: the same rule as CSRFGuard,
-//     which gets the same list. A listed origin may send the sign-in cookie,
-//     so a dashboard served from another address can sign in.
+// Hardcount matches origins itself because rs/cors's AllowedOrigins reads an
+// empty list as every origin, and an entry with a * inside as a pattern:
+// "h*" would allow every https origin. The boot check refuses such entries,
+// and here they match nothing.
 //
-// Hardcount matches origins itself instead of using rs/cors's AllowedOrigins.
-// That option reads an empty list as every origin, and an entry with a *
-// inside it as a prefix-and-suffix pattern: "h*" would allow every https
-// origin. The boot check refuses such entries, and here they match nothing.
-//
-// An OPTIONS request without Access-Control-Request-Method is not a preflight
-// and goes on to the router.
+// An OPTIONS request without Access-Control-Request-Method is not a
+// preflight and goes on to the router.
 func CORS(allowedOrigins []string) func(http.Handler) http.Handler {
 	opts := cors.Options{
 		AllowedMethods: []string{http.MethodGet, http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete},

@@ -20,21 +20,17 @@ import (
 )
 
 // RateLimiter is a distributed rate limiter that runs GCRA (Generic Cell Rate
-// Algorithm) in Redis. GCRA is a leaky-bucket variant. It smooths traffic,
-// instead of allowing a burst and then blocking at each window boundary.
-//
-// It uses go-redis/redis_rate, the official rate-limiting companion for
-// go-redis, used across the go-redis ecosystem.
+// Algorithm) in Redis, through go-redis/redis_rate. GCRA is a leaky-bucket
+// variant. It smooths traffic, instead of allowing a burst and then blocking
+// at each window boundary.
 type RateLimiter struct {
 	limiter *redis_rate.Limiter
 	limit   redis_rate.Limit
 	outage  OutageMode
-	// name namespaces this limiter's Redis keys. Distinct limiters (general
-	// API, hosted invoice, setup-link cooldown) share one Redis and key on
-	// the same identifier, such as "ip:1.2.3.4", but each has its own GCRA
-	// parameters. Without a namespace per limiter they would share one
-	// bucket. A request to one surface would spend another's allowance, and
-	// the conflicting rate and period would corrupt the smoothing state.
+	// name namespaces this limiter's Redis keys. Limiters key on the same
+	// identifiers, such as "ip:1.2.3.4": sharing a bucket, a request to one
+	// surface would spend another's allowance, and their rates would corrupt
+	// each other's state.
 	name string
 	// local counts requests in this process. It is set only for
 	// CountLocally.
@@ -60,12 +56,8 @@ const (
 
 // OpenRedis parses url, opens a client and checks it with a Ping bounded by
 // ctx. An empty url is not an error: it returns (nil, nil), and every limiter
-// then follows its OutageMode. The caller decides what an error means.
-// Production refuses to start on one (cmd/hardcount/main.go), because the
-// general and hosted-invoice limiters fail closed without Redis. A replica
-// that started anyway would look healthy and answer 429 to its share of
-// traffic.
-// Other environments warn and continue, failing open.
+// then follows its OutageMode. The caller decides what an error means:
+// cmd/hardcount refuses to start on one in production.
 func OpenRedis(ctx context.Context, url string) (*goredis.Client, error) {
 	if url == "" {
 		return nil, nil
@@ -82,13 +74,9 @@ func OpenRedis(ctx context.Context, url string) (*goredis.Client, error) {
 	return c, nil
 }
 
-// NewRateLimiter creates a GCRA rate limiter backed by Redis that allows rate
-// requests per window, with a burst of rate. name namespaces the limiter's
-// Redis keys, such as "general", "hosted_invoice" or "setup_link", so
-// limiters with different parameters do not share a bucket. For example,
-// NewRateLimiter(rdb, "general", 100, time.Minute, FailClosed) allows 100
-// requests a minute, spread smoothly with no bursts at the boundary. outage
-// says what the limiter does while rdb is nil or a Redis call fails.
+// NewRateLimiter returns a limiter that allows rate requests per window, with
+// a burst of rate. name namespaces its Redis keys, such as "general". outage
+// says what it does while rdb is nil or a Redis call fails.
 func NewRateLimiter(rdb *goredis.Client, name string, rate int, window time.Duration, outage OutageMode) *RateLimiter {
 	rl := &RateLimiter{
 		limit:  redis_rate.Limit{Rate: rate, Burst: rate, Period: window},
@@ -135,12 +123,9 @@ func (l RateLimited) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetAt.Unix(), 10))
 
 	if !allowed {
-		// Retry-After is when the next request may pass, rounded
-		// up to a whole second. It is not the reset time, when
-		// the whole bucket is full again. That is a full period
-		// (61s at any per-minute limit), although one request's
-		// token refills in period/rate. A client that honors the
-		// header would wait a minute for nothing.
+		// Retry-After is when the next request may pass, rounded up to a
+		// whole second, not the reset, when the whole bucket is full
+		// again: one request's token refills in period/rate.
 		retryAfter := max(int(math.Ceil(retryIn.Seconds())), 1)
 		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
 		respond.RateLimited(w, r)
@@ -150,11 +135,9 @@ func (l RateLimited) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	l.next.ServeHTTP(w, r)
 }
 
-// AllowKey is the exported form of allow, for a handler that enforces a
-// bucket with its own key instead of using the middleware.
-// paymentmethods.send-setup-email uses it for a per-customer cooldown, so a
-// double click does not send two emails. It returns (remaining, resetAt,
-// allowed), with the same outage mode as the middleware.
+// AllowKey spends one request from key's bucket, for a handler that limits by
+// a key of its own, such as a per-customer cooldown. It returns (remaining,
+// resetAt, allowed) and follows the same outage mode as the middleware.
 func (rl *RateLimiter) AllowKey(ctx context.Context, key string) (int, time.Time, bool) {
 	remaining, resetAt, _, allowed := rl.allow(ctx, key)
 	return remaining, resetAt, allowed
@@ -200,27 +183,21 @@ func (rl *RateLimiter) allow(ctx context.Context, key string) (int, time.Time, t
 	}
 }
 
-// bucketKey is the Redis key for a logical bucket: the per-limiter namespace
-// (name) keeps limiters with different GCRA parameters from colliding.
 func (rl *RateLimiter) bucketKey(key string) string {
 	return "rl:" + rl.name + ":" + key
 }
 
-// rateLimitKey chooses the most specific bucket for the request, as Stripe
-// does:
+// rateLimitKey picks the most specific bucket for the request:
 //
-//  1. The API key id, when there is one. A bucket per key stops a runaway
-//     integration from starving the tenant's dashboard or a parallel
-//     worker. Each key has a fixed livemode (hc_secret_test_* or
-//     hc_secret_live_*), so a bucket per key is also a bucket per mode.
-//  2. The tenant id, for dashboard traffic signed in with a session and no
-//     key. It carries the active mode as a suffix, so test-mode exploration
-//     and live-mode operations do not share a quota, as at Stripe. Without
-//     the suffix, one operator's heavy test load could throttle another
-//     operator's live action.
-//  3. The trusted client IP (the record's), for routes with no
-//     sign-in at all: bootstrap, /v1/auth and the public token pages. That
-//     way a flood with no sign-in cannot bypass the limiter.
+//  1. The API key, so a runaway integration cannot starve the tenant's
+//     dashboard. A key has one mode, so its bucket is per mode too.
+//  2. The tenant in its mode, for a dashboard session, so a heavy test-mode
+//     load cannot throttle a live action.
+//  3. The trusted client IP (the record's) on the routes with no sign-in, so
+//     a flood cannot skip the limiter by not signing in.
+//
+// A tenant request with no mode on ctx is an error, never guessed into the
+// live bucket.
 func rateLimitKey(r *http.Request) (string, error) {
 	if keyID := auth.CallerOf(r.Context()).KeyID; keyID != "" {
 		return "key:" + keyID, nil

@@ -14,17 +14,13 @@ import (
 
 // auditUncoveredMutations counts mutating requests that succeeded (2xx), left
 // no audit evidence and are not declared exempt. Its label is the route
-// pattern, never the raw path. The raw path carries ids, and on the public
-// routes it carries live payment tokens, so it would make the number of
-// series grow without limit.
+// pattern: the raw path carries ids, and payment tokens on the public pages,
+// so it would grow the series without limit.
 //
-// A value above zero means a state change committed with no compliance
-// record. Either the route is missing its audit emission, or a new route
-// shipped without one. Alert on any sustained rate. The route-audit
-// registry's arch test is the check at build time. This counter is the check
-// at run time, for the case the static test cannot see: a route declared
-// "explicit" (it writes its own row) whose emission stopped firing without a
-// word.
+// A value above zero is a state change committed with no audit row: alert on
+// it. The route table's test checks that every route declares its audit; this
+// counter catches at run time what that test cannot, a route declared
+// explicit whose own row stopped being written.
 var auditUncoveredMutations = promauto.NewCounterVec(
 	prometheus.CounterOpts{
 		Name: "hardcount_audit_uncovered_mutation_total",
@@ -33,31 +29,17 @@ var auditUncoveredMutations = promauto.NewCounterVec(
 	[]string{"route"},
 )
 
-// AuditCoverage returns a middleware that detects uncovered mutations:
+// AuditCoverage returns the middleware that counts uncovered mutations:
 // mutating requests that succeeded, left no audit evidence (a row or a
-// MarkSkip) and are not declared exempt. It only observes.
+// MarkSkip) and are not declared exempt. route gives the request's route
+// pattern, the counter's label, and whether the route table declares the
+// route exempt. It is passed in because the table lives in package api, which
+// imports this one.
 //
-// Coverage is declared in the route table (api.routeTable), and each row is written
-// in the business transaction (audit.Logger.LogInTx). This middleware only
-// reports when the two disagree. It replaces the AuditLog catch-all, and
-// ADR-090 (RC1 and RC2) records why.
-//
-// Two rules hold, and both matter:
-//
-//  1. It never changes the response: no status swap, no body rewrite, no
-//     injected error. The business transaction has already committed, so a
-//     changed answer would be false. A client told that a committed change
-//     failed may retry with a fresh key and make the change twice. A layer
-//     mounted inside Idempotency would also get the false answer cached for
-//     24h, which strands the real response (ADR-089). Telemetry never
-//     overwrites the answer of a committed money mutation.
-//
-//  2. It never buffers the body. It wraps nothing: it reads the status
-//     from the request's record (request.Begin).
-//
-// route gives the request's route pattern, which labels the counter, and
-// whether the registry declares the route exempt. It is passed in because
-// the registry lives in package api, which imports this package.
+// It only observes. It never changes the answer: the change has committed, so
+// another answer would be false, and a client told that a committed change
+// failed may make it again (ADR-089). It wraps no writer either: it reads the
+// status from the request's record.
 func AuditCoverage(route func(*http.Request) (pattern string, exempt bool)) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -66,9 +48,8 @@ func AuditCoverage(route func(*http.Request) (pattern string, exempt bool)) func
 			if !isMutating(r.Method) {
 				return
 			}
-			// Only a successful mutation must leave evidence. Any 2xx counts:
-			// several routes answer 204 (deletes) or 202 (async advance), and
-			// the billing run answers 206 on a partial cycle.
+			// Only a successful mutation must leave evidence, and any 2xx is
+			// one: 202, 204 and 206 included.
 			status := request.Of(r.Context()).Status()
 			if status < 200 || status >= 300 {
 				return
@@ -106,16 +87,11 @@ func isMutating(method string) bool {
 	return false
 }
 
-// AuditUncoveredMutationsByRoute returns a snapshot of the uncovered-mutation
-// counter, keyed by route pattern.
-//
-// A sibling package's end-to-end suite (internal/api's TestMain) uses it to
-// assert zero uncovered mutations across every route it drives. That is the
-// run-time half of ADR-090's coverage model. The registry's two-way diff at
-// build time is the other half. Operators read the same signal from
-// Prometheus. This accessor collects only this counter, on purpose. Gathering
-// the default registry would run every registered collector, including the
-// queue-depth GaugeFuncs, which open a database transaction per scrape.
+// AuditUncoveredMutationsByRoute returns the uncovered-mutation counter's
+// values by route pattern, so a test can assert that the routes it drove left
+// none. It collects only this counter: gathering the default registry would
+// run every collector there, such as the server's queue-depth gauges, which
+// query the database.
 func AuditUncoveredMutationsByRoute() map[string]float64 {
 	ch := make(chan prometheus.Metric)
 	go func() {
