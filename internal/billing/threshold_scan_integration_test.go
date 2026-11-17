@@ -153,10 +153,9 @@ func newThresholdFixture(t *testing.T, name string) *thresholdFixture {
 
 // insertSubscription inserts an active subscription on the fixture's plan for
 // customerID, mid-cycle, and returns its id and its item's id.
-func (f *thresholdFixture) insertSubscription(t *testing.T, ctx context.Context, customerID, code string) (string, string) {
+func (f *thresholdFixture) insertSubscription(t *testing.T, ctx context.Context, customerID, code string) (subID, itemID string) {
 	t.Helper()
-	subID := postgres.NewID("hc_sub")
-	itemID := postgres.NewID("hc_si")
+	subID, itemID = postgres.NewID("hc_sub"), postgres.NewID("hc_si")
 	tx, err := f.db.BeginTx(ctx, postgres.TxTenant, f.tenantID)
 	if err != nil {
 		t.Fatalf("begin sub tx: %v", err)
@@ -322,10 +321,10 @@ func TestThresholdScan_EachSubscriptionOnItsOwnInstant(t *testing.T) {
 		}
 	}
 
-	if fired, errs := f.engine.ScanThresholds(clock.WithRealTime(ctx), 50); fired != 2 || len(errs) > 0 {
-		t.Fatalf("fired %d, errors %v; want 2 fires", fired, errs)
+	if fired, scanErrs := f.engine.ScanThresholds(clock.WithRealTime(ctx), 50); fired != 2 || len(scanErrs) > 0 {
+		t.Fatalf("fired %d, errors %v; want 2 fires", fired, scanErrs)
 	}
-	seen := map[time.Time]bool{}
+	seen := map[int64]bool{} // by microsecond, what Postgres stores
 	for _, inv := range f.listInvoices(t, ctx) {
 		sub, err := f.subStore.Get(ctx, f.tenantID, inv.SubscriptionID)
 		if err != nil {
@@ -335,10 +334,10 @@ func TestThresholdScan_EachSubscriptionOnItsOwnInstant(t *testing.T) {
 			t.Errorf("%s issued at %v, its period closed at %v: want one instant", inv.InvoiceNumber, inv.IssuedAt, sub.UpdatedAt)
 			continue
 		}
-		if seen[*inv.IssuedAt] {
+		if seen[inv.IssuedAt.UnixMicro()] {
 			t.Errorf("two fires share the instant %v: want one each", *inv.IssuedAt)
 		}
-		seen[*inv.IssuedAt] = true
+		seen[inv.IssuedAt.UnixMicro()] = true
 	}
 }
 

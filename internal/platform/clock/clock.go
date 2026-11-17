@@ -9,13 +9,14 @@
 // it decides, with the service's Clock: a clock's instant is kept, and a
 // record on no clock gets one read of that Clock bound as a real instant (the
 // states are named on Decision). Every read of the clock below then answers
-// that instant. A request that starts a job over many records hands the job
-// a context with no instant, and the job binds one per row. A fan-out that
-// runs after the request has answered, over rows that may each be on their
-// own clock, does not bind one instant for all of them: it decides each row,
-// and the row's work binds its own. A payment's result is its own event,
-// recorded when Stripe's answer arrives (AtArrival), in the same call or by
-// webhook, and so is what the action writes on that invoice after it.
+// that instant. Work over many records (a job a request starts, or a fan-out
+// after the request has answered) binds no instant for all of them: each row
+// is decided and binds its own.
+//
+// One exception: a charge's result, and the invoice's writes that follow it
+// in the same action, are dated when Stripe's answer arrives (AtArrival), in
+// the same call or by webhook. A Stripe Tax answer is not one: it keeps the
+// action's instant.
 package clock
 
 import (
@@ -191,9 +192,8 @@ func EnsureEffectiveNow(ctx context.Context, c Clock) context.Context {
 	return WithEffectiveNow(ctx, c.Now(ctx))
 }
 
-// AtArrival returns ctx for recording a payment's result, Stripe's answer to a
-// charge, and what the action writes on that invoice after it. A Stripe Tax
-// answer is not one: it keeps the action's instant. On a test clock ctx is
+// AtArrival returns ctx for the package doc's one exception: a charge's
+// result and the invoice's writes that follow it. On a test clock ctx is
 // kept: its clock and instant. On no clock c is read once, and that read
 // replaces any real instant ctx carries, so the result is dated when it
 // arrived.

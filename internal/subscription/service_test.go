@@ -2452,33 +2452,40 @@ func TestProcessExpiredTrials(t *testing.T) {
 	})
 
 	t.Run("wall-clock: each expired trial is worked on its own instant", func(t *testing.T) {
-		svc := NewService(newMemStore(), clock.NewFake(createdAt))
+		creator := NewService(newMemStore(), clock.NewFake(createdAt))
 		trial := CreateInput{DisplayName: "Trial", CustomerID: "c", Items: []CreateItemInput{{PlanID: "p"}}, TrialDays: 14}
 		trial.Code = "sub-trial-cancel"
-		canceling, _ := svc.Create(ctx, "t1", trial)
-		trial.Code = "sub-trial-day1"
-		if _, err := svc.Create(ctx, "t1", trial); err != nil {
+		canceling, err := creator.Create(ctx, "t1", trial)
+		if err != nil {
 			t.Fatalf("create: %v", err)
 		}
-		mem := svc.store.(*memStore)
+		trial.Code = "sub-trial-day1"
+		if _, err := creator.Create(ctx, "t1", trial); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		mem := creator.store.(*memStore)
 		due := mem.subs[canceling.ID]
-		due.CancelAtPeriodEnd = true
+		due.CancelAtPeriodEnd = true // a cancel at period end is due when the trial ends (trialCancelDue)
 		mem.subs[canceling.ID] = due
 
 		server := &steppingClock{at: canceling.TrialEndAt.Add(time.Hour)}
 		fb := &fakeBiller{createTxOK: true, createTxInv: domain.Invoice{ID: "inv_day1"}}
-		svc2 := NewService(mem, server)
-		svc2.SetBiller(fb)
-		if _, errs := svc2.ProcessExpiredTrials(ctx, 100); len(errs) != 0 {
+		job := NewService(mem, server)
+		job.SetBiller(fb)
+		if _, errs := job.ProcessExpiredTrials(ctx, 100); len(errs) != 0 {
 			t.Fatalf("unexpected errors: %v", errs)
 		}
 		if len(fb.finalizedAt) != 1 {
 			t.Fatalf("day-1 finalizes: %d, want 1", len(fb.finalizedAt))
 		}
 		canceledAt, day1 := mem.subs[canceling.ID].UpdatedAt, fb.finalizedAt[0]
-		if !slices.Contains(server.issued[1:], canceledAt) || !slices.Contains(server.issued[1:], day1) || canceledAt.Equal(day1) {
-			t.Errorf("cancel at %v, day-1 invoice finalized at %v; want each on its own read of the server's clock after the list's %v (reads %v)",
-				canceledAt, day1, server.issued[0], server.issued)
+		for name, at := range map[string]time.Time{"the cancel": canceledAt, "the day-1 finalize": day1} {
+			if !slices.Contains(server.issued, at) || !at.After(server.issued[0]) {
+				t.Errorf("%s at %v: want a read of the server's clock after the list's %v", name, at, server.issued[0])
+			}
+		}
+		if canceledAt.Equal(day1) {
+			t.Errorf("the cancel and the day-1 finalize share %v: want each trial on its own read", day1)
 		}
 	})
 
