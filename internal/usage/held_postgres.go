@@ -10,7 +10,6 @@ import (
 	"github.com/shopspring/decimal"
 
 	"github.com/gethardcount/hardcount/internal/domain"
-	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -296,7 +295,7 @@ func (s *PostgresStore) ReleaseHeld(ctx context.Context, tenantID string, in Rel
 			ProviderCostMicros: h.ObservedCostMicros,
 		})
 		switch {
-		case errors.Is(err, errs.ErrDuplicateKey):
+		case errors.Is(err, errDuplicateKey):
 			row.Deduplicated = true
 		case err != nil:
 			return ReleaseHeldResult{}, fmt.Errorf("release held %s: %w", h.ID, err)
@@ -548,7 +547,7 @@ func (s *PostgresStore) ingestCallTx(ctx context.Context, tenantID string, call 
 			case err == nil:
 				res.Inserted++
 				written[call.LegacyKey] = true
-			case errors.Is(err, errs.ErrDuplicateKey):
+			case errors.Is(err, errDuplicateKey):
 				q, found, err := storedEventQuantity(ctx, tx, call.LegacyKey)
 				if err != nil {
 					return CallResult{}, err
@@ -600,7 +599,7 @@ func (s *PostgresStore) ingestCallTx(ctx context.Context, tenantID string, call 
 		case err == nil:
 			res.Inserted++
 			res.Written = append(res.Written, i)
-		case errors.Is(err, errs.ErrDuplicateKey):
+		case errors.Is(err, errDuplicateKey):
 			res.Deduplicated++
 		default:
 			return CallResult{}, err

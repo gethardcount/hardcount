@@ -22,7 +22,7 @@ var apiVersion = version.Version
 
 // JSON writes a success response with standard headers.
 func JSON(w http.ResponseWriter, r *http.Request, status int, data any) {
-	setHeaders(w, r)
+	setHeaders(w)
 	w.WriteHeader(status)
 	enc := json.NewEncoder(w)
 	// By default Go escapes <, > and & (as \u003c and so on), for safety
@@ -47,22 +47,23 @@ func List(w http.ResponseWriter, r *http.Request, data any, total int) {
 	})
 }
 
-// Error writes a Stripe-style error response.
-// Format: {"error": {"type": "...", "message": "...", "code": "...", "param": "..."}}
-func Error(w http.ResponseWriter, r *http.Request, status int, errType, code, message string) {
-	errorField(w, r, status, errType, code, "", message)
+// Error writes a Stripe-style error response:
+// {"error": {"type": "...", "code": "...", "message": "...", "request_id": "..."}}.
+// The type follows from the status (errorType).
+func Error(w http.ResponseWriter, r *http.Request, status int, code, message string) {
+	errorField(w, r, status, code, "", message)
 }
 
 // errorField is the underlying writer, which also puts the optional field
 // name in the envelope's Param slot. Every shortcut helper goes through it.
-func errorField(w http.ResponseWriter, r *http.Request, status int, errType, code, field, message string) {
-	setHeaders(w, r)
+func errorField(w http.ResponseWriter, r *http.Request, status int, code, field, message string) {
+	setHeaders(w)
 	w.WriteHeader(status)
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
 	_ = enc.Encode(ErrorBody{
 		Error: ErrorDetail{
-			Type:      errType,
+			Type:      errorType(status),
 			Code:      code,
 			Message:   message,
 			Param:     field,
@@ -74,13 +75,13 @@ func errorField(w http.ResponseWriter, r *http.Request, status int, errType, cod
 // ErrorWith writes the error envelope plus top-level fields beside "error".
 // Use it only when the error carries data a caller needs, such as the usage
 // batch's per-event errors. extra must not hold the key "error".
-func ErrorWith(w http.ResponseWriter, r *http.Request, status int, errType, code, message string, extra map[string]any) {
+func ErrorWith(w http.ResponseWriter, r *http.Request, status int, code, message string, extra map[string]any) {
 	body := make(map[string]any, len(extra)+1)
 	for k, v := range extra {
 		body[k] = v
 	}
-	body["error"] = ErrorDetail{Type: errType, Code: code, Message: message, RequestID: requestID(r)}
-	setHeaders(w, r)
+	body["error"] = ErrorDetail{Type: errorType(status), Code: code, Message: message, RequestID: requestID(r)}
+	setHeaders(w)
 	w.WriteHeader(status)
 	enc := json.NewEncoder(w)
 	enc.SetEscapeHTML(false)
@@ -91,17 +92,17 @@ func ErrorWith(w http.ResponseWriter, r *http.Request, status int, errType, code
 
 // BadRequest writes a 400 with code invalid_request and the message.
 func BadRequest(w http.ResponseWriter, r *http.Request, message string) {
-	Error(w, r, http.StatusBadRequest, "invalid_request_error", "invalid_request", message)
+	Error(w, r, http.StatusBadRequest, "invalid_request", message)
 }
 
 // NotFound writes a 404 with code not_found that names the resource.
 func NotFound(w http.ResponseWriter, r *http.Request, resource string) {
-	Error(w, r, http.StatusNotFound, "invalid_request_error", "not_found", resource+" not found")
+	Error(w, r, http.StatusNotFound, "not_found", resource+" not found")
 }
 
 // Validation writes a 422 with code validation_error and no field.
 func Validation(w http.ResponseWriter, r *http.Request, message string) {
-	errorField(w, r, http.StatusUnprocessableEntity, "invalid_request_error", "validation_error", "", message)
+	errorField(w, r, http.StatusUnprocessableEntity, "validation_error", "", message)
 }
 
 // ValidationField writes a 422 with the offending field name in the
@@ -109,7 +110,7 @@ func Validation(w http.ResponseWriter, r *http.Request, message string) {
 // field is known at the call site. Service-layer validation goes through
 // FromError, which takes the field from the DomainError.
 func ValidationField(w http.ResponseWriter, r *http.Request, field, message string) {
-	errorField(w, r, http.StatusUnprocessableEntity, "invalid_request_error", "validation_error", field, message)
+	errorField(w, r, http.StatusUnprocessableEntity, "validation_error", field, message)
 }
 
 // ValidationCoded writes a 422 with a domain-specific error code in the
@@ -123,7 +124,7 @@ func ValidationCoded(w http.ResponseWriter, r *http.Request, field, code, messag
 	if code == "" {
 		code = "validation_error"
 	}
-	errorField(w, r, http.StatusUnprocessableEntity, "invalid_request_error", code, field, message)
+	errorField(w, r, http.StatusUnprocessableEntity, code, field, message)
 }
 
 // ConflictCoded is the 409 counterpart of ValidationCoded: the same code and
@@ -133,7 +134,7 @@ func ConflictCoded(w http.ResponseWriter, r *http.Request, field, code, message 
 	if code == "" {
 		code = "already_exists"
 	}
-	errorField(w, r, http.StatusConflict, "invalid_request_error", code, field, message)
+	errorField(w, r, http.StatusConflict, code, field, message)
 }
 
 // NotFoundCoded is the 404 counterpart. The caller builds the message,
@@ -143,20 +144,12 @@ func NotFoundCoded(w http.ResponseWriter, r *http.Request, code, message string)
 	if code == "" {
 		code = "not_found"
 	}
-	Error(w, r, http.StatusNotFound, "invalid_request_error", code, message)
-}
-
-// PreconditionFailed writes a 412. The usual case is optimistic concurrency:
-// the caller sent If-Match with the ETag it last saw, and a concurrent
-// writer has since bumped the version. The client should GET the resource,
-// apply its edits again to the fresh copy, and retry.
-func PreconditionFailed(w http.ResponseWriter, r *http.Request, message string) {
-	Error(w, r, http.StatusPreconditionFailed, "invalid_request_error", "precondition_failed", message)
+	Error(w, r, http.StatusNotFound, code, message)
 }
 
 // RouteNotFound is the router's answer to a path it does not serve.
 func RouteNotFound(w http.ResponseWriter, r *http.Request) {
-	Error(w, r, http.StatusNotFound, "invalid_request_error", "route_not_found",
+	Error(w, r, http.StatusNotFound, "route_not_found",
 		"unrecognized request URL ("+r.Method+" "+r.URL.Path+")")
 }
 
@@ -166,35 +159,35 @@ func MethodNotAllowed(w http.ResponseWriter, r *http.Request, allow []string) {
 	if len(allow) > 0 {
 		w.Header().Set("Allow", strings.Join(allow, ", "))
 	}
-	Error(w, r, http.StatusMethodNotAllowed, "invalid_request_error", "method_not_allowed",
+	Error(w, r, http.StatusMethodNotAllowed, "method_not_allowed",
 		r.Method+" is not allowed on "+r.URL.Path)
 }
 
 // Timeout is the answer when a request runs past its time limit before
 // anything was written.
 func Timeout(w http.ResponseWriter, r *http.Request) {
-	Error(w, r, http.StatusGatewayTimeout, "api_error", "timeout", "the request ran past its time limit")
+	Error(w, r, http.StatusGatewayTimeout, "timeout", "the request ran past its time limit")
 }
 
 // InternalError writes a 500 with code internal_error and a generic
 // message.
 func InternalError(w http.ResponseWriter, r *http.Request) {
-	Error(w, r, http.StatusInternalServerError, "api_error", "internal_error", "an internal error occurred")
+	Error(w, r, http.StatusInternalServerError, "internal_error", "an internal error occurred")
 }
 
 // Unauthorized writes a 401 authentication_error with code unauthorized.
 func Unauthorized(w http.ResponseWriter, r *http.Request, message string) {
-	Error(w, r, http.StatusUnauthorized, "authentication_error", "unauthorized", message)
+	Error(w, r, http.StatusUnauthorized, "unauthorized", message)
 }
 
 // Forbidden writes a 403 authentication_error with code forbidden.
 func Forbidden(w http.ResponseWriter, r *http.Request, message string) {
-	Error(w, r, http.StatusForbidden, "authentication_error", "forbidden", message)
+	Error(w, r, http.StatusForbidden, "forbidden", message)
 }
 
 // RateLimited writes a 429 rate_limit_error with code rate_limited.
 func RateLimited(w http.ResponseWriter, r *http.Request) {
-	Error(w, r, http.StatusTooManyRequests, "rate_limit_error", "rate_limited", "too many requests — please retry after the rate limit resets")
+	Error(w, r, http.StatusTooManyRequests, "rate_limited", "too many requests — please retry after the rate limit resets")
 }
 
 // Types
@@ -214,12 +207,27 @@ type ErrorDetail struct {
 	Param     string `json:"param,omitempty"`
 }
 
-func setHeaders(w http.ResponseWriter, r *http.Request) {
+// errorType is the envelope's type for a status. A client switches on type
+// and code, so one status always has one type.
+func errorType(status int) string {
+	switch {
+	case status == http.StatusUnauthorized || status == http.StatusForbidden:
+		return "authentication_error"
+	case status == http.StatusTooManyRequests:
+		return "rate_limit_error"
+	case status >= http.StatusInternalServerError:
+		return "api_error"
+	default:
+		return "invalid_request_error"
+	}
+}
+
+// setHeaders sets the headers every answer from this package carries. The
+// Hardcount-Request-Id header is the RequestID middleware's, set before any
+// handler runs.
+func setHeaders(w http.ResponseWriter) {
 	w.Header().Set("Content-Type", "application/json")
 	w.Header().Set("Hardcount-Version", apiVersion)
-	if id := requestID(r); id != "" {
-		w.Header().Set("Hardcount-Request-Id", id)
-	}
 }
 
 func requestID(r *http.Request) string {

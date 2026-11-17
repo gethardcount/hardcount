@@ -344,7 +344,7 @@ func respondIngestUnavailable(w http.ResponseWriter, r *http.Request, tenantID s
 		"tenant_id", tenantID,
 		"error", err,
 	)
-	respond.Error(w, r, http.StatusServiceUnavailable, "api_error", "ingest_unavailable",
+	respond.Error(w, r, http.StatusServiceUnavailable, "ingest_unavailable",
 		"usage store temporarily unavailable — nothing was recorded; retry the request")
 }
 
@@ -362,7 +362,7 @@ func (h *Handler) respondIngestError(w http.ResponseWriter, r *http.Request, ten
 		respondIngestUnavailable(w, r, tenantID, err)
 		return
 	}
-	if errors.Is(err, errs.ErrDuplicateKey) && idempotencyKey != "" {
+	if errors.Is(err, errDuplicateKey) && idempotencyKey != "" {
 		if original, gerr := h.svc.GetByIdempotencyKey(r.Context(), tenantID, idempotencyKey); gerr == nil {
 			// A replay MUTATES NOTHING — it hands back the row the original
 			// request already wrote (and, for backfill, already audited).
@@ -550,7 +550,7 @@ func (h *Handler) batchIngest(w http.ResponseWriter, r *http.Request) {
 		// JSON (400) — the byte cap fires mid-array on valid JSON.
 		var maxErr *http.MaxBytesError
 		if errors.As(err, &maxErr) {
-			respond.Error(w, r, http.StatusRequestEntityTooLarge, "invalid_request_error", "batch_too_large",
+			respond.Error(w, r, http.StatusRequestEntityTooLarge, "batch_too_large",
 				fmt.Sprintf("request body exceeds %d bytes — send smaller batches", maxErr.Limit))
 			return
 		}
@@ -671,7 +671,7 @@ type BatchResponse struct {
 // with no errors[], the exact undebuggable-batch failure the ingest
 // stage's accumulation exists to prevent.
 func respondBatchRejected(w http.ResponseWriter, r *http.Request, errStrings []string, total int) {
-	respond.ErrorWith(w, r, http.StatusUnprocessableEntity, "invalid_request_error", "batch_rejected",
+	respond.ErrorWith(w, r, http.StatusUnprocessableEntity, "batch_rejected",
 		"batch rejected — nothing was ingested; fix the listed events and retry the whole batch",
 		map[string]any{"errors": errStrings, "ingested": 0, "total": total})
 }

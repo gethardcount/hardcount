@@ -12,23 +12,14 @@ import (
 	"testing"
 )
 
-// respondErrorTypes is every error `type` the API sends. respond.Error takes
-// (status, errType, code, message) as four loose values, and nine calls once
-// passed them wrong: three shifted by one (the message text in `code`, the
-// field name in `message`, a made-up word in `type`), six with "invalid_state"
-// as the type. A client switches on type and code, so either mistake makes an
-// error unrecognisable. The respond helpers (ValidationField, ConflictCoded,
-// ...) fill type for you and are the better call.
-var respondErrorTypes = map[string]bool{
-	"api_error":             true,
-	"invalid_request_error": true,
-	"authentication_error":  true,
-	"rate_limit_error":      true,
-}
-
+// respond.Error takes (status, code, message), two strings side by side, and
+// a client switches on code. A literal code must be a snake_case word, which
+// a message never is, so a swapped pair fails here. The type comes from the
+// status (respond's errorType). The respond helpers (ValidationField,
+// ConflictCoded, ...) fill the code for you and are the better call.
 var respondErrorCode = regexp.MustCompile(`^[a-z][a-z0-9_]*$`)
 
-func TestRespondErrorCalls_PassTypeAndCodeInOrder(t *testing.T) {
+func TestRespondErrorCalls_PassCodeBeforeMessage(t *testing.T) {
 	root := repoRoot(t)
 	calls := 0
 	for _, dir := range []string{"internal", "cmd"} {
@@ -51,18 +42,12 @@ func TestRespondErrorCalls_PassTypeAndCodeInOrder(t *testing.T) {
 				if !ok || sel.Sel.Name != "Error" {
 					return true
 				}
-				if pkg, ok := sel.X.(*ast.Ident); !ok || pkg.Name != "respond" || len(call.Args) != 6 {
+				if pkg, ok := sel.X.(*ast.Ident); !ok || pkg.Name != "respond" || len(call.Args) != 5 {
 					return true
 				}
 				calls++
 				pos := fset.Position(call.Pos())
-				typ, ok := stringLit(call.Args[3])
-				if !ok {
-					t.Errorf("%s:%d: respond.Error type must be a string literal", rel, pos.Line)
-				} else if !respondErrorTypes[typ] {
-					t.Errorf("%s:%d: respond.Error type %q is not an API error type (arguments are status, type, code, message)", rel, pos.Line, typ)
-				}
-				if code, ok := stringLit(call.Args[4]); ok && !respondErrorCode.MatchString(code) {
+				if code, ok := stringLit(call.Args[3]); ok && !respondErrorCode.MatchString(code) {
 					t.Errorf("%s:%d: respond.Error code %q is not a snake_case code (is the message in the code slot?)", rel, pos.Line, code)
 				}
 				return true

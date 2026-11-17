@@ -250,11 +250,9 @@ const CodeMeterHasUsage = "meter_has_usage"
 
 // Sentinel errors for store and service layers.
 var (
-	ErrNotFound           = errors.New("not found")
-	ErrAlreadyExists      = errors.New("already exists")
-	ErrDuplicateKey       = errors.New("duplicate key")
-	ErrInvalidState       = errors.New("invalid state")
-	ErrPreconditionFailed = errors.New("precondition failed")
+	ErrNotFound      = errors.New("not found")
+	ErrAlreadyExists = errors.New("already exists")
+	ErrInvalidState  = errors.New("invalid state")
 	// ErrForbidden marks an authorization denial (authenticated but not
 	// permitted). respond.FromError maps it to HTTP 403. Prefer
 	// errs.Forbidden.

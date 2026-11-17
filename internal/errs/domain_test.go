@@ -133,7 +133,6 @@ func TestSentinelErrors(t *testing.T) {
 	}{
 		{"NotFound", fmt.Errorf("customer: %w", ErrNotFound), ErrNotFound},
 		{"AlreadyExists", fmt.Errorf("dup: %w", ErrAlreadyExists), ErrAlreadyExists},
-		{"DuplicateKey", fmt.Errorf("key: %w", ErrDuplicateKey), ErrDuplicateKey},
 		{"InvalidState", fmt.Errorf("state: %w", ErrInvalidState), ErrInvalidState},
 	}
 

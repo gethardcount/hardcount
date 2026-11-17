@@ -14,8 +14,8 @@ import (
 // request to one surface consumed another's GCRA allowance. The per-limiter
 // name now namespaces the key.
 func TestRateLimiterBucketKey_NamespacedByLimiter(t *testing.T) {
-	general := NewRateLimiter(nil, "general", 100, time.Minute)
-	hosted := NewRateLimiter(nil, "hosted_invoice", 60, time.Minute)
+	general := NewRateLimiter(nil, "general", 100, time.Minute, FailOpen)
+	hosted := NewRateLimiter(nil, "hosted_invoice", 60, time.Minute, FailOpen)
 
 	id := "ip:1.2.3.4"
 	gk := general.bucketKey(id)
@@ -38,8 +38,8 @@ func TestRateLimiterBucketKey_NamespacedByLimiter(t *testing.T) {
 // 429 was a silently dropped revenue event. The split is observable via
 // the X-RateLimit-Limit header each limiter stamps.
 func TestSplitRateLimit_RoutesByPath(t *testing.T) {
-	general := NewRateLimiter(nil, "general", 100, time.Minute)
-	ingest := NewRateLimiter(nil, "ingest", 1000, time.Second)
+	general := NewRateLimiter(nil, "general", 100, time.Minute, FailOpen)
+	ingest := NewRateLimiter(nil, "ingest", 1000, time.Second, FailOpen)
 	isIngest := func(r *http.Request) bool {
 		return strings.HasPrefix(r.URL.Path, "/v1/usage-events") ||
 			strings.HasPrefix(r.URL.Path, "/v1/integrations/litellm")

@@ -173,7 +173,7 @@ func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Han
 				slog.Log(r.Context(), logging.ErrorLevel(r.Context(), err), "idempotency reserve failed; refusing the request (503) rather than running it unprotected",
 					"tenant_id", tenantID, "path", r.URL.Path, "error", err)
 				w.Header().Set("Retry-After", "1")
-				respond.Error(w, r, http.StatusServiceUnavailable, "api_error", "idempotency_unavailable", "could not record the idempotency key — retry the request with the same key")
+				respond.Error(w, r, http.StatusServiceUnavailable, "idempotency_unavailable", "could not record the idempotency key — retry the request with the same key")
 				return
 			}
 			if !claimed {
@@ -465,7 +465,7 @@ func replayExistingKey(w http.ResponseWriter, r *http.Request, db *postgres.DB, 
 			// On a database error while resolving the conflict, do not fail
 			// open: the side effect may already be running. Answer a 409 that
 			// the client retries, instead of running the operation again.
-			idempotencyError(w, r, http.StatusConflict, "conflict_idempotency",
+			respond.Error(w, r, http.StatusConflict, "conflict_idempotency",
 				"A request with this idempotency key is being processed. Please retry.")
 			return
 		}
@@ -477,7 +477,7 @@ func replayExistingKey(w http.ResponseWriter, r *http.Request, db *postgres.DB, 
 		// cannot be shown to be this caller's, and the comparison is false
 		// for it, since a request's fingerprint is never empty.
 		if found && subtle.ConstantTimeCompare(c.Fingerprint, fingerprint) != 1 {
-			idempotencyError(w, r, http.StatusUnprocessableEntity, "idempotency_error",
+			respond.Error(w, r, http.StatusUnprocessableEntity, "idempotency_error",
 				"This Idempotency-Key was first used by another caller or with a different request. Use a new key for a new request.")
 			return
 		}
@@ -507,7 +507,7 @@ func replayExistingKey(w http.ResponseWriter, r *http.Request, db *postgres.DB, 
 		// conflict, so the client retries into a clean slot instead of
 		// running concurrently.
 		if !found {
-			idempotencyError(w, r, http.StatusConflict, "conflict_idempotency",
+			respond.Error(w, r, http.StatusConflict, "conflict_idempotency",
 				"A concurrent request with this idempotency key did not complete. Please retry.")
 			return
 		}
@@ -515,20 +515,20 @@ func replayExistingKey(w http.ResponseWriter, r *http.Request, db *postgres.DB, 
 		// has no live owner: the owner died or panicked. Say so at once,
 		// because the outcome is unknown and polling cannot resolve it.
 		if age := time.Since(c.CreatedAt); age > idempotencyOrphanAfter {
-			idempotencyError(w, r, http.StatusConflict, "conflict_idempotency_unresolved",
+			respond.Error(w, r, http.StatusConflict, "conflict_idempotency_unresolved",
 				fmt.Sprintf("A request with this idempotency key started %s ago and never recorded an outcome — the replica handling it may have died mid-request. Whether its side effect committed is unknown: fetch the resource to check, then retry with a NEW idempotency key only if it does not exist.", age.Round(time.Minute)))
 			return
 		}
 		// Still pending. Wait for the owner to finalize, bounded by the poll
 		// timeout and the request context.
 		if time.Now().After(deadline) {
-			idempotencyError(w, r, http.StatusConflict, "conflict_idempotency",
+			respond.Error(w, r, http.StatusConflict, "conflict_idempotency",
 				"A request with this idempotency key is still being processed. Please retry.")
 			return
 		}
 		select {
 		case <-ctx.Done():
-			idempotencyError(w, r, http.StatusConflict, "conflict_idempotency",
+			respond.Error(w, r, http.StatusConflict, "conflict_idempotency",
 				"A request with this idempotency key is being processed. Please retry.")
 			return
 		case <-time.After(idempotencyPollInterval):
@@ -591,11 +591,4 @@ func NewIdempotencyCleaner(db *postgres.DB) *IdempotencyCleaner {
 // Cleanup runs CleanExpired and returns the number of rows it deleted.
 func (c *IdempotencyCleaner) Cleanup(ctx context.Context) (int, error) {
 	return CleanExpired(ctx, c.db)
-}
-
-// idempotencyError answers an Idempotency-Key problem in the one error
-// envelope: type invalid_request_error, and code naming the problem
-// (idempotency_error, conflict_idempotency or conflict_idempotency_unresolved).
-func idempotencyError(w http.ResponseWriter, r *http.Request, status int, code, message string) {
-	respond.Error(w, r, status, "invalid_request_error", code, message)
 }

@@ -129,7 +129,7 @@ func (h *PublicPaymentHandler) validateToken(w http.ResponseWriter, r *http.Requ
 		// Validate's JOIN to invoices means a deleted-invoice token
 		// also lands here as "invalid or expired" — operator-friendly
 		// 401 instead of a downstream 500.
-		respond.Error(w, r, http.StatusUnauthorized, "authentication_error", "invalid_token",
+		respond.Error(w, r, http.StatusUnauthorized, "invalid_token",
 			"invalid or expired token")
 		return
 	}
@@ -159,7 +159,7 @@ func (h *PublicPaymentHandler) validateToken(w http.ResponseWriter, r *http.Requ
 			// Validate's JOIN already proved the invoice exists, so
 			// ErrNoRows here means it was deleted between Validate and
 			// this read — race. Treat as stale link.
-			respond.Error(w, r, http.StatusNotFound, "invalid_request_error", "invoice_not_found",
+			respond.Error(w, r, http.StatusNotFound, "invoice_not_found",
 				"this payment link is no longer valid — the invoice it references is unavailable")
 			return
 		}
@@ -205,7 +205,7 @@ func (h *PublicPaymentHandler) validateToken(w http.ResponseWriter, r *http.Requ
 // against sql.ErrNoRows, so a missing customer was answered 500.
 func customerReadFailed(ctx context.Context, w http.ResponseWriter, r *http.Request, customerID string, err error) {
 	if errors.Is(err, errs.ErrNotFound) {
-		respond.Error(w, r, http.StatusNotFound, "invalid_request_error", "customer_not_found",
+		respond.Error(w, r, http.StatusNotFound, "customer_not_found",
 			"this payment link is no longer valid — the customer it references is unavailable")
 		return
 	}
@@ -220,7 +220,7 @@ func customerReadFailed(ctx context.Context, w http.ResponseWriter, r *http.Requ
 // page's code for the same state), not a 502. Stripe was never called. The
 // message names no setting, because the customer can't change one.
 func writeOnlinePaymentUnavailable(w http.ResponseWriter, r *http.Request) {
-	respond.Error(w, r, http.StatusConflict, "invalid_request_error", errs.CodeOnlinePaymentUnavailable,
+	respond.Error(w, r, http.StatusConflict, errs.CodeOnlinePaymentUnavailable,
 		"Adding a card online isn't available for this account right now. Please contact your billing administrator.")
 }
 
@@ -241,7 +241,7 @@ func (h *PublicPaymentHandler) createCheckoutSession(w http.ResponseWriter, r *h
 
 	token, err := h.tokens.Validate(r.Context(), rawToken)
 	if err != nil {
-		respond.Error(w, r, http.StatusUnauthorized, "authentication_error", "invalid_token",
+		respond.Error(w, r, http.StatusUnauthorized, "invalid_token",
 			"invalid or expired token")
 		return
 	}
@@ -283,7 +283,7 @@ func (h *PublicPaymentHandler) createCheckoutSession(w http.ResponseWriter, r *h
 			"customer_id", token.CustomerID, "error", err)
 		// Customer-facing endpoint — TIER 2 sanitization (ADR-026): neutral
 		// copy + reference id only, never operator/config detail.
-		respond.Error(w, r, http.StatusBadGateway, "api_error", "stripe_error",
+		respond.Error(w, r, http.StatusBadGateway, "stripe_error",
 			"We couldn't start the payment update right now. Please contact your billing administrator if the problem persists.")
 		return
 	}
@@ -292,7 +292,7 @@ func (h *PublicPaymentHandler) createCheckoutSession(w http.ResponseWriter, r *h
 	if err != nil {
 		slog.ErrorContext(scopedCtx, "public payment: read stripe credentials",
 			"customer_id", token.CustomerID, "error", err)
-		respond.Error(w, r, http.StatusBadGateway, "api_error", "stripe_error",
+		respond.Error(w, r, http.StatusBadGateway, "stripe_error",
 			"We couldn't start the payment update right now. Please contact your billing administrator if the problem persists.")
 		return
 	}
@@ -335,7 +335,7 @@ func (h *PublicPaymentHandler) createCheckoutSession(w http.ResponseWriter, r *h
 		return
 	}
 	if !consumed {
-		respond.Error(w, r, http.StatusUnauthorized, "authentication_error", "invalid_token",
+		respond.Error(w, r, http.StatusUnauthorized, "invalid_token",
 			"invalid or expired token")
 		return
 	}
@@ -408,7 +408,7 @@ func (h *PublicPaymentHandler) createCheckoutSession(w http.ResponseWriter, r *h
 		// Customer-facing endpoint — TIER 2 sanitization (ADR-026):
 		// even "Stripe SDK error" framing leaks operator context.
 		// End customers should see only neutral copy + reference ID.
-		respond.Error(w, r, http.StatusBadGateway, "api_error", "stripe_error",
+		respond.Error(w, r, http.StatusBadGateway, "stripe_error",
 			"We couldn't start the payment update right now. Please try the link again in a few minutes, or contact support if the problem persists.")
 		return
 	}
