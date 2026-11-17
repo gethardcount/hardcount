@@ -238,9 +238,7 @@ func (s *Server) routes() chi.Router {
 		r.Use(s.publicPageLimiter.Middleware())
 		r.Use(mw.Timeout(requestTimeout))
 		r.Use(door.Middleware)
-		if s.publicPaymentH != nil {
-			r.Mount("/v1/public/payment-updates", s.publicPaymentH.Routes())
-		}
+		r.Mount("/v1/public/payment-updates", s.publicPaymentH.Routes())
 		r.Mount("/v1/public/invoices", s.hostedInvoiceH.Routes())
 		r.Mount("/v1/public/cost-dashboard", s.customerH.PublicCostDashboardRoutes())
 	})
