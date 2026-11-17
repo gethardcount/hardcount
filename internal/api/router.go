@@ -34,6 +34,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/paymentmethods"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 	"github.com/gethardcount/hardcount/internal/pricing"
 	"github.com/gethardcount/hardcount/internal/recipe"
 	"github.com/gethardcount/hardcount/internal/session"
@@ -154,8 +155,8 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 // routes registers every route and its middleware, and returns the router.
 func (s *Server) routes() chi.Router {
 	r := chi.NewRouter()
-	// Each request's route, found once at the root (routeLookup).
-	lookup := &routeLookup{}
+	// Finds each request's route for its record (request.Begin).
+	finder := &routeFinder{}
 	// The clock door (clockDoor) runs last in every group, after
 	// authentication, the limiter and the timeout, so it reads a named record
 	// as the caller's tenant and mode, a replay costs no lookup, and its
@@ -181,20 +182,27 @@ func (s *Server) routes() chi.Router {
 	r.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
 		respond.MethodNotAllowed(w, req, allow.methods(req.URL))
 	})
-	useRequestEdge(r, s.settings.TrustProxy, s.settings.TrustedProxies())
+	// The root chain, in order:
+	//   - the edge (useRequestEdge): the trace span, the request id and the
+	//     trusted client IP; then request.Begin, which makes the record every
+	//     later layer reads; then the span correction, which reads it;
+	//   - the metrics and the access log, above the Recoverer, so a recovered
+	//     panic is still counted and logged as its 500;
+	//   - the Recoverer;
+	//   - CORS, below them, so a preflight it answers is counted and logged.
+	// Begin and the three readers above the Recoverer run where a panic is
+	// not recovered by ours; routeFinder says why Begin cannot panic for a
+	// request.
+	useRequestEdge(r, s.settings.TrustProxy, s.settings.TrustedProxies(), request.Begin(finder.route))
+	r.Use(mw.Metrics())
+	r.Use(requestLogger)
+	r.Use(mw.Recoverer(loggablePath))
 	// The origins, parsed once for both consumers (CORS and the CSRF origin
 	// allowlist) with the parser behind the boot check. Both match entries
 	// exactly, so entries are trimmed ("a, b" must allow "b") and blank ones
 	// are dropped (a blank entry would match a request with no Origin).
 	allowedOrigins := s.settings.CORSOrigins()
 	r.Use(mw.CORS(allowedOrigins))
-	r.Use(mw.Metrics())
-	r.Use(requestLogger)
-	r.Use(mw.Recoverer(loggablePath))
-	// After the Recoverer, so a panic in the lookup, or in a reader that finds
-	// it missing (routeOf), is answered; before the audit detector, which
-	// reads it.
-	r.Use(lookup.Middleware)
 
 	// Cap every request body (limitRequestBody): 1 MB, or the LiteLLM
 	// adapter's own larger cap.
@@ -484,7 +492,7 @@ func (s *Server) routes() chi.Router {
 	})
 
 	allow = newAllowIndex(r)
-	lookup.root = r
+	finder.root = r
 
 	return r
 }
@@ -494,11 +502,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.router.ServeHTTP(w, r)
 }
 
-// useRequestEdge mounts the first middlewares every request passes: the
-// trace span, the server-minted request id, the trusted client IP and the
-// span correction. Anything after it may answer without routing, as a CORS
-// preflight does, so the span correction must sit here.
-func useRequestEdge(r chi.Router, trustProxy string, trustedProxies []*net.IPNet) {
+// useRequestEdge mounts the first middlewares every request passes, begin
+// among them; routes() says their order and why.
+func useRequestEdge(r chi.Router, trustProxy string, trustedProxies []*net.IPNet, begin func(http.Handler) http.Handler) {
 	r.Use(mw.Tracing())
 	// Use mw.RequestID, not chi's middleware.RequestID. chi's honours an
 	// inbound X-Request-Id header as sent, which would let a caller choose the
@@ -521,6 +527,7 @@ func useRequestEdge(r chi.Router, trustProxy string, trustedProxies []*net.IPNet
 		slog.Warn("TRUST_PROXY not set — X-Forwarded-For ignored; rate limiting keys on the direct TCP peer. Behind a balancer that is ONE bucket for everyone: set TRUST_PROXY to the balancer's CIDR, or TRUST_PROXY=none if there is no proxy.")
 	}
 	r.Use(mw.TrustedClientIP(trustedProxies))
+	r.Use(begin)
 	r.Use(mw.TraceRequestAttrs(loggablePath))
 }
 
@@ -532,20 +539,15 @@ func useRequestEdge(r chi.Router, trustProxy string, trustedProxies []*net.IPNet
 // at the API. That two-segment address is why only one segment is kept. It
 // returns one of two things:
 //
-//   - When a route or a mount matched, chi's pattern, such as
-//     "/v1/public/invoices/{token}" or, for a miss under a mount,
-//     "/v1/public/invoices/*".
-//   - When nothing matched (a panic or a CORS preflight before routing, or
-//     a path outside every mount), the first segment followed by "/…", such
-//     as "/invoice/…" or "/V1/…". A path of one segment or fewer is
-//     returned whole. Every API address is under a mount and logs its
-//     pattern, so the later segments of an unmatched path add little, and
-//     the rule needs no list of routes to keep in step.
+//   - When the request matched a route, its pattern from the request's
+//     record, such as "/v1/public/invoices/{token}".
+//   - When it matched none, the first segment followed by "/…", such as
+//     "/invoice/…" or "/v1/…". A path of one segment or fewer is returned
+//     whole. The later segments of an unmatched path add little, and the
+//     rule needs no list of routes to keep in step.
 func loggablePath(r *http.Request) string {
-	if rctx := chi.RouteContext(r.Context()); rctx != nil {
-		if pat := rctx.RoutePattern(); pat != "" {
-			return pat
-		}
+	if pattern := request.Of(r.Context()).Route().Pattern; pattern != "" {
+		return pattern
 	}
 	segs := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/"), "/", 2)
 	if len(segs) < 2 || segs[1] == "" {

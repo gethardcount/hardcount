@@ -30,24 +30,23 @@ import (
 func requestLogger(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
-		ww := middleware.NewWrapResponseWriter(w, r.ProtoMajor)
-		// Authentication runs inside this middleware and hands its handler a
-		// new request, so r's context never learns the caller. Authentication
-		// writes the caller on this record.
-		ctx := request.WithRecord(r.Context())
-		r = r.WithContext(ctx)
-		next.ServeHTTP(ww, r)
+		next.ServeHTTP(w, r)
 
+		// Authentication runs inside this middleware and hands its handler a
+		// new request, so r's context never learns the caller; it writes the
+		// caller on the request's record.
+		ctx := r.Context()
+		rec := request.Of(ctx)
 		attrs := []any{
 			"method", r.Method,
 			"path", loggablePath(r),
-			"status", ww.Status(),
+			"status", rec.Status(),
 			"duration_ms", time.Since(start).Milliseconds(),
 			// Joins this line to the audit row the same request wrote.
 			"request_id", middleware.GetReqID(ctx),
 			"ip", audit.ExtractClientIP(r),
 		}
-		if actor := request.ActorOf(ctx); actor != (request.Actor{}) {
+		if actor := rec.Actor(); actor != (request.Actor{}) {
 			attrs = append(attrs, "actor_type", actor.Type, "actor_id", actor.ID, "tenant_id", actor.TenantID)
 		} else {
 			// No actor_id or tenant_id: a blank field reads as "we lost it",

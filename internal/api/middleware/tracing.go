@@ -3,12 +3,12 @@ package middleware
 import (
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
 	"go.opentelemetry.io/contrib/instrumentation/net/http/otelhttp"
 	semconv "go.opentelemetry.io/otel/semconv/v1.27.0"
 	"go.opentelemetry.io/otel/trace"
 
 	"github.com/gethardcount/hardcount/internal/audit"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
 // Tracing returns middleware that creates an OpenTelemetry span for each HTTP
@@ -34,7 +34,7 @@ func Tracing() func(http.Handler) http.Handler {
 // any client can write. After the handler returns, this sets:
 //
 //   - the span name to "{method} {route}" (method alone when nothing routed),
-//   - http.route to chi's route pattern,
+//   - http.route to the route pattern on the request's record,
 //   - url.path to path(r). path(r) must return a path that holds no link
 //     token.
 //   - client.address to audit.ExtractClientIP, the trusted client IP.
@@ -54,11 +54,9 @@ func TraceRequestAttrs(path func(*http.Request) string) func(http.Handler) http.
 					semconv.URLPath(path(r)),
 					semconv.ClientAddress(audit.ExtractClientIP(r)),
 				)
-				if rctx := chi.RouteContext(r.Context()); rctx != nil {
-					if pat := rctx.RoutePattern(); pat != "" {
-						name += " " + pat
-						span.SetAttributes(semconv.HTTPRoute(pat))
-					}
+				if pat := request.Of(r.Context()).Route().Pattern; pat != "" {
+					name += " " + pat
+					span.SetAttributes(semconv.HTTPRoute(pat))
 				}
 				span.SetName(name)
 			}()

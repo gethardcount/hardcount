@@ -142,8 +142,7 @@ func specShowOnceOperations(t *testing.T) map[string]string {
 	return out
 }
 
-// answersWithShowOnceSecret on real URLs, as the lookup at the root finds
-// them: every listed route with concrete ids, and the near misses around
+// answersWithShowOnceSecret on real URLs, as the root's record finds them: every listed route with concrete ids, and the near misses around
 // them. A path no route matches is never show-once. When no mount matches it
 // either, the router answers it 404 before any group's middleware runs.
 func TestAnswersWithShowOnceSecret(t *testing.T) {

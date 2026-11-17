@@ -73,10 +73,11 @@ func serveThroughLogger(t *testing.T, inside func(context.Context)) map[string]s
 	lines := captureAccessLog(t)
 	type insideKey struct{}
 
-	h := requestLogger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		inside(context.WithValue(r.Context(), insideKey{}, "added inside the logger"))
-		w.WriteHeader(http.StatusOK)
-	}))
+	h := request.Begin(func(r *http.Request) request.Route { return request.Route{Method: r.Method, Pattern: "/v1/invoices"} })(
+		requestLogger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			inside(context.WithValue(r.Context(), insideKey{}, "added inside the logger"))
+			w.WriteHeader(http.StatusOK)
+		})))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/invoices", nil)
 	ctx := context.WithValue(req.Context(), chimw.RequestIDKey, "hc_req_abc123")

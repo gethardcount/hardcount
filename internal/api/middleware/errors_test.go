@@ -6,6 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
 func errorCode(t *testing.T, rec *httptest.ResponseRecorder) string {
@@ -22,9 +24,15 @@ func errorCode(t *testing.T, rec *httptest.ResponseRecorder) string {
 // rawPath is the path function for tests whose paths hold no secret.
 func rawPath(r *http.Request) string { return r.URL.Path }
 
+// recorded is h under the server's root: each request gets its record, which
+// holds the status these middlewares read.
+func recorded(h http.Handler) http.Handler {
+	return request.Begin(func(r *http.Request) request.Route { return request.Route{Method: r.Method} })(h)
+}
+
 // A panic answers the JSON 500, not chi's empty one.
 func TestRecoverer_PanicAnswersTheEnvelope(t *testing.T) {
-	h := Recoverer(rawPath)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("boom") }))
+	h := recorded(Recoverer(rawPath)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic("boom") })))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	if rec.Code != http.StatusInternalServerError || errorCode(t, rec) != "internal_error" {
@@ -34,11 +42,11 @@ func TestRecoverer_PanicAnswersTheEnvelope(t *testing.T) {
 
 // A panic after the handler started its answer leaves that answer alone.
 func TestRecoverer_PanicAfterWriteKeepsTheAnswer(t *testing.T) {
-	h := Recoverer(rawPath)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	h := recorded(Recoverer(rawPath)(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"id":"x"}`))
 		panic("late")
-	}))
+	})))
 	rec := httptest.NewRecorder()
 	h.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	if rec.Code != http.StatusCreated || rec.Body.String() != `{"id":"x"}` {
@@ -48,7 +56,7 @@ func TestRecoverer_PanicAfterWriteKeepsTheAnswer(t *testing.T) {
 
 // net/http's abort sentinel is passed on, not turned into a 500.
 func TestRecoverer_RepanicsAbortHandler(t *testing.T) {
-	h := Recoverer(rawPath)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic(http.ErrAbortHandler) }))
+	h := recorded(Recoverer(rawPath)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { panic(http.ErrAbortHandler) })))
 	defer func() {
 		if r := recover(); r != http.ErrAbortHandler { //nolint:errorlint // the sentinel itself
 			t.Errorf("recovered %v, want http.ErrAbortHandler re-panicked", r)
@@ -60,20 +68,20 @@ func TestRecoverer_RepanicsAbortHandler(t *testing.T) {
 // A handler that runs out of time before writing gets the JSON 504; one
 // that answered in time keeps its answer.
 func TestTimeout_AnswersTheEnvelopeOnlyWhenNothingWasWritten(t *testing.T) {
-	slow := Timeout(10 * time.Millisecond)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+	slow := recorded(Timeout(10 * time.Millisecond)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 		<-r.Context().Done()
-	}))
+	})))
 	rec := httptest.NewRecorder()
 	slow.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	if rec.Code != http.StatusGatewayTimeout || errorCode(t, rec) != "timeout" {
 		t.Errorf("slow handler = %d %q, want 504 timeout", rec.Code, rec.Body.String())
 	}
 
-	wroteThenSlow := Timeout(10 * time.Millisecond)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	wroteThenSlow := recorded(Timeout(10 * time.Millisecond)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 		<-r.Context().Done()
-	}))
+	})))
 	rec = httptest.NewRecorder()
 	wroteThenSlow.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/", nil))
 	if rec.Code != http.StatusOK || rec.Body.String() != "ok" {

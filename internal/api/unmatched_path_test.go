@@ -40,25 +40,33 @@ func accessLogPath(t *testing.T, req *http.Request) string {
 	return ""
 }
 
-// The access log of the production router holds the route's pattern when
-// a route or a mount matched, and only the first segment of a path that
-// matched nothing.
+// The access log of the production router holds the pattern of the route
+// found at the root, even for a request answered before its handler ran,
+// and only the first segment of a path that matched no route. A CORS
+// preflight is logged too: the log sits above CORS.
 func TestAccessLog_PathIsAPatternOrTheFirstSegment(t *testing.T) {
 	cases := []struct {
-		name string
-		path string
-		want string
+		name, method, path, want string
 	}{
-		{"the hosted invoice page's address keeps its first segment", "/invoice/" + fakeLinkToken, "/invoice/…"},
-		{"a path outside every mount keeps one segment, upper case", "/V1/public/invoices/" + fakeLinkToken, "/V1/…"},
-		{"a path outside every mount keeps one segment, another version", "/v2/public/invoices/" + fakeLinkToken, "/v2/…"},
-		{"a one-segment path outside every mount is logged whole", "/healthz", "/healthz"},
-		{"a mistyped path under v1 logs the mount pattern", "/v1/custmers/" + fakeLinkToken, "/v1/*"},
-		{"a miss under a link-token mount logs the mount pattern", "/v1/public/invoices/" + fakeLinkToken + "/no-such-page", "/v1/public/invoices/*"},
+		{"a route refused by authentication logs its pattern", http.MethodGet, "/v1/customers/cus_1", "/v1/customers/{id}"},
+		{"a link-token route logs its pattern, never the token", http.MethodGet, "/v1/public/invoices/" + fakeLinkToken, "/v1/public/invoices/{token}"},
+		{"the hosted invoice page's address keeps its first segment", http.MethodGet, "/invoice/" + fakeLinkToken, "/invoice/…"},
+		{"a path outside every mount keeps one segment, upper case", http.MethodGet, "/V1/public/invoices/" + fakeLinkToken, "/V1/…"},
+		{"a path outside every mount keeps one segment, another version", http.MethodGet, "/v2/public/invoices/" + fakeLinkToken, "/v2/…"},
+		{"a one-segment path outside every mount is logged whole", http.MethodGet, "/healthz", "/healthz"},
+		{"a mistyped path under v1 keeps one segment", http.MethodGet, "/v1/custmers/" + fakeLinkToken, "/v1/…"},
+		{"a miss under a link-token mount keeps one segment", http.MethodGet, "/v1/public/invoices/" + fakeLinkToken + "/no-such-page", "/v1/…"},
+		{"a mount without the method keeps one segment", http.MethodDelete, "/v1/customers", "/v1/…"},
+		{"a CORS preflight is logged", http.MethodOptions, "/v1/public/invoices/" + fakeLinkToken, "/v1/…"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			got := accessLogPath(t, httptest.NewRequest(http.MethodGet, tc.path, nil))
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			if tc.method == http.MethodOptions {
+				req.Header.Set("Origin", "http://localhost:5173")
+				req.Header.Set("Access-Control-Request-Method", http.MethodGet)
+			}
+			got := accessLogPath(t, req)
 			if got != tc.want {
 				t.Errorf("access log path = %q, want %q", got, tc.want)
 			}
@@ -66,8 +74,7 @@ func TestAccessLog_PathIsAPatternOrTheFirstSegment(t *testing.T) {
 	}
 }
 
-// A CORS preflight is answered before routing, so it never reaches the
-// access log; its span's url.path keeps only the first segment.
+// A CORS preflight's span's url.path keeps only the first segment.
 func TestRequestEdge_PreflightSpanKeepsTheFirstSegment(t *testing.T) {
 	rec := tracetest.NewSpanRecorder()
 	prev := otel.GetTracerProvider()

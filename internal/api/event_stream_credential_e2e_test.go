@@ -15,6 +15,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 	"github.com/gethardcount/hardcount/internal/session"
 	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/webhook"
@@ -49,7 +50,10 @@ func newStreamRig(t *testing.T, db, authDB *postgres.DB) *streamRig {
 	sessions := session.NewService(session.NewPostgresStore(authDB))
 	keys := auth.NewService(authDB, audit.NewLogger(authDB))
 	r := chi.NewRouter()
-	r.Use(session.RequireCaller(sessions, keys)) // the /v1 group's authentication, as router.go mounts the stream
+	// The root's record, then the /v1 group's authentication, as router.go
+	// mounts the stream.
+	r.Use(request.Begin(func(req *http.Request) request.Route { return request.Route{Method: req.Method} }))
+	r.Use(session.RequireCaller(sessions, keys))
 	r.Route("/v1/webhook_events/stream", eventStreamRoute(webhook.NewHandler(srv.WebhookOutSvc), sessions, keys, testStreamInterval))
 	stream := httptest.NewServer(r)
 	t.Cleanup(stream.Close)

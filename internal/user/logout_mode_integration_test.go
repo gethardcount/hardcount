@@ -9,6 +9,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 	"github.com/gethardcount/hardcount/internal/session"
 )
 
@@ -76,7 +77,8 @@ func (it loginIT) authRows(t *testing.T, action string) []authRow {
 	return out
 }
 
-// postAuth posts body to path with the session cookie when cookie is not "".
+// postAuth posts body to path with the session cookie when cookie is not "",
+// under the server's root, which gives the request its record.
 func postAuth(h http.Handler, path, cookie, body string) *httptest.ResponseRecorder {
 	var req *http.Request
 	if body == "" {
@@ -89,7 +91,7 @@ func postAuth(h http.Handler, path, cookie, body string) *httptest.ResponseRecor
 		req.AddCookie(&http.Cookie{Name: session.CookieName, Value: cookie})
 	}
 	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	request.Begin(func(r *http.Request) request.Route { return request.Route{Method: r.Method} })(h).ServeHTTP(rr, req)
 	return rr
 }
 

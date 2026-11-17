@@ -130,22 +130,20 @@ func TestRequireCaller_NamesTheActorOnTheRecord(t *testing.T) {
 	}
 	store.sessions[sess.IDHash] = sess // the fake's InsertTx keeps nothing
 
-	serve := func(cookie string) (outer context.Context, seen *http.Request, status int) {
-		outer = request.WithRecord(t.Context())
-		rec := httptest.NewRecorder()
-		RequireCaller(sessions, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	serve := func(cookie string) (record *request.Record, seen *http.Request, status int) {
+		record, status = recordOf(RequireCaller(sessions, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			seen = r
-		})).ServeHTTP(rec, sessionRequest(cookie).WithContext(outer))
-		return outer, seen, rec.Code
+		})), sessionRequest(cookie))
+		return record, seen, status
 	}
 
 	t.Run("a session", func(t *testing.T) {
-		outer, seen, status := serve(rawSession)
+		record, seen, status := serve(rawSession)
 		if status != http.StatusOK || seen == nil {
 			t.Fatalf("status = %d (reached=%v), want 200", status, seen != nil)
 		}
 		want := request.Actor{Type: "user", ID: "usr_owner", TenantID: "ten_1"}
-		if got := request.ActorOf(outer); got != want {
+		if got := record.Actor(); got != want {
 			t.Errorf("actor on the record = %+v, want %+v", got, want)
 		}
 		if actorType, actorID := audit.ResolveActor(seen.Context()); actorType != want.Type || actorID != want.ID {
@@ -155,11 +153,11 @@ func TestRequireCaller_NamesTheActorOnTheRecord(t *testing.T) {
 
 	// An unknown cookie and no API key: 401 for missing credentials.
 	t.Run("refused", func(t *testing.T) {
-		outer, seen, status := serve("sess_unknown")
+		record, seen, status := serve("sess_unknown")
 		if status != http.StatusUnauthorized || seen != nil {
 			t.Fatalf("status = %d (reached=%v), want 401", status, seen != nil)
 		}
-		if got := request.ActorOf(outer); got != (request.Actor{}) {
+		if got := record.Actor(); got != (request.Actor{}) {
 			t.Errorf("actor on the record = %+v, want none: nobody signed in", got)
 		}
 	})
@@ -167,14 +165,28 @@ func TestRequireCaller_NamesTheActorOnTheRecord(t *testing.T) {
 
 // NameActor and the audit log name a session's user the same way.
 func TestNameActor(t *testing.T) {
-	ctx := request.WithRecord(t.Context())
 	sess := Session{UserID: "usr_owner", TenantID: "ten_1"}
-	NameActor(ctx, sess)
+	record, _ := recordOf(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		NameActor(r.Context(), sess)
+	}), httptest.NewRequest(http.MethodGet, "/", nil))
 	want := request.Actor{Type: "user", ID: "usr_owner", TenantID: "ten_1"}
-	if got := request.ActorOf(ctx); got != want {
+	if got := record.Actor(); got != want {
 		t.Errorf("actor on the record = %+v, want %+v", got, want)
 	}
 	if actorType, actorID := audit.ResolveActor(applyToCtx(t.Context(), sess)); actorType != want.Type || actorID != want.ID {
 		t.Errorf("the audit log names this session %s/%s, NameActor %s/%s", actorType, actorID, want.Type, want.ID)
 	}
+}
+
+// recordOf serves req through h under the server's root, so the request has
+// its record, and returns the record and the status.
+func recordOf(h http.Handler, req *http.Request) (*request.Record, int) {
+	var record *request.Record
+	w := httptest.NewRecorder()
+	request.Begin(func(r *http.Request) request.Route { return request.Route{Method: r.Method} })(
+		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			record = request.Of(r.Context())
+			h.ServeHTTP(w, r)
+		})).ServeHTTP(w, req)
+	return record, w.Code
 }

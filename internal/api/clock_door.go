@@ -15,6 +15,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
 // clockDoor is "the door": one middleware, the last of every route group,
@@ -26,8 +27,8 @@ import (
 // and binds.
 //
 // It decides in this order:
-//   - It takes the request's route, which the lookup at the root found
-//     (routeLookup: an in-memory Find, no database read), and the route's
+//   - It takes the request's route from its record, found at the root
+//     (routeFinder: an in-memory Find, no database read), and the route's
 //     entry in routeTable.
 //   - A route the router does not have, and a decidedIn route: in test mode
 //     the door records real time with no instant (clock.WithRealTime, one of
@@ -126,12 +127,12 @@ func (h doorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // route is the request's clock declaration in routeTable and its path
-// parameters, as the lookup at the root found them (routeOf): false when the
-// router has no such route.
+// parameters, from the request's record: false when the request matched no
+// route.
 func (d *clockDoor) route(r *http.Request) (clockDecl, *chi.Context, bool) {
-	m := routeOf(r.Context())
-	decl, ok := routeTable[m.key]
-	return decl.clock, m.params, ok
+	rt := request.Of(r.Context()).Route()
+	decl, ok := routeTable[routeKey{Method: rt.Method, Pattern: rt.Pattern}]
+	return decl.clock, rt.Params, ok
 }
 
 // errUnknownClockSource is pinFor's answer for a route table entry whose

@@ -16,7 +16,7 @@ import (
 //   - whether its answer carries a secret shown only once (the idempotency
 //     layer never keeps that answer for a replay).
 //
-// The lookup at the root finds each request's key (routeLookup).
+// Each request's key is found at the root, on its record (routeFinder).
 // TestRouteTable_MatchesLiveRoutes walks the router and compares it with the
 // table in both directions, and reports every gap in one run: a route with
 // no entry, an entry with no route, a mutating route or an export with no
@@ -60,10 +60,10 @@ func (d routeDecl) showsSecretOnce() routeDecl {
 	return d
 }
 
-// answersWithShowOnceSecret reports whether r's route (routeOf) answers with
-// a secret shown once, so the idempotency layer leaves it alone.
+// answersWithShowOnceSecret reports whether r's route answers with a secret
+// shown once, so the idempotency layer leaves it alone.
 func answersWithShowOnceSecret(r *http.Request) bool {
-	return routeTable[routeOf(r.Context()).key].showOnce
+	return routeTable[routeKeyOf(r.Context())].showOnce
 }
 
 // ---------------------------------------------------------------------------
@@ -249,20 +249,20 @@ func exempt(reason exemptReason, note string) auditDecl {
 	return auditDecl{Coverage: auditExempt, Reason: reason, Note: note}
 }
 
-// auditRoute is the request's route for the runtime detector (routeOf): its
-// pattern, which labels the uncovered-mutation counter, and whether the
-// table declares it exempt. The detector asks before it reports an uncovered
+// auditRoute is the request's route for the runtime detector: its pattern,
+// which labels the uncovered-mutation counter, and whether the table
+// declares it exempt. The detector asks before it reports an uncovered
 // mutation. Anything not in the table is not exempt, so a gap is reported
 // rather than hidden.
 func auditRoute(r *http.Request) (pattern string, exempt bool) {
-	key := routeOf(r.Context()).key
+	key := routeKeyOf(r.Context())
 	return key.Pattern, routeTable[key].audit.Coverage == auditExempt
 }
 
 // canonicalRoute normalizes a chi route pattern, so the two sources of
 // patterns agree on one key. One is chi.Walk's pattern string, which the
-// table tests see. The other is Find's, which the lookup at the root gives
-// every request (routeLookup). Raw, they can differ in two ways:
+// table tests see. The other is Find's, which routeFinder gives each
+// request's record. Raw, they can differ in two ways:
 //   - Walk does a single strings.Replace("/*/", "/") pass. So a Mount("/", …)
 //     inside a Route(…) leaves a "/*/" behind ("/v1/auth/*/login").
 //   - A subrouter's r.Post("/") arrives with a trailing slash
@@ -270,7 +270,7 @@ func auditRoute(r *http.Request) (pattern string, exempt bool) {
 //
 // chi's RoutePattern() loops the replace and trims; applying the same
 // normalization to both sides makes them meet
-// (TestRouteLookup_FindsEveryRouteAndItsParams).
+// (TestRouteFinder_FindsEveryRouteAndItsParams).
 func canonicalRoute(p string) string {
 	for strings.Contains(p, "/*/") {
 		p = strings.ReplaceAll(p, "/*/", "/")

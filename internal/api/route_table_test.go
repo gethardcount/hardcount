@@ -116,7 +116,7 @@ func TestRouteTable_DeclarationsAreWhole(t *testing.T) {
 	for k, entry := range routeTable {
 		name := k.Method + " " + k.Pattern
 		if got := canonicalRoute(k.Pattern); got != k.Pattern {
-			t.Errorf("%s: key is not canonical (canonicalRoute gives %q); the lookup would never find it", name, got)
+			t.Errorf("%s: key is not canonical (canonicalRoute gives %q); the root would never find it", name, got)
 		}
 		switch c := entry.clock; c.Source {
 		case clockRealTime:
@@ -245,8 +245,8 @@ func TestCanonicalRoute(t *testing.T) {
 }
 
 // TestAuditRoute_ExemptOnlyForDeclaredRoutes: the detector's view of a
-// request's route, as the lookup at the root found it, is exempt only for a
-// route the table declares exempt.
+// request's route, from its record, is exempt only for a route the table
+// declares exempt.
 func TestAuditRoute_ExemptOnlyForDeclaredRoutes(t *testing.T) {
 	for _, tc := range []struct {
 		path string

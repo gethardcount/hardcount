@@ -16,6 +16,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -25,21 +26,30 @@ func uncoveredCount(t *testing.T, route string) float64 {
 	return promtest.ToFloat64(auditUncoveredMutations.WithLabelValues(route))
 }
 
-// byPattern is the route the tests give the detector: chi's matched pattern,
-// exempt when listed as "METHOD pattern". In the server, the lookup at the
-// root gives it (api.auditRoute).
+// withRecord mounts the server's root on r: each request's record, with the
+// route found on r (as api.routeFinder finds it on the built router).
+func withRecord(r chi.Router) {
+	r.Use(request.Begin(func(req *http.Request) request.Route {
+		return request.Route{Method: req.Method, Pattern: r.Find(chi.NewRouteContext(), req.Method, req.URL.Path)}
+	}))
+}
+
+// byPattern is the route the tests give the detector: the record's pattern,
+// exempt when listed as "METHOD pattern". In the server, api.auditRoute
+// gives it.
 func byPattern(exempt map[string]bool) func(*http.Request) (string, bool) {
 	return func(r *http.Request) (string, bool) {
-		pattern := chi.RouteContext(r.Context()).RoutePattern()
+		pattern := request.Of(r.Context()).Route().Pattern
 		return pattern, exempt[r.Method+" "+pattern]
 	}
 }
 
-// detectorRouter builds a router shaped like the real one: the detector at the
-// ROOT, routes underneath in a mounted subtree (so RoutePattern() resolution is
-// exercised through a real nested Mount, not a flat router).
+// detectorRouter builds a router shaped like the real one: the record and the
+// detector at the ROOT, routes underneath in a mounted subtree, so the route
+// is found through a real nested Mount, not a flat router.
 func detectorRouter(exempt map[string]bool) chi.Router {
 	r := chi.NewRouter()
+	withRecord(r)
 	r.Use(AuditCoverage(byPattern(exempt)))
 
 	v1 := chi.NewRouter()
@@ -192,6 +202,7 @@ func TestAuditCoverage_NeverMutatesTheResponse(t *testing.T) {
 
 	observed := httptest.NewRecorder()
 	r := chi.NewRouter()
+	withRecord(r)
 	r.Use(AuditCoverage(byPattern(nil)))
 	r.Post("/v1/silent", handler)
 	r.ServeHTTP(observed, httptest.NewRequest("POST", "/v1/silent", nil))
@@ -222,6 +233,7 @@ func TestAuditCoverage_PreservesStreaming(t *testing.T) {
 	flushed := 0
 
 	r := chi.NewRouter()
+	withRecord(r)
 	r.Use(AuditCoverage(byPattern(nil)))
 	r.Get("/v1/exports/usage-events", func(w http.ResponseWriter, req *http.Request) {
 		f, ok := w.(http.Flusher)
@@ -259,6 +271,7 @@ func TestAuditCoverage_PreservesStreaming(t *testing.T) {
 // second seeder between the detector and the handler.
 func TestAuditCoverage_SeedsRequestStateOnce(t *testing.T) {
 	r := chi.NewRouter()
+	withRecord(r)
 	r.Use(AuditCoverage(byPattern(nil)))
 
 	r.Use(func(next http.Handler) http.Handler {
@@ -293,6 +306,7 @@ func TestAuditCoverage_RealEmissionIsSilent(t *testing.T) {
 	logger := audit.NewLogger(db)
 
 	r := chi.NewRouter()
+	withRecord(r)
 	r.Use(AuditCoverage(byPattern(nil)))
 	r.Post("/v1/invoices", func(w http.ResponseWriter, req *http.Request) {
 		if err := logger.Log(req.Context(), tenantID, domain.AuditActionCreate,
@@ -363,6 +377,7 @@ func TestAuditCoverage_IdempotentReplayIsNotAnUncoveredMutation(t *testing.T) {
 	var handlerCalls atomic.Int64
 
 	r := chi.NewRouter()
+	withRecord(r)
 	r.Use(AuditCoverage(byPattern(nil)))
 	r.Use(Idempotency(db, nil))
 	r.Post("/v1/invoices", func(w http.ResponseWriter, req *http.Request) {

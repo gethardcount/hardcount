@@ -8,9 +8,8 @@ import (
 	"runtime/debug"
 	"time"
 
-	chimw "github.com/go-chi/chi/v5/middleware"
-
 	"github.com/gethardcount/hardcount/internal/api/respond"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
 // Recoverer turns a handler panic into the JSON 500 every other internal
@@ -28,7 +27,6 @@ import (
 func Recoverer(path func(*http.Request) string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
 			defer func() {
 				rvr := recover()
 				if rvr == nil {
@@ -38,11 +36,11 @@ func Recoverer(path func(*http.Request) string) func(http.Handler) http.Handler 
 					panic(rvr)
 				}
 				slog.ErrorContext(r.Context(), "handler panic", "panic", rvr, "method", r.Method, "path", path(r), "stack", string(debug.Stack()))
-				if ww.Status() == 0 && r.Header.Get("Connection") != "Upgrade" {
+				if request.Of(r.Context()).Status() == 0 && r.Header.Get("Connection") != "Upgrade" {
 					respond.InternalError(w, r)
 				}
 			}()
-			next.ServeHTTP(ww, r)
+			next.ServeHTTP(w, r)
 		})
 	}
 }
@@ -66,12 +64,11 @@ type TimeLimit struct {
 
 func (t TimeLimit) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithTimeout(r.Context(), t.limit)
-	ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
 	defer func() {
 		cancel()
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) && ww.Status() == 0 {
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) && request.Of(ctx).Status() == 0 {
 			respond.Timeout(w, r)
 		}
 	}()
-	t.next.ServeHTTP(ww, r.WithContext(ctx))
+	t.next.ServeHTTP(w, r.WithContext(ctx))
 }
