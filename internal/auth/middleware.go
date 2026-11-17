@@ -6,15 +6,58 @@ import (
 	"github.com/gethardcount/hardcount/internal/api/respond"
 )
 
+// PermissionCheck answers 403 unless the caller may make the request, by one
+// of three rules (Kind). Require, RequireMethod and RequireSession make it.
+type PermissionCheck struct {
+	// Kind is the rule.
+	Kind CheckKind
+	// Read is the permission a read needs (GET, HEAD, OPTIONS), and Write
+	// the one a write needs (POST, PUT, PATCH, DELETE). Require sets both to
+	// its one permission. RequireSession checks neither.
+	Read, Write Permission
+
+	refusal string // RequireSession's 403 message
+	next    http.Handler
+}
+
+// CheckKind is the rule a PermissionCheck applies.
+type CheckKind int
+
+const (
+	// CheckPermission needs one permission for every method (Require).
+	CheckPermission CheckKind = iota
+	// CheckByMethod needs Read for a read and Write for a write
+	// (RequireMethod).
+	CheckByMethod
+	// CheckSession lets only dashboard sessions through (RequireSession).
+	CheckSession
+)
+
+func (c PermissionCheck) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	switch c.Kind {
+	case CheckSession:
+		if !CallerOf(r.Context()).IsSession() {
+			respond.Forbidden(w, r, c.refusal)
+			return
+		}
+	default:
+		perm := c.Read
+		switch r.Method {
+		case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
+			perm = c.Write
+		}
+		if !permitted(w, r, perm) {
+			return
+		}
+	}
+	c.next.ServeHTTP(w, r)
+}
+
 // Require returns middleware that answers 403 unless the caller holds perm
 // (HasPermission).
 func Require(perm Permission) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if permitted(w, r, perm) {
-				next.ServeHTTP(w, r)
-			}
-		})
+		return PermissionCheck{Kind: CheckPermission, Read: perm, Write: perm, next: next}
 	}
 }
 
@@ -36,13 +79,7 @@ func permitted(w http.ResponseWriter, r *http.Request, perm Permission) bool {
 func RequireSession(task string) func(http.Handler) http.Handler {
 	msg := "this endpoint requires a dashboard session — sign in to the dashboard to " + task
 	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !CallerOf(r.Context()).IsSession() {
-				respond.Forbidden(w, r, msg)
-				return
-			}
-			next.ServeHTTP(w, r)
-		})
+		return PermissionCheck{Kind: CheckSession, refusal: msg, next: next}
 	}
 }
 
@@ -52,15 +89,6 @@ func RequireSession(task string) func(http.Handler) http.Handler {
 // and writes, where one Require would let a caller that may read also write.
 func RequireMethod(read, write Permission) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			perm := read
-			switch r.Method {
-			case http.MethodPost, http.MethodPut, http.MethodPatch, http.MethodDelete:
-				perm = write
-			}
-			if permitted(w, r, perm) {
-				next.ServeHTTP(w, r)
-			}
-		})
+		return PermissionCheck{Kind: CheckByMethod, Read: read, Write: write, next: next}
 	}
 }

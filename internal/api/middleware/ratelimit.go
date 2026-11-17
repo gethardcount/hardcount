@@ -109,38 +109,48 @@ func NewRateLimiter(rdb *goredis.Client, name string, rate int, window time.Dura
 // requests.
 func (rl *RateLimiter) Middleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			key, err := rateLimitKey(r)
-			if err != nil {
-				respond.FromError(w, r, err, "rate_limit")
-				return
-			}
-			remaining, resetAt, retryIn, allowed := rl.allow(r.Context(), key)
-
-			// Set rate limit headers (Stripe convention)
-			w.Header().Set("X-RateLimit-Limit", strconv.Itoa(rl.limit.Rate))
-			w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
-			w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetAt.Unix(), 10))
-
-			if !allowed {
-				// Retry-After is when the next request may pass, rounded
-				// up to a whole second. It is not the reset time, when
-				// the whole bucket is full again. That is a full period
-				// (61s at any per-minute limit), although one request's
-				// token refills in period/rate. A client that honors the
-				// header would wait a minute for nothing.
-				retryAfter := int(math.Ceil(retryIn.Seconds()))
-				if retryAfter < 1 {
-					retryAfter = 1
-				}
-				w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
-				respond.RateLimited(w, r)
-				return
-			}
-
-			next.ServeHTTP(w, r)
-		})
+		return RateLimited{limiter: rl, next: next}
 	}
+}
+
+// RateLimited counts each request against its limiter, keyed by tenant, or by
+// client IP for a request that is not authenticated, and answers 429 past the
+// limit. RateLimiter.Middleware makes it.
+type RateLimited struct {
+	limiter *RateLimiter
+	next    http.Handler
+}
+
+func (l RateLimited) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	key, err := rateLimitKey(r)
+	if err != nil {
+		respond.FromError(w, r, err, "rate_limit")
+		return
+	}
+	remaining, resetAt, retryIn, allowed := l.limiter.allow(r.Context(), key)
+
+	// Set rate limit headers (Stripe convention)
+	w.Header().Set("X-RateLimit-Limit", strconv.Itoa(l.limiter.limit.Rate))
+	w.Header().Set("X-RateLimit-Remaining", strconv.Itoa(remaining))
+	w.Header().Set("X-RateLimit-Reset", strconv.FormatInt(resetAt.Unix(), 10))
+
+	if !allowed {
+		// Retry-After is when the next request may pass, rounded
+		// up to a whole second. It is not the reset time, when
+		// the whole bucket is full again. That is a full period
+		// (61s at any per-minute limit), although one request's
+		// token refills in period/rate. A client that honors the
+		// header would wait a minute for nothing.
+		retryAfter := int(math.Ceil(retryIn.Seconds()))
+		if retryAfter < 1 {
+			retryAfter = 1
+		}
+		w.Header().Set("Retry-After", strconv.Itoa(retryAfter))
+		respond.RateLimited(w, r)
+		return
+	}
+
+	l.next.ServeHTTP(w, r)
 }
 
 // AllowKey is the exported form of allow, for a handler that enforces a

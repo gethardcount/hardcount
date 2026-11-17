@@ -7,9 +7,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
-	"regexp"
-	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -21,6 +18,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/integrations/litellm"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/session"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -143,20 +141,6 @@ var ingestKeyRoutes = map[string]bool{
 	"POST /v1/meters":                    false,
 }
 
-// middlewareName finds a middleware's constructor in its closure's runtime
-// name (".../auth.Require.func1", or ".../auth.Require.1" when inlined):
-// chi.Walk reports middlewares as bare funcs. Any package's Require matches.
-var middlewareName = regexp.MustCompile(`[./](RequireCaller|Require|RequireMethod|RequireSession)\.(?:func)?\d+$`)
-
-// middlewareKind returns which of those constructors made mw, or "".
-func middlewareKind(mw func(http.Handler) http.Handler) string {
-	m := middlewareName.FindStringSubmatch(runtime.FuncForPC(reflect.ValueOf(mw).Pointer()).Name())
-	if m == nil {
-		return ""
-	}
-	return m[1]
-}
-
 // TestIngestKey_RefusedOnEveryRouteButUsage walks the live router. On every
 // route that takes an API key, it runs the route's permission gates (the
 // auth.Require, RequireMethod and RequireSession middlewares chi.Walk
@@ -184,15 +168,15 @@ func TestIngestKey_RefusedOnEveryRouteButUsage(t *testing.T) {
 		route = canonicalRoute(route)
 		authed, sessionOnly := false, false
 		var gates []func(http.Handler) http.Handler
-		for _, mw := range mws {
-			switch middlewareKind(mw) {
-			case "RequireCaller":
+		for i, h := range chainOf(mws) {
+			switch h := h.(type) {
+			case session.CallerRequired:
 				authed = true
-			case "RequireSession":
-				sessionOnly = true
-				gates = append(gates, mw)
-			case "Require", "RequireMethod":
-				gates = append(gates, mw)
+			case auth.PermissionCheck:
+				if h.Kind == auth.CheckSession {
+					sessionOnly = true
+				}
+				gates = append(gates, mws[i])
 			}
 		}
 		if !authed {

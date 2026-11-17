@@ -5,9 +5,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
-	"reflect"
 	"regexp"
-	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -251,8 +249,7 @@ func specIdempotencyHeader(t *testing.T) map[string]bool {
 // test: an inlined copy can be a different function from one built here. If
 // a rename breaks the match, the test finds 0 routes and fails.
 func isIdempotencyMiddleware(m func(http.Handler) http.Handler) bool {
-	fn := runtime.FuncForPC(reflect.ValueOf(m).Pointer())
-	return fn != nil && strings.Contains(fn.Name(), ".Idempotency.")
+	return chainIndex([]func(http.Handler) http.Handler{m}, idempotencyMW) == 0
 }
 
 // TestOpenAPISpec_IdempotencyKeyHeader ties the spec's Idempotency-Key header

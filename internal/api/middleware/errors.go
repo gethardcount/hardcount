@@ -53,16 +53,26 @@ func Recoverer(path func(*http.Request) string) func(http.Handler) http.Handler 
 // answered an empty 504.
 func Timeout(d time.Duration) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx, cancel := context.WithTimeout(r.Context(), d)
-			ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
-			defer func() {
-				cancel()
-				if errors.Is(ctx.Err(), context.DeadlineExceeded) && ww.Status() == 0 {
-					respond.Timeout(w, r)
-				}
-			}()
-			next.ServeHTTP(ww, r.WithContext(ctx))
-		})
+		return TimeLimit{limit: d, next: next}
 	}
+}
+
+// TimeLimit ends the request's context after limit. A handler that has
+// written nothing by then gets the JSON 504 (respond.Timeout); one that already
+// started its answer keeps it. Timeout makes it.
+type TimeLimit struct {
+	limit time.Duration
+	next  http.Handler
+}
+
+func (t TimeLimit) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), t.limit)
+	ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
+	defer func() {
+		cancel()
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) && ww.Status() == 0 {
+			respond.Timeout(w, r)
+		}
+	}()
+	t.next.ServeHTTP(ww, r.WithContext(ctx))
 }
