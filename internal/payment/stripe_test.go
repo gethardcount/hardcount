@@ -157,7 +157,7 @@ func newMockInvoiceUpdater() *mockInvoiceUpdater {
 // StampChargeOutcome models the real store's attempt-seq CAS (P13), so a
 // charge-path test exercises the same refusal production does. The SQL itself
 // is proven in internal/invoice/charge_outcome_guard_integration_test.go.
-func (m *mockInvoiceUpdater) StampChargeOutcome(_ context.Context, tenantID, id string, attemptSeq int64, ps domain.InvoicePaymentStatus, piID, errMsg string) (domain.Invoice, bool, error) {
+func (m *mockInvoiceUpdater) StampChargeOutcome(ctx context.Context, tenantID, id string, attemptSeq int64, ps domain.InvoicePaymentStatus, piID, errMsg string) (domain.Invoice, bool, error) {
 	if ps == domain.PaymentFailed && piID != "" {
 		// Mirror the store: a failure naming a PaymentIntent is a report, not a stamp.
 		return domain.Invoice{}, false, fmt.Errorf("stamp charge outcome: a failure naming a PaymentIntent goes through MarkPaymentFailedReportingTransition")
@@ -173,6 +173,7 @@ func (m *mockInvoiceUpdater) StampChargeOutcome(_ context.Context, tenantID, id 
 	inv.StripePaymentIntentID = piID
 	inv.LastPaymentError = errMsg
 	inv.ChargeAttemptSeq++
+	inv.UpdatedAt = clock.Now(ctx)
 	m.invoices[id] = inv
 	if piID != "" {
 		m.byPI[piID] = id

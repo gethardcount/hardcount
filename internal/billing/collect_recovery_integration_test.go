@@ -75,6 +75,7 @@ type collectHarness struct {
 	newEng   func(ps billing.PaymentReadiness, ch billing.InvoiceCharger, ds billing.DunningStarter) *billing.Engine
 	seed     func(t *testing.T, num string) domain.Invoice
 	db       *postgres.DB
+	clock    *clock.Fake // every engine's clock: a charger given it dates Stripe's answers on it
 }
 
 func newCollectHarness(t *testing.T) collectHarness {
@@ -85,12 +86,13 @@ func newCollectHarness(t *testing.T) collectHarness {
 	invoiceStore := invoice.NewPostgresStore(db)
 	subStore := subscription.NewPostgresStore(db)
 	customerStore := customer.NewPostgresStore(db)
+	clk := clock.NewFake(time.Now().UTC())
 
 	newEng := func(ps billing.PaymentReadiness, ch billing.InvoiceCharger, ds billing.DunningStarter) *billing.Engine {
 		e := billing.NewEngine(
 			&subStoreAdapter{subStore}, &usageStoreAdapter{usage.NewPostgresStore(db)},
 			&pricingStoreAdapter{pricing.NewPostgresStore(db)}, &invoiceStoreAdapter{invoiceStore},
-			nil, tenant.NewSettingsStore(db), ps, ch, clock.NewFake(time.Now().UTC()),
+			nil, tenant.NewSettingsStore(db), ps, ch, clk,
 		)
 		e.SetTaxProviderResolver(tax.NewResolver(nil))
 		e.SetNoPaymentMethodNotifier(&testNoPMNotifier{})
@@ -124,7 +126,35 @@ func newCollectHarness(t *testing.T) collectHarness {
 		}
 		return inv
 	}
-	return collectHarness{ctx: ctx, tenantID: tenantID, invoices: invoiceStore, newEng: newEng, seed: seed, db: db}
+	return collectHarness{ctx: ctx, tenantID: tenantID, invoices: invoiceStore, newEng: newEng, seed: seed, db: db, clock: clk}
+}
+
+// The nudge runs on its action's instant, here a finalize a minute before
+// Stripe answers. The charger's settle dates paid_at when the answer arrives,
+// and so is the nudge's own write after it, the clear of auto_charge_pending:
+// the invoice's updated_at never goes back before paid_at.
+func TestCollect_TheWriteAfterTheAnswerIsDatedWhenItArrives_RealStore(t *testing.T) {
+	h := newCollectHarness(t)
+	inv := h.seed(t, "INV-ARRIVAL")
+	stub := &stripeReply{}
+	stub.set(200, `{"id":"pi_arrival","object":"payment_intent","status":"succeeded","amount":5000,"currency":"usd"}`)
+	charger := liveCharger(h, stub, &countingDunning{})
+	charger.SetClock(h.clock)
+	e := h.newEng(testPaymentSetupsReady{}, charger, nil)
+
+	action := h.clock.Now(h.ctx).Add(-time.Minute)
+	e.CollectInvoice(clock.WithEffectiveNow(h.ctx, action), h.tenantID, inv.ID, nil)
+
+	got, err := h.invoices.Get(h.ctx, h.tenantID, inv.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status != domain.InvoicePaid || got.PaidAt == nil || got.AutoChargePending {
+		t.Fatalf("invoice %s, paid_at %v, auto_charge_pending %v; want paid and out of the queue", got.Status, got.PaidAt, got.AutoChargePending)
+	}
+	if got.UpdatedAt.Before(*got.PaidAt) {
+		t.Errorf("updated_at %v is before paid_at %v: the clear after the answer took the action's instant (%v)", got.UpdatedAt, *got.PaidAt, action)
+	}
 }
 
 // A crash between the finalize commit and the post-commit collection used to

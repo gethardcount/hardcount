@@ -5110,8 +5110,13 @@ func (e *Engine) processAutoCharge(ctx context.Context, inv domain.Invoice, at *
 	}
 
 	chargeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
-	if _, err := e.charger.ChargeInvoice(chargeCtx, inv.TenantID, inv, hold, stripeCusID, stripePMID); err != nil {
-		cancel()
+	_, err = e.charger.ChargeInvoice(chargeCtx, inv.TenantID, inv, hold, stripeCusID, stripePMID)
+	cancel()
+	// Stripe's answer is in: what this row writes next on the invoice is dated
+	// when it arrived, as the charger's settle dated its own write, so
+	// updated_at never goes backwards.
+	ctx = clock.AtArrival(ctx, e.clock)
+	if err != nil {
 		// Below Stripe's minimum charge: not a decline and not an error of
 		// this sweep. The charger recorded it (the invoice stays pending,
 		// out of this queue, with the operator's notice) and ended any
@@ -5181,7 +5186,6 @@ func (e *Engine) processAutoCharge(ctx context.Context, inv domain.Invoice, at *
 		errs = append(errs, fmt.Errorf("charge invoice %s: %w", inv.ID, err))
 		return charged, errs
 	}
-	cancel()
 
 	if err := e.invoices.SetAutoChargePending(ctx, inv.TenantID, inv.ID, false); err != nil {
 		// Benign relative to set(true): the next sweep re-lists the row
