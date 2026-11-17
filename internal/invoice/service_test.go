@@ -1603,6 +1603,24 @@ func TestRetryPendingTaxCommit(t *testing.T) {
 	}
 }
 
+// The commit sweep works each invoice on its own instant: the tick binds none,
+// so a row reads the server's clock once and its commit is dated then.
+func TestRetryPendingTaxCommit_EachInvoiceOnItsOwnInstant(t *testing.T) {
+	base := time.Date(2026, 1, 5, 9, 0, 0, 0, time.UTC)
+	store := newMemStore()
+	svc := NewService(store, &steppingClock{at: base}, newMemNumberer())
+	committer := &recordingTaxCommitter{}
+	svc.SetTaxCommitter(committer)
+	for _, id := range []string{"orphan_1", "orphan_2"} {
+		store.invoices[id] = domain.Invoice{ID: id, TenantID: "t1", Status: domain.InvoiceFinalized,
+			TaxFacts: domain.TaxFacts{TaxStatus: domain.InvoiceTaxOK, TaxProvider: "stripe_tax", TaxCalculationID: "taxcalc_" + id}}
+	}
+	if _, errs := svc.RetryPendingTaxCommit(postgres.WithLivemode(context.Background(), true), 50); len(errs) != 0 {
+		t.Fatalf("errors: %v", errs)
+	}
+	checkOwnInstants(t, committer.at, base)
+}
+
 // TestRetryTax_AutoFinalize_QueuesForCollection pins the handoff between the
 // tax reconciler and the auto-charge sweep. RetryTax auto-finalizes an engine
 // invoice the moment tax resolves — but finalizing is not collecting: nothing

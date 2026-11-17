@@ -3433,7 +3433,7 @@ func (s *Service) resumeListedPauses(ctx context.Context, listed []domain.Subscr
 		batchErrs []error
 	)
 	for _, sub := range listed {
-		ctx := clock.EnsureEffectiveNow(ctx, s.clock) // one instant for this subscription's work; a clock's is kept
+		ctx := clock.EnsureEffectiveNow(ctx, s.clock) // one instant for this subscription's work; the tick binds none
 		ok, err := s.resumeListedPause(ctx, sub)
 		if err != nil {
 			batchErrs = append(batchErrs, err)

@@ -244,8 +244,10 @@ func (r *Reconciler) sweep(ctx context.Context, label string, list func(context.
 }
 
 // decideRow decides a row's time from its invoice, right after the sweep
-// listed it (clock.DecideWithoutDoor), and the settle keeps that decision.
-// gone is true on a not-found:
+// listed it (clock.DecideWithoutDoor). On a test clock the settle keeps that
+// decision; on no clock the settle's times are read when Stripe's answer
+// arrives (clock.AtArrival), and the bound instant dates the row's other
+// writes. gone is true on a not-found:
 // the invoice, or, in a race with its clock's deletion, its clock; there is
 // nothing to settle, and the caller stamps the row so the list moves on.
 // Any other failure is clock.ErrUndecided: the row is checked again on the
@@ -261,7 +263,8 @@ func (r *Reconciler) decideRow(ctx context.Context, tenantID, invoiceID string) 
 		return decided, false, err
 	}
 	// Bound as decideFor binds an event's time. clock.Real() is the server's
-	// clock, which a row on no clock reads; a row on a test clock keeps its own.
+	// clock, which a row on no clock reads (neither the settler's nor the
+	// resolver's interface exposes one); a row on a test clock keeps its own.
 	return clock.EnsureEffectiveNow(decided, clock.Real()), false, nil
 }
 
