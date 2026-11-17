@@ -1,4 +1,4 @@
-package middleware
+package main
 
 import (
 	"context"
@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 // noDatabase is the connector of a pool that never connects. database/sql
@@ -28,7 +29,7 @@ func (noDatabase) Driver() driver.Driver { return nil }
 // The collector goes on the default Prometheus registry, which refuses a
 // second registration. `go test -count=2` runs the test twice in one process,
 // so both runs share one registration.
-var registerPoolStats sync.Once
+var poolStatsOnce sync.Once
 
 // TestDBPoolStats_Exported scrapes /metrics after a pool is registered. The
 // runbook's pool alert reads go_sql_wait_count_total{db_name="app"}, and
@@ -38,14 +39,14 @@ var registerPoolStats sync.Once
 // line carries the limit set on this pool, which shows the collector reads
 // the pool it was given.
 func TestDBPoolStats_Exported(t *testing.T) {
-	registerPoolStats.Do(func() {
+	poolStatsOnce.Do(func() {
 		pool := sql.OpenDB(noDatabase{})
 		pool.SetMaxOpenConns(7)
-		RegisterDBPoolStats(prometheus.DefaultRegisterer, pool)
+		registerPoolStats(prometheus.DefaultRegisterer, pool)
 	})
 
 	rec := httptest.NewRecorder()
-	MetricsHandler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
+	promhttp.Handler().ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/metrics", nil))
 	if rec.Code != http.StatusOK {
 		t.Fatalf("/metrics answered %d, want 200", rec.Code)
 	}

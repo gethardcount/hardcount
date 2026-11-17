@@ -12,7 +12,6 @@ import (
 
 	chimw "github.com/go-chi/chi/v5/middleware"
 
-	mw "github.com/gethardcount/hardcount/internal/api/middleware"
 	"github.com/gethardcount/hardcount/internal/audit"
 	hardcountauth "github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
@@ -900,7 +899,7 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 		"amount_cents", inv.AmountDueCents,
 		"request_id", chimw.GetReqID(ctx),
 	)
-	mw.RecordPaymentCharge("succeeded")
+	recordPaymentCharge("succeeded")
 
 	// If already succeeded (the common off-session case), settle through the
 	// settlement primitive NOW: a test-clock catch-up charge has no
@@ -1031,7 +1030,7 @@ func (s *Stripe) beforeConfirmError(ctx context.Context, tenantID string, inv do
 	recordChargeAttempt(ctx, s.invoices, tenantID, inv, "", trigger, domain.ChargeAttemptFailed, pe.Message,
 		chargedCard{paymentMethodID: stripePaymentMethodID, declineCode: pe.DeclineCode})
 	s.stampFailedWithoutPayment(withChargeAnchor(ctx), tenantID, inv, pe.Message, sentKey)
-	mw.RecordPaymentCharge("failed")
+	recordPaymentCharge("failed")
 	s.releaseAfterAnswer(ctx, tenantID, inv.ID, hold)
 	return fmt.Errorf("payment failed: %w", pe)
 }
@@ -1083,7 +1082,7 @@ func (s *Stripe) afterConfirmError(ctx context.Context, tenantID string, ce *con
 					"invoice_id", inv.ID, "stripe_payment_intent_id", pi, "error", cerr)
 			}
 		}
-		mw.RecordPaymentCharge("failed")
+		recordPaymentCharge("failed")
 		s.releaseAfterAnswer(ctx, tenantID, inv.ID, hold)
 		return fmt.Errorf("payment failed: %w", pe)
 	}
@@ -1108,7 +1107,7 @@ func (s *Stripe) afterConfirmError(ctx context.Context, tenantID string, ce *con
 	}
 	recordChargeAttempt(noteCtx, s.invoices, tenantID, inv, pi, trigger, domain.ChargeAttemptUnknown, unknown.Message,
 		chargedCard{paymentMethodID: stripePaymentMethodID})
-	mw.RecordPaymentCharge("failed")
+	recordPaymentCharge("failed")
 	if ke != nil {
 		// Still the key error (it must not count as a Stripe failure in the
 		// breaker every tenant shares), but one that says the invoice is no
@@ -1257,7 +1256,7 @@ func (s *Stripe) releaseUnsentHold(ctx context.Context, tenantID, invoiceID stri
 // it). A key that is not connected
 // has no row to mark. A lost mark is written again by the next charge.
 func (s *Stripe) reportUnusableKey(ctx context.Context, tenantID string, livemode bool, invoiceID string, ke *StripeKeyError) {
-	mw.RecordStripeKeyUnusable(ke.Reason)
+	recordStripeKeyUnusable(ke.Reason)
 	slog.ErrorContext(ctx, "charge not sent: Stripe refused this tenant's API key, or none is connected for this mode. Charges for this tenant and mode are paused (not failed) until the key is fixed under Settings → Payments",
 		"tenant_id", tenantID, "livemode", livemode, "invoice_id", invoiceID,
 		"reason", ke.Reason, "stripe_message", ke.Message)

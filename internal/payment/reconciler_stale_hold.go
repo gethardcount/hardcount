@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"time"
 
-	mw "github.com/gethardcount/hardcount/internal/api/middleware"
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/scheduler"
@@ -84,7 +83,7 @@ func (r *Reconciler) sweepStaleChargeHolds(ctx context.Context, limit int, panic
 				r.markChecked(ctx, h.Invoice)
 				result, cerr = staleHoldFailed, nil
 			}
-			mw.RecordStaleChargeHoldResolution(result)
+			recordStaleChargeHoldResolution(result)
 			if cerr != nil {
 				errs = append(errs, fmt.Errorf("invoice %s: %w", h.Invoice.ID, cerr))
 			}

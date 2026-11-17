@@ -1,26 +1,24 @@
-package middleware
+package leader
 
 import (
 	"testing"
 
 	"github.com/prometheus/client_golang/prometheus"
-
-	"github.com/gethardcount/hardcount/internal/platform/leader"
 )
 
-// TestInitLeaderLeaseLost_PanickedSeriesStartAtZero: the page row is
+// TestInitLeaseLost_PanickedSeriesStartAtZero: the page row is
 // increase(hardcount_leader_lease_lost_total[1h]) > 0. A counter series that is
 // first exported at 1 has no earlier sample, so increase() over it is empty
 // and the first panicked tick after a start never paged. Init exports every
 // role's reason="panicked" series at 0, so that first panic is an increase.
 // It creates no other reason: once a heartbeat_timeout series exists, one
 // timeout pages, and that waits for the heartbeat fix (RL-F2).
-func TestInitLeaderLeaseLost_PanickedSeriesStartAtZero(t *testing.T) {
-	roles := make([]string, 0, len(leader.Roles))
-	for _, r := range leader.Roles {
+func TestInitLeaseLost_PanickedSeriesStartAtZero(t *testing.T) {
+	roles := make([]string, 0, len(Roles))
+	for _, r := range Roles {
 		roles = append(roles, string(r))
 	}
-	InitLeaderLeaseLost(roles...)
+	InitLeaseLost(roles...)
 
 	reg := prometheus.NewPedanticRegistry()
 	reg.MustRegister(leaderLeaseLost)

@@ -673,7 +673,14 @@ func (s *Service) ExpireCredits(ctx context.Context) (int, []error) {
 	if err != nil {
 		return 0, []error{fmt.Errorf("list expired grants: %w", err)}
 	}
-	return s.processExpiry(ctx, grants)
+	expired, errs := s.processExpiry(ctx, grants)
+	// Each counted expiry has committed (ExpireGrantAtomic's own
+	// transaction). A test clock's expiries (ExpireCreditsForClock) are not
+	// counted.
+	for i := 0; i < expired; i++ {
+		recordCreditOperation("expiry")
+	}
+	return expired, errs
 }
 
 // ExpireCreditsForClock is the catchup-path counterpart. ADR-029

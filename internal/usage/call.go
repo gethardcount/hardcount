@@ -8,7 +8,6 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	mw "github.com/gethardcount/hardcount/internal/api/middleware"
 	"github.com/gethardcount/hardcount/internal/domain"
 )
 
@@ -203,7 +202,7 @@ func (s *Service) IngestCall(ctx context.Context, tenantID string, in CallInput)
 		recordLate(ctx, ev)
 	}
 	if res.Inserted > 0 {
-		mw.RecordUsageIngested(res.Inserted)
+		recordUsageIngested(res.Inserted)
 	}
 	// Only rows this call wrote: a row deduplicated against an earlier write
 	// was flagged, or not, when that write happened.

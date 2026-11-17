@@ -10,7 +10,6 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	mw "github.com/gethardcount/hardcount/internal/api/middleware"
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
@@ -337,7 +336,7 @@ func (s *Service) ingestAudited(ctx context.Context, tenantID string, input Inge
 		// is true ingest throughput, not request volume. Single and backfill
 		// count here; batch and the LiteLLM doors count their own written
 		// rows.
-		mw.RecordUsageIngested(1)
+		recordUsageIngested(1)
 		s.markWritten(ctx, &event, class)
 	}
 	return event, err
@@ -563,7 +562,7 @@ func (s *Service) BatchIngest(ctx context.Context, tenantID string, events []Ing
 		res.Results[i].Status = BatchDeduplicated
 	}
 	if res.Inserted > 0 {
-		mw.RecordUsageIngested(res.Inserted)
+		recordUsageIngested(res.Inserted)
 	}
 	// Only rows this batch inserted: a row deduplicated against an earlier
 	// write was flagged, or not, when that write happened.

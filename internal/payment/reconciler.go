@@ -160,9 +160,9 @@ func (r *Reconciler) Run(ctx context.Context, limit int) (int, []error) {
 		return 0, []error{err}
 	}
 	// The parked-invoice count (ADR-107's alerting surface) is exported by
-	// every replica from the database at scrape time (metrics.go,
-	// hardcount_parked_invoices) — not stamped here, where only the billing
-	// leader would set it.
+	// every replica from the database at scrape time
+	// (hardcount_parked_invoices, in cmd/hardcount's queue_gauges.go), not
+	// stamped here, where only the billing leader would set it.
 
 	var panics scheduler.Panics
 	n0, e0 := r.sweepStaleChargeHolds(ctx, limit, &panics)
