@@ -8,8 +8,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/gethardcount/hardcount/internal/api/respond"
-	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 	"github.com/gethardcount/hardcount/internal/session"
 )
 
@@ -209,7 +209,7 @@ func (h *Handler) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		UserAgent: r.UserAgent(),
 		// The address TrustedClientIP resolved, never a forwarding header
 		// the client wrote.
-		IP: audit.ExtractClientIP(r),
+		IP: request.Of(r.Context()).ClientIP(),
 	})
 	if err != nil {
 		respond.FromError(w, r, err, "invitation")

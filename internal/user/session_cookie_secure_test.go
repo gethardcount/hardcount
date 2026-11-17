@@ -10,6 +10,7 @@ import (
 	"golang.org/x/crypto/bcrypt"
 
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/gethardcount/hardcount/internal/session"
 )
 
@@ -38,7 +39,7 @@ func TestLogin_SessionCookieSecurePerEnvironment(t *testing.T) {
 
 			body, _ := json.Marshal(LoginReq{Email: "op@acme.com", Password: "a-good-password-123"})
 			rr := httptest.NewRecorder()
-			h.Routes().ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(string(body))))
+			requesttest.Root(h.Routes()).ServeHTTP(rr, httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(string(body))))
 
 			if rr.Code != http.StatusOK {
 				t.Fatalf("login status = %d, want 200: %s", rr.Code, rr.Body.String())

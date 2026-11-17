@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/go-redis/redis_rate/v10"
 )
 
@@ -95,9 +96,9 @@ func TestLocalLimiter_ConcurrentRequestsShareOneCount(t *testing.T) {
 // the usual headers, and the first requests still pass.
 func TestRateLimiter_LocalFallbackWithoutRedis(t *testing.T) {
 	rl := NewRateLimiter(nil, "general", 2, time.Minute, CountLocally)
-	h := rl.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+	h := requesttest.Root(rl.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}))
+	})))
 
 	send := func() *httptest.ResponseRecorder {
 		req := httptest.NewRequest(http.MethodPost, "/v1/auth/login", nil)

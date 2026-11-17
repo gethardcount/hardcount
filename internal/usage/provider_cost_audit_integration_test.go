@@ -14,6 +14,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/usage"
 )
@@ -67,7 +68,7 @@ func (f *providerCostAuditFixture) serve(t *testing.T, emitter usage.AuditEmitte
 	if emitter != nil {
 		h.SetAuditLogger(emitter)
 	}
-	reqCtx := audit.WithRequestState(f.ctx)
+	reqCtx := requesttest.Context(f.ctx)
 	req := httptest.NewRequest(method, target, strings.NewReader(body)).WithContext(reqCtx)
 	rec := httptest.NewRecorder()
 	h.Routes().ServeHTTP(rec, req)

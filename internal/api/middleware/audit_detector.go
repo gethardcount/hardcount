@@ -62,17 +62,6 @@ var auditUncoveredMutations = promauto.NewCounterVec(
 func AuditCoverage(route func(*http.Request) (pattern string, exempt bool)) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Seed the per-request audit state for the whole route tree. This
-			// middleware is mounted at the root, so every emission path gets
-			// its client IP and its accounted-for cell, including the public,
-			// auth, tenant and webhook blocks. WithRequestState keeps an
-			// existing cell, by contract. Otherwise a middleware below this
-			// one that seeds again would hide this cell, and every covered
-			// route would read as uncovered.
-			ctx := audit.WithRequestState(r.Context())
-			ctx = audit.WithClientIP(ctx, audit.ExtractClientIP(r))
-			r = r.WithContext(ctx)
-
 			next.ServeHTTP(w, r)
 
 			if !isMutating(r.Method) {

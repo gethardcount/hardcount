@@ -10,6 +10,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/config"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 )
 
 // rateLimitKey decides which bucket a request spends from. The precedence
@@ -57,20 +58,12 @@ func TestRateLimitKey_UnauthenticatedFallsBackToIP(t *testing.T) {
 	// Wholly-unauthenticated paths (login, bootstrap) still get a bucket,
 	// so a flood can't bypass the limiter by simply not authenticating.
 	//
-	// With no client IP resolved on the context, the key falls back to the
-	// TCP peer in either RemoteAddr shape.
-	for _, tc := range []struct{ name, remoteAddr, want string }{
-		{"host:port from the Go server", "203.0.113.7:54321", "ip:203.0.113.7"},
-		{"bare ip", "203.0.113.7", "ip:203.0.113.7"},
-		{"IPv6 host:port", "[2001:db8::1]:54321", "ip:2001:db8::1"},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			r := httptest.NewRequest("POST", "/v1/auth/login", nil)
-			r.RemoteAddr = tc.remoteAddr
-			if got := mustRateLimitKey(t, r); got != tc.want {
-				t.Errorf("bucket = %q, want %q", got, tc.want)
-			}
-		})
+	// With no client IP resolved on the context, the key is the TCP peer (its
+	// address shapes: request.TestClientIP).
+	r := httptest.NewRequest("POST", "/v1/auth/login", nil)
+	r.RemoteAddr = "203.0.113.7:54321"
+	if got := mustRateLimitKey(t, r); got != "ip:203.0.113.7" {
+		t.Errorf("bucket = %q, want ip:203.0.113.7", got)
 	}
 }
 
@@ -107,9 +100,14 @@ func TestRateLimitKey_TenantBucketsAreDistinctAcrossTenants(t *testing.T) {
 	}
 }
 
+// mustRateLimitKey is r's key, with r's record made as at the server's root.
 func mustRateLimitKey(t *testing.T, r *http.Request) string {
 	t.Helper()
-	key, err := rateLimitKey(r)
+	var key string
+	var err error
+	requesttest.Root(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		key, err = rateLimitKey(r)
+	})).ServeHTTP(httptest.NewRecorder(), r)
 	if err != nil {
 		t.Fatalf("rateLimitKey: %v", err)
 	}

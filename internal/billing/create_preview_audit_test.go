@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/audit"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 )
 
 // TestCreatePreview_OptsOutOfAudit pins the fix for the spurious "Created
@@ -28,7 +29,7 @@ func TestCreatePreview_OptsOutOfAudit(t *testing.T) {
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/invoices/create_preview", strings.NewReader(`{"customer_id":"  "}`))
-	req = req.WithContext(audit.WithRequestState(req.Context()))
+	req = req.WithContext(requesttest.Context(req.Context()))
 	rec := httptest.NewRecorder()
 
 	h.create(rec, req)

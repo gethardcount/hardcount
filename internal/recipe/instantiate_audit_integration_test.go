@@ -13,6 +13,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -133,7 +134,7 @@ func TestRecipeInstantiate_AuditSharedFate(t *testing.T) {
 		// that installed nothing — as an uncovered mutation, forever.
 		t.Run("a no-op re-apply is declared, not reported", func(t *testing.T) {
 			h := NewHandler(f.svc)
-			reqCtx := audit.WithRequestState(auth.WithTenantID(ctx, tenantID))
+			reqCtx := requesttest.Context(auth.WithTenantID(ctx, tenantID))
 			req := httptest.NewRequest(http.MethodPost, "/anthropic_style/instantiate", strings.NewReader(`{}`)).
 				WithContext(reqCtx)
 			rec := httptest.NewRecorder()

@@ -6,20 +6,21 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/config"
+	"github.com/gethardcount/hardcount/internal/platform/request"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 )
 
 // TestTrustedClientIP: the client IP comes from chi's ClientIPFrom*
-// middleware, read through audit.ExtractClientIP. X-Forwarded-For counts only
+// middleware, read from the request's record. X-Forwarded-For counts only
 // when the TCP peer is a trusted proxy, and r.RemoteAddr is left as the peer.
 func TestTrustedClientIP(t *testing.T) {
 	trusted, _ := config.ParseTrustProxy("10.0.0.0/8,127.0.0.1")
 
 	run := func(remoteAddr, xff, xrealip string, nets []*net.IPNet) (ip, remote string) {
-		h := TrustedClientIP(nets)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-			ip, remote = audit.ExtractClientIP(r), r.RemoteAddr
-		}))
+		h := TrustedClientIP(nets)(requesttest.Root(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			ip, remote = request.Of(r.Context()).ClientIP(), r.RemoteAddr
+		})))
 		req := httptest.NewRequest("GET", "/", nil)
 		req.RemoteAddr = remoteAddr
 		if xff != "" {

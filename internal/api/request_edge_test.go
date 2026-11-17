@@ -12,7 +12,6 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
-	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/config"
 	"github.com/gethardcount/hardcount/internal/platform/request"
 )
@@ -49,7 +48,7 @@ func edgeRouter(t *testing.T, trustProxy string) (http.Handler, *tracetest.SpanR
 		})
 	})
 	r.Get("/v1/public/invoices/{token}", func(w http.ResponseWriter, req *http.Request) {
-		seenIP = audit.ExtractClientIP(req)
+		seenIP = request.Of(req.Context()).ClientIP()
 		w.WriteHeader(http.StatusOK)
 	})
 	return r, rec, &seenIP

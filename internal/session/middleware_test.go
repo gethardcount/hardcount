@@ -14,6 +14,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/platform/request"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 )
 
 // fakeSessionStore serves one session by hash, or fails every lookup with an
@@ -183,10 +184,9 @@ func TestNameActor(t *testing.T) {
 func recordOf(h http.Handler, req *http.Request) (*request.Record, int) {
 	var record *request.Record
 	w := httptest.NewRecorder()
-	request.Begin(func(r *http.Request) request.Route { return request.Route{Method: r.Method} })(
-		http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			record = request.Of(r.Context())
-			h.ServeHTTP(w, r)
-		})).ServeHTTP(w, req)
+	requesttest.Root(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		record = request.Of(r.Context())
+		h.ServeHTTP(w, r)
+	})).ServeHTTP(w, req)
 	return record, w.Code
 }

@@ -259,7 +259,7 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (LoginResult, error)
 		if ended {
 			meta["previous_session_ended"] = true
 		}
-		actx := audit.WithClientIP(auth.WithUserID(ctx, u.ID), in.IP)
+		actx := auth.WithUserID(ctx, u.ID)
 		if err := s.audit.LogInTx(actx, tx, audit.Entry{
 			Action:       "login",
 			ResourceType: "user",

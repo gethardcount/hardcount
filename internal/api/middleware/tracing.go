@@ -7,7 +7,6 @@ import (
 	semconv "go.opentelemetry.io/otel/semconv/v1.27.0"
 	"go.opentelemetry.io/otel/trace"
 
-	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
@@ -37,7 +36,7 @@ func Tracing() func(http.Handler) http.Handler {
 //   - http.route to the route pattern on the request's record,
 //   - url.path to path(r). path(r) must return a path that holds no link
 //     token.
-//   - client.address to audit.ExtractClientIP, the trusted client IP.
+//   - client.address to the record's client address, the trusted one.
 //
 // Mount it after Tracing and TrustedClientIP and before anything that can
 // answer without routing (CORS preflight), so every span passes through it.
@@ -52,7 +51,7 @@ func TraceRequestAttrs(path func(*http.Request) string) func(http.Handler) http.
 				name := methodLabel(r.Method)
 				span.SetAttributes(
 					semconv.URLPath(path(r)),
-					semconv.ClientAddress(audit.ExtractClientIP(r)),
+					semconv.ClientAddress(request.Of(r.Context()).ClientIP()),
 				)
 				if pat := request.Of(r.Context()).Route().Pattern; pat != "" {
 					name += " " + pat

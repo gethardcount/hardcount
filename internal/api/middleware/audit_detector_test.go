@@ -263,37 +263,6 @@ func TestAuditCoverage_PreservesStreaming(t *testing.T) {
 	}
 }
 
-// TestAuditCoverage_SeedsRequestStateOnce guards the shadowing trap. The detector
-// seeds the audit request-state at the root; if any middleware BELOW it seeded a
-// fresh cell, downstream marks would land on the inner cell while the detector
-// read the outer — and every covered route would be reported as uncovered. The
-// contract that prevents it is WithRequestState's idempotency, pinned here with a
-// second seeder between the detector and the handler.
-func TestAuditCoverage_SeedsRequestStateOnce(t *testing.T) {
-	r := chi.NewRouter()
-	withRecord(r)
-	r.Use(AuditCoverage(byPattern(nil)))
-
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			next.ServeHTTP(w, req.WithContext(audit.WithRequestState(req.Context())))
-		})
-	})
-
-	r.Post("/v1/credits/grant", func(w http.ResponseWriter, req *http.Request) {
-		audit.MarkSkip(req.Context()) // marks whatever cell the handler can see
-		w.WriteHeader(http.StatusCreated)
-	})
-
-	before := uncoveredCount(t, "/v1/credits/grant")
-	rec := httptest.NewRecorder()
-	r.ServeHTTP(rec, httptest.NewRequest("POST", "/v1/credits/grant", nil))
-
-	if delta := uncoveredCount(t, "/v1/credits/grant") - before; delta != 0 {
-		t.Errorf("a re-seeded request state shadowed the detector's cell: got +%v reports for an accounted-for route, want +0", delta)
-	}
-}
-
 // TestAuditCoverage_RealEmissionIsSilent pins the COVERED path with a real audit
 // row, against real Postgres: a handler that emits through audit.Logger (the
 // self-mark inside Log/LogInTx is the ONLY thing that can claim coverage now) must

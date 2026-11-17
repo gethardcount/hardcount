@@ -19,7 +19,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
-	"github.com/gethardcount/hardcount/internal/platform/request"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/webhook"
 )
@@ -86,8 +86,7 @@ func newDeadlockRig(t *testing.T, db *postgres.DB, name string) *deadlockRig {
 	r.store.SetOutboxEnqueuer(webhook.NewOutboxStore(db))
 	ds := &deadlockOnceStore{PostgresStore: r.store}
 	r.h.svc.store = ds
-	return &deadlockRig{itemRaceRig: r, store: ds, srv: request.Begin(func(req *http.Request) request.Route { return request.Route{Method: req.Method} })(
-		middleware.Idempotency(db, nil)(r.h.Routes()))}
+	return &deadlockRig{itemRaceRig: r, store: ds, srv: requesttest.Root(middleware.Idempotency(db, nil)(r.h.Routes()))}
 }
 
 // send serves one request at proNow with the Idempotency-Key key.

@@ -20,7 +20,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
-	"github.com/gethardcount/hardcount/internal/platform/request"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/webhook"
@@ -110,8 +110,7 @@ func newDeadlockInvoiceRig(t *testing.T, db *postgres.DB, name string) *deadlock
 	h := invoice.NewHandler(svc, nil, nil, invoice.HandlerDeps{Charger: &collectCharger{}, PaymentSetups: readyPaymentSetup{}})
 	return &deadlockInvoiceRig{
 		t: t, db: db, ctx: ctx, tenantID: tenantID, store: store, inv: inv,
-		srv: request.Begin(func(r *http.Request) request.Route { return request.Route{Method: r.Method} })(
-			middleware.Idempotency(db, nil)(h.Routes())),
+		srv: requesttest.Root(middleware.Idempotency(db, nil)(h.Routes())),
 	}
 }
 

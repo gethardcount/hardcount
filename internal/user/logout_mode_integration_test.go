@@ -9,7 +9,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
-	"github.com/gethardcount/hardcount/internal/platform/request"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/gethardcount/hardcount/internal/session"
 )
 
@@ -91,7 +91,7 @@ func postAuth(h http.Handler, path, cookie, body string) *httptest.ResponseRecor
 		req.AddCookie(&http.Cookie{Name: session.CookieName, Value: cookie})
 	}
 	rr := httptest.NewRecorder()
-	request.Begin(func(r *http.Request) request.Route { return request.Route{Method: r.Method} })(h).ServeHTTP(rr, req)
+	requesttest.Root(h).ServeHTTP(rr, req)
 	return rr
 }
 

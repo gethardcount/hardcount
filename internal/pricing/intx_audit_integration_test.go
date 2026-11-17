@@ -17,6 +17,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/gethardcount/hardcount/internal/pricing"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
@@ -320,7 +321,7 @@ func TestMeterRoutes_AreAccountedFor(t *testing.T) {
 		{"DELETE /plans/{id}/prices/{price_id}", http.MethodDelete, "/" + plan.ID + "/prices/" + price.ID, "", h.PlanRoutes(), http.StatusOK},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			reqCtx := audit.WithRequestState(auth.WithTenantID(f.ctx, f.tenantID))
+			reqCtx := requesttest.Context(auth.WithTenantID(f.ctx, f.tenantID))
 			req := httptest.NewRequest(tc.method, tc.path, strings.NewReader(tc.body)).WithContext(reqCtx)
 			rec := httptest.NewRecorder()
 			tc.srv.ServeHTTP(rec, req)
