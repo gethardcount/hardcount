@@ -177,15 +177,16 @@ export default function ApiKeysPage() {
   const keyRow = (k: APIKey) => {
     const active = k.status === 'active'
     const type = keyTypeLabel(k.key_type)
+    const cut = k.key_prefix.lastIndexOf('_') + 1
     return (
       <TableRow key={k.id} className={cn(ROW, !active && 'text-muted-foreground')}>
         <TableCell className={cn('whitespace-normal text-sm font-medium [overflow-wrap:anywhere]', active ? 'text-foreground' : 'text-muted-foreground')}>
           {k.name}
           {/* Below md the Type and Key columns are hidden, so both go here:
               after a rotation two keys have one name, and only the start of
-              the key tells them apart. */}
+              the key tells them apart. It wraps before the part that differs. */}
           <span className="block text-xs font-normal text-muted-foreground md:hidden">
-            {type} · <code className="font-mono">{k.key_prefix}…</code>
+            {type} · <code className="font-mono">{k.key_prefix.slice(0, cut)}<wbr />{k.key_prefix.slice(cut)}…</code>
           </span>
         </TableCell>
         <TableCell className="hidden md:table-cell text-sm text-muted-foreground">{type}</TableCell>
