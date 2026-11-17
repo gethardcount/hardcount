@@ -91,13 +91,10 @@ func TestLocalLimiter_ConcurrentRequestsShareOneCount(t *testing.T) {
 	}
 }
 
-// With SetLocalFallback and no Redis, the middleware limits and answers 429
-// with the usual headers. It replaces fail-closed, so the first requests
-// still pass.
+// With CountLocally and no Redis, the middleware limits and answers 429 with
+// the usual headers, and the first requests still pass.
 func TestRateLimiter_LocalFallbackWithoutRedis(t *testing.T) {
-	rl := NewRateLimiter(nil, "general", 2, time.Minute)
-	rl.SetFailClosed(true)
-	rl.SetLocalFallback()
+	rl := NewRateLimiter(nil, "general", 2, time.Minute, CountLocally)
 	h := rl.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))

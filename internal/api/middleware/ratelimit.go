@@ -26,10 +26,9 @@ import (
 // It uses go-redis/redis_rate, the official rate-limiting companion for
 // go-redis, used across the go-redis ecosystem.
 type RateLimiter struct {
-	limiter    *redis_rate.Limiter
-	limit      redis_rate.Limit
-	rdb        *goredis.Client
-	failClosed bool
+	limiter *redis_rate.Limiter
+	limit   redis_rate.Limit
+	outage  OutageMode
 	// name namespaces this limiter's Redis keys. Distinct limiters (general
 	// API, hosted invoice, setup-link cooldown) share one Redis and key on
 	// the same identifier, such as "ip:1.2.3.4", but each has its own GCRA
@@ -37,14 +36,31 @@ type RateLimiter struct {
 	// bucket. A request to one surface would spend another's allowance, and
 	// the conflicting rate and period would corrupt the smoothing state.
 	name string
-	// local, when set, counts requests in this process whenever Redis is
-	// not configured or a Redis call fails. See SetLocalFallback.
+	// local counts requests in this process. It is set only for
+	// CountLocally.
 	local *localLimiter
 }
 
+// OutageMode is what a limiter does while Redis is not configured or a
+// Redis call fails.
+type OutageMode int
+
+const (
+	// FailOpen allows every request. It suits local development, and a
+	// bucket whose refusals would cost more than an outage's extra traffic.
+	FailOpen OutageMode = iota
+	// FailClosed answers every request 429. Use it in production, where
+	// serving without a limit is a DDoS vector.
+	FailClosed
+	// CountLocally counts in this process with the same rate and burst. The
+	// count is per replica: with N replicas behind a balancer, one key gets
+	// up to N times the limit while Redis is down.
+	CountLocally
+)
+
 // OpenRedis parses url, opens a client and checks it with a Ping bounded by
-// ctx. An empty url is not an error: it returns (nil, nil), the fail-open
-// shape every limiter accepts. The caller decides what an error means.
+// ctx. An empty url is not an error: it returns (nil, nil), and every limiter
+// then follows its OutageMode. The caller decides what an error means.
 // Production refuses to start on one (cmd/hardcount/main.go), because the
 // general and hosted-invoice limiters fail closed without Redis. A replica
 // that started anyway would look healthy and answer 429 to its share of
@@ -66,53 +82,25 @@ func OpenRedis(ctx context.Context, url string) (*goredis.Client, error) {
 	return c, nil
 }
 
-// SetFailClosed sets what happens when Redis is unreachable or not
-// configured. false, the default, fails open: every request is allowed, which
-// suits local development. true fails closed: every request except the
-// infrastructure endpoints gets 429. Use it in production, where serving
-// without rate limiting is a DDoS vector.
-func (rl *RateLimiter) SetFailClosed(v bool) {
-	rl.failClosed = v
-}
-
-// SetLocalFallback makes the limiter count requests in this process whenever
-// Redis is not configured or a Redis call fails, in place of the fail-open or
-// fail-closed choice. The in-process count uses the same rate and burst, but
-// it is per replica: with N replicas behind a balancer, one key gets up to N
-// times the limit while Redis is down. Call it after NewRateLimiter and
-// before serving.
-func (rl *RateLimiter) SetLocalFallback() {
-	rl.local = newLocalLimiter(rl.limit)
-}
-
-// NewRateLimiter creates a GCRA rate limiter backed by Redis. name namespaces
-// the limiter's Redis keys, such as "general", "hosted_invoice" or
-// "setup_link", so limiters with different parameters do not share a bucket.
-// For example, NewRateLimiter(rdb, "general", 100, time.Minute) allows 100
-// requests a minute, spread smoothly with no bursts at the boundary. If rdb
-// is nil, the limiter fails open and allows every request, unless
-// SetFailClosed or SetLocalFallback says otherwise.
-func NewRateLimiter(rdb *goredis.Client, name string, rate int, window time.Duration) *RateLimiter {
-	rl := &RateLimiter{rdb: rdb, name: name}
-
-	// Convert rate + window to redis_rate.Limit
-	switch {
-	case window <= time.Second:
-		rl.limit = redis_rate.PerSecond(rate)
-	case window <= time.Minute:
-		rl.limit = redis_rate.PerMinute(rate)
-	default:
-		rl.limit = redis_rate.Limit{
-			Rate:   rate,
-			Burst:  rate, // allow full rate as burst capacity
-			Period: window,
-		}
+// NewRateLimiter creates a GCRA rate limiter backed by Redis that allows rate
+// requests per window, with a burst of rate. name namespaces the limiter's
+// Redis keys, such as "general", "hosted_invoice" or "setup_link", so
+// limiters with different parameters do not share a bucket. For example,
+// NewRateLimiter(rdb, "general", 100, time.Minute, FailClosed) allows 100
+// requests a minute, spread smoothly with no bursts at the boundary. outage
+// says what the limiter does while rdb is nil or a Redis call fails.
+func NewRateLimiter(rdb *goredis.Client, name string, rate int, window time.Duration, outage OutageMode) *RateLimiter {
+	rl := &RateLimiter{
+		limit:  redis_rate.Limit{Rate: rate, Burst: rate, Period: window},
+		outage: outage,
+		name:   name,
 	}
-
 	if rdb != nil {
 		rl.limiter = redis_rate.NewLimiter(rdb)
 	}
-
+	if outage == CountLocally {
+		rl.local = newLocalLimiter(rl.limit)
+	}
 	return rl
 }
 
@@ -122,12 +110,6 @@ func NewRateLimiter(rdb *goredis.Client, name string, rate int, window time.Dura
 func (rl *RateLimiter) Middleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			// Skip rate limiting for infrastructure endpoints
-			if r.URL.Path == "/health" || r.URL.Path == "/health/ready" || r.URL.Path == "/metrics" {
-				next.ServeHTTP(w, r)
-				return
-			}
-
 			key, err := rateLimitKey(r)
 			if err != nil {
 				respond.FromError(w, r, err, "rate_limit")
@@ -165,8 +147,7 @@ func (rl *RateLimiter) Middleware() func(http.Handler) http.Handler {
 // bucket with its own key instead of using the middleware.
 // paymentmethods.send-setup-email uses it for a per-customer cooldown, so a
 // double click does not send two emails. It returns (remaining, resetAt,
-// allowed), with the same fail-open, fail-closed and local-fallback behavior
-// as the middleware.
+// allowed), with the same outage mode as the middleware.
 func (rl *RateLimiter) AllowKey(ctx context.Context, key string) (int, time.Time, bool) {
 	remaining, resetAt, _, allowed := rl.allow(ctx, key)
 	return remaining, resetAt, allowed
@@ -175,51 +156,41 @@ func (rl *RateLimiter) AllowKey(ctx context.Context, key string) (int, time.Time
 // allow checks the rate limit for key and returns (remaining, resetAt,
 // retryIn, allowed). resetAt is when the bucket is full again. retryIn is how
 // long until the next request may pass, and 0 when this one is allowed. When
-// Redis is absent or fails, the result depends on SetLocalFallback and
-// SetFailClosed.
+// Redis is not configured or fails, the outage mode decides.
 func (rl *RateLimiter) allow(ctx context.Context, key string) (int, time.Time, time.Duration, bool) {
 	now := time.Now().UTC()
 
-	if rl.limiter == nil {
-		switch {
-		case rl.local != nil:
-			return rl.local.allow(key, now)
-		case rl.failClosed:
-			slog.Error("rate_limiter: no redis configured, failing closed", "key", key)
-			return 0, now.Add(rl.limit.Period), rl.limit.Period, false
+	// err stays nil when Redis is not configured, which is normal outside
+	// production, so FailOpen and CountLocally log only a failed call.
+	var err error
+	if rl.limiter != nil {
+		var res *redis_rate.Result
+		res, err = rl.limiter.Allow(ctx, rl.bucketKey(key), rl.limit)
+		if err == nil {
+			resetAt := now.Add(res.ResetAfter)
+			if res.Allowed > 0 {
+				return res.Remaining, resetAt, 0, true
+			}
+			// redis_rate's RetryAfter is the time until the next request passes.
+			return res.Remaining, resetAt, res.RetryAfter, false
+		}
+	}
+
+	switch rl.outage {
+	case CountLocally:
+		if err != nil {
+			slog.Warn("rate_limiter: redis error, counting in this process", "error", err, "key", key)
+		}
+		return rl.local.allow(key, now)
+	case FailClosed:
+		slog.Log(ctx, logging.ErrorLevel(ctx, err), "rate_limiter: redis error, failing closed", "error", err, "key", key)
+		return 0, now.Add(rl.limit.Period), rl.limit.Period, false
+	default:
+		if err != nil {
+			slog.Warn("rate_limiter: redis error, failing open", "error", err, "key", key)
 		}
 		return rl.limit.Rate - 1, now.Add(rl.limit.Period), 0, true
 	}
-
-	res, err := rl.limiter.Allow(ctx, rl.bucketKey(key), rl.limit)
-	if err != nil {
-		switch {
-		case rl.local != nil:
-			slog.Warn("rate_limiter: redis error, counting in this process",
-				"error", err,
-				"key", key,
-			)
-			return rl.local.allow(key, now)
-		case rl.failClosed:
-			slog.Log(ctx, logging.ErrorLevel(ctx, err), "rate_limiter: redis error, failing closed",
-				"error", err,
-				"key", key,
-			)
-			return 0, now.Add(rl.limit.Period), rl.limit.Period, false
-		}
-		slog.Warn("rate_limiter: redis error, failing open",
-			"error", err,
-			"key", key,
-		)
-		return rl.limit.Rate - 1, now.Add(rl.limit.Period), 0, true
-	}
-
-	resetAt := now.Add(res.ResetAfter)
-	if res.Allowed > 0 {
-		return res.Remaining, resetAt, 0, true
-	}
-	// redis_rate's RetryAfter is the time until the next request passes.
-	return res.Remaining, resetAt, res.RetryAfter, false
 }
 
 // bucketKey is the Redis key for a logical bucket: the per-limiter namespace
@@ -240,10 +211,9 @@ func (rl *RateLimiter) bucketKey(key string) string {
 //     and live-mode operations do not share a quota, as at Stripe. Without
 //     the suffix, one operator's heavy test load could throttle another
 //     operator's live action.
-//  3. The trusted client IP (audit.ExtractClientIP), for paths with no
-//     sign-in at all: bootstrap, login, and public health probes that got
-//     past the skip list. That way a flood with no sign-in cannot bypass
-//     the limiter.
+//  3. The trusted client IP (audit.ExtractClientIP), for routes with no
+//     sign-in at all: bootstrap, /v1/auth and the public token pages. That
+//     way a flood with no sign-in cannot bypass the limiter.
 func rateLimitKey(r *http.Request) (string, error) {
 	if keyID := auth.KeyID(r.Context()); keyID != "" {
 		return "key:" + keyID, nil

@@ -70,16 +70,6 @@ func FromError(w http.ResponseWriter, r *http.Request, err error, resource strin
 	case errors.Is(err, errs.ErrAlreadyExists):
 		ConflictCoded(w, r, field, code, err.Error())
 
-	case errors.Is(err, errs.ErrDuplicateKey):
-		ConflictCoded(w, r, field, code, err.Error())
-
-	case errors.Is(err, errs.ErrPreconditionFailed):
-		if code != "" {
-			errorField(w, r, http.StatusPreconditionFailed, "invalid_request_error", code, "", err.Error())
-		} else {
-			PreconditionFailed(w, r, err.Error())
-		}
-
 	case errors.Is(err, errs.ErrInvalidState):
 		// A state conflict is a 409, not a 422. The request body is fine on
 		// its own. The conflict is with the resource's current state, such
@@ -94,7 +84,7 @@ func FromError(w http.ResponseWriter, r *http.Request, err error, resource strin
 		if c == "" {
 			c = "invalid_state"
 		}
-		errorField(w, r, http.StatusConflict, "invalid_request_error", c, field, err.Error())
+		errorField(w, r, http.StatusConflict, c, field, err.Error())
 
 	case errors.Is(err, errs.ErrForbidden):
 		// Authenticated but not permitted is a 403. The request is
@@ -129,7 +119,7 @@ func FromError(w http.ResponseWriter, r *http.Request, err error, resource strin
 			if errors.As(err, &oc) && oc.OperatorErrorCode() != "" {
 				code = oc.OperatorErrorCode()
 			}
-			Error(w, r, http.StatusBadGateway, "api_error", code, sme.OperatorSafeMessage())
+			Error(w, r, http.StatusBadGateway, code, sme.OperatorSafeMessage())
 			return
 		}
 
@@ -189,7 +179,7 @@ func unavailable(w http.ResponseWriter, r *http.Request, err error, code, resour
 		message = de.Message
 	}
 	w.Header().Set("Retry-After", "1")
-	Error(w, r, http.StatusServiceUnavailable, "api_error", code, message)
+	Error(w, r, http.StatusServiceUnavailable, code, message)
 }
 
 // routePattern returns the matched chi route pattern (for example

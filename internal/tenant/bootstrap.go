@@ -86,13 +86,13 @@ func (h *BootstrapHandler) bootstrap(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if bootstrapped {
-		respond.Error(w, r, http.StatusConflict, "invalid_request_error", "already_bootstrapped",
+		respond.Error(w, r, http.StatusConflict, "already_bootstrapped",
 			"bootstrap already completed — tenants exist")
 		return
 	}
 
 	if h.token == "" {
-		respond.Error(w, r, http.StatusForbidden, "authentication_error", "forbidden",
+		respond.Error(w, r, http.StatusForbidden, "forbidden",
 			"bootstrap disabled — set HARDCOUNT_BOOTSTRAP_TOKEN env var to enable")
 		return
 	}
@@ -106,7 +106,7 @@ func (h *BootstrapHandler) bootstrap(w http.ResponseWriter, r *http.Request) {
 	// circuits on the first mismatched byte). The empty-token disable case is
 	// already handled above; subtle returns 0 on a length mismatch.
 	if subtle.ConstantTimeCompare([]byte(provided), []byte(h.token)) != 1 {
-		respond.Error(w, r, http.StatusForbidden, "authentication_error", "forbidden",
+		respond.Error(w, r, http.StatusForbidden, "forbidden",
 			"invalid bootstrap token")
 		return
 	}
@@ -121,7 +121,7 @@ func (h *BootstrapHandler) bootstrap(w http.ResponseWriter, r *http.Request) {
 		if errors.Is(err, ErrAlreadyBootstrapped) {
 			// Race loser: another request committed between our
 			// advisory check and RunBootstrap's authoritative one.
-			respond.Error(w, r, http.StatusConflict, "invalid_request_error", "already_bootstrapped",
+			respond.Error(w, r, http.StatusConflict, "already_bootstrapped",
 				"bootstrap already completed — tenants exist")
 			return
 		}

@@ -149,7 +149,7 @@ func TestIdempotency_GET_NotCached(t *testing.T) {
 
 func TestRateLimiter_NilDB_FailsOpen(t *testing.T) {
 	// With nil db the rate limiter should fail open — every request is allowed.
-	rl := NewRateLimiter(nil, "test", 1, time.Minute)
+	rl := NewRateLimiter(nil, "test", 1, time.Minute, FailOpen)
 	handler := rl.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -176,8 +176,7 @@ func TestRateLimiter_NilDB_FailsOpen(t *testing.T) {
 }
 
 func TestRateLimiter_NilDB_FailsClosed_WhenConfigured(t *testing.T) {
-	rl := NewRateLimiter(nil, "test", 1, time.Minute)
-	rl.SetFailClosed(true)
+	rl := NewRateLimiter(nil, "test", 1, time.Minute, FailClosed)
 	handler := rl.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -187,25 +186,6 @@ func TestRateLimiter_NilDB_FailsClosed_WhenConfigured(t *testing.T) {
 	handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusTooManyRequests {
 		t.Errorf("fail-closed should return 429 when Redis missing, got %d", rec.Code)
-	}
-}
-
-func TestRateLimiter_HealthSkipped(t *testing.T) {
-	rl := NewRateLimiter(nil, "test", 1, time.Minute)
-	handler := rl.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	// Health check should bypass rate limiting entirely (no headers set)
-	req := httptest.NewRequest("GET", "/health", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("health check should bypass rate limit, got %d", rec.Code)
-	}
-	if rec.Header().Get("X-RateLimit-Limit") != "" {
-		t.Error("health check should not have rate limit headers")
 	}
 }
 

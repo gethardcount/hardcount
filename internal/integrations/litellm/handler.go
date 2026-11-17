@@ -181,7 +181,7 @@ func (h *Handler) spend(w http.ResponseWriter, r *http.Request) {
 			// The cap fires mid-array on valid JSON, so this is "split
 			// the batch", not "malformed JSON" (the /v1/usage-events/batch
 			// answer for the same case). Nothing was saved.
-			respond.Error(w, r, http.StatusRequestEntityTooLarge, "invalid_request_error", "batch_too_large",
+			respond.Error(w, r, http.StatusRequestEntityTooLarge, "batch_too_large",
 				fmt.Sprintf("the request body is over the %d MB limit, so the batch was not saved — send fewer records per batch (LiteLLM: lower DEFAULT_BATCH_SIZE)", tooBig.Limit>>20))
 		case errors.Is(err, errEmptyBody):
 			respond.BadRequest(w, r, "empty body")
@@ -259,7 +259,7 @@ func (h *Handler) spend(w http.ResponseWriter, r *http.Request) {
 				"deduplicated", resp.Deduplicated,
 				"error", err,
 			)
-			respond.Error(w, r, http.StatusServiceUnavailable, "api_error", "ingest_unavailable",
+			respond.Error(w, r, http.StatusServiceUnavailable, "ingest_unavailable",
 				"usage store temporarily unavailable — retry the whole batch; rows already recorded replay as deduplicated")
 			return
 		default:
