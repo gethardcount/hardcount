@@ -18,7 +18,8 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 )
 
-// fakeSessionStore serves the sessions it holds by hash.
+// fakeSessionStore serves the sessions it holds by hash. It holds only live
+// sessions, so GetByIDHash ignores the instant it is given.
 type fakeSessionStore struct {
 	sessions map[string]Session
 }

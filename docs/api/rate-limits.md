@@ -33,12 +33,14 @@ After that, one request's allowance comes back every period ÷ limit: every
 (see [Authentication](authentication.md#when-a-key-is-refused)). A key or
 session cookie of the wrong shape is refused without reading the database;
 a well-formed one that matches nothing costs one read. Hardcount does not
-limit how many requests one address sends before they are authenticated:
-on `/v1`, or on the Stripe and Postmark webhooks under `/v1/webhooks`,
+limit how many requests one address sends before they are authenticated on
+the `/v1` routes that take a key or session cookie, or on the Stripe and
+Postmark webhooks under `/v1/webhooks`,
 which are checked by their signature or password. Put a per-address limit
 on both in front of Hardcount, in your load balancer or proxy. The proxy in
 Hardcount's Compose stack carries one, ready to switch on
-([how](../production-one-vm.md#3-add-https-with-caddy)).
+([how](../production-one-vm.md#3-add-https-with-caddy)). Its `429` is
+nginx's own page, with no `Retry-After` header, not the answer below.
 
 ## The headers
 

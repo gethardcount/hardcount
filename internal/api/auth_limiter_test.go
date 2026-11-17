@@ -113,7 +113,8 @@ func TestPreSignInRoutes_UseTheAuthLimit(t *testing.T) {
 // down: the general limit, first setup and the public pages refuse; sign-in
 // counts in this process; usage ingest lets requests through. With no Redis
 // client every limiter follows its outage mode, so a probe tells them apart:
-// a refusal at once fails closed, a refusal within the limit counts locally.
+// a refusal at once fails closed, a refusal once the limit is spent counts
+// locally.
 func TestLimiters_OutageModesInProduction(t *testing.T) {
 	limits := config.RateLimits{GeneralPerMinute: 3, AuthPerMinute: 3, IngestPerSecond: 3}
 	srv := NewServer(&postgres.DB{}, nil, nil, WithAppEnv("production"), WithRateLimits(limits))

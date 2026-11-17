@@ -106,7 +106,8 @@ func TestRequireCaller_APIKey(t *testing.T) {
 // The context Authenticate returns names one caller, whatever the request's
 // context already held: a key with no user, or a session with no key. The
 // event stream re-runs Authenticate on a request whose context holds the
-// caller that opened it, and compares the two.
+// caller that opened it, and compares the two. A session that is not live
+// names no caller: the store refuses it at the instant it is given.
 func TestAuthenticate_NamesOneCaller(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	keys := auth.NewService(db, audit.NewLogger(db))

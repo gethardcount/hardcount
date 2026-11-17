@@ -314,7 +314,7 @@ func TestLogin_EndsTheSessionTheBrowserHeld(t *testing.T) {
 		t.Error("last_login_at is unset after a sign-in")
 	}
 
-	rr = signIn(h, loginITPassword, "not-a-session-id")
+	rr = signIn(h, loginITPassword, strings.Repeat("ab", 32))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("sign-in with an unknown cookie: status %d, want 200; body %s", rr.Code, rr.Body.String())
 	}

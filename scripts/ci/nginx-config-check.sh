@@ -105,12 +105,18 @@ echo "== nginx.conf with its per-address limit switched on"
 # shipped one, so the block cannot rot.
 sed -e '/# opt-in limit: begin/,/# opt-in limit: end/{' -e '/# opt-in limit:/!s/^\( *\)# /\1/' -e '}' \
   -e 's/listen 80 default_server;/listen 8081;/' "$compose/nginx.conf" > "$work/limited.conf"
+# A renamed marker or a line that lost its space would leave lines commented
+# and this check still passing, so count what came out.
+[ "$(grep -cE '^ *limit_req zone=hc_' "$work/limited.conf")" = 5 ] || fail "the copy has not 5 limit_req lines uncommented"
+[ "$(grep -cE '^ *set_real_ip_from ' "$work/limited.conf")" = 2 ] || fail "the copy has not 2 set_real_ip_from lines uncommented"
 printf 'events {}\nhttp { include /etc/nginx/mime.types; include /check/limited.conf; }\n' > "$work/limited-main.conf"
 docker exec "$name-proxy" nginx -t -c /check/limited-main.conf
 docker exec -d "$name-proxy" nginx -c /check/limited-main.conf -g 'pid /tmp/limited.pid; daemon off;'
-limited() { docker exec "$name-proxy" wget -q -O /dev/null http://127.0.0.1:8081/v1/customers; }
-for _ in $(seq 50); do limited && break; sleep 0.2; done
-if limited; then echo "ok    a /v1 request through the limit answers 200"; else fail "a /v1 request through the limit"; fi
+limited() { docker exec "$name-proxy" wget -q -O /dev/null "http://127.0.0.1:8081$1"; }
+for _ in $(seq 50); do limited /v1/customers && break; sleep 0.2; done
+for path in /v1/customers /v1/usage-events; do
+  if limited "$path"; then echo "ok    $path through the limit answers 200"; else fail "$path through the limit"; fi
+done
 
 [ "$failures" = 0 ] || { echo "$failures failed"; exit 1; }
 echo "All nginx checks passed."
