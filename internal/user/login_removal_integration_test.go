@@ -73,9 +73,8 @@ func (it removalIT) removeHolding(ctx context.Context, gate *user.Gate) error {
 }
 
 // joinSecondWorkspace makes the member join a second workspace, after the
-// first, and returns it. An accept refuses a second workspace, and an
-// account that joined two before that rule keeps both, so only SQL can make
-// one.
+// first, and returns it. A second membership, which an accept refuses: only
+// SQL can make one.
 func (it removalIT) joinSecondWorkspace(t *testing.T) string {
 	t.Helper()
 	second := testutil.CreateTestTenant(t, it.db, "Login Removal Second")

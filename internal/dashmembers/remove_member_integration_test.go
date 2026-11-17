@@ -31,9 +31,8 @@ func removalCtx(h *harness) context.Context {
 	return postgres.WithLivemode(ctx, false)
 }
 
-// attachMember adds an existing user to another workspace. An accept refuses
-// a second workspace, and an account that joined two before that rule keeps
-// both, so only SQL can make one.
+// attachMember adds an existing user to another workspace. A second
+// membership, which an accept refuses: only SQL can make one.
 func attachMember(t *testing.T, db *postgres.DB, userID, tenantID string) {
 	t.Helper()
 	tx, err := db.BeginTx(t.Context(), postgres.TxBypass, "")

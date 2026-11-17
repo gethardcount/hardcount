@@ -166,19 +166,19 @@ func servePublic(h *harness, method, path, body string) *httptest.ResponseRecord
 	return rec
 }
 
-// errorCode reads the code from an answer's error envelope, "" when the
-// answer has none.
-func errorCode(t *testing.T, rec *httptest.ResponseRecorder) string {
+// errorBody reads the code and the message from an answer's error envelope.
+func errorBody(t *testing.T, rec *httptest.ResponseRecorder) (code, message string) {
 	t.Helper()
 	var body struct {
 		Error struct {
-			Code string `json:"code"`
+			Code    string `json:"code"`
+			Message string `json:"message"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode the answer %s: %v", rec.Body.String(), err)
 	}
-	return body.Error.Code
+	return body.Error.Code, body.Error.Message
 }
 
 // --- harness --------------------------------------------------------------
@@ -320,55 +320,33 @@ func TestInviteAcceptNewUser(t *testing.T) {
 	}
 }
 
-// TestInviteAcceptExistingUser: an address signs in to one workspace. While
-// the invited account is a member of another workspace, the invite is still
-// created, the accept page and the accept both answer 409 member_elsewhere,
-// and nothing is written. Once the account is a member of no workspace, the
-// same link joins it WITHOUT minting a session: email possession alone must
-// not log into an already-privileged account. The invite email is worded for
-// someone with an account, and the members list dates them from the day they
-// joined this workspace.
+// TestInviteAcceptExistingUser: accepting an invite for an email that already
+// has an account, in no workspace, attaches the membership WITHOUT minting a
+// session — email possession alone must not log into an already-privileged
+// account. The invite email is worded for someone with an account, and the
+// members list dates them from the day they joined this workspace.
 func TestInviteAcceptExistingUser(t *testing.T) {
 	h := newHarness(t, "Team Existing")
 	ctx := postgres.WithLivemode(context.Background(), false)
 
-	// The invitee already has an account on ANOTHER workspace.
-	otherTenant := testutil.CreateTestTenant(t, h.db, "Other Workspace")
-	otherOwner := createUser(t, h.db, "owner@other.example.com", otherTenant, "owner")
-	existing := createUser(t, h.db, "veteran@example.com", otherTenant, "member")
+	existing := accountInNoWorkspace(t, h, "veteran@example.com")
 	// The account is a month older than this workspace's owner. Production
 	// writes created_at as now(), so only SQL can age it.
 	backdateAccount(t, h.db, existing.ID, 30*24*time.Hour)
 
 	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, "veteran@example.com"); err != nil {
-		t.Fatalf("invite an address that is a member of another workspace: %v, want it created", err)
+		t.Fatalf("invite: %v", err)
 	}
 	token := h.email.lastToken(t)
 	if !h.email.sent[0].hasAccount {
 		t.Error("the invite email of a person with an account says they have none")
 	}
 
-	preview := servePublic(h, http.MethodGet, "/invite/"+token, "")
-	accept := servePublic(h, http.MethodPost, "/accept-invite", `{"token":"`+token+`"}`)
-	for name, rec := range map[string]*httptest.ResponseRecorder{"preview": preview, "accept": accept} {
-		if code := errorCode(t, rec); rec.Code != http.StatusConflict || code != "member_elsewhere" {
-			t.Errorf("%s for a member of another workspace answered %d %q, want 409 member_elsewhere; body %s", name, rec.Code, code, rec.Body.String())
-		}
-	}
-	if isMember(t, h, existing.ID, h.tenantID) {
-		t.Fatal("the refused accept wrote a membership")
-	}
-
-	// The invitation is still pending: the same link works once the account
-	// has left the other workspace.
-	if err := h.svc.RemoveMember(ctx, otherTenant, otherOwner.ID, existing.ID); err != nil {
-		t.Fatalf("remove the invitee from the other workspace: %v", err)
-	}
-	p, err := h.svc.PreviewInvite(ctx, token)
+	preview, err := h.svc.PreviewInvite(ctx, token)
 	if err != nil {
-		t.Fatalf("preview once the account is a member of no workspace: %v", err)
+		t.Fatalf("preview: %v", err)
 	}
-	if p.NeedsNewAccount {
+	if preview.NeedsNewAccount {
 		t.Error("preview must recognize the existing account")
 	}
 
@@ -399,6 +377,51 @@ func TestInviteAcceptExistingUser(t *testing.T) {
 		if age := time.Since(m.JoinedAt); m.UserID == existing.ID && age > 24*time.Hour {
 			t.Errorf("the invitee joined %v ago, want today: that is the age of their account, not of this membership", age.Round(time.Hour))
 		}
+	}
+}
+
+// TestInviteAcceptRefusedForAMemberElsewhere: an address belongs to one
+// workspace. An invitation to a member of another workspace is created like
+// any other. Its accept page and its accept answer 409 member_elsewhere with
+// the address in the message, and write nothing. The same link joins the
+// account once it has left the other workspace.
+func TestInviteAcceptRefusedForAMemberElsewhere(t *testing.T) {
+	h := newHarness(t, "Team Refusal")
+	ctx := postgres.WithLivemode(context.Background(), false)
+	const invitee = "veteran@example.com"
+	otherTenant := testutil.CreateTestTenant(t, h.db, "Other Workspace")
+	otherOwner := createUser(t, h.db, "owner@other.example.com", otherTenant, "owner")
+	existing := createUser(t, h.db, invitee, otherTenant, "member")
+
+	if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, invitee); err != nil {
+		t.Fatalf("invite an address that is a member of another workspace: %v, want it created", err)
+	}
+	token := h.email.lastToken(t)
+	preview := func() *httptest.ResponseRecorder {
+		return servePublic(h, http.MethodGet, "/invite/"+token, "")
+	}
+	accept := func() *httptest.ResponseRecorder {
+		return servePublic(h, http.MethodPost, "/accept-invite", `{"token":"`+token+`"}`)
+	}
+
+	for name, rec := range map[string]*httptest.ResponseRecorder{"preview": preview(), "accept": accept()} {
+		code, message := errorBody(t, rec)
+		if rec.Code != http.StatusConflict || code != "member_elsewhere" || !strings.HasPrefix(message, invitee+" already belongs to another workspace") {
+			t.Errorf("%s for a member of another workspace answered %d %q %q, want 409 member_elsewhere and a message that starts with the address", name, rec.Code, code, message)
+		}
+	}
+	if isMember(t, h, existing.ID, h.tenantID) {
+		t.Fatal("the refused accept wrote a membership")
+	}
+
+	if err := h.svc.RemoveMember(ctx, otherTenant, otherOwner.ID, existing.ID); err != nil {
+		t.Fatalf("remove the invitee from the other workspace: %v", err)
+	}
+	if rec := preview(); rec.Code != http.StatusOK {
+		t.Fatalf("preview once the account has left the other workspace answered %d, want 200; body %s", rec.Code, rec.Body.String())
+	}
+	if rec := accept(); rec.Code != http.StatusOK || !isMember(t, h, existing.ID, h.tenantID) {
+		t.Fatalf("accept once the account has left the other workspace answered %d, want 200 and the membership; body %s", rec.Code, rec.Body.String())
 	}
 }
 

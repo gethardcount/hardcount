@@ -12,6 +12,13 @@ import { Label } from '@/components/ui/label'
 import { Loader2, Eye, EyeOff } from 'lucide-react'
 import { HardcountLogo } from '@/components/HardcountLogo'
 
+// memberElsewhere returns the server's sentence when err refuses an address
+// that belongs to another workspace, and '' otherwise. The sentence starts
+// with the address, so the page shows it as written, not in sentence case.
+function memberElsewhere(err: unknown): string {
+  return err instanceof ApiError && err.code === 'member_elsewhere' ? err.message : ''
+}
+
 // AcceptInvitePage consumes a team-invite link (?token= planted by the
 // invite email). Two shapes, decided by the server's preview:
 //   - new account: set a password → account created, session minted,
@@ -19,9 +26,8 @@ import { HardcountLogo } from '@/components/HardcountLogo'
 //   - existing account: one-click accept → membership attached, then
 //     off to /login to sign in with their own password (possession of
 //     the email alone must not open an already-privileged account).
-// An account that is a member of another workspace cannot join (an address
-// signs in to one workspace): the preview answers member_elsewhere, and the
-// page shows the server's sentence with no form.
+// An address that belongs to another workspace gets the server's refusal
+// (member_elsewhere) and no form.
 //
 // Deliberately NOT wrapped in PublicOnlyRoute — the token is the proof
 // of intent and may target a different account than any active session.
@@ -34,8 +40,7 @@ export default function AcceptInvitePage() {
 
   const [preview, setPreview] = useState<InvitePreview | null>(null)
   const [tokenState, setTokenState] = useState<'checking' | 'valid' | 'invalid'>(token ? 'checking' : 'invalid')
-  // The server's sentence when the link is valid and its account cannot
-  // join. It replaces the invalid-link text.
+  // The server's sentence when the address belongs to another workspace.
   const [refusal, setRefusal] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
@@ -52,7 +57,7 @@ export default function AcceptInvitePage() {
       .then(p => { if (!cancelled) { setPreview(p); setTokenState('valid') } })
       .catch(err => {
         if (cancelled) return
-        if (err instanceof ApiError && err.code === 'member_elsewhere') setRefusal(authFormError(err))
+        setRefusal(memberElsewhere(err))
         setTokenState('invalid')
       })
     return () => { cancelled = true }
@@ -83,7 +88,13 @@ export default function AcceptInvitePage() {
       }
       setAccepted(true)
     } catch (err) {
-      setError(authFormError(err))
+      const refused = memberElsewhere(err)
+      if (refused) {
+        setRefusal(refused)
+        setTokenState('invalid')
+      } else {
+        setError(authFormError(err))
+      }
     } finally {
       setLoading(false)
     }
@@ -117,7 +128,9 @@ export default function AcceptInvitePage() {
                 )}
               </p>
               <Link to="/login">
-                <Button variant="outline" className="w-full">Go to sign in</Button>
+                <Button variant="outline" className="w-full">
+                  {refusal ? 'Sign in to your workspace' : 'Go to sign in'}
+                </Button>
               </Link>
             </div>
           ) : accepted ? (

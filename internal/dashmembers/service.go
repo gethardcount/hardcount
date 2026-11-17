@@ -44,11 +44,10 @@ type UserDirectory interface {
 	CreateInTx(ctx context.Context, tx *sql.Tx, email, passwordHash, tenantID, role string) (domain.User, error)
 	// AttachTenantInTx adds a membership for an existing user, on the
 	// caller's transaction. It refuses a user who is a member of another
-	// workspace, with an error the handler answers as a 409
-	// (user.ErrMemberElsewhere).
+	// workspace (a 409, code member_elsewhere).
 	AttachTenantInTx(ctx context.Context, tx *sql.Tx, userID, tenantID, role string) error
 	// CheckJoin returns that refusal without writing, for the accept page.
-	CheckJoin(ctx context.Context, userID, tenantID string) error
+	CheckJoin(ctx context.Context, u domain.User, tenantID string) error
 }
 
 // SessionWriter starts and ends sessions on the caller's transaction: an
@@ -333,24 +332,21 @@ type InvitePreview struct {
 }
 
 // PreviewInvite validates a token for the accept page. Invalid/expired/
-// consumed tokens all return the same generic error — no oracle. A valid
-// token whose account is a member of another workspace gets the refusal the
-// accept would give (UserDirectory.CheckJoin), so the page shows it and no
-// form.
+// consumed tokens all return the same generic error — no oracle. An account
+// that is a member of another workspace is refused here too, so the page
+// shows no form. This read takes no lock, and the accept checks again.
 func (s *Service) PreviewInvite(ctx context.Context, token string) (InvitePreview, error) {
 	inv, err := s.lookupPending(ctx, token)
 	if err != nil {
 		return InvitePreview{}, err
 	}
-	existing, err := s.users.GetByEmail(ctx, inv.Email)
-	needsNew := errors.Is(err, errs.ErrNotFound)
-	if err != nil && !needsNew {
+	needsNew := false
+	if existing, err := s.users.GetByEmail(ctx, inv.Email); errors.Is(err, errs.ErrNotFound) {
+		needsNew = true
+	} else if err != nil {
 		return InvitePreview{}, err
-	}
-	if !needsNew {
-		if err := s.users.CheckJoin(ctx, existing.ID, inv.TenantID); err != nil {
-			return InvitePreview{}, err
-		}
+	} else if err := s.users.CheckJoin(ctx, existing, inv.TenantID); err != nil {
+		return InvitePreview{}, err
 	}
 	return InvitePreview{
 		Email:           inv.Email,
@@ -389,9 +385,7 @@ type AcceptResult struct {
 // case; ignored otherwise). In one transaction it claims the invitation,
 // writes the account or the membership, starts a new account's session, and
 // writes the member.joined audit row. When any of them fails, nothing is
-// written and the invitation stays usable. An account that is a member of
-// another workspace is refused that way (UserDirectory.AttachTenantInTx), and
-// the refusal is returned as it is.
+// written and the invitation stays usable.
 func (s *Service) AcceptInvite(ctx context.Context, in AcceptInput) (AcceptResult, error) {
 	inv, err := s.lookupPending(ctx, in.Token)
 	if err != nil {

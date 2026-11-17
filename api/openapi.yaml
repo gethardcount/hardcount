@@ -23018,7 +23018,7 @@ paths:
                 error:
                   type: invalid_request_error
                   code: member_elsewhere
-                  message: This address already signs in to another workspace on this server, and an address can belong to one. Ask the person who invited you to use a different address.
+                  message: sam@northwind.example already belongs to another workspace on this server, and an address can belong to only one. Ask the person who invited you to invite a different address, or sign in to the workspace you already have.
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "422":
           description: "The token is unknown, expired, revoked or already used (`param: token`)."
@@ -23145,17 +23145,30 @@ paths:
               account.
             - Code `already_exists`, `param: email`: another invitation to
               the same email created its account while this accept ran.
-              Accept again, now as an existing account.
+              Opening the link again shows why it cannot be accepted
+              (`member_elsewhere`).
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: member_elsewhere
-                  message: This address already signs in to another workspace on this server, and an address can belong to one. Ask the person who invited you to use a different address.
-                  request_id: req_dbjg652q3gpgqfoq5cd0
+              examples:
+                member_elsewhere:
+                  summary: The email is a member of another account
+                  value:
+                    error:
+                      type: invalid_request_error
+                      code: member_elsewhere
+                      message: sam@northwind.example already belongs to another workspace on this server, and an address can belong to only one. Ask the person who invited you to invite a different address, or sign in to the workspace you already have.
+                      request_id: req_dbjg652q3gpgqfoq5cd0
+                already_exists:
+                  summary: Another invitation created the email's account first
+                  value:
+                    error:
+                      type: invalid_request_error
+                      code: already_exists
+                      message: an account with this email already exists
+                      request_id: req_dbjg652q3gpgqfoq5cd0
+                      param: email
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":

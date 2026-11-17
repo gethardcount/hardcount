@@ -64,9 +64,7 @@ or read the credit balance. Do those with a secret key.
 A dashboard session (the cookie the dashboard gets when someone signs in)
 can do what a secret key can, in the mode the dashboard is in. That holds
 for every member: roles are recorded but not enforced, so any member can
-create a live secret key. An email address signs in to one account on a
-server, so an invitation to a second account is refused when it is accepted.
-Only a session can:
+create a live secret key. Only a session can:
 
 - manage team members (`/v1/members`);
 - change the account settings (`PUT /v1/settings`), which test and live

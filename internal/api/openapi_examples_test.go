@@ -298,13 +298,20 @@ func (c *exampleChecker) schemaExamples(at string, s map[string]any) {
 }
 
 // content checks a content map's media-type examples (JSON media types
-// only) and the examples inside each inline schema.
+// only), each value of an `examples` map among them, and the examples inside
+// each inline schema.
 func (c *exampleChecker) content(at string, content map[string]any) {
 	for mt, m := range content {
 		media, _ := m.(map[string]any)
 		schema, _ := media["schema"].(map[string]any)
-		if ex, ok := media["example"]; ok && strings.Contains(mt, "json") {
-			c.check(at+" "+mt+" example", schema, ex)
+		if strings.Contains(mt, "json") {
+			if ex, ok := media["example"]; ok {
+				c.check(at+" "+mt+" example", schema, ex)
+			}
+			for name, ex := range mapAt(media, "examples") {
+				em, _ := ex.(map[string]any)
+				c.check(at+" "+mt+" example "+name, schema, em["value"])
+			}
 		}
 		c.schemaExamples(at+" "+mt, schema)
 	}

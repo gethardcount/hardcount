@@ -780,7 +780,7 @@ func (s *Sender) SendMemberInvite(ctx context.Context, tenantID, to, inviterEmai
 	subject := fmt.Sprintf("You've been invited to %s on Hardcount", tenantName)
 	nextStep := "Open the link below within the next 7 days to set a password and join:"
 	if hasAccount {
-		nextStep = "You already have a Hardcount account. Open the link below within the next 7 days to accept, then sign in with your existing password:"
+		nextStep = "You already have a Hardcount account. Open the link below within the next 7 days to accept, then sign in with your existing password. An address can belong to only one workspace: if yours is in another, the page will say so:"
 	}
 	body := fmt.Sprintf(`Hi,
 

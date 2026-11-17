@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/dashmembers"
@@ -86,8 +87,7 @@ func TestRemoveMember_ConcurrentRemovalsKeepOneMember(t *testing.T) {
 
 // TestAcceptInvite_ConcurrentAcceptsIntoTwoWorkspacesKeepOneMembership: one
 // account is invited to two workspaces and accepts both at the same moment.
-// One accept joins, and the other is refused: an address signs in to one
-// workspace, so the second membership could never be reached.
+// One accept joins, and the other is refused with member_elsewhere.
 //
 // The test locks the account's user row, so both accepts wait on it with
 // their invitation claimed, then lets them go. The second starts its check
@@ -131,7 +131,9 @@ func TestAcceptInvite_ConcurrentAcceptsIntoTwoWorkspacesKeepOneMembership(t *tes
 
 	// Both accepts wait on the gate: for the user row's lock, or, with that
 	// lock gone, for the membership insert's foreign-key lock on the same row.
-	testutil.WaitForLockWaiters(t, ctx, admin, "", 2)
+	// Both statements name a user table, so "user" counts the two accepts and
+	// no other backend that waits.
+	testutil.WaitForLockWaiters(t, ctx, admin, "user", 2)
 	if err := gate.Rollback(); err != nil {
 		t.Fatalf("release gate: %v", err)
 	}
@@ -141,7 +143,7 @@ func TestAcceptInvite_ConcurrentAcceptsIntoTwoWorkspacesKeepOneMembership(t *tes
 		switch err := <-results; {
 		case err == nil:
 			joined++
-		case errors.Is(err, user.ErrMemberElsewhere):
+		case errs.Code(err) == "member_elsewhere":
 			refused++
 		default:
 			t.Errorf("accept: unexpected error %v", err)
@@ -151,11 +153,28 @@ func TestAcceptInvite_ConcurrentAcceptsIntoTwoWorkspacesKeepOneMembership(t *tes
 	if err != nil {
 		t.Fatalf("tenants for user: %v", err)
 	}
-	if len(memberships) != 1 {
-		t.Fatalf("memberships after one account accepted into two workspaces at once: got %d, want 1", len(memberships))
+	if len(memberships) != 1 || joined != 1 || refused != 1 {
+		t.Fatalf("one account accepted into two workspaces at once: %d memberships, %d joined, %d refused with member_elsewhere; want 1 of each", len(memberships), joined, refused)
 	}
-	if joined != 1 || refused != 1 {
-		t.Errorf("got %d joined and %d refused, want 1 and 1", joined, refused)
+}
+
+// TestAttachTenantInTx_RefusesATenantTransaction: row-level security hides
+// the memberships of other workspaces from a tenant transaction, so a member
+// of another workspace would pass the check there and join. The join fails
+// instead.
+func TestAttachTenantInTx_RefusesATenantTransaction(t *testing.T) {
+	h := newHarness(t, "Team Tenant Tx")
+	ctx := postgres.WithLivemode(context.Background(), false)
+	elsewhere := createUser(t, h.db, "elsewhere@example.com", testutil.CreateTestTenant(t, h.db, "Other Workspace"), "member")
+
+	tx, err := h.db.BeginTx(ctx, postgres.TxTenant, h.tenantID)
+	if err != nil {
+		t.Fatalf("begin tenant tx: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	err = user.NewPostgresStore(h.db).AttachTenantInTx(ctx, tx, elsewhere.ID, h.tenantID, "member")
+	if err == nil || !strings.Contains(err.Error(), "needs a bypass transaction") {
+		t.Fatalf("join on a tenant transaction: err = %v, want the refusal of a transaction that is not a bypass one", err)
 	}
 }
 
