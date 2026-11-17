@@ -77,7 +77,7 @@ func (oneKey) GetPlaintext(context.Context, string, bool) (tenantstripe.Plaintex
 
 // liveCharger is router.go's charger over the real Stripe client, sending
 // through stub, with dunning started on starter.
-func liveCharger(h collectHarness, stub *stripeReply, starter payment.DunningStarter) *payment.Stripe {
+func liveCharger(h collectHarness, stub http.RoundTripper, starter payment.DunningStarter) *payment.Stripe {
 	client := payment.NewLiveStripeClient(payment.NewStripeClientsWithHTTPClient(oneKey{}, &http.Client{Transport: stub}))
 	return payment.NewStripe(client, h.invoices, payment.NewPostgresWebhookStore(h.db), nil, starter)
 }

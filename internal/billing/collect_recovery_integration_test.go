@@ -272,11 +272,13 @@ func TestCollector_FirstRetryCountsFromTheFailure_RealStore(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("upsert policy: %v", err)
 	}
-	// Truncated to the microsecond: Postgres stores timestamps at that
-	// precision, so a time written in the same microsecond as `before`
-	// reads back a few hundred nanoseconds earlier than it and failed the
-	// lower bound below (seen in CI on 2026-10-13). Same in the test after.
-	before := time.Now().UTC().Truncate(time.Microsecond) // the engine's clock is fixed when it is built
+	// The failure is dated at the sweep row's instant, on the engine's clock,
+	// which is fixed when the harness is built. Truncated to the microsecond:
+	// Postgres stores timestamps at that precision, so a time written in the
+	// same microsecond as `before` reads back a few hundred nanoseconds earlier
+	// than it and failed the lower bound below (seen in CI on 2026-10-13).
+	// Same in the test after.
+	before := h.clock.Now(h.ctx).Truncate(time.Microsecond)
 	svc := dunning.NewService(dstore, nil, nil)
 	e := h.newEng(testPaymentSetupsNoPM{}, testChargerSentinel{}, dunningServiceStarter{svc: svc})
 

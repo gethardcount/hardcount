@@ -4909,6 +4909,10 @@ func (e *Engine) emailInvoiceOnce(ctx context.Context, inv domain.Invoice) {
 // when a tester uses a decline-card; they record the decline and
 // move on.
 func (e *Engine) processAutoCharge(ctx context.Context, inv domain.Invoice, at *time.Time, trigger string) (int, []error) {
+	// One instant for this invoice's work. The sweeps' tick binds none, so each
+	// invoice reads its own; the catch-up's clock and the nudge's instant are
+	// kept.
+	ctx = clock.EnsureEffectiveNow(ctx, e.clock)
 	charged := 0
 	var errs []error
 	// Shutdown or a lost lease: claim nothing. The finalize-time nudge
@@ -5114,7 +5118,7 @@ func (e *Engine) processAutoCharge(ctx context.Context, inv domain.Invoice, at *
 	cancel()
 	// Stripe's answer is in: what this row writes next on the invoice is dated
 	// when it arrived, as the charger's settle dated its own write, so
-	// updated_at never goes backwards.
+	// updated_at never goes backwards. release() is not called below this line.
 	ctx = clock.AtArrival(ctx, e.clock)
 	if err != nil {
 		// Below Stripe's minimum charge: not a decline and not an error of
