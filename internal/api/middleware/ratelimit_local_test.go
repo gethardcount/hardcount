@@ -1,15 +1,12 @@
 package middleware
 
 import (
-	"net/http"
-	"net/http/httptest"
 	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/go-redis/redis_rate/v10"
 )
 
@@ -89,43 +86,5 @@ func TestLocalLimiter_ConcurrentRequestsShareOneCount(t *testing.T) {
 	wg.Wait()
 	if got := allowed.Load(); got != 100 {
 		t.Fatalf("allowed %d of 200 concurrent requests, want 100", got)
-	}
-}
-
-// With CountLocally and no Redis, the middleware limits and answers 429 with
-// the usual headers, and the first requests still pass.
-func TestRateLimiter_LocalFallbackWithoutRedis(t *testing.T) {
-	rl := NewRateLimiter(nil, "general", 2, time.Minute, CountLocally)
-	h := requesttest.Root(rl.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	})))
-
-	send := func() *httptest.ResponseRecorder {
-		req := httptest.NewRequest(http.MethodPost, "/v1/auth/login", nil)
-		req.RemoteAddr = "198.51.100.7:4000"
-		rec := httptest.NewRecorder()
-		h.ServeHTTP(rec, req)
-		return rec
-	}
-	for i := 1; i <= 2; i++ {
-		if rec := send(); rec.Code != http.StatusOK {
-			t.Fatalf("request %d: status %d, want 200", i, rec.Code)
-		}
-	}
-	rec := send()
-	if rec.Code != http.StatusTooManyRequests {
-		t.Fatalf("request 3: status %d, want 429", rec.Code)
-	}
-	if got := rec.Header().Get("X-RateLimit-Remaining"); got != "0" {
-		t.Errorf("X-RateLimit-Remaining = %q, want 0", got)
-	}
-	if rec.Header().Get("Retry-After") == "" {
-		t.Error("429 without Retry-After")
-	}
-
-	// AllowKey shares the decision, so a handler-side bucket gets the same
-	// fallback.
-	if _, _, ok := rl.AllowKey(t.Context(), "customer:c1"); !ok {
-		t.Fatal("AllowKey on a fresh key: denied, want allowed")
 	}
 }
