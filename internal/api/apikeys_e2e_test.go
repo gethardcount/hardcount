@@ -200,7 +200,7 @@ func TestE2E_APIKeyLifecycle(t *testing.T) {
 // secret once and stores it nowhere: an Idempotency-Key on it is ignored, so
 // the answer is not kept for a replay. Sending the same request again runs it
 // again. The other requests that answer with a secret shown once skip the
-// idempotency layer by the same list (TestAnswersWithShowOnceSecret).
+// idempotency layer by the same list (TestAnswersWithShowOnceSecret_OnlyOnAMarkedRoute).
 func TestE2E_APIKeyIssue_SecretIsNotStoredForReplay(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "apikey-issue-bootstrap")
