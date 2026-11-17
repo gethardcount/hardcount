@@ -78,7 +78,7 @@ but its entry was not: delete the entry or update its pattern. Keys are
 canonical chi patterns (canonicalRoute), with their {placeholders}. A stale
 audit entry silently exempts whatever route later takes that pattern.`)
 	report(unaudited, `mutating route(s) declare no audit. Decide each one's audit story and add it
-with .with(...):
+with .withAudit(...):
 
   - explicit(note): the route emits a real audit row. Emit it IN the business
     transaction (audit.Logger.LogInTx on the caller's *sql.Tx), so the change
@@ -94,7 +94,7 @@ compliance log, the row you did not write cannot be recovered later.`)
 	report(unauditedExports, `export route(s) under /v1/exports declare no audit. A route that hands an
 operator bulk tenant data must emit an action=export audit row before it streams
 a byte, and fail closed if that row cannot be written (exportsHandler.auditExport),
-then declare it with .with(explicit(...)). A row written when the stream
+then declare it with .withAudit(explicit(...)). A row written when the stream
 completes is no substitute: killing the connection mid-stream defeats it.`)
 	report(strayAudits, `route(s) that neither change state nor export declare an audit. Only mutating
 routes and the GET routes under /v1/exports carry one; remove it.`)
