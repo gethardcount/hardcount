@@ -21,6 +21,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/platform/logging"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 	"github.com/gethardcount/hardcount/internal/version"
 )
 
@@ -130,7 +131,7 @@ func (g IdempotencyGuard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	caller, ok := requestCaller(r.Context())
 	if !ok {
 		slog.ErrorContext(r.Context(), "idempotency: no caller on the request context; authentication must run before this middleware",
-			"path", r.URL.Path)
+			"path", request.Of(r.Context()).Route().Pattern)
 		respond.InternalError(w, r)
 		return
 	}
@@ -187,7 +188,7 @@ func (g IdempotencyGuard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		// answers a failed idempotency check the same way.
 		idempotencyCacheErrors.WithLabelValues("reserve").Inc()
 		slog.Log(r.Context(), logging.ErrorLevel(r.Context(), err), "idempotency reserve failed; refusing the request (503) rather than running it unprotected",
-			"path", r.URL.Path, "error", err)
+			"path", request.Of(r.Context()).Route().Pattern, "error", err)
 		w.Header().Set("Retry-After", "1")
 		respond.Error(w, r, http.StatusServiceUnavailable, "idempotency_unavailable", "could not record the idempotency key — retry the request with the same key")
 		return

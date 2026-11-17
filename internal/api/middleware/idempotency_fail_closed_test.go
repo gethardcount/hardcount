@@ -13,6 +13,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 )
 
 // When the key cannot be reserved (a database error), the request is refused
@@ -28,10 +29,10 @@ func TestIdempotency_ReserveErrorRefusesAndRunsNothing(t *testing.T) {
 	db := postgres.NewDB(pool, time.Second)
 
 	var calls atomic.Int64
-	handler := Idempotency(db, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := requesttest.Root(Idempotency(db, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		w.WriteHeader(http.StatusOK)
-	}))
+	})))
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/credits/grant", strings.NewReader(`{"amount_cents":5000}`))
 	req.Header.Set("Idempotency-Key", "grant-abc123")
