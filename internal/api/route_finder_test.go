@@ -32,14 +32,14 @@ func lookedUp(method, path string) *http.Request {
 }
 
 // routeTable is keyed on the canonical pattern (canonicalRoute), and
-// the lookup at the root finds it before any group's middleware or mounted
+// routeFinder finds it at the root, before any group's middleware or mounted
 // sub-router runs. So for every route, inside /v1 or not, and those inside
-// mounted sub-routers and inline groups included, the lookup must give the
+// mounted sub-routers and inline groups included, the finder must give the
 // route's canonical pattern and fill its path parameters. A path made from
 // each pattern finds it. (chi.Walk prints an inline group as "/*/", as in
 // /v1/auth/*/login; Find returns /v1/auth/login, and canonicalRoute makes the
 // two agree.) A path the router does not have gets no pattern.
-func TestRouteLookup_FindsEveryRouteAndItsParams(t *testing.T) {
+func TestRouteFinder_FindsEveryRouteAndItsParams(t *testing.T) {
 	param := regexp.MustCompile(`\{([a-zA-Z_][a-zA-Z0-9_]*)\}`)
 	checked := 0
 	err := chi.Walk(builtRouter(), func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {

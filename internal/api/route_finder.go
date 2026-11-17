@@ -12,17 +12,14 @@ import (
 // routeFinder finds each request's route for its record (request.Begin):
 // one Find on the built router, which gives the route's pattern and fills
 // its path parameters before any group's middleware or mounted sub-router
-// runs (TestRouteLookup_FindsEveryRouteAndItsParams). The pattern is kept
+// runs (TestRouteFinder_FindsEveryRouteAndItsParams). The pattern is kept
 // only when routeTable holds the route, so a path that matches no route,
 // and a mount asked for a method its sub-router lacks, have none.
 //
-// It runs at the root above the Recoverer, as do three of the record's
-// readers: the trace attributes, the metrics and the access log. A panic
-// there is not recovered by ours, and net/http drops the connection. So it
-// must not be able to panic for a request: Find on the built router reads
-// only the method and the path, and nothing here is nil that a request can
-// make nil. A missing record in those readers can only be a mis-wired
-// server, and request.Of logs it before it panics.
+// It runs above the Recoverer (routes() says why), where a panic is not
+// recovered by ours and net/http drops the connection. So it must not be
+// able to panic for a request: Find on the built router reads only the
+// method and the path, and nothing here is nil that a request can make nil.
 type routeFinder struct {
 	// root is the built router, set once every route is registered.
 	root chi.Routes

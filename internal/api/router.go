@@ -182,9 +182,18 @@ func (s *Server) routes() chi.Router {
 	r.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
 		respond.MethodNotAllowed(w, req, allow.methods(req.URL))
 	})
+	// The root chain, in order:
+	//   - the edge (useRequestEdge): the trace span, the request id and the
+	//     trusted client IP; then request.Begin, which makes the record every
+	//     later layer reads; then the span correction, which reads it;
+	//   - the metrics and the access log, above the Recoverer, so a recovered
+	//     panic is still counted and logged as its 500;
+	//   - the Recoverer;
+	//   - CORS, below them, so a preflight it answers is counted and logged.
+	// Begin and the three readers above the Recoverer run where a panic is
+	// not recovered by ours; routeFinder says why Begin cannot panic for a
+	// request.
 	useRequestEdge(r, s.settings.TrustProxy, s.settings.TrustedProxies(), request.Begin(finder.route))
-	// The metrics and the access log come before CORS, so a preflight it
-	// answers is counted and logged too.
 	r.Use(mw.Metrics())
 	r.Use(requestLogger)
 	r.Use(mw.Recoverer(loggablePath))
@@ -493,11 +502,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.router.ServeHTTP(w, r)
 }
 
-// useRequestEdge mounts the first middlewares every request passes: the
-// trace span, the server-minted request id, the trusted client IP, begin,
-// which makes the request's record (request.Begin), and the span correction,
-// which reads it. Anything after it may answer without routing, as a CORS
-// preflight does, so the span correction must sit here.
+// useRequestEdge mounts the first middlewares every request passes, begin
+// among them; routes() says their order and why.
 func useRequestEdge(r chi.Router, trustProxy string, trustedProxies []*net.IPNet, begin func(http.Handler) http.Handler) {
 	r.Use(mw.Tracing())
 	// Use mw.RequestID, not chi's middleware.RequestID. chi's honours an

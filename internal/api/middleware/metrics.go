@@ -497,9 +497,9 @@ func RecordScheduledCleanup(table string, rows int) {
 	scheduledCleanupRows.WithLabelValues(table).Add(float64(rows))
 }
 
-// unmatchedRoute is the path label for any request that chi did not route to
-// a registered pattern: a 404 or 405 at the root, or an unknown verb. It is
-// one constant, so a scanner walking /wp-admin, /.env, /phpmyadmin and so on
+// unmatchedRoute is the path label for any request whose record has no
+// route: one that matched no route in the table, an unknown verb, or a CORS
+// preflight. It is one constant, so a scanner walking /wp-admin, /.env, /phpmyadmin and so on
 // creates one series, not one per probe. audit_detector.go uses the same word
 // for the same case.
 const unmatchedRoute = "unmatched"

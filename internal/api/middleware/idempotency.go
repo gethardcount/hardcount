@@ -554,14 +554,18 @@ type responseRecorder struct {
 	http.ResponseWriter
 	statusCode int
 	body       *bytes.Buffer
+	answered   bool // the status is set; a later WriteHeader changes nothing on the wire, so nothing here either
 }
 
 func (r *responseRecorder) WriteHeader(code int) {
-	r.statusCode = code
+	if !r.answered {
+		r.statusCode, r.answered = code, true
+	}
 	r.ResponseWriter.WriteHeader(code)
 }
 
 func (r *responseRecorder) Write(b []byte) (int, error) {
+	r.answered = true
 	r.body.Write(b)
 	return r.ResponseWriter.Write(b)
 }

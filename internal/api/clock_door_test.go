@@ -90,8 +90,8 @@ type seen struct {
 	header   http.Header
 }
 
-// through runs a request through the lookup at the root on the built router,
-// then the door, to a handler that records what it saw.
+// through runs a request through the root's record, its route found on the
+// built router, then the door, to a handler that records what it saw.
 func through(d *clockDoor, ctx context.Context, method, path string) seen {
 	var got seen
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

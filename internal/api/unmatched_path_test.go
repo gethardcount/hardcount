@@ -41,15 +41,15 @@ func accessLogPath(t *testing.T, req *http.Request) string {
 }
 
 // The access log of the production router holds the pattern of the route
-// found at the root, even for a request /v1's authentication refused before
-// it reached the route (it logged "/v1/*" when the pattern came from chi's
-// routing), and only the first segment of a path that matched no route. A
-// CORS preflight is logged too: the log sits above CORS.
+// found at the root, even for a request answered before its handler ran,
+// and only the first segment of a path that matched no route. A CORS
+// preflight is logged too: the log sits above CORS.
 func TestAccessLog_PathIsAPatternOrTheFirstSegment(t *testing.T) {
 	cases := []struct {
 		name, method, path, want string
 	}{
 		{"a route refused by authentication logs its pattern", http.MethodGet, "/v1/customers/cus_1", "/v1/customers/{id}"},
+		{"a link-token route logs its pattern, never the token", http.MethodGet, "/v1/public/invoices/" + fakeLinkToken, "/v1/public/invoices/{token}"},
 		{"the hosted invoice page's address keeps its first segment", http.MethodGet, "/invoice/" + fakeLinkToken, "/invoice/…"},
 		{"a path outside every mount keeps one segment, upper case", http.MethodGet, "/V1/public/invoices/" + fakeLinkToken, "/V1/…"},
 		{"a path outside every mount keeps one segment, another version", http.MethodGet, "/v2/public/invoices/" + fakeLinkToken, "/v2/…"},

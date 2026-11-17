@@ -270,7 +270,7 @@ func auditRoute(r *http.Request) (pattern string, exempt bool) {
 //
 // chi's RoutePattern() loops the replace and trims; applying the same
 // normalization to both sides makes them meet
-// (TestRouteLookup_FindsEveryRouteAndItsParams).
+// (TestRouteFinder_FindsEveryRouteAndItsParams).
 func canonicalRoute(p string) string {
 	for strings.Contains(p, "/*/") {
 		p = strings.ReplaceAll(p, "/*/", "/")

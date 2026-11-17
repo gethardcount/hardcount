@@ -44,9 +44,9 @@ func byPattern(exempt map[string]bool) func(*http.Request) (string, bool) {
 	}
 }
 
-// detectorRouter builds a router shaped like the real one: the detector at the
-// ROOT, routes underneath in a mounted subtree (so RoutePattern() resolution is
-// exercised through a real nested Mount, not a flat router).
+// detectorRouter builds a router shaped like the real one: the record and the
+// detector at the ROOT, routes underneath in a mounted subtree, so the route
+// is found through a real nested Mount, not a flat router.
 func detectorRouter(exempt map[string]bool) chi.Router {
 	r := chi.NewRouter()
 	withRecord(r)

@@ -7,6 +7,10 @@
 // request, and the metrics wrap the router and still have to name its
 // route. So the root makes one record per request (Begin), the layer that
 // learns a fact writes it there, and every layer reads it through Of.
+//
+// A fact about the request that more than one layer reads belongs on the
+// record: its route, caller and status. What a callee needs to do its work
+// stays on the context: the tenant, the mode, the instant.
 package request
 
 import (
