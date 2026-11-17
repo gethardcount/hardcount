@@ -412,6 +412,10 @@ func (s *Service) SetTaxReverser(tr TaxReverser) {
 	s.taxReverser = tr
 }
 
+// SetCreditNoteTotaler wires the credit-note totals that the tax reversal of
+// a void or an uncollectible invoice subtracts. Unset, the reversal uses
+// amount paid plus amount due, which reverses too little when customer credit
+// was applied; wire.go always sets it.
 func (s *Service) SetCreditNoteTotaler(c CreditNoteTotaler) {
 	s.creditNotes = c
 }
@@ -461,8 +465,6 @@ func (s *Service) decideInvoice(ctx context.Context, tenantID, invoiceID string)
 	return decided, nil
 }
 
-// SetTaxRetrier wires the orchestrator behind the retry-tax endpoint.
-// Production passes billing.Engine; tests can pass any implementation.
 // HeldReliefIssuer issues the relief credit notes held on a draft (a cancel,
 // plan swap or decrease while collection was paused, ADR-118) on the finalize
 // transaction, so the invoice becomes chargeable only at the relieved amount.
@@ -478,6 +480,8 @@ func (s *Service) SetHeldReliefIssuer(h HeldReliefIssuer) {
 	s.heldRelief = h
 }
 
+// SetTaxRetrier wires the orchestrator behind the retry-tax endpoint.
+// Production passes billing.Engine; tests can pass any implementation.
 func (s *Service) SetTaxRetrier(r TaxRetrier) {
 	s.taxRetrier = r
 }

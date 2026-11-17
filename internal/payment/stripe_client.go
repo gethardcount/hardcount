@@ -409,11 +409,8 @@ func NewLiveStripeClient(clients *StripeClients) *LiveStripeClient {
 // credentials could not be read. A lookup blip used to read as "not
 // configured" — a definite failure that spent a dunning attempt.
 func (c *LiveStripeClient) client(ctx context.Context) (*stripe.Client, error) {
-	// No Stripe mode configured at all: NewLiveStripeClient returned nil, and
-	// wire.go still hands it to the reconciler. The stale-hold sweep can
-	// meet a held invoice whose customer has a Stripe id even then (Stripe
-	// removed after charges ran), so answer "not configured" instead of
-	// panicking the tick.
+	// A nil receiver (a caller built without StripeClients) answers not
+	// configured.
 	if c == nil || c.clients == nil {
 		return nil, ErrStripeNotConfigured
 	}

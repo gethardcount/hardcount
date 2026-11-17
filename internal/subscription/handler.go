@@ -229,6 +229,7 @@ func (h *Handler) SetProrationDeps(plans PlanReader, invoices ProrationInvoiceCr
 }
 
 // SetProrationTaxApplier configures tax resolution on proration invoices.
+// Unset, a proration invoice carries no tax; wire.go always sets it.
 func (h *Handler) SetProrationTaxApplier(a ProrationTaxApplier) {
 	h.tax = a
 }

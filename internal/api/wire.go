@@ -244,8 +244,8 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	recipeSvc := recipe.NewService(db, recipeStore, recipeRegistry, pricingSvc)
 	recipeH := recipe.NewHandler(recipeSvc)
 
-	// One breaker for every Stripe call and tenant, so every caller backs off
-	// together while Stripe is failing.
+	// One breaker for charges and the reconciler, across tenants, so both back
+	// off together while Stripe is failing.
 	stripeBreaker := breaker.New(breaker.Config{
 		FailureThreshold: 5,
 		Cooldown:         30 * time.Second,
@@ -335,9 +335,9 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 		BaseURL:     hostedInvoiceBaseURL,
 	})
 
-	// Email. Every producer queues into email_outbox through outboxSender;
-	// the dispatcher worker in cmd/hardcount sends through emailSender
-	// (ADR-040).
+	// Email. Every producer but the Settings test send queues into
+	// email_outbox through outboxSender; the dispatcher worker in
+	// cmd/hardcount sends through emailSender (ADR-040).
 	emailSender := email.NewSender(o.appEnv)
 	emailSender.SetSettingsGetter(settingsStore)
 	emailSender.SetStripeReadiness(stripeClients)
@@ -512,7 +512,8 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	// Tax goes through the engine, which owns the tax provider.
 	invoiceSvc.SetTaxCommitter(engine)
 	invoiceSvc.SetTaxReverser(engine)
-	// A void reverses only the tax no credit note already covers.
+	// A void or an uncollectible invoice reverses only the tax no credit note
+	// already covers.
 	invoiceSvc.SetCreditNoteTotaler(creditNoteSvc)
 	invoiceSvc.SetCreditReverser(creditSvc)
 	invoiceSvc.SetTaxRetrier(engine)
@@ -530,12 +531,12 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	analyticsH := analytics.NewHandler(db)
 
 	// The email blind index finds a customer by email without decrypting, for
-	// bounce reports and the suppression gate. Without its key both fail
-	// closed.
+	// bounce reports and the suppression gate. Without its key neither runs:
+	// bounces are not recorded and bounced addresses are still sent to.
 	if bidxKey := srv.EmailBlindIndexKey; bidxKey != "" {
 		b, err := crypto.NewBlinder(bidxKey)
 		if err != nil {
-			slog.Error("invalid HARDCOUNT_EMAIL_BIDX_KEY — bounce-report and suppression lookups will fail closed", "error", err)
+			slog.Error("invalid HARDCOUNT_EMAIL_BIDX_KEY — bounces are not recorded and bounced addresses are still sent to", "error", err)
 		} else {
 			customerStore.SetBlinder(b)
 			bounceReporter := &bounceReporterAdapter{
@@ -551,7 +552,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 			slog.Info("email blind index enabled for bounce reporting + recipient suppression gate")
 		}
 	} else {
-		slog.Warn("HARDCOUNT_EMAIL_BIDX_KEY not set — bounce reporting + suppression will fail closed (no customers findable by email)")
+		slog.Warn("HARDCOUNT_EMAIL_BIDX_KEY not set — bounces are not recorded and bounced addresses are still sent to (no customer can be found by email)")
 	}
 
 	paymentMethodsH := paymentmethods.NewHandler(paymentMethodsSvc)
@@ -644,17 +645,19 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 		RestoreCatchUp:      payment.NewCatchUp(stripeAdapter, stripeClients, tenantStripeSvc, customerStore, creditNoteStore),
 	}
 
-	// Rate limits. docs/settings.md gives each limit, and the runbook what
-	// each does while Redis is down
+	// Rate limits. docs/settings.md gives each limit, and the runbook what the
+	// general, public-page, ingest and sign-in limits do while Redis is down
 	// (docs/ops/runbook/replica-will-not-start.md#redis-going-down-after-boot).
-	// rdb is nil only outside production.
+	// rdb is nil outside production, and in `restore catch-up`, which serves
+	// no routes.
 	failClosedInProd := mw.FailOpen
 	if o.appEnv == "production" {
 		failClosedInProd = mw.FailClosed
 	}
 	rateLimiter := mw.NewRateLimiter(rdb, "general", o.rateLimits.GeneralPerMinute, time.Minute, failClosedInProd)
 	// Bootstrap and sign-in share the "auth" bucket of each address. It is not
-	// "general": two rates on one GCRA key corrupt each other.
+	// "general": two rates on one GCRA key corrupt each other. Bootstrap fails
+	// closed in production, as general does.
 	bootstrapLimiter := mw.NewRateLimiter(rdb, "auth", o.rateLimits.AuthPerMinute, time.Minute, failClosedInProd)
 	// Sign-in never fails closed, or a Redis outage would lock operators out;
 	// it counts in this process instead (ADR-095).

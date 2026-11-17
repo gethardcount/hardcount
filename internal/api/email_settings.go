@@ -149,7 +149,7 @@ func (h *emailSettingsHandler) sendTest(w http.ResponseWriter, r *http.Request) 
 	}
 	// The recipient is the actor's own address, already on the row as the
 	// actor, so it is not repeated in metadata. audit is non-nil, because
-	// router.go passes this handler to audit.MustWired.
+	// wire.go passes this handler to audit.MustWired.
 	_ = h.audit.Log(ctx, tenantID, domain.AuditActionSend, "setting", "smtp", "SMTP test send",
 		map[string]any{"action": "test_email_sent"})
 	respond.JSON(w, r, http.StatusOK, map[string]string{"sent_to": to})
