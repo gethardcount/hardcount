@@ -17,7 +17,7 @@ import (
 // TestE2E_AuditRequestIDIsServerMinted proves the ADR-090 §6 property on a REAL
 // audit row, through the REAL router stack — not just at the middleware.
 //
-// The unit test (middleware.TestRequestID_IgnoresClientSuppliedHeader) pins that
+// The unit test (middleware.TestRequestID_HeaderSetForNonRespondResponses) pins that
 // mw.RequestID ignores the inbound header. This one closes the rest of the
 // chain: router mounts it → handler runs → the audit writer stamps
 // audit_log.request_id from that ctx. A regression anywhere along it (someone

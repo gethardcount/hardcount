@@ -19,8 +19,8 @@ import (
 //
 // CI has no Redis. Without it the general limiter lets requests through
 // outside production, so this test checks which limit each route carries
-// (X-RateLimit-Limit); the general count itself is exercised in
-// middleware.TestDefaultLimits_DashboardBurstPassesSignInStaysAt100. The
+// (X-RateLimit-Limit); that a bucket allows its whole limit at once is
+// middleware.TestLocalLimiter_MatchesRedisLimit's. The
 // sign-in limiter counts in the process without Redis, so its 429 here is
 // real.
 func TestE2E_DashboardBrowsingIsNotRefusedSignInStillIs(t *testing.T) {
