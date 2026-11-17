@@ -1187,7 +1187,7 @@ func (a *prorationTaxApplierAdapter) CommitTax(ctx context.Context, tenantID, in
 
 // pmCustomerLookupAdapter implements paymentmethods.CustomerLookup over
 // customer.PostgresStore. paymentmethods does not import customer, which
-// keeps the dependency graph one-way. router.go wires this adapter, so the
+// keeps the dependency graph one-way. wire.go wires this adapter, so the
 // operator's send-setup-email endpoint can read the recipient address and
 // display name from the canonical customer row.
 type pmCustomerLookupAdapter struct {

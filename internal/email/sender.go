@@ -210,7 +210,7 @@ and team invites can be delivered from this server.
 }
 
 // SetSettingsGetter wires the tenant settings store so Send* methods can
-// look up branding per email. Called from router.go; optional for tests.
+// look up branding per email. Called from wire.go; optional for tests.
 func (s *Sender) SetSettingsGetter(g SettingsGetter) { s.settings = g }
 
 // SetBounceReporter wires the bounce-capture callback. Router-side

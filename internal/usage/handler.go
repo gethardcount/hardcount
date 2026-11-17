@@ -35,7 +35,7 @@ type MeterResolver interface {
 
 // MeterLister lists the tenant's meters. The aggregate endpoint reads each
 // meter's aggregation from them (see BillingModes) so a Maximum meter reports
-// its peak, not a sum of readings. Wired in router.go (pricing.Service).
+// its peak, not a sum of readings. Wired in wire.go (pricing.Service).
 type MeterLister interface {
 	ListMeters(ctx context.Context, tenantID string) ([]domain.Meter, error)
 }

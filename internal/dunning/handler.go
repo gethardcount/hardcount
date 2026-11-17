@@ -39,7 +39,7 @@ func (h *Handler) SetEventLiner(l EventLiner) { h.eventLiner = l }
 
 // AuditWriter is the narrow audit surface dunning handler uses.
 // Decoupled from internal/audit so the handler can be tested with
-// a fake; wired in router.go via SetAuditLogger.
+// a fake; wired in wire.go via SetAuditLogger.
 type AuditWriter interface {
 	Log(ctx context.Context, tenantID, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
 }

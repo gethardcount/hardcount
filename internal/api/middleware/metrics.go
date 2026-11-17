@@ -119,18 +119,3 @@ func methodLabel(m string) string {
 	}
 	return "other"
 }
-
-// schedulerLastRunTimestamp backs the runbook's "scheduler is alive" alert:
-// `time() - hardcount_scheduler_last_run_timestamp_seconds > 2 * interval`.
-var schedulerLastRunTimestamp = promauto.NewGauge(
-	prometheus.GaugeOpts{
-		Name: "hardcount_scheduler_last_run_timestamp_seconds",
-		Help: "Unix timestamp of this replica's last billing-loop liveness stamp: every poll, and every page of a long billing drain. Alert when time() - this > 2x the scheduler interval.",
-	},
-)
-
-// RecordSchedulerTick stamps the scheduler-liveness gauge. The same hook that
-// feeds /health/ready calls it.
-func RecordSchedulerTick() {
-	schedulerLastRunTimestamp.SetToCurrentTime()
-}

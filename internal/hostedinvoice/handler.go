@@ -84,7 +84,7 @@ type CreditNoteLister interface {
 }
 
 // CheckoutSessionCreator is the adapter the Pay button calls. The concrete
-// implementation (in router.go) wraps *payment.StripeClients and handles
+// implementation (in adapters.go) wraps *payment.StripeClients and handles
 // the livemode lookup from the invoice row before picking the right Stripe
 // key. Kept behind an interface so tests don't need a live Stripe client
 // and so this package avoids importing internal/payment directly.

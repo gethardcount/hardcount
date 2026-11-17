@@ -143,7 +143,7 @@ var errStampFailed = errors.New("could not put the PaymentIntent on the invoice"
 // StripeKeyHealth records that Stripe refused a tenant's key for one mode, so
 // Settings → Payments shows it, and clears that notice once a charge goes
 // through with the key. Implemented by *tenantstripe.Service; wired via
-// SetKeyHealth in router.go.
+// SetKeyHealth in wire.go.
 type StripeKeyHealth interface {
 	MarkKeyRejected(ctx context.Context, tenantID string, livemode bool, stripeMessage string) error
 	ClearKeyRejected(ctx context.Context, tenantID string, livemode bool) error
@@ -169,7 +169,7 @@ func (s *Stripe) SetAuditLogger(a AuditEmitter) { s.audit = a }
 // webhook event (kind) with data in the same transaction, once per kind and
 // charge: it returns false, having written nothing, when the marker already
 // names this kind and PaymentIntent. Implemented by *invoice.PostgresStore;
-// wired via SetAnomalyRecorder in router.go.
+// wired via SetAnomalyRecorder in wire.go.
 type PaymentAnomalyRecorder interface {
 	RecordPaymentAnomaly(ctx context.Context, tenantID, invoiceID, kind, paymentIntentID string, capturedCents int64, data map[string]any) (bool, error)
 }

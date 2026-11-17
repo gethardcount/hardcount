@@ -102,7 +102,7 @@ type Engine struct {
 // AuditWriter is the narrow audit surface the engine needs. Defined
 // here (not imported from internal/audit) so billing doesn't gain a
 // reverse import of the audit package — production wires
-// *audit.Logger via SetAuditLogger in router.go. Optional: nil = engine
+// *audit.Logger via SetAuditLogger in wire.go. Optional: nil = engine
 // skips the audit write but still mutates state + dispatches webhooks.
 type AuditWriter interface {
 	Log(ctx context.Context, tenantID, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
@@ -227,7 +227,7 @@ type CustomerReader interface {
 // SetCustomerReader wires the customer reader used by
 // SimForCustomer (and transitively SimForInvoice on
 // one-off invoices). Production wires *customer.PostgresStore via
-// api/router.go.
+// api/wire.go.
 func (e *Engine) SetCustomerReader(r CustomerReader) {
 	e.customers = r
 }
@@ -250,7 +250,7 @@ var _ clock.Resolver = (*Engine)(nil)
 // customer experience is symmetric.
 //
 // Optional — when nil, engine skips the notification (local dev,
-// integration tests). Wire in router.go via SetNoPaymentMethodNotifier.
+// integration tests). Wire in wire.go via SetNoPaymentMethodNotifier.
 type NoPaymentMethodNotifier interface {
 	NotifyNoPaymentMethod(ctx context.Context, tenantID string, inv domain.Invoice, trigger string) (domain.NotifyOutcome, error)
 }
@@ -302,7 +302,7 @@ type InvoiceEmailer interface {
 // declined-card path's behaviour when dunning is off.
 //
 // REQUIRED — boot fails closed if unwired (#442); the old nil skip left
-// card-less invoices out of dunning forever. Wire in router.go via
+// card-less invoices out of dunning forever. Wire in wire.go via
 // SetDunningStarter.
 type DunningStarter interface {
 	StartDunning(ctx context.Context, tenantID, invoiceID, customerID string, simFailedAt time.Time, cause domain.DunningStartCause) error
@@ -331,7 +331,7 @@ type DunningResolver interface {
 // (canceled_at = at), the final partial-period invoice, and the
 // prepaid-relief credit drafts, then the post-commit finalize/issue legs.
 // Implemented by subscription.Service.FireDueScheduledCancel; wired in
-// router.go via SetScheduledCancelExecutor.
+// wire.go via SetScheduledCancelExecutor.
 //
 // REQUIRED — like DunningStarter, boot fails closed if unwired: a due
 // mid-period cancel the loop cannot execute would otherwise re-fetch on
