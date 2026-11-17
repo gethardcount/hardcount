@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
-	"net/url"
+
 	"regexp"
 	"strings"
 	"time"
@@ -181,7 +181,7 @@ func (s *Server) routes() chi.Router {
 	// every router mounted below. The 405 lists the path's methods in Allow.
 	r.NotFound(respond.RouteNotFound)
 	r.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
-		respond.MethodNotAllowed(w, req, allow.methods(req.URL))
+		respond.MethodNotAllowed(w, req, allow.methods(req))
 	})
 	// The root chain, in order:
 	//   - the edge (useRequestEdge): the trace span, the request id and the
@@ -196,7 +196,7 @@ func (s *Server) routes() chi.Router {
 	// request.
 	useRequestEdge(r, s.settings.TrustProxy, s.settings.TrustedProxies(), request.Begin(finder.route))
 	r.Use(mw.Metrics())
-	r.Use(requestLogger)
+	r.Use(accessLog)
 	r.Use(mw.Recoverer(loggablePath))
 	// The origins, parsed once for both consumers (CORS and the CSRF origin
 	// allowlist) with the parser behind the boot check. Both match entries
@@ -255,7 +255,7 @@ func (s *Server) routes() chi.Router {
 	bootstrapH := tenant.NewBootstrapHandler(s.db, bootstrapDeps)
 	r.Group(func(r chi.Router) {
 		r.Use(s.bootstrapLimiter.Middleware())
-		r.Use(mw.Timeout(30 * time.Second))
+		r.Use(mw.Timeout(requestTimeout))
 		r.Use(door.Middleware)
 		r.Mount("/v1/bootstrap", bootstrapH.Routes())
 	})
@@ -271,7 +271,7 @@ func (s *Server) routes() chi.Router {
 		// origin checked.
 		r.Use(mw.CSRFGuard(allowedOrigins))
 		r.Use(s.authLimiter.Middleware())
-		r.Use(mw.Timeout(30 * time.Second))
+		r.Use(mw.Timeout(requestTimeout))
 		r.Use(door.Middleware)
 		// The invite accept flow is public like login and reset, because
 		// the token is the credential. It shares their limiter, so guessing
@@ -283,7 +283,7 @@ func (s *Server) routes() chi.Router {
 
 	// Stripe webhooks need no API key, because their signature verifies them.
 	r.Group(func(r chi.Router) {
-		r.Use(mw.Timeout(30 * time.Second))
+		r.Use(mw.Timeout(requestTimeout))
 		r.Use(door.Middleware)
 		r.Mount("/v1/webhooks", s.webhookH.Routes())
 		// Postmark email webhooks need no API key either. Basic auth gates
@@ -296,38 +296,28 @@ func (s *Server) routes() chi.Router {
 	// It uses the hosted-invoice routes' tight per-IP bucket, because both are
 	// unauthenticated payment endpoints. Without a limit, anyone could guess
 	// tokens for free and multiply calls to the Stripe API.
-	if s.publicPaymentH != nil {
-		r.Group(func(r chi.Router) {
-			r.Use(s.hostedInvoiceRL.Middleware())
-			r.Use(mw.Timeout(30 * time.Second))
-			r.Use(door.Middleware)
-			r.Mount("/v1/public/payment-updates", s.publicPaymentH.Routes())
-		})
-	}
-
+	//
 	// Public hosted invoice, the equivalent of Stripe's hosted_invoice_url. It
 	// is unauthenticated: the 256-bit public_token in the URL is the only
 	// credential. It has its own rate-limit bucket (60/min per IP), because
 	// payment pages need tighter limits than the general API (see
 	// hostedInvoiceRL above).
-	r.Route("/v1/public/invoices", func(r chi.Router) {
-		r.Use(s.hostedInvoiceRL.Middleware())
-		r.Use(mw.Timeout(30 * time.Second))
-		r.Use(door.Middleware)
-		r.Mount("/", s.hostedInvoiceH.Routes())
-	})
-
+	//
 	// Public cost dashboard (ADR-031). It is unauthenticated: the 256-bit
 	// cost_dashboard_token in the path is the credential. Its rate limit
 	// (60/min per IP) is tighter than the general API's, because the embed
 	// widget may poll, and abuse from one site must not exhaust shared
 	// buckets. The reason and the limit are the same as for the hosted
 	// invoice page.
-	r.Route("/v1/public/cost-dashboard", func(r chi.Router) {
+	r.Group(func(r chi.Router) {
 		r.Use(s.hostedInvoiceRL.Middleware())
-		r.Use(mw.Timeout(30 * time.Second))
+		r.Use(mw.Timeout(requestTimeout))
 		r.Use(door.Middleware)
-		r.Mount("/", s.customerH.PublicCostDashboardRoutes())
+		if s.publicPaymentH != nil {
+			r.Mount("/v1/public/payment-updates", s.publicPaymentH.Routes())
+		}
+		r.Mount("/v1/public/invoices", s.hostedInvoiceH.Routes())
+		r.Mount("/v1/public/cost-dashboard", s.customerH.PublicCostDashboardRoutes())
 	})
 
 	// Tenant routes take a dashboard session cookie or `Authorization: Bearer
@@ -374,7 +364,7 @@ func (s *Server) routes() chi.Router {
 		// limitRequestBody.
 		r.Group(func(r chi.Router) {
 			r.Use(s.ingestLimiter.Middleware())
-			r.Use(mw.Timeout(30 * time.Second))
+			r.Use(mw.Timeout(requestTimeout))
 			r.Use(door.Middleware)
 			// Backfill is mounted before the /usage-events subtree, so chi picks
 			// the more specific pattern. PermUsageWrite limits it to secret-tier
@@ -403,7 +393,7 @@ func (s *Server) routes() chi.Router {
 			// the Idempotency-Key header (answersWithShowOnceSecret): that
 			// answer is never kept for a replay.
 			r.Use(mw.Idempotency(s.db, answersWithShowOnceSecret))
-			r.Use(mw.Timeout(30 * time.Second))
+			r.Use(mw.Timeout(requestTimeout))
 			r.Use(door.Middleware)
 
 			// whoami needs no permission. A key gets key_id and key_type; a session
@@ -557,6 +547,10 @@ func loggablePath(r *http.Request) string {
 	return "/" + segs[0] + "/…"
 }
 
+// requestTimeout is the time limit of every group but the exports
+// (exportTimeout) and the event stream, which has none.
+const requestTimeout = 30 * time.Second
+
 // maxRequestBodyBytes caps a request body on every route but the LiteLLM
 // adapter, against oversized payloads (DoS).
 const maxRequestBodyBytes = 1 << 20 // 1 MB
@@ -618,18 +612,11 @@ func newAllowIndex(router chi.Routes) *allowIndex {
 	return &allowIndex{flat: flat}
 }
 
-// methods lists the methods the router serves at u's path.
-func (a *allowIndex) methods(u *url.URL) []string {
-	if a == nil {
-		return nil
-	}
-	path := u.RawPath
-	if path == "" {
-		path = u.Path
-	}
+// methods lists the methods the router serves at r's path.
+func (a *allowIndex) methods(r *http.Request) []string {
 	var out []string
 	for _, m := range routeMethods {
-		if a.flat.Match(chi.NewRouteContext(), m, path) {
+		if a.flat.Match(chi.NewRouteContext(), m, routedPath(r)) {
 			out = append(out, m)
 		}
 	}

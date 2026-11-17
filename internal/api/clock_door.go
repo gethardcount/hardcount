@@ -81,7 +81,8 @@ type doorHandler struct {
 }
 
 func (h doorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	decl, params, routed := h.door.route(r)
+	entry, routed := routeTable[routeKeyOf(r.Context())]
+	decl, params := entry.clock, request.Of(r.Context()).Route().Params
 	// No mode on the context yet (a route before authentication) is
 	// treated as test mode.
 	live, err := postgres.Livemode(r.Context())
@@ -124,15 +125,6 @@ func (h doorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// A record's clock carries its instant; otherwise a real instant,
 	// one read of the server's clock.
 	h.next.ServeHTTP(w, r.WithContext(clock.EnsureEffectiveNow(ctx, h.door.clock)))
-}
-
-// route is the request's clock declaration in routeTable and its path
-// parameters, from the request's record: false when the request matched no
-// route.
-func (d *clockDoor) route(r *http.Request) (clockDecl, *chi.Context, bool) {
-	rt := request.Of(r.Context()).Route()
-	decl, ok := routeTable[routeKey{Method: rt.Method, Pattern: rt.Pattern}]
-	return decl.clock, rt.Params, ok
 }
 
 // errUnknownClockSource is pinFor's answer for a route table entry whose

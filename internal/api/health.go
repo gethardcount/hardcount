@@ -6,13 +6,12 @@ import (
 	"log/slog"
 	"net/http"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	mw "github.com/gethardcount/hardcount/internal/api/middleware"
-
 	"github.com/gethardcount/hardcount/internal/api/respond"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
-	"go.uber.org/atomic"
 )
 
 // --- Scheduler health tracking ---
@@ -32,9 +31,6 @@ var (
 
 // SetDraining announces shutdown: readiness answers 503 from now on.
 func SetDraining() { draining.Store(true) }
-
-// resetDrainingForTest clears the draining flag. Only tests call it.
-func resetDrainingForTest() { draining.Store(false) }
 
 // RecordSchedulerRun is called by the billing scheduler after each cycle,
 // so the health check can tell whether the scheduler is alive.
@@ -113,18 +109,16 @@ func handleDeepHealth(db *postgres.DB) http.HandlerFunc {
 		interval := schedulerInterval
 		schedulerMu.RUnlock()
 
-		if interval > 0 && !lastRun.IsZero() {
-			sinceLastRun := time.Since(lastRun)
-			if sinceLastRun > 2*interval {
-				checks["scheduler"] = fmt.Sprintf("degraded: last run %s ago (interval %s)", sinceLastRun.Truncate(time.Second), interval)
-				overallStatus = "degraded"
-			} else {
-				checks["scheduler"] = fmt.Sprintf("ok: last run %s ago", sinceLastRun.Truncate(time.Second))
-			}
-		} else if interval > 0 && lastRun.IsZero() {
-			checks["scheduler"] = "ok: awaiting first run"
-		} else {
+		switch since := time.Since(lastRun); {
+		case interval <= 0:
 			checks["scheduler"] = "ok: not configured"
+		case lastRun.IsZero():
+			checks["scheduler"] = "ok: awaiting first run"
+		case since > 2*interval:
+			checks["scheduler"] = fmt.Sprintf("degraded: last run %s ago (interval %s)", since.Truncate(time.Second), interval)
+			overallStatus = "degraded"
+		default:
+			checks["scheduler"] = fmt.Sprintf("ok: last run %s ago", since.Truncate(time.Second))
 		}
 
 		respond.JSON(w, r, status, map[string]any{

@@ -106,8 +106,8 @@ func TestRouterChains(t *testing.T) {
 		idempotency bool
 		timeout     time.Duration // 0: none
 	}
-	ordinary := group{"ordinary", srv.rateLimiter, true, 30 * time.Second}
-	ingest := group{"ingest", srv.ingestLimiter, false, 30 * time.Second}
+	ordinary := group{"ordinary", srv.rateLimiter, true, requestTimeout}
+	ingest := group{"ingest", srv.ingestLimiter, false, requestTimeout}
 	exports := group{"exports", srv.rateLimiter, false, exportTimeout}
 	stream := group{"stream", srv.rateLimiter, false, 0}
 	want := map[group][]string{
@@ -154,7 +154,7 @@ func TestRouterChains(t *testing.T) {
 			}
 		}
 		if at[timeout] >= 0 {
-			for _, d := range []time.Duration{30 * time.Second, exportTimeout} {
+			for _, d := range []time.Duration{requestTimeout, exportTimeout} {
 				if makesSame(mws[at[timeout]], mw.Timeout(d)) {
 					g.timeout = d
 				}

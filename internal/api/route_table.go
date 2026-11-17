@@ -285,19 +285,6 @@ func canonicalRoute(p string) string {
 	return p
 }
 
-// isMutatingMethod reports whether a method can change state.
-func isMutatingMethod(m string) bool {
-	switch m {
-	case "POST", "PUT", "PATCH", "DELETE":
-		return true
-	}
-	return false
-}
-
-// auditEgressPrefix is the subtree whose GET routes take data out and so
-// declare their audit.
-const auditEgressPrefix = "/v1/exports"
-
 // routeTable is the table. Keys are canonical (method, route pattern).
 //
 // The audit notes come from walking the live router and reading the emitting

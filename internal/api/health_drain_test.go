@@ -20,7 +20,7 @@ import (
 func TestReadiness_DrainingIs503LivenessStays200(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	srv := NewServer(db, nil, nil)
-	t.Cleanup(resetDrainingForTest)
+	t.Cleanup(func() { draining.Store(false) })
 
 	get := func(path string) (int, map[string]any) {
 		t.Helper()

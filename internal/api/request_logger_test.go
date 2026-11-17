@@ -65,7 +65,7 @@ func captureAccessLog(t *testing.T) *accessLines {
 	return lines
 }
 
-// serveThroughLogger runs one request through requestLogger and returns its
+// serveThroughLogger runs one request through accessLog and returns its
 // line. inside stands for the layers the logger wraps. Like authentication,
 // it gets a context made from the logger's, never the logger's own.
 func serveThroughLogger(t *testing.T, inside func(context.Context)) map[string]string {
@@ -74,7 +74,7 @@ func serveThroughLogger(t *testing.T, inside func(context.Context)) map[string]s
 	type insideKey struct{}
 
 	h := request.Begin(func(r *http.Request) request.Route { return request.Route{Method: r.Method, Pattern: "/v1/invoices"} })(
-		requestLogger(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		accessLog(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			inside(context.WithValue(r.Context(), insideKey{}, "added inside the logger"))
 			w.WriteHeader(http.StatusOK)
 		})))

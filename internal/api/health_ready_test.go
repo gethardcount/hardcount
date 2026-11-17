@@ -88,7 +88,7 @@ func TestReadiness_StatusCodeAndBody(t *testing.T) {
 	// drain through the router; this keeps the 503 pinned in -short runs.
 	t.Run("draining is 503", func(t *testing.T) {
 		setScheduler(t, time.Time{}, 0)
-		t.Cleanup(resetDrainingForTest)
+		t.Cleanup(func() { draining.Store(false) })
 		SetDraining()
 
 		code, raw, body := get(t, pingConnector{})

@@ -9,7 +9,7 @@ import (
 	"github.com/go-chi/chi/v5/middleware"
 )
 
-// requestLogger writes the access log. Each line says who made the request,
+// accessLog writes the access log. Each line says who made the request,
 // which tenant it touched and from which address, not only the method, path,
 // status and duration. So after an incident the log can answer "what did this
 // caller do" and "which tenant was affected". The request_id on each line
@@ -26,7 +26,7 @@ import (
 // Only the actor id is logged, not the name. A user actor's name is an
 // email, and logs go to sinks that cannot erase data. For the same reason,
 // the append-only audit_log stores no addresses either.
-func requestLogger(next http.Handler) http.Handler {
+func accessLog(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		next.ServeHTTP(w, r)

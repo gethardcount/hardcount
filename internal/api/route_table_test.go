@@ -269,6 +269,19 @@ func TestAuditRoute_ExemptOnlyForDeclaredRoutes(t *testing.T) {
 	}
 }
 
+// isMutatingMethod reports whether a method can change state.
+func isMutatingMethod(m string) bool {
+	switch m {
+	case "POST", "PUT", "PATCH", "DELETE":
+		return true
+	}
+	return false
+}
+
+// auditEgressPrefix is the subtree whose GET routes take data out and so
+// declare their audit.
+const auditEgressPrefix = "/v1/exports"
+
 // functionExists finds the method package.Type.Method in internal/<package>,
 // outside its tests.
 func functionExists(name string) error {
