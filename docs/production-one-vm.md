@@ -137,6 +137,8 @@ Caddy is a web server that gets a free HTTPS certificate from Let's Encrypt and 
 
 Hardcount reads each visitor's real address from the headers that Caddy and the stack's nginx forward. nginx is the web server container in front of the Hardcount API. Caddy's requests reach Hardcount through Docker's private network, which the Compose stack's default `TRUST_PROXY` already trusts, so leave that setting as it is.
 
+**A limit per address, ready to switch on.** The stack's nginx (`deploy/compose/nginx.conf`) carries two limits, switched off. Each counts per client address: 2,000 requests a second, in bursts of up to 4,000, on usage ingest and the Stripe and Postmark webhooks; and 100 a second, in bursts of up to 1,000, on the rest of the API. The ingest limit is twice Hardcount's own limit for one key, so an honest client meets that first. They bound requests Hardcount refuses before counting them, such as ones with bad keys ([rate limits](api/rate-limits.md)). To switch them on, uncomment the lines between each pair of `opt-in limit` markers in that file, then reload nginx. The pair in the server block holds the real-address lines, set for Docker's networks, which Caddy comes through here. Behind another balancer or a CDN, put its address range there instead: nginx otherwise sees the proxy's address for every visitor, and every client shares one bucket.
+
 ## 4. Set the web addresses
 
 Emails and Stripe send people to pages in Hardcount: your customers to the invoice page and the page to add a card, and your team to the password-reset page. Hardcount needs your address to build those links. It never guesses the address from a request.
