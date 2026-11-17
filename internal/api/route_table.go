@@ -5,26 +5,11 @@ import (
 	"strings"
 )
 
-// ---------------------------------------------------------------------------
-// The route table: what each route declares, in one place.
-//
-// Every route the router serves has one entry, keyed by its method and
-// canonical pattern. The entry says:
-//   - how a request's time is decided (the clock door reads it);
-//   - for a route that can change state, and for a bulk export, where its
-//     audit evidence comes from (the audit detector reads it);
-//   - whether its answer carries a secret shown only once (the idempotency
-//     layer never keeps that answer for a replay).
-//
-// Each request's key is found at the root, on its record (routeFinder).
-// TestRouteTable_MatchesLiveRoutes walks the router and compares it with the
-// table in both directions, and reports every gap in one run: a route with
-// no entry, an entry with no route, a mutating route or an export with no
-// audit, and an audit on any other route. A forgotten showsSecretOnce()
-// fails TestOpenAPISpec_ShowOnceSecretsAreNeverKept, once the field that
-// carries the secret is marked x-show-once in api/openapi.yaml. So adding a
-// route forces each decision at review.
-// ---------------------------------------------------------------------------
+// The route table has one entry per route the router serves: how its time is
+// decided, where its audit row comes from, and whether its answer shows a
+// secret once (docs/architecture.md#the-route-table).
+// TestRouteTable_MatchesLiveRoutes fails on a route with no entry, an entry
+// with no route, and a missing or stray audit.
 
 // routeKey is (HTTP method, canonical chi route pattern).
 type routeKey struct {
@@ -50,11 +35,10 @@ func (d routeDecl) withAudit(a auditDecl) routeDecl {
 }
 
 // showsSecretOnce is d with an answer that carries a secret shown only in
-// that answer: the fields marked `x-show-once: true` in api/openapi.yaml.
-// TestOpenAPISpec_ShowOnceSecretsAreNeverKept keeps the marks and the table
-// in step. /v1/bootstrap's fields are marked too, but its entry is not: it
-// is mounted outside the idempotency layer, and the test asserts it stays
-// there.
+// that answer: a field marked `x-show-once: true` in api/openapi.yaml, which
+// TestOpenAPISpec_ShowOnceSecretsAreNeverKept keeps in step with the table.
+// /v1/bootstrap's fields are marked but its entry is not: it is mounted
+// outside the idempotency layer, and the test fails if it moves inside.
 func (d routeDecl) showsSecretOnce() routeDecl {
 	d.showOnce = true
 	return d
@@ -66,20 +50,8 @@ func answersWithShowOnceSecret(r *http.Request) bool {
 	return routeTable[routeKeyOf(r.Context())].showOnce
 }
 
-// ---------------------------------------------------------------------------
-// The clock: how the door decides each request's time.
-//
-// Every route states how a request's time is decided, once, before its
-// handler runs. It is one read of the server's clock, or the time of the test
-// clock the request's record is on, or, where the request does not name its
-// record by a path parameter, the time a named function decides after it
-// reads the record. Only test mode has clocks: a live request on a real-time
-// or a record route gets one read of the server's clock and no record is
-// read, and a live request on a decidedIn route gets nothing from the door
-// (api.clockDoor says the rest).
-// ---------------------------------------------------------------------------
-
-// clockSource is how a test-mode request's time is decided.
+// clockSource is how a test-mode request's time is decided; clockDoor has the
+// rules.
 type clockSource int
 
 const (
@@ -130,147 +102,72 @@ func decidedIn(function string) routeDecl {
 // clocked is a route's entry with only its clock declared.
 func clocked(c clockDecl) routeDecl { return routeDecl{clock: c} }
 
-// ---------------------------------------------------------------------------
-// The audit (ADR-090).
-//
-// The table states, for every mutating route, where its audit evidence comes
-// from. Coverage is declared, not inferred by a catch-all middleware. Such a
-// middleware would infer the action and resource from the URL, and so write
-// false permanent rows into an append-only compliance log (ADR-090 RC2). It
-// would also miss every route outside the /v1 block it is mounted on (RC1).
-//
-// Each route has one of two kinds of coverage:
-//
-//   - explicit: the route emits a real, typed audit row. That is a LogInTx
-//     emission on the business transaction, or a residual Logger.Log on its
-//     own transaction, on a route not yet moved to LogInTx (ADR-090). Every
-//     entry below was checked by reading the emitting code.
-//   - exempt: the route writes no audit row, on purpose. The reason comes
-//     from a closed enum, and the note records why, plus any accepted loss.
-//
-// At runtime the detector (mw.AuditCoverage), which only observes, reports
-// any mutating 2xx that wrote no audit row and is not declared exempt here.
-//
-// Read egress (ADR-090 §7). Mutations are only half of a chain of custody. A
-// full-tenant export can take every customer and their PII, every invoice,
-// every subscription, a year of usage events, or the audit log itself. A tamper-evidence system
-// that cannot show who copied the evidence has a hole in its chain of
-// custody. Stripe and AWS CloudTrail both log data-export and read events,
-// and so does Hardcount.
-//
-// These five GET routes emit action=export before the first byte streams.
-// If the row cannot be written, they fail closed (exportsHandler.auditExport).
-//
-// The scope, and the loss this does not close on purpose, are written down.
-// A note that implies coverage it does not have is worse than no note.
-//
-//   - This covers the bulk export routes, /v1/exports/*.csv, where one
-//     request returns the whole table.
-//   - It does not audit ordinary paged list reads
-//     (GET /v1/customers?limit=100&offset=…). An operator who walks those
-//     pages copies the same data, and audit_log will not show it. audit_log
-//     can answer "did anyone take the one-click bulk export, and when?".
-//     That is the question an auditor asks, and the action a departing
-//     employee takes.
-//   - A row per list call would put audit_log on the busiest read path in
-//     the dashboard (every page load of every table). The noise would make
-//     the audit log unreadable. The same volume argument keeps usage ingest
-//     exempt below.
-//   - Close this loss when a design partner or an auditor asks for evidence
-//     of PII reads (SOC 2 CC6.x-style "who accessed customer records"). The
-//     answer then is a read trail built from the access log, grouped per
-//     session or actor, not one audit_log row per GET.
-//
-// On purpose, the GET routes under /v1/exports are the only reads that carry
-// an audit. Five routes do not justify an audit story for every read endpoint
-// in the product, and a table nobody can keep current is a table that lies.
-// ---------------------------------------------------------------------------
-
-// auditCoverage is how a route's audit evidence is produced.
+// auditCoverage is where a route's audit row comes from. Every route that can
+// change state declares one, and so does each GET under /v1/exports: a bulk
+// export is the one read that is audited, and it writes its row before the
+// first byte, or fails (ADR-090 §7). The runtime detector (mw.AuditCoverage)
+// reports a state-changing 2xx that wrote no row and is not exempt.
 type auditCoverage int
 
 const (
-	// auditExplicit: the route emits its own typed audit row.
+	// auditExplicit: the route writes its own audit row.
 	auditExplicit auditCoverage = iota + 1
-	// auditExempt: the route writes no audit row, on purpose. Needs a reason.
+	// auditExempt: the route writes no audit row, on purpose.
 	auditExempt
 )
 
-// exemptReason is a closed enum. A new reason widens, on purpose, what
-// "un-audited" may mean. So it is added here, in review, with a note, and
-// never as a free-text excuse at the call site.
+// exemptReason is why a route writes no audit row. The list is closed: a new
+// reason widens what may go unaudited, so it is added here, in review.
 type exemptReason string
 
 const (
-	// reasonNonMutatingPreview: a read-only POST, a POST only because the
-	// input does not fit a query string. It computes a result and returns
-	// it, and writes nothing.
+	// reasonNonMutatingPreview: a POST only because its input does not fit a
+	// query string; it computes a result and writes nothing.
 	reasonNonMutatingPreview exemptReason = "non_mutating_preview"
-
-	// reasonMachineIngest: high-volume machine ingest, where the events table
-	// is the record. See the accepted loss recorded on each entry.
+	// reasonMachineIngest: high-volume usage ingest, where the events table is
+	// the record.
 	reasonMachineIngest exemptReason = "machine_ingest"
-
-	// reasonSystemEndpoint: not an operator action on tenant data (no tenant to
-	// scope a row to).
+	// reasonSystemEndpoint: no tenant to scope a row to.
 	reasonSystemEndpoint exemptReason = "system_endpoint"
-
-	// reasonWebhookOwned: an inbound provider webhook. Its handlers audit its
-	// effects, with emissions inside their transactions. The delivery itself
-	// is recorded in stripe_webhook_events.
+	// reasonWebhookOwned: an inbound provider webhook, with no operator to
+	// attribute; the entry's note says what records its effects.
 	reasonWebhookOwned exemptReason = "webhook_owned"
 )
-
-// There is no `bootstrap` reason, on purpose. Bootstrap mints a live secret
-// key and the owner account. By the time it can emit, the tenant it just
-// created exists, so its rows have a tenant to belong to. POST /v1/bootstrap
-// is `explicit`, and writes its provisioning rows into the new tenant's own
-// log. A bootstrap reason would un-audit the creation of a credential that
-// can move money.
 
 // auditDecl is a route's audit declaration.
 type auditDecl struct {
 	Coverage auditCoverage
 	// Reason is set when, and only when, Coverage == auditExempt.
 	Reason exemptReason
-	// Note names the emission site (explicit) or justifies the exemption and
-	// records any accepted loss (exempt).
+	// Note names the function that writes the row (explicit), or says why
+	// there is none and records any accepted loss (exempt).
 	Note string
 }
 
-// explicit is an audit the route emits itself; note names where.
+// explicit is an audit row the route writes itself; note names the function
+// that writes it, or that calls what does.
 func explicit(note string) auditDecl {
 	return auditDecl{Coverage: auditExplicit, Note: note}
 }
 
-// exempt is no audit row, on purpose: reason is from the closed enum, and
-// note says why and records any accepted loss.
+// exempt is no audit row, on purpose.
 func exempt(reason exemptReason, note string) auditDecl {
 	return auditDecl{Coverage: auditExempt, Reason: reason, Note: note}
 }
 
 // auditRoute is the request's route for the runtime detector: its pattern,
-// which labels the uncovered-mutation counter, and whether the table
-// declares it exempt. The detector asks before it reports an uncovered
-// mutation. Anything not in the table is not exempt, so a gap is reported
-// rather than hidden.
+// which labels the detector's counter, and whether the table declares it
+// exempt. A route not in the table is not exempt, so a gap is reported.
 func auditRoute(r *http.Request) (pattern string, exempt bool) {
 	key := routeKeyOf(r.Context())
 	return key.Pattern, routeTable[key].audit.Coverage == auditExempt
 }
 
-// canonicalRoute normalizes a chi route pattern, so the two sources of
-// patterns agree on one key. One is chi.Walk's pattern string, which the
-// table tests see. The other is Find's, which routeFinder gives each
-// request's record. Raw, they can differ in two ways:
-//   - Walk does a single strings.Replace("/*/", "/") pass. So a Mount("/", …)
-//     inside a Route(…) leaves a "/*/" behind ("/v1/auth/*/login").
-//   - A subrouter's r.Post("/") arrives with a trailing slash
-//     ("/v1/customers/").
-//
-// chi's RoutePattern() loops the replace and trims; applying the same
-// normalization to both sides makes them meet
-// (TestRouteFinder_FindsEveryRouteAndItsParams).
+// canonicalRoute replaces "/*/" and trims a trailing slash as chi's
+// RoutePattern does, and makes an empty pattern "/", so chi.Walk's patterns
+// (the tests) and Find's (routeFinder) meet on one key. Walk leaves a "/*/"
+// where a Mount("/") sits inside a Route ("/v1/auth/*/login"), and keeps a
+// subrouter's trailing slash ("/v1/customers/").
 func canonicalRoute(p string) string {
 	for strings.Contains(p, "/*/") {
 		p = strings.ReplaceAll(p, "/*/", "/")
@@ -285,75 +182,67 @@ func canonicalRoute(p string) string {
 	return p
 }
 
-// routeTable is the table. Keys are canonical (method, route pattern).
-//
-// The audit notes come from walking the live router and reading the emitting
-// code for every mutating route, not from guessing. Each explicit note names
-// the emitter, so a reviewer can check the claim with one grep.
+// routeTable is the table, keyed by canonical method and pattern.
 var routeTable = map[routeKey]routeDecl{
 	// --- system ---------------------------------------------------------
 	{"GET", "/health"}:       realTime(),
 	{"GET", "/health/ready"}: realTime(),
-	// /metrics is registered with r.Handle, which chi expands to every method
-	// (its mALL). So the route walk rightly yields every method of /metrics,
-	// and each is declared, not filtered out: skipping r.Handle routes without
-	// a word would hide any future route that chi registers for every method.
+	// chi expands r.Handle("/metrics") to every method. Each is declared: a
+	// walk that skipped them would also skip a future route registered so.
 	{"GET", "/metrics"}:     realTime(),
 	{"HEAD", "/metrics"}:    realTime(),
-	{"POST", "/metrics"}:    realTime().withAudit(exempt(reasonSystemEndpoint, "Prometheus scrape endpoint; r.Handle expands to every method. No tenant, no operator action.")),
-	{"PUT", "/metrics"}:     realTime().withAudit(exempt(reasonSystemEndpoint, "same r.Handle expansion as POST /metrics.")),
-	{"PATCH", "/metrics"}:   realTime().withAudit(exempt(reasonSystemEndpoint, "same r.Handle expansion as POST /metrics.")),
-	{"DELETE", "/metrics"}:  realTime().withAudit(exempt(reasonSystemEndpoint, "same r.Handle expansion as POST /metrics.")),
+	{"POST", "/metrics"}:    realTime().withAudit(exempt(reasonSystemEndpoint, "The Prometheus scrape: no tenant, no operator action.")),
+	{"PUT", "/metrics"}:     realTime().withAudit(exempt(reasonSystemEndpoint, "As POST /metrics.")),
+	{"PATCH", "/metrics"}:   realTime().withAudit(exempt(reasonSystemEndpoint, "As POST /metrics.")),
+	{"DELETE", "/metrics"}:  realTime().withAudit(exempt(reasonSystemEndpoint, "As POST /metrics.")),
 	{"CONNECT", "/metrics"}: realTime(),
 	{"OPTIONS", "/metrics"}: realTime(),
 	{"TRACE", "/metrics"}:   realTime(),
 	{"QUERY", "/metrics"}:   realTime(),
 
 	// --- sign-in and setup: users and tenants are on no clock ------------
-	{"POST", "/v1/bootstrap"}:                   realTime().withAudit(explicit("tenant.RunBootstrap emits on its own tx into the NEW tenant's log: create/tenant (action=bootstrap_provisioned) + one create/api_key row per minted credential (never the key material) + create/user for the owner. actor=system — there is genuinely no authenticated identity here. It mints a LIVE secret key, so \"who created this key?\" must be answerable.")),
-	{"POST", "/v1/auth/login"}:                  realTime().withAudit(explicit("user.Service.Login → LogInTx(login, user), on the transaction that creates the session, ends the session the request's cookie named and stamps last_login_at. Failed logins are pre-auth: no tenant to scope a row to, so they stay in the security log.")),
-	{"POST", "/v1/auth/logout"}:                 realTime().withAudit(explicit("user.Service.Logout → LogInTx(logout, user), on the transaction that ends the session. An absent cookie, or one for an unknown, ended or expired session, ends nothing and declares MarkSkip.")),
-	{"POST", "/v1/auth/mode"}:                   realTime().withAudit(explicit("user.Service.SetMode → LogInTx(mode_changed, user), on the transaction that switches the session between test and live mode.")),
+	{"POST", "/v1/bootstrap"}:                   realTime().withAudit(explicit("tenant.RunBootstrap. Never exempt: it mints a live secret key.")),
+	{"POST", "/v1/auth/login"}:                  realTime().withAudit(explicit("user.Service.Login")),
+	{"POST", "/v1/auth/logout"}:                 realTime().withAudit(explicit("user.Service.Logout")),
+	{"POST", "/v1/auth/mode"}:                   realTime().withAudit(explicit("user.Service.SetMode")),
 	{"GET", "/v1/auth/password-reset/check"}:    realTime(),
-	{"POST", "/v1/auth/password-reset/confirm"}: realTime().withAudit(explicit("user.Service.ConfirmReset → LogInTx(password_reset_completed, user), on the transaction that sets the password and ends every session.")),
-	{"POST", "/v1/auth/password-reset/request"}: realTime().withAudit(explicit("user.Handler.requestPasswordReset → Log(password_reset_requested) on a matched account. A non-match (and the per-address throttle) writes nothing and declares MarkSkip — the fixed 200 is the enumeration defence.")),
+	{"POST", "/v1/auth/password-reset/confirm"}: realTime().withAudit(explicit("user.Service.ConfirmReset")),
+	{"POST", "/v1/auth/password-reset/request"}: realTime().withAudit(explicit("user.Handler.requestPasswordReset")),
 	{"GET", "/v1/auth/invite/{token}"}:          realTime(),
-	{"POST", "/v1/auth/accept-invite"}:          realTime().withAudit(explicit("dashmembers.Service.AcceptInvite → LogInTx(member.joined, user), on the transaction that claims the invitation, writes the account or the membership and creates a new account's session.")),
+	{"POST", "/v1/auth/accept-invite"}:          realTime().withAudit(explicit("dashmembers.Service.AcceptInvite")),
 	{"GET", "/v1/whoami"}:                       realTime(),
 	{"GET", "/v1/members"}:                      realTime(),
-	{"POST", "/v1/members/invite"}:              realTime().withAudit(explicit("dashmembers.Service.Invite → LogInTx(member.invited, user), on the transaction that revokes the address's expired invitation, creates the invitation and queues its email.")),
-	{"DELETE", "/v1/members/invitations/{id}"}:  realTime().withAudit(explicit("dashmembers.Service.Revoke → LogInTx(member.invite_revoked, user), on the transaction that revokes the invitation.")),
-	{"DELETE", "/v1/members/{userID}"}:          realTime().withAudit(explicit("dashmembers.Service.RemoveMember → LogInTx(member.removed, user), on the transaction that deletes the membership, revokes the invitations the member sent that are not yet accepted, and ends their sessions in the workspace.")),
+	{"POST", "/v1/members/invite"}:              realTime().withAudit(explicit("dashmembers.Service.Invite")),
+	{"DELETE", "/v1/members/invitations/{id}"}:  realTime().withAudit(explicit("dashmembers.Service.Revoke")),
+	{"DELETE", "/v1/members/{userID}"}:          realTime().withAudit(explicit("dashmembers.Service.RemoveMember")),
 	{"GET", "/v1/api-keys"}:                     realTime(),
-	{"POST", "/v1/api-keys"}:                    realTime().withAudit(explicit("auth.Service.CreateKey → LogInTx(create, api_key) on the key's own tx.")).showsSecretOnce(),
-	{"DELETE", "/v1/api-keys/{id}"}:             realTime().withAudit(explicit("auth.Service.RevokeKey → LogInTx(revoke, api_key) on the revocation's tx.")),
-	{"POST", "/v1/api-keys/{id}/rotate"}:        realTime().withAudit(explicit("auth.Service.RotateKey → LogInTx(rotate, api_key) on the rotation's one tx.")).showsSecretOnce(),
+	{"POST", "/v1/api-keys"}:                    realTime().withAudit(explicit("auth.Service.CreateKey")).showsSecretOnce(),
+	{"DELETE", "/v1/api-keys/{id}"}:             realTime().withAudit(explicit("auth.Service.RevokeKey")),
+	{"POST", "/v1/api-keys/{id}/rotate"}:        realTime().withAudit(explicit("auth.Service.RotateKey")).showsSecretOnce(),
 
 	// --- inbound webhooks -----------------------------------------------
-	// The endpoint names the tenant and mode; the customer is known only
-	// after the event is read. Each event handler decides from the record it
-	// names, not the settle, which already-decided paths also reach.
-	{"POST", "/v1/webhooks/stripe/{endpoint_id}"}: decidedIn("payment.Stripe.HandleWebhook").withAudit(exempt(reasonWebhookOwned, "Inbound Stripe delivery. Some effects DO audit in-tx (payment-method flips → payment.Stripe.handleCheckoutCompleted; refund-status flips → creditnote.ApplyRefundWebhook; refunds made in Stripe outside Hardcount → creditnote.RecordStripeRefund, which writes an update row on the invoice (action refunded_in_stripe) and, for a recorded note, its create and issued rows, ADR-134). ACCEPTED LOSS, recorded rather than glossed: card SETTLEMENT (payment_intent.succeeded/failed → payment.SettleSucceeded/SettleFailed) writes NO audit_log row. The settle is not evidence-free — invoices.paid_at/status, the in-tx invoice.paid + payment.succeeded outbox events, and stripe_webhook_events all record it, and it is machine-driven with no operator to attribute (the 2026-06-12 audit ruled webhooks+timeline own that record). But audit_log itself cannot answer \"when was INV-1042 settled?\". Closure trigger: an auditor or DP asking for settlement evidence FROM the audit log → emit on the settle tx (invoice.MarkPaidCardSettlementTransition would need an emit hook, and domain would need a settle action). Same ruling for card DISPUTES (charge.dispute.* → invoice.RecordStripeDispute, #979): no audit_log row; the invoice_disputes row, the in-tx payment.dispute_opened/closed outbox events and stripe_webhook_events record it.")),
+	// The endpoint names the tenant and mode; the record is known only once
+	// the event is read.
+	{"POST", "/v1/webhooks/stripe/{endpoint_id}"}: decidedIn("payment.Stripe.HandleWebhook").withAudit(exempt(reasonWebhookOwned, "Its handlers audit a card saved at checkout, a refund's status and a refund made in Stripe, each in its own transaction. Accepted loss: a card settlement or dispute writes no audit_log row; the invoice, its outbox events and stripe_webhook_events record it.")),
 	// email reports; reads no clock
-	{"POST", "/v1/webhooks/postmark"}: realTime().withAudit(exempt(reasonWebhookOwned, "Inbound Postmark delivery/bounce/complaint report (ADR-098). Basic-Auth gated; tenant resolves from the stamped outbox row, never the blind POST. Its effects are provider-truth STATE (email_outbox.delivery_state, customers.email_status) with the customer.email_bounced/email_complained outbox events as the observable record — machine-driven with no operator to attribute, same ruling as the Stripe settle path above. ACCEPTED LOSS: audit_log cannot answer 'when did the provider report INV-1042's email bounced' — the timeline (delivery_state) and webhook events own that record.")),
+	{"POST", "/v1/webhooks/postmark"}: realTime().withAudit(exempt(reasonWebhookOwned, "Postmark's delivery reports, behind Basic Auth; the tenant comes from the stored outbox row (ADR-098). Accepted loss: their effects (an email's delivery state, a suppressed address, outbox events) are not audit_log rows.")),
 
 	// --- public pages: the token names the record, and the mode is not
 	// known until it is read ----------------------------------------------
-	{"GET", "/v1/public/invoices/{token}"}:           decidedIn("hostedinvoice.Handler.resolveInvoice"),
-	{"POST", "/v1/public/invoices/{token}/checkout"}: decidedIn("hostedinvoice.Handler.resolveInvoice").withAudit(explicit("hostedInvoiceStripeAdapter (api/adapters.go) → LogInTx on the checkout-claim tx; actor is the CUSTOMER (auth.WithCustomerActor). Outside the old catch-all entirely.")),
-	{"GET", "/v1/public/invoices/{token}/pdf"}:       decidedIn("hostedinvoice.Handler.resolveInvoice"),
-	{"GET", "/v1/public/payment-updates/{token}"}:    realTime(), // writes nothing
-	// two audit rows, no money
-	{"POST", "/v1/public/payment-updates/{token}/checkout"}: realTime().withAudit(explicit("payment.PublicPaymentHandler.createCheckoutSession → LogInTx on the token consume/restore txs; customer actor.")),
+	{"GET", "/v1/public/invoices/{token}"}:                  decidedIn("hostedinvoice.Handler.resolveInvoice"),
+	{"POST", "/v1/public/invoices/{token}/checkout"}:        decidedIn("hostedinvoice.Handler.resolveInvoice").withAudit(explicit("api.hostedInvoiceStripeAdapter.CreateInvoicePaymentSession")),
+	{"GET", "/v1/public/invoices/{token}/pdf"}:              decidedIn("hostedinvoice.Handler.resolveInvoice"),
+	{"GET", "/v1/public/payment-updates/{token}"}:           realTime(),
+	{"POST", "/v1/public/payment-updates/{token}/checkout"}: realTime().withAudit(explicit("payment.PublicPaymentHandler.createCheckoutSession")),
 	{"GET", "/v1/public/cost-dashboard/{token}"}:            decidedIn("usage.CostDashboardAssembler.GetByToken"),
 
 	// --- tenant-wide reads and streams: each row by its stored dates ------
 	{"GET", "/v1/webhook_events/stream"}:     realTime(),
-	{"GET", "/v1/exports/audit-log.csv"}:     realTime().withAudit(explicit("exportsHandler.exportAuditLog → auditExport(action=export, resource_type=audit_log) BEFORE the stream, fail-closed. Exporting the audit log is itself an audited event. The row is written first, so it is always in the LOG; an UNFILTERED export therefore also contains it in the FILE, but a filtered one need not (a clock-scoped export never does — the export row has NULL sim columns).")),
-	{"GET", "/v1/exports/customers.csv"}:     realTime().withAudit(explicit("exportsHandler.exportCustomers → auditExport(action=export, resource_type=customer) BEFORE the stream; a failed row means 500 and NO bytes. Metadata carries the date scope + filename; no row count (unknowable pre-stream).")),
-	{"GET", "/v1/exports/invoices.csv"}:      realTime().withAudit(explicit("exportsHandler.exportInvoices → auditExport(action=export, resource_type=invoice) BEFORE the stream, fail-closed.")),
-	{"GET", "/v1/exports/subscriptions.csv"}: realTime().withAudit(explicit("exportsHandler.exportSubscriptions → auditExport(action=export, resource_type=subscription) BEFORE the stream, fail-closed.")),
-	{"GET", "/v1/exports/usage-events.csv"}:  realTime().withAudit(explicit("exportsHandler.exportUsageEvents → auditExport(action=export, resource_type=usage_event) BEFORE the stream, fail-closed. The from/to range is required by the route and lands in the row's metadata.")),
+	{"GET", "/v1/exports/audit-log.csv"}:     realTime().withAudit(explicit("api.exportsHandler.exportAuditLog")),
+	{"GET", "/v1/exports/customers.csv"}:     realTime().withAudit(explicit("api.exportsHandler.exportCustomers")),
+	{"GET", "/v1/exports/invoices.csv"}:      realTime().withAudit(explicit("api.exportsHandler.exportInvoices")),
+	{"GET", "/v1/exports/subscriptions.csv"}: realTime().withAudit(explicit("api.exportsHandler.exportSubscriptions")),
+	{"GET", "/v1/exports/usage-events.csv"}:  realTime().withAudit(explicit("api.exportsHandler.exportUsageEvents")),
 	{"GET", "/v1/analytics/mrr-movement"}:    realTime(),
 	{"GET", "/v1/analytics/overview"}:        realTime(),
 	{"GET", "/v1/analytics/revenue-chart"}:   realTime(),
@@ -363,147 +252,126 @@ var routeTable = map[routeKey]routeDecl{
 
 	// --- pricing, settings and tooling: on no clock ----------------------
 	{"GET", "/v1/meters"}:            realTime(),
-	{"POST", "/v1/meters"}:           realTime().withAudit(explicit("pricing.Handler.createMeter → Log(create, meter).")),
+	{"POST", "/v1/meters"}:           realTime().withAudit(explicit("pricing.Handler.createMeter")),
 	{"GET", "/v1/meters/{id}"}:       realTime(),
-	{"PATCH", "/v1/meters/{id}"}:     realTime().withAudit(explicit("pricing.Service.UpdateMeter → LogInTx(update, meter) on the meter's own tx.")),
+	{"PATCH", "/v1/meters/{id}"}:     realTime().withAudit(explicit("pricing.Service.UpdateMeter")),
 	{"GET", "/v1/plans"}:             realTime(),
-	{"POST", "/v1/plans"}:            realTime().withAudit(explicit("pricing.Handler.createPlan → Log(create, plan).")),
+	{"POST", "/v1/plans"}:            realTime().withAudit(explicit("pricing.Handler.createPlan")),
 	{"GET", "/v1/plans/{id}"}:        realTime(),
-	{"PATCH", "/v1/plans/{id}"}:      realTime().withAudit(explicit("pricing.Handler.updatePlan → Log(update, plan).")),
+	{"PATCH", "/v1/plans/{id}"}:      realTime().withAudit(explicit("pricing.Handler.updatePlan")),
 	{"GET", "/v1/plans/{id}/prices"}: realTime(),
-	// A price edit reaches subscriptions on many clocks. Its SQL stamps each
-	// clock's own time under a lock that orders it against an advance.
-	{"POST", "/v1/plans/{id}/prices"}:              realTime().withAudit(explicit("pricing.Service.AddPrice → LogInTx(create, plan_price) on the price write's tx, with the content and when it applies.")),
-	{"PATCH", "/v1/plans/{id}/prices/{price_id}"}:  realTime().withAudit(explicit("pricing.Service.EditPrice → LogInTx(update, plan_price) on the price write's tx, with the content before and after.")),
-	{"DELETE", "/v1/plans/{id}/prices/{price_id}"}: realTime().withAudit(explicit("pricing.Service.RemovePrice → LogInTx(delete, plan_price) on the price write's tx, with the overrides it ended.")),
+	// A price edit reaches subscriptions on many clocks, so no one clock
+	// decides it.
+	{"POST", "/v1/plans/{id}/prices"}:              realTime().withAudit(explicit("pricing.Service.AddPrice")),
+	{"PATCH", "/v1/plans/{id}/prices/{price_id}"}:  realTime().withAudit(explicit("pricing.Service.EditPrice")),
+	{"DELETE", "/v1/plans/{id}/prices/{price_id}"}: realTime().withAudit(explicit("pricing.Service.RemovePrice")),
 	// An override reads its customer's clock in its own SQL.
-	{"GET", "/v1/price-overrides"}:         realTime(),
-	{"POST", "/v1/price-overrides"}:        realTime().withAudit(explicit("pricing.Handler.createOverride → Log(create, price_override).")),
-	{"DELETE", "/v1/price-overrides/{id}"}: realTime().withAudit(explicit("pricing.Handler.deleteOverride → Log(delete, price_override).")),
-	{"GET", "/v1/provider-costs"}:          realTime(),
-	{"PUT", "/v1/provider-costs"}:          realTime().withAudit(explicit("usage.ProviderCostHandler.upsert → LogInTx(update, provider_cost) on the upsert tx.")),
-	{"DELETE", "/v1/provider-costs/{id}"}:  realTime().withAudit(explicit("usage.ProviderCostHandler.delete → LogInTx(delete, provider_cost) on the delete tx.")),
-	{"GET", "/v1/recipes"}:                 realTime(),
-	{"GET", "/v1/recipes/instances"}:       realTime(),
-	{"GET", "/v1/recipes/{key}"}:           realTime(),
-	// plans, meters and a dunning policy
-	{"POST", "/v1/recipes/{key}/instantiate"}: realTime().withAudit(explicit("recipe.Service.Instantiate → LogInTx(create, recipe) on the generate-plan tx (ADR-085 born-unique install). An idempotent re-apply installs nothing, emits nothing, and declares audit.MarkSkip on the badge-exists branch — a no-op deserves no record (the catch-all fabricated a 'created recipe' row for it).")),
-	{"POST", "/v1/recipes/{key}/preview"}:     realTime().withAudit(exempt(reasonNonMutatingPreview, "Read-only recipe render — returns the objects an instantiate WOULD create. Writes nothing (recipe/handler.go calls audit.MarkSkip).")),
+	{"GET", "/v1/price-overrides"}:            realTime(),
+	{"POST", "/v1/price-overrides"}:           realTime().withAudit(explicit("pricing.Handler.createOverride")),
+	{"DELETE", "/v1/price-overrides/{id}"}:    realTime().withAudit(explicit("pricing.Handler.deleteOverride")),
+	{"GET", "/v1/provider-costs"}:             realTime(),
+	{"PUT", "/v1/provider-costs"}:             realTime().withAudit(explicit("usage.ProviderCostHandler.upsert")),
+	{"DELETE", "/v1/provider-costs/{id}"}:     realTime().withAudit(explicit("usage.ProviderCostHandler.delete")),
+	{"GET", "/v1/recipes"}:                    realTime(),
+	{"GET", "/v1/recipes/instances"}:          realTime(),
+	{"GET", "/v1/recipes/{key}"}:              realTime(),
+	{"POST", "/v1/recipes/{key}/instantiate"}: realTime().withAudit(explicit("recipe.Service.Instantiate")),
+	{"POST", "/v1/recipes/{key}/preview"}:     realTime().withAudit(exempt(reasonNonMutatingPreview, "Renders what instantiate would create and writes nothing (recipe.Handler calls audit.MarkSkip).")),
 	{"GET", "/v1/settings"}:                   realTime(),
-	{"PUT", "/v1/settings"}:                   realTime().withAudit(explicit("tenant.SettingsHandler.upsert → Log(update, setting) with a FIELD-LEVEL diff. A save that changes no field mutates nothing semantically and declares MarkSkip.")),
+	{"PUT", "/v1/settings"}:                   realTime().withAudit(explicit("tenant.SettingsHandler.upsert")),
 	{"GET", "/v1/settings/email"}:             realTime(),
-	{"POST", "/v1/settings/email/test"}:       realTime().withAudit(explicit("api.emailSettingsHandler.sendTest → Log(send, setting: smtp; metadata action=test_email_sent; no address) after a successful SMTP send to the signed-in member.")),
+	{"POST", "/v1/settings/email/test"}:       realTime().withAudit(explicit("api.emailSettingsHandler.sendTest")),
 	{"GET", "/v1/settings/stripe"}:            realTime(),
 	// Connecting Stripe retries every invoice stuck on the missing key, each
 	// on its own clock.
-	{"POST", "/v1/settings/stripe"}:                                                 decidedIn("invoice.Service.RetryProviderConfigErrors").withAudit(explicit("tenantstripe.Handler.connect → Log(create, stripe_credentials) — never records the keys.")),
-	{"DELETE", "/v1/settings/stripe/{mode}"}:                                        realTime().withAudit(explicit("tenantstripe.Handler.delete → Log(delete, stripe_credentials).")),
-	{"PATCH", "/v1/settings/stripe/{mode}/webhook"}:                                 realTime().withAudit(explicit("tenantstripe.Handler.setWebhook → Log(rotate, stripe_credentials: webhook_secret_set) — never records the secret.")),
+	{"POST", "/v1/settings/stripe"}:                                                 decidedIn("invoice.Service.RetryProviderConfigErrors").withAudit(explicit("tenantstripe.Handler.connect")),
+	{"DELETE", "/v1/settings/stripe/{mode}"}:                                        realTime().withAudit(explicit("tenantstripe.Handler.delete")),
+	{"PATCH", "/v1/settings/stripe/{mode}/webhook"}:                                 realTime().withAudit(explicit("tenantstripe.Handler.setWebhook")),
 	{"GET", "/v1/dunning/policies"}:                                                 realTime(),
-	{"POST", "/v1/dunning/policies"}:                                                realTime().withAudit(explicit("dunning.Handler.createPolicy → Log(create, dunning_policy).")),
+	{"POST", "/v1/dunning/policies"}:                                                realTime().withAudit(explicit("dunning.Handler.createPolicy")),
 	{"GET", "/v1/dunning/policies/{id}"}:                                            realTime(),
-	{"PATCH", "/v1/dunning/policies/{id}"}:                                          realTime().withAudit(explicit("dunning.Handler.updatePolicy → Log(update, dunning_policy).")),
-	{"DELETE", "/v1/dunning/policies/{id}"}:                                         realTime().withAudit(explicit("dunning.Handler.deletePolicy → Log(delete, dunning_policy).")),
-	{"POST", "/v1/dunning/policies/{id}/set-default"}:                               realTime().withAudit(explicit("dunning.Handler.setDefaultPolicy → Log(update, dunning_policy: set_default).")),
+	{"PATCH", "/v1/dunning/policies/{id}"}:                                          realTime().withAudit(explicit("dunning.Handler.updatePolicy")),
+	{"DELETE", "/v1/dunning/policies/{id}"}:                                         realTime().withAudit(explicit("dunning.Handler.deletePolicy")),
+	{"POST", "/v1/dunning/policies/{id}/set-default"}:                               realTime().withAudit(explicit("dunning.Handler.setDefaultPolicy")),
 	{"GET", "/v1/dunning/stats"}:                                                    realTime(),
 	{"GET", "/v1/webhook-endpoints/endpoints"}:                                      realTime(),
-	{"POST", "/v1/webhook-endpoints/endpoints"}:                                     realTime().withAudit(explicit("webhook.Handler.createEndpoint → Log(create, webhook_endpoint).")).showsSecretOnce(),
+	{"POST", "/v1/webhook-endpoints/endpoints"}:                                     realTime().withAudit(explicit("webhook.Handler.createEndpoint")).showsSecretOnce(),
 	{"GET", "/v1/webhook-endpoints/endpoints/stats"}:                                realTime(),
 	{"GET", "/v1/webhook-endpoints/endpoints/{id}"}:                                 realTime(),
-	{"PATCH", "/v1/webhook-endpoints/endpoints/{id}"}:                               realTime().withAudit(explicit("webhook.Handler.updateEndpoint → Log(update, webhook_endpoint).")),
-	{"DELETE", "/v1/webhook-endpoints/endpoints/{id}"}:                              realTime().withAudit(explicit("webhook.Handler.deleteEndpoint → Log(delete, webhook_endpoint).")),
+	{"PATCH", "/v1/webhook-endpoints/endpoints/{id}"}:                               realTime().withAudit(explicit("webhook.Handler.updateEndpoint")),
+	{"DELETE", "/v1/webhook-endpoints/endpoints/{id}"}:                              realTime().withAudit(explicit("webhook.Handler.deleteEndpoint")),
 	{"GET", "/v1/webhook-endpoints/endpoints/{id}/deliveries"}:                      realTime(),
-	{"POST", "/v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay"}: realTime().withAudit(explicit("webhook.Handler.replayDelivery → Log(update, webhook_delivery: replayed_to_endpoint) — records target endpoint + replay clone ids.")),
-	{"POST", "/v1/webhook-endpoints/endpoints/{id}/rotate-secret"}:                  realTime().withAudit(explicit("webhook.Handler.rotateSecret → Log(rotate, webhook_endpoint) — never records the secret.")).showsSecretOnce(),
+	{"POST", "/v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay"}: realTime().withAudit(explicit("webhook.Handler.replayDelivery")),
+	{"POST", "/v1/webhook-endpoints/endpoints/{id}/rotate-secret"}:                  realTime().withAudit(explicit("webhook.Handler.rotateSecret")).showsSecretOnce(),
 	{"GET", "/v1/webhook-endpoints/events"}:                                         realTime(),
 	{"GET", "/v1/webhook_events/{id}/deliveries"}:                                   realTime(),
-	{"POST", "/v1/webhook_events/{id}/replay"}:                                      realTime().withAudit(explicit("webhook.Handler.replayEventV2 → Log(update, webhook_event: replayed).")),
+	{"POST", "/v1/webhook_events/{id}/replay"}:                                      realTime().withAudit(explicit("webhook.Handler.replayEventV2")),
 	// A clock itself: the advance decides each pass's time per clock.
-	//
-	// The clock routes stamp their audit rows on their own clock's simulated
-	// time (the sim axis, ADR-090 §5). So the clock's lifecycle sits inside the
-	// timeline it explains. Otherwise, after teardown (ADR-086), a
-	// clock-scoped query would return the effects (invoices finalized,
-	// subscriptions canceled) with no cause. It would show no "created", no
-	// "advanced to 2027-03-01" and no "deleted". The "deleted" row is the one
-	// that explains why every other trace of the simulation is gone.
 	{"GET", "/v1/test-clocks"}:                     realTime(),
-	{"POST", "/v1/test-clocks"}:                    realTime().withAudit(explicit("testclock.Service.Create → LogInTx(create, test_clock) on the clock's insert tx.")),
+	{"POST", "/v1/test-clocks"}:                    realTime().withAudit(explicit("testclock.Service.Create")),
 	{"GET", "/v1/test-clocks/{id}"}:                realTime(),
-	{"DELETE", "/v1/test-clocks/{id}"}:             realTime().withAudit(explicit("testclock.Service.Delete → LogInTx(delete, test_clock: teardown) on the teardown tx, named from the clock row it deletes. ADR-086: the audit row is the simulation's only record after teardown.")),
-	{"POST", "/v1/test-clocks/{id}/advance"}:       realTime().withAudit(explicit("testclock.Service.Advance → LogInTx(update, test_clock; metadata action=advanced, advanced_from read by the same statement) on the tx that marks the clock advancing.")),
-	{"POST", "/v1/test-clocks/{id}/retry-advance"}: realTime().withAudit(explicit("testclock.Service.RetryAdvance → LogInTx(update, test_clock; metadata action=retry_advance) on the tx that marks the clock advancing again.")),
+	{"DELETE", "/v1/test-clocks/{id}"}:             realTime().withAudit(explicit("testclock.Service.Delete")),
+	{"POST", "/v1/test-clocks/{id}/advance"}:       realTime().withAudit(explicit("testclock.Service.Advance")),
+	{"POST", "/v1/test-clocks/{id}/retry-advance"}: realTime().withAudit(explicit("testclock.Service.RetryAdvance")),
 	{"GET", "/v1/test-clocks/{id}/customers"}:      realTime(),
 	// Bills the tenant's due subscriptions, which never include a clock's.
-	{"POST", "/v1/billing/run"}: realTime().withAudit(explicit("billing.Handler.triggerCycle → Log(run, billing) — the operator's TRIGGER row: it records WHO ran a cycle and how many invoices it produced, including a run that produced ZERO (which leaves no finalize rows at all). NOT because the finalize rows are anonymous — triggerCycle runs synchronously on the request ctx, so those rows do carry the operator's actor/IP/request_id, unlike the scheduler's. Residual own-tx by design: the route owns no tx. A failed emission is surfaced in the response and left unmarked, so the detector reports it.")),
+	{"POST", "/v1/billing/run"}: realTime().withAudit(explicit("billing.Handler.triggerCycle")),
 
 	// --- customers --------------------------------------------------------
 	{"GET", "/v1/customers"}: realTime(),
 	// the body names the clock
-	{"POST", "/v1/customers"}:                                                decidedIn("customer.Service.Create").withAudit(explicit("customer.Service.Create → LogInTx(create, customer) on the customer's own tx.")),
+	{"POST", "/v1/customers"}:                                                decidedIn("customer.Service.Create").withAudit(explicit("customer.Service.Create")),
 	{"GET", "/v1/customers/{id}"}:                                            ofCustomer("id"),
-	{"PATCH", "/v1/customers/{id}"}:                                          ofCustomer("id").withAudit(explicit("customer.Handler.update → Log(update, customer) with a field diff.")),
+	{"PATCH", "/v1/customers/{id}"}:                                          ofCustomer("id").withAudit(explicit("customer.Handler.update")),
 	{"GET", "/v1/customers/{id}/billing-profile"}:                            ofCustomer("id"),
-	{"PUT", "/v1/customers/{id}/billing-profile"}:                            ofCustomer("id").withAudit(explicit("customer.Handler.upsertBillingProfile → Log(update, customer).")),
+	{"PUT", "/v1/customers/{id}/billing-profile"}:                            ofCustomer("id").withAudit(explicit("customer.Handler.upsertBillingProfile")),
 	{"GET", "/v1/customers/{id}/margin"}:                                     ofCustomer("id"),
-	{"POST", "/v1/customers/{id}/rotate-cost-dashboard-token"}:               ofCustomer("id").withAudit(explicit("customer.Handler.rotateCostDashboardToken → Log(rotate, customer) — never records the plaintext token.")).showsSecretOnce(),
+	{"POST", "/v1/customers/{id}/rotate-cost-dashboard-token"}:               ofCustomer("id").withAudit(explicit("customer.Handler.rotateCostDashboardToken")).showsSecretOnce(),
 	{"GET", "/v1/customers/{id}/sent-emails"}:                                ofCustomer("id"),
 	{"GET", "/v1/customers/{id}/usage"}:                                      ofCustomer("id"),
 	{"GET", "/v1/customers/{customer_id}/overview"}:                          ofCustomer("customer_id"),
 	{"GET", "/v1/customers/{customer_id}/payment-methods"}:                   ofCustomer("customer_id"),
-	{"POST", "/v1/customers/{customer_id}/payment-methods/send-setup-email"}: ofCustomer("customer_id").withAudit(explicit("paymentmethods.Handler.operatorSendSetupEmail → Log(update, customer: setup_link_sent). No recipient address on the row (GDPR erasure) — email_outbox is the delivery record.")),
-	{"POST", "/v1/customers/{customer_id}/payment-methods/setup-session"}:    ofCustomer("customer_id").withAudit(explicit("paymentmethods.Service.CreateSetupSession → Log(update, customer: setup_session_created).")).showsSecretOnce(),
-	{"DELETE", "/v1/customers/{customer_id}/payment-methods/{pmID}"}:         ofCustomer("customer_id").withAudit(explicit("paymentmethods.Service.Detach → Log(delete, payment_method) + Log(update) on any promoted new default.")),
-	{"POST", "/v1/customers/{customer_id}/payment-methods/{pmID}/default"}:   ofCustomer("customer_id").withAudit(explicit("paymentmethods.Service.SetDefault → Log(update, payment_method).")),
+	{"POST", "/v1/customers/{customer_id}/payment-methods/send-setup-email"}: ofCustomer("customer_id").withAudit(explicit("paymentmethods.Handler.operatorSendSetupEmail")),
+	{"POST", "/v1/customers/{customer_id}/payment-methods/setup-session"}:    ofCustomer("customer_id").withAudit(explicit("paymentmethods.Service.CreateSetupSession")).showsSecretOnce(),
+	{"DELETE", "/v1/customers/{customer_id}/payment-methods/{pmID}"}:         ofCustomer("customer_id").withAudit(explicit("paymentmethods.Service.Detach")),
+	{"POST", "/v1/customers/{customer_id}/payment-methods/{pmID}/default"}:   ofCustomer("customer_id").withAudit(explicit("paymentmethods.Service.SetDefault")),
 
 	// --- subscriptions ----------------------------------------------------
 	{"GET", "/v1/subscriptions"}: realTime(),
 	// the body names the customer
-	{"POST", "/v1/subscriptions"}:                                      decidedIn("subscription.Handler.create").withAudit(explicit("subscription.Handler.create → Log(create, subscription).")),
+	{"POST", "/v1/subscriptions"}:                                      decidedIn("subscription.Handler.create").withAudit(explicit("subscription.Handler.create")),
 	{"GET", "/v1/subscriptions/{id}"}:                                  ofSubscription(),
-	{"PUT", "/v1/subscriptions/{id}/billing-thresholds"}:               ofSubscription().withAudit(explicit("subscription.Handler.setBillingThresholds → Log(update, subscription).")),
-	{"DELETE", "/v1/subscriptions/{id}/billing-thresholds"}:            ofSubscription().withAudit(explicit("subscription.Handler.clearBillingThresholds → Log(update, subscription).")),
-	{"POST", "/v1/subscriptions/{id}/cancel"}:                          ofSubscription().withAudit(explicit("subscription.Service.Cancel → LogInTx(cancel, subscription) on the cancel tx (single writer: operator route AND dunning's terminal cancel).")),
-	{"POST", "/v1/subscriptions/{id}/end-trial"}:                       ofSubscription().withAudit(explicit("subscription.Handler.endTrial → Log(update, subscription: trial_ended).")),
-	{"POST", "/v1/subscriptions/{id}/extend-trial"}:                    ofSubscription().withAudit(explicit("subscription.Handler.extendTrial → Log(update, subscription: trial_extended).")),
-	{"POST", "/v1/subscriptions/{id}/items"}:                           ofSubscription().withAudit(explicit("subscription.Handler.addItem → Log(update, subscription).")),
-	{"PATCH", "/v1/subscriptions/{id}/items/{itemID}"}:                 ofSubscription().withAudit(explicit("subscription.Handler.updateItem → Log(subscription.item_updated).")),
-	{"DELETE", "/v1/subscriptions/{id}/items/{itemID}"}:                ofSubscription().withAudit(explicit("subscription.Handler.removeItem → Log(update, subscription).")),
-	{"DELETE", "/v1/subscriptions/{id}/items/{itemID}/pending-change"}: ofSubscription().withAudit(explicit("subscription.Handler.cancelPendingItemChange → Log(update, subscription; metadata action=cancel_pending_item_plan_change). A call that canceled no change calls audit.MarkSkip.")),
-	{"PUT", "/v1/subscriptions/{id}/pause-collection"}:                 ofSubscription().withAudit(explicit("subscription.Service.PauseCollection → Log(update, subscription; metadata action=collection_paused). The HANDLER emits nothing — the row is the service's.")),
-	{"DELETE", "/v1/subscriptions/{id}/pause-collection"}:              ofSubscription().withAudit(explicit("subscription.Service.ResumeCollection → Log(update, subscription; metadata action=collection_resumed). The HANDLER emits nothing — the row is the service's.")),
-	{"POST", "/v1/subscriptions/{id}/retry-billing"}:                   ofSubscription().withAudit(explicit("subscription.Service.RetryBilling → LogInTx(update, subscription; metadata action=billing_retried) on the transaction that clears the failure record; a subscription with no record answers 409 and emits nothing.")),
-	{"POST", "/v1/subscriptions/{id}/schedule-cancel"}:                 ofSubscription().withAudit(explicit("subscription.Handler.scheduleCancel → Log(update, subscription: cancel_scheduled).")),
-	{"DELETE", "/v1/subscriptions/{id}/scheduled-cancel"}:              ofSubscription().withAudit(explicit("subscription.Handler.clearScheduledCancel → Log(update, subscription; metadata action=cancel_cleared).")),
+	{"PUT", "/v1/subscriptions/{id}/billing-thresholds"}:               ofSubscription().withAudit(explicit("subscription.Handler.setBillingThresholds")),
+	{"DELETE", "/v1/subscriptions/{id}/billing-thresholds"}:            ofSubscription().withAudit(explicit("subscription.Handler.clearBillingThresholds")),
+	{"POST", "/v1/subscriptions/{id}/cancel"}:                          ofSubscription().withAudit(explicit("subscription.Service.Cancel")),
+	{"POST", "/v1/subscriptions/{id}/end-trial"}:                       ofSubscription().withAudit(explicit("subscription.Handler.endTrial")),
+	{"POST", "/v1/subscriptions/{id}/extend-trial"}:                    ofSubscription().withAudit(explicit("subscription.Handler.extendTrial")),
+	{"POST", "/v1/subscriptions/{id}/items"}:                           ofSubscription().withAudit(explicit("subscription.Handler.addItem")),
+	{"PATCH", "/v1/subscriptions/{id}/items/{itemID}"}:                 ofSubscription().withAudit(explicit("subscription.Handler.updateItem")),
+	{"DELETE", "/v1/subscriptions/{id}/items/{itemID}"}:                ofSubscription().withAudit(explicit("subscription.Handler.removeItem")),
+	{"DELETE", "/v1/subscriptions/{id}/items/{itemID}/pending-change"}: ofSubscription().withAudit(explicit("subscription.Handler.cancelPendingItemChange")),
+	{"PUT", "/v1/subscriptions/{id}/pause-collection"}:                 ofSubscription().withAudit(explicit("subscription.Service.PauseCollection")),
+	{"DELETE", "/v1/subscriptions/{id}/pause-collection"}:              ofSubscription().withAudit(explicit("subscription.Service.ResumeCollection")),
+	{"POST", "/v1/subscriptions/{id}/retry-billing"}:                   ofSubscription().withAudit(explicit("subscription.Service.RetryBilling")),
+	{"POST", "/v1/subscriptions/{id}/schedule-cancel"}:                 ofSubscription().withAudit(explicit("subscription.Handler.scheduleCancel")),
+	{"DELETE", "/v1/subscriptions/{id}/scheduled-cancel"}:              ofSubscription().withAudit(explicit("subscription.Handler.clearScheduledCancel")),
 	{"GET", "/v1/subscriptions/{id}/timeline"}:                         ofSubscription(),
 
 	// --- usage --------------------------------------------------------------
 	// The body names the customer by its external id; a batch or a LiteLLM
 	// callback names many, each decided per event.
-	//
-	// Accepted loss, for the three exempt ingest routes: "which credential
-	// ingested this event" cannot be recovered, because usage_events has no
-	// key_id column. The events tables record what was ingested, but not by
-	// whom. Close this loss at the first billing dispute that turns on
-	// provenance. The fix is a key_id column on usage_events, so each event
-	// records the credential that sent it, not a per-request audit row. At
-	// ingest volumes, one audit row per call would outweigh the events
-	// themselves.
-	{"POST", "/v1/usage-events"}:               decidedIn("usage.Service.Ingest").withAudit(exempt(reasonMachineIngest, "High-volume metering ingest (~1000/s); usage_events IS the record, and a row per event would double the write volume of the hottest path. ACCEPTED LOSS, stated precisely: until this PR the retired catch-all wrote a generic 'create usage_event' row per REQUEST, so these routes DO lose audit_log rows they were getting — what is lost with them is (a) WHICH CREDENTIAL ingested an event (usage_events carries no key_id) and (b) the request-level trail. The events themselves, their timestamps and their origin tag remain. Closure trigger: a billing dispute or an injected-usage incident → stamp key_id at ingest (plumb the fact; no heuristics).")),
-	{"POST", "/v1/usage-events/batch"}:         decidedIn("usage.Service.BatchIngest").withAudit(exempt(reasonMachineIngest, "Batch form of the same ingest. Same accepted loss.")),
-	{"POST", "/v1/integrations/litellm/spend"}: decidedIn("usage.Service.IngestCall").withAudit(exempt(reasonMachineIngest, "LiteLLM proxy spend callback — one POST per LLM call, funnels into the same usage_events writer. Same accepted loss.")),
-	// Backfill is not exempt, on purpose: it is an operator action on the
-	// money path. Inserting backdated usage changes what a customer is billed
-	// for a period that may already have closed, unlike the machine metering
-	// above. usage.Service.Backfill emits on the ingest transaction
-	// (ADR-090).
-	{"POST", "/v1/usage-events/backfill"}: decidedIn("usage.Service.Backfill").withAudit(explicit("usage.Service.Backfill → IngestAudited (in-tx): action=create/usage_event, metadata.action=usage_backfilled with the backdated timestamp.")),
-	// Held usage (#1044, ADR-122): operator actions on rows the LiteLLM
-	// callback could not ingest. Release changes what a customer is billed,
-	// as backfill does. Discard decides that the usage will never bill.
-	{"POST", "/v1/usage-events/held/release"}: decidedIn("usage.Service.Release").withAudit(explicit("usage.Service.Release → PostgresStore.ReleaseHeld (in-tx): action=create/usage_event, metadata.action=held_usage_released with the counts and the event time range. A call that changed no row calls audit.MarkSkip.")),
+	{"POST", "/v1/usage-events"}:               decidedIn("usage.Service.Ingest").withAudit(exempt(reasonMachineIngest, "usage_events is the record, and a row per call would double the writes of the busiest path. Accepted loss: which key sent an event, since usage_events has no key_id.")),
+	{"POST", "/v1/usage-events/batch"}:         decidedIn("usage.Service.BatchIngest").withAudit(exempt(reasonMachineIngest, "The batch form of the same ingest; the same accepted loss.")),
+	{"POST", "/v1/integrations/litellm/spend"}: decidedIn("usage.Service.IngestCall").withAudit(exempt(reasonMachineIngest, "LiteLLM's spend callback, which writes usage events like the ingest above; the same accepted loss.")),
+	// Backfill is audited, unlike the ingest above: an operator's backdated
+	// usage changes what a customer is billed.
+	{"POST", "/v1/usage-events/backfill"}: decidedIn("usage.Service.Backfill").withAudit(explicit("usage.Service.Backfill")),
+	// Held usage (ADR-122) is what the LiteLLM callback could not ingest.
+	// Releasing it changes what a customer is billed; discarding it means it
+	// never bills.
+	{"POST", "/v1/usage-events/held/release"}: decidedIn("usage.Service.Release").withAudit(explicit("usage.Service.Release")),
 	// Discard reads no clock.
-	{"POST", "/v1/usage-events/held/discard"}: realTime().withAudit(explicit("usage.Service.Discard → PostgresStore.DiscardHeld (in-tx): action=delete/usage_event, metadata.action=held_usage_discarded with the row count. A call that changed no row calls audit.MarkSkip.")),
+	{"POST", "/v1/usage-events/held/discard"}: realTime().withAudit(explicit("usage.Service.Discard")),
 	{"GET", "/v1/usage-events"}:               realTime(),
 	{"GET", "/v1/usage-events/aggregate"}:     realTime(),
 	{"GET", "/v1/usage-events/held"}:          realTime(),
@@ -511,46 +379,46 @@ var routeTable = map[routeKey]routeDecl{
 	// --- invoices -----------------------------------------------------------
 	{"GET", "/v1/invoices"}: realTime(),
 	// the body names the customer
-	{"POST", "/v1/invoices"}: decidedIn("invoice.Service.Create").withAudit(explicit("invoice.Service.Create → LogInTx(create, invoice) on the invoice's own tx.")),
+	{"POST", "/v1/invoices"}: decidedIn("invoice.Service.Create").withAudit(explicit("invoice.Service.Create")),
 	// the body names the customer
-	{"POST", "/v1/invoices/create_preview"}:                                 decidedIn("billing.PreviewService.CreatePreview").withAudit(exempt(reasonNonMutatingPreview, "Read-only estimate; POST only because the composer payload doesn't fit a query string. Writes nothing (billing/create_preview_handler.go calls audit.MarkSkip).")),
+	{"POST", "/v1/invoices/create_preview"}:                                 decidedIn("billing.PreviewService.CreatePreview").withAudit(exempt(reasonNonMutatingPreview, "Computes an estimate and writes nothing (billing.CreatePreviewHandler calls audit.MarkSkip).")),
 	{"GET", "/v1/invoices/{id}"}:                                            ofInvoice(),
-	{"POST", "/v1/invoices/{id}/collect"}:                                   ofInvoice().withAudit(explicit("invoice.Handler.collectPayment → Log(collect, invoice) — the money-movement row.")),
+	{"POST", "/v1/invoices/{id}/collect"}:                                   ofInvoice().withAudit(explicit("invoice.Handler.collectPayment")),
 	{"GET", "/v1/invoices/{id}/disputes"}:                                   ofInvoice(),
-	{"POST", "/v1/invoices/{id}/finalize"}:                                  ofInvoice().withAudit(explicit("invoice.Service.Finalize → LogInTx(finalize, invoice) on the finalize's own tx (finalizeHook).")),
-	{"POST", "/v1/invoices/{id}/line-items"}:                                ofInvoice().withAudit(explicit("invoice.Service.AddLineItem → LogInTx(line_item_added) on the invoice tx. The catch-all wrote 'create invoice {id}' here — a row asserting an invoice the operator never created.")),
-	{"POST", "/v1/invoices/{id}/mark-uncollectible"}:                        ofInvoice().withAudit(explicit("invoice.Service.MarkUncollectible → Log(update, invoice). Single service entry for operator + dunning terminal + resolve paths.")),
+	{"POST", "/v1/invoices/{id}/finalize"}:                                  ofInvoice().withAudit(explicit("invoice.Service.Finalize")),
+	{"POST", "/v1/invoices/{id}/line-items"}:                                ofInvoice().withAudit(explicit("invoice.Service.AddLineItem")),
+	{"POST", "/v1/invoices/{id}/mark-uncollectible"}:                        ofInvoice().withAudit(explicit("invoice.Service.MarkUncollectible")),
 	{"GET", "/v1/invoices/{id}/payment-timeline"}:                           ofInvoice(),
 	{"GET", "/v1/invoices/{id}/pdf"}:                                        ofInvoice(),
-	{"POST", "/v1/invoices/{id}/record-payment"}:                            ofInvoice().withAudit(explicit("invoice.Service.RecordOfflinePayment → Log(update, invoice: payment_recorded).")),
-	{"POST", "/v1/invoices/{id}/refund"}:                                    ofInvoice().withAudit(explicit("invoice.Handler.refund → Log(refund, invoice); the credit note carries its own issued row.")),
-	{"POST", "/v1/invoices/{id}/resend-setup-link"}:                         ofInvoice().withAudit(explicit("invoice.Handler.resendSetupLink → Log(send, invoice; metadata action=resend_setup_link).")),
-	{"POST", "/v1/invoices/{id}/retry-tax"}:                                 ofInvoice().withAudit(explicit("invoice.Handler.retryTax → Log(retry_tax, invoice).")),
-	{"POST", "/v1/invoices/{id}/rotate-public-token"}:                       ofInvoice().withAudit(explicit("invoice.Handler.rotatePublicToken → Log(rotate, invoice) — never records the token.")),
-	{"POST", "/v1/invoices/{id}/send"}:                                      ofInvoice().withAudit(explicit("invoice.Handler.sendEmail → Log(send, invoice).")),
+	{"POST", "/v1/invoices/{id}/record-payment"}:                            ofInvoice().withAudit(explicit("invoice.Service.RecordOfflinePayment")),
+	{"POST", "/v1/invoices/{id}/refund"}:                                    ofInvoice().withAudit(explicit("invoice.Handler.refund")),
+	{"POST", "/v1/invoices/{id}/resend-setup-link"}:                         ofInvoice().withAudit(explicit("invoice.Handler.resendSetupLink")),
+	{"POST", "/v1/invoices/{id}/retry-tax"}:                                 ofInvoice().withAudit(explicit("invoice.Handler.retryTax")),
+	{"POST", "/v1/invoices/{id}/rotate-public-token"}:                       ofInvoice().withAudit(explicit("invoice.Handler.rotatePublicToken")),
+	{"POST", "/v1/invoices/{id}/send"}:                                      ofInvoice().withAudit(explicit("invoice.Handler.sendEmail")),
 	{"GET", "/v1/invoices/{id}/stripe-refunds"}:                             ofInvoice(),
-	{"POST", "/v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss"}: ofInvoice().withAudit(explicit("creditnote.Service.DismissStripeRefund → LogInTx(update, invoice, action stripe_refund_dismissed) on the dismissal's tx (ADR-134).")),
-	{"POST", "/v1/invoices/{id}/void"}:                                      ofInvoice().withAudit(explicit("invoice.Service.Void → LogInTx(void, invoice) on the void coordinator tx (tax reversal + credit reversal share it).")),
+	{"POST", "/v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss"}: ofInvoice().withAudit(explicit("creditnote.Service.DismissStripeRefund")),
+	{"POST", "/v1/invoices/{id}/void"}:                                      ofInvoice().withAudit(explicit("invoice.Service.Void")),
 
 	// --- credit notes -------------------------------------------------------
 	{"GET", "/v1/credit-notes"}:       realTime(),
 	{"GET", "/v1/credit-notes/stats"}: realTime(),
 	// the body names the invoice
-	{"POST", "/v1/credit-notes"}:                           decidedIn("creditnote.Handler.create").withAudit(explicit("creditnote.Service.Create → LogInTx(create, credit_note) on the draft tx.")),
+	{"POST", "/v1/credit-notes"}:                           decidedIn("creditnote.Handler.create").withAudit(explicit("creditnote.Service.Create")),
 	{"GET", "/v1/credit-notes/{id}"}:                       ofCreditNote(),
-	{"POST", "/v1/credit-notes/{id}/attach-stripe-refund"}: ofCreditNote().withAudit(explicit("creditnote.Service.AttachStripeRefund → LogInTx(update, credit_note, action stripe_refund_attached) on the attach's tx (ADR-134).")),
-	{"POST", "/v1/credit-notes/{id}/issue"}:                ofCreditNote().withAudit(explicit("creditnote.Service.Issue → LogInTx(credit_note.issued) on the coordinator tx (+ the grant's own row). A DEFERRED outcome mutates nothing and declares MarkSkip.")),
+	{"POST", "/v1/credit-notes/{id}/attach-stripe-refund"}: ofCreditNote().withAudit(explicit("creditnote.Service.AttachStripeRefund")),
+	{"POST", "/v1/credit-notes/{id}/issue"}:                ofCreditNote().withAudit(explicit("creditnote.Service.Issue")),
 	{"GET", "/v1/credit-notes/{id}/pdf"}:                   ofCreditNote(),
-	{"POST", "/v1/credit-notes/{id}/retry-refund"}:         ofCreditNote().withAudit(explicit("creditnote.Service.RetryRefund → LogInTx on the refund-status persist tx, UNCONDITIONALLY: the audit-worthy fact is the operator action (a real cash-back request against the customer's payment), not the state transition, so a converged re-drive still records a row — carrying status_changed=false. Deliberately the OPPOSITE of ApplyRefundWebhook, where a no-op redelivery must record nothing.")),
-	{"POST", "/v1/credit-notes/{id}/send"}:                 ofCreditNote().withAudit(explicit("creditnote.Handler.sendEmail → Log(send, credit_note).")),
-	{"POST", "/v1/credit-notes/{id}/void"}:                 ofCreditNote().withAudit(explicit("creditnote.Service.Void → LogInTx(void, credit_note) on the draft→voided CAS tx.")),
+	{"POST", "/v1/credit-notes/{id}/retry-refund"}:         ofCreditNote().withAudit(explicit("creditnote.Service.RetryRefund")),
+	{"POST", "/v1/credit-notes/{id}/send"}:                 ofCreditNote().withAudit(explicit("creditnote.Handler.sendEmail")),
+	{"POST", "/v1/credit-notes/{id}/void"}:                 ofCreditNote().withAudit(explicit("creditnote.Service.Void")),
 
 	// --- credits ------------------------------------------------------------
 	{"GET", "/v1/credits/balances"}: realTime(),
 	// the body names the customer
-	{"POST", "/v1/credits/grant"}: decidedIn("credit.Service.Grant").withAudit(explicit("credit.Service.Grant → LogInTx(grant, credit) on the ledger tx (ADR-090's first domain).")),
+	{"POST", "/v1/credits/grant"}: decidedIn("credit.Service.Grant").withAudit(explicit("credit.Service.Grant")),
 	// the body names the customer
-	{"POST", "/v1/credits/adjust"}:                    decidedIn("credit.Service.Adjust").withAudit(explicit("credit.Service.Adjust → LogInTx(resource=credit) on the ledger tx. Action is credit.adjustment for a positive amount and credit.deduction for a negative one (the split the dashboard's severity styling keys on). There is no 'adjust' action in the vocabulary.")),
+	{"POST", "/v1/credits/adjust"}:                    decidedIn("credit.Service.Adjust").withAudit(explicit("credit.Service.Adjust")),
 	{"GET", "/v1/credits/balance/{customer_id}"}:      ofCustomer("customer_id"),
 	{"GET", "/v1/credits/balance/{customer_id}/live"}: ofCustomer("customer_id"),
 	{"GET", "/v1/credits/grants/{customer_id}"}:       ofCustomer("customer_id"),
