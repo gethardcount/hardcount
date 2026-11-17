@@ -12,7 +12,7 @@ import (
 )
 
 // The shipped limits, counted for real. CI has no Redis, so the in-process
-// count (SetLocalFallback) stands in for it: it allows what Redis allows.
+// count (CountLocally) stands in for it: it allows what Redis allows.
 //
 // One dashboard page sends about 10 requests, and every operator of an
 // account shares its per-mode bucket. At the old general default, 100 a
@@ -22,8 +22,7 @@ func TestDefaultLimits_DashboardBurstPassesSignInStaysAt100(t *testing.T) {
 	limits := config.DefaultRateLimits()
 	ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 
-	general := NewRateLimiter(nil, "general", limits.GeneralPerMinute, time.Minute)
-	general.SetLocalFallback()
+	general := NewRateLimiter(nil, "general", limits.GeneralPerMinute, time.Minute, CountLocally)
 	dashboard := general.Middleware()(ok)
 	for i := 1; i <= 200; i++ {
 		req := httptest.NewRequest(http.MethodGet, "/v1/customers", nil)
@@ -36,8 +35,7 @@ func TestDefaultLimits_DashboardBurstPassesSignInStaysAt100(t *testing.T) {
 		}
 	}
 
-	signIn := NewRateLimiter(nil, "auth", limits.AuthPerMinute, time.Minute)
-	signIn.SetLocalFallback()
+	signIn := NewRateLimiter(nil, "auth", limits.AuthPerMinute, time.Minute, CountLocally)
 	login := signIn.Middleware()(ok)
 	for i := 1; i <= 101; i++ {
 		req := httptest.NewRequest(http.MethodPost, "/v1/auth/login", nil)
@@ -59,8 +57,7 @@ func TestDefaultLimits_DashboardBurstPassesSignInStaysAt100(t *testing.T) {
 // header used to say 61 (the period plus one), so a client that honored it
 // waited a minute for a request it could have sent after 12 seconds.
 func TestRateLimiter_RetryAfterIsTheNextRequest(t *testing.T) {
-	rl := NewRateLimiter(nil, "general", 5, time.Minute)
-	rl.SetLocalFallback()
+	rl := NewRateLimiter(nil, "general", 5, time.Minute, CountLocally)
 	h := rl.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }))
 
 	var rec *httptest.ResponseRecorder
