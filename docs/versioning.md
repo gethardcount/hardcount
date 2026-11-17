@@ -39,8 +39,7 @@ picks a version.
 - **Every JSON answer carries a `Hardcount-Version` header:** the release of
   the server that answered. A release image says its tag, such as `v0.9.3`.
   An image built from `main` says `dev-` and the commit, such as
-  `dev-9c4a343`. A server built from source says `dev`. A replayed
-  `Idempotency-Key` answer does not carry it.
+  `dev-9c4a343`. A server built from source says `dev`.
 
 Use `Hardcount-Version` to tell which release your code is talking to, for
 example in your logs.

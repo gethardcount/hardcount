@@ -142,7 +142,7 @@ func TestCORS_ExposesHardcountHeaders(t *testing.T) {
 	// Header names are case-insensitive, and browsers match this list that
 	// way: X-RateLimit-Limit and X-Ratelimit-Limit are the same header.
 	exposed := strings.Split(rec.Header().Get("Access-Control-Expose-Headers"), ",")
-	for _, want := range []string{"Hardcount-Version", "Hardcount-Request-Id", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "Retry-After"} {
+	for _, want := range []string{"Hardcount-Version", "Hardcount-Request-Id", "Idempotent-Replayed", "X-RateLimit-Limit", "X-RateLimit-Remaining", "X-RateLimit-Reset", "Retry-After"} {
 		found := false
 		for _, h := range exposed {
 			if strings.EqualFold(strings.TrimSpace(h), want) {
