@@ -3238,6 +3238,8 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 		batchErrs []error
 	)
 	for _, sub := range expired {
+		// One instant for this subscription's work; the tick binds none.
+		rowCtx := clock.EnsureEffectiveNow(ctx, s.clock)
 		if sub.TrialEndAt == nil {
 			continue
 		}
@@ -3246,7 +3248,7 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 		// clock-path twin for the rationale; the activation UPDATE's SQL
 		// guard is the atomic backstop.
 		if trialCancelDue(sub) {
-			handled, cErr := s.cancelTrialAtEnd(ctx, sub.TenantID, sub)
+			handled, cErr := s.cancelTrialAtEnd(rowCtx, sub.TenantID, sub)
 			if cErr != nil {
 				batchErrs = append(batchErrs, fmt.Errorf("trial-end cancel sub %s: %w", sub.ID, cErr))
 			} else if handled {
@@ -3262,11 +3264,11 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 		// scheduler skips the just-elapsed in_advance segment).
 		var firstInv domain.Invoice
 		var haveInv bool
-		activated, err := s.store.ActivateAfterTrialWithBill(ctx, sub.TenantID, sub.ID, trialEndAt, func(tx *sql.Tx, a domain.Subscription) error {
+		activated, err := s.store.ActivateAfterTrialWithBill(rowCtx, sub.TenantID, sub.ID, trialEndAt, func(tx *sql.Tx, a domain.Subscription) error {
 			if s.biller == nil {
 				return nil
 			}
-			inv, ok, billErr := s.biller.BillOnCreateTx(ctx, tx, a, trialEndAt)
+			inv, ok, billErr := s.biller.BillOnCreateTx(rowCtx, tx, a, trialEndAt)
 			if billErr != nil {
 				return fmt.Errorf("first-invoice-on-trial-expiry: %w", billErr)
 			}
@@ -3277,14 +3279,14 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 			if errors.Is(err, domain.ErrTrialCancelDue) {
 				// Schedule committed after the snapshot — the SQL guard
 				// blocked the activation. Route to the free cancel.
-				fresh, gErr := s.store.Get(ctx, sub.TenantID, sub.ID)
+				fresh, gErr := s.store.Get(rowCtx, sub.TenantID, sub.ID)
 				if gErr != nil {
 					// Not domain.ErrLeftForNextRun: nothing was deferred on
 					// purpose, and what is true of the subscription is not known.
 					batchErrs = append(batchErrs, fmt.Errorf("re-read sub %s after its trial-end cancel came due: %w", sub.ID, gErr))
 					continue
 				}
-				if handled, cErr := s.cancelTrialAtEnd(ctx, sub.TenantID, fresh); cErr != nil {
+				if handled, cErr := s.cancelTrialAtEnd(rowCtx, sub.TenantID, fresh); cErr != nil {
 					batchErrs = append(batchErrs, fmt.Errorf("trial-end cancel sub %s: %w", sub.ID, cErr))
 				} else if handled {
 					processed++
@@ -3305,7 +3307,7 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 		// Audit the auto-flip (wall-clock counterpart of the catchup path's
 		// trial_ended row — no sim metadata, this scan excludes clock-pinned subs).
 		if s.audit != nil {
-			_ = s.audit.Log(ctx, activated.TenantID, domain.AuditActionUpdate, "subscription", activated.ID, activated.Code, map[string]any{
+			_ = s.audit.Log(rowCtx, activated.TenantID, domain.AuditActionUpdate, "subscription", activated.ID, activated.Code, map[string]any{
 				"action":       domain.SubAuditTrialEnded,
 				"customer_id":  activated.CustomerID,
 				"triggered_by": "schedule",
@@ -3317,7 +3319,7 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 		// auto-charge) — Stripe calls must never ride a DB tx; the invoice is now
 		// durable + atomic with the activation.
 		if haveInv {
-			s.biller.FinalizeOnCreateInvoice(ctx, activated, firstInv)
+			s.biller.FinalizeOnCreateInvoice(rowCtx, activated, firstInv)
 		}
 		// subscription.trial_ended (triggered_by=schedule) is enqueued IN
 		// the ActivateAfterTrial tx (store-level DispatchTx subset).
