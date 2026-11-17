@@ -189,7 +189,7 @@ func (rl *RateLimiter) allow(ctx context.Context, key string) (int, time.Time, t
 	switch rl.outage {
 	case CountLocally:
 		if err != nil {
-			slog.Warn("rate_limiter: redis error, counting in this process", "error", err, "key", key)
+			slog.WarnContext(ctx, "rate_limiter: redis error, counting in this process", "error", err, "key", key)
 		}
 		return rl.local.allow(key, now)
 	case FailClosed:
@@ -197,7 +197,7 @@ func (rl *RateLimiter) allow(ctx context.Context, key string) (int, time.Time, t
 		return 0, now.Add(rl.limit.Period), rl.limit.Period, false
 	default:
 		if err != nil {
-			slog.Warn("rate_limiter: redis error, failing open", "error", err, "key", key)
+			slog.WarnContext(ctx, "rate_limiter: redis error, failing open", "error", err, "key", key)
 		}
 		return rl.limit.Rate - 1, now.Add(rl.limit.Period), 0, true
 	}

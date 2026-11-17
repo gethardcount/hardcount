@@ -104,8 +104,8 @@ func TestConcurrentChangeAsConflict_DeadlockAndLockWaitAnswer409(t *testing.T) {
 					t.Errorf("log attr detail: got %q, want the deadlock's detail (who waited for whom)", got)
 				}
 			}
-			if entry["route"] != "/v1/things/{id}" {
-				t.Errorf("log attr route: got %v, want /v1/things/{id}", entry["route"])
+			if entry["path"] != "/v1/things/{id}" {
+				t.Errorf("log attr path: got %v, want /v1/things/{id}", entry["path"])
 			}
 		})
 	}
