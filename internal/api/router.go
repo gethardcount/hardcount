@@ -1791,8 +1791,9 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 				respond.FromError(w, req, err, "whoami")
 				return
 			}
+			c := auth.CallerOf(ctx)
 			out := map[string]any{
-				"tenant_id": auth.TenantID(ctx),
+				"tenant_id": c.TenantID,
 				"livemode":  live,
 				// can_email_setup_links lets the invoice page offer "Email a payment-method link".
 				"can_email_setup_links": setupLinksEmailable,
@@ -1801,18 +1802,18 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 				// off" notice instead of repeating it on every record.
 				"smtp_configured": emailSender.IsConfigured(),
 			}
-			if uid := auth.UserID(ctx); uid != "" {
-				u, err := userSvc.GetByID(ctx, uid)
+			if c.UserID != "" {
+				u, err := userSvc.GetByID(ctx, c.UserID)
 				if err != nil {
 					respond.FromError(w, req, err, "whoami")
 					return
 				}
-				out["user_id"] = uid
+				out["user_id"] = c.UserID
 				out["email"] = u.Email
 			}
-			if kid := auth.KeyID(ctx); kid != "" {
-				out["key_id"] = kid
-				out["key_type"] = string(auth.CallerOf(ctx).KeyType)
+			if c.KeyID != "" {
+				out["key_id"] = c.KeyID
+				out["key_type"] = string(c.KeyType)
 			}
 			respond.JSON(w, req, http.StatusOK, out)
 		})
@@ -2021,7 +2022,7 @@ func handleDeepHealth(db *postgres.DB) http.HandlerFunc {
 // The caller is the API key or dashboard session the request was made with,
 // under the audit log's names for it. session.RequireCaller names it;
 // sign-out and the mode switch read the session cookie themselves and name
-// it too (session.NameCaller). Any other request is "anonymous": a public
+// it too (session.NameActor). Any other request is "anonymous": a public
 // page, a webhook, a sign-in, or one refused before a caller was accepted. A
 // public token page and a webhook learn their account inside the handler, so
 // their lines have no tenant_id.
@@ -2049,8 +2050,8 @@ func requestLogger(next http.Handler) http.Handler {
 			"request_id", middleware.GetReqID(ctx),
 			"ip", audit.ExtractClientIP(r),
 		}
-		if caller := request.CallerOf(ctx); caller != (request.Caller{}) {
-			attrs = append(attrs, "actor_type", caller.ActorType, "actor_id", caller.ActorID, "tenant_id", caller.TenantID)
+		if actor := request.ActorOf(ctx); actor != (request.Actor{}) {
+			attrs = append(attrs, "actor_type", actor.ActorType, "actor_id", actor.ActorID, "tenant_id", actor.TenantID)
 		} else {
 			// No actor_id or tenant_id: a blank field reads as "we lost it",
 			// not "there was none".

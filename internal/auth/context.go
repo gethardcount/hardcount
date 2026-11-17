@@ -2,8 +2,7 @@ package auth
 
 import "context"
 
-// contextKey keys the two values a request's context carries: the caller,
-// and the customer acting on a public customer page.
+// contextKey keys the request's context values.
 type contextKey string
 
 const (
@@ -25,8 +24,23 @@ func (c Caller) IsSession() bool {
 	return c.UserID != "" && c.KeyID == ""
 }
 
+// Actor names c for a record: "user" and the user's id for a session,
+// "api_key" and the key's id for a key, and "", "" for neither. A caller with
+// a key is named as the key, as IsSession decides. The names are the audit
+// log's actor_type values.
+func (c Caller) Actor() (actorType, id string) {
+	switch {
+	case c.IsSession():
+		return "user", c.UserID
+	case c.KeyID != "":
+		return "api_key", c.KeyID
+	}
+	return "", ""
+}
+
 // WithCaller returns ctx carrying c as the whole caller, in place of any
-// caller ctx held. session.Authenticate sets it once for each request.
+// caller ctx held. session.Authenticate sets it on every authenticated
+// request; no caller means a background job or a route outside authentication.
 func WithCaller(ctx context.Context, c Caller) context.Context {
 	return context.WithValue(ctx, callerKey, c)
 }
@@ -50,19 +64,6 @@ func WithTenantID(ctx context.Context, tenantID string) context.Context {
 	c := CallerOf(ctx)
 	c.TenantID = tenantID
 	return WithCaller(ctx, c)
-}
-
-// KeyID returns the ID of the API key that authenticated the request, or ""
-// when no key did.
-func KeyID(ctx context.Context) string {
-	return CallerOf(ctx).KeyID
-}
-
-// UserID returns the dashboard user of the request's session, or "" when a
-// key authenticated it. The audit log names the actor by UserID for a session
-// and by KeyID for a key.
-func UserID(ctx context.Context) string {
-	return CallerOf(ctx).UserID
 }
 
 // WithUserID returns ctx with id as the caller's user. The account routes

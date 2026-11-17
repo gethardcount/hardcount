@@ -29,10 +29,10 @@ func (e unavailableError) Error() string { return e.msg + ": " + e.err.Error() }
 func (e unavailableError) Unwrap() error { return e.err }
 
 // Authenticate resolves r's credentials to a context that carries the caller
-// (auth.CallerOf) and its mode. A live session cookie wins over any key; a
-// cookie that does not resolve falls through to the Bearer key. It returns
-// ErrNoCredentials when there is neither, ValidateKey's error for a bad key,
-// and an unavailableError when a store fails.
+// (auth.CallerOf) and its test or live mode. A live session cookie wins over
+// any key; a cookie that does not resolve falls through to the Bearer key. It
+// returns ErrNoCredentials when there is neither, ValidateKey's error for a
+// bad key, and an unavailableError when a store fails.
 func Authenticate(r *http.Request, sessSvc *Service, keySvc *auth.Service) (context.Context, error) {
 	ctx := r.Context()
 	if c, err := r.Cookie(CookieName); err == nil && c.Value != "" {
@@ -45,8 +45,9 @@ func Authenticate(r *http.Request, sessSvc *Service, keySvc *auth.Service) (cont
 		}
 	}
 
-	rawKey := bearerToken(r)
-	if rawKey == "" {
+	rawKey, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+	rawKey = strings.TrimSpace(rawKey)
+	if !ok || rawKey == "" {
 		return nil, ErrNoCredentials
 	}
 	key, err := keySvc.ValidateKey(ctx, rawKey)
@@ -73,7 +74,7 @@ func RequireCaller(sessSvc *Service, keySvc *auth.Service) func(http.Handler) ht
 			switch {
 			case err == nil:
 				// The access log wraps this middleware and cannot see ctx.
-				request.SetCaller(ctx, callerIn(ctx))
+				request.SetActor(ctx, actorOf(auth.CallerOf(ctx)))
 				next.ServeHTTP(w, r.WithContext(ctx))
 			case errors.Is(err, ErrNoCredentials):
 				respond.Unauthorized(w, r, "missing credentials — sign in at /login or send Authorization: Bearer hc_secret_...")
@@ -90,35 +91,22 @@ func RequireCaller(sessSvc *Service, keySvc *auth.Service) func(http.Handler) ht
 	}
 }
 
-// callerIn names the caller for the access log with audit.ResolveActor's
-// names; session cannot import audit. TestCallerIn_APIKey keeps them equal.
-func callerIn(ctx context.Context) request.Caller {
-	c := auth.CallerOf(ctx)
-	if c.UserID != "" {
-		return request.Caller{ActorType: "user", ActorID: c.UserID, TenantID: c.TenantID}
-	}
-	return request.Caller{ActorType: "api_key", ActorID: c.KeyID, TenantID: c.TenantID}
-}
-
-// NameCaller names s's user on the request's record, for the access log. It
+// NameActor names s's user on the request's record, for the access log. It
 // is for a handler that resolves the session cookie itself (sign-out and the
 // mode switch); RequireCaller names the caller of every route behind it.
-func NameCaller(ctx context.Context, s Session) {
-	request.SetCaller(ctx, request.Caller{ActorType: "user", ActorID: s.UserID, TenantID: s.TenantID})
+func NameActor(ctx context.Context, s Session) {
+	request.SetActor(ctx, actorOf(auth.Caller{TenantID: s.TenantID, UserID: s.UserID}))
 }
 
-// applyToCtx returns ctx carrying s's user as the caller, in s's mode.
+// actorOf is c under the audit log's names for it (auth.Caller.Actor).
+func actorOf(c auth.Caller) request.Actor {
+	actorType, id := c.Actor()
+	return request.Actor{ActorType: actorType, ActorID: id, TenantID: c.TenantID}
+}
+
+// applyToCtx returns ctx carrying s's user as the caller, in s's test or live
+// mode.
 func applyToCtx(ctx context.Context, s Session) context.Context {
 	ctx = auth.WithCaller(ctx, auth.Caller{TenantID: s.TenantID, UserID: s.UserID})
 	return postgres.WithLivemode(ctx, s.Livemode)
-}
-
-// bearerToken returns the API key r carries: the Authorization Bearer token,
-// or "". Nothing else reads a key's value from a request, and Authenticate is
-// its only caller.
-func bearerToken(r *http.Request) string {
-	if token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer "); ok {
-		return strings.TrimSpace(token)
-	}
-	return ""
 }

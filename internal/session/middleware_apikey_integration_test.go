@@ -83,9 +83,9 @@ func TestRequireCaller_APIKey(t *testing.T) {
 		// The layer above reads the caller from the request's record.
 		outer := request.WithRecord(t.Context())
 		serve(keys, keyRequest("Authorization", created.RawKey).WithContext(outer))
-		onRecord := request.Caller{ActorType: "api_key", ActorID: created.Key.ID, TenantID: tenantID}
-		if got := request.CallerOf(outer); got != onRecord {
-			t.Errorf("caller on the record = %+v, want %+v", got, onRecord)
+		onRecord := request.Actor{ActorType: "api_key", ActorID: created.Key.ID, TenantID: tenantID}
+		if got := request.ActorOf(outer); got != onRecord {
+			t.Errorf("actor on the record = %+v, want %+v", got, onRecord)
 		}
 	})
 
@@ -98,8 +98,8 @@ func TestRequireCaller_APIKey(t *testing.T) {
 		if rec.Code != http.StatusOK || seen == nil {
 			t.Fatalf("got %d %s, want 200: the stale cookie blocked the key", rec.Code, rec.Body.String())
 		}
-		if ctx := seen.Context(); auth.TenantID(ctx) != tenantID || auth.KeyID(ctx) != created.Key.ID {
-			t.Errorf("principal = tenant %q, key %q; want the key's %s, %s", auth.TenantID(ctx), auth.KeyID(ctx), tenantID, created.Key.ID)
+		if c := auth.CallerOf(seen.Context()); c.TenantID != tenantID || c.KeyID != created.Key.ID {
+			t.Errorf("principal = tenant %q, key %q; want the key's %s, %s", c.TenantID, c.KeyID, tenantID, created.Key.ID)
 		}
 	})
 
@@ -146,10 +146,10 @@ func TestAuthenticate_NamesOneCaller(t *testing.T) {
 		if err != nil {
 			t.Fatalf("authenticate: %v", err)
 		}
-		if got := auth.KeyID(ctx); got != created.Key.ID {
+		if got := auth.CallerOf(ctx).KeyID; got != created.Key.ID {
 			t.Errorf("key id = %q, want %q", got, created.Key.ID)
 		}
-		if got := auth.UserID(ctx); got != "" {
+		if got := auth.CallerOf(ctx).UserID; got != "" {
 			t.Errorf("user id = %q, want none for a key", got)
 		}
 	})
@@ -161,10 +161,10 @@ func TestAuthenticate_NamesOneCaller(t *testing.T) {
 		if err != nil {
 			t.Fatalf("authenticate: %v", err)
 		}
-		if got := auth.UserID(ctx); got != sess.UserID {
+		if got := auth.CallerOf(ctx).UserID; got != sess.UserID {
 			t.Errorf("user id = %q, want %q", got, sess.UserID)
 		}
-		if got := auth.KeyID(ctx); got != "" {
+		if got := auth.CallerOf(ctx).KeyID; got != "" {
 			t.Errorf("key id = %q, want none for a session", got)
 		}
 	})

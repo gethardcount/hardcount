@@ -121,14 +121,14 @@ type InstantiateRequest struct {
 }
 
 func (h *Handler) instantiate(w http.ResponseWriter, r *http.Request) {
-	tenantID := auth.TenantID(r.Context())
+	c := auth.CallerOf(r.Context())
 	key := chi.URLParam(r, "key")
 	var req InstantiateRequest
 	if !respond.DecodeStrict(w, r, &req, respond.EmptyBodyOK) {
 		return
 	}
-	inst, err := h.svc.Instantiate(r.Context(), tenantID, key, req.Overrides, InstantiateOptions{
-		CreatedBy: auth.KeyID(r.Context()),
+	inst, err := h.svc.Instantiate(r.Context(), c.TenantID, key, req.Overrides, InstantiateOptions{
+		CreatedBy: c.KeyID,
 	})
 	if err != nil {
 		respond.FromError(w, r, err, "recipe")
