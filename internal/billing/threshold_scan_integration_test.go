@@ -19,6 +19,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/invoice"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/pricing"
 	"github.com/gethardcount/hardcount/internal/subscription"
@@ -127,47 +128,7 @@ func newThresholdFixture(t *testing.T, name string) *thresholdFixture {
 	cycleStart := time.Now().UTC().Truncate(time.Hour).Add(-72 * time.Hour)
 	cycleEnd := cycleStart.Add(30 * 24 * time.Hour)
 
-	subID := postgres.NewID("hc_sub")
-	itemID := postgres.NewID("hc_si")
-	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		t.Fatalf("begin sub tx: %v", err)
-	}
-	defer postgres.Rollback(tx)
-
-	now := time.Now().UTC()
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO subscriptions (
-			id, tenant_id, code, display_name, customer_id, status, billing_time,
-			current_billing_period_start, current_billing_period_end, next_billing_at,
-			created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, 'active', 'anniversary', $6, $7, $7, $8, $8)
-	`, subID, tenantID, "code-thresh", "Threshold Sub", cust.ID, cycleStart, cycleEnd, now)
-	if err != nil {
-		t.Fatalf("insert sub: %v", err)
-	}
-
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO subscription_items (id, tenant_id, subscription_id, plan_id, quantity, metadata, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, 1, '{}'::jsonb, $5, $5)
-	`, itemID, tenantID, subID, plan.ID, now)
-	if err != nil {
-		t.Fatalf("insert sub item: %v", err)
-	}
-	// Raw-SQL fixture bypasses the ADR-101 interval writer — mirror it:
-	// the item's billable lifetime opens at the cycle start.
-	_, err = tx.ExecContext(ctx, `
-		INSERT INTO billing_intervals (tenant_id, subscription_id, subscription_item_id, plan_id, quantity, starts_at, source)
-		VALUES ($1, $2, $3, $4, 1, $5, 'create')
-	`, tenantID, subID, itemID, plan.ID, cycleStart)
-	if err != nil {
-		t.Fatalf("insert billing interval: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit sub: %v", err)
-	}
-
-	return &thresholdFixture{
+	f := &thresholdFixture{
 		db:         db,
 		tenantID:   tenantID,
 		subStore:   subStore,
@@ -181,13 +142,58 @@ func newThresholdFixture(t *testing.T, name string) *thresholdFixture {
 		engine:     engine,
 		customerID: cust.ID,
 		planID:     plan.ID,
-		subID:      subID,
-		itemID:     itemID,
 		meterID:    meter.ID,
 		priceID:    prices[0].ID,
 		cycleStart: cycleStart,
 		cycleEnd:   cycleEnd,
 	}
+	f.subID, f.itemID = f.insertSubscription(t, ctx, cust.ID, "code-thresh")
+	return f
+}
+
+// insertSubscription inserts an active subscription on the fixture's plan for
+// customerID, mid-cycle, and returns its id and its item's id.
+func (f *thresholdFixture) insertSubscription(t *testing.T, ctx context.Context, customerID, code string) (subID, itemID string) {
+	t.Helper()
+	subID, itemID = postgres.NewID("hc_sub"), postgres.NewID("hc_si")
+	tx, err := f.db.BeginTx(ctx, postgres.TxTenant, f.tenantID)
+	if err != nil {
+		t.Fatalf("begin sub tx: %v", err)
+	}
+	defer postgres.Rollback(tx)
+
+	now := time.Now().UTC()
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO subscriptions (
+			id, tenant_id, code, display_name, customer_id, status, billing_time,
+			current_billing_period_start, current_billing_period_end, next_billing_at,
+			created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, 'active', 'anniversary', $6, $7, $7, $8, $8)
+	`, subID, f.tenantID, code, "Threshold Sub", customerID, f.cycleStart, f.cycleEnd, now)
+	if err != nil {
+		t.Fatalf("insert sub: %v", err)
+	}
+
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO subscription_items (id, tenant_id, subscription_id, plan_id, quantity, metadata, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, 1, '{}'::jsonb, $5, $5)
+	`, itemID, f.tenantID, subID, f.planID, now)
+	if err != nil {
+		t.Fatalf("insert sub item: %v", err)
+	}
+	// Raw-SQL fixture bypasses the ADR-101 interval writer — mirror it:
+	// the item's billable lifetime opens at the cycle start.
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO billing_intervals (tenant_id, subscription_id, subscription_item_id, plan_id, quantity, starts_at, source)
+		VALUES ($1, $2, $3, $4, 1, $5, 'create')
+	`, f.tenantID, subID, itemID, f.planID, f.cycleStart)
+	if err != nil {
+		t.Fatalf("insert billing interval: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit sub: %v", err)
+	}
+	return subID, itemID
 }
 
 // ingestUsage seeds N events spread evenly over the first 60 minutes of the
@@ -198,10 +204,16 @@ func newThresholdFixture(t *testing.T, name string) *thresholdFixture {
 // total quantity, billed at 1c/call = 1000c subtotal.
 func (f *thresholdFixture) ingestUsage(t *testing.T, ctx context.Context, count int, qty int64) {
 	t.Helper()
+	f.ingestUsageFor(t, ctx, f.customerID, count, qty)
+}
+
+// ingestUsageFor is ingestUsage for another customer of the tenant.
+func (f *thresholdFixture) ingestUsageFor(t *testing.T, ctx context.Context, customerID string, count int, qty int64) {
+	t.Helper()
 	for i := 0; i < count; i++ {
 		ts := f.cycleStart.Add(time.Duration(i) * time.Minute)
 		if _, err := f.usageSvc.Ingest(ctx, f.tenantID, usage.IngestInput{
-			CustomerID: f.customerID,
+			CustomerID: customerID,
 			MeterID:    f.meterID,
 			Quantity:   decimal.NewFromInt(qty),
 			Timestamp:  &ts,
@@ -286,6 +298,46 @@ func TestThresholdScan_AmountCrossFiresEarly(t *testing.T) {
 	}
 	if updated.CurrentBillingPeriodStart == nil || !updated.CurrentBillingPeriodStart.Equal(f.cycleStart) {
 		t.Errorf("period_start = %v after the fire, want %v (the anchor is kept)", updated.CurrentBillingPeriodStart, f.cycleStart)
+	}
+}
+
+// Each crossing subscription's fire runs on its own instant. The invoice's
+// issued_at and the period close's updated_at are one read of the server's
+// clock, not two, and the next subscription in the scan reads again.
+func TestThresholdScan_EachSubscriptionOnItsOwnInstant(t *testing.T) {
+	f := newThresholdFixture(t, "Threshold Own Instant")
+	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 60*time.Second)
+	defer cancel()
+	other, err := customer.NewPostgresStore(f.db).Create(ctx, f.tenantID, domain.Customer{ExternalID: "cus_thresh_2", DisplayName: "Second"})
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	second, _ := f.insertSubscription(t, ctx, other.ID, "code-thresh-2")
+	f.ingestUsage(t, ctx, 100, 10)
+	f.ingestUsageFor(t, ctx, other.ID, 100, 10)
+	for _, id := range []string{f.subID, second} {
+		if _, err := f.subSvc.SetBillingThresholds(ctx, f.tenantID, id, subscription.BillingThresholdsInput{AmountGTE: 500}); err != nil {
+			t.Fatalf("set threshold: %v", err)
+		}
+	}
+
+	if fired, scanErrs := f.engine.ScanThresholds(clock.WithRealTime(ctx), 50); fired != 2 || len(scanErrs) > 0 {
+		t.Fatalf("fired %d, errors %v; want 2 fires", fired, scanErrs)
+	}
+	seen := map[int64]bool{} // by microsecond, what Postgres stores
+	for _, inv := range f.listInvoices(t, ctx) {
+		sub, err := f.subStore.Get(ctx, f.tenantID, inv.SubscriptionID)
+		if err != nil {
+			t.Fatalf("get sub: %v", err)
+		}
+		if inv.IssuedAt == nil || !inv.IssuedAt.Equal(sub.UpdatedAt) {
+			t.Errorf("%s issued at %v, its period closed at %v: want one instant", inv.InvoiceNumber, inv.IssuedAt, sub.UpdatedAt)
+			continue
+		}
+		if seen[inv.IssuedAt.UnixMicro()] {
+			t.Errorf("two fires share the instant %v: want one each", *inv.IssuedAt)
+		}
+		seen[inv.IssuedAt.UnixMicro()] = true
 	}
 }
 

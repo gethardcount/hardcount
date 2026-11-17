@@ -12,6 +12,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/subscription"
@@ -191,6 +192,8 @@ func thresholdCandidateKey(sub domain.Subscription) walk.Key { return walk.Key{I
 // and — when crossed — fires the early finalize via fireThreshold. through is
 // one invoice grace before now on the wall clock (thresholdUsageThrough).
 func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) (bool, error) {
+	// One instant for this subscription's work (a catch-up's clock is kept).
+	ctx = clock.EnsureEffectiveNow(ctx, e.clock)
 	live, err := postgres.Livemode(ctx)
 	if err != nil {
 		return false, err
