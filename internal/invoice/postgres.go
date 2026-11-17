@@ -1936,7 +1936,7 @@ func (s *PostgresStore) AddLineItemAtomicAudited(
 	}
 	if status != domain.InvoiceDraft {
 		return domain.InvoiceLineItem{}, domain.Invoice{},
-			fmt.Errorf("can only add line items to draft invoices, current status: %s", status)
+			errs.Invalid("", fmt.Sprintf("can only add line items to draft invoices, current status: %s", status))
 	}
 	// Lines are added only to an invoice the operator made (POST
 	// /v1/invoices). A draft billing made for a subscription (a period

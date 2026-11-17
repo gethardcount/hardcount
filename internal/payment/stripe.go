@@ -757,7 +757,7 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	// hold, so a write-off that lands after the hold lapsed (a charger stalled
 	// past five minutes) still reaches here; keep the gate.
 	if inv.Status != domain.InvoiceFinalized {
-		return domain.Invoice{}, fmt.Errorf("can only charge a finalized invoice, current status: %s", inv.Status)
+		return domain.Invoice{}, errs.Invalid("", fmt.Sprintf("can only charge a finalized invoice, current status: %s", inv.Status))
 	}
 	if inv.AmountDueCents <= 0 {
 		return domain.Invoice{}, fmt.Errorf("invoice has no amount due")
