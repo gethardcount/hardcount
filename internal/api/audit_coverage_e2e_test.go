@@ -16,8 +16,8 @@ import (
 // because these tests go through NewServer: the AuditCoverage detector is mounted
 // at the root there, so every mutating request they make is classified for real
 // (2xx + no audit row + not declared exempt ⇒ reported). The BUILD-TIME half —
-// the route-audit registry's two-way diff against the live chi route table
-// (audit_routes_test.go) — proves every mutating route is DECLARED. This proves
+// the route table's two-way diff against the live chi routes
+// (TestRouteTable_MatchesLiveRoutes) — proves every mutating route is DECLARED. This proves
 // the declarations are not lies on the paths the suite actually exercises: a
 // route declared `explicit` whose emission silently stopped firing fails here,
 // naming itself.

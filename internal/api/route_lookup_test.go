@@ -25,7 +25,7 @@ func lookedUp(method, path string) *http.Request {
 	return got
 }
 
-// The route tables are keyed on the canonical pattern (canonicalRoute), and
+// routeTable is keyed on the canonical pattern (canonicalRoute), and
 // the lookup at the root finds it before any group's middleware or mounted
 // sub-router runs. So for every route, inside /v1 or not, and those inside
 // mounted sub-routers and inline groups included, the lookup must give the

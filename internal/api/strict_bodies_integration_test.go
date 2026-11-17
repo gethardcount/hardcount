@@ -12,6 +12,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testutil"
+	"github.com/go-chi/chi/v5"
 )
 
 // probeKey is the key every probe adds to an otherwise empty body. No
@@ -340,4 +341,20 @@ func flowStrings(m map[string]any, key string) []string {
 		}
 	}
 	return out
+}
+
+// walkMutatingRoutes is every live route that can change state, keyed
+// canonically.
+func walkMutatingRoutes(t *testing.T) map[routeKey]bool {
+	t.Helper()
+	found := map[routeKey]bool{}
+	if err := chi.Walk(newTestServer().router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		if isMutatingMethod(method) {
+			found[routeKey{Method: method, Pattern: canonicalRoute(route)}] = true
+		}
+		return nil
+	}); err != nil || len(found) == 0 {
+		t.Fatalf("walked %d mutating routes (%v): the walk is broken", len(found), err)
+	}
+	return found
 }

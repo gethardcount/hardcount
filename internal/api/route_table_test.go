@@ -34,9 +34,10 @@ func TestRouteTable_MatchesLiveRoutes(t *testing.T) {
 	for k := range walked {
 		entry, ok := routeTable[k]
 		name := k.Method + " " + k.Pattern
-		switch {
-		case !ok:
+		if !ok {
 			undeclared = append(undeclared, name)
+		}
+		switch {
 		case entry.audit.Coverage != 0:
 		case isMutatingMethod(k.Method):
 			unaudited = append(unaudited, name)
@@ -47,6 +48,12 @@ func TestRouteTable_MatchesLiveRoutes(t *testing.T) {
 	for k, entry := range routeTable {
 		name := k.Method + " " + k.Pattern
 		if !walked[k] {
+			switch entry.audit.Coverage {
+			case auditExplicit:
+				name += "  [explicit audit]"
+			case auditExempt:
+				name += "  [exempt(" + string(entry.audit.Reason) + ")]"
+			}
 			stale = append(stale, name)
 		}
 		takesOut := k.Method == http.MethodGet && strings.HasPrefix(k.Pattern, auditEgressPrefix+"/")
@@ -91,22 +98,6 @@ then declare it with .with(explicit(...)). A row written when the stream
 completes is no substitute: killing the connection mid-stream defeats it.`)
 	report(strayAudits, `route(s) that neither change state nor export declare an audit. Only mutating
 routes and the GET routes under /v1/exports carry one; remove it.`)
-}
-
-// walkMutatingRoutes is every live route that can change state, keyed
-// canonically.
-func walkMutatingRoutes(t *testing.T) map[routeKey]bool {
-	t.Helper()
-	found := map[routeKey]bool{}
-	if err := chi.Walk(newTestServer().router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
-		if isMutatingMethod(method) {
-			found[routeKey{Method: method, Pattern: canonicalRoute(route)}] = true
-		}
-		return nil
-	}); err != nil || len(found) == 0 {
-		t.Fatalf("walked %d mutating routes (%v): the walk is broken", len(found), err)
-	}
-	return found
 }
 
 // TestRouteTable_DeclarationsAreWhole: each entry says what its parts need,
@@ -162,7 +153,7 @@ func TestRouteTable_DeclarationsAreWhole(t *testing.T) {
 				t.Errorf("%s: exempt reason %q is not in the closed enum. Widening what un-audited may mean is a deliberate decision: add the reason constant with a comment, in review.", name, a.Reason)
 			}
 			if !isMutatingMethod(k.Method) {
-				t.Errorf("%s: an export must be explicit; an unrecorded full-table export is the gap ADR-090 §7 closes", name)
+				t.Errorf("%s: exempt is for mutating routes only; an export must be explicit, since an unrecorded full-table export is the gap ADR-090 §7 closes", name)
 			}
 		default:
 			t.Errorf("%s: audit declares no coverage (use explicit(...) or exempt(...))", name)
@@ -190,7 +181,7 @@ func TestRouteTable_ExemptionsStaySmall(t *testing.T) {
 
 	// The population as of the uninstall (ADR-090). Bump DELIBERATELY.
 	want := map[exemptReason]int{
-		reasonSystemEndpoint: 4, // /metrics × POST/PUT/PATCH/DELETE (r.Handle expands to all 9)
+		reasonSystemEndpoint: 4, // /metrics × POST/PUT/PATCH/DELETE (r.Handle expands to every method)
 		// usage-events {single, batch} + litellm spend. NOT backfill: an
 		// operator inserting BACKDATED usage changes what a customer is billed
 		// for a period that may already have closed — a money-path action, and
@@ -205,7 +196,7 @@ func TestRouteTable_ExemptionsStaySmall(t *testing.T) {
 		// delivery reports (ADR-098). Both machine-driven with no
 		// operator to attribute; their effects live in provider-truth
 		// state + outbox events, with the accepted losses recorded on
-		// each registry entry.
+		// each entry.
 		reasonWebhookOwned: 2,
 	}
 	for reason, n := range want {

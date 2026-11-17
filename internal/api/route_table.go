@@ -20,8 +20,10 @@ import (
 // TestRouteTable_MatchesLiveRoutes walks the router and compares it with the
 // table in both directions, and reports every gap in one run: a route with
 // no entry, an entry with no route, a mutating route or an export with no
-// audit, and an audit on any other route. So adding a route forces each
-// decision at review.
+// audit, and an audit on any other route. A forgotten showsSecretOnce()
+// fails TestOpenAPISpec_ShowOnceSecretsAreNeverKept, once the field that
+// carries the secret is marked x-show-once in api/openapi.yaml. So adding a
+// route forces each decision at review.
 // ---------------------------------------------------------------------------
 
 // routeKey is (HTTP method, canonical chi route pattern).
@@ -113,29 +115,29 @@ type clockDecl struct {
 
 // The clock constructors: each makes a route's entry, with how its time is
 // decided.
-func realTime() routeDecl               { return clocked(clockRealTime, "") }
-func ofCustomer(param string) routeDecl { return clocked(clockOfCustomer, param) }
-func ofSubscription() routeDecl         { return clocked(clockOfSubscription, "id") }
-func ofInvoice() routeDecl              { return clocked(clockOfInvoice, "id") }
-func ofCreditNote() routeDecl           { return clocked(clockOfCreditNote, "id") }
-func ofDunningRun() routeDecl           { return clocked(clockOfDunningRun, "id") }
+func realTime() routeDecl { return clocked(clockDecl{Source: clockRealTime}) }
+func ofCustomer(param string) routeDecl {
+	return clocked(clockDecl{Source: clockOfCustomer, Param: param})
+}
+func ofSubscription() routeDecl { return clocked(clockDecl{Source: clockOfSubscription, Param: "id"}) }
+func ofInvoice() routeDecl      { return clocked(clockDecl{Source: clockOfInvoice, Param: "id"}) }
+func ofCreditNote() routeDecl   { return clocked(clockDecl{Source: clockOfCreditNote, Param: "id"}) }
+func ofDunningRun() routeDecl   { return clocked(clockDecl{Source: clockOfDunningRun, Param: "id"}) }
 func decidedIn(function string) routeDecl {
-	return routeDecl{clock: clockDecl{Source: clockDecidedIn, In: function}}
+	return clocked(clockDecl{Source: clockDecidedIn, In: function})
 }
 
-func clocked(source clockSource, param string) routeDecl {
-	return routeDecl{clock: clockDecl{Source: source, Param: param}}
-}
+// clocked is a route's entry with only its clock declared.
+func clocked(c clockDecl) routeDecl { return routeDecl{clock: c} }
 
 // ---------------------------------------------------------------------------
 // The audit (ADR-090).
 //
 // The table states, for every mutating route, where its audit evidence comes
-// from. Coverage is declared,
-// not inferred by a catch-all middleware. Such a middleware would infer the
-// action and resource from the URL, and so write false permanent rows into
-// an append-only compliance log (ADR-090 RC2). It would also miss every
-// route outside the /v1 block it is mounted on (RC1).
+// from. Coverage is declared, not inferred by a catch-all middleware. Such a
+// middleware would infer the action and resource from the URL, and so write
+// false permanent rows into an append-only compliance log (ADR-090 RC2). It
+// would also miss every route outside the /v1 block it is mounted on (RC1).
 //
 // Each route has one of two kinds of coverage:
 //
@@ -146,17 +148,12 @@ func clocked(source clockSource, param string) routeDecl {
 //   - exempt: the route writes no audit row, on purpose. The reason comes
 //     from a closed enum, and the note records why, plus any accepted loss.
 //
-// TestRouteTable_MatchesLiveRoutes walks the real router and compares it
-// with this table in both directions. An undeclared mutating route fails CI,
-// and so does a stale entry. So adding a
-// mutating route forces an audit decision at review time, which is the
-// purpose of the table. At runtime the detector (mw.AuditCoverage), which
-// only observes, reports any mutating 2xx that wrote no audit row and is not
-// declared exempt here.
+// At runtime the detector (mw.AuditCoverage), which only observes, reports
+// any mutating 2xx that wrote no audit row and is not declared exempt here.
 //
-// Read egress (ADR-090 §7). Mutations are only half of a chain of custody. A full-tenant export can
-// take every customer and their PII, every invoice, every subscription, a
-// year of usage events, or the audit log itself. A tamper-evidence system
+// Read egress (ADR-090 §7). Mutations are only half of a chain of custody. A
+// full-tenant export can take every customer and their PII, every invoice,
+// every subscription, a year of usage events, or the audit log itself. A tamper-evidence system
 // that cannot show who copied the evidence has a hole in its chain of
 // custody. Stripe and AWS CloudTrail both log data-export and read events,
 // and so does Hardcount.
@@ -178,17 +175,15 @@ func clocked(source clockSource, param string) routeDecl {
 //   - A row per list call would put audit_log on the busiest read path in
 //     the dashboard (every page load of every table). The noise would make
 //     the audit log unreadable. The same volume argument keeps usage ingest
-//     exempt above.
+//     exempt below.
 //   - Close this loss when a design partner or an auditor asks for evidence
 //     of PII reads (SOC 2 CC6.x-style "who accessed customer records"). The
 //     answer then is a read trail built from the access log, grouped per
 //     session or actor, not one audit_log row per GET.
 //
-// The table test compares the audits on GET routes with the live GET routes
-// under /v1/exports, in both directions. So a new export route fails CI until
-// it declares its emission. On purpose, this is not a general GET axis. Five
-// routes do not justify an audit story for every read endpoint in the
-// product, and a table nobody can keep current is a table that lies.
+// On purpose, the GET routes under /v1/exports are the only reads that carry
+// an audit. Five routes do not justify an audit story for every read endpoint
+// in the product, and a table nobody can keep current is a table that lies.
 // ---------------------------------------------------------------------------
 
 // auditCoverage is how a route's audit evidence is produced.
@@ -243,10 +238,13 @@ type auditDecl struct {
 	Note string
 }
 
+// explicit is an audit the route emits itself; note names where.
 func explicit(note string) auditDecl {
 	return auditDecl{Coverage: auditExplicit, Note: note}
 }
 
+// exempt is no audit row, on purpose: reason is from the closed enum, and
+// note says why and records any accepted loss.
 func exempt(reason exemptReason, note string) auditDecl {
 	return auditDecl{Coverage: auditExempt, Reason: reason, Note: note}
 }
@@ -309,14 +307,13 @@ var routeTable = map[routeKey]routeDecl{
 	// --- system ---------------------------------------------------------
 	{"GET", "/health"}:       realTime(),
 	{"GET", "/health/ready"}: realTime(),
-	{"GET", "/metrics"}:      realTime(),
-	{"HEAD", "/metrics"}:     realTime(),
-	// /metrics is registered with r.Handle, which chi expands to all 9
-	// methods. So the route walk rightly yields POST, PUT, PATCH and DELETE
-	// /metrics. They are declared, not filtered out. Skipping r.Handle routes
-	// without a word would hide from the registry any future route that chi
-	// registers for all methods (its mALL).
-	{"POST", "/metrics"}:    realTime().with(exempt(reasonSystemEndpoint, "Prometheus scrape endpoint; r.Handle expands to all 9 methods. No tenant, no operator action.")),
+	// /metrics is registered with r.Handle, which chi expands to every method
+	// (its mALL). So the route walk rightly yields every method of /metrics,
+	// and each is declared, not filtered out: skipping r.Handle routes without
+	// a word would hide any future route that chi registers for every method.
+	{"GET", "/metrics"}:     realTime(),
+	{"HEAD", "/metrics"}:    realTime(),
+	{"POST", "/metrics"}:    realTime().with(exempt(reasonSystemEndpoint, "Prometheus scrape endpoint; r.Handle expands to every method. No tenant, no operator action.")),
 	{"PUT", "/metrics"}:     realTime().with(exempt(reasonSystemEndpoint, "same r.Handle expansion as POST /metrics.")),
 	{"PATCH", "/metrics"}:   realTime().with(exempt(reasonSystemEndpoint, "same r.Handle expansion as POST /metrics.")),
 	{"DELETE", "/metrics"}:  realTime().with(exempt(reasonSystemEndpoint, "same r.Handle expansion as POST /metrics.")),
@@ -350,15 +347,17 @@ var routeTable = map[routeKey]routeDecl{
 	// after the event is read. Each event handler decides from the record it
 	// names, not the settle, which already-decided paths also reach.
 	{"POST", "/v1/webhooks/stripe/{endpoint_id}"}: decidedIn("payment.Stripe.HandleWebhook").with(exempt(reasonWebhookOwned, "Inbound Stripe delivery. Some effects DO audit in-tx (payment-method flips → payment.Stripe.handleCheckoutCompleted; refund-status flips → creditnote.ApplyRefundWebhook; refunds made in Stripe outside Hardcount → creditnote.RecordStripeRefund, which writes an update row on the invoice (action refunded_in_stripe) and, for a recorded note, its create and issued rows, ADR-134). ACCEPTED LOSS, recorded rather than glossed: card SETTLEMENT (payment_intent.succeeded/failed → payment.SettleSucceeded/SettleFailed) writes NO audit_log row. The settle is not evidence-free — invoices.paid_at/status, the in-tx invoice.paid + payment.succeeded outbox events, and stripe_webhook_events all record it, and it is machine-driven with no operator to attribute (the 2026-06-12 audit ruled webhooks+timeline own that record). But audit_log itself cannot answer \"when was INV-1042 settled?\". Closure trigger: an auditor or DP asking for settlement evidence FROM the audit log → emit on the settle tx (invoice.MarkPaidCardSettlementTransition would need an emit hook, and domain would need a settle action). Same ruling for card DISPUTES (charge.dispute.* → invoice.RecordStripeDispute, #979): no audit_log row; the invoice_disputes row, the in-tx payment.dispute_opened/closed outbox events and stripe_webhook_events record it.")),
-	{"POST", "/v1/webhooks/postmark"}:             realTime().with(exempt(reasonWebhookOwned, "Inbound Postmark delivery/bounce/complaint report (ADR-098). Basic-Auth gated; tenant resolves from the stamped outbox row, never the blind POST. Its effects are provider-truth STATE (email_outbox.delivery_state, customers.email_status) with the customer.email_bounced/email_complained outbox events as the observable record — machine-driven with no operator to attribute, same ruling as the Stripe settle path above. ACCEPTED LOSS: audit_log cannot answer 'when did the provider report INV-1042's email bounced' — the timeline (delivery_state) and webhook events own that record.")), // email reports; reads no clock
+	// email reports; reads no clock
+	{"POST", "/v1/webhooks/postmark"}: realTime().with(exempt(reasonWebhookOwned, "Inbound Postmark delivery/bounce/complaint report (ADR-098). Basic-Auth gated; tenant resolves from the stamped outbox row, never the blind POST. Its effects are provider-truth STATE (email_outbox.delivery_state, customers.email_status) with the customer.email_bounced/email_complained outbox events as the observable record — machine-driven with no operator to attribute, same ruling as the Stripe settle path above. ACCEPTED LOSS: audit_log cannot answer 'when did the provider report INV-1042's email bounced' — the timeline (delivery_state) and webhook events own that record.")),
 
 	// --- public pages: the token names the record, and the mode is not
 	// known until it is read ----------------------------------------------
-	{"GET", "/v1/public/invoices/{token}"}:                  decidedIn("hostedinvoice.Handler.resolveInvoice"),
-	{"POST", "/v1/public/invoices/{token}/checkout"}:        decidedIn("hostedinvoice.Handler.resolveInvoice").with(explicit("hostedInvoiceStripeAdapter (api/adapters.go) → LogInTx on the checkout-claim tx; actor is the CUSTOMER (auth.WithCustomerActor). Outside the old catch-all entirely.")),
-	{"GET", "/v1/public/invoices/{token}/pdf"}:              decidedIn("hostedinvoice.Handler.resolveInvoice"),
-	{"GET", "/v1/public/payment-updates/{token}"}:           realTime(),                                                                                                                                  // writes nothing
-	{"POST", "/v1/public/payment-updates/{token}/checkout"}: realTime().with(explicit("payment.PublicPaymentHandler.createCheckoutSession → LogInTx on the token consume/restore txs; customer actor.")), // two audit rows, no money
+	{"GET", "/v1/public/invoices/{token}"}:           decidedIn("hostedinvoice.Handler.resolveInvoice"),
+	{"POST", "/v1/public/invoices/{token}/checkout"}: decidedIn("hostedinvoice.Handler.resolveInvoice").with(explicit("hostedInvoiceStripeAdapter (api/adapters.go) → LogInTx on the checkout-claim tx; actor is the CUSTOMER (auth.WithCustomerActor). Outside the old catch-all entirely.")),
+	{"GET", "/v1/public/invoices/{token}/pdf"}:       decidedIn("hostedinvoice.Handler.resolveInvoice"),
+	{"GET", "/v1/public/payment-updates/{token}"}:    realTime(), // writes nothing
+	// two audit rows, no money
+	{"POST", "/v1/public/payment-updates/{token}/checkout"}: realTime().with(explicit("payment.PublicPaymentHandler.createCheckoutSession → LogInTx on the token consume/restore txs; customer actor.")),
 	{"GET", "/v1/public/cost-dashboard/{token}"}:            decidedIn("usage.CostDashboardAssembler.GetByToken"),
 
 	// --- tenant-wide reads and streams: each row by its stored dates ------
@@ -391,16 +390,17 @@ var routeTable = map[routeKey]routeDecl{
 	{"PATCH", "/v1/plans/{id}/prices/{price_id}"}:  realTime().with(explicit("pricing.Service.EditPrice → LogInTx(update, plan_price) on the price write's tx, with the content before and after.")),
 	{"DELETE", "/v1/plans/{id}/prices/{price_id}"}: realTime().with(explicit("pricing.Service.RemovePrice → LogInTx(delete, plan_price) on the price write's tx, with the overrides it ended.")),
 	// An override reads its customer's clock in its own SQL.
-	{"GET", "/v1/price-overrides"}:            realTime(),
-	{"POST", "/v1/price-overrides"}:           realTime().with(explicit("pricing.Handler.createOverride → Log(create, price_override).")),
-	{"DELETE", "/v1/price-overrides/{id}"}:    realTime().with(explicit("pricing.Handler.deleteOverride → Log(delete, price_override).")),
-	{"GET", "/v1/provider-costs"}:             realTime(),
-	{"PUT", "/v1/provider-costs"}:             realTime().with(explicit("usage.ProviderCostHandler.upsert → LogInTx(update, provider_cost) on the upsert tx.")),
-	{"DELETE", "/v1/provider-costs/{id}"}:     realTime().with(explicit("usage.ProviderCostHandler.delete → LogInTx(delete, provider_cost) on the delete tx.")),
-	{"GET", "/v1/recipes"}:                    realTime(),
-	{"GET", "/v1/recipes/instances"}:          realTime(),
-	{"GET", "/v1/recipes/{key}"}:              realTime(),
-	{"POST", "/v1/recipes/{key}/instantiate"}: realTime().with(explicit("recipe.Service.Instantiate → LogInTx(create, recipe) on the generate-plan tx (ADR-085 born-unique install). An idempotent re-apply installs nothing, emits nothing, and declares audit.MarkSkip on the badge-exists branch — a no-op deserves no record (the catch-all fabricated a 'created recipe' row for it).")), // plans, meters and a dunning policy
+	{"GET", "/v1/price-overrides"}:         realTime(),
+	{"POST", "/v1/price-overrides"}:        realTime().with(explicit("pricing.Handler.createOverride → Log(create, price_override).")),
+	{"DELETE", "/v1/price-overrides/{id}"}: realTime().with(explicit("pricing.Handler.deleteOverride → Log(delete, price_override).")),
+	{"GET", "/v1/provider-costs"}:          realTime(),
+	{"PUT", "/v1/provider-costs"}:          realTime().with(explicit("usage.ProviderCostHandler.upsert → LogInTx(update, provider_cost) on the upsert tx.")),
+	{"DELETE", "/v1/provider-costs/{id}"}:  realTime().with(explicit("usage.ProviderCostHandler.delete → LogInTx(delete, provider_cost) on the delete tx.")),
+	{"GET", "/v1/recipes"}:                 realTime(),
+	{"GET", "/v1/recipes/instances"}:       realTime(),
+	{"GET", "/v1/recipes/{key}"}:           realTime(),
+	// plans, meters and a dunning policy
+	{"POST", "/v1/recipes/{key}/instantiate"}: realTime().with(explicit("recipe.Service.Instantiate → LogInTx(create, recipe) on the generate-plan tx (ADR-085 born-unique install). An idempotent re-apply installs nothing, emits nothing, and declares audit.MarkSkip on the badge-exists branch — a no-op deserves no record (the catch-all fabricated a 'created recipe' row for it).")),
 	{"POST", "/v1/recipes/{key}/preview"}:     realTime().with(exempt(reasonNonMutatingPreview, "Read-only recipe render — returns the objects an instantiate WOULD create. Writes nothing (recipe/handler.go calls audit.MarkSkip).")),
 	{"GET", "/v1/settings"}:                   realTime(),
 	{"PUT", "/v1/settings"}:                   realTime().with(explicit("tenant.SettingsHandler.upsert → Log(update, setting) with a FIELD-LEVEL diff. A save that changes no field mutates nothing semantically and declares MarkSkip.")),
@@ -432,14 +432,15 @@ var routeTable = map[routeKey]routeDecl{
 	{"GET", "/v1/webhook_events/{id}/deliveries"}:                                   realTime(),
 	{"POST", "/v1/webhook_events/{id}/replay"}:                                      realTime().with(explicit("webhook.Handler.replayEventV2 → Log(update, webhook_event: replayed).")),
 	// A clock itself: the advance decides each pass's time per clock.
-	{"GET", "/v1/test-clocks"}: realTime(),
-	// The clock routes stamp their rows on their own clock's simulated time
-	// (the sim axis, ADR-090 §5). So the clock's lifecycle sits inside the
+	//
+	// The clock routes stamp their audit rows on their own clock's simulated
+	// time (the sim axis, ADR-090 §5). So the clock's lifecycle sits inside the
 	// timeline it explains. Otherwise, after teardown (ADR-086), a
 	// clock-scoped query would return the effects (invoices finalized,
 	// subscriptions canceled) with no cause. It would show no "created", no
 	// "advanced to 2027-03-01" and no "deleted". The "deleted" row is the one
 	// that explains why every other trace of the simulation is gone.
+	{"GET", "/v1/test-clocks"}:                     realTime(),
 	{"POST", "/v1/test-clocks"}:                    realTime().with(explicit("testclock.Service.Create → LogInTx(create, test_clock) on the clock's insert tx.")),
 	{"GET", "/v1/test-clocks/{id}"}:                realTime(),
 	{"DELETE", "/v1/test-clocks/{id}"}:             realTime().with(explicit("testclock.Service.Delete → LogInTx(delete, test_clock: teardown) on the teardown tx, named from the clock row it deletes. ADR-086: the audit row is the simulation's only record after teardown.")),
@@ -450,8 +451,9 @@ var routeTable = map[routeKey]routeDecl{
 	{"POST", "/v1/billing/run"}: realTime().with(explicit("billing.Handler.triggerCycle → Log(run, billing) — the operator's TRIGGER row: it records WHO ran a cycle and how many invoices it produced, including a run that produced ZERO (which leaves no finalize rows at all). NOT because the finalize rows are anonymous — triggerCycle runs synchronously on the request ctx, so those rows do carry the operator's actor/IP/request_id, unlike the scheduler's. Residual own-tx by design: the route owns no tx. A failed emission is surfaced in the response and left unmarked, so the detector reports it.")),
 
 	// --- customers --------------------------------------------------------
-	{"GET", "/v1/customers"}:                                                 realTime(),
-	{"POST", "/v1/customers"}:                                                decidedIn("customer.Service.Create").with(explicit("customer.Service.Create → LogInTx(create, customer) on the customer's own tx.")), // the body names the clock
+	{"GET", "/v1/customers"}: realTime(),
+	// the body names the clock
+	{"POST", "/v1/customers"}:                                                decidedIn("customer.Service.Create").with(explicit("customer.Service.Create → LogInTx(create, customer) on the customer's own tx.")),
 	{"GET", "/v1/customers/{id}"}:                                            ofCustomer("id"),
 	{"PATCH", "/v1/customers/{id}"}:                                          ofCustomer("id").with(explicit("customer.Handler.update → Log(update, customer) with a field diff.")),
 	{"GET", "/v1/customers/{id}/billing-profile"}:                            ofCustomer("id"),
@@ -468,8 +470,9 @@ var routeTable = map[routeKey]routeDecl{
 	{"POST", "/v1/customers/{customer_id}/payment-methods/{pmID}/default"}:   ofCustomer("customer_id").with(explicit("paymentmethods.Service.SetDefault → Log(update, payment_method).")),
 
 	// --- subscriptions ----------------------------------------------------
-	{"GET", "/v1/subscriptions"}:                                       realTime(),
-	{"POST", "/v1/subscriptions"}:                                      decidedIn("subscription.Handler.create").with(explicit("subscription.Handler.create → Log(create, subscription).")), // the body names the customer
+	{"GET", "/v1/subscriptions"}: realTime(),
+	// the body names the customer
+	{"POST", "/v1/subscriptions"}:                                      decidedIn("subscription.Handler.create").with(explicit("subscription.Handler.create → Log(create, subscription).")),
 	{"GET", "/v1/subscriptions/{id}"}:                                  ofSubscription(),
 	{"PUT", "/v1/subscriptions/{id}/billing-thresholds"}:               ofSubscription().with(explicit("subscription.Handler.setBillingThresholds → Log(update, subscription).")),
 	{"DELETE", "/v1/subscriptions/{id}/billing-thresholds"}:            ofSubscription().with(explicit("subscription.Handler.clearBillingThresholds → Log(update, subscription).")),
@@ -499,28 +502,31 @@ var routeTable = map[routeKey]routeDecl{
 	// records the credential that sent it, not a per-request audit row. At
 	// ingest volumes, one audit row per call would outweigh the events
 	// themselves.
-	{"POST", "/v1/usage-events"}: decidedIn("usage.Service.Ingest").with(exempt(reasonMachineIngest, "High-volume metering ingest (~1000/s); usage_events IS the record, and a row per event would double the write volume of the hottest path. ACCEPTED LOSS, stated precisely: until this PR the retired catch-all wrote a generic 'create usage_event' row per REQUEST, so these routes DO lose audit_log rows they were getting — what is lost with them is (a) WHICH CREDENTIAL ingested an event (usage_events carries no key_id) and (b) the request-level trail. The events themselves, their timestamps and their origin tag remain. Closure trigger: a billing dispute or an injected-usage incident → stamp key_id at ingest (plumb the fact; no heuristics).")),
+	{"POST", "/v1/usage-events"}:               decidedIn("usage.Service.Ingest").with(exempt(reasonMachineIngest, "High-volume metering ingest (~1000/s); usage_events IS the record, and a row per event would double the write volume of the hottest path. ACCEPTED LOSS, stated precisely: until this PR the retired catch-all wrote a generic 'create usage_event' row per REQUEST, so these routes DO lose audit_log rows they were getting — what is lost with them is (a) WHICH CREDENTIAL ingested an event (usage_events carries no key_id) and (b) the request-level trail. The events themselves, their timestamps and their origin tag remain. Closure trigger: a billing dispute or an injected-usage incident → stamp key_id at ingest (plumb the fact; no heuristics).")),
+	{"POST", "/v1/usage-events/batch"}:         decidedIn("usage.Service.BatchIngest").with(exempt(reasonMachineIngest, "Batch form of the same ingest. Same accepted loss.")),
+	{"POST", "/v1/integrations/litellm/spend"}: decidedIn("usage.Service.IngestCall").with(exempt(reasonMachineIngest, "LiteLLM proxy spend callback — one POST per LLM call, funnels into the same usage_events writer. Same accepted loss.")),
 	// Backfill is not exempt, on purpose: it is an operator action on the
 	// money path. Inserting backdated usage changes what a customer is billed
 	// for a period that may already have closed, unlike the machine metering
 	// above. usage.Service.Backfill emits on the ingest transaction
 	// (ADR-090).
 	{"POST", "/v1/usage-events/backfill"}: decidedIn("usage.Service.Backfill").with(explicit("usage.Service.Backfill → IngestAudited (in-tx): action=create/usage_event, metadata.action=usage_backfilled with the backdated timestamp.")),
-	{"POST", "/v1/usage-events/batch"}:    decidedIn("usage.Service.BatchIngest").with(exempt(reasonMachineIngest, "Batch form of the same ingest. Same accepted loss.")),
 	// Held usage (#1044, ADR-122): operator actions on rows the LiteLLM
 	// callback could not ingest. Release changes what a customer is billed,
 	// as backfill does. Discard decides that the usage will never bill.
-	{"POST", "/v1/usage-events/held/release"}:  decidedIn("usage.Service.Release").with(explicit("usage.Service.Release → PostgresStore.ReleaseHeld (in-tx): action=create/usage_event, metadata.action=held_usage_released with the counts and the event time range. A call that changed no row calls audit.MarkSkip.")),
-	{"POST", "/v1/integrations/litellm/spend"}: decidedIn("usage.Service.IngestCall").with(exempt(reasonMachineIngest, "LiteLLM proxy spend callback — one POST per LLM call, funnels into the same usage_events writer. Same accepted loss.")),
-	{"POST", "/v1/usage-events/held/discard"}:  realTime().with(explicit("usage.Service.Discard → PostgresStore.DiscardHeld (in-tx): action=delete/usage_event, metadata.action=held_usage_discarded with the row count. A call that changed no row calls audit.MarkSkip.")), // reads no clock
-	{"GET", "/v1/usage-events"}:                realTime(),
-	{"GET", "/v1/usage-events/aggregate"}:      realTime(),
-	{"GET", "/v1/usage-events/held"}:           realTime(),
+	{"POST", "/v1/usage-events/held/release"}: decidedIn("usage.Service.Release").with(explicit("usage.Service.Release → PostgresStore.ReleaseHeld (in-tx): action=create/usage_event, metadata.action=held_usage_released with the counts and the event time range. A call that changed no row calls audit.MarkSkip.")),
+	// Discard reads no clock.
+	{"POST", "/v1/usage-events/held/discard"}: realTime().with(explicit("usage.Service.Discard → PostgresStore.DiscardHeld (in-tx): action=delete/usage_event, metadata.action=held_usage_discarded with the row count. A call that changed no row calls audit.MarkSkip.")),
+	{"GET", "/v1/usage-events"}:               realTime(),
+	{"GET", "/v1/usage-events/aggregate"}:     realTime(),
+	{"GET", "/v1/usage-events/held"}:          realTime(),
 
 	// --- invoices -----------------------------------------------------------
-	{"GET", "/v1/invoices"}:                                                 realTime(),
-	{"POST", "/v1/invoices"}:                                                decidedIn("invoice.Service.Create").with(explicit("invoice.Service.Create → LogInTx(create, invoice) on the invoice's own tx.")),                                                                                                                            // the body names the customer
-	{"POST", "/v1/invoices/create_preview"}:                                 decidedIn("billing.PreviewService.CreatePreview").with(exempt(reasonNonMutatingPreview, "Read-only estimate; POST only because the composer payload doesn't fit a query string. Writes nothing (billing/create_preview_handler.go calls audit.MarkSkip).")), // the body names the customer
+	{"GET", "/v1/invoices"}: realTime(),
+	// the body names the customer
+	{"POST", "/v1/invoices"}: decidedIn("invoice.Service.Create").with(explicit("invoice.Service.Create → LogInTx(create, invoice) on the invoice's own tx.")),
+	// the body names the customer
+	{"POST", "/v1/invoices/create_preview"}:                                 decidedIn("billing.PreviewService.CreatePreview").with(exempt(reasonNonMutatingPreview, "Read-only estimate; POST only because the composer payload doesn't fit a query string. Writes nothing (billing/create_preview_handler.go calls audit.MarkSkip).")),
 	{"GET", "/v1/invoices/{id}"}:                                            ofInvoice(),
 	{"POST", "/v1/invoices/{id}/collect"}:                                   ofInvoice().with(explicit("invoice.Handler.collectPayment → Log(collect, invoice) — the money-movement row.")),
 	{"GET", "/v1/invoices/{id}/disputes"}:                                   ofInvoice(),
@@ -540,9 +546,10 @@ var routeTable = map[routeKey]routeDecl{
 	{"POST", "/v1/invoices/{id}/void"}:                                      ofInvoice().with(explicit("invoice.Service.Void → LogInTx(void, invoice) on the void coordinator tx (tax reversal + credit reversal share it).")),
 
 	// --- credit notes -------------------------------------------------------
-	{"GET", "/v1/credit-notes"}:                            realTime(),
-	{"GET", "/v1/credit-notes/stats"}:                      realTime(),
-	{"POST", "/v1/credit-notes"}:                           decidedIn("creditnote.Handler.create").with(explicit("creditnote.Service.Create → LogInTx(create, credit_note) on the draft tx.")), // the body names the invoice
+	{"GET", "/v1/credit-notes"}:       realTime(),
+	{"GET", "/v1/credit-notes/stats"}: realTime(),
+	// the body names the invoice
+	{"POST", "/v1/credit-notes"}:                           decidedIn("creditnote.Handler.create").with(explicit("creditnote.Service.Create → LogInTx(create, credit_note) on the draft tx.")),
 	{"GET", "/v1/credit-notes/{id}"}:                       ofCreditNote(),
 	{"POST", "/v1/credit-notes/{id}/attach-stripe-refund"}: ofCreditNote().with(explicit("creditnote.Service.AttachStripeRefund → LogInTx(update, credit_note, action stripe_refund_attached) on the attach's tx (ADR-134).")),
 	{"POST", "/v1/credit-notes/{id}/issue"}:                ofCreditNote().with(explicit("creditnote.Service.Issue → LogInTx(credit_note.issued) on the coordinator tx (+ the grant's own row). A DEFERRED outcome mutates nothing and declares MarkSkip.")),
@@ -552,9 +559,11 @@ var routeTable = map[routeKey]routeDecl{
 	{"POST", "/v1/credit-notes/{id}/void"}:                 ofCreditNote().with(explicit("creditnote.Service.Void → LogInTx(void, credit_note) on the draft→voided CAS tx.")),
 
 	// --- credits ------------------------------------------------------------
-	{"GET", "/v1/credits/balances"}:                   realTime(),
-	{"POST", "/v1/credits/grant"}:                     decidedIn("credit.Service.Grant").with(explicit("credit.Service.Grant → LogInTx(grant, credit) on the ledger tx (ADR-090's first domain).")),                                                                                                                                                                           // the body names the customer
-	{"POST", "/v1/credits/adjust"}:                    decidedIn("credit.Service.Adjust").with(explicit("credit.Service.Adjust → LogInTx(resource=credit) on the ledger tx. Action is credit.adjustment for a positive amount and credit.deduction for a negative one (the split the dashboard's severity styling keys on). There is no 'adjust' action in the vocabulary.")), // the body names the customer
+	{"GET", "/v1/credits/balances"}: realTime(),
+	// the body names the customer
+	{"POST", "/v1/credits/grant"}: decidedIn("credit.Service.Grant").with(explicit("credit.Service.Grant → LogInTx(grant, credit) on the ledger tx (ADR-090's first domain).")),
+	// the body names the customer
+	{"POST", "/v1/credits/adjust"}:                    decidedIn("credit.Service.Adjust").with(explicit("credit.Service.Adjust → LogInTx(resource=credit) on the ledger tx. Action is credit.adjustment for a positive amount and credit.deduction for a negative one (the split the dashboard's severity styling keys on). There is no 'adjust' action in the vocabulary.")),
 	{"GET", "/v1/credits/balance/{customer_id}"}:      ofCustomer("customer_id"),
 	{"GET", "/v1/credits/balance/{customer_id}/live"}: ofCustomer("customer_id"),
 	{"GET", "/v1/credits/grants/{customer_id}"}:       ofCustomer("customer_id"),

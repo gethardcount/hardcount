@@ -63,7 +63,7 @@ var residualOwnTxAuditWriters = map[string]int{
 
 // Own-tx audit writes that are REQUEST-scoped (chi handlers living inside the
 // scanned packages). These are not background backlog — their routes are
-// declared in internal/api/audit_routes.go like every other handler route —
+// declared in internal/api/route_table.go like every other handler route —
 // but the scan sees them, so they are pinned here (package/action, counted)
 // instead of being silently skipped: a NEW own-tx call in a handler file
 // still fails CI until declared somewhere. Classification rule: a match in a
@@ -155,7 +155,7 @@ func TestBackgroundAuditWriters_AreAnExplicitShrinkingSet(t *testing.T) {
 		if !declared {
 			t.Errorf("NEW own-tx audit write %q (%d call(s)) in a handler file of a background package.\n"+
 				"If it is a request-scoped handler row: declare it in requestScopedOwnTxWriters "+
-				"(and make sure its route is in internal/api/audit_routes.go). If it is scheduler "+
+				"(and make sure its route is in internal/api/route_table.go). If it is scheduler "+
 				"work hiding in a handler file: move it, then see the background-writer rules below.", key, n)
 			continue
 		}
