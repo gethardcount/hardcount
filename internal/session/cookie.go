@@ -2,8 +2,6 @@ package session
 
 import (
 	"net/http"
-	"os"
-	"strings"
 	"time"
 )
 
@@ -17,7 +15,7 @@ type CookieConfig struct {
 }
 
 // DefaultCookieConfig returns the cookie attributes for appEnv, which is
-// config.Config.Env.
+// config.Config.Env, and domain, which is config.Server.CookieDomain.
 //
 // Secure is on in staging and production, for every request, so a
 // browser sends the session cookie only over HTTPS, or to localhost
@@ -25,9 +23,9 @@ type CookieConfig struct {
 // http://localhost, but Safari does not. Plain HTTP is for local, where
 // Secure is off: make dev, and the Compose quickstart, which sets
 // APP_ENV=local so Safari can sign in at http://localhost.
-func DefaultCookieConfig(appEnv string) CookieConfig {
+func DefaultCookieConfig(appEnv, domain string) CookieConfig {
 	return CookieConfig{
-		Domain: strings.TrimSpace(os.Getenv("HARDCOUNT_COOKIE_DOMAIN")),
+		Domain: domain,
 		Secure: appEnv == "production" || appEnv == "staging",
 	}
 }
@@ -53,8 +51,8 @@ func (c CookieConfig) SetCookie(w http.ResponseWriter, raw string, expires time.
 	})
 }
 
-// ClearCookie writes a cleared (Max-Age=-1) session cookie on the response,
-// for sign-out.
+// ClearCookie writes the session cookie with Max-Age=0, which clears it, for
+// sign-out.
 func (c CookieConfig) ClearCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     CookieName,

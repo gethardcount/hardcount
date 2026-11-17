@@ -2,7 +2,7 @@
 // password login (ADR-011). The browser holds an httpOnly cookie with a random
 // id; the database stores only its sha256 (HashID), so a copy of the table
 // cannot be replayed. A session is live while it is not revoked and not
-// expired, and every method here applies that rule.
+// expired: Resolve, End, EndTx and SetLivemode act only on a live one.
 package session
 
 import (

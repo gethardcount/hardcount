@@ -9,7 +9,10 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"testing/synctest"
+	"time"
 
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/platform/request"
@@ -132,16 +135,36 @@ func TestSessionUserNamedOnTheRecord(t *testing.T) {
 		t.Errorf("the audit log names this session %s/%s, the record %s/%s", actorType, actorID, want.Type, want.ID)
 	}
 
-	// An unknown cookie and no API key: 401 for missing credentials.
-	seen = nil
-	record, rec := recordOf(RequireCaller(sessions, nil)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { seen = r })),
-		sessionRequest("sess_unknown"))
-	if rec.Code != http.StatusUnauthorized || seen != nil {
-		t.Fatalf("unknown cookie: status = %d (reached=%v), want 401", rec.Code, seen != nil)
+	// No credential: 401 for missing credentials, the text the API docs
+	// promise. A key is read from Authorization: Bearer only, so one in
+	// X-API-Key is none (with a nil key service, reading it would panic).
+	keyInOtherHeader := httptest.NewRequest("GET", "/", nil)
+	keyInOtherHeader.Header.Set("X-API-Key", "hc_secret_test_"+strings.Repeat("0", 64))
+	for name, req := range map[string]*http.Request{"unknown cookie": sessionRequest("sess_unknown"), "key in X-API-Key": keyInOtherHeader} {
+		seen = nil
+		record, rec := recordOf(RequireCaller(sessions, nil)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { seen = r })), req)
+		if rec.Code != http.StatusUnauthorized || seen != nil || !strings.Contains(rec.Body.String(), "missing credentials") {
+			t.Errorf("%s: got %d %s (reached=%v), want 401 missing credentials", name, rec.Code, rec.Body.String(), seen != nil)
+		}
+		if got := record.Actor(); got != (request.Actor{}) {
+			t.Errorf("%s: actor on the record = %+v, want none: nobody signed in", name, got)
+		}
 	}
-	if got := record.Actor(); got != (request.Actor{}) {
-		t.Errorf("unknown cookie: actor on the record = %+v, want none: nobody signed in", got)
-	}
+
+	// An expired session is no session: one whose expires_at is now or earlier
+	// answers 401, like an unknown cookie. synctest stops the clock, so "now"
+	// is the instant Resolve reads.
+	synctest.Test(t, func(t *testing.T) {
+		for raw, expires := range map[string]time.Time{"sess_expires_now": time.Now(), "sess_expired": time.Now().Add(-time.Second)} {
+			store.sessions[HashID(raw)] = Session{UserID: "usr_owner", TenantID: "ten_1", ExpiresAt: expires}
+			_, rec := recordOf(RequireCaller(sessions, nil)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
+				t.Errorf("%s: reached the handler", raw)
+			})), sessionRequest(raw))
+			if rec.Code != http.StatusUnauthorized {
+				t.Errorf("%s: status = %d, want 401", raw, rec.Code)
+			}
+		}
+	})
 }
 
 // recordOf serves req through h under the server's root, so the request has

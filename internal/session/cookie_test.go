@@ -22,8 +22,7 @@ func TestCookieFlagsPerEnvironment(t *testing.T) {
 		{"production", true},
 	} {
 		t.Run("APP_ENV="+tc.appEnv, func(t *testing.T) {
-			t.Setenv("HARDCOUNT_COOKIE_DOMAIN", "")
-			c := DefaultCookieConfig(tc.appEnv)
+			c := DefaultCookieConfig(tc.appEnv, "")
 
 			for name, set := range map[string]func(http.ResponseWriter){
 				"set":   func(w http.ResponseWriter) { c.SetCookie(w, "raw", time.Now().Add(time.Hour)) },

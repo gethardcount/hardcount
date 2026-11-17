@@ -40,6 +40,7 @@ var configOwnedSettings = map[string]bool{
 	"PAYMENT_UPDATE_URL":        true,
 	"PAYMENT_UPDATE_RETURN_URL": true,
 	"HARDCOUNT_API_BASE_URL":    true,
+	"HARDCOUNT_COOKIE_DOMAIN":   true,
 	"POSTMARK_WEBHOOK_USER":     true,
 	"POSTMARK_WEBHOOK_PASS":     true,
 	"TRUST_PROXY":               true,

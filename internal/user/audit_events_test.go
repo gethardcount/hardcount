@@ -26,7 +26,7 @@ func (r *recordingAuditRecorder) Log(_ context.Context, _, action, _, _, _ strin
 func newAuthHandler(t *testing.T, store *fakeUserStore) (*Handler, *recordingAuditRecorder, *recordingAuditTx) {
 	t.Helper()
 	svc, auditor := newRecordingService(store)
-	h := NewHandler(svc, session.DefaultCookieConfig("local"), stubEmailSender{}, "", false)
+	h := NewHandler(svc, session.DefaultCookieConfig("local", ""), stubEmailSender{}, "", false)
 	rec := &recordingAuditRecorder{}
 	h.SetAuditLogger(rec)
 	return h, rec, auditor

@@ -136,8 +136,7 @@ type LoginThrottle struct {
 }
 
 // NewLoginThrottle builds the throttle. key comes from ThrottleKey; cookie
-// gives the hardcount_device cookie the session cookie's Domain, Secure and
-// SameSite.
+// gives the hardcount_device cookie the session cookie's Domain and Secure.
 func NewLoginThrottle(db *postgres.DB, key []byte, cookie session.CookieConfig) *LoginThrottle {
 	return &LoginThrottle{db: db, key: key, cookie: cookie}
 }

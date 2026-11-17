@@ -26,14 +26,13 @@ type postgresStore struct {
 	db *postgres.DB
 }
 
-// NewPostgresStore returns the Postgres-backed Store. Every query runs on a
-// bypass transaction, its own or the caller's: a session is read before any
-// tenant context exists.
+// NewPostgresStore returns the Postgres-backed Store. GetByIDHash, EndWith and
+// SetLivemodeWith open their own bypass transaction; the …Tx methods run on
+// the caller's, which must be one (each Service method says why).
 func NewPostgresStore(db *postgres.DB) Store {
 	return &postgresStore{db: db}
 }
 
-// InsertTx is Service.IssueTx's write.
 func (s *postgresStore) InsertTx(ctx context.Context, tx *sql.Tx, sess Session) error {
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO dashboard_sessions
@@ -70,6 +69,8 @@ func scanSession(row *sql.Row) (Session, error) {
 	return sess, nil
 }
 
+// GetByIDHash returns the row whatever its state; Resolve refuses revoked and
+// expired ones.
 func (s *postgresStore) GetByIDHash(ctx context.Context, idHash string) (Session, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -91,7 +92,6 @@ func (s *postgresStore) GetByIDHash(ctx context.Context, idHash string) (Session
 	return sess, nil
 }
 
-// EndTx is Service.EndTx's write.
 func (s *postgresStore) EndTx(ctx context.Context, tx *sql.Tx, idHash string) (bool, error) {
 	res, err := tx.ExecContext(ctx, `
 		UPDATE dashboard_sessions
@@ -108,7 +108,6 @@ func (s *postgresStore) EndTx(ctx context.Context, tx *sql.Tx, idHash string) (b
 	return n > 0, nil
 }
 
-// EndAllForUserTx is Service.EndAllForUserTx's write.
 func (s *postgresStore) EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID string) error {
 	_, err := tx.ExecContext(ctx, `
 		UPDATE dashboard_sessions
@@ -118,7 +117,6 @@ func (s *postgresStore) EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID 
 	return err
 }
 
-// EndForMemberTx is Service.EndForMemberTx's write.
 func (s *postgresStore) EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, tenantID string) error {
 	_, err := tx.ExecContext(ctx, `
 		UPDATE dashboard_sessions
@@ -128,7 +126,7 @@ func (s *postgresStore) EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, 
 	return err
 }
 
-// EndWith runs Service.End on a bypass transaction of its own.
+// EndWith is Service.End's write, on a bypass transaction of its own.
 func (s *postgresStore) EndWith(ctx context.Context, idHash string, then func(tx *sql.Tx, sess Session) error) (Session, bool, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -154,8 +152,8 @@ func (s *postgresStore) EndWith(ctx context.Context, idHash string, then func(tx
 	return sess, true, nil
 }
 
-// SetLivemodeWith runs Service.SetLivemode on a bypass transaction of its
-// own.
+// SetLivemodeWith is Service.SetLivemode's write, on a bypass transaction of
+// its own.
 func (s *postgresStore) SetLivemodeWith(ctx context.Context, idHash string, livemode bool, then func(tx *sql.Tx, sess Session) error) (Session, bool, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {

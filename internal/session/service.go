@@ -6,7 +6,8 @@ import (
 	"time"
 )
 
-// Service issues, resolves and ends sessions over a Store.
+// Service issues, resolves and ends sessions, and switches their mode, over a
+// Store.
 type Service struct {
 	store Store
 }
@@ -53,8 +54,9 @@ func (s *Service) IssueTx(ctx context.Context, tx *sql.Tx, in IssueInput) (rawID
 }
 
 // Resolve returns the live session for a raw cookie value. An empty, unknown,
-// revoked or expired value returns ErrNotFound, which every caller answers
-// with the same 401, so session ids cannot be enumerated.
+// revoked or expired value returns ErrNotFound, which Authenticate treats as
+// no cookie, so these cases cannot be told apart and session ids cannot be
+// enumerated.
 func (s *Service) Resolve(ctx context.Context, rawID string) (Session, error) {
 	if rawID == "" {
 		return Session{}, ErrNotFound
@@ -84,8 +86,8 @@ func (s *Service) End(ctx context.Context, rawID string, then func(tx *sql.Tx, s
 
 // EndTx ends the live session whose raw cookie value is rawID, whoever it
 // belongs to, on the caller's transaction, and reports whether it ended one.
-// It does not commit. tx must be a bypass transaction: a tenant
-// transaction's row-level security hides the session in the other mode.
+// It does not commit. tx must be a bypass transaction, to reach the session
+// whoever it belongs to, in either mode.
 func (s *Service) EndTx(ctx context.Context, tx *sql.Tx, rawID string) (bool, error) {
 	if rawID == "" {
 		return false, nil
@@ -103,7 +105,8 @@ func (s *Service) EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID string
 
 // EndForMemberTx ends every session of a user in one workspace, in both
 // modes, on the caller's transaction; other workspaces are not touched. It
-// does not commit. tx must be a bypass transaction, as for EndAllForUserTx.
+// does not commit. tx must be a bypass transaction: a tenant transaction's
+// row-level security hides the user's sessions in the other mode.
 func (s *Service) EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, tenantID string) error {
 	return s.store.EndForMemberTx(ctx, tx, userID, tenantID)
 }
