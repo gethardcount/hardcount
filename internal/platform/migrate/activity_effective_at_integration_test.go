@@ -11,8 +11,8 @@ const activityEffectiveAtVersion = 232
 
 // 00232 to 00234 date each email and charge attempt at the instant its action
 // decided. A row from before takes its test clock's instant, else the time it
-// was written. The Down gives a test-clock row written since its
-// sim_effective_at back, so the previous version's pair check lets the
+// was written. The Down gives each test-clock row its sim_effective_at back
+// (00237 drops the column), so the previous version's pair check lets the
 // dispatcher update it; and Up runs again.
 func TestActivityEffectiveAt_FillAndRollback(t *testing.T) {
 	dsn, db := scratchDB(t, "hardcount_migrate_activity_effective_at")
@@ -70,6 +70,14 @@ func TestActivityEffectiveAt_FillAndRollback(t *testing.T) {
 	}
 	if got, want := times("effective_at"), "em_clk=09-01 00:00 em_real=11-02 10:00 pi_clk=09-01 00:00 pi_real=11-02 10:00"; got != want {
 		t.Errorf("effective_at after Up: %s, want %s", got, want)
+	}
+	var left string
+	if err := db.QueryRow(`SELECT COALESCE(string_agg(table_name::text, ' ' ORDER BY table_name), '') FROM information_schema.columns
+		WHERE column_name = 'sim_effective_at' AND table_name IN ('email_outbox', 'invoice_charge_attempts')`).Scan(&left); err != nil {
+		t.Fatal(err)
+	}
+	if left != "" {
+		t.Errorf("sim_effective_at still on %v after Up (00237 drops it)", left)
 	}
 
 	// Rows as this version writes them on a test clock: effective_at, and no
