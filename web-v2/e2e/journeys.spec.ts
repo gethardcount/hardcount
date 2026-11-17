@@ -1289,7 +1289,7 @@ test('with no active key the list says so and still offers Create', async ({ pag
   await expect(main.getByRole('row').filter({ hasText: 'No active keys.' })).toBeVisible()
   await expect(main.getByRole('button', { name: 'Show 2 inactive keys (1 expired, 1 revoked)' })).toBeVisible()
   await shootKeys(page, 'no-active')
-  await main.getByRole('button', { name: 'Create a key' }).click()
+  await main.getByRole('row').getByRole('button', { name: 'Create API key' }).click()
   await expect(page.getByRole('dialog', { name: 'Create API key' })).toBeVisible()
 })
 
@@ -1320,10 +1320,14 @@ test('an expiring key counts the days to the date it shows, and a long name fits
   const hint = `Expires in ${dayNumber(expiresAt) - dayNumber(new Date())} days`
   const row = await apiKeyRow(page, name, expiresAt.toISOString())
   await expect(row).toContainText(hint)
+  // The expiry cannot be moved, and the page says what to do instead.
+  await expect(page.getByRole('main').getByText('A key cannot be extended. Create a new key before the old one expires, and switch to it.')).toBeVisible()
   await shootKeys(page, 'list-expiring', row)
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(row.getByRole('button', { name: `Actions for ${name}` })).toBeVisible()
   await expect(row).toContainText(hint)
+  // The Key column is hidden here, so the start of the key sits under the name.
+  await expect(row.getByText(/^Secret · hc_secret_test_[0-9a-f]{12}…$/)).toBeVisible()
   // Neither the page nor the table scrolls sideways.
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
   const table = page.getByRole('main').locator('[data-slot="table-container"]')
@@ -1365,7 +1369,7 @@ test('revoking a test key is a plain confirm; a live key needs the typed word', 
   await row.getByRole('button', { name: `Actions for ${name}` }).click()
   await page.getByRole('menuitem', { name: 'Revoke' }).click()
   const plain = page.getByRole('alertdialog', { name: 'Revoke test API key' })
-  const sentence = 'stops working at once: every request made with it is refused.'
+  const sentence = 'stops working with the next request: every request made with it is refused.'
   await expect(plain).toContainText(sentence)
   await expect(plain.getByRole('textbox')).toHaveCount(0)
   await plain.getByRole('button', { name: 'Revoke key' }).click()
