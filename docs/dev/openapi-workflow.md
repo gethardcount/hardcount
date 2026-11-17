@@ -98,8 +98,8 @@ instead, with the reason. Today that is only the methods other than `GET` on
 - a `POST`, `PUT` or `PATCH` route behind the idempotency middleware does
   not list the `IdempotencyKey` parameter in the spec;
 - an operation lists it but the middleware does not run on that route, or
-  skips it (the usage routes and `showOnceSecretRoutes`,
-  `skipsIdempotency`), so the server would ignore the header.
+  skips it (the usage routes, in the ingest group, and
+  `showOnceSecretRoutes`), so the server would ignore the header.
 
 A response field that carries a secret shown only in that answer is marked
 `x-show-once: true`. `TestOpenAPISpec_ShowOnceSecretsAreNeverKept` in

@@ -275,7 +275,9 @@ func csvSafe(s string) string {
 
 // flushAndContinue flushes the csv buffer to the underlying response
 // so streaming clients see partial output. Without the flush, large
-// exports buffer until completion.
+// exports buffer until completion. So nothing between the handler and the
+// socket may buffer the response: a buffering wrapper would hide the
+// Flusher and hold the whole CSV in memory (ADR-090).
 func flushAndContinue(cw *csv.Writer, w http.ResponseWriter) error {
 	cw.Flush()
 	if err := cw.Error(); err != nil {
