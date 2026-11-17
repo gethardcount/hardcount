@@ -104,18 +104,18 @@ func NewRateLimiter(rdb *goredis.Client, name string, rate int, window time.Dura
 	return rl
 }
 
-// Middleware returns chi-compatible rate-limiting middleware. It keys by
-// tenant ID from the auth context, or by IP address for unauthenticated
-// requests.
+// Middleware answers 429 to a request over the limiter's rate, or to every
+// request while a FailClosed limiter cannot reach Redis. The bucket is the API
+// key, the tenant and mode for a dashboard session, or the client IP before
+// sign-in (rateLimitKey).
 func (rl *RateLimiter) Middleware() func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return RateLimited{limiter: rl, next: next}
 	}
 }
 
-// RateLimited counts each request against its limiter, keyed by tenant, or by
-// client IP for a request that is not authenticated, and answers 429 past the
-// limit. RateLimiter.Middleware makes it.
+// RateLimited counts each request against its limiter. RateLimiter.Middleware
+// makes it; its doc has the rule.
 type RateLimited struct {
 	limiter *RateLimiter
 	next    http.Handler

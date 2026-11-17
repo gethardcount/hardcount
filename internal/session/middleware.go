@@ -61,19 +61,19 @@ func Authenticate(r *http.Request, sessSvc *Service, keySvc *auth.Service) (cont
 	return postgres.WithLivemode(ctx, key.Livemode), nil
 }
 
-// RequireCaller authenticates each request (Authenticate) and answers what it
-// cannot: 401 with no credentials or a key that is not valid, and a retryable
-// 503 when a store failed. The dashboard uses the cookie, and SDKs and curl
-// callers use the API key.
+// RequireCaller authenticates each request (Authenticate) and passes it on
+// with the caller and its mode on the context. It answers 401 to a request
+// with no credentials or a key that is not valid, and a retryable 503 when a
+// store failed. The dashboard uses the cookie, and SDKs and curl callers use
+// the API key.
 func RequireCaller(sessSvc *Service, keySvc *auth.Service) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return CallerRequired{sessions: sessSvc, keys: keySvc, next: next}
 	}
 }
 
-// CallerRequired authenticates each request (Authenticate) and answers what it
-// cannot: 401 with no credentials or a key that is not valid, and a retryable
-// 503 when a store failed. RequireCaller makes it.
+// CallerRequired authenticates each request. RequireCaller makes it; its doc
+// has the rule.
 type CallerRequired struct {
 	sessions *Service
 	keys     *auth.Service

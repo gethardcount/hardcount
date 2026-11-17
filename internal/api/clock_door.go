@@ -75,8 +75,7 @@ func (d *clockDoor) Middleware(next http.Handler) http.Handler {
 	return doorHandler{door: d, next: next}
 }
 
-// doorHandler is the clock door: it decides the request's time from the
-// record its route names and binds it on the context (clockDoor).
+// doorHandler runs the clock door in front of next; clockDoor has the rule.
 // clockDoor.Middleware makes it.
 type doorHandler struct {
 	door *clockDoor

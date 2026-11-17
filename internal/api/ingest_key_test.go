@@ -168,14 +168,14 @@ func TestIngestKey_RefusedOnEveryRouteButUsage(t *testing.T) {
 		route = canonicalRoute(route)
 		authed, sessionOnly := false, false
 		var gates []func(http.Handler) http.Handler
-		for i, h := range chainOf(mws) {
-			switch h := h.(type) {
+		for i, h := range handlersOf(mws) {
+			switch h.(type) {
 			case session.CallerRequired:
 				authed = true
+			case auth.SessionRequired:
+				sessionOnly = true
+				gates = append(gates, mws[i])
 			case auth.PermissionCheck:
-				if h.Kind == auth.CheckSession {
-					sessionOnly = true
-				}
 				gates = append(gates, mws[i])
 			}
 		}

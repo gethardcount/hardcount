@@ -7,10 +7,10 @@ import (
 	"github.com/gethardcount/hardcount/internal/session"
 )
 
-// chainOf wraps each middleware around a stub and returns the handlers it
-// makes, in order. chi.Walk reports middleware as funcs; the handler a
-// middleware returns has the type that says what it does.
-func chainOf(mws []func(http.Handler) http.Handler) []http.Handler {
+// handlersOf applies each middleware to a stub on its own, not nested, and
+// returns the handlers they make, in order. chi.Walk reports middleware as
+// funcs; the handler a middleware returns has the type that says what it does.
+func handlersOf(mws []func(http.Handler) http.Handler) []http.Handler {
 	stub := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
 	out := make([]http.Handler, len(mws))
 	for i, m := range mws {
@@ -41,7 +41,7 @@ var (
 // chainIndex is the index of the first middleware in mws that makes step, or
 // -1.
 func chainIndex(mws []func(http.Handler) http.Handler, step chainStep) int {
-	for i, h := range chainOf(mws) {
+	for i, h := range handlersOf(mws) {
 		if step.is(h) {
 			return i
 		}

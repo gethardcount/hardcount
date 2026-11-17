@@ -57,9 +57,8 @@ func Timeout(d time.Duration) func(http.Handler) http.Handler {
 	}
 }
 
-// TimeLimit ends the request's context after limit. A handler that has
-// written nothing by then gets the JSON 504 (respond.Timeout); one that already
-// started its answer keeps it. Timeout makes it.
+// TimeLimit ends the request's context after limit. Timeout makes it; its doc
+// has the rule.
 type TimeLimit struct {
 	limit time.Duration
 	next  http.Handler
