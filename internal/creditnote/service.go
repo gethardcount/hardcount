@@ -904,6 +904,7 @@ func (s *Service) RetryPendingCreditNoteTaxReversal(ctx context.Context, batch i
 	var errsOut []error
 	reversed := 0
 	for _, cn := range pending {
+		ctx := clock.EnsureEffectiveNow(ctx, s.clock) // one instant for this note's work; the tick binds none
 		// Marked, with its reversal already stored: a row an earlier version
 		// left (it stored the id and cleared the marker in two writes). One
 		// write does both now, so this version does not produce the state.

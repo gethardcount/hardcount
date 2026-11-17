@@ -113,9 +113,8 @@ func leadOneTick(ctx context.Context, role leader.Role, interval time.Duration, 
 			led, err = false, nil
 		}
 	}()
-	// A tick runs in real time. Below it, the test-clock job binds each
-	// clock's time (testclock.Service.runClock), and the payment reconciler
-	// each invoice's it settles (Reconciler.settle); everything else a tick
-	// does is real time.
+	// A tick runs in real time and binds no instant. Each job below it binds
+	// one per row: a clock's time in the test-clock job
+	// (testclock.Service.runClock), one read of the server's clock otherwise.
 	return gate.Lead(ctx, role, interval, func(ctx context.Context) { workFn(clock.WithRealTime(ctx)) })
 }
