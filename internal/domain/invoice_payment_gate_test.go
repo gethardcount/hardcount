@@ -333,3 +333,84 @@ func TestChargeHoldOwner(t *testing.T) {
 		t.Error("a refused claim (zero hold) owns something")
 	}
 }
+
+// TestRecoveryWarnsOnOfflinePayment pins the offline-recording warning. Its
+// charge-blocking twin (RecoveryBlocksCharge) was removed by ADR-113; recording
+// money that already arrived is never refused, only warned about. Refuse to
+// create a bad money event; never refuse to record one that already happened.
+func TestRecoveryWarnsOnOfflinePayment(t *testing.T) {
+	writtenOff := func() Invoice {
+		return Invoice{Status: InvoiceUncollectible, BillingReason: BillingReasonSubscriptionCycle}
+	}
+	taxReversed := func() Invoice {
+		i := writtenOff()
+		i.TaxProvider, i.TaxAmountCents = "stripe_tax", 725
+		i.TaxReversedAt = &time.Time{}
+		return i
+	}
+
+	t.Run("tax reversed warns", func(t *testing.T) {
+		w := RecoveryWarnsOnOfflinePayment(taxReversed(), 0)
+		if w == nil || w.Code != "tax_reversed_unrecoverable" {
+			t.Fatalf("got %+v, want a tax_reversed_unrecoverable warning", w)
+		}
+	})
+
+	t.Run("a written-off threshold invoice says nothing", func(t *testing.T) {
+		// A written-off threshold invoice keeps its window billed (ADR-066
+		// amendment 2026-10-23): no later invoice bills that usage again, so
+		// a payment on it settles the window once. The old
+		// recovery_superseded warning said the opposite.
+		i := writtenOff()
+		i.BillingReason = BillingReasonThreshold
+		if w := RecoveryWarnsOnOfflinePayment(i, 0); w != nil {
+			t.Fatalf("warned on a written-off threshold invoice: %+v — its usage is billed nowhere else", w)
+		}
+	})
+
+	t.Run("ordinary written-off invoice says nothing", func(t *testing.T) {
+		if w := RecoveryWarnsOnOfflinePayment(writtenOff(), 0); w != nil {
+			t.Fatalf("warned on a clean recovery: %+v — a warning on every offline payment is a warning nobody reads", w)
+		}
+	})
+
+	t.Run("a FINALIZED invoice never warns", func(t *testing.T) {
+		i := taxReversed()
+		i.Status = InvoiceFinalized
+		if w := RecoveryWarnsOnOfflinePayment(i, 0); w != nil {
+			t.Fatalf("warned on an ordinary invoice: %+v", w)
+		}
+	})
+
+	t.Run("tax-free written-off invoice says nothing", func(t *testing.T) {
+		// Only a REVERSED provider transaction is unreconciled. An invoice with
+		// no tax, or a manual-provider one, has no provider ledger to disagree
+		// with — warning there would train the operator to ignore this.
+		i := writtenOff()
+		i.TaxProvider, i.TaxAmountCents = "stripe_tax", 0
+		if w := RecoveryWarnsOnOfflinePayment(i, 0); w != nil {
+			t.Fatalf("warned with zero tax: %+v", w)
+		}
+		i.TaxProvider, i.TaxAmountCents = "manual", 725
+		if w := RecoveryWarnsOnOfflinePayment(i, 0); w != nil {
+			t.Fatalf("warned on a manual-provider invoice: %+v — the tenant files that tax themselves", w)
+		}
+	})
+
+	t.Run("unapplied credit warns — the arm that was UNSATISFIABLE until 2026-08-05", func(t *testing.T) {
+		// The predicate behind this sum used to test `issue_pending AND
+		// status='voided'`, which no row can satisfy: the status transition
+		// clears issue_pending in the same statement. The gate built on it
+		// could never fire, and it was written from a domain comment claiming
+		// the flag is "NEVER cleared" — itself false. Corrected to
+		// `voided AND issued_at IS NULL`.
+		w := RecoveryWarnsOnOfflinePayment(writtenOff(), 2500)
+		if w == nil || w.Code != "relief_not_reissued" {
+			t.Fatalf("got %+v, want a relief_not_reissued warning", w)
+		}
+		if RecoveryWarnsOnOfflinePayment(writtenOff(), 0) != nil {
+			t.Error("warned with zero unapplied relief — the negative control")
+		}
+	})
+
+}

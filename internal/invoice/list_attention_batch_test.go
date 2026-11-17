@@ -195,7 +195,7 @@ func TestList_AttentionReadsOncePerPage(t *testing.T) {
 	for _, inv := range got {
 		raw := store.invoices[inv.ID]
 		// The pre-#1142 per-row rules, restated.
-		atc := domain.AttentionContext{StripeConnected: true}
+		atc := attentionContext{StripeConnected: true}
 		atc.HasPaymentMethod = pms.ready[raw.CustomerID]
 		awaitsNoCard := !atc.HasPaymentMethod && raw.Status == domain.InvoiceFinalized && raw.PaymentStatus == domain.PaymentPending
 		if awaitsNoCard {
@@ -208,7 +208,7 @@ func TestList_AttentionReadsOncePerPage(t *testing.T) {
 		if raw.Status == domain.InvoiceFinalized && (raw.PaymentStatus == domain.PaymentPending || raw.PaymentStatus == domain.PaymentFailed) {
 			atc.PaymentPageOpen = pages.live[raw.ID]
 		}
-		want := domain.ClassifyInvoiceAttention(raw, atc)
+		want := classifyInvoiceAttention(raw, atc)
 		if !reflect.DeepEqual(inv.Attention, want) {
 			t.Errorf("%s (%s/%s): attention = %+v, want %+v", inv.ID, raw.Status, raw.PaymentStatus, inv.Attention, want)
 		}

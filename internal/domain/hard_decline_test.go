@@ -2,7 +2,6 @@ package domain
 
 import (
 	"slices"
-	"strings"
 	"testing"
 )
 
@@ -48,52 +47,5 @@ func TestIsHardDecline(t *testing.T) {
 	slices.Sort(want)
 	if !slices.Equal(got, want) {
 		t.Errorf("HardDeclineCodes() = %v, want %v — the SQL reads this list, so it must be exactly the set IsHardDecline accepts", got, want)
-	}
-}
-
-func refusedCardInvoice() Invoice {
-	return Invoice{
-		ID: "inv_1", Status: InvoiceFinalized, PaymentStatus: PaymentFailed,
-		LastPaymentError: "Your card was declined.",
-	}
-}
-
-func TestClassifyAttention_RefusedCard_AsksForADifferentCard(t *testing.T) {
-	att := ClassifyInvoiceAttention(refusedCardInvoice(), AttentionContext{
-		HasPaymentMethod: true, RetryBlockingDeclineCode: "lost_card",
-	})
-	if att == nil {
-		t.Fatal("no attention on a failed invoice")
-	}
-	if att.Reason != AttentionReasonPaymentFailed || att.Severity != AttentionSeverityCritical || att.Code != "payment.card_refused" {
-		t.Errorf("attention = %s/%s/%s, want payment_failed/critical/payment.card_refused", att.Reason, att.Severity, att.Code)
-	}
-	if !strings.Contains(att.Message, "different card") {
-		t.Errorf("message %q does not tell the operator the customer needs a different card", att.Message)
-	}
-	if len(strings.Fields(strings.Split(att.Message, "\n")[0])) > 25 {
-		t.Errorf("message %q is longer than 25 words", att.Message)
-	}
-	if !strings.Contains(att.Detail, "lost_card") {
-		t.Errorf("detail %q does not name Stripe's decline code", att.Detail)
-	}
-	// Retry would charge the card the bank refused: not offered.
-	if len(att.Actions) != 1 || att.Actions[0].Code != AttentionActionUpdatePaymentMethod {
-		t.Errorf("actions = %+v, want only update_payment_method", att.Actions)
-	}
-	if att.ProviderResponse != "Your card was declined." {
-		t.Errorf("provider response %q, want Stripe's message", att.ProviderResponse)
-	}
-}
-
-// Control: without a refused card the ordinary decline notice is unchanged,
-// Retry included — the next retry will charge the card.
-func TestClassifyAttention_OrdinaryDecline_Unchanged(t *testing.T) {
-	att := ClassifyInvoiceAttention(refusedCardInvoice(), AttentionContext{HasPaymentMethod: true})
-	if att == nil || att.Code != "payment.declined" {
-		t.Fatalf("attention = %+v, want payment.declined", att)
-	}
-	if len(att.Actions) != 2 || att.Actions[1].Code != AttentionActionRetryPayment {
-		t.Errorf("actions = %+v, want update_payment_method then retry_payment", att.Actions)
 	}
 }

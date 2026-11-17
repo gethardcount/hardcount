@@ -1475,7 +1475,7 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 	// staleness is a real-world duration (the provider settles in wall-clock),
 	// and the classifier guards on !IsSimulated so a clock-pinned invoice never
 	// escalates on a wall-clock age it can't satisfy.
-	atc := domain.AttentionContext{Now: time.Now().UTC()} //nolint:forbidigo // wall-clock: processing-staleness is a real-world duration (provider settles in wall-clock); classifier guards on !IsSimulated
+	atc := attentionContext{Now: time.Now().UTC()} //nolint:forbidigo // wall-clock: processing-staleness is a real-world duration (provider settles in wall-clock); classifier guards on !IsSimulated
 	atc.HasPaymentMethod = inv.CustomerID != "" && f.paymentReady[inv.CustomerID]
 	if awaitsPaymentNoCard(inv, atc.HasPaymentMethod) {
 		atc.CustomerHasEmail = f.hasEmail[inv.CustomerID]
@@ -1546,7 +1546,7 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 	atc.InvoiceEmailOff = s.invoiceEmailOff
 	atc.HostedPayOff = s.hostedPayOff
 	atc.SetupLinkCopyOff = s.setupLinkCopyOff
-	inv.Attention = domain.ClassifyInvoiceAttention(inv, atc)
+	inv.Attention = classifyInvoiceAttention(inv, atc)
 
 	// What an operator must know BEFORE recording a wire against a
 	// written-off invoice (tax already reported as uncollected / threshold
