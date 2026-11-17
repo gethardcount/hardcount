@@ -24,7 +24,7 @@ Every request passes the root chain, then one group's chain, then its route's ow
 1. **Trace span** (`mw.Tracing`) starts the request's span.
 2. **Request id** (`mw.RequestID`) is minted by the server, never taken from the client. The access log line and the request's audit rows carry it.
 3. **Client address** (`mw.TrustedClientIP`) reads `X-Forwarded-For` only from a proxy listed in `TRUST_PROXY`; otherwise it is the TCP peer.
-4. **The record** (`request.Begin`), [below](#the-record). Every later step reads it.
+4. **The record** (`request.Begin`), [below](#the-record). It sits below the client address, which it takes once; every later step reads it.
 5. **Span correction** (`mw.TraceRequestAttrs`) names the span by the route and keeps the link token out of `url.path`.
 6. **Metrics** come above the Recoverer, so a recovered panic is still counted as its 500, and above CORS, so a preflight is counted.
 7. **The access log** sits there for the same reason.
@@ -162,7 +162,7 @@ Under `internal/`:
 - **Telling people:** `webhook` (outbound, HMAC-signed), `email`, `audit`, `analytics` (dashboard numbers).
 - **Checking:** `testclock`, `doctor`, `arch` (tests for the rules on this page), `testutil`.
 - **Shared:** `api` (builds every store, service and handler, and mounts the routes), `domain` (shared data types, in the package `internal/domain`; it imports no store, service or other business package), `errs`, `config`, `pdffonts`, `version`.
-- **`platform/`:** `postgres` (transactions and RLS), `migrate`, `leader`, `scheduler` (the loop for leased jobs), `clock` (real or test-clock time), `money` (integer-cents math), `crypto`, `telemetry`, `logging`, `request` (one request's record, made at the root: its route, caller and status, read by every layer), `listorder`, `activity`, `timeline`.
+- **`platform/`:** `postgres` (transactions and RLS), `migrate`, `leader`, `scheduler` (the loop for leased jobs), `clock` (real or test-clock time), `money` (integer-cents math), `crypto`, `telemetry`, `logging`, `request` (one request's record: [The record](#the-record)), `listorder`, `activity`, `timeline`.
 
 ## Background work
 

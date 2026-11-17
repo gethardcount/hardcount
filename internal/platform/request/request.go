@@ -45,8 +45,10 @@ type Actor struct {
 	TenantID string
 }
 
-// Record is one request's record. It has no lock: every write and read is
-// on the request's own goroutine.
+// Record is one request's record. Every field but the audit mark is written
+// on the request's own goroutine. The client address is set at Begin and
+// never changes, so a goroutine the handler started may read it; the audit
+// mark is atomic because such a goroutine may write an audit row.
 type Record struct {
 	route    Route
 	actor    Actor
@@ -54,8 +56,7 @@ type Record struct {
 	writer   chimw.WrapResponseWriter
 	// audited is the audit mark: the request's audit story is accounted
 	// for, by a row that landed or by code that declared it changed
-	// nothing (audit.MarkSkip). Atomic, as a row may land on a goroutine
-	// the handler started.
+	// nothing (audit.MarkSkip).
 	audited atomic.Bool
 }
 
@@ -81,9 +82,12 @@ func (rec *Record) Status() int { return rec.writer.Status() }
 
 type ctxKey struct{}
 
-// Begin returns the root middleware that makes each request's record: its
-// route, as route finds it, and the writer that records its status. That
-// writer never buffers: its Write passes through, and chi's typed wrappers
+// Begin returns the middleware that makes each request's record: its route,
+// as route finds it, its client address, and the writer that records its
+// status. The address is taken once, here, so Begin must be mounted below
+// mw.TrustedClientIP; above it, every reader would get the TCP peer, one
+// rate-limit bucket and one throttle key per proxy (TestRequestEdge_ClientIP).
+// The writer never buffers: its Write passes through, and chi's typed wrappers
 // keep http.Flusher, http.Hijacker and io.ReaderFrom, so a streaming route
 // (the CSV exports) still streams instead of collecting its answer in
 // memory.
@@ -103,7 +107,7 @@ func Begin(route func(*http.Request) Route) func(http.Handler) http.Handler {
 func Of(ctx context.Context) *Record {
 	rec, ok := ctx.Value(ctxKey{}).(*Record)
 	if !ok {
-		const msg = "request: no record on the context: request.Begin must be the root middleware, above every reader"
+		const msg = "request: no record on the context: request.Begin must be mounted above every reader"
 		slog.ErrorContext(ctx, msg)
 		panic(msg)
 	}
@@ -113,9 +117,10 @@ func Of(ctx context.Context) *Record {
 // SetActor names the request's actor on its record.
 func SetActor(ctx context.Context, a Actor) { Of(ctx).actor = a }
 
-// MarkAudited marks the request's audit story accounted for. With no record
-// it does nothing: a job or the CLI writes audit rows with no request, and
-// nothing observes them.
+// MarkAudited marks the request's audit story accounted for. Only the audit
+// package may call this (internal/arch holds it). With no record it does
+// nothing: a job or the CLI writes audit rows with no request, and nothing
+// observes them.
 func MarkAudited(ctx context.Context) {
 	if rec, ok := ctx.Value(ctxKey{}).(*Record); ok {
 		rec.audited.Store(true)
@@ -123,8 +128,9 @@ func MarkAudited(ctx context.Context) {
 }
 
 // ClientIPIfAny is the request's client address, or "" with no record: a job
-// or the CLI writes audit rows with no request, so no client. Inside a
-// request use Of(ctx).ClientIP().
+// or the CLI writes audit rows with no request, so no client. Only the audit
+// package may call this (internal/arch holds it); inside a request use
+// Of(ctx).ClientIP().
 func ClientIPIfAny(ctx context.Context) string {
 	if rec, ok := ctx.Value(ctxKey{}).(*Record); ok {
 		return rec.clientIP

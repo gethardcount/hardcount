@@ -49,9 +49,10 @@ func TestRequestPasswordReset_CappedAccountIsSilentlySkipped(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"email": email})
 	req := httptest.NewRequest(http.MethodPost, "/password-reset/request", strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
-	// The request's record, as the server's root makes it: the capped arm must DECLARE the request accounted-for
-	// (MarkSkip), or the coverage detector reports this mutating 2xx as a
-	// mutation that lost its audit row.
+	// The request's record, as the server's root makes it: the capped arm
+	// must DECLARE the request accounted for (MarkSkip), or the coverage
+	// detector reports this mutating 2xx as a mutation that lost its audit
+	// row.
 	reqCtx := requesttest.Context(req.Context())
 	req = req.WithContext(reqCtx)
 	rec := httptest.NewRecorder()

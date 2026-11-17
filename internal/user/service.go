@@ -251,7 +251,8 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (LoginResult, error)
 			return fmt.Errorf("create the session: %w", err)
 		}
 		// The user is the actor. The row records the address the session
-		// row records. No email in the label: resource_id is the user id,
+		// row records: the handler fills in.IP from the request's record,
+		// where the audit row takes it too. No email in the label: resource_id is the user id,
 		// and audit_log is append-only, so an email written here could
 		// never be erased. previous_session_ended says the sign-in ended
 		// the session the browser held, without naming whose it was.
@@ -292,9 +293,8 @@ func (s *Service) Login(ctx context.Context, in LoginInput) (LoginResult, error)
 // The row is filed in test mode, as every account event is.
 func (s *Service) Logout(ctx context.Context, rawSessionCookie string) (session.Session, bool, error) {
 	return s.sessions.End(ctx, rawSessionCookie, func(tx *sql.Tx, sess session.Session) error {
-		// The session's user is the actor. The client address and the request
-		// id are already on ctx (the root audit-coverage and request-id
-		// middlewares put them there).
+		// The session's user is the actor. The audit row takes the client
+		// address from the request's record and the request id from ctx.
 		if err := s.audit.LogInTx(auth.WithUserID(ctx, sess.UserID), tx, audit.Entry{
 			Action:       "logout",
 			ResourceType: "user",
@@ -419,9 +419,9 @@ func (s *Service) ConfirmReset(ctx context.Context, plaintext, newPassword strin
 		if err := s.sessions.EndAllForUserTx(ctx, tx, userID); err != nil {
 			return fmt.Errorf("end sessions: %w", err)
 		}
-		// The account owner held the token, so they are the actor. The client
-		// address and the request id are already on ctx (the root
-		// audit-coverage and request-id middlewares put them there).
+		// The account owner held the token, so they are the actor. The audit
+		// row takes the client address from the request's record and the
+		// request id from ctx.
 		if err := s.audit.LogInTx(auth.WithUserID(ctx, userID), tx, audit.Entry{
 			Action:       "password_reset_completed",
 			ResourceType: "user",

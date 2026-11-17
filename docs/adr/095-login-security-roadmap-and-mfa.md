@@ -187,7 +187,7 @@ The in-process count is a token bucket from `golang.org/x/time/rate` with the Re
 - `X-Forwarded-For` is read only when the TCP peer is a `TRUST_PROXY` address, across every header line, right to left past trusted hops. An entry that is not a bare IP stops the walk, and the address is then the proxy's.
 - `X-Real-IP` is not read.
 
-`r.RemoteAddr` stays the TCP peer. Every reader, including the rate-limit key, audit and session rows, the access log and trace spans, takes the address from `audit.ExtractClientIP`, which falls back to the TCP peer when chi resolved none.
+`r.RemoteAddr` stays the TCP peer. Every reader, including the rate-limit key, audit and session rows, the access log and trace spans, takes the address from the request's record (`request.Of(ctx).ClientIP()`), which falls back to the TCP peer when chi resolved none.
 
 ## Amendment 2026-10-31: sign-in gets its own limit; the general limit is 1,000 a minute
 

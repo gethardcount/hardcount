@@ -62,7 +62,7 @@ func (h *Handler) SetAuditLogger(a AuditRecorder) { h.auditLogger = a }
 // for a reset) and is filed in test mode, as every account event is: the
 // route has no session, so ctx carries no mode. A failed write is logged and
 // the request still answers.
-func (h *Handler) auditResetRequest(ctx context.Context, r *http.Request, tenantID, userID string) {
+func (h *Handler) auditResetRequest(ctx context.Context, tenantID, userID string) {
 	if h.auditLogger == nil || tenantID == "" {
 		return
 	}
@@ -407,7 +407,7 @@ func (h *Handler) requestPasswordReset(w http.ResponseWriter, r *http.Request) {
 		// STORE its address — neither in the label nor in metadata, where it used
 		// to sit twice. audit_log is append-only, so an email written here could
 		// never be erased; the reader resolves it from the users row, which can.
-		h.auditResetRequest(r.Context(), r, tenantID, targetUserID)
+		h.auditResetRequest(r.Context(), tenantID, targetUserID)
 	} else {
 		// No account matched (or issuance failed): no token exists, nothing was
 		// mutated, and deliberately nothing is written — a row here would turn

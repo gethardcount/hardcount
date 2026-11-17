@@ -1,6 +1,6 @@
-// Package requesttest gives tests a context holding a request's record, as
-// the server's root makes one (request.Begin), for code that reads or writes
-// the record outside an HTTP round trip.
+// Package requesttest gives tests a request's record: request.Begin with a
+// route that holds only the method, and no mw.TrustedClientIP in front, so
+// the record's client address is the request's TCP peer.
 package requesttest
 
 import (
@@ -12,7 +12,7 @@ import (
 )
 
 // Context returns parent holding a new record, for a request that matched
-// no route.
+// no route. Its client address is httptest's, 192.0.2.1.
 func Context(parent context.Context) context.Context {
 	var ctx context.Context
 	req := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(parent)
@@ -21,8 +21,8 @@ func Context(parent context.Context) context.Context {
 	return ctx
 }
 
-// Root is h behind the server's root: each request gets a record, for a
-// request that matched no route.
+// Root is h behind request.Begin: each request gets a record with no route
+// and its own TCP peer as the client address.
 func Root(h http.Handler) http.Handler {
 	return request.Begin(func(r *http.Request) request.Route { return request.Route{Method: r.Method} })(h)
 }
