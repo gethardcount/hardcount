@@ -128,6 +128,7 @@ original text.
 
 ### Fixed
 
+- **A subscription on a trial keeps its last item.** `DELETE /v1/subscriptions/{id}/items/{item_id}` removed the last item of a trialing subscription, which then became active with nothing to bill. It now answers `409 invalid_state`, as for an active subscription, and so does removing an item from a canceled subscription ([#1838](https://github.com/gethardcount/hardcount/pull/1838)).
 - **Accepting an invitation is refused while the invited account is a member of another workspace.** It answered "You've joined", and sign-in then always opened the first workspace. An address signs in to one workspace on a server; the page now says so ([#PRNUM](https://github.com/gethardcount/hardcount/pull/PRNUM)).
 - **The "Remove member" dialog says that API keys are not changed.** It said the person loses access immediately; a key they copied keeps working until it is rotated. The dialog, the API keys guide and the data page now say to rotate it ([#1836](https://github.com/gethardcount/hardcount/pull/1836)).
 - **Rotating an API key with "Now" warns that the old key stops at once.** The dialog said nothing more for "Now" than for a grace period; it now says that anything still using the old key fails until it has the new one ([#1830](https://github.com/gethardcount/hardcount/pull/1830)).

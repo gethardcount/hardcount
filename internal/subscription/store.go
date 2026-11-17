@@ -407,8 +407,8 @@ type Store interface {
 	ClearItemPendingPlan(ctx context.Context, tenantID, itemID string) (domain.SubscriptionItem, error)
 
 	// RemoveItemTx deletes a single item on the caller's tx. The service
-	// layer refuses to remove the last item of an active subscription: a
-	// subscription with no priced lines is not a valid state.
+	// layer refuses to remove a subscription's last item: one with no
+	// priced lines is not a valid state.
 	RemoveItemTx(ctx context.Context, tx *sql.Tx, tenantID, itemID string) error
 
 	// EnqueueEventTx queues eventType for the subscription on the caller's

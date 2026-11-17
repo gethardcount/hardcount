@@ -3,6 +3,7 @@ package subscription
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"maps"
 	"sort"
@@ -1742,8 +1743,9 @@ func TestUpdateItem_Scheduled(t *testing.T) {
 }
 
 // TestAddRemoveItem covers item add/remove rules: duplicate plans rejected,
-// removing the last item on an active subscription is blocked (caller should
-// Cancel instead), removing a non-last item succeeds.
+// removing a subscription's last item is blocked, on a trial too (the caller
+// should Cancel instead), a canceled subscription's items do not change,
+// removing a non-last item succeeds.
 func TestAddRemoveItem(t *testing.T) {
 	svc := NewService(newMemStore(), nil)
 	ctx := context.Background()
@@ -1794,6 +1796,40 @@ func TestAddRemoveItem(t *testing.T) {
 		err := svc.RemoveItem(ctx, "t1", sub.ID, fresh.Items[0].ID)
 		if err == nil {
 			t.Fatal("expected error removing last item from active sub")
+		}
+	})
+
+	// A trial with no items would turn active with nothing to bill.
+	t.Run("cannot remove last item on trialing subscription", func(t *testing.T) {
+		trial, err := svc.Create(ctx, "t1", CreateInput{
+			Code: "sub-trial-items", DisplayName: "Trial", CustomerID: "c2",
+			Items: []CreateItemInput{{PlanID: "plan_base"}}, TrialDays: 14,
+		})
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if err := svc.RemoveItem(ctx, "t1", trial.ID, trial.Items[0].ID); !errors.Is(err, errs.ErrInvalidState) {
+			t.Fatalf("removing a trial's last item: got %v, want ErrInvalidState", err)
+		}
+		if fresh, _ := svc.Get(ctx, "t1", trial.ID); len(fresh.Items) != 1 {
+			t.Fatalf("the trial has %d items after the refused removal, want 1", len(fresh.Items))
+		}
+	})
+
+	// As for adding an item: a canceled subscription's items do not change.
+	t.Run("cannot remove an item from a canceled subscription", func(t *testing.T) {
+		two, err := svc.Create(ctx, "t1", CreateInput{
+			Code: "sub-canceled-items", DisplayName: "Canceled", CustomerID: "c3",
+			Items: []CreateItemInput{{PlanID: "plan_base"}, {PlanID: "plan_addon"}},
+		})
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		if _, _, err := svc.Cancel(ctx, "t1", two.ID); err != nil {
+			t.Fatalf("cancel: %v", err)
+		}
+		if err := svc.RemoveItem(ctx, "t1", two.ID, two.Items[0].ID); !errors.Is(err, errs.ErrInvalidState) {
+			t.Fatalf("removing an item from a canceled subscription: got %v, want ErrInvalidState", err)
 		}
 	})
 }

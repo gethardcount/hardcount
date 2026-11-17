@@ -750,8 +750,8 @@ var proLastHours = proPeriodEnd.Add(-6 * time.Hour)
 //
 //   - Two items may not bill one meter: usage is rated per customer and
 //     meter, so the meter would be invoiced twice every period.
-//   - An active subscription keeps at least one item: billing refuses one
-//     with none, every cycle.
+//   - A subscription keeps at least one item: billing refuses one with
+//     none, every cycle.
 //
 // Each check runs mid-period, where the change prorates in the handler's
 // transaction, and in the last hours of the period, where it prorates
