@@ -2,70 +2,77 @@ package auth
 
 import "context"
 
-// contextKey keys the caller values a request's context carries.
-// session.Authenticate sets them from a cookie or a key; a public customer
-// page sets the customer actor.
+// contextKey keys the two values a request's context carries: the caller,
+// and the customer acting on a public customer page.
 type contextKey string
 
 const (
-	tenantIDKey      contextKey = "tenant_id"
-	apiKeyIDKey      contextKey = "api_key_id"
-	userIDKey        contextKey = "user_id"
-	keyTypeKey       contextKey = "key_type"
+	callerKey        contextKey = "caller"
 	customerActorKey contextKey = "customer_actor_id"
 )
 
-// TenantID returns the authenticated tenant ID in ctx, or "" when there is
-// none.
-func TenantID(ctx context.Context) string {
-	v, _ := ctx.Value(tenantIDKey).(string)
-	return v
+// Caller is who a request acts as: a dashboard user's session, or an API key.
+type Caller struct {
+	TenantID string
+	UserID   string  // set for a session
+	KeyID    string  // set for a key
+	KeyType  KeyType // the key's type; "" for a session
 }
 
-// WithTenantID returns ctx carrying tenantID. A background job sets it before
-// calling code that needs the tenant, such as the per-tenant Stripe client.
+// IsSession reports whether c is a dashboard user's session: a user and no
+// key.
+func (c Caller) IsSession() bool {
+	return c.UserID != "" && c.KeyID == ""
+}
+
+// WithCaller returns ctx carrying c as the whole caller, in place of any
+// caller ctx held. session.Authenticate sets it once for each request.
+func WithCaller(ctx context.Context, c Caller) context.Context {
+	return context.WithValue(ctx, callerKey, c)
+}
+
+// CallerOf returns the caller in ctx, or the zero Caller when there is none.
+func CallerOf(ctx context.Context) Caller {
+	c, _ := ctx.Value(callerKey).(Caller)
+	return c
+}
+
+// TenantID returns the caller's tenant in ctx, or "" when there is none.
+func TenantID(ctx context.Context) string {
+	return CallerOf(ctx).TenantID
+}
+
+// WithTenantID returns ctx with tenantID as the caller's tenant; the rest of
+// the caller is kept. A background job, or a public route that finds the
+// tenant itself, sets it before calling code that needs the tenant, such as
+// the per-tenant Stripe client.
 func WithTenantID(ctx context.Context, tenantID string) context.Context {
-	return context.WithValue(ctx, tenantIDKey, tenantID)
+	c := CallerOf(ctx)
+	c.TenantID = tenantID
+	return WithCaller(ctx, c)
 }
 
 // KeyID returns the ID of the API key that authenticated the request, or ""
 // when no key did.
 func KeyID(ctx context.Context) string {
-	v, _ := ctx.Value(apiKeyIDKey).(string)
-	return v
-}
-
-// WithKeyID returns ctx carrying the id of the key that authenticated the
-// request.
-func WithKeyID(ctx context.Context, id string) context.Context {
-	return context.WithValue(ctx, apiKeyIDKey, id)
+	return CallerOf(ctx).KeyID
 }
 
 // UserID returns the dashboard user of the request's session, or "" when a
 // key authenticated it. The audit log names the actor by UserID for a session
 // and by KeyID for a key.
 func UserID(ctx context.Context) string {
-	v, _ := ctx.Value(userIDKey).(string)
-	return v
+	return CallerOf(ctx).UserID
 }
 
-// WithUserID returns ctx carrying the dashboard user of the request's
-// session.
+// WithUserID returns ctx with id as the caller's user. The account routes
+// that session.RequireCaller does not guard (a sign-in, a sign-out, a mode
+// switch, an accepted invitation, a password reset) set it, so their audit
+// row names the user. The result counts as that user's session.
 func WithUserID(ctx context.Context, id string) context.Context {
-	return context.WithValue(ctx, userIDKey, id)
-}
-
-// GetKeyType returns the caller's kind of credential in ctx (KeyType), or ""
-// when there is none.
-func GetKeyType(ctx context.Context) KeyType {
-	v, _ := ctx.Value(keyTypeKey).(KeyType)
-	return v
-}
-
-// WithKeyType returns ctx carrying the caller's kind of credential, which
-// Require, RequireMethod and RequireSession check.
-func WithKeyType(ctx context.Context, kt KeyType) context.Context {
-	return context.WithValue(ctx, keyTypeKey, kt)
+	c := CallerOf(ctx)
+	c.UserID = id
+	return WithCaller(ctx, c)
 }
 
 // CustomerActorID returns the customer a public customer page set as the

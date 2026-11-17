@@ -6,8 +6,8 @@ import (
 	"github.com/gethardcount/hardcount/internal/api/respond"
 )
 
-// Require returns middleware that answers 403 unless the caller's kind of
-// credential holds perm.
+// Require returns middleware that answers 403 unless the caller holds perm
+// (HasPermission).
 func Require(perm Permission) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -18,10 +18,10 @@ func Require(perm Permission) func(http.Handler) http.Handler {
 	}
 }
 
-// permitted reports whether the caller's kind of credential holds perm, and
-// answers 403 when it does not.
+// permitted reports whether the caller holds perm, and answers 403 when it
+// does not.
 func permitted(w http.ResponseWriter, r *http.Request, perm Permission) bool {
-	if HasPermission(GetKeyType(r.Context()), perm) {
+	if HasPermission(CallerOf(r.Context()), perm) {
 		return true
 	}
 	respond.Forbidden(w, r, "insufficient permissions: this key type does not have "+string(perm)+" access")
@@ -37,7 +37,7 @@ func RequireSession(task string) func(http.Handler) http.Handler {
 	msg := "this endpoint requires a dashboard session — sign in to the dashboard to " + task
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if GetKeyType(r.Context()) != KeyTypeSession {
+			if !CallerOf(r.Context()).IsSession() {
 				respond.Forbidden(w, r, msg)
 				return
 			}

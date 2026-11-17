@@ -28,12 +28,11 @@ type unavailableError struct {
 func (e unavailableError) Error() string { return e.msg + ": " + e.err.Error() }
 func (e unavailableError) Unwrap() error { return e.err }
 
-// Authenticate resolves r's credentials to the caller's context. A live
-// session cookie wins over any key; a cookie that does not resolve falls
-// through to the Bearer key. It returns ErrNoCredentials when there is
-// neither, ValidateKey's error for a bad key, and an unavailableError when a
-// store fails. The context names exactly one caller, clearing any earlier
-// one.
+// Authenticate resolves r's credentials to a context that carries the caller
+// (auth.CallerOf) and its mode. A live session cookie wins over any key; a
+// cookie that does not resolve falls through to the Bearer key. It returns
+// ErrNoCredentials when there is neither, ValidateKey's error for a bad key,
+// and an unavailableError when a store fails.
 func Authenticate(r *http.Request, sessSvc *Service, keySvc *auth.Service) (context.Context, error) {
 	ctx := r.Context()
 	if c, err := r.Cookie(CookieName); err == nil && c.Value != "" {
@@ -58,12 +57,8 @@ func Authenticate(r *http.Request, sessSvc *Service, keySvc *auth.Service) (cont
 		// A store failure, not a verdict on the credential.
 		return nil, unavailableError{msg: "api key validation unavailable", err: err}
 	}
-	ctx = auth.WithTenantID(ctx, key.TenantID)
-	ctx = auth.WithUserID(ctx, "")
-	ctx = auth.WithKeyID(ctx, key.ID)
-	ctx = auth.WithKeyType(ctx, auth.KeyType(key.KeyType))
-	ctx = postgres.WithLivemode(ctx, key.Livemode)
-	return ctx, nil
+	ctx = auth.WithCaller(ctx, auth.Caller{TenantID: key.TenantID, KeyID: key.ID, KeyType: auth.KeyType(key.KeyType)})
+	return postgres.WithLivemode(ctx, key.Livemode), nil
 }
 
 // RequireCaller authenticates each request (Authenticate) and answers what it
@@ -98,11 +93,11 @@ func RequireCaller(sessSvc *Service, keySvc *auth.Service) func(http.Handler) ht
 // callerIn names the caller for the access log with audit.ResolveActor's
 // names; session cannot import audit. TestCallerIn_APIKey keeps them equal.
 func callerIn(ctx context.Context) request.Caller {
-	c := request.Caller{ActorType: "api_key", ActorID: auth.KeyID(ctx), TenantID: auth.TenantID(ctx)}
-	if userID := auth.UserID(ctx); userID != "" {
-		c.ActorType, c.ActorID = "user", userID
+	c := auth.CallerOf(ctx)
+	if c.UserID != "" {
+		return request.Caller{ActorType: "user", ActorID: c.UserID, TenantID: c.TenantID}
 	}
-	return c
+	return request.Caller{ActorType: "api_key", ActorID: c.KeyID, TenantID: c.TenantID}
 }
 
 // NameCaller names s's user on the request's record, for the access log. It
@@ -112,13 +107,10 @@ func NameCaller(ctx context.Context, s Session) {
 	request.SetCaller(ctx, request.Caller{ActorType: "user", ActorID: s.UserID, TenantID: s.TenantID})
 }
 
+// applyToCtx returns ctx carrying s's user as the caller, in s's mode.
 func applyToCtx(ctx context.Context, s Session) context.Context {
-	ctx = auth.WithTenantID(ctx, s.TenantID)
-	ctx = auth.WithUserID(ctx, s.UserID)
-	ctx = auth.WithKeyID(ctx, "")
-	ctx = auth.WithKeyType(ctx, auth.KeyTypeSession)
-	ctx = postgres.WithLivemode(ctx, s.Livemode)
-	return ctx
+	ctx = auth.WithCaller(ctx, auth.Caller{TenantID: s.TenantID, UserID: s.UserID})
+	return postgres.WithLivemode(ctx, s.Livemode)
 }
 
 // bearerToken returns the API key r carries: the Authorization Bearer token,

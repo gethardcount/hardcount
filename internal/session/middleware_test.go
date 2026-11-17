@@ -168,7 +168,7 @@ func TestRequireCaller_NamesTheCallerOnTheRecord(t *testing.T) {
 
 // callerIn and the audit log name an API key's context the same way.
 func TestCallerIn_APIKey(t *testing.T) {
-	ctx := auth.WithKeyID(auth.WithUserID(auth.WithTenantID(t.Context(), "ten_1"), ""), "hc_key_9")
+	ctx := auth.WithCaller(t.Context(), auth.Caller{TenantID: "ten_1", KeyID: "hc_key_9", KeyType: auth.KeyTypeSecret})
 	want := request.Caller{ActorType: "api_key", ActorID: "hc_key_9", TenantID: "ten_1"}
 	if got := callerIn(ctx); got != want {
 		t.Errorf("callerIn = %+v, want %+v", got, want)

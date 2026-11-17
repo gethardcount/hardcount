@@ -100,7 +100,7 @@ func (r *deadlockRig) send(t *testing.T, method, path, key string, body any) *ht
 	req := httptest.NewRequest(method, path, &buf)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Idempotency-Key", key)
-	ctx := clock.WithEffectiveNow(auth.WithKeyID(auth.WithTenantID(r.ctx, r.tenantID), "key_test"), proNow)
+	ctx := clock.WithEffectiveNow(auth.WithCaller(r.ctx, auth.Caller{TenantID: r.tenantID, KeyID: "key_test"}), proNow)
 	rr := httptest.NewRecorder()
 	r.srv.ServeHTTP(rr, req.WithContext(ctx))
 	return rr

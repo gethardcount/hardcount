@@ -69,7 +69,7 @@ Under `cmd/`:
 
 Under `internal/`:
 
-- **Accounts and sign-in:** `tenant` (accounts and settings), `user`, `session`, `dashmembers`, `auth` (API keys of two stored types, `secret` and `ingest`, and per-route permissions).
+- **Accounts and sign-in:** `tenant` (accounts and settings), `user`, `session`, `dashmembers`, `auth` (API keys of two types, `secret` and `ingest`, and per-route permissions).
 - **What is sold:** `customer`, `pricing` (meters, plans, prices), `recipe` (ready-made pricing setups), `subscription`.
 - **Usage:** `usage`, `integrations/litellm` (turns LiteLLM logs into usage events).
 - **Billing:** `billing` (engine, scheduler, invoice preview), `invoice`, `tax`, `credit` (one ledger of grants, usage, expiry and adjustments; append-only, except a grant's `consumed_cents` and `cn_retired_cents`), `creditnote` (credit notes and refunds).

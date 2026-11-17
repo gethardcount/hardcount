@@ -73,8 +73,9 @@ func TestRequireCaller_APIKey(t *testing.T) {
 			t.Fatalf("got %d %s, want 200", rec.Code, rec.Body.String())
 		}
 		ctx := seen.Context()
-		if auth.TenantID(ctx) != tenantID || auth.KeyID(ctx) != created.Key.ID || auth.GetKeyType(ctx) != auth.KeyTypeSecret {
-			t.Errorf("principal = tenant %q, key %q, type %q; want %s, %s, secret", auth.TenantID(ctx), auth.KeyID(ctx), auth.GetKeyType(ctx), tenantID, created.Key.ID)
+		want := auth.Caller{TenantID: tenantID, KeyID: created.Key.ID, KeyType: auth.KeyTypeSecret}
+		if got := auth.CallerOf(ctx); got != want {
+			t.Errorf("caller = %+v, want %+v", got, want)
 		}
 		if live, err := postgres.Livemode(ctx); err != nil || live {
 			t.Errorf("livemode = %v (%v), want test mode", live, err)
@@ -82,9 +83,9 @@ func TestRequireCaller_APIKey(t *testing.T) {
 		// The layer above reads the caller from the request's record.
 		outer := request.WithRecord(t.Context())
 		serve(keys, keyRequest("Authorization", created.RawKey).WithContext(outer))
-		want := request.Caller{ActorType: "api_key", ActorID: created.Key.ID, TenantID: tenantID}
-		if got := request.CallerOf(outer); got != want {
-			t.Errorf("caller on the record = %+v, want %+v", got, want)
+		onRecord := request.Caller{ActorType: "api_key", ActorID: created.Key.ID, TenantID: tenantID}
+		if got := request.CallerOf(outer); got != onRecord {
+			t.Errorf("caller on the record = %+v, want %+v", got, onRecord)
 		}
 	})
 
@@ -120,9 +121,9 @@ func TestRequireCaller_APIKey(t *testing.T) {
 }
 
 // The context Authenticate returns names one caller, whatever the request's
-// context already held: a key empties the user, and a session empties the
-// key. The event stream re-runs Authenticate on a request whose context holds
-// the caller that opened it, and compares the two.
+// context already held: a key with no user, or a session with no key. The
+// event stream re-runs Authenticate on a request whose context holds the
+// caller that opened it, and compares the two.
 func TestAuthenticate_NamesOneCaller(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	keys := auth.NewService(db, audit.NewLogger(db))
@@ -138,7 +139,7 @@ func TestAuthenticate_NamesOneCaller(t *testing.T) {
 		t.Fatalf("issue session: %v", err)
 	}
 	store.sessions[sess.IDHash] = sess // the fake's InsertTx keeps nothing
-	held := auth.WithKeyID(auth.WithUserID(t.Context(), "usr_held"), "hc_key_held")
+	held := auth.WithCaller(t.Context(), auth.Caller{UserID: "usr_held", KeyID: "hc_key_held"})
 
 	t.Run("a key", func(t *testing.T) {
 		ctx, err := Authenticate(keyRequest("Authorization", created.RawKey).WithContext(held), sessions, keys)

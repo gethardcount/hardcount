@@ -31,7 +31,7 @@ func TestResolveActorKinds_MatchEveryActorCheck(t *testing.T) {
 	for _, ctx := range []context.Context{
 		base,
 		auth.WithUserID(base, "u"),
-		auth.WithKeyID(base, "k"),
+		auth.WithCaller(base, auth.Caller{KeyID: "k"}),
 		auth.WithCustomerActor(base, "c"),
 	} {
 		kind, _ := audit.ResolveActor(ctx)

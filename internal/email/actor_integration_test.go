@@ -30,7 +30,7 @@ func TestOutboxEnqueue_StampsActor(t *testing.T) {
 	}{
 		{"background worker", base, false, "system", "system"},
 		{"dashboard operator", auth.WithUserID(base, "hc_usr_actor"), false, "user", "hc_usr_actor"},
-		{"api key", auth.WithKeyID(base, "hc_key_actor"), false, "api_key", "hc_key_actor"},
+		{"api key", auth.WithCaller(base, auth.Caller{KeyID: "hc_key_actor"}), false, "api_key", "hc_key_actor"},
 		{"customer on a public page", auth.WithCustomerActor(base, "hc_cus_actor"), false, "customer", "hc_cus_actor"},
 		{"in the business transaction", auth.WithUserID(base, "hc_usr_intx"), true, "user", "hc_usr_intx"},
 	}

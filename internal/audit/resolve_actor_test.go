@@ -28,7 +28,7 @@ func TestResolveActor(t *testing.T) {
 		},
 		{
 			name:      "api key → api_key",
-			ctx:       auth.WithKeyID(context.Background(), "hc_secret_abc"),
+			ctx:       auth.WithCaller(context.Background(), auth.Caller{KeyID: "hc_secret_abc"}),
 			wantType:  "api_key",
 			wantActor: "hc_secret_abc",
 		},
@@ -46,13 +46,13 @@ func TestResolveActor(t *testing.T) {
 		},
 		{
 			name:      "customer beats user beats key",
-			ctx:       auth.WithCustomerActor(auth.WithKeyID(auth.WithUserID(context.Background(), "usr_1"), "hc_key"), "hc_cus_1"),
+			ctx:       auth.WithCustomerActor(auth.WithCaller(context.Background(), auth.Caller{UserID: "usr_1", KeyID: "hc_key"}), "hc_cus_1"),
 			wantType:  "customer",
 			wantActor: "hc_cus_1",
 		},
 		{
 			name:      "user beats key when both present",
-			ctx:       auth.WithKeyID(auth.WithUserID(context.Background(), "usr_2"), "hc_key_2"),
+			ctx:       auth.WithCaller(context.Background(), auth.Caller{UserID: "usr_2", KeyID: "hc_key_2"}),
 			wantType:  "user",
 			wantActor: "usr_2",
 		},

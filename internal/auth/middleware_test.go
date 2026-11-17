@@ -6,15 +6,14 @@ import (
 	"testing"
 )
 
-// guarded runs a handler behind mw for a principal of key type kt and
-// returns the status.
-func guarded(t *testing.T, mw func(http.Handler) http.Handler, kt KeyType, method string) int {
+// guarded runs a handler behind mw for the caller c and returns the status.
+func guarded(t *testing.T, mw func(http.Handler) http.Handler, c Caller, method string) int {
 	t.Helper()
 	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	req := httptest.NewRequest(method, "/", nil)
-	req = req.WithContext(WithKeyType(req.Context(), kt))
+	req = req.WithContext(WithCaller(req.Context(), c))
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 	return rec.Code
@@ -41,7 +40,7 @@ func TestRequireMethod_GETUsesReadPOSTUsesWrite(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.method+"_"+tc.why, func(t *testing.T) {
-			if code := guarded(t, mw, KeyTypeIngest, tc.method); code != tc.want {
+			if code := guarded(t, mw, Caller{KeyID: "hc_key_1", KeyType: KeyTypeIngest}, tc.method); code != tc.want {
 				t.Errorf("%s: got %d, want %d", tc.why, code, tc.want)
 			}
 		})
