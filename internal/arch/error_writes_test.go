@@ -46,7 +46,7 @@ var responseWriteExceptions = map[string]string{
 
 	// The readiness probe: a load balancer reads the status, and the body
 	// names the failing check.
-	"internal/api/router.go handleDeepHealth": "readiness probe: 503 with {status, checks}",
+	"internal/api/health.go handleDeepHealth": "readiness probe: 503 with {status, checks}",
 
 	// Success bodies that are not JSON.
 	"internal/creditnote/handler.go Handler.downloadPDF":    "PDF body",

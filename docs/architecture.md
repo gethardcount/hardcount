@@ -54,7 +54,7 @@ Each step queues its webhook events and emails for the [background jobs](#backgr
 
 1. Create `internal/<name>/`, laid out like `internal/customer`.
 2. Add a migration, following [Writing a database migration](dev/migrations.md).
-3. Wire the domain into `internal/api/router.go`.
+3. Wire the domain into `internal/api/wire.go`, and add its routes in `internal/api/router.go`.
 4. List its imports from `internal/` in `boundaries_test.go`.
 
 ## Package layout

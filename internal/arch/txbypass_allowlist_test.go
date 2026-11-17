@@ -87,7 +87,7 @@ var txBypassUsers = map[string]string{
 	"internal/webhook/postgres.go PostgresStore.ListPendingDeliveries":                       "background",
 
 	// Queue sizes for metrics and alerts.
-	"internal/api/router.go NewServer":                    "metrics",
+	"cmd/hardcount/main.go serve":                         "metrics",
 	"internal/email/outbox.go OutboxStore.FailedCount":    "metrics",
 	"internal/email/outbox.go OutboxStore.PendingCount":   "metrics",
 	"internal/webhook/outbox.go OutboxStore.FailedCount":  "metrics",
