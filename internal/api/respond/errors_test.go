@@ -249,53 +249,25 @@ type fakeSafeMessageError struct{ raw, safe string }
 func (e *fakeSafeMessageError) Error() string               { return e.raw }
 func (e *fakeSafeMessageError) OperatorSafeMessage() string { return e.safe }
 
+// A SafeMessageError answers 502 with its safe message and none of its raw
+// text, bare or wrapped with %w as the charge path wraps its payment error.
 func TestFromError_SafeMessageErrorAnswers502WithItsSafeMessage(t *testing.T) {
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/", nil)
+	raw := "Keys for idempotent requests can only be used with the same parameters they were first used with. Try using a key other than 'hardcount_inv_xxx'"
+	safe := &fakeSafeMessageError{raw: raw, safe: "Card was declined: insufficient funds."}
+	for name, err := range map[string]error{
+		"bare":    safe,
+		"wrapped": fmt.Errorf("payment failed: %w", safe),
+	} {
+		rec := httptest.NewRecorder()
+		FromError(rec, httptest.NewRequest("POST", "/", nil), err, "payment")
 
-	err := &fakeSafeMessageError{
-		raw:  "Keys for idempotent requests can only be used with the same parameters they were first used with. Try using a key other than 'hardcount_inv_xxx'",
-		safe: "Card was declined: insufficient funds.",
-	}
-	FromError(rec, req, err, "payment")
-
-	if rec.Code != http.StatusBadGateway {
-		t.Errorf("status: got %d, want 502", rec.Code)
-	}
-	body := rec.Body.String()
-	if !strings.Contains(body, "Card was declined") {
-		t.Errorf("expected curated message in response, got %s", body)
-	}
-	if strings.Contains(body, "Keys for idempotent requests") {
-		t.Errorf("raw Stripe SDK error leaked to wire: %s", body)
-	}
-	if strings.Contains(body, "hardcount_inv_") {
-		t.Errorf("internal idempotency-key leaked to wire: %s", body)
-	}
-}
-
-// A SafeMessageError wrapped with %w, as the charge path wraps its payment
-// error, is still found.
-func TestFromError_WrappedSafeMessageErrorIsFound(t *testing.T) {
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest("POST", "/", nil)
-
-	inner := &fakeSafeMessageError{
-		raw:  "internal sdk error verbatim",
-		safe: "Payment provider rejected the request. Please retry.",
-	}
-	wrapped := fmt.Errorf("payment failed: %w", inner)
-	FromError(rec, req, wrapped, "payment")
-
-	if rec.Code != http.StatusBadGateway {
-		t.Errorf("status: got %d, want 502", rec.Code)
-	}
-	body := rec.Body.String()
-	if !strings.Contains(body, "Payment provider rejected") {
-		t.Errorf("safe message lost through wrapper: %s", body)
-	}
-	if strings.Contains(body, "internal sdk error verbatim") {
-		t.Errorf("raw sdk error leaked: %s", body)
+		body := rec.Body.String()
+		if rec.Code != http.StatusBadGateway || !strings.Contains(body, "Card was declined") {
+			t.Errorf("%s: got %d %s, want 502 with the safe message", name, rec.Code, body)
+		}
+		if strings.Contains(body, "Keys for idempotent requests") || strings.Contains(body, "hardcount_inv_") {
+			t.Errorf("%s: the raw provider text reached the client: %s", name, body)
+		}
 	}
 }
 

@@ -8,9 +8,10 @@ import (
 )
 
 // SafeMessageError is an error that carries its own text for an operator,
-// such as a Stripe card decline with its decline code (ADR-026). Wherever an
-// error reaches an operator, OperatorSafeMessage is shown in place of
-// Error(). Return from it only text already fit for an operator: never a raw
+// such as a Stripe card decline with its decline code (ADR-026).
+// SanitizeForOperator, and respond.FromError for an error with no kind, show
+// OperatorSafeMessage in place of Error(). Return from it only text already
+// fit for an operator: never a raw
 // provider string, SQL, a stack or a panic.
 type SafeMessageError interface {
 	error

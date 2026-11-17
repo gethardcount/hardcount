@@ -6,10 +6,10 @@ import (
 )
 
 // DomainError is an error the API can answer: Kind picks the status, Code
-// replaces the status's default code, Field names the input at fault and
-// Message is the answer's text. Cause is for the log; only Unavailable sets
-// it, and its answer shows Message alone. With no Kind it is a server fault
-// and shows nothing. respond.FromError has the mapping.
+// replaces the status's default code where the status takes one, Field names
+// the input at fault and Message is the error's text. Cause is for the log;
+// only Unavailable sets it. With no Kind it is a server fault and shows
+// nothing. respond.FromError has the mapping, row by row.
 type DomainError struct {
 	Kind    error
 	Code    string

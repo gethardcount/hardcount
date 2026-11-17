@@ -11,7 +11,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/logging"
 )
 
-// operatorCodeError is a SafeMessageError that names its own code in place of
+// operatorCodeError is an error that names its own code in place of
 // provider_error, such as payment_outcome_unknown when the provider never
 // answered and the charge may have gone through. "" keeps provider_error.
 type operatorCodeError interface {
@@ -19,19 +19,22 @@ type operatorCodeError interface {
 }
 
 // FromError writes the answer for an error a service or store returned. It
-// picks the status from the error's kind, never from its text:
+// picks the status from the error's kind, never from its text. The first
+// row that matches wins:
 //
-//	kind                   status  code (a DomainError's Code replaces it)   message
-//	errs.ErrUnavailable    503     unavailable, and Retry-After: 1           the DomainError's own
-//	errs.ErrNotFound       404     not_found                                 "<resource> not found", or the DomainError's own if it has a Code
-//	errs.ErrAlreadyExists  409     already_exists                            err.Error()
-//	errs.ErrInvalidState   409     invalid_state                             err.Error()
-//	errs.ErrForbidden      403     forbidden (a Code is not used)            err.Error()
-//	errs.ErrValidation     422     validation_error                          err.Error()
+//	kind                   status  code                                      message
+//	errs.ErrUnavailable    503     unavailable*, and Retry-After: 1          the DomainError's own, else a fixed retry text
+//	errs.ErrNotFound       404     not_found*                                "<resource> not found", or the DomainError's own if it has a Code
+//	errs.ErrAlreadyExists  409     already_exists*                           err.Error()
+//	errs.ErrInvalidState   409     invalid_state*                            err.Error()
+//	errs.ErrForbidden      403     forbidden                                 err.Error()
+//	errs.ErrValidation     422     validation_error*                         err.Error()
 //	errs.SafeMessageError  502     provider_error, or its OperatorErrorCode  its OperatorSafeMessage()
 //	anything else          500     internal_error                            a generic message
 //
-// A 409 or 422 has the DomainError's Field as its param. The 503, 502 and
+// A DomainError's Code replaces a code marked *. A 409 or 422 has the
+// DomainError's Field as its param. A SafeMessageError is 502 because the
+// request reached a provider and the provider refused it. The 503, 502 and
 // 500 answers log err; the others are the client's to fix and log nothing.
 // A nil err writes nothing.
 func FromError(w http.ResponseWriter, r *http.Request, err error, resource string) {
