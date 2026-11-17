@@ -9,9 +9,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	mw "github.com/gethardcount/hardcount/internal/api/middleware"
 	"github.com/gethardcount/hardcount/internal/api/respond"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 var (
@@ -24,6 +25,15 @@ var (
 	// before it stops listening, and an orchestrator does not kill it early.
 	// Nothing clears it: the process is exiting.
 	draining atomic.Bool
+
+	// schedulerLastRunTimestamp backs the runbook's "scheduler is alive" alert:
+	// `time() - hardcount_scheduler_last_run_timestamp_seconds > 2 * interval`.
+	schedulerLastRunTimestamp = promauto.NewGauge(
+		prometheus.GaugeOpts{
+			Name: "hardcount_scheduler_last_run_timestamp_seconds",
+			Help: "Unix timestamp of this replica's last billing-loop liveness stamp: every poll, and every page of a long billing drain. Alert when time() - this > 2x the scheduler interval.",
+		},
+	)
 )
 
 // SetDraining announces shutdown: readiness answers 503 from now on.
@@ -36,7 +46,7 @@ func RecordSchedulerRun() {
 	schedulerLastRun = time.Now()
 	schedulerMu.Unlock()
 	// The runbook's scheduler alert reads /metrics, not /health/ready.
-	mw.RecordSchedulerTick()
+	schedulerLastRunTimestamp.SetToCurrentTime()
 }
 
 // SetSchedulerInterval stores the configured scheduler interval. The health

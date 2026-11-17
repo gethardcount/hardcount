@@ -23,7 +23,7 @@ type AuditEmitter interface {
 }
 
 // CustomerReader fetches a customer by id on a tenant- and mode-scoped
-// transaction. Implemented by *customer.PostgresStore, wired in router.go.
+// transaction. Implemented by *customer.PostgresStore, wired in wire.go.
 type CustomerReader interface {
 	Get(ctx context.Context, tenantID, customerID string) (domain.Customer, error)
 }
@@ -31,7 +31,7 @@ type CustomerReader interface {
 // LiveBalanceReader computes a customer's live credit figure: the settled
 // balance less usage not yet billed. Implemented by *billing.Engine, which
 // owns the computation because it must price usage the way the period close
-// does; wired in router.go. Defined here so credit does not import billing.
+// does; wired in wire.go. Defined here so credit does not import billing.
 type LiveBalanceReader interface {
 	LiveCreditBalance(ctx context.Context, tenantID, customerID string) (domain.CreditLiveBalance, error)
 }

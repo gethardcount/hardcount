@@ -12,7 +12,7 @@ import (
 
 // A store or service that queues webhook events in its transaction gets the
 // outbox from a setter after construction, and queues nothing while it is
-// nil. webhook.MustWiredOutbox in internal/api/router.go refuses to boot when
+// nil. webhook.MustWiredOutbox in internal/api/wire.go refuses to boot when
 // one of the components it is given has no outbox. This test makes sure it is
 // given every one: each production struct that declares SetOutboxEnqueuer, or
 // holds a field whose interface has the outbox's Enqueue method.
@@ -130,7 +130,7 @@ func TestMustWiredOutbox_CoversEveryOutboxHolder(t *testing.T) {
 		name := tn.Pkg().Name() + "." + tn.Name()
 		names = append(names, name)
 		if !gated[tn] {
-			problems = append(problems, name+" "+why+" but is not passed to webhook.MustWiredOutbox in internal/api/router.go. "+
+			problems = append(problems, name+" "+why+" but is not passed to webhook.MustWiredOutbox in internal/api/wire.go. "+
 				"Add it, so a dropped outbox setter line fails at boot instead of silently queuing none of its webhook events")
 		}
 	}

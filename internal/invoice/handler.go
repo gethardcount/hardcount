@@ -97,7 +97,7 @@ type SubscriptionLabeler interface {
 // NoPaymentMethodNotifier emails the customer a payment-update link when a
 // finalized invoice can't be auto-charged because no payment method is on
 // file. Structurally identical to the billing engine's notifier of the same
-// name (wired to the same adapter in router.go) — declared locally so the
+// name (wired to the same adapter in wire.go) — declared locally so the
 // invoice package doesn't import the billing engine (zero cross-domain
 // imports). Optional; nil means no-PM finalize just queues for retry.
 type NoPaymentMethodNotifier interface {
