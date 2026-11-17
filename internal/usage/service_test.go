@@ -29,7 +29,7 @@ func (m *memStore) Ingest(_ context.Context, tenantID string, e domain.UsageEven
 	if e.IdempotencyKey != "" {
 		for _, existing := range m.events {
 			if existing.TenantID == tenantID && existing.IdempotencyKey == e.IdempotencyKey {
-				return domain.UsageEvent{}, fmt.Errorf("%w: idempotency_key %q", errs.ErrDuplicateKey, e.IdempotencyKey)
+				return domain.UsageEvent{}, fmt.Errorf("%w: idempotency_key %q", errDuplicateKey, e.IdempotencyKey)
 			}
 		}
 	}
@@ -67,7 +67,7 @@ func (m *memStore) IngestBatch(ctx context.Context, tenantID string, events []do
 	for i, e := range events {
 		_, err := staged.Ingest(ctx, tenantID, e)
 		switch {
-		case errors.Is(err, errs.ErrDuplicateKey):
+		case errors.Is(err, errDuplicateKey):
 			deduped++
 		case err != nil:
 			return nil, 0, fmt.Errorf("event[%d]: %w", i, err)

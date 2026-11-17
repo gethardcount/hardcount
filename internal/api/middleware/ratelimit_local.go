@@ -11,7 +11,7 @@ import (
 
 // localLimiter counts requests in this process, one token bucket per key from
 // golang.org/x/time/rate. It backs a RateLimiter whose Redis is not configured
-// or failing (SetLocalFallback). A token bucket with the Redis limit's rate and
+// or failing (CountLocally). A token bucket with the Redis limit's rate and
 // burst allows the same requests as redis_rate's GCRA, so the only difference
 // is scope: this counts what one process sees, not what the whole fleet sees.
 type localLimiter struct {

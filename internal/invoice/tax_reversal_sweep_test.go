@@ -175,3 +175,31 @@ func TestNextTaxWorkAttempt(t *testing.T) {
 		}
 	}
 }
+
+// The reversal sweep works each invoice on its own instant: the tick binds
+// none, so a row reads the server's clock once and its reversal is dated then.
+func TestRetryPendingTaxReversal_EachInvoiceOnItsOwnInstant(t *testing.T) {
+	base := time.Date(2026, 1, 5, 9, 0, 0, 0, time.UTC)
+	store := newMemStore()
+	svc := NewService(store, &steppingClock{at: base}, newMemNumberer())
+	rev := &fakeTaxReverser{}
+	svc.SetTaxReverser(rev)
+	for _, id := range []string{"inv_rev_1", "inv_rev_2"} {
+		store.invoices[id] = domain.Invoice{ID: id, TenantID: "t1", CustomerID: "c", Status: domain.InvoiceVoided,
+			TaxFacts:         domain.TaxFacts{TaxProvider: "stripe_tax", TaxStatus: domain.InvoiceTaxOK},
+			TaxTransactionID: "tx_" + id, TotalAmountCents: 1000, AmountDueCents: 1000}
+	}
+	if _, errs := svc.RetryPendingTaxReversal(postgres.WithLivemode(context.Background(), true), 50); len(errs) != 0 {
+		t.Fatalf("errors: %v", errs)
+	}
+	checkOwnInstants(t, rev.at, base)
+}
+
+// checkOwnInstants asserts two tax calls, each on its own read of a stepping
+// server clock that started at base (not the machine's time).
+func checkOwnInstants(t *testing.T, at []time.Time, base time.Time) {
+	t.Helper()
+	if len(at) != 2 || at[0].Equal(at[1]) || !at[0].Before(base.Add(time.Hour)) || !at[1].Before(base.Add(time.Hour)) {
+		t.Errorf("tax calls at %v: want two, each its own read of the server's clock (from %v)", at, base)
+	}
+}

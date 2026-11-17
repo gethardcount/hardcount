@@ -92,7 +92,7 @@ func (s *PostgresStore) IngestBatch(ctx context.Context, tenantID string, events
 	for i, event := range events {
 		_, err := ingestOneTx(ctx, tx, tenantID, event)
 		switch {
-		case errors.Is(err, errs.ErrDuplicateKey):
+		case errors.Is(err, errDuplicateKey):
 			deduped++
 		case err != nil:
 			return nil, 0, fmt.Errorf("event[%d]: %w", i, err)
@@ -141,10 +141,15 @@ func (s *PostgresStore) GetByIdempotencyKey(ctx context.Context, tenantID, key s
 	return event, nil
 }
 
+// errDuplicateKey says an event with this idempotency key is already stored,
+// so nothing was written. The API answers it as errs.ErrAlreadyExists: 409
+// already_exists.
+var errDuplicateKey = errs.AlreadyExists("", "duplicate key")
+
 // ingestOneTx is the single-source INSERT every ingest path funnels
 // through (live POST, batch, backfill, LiteLLM). Runs on the caller's tx
 // so Ingest keeps its own-commit shape while IngestBatch composes N
-// inserts atomically. Returns errs.ErrDuplicateKey (no row written) when
+// inserts atomically. Returns errDuplicateKey (no row written) when
 // the event's idempotency key already exists — via ON CONFLICT DO NOTHING
 // rather than a unique-violation error, because a violation would poison
 // the surrounding batch transaction.
@@ -237,10 +242,10 @@ func ingestOneTx(ctx context.Context, tx *sql.Tx, tenantID string, event domain.
 		&event.ProviderCostMicros, &event.ProviderCostSource)
 
 	// ON CONFLICT DO NOTHING returns no row on an idempotency replay —
-	// surfaced as ErrDuplicateKey to keep this store's contract identical
+	// surfaced as errDuplicateKey to keep this store's contract identical
 	// to the pre-batch unique-violation shape (callers branch on it).
 	if err == sql.ErrNoRows {
-		return domain.UsageEvent{}, fmt.Errorf("%w: idempotency_key %q", errs.ErrDuplicateKey, event.IdempotencyKey)
+		return domain.UsageEvent{}, fmt.Errorf("%w: idempotency_key %q", errDuplicateKey, event.IdempotencyKey)
 	}
 	if err != nil {
 		return domain.UsageEvent{}, err

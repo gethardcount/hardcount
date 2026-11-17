@@ -143,7 +143,7 @@ func (h *emailSettingsHandler) sendTest(w http.ResponseWriter, r *http.Request) 
 		// The SMTP error is the operator's own server talking (refused
 		// login, dial timeout, STARTTLS missing). It never carries the
 		// password, and it is the one thing that tells them what to fix.
-		respond.Error(w, r, http.StatusBadGateway, "api_error", "smtp_error",
+		respond.Error(w, r, http.StatusBadGateway, "smtp_error",
 			"The email server didn't accept the test email: "+err.Error())
 		return
 	}

@@ -1308,7 +1308,10 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	//     Redis blip;
 	//   - /v1/auth counts in this process, because operator login, and its
 	//     throttle, must survive a Redis blip.
-	prod := o.appEnv == "production"
+	failClosedInProd := mw.FailOpen
+	if o.appEnv == "production" {
+		failClosedInProd = mw.FailClosed
+	}
 	// Login brute-force protection has two layers. The outer one is the
 	// per-IP /v1/auth limiter below. The inner one is the sign-in throttle
 	// (user.LoginThrottle, wired above). It counts per (address × email) and
@@ -1324,16 +1327,14 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	// The default is 1,000 a minute (about 16 a second) per API key, or per
 	// account and mode. Stripe's lowest documented global limit is 25 a
 	// second, in a sandbox (ADR-095 amendment 2026-10-31).
-	rateLimiter := mw.NewRateLimiter(rdb, "general", o.rateLimits.GeneralPerMinute, time.Minute)
+	//
 	// In production, refuse requests when Redis is unreachable instead of
 	// silently turning rate limiting off, which would open a DDoS vector.
 	// Outside production the general limiter fails open on purpose.
 	// OWASP ASVS and common practice say that generic API rate limiting
 	// should fail open when its store blips. The sign-in throttle does not
 	// depend on Redis.
-	if prod {
-		rateLimiter.SetFailClosed(true)
-	}
+	rateLimiter := mw.NewRateLimiter(rdb, "general", o.rateLimits.GeneralPerMinute, time.Minute, failClosedInProd)
 	// Before sign-in, /v1/bootstrap and /v1/auth count per client address on
 	// their own limit, HARDCOUNT_RATE_LIMIT_AUTH_PER_MIN (default 100 a
 	// minute). So a larger general limit never loosens password guessing.
@@ -1344,10 +1345,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	//
 	// The bootstrap instance fails closed in production, like the general
 	// one. The /v1/auth instance below never does.
-	bootstrapLimiter := mw.NewRateLimiter(rdb, "auth", o.rateLimits.AuthPerMinute, time.Minute)
-	if prod {
-		bootstrapLimiter.SetFailClosed(true)
-	}
+	bootstrapLimiter := mw.NewRateLimiter(rdb, "auth", o.rateLimits.AuthPerMinute, time.Minute, failClosedInProd)
 	// /v1/auth gets its own limiter instance. It shares the bootstrap
 	// limiter's Redis namespace and limit, so the buckets are shared, but it
 	// never fails closed. Locking operators out of login during a Redis blip
@@ -1359,8 +1357,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	// or a call fails) it counts in this process with the same limit (ADR-095
 	// amendment 2026-10-18). That count is per replica, so N replicas allow
 	// one address up to N times the limit until Redis is back.
-	authLimiter := mw.NewRateLimiter(rdb, "auth", o.rateLimits.AuthPerMinute, time.Minute)
-	authLimiter.SetLocalFallback()
+	authLimiter := mw.NewRateLimiter(rdb, "auth", o.rateLimits.AuthPerMinute, time.Minute, mw.CountLocally)
 
 	// The ingest routes (/v1/usage-events* and the LiteLLM adapter) get their
 	// own, much larger bucket. LiteLLM posts one callback per LLM call
@@ -1377,7 +1374,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	// authenticated (a secret key is required), and failing closed would turn
 	// a Redis blip into lost revenue data. For ingest, the risk of lost
 	// events outweighs the DoS argument that closes the general bucket.
-	ingestLimiter := mw.NewRateLimiter(rdb, "ingest", o.rateLimits.IngestPerSecond, time.Second)
+	ingestLimiter := mw.NewRateLimiter(rdb, "ingest", o.rateLimits.IngestPerSecond, time.Second, mw.FailOpen)
 
 	// The public hosted-invoice routes get a tighter bucket than the general
 	// API, following industry practice for payment pages (Stripe, Paddle).
@@ -1389,10 +1386,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	//     visit.
 	// 60/min per IP leaves room for about 10 customers at once behind one
 	// corporate NAT, and still bounds enumeration and scraping.
-	hostedInvoiceRL := mw.NewRateLimiter(rdb, "hosted_invoice", 60, time.Minute)
-	if prod {
-		hostedInvoiceRL.SetFailClosed(true)
-	}
+	hostedInvoiceRL := mw.NewRateLimiter(rdb, "hosted_invoice", 60, time.Minute, failClosedInProd)
 
 	// The operator's send-setup-email has a per-customer cooldown: 1 send per
 	// (tenant, customer) per 60s. It guards against a double click and the
@@ -1400,7 +1394,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	// Redis hiccup does not block a real "send link" action. The worst case,
 	// Redis down and a real double click, is two near-identical emails, with
 	// no money or state at risk.
-	setupLinkCooldown := mw.NewRateLimiter(rdb, "setup_link", 1, time.Minute)
+	setupLinkCooldown := mw.NewRateLimiter(rdb, "setup_link", 1, time.Minute, mw.FailOpen)
 	paymentMethodsH.SetCooldown(setupLinkCooldown)
 
 	s.db = db

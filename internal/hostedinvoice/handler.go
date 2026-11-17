@@ -493,7 +493,7 @@ func (h *Handler) createCheckoutSession(w http.ResponseWriter, r *http.Request) 
 		// Clear error rather than 200-with-no-url: the SPA surfaces this
 		// as the paid/voided banner, but a rogue direct POST deserves an
 		// honest state code so integrators know the operation was rejected.
-		respond.Error(w, r, http.StatusConflict, "invalid_request_error", "not_payable",
+		respond.Error(w, r, http.StatusConflict, "not_payable",
 			"invoice is not in a payable state")
 		return
 	}
@@ -510,7 +510,7 @@ func (h *Handler) createCheckoutSession(w http.ResponseWriter, r *http.Request) 
 		// Deployed without Stripe (dev / staging without keys). Surface
 		// a 503 rather than 500: the state is a known operator misconfig,
 		// not a bug.
-		respond.Error(w, r, http.StatusServiceUnavailable, "api_error", "stripe_unavailable",
+		respond.Error(w, r, http.StatusServiceUnavailable, "stripe_unavailable",
 			"payment processing is not configured")
 		return
 	}
@@ -524,7 +524,7 @@ func (h *Handler) createCheckoutSession(w http.ResponseWriter, r *http.Request) 
 		// The tenant has no Stripe keys for this mode. The page hides Pay in
 		// this state; a direct POST gets the same answer as a 409 the page
 		// can explain, not a 502 "failed to create checkout session".
-		respond.Error(w, r, http.StatusConflict, "invalid_request_error", PayUnavailableOnline,
+		respond.Error(w, r, http.StatusConflict, PayUnavailableOnline,
 			"online payment is not set up for this invoice")
 		return
 	}
@@ -545,7 +545,7 @@ func (h *Handler) createCheckoutSession(w http.ResponseWriter, r *http.Request) 
 		if errs.Code(err) == errs.CodeStripeNotConnected {
 			// Disconnected between the readiness check above and here: the
 			// same answer as the check, not the operator's sentence.
-			respond.Error(w, r, http.StatusConflict, "invalid_request_error", PayUnavailableOnline,
+			respond.Error(w, r, http.StatusConflict, PayUnavailableOnline,
 				"online payment is not set up for this invoice")
 			return
 		}
@@ -555,7 +555,7 @@ func (h *Handler) createCheckoutSession(w http.ResponseWriter, r *http.Request) 
 		}
 		slog.ErrorContext(r.Context(), "hostedinvoice: checkout session create",
 			"invoice_id", inv.ID, "tenant_id", inv.TenantID, "error", err)
-		respond.Error(w, r, http.StatusBadGateway, "api_error", "stripe_error",
+		respond.Error(w, r, http.StatusBadGateway, "stripe_error",
 			"failed to create checkout session")
 		return
 	}
