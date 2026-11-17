@@ -330,189 +330,202 @@ func (s *Server) routes() chi.Router {
 		r.Mount("/", s.customerH.PublicCostDashboardRoutes())
 	})
 
-	// The real-time webhook event stream (SSE) is mounted above the /v1 route
-	// block, so it skips the global 30s middleware.Timeout, which would cut
-	// any long-lived EventSource connection at 30s. It gets the same auth
-	// chain as /v1/* (session cookie or Bearer API key, rate limit, permission
-	// check), but not idempotency, which adds nothing to a streaming GET, and
-	// not the Timeout. The stream is GET-only and read-only: it has no body to
-	// key for idempotency, and nothing to audit beyond the access log. Every
-	// 15 seconds the stream checks its credential again: once the key is
-	// revoked or expires, or the session ends, it closes with no final frame,
-	// and a reconnect with the same credential answers 401. A store failure
-	// does not close it (eventStreamRoute).
-	r.Route("/v1/webhook_events/stream", eventStreamRoute(s.webhookOutH, s.sessionSvc, s.authSvc, s.rateLimiter.Middleware(), door.Middleware, webhook.StreamHeartbeatInterval))
-
-	// Streaming CSV exports are mounted beside the /v1 block, like the SSE
-	// stream above, so they get a five-minute timeout instead of the 30s CRUD
-	// cap. A full usage-events export can stream for longer than 30s, and a
-	// 30s cap would cut it off mid-file (see exportAbort). They get the same
-	// auth chain as /v1, without idempotency, since they are GET-only. Each
-	// endpoint requires the matching *Read permission.
-	//
-	// Nothing between the handler and the socket buffers the response.
-	// exports.go streams through http.Flusher, and a buffering wrapper would
-	// hide the Flusher and hold the whole CSV in memory instead (ADR-090).
-	//
-	// Every export writes an action=export audit row before it streams, and
-	// refuses to stream if that row cannot be written (ADR-090 §7, read
-	// egress). A tamper-evidence system that cannot show who copied the
-	// evidence has a hole in its chain of custody. audit-log.csv is here too:
-	// the compliance export is itself an audited event, and it uses the same
-	// permission as the audit-log read route below.
-	r.Route("/v1/exports", func(r chi.Router) {
-		r.Use(session.RequireCaller(s.sessionSvc, s.authSvc))
-		r.Use(s.rateLimiter.Middleware())
-		// The handler moves each response's write deadline to match this
-		// timeout (extendExportWriteDeadline), because the server's
-		// WriteTimeout is 35 s.
-		r.Use(mw.Timeout(exportTimeout))
-		r.Use(door.Middleware)
-		exportsH := newExportsHandler(s.customerStore, s.invoiceStore, s.subStore, s.usageStore, s.auditLogger, s.auditLogger)
-		r.Mount("/", exportsH.Routes(
-			auth.Require(auth.PermCustomerRead),
-			auth.Require(auth.PermInvoiceRead),
-			auth.Require(auth.PermSubscriptionRead),
-			auth.Require(auth.PermUsageRead),
-			auth.Require(auth.PermAPIKeyRead),
-		))
-	})
-
 	// Tenant routes take a dashboard session cookie or `Authorization: Bearer
-	// <key>`; session.Authenticate decides which.
+	// <key>`; session.Authenticate decides which. Every /v1 route passes the
+	// CSRF guard and authentication. The four groups below differ in their
+	// rate limit, idempotency and timeout.
 	r.Route("/v1", func(r chi.Router) {
 		// The CSRF guard refuses a cross-site browser write before auth reads
 		// the session cookie. A Bearer request with no session cookie is
 		// exempt: a browser does not attach a key on its own.
 		r.Use(mw.CSRFGuard(allowedOrigins))
 		r.Use(session.RequireCaller(s.sessionSvc, s.authSvc))
-		// After auth, so the tenant ID is available for the bucket key. Ingest
-		// paths use their own, much larger bucket (see ingestLimiter).
-		r.Use(mw.SplitRateLimit(isIngestPath, s.ingestLimiter, s.rateLimiter))
-		// The usage routes, and the requests whose answer carries a secret
-		// shown only once, ignore the Idempotency-Key header
-		// (skipsIdempotency).
-		r.Use(mw.Idempotency(s.db, skipsIdempotency))
-		// No audit middleware here: the code that owns a write emits its
-		// audit row in its own transaction (audit.Logger.LogInTx), and
-		// audit_routes.go declares each mutating route's row, or why it has
-		// none.
+
+		// The real-time webhook event stream (SSE) has no timeout: the 30s one
+		// would cut a long-lived EventSource connection. It has no idempotency
+		// either: the stream is GET-only and read-only, with no body to key and
+		// nothing to audit beyond the access log. Every 15 seconds the stream
+		// checks its credential again: once the key is revoked or expires, or
+		// the session ends, it closes with no final frame, and a reconnect with
+		// the same credential answers 401. A store failure does not close it
+		// (eventStreamRoute).
+		r.Group(func(r chi.Router) {
+			r.Use(s.rateLimiter.Middleware())
+			r.Use(door.Middleware)
+			r.Route("/webhook_events/stream", eventStreamRoute(s.webhookOutH, s.sessionSvc, s.authSvc, webhook.StreamHeartbeatInterval))
+		})
+
+		// Streaming CSV exports get a five-minute timeout instead of the 30s
+		// CRUD cap. A full usage-events export can stream for longer than 30s,
+		// and a 30s cap would cut it off mid-file (see exportAbort). They are
+		// GET-only, so they skip idempotency. Each endpoint requires the
+		// matching *Read permission.
 		//
-		// A per-request timeout for ordinary CRUD endpoints. The SSE stream
-		// is mounted above this block, on the sibling
-		// /v1/webhook_events/stream route, so it does not inherit the 30s
-		// cap. Long-lived EventSource connections must run with no limit.
-		r.Use(mw.Timeout(30 * time.Second))
-		r.Use(door.Middleware)
-
-		// whoami needs no permission. A key gets key_id and key_type; a session
-		// gets user_id and email, which the dashboard needs to stay signed in.
-		r.Get("/whoami", s.handleWhoami)
-
-		r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/api-keys", s.authH.Routes())
-		// Team membership is for dashboard sessions only. An API key is a
-		// machine credential with no user to attribute an invite or removal
-		// to, so it gets 403 here. The store checks the caller's membership on
-		// each write.
-		r.With(auth.RequireSession("manage team membership")).Mount("/members", s.membersH.Routes())
-		// The /customers subtree mixes reads (GET list, get, billing-profile)
-		// and writes (POST create, PATCH update, PUT billing-profile, GDPR
-		// delete-data). RequireMethod picks the permission by HTTP method:
-		// customer:read for a read, customer:write for a write.
-		r.With(auth.RequireMethod(auth.PermCustomerRead, auth.PermCustomerWrite)).Mount("/customers", s.customerH.Routes())
-		// The customer-scoped usage view combines usage totals with customer,
-		// subscription and pricing reads. It is gated on PermUsageRead alone,
-		// not on the /customers permissions.
-		r.Mount("/customers/{id}/usage", s.customerUsageH.CustomerUsageRoutes(
-			auth.Require(auth.PermUsageRead),
-		))
-		// The per-customer margin report (ADR-079) compares rated usage
-		// revenue with the stamped provider costs (COGS, cost of goods
-		// sold). Only operators can call it: COGS never shows on a
-		// customer-facing page, the hosted cost dashboard included.
-		r.With(auth.Require(auth.PermUsageRead)).Get("/customers/{id}/margin", s.providerCostH.Margin)
-		// Provider cost rates CRUD (ADR-079): the operator's COGS table.
-		r.With(auth.RequireMethod(auth.PermUsageRead, auth.PermUsageWrite)).Mount("/provider-costs", s.providerCostH.Routes())
-		// The operator's payment-method management. It uses the same Service
-		// as the /v1/me/payment-methods customer-facing routes. Only the auth
-		// model and the source of customer_id differ. It offers list,
-		// setDefault and detach, plus "send setup link", which mints a
-		// Stripe Checkout setup URL the operator can give the customer. Card
-		// capture stays in the Stripe-hosted iframe, so the operator's PCI
-		// scope stays SAQ-A. Chargebee, Lago and Orb offer the same shape.
-		r.With(auth.RequireMethod(auth.PermCustomerRead, auth.PermCustomerWrite)).Mount("/customers/{customer_id}/payment-methods", s.paymentMethodsH.OperatorRoutes())
-		r.With(auth.RequireMethod(auth.PermPricingRead, auth.PermPricingWrite)).Mount("/meters", s.pricingH.MeterRoutes())
-		// A plan and its prices (/v1/plans/{id}/prices) are one subtree.
-		r.With(auth.RequireMethod(auth.PermPricingRead, auth.PermPricingWrite)).Mount("/plans", s.pricingH.PlanRoutes())
-		r.With(auth.Require(auth.PermPricingWrite)).Mount("/recipes", s.recipeH.Routes())
-		r.With(auth.RequireMethod(auth.PermSubscriptionRead, auth.PermSubscriptionWrite)).Mount("/subscriptions", s.subH.Routes())
-		// Backfill is mounted before the /usage-events subtree, so chi picks
-		// the more specific pattern. PermUsageWrite limits it to secret-tier
-		// keys, so an ingest key cannot backfill (ADR-133).
-		r.With(auth.Require(auth.PermUsageWrite)).Post("/usage-events/backfill", s.usageH.Backfill)
-		// Sending events needs PermUsageIngest, the one permission an ingest
-		// key holds (ADR-133). The reads, and the held-usage release and
-		// discard, need usage read and write.
-		r.Mount("/usage-events", s.usageH.Routes(
-			auth.Require(auth.PermUsageIngest),
-			auth.Require(auth.PermUsageRead),
-			auth.Require(auth.PermUsageWrite),
-		))
-		// The LiteLLM adapter: POST /v1/integrations/litellm/spend. The
-		// operator's LiteLLM proxy sends the Bearer key on every callback,
-		// so it needs only PermUsageIngest, which an ingest key (ADR-133) or
-		// a secret key holds. See ADR-033 and docs/integrations/litellm.md.
-		r.With(auth.Require(auth.PermUsageIngest)).Mount("/integrations/litellm",
-			litellm.New(s.customerStore, s.pricingSvc, s.usageSvc, s.usageSvc).Routes())
-		// create_preview must be mounted before /invoices, because chi tries
-		// patterns in registration order. Once /invoices is mounted with its
-		// /{id}/... children, "create_preview" would be taken as an invoice
-		// ID. See docs/dev/design/create-preview.md.
-		r.With(auth.Require(auth.PermInvoiceRead)).Mount("/invoices/create_preview", s.createPreviewH.Routes())
-		r.With(auth.RequireMethod(auth.PermInvoiceRead, auth.PermInvoiceWrite)).Mount("/invoices", s.invoiceH.Routes())
-		r.With(auth.Require(auth.PermInvoiceWrite)).Mount("/credit-notes", s.creditNoteH.Routes())
-		r.With(auth.Require(auth.PermPricingWrite)).Mount("/price-overrides", s.pricingH.OverrideRoutes())
-		r.With(auth.Require(auth.PermCustomerWrite)).Mount("/credits", s.creditH.Routes())
-		r.With(auth.RequireMethod(auth.PermDunningRead, auth.PermDunningWrite)).Mount("/dunning", s.dunningH.Routes())
-		r.With(auth.Require(auth.PermInvoiceWrite)).Mount("/billing", s.billingH.Routes())
-		r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/webhook-endpoints", s.webhookOutH.Routes())
-		// The real-time event UI's replay and deliveries timeline live here.
-		// The SSE stream itself is mounted above /v1, because chi's 30s
-		// middleware.Timeout would kill long-lived streams. The path uses an
-		// underscore (webhook_events) on purpose, to match Stripe's
-		// /v1/events convention and not collide with the
-		// /webhook-endpoints/events list.
+		// Nothing between the handler and the socket buffers the response.
+		// exports.go streams through http.Flusher, and a buffering wrapper would
+		// hide the Flusher and hold the whole CSV in memory instead (ADR-090).
 		//
-		// PermAPIKeyRead is enough for both the read (deliveries) and the
-		// replay. Replay changes state, but it only re-issues an event that
-		// was already emitted.
-		r.With(auth.Require(auth.PermAPIKeyRead)).Mount("/webhook_events", s.webhookOutH.EventRoutes())
-		r.With(auth.Require(auth.PermAPIKeyRead)).Mount("/audit-log", s.auditH.Routes())
-		// Test and live mode share the account settings, and a key belongs
-		// to one mode, so a key may read them but only the dashboard changes
-		// them.
-		r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings", s.settingsH.Routes(auth.RequireSession("change account settings")))
-		// Each mode has its own Stripe connection, and a caller manages only
-		// its own mode's: a key the mode it was made in, a dashboard session
-		// the mode it is in. tenantstripe.Service enforces this, not a
-		// middleware, because the mode comes from the body or the path.
-		r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings/stripe", s.tenantStripeH.Routes())
-		r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings/email", s.emailSettingsH.Routes())
-		r.With(auth.Require(auth.PermInvoiceRead)).Mount("/analytics", s.analyticsH.Routes())
-		r.With(auth.Require(auth.PermTestClockWrite)).Mount("/test-clocks", s.testClockH.Routes())
+		// Every export writes an action=export audit row before it streams, and
+		// refuses to stream if that row cannot be written (ADR-090 §7, read
+		// egress). A tamper-evidence system that cannot show who copied the
+		// evidence has a hole in its chain of custody. audit-log.csv is here too:
+		// the compliance export is itself an audited event, and it uses the same
+		// permission as the audit-log read route below.
+		r.Group(func(r chi.Router) {
+			r.Use(s.rateLimiter.Middleware())
+			// The handler moves each response's write deadline to match this
+			// timeout (extendExportWriteDeadline), because the server's
+			// WriteTimeout is 35 s.
+			r.Use(mw.Timeout(exportTimeout))
+			r.Use(door.Middleware)
+			exportsH := newExportsHandler(s.customerStore, s.invoiceStore, s.subStore, s.usageStore, s.auditLogger, s.auditLogger)
+			r.Mount("/exports", exportsH.Routes(
+				auth.Require(auth.PermCustomerRead),
+				auth.Require(auth.PermInvoiceRead),
+				auth.Require(auth.PermSubscriptionRead),
+				auth.Require(auth.PermUsageRead),
+				auth.Require(auth.PermAPIKeyRead),
+			))
+		})
 
-		// Customer Detail: the dashboard's composed per-customer views, in the
-		// same /customers/{...} namespace as usage, margin and
-		// payment-methods. They are not under /customer-portal, so that name
-		// means only the removed self-serve portal (ADR-051).
-		customerDetail := newCustomerDetailHandler(s.customerStore, s.subStore, s.invoiceStore)
-		r.With(auth.Require(auth.PermCustomerRead)).Get("/customers/{customer_id}/overview", customerDetail.overview)
-		// A card is added through one of two Stripe Checkout setup sessions.
-		// The operator's goes through paymentmethods.Service.CreateSetupSession:
-		// POST /v1/customers/{id}/payment-methods/send-setup-email (email) or
-		// POST /v1/customers/{id}/payment-methods/setup-session (copy-link).
-		// The customer's comes from the payment-update email link:
-		// POST /v1/public/payment-updates/{token}/checkout.
+		// Usage ingest has its own, much larger bucket (ingestLimiter): one
+		// callback per LLM call must never be squeezed through the operator-CRUD
+		// bucket. It ignores the Idempotency-Key header: each event's
+		// idempotency_key, or the held row moving only once, is its dedup. The
+		// group holds the routes a path-prefix test used to pick out: the
+		// /usage-events mount, its reads included, the backfill and the LiteLLM
+		// mount.
+		r.Group(func(r chi.Router) {
+			r.Use(s.ingestLimiter.Middleware())
+			r.Use(mw.Timeout(30 * time.Second))
+			r.Use(door.Middleware)
+			// Backfill is mounted before the /usage-events subtree, so chi picks
+			// the more specific pattern. PermUsageWrite limits it to secret-tier
+			// keys, so an ingest key cannot backfill (ADR-133).
+			r.With(auth.Require(auth.PermUsageWrite)).Post("/usage-events/backfill", s.usageH.Backfill)
+			// Sending events needs PermUsageIngest, the one permission an ingest
+			// key holds (ADR-133). The reads, and the held-usage release and
+			// discard, need usage read and write.
+			r.Mount("/usage-events", s.usageH.Routes(
+				auth.Require(auth.PermUsageIngest),
+				auth.Require(auth.PermUsageRead),
+				auth.Require(auth.PermUsageWrite),
+			))
+			// The LiteLLM adapter: POST /v1/integrations/litellm/spend. The
+			// operator's LiteLLM proxy sends the Bearer key on every callback,
+			// so it needs only PermUsageIngest, which an ingest key (ADR-133) or
+			// a secret key holds. See ADR-033 and docs/integrations/litellm.md.
+			r.With(auth.Require(auth.PermUsageIngest)).Mount("/integrations/litellm",
+				litellm.New(s.customerStore, s.pricingSvc, s.usageSvc, s.usageSvc).Routes())
+		})
+
+		// Everything else.
+		r.Group(func(r chi.Router) {
+			r.Use(s.rateLimiter.Middleware())
+			// A request whose answer carries a secret shown only once ignores
+			// the Idempotency-Key header (answersWithShowOnceSecret): that
+			// answer is never kept for a replay.
+			r.Use(mw.Idempotency(s.db, answersWithShowOnceSecret))
+			// No audit middleware here: the code that owns a write emits its
+			// audit row in its own transaction (audit.Logger.LogInTx), and
+			// audit_routes.go declares each mutating route's row, or why it has
+			// none.
+			//
+			// A per-request timeout for ordinary CRUD endpoints.
+			r.Use(mw.Timeout(30 * time.Second))
+			r.Use(door.Middleware)
+
+			// whoami needs no permission. A key gets key_id and key_type; a session
+			// gets user_id and email, which the dashboard needs to stay signed in.
+			r.Get("/whoami", s.handleWhoami)
+
+			r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/api-keys", s.authH.Routes())
+			// Team membership is for dashboard sessions only. An API key is a
+			// machine credential with no user to attribute an invite or removal
+			// to, so it gets 403 here. The store checks the caller's membership on
+			// each write.
+			r.With(auth.RequireSession("manage team membership")).Mount("/members", s.membersH.Routes())
+			// The /customers subtree mixes reads (GET list, get, billing-profile)
+			// and writes (POST create, PATCH update, PUT billing-profile, GDPR
+			// delete-data). RequireMethod picks the permission by HTTP method:
+			// customer:read for a read, customer:write for a write.
+			r.With(auth.RequireMethod(auth.PermCustomerRead, auth.PermCustomerWrite)).Mount("/customers", s.customerH.Routes())
+			// The customer-scoped usage view combines usage totals with customer,
+			// subscription and pricing reads. It is gated on PermUsageRead alone,
+			// not on the /customers permissions.
+			r.Mount("/customers/{id}/usage", s.customerUsageH.CustomerUsageRoutes(
+				auth.Require(auth.PermUsageRead),
+			))
+			// The per-customer margin report (ADR-079) compares rated usage
+			// revenue with the stamped provider costs (COGS, cost of goods
+			// sold). Only operators can call it: COGS never shows on a
+			// customer-facing page, the hosted cost dashboard included.
+			r.With(auth.Require(auth.PermUsageRead)).Get("/customers/{id}/margin", s.providerCostH.Margin)
+			// Provider cost rates CRUD (ADR-079): the operator's COGS table.
+			r.With(auth.RequireMethod(auth.PermUsageRead, auth.PermUsageWrite)).Mount("/provider-costs", s.providerCostH.Routes())
+			// The operator's payment-method management. It uses the same Service
+			// as the /v1/me/payment-methods customer-facing routes. Only the auth
+			// model and the source of customer_id differ. It offers list,
+			// setDefault and detach, plus "send setup link", which mints a
+			// Stripe Checkout setup URL the operator can give the customer. Card
+			// capture stays in the Stripe-hosted iframe, so the operator's PCI
+			// scope stays SAQ-A. Chargebee, Lago and Orb offer the same shape.
+			r.With(auth.RequireMethod(auth.PermCustomerRead, auth.PermCustomerWrite)).Mount("/customers/{customer_id}/payment-methods", s.paymentMethodsH.OperatorRoutes())
+			r.With(auth.RequireMethod(auth.PermPricingRead, auth.PermPricingWrite)).Mount("/meters", s.pricingH.MeterRoutes())
+			// A plan and its prices (/v1/plans/{id}/prices) are one subtree.
+			r.With(auth.RequireMethod(auth.PermPricingRead, auth.PermPricingWrite)).Mount("/plans", s.pricingH.PlanRoutes())
+			r.With(auth.Require(auth.PermPricingWrite)).Mount("/recipes", s.recipeH.Routes())
+			r.With(auth.RequireMethod(auth.PermSubscriptionRead, auth.PermSubscriptionWrite)).Mount("/subscriptions", s.subH.Routes())
+			// create_preview must be mounted before /invoices, because chi tries
+			// patterns in registration order. Once /invoices is mounted with its
+			// /{id}/... children, "create_preview" would be taken as an invoice
+			// ID. See docs/dev/design/create-preview.md.
+			r.With(auth.Require(auth.PermInvoiceRead)).Mount("/invoices/create_preview", s.createPreviewH.Routes())
+			r.With(auth.RequireMethod(auth.PermInvoiceRead, auth.PermInvoiceWrite)).Mount("/invoices", s.invoiceH.Routes())
+			r.With(auth.Require(auth.PermInvoiceWrite)).Mount("/credit-notes", s.creditNoteH.Routes())
+			r.With(auth.Require(auth.PermPricingWrite)).Mount("/price-overrides", s.pricingH.OverrideRoutes())
+			r.With(auth.Require(auth.PermCustomerWrite)).Mount("/credits", s.creditH.Routes())
+			r.With(auth.RequireMethod(auth.PermDunningRead, auth.PermDunningWrite)).Mount("/dunning", s.dunningH.Routes())
+			r.With(auth.Require(auth.PermInvoiceWrite)).Mount("/billing", s.billingH.Routes())
+			r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/webhook-endpoints", s.webhookOutH.Routes())
+			// The real-time event UI's replay and deliveries timeline live here.
+			// The SSE stream itself is mounted above /v1, because chi's 30s
+			// middleware.Timeout would kill long-lived streams. The path uses an
+			// underscore (webhook_events) on purpose, to match Stripe's
+			// /v1/events convention and not collide with the
+			// /webhook-endpoints/events list.
+			//
+			// PermAPIKeyRead is enough for both the read (deliveries) and the
+			// replay. Replay changes state, but it only re-issues an event that
+			// was already emitted.
+			r.With(auth.Require(auth.PermAPIKeyRead)).Mount("/webhook_events", s.webhookOutH.EventRoutes())
+			r.With(auth.Require(auth.PermAPIKeyRead)).Mount("/audit-log", s.auditH.Routes())
+			// Test and live mode share the account settings, and a key belongs
+			// to one mode, so a key may read them but only the dashboard changes
+			// them.
+			r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings", s.settingsH.Routes(auth.RequireSession("change account settings")))
+			// Each mode has its own Stripe connection, and a caller manages only
+			// its own mode's: a key the mode it was made in, a dashboard session
+			// the mode it is in. tenantstripe.Service enforces this, not a
+			// middleware, because the mode comes from the body or the path.
+			r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings/stripe", s.tenantStripeH.Routes())
+			r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings/email", s.emailSettingsH.Routes())
+			r.With(auth.Require(auth.PermInvoiceRead)).Mount("/analytics", s.analyticsH.Routes())
+			r.With(auth.Require(auth.PermTestClockWrite)).Mount("/test-clocks", s.testClockH.Routes())
+
+			// Customer Detail: the dashboard's composed per-customer views, in the
+			// same /customers/{...} namespace as usage, margin and
+			// payment-methods. They are not under /customer-portal, so that name
+			// means only the removed self-serve portal (ADR-051).
+			customerDetail := newCustomerDetailHandler(s.customerStore, s.subStore, s.invoiceStore)
+			r.With(auth.Require(auth.PermCustomerRead)).Get("/customers/{customer_id}/overview", customerDetail.overview)
+			// A card is added through one of two Stripe Checkout setup sessions.
+			// The operator's goes through paymentmethods.Service.CreateSetupSession:
+			// POST /v1/customers/{id}/payment-methods/send-setup-email (email) or
+			// POST /v1/customers/{id}/payment-methods/setup-session (copy-link).
+			// The customer's comes from the payment-update email link:
+			// POST /v1/public/payment-updates/{token}/checkout.
+		})
 	})
 
 	allow = newAllowIndex(r)
@@ -594,7 +607,7 @@ const maxRequestBodyBytes = 1 << 20 // 1 MB
 // adapter, whose batches of full call records run to several MB
 // (litellm.MaxBodyBytes says why and how much). It is the one place every
 // route's cap is set, so no route goes uncapped. The adapter is matched on
-// the path prefix it is mounted at, as isIngestPath matches it.
+// the path prefix it is mounted at.
 func limitRequestBody(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		limit := int64(maxRequestBodyBytes)
@@ -608,27 +621,6 @@ func limitRequestBody(next http.Handler) http.Handler {
 
 // litellmPathPrefix is where the LiteLLM adapter is mounted.
 const litellmPathPrefix = "/v1/integrations/litellm"
-
-// isIngestPath reports whether r is a usage route: the usage-events subtree
-// (single, batch, backfill, held release and discard, plus the reads, which
-// do no harm there) or the LiteLLM adapter. These routes use the dedicated
-// ingest rate-limit bucket, because one callback per LLM call must never be
-// squeezed through the operator-CRUD bucket. They ignore the
-// Idempotency-Key header: each event's idempotency_key, or the held row
-// moving only once, is their dedup.
-func isIngestPath(r *http.Request) bool {
-	return strings.HasPrefix(r.URL.Path, "/v1/usage-events") ||
-		strings.HasPrefix(r.URL.Path, litellmPathPrefix)
-}
-
-// skipsIdempotency reports whether the idempotency layer leaves r alone. It
-// does for the usage routes (isIngestPath), where each event's own
-// idempotency_key is the one dedup rule, and for the requests whose answer
-// carries a secret shown only in that answer (answersWithShowOnceSecret),
-// which is never kept for a replay.
-func skipsIdempotency(r *http.Request) bool {
-	return isIngestPath(r) || answersWithShowOnceSecret(r)
-}
 
 // showOnceSecretRoutes are the requests behind the idempotency layer whose
 // answer carries a secret shown only in that answer: the fields marked

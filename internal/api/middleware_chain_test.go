@@ -35,6 +35,7 @@ var (
 	authMW        = chainStep{"authentication", is[session.CallerRequired]}
 	timeoutMW     = chainStep{"the timeout", is[mw.TimeLimit]}
 	idempotencyMW = chainStep{"Idempotency", is[mw.IdempotencyGuard]}
+	limiterMW     = chainStep{"the rate limit", is[mw.RateLimited]}
 	doorMW        = chainStep{"the door", is[doorHandler]}
 )
 

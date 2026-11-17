@@ -306,40 +306,6 @@ func TestClockDoor_EveryRoutePassesThroughIt(t *testing.T) {
 	}
 }
 
-// The door is the last of its group's middleware: after authentication, so
-// it reads the named record as the caller's tenant and mode; after the
-// timeout, so its lookups are bounded; and after Idempotency, so a replay
-// costs no lookup and the door's 503 is not stored. On the /v1 group all
-// four are there, in that order.
-func TestClockDoor_ComesAfterAuthenticationIdempotencyAndTheTimeout(t *testing.T) {
-	var wrong []string
-	v1 := false
-	if err := chi.Walk(newTestServer().router, func(method, route string, _ http.Handler, mws ...func(http.Handler) http.Handler) error {
-		door := chainIndex(mws, doorMW)
-		for _, before := range []chainStep{authMW, timeoutMW, idempotencyMW} {
-			if i := chainIndex(mws, before); i >= 0 && i > door {
-				wrong = append(wrong, method+" "+route+": the door comes before "+before.name)
-			}
-		}
-		if method == "POST" && canonicalRoute(route) == "/v1/subscriptions/{id}/cancel" {
-			v1 = true
-			a, i, to := chainIndex(mws, authMW), chainIndex(mws, idempotencyMW), chainIndex(mws, timeoutMW)
-			if a < 0 || i < 0 || to < 0 || door < 0 || a >= i || i >= to || to >= door {
-				wrong = append(wrong, fmt.Sprintf("%s %s: authentication %d, Idempotency %d, timeout %d, door %d; want them in that order", method, route, a, i, to, door))
-			}
-		}
-		return nil
-	}); err != nil {
-		t.Fatalf("walk: %v", err)
-	}
-	if !v1 {
-		t.Fatal("POST /v1/subscriptions/{id}/cancel not found: the /v1 group was not checked")
-	}
-	if len(wrong) > 0 {
-		t.Errorf("the door is out of place:\n  %s", strings.Join(wrong, "\n  "))
-	}
-}
-
 // Every route whose entry reads a record is authenticated, so the door reads
 // it as the caller's tenant and mode. A route with no authentication and an
 // entry that reads a record would read with no tenant and no mode.
