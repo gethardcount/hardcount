@@ -10,7 +10,7 @@ import (
 // The outer layer reads what an inner layer wrote, although the inner layer
 // handed its own handler a new request with a new context.
 func TestActorOf_ReadsWhatALayerInsideWrote(t *testing.T) {
-	want := Actor{ActorType: "api_key", ActorID: "hc_key_1", TenantID: "hc_ten_1"}
+	want := Actor{Type: "api_key", ID: "hc_key_1", TenantID: "hc_ten_1"}
 	type innerKey struct{}
 
 	inner := func(next http.Handler) http.Handler {
@@ -46,7 +46,7 @@ func TestActorOf_NobodySignedIn(t *testing.T) {
 // nothing and a read answers the zero Actor.
 func TestSetActor_NoRecord(t *testing.T) {
 	ctx := t.Context()
-	SetActor(ctx, Actor{ActorType: "user", ActorID: "hc_usr_1", TenantID: "hc_ten_1"})
+	SetActor(ctx, Actor{Type: "user", ID: "hc_usr_1", TenantID: "hc_ten_1"})
 	if got := ActorOf(ctx); got != (Actor{}) {
 		t.Errorf("actor with no record = %+v, want the zero Actor", got)
 	}
@@ -56,7 +56,7 @@ func TestSetActor_NoRecord(t *testing.T) {
 // first one's actor.
 func TestWithRecord_OnePerRequest(t *testing.T) {
 	first := WithRecord(t.Context())
-	SetActor(first, Actor{ActorType: "user", ActorID: "hc_usr_1", TenantID: "hc_ten_1"})
+	SetActor(first, Actor{Type: "user", ID: "hc_usr_1", TenantID: "hc_ten_1"})
 	if got := ActorOf(WithRecord(t.Context())); got != (Actor{}) {
 		t.Errorf("a second request's actor = %+v, want the zero Actor", got)
 	}

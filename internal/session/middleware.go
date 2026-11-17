@@ -95,18 +95,23 @@ func RequireCaller(sessSvc *Service, keySvc *auth.Service) func(http.Handler) ht
 // is for a handler that resolves the session cookie itself (sign-out and the
 // mode switch); RequireCaller names the caller of every route behind it.
 func NameActor(ctx context.Context, s Session) {
-	request.SetActor(ctx, actorOf(auth.Caller{TenantID: s.TenantID, UserID: s.UserID}))
+	request.SetActor(ctx, actorOf(sessionCaller(s)))
 }
 
-// actorOf is c under the audit log's names for it (auth.Caller.Actor).
+// actorOf names c for the access log, in the audit log's words
+// (auth.Caller.Actor).
 func actorOf(c auth.Caller) request.Actor {
 	actorType, id := c.Actor()
-	return request.Actor{ActorType: actorType, ActorID: id, TenantID: c.TenantID}
+	return request.Actor{Type: actorType, ID: id, TenantID: c.TenantID}
+}
+
+// sessionCaller is s's user as a caller.
+func sessionCaller(s Session) auth.Caller {
+	return auth.Caller{TenantID: s.TenantID, UserID: s.UserID}
 }
 
 // applyToCtx returns ctx carrying s's user as the caller, in s's test or live
 // mode.
 func applyToCtx(ctx context.Context, s Session) context.Context {
-	ctx = auth.WithCaller(ctx, auth.Caller{TenantID: s.TenantID, UserID: s.UserID})
-	return postgres.WithLivemode(ctx, s.Livemode)
+	return postgres.WithLivemode(auth.WithCaller(ctx, sessionCaller(s)), s.Livemode)
 }

@@ -2,14 +2,16 @@ package auth
 
 import "testing"
 
-// The callers production builds: a session, a key, and a user alone (an
-// account route's WithUserID). A key with a user named is a shape nothing
-// builds; it is here to show the key decides.
+// The callers production builds: a session, a key, a user alone (an account
+// route's WithUserID) and a tenant alone (a job's or a public route's
+// WithTenantID). A key with a user named is a shape nothing builds; it is
+// here to show the key decides.
 var (
 	aSession      = Caller{TenantID: "hc_ten_1", UserID: "hc_usr_1"}
 	aKey          = Caller{TenantID: "hc_ten_1", KeyID: "hc_key_1", KeyType: KeyTypeSecret}
 	aKeyWithAUser = Caller{TenantID: "hc_ten_1", UserID: "hc_usr_1", KeyID: "hc_key_1", KeyType: KeyTypeIngest}
 	aUserOnly     = Caller{UserID: "hc_usr_1"}
+	aTenantOnly   = Caller{TenantID: "hc_ten_1"}
 )
 
 // A session is a user and no key; a caller with a key is never a session.
@@ -23,6 +25,7 @@ func TestCaller_IsSession(t *testing.T) {
 		{"a key", aKey, false},
 		{"a key with a user named", aKeyWithAUser, false},
 		{"a user only", aUserOnly, true},
+		{"a tenant only", aTenantOnly, false},
 		{"the zero caller", Caller{}, false},
 	} {
 		if got := tc.caller.IsSession(); got != tc.want {
@@ -43,6 +46,7 @@ func TestCaller_Actor(t *testing.T) {
 		{"a key", aKey, "api_key", "hc_key_1"},
 		{"a key with a user named", aKeyWithAUser, "api_key", "hc_key_1"},
 		{"a user only", aUserOnly, "user", "hc_usr_1"},
+		{"a tenant only", aTenantOnly, "", ""},
 		{"the zero caller", Caller{}, "", ""},
 	} {
 		if gotType, gotID := tc.caller.Actor(); gotType != tc.wantType || gotID != tc.wantID {

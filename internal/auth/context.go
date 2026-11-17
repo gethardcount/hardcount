@@ -11,6 +11,8 @@ const (
 )
 
 // Caller is who a request acts as: a dashboard user's session, or an API key.
+// A background job, a webhook or a public page carries only a tenant
+// (WithTenantID), or no caller.
 type Caller struct {
 	TenantID string
 	UserID   string  // set for a session
@@ -24,10 +26,10 @@ func (c Caller) IsSession() bool {
 	return c.UserID != "" && c.KeyID == ""
 }
 
-// Actor names c for a record: "user" and the user's id for a session,
-// "api_key" and the key's id for a key, and "", "" for neither. A caller with
-// a key is named as the key, as IsSession decides. The names are the audit
-// log's actor_type values.
+// Actor names c in the audit log's actor_type words: "user" and the user's
+// id for a session (IsSession), "api_key" and the key's id for any caller
+// with a key, and "", "" for neither. A new name needs every actor_type CHECK
+// widened (audit.ResolveActor).
 func (c Caller) Actor() (actorType, id string) {
 	switch {
 	case c.IsSession():
@@ -38,9 +40,8 @@ func (c Caller) Actor() (actorType, id string) {
 	return "", ""
 }
 
-// WithCaller returns ctx carrying c as the whole caller, in place of any
-// caller ctx held. session.Authenticate sets it on every authenticated
-// request; no caller means a background job or a route outside authentication.
+// WithCaller returns ctx with c as its whole caller, replacing any caller ctx
+// held. session.Authenticate sets it for each authenticated request.
 func WithCaller(ctx context.Context, c Caller) context.Context {
 	return context.WithValue(ctx, callerKey, c)
 }
@@ -69,7 +70,8 @@ func WithTenantID(ctx context.Context, tenantID string) context.Context {
 // WithUserID returns ctx with id as the caller's user. The account routes
 // that session.RequireCaller does not guard (a sign-in, a sign-out, a mode
 // switch, an accepted invitation, a password reset) set it, so their audit
-// row names the user. The result counts as that user's session.
+// row names the user. Each calls it on a context with no caller, so the
+// result is that user's session (IsSession).
 func WithUserID(ctx context.Context, id string) context.Context {
 	c := CallerOf(ctx)
 	c.UserID = id

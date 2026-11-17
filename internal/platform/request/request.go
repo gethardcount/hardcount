@@ -17,11 +17,11 @@ import "context"
 // Actor is who made a request, as the layer that authenticated it names
 // them.
 type Actor struct {
-	// ActorType and ActorID are the audit log's names for the caller
-	// (auth.Caller.Actor): "user" with a user id, or "api_key" with a key id.
-	ActorType string
-	ActorID   string
-	// TenantID is the account the caller signed in to.
+	// Type and ID name the caller as the audit log does (auth.Caller.Actor):
+	// "user" and a user id, or "api_key" and a key id.
+	Type string
+	ID   string
+	// TenantID is the caller's account.
 	TenantID string
 }
 

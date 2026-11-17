@@ -144,12 +144,12 @@ func TestRequireCaller_NamesTheActorOnTheRecord(t *testing.T) {
 		if status != http.StatusOK || seen == nil {
 			t.Fatalf("status = %d (reached=%v), want 200", status, seen != nil)
 		}
-		want := request.Actor{ActorType: "user", ActorID: "usr_owner", TenantID: "ten_1"}
+		want := request.Actor{Type: "user", ID: "usr_owner", TenantID: "ten_1"}
 		if got := request.ActorOf(outer); got != want {
 			t.Errorf("actor on the record = %+v, want %+v", got, want)
 		}
-		if actorType, actorID := audit.ResolveActor(seen.Context()); actorType != want.ActorType || actorID != want.ActorID {
-			t.Errorf("the audit log names this caller %s/%s, the record %s/%s", actorType, actorID, want.ActorType, want.ActorID)
+		if actorType, actorID := audit.ResolveActor(seen.Context()); actorType != want.Type || actorID != want.ID {
+			t.Errorf("the audit log names this caller %s/%s, the record %s/%s", actorType, actorID, want.Type, want.ID)
 		}
 	})
 
@@ -170,11 +170,11 @@ func TestNameActor(t *testing.T) {
 	ctx := request.WithRecord(t.Context())
 	sess := Session{UserID: "usr_owner", TenantID: "ten_1"}
 	NameActor(ctx, sess)
-	want := request.Actor{ActorType: "user", ActorID: "usr_owner", TenantID: "ten_1"}
+	want := request.Actor{Type: "user", ID: "usr_owner", TenantID: "ten_1"}
 	if got := request.ActorOf(ctx); got != want {
 		t.Errorf("actor on the record = %+v, want %+v", got, want)
 	}
-	if actorType, actorID := audit.ResolveActor(applyToCtx(t.Context(), sess)); actorType != want.ActorType || actorID != want.ActorID {
-		t.Errorf("the audit log names this session %s/%s, NameActor %s/%s", actorType, actorID, want.ActorType, want.ActorID)
+	if actorType, actorID := audit.ResolveActor(applyToCtx(t.Context(), sess)); actorType != want.Type || actorID != want.ID {
+		t.Errorf("the audit log names this session %s/%s, NameActor %s/%s", actorType, actorID, want.Type, want.ID)
 	}
 }

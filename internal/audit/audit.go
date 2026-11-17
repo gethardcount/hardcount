@@ -441,11 +441,11 @@ func (l *Logger) LogInTx(ctx context.Context, tx *sql.Tx, e Entry) error {
 }
 
 // ResolveActor determines who performed an audited action from the request
-// context, in priority order:
-//   - customer — a stamped customer actor (public token flows, auth.WithCustomerActor)
-//   - user     — a dashboard user's session (auth.Caller.Actor)
-//   - api_key  — an API key (auth.Caller.Actor)
-//   - system   — background workers / cron with no request identity
+// context, in this order:
+//   - customer: a stamped customer actor (public token flows, auth.WithCustomerActor)
+//   - the caller, as auth.Caller.Actor names it: user for a session, api_key
+//     for any caller with a key
+//   - system: a background job, with no caller
 //
 // A new kind must also be added to every actor_type CHECK (audit_log,
 // email_outbox, invoice_charge_attempts) and to the contexts in

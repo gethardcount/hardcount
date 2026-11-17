@@ -271,7 +271,7 @@ func requestCaller(ctx context.Context) (caller string, ok bool) {
 	switch {
 	case c.KeyID != "" && c.UserID == "":
 		return "key:" + c.KeyID, true
-	case c.UserID != "" && c.KeyID == "":
+	case c.IsSession():
 		return "user:" + c.UserID, true
 	}
 	return "", false
