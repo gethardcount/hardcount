@@ -86,7 +86,7 @@ func newCollectHarness(t *testing.T) collectHarness {
 	invoiceStore := invoice.NewPostgresStore(db)
 	subStore := subscription.NewPostgresStore(db)
 	customerStore := customer.NewPostgresStore(db)
-	clk := clock.NewFake(time.Now().UTC())
+	clk := clock.NewFake(time.Now().UTC().Truncate(time.Microsecond)) // what Postgres stores, so a time read back compares equal
 
 	newEng := func(ps billing.PaymentReadiness, ch billing.InvoiceCharger, ds billing.DunningStarter) *billing.Engine {
 		e := billing.NewEngine(
@@ -261,8 +261,9 @@ func TestCollector_StartsNoPaymentDunning_RealStore(t *testing.T) {
 // issue date or billing period (found walking FLOW I10, 2026-10-11: an
 // invoice issued 10 days into its period was anchored on the period start,
 // so its first retry was already past and ran at once). Real store, real
-// engine as the clock resolver — the production wiring — so an unpinned
-// invoice resolves to wall-clock through the same path it does live.
+// engine as the clock resolver — the production wiring — so an invoice on no
+// clock is dated at the sweep row's instant, read from the engine's clock, as
+// it is live.
 func TestCollector_FirstRetryCountsFromTheFailure_RealStore(t *testing.T) {
 	h := newCollectHarness(t)
 	dstore := dunning.NewPostgresStore(h.db)
@@ -272,11 +273,7 @@ func TestCollector_FirstRetryCountsFromTheFailure_RealStore(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("upsert policy: %v", err)
 	}
-	// Truncated to the microsecond: Postgres stores timestamps at that
-	// precision, so a time written in the same microsecond as `before`
-	// reads back a few hundred nanoseconds earlier than it and failed the
-	// lower bound below (seen in CI on 2026-10-13). Same in the test after.
-	before := time.Now().UTC().Truncate(time.Microsecond) // the engine's clock is fixed when it is built
+	failedAt := h.clock.Now(h.ctx) // the sweep row's instant: the engine's clock, fixed in the harness
 	svc := dunning.NewService(dstore, nil, nil)
 	e := h.newEng(testPaymentSetupsNoPM{}, testChargerSentinel{}, dunningServiceStarter{svc: svc})
 
@@ -298,16 +295,15 @@ func TestCollector_FirstRetryCountsFromTheFailure_RealStore(t *testing.T) {
 	}
 
 	e.RetryPendingCharges(clock.WithRealTime(h.ctx), 50, nil) // a job's tick, decided at real time as the scheduler decides it
-	after := time.Now().UTC()
 
 	run, err := dstore.GetRunByInvoice(h.ctx, h.tenantID, inv.ID)
 	if err != nil {
 		t.Fatalf("card-less invoice must have a dunning run: %v", err)
 	}
 	grace := 3 * 24 * time.Hour
-	if run.NextActionAt == nil || run.NextActionAt.Before(before.Add(grace)) || run.NextActionAt.After(after.Add(grace)) {
-		t.Errorf("first retry = %v, want failure + 3d, in [%v, %v] (issued %v would give %v)",
-			run.NextActionAt, before.Add(grace), after.Add(grace), issued, issued.Add(grace))
+	if run.NextActionAt == nil || !run.NextActionAt.Equal(failedAt.Add(grace)) {
+		t.Errorf("first retry = %v, want %v, the failure plus 3 days (issued %v would give %v)",
+			run.NextActionAt, failedAt.Add(grace), issued, issued.Add(grace))
 	}
 }
 
