@@ -435,7 +435,7 @@ func (s *Service) AcceptInvite(ctx context.Context, in AcceptInput) (AcceptResul
 		// The route has no session, so the accepting user is the actor and
 		// the row carries the client address. resource_id names the user, not
 		// the email: audit_log cannot be erased.
-		actx := audit.WithClientIP(auth.WithUserID(ctx, res.UserID), in.IP)
+		actx := auth.WithUserID(ctx, res.UserID)
 		if err := s.audit.LogInTx(actx, tx, audit.Entry{
 			Action:       "member.joined",
 			ResourceType: "user",

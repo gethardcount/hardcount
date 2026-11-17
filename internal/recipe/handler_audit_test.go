@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/audit"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 )
 
 // TestRecipePreview_OptsOutOfAudit pins that POST /v1/recipes/{key}/preview —
@@ -19,7 +20,7 @@ func TestRecipePreview_OptsOutOfAudit(t *testing.T) {
 	h := &Handler{svc: &Service{registry: &Registry{}}}
 
 	req := httptest.NewRequest(http.MethodPost, "/v1/recipes/anything/preview", strings.NewReader(`{}`))
-	req = req.WithContext(audit.WithRequestState(req.Context()))
+	req = req.WithContext(requesttest.Context(req.Context()))
 	rec := httptest.NewRecorder()
 
 	h.preview(rec, req)

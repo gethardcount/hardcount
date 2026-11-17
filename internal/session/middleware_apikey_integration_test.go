@@ -10,6 +10,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/platform/request"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -44,11 +45,10 @@ func TestRequireCaller_APIKey(t *testing.T) {
 		t.Helper()
 		var seen *http.Request
 		rec := httptest.NewRecorder()
-		request.Begin(func(r *http.Request) request.Route { return request.Route{Method: r.Method} })(
-			RequireCaller(sessions, svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				seen = r
-				w.WriteHeader(http.StatusOK)
-			}))).ServeHTTP(rec, req)
+		requesttest.Root(RequireCaller(sessions, svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			seen = r
+			w.WriteHeader(http.StatusOK)
+		}))).ServeHTTP(rec, req)
 		return rec, seen
 	}
 

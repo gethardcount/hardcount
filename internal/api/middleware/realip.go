@@ -8,8 +8,8 @@ import (
 )
 
 // TrustedClientIP resolves the client IP with chi's ClientIPFrom* middleware
-// and stores it on the request context. Read it with audit.ExtractClientIP,
-// or with chi's GetClientIP. r.RemoteAddr is left as the TCP peer.
+// and stores it on the request context, where the request's record takes it
+// (request.Record.ClientIP). r.RemoteAddr is left as the TCP peer.
 //
 //   - With trusted proxies, chi's ClientIPFromXFF reads X-Forwarded-For only
 //     when the TCP peer is inside one of them. It merges every header line,
@@ -18,7 +18,7 @@ import (
 //   - With none, chi's ClientIPFromRemoteAddr uses the TCP peer.
 //
 // No other header (X-Real-IP, True-Client-IP) is read. When chi resolves
-// nothing, audit.ExtractClientIP falls back to the TCP peer.
+// nothing, the record falls back to the TCP peer.
 func TrustedClientIP(trusted []*net.IPNet) func(http.Handler) http.Handler {
 	if len(trusted) == 0 {
 		return chimw.ClientIPFromRemoteAddr

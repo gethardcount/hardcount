@@ -15,6 +15,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/api/respond"
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 	"github.com/gethardcount/hardcount/internal/session"
 )
 
@@ -61,11 +62,10 @@ func (h *Handler) SetAuditLogger(a AuditRecorder) { h.auditLogger = a }
 // for a reset) and is filed in test mode, as every account event is: the
 // route has no session, so ctx carries no mode. A failed write is logged and
 // the request still answers.
-func (h *Handler) auditResetRequest(ctx context.Context, r *http.Request, tenantID, userID string) {
+func (h *Handler) auditResetRequest(ctx context.Context, tenantID, userID string) {
 	if h.auditLogger == nil || tenantID == "" {
 		return
 	}
-	ctx = audit.WithClientIP(ctx, audit.ExtractClientIP(r))
 	ctx = postgres.WithLivemode(ctx, false)
 	if err := h.auditLogger.Log(ctx, tenantID, "password_reset_requested", "user", userID, "", nil); err != nil {
 		slog.ErrorContext(ctx, "audit: password reset request row not written", "tenant_id", tenantID, "error", err)
@@ -153,7 +153,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	// The address TrustedClientIP resolved. The failed-login log, the throttle,
 	// the session row and the audit row all use this one value; none of them
 	// reads a forwarding header the client could have written.
-	ip := audit.ExtractClientIP(r)
+	ip := request.Of(r.Context()).ClientIP()
 
 	// The sign-in throttle counts this attempt before the password check, so
 	// a refused attempt costs no account lookup and no bcrypt. It is keyed on
@@ -407,7 +407,7 @@ func (h *Handler) requestPasswordReset(w http.ResponseWriter, r *http.Request) {
 		// STORE its address — neither in the label nor in metadata, where it used
 		// to sit twice. audit_log is append-only, so an email written here could
 		// never be erased; the reader resolves it from the users row, which can.
-		h.auditResetRequest(r.Context(), r, tenantID, targetUserID)
+		h.auditResetRequest(r.Context(), tenantID, targetUserID)
 	} else {
 		// No account matched (or issuance failed): no token exists, nothing was
 		// mutated, and deliberately nothing is written — a row here would turn

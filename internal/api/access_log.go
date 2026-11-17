@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/platform/request"
 	"github.com/go-chi/chi/v5/middleware"
 )
@@ -44,7 +43,7 @@ func requestLogger(next http.Handler) http.Handler {
 			"duration_ms", time.Since(start).Milliseconds(),
 			// Joins this line to the audit row the same request wrote.
 			"request_id", middleware.GetReqID(ctx),
-			"ip", audit.ExtractClientIP(r),
+			"ip", rec.ClientIP(),
 		}
 		if actor := rec.Actor(); actor != (request.Actor{}) {
 			attrs = append(attrs, "actor_type", actor.Type, "actor_id", actor.ID, "tenant_id", actor.TenantID)

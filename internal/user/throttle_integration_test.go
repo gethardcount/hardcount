@@ -14,6 +14,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/gethardcount/hardcount/internal/session"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
@@ -55,7 +56,7 @@ func itHandler(store Store, throttle *LoginThrottle) http.Handler {
 	if throttle != nil {
 		h.SetLoginThrottle(throttle)
 	}
-	return h.Routes()
+	return requesttest.Root(h.Routes())
 }
 
 func itThrottle(t *testing.T, db *postgres.DB) *LoginThrottle {
@@ -252,10 +253,13 @@ func TestLoginThrottle_RowDeletedDuringAnAttempt(t *testing.T) {
 	db, _ := throttleIT(t)
 	th := itThrottle(t, db)
 	ctx := context.Background()
-	attempt := func() (ThrottleVerdict, error) {
+	attempt := func() (v ThrottleVerdict, err error) {
 		r := httptest.NewRequest(http.MethodPost, "/login", nil)
 		r.RemoteAddr = "198.51.100.90:40000"
-		return th.Reserve(r, itEmail)
+		requesttest.Root(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+			v, err = th.Reserve(r, itEmail)
+		})).ServeHTTP(httptest.NewRecorder(), r)
+		return v, err
 	}
 	if v, err := attempt(); err != nil || !v.Allowed {
 		t.Fatalf("first attempt: allowed %v, error %v", v.Allowed, err)

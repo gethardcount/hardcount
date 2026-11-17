@@ -13,6 +13,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 )
 
 func TestIdempotency_NoCaching_WithoutKey(t *testing.T) {
@@ -150,9 +151,9 @@ func TestIdempotency_GET_NotCached(t *testing.T) {
 func TestRateLimiter_NilDB_FailsOpen(t *testing.T) {
 	// With nil db the rate limiter should fail open — every request is allowed.
 	rl := NewRateLimiter(nil, "test", 1, time.Minute, FailOpen)
-	handler := rl.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := requesttest.Root(rl.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}))
+	})))
 
 	for i := 0; i < 5; i++ {
 		req := httptest.NewRequest("GET", "/v1/customers", nil)
@@ -177,9 +178,9 @@ func TestRateLimiter_NilDB_FailsOpen(t *testing.T) {
 
 func TestRateLimiter_NilDB_FailsClosed_WhenConfigured(t *testing.T) {
 	rl := NewRateLimiter(nil, "test", 1, time.Minute, FailClosed)
-	handler := rl.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := requesttest.Root(rl.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
-	}))
+	})))
 
 	req := httptest.NewRequest("GET", "/v1/customers", nil)
 	rec := httptest.NewRecorder()

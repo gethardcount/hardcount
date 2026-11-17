@@ -1,4 +1,4 @@
-package audit_test
+package request
 
 import (
 	"net/http"
@@ -6,16 +6,14 @@ import (
 	"testing"
 
 	chimw "github.com/go-chi/chi/v5/middleware"
-
-	"github.com/gethardcount/hardcount/internal/audit"
 )
 
-// TestExtractClientIP pins the security property: with no client IP resolved
-// on the context (the global TrustedClientIP middleware sets one under its
-// proxy-trust policy), the audit IP is the TCP peer in r.RemoteAddr and NEVER
-// a raw X-Forwarded-For / X-Real-IP value — otherwise any client could forge
-// audit_log.ip_address.
-func TestExtractClientIP(t *testing.T) {
+// TestClientIP pins the security property: with no client IP resolved on the
+// context (the global TrustedClientIP middleware sets one under its
+// proxy-trust policy), the record's client address is the TCP peer in
+// r.RemoteAddr and NEVER a raw X-Forwarded-For / X-Real-IP value — otherwise
+// any client could forge audit_log.ip_address.
+func TestClientIP(t *testing.T) {
 	cases := []struct {
 		name       string
 		remoteAddr string
@@ -55,26 +53,26 @@ func TestExtractClientIP(t *testing.T) {
 			if tc.xRealIP != "" {
 				r.Header.Set("X-Real-IP", tc.xRealIP)
 			}
-			if got := audit.ExtractClientIP(r); got != tc.want {
-				t.Errorf("ExtractClientIP = %q, want %q", got, tc.want)
+			if got := clientIP(r); got != tc.want {
+				t.Errorf("clientIP = %q, want %q", got, tc.want)
 			}
 		})
 	}
 }
 
-// TestExtractClientIP_PrefersResolvedIP: when chi's ClientIPFrom* middleware
+// TestClientIP_PrefersResolvedIP: when chi's ClientIPFrom* middleware
 // resolved an IP, that IP wins over the TCP peer (behind a trusted proxy the
 // peer is the proxy).
-func TestExtractClientIP_PrefersResolvedIP(t *testing.T) {
+func TestClientIP_PrefersResolvedIP(t *testing.T) {
 	var got string
 	h := chimw.ClientIPFromXFF("10.0.0.0/8")(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
-		got = audit.ExtractClientIP(r)
+		got = clientIP(r)
 	}))
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.RemoteAddr = "10.0.0.2:443"
 	r.Header.Set("X-Forwarded-For", "198.51.100.7")
 	h.ServeHTTP(httptest.NewRecorder(), r)
 	if got != "198.51.100.7" {
-		t.Fatalf("ExtractClientIP = %q, want 198.51.100.7", got)
+		t.Fatalf("clientIP = %q, want 198.51.100.7", got)
 	}
 }

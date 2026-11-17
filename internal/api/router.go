@@ -157,11 +157,12 @@ func (s *Server) routes() chi.Router {
 	r := chi.NewRouter()
 	// Finds each request's route for its record (request.Begin).
 	finder := &routeFinder{}
-	// The clock door (clockDoor) runs last in every group, after
-	// authentication, the limiter and the timeout, so it reads a named record
-	// as the caller's tenant and mode, a replay costs no lookup, and its
-	// lookups are bounded. A route's own permission check runs after it, so a
-	// caller without the permission can meet the door's 503 before its 403.
+	// The clock door (clockDoor) runs last in every group: after
+	// authentication, so it looks up the record the request names in the
+	// caller's tenant and mode; after Idempotency, so a replayed request never
+	// reaches it; inside the time limit, so its lookups are bounded. A route's
+	// own permission check runs after it, so a caller without the permission
+	// can meet the door's 503 before its 403.
 	door := &clockDoor{
 		resolver: s.BillingEngine,
 		clock:    s.clk,
@@ -217,9 +218,9 @@ func (s *Server) routes() chi.Router {
 	// response and never buffers the body.
 	//
 	// It is mounted at the root, not on /v1, so it also sees /v1/auth,
-	// /v1/public/*, /v1/webhooks and /v1/bootstrap (ADR-090 RC1). It sits
-	// after RequestID and TrustedClientIP, so the ctx it seeds for every later
-	// audit emission carries the request id and the real client IP.
+	// /v1/public/*, /v1/webhooks and /v1/bootstrap (ADR-090 RC1). The audit
+	// mark it reads, and the client address every audit row records, are on
+	// the request's record.
 	r.Use(mw.AuditCoverage(auditRoute))
 
 	// No global timeout: each group sets its own, and the event stream sets
@@ -516,8 +517,8 @@ func useRequestEdge(r chi.Router, trustProxy string, trustedProxies []*net.IPNet
 	// is read only when the TCP peer is inside TRUST_PROXY, a comma-separated
 	// list of CIDRs or IPs such as "10.0.0.0/8,127.0.0.1". Otherwise, and when
 	// TRUST_PROXY is unset or "none", the client IP is the TCP peer. Rate
-	// limits, audit and session rows, logs and spans all read it through
-	// audit.ExtractClientIP.
+	// limits, audit and session rows, logs and spans all read it from the
+	// request's record.
 	switch {
 	case strings.EqualFold(strings.TrimSpace(trustProxy), "none"):
 		slog.Info("TRUST_PROXY=none — no proxy in front; rate limiting keys on the direct TCP peer")

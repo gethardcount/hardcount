@@ -13,10 +13,10 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 
 	"github.com/gethardcount/hardcount/internal/api/respond"
-	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/platform/logging"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
 // RateLimiter is a distributed rate limiter that runs GCRA (Generic Cell Rate
@@ -221,7 +221,7 @@ func (rl *RateLimiter) bucketKey(key string) string {
 //     and live-mode operations do not share a quota, as at Stripe. Without
 //     the suffix, one operator's heavy test load could throttle another
 //     operator's live action.
-//  3. The trusted client IP (audit.ExtractClientIP), for routes with no
+//  3. The trusted client IP (the record's), for routes with no
 //     sign-in at all: bootstrap, /v1/auth and the public token pages. That
 //     way a flood with no sign-in cannot bypass the limiter.
 func rateLimitKey(r *http.Request) (string, error) {
@@ -239,5 +239,5 @@ func rateLimitKey(r *http.Request) (string, error) {
 		}
 		return "tenant:" + tenantID + ":" + mode, nil
 	}
-	return "ip:" + audit.ExtractClientIP(r), nil
+	return "ip:" + request.Of(r.Context()).ClientIP(), nil
 }

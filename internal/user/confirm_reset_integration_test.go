@@ -15,6 +15,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/gethardcount/hardcount/internal/session"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
@@ -63,7 +64,7 @@ func (it resetIT) service(sessions SessionWriter, auditor AuditTxWriter) *Servic
 }
 
 func (it resetIT) handler(sessions SessionWriter, auditor AuditTxWriter) http.Handler {
-	return NewHandler(it.service(sessions, auditor), session.CookieConfig{Path: "/"}, stubEmailSender{}, "", false).Routes()
+	return requesttest.Root(NewHandler(it.service(sessions, auditor), session.CookieConfig{Path: "/"}, stubEmailSender{}, "", false).Routes())
 }
 
 // confirm posts the reset form with password to a handler whose service

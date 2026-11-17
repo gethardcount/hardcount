@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 	"github.com/gethardcount/hardcount/internal/session"
 )
 
@@ -230,7 +230,7 @@ func (t *LoginThrottle) Reserve(r *http.Request, email string) (ThrottleVerdict,
 	}
 	if !knownBrowser {
 		subjects = []thresholdSubject{
-			{t.subject("pair", audit.ExtractClientIP(r), email), pairThreshold},
+			{t.subject("pair", request.Of(r.Context()).ClientIP(), email), pairThreshold},
 			{account, accountThreshold},
 		}
 	}
@@ -324,7 +324,7 @@ func (t *LoginThrottle) proved(w http.ResponseWriter, r *http.Request, email str
 		}
 		tok = hex.EncodeToString(buf)
 	}
-	cleared := []string{t.subject("pair", audit.ExtractClientIP(r), email)}
+	cleared := []string{t.subject("pair", request.Of(r.Context()).ClientIP(), email)}
 	if clearEmail {
 		cleared = append(cleared, t.subject("account", email))
 	}

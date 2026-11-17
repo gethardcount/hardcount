@@ -21,6 +21,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/gethardcount/hardcount/internal/session"
 	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/user"
@@ -160,6 +161,7 @@ func accountInNoWorkspace(t *testing.T, h *harness, address string) domain.User 
 // and returns the answer.
 func servePublic(h *harness, method, path, body string) *httptest.ResponseRecorder {
 	r := chi.NewRouter()
+	r.Use(requesttest.Root)
 	dashmembers.NewHandler(h.svc, session.CookieConfig{Path: "/"}).RegisterPublicRoutes(r)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(body)))

@@ -16,6 +16,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -234,7 +235,7 @@ func TestCustomerCreateRoute_IsAccountedFor(t *testing.T) {
 	svc.SetAuditLogger(audit.NewLogger(db))
 	router := customer.NewHandler(svc).Routes()
 
-	reqCtx := audit.WithRequestState(auth.WithTenantID(ctx, tenantID))
+	reqCtx := requesttest.Context(auth.WithTenantID(ctx, tenantID))
 	req := httptest.NewRequest(http.MethodPost, "/",
 		strings.NewReader(`{"external_id":"cus_markhandled","display_name":"Handled Co"}`)).WithContext(reqCtx)
 	rec := httptest.NewRecorder()

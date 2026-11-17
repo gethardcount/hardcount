@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/gethardcount/hardcount/internal/platform/request"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 )
 
 // loggablePath returns the matched route's pattern when there is one
@@ -16,8 +16,7 @@ import (
 func TestLoggablePath_IsAPatternOrTheFirstSegment(t *testing.T) {
 	logged := func(req *http.Request) string {
 		var got string
-		request.Begin(func(r *http.Request) request.Route { return request.Route{Method: r.Method} })(
-			http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { got = loggablePath(r) })).
+		requesttest.Root(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { got = loggablePath(r) })).
 			ServeHTTP(httptest.NewRecorder(), req)
 		return got
 	}

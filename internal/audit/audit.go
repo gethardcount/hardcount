@@ -13,6 +13,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/crypto"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -169,7 +170,7 @@ func (l *Logger) Log(ctx context.Context, tenantID, action, resourceType, resour
 
 	actorType, actorID := ResolveActor(ctx)
 
-	ipAddress := ClientIP(ctx)
+	ipAddress := request.ClientIPIfAny(ctx)
 	requestID := chimw.GetReqID(ctx)
 
 	// created_at is wall-clock — the audit row answers "when did the
@@ -414,7 +415,7 @@ func (l *Logger) LogInTx(ctx context.Context, tx *sql.Tx, e Entry) error {
 		VALUES ($1, NULLIF(current_setting('app.tenant_id', true), ''), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 	`, postgres.NewID("hc_aud"), actorType, actorID, e.Action, e.ResourceType,
 		e.ResourceID, e.ResourceLabel, metaJSON,
-		nullIfEmpty(ClientIP(ctx)), nullIfEmpty(chimw.GetReqID(ctx)),
+		nullIfEmpty(request.ClientIPIfAny(ctx)), nullIfEmpty(chimw.GetReqID(ctx)),
 		simAt, clockID, time.Now().UTC())
 	if err != nil {
 		// Count this as OutcomeMutationRefused, not OutcomeRowLost. Returning

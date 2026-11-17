@@ -18,6 +18,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/gethardcount/hardcount/internal/session"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
@@ -59,7 +60,7 @@ func (it loginIT) handler(store Store, auditor AuditTxWriter, throttle *LoginThr
 	if throttle != nil {
 		h.SetLoginThrottle(throttle)
 	}
-	return h.Routes()
+	return requesttest.Root(h.Routes())
 }
 
 // signIn posts the sign-in form from loginITAddress, with the session

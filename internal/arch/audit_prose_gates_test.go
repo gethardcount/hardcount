@@ -97,12 +97,21 @@ var markSkipCallers = map[string]markSkipCaller{
 
 // TestMarkSkipCallers_MatchTheCode is the gate on the class that drifted in all
 // three audit rounds: a hand-maintained list of "who calls MarkSkip" that nobody
-// re-derives when a caller is added.
+// re-derives when a caller is added. It also holds that only the audit package
+// calls request.MarkAudited (the mark MarkSkip and an emitted row set) and
+// request.ClientIPIfAny, the two calls that accept a missing record.
 func TestMarkSkipCallers_MatchTheCode(t *testing.T) {
 	call := regexp.MustCompile(`(?:audit\.)?MarkSkip\(`)
+	auditOnly := regexp.MustCompile(`request\.(?:MarkAudited|ClientIPIfAny)\(`)
 
 	found := map[string]int{}
+	var outsideAudit []string
 	for path, src := range sourceFiles(t) {
+		if !strings.HasPrefix(path, "internal/audit/") {
+			for _, m := range auditOnly.FindAllString(src, -1) {
+				outsideAudit = append(outsideAudit, path+": "+m)
+			}
+		}
 		// The definition itself, and the package's own doc, are not callers.
 		if path == "internal/audit/context.go" {
 			continue
@@ -131,6 +140,17 @@ func TestMarkSkipCallers_MatchTheCode(t *testing.T) {
 	sort.Strings(undeclared)
 	sort.Strings(stale)
 	sort.Strings(miscounted)
+	sort.Strings(outsideAudit)
+
+	if len(outsideAudit) > 0 {
+		t.Errorf(`only the audit package may call request.MarkAudited and request.ClientIPIfAny:
+
+  %s
+
+MarkAudited claims audit coverage with no row behind it, and ClientIPIfAny answers ""
+where a request's record is missing. Outside the audit package, call audit.MarkSkip
+(declared in markSkipCallers) or read request.Of(ctx).ClientIP().`, strings.Join(outsideAudit, "\n  "))
+	}
 
 	if len(undeclared) > 0 {
 		t.Errorf(`%d file(s) call audit.MarkSkip but are NOT declared in markSkipCallers:

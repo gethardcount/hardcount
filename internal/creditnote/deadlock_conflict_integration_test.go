@@ -21,7 +21,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
-	"github.com/gethardcount/hardcount/internal/platform/request"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -101,8 +101,7 @@ func newDeadlockCNRig(t *testing.T, db *postgres.DB, suffix string) *deadlockCNR
 	return &deadlockCNRig{
 		t: t, db: db, ctx: ctx, tenantID: tenantID, inv: inv, svc: svc,
 		invoices: invoices, notes: notes, logger: logger,
-		srv: request.Begin(func(r *http.Request) request.Route { return request.Route{Method: r.Method} })(
-			middleware.Idempotency(db, nil)(creditnote.NewHandler(svc, creditnote.HandlerDeps{}).Routes())),
+		srv: requesttest.Root(middleware.Idempotency(db, nil)(creditnote.NewHandler(svc, creditnote.HandlerDeps{}).Routes())),
 	}
 }
 
