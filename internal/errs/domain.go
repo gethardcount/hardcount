@@ -54,12 +54,15 @@ func (e *DomainError) Is(target error) bool {
 	return e.Kind == target
 }
 
-// New returns a DomainError with code and message, and no Kind.
+// New returns a DomainError with code and message, and no Kind. With no
+// Kind it has no HTTP status of its own: a caller answers it itself, and
+// respond.FromError treats it as a server fault (500).
 func New(code, message string) *DomainError {
 	return &DomainError{Code: code, Message: message}
 }
 
-// Wrap returns a DomainError with code and message that wraps cause.
+// Wrap returns a DomainError with code and message that wraps cause, and no
+// Kind, so respond.FromError treats it as a server fault (500), as for New.
 func Wrap(cause error, code, message string) *DomainError {
 	return &DomainError{Code: code, Message: message, Cause: cause}
 }
