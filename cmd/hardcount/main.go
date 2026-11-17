@@ -214,6 +214,23 @@ func serve() {
 		api.WithInvoiceGrace(cfg.InvoiceGracePeriod),
 		api.WithAppEnv(cfg.Env),
 		api.WithRateLimits(cfg.RateLimits))
+	// Queue-depth gauges, which the Grafana and runbook alerts watch. The
+	// counts run on a TxBypass transaction because they span tenants. Under
+	// the app role's RLS they would always report a healthy-looking 0.
+	mw.RegisterQueueDepthGauges(cfg.InvoiceGracePeriod, func(query string) (float64, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
+		if err != nil {
+			return 0, err
+		}
+		defer postgres.Rollback(tx)
+		var n float64
+		if err := tx.QueryRowContext(ctx, query).Scan(&n); err != nil {
+			return 0, err
+		}
+		return n, nil
+	})
 
 	billingInterval := 1 * time.Hour
 	if cfg.Env == "local" {

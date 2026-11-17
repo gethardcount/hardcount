@@ -8,7 +8,7 @@ import (
 )
 
 // TestMustWired_CoversEveryAuditedComponent pins the audit.MustWired list in
-// router.go against the SetAuditLogger wiring cluster: every component that
+// wire.go against the SetAuditLogger wiring cluster: every component that
 // gets an in-tx audit emitter via <name>.SetAuditLogger(auditLogger) must
 // also appear in the audit.MustWired(...) call, so a future audited domain
 // can't silently skip the boot-time nil check. Source-text based on purpose:
@@ -34,15 +34,15 @@ import (
 // reopen it: MustWired is generic (it reflects the audit field out of any struct),
 // so there is no kind of component it cannot check.
 func TestMustWired_CoversEveryAuditedComponent(t *testing.T) {
-	src, err := os.ReadFile("router.go")
+	src, err := os.ReadFile("wire.go")
 	if err != nil {
-		t.Fatalf("read router.go: %v", err)
+		t.Fatalf("read wire.go: %v", err)
 	}
 	text := string(src)
 
 	mws := regexp.MustCompile(`audit\.MustWired\(([^)]*)\)`).FindAllStringSubmatch(text, -1)
 	if len(mws) == 0 {
-		t.Fatal("audit.MustWired call not found in router.go")
+		t.Fatal("audit.MustWired call not found in wire.go")
 	}
 	wired := map[string]bool{}
 	for _, mw := range mws {
@@ -58,7 +58,7 @@ func TestMustWired_CoversEveryAuditedComponent(t *testing.T) {
 	for _, m := range regexp.MustCompile(`(\w+)\.SetAuditLogger\(auditLogger\)`).FindAllStringSubmatch(text, -1) {
 		recv := m[1]
 		if !wired[recv] {
-			t.Errorf("%s.SetAuditLogger is wired in router.go but %s is missing from audit.MustWired(...) — add it, so that DROPPING that wiring line fails loudly at boot instead of silently un-auditing %s's routes", recv, recv, recv)
+			t.Errorf("%s.SetAuditLogger is wired in wire.go but %s is missing from audit.MustWired(...) — add it, so that DROPPING that wiring line fails loudly at boot instead of silently un-auditing %s's routes", recv, recv, recv)
 		}
 	}
 
@@ -73,7 +73,7 @@ func TestMustWired_CoversEveryAuditedComponent(t *testing.T) {
 	// a hole shaped like the other style.
 	//
 	// THE FIRST VERSION OF THIS CHECK WAS DEAD. It guarded on
-	// `len(literals) > 0 && len(mws) < 2` — and router.go has SIX MustWired calls,
+	// `len(literals) > 0 && len(mws) < 2` — and wire.go has SIX MustWired calls,
 	// so the branch could never fire. Deleting BOTH gates it was supposed to
 	// protect left every test green (mutation-verified). A gate whose condition is
 	// unreachable, under a comment asserting it "fails loudly", is the arc's
