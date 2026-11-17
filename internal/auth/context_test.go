@@ -15,7 +15,7 @@ var (
 )
 
 // A session is a user and no key; a caller with a key is never a session.
-func TestCaller_IsSession(t *testing.T) {
+func TestCaller_IsSessionMeansAUserAndNoKey(t *testing.T) {
 	for _, tc := range []struct {
 		name   string
 		caller Caller
@@ -36,7 +36,7 @@ func TestCaller_IsSession(t *testing.T) {
 
 // A session is named as its user, and a key as the key whoever else is named
 // on it. A caller that is neither has no name.
-func TestCaller_Actor(t *testing.T) {
+func TestCaller_ActorIsTheKeyElseTheUser(t *testing.T) {
 	for _, tc := range []struct {
 		name             string
 		caller           Caller

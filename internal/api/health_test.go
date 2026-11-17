@@ -34,15 +34,10 @@ func (pingConn) Prepare(string) (driver.Stmt, error) { return nil, errors.New("n
 func (pingConn) Close() error                        { return nil }
 func (pingConn) Begin() (driver.Tx, error)           { return nil, errors.New("not supported") }
 
-// TestReadiness_StatusCodeAndBody pins the two halves of the readiness
-// contract that a load balancer and an anonymous caller depend on.
-//
-// A stale billing tick is reported in the body but answers 200: taking the
-// replica out of the balancer does not restart the tick, and on a single
-// replica it turns a background stall into an API outage. A failed database
-// ping answers 503, and the body carries a fixed word, never the driver's
-// error text (which names the database user, database and host).
-func TestReadiness_StatusCodeAndBody(t *testing.T) {
+// Readiness reports a stale billing tick in its body but answers 200, and
+// answers a failed database ping 503 with a fixed word in the body, never the
+// driver's error, which names the database user, database and host.
+func TestReadiness_AStaleTickStays200AndAFailedPingIs503WithNoDetail(t *testing.T) {
 	setScheduler := func(t *testing.T, lastRun time.Time, interval time.Duration) {
 		t.Helper()
 		schedulerMu.Lock()
@@ -84,19 +79,6 @@ func TestReadiness_StatusCodeAndBody(t *testing.T) {
 		}
 	})
 
-	// The real-Postgres TestReadiness_DrainingIs503LivenessStays200 covers
-	// drain through the router; this keeps the 503 pinned in -short runs.
-	t.Run("draining is 503", func(t *testing.T) {
-		setScheduler(t, time.Time{}, 0)
-		t.Cleanup(resetDrainingForTest)
-		SetDraining()
-
-		code, raw, body := get(t, pingConnector{})
-		if code != http.StatusServiceUnavailable || body["status"] != "draining" {
-			t.Fatalf("draining: status = %d, want 503 draining; body %s", code, raw)
-		}
-	})
-
 	t.Run("failed database ping is 503 with no error text", func(t *testing.T) {
 		setScheduler(t, time.Time{}, 0)
 		const detail = "failed to connect to `user=hardcount_app database=hardcount`: 10.0.0.7:5432: connection refused"
@@ -115,4 +97,23 @@ func TestReadiness_StatusCodeAndBody(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestHealth_AnswersOKWithoutADatabase runs /health on a server with no
+// database: liveness must not read it.
+func TestHealth_AnswersOKWithoutADatabase(t *testing.T) {
+	rec := httptest.NewRecorder()
+	newTestServer().ServeHTTP(rec, httptest.NewRequest("GET", "/health", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status: got %d, want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Errorf("Content-Type: got %q, want application/json", ct)
+	}
+	var body map[string]string
+	_ = json.NewDecoder(rec.Body).Decode(&body)
+	if body["status"] != "ok" {
+		t.Errorf("body: got %v", body)
+	}
 }

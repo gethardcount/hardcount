@@ -1,10 +1,15 @@
 package auth
 
 import (
+	"context"
+	"database/sql"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // A key's last_used_at write is due at most once per lastUsedTouchInterval,
@@ -33,7 +38,7 @@ func TestLastUsedDue_OncePerIntervalPerKey(t *testing.T) {
 
 // A key's status at a moment: revoked once revoked, even before its expiry;
 // otherwise expired at or after its expires_at; otherwise active.
-func TestStatusAt(t *testing.T) {
+func TestStatusAt_RevokedElseExpiredFromExpiresAtElseActive(t *testing.T) {
 	now := time.Date(2026, 11, 14, 12, 0, 0, 0, time.UTC)
 	at := func(d time.Duration) *time.Time { v := now.Add(d); return &v }
 	for _, c := range []struct {
@@ -51,6 +56,41 @@ func TestStatusAt(t *testing.T) {
 	} {
 		if got := statusAt(c.key, now); got != c.want {
 			t.Errorf("%s: status %q, want %q", c.name, got, c.want)
+		}
+	}
+}
+
+// noAudit is an AuditWriter for a test that changes no key.
+type noAudit struct{}
+
+func (noAudit) LogInTxFields(context.Context, *sql.Tx, string, string, string, string, map[string]any) error {
+	return nil
+}
+
+// A string that is not a key is refused before any lookup: one of the four
+// type-and-mode prefixes, then exactly 64 lowercase hex characters. The
+// service's store is closed, so a refusal that came from a lookup would be an
+// outage error, not ErrInvalidKey; a well-formed key does reach the store.
+func TestValidateKey_RefusesAStringThatIsNotAKeyBeforeAnyLookup(t *testing.T) {
+	down := testutil.OpenTracedDB(t, nil)
+	_ = down.Pool.Close()
+	keys := NewService(down, noAudit{})
+	secret := strings.Repeat("0123456789abcdef", 4)
+
+	for name, raw := range map[string]string{
+		"no mode (the older format)":  "hc_secret_" + secret,
+		"63 hex characters":           "hc_secret_live_" + secret[1:],
+		"65 hex characters":           "hc_secret_live_" + secret + "a",
+		"uppercase hex":               "hc_ingest_test_" + strings.ToUpper(secret),
+		"a character that is not hex": "hc_secret_test_" + secret[:63] + "g",
+	} {
+		if _, err := keys.ValidateKey(t.Context(), raw); !errors.Is(err, ErrInvalidKey) {
+			t.Errorf("%s: got %v, want ErrInvalidKey without a lookup", name, err)
+		}
+	}
+	for _, raw := range []string{"hc_secret_live_" + secret, "hc_ingest_test_" + secret} {
+		if _, err := keys.ValidateKey(t.Context(), raw); err == nil || errors.Is(err, ErrInvalidKey) {
+			t.Errorf("%s…: got %v, want the lookup's outage error", raw[:15], err)
 		}
 	}
 }

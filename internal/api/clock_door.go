@@ -18,48 +18,22 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
-// clockDoor is "the door": one middleware, the last of every route group,
-// that runs before a request's handler. On a real-time route and a record's
-// route it decides the request's time and binds it, so everything the
-// request does reads one instant. On a decidedIn route it binds nothing: the
-// route names its record in the body or by a token, so the door cannot know
-// that record's clock, and the named function reads the record, then decides
-// and binds.
-//
-// It decides in this order:
-//   - It takes the request's route from its record, found at the root
-//     (routeFinder: an in-memory Find, no database read), and the route's
-//     entry in routeTable.
-//   - A route the router does not have, and a decidedIn route: in test mode
-//     the door records real time with no instant (clock.WithRealTime, one of
-//     the states named on clock.Decision); in live mode it leaves the
-//     context as it is. The router answers an unknown route with 404 or 405.
-//   - Live mode, on a real-time or a record route: a real instant, one read
-//     of the server's clock, and no record is read. Test clocks exist only
-//     in test mode (a CHECK on test_clocks), so no live record is on one.
-//   - Test mode, on a real-time route (one that names no record on a
-//     clock): a real instant, one read of the server's clock.
-//   - Test mode, on a record's route (the customer, subscription or invoice
-//     its path names, or a credit note's or a dunning run's invoice): that
-//     record's test clock and its frozen time, with no read of the server's
-//     clock. A record on no clock, a not-found, or an empty id or one
-//     Postgres cannot read (a NUL, or bytes that are not UTF-8): a real
-//     instant, one read of the server's clock.
-//
-// A request with no mode on its context yet (the routes before
-// authentication, whose mode comes from what they read) is decided as in
-// test mode.
-//
-// A not-found is the record itself, or, in a race with a clock's deletion,
-// its clock, after which the record is on no clock: a real instant is right
-// in both, and the handler answers a missing record with its own 404 after
-// its own checks. A record whose clock cannot be read is answered 503
-// (errs.Unavailable), which the client retries and the idempotency layer
-// does not store; nothing is bound, and the handler does not run.
+// clockDoor is the door: the last step of every group, which binds the
+// instant a request runs on before its handler, from its route's entry in
+// routeTable. A real-time route gets one read of the server's clock. A
+// record's route gets, in test mode, the time of the test clock its record is
+// on, and one read when the record is on none, is not found, or has an id
+// Postgres cannot read; in live mode, where no record is on a clock, one read
+// and no lookup. A decidedIn route gets no instant (in test mode, real time
+// with none): its named function decides after it reads its record. So does a
+// request whose route is not in routeTable, which the router answers 404 or
+// 405. A request with no mode yet counts as test mode.
+// A clock that cannot be read is answered 503, which the client retries and
+// Idempotency does not keep, and the handler does not run.
 type clockDoor struct {
 	resolver clock.Resolver
-	// clock is the server's clock, the router's: the door reads real time
-	// from it once per request.
+	// clock is the server's clock: the door reads real time from it at most
+	// once per request.
 	clock clock.Clock
 	// creditNoteInvoice and dunningRunInvoice read the invoice a credit note
 	// or a dunning run belongs to.
@@ -67,8 +41,8 @@ type clockDoor struct {
 	dunningRunInvoice func(ctx context.Context, tenantID, id string) (string, error)
 }
 
-// Middleware is the door. router.go says where it sits in each group, and
-// why.
+// Middleware is the door (docs/architecture.md#the-path-of-a-request says
+// why it ends every group).
 func (d *clockDoor) Middleware(next http.Handler) http.Handler {
 	return doorHandler{door: d, next: next}
 }
@@ -81,15 +55,11 @@ type doorHandler struct {
 }
 
 func (h doorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	decl, params, routed := h.door.route(r)
-	// No mode on the context yet (a route before authentication) is
-	// treated as test mode.
+	entry, routed := routeTable[routeKeyOf(r.Context())]
+	decl, params := entry.clock, request.Of(r.Context()).Route().Params
 	live, err := postgres.Livemode(r.Context())
 	live = err == nil && live
 	if !routed || decl.Source == clockDecidedIn {
-		// The router answers an unknown route itself; a decidedIn
-		// route's function decides and binds once it has read its
-		// record.
 		if !live {
 			r = r.WithContext(clock.WithRealTime(r.Context()))
 		}
@@ -97,8 +67,7 @@ func (h doorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if live {
-		// No live record is on a test clock: a real instant, one read of
-		// the server's clock, and no record is read.
+		// Test clocks exist only in test mode (a CHECK on test_clocks).
 		h.next.ServeHTTP(w, r.WithContext(clock.EnsureEffectiveNow(r.Context(), h.door.clock)))
 		return
 	}
@@ -109,10 +78,11 @@ func (h doorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case errors.Is(err, errUnknownClockSource):
-		// A route table entry the door does not know: a server fault.
 		respond.InternalError(w, r)
 		return
 	case errors.Is(err, errs.ErrNotFound):
+		// The record, or in a race with its clock's deletion the clock: the
+		// handler answers a missing record with its own 404.
 		ctx = clock.WithRealTime(r.Context())
 	case err != nil:
 		// The clock could not be read: refuse, so the work never runs on
@@ -121,18 +91,7 @@ func (h doorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			fmt.Sprintf("The test clock of %s could not be read. Nothing was done; send the request again.", record), err), "record")
 		return
 	}
-	// A record's clock carries its instant; otherwise a real instant,
-	// one read of the server's clock.
 	h.next.ServeHTTP(w, r.WithContext(clock.EnsureEffectiveNow(ctx, h.door.clock)))
-}
-
-// route is the request's clock declaration in routeTable and its path
-// parameters, from the request's record: false when the request matched no
-// route.
-func (d *clockDoor) route(r *http.Request) (clockDecl, *chi.Context, bool) {
-	rt := request.Of(r.Context()).Route()
-	decl, ok := routeTable[routeKey{Method: rt.Method, Pattern: rt.Pattern}]
-	return decl.clock, rt.Params, ok
 }
 
 // errUnknownClockSource is pinFor's answer for a route table entry whose
@@ -172,12 +131,10 @@ func (d *clockDoor) pinFor(ctx context.Context, entry clockDecl, params *chi.Con
 }
 
 // readableID reports whether id can name a record: not empty, and text
-// Postgres can read (UTF-8 with no NUL). chi matches an empty parameter in
-// the middle of a path (/v1/subscriptions//cancel), and an escaped NUL or
-// stray byte reaches the parameter decoded. A read with such an id fails
-// with an error that is not a not-found, which would be a 503 a client
-// retries for ever; the handler answers it instead, as it would without the
-// door.
+// Postgres can read (UTF-8 with no NUL). chi matches an empty parameter
+// (/v1/subscriptions//cancel) and decodes an escaped NUL or stray byte into
+// it. A read with such an id fails with an error that is not a not-found, a
+// 503 a client would retry for ever, so the door leaves it to the handler.
 func readableID(id string) bool {
 	return id != "" && utf8.ValidString(id) && !strings.ContainsRune(id, 0)
 }

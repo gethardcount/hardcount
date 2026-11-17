@@ -78,12 +78,12 @@ but its entry was not: delete the entry or update its pattern. Keys are
 canonical chi patterns (canonicalRoute), with their {placeholders}. A stale
 audit entry silently exempts whatever route later takes that pattern.`)
 	report(unaudited, `mutating route(s) declare no audit. Decide each one's audit story and add it
-with .with(...):
+with .withAudit(...):
 
   - explicit(note): the route emits a real audit row. Emit it IN the business
     transaction (audit.Logger.LogInTx on the caller's *sql.Tx), so the change
-    and its evidence commit or roll back together (ADR-090), and name the
-    emission site in the note.
+    and its evidence commit or roll back together (ADR-090). The note starts
+    with the function that writes the row, as package.Type.Method.
   - exempt(reason, note): the route writes no audit row, on purpose. reason is
     one of the closed enum (non_mutating_preview, machine_ingest,
     system_endpoint, webhook_owned), and the note says why and records any
@@ -94,7 +94,7 @@ compliance log, the row you did not write cannot be recovered later.`)
 	report(unauditedExports, `export route(s) under /v1/exports declare no audit. A route that hands an
 operator bulk tenant data must emit an action=export audit row before it streams
 a byte, and fail closed if that row cannot be written (exportsHandler.auditExport),
-then declare it with .with(explicit(...)). A row written when the stream
+then declare it with .withAudit(explicit(...)). A row written when the stream
 completes is no substitute: killing the connection mid-stream defeats it.`)
 	report(strayAudits, `route(s) that neither change state nor export declare an audit. Only mutating
 routes and the GET routes under /v1/exports carry one; remove it.`)
@@ -102,10 +102,10 @@ routes and the GET routes under /v1/exports carry one; remove it.`)
 
 // TestRouteTable_DeclarationsAreWhole: each entry says what its parts need,
 // and nothing else. A key is canonical. A record's clock parameter is in its
-// route's pattern, and a deciding function exists. An audit names its site or
-// justifies its exemption with a reason from the closed enum, and an export's
-// audit is explicit: there is no honest exempt reason for handing out a whole
-// table with no record.
+// route's pattern, and a deciding function exists. An explicit audit's note
+// starts with a function that exists; an exempt one has a reason from the
+// closed list, and only a state-changing route is exempt: there is no honest
+// reason for handing out a whole table with no record.
 func TestRouteTable_DeclarationsAreWhole(t *testing.T) {
 	validReasons := map[exemptReason]bool{
 		reasonNonMutatingPreview: true,
@@ -128,8 +128,8 @@ func TestRouteTable_DeclarationsAreWhole(t *testing.T) {
 				t.Errorf("%s: the record's parameter %q must be in the pattern, and no function named; has %+v", name, c.Param, c)
 			}
 		case clockDecidedIn:
-			if c.In == "" || c.Param != "" {
-				t.Errorf("%s: decidedIn names a function and no parameter; has %+v", name, c)
+			if c.In == "" || c.Param != "" || strings.Count(c.In, ".") != 2 {
+				t.Errorf("%s: decidedIn names a function as package.Type.Method, and no parameter; has %+v", name, c)
 			} else if err := functionExists(c.In); err != nil {
 				t.Errorf("%s: %v", name, err)
 			}
@@ -141,12 +141,17 @@ func TestRouteTable_DeclarationsAreWhole(t *testing.T) {
 			continue
 		}
 		if strings.TrimSpace(a.Note) == "" {
-			t.Errorf("%s: empty audit note. An explicit entry names its emission site; an exempt entry justifies itself.", name)
+			t.Errorf("%s: empty audit note. An explicit entry names the function that writes the row; an exempt entry says why there is none.", name)
 		}
 		switch a.Coverage {
 		case auditExplicit:
 			if a.Reason != "" {
 				t.Errorf("%s: explicit audit carries exempt reason %q", name, a.Reason)
+			}
+			if words := strings.Fields(a.Note); len(words) > 0 {
+				if err := functionExists(strings.TrimSuffix(words[0], ".")); err != nil {
+					t.Errorf("%s: an explicit note starts with the function that writes the row: %v", name, err)
+				}
 			}
 		case auditExempt:
 			if !validReasons[a.Reason] {
@@ -161,9 +166,8 @@ func TestRouteTable_DeclarationsAreWhole(t *testing.T) {
 	}
 }
 
-// TestRouteTable_ExemptionsStaySmall makes the exempt list a thing you
-// have to look at. It is not a cap on correctness — it is a tripwire: if this
-// number grows, someone is exempting routes to make the gate quiet.
+// TestRouteTable_ExemptionsStaySmall pins how many routes each exempt reason
+// covers, so an exemption added to quiet the detector shows in review.
 func TestRouteTable_ExemptionsStaySmall(t *testing.T) {
 	byReason := map[exemptReason][]string{}
 	explicitN := 0
@@ -179,25 +183,11 @@ func TestRouteTable_ExemptionsStaySmall(t *testing.T) {
 		explicitN++
 	}
 
-	// The population as of the uninstall (ADR-090). Bump DELIBERATELY.
 	want := map[exemptReason]int{
-		reasonSystemEndpoint: 4, // /metrics × POST/PUT/PATCH/DELETE (r.Handle expands to every method)
-		// usage-events {single, batch} + litellm spend. NOT backfill: an
-		// operator inserting BACKDATED usage changes what a customer is billed
-		// for a period that may already have closed — a money-path action, and
-		// it emits (usage.Service.Backfill → IngestAudited).
-		reasonMachineIngest:      3,
+		reasonSystemEndpoint:     4, // /metrics: POST, PUT, PATCH, DELETE
+		reasonMachineIngest:      3, // usage events, their batch, the LiteLLM callback
 		reasonNonMutatingPreview: 2, // invoice create_preview, recipe preview
-		// NOTE: there is no `bootstrap` reason at all any more — the constant is
-		// deleted, so exempt("bootstrap") no longer compiles. POST /v1/bootstrap
-		// is explicit: it mints a LIVE secret key and the owner account, and emits
-		// its provisioning rows on its own tx.
-		// Inbound provider webhooks: Stripe payments + Postmark email
-		// delivery reports (ADR-098). Both machine-driven with no
-		// operator to attribute; their effects live in provider-truth
-		// state + outbox events, with the accepted losses recorded on
-		// each entry.
-		reasonWebhookOwned: 2,
+		reasonWebhookOwned:       2, // Stripe, Postmark
 	}
 	for reason, n := range want {
 		if got := len(byReason[reason]); got != n {
@@ -220,9 +210,8 @@ func TestRouteTable_ExemptionsStaySmall(t *testing.T) {
 	t.Logf("route table: %d explicit audits, %d exempt", explicitN, exemptN)
 }
 
-// TestCanonicalRoute pins the normalizations that let chi.Walk's patterns and
-// Find's meet on one key.
-func TestCanonicalRoute(t *testing.T) {
+// canonicalRoute makes chi.Walk's patterns and Find's meet on one key.
+func TestCanonicalRoute_MakesWalkAndFindPatternsMeet(t *testing.T) {
 	tests := []struct {
 		name string
 		in   string
@@ -269,14 +258,76 @@ func TestAuditRoute_ExemptOnlyForDeclaredRoutes(t *testing.T) {
 	}
 }
 
-// functionExists finds the method package.Type.Method in internal/<package>,
-// outside its tests.
+// On real URLs, as the root's record finds them, only a route marked
+// showsSecretOnce answers with a show-once secret: every marked route with
+// concrete ids is, and the near misses around them are not.
+func TestAnswersWithShowOnceSecret_OnlyOnAMarkedRoute(t *testing.T) {
+	for _, tc := range []struct {
+		method, path string
+		want         bool
+	}{
+		{"POST", "/v1/api-keys", true},
+		{"POST", "/v1/api-keys/", true},
+		{"POST", "/v1/api-keys/hc_key_dbs004jmajdrc1h3298g/rotate", true},
+		// chi matches an empty id; the handler refuses it, and the refusal
+		// is not kept (TestE2E_APIKeyIssue_SecretIsNotStoredForReplay).
+		{"POST", "/v1/api-keys//rotate", true},
+		// chi routes on the escaped path, so an id holding an escaped slash
+		// finds the rotate route, as the handler does.
+		{"POST", "/v1/api-keys/a%2Fb/rotate", true},
+		{"POST", "/v1/customers/hc_cus_dakhnk2q3gpgqfoq5c0g/rotate-cost-dashboard-token", true},
+		{"POST", "/v1/customers/hc_cus_dakhnk2q3gpgqfoq5c0g/payment-methods/setup-session", true},
+		{"POST", "/v1/webhook-endpoints/endpoints", true},
+		{"POST", "/v1/webhook-endpoints/endpoints/hc_whe_danslg2q3gpgqfoq5c80/rotate-secret", true},
+
+		{"GET", "/v1/api-keys", false},
+		{"PATCH", "/v1/api-keys", false},
+		{"DELETE", "/v1/api-keys/hc_key_a", false},
+		{"POST", "/v1/api-keysx", false},
+		{"POST", "/v1/api-keys/hc_key_a", false},
+		{"POST", "/v1/api-keys/hc_key_a/rotate/extra", false},
+		// The /api-keys mount matches but its sub-router has no such route, so
+		// the ordinary group runs and its 404 is kept for a replay; no handler
+		// runs, so no secret is involved.
+		{"POST", "/v1/api-keys/hc_key_a/rotate/", false},
+		{"POST", "/v1/customers", false},
+		{"POST", "/v1/customers/hc_cus_a/payment-methods", false},
+		{"POST", "/v1/webhook-endpoints/endpoints/hc_whe_a/test", false},
+		{"PATCH", "/v1/webhook-endpoints/endpoints/hc_whe_a", false},
+		{"POST", "/v2/api-keys", false},
+	} {
+		if got := answersWithShowOnceSecret(lookedUp(tc.method, tc.path)); got != tc.want {
+			t.Errorf("%s %s: %v, want %v", tc.method, tc.path, got, tc.want)
+		}
+	}
+}
+
+// isMutatingMethod reports whether a method can change state.
+func isMutatingMethod(m string) bool {
+	switch m {
+	case "POST", "PUT", "PATCH", "DELETE":
+		return true
+	}
+	return false
+}
+
+// auditEgressPrefix is the subtree whose GET routes take data out and so
+// declare their audit.
+const auditEgressPrefix = "/v1/exports"
+
+// functionExists finds package.Type.Method, or package.Function, in
+// internal/<package>, outside its tests.
 func functionExists(name string) error {
 	parts := strings.Split(name, ".")
-	if len(parts) != 3 {
-		return fmt.Errorf("%q is not package.Type.Method", name)
+	var decl *regexp.Regexp
+	switch len(parts) {
+	case 2:
+		decl = regexp.MustCompile(`(?m)^func ` + parts[1] + `\(`)
+	case 3:
+		decl = regexp.MustCompile(`(?m)^func \(\w+ \*?` + parts[1] + `\) ` + parts[2] + `\(`)
+	default:
+		return fmt.Errorf("%q is not package.Type.Method or package.Function", name)
 	}
-	decl := regexp.MustCompile(`(?m)^func \(\w+ \*?` + parts[1] + `\) ` + parts[2] + `\(`)
 	files, err := filepath.Glob(filepath.Join("..", parts[0], "*.go"))
 	if err != nil || len(files) == 0 {
 		return fmt.Errorf("%s: no package internal/%s", name, parts[0])
@@ -293,5 +344,5 @@ func functionExists(name string) error {
 			return nil
 		}
 	}
-	return fmt.Errorf("%s: no such method in internal/%s", name, parts[0])
+	return fmt.Errorf("%s: no such function in internal/%s", name, parts[0])
 }

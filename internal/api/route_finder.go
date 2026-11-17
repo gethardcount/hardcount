@@ -9,17 +9,13 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
-// routeFinder finds each request's route for its record (request.Begin):
-// one Find on the built router, which gives the route's pattern and fills
-// its path parameters before any group's middleware or mounted sub-router
-// runs (TestRouteFinder_FindsEveryRouteAndItsParams). The pattern is kept
-// only when routeTable holds the route, so a path that matches no route,
-// and a mount asked for a method its sub-router lacks, have none.
-//
-// It runs above the Recoverer (routes() says why), where a panic is not
-// recovered by ours and net/http drops the connection. So it must not be
-// able to panic for a request: Find on the built router reads only the
-// method and the path, and nothing here is nil that a request can make nil.
+// routeFinder finds each request's route for its record (request.Begin): one
+// Find on the built router gives its pattern and path parameters before any
+// group runs. The pattern is kept only when routeTable has the route, so a
+// path no route matches, and a mount asked for a method its sub-router lacks,
+// get none. It runs above the Recoverer, where a panic drops the connection,
+// so it must not panic for a request: Find reads only the method and the
+// path, and nothing here is nil that a request can make nil.
 type routeFinder struct {
 	// root is the built router, set once every route is registered.
 	root chi.Routes

@@ -664,7 +664,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	ingestLimiter := mw.NewRateLimiter(rdb, "ingest", o.rateLimits.IngestPerSecond, time.Second, mw.FailOpen)
 	// The public pages: 60 a minute per address, room for about ten customers
 	// behind one NAT. The Redis key keeps its first name, "hosted_invoice".
-	hostedInvoiceRL := mw.NewRateLimiter(rdb, "hosted_invoice", 60, time.Minute, failClosedInProd)
+	publicPageLimiter := mw.NewRateLimiter(rdb, "hosted_invoice", 60, time.Minute, failClosedInProd)
 	// One setup-link email per customer a minute, against a double click. An
 	// outage risks only a second email, so it fails open.
 	setupLinkCooldown := mw.NewRateLimiter(rdb, "setup_link", 1, time.Minute, mw.FailOpen)
@@ -718,7 +718,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	s.bootstrapLimiter = bootstrapLimiter
 	s.authLimiter = authLimiter
 	s.ingestLimiter = ingestLimiter
-	s.hostedInvoiceRL = hostedInvoiceRL
+	s.publicPageLimiter = publicPageLimiter
 	s.opts = o
 	s.settings = srv
 	return s

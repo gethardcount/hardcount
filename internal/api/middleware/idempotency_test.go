@@ -113,10 +113,10 @@ func TestRequestCaller(t *testing.T) {
 // rather than being stored under a fingerprint that names no caller.
 func TestIdempotency_NoCallerIsRefused(t *testing.T) {
 	var calls int
-	handler := Idempotency(nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	handler := requesttest.Root(Idempotency(nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
 		w.WriteHeader(http.StatusCreated)
-	}))
+	})))
 	req := httptest.NewRequest("POST", "/v1/customers", strings.NewReader(`{}`))
 	req.Header.Set("Idempotency-Key", "idem-no-caller")
 	req = req.WithContext(postgres.WithLivemode(auth.WithTenantID(req.Context(), "t1"), false))

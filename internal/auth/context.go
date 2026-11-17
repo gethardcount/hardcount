@@ -27,9 +27,8 @@ func (c Caller) IsSession() bool {
 }
 
 // Actor names c in the audit log's actor_type words: "user" and the user's
-// id for a session (IsSession), "api_key" and the key's id for any caller
-// with a key, and "", "" for neither. A new name needs every actor_type CHECK
-// widened (audit.ResolveActor).
+// id for a session, "api_key" and the key's id for any caller with a key,
+// and "", "" for neither. audit.ResolveActor says what a new name needs.
 func (c Caller) Actor() (actorType, id string) {
 	switch {
 	case c.IsSession():
@@ -78,17 +77,17 @@ func WithUserID(ctx context.Context, id string) context.Context {
 	return WithCaller(ctx, c)
 }
 
-// CustomerActorID returns the customer a public customer page set as the
-// request's actor (WithCustomerActor), or "" when no customer acted.
-// audit.Logger reads it to write actor_type 'customer'.
+// CustomerActorID returns the customer WithCustomerActor put on ctx, or ""
+// when none.
 func CustomerActorID(ctx context.Context) string {
 	v, _ := ctx.Value(customerActorKey).(string)
 	return v
 }
 
-// WithCustomerActor returns ctx carrying a customer as the request's actor,
-// so the audit row of what a customer did names them (actor_type 'customer')
-// rather than 'system' (ADR-090).
+// WithCustomerActor returns ctx with customerID as the actor, for work a
+// customer did: on a public page, or in the Stripe event such a page caused.
+// audit.ResolveActor then names the customer (actor_type 'customer') ahead
+// of any caller.
 func WithCustomerActor(ctx context.Context, customerID string) context.Context {
 	return context.WithValue(ctx, customerActorKey, customerID)
 }

@@ -86,7 +86,7 @@ type ctxKey struct{}
 // as route finds it, its client address, and the writer that records its
 // status. The address is taken once, here, so Begin must be mounted below
 // mw.TrustedClientIP; above it, every reader would get the TCP peer, one
-// rate-limit bucket and one throttle key per proxy (TestRequestEdge_ClientIP).
+// rate-limit bucket and one throttle key per proxy (TestRequestEdge_ClientIPReadsForwardingOnlyFromATrustedProxy).
 // The writer never buffers: its Write passes through, and chi's typed wrappers
 // keep http.Flusher, http.Hijacker and io.ReaderFrom, so a streaming route
 // (the CSV exports) still streams instead of collecting its answer in

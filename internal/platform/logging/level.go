@@ -3,8 +3,9 @@
 // it, so it lives outside the HTTP packages.
 //
 // It is not in internal/platform/telemetry, which holds the rest of the
-// logging code, because telemetry imports internal/auth, and auth's
-// middleware calls ErrorLevel. Putting it there would be an import cycle.
+// logging code, because telemetry imports internal/auth, auth imports
+// internal/api/respond, and respond calls ErrorLevel. Putting it there would
+// be an import cycle.
 package logging
 
 import (
