@@ -4,7 +4,6 @@ import (
 	"crypto/subtle"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 
 	"github.com/gethardcount/hardcount/internal/api/respond"
@@ -45,9 +44,8 @@ func SecurityHeaders(appEnv string) func(http.Handler) http.Handler {
 // stops holding once a load balancer makes every caller a private address.
 // It refuses the scrape rather than the boot, so an install that does not
 // scrape metrics keeps billing through the upgrade. appEnv is
-// config.Config.Env.
-func MetricsAuth(appEnv string, next http.Handler) http.Handler {
-	token := strings.TrimSpace(os.Getenv("METRICS_TOKEN"))
+// config.Config.Env, and token is METRICS_TOKEN (config.Server.MetricsToken).
+func MetricsAuth(appEnv, token string, next http.Handler) http.Handler {
 	prod := appEnv == "production"
 	if token == "" && prod {
 		slog.Warn("METRICS_TOKEN not set — /metrics answers 401 in production. Set METRICS_TOKEN and have Prometheus send it as a bearer token")

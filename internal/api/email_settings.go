@@ -12,6 +12,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/api/respond"
 	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/config"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/email"
 	"github.com/gethardcount/hardcount/internal/errs"
@@ -69,16 +70,15 @@ type emailSettingsAudit interface {
 	Log(ctx context.Context, tenantID, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
 }
 
-// emailLinkEnvs reads the link env vars once at boot: the same values the
+// emailLinkEnvs reports which link settings are set: the same values the
 // boot warnings report.
-func emailLinkEnvs(getenv func(string) string) []emailLinkEnv {
-	set := func(k string) bool { return strings.TrimSpace(getenv(k)) != "" }
+func emailLinkEnvs(srv config.Server) []emailLinkEnv {
 	return []emailLinkEnv{
-		{Env: "HOSTED_INVOICE_BASE_URL", Set: set("HOSTED_INVOICE_BASE_URL"),
+		{Env: "HOSTED_INVOICE_BASE_URL", Set: srv.HostedInvoiceBaseURL != "",
 			Effect: "Invoice, receipt and reminder emails go out without a link to view and pay the invoice, and the invoice page has no Pay button."},
-		{Env: "PAYMENT_UPDATE_URL", Set: set("PAYMENT_UPDATE_URL"),
+		{Env: "PAYMENT_UPDATE_URL", Set: srv.PaymentUpdateURL != "",
 			Effect: "Emails asking a customer to add a payment method can't be sent."},
-		{Env: "DASHBOARD_BASE_URL", Set: set("DASHBOARD_BASE_URL"),
+		{Env: "DASHBOARD_BASE_URL", Set: srv.DashboardBaseURL != "",
 			Effect: "Password reset and team invite emails can't be sent."},
 	}
 }

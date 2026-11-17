@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"net/url"
-	"os"
 	"regexp"
 	"strings"
 	"time"
@@ -102,6 +102,7 @@ type Server struct {
 	ingestLimiter       *mw.RateLimiter
 	hostedInvoiceRL     *mw.RateLimiter
 	opts                serverOptions
+	settings            config.Server
 
 	// Exported so main.go can wire the billing scheduler and dunning.
 	BillingEngine    *billing.Engine
@@ -175,18 +176,12 @@ func (s *Server) routes() chi.Router {
 	r.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
 		respond.MethodNotAllowed(w, req, allow.methods(req.URL))
 	})
-	useRequestEdge(r, os.Getenv("TRUST_PROXY"))
-	corsEnv := os.Getenv("CORS_ALLOWED_ORIGINS")
-	if corsEnv == "" {
-		corsEnv = "http://localhost:3000,http://localhost:5173,http://localhost:5174"
-	}
-	// Parse the origins once, for both consumers (CORS and the CSRF origin
-	// allowlist), with the parser behind the boot check. Both match entries
+	useRequestEdge(r, s.settings.TrustProxy, s.settings.TrustedProxies())
+	// The origins, parsed once for both consumers (CORS and the CSRF origin
+	// allowlist) with the parser behind the boot check. Both match entries
 	// exactly, so entries are trimmed ("a, b" must allow "b") and blank ones
-	// are dropped (a blank entry would match a request with no Origin). The
-	// error is ignored. config.Load already refused to start on it, and the
-	// list returned with it holds only the usable entries.
-	allowedOrigins, _ := config.ParseCORSOrigins(corsEnv)
+	// are dropped (a blank entry would match a request with no Origin).
+	allowedOrigins := s.settings.CORSOrigins()
 	r.Use(mw.CORS(allowedOrigins))
 	r.Use(mw.Metrics())
 	r.Use(requestLogger)
@@ -234,7 +229,7 @@ func (s *Server) routes() chi.Router {
 	// Public
 	r.With(door.Middleware).Get("/health", handleHealth)
 	r.With(door.Middleware).Get("/health/ready", handleDeepHealth(s.db))
-	r.With(door.Middleware).Handle("/metrics", mw.MetricsAuth(s.opts.appEnv, mw.MetricsHandler()))
+	r.With(door.Middleware).Handle("/metrics", mw.MetricsAuth(s.opts.appEnv, s.settings.MetricsToken, mw.MetricsHandler()))
 
 	// Bootstrap is the one-time setup: no auth, and it works only while no
 	// tenant exists. The deps let tenant.RunBootstrap create the owner user
@@ -535,7 +530,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // trace span, the server-minted request id, the trusted client IP and the
 // span correction. Anything after it may answer without routing, as a CORS
 // preflight does, so the span correction must sit here.
-func useRequestEdge(r chi.Router, trustProxy string) {
+func useRequestEdge(r chi.Router, trustProxy string, trustedProxies []*net.IPNet) {
 	r.Use(mw.Tracing())
 	// Use mw.RequestID, not chi's middleware.RequestID. chi's honours an
 	// inbound X-Request-Id header as sent, which would let a caller choose the
@@ -549,7 +544,6 @@ func useRequestEdge(r chi.Router, trustProxy string) {
 	// TRUST_PROXY is unset or "none", the client IP is the TCP peer. Rate
 	// limits, audit and session rows, logs and spans all read it through
 	// audit.ExtractClientIP.
-	trustedProxies := mw.ParseTrustedProxies(trustProxy)
 	switch {
 	case strings.EqualFold(strings.TrimSpace(trustProxy), "none"):
 		slog.Info("TRUST_PROXY=none — no proxy in front; rate limiting keys on the direct TCP peer")

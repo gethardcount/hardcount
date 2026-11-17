@@ -31,6 +31,20 @@ var configOwnedSettings = map[string]bool{
 	"DB_CONN_MAX_IDLE_TIME_SEC":            true,
 	"DB_PING_TIMEOUT_SEC":                  true,
 	"DB_QUERY_TIMEOUT_MS":                  true,
+	// The API server's settings (config.Server). HOSTED_INVOICE_BASE_URL is
+	// not here yet: internal/email/sender.go still reads it itself.
+	"HARDCOUNT_ENCRYPTION_KEY":  true,
+	"HARDCOUNT_EMAIL_BIDX_KEY":  true,
+	"DASHBOARD_BASE_URL":        true,
+	"CUSTOMER_PORTAL_URL":       true,
+	"PAYMENT_UPDATE_URL":        true,
+	"PAYMENT_UPDATE_RETURN_URL": true,
+	"HARDCOUNT_API_BASE_URL":    true,
+	"POSTMARK_WEBHOOK_USER":     true,
+	"POSTMARK_WEBHOOK_PASS":     true,
+	"TRUST_PROXY":               true,
+	"CORS_ALLOWED_ORIGINS":      true,
+	"METRICS_TOKEN":             true,
 }
 
 // TestConfigOwnedSettings_ReadOnlyInConfig fails on any non-test call outside
@@ -61,7 +75,7 @@ func TestConfigOwnedSettings_ReadOnlyInConfig(t *testing.T) {
 						getenvCalls++
 					}
 				}
-				if inConfig {
+				if inConfig || !readsEnv(call.Fun) {
 					return true
 				}
 				for _, arg := range call.Args {
@@ -82,4 +96,20 @@ func TestConfigOwnedSettings_ReadOnlyInConfig(t *testing.T) {
 	if getenvCalls < 20 {
 		t.Fatalf("found only %d os.Getenv calls under internal/ and cmd/; did the walk break?", getenvCalls)
 	}
+}
+
+// readsEnv reports whether fn names an env read: os.Getenv, os.LookupEnv or a
+// package's own envOr-style helper. A call that only names a setting, such as
+// an error that says which one is unset, is not a read.
+func readsEnv(fn ast.Expr) bool {
+	var name string
+	switch f := fn.(type) {
+	case *ast.Ident:
+		name = f.Name
+	case *ast.SelectorExpr:
+		name = f.Sel.Name
+	default:
+		return false
+	}
+	return strings.Contains(strings.ToLower(name), "env")
 }
