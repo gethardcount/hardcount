@@ -71,6 +71,14 @@ func TestActivityEffectiveAt_FillAndRollback(t *testing.T) {
 	if got, want := times("effective_at"), "em_clk=09-01 00:00 em_real=11-02 10:00 pi_clk=09-01 00:00 pi_real=11-02 10:00"; got != want {
 		t.Errorf("effective_at after Up: %s, want %s", got, want)
 	}
+	var left string
+	if err := db.QueryRow(`SELECT COALESCE(string_agg(table_name::text, ' ' ORDER BY table_name), '') FROM information_schema.columns
+		WHERE column_name = 'sim_effective_at' AND table_name IN ('email_outbox', 'invoice_charge_attempts')`).Scan(&left); err != nil {
+		t.Fatal(err)
+	}
+	if left != "" {
+		t.Errorf("sim_effective_at still on %v after Up (00237 drops it)", left)
+	}
 
 	// Rows as this version writes them on a test clock: effective_at, and no
 	// sim_effective_at.
