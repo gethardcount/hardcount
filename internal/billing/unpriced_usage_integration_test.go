@@ -52,6 +52,20 @@ func unpricedGrowth(t *testing.T) func() float64 {
 	return func() float64 { return read() - before }
 }
 
+// hasUnpricedWarn reports whether logs hold a "usage matched no price" WARN
+// line naming meter by id and event name, with quantity qty.
+func hasUnpricedWarn(logs string, meter domain.Meter, qty string) bool {
+	for _, line := range strings.Split(logs, "\n") {
+		if strings.Contains(line, "usage matched no price of its plan") &&
+			strings.Contains(line, "meter_id="+meter.ID+" ") &&
+			strings.Contains(line, "meter="+meter.EventName+" ") &&
+			strings.Contains(line, "quantity="+qty+" ") {
+			return true
+		}
+	}
+	return false
+}
+
 // tokensMeter creates a sum meter. Its plans price it with modelA alone, so
 // model=b usage matches no price.
 func tokensMeter(t *testing.T, ctx context.Context, f *thresholdFixture, key string) domain.Meter {
@@ -226,6 +240,7 @@ func TestUnpricedUsage_CycleClose_CountsEachMeter(t *testing.T) {
 	f := newThresholdFixture(t, "Unpriced Cycle")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 120*time.Second)
 	defer cancel()
+	logs := captureLogs(t)
 	unpriced := unpricedGrowth(t)
 
 	tok := tokensMeter(t, ctx, f, "tok_cyc")
@@ -265,6 +280,15 @@ func TestUnpricedUsage_CycleClose_CountsEachMeter(t *testing.T) {
 	}
 	if got := unpriced(); got != 32 {
 		t.Errorf("counter grew by %v, want 32 (25 tokens and 7 seats)", got)
+	}
+	// The counter has no meter label, so the WARN is what names each meter.
+	for _, want := range []struct {
+		meter domain.Meter
+		qty   string
+	}{{tok, "25"}, {single, "7"}} {
+		if !hasUnpricedWarn(logs.String(), want.meter, want.qty) {
+			t.Errorf("no WARN names meter %s (%s) with quantity=%s; logs:\n%s", want.meter.ID, want.meter.EventName, want.qty, logs.String())
+		}
 	}
 }
 

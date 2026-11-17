@@ -1,7 +1,7 @@
 # ADR-096: Unpriced meter on a plan — guard at authoring, loud at finalize
 
 Date: 2026-07-18
-Status: Accepted (amended 2026-10-14; see [the amendment](#amendment-2026-10-14-981-refuse-removing-the-last-price-and-count-unpriced-usage); the last-price guard was replaced on 2026-10-23 by the wider meter-in-use guard of [ADR-070](070-price-change-semantics.md#amendment-2026-10-23-meter-pricing-edits-are-refused-while-a-subscription-uses-the-meter)). Current rule: an invoice is still built without usage that has no price, and every invoice built without it logs it and counts its quantity. Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md) (the plan-attach and meter-in-use guards are gone), built in PR-4 (#1386); ingest's `no_price` answer built in PR-6 (#1390).
+Status: Accepted (amended 2026-10-14; see [the amendment](#amendment-2026-10-14-981-refuse-removing-the-last-price-and-count-unpriced-usage); the last-price guard was replaced on 2026-10-23 by the wider meter-in-use guard of [ADR-070](070-price-change-semantics.md#amendment-2026-10-23-meter-pricing-edits-are-refused-while-a-subscription-uses-the-meter)). Current rule: an invoice is still built without usage that has no price, and every invoice built without it logs it and counts its quantity. Superseded in part by [ADR-130](130-usage-prices-belong-to-the-plan.md) (the plan-attach and meter-in-use guards are gone), built in PR-4 (#1386); ingest's `no_price` answer built in PR-6 (#1390). Amended 2026-11-17: the counter has no `meter_id` label; see [the amendment](#amendment-2026-11-17-the-unpriced-counter-has-no-meter-label).
 
 Original status: Accepted. The **guard + loud-log** below is IMPLEMENTED in this PR. The fuller "durable marker + critical banner + metering-only flag" design (from the design panel) is **deferred** — see *Deferred* — because live-doc verification showed it has no industry precedent and the guard already fixes the real defect.
 Relates: ADR-070 (no-silent-fallbacks in billing — this extends its fail-LOUD mandate to the finalize path), ADR-044 (multi-dim `{model,token_type}` rating — the meters this most affects), ADR-034 (plan immutability — the guard runs after it).
@@ -167,3 +167,9 @@ which later invoices use; bill past periods with a one-off invoice.
   invoice line for it. Trigger: an operator misses unpriced usage with the
   signals above.
 
+## Amendment 2026-11-17: the unpriced counter has no meter label
+
+`hardcount_usage_unpriced_quantity_total` is labeled by `mode` alone. A
+`meter_id` label kept one series per meter of every account, never dropped.
+The WARN names the meter instead: it carries `meter_id` and `meter` (the
+event name) beside the quantity. Both `mode` series exist at 0 from boot.

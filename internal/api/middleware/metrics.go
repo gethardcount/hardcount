@@ -188,12 +188,13 @@ var (
 	// no price and was left off an invoice (#981). It is a signal, not a
 	// record: it resets on restart and is not per customer. The per-customer
 	// view is the no_price row of GET /v1/customers/{id}/usage, and the WARN
-	// names the meter. A meter label would add a series for every meter of
+	// names the meter by id and event name. A meter label would add a series for every meter of
 	// every account, never dropped. Test-clock simulations are not counted.
+	// Both modes start at 0 (init below), as the dead-letter counters do.
 	usageUnpricedQuantity = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "hardcount_usage_unpriced_quantity_total",
-			Help: "Usage quantity that matched no price of its subscription's plan, and so was left off an invoice (period close, cancel final invoice or spend-threshold invoice), by mode. Test-clock simulations are not counted. The WARN \"usage matched no price\" names the meter. Bill it with a one-off invoice; add a price to the plan so later invoices include it.",
+			Help: "Usage quantity that matched no price of its subscription's plan, and so was left off an invoice (period close, cancel final invoice or spend-threshold invoice), by mode. Test-clock simulations are not counted. The WARN \"usage matched no price of its plan\" names the meter's id and event name. Bill it with a one-off invoice; add a price to the plan so later invoices include it.",
 		},
 		[]string{"mode"},
 	)
@@ -229,6 +230,7 @@ func init() {
 		emailOutboxDeadLettered.WithLabelValues(DeadLetterPermanent, mode)
 		emailOutboxDeadLettered.WithLabelValues(DeadLetterMaxAttempts, mode)
 		webhookOutboxDeadLettered.WithLabelValues(DeadLetterMaxAttempts, mode)
+		usageUnpricedQuantity.WithLabelValues(mode)
 	}
 }
 
@@ -314,7 +316,7 @@ func RegisterLeaderStatus(reg prometheus.Registerer, query func(context.Context)
 		age:          prometheus.NewDesc("hardcount_leader_last_tick_age_seconds", "Seconds since the role's last completed tick on ANY replica (leader_leases.last_tick_ended_at). Absent until the role has ticked once. Alert when it exceeds a few multiples of the role's interval — that is the cluster-wide stall signal a single replica's liveness gauge cannot give.", []string{"role"}, nil),
 		held:         prometheus.NewDesc("hardcount_leader_held", "1 while some replica holds the role's lease (a tick is running), else 0.", []string{"role"}, nil),
 		paused:       prometheus.NewDesc("hardcount_leader_paused", "1 while the role is paused by an operator (leader_pause), else 0.", []string{"role"}, nil),
-		scrapeFailed: prometheus.NewDesc("hardcount_leader_status_scrape_failed", "1 when this scrape could not read leader_status, else 0. While it is 1, hardcount_leader_last_tick_age_seconds, hardcount_leader_held and hardcount_leader_paused are absent.", nil, nil),
+		scrapeFailed: prometheus.NewDesc("hardcount_leader_status_scrape_failed", "1 when this scrape could not read leader_status, else 0. While it is 1, hardcount_leader_last_tick_age_seconds, hardcount_leader_held and hardcount_leader_paused are absent. The stalled-role alert cannot fire while it is 1: check that the database answers the leader_status query.", nil, nil),
 	})
 }
 

@@ -675,7 +675,7 @@ func (b ratedBucket) noteLeftOut(prefix string, sub domain.Subscription, unprice
 		return
 	}
 	slog.Warn(prefix+": usage matched no price of its plan — not billed",
-		"meter", b.meter.EventName, "plan_id", b.w.planID, "quantity", qty.String(), "subscription_id", sub.ID)
+		"meter_id", b.w.meterID, "meter", b.meter.EventName, "plan_id", b.w.planID, "quantity", qty.String(), "subscription_id", sub.ID)
 	unpriced.add(b.w.meterID, qty)
 }
 
