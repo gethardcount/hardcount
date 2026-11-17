@@ -38,7 +38,8 @@ func scanKey(row interface{ Scan(...any) error }, extra ...any) (domain.APIKey, 
 	return k, nil
 }
 
-// notFound returns errs.ErrNotFound for a query that matched no row.
+// notFound turns sql.ErrNoRows into errs.ErrNotFound and passes any other
+// result through.
 func notFound(k domain.APIKey, err error) (domain.APIKey, error) {
 	if errors.Is(err, sql.ErrNoRows) {
 		return domain.APIKey{}, errs.ErrNotFound
@@ -109,8 +110,8 @@ func (s store) getByPrefix(ctx context.Context, prefix string) (domain.APIKey, s
 	return key, h, nil
 }
 
-// list returns one page of the tenant's API keys, newest first, and how many
-// keys match.
+// list returns one page of the tenant's keys in the mode ctx carries, and how
+// many keys there are.
 func (s store) list(ctx context.Context, filter ListFilter) ([]domain.APIKey, int, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, filter.TenantID)
 	if err != nil {
@@ -140,7 +141,9 @@ func (s store) list(ctx context.Context, filter ListFilter) ([]domain.APIKey, in
 	return keys, total, rows.Err()
 }
 
-// touchLastUsed sets the key's last_used_at to usedAt.
+// touchLastUsed sets the key's last_used_at to usedAt. It bypasses RLS, as
+// getByPrefix does, so it needs no tenant and no mode on ctx: ValidateKey can
+// run before the request has either.
 func (s store) touchLastUsed(ctx context.Context, id string, usedAt time.Time) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {

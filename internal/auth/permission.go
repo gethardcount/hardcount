@@ -1,6 +1,6 @@
 package auth
 
-// Permission represents a specific API operation scope.
+// Permission is what a route requires of its caller (Require, RequireMethod).
 type Permission string
 
 const (
@@ -15,7 +15,8 @@ const (
 
 	PermUsageRead  Permission = "usage:read"
 	PermUsageWrite Permission = "usage:write"
-	// PermUsageIngest sends usage events.
+	// PermUsageIngest sends usage events, one at a time, in a batch or from
+	// the LiteLLM callback.
 	PermUsageIngest Permission = "usage:ingest"
 
 	PermInvoiceRead  Permission = "invoice:read"
@@ -26,8 +27,8 @@ const (
 
 	// apikey:read and apikey:write gate more than API keys. apikey:write
 	// gates the API key routes (listing keys included), webhook endpoints
-	// and settings; apikey:read gates webhook events, their stream and the
-	// audit log (router.go).
+	// and the settings routes; apikey:read gates webhook events and their
+	// stream, and the audit log and its export.
 	PermAPIKeyRead  Permission = "apikey:read"
 	PermAPIKeyWrite Permission = "apikey:write"
 
@@ -40,8 +41,8 @@ const (
 type KeyType string
 
 const (
-	KeyTypeSecret KeyType = "secret" // hc_secret_ — full access to one account
-	KeyTypeIngest KeyType = "ingest" // hc_ingest_ — sends usage events only (ADR-133)
+	KeyTypeSecret KeyType = "secret" // hc_secret_: every permission
+	KeyTypeIngest KeyType = "ingest" // hc_ingest_: PermUsageIngest only (ADR-133)
 )
 
 // keyTypes is every KeyType; typePrefixes and checkCreateInput derive from it.
@@ -73,9 +74,8 @@ var fullAccess = func() map[Permission]bool {
 // keyPermissions is what a key of each type may do.
 var keyPermissions = map[KeyType]map[Permission]bool{
 	KeyTypeSecret: fullAccess,
-	// An ingest key sends usage and nothing else (ADR-133). A LiteLLM proxy
-	// or another gateway keeps it in its config, so a leaked copy cannot
-	// refund, void, read customers or mint keys.
+	// A LiteLLM proxy or another gateway keeps an ingest key in its config,
+	// so a leaked copy must not refund, void, read customers or mint keys.
 	KeyTypeIngest: {
 		PermUsageIngest: true,
 	},
@@ -83,9 +83,9 @@ var keyPermissions = map[KeyType]map[Permission]bool{
 
 // hasPermission reports whether c holds perm. A session holds every
 // permission: roles are recorded in user_tenants.role but not enforced
-// (ADR-081). A key holds its type's permissions, whoever else is named on
-// the caller. A caller that is neither, or a key of an unknown type, holds
-// none.
+// (ADR-081). Any other caller holds what its KeyType holds, so a key is
+// judged by its type even when a user is named too, and a caller with no key
+// type, or an unknown one, holds none.
 func hasPermission(c Caller, perm Permission) bool {
 	if c.IsSession() {
 		return true
