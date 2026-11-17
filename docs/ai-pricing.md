@@ -181,7 +181,7 @@ five places:
   in `GET /v1/customers/{id}/usage` (the current billing period, unless
   you pass `from` and `to`), marked `no_price`;
 - the warning on the invoice preview, which gives the quantity;
-- the `hardcount_usage_unpriced_quantity_total{meter_id, mode}` metric (usage
+- the `hardcount_usage_unpriced_quantity_total{mode}` metric (usage
   of customers on a test clock is not counted);
 - a server log line when the invoice is made.
 

@@ -12,7 +12,7 @@ import (
 // without it. That is the peer norm (Lago bills it at a $0
 // default, Metronome and Orb leave it off). It is never silent: each place
 // that builds an invoice without it logs a WARN and adds the quantity to
-// hardcount_usage_unpriced_quantity_total{meter_id}. The invoice builders are
+// hardcount_usage_unpriced_quantity_total. The invoice builders are
 // the period close and the cancel final invoice (buildLineItems,
 // buildCancelLineItems) and the spend-threshold invoice (fireThreshold).
 
@@ -35,8 +35,8 @@ func (u unpricedUsage) record(live bool, sub domain.Subscription) {
 	if sub.TestClockID != "" {
 		return
 	}
-	for meterID, qty := range u {
-		mw.RecordUsageUnpriced(meterID, live, qty.InexactFloat64())
+	for _, qty := range u {
+		mw.RecordUsageUnpriced(live, qty.InexactFloat64())
 	}
 }
 

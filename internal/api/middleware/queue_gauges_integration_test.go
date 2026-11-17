@@ -36,7 +36,7 @@ var (
 func registerGauges(db *postgres.DB) {
 	gaugeDB, gaugeFailed = db, nil
 	gaugeOnce.Do(func() {
-		mw.RegisterQueueDepthGauges(time.Hour, func(query string) (float64, error) {
+		mw.RegisterQueueDepthGauges(prometheus.DefaultRegisterer, time.Hour, func(query string) (float64, error) {
 			ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 			defer cancel()
 			tx, err := gaugeDB.BeginTx(ctx, postgres.TxBypass, "")

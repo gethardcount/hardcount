@@ -59,6 +59,11 @@ func init() {
 	} else {
 		heldUsageEvents = c
 	}
+	// Each reason starts at 0: a series born at 1 has no earlier sample, so
+	// increase() would miss the first held row after a restart.
+	for _, r := range []domain.HeldUsageReason{domain.HeldReasonCustomerNotFound, domain.HeldReasonMeterNotFound} {
+		heldUsageEvents.WithLabelValues(string(r))
+	}
 }
 
 // heldEvent checks one row to hold and builds it. A row the checks refuse

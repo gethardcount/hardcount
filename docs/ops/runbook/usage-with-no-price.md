@@ -9,7 +9,7 @@ Back to the [runbook index](index.md).
 | When | What you see |
 |---|---|
 | The event arrives | `billing_status: "no_price"` in the API's answer, and `hardcount_usage_unbilled_total{reason="no_price"}` rises |
-| The invoice is built | `hardcount_usage_unpriced_quantity_total{meter_id, mode}` rises, and the server logs a WARN `cycle: usage matched no price of its plan — not billed` |
+| The invoice is built | `hardcount_usage_unpriced_quantity_total{mode}` rises, and the server logs a WARN `cycle: usage matched no price of its plan — not billed` |
 
 - The answer is the API's response to the request that sent the event. A
   batch, a LiteLLM delivery and a release of
@@ -20,7 +20,9 @@ Back to the [runbook index](index.md).
   usage call. The Fix below applies to it too: find its events with the
   usage-events call in [Check](#check).
 - `mode` is `live` or `test`. Test-clock simulations are not counted.
-- The WARN carries `meter`, `quantity` and `subscription_id`. Its prefix is
+- The metric has no meter label. The WARN names the meter: it carries
+  `meter_id`, `meter` (the meter's event name), `quantity` and
+  `subscription_id`. Its prefix is
   `cycle`, `cancel` or `threshold`, and the `cycle` and `cancel` lines also
   carry `plan_id`.
 
@@ -45,8 +47,13 @@ older models only.
 
 ## Check
 
+Take `meter_id`, `subscription_id` and, on a `cycle` or `cancel` line,
+`plan_id` from the WARN. The subscription names the customer and, in its
+items, the plan (for a `threshold` line, which carries no `plan_id`):
+`curl -sS "$API/v1/subscriptions/<subscription_id>" -H "Authorization: Bearer $KEY" | jq '{customer_id, plans: [.items[].plan_id]}'`.
+
 ```bash
-PLAN=<plan id>; CUSTOMER=<customer id>; METER=<meter id>
+PLAN=<plan_id>; CUSTOMER=<customer_id>; METER=<meter_id>
 # The plan's prices, 100 a page (with more, add &offset=100, 200, ...),
 # and the customer's usage no price took this period:
 curl -sS "$API/v1/plans/$PLAN/prices?limit=100" -H "Authorization: Bearer $KEY" | jq '.data[] | {meter_id, dimension_match}'
@@ -112,6 +119,6 @@ curl -sS "$API/v1/usage-events?customer_id=$CUSTOMER&meter_id=$METER" -H "Author
 ## Verify
 
 From the next billing period, the customer's invoice carries a line for the
-usage, and the counter stops rising for that meter.
+usage, and no new WARN names that meter.
 
 Related: [ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md).
