@@ -261,7 +261,7 @@ table:
 | `hardcount_leader_held{role}` | Stays 1 while `last_tick_age` grows: a tick is wedged but still renewing. See [Check](#check) step 3 for billing |
 | `hardcount_leader_paused{role}` | 1 outside a planned window |
 | `hardcount_leader_lease_lost_total{role,reason}` | Any increase, except `reason="paused"`. See [Lease-lost reasons](#lease-lost-reasons) |
-| `hardcount_leader_status_scrape_errors_total` | 1: the view could not be read. The database is the problem, not the roles |
+| `hardcount_leader_status_scrape_failed` | 1: the view could not be read, so the gauges above are absent from that scrape. The database is the problem, not the roles |
 
 ### Lease-lost reasons
 

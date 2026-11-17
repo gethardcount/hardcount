@@ -187,15 +187,15 @@ var (
 	// usageUnpricedQuantity is the operator's signal for usage that matched
 	// no price and was left off an invoice (#981). It is a signal, not a
 	// record: it resets on restart and is not per customer. The per-customer
-	// view is the no_price row of GET /v1/customers/{id}/usage. meter_id
-	// is bounded by the meters a tenant creates. mode is live or test, as on
-	// hardcount_parked_invoices; test-clock simulations are not counted.
+	// view is the no_price row of GET /v1/customers/{id}/usage, and the WARN
+	// names the meter. A meter label would add a series for every meter of
+	// every account, never dropped. Test-clock simulations are not counted.
 	usageUnpricedQuantity = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "hardcount_usage_unpriced_quantity_total",
-			Help: "Usage quantity that matched no price of its subscription's plan, and so was left off an invoice (period close, cancel final invoice or spend-threshold invoice), by meter. Test-clock simulations are not counted. Bill it with a one-off invoice; add a price to the plan so later invoices include it.",
+			Help: "Usage quantity that matched no price of its subscription's plan, and so was left off an invoice (period close, cancel final invoice or spend-threshold invoice), by mode. Test-clock simulations are not counted. The WARN \"usage matched no price\" names the meter. Bill it with a one-off invoice; add a price to the plan so later invoices include it.",
 		},
-		[]string{"meter_id", "mode"},
+		[]string{"mode"},
 	)
 
 	// The outbox dead-letter counters count a row once, when the mark that
@@ -251,14 +251,13 @@ func RecordWebhookOutboxDeadLettered(live bool) {
 	webhookOutboxDeadLettered.WithLabelValues(DeadLetterMaxAttempts, modeLabel(live)).Inc()
 }
 
-// RecordUsageUnpriced adds the quantity of one meter's usage that an invoice
-// was built without because no price matched it. live is the mode the
-// invoice was built in.
-func RecordUsageUnpriced(meterID string, live bool, quantity float64) {
+// RecordUsageUnpriced adds usage quantity that an invoice was built without
+// because no price matched it. live is the mode the invoice was built in.
+func RecordUsageUnpriced(live bool, quantity float64) {
 	if quantity <= 0 {
 		return
 	}
-	usageUnpricedQuantity.WithLabelValues(meterID, modeLabel(live)).Add(quantity)
+	usageUnpricedQuantity.WithLabelValues(modeLabel(live)).Add(quantity)
 }
 
 // RecordLeaderLeaseLost counts a lost lease (leader.LostFunc adapter).
@@ -299,11 +298,11 @@ type LeaderStatusRow struct {
 // hardcount_scheduler_last_run_timestamp_seconds only says that this
 // replica's loop is alive.
 type leaderStatusCollector struct {
-	query   func(context.Context) ([]LeaderStatusRow, error)
-	age     *prometheus.Desc
-	held    *prometheus.Desc
-	paused  *prometheus.Desc
-	scrapeE *prometheus.Desc
+	query        func(context.Context) ([]LeaderStatusRow, error)
+	age          *prometheus.Desc
+	held         *prometheus.Desc
+	paused       *prometheus.Desc
+	scrapeFailed *prometheus.Desc
 }
 
 // RegisterLeaderStatus wires the leader_status collector. Call it once, at
@@ -311,11 +310,11 @@ type leaderStatusCollector struct {
 // right outcome for wiring it twice.
 func RegisterLeaderStatus(query func(context.Context) ([]LeaderStatusRow, error)) {
 	prometheus.MustRegister(&leaderStatusCollector{
-		query:   query,
-		age:     prometheus.NewDesc("hardcount_leader_last_tick_age_seconds", "Seconds since the role's last completed tick on ANY replica (leader_leases.last_tick_ended_at). Absent until the role has ticked once. Alert when it exceeds a few multiples of the role's interval — that is the cluster-wide stall signal a single replica's liveness gauge cannot give.", []string{"role"}, nil),
-		held:    prometheus.NewDesc("hardcount_leader_held", "1 while some replica holds the role's lease (a tick is running), else 0.", []string{"role"}, nil),
-		paused:  prometheus.NewDesc("hardcount_leader_paused", "1 while the role is paused by an operator (leader_pause), else 0.", []string{"role"}, nil),
-		scrapeE: prometheus.NewDesc("hardcount_leader_status_scrape_errors_total", "Scrapes on which leader_status could not be read (counts 1 on the failing scrape, so a sustained failure reads as a flat 1).", nil, nil),
+		query:        query,
+		age:          prometheus.NewDesc("hardcount_leader_last_tick_age_seconds", "Seconds since the role's last completed tick on ANY replica (leader_leases.last_tick_ended_at). Absent until the role has ticked once. Alert when it exceeds a few multiples of the role's interval — that is the cluster-wide stall signal a single replica's liveness gauge cannot give.", []string{"role"}, nil),
+		held:         prometheus.NewDesc("hardcount_leader_held", "1 while some replica holds the role's lease (a tick is running), else 0.", []string{"role"}, nil),
+		paused:       prometheus.NewDesc("hardcount_leader_paused", "1 while the role is paused by an operator (leader_pause), else 0.", []string{"role"}, nil),
+		scrapeFailed: prometheus.NewDesc("hardcount_leader_status_scrape_failed", "1 when this scrape could not read leader_status, else 0. While it is 1, hardcount_leader_last_tick_age_seconds, hardcount_leader_held and hardcount_leader_paused are absent.", nil, nil),
 	})
 }
 
@@ -323,7 +322,7 @@ func (c *leaderStatusCollector) Describe(ch chan<- *prometheus.Desc) {
 	ch <- c.age
 	ch <- c.held
 	ch <- c.paused
-	ch <- c.scrapeE
+	ch <- c.scrapeFailed
 }
 
 func (c *leaderStatusCollector) Collect(ch chan<- prometheus.Metric) {
@@ -331,10 +330,10 @@ func (c *leaderStatusCollector) Collect(ch chan<- prometheus.Metric) {
 	defer cancel()
 	rows, err := c.query(ctx)
 	if err != nil {
-		ch <- prometheus.MustNewConstMetric(c.scrapeE, prometheus.GaugeValue, 1)
+		ch <- prometheus.MustNewConstMetric(c.scrapeFailed, prometheus.GaugeValue, 1)
 		return
 	}
-	ch <- prometheus.MustNewConstMetric(c.scrapeE, prometheus.GaugeValue, 0)
+	ch <- prometheus.MustNewConstMetric(c.scrapeFailed, prometheus.GaugeValue, 0)
 	for _, r := range rows {
 		if r.HasTicked {
 			ch <- prometheus.MustNewConstMetric(c.age, prometheus.GaugeValue, r.LastTickAgeSeconds, r.Role)

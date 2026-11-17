@@ -9,7 +9,7 @@ Back to the [runbook index](index.md).
 | When | What you see |
 |---|---|
 | The event arrives | `billing_status: "no_price"` in the API's answer, and `hardcount_usage_unbilled_total{reason="no_price"}` rises |
-| The invoice is built | `hardcount_usage_unpriced_quantity_total{meter_id, mode}` rises, and the server logs a WARN `cycle: usage matched no price of its plan — not billed` |
+| The invoice is built | `hardcount_usage_unpriced_quantity_total{mode}` rises, and the server logs a WARN `cycle: usage matched no price of its plan — not billed` |
 
 - The answer is the API's response to the request that sent the event. A
   batch, a LiteLLM delivery and a release of
@@ -20,7 +20,8 @@ Back to the [runbook index](index.md).
   usage call. The Fix below applies to it too: find its events with the
   usage-events call in [Check](#check).
 - `mode` is `live` or `test`. Test-clock simulations are not counted.
-- The WARN carries `meter`, `quantity` and `subscription_id`. Its prefix is
+- The metric has no meter label. The WARN names the meter: it carries
+  `meter`, `quantity` and `subscription_id`. Its prefix is
   `cycle`, `cancel` or `threshold`, and the `cycle` and `cancel` lines also
   carry `plan_id`.
 
@@ -112,6 +113,6 @@ curl -sS "$API/v1/usage-events?customer_id=$CUSTOMER&meter_id=$METER" -H "Author
 ## Verify
 
 From the next billing period, the customer's invoice carries a line for the
-usage, and the counter stops rising for that meter.
+usage, and no new WARN names that meter.
 
 Related: [ADR-130](../../adr/130-usage-prices-belong-to-the-plan.md).
