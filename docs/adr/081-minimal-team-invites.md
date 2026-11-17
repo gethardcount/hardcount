@@ -169,4 +169,4 @@ of one account into two workspaces at once end with one membership.
 The "first-joined workspace" consequence above no longer arises from an
 accept. An account that already holds two memberships keeps both and signs in
 to the first-joined one
-([#PRNUM](https://github.com/gethardcount/hardcount/pull/PRNUM)).
+([#1839](https://github.com/gethardcount/hardcount/pull/1839)).
