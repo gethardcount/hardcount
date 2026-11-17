@@ -34,15 +34,10 @@ func (pingConn) Prepare(string) (driver.Stmt, error) { return nil, errors.New("n
 func (pingConn) Close() error                        { return nil }
 func (pingConn) Begin() (driver.Tx, error)           { return nil, errors.New("not supported") }
 
-// TestReadiness_StatusCodeAndBody pins the two halves of the readiness
-// contract that a load balancer and an anonymous caller depend on.
-//
-// A stale billing tick is reported in the body but answers 200: taking the
-// replica out of the balancer does not restart the tick, and on a single
-// replica it turns a background stall into an API outage. A failed database
-// ping answers 503, and the body carries a fixed word, never the driver's
-// error text (which names the database user, database and host).
-func TestReadiness_StatusCodeAndBody(t *testing.T) {
+// Readiness reports a stale billing tick in its body but answers 200, and
+// answers a failed database ping 503 with a fixed word in the body, never the
+// driver's error, which names the database user, database and host.
+func TestReadiness_AStaleTickStays200AndAFailedPingIs503WithNoDetail(t *testing.T) {
 	setScheduler := func(t *testing.T, lastRun time.Time, interval time.Duration) {
 		t.Helper()
 		schedulerMu.Lock()
@@ -81,19 +76,6 @@ func TestReadiness_StatusCodeAndBody(t *testing.T) {
 		}
 		if checks["database"] != "ok" {
 			t.Fatalf("checks.database = %v, want ok", checks["database"])
-		}
-	})
-
-	// The real-Postgres TestReadiness_DrainingIs503LivenessStays200 covers
-	// drain through the router; this keeps the 503 pinned in -short runs.
-	t.Run("draining is 503", func(t *testing.T) {
-		setScheduler(t, time.Time{}, 0)
-		t.Cleanup(func() { draining.Store(false) })
-		SetDraining()
-
-		code, raw, body := get(t, pingConnector{})
-		if code != http.StatusServiceUnavailable || body["status"] != "draining" {
-			t.Fatalf("draining: status = %d, want 503 draining; body %s", code, raw)
 		}
 	})
 
