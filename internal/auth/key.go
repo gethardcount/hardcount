@@ -10,14 +10,14 @@ import (
 
 // A key is a type prefix, hc_{type}_{mode}_, then secretBytes random bytes in
 // lowercase hex. Its lookup prefix (the type prefix and the first lookupHexLen
-// hex characters) finds its row, which holds a salted hash of the whole key
-// (hashKey). api_keys_prefix_shape_check states the same shape.
+// hex characters) finds its row, which holds a hash of the whole key salted
+// with saltBytes random bytes (hashKey). api_keys_prefix_shape_check states
+// the same shape.
 const (
 	secretBytes  = 32
 	lookupHexLen = 12
+	saltBytes    = 16
 )
-
-const saltBytes = 16
 
 // typePrefix returns a key's type prefix, "hc_{type}_{mode}_": hc_secret_live_,
 // hc_ingest_test_ and so on. The visible mode lets an operator spot a test

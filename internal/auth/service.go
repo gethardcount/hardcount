@@ -40,10 +40,6 @@ type AuditWriter interface {
 	LogInTxFields(ctx context.Context, tx *sql.Tx, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
 }
 
-// lastUsedTouchInterval is the least time between writes of a key's
-// last_used_at: no auth decision reads it, and each write locks the key's row.
-const lastUsedTouchInterval = time.Minute
-
 // NewService returns a Service on db that writes each key change's audit row
 // with audit. It panics on a nil audit: a key change with no audit row would
 // be invisible on the operator's Audit Log page.
@@ -60,24 +56,18 @@ func (s *Service) auditKeyChange(ctx context.Context, tx *sql.Tx, action string,
 	return s.audit.LogInTxFields(ctx, tx, action, "api_key", key.ID, key.Name, metadata)
 }
 
-// lastUsedDebounce decides when a key's last_used_at is due for a write: at
-// most once per lastUsedTouchInterval per key, in this process.
-type lastUsedDebounce struct {
-	last sync.Map // key id → *atomic.Int64: unix nanoseconds of the last claimed write
-}
-
-// due reports whether a write of key id's last_used_at is due at now, and
-// claims it. Under a concurrent burst exactly one caller wins an interval:
-// the per-key time is advanced with a compare-and-swap, so simultaneous
-// requests make one write, not one each.
-func (d *lastUsedDebounce) due(id string, now time.Time) bool {
-	v, _ := d.last.LoadOrStore(id, new(atomic.Int64))
-	last := v.(*atomic.Int64)
-	prev := last.Load()
-	if prev != 0 && now.UnixNano()-prev < int64(lastUsedTouchInterval) {
-		return false
+// statusAt is the one rule for a key's status at now: revoked once revoked;
+// otherwise expired at or after its expires_at; otherwise active. Only an
+// active key authenticates (ValidateKey) or can be rotated (RotateKey).
+func statusAt(key domain.APIKey, now time.Time) string {
+	switch {
+	case key.RevokedAt != nil:
+		return domain.APIKeyStatusRevoked
+	case key.ExpiresAt != nil && !now.Before(*key.ExpiresAt):
+		return domain.APIKeyStatusExpired
+	default:
+		return domain.APIKeyStatusActive
 	}
-	return last.CompareAndSwap(prev, now.UnixNano())
 }
 
 // CreateKeyResult contains the key record and the raw key, which is shown
@@ -110,9 +100,6 @@ func (s *Service) CreateKey(ctx context.Context, tenantID string, input CreateKe
 	return result, nil
 }
 
-// maxKeyNameLen is the most characters a new key's name may have.
-const maxKeyNameLen = 100
-
 // CreateKeyTx is CreateKey on the caller's transaction, for account setup
 // (tenant.RunBootstrap). tx must have app.tenant_id set to tenantID and
 // app.livemode set, and ctx must carry the same mode (postgres.WithLivemode):
@@ -141,19 +128,8 @@ func (s *Service) CreateKeyTx(ctx context.Context, tx *sql.Tx, tenantID string, 
 	return result, nil
 }
 
-// statusAt is the one rule for a key's status at now: revoked once revoked;
-// otherwise expired at or after its expires_at; otherwise active. Only an
-// active key authenticates (ValidateKey) or can be rotated (RotateKey).
-func statusAt(key domain.APIKey, now time.Time) string {
-	switch {
-	case key.RevokedAt != nil:
-		return domain.APIKeyStatusRevoked
-	case key.ExpiresAt != nil && !now.Before(*key.ExpiresAt):
-		return domain.APIKeyStatusExpired
-	default:
-		return domain.APIKeyStatusActive
-	}
-}
+// maxKeyNameLen is the most characters a new key's name may have.
+const maxKeyNameLen = 100
 
 // checkCreateInput checks a create request and returns the key to mint: a
 // name of 1 to maxKeyNameLen characters once trimmed, a key type (secret
@@ -256,6 +232,30 @@ func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey
 	}
 
 	return key, nil
+}
+
+// lastUsedTouchInterval is the least time between writes of a key's
+// last_used_at: no auth decision reads it, and each write locks the key's row.
+const lastUsedTouchInterval = time.Minute
+
+// lastUsedDebounce decides when a key's last_used_at is due for a write: at
+// most once per lastUsedTouchInterval per key, in this process.
+type lastUsedDebounce struct {
+	last sync.Map // key id → *atomic.Int64: unix nanoseconds of the last claimed write
+}
+
+// due reports whether a write of key id's last_used_at is due at now, and
+// claims it. Under a concurrent burst exactly one caller wins an interval:
+// the per-key time is advanced with a compare-and-swap, so simultaneous
+// requests make one write, not one each.
+func (d *lastUsedDebounce) due(id string, now time.Time) bool {
+	v, _ := d.last.LoadOrStore(id, new(atomic.Int64))
+	last := v.(*atomic.Int64)
+	prev := last.Load()
+	if prev != 0 && now.UnixNano()-prev < int64(lastUsedTouchInterval) {
+		return false
+	}
+	return last.CompareAndSwap(prev, now.UnixNano())
 }
 
 // RevokeKey revokes the tenant's key with id and returns the revoked key. A
