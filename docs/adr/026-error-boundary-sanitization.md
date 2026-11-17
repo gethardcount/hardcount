@@ -1,11 +1,11 @@
 # ADR-026: HTTP error responses are sanitized at a single boundary
 
-**Status:** Accepted (amended 2026-07-20)
+**Status:** Accepted (amended 2026-07-20 and 2026-11-17)
 **Date:** 2026-05-05
 
 ## Summary
 
-`respond.FromError` is the one place that turns a service error into an HTTP response, so raw SDK, database and runtime errors never reach a response body. Typed Hardcount errors pass through with their status, and errors that implement `SafeMessageError` show only their `OperatorSafeMessage()`, such as "Card was declined: Insufficient funds.". Any other error becomes a generic 500 and is logged in full with the request ID. One legacy fallback remains: an untyped error worded like validation ("invalid …") gets a 422 with its text. Amended 2026-07-20: when the auth lookup cannot reach a verdict, for example because the database is down, the auth middleware returns `503 authentication_unavailable` instead of a misleading 401. Status: active, amended.
+`respond.FromError` is the one place that turns a service error into an HTTP response, so raw SDK, database and runtime errors never reach a response body. Typed Hardcount errors pass through with their status, and errors that implement `SafeMessageError` show only their `OperatorSafeMessage()`, such as "Card was declined: Insufficient funds.". Any other error becomes a generic 500 and is logged in full with the request ID. Amended 2026-11-17: the status never depends on an error's wording; an error with no kind is a server fault and answers 500. Amended 2026-07-20: when the auth lookup cannot reach a verdict, for example because the database is down, the auth middleware returns `503 authentication_unavailable` instead of a misleading 401. Status: active, amended.
 
 ## Context
 
@@ -208,3 +208,19 @@ degraded an outage to "missing credentials" via fall-through) map non-verdict er
 `503 api_error/authentication_unavailable` with no upstream detail in the
 body. The sanitization boundary is unchanged: DB internals still never
 reach a response.
+
+## Amendment (2026-11-17, #1854): no status from wording
+
+`FromError` had one fallback: an error with no kind whose message read like a
+validation message (a leading "invalid " or "cannot ", or " is required", " must
+be " and similar anywhere) answered `422` with that message. A status then
+depended on wording, and a server fault with the wrong words would have reached
+a client as a validation error carrying internal text.
+
+The fallback is gone. An error answers by its kind (`errs.Invalid`,
+`errs.NotFound` and the rest). An error with no kind is a server fault: `500`
+`internal_error`, the generic body, and the full error in the log. The two
+client mistakes that had relied on their wording were given their kind and
+answer as before. `errs.New` and `errs.Wrap`, which built an error with a code
+and no kind, are removed: nothing could answer one but a 500.
+

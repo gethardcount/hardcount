@@ -24,7 +24,7 @@ type fakeCustomerLookup struct {
 func (f *fakeCustomerLookup) Get(_ context.Context, tenantID, id string) (domain.Customer, error) {
 	c, ok := f.customers[tenantID+"/"+id]
 	if !ok {
-		return domain.Customer{}, errs.New("not_found", "customer not found").WithCode("customer_not_found")
+		return domain.Customer{}, errs.NotFound("customer")
 	}
 	return c, nil
 }

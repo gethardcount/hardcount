@@ -140,7 +140,7 @@ func VerifyPassword(hash, plaintext string) error {
 // ErrBadCredentials covers both "no such user" and "wrong password".
 // Same error for both so an attacker can't enumerate registered
 // emails by timing the response. Handler maps to 401.
-var ErrBadCredentials = errs.New("bad_credentials", "invalid email or password")
+var ErrBadCredentials = errors.New("invalid email or password")
 
 // wrongPasswordError is ErrBadCredentials for an email that has an account.
 // It carries the user id only for the failed-login log line, which must not

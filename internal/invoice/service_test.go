@@ -625,7 +625,7 @@ func (m *memStore) AddLineItemAtomicAudited(_ context.Context, tenantID, invoice
 	}
 	if inv.Status != domain.InvoiceDraft {
 		return domain.InvoiceLineItem{}, domain.Invoice{},
-			fmt.Errorf("can only add line items to draft invoices, current status: %s", inv.Status)
+			errs.Invalid("", fmt.Sprintf("can only add line items to draft invoices, current status: %s", inv.Status))
 	}
 	before := inv
 	beforeItems := len(m.lineItems[invoiceID])
