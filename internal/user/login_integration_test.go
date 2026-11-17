@@ -56,7 +56,7 @@ func newLoginIT(t *testing.T) loginIT {
 // auditor. throttle may be nil.
 func (it loginIT) handler(store Store, auditor AuditTxWriter, throttle *LoginThrottle) http.Handler {
 	svc := NewService(store, clock.Real(), it.sessSvc, auditor)
-	h := NewHandler(svc, session.CookieConfig{Path: "/"}, stubEmailSender{}, "", false)
+	h := NewHandler(svc, session.CookieConfig{}, stubEmailSender{}, "", false)
 	if throttle != nil {
 		h.SetLoginThrottle(throttle)
 	}

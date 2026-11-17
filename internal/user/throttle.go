@@ -360,7 +360,7 @@ func (t *LoginThrottle) proved(w http.ResponseWriter, r *http.Request, email str
 		MaxAge:   int(knownBrowserFor / time.Second),
 		HttpOnly: true,
 		Secure:   t.cookie.Secure,
-		SameSite: t.cookie.SameSite,
+		SameSite: http.SameSiteLaxMode,
 	})
 	return nil
 }
