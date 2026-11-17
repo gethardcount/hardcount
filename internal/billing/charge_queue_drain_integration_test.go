@@ -3,11 +3,15 @@ package billing_test
 import (
 	"context"
 	"fmt"
+	"io"
+	"net/http"
 	"slices"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/platform/walk"
 )
@@ -156,5 +160,57 @@ func TestListAutoChargePendingForClock_PagesAfterTheCursor(t *testing.T) {
 	page3, err := h.invoices.ListAutoChargePendingForClock(h.ctx, h.tenantID, clockID, walk.Key{At: page2[0].CreatedAt, ID: page2[0].ID}, 1)
 	if err != nil || len(page3) != 0 {
 		t.Fatalf("page 3 = %v %v, want empty", page3, err)
+	}
+}
+
+// stripeAnswersLater is a canned Stripe: create returns a new id, confirm
+// echoes it and succeeds, and each answer advances clk (the engine's) a minute.
+type stripeAnswersLater struct {
+	clk *clock.Fake
+	n   int
+}
+
+func (s *stripeAnswersLater) RoundTrip(req *http.Request) (*http.Response, error) {
+	s.clk.Advance(time.Minute)
+	id, confirm := strings.CutSuffix(strings.TrimPrefix(req.URL.Path, "/v1/payment_intents/"), "/confirm")
+	if !confirm {
+		s.n++
+		id = fmt.Sprintf("pi_row_%d", s.n)
+	}
+	body := fmt.Sprintf(`{"id":%q,"object":"payment_intent","status":"succeeded","amount":5000,"currency":"usd"}`, id)
+	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": []string{"application/json"}},
+		Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
+}
+
+// The sweep's tick decides no time, so each invoice's work runs on its own
+// instant: the time that invoice was reached. The first is charged on the
+// clock as the sweep starts; the second when the first's answer is in, not on
+// the first's instant.
+func TestRetryPendingCharges_EachInvoiceOnItsOwnInstant(t *testing.T) {
+	h := newCollectHarness(t)
+	first, second := h.seed(t, "INV-ROW-1"), h.seed(t, "INV-ROW-2")
+	charger := liveCharger(h, &stripeAnswersLater{clk: h.clock}, &countingDunning{})
+	charger.SetClock(h.clock)
+	e := h.newEng(testPaymentSetupsReady{}, charger, nil)
+
+	start := h.clock.Now(h.ctx)
+	if _, errs := e.RetryPendingCharges(h.ctx, 50, nil); len(errs) != 0 {
+		t.Fatalf("sweep: %v", errs)
+	}
+	paid, err := h.invoices.Get(h.ctx, h.tenantID, first.ID)
+	if err != nil || paid.PaidAt == nil {
+		t.Fatalf("first invoice %s, %v: want paid", paid.Status, err)
+	}
+	for _, c := range []struct {
+		inv  domain.Invoice
+		want time.Time
+	}{{first, start}, {second, *paid.PaidAt}} {
+		attempts, err := h.invoices.ListChargeAttemptsByInvoice(h.ctx, h.tenantID, c.inv.ID)
+		if err != nil || len(attempts) != 1 {
+			t.Fatalf("%s attempts %v, %v: want one", c.inv.InvoiceNumber, attempts, err)
+		}
+		if got := attempts[0].EffectiveAt; !got.Equal(c.want) {
+			t.Errorf("%s charged at %v, want %v, when the sweep reached it", c.inv.InvoiceNumber, got, c.want)
+		}
 	}
 }
