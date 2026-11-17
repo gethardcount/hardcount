@@ -8,10 +8,10 @@ import (
 )
 
 // matchedRoute is the route a request matched, found once at the root
-// (routeLookup): its method and canonical pattern, which key the route
-// tables, and its path parameters. A path that matches no route has an empty
-// pattern; a mount point asked for a method its sub-router lacks has the
-// mount's pattern, which no table holds.
+// (routeLookup): its method and canonical pattern, which key routeTable, and
+// its path parameters. A path that matches no route has an empty pattern; a
+// mount point asked for a method its sub-router lacks has the mount's
+// pattern, which the table does not hold.
 type matchedRoute struct {
 	key    routeKey
 	params *chi.Context
