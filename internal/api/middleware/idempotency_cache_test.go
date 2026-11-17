@@ -14,6 +14,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/version"
 )
 
 // TestIdempotency_Caches5xx is the regression test for COR-6: a transient 500
@@ -54,6 +55,9 @@ func TestIdempotency_Caches5xx(t *testing.T) {
 	}
 	if rec2.Header().Get("Idempotent-Replayed") != "true" {
 		t.Error("replay: Idempotent-Replayed=true must be set")
+	}
+	if got := rec2.Header().Get("Hardcount-Version"); got != version.Version {
+		t.Errorf("replay: Hardcount-Version = %q, want %q", got, version.Version)
 	}
 	if rec2.Body.String() != rec1.Body.String() {
 		t.Errorf("replay body mismatch:\n got: %s\nwant: %s", rec2.Body.String(), rec1.Body.String())

@@ -129,6 +129,7 @@ original text.
 
 ### Fixed
 
+- **A replayed answer carries `Hardcount-Version`, and a browser on another origin can read `Idempotent-Replayed`.** An answer replayed for a repeated `Idempotency-Key` left out the version header every other answer has, and CORS did not expose the replay header to a page on another origin ([#1850](https://github.com/gethardcount/hardcount/pull/1850)).
 - **The API keys page tells two keys with one name apart on a phone, and says what to do about a key that is about to expire.** After a rotation the old and the new key looked the same on a narrow screen, and the expiry warning offered no action that helps. A key in its last week also shows the hour it stops, and the revoke dialog says what the docs say: the key is refused from the next request ([#1846](https://github.com/gethardcount/hardcount/pull/1846)).
 - **Switching the dashboard to the mode it is already in writes no audit row.** `POST /v1/auth/mode` with the session's current mode wrote a `mode_changed` row though nothing changed. It still answers `200` ([#1840](https://github.com/gethardcount/hardcount/pull/1840)).
 - **A subscription on a trial keeps its last item.** `DELETE /v1/subscriptions/{id}/items/{item_id}` removed the last item of a trialing subscription, which then became active with nothing to bill. It now answers `409 invalid_state`, as for an active subscription, and so does removing an item from a canceled subscription ([#1838](https://github.com/gethardcount/hardcount/pull/1838)).
