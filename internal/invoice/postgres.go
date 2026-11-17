@@ -4677,7 +4677,7 @@ func buildInvWhere(f ListFilter) (string, []any) {
 	}
 	if f.Overdue {
 		// "Past due" = open, past its due date, not settled, not
-		// mid-payment. Mirrors domain.ClassifyInvoiceAttention's
+		// mid-payment. Mirrors classifyInvoiceAttention's
 		// overdue semantics, but computed in SQL so the filter
 		// paginates server-side. due_at compares against DB
 		// wall-clock now(); test-clock invoices stamp due_at in
