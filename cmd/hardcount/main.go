@@ -21,6 +21,8 @@ import (
 
 	neturl "net/url"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/gethardcount/hardcount/internal/api"
 	mw "github.com/gethardcount/hardcount/internal/api/middleware"
 	"github.com/gethardcount/hardcount/internal/billing"
@@ -159,7 +161,7 @@ func serve() {
 	defer closeAppPool()
 
 	db := postgres.NewDB(appPool, cfg.DB.QueryTimeout)
-	registerMetrics(appPool, db, cfg.InvoiceGracePeriod)
+	registerMetrics(prometheus.DefaultRegisterer, appPool, db, cfg.InvoiceGracePeriod)
 
 	// Leader gate (ADR-114). Each singleton loop (billing, dunning, the two
 	// outbox dispatchers, webhook delivery retry and the test-clock catch-up)

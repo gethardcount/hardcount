@@ -10,6 +10,8 @@ import (
 	"strings"
 	"sync"
 	"testing"
+
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // noDatabase is the connector of a pool that never connects. database/sql
@@ -39,7 +41,7 @@ func TestDBPoolStats_Exported(t *testing.T) {
 	registerPoolStats.Do(func() {
 		pool := sql.OpenDB(noDatabase{})
 		pool.SetMaxOpenConns(7)
-		RegisterDBPoolStats(pool)
+		RegisterDBPoolStats(prometheus.DefaultRegisterer, pool)
 	})
 
 	rec := httptest.NewRecorder()

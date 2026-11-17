@@ -60,7 +60,7 @@ var (
 	idempotencyCacheErrors = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "hardcount_idempotency_cache_errors_total",
-			Help: "Idempotency-key DB errors by stage: reserve (request refused with 503), finalize (response not stored; retries get 409), release (key not freed; retries get 409).",
+			Help: "Idempotency-key failures by stage: reserve (the key could not be claimed, on a database error or a client that went away; the request was refused with 503), finalize (response not stored; retries get 409), release (key not freed; retries get 409).",
 		},
 		[]string{"stage"},
 	)
@@ -68,7 +68,7 @@ var (
 	invoicesGenerated = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "hardcount_invoices_generated_total",
-			Help: "Invoices built by the scheduled billing run, both modes: period-close invoices and the final invoice of a cancel whose date has passed. Spend-threshold invoices, a final invoice built when a cancel takes effect at once, POST /v1/billing/run, test-clock advances and invoices created through the API are not counted.",
+			Help: "Invoices built by the scheduled billing run's period closes, both modes, including a close that ends a subscription canceled at its period end. Not counted: the final invoice of a cancel scheduled inside a period, spend-threshold invoices, cancels that take effect at once, POST /v1/billing/run, test-clock advances and invoices created through the API.",
 		},
 	)
 
@@ -308,8 +308,8 @@ type leaderStatusCollector struct {
 // RegisterLeaderStatus wires the leader_status collector. Call it once, at
 // boot. A second call panics on the duplicate registration, which is the
 // right outcome for wiring it twice.
-func RegisterLeaderStatus(query func(context.Context) ([]LeaderStatusRow, error)) {
-	prometheus.MustRegister(&leaderStatusCollector{
+func RegisterLeaderStatus(reg prometheus.Registerer, query func(context.Context) ([]LeaderStatusRow, error)) {
+	reg.MustRegister(&leaderStatusCollector{
 		query:        query,
 		age:          prometheus.NewDesc("hardcount_leader_last_tick_age_seconds", "Seconds since the role's last completed tick on ANY replica (leader_leases.last_tick_ended_at). Absent until the role has ticked once. Alert when it exceeds a few multiples of the role's interval — that is the cluster-wide stall signal a single replica's liveness gauge cannot give.", []string{"role"}, nil),
 		held:         prometheus.NewDesc("hardcount_leader_held", "1 while some replica holds the role's lease (a tick is running), else 0.", []string{"role"}, nil),
@@ -359,8 +359,8 @@ func b2f(b bool) float64 {
 // connection. It stays flat while DB_MAX_OPEN_CONNS is enough, so the runbook
 // alerts on its rate. The series are database/sql's own counters: a scrape
 // reads them from memory and runs no query.
-func RegisterDBPoolStats(pool *sql.DB) {
-	prometheus.MustRegister(collectors.NewDBStatsCollector(pool, "app"))
+func RegisterDBPoolStats(reg prometheus.Registerer, pool *sql.DB) {
+	reg.MustRegister(collectors.NewDBStatsCollector(pool, "app"))
 }
 
 // RecordStripeBreakerState updates the global breaker state gauge. Called
@@ -449,8 +449,9 @@ func RecordStripeKeyUnusable(reason string) {
 	stripeKeyUnusable.WithLabelValues(reason).Inc()
 }
 
-// RecordWebhookDelivery records a finished webhook delivery attempt by status
-// ("succeeded" or "failed").
+// RecordWebhookDelivery counts a delivery's final outcome: "succeeded" (a 2xx
+// whose mark applied) or "failed" (its last retry failed, or it was given up
+// while still pending).
 func RecordWebhookDelivery(status string) {
 	webhookDeliveries.WithLabelValues(status).Inc()
 }
@@ -560,9 +561,10 @@ func RecordSchedulerTick() {
 // they use partial or status indexes, and each is capped at 3s. A query
 // failure reports -1, which is visibly wrong, instead of a 0 that looks
 // healthy.
-func RegisterQueueDepthGauges(invoiceGrace time.Duration, count func(query string) (float64, error)) {
+func RegisterQueueDepthGauges(reg prometheus.Registerer, invoiceGrace time.Duration, count func(query string) (float64, error)) {
+	auto := promauto.With(reg)
 	gauge := func(name, help, query string) {
-		promauto.NewGaugeFunc(prometheus.GaugeOpts{Name: name, Help: help}, func() float64 {
+		auto.NewGaugeFunc(prometheus.GaugeOpts{Name: name, Help: help}, func() float64 {
 			n, err := count(query)
 			if err != nil {
 				return -1
@@ -591,7 +593,7 @@ func RegisterQueueDepthGauges(invoiceGrace time.Duration, count func(query strin
 		for _, d := range []struct{ label, status string }{{"open", "finalized"}, {"written_off", "uncollectible"}} {
 			q := fmt.Sprintf(`SELECT COUNT(*) FROM invoices WHERE status = '%s' AND payment_status = 'unknown' AND COALESCE(stripe_payment_intent_id, '') = '' AND livemode = %t
 				AND (auto_charge_claimed_until IS NULL OR auto_charge_claimed_until < now() - interval '26 hours')`, d.status, m.live)
-			promauto.NewGaugeFunc(prometheus.GaugeOpts{Name: "hardcount_parked_invoices", Help: parkedHelp, ConstLabels: prometheus.Labels{"mode": m.label, "disposition": d.label}}, func() float64 {
+			auto.NewGaugeFunc(prometheus.GaugeOpts{Name: "hardcount_parked_invoices", Help: parkedHelp, ConstLabels: prometheus.Labels{"mode": m.label, "disposition": d.label}}, func() float64 {
 				n, err := count(q)
 				if err != nil {
 					return -1
@@ -651,7 +653,7 @@ func RegisterQueueDepthGauges(invoiceGrace time.Duration, count func(query strin
 				FROM subscriptions WHERE ` + pred},
 		} {
 			q := g.query
-			promauto.NewGaugeFunc(prometheus.GaugeOpts{Name: g.name, Help: g.help, ConstLabels: prometheus.Labels{"mode": m.label}}, func() float64 {
+			auto.NewGaugeFunc(prometheus.GaugeOpts{Name: g.name, Help: g.help, ConstLabels: prometheus.Labels{"mode": m.label}}, func() float64 {
 				n, err := count(q)
 				if err != nil {
 					return -1
@@ -674,7 +676,7 @@ func RegisterQueueDepthGauges(invoiceGrace time.Duration, count func(query strin
 	}{{"live", true}, {"test", false}} {
 		for _, st := range []struct{ label, nextAttempt string }{{"retrying", "IS NOT NULL"}, {"parked", "IS NULL"}} {
 			q := fmt.Sprintf(`SELECT COUNT(*) FROM subscriptions WHERE %s AND livemode = %t AND billing_next_attempt_at %s`, billingFailing, m.live, st.nextAttempt)
-			promauto.NewGaugeFunc(prometheus.GaugeOpts{Name: "hardcount_billing_failing_subscriptions", Help: failingHelp, ConstLabels: prometheus.Labels{"mode": m.label, "state": st.label}}, func() float64 {
+			auto.NewGaugeFunc(prometheus.GaugeOpts{Name: "hardcount_billing_failing_subscriptions", Help: failingHelp, ConstLabels: prometheus.Labels{"mode": m.label, "state": st.label}}, func() float64 {
 				n, err := count(q)
 				if err != nil {
 					return -1
@@ -697,7 +699,7 @@ func RegisterQueueDepthGauges(invoiceGrace time.Duration, count func(query strin
 			WHERE i.auto_charge_pending AND i.payment_status = 'pending' AND i.status = 'finalized'
 			  AND i.livemode = %t AND i.is_simulated = false
 			  AND NOT EXISTS (SELECT 1 FROM subscriptions ps WHERE ps.id = i.subscription_id AND ps.pause_collection_behavior IS NOT NULL AND (ps.pause_collection_resumes_at IS NULL OR ps.pause_collection_resumes_at > now()))`, m.live)
-		promauto.NewGaugeFunc(prometheus.GaugeOpts{
+		auto.NewGaugeFunc(prometheus.GaugeOpts{
 			Name:        "hardcount_auto_charge_queued_invoices",
 			Help:        "Invoices the auto-charge sweep visits each tick, including card-less ones waiting for a payment method. Sustained > 5000 is the ADR-116 amendment trigger. For charges that keep failing, watch hardcount_auto_charge_retries_total{result=\"failed\"}. -1 = metric query failed.",
 			ConstLabels: prometheus.Labels{"mode": m.label},
@@ -742,7 +744,7 @@ func RegisterQueueDepthGauges(invoiceGrace time.Duration, count func(query strin
 					WHERE status = 'pending' AND livemode = %t`},
 		} {
 			q := fmt.Sprintf(g.query, m.live)
-			promauto.NewGaugeFunc(prometheus.GaugeOpts{Name: g.name, Help: g.help, ConstLabels: prometheus.Labels{"mode": m.label}}, func() float64 {
+			auto.NewGaugeFunc(prometheus.GaugeOpts{Name: g.name, Help: g.help, ConstLabels: prometheus.Labels{"mode": m.label}}, func() float64 {
 				n, err := count(q)
 				if err != nil {
 					return -1

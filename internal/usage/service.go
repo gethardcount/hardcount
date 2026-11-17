@@ -366,7 +366,7 @@ var lateUsageEvents *prometheus.CounterVec
 func init() {
 	c := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hardcount_usage_late_event_total",
-		Help: "Usage events, other than backfills, whose timestamp was more than 24h before the customer's current time when they arrived. Counted before the write, so a resend counts again. Events left off an invoice are hardcount_usage_unbilled_total{reason=\"after_close\"}.",
+		Help: "Usage events, other than backfills, whose timestamp was more than 24h before the customer's current time when they arrived. An API event is counted when it is checked, before the write; a LiteLLM event after its call is written. Either way a resend counts again. Events left off an invoice are hardcount_usage_unbilled_total{reason=\"after_close\"}.",
 	}, []string{"origin"})
 	if err := prometheus.DefaultRegisterer.Register(c); err != nil {
 		if are, ok := err.(prometheus.AlreadyRegisteredError); ok {

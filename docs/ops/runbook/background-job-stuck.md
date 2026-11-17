@@ -258,7 +258,7 @@ table:
 | Metric | Alert when |
 |---|---|
 | `hardcount_leader_last_tick_age_seconds{role}` | > max(3× the role's interval, 5 min): no replica has finished a tick. For `testclock_catchup` a long advance trips it too (a pass may run 10 minutes); see [Test-clock advance hung](test-clock-advance-hung.md) |
-| `hardcount_leader_held{role}` | Stays 1 while `last_tick_age` grows: a tick is wedged but still renewing. See [Check](#check) step 3 for billing |
+| `hardcount_leader_held{role}` | Stays 1 while `last_tick_age` grows: a tick still running. That is a long billing drain (`hardcount_billing_due_subscriptions` falling), a long test-clock advance, or a tick stuck but still renewing. Follow [Check](#check) before restarting anything; step 3 is for billing |
 | `hardcount_leader_paused{role}` | 1 outside a planned window |
 | `hardcount_leader_lease_lost_total{role,reason}` | Any increase, except `reason="paused"`. See [Lease-lost reasons](#lease-lost-reasons) |
 | `hardcount_leader_status_scrape_failed` | 1: the view could not be read, so the gauges above are absent from that scrape. The database is the problem, not the roles |

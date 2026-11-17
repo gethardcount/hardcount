@@ -18,8 +18,9 @@ have:
 - **`outcome="mutation_refused"`: nothing is missing.** The audit write
   failed inside the business transaction, so the change was rolled back
   with it. The two succeed or fail together. This is an availability
-  problem, not an evidence problem: the customer got an error, and the log
-  is intact.
+  problem, not an evidence problem: writes are failing, and the log is
+  intact. A failed API request logs `unhandled error` with
+  `audit log (in-tx): insert` in its `error` field.
 
 **Check:**
 
