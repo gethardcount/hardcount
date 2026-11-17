@@ -33,7 +33,7 @@ type SubscriptionPlanUsageReader interface {
 }
 
 // CustomerReader fetches a customer by id on a tenant- and mode-scoped
-// transaction. Implemented by *customer.PostgresStore, wired in router.go.
+// transaction. Implemented by *customer.PostgresStore, wired in wire.go.
 type CustomerReader interface {
 	Get(ctx context.Context, tenantID, customerID string) (domain.Customer, error)
 }
@@ -63,7 +63,7 @@ func (s *Service) SetCustomerReader(r CustomerReader) { s.customers = r }
 // SetSubscriptionPlanUsageReader wires the live-sub counter UpdatePlan uses
 // to keep the base fee fixed (ADR-034). Optional — when unwired (narrow unit
 // tests) the base fee is editable. Production wires
-// *subscription.PostgresStore via router.go.
+// *subscription.PostgresStore via wire.go.
 func (s *Service) SetSubscriptionPlanUsageReader(r SubscriptionPlanUsageReader) {
 	s.subPlanUsage = r
 }

@@ -410,7 +410,7 @@ func NewLiveStripeClient(clients *StripeClients) *LiveStripeClient {
 // configured" — a definite failure that spent a dunning attempt.
 func (c *LiveStripeClient) client(ctx context.Context) (*stripe.Client, error) {
 	// No Stripe mode configured at all: NewLiveStripeClient returned nil, and
-	// router.go still hands it to the reconciler. The stale-hold sweep can
+	// wire.go still hands it to the reconciler. The stale-hold sweep can
 	// meet a held invoice whose customer has a Stripe id even then (Stripe
 	// removed after charges ran), so answer "not configured" instead of
 	// panicking the tick.

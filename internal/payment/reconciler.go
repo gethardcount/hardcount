@@ -86,7 +86,7 @@ type Reconciler struct {
 	settler Settler
 	// resolver decides each row's time from its invoice (decideRow), so a
 	// clock invoice is settled on its clock. Wired via SetResolver from
-	// router.go. Nil (narrow unit tests) decides nothing.
+	// wire.go. Nil (narrow unit tests) decides nothing.
 	resolver clock.Resolver
 	// hostedLedger + hostedReader drive the hosted-page sweep
 	// (reconciler_hosted.go). Nil-tolerant: unwired, that sweep is skipped.

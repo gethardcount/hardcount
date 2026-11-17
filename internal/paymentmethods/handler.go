@@ -38,7 +38,7 @@ type Handler struct {
 
 // CustomerLookup resolves the recipient's email + display name for
 // the operator "send setup email" flow. Implemented by
-// *customer.PostgresStore via a thin adapter in router.go.
+// *customer.PostgresStore via a thin adapter in adapters.go.
 type CustomerLookup interface {
 	GetForSetupLink(ctx context.Context, tenantID, customerID string) (email, displayName string, err error)
 }

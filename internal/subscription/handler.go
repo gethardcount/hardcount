@@ -32,7 +32,7 @@ type PlanReader interface {
 
 // PlanMeterReader reads a plan's meters: every meter the plan has ever had a
 // price for, the conservative set the overlap guard compares (ADR-130).
-// Implemented by *pricing.PostgresStore, wired in router.go.
+// Implemented by *pricing.PostgresStore, wired in wire.go.
 type PlanMeterReader interface {
 	PlanMeterIDs(ctx context.Context, tenantID, planID string) ([]string, error)
 }
@@ -206,7 +206,7 @@ func NewHandler(svc *Service) *Handler {
 func (h *Handler) SetAuditLogger(l auditRecorder) { h.auditLogger = l }
 
 // SetInvoiceFinalizeRecorder wires the finalize audit row for proration
-// invoices (the billing engine; router.go).
+// invoices (the billing engine; wire.go).
 func (h *Handler) SetInvoiceFinalizeRecorder(r InvoiceFinalizeRecorder) { h.finalizeAudit = r }
 
 // planIDsForAudit projects a sub's items into the audit metadata
@@ -240,7 +240,7 @@ func (h *Handler) SetTenantLocator(l TenantLocator) { h.tzLocator = l }
 
 // SetNetTermsReader wires the tenant Net-terms resolver (the billing engine)
 // so proration invoices stamp the operator-configured terms instead of a
-// hardcoded Net 30; wired from router.go.
+// hardcoded Net 30; wired from wire.go.
 func (h *Handler) SetNetTermsReader(r NetTermsReader) { h.netTerms = r }
 
 // tenantLoc resolves the tenant billing timezone, UTC when unwired.
@@ -283,7 +283,7 @@ func (h *Handler) respondSub(w http.ResponseWriter, r *http.Request, status int,
 
 // SetCreditNoteIssuer wires the tax-reversing credit-note primitive that
 // credits unused prepaid time (ADR-048, ADR-118). Implemented by
-// *creditnote.Service; wired from router.go.
+// *creditnote.Service; wired from wire.go.
 func (h *Handler) SetCreditNoteIssuer(i CreditNoteIssuer) {
 	h.creditNotes = i
 }

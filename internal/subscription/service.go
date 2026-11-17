@@ -202,7 +202,7 @@ func NewService(store Store, clk clock.Clock) *Service {
 }
 
 // SetSettingsReader wires the tenant settings reader. Kept as a setter
-// rather than a constructor arg because router.go builds the settings
+// rather than a constructor arg because wire.go builds the settings
 // store after the subscription service today; setter avoids a forced
 // re-order. Calls before the setter is wired fall back to UTC for
 // period snapping (tested via the nil branch of tenantLocation).
@@ -215,7 +215,7 @@ func (s *Service) SetSettingsReader(r SettingsReader) {
 // inherit test_clock_id from the owning customer (ADR-027). When
 // unwired (narrow unit tests), neither happens: the new sub has no
 // clock unless the caller stamps one directly. Production wires the
-// real customer store via router.go.
+// real customer store via wire.go.
 func (s *Service) SetCustomerReader(r CustomerReader) {
 	s.customers = r
 }
@@ -223,7 +223,7 @@ func (s *Service) SetCustomerReader(r CustomerReader) {
 // ProfileCurrencyReader is the narrow seam for the ADR-100 currency pin:
 // the customer's billing-profile currency is the highest-precedence invoice
 // label, so a new plan must match it. Nil-safe like every sibling guard
-// seam; production wires the customer store via router.go.
+// seam; production wires the customer store via wire.go.
 type ProfileCurrencyReader interface {
 	GetBillingProfile(ctx context.Context, tenantID, customerID string) (domain.CustomerBillingProfile, error)
 }
@@ -237,7 +237,7 @@ func (s *Service) SetProfileReader(r ProfileCurrencyReader) {
 // yearly-aware period anchoring. Optional —
 // nil-safe; without it, the period helpers default to monthly math
 // (pre-Bug-#10 behavior). Production wires the pricing store via
-// router.go.
+// wire.go.
 func (s *Service) SetPlanReader(r PlanReader) {
 	s.plans = r
 }
@@ -250,7 +250,7 @@ func (s *Service) SetPlanMeterReader(r PlanMeterReader) {
 // SetBiller wires the billing engine for the in_advance first-invoice
 // path (ADR-031). Optional — without it, in_advance plans silently
 // behave like in_arrears until the next cycle close. Production wires
-// *billing.Engine via router.go; unit tests can leave it unwired
+// *billing.Engine via wire.go; unit tests can leave it unwired
 // because most don't exercise the day-1 invoice path.
 func (s *Service) SetBiller(b Biller) {
 	s.biller = b

@@ -398,13 +398,13 @@ func NewService(store Store, clk clock.Clock, settings TenantSettingsStore) *Ser
 }
 
 // SetTaxCommitter wires the upstream tax-transaction committer. Called from
-// router.go with the billing engine so finalize can commit Stripe tax calcs.
+// wire.go with the billing engine so finalize can commit Stripe tax calcs.
 func (s *Service) SetTaxCommitter(tc TaxCommitter) {
 	s.taxCommitter = tc
 }
 
 // SetTaxReverser wires the upstream tax-transaction reverser. Called from
-// router.go with the billing engine so Void on a finalized-but-unpaid
+// wire.go with the billing engine so Void on a finalized-but-unpaid
 // invoice can reverse the tax_transaction committed at finalize time.
 // Without this, voided invoices leave their tax recorded as collected
 // with the authority — over-reporting tax revenue.
@@ -418,7 +418,7 @@ func (s *Service) SetCreditNoteTotaler(c CreditNoteTotaler) {
 
 // SetCreditReverser wires the consumed-credit reverser used by Void to restore
 // applied customer credits atomically with the status flip. Called from
-// router.go with the credit service. Without it, Void still voids but reverses
+// wire.go with the credit service. Without it, Void still voids but reverses
 // no credits (correct for tenants that never apply customer credit).
 func (s *Service) SetCreditReverser(r CreditReverser) {
 	s.creditReverser = r

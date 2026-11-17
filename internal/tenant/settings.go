@@ -343,7 +343,7 @@ type SettingsHandler struct {
 // SettingsAuditRecorder is the narrow audit surface the settings handler
 // needs — declared here so internal/tenant stays decoupled from
 // internal/audit. Production wires *audit.Logger via SetAuditLogger in
-// router.go. Optional: nil = NO audit row at all. There is no longer a fallback:
+// wire.go. Optional: nil = NO audit row at all. There is no longer a fallback:
 // the generic middleware catch-all that used to record "a PUT happened" was
 // deleted (ADR-090), and its replacement is a PURE OBSERVER that reports an
 // uncovered mutation rather than writing one. A nil recorder here means the
