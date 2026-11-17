@@ -2900,16 +2900,16 @@ func (s *Service) retryStuck(ctx context.Context, tenantID string, stuck []domai
 		if err := ctx.Err(); err != nil {
 			return processed, append(errs, fmt.Errorf("stopped before %d of %d invoices: %w", len(stuck)-i, len(stuck), err))
 		}
-		ctx := ctx
+		rowCtx := ctx
 		if decide != nil {
 			decided, err := decide(ctx, tenantID, inv.ID)
 			if err != nil {
 				errs = append(errs, fmt.Errorf("invoice %s: %w", inv.ID, err))
 				continue
 			}
-			ctx = decided
+			rowCtx = decided
 		}
-		if _, retryErr := s.RetryTax(ctx, tenantID, inv.ID); retryErr != nil {
+		if _, retryErr := s.RetryTax(rowCtx, tenantID, inv.ID); retryErr != nil {
 			errs = append(errs, fmt.Errorf("invoice %s: %w", inv.ID, retryErr))
 			continue
 		}
