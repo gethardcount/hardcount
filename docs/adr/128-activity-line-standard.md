@@ -1,7 +1,7 @@
 # ADR-128: Activity line standard
 
 **Date:** 2026-10-19
-**Status:** Accepted
+**Status:** Accepted (amended 2026-11-17: one date column for emails and charge attempts)
 **Amends:** [ADR-104](104-one-activity-lane-entity-calendar.md) for the Sent
 emails card, and [ADR-102](102-invoice-charge-attempts.md) for hosted-page
 payment attempts.
@@ -185,7 +185,7 @@ together one release after the pages move.
 
 ADR-104's surface table put the customer's Sent-emails card on the real
 calendar, next to webhook deliveries. The card moves to the entity's
-calendar: each email is dated at its `sim_effective_at`, with the real send
+calendar: each email is dated at its `effective_at`, with the real send
 time as its Recorded part. Webhook deliveries stay on real time.
 
 ### Reversal: hosted-page payment attempts
@@ -193,7 +193,7 @@ time as its Recorded part. Webhook deliveries stay on real time.
 ADR-102 made a charge attempt created by the settle path (the hosted payment
 page, `trigger_source='external'`) "deliberately wall-clock", because "an
 interactive act is a wall fact". That rule is reversed. When the settle path
-writes the attempt, it stamps `sim_effective_at` from the invoice's clock,
+writes the attempt, it stamps `effective_at` from the invoice's clock,
 the same as any other act on a pinned invoice. The change touches the settle
 path, so it follows the
 [money-path playbook](../dev/money-path-robustness-playbook.md).
@@ -205,6 +205,15 @@ the database before the charge call records its own attempt (a dunning
 retry's failure webhook arriving first), the charge call's date wins over the
 report's. That is the rule `trigger_source` already follows: the writer that
 made the attempt owns its facts.
+
+### Amendment 2026-11-17: one date column for emails and charge attempts
+
+An email and a charge attempt are dated by `effective_at`, the instant their
+action decided, on a test clock or not
+([#1824](https://github.com/gethardcount/hardcount/pull/1824)). Off a test
+clock an email was dated by the database's stamps, so it could sort after the
+next request's event when the database's clock led the server's. Migration
+00237 drops `sim_effective_at` from both tables.
 
 ## Why this design
 
