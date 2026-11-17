@@ -3227,7 +3227,7 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 	if err != nil {
 		return 0, []error{err}
 	}
-	now := s.clock.Now(ctx)
+	now := s.clock.Now(ctx) // only for the list; each row reads its own
 	expired, err := s.store.ListExpiredTrials(ctx, now, livemode, batch)
 	if err != nil {
 		return 0, []error{fmt.Errorf("list expired trials: %w", err)}
@@ -3241,6 +3241,8 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 		if sub.TrialEndAt == nil {
 			continue
 		}
+		// One instant for this subscription's work; the tick binds none.
+		ctx := clock.EnsureEffectiveNow(ctx, s.clock)
 		trialEndAt := *sub.TrialEndAt
 		// ADR-069 routing: a due cancel schedule cancels FREE — see the
 		// clock-path twin for the rationale; the activation UPDATE's SQL

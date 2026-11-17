@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"maps"
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -1280,6 +1281,7 @@ type fakeBiller struct {
 	finalCancelErr            error
 	finalCancelInv            domain.Invoice
 	createTxCalls             int
+	finalizedAt               []time.Time // the instant each FinalizeOnCreateInvoice ran on
 	createTxOK                bool
 	createTxInv               domain.Invoice
 	createTxErr               error
@@ -1398,6 +1400,7 @@ func (f *fakeBiller) ThresholdBilledThroughTx(_ context.Context, _ *sql.Tx, _ do
 
 func (f *fakeBiller) FinalizeOnCreateInvoice(ctx context.Context, _ domain.Subscription, inv domain.Invoice) {
 	f.finalizeCalls++
+	f.finalizedAt = append(f.finalizedAt, clock.Now(ctx))
 	f.postCommit = append(f.postCommit, "finalize:"+inv.ID)
 	f.postCommitCtxErr = append(f.postCommitCtxErr, ctx.Err())
 }
@@ -2448,6 +2451,44 @@ func TestProcessExpiredTrials(t *testing.T) {
 		}
 	})
 
+	t.Run("wall-clock: each expired trial is worked on its own instant", func(t *testing.T) {
+		creator := NewService(newMemStore(), clock.NewFake(createdAt))
+		trial := CreateInput{DisplayName: "Trial", CustomerID: "c", Items: []CreateItemInput{{PlanID: "p"}}, TrialDays: 14}
+		trial.Code = "sub-trial-cancel"
+		canceling, err := creator.Create(ctx, "t1", trial)
+		if err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		trial.Code = "sub-trial-day1"
+		if _, err := creator.Create(ctx, "t1", trial); err != nil {
+			t.Fatalf("create: %v", err)
+		}
+		mem := creator.store.(*memStore)
+		due := mem.subs[canceling.ID]
+		due.CancelAtPeriodEnd = true // a cancel at period end is due when the trial ends (trialCancelDue)
+		mem.subs[canceling.ID] = due
+
+		server := &steppingClock{at: canceling.TrialEndAt.Add(time.Hour)}
+		fb := &fakeBiller{createTxOK: true, createTxInv: domain.Invoice{ID: "inv_day1"}}
+		job := NewService(mem, server)
+		job.SetBiller(fb)
+		if _, errs := job.ProcessExpiredTrials(ctx, 100); len(errs) != 0 {
+			t.Fatalf("unexpected errors: %v", errs)
+		}
+		if len(fb.finalizedAt) != 1 {
+			t.Fatalf("day-1 finalizes: %d, want 1", len(fb.finalizedAt))
+		}
+		canceledAt, day1 := mem.subs[canceling.ID].UpdatedAt, fb.finalizedAt[0]
+		for name, at := range map[string]time.Time{"the cancel": canceledAt, "the day-1 finalize": day1} {
+			if !slices.Contains(server.issued, at) || !at.After(server.issued[0]) {
+				t.Errorf("%s at %v: want a read of the server's clock after the list's %v", name, at, server.issued[0])
+			}
+		}
+		if canceledAt.Equal(day1) {
+			t.Errorf("the cancel and the day-1 finalize share %v: want each trial on its own read", day1)
+		}
+	})
+
 	t.Run("wall-clock: excludes clock-pinned subs (ADR-028 disjoint flows)", func(t *testing.T) {
 		// Clock-pinned subs must NOT be processed by the wall-clock
 		// path — they flow through the catchup orchestrator's Phase
@@ -2481,6 +2522,18 @@ func TestProcessExpiredTrials(t *testing.T) {
 			t.Errorf("status: got %q, want trialing (clock-pinned not touched by wall-clock scan)", mem.subs[sub.ID].Status)
 		}
 	})
+}
+
+// steppingClock reads one second later each time and keeps every read.
+type steppingClock struct {
+	at     time.Time
+	issued []time.Time
+}
+
+func (c *steppingClock) Now(context.Context) time.Time {
+	c.at = c.at.Add(time.Second)
+	c.issued = append(c.issued, c.at)
+	return c.at
 }
 
 // TestPeriodAnchoring: the first billing period anchors the same way from
