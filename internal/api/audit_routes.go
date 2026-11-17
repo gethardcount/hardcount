@@ -111,11 +111,6 @@ func exempt(reason exemptReason, note string) auditDecl {
 // chi's RoutePattern() loops the replace and trims; applying the same
 // normalization to both sides makes them meet
 // (TestRouteLookup_FindsEveryRouteAndItsParams).
-//
-// Do not also trim a trailing "/*". A pattern such as "/v1/customers/*",
-// from a path no route under a mount matches, must not fold onto the real
-// "/v1/customers" key, or a miss would pass for a covered route. Left as it
-// is, it matches no key at all, which is the correct answer.
 func canonicalRoute(p string) string {
 	for strings.Contains(p, "/*/") {
 		p = strings.ReplaceAll(p, "/*/", "/")

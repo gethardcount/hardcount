@@ -26,7 +26,7 @@ import (
 // and binds.
 //
 // It decides in this order:
-//   - It takes the request's route, which the lookup at the edge found
+//   - It takes the request's route, which the lookup at the root found
 //     (routeLookup: an in-memory Find, no database read), and the route's
 //     entry in clockRoutes.
 //   - A route the router does not have, and a decidedIn route: in test mode
@@ -126,7 +126,7 @@ func (h doorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // route is the request's entry in clockRoutes and its path parameters, as
-// the lookup at the edge found them (routeOf): false when the router has no
+// the lookup at the root found them (routeOf): false when the router has no
 // such route.
 func (d *clockDoor) route(r *http.Request) (clockDecl, *chi.Context, bool) {
 	m := routeOf(r.Context())

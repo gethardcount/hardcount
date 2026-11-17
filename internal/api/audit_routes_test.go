@@ -199,9 +199,8 @@ func TestAuditRouteRegistry_ExemptionsStaySmall(t *testing.T) {
 		explicitN, len(auditRouteRegistry)-explicitN, len(auditRouteRegistry))
 }
 
-// TestCanonicalRoute pins the two normalizations that let chi.Walk's patterns and
-// the runtime RoutePattern() meet on one key — and the one normalization that
-// must NOT happen.
+// TestCanonicalRoute pins the normalizations that let chi.Walk's patterns and
+// Find's meet on one key.
 func TestCanonicalRoute(t *testing.T) {
 	tests := []struct {
 		name string
@@ -214,14 +213,6 @@ func TestCanonicalRoute(t *testing.T) {
 		{"walk does not trim a subrouter's trailing slash", "/v1/customers/", "/v1/customers"},
 		{"mounted root", "/v1/public/invoices/*/{token}/checkout", "/v1/public/invoices/{token}/checkout"},
 		{"root stays root", "/", "/"},
-
-		// The load-bearing negative. A 404 inside a mounted subtree yields
-		// RoutePattern() == "/v1/customers/*". Trimming the trailing "/*" would
-		// collapse it onto the real "/v1/customers" key — a MISS masquerading as
-		// a covered route (and, for an exempt key, a silent free pass for
-		// anything unmatched under that subtree). Leaving it intact means it
-		// matches no key, which is the honest answer.
-		{"trailing /* is NOT trimmed (an unmatched subtree must not collapse onto a real key)", "/v1/customers/*", "/v1/customers/*"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

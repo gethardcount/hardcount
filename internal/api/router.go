@@ -154,8 +154,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 // routes registers every route and its middleware, and returns the router.
 func (s *Server) routes() chi.Router {
 	r := chi.NewRouter()
-	// Each request's route, found once at the root; the lookup's root is the
-	// built router, set once every route is registered, below.
+	// Each request's route, found once at the root (routeLookup).
 	lookup := &routeLookup{}
 	// The clock door (clockDoor) runs last in every group, after
 	// authentication, the limiter and the timeout, so it reads a named record
@@ -192,9 +191,9 @@ func (s *Server) routes() chi.Router {
 	r.Use(mw.Metrics())
 	r.Use(requestLogger)
 	r.Use(mw.Recoverer(loggablePath))
-	// One Find per request, for the clock door, the show-once check and the
-	// audit detector (routeLookup). After the Recoverer, so a panic in it is
-	// answered; before the detector, which reads it.
+	// After the Recoverer, so a panic in the lookup, or in a reader that finds
+	// it missing (routeOf), is answered; before the audit detector, which
+	// reads it.
 	r.Use(lookup.Middleware)
 
 	// Cap every request body (limitRequestBody): 1 MB, or the LiteLLM

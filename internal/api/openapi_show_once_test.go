@@ -144,8 +144,8 @@ func specShowOnceOperations(t *testing.T) map[string]string {
 
 // answersWithShowOnceSecret on real URLs, as the lookup at the root finds
 // them: every listed route with concrete ids, and the near misses around
-// them. A path no route matches is never show-once; the router answers it
-// 404 before any group's middleware runs.
+// them. A path no route matches is never show-once. When no mount matches it
+// either, the router answers it 404 before any group's middleware runs.
 func TestAnswersWithShowOnceSecret(t *testing.T) {
 	for _, tc := range []struct {
 		method, path string
@@ -171,6 +171,9 @@ func TestAnswersWithShowOnceSecret(t *testing.T) {
 		{"POST", "/v1/api-keysx", false},
 		{"POST", "/v1/api-keys/hc_key_a", false},
 		{"POST", "/v1/api-keys/hc_key_a/rotate/extra", false},
+		// The /api-keys mount matches but its sub-router has no such route, so
+		// the ordinary group runs and its 404 is kept for a replay; no handler
+		// runs, so no secret is involved.
 		{"POST", "/v1/api-keys/hc_key_a/rotate/", false},
 		{"POST", "/v1/customers", false},
 		{"POST", "/v1/customers/hc_cus_a/payment-methods", false},
