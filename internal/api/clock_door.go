@@ -28,7 +28,7 @@ import (
 // It decides in this order:
 //   - It takes the request's route, which the lookup at the root found
 //     (routeLookup: an in-memory Find, no database read), and the route's
-//     entry in clockRoutes.
+//     entry in routeTable.
 //   - A route the router does not have, and a decidedIn route: in test mode
 //     the door records real time with no instant (clock.WithRealTime, one of
 //     the states named on clock.Decision); in live mode it leaves the
@@ -125,13 +125,13 @@ func (h doorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.next.ServeHTTP(w, r.WithContext(clock.EnsureEffectiveNow(ctx, h.door.clock)))
 }
 
-// route is the request's entry in clockRoutes and its path parameters, as
-// the lookup at the root found them (routeOf): false when the router has no
-// such route.
+// route is the request's clock declaration in routeTable and its path
+// parameters, as the lookup at the root found them (routeOf): false when the
+// router has no such route.
 func (d *clockDoor) route(r *http.Request) (clockDecl, *chi.Context, bool) {
 	m := routeOf(r.Context())
-	decl, ok := clockRoutes[m.key]
-	return decl, m.params, ok
+	decl, ok := routeTable[m.key]
+	return decl.clock, m.params, ok
 }
 
 // errUnknownClockSource is pinFor's answer for a route table entry whose

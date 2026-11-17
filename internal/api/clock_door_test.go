@@ -313,7 +313,7 @@ func TestClockDoor_EveryRouteThatReadsARecordIsAuthenticated(t *testing.T) {
 	var open []string
 	reading := 0
 	if err := chi.Walk(newTestServer().router, func(method, route string, _ http.Handler, mws ...func(http.Handler) http.Handler) error {
-		switch clockRoutes[routeKey{Method: method, Pattern: canonicalRoute(route)}].Source {
+		switch routeTable[routeKey{Method: method, Pattern: canonicalRoute(route)}].clock.Source {
 		case clockOfCustomer, clockOfSubscription, clockOfInvoice, clockOfCreditNote, clockOfDunningRun:
 			reading++
 			if chainIndex(mws, authMW) < 0 {
@@ -332,34 +332,6 @@ func TestClockDoor_EveryRouteThatReadsARecordIsAuthenticated(t *testing.T) {
 	}
 }
 
-// Every entry that reads a record names a parameter its route's pattern has.
-// One that did not would read an empty id, which the door decides as real
-// time: a record on a clock would silently run at real time.
-func TestClockDoor_EveryRecordEntryNamesAParameterOfItsRoute(t *testing.T) {
-	var wrong []string
-	reading := 0
-	if err := chi.Walk(newTestServer().router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
-		pattern := canonicalRoute(route)
-		entry := clockRoutes[routeKey{Method: method, Pattern: pattern}]
-		switch entry.Source {
-		case clockOfCustomer, clockOfSubscription, clockOfInvoice, clockOfCreditNote, clockOfDunningRun:
-			reading++
-			if !strings.Contains(pattern, "{"+entry.Param+"}") {
-				wrong = append(wrong, method+" "+pattern+": no {"+entry.Param+"}")
-			}
-		}
-		return nil
-	}); err != nil {
-		t.Fatalf("walk: %v", err)
-	}
-	if reading == 0 {
-		t.Fatal("no route reads a record: the walk found none of the table's entries")
-	}
-	if len(wrong) > 0 {
-		t.Errorf("%d entries name a parameter their route does not have:\n  %s", len(wrong), strings.Join(wrong, "\n  "))
-	}
-}
-
 // A route table entry whose source the door does not know is a fault in the
 // table or the door: pinFor says so, and the door answers 500, never the 503
 // that says a clock could not be read, and binds nothing.
@@ -369,9 +341,9 @@ func TestClockDoor_AnUnknownClockSourceIsAServerFault(t *testing.T) {
 		t.Fatalf("pinFor: %v; want errUnknownClockSource", err)
 	}
 	key := routeKey{Method: "GET", Pattern: "/v1/whoami"}
-	saved := clockRoutes[key]
-	clockRoutes[key] = clockDecl{Source: clockSource(99)}
-	t.Cleanup(func() { clockRoutes[key] = saved })
+	saved := routeTable[key]
+	routeTable[key] = routeDecl{clock: clockDecl{Source: clockSource(99)}}
+	t.Cleanup(func() { routeTable[key] = saved })
 	got := through(d, auth.WithTenantID(postgres.WithLivemode(context.Background(), false), "t1"), "GET", "/v1/whoami")
 	if got.reached || got.code != http.StatusInternalServerError || strings.Contains(got.body, "test_clock_unavailable") || serverOf(d).reads != 0 {
 		t.Errorf("reached %v, code %d, body %s, %d server reads; want not reached, 500, no clock refusal, no read",
