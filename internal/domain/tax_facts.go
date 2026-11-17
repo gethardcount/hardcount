@@ -57,3 +57,32 @@ type TaxFacts struct {
 	// before this column existed (migration 0067).
 	TaxErrorCode string `json:"tax_error_code,omitempty"`
 }
+
+// MaxTaxRetryAttempts is the reconciler's hard cap on automatic tax
+// retries (the SQL predicate lives in billing/tax_retry.go, which
+// sources this const). The attention banner asserts this policy to
+// operators, so the classifier and the reconciler must share one
+// number.
+const MaxTaxRetryAttempts = 8
+
+// TaxRetryableErrorCodes is the single source for WHICH tax error
+// codes the reconciler retries. provider_not_configured is retryable
+// on purpose: it fails PRE-FLIGHT (no provider API call, no quota),
+// and retrying self-heals the invoice that raced a Stripe connect —
+// the banner already promised this behavior; now it is true. Codes
+// outside this list are operator-action-required (auth, bad customer
+// data, unregistered jurisdiction): retrying those burns provider
+// quota with no chance of success.
+func TaxRetryableErrorCodes() []string {
+	return []string{"provider_outage", "unknown", "provider_not_configured"}
+}
+
+// TaxErrorCodeRetryable reports whether the reconciler retries code.
+func TaxErrorCodeRetryable(code string) bool {
+	for _, c := range TaxRetryableErrorCodes() {
+		if c == code {
+			return true
+		}
+	}
+	return false
+}

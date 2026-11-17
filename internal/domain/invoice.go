@@ -321,7 +321,7 @@ type Invoice struct {
 	PaymentCardBrand string `json:"payment_card_brand,omitempty"`
 	PaymentCardLast4 string `json:"payment_card_last4,omitempty"`
 	// Attention is the one "needs operator attention" field, computed on
-	// read by ClassifyInvoiceAttention. It is never stored. It is always
+	// read by classifyInvoiceAttention in internal/invoice. It is never stored. It is always
 	// derived from the durable fields above (tax_status, tax_error_code,
 	// payment_status, last_payment_error) plus due_at. It is nil when the
 	// invoice is healthy (terminal, or no failure mode active).
