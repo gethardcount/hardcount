@@ -4884,8 +4884,11 @@ func (e *Engine) emailInvoiceOnce(ctx context.Context, inv domain.Invoice) {
 // it for each invoice, and the post-commit CollectInvoice nudge calls it once,
 // so collection has a single implementation.
 //
+// Until ChargeInvoice returns, ctx carries the row's one instant; after it,
+// AtArrival re-dates what this function writes.
+//
 // at anchors the credit application and a credit-covered settle; nil means
-// "the invoice's own clock now" (SimForInvoice), which is what the sweeps want.
+// the instant bound on ctx, which is what the sweeps want.
 // trigger labels the no-payment-method email (finalize_no_pm when a finalize
 // site nudges, auto_charge_retry_no_pm from the sweeps).
 //
@@ -4909,9 +4912,9 @@ func (e *Engine) emailInvoiceOnce(ctx context.Context, inv domain.Invoice) {
 // when a tester uses a decline-card; they record the decline and
 // move on.
 func (e *Engine) processAutoCharge(ctx context.Context, inv domain.Invoice, at *time.Time, trigger string) (int, []error) {
-	// One instant for this invoice's work. The sweeps' tick binds none, so each
-	// invoice reads its own; the catch-up's clock and the nudge's instant are
-	// kept.
+	// One instant for all of this invoice's stamps. EnsureEffectiveNow keeps one
+	// already bound (a test clock's, or the action's) and reads the clock once
+	// otherwise.
 	ctx = clock.EnsureEffectiveNow(ctx, e.clock)
 	charged := 0
 	var errs []error
@@ -4948,7 +4951,8 @@ func (e *Engine) processAutoCharge(ctx context.Context, inv domain.Invoice, at *
 	}
 	// Every path below that sends no charge releases the hold (by its
 	// token): left set, it would wait for the stale-hold sweep. The store
-	// runs the release even after a shutdown ends ctx.
+	// runs the release even after a shutdown ends ctx. release reads ctx when
+	// it runs; ctx is rebound at AtArrival, so call it only above that line.
 	release := func() {
 		if err := e.invoices.ReleaseChargeHold(ctx, inv.TenantID, inv.ID, hold); err != nil {
 			slog.Warn("auto-charge: releasing the charge hold failed — the invoice waits for the stale-hold sweep",
@@ -5116,10 +5120,7 @@ func (e *Engine) processAutoCharge(ctx context.Context, inv domain.Invoice, at *
 	chargeCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	_, err = e.charger.ChargeInvoice(chargeCtx, inv.TenantID, inv, hold, stripeCusID, stripePMID)
 	cancel()
-	// Stripe's answer is in: what this row writes next on the invoice is dated
-	// when it arrived, as the charger's settle dated its own write, so
-	// updated_at never goes backwards. release() is not called below this line.
-	ctx = clock.AtArrival(ctx, e.clock)
+	ctx = clock.AtArrival(ctx, e.clock) // Stripe's answer is in: see the doc comment
 	if err != nil {
 		// Below Stripe's minimum charge: not a decline and not an error of
 		// this sweep. The charger recorded it (the invoice stays pending,

@@ -1533,7 +1533,8 @@ type chargedCard struct {
 }
 
 // recordChargeAttempt best-effort writes the ADR-102 attempt fact, dated by
-// the store at ctx's instant: the charge's action. Best-effort: the
+// the store at ctx's instant: the charge's action. An attempt row is dated
+// when the attempt began; its result's time is on the invoice. Best-effort: the
 // timeline's precedence chain (dunning row → attempt row → webhook row)
 // falls back to the webhook row when this write is lost, so failure
 // degrades display, never money.

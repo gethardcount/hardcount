@@ -163,8 +163,8 @@ func TestListAutoChargePendingForClock_PagesAfterTheCursor(t *testing.T) {
 	}
 }
 
-// stripeAnswersLater is Stripe answering each request a minute after it was
-// asked, on clk: every PaymentIntent it creates succeeds, each with its own id.
+// stripeAnswersLater is a canned Stripe: create returns a new id, confirm
+// echoes it and succeeds, and each answer advances clk (the engine's) a minute.
 type stripeAnswersLater struct {
 	clk *clock.Fake
 	n   int
@@ -199,7 +199,7 @@ func TestRetryPendingCharges_EachInvoiceOnItsOwnInstant(t *testing.T) {
 	}
 	paid, err := h.invoices.Get(h.ctx, h.tenantID, first.ID)
 	if err != nil || paid.PaidAt == nil {
-		t.Fatalf("first invoice %+v, %v: want paid", paid.PaidAt, err)
+		t.Fatalf("first invoice %s, %v: want paid", paid.Status, err)
 	}
 	for _, c := range []struct {
 		inv  domain.Invoice

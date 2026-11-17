@@ -28,11 +28,12 @@ func TestSortInvoiceTimeline_CausalTies(t *testing.T) {
 			{EventType: "dunning.retry_attempted", sortAt: instant, tieRank: rankRetryAttempted},
 			{EventType: "dunning.escalated", sortAt: instant, tieRank: rankEscalated},
 			{EventType: "dunning.started", sortAt: instant, tieRank: rankDunningStarted},
+			{EventType: "email.payment_setup_request", sortAt: instant, tieRank: rankEmail}, // no card: the email asking for one
 		}
 		sortInvoiceTimeline(events)
 		want := []string{
 			"invoice.created", "invoice.finalized", "dunning.started",
-			"dunning.retry_attempted", "dunning.escalated", "invoice.uncollectible",
+			"dunning.retry_attempted", "dunning.escalated", "invoice.uncollectible", "email.payment_setup_request",
 		}
 		for i, w := range want {
 			if events[i].EventType != w {
