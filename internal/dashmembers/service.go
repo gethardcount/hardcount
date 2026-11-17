@@ -43,8 +43,11 @@ type UserDirectory interface {
 	// the caller's transaction. The bootstrap owner is created the same way.
 	CreateInTx(ctx context.Context, tx *sql.Tx, email, passwordHash, tenantID, role string) (domain.User, error)
 	// AttachTenantInTx adds a membership for an existing user, on the
-	// caller's transaction.
+	// caller's transaction. It refuses a user who is a member of another
+	// workspace (a 409, code member_elsewhere).
 	AttachTenantInTx(ctx context.Context, tx *sql.Tx, userID, tenantID, role string) error
+	// CheckJoin returns that refusal without writing, for the accept page.
+	CheckJoin(ctx context.Context, u domain.User, tenantID string) error
 }
 
 // SessionWriter starts and ends sessions on the caller's transaction: an
@@ -329,16 +332,20 @@ type InvitePreview struct {
 }
 
 // PreviewInvite validates a token for the accept page. Invalid/expired/
-// consumed tokens all return the same generic error — no oracle.
+// consumed tokens all return the same generic error — no oracle. An account
+// that is a member of another workspace is refused here too, so the page
+// shows no form. This read takes no lock, and the accept checks again.
 func (s *Service) PreviewInvite(ctx context.Context, token string) (InvitePreview, error) {
 	inv, err := s.lookupPending(ctx, token)
 	if err != nil {
 		return InvitePreview{}, err
 	}
 	needsNew := false
-	if _, err := s.users.GetByEmail(ctx, inv.Email); errors.Is(err, errs.ErrNotFound) {
+	if existing, err := s.users.GetByEmail(ctx, inv.Email); errors.Is(err, errs.ErrNotFound) {
 		needsNew = true
 	} else if err != nil {
+		return InvitePreview{}, err
+	} else if err := s.users.CheckJoin(ctx, existing, inv.TenantID); err != nil {
 		return InvitePreview{}, err
 	}
 	return InvitePreview{

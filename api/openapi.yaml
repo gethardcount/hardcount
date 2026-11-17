@@ -22959,7 +22959,9 @@ paths:
         Returns the invited email, the account's name, and whether the
         invitee has to create an account. An unknown, expired, revoked or
         used token gets the same 422, so the answer does not tell a
-        guesser which tokens exist.
+        guesser which tokens exist. A valid token whose email is already
+        a member of another account gets a 409: the accept would refuse
+        it.
       parameters:
         - name: token
           in: path
@@ -23002,6 +23004,22 @@ paths:
                 needs_new_account: true
                 invited_by_email: maya@northwind.example
                 expires_at: "2026-11-04T15:00:00Z"
+        "409":
+          description: |
+            The invited email is a member of another account on this
+            server (code `member_elsewhere`). An email signs in to one
+            account, so the invitation cannot be accepted while that
+            lasts. The invitation stays pending.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  type: invalid_request_error
+                  code: member_elsewhere
+                  message: sam@northwind.example already belongs to another workspace on this server, and an address can belong to only one. Ask the person who invited you to invite a different address, or sign in to the workspace you already have.
+                  request_id: req_dbjg652q3gpgqfoq5cd0
         "422":
           description: "The token is unknown, expired, revoked or already used (`param: token`)."
           content:
@@ -23038,7 +23056,9 @@ paths:
         - An account has the email: Hardcount adds the membership but does
           not sign the user in, because holding the email alone must not
           open an existing account. The user signs in with their own
-          password afterwards, and `password` is ignored.
+          password afterwards, and `password` is ignored. A user who is
+          a member of another account on this server is refused (409): an
+          email signs in to one account.
 
         A new account's password is checked before the token is used up:
         if it fails the check (422, `param: password`), the invitation can
@@ -23117,21 +23137,38 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "409":
           description: |
-            Another invitation to the same email created its account while
-            this accept ran (code `already_exists`, `param: email`). Nothing
-            changed, and the invitation can be accepted again, now as an
-            existing account.
+            The invitation cannot be accepted now. Nothing changed, and
+            the invitation stays pending.
+
+            - Code `member_elsewhere`: the invited email is a member of
+              another account on this server. An email signs in to one
+              account.
+            - Code `already_exists`, `param: email`: another invitation to
+              the same email created its account while this accept ran.
+              Opening the link again shows why it cannot be accepted
+              (`member_elsewhere`).
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
-              example:
-                error:
-                  type: invalid_request_error
-                  code: already_exists
-                  message: an account with this email already exists
-                  request_id: req_dbjg652q3gpgqfoq5cd0
-                  param: email
+              examples:
+                member_elsewhere:
+                  summary: The email is a member of another account
+                  value:
+                    error:
+                      type: invalid_request_error
+                      code: member_elsewhere
+                      message: sam@northwind.example already belongs to another workspace on this server, and an address can belong to only one. Ask the person who invited you to invite a different address, or sign in to the workspace you already have.
+                      request_id: req_dbjg652q3gpgqfoq5cd0
+                already_exists:
+                  summary: Another invitation created the email's account first
+                  value:
+                    error:
+                      type: invalid_request_error
+                      code: already_exists
+                      message: an account with this email already exists
+                      request_id: req_dbjg652q3gpgqfoq5cd0
+                      param: email
         "413":
           $ref: "#/components/responses/PayloadTooLarge"
         "422":

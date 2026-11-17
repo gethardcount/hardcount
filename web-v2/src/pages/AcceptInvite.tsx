@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { Link, useNavigate, useSearchParams } from 'react-router-dom'
+import { ApiError } from '@/lib/api'
 import { membersApi, type InvitePreview } from '@/lib/members'
 import { authFormError } from '@/lib/authFormError'
 import { useAuth } from '@/contexts/AuthContext'
@@ -11,6 +12,13 @@ import { Label } from '@/components/ui/label'
 import { Loader2, Eye, EyeOff } from 'lucide-react'
 import { HardcountLogo } from '@/components/HardcountLogo'
 
+// memberElsewhere returns the server's sentence when err refuses an address
+// that belongs to another workspace, and '' otherwise. The sentence starts
+// with the address, so the page shows it as written, not in sentence case.
+function memberElsewhere(err: unknown): string {
+  return err instanceof ApiError && err.code === 'member_elsewhere' ? err.message : ''
+}
+
 // AcceptInvitePage consumes a team-invite link (?token= planted by the
 // invite email). Two shapes, decided by the server's preview:
 //   - new account: set a password → account created, session minted,
@@ -18,6 +26,8 @@ import { HardcountLogo } from '@/components/HardcountLogo'
 //   - existing account: one-click accept → membership attached, then
 //     off to /login to sign in with their own password (possession of
 //     the email alone must not open an already-privileged account).
+// An address that belongs to another workspace gets the server's refusal
+// (member_elsewhere) and no form.
 //
 // Deliberately NOT wrapped in PublicOnlyRoute — the token is the proof
 // of intent and may target a different account than any active session.
@@ -30,6 +40,8 @@ export default function AcceptInvitePage() {
 
   const [preview, setPreview] = useState<InvitePreview | null>(null)
   const [tokenState, setTokenState] = useState<'checking' | 'valid' | 'invalid'>(token ? 'checking' : 'invalid')
+  // The server's sentence when the address belongs to another workspace.
+  const [refusal, setRefusal] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
   const [showPassword, setShowPassword] = useState(false)
@@ -43,7 +55,11 @@ export default function AcceptInvitePage() {
     let cancelled = false
     membersApi.previewInvite(token)
       .then(p => { if (!cancelled) { setPreview(p); setTokenState('valid') } })
-      .catch(() => { if (!cancelled) setTokenState('invalid') })
+      .catch(err => {
+        if (cancelled) return
+        setRefusal(memberElsewhere(err))
+        setTokenState('invalid')
+      })
     return () => { cancelled = true }
   }, [token])
 
@@ -72,7 +88,13 @@ export default function AcceptInvitePage() {
       }
       setAccepted(true)
     } catch (err) {
-      setError(authFormError(err))
+      const refused = memberElsewhere(err)
+      if (refused) {
+        setRefusal(refused)
+        setTokenState('invalid')
+      } else {
+        setError(authFormError(err))
+      }
     } finally {
       setLoading(false)
     }
@@ -98,11 +120,17 @@ export default function AcceptInvitePage() {
           ) : tokenState === 'invalid' ? (
             <div className="space-y-4 text-sm">
               <p className="text-foreground">
-                This invitation link is no longer valid. It may have expired, been revoked,
-                or already been used. Ask a workspace member to send a new invite.
+                {refusal || (
+                  <>
+                    This invitation link is no longer valid. It may have expired, been revoked,
+                    or already been used. Ask a workspace member to send a new invite.
+                  </>
+                )}
               </p>
               <Link to="/login">
-                <Button variant="outline" className="w-full">Go to sign in</Button>
+                <Button variant="outline" className="w-full">
+                  {refusal ? 'Sign in to your workspace' : 'Go to sign in'}
+                </Button>
               </Link>
             </div>
           ) : accepted ? (
