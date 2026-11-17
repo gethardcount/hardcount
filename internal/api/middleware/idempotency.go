@@ -82,165 +82,177 @@ const (
 // fingerprint. So those routes run as if no header was sent.
 func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if r.Method != "POST" && r.Method != "PUT" && r.Method != "PATCH" {
-				next.ServeHTTP(w, r)
-				return
-			}
-			if ignore != nil && ignore(r) {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
-			if key == "" {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			tenantID := auth.TenantID(r.Context())
-			if tenantID == "" {
-				next.ServeHTTP(w, r)
-				return
-			}
-
-			// The caller is part of the fingerprint, so a stored answer is
-			// returned only to the caller that made the request. That
-			// matters because this middleware runs before each route's
-			// permission check: a replay does not pass that check again.
-			// Authentication runs first and puts exactly one caller on the
-			// context. A request without one means the router is wired
-			// wrong, so it is refused rather than fingerprinted with no
-			// caller.
-			caller, ok := requestCaller(r.Context())
-			if !ok {
-				slog.ErrorContext(r.Context(), "idempotency: no caller on the request context; authentication must run before this middleware",
-					"tenant_id", tenantID, "path", r.URL.Path)
-				respond.InternalError(w, r)
-				return
-			}
-
-			// Capture livemode from the request ctx, so the cache write
-			// after the response carries the same mode. That write runs on
-			// context.Background, not r.Context, so it survives a client
-			// disconnect. Without this, the BeginTx for the cache insert
-			// defaults to live mode. A test-mode response would then be
-			// stored with livemode=true, which corrupts later replays for
-			// the test partition.
-			livemode, err := postgres.Livemode(r.Context())
-			if err != nil {
-				respond.FromError(w, r, err, "idempotency")
-				return
-			}
-
-			// Read the whole body to hash it for the fingerprint, then give
-			// the next handler a fresh reader. The router caps the body
-			// (limitRequestBody), so a body over the cap is answered here
-			// with the 413 the handler's decoder gives without a key. The
-			// key is not reserved yet, so nothing is stored for it.
-			bodyBytes, err := io.ReadAll(r.Body)
-			if err != nil {
-				if !respond.BodyTooLarge(w, r, err) {
-					respond.BadRequest(w, r, "failed to read body")
-				}
-				return
-			}
-			_ = r.Body.Close()
-			r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
-
-			fingerprint := fingerprintRequest(r.Method, r.URL.RequestURI(), caller, bodyBytes)
-
-			// Reserve the key before running the handler. reserveKey's one
-			// conditional INSERT ... ON CONFLICT DO UPDATE, which resets only
-			// an expired row, is the serialization point. Of the concurrent
-			// requests with the same (tenant, livemode, key), exactly one
-			// claims the row and runs: it inserts a new row or resets an
-			// expired one, and RowsAffected = 1 names it. Every other one
-			// finds the row taken. Without the reservation, two
-			// simultaneous retries could both find no row and both run the
-			// side effect: a double credit grant or a double charge.
-			claimed, err := reserveKey(r.Context(), db, tenantID, key,
-				r.Method, r.URL.Path, fingerprint)
-			if err != nil {
-				// A database error on the reserve fails closed: refuse with
-				// a retryable 503 and run nothing. Running the handler
-				// without a reservation breaks the key's one promise just
-				// when retries happen. The action commits, the client sees
-				// an error and retries, and the retry finds no reservation
-				// and runs the action again: a second credit grant, refund
-				// or charge. A refused request is safe to retry, and Stripe
-				// answers a failed idempotency check the same way.
-				idempotencyCacheErrors.WithLabelValues("reserve").Inc()
-				slog.Log(r.Context(), logging.ErrorLevel(r.Context(), err), "idempotency reserve failed; refusing the request (503) rather than running it unprotected",
-					"tenant_id", tenantID, "path", r.URL.Path, "error", err)
-				w.Header().Set("Retry-After", "1")
-				respond.Error(w, r, http.StatusServiceUnavailable, "idempotency_unavailable", "could not record the idempotency key — retry the request with the same key")
-				return
-			}
-			if !claimed {
-				// Another request owns this key. It has either completed, or
-				// it is still in flight. Resolve it as a serial retry would:
-				// replay the stored response, answer 422 on a fingerprint
-				// mismatch, or 409 if it never resolves.
-				replayExistingKey(w, r, db, tenantID, key, fingerprint)
-				return
-			}
-
-			recorder := &responseRecorder{
-				ResponseWriter: w,
-				statusCode:     http.StatusOK,
-				body:           &bytes.Buffer{},
-			}
-			ctx, bodyRefused := respond.TrackBodyRefusal(r.Context())
-			next.ServeHTTP(recorder, r.WithContext(ctx))
-
-			// Finalize the reservation on context.Background, with the
-			// captured livemode, so the write survives a client disconnect.
-			// When the connection drops after the side effect committed, the
-			// response must still be stored, or the retry runs it again.
-			bgCtx := postgres.WithLivemode(context.Background(), livemode)
-
-			// Cache every status except 409, 422 and 503, and every refused
-			// body. Above all, a retry after a transient 500 must not run
-			// the side effects again. The first call may have committed
-			// writes the client cannot see, such as a Stripe charge that
-			// succeeded while the response timed out. If the 500 were not
-			// cached, a retry under the same key would charge twice.
-			//
-			// 409 Conflict and 422 Unprocessable Entity are not cached,
-			// because neither is the real first response. A 409 comes from
-			// contention on shared state, and a retry after it clears may
-			// succeed. A 422 usually comes from input validation. The client
-			// usually fixes the body, and the fingerprint check would then
-			// flag the fixed body as a reused key. Storing either would
-			// trap the caller, so the pending reservation is deleted
-			// instead, which frees the key for a clean retry.
-			//
-			// 503 Service Unavailable is not cached either. A handler
-			// answers 503 only when a second run is safe: something the
-			// request needed failed, and nothing it committed would be done
-			// twice (errs.Unavailable). Storing it would replay a failure
-			// that a retry may get past. A handler that may have made its
-			// change must not answer 503.
-			//
-			// A refused body is not cached either: the 400 for a body that
-			// is not valid JSON, or the 422 for a key the request type does
-			// not declare (respond.WriteBodyError). The handler answered
-			// before it changed anything, and the client fixes the body, so
-			// a stored refusal would only trap the corrected request. Any
-			// other 400 is still cached: a handler past its decode may have
-			// written something before it answered.
-			if bodyRefused() ||
-				recorder.statusCode == http.StatusConflict ||
-				recorder.statusCode == http.StatusUnprocessableEntity ||
-				recorder.statusCode == http.StatusServiceUnavailable {
-				releaseKey(bgCtx, db, tenantID, key, recorder.statusCode)
-				return
-			}
-			finalizeKey(bgCtx, db, tenantID, key,
-				recorder.statusCode, recorder.body.Bytes())
-		})
+		return IdempotencyGuard{db: db, ignore: ignore, next: next}
 	}
+}
+
+// IdempotencyGuard replays the stored answer to a POST, PUT or PATCH that
+// repeats an Idempotency-Key from the same caller, and refuses a key reused
+// for a different request. A request ignore matches passes through.
+// Idempotency makes it; its doc has the rules.
+type IdempotencyGuard struct {
+	db     *postgres.DB
+	ignore func(*http.Request) bool
+	next   http.Handler
+}
+
+func (g IdempotencyGuard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" && r.Method != "PUT" && r.Method != "PATCH" {
+		g.next.ServeHTTP(w, r)
+		return
+	}
+	if g.ignore != nil && g.ignore(r) {
+		g.next.ServeHTTP(w, r)
+		return
+	}
+
+	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
+	if key == "" {
+		g.next.ServeHTTP(w, r)
+		return
+	}
+
+	tenantID := auth.TenantID(r.Context())
+	if tenantID == "" {
+		g.next.ServeHTTP(w, r)
+		return
+	}
+
+	// The caller is part of the fingerprint, so a stored answer is
+	// returned only to the caller that made the request. That
+	// matters because this middleware runs before each route's
+	// permission check: a replay does not pass that check again.
+	// Authentication runs first and puts exactly one caller on the
+	// context. A request without one means the router is wired
+	// wrong, so it is refused rather than fingerprinted with no
+	// caller.
+	caller, ok := requestCaller(r.Context())
+	if !ok {
+		slog.ErrorContext(r.Context(), "idempotency: no caller on the request context; authentication must run before this middleware",
+			"tenant_id", tenantID, "path", r.URL.Path)
+		respond.InternalError(w, r)
+		return
+	}
+
+	// Capture livemode from the request ctx, so the cache write
+	// after the response carries the same mode. That write runs on
+	// context.Background, not r.Context, so it survives a client
+	// disconnect. Without this, the BeginTx for the cache insert
+	// defaults to live mode. A test-mode response would then be
+	// stored with livemode=true, which corrupts later replays for
+	// the test partition.
+	livemode, err := postgres.Livemode(r.Context())
+	if err != nil {
+		respond.FromError(w, r, err, "idempotency")
+		return
+	}
+
+	// Read the whole body to hash it for the fingerprint, then give
+	// the next handler a fresh reader. The router caps the body
+	// (limitRequestBody), so a body over the cap is answered here
+	// with the 413 the handler's decoder gives without a key. The
+	// key is not reserved yet, so nothing is stored for it.
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		if !respond.BodyTooLarge(w, r, err) {
+			respond.BadRequest(w, r, "failed to read body")
+		}
+		return
+	}
+	_ = r.Body.Close()
+	r.Body = io.NopCloser(bytes.NewReader(bodyBytes))
+
+	fingerprint := fingerprintRequest(r.Method, r.URL.RequestURI(), caller, bodyBytes)
+
+	// Reserve the key before running the handler. reserveKey's one
+	// conditional INSERT ... ON CONFLICT DO UPDATE, which resets only
+	// an expired row, is the serialization point. Of the concurrent
+	// requests with the same (tenant, livemode, key), exactly one
+	// claims the row and runs: it inserts a new row or resets an
+	// expired one, and RowsAffected = 1 names it. Every other one
+	// finds the row taken. Without the reservation, two
+	// simultaneous retries could both find no row and both run the
+	// side effect: a double credit grant or a double charge.
+	claimed, err := reserveKey(r.Context(), g.db, tenantID, key,
+		r.Method, r.URL.Path, fingerprint)
+	if err != nil {
+		// A database error on the reserve fails closed: refuse with
+		// a retryable 503 and run nothing. Running the handler
+		// without a reservation breaks the key's one promise just
+		// when retries happen. The action commits, the client sees
+		// an error and retries, and the retry finds no reservation
+		// and runs the action again: a second credit grant, refund
+		// or charge. A refused request is safe to retry, and Stripe
+		// answers a failed idempotency check the same way.
+		idempotencyCacheErrors.WithLabelValues("reserve").Inc()
+		slog.Log(r.Context(), logging.ErrorLevel(r.Context(), err), "idempotency reserve failed; refusing the request (503) rather than running it unprotected",
+			"tenant_id", tenantID, "path", r.URL.Path, "error", err)
+		w.Header().Set("Retry-After", "1")
+		respond.Error(w, r, http.StatusServiceUnavailable, "idempotency_unavailable", "could not record the idempotency key — retry the request with the same key")
+		return
+	}
+	if !claimed {
+		// Another request owns this key. It has either completed, or
+		// it is still in flight. Resolve it as a serial retry would:
+		// replay the stored response, answer 422 on a fingerprint
+		// mismatch, or 409 if it never resolves.
+		replayExistingKey(w, r, g.db, tenantID, key, fingerprint)
+		return
+	}
+
+	recorder := &responseRecorder{
+		ResponseWriter: w,
+		statusCode:     http.StatusOK,
+		body:           &bytes.Buffer{},
+	}
+	ctx, bodyRefused := respond.TrackBodyRefusal(r.Context())
+	g.next.ServeHTTP(recorder, r.WithContext(ctx))
+
+	// Finalize the reservation on context.Background, with the
+	// captured livemode, so the write survives a client disconnect.
+	// When the connection drops after the side effect committed, the
+	// response must still be stored, or the retry runs it again.
+	bgCtx := postgres.WithLivemode(context.Background(), livemode)
+
+	// Cache every status except 409, 422 and 503, and every refused
+	// body. Above all, a retry after a transient 500 must not run
+	// the side effects again. The first call may have committed
+	// writes the client cannot see, such as a Stripe charge that
+	// succeeded while the response timed out. If the 500 were not
+	// cached, a retry under the same key would charge twice.
+	//
+	// 409 Conflict and 422 Unprocessable Entity are not cached,
+	// because neither is the real first response. A 409 comes from
+	// contention on shared state, and a retry after it clears may
+	// succeed. A 422 usually comes from input validation. The client
+	// usually fixes the body, and the fingerprint check would then
+	// flag the fixed body as a reused key. Storing either would
+	// trap the caller, so the pending reservation is deleted
+	// instead, which frees the key for a clean retry.
+	//
+	// 503 Service Unavailable is not cached either. A handler
+	// answers 503 only when a second run is safe: something the
+	// request needed failed, and nothing it committed would be done
+	// twice (errs.Unavailable). Storing it would replay a failure
+	// that a retry may get past. A handler that may have made its
+	// change must not answer 503.
+	//
+	// A refused body is not cached either: the 400 for a body that
+	// is not valid JSON, or the 422 for a key the request type does
+	// not declare (respond.WriteBodyError). The handler answered
+	// before it changed anything, and the client fixes the body, so
+	// a stored refusal would only trap the corrected request. Any
+	// other 400 is still cached: a handler past its decode may have
+	// written something before it answered.
+	if bodyRefused() ||
+		recorder.statusCode == http.StatusConflict ||
+		recorder.statusCode == http.StatusUnprocessableEntity ||
+		recorder.statusCode == http.StatusServiceUnavailable {
+		releaseKey(bgCtx, g.db, tenantID, key, recorder.statusCode)
+		return
+	}
+	finalizeKey(bgCtx, g.db, tenantID, key,
+		recorder.statusCode, recorder.body.Bytes())
 }
 
 // fingerprintRequest returns a stable hash of what makes two requests the

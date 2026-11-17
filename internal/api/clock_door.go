@@ -72,51 +72,60 @@ type clockDoor struct {
 // Middleware is the door. router.go says where it sits in each group, and
 // why.
 func (d *clockDoor) Middleware(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		decl, params, routed := d.route(r)
-		// No mode on the context yet (a route before authentication) is
-		// treated as test mode.
-		live, err := postgres.Livemode(r.Context())
-		live = err == nil && live
-		if !routed || decl.Source == clockDecidedIn {
-			// The router answers an unknown route itself; a decidedIn
-			// route's function decides and binds once it has read its
-			// record.
-			if !live {
-				r = r.WithContext(clock.WithRealTime(r.Context()))
-			}
-			next.ServeHTTP(w, r)
-			return
+	return doorHandler{door: d, next: next}
+}
+
+// doorHandler runs the clock door in front of next; clockDoor has the rule.
+// clockDoor.Middleware makes it.
+type doorHandler struct {
+	door *clockDoor
+	next http.Handler
+}
+
+func (h doorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	decl, params, routed := h.door.route(r)
+	// No mode on the context yet (a route before authentication) is
+	// treated as test mode.
+	live, err := postgres.Livemode(r.Context())
+	live = err == nil && live
+	if !routed || decl.Source == clockDecidedIn {
+		// The router answers an unknown route itself; a decidedIn
+		// route's function decides and binds once it has read its
+		// record.
+		if !live {
+			r = r.WithContext(clock.WithRealTime(r.Context()))
 		}
-		if live {
-			// No live record is on a test clock: a real instant, one read of
-			// the server's clock, and no record is read.
-			next.ServeHTTP(w, r.WithContext(clock.EnsureEffectiveNow(r.Context(), d.clock)))
-			return
-		}
-		ctx := clock.WithRealTime(r.Context())
-		pin, record, err := d.pinFor(r.Context(), decl, params)
-		if err == nil && pin != (clock.Pin{}) {
-			ctx, err = clock.Decide(r.Context(), d.resolver, pin)
-		}
-		switch {
-		case errors.Is(err, errUnknownClockSource):
-			// A route table entry the door does not know: a server fault.
-			respond.InternalError(w, r)
-			return
-		case errors.Is(err, errs.ErrNotFound):
-			ctx = clock.WithRealTime(r.Context())
-		case err != nil:
-			// The clock could not be read: refuse, so the work never runs on
-			// a time nobody decided.
-			respond.FromError(w, r, errs.Unavailable("test_clock_unavailable",
-				fmt.Sprintf("The test clock of %s could not be read. Nothing was done; send the request again.", record), err), "record")
-			return
-		}
-		// A record's clock carries its instant; otherwise a real instant,
-		// one read of the server's clock.
-		next.ServeHTTP(w, r.WithContext(clock.EnsureEffectiveNow(ctx, d.clock)))
-	})
+		h.next.ServeHTTP(w, r)
+		return
+	}
+	if live {
+		// No live record is on a test clock: a real instant, one read of
+		// the server's clock, and no record is read.
+		h.next.ServeHTTP(w, r.WithContext(clock.EnsureEffectiveNow(r.Context(), h.door.clock)))
+		return
+	}
+	ctx := clock.WithRealTime(r.Context())
+	pin, record, err := h.door.pinFor(r.Context(), decl, params)
+	if err == nil && pin != (clock.Pin{}) {
+		ctx, err = clock.Decide(r.Context(), h.door.resolver, pin)
+	}
+	switch {
+	case errors.Is(err, errUnknownClockSource):
+		// A route table entry the door does not know: a server fault.
+		respond.InternalError(w, r)
+		return
+	case errors.Is(err, errs.ErrNotFound):
+		ctx = clock.WithRealTime(r.Context())
+	case err != nil:
+		// The clock could not be read: refuse, so the work never runs on
+		// a time nobody decided.
+		respond.FromError(w, r, errs.Unavailable("test_clock_unavailable",
+			fmt.Sprintf("The test clock of %s could not be read. Nothing was done; send the request again.", record), err), "record")
+		return
+	}
+	// A record's clock carries its instant; otherwise a real instant,
+	// one read of the server's clock.
+	h.next.ServeHTTP(w, r.WithContext(clock.EnsureEffectiveNow(ctx, h.door.clock)))
 }
 
 // route finds the request's entry in clockRoutes and its path parameters,

@@ -62,32 +62,43 @@ func Authenticate(r *http.Request, sessSvc *Service, keySvc *auth.Service) (cont
 	return postgres.WithLivemode(ctx, key.Livemode), nil
 }
 
-// RequireCaller authenticates each request (Authenticate) and answers what it
-// cannot: 401 with no credentials or a key that is not valid, and a retryable
-// 503 when a store failed. The dashboard uses the cookie, and SDKs and curl
-// callers use the API key.
+// RequireCaller authenticates each request (Authenticate) and passes it on
+// with the caller and its mode on the context. It answers 401 to a request
+// with no credentials or a key that is not valid, and a retryable 503 when a
+// store failed. The dashboard uses the cookie, and SDKs and curl callers use
+// the API key.
 func RequireCaller(sessSvc *Service, keySvc *auth.Service) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx, err := Authenticate(r, sessSvc, keySvc)
-			var unavailable unavailableError
-			switch {
-			case err == nil:
-				// The access log wraps this middleware and cannot see ctx.
-				request.SetActor(ctx, actorOf(auth.CallerOf(ctx)))
-				next.ServeHTTP(w, r.WithContext(ctx))
-			case errors.Is(err, ErrNoCredentials):
-				respond.Unauthorized(w, r, "missing credentials — sign in at /login or send Authorization: Bearer hc_secret_...")
-			case errors.As(err, &unavailable):
-				slog.Log(r.Context(), logging.ErrorLevel(r.Context(), unavailable.err), unavailable.msg, "error", unavailable.err)
-				respond.Error(w, r, http.StatusServiceUnavailable,
-					"authentication_unavailable",
-					"authentication is temporarily unavailable — retry shortly")
-			default:
-				slog.WarnContext(r.Context(), "api key validation failed", "error", err)
-				respond.Unauthorized(w, r, "invalid or expired API key")
-			}
-		})
+		return CallerRequired{sessions: sessSvc, keys: keySvc, next: next}
+	}
+}
+
+// CallerRequired authenticates each request. RequireCaller makes it; its doc
+// has the rule.
+type CallerRequired struct {
+	sessions *Service
+	keys     *auth.Service
+	next     http.Handler
+}
+
+func (c CallerRequired) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx, err := Authenticate(r, c.sessions, c.keys)
+	var unavailable unavailableError
+	switch {
+	case err == nil:
+		// The access log wraps this middleware and cannot see ctx.
+		request.SetActor(ctx, actorOf(auth.CallerOf(ctx)))
+		c.next.ServeHTTP(w, r.WithContext(ctx))
+	case errors.Is(err, ErrNoCredentials):
+		respond.Unauthorized(w, r, "missing credentials — sign in at /login or send Authorization: Bearer hc_secret_...")
+	case errors.As(err, &unavailable):
+		slog.Log(r.Context(), logging.ErrorLevel(r.Context(), unavailable.err), unavailable.msg, "error", unavailable.err)
+		respond.Error(w, r, http.StatusServiceUnavailable,
+			"authentication_unavailable",
+			"authentication is temporarily unavailable — retry shortly")
+	default:
+		slog.WarnContext(r.Context(), "api key validation failed", "error", err)
+		respond.Unauthorized(w, r, "invalid or expired API key")
 	}
 }
 

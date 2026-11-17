@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -308,32 +306,6 @@ func TestClockDoor_EveryRoutePassesThroughIt(t *testing.T) {
 	}
 }
 
-// mwName is a middleware's function name, for finding it in a route's chain.
-func mwName(m func(http.Handler) http.Handler) string {
-	if fn := runtime.FuncForPC(reflect.ValueOf(m).Pointer()); fn != nil {
-		return fn.Name()
-	}
-	return ""
-}
-
-// chainIndex is the position in mws of the first middleware whose name
-// contains name, or -1.
-func chainIndex(mws []func(http.Handler) http.Handler, name string) int {
-	for i, m := range mws {
-		if strings.Contains(mwName(m), name) {
-			return i
-		}
-	}
-	return -1
-}
-
-const (
-	authMW        = "session.RequireCaller."
-	timeoutMW     = "middleware.Timeout."
-	idempotencyMW = "middleware.Idempotency."
-	doorMW        = "clockDoor).Middleware"
-)
-
 // The door is the last of its group's middleware: after authentication, so
 // it reads the named record as the caller's tenant and mode; after the
 // timeout, so its lookups are bounded; and after Idempotency, so a replay
@@ -344,9 +316,9 @@ func TestClockDoor_ComesAfterAuthenticationIdempotencyAndTheTimeout(t *testing.T
 	v1 := false
 	if err := chi.Walk(newTestServer().router, func(method, route string, _ http.Handler, mws ...func(http.Handler) http.Handler) error {
 		door := chainIndex(mws, doorMW)
-		for _, before := range []string{authMW, timeoutMW, idempotencyMW} {
+		for _, before := range []chainStep{authMW, timeoutMW, idempotencyMW} {
 			if i := chainIndex(mws, before); i >= 0 && i > door {
-				wrong = append(wrong, method+" "+route+": the door comes before "+before)
+				wrong = append(wrong, method+" "+route+": the door comes before "+before.name)
 			}
 		}
 		if method == "POST" && canonicalRoute(route) == "/v1/subscriptions/{id}/cancel" {
