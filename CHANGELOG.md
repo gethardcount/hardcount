@@ -61,6 +61,7 @@ original text.
 
 ### Changed
 
+- **On an invoice with no card on file, the activity card lists "Payment recovery started" before the email that asks for a card, on real time as on a test clock.** It listed the email first ([#1844](https://github.com/gethardcount/hardcount/pull/1844)).
 - **Off a test clock, an email in an invoice's activity and in a customer's sent emails is dated at the time of the action that queued it, not when the mail server took it.** Emails no longer sort out of order when the database's and the server's clocks differ ([#1824](https://github.com/gethardcount/hardcount/pull/1824)).
 - **A test clock's advance fails when a card charge could not be made.** When credits could not be applied first, Stripe could not take the charge, Stripe refused the account's key, or the attempt's result was unclear, the advance ended `ready` with the invoice uncharged. Now the clock stops at `internal_failure`, and the reason names the invoice and what to do: Retry advance, after fixing the Stripe key if it was refused. Collection outside a clock is unchanged ([#1751](https://github.com/gethardcount/hardcount/pull/1751)).
 - **A test clock's advance no longer skips an invoice whose earlier charge attempt has not finished.** The advance passed over it and could end `ready` with it uncharged. Now the clock stops at `internal_failure` naming the invoice; Retry advance once that attempt is done. An invoice on the hosted page, paused, or settled meanwhile is still left alone ([#1756](https://github.com/gethardcount/hardcount/pull/1756)).
