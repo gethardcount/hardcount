@@ -101,7 +101,7 @@ type Server struct {
 	bootstrapLimiter    *mw.RateLimiter
 	authLimiter         *mw.RateLimiter
 	ingestLimiter       *mw.RateLimiter
-	hostedInvoiceRL     *mw.RateLimiter
+	publicPageLimiter   *mw.RateLimiter
 	opts                serverOptions
 	settings            config.Server
 
@@ -167,8 +167,9 @@ func (s *Server) routes() chi.Router {
 	r.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
 		respond.MethodNotAllowed(w, req, allow.methods(req))
 	})
-	// The root chain; docs/architecture.md#the-path-of-a-request says why each
-	// step sits where it does. Everything above the Recoverer runs where a
+	// The root chain; docs/architecture.md#the-path-of-a-request lists each
+	// step and says why the record, the metrics, the access log and the door
+	// sit where they do. Everything above the Recoverer runs where a
 	// panic is not recovered by ours; routeFinder says why Begin cannot panic.
 	useRequestEdge(r, s.settings.TrustProxy, s.settings.TrustedProxies(), request.Begin(finder.route))
 	r.Use(mw.Metrics())
@@ -182,9 +183,6 @@ func (s *Server) routes() chi.Router {
 	// At the root, not on /v1, so the detector also sees the routes outside
 	// /v1's authentication (ADR-090).
 	r.Use(mw.AuditCoverage(auditRoute))
-
-	// No global timeout: each group sets its own, and the event stream sets
-	// none.
 
 	// Public
 	r.With(door.Middleware).Get("/health", handleHealth)
@@ -211,8 +209,8 @@ func (s *Server) routes() chi.Router {
 	})
 
 	// The dashboard's account routes (sign-in and sign-out, the mode switch,
-	// password reset, invitations) take no API key. The CSRF guard comes
-	// first, because sign-in sets the session cookie: a cross-site POST would
+	// password reset, invitations) take no API key. The CSRF guard is
+	// here because sign-in sets the session cookie: a cross-site POST would
 	// fix a sign-in. One limiter slows password and invite-token guessing.
 	r.Route("/v1/auth", func(r chi.Router) {
 		r.Use(mw.CSRFGuard(allowedOrigins))
@@ -237,7 +235,7 @@ func (s *Server) routes() chi.Router {
 	// take no auth: the token in the path is the credential. They share one
 	// tight per-address bucket, so guessing a token is not free.
 	r.Group(func(r chi.Router) {
-		r.Use(s.hostedInvoiceRL.Middleware())
+		r.Use(s.publicPageLimiter.Middleware())
 		r.Use(mw.Timeout(requestTimeout))
 		r.Use(door.Middleware)
 		if s.publicPaymentH != nil {
@@ -249,8 +247,9 @@ func (s *Server) routes() chi.Router {
 
 	// Every other /v1 route takes a session cookie or a Bearer key, then joins
 	// one of four groups, which differ in rate limit, Idempotency and time
-	// limit. chi runs a group's steps only once a route matches, so a path no
-	// route matches answers its 404 or 405 after authentication alone. The
+	// limit. chi runs a group's steps once a route or a mount's prefix matches:
+	// a path under no mount answers its 404 or 405 after authentication alone,
+	// and one under a mount after the group's steps. The
 	// CSRF guard comes before authentication, so a cross-site write is refused
 	// before the session cookie is read.
 	r.Route("/v1", func(r chi.Router) {

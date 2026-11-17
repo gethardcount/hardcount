@@ -98,3 +98,22 @@ func TestReadiness_AStaleTickStays200AndAFailedPingIs503WithNoDetail(t *testing.
 		}
 	})
 }
+
+// TestHealth_AnswersOKWithoutADatabase runs /health on a server with no
+// database: liveness must not read it.
+func TestHealth_AnswersOKWithoutADatabase(t *testing.T) {
+	rec := httptest.NewRecorder()
+	newTestServer().ServeHTTP(rec, httptest.NewRequest("GET", "/health", nil))
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("status: got %d, want 200", rec.Code)
+	}
+	if ct := rec.Header().Get("Content-Type"); !strings.Contains(ct, "application/json") {
+		t.Errorf("Content-Type: got %q, want application/json", ct)
+	}
+	var body map[string]string
+	_ = json.NewDecoder(rec.Body).Decode(&body)
+	if body["status"] != "ok" {
+		t.Errorf("body: got %v", body)
+	}
+}

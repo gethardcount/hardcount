@@ -1386,7 +1386,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	//     visit.
 	// 60/min per IP leaves room for about 10 customers at once behind one
 	// corporate NAT, and still bounds enumeration and scraping.
-	hostedInvoiceRL := mw.NewRateLimiter(rdb, "hosted_invoice", 60, time.Minute, failClosedInProd)
+	publicPageLimiter := mw.NewRateLimiter(rdb, "hosted_invoice", 60, time.Minute, failClosedInProd)
 
 	// The operator's send-setup-email has a per-customer cooldown: 1 send per
 	// (tenant, customer) per 60s. It guards against a double click and the
@@ -1445,7 +1445,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	s.bootstrapLimiter = bootstrapLimiter
 	s.authLimiter = authLimiter
 	s.ingestLimiter = ingestLimiter
-	s.hostedInvoiceRL = hostedInvoiceRL
+	s.publicPageLimiter = publicPageLimiter
 	s.opts = o
 	s.settings = srv
 	return s

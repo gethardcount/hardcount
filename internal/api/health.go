@@ -48,6 +48,8 @@ func SetSchedulerInterval(d time.Duration) {
 	schedulerMu.Unlock()
 }
 
+// handleHealth answers liveness. It never reads the database: a probe that
+// did would restart every replica when Postgres is down.
 func handleHealth(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, map[string]string{"status": "ok"})
 }
@@ -87,8 +89,9 @@ func handleDeepHealth(db *postgres.DB) http.HandlerFunc {
 
 		// A stale tick (no run within two intervals) stays at 200: pulling the
 		// replica does not restart the tick, and on one replica it would take
-		// the API down. Alert on hardcount_leader_last_tick_age_seconds instead
-		// (docs/ops/runbook/monitoring.md).
+		// the API down. Alert on hardcount_scheduler_last_run_timestamp_seconds,
+		// which RecordSchedulerRun sets, and on
+		// hardcount_leader_last_tick_age_seconds (docs/ops/runbook/monitoring.md).
 		schedulerMu.RLock()
 		lastRun := schedulerLastRun
 		interval := schedulerInterval

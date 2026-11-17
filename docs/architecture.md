@@ -17,7 +17,7 @@ Each step queues its webhook events and emails for the [background jobs](#backgr
 
 ## The path of a request
 
-Every request passes the root chain, then one group's chain, then its route's own checks and its handler. `internal/api/router.go` builds all three, and this section says why each step sits where it does.
+Every request passes the root chain, then one group's chain, then its route's own checks and its handler. `internal/api/router.go` builds all three, and this section lists each step and says why the record, the metrics, the access log and the door sit where they do.
 
 **The root chain**, in order:
 

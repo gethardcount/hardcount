@@ -24,9 +24,10 @@ import (
 // record's route gets, in test mode, the time of the test clock its record is
 // on, and one read when the record is on none, is not found, or has an id
 // Postgres cannot read; in live mode, where no record is on a clock, one read
-// and no lookup. A decidedIn route and a route the router does not have get
-// no instant (real time with none, in test mode): the named function decides
-// after it reads its record. A request with no mode yet counts as test mode.
+// and no lookup. A decidedIn route gets no instant (in test mode, real time
+// with none): its named function decides after it reads its record. So does a
+// request whose route is not in routeTable, which the router answers 404 or
+// 405. A request with no mode yet counts as test mode.
 // A clock that cannot be read is answered 503, which the client retries and
 // Idempotency does not keep, and the handler does not run.
 type clockDoor struct {
