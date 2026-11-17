@@ -8,7 +8,6 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
 // errInvoicePDF marks a failure to render the invoice PDF, which the
@@ -64,12 +63,8 @@ func (h *Handler) emailInvoice(ctx context.Context, tenantID string, inv domain.
 	if err := h.invoiceEmailRefusal(inv); err != nil {
 		return err
 	}
-	// On the action's time (see Service.clock), so the enqueued email carries
-	// the invoice's billing anchor and lands on the invoice's own calendar
-	// (ADR-030, ADR-104).
-	bound := clock.EnsureEffectiveNow(ctx, h.svc.clock)
 
-	cc, err := resolveSendCC(bound, h.customers, tenantID, inv.CustomerID, to, ccOverride)
+	cc, err := resolveSendCC(ctx, h.customers, tenantID, inv.CustomerID, to, ccOverride)
 	if err != nil {
 		return err
 	}
@@ -78,9 +73,9 @@ func (h *Handler) emailInvoice(ctx context.Context, tenantID string, inv domain.
 	// this path previously hand-rolled a THINNER context (no buyer
 	// address/tax id, no credit notes), so the emailed document diverged
 	// from the downloaded one.
-	bt, ci, cnInfos := BuildPDFContext(bound, h.customers, h.settings, h.pdfCreditNotes, tenantID, inv)
+	bt, ci, cnInfos := BuildPDFContext(ctx, h.customers, h.settings, h.pdfCreditNotes, tenantID, inv)
 
-	pdfBytes, err := RenderPDF(bound, inv, items, bt, cnInfos, ci)
+	pdfBytes, err := RenderPDF(ctx, inv, items, bt, cnInfos, ci)
 	if err != nil {
 		return fmt.Errorf("%w: %w", errInvoicePDF, err)
 	}
@@ -88,7 +83,7 @@ func (h *Handler) emailInvoice(ctx context.Context, tenantID string, inv domain.
 	// AmountDueCents, not Total: the email template labels this figure
 	// "Amount due", and credits/partial payments make the two differ —
 	// telling a customer they owe the pre-credit total is wrong.
-	if err := h.emailSender.SendInvoice(bound, tenantID, to, cc, bt.Name, inv.InvoiceNumber, inv.AmountDueCents, inv.Currency, pdfBytes, inv.PublicToken, inv.Status == domain.InvoiceUncollectible); err != nil {
+	if err := h.emailSender.SendInvoice(ctx, tenantID, to, cc, bt.Name, inv.InvoiceNumber, inv.AmountDueCents, inv.Currency, pdfBytes, inv.PublicToken, inv.Status == domain.InvoiceUncollectible); err != nil {
 		return err
 	}
 

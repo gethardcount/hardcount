@@ -407,7 +407,6 @@ type UpdateInput struct {
 // create are ordered the same way. An email change clears the bounce state
 // in the same write. The Stripe sync runs after the commit.
 func (s *Service) Update(ctx context.Context, tenantID, id string, input UpdateInput) (domain.Customer, error) {
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 
 	// Checks that read only the input run before the lock.
 	name := strings.TrimSpace(input.DisplayName)
@@ -578,7 +577,6 @@ func (s *Service) UpsertBillingProfile(ctx context.Context, tenantID string, bp 
 		}
 		return domain.CustomerBillingProfile{}, fmt.Errorf("get customer: %w", err)
 	}
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	if phone := strings.TrimSpace(bp.Phone); phone != "" {
 		if !phonePattern.MatchString(phone) {
 			return domain.CustomerBillingProfile{}, errs.Invalid("phone", "must be 7-20 characters and contain only digits, spaces, +, -, (, )")

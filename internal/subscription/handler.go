@@ -869,7 +869,7 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 	// clock and its instant, or one read of the server's clock), and
 	// EnsureEffectiveNow keeps it, so the handler's own reads (the proration
 	// days, the period close, changeAt) and the service's agree.
-	ctx := clock.EnsureEffectiveNow(r.Context(), h.svc.clock) // the action's time: see Service.clock
+	ctx := r.Context()
 	r = r.WithContext(ctx)
 
 	// Close an ended, unbilled period first, so the snapshot below is the
@@ -961,7 +961,7 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// One instant for the whole route: see addItem.
-	ctx := clock.EnsureEffectiveNow(r.Context(), h.svc.clock) // the action's time: see Service.clock
+	ctx := r.Context()
 	r = r.WithContext(ctx)
 
 	// Close an ended, unbilled period first, so the change (and its
@@ -1159,7 +1159,7 @@ func (h *Handler) removeItem(w http.ResponseWriter, r *http.Request) {
 	itemID := chi.URLParam(r, "itemID")
 
 	// One instant for the whole route: see addItem.
-	ctx := clock.EnsureEffectiveNow(r.Context(), h.svc.clock) // the action's time: see Service.clock
+	ctx := r.Context()
 	r = r.WithContext(ctx)
 
 	// Close an ended, unbilled period first, so the snapshot below is the

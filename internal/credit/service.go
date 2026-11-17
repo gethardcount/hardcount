@@ -806,7 +806,6 @@ func (s *Service) GetBalance(ctx context.Context, tenantID, customerID string) (
 // a test clock, that clock's frozen time), the same instant a draw would
 // judge expiry at.
 func (s *Service) SpendableBalance(ctx context.Context, tenantID, customerID string) (map[string]int64, error) {
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	return s.store.GetSpendableBalance(ctx, tenantID, customerID, clock.Now(ctx))
 }
 

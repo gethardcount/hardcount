@@ -391,7 +391,6 @@ type CreditLineInput struct {
 }
 
 func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput) (domain.CreditNote, error) {
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	// In-flight payment gate. An OPERATOR credit note must not reduce an
 	// invoice's amount_due while its payment is in flight (processing/unknown):
 	// at settle, MarkPaid records amount_paid off the now-lower amount_due
@@ -1211,8 +1210,6 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 		return domain.CreditNote{}, fmt.Errorf("credit granter not wired (pass it to NewService)")
 	}
 
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
-
 	inv, err := s.invoices.Get(ctx, tenantID, input.InvoiceID)
 	if err != nil {
 		return domain.CreditNote{}, err
@@ -1512,8 +1509,6 @@ func (s *Service) CreateRefund(ctx context.Context, tenantID string, input Refun
 	if strings.TrimSpace(input.Reason) == "" {
 		return domain.CreditNote{}, errs.Required("reason")
 	}
-
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 
 	inv, err := s.invoices.Get(ctx, tenantID, input.InvoiceID)
 	if err != nil {
@@ -2060,7 +2055,6 @@ func (s *Service) IssueHeldReliefTx(ctx context.Context, tx *sql.Tx, tenantID st
 // note marked the invoice paid, closing its dunning run. Best-effort like
 // Issue's: each leg is recorded and recovered by its own sweep.
 func (s *Service) FinishHeldRelief(ctx context.Context, tenantID string, issued []HeldRelief) {
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	for _, h := range issued {
 		cn, err := s.store.Get(ctx, tenantID, h.CreditNoteID)
 		if err != nil {
@@ -2352,7 +2346,6 @@ func (s *Service) RetryRefund(ctx context.Context, tenantID, id string) (domain.
 	if err != nil {
 		return domain.CreditNote{}, err
 	}
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	if cn.Status != domain.CreditNoteIssued {
 		return domain.CreditNote{}, errs.InvalidState(fmt.Sprintf(
 			"can only retry refund on issued credit notes (current status: %s)", cn.Status))
@@ -2711,7 +2704,6 @@ func (s *Service) Void(ctx context.Context, tenantID, id string) (domain.CreditN
 	if err != nil {
 		return domain.CreditNote{}, err
 	}
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	if cn.Status == domain.CreditNoteVoided {
 		return domain.CreditNote{}, errs.InvalidState("credit note is already voided")
 	}

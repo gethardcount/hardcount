@@ -15,7 +15,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
 // CustomerGetter resolves customer IDs to display names and billing profiles
@@ -629,7 +628,7 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// The handler has no clock of its own: it reads the service's, the server's.
-	ctx := clock.EnsureEffectiveNow(r.Context(), h.svc.clock) // the action's time: see Service.clock
+	ctx := r.Context()
 
 	bt, ci, orig := h.assemblePDFContext(ctx, tenantID, cn)
 	pdfBytes, err := RenderPDF(ctx, cn, items, orig, bt, ci)
