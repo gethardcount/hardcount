@@ -6,7 +6,9 @@ import (
 	"unicode/utf8"
 )
 
-func TestClip(t *testing.T) {
+// Clip replaces invalid UTF-8 and NUL bytes, then cuts at a character
+// boundary at or before maxBytes.
+func TestClip_CutsAtACharacterBoundary(t *testing.T) {
 	for _, tc := range []struct {
 		name     string
 		in       string

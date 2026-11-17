@@ -22,7 +22,7 @@ type strictBody struct {
 	Items []strictItem `json:"items"`
 }
 
-func TestDecodeStrict(t *testing.T) {
+func TestDecodeStrict_TheRule(t *testing.T) {
 	cases := []struct {
 		name       string
 		body       string
@@ -222,7 +222,7 @@ func TestDecodeBody_KeysMatchExactly(t *testing.T) {
 }
 
 // A nil body (a server-side request built with no body) is empty.
-func TestDecodeBody_NilBody(t *testing.T) {
+func TestDecodeBody_NilBodyIsEmpty(t *testing.T) {
 	req := httptest.NewRequest("POST", "/", nil)
 	req.Body = nil
 	var v strictBody
@@ -269,7 +269,7 @@ func TestDecodeBody_KeepsTheCause(t *testing.T) {
 	}
 }
 
-func TestNoBody(t *testing.T) {
+func TestNoBody_TakesNothingButAnEmptyBody(t *testing.T) {
 	cases := []struct {
 		name       string
 		body       string
@@ -310,7 +310,7 @@ func TestNoBody(t *testing.T) {
 // A read that stopped at the router's cap is a 413 naming the cap, also when
 // the cap error is wrapped. Any other error is left to the caller, with
 // nothing written.
-func TestBodyTooLarge(t *testing.T) {
+func TestBodyTooLarge_Answers413NamingTheCap(t *testing.T) {
 	capErr := &http.MaxBytesError{Limit: 1 << 20}
 	for _, c := range []struct {
 		name    string

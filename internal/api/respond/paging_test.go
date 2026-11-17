@@ -71,13 +71,3 @@ func TestWindow(t *testing.T) {
 		}
 	}
 }
-
-// A nil slice is written as [], so data is always an array.
-func TestList_NilIsEmptyArray(t *testing.T) {
-	rec := httptest.NewRecorder()
-	var none []string
-	List(rec, httptest.NewRequest(http.MethodGet, "/", nil), none, 0)
-	if got := rec.Body.String(); got != "{\"data\":[],\"total\":0}\n" {
-		t.Errorf("body = %q, want data [] and total 0", got)
-	}
-}

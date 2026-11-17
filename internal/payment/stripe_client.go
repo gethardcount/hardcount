@@ -51,7 +51,7 @@ type PaymentError struct {
 
 func (e *PaymentError) Error() string { return e.Message }
 
-// OperatorSafeMessage implements respond.SafeMessageError so the
+// OperatorSafeMessage implements errs.SafeMessageError so the
 // boundary sanitizer (respond.FromError) surfaces a curated message
 // instead of falling through to "Internal error". For card declines
 // we look up the typed decline_code in a curated map sourced from
@@ -168,7 +168,7 @@ func (e *StripeKeyError) Error() string {
 
 func (e *StripeKeyError) Unwrap() error { return ErrPaymentTransient }
 
-// OperatorSafeMessage implements respond.SafeMessageError. Stripe's own
+// OperatorSafeMessage implements errs.SafeMessageError. Stripe's own
 // sentence names the key's last characters or the missing permission; it
 // goes to the log and the Settings notice, not to this response.
 func (e *StripeKeyError) OperatorSafeMessage() string {
