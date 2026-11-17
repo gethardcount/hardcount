@@ -12,10 +12,8 @@ package api
 // read, and a live request on a decidedIn route gets nothing from the door
 // (api.clockDoor says the rest).
 //
-// The door looks a request up by (method, canonical route pattern), from
-// Find on the built router: Find gives every route's pattern and fills its
-// path parameters before the mounted sub-router runs
-// (TestRouter_FindGivesEveryRoutesPatternAndParams).
+// The door looks a request up by (method, canonical route pattern), as the
+// lookup at the root found them (routeLookup).
 //
 // TestClockRoutes_MatchLiveRoutes walks the router and compares it with this
 // table in both directions: a route with no declaration fails, and so does a

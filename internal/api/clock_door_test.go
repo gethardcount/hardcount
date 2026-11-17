@@ -63,12 +63,11 @@ func (c *doorServer) Now(ctx context.Context) time.Time {
 	return doorServerAt
 }
 
-// doorRig is the door on the built router, with fake record lookups and a
-// counting server clock (serverOf).
+// doorRig is the door, with fake record lookups and a counting server clock
+// (serverOf).
 func doorRig(t *testing.T, res *spyResolver) *clockDoor {
 	t.Helper()
 	return &clockDoor{
-		root:              newTestServer().router,
 		resolver:          res,
 		clock:             &doorServer{},
 		creditNoteInvoice: func(context.Context, string, string) (string, error) { return "inv_of_note", nil },
@@ -91,8 +90,8 @@ type seen struct {
 	header   http.Header
 }
 
-// through runs a request through the door to a handler that records what it
-// saw.
+// through runs a request through the lookup at the root on the built router,
+// then the door, to a handler that records what it saw.
 func through(d *clockDoor, ctx context.Context, method, path string) seen {
 	var got seen
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -101,7 +100,8 @@ func through(d *clockDoor, ctx context.Context, method, path string) seen {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	rec := httptest.NewRecorder()
-	d.Middleware(next).ServeHTTP(rec, httptest.NewRequest(method, path, nil).WithContext(ctx))
+	lookup := &routeLookup{root: builtRouter()}
+	lookup.Middleware(d.Middleware(next)).ServeHTTP(rec, httptest.NewRequest(method, path, nil).WithContext(ctx))
 	got.code, got.body, got.header = rec.Code, rec.Body.String(), rec.Header()
 	return got
 }

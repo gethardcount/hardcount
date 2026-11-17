@@ -154,12 +154,13 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 // routes registers every route and its middleware, and returns the router.
 func (s *Server) routes() chi.Router {
 	r := chi.NewRouter()
+	// Each request's route, found once at the root (routeLookup).
+	lookup := &routeLookup{}
 	// The clock door (clockDoor) runs last in every group, after
 	// authentication, the limiter and the timeout, so it reads a named record
 	// as the caller's tenant and mode, a replay costs no lookup, and its
 	// lookups are bounded. A route's own permission check runs after it, so a
 	// caller without the permission can meet the door's 503 before its 403.
-	// Its root is the built router, set once every route is registered, below.
 	door := &clockDoor{
 		resolver: s.BillingEngine,
 		clock:    s.clk,
@@ -190,6 +191,10 @@ func (s *Server) routes() chi.Router {
 	r.Use(mw.Metrics())
 	r.Use(requestLogger)
 	r.Use(mw.Recoverer(loggablePath))
+	// After the Recoverer, so a panic in the lookup, or in a reader that finds
+	// it missing (routeOf), is answered; before the audit detector, which
+	// reads it.
+	r.Use(lookup.Middleware)
 
 	// Cap every request body (limitRequestBody): 1 MB, or the LiteLLM
 	// adapter's own larger cap.
@@ -207,7 +212,7 @@ func (s *Server) routes() chi.Router {
 	// /v1/public/*, /v1/webhooks and /v1/bootstrap (ADR-090 RC1). It sits
 	// after RequestID and TrustedClientIP, so the ctx it seeds for every later
 	// audit emission carries the request id and the real client IP.
-	r.Use(mw.AuditCoverage(auditRouteExempt))
+	r.Use(mw.AuditCoverage(auditRoute))
 
 	// No global timeout: each group sets its own, and the event stream sets
 	// none.
@@ -479,7 +484,7 @@ func (s *Server) routes() chi.Router {
 	})
 
 	allow = newAllowIndex(r)
-	door.root = r
+	lookup.root = r
 
 	return r
 }
@@ -578,46 +583,19 @@ const litellmPathPrefix = "/v1/integrations/litellm"
 // TestOpenAPISpec_ShowOnceSecretsAreNeverKept keeps the list and the marks
 // in step. /v1/bootstrap's fields are marked too but not listed: it is
 // mounted outside the layer, and the test asserts it stays there.
-var showOnceSecretRoutes = []string{
-	"POST /v1/api-keys",
-	"POST /v1/api-keys/{id}/rotate",
-	"POST /v1/customers/{id}/rotate-cost-dashboard-token",
-	"POST /v1/customers/{customer_id}/payment-methods/setup-session",
-	"POST /v1/webhook-endpoints/endpoints",
-	"POST /v1/webhook-endpoints/endpoints/{id}/rotate-secret",
+var showOnceSecretRoutes = map[routeKey]bool{
+	{"POST", "/v1/api-keys"}:                                              true,
+	{"POST", "/v1/api-keys/{id}/rotate"}:                                  true,
+	{"POST", "/v1/customers/{id}/rotate-cost-dashboard-token"}:            true,
+	{"POST", "/v1/customers/{customer_id}/payment-methods/setup-session"}: true,
+	{"POST", "/v1/webhook-endpoints/endpoints"}:                           true,
+	{"POST", "/v1/webhook-endpoints/endpoints/{id}/rotate-secret"}:        true,
 }
 
-// answersWithShowOnceSecret reports whether r is one of showOnceSecretRoutes.
+// answersWithShowOnceSecret reports whether r's route (routeOf) is one of
+// showOnceSecretRoutes.
 func answersWithShowOnceSecret(r *http.Request) bool {
-	for _, route := range showOnceSecretRoutes {
-		method, pattern, _ := strings.Cut(route, " ")
-		if r.Method == method && pathMatchesPattern(r.URL.Path, pattern) {
-			return true
-		}
-	}
-	return false
-}
-
-// pathMatchesPattern reports whether path has pattern's segments, a {name}
-// segment matching any one non-empty segment. A trailing slash is ignored.
-func pathMatchesPattern(path, pattern string) bool {
-	got := strings.Split(strings.Trim(path, "/"), "/")
-	want := strings.Split(strings.Trim(pattern, "/"), "/")
-	if len(got) != len(want) {
-		return false
-	}
-	for i, w := range want {
-		if strings.HasPrefix(w, "{") && strings.HasSuffix(w, "}") {
-			if got[i] == "" {
-				return false
-			}
-			continue
-		}
-		if got[i] != w {
-			return false
-		}
-	}
-	return true
+	return showOnceSecretRoutes[routeOf(r.Context()).key]
 }
 
 // routeMethods are the methods the Allow header can list, in its order.

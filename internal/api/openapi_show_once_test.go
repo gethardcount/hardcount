@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -34,7 +33,7 @@ func TestOpenAPISpec_ShowOnceSecretsAreNeverKept(t *testing.T) {
 				break
 			}
 		}
-		kept[routeShape(method, route)] = behind && !answersWithShowOnceSecret(&http.Request{Method: method, URL: &url.URL{Path: route}})
+		kept[routeShape(method, route)] = behind && !showOnceSecretRoutes[routeKey{Method: method, Pattern: canonicalRoute(route)}]
 		return nil
 	})
 	if err != nil {
@@ -52,10 +51,9 @@ func TestOpenAPISpec_ShowOnceSecretsAreNeverKept(t *testing.T) {
 		t.Errorf("%d operation(s) answer with an x-show-once field but the idempotency layer keeps the answer. Add them to showOnceSecretRoutes in router.go:\n  %s",
 			len(keptSecrets), strings.Join(keptSecrets, "\n  "))
 	}
-	for _, route := range showOnceSecretRoutes {
-		method, pattern, _ := strings.Cut(route, " ")
-		if _, ok := marked[routeShape(method, pattern)]; !ok {
-			t.Errorf("showOnceSecretRoutes lists %q, but its answer in api/openapi.yaml has no x-show-once field. Remove the entry, or mark the field that carries the secret", route)
+	for key := range showOnceSecretRoutes {
+		if _, ok := marked[routeShape(key.Method, key.Pattern)]; !ok {
+			t.Errorf("showOnceSecretRoutes lists %s %s, but its answer in api/openapi.yaml has no x-show-once field. Remove the entry, or mark the field that carries the secret", key.Method, key.Pattern)
 		}
 	}
 }
@@ -144,8 +142,10 @@ func specShowOnceOperations(t *testing.T) map[string]string {
 	return out
 }
 
-// answersWithShowOnceSecret on real URLs: every listed route with concrete
-// ids, with and without a trailing slash, and the near misses around them.
+// answersWithShowOnceSecret on real URLs, as the lookup at the root finds
+// them: every listed route with concrete ids, and the near misses around
+// them. A path no route matches is never show-once. When no mount matches it
+// either, the router answers it 404 before any group's middleware runs.
 func TestAnswersWithShowOnceSecret(t *testing.T) {
 	for _, tc := range []struct {
 		method, path string
@@ -154,7 +154,12 @@ func TestAnswersWithShowOnceSecret(t *testing.T) {
 		{"POST", "/v1/api-keys", true},
 		{"POST", "/v1/api-keys/", true},
 		{"POST", "/v1/api-keys/hc_key_dbs004jmajdrc1h3298g/rotate", true},
-		{"POST", "/v1/api-keys/hc_key_dbs004jmajdrc1h3298g/rotate/", true},
+		// chi matches an empty id; the handler refuses it, and the refusal
+		// is not kept (TestE2E_APIKeyIssue_SecretIsNotStoredForReplay).
+		{"POST", "/v1/api-keys//rotate", true},
+		// chi routes on the escaped path, so an id holding an escaped slash
+		// finds the rotate route, as the handler does.
+		{"POST", "/v1/api-keys/a%2Fb/rotate", true},
 		{"POST", "/v1/customers/hc_cus_dakhnk2q3gpgqfoq5c0g/rotate-cost-dashboard-token", true},
 		{"POST", "/v1/customers/hc_cus_dakhnk2q3gpgqfoq5c0g/payment-methods/setup-session", true},
 		{"POST", "/v1/webhook-endpoints/endpoints", true},
@@ -165,16 +170,18 @@ func TestAnswersWithShowOnceSecret(t *testing.T) {
 		{"DELETE", "/v1/api-keys/hc_key_a", false},
 		{"POST", "/v1/api-keysx", false},
 		{"POST", "/v1/api-keys/hc_key_a", false},
-		{"POST", "/v1/api-keys//rotate", false},
 		{"POST", "/v1/api-keys/hc_key_a/rotate/extra", false},
+		// The /api-keys mount matches but its sub-router has no such route, so
+		// the ordinary group runs and its 404 is kept for a replay; no handler
+		// runs, so no secret is involved.
+		{"POST", "/v1/api-keys/hc_key_a/rotate/", false},
 		{"POST", "/v1/customers", false},
 		{"POST", "/v1/customers/hc_cus_a/payment-methods", false},
 		{"POST", "/v1/webhook-endpoints/endpoints/hc_whe_a/test", false},
 		{"PATCH", "/v1/webhook-endpoints/endpoints/hc_whe_a", false},
 		{"POST", "/v2/api-keys", false},
 	} {
-		req := &http.Request{Method: tc.method, URL: &url.URL{Path: tc.path}}
-		if got := answersWithShowOnceSecret(req); got != tc.want {
+		if got := answersWithShowOnceSecret(lookedUp(tc.method, tc.path)); got != tc.want {
 			t.Errorf("%s %s: %v, want %v", tc.method, tc.path, got, tc.want)
 		}
 	}
