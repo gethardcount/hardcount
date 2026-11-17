@@ -25,73 +25,57 @@ import (
 	"github.com/gethardcount/hardcount/internal/version"
 )
 
-// statusPending marks an idempotency row that is reserved but not yet
-// completed. The request that claims the key writes it before running the
-// handler. A concurrent request that finds it polls until the owner writes
-// the real status_code, which is always above 0. status_code is NOT NULL, so
-// this sentinel encodes "in flight" without a separate column.
+// statusPending is the status_code of a reserved key whose request has not
+// stored its answer yet. A stored answer's status is always above it.
 const statusPending = 0
 
-// idempotencyPollInterval and idempotencyPollTimeout bound how long a losing
-// concurrent request waits for the winner to store its response before it
-// gives up with 409. The timeout is shorter than typical handler budgets. A
-// request still pending after the timeout either died mid-flight, or is a
-// slow operation that the client should retry instead of blocking on.
 const (
+	// A request that finds the key held by a running request reads it this
+	// often, for this long, before it answers 409.
 	idempotencyPollInterval = 25 * time.Millisecond
 	idempotencyPollTimeout  = 5 * time.Second
 
-	// idempotencyOrphanAfter is the age at which a pending reservation has
-	// no live owner: the owner died (OOM, SIGKILL, node loss) or panicked
-	// (Recoverer is mounted outside this middleware) between reserving and
-	// finalizing. Without this limit, the row would sit at status 0 for its
-	// 24 h life, and every retry on any replica would poll 5 s and be told
-	// "please retry" (S2 in docs/dev/records/ha-readiness-2026-07-06.md).
-	//
-	// It is 5 minutes because that is the longest any handler here runs:
-	// the export group (router.go), and a refund (POST
-	// /v1/invoices/{id}/refund, or POST /v1/credit-notes with auto_issue),
-	// whose work runs on its own 5-minute budget past the request timeout.
-	// Every other handler gets 30 s. So a retry just past this limit may be
-	// told the owner died while a refund is still finishing.
-	//
-	// Past the limit, a retry is told that the outcome is unknown and how
-	// to find out (conflict_idempotency_unresolved). The reservation is
-	// never released for a second run, because the handler's transaction
-	// may have committed before the owner died.
+	// idempotencyOrphanAfter is the age past which a pending reservation has
+	// no live owner: it died, or panicked (the Recoverer sits outside this
+	// middleware), before it stored an answer. Its change may have committed,
+	// so the key is never freed for a second run. The guarded routes have a
+	// 30 s time limit, but a refund's steps run on their own 5-minute budget,
+	// so a retry just past this age may still meet a refund finishing.
 	idempotencyOrphanAfter = 5 * time.Minute
+
+	// keyQueryTimeout bounds each transaction on idempotency_keys.
+	keyQueryTimeout = 2 * time.Second
 )
 
-// Idempotency returns middleware that caches responses for POST, PUT and
-// PATCH requests that carry an Idempotency-Key header. When a request with
-// the same key was processed before, it returns the cached response.
+// Idempotency returns the middleware that makes a retried write safe. It
+// guards a POST, PUT or PATCH with an Idempotency-Key from a tenant, unless
+// ignore matches it (nil matches nothing). Every other request passes
+// through. The server's ignore names the requests whose answer carries a
+// secret shown once, which must never be kept: they run as if no key was
+// sent.
 //
-// The rules, where the caller is the API key, or the dashboard user, that
-// made the request:
-//   - Same key, same caller, method, path, query string and body: replay
-//     the cached response, with the header Idempotent-Replayed: true. While
-//     the first request still runs, wait for its answer.
-//   - Same key, any of those different: 422 idempotency_error at once,
-//     whether the first request has finished or not. This catches a client
-//     bug that reuses a key across operations, such as a retry of
-//     POST /invoices with a changed amount under the old key. It also keeps
-//     a stored answer, and the state of a running request, from reaching
-//     another caller of the account.
+// A key is kept per tenant and mode for 24 hours. A request is the same
+// request as the one that first used the key when its caller (the API key,
+// or the dashboard user), method, path, query string and body match:
 //
-// ignore names the requests that skip this middleware, and nil means none.
-// The server names the requests whose answer carries a secret shown only
-// once, which must never be kept for a replay. Those requests run as if no
-// header was sent.
+//   - The first request runs, and its answer is stored. The same request
+//     again gets that answer replayed, with Idempotent-Replayed: true, after
+//     waiting for it while the first still runs.
+//   - Any other request with the key gets 422 idempotency_error at once,
+//     finished or not. So a stored answer goes only to its own caller, which
+//     matters because a replay skips the route's permission check.
+//   - A 409, a 422, a 503 and a refused body (respond.WriteBodyError) are not
+//     stored: they free the key for the next request with it.
+//
+// Its other answers are in docs/architecture.md, "Where a refusal comes from".
 func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return IdempotencyGuard{db: db, ignore: ignore, next: next}
 	}
 }
 
-// IdempotencyGuard replays the stored answer to a POST, PUT or PATCH that
-// repeats an Idempotency-Key from the same caller, and refuses a key reused
-// for a different request. A request ignore matches passes through.
-// Idempotency makes it; its doc has the rules.
+// IdempotencyGuard makes a retried write safe. Idempotency makes it; its doc
+// has the rules.
 type IdempotencyGuard struct {
 	db     *postgres.DB
 	ignore func(*http.Request) bool
@@ -99,35 +83,16 @@ type IdempotencyGuard struct {
 }
 
 func (g IdempotencyGuard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	if r.Method != "POST" && r.Method != "PUT" && r.Method != "PATCH" {
-		g.next.ServeHTTP(w, r)
-		return
-	}
-	if g.ignore != nil && g.ignore(r) {
-		g.next.ServeHTTP(w, r)
-		return
-	}
-
+	writes := r.Method == http.MethodPost || r.Method == http.MethodPut || r.Method == http.MethodPatch
 	key := strings.TrimSpace(r.Header.Get("Idempotency-Key"))
-	if key == "" {
-		g.next.ServeHTTP(w, r)
-		return
-	}
-
 	tenantID := auth.TenantID(r.Context())
-	if tenantID == "" {
+	if !writes || (g.ignore != nil && g.ignore(r)) || key == "" || tenantID == "" {
 		g.next.ServeHTTP(w, r)
 		return
 	}
 
-	// The caller is part of the fingerprint, so a stored answer is
-	// returned only to the caller that made the request. That
-	// matters because this middleware runs before each route's
-	// permission check: a replay does not pass that check again.
-	// Authentication runs first and puts exactly one caller on the
-	// context. A request without one means the router is wired
-	// wrong, so it is refused rather than fingerprinted with no
-	// caller.
+	// Authentication runs first and leaves exactly one caller. Anything else
+	// means the router is wired wrong; the answer would be kept for no caller.
 	caller, ok := requestCaller(r.Context())
 	if !ok {
 		slog.ErrorContext(r.Context(), "idempotency: no caller on the request context; authentication must run before this middleware",
@@ -136,24 +101,14 @@ func (g IdempotencyGuard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Capture livemode from the request ctx, so the cache write
-	// after the response carries the same mode. That write runs on
-	// context.Background, not r.Context, so it survives a client
-	// disconnect. Without this, the BeginTx for the cache insert
-	// defaults to live mode. A test-mode response would then be
-	// stored with livemode=true, which corrupts later replays for
-	// the test partition.
 	livemode, err := postgres.Livemode(r.Context())
 	if err != nil {
 		respond.FromError(w, r, err, "idempotency")
 		return
 	}
 
-	// Read the whole body to hash it for the fingerprint, then give
-	// the next handler a fresh reader. The router caps the body
-	// (limitRequestBody), so a body over the cap is answered here
-	// with the 413 the handler's decoder gives without a key. The
-	// key is not reserved yet, so nothing is stored for it.
+	// The body is read before the key is reserved, so a body that cannot be
+	// read, such as one over the router's cap (413), stores nothing.
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		if !respond.BodyTooLarge(w, r, err) {
@@ -166,26 +121,11 @@ func (g IdempotencyGuard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	fingerprint := fingerprintRequest(r.Method, r.URL.RequestURI(), caller, bodyBytes)
 
-	// Reserve the key before running the handler. reserveKey's one
-	// conditional INSERT ... ON CONFLICT DO UPDATE, which resets only
-	// an expired row, is the serialization point. Of the concurrent
-	// requests with the same (tenant, livemode, key), exactly one
-	// claims the row and runs: it inserts a new row or resets an
-	// expired one, and RowsAffected = 1 names it. Every other one
-	// finds the row taken. Without the reservation, two
-	// simultaneous retries could both find no row and both run the
-	// side effect: a double credit grant or a double charge.
 	claimed, err := reserveKey(r.Context(), g.db, tenantID, key,
 		r.Method, r.URL.Path, fingerprint)
 	if err != nil {
-		// A database error on the reserve fails closed: refuse with
-		// a retryable 503 and run nothing. Running the handler
-		// without a reservation breaks the key's one promise just
-		// when retries happen. The action commits, the client sees
-		// an error and retries, and the retry finds no reservation
-		// and runs the action again: a second credit grant, refund
-		// or charge. A refused request is safe to retry, and Stripe
-		// answers a failed idempotency check the same way.
+		// Running the handler unreserved would let the client's retry run
+		// the action a second time. A refused request is safe to retry.
 		idempotencyCacheErrors.WithLabelValues("reserve").Inc()
 		slog.Log(r.Context(), logging.ErrorLevel(r.Context(), err), "idempotency reserve failed; refusing the request (503) rather than running it unprotected",
 			"path", request.Of(r.Context()).Route().Pattern, "error", err)
@@ -194,10 +134,6 @@ func (g IdempotencyGuard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if !claimed {
-		// Another request owns this key. It has either completed, or
-		// it is still in flight. Resolve it as a serial retry would:
-		// replay the stored response, answer 422 on a fingerprint
-		// mismatch, or 409 if it never resolves.
 		replayExistingKey(w, r, g.db, tenantID, key, fingerprint)
 		return
 	}
@@ -210,44 +146,17 @@ func (g IdempotencyGuard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	ctx, bodyRefused := respond.TrackBodyRefusal(r.Context())
 	g.next.ServeHTTP(recorder, r.WithContext(ctx))
 
-	// Finalize the reservation on context.Background, with the
-	// captured livemode, so the write survives a client disconnect.
-	// When the connection drops after the side effect committed, the
-	// response must still be stored, or the retry runs it again.
-	// It carries the request's id too, so the lines finalize and release
-	// write join the request's other lines.
+	// The answer is stored on a background context, so a client that hangs
+	// up after the change committed still leaves it for the retry. A tenant
+	// transaction needs the request's mode, and the log lines its id.
 	bgCtx := context.WithValue(postgres.WithLivemode(context.Background(), livemode), chimw.RequestIDKey, chimw.GetReqID(r.Context()))
 
-	// Cache every status except 409, 422 and 503, and every refused
-	// body. Above all, a retry after a transient 500 must not run
-	// the side effects again. The first call may have committed
-	// writes the client cannot see, such as a Stripe charge that
-	// succeeded while the response timed out. If the 500 were not
-	// cached, a retry under the same key would charge twice.
-	//
-	// 409 Conflict and 422 Unprocessable Entity are not cached,
-	// because neither is the real first response. A 409 comes from
-	// contention on shared state, and a retry after it clears may
-	// succeed. A 422 usually comes from input validation. The client
-	// usually fixes the body, and the fingerprint check would then
-	// flag the fixed body as a reused key. Storing either would
-	// trap the caller, so the pending reservation is deleted
-	// instead, which frees the key for a clean retry.
-	//
-	// 503 Service Unavailable is not cached either. A handler
-	// answers 503 only when a second run is safe: something the
-	// request needed failed, and nothing it committed would be done
-	// twice (errs.Unavailable). Storing it would replay a failure
-	// that a retry may get past. A handler that may have made its
-	// change must not answer 503.
-	//
-	// A refused body is not cached either: the 400 for a body that
-	// is not valid JSON, or the 422 for a key the request type does
-	// not declare (respond.WriteBodyError). The handler answered
-	// before it changed anything, and the client fixes the body, so
-	// a stored refusal would only trap the corrected request. Any
-	// other 400 is still cached: a handler past its decode may have
-	// written something before it answered.
+	// A stored 500 keeps a retry from running again a change that may have
+	// committed. A 409 or a 422 is not the request's outcome: a retry may get
+	// past the conflict, and the client fixes the body. A handler answers 503
+	// only when a second run is safe (errs.Unavailable). A refused body was
+	// answered before anything changed. Any other 400 is stored: the handler
+	// may have written before it answered.
 	if bodyRefused() ||
 		recorder.statusCode == http.StatusConflict ||
 		recorder.statusCode == http.StatusUnprocessableEntity ||
@@ -259,13 +168,11 @@ func (g IdempotencyGuard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		recorder.statusCode, recorder.body.Bytes())
 }
 
-// fingerprintRequest returns a stable hash of what makes two requests the
-// same request: the method, the path with its query string (uri), the caller
-// (requestCaller) and the body. A retry whose hash differs from the stored
-// one reused the key for another request and gets 422 idempotency_error.
-// A zero byte separates the parts, so moving a byte across a boundary
-// changes the hash: uri "/v1/a" with caller "bc" is not uri "/v1/ab" with
-// caller "c".
+// fingerprintRequest hashes what makes two requests the same request: the
+// method, the path with its query string (uri), the caller (requestCaller)
+// and the body. A zero byte between the parts keeps a byte moved across a
+// boundary from hashing equal: uri "/v1/a" with caller "bc" is not uri
+// "/v1/ab" with caller "c".
 func fingerprintRequest(method, uri, caller string, body []byte) []byte {
 	h := sha256.New()
 	h.Write([]byte(method))
@@ -293,34 +200,22 @@ func requestCaller(ctx context.Context) (caller string, ok bool) {
 	return "", false
 }
 
-type cachedResponse struct {
+type keyRow struct {
 	StatusCode  int
 	Body        []byte
 	Fingerprint []byte
-	CreatedAt   time.Time // when the key was reserved — a pending row's age
+	ReservedAt  time.Time
 }
 
-// reserveKey claims the idempotency key atomically. It inserts a pending row
-// (status_code = statusPending), and reports whether this request won the
-// claim. RowsAffected 1 means claimed, so run the handler. 0 means another
-// request already owns the key, so replay its outcome. This one statement is
-// the serialization point that stops two concurrent requests from both
-// running the side effect.
-//
-// An expired key is absent. When the key's row has passed expires_at, the
-// conflict branch resets that row to a new pending reservation, so the
-// request runs as new without waiting for CleanExpired to delete it. The
-// reset sets status_code back to statusPending, so a retry that arrives
-// during the new run waits for the new answer, not the expired one. Of two
-// requests that find the same expired row, the second waits on the first's
-// row lock, then sees the reset row as unexpired and does not claim it.
-//
-// The INSERT leaves out livemode on purpose. The BEFORE INSERT trigger
-// (set_livemode_from_session) sets it from the transaction's session, so the
-// row lands in the mode partition the request runs under. The conflict
-// resolves against the (tenant_id, livemode, key) primary key.
+// reserveKey claims key and reports whether this request won. Its one
+// statement orders the requests that send the key at once: exactly one
+// inserts a pending row and runs. An expired key is absent: its row, not yet
+// deleted by CleanExpired, is taken over as a new pending reservation, so a
+// retry during the new run waits for the new answer. Of two requests on one
+// expired row, the second waits on the first's row lock, then finds the row
+// unexpired. The insert trigger sets livemode from the transaction's mode.
 func reserveKey(ctx context.Context, db *postgres.DB, tenantID, key, method, path string, fingerprint []byte) (bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, keyQueryTimeout)
 	defer cancel()
 
 	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
@@ -351,8 +246,6 @@ func reserveKey(ctx context.Context, db *postgres.DB, tenantID, key, method, pat
 		return false, err
 	}
 	if n == 0 {
-		// Conflict with an unexpired row: another request holds the key.
-		// Nothing to commit.
 		return false, nil
 	}
 	if err := tx.Commit(); err != nil {
@@ -361,19 +254,14 @@ func reserveKey(ctx context.Context, db *postgres.DB, tenantID, key, method, pat
 	return true, nil
 }
 
-// finalizeKey writes the captured response onto the pending reservation. The
-// owning request always overwrites its own pending row, so an unconditional
-// UPDATE on (tenant_id, key) is correct.
+// finalizeKey stores the answer on this request's pending row, which no other
+// request can take while it runs. A failure leaves the key pending, so every
+// retry with it gets 409 for the rest of its 24 hours and never this answer:
+// each one is counted and logged.
 func finalizeKey(ctx context.Context, db *postgres.DB, tenantID, key string, statusCode int, body []byte) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, keyQueryTimeout)
 	defer cancel()
 
-	// A finalize failure leaves the row pending with no response stored. A
-	// retry does not run the handler again. It finds the pending row and
-	// gets 409 conflict_idempotency, then conflict_idempotency_unresolved
-	// once the reservation is older than idempotencyOrphanAfter, for the rest
-	// of the key's 24-hour life. The client never sees this response
-	// replayed, so every failure path is counted and logged.
 	fail := func(stage string, err error) {
 		idempotencyCacheErrors.WithLabelValues("finalize").Inc()
 		slog.ErrorContext(ctx, "idempotency finalize failed; response not stored, key stays pending and retries with it get 409",
@@ -400,14 +288,10 @@ func finalizeKey(ctx context.Context, db *postgres.DB, tenantID, key string, sta
 	}
 }
 
-// releaseKey deletes the pending reservation, so a key whose answer is not
-// cached (409, 422, 503 or a refused body) can be retried cleanly. When
-// the delete fails, the pending row stays. Every retry with the key then gets
-// 409 instead of running again (conflict_idempotency_unresolved once the
-// reservation is older than idempotencyOrphanAfter). So each failure is
-// counted and logged, like a finalize failure.
+// releaseKey deletes this request's pending row, freeing the key. A failure
+// leaves the key pending, as in finalizeKey, and is counted and logged.
 func releaseKey(ctx context.Context, db *postgres.DB, tenantID, key string, statusCode int) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, keyQueryTimeout)
 	defer cancel()
 
 	fail := func(stage string, err error) {
@@ -435,18 +319,16 @@ func releaseKey(ctx context.Context, db *postgres.DB, tenantID, key string, stat
 	}
 }
 
-// readKey loads the current state of a reserved or completed idempotency row.
-// pending reports whether the owner has not finalized it yet (status_code ==
-// statusPending). found is false when no row exists, because the owner
-// released it. It is called only after reserveKey found the row unexpired,
-// so it applies no expiry rule of its own.
-func readKey(ctx context.Context, db *postgres.DB, tenantID, key string) (c cachedResponse, found, pending bool, err error) {
-	ctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+// readKey loads key's row. found is false when its owner released it. It
+// runs only after reserveKey found the row unexpired, so it applies no expiry
+// rule of its own.
+func readKey(ctx context.Context, db *postgres.DB, tenantID, key string) (c keyRow, found bool, err error) {
+	ctx, cancel := context.WithTimeout(ctx, keyQueryTimeout)
 	defer cancel()
 
 	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
-		return cachedResponse{}, false, false, err
+		return keyRow{}, false, err
 	}
 	defer postgres.Rollback(tx)
 
@@ -454,62 +336,47 @@ func readKey(ctx context.Context, db *postgres.DB, tenantID, key string) (c cach
 		`SELECT status_code, response_body, request_fingerprint, created_at FROM idempotency_keys
 		WHERE tenant_id = $1 AND key = $2`,
 		tenantID, key,
-	).Scan(&c.StatusCode, &c.Body, &c.Fingerprint, &c.CreatedAt)
+	).Scan(&c.StatusCode, &c.Body, &c.Fingerprint, &c.ReservedAt)
 	if errors.Is(err, sql.ErrNoRows) {
-		return cachedResponse{}, false, false, nil
+		return keyRow{}, false, nil
 	}
 	if err != nil {
-		return cachedResponse{}, false, false, err
+		return keyRow{}, false, err
 	}
 	if err := tx.Commit(); err != nil {
-		return cachedResponse{}, false, false, err
+		return keyRow{}, false, err
 	}
-	return c, true, c.StatusCode == statusPending, nil
+	return c, true, nil
 }
 
-// replayExistingKey resolves a request that lost the reserve race. It
-// answers 422 at once when the row's fingerprint is not this request's,
-// replays the stored response once the owner finalizes, and polls briefly
-// while the owner is still in flight. If the owner does not finalize within the poll window,
-// because it died or the operation is too slow to block on, it returns 409
-// conflict_idempotency, which tells the client to retry.
+// replayExistingKey answers a request whose key another request holds: 422
+// when the key's fingerprint is not this request's, the stored answer once
+// there is one, and otherwise 409, such as when there is still none after
+// idempotencyPollTimeout.
 func replayExistingKey(w http.ResponseWriter, r *http.Request, db *postgres.DB, tenantID, key string, fingerprint []byte) {
 	ctx := r.Context()
 	deadline := time.Now().Add(idempotencyPollTimeout)
 	for {
-		c, found, pending, err := readKey(ctx, db, tenantID, key)
+		c, found, err := readKey(ctx, db, tenantID, key)
 		if err != nil {
-			// On a database error while resolving the conflict, do not fail
-			// open: the side effect may already be running. Answer a 409 that
-			// the client retries, instead of running the operation again.
+			// Not running the request: the first one may be running it now.
 			respond.Error(w, r, http.StatusConflict, "conflict_idempotency",
 				"A request with this idempotency key is being processed. Please retry.")
 			return
 		}
-		// A row whose fingerprint is not this request's belongs to another
-		// caller or another request: answer 422 before anything else. The
-		// reservation stores the fingerprint, so this holds while the first
-		// request still runs too, and another caller never waits on it or
-		// learns how it ended. A row with no fingerprint matches nothing: it
-		// cannot be shown to be this caller's, and the comparison is false
-		// for it, since a request's fingerprint is never empty.
+		// Checked first, while the first request still runs too, so another
+		// caller never waits on it or learns how it ended. A row with no
+		// fingerprint matches no request.
 		if found && subtle.ConstantTimeCompare(c.Fingerprint, fingerprint) != 1 {
 			respond.Error(w, r, http.StatusUnprocessableEntity, "idempotency_error",
 				"This Idempotency-Key was first used by another caller or with a different request. Use a new key for a new request.")
 			return
 		}
-		if found && !pending {
-			// A replay runs no handler and makes no mutation. It hands back
-			// the first request's response, and that request wrote the audit
-			// row. Mark this request accounted for, so the audit-coverage
-			// detector does not read this 2xx as a mutation that lost its
-			// row. The detector is mounted at the root and wraps this
-			// middleware, so without the mark every idempotent retry of a
-			// successful mutation would be reported as uncovered.
-			//
-			// Writing a second row here would be worse than the false alarm:
-			// it would record a mutation that never happened, in an
-			// append-only log.
+		if found && c.StatusCode != statusPending {
+			// A replay changes nothing, and the first request wrote the audit
+			// row. Without the mark, the audit detector, which wraps this
+			// middleware, would report every replayed 2xx; a second row would
+			// record a change that never happened.
 			audit.MarkSkip(ctx)
 
 			w.Header().Set("Content-Type", "application/json")
@@ -519,26 +386,19 @@ func replayExistingKey(w http.ResponseWriter, r *http.Request, db *postgres.DB, 
 			_, _ = w.Write(c.Body)
 			return
 		}
-		// Not found means the owner released the key after its handler
-		// answered 409, 422 or 503, or refused the body. The key is free
-		// again, but this request already lost the race. Treat it as a
-		// conflict, so the client retries into a clean slot instead of
-		// running concurrently.
+		// The owner freed the key. This request still lost the race, so it
+		// retries rather than run beside whatever took the key next.
 		if !found {
 			respond.Error(w, r, http.StatusConflict, "conflict_idempotency",
 				"A concurrent request with this idempotency key did not complete. Please retry.")
 			return
 		}
-		// Still pending. A reservation older than any route's time budget
-		// has no live owner: the owner died or panicked. Say so at once,
-		// because the outcome is unknown and polling cannot resolve it.
-		if age := time.Since(c.CreatedAt); age > idempotencyOrphanAfter {
+		// No polling can tell what an orphaned reservation's owner did.
+		if age := time.Since(c.ReservedAt); age > idempotencyOrphanAfter {
 			respond.Error(w, r, http.StatusConflict, "conflict_idempotency_unresolved",
 				fmt.Sprintf("A request with this idempotency key started %s ago and never recorded an outcome — the replica handling it may have died mid-request. Whether its side effect committed is unknown: fetch the resource to check, then retry with a NEW idempotency key only if it does not exist.", age.Round(time.Minute)))
 			return
 		}
-		// Still pending. Wait for the owner to finalize, bounded by the poll
-		// timeout and the request context.
 		if time.Now().After(deadline) {
 			respond.Error(w, r, http.StatusConflict, "conflict_idempotency",
 				"A request with this idempotency key is still being processed. Please retry.")
@@ -554,7 +414,7 @@ func replayExistingKey(w http.ResponseWriter, r *http.Request, db *postgres.DB, 
 	}
 }
 
-// responseRecorder captures the response for caching while writing to the client.
+// responseRecorder keeps a copy of the answer it writes to the client.
 type responseRecorder struct {
 	http.ResponseWriter
 	statusCode int
@@ -575,10 +435,9 @@ func (r *responseRecorder) Write(b []byte) (int, error) {
 	return r.ResponseWriter.Write(b)
 }
 
-// CleanExpired deletes expired idempotency keys across all tenants and
-// returns the number of rows deleted. A background scheduler calls it, not a
-// request, so it works across tenants by design. It uses TxBypass to skip the
-// tenant_isolation policy.
+// CleanExpired deletes the expired keys of every tenant and returns how many
+// it deleted. The scheduler calls it outside any request, so it bypasses the
+// tenant_isolation policy (TxBypass).
 func CleanExpired(ctx context.Context, db *postgres.DB) (int, error) {
 	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -597,10 +456,9 @@ func CleanExpired(ctx context.Context, db *postgres.DB) (int, error) {
 	return int(n), nil
 }
 
-// IdempotencyCleaner adapts CleanExpired to the scheduler's cleaner interface,
-// Cleanup(ctx) (int, error), the shape payment.TokenService also has. That
-// keeps the scheduler wiring the same for every cleanup task, and it means the
-// scheduler package does not need to import middleware.
+// IdempotencyCleaner is CleanExpired in the shape of the scheduler's
+// cleaners (billing.IdempotencyCleaner), so the scheduler does not import
+// this package.
 type IdempotencyCleaner struct {
 	db *postgres.DB
 }

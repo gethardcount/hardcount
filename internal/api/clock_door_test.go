@@ -340,9 +340,15 @@ func TestClockDoor_AnUnknownClockSourceIsAServerFault(t *testing.T) {
 		t.Fatalf("pinFor: %v; want errUnknownClockSource", err)
 	}
 	key := routeKey{Method: "GET", Pattern: "/v1/whoami"}
-	saved := routeTable[key]
+	saved, had := routeTable[key]
 	routeTable[key] = routeDecl{clock: clockDecl{Source: clockSource(99)}}
-	t.Cleanup(func() { routeTable[key] = saved })
+	t.Cleanup(func() {
+		if had {
+			routeTable[key] = saved
+		} else {
+			delete(routeTable, key)
+		}
+	})
 	got := through(d, auth.WithTenantID(postgres.WithLivemode(context.Background(), false), "t1"), "GET", "/v1/whoami")
 	if got.reached || got.code != http.StatusInternalServerError || strings.Contains(got.body, "test_clock_unavailable") || serverOf(d).reads != 0 {
 		t.Errorf("reached %v, code %d, body %s, %d server reads; want not reached, 500, no clock refusal, no read",

@@ -11,9 +11,9 @@ import (
 
 // A body that is not valid JSON is a 400 on every route Hardcount defines the
 // body of (respond.DecodeStrict; TestStrictBodies_EveryJSONRouteRefusesAnUnknownKey
-// sends one to each). The reference must say so under 400: a client that
-// reads it under 422 expects its Idempotency-Key to be freed, but a 400 is
-// kept, so the corrected retry under the same key is refused for 24 hours.
+// sends one to each). The reference must say so under 400, the status the
+// client gets. Like an unknown key's 422, the refused body is not stored
+// under its Idempotency-Key, so the corrected request may reuse the key.
 func TestOpenAPISpec_MalformedBodyIsDocumentedAs400(t *testing.T) {
 	raw, err := os.ReadFile(specPath)
 	if err != nil {

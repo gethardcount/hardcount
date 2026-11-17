@@ -230,6 +230,20 @@ func TestRouter_CrossSiteWriteToTheStreamOrAnExportIsRefused(t *testing.T) {
 	}
 }
 
+// A cross-site sign-in answers 403 before the login handler runs: sign-in
+// sets the session cookie, so another site could sign the visitor's browser
+// in to an account of its choosing.
+func TestRouter_CrossSiteSignInIsRefused(t *testing.T) {
+	req := httptest.NewRequest(http.MethodPost, "/v1/auth/login", strings.NewReader("{"))
+	req.Header.Set("Sec-Fetch-Site", "cross-site")
+	req.Header.Set("Origin", "https://attacker.example")
+	rec := httptest.NewRecorder()
+	newTestServer().ServeHTTP(rec, req)
+	if rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "cross-site request blocked") {
+		t.Fatalf("cross-site POST /v1/auth/login = %d %s, want 403 cross-site request blocked", rec.Code, rec.Body.String())
+	}
+}
+
 // An unknown route and a method the route does not take answer the JSON
 // error envelope every other error uses, and a 405 lists the path's methods.
 func TestRouter_UnknownRouteAndWrongMethodAnswerTheEnvelope(t *testing.T) {
