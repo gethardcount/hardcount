@@ -205,7 +205,9 @@ func TestConfirmReset_EndsSessionsInEveryWorkspace(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := NewPostgresStore(it.db).AttachTenantInTx(t.Context(), tx, it.userID, second, "member"); err != nil {
+	// An accept refuses a second workspace, and an account that joined two
+	// before that rule keeps both, so only SQL can make one.
+	if _, err := tx.ExecContext(t.Context(), `INSERT INTO user_tenants (user_id, tenant_id, role) VALUES ($1, $2, 'member')`, it.userID, second); err != nil {
 		t.Fatalf("join the second workspace: %v", err)
 	}
 	if err := tx.Commit(); err != nil {

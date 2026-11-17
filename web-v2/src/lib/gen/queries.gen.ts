@@ -11504,7 +11504,9 @@ export const getGetInvitationUrl = (token: string,) => {
  * Returns the invited email, the account's name, and whether the
  * invitee has to create an account. An unknown, expired, revoked or
  * used token gets the same 422, so the answer does not tell a
- * guesser which tokens exist.
+ * guesser which tokens exist. A valid token whose email is already
+ * a member of another account gets a 409: the accept would refuse
+ * it.
  * @summary Preview a team invitation
  */
 export const getInvitation = async (token: string, options?: RequestInit): Promise<GetInvitation200> => {
@@ -11618,7 +11620,9 @@ export const getAcceptInvitationUrl = () => {
  * - An account has the email: Hardcount adds the membership but does
  *   not sign the user in, because holding the email alone must not
  *   open an existing account. The user signs in with their own
- *   password afterwards, and `password` is ignored.
+ *   password afterwards, and `password` is ignored. A user who is
+ *   a member of another account on this server is refused (409): an
+ *   email signs in to one account.
  *
  * A new account's password is checked before the token is used up:
  * if it fails the check (422, `param: password`), the invitation can

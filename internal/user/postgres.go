@@ -189,17 +189,63 @@ func (s *PostgresStore) CreateInTx(ctx context.Context, tx *sql.Tx, email, passw
 	return u, nil
 }
 
+// ErrMemberElsewhere refuses a second workspace for an account. Sign-in
+// opens one workspace per address, so a second membership could never be
+// reached (ADR-081). The accept page shows the message to the invited person.
+var ErrMemberElsewhere = errs.AlreadyExists("", "This address already signs in to another workspace on this server, and an address can belong to one. Ask the person who invited you to use a different address.").WithCode("member_elsewhere")
+
 // AttachTenantInTx adds (user_id, tenant_id, role) to user_tenants on the
-// caller's transaction, and does nothing when the membership already
-// exists. The invite accept uses it so the membership commits with the
-// invitation's claim. No commit here; the caller owns the tx.
+// caller's transaction, and does nothing when the membership already exists.
+// It returns ErrMemberElsewhere, and writes nothing, when the user is a
+// member of another workspace. The invite accept uses it so the membership
+// commits with the invitation's claim. No commit here; the caller owns the tx.
+//
+// tx must be a bypass transaction: row-level security hides other workspaces'
+// memberships from a tenant one. The user's row is locked first, as SignIn
+// locks it, so of two accepts of one account into two workspaces at once the
+// second waits and is refused.
 func (s *PostgresStore) AttachTenantInTx(ctx context.Context, tx *sql.Tx, userID, tenantID, role string) error {
+	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, userID); err != nil {
+		return fmt.Errorf("lock user: %w", err)
+	}
+	if err := checkJoin(ctx, tx, userID, tenantID); err != nil {
+		return err
+	}
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO user_tenants (user_id, tenant_id, role)
 		VALUES ($1, $2, $3)
 		ON CONFLICT (user_id, tenant_id) DO NOTHING
 	`, userID, tenantID, role); err != nil {
 		return fmt.Errorf("attach tenant: %w", err)
+	}
+	return nil
+}
+
+// CheckJoin returns ErrMemberElsewhere when AttachTenantInTx would refuse the
+// user for tenantID, and nil otherwise. It is a plain read for the accept
+// page: a membership can change before the accept, which checks again under
+// the user's row lock.
+func (s *PostgresStore) CheckJoin(ctx context.Context, userID, tenantID string) error {
+	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
+	if err != nil {
+		return err
+	}
+	defer postgres.Rollback(tx)
+	return checkJoin(ctx, tx, userID, tenantID)
+}
+
+// checkJoin returns ErrMemberElsewhere when the user is a member of a
+// workspace other than tenantID. tx must be a bypass transaction.
+func checkJoin(ctx context.Context, tx *sql.Tx, userID, tenantID string) error {
+	var elsewhere bool
+	err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (SELECT 1 FROM user_tenants WHERE user_id = $1 AND tenant_id <> $2)
+	`, userID, tenantID).Scan(&elsewhere)
+	if err != nil {
+		return fmt.Errorf("look for another workspace: %w", err)
+	}
+	if elsewhere {
+		return ErrMemberElsewhere
 	}
 	return nil
 }

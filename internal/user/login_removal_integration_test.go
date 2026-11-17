@@ -73,7 +73,9 @@ func (it removalIT) removeHolding(ctx context.Context, gate *user.Gate) error {
 }
 
 // joinSecondWorkspace makes the member join a second workspace, after the
-// first, and returns it.
+// first, and returns it. An accept refuses a second workspace, and an
+// account that joined two before that rule keeps both, so only SQL can make
+// one.
 func (it removalIT) joinSecondWorkspace(t *testing.T) string {
 	t.Helper()
 	second := testutil.CreateTestTenant(t, it.db, "Login Removal Second")
@@ -82,7 +84,7 @@ func (it removalIT) joinSecondWorkspace(t *testing.T) string {
 		t.Fatal(err)
 	}
 	defer postgres.Rollback(tx)
-	if err := user.NewPostgresStore(it.db).AttachTenantInTx(t.Context(), tx, it.memberID, second, "member"); err != nil {
+	if _, err := tx.ExecContext(t.Context(), `INSERT INTO user_tenants (user_id, tenant_id, role) VALUES ($1, $2, 'member')`, it.memberID, second); err != nil {
 		t.Fatalf("join the second workspace: %v", err)
 	}
 	if err := tx.Commit(); err != nil {

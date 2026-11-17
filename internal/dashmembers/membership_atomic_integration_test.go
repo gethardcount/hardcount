@@ -84,6 +84,81 @@ func TestRemoveMember_ConcurrentRemovalsKeepOneMember(t *testing.T) {
 	}
 }
 
+// TestAcceptInvite_ConcurrentAcceptsIntoTwoWorkspacesKeepOneMembership: one
+// account is invited to two workspaces and accepts both at the same moment.
+// One accept joins, and the other is refused: an address signs in to one
+// workspace, so the second membership could never be reached.
+//
+// The test locks the account's user row, so both accepts wait on it with
+// their invitation claimed, then lets them go. The second starts its check
+// after the first commits and sees the membership.
+//
+// Mutation: drop the user-row lock from AttachTenantInTx, and both accepts
+// read no membership before either writes: two memberships.
+func TestAcceptInvite_ConcurrentAcceptsIntoTwoWorkspacesKeepOneMembership(t *testing.T) {
+	h := newHarness(t, "Team Two Accepts A")
+	ctx := postgres.WithLivemode(context.Background(), false)
+	second := testutil.CreateTestTenant(t, h.db, "Team Two Accepts B")
+	secondOwner := createUser(t, h.db, "owner@two-accepts-b.example.com", second, "owner")
+	const invitee = "both@example.com"
+	u := accountInNoWorkspace(t, h, invitee)
+
+	var tokens [2]string
+	for i, at := range []struct{ tenantID, inviter string }{{h.tenantID, h.owner}, {second, secondOwner.ID}} {
+		if _, err := h.svc.Invite(ctx, at.tenantID, at.inviter, invitee); err != nil {
+			t.Fatalf("invite to workspace %d: %v", i+1, err)
+		}
+		tokens[i] = h.email.lastToken(t)
+	}
+
+	admin := testutil.AdminPool(t)
+	gate, err := admin.BeginTx(ctx, nil)
+	if err != nil {
+		t.Fatalf("begin gate tx: %v", err)
+	}
+	defer func() { _ = gate.Rollback() }() // the release below already ended it on the normal path
+	if _, err := gate.ExecContext(ctx, `SELECT 1 FROM users WHERE id = $1 FOR UPDATE`, u.ID); err != nil {
+		t.Fatalf("lock the user row: %v", err)
+	}
+
+	results := make(chan error, 2)
+	for _, token := range tokens {
+		go func() {
+			_, err := h.svc.AcceptInvite(ctx, dashmembers.AcceptInput{Token: token})
+			results <- err
+		}()
+	}
+
+	// Both accepts wait on the gate: for the user row's lock, or, with that
+	// lock gone, for the membership insert's foreign-key lock on the same row.
+	testutil.WaitForLockWaiters(t, ctx, admin, "", 2)
+	if err := gate.Rollback(); err != nil {
+		t.Fatalf("release gate: %v", err)
+	}
+
+	var joined, refused int
+	for range 2 {
+		switch err := <-results; {
+		case err == nil:
+			joined++
+		case errors.Is(err, user.ErrMemberElsewhere):
+			refused++
+		default:
+			t.Errorf("accept: unexpected error %v", err)
+		}
+	}
+	memberships, err := user.NewPostgresStore(h.db).TenantsForUser(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("tenants for user: %v", err)
+	}
+	if len(memberships) != 1 {
+		t.Fatalf("memberships after one account accepted into two workspaces at once: got %d, want 1", len(memberships))
+	}
+	if joined != 1 || refused != 1 {
+		t.Errorf("got %d joined and %d refused, want 1 and 1", joined, refused)
+	}
+}
+
 // joinFailsDirectory is the test user directory with one fault: the
 // membership write fails after the real one ran on the accept's transaction.
 // The user row and the membership are on that transaction, so a test sees
@@ -128,8 +203,7 @@ func TestAcceptInvite_FailedJoinKeepsTheInvite(t *testing.T) {
 			userStore := user.NewPostgresStore(h.db)
 			const invitee = "joiner@example.com"
 			if tc.existing {
-				other := testutil.CreateTestTenant(t, h.db, "Joiner Home")
-				createUser(t, h.db, invitee, other, "owner")
+				accountInNoWorkspace(t, h, invitee)
 			}
 			if _, err := h.svc.Invite(ctx, h.tenantID, h.owner, invitee); err != nil {
 				t.Fatalf("invite: %v", err)

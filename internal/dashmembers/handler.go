@@ -166,7 +166,9 @@ func (h *Handler) removeMember(w http.ResponseWriter, r *http.Request) {
 
 // previewInvite renders the accept-page context. Unauthed; the token is
 // the credential. Invalid/expired/revoked/consumed all collapse into one
-// generic 422 — no state oracle for token guessers.
+// generic 422 — no state oracle for token guessers. A valid token whose
+// account is a member of another workspace gets its own 409, here and on the
+// accept: its holder already sees whether the address has an account.
 func (h *Handler) previewInvite(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
 	preview, err := h.svc.PreviewInvite(ctx, chi.URLParam(r, "token"))

@@ -102,6 +102,7 @@ decide.
 | `invalid_state` | The resource is in the wrong state for this action, such as advancing a test clock that is still advancing | Read it, wait or change it, then try again |
 | `concurrent_change` | Another change to the same records stopped the request: Postgres broke a deadlock or ended the request's wait for a lock, or, for a cancel, the subscription changed twice while the cancel priced it. Only the routes listed below answer it. | Send the same request again. With an `Idempotency-Key`, the same key works. Some steps stay done (below). |
 | `already_bootstrapped` | `POST /v1/bootstrap` after the first account exists | Do not retry |
+| `member_elsewhere` | Opening or accepting a team invitation for an email that is a member of another account on this server. An email signs in to one account. | Invite a different address |
 
 These routes answer `concurrent_change`:
 

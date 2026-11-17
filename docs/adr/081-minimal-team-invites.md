@@ -12,7 +12,7 @@ user, undercutting a feature the README sells.
 
 ## Summary
 
-Teammates join an account through a single-use email invite (`POST /v1/members/invite`) valid for 7 days, so people stop sharing one password and audit rows name the real person. There is no role-based access control: every member has full access, and the recorded role is not enforced. Only a signed-in dashboard user can invite or remove members, because an API key has no person to attribute the act to. Removing a member ends all their sessions, and nobody can remove themselves, so one member always stays, even when two removals run at once. An invitation is saved with its email, and an accept saves the account and the membership with its claim on the invitation, so a failure leaves nothing half done (amendment 2026-11-10), and a new account's session and the audit row join that transaction (amendment 2026-11-16). Only a current member can invite, revoke an invitation or remove a member (amendments 2026-11-16 and 2026-11-17). Status: active, amending [ADR-011](011-email-password-auth-and-clean-api-keys.md); roles, MFA and SSO are not built.
+Teammates join an account through a single-use email invite (`POST /v1/members/invite`) valid for 7 days, so people stop sharing one password and audit rows name the real person. There is no role-based access control: every member has full access, and the recorded role is not enforced. Only a signed-in dashboard user can invite or remove members, because an API key has no person to attribute the act to. Removing a member ends all their sessions, and nobody can remove themselves, so one member always stays, even when two removals run at once. An invitation is saved with its email, and an accept saves the account and the membership with its claim on the invitation, so a failure leaves nothing half done (amendment 2026-11-10), and a new account's session and the audit row join that transaction (amendment 2026-11-16). Only a current member can invite, revoke an invitation or remove a member (amendments 2026-11-16 and 2026-11-17). An address signs in to one workspace on a server, so an accept is refused while the invited account is a member of another workspace (amendment 2026-11-17, one workspace). Status: active, amending [ADR-011](011-email-password-auth-and-clean-api-keys.md); roles, MFA and SSO are not built.
 
 ## Decision
 
@@ -148,3 +148,26 @@ one member always stays. That replaces the member count in the `DELETE` and
 the "cannot remove the last member" refusal of the 2026-11-10 amendment. Of
 two members removing each other at once, the second waits for the first and
 gets the `403` ([#1834](https://github.com/gethardcount/hardcount/pull/1834)).
+
+## Amendment 2026-11-17: an address signs in to one workspace
+
+An address signs in to one workspace on a server. Accepting an invitation is
+refused, with `409` `member_elsewhere`, while the invited account is a member
+of another workspace, and the accept page says so. Sign-in opens the
+first-joined workspace and the dashboard has no workspace switcher, so a
+second membership could not be reached.
+
+The rule is enforced where the invited person opens the link, not where the
+invitation is sent. An invitation to such an address is created and answered
+like any other, so a member cannot learn from the invite's answer that an
+address has an account in another workspace. The person who opens the link
+owns the mailbox, and the accept page already tells them whether the address
+has an account. `AttachTenantInTx` locks the user's row, as sign-in does, and
+then looks for a membership in another workspace, so two accepts of one
+account into two workspaces at once end with one membership. The preview
+refuses the same case with a plain read.
+
+The "first-joined workspace" consequence above no longer arises from an
+accept. An account that already holds two memberships keeps both and signs in
+to the first-joined one
+([#PRNUM](https://github.com/gethardcount/hardcount/pull/PRNUM)).
