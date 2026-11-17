@@ -305,19 +305,24 @@
     },
     {
       "datasource": "Prometheus",
-      "title": "Audit write errors (PAGE if rate > 0)",
+      "title": "Audit write errors (PAGE if rows lost > 0)",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 68 },
       "id": 16,
       "targets": [
         {
-          "expr": "sum(rate(hardcount_audit_write_errors_total[5m]))",
-          "legendFormat": "audit errors/sec",
+          "expr": "sum(rate(hardcount_audit_write_errors_total{outcome=\"row_lost\"}[5m]))",
+          "legendFormat": "rows lost/sec",
           "refId": "A"
+        },
+        {
+          "expr": "sum(rate(hardcount_audit_write_errors_total{outcome=\"mutation_refused\"}[5m]))",
+          "legendFormat": "changes refused/sec",
+          "refId": "B"
         }
       ],
       "alert": {
-        "name": "Audit write failures",
+        "name": "Audit rows lost",
         "conditions": [
           {
             "evaluator": { "type": "gt", "params": [0] },

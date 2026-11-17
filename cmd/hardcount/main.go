@@ -157,12 +157,9 @@ func serve() {
 
 	appPool, closeAppPool := openAppPool(cfg, pool)
 	defer closeAppPool()
-	// appPool serves every request and background job, so its waits are the
-	// ones an operator needs to see. pool, when it is a separate pool, runs
-	// only the start-up checks above, so it is not exported.
-	mw.RegisterDBPoolStats(appPool)
 
 	db := postgres.NewDB(appPool, cfg.DB.QueryTimeout)
+	registerMetrics(appPool, db, cfg.InvoiceGracePeriod)
 
 	// Leader gate (ADR-114). Each singleton loop (billing, dunning, the two
 	// outbox dispatchers, webhook delivery retry and the test-clock catch-up)
@@ -171,22 +168,6 @@ func serve() {
 	// safe behind a transaction-mode pooler.
 	gate := leader.New(appPool, func(role leader.Role, reason string) {
 		mw.RecordLeaderLeaseLost(string(role), reason)
-	})
-	roles := make([]string, 0, len(leader.Roles))
-	for _, r := range leader.Roles {
-		roles = append(roles, string(r))
-	}
-	mw.InitLeaderLeaseLost(roles...)
-	mw.RegisterLeaderStatus(func(ctx context.Context) ([]mw.LeaderStatusRow, error) {
-		rows, err := leader.Status(ctx, appPool)
-		if err != nil {
-			return nil, err
-		}
-		out := make([]mw.LeaderStatusRow, 0, len(rows))
-		for _, r := range rows {
-			out = append(out, mw.LeaderStatusRow{Role: string(r.Role), Held: r.Held, HasTicked: r.HasTicked, LastTickAgeSeconds: r.LastTickAgeS, Paused: r.Paused})
-		}
-		return out, nil
 	})
 
 	// Production refuses to start without a reachable Redis. Without Redis
@@ -214,24 +195,6 @@ func serve() {
 		api.WithInvoiceGrace(cfg.InvoiceGracePeriod),
 		api.WithAppEnv(cfg.Env),
 		api.WithRateLimits(cfg.RateLimits))
-	// Queue-depth gauges, which the Grafana and runbook alerts watch. The
-	// counts run on a TxBypass transaction because they span tenants. Under
-	// the app role's RLS they would always report a healthy-looking 0.
-	mw.RegisterQueueDepthGauges(cfg.InvoiceGracePeriod, func(query string) (float64, error) {
-		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
-		defer cancel()
-		tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
-		if err != nil {
-			return 0, err
-		}
-		defer postgres.Rollback(tx)
-		var n float64
-		if err := tx.QueryRowContext(ctx, query).Scan(&n); err != nil {
-			return 0, err
-		}
-		return n, nil
-	})
-
 	billingInterval := 1 * time.Hour
 	if cfg.Env == "local" {
 		billingInterval = 5 * time.Minute
