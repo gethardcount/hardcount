@@ -11147,7 +11147,8 @@ export const getSwitchSessionModeUrl = () => {
  * A switch writes a `mode_changed` audit row, filed in test mode
  * whichever mode is chosen. The switch and its row are saved
  * together: if they cannot be saved, the answer is 500 and the
- * session keeps its mode.
+ * session keeps its mode. Choosing the mode the session is already
+ * in answers 200 and writes no row.
  * @summary Switch the dashboard session between test and live mode
  */
 export const switchSessionMode = async (switchSessionModeBody: SwitchSessionModeBody, options?: RequestInit): Promise<SwitchSessionMode200> => {

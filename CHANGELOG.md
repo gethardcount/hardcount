@@ -128,6 +128,7 @@ original text.
 
 ### Fixed
 
+- **Switching the dashboard to the mode it is already in writes no audit row.** `POST /v1/auth/mode` with the session's current mode wrote a `mode_changed` row though nothing changed. It still answers `200` ([#PRNUM](https://github.com/gethardcount/hardcount/pull/PRNUM)).
 - **A subscription on a trial keeps its last item.** `DELETE /v1/subscriptions/{id}/items/{item_id}` removed the last item of a trialing subscription, which then became active with nothing to bill. It now answers `409 invalid_state`, as for an active subscription, and so does removing an item from a canceled subscription ([#1838](https://github.com/gethardcount/hardcount/pull/1838)).
 - **Accepting an invitation for an address that already belongs to another workspace is refused.** The page said "You've joined", but sign-in then always opened the first workspace. An address can belong to one workspace on a server, and the accept page now says so ([#1839](https://github.com/gethardcount/hardcount/pull/1839)).
 - **The "Remove member" dialog says that API keys are not changed.** It said the person loses access immediately; a key they copied keeps working until it is rotated. The dialog, the API keys guide and the data page now say to rotate it ([#1836](https://github.com/gethardcount/hardcount/pull/1836)).
