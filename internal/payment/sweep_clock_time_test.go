@@ -18,10 +18,12 @@ import (
 
 // The payment reconciler runs in real time (the billing role's tick) and
 // reaches clock invoices too. It decides each row's time from the row's
-// invoice (decideRow), and the settle keeps that decision: with no
-// contracted instant on the charge, paid_at, the failed stamp and dunning's
-// start are all at the invoice's clock time (dunningSimFailedAt: the
-// charge's anchor, else the decided time).
+// invoice (decideRow). On a test clock the settle keeps that decision: with
+// no contracted instant on the charge, paid_at, the failed stamp and
+// dunning's start are all at the invoice's clock time (dunningSimFailedAt:
+// the charge's anchor, else the decided time). On no clock the settle's times
+// are read when Stripe's answer arrives, and the bound instant dates the
+// row's other writes.
 
 var sweepFrozen = time.Date(2027, 2, 14, 9, 30, 0, 0, time.UTC)
 
@@ -227,11 +229,28 @@ func TestRealTimeSweep_AnInvoiceOnNoClockIsPaidAtRealTime(t *testing.T) {
 	}})
 	r.SetResolver(noClock{})
 	r.settler.(*Stripe).SetResolver(noClock{})
+	arrival := time.Date(2030, 1, 2, 3, 4, 5, 0, time.UTC) // far from the row's instant, read from the machine
+	r.settler.(*Stripe).SetClock(clock.NewFake(arrival))
 	if _, runErrs := r.Run(tickCtx(), 10); len(runErrs) != 0 {
 		t.Fatalf("errors %v; want none", runErrs)
 	}
-	if got := updater.invoices[inv.ID]; got.PaidAt == nil || time.Since(*got.PaidAt) > time.Minute {
-		t.Errorf("paid_at %v; want real time", got.PaidAt)
+	if got := updater.invoices[inv.ID]; got.PaidAt == nil || !got.PaidAt.Equal(arrival) {
+		t.Errorf("paid_at %v; want %v, when Stripe's answer arrived, not the row's instant", got.PaidAt, arrival)
+	}
+}
+
+// A row on no clock is bound to one read of the server's clock, as decideFor
+// binds an event, so what the row's work stamps is that instant, not a
+// later read each time.
+func TestRealTimeSweep_ARowOnNoClockIsBoundToOneInstant(t *testing.T) {
+	r, _, _ := sweepHarness(unknownClockInvoice(), &mockStripeClient{})
+	r.SetResolver(noClock{})
+	decided, gone, err := r.decideRow(tickCtx(), "t1", "inv_x")
+	if err != nil || gone {
+		t.Fatalf("decideRow: gone %v, err %v", gone, err)
+	}
+	if _, ok := clock.EffectiveNow(decided); !ok {
+		t.Error("the row's ctx carries no instant: each stamp would read the clock again")
 	}
 }
 

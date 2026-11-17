@@ -5,8 +5,10 @@ import (
 	"database/sql"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/tax"
 )
@@ -15,6 +17,8 @@ import (
 // upstream transaction id so tests can assert idempotency + persistence.
 type fakeTaxReverser struct {
 	calls    []tax.ReversalRequest
+	at       []time.Time // the instant each call ran on
+	server   *clock.Fake // when set, each call advances it a minute
 	failWith error
 	returnID string
 	// emptyResult makes ReverseTax return an empty ReversalResult with no
@@ -22,8 +26,12 @@ type fakeTaxReverser struct {
 	emptyResult bool
 }
 
-func (f *fakeTaxReverser) ReverseTax(_ context.Context, _ string, req tax.ReversalRequest) (*tax.ReversalResult, error) {
+func (f *fakeTaxReverser) ReverseTax(ctx context.Context, _ string, req tax.ReversalRequest) (*tax.ReversalResult, error) {
 	f.calls = append(f.calls, req)
+	f.at = append(f.at, clock.Now(ctx))
+	if f.server != nil {
+		f.server.Advance(time.Minute)
+	}
 	if f.failWith != nil {
 		return nil, f.failWith
 	}
@@ -352,6 +360,42 @@ func TestRetryPendingCreditNoteTaxReversal_ReDrivesAndClears(t *testing.T) {
 	}
 	if len(rev.calls) != 2 {
 		t.Errorf("reverse calls: got %d, want 2 (failed inline + recovered sweep)", len(rev.calls))
+	}
+}
+
+// The sweep works each note on its own instant: the tick binds none, so a
+// note reads the server's clock once and its reversal is dated then.
+func TestRetryPendingCreditNoteTaxReversal_EachNoteOnItsOwnInstant(t *testing.T) {
+	t.Parallel()
+	store := newMemStore()
+	invoices := &memInvoiceReader{invoices: map[string]domain.Invoice{}}
+	for _, id := range []string{"inv_a", "inv_b"} {
+		invoices.invoices[id] = domain.Invoice{
+			ID: id, TenantID: "t1", CustomerID: "cus_1", Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded,
+			Currency: "USD", SubtotalCents: 10000, TaxFacts: domain.TaxFacts{TaxAmountCents: 1800, TaxProvider: "stripe_tax"},
+			TotalAmountCents: 11800, AmountPaidCents: 11800, StripePaymentIntentID: "pi_" + id, TaxTransactionID: "tx_" + id,
+		}
+	}
+	store.invoices = invoices
+	base := time.Date(2026, 1, 5, 9, 0, 0, 0, time.UTC)
+	server := clock.NewFake(base)
+	rev := &fakeTaxReverser{failWith: errors.New("stripe: transient")}
+	svc := NewService(store, invoices, &fakeRefunder{}, &fakeCreditGranter{})
+	svc.SetNumberGenerator(&fakeCNNumbers{})
+	svc.SetTaxReverser(rev)
+	svc.SetClock(server)
+	for _, id := range []string{"inv_a", "inv_b"} {
+		if _, err := svc.CreateRefund(context.Background(), "t1", RefundInput{InvoiceID: id, Reason: "fraudulent"}); err != nil {
+			t.Fatalf("CreateRefund %s: %v", id, err)
+		}
+	}
+
+	rev.failWith, rev.returnID, rev.at, rev.server = nil, "tx_reversal", nil, server
+	if _, errs := svc.RetryPendingCreditNoteTaxReversal(postgres.WithLivemode(context.Background(), true), 10); len(errs) != 0 {
+		t.Fatalf("sweep errors: %v", errs)
+	}
+	if len(rev.at) != 2 || rev.at[0].Equal(rev.at[1]) || rev.at[0].After(base.Add(time.Hour)) || rev.at[1].After(base.Add(time.Hour)) {
+		t.Errorf("reversals at %v: want two, each its own read of the server's clock (from %v)", rev.at, base)
 	}
 }
 
