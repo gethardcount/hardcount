@@ -38,7 +38,7 @@ const requestIDPrefix = "req_"
 //   - Nothing consumes it as input. The name still appears in tests that
 //     forge the header to prove it is ignored, and in the docs that record
 //     this decision. Hardcount's published contract is the
-//     Hardcount-Request-Id response header (respond.go). The dashboard
+//     Hardcount-Request-Id response header, set below. The dashboard
 //     captures it (web-v2 lib/api.ts), and the docs point support at it.
 //     That contract is unchanged.
 //   - Cross-service trace continuity belongs to W3C Trace Context, which
@@ -67,14 +67,9 @@ func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		id := requestIDPrefix + xid.New().String()
 		ctx := context.WithValue(r.Context(), chimw.RequestIDKey, id)
-		// Set the published header here, not only in respond.JSON. Otherwise
-		// a response that never reaches a respond helper has no id in the
-		// header or the body. Two such responses are chi's default "404 page
-		// not found" for an unrouted path and net/http's "400 Bad Request"
-		// for a malformed request line. With no envelope to parse, the
-		// caller needs the header most. Setting it before next.ServeHTTP
-		// covers whoever writes the status. respond.JSON sets the same value
-		// again, a no-op.
+		// The one place the header is set. Before next.ServeHTTP, so every
+		// answer carries it, whoever writes the status, also one with no
+		// envelope to read the id from.
 		w.Header().Set("Hardcount-Request-Id", id)
 		next.ServeHTTP(w, r.WithContext(ctx))
 	})
