@@ -173,7 +173,8 @@ func (s *postgresStore) EndWith(ctx context.Context, idHash string, then func(tx
 
 // SetLivemodeWith switches the live session whose hash is idHash to livemode
 // and calls then, under EndWith's contract. It returns the session in its new
-// mode.
+// mode. A session already in that mode is returned as it is, and then is not
+// called: nothing changed, so there is nothing to record.
 func (s *postgresStore) SetLivemodeWith(ctx context.Context, idHash string, livemode bool, then func(tx *sql.Tx, sess Session) error) (Session, bool, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -181,13 +182,24 @@ func (s *postgresStore) SetLivemodeWith(ctx context.Context, idHash string, live
 	}
 	defer postgres.Rollback(tx)
 
+	now := time.Now().UTC()
 	sess, err := scanSession(tx.QueryRowContext(ctx, `
 		UPDATE dashboard_sessions
 		SET livemode = $1
-		WHERE id_hash = $2 AND revoked_at IS NULL AND expires_at > $3
-		RETURNING `+sessionCols, livemode, idHash, time.Now().UTC()))
+		WHERE id_hash = $2 AND revoked_at IS NULL AND expires_at > $3 AND livemode <> $1
+		RETURNING `+sessionCols, livemode, idHash, now))
 	if errors.Is(err, sql.ErrNoRows) {
-		return Session{}, false, nil
+		// Not live, or already in this mode.
+		sess, err = scanSession(tx.QueryRowContext(ctx, `
+			SELECT `+sessionCols+` FROM dashboard_sessions
+			WHERE id_hash = $1 AND revoked_at IS NULL AND expires_at > $2`, idHash, now))
+		if errors.Is(err, sql.ErrNoRows) {
+			return Session{}, false, nil
+		}
+		if err != nil {
+			return Session{}, false, fmt.Errorf("read session: %w", err)
+		}
+		return sess, true, nil
 	}
 	if err != nil {
 		return Session{}, false, fmt.Errorf("set session mode: %w", err)

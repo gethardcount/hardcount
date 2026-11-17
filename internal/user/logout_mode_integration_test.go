@@ -221,7 +221,8 @@ func TestSetMode_AFailedAuditRowLeavesTheMode(t *testing.T) {
 // TestSetMode: a body without livemode is a 422 on param livemode and leaves
 // the mode. {"livemode": true} switches the session to live mode and writes
 // one mode_changed row, filed in test mode, with the new mode in its
-// metadata. An expired, signed-out or unknown session gets 401 and no row.
+// metadata. A switch to the mode the session is in answers 200 and writes no
+// row. An expired, signed-out or unknown session gets 401 and no row.
 func TestSetMode(t *testing.T) {
 	it := newLoginIT(t)
 	h := it.handler(NewPostgresStore(it.db), audit.NewLogger(it.db), nil)
@@ -252,6 +253,15 @@ func TestSetMode(t *testing.T) {
 	want := authRow{tenantID: it.tenantID, actorType: "user", actorID: it.userID, livemode: false, metadata: `{"livemode": true}`}
 	if got := it.authRows(t, "mode_changed"); len(got) != 1 || got[0] != want {
 		t.Fatalf("mode_changed rows = %+v, want [%+v]", got, want)
+	}
+
+	// The session is in live mode now: the same switch again changes nothing.
+	rr = postAuth(h, "/mode", raw, `{"livemode": true}`)
+	if got := strings.TrimSpace(rr.Body.String()); rr.Code != http.StatusOK || got != `{"livemode":true}` {
+		t.Fatalf("switch to the mode it is in: status %d, body %s; want 200 {\"livemode\":true}", rr.Code, got)
+	}
+	if got := it.authRows(t, "mode_changed"); len(got) != 1 {
+		t.Fatalf("mode_changed rows after a switch that changed nothing = %+v, want the one row", got)
 	}
 
 	expired := it.sessionIn(t, false)

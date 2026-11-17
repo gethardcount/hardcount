@@ -313,7 +313,9 @@ func (s *Service) Logout(ctx context.Context, rawSessionCookie string) (session.
 // test mode whatever the new mode, as every account event is, and records
 // the new mode in its metadata.
 func (s *Service) SetMode(ctx context.Context, rawSessionCookie string, livemode bool) (session.Session, bool, error) {
-	return s.sessions.SetLivemode(ctx, rawSessionCookie, livemode, func(tx *sql.Tx, sess session.Session) error {
+	changed := false
+	sess, found, err := s.sessions.SetLivemode(ctx, rawSessionCookie, livemode, func(tx *sql.Tx, sess session.Session) error {
+		changed = true
 		if err := s.audit.LogInTx(auth.WithUserID(ctx, sess.UserID), tx, audit.Entry{
 			Action:       "mode_changed",
 			ResourceType: "user",
@@ -324,6 +326,12 @@ func (s *Service) SetMode(ctx context.Context, rawSessionCookie string, livemode
 		}
 		return nil
 	})
+	if err == nil && found && !changed {
+		// The session was already in this mode: nothing changed, so there is
+		// no row to write.
+		audit.MarkSkip(ctx)
+	}
+	return sess, found, err
 }
 
 // IssueResetToken generates a fresh reset token for the user with the
