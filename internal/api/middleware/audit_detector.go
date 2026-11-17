@@ -37,7 +37,7 @@ var auditUncoveredMutations = promauto.NewCounterVec(
 // mutating requests that succeeded, left no audit evidence (a row or a
 // MarkSkip) and are not declared exempt. It only observes.
 //
-// Coverage is declared in the route-audit registry, and each row is written
+// Coverage is declared in the route table (api.routeTable), and each row is written
 // in the business transaction (audit.Logger.LogInTx). This middleware only
 // reports when the two disagree. It replaces the AuditLog catch-all, and
 // ADR-090 (RC1 and RC2) records why.
@@ -110,7 +110,7 @@ func AuditCoverage(route func(*http.Request) (pattern string, exempt bool)) func
 				"route", pattern,
 				"status", ww.Status(),
 				"request_id", chimw.GetReqID(r.Context()),
-				"remedy", "emit the row in the business transaction (audit.Logger.LogInTx) and declare the route in internal/api/audit_routes.go")
+				"remedy", "emit the row in the business transaction (audit.Logger.LogInTx) and declare the route in internal/api/route_table.go")
 		})
 	}
 }

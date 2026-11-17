@@ -205,7 +205,7 @@ func (s *Server) routes() chi.Router {
 
 	// The audit-coverage detector (ADR-090) only observes. It reports any
 	// mutating 2xx that wrote no audit row and is not declared exempt in the
-	// route-audit registry (audit_routes.go), with slog.Error and the
+	// route table (route_table.go), with slog.Error and the
 	// hardcount_audit_uncovered_mutation_total counter. It never touches the
 	// response and never buffers the body.
 	//
@@ -577,27 +577,6 @@ func limitRequestBody(next http.Handler) http.Handler {
 
 // litellmPathPrefix is where the LiteLLM adapter is mounted.
 const litellmPathPrefix = "/v1/integrations/litellm"
-
-// showOnceSecretRoutes are the requests behind the idempotency layer whose
-// answer carries a secret shown only in that answer: the fields marked
-// `x-show-once: true` in api/openapi.yaml.
-// TestOpenAPISpec_ShowOnceSecretsAreNeverKept keeps the list and the marks
-// in step. /v1/bootstrap's fields are marked too but not listed: it is
-// mounted outside the layer, and the test asserts it stays there.
-var showOnceSecretRoutes = map[routeKey]bool{
-	{"POST", "/v1/api-keys"}:                                              true,
-	{"POST", "/v1/api-keys/{id}/rotate"}:                                  true,
-	{"POST", "/v1/customers/{id}/rotate-cost-dashboard-token"}:            true,
-	{"POST", "/v1/customers/{customer_id}/payment-methods/setup-session"}: true,
-	{"POST", "/v1/webhook-endpoints/endpoints"}:                           true,
-	{"POST", "/v1/webhook-endpoints/endpoints/{id}/rotate-secret"}:        true,
-}
-
-// answersWithShowOnceSecret reports whether r's route (routeOf) is one of
-// showOnceSecretRoutes.
-func answersWithShowOnceSecret(r *http.Request) bool {
-	return showOnceSecretRoutes[routeOf(r.Context()).key]
-}
 
 // routeMethods are the methods the Allow header can list, in its order.
 var routeMethods = []string{

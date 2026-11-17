@@ -251,7 +251,7 @@ func isIdempotencyMiddleware(m func(http.Handler) http.Handler) bool {
 // TestOpenAPISpec_IdempotencyKeyHeader ties the spec's Idempotency-Key header
 // to the routes that honour it. mw.Idempotency caches the response of a POST,
 // PUT or PATCH that sends the header, and only routes mounted behind it do
-// that, except the routes it is told to ignore (showOnceSecretRoutes). Every
+// that, except the routes it is told to ignore (marked showsSecretOnce() in routeTable). Every
 // such route must declare the header in api/openapi.yaml, so generated
 // clients can send it, and no other operation may declare it, since the
 // server would ignore it there.
@@ -262,7 +262,7 @@ func TestOpenAPISpec_IdempotencyKeyHeader(t *testing.T) {
 		if method != http.MethodPost && method != http.MethodPut && method != http.MethodPatch {
 			return nil
 		}
-		if showOnceSecretRoutes[routeKey{Method: method, Pattern: canonicalRoute(route)}] {
+		if routeTable[routeKey{Method: method, Pattern: canonicalRoute(route)}].showOnce {
 			return nil
 		}
 		for _, m := range mws {
