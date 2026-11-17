@@ -34,13 +34,8 @@ type Config struct {
 	// the limiters fail open, except the one on /v1/auth, which counts in the
 	// process.
 	RedisURL string
-	// TrustProxy is the TRUST_PROXY CIDR list. The router honours forwarded
-	// client addresses only from these. It is required in production. Behind
-	// a balancer with it unset, every request's client address is the
-	// balancer's, so the per-IP limits on the public pay pages and /v1/auth
-	// collapse into one bucket for the whole install. "none" declares that
-	// there is no proxy.
-	TrustProxy string
+	// Server is what the API server reads (ServerFromEnv), checked here.
+	Server Server
 
 	// ShutdownDrainDelay is how long a replica keeps its listener open after
 	// SIGTERM sets /health/ready to 503 'draining'. A load balancer that
@@ -154,7 +149,7 @@ func Load() (Config, error) {
 		Migrate:        migrateOnBoot,
 		DB:             db,
 		RedisURL:       strings.TrimSpace(os.Getenv("REDIS_URL")),
-		TrustProxy:     strings.TrimSpace(os.Getenv("TRUST_PROXY")),
+		Server:         ServerFromEnv(),
 		RateLimits:     rateLimits,
 		BootstrapToken: strings.TrimSpace(os.Getenv("HARDCOUNT_BOOTSTRAP_TOKEN")),
 	}
@@ -187,7 +182,7 @@ func Load() (Config, error) {
 // the cases where going on would risk silent data loss, a compliance
 // violation or secret exposure.
 func (c Config) validateFatal() error {
-	encKey := strings.TrimSpace(os.Getenv("HARDCOUNT_ENCRYPTION_KEY"))
+	encKey := c.Server.EncryptionKey
 
 	// The production checks below, and everything the server hands Config.Env
 	// to, test for exactly "production". A near-miss such as "prod" or
@@ -203,14 +198,14 @@ func (c Config) validateFatal() error {
 	if c.Env == "production" && c.RedisURL == "" {
 		return fmt.Errorf("REDIS_URL is required in production — the general and hosted-invoice rate limiters fail CLOSED without Redis, so every dashboard, export, bootstrap and hosted-invoice request would answer 429 while /health/ready reports ok; point REDIS_URL at a managed Redis (docs/settings.md)")
 	}
-	if c.Env == "production" && c.TrustProxy == "" {
+	if c.Env == "production" && c.Server.TrustProxy == "" {
 		return fmt.Errorf("TRUST_PROXY is required in production — behind a load balancer or ingress every request's client address is the balancer's, so the per-IP limits on the public pay pages (60/min) and on /v1/auth (100/min) become ONE bucket shared by every customer and operator of the install; set TRUST_PROXY to the balancer/ingress CIDR(s), or TRUST_PROXY=none if replicas accept client connections directly (docs/ops/high-availability.md)")
 	}
 
 	// A set value must mean what it says in every environment: the router
 	// skips an entry it cannot parse, so a typo would pass the check above
 	// and then behave exactly as unset.
-	if _, err := ParseTrustProxy(c.TrustProxy); err != nil {
+	if _, err := ParseTrustProxy(c.Server.TrustProxy); err != nil {
 		return fmt.Errorf("%w — set TRUST_PROXY to the balancer/ingress IP(s) or CIDR(s), comma-separated (e.g. 10.0.0.0/8,127.0.0.1), or TRUST_PROXY=none if replicas accept client connections directly (docs/ops/high-availability.md)", err)
 	}
 
@@ -218,7 +213,7 @@ func (c Config) validateFatal() error {
 	// every environment. Otherwise a pattern meant to allow a dashboard would
 	// allow nothing, or a * beside it would keep it from signing in, and the
 	// operator would not know why.
-	if _, err := ParseCORSOrigins(os.Getenv("CORS_ALLOWED_ORIGINS")); err != nil {
+	if _, err := ParseCORSOrigins(c.Server.CORSAllowedOrigins); err != nil {
 		return fmt.Errorf("%w (docs/settings.md)", err)
 	}
 
@@ -278,7 +273,7 @@ var publicAddressSettings = []string{
 func (c Config) Validate() []string {
 	var warnings []string
 
-	encKey := strings.TrimSpace(os.Getenv("HARDCOUNT_ENCRYPTION_KEY"))
+	encKey := c.Server.EncryptionKey
 	if encKey == "" {
 		if c.Env == "production" {
 			warnings = append(warnings, "HARDCOUNT_ENCRYPTION_KEY is not set — customer PII will be stored in plaintext")
@@ -291,7 +286,7 @@ func (c Config) Validate() []string {
 		}
 	}
 
-	if c.TrustProxy == "" && c.Env == "production" {
+	if c.Server.TrustProxy == "" && c.Env == "production" {
 		warnings = append(warnings, "TRUST_PROXY is not set — in production every per-IP rate limit collapses into one bucket behind a balancer; boot refuses (set the ingress CIDR, or TRUST_PROXY=none)")
 	}
 	if c.RedisURL == "" && c.Env == "production" {
@@ -310,8 +305,9 @@ func (c Config) Validate() []string {
 	// http:// says one is not. Hardcount cannot see the browser's scheme at
 	// start-up, and these settings are what it can see.
 	if c.Env == "production" || c.Env == "staging" {
+		addresses := c.Server.publicAddresses()
 		for _, name := range publicAddressSettings {
-			u, err := neturl.Parse(strings.TrimSpace(os.Getenv(name)))
+			u, err := neturl.Parse(addresses[name])
 			if err == nil && strings.EqualFold(u.Scheme, "http") {
 				warnings = append(warnings, fmt.Sprintf("%s is an http:// address, so Hardcount is served without TLS there. In %s the sign-in cookie is always Secure, and the pages at this address and the links to them are not encrypted. Serve Hardcount over HTTPS and set %s to its https:// address (docs/production-one-vm.md#3-add-https-with-caddy)", name, c.Env, name))
 			}

@@ -3,6 +3,7 @@ package middleware
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -40,10 +41,9 @@ func TestMetricsAuth(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("METRICS_TOKEN", tc.token)
 
 			served := false
-			h := MetricsAuth(tc.env, http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			h := MetricsAuth(tc.env, strings.TrimSpace(tc.token), http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				served = true
 				w.WriteHeader(http.StatusOK)
 			}))

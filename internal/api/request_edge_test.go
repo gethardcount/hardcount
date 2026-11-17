@@ -13,6 +13,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	"github.com/gethardcount/hardcount/internal/audit"
+	"github.com/gethardcount/hardcount/internal/config"
 )
 
 // A 64-hex capability token, the shape the public invoice and
@@ -32,7 +33,7 @@ func edgeRouter(t *testing.T, trustProxy string) (http.Handler, *tracetest.SpanR
 
 	var seenIP string
 	r := chi.NewRouter()
-	useRequestEdge(r, trustProxy)
+	useRequestEdge(r, trustProxy, config.Server{TrustProxy: trustProxy}.TrustedProxies())
 	r.Use(func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 			if req.Method == http.MethodOptions {

@@ -2,11 +2,13 @@ package middleware
 
 import (
 	"errors"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/config"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -78,7 +80,7 @@ func TestRateLimitKey_UnauthenticatedFallsBackToIP(t *testing.T) {
 func TestRateLimitKey_KeysOnResolvedClientIPBehindProxy(t *testing.T) {
 	key := func(xff string) string {
 		var got string
-		h := TrustedClientIP(ParseTrustedProxies("10.0.0.0/8"))(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
+		h := TrustedClientIP(trustedNets(t, "10.0.0.0/8"))(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 			got = mustRateLimitKey(t, r)
 		}))
 		r := httptest.NewRequest("POST", "/v1/auth/login", nil)
@@ -122,4 +124,14 @@ func TestRateLimitKey_TenantWithoutModeIsAnError(t *testing.T) {
 	if !errors.Is(err, postgres.ErrLivemodeUnset) {
 		t.Fatalf("err = %v, want postgres.ErrLivemodeUnset", err)
 	}
+}
+
+// trustedNets parses a TRUST_PROXY value with config's parser.
+func trustedNets(t *testing.T, spec string) []*net.IPNet {
+	t.Helper()
+	nets, err := config.ParseTrustProxy(spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return nets
 }

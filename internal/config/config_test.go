@@ -63,9 +63,10 @@ func TestLoad_CustomPort(t *testing.T) {
 
 func TestValidate_ProductionWarnsMissingRedis(t *testing.T) {
 	cfg := Config{
-		Port: "8080",
-		Env:  "production",
-		DB:   DBConfig{MaxOpenConns: 20, MaxIdleConns: 5, QueryTimeout: 5 * time.Second},
+		Server: ServerFromEnv(),
+		Port:   "8080",
+		Env:    "production",
+		DB:     DBConfig{MaxOpenConns: 20, MaxIdleConns: 5, QueryTimeout: 5 * time.Second},
 	}
 	warnings := cfg.Validate()
 	var found bool
@@ -86,11 +87,11 @@ func TestValidate_ValidConfig(t *testing.T) {
 	}
 
 	cfg := Config{
-		Port:       "8080",
-		Env:        "production",
-		RedisURL:   "redis://localhost:6379",
-		TrustProxy: "none",
-		DB:         DBConfig{MaxOpenConns: 20, MaxIdleConns: 5, QueryTimeout: 5 * time.Second},
+		Port:     "8080",
+		Env:      "production",
+		RedisURL: "redis://localhost:6379",
+		Server:   envServer("none"),
+		DB:       DBConfig{MaxOpenConns: 20, MaxIdleConns: 5, QueryTimeout: 5 * time.Second},
 	}
 	warnings := cfg.Validate()
 	if len(warnings) > 0 {
@@ -101,7 +102,8 @@ func TestValidate_ValidConfig(t *testing.T) {
 func TestValidate_EncryptionKeyWarnings(t *testing.T) {
 	_ = os.Unsetenv("HARDCOUNT_ENCRYPTION_KEY")
 	cfg := Config{
-		Env: "production", Port: "8080",
+		Server: ServerFromEnv(),
+		Env:    "production", Port: "8080",
 		RedisURL: "redis://localhost:6379",
 		DB:       DBConfig{MaxOpenConns: 20, MaxIdleConns: 5, QueryTimeout: 5 * time.Second},
 	}
@@ -117,6 +119,7 @@ func TestValidate_EncryptionKeyWarnings(t *testing.T) {
 	}
 
 	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", "tooshort")
+	cfg.Server = ServerFromEnv() // after this Setenv
 	warnings = cfg.Validate()
 	found = false
 	for _, w := range warnings {
@@ -129,6 +132,7 @@ func TestValidate_EncryptionKeyWarnings(t *testing.T) {
 	}
 
 	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")
+	cfg.Server = ServerFromEnv() // after this Setenv
 	warnings = cfg.Validate()
 	found = false
 	for _, w := range warnings {
@@ -142,7 +146,8 @@ func TestValidate_EncryptionKeyWarnings(t *testing.T) {
 
 	_ = os.Unsetenv("HARDCOUNT_ENCRYPTION_KEY")
 	localCfg := Config{
-		Env: "local", Port: "8080",
+		Server: ServerFromEnv(),
+		Env:    "local", Port: "8080",
 		DB: DBConfig{MaxOpenConns: 20, MaxIdleConns: 5, QueryTimeout: 5 * time.Second},
 	}
 	warnings = localCfg.Validate()
@@ -155,9 +160,10 @@ func TestValidate_EncryptionKeyWarnings(t *testing.T) {
 
 func TestValidate_DBPoolSanity(t *testing.T) {
 	cfg := Config{
-		Port: "8080",
-		Env:  "local",
-		DB:   DBConfig{MaxOpenConns: 5, MaxIdleConns: 10, QueryTimeout: 5 * time.Second},
+		Server: ServerFromEnv(),
+		Port:   "8080",
+		Env:    "local",
+		DB:     DBConfig{MaxOpenConns: 5, MaxIdleConns: 10, QueryTimeout: 5 * time.Second},
 	}
 	warnings := cfg.Validate()
 	found := false
@@ -433,10 +439,10 @@ func TestLoad_RejectsNearMissOfProduction(t *testing.T) {
 // is plain HTTP by design and stays quiet.
 func TestValidate_WarnsOnPlainHTTPAddressOutsideLocal(t *testing.T) {
 	base := Config{
-		Port:       "8080",
-		RedisURL:   "redis://localhost:6379",
-		TrustProxy: "none",
-		DB:         DBConfig{MaxOpenConns: 20, MaxIdleConns: 5, QueryTimeout: 5 * time.Second},
+		Port:     "8080",
+		RedisURL: "redis://localhost:6379",
+		Server:   envServer("none"),
+		DB:       DBConfig{MaxOpenConns: 20, MaxIdleConns: 5, QueryTimeout: 5 * time.Second},
 	}
 	settings := []string{
 		"DASHBOARD_BASE_URL", "CUSTOMER_PORTAL_URL", "HOSTED_INVOICE_BASE_URL",
@@ -462,6 +468,7 @@ func TestValidate_WarnsOnPlainHTTPAddressOutsideLocal(t *testing.T) {
 				t.Setenv(name, c.value)
 				cfg := base
 				cfg.Env = c.env
+				cfg.Server = envServer("none") // read after this case's Setenv
 				var got []string
 				for _, w := range cfg.Validate() {
 					if strings.HasPrefix(w, name+" is an http:// address") {
@@ -788,4 +795,12 @@ func TestParseLogLevel(t *testing.T) {
 			t.Errorf("ParseLogLevel(%q) = nil error, want a refusal", raw)
 		}
 	}
+}
+
+// envServer is the server's settings from the environment, with TRUST_PROXY
+// set to trustProxy.
+func envServer(trustProxy string) Server {
+	s := ServerFromEnv()
+	s.TrustProxy = trustProxy
+	return s
 }
