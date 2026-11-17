@@ -1108,7 +1108,7 @@ test('a new API key shows once, with a try-it line, and closes only from "I\'ve 
   await expect(main.getByText(origin, { exact: true })).toBeVisible()
 
   await page.getByRole('button', { name: 'Create API key' }).click()
-  await page.getByPlaceholder('e.g. Production, Staging, CI/CD').fill(`e2e show-once ${uniq()}`)
+  await page.getByPlaceholder('e.g. Production server').fill(`e2e show-once ${uniq()}`)
   await page.getByRole('button', { name: 'Create key' }).click()
   const shown = page.getByRole('dialog', { name: 'API key created' })
   await expect(shown).toBeVisible()
@@ -1136,7 +1136,7 @@ test('a usage-only API key is made from the dialog and shows its type in the lis
   await expect(dialog.getByRole('radio', { name: /^Usage only/ })).toHaveAttribute('aria-checked', 'true')
   await expect(dialog.getByRole('radio', { name: /^Secret/ })).toHaveAttribute('aria-checked', 'false')
   await expect(dialog.getByText('Can only send usage events. Use it in LiteLLM or another gateway.')).toBeVisible()
-  await dialog.getByPlaceholder('e.g. Production, Staging, CI/CD').fill(name)
+  await dialog.getByPlaceholder('e.g. Production server').fill(name)
   await dialog.getByRole('button', { name: 'Create key' }).click()
 
   const shown = page.getByRole('dialog', { name: 'API key created' })
@@ -1201,7 +1201,7 @@ test('the name is checked as the server checks it, and copying a key the browser
   await page.goto('/api-keys')
   await page.getByRole('button', { name: 'Create API key' }).click()
   const create = page.getByRole('dialog', { name: 'Create API key' })
-  const nameField = create.getByPlaceholder('e.g. Production, Staging, CI/CD')
+  const nameField = create.getByPlaceholder('e.g. Production server')
   // Blank once trimmed, and 101 characters: refused before any request.
   await nameField.fill('   ')
   await create.getByRole('button', { name: 'Create key' }).click()
@@ -1321,7 +1321,7 @@ test('an expiring key counts the days to the date it shows, and a long name fits
   const row = await apiKeyRow(page, name, expiresAt.toISOString())
   await expect(row).toContainText(hint)
   // The expiry cannot be moved, and the page says what to do instead.
-  await expect(page.getByRole('main').getByText('A key cannot be extended. Create a new key before the old one expires, and switch to it.')).toBeVisible()
+  await expect(page.getByRole('main').getByText('A key cannot be extended. Before one expires, switch what uses it to another key.')).toBeVisible()
   await shootKeys(page, 'list-expiring', row)
   await page.setViewportSize({ width: 390, height: 844 })
   await expect(row.getByRole('button', { name: `Actions for ${name}` })).toBeVisible()
@@ -1369,7 +1369,7 @@ test('revoking a test key is a plain confirm; a live key needs the typed word', 
   await row.getByRole('button', { name: `Actions for ${name}` }).click()
   await page.getByRole('menuitem', { name: 'Revoke' }).click()
   const plain = page.getByRole('alertdialog', { name: 'Revoke test API key' })
-  const sentence = 'stops working with the next request: every request made with it is refused.'
+  const sentence = 'is refused from the next request; a request already running finishes.'
   await expect(plain).toContainText(sentence)
   await expect(plain.getByRole('textbox')).toHaveCount(0)
   await plain.getByRole('button', { name: 'Revoke key' }).click()

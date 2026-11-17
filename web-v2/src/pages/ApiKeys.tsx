@@ -107,7 +107,7 @@ function oldKeySentence(old: APIKey, timezone: string): string {
 
 // revokeSentence is what revoking a key does, the same in both dialogs.
 function revokeSentence(key: APIKey): string {
-  return `"${key.name}" (${key.key_prefix}…) stops working with the next request: every request made with it is refused. This can't be undone.`
+  return `"${key.name}" (${key.key_prefix}…) is refused from the next request; a request already running finishes. This can't be undone.`
 }
 
 export default function ApiKeysPage() {
@@ -141,7 +141,6 @@ export default function ApiKeysPage() {
 
   const showNewKey = (title: string, rawKey: string, note?: string) => {
     setNewKey({ title, rawKey, note })
-    toast.success(title)
     void refetch()
   }
 
@@ -195,7 +194,8 @@ export default function ApiKeysPage() {
         </TableCell>
         <TableCell><StatusBadge status={keyStatus(k, tenantTZ, now)} /></TableCell>
         <TableCell className="hidden md:table-cell text-sm text-muted-foreground">
-          {k.expires_at ? formatDate(k.expires_at, tenantTZ) : 'Never'}
+          {/* A key in its last week shows the hour too: after a rotation it is when the old key stops. */}
+          {!k.expires_at ? 'Never' : expiringIn(k, tenantTZ, now) === undefined ? formatDate(k.expires_at, tenantTZ) : formatDateTime(k.expires_at, tenantTZ)}
         </TableCell>
         <TableCell className="hidden md:table-cell text-sm text-muted-foreground">{lastUsed(k, now)}</TableCell>
         <TableCell className="text-right">
@@ -304,7 +304,7 @@ export default function ApiKeysPage() {
 
           {activeKeys.some(k => expiringIn(k, tenantTZ, now) !== undefined) && (
             <p className="mt-3 text-sm text-muted-foreground">
-              A key cannot be extended. Create a new key before the old one expires, and switch to it.
+              A key cannot be extended. Before one expires, switch what uses it to another key.
             </p>
           )}
 

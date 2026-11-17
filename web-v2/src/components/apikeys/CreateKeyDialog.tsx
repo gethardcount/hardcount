@@ -84,7 +84,7 @@ export function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; o
                 <FormItem>
                   <FormLabel>Name</FormLabel>
                   <FormControl>
-                    <Input placeholder="e.g. Production, Staging, CI/CD" {...field} />
+                    <Input placeholder="e.g. Production server" {...field} />
                   </FormControl>
                   <FormDescription>A descriptive name to identify this key</FormDescription>
                   <FormMessage />
