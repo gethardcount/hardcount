@@ -572,7 +572,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 		slog.Warn("DASHBOARD_BASE_URL NOT SET — password-reset emails will NOT be sent (the reset link origin is never derived from request headers, to prevent host-header poisoning / token theft). Set this to your canonical dashboard URL (e.g. http://localhost:5173 in dev) to enable password-reset emails.")
 	}
 	dashboardAuthH := user.NewHandler(
-		userSvc, session.DefaultCookieConfig(o.appEnv),
+		userSvc, session.DefaultCookieConfig(o.appEnv, srv.CookieDomain),
 		&passwordResetEmailAdapter{sender: outboxSender},
 		dashboardBaseURL,
 		emailSender.IsConfigured(),
@@ -585,7 +585,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 		slog.Error("invalid HARDCOUNT_ENCRYPTION_KEY: the sign-in throttle uses the local development key", "error", err)
 		throttleKey, _ = user.ThrottleKey("")
 	}
-	loginThrottle := user.NewLoginThrottle(db, throttleKey, session.DefaultCookieConfig(o.appEnv))
+	loginThrottle := user.NewLoginThrottle(db, throttleKey, session.DefaultCookieConfig(o.appEnv, srv.CookieDomain))
 	dashboardAuthH.SetLoginThrottle(loginThrottle)
 	membersSvc := dashmembers.NewService(
 		dashmembers.NewPostgresStore(db),
@@ -598,7 +598,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 		dashboardBaseURL,
 	)
 	membersSvc.SetEmailConfigured(emailSender.IsConfigured())
-	membersH := dashmembers.NewHandler(membersSvc, session.DefaultCookieConfig(o.appEnv))
+	membersH := dashmembers.NewHandler(membersSvc, session.DefaultCookieConfig(o.appEnv, srv.CookieDomain))
 	membersH.SetSignInRecorder(loginThrottle)
 
 	emailSettingsH := &emailSettingsHandler{

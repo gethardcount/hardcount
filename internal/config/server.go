@@ -24,6 +24,9 @@ type Server struct {
 	PaymentUpdateReturnURL string // PAYMENT_UPDATE_RETURN_URL
 	APIBaseURL             string // HARDCOUNT_API_BASE_URL
 
+	// CookieDomain is HARDCOUNT_COOKIE_DOMAIN, the sign-in cookie's Domain.
+	CookieDomain string
+
 	// PostmarkWebhookUser and PostmarkWebhookPass are the basic-auth pair
 	// Postmark's webhook sends (POSTMARK_WEBHOOK_USER, POSTMARK_WEBHOOK_PASS).
 	PostmarkWebhookUser string
@@ -58,6 +61,7 @@ func ServerFromEnv() Server {
 		PaymentUpdateURL:       trimmed("PAYMENT_UPDATE_URL"),
 		PaymentUpdateReturnURL: trimmed("PAYMENT_UPDATE_RETURN_URL"),
 		APIBaseURL:             trimmed("HARDCOUNT_API_BASE_URL"),
+		CookieDomain:           trimmed("HARDCOUNT_COOKIE_DOMAIN"),
 		PostmarkWebhookUser:    trimmed("POSTMARK_WEBHOOK_USER"),
 		PostmarkWebhookPass:    trimmed("POSTMARK_WEBHOOK_PASS"),
 		TrustProxy:             trimmed("TRUST_PROXY"),

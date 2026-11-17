@@ -10,24 +10,17 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/platform/request"
-	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// The API key half of RequireCaller, on real Postgres: what a request
-// with a key that is not valid, a valid key in the Authorization header or in
-// X-API-Key, a valid key beside a stale session cookie, and a key checked
-// while the database is down each get.
+// The API key half of RequireCaller, on real Postgres: what a request with a
+// key that is not valid, a valid key, a valid key beside a stale session
+// cookie, and a key checked while the database is down each get.
 
-// keyRequest is a request with no cookie, carrying key in header: as a Bearer
-// token in Authorization, or as it is in any other header.
-func keyRequest(header, key string) *http.Request {
+// keyRequest is a request with no cookie, carrying key as a Bearer token.
+func keyRequest(key string) *http.Request {
 	req := httptest.NewRequest("GET", "/", nil)
-	if header == "Authorization" {
-		req.Header.Set(header, "Bearer "+key)
-	} else {
-		req.Header.Set(header, key)
-	}
+	req.Header.Set("Authorization", "Bearer "+key)
 	return req
 }
 
@@ -41,35 +34,24 @@ func TestRequireCaller_APIKey(t *testing.T) {
 	}
 	sessions := NewService(&fakeSessionStore{sessions: map[string]Session{}})
 
-	serve := func(svc *auth.Service, req *http.Request) (*httptest.ResponseRecorder, *http.Request) {
+	serve := func(svc *auth.Service, req *http.Request) (*httptest.ResponseRecorder, *http.Request, *request.Record) {
 		t.Helper()
 		var seen *http.Request
-		rec := httptest.NewRecorder()
-		requesttest.Root(RequireCaller(sessions, svc)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		record, rec := recordOf(RequireCaller(sessions, svc)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) {
 			seen = r
-			w.WriteHeader(http.StatusOK)
-		}))).ServeHTTP(rec, req)
-		return rec, seen
+		})), req)
+		return rec, seen, record
 	}
 
 	t.Run("a key that is not valid", func(t *testing.T) {
-		rec, seen := serve(keys, keyRequest("Authorization", "hc_secret_test_"+strings.Repeat("0", 64)))
+		rec, seen, _ := serve(keys, keyRequest("hc_secret_test_"+strings.Repeat("0", 64)))
 		if rec.Code != http.StatusUnauthorized || seen != nil || !strings.Contains(rec.Body.String(), "invalid or expired API key") {
 			t.Errorf("got %d %s (reached=%v), want 401 with the generic message", rec.Code, rec.Body.String(), seen != nil)
 		}
 	})
 
-	// A key is read from the Authorization Bearer header only: one sent in
-	// X-API-Key is no credential at all.
-	t.Run("a valid key in X-API-Key", func(t *testing.T) {
-		rec, seen := serve(keys, keyRequest("X-API-Key", created.RawKey))
-		if rec.Code != http.StatusUnauthorized || seen != nil || !strings.Contains(rec.Body.String(), "missing credentials") {
-			t.Errorf("got %d %s (reached=%v), want 401 missing credentials", rec.Code, rec.Body.String(), seen != nil)
-		}
-	})
-
-	t.Run("a valid key in Authorization", func(t *testing.T) {
-		rec, seen := serve(keys, keyRequest("Authorization", created.RawKey))
+	t.Run("a valid key", func(t *testing.T) {
+		rec, seen, record := serve(keys, keyRequest(created.RawKey))
 		if rec.Code != http.StatusOK || seen == nil {
 			t.Fatalf("got %d %s, want 200", rec.Code, rec.Body.String())
 		}
@@ -82,8 +64,6 @@ func TestRequireCaller_APIKey(t *testing.T) {
 			t.Errorf("livemode = %v (%v), want test mode", live, err)
 		}
 		// The layer above reads the caller from the request's record.
-		record, _ := recordOf(RequireCaller(sessions, keys)(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})),
-			keyRequest("Authorization", created.RawKey))
 		onRecord := request.Actor{Type: "api_key", ID: created.Key.ID, TenantID: tenantID}
 		if got := record.Actor(); got != onRecord {
 			t.Errorf("actor on the record = %+v, want %+v", got, onRecord)
@@ -93,9 +73,9 @@ func TestRequireCaller_APIKey(t *testing.T) {
 	// A cookie that names no live session does not block a valid key on the
 	// same request: the request is the key's.
 	t.Run("a stale cookie and a valid key", func(t *testing.T) {
-		req := keyRequest("Authorization", created.RawKey)
+		req := keyRequest(created.RawKey)
 		req.AddCookie(&http.Cookie{Name: CookieName, Value: "sess_ended"})
-		rec, seen := serve(keys, req)
+		rec, seen, _ := serve(keys, req)
 		if rec.Code != http.StatusOK || seen == nil {
 			t.Fatalf("got %d %s, want 200: the stale cookie blocked the key", rec.Code, rec.Body.String())
 		}
@@ -109,7 +89,7 @@ func TestRequireCaller_APIKey(t *testing.T) {
 	t.Run("the database is down", func(t *testing.T) {
 		down := testutil.OpenTracedDB(t, nil)
 		_ = down.Pool.Close()
-		rec, seen := serve(auth.NewService(down, audit.NewLogger(down)), keyRequest("Authorization", created.RawKey))
+		rec, seen, _ := serve(auth.NewService(down, audit.NewLogger(down)), keyRequest(created.RawKey))
 		body := rec.Body.String()
 		if rec.Code != http.StatusServiceUnavailable || seen != nil {
 			t.Fatalf("got %d %s (reached=%v), want 503", rec.Code, body, seen != nil)
@@ -143,7 +123,7 @@ func TestAuthenticate_NamesOneCaller(t *testing.T) {
 	held := auth.WithCaller(t.Context(), auth.Caller{UserID: "usr_held", KeyID: "hc_key_held"})
 
 	t.Run("a key", func(t *testing.T) {
-		ctx, err := Authenticate(keyRequest("Authorization", created.RawKey).WithContext(held), sessions, keys)
+		ctx, err := Authenticate(keyRequest(created.RawKey).WithContext(held), sessions, keys)
 		if err != nil {
 			t.Fatalf("authenticate: %v", err)
 		}

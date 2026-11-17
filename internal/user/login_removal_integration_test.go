@@ -103,7 +103,7 @@ func signInMember(h http.Handler) *httptest.ResponseRecorder {
 
 func (it removalIT) handler(store user.Store) http.Handler {
 	return requesttest.Root(user.NewHandler(it.service(store, audit.NewLogger(it.db)),
-		session.CookieConfig{Path: "/"}, nil, "", false).Routes())
+		session.CookieConfig{}, nil, "", false).Routes())
 }
 
 // liveSessions counts the member's live sessions in the workspace, read

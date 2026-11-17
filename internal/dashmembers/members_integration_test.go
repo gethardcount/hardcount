@@ -162,7 +162,7 @@ func accountInNoWorkspace(t *testing.T, h *harness, address string) domain.User 
 func servePublic(h *harness, method, path, body string) *httptest.ResponseRecorder {
 	r := chi.NewRouter()
 	r.Use(requesttest.Root)
-	dashmembers.NewHandler(h.svc, session.CookieConfig{Path: "/"}).RegisterPublicRoutes(r)
+	dashmembers.NewHandler(h.svc, session.CookieConfig{}).RegisterPublicRoutes(r)
 	rec := httptest.NewRecorder()
 	r.ServeHTTP(rec, httptest.NewRequest(method, path, strings.NewReader(body)))
 	return rec

@@ -290,7 +290,7 @@ func serve(h *harness, svc *dashmembers.Service, method, path, body string) *htt
 		req.Header.Set("Content-Type", "application/json")
 	}
 	rec := httptest.NewRecorder()
-	requesttest.Root(dashmembers.NewHandler(svc, session.CookieConfig{Path: "/"}).Routes()).ServeHTTP(rec, req)
+	requesttest.Root(dashmembers.NewHandler(svc, session.CookieConfig{}).Routes()).ServeHTTP(rec, req)
 	return rec
 }
 

@@ -2,23 +2,20 @@ package session
 
 import (
 	"net/http"
-	"os"
-	"strings"
 	"time"
 )
 
-// CookieConfig centralises cookie attributes. SameSite=Lax keeps the
-// cookie attached across top-level navigation (correct for a first-party
-// dashboard) while blocking most cross-site CSRF.
+// CookieConfig holds the session cookie's attributes that differ by install.
+// Every session cookie is also HttpOnly, Path=/ and SameSite=Lax: Lax keeps
+// it on top-level navigation to the dashboard while blocking most cross-site
+// requests.
 type CookieConfig struct {
-	Domain   string
-	Secure   bool
-	SameSite http.SameSite
-	Path     string
+	Domain string
+	Secure bool
 }
 
 // DefaultCookieConfig returns the cookie attributes for appEnv, which is
-// config.Config.Env. Tests override fields directly.
+// config.Config.Env, and domain, which is config.Server.CookieDomain.
 //
 // Secure is on in staging and production, for every request, so a
 // browser sends the session cookie only over HTTPS, or to localhost
@@ -26,19 +23,16 @@ type CookieConfig struct {
 // http://localhost, but Safari does not. Plain HTTP is for local, where
 // Secure is off: make dev, and the Compose quickstart, which sets
 // APP_ENV=local so Safari can sign in at http://localhost.
-func DefaultCookieConfig(appEnv string) CookieConfig {
-	secure := appEnv == "production" || appEnv == "staging"
+func DefaultCookieConfig(appEnv, domain string) CookieConfig {
 	return CookieConfig{
-		Domain:   strings.TrimSpace(os.Getenv("HARDCOUNT_COOKIE_DOMAIN")),
-		Secure:   secure,
-		SameSite: http.SameSiteLaxMode,
-		Path:     "/",
+		Domain: domain,
+		Secure: appEnv == "production" || appEnv == "staging",
 	}
 }
 
 // SetCookie writes the session cookie on the response. Sign-in
 // (internal/user) and invite accept (internal/dashmembers) call it after
-// Issue.
+// IssueTx.
 func (c CookieConfig) SetCookie(w http.ResponseWriter, raw string, expires time.Time) {
 	maxAge := int(time.Until(expires).Seconds())
 	if maxAge < 0 {
@@ -47,27 +41,27 @@ func (c CookieConfig) SetCookie(w http.ResponseWriter, raw string, expires time.
 	http.SetCookie(w, &http.Cookie{
 		Name:     CookieName,
 		Value:    raw,
-		Path:     c.Path,
+		Path:     "/",
 		Domain:   c.Domain,
 		Expires:  expires,
 		MaxAge:   maxAge,
 		HttpOnly: true,
 		Secure:   c.Secure,
-		SameSite: c.SameSite,
+		SameSite: http.SameSiteLaxMode,
 	})
 }
 
-// ClearCookie writes a cleared (Max-Age=-1) cookie on the response.
-// Used by the logout handler.
+// ClearCookie writes the session cookie with Max-Age=0, which clears it, for
+// sign-out.
 func (c CookieConfig) ClearCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     CookieName,
 		Value:    "",
-		Path:     c.Path,
+		Path:     "/",
 		Domain:   c.Domain,
 		MaxAge:   -1,
 		HttpOnly: true,
 		Secure:   c.Secure,
-		SameSite: c.SameSite,
+		SameSite: http.SameSiteLaxMode,
 	})
 }

@@ -33,7 +33,7 @@ func TestAcceptInvite_SessionIPIsTheTrustedClientIP(t *testing.T) {
 	}
 	token := h.email.lastToken(t)
 
-	handler := dashmembers.NewHandler(h.svc, session.CookieConfig{Path: "/"})
+	handler := dashmembers.NewHandler(h.svc, session.CookieConfig{})
 	r := chi.NewRouter()
 	// The router mounts TrustedClientIP globally, ahead of /v1/auth.
 	r.Use(mw.TrustedClientIP(config.Server{TrustProxy: "10.0.0.0/8"}.TrustedProxies()))

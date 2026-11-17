@@ -38,7 +38,7 @@ func Authenticate(r *http.Request, sessSvc *Service, keySvc *auth.Service) (cont
 	if c, err := r.Cookie(CookieName); err == nil && c.Value != "" {
 		sess, err := sessSvc.Resolve(ctx, c.Value)
 		if err == nil {
-			return applyToCtx(ctx, sess), nil
+			return postgres.WithLivemode(auth.WithCaller(ctx, sessionCaller(sess)), sess.Livemode), nil
 		}
 		if !errors.Is(err, ErrNotFound) {
 			return nil, unavailableError{msg: "session resolve unavailable", err: err}
@@ -119,10 +119,4 @@ func actorOf(c auth.Caller) request.Actor {
 // sessionCaller is s's user as a caller.
 func sessionCaller(s Session) auth.Caller {
 	return auth.Caller{TenantID: s.TenantID, UserID: s.UserID}
-}
-
-// applyToCtx returns ctx carrying s's user as the caller, in s's test or live
-// mode.
-func applyToCtx(ctx context.Context, s Session) context.Context {
-	return postgres.WithLivemode(auth.WithCaller(ctx, sessionCaller(s)), s.Livemode)
 }

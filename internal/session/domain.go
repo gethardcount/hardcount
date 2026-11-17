@@ -1,10 +1,8 @@
 // Package session implements dashboard sessions, issued by the email and
 // password login (ADR-011). The browser holds an httpOnly cookie with a random
-// id; the database stores only its hash (HashID). A session is live while it
-// is not revoked and not expired, and every method here applies that rule.
-// Service.Issue and IssueTx mint a session, Resolve turns a cookie into its
-// session, End, EndTx, EndAllForUserTx and EndForMemberTx end sessions, and
-// SetLivemode switches a session's mode.
+// id; the database stores only its sha256 (HashID), so a copy of the table
+// cannot be replayed. A session is live while it is not revoked and not
+// expired: Resolve, End, EndTx and SetLivemode act only on a live one.
 package session
 
 import (
@@ -23,35 +21,23 @@ const CookieName = "hardcount_session"
 // own.
 const DefaultTTL = 7 * 24 * time.Hour
 
-// ErrNotFound signals that a session id resolves to no row, or to a
-// row that has been revoked or expired. Callers funnel all three into
-// 401 to deny enumeration of session ids.
+// ErrNotFound signals that a session id resolves to no row, or to a row that
+// has been revoked or expired.
 var ErrNotFound = errors.New("session: not found")
 
-// Session is a dashboard_sessions row. Its id is stored hashed (HashID), and
-// the raw id never leaves the cookie. UserID is the operator it was issued
-// for: a session is bound to a user, not to a key (ADR-011). Livemode is the
-// mode it acts in, which SetLivemode switches.
+// Session is a dashboard_sessions row. It is bound to the user it was issued
+// for, not to a key (ADR-011). Livemode is the mode it acts in, which
+// SetLivemode switches.
 type Session struct {
-	IDHash     string
-	UserID     string
-	TenantID   string
-	Livemode   bool
-	CreatedAt  time.Time
-	LastSeenAt time.Time
-	ExpiresAt  time.Time
-	RevokedAt  *time.Time
-	UserAgent  string
-	IP         string
-}
-
-// IsActive reports whether the session can authenticate a request: it is
-// not revoked and not yet expired.
-func (s Session) IsActive(now time.Time) bool {
-	if s.RevokedAt != nil {
-		return false
-	}
-	return now.Before(s.ExpiresAt)
+	IDHash    string
+	UserID    string
+	TenantID  string
+	Livemode  bool
+	CreatedAt time.Time
+	ExpiresAt time.Time
+	RevokedAt *time.Time
+	UserAgent string
+	IP        string
 }
 
 // HashID returns the storage form of a raw session id.
@@ -60,8 +46,7 @@ func HashID(raw string) string {
 	return hex.EncodeToString(sum[:])
 }
 
-// newRawID mints a 256-bit random id encoded as 64 hex chars. The raw form
-// lives only in the cookie, and the database stores HashID(raw).
+// newRawID mints a 256-bit random id encoded as 64 hex chars.
 func newRawID() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {

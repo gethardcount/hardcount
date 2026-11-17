@@ -64,7 +64,7 @@ func (it resetIT) service(sessions SessionWriter, auditor AuditTxWriter) *Servic
 }
 
 func (it resetIT) handler(sessions SessionWriter, auditor AuditTxWriter) http.Handler {
-	return requesttest.Root(NewHandler(it.service(sessions, auditor), session.CookieConfig{Path: "/"}, stubEmailSender{}, "", false).Routes())
+	return requesttest.Root(NewHandler(it.service(sessions, auditor), session.CookieConfig{}, stubEmailSender{}, "", false).Routes())
 }
 
 // confirm posts the reset form with password to a handler whose service

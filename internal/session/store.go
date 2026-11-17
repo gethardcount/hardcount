@@ -10,12 +10,12 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// Store reads and writes dashboard_sessions rows. A session is bound to a
-// user, not to a key (ADR-011), so nothing here revokes sessions by key.
+// Store reads and writes dashboard_sessions rows. Service is its one caller,
+// and Service's methods state each contract.
 type Store interface {
 	InsertTx(ctx context.Context, tx *sql.Tx, s Session) error
 	GetByIDHash(ctx context.Context, idHash string) (Session, error)
-	RevokeTx(ctx context.Context, tx *sql.Tx, idHash string) (bool, error)
+	EndTx(ctx context.Context, tx *sql.Tx, idHash string) (bool, error)
 	EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID string) error
 	EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, tenantID string) error
 	EndWith(ctx context.Context, idHash string, then func(tx *sql.Tx, sess Session) error) (Session, bool, error)
@@ -26,23 +26,19 @@ type postgresStore struct {
 	db *postgres.DB
 }
 
-// NewPostgresStore returns the Postgres-backed Store. Sessions are queried
-// by id_hash (the primary key), so RLS is not strictly needed: the id space
-// has no overlap across tenants. Inserts and tenant-scoped reads run inside
-// TxBypass, because the session id is itself the auth boundary.
+// NewPostgresStore returns the Postgres-backed Store. GetByIDHash, EndWith and
+// SetLivemodeWith open their own bypass transaction; the …Tx methods run on
+// the caller's, which must be one (each Service method says why).
 func NewPostgresStore(db *postgres.DB) Store {
 	return &postgresStore{db: db}
 }
 
-// InsertTx inserts a session row on the caller's transaction. It does not
-// commit. The caller's transaction must be a bypass transaction: a session
-// row is written before any tenant context exists.
 func (s *postgresStore) InsertTx(ctx context.Context, tx *sql.Tx, sess Session) error {
 	_, err := tx.ExecContext(ctx, `
 		INSERT INTO dashboard_sessions
 			(id_hash, user_id, tenant_id, livemode, created_at,
-			 last_seen_at, expires_at, user_agent, ip)
-		VALUES ($1, $2, $3, $4, $5, $5, $6, $7, $8)
+			 expires_at, user_agent, ip)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 	`, sess.IDHash, sess.UserID, sess.TenantID, sess.Livemode,
 		sess.CreatedAt, sess.ExpiresAt, nullStr(sess.UserAgent), nullStr(sess.IP),
 	)
@@ -51,7 +47,7 @@ func (s *postgresStore) InsertTx(ctx context.Context, tx *sql.Tx, sess Session) 
 
 // sessionCols are the columns scanSession reads, in its order.
 const sessionCols = `id_hash, user_id, tenant_id, livemode, created_at,
-	last_seen_at, expires_at, revoked_at, user_agent, ip`
+	expires_at, revoked_at, user_agent, ip`
 
 // scanSession reads one row of sessionCols.
 func scanSession(row *sql.Row) (Session, error) {
@@ -60,7 +56,7 @@ func scanSession(row *sql.Row) (Session, error) {
 	var revokedAt sql.NullTime
 	if err := row.Scan(
 		&sess.IDHash, &sess.UserID, &sess.TenantID, &sess.Livemode,
-		&sess.CreatedAt, &sess.LastSeenAt, &sess.ExpiresAt, &revokedAt,
+		&sess.CreatedAt, &sess.ExpiresAt, &revokedAt,
 		&ua, &ip,
 	); err != nil {
 		return Session{}, err
@@ -73,6 +69,8 @@ func scanSession(row *sql.Row) (Session, error) {
 	return sess, nil
 }
 
+// GetByIDHash returns the row whatever its state; Resolve refuses revoked and
+// expired ones.
 func (s *postgresStore) GetByIDHash(ctx context.Context, idHash string) (Session, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -94,11 +92,7 @@ func (s *postgresStore) GetByIDHash(ctx context.Context, idHash string) (Session
 	return sess, nil
 }
 
-// RevokeTx ends the live session whose hash is idHash on the caller's
-// transaction, whoever it belongs to, and reports whether it ended one. A
-// revoked, expired or unknown hash changes nothing. It does not commit. The caller's
-// transaction must see the row in either mode: a bypass transaction does.
-func (s *postgresStore) RevokeTx(ctx context.Context, tx *sql.Tx, idHash string) (bool, error) {
+func (s *postgresStore) EndTx(ctx context.Context, tx *sql.Tx, idHash string) (bool, error) {
 	res, err := tx.ExecContext(ctx, `
 		UPDATE dashboard_sessions
 		SET revoked_at = $1
@@ -114,11 +108,6 @@ func (s *postgresStore) RevokeTx(ctx context.Context, tx *sql.Tx, idHash string)
 	return n > 0, nil
 }
 
-// EndAllForUserTx revokes every active session of a user, in every workspace
-// and mode, on the caller's transaction. It does not commit. The caller's
-// transaction must see every session row: a bypass transaction does, while a
-// tenant transaction's row-level security hides the other workspaces and
-// mode.
 func (s *postgresStore) EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID string) error {
 	_, err := tx.ExecContext(ctx, `
 		UPDATE dashboard_sessions
@@ -128,10 +117,6 @@ func (s *postgresStore) EndAllForUserTx(ctx context.Context, tx *sql.Tx, userID 
 	return err
 }
 
-// EndForMemberTx revokes every active session of a user in one workspace, in
-// both modes, on the caller's transaction. It does not commit. The caller's
-// transaction must see the sessions of both modes: a bypass transaction does,
-// while a tenant transaction's row-level security hides the other mode.
 func (s *postgresStore) EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, tenantID string) error {
 	_, err := tx.ExecContext(ctx, `
 		UPDATE dashboard_sessions
@@ -141,11 +126,7 @@ func (s *postgresStore) EndForMemberTx(ctx context.Context, tx *sql.Tx, userID, 
 	return err
 }
 
-// EndWith ends the live session whose hash is idHash and calls then on the
-// same bypass transaction, so the sign-out and then's writes commit or roll
-// back together. It returns the ended session and whether one was found; with
-// none, nothing changes and then is not called. then must not commit or roll
-// back tx; its error rolls the sign-out back and is returned.
+// EndWith is Service.End's write, on a bypass transaction of its own.
 func (s *postgresStore) EndWith(ctx context.Context, idHash string, then func(tx *sql.Tx, sess Session) error) (Session, bool, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -171,10 +152,8 @@ func (s *postgresStore) EndWith(ctx context.Context, idHash string, then func(tx
 	return sess, true, nil
 }
 
-// SetLivemodeWith switches the live session whose hash is idHash to livemode
-// and calls then, under EndWith's contract. It returns the session in its new
-// mode. A session already in that mode is returned as it is, and then is not
-// called: nothing changed, so there is nothing to record.
+// SetLivemodeWith is Service.SetLivemode's write, on a bypass transaction of
+// its own.
 func (s *postgresStore) SetLivemodeWith(ctx context.Context, idHash string, livemode bool, then func(tx *sql.Tx, sess Session) error) (Session, bool, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
