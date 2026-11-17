@@ -267,7 +267,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 		r.override = id(create("POST", "/v1/price-overrides", map[string]any{
 			"customer_id": cus2, "price_id": r.price, "mode": "per_unit", "unit_amount_cents": "50",
 		}))
-		r.hook = id(create("POST", "/v1/webhook-endpoints/endpoints", map[string]any{"url": "https://example.com/" + tag})["endpoint"].(map[string]any))
+		r.hook = id(create("POST", "/v1/webhook-endpoints/endpoints", map[string]any{"url": "http://localhost:9001/" + tag})["endpoint"].(map[string]any))
 		r.rate = id(create("PUT", "/v1/provider-costs", map[string]any{
 			"provider": "openai", "model": "model-" + tag, "token_type": "input", "unit_cost_cents": "0.0001",
 		}))
