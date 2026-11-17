@@ -929,11 +929,12 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	// context detached from the caller unless the caller was cancelled: the
 	// deadline can pass while this is written. If the write is lost the
 	// invoice stays unknown on the PaymentIntent, which the unknown sweep
-	// reads.
-	stampCtx := ctx
+	// reads. "Processing" is Stripe's answer, so it is dated when it arrived,
+	// as a settle is.
+	stampCtx := clock.AtArrival(ctx, s.clock)
 	if !errors.Is(ctx.Err(), context.Canceled) {
 		var cancelStamp context.CancelFunc
-		stampCtx, cancelStamp = context.WithTimeout(context.WithoutCancel(ctx), chargeOutcomeSaveTimeout)
+		stampCtx, cancelStamp = context.WithTimeout(context.WithoutCancel(stampCtx), chargeOutcomeSaveTimeout)
 		defer cancelStamp()
 	}
 	current, applied, err := s.invoices.StampChargeOutcome(stampCtx, tenantID, inv.ID, stamped.ChargeAttemptSeq,

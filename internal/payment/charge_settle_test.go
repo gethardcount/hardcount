@@ -78,18 +78,21 @@ func (a answersLater) CreateUnconfirmedPaymentIntent(ctx context.Context, p Paym
 // A charge's result is its own event: on no clock it is recorded when it
 // arrives, not at the instant the charge's action carries. An inline success
 // is paid then; a decline, or a refusal with no PaymentIntent, starts payment
-// recovery then.
+// recovery then; a payment Stripe is still processing is stamped processing
+// then.
 func TestChargeInvoice_AnInlineResultIsRecordedWhenItArrives(t *testing.T) {
 	action := time.Date(2026, 11, 16, 23, 59, 58, 0, time.UTC)
 	arrived := action.Add(time.Minute)
 	for _, c := range []struct {
-		name   string
-		client *mockStripeClient
-		paid   bool
+		name       string
+		client     *mockStripeClient
+		paid       bool
+		processing bool
 	}{
-		{"a success", &mockStripeClient{piID: "pi_ok", chargeStatus: "succeeded"}, true},
-		{"a decline", &mockStripeClient{shouldFail: true}, false},
-		{"a refusal with no PaymentIntent", &mockStripeClient{shouldFail: true, failErr: &PaymentError{Message: "invalid payment method"}}, false},
+		{"a success", &mockStripeClient{piID: "pi_ok", chargeStatus: "succeeded"}, true, false},
+		{"a decline", &mockStripeClient{shouldFail: true}, false, false},
+		{"a refusal with no PaymentIntent", &mockStripeClient{shouldFail: true, failErr: &PaymentError{Message: "invalid payment method"}}, false, false},
+		{"a payment still processing", &mockStripeClient{piID: "pi_async", chargeStatus: "processing"}, false, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			invoices := newMockInvoiceUpdater()
@@ -104,6 +107,12 @@ func TestChargeInvoice_AnInlineResultIsRecordedWhenItArrives(t *testing.T) {
 			if c.paid {
 				if paid := invoices.invoices["inv_1"].PaidAt; paid == nil || !paid.Equal(arrived) {
 					t.Errorf("paid_at %v, want %v, when Stripe's answer arrived", paid, arrived)
+				}
+				return
+			}
+			if c.processing {
+				if stored := invoices.invoices["inv_1"]; stored.PaymentStatus != domain.PaymentProcessing || !stored.UpdatedAt.Equal(arrived) {
+					t.Errorf("invoice %s updated at %v, want processing at %v, when Stripe's answer arrived", stored.PaymentStatus, stored.UpdatedAt, arrived)
 				}
 				return
 			}
