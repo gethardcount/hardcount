@@ -44,8 +44,7 @@ import (
 //
 // Code that wants wall-clock time even on a pinned entity calls
 // time.Now().UTC() directly, by design. Examples are the cron tick
-// scheduler, webhook delivery timestamps, postgres updated_at columns and the
-// audit log's recorded_at.
+// scheduler, webhook delivery timestamps and the audit log's recorded_at.
 type Clock interface {
 	// Now returns ctx's effective-now if one is bound
 	// (clock.WithEffectiveNow), and otherwise wall-clock time in UTC. Passing
