@@ -230,35 +230,29 @@ func TestCanonicalRoute(t *testing.T) {
 			}
 		})
 	}
-
-	// And the property that motivates the negative above: an unmatched subtree
-	// pattern must not be exempt just because its parent prefix is.
-	if auditRouteExempt("POST", "/v1/usage-events/*") {
-		t.Error("an unmatched path under an exempt subtree resolved as exempt — canonicalRoute is collapsing /*")
-	}
 }
 
-// TestAuditRouteExempt_LooksUpCanonically proves the detector's lookup meets the
-// registry on the canonical key even when handed a runtime RoutePattern() with
-// chi's residual artifacts.
-func TestAuditRouteExempt_LooksUpCanonically(t *testing.T) {
-	if !auditRouteExempt("POST", "/v1/usage-events") {
-		t.Error("POST /v1/usage-events should be exempt(machine_ingest)")
-	}
-	// Trailing slash, as chi.Walk reports a subrouter's r.Post("/") leaf.
-	if !auditRouteExempt("POST", "/v1/invoices/create_preview/") {
-		t.Error("POST /v1/invoices/create_preview/ should canonicalize to /v1/invoices/create_preview and be exempt(non_mutating_preview)")
-	}
-	// Bootstrap is EXPLICIT (it mints a live secret key and emits for it), so
-	// it must NOT resolve as exempt — a regression here would silence the
-	// detector on the one route that provisions a money-moving credential.
-	if auditRouteExempt("POST", "/v1/bootstrap") {
-		t.Error("POST /v1/bootstrap is explicit (it audits its own provisioning), not exempt")
-	}
-	if auditRouteExempt("POST", "/v1/credits/grant") {
-		t.Error("POST /v1/credits/grant is explicit, not exempt")
-	}
-	if auditRouteExempt("POST", "/v1/not/a/route") {
-		t.Error("an unknown route must not resolve as exempt — unknown means uncovered, loudly")
+// TestAuditRoute_ExemptOnlyForDeclaredRoutes: the detector's view of a
+// request's route, as the lookup at the root found it, is exempt only for a
+// route the table declares exempt.
+func TestAuditRoute_ExemptOnlyForDeclaredRoutes(t *testing.T) {
+	for _, tc := range []struct {
+		path string
+		want bool
+		why  string
+	}{
+		{"/v1/usage-events", true, "machine_ingest"},
+		{"/v1/invoices/create_preview", true, "non_mutating_preview, a subrouter's Post(\"/\") leaf"},
+		// Bootstrap mints a live secret key and audits it: a regression here
+		// would silence the detector on the one route that provisions a
+		// money-moving credential.
+		{"/v1/bootstrap", false, "explicit"},
+		{"/v1/credits/grant", false, "explicit"},
+		{"/v1/usage-events/nope", false, "unmatched, under an exempt subtree"},
+		{"/v1/not/a/route", false, "unknown means uncovered, loudly"},
+	} {
+		if _, exempt := auditRoute(lookedUp(http.MethodPost, tc.path)); exempt != tc.want {
+			t.Errorf("POST %s: exempt %v, want %v (%s)", tc.path, exempt, tc.want, tc.why)
+		}
 	}
 }

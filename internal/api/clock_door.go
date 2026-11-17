@@ -26,8 +26,9 @@ import (
 // and binds.
 //
 // It decides in this order:
-//   - It finds the request's route in the router (Find: an in-memory lookup,
-//     no database read) and the route's entry in clockRoutes.
+//   - It takes the request's route, which the lookup at the edge found
+//     (routeLookup: an in-memory Find, no database read), and the route's
+//     entry in clockRoutes.
 //   - A route the router does not have, and a decidedIn route: in test mode
 //     the door records real time with no instant (clock.WithRealTime, one of
 //     the states named on clock.Decision); in live mode it leaves the
@@ -55,10 +56,6 @@ import (
 // (errs.Unavailable), which the client retries and the idempotency layer
 // does not store; nothing is bound, and the handler does not run.
 type clockDoor struct {
-	// root is the built router: the door finds a request's route and its
-	// path parameters with Find before the mounted sub-router runs. Set once
-	// every route is registered.
-	root     chi.Routes
 	resolver clock.Resolver
 	// clock is the server's clock, the router's: the door reads real time
 	// from it once per request.
@@ -128,13 +125,13 @@ func (h doorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	h.next.ServeHTTP(w, r.WithContext(clock.EnsureEffectiveNow(ctx, h.door.clock)))
 }
 
-// route finds the request's entry in clockRoutes and its path parameters,
-// reading nothing: false when the router has no such route.
+// route is the request's entry in clockRoutes and its path parameters, as
+// the lookup at the edge found them (routeOf): false when the router has no
+// such route.
 func (d *clockDoor) route(r *http.Request) (clockDecl, *chi.Context, bool) {
-	rctx := chi.NewRouteContext()
-	pattern := canonicalRoute(d.root.Find(rctx, r.Method, routedPath(r)))
-	decl, ok := clockRoutes[routeKey{Method: r.Method, Pattern: pattern}]
-	return decl, rctx, ok
+	m := routeOf(r.Context())
+	decl, ok := clockRoutes[m.key]
+	return decl, m.params, ok
 }
 
 // errUnknownClockSource is pinFor's answer for a route table entry whose
@@ -182,14 +179,4 @@ func (d *clockDoor) pinFor(ctx context.Context, entry clockDecl, params *chi.Con
 // door.
 func readableID(id string) bool {
 	return id != "" && utf8.ValidString(id) && !strings.ContainsRune(id, 0)
-}
-
-// routedPath is the path chi routes the request on: the escaped path when
-// the URL has one, so a path parameter holding an escaped slash finds the
-// same route, with the same parameter, as the handler.
-func routedPath(r *http.Request) string {
-	if r.URL.RawPath != "" {
-		return r.URL.RawPath
-	}
-	return r.URL.Path
 }

@@ -226,6 +226,12 @@ func TestE2E_APIKeyIssue_SecretIsNotStoredForReplay(t *testing.T) {
 	flowDo(t, ts, "POST", rotatePath, rotate).want(t, 200, "rotate")
 	flowDo(t, ts, "POST", rotatePath, rotate).want(t, 409, "rotate again with the same Idempotency-Key: the key is revoked now, not a replayed answer")
 
+	// chi matches an empty id to the rotate route too, so the layer leaves it
+	// alone: the handler refuses it, and the count below finds the refusal
+	// not kept.
+	emptyID := flowReq{cookie: owner, header: map[string]string{"Idempotency-Key": "apikey-issue-empty-id"}}
+	flowDo(t, ts, "POST", "/v1/api-keys//rotate", emptyID).want(t, 404, "rotate an empty id")
+
 	tx, err := db.BeginTx(context.Background(), postgres.TxBypass, "")
 	if err != nil {
 		t.Fatalf("begin: %v", err)

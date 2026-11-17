@@ -1,6 +1,9 @@
 package api
 
-import "strings"
+import (
+	"net/http"
+	"strings"
+)
 
 // ---------------------------------------------------------------------------
 // The route-audit registry (ADR-090).
@@ -98,20 +101,21 @@ func exempt(reason exemptReason, note string) auditDecl {
 
 // canonicalRoute normalizes a chi route pattern, so the two sources of
 // patterns agree on one key. One is chi.Walk's pattern string, which the
-// arch test sees. The other is chi.RouteContext(r.Context()).RoutePattern(),
-// which the detector sees at runtime. They differ in exactly two ways:
+// table tests see. The other is Find's, which the lookup at the root gives
+// every request (routeLookup). Raw, they can differ in two ways:
 //   - Walk does a single strings.Replace("/*/", "/") pass. So a Mount("/", …)
 //     inside a Route(…) leaves a "/*/" behind ("/v1/auth/*/login").
-//   - Walk does not trim a trailing slash. So a subrouter's r.Post("/")
-//     arrives as "/v1/customers/".
+//   - A subrouter's r.Post("/") arrives with a trailing slash
+//     ("/v1/customers/").
 //
-// RoutePattern() loops the replace and trims. Applying chi's own
-// normalization to both sides makes them meet.
+// chi's RoutePattern() loops the replace and trims; applying the same
+// normalization to both sides makes them meet
+// (TestRouteLookup_FindsEveryRouteAndItsParams).
 //
-// Do not also trim a trailing "/*". A 404 inside a mounted subtree yields
-// RoutePattern() == "/v1/customers/*". Trimming that would fold it onto the
-// real "/v1/customers" key, so a miss would pass for a covered route. Left as
-// it is, it matches no key at all, which is the correct answer.
+// Do not also trim a trailing "/*". A pattern such as "/v1/customers/*",
+// from a path no route under a mount matches, must not fold onto the real
+// "/v1/customers" key, or a miss would pass for a covered route. Left as it
+// is, it matches no key at all, which is the correct answer.
 func canonicalRoute(p string) string {
 	for strings.Contains(p, "/*/") {
 		p = strings.ReplaceAll(p, "/*/", "/")
@@ -137,13 +141,15 @@ func isMutatingMethod(m string) bool {
 	return false
 }
 
-// auditRouteExempt reports whether (method, canonical pattern) is declared
-// exempt. The runtime detector asks it before reporting an uncovered
+// auditRoute is the request's route for the runtime detector (routeOf): its
+// pattern, which labels the uncovered-mutation counter, and whether the
+// table declares it exempt. The detector asks before it reports an uncovered
 // mutation. Anything not in the table is not exempt, so a gap is reported
 // rather than hidden.
-func auditRouteExempt(method, pattern string) bool {
-	d, ok := auditRouteRegistry[routeKey{Method: method, Pattern: canonicalRoute(pattern)}]
-	return ok && d.Coverage == auditExempt
+func auditRoute(r *http.Request) (pattern string, exempt bool) {
+	key := routeOf(r.Context()).key
+	d, ok := auditRouteRegistry[key]
+	return key.Pattern, ok && d.Coverage == auditExempt
 }
 
 // auditRouteRegistry is the table. Keys are canonical (method, RoutePattern).

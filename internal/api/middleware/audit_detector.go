@@ -4,7 +4,6 @@ import (
 	"log/slog"
 	"net/http"
 
-	"github.com/go-chi/chi/v5"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
@@ -61,10 +60,10 @@ var auditUncoveredMutations = promauto.NewCounterVec(
 //     The CSV exports are such a route: they get a 5-minute timeout because
 //     they stream.
 //
-// isExempt looks up (method, canonical route pattern) in the registry. It is
-// passed in because the registry lives in package api, which imports this
-// package.
-func AuditCoverage(isExempt func(method, routePattern string) bool) func(http.Handler) http.Handler {
+// route gives the request's route pattern, which labels the counter, and
+// whether the registry declares the route exempt. It is passed in because
+// the registry lives in package api, which imports this package.
+func AuditCoverage(route func(*http.Request) (pattern string, exempt bool)) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Seed the per-request audit state for the whole route tree. This
@@ -97,28 +96,18 @@ func AuditCoverage(isExempt func(method, routePattern string) bool) func(http.Ha
 				return
 			}
 
-			// Read the matched pattern here, synchronously. Mounted
-			// subrouters share the root's *chi.Context, and the root returns
-			// it to a pool once this handler returns. Reading it from a
-			// goroutine that outlives the request is a use-after-free. An
-			// unmatched path (a 404 inside a mounted subtree) gives a pattern
-			// such as "/v1/customers/*", which matches no registry key on
-			// purpose.
-			route := "unmatched"
-			if rctx := chi.RouteContext(r.Context()); rctx != nil {
-				if pat := rctx.RoutePattern(); pat != "" {
-					route = pat
-				}
-			}
-
-			if isExempt(r.Method, route) {
+			pattern, exempt := route(r)
+			if exempt {
 				return
 			}
+			if pattern == "" {
+				pattern = "unmatched"
+			}
 
-			auditUncoveredMutations.WithLabelValues(route).Inc()
+			auditUncoveredMutations.WithLabelValues(pattern).Inc()
 			slog.ErrorContext(r.Context(), "UNCOVERED MUTATION — a state change committed with no audit row",
 				"method", r.Method,
-				"route", route,
+				"route", pattern,
 				"status", ww.Status(),
 				"request_id", chimw.GetReqID(r.Context()),
 				"remedy", "emit the row in the business transaction (audit.Logger.LogInTx) and declare the route in internal/api/audit_routes.go")
