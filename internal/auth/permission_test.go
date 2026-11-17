@@ -25,3 +25,30 @@ func TestHasPermission_UnknownType(t *testing.T) {
 		}
 	}
 }
+
+// Who holds what: a session every permission, a key its type's. A caller with
+// a key is judged as that key even when a user is named on it too.
+func TestHasPermission_ByCaller(t *testing.T) {
+	session := Caller{TenantID: "hc_ten_1", UserID: "hc_usr_1"}
+	ingest := Caller{TenantID: "hc_ten_1", KeyID: "hc_key_1", KeyType: KeyTypeIngest}
+	ingestWithUser := ingest
+	ingestWithUser.UserID = "hc_usr_1"
+	for _, tc := range []struct {
+		name   string
+		caller Caller
+		perm   Permission
+		want   bool
+	}{
+		{"a session holds a write permission", session, PermAPIKeyWrite, true},
+		{"an ingest key sends usage", ingest, PermUsageIngest, true},
+		{"an ingest key holds nothing else", ingest, PermAPIKeyWrite, false},
+		{"an ingest key with a user named is still an ingest key", ingestWithUser, PermAPIKeyWrite, false},
+	} {
+		if got := HasPermission(tc.caller, tc.perm); got != tc.want {
+			t.Errorf("%s: HasPermission = %v, want %v", tc.name, got, tc.want)
+		}
+	}
+	if ingestWithUser.IsSession() {
+		t.Error("a caller with a key is a session")
+	}
+}

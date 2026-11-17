@@ -37,7 +37,7 @@ func RequireSession(task string) func(http.Handler) http.Handler {
 	msg := "this endpoint requires a dashboard session — sign in to the dashboard to " + task
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if CallerOf(r.Context()).UserID == "" {
+			if !CallerOf(r.Context()).IsSession() {
 				respond.Forbidden(w, r, msg)
 				return
 			}

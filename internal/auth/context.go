@@ -19,6 +19,12 @@ type Caller struct {
 	KeyType  KeyType // the key's type; "" for a session
 }
 
+// IsSession reports whether c is a dashboard user's session: a user and no
+// key.
+func (c Caller) IsSession() bool {
+	return c.UserID != "" && c.KeyID == ""
+}
+
 // WithCaller returns ctx carrying c as the whole caller, in place of any
 // caller ctx held. session.Authenticate sets it once for each request.
 func WithCaller(ctx context.Context, c Caller) context.Context {

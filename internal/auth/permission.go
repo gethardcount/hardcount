@@ -85,10 +85,11 @@ var keyPermissions = map[KeyType]map[Permission]bool{
 
 // HasPermission reports whether c holds perm. A session holds every
 // permission: roles are recorded in user_tenants.role but not enforced
-// (ADR-081). A key holds its type's permissions. A caller that is neither,
-// or a key of an unknown type, holds none.
+// (ADR-081). A key holds its type's permissions, whoever else is named on
+// the caller. A caller that is neither, or a key of an unknown type, holds
+// none.
 func HasPermission(c Caller, perm Permission) bool {
-	if c.UserID != "" {
+	if c.IsSession() {
 		return true
 	}
 	return keyPermissions[c.KeyType][perm]
