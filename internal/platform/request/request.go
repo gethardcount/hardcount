@@ -64,10 +64,9 @@ type Record struct {
 	audited atomic.Bool
 }
 
-// Route is the route the request matched.
 func (rec *Record) Route() Route { return rec.route }
 
-// Actor is who made the request: the zero Actor when nobody signed in.
+// Actor is zero when nobody signed in.
 func (rec *Record) Actor() Actor { return rec.actor }
 
 // ClientIP is the client's address: the one mw.TrustedClientIP resolved,

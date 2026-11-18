@@ -87,16 +87,16 @@ func TestFingerprintRequest(t *testing.T) {
 	}
 }
 
-// A request with a tenant but no single caller (none, or both a key and a
-// user) means authentication did not run first. It is refused with 500 and
-// runs nothing, rather than stored under a fingerprint that names no caller.
+// A request with no caller, or a caller with no tenant, means authentication
+// did not run first. It is refused with 500 and runs nothing, rather than
+// stored for no caller or passed through unguarded.
 func TestIdempotency_NoCallerIsRefused(t *testing.T) {
 	for _, c := range []struct {
 		name   string
 		caller auth.Caller
 	}{
 		{"no caller", auth.Caller{TenantID: "t1"}},
-		{"both a key and a user", auth.Caller{TenantID: "t1", UserID: "usr_a", KeyID: "key_a"}},
+		{"a caller with no tenant", auth.Caller{KeyID: "key_a"}},
 	} {
 		var calls int
 		handler := requesttest.Root(Idempotency(nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
