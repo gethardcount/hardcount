@@ -50,7 +50,7 @@ func (d routeDecl) showsSecretOnce() routeDecl {
 // matched no route, where nothing can run (a 404 or a 405), and one whose
 // answer carries a secret shown once, which must never be kept.
 func keepsNoKey(r *http.Request) bool {
-	return request.Of(r.Context()).Route().NoRoute || answersWithShowOnceSecret(r)
+	return request.Of(r.Context()).Route().Pattern == "" || answersWithShowOnceSecret(r)
 }
 
 // answersWithShowOnceSecret reports whether r's route answers with a secret

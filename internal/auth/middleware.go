@@ -47,7 +47,7 @@ func Require(perm Permission) func(http.Handler) http.Handler {
 // the permission the request's method needs: write for POST, PUT, PATCH and
 // DELETE, read for every other method. Put it in front of a chi.Mount whose
 // subrouter has both reads and writes, where one Require would let a caller
-// that may read also write.
+// that may read also write. Like Require, it answers before any change.
 func RequireMethod(read, write Permission) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return PermissionCheck{read: read, write: write, next: next}
@@ -73,7 +73,8 @@ func (c SessionRequired) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 // (Caller.IsSession). Use it for a human act (team membership), where an API
 // key has no user to attribute the action to, and for settings both modes
 // share, which a key, made in one mode, must not change. Any other caller
-// gets a 403 that ends "sign in to the dashboard to <task>".
+// gets a 403 that ends "sign in to the dashboard to <task>", before any
+// change, as Require does.
 func RequireSession(task string) func(http.Handler) http.Handler {
 	msg := "this endpoint requires a dashboard session — sign in to the dashboard to " + task
 	return func(next http.Handler) http.Handler {

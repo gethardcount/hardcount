@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"regexp"
@@ -16,16 +17,10 @@ import (
 // requests up on it.
 var builtRouter = sync.OnceValue(func() chi.Routes { return newTestServer().router })
 
-// builtFinder is the server's route finder, on the built router.
-var builtFinder = sync.OnceValue(func() *routeFinder {
-	r := builtRouter()
-	return &routeFinder{root: r, served: newAllowIndex(r)}
-})
-
 // begin is the server's root middleware that makes each request's record,
 // on the built router.
 func begin() func(http.Handler) http.Handler {
-	return request.Begin(builtFinder().route)
+	return request.Begin((&routeFinder{root: builtRouter()}).route)
 }
 
 // lookedUp is the request as the middleware after the root sees it: with its
@@ -74,7 +69,38 @@ func TestRouteFinder_FindsEveryRouteAndItsParams(t *testing.T) {
 	if checked < 150 {
 		t.Fatalf("checked %d routes, want every route of the router (190 today)", checked)
 	}
-	if got := request.Of(lookedUp(http.MethodPost, "/v1/not/a/route").Context()).Route().Pattern; got != "" {
-		t.Errorf("a path the router does not have: pattern %q, want none", got)
+	// No route serves these, though chi's Find names a mount for some: they
+	// have no pattern, so Idempotency keeps no key and chi answers 404 or
+	// 405. A mount's root with a trailing slash is served, under its key.
+	for _, c := range []struct{ method, path, want string }{
+		{http.MethodPost, "/v1/not/a/route", ""},
+		{http.MethodGet, "/v1/invoices/create_preview", ""},
+		{http.MethodGet, "/v1/invoices/create_preview/", ""},
+		{http.MethodPost, "/v1/customers/x/usage", ""},
+		{http.MethodPost, "/v1/invoices/x/typo", ""},
+		{http.MethodPost, "/v1/customers/", "/v1/customers"},
+	} {
+		if got := request.Of(lookedUp(c.method, c.path).Context()).Route().Pattern; got != c.want {
+			t.Errorf("%s %s: pattern %q, want %q", c.method, c.path, got, c.want)
+		}
 	}
+}
+
+// A server that would serve a route the route table does not list does not
+// start, and names the route (mustListEveryRoute).
+func TestServer_RefusesToStartWithARouteTheTableDoesNotList(t *testing.T) {
+	key := routeKey{Method: http.MethodGet, Pattern: "/health"}
+	saved, had := routeTable[key]
+	delete(routeTable, key)
+	t.Cleanup(func() {
+		if had {
+			routeTable[key] = saved
+		}
+	})
+	defer func() {
+		if r := recover(); r == nil || !strings.Contains(fmt.Sprint(r), "GET /health") {
+			t.Errorf("building a server with GET /health unlisted recovered %v, want a refusal naming GET /health", r)
+		}
+	}()
+	newTestServer()
 }

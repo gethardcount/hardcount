@@ -175,7 +175,6 @@ func (s *Server) routes() chi.Router {
 	r.Use(mw.Metrics())
 	r.Use(accessLog)
 	r.Use(mw.Recoverer(loggablePath))
-	r.Use(refuseUnlistedRoutes)
 	// One parsed list of origins serves CORS and the CSRF guards.
 	allowedOrigins := s.settings.CORSOrigins()
 	r.Use(mw.CORS(allowedOrigins))
@@ -301,9 +300,9 @@ func (s *Server) routes() chi.Router {
 		// Ordinary routes: replayable by Idempotency-Key, 30 s.
 		r.Group(func(r chi.Router) {
 			r.Use(s.rateLimiter.Middleware())
-			// A request whose answer carries a secret shown only once ignores
-			// the Idempotency-Key header (answersWithShowOnceSecret): that
-			// answer is never kept for a replay.
+			// Idempotency holds no key (keepsNoKey) for a request no route
+			// serves, where nothing can run, or one whose answer carries a
+			// secret shown only once, which is never kept for a replay.
 			r.Use(mw.Idempotency(s.db, keepsNoKey))
 			r.Use(mw.Timeout(requestTimeout))
 			r.Use(door.Middleware)
@@ -350,7 +349,8 @@ func (s *Server) routes() chi.Router {
 	})
 
 	allow = newAllowIndex(r)
-	finder.root, finder.served = r, allow
+	finder.root = r
+	mustListEveryRoute(r)
 
 	return r
 }
@@ -418,24 +418,6 @@ func limitRequestBody(next http.Handler) http.Handler {
 	})
 }
 
-// refuseUnlistedRoutes answers 500 to a request the router serves on a route
-// the route table does not list. Such a route would run with no clock
-// decision, no audit and no retry key, so it is refused, never passed. It
-// sits here, below the access log and the metrics, which record the 500, and
-// above every group's steps, so none of them sees the request.
-// TestRouteTable_MatchesLiveRoutes keeps such a route from being built; this
-// is the run-time half.
-func refuseUnlistedRoutes(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if rt := request.Of(r.Context()).Route(); !rt.NoRoute && rt.Pattern == "" {
-			slog.ErrorContext(r.Context(), "route served but not in the route table", "method", r.Method)
-			respond.InternalError(w, r)
-			return
-		}
-		next.ServeHTTP(w, r)
-	})
-}
-
 // litellmPathPrefix is where the LiteLLM adapter is mounted.
 const litellmPathPrefix = "/v1/integrations/litellm"
 
@@ -454,6 +436,22 @@ type allowIndex struct {
 }
 
 var pathParamName = regexp.MustCompile(`\{[^}]*\}`)
+
+// mustListEveryRoute refuses to build a server that serves a route the route
+// table does not list, and names the route. Such a route would run with no
+// clock decision, no audit and no retry key, and its record could not tell it
+// from a path no route serves. TestRouteTable_MatchesLiveRoutes holds the same
+// rule in CI.
+func mustListEveryRoute(router chi.Routes) {
+	// Walk returns only the walk function's error, and this one has none.
+	_ = chi.Walk(router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		key := routeKey{Method: method, Pattern: canonicalRoute(route)}
+		if _, ok := routeTable[key]; !ok {
+			panic(fmt.Sprintf("route %s %s is served but not in the route table (route_table.go)", key.Method, key.Pattern))
+		}
+		return nil
+	})
+}
 
 func newAllowIndex(router chi.Routes) *allowIndex {
 	flat := chi.NewMux()
@@ -477,17 +475,11 @@ func newAllowIndex(router chi.Routes) *allowIndex {
 	return &allowIndex{flat: flat}
 }
 
-// serves reports whether the router serves method at path, in the flat
-// index: a mount's sub-router counts only for the methods it routes.
-func (a *allowIndex) serves(method, path string) bool {
-	return a.flat.Match(chi.NewRouteContext(), method, path)
-}
-
 // methods lists the methods the router serves at r's path.
 func (a *allowIndex) methods(r *http.Request) []string {
 	var out []string
 	for _, m := range routeMethods {
-		if a.serves(m, routedPath(r)) {
+		if a.flat.Match(chi.NewRouteContext(), m, routedPath(r)) {
 			out = append(out, m)
 		}
 	}

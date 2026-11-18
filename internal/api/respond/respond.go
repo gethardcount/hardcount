@@ -133,6 +133,8 @@ func InternalError(w http.ResponseWriter, r *http.Request) {
 }
 
 // Unauthorized writes a 401 authentication_error with code unauthorized.
+// Write it only before any change: the idempotency layer does not store a
+// 401.
 func Unauthorized(w http.ResponseWriter, r *http.Request, message string) {
 	Error(w, r, http.StatusUnauthorized, "unauthorized", message)
 }

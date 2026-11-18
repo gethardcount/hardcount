@@ -9,34 +9,27 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
-// routeFinder finds each request's route for its record (request.Begin)
-// before any group runs: whether the router serves the method at the path,
-// and if so its pattern, kept only when routeTable has the route, and its path
-// parameters. It runs above the Recoverer, where a panic drops the
-// connection, so it must not panic for a request: Find and Match read only
-// the method and the path, and nothing here is nil that a request can make
-// nil.
+// routeFinder finds each request's route for its record (request.Begin): one
+// Find on the built router gives its pattern and path parameters before any
+// group runs. The pattern is kept only when routeTable has the route, so a
+// path no route matches, and a mount asked for a method its sub-router lacks,
+// get none. It runs above the Recoverer, where a panic drops the connection,
+// so it must not panic for a request: Find reads only the method and the
+// path, and nothing here is nil that a request can make nil.
 type routeFinder struct {
-	// root is the built router, and served its routes flat (newAllowIndex);
-	// both are set once every route is registered.
-	root   chi.Routes
-	served *allowIndex
+	// root is the built router, set once every route is registered.
+	root chi.Routes
 }
 
 func (f *routeFinder) route(r *http.Request) request.Route {
 	rctx := chi.NewRouteContext()
 	rt := request.Route{Method: r.Method, Params: rctx}
-	// Find names a mount's route even for a method its sub-router lacks, and
-	// the flat index alone takes a trailing slash the router refuses: the
-	// router serves the request only when both agree.
-	pattern := f.root.Find(rctx, r.Method, routedPath(r))
-	if pattern == "" || !f.served.serves(r.Method, routedPath(r)) {
-		rt.NoRoute = true
-		return rt
-	}
-	key := routeKey{Method: r.Method, Pattern: canonicalRoute(pattern)}
-	if _, ok := routeTable[key]; ok {
-		rt.Pattern = key.Pattern
+	// A miss keys as "", not as canonicalRoute(""), which is "/".
+	if pattern := f.root.Find(rctx, r.Method, routedPath(r)); pattern != "" {
+		key := routeKey{Method: r.Method, Pattern: canonicalRoute(pattern)}
+		if _, ok := routeTable[key]; ok {
+			rt.Pattern = key.Pattern
+		}
 	}
 	return rt
 }

@@ -121,4 +121,15 @@ func TestE2E_IdempotencyKey_AnswersOnlyTheCallerThatMadeTheRequest(t *testing.T)
 		t.Errorf("after the 405: %d idempotency rows, want none", n)
 	}
 	create(flowReq{bearer: secret}, "/v1/customers", "k-unrouted").want(t, 201, "secret key after the unrouted request")
+
+	// A typo under a mount answers 404 and reserves nothing either.
+	typo := flowDo(t, ts, "POST", "/v1/invoices/x/typo", flowReq{bearer: secret,
+		header: map[string]string{"Idempotency-Key": "k-typo"}, body: map[string]any{}})
+	if typo.status != 404 {
+		t.Fatalf("a typo under the invoices mount: %d %s, want 404", typo.status, typo.raw)
+	}
+	if n := rows("k-typo"); n != 0 {
+		t.Errorf("after the 404: %d idempotency rows, want none", n)
+	}
+	create(flowReq{bearer: secret}, "/v1/customers", "k-typo").want(t, 201, "secret key after the 404")
 }

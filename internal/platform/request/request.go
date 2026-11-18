@@ -26,15 +26,12 @@ import (
 )
 
 // Route is the route a request matched: its method and pattern, which key
-// the server's route table, and its path parameters. NoRoute is true when the
-// router serves no handler for the method at the path: the request gets a 404
-// or a 405. Pattern is set only for a route the table lists, so a route the
-// router serves but the table lacks has neither, and the server refuses it
-// before any route step runs.
+// the server's route table, and its path parameters. The Pattern is empty
+// when the request matched no route: the server starts only when the table
+// lists every route it serves.
 type Route struct {
 	Method  string
 	Pattern string
-	NoRoute bool
 	Params  *chi.Context
 }
 
