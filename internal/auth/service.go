@@ -224,6 +224,7 @@ func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey
 		return domain.APIKey{}, ErrInvalidKey
 	}
 
+	// getByPrefix set Status as it read the row (scanKey, statusAt).
 	if key.Status != domain.APIKeyStatusActive {
 		return domain.APIKey{}, fmt.Errorf("api key %s: %w", key.Status, ErrInvalidKey)
 	}
@@ -305,9 +306,10 @@ type RotateKeyResult struct {
 // RotateKey replaces the tenant's key with id, in the mode ctx carries, with
 // a new key of the same name, type, mode and expires_at. A grace of 0
 // revokes the old key; a grace of up to maxRotationGrace sets it to expire
-// that many seconds from now, or at its own expires_at if that is sooner. A
-// grace out of range returns a validation error, a key not found
-// errs.ErrNotFound, and a key that is not active errs.ErrInvalidState.
+// that many seconds from now, or at its own expires_at if that is sooner
+// (scheduleExpiry). A grace out of range returns a validation error, a key
+// not found errs.ErrNotFound, and a key that is not active
+// errs.ErrInvalidState.
 func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input RotateKeyInput) (RotateKeyResult, error) {
 	maxGraceSeconds := int64(maxRotationGrace / time.Second)
 	if input.ExpiresInSeconds < 0 {

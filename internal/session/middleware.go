@@ -29,10 +29,10 @@ func (e unavailableError) Error() string { return e.msg + ": " + e.err.Error() }
 func (e unavailableError) Unwrap() error { return e.err }
 
 // Authenticate resolves r's credentials to a context that carries the caller
-// (auth.CallerOf) and its test or live mode. A live session cookie wins over
-// any key; a cookie that does not resolve falls through to the Bearer key. It
-// returns ErrNoCredentials when there is neither, ValidateKey's error for a
-// bad key, and an unavailableError when a store fails.
+// (auth.CallerOf) and its test or live mode. A session cookie that resolves
+// wins over any key; a cookie that does not resolve falls through to the
+// Bearer key. It returns ErrNoCredentials when there is neither, ValidateKey's
+// error for a bad key, and an unavailableError when a store fails.
 func Authenticate(r *http.Request, sessSvc *Service, keySvc *auth.Service) (context.Context, error) {
 	ctx := r.Context()
 	if c, err := r.Cookie(CookieName); err == nil && c.Value != "" {

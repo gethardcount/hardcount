@@ -5,7 +5,6 @@ package config
 import (
 	"context"
 	"database/sql"
-	"encoding/hex"
 	"fmt"
 	"log/slog"
 	"net"
@@ -202,8 +201,8 @@ func (c Config) validateFatal() error {
 		return fmt.Errorf("TRUST_PROXY is required in production — behind a load balancer or ingress every request's client address is the balancer's, so the per-IP limits on the public pay pages (60/min) and on /v1/auth (100/min) become ONE bucket shared by every customer and operator of the install; set TRUST_PROXY to the balancer/ingress CIDR(s), or TRUST_PROXY=none if replicas accept client connections directly (docs/ops/high-availability.md)")
 	}
 
-	// A set TRUST_PROXY or CORS_ALLOWED_ORIGINS must mean what it says, in
-	// every environment.
+	// A set TRUST_PROXY, CORS_ALLOWED_ORIGINS or HARDCOUNT_ENCRYPTION_KEY
+	// must mean what it says, in every environment.
 	if err := c.Server.Check(); err != nil {
 		return err
 	}
@@ -221,15 +220,6 @@ func (c Config) validateFatal() error {
 	// command that loads the config treats it alike.
 	if _, err := ParseLogLevel(os.Getenv("LOG_LEVEL")); err != nil {
 		return err
-	}
-
-	if encKey != "" {
-		if len(encKey) != 64 {
-			return fmt.Errorf("HARDCOUNT_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes), got %d", len(encKey))
-		}
-		if _, err := hex.DecodeString(encKey); err != nil {
-			return fmt.Errorf("HARDCOUNT_ENCRYPTION_KEY is not valid hex: %w", err)
-		}
 	}
 
 	// The bootstrap token mints the owner login and the first live key. A
@@ -264,17 +254,8 @@ var publicAddressSettings = []string{
 func (c Config) Validate() []string {
 	var warnings []string
 
-	encKey := c.Server.EncryptionKey
-	if encKey == "" {
-		if c.Env == "production" {
-			warnings = append(warnings, "HARDCOUNT_ENCRYPTION_KEY is not set — customer PII will be stored in plaintext")
-		}
-	} else {
-		if len(encKey) != 64 {
-			warnings = append(warnings, fmt.Sprintf("HARDCOUNT_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes), got %d characters", len(encKey)))
-		} else if _, err := hex.DecodeString(encKey); err != nil {
-			warnings = append(warnings, "HARDCOUNT_ENCRYPTION_KEY is not valid hex")
-		}
+	if c.Server.EncryptionKey == "" && c.Env == "production" {
+		warnings = append(warnings, "HARDCOUNT_ENCRYPTION_KEY is not set — customer PII will be stored in plaintext")
 	}
 
 	if c.Server.TrustProxy == "" && c.Env == "production" {

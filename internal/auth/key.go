@@ -79,9 +79,9 @@ func mintKey(kt KeyType, livemode bool) (raw, lookup string, h storedHash, err e
 	return raw, p + secretHex[:lookupHexLen], storedHash{salt: hex.EncodeToString(salt), hash: hashKey(salt, raw)}, nil
 }
 
-// hashKey returns hex(SHA-256(salt || raw)). An empty salt is valid: a
-// stored key may have none (api_keys_salt_shape_check allows an empty
-// key_salt). mintKey always draws one.
+// hashKey returns hex(SHA-256(salt || raw)). salt is empty for a key the
+// setup command stored in v0.9.3 or earlier (ADR-141), which
+// api_keys_salt_shape_check allows; mintKey always draws one.
 func hashKey(salt []byte, raw string) string {
 	sum := sha256.Sum256(append(append([]byte{}, salt...), raw...))
 	return hex.EncodeToString(sum[:])

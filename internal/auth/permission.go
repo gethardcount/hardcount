@@ -50,7 +50,9 @@ const (
 // api_keys CHECKs.
 var keyTypes = []KeyType{KeyTypeSecret, KeyTypeIngest}
 
-// allPermissions is every permission a route can require.
+// allPermissions is every permission a route can require. A permission left
+// out of it is held by no key, so a secret key is refused it (a session still
+// holds it).
 var allPermissions = []Permission{
 	PermCustomerRead, PermCustomerWrite,
 	PermPricingRead, PermPricingWrite,
@@ -83,9 +85,8 @@ var keyPermissions = map[KeyType]map[Permission]bool{
 
 // hasPermission reports whether c holds perm. A session holds every
 // permission: roles are recorded in user_tenants.role but not enforced
-// (ADR-081). Any other caller holds what its KeyType holds, so a key is
-// judged by its type even when a user is named too, and a caller with no key
-// type, or an unknown one, holds none.
+// (ADR-081). Any other caller holds what its KeyType holds, and a caller with
+// no key type, or an unknown one, holds none.
 func hasPermission(c Caller, perm Permission) bool {
 	if c.IsSession() {
 		return true
