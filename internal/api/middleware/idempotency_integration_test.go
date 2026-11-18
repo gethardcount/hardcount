@@ -172,10 +172,10 @@ func checkRanOnce(t *testing.T, recs [2]*httptest.ResponseRecorder, runs int64) 
 }
 
 // Every answer is stored under its key and replayed, a 400 written after the
-// handler read its body included, except a 409, a 422 and a 503, which free
-// the key for a second run. A replay keeps the status, the body and
-// Hardcount-Version, and sets Idempotent-Replayed.
-func TestIdempotency_StoresEveryAnswerExcept409_422And503(t *testing.T) {
+// handler read its body included, except a refusal of the caller (401, 403),
+// a 409, a 422 and a 503, which free the key for a second run. A replay keeps
+// the status, the body and Hardcount-Version, and sets Idempotent-Replayed.
+func TestIdempotency_StoresEveryAnswerExcept401_403_409_422And503(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	tenantID := testutil.CreateTestTenant(t, db, "Idempotency Statuses")
 	for _, tc := range []struct {
@@ -183,7 +183,8 @@ func TestIdempotency_StoresEveryAnswerExcept409_422And503(t *testing.T) {
 		stored bool
 	}{
 		{http.StatusBadRequest, true},
-		{http.StatusUnauthorized, true},
+		{http.StatusUnauthorized, false},
+		{http.StatusForbidden, false},
 		{http.StatusNotFound, true},
 		{http.StatusInternalServerError, true},
 		{http.StatusBadGateway, true},

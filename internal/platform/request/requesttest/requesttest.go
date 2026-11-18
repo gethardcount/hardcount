@@ -11,8 +11,8 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
-// Context returns parent holding a new record, for a request that matched
-// no route. Its client address is httptest's, 192.0.2.1.
+// Context returns parent holding a new record whose route holds only the
+// method. Its client address is httptest's, 192.0.2.1.
 func Context(parent context.Context) context.Context {
 	var ctx context.Context
 	req := httptest.NewRequest(http.MethodGet, "/", nil).WithContext(parent)
@@ -21,8 +21,8 @@ func Context(parent context.Context) context.Context {
 	return ctx
 }
 
-// Root is h behind request.Begin: each request gets a record with no route
-// and its own TCP peer as the client address.
+// Root is h behind request.Begin: each request gets a record whose route
+// holds only the method, and its own TCP peer as the client address.
 func Root(h http.Handler) http.Handler {
 	return request.Begin(func(r *http.Request) request.Route { return request.Route{Method: r.Method} })(h)
 }

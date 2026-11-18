@@ -50,9 +50,9 @@ const (
 // Idempotency returns the middleware that makes a retried write safe. It
 // guards a POST, PUT or PATCH with an Idempotency-Key from a tenant, unless
 // ignore matches it (nil matches nothing). Every other request passes
-// through. The server's ignore names the requests whose answer carries a
-// secret shown once, which must never be kept: they run as if no key was
-// sent.
+// through. The server's ignore names two kinds, which run as if no key was
+// sent: a request that matched no route, where nothing can run, and one whose
+// answer carries a secret shown once, which must never be kept.
 //
 // A key is kept per tenant and mode for 24 hours. A request is the same
 // request as the one that first used the key when its caller (the API key,
@@ -64,8 +64,9 @@ const (
 //   - Any other request with the key gets 422 idempotency_error at once,
 //     finished or not. So a stored answer goes only to its own caller, which
 //     matters because a replay skips the route's permission check.
-//   - A 409, a 422, a 503 and a refused body (respond.WriteBodyError) are not
-//     stored: they free the key for the next request with it.
+//   - A refusal of the caller is not stored: a 401 or a 403 frees the key for
+//     the next request with it, as a 409, a 422, a 503 and a refused body
+//     (respond.WriteBodyError) do.
 //
 // Its other answers are in docs/architecture.md, "Where a refusal comes from".
 func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Handler) http.Handler {
@@ -152,12 +153,16 @@ func (g IdempotencyGuard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	bgCtx := context.WithValue(postgres.WithLivemode(context.Background(), livemode), chimw.RequestIDKey, chimw.GetReqID(r.Context()))
 
 	// A stored 500 keeps a retry from running again a change that may have
-	// committed. A 409 or a 422 is not the request's outcome: a retry may get
-	// past the conflict, and the client fixes the body. A handler answers 503
-	// only when a second run is safe (errs.Unavailable). A refused body was
-	// answered before anything changed. Any other 400 is stored: the handler
-	// may have written before it answered.
+	// committed. A 401 or a 403 refuses the caller before any change
+	// (errs.Forbidden), so another caller's request with the key may run. A
+	// 409 or a 422 is not the request's outcome: a retry may get past the
+	// conflict, and the client fixes the body. A handler answers 503 only when
+	// a second run is safe (errs.Unavailable). A refused body was answered
+	// before anything changed. Any other 400 is stored: the handler may have
+	// written before it answered.
 	if bodyRefused() ||
+		recorder.statusCode == http.StatusUnauthorized ||
+		recorder.statusCode == http.StatusForbidden ||
 		recorder.statusCode == http.StatusConflict ||
 		recorder.statusCode == http.StatusUnprocessableEntity ||
 		recorder.statusCode == http.StatusServiceUnavailable {

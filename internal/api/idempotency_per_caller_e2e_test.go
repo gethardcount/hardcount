@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -17,7 +18,9 @@ import (
 // caller that made the request: a secret key's retry replays it, while an
 // ingest key, a dashboard user, or the same key with another query string
 // gets the key-reuse 422 and none of the stored body. A dashboard user who
-// signs in again is still the same caller, so the retry replays.
+// signs in again is still the same caller, so the retry replays. A request
+// refused by its route's permission, or one that matched no route, holds no
+// key: the next caller's request with it runs.
 func TestE2E_IdempotencyKey_AnswersOnlyTheCallerThatMadeTheRequest(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "idem-caller-bootstrap")
@@ -79,4 +82,43 @@ func TestE2E_IdempotencyKey_AnswersOnlyTheCallerThatMadeTheRequest(t *testing.T)
 		t.Fatal("the second sign-in reused the first session; the test needs two sessions")
 	}
 	replay(create(flowReq{cookie: again}, "/v1/customers", "k-session"), "same user in a new session", firstS)
+
+	rows := func(key string) int {
+		t.Helper()
+		tx, err := db.BeginTx(t.Context(), postgres.TxBypass, "")
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer postgres.Rollback(tx)
+		var n int
+		if err := tx.QueryRowContext(t.Context(), `SELECT count(*) FROM idempotency_keys WHERE key = $1`, key).Scan(&n); err != nil {
+			t.Fatalf("count idempotency rows: %v", err)
+		}
+		return n
+	}
+
+	// The route refuses the ingest key (customer:write) after the key was
+	// reserved; the 403 is not stored, so the secret key's request with the
+	// key runs, and its answer is stored.
+	if r := create(flowReq{bearer: ingest}, "/v1/customers", "k-refused"); r.status != 403 {
+		t.Fatalf("ingest key creating a customer: %d %s, want 403", r.status, r.raw)
+	}
+	if n := rows("k-refused"); n != 0 {
+		t.Errorf("after the 403: %d idempotency rows, want none", n)
+	}
+	firstR := create(flowReq{bearer: secret}, "/v1/customers", "k-refused").want(t, 201, "secret key after the refused request")
+	replay(create(flowReq{bearer: secret}, "/v1/customers", "k-refused"), "secret key retrying after the refusal", firstR)
+
+	// The customer-usage mount routes no POST: the ingest key's request
+	// answers 405 and reserves nothing, so the secret key's request with the
+	// key runs.
+	unrouted := flowDo(t, ts, "POST", "/v1/customers/x/usage", flowReq{bearer: ingest,
+		header: map[string]string{"Idempotency-Key": "k-unrouted"}, body: map[string]any{}})
+	if unrouted.status != 405 {
+		t.Fatalf("ingest key posting under the usage mount: %d %s, want 405", unrouted.status, unrouted.raw)
+	}
+	if n := rows("k-unrouted"); n != 0 {
+		t.Errorf("after the 405: %d idempotency rows, want none", n)
+	}
+	create(flowReq{bearer: secret}, "/v1/customers", "k-unrouted").want(t, 201, "secret key after the unrouted request")
 }

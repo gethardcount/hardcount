@@ -36,7 +36,9 @@ func permitted(w http.ResponseWriter, r *http.Request, perm Permission) bool {
 }
 
 // Require returns middleware that answers 403 unless the caller holds perm
-// (hasPermission), whatever the request's method.
+// (hasPermission), whatever the request's method. A 403 is answered only
+// before any change, as here, in front of the handler: the idempotency layer
+// does not store it.
 func Require(perm Permission) func(http.Handler) http.Handler {
 	return RequireMethod(perm, perm)
 }

@@ -137,7 +137,8 @@ func Unauthorized(w http.ResponseWriter, r *http.Request, message string) {
 	Error(w, r, http.StatusUnauthorized, "unauthorized", message)
 }
 
-// Forbidden writes a 403 authentication_error with code forbidden.
+// Forbidden writes a 403 authentication_error with code forbidden. Write it
+// only before any change: the idempotency layer does not store a 403.
 func Forbidden(w http.ResponseWriter, r *http.Request, message string) {
 	Error(w, r, http.StatusForbidden, "forbidden", message)
 }

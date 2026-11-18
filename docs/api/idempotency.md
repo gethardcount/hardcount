@@ -73,9 +73,10 @@ If a customer with that `external_id` already exists, the first call
 answers `409` `already_exists`. A `409` is not stored, so the second call
 runs again and gets `409` too. Use an `external_id` you have not used yet.
 
-- **Use a UUID,** or another unique string. Keep it to 255 characters or
-  fewer: Hardcount does not check the length, but a very long key can fail
-  to be stored.
+- **Use a random UUID.** Every API key and dashboard user of an account
+  shares one set of keys in each mode, so make a key unpredictable, never a
+  counter or a name. Keep it to 255 characters or fewer: Hardcount does not
+  check the length, but a very long key can fail to be stored.
 - **A key belongs to one account and one mode, and a retry must come from
   the same caller:** the API key, or the dashboard user, that made the
   request. A retry from another API key or another user of the account gets
@@ -91,8 +92,8 @@ runs again and gets `409` too. Use an `external_id` you have not used yet.
 
 | The first request | A retry with the same key gets |
 |---|---|
-| Finished with any status except `409`, `422`, `503` or `400` `invalid JSON body`, including other `4xx` and `5xx` answers | The first status and body, plus `Idempotent-Replayed: true`. The request does not run again. A crash is the exception: see [A key Hardcount could not finish](#a-key-hardcount-could-not-finish). |
-| Finished with `409`, `422`, `503` or `400` `invalid JSON body` | A new run. These answers are not stored, so the key is free again. |
+| Finished with any status except `401`, `403`, `409`, `422`, `503` or `400` `invalid JSON body`, including other `4xx` and `5xx` answers | The first status and body, plus `Idempotent-Replayed: true`. The request does not run again. A crash is the exception: see [A key Hardcount could not finish](#a-key-hardcount-could-not-finish). |
+| Finished with `401`, `403`, `409`, `422`, `503` or `400` `invalid JSON body` | A new run. These answers are not stored, so the key is free again. |
 | Is still running, and the retry is the same request from the same caller | Hardcount waits up to 5 seconds for it, then answers `409` `conflict_idempotency`. Retry later with the same key. |
 | Is still running or has finished, and the retry's caller, method, path, query string or body differs | `422` `idempotency_error` at once. The key was first used by another caller or for a different request: use a new key for a new request. |
 | Started more than 5 minutes ago and never recorded an answer | `409` `conflict_idempotency_unresolved`. See [A key Hardcount could not finish](#a-key-hardcount-could-not-finish). |
@@ -102,10 +103,14 @@ A replay sends the first response's status and body only. The body's
 new request's. No other header of the first response is sent again.
 
 **A stored `4xx` comes back too.** A `400` other than `invalid JSON body`,
-a `403` for a key type that may not call the route, or a `404` is stored
-like any other answer. Fix the request, then send it with a new key: the
-fixed request has a different body, so the old key answers `422`
-`idempotency_error`.
+or a `404` for a record that does not exist, is stored like any other
+answer. Fix the request, then send it with a new key: the fixed request has
+a different body, so the old key answers `422` `idempotency_error`.
+
+**A refusal of the caller is never stored.** A `401`, or a `403` because the
+caller may not call the route or do what it asks, frees the key: Hardcount
+answers it before it changes anything. The next request with the key runs,
+from this caller or another.
 
 **A `400` `invalid JSON body` is never stored.** Hardcount refused the body
 before it did anything. Fix the body, then send it with the same key.
@@ -140,6 +145,8 @@ retry with the same key runs normally after them:
 
 - `401` (no key or a bad key) and `429` `rate_limited` (the
   [rate limit](rate-limits.md)).
+- `404` and `405` for a path or a method no route serves: nothing can run
+  there, so the request holds no key.
 - `403` for a browser request from another site.
 - `413` `payload_too_large` for a body over 1 MB: Hardcount reads the body
   to match it, and stops there.

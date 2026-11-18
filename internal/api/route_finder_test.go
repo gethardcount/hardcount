@@ -16,10 +16,16 @@ import (
 // requests up on it.
 var builtRouter = sync.OnceValue(func() chi.Routes { return newTestServer().router })
 
+// builtFinder is the server's route finder, on the built router.
+var builtFinder = sync.OnceValue(func() *routeFinder {
+	r := builtRouter()
+	return &routeFinder{root: r, served: newAllowIndex(r)}
+})
+
 // begin is the server's root middleware that makes each request's record,
 // on the built router.
 func begin() func(http.Handler) http.Handler {
-	return request.Begin((&routeFinder{root: builtRouter()}).route)
+	return request.Begin(builtFinder().route)
 }
 
 // lookedUp is the request as the middleware after the root sees it: with its
