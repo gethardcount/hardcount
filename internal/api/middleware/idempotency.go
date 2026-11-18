@@ -47,25 +47,24 @@ const (
 
 // Idempotency returns the middleware that makes a retried write safe. It
 // guards a POST, PUT or PATCH with an Idempotency-Key from a tenant, unless
-// ignore matches it (nil matches nothing). Every other request passes
-// through. The server's ignore names two kinds, which run as if no key was
-// sent: a request that matched no route, where nothing can run, and one whose
-// answer carries a secret shown once, which must never be kept.
+// ignore matches it (nil matches nothing); a request ignore matches runs as
+// if no key was sent, and the server's ignore (keepsNoKey, internal/api) says
+// which. Every other request passes through.
 //
 // A key is kept per tenant and mode for 24 hours, the expires_at default on
-// idempotency_keys. A request is the same
-// request as the one that first used the key when its caller (the API key,
-// or the dashboard user), method, path, query string and body match:
+// idempotency_keys. A request is the same request as the one that first used
+// the key when its caller (the API key, or the dashboard user), method, path,
+// query string and body match:
 //
-//   - The first request runs, and its answer is stored. The same request
-//     again gets that answer replayed, with Idempotent-Replayed: true, after
-//     waiting for it while the first still runs.
+//   - The first request runs, and its handler's answer is stored, unless
+//     freesKey says the answer frees the key: then the next request with the
+//     key runs.
+//   - The same request again gets the stored answer replayed, with
+//     Idempotent-Replayed: true, after waiting for it while the first still
+//     runs.
 //   - Any other request with the key gets 422 idempotency_error at once,
 //     finished or not. So a stored answer goes only to its own caller, never
 //     to another key or user of the account.
-//   - A refusal of the caller is not stored: a 401 or a 403 frees the key for
-//     the next request with it, as a 409, a 422, a 503 and a refused body
-//     (respond.WriteBodyError) do.
 //
 // Its other answers are in docs/architecture.md, "Where a refusal comes from".
 func Idempotency(db *postgres.DB, ignore func(*http.Request) bool) func(http.Handler) http.Handler {
@@ -127,7 +126,7 @@ func (g IdempotencyGuard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		// Running the handler unreserved would let the client's retry run
 		// the action a second time. A refused request is safe to retry.
-		idempotencyCacheErrors.WithLabelValues("reserve").Inc()
+		idempotencyKeyErrors.WithLabelValues("reserve").Inc()
 		slog.Log(r.Context(), logging.ErrorLevel(r.Context(), err), "idempotency reserve failed; refusing the request (503) rather than running it unprotected",
 			"path", request.Of(r.Context()).Route().Pattern, "error", err)
 		w.Header().Set("Retry-After", "1")
@@ -149,28 +148,42 @@ func (g IdempotencyGuard) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// The answer is stored on a background context, so a client that hangs
 	// up after the change committed still leaves it for the retry. A tenant
-	// transaction needs the request's mode, and the log lines its id.
+	// transaction needs the request's mode, and the log lines the request's
+	// id, which mw.RequestID stored under chi's key.
 	bgCtx := context.WithValue(postgres.WithLivemode(context.Background(), livemode), chimw.RequestIDKey, chimw.GetReqID(r.Context()))
 
-	// A stored 500 keeps a retry from running again a change that may have
-	// committed. A 401 or a 403 refuses the caller before any change
-	// (errs.Forbidden), so another caller's request with the key may run. A
-	// 409 or a 422 is not the request's outcome: a retry may get past the
-	// conflict, and the client fixes the body. A handler answers 503 only when
-	// a second run is safe (errs.Unavailable). A refused body was answered
-	// before anything changed. Any other 400 is stored: the handler may have
-	// written before it answered.
-	if bodyRefused() ||
-		recorder.statusCode == http.StatusUnauthorized ||
-		recorder.statusCode == http.StatusForbidden ||
-		recorder.statusCode == http.StatusConflict ||
-		recorder.statusCode == http.StatusUnprocessableEntity ||
-		recorder.statusCode == http.StatusServiceUnavailable {
+	if freesKey(recorder.statusCode, bodyRefused()) {
 		releaseKey(bgCtx, g.db, tenantID, key, recorder.statusCode)
 		return
 	}
 	finalizeKey(bgCtx, g.db, tenantID, key,
 		recorder.statusCode, recorder.body.Bytes())
+}
+
+// freesKey reports whether the handler's answer frees its key instead of
+// being stored, so the next request with the key runs. bodyRefused is true
+// when the handler refused the body (respond.WriteBodyError).
+func freesKey(status int, bodyRefused bool) bool {
+	switch {
+	case bodyRefused:
+		// Answered before anything changed.
+		return true
+	case status == http.StatusUnauthorized, status == http.StatusForbidden:
+		// A refusal of the caller comes before any change (errs.Forbidden),
+		// so another caller's request with the key may run.
+		return true
+	case status == http.StatusConflict, status == http.StatusUnprocessableEntity:
+		// Not the request's outcome: a retry may get past the conflict, and
+		// the client fixes the body.
+		return true
+	case status == http.StatusServiceUnavailable:
+		// A handler answers 503 only when a second run is safe
+		// (errs.Unavailable).
+		return true
+	}
+	// Every other answer is stored. A 500 keeps a retry from running again a
+	// change that may have committed, and any other 400 may follow a write.
+	return false
 }
 
 // fingerprintRequest hashes what makes two requests the same request: the
@@ -215,13 +228,19 @@ type keyRow struct {
 	ReservedAt  time.Time
 }
 
-// reserveKey claims key and reports whether this request won. Its one
-// statement orders the requests that send the key at once: exactly one
-// inserts a pending row and runs. An expired key is absent: its row, not yet
-// deleted by the IdempotencyCleaner, is taken over as a new pending
-// reservation, so a retry during the new run waits for the new answer. Of two requests on one
+// reserveKey claims key and reports whether this request won.
+//
+// Its one statement inserts a pending row, or takes over the row of an
+// expired key, which the IdempotencyCleaner has not deleted yet. The row's
+// created_at and expires_at come from the column defaults (now, and 24 hours
+// on), and a BEFORE INSERT trigger (set_livemode) sets its livemode from the
+// transaction's mode, so the conflict on (tenant_id, livemode, key) is in the
+// request's mode.
+//
+// The race: of the requests that send the key at once, exactly one inserts
+// and runs, and the others go to replayExistingKey. Of two requests on one
 // expired row, the second waits on the first's row lock, then finds the row
-// unexpired. The insert trigger sets livemode from the transaction's mode.
+// unexpired.
 func reserveKey(ctx context.Context, db *postgres.DB, tenantID, key, method, path string, fingerprint []byte) (claimed bool, err error) {
 	_, err = inKeyTx(ctx, db, tenantID, "insert", func(ctx context.Context, tx *sql.Tx) error {
 		res, err := tx.ExecContext(ctx,
@@ -261,7 +280,7 @@ func finalizeKey(ctx context.Context, db *postgres.DB, tenantID, key string, sta
 		return err
 	})
 	if err != nil {
-		idempotencyCacheErrors.WithLabelValues("finalize").Inc()
+		idempotencyKeyErrors.WithLabelValues("finalize").Inc()
 		slog.ErrorContext(ctx, "idempotency finalize failed; response not stored, key stays pending and retries with it get 409",
 			"stage", stage, "tenant_id", tenantID, "status_code", statusCode, "error", err)
 	}
@@ -278,7 +297,7 @@ func releaseKey(ctx context.Context, db *postgres.DB, tenantID, key string, answ
 		return err
 	})
 	if err != nil {
-		idempotencyCacheErrors.WithLabelValues("release").Inc()
+		idempotencyKeyErrors.WithLabelValues("release").Inc()
 		slog.ErrorContext(ctx, "idempotency release failed; key stays pending and retries with it get 409 instead of running again",
 			"stage", stage, "tenant_id", tenantID, "status_code", answerStatus, "error", err)
 	}
@@ -287,13 +306,13 @@ func releaseKey(ctx context.Context, db *postgres.DB, tenantID, key string, answ
 // readKey loads key's row. found is false when its owner released it. It
 // runs only after reserveKey found the row unexpired, so it applies no expiry
 // rule of its own.
-func readKey(ctx context.Context, db *postgres.DB, tenantID, key string) (c keyRow, found bool, err error) {
+func readKey(ctx context.Context, db *postgres.DB, tenantID, key string) (row keyRow, found bool, err error) {
 	_, err = inKeyTx(ctx, db, tenantID, "select", func(ctx context.Context, tx *sql.Tx) error {
 		err := tx.QueryRowContext(ctx,
 			`SELECT status_code, response_body, request_fingerprint, created_at FROM idempotency_keys
 			WHERE tenant_id = $1 AND key = $2`,
 			tenantID, key,
-		).Scan(&c.StatusCode, &c.Body, &c.Fingerprint, &c.ReservedAt)
+		).Scan(&row.StatusCode, &row.Body, &row.Fingerprint, &row.ReservedAt)
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil
 		}
@@ -303,13 +322,13 @@ func readKey(ctx context.Context, db *postgres.DB, tenantID, key string) (c keyR
 	if err != nil {
 		return keyRow{}, false, err
 	}
-	return c, found, nil
+	return row, found, nil
 }
 
 // inKeyTx runs statement on a tenant transaction bounded by keyQueryTimeout,
-// and commits it. On a failure it names the step that failed: "begin", step
-// or "commit".
-func inKeyTx(ctx context.Context, db *postgres.DB, tenantID, step string, statement func(context.Context, *sql.Tx) error) (string, error) {
+// and commits it. On a failure it names the stage that failed: "begin",
+// stage (the statement's) or "commit".
+func inKeyTx(ctx context.Context, db *postgres.DB, tenantID, stage string, statement func(context.Context, *sql.Tx) error) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, keyQueryTimeout)
 	defer cancel()
 
@@ -320,7 +339,7 @@ func inKeyTx(ctx context.Context, db *postgres.DB, tenantID, step string, statem
 	defer postgres.Rollback(tx)
 
 	if err := statement(ctx, tx); err != nil {
-		return step, err
+		return stage, err
 	}
 	if err := tx.Commit(); err != nil {
 		return "commit", err
@@ -328,15 +347,22 @@ func inKeyTx(ctx context.Context, db *postgres.DB, tenantID, step string, statem
 	return "", nil
 }
 
-// replayExistingKey answers a request whose key another request holds: 422
-// when the key's fingerprint is not this request's, the stored answer once
-// there is one, and otherwise 409, such as when there is still none after
-// idempotencyPollTimeout.
+// replayExistingKey answers a request whose key another request holds. It
+// reads the key's row until one of these applies, checked in this order:
+//
+//   - the row cannot be read: 409 conflict_idempotency;
+//   - the row's fingerprint is not this request's: 422 idempotency_error;
+//   - the row holds an answer: that answer, replayed;
+//   - the owner freed the key: 409 conflict_idempotency;
+//   - the reservation is older than idempotencyOrphanAfter: 409
+//     conflict_idempotency_unresolved;
+//   - idempotencyPollTimeout has passed, or the client went away: 409
+//     conflict_idempotency.
 func replayExistingKey(w http.ResponseWriter, r *http.Request, db *postgres.DB, tenantID, key string, fingerprint []byte) {
 	ctx := r.Context()
 	deadline := time.Now().Add(idempotencyPollTimeout)
 	for {
-		c, found, err := readKey(ctx, db, tenantID, key)
+		row, found, err := readKey(ctx, db, tenantID, key)
 		if err != nil {
 			// Not running the request: the first one may be running it now.
 			respond.Error(w, r, http.StatusConflict, "conflict_idempotency",
@@ -344,14 +370,13 @@ func replayExistingKey(w http.ResponseWriter, r *http.Request, db *postgres.DB, 
 			return
 		}
 		// Checked first, while the first request still runs too, so another
-		// caller never waits on it or learns how it ended. A row written
-		// without a fingerprint, which this code never does, matches none.
-		if found && !bytes.Equal(c.Fingerprint, fingerprint) {
+		// caller never waits on it or learns how it ended.
+		if found && !bytes.Equal(row.Fingerprint, fingerprint) {
 			respond.Error(w, r, http.StatusUnprocessableEntity, "idempotency_error",
 				"This Idempotency-Key was first used by another caller or with a different request. Use a new key for a new request.")
 			return
 		}
-		if found && c.StatusCode != statusPending {
+		if found && row.StatusCode != statusPending {
 			// A replay changes nothing, and the first request wrote the audit
 			// row. Without the mark, the audit detector, which wraps this
 			// middleware, would report every replayed 2xx; a second row would
@@ -361,8 +386,8 @@ func replayExistingKey(w http.ResponseWriter, r *http.Request, db *postgres.DB, 
 			w.Header().Set("Content-Type", "application/json")
 			w.Header().Set("Hardcount-Version", version.Version)
 			w.Header().Set("Idempotent-Replayed", "true")
-			w.WriteHeader(c.StatusCode)
-			_, _ = w.Write(c.Body)
+			w.WriteHeader(row.StatusCode)
+			_, _ = w.Write(row.Body)
 			return
 		}
 		// The owner freed the key. This request still lost the race, so it
@@ -373,7 +398,7 @@ func replayExistingKey(w http.ResponseWriter, r *http.Request, db *postgres.DB, 
 			return
 		}
 		// No polling can tell what an orphaned reservation's owner did.
-		if age := time.Since(c.ReservedAt); age > idempotencyOrphanAfter {
+		if age := time.Since(row.ReservedAt); age > idempotencyOrphanAfter {
 			respond.Error(w, r, http.StatusConflict, "conflict_idempotency_unresolved",
 				fmt.Sprintf("A request with this idempotency key started %s ago and never recorded an outcome — the replica handling it may have died mid-request. Whether its side effect committed is unknown: fetch the resource to check, then retry with a NEW idempotency key only if it does not exist.", age.Round(time.Minute)))
 			return
@@ -412,37 +437,4 @@ func (r *responseRecorder) Write(b []byte) (int, error) {
 	r.answered = true
 	r.body.Write(b)
 	return r.ResponseWriter.Write(b)
-}
-
-// IdempotencyCleaner deletes expired keys, in the shape of the scheduler's
-// cleaners (billing.IdempotencyCleaner), so the scheduler does not import
-// this package.
-type IdempotencyCleaner struct {
-	db *postgres.DB
-}
-
-// NewIdempotencyCleaner returns an IdempotencyCleaner for the keys in db.
-func NewIdempotencyCleaner(db *postgres.DB) *IdempotencyCleaner {
-	return &IdempotencyCleaner{db: db}
-}
-
-// Cleanup deletes the expired keys of every tenant and returns how many it
-// deleted. The scheduler calls it outside any request, so it bypasses the
-// tenant_isolation policy (TxBypass).
-func (c *IdempotencyCleaner) Cleanup(ctx context.Context) (int, error) {
-	tx, err := c.db.BeginTx(ctx, postgres.TxBypass, "")
-	if err != nil {
-		return 0, err
-	}
-	defer postgres.Rollback(tx)
-
-	res, err := tx.ExecContext(ctx, `DELETE FROM idempotency_keys WHERE expires_at < now()`)
-	if err != nil {
-		return 0, err
-	}
-	n, _ := res.RowsAffected()
-	if err := tx.Commit(); err != nil {
-		return 0, err
-	}
-	return int(n), nil
 }

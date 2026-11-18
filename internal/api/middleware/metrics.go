@@ -36,17 +36,18 @@ var (
 		},
 	)
 
-	// idempotencyCacheErrors counts idempotency-layer database failures by
-	// stage. None of them runs a handler twice:
+	// idempotencyKeyErrors counts idempotency-layer database failures by
+	// stage (its metric name keeps "cache" for the alerts and dashboards that
+	// match it). None of them runs a handler twice:
 	//   - reserve: the key could not be claimed, so the request was refused
 	//     with a retryable 503 and the handler did not run.
 	//   - finalize: the handler ran but its response was not stored. The key
 	//     stays pending, and retries with it get 409.
-	//   - release: an answer that is not stored (a 401, 403, 409, 422, 503 or
-	//     refused body) could not free the key. It stays pending, and retries
-	//     with it get 409 instead of running again.
+	//   - release: an answer that frees its key (freesKey) could not free it.
+	//     It stays pending, and retries with it get 409 instead of running
+	//     again.
 	// A sustained rate means clients are being refused or stuck on 409s.
-	idempotencyCacheErrors = promauto.NewCounterVec(
+	idempotencyKeyErrors = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "hardcount_idempotency_cache_errors_total",
 			Help: "Idempotency-key failures by stage: reserve (the key could not be claimed, on a database error or a client that went away; the request was refused with 503), finalize (response not stored; retries get 409), release (key not freed; retries get 409).",

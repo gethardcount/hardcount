@@ -69,9 +69,8 @@ func WithTenantID(ctx context.Context, tenantID string) context.Context {
 }
 
 // WithUserID returns ctx with id as the caller's user. The account routes
-// that session.RequireCaller does not guard (a sign-in, a sign-out, a mode
-// switch, an accepted invitation, a password reset) set it, so their audit
-// row names the user. Each calls it on a context with no caller, so the
+// outside authentication (route_table.go's outsideAuth entries) set it, so
+// their audit row names the user. Each calls it on a context with no caller, so the
 // result is that user's session (IsSession).
 func WithUserID(ctx context.Context, id string) context.Context {
 	c := CallerOf(ctx)

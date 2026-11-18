@@ -103,8 +103,9 @@ func (c CallerRequired) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 }
 
 // NameActor names s's user on the request's record, for the access log. It
-// is for a handler that resolves the session cookie itself (sign-out and the
-// mode switch); RequireCaller names the caller of every route behind it.
+// is for a handler outside authentication that reads the session cookie
+// itself (route_table.go's outsideAuth says which); RequireCaller names the
+// caller of every route behind it.
 func NameActor(ctx context.Context, s Session) {
 	request.SetActor(ctx, actorOf(sessionCaller(s)))
 }

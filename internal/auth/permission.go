@@ -23,8 +23,8 @@ const (
 	PermDunningRead  Permission = "dunning:read"
 	PermDunningWrite Permission = "dunning:write"
 
-	// apikey:read and apikey:write gate more than API keys; the route table
-	// (internal/api/route_table.go) names each route's permission.
+	// apikey:read and apikey:write gate more than API keys: the access values
+	// in internal/api/route_table.go say what each guards.
 	PermAPIKeyRead  Permission = "apikey:read"
 	PermAPIKeyWrite Permission = "apikey:write"
 
@@ -48,7 +48,9 @@ var keyTypes = []KeyType{KeyTypeSecret, KeyTypeIngest}
 // hasPermission reports whether c holds perm: a session and a secret key hold
 // every permission, an ingest key holds only usage:ingest, and any other
 // caller holds none. PermissionRequired decides the session-only and
-// any-caller routes, and some handlers refuse more.
+// any-caller routes, and three handlers refuse more: the test email refuses
+// any key, tenantstripe's checkMode the other mode's connection, and the
+// billing run a caller with no tenant.
 func hasPermission(c Caller, perm Permission) bool {
 	switch {
 	case c.IsSession():
