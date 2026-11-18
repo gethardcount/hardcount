@@ -7,19 +7,20 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/logging"
-	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
 // operatorCodeError is an error that names its own code in place of
 // provider_error, such as payment_outcome_unknown when the provider never
 // answered and the charge may have gone through. "" keeps provider_error.
+// "Operator" in these names is the client reading the answer: the account's
+// staff in the dashboard, or its code calling the API.
 type operatorCodeError interface {
 	OperatorErrorCode() string
 }
 
 // FromError writes the answer for an error a service or store returned. It
 // picks the status from the error's kind, never from its text. The first
-// row that matches wins:
+// row that matches wins, and a DomainError's Code replaces a code marked *:
 //
 //	kind                   status  code                                      message
 //	errs.ErrUnavailable    503     unavailable*, and Retry-After: 1          the DomainError's own, else a fixed retry text
@@ -31,11 +32,10 @@ type operatorCodeError interface {
 //	errs.SafeMessageError  502     provider_error, or its OperatorErrorCode  its OperatorSafeMessage()
 //	anything else          500     internal_error                            a generic message
 //
-// A DomainError's Code replaces a code marked *. A 409 or 422 has the
-// DomainError's Field as its param. A SafeMessageError is 502 because the
-// request reached a provider and the provider refused it. The 503, 502 and
-// 500 answers log err; the others are the client's to fix and log nothing.
-// A nil err writes nothing.
+// A 409 or 422 has the DomainError's Field as its param. A SafeMessageError
+// is 502 because the request reached a provider and the provider refused it.
+// The 503, 502 and 500 answers log err; the others are the client's to fix
+// and log nothing. A nil err writes nothing.
 func FromError(w http.ResponseWriter, r *http.Request, err error, resource string) {
 	if err == nil {
 		return
@@ -121,10 +121,4 @@ func domainMessage(err error, otherwise string) string {
 		return de.Message
 	}
 	return otherwise
-}
-
-// routePattern returns the request's route pattern from its record (for
-// example "/v1/api-keys/{id}/rotate"), or "" when it matched none.
-func routePattern(r *http.Request) string {
-	return request.Of(r.Context()).Route().Pattern
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
 // concurrentChangeMessage is the 409's message. The dashboard shows it to an
@@ -63,4 +64,10 @@ func ConcurrentChangeAsConflict(r *http.Request, err error) error {
 		"path", routePattern(r),
 	)
 	return ConcurrentChange()
+}
+
+// routePattern returns the request's route pattern from its record (for
+// example "/v1/api-keys/{id}/rotate"), or "" when it matched none.
+func routePattern(r *http.Request) string {
+	return request.Of(r.Context()).Route().Pattern
 }

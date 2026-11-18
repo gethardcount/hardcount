@@ -1,5 +1,7 @@
 // Package middleware holds the HTTP middleware of the API server. "The path
 // of a request" in docs/architecture.md says where each one runs and why.
+// The steps the router's chain test in internal/api checks have exported
+// handler types, such as CrossSiteCheck: the test tells them apart by type.
 package middleware
 
 import (

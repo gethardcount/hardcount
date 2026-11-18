@@ -19,17 +19,24 @@ import (
 )
 
 // clockDoor is the door: the last step of every group, which binds the
-// instant a request runs on before its handler, from its route's entry in
-// routeTable. A real-time route gets one read of the server's clock. A
-// record's route gets, in test mode, the time of the test clock its record is
-// on, and one read when the record is on none, is not found, or has an id
-// Postgres cannot read; in live mode, where no record is on a clock, one read
-// and no lookup. A decidedIn route gets no instant (in test mode, real time
-// with none): its named function decides after it reads its record. So does a
-// request whose route is not in routeTable, which the router answers 404 or
-// 405. A request with no mode yet counts as test mode.
-// A clock that cannot be read is answered 503, which the client retries and
-// Idempotency does not keep, and the handler does not run.
+// instant a request runs on before its handler runs. docs/architecture.md,
+// "The path of a request", says why it ends every group. The instant is the
+// time on the context that clock.Now and every Clock's Now(ctx) return, so
+// all the work of one request reads one time. By the request's entry in
+// routeTable, the door puts on the context:
+//
+//   - real time: one read of the server's clock, in either mode.
+//   - a record's clock: in test mode, the clock the record is on and its
+//     instant, or one read when the record is on none, is not found, or has
+//     an id Postgres cannot read; in live mode, one read and no lookup.
+//   - decided in a named function: no instant. In test mode it marks real
+//     time decided (clock.WithRealTime) until that function decides; in live
+//     mode it puts nothing.
+//   - no entry, which the router answers 404 or 405: as decided in.
+//
+// A request with no mode yet counts as test mode. A record's clock that
+// cannot be read answers 503, which the client retries and Idempotency does
+// not keep, and the handler does not run.
 type clockDoor struct {
 	resolver clock.Resolver
 	// clock is the server's clock: the door reads real time from it at most
@@ -41,8 +48,6 @@ type clockDoor struct {
 	dunningRunInvoice func(ctx context.Context, tenantID, id string) (string, error)
 }
 
-// Middleware is the door (docs/architecture.md#the-path-of-a-request says
-// why it ends every group).
 func (d *clockDoor) Middleware(next http.Handler) http.Handler {
 	return doorHandler{door: d, next: next}
 }

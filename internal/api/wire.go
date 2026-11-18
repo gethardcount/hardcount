@@ -6,9 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	mw "github.com/gethardcount/hardcount/internal/api/middleware"
-
 	"github.com/gethardcount/hardcount/internal/analytics"
+	mw "github.com/gethardcount/hardcount/internal/api/middleware"
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/billing"
@@ -79,9 +78,9 @@ func WithInvoiceGrace(d time.Duration) ServerOption {
 }
 
 // wire builds the stores, services and handlers, and the Server that holds
-// what the routes read. Each value is built once what it needs exists. A
-// setter's own doc says what it is for. The boot gates near the end refuse to
-// start with an engine collaborator, audit emitter or outbox left unwired.
+// what the routes read. Each value is built once what it needs exists. The
+// boot gates near the end refuse to start with an engine collaborator, audit
+// emitter or outbox left unwired.
 func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOption) *Server {
 	if clk == nil {
 		clk = clock.Real()
