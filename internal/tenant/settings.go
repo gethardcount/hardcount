@@ -364,13 +364,12 @@ func NewSettingsHandler(store *SettingsStore) *SettingsHandler {
 // metadata={"path":"/v1/settings"} and no record of WHAT changed.
 func (h *SettingsHandler) SetAuditLogger(a SettingsAuditRecorder) { h.auditLogger = a }
 
-// Routes serves GET and PUT /v1/settings. update gates the PUT: the settings
-// are shared by test and live mode, so the router lets only a dashboard
-// session change them.
-func (h *SettingsHandler) Routes(update func(http.Handler) http.Handler) chi.Router {
+// Routes serves GET and PUT /v1/settings. The settings are shared by test and
+// live mode, so the API's route table lets only a dashboard session PUT them.
+func (h *SettingsHandler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Get("/", h.get)
-	r.With(update).Put("/", h.upsert)
+	r.Put("/", h.upsert)
 	return r
 }
 

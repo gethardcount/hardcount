@@ -142,13 +142,13 @@ var ingestKeyRoutes = map[string]bool{
 }
 
 // TestIngestKey_RefusedOnEveryRouteButUsage walks the live router. On every
-// route that takes an API key, it runs the route's permission gates (the
-// auth.Require, RequireMethod and RequireSession middlewares chi.Walk
-// reports for it) as an ingest key, and checks the gates let it through
-// only on the routes ingestKeyRoutes marks true. Everywhere else
-// the answer is the ordinary missing-permission 403. A route with no gate
-// at all lets the key through and fails here unless it is listed, so a new
-// route cannot open to ingest keys by forgetting its permission.
+// route that takes an API key, it runs the route's permission check (the
+// auth.RequirePermission step chi.Walk reports for it, which reads the route
+// table) as an ingest key, and checks it lets the key through only on the
+// routes ingestKeyRoutes marks true. Everywhere else the answer is the
+// ordinary missing-permission 403. A route open to any caller lets the key
+// through and fails here unless it is listed, so a new route cannot open to
+// ingest keys by naming the wrong permission.
 //
 // It also checks that a dashboard session passes every gate, and a secret
 // key every gate but a session-only one.
@@ -166,25 +166,23 @@ func TestIngestKey_RefusedOnEveryRouteButUsage(t *testing.T) {
 			return nil
 		}
 		route = canonicalRoute(route)
-		authed, sessionOnly := false, false
+		authed := false
 		var gates []func(http.Handler) http.Handler
 		for i, h := range handlersOf(mws) {
 			switch h.(type) {
 			case session.CallerRequired:
 				authed = true
-			case auth.SessionRequired:
-				sessionOnly = true
-				gates = append(gates, mws[i])
-			case auth.PermissionCheck:
+			case auth.PermissionRequired:
 				gates = append(gates, mws[i])
 			}
 		}
 		if !authed {
 			if len(gates) > 0 {
-				t.Errorf("%s %s has a permission gate but no API-key auth before it", method, route)
+				t.Errorf("%s %s has a permission check but no API-key auth before it", method, route)
 			}
 			return nil // a public route: no API key is read
 		}
+		sessionOnly := routeTable[routeKey{Method: method, Pattern: route}].who.need.Session != ""
 		key := method + " " + route
 		seen[key] = true
 		checked++
@@ -210,7 +208,8 @@ func TestIngestKey_RefusedOnEveryRouteButUsage(t *testing.T) {
 			ctx := auth.WithCaller(postgres.WithLivemode(context.Background(), false), c.caller)
 			req := httptest.NewRequest(method, probePath(route), nil).WithContext(ctx)
 			rec := httptest.NewRecorder()
-			h.ServeHTTP(rec, req)
+			// The check reads the route from the request's record.
+			begin()(h).ServeHTTP(rec, req)
 
 			switch {
 			case ingest && ingestKeyRoutes[key]:

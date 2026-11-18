@@ -1,6 +1,6 @@
 package auth
 
-// Permission is what a route requires of its caller (Require, RequireMethod).
+// Permission is what a route requires of its caller (RequirePermission).
 type Permission string
 
 const (

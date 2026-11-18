@@ -12,8 +12,6 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-
-	"github.com/gethardcount/hardcount/internal/auth"
 )
 
 // TestRouteTable_MatchesLiveRoutes walks the live router and compares it with
@@ -188,80 +186,21 @@ func TestRouteTable_AnyCallerStaysSmall(t *testing.T) {
 	}
 }
 
-// TestRouteTable_PermissionsMatchTheMounts: every route behind authentication
-// names in its entry what its mount's checks enforce today, and every route
-// outside authentication names noCaller. Each check is matched by the handler
-// it makes (makesSame): auth.RequireMethod(read, write) with the entry's
-// permission on the side the route's method picks, or auth.RequireSession
-// with the entry's task.
-func TestRouteTable_PermissionsMatchTheMounts(t *testing.T) {
-	var perms []auth.Permission
-	for _, d := range routeTable {
-		if p := d.who.need.Perm; p != "" && !slices.Contains(perms, p) {
-			perms = append(perms, p)
-		}
-	}
-	checked := 0
+// TestRouteTable_NoCallerIsOutsideAuthentication: a route names noCaller
+// exactly when it is outside authentication. One behind it that named
+// noCaller would be refused by every caller; one outside it that named a
+// permission would have it checked by nobody.
+func TestRouteTable_NoCallerIsOutsideAuthentication(t *testing.T) {
 	err := chi.Walk(builtRouter(), func(method, route string, _ http.Handler, mws ...func(http.Handler) http.Handler) error {
 		key := routeKey{Method: method, Pattern: canonicalRoute(route)}
-		w := routeTable[key].who
-		authed := chainIndex(mws, authMW) >= 0
-		if w.noCaller == authed {
-			t.Errorf("%s %s: noCaller is %v, but the route is behind authentication: %v", method, key.Pattern, w.noCaller, authed)
-			return nil
+		if authed := chainIndex(mws, authMW) >= 0; routeTable[key].who.noCaller == authed {
+			t.Errorf("%s %s: noCaller is %v, but the route is behind authentication: %v", method, key.Pattern, routeTable[key].who.noCaller, authed)
 		}
-		if !authed {
-			return nil
-		}
-		var gates []func(http.Handler) http.Handler
-		for _, m := range mws {
-			switch m(chainStub).(type) {
-			case auth.PermissionCheck, auth.SessionRequired:
-				gates = append(gates, m)
-			}
-		}
-		if !mountsEnforce(gates, method, w.need, perms) {
-			t.Errorf("%s %s: the entry names %+v, which is not what its mount checks", method, key.Pattern, w.need)
-		}
-		checked++
 		return nil
 	})
 	if err != nil {
 		t.Fatalf("walk: %v", err)
 	}
-	if checked < 150 {
-		t.Fatalf("checked %d authenticated routes, want every one (161 today)", checked)
-	}
-}
-
-// mountsEnforce reports whether gates, a route's mount checks, enforce need for
-// method.
-func mountsEnforce(gates []func(http.Handler) http.Handler, method string, need auth.Need, perms []auth.Permission) bool {
-	switch {
-	case need.Any:
-		return len(gates) == 0
-	case need.Session != "":
-		// A session holds every permission, so a permission check beside the
-		// session check changes nothing.
-		found := false
-		for _, g := range gates {
-			if makesSame(g, auth.RequireSession(need.Session)) {
-				found = true
-			} else if _, ok := g(chainStub).(auth.PermissionCheck); !ok {
-				return false
-			}
-		}
-		return found
-	case need.Perm != "" && len(gates) == 1:
-		write := isMutatingMethod(method)
-		for _, x := range perms {
-			if !write && makesSame(gates[0], auth.RequireMethod(need.Perm, x)) ||
-				write && makesSame(gates[0], auth.RequireMethod(x, need.Perm)) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 // TestRouteTable_ExemptionsStaySmall pins how many routes each exempt reason
@@ -357,9 +296,9 @@ func TestAuditRoute_ExemptOnlyForDeclaredRoutes(t *testing.T) {
 }
 
 // On real URLs, as the root's record finds them, only a route marked
-// showsSecretOnce answers with a show-once secret: every marked route with
+// withShowOnce answers with a show-once secret: every marked route with
 // concrete ids is, and the near misses around them are not.
-func TestAnswersWithShowOnceSecret_OnlyOnAMarkedRoute(t *testing.T) {
+func TestIsShowOnce_OnlyOnAMarkedRoute(t *testing.T) {
 	for _, tc := range []struct {
 		method, path string
 		want         bool
@@ -394,7 +333,7 @@ func TestAnswersWithShowOnceSecret_OnlyOnAMarkedRoute(t *testing.T) {
 		{"PATCH", "/v1/webhook-endpoints/endpoints/hc_whe_a", false},
 		{"POST", "/v2/api-keys", false},
 	} {
-		if got := answersWithShowOnceSecret(lookedUp(tc.method, tc.path)); got != tc.want {
+		if got := isShowOnce(lookedUp(tc.method, tc.path)); got != tc.want {
 			t.Errorf("%s %s: %v, want %v", tc.method, tc.path, got, tc.want)
 		}
 	}

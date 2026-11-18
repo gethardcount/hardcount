@@ -19,7 +19,7 @@ import (
 // removal kills the removed member's session. This pins the seams the
 // package-level dashmembers tests can't: chi route registration (the
 // public accept routes vs the /v1/auth Mount("/") wildcard), the
-// RequireSession gate, cookie minting on accept, and the env-driven
+// session-only route, cookie minting on accept, and the env-driven
 // DASHBOARD_BASE_URL plumbing through router construction.
 func TestE2E_MemberInviteAcceptRemove(t *testing.T) {
 	db := testutil.SetupTestDB(t)

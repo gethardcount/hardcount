@@ -169,8 +169,7 @@ func (s *Server) routes() chi.Router {
 	})
 	// The root chain; docs/architecture.md#the-path-of-a-request lists each
 	// step and says why the record, the metrics, the access log and the door
-	// sit where they do. Everything above the Recoverer runs where a
-	// panic is not recovered by ours; routeFinder says why Begin cannot panic.
+	// sit where they do.
 	useRequestEdge(r, s.settings.TrustProxy, s.settings.TrustedProxies(), request.Begin(finder.route))
 	r.Use(mw.Metrics())
 	r.Use(accessLog)
@@ -243,20 +242,21 @@ func (s *Server) routes() chi.Router {
 		r.Mount("/v1/public/cost-dashboard", s.customerH.PublicCostDashboardRoutes())
 	})
 
-	// Every other /v1 route takes a session cookie or a Bearer key, then joins
-	// one of four groups, which differ in rate limit, Idempotency and time
-	// limit. chi runs a group's steps once a route or a mount's prefix matches:
-	// a path under no mount answers its 404 or 405 after authentication alone,
-	// and one under a mount after the group's steps. The
-	// CSRF guard comes before authentication, so a cross-site write is refused
-	// before the session cookie is read.
+	// Every other /v1 route takes a session cookie or a Bearer key, passes the
+	// route table's permission check, then joins one of four groups, which
+	// differ in rate limit, Idempotency and time limit. The CSRF guard comes
+	// before authentication, so a cross-site write is refused before the
+	// session cookie is read. A path no route serves passes the permission
+	// check and gets its 404 or 405: after authentication only when it is
+	// under no mount, and after the group's steps when it is under one.
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(mw.CSRFGuard(allowedOrigins))
 		r.Use(session.RequireCaller(s.sessionSvc, s.authSvc))
 		r.Use(auth.RequirePermission(routeNeeds{}))
 
 		// The event stream: no timeout (an EventSource stays open for hours),
-		// and no Idempotency (GET only).
+		// and no Idempotency (GET only). It takes the session and key
+		// services again because it re-checks its credential while open.
 		r.Group(func(r chi.Router) {
 			r.Use(s.rateLimiter.Middleware())
 			r.Use(door.Middleware)
@@ -270,32 +270,20 @@ func (s *Server) routes() chi.Router {
 			r.Use(mw.Timeout(exportTimeout))
 			r.Use(door.Middleware)
 			exportsH := newExportsHandler(s.customerStore, s.invoiceStore, s.subStore, s.usageStore, s.auditLogger, s.auditLogger)
-			r.Mount("/exports", exportsH.Routes(
-				auth.Require(auth.PermCustomerRead),
-				auth.Require(auth.PermInvoiceRead),
-				auth.Require(auth.PermSubscriptionRead),
-				auth.Require(auth.PermUsageRead),
-				auth.Require(auth.PermAPIKeyRead),
-			))
+			r.Mount("/exports", exportsH.Routes())
 		})
 
 		// Usage ingest: its own, much larger bucket, because LiteLLM drops a
 		// rate-limited event for good, and no Idempotency, because each event's
-		// own key (or the held row moving once) is its dedup. Sending usage
-		// needs only usage:ingest, the one permission an ingest key holds
-		// (ADR-133); backfill, the reads and the held-usage actions need more.
+		// own key is its dedup, and a held row (usage that named a customer or
+		// meter that did not exist yet, kept to release later) moves once.
 		r.Group(func(r chi.Router) {
 			r.Use(s.ingestLimiter.Middleware())
 			r.Use(mw.Timeout(requestTimeout))
 			r.Use(door.Middleware)
-			r.With(auth.Require(auth.PermUsageWrite)).Post("/usage-events/backfill", s.usageH.Backfill)
-			r.Mount("/usage-events", s.usageH.Routes(
-				auth.Require(auth.PermUsageIngest),
-				auth.Require(auth.PermUsageRead),
-				auth.Require(auth.PermUsageWrite),
-			))
-			r.With(auth.Require(auth.PermUsageIngest)).Mount("/integrations/litellm",
-				litellm.New(s.customerStore, s.pricingSvc, s.usageSvc, s.usageSvc).Routes())
+			r.Post("/usage-events/backfill", s.usageH.Backfill)
+			r.Mount("/usage-events", s.usageH.Routes())
+			r.Mount("/integrations/litellm", litellm.New(s.customerStore, s.pricingSvc, s.usageSvc, s.usageSvc).Routes())
 		})
 
 		// Ordinary routes: replayable by Idempotency-Key, 30 s.
@@ -309,43 +297,37 @@ func (s *Server) routes() chi.Router {
 			r.Use(door.Middleware)
 
 			r.Get("/whoami", s.handleWhoami)
-			r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/api-keys", s.authH.Routes())
-			r.With(auth.RequireSession("manage team membership")).Mount("/members", s.membersH.Routes())
-			r.With(auth.RequireMethod(auth.PermCustomerRead, auth.PermCustomerWrite)).Mount("/customers", s.customerH.Routes())
-			// A customer's usage and margin need usage:read, not the /customers
-			// permissions.
-			r.Mount("/customers/{id}/usage", s.customerUsageH.CustomerUsageRoutes(
-				auth.Require(auth.PermUsageRead),
-			))
-			r.With(auth.Require(auth.PermUsageRead)).Get("/customers/{id}/margin", s.providerCostH.Margin)
-			r.With(auth.RequireMethod(auth.PermUsageRead, auth.PermUsageWrite)).Mount("/provider-costs", s.providerCostH.Routes())
-			r.With(auth.RequireMethod(auth.PermCustomerRead, auth.PermCustomerWrite)).Mount("/customers/{customer_id}/payment-methods", s.paymentMethodsH.OperatorRoutes())
-			r.With(auth.RequireMethod(auth.PermPricingRead, auth.PermPricingWrite)).Mount("/meters", s.pricingH.MeterRoutes())
-			r.With(auth.RequireMethod(auth.PermPricingRead, auth.PermPricingWrite)).Mount("/plans", s.pricingH.PlanRoutes())
-			r.With(auth.Require(auth.PermPricingWrite)).Mount("/recipes", s.recipeH.Routes())
-			r.With(auth.RequireMethod(auth.PermSubscriptionRead, auth.PermSubscriptionWrite)).Mount("/subscriptions", s.subH.Routes())
-			r.With(auth.Require(auth.PermInvoiceRead)).Mount("/invoices/create_preview", s.createPreviewH.Routes())
-			r.With(auth.RequireMethod(auth.PermInvoiceRead, auth.PermInvoiceWrite)).Mount("/invoices", s.invoiceH.Routes())
-			r.With(auth.Require(auth.PermInvoiceWrite)).Mount("/credit-notes", s.creditNoteH.Routes())
-			r.With(auth.Require(auth.PermPricingWrite)).Mount("/price-overrides", s.pricingH.OverrideRoutes())
-			r.With(auth.Require(auth.PermCustomerWrite)).Mount("/credits", s.creditH.Routes())
-			r.With(auth.RequireMethod(auth.PermDunningRead, auth.PermDunningWrite)).Mount("/dunning", s.dunningH.Routes())
-			r.With(auth.Require(auth.PermInvoiceWrite)).Mount("/billing", s.billingH.Routes())
-			r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/webhook-endpoints", s.webhookOutH.Routes())
-			// A replay needs only apikey:read: it sends again an event already
-			// emitted.
-			r.With(auth.Require(auth.PermAPIKeyRead)).Mount("/webhook_events", s.webhookOutH.EventRoutes())
-			r.With(auth.Require(auth.PermAPIKeyRead)).Mount("/audit-log", s.auditH.Routes())
-			r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings", s.settingsH.Routes(auth.RequireSession("change account settings")))
+			r.Mount("/api-keys", s.authH.Routes())
+			r.Mount("/members", s.membersH.Routes())
+			r.Mount("/customers", s.customerH.Routes())
+			r.Mount("/customers/{id}/usage", s.customerUsageH.CustomerUsageRoutes())
+			r.Get("/customers/{id}/margin", s.providerCostH.Margin)
+			r.Mount("/provider-costs", s.providerCostH.Routes())
+			r.Mount("/customers/{customer_id}/payment-methods", s.paymentMethodsH.OperatorRoutes())
+			r.Mount("/meters", s.pricingH.MeterRoutes())
+			r.Mount("/plans", s.pricingH.PlanRoutes())
+			r.Mount("/recipes", s.recipeH.Routes())
+			r.Mount("/subscriptions", s.subH.Routes())
+			r.Mount("/invoices/create_preview", s.createPreviewH.Routes())
+			r.Mount("/invoices", s.invoiceH.Routes())
+			r.Mount("/credit-notes", s.creditNoteH.Routes())
+			r.Mount("/price-overrides", s.pricingH.OverrideRoutes())
+			r.Mount("/credits", s.creditH.Routes())
+			r.Mount("/dunning", s.dunningH.Routes())
+			r.Mount("/billing", s.billingH.Routes())
+			r.Mount("/webhook-endpoints", s.webhookOutH.Routes())
+			r.Mount("/webhook_events", s.webhookOutH.EventRoutes())
+			r.Mount("/audit-log", s.auditH.Routes())
+			r.Mount("/settings", s.settingsH.Routes())
 			// A caller manages only its own mode's Stripe connection.
 			// tenantstripe.Service checks it, not a middleware, because the mode
 			// comes from the body or the path.
-			r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings/stripe", s.tenantStripeH.Routes())
-			r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings/email", s.emailSettingsH.Routes())
-			r.With(auth.Require(auth.PermInvoiceRead)).Mount("/analytics", s.analyticsH.Routes())
-			r.With(auth.Require(auth.PermTestClockWrite)).Mount("/test-clocks", s.testClockH.Routes())
+			r.Mount("/settings/stripe", s.tenantStripeH.Routes())
+			r.Mount("/settings/email", s.emailSettingsH.Routes())
+			r.Mount("/analytics", s.analyticsH.Routes())
+			r.Mount("/test-clocks", s.testClockH.Routes())
 			customerDetail := newCustomerDetailHandler(s.customerStore, s.subStore, s.invoiceStore)
-			r.With(auth.Require(auth.PermCustomerRead)).Get("/customers/{customer_id}/overview", customerDetail.overview)
+			r.Get("/customers/{customer_id}/overview", customerDetail.overview)
 		})
 	})
 

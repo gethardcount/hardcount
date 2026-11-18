@@ -23,7 +23,7 @@ type routeKey struct {
 // routeDecl is one route's entry. A clock constructor below (realTime,
 // ofCustomer, ofSubscription, ofInvoice, ofCreditNote, ofDunningRun,
 // decidedIn) makes it from who may call the route and how its time is
-// decided; withAudit adds its audit, and showsSecretOnce marks its answer.
+// decided; withAudit adds its audit, and withShowOnce marks its answer.
 type routeDecl struct {
 	who   who
 	clock clockDecl
@@ -38,12 +38,12 @@ func (d routeDecl) withAudit(a auditDecl) routeDecl {
 	return d
 }
 
-// showsSecretOnce is d with an answer that carries a secret shown only in
-// that answer: a field marked `x-show-once: true` in api/openapi.yaml, which
+// withShowOnce is d with an answer that carries a secret shown only in that
+// answer: a field marked `x-show-once: true` in api/openapi.yaml, which
 // TestOpenAPISpec_ShowOnceSecretsAreNeverKept keeps in step with the table.
 // /v1/bootstrap's fields are marked but its entry is not: it is mounted
 // outside the idempotency layer, and the test fails if it moves inside.
-func (d routeDecl) showsSecretOnce() routeDecl {
+func (d routeDecl) withShowOnce() routeDecl {
 	d.showOnce = true
 	return d
 }
@@ -52,17 +52,19 @@ func (d routeDecl) showsSecretOnce() routeDecl {
 // matched no route, where nothing can run (a 404 or a 405), and one whose
 // answer carries a secret shown once, which must never be kept.
 func keepsNoKey(r *http.Request) bool {
-	return request.Of(r.Context()).Route().Pattern == "" || answersWithShowOnceSecret(r)
+	return request.Of(r.Context()).Route().Pattern == "" || isShowOnce(r)
 }
 
-// answersWithShowOnceSecret reports whether r's route answers with a secret
-// shown once, so the idempotency layer leaves it alone.
-func answersWithShowOnceSecret(r *http.Request) bool {
+// isShowOnce reports whether r's route answers with a secret shown once, so
+// the idempotency layer leaves it alone.
+func isShowOnce(r *http.Request) bool {
 	return routeTable[routeKeyOf(r.Context())].showOnce
 }
 
-// clockSource is how a test-mode request's time is decided; clockDoor has the
-// rules.
+// A request runs in test mode or live mode, the mode of its key or session.
+// In test mode a record can be on a test clock, which holds a simulated time;
+// there are no test clocks in live mode. clockSource is how a test-mode
+// request's time is decided; clockDoor has the rules.
 type clockSource int
 
 const (
@@ -232,11 +234,10 @@ func auditRoute(r *http.Request) (pattern string, exempt bool) {
 	return key.Pattern, routeTable[key].audit.Coverage == auditExempt
 }
 
-// canonicalRoute replaces "/*/" and trims a trailing slash as chi's
-// RoutePattern does, and makes an empty pattern "/", so chi.Walk's patterns
-// (the tests) and Find's (routeFinder) meet on one key. Walk leaves a "/*/"
-// where a Mount("/") sits inside a Route ("/v1/auth/*/login"), and keeps a
-// subrouter's trailing slash ("/v1/customers/").
+// canonicalRoute gives chi.Walk's patterns and Find's one key, as chi's
+// RoutePattern does: it drops each "/*/" (Walk prints one where a Mount("/")
+// sits inside a Route: /v1/auth/*/login), trims a trailing slash (a
+// sub-router's root: /v1/customers/), and makes an empty pattern "/".
 func canonicalRoute(p string) string {
 	for strings.Contains(p, "/*/") {
 		p = strings.ReplaceAll(p, "/*/", "/")
@@ -285,9 +286,9 @@ var routeTable = map[routeKey]routeDecl{
 	{"DELETE", "/v1/members/invitations/{id}"}:  realTime(membersSession).withAudit(explicit("dashmembers.Service.Revoke (LogInTx)")),
 	{"DELETE", "/v1/members/{userID}"}:          realTime(membersSession).withAudit(explicit("dashmembers.Service.RemoveMember (LogInTx)")),
 	{"GET", "/v1/api-keys"}:                     realTime(apikeyWrite),
-	{"POST", "/v1/api-keys"}:                    realTime(apikeyWrite).withAudit(explicit("auth.Service.CreateKey (LogInTx)")).showsSecretOnce(),
+	{"POST", "/v1/api-keys"}:                    realTime(apikeyWrite).withAudit(explicit("auth.Service.CreateKey (LogInTx)")).withShowOnce(),
 	{"DELETE", "/v1/api-keys/{id}"}:             realTime(apikeyWrite).withAudit(explicit("auth.Service.RevokeKey (LogInTx)")),
-	{"POST", "/v1/api-keys/{id}/rotate"}:        realTime(apikeyWrite).withAudit(explicit("auth.Service.RotateKey (LogInTx)")).showsSecretOnce(),
+	{"POST", "/v1/api-keys/{id}/rotate"}:        realTime(apikeyWrite).withAudit(explicit("auth.Service.RotateKey (LogInTx)")).withShowOnce(),
 
 	// --- inbound webhooks -----------------------------------------------
 	// The endpoint names the tenant and mode; the record is known only once
@@ -306,7 +307,9 @@ var routeTable = map[routeKey]routeDecl{
 	{"GET", "/v1/public/cost-dashboard/{token}"}:            decidedIn(noCaller, "usage.CostDashboardAssembler.GetByToken"),
 
 	// --- tenant-wide reads and streams: each row by its stored dates ------
-	{"GET", "/v1/webhook_events/stream"}:     realTime(apikeyRead),
+	{"GET", "/v1/webhook_events/stream"}: realTime(apikeyRead),
+	// The audit log's export needs what reading it does: the file is the
+	// same data.
 	{"GET", "/v1/exports/audit-log.csv"}:     realTime(apikeyRead).withAudit(explicit("api.exportsHandler.exportAuditLog (auditExport, before the first byte)")),
 	{"GET", "/v1/exports/customers.csv"}:     realTime(customerRead).withAudit(explicit("api.exportsHandler.exportCustomers (auditExport, before the first byte)")),
 	{"GET", "/v1/exports/invoices.csv"}:      realTime(invoiceRead).withAudit(explicit("api.exportsHandler.exportInvoices (auditExport, before the first byte)")),
@@ -364,17 +367,19 @@ var routeTable = map[routeKey]routeDecl{
 	{"POST", "/v1/dunning/policies/{id}/set-default"}:                               realTime(dunningWrite).withAudit(explicit("dunning.Handler.setDefaultPolicy (Log)")),
 	{"GET", "/v1/dunning/stats"}:                                                    realTime(dunningRead),
 	{"GET", "/v1/webhook-endpoints/endpoints"}:                                      realTime(apikeyWrite),
-	{"POST", "/v1/webhook-endpoints/endpoints"}:                                     realTime(apikeyWrite).withAudit(explicit("webhook.Handler.createEndpoint (Log)")).showsSecretOnce(),
+	{"POST", "/v1/webhook-endpoints/endpoints"}:                                     realTime(apikeyWrite).withAudit(explicit("webhook.Handler.createEndpoint (Log)")).withShowOnce(),
 	{"GET", "/v1/webhook-endpoints/endpoints/stats"}:                                realTime(apikeyWrite),
 	{"GET", "/v1/webhook-endpoints/endpoints/{id}"}:                                 realTime(apikeyWrite),
 	{"PATCH", "/v1/webhook-endpoints/endpoints/{id}"}:                               realTime(apikeyWrite).withAudit(explicit("webhook.Handler.updateEndpoint (Log)")),
 	{"DELETE", "/v1/webhook-endpoints/endpoints/{id}"}:                              realTime(apikeyWrite).withAudit(explicit("webhook.Handler.deleteEndpoint (Log)")),
 	{"GET", "/v1/webhook-endpoints/endpoints/{id}/deliveries"}:                      realTime(apikeyWrite),
 	{"POST", "/v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay"}: realTime(apikeyWrite).withAudit(explicit("webhook.Handler.replayDelivery (Log)")),
-	{"POST", "/v1/webhook-endpoints/endpoints/{id}/rotate-secret"}:                  realTime(apikeyWrite).withAudit(explicit("webhook.Handler.rotateSecret (Log)")).showsSecretOnce(),
+	{"POST", "/v1/webhook-endpoints/endpoints/{id}/rotate-secret"}:                  realTime(apikeyWrite).withAudit(explicit("webhook.Handler.rotateSecret (Log)")).withShowOnce(),
 	{"GET", "/v1/webhook-endpoints/events"}:                                         realTime(apikeyWrite),
 	{"GET", "/v1/webhook_events/{id}/deliveries"}:                                   realTime(apikeyRead),
-	{"POST", "/v1/webhook_events/{id}/replay"}:                                      realTime(apikeyRead).withAudit(explicit("webhook.Handler.replayEventV2 (Log)")),
+	// A replay needs only apikey:read: it sends again an event already
+	// emitted.
+	{"POST", "/v1/webhook_events/{id}/replay"}: realTime(apikeyRead).withAudit(explicit("webhook.Handler.replayEventV2 (Log)")),
 	// A clock itself: the advance decides each pass's time per clock.
 	{"GET", "/v1/test-clocks"}:                     realTime(testclockWrite),
 	{"POST", "/v1/test-clocks"}:                    realTime(testclockWrite).withAudit(explicit("testclock.Service.Create (LogInTx)")),
@@ -389,19 +394,21 @@ var routeTable = map[routeKey]routeDecl{
 	// --- customers --------------------------------------------------------
 	{"GET", "/v1/customers"}: realTime(customerRead),
 	// the body names the clock
-	{"POST", "/v1/customers"}:                                                decidedIn(customerWrite, "customer.Service.Create").withAudit(explicit("customer.Service.Create (LogInTx)")),
-	{"GET", "/v1/customers/{id}"}:                                            ofCustomer(customerRead, "id"),
-	{"PATCH", "/v1/customers/{id}"}:                                          ofCustomer(customerWrite, "id").withAudit(explicit("customer.Handler.update (Log)")),
-	{"GET", "/v1/customers/{id}/billing-profile"}:                            ofCustomer(customerRead, "id"),
-	{"PUT", "/v1/customers/{id}/billing-profile"}:                            ofCustomer(customerWrite, "id").withAudit(explicit("customer.Handler.upsertBillingProfile (Log)")),
+	{"POST", "/v1/customers"}:                     decidedIn(customerWrite, "customer.Service.Create").withAudit(explicit("customer.Service.Create (LogInTx)")),
+	{"GET", "/v1/customers/{id}"}:                 ofCustomer(customerRead, "id"),
+	{"PATCH", "/v1/customers/{id}"}:               ofCustomer(customerWrite, "id").withAudit(explicit("customer.Handler.update (Log)")),
+	{"GET", "/v1/customers/{id}/billing-profile"}: ofCustomer(customerRead, "id"),
+	{"PUT", "/v1/customers/{id}/billing-profile"}: ofCustomer(customerWrite, "id").withAudit(explicit("customer.Handler.upsertBillingProfile (Log)")),
+	// A customer's usage and margin need usage:read, not the customer
+	// permissions.
 	{"GET", "/v1/customers/{id}/margin"}:                                     ofCustomer(usageRead, "id"),
-	{"POST", "/v1/customers/{id}/rotate-cost-dashboard-token"}:               ofCustomer(customerWrite, "id").withAudit(explicit("customer.Handler.rotateCostDashboardToken (Log)")).showsSecretOnce(),
+	{"POST", "/v1/customers/{id}/rotate-cost-dashboard-token"}:               ofCustomer(customerWrite, "id").withAudit(explicit("customer.Handler.rotateCostDashboardToken (Log)")).withShowOnce(),
 	{"GET", "/v1/customers/{id}/sent-emails"}:                                ofCustomer(customerRead, "id"),
 	{"GET", "/v1/customers/{id}/usage"}:                                      ofCustomer(usageRead, "id"),
 	{"GET", "/v1/customers/{customer_id}/overview"}:                          ofCustomer(customerRead, "customer_id"),
 	{"GET", "/v1/customers/{customer_id}/payment-methods"}:                   ofCustomer(customerRead, "customer_id"),
 	{"POST", "/v1/customers/{customer_id}/payment-methods/send-setup-email"}: ofCustomer(customerWrite, "customer_id").withAudit(explicit("paymentmethods.Handler.operatorSendSetupEmail (Log)")),
-	{"POST", "/v1/customers/{customer_id}/payment-methods/setup-session"}:    ofCustomer(customerWrite, "customer_id").withAudit(explicit("paymentmethods.Service.CreateSetupSession (Log)")).showsSecretOnce(),
+	{"POST", "/v1/customers/{customer_id}/payment-methods/setup-session"}:    ofCustomer(customerWrite, "customer_id").withAudit(explicit("paymentmethods.Service.CreateSetupSession (Log)")).withShowOnce(),
 	{"DELETE", "/v1/customers/{customer_id}/payment-methods/{pmID}"}:         ofCustomer(customerWrite, "customer_id").withAudit(explicit("paymentmethods.Service.Detach (Log)")),
 	{"POST", "/v1/customers/{customer_id}/payment-methods/{pmID}/default"}:   ofCustomer(customerWrite, "customer_id").withAudit(explicit("paymentmethods.Service.SetDefault (Log)")),
 
@@ -427,8 +434,10 @@ var routeTable = map[routeKey]routeDecl{
 	{"GET", "/v1/subscriptions/{id}/timeline"}:                         ofSubscription(subscriptionRead),
 
 	// --- usage --------------------------------------------------------------
-	// The body names the customer by its external id; a batch or a LiteLLM
-	// callback names many, each decided per event.
+	// Sending usage needs only usage:ingest, the one permission an ingest key
+	// holds (ADR-133); backfill, the reads and the held-usage actions need
+	// more. The body names the customer by its external id; a batch or a
+	// LiteLLM callback names many, each decided per event.
 	{"POST", "/v1/usage-events"}:               decidedIn(usageIngest, "usage.Service.Ingest").withAudit(exempt(reasonMachineIngest, "usage_events is the record, and a row per call would double the writes of the busiest path. Accepted loss: which key sent an event, since usage_events has no key_id. Close it with that column at the first billing dispute that turns on which key sent usage.")),
 	{"POST", "/v1/usage-events/batch"}:         decidedIn(usageIngest, "usage.Service.BatchIngest").withAudit(exempt(reasonMachineIngest, "The batch form of the same ingest; the same accepted loss.")),
 	{"POST", "/v1/integrations/litellm/spend"}: decidedIn(usageIngest, "usage.Service.IngestCall").withAudit(exempt(reasonMachineIngest, "LiteLLM's spend callback, which writes usage events like the ingest above; the same accepted loss.")),

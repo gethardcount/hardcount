@@ -1,7 +1,7 @@
 // Package auth issues API keys and decides who may do what. Service manages
 // the keys, and Handler serves their routes.
-// Caller is who a request acts as, a dashboard session or a key, and Require,
-// RequireMethod and RequireSession refuse a caller what it may not do.
+// Caller is who a request acts as, a dashboard session or a key, and
+// RequirePermission refuses a caller what its route does not let it do.
 package auth
 
 import (
@@ -74,7 +74,7 @@ func statusAt(key domain.APIKey, now time.Time) string {
 
 // CreateKeyResult is a new key and its raw value. No later answer can show
 // the raw value: the table holds only its hash, and the routes that answer
-// with it are showsSecretOnce (internal/api/route_table.go), so the
+// with it are withShowOnce (internal/api/route_table.go), so the
 // idempotency layer keeps no copy.
 type CreateKeyResult struct {
 	Key    domain.APIKey `json:"key"`
