@@ -152,8 +152,8 @@ func checkCreateInput(input CreateKeyInput, now time.Time) (CreateKeyInput, erro
 	if keyType == "" {
 		keyType = KeyTypeSecret
 	}
-	// An ingest key holds less than any caller that can mint one, so key_type
-	// cannot raise access.
+	// key_type only has to name a type: every caller that can mint a key
+	// holds at least what an ingest key holds, so no type raises access.
 	if !slices.Contains(keyTypes, keyType) {
 		names := make([]string, len(keyTypes))
 		for i, kt := range keyTypes {

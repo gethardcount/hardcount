@@ -180,9 +180,9 @@ func TestIdempotency_StoreWriteErrorsAreCountedAndLogged(t *testing.T) {
 			slog.SetDefault(slog.New(rec))
 			t.Cleanup(func() { slog.SetDefault(prev) })
 
-			before := promtest.ToFloat64(idempotencyCacheErrors.WithLabelValues(tc.stage))
+			before := promtest.ToFloat64(idempotencyKeyErrors.WithLabelValues(tc.stage))
 			tc.write(postgres.WithLivemode(context.Background(), false))
-			if got := promtest.ToFloat64(idempotencyCacheErrors.WithLabelValues(tc.stage)) - before; got != 1 {
+			if got := promtest.ToFloat64(idempotencyKeyErrors.WithLabelValues(tc.stage)) - before; got != 1 {
 				t.Errorf("hardcount_idempotency_cache_errors_total{stage=%q} rose by %v, want 1", tc.stage, got)
 			}
 

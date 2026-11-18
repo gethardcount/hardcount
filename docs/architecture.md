@@ -17,7 +17,7 @@ Each step queues its webhook events and emails for the [background jobs](#backgr
 
 ## The path of a request
 
-Every request passes the root chain, then its group's chain, then its handler. Inside `/v1`, authentication and the route's permission check come before the group's steps. `internal/api/router.go` builds all of it, and this section lists each step and says why the record, the metrics, the access log and the door sit where they do.
+Every request passes the root chain, then its group's chain, then its handler. Inside `/v1`, authentication and the route's permission check come before the group's steps. `internal/api/router.go` builds all of it, and this section lists each step and says why the record (the one object per request that holds its route, client address and status), the metrics, the access log and the door (the clock door, which decides the instant the request runs on) sit where they do. In a chain, *above* means earlier: a step wraps every step below it, so it sees the request before them and their answer after.
 
 **The root chain**, in order:
 
@@ -56,7 +56,7 @@ The door is last for three reasons:
 
 ### The record
 
-`request.Begin` makes one record per request, at the root (`internal/platform/request`). It holds the request's route (found once; `unmatched` when no route in the route table matches), its client address, and the writer that records its status. Authentication adds the caller, and an audit row or `audit.MarkSkip` sets its audit mark, which says the request's audit is accounted for.
+`request.Begin` makes one record per request, at the root (`internal/platform/request`). It holds the request's route (found once; `unmatched` when no route in the route table matches), its client address, and the writer that records its status. Authentication adds the caller, and an audit row or `audit.MarkSkip` (called by a request that rightly writes no row, such as a replayed answer) sets its audit mark, which says the request's audit is accounted for.
 
 - **One accessor:** every layer reads the record through `request.Of`, which panics when the root made none, as only a mis-wired server can.
 - **What belongs on it:** a fact about the request that more than one layer reads. What a callee needs to do its work (the tenant, the mode, the instant) stays on the context.
@@ -89,6 +89,8 @@ The door is last for three reasons:
    - no entry: the server does not start, and `TestRouteTable_MatchesLiveRoutes` fails;
    - no `.needs(…)` or `.outsideAuth()`: the entry does not compile;
    - no audit on a route that changes state: `TestRouteTable_MatchesLiveRoutes` fails;
+   - an explicit note naming a function that does not exist, or a clock parameter (`ofCustomer("…")`) that is not in the pattern: `TestRouteTable_DeclarationsAreWhole` fails;
+   - a handler that never writes the audit row its entry declares: `internal/api`'s `TestMain` fails the end-to-end run, naming the route, when a test drives it;
    - no `api/openapi.yaml` entry: `TestOpenAPISpec_MatchesRouter` fails;
    - a new any-caller or session-only route: `TestRouteTable_AnyCallerStaysSmall` or `TestRouteTable_SessionOnlyRoutesAreListed` fails;
    - a new route an ingest key may call (`usageIngest`): `TestIngestKey_RefusedOnEveryRouteButUsage` fails until the route is in its `ingestKeyRoutes`.

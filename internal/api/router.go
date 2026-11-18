@@ -143,7 +143,7 @@ func NewServer(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...Serv
 // routes registers every route and its middleware, and returns the router.
 func (s *Server) routes() chi.Router {
 	r := chi.NewRouter()
-	finder := &routeFinder{}
+	finder := &routeFinder{} // its root is set at the end of routes()
 	// The clock door ends every group; docs/architecture.md#the-path-of-a-request
 	// says why it sits last.
 	door := &clockDoor{
@@ -168,6 +168,7 @@ func (s *Server) routes() chi.Router {
 	// The root chain; docs/architecture.md#the-path-of-a-request lists each
 	// step and says why the record, the metrics, the access log and the door
 	// sit where they do.
+	// Steps 1 to 5: useRequestEdge, below.
 	useRequestEdge(r, s.settings.TrustProxy, s.settings.TrustedProxies(), request.Begin(finder.route))
 	r.Use(mw.Metrics())
 	r.Use(accessLog)
@@ -246,7 +247,10 @@ func (s *Server) routes() chi.Router {
 	// before authentication, so a cross-site write is refused before the
 	// session cookie is read. The permission check answers a path no route
 	// serves with its 404 or 405 (noRoute), so a group's steps and handlers run
-	// only for a listed route the caller may call.
+	// only for a listed route the caller may call. chi matches a static path
+	// segment before a parameter, whatever the order of the mounts below, so
+	// /webhook_events/stream, /usage-events/backfill, /invoices/create_preview
+	// and /settings/stripe each win over their sibling.
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(mw.CSRFGuard(allowedOrigins))
 		r.Use(session.RequireCaller(s.sessionSvc, s.authSvc))
@@ -286,9 +290,7 @@ func (s *Server) routes() chi.Router {
 		// Ordinary routes: replayable by Idempotency-Key, 30 s.
 		r.Group(func(r chi.Router) {
 			r.Use(s.rateLimiter.Middleware())
-			// Idempotency holds no key (keepsNoKey) for a request no route
-			// serves, where nothing can run, or one whose answer carries a
-			// secret shown only once, which is never kept for a replay.
+			// keepsNoKey says which requests Idempotency holds no key for.
 			r.Use(mw.Idempotency(s.db, keepsNoKey))
 			r.Use(mw.Timeout(requestTimeout))
 			r.Use(door.Middleware)

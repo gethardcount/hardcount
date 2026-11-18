@@ -20,11 +20,11 @@ type routeKey struct {
 	Pattern string
 }
 
-// routeDecl is one route's entry. A clock constructor below (realTime,
-// ofCustomer, ofSubscription, ofInvoice, ofCreditNote, ofDunningRun,
-// decidedIn) says how its time is decided, and needs or outsideAuth makes the
-// entry from that; withAudit adds its audit, and withShowOnce marks its
-// answer.
+// routeDecl is one route's entry, built in steps. A clock constructor below
+// (realTime, ofCustomer, ofSubscription, ofInvoice, ofCreditNote,
+// ofDunningRun, decidedIn) says how the route's time is decided. Then needs
+// or outsideAuth says who may call it, which makes the entry. Then withAudit
+// adds its audit, and withShowOnce marks its answer.
 type routeDecl struct {
 	// access is who may call the route, which auth.RequirePermission checks;
 	// it is zero on a route outside authentication.
@@ -45,16 +45,20 @@ func (d routeDecl) withAudit(a auditDecl) routeDecl {
 // withShowOnce is d with an answer that carries a secret shown only in that
 // answer: a field marked `x-show-once: true` in api/openapi.yaml, which
 // TestOpenAPISpec_ShowOnceSecretsAreNeverKept keeps in step with the table.
-// /v1/bootstrap's fields are marked but its entry is not: it is mounted
-// outside the idempotency layer, and the test fails if it moves inside.
+// /v1/bootstrap's answer has marked fields, but its entry is not marked: the
+// mark only keeps the idempotency layer from keeping an answer, and bootstrap
+// is mounted outside that layer. Moved inside, it would fail that test until
+// marked.
 func (d routeDecl) withShowOnce() routeDecl {
 	d.showOnce = true
 	return d
 }
 
-// keepsNoKey reports whether Idempotency holds no key for r: a request that
-// matched no route, where nothing can run (a 404 or a 405), and one whose
-// answer carries a secret shown once, which must never be kept.
+// keepsNoKey is the server's ignore for Idempotency (mw.Idempotency): a
+// request it matches runs as if no Idempotency-Key was sent. It matches a
+// request no route serves, where nothing can run, and one whose answer
+// carries a secret shown once, which must never be kept. This is the one
+// statement of that rule; other comments point here.
 func keepsNoKey(r *http.Request) bool {
 	return request.Of(r.Context()).Route().Pattern == "" || isShowOnce(r)
 }
@@ -72,8 +76,11 @@ func isShowOnce(r *http.Request) bool {
 type clockSource int
 
 const (
-	// clockRealTime: the request names no record on a clock, or reads many
-	// (a tenant-wide list or export), each shown by its stored dates.
+	// clockRealTime: the door binds one read of the server's clock, and the
+	// whole request runs on it. For work that belongs to no one record on a
+	// test clock: a tenant-wide list or export, whose rows show the dates
+	// stored on them, or a change whose records keep their own clocks, which
+	// the handler's SQL reads where it needs them.
 	clockRealTime clockSource = iota + 1
 	// clockOfCustomer, clockOfSubscription and clockOfInvoice: the path
 	// parameter names the record. Its clock's time, or real time when it is
@@ -85,9 +92,9 @@ const (
 	// record of an invoice; that invoice's clock decides.
 	clockOfCreditNote
 	clockOfDunningRun
-	// clockDecidedIn: the record is named in the body or by a token, or the
-	// request touches many records each on its own clock. The named function
-	// decides, after it reads the record.
+	// clockDecidedIn: the door binds no instant. The named function decides
+	// it once it has read the record: the one the body or a token names, or
+	// each of many records, which each run on their own clock.
 	clockDecidedIn
 )
 
@@ -129,10 +136,17 @@ func (c clockDecl) outsideAuth() routeDecl {
 func permission(p auth.Permission) auth.Access { return auth.Access{Perm: p} }
 
 // sessionOnly is the access of a route only a dashboard session may call.
-// task is what the 403 tells any other caller to sign in to do.
+// Its 403 tells any other caller to sign in to the dashboard to do task.
 func sessionOnly(task string) auth.Access { return auth.Access{Session: task} }
 
 // The access values an entry names, one per permission and kind of caller.
+//
+// Seven areas take their write permission for reads too, one permission for
+// the area: API keys, price overrides, recipes, settings, webhook endpoints,
+// credit notes and credits. Test clocks have only testclock:write. The
+// apikey pair guards more than keys: apikeyWrite the key routes, the
+// settings (Stripe and email included) and webhook endpoints; apikeyRead
+// webhook events and their stream, and the audit log and its export.
 var (
 	// anyCaller: any API key or dashboard session.
 	// TestRouteTable_AnyCallerStaysSmall lists the routes that take it.
@@ -207,7 +221,8 @@ type auditDecl struct {
 	// Reason is set when, and only when, Coverage == auditExempt.
 	Reason exemptReason
 	// Note names the function that writes the row (explicit), or says why
-	// there is none and records any accepted loss (exempt).
+	// there is none (exempt). An accepted loss, and what would close it, is a
+	// comment above the entry.
 	Note string
 }
 
@@ -227,7 +242,7 @@ func exempt(reason exemptReason, note string) auditDecl {
 // auditRoute is the request's route for the runtime detector: its pattern,
 // which labels the detector's counter, and whether the table declares it
 // exempt. A route not in the table is not exempt, so a gap is reported.
-func auditRoute(r *http.Request) (pattern string, exempt bool) {
+func auditRoute(r *http.Request) (pattern string, declaredExempt bool) {
 	key := routeKeyOf(r.Context())
 	return key.Pattern, routeTable[key].audit.Coverage == auditExempt
 }
@@ -241,7 +256,6 @@ func canonicalRoute(p string) string {
 		p = strings.ReplaceAll(p, "/*/", "/")
 	}
 	if p != "/" {
-		p = strings.TrimSuffix(p, "//")
 		p = strings.TrimSuffix(p, "/")
 	}
 	if p == "" {
@@ -257,9 +271,11 @@ var routeTable = map[routeKey]routeDecl{
 	{"GET", "/health/ready"}: realTime().outsideAuth(),
 	// chi expands r.Handle("/metrics") to every method. Each is declared: a
 	// walk that skipped them would also skip a future route registered so.
+	// The write methods need an audit declaration, though each only returns
+	// the scrape.
 	{"GET", "/metrics"}:     realTime().outsideAuth(),
 	{"HEAD", "/metrics"}:    realTime().outsideAuth(),
-	{"POST", "/metrics"}:    realTime().outsideAuth().withAudit(exempt(reasonSystemEndpoint, "The Prometheus scrape: no tenant, no operator action.")),
+	{"POST", "/metrics"}:    realTime().outsideAuth().withAudit(exempt(reasonSystemEndpoint, "Returns the Prometheus scrape and changes nothing.")),
 	{"PUT", "/metrics"}:     realTime().outsideAuth().withAudit(exempt(reasonSystemEndpoint, "As POST /metrics.")),
 	{"PATCH", "/metrics"}:   realTime().outsideAuth().withAudit(exempt(reasonSystemEndpoint, "As POST /metrics.")),
 	{"DELETE", "/metrics"}:  realTime().outsideAuth().withAudit(exempt(reasonSystemEndpoint, "As POST /metrics.")),
@@ -283,30 +299,36 @@ var routeTable = map[routeKey]routeDecl{
 	{"POST", "/v1/members/invite"}:              realTime().needs(membersSession).withAudit(explicit("dashmembers.Service.Invite (LogInTx)")),
 	{"DELETE", "/v1/members/invitations/{id}"}:  realTime().needs(membersSession).withAudit(explicit("dashmembers.Service.Revoke (LogInTx)")),
 	{"DELETE", "/v1/members/{userID}"}:          realTime().needs(membersSession).withAudit(explicit("dashmembers.Service.RemoveMember (LogInTx)")),
-	// The key routes, listing included, take apikey:write: one permission for
-	// the area.
-	{"GET", "/v1/api-keys"}:              realTime().needs(apikeyWrite),
-	{"POST", "/v1/api-keys"}:             realTime().needs(apikeyWrite).withAudit(explicit("auth.Service.CreateKey (LogInTx)")).withShowOnce(),
-	{"DELETE", "/v1/api-keys/{id}"}:      realTime().needs(apikeyWrite).withAudit(explicit("auth.Service.RevokeKey (LogInTx)")),
-	{"POST", "/v1/api-keys/{id}/rotate"}: realTime().needs(apikeyWrite).withAudit(explicit("auth.Service.RotateKey (LogInTx)")).withShowOnce(),
+	{"GET", "/v1/api-keys"}:                     realTime().needs(apikeyWrite),
+	{"POST", "/v1/api-keys"}:                    realTime().needs(apikeyWrite).withAudit(explicit("auth.Service.CreateKey (LogInTx)")).withShowOnce(),
+	{"DELETE", "/v1/api-keys/{id}"}:             realTime().needs(apikeyWrite).withAudit(explicit("auth.Service.RevokeKey (LogInTx)")),
+	{"POST", "/v1/api-keys/{id}/rotate"}:        realTime().needs(apikeyWrite).withAudit(explicit("auth.Service.RotateKey (LogInTx)")).withShowOnce(),
 
 	// --- inbound webhooks -----------------------------------------------
 	// The endpoint names the tenant and mode; the record is known only once
 	// the event is read.
-	{"POST", "/v1/webhooks/stripe/{endpoint_id}"}: decidedIn("payment.Stripe.HandleWebhook").outsideAuth().withAudit(exempt(reasonWebhookOwned, "Its handlers audit a card saved at checkout, a refund's status and a refund made in Stripe, each in its own transaction. Accepted loss: a card settlement or dispute writes no audit_log row; the invoice (a settlement) or its invoice_disputes row (a dispute), the outbox events and stripe_webhook_events record it. Close it with a row on the settle transaction when an auditor asks audit_log for settlement evidence.")),
-	// email reports; reads no clock
-	{"POST", "/v1/webhooks/postmark"}: realTime().outsideAuth().withAudit(exempt(reasonWebhookOwned, "Postmark's delivery reports, behind Basic Auth; the tenant comes from the stored outbox row (ADR-098). Accepted loss: their effects are not audit_log rows; the outbox row's delivery state, the customer's email status and the outbox events record them.")),
+	// Accepted loss: a card settlement or dispute writes no audit_log row; the
+	// invoice (a settlement) or its invoice_disputes row (a dispute), the
+	// outbox events and stripe_webhook_events record it. Close it with a row
+	// on the settle transaction when an auditor asks audit_log for settlement
+	// evidence.
+	{"POST", "/v1/webhooks/stripe/{endpoint_id}"}: decidedIn("payment.Stripe.HandleWebhook").outsideAuth().withAudit(exempt(reasonWebhookOwned, "Its handlers audit a card saved at checkout, a refund's status and a refund made in Stripe, each in its own transaction.")),
+	// Email reports read no clock. Accepted loss: their effects are not
+	// audit_log rows; the outbox row's delivery state, the customer's email
+	// status and the outbox events record them.
+	{"POST", "/v1/webhooks/postmark"}: realTime().outsideAuth().withAudit(exempt(reasonWebhookOwned, "Postmark's delivery reports, behind Basic Auth; the tenant comes from the stored outbox row (ADR-098).")),
 
 	// --- public pages: the token names the record, and the mode is not
 	// known until it is read ----------------------------------------------
-	{"GET", "/v1/public/invoices/{token}"}:                  decidedIn("hostedinvoice.Handler.resolveInvoice").outsideAuth(),
-	{"POST", "/v1/public/invoices/{token}/checkout"}:        decidedIn("hostedinvoice.Handler.resolveInvoice").outsideAuth().withAudit(explicit("api.hostedInvoiceStripeAdapter.CreateInvoicePaymentSession (LogInTx)")),
-	{"GET", "/v1/public/invoices/{token}/pdf"}:              decidedIn("hostedinvoice.Handler.resolveInvoice").outsideAuth(),
+	{"GET", "/v1/public/invoices/{token}"}:           decidedIn("hostedinvoice.Handler.resolveInvoice").outsideAuth(),
+	{"POST", "/v1/public/invoices/{token}/checkout"}: decidedIn("hostedinvoice.Handler.resolveInvoice").outsideAuth().withAudit(explicit("api.hostedInvoiceStripeAdapter.CreateInvoicePaymentSession (LogInTx)")),
+	{"GET", "/v1/public/invoices/{token}/pdf"}:       decidedIn("hostedinvoice.Handler.resolveInvoice").outsideAuth(),
+	// A card update reads no record's clock; its token expires on real time.
 	{"GET", "/v1/public/payment-updates/{token}"}:           realTime().outsideAuth(),
 	{"POST", "/v1/public/payment-updates/{token}/checkout"}: realTime().outsideAuth().withAudit(explicit("payment.PublicPaymentHandler.createCheckoutSession (LogInTx)")),
 	{"GET", "/v1/public/cost-dashboard/{token}"}:            decidedIn("usage.CostDashboardAssembler.GetByToken").outsideAuth(),
 
-	// --- tenant-wide reads and streams: each row by its stored dates ------
+	// --- tenant-wide reads and streams ------------------------------------
 	{"GET", "/v1/webhook_events/stream"}: realTime().needs(apikeyRead),
 	// The audit log's export needs what reading it does: the file is the
 	// same data.
@@ -337,41 +359,35 @@ var routeTable = map[routeKey]routeDecl{
 	{"POST", "/v1/plans/{id}/prices"}:              realTime().needs(pricingWrite).withAudit(explicit("pricing.Service.AddPrice (LogInTx)")),
 	{"PATCH", "/v1/plans/{id}/prices/{price_id}"}:  realTime().needs(pricingWrite).withAudit(explicit("pricing.Service.EditPrice (LogInTx)")),
 	{"DELETE", "/v1/plans/{id}/prices/{price_id}"}: realTime().needs(pricingWrite).withAudit(explicit("pricing.Service.RemovePrice (LogInTx)")),
-	// An override reads its customer's clock in its own SQL. Overrides, reads
-	// included, take pricing:write: one permission for the area.
-	{"GET", "/v1/price-overrides"}:         realTime().needs(pricingWrite),
-	{"POST", "/v1/price-overrides"}:        realTime().needs(pricingWrite).withAudit(explicit("pricing.Handler.createOverride (Log)")),
-	{"DELETE", "/v1/price-overrides/{id}"}: realTime().needs(pricingWrite).withAudit(explicit("pricing.Handler.deleteOverride (Log)")),
-	{"GET", "/v1/provider-costs"}:          realTime().needs(usageRead),
-	{"PUT", "/v1/provider-costs"}:          realTime().needs(usageWrite).withAudit(explicit("usage.ProviderCostHandler.upsert (LogInTx)")),
-	{"DELETE", "/v1/provider-costs/{id}"}:  realTime().needs(usageWrite).withAudit(explicit("usage.ProviderCostHandler.delete (LogInTx)")),
-	// Recipes, reads included, take pricing:write: one permission for the area.
+	// An override reads its customer's clock in its own SQL.
+	{"GET", "/v1/price-overrides"}:            realTime().needs(pricingWrite),
+	{"POST", "/v1/price-overrides"}:           realTime().needs(pricingWrite).withAudit(explicit("pricing.Handler.createOverride (Log)")),
+	{"DELETE", "/v1/price-overrides/{id}"}:    realTime().needs(pricingWrite).withAudit(explicit("pricing.Handler.deleteOverride (Log)")),
+	{"GET", "/v1/provider-costs"}:             realTime().needs(usageRead),
+	{"PUT", "/v1/provider-costs"}:             realTime().needs(usageWrite).withAudit(explicit("usage.ProviderCostHandler.upsert (LogInTx)")),
+	{"DELETE", "/v1/provider-costs/{id}"}:     realTime().needs(usageWrite).withAudit(explicit("usage.ProviderCostHandler.delete (LogInTx)")),
 	{"GET", "/v1/recipes"}:                    realTime().needs(pricingWrite),
 	{"GET", "/v1/recipes/instances"}:          realTime().needs(pricingWrite),
 	{"GET", "/v1/recipes/{key}"}:              realTime().needs(pricingWrite),
 	{"POST", "/v1/recipes/{key}/instantiate"}: realTime().needs(pricingWrite).withAudit(explicit("recipe.Service.Instantiate (LogInTx)")),
 	{"POST", "/v1/recipes/{key}/preview"}:     realTime().needs(pricingWrite).withAudit(exempt(reasonNonMutatingPreview, "Renders what instantiate would create and writes nothing (recipe.Handler calls audit.MarkSkip).")),
-	// The settings routes, reads included, take apikey:write: one permission
-	// for the area. Changing the account's settings takes a dashboard session.
-	{"GET", "/v1/settings"}:             realTime().needs(apikeyWrite),
-	{"PUT", "/v1/settings"}:             realTime().needs(settingsSession).withAudit(explicit("tenant.SettingsHandler.upsert (Log)")),
-	{"GET", "/v1/settings/email"}:       realTime().needs(apikeyWrite),
-	{"POST", "/v1/settings/email/test"}: realTime().needs(apikeyWrite).withAudit(explicit("api.emailSettingsHandler.sendTest (Log)")),
-	{"GET", "/v1/settings/stripe"}:      realTime().needs(apikeyWrite),
+	{"GET", "/v1/settings"}:                   realTime().needs(apikeyWrite),
+	{"PUT", "/v1/settings"}:                   realTime().needs(settingsSession).withAudit(explicit("tenant.SettingsHandler.upsert (Log)")),
+	{"GET", "/v1/settings/email"}:             realTime().needs(apikeyWrite),
+	{"POST", "/v1/settings/email/test"}:       realTime().needs(apikeyWrite).withAudit(explicit("api.emailSettingsHandler.sendTest (Log)")),
+	{"GET", "/v1/settings/stripe"}:            realTime().needs(apikeyWrite),
 	// Connecting Stripe retries every invoice stuck on the missing key, each
 	// on its own clock.
-	{"POST", "/v1/settings/stripe"}:                   decidedIn("invoice.Service.RetryProviderConfigErrors").needs(apikeyWrite).withAudit(explicit("tenantstripe.Handler.connect (Log)")),
-	{"DELETE", "/v1/settings/stripe/{mode}"}:          realTime().needs(apikeyWrite).withAudit(explicit("tenantstripe.Handler.delete (Log)")),
-	{"PATCH", "/v1/settings/stripe/{mode}/webhook"}:   realTime().needs(apikeyWrite).withAudit(explicit("tenantstripe.Handler.setWebhook (Log)")),
-	{"GET", "/v1/dunning/policies"}:                   realTime().needs(dunningRead),
-	{"POST", "/v1/dunning/policies"}:                  realTime().needs(dunningWrite).withAudit(explicit("dunning.Handler.createPolicy (Log)")),
-	{"GET", "/v1/dunning/policies/{id}"}:              realTime().needs(dunningRead),
-	{"PATCH", "/v1/dunning/policies/{id}"}:            realTime().needs(dunningWrite).withAudit(explicit("dunning.Handler.updatePolicy (Log)")),
-	{"DELETE", "/v1/dunning/policies/{id}"}:           realTime().needs(dunningWrite).withAudit(explicit("dunning.Handler.deletePolicy (Log)")),
-	{"POST", "/v1/dunning/policies/{id}/set-default"}: realTime().needs(dunningWrite).withAudit(explicit("dunning.Handler.setDefaultPolicy (Log)")),
-	{"GET", "/v1/dunning/stats"}:                      realTime().needs(dunningRead),
-	// Webhook endpoints, reads included, take apikey:write: one permission for
-	// the area.
+	{"POST", "/v1/settings/stripe"}:                                                 decidedIn("invoice.Service.RetryProviderConfigErrors").needs(apikeyWrite).withAudit(explicit("tenantstripe.Handler.connect (Log)")),
+	{"DELETE", "/v1/settings/stripe/{mode}"}:                                        realTime().needs(apikeyWrite).withAudit(explicit("tenantstripe.Handler.delete (Log)")),
+	{"PATCH", "/v1/settings/stripe/{mode}/webhook"}:                                 realTime().needs(apikeyWrite).withAudit(explicit("tenantstripe.Handler.setWebhook (Log)")),
+	{"GET", "/v1/dunning/policies"}:                                                 realTime().needs(dunningRead),
+	{"POST", "/v1/dunning/policies"}:                                                realTime().needs(dunningWrite).withAudit(explicit("dunning.Handler.createPolicy (Log)")),
+	{"GET", "/v1/dunning/policies/{id}"}:                                            realTime().needs(dunningRead),
+	{"PATCH", "/v1/dunning/policies/{id}"}:                                          realTime().needs(dunningWrite).withAudit(explicit("dunning.Handler.updatePolicy (Log)")),
+	{"DELETE", "/v1/dunning/policies/{id}"}:                                         realTime().needs(dunningWrite).withAudit(explicit("dunning.Handler.deletePolicy (Log)")),
+	{"POST", "/v1/dunning/policies/{id}/set-default"}:                               realTime().needs(dunningWrite).withAudit(explicit("dunning.Handler.setDefaultPolicy (Log)")),
+	{"GET", "/v1/dunning/stats"}:                                                    realTime().needs(dunningRead),
 	{"GET", "/v1/webhook-endpoints/endpoints"}:                                      realTime().needs(apikeyWrite),
 	{"POST", "/v1/webhook-endpoints/endpoints"}:                                     realTime().needs(apikeyWrite).withAudit(explicit("webhook.Handler.createEndpoint (Log)")).withShowOnce(),
 	{"GET", "/v1/webhook-endpoints/endpoints/stats"}:                                realTime().needs(apikeyWrite),
@@ -386,8 +402,7 @@ var routeTable = map[routeKey]routeDecl{
 	// A replay needs only apikey:read: it sends again an event already
 	// emitted.
 	{"POST", "/v1/webhook_events/{id}/replay"}: realTime().needs(apikeyRead).withAudit(explicit("webhook.Handler.replayEventV2 (Log)")),
-	// A clock itself: the advance decides each pass's time per clock. Reads
-	// take testclock:write too: test clocks have no read permission.
+	// A clock itself: the advance decides each pass's time per clock.
 	{"GET", "/v1/test-clocks"}:                     realTime().needs(testclockWrite),
 	{"POST", "/v1/test-clocks"}:                    realTime().needs(testclockWrite).withAudit(explicit("testclock.Service.Create (LogInTx)")),
 	{"GET", "/v1/test-clocks/{id}"}:                realTime().needs(testclockWrite),
@@ -444,10 +459,13 @@ var routeTable = map[routeKey]routeDecl{
 	// Sending usage needs only usage:ingest, the one permission an ingest key
 	// holds (ADR-133); backfill, the reads and the held-usage actions need
 	// more. The body names the customer by its external id; a batch or a
-	// LiteLLM callback names many, each decided per event.
-	{"POST", "/v1/usage-events"}:               decidedIn("usage.Service.Ingest").needs(usageIngest).withAudit(exempt(reasonMachineIngest, "usage_events is the record, and a row per call would double the writes of the busiest path. Accepted loss: which key sent an event, since usage_events has no key_id. Close it with that column at the first billing dispute that turns on which key sent usage.")),
-	{"POST", "/v1/usage-events/batch"}:         decidedIn("usage.Service.BatchIngest").needs(usageIngest).withAudit(exempt(reasonMachineIngest, "The batch form of the same ingest; the same accepted loss.")),
-	{"POST", "/v1/integrations/litellm/spend"}: decidedIn("usage.Service.IngestCall").needs(usageIngest).withAudit(exempt(reasonMachineIngest, "LiteLLM's spend callback, which writes usage events like the ingest above; the same accepted loss.")),
+	// LiteLLM callback names many, each decided per event. Accepted loss, for
+	// all three: which key sent an event, since usage_events has no key_id.
+	// Close it with that column at the first billing dispute that turns on
+	// which key sent usage.
+	{"POST", "/v1/usage-events"}:               decidedIn("usage.Service.Ingest").needs(usageIngest).withAudit(exempt(reasonMachineIngest, "usage_events is the record, and a row per call would double the writes of the busiest path.")),
+	{"POST", "/v1/usage-events/batch"}:         decidedIn("usage.Service.BatchIngest").needs(usageIngest).withAudit(exempt(reasonMachineIngest, "The batch form of the same ingest.")),
+	{"POST", "/v1/integrations/litellm/spend"}: decidedIn("usage.Service.IngestCall").needs(usageIngest).withAudit(exempt(reasonMachineIngest, "LiteLLM's spend callback, which writes usage events like the ingest above.")),
 	// Backfill is audited, unlike the ingest above: an operator's backdated
 	// usage changes what a customer is billed.
 	{"POST", "/v1/usage-events/backfill"}: decidedIn("usage.Service.Backfill").needs(usageWrite).withAudit(explicit("usage.Service.Backfill (LogInTx)")),
@@ -486,8 +504,6 @@ var routeTable = map[routeKey]routeDecl{
 	{"POST", "/v1/invoices/{id}/void"}:                                      ofInvoice().needs(invoiceWrite).withAudit(explicit("invoice.Service.Void (LogInTx)")),
 
 	// --- credit notes -------------------------------------------------------
-	// Credit notes, reads included, take invoice:write: one permission for the
-	// area.
 	{"GET", "/v1/credit-notes"}:       realTime().needs(invoiceWrite),
 	{"GET", "/v1/credit-notes/stats"}: realTime().needs(invoiceWrite),
 	// the body names the invoice
@@ -501,8 +517,6 @@ var routeTable = map[routeKey]routeDecl{
 	{"POST", "/v1/credit-notes/{id}/void"}:                 ofCreditNote().needs(invoiceWrite).withAudit(explicit("creditnote.Service.Void (LogInTx)")),
 
 	// --- credits ------------------------------------------------------------
-	// Credits, reads included, take customer:write: one permission for the
-	// area.
 	{"GET", "/v1/credits/balances"}: realTime().needs(customerWrite),
 	// the body names the customer
 	{"POST", "/v1/credits/grant"}: decidedIn("credit.Service.Grant").needs(customerWrite).withAudit(explicit("credit.Service.Grant (LogInTx)")),

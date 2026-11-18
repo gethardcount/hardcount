@@ -14,8 +14,8 @@ import (
 // Find on the built router gives its pattern and path parameters before any
 // group runs. The pattern is kept only when routeTable has the route, so a
 // path no route matches, and a mount asked for a method its sub-router lacks,
-// get none. It runs above the Recoverer, where a panic drops the connection,
-// so it must not panic for a request: Find reads only the method and the
+// get none. It runs above the Recoverer, where a panic drops the connection.
+// So it must not panic for a request: Find reads only the method and the
 // path, and nothing here is nil that a request can make nil.
 type routeFinder struct {
 	// root is the built router, set once every route is registered.
