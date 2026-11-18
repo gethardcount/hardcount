@@ -253,6 +253,7 @@ func (s *Server) routes() chi.Router {
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(mw.CSRFGuard(allowedOrigins))
 		r.Use(session.RequireCaller(s.sessionSvc, s.authSvc))
+		r.Use(auth.RequirePermission(routeNeeds{}))
 
 		// The event stream: no timeout (an EventSource stays open for hours),
 		// and no Idempotency (GET only).

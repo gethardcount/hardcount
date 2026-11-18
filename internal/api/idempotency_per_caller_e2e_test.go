@@ -13,14 +13,14 @@ import (
 // TestE2E_IdempotencyKey_AnswersOnlyTheCallerThatMadeTheRequest sends one
 // Idempotency-Key from several callers of one account and mode, over the
 // real router and database. The caller is the API key, or the dashboard
-// user, that made the request. The idempotency layer runs before each
-// route's permission check, so a stored answer must go back only to the
-// caller that made the request: a secret key's retry replays it, while an
-// ingest key, a dashboard user, or the same key with another query string
-// gets the key-reuse 422 and none of the stored body. A dashboard user who
-// signs in again is still the same caller, so the retry replays. A request
-// refused by its route's permission, or one that matched no route, holds no
-// key: the next caller's request with it runs.
+// user, that made the request. Every caller that holds the route's
+// permission reaches the idempotency layer, so a stored answer must go back
+// only to the caller that made the request: a secret key's retry replays it,
+// while another secret key, a dashboard user, or the same key with another
+// query string gets the key-reuse 422 and none of the stored body. A
+// dashboard user who signs in again is still the same caller, so the retry
+// replays. A request refused by its route's permission, or one that matched
+// no route, holds no key: the next caller's request with it runs.
 func TestE2E_IdempotencyKey_AnswersOnlyTheCallerThatMadeTheRequest(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "idem-caller-bootstrap")
@@ -36,7 +36,7 @@ func TestE2E_IdempotencyKey_AnswersOnlyTheCallerThatMadeTheRequest(t *testing.T)
 			want(t, 201, "create a "+keyType+" key")
 		return flowStr(created.body, "raw_key")
 	}
-	secret, ingest := newKey("secret"), newKey("ingest")
+	secret, otherSecret, ingest := newKey("secret"), newKey("secret"), newKey("ingest")
 
 	reuse := func(r flowResp, who, firstID string) {
 		t.Helper()
@@ -65,7 +65,7 @@ func TestE2E_IdempotencyKey_AnswersOnlyTheCallerThatMadeTheRequest(t *testing.T)
 	// account and mode sends the same method, path, body and key.
 	first := create(flowReq{bearer: secret}, "/v1/customers", "k-cred").want(t, 201, "secret key creates a customer")
 	firstID := flowStr(first.body, "id")
-	reuse(create(flowReq{bearer: ingest}, "/v1/customers", "k-cred"), "ingest key reusing the secret key's key", firstID)
+	reuse(create(flowReq{bearer: otherSecret}, "/v1/customers", "k-cred"), "another secret key reusing the first's key", firstID)
 	reuse(create(flowReq{cookie: owner}, "/v1/customers", "k-cred"), "dashboard session reusing the secret key's key", firstID)
 	replay(create(flowReq{bearer: secret}, "/v1/customers", "k-cred"), "secret key retrying", first)
 
@@ -97,8 +97,8 @@ func TestE2E_IdempotencyKey_AnswersOnlyTheCallerThatMadeTheRequest(t *testing.T)
 		return n
 	}
 
-	// The route refuses the ingest key (customer:write) after the key was
-	// reserved; the 403 is not stored, so the secret key's request with the
+	// The route's permission (customer:write) refuses the ingest key before
+	// Idempotency, so nothing is reserved: the secret key's request with the
 	// key runs, and its answer is stored.
 	if r := create(flowReq{bearer: ingest}, "/v1/customers", "k-refused"); r.status != 403 {
 		t.Fatalf("ingest key creating a customer: %d %s, want 403", r.status, r.raw)

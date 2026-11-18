@@ -61,8 +61,8 @@ const (
 //     again gets that answer replayed, with Idempotent-Replayed: true, after
 //     waiting for it while the first still runs.
 //   - Any other request with the key gets 422 idempotency_error at once,
-//     finished or not. So a stored answer goes only to its own caller, which
-//     matters because a replay skips the route's permission check.
+//     finished or not. So a stored answer goes only to its own caller, never
+//     to another key or user of the account.
 //   - A refusal of the caller is not stored: a 401 or a 403 frees the key for
 //     the next request with it, as a 409, a 422, a 503 and a refused body
 //     (respond.WriteBodyError) do.

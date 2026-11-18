@@ -6,11 +6,14 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/gethardcount/hardcount/internal/auth"
 )
 
 // TestRouteTable_MatchesLiveRoutes walks the live router and compares it with
@@ -101,7 +104,8 @@ routes and the GET routes under /v1/exports carry one; remove it.`)
 }
 
 // TestRouteTable_DeclarationsAreWhole: each entry says what its parts need,
-// and nothing else. A key is canonical. A record's clock parameter is in its
+// and nothing else. A key is canonical. Who may call it is named: a
+// permission, a session task, any caller, or no caller. A record's clock parameter is in its
 // route's pattern, and a deciding function exists. An explicit audit's note
 // starts with a function that exists; an exempt one has a reason from the
 // closed list, and only a state-changing route is exempt: there is no honest
@@ -117,6 +121,9 @@ func TestRouteTable_DeclarationsAreWhole(t *testing.T) {
 		name := k.Method + " " + k.Pattern
 		if got := canonicalRoute(k.Pattern); got != k.Pattern {
 			t.Errorf("%s: key is not canonical (canonicalRoute gives %q); the root would never find it", name, got)
+		}
+		if entry.who == (who{}) {
+			t.Errorf("%s: names nobody who may call it; RequirePermission would refuse every request", name)
 		}
 		switch c := entry.clock; c.Source {
 		case clockRealTime:
@@ -164,6 +171,97 @@ func TestRouteTable_DeclarationsAreWhole(t *testing.T) {
 			t.Errorf("%s: audit declares no coverage (use explicit(...) or exempt(...))", name)
 		}
 	}
+}
+
+// TestRouteTable_AnyCallerStaysSmall lists the routes any API key or session
+// may call, so one added to skip a permission shows in review.
+func TestRouteTable_AnyCallerStaysSmall(t *testing.T) {
+	var got []string
+	for k, d := range routeTable {
+		if d.who == anyCaller {
+			got = append(got, k.Method+" "+k.Pattern)
+		}
+	}
+	sort.Strings(got)
+	if want := []string{"GET /v1/whoami"}; !slices.Equal(got, want) {
+		t.Errorf("anyCaller routes: %v, want %v. A route that changes or reads an account's data names its permission.", got, want)
+	}
+}
+
+// TestRouteTable_PermissionsMatchTheMounts: every route behind authentication
+// names in its entry what its mount's checks enforce today, and every route
+// outside authentication names noCaller. Each check is matched by the handler
+// it makes (makesSame): auth.RequireMethod(read, write) with the entry's
+// permission on the side the route's method picks, or auth.RequireSession
+// with the entry's task.
+func TestRouteTable_PermissionsMatchTheMounts(t *testing.T) {
+	var perms []auth.Permission
+	for _, d := range routeTable {
+		if p := d.who.need.Perm; p != "" && !slices.Contains(perms, p) {
+			perms = append(perms, p)
+		}
+	}
+	checked := 0
+	err := chi.Walk(builtRouter(), func(method, route string, _ http.Handler, mws ...func(http.Handler) http.Handler) error {
+		key := routeKey{Method: method, Pattern: canonicalRoute(route)}
+		w := routeTable[key].who
+		authed := chainIndex(mws, authMW) >= 0
+		if w.noCaller == authed {
+			t.Errorf("%s %s: noCaller is %v, but the route is behind authentication: %v", method, key.Pattern, w.noCaller, authed)
+			return nil
+		}
+		if !authed {
+			return nil
+		}
+		var gates []func(http.Handler) http.Handler
+		for _, m := range mws {
+			switch m(chainStub).(type) {
+			case auth.PermissionCheck, auth.SessionRequired:
+				gates = append(gates, m)
+			}
+		}
+		if !mountsEnforce(gates, method, w.need, perms) {
+			t.Errorf("%s %s: the entry names %+v, which is not what its mount checks", method, key.Pattern, w.need)
+		}
+		checked++
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
+	}
+	if checked < 150 {
+		t.Fatalf("checked %d authenticated routes, want every one (161 today)", checked)
+	}
+}
+
+// mountsEnforce reports whether gates, a route's mount checks, enforce need for
+// method.
+func mountsEnforce(gates []func(http.Handler) http.Handler, method string, need auth.Need, perms []auth.Permission) bool {
+	switch {
+	case need.Any:
+		return len(gates) == 0
+	case need.Session != "":
+		// A session holds every permission, so a permission check beside the
+		// session check changes nothing.
+		found := false
+		for _, g := range gates {
+			if makesSame(g, auth.RequireSession(need.Session)) {
+				found = true
+			} else if _, ok := g(chainStub).(auth.PermissionCheck); !ok {
+				return false
+			}
+		}
+		return found
+	case need.Perm != "" && len(gates) == 1:
+		write := isMutatingMethod(method)
+		for _, x := range perms {
+			if !write && makesSame(gates[0], auth.RequireMethod(need.Perm, x)) ||
+				write && makesSame(gates[0], auth.RequireMethod(x, need.Perm)) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // TestRouteTable_ExemptionsStaySmall pins how many routes each exempt reason
