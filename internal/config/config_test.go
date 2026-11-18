@@ -118,33 +118,6 @@ func TestValidate_EncryptionKeyWarnings(t *testing.T) {
 		t.Error("expected warning about missing encryption key in production")
 	}
 
-	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", "tooshort")
-	cfg.Server = ServerFromEnv() // after this Setenv
-	warnings = cfg.Validate()
-	found = false
-	for _, w := range warnings {
-		if strings.HasPrefix(w, "HARDCOUNT_ENCRYPTION_KEY") {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected warning about invalid encryption key length")
-	}
-
-	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")
-	cfg.Server = ServerFromEnv() // after this Setenv
-	warnings = cfg.Validate()
-	found = false
-	for _, w := range warnings {
-		if w == "HARDCOUNT_ENCRYPTION_KEY is not valid hex" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected warning about invalid hex")
-	}
-
-	_ = os.Unsetenv("HARDCOUNT_ENCRYPTION_KEY")
 	localCfg := Config{
 		Server: ServerFromEnv(),
 		Env:    "local", Port: "8080",
@@ -191,20 +164,20 @@ func TestLoad_ProductionRequiresEncryptionKey(t *testing.T) {
 	}
 }
 
+// A set HARDCOUNT_ENCRYPTION_KEY that is not 64 hex characters stops
+// start-up outside production too: Check refuses it, for Load and for
+// api.NewServer alike.
 func TestLoad_InvalidEncryptionKeyFormat(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
 	t.Setenv("APP_ENV", "local")
-	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", "tooshort")
-
-	_, err := Load()
-	if err == nil {
-		t.Fatal("expected error for invalid encryption key length")
-	}
-
-	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")
-	_, err = Load()
-	if err == nil {
-		t.Fatal("expected error for invalid hex in encryption key")
+	for _, bad := range []string{"tooshort", strings.Repeat("z", 64)} {
+		t.Setenv("HARDCOUNT_ENCRYPTION_KEY", bad)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "HARDCOUNT_ENCRYPTION_KEY") {
+			t.Errorf("Load with HARDCOUNT_ENCRYPTION_KEY=%q: %v, want a refusal naming the setting", bad, err)
+		}
+		if err := ServerFromEnv().Check(); err == nil || !strings.Contains(err.Error(), "HARDCOUNT_ENCRYPTION_KEY") {
+			t.Errorf("Check with HARDCOUNT_ENCRYPTION_KEY=%q: %v, want a refusal naming the setting", bad, err)
+		}
 	}
 }
 

@@ -1,6 +1,7 @@
 package config
 
 import (
+	"encoding/hex"
 	"fmt"
 	"net"
 	"os"
@@ -71,16 +72,25 @@ func ServerFromEnv() Server {
 	}
 }
 
-// Check refuses a set TRUST_PROXY or CORS_ALLOWED_ORIGINS the server could not
-// use, with the setting's name: an entry that does not parse, or a value that
-// names nothing. Load calls it, and so does api.NewServer, so a server built
-// without Load refuses the same values instead of dropping them.
+// Check refuses a set TRUST_PROXY, CORS_ALLOWED_ORIGINS or
+// HARDCOUNT_ENCRYPTION_KEY the server could not use, with the setting's name:
+// an entry that does not parse, a value that names nothing, or a key that is
+// not 64 hex characters. Load calls it, and so does api.NewServer, so a
+// server built without Load refuses the same values instead of dropping them.
 func (s Server) Check() error {
 	if _, err := ParseTrustProxy(s.TrustProxy); err != nil {
 		return fmt.Errorf("%w — set TRUST_PROXY to the balancer/ingress IP(s) or CIDR(s), comma-separated (e.g. 10.0.0.0/8,127.0.0.1), or TRUST_PROXY=none if replicas accept client connections directly (docs/ops/high-availability.md)", err)
 	}
 	if _, err := ParseCORSOrigins(s.CORSAllowedOrigins); err != nil {
 		return fmt.Errorf("%w (docs/settings.md)", err)
+	}
+	if key := s.EncryptionKey; key != "" {
+		if len(key) != 64 {
+			return fmt.Errorf("HARDCOUNT_ENCRYPTION_KEY must be exactly 64 hex characters (32 bytes), got %d", len(key))
+		}
+		if _, err := hex.DecodeString(key); err != nil {
+			return fmt.Errorf("HARDCOUNT_ENCRYPTION_KEY is not valid hex: %w", err)
+		}
 	}
 	return nil
 }

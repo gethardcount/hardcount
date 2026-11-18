@@ -107,18 +107,18 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 
 	// One encryptor covers customer PII, webhook secrets, Stripe keys and
 	// hosted-invoice tokens, so a key rotation reaches all of them. config
-	// requires a key in production.
+	// requires a key in production, and srv.Check refused a key that is not
+	// 64 hex characters.
 	var sharedEnc *crypto.Encryptor
 	if encKey := srv.EncryptionKey; encKey != "" {
 		enc, err := crypto.NewEncryptor(encKey)
 		if err != nil {
-			slog.Error("invalid HARDCOUNT_ENCRYPTION_KEY, encryption at rest disabled", "error", err)
-		} else {
-			sharedEnc = enc
-			customerStore.SetEncryptor(enc)
-			invoiceStore.SetEncryptor(enc)
-			slog.Info("encryption at rest enabled for customer PII, webhook secrets, Stripe credentials, and hosted-invoice tokens on invoices; an unsent email in email_outbox holds its link token unencrypted until it is sent")
+			panic(err.Error())
 		}
+		sharedEnc = enc
+		customerStore.SetEncryptor(enc)
+		invoiceStore.SetEncryptor(enc)
+		slog.Info("encryption at rest enabled for customer PII, webhook secrets, Stripe credentials, and hosted-invoice tokens on invoices; an unsent email in email_outbox holds its link token unencrypted until it is sent")
 	} else {
 		slog.Warn("HARDCOUNT_ENCRYPTION_KEY not set — customer PII, webhook secrets, Stripe credentials, and hosted-invoice tokens stored in plaintext")
 	}
@@ -585,8 +585,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	// Redis. With no encryption key, in development, it uses a fixed key.
 	throttleKey, err := user.ThrottleKey(srv.EncryptionKey)
 	if err != nil {
-		slog.Error("invalid HARDCOUNT_ENCRYPTION_KEY: the sign-in throttle uses the local development key", "error", err)
-		throttleKey, _ = user.ThrottleKey("")
+		panic(err.Error()) // srv.Check refused a key ThrottleKey refuses
 	}
 	loginThrottle := user.NewLoginThrottle(db, throttleKey, session.DefaultCookieConfig(o.appEnv, srv.CookieDomain))
 	dashboardAuthH.SetLoginThrottle(loginThrottle)
