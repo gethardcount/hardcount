@@ -11,7 +11,9 @@ const (
 )
 
 // Caller is who a request acts as: a dashboard user's session, or an API key.
-// A background job, a webhook or a public page carries only a tenant
+// Never both a UserID and a KeyID: session.Authenticate sets one or the other,
+// and WithUserID runs only on account routes, which carry no caller. A
+// background job, a webhook or a public page carries only a tenant
 // (WithTenantID), or no caller.
 type Caller struct {
 	TenantID string
