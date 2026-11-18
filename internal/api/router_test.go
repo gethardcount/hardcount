@@ -21,6 +21,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/trace/tracetest"
 
 	mw "github.com/gethardcount/hardcount/internal/api/middleware"
+	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/config"
 	"github.com/gethardcount/hardcount/internal/integrations/litellm"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
@@ -76,6 +77,7 @@ type chainStep struct {
 var (
 	csrfMW        = chainStep{"the CSRF guard", is[mw.CrossSiteCheck]}
 	authMW        = chainStep{"authentication", is[session.CallerRequired]}
+	permissionMW  = chainStep{"the permission check", is[auth.PermissionRequired]}
 	timeoutMW     = chainStep{"the timeout", is[mw.TimeLimit]}
 	idempotencyMW = chainStep{"Idempotency", is[mw.IdempotencyGuard]}
 	limiterMW     = chainStep{"the rate limit", is[mw.RateLimited]}
@@ -125,8 +127,8 @@ func TestRouter_AV1RequestWithNoCredentialsIs401BeforeTheRateLimit(t *testing.T)
 }
 
 // On every route the chain runs in this order, each step where the route has
-// it: the CSRF guard, authentication, the rate limit, Idempotency, the
-// timeout, then the clock door. Each authenticated route is in one of the four
+// it: the CSRF guard, authentication, the permission check, the rate limit,
+// Idempotency, the timeout, then the clock door. Each authenticated route is in one of the four
 // /v1 groups, read from its limiter, its Idempotency and its time limit: the
 // ingest, export and stream groups hold exactly the routes listed here, and
 // every other authenticated route is an ordinary one.
@@ -154,8 +156,8 @@ func TestRouter_ChainsRunInOrderAndEachRouteIsInOneGroup(t *testing.T) {
 		},
 		stream: {"GET /v1/webhook_events/stream"},
 	}
-	steps := []chainStep{csrfMW, authMW, limiterMW, idempotencyMW, timeoutMW, doorMW}
-	const csrf, authn, limit, idem, timeout, door = 0, 1, 2, 3, 4, 5
+	steps := []chainStep{csrfMW, authMW, permissionMW, limiterMW, idempotencyMW, timeoutMW, doorMW}
+	const csrf, authn, perm, limit, idem, timeout, door = 0, 1, 2, 3, 4, 5, 6
 	got := map[group][]string{}
 	if err := chi.Walk(srv.router, func(method, route string, _ http.Handler, mws ...func(http.Handler) http.Handler) error {
 		key := method + " " + canonicalRoute(route)
@@ -173,11 +175,14 @@ func TestRouter_ChainsRunInOrderAndEachRouteIsInOneGroup(t *testing.T) {
 		if at[authn] < 0 {
 			return nil // a public route: only the order applies
 		}
-		for _, i := range []int{csrf, limit, door} {
+		for _, i := range []int{csrf, perm, limit, door} {
 			if at[i] < 0 {
 				t.Errorf("%s: authenticated but without %s", key, steps[i].name)
 				return nil
 			}
+		}
+		if at[perm] != at[authn]+1 {
+			t.Errorf("%s: the permission check does not come right after authentication", key)
 		}
 		g := group{idempotency: at[idem] >= 0}
 		for _, l := range []*mw.RateLimiter{srv.rateLimiter, srv.ingestLimiter} {

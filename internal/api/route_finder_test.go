@@ -70,18 +70,35 @@ func TestRouteFinder_FindsEveryRouteAndItsParams(t *testing.T) {
 		t.Fatalf("checked %d routes, want every route of the router (190 today)", checked)
 	}
 	// No route serves these, though chi's Find names a mount for some: they
-	// have no pattern, so Idempotency keeps no key and chi answers 404 or
-	// 405. A mount's root with a trailing slash is served, under its key.
-	for _, c := range []struct{ method, path, want string }{
-		{http.MethodPost, "/v1/not/a/route", ""},
-		{http.MethodGet, "/v1/invoices/create_preview", ""},
-		{http.MethodGet, "/v1/invoices/create_preview/", ""},
-		{http.MethodPost, "/v1/customers/x/usage", ""},
-		{http.MethodPost, "/v1/invoices/x/typo", ""},
-		{http.MethodPost, "/v1/customers/", "/v1/customers"},
+	// have no pattern, and noRoute answers them, 405 with the path's methods
+	// in Allow, or 404 when no route serves the path. A mount's root with a
+	// trailing slash is served, under its key.
+	finder := &routeFinder{root: builtRouter()}
+	for _, c := range []struct{ method, path, want, allow string }{
+		{http.MethodPost, "/v1/not/a/route", "", ""},
+		{http.MethodGet, "/v1/invoices/create_preview", "", "POST"},
+		{http.MethodGet, "/v1/invoices/create_preview/", "", "POST"},
+		{http.MethodPost, "/v1/customers/x/usage", "", "GET"},
+		{http.MethodPost, "/v1/invoices/x/typo", "", ""},
+		{http.MethodGet, "/v1/customers/x/", "", ""},
+		{http.MethodHead, "/v1/customers", "", "GET, POST"},
+		{http.MethodOptions, "/v1/exports/customers.csv", "", "GET"},
+		{http.MethodPost, "/v1/customers/", "/v1/customers", "GET, POST"},
 	} {
-		if got := request.Of(lookedUp(c.method, c.path).Context()).Route().Pattern; got != c.want {
+		r := lookedUp(c.method, c.path)
+		if got := request.Of(r.Context()).Route().Pattern; got != c.want {
 			t.Errorf("%s %s: pattern %q, want %q", c.method, c.path, got, c.want)
+		}
+		if got := strings.Join(finder.methods(r), ", "); got != c.allow {
+			t.Errorf("%s %s: methods %q, want %q", c.method, c.path, got, c.allow)
+		}
+		if c.want != "" {
+			continue
+		}
+		rec := httptest.NewRecorder()
+		begin()(noRoute{finder}).ServeHTTP(rec, httptest.NewRequest(c.method, c.path, nil))
+		if want := map[bool]int{true: 404, false: 405}[c.allow == ""]; rec.Code != want || rec.Header().Get("Allow") != c.allow {
+			t.Errorf("%s %s: noRoute answers %d, Allow %q; want %d, Allow %q", c.method, c.path, rec.Code, rec.Header().Get("Allow"), want, c.allow)
 		}
 	}
 }

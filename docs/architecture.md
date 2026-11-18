@@ -17,7 +17,7 @@ Each step queues its webhook events and emails for the [background jobs](#backgr
 
 ## The path of a request
 
-Every request passes the root chain, then one group's chain, then its route's own checks and its handler. `internal/api/router.go` builds all three, and this section lists each step and says why the record, the metrics, the access log and the door sit where they do.
+Every request passes the root chain, then its group's chain, then its handler. Inside `/v1`, authentication and the route's permission check come before the group's steps. `internal/api/router.go` builds all of it, and this section lists each step and says why the record, the metrics, the access log and the door sit where they do.
 
 **The root chain**, in order:
 
@@ -43,7 +43,7 @@ Every request passes the root chain, then one group's chain, then its route's ow
 | `/v1/auth` | CSRF guard, sign-in rate limit, 30 s, the clock door |
 | `/v1/webhooks` | 30 s, the clock door; each provider's own check (Stripe's signature, Postmark's credentials) runs in its handler |
 | `/v1/public/…` (hosted invoice, payment update, cost dashboard) | public-page rate limit, 30 s, the clock door |
-| every other `/v1` route: | CSRF guard, authentication, then one of: |
+| every other `/v1` route: | CSRF guard, authentication, the route's permission, then one of: |
 | — ordinary | general rate limit, Idempotency, 30 s, the clock door |
 | — usage ingest | ingest rate limit, 30 s, the clock door |
 | — exports | general rate limit, 5 minutes, the clock door |
@@ -54,11 +54,9 @@ The door is last for three reasons:
 - after Idempotency, so a replayed request never reaches it;
 - inside the time limit, so its lookups are bounded.
 
-A route's own permission check runs after the door, so a caller without the permission can meet the door's 503 before its 403.
-
 ### The record
 
-`request.Begin` makes one record per request, at the root (`internal/platform/request`). It holds the request's route (found once; `unmatched` when no route in the route table matches), its client address, and the writer that records its status. Authentication adds the caller, and an audit row or `audit.MarkSkip` sets its audit mark.
+`request.Begin` makes one record per request, at the root (`internal/platform/request`). It holds the request's route (found once; `unmatched` when no route in the route table matches), its client address, and the writer that records its status. Authentication adds the caller, and an audit row or `audit.MarkSkip` sets its audit mark, which says the request's audit is accounted for.
 
 - **One accessor:** every layer reads the record through `request.Of`, which panics when the root made none, as only a mis-wired server can.
 - **What belongs on it:** a fact about the request that more than one layer reads. What a callee needs to do its work (the tenant, the mode, the instant) stays on the context.
@@ -67,11 +65,33 @@ A route's own permission check runs after the door, so a caller without the perm
 ### The route table
 
 `internal/api/route_table.go` has one line per route, saying:
+- who may call it: `.needs(…)` with a permission, a dashboard session only or any caller, or `.outsideAuth()` for a route outside authentication (the permission check reads this);
 - how its time is decided (the clock door reads this);
 - where its audit evidence comes from, when it changes state or exports (the audit detector);
 - whether its answer carries a secret shown once (Idempotency never keeps that answer).
 
 `TestRouteTable_MatchesLiveRoutes` walks the router and fails on a route with no entry, an entry with no route, or a missing audit. A server that would serve a route with no entry does not start, so a request with no entry is one no route serves.
+
+### Adding a route
+
+1. **Register it** in its handler's `Routes()`, such as `invoice.Handler.Routes`, which `router.go` mounts at `/v1/invoices`. A new handler also needs a mount in `router.go`, in the group whose rate limit, Idempotency and time limit fit it ([the groups](#the-path-of-a-request)): the ordinary group, unless the route sends usage, streams or exports.
+2. **Add its entry** to `routeTable`, such as:
+   ```go
+   {"POST", "/v1/invoices/{id}/finalize"}: ofInvoice().needs(invoiceWrite).withAudit(explicit("invoice.Service.Finalize (LogInTx)")),
+   ```
+   - how its time is decided: one of the clock constructors in `route_table.go` (`realTime()`, `ofCustomer("id")`, `ofInvoice()`, …, `decidedIn("package.Type.Method")`);
+   - who may call it: `.needs(…)` with a permission value (`invoiceRead`, `invoiceWrite`, …), `membersSession`, `settingsSession` or `anyCaller`; or `.outsideAuth()` for a route outside `/v1`'s authentication;
+   - where its audit row comes from, if it changes state or exports: `.withAudit(explicit("…"))`, naming the function that writes it, or `.withAudit(exempt(reason, "…"))`, saying why it writes none;
+   - `.withShowOnce()`, when its answer carries a secret shown once.
+3. **Describe it in `api/openapi.yaml`** ([OpenAPI workflow](dev/openapi-workflow.md)).
+4. **Read or write is your choice.** A route that changes data takes its area's write permission. `TestRouteTable_WritesNeedAWritePermission` fails on a `POST`, `PUT`, `PATCH` or `DELETE` that takes a read one, unless the test lists it with its reason.
+5. **What fails when a part is forgotten:**
+   - no entry: the server does not start, and `TestRouteTable_MatchesLiveRoutes` fails;
+   - no `.needs(…)` or `.outsideAuth()`: the entry does not compile;
+   - no audit on a route that changes state: `TestRouteTable_MatchesLiveRoutes` fails;
+   - no `api/openapi.yaml` entry: `TestOpenAPISpec_MatchesRouter` fails;
+   - a new any-caller or session-only route: `TestRouteTable_AnyCallerStaysSmall` or `TestRouteTable_SessionOnlyRoutesAreListed` fails;
+   - a new route an ingest key may call (`usageIngest`): `TestIngestKey_RefusedOnEveryRouteButUsage` fails until the route is in its `ingestKeyRoutes`.
 
 ### Where a refusal comes from
 
@@ -79,11 +99,12 @@ The access log and the metrics name each request by its route's pattern when it 
 
 | Answer | From | When |
 |---|---|---|
-| `404`, `405` | the router | no route matches the path or the method (inside `/v1`, after authentication); Idempotency keeps no key for it |
+| `404`, `405` | the router; inside `/v1`, the route's permission check | no route matches the path or the method. Inside `/v1` the permission check answers it right after authentication, before any group step. A `405`'s `Allow` lists the methods a route serves at the path |
 | `413` | the body cap | a body over its cap, when it is read: by Idempotency first, on a request it guards (a write with an `Idempotency-Key`), else by the handler |
-| `403` cross-site request blocked | the CSRF guard | a write from another site that does not carry only an API key |
+| `403` cross-site request blocked | the CSRF guard | a write from another site, unless it carries a Bearer key and no session cookie |
 | `401` | authentication | `missing credentials`: no key, and no session cookie that is still signed in (an expired or signed-out session included); `invalid or expired API key`: a key that is not valid |
 | `503 authentication_unavailable` | authentication | the session or key store could not be read |
+| `403`, `500` | the route's permission check | `403`: the caller lacks the route's permission, or the route takes only a dashboard session; it comes before the rate limit, Idempotency and the door. `500`: the route's entry names no caller, a fault in the table |
 | `429` | the group's rate limit | over the bucket, or any request while a fail-closed limiter cannot reach Redis |
 | `409 conflict_idempotency` | Idempotency | the first request with the key is still running after the wait |
 | `409 conflict_idempotency_unresolved` | Idempotency | the first request's owner died before it stored an answer, so the outcome is unknown |
@@ -91,14 +112,16 @@ The access log and the metrics name each request by its route's pattern when it 
 | `503 idempotency_unavailable` | Idempotency | the key could not be recorded; its other answers are a `400` (a body it cannot read), the `413` above, and a `500` when no caller is on the request (a mis-wired router) |
 | `504 timeout` | the time limit | the handler wrote nothing in time |
 | `503 test_clock_unavailable`, `500` | the clock door | the record's test clock could not be read; a route entry the door does not know |
-| `403` | the route's permission check | the caller lacks the route's permission, or the route takes only a dashboard session; Idempotency does not store it, so the key is free for the next request |
 | `500 internal_error` | the Recoverer | a panic before anything was written |
 
 ### The answer
 
 - **Writing:** a handler answers through `respond`, which writes every body and sets `Hardcount-Version`. `Hardcount-Request-Id` is set at the root.
 - **Errors:** an error becomes an answer by its kind, in one place, `respond.FromError`; its doc holds the table. An error with no kind answers `500` and is logged.
-- **Audit:** an action that changes rows writes its audit row in the same transaction as the change ([ADR-090](adr/090-audit-in-tx-emission.md)), so the change and its evidence commit together. The audit detector at the root reports one that did not.
+- **Audit:** each explicit audit note in the route table marks how its route writes its row, `(LogInTx)` or `(Log)`; an exempt route writes none.
+  - **`(LogInTx)`, the rule ([ADR-090](adr/090-audit-in-tx-emission.md)):** the row is in the same transaction as the change, so the two commit together, and a failed write rolls the change back.
+  - **`(Log)`:** the row is written just after the change commits, so a failed write leaves the change without its row; it is counted in `hardcount_audit_write_errors_total` and logged.
+  - The audit detector at the root reports a change that wrote no row.
 
 ## Design rules
 

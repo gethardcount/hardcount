@@ -6,6 +6,7 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/gethardcount/hardcount/internal/api/respond"
 	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
@@ -23,15 +24,48 @@ type routeFinder struct {
 
 func (f *routeFinder) route(r *http.Request) request.Route {
 	rctx := chi.NewRouteContext()
-	rt := request.Route{Method: r.Method, Params: rctx}
-	// A miss keys as "", not as canonicalRoute(""), which is "/".
-	if pattern := f.root.Find(rctx, r.Method, routedPath(r)); pattern != "" {
-		key := routeKey{Method: r.Method, Pattern: canonicalRoute(pattern)}
-		if _, ok := routeTable[key]; ok {
-			rt.Pattern = key.Pattern
+	return request.Route{Method: r.Method, Pattern: f.pattern(rctx, r.Method, routedPath(r)), Params: rctx}
+}
+
+// methods lists the methods a route serves at r's path, by the same rule as
+// route, for a 405's Allow header.
+func (f *routeFinder) methods(r *http.Request) []string {
+	var out []string
+	for _, m := range routeMethods {
+		if f.pattern(chi.NewRouteContext(), m, routedPath(r)) != "" {
+			out = append(out, m)
 		}
 	}
-	return rt
+	return out
+}
+
+// pattern is the canonical pattern of the route that serves method at path,
+// and "" when routeTable lists none. Find fills rctx's path parameters.
+func (f *routeFinder) pattern(rctx *chi.Context, method, path string) string {
+	// A miss keys as "", not as canonicalRoute(""), which is "/".
+	p := f.root.Find(rctx, method, path)
+	if p == "" {
+		return ""
+	}
+	key := routeKey{Method: method, Pattern: canonicalRoute(p)}
+	if _, ok := routeTable[key]; !ok {
+		return ""
+	}
+	return key.Pattern
+}
+
+// noRoute answers a request no route serves: 405, with the methods a route
+// serves at its path in Allow, or 404 when none does. Inside /v1's
+// authentication the permission check gives it (auth.RequirePermission), so
+// no group step or handler runs for such a request.
+type noRoute struct{ finder *routeFinder }
+
+func (n noRoute) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if methods := n.finder.methods(r); len(methods) > 0 {
+		respond.MethodNotAllowed(w, r, methods)
+		return
+	}
+	respond.RouteNotFound(w, r)
 }
 
 // routeKeyOf is the request's key in routeTable, from its record.

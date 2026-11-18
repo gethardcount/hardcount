@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 
-	"regexp"
 	"strings"
 	"time"
 
@@ -159,18 +158,16 @@ func (s *Server) routes() chi.Router {
 			return run.InvoiceID, err
 		},
 	}
-	var allow *allowIndex // built once every route is registered, below
 	// chi hands both handlers down to every router mounted below, so the
 	// router's every 404 and 405 answers the JSON envelope; a 405 lists the
 	// path's methods.
 	r.NotFound(respond.RouteNotFound)
 	r.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
-		respond.MethodNotAllowed(w, req, allow.methods(req))
+		respond.MethodNotAllowed(w, req, finder.methods(req))
 	})
 	// The root chain; docs/architecture.md#the-path-of-a-request lists each
 	// step and says why the record, the metrics, the access log and the door
-	// sit where they do. Everything above the Recoverer runs where a
-	// panic is not recovered by ours; routeFinder says why Begin cannot panic.
+	// sit where they do.
 	useRequestEdge(r, s.settings.TrustProxy, s.settings.TrustedProxies(), request.Begin(finder.route))
 	r.Use(mw.Metrics())
 	r.Use(accessLog)
@@ -243,16 +240,17 @@ func (s *Server) routes() chi.Router {
 		r.Mount("/v1/public/cost-dashboard", s.customerH.PublicCostDashboardRoutes())
 	})
 
-	// Every other /v1 route takes a session cookie or a Bearer key, then joins
-	// one of four groups, which differ in rate limit, Idempotency and time
-	// limit. chi runs a group's steps once a route or a mount's prefix matches:
-	// a path under no mount answers its 404 or 405 after authentication alone,
-	// and one under a mount after the group's steps. The
-	// CSRF guard comes before authentication, so a cross-site write is refused
-	// before the session cookie is read.
+	// Every other /v1 route takes a session cookie or a Bearer key, passes the
+	// route table's permission check, then joins one of four groups, which
+	// differ in rate limit, Idempotency and time limit. The CSRF guard comes
+	// before authentication, so a cross-site write is refused before the
+	// session cookie is read. The permission check answers a path no route
+	// serves with its 404 or 405 (noRoute), so a group's steps and handlers run
+	// only for a listed route the caller may call.
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(mw.CSRFGuard(allowedOrigins))
 		r.Use(session.RequireCaller(s.sessionSvc, s.authSvc))
+		r.Use(auth.RequirePermission(tableAccess{}, noRoute{finder}))
 
 		// The event stream: no timeout (an EventSource stays open for hours),
 		// and no Idempotency (GET only).
@@ -269,32 +267,20 @@ func (s *Server) routes() chi.Router {
 			r.Use(mw.Timeout(exportTimeout))
 			r.Use(door.Middleware)
 			exportsH := newExportsHandler(s.customerStore, s.invoiceStore, s.subStore, s.usageStore, s.auditLogger, s.auditLogger)
-			r.Mount("/exports", exportsH.Routes(
-				auth.Require(auth.PermCustomerRead),
-				auth.Require(auth.PermInvoiceRead),
-				auth.Require(auth.PermSubscriptionRead),
-				auth.Require(auth.PermUsageRead),
-				auth.Require(auth.PermAPIKeyRead),
-			))
+			r.Mount("/exports", exportsH.Routes())
 		})
 
 		// Usage ingest: its own, much larger bucket, because LiteLLM drops a
 		// rate-limited event for good, and no Idempotency, because each event's
-		// own key (or the held row moving once) is its dedup. Sending usage
-		// needs only usage:ingest, the one permission an ingest key holds
-		// (ADR-133); backfill, the reads and the held-usage actions need more.
+		// own key is its dedup, and a held row moves once (route_table.go's
+		// usage entries say what held usage is).
 		r.Group(func(r chi.Router) {
 			r.Use(s.ingestLimiter.Middleware())
 			r.Use(mw.Timeout(requestTimeout))
 			r.Use(door.Middleware)
-			r.With(auth.Require(auth.PermUsageWrite)).Post("/usage-events/backfill", s.usageH.Backfill)
-			r.Mount("/usage-events", s.usageH.Routes(
-				auth.Require(auth.PermUsageIngest),
-				auth.Require(auth.PermUsageRead),
-				auth.Require(auth.PermUsageWrite),
-			))
-			r.With(auth.Require(auth.PermUsageIngest)).Mount("/integrations/litellm",
-				litellm.New(s.customerStore, s.pricingSvc, s.usageSvc, s.usageSvc).Routes())
+			r.Post("/usage-events/backfill", s.usageH.Backfill)
+			r.Mount("/usage-events", s.usageH.Routes())
+			r.Mount("/integrations/litellm", litellm.New(s.customerStore, s.pricingSvc, s.usageSvc, s.usageSvc).Routes())
 		})
 
 		// Ordinary routes: replayable by Idempotency-Key, 30 s.
@@ -308,47 +294,40 @@ func (s *Server) routes() chi.Router {
 			r.Use(door.Middleware)
 
 			r.Get("/whoami", s.handleWhoami)
-			r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/api-keys", s.authH.Routes())
-			r.With(auth.RequireSession("manage team membership")).Mount("/members", s.membersH.Routes())
-			r.With(auth.RequireMethod(auth.PermCustomerRead, auth.PermCustomerWrite)).Mount("/customers", s.customerH.Routes())
-			// A customer's usage and margin need usage:read, not the /customers
-			// permissions.
-			r.Mount("/customers/{id}/usage", s.customerUsageH.CustomerUsageRoutes(
-				auth.Require(auth.PermUsageRead),
-			))
-			r.With(auth.Require(auth.PermUsageRead)).Get("/customers/{id}/margin", s.providerCostH.Margin)
-			r.With(auth.RequireMethod(auth.PermUsageRead, auth.PermUsageWrite)).Mount("/provider-costs", s.providerCostH.Routes())
-			r.With(auth.RequireMethod(auth.PermCustomerRead, auth.PermCustomerWrite)).Mount("/customers/{customer_id}/payment-methods", s.paymentMethodsH.OperatorRoutes())
-			r.With(auth.RequireMethod(auth.PermPricingRead, auth.PermPricingWrite)).Mount("/meters", s.pricingH.MeterRoutes())
-			r.With(auth.RequireMethod(auth.PermPricingRead, auth.PermPricingWrite)).Mount("/plans", s.pricingH.PlanRoutes())
-			r.With(auth.Require(auth.PermPricingWrite)).Mount("/recipes", s.recipeH.Routes())
-			r.With(auth.RequireMethod(auth.PermSubscriptionRead, auth.PermSubscriptionWrite)).Mount("/subscriptions", s.subH.Routes())
-			r.With(auth.Require(auth.PermInvoiceRead)).Mount("/invoices/create_preview", s.createPreviewH.Routes())
-			r.With(auth.RequireMethod(auth.PermInvoiceRead, auth.PermInvoiceWrite)).Mount("/invoices", s.invoiceH.Routes())
-			r.With(auth.Require(auth.PermInvoiceWrite)).Mount("/credit-notes", s.creditNoteH.Routes())
-			r.With(auth.Require(auth.PermPricingWrite)).Mount("/price-overrides", s.pricingH.OverrideRoutes())
-			r.With(auth.Require(auth.PermCustomerWrite)).Mount("/credits", s.creditH.Routes())
-			r.With(auth.RequireMethod(auth.PermDunningRead, auth.PermDunningWrite)).Mount("/dunning", s.dunningH.Routes())
-			r.With(auth.Require(auth.PermInvoiceWrite)).Mount("/billing", s.billingH.Routes())
-			r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/webhook-endpoints", s.webhookOutH.Routes())
-			// A replay needs only apikey:read: it sends again an event already
-			// emitted.
-			r.With(auth.Require(auth.PermAPIKeyRead)).Mount("/webhook_events", s.webhookOutH.EventRoutes())
-			r.With(auth.Require(auth.PermAPIKeyRead)).Mount("/audit-log", s.auditH.Routes())
-			r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings", s.settingsH.Routes(auth.RequireSession("change account settings")))
+			r.Mount("/api-keys", s.authH.Routes())
+			r.Mount("/members", s.membersH.Routes())
+			r.Mount("/customers", s.customerH.Routes())
+			r.Mount("/customers/{id}/usage", s.customerUsageH.CustomerUsageRoutes())
+			r.Get("/customers/{id}/margin", s.providerCostH.Margin)
+			r.Mount("/provider-costs", s.providerCostH.Routes())
+			r.Mount("/customers/{customer_id}/payment-methods", s.paymentMethodsH.OperatorRoutes())
+			r.Mount("/meters", s.pricingH.MeterRoutes())
+			r.Mount("/plans", s.pricingH.PlanRoutes())
+			r.Mount("/recipes", s.recipeH.Routes())
+			r.Mount("/subscriptions", s.subH.Routes())
+			r.Mount("/invoices/create_preview", s.createPreviewH.Routes())
+			r.Mount("/invoices", s.invoiceH.Routes())
+			r.Mount("/credit-notes", s.creditNoteH.Routes())
+			r.Mount("/price-overrides", s.pricingH.OverrideRoutes())
+			r.Mount("/credits", s.creditH.Routes())
+			r.Mount("/dunning", s.dunningH.Routes())
+			r.Mount("/billing", s.billingH.Routes())
+			r.Mount("/webhook-endpoints", s.webhookOutH.Routes())
+			r.Mount("/webhook_events", s.webhookOutH.EventRoutes())
+			r.Mount("/audit-log", s.auditH.Routes())
+			r.Mount("/settings", s.settingsH.Routes())
 			// A caller manages only its own mode's Stripe connection.
 			// tenantstripe.Service checks it, not a middleware, because the mode
 			// comes from the body or the path.
-			r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings/stripe", s.tenantStripeH.Routes())
-			r.With(auth.Require(auth.PermAPIKeyWrite)).Mount("/settings/email", s.emailSettingsH.Routes())
-			r.With(auth.Require(auth.PermInvoiceRead)).Mount("/analytics", s.analyticsH.Routes())
-			r.With(auth.Require(auth.PermTestClockWrite)).Mount("/test-clocks", s.testClockH.Routes())
+			r.Mount("/settings/stripe", s.tenantStripeH.Routes())
+			r.Mount("/settings/email", s.emailSettingsH.Routes())
+			r.Mount("/analytics", s.analyticsH.Routes())
+			r.Mount("/test-clocks", s.testClockH.Routes())
 			customerDetail := newCustomerDetailHandler(s.customerStore, s.subStore, s.invoiceStore)
-			r.With(auth.Require(auth.PermCustomerRead)).Get("/customers/{customer_id}/overview", customerDetail.overview)
+			r.Get("/customers/{customer_id}/overview", customerDetail.overview)
 		})
 	})
 
-	allow = newAllowIndex(r)
 	finder.root = r
 	mustListEveryRoute(r)
 
@@ -427,16 +406,6 @@ var routeMethods = []string{
 	http.MethodPatch, http.MethodDelete, http.MethodOptions,
 }
 
-// allowIndex answers which methods a path takes, for the Allow header of a
-// 405. chi's own Find cannot answer it through a mount, because a mount
-// point matches every method. So every route the router serves, as
-// chi.Walk lists it, is registered on one flat router with no mounts.
-type allowIndex struct {
-	flat *chi.Mux
-}
-
-var pathParamName = regexp.MustCompile(`\{[^}]*\}`)
-
 // mustListEveryRoute refuses to build a server that serves a route the route
 // table does not list, and names the route. Such a route would run with no
 // clock decision, no audit and no retry key, and its record could not tell it
@@ -451,37 +420,4 @@ func mustListEveryRoute(router chi.Routes) {
 		}
 		return nil
 	})
-}
-
-func newAllowIndex(router chi.Routes) *allowIndex {
-	flat := chi.NewMux()
-	noop := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
-	// Walk returns only the walk function's error, and this one has none.
-	_ = chi.Walk(router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
-		// Parameters are renamed by position: two routers may name the
-		// same segment differently ({id}, {customer_id}), which one chi
-		// tree refuses.
-		n := 0
-		pattern := pathParamName.ReplaceAllStringFunc(canonicalRoute(route), func(string) string {
-			n++
-			return fmt.Sprintf("{p%d}", n)
-		})
-		flat.Method(method, pattern, noop)
-		if pattern != "/" && !strings.HasSuffix(pattern, "*") {
-			flat.Method(method, pattern+"/", noop)
-		}
-		return nil
-	})
-	return &allowIndex{flat: flat}
-}
-
-// methods lists the methods the router serves at r's path.
-func (a *allowIndex) methods(r *http.Request) []string {
-	var out []string
-	for _, m := range routeMethods {
-		if a.flat.Match(chi.NewRouteContext(), m, routedPath(r)) {
-			out = append(out, m)
-		}
-	}
-	return out
 }

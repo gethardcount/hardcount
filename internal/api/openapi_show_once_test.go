@@ -14,7 +14,7 @@ import (
 // A field marked `x-show-once: true` in api/openapi.yaml carries a secret
 // shown only in that answer, so the idempotency layer must never keep the
 // answer for a replay. Every operation whose 2xx answer has such a field is
-// either outside mw.Idempotency or marked showsSecretOnce() in routeTable, and
+// either outside mw.Idempotency or marked withShowOnce() in routeTable, and
 // every route so marked answers with such a field. A new show-once field
 // therefore fails here until its route is covered.
 func TestOpenAPISpec_ShowOnceSecretsAreNeverKept(t *testing.T) {
@@ -48,12 +48,12 @@ func TestOpenAPISpec_ShowOnceSecretsAreNeverKept(t *testing.T) {
 	}
 	if len(keptSecrets) > 0 {
 		sort.Strings(keptSecrets)
-		t.Errorf("%d operation(s) answer with an x-show-once field but the idempotency layer keeps the answer. Mark them .showsSecretOnce() in routeTable (route_table.go):\n  %s",
+		t.Errorf("%d operation(s) answer with an x-show-once field but the idempotency layer keeps the answer. Mark them .withShowOnce() in routeTable (route_table.go):\n  %s",
 			len(keptSecrets), strings.Join(keptSecrets, "\n  "))
 	}
 	for key, entry := range routeTable {
 		if _, ok := marked[routeShape(key.Method, key.Pattern)]; entry.showOnce && !ok {
-			t.Errorf("routeTable marks %s %s showsSecretOnce(), but its answer in api/openapi.yaml has no x-show-once field. Remove the mark, or mark the field that carries the secret", key.Method, key.Pattern)
+			t.Errorf("routeTable marks %s %s withShowOnce(), but its answer in api/openapi.yaml has no x-show-once field. Remove the mark, or mark the field that carries the secret", key.Method, key.Pattern)
 		}
 	}
 }

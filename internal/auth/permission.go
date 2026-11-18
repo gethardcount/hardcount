@@ -1,6 +1,6 @@
 package auth
 
-// Permission is what a route requires of its caller (Require, RequireMethod).
+// Permission is what a route requires of its caller (RequirePermission).
 type Permission string
 
 const (
@@ -25,14 +25,11 @@ const (
 	PermDunningRead  Permission = "dunning:read"
 	PermDunningWrite Permission = "dunning:write"
 
-	// apikey:read and apikey:write gate more than API keys. apikey:write
-	// gates the API key routes (listing keys included), webhook endpoints
-	// and the settings routes; apikey:read gates webhook events and their
-	// stream, and the audit log and its export.
+	// apikey:read and apikey:write gate more than API keys; the route table
+	// (internal/api/route_table.go) names each route's permission.
 	PermAPIKeyRead  Permission = "apikey:read"
 	PermAPIKeyWrite Permission = "apikey:write"
 
-	// PermTestClockWrite gates the /test-clocks routes.
 	PermTestClockWrite Permission = "testclock:write"
 )
 

@@ -6,11 +6,14 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"sort"
 	"strings"
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/gethardcount/hardcount/internal/auth"
 )
 
 // TestRouteTable_MatchesLiveRoutes walks the live router and compares it with
@@ -72,7 +75,9 @@ how each one's time is decided: realTime() when the request names no record on
 a clock; ofCustomer, ofSubscription, ofInvoice, ofCreditNote or ofDunningRun
 when a path parameter names the record; or decidedIn("package.Type.Method")
 naming the function that decides after it reads the record the body or a
-token names.`)
+token names. Then who may call it: .needs(customerWrite), or another
+permission, a session value or anyCaller, or .outsideAuth() for a route outside
+/v1's authentication. docs/architecture.md, "Adding a route", has an example.`)
 	report(stale, `routeTable entr(y/ies) match no live route. The route was renamed or removed
 but its entry was not: delete the entry or update its pattern. Keys are
 canonical chi patterns (canonicalRoute), with their {placeholders}. A stale
@@ -163,6 +168,89 @@ func TestRouteTable_DeclarationsAreWhole(t *testing.T) {
 		default:
 			t.Errorf("%s: audit declares no coverage (use explicit(...) or exempt(...))", name)
 		}
+	}
+}
+
+// TestRouteTable_AnyCallerStaysSmall lists the routes any API key or session
+// may call, so one added to skip a permission shows in review.
+func TestRouteTable_AnyCallerStaysSmall(t *testing.T) {
+	var got []string
+	for k, d := range routeTable {
+		if d.access.Any {
+			got = append(got, k.Method+" "+k.Pattern)
+		}
+	}
+	sort.Strings(got)
+	if want := []string{"GET /v1/whoami"}; !slices.Equal(got, want) {
+		t.Errorf("anyCaller routes: %v, want %v. A route that changes or reads an account's data names its permission.", got, want)
+	}
+}
+
+// TestRouteTable_SessionOnlyRoutesAreListed lists the routes only a dashboard
+// session may call, so a key permission given to one shows in review: on a
+// members route it would let any secret key change who belongs to the
+// account.
+func TestRouteTable_SessionOnlyRoutesAreListed(t *testing.T) {
+	var got []string
+	for k, d := range routeTable {
+		if d.access.Session != "" {
+			got = append(got, k.Method+" "+k.Pattern)
+		}
+	}
+	sort.Strings(got)
+	want := []string{
+		"DELETE /v1/members/invitations/{id}",
+		"DELETE /v1/members/{userID}",
+		"GET /v1/members",
+		"POST /v1/members/invite",
+		"PUT /v1/settings",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("session-only routes: %v, want %v", got, want)
+	}
+}
+
+// TestRouteTable_WritesNeedAWritePermission: a route behind authentication
+// with a POST, PUT, PATCH or DELETE needs a write permission, usage:ingest or
+// a dashboard session, so a key that held only read permissions could change
+// nothing. The few that need only a read permission are listed, each with
+// its reason.
+func TestRouteTable_WritesNeedAWritePermission(t *testing.T) {
+	var got []string
+	for k, d := range routeTable {
+		a := d.access
+		if !isMutatingMethod(k.Method) || d.outsideAuth || a.Session != "" ||
+			a.Perm == auth.PermUsageIngest || strings.HasSuffix(string(a.Perm), ":write") {
+			continue
+		}
+		got = append(got, k.Method+" "+k.Pattern)
+	}
+	sort.Strings(got)
+	want := []string{
+		// Works out an invoice and stores nothing.
+		"POST /v1/invoices/create_preview",
+		// Sends again an event already emitted.
+		"POST /v1/webhook_events/{id}/replay",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("writes that need no write permission: %v, want %v. A route that changes an account's data needs its write permission.", got, want)
+	}
+}
+
+// TestRouteTable_OutsideAuthMatchesTheRouter: an entry says outsideAuth
+// exactly when its route is outside authentication. One behind it would be
+// refused by every caller (its access is zero); one outside it that needed a
+// permission would have it checked by nobody.
+func TestRouteTable_OutsideAuthMatchesTheRouter(t *testing.T) {
+	err := chi.Walk(builtRouter(), func(method, route string, _ http.Handler, mws ...func(http.Handler) http.Handler) error {
+		key := routeKey{Method: method, Pattern: canonicalRoute(route)}
+		if authed := chainIndex(mws, authMW) >= 0; routeTable[key].outsideAuth == authed {
+			t.Errorf("%s %s: outsideAuth is %v, but the route is behind authentication: %v", method, key.Pattern, routeTable[key].outsideAuth, authed)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("walk: %v", err)
 	}
 }
 
@@ -259,9 +347,9 @@ func TestAuditRoute_ExemptOnlyForDeclaredRoutes(t *testing.T) {
 }
 
 // On real URLs, as the root's record finds them, only a route marked
-// showsSecretOnce answers with a show-once secret: every marked route with
+// withShowOnce answers with a show-once secret: every marked route with
 // concrete ids is, and the near misses around them are not.
-func TestAnswersWithShowOnceSecret_OnlyOnAMarkedRoute(t *testing.T) {
+func TestIsShowOnce_OnlyOnAMarkedRoute(t *testing.T) {
 	for _, tc := range []struct {
 		method, path string
 		want         bool
@@ -296,7 +384,7 @@ func TestAnswersWithShowOnceSecret_OnlyOnAMarkedRoute(t *testing.T) {
 		{"PATCH", "/v1/webhook-endpoints/endpoints/hc_whe_a", false},
 		{"POST", "/v2/api-keys", false},
 	} {
-		if got := answersWithShowOnceSecret(lookedUp(tc.method, tc.path)); got != tc.want {
+		if got := isShowOnce(lookedUp(tc.method, tc.path)); got != tc.want {
 			t.Errorf("%s %s: %v, want %v", tc.method, tc.path, got, tc.want)
 		}
 	}

@@ -58,34 +58,31 @@ func NewHandler(svc *Service, customers CustomerResolver, meters MeterResolver) 
 	return &Handler{svc: svc, customers: customers, meters: meters}
 }
 
-// Routes serves /v1/usage-events. The router passes one permission gate
-// for each kind of route: ingest gates sending events (single and batch),
-// the only routes here an ingest key may call (ADR-133); read gates the
-// list, the aggregate and the held list; write gates the held-usage
-// release and discard.
-func (h *Handler) Routes(ingest, read, write func(http.Handler) http.Handler) chi.Router {
+// Routes serves /v1/usage-events. Each route's permission is in the API's
+// route table: sending events (single and batch) needs only usage:ingest, the
+// one permission an ingest key holds (ADR-133).
+func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
-	r.With(ingest).Post("/", h.ingest)
-	r.With(ingest).Post("/batch", h.batchIngest)
-	r.With(read).Get("/", h.list)
+	r.Post("/", h.ingest)
+	r.Post("/batch", h.batchIngest)
+	r.Get("/", h.list)
 	// Server-side aggregate that powers the /usage page's stat cards +
 	// "Usage by Meter" breakdown. Mounted as a sibling of GET / so chi
 	// picks the more-specific pattern; reuses parseListFilter so filter
 	// semantics match the list query exactly. See internal/usage/store.go
 	// (Aggregate type) for the response shape.
-	r.With(read).Get("/aggregate", h.aggregate)
+	r.Get("/aggregate", h.aggregate)
 	// Held usage (#1044, ADR-122): rows the LiteLLM callback could not
 	// ingest because their customer or meter did not exist.
-	r.With(read).Get("/held", h.listHeld)
-	r.With(write).Post("/held/release", h.releaseHeld)
-	r.With(write).Post("/held/discard", h.discardHeld)
+	r.Get("/held", h.listHeld)
+	r.Post("/held/release", h.releaseHeld)
+	r.Post("/held/discard", h.discardHeld)
 	return r
 }
 
-// Backfill is exported so the router can mount it behind PermUsageWrite —
-// the /usage-events subtree uses PermUsageRead for historical reasons, but
-// backfill is a sensitive ledger operation and should not be reachable by
-// read-only keys.
+// Backfill is exported so the router mounts it on its own route, outside
+// the usage-events sub-router; its permission (usage:write) is in the API's
+// route table.
 func (h *Handler) Backfill(w http.ResponseWriter, r *http.Request) {
 	h.backfill(w, r)
 }
