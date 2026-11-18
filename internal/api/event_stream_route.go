@@ -16,10 +16,11 @@ import (
 // router.go authenticates the caller, checks the route table's permission
 // (apikey:read) and rate-limits first. The permission is not checked again
 // while the stream is open: a key's type cannot change, and a session holds
-// every permission. Every interval the stream checks its caller
-// again (streamCredentialStopped): once the key is revoked or expires, or the
-// session ends, it closes with no final frame, and a reconnect with the same
-// credential answers 401. A store failure does not close it. router.go passes
+// every permission. Every interval the stream checks its caller again
+// (streamCredentialStopped), which is why it takes the session and key
+// services: once the key is revoked or expires, or the session ends, it
+// closes with no final frame, and a reconnect with the same credential
+// answers 401. A store failure does not close it. router.go passes
 // webhook.StreamHeartbeatInterval; it is a function, not inline in router.go,
 // so the stream's credential test can mount it with a short interval.
 func eventStreamRoute(h *webhook.Handler, sessSvc *session.Service, authSvc *auth.Service, every time.Duration) func(chi.Router) {

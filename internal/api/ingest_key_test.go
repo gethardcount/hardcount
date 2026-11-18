@@ -182,7 +182,7 @@ func TestIngestKey_RefusedOnEveryRouteButUsage(t *testing.T) {
 			}
 			return nil // a public route: no API key is read
 		}
-		sessionOnly := routeTable[routeKey{Method: method, Pattern: route}].who.need.Session != ""
+		sessionOnly := routeTable[routeKey{Method: method, Pattern: route}].access.Session != ""
 		key := method + " " + route
 		seen[key] = true
 		checked++

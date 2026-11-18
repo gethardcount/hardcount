@@ -12,6 +12,8 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
+
+	"github.com/gethardcount/hardcount/internal/auth"
 )
 
 // TestRouteTable_MatchesLiveRoutes walks the live router and compares it with
@@ -73,7 +75,9 @@ how each one's time is decided: realTime() when the request names no record on
 a clock; ofCustomer, ofSubscription, ofInvoice, ofCreditNote or ofDunningRun
 when a path parameter names the record; or decidedIn("package.Type.Method")
 naming the function that decides after it reads the record the body or a
-token names.`)
+token names. Then who may call it: .needs(customerWrite), or another
+permission, a session value or anyCaller, or .outsideAuth() for a route outside
+/v1's authentication. docs/architecture.md, "Adding a route", has an example.`)
 	report(stale, `routeTable entr(y/ies) match no live route. The route was renamed or removed
 but its entry was not: delete the entry or update its pattern. Keys are
 canonical chi patterns (canonicalRoute), with their {placeholders}. A stale
@@ -102,8 +106,7 @@ routes and the GET routes under /v1/exports carry one; remove it.`)
 }
 
 // TestRouteTable_DeclarationsAreWhole: each entry says what its parts need,
-// and nothing else. A key is canonical. Who may call it is named: a
-// permission, a session task, any caller, or no caller. A record's clock parameter is in its
+// and nothing else. A key is canonical. A record's clock parameter is in its
 // route's pattern, and a deciding function exists. An explicit audit's note
 // starts with a function that exists; an exempt one has a reason from the
 // closed list, and only a state-changing route is exempt: there is no honest
@@ -119,9 +122,6 @@ func TestRouteTable_DeclarationsAreWhole(t *testing.T) {
 		name := k.Method + " " + k.Pattern
 		if got := canonicalRoute(k.Pattern); got != k.Pattern {
 			t.Errorf("%s: key is not canonical (canonicalRoute gives %q); the root would never find it", name, got)
-		}
-		if entry.who == (who{}) {
-			t.Errorf("%s: names nobody who may call it; RequirePermission would refuse every request", name)
 		}
 		switch c := entry.clock; c.Source {
 		case clockRealTime:
@@ -176,7 +176,7 @@ func TestRouteTable_DeclarationsAreWhole(t *testing.T) {
 func TestRouteTable_AnyCallerStaysSmall(t *testing.T) {
 	var got []string
 	for k, d := range routeTable {
-		if d.who == anyCaller {
+		if d.access.Any {
 			got = append(got, k.Method+" "+k.Pattern)
 		}
 	}
@@ -186,15 +186,42 @@ func TestRouteTable_AnyCallerStaysSmall(t *testing.T) {
 	}
 }
 
-// TestRouteTable_NoCallerIsOutsideAuthentication: a route names noCaller
-// exactly when it is outside authentication. One behind it that named
-// noCaller would be refused by every caller; one outside it that named a
+// TestRouteTable_WritesNeedAWritePermission: a route behind authentication
+// with a POST, PUT, PATCH or DELETE needs a write permission, usage:ingest or
+// a dashboard session, so a key that held only read permissions could change
+// nothing. The few that need only a read permission are listed, each with
+// its reason.
+func TestRouteTable_WritesNeedAWritePermission(t *testing.T) {
+	var got []string
+	for k, d := range routeTable {
+		a := d.access
+		if !isMutatingMethod(k.Method) || d.outsideAuth || a.Session != "" ||
+			a.Perm == auth.PermUsageIngest || strings.HasSuffix(string(a.Perm), ":write") {
+			continue
+		}
+		got = append(got, k.Method+" "+k.Pattern)
+	}
+	sort.Strings(got)
+	want := []string{
+		// Works out an invoice and stores nothing.
+		"POST /v1/invoices/create_preview",
+		// Sends again an event already emitted.
+		"POST /v1/webhook_events/{id}/replay",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("writes that need no write permission: %v, want %v. A route that changes an account's data needs its write permission.", got, want)
+	}
+}
+
+// TestRouteTable_OutsideAuthMatchesTheRouter: an entry says outsideAuth
+// exactly when its route is outside authentication. One behind it would be
+// refused by every caller (its access is zero); one outside it that needed a
 // permission would have it checked by nobody.
-func TestRouteTable_NoCallerIsOutsideAuthentication(t *testing.T) {
+func TestRouteTable_OutsideAuthMatchesTheRouter(t *testing.T) {
 	err := chi.Walk(builtRouter(), func(method, route string, _ http.Handler, mws ...func(http.Handler) http.Handler) error {
 		key := routeKey{Method: method, Pattern: canonicalRoute(route)}
-		if authed := chainIndex(mws, authMW) >= 0; routeTable[key].who.noCaller == authed {
-			t.Errorf("%s %s: noCaller is %v, but the route is behind authentication: %v", method, key.Pattern, routeTable[key].who.noCaller, authed)
+		if authed := chainIndex(mws, authMW) >= 0; routeTable[key].outsideAuth == authed {
+			t.Errorf("%s %s: outsideAuth is %v, but the route is behind authentication: %v", method, key.Pattern, routeTable[key].outsideAuth, authed)
 		}
 		return nil
 	})

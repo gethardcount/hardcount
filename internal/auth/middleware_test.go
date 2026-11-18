@@ -6,42 +6,42 @@ import (
 	"testing"
 )
 
-// needsOf is a route's Need for RequirePermission's test, and whether a route
-// serves the request.
-type needsOf struct {
-	need   Need
+// accessOf is a route's Access for RequirePermission's test, and whether a
+// route serves the request.
+type accessOf struct {
+	access Access
 	routed bool
 }
 
-func (n needsOf) Need(*http.Request) (Need, bool) { return n.need, n.routed }
+func (a accessOf) Lookup(*http.Request) (Access, bool) { return a.access, a.routed }
 
-// RequirePermission checks the route's Need: a permission the caller holds
+// RequirePermission checks the route's Access: a permission the caller holds
 // (an ingest key holds only usage:ingest), a dashboard session, or any
 // caller. A request no route serves passes on to the router's 404 or 405. An
 // entry that names nobody is a fault in the table, refused with 500.
-func TestRequirePermission_ChecksTheRoutesNeed(t *testing.T) {
+func TestRequirePermission_ChecksTheRoutesAccess(t *testing.T) {
 	ingest := Caller{TenantID: "t1", KeyID: "hc_key_1", KeyType: KeyTypeIngest}
 	session := Caller{TenantID: "t1", UserID: "hc_usr_1"}
-	members := Need{Session: "manage team membership"}
+	members := Access{Session: "manage team membership"}
 	for _, c := range []struct {
 		name   string
-		needs  needsOf
+		table  accessOf
 		caller Caller
 		want   int
 	}{
-		{"no route", needsOf{}, ingest, http.StatusOK},
-		{"any caller", needsOf{Need{Any: true}, true}, ingest, http.StatusOK},
-		{"a permission held", needsOf{Need{Perm: PermUsageIngest}, true}, ingest, http.StatusOK},
-		{"a permission not held", needsOf{Need{Perm: PermCustomerWrite}, true}, ingest, http.StatusForbidden},
-		{"session only, a session", needsOf{members, true}, session, http.StatusOK},
-		{"session only, a key", needsOf{members, true}, ingest, http.StatusForbidden},
-		{"names nobody", needsOf{Need{}, true}, session, http.StatusInternalServerError},
+		{"no route", accessOf{}, ingest, http.StatusOK},
+		{"any caller", accessOf{Access{Any: true}, true}, ingest, http.StatusOK},
+		{"a permission held", accessOf{Access{Perm: PermUsageIngest}, true}, ingest, http.StatusOK},
+		{"a permission not held", accessOf{Access{Perm: PermCustomerWrite}, true}, ingest, http.StatusForbidden},
+		{"session only, a session", accessOf{members, true}, session, http.StatusOK},
+		{"session only, a key", accessOf{members, true}, ingest, http.StatusForbidden},
+		{"names nobody", accessOf{Access{}, true}, session, http.StatusInternalServerError},
 	} {
 		ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
 		req = req.WithContext(WithCaller(req.Context(), c.caller))
 		rec := httptest.NewRecorder()
-		RequirePermission(c.needs)(ok).ServeHTTP(rec, req)
+		RequirePermission(c.table)(ok).ServeHTTP(rec, req)
 		if rec.Code != c.want {
 			t.Errorf("%s: got %d, want %d", c.name, rec.Code, c.want)
 		}

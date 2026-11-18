@@ -247,16 +247,15 @@ func (s *Server) routes() chi.Router {
 	// differ in rate limit, Idempotency and time limit. The CSRF guard comes
 	// before authentication, so a cross-site write is refused before the
 	// session cookie is read. A path no route serves passes the permission
-	// check and gets its 404 or 405: after authentication only when it is
-	// under no mount, and after the group's steps when it is under one.
+	// check and gets its 404 or 405, after the steps
+	// docs/architecture.md#where-a-refusal-comes-from names.
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(mw.CSRFGuard(allowedOrigins))
 		r.Use(session.RequireCaller(s.sessionSvc, s.authSvc))
-		r.Use(auth.RequirePermission(routeNeeds{}))
+		r.Use(auth.RequirePermission(tableAccess{}))
 
 		// The event stream: no timeout (an EventSource stays open for hours),
-		// and no Idempotency (GET only). It takes the session and key
-		// services again because it re-checks its credential while open.
+		// and no Idempotency (GET only).
 		r.Group(func(r chi.Router) {
 			r.Use(s.rateLimiter.Middleware())
 			r.Use(door.Middleware)
@@ -275,8 +274,8 @@ func (s *Server) routes() chi.Router {
 
 		// Usage ingest: its own, much larger bucket, because LiteLLM drops a
 		// rate-limited event for good, and no Idempotency, because each event's
-		// own key is its dedup, and a held row (usage that named a customer or
-		// meter that did not exist yet, kept to release later) moves once.
+		// own key is its dedup, and a held row moves once (route_table.go's
+		// usage entries say what held usage is).
 		r.Group(func(r chi.Router) {
 			r.Use(s.ingestLimiter.Middleware())
 			r.Use(mw.Timeout(requestTimeout))

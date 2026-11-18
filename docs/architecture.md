@@ -65,7 +65,7 @@ The door is last for three reasons:
 ### The route table
 
 `internal/api/route_table.go` has one line per route, saying:
-- who may call it: a permission, a dashboard session only, any caller, or, outside authentication, no caller (the permission check reads this);
+- who may call it: `.needs(…)` with a permission, a dashboard session only or any caller, or `.outsideAuth()` for a route outside authentication (the permission check reads this);
 - how its time is decided (the clock door reads this);
 - where its audit evidence comes from, when it changes state or exports (the audit detector);
 - whether its answer carries a secret shown once (Idempotency never keeps that answer).
@@ -74,14 +74,19 @@ The door is last for three reasons:
 
 ### Adding a route
 
-1. Register it in its handler's `Routes()`, such as `invoice.Handler.Routes`, which `router.go` mounts at `/v1/invoices` in the ordinary group.
-2. Add its entry to `routeTable`:
-   - who may call it, the constructor's first argument: `invoiceWrite`, `membersSession`, `anyCaller`, or `noCaller` for a route outside authentication;
-   - how its time is decided;
-   - where its audit row comes from, if it changes state or exports.
-3. What fails when a part is forgotten:
+1. **Register it** in its handler's `Routes()`, such as `invoice.Handler.Routes`, which `router.go` mounts at `/v1/invoices`. A new handler also needs a mount in `router.go`, in the group whose rate limit, Idempotency and time limit fit it ([the groups](#the-path-of-a-request)): the ordinary group, unless the route sends usage, streams or exports.
+2. **Add its entry** to `routeTable`, such as:
+   ```go
+   {"POST", "/v1/invoices/{id}/finalize"}: ofInvoice().needs(invoiceWrite).withAudit(explicit("invoice.Service.Finalize (LogInTx)")),
+   ```
+   - how its time is decided: one of the clock constructors in `route_table.go` (`realTime()`, `ofCustomer("id")`, `ofInvoice()`, …, `decidedIn("package.Type.Method")`);
+   - who may call it: `.needs(…)` with a permission value (`invoiceRead`, `invoiceWrite`, …), `membersSession`, `settingsSession` or `anyCaller`; or `.outsideAuth()` for a route outside `/v1`'s authentication;
+   - where its audit row comes from, if it changes state or exports: `.withAudit(explicit("…"))`, naming the function that writes it, or `.withAudit(exempt(reason, "…"))`, saying why it writes none;
+   - `.withShowOnce()`, when its answer carries a secret shown once.
+3. **Read or write is your choice.** A route that changes data takes its area's write permission. `TestRouteTable_WritesNeedAWritePermission` fails on a `POST`, `PUT`, `PATCH` or `DELETE` that takes a read one, unless the test lists it with its reason.
+4. **What fails when a part is forgotten:**
    - no entry: the server does not start, and `TestRouteTable_MatchesLiveRoutes` fails;
-   - no permission: the entry does not compile;
+   - no `.needs(…)` or `.outsideAuth()`: the entry does not compile;
    - no audit on a route that changes state: `TestRouteTable_MatchesLiveRoutes` fails;
    - a new any-caller route: `TestRouteTable_AnyCallerStaysSmall` fails.
 
@@ -91,7 +96,7 @@ The access log and the metrics name each request by its route's pattern when it 
 
 | Answer | From | When |
 |---|---|---|
-| `404`, `405` | the router | no route matches the path or the method (inside `/v1`, after authentication, and under a mount after the group's steps too); Idempotency keeps no key for it |
+| `404`, `405` | the router | no route matches the path or the method. Inside `/v1` it comes after authentication, and under a mount after the group's steps too: chi runs a group's steps once a mount's prefix matches. Idempotency keeps no key for it |
 | `413` | the body cap | a body over its cap, when it is read: by Idempotency first, on a request it guards (a write with an `Idempotency-Key`), else by the handler |
 | `403` cross-site request blocked | the CSRF guard | a write from another site, unless it carries a Bearer key and no session cookie |
 | `401` | authentication | `missing credentials`: no key, and no session cookie that is still signed in (an expired or signed-out session included); `invalid or expired API key`: a key that is not valid |
