@@ -51,7 +51,8 @@ func newStreamRig(t *testing.T, db, authDB *postgres.DB) *streamRig {
 	keys := auth.NewService(authDB, audit.NewLogger(authDB))
 	r := chi.NewRouter()
 	// The root's record, then the /v1 group's authentication, as router.go
-	// mounts the stream.
+	// mounts the stream; its permission check is left out, as the session and
+	// the secret key here both hold apikey:read.
 	r.Use(requesttest.Root)
 	r.Use(session.RequireCaller(sessions, keys))
 	r.Route("/v1/webhook_events/stream", eventStreamRoute(webhook.NewHandler(srv.WebhookOutSvc), sessions, keys, testStreamInterval))

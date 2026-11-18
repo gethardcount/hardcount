@@ -186,6 +186,30 @@ func TestRouteTable_AnyCallerStaysSmall(t *testing.T) {
 	}
 }
 
+// TestRouteTable_SessionOnlyRoutesAreListed lists the routes only a dashboard
+// session may call, so a key permission given to one shows in review: on a
+// members route it would let any secret key change who belongs to the
+// account.
+func TestRouteTable_SessionOnlyRoutesAreListed(t *testing.T) {
+	var got []string
+	for k, d := range routeTable {
+		if d.access.Session != "" {
+			got = append(got, k.Method+" "+k.Pattern)
+		}
+	}
+	sort.Strings(got)
+	want := []string{
+		"DELETE /v1/members/invitations/{id}",
+		"DELETE /v1/members/{userID}",
+		"GET /v1/members",
+		"POST /v1/members/invite",
+		"PUT /v1/settings",
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("session-only routes: %v, want %v", got, want)
+	}
+}
+
 // TestRouteTable_WritesNeedAWritePermission: a route behind authentication
 // with a POST, PUT, PATCH or DELETE needs a write permission, usage:ingest or
 // a dashboard session, so a key that held only read permissions could change

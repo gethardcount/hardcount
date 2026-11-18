@@ -7,7 +7,6 @@ import (
 	"net"
 	"net/http"
 
-	"regexp"
 	"strings"
 	"time"
 
@@ -159,13 +158,12 @@ func (s *Server) routes() chi.Router {
 			return run.InvoiceID, err
 		},
 	}
-	var allow *allowIndex // built once every route is registered, below
 	// chi hands both handlers down to every router mounted below, so the
 	// router's every 404 and 405 answers the JSON envelope; a 405 lists the
 	// path's methods.
 	r.NotFound(respond.RouteNotFound)
 	r.MethodNotAllowed(func(w http.ResponseWriter, req *http.Request) {
-		respond.MethodNotAllowed(w, req, allow.methods(req))
+		respond.MethodNotAllowed(w, req, finder.methods(req))
 	})
 	// The root chain; docs/architecture.md#the-path-of-a-request lists each
 	// step and says why the record, the metrics, the access log and the door
@@ -246,13 +244,13 @@ func (s *Server) routes() chi.Router {
 	// route table's permission check, then joins one of four groups, which
 	// differ in rate limit, Idempotency and time limit. The CSRF guard comes
 	// before authentication, so a cross-site write is refused before the
-	// session cookie is read. A path no route serves passes the permission
-	// check and gets its 404 or 405, after the steps
-	// docs/architecture.md#where-a-refusal-comes-from names.
+	// session cookie is read. The permission check answers a path no route
+	// serves with its 404 or 405 (noRoute), so a group's steps and handlers run
+	// only for a listed route the caller may call.
 	r.Route("/v1", func(r chi.Router) {
 		r.Use(mw.CSRFGuard(allowedOrigins))
 		r.Use(session.RequireCaller(s.sessionSvc, s.authSvc))
-		r.Use(auth.RequirePermission(tableAccess{}))
+		r.Use(auth.RequirePermission(tableAccess{}, noRoute{finder}))
 
 		// The event stream: no timeout (an EventSource stays open for hours),
 		// and no Idempotency (GET only).
@@ -330,7 +328,6 @@ func (s *Server) routes() chi.Router {
 		})
 	})
 
-	allow = newAllowIndex(r)
 	finder.root = r
 	mustListEveryRoute(r)
 
@@ -409,16 +406,6 @@ var routeMethods = []string{
 	http.MethodPatch, http.MethodDelete, http.MethodOptions,
 }
 
-// allowIndex answers which methods a path takes, for the Allow header of a
-// 405. chi's own Find cannot answer it through a mount, because a mount
-// point matches every method. So every route the router serves, as
-// chi.Walk lists it, is registered on one flat router with no mounts.
-type allowIndex struct {
-	flat *chi.Mux
-}
-
-var pathParamName = regexp.MustCompile(`\{[^}]*\}`)
-
 // mustListEveryRoute refuses to build a server that serves a route the route
 // table does not list, and names the route. Such a route would run with no
 // clock decision, no audit and no retry key, and its record could not tell it
@@ -433,37 +420,4 @@ func mustListEveryRoute(router chi.Routes) {
 		}
 		return nil
 	})
-}
-
-func newAllowIndex(router chi.Routes) *allowIndex {
-	flat := chi.NewMux()
-	noop := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
-	// Walk returns only the walk function's error, and this one has none.
-	_ = chi.Walk(router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
-		// Parameters are renamed by position: two routers may name the
-		// same segment differently ({id}, {customer_id}), which one chi
-		// tree refuses.
-		n := 0
-		pattern := pathParamName.ReplaceAllStringFunc(canonicalRoute(route), func(string) string {
-			n++
-			return fmt.Sprintf("{p%d}", n)
-		})
-		flat.Method(method, pattern, noop)
-		if pattern != "/" && !strings.HasSuffix(pattern, "*") {
-			flat.Method(method, pattern+"/", noop)
-		}
-		return nil
-	})
-	return &allowIndex{flat: flat}
-}
-
-// methods lists the methods the router serves at r's path.
-func (a *allowIndex) methods(r *http.Request) []string {
-	var out []string
-	for _, m := range routeMethods {
-		if a.flat.Match(chi.NewRouteContext(), m, routedPath(r)) {
-			out = append(out, m)
-		}
-	}
-	return out
 }

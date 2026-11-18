@@ -17,8 +17,9 @@ func (a accessOf) Lookup(*http.Request) (Access, bool) { return a.access, a.rout
 
 // RequirePermission checks the route's Access: a permission the caller holds
 // (an ingest key holds only usage:ingest), a dashboard session, or any
-// caller. A request no route serves passes on to the router's 404 or 405. An
-// entry that names nobody is a fault in the table, refused with 500.
+// caller. A request no route serves gets the unrouted handler's answer (the
+// router's 404 or 405), never the next handler. An entry that names nobody is
+// a fault in the table, refused with 500.
 func TestRequirePermission_ChecksTheRoutesAccess(t *testing.T) {
 	ingest := Caller{TenantID: "t1", KeyID: "hc_key_1", KeyType: KeyTypeIngest}
 	session := Caller{TenantID: "t1", UserID: "hc_usr_1"}
@@ -29,7 +30,7 @@ func TestRequirePermission_ChecksTheRoutesAccess(t *testing.T) {
 		caller Caller
 		want   int
 	}{
-		{"no route", accessOf{}, ingest, http.StatusOK},
+		{"no route", accessOf{}, session, http.StatusNotFound},
 		{"any caller", accessOf{Access{Any: true}, true}, ingest, http.StatusOK},
 		{"a permission held", accessOf{Access{Perm: PermUsageIngest}, true}, ingest, http.StatusOK},
 		{"a permission not held", accessOf{Access{Perm: PermCustomerWrite}, true}, ingest, http.StatusForbidden},
@@ -41,7 +42,7 @@ func TestRequirePermission_ChecksTheRoutesAccess(t *testing.T) {
 		req := httptest.NewRequest(http.MethodPost, "/", nil)
 		req = req.WithContext(WithCaller(req.Context(), c.caller))
 		rec := httptest.NewRecorder()
-		RequirePermission(c.table)(ok).ServeHTTP(rec, req)
+		RequirePermission(c.table, http.NotFoundHandler())(ok).ServeHTTP(rec, req)
 		if rec.Code != c.want {
 			t.Errorf("%s: got %d, want %d", c.name, rec.Code, c.want)
 		}

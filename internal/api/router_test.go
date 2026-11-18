@@ -127,8 +127,8 @@ func TestRouter_AV1RequestWithNoCredentialsIs401BeforeTheRateLimit(t *testing.T)
 }
 
 // On every route the chain runs in this order, each step where the route has
-// it: the CSRF guard, authentication, the rate limit, Idempotency, the
-// timeout, then the clock door. Each authenticated route is in one of the four
+// it: the CSRF guard, authentication, the permission check, the rate limit,
+// Idempotency, the timeout, then the clock door. Each authenticated route is in one of the four
 // /v1 groups, read from its limiter, its Idempotency and its time limit: the
 // ingest, export and stream groups hold exactly the routes listed here, and
 // every other authenticated route is an ordinary one.

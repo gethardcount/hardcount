@@ -150,8 +150,9 @@ var ingestKeyRoutes = map[string]bool{
 // through and fails here unless it is listed, so a new route cannot open to
 // ingest keys by naming the wrong permission.
 //
-// It also checks that a dashboard session passes every gate, and a secret
-// key every gate but a session-only one.
+// It also checks that a dashboard session passes every check, and a secret
+// key every check but a session-only one, which answers it the session-only
+// 403.
 //
 // Mutation: give the ingest key any other permission (usage:read, say), or
 // gate the usage routes on usage:write again, and this fails.
@@ -226,8 +227,10 @@ func TestIngestKey_RefusedOnEveryRouteButUsage(t *testing.T) {
 				}
 			case secret && sessionOnly:
 				// /v1/members and PUT /v1/settings take only a dashboard
-				// session. TestE2E_Settings_ChangeTakesDashboardSession checks
-				// that a secret key is refused on PUT /v1/settings.
+				// session.
+				if reached || rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "requires a dashboard session") {
+					t.Errorf("%s: a secret key got %d (reached=%v) %s, want the session-only 403", key, rec.Code, reached, rec.Body.String())
+				}
 			default:
 				if !reached {
 					t.Errorf("%s: a %s is refused (%d), want it let through", key, c.name, rec.Code)

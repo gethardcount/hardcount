@@ -118,9 +118,9 @@ func (c clockDecl) needs(access auth.Access) routeDecl {
 	return routeDecl{access: access, clock: c}
 }
 
-// outsideAuth is the entry of a route outside authentication: it takes no API
-// key or session, and its handler checks its own credential, if any (a token,
-// a signature or a password).
+// outsideAuth is the entry of a route outside authentication: authentication
+// does not run, and its handler checks its own credential, if any: a session
+// cookie (sign-out, the mode switch), a token, a signature or a password.
 func (c clockDecl) outsideAuth() routeDecl {
 	return routeDecl{outsideAuth: true, clock: c}
 }
@@ -269,7 +269,7 @@ var routeTable = map[routeKey]routeDecl{
 	{"QUERY", "/metrics"}:   realTime().outsideAuth(),
 
 	// --- sign-in and setup: users and tenants are on no clock ------------
-	{"POST", "/v1/bootstrap"}:                   realTime().outsideAuth().withAudit(explicit("tenant.RunBootstrap (on its own transaction). Never exempt: it mints a live secret key.")),
+	{"POST", "/v1/bootstrap"}:                   realTime().outsideAuth().withAudit(explicit("tenant.RunBootstrap (LogInTx, on its own transaction). Never exempt: it mints a live secret key.")),
 	{"POST", "/v1/auth/login"}:                  realTime().outsideAuth().withAudit(explicit("user.Service.Login (LogInTx)")),
 	{"POST", "/v1/auth/logout"}:                 realTime().outsideAuth().withAudit(explicit("user.Service.Logout (LogInTx)")),
 	{"POST", "/v1/auth/mode"}:                   realTime().outsideAuth().withAudit(explicit("user.Service.SetMode (LogInTx)")),
@@ -450,13 +450,13 @@ var routeTable = map[routeKey]routeDecl{
 	{"POST", "/v1/integrations/litellm/spend"}: decidedIn("usage.Service.IngestCall").needs(usageIngest).withAudit(exempt(reasonMachineIngest, "LiteLLM's spend callback, which writes usage events like the ingest above; the same accepted loss.")),
 	// Backfill is audited, unlike the ingest above: an operator's backdated
 	// usage changes what a customer is billed.
-	{"POST", "/v1/usage-events/backfill"}: decidedIn("usage.Service.Backfill").needs(usageWrite).withAudit(explicit("usage.Service.Backfill (in the change's transaction)")),
+	{"POST", "/v1/usage-events/backfill"}: decidedIn("usage.Service.Backfill").needs(usageWrite).withAudit(explicit("usage.Service.Backfill (LogInTx)")),
 	// Held usage (ADR-122) is what the LiteLLM callback could not ingest.
 	// Releasing it changes what a customer is billed; discarding it means it
 	// never bills.
-	{"POST", "/v1/usage-events/held/release"}: decidedIn("usage.Service.Release").needs(usageWrite).withAudit(explicit("usage.Service.Release (in the change's transaction)")),
+	{"POST", "/v1/usage-events/held/release"}: decidedIn("usage.Service.Release").needs(usageWrite).withAudit(explicit("usage.Service.Release (LogInTx)")),
 	// Discard reads no clock.
-	{"POST", "/v1/usage-events/held/discard"}: realTime().needs(usageWrite).withAudit(explicit("usage.Service.Discard (in the change's transaction)")),
+	{"POST", "/v1/usage-events/held/discard"}: realTime().needs(usageWrite).withAudit(explicit("usage.Service.Discard (LogInTx)")),
 	{"GET", "/v1/usage-events"}:               realTime().needs(usageRead),
 	{"GET", "/v1/usage-events/aggregate"}:     realTime().needs(usageRead),
 	{"GET", "/v1/usage-events/held"}:          realTime().needs(usageRead),

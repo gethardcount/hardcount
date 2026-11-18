@@ -83,12 +83,15 @@ The door is last for three reasons:
    - who may call it: `.needs(…)` with a permission value (`invoiceRead`, `invoiceWrite`, …), `membersSession`, `settingsSession` or `anyCaller`; or `.outsideAuth()` for a route outside `/v1`'s authentication;
    - where its audit row comes from, if it changes state or exports: `.withAudit(explicit("…"))`, naming the function that writes it, or `.withAudit(exempt(reason, "…"))`, saying why it writes none;
    - `.withShowOnce()`, when its answer carries a secret shown once.
-3. **Read or write is your choice.** A route that changes data takes its area's write permission. `TestRouteTable_WritesNeedAWritePermission` fails on a `POST`, `PUT`, `PATCH` or `DELETE` that takes a read one, unless the test lists it with its reason.
-4. **What fails when a part is forgotten:**
+3. **Describe it in `api/openapi.yaml`** ([OpenAPI workflow](dev/openapi-workflow.md)).
+4. **Read or write is your choice.** A route that changes data takes its area's write permission. `TestRouteTable_WritesNeedAWritePermission` fails on a `POST`, `PUT`, `PATCH` or `DELETE` that takes a read one, unless the test lists it with its reason.
+5. **What fails when a part is forgotten:**
    - no entry: the server does not start, and `TestRouteTable_MatchesLiveRoutes` fails;
    - no `.needs(…)` or `.outsideAuth()`: the entry does not compile;
    - no audit on a route that changes state: `TestRouteTable_MatchesLiveRoutes` fails;
-   - a new any-caller route: `TestRouteTable_AnyCallerStaysSmall` fails.
+   - no `api/openapi.yaml` entry: `TestOpenAPISpec_MatchesRouter` fails;
+   - a new any-caller or session-only route: `TestRouteTable_AnyCallerStaysSmall` or `TestRouteTable_SessionOnlyRoutesAreListed` fails;
+   - a new route an ingest key may call (`usageIngest`): `TestIngestKey_RefusedOnEveryRouteButUsage` fails until the route is in its `ingestKeyRoutes`.
 
 ### Where a refusal comes from
 
@@ -96,12 +99,12 @@ The access log and the metrics name each request by its route's pattern when it 
 
 | Answer | From | When |
 |---|---|---|
-| `404`, `405` | the router | no route matches the path or the method. Inside `/v1` it comes after authentication, and under a mount after the group's steps too: chi runs a group's steps once a mount's prefix matches. Idempotency keeps no key for it |
+| `404`, `405` | the router; inside `/v1`, the route's permission check | no route matches the path or the method. Inside `/v1` the permission check answers it right after authentication, before any group step. A `405`'s `Allow` lists the methods a route serves at the path |
 | `413` | the body cap | a body over its cap, when it is read: by Idempotency first, on a request it guards (a write with an `Idempotency-Key`), else by the handler |
 | `403` cross-site request blocked | the CSRF guard | a write from another site, unless it carries a Bearer key and no session cookie |
 | `401` | authentication | `missing credentials`: no key, and no session cookie that is still signed in (an expired or signed-out session included); `invalid or expired API key`: a key that is not valid |
 | `503 authentication_unavailable` | authentication | the session or key store could not be read |
-| `403` | the route's permission check | the caller lacks the route's permission, or the route takes only a dashboard session; it comes before the rate limit, Idempotency and the door |
+| `403`, `500` | the route's permission check | `403`: the caller lacks the route's permission, or the route takes only a dashboard session; it comes before the rate limit, Idempotency and the door. `500`: the route's entry names no caller, a fault in the table |
 | `429` | the group's rate limit | over the bucket, or any request while a fail-closed limiter cannot reach Redis |
 | `409 conflict_idempotency` | Idempotency | the first request with the key is still running after the wait |
 | `409 conflict_idempotency_unresolved` | Idempotency | the first request's owner died before it stored an answer, so the outcome is unknown |
@@ -115,7 +118,7 @@ The access log and the metrics name each request by its route's pattern when it 
 
 - **Writing:** a handler answers through `respond`, which writes every body and sets `Hardcount-Version`. `Hardcount-Request-Id` is set at the root.
 - **Errors:** an error becomes an answer by its kind, in one place, `respond.FromError`; its doc holds the table. An error with no kind answers `500` and is logged.
-- **Audit:** an action that changes rows writes its audit row, and the route table's audit note marks each such route `(LogInTx)` or `(Log)`.
+- **Audit:** each explicit audit note in the route table marks how its route writes its row, `(LogInTx)` or `(Log)`; an exempt route writes none.
   - **`(LogInTx)`, the rule ([ADR-090](adr/090-audit-in-tx-emission.md)):** the row is in the same transaction as the change, so the two commit together, and a failed write rolls the change back.
   - **`(Log)`:** the row is written just after the change commits, so a failed write leaves the change without its row; it is counted in `hardcount_audit_write_errors_total` and logged.
   - The audit detector at the root reports a change that wrote no row.
