@@ -25,9 +25,7 @@ type AccessTable interface {
 // RequirePermission returns middleware that answers 403 unless the caller has
 // the Access the request's route needs. unrouted answers a request no route
 // serves (its 404 or 405), so the next handler runs only for a route the
-// table lists and the caller may call. It runs right after authentication
-// and answers before any change, so the idempotency layer does not store its
-// 403.
+// table lists and the caller may call.
 func RequirePermission(table AccessTable, unrouted http.Handler) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return PermissionRequired{table: table, unrouted: unrouted, next: next}
@@ -48,37 +46,22 @@ func (c PermissionRequired) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	case !routed:
 		c.unrouted.ServeHTTP(w, r)
 		return
-	case access.Any:
+	case access.Any: // any caller passes
 	case access.Session != "":
 		if !CallerOf(r.Context()).IsSession() {
-			respond.Forbidden(w, r, sessionRefusal(access.Session))
+			respond.Forbidden(w, r, "this endpoint requires a dashboard session — sign in to the dashboard to "+access.Session)
 			return
 		}
 	case access.Perm != "":
-		if !permitted(w, r, access.Perm) {
+		if !hasPermission(CallerOf(r.Context()), access.Perm) {
+			respond.Forbidden(w, r, "insufficient permissions: this key type does not have "+string(access.Perm)+" access")
 			return
 		}
 	default:
-		// The route's entry names nobody: a fault in the table, refused.
-		slog.ErrorContext(r.Context(), "route declares no permission", "method", r.Method)
+		// The route's entry names no caller: a fault in the table, refused.
+		slog.ErrorContext(r.Context(), "route entry names no caller", "method", r.Method)
 		respond.InternalError(w, r)
 		return
 	}
 	c.next.ServeHTTP(w, r)
-}
-
-// sessionRefusal is the 403's text for a caller that is not a dashboard
-// session, on a route for task.
-func sessionRefusal(task string) string {
-	return "this endpoint requires a dashboard session — sign in to the dashboard to " + task
-}
-
-// permitted reports whether the caller holds perm, and answers 403 when it
-// does not.
-func permitted(w http.ResponseWriter, r *http.Request, perm Permission) bool {
-	if hasPermission(CallerOf(r.Context()), perm) {
-		return true
-	}
-	respond.Forbidden(w, r, "insufficient permissions: this key type does not have "+string(perm)+" access")
-	return false
 }

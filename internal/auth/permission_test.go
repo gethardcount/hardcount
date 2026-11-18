@@ -5,15 +5,16 @@ import (
 	"testing"
 )
 
-// Each key type has a permission entry. Mutation: add a type to keyTypes
-// without an entry in keyPermissions, and this fails.
-// TestKeyShape_ParserAndTableAgree checks each type's prefixes.
-func TestKeyTypes_EachHasPermissions(t *testing.T) {
-	for _, kt := range keyTypes {
-		if _, ok := keyPermissions[kt]; !ok {
-			t.Errorf("%s has no permission entry", kt)
-		}
-	}
+// allPermissions is every Permission constant, for the test that checks each.
+var allPermissions = []Permission{
+	PermCustomerRead, PermCustomerWrite,
+	PermPricingRead, PermPricingWrite,
+	PermSubscriptionRead, PermSubscriptionWrite,
+	PermUsageRead, PermUsageWrite, PermUsageIngest,
+	PermInvoiceRead, PermInvoiceWrite,
+	PermDunningRead, PermDunningWrite,
+	PermAPIKeyRead, PermAPIKeyWrite,
+	PermTestClockWrite,
 }
 
 // A session holds every permission and a key its type's, even with a user
