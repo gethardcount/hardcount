@@ -3,6 +3,8 @@ package api
 import (
 	"net/http"
 	"strings"
+
+	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
 // The route table has one entry per route the router serves: how its time is
@@ -42,6 +44,13 @@ func (d routeDecl) withAudit(a auditDecl) routeDecl {
 func (d routeDecl) showsSecretOnce() routeDecl {
 	d.showOnce = true
 	return d
+}
+
+// keepsNoKey reports whether Idempotency holds no key for r: a request that
+// matched no route, where nothing can run (a 404 or a 405), and one whose
+// answer carries a secret shown once, which must never be kept.
+func keepsNoKey(r *http.Request) bool {
+	return request.Of(r.Context()).Route().Pattern == "" || answersWithShowOnceSecret(r)
 }
 
 // answersWithShowOnceSecret reports whether r's route answers with a secret

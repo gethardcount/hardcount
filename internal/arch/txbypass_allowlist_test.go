@@ -56,7 +56,7 @@ var txBypassUsers = map[string]string{
 
 	// Background jobs: sweeps across tenants, the test-clock catch-up (the
 	// testclock_catchup role's claim list), start-up recovery and backfill.
-	"internal/api/middleware/idempotency.go CleanExpired":                                    "background",
+	"internal/api/middleware/idempotency.go IdempotencyCleaner.Cleanup":                      "background",
 	"internal/credit/postgres.go PostgresStore.ListExpiredGrants":                            "background",
 	"internal/credit/postgres.go PostgresStore.ListExpiredGrantsForClock":                    "background",
 	"internal/creditnote/postgres.go PostgresStore.ListPendingClawbackDrafts":                "background",

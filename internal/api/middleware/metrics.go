@@ -42,8 +42,9 @@ var (
 	//     with a retryable 503 and the handler did not run.
 	//   - finalize: the handler ran but its response was not stored. The key
 	//     stays pending, and retries with it get 409.
-	//   - release: a 409, 422 or 503 could not free the key. It stays
-	//     pending, and retries with it get 409 instead of running again.
+	//   - release: an answer that is not stored (a 401, 403, 409, 422, 503 or
+	//     refused body) could not free the key. It stays pending, and retries
+	//     with it get 409 instead of running again.
 	// A sustained rate means clients are being refused or stuck on 409s.
 	idempotencyCacheErrors = promauto.NewCounterVec(
 		prometheus.CounterOpts{

@@ -300,10 +300,10 @@ func (s *Server) routes() chi.Router {
 		// Ordinary routes: replayable by Idempotency-Key, 30 s.
 		r.Group(func(r chi.Router) {
 			r.Use(s.rateLimiter.Middleware())
-			// A request whose answer carries a secret shown only once ignores
-			// the Idempotency-Key header (answersWithShowOnceSecret): that
-			// answer is never kept for a replay.
-			r.Use(mw.Idempotency(s.db, answersWithShowOnceSecret))
+			// Idempotency holds no key (keepsNoKey) for a request no route
+			// serves, where nothing can run, or one whose answer carries a
+			// secret shown only once, which is never kept for a replay.
+			r.Use(mw.Idempotency(s.db, keepsNoKey))
 			r.Use(mw.Timeout(requestTimeout))
 			r.Use(door.Middleware)
 
@@ -350,6 +350,7 @@ func (s *Server) routes() chi.Router {
 
 	allow = newAllowIndex(r)
 	finder.root = r
+	mustListEveryRoute(r)
 
 	return r
 }
@@ -435,6 +436,22 @@ type allowIndex struct {
 }
 
 var pathParamName = regexp.MustCompile(`\{[^}]*\}`)
+
+// mustListEveryRoute refuses to build a server that serves a route the route
+// table does not list, and names the route. Such a route would run with no
+// clock decision, no audit and no retry key, and its record could not tell it
+// from a path no route serves. TestRouteTable_MatchesLiveRoutes holds the same
+// rule in CI.
+func mustListEveryRoute(router chi.Routes) {
+	// Walk returns only the walk function's error, and this one has none.
+	_ = chi.Walk(router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
+		key := routeKey{Method: method, Pattern: canonicalRoute(route)}
+		if _, ok := routeTable[key]; !ok {
+			panic(fmt.Sprintf("route %s %s is served but not in the route table (route_table.go)", key.Method, key.Pattern))
+		}
+		return nil
+	})
+}
 
 func newAllowIndex(router chi.Routes) *allowIndex {
 	flat := chi.NewMux()

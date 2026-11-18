@@ -71,7 +71,7 @@ A route's own permission check runs after the door, so a caller without the perm
 - where its audit evidence comes from, when it changes state or exports (the audit detector);
 - whether its answer carries a secret shown once (Idempotency never keeps that answer).
 
-`TestRouteTable_MatchesLiveRoutes` walks the router and fails on a route with no entry, an entry with no route, or a missing audit.
+`TestRouteTable_MatchesLiveRoutes` walks the router and fails on a route with no entry, an entry with no route, or a missing audit. A server that would serve a route with no entry does not start, so a request with no entry is one no route serves.
 
 ### Where a refusal comes from
 
@@ -79,7 +79,7 @@ The access log and the metrics name each request by its route's pattern when it 
 
 | Answer | From | When |
 |---|---|---|
-| `404`, `405` | the router | no route matches the path or the method (inside `/v1`, after authentication) |
+| `404`, `405` | the router | no route matches the path or the method (inside `/v1`, after authentication); Idempotency keeps no key for it |
 | `413` | the body cap | a body over its cap, when it is read: by Idempotency first, on a request it guards (a write with an `Idempotency-Key`), else by the handler |
 | `403` cross-site request blocked | the CSRF guard | a write from another site that does not carry only an API key |
 | `401` | authentication | `missing credentials`: no key, and no session cookie that is still signed in (an expired or signed-out session included); `invalid or expired API key`: a key that is not valid |
@@ -91,7 +91,7 @@ The access log and the metrics name each request by its route's pattern when it 
 | `503 idempotency_unavailable` | Idempotency | the key could not be recorded; its other answers are a `400` (a body it cannot read), the `413` above, and a `500` when no caller is on the request (a mis-wired router) |
 | `504 timeout` | the time limit | the handler wrote nothing in time |
 | `503 test_clock_unavailable`, `500` | the clock door | the record's test clock could not be read; a route entry the door does not know |
-| `403` | the route's permission check | the caller lacks the route's permission, or the route takes only a dashboard session |
+| `403` | the route's permission check | the caller lacks the route's permission, or the route takes only a dashboard session; Idempotency does not store it, so the key is free for the next request |
 | `500 internal_error` | the Recoverer | a panic before anything was written |
 
 ### The answer

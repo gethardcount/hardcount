@@ -64,6 +64,7 @@ func (h doorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	decl, params := entry.clock, request.Of(r.Context()).Route().Params
 	live, err := postgres.Livemode(r.Context())
 	live = err == nil && live
+	// No entry means no route serves the request (mustListEveryRoute).
 	if !routed || decl.Source == clockDecidedIn {
 		if !live {
 			r = r.WithContext(clock.WithRealTime(r.Context()))

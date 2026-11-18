@@ -118,7 +118,9 @@ func InvalidState(message string) *DomainError {
 }
 
 // Forbidden refuses an authenticated caller who may not do this. A service
-// returns it for a rule that must hold on every route that reaches it.
+// returns it for a rule that must hold on every route that reaches it. Return
+// it only before any change: the idempotency layer does not store a 403, so
+// another caller's request with the same key runs.
 //
 //	return errs.Forbidden("this key cannot do that")
 func Forbidden(message string) *DomainError {
