@@ -12,8 +12,9 @@ import (
 // operatorCodeError is an error that names its own code in place of
 // provider_error, such as payment_outcome_unknown when the provider never
 // answered and the charge may have gone through. "" keeps provider_error.
-// "Operator" in these names is the client reading the answer: the account's
-// staff in the dashboard, or its code calling the API.
+// "Operator" in these names is the business that runs Hardcount
+// (docs/glossary.md): whoever reads this answer, in the dashboard or from
+// its own code.
 type operatorCodeError interface {
 	OperatorErrorCode() string
 }
