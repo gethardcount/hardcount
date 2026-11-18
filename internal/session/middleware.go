@@ -96,7 +96,7 @@ func (c CallerRequired) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		respond.Error(w, r, http.StatusServiceUnavailable,
 			"authentication_unavailable",
 			"authentication is temporarily unavailable — retry shortly")
-	default:
+	default: // auth.ErrInvalidKey: the only other error Authenticate returns
 		slog.WarnContext(r.Context(), "api key validation failed", "error", err)
 		respond.Unauthorized(w, r, "invalid or expired API key")
 	}

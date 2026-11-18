@@ -12,7 +12,9 @@ import (
 // lowercase hex. Its lookup prefix, the type prefix and the first
 // lookupHexLen hex characters, finds its row, which stores the key's hash
 // and the hash's salt (hashKey), never the key. api_keys_prefix_shape_check
-// states the lookup prefix's shape.
+// states the lookup prefix's shape. In hc_secret_live_3f9a…, hc_secret_live_
+// is the type prefix; with the next lookupHexLen characters it is the lookup
+// prefix, stored as key_prefix.
 const (
 	secretBytes  = 32
 	lookupHexLen = 12
@@ -81,7 +83,9 @@ func mintKey(kt KeyType, livemode bool) (raw, lookup string, h storedHash, err e
 
 // hashKey returns hex(SHA-256(salt || raw)). salt is empty for a key the
 // setup command stored in v0.9.3 or earlier (ADR-141), which
-// api_keys_salt_shape_check allows; mintKey always draws one.
+// api_keys_salt_shape_check allows; mintKey always draws one. One round of a
+// fast hash is enough: a key is secretBytes random bytes, not a password, so
+// there is nothing to guess.
 func hashKey(salt []byte, raw string) string {
 	sum := sha256.Sum256(append(append([]byte{}, salt...), raw...))
 	return hex.EncodeToString(sum[:])

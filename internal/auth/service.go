@@ -105,11 +105,13 @@ func (s *Service) CreateKey(ctx context.Context, tenantID string, input CreateKe
 }
 
 // CreateKeyTx is CreateKey on the caller's transaction, for account setup
-// (tenant.RunBootstrap). tx must have app.tenant_id set to tenantID and
-// app.livemode set, and ctx must carry the same mode (postgres.WithLivemode):
-// the row and its audit row take their mode from tx, the key's prefix takes
-// it from ctx, and api_keys_prefix_shape_check refuses a key where they
-// differ.
+// (tenant.RunBootstrap). The caller gives the mode twice:
+//   - tx has app.tenant_id set to tenantID and app.livemode set: the row and
+//     its audit row take their mode from tx;
+//   - ctx carries the same mode (postgres.WithLivemode): the key's prefix
+//     takes it from ctx.
+//
+// api_keys_prefix_shape_check refuses a key where the two differ.
 func (s *Service) CreateKeyTx(ctx context.Context, tx *sql.Tx, tenantID string, input CreateKeyInput) (CreateKeyResult, error) {
 	k, err := checkCreateInput(input, time.Now().UTC())
 	if err != nil {
@@ -224,7 +226,8 @@ func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey
 		return domain.APIKey{}, ErrInvalidKey
 	}
 
-	// getByPrefix set Status as it read the row (scanKey, statusAt).
+	// getByPrefix set Status as it read the row: scanKey, in postgres.go,
+	// applies statusAt at the server's clock.
 	if key.Status != domain.APIKeyStatusActive {
 		return domain.APIKey{}, fmt.Errorf("api key %s: %w", key.Status, ErrInvalidKey)
 	}
@@ -307,7 +310,7 @@ type RotateKeyResult struct {
 // a new key of the same name, type, mode and expires_at. A grace of 0
 // revokes the old key; a grace of up to maxRotationGrace sets it to expire
 // that many seconds from now, or at its own expires_at if that is sooner
-// (scheduleExpiry). A grace out of range returns a validation error, a key
+// (scheduleExpiry, in postgres.go, does it in SQL). A grace out of range returns a validation error, a key
 // not found errs.ErrNotFound, and a key that is not active
 // errs.ErrInvalidState.
 func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input RotateKeyInput) (RotateKeyResult, error) {
@@ -322,8 +325,9 @@ func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input Rota
 
 	var result RotateKeyResult
 	err := s.db.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
-		// Row-level security finds the key only in the caller's mode, so the
-		// replacement, minted on the same transaction, is in the old key's mode.
+		// Row-level security finds the key only in the caller's mode, so
+		// old.Livemode is the transaction's mode, and the replacement, minted
+		// on the same transaction, is in it.
 		old, err := s.store.getForUpdate(ctx, tx, id)
 		if err != nil {
 			return err

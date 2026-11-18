@@ -45,10 +45,10 @@ func (d routeDecl) withAudit(a auditDecl) routeDecl {
 // withShowOnce is d with an answer that carries a secret shown only in that
 // answer: a field marked `x-show-once: true` in api/openapi.yaml, which
 // TestOpenAPISpec_ShowOnceSecretsAreNeverKept keeps in step with the table.
-// /v1/bootstrap's answer has marked fields, but its entry is not marked: the
-// mark only keeps the idempotency layer from keeping an answer, and bootstrap
-// is mounted outside that layer. Moved inside, it would fail that test until
-// marked.
+// /v1/bootstrap's answer has marked fields and its entry is not marked. The
+// mark only tells the idempotency layer not to keep an answer, and bootstrap
+// is mounted outside that layer; the test would fail if it were moved inside
+// without the mark.
 func (d routeDecl) withShowOnce() routeDecl {
 	d.showOnce = true
 	return d
@@ -141,12 +141,16 @@ func sessionOnly(task string) auth.Access { return auth.Access{Session: task} }
 
 // The access values an entry names, one per permission and kind of caller.
 //
-// Seven areas take their write permission for reads too, one permission for
-// the area: API keys, price overrides, recipes, settings, webhook endpoints,
-// credit notes and credits. Test clocks have only testclock:write. The
-// apikey pair guards more than keys: apikeyWrite the key routes, the
-// settings (Stripe and email included) and webhook endpoints; apikeyRead
-// webhook events and their stream, and the audit log and its export.
+// Seven areas take one permission for reads and writes alike, so their GET
+// entries name a write permission on purpose:
+//   - API keys, settings (Stripe and email included), webhook endpoints:
+//     apikeyWrite;
+//   - price overrides, recipes: pricingWrite;
+//   - credit notes: invoiceWrite;
+//   - credits: customerWrite.
+//
+// Test clocks have only testclockWrite. apikeyRead guards webhook events and
+// their stream, and the audit log and its export.
 var (
 	// anyCaller: any API key or dashboard session.
 	// TestRouteTable_AnyCallerStaysSmall lists the routes that take it.

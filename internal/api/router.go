@@ -257,7 +257,9 @@ func (s *Server) routes() chi.Router {
 		r.Use(auth.RequirePermission(tableAccess{}, noRoute{finder}))
 
 		// The event stream: no timeout (an EventSource stays open for hours),
-		// and no Idempotency (GET only).
+		// and no Idempotency (GET only). It takes the session and key services
+		// because it checks its caller again while the stream is open
+		// (event_stream_route.go).
 		r.Group(func(r chi.Router) {
 			r.Use(s.rateLimiter.Middleware())
 			r.Use(door.Middleware)
@@ -276,8 +278,9 @@ func (s *Server) routes() chi.Router {
 
 		// Usage ingest: its own, much larger bucket, because LiteLLM drops a
 		// rate-limited event for good, and no Idempotency, because each event's
-		// own key is its dedup, and a held row moves once (route_table.go's
-		// usage entries say what held usage is).
+		// own key already stops a second copy, and releasing or discarding
+		// held usage marks each held row once, so a second call finds nothing
+		// held (route_table.go's usage entries say what held usage is).
 		r.Group(func(r chi.Router) {
 			r.Use(s.ingestLimiter.Middleware())
 			r.Use(mw.Timeout(requestTimeout))
