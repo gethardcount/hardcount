@@ -45,9 +45,10 @@ const (
 // api_keys CHECKs.
 var keyTypes = []KeyType{KeyTypeSecret, KeyTypeIngest}
 
-// hasPermission reports whether c holds perm. It is the whole permission
-// model: a session and a secret key hold every permission, an ingest key holds
-// only usage:ingest, and any other caller holds none.
+// hasPermission reports whether c holds perm: a session and a secret key hold
+// every permission, an ingest key holds only usage:ingest, and any other
+// caller holds none. PermissionRequired decides the session-only and
+// any-caller routes, and some handlers refuse more.
 func hasPermission(c Caller, perm Permission) bool {
 	switch {
 	case c.IsSession():
@@ -61,8 +62,8 @@ func hasPermission(c Caller, perm Permission) bool {
 		// mint keys.
 		return perm == PermUsageIngest
 	default:
-		// No key type (a job's context, or a request nothing authenticated),
-		// or an unknown one.
+		// No key type, or an unknown one: only a fault could build such a
+		// caller.
 		return false
 	}
 }
