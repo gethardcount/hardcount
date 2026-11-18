@@ -48,9 +48,10 @@ var keyTypes = []KeyType{KeyTypeSecret, KeyTypeIngest}
 // hasPermission reports whether c holds perm: a session and a secret key hold
 // every permission, an ingest key holds only usage:ingest, and any other
 // caller holds none. PermissionRequired decides the session-only and
-// any-caller routes, and three handlers refuse more: the test email refuses
-// any key, tenantstripe's checkMode the other mode's connection, and the
-// billing run a caller with no tenant.
+// any-caller routes. Three handlers refuse more:
+//   - the test email refuses any key;
+//   - tenantstripe's checkMode refuses the other mode's connection;
+//   - the billing run refuses a caller with no tenant.
 func hasPermission(c Caller, perm Permission) bool {
 	switch {
 	case c.IsSession():

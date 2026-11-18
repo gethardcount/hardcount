@@ -49,7 +49,8 @@ const (
 // guards a POST, PUT or PATCH with an Idempotency-Key from a tenant, unless
 // ignore matches it (nil matches nothing); a request ignore matches runs as
 // if no key was sent, and the server's ignore (keepsNoKey, internal/api) says
-// which. Every other request passes through.
+// which. Every other request passes through. ignore is asked before the
+// handler runs; freesKey, after it, says whether the answer is kept.
 //
 // A key is kept per tenant and mode for 24 hours, the expires_at default on
 // idempotency_keys. A request is the same request as the one that first used
@@ -173,8 +174,9 @@ func freesKey(status int, bodyRefused bool) bool {
 		// so another caller's request with the key may run.
 		return true
 	case status == http.StatusConflict, status == http.StatusUnprocessableEntity:
-		// Not the request's outcome: a retry may get past the conflict, and
-		// the client fixes the body.
+		// The request did not happen. A retry may get past a conflict; and a
+		// corrected body must be able to run under the same key, where a
+		// stored 422 would answer it as another request.
 		return true
 	case status == http.StatusServiceUnavailable:
 		// A handler answers 503 only when a second run is safe
@@ -182,7 +184,8 @@ func freesKey(status int, bodyRefused bool) bool {
 		return true
 	}
 	// Every other answer is stored. A 500 keeps a retry from running again a
-	// change that may have committed, and any other 400 may follow a write.
+	// change that may have committed. A 400 that is not a refused body is
+	// stored too: the handler may have written before it answered.
 	return false
 }
 

@@ -34,7 +34,7 @@ Every request passes the root chain, then its group's chain, then its handler. I
 11. **Security headers.**
 12. **Audit detector** (`mw.AuditCoverage`) only observes: it reports a mutating 2xx that wrote no audit row and is not declared exempt.
 
-**The groups.** chi then routes the request into one group, which adds its own steps. Each group ends with **the clock door**. It decides the instant the request runs on, from the route's entry in the [route table](#the-route-table): real time, or the time of the test clock that the record the request names is on. The handler reads that instant from the context.
+**The groups.** chi then routes the request into one group, which adds its own steps. Each group ends with **the clock door**. It decides the instant the request runs on, from the route's entry in the [route table](#the-route-table): real time, or the time of the test clock that the invoice, customer or other record named in the request is on. The handler reads that instant from the context.
 
 | Group | Steps, in order |
 |---|---|
@@ -50,7 +50,7 @@ Every request passes the root chain, then its group's chain, then its handler. I
 | — the event stream | general rate limit, the clock door |
 
 The door is last for three reasons:
-- after authentication, so it looks up the record the request names in the caller's tenant and mode;
+- after authentication, so it looks up that invoice or customer in the caller's tenant and mode (test or live);
 - after Idempotency, so a replayed request never reaches it;
 - inside the time limit, so its lookups are bounded.
 

@@ -11,10 +11,12 @@ const (
 )
 
 // Caller is who a request acts as: a dashboard user's session, or an API key.
-// Never both a UserID and a KeyID: session.Authenticate sets one or the other,
-// and WithUserID runs only on account routes, which carry no caller. A
-// background job, a webhook or a public page carries only a tenant
-// (WithTenantID), or no caller.
+// Never both a UserID and a KeyID: session.Authenticate sets one or the
+// other. WithUserID names a user only on the account routes (sign-in and
+// sign-out, the mode switch, invitations, password reset), where
+// authentication does not run and there is no caller yet. A background job, a
+// webhook or a public page carries only a tenant (WithTenantID), or no
+// caller.
 type Caller struct {
 	TenantID string
 	UserID   string  // set for a session
@@ -30,7 +32,7 @@ func (c Caller) IsSession() bool {
 
 // Actor names c in the audit log's actor_type words: "user" and the user's
 // id for a session, "api_key" and the key's id for any caller with a key,
-// and "", "" for neither. audit.ResolveActor says what a new name needs.
+// and "", "" for neither. audit.ResolveActor says what adding an actor type needs.
 func (c Caller) Actor() (actorType, id string) {
 	switch {
 	case c.IsSession():
