@@ -23,7 +23,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"sync"
 	"time"
 
@@ -138,8 +137,8 @@ var simKey = simKeyType{}
 
 // WithSim binds a full simulated-time context, instant and clock, to ctx.
 // It is called where the clock is known: by the ForClock and catch-up
-// drivers, which hold the clock id and its frozen_time, and by
-// BindEffectiveNow, which resolves an entity's pin. (Catch-up is the work
+// drivers, which hold the clock id and its frozen_time, and by Decide, which
+// resolves a record's clock. (Catch-up is the work
 // that runs everything that fell due in the time a test clock skipped.)
 // Every Clock.Now(ctx) below reads s.At.
 // The audit Logger itself stamps every audit row on this ctx onto the sim
@@ -331,10 +330,9 @@ func Decision(ctx context.Context) (Sim, bool) {
 // record whose time could not be read is not a record that is missing.
 var ErrUndecided = errors.New("the time could not be decided")
 
-// Decide resolves p through r and records the answer on ctx. Unlike
-// BindEffectiveNow it returns the resolver's error, as ErrUndecided, and
-// needs a resolver and an id: it is the call that decides, at the entry point
-// of a request or a job's row. A clock is decided as the record's clock. For
+// Decide resolves p through r and records the answer on ctx. It returns the
+// resolver's error, as ErrUndecided, and needs a resolver and an id: it is
+// the call that decides, at the entry point of a request or a job's row. A clock is decided as the record's clock. For
 // a record on no clock the result is real time, except that a real instant
 // ctx already carries is kept; a clock's instant is dropped
 // (keepOrRealTime).
@@ -367,12 +365,13 @@ func Decide(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
 	return WithSim(ctx, sim), nil
 }
 
-// Resolver maps an entity to its simulated-time context. That is the clock
-// the entity is pinned to and the clock's frozen_time, or a bare wall-clock
-// Sim (TestClockID "") when the entity is not pinned. Operator entry points
-// use it to bind ctx through BindEffectiveNow. So do boundary code paths
-// with no inherited binding, such as Stripe webhook handlers and async
-// workers.
+// Resolver answers which test clock a record is on. A record on a clock
+// answers the clock's id and its frozen time. A record on no clock answers no
+// clock, a zero Sim, without reading any clock: the caller binds an instant
+// if it needs one (Decide's caller, with EnsureEffectiveNow). An error comes
+// with a zero Sim too, and a caller that goes on anyway reads its own clock.
+// Every decision goes through it: the API's door, and Decide's other callers
+// (a decidedIn route's function, a Stripe event, a job's row, a public page).
 //
 // It returns the instant and the clock id together, from one resolution,
 // because they are two halves of one fact. A clock id resolved apart from
@@ -396,75 +395,4 @@ type Pin struct {
 	CustomerID     string
 	SubscriptionID string
 	InvoiceID      string
-}
-
-// BindEffectiveNow resolves p through r and returns a ctx carrying that
-// entity's simulated-time context: its effective-now and, when the entity is
-// pinned to a test clock, the clock id. On a resolver error it returns the
-// original ctx unchanged. Failing the operator's action on a dangling pin is
-// worse than stamping the wrong time domain on an edge-case row. The caller
-// can log the error if they care. Most don't.
-//
-// It binds the clock id as well as the instant, so every audit emitter below
-// a pin resolution inherits the clock, and no audit row written below it
-// misses the sim axis. No emitter has to know that test clocks exist. The
-// name still fits: the call binds the entity's time domain onto ctx, and the
-// clock id is part of that domain.
-//
-// The returned bool is true when the ctx now carries effective-now, and
-// false when the binding was skipped: no resolver, no ids, or an error.
-func BindEffectiveNow(ctx context.Context, r Resolver, p Pin) (context.Context, bool) {
-	if r == nil {
-		return ctx, false
-	}
-	var (
-		sim Sim
-		err error
-	)
-	switch {
-	case p.InvoiceID != "":
-		sim, err = r.SimForInvoice(ctx, p.TenantID, p.InvoiceID)
-	case p.SubscriptionID != "":
-		sim, err = r.SimForSubscription(ctx, p.TenantID, p.SubscriptionID)
-	case p.CustomerID != "":
-		sim, err = r.SimForCustomer(ctx, p.TenantID, p.CustomerID)
-	default:
-		return ctx, false
-	}
-	if err != nil {
-		// A record the resolver could not read: go on in the time ctx
-		// already has. Logged here, the one place every bind passes.
-		slog.WarnContext(ctx, "clock: could not resolve the record's time; going on in the time the context has",
-			"tenant_id", p.TenantID, "customer_id", p.CustomerID, "subscription_id", p.SubscriptionID,
-			"invoice_id", p.InvoiceID, "error", err)
-		return ctx, false
-	}
-	// A nested resolution may refine the time domain, but never erase one it
-	// was handed. A record on no clock (an unpinned customer, say) answers
-	// with no clock id; under a bound ctx its instant is the bound one, so it
-	// is the simulated instant with no clock. Binding it would drop the
-	// clock: SimOf would turn false, and every audit row below this call
-	// would lose its sim columns for the rest of the service call. Inside a
-	// catch-up every record touched is the clock's, so an answer with no
-	// clock there is never a sign that the work left the simulation.
-	if sim.TestClockID == "" {
-		if _, inherited := SimOf(ctx); inherited {
-			return ctx, true
-		}
-	}
-	// Bind at the boundary, inherit below it (ADR-029). On a test clock the
-	// resolver can only answer the clock's frozen_time, so a nested
-	// resolution of the same clock never knows more than the caller did. A
-	// caller that bound an earlier instant on that clock did it on purpose:
-	// a cycle close at its boundary, a dunning retry at its slot, a trial
-	// flip at trial_end_at, a pause resume at resumes_at. Replacing that
-	// instant with frozen_time would date every effect below the rebind (an
-	// audit row, a pause start, a write-off) at the advance's target, not at
-	// the instant the caller set. No caller can set an inherited instant
-	// after frozen_time on purpose, so the resolution replaces it. A
-	// different clock always wins.
-	if inherited, ok := SimOf(ctx); ok && inherited.TestClockID == sim.TestClockID && !inherited.At.After(sim.At) {
-		return ctx, true
-	}
-	return WithSim(ctx, sim), true
 }

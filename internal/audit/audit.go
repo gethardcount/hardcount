@@ -250,9 +250,10 @@ type Entry struct {
 //
 // COVERED: every path that runs under a clock binding. That is every ForClock /
 // catchup phase (the advance binds clock.WithSim, so finalize, cancel, clawback
-// issue, dunning and threshold rows all inherit it), every service whose entry
-// point resolves an entity's pin (BindEffectiveNow yields the clock id along
-// with the instant, and refuses to erase an inherited one), the
+// issue, dunning and threshold rows all inherit it), every entry point whose
+// time is decided from its record (clock.Decide binds the record's clock id
+// with its instant: the API's door, and the functions that decide their own
+// time), the
 // handler-level emitters that bind explicitly before emitting (invoice,
 // subscription, customer — including CREATE, which binds from the clock it is
 // handed because the customer pin does not exist yet — dunning), and the
