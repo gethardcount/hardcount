@@ -37,12 +37,12 @@ them to use Hardcount.
   delivers each row, with retries. [More](../adr/040-outbox-always-on.md)
 - **leader lease**: A row in the `leader_leases` table that lets exactly
   one copy of Hardcount run one tick of a job that must run once across all
-  copies (billing, dunning, both outbox dispatchers, webhook delivery). It
-  is renewed during the tick and released after it. It expires 10 seconds
-  after the last renewal.
+  copies (billing, dunning, both outbox dispatchers, webhook delivery, the
+  test-clock catch-up). It is renewed during the tick and released after it.
+  It expires 10 seconds after the last renewal.
   [More](../adr/114-leader-leases-tick-scoped-fencing.md)
 - **fencing token**: A number for each job in `leader_leases`
-  (`holder_token`) that goes up every time a copy takes the lease. The five
+  (`holder_token`) that goes up every time a copy takes the lease. The
   queries that claim due work check it with `leader_fence`, so a former
   leader that stalled claims nothing.
   [More](../adr/114-leader-leases-tick-scoped-fencing.md#fencing-boundary-the-five-claim-funnels)

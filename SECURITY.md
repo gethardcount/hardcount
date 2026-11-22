@@ -27,7 +27,7 @@ Hardcount is pre-1.0. Only the latest release gets security fixes.
 ## In scope
 
 - The Hardcount Go binary (`cmd/hardcount`, `cmd/hardcount-bootstrap`, `cmd/hardcount-bench-seed`, `cmd/hardcount-doctor`)
-- Code under `internal/` and `pkg/`
+- Code under `internal/`
 - The migration runner and schema in `internal/platform/migrate/`
 - The web-v2 dashboard (`web-v2/`)
 - Docker Compose deployment config under `deploy/compose/`

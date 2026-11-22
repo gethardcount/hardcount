@@ -129,7 +129,7 @@ line item, a ledger entry without its counterpart, or a subscription whose
 period bounds no longer agree with its invoices.
 
 `hardcount-doctor` (Hardcount's invariant-checking CLI) swept **28 money invariants**
-at the time (32 now) as read-only SQL. After every scenario above:
+at the time as read-only SQL. After every scenario above:
 
 ```
 doctor: 28 checks, 0 violations, 0 errors, ~23ms
