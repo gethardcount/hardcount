@@ -1796,6 +1796,47 @@ func TestBillDue_DueAtTheCallersInstant(t *testing.T) {
 	}
 }
 
+// A trial that ends inside a period is activated by that period's close, and
+// its day-1 invoice (the plan bills in advance) is collected at the close: the
+// close rebinds the context to next_billing_at, and the collection takes that
+// instant, not the clock's frozen time. Its credits are applied then.
+func TestBillOnePeriod_ATrialEndingInThePeriodIsCollectedAtTheClose(t *testing.T) {
+	periodStart := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)
+	trialEnd := time.Date(2026, 2, 15, 0, 0, 0, 0, time.UTC)
+	frozen := periodEnd.Add(10 * 24 * time.Hour)
+	subs := &mockSubs{subs: map[string]domain.Subscription{
+		"sub_1": {
+			ID: "sub_1", TenantID: "t1", CustomerID: "cus_1", TestClockID: "tc_1",
+			Items:                     []domain.SubscriptionItem{{PlanID: "pln_1", Quantity: 1}},
+			Status:                    domain.SubscriptionTrialing,
+			BillingTime:               domain.BillingTimeCalendar,
+			TrialEndAt:                &trialEnd,
+			CurrentBillingPeriodStart: &periodStart,
+			CurrentBillingPeriodEnd:   &periodEnd,
+			NextBillingAt:             &periodEnd,
+		},
+	}, cycleUpdated: make(map[string]bool)}
+	pricing := &mockPricing{plans: map[string]domain.Plan{
+		"pln_1": {ID: "pln_1", Currency: "USD", BillingInterval: domain.BillingMonthly, BaseAmountCents: 4900, BaseBillTiming: domain.BillInAdvance},
+	}}
+	invoices := &mockInvoices{}
+	applier := &fakeCreditApplier{inv: invoices, applyCents: 100}
+	engine := wireBaseTax(NewEngine(subs, &mockUsage{totals: map[string]int64{}}, pricing, invoices, applier, &mockSettings{},
+		&fakePaymentSetups{ready: true, stripeCustomerID: "cus_stripe_1"}, &recordingCharger{store: invoices}, clock.NewFake(frozen)))
+	engine.SetTestClockReader(&stubClockReader{clk: domain.TestClock{ID: "tc_1", FrozenTime: frozen}})
+	ctx := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: frozen, TestClockID: "tc_1"})
+
+	if _, err := engine.billOnePeriod(ctx, subs.subs["sub_1"]); err != nil {
+		t.Fatalf("billOnePeriod: %v", err)
+	}
+	// Two collections: the day-1 invoice's (FinalizeOnCreateInvoice, no
+	// anchor) and the period's own (anchored at the close).
+	if len(applier.at) != 2 || !applier.at[0].Equal(periodEnd) || !applier.at[1].Equal(periodEnd) {
+		t.Errorf("credits applied at %v; want twice, both at the close %v (not the clock's frozen %v)", applier.at, periodEnd, frozen)
+	}
+}
+
 // TestRunCycle_CalendarMonthly_AutoRealignsOnCycleClose locks in the
 // fix for the drifted-anchor case: a calendar-billing monthly sub
 // whose period anchored on day-20 (e.g. inherited from a prior
