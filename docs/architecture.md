@@ -25,7 +25,7 @@ Every request passes the root chain, then its group's chain, then its handler. I
 2. **Request id** (`mw.RequestID`) is minted by the server, never taken from the client. The access log line and the request's audit rows carry it.
 3. **Client address** (`mw.TrustedClientIP`) reads `X-Forwarded-For` only from a proxy listed in `TRUST_PROXY`; otherwise it is the TCP peer.
 4. **The record** (`request.Begin`), [below](#the-record). It sits below the client address, which it takes once; every later step reads it.
-5. **Span correction** (`mw.TraceRequestAttrs`) names the span by the route and keeps the link token out of `url.path`.
+5. **Span correction** (`mw.TraceRequestAttrs`) names the span by the route and keeps a link token (the secret in a public page's link, such as a hosted invoice's) out of `url.path`.
 6. **Metrics** come above the Recoverer, so a recovered panic is still counted as its 500, and above CORS, so a preflight is counted.
 7. **The access log** sits there for the same reason.
 8. **Recoverer** answers a panic with the JSON 500 and logs its stack.

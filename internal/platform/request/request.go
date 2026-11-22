@@ -2,11 +2,12 @@
 // request learn about it, readable by every layer, inner or outer.
 //
 // A middleware that adds to the context hands its handler a new
-// *http.Request, so a layer never sees what the layers inside it added. The
+// *http.Request, so a layer never sees what the layers inside it added: the
 // access log wraps authentication and still has to name who made the
-// request, and the metrics wrap the router and still have to name its
-// route. So the root makes one record per request (Begin), the layer that
-// learns a fact writes it there, and every layer reads it through Of.
+// request. So the root makes one record per request (Begin). The route and
+// the client address are known there; what is learned later (the caller,
+// the status, the audit mark) is written to the record; and every layer
+// reads it through Of.
 //
 // A fact about the request that more than one layer reads belongs on the
 // record: its route, caller, client address, status and audit mark. What a
@@ -45,10 +46,12 @@ type Actor struct {
 	TenantID string
 }
 
-// Record is one request's record. Every field but the audit mark is written
-// on the request's own goroutine. The client address is set at Begin and
-// never changes, so a goroutine the handler started may read it; the audit
-// mark is atomic because such a goroutine may write an audit row.
+// Record is one request's record. The route and the client address are set
+// at Begin and never change, so a goroutine the handler started may read
+// them. The caller is written once (SetActor) and the status changes while
+// the answer is written; both are for the request's own goroutine. The
+// audit mark is atomic because a goroutine the handler started may write an
+// audit row.
 type Record struct {
 	route    Route
 	actor    Actor

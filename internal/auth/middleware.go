@@ -9,7 +9,7 @@ import (
 
 // Access is who may call a route: a caller holding Perm, only a dashboard
 // session (Session is the task its 403 names), or any caller (Any). The zero
-// Access lets nobody through.
+// Access names no caller: a fault in the table, answered 500.
 type Access struct {
 	Perm    Permission
 	Session string
@@ -23,9 +23,10 @@ type AccessTable interface {
 }
 
 // RequirePermission returns middleware that answers 403 unless the caller has
-// the Access the request's route needs. unrouted answers a request no route
-// serves (its 404 or 405), so the next handler runs only for a route the
-// table lists and the caller may call.
+// the Access the request's route needs, and 500 for a route whose Access
+// names no caller. unrouted answers a request no route serves (its 404 or
+// 405), so the next handler runs only for a route the table lists and the
+// caller may call.
 func RequirePermission(table AccessTable, unrouted http.Handler) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return PermissionRequired{table: table, unrouted: unrouted, next: next}
