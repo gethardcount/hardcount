@@ -81,6 +81,12 @@ func TestMissingAppGrants_NamesTheMissingGrant(t *testing.T) {
 	if !slices.Contains(missing, want) {
 		t.Fatalf("missing = %v, want it to contain %q", missing, want)
 	}
+	// The migrator's own table and sequence are not the app's to use.
+	for _, m := range missing {
+		if strings.Contains(m, "goose_db_version") {
+			t.Fatalf("asked for a grant on the migrator's own object: %q", m)
+		}
+	}
 
 	if _, err := admin.Exec(`GRANT INSERT, DELETE ON public.p1317_probe TO ` + role); err != nil {
 		t.Fatalf("grant: %v", err)
