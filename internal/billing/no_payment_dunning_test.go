@@ -7,20 +7,24 @@ import (
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // recordingDunningStarter records every StartDunning call so a test can
-// assert which invoices got enrolled. When err is set it's returned for
-// every call (simulating a dunning failure).
+// assert which invoices got enrolled, and on what instant. When err is set
+// it's returned for every call (simulating a dunning failure).
 type recordingDunningStarter struct {
 	started []string
 	err     error
 	causes  []domain.DunningStartCause
+	at      []time.Time
 }
 
-func (d *recordingDunningStarter) StartDunning(_ context.Context, _, invoiceID, _ string, _ time.Time, cause domain.DunningStartCause) error {
+func (d *recordingDunningStarter) StartDunning(ctx context.Context, _, invoiceID, _ string, _ time.Time, cause domain.DunningStartCause) error {
 	d.causes = append(d.causes, cause)
+	at, _ := clock.EffectiveNow(ctx)
+	d.at = append(d.at, at)
 	if d.err != nil {
 		return d.err
 	}
@@ -72,6 +76,10 @@ func TestCollector_NoCard_StartsNoPaymentDunningOnce(t *testing.T) {
 	// Nothing was ever charged, so the run must NOT claim a payment failure.
 	if starter.causes[0] != domain.DunningCauseNoPaymentMethod {
 		t.Fatalf("cause = %v, want no_payment_method", starter.causes[0])
+	}
+	// The run starts on the instant the sweep bound for this invoice.
+	if want := billingTestClock().Now(context.Background()); !starter.at[0].Equal(want) {
+		t.Errorf("started on %v, want %v, the engine's clock read for this invoice", starter.at[0], want)
 	}
 }
 

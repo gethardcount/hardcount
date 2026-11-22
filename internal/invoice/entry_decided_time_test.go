@@ -243,43 +243,6 @@ func (c *steppingClock) Now(ctx context.Context) time.Time {
 	return c.at
 }
 
-// RetryTax binds its own instant: the tax_retry sweep and the Stripe-connect
-// fan-out bind none per invoice. At real time it reads the server's clock
-// once, and the retry runs on that instant.
-func TestRetryTax_AtRealTimeReadsTheServersClockOnce(t *testing.T) {
-	past := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
-	store := &instantStore{memStore: newMemStore()}
-	server := &steppingClock{at: past}
-	svc := NewService(store, server, newMemNumberer())
-	inv := stuckDraft("", "cus_1", "provider_unavailable")
-	inv.CustomerID = "cus_1"
-	inv, err := store.Create(context.Background(), "t1", inv)
-	if err != nil {
-		t.Fatalf("seed: %v", err)
-	}
-	retrier := &instantSeeingRetrier{stubTaxRetrier: &stubTaxRetrier{store: store.memStore}}
-	svc.SetTaxRetrier(retrier)
-	if _, err := svc.RetryTax(clock.WithRealTime(postgres.WithLivemode(context.Background(), false)), "t1", inv.ID); err != nil {
-		t.Fatalf("RetryTax: %v", err)
-	}
-	if want := past.Add(time.Second); server.reads != 1 || !retrier.at.Equal(want) {
-		t.Errorf("server clock read %d times, the retry ran at %v; want one read, %v", server.reads, retrier.at, want)
-	}
-}
-
-// instantSeeingRetrier records the instant a tax retry's ctx carries.
-type instantSeeingRetrier struct {
-	*stubTaxRetrier
-	at time.Time
-}
-
-func (r *instantSeeingRetrier) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID string,
-	then func(ctx context.Context, tx *sql.Tx, taxed domain.Invoice) error,
-) (domain.Invoice, error) {
-	r.at, _ = clock.EffectiveNow(ctx)
-	return r.stubTaxRetrier.RetryTaxForInvoice(ctx, tenantID, invoiceID, then)
-}
-
 // instantAudit records the instant an in-transaction audit row's ctx carries
 // (the audit store stamps the row with it).
 type instantAudit struct{ at time.Time }

@@ -2,9 +2,12 @@ package creditnote
 
 import (
 	"context"
+	"slices"
 	"testing"
+	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -71,5 +74,45 @@ func TestRetryPendingClawbackIssue(t *testing.T) {
 	}
 	if due := invoices.invoices["inv_1"].AmountDueCents; due != 5000 {
 		t.Errorf("amount_due after second tick: got %d, want 5000 (no double-apply)", due)
+	}
+}
+
+// The clawback_issue sweep works each note on its own instant: the tick binds
+// none, so a note reads the server's clock once and is issued then.
+func TestRetryPendingClawbackIssue_EachNoteOnItsOwnInstant(t *testing.T) {
+	base := time.Date(2026, 1, 5, 9, 0, 0, 0, time.UTC)
+	store := newMemStore()
+	invoices := &memInvoiceReader{invoices: map[string]domain.Invoice{}}
+	for _, id := range []string{"inv_a", "inv_b"} {
+		invoices.invoices[id] = domain.Invoice{
+			ID: id, TenantID: "t1", CustomerID: "cus_1",
+			Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
+			Currency: "USD", TotalAmountCents: 10000, AmountDueCents: 10000,
+		}
+	}
+	server := &cnSteppingClock{at: base}
+	svc := NewService(store, invoices, nil)
+	svc.SetNumberGenerator(&fakeCNNumbers{})
+	svc.SetClock(server)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	for _, id := range []string{"inv_a", "inv_b"} {
+		if _, err := svc.CreateAdjustmentDraftTx(clock.WithEffectiveNow(ctx, base), nil, "t1", id, 5000, "subscription_downgrade", "clawback"); err != nil {
+			t.Fatalf("create clawback draft on %s: %v", id, err)
+		}
+	}
+
+	if _, errs := svc.RetryPendingClawbackIssue(ctx, 100); len(errs) != 0 {
+		t.Fatalf("retry errors: %v", errs)
+	}
+	var issuedAt []time.Time
+	for _, cn := range store.notes {
+		if cn.IssuedAt != nil {
+			issuedAt = append(issuedAt, *cn.IssuedAt)
+		}
+	}
+	slices.SortFunc(issuedAt, time.Time.Compare)
+	want := []time.Time{base.Add(time.Second), base.Add(2 * time.Second)}
+	if server.reads != 2 || !slices.EqualFunc(issuedAt, want, time.Time.Equal) {
+		t.Errorf("server clock read %d times, notes issued at %v; want one read per note, issued at %v", server.reads, issuedAt, want)
 	}
 }

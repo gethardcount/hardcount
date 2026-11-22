@@ -112,9 +112,11 @@ func TestRetryProviderConfigErrors_DecidesEachInvoice(t *testing.T) {
 
 // The connect fan-out is detached from the connect request and outlives it,
 // so it starts on no instant (the connect route is decidedIn: the door binds
-// none) and each invoice's retry reads the server's clock by itself: two
-// invoices on no clock are settled at two instants, in both modes, and one on
-// a clock at its clock's time.
+// none), and decideInvoice binds each invoice's own. In both modes two
+// invoices on no clock are each retried and settled on their own read of the
+// server's clock. In test mode an invoice on a clock is settled at its clock's
+// time; live mode decides no clock, so that invoice reads the server's clock
+// too.
 func TestRetryProviderConfigErrors_EachInvoiceReadsItsOwnTime(t *testing.T) {
 	frozen := time.Date(2027, 8, 20, 6, 0, 0, 0, time.UTC)
 	past := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
@@ -137,7 +139,8 @@ func TestRetryProviderConfigErrors_EachInvoiceReadsItsOwnTime(t *testing.T) {
 			}
 			server := &steppingClock{at: past}
 			svc := NewService(store, server, newMemNumberer())
-			svc.SetTaxRetrier(&stubTaxRetrier{store: store})
+			retrier := &instantSeeingRetrier{stubTaxRetrier: &stubTaxRetrier{store: store}}
+			svc.SetTaxRetrier(retrier)
 			svc.SetResolver(&invoiceAnswers{sims: map[string]clock.Sim{
 				"inv_1": {At: time.Now().UTC()}, // on no clock
 				"inv_2": {At: time.Now().UTC()},
@@ -150,9 +153,13 @@ func TestRetryProviderConfigErrors_EachInvoiceReadsItsOwnTime(t *testing.T) {
 			for i := 1; i <= 3; i++ {
 				reads[past.Add(time.Duration(i)*time.Second)] = true
 			}
+			ra, rb := retrier.at["inv_1"], retrier.at["inv_2"]
+			if ra.Equal(rb) || !reads[ra] || !reads[rb] {
+				t.Errorf("the invoices on no clock were retried on %v and %v; want each on its own read of the server's clock", ra, rb)
+			}
 			a, b, pc := store.invoices["inv_1"].PaidAt, store.invoices["inv_2"].PaidAt, store.invoices["inv_c"].PaidAt
-			if a == nil || b == nil || pc == nil || a.Equal(*b) || !reads[*a] || !reads[*b] {
-				t.Fatalf("paid at %v, %v, %v; want the two invoices on no clock at two reads of the server's clock", a, b, pc)
+			if a == nil || b == nil || pc == nil || !a.Equal(ra) || !b.Equal(rb) {
+				t.Fatalf("paid at %v, %v, %v; want the two invoices on no clock paid on their retries' instants", a, b, pc)
 			}
 			switch {
 			case !c.live && !pc.Equal(frozen):

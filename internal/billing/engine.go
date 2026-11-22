@@ -4808,8 +4808,8 @@ const failedDunningBackfillCoolOff = 10 * time.Minute
 // (firstForThisPI=false). This sweep re-drives the idempotent StartDunning so the
 // invoice still reaches a terminal instead of sitting failed forever. CRON /
 // livemode path; clock-pinned invoices are excluded by the store query and dunned
-// inline during Advance. Shares enrollStalledForDunning's body, so it inherits the
-// adapter's "dunning disabled" swallow.
+// inline during Advance. Its rows go through enrollStalledForDunning, so the
+// adapter swallows a "dunning disabled" answer.
 func (e *Engine) EnrollFailedWithoutDunning(ctx context.Context, limit int) (int, []error) {
 	// dunningStarter is REQUIRED (boot fails closed, #442) — the old nil
 	// early-returns in the three enroll sweeps silently left card-less
@@ -4825,15 +4825,16 @@ func (e *Engine) EnrollFailedWithoutDunning(ctx context.Context, limit int) (int
 	return e.enrollStalledForDunning(ctx, pending, domain.DunningCausePaymentFailed)
 }
 
-// enrollStalledForDunning is the shared body: enroll each candidate via
-// the idempotent StartDunning (which anchors the first retry: now for a
-// wall-clock invoice, the issue instant for a clock-pinned one). A "dunning
+// enrollStalledForDunning enrolls each candidate via the idempotent
+// StartDunning (which anchors the first retry: now for a wall-clock invoice,
+// the issue instant for a clock-pinned one). A "dunning
 // disabled" outcome is swallowed by the adapter as a deliberate skip; other
 // errors are collected per-invoice so one bad row doesn't abort the sweep.
 func (e *Engine) enrollStalledForDunning(ctx context.Context, pending []domain.Invoice, cause domain.DunningStartCause) (int, []error) {
 	swept := 0
 	var errs []error
 	for _, inv := range pending {
+		ctx := clock.EnsureEffectiveNow(ctx, e.clock) // one instant for this invoice's work; the tick binds none
 		if err := e.dunningStarter.StartDunning(ctx, inv.TenantID, inv.ID, inv.CustomerID, inv.IssuedAtOrZero(), cause); err != nil {
 			errs = append(errs, fmt.Errorf("enroll invoice %s for dunning: %w", inv.ID, err))
 			continue

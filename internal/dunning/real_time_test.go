@@ -27,28 +27,12 @@ func (c *steppingClock) Now(ctx context.Context) time.Time {
 	return c.at
 }
 
-// At real time (an invoice on no clock: the decision binds no instant) each
-// dunning entry point reads the server's clock once, and every stamp of the
-// action is that one instant. Two reads would differ here, as the clock
-// steps on each.
+// At real time (an invoice on no clock: the decision binds no instant) a
+// resolve and a due run's retry each read the server's clock once, and every
+// stamp of the action is that one instant. Two reads would differ here, as
+// the clock steps on each.
 func TestDunning_AtRealTimeReadsTheServersClockOnce(t *testing.T) {
 	past := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
-
-	t.Run("a run starts at the server's time, read once", func(t *testing.T) {
-		store := &instantStore{memStore: newMemStore()}
-		server := &steppingClock{at: past}
-		svc := NewService(store, &noopRetrier{}, server)
-		run, err := svc.StartDunning(testutil.AtRealTime(), "t1", "inv_1", "cus_1", time.Time{}, domain.DunningCausePaymentFailed)
-		if err != nil {
-			t.Fatalf("StartDunning: %v", err)
-		}
-		want := past.Add(time.Second)
-		if server.reads != 1 || !run.CreatedAt.Equal(want) || run.NextActionAt == nil || !run.NextActionAt.After(want) {
-			t.Errorf("server clock read %d times, created_at %v, next_action_at %v; want one read, created at %v and the first retry after it",
-				server.reads, run.CreatedAt, run.NextActionAt, want)
-		}
-		store.wroteAt(t, "StartRun", want)
-	})
 
 	t.Run("a resolve stamps the server's time, read once", func(t *testing.T) {
 		store := &instantStore{memStore: newMemStore()}

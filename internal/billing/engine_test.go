@@ -1411,6 +1411,7 @@ type fakeCreditNoteAdjuster struct {
 	calls     []cnAdjustCall // create (issue+draft) calls
 	draftCall []cnAdjustCall // CreateAdjustmentDraftTx calls specifically
 	issued    []string       // Issue() ids
+	issuedAt  []time.Time    // the instant each Issue() ctx carries
 	// lockedBeforeDrafts holds the invoice ids of every LockInvoicesForDraftsTx
 	// call made before the first draft; a call after a draft is left out.
 	lockedBeforeDrafts []string
@@ -1451,11 +1452,13 @@ func (a *fakeCreditNoteAdjuster) CreateAdjustmentDraftTx(_ context.Context, _ *s
 	return domain.CreditNote{ID: fmt.Sprintf("hc_cn_draft_%d", len(a.draftCall)), TotalCents: grossCents}, nil
 }
 
-func (a *fakeCreditNoteAdjuster) Issue(_ context.Context, _, id string) (domain.CreditNote, error) {
+func (a *fakeCreditNoteAdjuster) Issue(ctx context.Context, _, id string) (domain.CreditNote, error) {
 	if a.issueErr[id] != nil {
 		return domain.CreditNote{}, a.issueErr[id]
 	}
 	a.issued = append(a.issued, id)
+	at, _ := clock.EffectiveNow(ctx)
+	a.issuedAt = append(a.issuedAt, at)
 	return domain.CreditNote{ID: id, Status: domain.CreditNoteIssued}, nil
 }
 

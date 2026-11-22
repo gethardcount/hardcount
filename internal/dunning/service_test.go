@@ -1058,16 +1058,16 @@ func (s *stubClockResolver) SimForSubscription(_ context.Context, _, _ string) (
 }
 
 // TestDunning_StampsTheDecidedTime: every per-invoice timestamp dunning
-// writes (next_action_at, last_attempt_at, resolved_at, created_at) is at
-// the time its caller decided. A clock-pinned invoice's run, decided at the
-// invoice's clock, is stamped at frozen_time, so the clock's catch-up finds
-// it in its window.
+// writes (next_action_at, last_attempt_at, resolved_at, created_at), and the
+// instant a run's start is written on, is the time its caller decided. A
+// clock-pinned invoice's run, decided at the invoice's clock, is stamped at
+// frozen_time, so the clock's catch-up finds it in its window.
 func TestDunning_StampsTheDecidedTime(t *testing.T) {
 	frozen := time.Date(2024, 2, 1, 12, 0, 0, 0, time.UTC)
 	resolver := &stubClockResolver{byInvoice: map[string]time.Time{"inv_1": frozen}}
 
 	t.Run("StartDunning stamps frozen", func(t *testing.T) {
-		store := newMemStore()
+		store := &instantStore{memStore: newMemStore()}
 		svc := NewService(store, &noopRetrier{}, nil)
 
 		run, err := svc.StartDunning(testutil.DecidedFor(t, resolver, clock.Pin{TenantID: "t1", InvoiceID: "inv_1"}), "t1", "inv_1", "cus_1", frozen, domain.DunningCausePaymentFailed)
@@ -1085,6 +1085,7 @@ func TestDunning_StampsTheDecidedTime(t *testing.T) {
 		if !run.NextActionAt.Equal(wantNext) {
 			t.Errorf("next_action_at: got %v, want %v (frozen + 3d grace)", *run.NextActionAt, wantNext)
 		}
+		store.wroteAt(t, "StartRun", frozen)
 	})
 
 	t.Run("processRun chains in simulated time off run.NextActionAt", func(t *testing.T) {
