@@ -53,9 +53,9 @@ type Service struct {
 	// Each entry point keeps that time. Only a grant and an adjustment bind
 	// an instant themselves: for a customer on no clock, decideForCustomer
 	// reads this clock once (clock.EnsureEffectiveNow). Every other entry
-	// arrives with its caller's instant. Without that read, two reads of the
-	// time in one grant could differ, and a store's stamp could fall on
-	// another time than the action's.
+	// keeps its caller's instant. Without that read, two reads of the time in
+	// one grant could differ, and a store's stamp could fall on another time
+	// than the action's.
 	clock clock.Clock
 }
 

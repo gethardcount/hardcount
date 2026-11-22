@@ -140,7 +140,7 @@ type Service struct {
 	//   - a create, Create itself, from the test clock its body names.
 	// Each entry point keeps that time. Only Create binds an instant itself:
 	// for a customer on no test clock it reads this clock once
-	// (clock.EnsureEffectiveNow). Every other entry arrives with the door's
+	// (clock.EnsureEffectiveNow). Every other entry keeps its caller's
 	// instant. Without that read, two reads of the time in one create could
 	// differ, and a store's stamp could fall on another time than the
 	// action's.
