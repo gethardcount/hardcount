@@ -5,6 +5,7 @@ package config
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -388,7 +389,7 @@ func loadDatabaseURL() (string, error) {
 
 	dbURL := strings.TrimSpace(os.Getenv("DATABASE_URL"))
 	if dbURL == "" {
-		return "", fmt.Errorf("DATABASE_URL or DB_HOST/DB_NAME/DB_USER/DB_PASSWORD required")
+		return "", errors.New("DATABASE_URL or DB_HOST/DB_NAME/DB_USER/DB_PASSWORD required in the environment: the server does not read a .env file (make dev loads one)")
 	}
 	if err := CheckDatabaseURL("DATABASE_URL", dbURL); err != nil {
 		return "", err
