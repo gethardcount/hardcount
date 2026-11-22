@@ -1,8 +1,10 @@
 # Stripe circuit breaker open
 
 A circuit breaker stops calling a service that keeps failing, until it
-recovers. Hardcount has one for Stripe calls. This page also covers payment
-retries skipped for another reason. Back to the [runbook index](index.md).
+recovers. Hardcount has one for two Stripe calls: the one that charges a
+card, and the one that reads a charge whose result is not yet known. This
+page also covers payment retries skipped for another reason. Back to the
+[runbook index](index.md).
 
 ## Symptom
 
@@ -18,7 +20,7 @@ retries skipped for another reason. Back to the [runbook index](index.md).
 
 ## Why
 
-- Stripe calls got no clear answer 5 times in a row (a 5xx, a timeout or a
+- Those calls got no clear answer 5 times in a row (a 5xx, a timeout or a
   dropped connection), and the breaker tripped, so payment retries are not
   spent while Stripe is failing.
   Declines and other definite errors do not count, and neither does a
