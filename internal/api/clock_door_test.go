@@ -13,18 +13,18 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/billing"
+	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// spyResolver answers every record on clock clk_1 at doorFrozen (or, with
-// noClock, on no clock, as the engine answers: the machine's time and no
-// clock id), or err, and records what it was asked.
+// spyResolver answers every record on clock clk_1 at doorFrozen, or err, and
+// records what it was asked.
 type spyResolver struct {
-	asked   []string
-	err     error
-	noClock bool
+	asked []string
+	err   error
 }
 
 var doorFrozen = time.Date(2025, 3, 1, 12, 0, 0, 0, time.UTC)
@@ -33,9 +33,6 @@ func (s *spyResolver) answer(kind, id string) (clock.Sim, error) {
 	s.asked = append(s.asked, kind+":"+id)
 	if s.err != nil {
 		return clock.Sim{}, s.err
-	}
-	if s.noClock {
-		return clock.Sim{At: time.Now().UTC()}, nil
 	}
 	return clock.Sim{At: doorFrozen, TestClockID: "clk_1"}, nil
 }
@@ -47,6 +44,13 @@ func (s *spyResolver) SimForSubscription(_ context.Context, _, id string) (clock
 }
 func (s *spyResolver) SimForInvoice(_ context.Context, _, id string) (clock.Sim, error) {
 	return s.answer("invoice", id)
+}
+
+// noClockCustomers answers every customer on no clock.
+type noClockCustomers struct{}
+
+func (noClockCustomers) Get(_ context.Context, tenantID, id string) (domain.Customer, error) {
+	return domain.Customer{ID: id, TenantID: tenantID}, nil
 }
 
 // doorServer is the server's clock in the door's tests: a fixed time,
@@ -122,28 +126,26 @@ func TestClockDoor_DecidesFromTheRouteTable(t *testing.T) {
 		want               clock.Sim // the zero Sim is real time with no instant
 		asked              string
 		serverReads        int
-		noClock            bool
 	}{
-		{"a customer's route", "GET", "/v1/customers/cus_1", onClock, "customer:cus_1", 0, false},
-		{"a customer on no clock", "GET", "/v1/customers/cus_1", realInstant, "customer:cus_1", 1, true},
-		{"a customer's route by customer_id", "GET", "/v1/credits/balance/cus_2/live", onClock, "customer:cus_2", 0, false},
-		{"a subscription's route", "POST", "/v1/subscriptions/sub_1/cancel", onClock, "subscription:sub_1", 0, false},
-		{"an invoice's route", "GET", "/v1/invoices/inv_1/pdf", onClock, "invoice:inv_1", 0, false},
-		{"a credit note's route, by its invoice", "GET", "/v1/credit-notes/cn_1", onClock, "invoice:inv_of_note", 0, false},
-		{"a dunning run's route, by its invoice", "GET", "/v1/dunning/runs/run_1", onClock, "invoice:inv_of_run", 0, false},
-		{"a route that names no record", "GET", "/v1/whoami", realInstant, "", 1, false},
-		{"a route its function decides", "POST", "/v1/customers", clock.Sim{}, "", 0, false},
+		{"a customer's route", "GET", "/v1/customers/cus_1", onClock, "customer:cus_1", 0},
+		{"a customer's route by customer_id", "GET", "/v1/credits/balance/cus_2/live", onClock, "customer:cus_2", 0},
+		{"a subscription's route", "POST", "/v1/subscriptions/sub_1/cancel", onClock, "subscription:sub_1", 0},
+		{"an invoice's route", "GET", "/v1/invoices/inv_1/pdf", onClock, "invoice:inv_1", 0},
+		{"a credit note's route, by its invoice", "GET", "/v1/credit-notes/cn_1", onClock, "invoice:inv_of_note", 0},
+		{"a dunning run's route, by its invoice", "GET", "/v1/dunning/runs/run_1", onClock, "invoice:inv_of_run", 0},
+		{"a route that names no record", "GET", "/v1/whoami", realInstant, "", 1},
+		{"a route its function decides", "POST", "/v1/customers", clock.Sim{}, "", 0},
 		// Usage's entries decide and bind themselves; usage's build refuses a
 		// context with no instant, which the door must leave to fire.
-		{"usage ingest", "POST", "/v1/usage-events", clock.Sim{}, "", 0, false},
-		{"usage batch", "POST", "/v1/usage-events/batch", clock.Sim{}, "", 0, false},
-		{"usage backfill", "POST", "/v1/usage-events/backfill", clock.Sim{}, "", 0, false},
-		{"usage held release", "POST", "/v1/usage-events/held/release", clock.Sim{}, "", 0, false},
-		{"a LiteLLM spend call", "POST", "/v1/integrations/litellm/spend", clock.Sim{}, "", 0, false},
-		{"a route the router does not have", "GET", "/v1/nothing-here", clock.Sim{}, "", 0, false},
+		{"usage ingest", "POST", "/v1/usage-events", clock.Sim{}, "", 0},
+		{"usage batch", "POST", "/v1/usage-events/batch", clock.Sim{}, "", 0},
+		{"usage backfill", "POST", "/v1/usage-events/backfill", clock.Sim{}, "", 0},
+		{"usage held release", "POST", "/v1/usage-events/held/release", clock.Sim{}, "", 0},
+		{"a LiteLLM spend call", "POST", "/v1/integrations/litellm/spend", clock.Sim{}, "", 0},
+		{"a route the router does not have", "GET", "/v1/nothing-here", clock.Sim{}, "", 0},
 	} {
 		t.Run("test mode, "+c.name, func(t *testing.T) {
-			res := &spyResolver{noClock: c.noClock}
+			res := &spyResolver{}
 			d := doorRig(t, res)
 			got := through(d, test, c.method, c.path)
 			if !got.reached || !got.decided || got.decision != c.want || serverOf(d).reads != c.serverReads {
@@ -155,6 +157,20 @@ func TestClockDoor_DecidesFromTheRouteTable(t *testing.T) {
 			}
 		})
 	}
+
+	// In production the engine is the resolver. It answers a customer on no
+	// clock without reading a clock, so the request reads the server's clock
+	// once: the instant the door binds.
+	t.Run("test mode, a customer on no clock, answered by the engine: one read of the server's clock", func(t *testing.T) {
+		d := doorRig(t, nil)
+		engine := billing.NewEngine(nil, nil, nil, nil, nil, nil, nil, nil, d.clock)
+		engine.SetCustomerReader(noClockCustomers{})
+		d.resolver = engine
+		got := through(d, test, "GET", "/v1/customers/cus_1")
+		if !got.reached || got.decision != realInstant || serverOf(d).reads != 1 {
+			t.Errorf("reached %v, %+v after %d server reads; want %+v after one", got.reached, got.decision, serverOf(d).reads, realInstant)
+		}
+	})
 
 	live := auth.WithTenantID(postgres.WithLivemode(context.Background(), true), "t1")
 	for _, c := range []struct{ name, method, path string }{

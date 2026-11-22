@@ -31,6 +31,13 @@ linters:
         #   //nolint:forbidigo // single-invoice-ok: <reason>
         - pattern: \.(FindBaseInvoiceForPeriod|GetByProrationSource)$
           msg: "single-invoice-ok: a period can be funded by several invoices; use FindFundingInvoicesForPeriod (ADR-048 amendment), or add //nolint:forbidigo // single-invoice-ok: <reason>"
+        # A real instant on a context is trusted as one read of the server's
+        # clock (clock.Decide keeps it for a record on no clock), so production
+        # makes one only by reading a clock. A place that must name an instant
+        # says why: //nolint:forbidigo // real-instant: <reason>
+        - pattern: ^clock\.WithEffectiveNow$
+          pkg: ^github\.com/gethardcount/hardcount/internal/platform/clock$
+          msg: "real-instant: bind a real instant by reading a clock (clock.EnsureEffectiveNow, or clock.AtArrival for a payment's result), or add //nolint:forbidigo // real-instant: <reason>"
 
   exclusions:
     rules:
@@ -42,6 +49,10 @@ linters:
       - linters: [forbidigo]
         text: "single-invoice-ok:"
         path-except: ^internal/(subscription|billing)/
+      # The clock package's own readers (EnsureEffectiveNow, AtArrival) make it.
+      - linters: [forbidigo]
+        text: "real-instant:"
+        path: ^internal/platform/clock/
       # Tests may use wall-clock time and single-row lookups freely.
       - linters: [forbidigo]
         path: _test\.go$

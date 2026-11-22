@@ -198,25 +198,20 @@ func TestBillingRun_EachSubscriptionIsBilledOnItsOwnTime(t *testing.T) {
 
 // A subscription write closes an ended period first, then plans from the new
 // one. On a subscription's route the door binds one instant, and the close
-// and the schedule both read it. Live: one read of the server's clock. Test
-// mode: two, because the decision for a subscription on no clock reads the
-// server's clock too, inside the engine's answer, and does not keep it; the
-// request's work all reads the door's. The ended period's invoice is dated at
-// its boundary.
+// and the schedule both read it: one read of the server's clock, in both
+// modes (in test mode the engine answers a subscription on no clock without
+// a read). The ended period's invoice is dated at its boundary.
 func TestScheduleCancel_TheCloseAndTheScheduleShareOneInstant(t *testing.T) {
-	for _, c := range []struct {
-		live  bool
-		reads int
-	}{{false, 2}, {true, 1}} {
-		t.Run(map[bool]string{false: "test mode", true: "live"}[c.live], func(t *testing.T) {
-			r := newInstantRig(t, c.live)
+	for _, live := range []bool{false, true} {
+		t.Run(map[bool]string{false: "test mode", true: "live"}[live], func(t *testing.T) {
+			r := newInstantRig(t, live)
 			subID := r.subscribe("sched")
 			r.clk.stepFrom(lagB.Add(time.Hour))
 			r.must(http.MethodPost, "/v1/subscriptions/"+subID+"/schedule-cancel", time.Time{}, map[string]any{"at_period_end": true}, http.StatusOK)
 			_, reads := r.clk.count()
 			invs := r.cycleInvoices()
-			if reads != c.reads || len(invs) != 1 || !invs[0][0].Equal(lagB) {
-				t.Errorf("%d server reads, closing invoices %v; want %d reads and the ended period's invoice at its boundary %v", reads, invs, c.reads, lagB)
+			if reads != 1 || len(invs) != 1 || !invs[0][0].Equal(lagB) {
+				t.Errorf("%d server reads, closing invoices %v; want one read and the ended period's invoice at its boundary %v", reads, invs, lagB)
 			}
 		})
 	}
@@ -224,16 +219,13 @@ func TestScheduleCancel_TheCloseAndTheScheduleShareOneInstant(t *testing.T) {
 
 // Finalize collects right after it finalizes. On an invoice's route the door
 // binds one instant, and the finalize and the settle both read it, so an
-// invoice that credits cover is issued and paid at that one time. Live: one
-// read of the server's clock. Test mode: two, the second inside the engine's
-// answer for an invoice on no clock, which the decision does not keep.
+// invoice that credits cover is issued and paid at that one time: one read
+// of the server's clock, in both modes (in test mode the engine answers an
+// invoice on no clock without a read).
 func TestFinalize_ACreditCoveredInvoiceIsIssuedAndPaidAtOneInstant(t *testing.T) {
-	for _, c := range []struct {
-		live  bool
-		reads int
-	}{{false, 2}, {true, 1}} {
-		t.Run(map[bool]string{false: "test mode", true: "live"}[c.live], func(t *testing.T) {
-			r := newInstantRig(t, c.live)
+	for _, live := range []bool{false, true} {
+		t.Run(map[bool]string{false: "test mode", true: "live"}[live], func(t *testing.T) {
+			r := newInstantRig(t, live)
 			cust := r.must(http.MethodPost, "/v1/customers", lagP0, map[string]any{
 				"external_id": "cus_fin", "display_name": "Fin", "email": "fin@example.test",
 			}, http.StatusCreated)
@@ -249,13 +241,13 @@ func TestFinalize_ACreditCoveredInvoiceIsIssuedAndPaidAtOneInstant(t *testing.T)
 			r.clk.stepFrom(start)
 			r.must(http.MethodPost, "/v1/invoices/"+id+"/finalize", time.Time{}, nil, http.StatusOK)
 			_, reads := r.clk.count()
-			want := start.Add(time.Duration(c.reads) * time.Second) // the door's read is the request's last
+			want := start.Add(time.Second) // the door's read
 			got := r.must(http.MethodGet, "/v1/invoices/"+id, lagP0, nil, http.StatusOK)
 			issued, _ := time.Parse(time.RFC3339Nano, flowStr(got, "invoice", "issued_at"))
 			paid, _ := time.Parse(time.RFC3339Nano, flowStr(got, "invoice", "paid_at"))
-			if reads != c.reads || flowStr(got, "invoice", "status") != "paid" || !issued.Equal(want) || !paid.Equal(want) {
-				t.Errorf("%d server reads; status %v, issued %v, paid %v; want %d reads, paid, both at %v",
-					reads, flowStr(got, "invoice", "status"), issued, paid, c.reads, want)
+			if reads != 1 || flowStr(got, "invoice", "status") != "paid" || !issued.Equal(want) || !paid.Equal(want) {
+				t.Errorf("%d server reads; status %v, issued %v, paid %v; want one read, paid, both at %v",
+					reads, flowStr(got, "invoice", "status"), issued, paid, want)
 			}
 		})
 	}

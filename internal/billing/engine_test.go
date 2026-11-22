@@ -2412,8 +2412,7 @@ func TestRunCycle_SkipsPendingChangeNotYetDue(t *testing.T) {
 // TestEffectiveNow covers the four branches of Engine.effectiveNow, the
 // instant the engine bills a subscription at: no test clock → real time;
 // a clock it reads → the clock's frozen time; a clock id with no reader →
-// real time; a clock it cannot read → real time (the fallback step 5
-// removes).
+// real time; a clock it cannot read → real time, logged.
 func TestEffectiveNow(t *testing.T) {
 	wall := time.Date(2026, 4, 20, 12, 0, 0, 0, time.UTC)
 	frozen := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -2458,85 +2457,7 @@ func TestEffectiveNow(t *testing.T) {
 	})
 }
 
-// TestEffectiveNowForInvoice locks in the per-invoice resolver dunning
-// uses to keep state-machine timestamps in the simulation domain.
-// Branches: clock-pinned sub returns frozen, unpinned sub returns
-// wall-clock, manual draft (no subscription) returns wall-clock,
-// missing invoice returns an error.
-func TestEffectiveNowForInvoice(t *testing.T) {
-	wall := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
-	frozen := time.Date(2024, 2, 1, 12, 0, 0, 0, time.UTC)
-	fakeClk := clock.NewFake(wall)
-
-	t.Run("clock-pinned invoice returns frozen", func(t *testing.T) {
-		invoices := &mockInvoices{invoices: []domain.Invoice{
-			{ID: "inv_1", TenantID: "t1", SubscriptionID: "sub_1"},
-		}}
-		subs := &mockSubs{subs: map[string]domain.Subscription{
-			"sub_1": {ID: "sub_1", TenantID: "t1", TestClockID: "tc_1"},
-		}}
-		e := NewEngine(subs, nil, nil, invoices, nil, nil, nil, nil, fakeClk)
-		e.SetTestClockReader(&stubClockReader{clk: domain.TestClock{FrozenTime: frozen}})
-
-		got, err := e.SimForInvoice(context.Background(), "t1", "inv_1")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !got.At.Equal(frozen) {
-			t.Errorf("clock-pinned invoice: got %v, want %v (frozen)", got, frozen)
-		}
-	})
-
-	t.Run("unpinned subscription returns wall clock", func(t *testing.T) {
-		invoices := &mockInvoices{invoices: []domain.Invoice{
-			{ID: "inv_2", TenantID: "t1", SubscriptionID: "sub_2"},
-		}}
-		subs := &mockSubs{subs: map[string]domain.Subscription{
-			"sub_2": {ID: "sub_2", TenantID: "t1"}, // no TestClockID
-		}}
-		e := NewEngine(subs, nil, nil, invoices, nil, nil, nil, nil, fakeClk)
-
-		got, err := e.SimForInvoice(context.Background(), "t1", "inv_2")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !got.At.Equal(wall) {
-			t.Errorf("unpinned sub: got %v, want %v (wall)", got, wall)
-		}
-	})
-
-	t.Run("manual draft (no subscription) returns wall clock", func(t *testing.T) {
-		invoices := &mockInvoices{invoices: []domain.Invoice{
-			{ID: "inv_3", TenantID: "t1"}, // no SubscriptionID
-		}}
-		e := NewEngine(nil, nil, nil, invoices, nil, nil, nil, nil, fakeClk)
-
-		got, err := e.SimForInvoice(context.Background(), "t1", "inv_3")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !got.At.Equal(wall) {
-			t.Errorf("manual draft: got %v, want %v (wall)", got, wall)
-		}
-	})
-
-	t.Run("missing invoice returns error and wall fallback", func(t *testing.T) {
-		invoices := &mockInvoices{} // empty
-		e := NewEngine(nil, nil, nil, invoices, nil, nil, nil, nil, fakeClk)
-
-		got, err := e.SimForInvoice(context.Background(), "t1", "inv_missing")
-		if err == nil {
-			t.Error("expected error for missing invoice")
-		}
-		if !got.At.Equal(wall) {
-			t.Errorf("missing-invoice fallback: got %v, want %v (wall)", got, wall)
-		}
-	})
-}
-
-// stubCustomerReader returns a fixed customer per id — used by the
-// EffectiveNowForCustomer tests and the (one-off invoice) branch of
-// EffectiveNowForInvoice.
+// stubCustomerReader returns a fixed customer per id, for the resolver tests.
 type stubCustomerReader struct {
 	customers map[string]domain.Customer
 	err       error
@@ -2551,96 +2472,6 @@ func (s *stubCustomerReader) Get(_ context.Context, _, id string) (domain.Custom
 		return domain.Customer{}, fmt.Errorf("not found")
 	}
 	return c, nil
-}
-
-// TestEffectiveNowForCustomer covers the four resolution branches for
-// the customer-level entry point used by subscription.Service.Create
-// and the one-off-invoice branch of EffectiveNowForInvoice.
-func TestEffectiveNowForCustomer(t *testing.T) {
-	wall := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
-	frozen := time.Date(2024, 2, 1, 12, 0, 0, 0, time.UTC)
-	fakeClk := clock.NewFake(wall)
-
-	t.Run("clock-pinned customer returns frozen", func(t *testing.T) {
-		e := NewEngine(nil, nil, nil, nil, nil, nil, nil, nil, fakeClk)
-		e.SetCustomerReader(&stubCustomerReader{customers: map[string]domain.Customer{
-			"cus_1": {ID: "cus_1", TenantID: "t1", TestClockID: "tc_1"},
-		}})
-		e.SetTestClockReader(&stubClockReader{clk: domain.TestClock{FrozenTime: frozen}})
-
-		got, err := e.SimForCustomer(context.Background(), "t1", "cus_1")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !got.At.Equal(frozen) {
-			t.Errorf("clock-pinned customer: got %v, want %v (frozen)", got, frozen)
-		}
-	})
-
-	t.Run("unpinned customer returns wall clock", func(t *testing.T) {
-		e := NewEngine(nil, nil, nil, nil, nil, nil, nil, nil, fakeClk)
-		e.SetCustomerReader(&stubCustomerReader{customers: map[string]domain.Customer{
-			"cus_2": {ID: "cus_2", TenantID: "t1"}, // no TestClockID
-		}})
-		got, err := e.SimForCustomer(context.Background(), "t1", "cus_2")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !got.At.Equal(wall) {
-			t.Errorf("unpinned customer: got %v, want %v (wall)", got, wall)
-		}
-	})
-
-	t.Run("no customer reader wired returns wall clock", func(t *testing.T) {
-		e := NewEngine(nil, nil, nil, nil, nil, nil, nil, nil, fakeClk)
-		got, err := e.SimForCustomer(context.Background(), "t1", "cus_x")
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		if !got.At.Equal(wall) {
-			t.Errorf("no-reader fallback: got %v, want %v (wall)", got, wall)
-		}
-	})
-
-	t.Run("missing customer returns error and wall fallback", func(t *testing.T) {
-		e := NewEngine(nil, nil, nil, nil, nil, nil, nil, nil, fakeClk)
-		e.SetCustomerReader(&stubCustomerReader{customers: map[string]domain.Customer{}})
-
-		got, err := e.SimForCustomer(context.Background(), "t1", "cus_missing")
-		if err == nil {
-			t.Error("expected error for missing customer")
-		}
-		if !got.At.Equal(wall) {
-			t.Errorf("missing-customer fallback: got %v, want %v (wall)", got, wall)
-		}
-	})
-}
-
-// TestEffectiveNowForInvoice_OneOffCustomerPath locks in the one-off
-// invoice branch added alongside EffectiveNowForCustomer: invoices
-// without a subscription_id resolve via the customer pin instead of
-// returning wall-clock unconditionally.
-func TestEffectiveNowForInvoice_OneOffCustomerPath(t *testing.T) {
-	wall := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
-	frozen := time.Date(2024, 2, 1, 12, 0, 0, 0, time.UTC)
-	fakeClk := clock.NewFake(wall)
-
-	invoices := &mockInvoices{invoices: []domain.Invoice{
-		{ID: "inv_oneoff", TenantID: "t1", CustomerID: "cus_1"}, // no SubscriptionID
-	}}
-	e := NewEngine(nil, nil, nil, invoices, nil, nil, nil, nil, fakeClk)
-	e.SetCustomerReader(&stubCustomerReader{customers: map[string]domain.Customer{
-		"cus_1": {ID: "cus_1", TenantID: "t1", TestClockID: "tc_1"},
-	}})
-	e.SetTestClockReader(&stubClockReader{clk: domain.TestClock{FrozenTime: frozen}})
-
-	got, err := e.SimForInvoice(context.Background(), "t1", "inv_oneoff")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if !got.At.Equal(frozen) {
-		t.Errorf("one-off invoice for clock-pinned customer: got %v, want %v (frozen)", got, frozen)
-	}
 }
 
 // TestRunCycle_AppliesPendingChangeAtTheClose: when a due pending item plan

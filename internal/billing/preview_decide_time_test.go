@@ -52,10 +52,9 @@ func (p previewClocks) Get(_ context.Context, _, id string) (domain.TestClock, e
 // A preview decides its time from the subscription it previews and binds it,
 // so its generated_at and any later read of now read one instant: on a clock,
 // the clock's frozen time, with no read of the server's clock; on no clock,
-// the server's clock read by the bind (the engine's answer for a record on no
-// clock reads it too, and the decision does not keep that answer); in live
-// mode, one read, by the bind. A clock that cannot be read refuses the
-// preview and binds nothing.
+// and in live mode, one read of the server's clock, by the bind (the engine's
+// answer for a record on no clock reads nothing). A subscription that cannot
+// be read refuses the preview, binds nothing and reads no server clock.
 func TestPreviewDecide_BindsOneInstant(t *testing.T) {
 	frozen := time.Date(2027, 4, 1, 0, 0, 0, 0, time.UTC)
 	past := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
@@ -72,12 +71,9 @@ func TestPreviewDecide_BindsOneInstant(t *testing.T) {
 		wantErr         bool
 	}{
 		{"a subscription on a clock", testMode, domain.Subscription{ID: "sub_1", TenantID: "t1", TestClockID: "clk_1"}, nil, frozen, "clk_1", 0, 1, false},
-		// Two reads: the engine's answer for a subscription on no clock reads
-		// the server's clock (realTime), and the decision drops that answer;
-		// the bind then reads once, and that second read is the one bound.
-		{"a subscription on no clock", testMode, domain.Subscription{ID: "sub_1", TenantID: "t1"}, nil, past.Add(2 * time.Second), "", 2, 1, false},
+		{"a subscription on no clock", testMode, domain.Subscription{ID: "sub_1", TenantID: "t1"}, nil, past.Add(time.Second), "", 1, 1, false},
 		{"live mode", postgres.WithLivemode(context.Background(), true), domain.Subscription{ID: "sub_1", TenantID: "t1"}, nil, past.Add(time.Second), "", 1, 0, false},
-		{"a subscription that cannot be read", testMode, domain.Subscription{ID: "sub_1", TenantID: "t1"}, errors.New("connection reset by peer"), time.Time{}, "", 1, 1, true},
+		{"a subscription that cannot be read", testMode, domain.Subscription{ID: "sub_1", TenantID: "t1"}, errors.New("connection reset by peer"), time.Time{}, "", 0, 1, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			server := &previewServer{at: past}
