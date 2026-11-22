@@ -4834,6 +4834,7 @@ func (e *Engine) enrollStalledForDunning(ctx context.Context, pending []domain.I
 	swept := 0
 	var errs []error
 	for _, inv := range pending {
+		ctx := clock.EnsureEffectiveNow(ctx, e.clock) // one instant for this invoice's work; the tick binds none
 		if err := e.dunningStarter.StartDunning(ctx, inv.TenantID, inv.ID, inv.CustomerID, inv.IssuedAtOrZero(), cause); err != nil {
 			errs = append(errs, fmt.Errorf("enroll invoice %s for dunning: %w", inv.ID, err))
 			continue

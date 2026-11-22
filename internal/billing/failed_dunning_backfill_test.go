@@ -3,10 +3,12 @@ package billing
 import (
 	"context"
 	"errors"
+	"slices"
 	"testing"
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
 // failedBackfillInvoice is a finalized, failed, still-owed invoice updated at the
@@ -77,4 +79,44 @@ func TestEnrollFailedWithoutDunning_CollectsPerInvoiceErrors(t *testing.T) {
 	if len(errsOut) != 1 {
 		t.Fatalf("errors = %v, want 1", errsOut)
 	}
+}
+
+// The sweep's tick binds no instant, so each invoice is enrolled on its own:
+// one read of the engine's clock per invoice, when the sweep reaches it.
+func TestEnrollFailedWithoutDunning_EachInvoiceOnItsOwnInstant(t *testing.T) {
+	aged := time.Now().UTC().Add(-time.Hour)
+	inv := &mockInvoices{invoices: []domain.Invoice{failedBackfillInvoice("inv_1", aged), failedBackfillInvoice("inv_2", aged)}}
+	base := time.Date(2026, 1, 5, 9, 0, 0, 0, time.UTC)
+	server := &steppingClock{at: base}
+	engine := wireBaseTax(NewEngine(
+		&mockSubs{cycleUpdated: make(map[string]bool)},
+		&mockUsage{}, &mockPricing{}, inv, nil, &mockSettings{},
+		&fakePaymentSetups{}, &recordingCharger{}, server,
+	))
+	starter := &recordingDunningStarter{}
+	engine.SetDunningStarter(starter)
+
+	if _, errs := engine.EnrollFailedWithoutDunning(context.Background(), 10); len(errs) != 0 {
+		t.Fatalf("unexpected errors: %v", errs)
+	}
+	want := []time.Time{base.Add(time.Second), base.Add(2 * time.Second)}
+	if server.reads != 2 || !slices.EqualFunc(starter.at, want, time.Time.Equal) {
+		t.Errorf("engine clock read %d times, enrolled at %v; want one read per invoice, %v", server.reads, starter.at, want)
+	}
+}
+
+// steppingClock moves a second each time it answers a read itself (no
+// instant bound on ctx), and counts those reads.
+type steppingClock struct {
+	at    time.Time
+	reads int
+}
+
+func (c *steppingClock) Now(ctx context.Context) time.Time {
+	if t, ok := clock.EffectiveNow(ctx); ok {
+		return t
+	}
+	c.reads++
+	c.at = c.at.Add(time.Second)
+	return c.at
 }

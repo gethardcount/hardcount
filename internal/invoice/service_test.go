@@ -1621,6 +1621,37 @@ func TestRetryPendingTaxCommit_EachInvoiceOnItsOwnInstant(t *testing.T) {
 	checkOwnInstants(t, committer.at, base)
 }
 
+// The tax_retry sweep works each invoice on its own instant: the tick binds
+// none, so a row reads the server's clock once and its retry runs then.
+func TestRetryPendingTax_EachInvoiceOnItsOwnInstant(t *testing.T) {
+	base := time.Date(2026, 1, 5, 9, 0, 0, 0, time.UTC)
+	store := newMemStore()
+	svc := NewService(store, &steppingClock{at: base}, newMemNumberer())
+	retrier := &instantSeeingRetrier{stubTaxRetrier: &stubTaxRetrier{store: store}}
+	svc.SetTaxRetrier(retrier)
+	for _, id := range []string{"inv_1", "inv_2"} {
+		store.invoices[id] = stuckDraft(id, "cus_1", "provider_outage")
+	}
+	if _, errs := svc.RetryPendingTax(postgres.WithLivemode(context.Background(), true), 50); len(errs) != 0 {
+		t.Fatalf("errors: %v", errs)
+	}
+	checkOwnInstants(t, retrier.at, base)
+}
+
+// instantSeeingRetrier records the instant each tax retry's ctx carries.
+type instantSeeingRetrier struct {
+	*stubTaxRetrier
+	at []time.Time
+}
+
+func (r *instantSeeingRetrier) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID string,
+	then func(ctx context.Context, tx *sql.Tx, taxed domain.Invoice) error,
+) (domain.Invoice, error) {
+	at, _ := clock.EffectiveNow(ctx)
+	r.at = append(r.at, at)
+	return r.stubTaxRetrier.RetryTaxForInvoice(ctx, tenantID, invoiceID, then)
+}
+
 // TestRetryTax_AutoFinalize_QueuesForCollection pins the handoff between the
 // tax reconciler and the auto-charge sweep. RetryTax auto-finalizes an engine
 // invoice the moment tax resolves — but finalizing is not collecting: nothing

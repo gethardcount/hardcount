@@ -2,7 +2,6 @@ package creditnote
 
 import (
 	"context"
-	"slices"
 	"testing"
 	"time"
 
@@ -139,22 +138,5 @@ func TestCreditNoteEntryPoints_RunOnTheDecidedTime(t *testing.T) {
 				t.Errorf("stamp %v, clock reads %d; want %v, none", stamp, res.reads, cnDecidedAt)
 			}
 		})
-	}
-}
-
-// Issue binds its own instant: the clawback_issue sweep binds none per note.
-// At real time it reads the server's clock once, and the note is issued at
-// that instant.
-func TestIssue_AtRealTimeReadsTheServersClockOnce(t *testing.T) {
-	past := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
-	i := slices.IndexFunc(cnEntries(), func(e cnEntry) bool { return e.name == "a credit note is issued" })
-	if i < 0 {
-		t.Fatal("cnEntries has no issue entry")
-	}
-	server := &cnSteppingClock{at: past}
-	svc, store, _ := newCNSvc(server)
-	stamp := cnEntries()[i].run(t, clock.WithRealTime(postgres.WithLivemode(context.Background(), false)), svc, store)
-	if want := past.Add(time.Second); server.reads != 1 || stamp == nil || !stamp.Equal(want) {
-		t.Errorf("server clock read %d times, issued at %v; want one read, %v", server.reads, stamp, want)
 	}
 }

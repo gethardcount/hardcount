@@ -434,7 +434,6 @@ func (s *Service) StartDunning(ctx context.Context, tenantID string, invoiceID, 
 		return domain.InvoiceDunningRun{}, fmt.Errorf("dunning policy %s has no retries", policy.ID)
 	}
 
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	failureAt := s.clock.Now(ctx)
 	if _, simulated := clock.SimOf(ctx); simulated && !simFailedAt.IsZero() && simFailedAt.Before(failureAt) {
 		failureAt = simFailedAt

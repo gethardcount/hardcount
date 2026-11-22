@@ -112,9 +112,9 @@ func TestRetryProviderConfigErrors_DecidesEachInvoice(t *testing.T) {
 
 // The connect fan-out is detached from the connect request and outlives it,
 // so it starts on no instant (the connect route is decidedIn: the door binds
-// none) and each invoice's retry reads the server's clock by itself: two
-// invoices on no clock are settled at two instants, in both modes, and one on
-// a clock at its clock's time.
+// none), and decideInvoice binds each invoice's own: two invoices on no clock
+// are settled at two reads of the server's clock, in both modes, and one on a
+// clock at its clock's time.
 func TestRetryProviderConfigErrors_EachInvoiceReadsItsOwnTime(t *testing.T) {
 	frozen := time.Date(2027, 8, 20, 6, 0, 0, 0, time.UTC)
 	past := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
