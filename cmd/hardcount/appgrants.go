@@ -26,8 +26,8 @@ var fullTableNeeds = []string{"SELECT", "INSERT", "UPDATE", "DELETE"}
 // check, a database that lacks the default privileges from docker/init.sql
 // or deploy/compose/postgres-init.sh would boot, then fail requests with
 // 500s and log "permission denied" from the outbox workers (#1317).
-// Partitions are read through their parent, and goose's own table belongs
-// to the migrator, so neither is checked.
+// Partitions are read through their parent, and goose's own table and its
+// sequence belong to the migrator, so none of those is checked.
 func missingAppGrants(pool *sql.DB) (role string, missing []string, err error) {
 	if err := pool.QueryRow(`SELECT current_user`).Scan(&role); err != nil {
 		return "", nil, err
@@ -39,7 +39,8 @@ func missingAppGrants(pool *sql.DB) (role string, missing []string, err error) {
 		       c.relkind = 'S' AND has_sequence_privilege(c.oid, 'USAGE')
 		FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
 		WHERE n.nspname = 'public' AND c.relkind IN ('r', 'p', 'S')
-		  AND NOT c.relispartition AND c.relname <> 'goose_db_version'
+		  AND NOT c.relispartition
+		  AND c.relname NOT IN ('goose_db_version', 'goose_db_version_id_seq')
 		ORDER BY c.relname`)
 	if err != nil {
 		return role, nil, err

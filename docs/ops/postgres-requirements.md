@@ -41,7 +41,7 @@ Hardcount connects as two users. The second one is what keeps each account's dat
 | Setting | User | Used for | Needs |
 |---|---|---|---|
 | `DATABASE_URL` | The admin user, usually the database owner | Database upgrades (migrations) | Create tables and extensions in the database |
-| `APP_DATABASE_URL` | A limited user, usually `hardcount_app` | Every API request and background job | Read and write the tables. It must not be a superuser and must not have `BYPASSRLS`. |
+| `APP_DATABASE_URL` | A limited user named `hardcount_app` | Every API request and background job | Read and write the tables. It must not be a superuser and must not have `BYPASSRLS`. |
 
 Postgres hides each account's rows from the others with a feature called Row-Level Security (RLS). A superuser, or a user with `BYPASSRLS`, skips that check. So with any `APP_ENV` other than `local`, Hardcount refuses to start when `APP_DATABASE_URL`:
 
@@ -52,7 +52,7 @@ Postgres hides each account's rows from the others with a feature called Row-Lev
 
 With `APP_ENV=local` and no `APP_DATABASE_URL`, it builds `hardcount_app:hardcount_app` from `DATABASE_URL`. If that user can connect, it is used. If not, the server runs on the admin connection and logs a warning; RLS is then not enforced.
 
-Create the limited user as the admin user, before the first start:
+Create the limited user as the admin user, before the first start. Name it `hardcount_app`: the upgrades grant tables to that name, and the first one fails with `role "hardcount_app" does not exist` without it.
 
 ```sql
 -- in psql: \set pw 'a-long-random-password'
@@ -65,7 +65,7 @@ ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT ALL ON SEQUENCES TO hardcount_ap
 
 `ALTER DEFAULT PRIVILEGES` covers the tables the admin user creates later, so run the upgrades as that same admin user.
 
-In every `APP_ENV`, Hardcount also refuses to start when the limited user can't read and write a table it needs. The log line `refusing to start: the app database role is missing grants the app needs` lists the `GRANT` statements to run as the admin user. This happens when the database was created without the `ALTER DEFAULT PRIVILEGES` lines above, for example on managed Postgres. Without this check, requests that wrote those tables would fail with a 500 after the server started.
+In every `APP_ENV`, Hardcount also refuses to start when the limited user can't read and write a table it needs. The log line `refusing to start: the app database role is missing grants the app needs` lists the `GRANT` statements to run as the admin user. This happens when the database was created without the `ALTER DEFAULT PRIVILEGES` lines above, or when a different user ran them than the one that runs the upgrades, for example on managed Postgres. Without this check, requests that wrote those tables would fail with a 500 after the server started.
 
 **You see:** `CREATE ROLE`, `GRANT` and `ALTER DEFAULT PRIVILEGES` lines from psql. When Hardcount starts, it checks the user and starts listening.
 
