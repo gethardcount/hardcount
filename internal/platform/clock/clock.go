@@ -32,8 +32,8 @@ import (
 
 // Clock provides the current time. Through ctx, a caller can carry a
 // request-scoped effective-now: the instant the request treats as now, such
-// as a test clock's frozen_time. Operator entry points bind it with
-// WithEffectiveNow. Without one, callers get wall-clock time.
+// as a test clock's frozen_time. Entry points bind it by deciding (Decide)
+// and binding (EnsureEffectiveNow). Without one, callers get wall-clock time.
 //
 // Now takes ctx because, on an entity pinned to a test clock, every
 // business timestamp must be in that clock's frozen_time domain (Stripe's
@@ -138,8 +138,8 @@ var simKey = simKeyType{}
 // WithSim binds a full simulated-time context, instant and clock, to ctx.
 // It is called where the clock is known: by the ForClock and catch-up
 // drivers, which hold the clock id and its frozen_time, and by Decide, which
-// resolves a record's clock. (Catch-up is the work
-// that runs everything that fell due in the time a test clock skipped.)
+// resolves a record's clock. (Catch-up is the work that runs everything that
+// fell due in the time a test clock skipped.)
 // Every Clock.Now(ctx) below reads s.At.
 // The audit Logger itself stamps every audit row on this ctx onto the sim
 // axis (ADR-090 §5).
@@ -332,10 +332,10 @@ var ErrUndecided = errors.New("the time could not be decided")
 
 // Decide resolves p through r and records the answer on ctx. It returns the
 // resolver's error, as ErrUndecided, and needs a resolver and an id: it is
-// the call that decides, at the entry point of a request or a job's row. A clock is decided as the record's clock. For
-// a record on no clock the result is real time, except that a real instant
-// ctx already carries is kept; a clock's instant is dropped
-// (keepOrRealTime).
+// the call that decides, at the entry point of a request or a job's row. A
+// clock is decided as the record's clock. For a record on no clock the result
+// is real time, except that a real instant ctx already carries is kept; a
+// clock's instant is dropped (keepOrRealTime).
 // Work on a record that did not come through the API's clock door decides
 // with DecideWithoutDoor, which calls it.
 func Decide(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
@@ -370,8 +370,9 @@ func Decide(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
 // clock, a zero Sim, without reading any clock: the caller binds an instant
 // if it needs one (Decide's caller, with EnsureEffectiveNow). An error comes
 // with a zero Sim too, and a caller that goes on anyway reads its own clock.
-// Every decision goes through it: the API's door, and Decide's other callers
-// (a decidedIn route's function, a Stripe event, a job's row, a public page).
+// Every decision made from a record goes through it (Decide): the API's door
+// on a record route in test mode, and Decide's other callers (a decidedIn
+// route's function, a Stripe event, a job's row, a public page).
 //
 // It returns the instant and the clock id together, from one resolution,
 // because they are two halves of one fact. A clock id resolved apart from

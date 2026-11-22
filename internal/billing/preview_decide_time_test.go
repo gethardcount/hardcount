@@ -53,8 +53,8 @@ func (p previewClocks) Get(_ context.Context, _, id string) (domain.TestClock, e
 // so its generated_at and any later read of now read one instant: on a clock,
 // the clock's frozen time, with no read of the server's clock; on no clock,
 // and in live mode, one read of the server's clock, by the bind (the engine's
-// answer for a record on no clock reads nothing). A clock that cannot be read
-// refuses the preview, binds nothing and reads no clock.
+// answer for a record on no clock reads nothing). A subscription that cannot
+// be read refuses the preview, binds nothing and reads no server clock.
 func TestPreviewDecide_BindsOneInstant(t *testing.T) {
 	frozen := time.Date(2027, 4, 1, 0, 0, 0, 0, time.UTC)
 	past := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)

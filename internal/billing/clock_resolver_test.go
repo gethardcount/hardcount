@@ -55,8 +55,9 @@ func (c *countingClocks) Get(ctx context.Context, tenantID, id string) (domain.T
 // resolverHarness is an engine whose invoice inv_1 is on subscription sub_1
 // of customer cus_1, all on clock tc_1 frozen at frozen, and whose invoice
 // inv_free (on sub_free) and one-off invoice inv_oneoff are of customer
-// cus_free, on no clock; one-off invoice inv_oneoff_1 is of cus_1. clockErr, when set, fails the clock's read. The
-// engine's clock steps and counts the reads it answers itself.
+// cus_free, on no clock; one-off invoice inv_oneoff_1 is of cus_1. clockErr,
+// when set, fails the clock's read. The engine's clock steps and counts the
+// reads it answers itself.
 func resolverHarness(clockErr error) (*Engine, *countingInvoices, *countingSubs, *countingCustomers, *countingClocks, *steppingClock) {
 	wall := time.Date(2026, 5, 8, 12, 0, 0, 0, time.UTC)
 	frozen := time.Date(2024, 2, 1, 12, 0, 0, 0, time.UTC)
@@ -182,7 +183,7 @@ func TestResolvers_NoModeReads(t *testing.T) {
 }
 
 // An invoice that owes nothing, settled by the real-time run, is paid at the
-// machine's time: real time in live mode is never a zero instant.
+// engine's clock (fixed here), never at a zero instant.
 func TestCollect_LiveZeroDueInvoiceIsPaidNow(t *testing.T) {
 	inv, _, engine := retryHarness(t, nil)
 	engine.SetDunningResolver(&recordingDunningResolver{})

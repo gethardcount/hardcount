@@ -249,8 +249,8 @@ func TestDecision_RecordsOneOfThreeAnswers(t *testing.T) {
 }
 
 // Decide records the resolver's answer and returns its errors: a clock binds
-// the clock and its instant; an answer with no clock binds real time, not the
-// instant the resolver computed; a failed lookup, no resolver and an empty
+// the clock and its instant; an answer with no clock binds real time,
+// whatever At it carries; a failed lookup, no resolver and an empty
 // pin are errors that leave ctx as it was. It replaces an earlier decision,
 // except a real instant for a record on no clock (TestDecide_EveryCase).
 func TestDecide(t *testing.T) {

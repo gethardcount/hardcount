@@ -94,9 +94,10 @@ func collectFailureNext(err error) string {
 
 // collectionAt is the instant processAutoCharge applies credits and settles
 // at: the caller's anchor when it has one, else the invoice's clock now, else
-// the engine's clock (under processAutoCharge's bound ctx, its instant). A
-// clock it cannot read falls back to the engine's clock, logged, as
-// effectiveNow does.
+// the engine's clock (under processAutoCharge's bound ctx, its instant). When
+// the invoice's clock cannot be found (the invoice, its subscription or
+// customer, or their test clock cannot be read), it falls back to the
+// engine's clock, logged, as effectiveNow does.
 func (e *Engine) collectionAt(ctx context.Context, inv domain.Invoice, at *time.Time) time.Time {
 	if at != nil {
 		return *at

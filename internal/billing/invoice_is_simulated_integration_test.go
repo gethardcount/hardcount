@@ -28,7 +28,8 @@ import (
 //     an UNPINNED customer, so a check on the ctx's binding would mis-flag
 //     EVERY manual invoice as simulated, the bug this test pins shut.
 //   - The TIMESTAMPS (issued_at) ride the resolver-bound frozen time
-//     (invoiceSvc.SetResolver(engine) → EffectiveNowForCustomer).
+//     (invoiceSvc.SetResolver(engine): the create decides through
+//     SimForCustomer).
 //
 // Production wires both: router.go SetResolver + invoiceSvc.SetCustomerReader +
 // engine.SetCustomerReader + engine.SetTestClockReader.

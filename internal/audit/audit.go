@@ -253,11 +253,11 @@ type Entry struct {
 // issue, dunning and threshold rows all inherit it), every entry point whose
 // time is decided from its record (clock.Decide binds the record's clock id
 // with its instant: the API's door, and the functions that decide their own
-// time), the
-// handler-level emitters that bind explicitly before emitting (invoice,
-// subscription, customer — including CREATE, which binds from the clock it is
-// handed because the customer pin does not exist yet — dunning), and the
-// test-clock service, which binds each change's row to the clock it changes.
+// time), the handler-level emitters that bind explicitly before emitting
+// (invoice, subscription, customer — including CREATE, which binds from the
+// clock it is handed because the customer pin does not exist yet — dunning),
+// and the test-clock service, which binds each change's row to the clock it
+// changes.
 // Credit notes are covered on every route: each request is decided from its
 // credit note or invoice (the API's door; a create, from the invoice its body
 // names) and creditnote.Service keeps that decision, so the in-tx rows and

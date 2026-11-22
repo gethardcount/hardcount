@@ -218,7 +218,7 @@ func (e *Engine) SetCreditHeadroomReader(r CreditHeadroomReader) {
 // CustomerReader is the narrow read interface the engine uses to
 // resolve a customer's test_clock_id pin (ADR-027). Implemented by
 // *customer.PostgresStore. Optional — when nil, SimForCustomer
-// falls back to wall-clock; this is the safe default for narrow unit
+// answers no clock, a zero Sim; this is the safe default for narrow unit
 // tests that don't exercise customer-level clock pins.
 type CustomerReader interface {
 	Get(ctx context.Context, tenantID, id string) (domain.Customer, error)
