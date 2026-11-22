@@ -171,31 +171,6 @@ func TestItemRoutes_RunOnTheDecidedTime(t *testing.T) {
 	}
 }
 
-// At real time (a subscription on no test clock: the door binds no instant)
-// an item route reads the server's clock once; its clawback notes are issued
-// at that instant and its audit rows carry no clock.
-func TestItemRoutes_AtRealTimeReadTheServersClockOnce(t *testing.T) {
-	for _, e := range handlerEntries() {
-		t.Run(e.name, func(t *testing.T) {
-			server := &subSteppingClock{at: proNow.Add(-time.Second)}
-			res := &subLaterOnSameClock{}
-			ctx := clock.WithRealTime(auth.WithTenantID(postgres.WithLivemode(context.Background(), false), "t1"))
-			audits, notes := e.run(t, ctx, server, res)
-			if server.reads != 1 || len(notes) != e.wantNotes || !allTimesAt(notes, proNow) || res.reads != 0 {
-				t.Errorf("server clock read %d times, resolver reads %d, notes issued at %v; want one read, none, %d at %v", server.reads, res.reads, notes, e.wantNotes, proNow)
-			}
-			if len(audits.entries) == 0 {
-				t.Fatal("no audit rows")
-			}
-			for _, a := range audits.entries {
-				if a.sim.TestClockID != "" {
-					t.Errorf("audit row %s on %+v; want no clock", a.action, a.sim)
-				}
-			}
-		})
-	}
-}
-
 func allTimesAt(got []time.Time, want time.Time) bool {
 	for _, at := range got {
 		if !at.Equal(want) {

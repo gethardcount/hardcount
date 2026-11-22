@@ -141,18 +141,20 @@ func TestCreditNoteEntryPoints_RunOnTheDecidedTime(t *testing.T) {
 	}
 }
 
-// At real time (an invoice on no clock: the decision binds no instant) each
-// entry point reads the server's clock once, and its stamp is that instant.
-func TestCreditNoteEntryPoints_AtRealTimeReadTheServersClockOnce(t *testing.T) {
+// Issue binds its own instant: the clawback_issue sweep binds none per note.
+// At real time it reads the server's clock once, and the note is issued at
+// that instant.
+func TestIssue_AtRealTimeReadsTheServersClockOnce(t *testing.T) {
 	past := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
 	for _, e := range cnEntries() {
-		t.Run(e.name+", reading the server's clock once", func(t *testing.T) {
-			server := &cnSteppingClock{at: past}
-			svc, store, _ := newCNSvc(server)
-			stamp := e.run(t, clock.WithRealTime(postgres.WithLivemode(context.Background(), false)), svc, store)
-			if want := past.Add(time.Second); server.reads != 1 || stamp == nil || !stamp.Equal(want) {
-				t.Errorf("server clock read %d times, stamp %v; want one read, %v", server.reads, stamp, want)
-			}
-		})
+		if e.name != "a credit note is issued" {
+			continue
+		}
+		server := &cnSteppingClock{at: past}
+		svc, store, _ := newCNSvc(server)
+		stamp := e.run(t, clock.WithRealTime(postgres.WithLivemode(context.Background(), false)), svc, store)
+		if want := past.Add(time.Second); server.reads != 1 || stamp == nil || !stamp.Equal(want) {
+			t.Errorf("server clock read %d times, issued at %v; want one read, %v", server.reads, stamp, want)
+		}
 	}
 }

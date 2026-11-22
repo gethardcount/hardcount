@@ -8,7 +8,6 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
-	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // The cancel's attempts (ADR-139), with the memory store and a fake biller
@@ -104,25 +103,26 @@ func TestCancel_TrialActivatedWhilePriced_PlansAgainFromTheActiveRow(t *testing.
 	}
 }
 
-// Each attempt binds its instant from the caller's context. On the request's
-// context, which the API's door decided at real time (the subscription is on
-// no clock), the second plan is at a new instant; binding again on the first
-// attempt's context would give the first instant back.
+// Each attempt runs on the caller's instant (the door's, dunning's or a test
+// clock's), so a second attempt plans at the same instant as the first.
 //
-// Mutation M7 (bind once, outside the attempts) → both plans at one instant.
-func TestCancel_EachAttemptBindsFromTheCallersContext(t *testing.T) {
+// Mutation: bind a new instant per attempt → the second plan is a second
+// read of the server's clock.
+func TestCancel_ASecondAttemptPlansAtTheCallersInstant(t *testing.T) {
 	server := &subSteppingClock{at: time.Now().UTC().Add(time.Hour)}
 	svc := NewService(newMemStore(), server)
 	fb := &fakeBiller{}
 	svc.SetBiller(fb)
 	id := seedActiveSub(t, svc, fb)
 	fb.writeMoved = 1
+	server.reads = 0
 
-	if _, _, err := svc.Cancel(testutil.AtRealTime(), "t1", id); err != nil {
+	at := time.Now().UTC().Add(time.Minute).Truncate(time.Second)
+	if _, _, err := svc.Cancel(clock.WithEffectiveNow(context.Background(), at), "t1", id); err != nil {
 		t.Fatalf("Cancel: %v", err)
 	}
-	if len(fb.planAts) != 2 || !fb.planAts[1].Equal(fb.planAts[0].Add(time.Second)) {
-		t.Errorf("plan instants = %v, want two, the second one read of the server's clock after the first: each attempt binds anew", fb.planAts)
+	if len(fb.planAts) != 2 || !fb.planAts[0].Equal(at) || !fb.planAts[1].Equal(at) || server.reads != 0 {
+		t.Errorf("plan instants = %v, server clock reads %d; want two, both %v, none", fb.planAts, server.reads, at)
 	}
 }
 

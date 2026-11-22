@@ -407,7 +407,6 @@ type UpdateInput struct {
 // create are ordered the same way. An email change clears the bounce state
 // in the same write. The Stripe sync runs after the commit.
 func (s *Service) Update(ctx context.Context, tenantID, id string, input UpdateInput) (domain.Customer, error) {
-
 	// Checks that read only the input run before the lock.
 	name := strings.TrimSpace(input.DisplayName)
 	var email string

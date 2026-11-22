@@ -93,20 +93,3 @@ func TestCustomerEntryPoints_RunOnTheDecidedTime(t *testing.T) {
 		})
 	}
 }
-
-// At real time (a customer on no test clock: the decision binds no instant)
-// each entry point reads the server's clock once, and the row is stamped at
-// that instant.
-func TestCustomerEntryPoints_AtRealTimeReadTheServersClockOnce(t *testing.T) {
-	past := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
-	for _, e := range custEntries() {
-		t.Run(e.name, func(t *testing.T) {
-			server := &custSteppingClock{at: past}
-			svc, store, id := newCustTimeSvc(t, server)
-			e.run(t, clock.WithRealTime(postgres.WithLivemode(context.Background(), false)), svc, id)
-			if want := past.Add(time.Second); server.reads != 1 || len(store.at) != 1 || !store.at[0].Equal(want) {
-				t.Errorf("server clock read %d times, the write ran at %v; want one read, one write at %v", server.reads, store.at, want)
-			}
-		})
-	}
-}

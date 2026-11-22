@@ -2088,7 +2088,6 @@ func CancelOrigin(ctx context.Context) string {
 // ErrWatermarkMoved with nothing written; billSubscription re-reads once and
 // fires again.
 func (s *Service) FireDueScheduledCancel(ctx context.Context, tenantID, id string, at time.Time) error {
-
 	sub, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return err
@@ -2394,7 +2393,6 @@ func (pc plannedCancel) writeTx(ctx context.Context, tx *sql.Tx, store Store, lo
 // transaction. ErrWatermarkMoved means nothing was written and the cancel can
 // plan again.
 func (s *Service) cancelOnce(ctx context.Context, tenantID, id string, grace time.Duration) (domain.Subscription, int64, error) {
-
 	// A cancel can arrive after the period ended and before the billing run
 	// closed it. No run bills a canceled subscription, so the ended periods
 	// are closed first, through the run's own attempt (period CAS, catch-up
