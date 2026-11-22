@@ -1081,7 +1081,6 @@ func (s *Service) SetCreditApplier(c CreditApplier) {
 // finalize. An apply error is returned for the caller to route to the
 // retry sweep, which re-applies atomically before its own charge.
 func (s *Service) ApplyCreditBalance(ctx context.Context, tenantID, id string) (domain.Invoice, error) {
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	inv, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -1109,7 +1108,6 @@ func (s *Service) ApplyCreditBalance(ctx context.Context, tenantID, id string) (
 // racing tax-pending draft can never jump to paid through here. paid_at is
 // at the time the caller decided, so a clock invoice settles on its clock.
 func (s *Service) SettleZeroDue(ctx context.Context, tenantID, id string) (domain.Invoice, error) {
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	inv, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -1136,7 +1134,6 @@ func (s *Service) SettleZeroDue(ctx context.Context, tenantID, id string) (domai
 // taken the money. paid reports whether this call settled the invoice, so
 // the caller fires its effects once.
 func (s *Service) SettleZeroDueWithoutClaim(ctx context.Context, tenantID, id string) (domain.Invoice, bool, error) {
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	return s.store.SettleZeroDue(ctx, tenantID, id, s.clock.Now(ctx))
 }
 
@@ -1649,7 +1646,6 @@ func (s *Service) List(ctx context.Context, filter ListFilter) ([]domain.Invoice
 // A tax retry finalizes an engine draft through RetryTax instead, inside its
 // tax write's transaction; both use finalizeHook and afterFinalize.
 func (s *Service) Finalize(ctx context.Context, tenantID, id string) (domain.Invoice, error) {
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	inv, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -1983,7 +1979,6 @@ func (s *Service) markTaxReversed(ctx context.Context, tenantID, invoiceID strin
 }
 
 func (s *Service) Void(ctx context.Context, tenantID, id string) (domain.Invoice, error) {
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	inv, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -2244,7 +2239,6 @@ func (s *Service) MarkUncollectible(ctx context.Context, tenantID, id string) (d
 // (ADR-112 amendment 2026-11-09). then reads nothing outside tx: the row
 // lock is held while it runs.
 func (s *Service) MarkUncollectibleThen(ctx context.Context, tenantID, id string, then func(tx *sql.Tx) error) (domain.Invoice, error) {
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	inv, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -2379,7 +2373,6 @@ func (s *Service) MarkUncollectibleThen(ctx context.Context, tenantID, id string
 // After the commit it closes the invoice's dunning run and expires any
 // Checkout page still open for it.
 func (s *Service) RecordOfflinePayment(ctx context.Context, tenantID, id, note string) (domain.Invoice, error) {
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	inv, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
 		return domain.Invoice{}, err
@@ -2571,7 +2564,6 @@ type AddLineItemInput struct {
 }
 
 func (s *Service) AddLineItem(ctx context.Context, tenantID, invoiceID string, input AddLineItemInput) (domain.InvoiceLineItem, error) {
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	// Currency is left empty here — AddLineItemAtomicAudited stamps it from the
 	// invoice row it locks. The atomic-create path passes the resolved
 	// currency instead, since the header isn't persisted yet.

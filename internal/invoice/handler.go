@@ -19,7 +19,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/activity"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/timeline"
 )
 
@@ -549,12 +548,11 @@ func (h *Handler) finalize(w http.ResponseWriter, r *http.Request) {
 	// Collect now through the billing engine's one collector (credits, then
 	// the card, or the setup-link email). The finalize write already queued
 	// the invoice, so if this is unwired or the process dies mid-call the
-	// auto-charge sweep collects it on its next tick. It runs on the action's
-	// time (see Service.clock), so the setup-link email it may enqueue carries
-	// the invoice's billing anchor (ADR-104). h.svc.clock is the server's
-	// clock, the one the service's entry points read real time from.
+	// auto-charge sweep collects it on its next tick. It runs on the instant
+	// the door bound for the request, so the setup-link email it may enqueue
+	// carries the invoice's billing anchor (ADR-104).
 	if h.collector != nil {
-		h.collector.CollectInvoice(clock.EnsureEffectiveNow(r.Context(), h.svc.clock), tenantID, inv.ID, nil)
+		h.collector.CollectInvoice(r.Context(), tenantID, inv.ID, nil)
 		// Respond with the post-collection state (paid, failed, or still
 		// queued), as the caller saw it before collection moved here.
 		if collected, err := h.svc.Get(r.Context(), tenantID, inv.ID); err == nil {
@@ -586,6 +584,10 @@ func (h *Handler) void(w http.ResponseWriter, r *http.Request) {
 	}
 	respond.JSON(w, r, http.StatusOK, inv)
 }
+
+// noPMTriggerOperatorResend is the setup email's trigger when an operator
+// resends it, as billing's noPMTrigger values name the others.
+const noPMTriggerOperatorResend = "operator_resend"
 
 // resendSetupLink re-emails the customer the payment-METHOD setup link for a
 // finalized, unpaid invoice with no card on file — the "Resend setup link"
@@ -657,10 +659,7 @@ func (h *Handler) resendSetupLink(w http.ResponseWriter, r *http.Request) {
 	}
 	// The TRUE cause: an operator clicked Resend. The row used to say
 	// "finalize_no_pm" — a finalize that never ran.
-	// On the action's time (see Service.clock), so the resent setup-link
-	// email carries the invoice's billing anchor (ADR-030).
-	resendCtx := clock.EnsureEffectiveNow(r.Context(), h.svc.clock)
-	outcome, err := h.noPMNotifier.NotifyNoPaymentMethod(resendCtx, tenantID, inv, "operator_resend")
+	outcome, err := h.noPMNotifier.NotifyNoPaymentMethod(r.Context(), tenantID, inv, noPMTriggerOperatorResend)
 	if err != nil {
 		respond.FromError(w, r, err, "invoice")
 		return
@@ -1077,11 +1076,11 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// On the action's time (see Service.clock), as finalize's collect: on a
-	// clock invoice the charge records its clock's instant (the PI's
+	// On the instant the door bound for the request, as finalize's collect:
+	// on a clock invoice the charge records its clock's instant (the PI's
 	// hardcount_anchor_at), which dates paid_at and a decline's first dunning
 	// retry.
-	charged, err := h.charger.ChargeInvoiceNow(clock.EnsureEffectiveNow(r.Context(), h.svc.clock), tenantID, inv, hold, ps.StripeCustomerID, ps.StripePaymentMethodID)
+	charged, err := h.charger.ChargeInvoiceNow(r.Context(), tenantID, inv, hold, ps.StripeCustomerID, ps.StripePaymentMethodID)
 	if err != nil {
 		// ADR-026 boundary sanitization: ChargeInvoice wraps a
 		// *payment.PaymentError which respond.FromError detects and

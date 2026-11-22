@@ -37,19 +37,3 @@ func TestSpendableBalance_JudgesExpiryAtTheDecidedTime(t *testing.T) {
 		t.Errorf("expiry judged at %v, clock reads %d; want %v, none", store.at, res.reads, decidedAt)
 	}
 }
-
-// At real time a spendable balance reads the server's clock once and judges
-// expiry at that instant.
-func TestSpendableBalance_AtRealTimeReadsTheServersClockOnce(t *testing.T) {
-	past := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
-	store := &atStore{memStore: newMemStore()}
-	svc := NewService(store)
-	server := &steppingClock{at: past}
-	svc.SetClock(server)
-	if _, err := svc.SpendableBalance(clock.WithRealTime(postgres.WithLivemode(context.Background(), false)), "t1", "cus_1"); err != nil {
-		t.Fatalf("SpendableBalance: %v", err)
-	}
-	if want := past.Add(time.Second); server.reads != 1 || !store.at.Equal(want) {
-		t.Errorf("server clock read %d times, expiry judged at %v; want one read, %v", server.reads, store.at, want)
-	}
-}

@@ -50,12 +50,12 @@ type Service struct {
 	//     its body names (decideForCustomer);
 	//   - the engine's reads (a balance, a draw), the time of the work that
 	//     makes them.
-	// Each entry point keeps that time. Work that arrives with no instant
-	// bound (a job's row, or a function that decides its own time, before it
-	// binds) reads this clock once (clock.EnsureEffectiveNow); a request on a
-	// real-time or a record route arrives with the door's instant. Without
-	// that read, two reads of the time in one action could differ, and a
-	// store's stamp could fall on another time than the action's.
+	// Each entry point keeps that time. Only a grant and an adjustment bind
+	// an instant themselves: for a customer on no clock, decideForCustomer
+	// reads this clock once (clock.EnsureEffectiveNow). Every other entry
+	// keeps its caller's instant. Without that read, two reads of the time in
+	// one grant could differ, and a store's stamp could fall on another time
+	// than the action's.
 	clock clock.Clock
 }
 
@@ -813,7 +813,6 @@ func (s *Service) GetBalance(ctx context.Context, tenantID, customerID string) (
 // a test clock, that clock's frozen time), the same instant a draw would
 // judge expiry at.
 func (s *Service) SpendableBalance(ctx context.Context, tenantID, customerID string) (map[string]int64, error) {
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	return s.store.GetSpendableBalance(ctx, tenantID, customerID, clock.Now(ctx))
 }
 

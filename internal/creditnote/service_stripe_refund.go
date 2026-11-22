@@ -550,7 +550,6 @@ func (s *Service) DismissStripeRefund(ctx context.Context, tenantID, invoiceID, 
 	if utf8.RuneCountInString(note) > maxDismissNoteLen {
 		return domain.InvoiceStripeRefund{}, errs.Invalid("note", fmt.Sprintf("must be at most %d characters", maxDismissNoteLen))
 	}
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	tx, err := s.store.BeginTx(ctx, tenantID)
 	if err != nil {
 		return domain.InvoiceStripeRefund{}, err
@@ -809,7 +808,6 @@ func (s *Service) AttachStripeRefund(ctx context.Context, tenantID, creditNoteID
 	if err != nil {
 		return domain.CreditNote{}, err
 	}
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	if cn.Status != domain.CreditNoteIssued || cn.RefundStatus != domain.RefundFailed || cn.RefundAmountCents <= 0 {
 		return domain.CreditNote{}, errs.InvalidState("a refund made in Stripe can be attached only to an issued credit note whose card refund failed")
 	}
