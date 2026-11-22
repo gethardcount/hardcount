@@ -97,7 +97,7 @@ type SubscriptionCurrency struct {
 // currency guards. Narrow interface wired via SetSubscriptionChecker
 // (precedent: SetStripeSyncer) so the customer package keeps the
 // zero-peer-import rule; implemented by an adapter over the subscription
-// store in api/router.go.
+// store in api/adapters.go.
 //
 // The service calls it under the customer-rules lock
 // (Store.WithCustomerRulesLock). Subscription creates hold the same lock, so
@@ -149,7 +149,7 @@ type Service struct {
 
 // DunningPolicyReader fetches a dunning policy by id on a tenant- and
 // mode-scoped transaction. Implemented by *dunning.PostgresStore, wired in
-// router.go.
+// wire.go.
 type DunningPolicyReader interface {
 	GetPolicyByID(ctx context.Context, tenantID, id string) (domain.DunningPolicy, error)
 }
@@ -180,7 +180,7 @@ func (s *Service) SetStripeSyncer(syncer StripeSyncer) {
 }
 
 // SetSubscriptionChecker wires the archive/currency guard's subscription
-// lookup. Production always wires it (api/router.go); the guarded
+// lookup. Production always wires it (api/wire.go); the guarded
 // transitions FAIL LOUDLY when it's missing rather than silently
 // permitting an archive that keeps billing (ADR-067).
 func (s *Service) SetSubscriptionChecker(c SubscriptionChecker) {
@@ -190,7 +190,7 @@ func (s *Service) SetSubscriptionChecker(c SubscriptionChecker) {
 // SetTestClockChecker wires the test-clock existence check used at
 // customer-create time. Optional — if unwired, customer-create
 // rejects any test_clock_id (defensive default; production wires
-// the real store via api/router.go).
+// the real store via api/wire.go).
 func (s *Service) SetTestClockChecker(checker TestClockChecker) {
 	s.clocks = checker
 }
@@ -198,7 +198,7 @@ func (s *Service) SetTestClockChecker(checker TestClockChecker) {
 // SetTaxFlusher wires the per-customer tax-retry flush fired after a
 // successful billing-profile upsert. Optional — if unwired, the
 // flush is a no-op and operators fall back to per-invoice Retry.
-// Production wires *invoice.Service via api/router.go.
+// Production wires *invoice.Service via api/wire.go.
 func (s *Service) SetTaxFlusher(flusher TaxFlusher) {
 	s.taxFlusher = flusher
 }

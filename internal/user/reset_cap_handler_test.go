@@ -12,6 +12,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/gethardcount/hardcount/internal/session"
 )
 
@@ -37,7 +38,7 @@ func TestRequestPasswordReset_CappedAccountIsSilentlySkipped(t *testing.T) {
 		createTokenErr: ErrResetSendCapped,
 	}
 	sender := &countingResetEmail{}
-	h := NewHandler(newFakeService(userStore), session.DefaultCookieConfig("local"), sender, "https://dash.example.test", true)
+	h := NewHandler(newFakeService(userStore), session.DefaultCookieConfig("local", ""), sender, "https://dash.example.test", true)
 
 	// Capture logs for the level assertion; restore the default after.
 	var logs bytes.Buffer
@@ -48,11 +49,11 @@ func TestRequestPasswordReset_CappedAccountIsSilentlySkipped(t *testing.T) {
 	body, _ := json.Marshal(map[string]string{"email": email})
 	req := httptest.NewRequest(http.MethodPost, "/password-reset/request", strings.NewReader(string(body)))
 	req.Header.Set("Content-Type", "application/json")
-	// Audit-coverage state on the ctx, as the root middleware provides in
-	// production: the capped arm must DECLARE the request accounted-for
-	// (MarkSkip), or the coverage detector reports this mutating 2xx as a
-	// mutation that lost its audit row.
-	reqCtx := audit.WithRequestState(req.Context())
+	// The request's record, as the server's root makes it: the capped arm
+	// must DECLARE the request accounted for (MarkSkip), or the coverage
+	// detector reports this mutating 2xx as a mutation that lost its audit
+	// row.
+	reqCtx := requesttest.Context(req.Context())
 	req = req.WithContext(reqCtx)
 	rec := httptest.NewRecorder()
 	h.Routes().ServeHTTP(rec, req)
@@ -66,11 +67,11 @@ func TestRequestPasswordReset_CappedAccountIsSilentlySkipped(t *testing.T) {
 	// can be capped — any distinguishable reply would be a reliable
 	// account-existence oracle (four requests and an attacker knows).
 	unknownStore := &fakeUserStore{}
-	unknownH := NewHandler(newFakeService(unknownStore), session.DefaultCookieConfig("local"), &countingResetEmail{}, "https://dash.example.test", true)
+	unknownH := NewHandler(newFakeService(unknownStore), session.DefaultCookieConfig("local", ""), &countingResetEmail{}, "https://dash.example.test", true)
 	unknownBody, _ := json.Marshal(map[string]string{"email": "nobody@example.com"})
 	unknownReq := httptest.NewRequest(http.MethodPost, "/password-reset/request", strings.NewReader(string(unknownBody)))
 	unknownReq.Header.Set("Content-Type", "application/json")
-	unknownReq = unknownReq.WithContext(audit.WithRequestState(unknownReq.Context()))
+	unknownReq = unknownReq.WithContext(requesttest.Context(unknownReq.Context()))
 	unknownRec := httptest.NewRecorder()
 	unknownH.Routes().ServeHTTP(unknownRec, unknownReq)
 

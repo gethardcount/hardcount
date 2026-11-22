@@ -2,10 +2,9 @@ package billing_test
 
 // #981: usage that matches no price is left off the invoice (the peer norm),
 // but never silently. Each invoice that is built without it logs a warning
-// and adds its quantity to hardcount_usage_unpriced_quantity_total{meter_id}.
-// These tests run the real engine on real Postgres and read the counter from
-// the default Prometheus registry. Meter ids are unique per test, so the
-// counter of one test cannot leak into another.
+// and adds its quantity to hardcount_usage_unpriced_quantity_total. These
+// tests run the real engine on real Postgres and read how much the counter
+// grew from the default Prometheus registry.
 
 import (
 	"context"
@@ -24,35 +23,47 @@ import (
 	"github.com/gethardcount/hardcount/internal/usage"
 )
 
-// unpricedCounter reads hardcount_usage_unpriced_quantity_total for one meter
-// in test mode (every test here runs with livemode=false); 0 when the
-// series does not exist.
-func unpricedCounter(t *testing.T, meterID string) float64 {
+// unpricedGrowth reads hardcount_usage_unpriced_quantity_total in test mode
+// (every test here runs with livemode=false) and returns how much it has
+// grown since. The tests in a package run one at a time, so the growth is
+// the calling test's.
+func unpricedGrowth(t *testing.T) func() float64 {
 	t.Helper()
-	mfs, err := prometheus.DefaultGatherer.Gather()
-	if err != nil {
-		t.Fatalf("gather metrics: %v", err)
-	}
-	for _, mf := range mfs {
-		if mf.GetName() != "hardcount_usage_unpriced_quantity_total" {
-			continue
+	read := func() float64 {
+		mfs, err := prometheus.DefaultGatherer.Gather()
+		if err != nil {
+			t.Fatalf("gather metrics: %v", err)
 		}
-		for _, m := range mf.GetMetric() {
-			var meterOK, modeOK bool
-			for _, lp := range m.GetLabel() {
-				switch lp.GetName() {
-				case "meter_id":
-					meterOK = lp.GetValue() == meterID
-				case "mode":
-					modeOK = lp.GetValue() == "test"
+		for _, mf := range mfs {
+			if mf.GetName() != "hardcount_usage_unpriced_quantity_total" {
+				continue
+			}
+			for _, m := range mf.GetMetric() {
+				for _, lp := range m.GetLabel() {
+					if lp.GetName() == "mode" && lp.GetValue() == "test" {
+						return m.GetCounter().GetValue()
+					}
 				}
 			}
-			if meterOK && modeOK {
-				return m.GetCounter().GetValue()
-			}
+		}
+		return 0
+	}
+	before := read()
+	return func() float64 { return read() - before }
+}
+
+// hasUnpricedWarn reports whether logs hold a "usage matched no price" WARN
+// line naming meter by id and event name, with quantity qty.
+func hasUnpricedWarn(logs string, meter domain.Meter, qty string) bool {
+	for _, line := range strings.Split(logs, "\n") {
+		if strings.Contains(line, "usage matched no price of its plan") &&
+			strings.Contains(line, "meter_id="+meter.ID+" ") &&
+			strings.Contains(line, "meter="+meter.EventName+" ") &&
+			strings.Contains(line, "quantity="+qty+" ") {
+			return true
 		}
 	}
-	return 0
+	return false
 }
 
 // tokensMeter creates a sum meter. Its plans price it with modelA alone, so
@@ -164,6 +175,7 @@ func TestUnpricedUsage_ThresholdThenCycle_CountedOnce(t *testing.T) {
 	f := newThresholdFixture(t, "Unpriced Threshold")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 120*time.Second)
 	defer cancel()
+	unpriced := unpricedGrowth(t)
 	logs := captureLogs(t)
 
 	tok := tokensMeter(t, ctx, f, "tok_thr")
@@ -191,7 +203,7 @@ func TestUnpricedUsage_ThresholdThenCycle_CountedOnce(t *testing.T) {
 	if fired != 1 {
 		t.Fatalf("fired = %d, want 1", fired)
 	}
-	if got := unpricedCounter(t, tok.ID); got != 70 {
+	if got := unpriced(); got != 70 {
 		t.Fatalf("after the threshold invoice: counter = %v, want 70 (the pre-fire unpriced quantity)", got)
 	}
 	if !strings.Contains(logs.String(), "threshold: usage matched no price of its plan") ||
@@ -215,7 +227,7 @@ func TestUnpricedUsage_ThresholdThenCycle_CountedOnce(t *testing.T) {
 	if sub.CurrentBillingPeriodStart == nil || sub.CurrentBillingPeriodStart.Equal(f.cycleStart) {
 		t.Fatalf("the period must have closed, start is still %v", sub.CurrentBillingPeriodStart)
 	}
-	if got := unpricedCounter(t, tok.ID); got != 100 {
+	if got := unpriced(); got != 100 {
 		t.Fatalf("after the period close: counter = %v, want 100 (70 on the threshold invoice + 30 after it; 200 means the full-window pass counted the period again)", got)
 	}
 }
@@ -228,6 +240,8 @@ func TestUnpricedUsage_CycleClose_CountsEachMeter(t *testing.T) {
 	f := newThresholdFixture(t, "Unpriced Cycle")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 120*time.Second)
 	defer cancel()
+	logs := captureLogs(t)
+	unpriced := unpricedGrowth(t)
 
 	tok := tokensMeter(t, ctx, f, "tok_cyc")
 	single, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
@@ -264,11 +278,17 @@ func TestUnpricedUsage_CycleClose_CountsEachMeter(t *testing.T) {
 	if generated != 1 {
 		t.Fatalf("generated = %d, want 1 (the model=a line)", generated)
 	}
-	if got := unpricedCounter(t, tok.ID); got != 25 {
-		t.Errorf("tokens meter: counter = %v, want 25", got)
+	if got := unpriced(); got != 32 {
+		t.Errorf("counter grew by %v, want 32 (25 tokens and 7 seats)", got)
 	}
-	if got := unpricedCounter(t, single.ID); got != 7 {
-		t.Errorf("seats meter: counter = %v, want 7", got)
+	// The counter has no meter label, so the WARN is what names each meter.
+	for _, want := range []struct {
+		meter domain.Meter
+		qty   string
+	}{{tok, "25"}, {single, "7"}} {
+		if !hasUnpricedWarn(logs.String(), want.meter, want.qty) {
+			t.Errorf("no WARN names meter %s (%s) with quantity=%s; logs:\n%s", want.meter.ID, want.meter.EventName, want.qty, logs.String())
+		}
 	}
 }
 
@@ -279,6 +299,7 @@ func TestUnpricedUsage_ImmediateCancel_NoInvoice_Counted(t *testing.T) {
 	f := newThresholdFixture(t, "Unpriced Cancel")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 120*time.Second)
 	defer cancel()
+	unpriced := unpricedGrowth(t)
 
 	tok := tokensMeter(t, ctx, f, "tok_cxl")
 	plan, _, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
@@ -313,7 +334,7 @@ func TestUnpricedUsage_ImmediateCancel_NoInvoice_Counted(t *testing.T) {
 	if inv.ID != "" {
 		t.Fatalf("no priced usage and no base: want no invoice, got %s", inv.ID)
 	}
-	if got := unpricedCounter(t, tok.ID); got != 40 {
+	if got := unpriced(); got != 40 {
 		t.Fatalf("counter = %v, want 40", got)
 	}
 }
@@ -327,6 +348,7 @@ func TestUnpricedUsage_MaxMeter_ThresholdLeavesItToClose(t *testing.T) {
 	f := newThresholdFixture(t, "Unpriced Max")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 120*time.Second)
 	defer cancel()
+	unpriced := unpricedGrowth(t)
 
 	gpu, err := f.pricingSvc.CreateMeter(ctx, f.tenantID, pricing.CreateMeterInput{
 		EventName: "gpu_max", Name: "GPU", Unit: "gpus", Aggregation: "max",
@@ -351,7 +373,7 @@ func TestUnpricedUsage_MaxMeter_ThresholdLeavesItToClose(t *testing.T) {
 	if len(errs) > 0 || fired != 1 {
 		t.Fatalf("fired = %d, errs = %v; want one fire", fired, errs)
 	}
-	if got := unpricedCounter(t, gpu.ID); got != 0 {
+	if got := unpriced(); got != 0 {
 		t.Fatalf("after the threshold invoice: counter = %v, want 0 (the close reports a max bucket)", got)
 	}
 
@@ -360,7 +382,7 @@ func TestUnpricedUsage_MaxMeter_ThresholdLeavesItToClose(t *testing.T) {
 	if _, failures := f.engine.RunCycleForTenant(ctx, f.tenantID, 50); len(failures) > 0 {
 		t.Fatalf("cycle failures: %v", failures)
 	}
-	if got := unpricedCounter(t, gpu.ID); got != 50 {
+	if got := unpriced(); got != 50 {
 		t.Fatalf("after the period close: counter = %v, want 50 (the peak, once)", got)
 	}
 }
@@ -374,6 +396,7 @@ func TestUnpricedUsage_ImmediateCancelTx_WithInvoice_Counted(t *testing.T) {
 	f := newThresholdFixture(t, "Unpriced Cancel Tx")
 	ctx, cancel := context.WithTimeout(postgres.WithLivemode(context.Background(), false), 120*time.Second)
 	defer cancel()
+	unpriced := unpricedGrowth(t)
 
 	tok := tokensMeter(t, ctx, f, "tok_cxltx")
 	plan, _, err := f.pricingSvc.CreatePlan(ctx, f.tenantID, pricing.CreatePlanInput{
@@ -412,7 +435,7 @@ func TestUnpricedUsage_ImmediateCancelTx_WithInvoice_Counted(t *testing.T) {
 	// First attempt: the caller's later step fails and the tx rolls back.
 	_, _, tx := attempt()
 	postgres.Rollback(tx)
-	if got := unpricedCounter(t, tok.ID); got != 0 {
+	if got := unpriced(); got != 0 {
 		t.Fatalf("after a rolled-back cancel: counter = %v, want 0", got)
 	}
 
@@ -425,7 +448,7 @@ func TestUnpricedUsage_ImmediateCancelTx_WithInvoice_Counted(t *testing.T) {
 	if inv.ID == "" || inv.SubtotalCents != 12 {
 		t.Fatalf("final invoice = %q subtotal %d, want one invoice of 12c (model=a only)", inv.ID, inv.SubtotalCents)
 	}
-	if got := unpricedCounter(t, tok.ID); got != 33 {
+	if got := unpriced(); got != 33 {
 		t.Fatalf("counter = %v, want 33", got)
 	}
 }

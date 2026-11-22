@@ -15,8 +15,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 	"github.com/gethardcount/hardcount/internal/session"
 )
 
@@ -136,8 +136,7 @@ type LoginThrottle struct {
 }
 
 // NewLoginThrottle builds the throttle. key comes from ThrottleKey; cookie
-// gives the hardcount_device cookie the session cookie's Domain, Secure and
-// SameSite.
+// gives the hardcount_device cookie the session cookie's Domain and Secure.
 func NewLoginThrottle(db *postgres.DB, key []byte, cookie session.CookieConfig) *LoginThrottle {
 	return &LoginThrottle{db: db, key: key, cookie: cookie}
 }
@@ -230,7 +229,7 @@ func (t *LoginThrottle) Reserve(r *http.Request, email string) (ThrottleVerdict,
 	}
 	if !knownBrowser {
 		subjects = []thresholdSubject{
-			{t.subject("pair", audit.ExtractClientIP(r), email), pairThreshold},
+			{t.subject("pair", request.Of(r.Context()).ClientIP(), email), pairThreshold},
 			{account, accountThreshold},
 		}
 	}
@@ -324,7 +323,7 @@ func (t *LoginThrottle) proved(w http.ResponseWriter, r *http.Request, email str
 		}
 		tok = hex.EncodeToString(buf)
 	}
-	cleared := []string{t.subject("pair", audit.ExtractClientIP(r), email)}
+	cleared := []string{t.subject("pair", request.Of(r.Context()).ClientIP(), email)}
 	if clearEmail {
 		cleared = append(cleared, t.subject("account", email))
 	}
@@ -360,7 +359,7 @@ func (t *LoginThrottle) proved(w http.ResponseWriter, r *http.Request, email str
 		MaxAge:   int(knownBrowserFor / time.Second),
 		HttpOnly: true,
 		Secure:   t.cookie.Secure,
-		SameSite: t.cookie.SameSite,
+		SameSite: http.SameSiteLaxMode,
 	})
 	return nil
 }

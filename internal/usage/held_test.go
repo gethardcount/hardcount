@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/shopspring/decimal"
 
 	"github.com/gethardcount/hardcount/internal/domain"
@@ -220,5 +221,33 @@ func TestHoldCall_Validation(t *testing.T) {
 	}
 	if got := store.held[0].EventAt; got.Before(at) || got.After(time.Now().UTC()) {
 		t.Fatalf("event_at = %v, want the receive time", got)
+	}
+}
+
+// Each hold reason is exported at 0 from boot. A counter series born at 1 has
+// no earlier sample, so increase() reads it as 0 and an alert on the first
+// held row after a restart never fires.
+func TestHeldEventsSeries_ExistAtZero(t *testing.T) {
+	families, err := prometheus.DefaultGatherer.Gather()
+	if err != nil {
+		t.Fatalf("gather: %v", err)
+	}
+	have := map[string]bool{}
+	for _, f := range families {
+		if f.GetName() != "hardcount_usage_held_events_total" {
+			continue
+		}
+		for _, m := range f.GetMetric() {
+			for _, l := range m.GetLabel() {
+				if l.GetName() == "reason" {
+					have[l.GetValue()] = true
+				}
+			}
+		}
+	}
+	for _, r := range []domain.HeldUsageReason{domain.HeldReasonCustomerNotFound, domain.HeldReasonMeterNotFound} {
+		if !have[string(r)] {
+			t.Errorf("hardcount_usage_held_events_total{reason=%q} is not exported before the first held row", r)
+		}
 	}
 }

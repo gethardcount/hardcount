@@ -37,7 +37,9 @@ alerting tier: what should page someone, and what is only informational.
 | `increase(hardcount_leader_lease_lost_total[1h])` | > 0 | A tick lost its lease. Split by `reason`, and exclude `paused` (an operator action). What each reason means: [Lease-lost reasons](background-job-stuck.md#lease-lost-reasons) |
 | `hardcount_email_outbox_failing_emails{mode="live"}` | > 0 | See [Emails not going out](email-outbox-backed-up.md) |
 | `hardcount_email_outbox_oldest_due_age_seconds{mode="live"}` | > 1800 | See [Emails not going out](email-outbox-backed-up.md) |
+| `hardcount_audit_write_errors_total{outcome="row_lost"}` | rate > 0/s | **Audit evidence permanently lost.** A change committed and its audit row did not. Treat as a compliance incident. The `audit: failed` ERROR lines name each lost change. The bundled Grafana dashboard pages on this outcome. See [Audit log gaps](audit-log-gaps.md#audit-write-errors) |
 | `hardcount_webhook_outbox_oldest_pending_age_seconds{mode="live"}` | > 1800 | A webhook event queued 30 minutes ago has no deliveries yet: the webhook outbox job is stopped, or writing the event fails. A failing endpoint does not show here. See [Webhook outbox backed up](webhook-outbox-backed-up.md) |
+| `hardcount_leader_status_scrape_failed` | == 1 for 5m | The scrape could not read the `leader_status` view within 2 seconds: 1 on that scrape, 0 on one that read it. That scrape has no `hardcount_leader_last_tick_age_seconds`, `hardcount_leader_held` or `hardcount_leader_paused` series, so the stalled-role alert cannot fire while this is 1. Run the `leader_status` query ([A background job is stuck](background-job-stuck.md#check), Check step 1) in psql. If it fails, fix the database. If it answers, this replica's scrape timed out waiting on its pool; see `go_sql_wait_count_total{db_name="app"}` |
 
 ### Warn (Slack or email, not page)
 
@@ -63,16 +65,18 @@ alerting tier: what should page someone, and what is only informational.
 | `hardcount_stripe_key_unusable_total{reason}` | increase > 0 | Charges are paused (not failed) until the key is fixed in Settings → Payments. `rejected`: Stripe refused the account's key (rolled, or a restricted key without a permission; adding the permission in Stripe also fixes it, and the next charge that goes through clears the Settings notice). `not_configured`: no key for that mode. The ERROR line "Stripe refused this tenant's API key" names the account and mode. Each tick tries again |
 | `hardcount_stale_charge_hold_resolutions_total{result="failed"}` | increase on several billing ticks in a row | Hardcount could not clear a charge hold that a stopped charge left: the database write failed, or the check panicked. The invoice cannot be charged until the hold clears. See [A charge hold that does not clear](unclear-charge.md#a-charge-hold-that-does-not-clear) |
 | `hardcount_reconciler_sweeps_total{reconciler="payment_unknown",outcome="error"}` | increase on every billing tick | A check of the payment reconciler fails for the same invoice on each tick. One cause is an `unknown` payment that Hardcount cannot read at Stripe (disconnected, key rejected, or the payment not in the connected Stripe account). That invoice is not charged until Stripe can be read or the invoice is written off. The `reconciler error` log line names it. See [Unconfirmed, with a PaymentIntent](unclear-charge.md#unconfirmed-with-a-paymentintent) |
-| `hardcount_http_requests_total{method="POST",path="/v1/integrations/litellm/spend",status="503"}` | any increase | LiteLLM spend batches were refused for retry (usage store unreachable). See [LiteLLM spend gap](litellm-spend-gap.md) |
+| `hardcount_http_requests_total{method="POST",path="/v1/integrations/litellm/spend",status="503"}` | any increase | LiteLLM spend batches were refused for retry: the usage store, or the API-key check before it, could not reach the database. See [LiteLLM spend gap](litellm-spend-gap.md) |
 | `hardcount_litellm_skipped_with_tokens_total{call_type}` | any increase | LiteLLM sent a call Hardcount does not bill (images, audio, batch results, ...) that carries tokens. The WARN "skipped a record that carries tokens" names the call type. Expected for `gpt-image-*` traffic; a new call type means LiteLLM sends usage Hardcount does not bill. See [Which LiteLLM calls bill](../../integrations/litellm.md#which-litellm-calls-bill) |
 | `hardcount_litellm_cache_write_unsplit_total{reason}` | any increase | Claude cache writes billed as `input`, below the provider's cache-write price. `no_split` is expected for streamed calls; `no_count` means a `/v1/responses` call whose record has no cache-write count. See [LiteLLM: what lands in Hardcount](../../integrations/litellm.md#4-what-lands-in-hardcount) |
 | `hardcount_auto_charge_retries_total{result="failed"}` | growing rapidly | Many invoices stuck in retry |
-| `hardcount_audit_write_errors_total{outcome="row_lost"}` | rate > 0/s | **Audit evidence permanently lost.** Treat as a compliance incident. See [Audit log gaps](audit-log-gaps.md#audit-write-errors) |
-| `hardcount_audit_write_errors_total{outcome="mutation_refused"}` | rate > 0/s | **Nothing is missing.** An availability problem, not an evidence problem. See [Audit log gaps](audit-log-gaps.md#audit-write-errors) |
+| `hardcount_audit_write_errors_total{outcome="mutation_refused"}` | rate > 0 for 5m | **Nothing is missing, but writes are failing.** An audit row could not be written inside its change's transaction, so the change rolled back: an API request answered 500, or a background step (billing, a Stripe payment event, a credit note) failed and will retry. The bundled dashboard alerts on this separately. Look at the database; the failed request logs `unhandled error` with `audit log (in-tx): insert` in its `error`. See [Audit log gaps](audit-log-gaps.md#audit-write-errors) |
 | `hardcount_audit_uncovered_mutation_total{route}` | any increase | A route changed data and wrote no audit row. Should be **flat zero**. See [Audit log gaps](audit-log-gaps.md#a-change-with-no-audit-row) |
+| `hardcount_idempotency_cache_errors_total{stage}` | rate > 0 for 5m | An `Idempotency-Key` row could not be claimed or written. `reserve`: a database error, or a client that went away during the claim; the request was refused with a `503` the client may retry, and did not run. Its line is `idempotency reserve failed; refusing the request (503) rather than running it unprotected`. `finalize`: the request ran but its answer was not stored, so a retry with the same key gets `409`; its ERROR line is `idempotency finalize failed; response not stored, key stays pending and retries with it get 409`. `release`: a refused request's key was not freed, so a retry with it gets `409`; its ERROR line is `idempotency release failed; key stays pending and retries with it get 409 instead of running again`. The `error` field says whether the database or the client was the cause |
+| `increase(hardcount_usage_held_events_total[1h])` by `reason` | > 0 | LiteLLM sent usage for a customer (`customer_not_found`) or a meter (`meter_not_found`) that does not exist, so Hardcount held those rows instead of billing them. Counted once per new held row. Create the customer or the meter, then release the rows. See [Usage for a customer Hardcount does not know yet](../../integrations/litellm.md#usage-for-a-customer-hardcount-does-not-know-yet) |
+| `hardcount_leader_paused{role}` | == 1 outside a planned window | An operator paused the role with `leader_pause`, so no replica runs it. A pause survives restarts and lasts until `leader_unpause`. See [Metrics for the roles](background-job-stuck.md#metrics-for-the-roles) |
 | `hardcount_auth_login_total{outcome="throttled"}` | rate > 0 for 15m | Someone keeps guessing dashboard passwords, or `TRUST_PROXY` is wrong. See [Sign-in throttled](sign-in-throttled.md) |
 | `hardcount_auth_login_total{outcome="error"}` | any increase | Sign-in failed on the server side, usually the database. Everyone is refused while it lasts |
-| `increase(hardcount_usage_unpriced_quantity_total{mode="live"}[1d])` by `meter_id` | > 0 | Some usage matched no price, and an invoice was built without it. That usage is not billed unless you bill it. See [Usage with no price](usage-with-no-price.md) |
+| `increase(hardcount_usage_unpriced_quantity_total{mode="live"}[1d])` | > 0 | Some usage matched no price, and an invoice was built without it. The WARN `usage matched no price of its plan — not billed` names the meter's id and event name. That usage is not billed unless you bill it. See [Usage with no price](usage-with-no-price.md) |
 | `increase(hardcount_usage_unbilled_total{reason="after_close"}[1d])` by `origin` | > 0 | Usage arrived after its period's invoice was built: stored, billed on no invoice unless you bill it. A WARN line names each event. See [Invoice timing and late usage](invoice-timing-late-usage.md) |
 | `increase(hardcount_usage_unbilled_total{reason=~"no_price\|not_on_plan\|outside_subscription"}[1d])` by `reason` | > 0 | Usage was stored, and when it arrived Hardcount found a reason it is not billed: no price takes it (`no_price`), its meter is not on the plan (`not_on_plan`), or no subscription covered it (`outside_subscription`). The answer that wrote each event says which. See [Usage with no price](usage-with-no-price.md) |
 
@@ -105,7 +109,30 @@ Notes on three rows:
 ### Info (dashboards, no alert)
 
 - `hardcount_billing_cycles_total`: billing passes run (a cycle runs two: live, then test)
-- `hardcount_invoices_generated_total`: invoice volume
+- `hardcount_invoices_generated_total`: invoices built by the scheduled
+  billing run's period closes, both modes, including a close that ends a
+  subscription canceled at its period end. Not counted: the final invoice
+  of a cancel scheduled inside a period, spend-threshold invoices, cancels
+  that take effect at once, `POST /v1/billing/run`, test-clock advances and
+  invoices created through the API
+- `hardcount_http_requests_in_flight`: requests this replica is answering now
+- `hardcount_dunning_active_runs`: active dunning runs across every account
+  and both modes (−1 = the count query failed)
+- `hardcount_leader_held{role}`: 1 while a replica holds the role's lease (a
+  tick is running), else 0. Roles: `billing`, `dunning`, `webhook_outbox`,
+  `email_outbox`, `webhook_delivery`, `testclock_catchup`. A 1 that stays
+  while `hardcount_leader_last_tick_age_seconds` grows is a tick still
+  running: a long billing drain (`hardcount_billing_due_subscriptions`
+  falling), a long test-clock advance, or a tick stuck but still renewing.
+  Follow Check in [A background job is stuck](background-job-stuck.md#check)
+  before restarting anything
+- `hardcount_usage_late_event_total{origin}`: usage events, other than
+  backfills, whose time was more than 24 hours before the customer's current
+  time when they arrived (`origin` is always `api`). An API event is counted
+  when it is checked, before the write; a LiteLLM event after its call is
+  written. Either way a resend counts again. It does not say an
+  event was left off an invoice:
+  `hardcount_usage_unbilled_total{reason="after_close"}` does
 - `hardcount_usage_events_ingested_total`: usage ingest rate
 - `hardcount_billing_cycle_duration_seconds`: cycle latency
 - `hardcount_credit_operations_total`: credit ledger activity

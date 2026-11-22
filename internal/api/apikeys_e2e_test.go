@@ -200,7 +200,7 @@ func TestE2E_APIKeyLifecycle(t *testing.T) {
 // secret once and stores it nowhere: an Idempotency-Key on it is ignored, so
 // the answer is not kept for a replay. Sending the same request again runs it
 // again. The other requests that answer with a secret shown once skip the
-// idempotency layer by the same list (TestAnswersWithShowOnceSecret).
+// idempotency layer by the same list (TestAnswersWithShowOnceSecret_OnlyOnAMarkedRoute).
 func TestE2E_APIKeyIssue_SecretIsNotStoredForReplay(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "apikey-issue-bootstrap")
@@ -225,6 +225,12 @@ func TestE2E_APIKeyIssue_SecretIsNotStoredForReplay(t *testing.T) {
 	rotate := flowReq{cookie: owner, header: map[string]string{"Idempotency-Key": "apikey-issue-rotate"}}
 	flowDo(t, ts, "POST", rotatePath, rotate).want(t, 200, "rotate")
 	flowDo(t, ts, "POST", rotatePath, rotate).want(t, 409, "rotate again with the same Idempotency-Key: the key is revoked now, not a replayed answer")
+
+	// chi matches an empty id to the rotate route too, so the layer leaves it
+	// alone: the handler refuses it, and the count below finds the refusal
+	// not kept.
+	emptyID := flowReq{cookie: owner, header: map[string]string{"Idempotency-Key": "apikey-issue-empty-id"}}
+	flowDo(t, ts, "POST", "/v1/api-keys//rotate", emptyID).want(t, 404, "rotate an empty id")
 
 	tx, err := db.BeginTx(context.Background(), postgres.TxBypass, "")
 	if err != nil {

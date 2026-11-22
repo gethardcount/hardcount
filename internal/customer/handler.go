@@ -558,7 +558,7 @@ func (h *Handler) PublicCostDashboardRoutes() chi.Router {
 
 // CostDashboardService is the narrow shape used by the public route
 // to compose the sanitized projection. Implemented by the cost-
-// dashboard assembler wired in router.go from the existing
+// dashboard assembler wired in wire.go from the existing
 // customer-usage service.
 type CostDashboardService interface {
 	GetByToken(ctx context.Context, token string) (any, error)

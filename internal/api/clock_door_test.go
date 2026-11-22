@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
-	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -65,12 +63,11 @@ func (c *doorServer) Now(ctx context.Context) time.Time {
 	return doorServerAt
 }
 
-// doorRig is the door on the built router, with fake record lookups and a
-// counting server clock (serverOf).
+// doorRig is the door, with fake record lookups and a counting server clock
+// (serverOf).
 func doorRig(t *testing.T, res *spyResolver) *clockDoor {
 	t.Helper()
 	return &clockDoor{
-		root:              newTestServer().router,
 		resolver:          res,
 		clock:             &doorServer{},
 		creditNoteInvoice: func(context.Context, string, string) (string, error) { return "inv_of_note", nil },
@@ -93,8 +90,8 @@ type seen struct {
 	header   http.Header
 }
 
-// through runs a request through the door to a handler that records what it
-// saw.
+// through runs a request through the root's record, its route found on the
+// built router, then the door, to a handler that records what it saw.
 func through(d *clockDoor, ctx context.Context, method, path string) seen {
 	var got seen
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -103,7 +100,7 @@ func through(d *clockDoor, ctx context.Context, method, path string) seen {
 		w.WriteHeader(http.StatusNoContent)
 	})
 	rec := httptest.NewRecorder()
-	d.Middleware(next).ServeHTTP(rec, httptest.NewRequest(method, path, nil).WithContext(ctx))
+	begin()(d.Middleware(next)).ServeHTTP(rec, httptest.NewRequest(method, path, nil).WithContext(ctx))
 	got.code, got.body, got.header = rec.Code, rec.Body.String(), rec.Header()
 	return got
 }
@@ -308,66 +305,6 @@ func TestClockDoor_EveryRoutePassesThroughIt(t *testing.T) {
 	}
 }
 
-// mwName is a middleware's function name, for finding it in a route's chain.
-func mwName(m func(http.Handler) http.Handler) string {
-	if fn := runtime.FuncForPC(reflect.ValueOf(m).Pointer()); fn != nil {
-		return fn.Name()
-	}
-	return ""
-}
-
-// chainIndex is the position in mws of the first middleware whose name
-// contains name, or -1.
-func chainIndex(mws []func(http.Handler) http.Handler, name string) int {
-	for i, m := range mws {
-		if strings.Contains(mwName(m), name) {
-			return i
-		}
-	}
-	return -1
-}
-
-const (
-	authMW        = "session.RequireCaller."
-	timeoutMW     = "middleware.Timeout."
-	idempotencyMW = "middleware.Idempotency."
-	doorMW        = "clockDoor).Middleware"
-)
-
-// The door is the last of its group's middleware: after authentication, so
-// it reads the named record as the caller's tenant and mode; after the
-// timeout, so its lookups are bounded; and after Idempotency, so a replay
-// costs no lookup and the door's 503 is not stored. On the /v1 group all
-// four are there, in that order.
-func TestClockDoor_ComesAfterAuthenticationIdempotencyAndTheTimeout(t *testing.T) {
-	var wrong []string
-	v1 := false
-	if err := chi.Walk(newTestServer().router, func(method, route string, _ http.Handler, mws ...func(http.Handler) http.Handler) error {
-		door := chainIndex(mws, doorMW)
-		for _, before := range []string{authMW, timeoutMW, idempotencyMW} {
-			if i := chainIndex(mws, before); i >= 0 && i > door {
-				wrong = append(wrong, method+" "+route+": the door comes before "+before)
-			}
-		}
-		if method == "POST" && canonicalRoute(route) == "/v1/subscriptions/{id}/cancel" {
-			v1 = true
-			a, i, to := chainIndex(mws, authMW), chainIndex(mws, idempotencyMW), chainIndex(mws, timeoutMW)
-			if a < 0 || i < 0 || to < 0 || door < 0 || a >= i || i >= to || to >= door {
-				wrong = append(wrong, fmt.Sprintf("%s %s: authentication %d, Idempotency %d, timeout %d, door %d; want them in that order", method, route, a, i, to, door))
-			}
-		}
-		return nil
-	}); err != nil {
-		t.Fatalf("walk: %v", err)
-	}
-	if !v1 {
-		t.Fatal("POST /v1/subscriptions/{id}/cancel not found: the /v1 group was not checked")
-	}
-	if len(wrong) > 0 {
-		t.Errorf("the door is out of place:\n  %s", strings.Join(wrong, "\n  "))
-	}
-}
-
 // Every route whose entry reads a record is authenticated, so the door reads
 // it as the caller's tenant and mode. A route with no authentication and an
 // entry that reads a record would read with no tenant and no mode.
@@ -375,7 +312,7 @@ func TestClockDoor_EveryRouteThatReadsARecordIsAuthenticated(t *testing.T) {
 	var open []string
 	reading := 0
 	if err := chi.Walk(newTestServer().router, func(method, route string, _ http.Handler, mws ...func(http.Handler) http.Handler) error {
-		switch clockRoutes[routeKey{Method: method, Pattern: canonicalRoute(route)}].Source {
+		switch routeTable[routeKey{Method: method, Pattern: canonicalRoute(route)}].clock.Source {
 		case clockOfCustomer, clockOfSubscription, clockOfInvoice, clockOfCreditNote, clockOfDunningRun:
 			reading++
 			if chainIndex(mws, authMW) < 0 {
@@ -394,34 +331,6 @@ func TestClockDoor_EveryRouteThatReadsARecordIsAuthenticated(t *testing.T) {
 	}
 }
 
-// Every entry that reads a record names a parameter its route's pattern has.
-// One that did not would read an empty id, which the door decides as real
-// time: a record on a clock would silently run at real time.
-func TestClockDoor_EveryRecordEntryNamesAParameterOfItsRoute(t *testing.T) {
-	var wrong []string
-	reading := 0
-	if err := chi.Walk(newTestServer().router, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
-		pattern := canonicalRoute(route)
-		entry := clockRoutes[routeKey{Method: method, Pattern: pattern}]
-		switch entry.Source {
-		case clockOfCustomer, clockOfSubscription, clockOfInvoice, clockOfCreditNote, clockOfDunningRun:
-			reading++
-			if !strings.Contains(pattern, "{"+entry.Param+"}") {
-				wrong = append(wrong, method+" "+pattern+": no {"+entry.Param+"}")
-			}
-		}
-		return nil
-	}); err != nil {
-		t.Fatalf("walk: %v", err)
-	}
-	if reading == 0 {
-		t.Fatal("no route reads a record: the walk found none of the table's entries")
-	}
-	if len(wrong) > 0 {
-		t.Errorf("%d entries name a parameter their route does not have:\n  %s", len(wrong), strings.Join(wrong, "\n  "))
-	}
-}
-
 // A route table entry whose source the door does not know is a fault in the
 // table or the door: pinFor says so, and the door answers 500, never the 503
 // that says a clock could not be read, and binds nothing.
@@ -431,9 +340,15 @@ func TestClockDoor_AnUnknownClockSourceIsAServerFault(t *testing.T) {
 		t.Fatalf("pinFor: %v; want errUnknownClockSource", err)
 	}
 	key := routeKey{Method: "GET", Pattern: "/v1/whoami"}
-	saved := clockRoutes[key]
-	clockRoutes[key] = clockDecl{Source: clockSource(99)}
-	t.Cleanup(func() { clockRoutes[key] = saved })
+	saved, had := routeTable[key]
+	routeTable[key] = routeDecl{clock: clockDecl{Source: clockSource(99)}}
+	t.Cleanup(func() {
+		if had {
+			routeTable[key] = saved
+		} else {
+			delete(routeTable, key)
+		}
+	})
 	got := through(d, auth.WithTenantID(postgres.WithLivemode(context.Background(), false), "t1"), "GET", "/v1/whoami")
 	if got.reached || got.code != http.StatusInternalServerError || strings.Contains(got.body, "test_clock_unavailable") || serverOf(d).reads != 0 {
 		t.Errorf("reached %v, code %d, body %s, %d server reads; want not reached, 500, no clock refusal, no read",

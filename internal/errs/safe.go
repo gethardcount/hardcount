@@ -7,32 +7,20 @@ import (
 	"strings"
 )
 
-// SafeMessageError is the opt-in marker for an error type that owns its
-// operator-safe rendering (ADR-026).
-//
-// An error type implements it when it wraps a message that was categorized
-// upstream and is already curated for the operator. Examples are a Stripe
-// card decline with its decline_code and a classified tax provider failure.
-// The type then bypasses the default generic sanitizing. SanitizeForOperator
-// finds it with errors.As and returns OperatorSafeMessage() instead.
-//
-// Never implement it on an error that includes raw provider strings,
-// database internals, panic stacks or anything else unsafe for an operator.
-// Those are exactly what the boundary sanitizer exists to suppress.
-//
-// It lives in internal/errs so that code outside HTTP can use the same
-// dispatch: the test-clock catch-up orchestrator, scheduler error rollups
-// and audit-log writers. respond.SafeMessageError is an alias of it.
+// SafeMessageError is an error that carries its own text for an operator,
+// such as a Stripe card decline with its decline code (ADR-026).
+// SanitizeForOperator, and respond.FromError for an error with no kind, show
+// OperatorSafeMessage in place of Error(). Return from it only text already
+// fit for an operator: never a raw
+// provider string, SQL, a stack or a panic.
 type SafeMessageError interface {
 	error
 	OperatorSafeMessage() string
 }
 
-// genericInternalError is the operator-grade fallback when an error has no
-// SafeMessageError implementation and contains internal-only markers. The
-// request_id lets support trace the full diagnostic in slog. The capital on
-// the first word is intended, because this string lands in dashboard
-// banners and toast bodies.
+// genericInternalError is what an operator sees in place of an error with an
+// internal marker. The request ID lets support find the error in the log.
+// It is capitalized because the dashboard shows it as a sentence.
 func genericInternalError(requestID string) string {
 	if requestID == "" {
 		return "An internal error occurred. See server logs for details."
@@ -40,28 +28,18 @@ func genericInternalError(requestID string) string {
 	return fmt.Sprintf("An internal error occurred. Reference: %s", requestID)
 }
 
-// SanitizeForOperator returns an operator-safe rendering of err, for any
-// boundary where the error message lands in the dashboard, in a column the
-// dashboard reads, or in an HTTP body (ADR-026).
+// SanitizeForOperator returns the text of err that an operator may see, in
+// the dashboard or in a column it reads (ADR-026), with personal data
+// scrubbed (Scrub):
 //
-// It works in this order:
+//  1. The OperatorSafeMessage of a SafeMessageError in err's chain.
+//  2. Else, when the message holds an internal marker (hasInternalMarkers),
+//     "An internal error occurred." with requestID as its reference, or a
+//     pointer to the server log when requestID is empty. The caller logs
+//     err.
+//  3. Else the message itself.
 //
-//  1. If err, or any error in its chain, implements SafeMessageError,
-//     return OperatorSafeMessage(). The error type opted into curated
-//     rendering.
-//  2. Otherwise, scan the message for internal-only markers: SQLSTATE
-//     codes, Go file:line frames, panic markers and raw stack traces. If
-//     any is present, return the generic "internal error reference:
-//     REQ-XYZ" message. The caller's job is to log the full diagnostic to
-//     slog, for support to trace.
-//  3. Otherwise, treat the message as operator-safe (Stripe text, domain
-//     validation errors with curated copy and so on). Pass it through after
-//     Scrub redacts personal data (PII).
-//
-// The third branch is conservative on purpose: there is no allow-list of
-// known-safe patterns. The marker check in step 2 is the filter that does
-// the work. Anything shaped like a SQLSTATE, a file:line or a panic is
-// internal by construction. Tests pin the marker set.
+// It returns "" for a nil err.
 func SanitizeForOperator(err error, requestID string) string {
 	if err == nil {
 		return ""
@@ -77,30 +55,15 @@ func SanitizeForOperator(err error, requestID string) string {
 	return Scrub(msg)
 }
 
-// SummarizeForOperator builds a short operator-grade summary of a batch of
-// errors, usually the per-row errors of a multi-row catch-up phase or a
-// scheduler tick. It returns "" when errs is empty.
+// SummarizeForOperator joins the operator text of a batch of errors, such as
+// a scheduler tick's per-row errors, with "; ". Each error gives what
+// SanitizeForOperator would, except that the errors with an internal marker
+// are counted into one last part, "N internal error(s)", with requestID as
+// its reference when it is set. Nil errors are skipped; it returns "" for an
+// empty batch. It never logs: the caller logs the errors. For example, one
+// safe error and two with a marker give:
 //
-// The output, by category:
-//
-//   - Each error that implements SafeMessageError is included verbatim
-//     after Scrub, joined with "; ".
-//   - All others are counted, and appear as "N internal error(s)" with the
-//     request_id reference.
-//
-// The full diagnostic for every error stays in slog. That is the caller's
-// job: SummarizeForOperator never logs.
-//
-// Examples:
-//
-//	SummarizeForOperator([err1_safe, err2_internal, err3_internal], "REQ-1")
-//	  → "stripe tax: customer has no country on billing profile; 2 internal error(s). Reference: REQ-1"
-//
-//	SummarizeForOperator([err_internal, err_internal], "REQ-1")
-//	  → "2 internal error(s). Reference: REQ-1"
-//
-//	SummarizeForOperator([err_safe], "")
-//	  → "stripe tax: customer has no country on billing profile"
+//	stripe tax: customer has no country on billing profile; 2 internal error(s). Reference: REQ-1
 func SummarizeForOperator(errs []error, requestID string) string {
 	if len(errs) == 0 {
 		return ""
@@ -121,8 +84,6 @@ func SummarizeForOperator(errs []error, requestID string) string {
 			internal++
 			continue
 		}
-		// A plain message with no internal markers is operator-safe by
-		// default. Pass it through after the PII scrub.
 		safe = append(safe, Scrub(msg))
 	}
 	parts := safe
@@ -136,11 +97,10 @@ func SummarizeForOperator(errs []error, requestID string) string {
 	return strings.Join(parts, "; ")
 }
 
-// hasInternalMarkers reports whether msg contains a pattern that means
-// something only to engineers and support, never to operators: SQLSTATE
-// codes, Go panic markers, source file:line references and stack-trace frame
-// markers. It is shared so that SanitizeForOperator and SummarizeForOperator
-// stay in sync.
+// hasInternalMarkers reports whether msg holds text meant for engineers, not
+// operators: a SQLSTATE code, a Go file:line, "runtime error:", "panic:" or
+// "goroutine ". There is no list of safe text: a message without a marker is
+// shown.
 func hasInternalMarkers(msg string) bool {
 	return reSQLState.MatchString(msg) ||
 		reGoFileLine.MatchString(msg) ||

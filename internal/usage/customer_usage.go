@@ -35,7 +35,7 @@ type PricingReader interface {
 }
 
 // UsageRater prices a subscription's usage the way billing does (ADR-130
-// §10). Implemented by *billing.Engine, wired in router.go: the rater lives
+// §10). Implemented by *billing.Engine, wired in wire.go: the rater lives
 // in billing, so the customer page prices usage the way the invoice does.
 type UsageRater interface {
 	// RateCurrentPeriod is the subscription's whole current period as its

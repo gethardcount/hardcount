@@ -61,7 +61,7 @@ type retryResponse struct {
 func (r *retryRig) retry(t *testing.T, subID string) (int, retryResponse, string) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/"+subID+"/retry-billing", nil)
-	req = req.WithContext(auth.WithKeyID(auth.WithTenantID(r.ctx, r.tenantID), retryKeyID))
+	req = req.WithContext(auth.WithCaller(r.ctx, auth.Caller{TenantID: r.tenantID, KeyID: retryKeyID}))
 	rec := httptest.NewRecorder()
 	r.router.ServeHTTP(rec, req)
 	var out retryResponse

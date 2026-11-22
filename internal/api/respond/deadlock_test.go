@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
 // A request that lost a database deadlock, or whose lock wait Postgres ended,
@@ -21,10 +22,7 @@ import (
 // nothing of the cause, and the raw error goes to the log at WARN with the
 // route, on a line that names which of the two it was. Every other error
 // passes through unchanged.
-//
-// Mutation-verify: drop the 55P03 branch of ConcurrentChangeAsConflict and
-// lock_timeout fails (500, no WARN line).
-func TestConcurrentChangeAsConflict(t *testing.T) {
+func TestConcurrentChangeAsConflict_DeadlockAndLockWaitAnswer409(t *testing.T) {
 	deadlock := fmt.Errorf("cancel proration relief: %w", &pgconn.PgError{
 		Code:    "40P01",
 		Message: "deadlock detected",
@@ -39,6 +37,9 @@ func TestConcurrentChangeAsConflict(t *testing.T) {
 	// ConcurrentChangeAsConflict and FromError, as a handler does.
 	serve := func(err error) *httptest.ResponseRecorder {
 		router := chi.NewRouter()
+		router.Use(request.Begin(func(r *http.Request) request.Route {
+			return request.Route{Method: r.Method, Pattern: router.Find(chi.NewRouteContext(), r.Method, r.URL.Path)}
+		}))
 		router.Post("/v1/things/{id}", func(w http.ResponseWriter, r *http.Request) {
 			FromError(w, r, ConcurrentChangeAsConflict(r, err), "thing")
 		})
@@ -76,8 +77,8 @@ func TestConcurrentChangeAsConflict(t *testing.T) {
 				t.Fatalf("status: got %d, want 409", rec.Code)
 			}
 			body := decodeError(t, rec)
-			if body.Type != "invalid_request_error" || body.Code != CodeConcurrentChange {
-				t.Errorf("body: got %+v, want invalid_request_error %s", body, CodeConcurrentChange)
+			if body.Type != "invalid_request_error" || body.Code != "concurrent_change" {
+				t.Errorf("body: got %+v, want invalid_request_error concurrent_change", body)
 			}
 			if body.Message != concurrentChangeMessage {
 				t.Errorf("message: got %q, want %q", body.Message, concurrentChangeMessage)
@@ -103,8 +104,8 @@ func TestConcurrentChangeAsConflict(t *testing.T) {
 					t.Errorf("log attr detail: got %q, want the deadlock's detail (who waited for whom)", got)
 				}
 			}
-			if entry["route"] != "/v1/things/{id}" {
-				t.Errorf("log attr route: got %v, want /v1/things/{id}", entry["route"])
+			if entry["path"] != "/v1/things/{id}" {
+				t.Errorf("log attr path: got %v, want /v1/things/{id}", entry["path"])
 			}
 		})
 	}

@@ -20,7 +20,8 @@ func NewHandler(svc *Service) *Handler {
 
 // Routes returns the key routes. The router mounts them behind
 // session.RequireCaller, which puts the caller's tenant and mode in ctx, and
-// auth.Require(PermAPIKeyWrite), which refuses an ingest key.
+// RequirePermission, whose route table asks apikey:write of every one, which
+// refuses an ingest key.
 func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Post("/", h.create)

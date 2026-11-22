@@ -53,8 +53,8 @@ func (h *Handler) Routes() chi.Router {
 }
 
 // EventRoutes serves an event's deliveries and its replay. The live stream is
-// mounted separately (StreamHandler), outside the /v1 block's 30s timeout,
-// which would cut a long-lived stream.
+// mounted separately (StreamHandler), in a group with no timeout, which
+// would cut a long-lived stream.
 func (h *Handler) EventRoutes() chi.Router {
 	r := chi.NewRouter()
 	r.Get("/{id}/deliveries", h.listDeliveriesEnriched)

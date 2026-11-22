@@ -15,6 +15,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/gethardcount/hardcount/internal/session"
 	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/webhook"
@@ -46,11 +47,15 @@ func newStreamRig(t *testing.T, db, authDB *postgres.DB) *streamRig {
 	const email, password = "owner@stream-credential.test", "stream-credential-pw-12"
 	tenantID := flowStr(flowBootstrap(t, api, "stream-credential-bootstrap", email, password), "tenant", "id")
 
+	sessions := session.NewService(session.NewPostgresStore(authDB))
+	keys := auth.NewService(authDB, audit.NewLogger(authDB))
 	r := chi.NewRouter()
-	noRateLimit := func(next http.Handler) http.Handler { return next }
-	r.Route("/v1/webhook_events/stream", eventStreamRoute(webhook.NewHandler(srv.WebhookOutSvc),
-		session.NewService(session.NewPostgresStore(authDB)), auth.NewService(authDB, audit.NewLogger(authDB)),
-		noRateLimit, noRateLimit, testStreamInterval))
+	// The root's record, then the /v1 group's authentication, as router.go
+	// mounts the stream; its permission check is left out, as the session and
+	// the secret key here both hold apikey:read.
+	r.Use(requesttest.Root)
+	r.Use(session.RequireCaller(sessions, keys))
+	r.Route("/v1/webhook_events/stream", eventStreamRoute(webhook.NewHandler(srv.WebhookOutSvc), sessions, keys, testStreamInterval))
 	stream := httptest.NewServer(r)
 	t.Cleanup(stream.Close)
 

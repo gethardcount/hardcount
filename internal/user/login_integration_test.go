@@ -18,6 +18,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/gethardcount/hardcount/internal/session"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
@@ -55,11 +56,11 @@ func newLoginIT(t *testing.T) loginIT {
 // auditor. throttle may be nil.
 func (it loginIT) handler(store Store, auditor AuditTxWriter, throttle *LoginThrottle) http.Handler {
 	svc := NewService(store, clock.Real(), it.sessSvc, auditor)
-	h := NewHandler(svc, session.CookieConfig{Path: "/"}, stubEmailSender{}, "", false)
+	h := NewHandler(svc, session.CookieConfig{}, stubEmailSender{}, "", false)
 	if throttle != nil {
 		h.SetLoginThrottle(throttle)
 	}
-	return h.Routes()
+	return requesttest.Root(h.Routes())
 }
 
 // signIn posts the sign-in form from loginITAddress, with the session
@@ -313,7 +314,7 @@ func TestLogin_EndsTheSessionTheBrowserHeld(t *testing.T) {
 		t.Error("last_login_at is unset after a sign-in")
 	}
 
-	rr = signIn(h, loginITPassword, "not-a-session-id")
+	rr = signIn(h, loginITPassword, strings.Repeat("ab", 32))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("sign-in with an unknown cookie: status %d, want 200; body %s", rr.Code, rr.Body.String())
 	}

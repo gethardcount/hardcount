@@ -13,8 +13,8 @@ import (
 )
 
 // Every error the API answers goes through internal/api/respond, so it has
-// one shape: {"error": {"type", "code", "message", "param", "request_id"}},
-// the Hardcount-Request-Id header and Content-Type application/json.
+// one shape: {"error": {"type", "code", "message", "param", "request_id"}}
+// and Content-Type application/json.
 //
 // This finds, in non-test code under internal/ and cmd/, every place that
 // writes a response status or body by hand:
@@ -46,7 +46,7 @@ var responseWriteExceptions = map[string]string{
 
 	// The readiness probe: a load balancer reads the status, and the body
 	// names the failing check.
-	"internal/api/router.go handleDeepHealth": "readiness probe: 503 with {status, checks}",
+	"internal/api/health.go handleDeepHealth": "readiness probe: 503 with {status, checks}",
 
 	// Success bodies that are not JSON.
 	"internal/creditnote/handler.go Handler.downloadPDF":    "PDF body",

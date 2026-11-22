@@ -37,11 +37,11 @@ A key's **lookup prefix** is its type prefix and the first 12 hex
 characters. The key list shows it, and the API returns it as `key_prefix`,
 so you can tell keys apart without the whole key.
 
-Hardcount stores only a salted SHA-256 hash of each key, never the key
-itself, so the full key is shown only once, when it is made. Keys that the
-setup command (`hardcount-bootstrap` or `POST /v1/bootstrap`) made in v0.9.3
-or earlier have no salt. They still work, and rotating one replaces it with
-a salted key.
+Hardcount stores only a SHA-256 hash of each key, never the key itself, so
+the full key is shown only once, when it is made. Each key's hash has its own
+random salt, except keys that the setup command (`hardcount-bootstrap` or
+`POST /v1/bootstrap`) made in v0.9.3 or earlier, which have none. They still
+work, and rotating one replaces it with a salted key.
 
 **The mode is fixed by the key.** Each account has two separate sets of
 data, test and live. A test key reads and writes only test data, and a live
@@ -68,7 +68,7 @@ create a live secret key. Only a session can:
 
 - manage team members (`/v1/members`);
 - change the account settings (`PUT /v1/settings`), which test and live
-  mode share. A key can read them;
+  mode share. A secret key can read them;
 - send the test email (`POST /v1/settings/email/test`), which goes to the
   signed-in member's own address.
 
@@ -91,12 +91,12 @@ without touching the others, and each has its own
   and API keys. It can read the account settings. Rotate it right away,
   with **Now** ([Rotate a key](../api-keys.md#rotate-a-key)).
 - **A usage-only key** can send usage for any customer in its mode. Usage
-  can raise a bill, and a negative quantity can lower one. It cannot read
-  anything, except an event it sends again: a repeated `idempotency_key`
-  answers with the first event. Rotate it too.
+  can raise a bill, and a negative quantity can lower one. It can read
+  `GET /v1/whoami`. A repeated `idempotency_key` answers with the event
+  that first used that key in its mode. Rotate it too.
 
-A leaked test key exposes test data and the account settings, which both
-modes share. Test mode cannot charge a real card.
+A leaked secret test key exposes test data and the account settings, which
+both modes share. Test mode cannot charge a real card.
 
 The account's Audit Log shows who created, rotated and revoked each key, and
 when.
@@ -139,9 +139,9 @@ takes and does.
 | `DELETE` | `/v1/api-keys/{id}` | [Revoke a key](../api-keys.md#revoke-a-key) |
 
 Each key's record has `id`, `name`, `key_type`, `status`, `livemode`,
-`key_prefix`, `created_at`, and, when set, `expires_at`, `revoked_at` and
-`last_used_at`. `last_used_at` is updated at most once a minute per server,
-so it can lag a little.
+`key_prefix`, `tenant_id`, `created_at`, and, when set, `expires_at`,
+`revoked_at` and `last_used_at`. `last_used_at` is updated at most once a
+minute per server, so it can lag a little.
 
 ### A key's status
 

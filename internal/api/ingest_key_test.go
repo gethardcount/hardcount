@@ -7,9 +7,6 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
-	"reflect"
-	"regexp"
-	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -21,6 +18,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/integrations/litellm"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/session"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -143,31 +141,18 @@ var ingestKeyRoutes = map[string]bool{
 	"POST /v1/meters":                    false,
 }
 
-// middlewareName finds a middleware's constructor in its closure's runtime
-// name (".../auth.Require.func1", or ".../auth.Require.1" when inlined):
-// chi.Walk reports middlewares as bare funcs. Any package's Require matches.
-var middlewareName = regexp.MustCompile(`[./](RequireCaller|Require|RequireMethod|RequireSession)\.(?:func)?\d+$`)
-
-// middlewareKind returns which of those constructors made mw, or "".
-func middlewareKind(mw func(http.Handler) http.Handler) string {
-	m := middlewareName.FindStringSubmatch(runtime.FuncForPC(reflect.ValueOf(mw).Pointer()).Name())
-	if m == nil {
-		return ""
-	}
-	return m[1]
-}
-
 // TestIngestKey_RefusedOnEveryRouteButUsage walks the live router. On every
-// route that takes an API key, it runs the route's permission gates (the
-// auth.Require, RequireMethod and RequireSession middlewares chi.Walk
-// reports for it) with an ingest key's principal, and checks the gates let
-// it through only on the routes ingestKeyRoutes marks true. Everywhere else
-// the answer is the ordinary missing-permission 403. A route with no gate
-// at all lets the key through and fails here unless it is listed, so a new
-// route cannot open to ingest keys by forgetting its permission.
+// route that takes an API key, it runs the route's permission check (the
+// auth.RequirePermission step chi.Walk reports for it, which reads the route
+// table) as an ingest key, and checks it lets the key through only on the
+// routes ingestKeyRoutes marks true. Everywhere else the answer is the
+// ordinary missing-permission 403. A route open to any caller lets the key
+// through and fails here unless it is listed, so a new route cannot open to
+// ingest keys by naming the wrong permission.
 //
-// It also checks that a dashboard session passes every gate, and a secret
-// key every gate but a session-only one.
+// It also checks that a dashboard session passes every check, and a secret
+// key every check but a session-only one, which answers it the session-only
+// 403.
 //
 // Mutation: give the ingest key any other permission (usage:read, say), or
 // gate the usage routes on usage:write again, and this fails.
@@ -182,30 +167,37 @@ func TestIngestKey_RefusedOnEveryRouteButUsage(t *testing.T) {
 			return nil
 		}
 		route = canonicalRoute(route)
-		authed, sessionOnly := false, false
+		authed := false
 		var gates []func(http.Handler) http.Handler
-		for _, mw := range mws {
-			switch middlewareKind(mw) {
-			case "RequireCaller":
+		for i, h := range handlersOf(mws) {
+			switch h.(type) {
+			case session.CallerRequired:
 				authed = true
-			case "RequireSession":
-				sessionOnly = true
-				gates = append(gates, mw)
-			case "Require", "RequireMethod":
-				gates = append(gates, mw)
+			case auth.PermissionRequired:
+				gates = append(gates, mws[i])
 			}
 		}
 		if !authed {
 			if len(gates) > 0 {
-				t.Errorf("%s %s has a permission gate but no API-key auth before it", method, route)
+				t.Errorf("%s %s has a permission check but no API-key auth before it", method, route)
 			}
 			return nil // a public route: no API key is read
 		}
+		sessionOnly := routeTable[routeKey{Method: method, Pattern: route}].access.Session != ""
 		key := method + " " + route
 		seen[key] = true
 		checked++
 
-		for _, kt := range []auth.KeyType{auth.KeyTypeIngest, auth.KeyTypeSecret, auth.KeyTypeSession} {
+		const tenant = "hc_ten_gate"
+		for _, c := range []struct {
+			name   string
+			caller auth.Caller
+		}{
+			{"ingest key", auth.Caller{TenantID: tenant, KeyID: "hc_key_ingest", KeyType: auth.KeyTypeIngest}},
+			{"secret key", auth.Caller{TenantID: tenant, KeyID: "hc_key_secret", KeyType: auth.KeyTypeSecret}},
+			{"session", auth.Caller{TenantID: tenant, UserID: "hc_usr_gate"}},
+		} {
+			ingest, secret := c.caller.KeyType == auth.KeyTypeIngest, c.caller.KeyType == auth.KeyTypeSecret
 			reached := false
 			var h http.Handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 				reached = true
@@ -214,17 +206,18 @@ func TestIngestKey_RefusedOnEveryRouteButUsage(t *testing.T) {
 			for i := len(gates) - 1; i >= 0; i-- {
 				h = gates[i](h)
 			}
-			ctx := auth.WithKeyType(auth.WithTenantID(postgres.WithLivemode(context.Background(), false), "hc_ten_gate"), kt)
+			ctx := auth.WithCaller(postgres.WithLivemode(context.Background(), false), c.caller)
 			req := httptest.NewRequest(method, probePath(route), nil).WithContext(ctx)
 			rec := httptest.NewRecorder()
-			h.ServeHTTP(rec, req)
+			// The check reads the route from the request's record.
+			begin()(h).ServeHTTP(rec, req)
 
 			switch {
-			case kt == auth.KeyTypeIngest && ingestKeyRoutes[key]:
+			case ingest && ingestKeyRoutes[key]:
 				if !reached {
 					t.Errorf("%s: the ingest key is refused (%d), but it must reach this route", key, rec.Code)
 				}
-			case kt == auth.KeyTypeIngest:
+			case ingest:
 				body := rec.Body.String()
 				if reached || rec.Code != http.StatusForbidden {
 					t.Errorf("%s: the ingest key got %d (reached=%v), want 403", key, rec.Code, reached)
@@ -232,13 +225,15 @@ func TestIngestKey_RefusedOnEveryRouteButUsage(t *testing.T) {
 					sessionOnly && strings.Contains(body, "requires a dashboard session"); !missingPerm && !sessionNeeded {
 					t.Errorf("%s: the ingest key's 403 says %s, want the missing-permission message", key, body)
 				}
-			case kt == auth.KeyTypeSecret && sessionOnly:
+			case secret && sessionOnly:
 				// /v1/members and PUT /v1/settings take only a dashboard
-				// session. TestE2E_Settings_ChangeTakesDashboardSession checks
-				// that a secret key is refused on PUT /v1/settings.
+				// session.
+				if reached || rec.Code != http.StatusForbidden || !strings.Contains(rec.Body.String(), "requires a dashboard session") {
+					t.Errorf("%s: a secret key got %d (reached=%v) %s, want the session-only 403", key, rec.Code, reached, rec.Body.String())
+				}
 			default:
 				if !reached {
-					t.Errorf("%s: a %s principal is refused (%d), want it let through", key, kt, rec.Code)
+					t.Errorf("%s: a %s is refused (%d), want it let through", key, c.name, rec.Code)
 				}
 			}
 		}

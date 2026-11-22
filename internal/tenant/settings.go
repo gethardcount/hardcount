@@ -343,7 +343,7 @@ type SettingsHandler struct {
 // SettingsAuditRecorder is the narrow audit surface the settings handler
 // needs — declared here so internal/tenant stays decoupled from
 // internal/audit. Production wires *audit.Logger via SetAuditLogger in
-// router.go. Optional: nil = NO audit row at all. There is no longer a fallback:
+// wire.go. Optional: nil = NO audit row at all. There is no longer a fallback:
 // the generic middleware catch-all that used to record "a PUT happened" was
 // deleted (ADR-090), and its replacement is a PURE OBSERVER that reports an
 // uncovered mutation rather than writing one. A nil recorder here means the
@@ -364,13 +364,12 @@ func NewSettingsHandler(store *SettingsStore) *SettingsHandler {
 // metadata={"path":"/v1/settings"} and no record of WHAT changed.
 func (h *SettingsHandler) SetAuditLogger(a SettingsAuditRecorder) { h.auditLogger = a }
 
-// Routes serves GET and PUT /v1/settings. update gates the PUT: the settings
-// are shared by test and live mode, so the router lets only a dashboard
-// session change them.
-func (h *SettingsHandler) Routes(update func(http.Handler) http.Handler) chi.Router {
+// Routes serves GET and PUT /v1/settings. The settings are shared by test and
+// live mode, so the API's route table lets only a dashboard session PUT them.
+func (h *SettingsHandler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Get("/", h.get)
-	r.With(update).Put("/", h.upsert)
+	r.Put("/", h.upsert)
 	return r
 }
 

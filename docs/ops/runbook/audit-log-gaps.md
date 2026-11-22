@@ -2,7 +2,7 @@
 
 Hardcount writes an audit row for changes made through the API and dashboard.
 Usage ingest and inbound webhooks are exempt (listed in
-`internal/api/audit_routes.go`). This page is for the two metrics that say a
+`internal/api/route_table.go`). This page is for the two metrics that say a
 row failed or is missing. Back to the [runbook index](index.md).
 
 ## Audit write errors
@@ -18,8 +18,9 @@ have:
 - **`outcome="mutation_refused"`: nothing is missing.** The audit write
   failed inside the business transaction, so the change was rolled back
   with it. The two succeed or fail together. This is an availability
-  problem, not an evidence problem: the customer got an error, and the log
-  is intact.
+  problem, not an evidence problem: writes are failing, and the log is
+  intact. A failed API request logs `unhandled error` with
+  `audit log (in-tx): insert` in its `error` field.
 
 **Check:**
 
@@ -46,7 +47,7 @@ have:
 increase: a route changed data and wrote no audit row.
 
 **Why:** the counter should be **flat zero**. Every route that changes data
-is declared in `internal/api/audit_routes.go` as `explicit` (it writes an
+is declared in `internal/api/route_table.go` as `explicit` (it writes an
 audit row) or `exempt` (it does not need to). A non-zero counter means one
 of three things, most likely first:
 
@@ -58,10 +59,10 @@ of three things, most likely first:
    audit row is needed.
 3. A new route shipped without a declaration. CI blocks this: the test that
    walks every route fails the build, unless someone edited the route list
-   (`audit_routes.go`) to silence it.
+   (`route_table.go`) to silence it.
 
-**Check:** find the route from the `route` label and the
-`UNCOVERED MUTATION` error log.
+**Check:** find the route from the counter's `route` label, or from the
+`path` field of the `UNCOVERED MUTATION` error log.
 
 **Fix:** fix the code path that skipped the audit row, or add the missing
 declaration. Do not add an exemption without recording what is being given

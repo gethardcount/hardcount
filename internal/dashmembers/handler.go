@@ -8,8 +8,8 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/gethardcount/hardcount/internal/api/respond"
-	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 	"github.com/gethardcount/hardcount/internal/session"
 )
 
@@ -123,12 +123,12 @@ type InviteReq struct {
 
 func (h *Handler) invite(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	tenantID := auth.TenantID(ctx)
+	c := auth.CallerOf(ctx)
 	var req InviteReq
 	if !respond.DecodeStrict(w, r, &req) {
 		return
 	}
-	inv, err := h.svc.Invite(ctx, tenantID, auth.UserID(ctx), req.Email)
+	inv, err := h.svc.Invite(ctx, c.TenantID, c.UserID, req.Email)
 	if err != nil {
 		respond.FromError(w, r, err, "invitation")
 		return
@@ -141,9 +141,9 @@ func (h *Handler) revokeInvitation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	tenantID := auth.TenantID(ctx)
+	c := auth.CallerOf(ctx)
 	id := chi.URLParam(r, "id")
-	if err := h.svc.Revoke(ctx, tenantID, auth.UserID(ctx), id); err != nil {
+	if err := h.svc.Revoke(ctx, c.TenantID, c.UserID, id); err != nil {
 		respond.FromError(w, r, err, "invitation")
 		return
 	}
@@ -155,9 +155,9 @@ func (h *Handler) removeMember(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	ctx := r.Context()
-	tenantID := auth.TenantID(ctx)
+	c := auth.CallerOf(ctx)
 	targetUserID := chi.URLParam(r, "userID")
-	if err := h.svc.RemoveMember(ctx, tenantID, auth.UserID(ctx), targetUserID); err != nil {
+	if err := h.svc.RemoveMember(ctx, c.TenantID, c.UserID, targetUserID); err != nil {
 		respond.FromError(w, r, err, "member")
 		return
 	}
@@ -209,7 +209,7 @@ func (h *Handler) acceptInvite(w http.ResponseWriter, r *http.Request) {
 		UserAgent: r.UserAgent(),
 		// The address TrustedClientIP resolved, never a forwarding header
 		// the client wrote.
-		IP: audit.ExtractClientIP(r),
+		IP: request.Of(r.Context()).ClientIP(),
 	})
 	if err != nil {
 		respond.FromError(w, r, err, "invitation")

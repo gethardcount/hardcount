@@ -12,6 +12,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/api/respond"
 	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/config"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/email"
 	"github.com/gethardcount/hardcount/internal/errs"
@@ -69,16 +70,15 @@ type emailSettingsAudit interface {
 	Log(ctx context.Context, tenantID, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
 }
 
-// emailLinkEnvs reads the link env vars once at boot: the same values the
+// emailLinkEnvs reports which link settings are set: the same values the
 // boot warnings report.
-func emailLinkEnvs(getenv func(string) string) []emailLinkEnv {
-	set := func(k string) bool { return strings.TrimSpace(getenv(k)) != "" }
+func emailLinkEnvs(srv config.Server) []emailLinkEnv {
 	return []emailLinkEnv{
-		{Env: "HOSTED_INVOICE_BASE_URL", Set: set("HOSTED_INVOICE_BASE_URL"),
+		{Env: "HOSTED_INVOICE_BASE_URL", Set: srv.HostedInvoiceBaseURL != "",
 			Effect: "Invoice, receipt and reminder emails go out without a link to view and pay the invoice, and the invoice page has no Pay button."},
-		{Env: "PAYMENT_UPDATE_URL", Set: set("PAYMENT_UPDATE_URL"),
+		{Env: "PAYMENT_UPDATE_URL", Set: srv.PaymentUpdateURL != "",
 			Effect: "Emails asking a customer to add a payment method can't be sent."},
-		{Env: "DASHBOARD_BASE_URL", Set: set("DASHBOARD_BASE_URL"),
+		{Env: "DASHBOARD_BASE_URL", Set: srv.DashboardBaseURL != "",
 			Effect: "Password reset and team invite emails can't be sent."},
 	}
 }
@@ -110,9 +110,9 @@ func (h *emailSettingsHandler) sendTest(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	ctx := r.Context()
-	tenantID := auth.TenantID(ctx)
-	userID := auth.UserID(ctx)
-	if auth.GetKeyType(ctx) != auth.KeyTypeSession || userID == "" {
+	caller := auth.CallerOf(ctx)
+	tenantID, userID := caller.TenantID, caller.UserID
+	if !caller.IsSession() {
 		// An API key has no address of its own to send to.
 		respond.Forbidden(w, r, "Sign in to the dashboard to send a test email. It goes to your own address.")
 		return
@@ -143,13 +143,13 @@ func (h *emailSettingsHandler) sendTest(w http.ResponseWriter, r *http.Request) 
 		// The SMTP error is the operator's own server talking (refused
 		// login, dial timeout, STARTTLS missing). It never carries the
 		// password, and it is the one thing that tells them what to fix.
-		respond.Error(w, r, http.StatusBadGateway, "api_error", "smtp_error",
+		respond.Error(w, r, http.StatusBadGateway, "smtp_error",
 			"The email server didn't accept the test email: "+err.Error())
 		return
 	}
 	// The recipient is the actor's own address, already on the row as the
 	// actor, so it is not repeated in metadata. audit is non-nil, because
-	// router.go passes this handler to audit.MustWired.
+	// wire.go passes this handler to audit.MustWired.
 	_ = h.audit.Log(ctx, tenantID, domain.AuditActionSend, "setting", "smtp", "SMTP test send",
 		map[string]any{"action": "test_email_sent"})
 	respond.JSON(w, r, http.StatusOK, map[string]string{"sent_to": to})

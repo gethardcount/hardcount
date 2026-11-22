@@ -201,7 +201,7 @@ func TestLogin_ThrottleFailsClosed(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = pool.Close() })
 	key, _ := ThrottleKey("")
-	th := NewLoginThrottle(postgres.NewDB(pool, time.Second), key, session.CookieConfig{Path: "/"})
+	th := NewLoginThrottle(postgres.NewDB(pool, time.Second), key, session.CookieConfig{})
 
 	hash, err := bcrypt.GenerateFromPassword([]byte("a-good-password-123"), bcrypt.MinCost)
 	if err != nil {

@@ -242,8 +242,8 @@ func previewResultFrom(r domain.Recipe) PreviewResult {
 }
 
 // InstantiateOptions holds the one-off options for Instantiate. CreatedBy
-// is the actor (operator email or API key ID) recorded on
-// recipe_instances.created_by for audit.
+// is the ID of the API key or dashboard user that installed the recipe,
+// recorded on recipe_instances.created_by.
 type InstantiateOptions struct {
 	CreatedBy string
 }

@@ -4,7 +4,6 @@ import (
 	"context"
 	"log/slog"
 
-	mw "github.com/gethardcount/hardcount/internal/api/middleware"
 	"github.com/gethardcount/hardcount/internal/platform/scheduler"
 )
 
@@ -80,9 +79,6 @@ func (r reconcilerFunc) Name() string { return r.name }
 func (r reconcilerFunc) Reconcile(ctx context.Context, batch int) (int, []error) {
 	return r.fn(ctx, batch)
 }
-
-// recordReconcilerSweep is the metric sink, a var so tests can observe it.
-var recordReconcilerSweep = mw.RecordReconcilerSweep
 
 // reconcilers returns the recovery sweeps in their deliberate tick order. THE
 // ORDER IS LOAD-BEARING: the tax reconcilers must run before auto-charge so a

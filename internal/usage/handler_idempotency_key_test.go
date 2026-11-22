@@ -1,10 +1,14 @@
 package usage
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strings"
 	"testing"
+
+	"github.com/gethardcount/hardcount/internal/api/respond"
+	"github.com/gethardcount/hardcount/internal/domain"
 )
 
 // #980: an event without an idempotency_key could not be told apart from its
@@ -163,5 +167,36 @@ func TestUsageIngest_IdempotencyKeyLengthLimit(t *testing.T) {
 				t.Errorf("422 does not name idempotency_key: %s", rr.Body.String())
 			}
 		})
+	}
+}
+
+// unreadableReplays is a store whose first events cannot be read back.
+type unreadableReplays struct{ *memStore }
+
+func (unreadableReplays) GetByIdempotencyKey(context.Context, string, string) (domain.UsageEvent, error) {
+	return domain.UsageEvent{}, errLookupInfra
+}
+
+// A replayed key whose first event cannot be read back answers 409
+// already_exists naming the key, and stores nothing twice.
+func TestUsageIngest_ReplayThatCannotBeReadIs409(t *testing.T) {
+	store := unreadableReplays{newMemStore()}
+	h := NewHandler(NewService(store), &stubCustomers{}, &stubMeters{})
+	if rr := usageReq(t, h.ingest, keyedEvent); rr.Code != http.StatusCreated {
+		t.Fatalf("first: status %d, want 201; body %s", rr.Code, rr.Body.String())
+	}
+	rr := usageReq(t, h.ingest, keyedEvent)
+	t.Logf("replay answer: %d %v %s", rr.Code, rr.Header(), rr.Body.String())
+	var resp respond.ErrorBody
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v; body %s", err, rr.Body.String())
+	}
+	got := resp.Error
+	if rr.Code != http.StatusConflict || got.Type != "invalid_request_error" || got.Code != "already_exists" ||
+		got.Message != `duplicate key: idempotency_key "evt_1"` || got.Param != "" {
+		t.Errorf("replay: %d %+v, want 409 invalid_request_error already_exists naming the key", rr.Code, got)
+	}
+	if len(store.events) != 1 {
+		t.Errorf("%d events stored, want 1", len(store.events))
 	}
 }

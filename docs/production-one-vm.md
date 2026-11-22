@@ -137,6 +137,20 @@ Caddy is a web server that gets a free HTTPS certificate from Let's Encrypt and 
 
 Hardcount reads each visitor's real address from the headers that Caddy and the stack's nginx forward. nginx is the web server container in front of the Hardcount API. Caddy's requests reach Hardcount through Docker's private network, which the Compose stack's default `TRUST_PROXY` already trusts, so leave that setting as it is.
 
+**A limit per address, ready to switch on.** The stack's nginx (`deploy/compose/nginx.conf`) carries two limits, switched off. Each counts per client address:
+- 2,000 requests a second, in bursts of up to 4,000, on usage ingest and the Stripe and Postmark webhooks. That is twice Hardcount's own ingest limit for one key, so one key sending from one address at the default rate meets Hardcount's limit first.
+- 100 a second, in bursts of up to 1,000, on the rest of the API, `/health` and the event stream included.
+
+They bound requests Hardcount refuses before counting them, such as ones with bad keys ([rate limits](api/rate-limits.md)).
+
+To switch them on:
+1. Uncomment the lines between each pair of `opt-in limit` markers in that file. The pair in the server block holds the real-address lines, set for Docker's networks, which Caddy comes through here. Without them, nginx sees Caddy's address for every visitor, and every client shares one bucket.
+2. Run `docker compose restart nginx`. The file is mounted on its own, and an editor that saves by replacing it leaves a running nginx on the old copy, which a reload would read again.
+
+- **Nothing in front of nginx:** leave the real-address pair commented. A client that comes in through Docker's port proxy can appear as the bridge gateway, inside those ranges, and then choose its own counted address with `X-Forwarded-For`.
+- **A CDN in front of Caddy:** add the CDN's address ranges beside Docker's, and set Caddy's `trusted_proxies` to the CDN, so Caddy passes the visitor's address on.
+- **Other effects:** switched on, the pair also changes the address that the `/metrics` allow list, the access log and `X-Real-IP` see.
+
 ## 4. Set the web addresses
 
 Emails and Stripe send people to pages in Hardcount: your customers to the invoice page and the page to add a card, and your team to the password-reset page. Hardcount needs your address to build those links. It never guesses the address from a request.

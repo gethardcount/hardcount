@@ -1,8 +1,10 @@
 package api
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -58,5 +60,21 @@ func TestCORSAllowedOrigins_WildcardSendsNoCredentials(t *testing.T) {
 	}
 	if got := rec.Header().Get("Access-Control-Allow-Credentials"); got != "" {
 		t.Errorf("Access-Control-Allow-Credentials = %q, want none with *", got)
+	}
+}
+
+// A server built without config.Load, as a test builds one, refuses a value it
+// cannot use as Load does, naming the setting, instead of dropping it.
+func TestNewServer_RefusesSettingsItCannotUse(t *testing.T) {
+	for setting, value := range map[string]string{"TRUST_PROXY": "10.0.0.0/8,bogus", "CORS_ALLOWED_ORIGINS": " , "} {
+		t.Run(setting, func(t *testing.T) {
+			t.Setenv(setting, value)
+			defer func() {
+				if r := recover(); r == nil || !strings.Contains(fmt.Sprint(r), setting) {
+					t.Errorf("%s=%q: NewServer recovered %v, want a refusal naming %s", setting, value, r, setting)
+				}
+			}()
+			newTestServer()
+		})
 	}
 }

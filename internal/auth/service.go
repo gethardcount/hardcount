@@ -1,7 +1,7 @@
-// Package auth issues and validates API keys, decides what each kind of
-// credential may do, and carries the authenticated caller in the request
-// context: its tenant, its key or user, and its kind of credential (a stored
-// key type, or a dashboard session).
+// Package auth issues API keys and decides who may do what. Service manages
+// the keys, and Handler serves their routes.
+// Caller is who a request acts as, a dashboard session or a key, and
+// RequirePermission refuses a caller what its route does not let it do.
 package auth
 
 import (
@@ -24,9 +24,9 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// Service creates, validates, rotates and revokes API keys. A change to a
-// key (create, revoke, rotate) and its audit row commit in one transaction,
-// or neither does.
+// Service creates, lists, validates, rotates and revokes API keys. A change
+// to a key (create, revoke, rotate) and its audit row commit in one
+// transaction, or neither does.
 type Service struct {
 	db       *postgres.DB
 	store    store
@@ -35,15 +35,11 @@ type Service struct {
 }
 
 // AuditWriter writes an audit row on the caller's transaction, so the change
-// and its row commit or roll back together. *audit.Logger is the one
-// implementation; auth cannot import audit, which imports auth for the actor.
+// and its row commit or roll back together. *audit.Logger implements it;
+// auth cannot import audit, which imports auth.
 type AuditWriter interface {
 	LogInTxFields(ctx context.Context, tx *sql.Tx, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
 }
-
-// lastUsedTouchInterval is the least time between writes of a key's
-// last_used_at: no auth decision reads it, and each write locks the key's row.
-const lastUsedTouchInterval = time.Minute
 
 // NewService returns a Service on db that writes each key change's audit row
 // with audit. It panics on a nil audit: a key change with no audit row would
@@ -55,48 +51,31 @@ func NewService(db *postgres.DB, audit AuditWriter) *Service {
 	return &Service{db: db, store: store{db: db}, audit: audit}
 }
 
-// inTenantTx runs fn in a transaction scoped to tenantID and the mode ctx
-// carries, and commits it when fn succeeds.
-func (s *Service) inTenantTx(ctx context.Context, tenantID string, fn func(tx *sql.Tx) error) error {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return err
-	}
-	defer postgres.Rollback(tx)
-	if err := fn(tx); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-// auditKeyChange writes the audit row of a change to key on tx: the key's id
-// and name, and metadata, which never holds the raw key.
+// auditKeyChange writes the audit row of a change to key on tx, labelled with
+// the key's id and name. metadata must never hold the key, its hash or its
+// salt.
 func (s *Service) auditKeyChange(ctx context.Context, tx *sql.Tx, action string, key domain.APIKey, metadata map[string]any) error {
 	return s.audit.LogInTxFields(ctx, tx, action, "api_key", key.ID, key.Name, metadata)
 }
 
-// lastUsedDebounce decides when a key's last_used_at is due for a write: at
-// most once per lastUsedTouchInterval per key, in this process.
-type lastUsedDebounce struct {
-	last sync.Map // key id → *atomic.Int64: unix nanoseconds of the last claimed write
-}
-
-// due reports whether a write of key id's last_used_at is due at now, and
-// claims it. Under a concurrent burst exactly one caller wins an interval:
-// the per-key time is advanced with a compare-and-swap, so simultaneous
-// requests make one write, not one each.
-func (d *lastUsedDebounce) due(id string, now time.Time) bool {
-	v, _ := d.last.LoadOrStore(id, new(atomic.Int64))
-	last := v.(*atomic.Int64)
-	prev := last.Load()
-	if prev != 0 && now.UnixNano()-prev < int64(lastUsedTouchInterval) {
-		return false
+// statusAt is the one rule for a key's status at now: revoked once revoked;
+// otherwise expired at or after its expires_at; otherwise active. Only an
+// active key authenticates (ValidateKey) or can be rotated (RotateKey).
+func statusAt(key domain.APIKey, now time.Time) string {
+	switch {
+	case key.RevokedAt != nil:
+		return domain.APIKeyStatusRevoked
+	case key.ExpiresAt != nil && !now.Before(*key.ExpiresAt):
+		return domain.APIKeyStatusExpired
+	default:
+		return domain.APIKeyStatusActive
 	}
-	return last.CompareAndSwap(prev, now.UnixNano())
 }
 
-// CreateKeyResult contains the key record and the raw key, which is shown
-// once.
+// CreateKeyResult is a new key and its raw value. No later answer can show
+// the raw value: the table holds only its hash, and the routes that answer
+// with it are withShowOnce (internal/api/route_table.go), so the
+// idempotency layer keeps no copy.
 type CreateKeyResult struct {
 	Key    domain.APIKey `json:"key"`
 	RawKey string        `json:"raw_key"`
@@ -114,7 +93,7 @@ type CreateKeyInput struct {
 // returns it with its raw value. checkCreateInput says what it refuses.
 func (s *Service) CreateKey(ctx context.Context, tenantID string, input CreateKeyInput) (CreateKeyResult, error) {
 	var result CreateKeyResult
-	err := s.inTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+	err := s.db.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
 		var err error
 		result, err = s.CreateKeyTx(ctx, tx, tenantID, input)
 		return err
@@ -125,15 +104,14 @@ func (s *Service) CreateKey(ctx context.Context, tenantID string, input CreateKe
 	return result, nil
 }
 
-// maxKeyNameLen is the most characters a new key's name may have.
-const maxKeyNameLen = 100
-
 // CreateKeyTx is CreateKey on the caller's transaction, for account setup
-// (tenant.RunBootstrap). tx must have app.tenant_id set to tenantID and
-// app.livemode set, and ctx must carry the same mode (postgres.WithLivemode):
-// the row and its audit row take their mode from tx, the key's prefix takes
-// it from ctx, and api_keys_prefix_shape_check refuses a key where they
-// differ.
+// (tenant.RunBootstrap). The caller gives the mode twice:
+//   - tx has app.tenant_id set to tenantID and app.livemode set: the row and
+//     its audit row take their mode from tx;
+//   - ctx carries the same mode (postgres.WithLivemode): the key's prefix
+//     takes it from ctx.
+//
+// api_keys_prefix_shape_check refuses a key where the two differ.
 func (s *Service) CreateKeyTx(ctx context.Context, tx *sql.Tx, tenantID string, input CreateKeyInput) (CreateKeyResult, error) {
 	k, err := checkCreateInput(input, time.Now().UTC())
 	if err != nil {
@@ -156,24 +134,13 @@ func (s *Service) CreateKeyTx(ctx context.Context, tx *sql.Tx, tenantID string, 
 	return result, nil
 }
 
-// statusAt is the one rule for a key's status at now: revoked once revoked;
-// otherwise expired at or after its expires_at; otherwise active. Only an
-// active key authenticates (ValidateKey) or can be rotated (RotateKey).
-func statusAt(key domain.APIKey, now time.Time) string {
-	switch {
-	case key.RevokedAt != nil:
-		return domain.APIKeyStatusRevoked
-	case key.ExpiresAt != nil && !now.Before(*key.ExpiresAt):
-		return domain.APIKeyStatusExpired
-	default:
-		return domain.APIKeyStatusActive
-	}
-}
+// maxKeyNameLen is the most characters a new key's name may have.
+const maxKeyNameLen = 100
 
 // checkCreateInput checks a create request and returns the key to mint: a
-// name of 1 to maxKeyNameLen characters once trimmed, a stored key type
-// (secret when empty), and an expires_at after now. Keys belong to the
-// account, outside any customer's test clock, so now is the wall clock.
+// name of 1 to maxKeyNameLen characters once trimmed, a key type (secret
+// when empty), and an expires_at after now. Keys belong to the account,
+// outside any customer's test clock, so now is the wall clock.
 func checkCreateInput(input CreateKeyInput, now time.Time) (CreateKeyInput, error) {
 	name := strings.TrimSpace(input.Name)
 	if name == "" {
@@ -187,11 +154,11 @@ func checkCreateInput(input CreateKeyInput, now time.Time) (CreateKeyInput, erro
 	if keyType == "" {
 		keyType = KeyTypeSecret
 	}
-	// An ingest key holds less than any caller that can mint one, so key_type
-	// cannot raise access.
-	if !slices.Contains(storedKeyTypes, keyType) {
-		names := make([]string, len(storedKeyTypes))
-		for i, kt := range storedKeyTypes {
+	// key_type only has to name a type: every caller that can mint a key
+	// holds at least what an ingest key holds, so no type raises access.
+	if !slices.Contains(keyTypes, keyType) {
+		names := make([]string, len(keyTypes))
+		for i, kt := range keyTypes {
 			names[i] = string(kt)
 		}
 		return CreateKeyInput{}, errs.Invalid("key_type", "must be one of: "+strings.Join(names, ", "))
@@ -225,16 +192,16 @@ func (s *Service) mintAndInsert(ctx context.Context, tx *sql.Tx, tenantID string
 	return CreateKeyResult{Key: key, RawKey: rawKey}, nil
 }
 
-// ErrInvalidKey means the key is not valid: bad format, unknown, wrong secret,
-// expired or revoked. Callers answer only this with 401. Any other ValidateKey
-// error is a store failure and gets a 503 (ADR-026).
+// ErrInvalidKey is ValidateKey's verdict that a string is not a usable key:
+// the only ValidateKey error that may answer 401. Any other is a store
+// failure that says nothing about the key (ADR-026).
 var ErrInvalidKey = errors.New("invalid api key")
 
-// ValidateKey returns the key rawKey is, or ErrInvalidKey. rawKey must have a
-// key's shape (lookupPrefix) and match a stored key's hash, and the key must
-// be active: scanKey sets its Status from statusAt when the row is read. It
-// writes the key's last_used_at at most once per lastUsedTouchInterval; a
-// failed write is logged and does not refuse the key.
+// ValidateKey returns the active key rawKey is. It returns ErrInvalidKey when
+// rawKey does not have a key's shape (lookupPrefix), matches no stored key,
+// or names a key that is not active (statusAt). It writes the key's
+// last_used_at as lastUsedDebounce allows; a failed write is logged and does
+// not refuse the key.
 func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey, error) {
 	lookup, ok := lookupPrefix(rawKey)
 	if !ok {
@@ -259,6 +226,8 @@ func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey
 		return domain.APIKey{}, ErrInvalidKey
 	}
 
+	// getByPrefix set Status as it read the row: scanKey, in postgres.go,
+	// applies statusAt at the server's clock.
 	if key.Status != domain.APIKeyStatusActive {
 		return domain.APIKey{}, fmt.Errorf("api key %s: %w", key.Status, ErrInvalidKey)
 	}
@@ -273,13 +242,37 @@ func (s *Service) ValidateKey(ctx context.Context, rawKey string) (domain.APIKey
 	return key, nil
 }
 
-// RevokeKey revokes the tenant's key with id and returns the revoked key. A
-// key that is not found, or already revoked, returns errs.ErrNotFound. A
-// caller may revoke the key it calls with, and the last key: an operator can
-// still sign in and make a new one (ADR-011).
+// lastUsedTouchInterval is the least time between one process's writes of a
+// key's last_used_at: no auth decision reads it, and each write locks the
+// key's row.
+const lastUsedTouchInterval = time.Minute
+
+// lastUsedDebounce decides when a key's last_used_at is due for a write: at
+// most once per lastUsedTouchInterval per key, in this process.
+type lastUsedDebounce struct {
+	last sync.Map // key id → *atomic.Int64: unix nanoseconds of the last claimed write
+}
+
+// due reports whether a write of key id's last_used_at is due at now, and
+// claims it. The claim is a compare-and-swap, so of concurrent callers only
+// one wins a due write.
+func (d *lastUsedDebounce) due(id string, now time.Time) bool {
+	v, _ := d.last.LoadOrStore(id, new(atomic.Int64))
+	last := v.(*atomic.Int64)
+	prev := last.Load()
+	if prev != 0 && now.UnixNano()-prev < int64(lastUsedTouchInterval) {
+		return false
+	}
+	return last.CompareAndSwap(prev, now.UnixNano())
+}
+
+// RevokeKey revokes the tenant's key with id, in the mode ctx carries, and
+// returns the revoked key. A key that is not found, or already revoked,
+// returns errs.ErrNotFound. A caller may revoke the key it calls with, and
+// the last key: an operator can still sign in and make a new one (ADR-011).
 func (s *Service) RevokeKey(ctx context.Context, tenantID, id string) (domain.APIKey, error) {
 	var key domain.APIKey
-	err := s.inTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+	err := s.db.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
 		var err error
 		if key, err = s.store.revoke(ctx, tx, id); err != nil {
 			return err
@@ -299,8 +292,8 @@ func (s *Service) RevokeKey(ctx context.Context, tenantID, id string) (domain.AP
 // ends on its own.
 const maxRotationGrace = 7 * 24 * time.Hour
 
-// RotateKeyInput is the request to rotate a key. ExpiresInSeconds is how long
-// the old key keeps working; 0 revokes it at once.
+// RotateKeyInput is the request to rotate a key. ExpiresInSeconds is the old
+// key's grace (RotateKey).
 type RotateKeyInput struct {
 	ExpiresInSeconds int64 `json:"expires_in_seconds,omitempty"`
 }
@@ -313,12 +306,13 @@ type RotateKeyResult struct {
 	RawKey string        `json:"raw_key"`
 }
 
-// RotateKey issues a replacement for key `id`, keeping its name, type,
-// livemode and any configured expires_at. The old key is revoked at once
-// (grace 0), or set to expire after input.ExpiresInSeconds seconds; a grace
-// never moves an earlier expires_at later. A revoked or expired key cannot be
-// rotated: create a new key instead. The replacement, the old key's change
-// and the audit row commit together.
+// RotateKey replaces the tenant's key with id, in the mode ctx carries, with
+// a new key of the same name, type, mode and expires_at. A grace of 0
+// revokes the old key; a grace of up to maxRotationGrace sets it to expire
+// that many seconds from now, or at its own expires_at if that is sooner
+// (scheduleExpiry, in postgres.go, does it in SQL). A grace out of range returns a validation error, a key
+// not found errs.ErrNotFound, and a key that is not active
+// errs.ErrInvalidState.
 func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input RotateKeyInput) (RotateKeyResult, error) {
 	maxGraceSeconds := int64(maxRotationGrace / time.Second)
 	if input.ExpiresInSeconds < 0 {
@@ -330,21 +324,20 @@ func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input Rota
 	}
 
 	var result RotateKeyResult
-	err := s.inTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
-		// Row-level security finds the key only in the caller's mode, so the
-		// replacement, minted on the same transaction, is in the old key's mode.
+	err := s.db.WithTenantTx(ctx, tenantID, func(tx *sql.Tx) error {
+		// Row-level security finds the key only in the caller's mode, so
+		// old.Livemode is the transaction's mode, and the replacement, minted
+		// on the same transaction, is in it.
 		old, err := s.store.getForUpdate(ctx, tx, id)
 		if err != nil {
 			return err
 		}
-		// scanKey sets Status from statusAt when the row is read.
 		if old.Status != domain.APIKeyStatusActive {
 			return errs.InvalidState("cannot rotate a " + old.Status + " key")
 		}
 
-		// The replacement takes the old key's name, type and expires_at as they
-		// are. A rotation is a credential swap, not a reconfiguration, so none
-		// of them is checked again.
+		// A rotation swaps the credential and changes nothing else, so the old
+		// key's name, type and expires_at are not checked again.
 		created, err := s.mintAndInsert(ctx, tx, tenantID, CreateKeyInput{
 			Name:      old.Name,
 			KeyType:   KeyType(old.KeyType),
@@ -358,8 +351,6 @@ func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input Rota
 		var outcome string
 		var stopsAt *time.Time
 		if input.ExpiresInSeconds == 0 {
-			// The old key stops authenticating on the next ValidateKey. A
-			// request already in flight under it completes.
 			oldAfter, err = s.store.revoke(ctx, tx, id)
 			outcome, stopsAt = "revoked", oldAfter.RevokedAt
 		} else {
@@ -388,8 +379,8 @@ func (s *Service) RotateKey(ctx context.Context, tenantID, id string, input Rota
 	return result, nil
 }
 
-// ListKeys returns one page of the keys that filter selects, and how many
-// match.
+// ListKeys returns one page of filter's keys in the mode ctx carries, newest
+// first, and how many keys there are.
 func (s *Service) ListKeys(ctx context.Context, filter ListFilter) ([]domain.APIKey, int, error) {
 	return s.store.list(ctx, filter)
 }

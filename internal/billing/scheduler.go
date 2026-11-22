@@ -2,12 +2,12 @@ package billing
 
 import (
 	"context"
-	"github.com/gethardcount/hardcount/internal/platform/leader"
 	"log/slog"
 	"sync"
 	"time"
 
-	mw "github.com/gethardcount/hardcount/internal/api/middleware"
+	"github.com/gethardcount/hardcount/internal/platform/leader"
+
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/platform/scheduler"
@@ -292,7 +292,7 @@ func (s *Scheduler) runBillingHalf(ctx context.Context) {
 	}
 
 	duration := time.Since(start)
-	mw.RecordBillingCycleDuration(duration.Seconds())
+	recordBillingCycleDuration(duration.Seconds())
 
 	// Cross-mode cleanup: TxBypass DELETEs that are mode-agnostic by design
 	// (tokens / idempotency keys expire regardless of mode). Running these
@@ -343,11 +343,11 @@ func (s *Scheduler) runBillingCycleForMode(ctx context.Context, live bool, panic
 		defer panics.Guard("step", "auto_charge_retry", "mode", mode)
 		chargeRetried, chargeErrs := s.engine.RetryPendingCharges(ctx, s.batch, s.onRun)
 		for i := 0; i < chargeRetried; i++ {
-			mw.RecordAutoChargeRetry("succeeded")
+			recordAutoChargeRetry("succeeded")
 		}
 		for _, e := range chargeErrs {
 			slog.Error("auto-charge retry error", "mode", mode, "error", e)
-			mw.RecordAutoChargeRetry("failed")
+			recordAutoChargeRetry("failed")
 		}
 	}()
 
@@ -404,7 +404,7 @@ func (s *Scheduler) runBillingCycleForMode(ctx context.Context, live bool, panic
 		// accumulates the per-mode totals. Recorded unconditionally — a run with
 		// errors still ran and may have generated some invoices; the error counter
 		// (below) is the separate failure signal.
-		mw.RecordBillingCycle(generated)
+		recordBillingCycle(generated)
 		if len(errs) > 0 {
 			slog.Error("billing cycle completed with errors",
 				"mode", mode,
@@ -413,7 +413,7 @@ func (s *Scheduler) runBillingCycleForMode(ctx context.Context, live bool, panic
 			)
 			for _, err := range errs {
 				slog.Error("billing cycle error", "mode", mode, "error", err)
-				mw.RecordBillingCycleError()
+				recordBillingCycleError()
 			}
 		} else if generated > 0 {
 			slog.Info("billing cycle completed", "mode", mode, "generated", generated)
@@ -449,9 +449,6 @@ func (s *Scheduler) runBillingCycleForMode(ctx context.Context, live bool, panic
 			for _, e := range cErrs {
 				slog.Error("credit expiry error", "mode", mode, "error", e)
 			}
-			for i := 0; i < expired; i++ {
-				mw.RecordCreditOperation("expiry")
-			}
 			if expired > 0 {
 				slog.Info("credits expired", "mode", mode, "count", expired)
 			}
@@ -474,7 +471,7 @@ func (s *Scheduler) runCrossModeCleanup(ctx context.Context, panics *scheduler.P
 				slog.Error("token cleanup error", "error", err)
 			} else if cleaned > 0 {
 				slog.Info("expired payment tokens cleaned up", "count", cleaned)
-				mw.RecordScheduledCleanup("payment_tokens", cleaned)
+				recordScheduledCleanup("payment_tokens", cleaned)
 			}
 		}()
 	}
@@ -490,7 +487,7 @@ func (s *Scheduler) runCrossModeCleanup(ctx context.Context, panics *scheduler.P
 				slog.Error("idempotency cleanup error", "error", err)
 			} else if cleaned > 0 {
 				slog.Info("expired idempotency keys cleaned up", "count", cleaned)
-				mw.RecordScheduledCleanup("idempotency_keys", cleaned)
+				recordScheduledCleanup("idempotency_keys", cleaned)
 			}
 		}()
 	}
@@ -505,7 +502,7 @@ func (s *Scheduler) runCrossModeCleanup(ctx context.Context, panics *scheduler.P
 				slog.Error("login throttle cleanup error", "error", err)
 			} else if cleaned > 0 {
 				slog.Info("old sign-in throttle rows cleaned up", "count", cleaned)
-				mw.RecordScheduledCleanup("login_throttle", cleaned)
+				recordScheduledCleanup("login_throttle", cleaned)
 			}
 		}()
 	}
@@ -560,10 +557,10 @@ func (s *Scheduler) runDunningForMode(ctx context.Context, live bool, tenantIDs 
 			// {outcome="failed"} dunning-machinery alert watches.
 			for _, e := range dErrs {
 				slog.Error("dunning error", "mode", mode, "tenant_id", tid, "error", e)
-				mw.RecordDunningRun("failed")
+				recordDunningRun("failed")
 			}
 			for i := 0; i < processed; i++ {
-				mw.RecordDunningRun("succeeded")
+				recordDunningRun("succeeded")
 			}
 			if processed > 0 {
 				slog.Info("dunning runs processed", "mode", mode, "tenant_id", tid, "processed", processed)

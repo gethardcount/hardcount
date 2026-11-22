@@ -9,6 +9,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/gethardcount/hardcount/internal/session"
 )
 
@@ -76,7 +77,8 @@ func (it loginIT) authRows(t *testing.T, action string) []authRow {
 	return out
 }
 
-// postAuth posts body to path with the session cookie when cookie is not "".
+// postAuth posts body to path with the session cookie when cookie is not "",
+// under the server's root, which gives the request its record.
 func postAuth(h http.Handler, path, cookie, body string) *httptest.ResponseRecorder {
 	var req *http.Request
 	if body == "" {
@@ -89,7 +91,7 @@ func postAuth(h http.Handler, path, cookie, body string) *httptest.ResponseRecor
 		req.AddCookie(&http.Cookie{Name: session.CookieName, Value: cookie})
 	}
 	rr := httptest.NewRecorder()
-	h.ServeHTTP(rr, req)
+	requesttest.Root(h).ServeHTTP(rr, req)
 	return rr
 }
 
@@ -173,7 +175,7 @@ func TestLogout_WithNoLiveSessionWritesNothing(t *testing.T) {
 
 	for _, c := range []struct{ name, cookie string }{
 		{"expired session", expired},
-		{"unknown session", "not-a-session-id"},
+		{"unknown session", strings.Repeat("ab", 32)},
 	} {
 		rr := postAuth(h, "/logout", c.cookie, "")
 		if rr.Code != http.StatusNoContent {
@@ -273,7 +275,7 @@ func TestSetMode(t *testing.T) {
 	for _, c := range []struct{ name, cookie string }{
 		{"expired session", expired},
 		{"signed-out session", signedOut},
-		{"unknown session", "not-a-session-id"},
+		{"unknown session", strings.Repeat("ab", 32)},
 	} {
 		rr := postAuth(h, "/mode", c.cookie, `{"livemode": true}`)
 		if rr.Code != http.StatusUnauthorized {

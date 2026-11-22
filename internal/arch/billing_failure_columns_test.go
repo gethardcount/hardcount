@@ -21,7 +21,7 @@ import (
 var billingFailureColumnOwners = map[string]bool{
 	"internal/domain/subscription_billing_failure.go": true, // the predicate
 	"internal/subscription/postgres.go":               true, // the scan, the two writers, the gates
-	"internal/api/middleware/metrics.go":              true, // the gauges' hand copy, pinned by TestBillingGauges_DueAndFailingPartition
+	"cmd/hardcount/queue_gauges.go":                   true, // the gauges' hand copy, pinned by TestBillingGauges_DueAndFailingPartition
 }
 
 func TestBillingFailureColumns_ReadOnlyThroughThePredicate(t *testing.T) {

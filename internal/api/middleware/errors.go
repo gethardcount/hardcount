@@ -8,27 +8,24 @@ import (
 	"runtime/debug"
 	"time"
 
-	chimw "github.com/go-chi/chi/v5/middleware"
-
 	"github.com/gethardcount/hardcount/internal/api/respond"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 )
 
 // Recoverer turns a handler panic into the JSON 500 every other internal
-// error answers (respond.InternalError), and logs the panic with its stack.
-// It replaces chi's Recoverer, which answered an empty 500.
+// error answers (respond.InternalError), where chi's Recoverer answers an
+// empty 500, and logs the panic with its stack.
 //
 // The log line's path is path(r), never the raw path, because some public
-// links carry a link token in the path that works like a password.
-// path(r) must return a path that holds no link token. The router passes
-// loggablePath, the function it also gives TraceRequestAttrs.
+// links carry a link token in the path that works like a password. path(r)
+// must return a path that holds no link token.
 //
 // http.ErrAbortHandler is re-panicked, as net/http expects: it aborts the
-// response on purpose. A panic after the handler has started its answer
-// cannot change that answer, but the log still records the panic.
+// response on purpose. A panic after the handler started its answer, or on a
+// connection upgrade, writes nothing, but the log still records it.
 func Recoverer(path func(*http.Request) string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
 			defer func() {
 				rvr := recover()
 				if rvr == nil {
@@ -38,31 +35,39 @@ func Recoverer(path func(*http.Request) string) func(http.Handler) http.Handler 
 					panic(rvr)
 				}
 				slog.ErrorContext(r.Context(), "handler panic", "panic", rvr, "method", r.Method, "path", path(r), "stack", string(debug.Stack()))
-				if ww.Status() == 0 && r.Header.Get("Connection") != "Upgrade" {
+				if request.Of(r.Context()).Status() == 0 && r.Header.Get("Connection") != "Upgrade" {
 					respond.InternalError(w, r)
 				}
 			}()
-			next.ServeHTTP(ww, r)
+			next.ServeHTTP(w, r)
 		})
 	}
 }
 
 // Timeout ends the request's context after d. A handler that has written
 // nothing when the time runs out gets the JSON 504 (respond.Timeout). One
-// that already started its answer keeps it. It replaces chi's Timeout, which
-// answered an empty 504.
+// that already started its answer keeps it; chi's Timeout answers an empty
+// 504.
 func Timeout(d time.Duration) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			ctx, cancel := context.WithTimeout(r.Context(), d)
-			ww := chimw.NewWrapResponseWriter(w, r.ProtoMajor)
-			defer func() {
-				cancel()
-				if errors.Is(ctx.Err(), context.DeadlineExceeded) && ww.Status() == 0 {
-					respond.Timeout(w, r)
-				}
-			}()
-			next.ServeHTTP(ww, r.WithContext(ctx))
-		})
+		return TimeLimit{limit: d, next: next}
 	}
+}
+
+// TimeLimit ends the request's context after limit. Timeout makes it; its doc
+// has the rule.
+type TimeLimit struct {
+	limit time.Duration
+	next  http.Handler
+}
+
+func (t TimeLimit) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	ctx, cancel := context.WithTimeout(r.Context(), t.limit)
+	defer func() {
+		cancel()
+		if errors.Is(ctx.Err(), context.DeadlineExceeded) && request.Of(ctx).Status() == 0 {
+			respond.Timeout(w, r)
+		}
+	}()
+	t.next.ServeHTTP(w, r.WithContext(ctx))
 }

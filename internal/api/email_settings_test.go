@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/config"
 	"github.com/gethardcount/hardcount/internal/email"
 )
 
@@ -36,10 +37,9 @@ func (f *fakeAudit) Log(_ context.Context, _, action, resourceType, resourceID, 
 }
 
 func newEmailSettingsTestHandler(s *fakeEmailSender, a *fakeAudit) http.Handler {
-	env := map[string]string{"HOSTED_INVOICE_BASE_URL": "https://pay.example.com"}
 	h := &emailSettingsHandler{
 		sender: s,
-		links:  emailLinkEnvs(func(k string) string { return env[k] }),
+		links:  emailLinkEnvs(config.Server{HostedInvoiceBaseURL: "https://pay.example.com"}),
 		userEmail: func(_ context.Context, userID string) (string, error) {
 			return userID + "@team.example.com", nil
 		},
@@ -50,10 +50,7 @@ func newEmailSettingsTestHandler(s *fakeEmailSender, a *fakeAudit) http.Handler 
 
 func sessionReq(method, path string) *http.Request {
 	r := httptest.NewRequest(method, path, nil)
-	ctx := auth.WithTenantID(r.Context(), "hc_ten_1")
-	ctx = auth.WithUserID(ctx, "ops")
-	ctx = auth.WithKeyType(ctx, auth.KeyTypeSession)
-	return r.WithContext(ctx)
+	return r.WithContext(auth.WithCaller(r.Context(), auth.Caller{TenantID: "hc_ten_1", UserID: "ops"}))
 }
 
 // The status lists every link env var, set or not, so the page can name the
@@ -129,14 +126,19 @@ func TestEmailSettings_SendTest(t *testing.T) {
 			t.Fatalf("got %d %s", rr.Code, rr.Body.String())
 		}
 	})
-	t.Run("an API key can't send a test email", func(t *testing.T) {
-		s := &fakeEmailSender{configured: true}
-		r := httptest.NewRequest("POST", "/test", nil)
-		r = r.WithContext(auth.WithKeyType(auth.WithTenantID(r.Context(), "hc_ten_1"), auth.KeyTypeSecret))
-		rr := httptest.NewRecorder()
-		newEmailSettingsTestHandler(s, &fakeAudit{}).ServeHTTP(rr, r)
-		if rr.Code != http.StatusForbidden || len(s.sentTo) != 0 {
-			t.Fatalf("got %d, sent %v", rr.Code, s.sentTo)
+	t.Run("an API key can't send a test email, with or without a user named on it", func(t *testing.T) {
+		key := auth.Caller{TenantID: "hc_ten_1", KeyID: "hc_key_1", KeyType: auth.KeyTypeSecret}
+		keyWithUser := key
+		keyWithUser.UserID = "hc_usr_1"
+		for _, caller := range []auth.Caller{key, keyWithUser} {
+			s := &fakeEmailSender{configured: true}
+			r := httptest.NewRequest("POST", "/test", nil)
+			r = r.WithContext(auth.WithCaller(r.Context(), caller))
+			rr := httptest.NewRecorder()
+			newEmailSettingsTestHandler(s, &fakeAudit{}).ServeHTTP(rr, r)
+			if rr.Code != http.StatusForbidden || len(s.sentTo) != 0 {
+				t.Fatalf("%+v: got %d, sent %v", caller, rr.Code, s.sentTo)
+			}
 		}
 	})
 }

@@ -1,6 +1,6 @@
 package auth
 
-// Permission represents a specific API operation scope.
+// Permission is what a route requires of its caller (RequirePermission).
 type Permission string
 
 const (
@@ -13,10 +13,8 @@ const (
 	PermSubscriptionRead  Permission = "subscription:read"
 	PermSubscriptionWrite Permission = "subscription:write"
 
-	PermUsageRead  Permission = "usage:read"
-	PermUsageWrite Permission = "usage:write"
-	// PermUsageIngest sends usage events. It is the only permission an
-	// ingest key holds.
+	PermUsageRead   Permission = "usage:read"
+	PermUsageWrite  Permission = "usage:write"
 	PermUsageIngest Permission = "usage:ingest"
 
 	PermInvoiceRead  Permission = "invoice:read"
@@ -25,72 +23,50 @@ const (
 	PermDunningRead  Permission = "dunning:read"
 	PermDunningWrite Permission = "dunning:write"
 
-	// apikey:read and apikey:write gate more than API keys. apikey:write
-	// gates the API key routes (listing keys included), webhook endpoints
-	// and settings; apikey:read gates webhook events, their stream and the
-	// audit log (router.go).
+	// apikey:read and apikey:write gate more than API keys: the access values
+	// in internal/api/route_table.go say what each guards.
 	PermAPIKeyRead  Permission = "apikey:read"
 	PermAPIKeyWrite Permission = "apikey:write"
 
-	// PermTestClockWrite gates the /test-clocks routes.
 	PermTestClockWrite Permission = "testclock:write"
 )
 
-// KeyType is a caller's kind of credential, which sets its permissions: a
-// stored key type (secret or ingest), or KeyTypeSession for a dashboard
-// session, which no key backs.
+// KeyType is an API key's type, which sets the key's permissions
+// (hasPermission).
 type KeyType string
 
 const (
-	KeyTypeSecret  KeyType = "secret"  // hc_secret_ — full access to one account
-	KeyTypeIngest  KeyType = "ingest"  // hc_ingest_ — sends usage events only (ADR-133)
-	KeyTypeSession KeyType = "session" // dashboard cookie session, never stored in api_keys
+	KeyTypeSecret KeyType = "secret" // hc_secret_: every permission
+	KeyTypeIngest KeyType = "ingest" // hc_ingest_: PermUsageIngest only (ADR-133)
 )
 
-// storedKeyTypes are the types a key can be issued and stored as. The type
-// prefixes (typePrefixes) and the create check (checkCreateInput) both come
-// from this list. A new type needs a permission entry
-// (TestStoredKeyTypes_EachHasPermissions) and a migration that widens the
-// api_keys CHECKs (TestKeyShape_ParserAndTableAgree).
-var storedKeyTypes = []KeyType{KeyTypeSecret, KeyTypeIngest}
+// keyTypes is every KeyType; typePrefixes and checkCreateInput derive from it.
+// A new type needs a case in hasPermission and a migration widening the
+// api_keys CHECKs.
+var keyTypes = []KeyType{KeyTypeSecret, KeyTypeIngest}
 
-// allPermissions is every permission a route can require.
-var allPermissions = []Permission{
-	PermCustomerRead, PermCustomerWrite,
-	PermPricingRead, PermPricingWrite,
-	PermSubscriptionRead, PermSubscriptionWrite,
-	PermUsageRead, PermUsageWrite, PermUsageIngest,
-	PermInvoiceRead, PermInvoiceWrite,
-	PermDunningRead, PermDunningWrite,
-	PermAPIKeyRead, PermAPIKeyWrite,
-	PermTestClockWrite,
-}
-
-// fullAccess is every permission. A secret key and a dashboard session
-// hold it.
-var fullAccess = func() map[Permission]bool {
-	m := make(map[Permission]bool, len(allPermissions))
-	for _, p := range allPermissions {
-		m[p] = true
+// hasPermission reports whether c holds perm: a session and a secret key hold
+// every permission, an ingest key holds only usage:ingest, and any other
+// caller holds none. PermissionRequired decides the session-only and
+// any-caller routes. Three handlers refuse more:
+//   - the test email refuses any key;
+//   - tenantstripe's checkMode refuses the other mode's connection;
+//   - the billing run refuses a caller with no tenant.
+func hasPermission(c Caller, perm Permission) bool {
+	switch {
+	case c.IsSession():
+		// Roles are recorded in user_tenants.role but not enforced (ADR-081).
+		return true
+	case c.KeyType == KeyTypeSecret:
+		return true
+	case c.KeyType == KeyTypeIngest:
+		// A LiteLLM proxy or another gateway keeps an ingest key in its
+		// config, so a leaked copy must not refund, void, read customers or
+		// mint keys.
+		return perm == PermUsageIngest
+	default:
+		// No key type, or an unknown one: only a fault could build such a
+		// caller.
+		return false
 	}
-	return m
-}()
-
-var keyPermissions = map[KeyType]map[Permission]bool{
-	KeyTypeSecret: fullAccess,
-	// An ingest key sends usage and nothing else (ADR-133). A LiteLLM proxy
-	// or another gateway keeps it in its config, so a leaked copy cannot
-	// refund, void, read customers or mint keys.
-	KeyTypeIngest: {
-		PermUsageIngest: true,
-	},
-	// Every dashboard session gets the full set: roles are recorded in
-	// user_tenants.role but not enforced (ADR-081).
-	KeyTypeSession: fullAccess,
-}
-
-// HasPermission reports whether keyType holds perm. An unknown key type
-// holds no permission.
-func HasPermission(keyType KeyType, perm Permission) bool {
-	return keyPermissions[keyType][perm]
 }

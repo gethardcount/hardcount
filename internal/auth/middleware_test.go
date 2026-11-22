@@ -6,44 +6,45 @@ import (
 	"testing"
 )
 
-// guarded runs a handler behind mw for a principal of key type kt and
-// returns the status.
-func guarded(t *testing.T, mw func(http.Handler) http.Handler, kt KeyType, method string) int {
-	t.Helper()
-	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-	req := httptest.NewRequest(method, "/", nil)
-	req = req.WithContext(WithKeyType(req.Context(), kt))
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	return rec.Code
+// accessOf is a route's Access for RequirePermission's test, and whether a
+// route serves the request.
+type accessOf struct {
+	access Access
+	routed bool
 }
 
-func TestRequireMethod_GETUsesReadPOSTUsesWrite(t *testing.T) {
-	// RequireMethod(read, write) checks read for GET, HEAD and OPTIONS and
-	// write for the rest. An ingest key holds usage:ingest and not
-	// customer:write, so with those two the read methods pass and the write
-	// methods get 403.
-	mw := RequireMethod(PermUsageIngest, PermCustomerWrite)
-	cases := []struct {
-		method string
+func (a accessOf) Lookup(*http.Request) (Access, bool) { return a.access, a.routed }
+
+// RequirePermission checks the route's Access: a permission the caller holds
+// (an ingest key holds only usage:ingest), a dashboard session, or any
+// caller. A request no route serves gets the unrouted handler's answer (the
+// router's 404 or 405), never the next handler. An entry that names nobody is
+// a fault in the table, refused with 500.
+func TestRequirePermission_ChecksTheRoutesAccess(t *testing.T) {
+	ingest := Caller{TenantID: "t1", KeyID: "hc_key_1", KeyType: KeyTypeIngest}
+	session := Caller{TenantID: "t1", UserID: "hc_usr_1"}
+	members := Access{Session: "manage team membership"}
+	for _, c := range []struct {
+		name   string
+		table  accessOf
+		caller Caller
 		want   int
-		why    string
 	}{
-		{"GET", http.StatusOK, "the read permission (usage:ingest) is held"},
-		{"HEAD", http.StatusOK, "the read permission is held"},
-		{"OPTIONS", http.StatusOK, "the read permission is held"},
-		{"POST", http.StatusForbidden, "the write permission (customer:write) is not held"},
-		{"PUT", http.StatusForbidden, "the write permission is not held"},
-		{"PATCH", http.StatusForbidden, "the write permission is not held"},
-		{"DELETE", http.StatusForbidden, "the write permission is not held"},
-	}
-	for _, tc := range cases {
-		t.Run(tc.method+"_"+tc.why, func(t *testing.T) {
-			if code := guarded(t, mw, KeyTypeIngest, tc.method); code != tc.want {
-				t.Errorf("%s: got %d, want %d", tc.why, code, tc.want)
-			}
-		})
+		{"no route", accessOf{}, session, http.StatusNotFound},
+		{"any caller", accessOf{Access{Any: true}, true}, ingest, http.StatusOK},
+		{"a permission held", accessOf{Access{Perm: PermUsageIngest}, true}, ingest, http.StatusOK},
+		{"a permission not held", accessOf{Access{Perm: PermCustomerWrite}, true}, ingest, http.StatusForbidden},
+		{"session only, a session", accessOf{members, true}, session, http.StatusOK},
+		{"session only, a key", accessOf{members, true}, ingest, http.StatusForbidden},
+		{"names nobody", accessOf{Access{}, true}, session, http.StatusInternalServerError},
+	} {
+		ok := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
+		req := httptest.NewRequest(http.MethodPost, "/", nil)
+		req = req.WithContext(WithCaller(req.Context(), c.caller))
+		rec := httptest.NewRecorder()
+		RequirePermission(c.table, http.NotFoundHandler())(ok).ServeHTTP(rec, req)
+		if rec.Code != c.want {
+			t.Errorf("%s: got %d, want %d", c.name, rec.Code, c.want)
+		}
 	}
 }

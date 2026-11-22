@@ -5,26 +5,11 @@ import (
 	"net/http"
 
 	chimw "github.com/go-chi/chi/v5/middleware"
-
-	"github.com/gethardcount/hardcount/internal/config"
 )
 
-// ParseTrustedProxies parses a comma-separated TRUST_PROXY spec of CIDRs and/or
-// bare IPs into networks. A bare IP becomes a /32 (IPv4) or /128 (IPv6).
-// Empty input or "none" gives an empty slice, which means "trust no proxy":
-// forwarding headers are then never honored.
-//
-// It uses config.ParseTrustProxy, the parser behind the boot check, which
-// refuses to start on an entry that does not parse. An invalid entry is
-// skipped here only for a caller that did not go through config.Load.
-func ParseTrustedProxies(spec string) []*net.IPNet {
-	nets, _ := config.ParseTrustProxy(spec)
-	return nets
-}
-
 // TrustedClientIP resolves the client IP with chi's ClientIPFrom* middleware
-// and stores it on the request context. Read it with audit.ExtractClientIP,
-// or with chi's GetClientIP. r.RemoteAddr is left as the TCP peer.
+// and stores it on the request context, where the request's record takes it
+// (request.Record.ClientIP). r.RemoteAddr is left as the TCP peer.
 //
 //   - With trusted proxies, chi's ClientIPFromXFF reads X-Forwarded-For only
 //     when the TCP peer is inside one of them. It merges every header line,
@@ -33,7 +18,7 @@ func ParseTrustedProxies(spec string) []*net.IPNet {
 //   - With none, chi's ClientIPFromRemoteAddr uses the TCP peer.
 //
 // No other header (X-Real-IP, True-Client-IP) is read. When chi resolves
-// nothing, audit.ExtractClientIP falls back to the TCP peer.
+// nothing, the record falls back to the TCP peer.
 func TrustedClientIP(trusted []*net.IPNet) func(http.Handler) http.Handler {
 	if len(trusted) == 0 {
 		return chimw.ClientIPFromRemoteAddr

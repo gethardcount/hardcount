@@ -130,18 +130,13 @@ func newExportsHandler(
 	}
 }
 
-func (h *exportsHandler) Routes(customerRead, invoiceRead, subscriptionRead, usageRead, auditRead func(http.Handler) http.Handler) chi.Router {
+func (h *exportsHandler) Routes() chi.Router {
 	r := chi.NewRouter()
-	r.With(customerRead).Get("/customers.csv", h.exportCustomers)
-	r.With(invoiceRead).Get("/invoices.csv", h.exportInvoices)
-	r.With(subscriptionRead).Get("/subscriptions.csv", h.exportSubscriptions)
-	r.With(usageRead).Get("/usage-events.csv", h.exportUsageEvents)
-	// The audit log can be exported too. It needs the same permission as the
-	// audit-log read route: auth.PermAPIKeyRead (see the /v1/audit-log mount
-	// in router.go). The file is the same data. A different gate would either
-	// lock out operators who can already read it on screen, or give it to
-	// operators who cannot.
-	r.With(auditRead).Get("/audit-log.csv", h.exportAuditLog)
+	r.Get("/customers.csv", h.exportCustomers)
+	r.Get("/invoices.csv", h.exportInvoices)
+	r.Get("/subscriptions.csv", h.exportSubscriptions)
+	r.Get("/usage-events.csv", h.exportUsageEvents)
+	r.Get("/audit-log.csv", h.exportAuditLog)
 	return r
 }
 
@@ -275,7 +270,9 @@ func csvSafe(s string) string {
 
 // flushAndContinue flushes the csv buffer to the underlying response
 // so streaming clients see partial output. Without the flush, large
-// exports buffer until completion.
+// exports buffer until completion. So nothing between the handler and the
+// socket may buffer the response: a buffering wrapper would hide the
+// Flusher and hold the whole CSV in memory (ADR-090).
 func flushAndContinue(cw *csv.Writer, w http.ResponseWriter) error {
 	cw.Flush()
 	if err := cw.Error(); err != nil {

@@ -3,11 +3,8 @@ package api
 import (
 	"fmt"
 	"net/http"
-	"net/url"
 	"os"
-	"reflect"
 	"regexp"
-	"runtime"
 	"sort"
 	"strings"
 	"testing"
@@ -245,20 +242,16 @@ func specIdempotencyHeader(t *testing.T) map[string]bool {
 	return out
 }
 
-// isIdempotencyMiddleware reports whether m is the closure mw.Idempotency
-// returns, by its name: "middleware.Idempotency.1", whether or not the
-// compiler inlined mw.Idempotency into NewServer. A function pointer is no
-// test: an inlined copy can be a different function from one built here. If
-// a rename breaks the match, the test finds 0 routes and fails.
+// isIdempotencyMiddleware reports whether m is mw.Idempotency: whether the
+// handler it makes is an mw.IdempotencyGuard.
 func isIdempotencyMiddleware(m func(http.Handler) http.Handler) bool {
-	fn := runtime.FuncForPC(reflect.ValueOf(m).Pointer())
-	return fn != nil && strings.Contains(fn.Name(), ".Idempotency.")
+	return idempotencyMW.is(m(http.NotFoundHandler()))
 }
 
 // TestOpenAPISpec_IdempotencyKeyHeader ties the spec's Idempotency-Key header
 // to the routes that honour it. mw.Idempotency caches the response of a POST,
 // PUT or PATCH that sends the header, and only routes mounted behind it do
-// that, except the routes it is told to ignore (skipsIdempotency). Every
+// that, except the routes it is told to ignore (marked withShowOnce() in routeTable). Every
 // such route must declare the header in api/openapi.yaml, so generated
 // clients can send it, and no other operation may declare it, since the
 // server would ignore it there.
@@ -269,7 +262,7 @@ func TestOpenAPISpec_IdempotencyKeyHeader(t *testing.T) {
 		if method != http.MethodPost && method != http.MethodPut && method != http.MethodPatch {
 			return nil
 		}
-		if skipsIdempotency(&http.Request{Method: method, URL: &url.URL{Path: route}}) {
+		if routeTable[routeKey{Method: method, Pattern: canonicalRoute(route)}].showOnce {
 			return nil
 		}
 		for _, m := range mws {

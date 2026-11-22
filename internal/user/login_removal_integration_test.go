@@ -19,6 +19,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/gethardcount/hardcount/internal/session"
 	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/user"
@@ -101,8 +102,8 @@ func signInMember(h http.Handler) *httptest.ResponseRecorder {
 }
 
 func (it removalIT) handler(store user.Store) http.Handler {
-	return user.NewHandler(it.service(store, audit.NewLogger(it.db)),
-		session.CookieConfig{Path: "/"}, nil, "", false).Routes()
+	return requesttest.Root(user.NewHandler(it.service(store, audit.NewLogger(it.db)),
+		session.CookieConfig{}, nil, "", false).Routes())
 }
 
 // liveSessions counts the member's live sessions in the workspace, read

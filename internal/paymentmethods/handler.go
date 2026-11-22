@@ -38,7 +38,7 @@ type Handler struct {
 
 // CustomerLookup resolves the recipient's email + display name for
 // the operator "send setup email" flow. Implemented by
-// *customer.PostgresStore via a thin adapter in router.go.
+// *customer.PostgresStore via a thin adapter in adapters.go.
 type CustomerLookup interface {
 	GetForSetupLink(ctx context.Context, tenantID, customerID string) (email, displayName string, err error)
 }
@@ -279,7 +279,7 @@ func (h *Handler) operatorSendSetupEmail(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	if h.customerLookup == nil || h.emailer == nil {
-		respond.Error(w, r, http.StatusServiceUnavailable, "api_error",
+		respond.Error(w, r, http.StatusServiceUnavailable,
 			"email_unavailable",
 			"email setup-link sending is not configured on this Hardcount instance")
 		return
@@ -299,7 +299,7 @@ func (h *Handler) operatorSendSetupEmail(w http.ResponseWriter, r *http.Request)
 				retryIn = 1
 			}
 			w.Header().Set("Retry-After", strconv.Itoa(retryIn))
-			respond.Error(w, r, http.StatusTooManyRequests, "rate_limit_error",
+			respond.Error(w, r, http.StatusTooManyRequests,
 				"cooldown_active",
 				"a setup link was sent to this customer recently — wait before sending again")
 			return
@@ -307,7 +307,7 @@ func (h *Handler) operatorSendSetupEmail(w http.ResponseWriter, r *http.Request)
 	}
 	note := strings.TrimSpace(req.Note)
 	if len(note) > 2000 {
-		respond.Error(w, r, http.StatusUnprocessableEntity, "invalid_request_error",
+		respond.Error(w, r, http.StatusUnprocessableEntity,
 			"note_too_long", "note must be 2000 characters or fewer")
 		return
 	}
@@ -353,7 +353,7 @@ func (h *Handler) operatorSendSetupEmail(w http.ResponseWriter, r *http.Request)
 		// failures.
 		slog.ErrorContext(r.Context(), "operator setup email: enqueue",
 			"customer_id", customerID, "to", email, "session_id", sessionID, "error", err)
-		respond.Error(w, r, http.StatusBadGateway, "api_error",
+		respond.Error(w, r, http.StatusBadGateway,
 			"email_enqueue_failed",
 			"failed to queue the setup link email — please retry; if it persists, check the email outbox dashboard")
 		return

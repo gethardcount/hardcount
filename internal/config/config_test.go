@@ -63,9 +63,10 @@ func TestLoad_CustomPort(t *testing.T) {
 
 func TestValidate_ProductionWarnsMissingRedis(t *testing.T) {
 	cfg := Config{
-		Port: "8080",
-		Env:  "production",
-		DB:   DBConfig{MaxOpenConns: 20, MaxIdleConns: 5, QueryTimeout: 5 * time.Second},
+		Server: ServerFromEnv(),
+		Port:   "8080",
+		Env:    "production",
+		DB:     DBConfig{MaxOpenConns: 20, MaxIdleConns: 5, QueryTimeout: 5 * time.Second},
 	}
 	warnings := cfg.Validate()
 	var found bool
@@ -86,11 +87,11 @@ func TestValidate_ValidConfig(t *testing.T) {
 	}
 
 	cfg := Config{
-		Port:       "8080",
-		Env:        "production",
-		RedisURL:   "redis://localhost:6379",
-		TrustProxy: "none",
-		DB:         DBConfig{MaxOpenConns: 20, MaxIdleConns: 5, QueryTimeout: 5 * time.Second},
+		Port:     "8080",
+		Env:      "production",
+		RedisURL: "redis://localhost:6379",
+		Server:   envServer("none"),
+		DB:       DBConfig{MaxOpenConns: 20, MaxIdleConns: 5, QueryTimeout: 5 * time.Second},
 	}
 	warnings := cfg.Validate()
 	if len(warnings) > 0 {
@@ -101,7 +102,8 @@ func TestValidate_ValidConfig(t *testing.T) {
 func TestValidate_EncryptionKeyWarnings(t *testing.T) {
 	_ = os.Unsetenv("HARDCOUNT_ENCRYPTION_KEY")
 	cfg := Config{
-		Env: "production", Port: "8080",
+		Server: ServerFromEnv(),
+		Env:    "production", Port: "8080",
 		RedisURL: "redis://localhost:6379",
 		DB:       DBConfig{MaxOpenConns: 20, MaxIdleConns: 5, QueryTimeout: 5 * time.Second},
 	}
@@ -116,33 +118,9 @@ func TestValidate_EncryptionKeyWarnings(t *testing.T) {
 		t.Error("expected warning about missing encryption key in production")
 	}
 
-	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", "tooshort")
-	warnings = cfg.Validate()
-	found = false
-	for _, w := range warnings {
-		if strings.HasPrefix(w, "HARDCOUNT_ENCRYPTION_KEY") {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected warning about invalid encryption key length")
-	}
-
-	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")
-	warnings = cfg.Validate()
-	found = false
-	for _, w := range warnings {
-		if w == "HARDCOUNT_ENCRYPTION_KEY is not valid hex" {
-			found = true
-		}
-	}
-	if !found {
-		t.Error("expected warning about invalid hex")
-	}
-
-	_ = os.Unsetenv("HARDCOUNT_ENCRYPTION_KEY")
 	localCfg := Config{
-		Env: "local", Port: "8080",
+		Server: ServerFromEnv(),
+		Env:    "local", Port: "8080",
 		DB: DBConfig{MaxOpenConns: 20, MaxIdleConns: 5, QueryTimeout: 5 * time.Second},
 	}
 	warnings = localCfg.Validate()
@@ -155,9 +133,10 @@ func TestValidate_EncryptionKeyWarnings(t *testing.T) {
 
 func TestValidate_DBPoolSanity(t *testing.T) {
 	cfg := Config{
-		Port: "8080",
-		Env:  "local",
-		DB:   DBConfig{MaxOpenConns: 5, MaxIdleConns: 10, QueryTimeout: 5 * time.Second},
+		Server: ServerFromEnv(),
+		Port:   "8080",
+		Env:    "local",
+		DB:     DBConfig{MaxOpenConns: 5, MaxIdleConns: 10, QueryTimeout: 5 * time.Second},
 	}
 	warnings := cfg.Validate()
 	found := false
@@ -185,20 +164,20 @@ func TestLoad_ProductionRequiresEncryptionKey(t *testing.T) {
 	}
 }
 
+// A set HARDCOUNT_ENCRYPTION_KEY that is not 64 hex characters stops
+// start-up outside production too: Check refuses it, for Load and for
+// api.NewServer alike.
 func TestLoad_InvalidEncryptionKeyFormat(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
 	t.Setenv("APP_ENV", "local")
-	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", "tooshort")
-
-	_, err := Load()
-	if err == nil {
-		t.Fatal("expected error for invalid encryption key length")
-	}
-
-	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", "zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz")
-	_, err = Load()
-	if err == nil {
-		t.Fatal("expected error for invalid hex in encryption key")
+	for _, bad := range []string{"tooshort", strings.Repeat("z", 64)} {
+		t.Setenv("HARDCOUNT_ENCRYPTION_KEY", bad)
+		if _, err := Load(); err == nil || !strings.Contains(err.Error(), "HARDCOUNT_ENCRYPTION_KEY") {
+			t.Errorf("Load with HARDCOUNT_ENCRYPTION_KEY=%q: %v, want a refusal naming the setting", bad, err)
+		}
+		if err := ServerFromEnv().Check(); err == nil || !strings.Contains(err.Error(), "HARDCOUNT_ENCRYPTION_KEY") {
+			t.Errorf("Check with HARDCOUNT_ENCRYPTION_KEY=%q: %v, want a refusal naming the setting", bad, err)
+		}
 	}
 }
 
@@ -433,10 +412,10 @@ func TestLoad_RejectsNearMissOfProduction(t *testing.T) {
 // is plain HTTP by design and stays quiet.
 func TestValidate_WarnsOnPlainHTTPAddressOutsideLocal(t *testing.T) {
 	base := Config{
-		Port:       "8080",
-		RedisURL:   "redis://localhost:6379",
-		TrustProxy: "none",
-		DB:         DBConfig{MaxOpenConns: 20, MaxIdleConns: 5, QueryTimeout: 5 * time.Second},
+		Port:     "8080",
+		RedisURL: "redis://localhost:6379",
+		Server:   envServer("none"),
+		DB:       DBConfig{MaxOpenConns: 20, MaxIdleConns: 5, QueryTimeout: 5 * time.Second},
 	}
 	settings := []string{
 		"DASHBOARD_BASE_URL", "CUSTOMER_PORTAL_URL", "HOSTED_INVOICE_BASE_URL",
@@ -462,6 +441,7 @@ func TestValidate_WarnsOnPlainHTTPAddressOutsideLocal(t *testing.T) {
 				t.Setenv(name, c.value)
 				cfg := base
 				cfg.Env = c.env
+				cfg.Server = envServer("none") // read after this case's Setenv
 				var got []string
 				for _, w := range cfg.Validate() {
 					if strings.HasPrefix(w, name+" is an http:// address") {
@@ -508,9 +488,10 @@ func TestLoad_TrustProxyMustParse(t *testing.T) {
 
 // An origin with a * inside it, such as https://*.example.com, is not a
 // pattern: Hardcount matches origins exactly, so it would allow nothing. "*"
-// beside other origins turns the sign-in cookie off for them too. Both stop
-// start-up, in every environment.
-func TestLoad_CORSAllowedOriginsRefusesPatterns(t *testing.T) {
+// beside other origins turns the sign-in cookie off for them too. A set value
+// with no origin in it would allow none. All three stop start-up, in every
+// environment.
+func TestLoad_CORSAllowedOriginsMustBeUsable(t *testing.T) {
 	t.Setenv("DATABASE_URL", "postgres://test:test@localhost/test")
 	t.Setenv("APP_DATABASE_URL", "postgres://app:app@localhost/test")
 	t.Setenv("HARDCOUNT_ENCRYPTION_KEY", strings.Repeat("ab", 32))
@@ -519,7 +500,7 @@ func TestLoad_CORSAllowedOriginsRefusesPatterns(t *testing.T) {
 
 	for _, env := range []string{"production", "local"} {
 		t.Setenv("APP_ENV", env)
-		for _, bad := range []string{"https://*.example.com", "h*", "https://app.example.com,*.example.com", "**", "*,https://app.example.com", "https://app.example.com, *"} {
+		for _, bad := range []string{"https://*.example.com", "h*", "https://app.example.com,*.example.com", "**", "*,https://app.example.com", "https://app.example.com, *", "   ", " , "} {
 			t.Setenv("CORS_ALLOWED_ORIGINS", bad)
 			_, err := Load()
 			if err == nil || !strings.Contains(err.Error(), "CORS_ALLOWED_ORIGINS") {
@@ -544,7 +525,7 @@ func TestParseCORSOrigins(t *testing.T) {
 		err  string
 	}{
 		{"", nil, ""},
-		{" , ", nil, ""},
+		{" , ", nil, "names no origin"},
 		{" https://a.example.com , https://b.example.com ,", []string{"https://a.example.com", "https://b.example.com"}, ""},
 		{" * ", []string{"*"}, ""},
 		{"*,*", []string{"*"}, ""},
@@ -788,4 +769,12 @@ func TestParseLogLevel(t *testing.T) {
 			t.Errorf("ParseLogLevel(%q) = nil error, want a refusal", raw)
 		}
 	}
+}
+
+// envServer is the server's settings from the environment, with TRUST_PROXY
+// set to trustProxy.
+func envServer(trustProxy string) Server {
+	s := ServerFromEnv()
+	s.TrustProxy = trustProxy
+	return s
 }

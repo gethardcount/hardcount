@@ -2,83 +2,95 @@ package auth
 
 import "context"
 
-// contextKey keys the caller values a request's context carries.
-// session.Authenticate sets them from a cookie or a key; a public customer
-// page sets the customer actor.
+// contextKey keys the request's context values.
 type contextKey string
 
 const (
-	tenantIDKey      contextKey = "tenant_id"
-	apiKeyIDKey      contextKey = "api_key_id"
-	userIDKey        contextKey = "user_id"
-	keyTypeKey       contextKey = "key_type"
+	callerKey        contextKey = "caller"
 	customerActorKey contextKey = "customer_actor_id"
 )
 
-// TenantID returns the authenticated tenant ID in ctx, or "" when there is
-// none.
+// Caller is who a request acts as: a dashboard user's session, or an API key.
+// Never both a UserID and a KeyID: session.Authenticate sets one or the
+// other. WithUserID names a user only on the account routes (sign-in and
+// sign-out, the mode switch, invitations, password reset), where
+// authentication does not run and there is no caller yet. A background job, a
+// webhook or a public page carries only a tenant (WithTenantID), or no
+// caller.
+type Caller struct {
+	TenantID string
+	UserID   string  // set for a session
+	KeyID    string  // set for a key
+	KeyType  KeyType // the key's type; "" for a session
+}
+
+// IsSession reports whether c is a dashboard user's session: a user and no
+// key.
+func (c Caller) IsSession() bool {
+	return c.UserID != "" && c.KeyID == ""
+}
+
+// Actor names c in the audit log's actor_type words: "user" and the user's
+// id for a session, "api_key" and the key's id for any caller with a key,
+// and "", "" for neither. audit.ResolveActor says what adding an actor type needs.
+func (c Caller) Actor() (actorType, id string) {
+	switch {
+	case c.IsSession():
+		return "user", c.UserID
+	case c.KeyID != "":
+		return "api_key", c.KeyID
+	}
+	return "", ""
+}
+
+// WithCaller returns ctx with c as its whole caller, replacing any caller ctx
+// held. session.Authenticate sets it for each authenticated request.
+func WithCaller(ctx context.Context, c Caller) context.Context {
+	return context.WithValue(ctx, callerKey, c)
+}
+
+// CallerOf returns the caller in ctx, or the zero Caller when there is none.
+func CallerOf(ctx context.Context) Caller {
+	c, _ := ctx.Value(callerKey).(Caller)
+	return c
+}
+
+// TenantID returns the caller's tenant in ctx, or "" when there is none.
 func TenantID(ctx context.Context) string {
-	v, _ := ctx.Value(tenantIDKey).(string)
-	return v
+	return CallerOf(ctx).TenantID
 }
 
-// WithTenantID returns ctx carrying tenantID. A background job sets it before
-// calling code that needs the tenant, such as the per-tenant Stripe client.
+// WithTenantID returns ctx with tenantID as the caller's tenant; the rest of
+// the caller is kept. A background job, or a public route that finds the
+// tenant itself, sets it before calling code that needs the tenant, such as
+// the per-tenant Stripe client.
 func WithTenantID(ctx context.Context, tenantID string) context.Context {
-	return context.WithValue(ctx, tenantIDKey, tenantID)
+	c := CallerOf(ctx)
+	c.TenantID = tenantID
+	return WithCaller(ctx, c)
 }
 
-// KeyID returns the ID of the API key that authenticated the request, or ""
-// when no key did.
-func KeyID(ctx context.Context) string {
-	v, _ := ctx.Value(apiKeyIDKey).(string)
-	return v
-}
-
-// WithKeyID returns ctx carrying the id of the key that authenticated the
-// request.
-func WithKeyID(ctx context.Context, id string) context.Context {
-	return context.WithValue(ctx, apiKeyIDKey, id)
-}
-
-// UserID returns the dashboard user of the request's session, or "" when a
-// key authenticated it. The audit log names the actor by UserID for a session
-// and by KeyID for a key.
-func UserID(ctx context.Context) string {
-	v, _ := ctx.Value(userIDKey).(string)
-	return v
-}
-
-// WithUserID returns ctx carrying the dashboard user of the request's
-// session.
+// WithUserID returns ctx with id as the caller's user. The account routes
+// outside authentication (route_table.go's outsideAuth entries) set it, so
+// their audit row names the user. Each calls it on a context with no caller, so the
+// result is that user's session (IsSession).
 func WithUserID(ctx context.Context, id string) context.Context {
-	return context.WithValue(ctx, userIDKey, id)
+	c := CallerOf(ctx)
+	c.UserID = id
+	return WithCaller(ctx, c)
 }
 
-// GetKeyType returns the caller's kind of credential in ctx (KeyType), or ""
-// when there is none.
-func GetKeyType(ctx context.Context) KeyType {
-	v, _ := ctx.Value(keyTypeKey).(KeyType)
-	return v
-}
-
-// WithKeyType returns ctx carrying the caller's kind of credential, which
-// Require, RequireMethod and RequireSession check.
-func WithKeyType(ctx context.Context, kt KeyType) context.Context {
-	return context.WithValue(ctx, keyTypeKey, kt)
-}
-
-// CustomerActorID returns the customer a public customer page set as the
-// request's actor (WithCustomerActor), or "" when no customer acted.
-// audit.Logger reads it to write actor_type 'customer'.
+// CustomerActorID returns the customer WithCustomerActor put on ctx, or ""
+// when none.
 func CustomerActorID(ctx context.Context) string {
 	v, _ := ctx.Value(customerActorKey).(string)
 	return v
 }
 
-// WithCustomerActor returns ctx carrying a customer as the request's actor,
-// so the audit row of what a customer did names them (actor_type 'customer')
-// rather than 'system' (ADR-090).
+// WithCustomerActor returns ctx with customerID as the actor, for work a
+// customer did: on a public page, or in the Stripe event such a page caused.
+// audit.ResolveActor then names the customer (actor_type 'customer') ahead
+// of any caller.
 func WithCustomerActor(ctx context.Context, customerID string) context.Context {
 	return context.WithValue(ctx, customerActorKey, customerID)
 }

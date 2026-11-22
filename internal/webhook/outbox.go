@@ -5,12 +5,12 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/gethardcount/hardcount/internal/platform/leader"
 	"log/slog"
 	"runtime/debug"
 	"time"
 
-	mw "github.com/gethardcount/hardcount/internal/api/middleware"
+	"github.com/gethardcount/hardcount/internal/platform/leader"
+
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
@@ -320,7 +320,7 @@ func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler Out
 			slog.Error("webhook outbox: commit DLQ mark", "outbox_id", row.ID, "error", err)
 			return
 		}
-		mw.RecordWebhookOutboxDeadLettered(row.Livemode)
+		recordOutboxDeadLettered(row.Livemode)
 		slog.Error("webhook outbox: row moved to DLQ after max attempts",
 			"outbox_id", row.ID,
 			"tenant_id", row.TenantID,

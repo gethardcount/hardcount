@@ -55,7 +55,7 @@ docker run -d --name "$name-dash" --network "$name" --network-alias hardcount-da
 echo "== nginx -t: nginx.conf on $proxy_image"
 docker run --rm --network "$name" "${proxy_files[@]}" "$proxy_image" nginx -t
 docker run -d --name "$name-proxy" --network "$name" -p 127.0.0.1::80 \
-  "${proxy_files[@]}" "$proxy_image" >/dev/null
+  "${proxy_files[@]}" -v "$work:/check:ro" "$proxy_image" >/dev/null
 base="http://127.0.0.1:$(docker port "$name-proxy" 80/tcp | head -1 | sed 's/.*://')"
 for _ in $(seq 50); do curl -fs -o /dev/null "$base/" && break; sleep 0.2; done
 
@@ -97,6 +97,25 @@ for c in proxy dash; do
   grep '" [0-9][0-9][0-9] ' "$work/$c.log" || true
   if grep -q secret "$work/$c.log"; then fail "$c log holds a token"; else echo "ok    $c log holds no token"; fi
   grep -q 'GET /invoices/hc_inv_visible ' "$work/$c.log" || fail "$c log lacks a path with no token"
+done
+
+echo "== nginx.conf with its per-address limit switched on"
+# The limit ships commented out between "opt-in limit" markers. A copy with
+# those lines uncommented, on port 8081, runs in the proxy container beside the
+# shipped one, so the block cannot rot.
+sed -e '/# opt-in limit: begin/,/# opt-in limit: end/{' -e '/# opt-in limit:/!s/^\( *\)# /\1/' -e '}' \
+  -e 's/listen 80 default_server;/listen 8081;/' "$compose/nginx.conf" > "$work/limited.conf"
+# A renamed marker or a line that lost its space would leave lines commented
+# and this check still passing, so count what came out.
+[ "$(grep -cE '^ *limit_req zone=hc_' "$work/limited.conf")" = 5 ] || fail "the copy has not 5 limit_req lines uncommented"
+[ "$(grep -cE '^ *set_real_ip_from ' "$work/limited.conf")" = 2 ] || fail "the copy has not 2 set_real_ip_from lines uncommented"
+printf 'events {}\nhttp { include /etc/nginx/mime.types; include /check/limited.conf; }\n' > "$work/limited-main.conf"
+docker exec "$name-proxy" nginx -t -c /check/limited-main.conf
+docker exec -d "$name-proxy" nginx -c /check/limited-main.conf -g 'pid /tmp/limited.pid; daemon off;'
+limited() { docker exec "$name-proxy" wget -q -O /dev/null "http://127.0.0.1:8081$1"; }
+for _ in $(seq 50); do limited /v1/customers && break; sleep 0.2; done
+for path in /v1/customers /v1/usage-events; do
+  if limited "$path"; then echo "ok    $path through the limit answers 200"; else fail "$path through the limit"; fi
 done
 
 [ "$failures" = 0 ] || { echo "$failures failed"; exit 1; }

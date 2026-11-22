@@ -12,8 +12,10 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	mw "github.com/gethardcount/hardcount/internal/api/middleware"
+	"github.com/gethardcount/hardcount/internal/config"
 	"github.com/gethardcount/hardcount/internal/dashmembers"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/gethardcount/hardcount/internal/session"
 )
 
@@ -31,10 +33,11 @@ func TestAcceptInvite_SessionIPIsTheTrustedClientIP(t *testing.T) {
 	}
 	token := h.email.lastToken(t)
 
-	handler := dashmembers.NewHandler(h.svc, session.CookieConfig{Path: "/"})
+	handler := dashmembers.NewHandler(h.svc, session.CookieConfig{})
 	r := chi.NewRouter()
 	// The router mounts TrustedClientIP globally, ahead of /v1/auth.
-	r.Use(mw.TrustedClientIP(mw.ParseTrustedProxies("10.0.0.0/8")))
+	r.Use(mw.TrustedClientIP(config.Server{TrustProxy: "10.0.0.0/8"}.TrustedProxies()))
+	r.Use(requesttest.Root) // the request's record, which takes the client address, as at the server's root
 	handler.RegisterPublicRoutes(r)
 
 	body, _ := json.Marshal(map[string]string{"token": token, "password": testPassword})

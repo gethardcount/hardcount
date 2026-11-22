@@ -18,6 +18,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/dashmembers"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/gethardcount/hardcount/internal/session"
 	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/user"
@@ -289,7 +290,7 @@ func serve(h *harness, svc *dashmembers.Service, method, path, body string) *htt
 		req.Header.Set("Content-Type", "application/json")
 	}
 	rec := httptest.NewRecorder()
-	dashmembers.NewHandler(svc, session.CookieConfig{Path: "/"}).Routes().ServeHTTP(rec, req)
+	requesttest.Root(dashmembers.NewHandler(svc, session.CookieConfig{}).Routes()).ServeHTTP(rec, req)
 	return rec
 }
 

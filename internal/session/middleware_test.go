@@ -5,33 +5,30 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/gethardcount/hardcount/internal/audit"
-	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/platform/request"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 )
 
-// fakeSessionStore serves one session by hash, or fails every lookup with an
-// infrastructure error when outage is set.
+// fakeSessionStore serves the sessions it holds by hash. It holds only live
+// sessions, so GetByIDHash ignores the instant it is given.
 type fakeSessionStore struct {
 	sessions map[string]Session
-	outage   bool
 }
 
 func (f *fakeSessionStore) InsertTx(context.Context, *sql.Tx, Session) error { return nil }
-func (f *fakeSessionStore) RevokeTx(context.Context, *sql.Tx, string) (bool, error) {
+func (f *fakeSessionStore) EndTx(context.Context, *sql.Tx, string) (bool, error) {
 	return false, nil
 }
-func (f *fakeSessionStore) GetByIDHash(_ context.Context, idHash string) (Session, error) {
-	if f.outage {
-		return Session{}, errors.New("checkout conn: dial tcp 127.0.0.1:5432: connect: connection refused")
-	}
+func (f *fakeSessionStore) GetByIDHash(_ context.Context, idHash string, _ time.Time) (Session, error) {
 	s, ok := f.sessions[idHash]
 	if !ok {
 		return Session{}, ErrNotFound
@@ -49,42 +46,29 @@ func (f *fakeSessionStore) SetLivemodeWith(context.Context, string, bool, func(*
 	return Session{}, false, nil
 }
 
+// unknownSession is a well-formed session id that names no session.
+var unknownSession = strings.Repeat("ab", 32)
+
 func sessionRequest(cookie string) *http.Request {
 	req := httptest.NewRequest("GET", "/", nil)
 	req.AddCookie(&http.Cookie{Name: CookieName, Value: cookie})
 	return req
 }
 
-// A session store that fails is no verdict on the cookie: the request stops
-// with a 503 and does not go on to the API key, where with no key it would
-// get a 401 for missing credentials.
-func TestRequireCaller_CookieOutageDoesNotFallThrough(t *testing.T) {
-	svc := NewService(&fakeSessionStore{outage: true})
-	handler := RequireCaller(svc, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		t.Fatal("should not reach handler")
-	}))
-
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, sessionRequest("sess_deadbeef"))
-
-	if rec.Code != http.StatusServiceUnavailable {
-		t.Fatalf("status: got %d, want 503 (no fall-through on outage)", rec.Code)
-	}
-}
-
 // canceledStore fails every lookup the way the Postgres store does when the
 // request's context is cancelled mid-query.
 type canceledStore struct{ fakeSessionStore }
 
-func (*canceledStore) GetByIDHash(context.Context, string) (Session, error) {
+func (*canceledStore) GetByIDHash(context.Context, string, time.Time) (Session, error) {
 	return Session{}, fmt.Errorf("get session: %w", context.Canceled)
 }
 
-// TestRequireCaller_ClientGoneLogsAtWarn: when the session lookup fails
-// because the client went away (a closed browser tab), the 503 is logged at
-// WARN. The same error on a live request stays at ERROR, the level operators
-// alert on.
-func TestRequireCaller_ClientGoneLogsAtWarn(t *testing.T) {
+// A session store that fails is no verdict on the cookie: the request stops
+// with a 503 and does not go on to the API key, where with no key it would
+// get a 401 for missing credentials. When the client went away (a closed
+// browser tab), the 503 is logged at WARN. The same error on a live request
+// stays at ERROR, the level operators alert on.
+func TestRequireCaller_SessionStoreFails(t *testing.T) {
 	svc := NewService(&canceledStore{})
 	handler := RequireCaller(svc, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		t.Fatal("should not reach handler")
@@ -106,8 +90,12 @@ func TestRequireCaller_ClientGoneLogsAtWarn(t *testing.T) {
 			slog.SetDefault(slog.New(slog.NewJSONHandler(&buf, nil)))
 			t.Cleanup(func() { slog.SetDefault(prev) })
 
-			handler.ServeHTTP(httptest.NewRecorder(), sessionRequest("sess_deadbeef").WithContext(tc.ctx))
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, sessionRequest(unknownSession).WithContext(tc.ctx))
 
+			if rec.Code != http.StatusServiceUnavailable {
+				t.Errorf("status = %d, want 503 (no fall-through to the API key)", rec.Code)
+			}
 			var entry map[string]any
 			if err := json.Unmarshal(buf.Bytes(), &entry); err != nil {
 				t.Fatalf("want exactly one JSON log line, got %q: %v", buf.String(), err)
@@ -117,12 +105,22 @@ func TestRequireCaller_ClientGoneLogsAtWarn(t *testing.T) {
 			}
 		})
 	}
+
+	// A cookie of the wrong shape is no cookie: it is never looked up, so the
+	// failing store is not reached and the answer is the 401 for no
+	// credential, not the 503.
+	rec := httptest.NewRecorder()
+	RequireCaller(svc, nil)(http.NotFoundHandler()).ServeHTTP(rec, sessionRequest("sess_deadbeef"))
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("a cookie of the wrong shape: status = %d, want 401 with no lookup", rec.Code)
+	}
 }
 
-// The access log wraps RequireCaller and cannot see the context it hands
-// its handler. So the middleware names the caller it accepted on the request's
-// record, under the names the audit log gives the same context.
-func TestRequireCaller_NamesTheCallerOnTheRecord(t *testing.T) {
+// The access log wraps RequireCaller and cannot see the context it hands its
+// handler, and sign-out and the mode switch resolve the cookie themselves. So
+// RequireCaller and NameActor name a session's user on the request's record,
+// under the names the audit log gives the same session's context.
+func TestSessionUserNamedOnTheRecord(t *testing.T) {
 	store := &fakeSessionStore{sessions: map[string]Session{}}
 	sessions := NewService(store)
 	rawSession, sess, err := sessions.IssueTx(t.Context(), nil, IssueInput{UserID: "usr_owner", TenantID: "ten_1"})
@@ -130,64 +128,50 @@ func TestRequireCaller_NamesTheCallerOnTheRecord(t *testing.T) {
 		t.Fatalf("issue session: %v", err)
 	}
 	store.sessions[sess.IDHash] = sess // the fake's InsertTx keeps nothing
+	want := request.Actor{Type: "user", ID: "usr_owner", TenantID: "ten_1"}
 
-	serve := func(cookie string) (outer context.Context, seen *http.Request, status int) {
-		outer = request.WithRecord(t.Context())
-		rec := httptest.NewRecorder()
-		RequireCaller(sessions, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			seen = r
-		})).ServeHTTP(rec, sessionRequest(cookie).WithContext(outer))
-		return outer, seen, rec.Code
+	var seen *http.Request
+	for name, h := range map[string]http.Handler{
+		"RequireCaller": RequireCaller(sessions, nil)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { seen = r })),
+		"NameActor":     http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { NameActor(r.Context(), sess) }),
+	} {
+		record, rec := recordOf(h, sessionRequest(rawSession))
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s: status = %d, want 200", name, rec.Code)
+		}
+		if got := record.Actor(); got != want {
+			t.Errorf("%s: actor on the record = %+v, want %+v", name, got, want)
+		}
+	}
+	if actorType, actorID := audit.ResolveActor(seen.Context()); actorType != want.Type || actorID != want.ID {
+		t.Errorf("the audit log names this session %s/%s, the record %s/%s", actorType, actorID, want.Type, want.ID)
 	}
 
-	t.Run("a session", func(t *testing.T) {
-		outer, seen, status := serve(rawSession)
-		if status != http.StatusOK || seen == nil {
-			t.Fatalf("status = %d (reached=%v), want 200", status, seen != nil)
+	// No credential: 401 for missing credentials, the text the API docs
+	// promise. A key is read from Authorization: Bearer only, so one in
+	// X-API-Key is none (with a nil key service, reading it would panic).
+	keyInOtherHeader := httptest.NewRequest("GET", "/", nil)
+	keyInOtherHeader.Header.Set("X-API-Key", "hc_secret_test_"+strings.Repeat("0", 64))
+	for name, req := range map[string]*http.Request{"unknown cookie": sessionRequest(unknownSession), "key in X-API-Key": keyInOtherHeader} {
+		seen = nil
+		record, rec := recordOf(RequireCaller(sessions, nil)(http.HandlerFunc(func(_ http.ResponseWriter, r *http.Request) { seen = r })), req)
+		if rec.Code != http.StatusUnauthorized || seen != nil || !strings.Contains(rec.Body.String(), "missing credentials") {
+			t.Errorf("%s: got %d %s (reached=%v), want 401 missing credentials", name, rec.Code, rec.Body.String(), seen != nil)
 		}
-		want := request.Caller{ActorType: "user", ActorID: "usr_owner", TenantID: "ten_1"}
-		if got := request.CallerOf(outer); got != want {
-			t.Errorf("caller on the record = %+v, want %+v", got, want)
+		if got := record.Actor(); got != (request.Actor{}) {
+			t.Errorf("%s: actor on the record = %+v, want none: nobody signed in", name, got)
 		}
-		if actorType, actorID := audit.ResolveActor(seen.Context()); actorType != want.ActorType || actorID != want.ActorID {
-			t.Errorf("the audit log names this caller %s/%s, the record %s/%s", actorType, actorID, want.ActorType, want.ActorID)
-		}
-	})
-
-	// An unknown cookie and no API key: 401 for missing credentials.
-	t.Run("refused", func(t *testing.T) {
-		outer, seen, status := serve("sess_unknown")
-		if status != http.StatusUnauthorized || seen != nil {
-			t.Fatalf("status = %d (reached=%v), want 401", status, seen != nil)
-		}
-		if got := request.CallerOf(outer); got != (request.Caller{}) {
-			t.Errorf("caller on the record = %+v, want none: nobody signed in", got)
-		}
-	})
-}
-
-// callerIn and the audit log name an API key's context the same way.
-func TestCallerIn_APIKey(t *testing.T) {
-	ctx := auth.WithKeyID(auth.WithUserID(auth.WithTenantID(t.Context(), "ten_1"), ""), "hc_key_9")
-	want := request.Caller{ActorType: "api_key", ActorID: "hc_key_9", TenantID: "ten_1"}
-	if got := callerIn(ctx); got != want {
-		t.Errorf("callerIn = %+v, want %+v", got, want)
-	}
-	if actorType, actorID := audit.ResolveActor(ctx); actorType != want.ActorType || actorID != want.ActorID {
-		t.Errorf("the audit log names this caller %s/%s, callerIn %s/%s", actorType, actorID, want.ActorType, want.ActorID)
 	}
 }
 
-// NameCaller and the audit log name a session's user the same way.
-func TestNameCaller(t *testing.T) {
-	ctx := request.WithRecord(t.Context())
-	sess := Session{UserID: "usr_owner", TenantID: "ten_1"}
-	NameCaller(ctx, sess)
-	want := request.Caller{ActorType: "user", ActorID: "usr_owner", TenantID: "ten_1"}
-	if got := request.CallerOf(ctx); got != want {
-		t.Errorf("caller on the record = %+v, want %+v", got, want)
-	}
-	if actorType, actorID := audit.ResolveActor(applyToCtx(t.Context(), sess)); actorType != want.ActorType || actorID != want.ActorID {
-		t.Errorf("the audit log names this session %s/%s, NameCaller %s/%s", actorType, actorID, want.ActorType, want.ActorID)
-	}
+// recordOf serves req through h under the server's root, so the request has
+// its record, and returns the record and the response.
+func recordOf(h http.Handler, req *http.Request) (*request.Record, *httptest.ResponseRecorder) {
+	var record *request.Record
+	w := httptest.NewRecorder()
+	requesttest.Root(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		record = request.Of(r.Context())
+		h.ServeHTTP(w, r)
+	})).ServeHTTP(w, req)
+	return record, w
 }

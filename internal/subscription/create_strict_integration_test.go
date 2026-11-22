@@ -102,7 +102,7 @@ func (f *strictCreateFixture) post(body, idemKey string) *httptest.ResponseRecor
 	if idemKey != "" {
 		req.Header.Set("Idempotency-Key", idemKey)
 	}
-	reqCtx := clock.WithEffectiveNow(auth.WithKeyID(auth.WithTenantID(f.ctx, f.tenant), "key_test"), f.now)
+	reqCtx := clock.WithEffectiveNow(auth.WithCaller(f.ctx, auth.Caller{TenantID: f.tenant, KeyID: "key_test"}), f.now)
 	rr := httptest.NewRecorder()
 	f.srv.ServeHTTP(rr, req.WithContext(reqCtx))
 	return rr

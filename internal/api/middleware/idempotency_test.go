@@ -3,42 +3,49 @@ package middleware
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"testing/iotest"
 	"time"
 
+	_ "github.com/jackc/pgx/v5/stdlib"
+	promtest "github.com/prometheus/client_golang/prometheus/testutil"
+
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 )
 
-func TestIdempotency_NoCaching_WithoutKey(t *testing.T) {
-	callCount := 0
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		callCount++
-		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"id":"new"}`))
-	})
-
-	// No idempotency key — should execute every time
-	req := httptest.NewRequest("POST", "/v1/customers", strings.NewReader(`{}`))
-	ctx := auth.WithTenantID(req.Context(), "t1")
-	req = req.WithContext(ctx)
-
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if callCount != 1 {
-		t.Errorf("expected 1 call, got %d", callCount)
+// closedDB is a store whose every transaction fails, as during an outage.
+func closedDB(t *testing.T) *postgres.DB {
+	t.Helper()
+	pool, err := sql.Open("pgx", "postgres://nobody@127.0.0.1:1/none")
+	if err != nil {
+		t.Fatalf("open: %v", err)
 	}
+	_ = pool.Close()
+	return postgres.NewDB(pool, time.Second)
 }
 
-// TestFingerprintRequest holds what makes two requests the same request: the
+// keyedPost is a POST /v1/invoices with an Idempotency-Key, from caller, in
+// test mode.
+func keyedPost(caller auth.Caller, body io.Reader) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, "/v1/invoices", body)
+	req.Header.Set("Idempotency-Key", "idem-unit")
+	return req.WithContext(postgres.WithLivemode(auth.WithCaller(req.Context(), caller), false))
+}
+
+// The fingerprint names what makes two requests the same request: the
 // method, the path with its query string, the caller and the body. Equal
-// inputs hash equal, and changing any one of them changes the hash.
+// inputs hash equal, changing any one changes the hash, and a zero byte
+// between the parts keeps a byte moved across a boundary from hashing equal.
 func TestFingerprintRequest(t *testing.T) {
 	type in struct {
 		method, uri, caller string
@@ -66,9 +73,6 @@ func TestFingerprintRequest(t *testing.T) {
 			t.Errorf("%s: the fingerprint must differ from the base request's", c.name)
 		}
 	}
-
-	// A zero byte separates each part from the next, so moving one byte
-	// across a boundary changes the hash.
 	for _, c := range []struct {
 		boundary string
 		a, b     in
@@ -83,164 +87,122 @@ func TestFingerprintRequest(t *testing.T) {
 	}
 }
 
-// TestRequestCaller holds who the fingerprint names as the caller: the API
-// key's id for a key, and the dashboard user's id for a session, so a person
-// who signs in again is the same caller. A context with neither, or with both,
-// names no caller.
-func TestRequestCaller(t *testing.T) {
-	bg := context.Background()
+// A request with no caller, or a caller with no tenant, means authentication
+// did not run first. It is refused with 500 and runs nothing, rather than
+// stored for no caller or passed through unguarded.
+func TestIdempotency_NoCallerIsRefused(t *testing.T) {
 	for _, c := range []struct {
 		name   string
-		ctx    context.Context
-		want   string
-		wantOK bool
+		caller auth.Caller
 	}{
-		{"API key", auth.WithUserID(auth.WithKeyID(bg, "key_a"), ""), "key:key_a", true},
-		{"dashboard session", auth.WithKeyID(auth.WithUserID(bg, "usr_a"), ""), "user:usr_a", true},
-		{"no caller", bg, "", false},
-		{"both", auth.WithUserID(auth.WithKeyID(bg, "key_a"), "usr_a"), "", false},
+		{"no caller", auth.Caller{TenantID: "t1"}},
+		{"a caller with no tenant", auth.Caller{KeyID: "key_a"}},
 	} {
-		got, ok := requestCaller(c.ctx)
-		if got != c.want || ok != c.wantOK {
-			t.Errorf("%s: requestCaller = %q, %v; want %q, %v", c.name, got, ok, c.want, c.wantOK)
+		var calls int
+		handler := requesttest.Root(Idempotency(nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			calls++
+			w.WriteHeader(http.StatusCreated)
+		})))
+		rec := httptest.NewRecorder()
+		handler.ServeHTTP(rec, keyedPost(c.caller, strings.NewReader(`{}`)))
+		if rec.Code != http.StatusInternalServerError || calls != 0 {
+			t.Errorf("%s: status %d with the handler run %d time(s), want 500 and 0", c.name, rec.Code, calls)
 		}
 	}
 }
 
-// A request that reaches the middleware with a tenant but no caller means
-// authentication did not run first. It is refused with 500 and runs nothing,
-// rather than being stored under a fingerprint that names no caller.
-func TestIdempotency_NoCallerIsRefused(t *testing.T) {
+// When the key cannot be reserved, the request is refused with a retryable
+// 503 and the handler does not run: running it unprotected would let the
+// client's retry run the action a second time.
+func TestIdempotency_ReserveErrorRefusesAndRunsNothing(t *testing.T) {
+	var calls atomic.Int64
+	handler := requesttest.Root(Idempotency(closedDB(t), nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		w.WriteHeader(http.StatusOK)
+	})))
+	rec := httptest.NewRecorder()
+	handler.ServeHTTP(rec, keyedPost(auth.Caller{TenantID: "t1", KeyID: "key_test"}, strings.NewReader(`{"amount_cents":5000}`)))
+
+	if rec.Code != http.StatusServiceUnavailable || rec.Header().Get("Retry-After") == "" {
+		t.Fatalf("status %d, Retry-After %q; want 503 with Retry-After", rec.Code, rec.Header().Get("Retry-After"))
+	}
+	if n := calls.Load(); n != 0 {
+		t.Fatalf("handler ran %d time(s); with no reservation it must not run", n)
+	}
+}
+
+// The body is read before the key is reserved, so a body that fails to read
+// answers 400 without running the handler or touching the store: the store is
+// nil here, so a reserve would panic.
+func TestIdempotency_BodyReadErrorAnsweredBeforeTheReserve(t *testing.T) {
 	var calls int
 	handler := Idempotency(nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		w.WriteHeader(http.StatusCreated)
 	}))
-	req := httptest.NewRequest("POST", "/v1/customers", strings.NewReader(`{}`))
-	req.Header.Set("Idempotency-Key", "idem-no-caller")
-	req = req.WithContext(postgres.WithLivemode(auth.WithTenantID(req.Context(), "t1"), false))
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusInternalServerError || calls != 0 {
-		t.Errorf("status %d with the handler run %d time(s), want 500 and 0", rec.Code, calls)
+	handler.ServeHTTP(rec, keyedPost(auth.Caller{TenantID: "t1", KeyID: "key_a"}, io.NopCloser(iotest.ErrReader(io.ErrUnexpectedEOF))))
+	if rec.Code != http.StatusBadRequest || !strings.Contains(rec.Body.String(), `"code":"invalid_request"`) || calls != 0 {
+		t.Errorf("answer %d %s with the handler run %d time(s), want 400 invalid_request and 0", rec.Code, rec.Body, calls)
 	}
 }
 
-func TestIdempotency_GET_NotCached(t *testing.T) {
-	callCount := 0
-	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		callCount++
-		w.WriteHeader(http.StatusOK)
-	})
-
-	// GET with idempotency key — should NOT be cached
-	req := httptest.NewRequest("GET", "/v1/customers", nil)
-	req.Header.Set("Idempotency-Key", "idem-get-1")
-
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	handler.ServeHTTP(rec, req)
-
-	if callCount != 2 {
-		t.Errorf("GET should not be cached, expected 2 calls, got %d", callCount)
-	}
+// recordingHandler keeps every slog record so a test can read what was logged.
+type recordingHandler struct {
+	mu      sync.Mutex
+	records []slog.Record
 }
 
-func TestRateLimiter_NilDB_FailsOpen(t *testing.T) {
-	// With nil db the rate limiter should fail open — every request is allowed.
-	rl := NewRateLimiter(nil, "test", 1, time.Minute)
-	handler := rl.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	for i := 0; i < 5; i++ {
-		req := httptest.NewRequest("GET", "/v1/customers", nil)
-		rec := httptest.NewRecorder()
-		handler.ServeHTTP(rec, req)
-		if rec.Code != http.StatusOK {
-			t.Errorf("request %d: fail-open should allow, got %d", i, rec.Code)
-		}
-	}
-
-	// Headers should still be set even in fail-open mode
-	req := httptest.NewRequest("GET", "/v1/customers", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Header().Get("X-RateLimit-Limit") != "1" {
-		t.Errorf("X-RateLimit-Limit: got %q, want 1", rec.Header().Get("X-RateLimit-Limit"))
-	}
-	if rec.Header().Get("X-RateLimit-Remaining") == "" {
-		t.Error("X-RateLimit-Remaining header should be set")
-	}
+func (h *recordingHandler) Enabled(context.Context, slog.Level) bool { return true }
+func (h *recordingHandler) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r.Clone())
+	return nil
 }
+func (h *recordingHandler) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *recordingHandler) WithGroup(string) slog.Handler      { return h }
 
-func TestRateLimiter_NilDB_FailsClosed_WhenConfigured(t *testing.T) {
-	rl := NewRateLimiter(nil, "test", 1, time.Minute)
-	rl.SetFailClosed(true)
-	handler := rl.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	req := httptest.NewRequest("GET", "/v1/customers", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-	if rec.Code != http.StatusTooManyRequests {
-		t.Errorf("fail-closed should return 429 when Redis missing, got %d", rec.Code)
-	}
-}
-
-func TestRateLimiter_HealthSkipped(t *testing.T) {
-	rl := NewRateLimiter(nil, "test", 1, time.Minute)
-	handler := rl.Middleware()(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusOK)
-	}))
-
-	// Health check should bypass rate limiting entirely (no headers set)
-	req := httptest.NewRequest("GET", "/health", nil)
-	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Errorf("health check should bypass rate limit, got %d", rec.Code)
-	}
-	if rec.Header().Get("X-RateLimit-Limit") != "" {
-		t.Error("health check should not have rate limit headers")
-	}
-}
-
-// The body is read before the key is reserved. A body over the router's cap
-// gets the decoder's 413, and a body that fails to read for another reason
-// keeps its 400. Neither runs the handler or touches the store: the store is
-// nil here, so a reserve would panic.
-func TestIdempotency_BodyReadErrorAnsweredBeforeTheReserve(t *testing.T) {
-	for _, c := range []struct {
-		name     string
-		body     func(http.ResponseWriter) io.ReadCloser
-		wantCode int
-		wantErr  string
+// A failed release or finalize leaves the key pending, so every retry with it
+// gets 409 for the rest of the key's life. Each is counted in
+// hardcount_idempotency_cache_errors_total and logged at ERROR.
+func TestIdempotency_StoreWriteErrorsAreCountedAndLogged(t *testing.T) {
+	db := closedDB(t)
+	for _, tc := range []struct {
+		stage string
+		write func(ctx context.Context)
 	}{
-		{"over the cap", func(w http.ResponseWriter) io.ReadCloser {
-			return http.MaxBytesReader(w, io.NopCloser(strings.NewReader(`{"a":"bcdefgh"}`)), 8)
-		}, http.StatusRequestEntityTooLarge, "payload_too_large"},
-		{"another read error", func(http.ResponseWriter) io.ReadCloser {
-			return io.NopCloser(iotest.ErrReader(io.ErrUnexpectedEOF))
-		}, http.StatusBadRequest, "invalid_request"},
+		{"release", func(ctx context.Context) { releaseKey(ctx, db, "t1", "grant-abc123", http.StatusConflict) }},
+		{"finalize", func(ctx context.Context) { finalizeKey(ctx, db, "t1", "grant-abc123", http.StatusOK, []byte(`{}`)) }},
 	} {
-		t.Run(c.name, func(t *testing.T) {
-			var calls int
-			handler := Idempotency(nil, nil)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				calls++
-			}))
-			rec := httptest.NewRecorder()
-			req := httptest.NewRequest("POST", "/v1/customers", nil)
-			req.Body = c.body(rec)
-			req.Header.Set("Idempotency-Key", "idem-body-read")
-			ctx := auth.WithUserID(auth.WithKeyID(auth.WithTenantID(req.Context(), "t1"), "key_a"), "")
-			handler.ServeHTTP(rec, req.WithContext(postgres.WithLivemode(ctx, false)))
+		t.Run(tc.stage, func(t *testing.T) {
+			rec := &recordingHandler{}
+			prev := slog.Default()
+			slog.SetDefault(slog.New(rec))
+			t.Cleanup(func() { slog.SetDefault(prev) })
 
-			if rec.Code != c.wantCode || !strings.Contains(rec.Body.String(), `"code":"`+c.wantErr+`"`) || calls != 0 {
-				t.Errorf("answer %d %s with the handler run %d time(s), want %d %s and 0", rec.Code, rec.Body, calls, c.wantCode, c.wantErr)
+			before := promtest.ToFloat64(idempotencyKeyErrors.WithLabelValues(tc.stage))
+			tc.write(postgres.WithLivemode(context.Background(), false))
+			if got := promtest.ToFloat64(idempotencyKeyErrors.WithLabelValues(tc.stage)) - before; got != 1 {
+				t.Errorf("hardcount_idempotency_cache_errors_total{stage=%q} rose by %v, want 1", tc.stage, got)
+			}
+
+			var logged *slog.Record
+			for i := range rec.records {
+				if rec.records[i].Level == slog.LevelError {
+					logged = &rec.records[i]
+					break
+				}
+			}
+			if logged == nil {
+				t.Fatalf("no ERROR log for a failed %s", tc.stage)
+			}
+			attrs := map[string]string{}
+			logged.Attrs(func(a slog.Attr) bool {
+				attrs[a.Key] = a.Value.String()
+				return true
+			})
+			if attrs["tenant_id"] != "t1" || attrs["stage"] != "begin" || attrs["error"] == "" {
+				t.Errorf("log attrs = %v, want tenant_id=t1, stage=begin and the error", attrs)
 			}
 		})
 	}

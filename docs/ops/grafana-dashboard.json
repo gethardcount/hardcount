@@ -253,7 +253,7 @@
           "refId": "A"
         }
       ],
-      "description": "Scrape-time gauge (RegisterQueueDepthGauges, shipped 2026-07-06): counts invoice_dunning_runs WHERE state='active'. A value of -1 means the count query itself failed."
+      "description": "Scrape-time gauge (cmd/hardcount's queue-depth gauges, shipped 2026-07-06): counts invoice_dunning_runs WHERE state='active'. A value of -1 means the count query itself failed."
     },
     {
       "collapsed": false,
@@ -294,7 +294,7 @@
           "refId": "B"
         }
       ],
-      "description": "Scrape-time gauges (RegisterQueueDepthGauges, shipped 2026-07-06): pending email/webhook outbox rows. A value of -1 means the count query itself failed. The runbook alerts at > 1000."
+      "description": "Scrape-time gauges (cmd/hardcount's queue-depth gauges, shipped 2026-07-06): pending email/webhook outbox rows. A value of -1 means the count query itself failed. The runbook alerts at > 1000."
     },
     {
       "collapsed": false,
@@ -305,19 +305,45 @@
     },
     {
       "datasource": "Prometheus",
-      "title": "Audit write errors (PAGE if rate > 0)",
+      "title": "Audit rows lost (PAGE if > 0)",
       "type": "timeseries",
       "gridPos": { "h": 8, "w": 12, "x": 0, "y": 68 },
       "id": 16,
       "targets": [
         {
-          "expr": "sum(rate(hardcount_audit_write_errors_total[5m]))",
-          "legendFormat": "audit errors/sec",
+          "expr": "sum(rate(hardcount_audit_write_errors_total{outcome=\"row_lost\"}[5m]))",
+          "legendFormat": "rows lost/sec",
           "refId": "A"
         }
       ],
       "alert": {
-        "name": "Audit write failures",
+        "name": "Audit rows lost: changes committed without their audit row",
+        "conditions": [
+          {
+            "evaluator": { "type": "gt", "params": [0] },
+            "query": { "params": ["A", "5m", "now"] },
+            "reducer": { "type": "avg" },
+            "type": "query"
+          }
+        ],
+        "for": "5m"
+      }
+    },
+    {
+      "datasource": "Prometheus",
+      "title": "Writes refused: audit row not written (ALERT if > 0 for 5m)",
+      "type": "timeseries",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 76 },
+      "id": 19,
+      "targets": [
+        {
+          "expr": "sum(rate(hardcount_audit_write_errors_total{outcome=\"mutation_refused\"}[5m]))",
+          "legendFormat": "writes refused/sec",
+          "refId": "A"
+        }
+      ],
+      "alert": {
+        "name": "Writes failing: audit row could not be written",
         "conditions": [
           {
             "evaluator": { "type": "gt", "params": [0] },
@@ -347,7 +373,7 @@
       "datasource": "Prometheus",
       "title": "Credit operations",
       "type": "timeseries",
-      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 76 },
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 84 },
       "id": 18,
       "targets": [
         {

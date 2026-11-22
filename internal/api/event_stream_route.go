@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"time"
@@ -13,17 +12,20 @@ import (
 	"github.com/gethardcount/hardcount/internal/webhook"
 )
 
-// eventStreamRoute mounts GET /v1/webhook_events/stream: the session cookie
-// or API key (session.RequireCaller), rateLimit, the clock door (door), the
-// apikey:read permission, then the stream. The stream checks its caller again
-// (streamCredentialStopped) at the interval every, for which router.go passes
-// webhook.StreamHeartbeatInterval.
-func eventStreamRoute(h *webhook.Handler, sessSvc *session.Service, authSvc *auth.Service, rateLimit, door func(http.Handler) http.Handler, every time.Duration) func(chi.Router) {
+// eventStreamRoute mounts GET /v1/webhook_events/stream. The /v1 group in
+// router.go authenticates the caller, checks the route table's permission
+// (apikey:read) and rate-limits first. The permission is not checked again
+// while the stream is open: a key's type cannot change, and a session holds
+// every permission. Every interval the stream checks its caller again
+// (streamCredentialStopped), which is why it takes the session and key
+// services: once the key is revoked or expires, or the session ends, it
+// closes with no final frame, and a reconnect with the same credential
+// answers 401. A store failure does not close it. router.go passes
+// webhook.StreamHeartbeatInterval; it is a function, not inline in router.go,
+// so the stream's credential test can mount it with a short interval.
+func eventStreamRoute(h *webhook.Handler, sessSvc *session.Service, authSvc *auth.Service, every time.Duration) func(chi.Router) {
 	return func(r chi.Router) {
-		r.Use(session.RequireCaller(sessSvc, authSvc))
-		r.Use(rateLimit)
-		r.Use(door)
-		r.With(auth.Require(auth.PermAPIKeyRead)).Get("/", h.StreamHandler(streamCredentialStopped(sessSvc, authSvc), every))
+		r.Get("/", h.StreamHandler(streamCredentialStopped(sessSvc, authSvc), every))
 	}
 }
 
@@ -41,20 +43,11 @@ func streamCredentialStopped(sessSvc *session.Service, authSvc *auth.Service) fu
 		ctx, err := session.Authenticate(r, sessSvc, authSvc)
 		switch {
 		case err == nil:
-			return callerOf(ctx) != callerOf(r.Context()), nil
+			return auth.CallerOf(ctx) != auth.CallerOf(r.Context()), nil
 		case errors.Is(err, session.ErrNoCredentials), errors.Is(err, auth.ErrInvalidKey):
 			return true, nil
 		default:
 			return false, err
 		}
 	}
-}
-
-// streamCaller is who a request's credentials name: the tenant, and the
-// session's user or the key. Authenticate sets all three, the one it does not
-// have as "".
-type streamCaller struct{ tenantID, userID, keyID string }
-
-func callerOf(ctx context.Context) streamCaller {
-	return streamCaller{auth.TenantID(ctx), auth.UserID(ctx), auth.KeyID(ctx)}
 }

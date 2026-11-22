@@ -13,6 +13,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/crypto"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request"
 	chimw "github.com/go-chi/chi/v5/middleware"
 	"github.com/prometheus/client_golang/prometheus"
 )
@@ -169,7 +170,7 @@ func (l *Logger) Log(ctx context.Context, tenantID, action, resourceType, resour
 
 	actorType, actorID := ResolveActor(ctx)
 
-	ipAddress := ClientIP(ctx)
+	ipAddress := request.ClientIPIfAny(ctx)
 	requestID := chimw.GetReqID(ctx)
 
 	// created_at is wall-clock — the audit row answers "when did the
@@ -414,7 +415,7 @@ func (l *Logger) LogInTx(ctx context.Context, tx *sql.Tx, e Entry) error {
 		VALUES ($1, NULLIF(current_setting('app.tenant_id', true), ''), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
 	`, postgres.NewID("hc_aud"), actorType, actorID, e.Action, e.ResourceType,
 		e.ResourceID, e.ResourceLabel, metaJSON,
-		nullIfEmpty(ClientIP(ctx)), nullIfEmpty(chimw.GetReqID(ctx)),
+		nullIfEmpty(request.ClientIPIfAny(ctx)), nullIfEmpty(chimw.GetReqID(ctx)),
 		simAt, clockID, time.Now().UTC())
 	if err != nil {
 		// Count this as OutcomeMutationRefused, not OutcomeRowLost. Returning
@@ -441,32 +442,21 @@ func (l *Logger) LogInTx(ctx context.Context, tx *sql.Tx, e Entry) error {
 }
 
 // ResolveActor determines who performed an audited action from the request
-// context, in priority order:
-//   - customer — a stamped customer actor (public token flows, auth.WithCustomerActor)
-//   - user     — a dashboard operator on a session cookie (auth.WithUserID, ADR-011)
-//   - api_key  — an SDK / curl caller on a Bearer hc_… key (auth.WithKeyID)
-//   - system   — background workers / cron with no request identity
+// context, in this order:
+//   - customer: a stamped customer actor (public token flows, auth.WithCustomerActor)
+//   - the caller, as auth.Caller.Actor names it: user for a session, api_key
+//     for any caller with a key
+//   - system: a background job, with no caller
 //
 // A new kind must also be added to every actor_type CHECK (audit_log,
 // email_outbox, invoice_charge_attempts) and to the contexts in
 // TestResolveActorKinds_MatchEveryActorCheck.
-//
-// Every audit write path calls this, so the actor resolves identically on all of
-// them: the post-hoc Logger.Log and the in-tx LogInTx. (There used to be a third
-// — the catch-all AuditLog middleware — which ADR-090 deleted.) Before this, both read only auth.KeyID — and
-// session.applyToCtx sets WithUserID but never WithKeyID — so every dashboard
-// (session-cookie) operator action recorded actor_type='system'/'system', and
-// the log could not answer "who did this?" for the primary UI. The 'user'
-// value the audit_log CHECK constraint reserves was never written.
 func ResolveActor(ctx context.Context) (actorType, actorID string) {
 	if custID := auth.CustomerActorID(ctx); custID != "" {
 		return "customer", custID
 	}
-	if userID := auth.UserID(ctx); userID != "" {
-		return "user", userID
-	}
-	if keyID := auth.KeyID(ctx); keyID != "" {
-		return "api_key", keyID
+	if kind, id := auth.CallerOf(ctx).Actor(); kind != "" {
+		return kind, id
 	}
 	return "system", "system"
 }

@@ -93,13 +93,13 @@ const setupCompletePath = "/payment-method-added"
 // AuditWriter is the narrow audit surface paymentmethods needs.
 // Declared here (not imported from internal/audit) so the package
 // stays decoupled and testable with a fake. Production wires
-// *audit.Logger via SetAuditLogger in router.go.
+// *audit.Logger via SetAuditLogger in wire.go.
 type AuditWriter interface {
 	Log(ctx context.Context, tenantID, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
 }
 
 // NewService — `summary` parameter kept for back-compat with the
-// existing router.go wiring (passes customerStore which used to
+// existing wire.go wiring (passes customerStore which used to
 // satisfy PaymentSetupSummaryWriter). Ignored. Remove this parameter
 // once the writer interface is fully retired across all builders.
 func NewService(store Store, stripe StripeAPI, _ any) *Service {

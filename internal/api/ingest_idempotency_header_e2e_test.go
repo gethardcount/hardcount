@@ -11,15 +11,14 @@ import (
 
 // TestIngest_IdempotencyKeyHeaderIsIgnored sends two different events under
 // one Idempotency-Key header to the single and the batch route, through the
-// full router to real Postgres. The usage routes ignore the header (the
-// router passes isIngestPath to mw.Idempotency): each event's own
+// full router to real Postgres. The usage routes ignore the header (router.go
+// mounts them in the ingest group, which has no mw.Idempotency): each event's own
 // idempotency_key is the one dedup rule there. So all four are stored, no
-// answer is a replay, and no idempotency_keys row is written. The
-// middleware's own test passes a predicate that always skips, so only this
-// test sees the router's wiring.
+// answer is a replay, and no idempotency_keys row is written. Only this test
+// sees the behaviour; the router's chain test sees the wiring.
 //
-// Mutation-verify: pass nil instead of isIngestPath in router.go → the second
-// event on each route answers 422 idempotency_error, and rows are written.
+// Mutation-verify: add mw.Idempotency to the ingest group in router.go → the
+// second event on each route answers 422 idempotency_error, and rows are written.
 func TestIngest_IdempotencyKeyHeaderIsIgnored(t *testing.T) {
 	r := newLagRigBare(t, "in_arrears", 0)
 	ts := lagP0.Add(24 * time.Hour)

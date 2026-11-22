@@ -454,7 +454,7 @@ func TestImmediateCancel_InAdvance_AfterPeriodEnd_KeepsEndedPeriodUsage(t *testi
 func (r *cancelRig) cancelHTTP(t *testing.T, at time.Time) (int, string) {
 	t.Helper()
 	req := httptest.NewRequest(http.MethodPost, "/"+r.f.subID+"/cancel", nil)
-	req = req.WithContext(auth.WithKeyID(auth.WithTenantID(r.at(at), r.f.tenantID), "hc_key_cancel_991"))
+	req = req.WithContext(auth.WithCaller(r.at(at), auth.Caller{TenantID: r.f.tenantID, KeyID: "hc_key_cancel_991"}))
 	rec := httptest.NewRecorder()
 	subscription.NewHandler(r.f.subSvc).Routes().ServeHTTP(rec, req)
 	return rec.Code, rec.Body.String()

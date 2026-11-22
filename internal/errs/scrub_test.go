@@ -2,7 +2,9 @@ package errs
 
 import "testing"
 
-func TestScrub(t *testing.T) {
+// Scrub redacts card digits and email addresses, and keeps Stripe IDs and
+// decline codes.
+func TestScrub_RedactsCardDigitsAndEmails(t *testing.T) {
 	cases := []struct {
 		name string
 		in   string

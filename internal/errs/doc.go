@@ -1,4 +1,5 @@
 // Package errs provides structured domain errors with machine-readable codes.
-// The API layer translates these into HTTP responses by matching on error
-// type or code, not by parsing error message strings.
+// The API layer picks an error's HTTP status from its kind (a sentinel such as
+// ErrValidation, matched with errors.Is), never from its message
+// (respond.FromError has the mapping).
 package errs

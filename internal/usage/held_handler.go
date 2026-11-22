@@ -13,7 +13,7 @@ import (
 )
 
 // SetHeldDeps wires what the held-usage routes read besides the usage
-// store: a customer by id, to check a release target. Wired in router.go
+// store: a customer by id, to check a release target. Wired in wire.go
 // with the customer store. Which released rows an invoice counts is read by
 // the service (Service.Release).
 func (h *Handler) SetHeldDeps(customers CustomerLookup) {

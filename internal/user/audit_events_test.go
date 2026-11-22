@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/gethardcount/hardcount/internal/session"
 )
 
@@ -25,7 +26,7 @@ func (r *recordingAuditRecorder) Log(_ context.Context, _, action, _, _, _ strin
 func newAuthHandler(t *testing.T, store *fakeUserStore) (*Handler, *recordingAuditRecorder, *recordingAuditTx) {
 	t.Helper()
 	svc, auditor := newRecordingService(store)
-	h := NewHandler(svc, session.DefaultCookieConfig("local"), stubEmailSender{}, "", false)
+	h := NewHandler(svc, session.DefaultCookieConfig("local", ""), stubEmailSender{}, "", false)
 	rec := &recordingAuditRecorder{}
 	h.SetAuditLogger(rec)
 	return h, rec, auditor
@@ -41,7 +42,7 @@ func TestLogin_FailureNotInAuditLog(t *testing.T) {
 	body, _ := json.Marshal(LoginReq{Email: "nobody@acme.com", Password: "some-long-password"})
 	req := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(string(body)))
 	rr := httptest.NewRecorder()
-	h.Routes().ServeHTTP(rr, req)
+	requesttest.Root(h.Routes()).ServeHTTP(rr, req)
 
 	if rr.Code != http.StatusUnauthorized {
 		t.Fatalf("status = %d, want 401", rr.Code)

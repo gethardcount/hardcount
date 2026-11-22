@@ -102,11 +102,7 @@ func NoBody(w http.ResponseWriter, r *http.Request) bool {
 // own way, such as the usage batch's 413. It returns a *BodyError. Pass any
 // error the handler does not answer itself to WriteBodyError.
 func DecodeBody(r *http.Request, v any, opts ...DecodeOption) error {
-	var rule decodeRule
-	for _, o := range opts {
-		o(&rule)
-	}
-	return decodeBody(r, v, rule)
+	return decodeBody(r, v, ruleOf(opts))
 }
 
 // WriteBodyError writes the response for a DecodeBody error: a 413 for a
@@ -143,7 +139,7 @@ func BodyTooLarge(w http.ResponseWriter, r *http.Request, err error) bool {
 	if tooBig.Limit%(1<<20) == 0 {
 		limit = fmt.Sprintf("%d MB", tooBig.Limit>>20)
 	}
-	Error(w, r, http.StatusRequestEntityTooLarge, "invalid_request_error", "payload_too_large",
+	Error(w, r, http.StatusRequestEntityTooLarge, "payload_too_large",
 		fmt.Sprintf("The request body is larger than the %s limit. Send a smaller body.", limit))
 	return true
 }
@@ -194,11 +190,15 @@ func decodeBody(r *http.Request, v any, rule decodeRule) error {
 // such as one event of the usage batch. A key that v does not declare with
 // exactly that spelling and case is a *BodyError naming it.
 func DecodeValue(raw json.RawMessage, v any, opts ...DecodeOption) error {
+	return decodeValue(raw, v, ruleOf(opts))
+}
+
+func ruleOf(opts []DecodeOption) decodeRule {
 	var rule decodeRule
 	for _, o := range opts {
 		o(&rule)
 	}
-	return decodeValue(raw, v, rule)
+	return rule
 }
 
 func decodeValue(raw json.RawMessage, v any, rule decodeRule) error {

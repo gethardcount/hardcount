@@ -10,7 +10,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/gethardcount/hardcount/internal/platform/leader"
 	"io"
 	"log/slog"
 	mrand "math/rand/v2"
@@ -25,7 +24,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	mw "github.com/gethardcount/hardcount/internal/api/middleware"
+	"github.com/gethardcount/hardcount/internal/platform/leader"
+
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
@@ -796,7 +796,7 @@ func (s *Service) scheduleRetryOrFail(ctx context.Context, tenantID string, d do
 		d.NextRetryAt = nil
 		// Only count permanent failures — per-attempt retries are transient
 		// and would drown the alert's success-rate denominator.
-		mw.RecordWebhookDelivery("failed")
+		recordWebhookDelivery("failed")
 		// SSE: the dashboard row for this event flips to "failed".
 		// Lookup-by-id rather than a struct passthrough so we re-read
 		// the event_type/customer_id without bloating the delivery row.
@@ -848,7 +848,7 @@ func (s *Service) giveUpDelivery(ctx context.Context, d domain.WebhookDelivery, 
 		slog.WarnContext(ctx, "webhook: give-up mark not applied", "delivery_id", d.ID, "error", err)
 		return
 	}
-	mw.RecordWebhookDelivery("failed")
+	recordWebhookDelivery("failed")
 	s.publishFrameForEventID(ctx, d.TenantID, d.WebhookEventID, "failed", &now)
 	slog.ErrorContext(ctx, "webhook delivery given up: still pending past the whole retry schedule, with no final outcome recorded",
 		"delivery_id", d.ID,
@@ -1366,7 +1366,7 @@ func (s *Service) attemptDelivery(ctx context.Context, d domain.WebhookDelivery,
 			slog.Warn("webhook: success mark not applied", "delivery_id", d.ID, "error", err)
 			return
 		}
-		mw.RecordWebhookDelivery("succeeded")
+		recordWebhookDelivery("succeeded")
 		if s.bus != nil {
 			s.bus.Publish(d.TenantID, FrameFromEvent(event, string(domain.DeliverySucceeded), &now))
 		}

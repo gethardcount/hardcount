@@ -9,19 +9,21 @@ import (
 )
 
 // A key is a type prefix, hc_{type}_{mode}_, then secretBytes random bytes in
-// lowercase hex. Its lookup prefix (the type prefix and the first lookupHexLen
-// hex characters) finds its row, which holds a salted hash of the whole key
-// (hashKey). api_keys_prefix_shape_check states the same shape.
+// lowercase hex. Its lookup prefix, the type prefix and the first
+// lookupHexLen hex characters, finds its row, which stores the key's hash
+// and the hash's salt (hashKey), never the key. api_keys_prefix_shape_check
+// states the lookup prefix's shape. In hc_secret_live_3f9a…, hc_secret_live_
+// is the type prefix; with the next lookupHexLen characters it is the lookup
+// prefix, stored as key_prefix.
 const (
 	secretBytes  = 32
 	lookupHexLen = 12
+	saltBytes    = 16
 )
-
-const saltBytes = 16
 
 // typePrefix returns a key's type prefix, "hc_{type}_{mode}_": hc_secret_live_,
 // hc_ingest_test_ and so on. The visible mode lets an operator spot a test
-// key in a production config. kt is one of storedKeyTypes.
+// key in a production config.
 func typePrefix(kt KeyType, livemode bool) string {
 	mode := "test"
 	if livemode {
@@ -30,11 +32,11 @@ func typePrefix(kt KeyType, livemode bool) string {
 	return "hc_" + string(kt) + "_" + mode + "_"
 }
 
-// typePrefixes are the type prefixes a key can have: each stored key type,
-// live and test.
+// typePrefixes are the type prefixes a key can have: each key type, live and
+// test.
 var typePrefixes = func() []string {
 	var ps []string
-	for _, kt := range storedKeyTypes {
+	for _, kt := range keyTypes {
 		ps = append(ps, typePrefix(kt, true), typePrefix(kt, false))
 	}
 	return ps
@@ -79,8 +81,11 @@ func mintKey(kt KeyType, livemode bool) (raw, lookup string, h storedHash, err e
 	return raw, p + secretHex[:lookupHexLen], storedHash{salt: hex.EncodeToString(salt), hash: hashKey(salt, raw)}, nil
 }
 
-// hashKey returns hex(SHA-256(salt || raw)). An empty salt is valid: keys the
-// setup command made before salts were added have none.
+// hashKey returns hex(SHA-256(salt || raw)). salt is empty for a key the
+// setup command stored in v0.9.3 or earlier (ADR-141), which
+// api_keys_salt_shape_check allows; mintKey always draws one. One round of a
+// fast hash is enough: a key is secretBytes random bytes, not a password, so
+// there is nothing to guess.
 func hashKey(salt []byte, raw string) string {
 	sum := sha256.Sum256(append(append([]byte{}, salt...), raw...))
 	return hex.EncodeToString(sum[:])

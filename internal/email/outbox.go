@@ -6,12 +6,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"github.com/gethardcount/hardcount/internal/platform/leader"
 	"log/slog"
 	"runtime/debug"
 	"time"
 
-	mw "github.com/gethardcount/hardcount/internal/api/middleware"
+	"github.com/gethardcount/hardcount/internal/platform/leader"
+
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
@@ -561,11 +561,11 @@ func (s *OutboxStore) attemptRow(ctx context.Context, row OutboxRow, handler Out
 		`, errMsg, row.Attempts) {
 			return
 		}
-		cause := mw.DeadLetterMaxAttempts
+		cause := deadLetterMaxAttempts
 		if permanent {
-			cause = mw.DeadLetterPermanent
+			cause = deadLetterPermanent
 		}
-		mw.RecordEmailOutboxDeadLettered(cause, row.Livemode)
+		recordOutboxDeadLettered(cause, row.Livemode)
 		slog.Error("email outbox: row moved to DLQ",
 			"outbox_id", row.ID,
 			"tenant_id", row.TenantID,

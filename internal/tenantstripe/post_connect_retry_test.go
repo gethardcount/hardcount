@@ -34,7 +34,7 @@ func (r *observingRetrier) RetryProviderConfigErrors(ctx context.Context, _ stri
 	live, err := postgres.Livemode(ctx)
 	dl, ok := ctx.Deadline()
 	r.seen <- seenCtx{
-		userID: hardcountauth.UserID(ctx), tenantID: hardcountauth.TenantID(ctx),
+		userID: hardcountauth.CallerOf(ctx).UserID, tenantID: hardcountauth.TenantID(ctx),
 		livemode: live, modeErr: err, errAfterRequest: ctx.Err(), deadline: dl, hasDeadline: ok,
 	}
 	return 0, nil

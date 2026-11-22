@@ -7,14 +7,14 @@ import (
 	"testing"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/testutil"
 )
 
-// newMetricsRouter mirrors router.go's mount: Metrics() on the root mux, one
-// parameterised route, one mounted subtree.
+// newMetricsRouter mirrors router.go's mount: the record and Metrics() on the
+// root mux, one parameterised route, one mounted subtree.
 func newMetricsRouter() http.Handler {
 	r := chi.NewRouter()
+	withRecord(r)
 	r.Use(Metrics())
 	r.Get("/v1/customers/{id}", func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(200) })
 	sub := chi.NewRouter()
@@ -30,9 +30,10 @@ func hit(h http.Handler, method, path string) {
 
 // TestMetrics_LabelSpaceIsBounded pins the defect class this middleware
 // existed to prevent and did not: client-chosen label values. 500 distinct
-// scanner probes must produce exactly ONE new series (path="unmatched"),
-// a parameterised route must be labelled by its PATTERN (one series for any
-// number of ids), and an unknown verb must collapse to "other".
+// scanner probes, and misses under a mount, must produce exactly ONE new
+// series (path="unmatched"), a parameterised route must be labelled by its
+// PATTERN (one series for any number of ids), and an unknown verb must
+// collapse to "other".
 func TestMetrics_LabelSpaceIsBounded(t *testing.T) {
 	h := newMetricsRouter()
 	before := testutil.CollectAndCount(httpRequestsTotal)
@@ -50,13 +51,13 @@ func TestMetrics_LabelSpaceIsBounded(t *testing.T) {
 	hit(h, http.MethodGet, "/v1/sub/nope-2")
 
 	added := testutil.CollectAndCount(httpRequestsTotal) - before
-	// unmatched/GET/404 · /v1/customers/{id}/GET/200 · other/…/200 ·
-	// /v1/sub/*/GET/200 (ping) · /v1/sub/*/GET/404 (nope) = 5 series.
-	if added != 5 {
-		t.Fatalf("expected 5 new series for 605 requests, got %d — the label space is not bounded", added)
+	// unmatched/GET/404 (probes and the two misses under the mount) ·
+	// /v1/customers/{id}/GET/200 · other/…/405 · /v1/sub/ping/GET/200 = 4.
+	if added != 4 {
+		t.Fatalf("expected 4 new series for 605 requests, got %d — the label space is not bounded", added)
 	}
-	if v := testutil.ToFloat64(httpRequestsTotal.WithLabelValues(http.MethodGet, unmatchedRoute, "404")); v != 500 {
-		t.Fatalf("500 scanner probes should land on ONE unmatched series, got %v", v)
+	if v := testutil.ToFloat64(httpRequestsTotal.WithLabelValues(http.MethodGet, unmatchedRoute, "404")); v != 502 {
+		t.Fatalf("500 scanner probes and 2 misses under a mount should land on ONE unmatched series, got %v", v)
 	}
 	if v := testutil.ToFloat64(httpRequestsTotal.WithLabelValues(http.MethodGet, "/v1/customers/{id}", "200")); v != 100 {
 		t.Fatalf("parameterised route should be labelled by pattern, got %v on the pattern series", v)
@@ -82,40 +83,6 @@ func TestMethodLabel(t *testing.T) {
 	for _, m := range []string{"BREW", "get", "", "PROPFIND"} {
 		if got := methodLabel(m); got != "other" {
 			t.Errorf("methodLabel(%q) = %s, want other", m, got)
-		}
-	}
-}
-
-// TestOutboxDeadLetterSeries_ExistAtZero: every dead-letter series an alert
-// reads is exported at 0 from boot. A counter series born at 1 on the first
-// dead letter has no earlier sample, so increase() reads it as 0 and the
-// alert misses the first lost email. Prometheus: "export a default value such
-// as 0 for any time series you know may exist".
-func TestOutboxDeadLetterSeries_ExistAtZero(t *testing.T) {
-	families, err := prometheus.DefaultGatherer.Gather()
-	if err != nil {
-		t.Fatalf("gather: %v", err)
-	}
-	have := map[string]bool{}
-	for _, f := range families {
-		for _, m := range f.GetMetric() {
-			key := f.GetName()
-			for _, l := range m.GetLabel() {
-				key += "," + l.GetName() + "=" + l.GetValue()
-			}
-			have[key] = true
-		}
-	}
-	for _, want := range []string{
-		"hardcount_email_outbox_dead_lettered_total,cause=permanent,mode=live",
-		"hardcount_email_outbox_dead_lettered_total,cause=permanent,mode=test",
-		"hardcount_email_outbox_dead_lettered_total,cause=max_attempts,mode=live",
-		"hardcount_email_outbox_dead_lettered_total,cause=max_attempts,mode=test",
-		"hardcount_webhook_outbox_dead_lettered_total,cause=max_attempts,mode=live",
-		"hardcount_webhook_outbox_dead_lettered_total,cause=max_attempts,mode=test",
-	} {
-		if !have[want] {
-			t.Errorf("series %s is not exported before the first dead letter", want)
 		}
 	}
 }

@@ -5,9 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/api/respond"
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
@@ -570,6 +574,13 @@ func TestChargeInvoice_RequiresPaymentMethod(t *testing.T) {
 	if client.lastParams.CustomerID != "" {
 		t.Errorf("Stripe was called despite missing PM: lastParams=%+v", client.lastParams)
 	}
+	// A wiring bug is the server's fault, so Charge now answers 500 and the
+	// operator never sees the internal text.
+	rec := httptest.NewRecorder()
+	respond.FromError(rec, httptest.NewRequest(http.MethodPost, "/v1/invoices/inv_1/collect", nil), err, "payment")
+	if rec.Code != http.StatusInternalServerError || strings.Contains(rec.Body.String(), "payment method") {
+		t.Errorf("Charge now answered %d %s, want 500 with a generic body", rec.Code, rec.Body.String())
+	}
 }
 
 func TestChargeInvoice_NotFinalized(t *testing.T) {
@@ -577,8 +588,9 @@ func TestChargeInvoice_NotFinalized(t *testing.T) {
 
 	inv := domain.Invoice{Status: domain.InvoiceDraft, AmountDueCents: 100}
 	_, err := stripe.ChargeInvoice(context.Background(), "t1", inv, testHold, "cus_stripe", "pm_test")
-	if err == nil {
-		t.Fatal("expected error for non-finalized invoice")
+	// A validation error: Charge now answers it 422 with this message.
+	if !errors.Is(err, errs.ErrValidation) || err.Error() != "can only charge a finalized invoice, current status: draft" {
+		t.Fatalf("err = %v, want a validation error naming the status", err)
 	}
 }
 

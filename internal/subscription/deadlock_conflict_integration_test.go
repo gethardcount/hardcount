@@ -19,6 +19,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/platform/request/requesttest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/webhook"
 )
@@ -85,7 +86,7 @@ func newDeadlockRig(t *testing.T, db *postgres.DB, name string) *deadlockRig {
 	r.store.SetOutboxEnqueuer(webhook.NewOutboxStore(db))
 	ds := &deadlockOnceStore{PostgresStore: r.store}
 	r.h.svc.store = ds
-	return &deadlockRig{itemRaceRig: r, store: ds, srv: middleware.Idempotency(db, nil)(r.h.Routes())}
+	return &deadlockRig{itemRaceRig: r, store: ds, srv: requesttest.Root(middleware.Idempotency(db, nil)(r.h.Routes()))}
 }
 
 // send serves one request at proNow with the Idempotency-Key key.
@@ -100,7 +101,7 @@ func (r *deadlockRig) send(t *testing.T, method, path, key string, body any) *ht
 	req := httptest.NewRequest(method, path, &buf)
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Idempotency-Key", key)
-	ctx := clock.WithEffectiveNow(auth.WithKeyID(auth.WithTenantID(r.ctx, r.tenantID), "key_test"), proNow)
+	ctx := clock.WithEffectiveNow(auth.WithCaller(r.ctx, auth.Caller{TenantID: r.tenantID, KeyID: "key_test"}), proNow)
 	rr := httptest.NewRecorder()
 	r.srv.ServeHTTP(rr, req.WithContext(ctx))
 	return rr

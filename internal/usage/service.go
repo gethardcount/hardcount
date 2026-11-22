@@ -10,7 +10,6 @@ import (
 
 	"github.com/shopspring/decimal"
 
-	mw "github.com/gethardcount/hardcount/internal/api/middleware"
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
@@ -337,7 +336,7 @@ func (s *Service) ingestAudited(ctx context.Context, tenantID string, input Inge
 		// is true ingest throughput, not request volume. Single and backfill
 		// count here; batch and the LiteLLM doors count their own written
 		// rows.
-		mw.RecordUsageIngested(1)
+		recordUsageIngested(1)
 		s.markWritten(ctx, &event, class)
 	}
 	return event, err
@@ -366,7 +365,7 @@ var lateUsageEvents *prometheus.CounterVec
 func init() {
 	c := prometheus.NewCounterVec(prometheus.CounterOpts{
 		Name: "hardcount_usage_late_event_total",
-		Help: "Live-origin usage events ingested with a timestamp >24h in the past — may fall in an already-finalized (unbillable) period.",
+		Help: "Usage events, other than backfills, whose timestamp was more than 24h before the customer's current time when they arrived. An API event is counted when it is checked, before the write; a LiteLLM event after its call is written. Either way a resend counts again. Events left off an invoice are hardcount_usage_unbilled_total{reason=\"after_close\"}.",
 	}, []string{"origin"})
 	if err := prometheus.DefaultRegisterer.Register(c); err != nil {
 		if are, ok := err.(prometheus.AlreadyRegisteredError); ok {
@@ -563,7 +562,7 @@ func (s *Service) BatchIngest(ctx context.Context, tenantID string, events []Ing
 		res.Results[i].Status = BatchDeduplicated
 	}
 	if res.Inserted > 0 {
-		mw.RecordUsageIngested(res.Inserted)
+		recordUsageIngested(res.Inserted)
 	}
 	// Only rows this batch inserted: a row deduplicated against an earlier
 	// write was flagged, or not, when that write happened.

@@ -51,7 +51,7 @@ type PaymentError struct {
 
 func (e *PaymentError) Error() string { return e.Message }
 
-// OperatorSafeMessage implements respond.SafeMessageError so the
+// OperatorSafeMessage implements errs.SafeMessageError so the
 // boundary sanitizer (respond.FromError) surfaces a curated message
 // instead of falling through to "Internal error". For card declines
 // we look up the typed decline_code in a curated map sourced from
@@ -168,7 +168,7 @@ func (e *StripeKeyError) Error() string {
 
 func (e *StripeKeyError) Unwrap() error { return ErrPaymentTransient }
 
-// OperatorSafeMessage implements respond.SafeMessageError. Stripe's own
+// OperatorSafeMessage implements errs.SafeMessageError. Stripe's own
 // sentence names the key's last characters or the missing permission; it
 // goes to the log and the Settings notice, not to this response.
 func (e *StripeKeyError) OperatorSafeMessage() string {
@@ -409,11 +409,8 @@ func NewLiveStripeClient(clients *StripeClients) *LiveStripeClient {
 // credentials could not be read. A lookup blip used to read as "not
 // configured" — a definite failure that spent a dunning attempt.
 func (c *LiveStripeClient) client(ctx context.Context) (*stripe.Client, error) {
-	// No Stripe mode configured at all: NewLiveStripeClient returned nil, and
-	// router.go still hands it to the reconciler. The stale-hold sweep can
-	// meet a held invoice whose customer has a Stripe id even then (Stripe
-	// removed after charges ran), so answer "not configured" instead of
-	// panicking the tick.
+	// A nil receiver (a caller built without StripeClients) answers not
+	// configured.
 	if c == nil || c.clients == nil {
 		return nil, ErrStripeNotConfigured
 	}

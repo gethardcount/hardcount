@@ -2,7 +2,6 @@ package api
 
 import (
 	"net/http"
-	"net/url"
 	"os"
 	"sort"
 	"strings"
@@ -15,8 +14,8 @@ import (
 // A field marked `x-show-once: true` in api/openapi.yaml carries a secret
 // shown only in that answer, so the idempotency layer must never keep the
 // answer for a replay. Every operation whose 2xx answer has such a field is
-// either outside mw.Idempotency or in showOnceSecretRoutes, and every entry
-// of showOnceSecretRoutes answers with such a field. A new show-once field
+// either outside mw.Idempotency or marked withShowOnce() in routeTable, and
+// every route so marked answers with such a field. A new show-once field
 // therefore fails here until its route is covered.
 func TestOpenAPISpec_ShowOnceSecretsAreNeverKept(t *testing.T) {
 	marked := specShowOnceOperations(t)
@@ -34,7 +33,7 @@ func TestOpenAPISpec_ShowOnceSecretsAreNeverKept(t *testing.T) {
 				break
 			}
 		}
-		kept[routeShape(method, route)] = behind && !skipsIdempotency(&http.Request{Method: method, URL: &url.URL{Path: route}})
+		kept[routeShape(method, route)] = behind && !routeTable[routeKey{Method: method, Pattern: canonicalRoute(route)}].showOnce
 		return nil
 	})
 	if err != nil {
@@ -49,13 +48,12 @@ func TestOpenAPISpec_ShowOnceSecretsAreNeverKept(t *testing.T) {
 	}
 	if len(keptSecrets) > 0 {
 		sort.Strings(keptSecrets)
-		t.Errorf("%d operation(s) answer with an x-show-once field but the idempotency layer keeps the answer. Add them to showOnceSecretRoutes in router.go:\n  %s",
+		t.Errorf("%d operation(s) answer with an x-show-once field but the idempotency layer keeps the answer. Mark them .withShowOnce() in routeTable (route_table.go):\n  %s",
 			len(keptSecrets), strings.Join(keptSecrets, "\n  "))
 	}
-	for _, route := range showOnceSecretRoutes {
-		method, pattern, _ := strings.Cut(route, " ")
-		if _, ok := marked[routeShape(method, pattern)]; !ok {
-			t.Errorf("showOnceSecretRoutes lists %q, but its answer in api/openapi.yaml has no x-show-once field. Remove the entry, or mark the field that carries the secret", route)
+	for key, entry := range routeTable {
+		if _, ok := marked[routeShape(key.Method, key.Pattern)]; entry.showOnce && !ok {
+			t.Errorf("routeTable marks %s %s withShowOnce(), but its answer in api/openapi.yaml has no x-show-once field. Remove the mark, or mark the field that carries the secret", key.Method, key.Pattern)
 		}
 	}
 }
@@ -142,40 +140,4 @@ func specShowOnceOperations(t *testing.T) map[string]string {
 		}
 	}
 	return out
-}
-
-// answersWithShowOnceSecret on real URLs: every listed route with concrete
-// ids, with and without a trailing slash, and the near misses around them.
-func TestAnswersWithShowOnceSecret(t *testing.T) {
-	for _, tc := range []struct {
-		method, path string
-		want         bool
-	}{
-		{"POST", "/v1/api-keys", true},
-		{"POST", "/v1/api-keys/", true},
-		{"POST", "/v1/api-keys/hc_key_dbs004jmajdrc1h3298g/rotate", true},
-		{"POST", "/v1/api-keys/hc_key_dbs004jmajdrc1h3298g/rotate/", true},
-		{"POST", "/v1/customers/hc_cus_dakhnk2q3gpgqfoq5c0g/rotate-cost-dashboard-token", true},
-		{"POST", "/v1/customers/hc_cus_dakhnk2q3gpgqfoq5c0g/payment-methods/setup-session", true},
-		{"POST", "/v1/webhook-endpoints/endpoints", true},
-		{"POST", "/v1/webhook-endpoints/endpoints/hc_whe_danslg2q3gpgqfoq5c80/rotate-secret", true},
-
-		{"GET", "/v1/api-keys", false},
-		{"PATCH", "/v1/api-keys", false},
-		{"DELETE", "/v1/api-keys/hc_key_a", false},
-		{"POST", "/v1/api-keysx", false},
-		{"POST", "/v1/api-keys/hc_key_a", false},
-		{"POST", "/v1/api-keys//rotate", false},
-		{"POST", "/v1/api-keys/hc_key_a/rotate/extra", false},
-		{"POST", "/v1/customers", false},
-		{"POST", "/v1/customers/hc_cus_a/payment-methods", false},
-		{"POST", "/v1/webhook-endpoints/endpoints/hc_whe_a/test", false},
-		{"PATCH", "/v1/webhook-endpoints/endpoints/hc_whe_a", false},
-		{"POST", "/v2/api-keys", false},
-	} {
-		req := &http.Request{Method: tc.method, URL: &url.URL{Path: tc.path}}
-		if got := answersWithShowOnceSecret(req); got != tc.want {
-			t.Errorf("%s %s: %v, want %v", tc.method, tc.path, got, tc.want)
-		}
-	}
 }
