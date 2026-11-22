@@ -2981,10 +2981,9 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 		return false, refuse(refusalNoPeriod, fmt.Errorf("subscription has no billing period set"))
 	}
 
-	// Resolve "now" as this cycle's own close instant — sub.NextBillingAt
-	// at entry, falling back to the clock's frozen_time / wall-clock only
-	// when NextBillingAt is unset (unreachable from billSubscription's
-	// caught-up check, but kept defensive).
+	// "now" is this cycle's own close instant, sub.NextBillingAt. The one
+	// caller, billSubscription, returns before calling this when it is nil,
+	// so a nil here is a fault.
 	//
 	// Anchoring on the cycle boundary keeps every per-cycle decision in
 	// the time domain the cycle belongs to:
@@ -3008,10 +3007,10 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	// one scheduler tick, so the change is neutral — invoice timestamps
 	// land exactly on the period boundary instead of "few minutes after,"
 	// which is the more defensible cosmetic anyway.
-	now := e.effectiveNow(ctx, sub)
-	if sub.NextBillingAt != nil {
-		now = *sub.NextBillingAt
+	if sub.NextBillingAt == nil {
+		return false, fmt.Errorf("bill a period of subscription %s: it has no next_billing_at", sub.ID)
 	}
+	now := *sub.NextBillingAt
 	// Rebind ctx's instant to this cycle's own close (keeping the clock)
 	// so downstream effects that read ctx time — the auto-charge, whose
 	// PI metadata anchor drives the settle's paid_at — land on the
