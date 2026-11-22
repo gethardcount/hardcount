@@ -368,7 +368,8 @@ func useRequestEdge(r chi.Router, trustProxy string, trustedProxies []*net.IPNet
 // when it matched none, its first segment and "/…" (a path of one segment or
 // fewer is kept whole). A link token works like a password and always comes
 // after the first segment: "/v1/public/invoices/{token}", and
-// "/invoice/{token}", the hosted page a deployment may point at the API.
+// "/invoice/{token}", the hosted invoice link, which reaches the API when
+// HOSTED_INVOICE_BASE_URL is set to the API's address.
 func loggablePath(r *http.Request) string {
 	if pattern := request.Of(r.Context()).Route().Pattern; pattern != "" {
 		return pattern
