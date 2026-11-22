@@ -19,10 +19,12 @@ type fakeCreditApplier struct {
 	applyCents int64
 	err        error
 	calls      int
+	at         []time.Time // the instant of each apply
 }
 
-func (f *fakeCreditApplier) ApplyToInvoiceAt(_ context.Context, _, _, invoiceID string, amountCents int64, _ time.Time, _ ...string) (int64, error) {
+func (f *fakeCreditApplier) ApplyToInvoiceAt(_ context.Context, _, _, invoiceID string, amountCents int64, at time.Time, _ ...string) (int64, error) {
 	f.calls++
+	f.at = append(f.at, at)
 	if f.err != nil {
 		return 0, f.err
 	}

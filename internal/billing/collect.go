@@ -91,24 +91,3 @@ func collectFailureNext(err error) string {
 		return "the invoice is still queued, and the auto-charge sweep will retry"
 	}
 }
-
-// collectionAt is the instant processAutoCharge applies credits and settles
-// at: the caller's anchor when it has one, else the invoice's clock now, else
-// the engine's clock (under processAutoCharge's bound ctx, its instant). When
-// the invoice's clock cannot be found (the invoice, its subscription or
-// customer, or their test clock cannot be read), it falls back to the
-// engine's clock, logged, as effectiveNow does.
-func (e *Engine) collectionAt(ctx context.Context, inv domain.Invoice, at *time.Time) time.Time {
-	if at != nil {
-		return *at
-	}
-	sim, err := e.SimForInvoice(ctx, inv.TenantID, inv.ID)
-	if err != nil {
-		slog.WarnContext(ctx, "collect: could not find the invoice's test clock; collecting at real time",
-			"invoice_id", inv.ID, "error", err)
-	}
-	if !sim.Simulated() {
-		return e.clock.Now(ctx)
-	}
-	return sim.At
-}
