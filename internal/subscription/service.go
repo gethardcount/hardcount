@@ -2416,15 +2416,15 @@ func (s *Service) cancelOnce(ctx context.Context, tenantID, id string, grace tim
 		return domain.Subscription{}, 0, errAlreadyTerminated(sub.Status)
 	}
 
-	// The cancel instant, read once per attempt (ADR-139). Priced from a row
-	// whose period starts after it, the final invoice would bill nothing and
-	// the relief would skip the new period's prebill, while the
-	// compare-and-set passes on that row: the subscription would be canceled
-	// with the new period unrelieved. So that row is not planned; the next
-	// attempt reads a new instant (on the API's unbound context, normally at
-	// or after the new period's start). A trialing row is planned:
-	// an instant before the first paid period is the free trial cancel
-	// (ADR-069).
+	// The cancel instant is the caller's (the door's, dunning's or a test
+	// clock's). Priced from a row whose period starts after it, the final
+	// invoice would bill nothing and the relief would skip the new period's
+	// prebill, while the compare-and-set passes on that row: the subscription
+	// would be canceled with the new period unrelieved. So that row is not
+	// planned. The next attempt, on the same instant, refuses it again, and
+	// the cancel answers ErrWatermarkMoved (a 409); a new request takes a new
+	// instant. A trialing row is planned: an instant before the first paid
+	// period is the free trial cancel (ADR-069).
 	at := clock.Now(ctx)
 	if sub.Status == domain.SubscriptionActive && sub.CurrentBillingPeriodStart != nil && sub.CurrentBillingPeriodStart.After(at) {
 		return domain.Subscription{}, 0, ErrWatermarkMoved

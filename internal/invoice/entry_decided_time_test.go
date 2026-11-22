@@ -140,8 +140,9 @@ func TestEntryPoints_RunOnTheDecidedTime(t *testing.T) {
 		if final.IssuedAt == nil || !final.IssuedAt.Equal(entryDecidedAt) || !aud.at.Equal(entryDecidedAt) || res.reads != 0 {
 			t.Errorf("issued_at %v, audit row at %v, clock reads %d; want both %v, none", final.IssuedAt, aud.at, res.reads, entryDecidedAt)
 		}
-		if final.DueAt == nil || final.DueAt.Before(entryDecidedAt) {
-			t.Errorf("due_at %v; the due date counts from the issue date %v", final.DueAt, entryDecidedAt)
+		// The fake settings' Net 30, counted from the issue date.
+		if want := domain.AddDaysIn(entryDecidedAt, 30, time.UTC); final.DueAt == nil || !final.DueAt.Equal(want) {
+			t.Errorf("due_at %v; want %v, 30 days from the issue date", final.DueAt, want)
 		}
 	})
 

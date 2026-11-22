@@ -1309,8 +1309,8 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 	}
 	// The final actions happen at the escalation's instant, not wherever the
 	// advance landed: rebind ctx's instant to it, keeping the clock, so the
-	// subscription's pause or cancel and the invoice's write-off below (each
-	// re-binds and inherits it) are dated with the escalated event. The
+	// subscription's pause or cancel and the invoice's write-off below, which
+	// run on it, are dated with the escalated event. The
 	// subscription's action never goes before its current period, though
 	// (applySubscriptionAction). The inline path already arrives bound to its
 	// retry slot; exhaust-on-entry arrives at frozen_time. Wall-clock runs

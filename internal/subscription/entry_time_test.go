@@ -88,14 +88,12 @@ func (s *writeSpyStore) ClearBillingThresholds(ctx context.Context, tenantID, id
 }
 
 // subEntry is a subscription entry point run on ctx against a fresh service
-// and a subscription seeded around base (on clock tclk_1 when clocked). It
-// returns the stamp the action wrote. realTimeReads is how many times it
-// reads the server's clock at real time when not 1 (see ScheduleCancel).
+// and a subscription seeded around base on clock tclk_1. It returns the stamp
+// the action wrote.
 type subEntry struct {
-	name          string
-	status        domain.SubscriptionStatus
-	realTimeReads int
-	run           func(t *testing.T, ctx context.Context, svc *Service, store *writeSpyStore, sub domain.Subscription, base time.Time) time.Time
+	name   string
+	status domain.SubscriptionStatus
+	run    func(t *testing.T, ctx context.Context, svc *Service, store *writeSpyStore, sub domain.Subscription, base time.Time) time.Time
 }
 
 func subEntries() []subEntry {
@@ -103,7 +101,7 @@ func subEntries() []subEntry {
 		// Create makes a new subscription (the seeded one is unused): its
 		// stored created_at and activation stamp are one instant, and its
 		// period starts on that instant's day (the tenant's zone, UTC here).
-		{"Create", domain.SubscriptionActive, 0, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, _ domain.Subscription, _ time.Time) time.Time {
+		{"Create", domain.SubscriptionActive, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, _ domain.Subscription, _ time.Time) time.Time {
 			created, err := svc.Create(ctx, "t1", CreateInput{
 				Code: "sub-created", DisplayName: "Created", CustomerID: "cus_time",
 				Items: []CreateItemInput{{PlanID: "pln_1"}},
@@ -118,25 +116,21 @@ func subEntries() []subEntry {
 			}
 			return created.CreatedAt
 		}},
-		{"Cancel", domain.SubscriptionActive, 0, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, _ time.Time) time.Time {
+		{"Cancel", domain.SubscriptionActive, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, _ time.Time) time.Time {
 			out, _, err := svc.Cancel(ctx, "t1", sub.ID)
 			if err != nil {
 				t.Fatalf("Cancel: %v", err)
 			}
 			return *out.CanceledAt
 		}},
-		{"CancelForDunning", domain.SubscriptionActive, 0, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, _ time.Time) time.Time {
+		{"CancelForDunning", domain.SubscriptionActive, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, _ time.Time) time.Time {
 			out, _, err := svc.CancelForDunning(ctx, "t1", sub.ID)
 			if err != nil {
 				t.Fatalf("CancelForDunning: %v", err)
 			}
 			return *out.CanceledAt
 		}},
-		// At real time ScheduleCancel reads the server's clock twice, as on
-		// main: it closes an ended period (CloseEndedPeriodFirst, on its own
-		// instant) before it takes the schedule's. The door binding one
-		// instant per request ends that (the entry-binding plan).
-		{"ScheduleCancel", domain.SubscriptionActive, 2, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, base time.Time) time.Time {
+		{"ScheduleCancel", domain.SubscriptionActive, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, base time.Time) time.Time {
 			at := base.Add(35 * 24 * time.Hour)
 			out, err := svc.ScheduleCancel(ctx, "t1", sub.ID, ScheduleCancelInput{CancelAt: &at})
 			if err != nil {
@@ -144,7 +138,7 @@ func subEntries() []subEntry {
 			}
 			return out.UpdatedAt
 		}},
-		{"ClearScheduledCancel", domain.SubscriptionActive, 0, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, base time.Time) time.Time {
+		{"ClearScheduledCancel", domain.SubscriptionActive, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, base time.Time) time.Time {
 			at := base.Add(35 * 24 * time.Hour)
 			if _, err := svc.ScheduleCancel(clock.WithEffectiveNow(ctx, base.Add(-time.Hour)), "t1", sub.ID, ScheduleCancelInput{CancelAt: &at}); err != nil {
 				t.Fatalf("seed the schedule: %v", err)
@@ -155,7 +149,7 @@ func subEntries() []subEntry {
 			}
 			return out.UpdatedAt
 		}},
-		{"UpdateItem (seat change)", domain.SubscriptionActive, 0, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, _ time.Time) time.Time {
+		{"UpdateItem (seat change)", domain.SubscriptionActive, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, _ time.Time) time.Time {
 			q := int64(3)
 			res, err := svc.UpdateItem(ctx, "t1", sub.ID, sub.Items[0].ID, UpdateItemInput{Quantity: &q})
 			if err != nil {
@@ -163,7 +157,7 @@ func subEntries() []subEntry {
 			}
 			return res.Item.UpdatedAt
 		}},
-		{"CancelPendingItemChange", domain.SubscriptionActive, 0, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, base time.Time) time.Time {
+		{"CancelPendingItemChange", domain.SubscriptionActive, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, base time.Time) time.Time {
 			if _, err := svc.store.SetItemPendingPlanTx(context.Background(), nil, "t1", sub.Items[0].ID, "pln_2", base.Add(72*time.Hour)); err != nil {
 				t.Fatalf("seed pending plan: %v", err)
 			}
@@ -173,14 +167,14 @@ func subEntries() []subEntry {
 			}
 			return item.UpdatedAt
 		}},
-		{"AddItem", domain.SubscriptionActive, 0, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, _ time.Time) time.Time {
+		{"AddItem", domain.SubscriptionActive, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, _ time.Time) time.Time {
 			item, err := svc.AddItem(ctx, "t1", sub.ID, AddItemInput{PlanID: "pln_2", Quantity: 1})
 			if err != nil {
 				t.Fatalf("AddItem: %v", err)
 			}
 			return item.CreatedAt
 		}},
-		{"RemoveItem", domain.SubscriptionActive, 0, func(t *testing.T, ctx context.Context, svc *Service, store *writeSpyStore, sub domain.Subscription, base time.Time) time.Time {
+		{"RemoveItem", domain.SubscriptionActive, func(t *testing.T, ctx context.Context, svc *Service, store *writeSpyStore, sub domain.Subscription, base time.Time) time.Time {
 			extra, err := svc.AddItem(clock.WithEffectiveNow(ctx, base.Add(-time.Hour)), "t1", sub.ID, AddItemInput{PlanID: "pln_2", Quantity: 1})
 			if err != nil {
 				t.Fatalf("seed extra item: %v", err)
@@ -190,14 +184,14 @@ func subEntries() []subEntry {
 			}
 			return store.last(t)
 		}},
-		{"PauseCollection", domain.SubscriptionActive, 0, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, _ time.Time) time.Time {
+		{"PauseCollection", domain.SubscriptionActive, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, _ time.Time) time.Time {
 			out, err := svc.PauseCollection(ctx, "t1", sub.ID, PauseCollectionInput{Behavior: domain.PauseCollectionKeepAsDraft})
 			if err != nil {
 				t.Fatalf("PauseCollection: %v", err)
 			}
 			return out.UpdatedAt
 		}},
-		{"PauseCollectionForDunning", domain.SubscriptionActive, 0, func(t *testing.T, ctx context.Context, svc *Service, store *writeSpyStore, sub domain.Subscription, _ time.Time) time.Time {
+		{"PauseCollectionForDunning", domain.SubscriptionActive, func(t *testing.T, ctx context.Context, svc *Service, store *writeSpyStore, sub domain.Subscription, _ time.Time) time.Time {
 			if _, err := svc.PauseCollectionForDunning(ctx, "t1", sub.ID, "inv_1"); err != nil {
 				t.Fatalf("PauseCollectionForDunning: %v", err)
 			}
@@ -207,7 +201,7 @@ func subEntries() []subEntry {
 			}
 			return got.UpdatedAt
 		}},
-		{"ResumeCollection", domain.SubscriptionActive, 0, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, base time.Time) time.Time {
+		{"ResumeCollection", domain.SubscriptionActive, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, base time.Time) time.Time {
 			if _, err := svc.PauseCollection(clock.WithEffectiveNow(ctx, base.Add(-time.Hour)), "t1", sub.ID, PauseCollectionInput{Behavior: domain.PauseCollectionKeepAsDraft}); err != nil {
 				t.Fatalf("seed the pause: %v", err)
 			}
@@ -217,27 +211,27 @@ func subEntries() []subEntry {
 			}
 			return out.UpdatedAt
 		}},
-		{"EndTrial", domain.SubscriptionTrialing, 0, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, _ time.Time) time.Time {
+		{"EndTrial", domain.SubscriptionTrialing, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, _ time.Time) time.Time {
 			out, err := svc.EndTrial(ctx, "t1", sub.ID)
 			if err != nil {
 				t.Fatalf("EndTrial: %v", err)
 			}
 			return out.UpdatedAt
 		}},
-		{"ExtendTrial", domain.SubscriptionTrialing, 0, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, base time.Time) time.Time {
+		{"ExtendTrial", domain.SubscriptionTrialing, func(t *testing.T, ctx context.Context, svc *Service, _ *writeSpyStore, sub domain.Subscription, base time.Time) time.Time {
 			out, err := svc.ExtendTrial(ctx, "t1", sub.ID, base.Add(20*24*time.Hour))
 			if err != nil {
 				t.Fatalf("ExtendTrial: %v", err)
 			}
 			return out.UpdatedAt
 		}},
-		{"SetBillingThresholds", domain.SubscriptionActive, 0, func(t *testing.T, ctx context.Context, svc *Service, store *writeSpyStore, sub domain.Subscription, _ time.Time) time.Time {
+		{"SetBillingThresholds", domain.SubscriptionActive, func(t *testing.T, ctx context.Context, svc *Service, store *writeSpyStore, sub domain.Subscription, _ time.Time) time.Time {
 			if _, err := svc.SetBillingThresholds(ctx, "t1", sub.ID, BillingThresholdsInput{AmountGTE: 10000}); err != nil {
 				t.Fatalf("SetBillingThresholds: %v", err)
 			}
 			return store.last(t)
 		}},
-		{"ClearBillingThresholds", domain.SubscriptionActive, 0, func(t *testing.T, ctx context.Context, svc *Service, store *writeSpyStore, sub domain.Subscription, base time.Time) time.Time {
+		{"ClearBillingThresholds", domain.SubscriptionActive, func(t *testing.T, ctx context.Context, svc *Service, store *writeSpyStore, sub domain.Subscription, base time.Time) time.Time {
 			if _, err := svc.SetBillingThresholds(clock.WithEffectiveNow(ctx, base.Add(-time.Hour)), "t1", sub.ID, BillingThresholdsInput{AmountGTE: 10000}); err != nil {
 				t.Fatalf("seed thresholds: %v", err)
 			}

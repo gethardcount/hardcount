@@ -106,8 +106,8 @@ func TestCancel_TrialActivatedWhilePriced_PlansAgainFromTheActiveRow(t *testing.
 // Each attempt runs on the caller's instant (the door's, dunning's or a test
 // clock's), so a second attempt plans at the same instant as the first.
 //
-// Mutation: bind a new instant per attempt → the second plan is a second
-// read of the server's clock.
+// Mutation: plan each attempt on a fresh read of the server's clock, ignoring
+// the caller's instant → neither plan is at the caller's instant.
 func TestCancel_ASecondAttemptPlansAtTheCallersInstant(t *testing.T) {
 	server := &subSteppingClock{at: time.Now().UTC().Add(time.Hour)}
 	svc := NewService(newMemStore(), server)
@@ -129,7 +129,7 @@ func TestCancel_ASecondAttemptPlansAtTheCallersInstant(t *testing.T) {
 // An active row whose period starts after the cancel instant is not planned:
 // priced from it, the final invoice would bill nothing and the relief would
 // skip the new period's prebill, while the compare-and-set passes. Both
-// attempts refuse it (the instant is bound, as dunning's is), and the cancel
+// attempts refuse it (each runs on the caller's instant), and the cancel
 // returns ErrWatermarkMoved with nothing planned or written.
 //
 // Mutation M8 (drop the period-start rule) → the cancel commits at an instant

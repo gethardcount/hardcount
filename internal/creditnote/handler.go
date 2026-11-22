@@ -627,17 +627,15 @@ func (h *Handler) sendEmail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	ctx := r.Context()
-
-	bt, ci, orig := h.assemblePDFContext(ctx, tenantID, cn)
-	pdfBytes, err := RenderPDF(ctx, cn, items, orig, bt, ci)
+	bt, ci, orig := h.assemblePDFContext(r.Context(), tenantID, cn)
+	pdfBytes, err := RenderPDF(r.Context(), cn, items, orig, bt, ci)
 	if err != nil {
-		slog.ErrorContext(ctx, "render credit note pdf for email", "credit_note_id", id, "error", err)
+		slog.ErrorContext(r.Context(), "render credit note pdf for email", "credit_note_id", id, "error", err)
 		respond.InternalError(w, r)
 		return
 	}
 
-	if err := h.emailSender.SendCreditNote(ctx, tenantID, to, cc,
+	if err := h.emailSender.SendCreditNote(r.Context(), tenantID, to, cc,
 		bt.Name, cn.CreditNoteNumber, orig.Number, cn.TotalCents, cn.Currency, pdfBytes); err != nil {
 		respond.FromError(w, r, err, "credit_note_email")
 		return

@@ -585,6 +585,10 @@ func (h *Handler) void(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, inv)
 }
 
+// noPMTriggerOperatorResend is the setup email's trigger when an operator
+// resends it, as billing's noPMTrigger values name the others.
+const noPMTriggerOperatorResend = "operator_resend"
+
 // resendSetupLink re-emails the customer the payment-METHOD setup link for a
 // finalized, unpaid invoice with no card on file — the "Resend setup link"
 // nudge on the no_payment_method attention card. It re-sends the SAME email the
@@ -594,10 +598,6 @@ func (h *Handler) void(w http.ResponseWriter, r *http.Request) {
 // POST /{id}/send, which emails the hosted-invoice "pay this invoice" link
 // (Checkout in PAYMENT mode) — a different collection path for states where the
 // operator wants the customer to pay directly.
-// noPMTriggerOperatorResend is the setup email's trigger when an operator
-// resends it, as billing's noPMTrigger values name the others.
-const noPMTriggerOperatorResend = "operator_resend"
-
 func (h *Handler) resendSetupLink(w http.ResponseWriter, r *http.Request) {
 	if !respond.NoBody(w, r) {
 		return
