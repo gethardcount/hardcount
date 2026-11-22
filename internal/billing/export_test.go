@@ -100,9 +100,13 @@ func (e *Engine) BillOnCreate(ctx context.Context, sub domain.Subscription) (dom
 		inv domain.Invoice
 		ok  bool
 	)
+	now, err := e.effectiveNow(ctx, sub)
+	if err != nil {
+		return domain.Invoice{}, err
+	}
 	if err := e.subs.WithTenantTx(ctx, sub.TenantID, func(tx *sql.Tx) error {
 		var err error
-		inv, ok, err = e.BillOnCreateTx(ctx, tx, sub, e.effectiveNow(ctx, sub))
+		inv, ok, err = e.BillOnCreateTx(ctx, tx, sub, now)
 		return err
 	}); err != nil {
 		if errs.Code(err) == errs.CodeInvoiceBillingPeriodTaken {

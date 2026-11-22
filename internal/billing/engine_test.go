@@ -526,18 +526,22 @@ func (m *mockSubs) GetDueBillingForTenant(ctx context.Context, _ string, now, du
 }
 
 // GetDueBillingForClock — mirror of GetDueBilling for the disjoint
-// catchup path (ADR-028). Returns ONLY subs pinned to the given
-// clock whose next_billing_at is on-or-before `before`. The mock
-// uses `before` directly because it doesn't model test-clock rows;
-// real engine wiring resolves frozen_time via the SQL JOIN.
-func (m *mockSubs) GetDueBillingForClock(_ context.Context, _, clockID string, exclude []string, limit int) ([]domain.Subscription, error) {
+// catchup path (ADR-028). Returns ONLY subs pinned to the given clock that
+// are due at its frozen time: next_billing_at, or an active sub's cancel_at,
+// on or before it. The mock doesn't model test-clock rows, so it reads the
+// frozen time from ctx, which the catch-up binds to it; the real query joins
+// test_clocks.
+func (m *mockSubs) GetDueBillingForClock(ctx context.Context, _, clockID string, exclude []string, limit int) ([]domain.Subscription, error) {
+	frozen := clock.Now(ctx)
 	var result []domain.Subscription
 	for _, s := range m.subs {
 		if s.TestClockID != clockID || slices.Contains(exclude, s.ID) {
 			continue
 		}
 		eligible := s.Status == domain.SubscriptionActive || s.Status == domain.SubscriptionTrialing
-		if eligible && s.NextBillingAt != nil {
+		due := (s.NextBillingAt != nil && !s.NextBillingAt.After(frozen)) ||
+			(s.Status == domain.SubscriptionActive && s.CancelAt != nil && !s.CancelAt.After(frozen))
+		if eligible && due {
 			result = append(result, s)
 		}
 	}
@@ -1717,6 +1721,74 @@ func TestRunCycle_GeneratesInvoice(t *testing.T) {
 	}
 }
 
+// nthFailingClocks answers the test clock clk, except that its failOn-th read
+// fails (none when failOn is 0).
+type nthFailingClocks struct {
+	clk           domain.TestClock
+	failOn, reads int
+}
+
+func (c *nthFailingClocks) Get(context.Context, string, string) (domain.TestClock, error) {
+	c.reads++
+	if c.reads == c.failOn {
+		return domain.TestClock{}, errors.New("connection reset by peer")
+	}
+	return c.clk, nil
+}
+
+// A clock's billing run that cannot read a subscription's test clock skips it
+// with the error and writes nothing, whether the read fails at the due check
+// (billSubscription) or at the cycle close (billOnePeriod). Once the clock
+// reads, the next run (Retry advance) bills the period once.
+func TestRunCycleForClock_AClockThatCannotBeReadSkipsTheSubscription(t *testing.T) {
+	for _, c := range []struct {
+		name   string
+		failOn int
+	}{{"at the due check", 1}, {"at the cycle close", 2}} {
+		t.Run(c.name, func(t *testing.T) {
+			engine, subs, _, _, invoices := setupEngine()
+			sub := subs.subs["sub_1"]
+			sub.TestClockID = "tc_1"
+			subs.subs["sub_1"] = sub
+			frozen := time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC) // one period due
+			clocks := &nthFailingClocks{clk: domain.TestClock{ID: "tc_1", FrozenTime: frozen}, failOn: c.failOn}
+			engine.SetTestClockReader(clocks)
+			ctx := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: frozen, TestClockID: "tc_1"})
+
+			if n, errs := engine.RunCycleForClock(ctx, "t1", "tc_1", 50); n != 0 || len(errs) != 1 || len(invoices.invoices) != 0 || subs.cycleUpdated["sub_1"] {
+				t.Fatalf("billed %d, errors %v, %d invoices, cycle advanced %v; want the clock's error and nothing written",
+					n, errs, len(invoices.invoices), subs.cycleUpdated["sub_1"])
+			}
+			clocks.failOn = 0
+			if n, errs := engine.RunCycleForClock(ctx, "t1", "tc_1", 50); n != 1 || len(errs) != 0 || len(invoices.invoices) != 1 {
+				t.Fatalf("the next run: billed %d, errors %v, %d invoices; want the period billed once", n, errs, len(invoices.invoices))
+			}
+		})
+	}
+}
+
+// A cancel prices its final invoice at the subscription's clock. When the
+// clock cannot be read, the plan is refused as the door refuses (503,
+// test_clock_unavailable, even when its cause is a not-found from a clock
+// delete racing the cancel), and nothing is written.
+func TestPlanCancelBill_AClockThatCannotBeReadIsUnavailable(t *testing.T) {
+	engine, subs, _, _, invoices := setupEngine()
+	sub := subs.subs["sub_1"]
+	sub.TestClockID = "tc_1"
+	subs.subs["sub_1"] = sub
+	frozen := time.Date(2026, 3, 20, 0, 0, 0, 0, time.UTC)
+	engine.SetTestClockReader(&stubClockReader{err: fmt.Errorf("read test clock tc_1: %w", errs.ErrNotFound)})
+	ctx := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: frozen, TestClockID: "tc_1"})
+
+	w, err := engine.PlanCancelBill(ctx, sub, frozen)
+	if w != nil || !errors.Is(err, errs.ErrUnavailable) || errs.Code(err) != "test_clock_unavailable" {
+		t.Fatalf("writer %v, error %v (code %q); want no writer and test_clock_unavailable", w != nil, err, errs.Code(err))
+	}
+	if len(invoices.invoices) != 0 || subs.cycleUpdated["sub_1"] {
+		t.Errorf("%d invoices, cycle advanced %v; want nothing written", len(invoices.invoices), subs.cycleUpdated["sub_1"])
+	}
+}
+
 // TestRunCycle_CalendarMonthly_AutoRealignsOnCycleClose locks in the
 // fix for the drifted-anchor case: a calendar-billing monthly sub
 // whose period anchored on day-20 (e.g. inherited from a prior
@@ -2412,7 +2484,7 @@ func TestRunCycle_SkipsPendingChangeNotYetDue(t *testing.T) {
 // TestEffectiveNow covers the four branches of Engine.effectiveNow, the
 // instant the engine bills a subscription at: no test clock → real time;
 // a clock it reads → the clock's frozen time; a clock id with no reader →
-// real time; a clock it cannot read → real time, logged.
+// real time; a clock it cannot read → an error, and no instant.
 func TestEffectiveNow(t *testing.T) {
 	wall := time.Date(2026, 4, 20, 12, 0, 0, 0, time.UTC)
 	frozen := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
@@ -2424,8 +2496,8 @@ func TestEffectiveNow(t *testing.T) {
 	t.Run("no test clock id returns real time", func(t *testing.T) {
 		e := NewEngine(nil, nil, nil, nil, nil, nil, nil, nil, fakeClk)
 		e.SetTestClockReader(&stubClockReader{clk: domain.TestClock{FrozenTime: frozen}})
-		if got := e.effectiveNow(context.Background(), liveSub); !got.Equal(wall) {
-			t.Errorf("unpinned sub: got %v, want %v", got, wall)
+		if got, err := e.effectiveNow(context.Background(), liveSub); err != nil || !got.Equal(wall) {
+			t.Errorf("unpinned sub: got %v, %v; want %v", got, err, wall)
 		}
 	})
 
@@ -2433,8 +2505,8 @@ func TestEffectiveNow(t *testing.T) {
 		reader := &stubClockReader{clk: domain.TestClock{FrozenTime: frozen}}
 		e := NewEngine(nil, nil, nil, nil, nil, nil, nil, nil, fakeClk)
 		e.SetTestClockReader(reader)
-		if got := e.effectiveNow(context.Background(), testSub); !got.Equal(frozen) {
-			t.Errorf("test-mode sub: got %v, want %v", got, frozen)
+		if got, err := e.effectiveNow(context.Background(), testSub); err != nil || !got.Equal(frozen) {
+			t.Errorf("test-mode sub: got %v, %v; want %v", got, err, frozen)
 		}
 		if reader.lastID != "tc_1" || reader.lastTenant != "t1" {
 			t.Errorf("reader lookup: got (%q,%q), want (t1,tc_1)", reader.lastTenant, reader.lastID)
@@ -2443,16 +2515,16 @@ func TestEffectiveNow(t *testing.T) {
 
 	t.Run("test clock id without reader returns real time", func(t *testing.T) {
 		e := NewEngine(nil, nil, nil, nil, nil, nil, nil, nil, fakeClk)
-		if got := e.effectiveNow(context.Background(), testSub); !got.Equal(wall) {
-			t.Errorf("no reader: got %v, want %v", got, wall)
+		if got, err := e.effectiveNow(context.Background(), testSub); err != nil || !got.Equal(wall) {
+			t.Errorf("no reader: got %v, %v; want %v", got, err, wall)
 		}
 	})
 
-	t.Run("a clock it cannot read falls back to real time", func(t *testing.T) {
+	t.Run("a clock it cannot read is an error", func(t *testing.T) {
 		e := NewEngine(nil, nil, nil, nil, nil, nil, nil, nil, fakeClk)
 		e.SetTestClockReader(&stubClockReader{err: errs.ErrNotFound})
-		if got := e.effectiveNow(context.Background(), testSub); !got.Equal(wall) {
-			t.Errorf("reader error: got %v, want %v", got, wall)
+		if got, err := e.effectiveNow(context.Background(), testSub); err == nil || !got.IsZero() {
+			t.Errorf("reader error: got %v, %v; want an error and no instant", got, err)
 		}
 	})
 }

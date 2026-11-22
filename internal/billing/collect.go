@@ -64,6 +64,15 @@ func (e *Engine) CollectInvoice(ctx context.Context, tenantID, invoiceID string,
 				slog.DebugContext(ctx, "collect: another charge has the invoice", "invoice_id", invoiceID, "error", cerr)
 				continue
 			}
+			if errors.Is(cerr, errCollectionTimeUnread) {
+				next := "the auto-charge sweep collects it on its next tick"
+				if inv.IsSimulated {
+					next = "its test clock's next advance collects it"
+				}
+				slog.ErrorContext(ctx, "collect: the invoice's time could not be read, so nothing was collected; it stays queued, and "+next,
+					"invoice_id", invoiceID, "error", cerr)
+				continue
+			}
 			slog.WarnContext(ctx, "collect: did not complete; "+collectFailureNext(cerr),
 				"invoice_id", invoiceID, "error", cerr)
 		}
@@ -96,19 +105,23 @@ func collectFailureNext(err error) string {
 // at: the caller's anchor when it has one, else the invoice's clock now, else
 // the engine's clock (under processAutoCharge's bound ctx, its instant). When
 // the invoice's clock cannot be found (the invoice, its subscription or
-// customer, or their test clock cannot be read), it falls back to the
-// engine's clock, logged, as effectiveNow does.
-func (e *Engine) collectionAt(ctx context.Context, inv domain.Invoice, at *time.Time) time.Time {
+// customer, or their test clock cannot be read) it returns the error, and the
+// invoice is not collected.
+func (e *Engine) collectionAt(ctx context.Context, inv domain.Invoice, at *time.Time) (time.Time, error) {
 	if at != nil {
-		return *at
+		return *at, nil
 	}
 	sim, err := e.SimForInvoice(ctx, inv.TenantID, inv.ID)
 	if err != nil {
-		slog.WarnContext(ctx, "collect: could not find the invoice's test clock; collecting at real time",
-			"invoice_id", inv.ID, "error", err)
+		return time.Time{}, err
 	}
 	if !sim.Simulated() {
-		return e.clock.Now(ctx)
+		return e.clock.Now(ctx), nil
 	}
-	return sim.At
+	return sim.At, nil
 }
+
+// errCollectionTimeUnread marks a collection that did not start because the
+// invoice's time could not be read: nothing was written, the hold is
+// released, and the invoice stays queued.
+var errCollectionTimeUnread = errors.New("could not read the time to collect invoice")

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
@@ -318,5 +319,50 @@ func TestCollect_RefusedClaimSaysWhatIsLeft(t *testing.T) {
 				t.Errorf("a refused claim logged at Warn or above in real time:\n%s", logs.String())
 			}
 		})
+	}
+}
+
+// A collection whose test clock cannot be read writes nothing: no credit is
+// applied, nothing is charged, the hold is released and the invoice stays
+// queued. The finalize-time collect logs it once, at error level, naming the
+// clock's next advance. That advance's charge job leaves the invoice for its
+// next run while the clock still cannot be read (the advance fails), and
+// charges it once the clock reads.
+func TestCollect_AClockThatCannotBeReadCollectsNothing(t *testing.T) {
+	inv, applier, charger, engine := leftHarness(t)
+	inv.invoices[0].IsSimulated = true
+	engine.SetCustomerReader(&stubCustomerReader{customers: map[string]domain.Customer{
+		"cus_1": {ID: "cus_1", TenantID: "t1", TestClockID: "tc_1"},
+	}})
+	clocks := &stubClockReader{clk: domain.TestClock{ID: "tc_1", FrozenTime: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)},
+		err: errors.New("connection reset by peer")}
+	engine.SetTestClockReader(clocks)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	untouched := func(when string) {
+		t.Helper()
+		got := inv.invoices[0]
+		if len(charger.got) != 0 || applier.calls != 0 || inv.holdSet("inv_1") || !got.AutoChargePending || got.AmountDueCents != 1000 {
+			t.Fatalf("%s: %d charges, %d credit applies, hold set %v, queued %v, due %d; want nothing written and the invoice still queued",
+				when, len(charger.got), applier.calls, inv.holdSet("inv_1"), got.AutoChargePending, got.AmountDueCents)
+		}
+	}
+
+	logs := warnLogs(t)
+	engine.CollectInvoice(ctx, "t1", "inv_1", nil)
+	untouched("finalize's collect")
+	if out := logs.String(); strings.Count(out, "level=ERROR") != 1 || !strings.Contains(out, "invoice_id=inv_1") ||
+		!strings.Contains(out, "its test clock's next advance collects it") {
+		t.Errorf("logs %q: want one error naming inv_1 and the clock's next advance", out)
+	}
+
+	charged, errs := engine.RetryPendingChargesForClock(ctx, "t1", "tc_1", 50)
+	if charged != 0 || len(errs) != 1 || !errors.Is(errs[0], domain.ErrLeftForNextRun) {
+		t.Fatalf("the advance's charge job: charged %d, errors %v; want 0 and the invoice left for the next run", charged, errs)
+	}
+	untouched("the advance's charge job")
+
+	clocks.err = nil // the clock reads again: Retry advance
+	if charged, errs := engine.RetryPendingChargesForClock(ctx, "t1", "tc_1", 50); charged != 1 || len(errs) != 0 {
+		t.Fatalf("the retry: charged %d, errors %v; want 1 and none", charged, errs)
 	}
 }

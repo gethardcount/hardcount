@@ -2,6 +2,7 @@ package billing
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"testing"
@@ -666,6 +667,40 @@ func TestScanThresholdsForClock_DrainsPastBatchSize(t *testing.T) {
 	}
 	if len(invoices.invoices) != 60 {
 		t.Fatalf("expected 60 threshold invoices, got %d", len(invoices.invoices))
+	}
+}
+
+// A clock's threshold scan that cannot read a subscription's test clock
+// skips it with the error and writes nothing. Once the clock reads, the next
+// scan (Retry advance) fires it.
+func TestScanThresholdsForClock_AClockThatCannotBeReadSkipsTheSubscription(t *testing.T) {
+	thresholds := &domain.BillingThresholds{AmountGTE: 50000}
+	engine, subs, invoices := setupThresholdEngine(thresholds, 1000)
+	at := time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC)
+	clocks := &stubClockReader{clk: domain.TestClock{ID: "tc_1", FrozenTime: at}, err: errors.New("connection reset by peer")}
+	engine.SetTestClockReader(clocks)
+	periodStart := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+	periodEnd := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
+	sub := domain.Subscription{
+		ID: "sub_clk", TenantID: "t1", CustomerID: "cus_1", TestClockID: "tc_1",
+		Items:                     []domain.SubscriptionItem{{ID: "subitem_1", PlanID: "pln_1", Quantity: 1}},
+		Status:                    domain.SubscriptionActive,
+		BillingTime:               domain.BillingTimeCalendar,
+		CurrentBillingPeriodStart: &periodStart,
+		CurrentBillingPeriodEnd:   &periodEnd,
+		NextBillingAt:             &periodEnd,
+		BillingThresholds:         thresholds,
+	}
+	subs.clockCandidates = []domain.Subscription{sub}
+	subs.subs[sub.ID] = sub
+	ctx := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: at, TestClockID: "tc_1"})
+
+	if fired, errs := engine.ScanThresholdsForClock(ctx, "t1", "tc_1", 50); fired != 0 || len(errs) != 1 || len(invoices.invoices) != 0 {
+		t.Fatalf("fired %d, errors %v, %d invoices; want none fired, the clock's error, nothing written", fired, errs, len(invoices.invoices))
+	}
+	clocks.err = nil
+	if fired, errs := engine.ScanThresholdsForClock(ctx, "t1", "tc_1", 50); fired != 1 || len(errs) != 0 || len(invoices.invoices) != 1 {
+		t.Fatalf("the next scan: fired %d, errors %v, %d invoices; want it fired once", fired, errs, len(invoices.invoices))
 	}
 }
 

@@ -1549,23 +1549,18 @@ func (e *Engine) clockOf(ctx context.Context, tenantID, clockID, owner string) (
 }
 
 // effectiveNow is the instant the engine bills a subscription at: its test
-// clock's time, or else the engine's clock (under a bound ctx, its instant).
-// A clock it cannot read falls back to the engine's clock, logged, so one
-// dangling test_clock_id does not stop the billing run for every tenant.
-// That fallback reaches writes: the catch-up's due gate (closeEndedPeriods),
-// the cycle close's now, the invoice build's now (the invoice's tax date and
-// timestamps) and the threshold scan. It returns only the instant, so a
-// fallback can never be bound back onto a ctx as a time with no clock.
-func (e *Engine) effectiveNow(ctx context.Context, sub domain.Subscription) time.Time {
+// clock's frozen time, or else the engine's clock (under a bound ctx, its
+// instant). A test clock it cannot read is an error, and the caller skips the
+// subscription; it is never billed at the engine's time instead.
+func (e *Engine) effectiveNow(ctx context.Context, sub domain.Subscription) (time.Time, error) {
 	sim, err := e.clockOf(ctx, sub.TenantID, sub.TestClockID, "subscription "+sub.ID)
 	if err != nil {
-		slog.WarnContext(ctx, "test clock lookup failed, falling back to real time",
-			"subscription_id", sub.ID, "test_clock_id", sub.TestClockID, "error", err)
+		return time.Time{}, err
 	}
 	if !sim.Simulated() {
-		return e.clock.Now(ctx)
+		return e.clock.Now(ctx), nil
 	}
-	return sim.At
+	return sim.At, nil
 }
 
 // SimForInvoice is the time answer for an invoice: the clock of its
@@ -2396,7 +2391,11 @@ func (e *Engine) billSubscription(ctx context.Context, sub domain.Subscription, 
 		// whether a due instant has come; the close itself still runs at
 		// the due instant (billOnePeriod anchors on next_billing_at, the
 		// cancel on cancel_at), so no invoice date moves.
-		dueBy := e.effectiveNow(ctx, sub).Add(-grace)
+		now, err := e.effectiveNow(ctx, sub)
+		if err != nil {
+			return count, err
+		}
+		dueBy := now.Add(-grace)
 
 		// ADR-097: a cancel_at strictly INSIDE the current period fires
 		// here, BEFORE the caught-up early-return — the motivating bug's
@@ -3008,7 +3007,10 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	// one scheduler tick, so the change is neutral — invoice timestamps
 	// land exactly on the period boundary instead of "few minutes after,"
 	// which is the more defensible cosmetic anyway.
-	now := e.effectiveNow(ctx, sub)
+	now, err := e.effectiveNow(ctx, sub)
+	if err != nil {
+		return false, err
+	}
 	if sub.NextBillingAt != nil {
 		now = *sub.NextBillingAt
 	}
@@ -4154,7 +4156,12 @@ func (e *Engine) priceFinalOnCancel(ctx context.Context, sub domain.Subscription
 	p.kind = finalOnCancelBill
 	p.billingLoc, p.netDays, p.invoiceCurrency = billingLoc, netDays, invoiceCurrency
 	p.lineItems, p.taxApp = lineItems, taxApp
-	p.now = e.effectiveNow(ctx, sub)
+	now, err := e.effectiveNow(ctx, sub)
+	if err != nil {
+		return finalOnCancel{}, errs.Unavailable("test_clock_unavailable",
+			"The subscription's test clock could not be read, so it was not canceled. Try again.", err)
+	}
+	p.now = now
 	p.dueAt = domain.AddDaysIn(p.now, netDays, billingLoc)
 	return p, nil
 }
@@ -4965,7 +4972,16 @@ func (e *Engine) processAutoCharge(ctx context.Context, inv domain.Invoice, at *
 	}
 	inv = fresh
 
-	settleAt := e.collectionAt(ctx, inv, at)
+	settleAt, err := e.collectionAt(ctx, inv, at)
+	if err != nil {
+		// Provably pre-Stripe: release the hold so a later run can claim the
+		// invoice at once.
+		release()
+		if nerr := e.chargeNotMadeFor(ctx, inv, "the time to charge it at could not be read", fmt.Errorf("%w: %w", errCollectionTimeUnread, err)); nerr != nil {
+			errs = append(errs, nerr)
+		}
+		return charged, errs
+	}
 	// Apply customer credits BEFORE charging (trap R1: never charge the
 	// pre-credit amount). ApplyToInvoiceAt is safe to re-run: it drains
 	// min(amount_due, current balance), so an already-applied invoice or
