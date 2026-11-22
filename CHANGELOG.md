@@ -139,6 +139,7 @@ original text.
 
 ### Fixed
 
+- **The bootstrap output names your dashboard's address.** `hardcount-bootstrap` told you to sign in at `http://localhost:5173/login` wherever the dashboard ran. It now uses `DASHBOARD_BASE_URL` when that is set.
 - **Start-up with no database setting says where the server looks.** The message now says the setting must be in the environment and that the server does not read a `.env` file (`make dev` loads one). It named the settings only, so starting the binary beside a `.env` looked like a fault.
 - **The start-up check on the limited database user no longer asks for the migration tool's sequence.** On a database without default privileges, the grants it listed included `goose_db_version_id_seq`, which Hardcount never uses as that user. The docs now say the limited user must be named `hardcount_app`; they said "usually".
 - **An error's status no longer depends on its wording.** A server fault whose message read like a validation message, such as "… is required", answered `422` with that internal text. It now answers `500` `internal_error`, and the details go to the server log. Client mistakes keep their `422` ([#1854](https://github.com/gethardcount/hardcount/pull/1854)).

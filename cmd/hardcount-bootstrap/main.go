@@ -105,7 +105,7 @@ func main() {
 	fmt.Printf("  Tenant:     %s\n", result.Tenant.Name)
 	fmt.Printf("  Tenant ID:  %s\n", result.Tenant.ID)
 	fmt.Println()
-	fmt.Println("  Dashboard sign-in (http://localhost:5173/login):")
+	fmt.Printf("  Dashboard sign-in (%s):\n", signInURL())
 	fmt.Printf("  Email:    %s\n", result.OwnerUser.Email)
 	if result.PasswordGenerated {
 		fmt.Printf("  Password: %s   (generated — save this; not retrievable)\n", result.OwnerPassword)
@@ -153,7 +153,7 @@ func printEmailExistsGuidance(email string) {
 	fmt.Fprintf(os.Stderr, "ERROR: an account already exists for %s.\n\n", email)
 	fmt.Fprintln(os.Stderr, "Hardcount is already bootstrapped for this email. Pick one:")
 	fmt.Fprintln(os.Stderr, "")
-	fmt.Fprintln(os.Stderr, "  1. Sign in with the existing credentials at http://localhost:5173/login")
+	fmt.Fprintf(os.Stderr, "  1. Sign in with the existing credentials at %s\n", signInURL())
 	fmt.Fprintln(os.Stderr, "  2. Create an ADDITIONAL tenant in the same deployment — each tenant")
 	fmt.Fprintln(os.Stderr, "     needs its OWN owner email, so pick one you have not used yet:")
 	fmt.Fprintln(os.Stderr, "")
@@ -173,4 +173,15 @@ func printEmailExistsGuidance(email string) {
 func fatal(format string, args ...any) {
 	fmt.Fprintf(os.Stderr, "ERROR: "+format+"\n", args...)
 	os.Exit(1)
+}
+
+// signInURL is the dashboard's sign-in page: under DASHBOARD_BASE_URL when it
+// is set, as the links in emails are, else the dashboard's default local
+// address.
+func signInURL() string {
+	base := strings.TrimRight(strings.TrimSpace(os.Getenv("DASHBOARD_BASE_URL")), "/")
+	if base == "" {
+		base = "http://localhost:5173"
+	}
+	return base + "/login"
 }
