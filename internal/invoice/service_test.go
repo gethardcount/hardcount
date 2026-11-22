@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"maps"
 	"slices"
 	"strings"
 	"testing"
@@ -1626,7 +1627,8 @@ func TestRetryPendingTaxCommit_EachInvoiceOnItsOwnInstant(t *testing.T) {
 func TestRetryPendingTax_EachInvoiceOnItsOwnInstant(t *testing.T) {
 	base := time.Date(2026, 1, 5, 9, 0, 0, 0, time.UTC)
 	store := newMemStore()
-	svc := NewService(store, &steppingClock{at: base}, newMemNumberer())
+	server := &steppingClock{at: base}
+	svc := NewService(store, server, newMemNumberer())
 	retrier := &instantSeeingRetrier{stubTaxRetrier: &stubTaxRetrier{store: store}}
 	svc.SetTaxRetrier(retrier)
 	for _, id := range []string{"inv_1", "inv_2"} {
@@ -1635,20 +1637,27 @@ func TestRetryPendingTax_EachInvoiceOnItsOwnInstant(t *testing.T) {
 	if _, errs := svc.RetryPendingTax(postgres.WithLivemode(context.Background(), true), 50); len(errs) != 0 {
 		t.Fatalf("errors: %v", errs)
 	}
-	checkOwnInstants(t, retrier.at, base)
+	got := slices.SortedFunc(maps.Values(retrier.at), time.Time.Compare)
+	want := []time.Time{base.Add(time.Second), base.Add(2 * time.Second)}
+	if server.reads != 2 || !slices.EqualFunc(got, want, time.Time.Equal) {
+		t.Errorf("server clock read %d times, retries ran at %v; want one read per invoice, retries at %v", server.reads, got, want)
+	}
 }
 
-// instantSeeingRetrier records the instant each tax retry's ctx carries.
+// instantSeeingRetrier records, by invoice, the instant a tax retry's ctx
+// carries.
 type instantSeeingRetrier struct {
 	*stubTaxRetrier
-	at []time.Time
+	at map[string]time.Time
 }
 
 func (r *instantSeeingRetrier) RetryTaxForInvoice(ctx context.Context, tenantID, invoiceID string,
 	then func(ctx context.Context, tx *sql.Tx, taxed domain.Invoice) error,
 ) (domain.Invoice, error) {
-	at, _ := clock.EffectiveNow(ctx)
-	r.at = append(r.at, at)
+	if r.at == nil {
+		r.at = map[string]time.Time{}
+	}
+	r.at[invoiceID], _ = clock.EffectiveNow(ctx)
 	return r.stubTaxRetrier.RetryTaxForInvoice(ctx, tenantID, invoiceID, then)
 }
 

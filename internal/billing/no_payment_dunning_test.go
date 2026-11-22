@@ -77,6 +77,10 @@ func TestCollector_NoCard_StartsNoPaymentDunningOnce(t *testing.T) {
 	if starter.causes[0] != domain.DunningCauseNoPaymentMethod {
 		t.Fatalf("cause = %v, want no_payment_method", starter.causes[0])
 	}
+	// The run starts on the instant the sweep bound for this invoice.
+	if want := billingTestClock().Now(context.Background()); !starter.at[0].Equal(want) {
+		t.Errorf("started on %v, want %v, the engine's clock read for this invoice", starter.at[0], want)
+	}
 }
 
 // A failed start is surfaced and leaves the invoice queued, so the next sweep

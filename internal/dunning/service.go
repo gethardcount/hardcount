@@ -227,15 +227,17 @@ type Service struct {
 	// clock package's doc). Who decides it:
 	//   - a failed payment starts a run on the time of the payment's settle;
 	//   - an invoice finalized with no card starts one on the finalize's time;
+	//   - the backfill job starts one for a failed invoice that has none, on
+	//     its own read of the server's clock for that invoice;
 	//   - the scheduled job retries due runs at real time (its list excludes
 	//     invoices on a test clock), and a test clock's catch-up retries its
 	//     own on that clock;
 	//   - an invoice action that closes the run (a void, a write-off, a
 	//     payment, a credit note) runs on that action's time, which the API's
 	//     door (api.clockDoor) decides for a request.
-	// Each entry point keeps that time. Work that arrives with no instant
-	// bound (a job's row, or a function that decides its own time, before it
-	// binds) reads this clock once (clock.EnsureEffectiveNow); a request on a
+	// Each entry point keeps that time, and a run's start always arrives with
+	// it bound. A due run's retry, or a resolve, that arrives with no instant
+	// bound reads this clock once (clock.EnsureEffectiveNow); a request on a
 	// real-time or a record route arrives with the door's instant. Without
 	// that read, two reads of the time in one action could differ, and a
 	// store's stamp could fall on another time than the action's.
@@ -384,6 +386,9 @@ func (s *Service) SetCustomerEmailFetcher(fetcher CustomerEmailFetcher) {
 // so card-less invoices carried a payment-failure they never had; the
 // timeline hid the lie by rendering a generic row. An unknown cause is
 // refused loudly.
+//
+// ctx carries the action's instant, bound by the caller; "now" above is that
+// instant.
 func (s *Service) StartDunning(ctx context.Context, tenantID string, invoiceID, customerID string, simFailedAt time.Time, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error) {
 	if !cause.Valid() {
 		return domain.InvoiceDunningRun{}, errs.Invalid("cause", fmt.Sprintf("unknown dunning start cause %q", cause))

@@ -1745,6 +1745,12 @@ func (s *Service) IssuedCreditedCents(ctx context.Context, tenantID, invoiceID s
 	return sums.IssuedCents, nil
 }
 
+// Issue issues a draft credit note: the issue and its money effect (on the
+// source invoice's amount due, or the customer's balance) commit on one
+// transaction, and a Stripe refund and the tax reversal follow the commit.
+// While the source cannot take the note (issueHeld), holdIssue voids it or
+// leaves it a draft. A note that is not a draft is refused. ctx carries the
+// action's instant, bound by the caller.
 func (s *Service) Issue(ctx context.Context, tenantID, id string) (domain.CreditNote, error) {
 	cn, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {

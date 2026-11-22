@@ -196,10 +196,12 @@ func TestRetryPendingTaxReversal_EachInvoiceOnItsOwnInstant(t *testing.T) {
 }
 
 // checkOwnInstants asserts two tax calls, each on its own read of a stepping
-// server clock that started at base (not the machine's time).
+// server clock that started at base: two different instants, each after base
+// and within the hour (not zero, and not the machine's time).
 func checkOwnInstants(t *testing.T, at []time.Time, base time.Time) {
 	t.Helper()
-	if len(at) != 2 || at[0].Equal(at[1]) || !at[0].Before(base.Add(time.Hour)) || !at[1].Before(base.Add(time.Hour)) {
+	read := func(a time.Time) bool { return a.After(base) && a.Before(base.Add(time.Hour)) }
+	if len(at) != 2 || at[0].Equal(at[1]) || !read(at[0]) || !read(at[1]) {
 		t.Errorf("tax calls at %v: want two, each its own read of the server's clock (from %v)", at, base)
 	}
 }

@@ -9,6 +9,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
 // canceledInAdvanceSub builds a mid-period-canceled in_advance sub funded by the
@@ -55,7 +56,7 @@ func wireCancelEngine(inv *mockInvoices, pricing *mockPricing, adjuster *fakeCre
 
 // TestWriteCancelReliefTx_AllPaid_CreatesDrafts: an all-paid funding set gets
 // issue_pending DRAFTS on the cancel tx, reports the gross owed, and
-// FinishRelief issues them post-commit.
+// FinishRelief issues them post-commit, on the cancel's instant.
 func TestWriteCancelReliefTx_AllPaid_CreatesDrafts(t *testing.T) {
 	baseInv, baseLine := paidBaseInvoice()
 	sub, inv, pricing := canceledInAdvanceSub([]domain.Invoice{baseInv}, []domain.InvoiceLineItem{baseLine})
@@ -76,11 +77,12 @@ func TestWriteCancelReliefTx_AllPaid_CreatesDrafts(t *testing.T) {
 	if len(adjuster.issued) != 0 {
 		t.Errorf("nothing may be issued before the cancel commits; issued=%v", adjuster.issued)
 	}
-	if err := e.FinishRelief(context.Background(), sub, r); err != nil {
+	cancelAt := *sub.CanceledAt
+	if err := e.FinishRelief(clock.WithEffectiveNow(context.Background(), cancelAt), sub, r); err != nil {
 		t.Fatalf("FinishRelief: %v", err)
 	}
-	if len(adjuster.issued) != 1 || adjuster.issued[0] != r.DraftIDs[0] {
-		t.Errorf("FinishRelief issued=%v, want %v", adjuster.issued, r.DraftIDs)
+	if len(adjuster.issued) != 1 || adjuster.issued[0] != r.DraftIDs[0] || !adjuster.issuedAt[0].Equal(cancelAt) {
+		t.Errorf("FinishRelief issued=%v on %v, want %v on the cancel's instant %v", adjuster.issued, adjuster.issuedAt, r.DraftIDs, cancelAt)
 	}
 }
 

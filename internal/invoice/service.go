@@ -453,8 +453,8 @@ func (s *Service) decideCreate(ctx context.Context, tenantID string, input Creat
 // decideInvoice is the connect fan-out's: it decides and binds each
 // invoice's time (clock.DecideOrRealTime) before that invoice's retry. The
 // fan-out calls it once per invoice, so an invoice on no clock gets its own
-// read of this clock, when its retry starts, and a fan-out that runs for
-// minutes never dates all its invoices at its start. When the invoice's
+// read of the service's clock, when its retry starts, and a fan-out that runs
+// for minutes never dates all its invoices at its start. When the invoice's
 // clock cannot be read, the fan-out skips the invoice and writes nothing.
 func (s *Service) decideInvoice(ctx context.Context, tenantID, invoiceID string) (context.Context, error) {
 	decided, err := clock.DecideOrRealTime(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
@@ -2697,6 +2697,8 @@ func buildLineItem(input AddLineItemInput, currency string) (domain.InvoiceLineI
 // during the calculation gets the store's 409. After the commit, the
 // finalize's steps and the $0 settle run on a stepsBudget ctx. Manual
 // invoices stay drafts. An error comes back with no invoice.
+//
+// ctx carries the action's instant, bound by the caller.
 func (s *Service) RetryTax(ctx context.Context, tenantID, invoiceID string) (domain.Invoice, error) {
 	if s.taxRetrier == nil {
 		return domain.Invoice{}, errs.InvalidState("tax retry is not configured")

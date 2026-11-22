@@ -638,10 +638,12 @@ type recordedStartDunning struct {
 	invoiceID  string
 	customerID string
 	failureAt  time.Time
+	at         time.Time // the instant ctx carries
 }
 
-func (r *recordingDunningStarter) StartDunning(_ context.Context, tenantID, invoiceID, customerID string, failureAt time.Time, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error) {
-	r.calls = append(r.calls, recordedStartDunning{tenantID, invoiceID, customerID, failureAt})
+func (r *recordingDunningStarter) StartDunning(ctx context.Context, tenantID, invoiceID, customerID string, failureAt time.Time, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error) {
+	at, _ := clock.EffectiveNow(ctx)
+	r.calls = append(r.calls, recordedStartDunning{tenantID, invoiceID, customerID, failureAt, at})
 	return domain.InvoiceDunningRun{ID: "drun_test", InvoiceID: invoiceID}, nil
 }
 
