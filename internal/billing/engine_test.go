@@ -1717,6 +1717,33 @@ func TestRunCycle_GeneratesInvoice(t *testing.T) {
 	}
 }
 
+// A period's close runs at its next_billing_at and reads no test clock: with
+// a clock reader that fails, the period is billed, and the reader is never
+// asked. A subscription with no next_billing_at, which the one caller never
+// passes, is an error.
+func TestBillOnePeriod_ReadsNoTestClock(t *testing.T) {
+	engine, subs, _, _, invoices := setupEngine()
+	reader := &stubClockReader{err: errors.New("connection reset by peer")}
+	engine.SetTestClockReader(reader)
+	sub := subs.subs["sub_1"]
+	sub.TestClockID = "tc_1"
+	subs.subs["sub_1"] = sub
+	frozen := time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC)
+	ctx := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: frozen, TestClockID: "tc_1"})
+
+	if invoiced, err := engine.billOnePeriod(ctx, sub); err != nil || !invoiced || len(invoices.invoices) != 1 {
+		t.Fatalf("invoiced %v, error %v, %d invoices; want the period billed", invoiced, err, len(invoices.invoices))
+	}
+	if reader.lastID != "" {
+		t.Errorf("the test clock reader was asked for %q; want it never asked", reader.lastID)
+	}
+
+	sub.NextBillingAt = nil
+	if _, err := engine.billOnePeriod(ctx, sub); err == nil {
+		t.Error("no next_billing_at: got no error")
+	}
+}
+
 // TestRunCycle_CalendarMonthly_AutoRealignsOnCycleClose locks in the
 // fix for the drifted-anchor case: a calendar-billing monthly sub
 // whose period anchored on day-20 (e.g. inherited from a prior
