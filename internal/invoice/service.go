@@ -918,8 +918,7 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 
 	// Validate and build every line before the create transaction opens.
 	// That transaction holds the tenant's number row until it commits, so
-	// it runs only the writes. The commit-expiry check reads the clock bound
-	// just above.
+	// it runs only the writes.
 	items := make([]domain.InvoiceLineItem, 0, len(input.LineItems))
 	var subtotal int64
 	commitLines := 0
@@ -927,11 +926,6 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		li, err := buildLineItem(liInput, currency)
 		if err != nil {
 			return domain.Invoice{}, fmt.Errorf("line item %d: %w", i+1, err)
-		}
-		// Compose-time expiry sanity (ADR-078); re-checked at finalize.
-		if li.CommitExpiresAt != nil && !li.CommitExpiresAt.After(now) {
-			return domain.Invoice{}, fmt.Errorf("line item %d: %w", i+1,
-				errs.Invalid("commit_expires_at", "must be in the future"))
 		}
 		if li.IsCommitLine() {
 			commitLines++
@@ -941,12 +935,12 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		}
 		items = append(items, li)
 	}
-	// One commit per invoice (ADR-078). The store enforces it too, on both
-	// create (createWithLineItemsInTx) and AddLineItem (under the row lock).
-	// Checking here refuses the pair with the other line errors, before the
-	// create transaction opens.
-	if commitLines > 1 {
-		return domain.Invoice{}, errs.Invalid("commit_granted_cents", "invoice already has a commit line — one commit per invoice; use a separate invoice")
+	// A commit line is alone on its invoice (ADR-078). The store enforces it
+	// too, on both create (createWithLineItemsInTx) and AddLineItem (under
+	// the row lock). Checking here refuses it with the other line errors,
+	// before the create transaction opens.
+	if commitLines > 0 && len(items) > 1 {
+		return domain.Invoice{}, errCommitLineAlone()
 	}
 	// One-off invoices that omit a billing window default to "now → now" so
 	// the NOT NULL period columns get sane values. Cycle invoices always
@@ -2559,12 +2553,9 @@ type AddLineItemInput struct {
 	// CommitGrantedCents marks the line as a prepaid-commit purchase
 	// (ADR-078): when the invoice finalizes, a credit block of this many
 	// cents is granted (may differ from the line price — discounted
-	// commits). add_on lines on manual invoices only, at most one per
-	// invoice (invoice-level rules enforced in the store, in-tx).
+	// commits). Bought credit never expires. An add_on line on a manual
+	// invoice, alone on it (invoice-level rules enforced in the store, in-tx).
 	CommitGrantedCents *int64 `json:"commit_granted_cents,omitempty"`
-	// CommitExpiresAt is the granted block's expiry; nil = never expires
-	// (phase-1 default).
-	CommitExpiresAt *time.Time `json:"commit_expires_at,omitempty"`
 }
 
 func (s *Service) AddLineItem(ctx context.Context, tenantID, invoiceID string, input AddLineItemInput) (domain.InvoiceLineItem, error) {
@@ -2574,14 +2565,6 @@ func (s *Service) AddLineItem(ctx context.Context, tenantID, invoiceID string, i
 	li, err := buildLineItem(input, "")
 	if err != nil {
 		return domain.InvoiceLineItem{}, err
-	}
-	// Compose-time expiry sanity (ADR-078): a commit whose expiry already
-	// passed would grant dead-on-arrival credits. Checked against the time
-	// the caller decided, a clock invoice's clock time. Re-checked at
-	// finalize — the line may sit
-	// in draft past its expiry.
-	if li.CommitExpiresAt != nil && !li.CommitExpiresAt.After(s.clock.Now(ctx)) {
-		return domain.InvoiceLineItem{}, errs.Invalid("commit_expires_at", "must be in the future")
 	}
 	item, _, err := s.store.AddLineItemAtomicAudited(ctx, tenantID, invoiceID, li, s.lineItemAddedEmission(ctx))
 	return item, err
@@ -2656,8 +2639,8 @@ func buildLineItem(input AddLineItemInput, currency string) (domain.InvoiceLineI
 	}
 
 	// Commit purchase lines (ADR-078): line-local rules here; the
-	// invoice-level rules (manual invoices only, at most one commit line
-	// per invoice) are enforced in the store under the invoice row lock,
+	// invoice-level rules (manual invoices only, the commit line alone on
+	// its invoice) are enforced in the store under the invoice row lock,
 	// covering both this path's consumers (AddLineItemAtomicAudited and
 	// CreateNumberedAudited).
 	if input.CommitGrantedCents != nil {
@@ -2670,8 +2653,6 @@ func buildLineItem(input AddLineItemInput, currency string) (domain.InvoiceLineI
 		if domain.InvoiceLineItemType(lineType) != domain.LineTypeAddOn {
 			return domain.InvoiceLineItem{}, errs.Invalid("commit_granted_cents", "commit purchase lines must be add_on lines")
 		}
-	} else if input.CommitExpiresAt != nil {
-		return domain.InvoiceLineItem{}, errs.Invalid("commit_expires_at", "requires commit_granted_cents")
 	}
 
 	return domain.InvoiceLineItem{
@@ -2683,7 +2664,6 @@ func buildLineItem(input AddLineItemInput, currency string) (domain.InvoiceLineI
 		TotalAmountCents:   amountCents,
 		Currency:           currency,
 		CommitGrantedCents: input.CommitGrantedCents,
-		CommitExpiresAt:    input.CommitExpiresAt,
 	}, nil
 }
 

@@ -20,7 +20,7 @@ import (
 func TestCommitFinalize_ConcurrentDoubleFinalize(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Commit Concurrent Finalize")
 
-	inv := h.createCommitInvoice(t, ctx, 9000, 10000, nil)
+	inv := h.createCommitInvoice(t, ctx, 9000, 10000)
 
 	const racers = 2
 	var wg sync.WaitGroup
@@ -64,7 +64,7 @@ func TestCommitFinalize_ConcurrentDoubleFinalize(t *testing.T) {
 func TestCommitMarkPaid_ConcurrentRedelivery_NoGrantEffect(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Commit Concurrent MarkPaid")
 
-	inv := h.createCommitInvoice(t, ctx, 9000, 10000, nil)
+	inv := h.createCommitInvoice(t, ctx, 9000, 10000)
 	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
 		t.Fatalf("finalize: %v", err)
 	}

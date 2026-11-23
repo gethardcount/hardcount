@@ -76,7 +76,7 @@ func drain(t *testing.T, h *commitHarness, ctx context.Context, cents int64, rou
 // account for 3600 of the cash; NOT 6000 face, NOT 5000 face-minus-face).
 func TestCommitRelief_WorkedExample(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Relief Worked Example")
-	inv := h.createCommitInvoice(t, ctx, 9000, 10000, nil)
+	inv := h.createCommitInvoice(t, ctx, 9000, 10000)
 	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
 		t.Fatalf("finalize: %v", err)
 	}
@@ -132,7 +132,7 @@ func TestCommitRelief_WorkedExample(t *testing.T) {
 // f(total retired) — per-slice independent rounding would over-refund.
 func TestCommitRelief_PartialsTelescope(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Relief Telescoping")
-	inv := h.createCommitInvoice(t, ctx, 9000, 10000, nil)
+	inv := h.createCommitInvoice(t, ctx, 9000, 10000)
 	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
 		t.Fatalf("finalize: %v", err)
 	}
@@ -175,7 +175,7 @@ func TestCommitRelief_Gates(t *testing.T) {
 	cnSvc := newReliefCNService(h)
 
 	// Unpaid commit invoice → route to void.
-	inv := h.createCommitInvoice(t, ctx, 9000, 10000, nil)
+	inv := h.createCommitInvoice(t, ctx, 9000, 10000)
 	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
 		t.Fatalf("finalize: %v", err)
 	}
@@ -224,7 +224,7 @@ func TestCommitRelief_Gates(t *testing.T) {
 // relief cash always matches the f-slice of what was actually retired).
 func TestCommitRelief_ConcurrentDrawdown(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Relief Race")
-	inv := h.createCommitInvoice(t, ctx, 9000, 10000, nil)
+	inv := h.createCommitInvoice(t, ctx, 9000, 10000)
 	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
 		t.Fatalf("finalize: %v", err)
 	}
@@ -271,11 +271,11 @@ func TestCommitRelief_ConcurrentDrawdown(t *testing.T) {
 }
 
 // TestCommitRelief_ExpiredGrant: term lapse is contractual breakage — the
-// swept grant has nothing refundable.
+// swept grant has nothing refundable. Bought credit no longer expires; a
+// grant made before that can still carry an expiry, set here on the ledger.
 func TestCommitRelief_ExpiredGrant(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Relief Expired")
-	exp := time.Now().UTC().Add(time.Hour)
-	inv := h.createCommitInvoice(t, ctx, 9000, 10000, &exp)
+	inv := h.createCommitInvoice(t, ctx, 9000, 10000)
 	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
 		t.Fatalf("finalize: %v", err)
 	}
@@ -313,7 +313,7 @@ func TestCommitRelief_ExpiredGrant(t *testing.T) {
 // nothing to reverse.
 func TestCommitRelief_OnAStripeTaxTenant_OwesNoTaxReversal(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Relief Stripe Tax Tenant")
-	inv := h.createCommitInvoice(t, ctx, 9000, 10000, nil)
+	inv := h.createCommitInvoice(t, ctx, 9000, 10000)
 	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
 		t.Fatalf("finalize: %v", err)
 	}

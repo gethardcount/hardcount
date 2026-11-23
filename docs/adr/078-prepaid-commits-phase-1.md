@@ -1,6 +1,6 @@
 # ADR-078: Prepaid commits + drawdown, phase 1
 
-**Status:** Accepted (2026-07-05; amended 2026-08-04 and 2026-10-19; supplemented by [ADR-080](080-paid-commit-cn-relief.md) on 2026-07-06)
+**Status:** Accepted (2026-07-05; amended 2026-08-04, 2026-10-19 and 2026-11-23; supplemented by [ADR-080](080-paid-commit-cn-relief.md) on 2026-07-06)
 **Context:** `docs/dev/design/prepaid-commits.md` (the locked design — peer-swept
 across Metronome/Lago/Stripe/AI-infra with adversarial quote-verification,
 then a 6-lens adversarial design panel; this ADR records the decisions, the
@@ -311,3 +311,16 @@ commits with tax on.
 **Promotional credit is unchanged.** Free promotional credit also pays the
 tax on the usage it covers. Whether it should apply before tax is a separate
 decision. Trigger: a partner uses promotional credit with tax on.
+
+## Amendment 2026-11-23 — a commit line is alone, and bought credit never expires
+
+- **A commit line is the only line on its invoice.** The invoice buys
+  prepaid credit and nothing else. Create and `POST /v1/invoices/{id}/line-items`
+  refuse a commit line beside any other line, in either order, under the
+  invoice row lock. An invoice can no longer mix a commit with ordinary
+  charges.
+- **Bought credit never expires.** `commit_expires_at` is removed from the
+  line, the API and the dashboard (migrations 00239 and 00240), so D10's
+  optional expiry is gone. A commit grant made before this keeps the expiry
+  already written on it. Credit with an expiry is granted by hand
+  (`POST /v1/credits/grant` with `expires_at`).

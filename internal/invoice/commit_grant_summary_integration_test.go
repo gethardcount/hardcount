@@ -55,7 +55,7 @@ func grantSummaryFor(t *testing.T, h *commitHarness, ctx context.Context, grantI
 func TestGrantSummary_VoidRetiredIsNotUsed(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Grant Summary Void Retired")
 
-	inv := h.createCommitInvoice(t, ctx, 10000, 10000, nil)
+	inv := h.createCommitInvoice(t, ctx, 10000, 10000)
 	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
 		t.Fatalf("finalize: %v", err)
 	}
@@ -89,7 +89,7 @@ func TestGrantSummary_VoidRetiredIsNotUsed(t *testing.T) {
 func TestGrantSummary_ReliefRetiredIsNotUsed(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Grant Summary Relief Retired")
 
-	inv := h.createCommitInvoice(t, ctx, 10000, 10000, nil)
+	inv := h.createCommitInvoice(t, ctx, 10000, 10000)
 	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
 		t.Fatalf("finalize: %v", err)
 	}

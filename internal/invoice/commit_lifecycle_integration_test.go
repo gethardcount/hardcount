@@ -2,6 +2,8 @@ package invoice_test
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"testing"
@@ -131,7 +133,7 @@ func (h *commitHarness) countEvents(t *testing.T, ctx context.Context, custID, e
 
 // createCommitInvoice composes a manual invoice with one commit line through
 // the real service path (Create → buildLineItem → CreateWithLineItems).
-func (h *commitHarness) createCommitInvoice(t *testing.T, ctx context.Context, priceCents, grantCents int64, expiresAt *time.Time) domain.Invoice {
+func (h *commitHarness) createCommitInvoice(t *testing.T, ctx context.Context, priceCents, grantCents int64) domain.Invoice {
 	t.Helper()
 	inv, err := h.invSvc.Create(ctx, h.tenantID, invoice.CreateInput{
 		CustomerID: h.custID,
@@ -142,7 +144,6 @@ func (h *commitHarness) createCommitInvoice(t *testing.T, ctx context.Context, p
 			Quantity:           1,
 			UnitAmountCents:    priceCents,
 			CommitGrantedCents: &grantCents,
-			CommitExpiresAt:    expiresAt,
 		}},
 	})
 	if err != nil {
@@ -186,7 +187,7 @@ func TestCommitFinalize_FundsGrantOnce(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Commit Fund Once")
 
 	// Discounted commit: pay $90, receive $100 of credits.
-	inv := h.createCommitInvoice(t, ctx, 9000, 10000, nil)
+	inv := h.createCommitInvoice(t, ctx, 9000, 10000)
 	if h.balance(t, ctx) != 0 {
 		t.Fatalf("balance before finalize = %d, want 0 (grant-on-ISSUE, not on create)", h.balance(t, ctx))
 	}
@@ -206,7 +207,7 @@ func TestCommitFinalize_FundsGrantOnce(t *testing.T) {
 		t.Fatal("no commit grant found for the funding invoice")
 	}
 	if grant.ExpiresAt != nil {
-		t.Errorf("grant expiry = %v, want nil (phase-1 default: never)", grant.ExpiresAt)
+		t.Errorf("grant expiry = %v, want nil: bought credit never expires", grant.ExpiresAt)
 	}
 	if grant.AmountCents != 10000 {
 		t.Errorf("grant amount = %d, want 10000", grant.AmountCents)
@@ -222,38 +223,17 @@ func TestCommitFinalize_FundsGrantOnce(t *testing.T) {
 }
 
 // TestCommitFinalize_FunderErrorKeepsDraft pins the both-or-neither contract:
-// a funder error (commit expiry passed while the invoice sat in draft) fails
-// Finalize loudly, the status flip rolls back, and no ledger row exists —
-// never a finalized purchase that silently granted nothing.
+// a funder error fails Finalize loudly, the status flip rolls back, and no
+// ledger row exists — never a finalized purchase that silently granted
+// nothing.
 func TestCommitFinalize_FunderErrorKeepsDraft(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Commit Funder Error")
-
-	future := time.Now().Add(24 * time.Hour)
-	inv := h.createCommitInvoice(t, ctx, 9000, 10000, &future)
-
-	// The line was composed valid, then sat in draft past its expiry.
-	{
-		tx, err := h.db.BeginTx(ctx, postgres.TxTenant, h.tenantID)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
-		if _, err := tx.ExecContext(ctx, `
-			UPDATE invoice_line_items SET commit_expires_at = now() - interval '1 hour'
-			WHERE invoice_id = $1 AND commit_granted_cents IS NOT NULL
-		`, inv.ID); err != nil {
-			t.Fatalf("backdate expiry: %v", err)
-		}
-		if err := tx.Commit(); err != nil {
-			t.Fatalf("commit: %v", err)
-		}
-	}
+	inv := h.createCommitInvoice(t, ctx, 9000, 10000)
+	h.invStore.SetCommitFunder(failingFunder{})
 
 	_, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID)
-	if err == nil {
-		t.Fatal("finalize should fail: commit expiry already passed (dead-on-arrival grant)")
-	}
-	if !strings.Contains(err.Error(), "expire on arrival") {
-		t.Errorf("error = %v, want the dead-on-arrival expiry validation", err)
+	if err == nil || !strings.Contains(err.Error(), "fund commit grant at finalize") {
+		t.Fatalf("finalize: err = %v, want the funder's error", err)
 	}
 
 	got, err := h.invSvc.Get(ctx, h.tenantID, inv.ID)
@@ -271,6 +251,13 @@ func TestCommitFinalize_FunderErrorKeepsDraft(t *testing.T) {
 	}
 }
 
+// failingFunder fails every commit grant.
+type failingFunder struct{}
+
+func (failingFunder) GrantCommitForInvoiceTx(context.Context, *sql.Tx, string, string, string, string, string, int64) (domain.CreditLedgerEntry, error) {
+	return domain.CreditLedgerEntry{}, errors.New("grant refused")
+}
+
 // TestCommitVoid_RetiresRemaining pins ADR-078 D3: voiding an unpaid commit
 // funding invoice retires the grant's REMAINING balance in the void tx;
 // consumed stays consumed. And D3's exactly-once: the legal
@@ -279,7 +266,7 @@ func TestCommitFinalize_FunderErrorKeepsDraft(t *testing.T) {
 func TestCommitVoid_RetiresRemaining(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Commit Void Retire")
 
-	inv := h.createCommitInvoice(t, ctx, 10000, 10000, nil)
+	inv := h.createCommitInvoice(t, ctx, 10000, 10000)
 	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
 		t.Fatalf("finalize: %v", err)
 	}
@@ -325,7 +312,7 @@ func TestCommitVoid_RetiresRemaining(t *testing.T) {
 func TestCommitUncollectible_NoRetire_ThenVoidRetiresOnce(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Commit Uncollectible Then Void")
 
-	inv := h.createCommitInvoice(t, ctx, 10000, 10000, nil)
+	inv := h.createCommitInvoice(t, ctx, 10000, 10000)
 	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
 		t.Fatalf("finalize: %v", err)
 	}
@@ -369,7 +356,7 @@ func TestCommitUncollectible_NoRetire_ThenVoidRetiresOnce(t *testing.T) {
 func TestUpdateStatusWithReversalPrior_CAS_RejectsPaidToVoid(t *testing.T) {
 	h, ctx := newCommitHarness(t, "CAS Paid To Void")
 
-	inv := h.createCommitInvoice(t, ctx, 10000, 10000, nil)
+	inv := h.createCommitInvoice(t, ctx, 10000, 10000)
 	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
 		t.Fatalf("finalize: %v", err)
 	}
@@ -398,7 +385,7 @@ func TestUpdateStatusWithReversalPrior_CAS_RejectsPaidToVoid(t *testing.T) {
 func TestCreditNote_BlockedOnCommitInvoice(t *testing.T) {
 	h, ctx := newCommitHarness(t, "CN Blocked On Commit")
 
-	inv := h.createCommitInvoice(t, ctx, 10000, 10000, nil)
+	inv := h.createCommitInvoice(t, ctx, 10000, 10000)
 	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
 		t.Fatalf("finalize: %v", err)
 	}
