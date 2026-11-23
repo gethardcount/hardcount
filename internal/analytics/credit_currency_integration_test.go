@@ -14,11 +14,9 @@ import (
 )
 
 // T10 (ADR-129): the dashboard's credit liability is one figure per currency,
-// the workspace default first, never a sum across currencies. Test-clock
-// customers stay out.
+// the workspace default first, never a sum across currencies.
 //
-// Mutation-verify: drop the GROUP BY currency → one row, red; drop the
-// test-clock filter → EUR reads 10500, red.
+// Mutation-verify: drop the GROUP BY currency → one row, red.
 func TestOverview_CreditBalanceByCurrency(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -55,9 +53,6 @@ func TestOverview_CreditBalanceByCurrency(t *testing.T) {
 	eur := newCustomer("cus_an_eur")
 	seed(eur, "EUR", 1000)
 	seed(eur, "EUR", 500)
-	sim := newCustomer("cus_an_sim")
-	execBypass(t, db, `UPDATE customers SET test_clock_id = $1 WHERE id = $2`, seedClock(t, db, tenantID), sim)
-	seed(sim, "EUR", 9000)
 
 	req := httptest.NewRequest("GET", "/overview?period=30d", nil)
 	req = req.WithContext(auth.WithTenantID(postgres.WithLivemode(req.Context(), false), tenantID))
@@ -81,6 +76,6 @@ func TestOverview_CreditBalanceByCurrency(t *testing.T) {
 		t.Fatalf("credit_balance_by_currency: %v (body %s)", err, rr.Body.String())
 	}
 	if len(got) != 2 || got[0].Currency != "EUR" || got[0].AmountCents != 1500 || got[1].Currency != "USD" || got[1].AmountCents != 3000 {
-		t.Errorf("credit_balance_by_currency = %+v, want [EUR 1500, USD 3000] (the default currency first, test clocks out)", got)
+		t.Errorf("credit_balance_by_currency = %+v, want [EUR 1500, USD 3000] (the default currency first)", got)
 	}
 }

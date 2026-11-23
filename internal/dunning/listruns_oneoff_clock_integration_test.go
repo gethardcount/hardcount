@@ -48,9 +48,9 @@ func TestListRuns_OneOffInvoiceRunOnACustomerClock(t *testing.T) {
 		VALUES ('dpol_oneoff', $1, 'P', true, true, '[3, 3, 3]', 'pause', 'none', false)`, tenantID)
 	// A one-off invoice: subscription_id NULL.
 	mustExec(`INSERT INTO invoices (id, tenant_id, customer_id, invoice_number,
-			status, payment_status, is_simulated, currency, subtotal_cents, total_amount_cents,
+			status, payment_status, currency, subtotal_cents, total_amount_cents,
 			amount_due_cents, tax_status, billing_period_start, billing_period_end, created_at, updated_at)
-		VALUES ('inv_dun_oneoff', $1, 'cus_dun_pin', 'inv_dun_oneoff', 'finalized', 'failed', true, 'USD', 2500, 2500, 2500, 'ok', $2, $2, $2, $2)`,
+		VALUES ('inv_dun_oneoff', $1, 'cus_dun_pin', 'inv_dun_oneoff', 'finalized', 'failed', 'USD', 2500, 2500, 2500, 'ok', $2, $2, $2, $2)`,
 		tenantID, frozen.Add(-24*time.Hour))
 	mustExec(`INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, reason, attempt_count, next_action_at, paused, created_at, updated_at, livemode)
 		VALUES ('run_oneoff_pin', $1, 'inv_dun_oneoff', 'cus_dun_pin', 'dpol_oneoff', 'active', 'payment_failed', 0, $2, false, $3, $3, false)`,

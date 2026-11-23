@@ -16,7 +16,4 @@ package domain
 //     its outcome was never recorded (a failed write after Stripe answered,
 //     or a crash in that window). RetryRefund recovers it by searching Stripe
 //     for the refund before it creates one.
-//
-// Test-clock credit notes are not an operator obligation, so they are left
-// out.
-const CreditNoteRefundNeedsAttentionSQL = `status = 'issued' AND (refund_status IN ('failed', 'unknown') OR (refund_status = 'pending' AND updated_at < now() - interval '72 hours') OR (refund_status = 'none' AND refund_amount_cents > 0 AND updated_at < now() - interval '1 hour')) AND is_simulated = false`
+const CreditNoteRefundNeedsAttentionSQL = `status = 'issued' AND (refund_status IN ('failed', 'unknown') OR (refund_status = 'pending' AND updated_at < now() - interval '72 hours') OR (refund_status = 'none' AND refund_amount_cents > 0 AND updated_at < now() - interval '1 hour'))`

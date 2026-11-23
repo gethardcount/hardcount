@@ -3,12 +3,8 @@ package invoice_test
 import (
 	"context"
 	"testing"
-	"time"
 
-	"github.com/gethardcount/hardcount/internal/customer"
-	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/testutil"
@@ -77,49 +73,5 @@ func TestGet_PaymentPageOpenBanner_RealStore(t *testing.T) {
 	}
 	if got.Attention != nil && got.Attention.Code == "payment.page_open" {
 		t.Fatalf("page lapsed: still showing the page-open banner")
-	}
-}
-
-// A clock-pinned invoice's failure banner reads its latest failed charge's
-// simulated instant off invoice_charge_attempts, not its issue instant.
-func TestGet_SimulatedFailureBannerDatesFromTheCharge_RealStore(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	ctx := postgres.WithLivemode(context.Background(), false)
-	tenantID := testutil.CreateTestTenant(t, db, "Sim Failure Since")
-	cust, err := customer.NewPostgresStore(db).Create(ctx, tenantID, domain.Customer{ExternalID: "cus_sim_since", DisplayName: "Sim Since"})
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
-	issued := time.Date(2028, 2, 1, 0, 0, 0, 0, time.UTC)
-	declined := time.Date(2028, 2, 10, 9, 0, 0, 0, time.UTC)
-	retried := time.Date(2028, 2, 13, 9, 0, 0, 0, time.UTC)
-	store := invoice.NewPostgresStore(db)
-	inv, err := store.CreateWithLineItems(ctx, tenantID, domain.Invoice{
-		CustomerID: cust.ID, InvoiceNumber: "INV-SIM-SINCE",
-		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed,
-		Currency: "USD", SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
-		IssuedAt: &issued, IsSimulated: true,
-	}, nil)
-	if err != nil {
-		t.Fatalf("create invoice: %v", err)
-	}
-	for _, at := range []time.Time{declined, retried} {
-		at := at
-		if err := store.RecordChargeAttempt(clock.WithEffectiveNow(ctx, at), tenantID, domain.InvoiceChargeAttempt{
-			InvoiceID: inv.ID, StripePaymentIntentID: "pi_" + at.Format("0102"),
-			Trigger: domain.ChargeTriggerAutoCharge, Outcome: domain.ChargeAttemptFailed,
-			ProviderReason: "Your card was declined.", AmountCents: 5000,
-			OccurredAt: time.Now().UTC(),
-		}); err != nil {
-			t.Fatalf("record attempt: %v", err)
-		}
-	}
-
-	got, err := invoice.NewService(store, nil, tenant.NewSettingsStore(db)).Get(ctx, tenantID, inv.ID)
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	if got.Attention == nil || got.Attention.Since == nil || !got.Attention.Since.Equal(retried) {
-		t.Fatalf("since = %+v, want the latest failed charge %v (not the issue %v)", got.Attention, retried, issued)
 	}
 }

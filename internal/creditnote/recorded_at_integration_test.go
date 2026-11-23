@@ -53,7 +53,7 @@ func TestCreditNote_RecordedAt_DualStamp(t *testing.T) {
 		InvoiceID: inv.ID, CustomerID: cust.ID, CreditNoteNumber: "CN-REC-1",
 		Status: domain.CreditNoteDraft, Reason: "billing error",
 		SubtotalCents: 100, TotalCents: 100, CreditAmountCents: 100,
-		Currency: "USD", RefundStatus: domain.RefundNone, IsSimulated: true,
+		Currency: "USD", RefundStatus: domain.RefundNone,
 	})
 	if err != nil {
 		t.Fatalf("create cn: %v", err)

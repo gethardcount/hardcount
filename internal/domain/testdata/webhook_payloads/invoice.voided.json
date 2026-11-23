@@ -14,7 +14,6 @@
     "due_at": "2026-10-01T12:00:00Z",
     "id": "hc_inv_golden",
     "invoice_number": "HC-000042",
-    "is_simulated": false,
     "issued_at": "2026-10-01T12:00:00Z",
     "metadata": {
       "order": "A-1"

@@ -1456,10 +1456,7 @@ func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string, limit
 	return balances, total, rows.Err()
 }
 
-// ListExpiredGrants — CRON path. ADR-029 Phase 4: clock-pinned
-// customers' grants are excluded. Without this filter the wall-clock cron
-// would expire a clock-pinned customer's grants based on wall-clock time,
-// not the simulated time the customer's other consequences run on.
+// ListExpiredGrants lists the grants past their expiry, for the cron path.
 //
 // A grant a period close or a period invoice still draws on is not listed
 // (domain.CreditDrawOwedSQL, ADR-071 §2): a close that fails and waits on the
@@ -1493,11 +1490,6 @@ func (s *PostgresStore) ListExpiredGrants(ctx context.Context) ([]domain.CreditL
 		  AND g.expires_at < NOW()
 		  AND g.livemode = $1
 		  AND g.consumed_cents < g.amount_cents
-		  AND NOT EXISTS (
-		    SELECT 1 FROM customers c
-		    WHERE c.id = g.customer_id
-		      AND c.test_clock_id IS NOT NULL
-		  )
 		  AND NOT `+domain.CreditDrawOwedSQL("g")+`
 	`, live)
 	if err != nil {

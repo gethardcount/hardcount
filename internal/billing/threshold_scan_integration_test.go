@@ -792,7 +792,6 @@ func TestThresholdScan_DrainsWholeFleet_RealStore(t *testing.T) {
 		EXPLAIN SELECT s.id FROM subscriptions s
 		WHERE s.status IN ('active', 'trialing')
 		  AND s.livemode = FALSE
-		  AND s.test_clock_id IS NULL
 		  AND s.id > ''
 		  AND (s.billing_threshold_amount_gte IS NOT NULL
 		       OR EXISTS (SELECT 1 FROM subscription_item_thresholds sit WHERE sit.subscription_id = s.id))

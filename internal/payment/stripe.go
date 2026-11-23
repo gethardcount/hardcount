@@ -1362,9 +1362,8 @@ const purposePaymentUpdateToken = "payment_update_token"
 // "start dunning" action. The run is re-driven automatically: every later
 // report of the same decline (its webhook, the reconciler) calls
 // StartDunning again through SettleFailed, and the dunning_backfill
-// reconciler retries it every tick for a wall-clock failed invoice with no
-// run, after a 10-minute cool-off. A test-clock invoice has only the
-// reports: the backfill skips simulated invoices.
+// reconciler retries it every tick for a failed invoice with no run, after a
+// 10-minute cool-off.
 //
 // 2026-05-30 design-debt audit (Tier 1 #5) replaced two log-and-swallow
 // sites here and at the inline charge-failure path with this retry.

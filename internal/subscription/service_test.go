@@ -580,9 +580,6 @@ func (m *memStore) ListExpiredTrials(_ context.Context, before time.Time, _ bool
 	}
 	var out []domain.Subscription
 	for _, s := range m.subs {
-		if s.TestClockID != "" {
-			continue
-		}
 		if s.Status != domain.SubscriptionTrialing {
 			continue
 		}
@@ -604,9 +601,6 @@ func (m *memStore) ListExpiredPauseCollections(_ context.Context, before time.Ti
 	}
 	var out []domain.Subscription
 	for _, s := range m.subs {
-		if s.TestClockID != "" {
-			continue
-		}
 		if s.PauseCollection == nil || s.PauseCollection.ResumesAt == nil {
 			continue
 		}
@@ -2216,40 +2210,6 @@ func TestProcessExpiredTrials(t *testing.T) {
 		}
 		if canceledAt.Equal(day1) {
 			t.Errorf("the cancel and the day-1 finalize share %v: want each trial on its own read", day1)
-		}
-	})
-
-	t.Run("wall-clock: excludes clock-pinned subs (ADR-028 disjoint flows)", func(t *testing.T) {
-		// Clock-pinned subs must NOT be processed by the wall-clock
-		// path — they flow through the catchup orchestrator's Phase
-		// 0.5 instead. Running them in both paths would race the
-		// orchestrator and could double-fire BillOnCreate (idempotent
-		// on the UNIQUE constraint but still wrong semantically).
-		svc := NewService(newMemStore(), clock.NewFake(createdAt))
-		svc.SetBiller(&fakeBiller{})
-		sub, _ := svc.Create(ctx, "t1", CreateInput{
-			Code: "sub-clock-pinned", DisplayName: "Clock-pinned",
-			CustomerID: "c",
-			Items:      []CreateItemInput{{PlanID: "p"}},
-			TrialDays:  14,
-		})
-		mem := svc.store.(*memStore)
-		seeded := mem.subs[sub.ID]
-		seeded.TestClockID = "tclk_1"
-		mem.subs[sub.ID] = seeded
-
-		laterClock := clock.NewFake(sub.TrialEndAt.Add(5 * 24 * time.Hour))
-		svc2 := NewService(mem, laterClock)
-		svc2.SetBiller(&fakeBiller{})
-
-		processed, _ := svc2.ProcessExpiredTrials(ctx, 100)
-		if processed != 0 {
-			t.Errorf("processed: got %d, want 0 (clock-pinned subs flow through catchup)", processed)
-		}
-		// Status stays trialing — only the catchup orchestrator can
-		// transition this sub.
-		if mem.subs[sub.ID].Status != domain.SubscriptionTrialing {
-			t.Errorf("status: got %q, want trialing (clock-pinned not touched by wall-clock scan)", mem.subs[sub.ID].Status)
 		}
 	})
 }

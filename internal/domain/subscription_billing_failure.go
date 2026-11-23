@@ -74,8 +74,8 @@ func SubscriptionDueInstantSQL(alias string) string {
 
 // SubscriptionBillingFailingSQL is the one predicate that says a
 // subscriptions row (aliased as alias) carries a live billing-failure record:
-// a wall-clock subscription that can still bill, whose record was saved for
-// the due instant the row has now. The five billing_* columns are not cleared
+// a subscription that can still bill, whose record was saved for the due
+// instant the row has now. The five billing_* columns are not cleared
 // when the due instant moves, so reading them without this predicate reads
 // stale data. Every reader goes through it: the due scans, the list filter,
 // both writers, and the gauges (a hand copy, which a test checks against
@@ -84,11 +84,11 @@ func SubscriptionDueInstantSQL(alias string) string {
 // Every term is two-valued (never NULL), so the predicate is safe under NOT.
 func SubscriptionBillingFailingSQL(alias string) string {
 	return strings.ReplaceAll(
-		`a.status IN ('active','trialing') AND a.test_clock_id IS NULL AND a.billing_failed_for IS NOT NULL AND a.billing_failed_for IS NOT DISTINCT FROM `,
+		`a.status IN ('active','trialing') AND a.billing_failed_for IS NOT NULL AND a.billing_failed_for IS NOT DISTINCT FROM `,
 		"a.", alias+".") + SubscriptionDueInstantSQL(alias)
 }
 
-// SubscriptionBillingGateSQL is the clause the wall-clock due scans add: skip
+// SubscriptionBillingGateSQL is the clause the due scans add: skip
 // a row whose live record is parked (no next attempt) or still waiting.
 // nowParam is the placeholder of the run's anchored instant, for example
 // "$2".

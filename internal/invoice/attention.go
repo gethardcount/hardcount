@@ -198,14 +198,6 @@ type attentionContext struct {
 	// error leaves it nil: the notice is display-only, and the refund stays
 	// on the invoice's timeline and in GET /v1/invoices/{id}/stripe-refunds.
 	StripeRefundReview *domain.InvoiceStripeRefund
-
-	// LastFailedChargeAt is the simulated instant of the invoice's latest
-	// failed charge, for a clock-pinned invoice only (nil otherwise). The
-	// payment-failure banner dates "since" from it: attentionSince's issue
-	// instant is wrong for an invoice charged on a later Advance (a paused
-	// subscription's draft finalized later read "since 13d ago" four days
-	// after its decline, found walking FLOW TC5, 2026-10-11).
-	LastFailedChargeAt *time.Time
 }
 
 // processingStaleAfter is how long a payment may sit `processing` before the
@@ -387,7 +379,7 @@ func classifyAmountBelowMinimum(inv domain.Invoice) *domain.Attention {
 // provider), and the closed reason enum is a public contract. The Code carries
 // the recovery-specific granularity, which is what it is for.
 func classifyRecoveryInFlight(inv domain.Invoice) *domain.Attention {
-	since := attentionSince(inv)
+	since := inv.UpdatedAt
 	return &domain.Attention{
 		Severity: domain.AttentionSeverityInfo,
 		Reason:   domain.AttentionReasonPaymentProcessing,
@@ -496,7 +488,7 @@ func withCommitExposure(att *domain.Attention, inv domain.Invoice, atc attention
 	}
 
 	if att == nil {
-		since := attentionSince(inv)
+		since := inv.UpdatedAt
 		return &domain.Attention{
 			Severity: floor,
 			Reason:   domain.AttentionReasonCommitExposure,
@@ -686,23 +678,6 @@ func classifyTaxAttention(inv domain.Invoice, atc attentionContext) *domain.Atte
 	return att
 }
 
-// attentionSince anchors a banner's "since" instant. UpdatedAt is a
-// wall-clock bookkeeping stamp (DB now()); on a SIMULATED invoice the
-// attention state is born on the sim axis (finalize and charge
-// outcomes happen at clock-advance), so rendering the wall stamp
-// against the page's sim-time anchor produced cross-domain deltas —
-// "since 70d ago" on an invoice finalized at sim-today (found live,
-// FLOW I12 fixture NIM-000258). Simulated invoices anchor to IssuedAt
-// (sim-domain, the birth of every finalize-derived attention state);
-// wall-clock invoices keep UpdatedAt, which is fresher for
-// failed-charge states.
-func attentionSince(inv domain.Invoice) time.Time {
-	if inv.IsSimulated && inv.IssuedAt != nil {
-		return *inv.IssuedAt
-	}
-	return inv.UpdatedAt
-}
-
 func classifyPaymentFailure(inv domain.Invoice, atc attentionContext) *domain.Attention {
 	// Operator voice, not provider voice: LastPaymentError is Stripe's
 	// CARDHOLDER-facing sentence ("Your card was declined") — promoted
@@ -715,10 +690,7 @@ func classifyPaymentFailure(inv domain.Invoice, atc attentionContext) *domain.At
 	if inv.LastPaymentError == "" {
 		headline = "The customer's payment attempt failed."
 	}
-	since := attentionSince(inv)
-	if atc.LastFailedChargeAt != nil {
-		since = *atc.LastFailedChargeAt
-	}
+	since := inv.UpdatedAt
 	switch code := atc.RetryBlockingDeclineCode; {
 	case domain.IsHardDecline(code):
 		return classifyRefusedCard(inv, code, atc.DunningRetrying, atc.HostedPayOff, since)
@@ -848,7 +820,7 @@ func classifyNeedsConfirmation(inv domain.Invoice, retrying, hostedPayOff bool, 
 }
 
 func classifyPaymentUnconfirmed(inv domain.Invoice) *domain.Attention {
-	since := attentionSince(inv)
+	since := inv.UpdatedAt
 	// No operator action: the reconciler re-queries the provider on the next
 	// tick and now settles the outcome COMPLETELY — mark + dunning + email +
 	// event, identical to the webhook (ADR-049 Phase 2). The prior disabled
@@ -913,17 +885,15 @@ func classifyPaymentUnconfirmed(inv domain.Invoice) *domain.Attention {
 // (ADR-049 Phase 3) or via the reconciler backstop if the provider callback is
 // delayed/dropped (Phase 2) — so the healthy state needs no operator action.
 //
-// Age-aware: a REAL (non-simulated) invoice still `processing` past
-// processingStaleAfter is anomalous for a card (it should have settled inline
-// or via the reconciler), so escalate Info → Warning and point the operator at
-// the provider — without falsely promising auto-resolution for the stuck case.
-// Simulated invoices never escalate: their "age" is sim-time, not a real-world
-// duration, so a wall-clock age check would false-positive (atc.Now is
-// wall-clock). Zero atc.Now also keeps it Info (callers that don't set it).
+// Age-aware: an invoice still `processing` past processingStaleAfter is
+// anomalous for a card (it should have settled inline or via the reconciler),
+// so escalate Info → Warning and point the operator at the provider — without
+// falsely promising auto-resolution for the stuck case. Zero atc.Now keeps it
+// Info (callers that don't set it).
 func classifyPaymentProcessing(inv domain.Invoice, atc attentionContext) *domain.Attention {
-	since := attentionSince(inv)
+	since := inv.UpdatedAt
 
-	stale := !inv.IsSimulated && !atc.Now.IsZero() && atc.Now.Sub(inv.UpdatedAt) > processingStaleAfter
+	stale := !atc.Now.IsZero() && atc.Now.Sub(inv.UpdatedAt) > processingStaleAfter
 	if stale {
 		return &domain.Attention{
 			Severity: domain.AttentionSeverityWarning,
@@ -968,7 +938,7 @@ func classifyPaymentPageOpen() *domain.Attention {
 // operator can short-circuit with "Charge now" if they don't want to
 // wait the scheduler interval.
 func classifyPaymentScheduled(inv domain.Invoice) *domain.Attention {
-	since := attentionSince(inv)
+	since := inv.UpdatedAt
 	// payment_scheduled fires when auto_charge_pending=true and the
 	// invoice is still unpaid: the finalize-time collection didn't finish
 	// (a transient failure, or the process stopped), and the auto-charge
@@ -976,25 +946,12 @@ func classifyPaymentScheduled(inv domain.Invoice) *domain.Attention {
 	// next_attempt_at; "usually within an hour" is honest because the
 	// sweep runs on the billing tick, hourly by default (every 5 minutes in
 	// local dev, cmd/hardcount/main.go).
-	//
-	// A clock-pinned (simulated) invoice is the exception: the wall-clock
-	// sweep EXCLUDES it (ADR-028/029 disjoint flows — ListAutoChargePending
-	// filters out subs with a test_clock_id), so the retry fires only when
-	// the operator advances the test clock. "Within an hour" there is a
-	// lie — in real time the invoice sits indefinitely, so adding a payment
-	// method and waiting looks broken. Surface the clock-advance reality.
-	message := "The card on file is charged automatically, usually within an hour; use Charge now to collect it right away."
-	detail := "Automatic charges run on a schedule, hourly by default."
-	if inv.IsSimulated {
-		message = "The card on file is charged on the next clock advance; use Charge now to collect it right away."
-		detail = "Simulated invoices are charged only when the test clock is advanced, never on the real-time schedule."
-	}
 	return &domain.Attention{
 		Severity: domain.AttentionSeverityInfo,
 		Reason:   domain.AttentionReasonPaymentScheduled,
 		Code:     "payment.scheduled",
-		Message:  message,
-		Detail:   detail,
+		Message:  "The card on file is charged automatically, usually within an hour; use Charge now to collect it right away.",
+		Detail:   "Automatic charges run on a schedule, hourly by default.",
 		DocURL:   docURL("payment-scheduled"),
 		Actions: []domain.AttentionActionItem{
 			{Code: domain.AttentionActionChargeNow, Label: "Charge now"},
@@ -1020,7 +977,7 @@ func classifyPaymentScheduled(inv domain.Invoice) *domain.Attention {
 // offered because a manual collect is an explicit override and has no pause
 // filter — the pause governs automation, not the operator.
 func classifyCollectionPaused(inv domain.Invoice, retrying bool) *domain.Attention {
-	since := attentionSince(inv)
+	since := inv.UpdatedAt
 	message := "Collection is paused on the subscription, so this invoice won't be charged automatically; use Charge now to collect it anyway."
 	detail := "Resume collection on the subscription page to go back to automatic charges. This invoice is then charged on the next run."
 	if retrying {
@@ -1053,7 +1010,7 @@ func classifyCollectionPaused(inv domain.Invoice, retrying bool) *domain.Attenti
 // written before that change. It is operator-recoverable via Charge now,
 // which is why the actions matter more than the copy here.
 func classifyAwaitingPayment(inv domain.Invoice) *domain.Attention {
-	since := attentionSince(inv)
+	since := inv.UpdatedAt
 	return &domain.Attention{
 		Severity: domain.AttentionSeverityInfo,
 		Reason:   domain.AttentionReasonAwaitingPayment,
@@ -1082,11 +1039,10 @@ const pausedRetriesDetail = "Pausing collection keeps new invoices as drafts. Pa
 // conjure the card, so the operator/customer is the mover.
 //
 // Message line 1 says what happens to THIS invoice when a card arrives,
-// which depends on three real signals: collection paused (the sweep that
+// which depends on two real signals: collection paused (the sweep that
 // charges on attach skips paused subscriptions, so nothing happens until
-// resume), an open dunning run (which the pause does not stop, so its next
-// retry charges the new card) and simulated time (the wall-clock sweep excludes clock-pinned
-// invoices, so the charge waits for the next clock advance). Line 2 says
+// resume) and an open dunning run (which the pause does not stop, so its next
+// retry charges the new card). Line 2 says
 // what happened to the setup link, which depends on two more: whether the
 // customer has an email and whether this server can send email at all.
 //
@@ -1098,7 +1054,7 @@ const pausedRetriesDetail = "Pausing collection keeps new invoices as drafts. Pa
 // broken). Promoting to critical would make a perfectly normal "send-
 // invoice" collection mode look alarming.
 func classifyNoPaymentMethod(inv domain.Invoice, atc attentionContext) *domain.Attention {
-	since := attentionSince(inv)
+	since := inv.UpdatedAt
 	if !atc.StripeConnected {
 		return classifyNoPaymentMethodNoStripe(inv, atc, since)
 	}
@@ -1111,9 +1067,6 @@ func classifyNoPaymentMethod(inv domain.Invoice, atc attentionContext) *domain.A
 	// Update"), and it lives HERE, server-owned, so the client can't drift a
 	// duplicate copy of it (it used to hardcode one).
 	charge := "This invoice is charged automatically once the customer adds a card."
-	if inv.IsSimulated {
-		charge = "This invoice is charged on the next clock advance once the customer adds a card."
-	}
 	// A pause stops the charge on attach, not a dunning run already open on
 	// the invoice: its next retry charges the card the customer adds.
 	pausedRetrying := atc.CollectionPaused && atc.DunningRetrying
@@ -1181,8 +1134,6 @@ func classifyNoPaymentMethod(inv domain.Invoice, atc attentionContext) *domain.A
 		switch {
 		case atc.CollectionPaused:
 			msg = "Retries stopped and collection is paused; ask the customer to add a card, then resume collection."
-		case inv.IsSimulated:
-			msg = "Retries stopped; this invoice is charged on the next clock advance once the customer adds a card."
 		default:
 			msg = "Retries stopped; this invoice is charged automatically once the customer adds a card."
 		}

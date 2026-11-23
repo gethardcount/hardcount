@@ -243,7 +243,7 @@ const invCols = `id, tenant_id, customer_id, COALESCE(subscription_id,''), invoi
 	COALESCE(tax_error_code,''), tax_next_retry_at,
 	COALESCE(payment_card_brand,''), COALESCE(payment_card_last4,''),
 	COALESCE(public_token_encrypted,''), COALESCE(billing_reason,''),
-	is_simulated, tax_reversed_at,
+	tax_reversed_at,
 	COALESCE(payment_anomaly_kind,''), COALESCE(payment_anomaly_payment_intent_id,''), COALESCE(payment_anomaly_captured_cents,0),
 	COALESCE(billing_timezone,''), no_pm_notified_at, charge_attempt_seq,
 	COALESCE(provider_payment_status,''), provider_synced_at,
@@ -2411,9 +2411,9 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 			source_plan_changed_at, source_subscription_item_id, source_change_type,
 			tax_provider, tax_calculation_id, tax_reverse_charge, tax_exempt_reason,
 			tax_status, tax_deferred_at, tax_retry_count, tax_pending_reason, tax_error_code, billing_reason,
-			public_token_encrypted, public_token_hash, paid_at, voided_at, is_simulated,
+			public_token_encrypted, public_token_hash, paid_at, voided_at,
 			billing_timezone, auto_charge_pending, tax_inclusive)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,'{}',$27,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47,$48)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,'{}',$27,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36,$37,$38,$39,$40,$41,$42,$43,$44,$45,$46,$47)
 		RETURNING `+invCols,
 		id, tenantID, inv.CustomerID, postgres.NullableString(inv.SubscriptionID), inv.InvoiceNumber,
 		inv.Status, inv.PaymentStatus, inv.Currency,
@@ -2434,7 +2434,6 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 		postgres.NullableString(string(inv.BillingReason)),
 		postgres.NullableString(encToken), postgres.NullableString(tokenHash),
 		postgres.NullableTime(inv.PaidAt), postgres.NullableTime(inv.VoidedAt),
-		inv.IsSimulated,
 		postgres.NullableString(inv.BillingTimezone),
 		collectionQueuedAtFinalize(inv.Status, inv.PaymentStatus),
 		inv.TaxInclusive,
@@ -2627,7 +2626,7 @@ func chargeClaimWhere(eligibility string) string {
 // including an expired one (chargeHoldFree).
 //
 // It refuses an invoice whose subscription has collection paused, read at the
-// invoice's own now (invoiceClockNowSQL), as the sweeps' lists do. The
+// database's now(), as the sweep's list does. The
 // collect that runs right after a finalize claims here without a list, so
 // without this an operator's Finalize on a paused subscription's draft
 // charged the card, while the finalize dialog said nothing is charged until
@@ -2640,9 +2639,8 @@ func chargeClaimWhere(eligibility string) string {
 //     ("since"), the reconciler sweeps' staleness cool-offs, and the past-due
 //     view's proxies — a claim write that touched it would make every
 //     claimed invoice look freshly-active once per window.
-//   - DB-side now() on both sides of the hold comparison: test clocks freeze
-//     simulated time, and a simulated-time hold would never expire on a
-//     frozen clock (the catchup path shares this claim).
+//   - DB-side now() on both sides of the hold comparison, so the hold and
+//     its expiry are measured on one clock.
 //
 // Deliberately per-invoice, not stamped at list time — a batch-wide hold
 // cannot cover a serial 50-invoice loop, and a claiming LIST would hide rows
@@ -2675,7 +2673,7 @@ var autoChargeClaim = claimConditions{
 	{`auto_charge_pending = TRUE`, domain.ChargeNothingToCharge},
 	{chargeHoldFree, domain.ChargeHeldByAttempt},
 	{noLiveHostedPageSQL, domain.ChargePayingOnHostedPage},
-	{notPausedForCollection("invoices", invoiceClockNowSQL), domain.ChargeCollectionPaused},
+	{notPausedForCollection("invoices", "now()"), domain.ChargeCollectionPaused},
 }
 
 // where is the conditions' AND: the claim's predicate.
@@ -2720,14 +2718,6 @@ func (s *PostgresStore) ChargeClaimStateOf(ctx context.Context, tenantID, id str
 	}
 	return state, nil
 }
-
-// invoiceClockNowSQL is the invoice's own now, on the database: the frozen
-// time of the test clock its customer is pinned to, else now(). now() is the
-// instant the sweep's list (ListAutoChargePending) reads the pause at, so the
-// claim and the list agree on whether a timed pause still holds.
-const invoiceClockNowSQL = `COALESCE((SELECT tc.frozen_time FROM customers pc
-		JOIN test_clocks tc ON tc.id = pc.test_clock_id
-		WHERE pc.id = invoices.customer_id), now())`
 
 // ReleaseChargeHold clears the hold its owner took, and only that hold: the
 // UPDATE compares the value the owner's claim wrote (ADR-127). An owner that
@@ -2966,9 +2956,7 @@ const staleHoldRecheckAfter = 30 * time.Minute
 // charger that stamps the invoice before confirming, ADR-137).
 //
 // TxBypass across tenants with an explicit livemode, like the payment sweeps'
-// lists. Not gated on is_simulated: the hold is always written on the
-// database's wall clock, and a lost simulated charge is as real at Stripe as
-// any other (ADR-030's payment-sync exception).
+// lists.
 //
 // Open invoices (finalized, pending or failed) first: only their holds refuse
 // anyone (charges, the hosted page, void, offline payment, dunning), so when
@@ -3273,10 +3261,6 @@ func (s *PostgresStore) CollectionPausedTx(ctx context.Context, tx *sql.Tx, invo
 // was the bug this replaced: card-less invoices stay queued (so a card added
 // later is charged on the next visit), and 50 of them filled the page for
 // good, so nothing newer was ever retried.
-//
-// Excludes clock-pinned subscriptions per ADR-029: simulation
-// time progresses only on operator Advance, so the wall-clock scheduler
-// must never charge a clock-pinned invoice.
 func (s *PostgresStore) ListAutoChargePending(ctx context.Context, after walk.Key, limit int) ([]domain.Invoice, error) {
 	live, err := postgres.Livemode(ctx)
 	if err != nil {
@@ -3294,21 +3278,12 @@ func (s *PostgresStore) ListAutoChargePending(ctx context.Context, after walk.Ke
 
 	// TxBypass crosses tenants for the scheduler sweep; livemode must still
 	// be honoured explicitly from ctx (see scheduler fan-out in #13).
-	//
-	// Simulated (test-clock) invoices are excluded by their OWN durable
-	// is_simulated flag, not by a subscriptions join. The join missed a
-	// customer-pinned one-off (empty subscription_id → nothing to join
-	// through), which then leaked into this wall-clock sweep and got
-	// auto-charged/dunned against sim time (ADR-029 violation). Gating on
-	// is_simulated catches every simulated invoice — sub-owned or one-off.
-	// Mirrors ListPendingTaxReversal's gate.
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+invCols+` FROM invoices i
 		WHERE i.auto_charge_pending = TRUE
 		  AND i.payment_status = 'pending'
 		  AND i.status = 'finalized'
 		  AND i.livemode = $1
-		  AND i.is_simulated = false
 		  AND `+notPausedForCollection("i", "now()")+`
 		  AND (i.created_at, i.id) > ($3, $4)
 		ORDER BY i.created_at ASC, i.id ASC
@@ -3343,9 +3318,7 @@ func (s *PostgresStore) ListAutoChargePending(ctx context.Context, after walk.Ke
 // StartDunning is exactly-once per invoice (GetRunByInvoice returns the existing
 // run regardless of state; 0085 UNIQUE is the DB backstop), so an invoice with ANY
 // run — active, escalated, or resolved — must be excluded, else the sweep would
-// re-dun a resolved invoice forever. Clock-pinned invoices are excluded (the
-// wall-clock scheduler must never dun a simulated sub; ADR-029 — their dunning is
-// driven inline during Advance). Cross-tenant sweep (TxBypass); livemode honoured
+// re-dun a resolved invoice forever. Cross-tenant sweep (TxBypass); livemode honoured
 // from ctx. olderThan is the cool-off so the inline SettleFailed path wins the
 // common case and this stays a pure backstop.
 func (s *PostgresStore) ListFailedWithoutDunningRun(ctx context.Context, olderThan time.Time, limit int) ([]domain.Invoice, error) {
@@ -3373,7 +3346,6 @@ func (s *PostgresStore) ListFailedWithoutDunningRun(ctx context.Context, olderTh
 		  AND NOT EXISTS (
 		    SELECT 1 FROM invoice_dunning_runs r WHERE r.invoice_id = i.id
 		  )
-		  AND i.is_simulated = false
 		ORDER BY i.updated_at ASC
 		LIMIT $3
 	`, live, olderThan, limit)
@@ -3447,15 +3419,8 @@ func (s *PostgresStore) ListProcessingPayments(ctx context.Context, olderThan ti
 // under a live ctx (see #13). Status is a trusted internal enum (not user
 // input), interpolated into the predicate.
 //
-// DELIBERATELY NOT gated on is_simulated, unlike every sibling invoice sweep:
-// payment state-sync is the wall-clock plane by design (ADR-030's Stripe
-// exception — PaymentIntent truth lives at Stripe on real time, even for
-// clock-pinned invoices), and the test-clock catch-up has no payment-sync phase,
-// so excluding simulated rows here would strand an ambiguous simulated charge
-// in unknown/processing forever. The reconciler decides each row's time from
-// its invoice (decideRow) and the settle keeps it, with the
-// hardcount_anchor_at PI anchor, so recovered outcomes still stamp the
-// simulated instant. See the ADR-030 wall-plane note.
+// The reconciler decides each row's time from its invoice (decideRow) and the
+// settle keeps it, with the hardcount_anchor_at PI anchor.
 func (s *PostgresStore) listInflightPayments(ctx context.Context, status domain.InvoicePaymentStatus, olderThan time.Time, limit int) ([]domain.Invoice, error) {
 	live, err := postgres.Livemode(ctx)
 	if err != nil {
@@ -3541,10 +3506,6 @@ func (s *PostgresStore) listInflightPayments(ctx context.Context, status domain.
 // Postgres uses idx_invoices_tax_retry_due (migration 0074) to
 // narrow the scan; the predicate matches the index where clause
 // exactly so the planner picks it.
-// ListPendingTaxRetry — CRON path. ADR-029 Phase 2: clock-pinned
-// invoices are excluded. Without this filter the wall-clock scheduler
-// would retry tax on a clock-pinned invoice every tick — same drip-bill
-// smell ADR-028 closed for period generation.
 func (s *PostgresStore) ListPendingTaxRetry(ctx context.Context, batch int, retryableCodes []string, maxAttempts int, livemode bool) ([]domain.Invoice, error) {
 	if batch <= 0 {
 		batch = 50
@@ -3566,7 +3527,6 @@ func (s *PostgresStore) ListPendingTaxRetry(ctx context.Context, batch int, retr
 		  AND COALESCE(i.tax_error_code, '') = ANY($2)
 		  AND i.tax_retry_count < $3
 		  AND (i.tax_next_retry_at IS NULL OR i.tax_next_retry_at <= now())
-		  AND i.is_simulated = false
 		ORDER BY i.tax_next_retry_at ASC NULLS FIRST
 		LIMIT $4
 	`, livemode, retryableCodes, maxAttempts, batch)
@@ -3615,8 +3575,6 @@ func (s *PostgresStore) ListPendingTaxRetry(ctx context.Context, batch int, retr
 // invoice's tax_next_retry_at forward (DeferTaxWork), and the list takes
 // invoices never deferred first, then the longest-waiting. The list is across
 // tenants, so without that one tenant's failing invoices held its head.
-//
-// Clock-pinned invoices are excluded (ADR-029).
 func (s *PostgresStore) ListPendingTaxCommit(ctx context.Context, batch int, livemode bool) ([]domain.Invoice, error) {
 	if batch <= 0 {
 		batch = 50
@@ -3654,7 +3612,6 @@ func (s *PostgresStore) ListPendingTaxCommit(ctx context.Context, batch int, liv
 		          ORDER BY c.created_at ASC LIMIT 1),
 		        i.updated_at + interval '24 hours') > now()
 		  AND (i.tax_next_retry_at IS NULL OR i.tax_next_retry_at <= now())
-		  AND i.is_simulated = false
 		ORDER BY i.tax_next_retry_at ASC NULLS FIRST, i.updated_at ASC
 		LIMIT $2
 	`, livemode, batch)
@@ -3732,11 +3689,6 @@ func (s *PostgresStore) ListPendingTaxCommit(ctx context.Context, batch int, liv
 // under-remit. Snapshotting the request body at status-change time is the clean
 // fix if a real tax-filing DP hits this; deferred (pre-existing to the
 // same-reference design, and zero live tax tenants today).
-//
-// Simulated (test-clock) invoices are excluded via is_simulated — the durable
-// write-time flag (ADR-030), which covers BOTH subscription-pinned and
-// customer-pinned one-off invoices (a subscriptions-only NOT EXISTS would miss
-// the latter).
 func (s *PostgresStore) ListPendingTaxReversal(ctx context.Context, batch int, livemode bool) ([]domain.Invoice, error) {
 	if batch <= 0 {
 		batch = 50
@@ -3759,7 +3711,6 @@ func (s *PostgresStore) ListPendingTaxReversal(ctx context.Context, batch int, l
 		  AND COALESCE(i.tax_transaction_id, '') <> ''
 		  AND i.tax_reversed_at IS NULL
 		  AND (i.tax_next_retry_at IS NULL OR i.tax_next_retry_at <= now())
-		  AND i.is_simulated = false
 		ORDER BY i.tax_next_retry_at ASC NULLS FIRST, i.updated_at ASC
 		LIMIT $2
 	`, livemode, batch)
@@ -3990,7 +3941,7 @@ func (s *PostgresStore) scanInvDest(inv *domain.Invoice) []any {
 		&inv.TaxErrorCode, &inv.TaxNextRetryAt,
 		&inv.PaymentCardBrand, &inv.PaymentCardLast4,
 		decryptScanner{enc: s.enc, dst: &inv.PublicToken}, (*string)(&inv.BillingReason),
-		&inv.IsSimulated, &inv.TaxReversedAt,
+		&inv.TaxReversedAt,
 		&inv.PaymentAnomalyKind, &inv.PaymentAnomalyPaymentIntentID, &inv.PaymentAnomalyCapturedCents,
 		&inv.BillingTimezone, &inv.NoPMNotifiedAt, &inv.ChargeAttemptSeq,
 		&inv.ProviderPaymentStatus, &inv.ProviderSyncedAt,

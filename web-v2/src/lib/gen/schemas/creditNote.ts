@@ -127,8 +127,6 @@ export interface CreditNote {
      * Absent otherwise.
      */
   tax_transaction_id?: string;
-  /** True when the note's dates are test-clock time (its invoice's customer is on a test clock). */
-  is_simulated: boolean;
   /** True on a draft that Hardcount will issue automatically, such as the credit for unused time after a plan downgrade. */
   issue_pending: boolean;
   /** True while the credit note's tax reversal at Stripe Tax is still owed. Set when a note with an amount is issued on an invoice Stripe Tax taxed, and cleared when the reversal is recorded, normally within the same request. It stays true while a failed reversal is retried, and while the invoice's own tax is not yet recorded at Stripe. If the invoice's tax is never recorded at Stripe, the flag stays true and no reversal is made. */

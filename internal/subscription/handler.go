@@ -2047,16 +2047,7 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 			DueAt:              &dueAt,
 			// CreatedAt on the same `now` so test-clock-driven plan
 			// changes have created_at == issued_at on simulation time.
-			CreatedAt: now,
-			// Stamp the authoritative simulated flag from the sub's test
-			// clock — matching every engine invoice path (billOnePeriod /
-			// BillOnCreate / threshold). Without it a clock-pinned
-			// plan-change proration invoice persisted is_simulated=false
-			// despite its dates being on simulation time, so the dashboard
-			// showed no "Simulated" marker (while the sibling cycle invoice
-			// did). The frontend badge reads this field authoritatively and
-			// deliberately does NOT infer simulation from a future date.
-			IsSimulated:        sub.TestClockID != "",
+			CreatedAt:          now,
 			NetPaymentTermDays: netDays,
 			// Stripe stamps subscription_update for every mid-period
 			// change invoice (plan / quantity / item add). Pre-fix this

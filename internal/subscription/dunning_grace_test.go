@@ -54,8 +54,8 @@ type graceFixture struct {
 }
 
 // newGraceFixture is an active subscription whose period ends at periodEnd,
-// served at now with a 1h invoice grace. testClockID pins it to a test clock.
-func newGraceFixture(t *testing.T, periodEnd, now time.Time, testClockID string) *graceFixture {
+// served at now with a 1h invoice grace.
+func newGraceFixture(t *testing.T, periodEnd, now time.Time) *graceFixture {
 	t.Helper()
 	store := newMemStore()
 	clk := clock.NewFake(now)
@@ -63,7 +63,6 @@ func newGraceFixture(t *testing.T, periodEnd, now time.Time, testClockID string)
 	sub := store.subs[subID]
 	next := periodEnd
 	sub.NextBillingAt = &next
-	sub.TestClockID = testClockID
 	store.subs[subID] = sub
 	biller := &periodBiller{store: store, clk: clk}
 	svc := NewService(store, clk)
@@ -111,7 +110,7 @@ func wantGraceWait(t *testing.T, err error, until time.Time) {
 func TestDunningActions_InsideTheGrace_WaitAndBillNothing(t *testing.T) {
 	for _, action := range []string{"pause", "cancel"} {
 		t.Run(action, func(t *testing.T) {
-			f := newGraceFixture(t, graceB, graceB.Add(5*time.Minute), "")
+			f := newGraceFixture(t, graceB, graceB.Add(5*time.Minute))
 			wantGraceWait(t, f.dunningAction(action), graceB.Add(testGrace))
 			if len(f.biller.graces) != 1 || f.biller.graces[0] != testGrace {
 				t.Fatalf("graces=%v, want one close with the grace", f.biller.graces)
@@ -127,7 +126,7 @@ func TestDunningActions_InsideTheGrace_WaitAndBillNothing(t *testing.T) {
 func TestOperatorWrites_InsideTheGrace_CloseNow(t *testing.T) {
 	now := graceB.Add(5 * time.Minute)
 	t.Run("pause", func(t *testing.T) {
-		f := newGraceFixture(t, graceB, now, "")
+		f := newGraceFixture(t, graceB, now)
 		if _, err := f.svc.PauseCollection(context.Background(), "t1", f.subID, PauseCollectionInput{Behavior: domain.PauseCollectionKeepAsDraft}); err != nil {
 			t.Fatalf("PauseCollection: %v", err)
 		}
@@ -136,7 +135,7 @@ func TestOperatorWrites_InsideTheGrace_CloseNow(t *testing.T) {
 		}
 	})
 	t.Run("cancel", func(t *testing.T) {
-		f := newGraceFixture(t, graceB, now, "")
+		f := newGraceFixture(t, graceB, now)
 		if _, _, err := f.svc.Cancel(context.Background(), "t1", f.subID); err != nil {
 			t.Fatalf("Cancel: %v", err)
 		}
@@ -146,24 +145,21 @@ func TestOperatorWrites_InsideTheGrace_CloseNow(t *testing.T) {
 	})
 }
 
-// The cases where dunning's action does not wait. Mutation check: drop the
-// test-clock exemption → the test-clock case waits.
+// The cases where dunning's action does not wait.
 func TestDunningActions_CloseWhenNoGraceApplies(t *testing.T) {
 	cases := []struct {
 		name      string
 		now       time.Time
 		grace     time.Duration
-		testClock string
 		wantGrace time.Duration
 	}{
-		{"test clock", graceB.Add(5 * time.Minute), testGrace, "tc_1", 0},
-		{"grace 0", graceB.Add(5 * time.Minute), 0, "", 0},
-		{"past the grace", graceB.Add(testGrace), testGrace, "", testGrace},
+		{"grace 0", graceB.Add(5 * time.Minute), 0, 0},
+		{"past the grace", graceB.Add(testGrace), testGrace, testGrace},
 	}
 	for _, c := range cases {
 		for _, action := range []string{"pause", "cancel"} {
 			t.Run(c.name+"/"+action, func(t *testing.T) {
-				f := newGraceFixture(t, graceB, c.now, c.testClock)
+				f := newGraceFixture(t, graceB, c.now)
 				f.svc.SetInvoiceGrace(c.grace)
 				if err := f.dunningAction(action); err != nil {
 					t.Fatalf("%s: %v", action, err)
@@ -185,7 +181,7 @@ func TestDunningActions_CloseWhenNoGraceApplies(t *testing.T) {
 //
 // Mutation check: pass 0 to BillDue from closeEndedPeriods → May closes too.
 func TestDunningActions_CatchUp_ClosesTheOlderPeriodAndWaits(t *testing.T) {
-	f := newGraceFixture(t, graceB, graceP2.Add(5*time.Minute), "")
+	f := newGraceFixture(t, graceB, graceP2.Add(5*time.Minute))
 	wantGraceWait(t, f.dunningAction("pause"), graceP2.Add(testGrace))
 	if len(f.biller.graces) != 1 || f.biller.graces[0] != testGrace {
 		t.Fatalf("graces=%v, want one close with the grace", f.biller.graces)

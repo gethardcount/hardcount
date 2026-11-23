@@ -197,3 +197,19 @@ func TestOverview_OutstandingByCurrency(t *testing.T) {
 		}
 	}
 }
+
+func getOverview(t *testing.T, db *postgres.DB, tenantID string) OverviewResponse {
+	t.Helper()
+	req := httptest.NewRequest("GET", "/overview?period=30d", nil)
+	req = req.WithContext(auth.WithTenantID(postgres.WithLivemode(req.Context(), false), tenantID))
+	rr := httptest.NewRecorder()
+	NewHandler(db).overview(rr, req)
+	if rr.Code != 200 {
+		t.Fatalf("overview status: got %d, body=%s", rr.Code, rr.Body.String())
+	}
+	var resp OverviewResponse
+	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode overview: %v", err)
+	}
+	return resp
+}

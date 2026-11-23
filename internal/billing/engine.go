@@ -442,9 +442,8 @@ type InvoiceCharger interface {
 
 // SubscriptionReader reads subscription and plan data for billing.
 type SubscriptionReader interface {
-	// GetDueBilling: wall-clock cron path. Returns ONLY subs that
-	// are NOT pinned to a test clock (ADR-028 disjoint flows). The
-	// scheduler tick fans this out per livemode. Every due scan takes
+	// GetDueBilling: cron path. The scheduler tick fans this out per
+	// livemode. Every due scan takes
 	// exclude: ids the caller already attempted this run (drainDue).
 	// now gates billing failures (ADR-119); dueBy = now less the invoice
 	// grace admits due instants (ADR-120).
@@ -878,9 +877,7 @@ func (e *Engine) CheckTaxCalculationUsable(ctx context.Context, tenantID, invoic
 		// advanced past the window (e.g. a mid-period proration after
 		// advancing the clock) made a calc created seconds ago in real time
 		// read as expired. The commit was skipped and the proration invoice
-		// kept tax_calculation_id but no tax_transaction_id — and the
-		// wall-clock reconciler excludes clock-pinned invoices, so nothing
-		// recovered it.
+		// kept tax_calculation_id but no tax_transaction_id.
 		if now := time.Now().UTC(); now.After(usableUntil.Add(-taxCalculationExpiryMargin)) { //nolint:forbidigo // wall-clock: the calculation expires at Stripe in real time, never on the simulated clock
 			de := errs.InvalidState(fmt.Sprintf(
 				"tax calculation expired (usable until %s) — retry tax to refresh, then finalize",
@@ -3165,12 +3162,6 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 		CreatedAt:          now,
 		NetPaymentTermDays: netDays,
 		BillingReason:      domain.BillingReasonSubscriptionCycle,
-		// Persist whether this invoice's domain timestamps were stamped on a
-		// frozen test clock (the subscription is pinned), so the activity
-		// timeline + header render the simulated badge without re-deriving
-		// from the mutable test_clock_id at read time. The manual-invoice path
-		// captures the same signal from the customer's pin (invoice.Service).
-		IsSimulated: sub.TestClockID != "",
 	}
 	out, err := e.commitPeriodClose(ctx, sub, expected, periodStart, periodEnd, nextPeriodStart, nextPeriodEnd, now, thresholdBilledThrough, invoiceRow, lineItems, belowZero)
 	if errors.Is(err, errPeriodMoved) {
@@ -3555,7 +3546,6 @@ func (e *Engine) buildOnCreateInvoice(ctx context.Context, sub domain.Subscripti
 		CreatedAt:          now,
 		NetPaymentTermDays: netDays,
 		BillingReason:      domain.BillingReasonSubscriptionCreate,
-		IsSimulated:        sub.TestClockID != "",
 	}
 	return inv, lineItems, true, nil
 }
@@ -4158,7 +4148,6 @@ func (e *Engine) writeFinalOnCancel(ctx context.Context, tx *sql.Tx, sub domain.
 		CreatedAt:          p.now,
 		NetPaymentTermDays: p.netDays,
 		BillingReason:      domain.BillingReasonSubscriptionCancel,
-		IsSimulated:        sub.TestClockID != "",
 	}
 	// Insert on the caller's coordinator tx (CancelAtomicWithBill). No
 	// idempotent-skip — a unique violation poisons the caller's tx, so
@@ -4623,8 +4612,7 @@ func (e *Engine) FinishRelief(ctx context.Context, sub domain.Subscription, r do
 // RetryPendingCharges visits every invoice queued for auto-charge, once per
 // call, pageSize at a time, and tries to collect it. CRON path — the
 // wall-clock scheduler calls this every tick, passing its liveness stamp as
-// onPage: a sweep can outlast the interval. ADR-029 Phase 1: clock-pinned
-// invoices are excluded from this query.
+// onPage: a sweep can outlast the interval.
 //
 // Rows that stay queued by design (a card-less invoice waits for a card) do
 // not hold back the rows behind them: the walk reads the queue to its end.
@@ -4697,17 +4685,14 @@ const failedDunningBackfillCoolOff = 10 * time.Minute
 // invoice failed-but-undunned, and a same-PI webhook redelivery skips the restart
 // (firstForThisPI=false). This sweep re-drives the idempotent StartDunning so the
 // invoice still reaches a terminal instead of sitting failed forever. CRON /
-// livemode path; clock-pinned invoices are excluded by the store query and dunned
-// inline during Advance. Its rows go through enrollStalledForDunning, so the
+// livemode path. Its rows go through enrollStalledForDunning, so the
 // adapter swallows a "dunning disabled" answer.
 func (e *Engine) EnrollFailedWithoutDunning(ctx context.Context, limit int) (int, []error) {
 	// dunningStarter is REQUIRED (boot fails closed, #442) — the old nil
 	// early-returns in the three enroll sweeps silently left card-less
 	// invoices out of dunning forever.
-	// Cool-off cutoff. The sweep is livemode-only (clock-pinned rows are excluded
-	// by the store query), so a real-time cutoff against updated_at is correct and
-	// never touches simulated time.
-	olderThan := time.Now().UTC().Add(-failedDunningBackfillCoolOff) //nolint:forbidigo // wall-clock: reconciler is livemode-only; clock-pinned rows are excluded by the query
+	// Cool-off cutoff: a real-time cutoff against updated_at.
+	olderThan := time.Now().UTC().Add(-failedDunningBackfillCoolOff) //nolint:forbidigo // wall-clock: the cool-off is a real-world duration against updated_at
 	pending, err := e.invoices.ListFailedWithoutDunningRun(ctx, olderThan, limit)
 	if err != nil {
 		return 0, []error{fmt.Errorf("list failed-without-dunning for backfill: %w", err)}

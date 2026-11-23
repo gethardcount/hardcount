@@ -25,10 +25,9 @@ import (
 //	E  two active subs, started 60d ago           counted once, now and at t
 //	F  one sub canceled 10d ago, never started    never live
 //	G  one sub started 90d ago, canceled 40d ago  not live now, not at t
-//	S  test-clock customer with a trialing sub    excluded everywhere
 //
 // Failed payments: one invoice created 10d ago (window), two created 40d
-// ago (previous window), one simulated in the window.
+// ago (previous window).
 //
 // Mutation checks (each makes this test fail):
 //   - trialing predicate back to status='active' AND trial_end_at > now() → 0
@@ -45,63 +44,59 @@ func TestOverview_HomeCountsAndBaselines(t *testing.T) {
 	now := time.Now().UTC()
 	daysAgo := func(d int) time.Time { return now.Add(-time.Duration(d) * 24 * time.Hour) }
 
-	mkCust := func(ext, clockID string) string {
+	mkCust := func(ext string) string {
 		t.Helper()
-		c, err := custStore.Create(ctx, tenantID, domain.Customer{ExternalID: ext, DisplayName: ext, TestClockID: clockID})
+		c, err := custStore.Create(ctx, tenantID, domain.Customer{ExternalID: ext, DisplayName: ext})
 		if err != nil {
 			t.Fatalf("customer %s: %v", ext, err)
 		}
 		execBypass(t, db, `UPDATE customers SET status = 'active' WHERE id = $1`, c.ID)
 		return c.ID
 	}
-	mkSub := func(custID, code, status string, startedAt, activatedAt, canceledAt *time.Time, clockID string) {
+	mkSub := func(custID, code, status string, startedAt, activatedAt, canceledAt *time.Time) {
 		t.Helper()
 		execTenant(t, db, tenantID, `
 			INSERT INTO subscriptions (id, tenant_id, livemode, code, display_name, customer_id, status, billing_time,
-				started_at, activated_at, canceled_at, test_clock_id,
+				started_at, activated_at, canceled_at,
 				current_billing_period_start, current_billing_period_end, next_billing_at, created_at, updated_at)
-			VALUES ($1, $2, false, $3, $3, $4, $5, 'anniversary', $6, $7, $8, NULLIF($9, ''), $10, $11, $11, $10, $10)`,
+			VALUES ($1, $2, false, $3, $3, $4, $5, 'anniversary', $6, $7, $8, $9, $10, $10, $9, $9)`,
 			postgres.NewID("hc_sub"), tenantID, code, custID, status,
-			startedAt, activatedAt, canceledAt, clockID, daysAgo(60), now.Add(24*time.Hour))
+			startedAt, activatedAt, canceledAt, daysAgo(60), now.Add(24*time.Hour))
 	}
 	p := func(t time.Time) *time.Time { return &t }
 
-	a := mkCust("cus_a", "")
-	mkSub(a, "sub-a", "active", p(daysAgo(60)), p(daysAgo(60)), nil, "")
-	b := mkCust("cus_b", "")
-	mkSub(b, "sub-b", "trialing", p(daysAgo(5)), nil, nil, "")
-	c := mkCust("cus_c", "")
-	mkSub(c, "sub-c", "canceled", p(daysAgo(60)), p(daysAgo(60)), p(daysAgo(10)), "")
-	_ = mkCust("cus_d", "")
-	e := mkCust("cus_e", "")
-	mkSub(e, "sub-e1", "active", p(daysAgo(60)), p(daysAgo(60)), nil, "")
-	mkSub(e, "sub-e2", "active", p(daysAgo(60)), p(daysAgo(60)), nil, "")
+	a := mkCust("cus_a")
+	mkSub(a, "sub-a", "active", p(daysAgo(60)), p(daysAgo(60)), nil)
+	b := mkCust("cus_b")
+	mkSub(b, "sub-b", "trialing", p(daysAgo(5)), nil, nil)
+	c := mkCust("cus_c")
+	mkSub(c, "sub-c", "canceled", p(daysAgo(60)), p(daysAgo(60)), p(daysAgo(10)))
+	_ = mkCust("cus_d")
+	e := mkCust("cus_e")
+	mkSub(e, "sub-e1", "active", p(daysAgo(60)), p(daysAgo(60)), nil)
+	mkSub(e, "sub-e2", "active", p(daysAgo(60)), p(daysAgo(60)), nil)
 	// F was canceled before it ever started (a draft in earlier releases, or
 	// canceled by migration 00235): it has no start and no period.
-	f := mkCust("cus_f", "")
-	mkSub(f, "sub-f", "canceled", nil, nil, p(daysAgo(10)), "")
-	g := mkCust("cus_g", "")
-	mkSub(g, "sub-g", "canceled", p(daysAgo(90)), p(daysAgo(90)), p(daysAgo(40)), "")
-	clockID := seedClock(t, db, tenantID)
-	s := mkCust("cus_s", clockID)
-	mkSub(s, "sub-s", "trialing", p(daysAgo(5)), nil, nil, clockID)
+	f := mkCust("cus_f")
+	mkSub(f, "sub-f", "canceled", nil, nil, p(daysAgo(10)))
+	g := mkCust("cus_g")
+	mkSub(g, "sub-g", "canceled", p(daysAgo(90)), p(daysAgo(90)), p(daysAgo(40)))
 
-	failed := func(custID string, cents int64, createdAt time.Time, simulated bool) {
+	failed := func(custID string, cents int64, createdAt time.Time) {
 		t.Helper()
 		inv := makePaidInvoice(t, ctx, invStore, tenantID, custID, "USD", cents)
 		execBypass(t, db, `UPDATE invoices SET status = 'finalized', payment_status = 'failed', paid_at = NULL,
-			amount_paid_cents = 0, amount_due_cents = total_amount_cents, created_at = $2, is_simulated = $3 WHERE id = $1`,
-			inv.ID, createdAt, simulated)
+			amount_paid_cents = 0, amount_due_cents = total_amount_cents, created_at = $2 WHERE id = $1`,
+			inv.ID, createdAt)
 	}
-	failed(a, 10_01, daysAgo(10), false)
-	failed(a, 10_02, daysAgo(40), false)
-	failed(e, 10_03, daysAgo(41), false)
-	failed(s, 10_04, daysAgo(3), true)
+	failed(a, 10_01, daysAgo(10))
+	failed(a, 10_02, daysAgo(40))
+	failed(e, 10_03, daysAgo(41))
 
 	resp := getOverview(t, db, tenantID)
 
 	if resp.TrialingSubs != 1 {
-		t.Errorf("trialing_subscriptions: got %d, want 1 (status 'trialing'; the simulated trial is excluded)", resp.TrialingSubs)
+		t.Errorf("trialing_subscriptions: got %d, want 1 (status 'trialing')", resp.TrialingSubs)
 	}
 	if resp.ActiveSubs != 3 {
 		t.Errorf("active_subscriptions: got %d, want 3", resp.ActiveSubs)

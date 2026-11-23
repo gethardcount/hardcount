@@ -8,7 +8,7 @@ import {
 import { allNavItems } from '@/lib/navigation'
 import { invoiceStatus } from '@/lib/statusLabels'
 import { invoiceRowAmount } from '@/lib/invoiceTerminal'
-import { wallClockNow, type EffectiveNow } from '@/lib/effectiveNow'
+import { wallClockNow } from '@/lib/effectiveNow'
 import { api, type Customer, type Invoice, type Plan, type Subscription } from '@/lib/api'
 import {
   Command,
@@ -44,13 +44,6 @@ function navItems(): NavItem[] {
     icon: i.icon,
     href: i.to,
   }))
-}
-
-// The palette doesn't load test clocks, so it can only judge "Past due" for
-// real-time invoices. A simulated invoice's now is not known here, so its
-// badge is the stored status (Open), never Past due by real time.
-function paletteNow(inv: Invoice): EffectiveNow | undefined {
-  return inv.is_simulated ? undefined : wallClockNow()
 }
 
 export function CommandPalette({ open, onClose }: CommandPaletteProps) {
@@ -185,7 +178,7 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
                   <FileText className="mr-2 h-4 w-4" />
                   <div className="flex flex-col">
                     <span>{inv.invoice_number}</span>
-                    <span className="text-xs opacity-60">{invoiceStatus(inv, paletteNow(inv)).label} · {invoiceRowAmount(inv)}</span>
+                    <span className="text-xs opacity-60">{invoiceStatus(inv, wallClockNow()).label} · {invoiceRowAmount(inv)}</span>
                   </div>
                 </CommandItem>
               ))}

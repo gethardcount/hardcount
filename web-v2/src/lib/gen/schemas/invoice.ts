@@ -381,14 +381,6 @@ export interface Invoice {
   source_change_type?: ItemChangeType;
   billing_reason?: InvoiceBillingReason;
   /**
-     * True when the invoice's dates (created, issued, due, paid) are
-     * on a test clock's time instead of the real time. Recorded when
-     * the invoice is written: for a cycle invoice, its subscription is
-     * on a test clock; for one you create, its customer is. Always
-     * false in live mode.
-     */
-  is_simulated: boolean;
-  /**
      * The test clock this invoice's dates follow: the clock its customer
      * is pinned to, for cycle and one-off invoices alike. Read from the
      * customer on `GET /v1/invoices` and `GET /v1/invoices/{id}`; other

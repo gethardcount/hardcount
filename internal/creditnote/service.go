@@ -1086,12 +1086,6 @@ func (s *Service) buildCreditNote(ctx context.Context, tx *sql.Tx, tenantID stri
 		OutOfBandAmountCents: outOfBandAmount,
 		Currency:             inv.Currency,
 		RefundStatus:         domain.RefundNone,
-		// Simulated iff the source invoice is: the clock belongs to the
-		// invoice, not to whoever acted on it. A note flagged otherwise would
-		// show the clock's date in the real-time lane, stay visible to the
-		// real-time jobs that skip simulated rows, and survive the teardown
-		// that deletes a clock's data (ADR-086).
-		IsSimulated: inv.IsSimulated,
 		// IssuePending: an auto-issue clawback draft to be issued post-commit and
 		// retried by the reconciler if Issue() fails (migration 0121). Only the
 		// in-tx clawback create (CreateAdjustmentDraftTx) sets this.
@@ -1377,8 +1371,6 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 			CommitRetiredCents:   r,
 			Currency:             inv.Currency,
 			RefundStatus:         domain.RefundNone,
-			// Same rule as buildCreditNote: simulated iff the source invoice is.
-			IsSimulated: inv.IsSimulated,
 		}
 		line := domain.CreditNoteLineItem{
 			Description:     fmt.Sprintf("Commit relief — retired %d of %d commit credits", r, granted),

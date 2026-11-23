@@ -85,7 +85,6 @@ func (h *Handler) mrrMovement(w http.ResponseWriter, r *http.Request) {
 		JOIN plans p ON p.id = si.plan_id
 		WHERE s.activated_at >= $3 AND s.activated_at < $4
 		  AND p.currency = $5
-		  AND s.test_clock_id IS NULL
 		GROUP BY 1
 	`, period.Trunc, dateFmt, period.Start, period.End, defaultCurrency)
 	if err != nil {
@@ -119,7 +118,6 @@ func (h *Handler) mrrMovement(w http.ResponseWriter, r *http.Request) {
 		JOIN plans p ON p.id = si.plan_id
 		WHERE s.canceled_at >= $3 AND s.canceled_at < $4
 		  AND p.currency = $5
-		  AND s.test_clock_id IS NULL
 		GROUP BY 1
 	`, period.Trunc, dateFmt, period.Start, period.End, defaultCurrency)
 	if err != nil {
@@ -165,7 +163,6 @@ func (h *Handler) mrrMovement(w http.ResponseWriter, r *http.Request) {
 		  AND s.activated_at IS NOT NULL
 		  AND s.activated_at < $3
 		  AND (s.canceled_at IS NULL OR s.canceled_at >= $4)
-		  AND s.test_clock_id IS NULL
 	`, period.Trunc, dateFmt, period.Start, period.End, defaultCurrency)
 	if err != nil {
 		slog.Error("analytics mrr-movement: change-events query", "error", err)

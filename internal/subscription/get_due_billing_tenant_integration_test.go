@@ -96,10 +96,9 @@ func TestGetDueBillingForTenant_ScopesToTenant(t *testing.T) {
 	}
 }
 
-// TestGetDueBillingForTenant_ExcludesClockPinnedAndNotDue locks the disjoint-flow
-// + due predicates: a clock-pinned sub (operator Advance owns it) and a
-// not-yet-due sub are both excluded from the manual run, mirroring GetDueBilling.
-func TestGetDueBillingForTenant_ExcludesClockPinnedAndNotDue(t *testing.T) {
+// TestGetDueBillingForTenant_ExcludesNotDue locks the due predicate: a
+// not-yet-due sub is excluded from the manual run, mirroring GetDueBilling.
+func TestGetDueBillingForTenant_ExcludesNotDue(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 	store := NewPostgresStore(db)
@@ -138,25 +137,6 @@ func TestGetDueBillingForTenant_ExcludesClockPinnedAndNotDue(t *testing.T) {
 	}
 	dueSub := mk("sub-due", past)
 	notDue := mk("sub-notdue", future)
-	clockPinned := mk("sub-clock", past)
-
-	// Pin one sub to a test clock via raw SQL (real test_clocks row).
-	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO test_clocks (id, tenant_id, name, frozen_time, status, livemode)
-		 VALUES ('tc_excl', $1, 'excl', $2, 'ready', false)`, tenantID, now); err != nil {
-		t.Fatalf("seed test clock: %v", err)
-	}
-	if _, err := tx.ExecContext(ctx,
-		`UPDATE subscriptions SET test_clock_id = 'tc_excl' WHERE id = $1`, clockPinned); err != nil {
-		t.Fatalf("pin sub to clock: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
 
 	due, err := store.GetDueBillingForTenant(ctx, tenantID, now, now, nil, 50)
 	if err != nil {
@@ -167,12 +147,9 @@ func TestGetDueBillingForTenant_ExcludesClockPinnedAndNotDue(t *testing.T) {
 		got[s.ID] = true
 	}
 	if !got[dueSub] {
-		t.Errorf("the due, non-clock-pinned sub %s must be returned", dueSub)
+		t.Errorf("the due sub %s must be returned", dueSub)
 	}
 	if got[notDue] {
 		t.Errorf("a not-yet-due sub %s must be excluded", notDue)
-	}
-	if got[clockPinned] {
-		t.Errorf("a clock-pinned sub %s must be excluded (operator Advance owns it, ADR-028)", clockPinned)
 	}
 }

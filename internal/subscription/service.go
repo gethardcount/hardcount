@@ -2183,8 +2183,7 @@ func (s *Service) FireDueScheduledCancel(ctx context.Context, tenantID, id strin
 // action runs when the grace ends and usage arriving inside the grace is on
 // the invoice. The close itself honours the grace, and the check after it
 // reads the row at the same now, so no period inside its grace is closed
-// however the boundary and this call interleave. A test clock has no grace
-// (ADR-120): its advance decides when usage arrives.
+// however the boundary and this call interleave.
 //
 // Trialing subscriptions are left to the trial scans, as Cancel always has
 // (ADR-069: a trial cancel is free however late it lands). closed reports
@@ -2197,9 +2196,6 @@ func (s *Service) closeEndedPeriods(ctx context.Context, tenantID, id string, gr
 	now := s.clock.Now(ctx)
 	if s.dueBiller == nil || sub.Status != domain.SubscriptionActive || !domain.BillingDueAt(sub, now) {
 		return sub, false, nil
-	}
-	if sub.TestClockID != "" {
-		grace = 0
 	}
 	// The close honours the grace (BillDue closes no period still inside it),
 	// so the one guard is the check after it: whatever is still due at now but
@@ -3051,17 +3047,14 @@ func (s *Service) cancelTrialAtEnd(ctx context.Context, tenantID string, sub dom
 	return true, nil
 }
 
-// ProcessExpiredTrials scans non-clock-pinned trialing subs whose
-// `trial_end_at` has elapsed in wall-clock time and flips each to active at
+// ProcessExpiredTrials scans trialing subs whose
+// `trial_end_at` has elapsed and flips each to active at
 // trial_end_at: ActivateAfterTrial (atomic flip + activated_at) +
 // BillOnCreate (in_advance first-paid-period coverage).
 //
 // Livemode partition comes from ctx (the scheduler fans out per
 // mode). Per-row errors are collected but don't abort the batch
 // — same shape as every other scheduler-tick processor.
-//
-// ADR-028 disjoint flows: the store query EXPLICITLY EXCLUDES
-// clock-pinned rows (`test_clock_id IS NULL` filter).
 func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []error) {
 	if batch <= 0 {
 		batch = 100
@@ -3147,8 +3140,7 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 			continue
 		}
 
-		// Audit the auto-flip, as the operator's EndTrial writes it (no sim
-		// metadata: this scan excludes clock-pinned subs).
+		// Audit the auto-flip, as the operator's EndTrial writes it.
 		if s.audit != nil {
 			_ = s.audit.Log(ctx, activated.TenantID, domain.AuditActionUpdate, "subscription", activated.ID, activated.Code, map[string]any{
 				"action":       domain.SubAuditTrialEnded,
@@ -3171,10 +3163,9 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 	return processed, batchErrs
 }
 
-// ProcessExpiredPauseCollections scans non-clock-pinned subs whose
-// pause_collection_resumes_at has elapsed in wall-clock time and resumes
-// each (resumeListedPause). Per ADR-028 disjoint flows, the store query
-// explicitly excludes clock-pinned rows.
+// ProcessExpiredPauseCollections scans subs whose
+// pause_collection_resumes_at has elapsed and resumes each
+// (resumeListedPause).
 func (s *Service) ProcessExpiredPauseCollections(ctx context.Context, batch int) (int, []error) {
 	if batch <= 0 {
 		batch = 100

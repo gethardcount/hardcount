@@ -108,10 +108,6 @@ func recoveryRows(in recoveryRowsInput) []TimelineEvent {
 					dc.resolvedBy = in.resolvedBy(re.run.ID)
 				}
 			}
-			var recorded time.Time
-			if inv.IsSimulated && evt.RecordedAt != nil {
-				recorded = *evt.RecordedAt
-			}
 			out = append(out, TimelineEvent{
 				ID:           "dunning:" + evt.ID,
 				Timestamp:    evt.CreatedAt.Format(time.RFC3339),
@@ -120,9 +116,6 @@ func recoveryRows(in recoveryRowsInput) []TimelineEvent {
 				Source:       "dunning",
 				EventType:    string(evt.EventType),
 				AttemptCount: evt.AttemptCount,
-				IsSimulated:  inv.IsSimulated,
-				RecordedAt:   rfc3339OrEmpty(recorded),
-				recordedSort: recorded,
 				// Exact-attribution key written by the dunning retry path
 				// (RetryError); empty on legacy rows.
 				PaymentIntentID: piFromEventMetadata(evt.Metadata),

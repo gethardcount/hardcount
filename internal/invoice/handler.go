@@ -1492,8 +1492,8 @@ type TimelineEvent struct {
 	// "after 3 retry attempts" on the same row in the dunning-
 	// recovered case). Empty = no sub-line. ADR-020.
 	Detail string `json:"detail,omitempty"`
-	// IsSimulated marks an event dated on the invoice's test clock. The SPA
-	// reads it directly.
+	// IsSimulated marks an email row caused on a test clock
+	// (activity.EmailInstant). The SPA reads it directly.
 	IsSimulated bool `json:"is_simulated,omitempty"`
 	// RecordedAt is the REAL-WORLD instant of a row whose primary
 	// timestamp is simulated — the operator contract's Invariant A
@@ -1579,21 +1579,7 @@ func renderChargeAttempts(events []TimelineEvent, attempts []domain.InvoiceCharg
 			}
 		case domain.ChargeAttemptSucceeded:
 			if inv.PaidAt != nil {
-				// The paid lifecycle row owns this success's story — and
-				// this attempt owns its WALL moment (a webhook settle
-				// writes no operator audit row, so the attempt's
-				// occurred_at is the only real-world stamp the paid row
-				// can honestly carry; ADR-104 Invariant A). Lift it when
-				// the audit join left the row bare.
-				if inv.IsSimulated {
-					for i := range events {
-						if events[i].EventType == "invoice.paid" && events[i].Source == "lifecycle" && events[i].RecordedAt == "" {
-							events[i].RecordedAt = a.OccurredAt.Format(time.RFC3339)
-							events[i].recordedSort = a.OccurredAt
-							break
-						}
-					}
-				}
+				// The paid lifecycle row owns this success's story.
 				continue
 			}
 		default: // pending
@@ -1620,13 +1606,8 @@ func renderChargeAttempts(events []TimelineEvent, attempts []domain.InvoiceCharg
 }
 
 // chargeAttemptRow renders one attempt at the instant its action decided
-// (effective_at), in both modes. On a simulated invoice the real time the row
-// was written is kept as its Recorded time.
+// (effective_at), in both modes.
 func chargeAttemptRow(a domain.InvoiceChargeAttempt, inv domain.Invoice) TimelineEvent {
-	var recorded time.Time
-	if inv.IsSimulated {
-		recorded = a.OccurredAt
-	}
 	return TimelineEvent{
 		ID:              "attempt:" + a.ID,
 		Timestamp:       a.EffectiveAt.Format(time.RFC3339),
@@ -1635,9 +1616,6 @@ func chargeAttemptRow(a domain.InvoiceChargeAttempt, inv domain.Invoice) Timelin
 		Source:          "payment",
 		EventType:       "charge_attempt." + string(a.Outcome),
 		PaymentIntentID: a.StripePaymentIntentID,
-		IsSimulated:     inv.IsSimulated,
-		RecordedAt:      rfc3339OrEmpty(recorded),
-		recordedSort:    recorded,
 		Line:            attemptLine(a, inv),
 	}
 }
@@ -1764,19 +1742,6 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 		respond.JSON(w, r, http.StatusOK, map[string]any{"events": []TimelineEvent{}, "degraded": []string{}, "truncated": false})
 		return
 	}
-
-	// is_simulated is the invoice's persisted, authoritative flag — stamped at
-	// write time when the creating context was bound to a frozen test clock
-	// (engine: the subscription is pinned; manual composer: the customer is
-	// pinned). Reading it here, instead of re-deriving from the subscription's
-	// CURRENT test_clock_id, fixes two defects: (1) manual one-off invoices
-	// have no subscription to look through, so the old lookup always returned
-	// false and dropped their badge despite simulated timestamps; (2) the badge
-	// now survives a later clock unpin, since the old sub.Get was a mutable
-	// read-time snapshot (the heuristic feedback_no_heuristic_proxies bans).
-	// It also decides, for every row the invoice owns, whether the line
-	// carries a Recorded time (ADR-128 rule 6).
-	isSimulated := inv.IsSimulated
 
 	// Lane-degradation disclosure (2026-07-19 audit, finding 4): a
 	// side-lane fetch failure used to be swallowed (`if err == nil`) — the
@@ -1933,21 +1898,14 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 		return nil
 	}
 	addLifecycle := func(idKind, eventType string, at time.Time, rank int, line activity.Line) int {
-		var recorded time.Time
-		if e, ok := lifecycle[eventType]; ok && isSimulated {
-			recorded = e.CreatedAt
-		}
 		events = append(events, TimelineEvent{
-			ID:           "lifecycle:" + idKind + ":" + inv.ID,
-			Timestamp:    at.Format(time.RFC3339),
-			sortAt:       at,
-			tieRank:      rank,
-			Source:       "lifecycle",
-			EventType:    eventType,
-			IsSimulated:  isSimulated,
-			RecordedAt:   rfc3339OrEmpty(recorded),
-			recordedSort: recorded,
-			Line:         line,
+			ID:        "lifecycle:" + idKind + ":" + inv.ID,
+			Timestamp: at.Format(time.RFC3339),
+			sortAt:    at,
+			tieRank:   rank,
+			Source:    "lifecycle",
+			EventType: eventType,
+			Line:      line,
 		})
 		return len(events) - 1
 	}
@@ -2038,8 +1996,7 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 	// credit notes channel-by-channel; these rows give the SAME facts a
 	// place in the chronology. There is one timeline (ADR-104): every CN
 	// row sorts by its issued_at on the invoice's calendar — operator CNs
-	// and engine clawbacks both issue under the invoice's clock. A CN's
-	// is_simulated is its source invoice's; it gates the Recorded part.
+	// and engine clawbacks both issue under the invoice's clock.
 	cnLinks := map[string]activity.Part{}
 	for _, cn := range cns {
 		if cn.CreditNoteNumber != "" {
@@ -2062,21 +2019,14 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 				refundFailure, _ = e.Metadata["provider_failure_reason"].(string)
 			}
 		}
-		var cnRecorded time.Time
-		if cn.IsSimulated && cn.RecordedAt != nil {
-			cnRecorded = *cn.RecordedAt
-		}
 		events = append(events, TimelineEvent{
-			ID:           "cn:" + cn.ID,
-			Timestamp:    cn.IssuedAt.Format(time.RFC3339),
-			sortAt:       *cn.IssuedAt,
-			tieRank:      rankCreditNote,
-			Source:       "credit_note",
-			EventType:    "credit_note.issued",
-			IsSimulated:  cn.IsSimulated,
-			RecordedAt:   rfc3339OrEmpty(cnRecorded),
-			recordedSort: cnRecorded,
-			Line:         creditNoteLine(cn, issuedBy, refundFailure),
+			ID:        "cn:" + cn.ID,
+			Timestamp: cn.IssuedAt.Format(time.RFC3339),
+			sortAt:    *cn.IssuedAt,
+			tieRank:   rankCreditNote,
+			Source:    "credit_note",
+			EventType: "credit_note.issued",
+			Line:      creditNoteLine(cn, issuedBy, refundFailure),
 		})
 	}
 

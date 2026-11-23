@@ -1602,20 +1602,10 @@ func (s *PostgresStore) GetDueBilling(ctx context.Context, now, dueBy time.Time,
 		limit = 50
 	}
 
-	// ADR-028 disjoint flows: GetDueBilling is the wall-clock cron's
-	// query — it processes ONLY subs without a test clock. Clock-
-	// pinned subs are operator-controlled. Without this filter, the cron
-	// would silently drip-bill stuck clock-pinned subs in the background,
-	// breaking the operator's mental model of simulation time AND
-	// racing with the test-clock catch-up for the same rows.
-	//
-	// Stripe Test Clocks operate the same way: no cron touches
-	// clock-pinned customers; advance is the sole path.
-	//
 	// TxBypass is used to cross tenants (scheduler-wide sweep), but the
 	// caller's ctx livemode must still scope us to a single partition —
-	// otherwise the per-sub TxTenant calls downstream (plan / test-clock /
-	// settings lookups) default to live and silently fail for test-mode
+	// otherwise the per-sub TxTenant calls downstream (plan / settings
+	// lookups) default to live and silently fail for test-mode
 	// subs. The scheduler fans out ctx per livemode; we honour that here
 	// with an explicit WHERE clause since TxBypass doesn't set app.livemode.
 	//
@@ -1628,12 +1618,11 @@ func (s *PostgresStore) GetDueBilling(ctx context.Context, now, dueBy time.Time,
 	// whose next attempt is after this run's instant, is skipped. The filter
 	// runs before the LIMIT, so failing subs no longer fill the head of every
 	// oldest-first page. The same clause is in GetDueBillingForTenant and
-	// ListExpiredTrials; the clock scans never carry it.
+	// ListExpiredTrials.
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+qualifiedSubCols("s")+` FROM subscriptions s
 		WHERE s.status IN ('active', 'trialing')
 		  AND s.livemode = $1
-		  AND s.test_clock_id IS NULL
 		  AND (s.next_billing_at <= $7
 		       OR (s.status = 'active' AND s.cancel_at IS NOT NULL AND s.cancel_at <= $7))
 		  AND `+domain.SubscriptionBillingGateSQL("s", "$2")+`
@@ -1673,8 +1662,7 @@ func (s *PostgresStore) GetDueBilling(ctx context.Context, now, dueBy time.Time,
 // this runs TxTenant so the subscriptions RLS policy (0020, mode-aware)
 // restricts the result to the caller's own subscriptions AND livemode — the
 // manual trigger can never observe or bill another tenant's subs (the pre-fix
-// cross-tenant leak). Same disjoint-flow rules as GetDueBilling: clock-pinned
-// subs are excluded (operator Advance owns them). FOR UPDATE SKIP LOCKED keeps a
+// cross-tenant leak). FOR UPDATE SKIP LOCKED keeps a
 // manual run and the concurrent wall-clock scheduler from contending on the same
 // row DURING the fetch; it does NOT by itself prevent double-billing — these
 // locks release when this fetch tx rolls back, before billSubscription runs.
@@ -1704,7 +1692,6 @@ func (s *PostgresStore) GetDueBillingForTenant(ctx context.Context, tenantID str
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+qualifiedSubCols("s")+` FROM subscriptions s
 		WHERE s.status IN ('active', 'trialing')
-		  AND s.test_clock_id IS NULL
 		  AND (s.next_billing_at <= $4
 		       OR (s.status = 'active' AND s.cancel_at IS NOT NULL AND s.cancel_at <= $4))
 		  AND `+domain.SubscriptionBillingGateSQL("s", "$1")+`
@@ -1759,11 +1746,10 @@ func resumeNotWaitingOnCloseSQL(a string) string {
 			OR (` + a + `.status = 'trialing' AND ` + a + `.trial_end_at IS NOT NULL AND ` + a + `.trial_end_at < ` + a + `.pause_collection_resumes_at)))`
 }
 
-// ListExpiredPauseCollections returns wall-clock subs whose
+// ListExpiredPauseCollections returns subs whose
 // pause_collection_resumes_at has passed. Used by the scheduler's
 // pause-resume tick (the dedicated scan that pairs with the trial-
-// expiry scan — independent of cycle billing). Excludes clock-
-// pinned subs to honor ADR-028 disjoint flows.
+// expiry scan — independent of cycle billing).
 //
 // Stripe-parity rationale: Stripe resumes collection AT resumes_at
 // rather than at the next cycle close. Before this method existed,
@@ -1788,7 +1774,6 @@ func (s *PostgresStore) ListExpiredPauseCollections(ctx context.Context, before 
 	rows, err := tx.QueryContext(ctx, `
 		SELECT `+qualifiedSubCols("s")+` FROM subscriptions s
 		WHERE s.livemode = $1
-		  AND s.test_clock_id IS NULL
 		  AND s.pause_collection_resumes_at IS NOT NULL
 		  AND s.pause_collection_resumes_at <= $2
 		  AND `+resumeNotWaitingOnCloseSQL("s")+`
@@ -1880,7 +1865,6 @@ func (s *PostgresStore) ClosePeriodTx(ctx context.Context, tx *sql.Tx, tenantID,
 //     manual run that lost the race) matches nothing.
 //   - The count the row holds for this due instant equals the count the
 //     attempt read. Two runs that fail the same attempt count once.
-//   - Wall-clock only. A real-time wait means nothing on a test clock.
 //   - Status is in (active, trialing) but is not compared with the status
 //     read: the trial flip commits on its own and leaves the due instant
 //     unchanged, so a failure right after it is still recorded.
@@ -1903,7 +1887,6 @@ func (s *PostgresStore) RecordBillingFailure(ctx context.Context, tenantID, id s
 		       billing_next_attempt_at = $5,
 		       billing_last_error      = $6
 		 WHERE s.id = $1
-		   AND s.test_clock_id IS NULL
 		   AND s.status IN ('active','trialing')
 		   AND `+due+` IS NOT NULL
 		   AND `+due+` IS NOT DISTINCT FROM $2::timestamptz
@@ -2930,11 +2913,6 @@ func (s *PostgresStore) ClearBillingThresholds(ctx context.Context, tenantID, id
 // GetDueBilling: the scheduler is cross-tenant and the per-tenant
 // downstream calls (usage aggregation, plan reads) carry their own
 // tenant context.
-// ListWithThresholds — CRON path. ADR-029 Phase 3: clock-pinned subs
-// are excluded. Without this filter the wall-clock cron would fire
-// threshold-based invoices on clock-pinned subs even though their running cycle
-// subtotals are accumulated against simulated time — same drip-bill
-// shape ADR-028 closed for period generation.
 func (s *PostgresStore) ListWithThresholds(ctx context.Context, livemode bool, afterID string, limit int) ([]domain.Subscription, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -2954,7 +2932,6 @@ func (s *PostgresStore) ListWithThresholds(ctx context.Context, livemode bool, a
 		SELECT `+qualifiedSubCols("s")+` FROM subscriptions s
 		WHERE s.status IN ('active', 'trialing')
 		  AND s.livemode = $1
-		  AND s.test_clock_id IS NULL
 		  AND s.id > $2
 		  AND (s.billing_threshold_amount_gte IS NOT NULL
 		       OR EXISTS (SELECT 1 FROM subscription_item_thresholds sit WHERE sit.subscription_id = s.id))
@@ -2986,13 +2963,10 @@ func (s *PostgresStore) ListWithThresholds(ctx context.Context, livemode bool, a
 	return subs, nil
 }
 
-// ListExpiredTrials returns, for the cron tick, non-clock-pinned trialing
-// subs whose trial_end_at has elapsed, scoped per livemode; uses TxBypass
-// to cross tenants (scheduler-wide sweep) with an explicit livemode filter
-// (TxBypass doesn't set app.livemode for RLS).
-//
-// ADR-028 disjoint flows: clock-pinned subs are EXPLICITLY EXCLUDED
-// (`test_clock_id IS NULL`).
+// ListExpiredTrials returns, for the cron tick, trialing subs whose
+// trial_end_at has elapsed, scoped per livemode; uses TxBypass to cross
+// tenants (scheduler-wide sweep) with an explicit livemode filter (TxBypass
+// doesn't set app.livemode for RLS).
 //
 // FOR UPDATE SKIP LOCKED so concurrent scheduler ticks (multi-
 // replica) don't double-process the same trialing sub.
@@ -3024,7 +2998,6 @@ func (s *PostgresStore) ListExpiredTrials(ctx context.Context, before time.Time,
 		SELECT `+qualifiedSubCols("s")+` FROM subscriptions s
 		WHERE s.status = 'trialing'
 		  AND s.livemode = $1
-		  AND s.test_clock_id IS NULL
 		  AND s.trial_end_at IS NOT NULL
 		  AND s.trial_end_at <= $2
 		  AND (COALESCE(s.cancel_at_period_end, false)
@@ -3109,8 +3082,8 @@ func listItemsTx(ctx context.Context, tx *sql.Tx, subscriptionID string) ([]doma
 }
 
 // qualifiedSubCols prefixes every column in subCols with the given table alias.
-// Needed when subscriptions is JOINed against another table (e.g. test_clocks
-// or subscription_items for filtering) with overlapping column names.
+// Needed when subscriptions is JOINed against another table (e.g.
+// subscription_items for filtering) with overlapping column names.
 func qualifiedSubCols(alias string) string {
 	var b strings.Builder
 	for i, col := range splitTopLevelCommas(subCols) {
@@ -3230,15 +3203,15 @@ func scanSubRow(row rowScanner, sub *domain.Subscription) error {
 
 // composeBillingFailure is the Go form of
 // domain.SubscriptionBillingFailingSQL: the five billing_* columns become a
-// BillingFailure only on a wall-clock subscription that can still bill and
-// whose record was saved for the due instant the row has now. Anything else is
+// BillingFailure only on a subscription that can still bill and whose record
+// was saved for the due instant the row has now. Anything else is
 // a stale leftover (the columns are never cleared when the due instant moves)
 // and reads as nil. This is the only place Go decides whether a record is
 // live, so every read path agrees; a real-Postgres test asserts it matches the
 // SQL predicate row for row. (ClearBillingFailure decides it in SQL, with that
 // same predicate.)
 func composeBillingFailure(sub domain.Subscription, failedFor sql.NullTime, count int, failedAt, nextAttemptAt sql.NullTime, lastError string) *domain.BillingFailure {
-	if !failedFor.Valid || sub.TestClockID != "" {
+	if !failedFor.Valid {
 		return nil
 	}
 	if sub.Status != domain.SubscriptionActive && sub.Status != domain.SubscriptionTrialing {
@@ -3390,11 +3363,9 @@ func buildSubWhere(f ListFilter) (string, []any) {
 		// pause in force now, the engine's rule (PauseCollection.InForceAt):
 		// a timed pause stops holding collection at resumes_at, though the
 		// resumer leaves it on the row while a period that ended before then
-		// is still open. "Now" is the subscription's test clock, when it has
-		// one, as in the clock's charge sweep.
+		// is still open.
 		clauses = append(clauses, `(s.pause_collection_behavior IS NOT NULL AND s.status IN ('active','trialing')
-			AND (s.pause_collection_resumes_at IS NULL OR s.pause_collection_resumes_at >
-			     COALESCE((SELECT tc.frozen_time FROM test_clocks tc WHERE tc.id = s.test_clock_id), now())))`)
+			AND (s.pause_collection_resumes_at IS NULL OR s.pause_collection_resumes_at > now()))`)
 	}
 	if f.Search != "" {
 		// One placeholder reused across both columns — Postgres

@@ -16,15 +16,15 @@ import (
 // (credits / offline / $0 pay an invoice with no charge).
 func TestRenderChargeAttempts(t *testing.T) {
 	wallT := time.Date(2026, 7, 28, 14, 12, 0, 0, time.UTC)
-	simT := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
-	failed := func(pi string, sim bool) domain.InvoiceChargeAttempt {
+	effT := time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC)
+	failed := func(pi string, decided bool) domain.InvoiceChargeAttempt {
 		a := domain.InvoiceChargeAttempt{
 			StripePaymentIntentID: pi, Outcome: domain.ChargeAttemptFailed,
 			ProviderReason: "Your card was declined.", AmountCents: 440, OccurredAt: wallT,
 		}
 		a.EffectiveAt = wallT
-		if sim {
-			a.EffectiveAt = simT
+		if decided {
+			a.EffectiveAt = effT
 		}
 		return a
 	}
@@ -60,19 +60,14 @@ func TestRenderChargeAttempts(t *testing.T) {
 		t.Fatalf("a decline code wins over the provider's text: %q", out[0].Line.Problem)
 	}
 
-	// No dunning row → the attempt renders itself, on the test clock's
-	// calendar on a simulated invoice.
-	out = renderChargeAttempts(nil, []domain.InvoiceChargeAttempt{failed("pi_2", true)}, domain.Invoice{IsSimulated: true})
+	// No dunning row → the attempt renders itself, at the instant its
+	// action decided (effective_at), not when it was written.
+	out = renderChargeAttempts(nil, []domain.InvoiceChargeAttempt{failed("pi_2", true)}, domain.Invoice{})
 	if count(out, "payment") != 1 {
 		t.Fatalf("unowned attempt must render: %+v", out)
 	}
-	if !out[0].IsSimulated || !out[0].sortAt.Equal(simT) {
-		t.Fatalf("an attempt on a simulated invoice must render on its clock's calendar: sim=%v at %v", out[0].IsSimulated, out[0].sortAt)
-	}
-	// A wall-stamped attempt keeps wall time.
-	out = renderChargeAttempts(nil, []domain.InvoiceChargeAttempt{failed("pi_3", false)}, domain.Invoice{})
-	if out[0].IsSimulated || !out[0].sortAt.Equal(wallT) {
-		t.Fatalf("wall attempt must keep wall time: sim=%v at %v", out[0].IsSimulated, out[0].sortAt)
+	if !out[0].sortAt.Equal(effT) {
+		t.Fatalf("an attempt must render at its effective_at %v, got %v", effT, out[0].sortAt)
 	}
 	// Empty-PI attempts (the PI create itself failed) still render —
 	// they can never have a dunning twin to absorb them.

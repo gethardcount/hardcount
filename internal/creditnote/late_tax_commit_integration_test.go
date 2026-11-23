@@ -8,6 +8,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/tenant"
 )
 
@@ -42,7 +43,7 @@ func TestCreditNoteOnAnInvoiceCommittedLate_ItsReversalIsMade(t *testing.T) {
 	f := newReversalFixture(t, "CN Late Commit")
 	inv := f.invoice("INV-LATE-COMMIT", "stripe_tax", 1000, "")
 	execBypassCN(t, f.db, `
-		UPDATE invoices SET tax_status = 'ok', tax_calculation_id = 'taxcalc_late', is_simulated = false,
+		UPDATE invoices SET tax_status = 'ok', tax_calculation_id = 'taxcalc_late',
 		       issued_at = now() - interval '3 days', updated_at = now() - interval '3 days'
 		 WHERE id = $1`, inv.ID)
 	execBypassCN(t, f.db, `
@@ -106,5 +107,20 @@ func TestCreditNoteOnAnInvoiceCommittedLate_ItsReversalIsMade(t *testing.T) {
 	got := f.note(draft.ID)
 	if got.TaxTransactionID != "tx_reversal_after_late_commit" || got.TaxReversalPending {
 		t.Fatalf("after the reversal: tx=%q pending=%v, want the reversal stored and the marker cleared", got.TaxTransactionID, got.TaxReversalPending)
+	}
+}
+
+func execBypassCN(t *testing.T, db *postgres.DB, q string, args ...any) {
+	t.Helper()
+	tx, err := db.BeginTx(context.Background(), postgres.TxBypass, "")
+	if err != nil {
+		t.Fatalf("begin bypass: %v", err)
+	}
+	defer func() { _ = tx.Rollback() }()
+	if _, err := tx.ExecContext(context.Background(), q, args...); err != nil {
+		t.Fatalf("exec %q: %v", q, err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
 	}
 }

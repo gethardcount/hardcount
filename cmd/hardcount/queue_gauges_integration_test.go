@@ -112,12 +112,12 @@ func gaugeValue(t *testing.T, name string, labels map[string]string) float64 {
 	return 0
 }
 
-// TestBillingGauges_DueAndFailingPartition: every owed wall-clock subscription
-// is in exactly one of two gauges (ADR-119). "Due" counts the ones billing is
-// not failing on, including one whose failures are never saved; "failing"
-// counts the saved ones by state. Rows that only look like failures (a record
-// for another due instant, a record on a clock-pinned or canceled row) count
-// as what they really are.
+// TestBillingGauges_DueAndFailingPartition: every owed subscription is in
+// exactly one of two gauges (ADR-119). "Due" counts the ones billing is not
+// failing on, including one whose failures are never saved; "failing" counts
+// the saved ones by state. Rows that only look like failures (a record for
+// another due instant, a record on a canceled row) count as what they really
+// are.
 //
 // The gauge predicate is a hand copy of domain.SubscriptionBillingFailingSQL.
 // The last assertion pins the copy to the original on these rows; drift in
@@ -128,7 +128,7 @@ func TestBillingGauges_DueAndFailingPartition(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now().UTC().Truncate(time.Microsecond)
 	due := now.Add(-48 * time.Hour)
-	const tenantID, clockID = "hc_ten_bfgauge", "hc_tclk_bfgauge"
+	const tenantID = "hc_ten_bfgauge"
 
 	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -143,48 +143,45 @@ func TestBillingGauges_DueAndFailingPartition(t *testing.T) {
 	}
 	mustExec(`SELECT set_config('app.livemode', 'off', true)`)
 	mustExec(`INSERT INTO tenants (id, name, status) VALUES ($1, 'BillingGauges', 'active')`, tenantID)
-	mustExec(`INSERT INTO test_clocks (id, tenant_id, name, frozen_time, status, livemode)
-		VALUES ($1, $2, 'gauges', $3, 'ready', false)`, clockID, tenantID, now)
 	mustExec(`INSERT INTO customers (id, tenant_id, external_id, display_name, email, created_at, updated_at)
 		VALUES ('cus_bfgauge', $1, 'g', 'BillingGauges', '', $2, $2)`, tenantID, now)
-	seed := func(id, status string, nextBilling time.Time, cancelAt *time.Time, clock any, failedFor, nextAttempt *time.Time) {
+	seed := func(id, status string, nextBilling time.Time, cancelAt *time.Time, failedFor, nextAttempt *time.Time) {
 		mustExec(`INSERT INTO subscriptions (
 			id, tenant_id, code, display_name, customer_id, status, billing_time,
 			current_billing_period_start, current_billing_period_end, next_billing_at, cancel_at,
-			livemode, test_clock_id, billing_failed_for, billing_failure_count, billing_next_attempt_at,
+			livemode, billing_failed_for, billing_failure_count, billing_next_attempt_at,
 			created_at, updated_at
-		) VALUES ($1, $2, $1, $1, 'cus_bfgauge', $3, 'calendar', $4, $5, $5, $10, false, $6, $7, $8, $9, $4, $4)`,
-			id, tenantID, status, nextBilling.Add(-30*24*time.Hour), nextBilling, clock,
+		) VALUES ($1, $2, $1, $1, 'cus_bfgauge', $3, 'calendar', $4, $5, $5, $9, false, $6, $7, $8, $4, $4)`,
+			id, tenantID, status, nextBilling.Add(-30*24*time.Hour), nextBilling,
 			postgres.NullableTime(failedFor), map[bool]int{true: 3, false: 0}[failedFor != nil], postgres.NullableTime(nextAttempt),
 			postgres.NullableTime(cancelAt))
 	}
 	later, stale, notDue := now.Add(time.Hour), due.Add(-30*24*time.Hour), now.Add(72*time.Hour)
 	earlier := due.Add(-24 * time.Hour)
-	seed("sub_g_healthy", "active", due, nil, nil, nil, nil)
+	seed("sub_g_healthy", "active", due, nil, nil, nil)
 	// Failing on every run with an error that is never saved (a lost
 	// connection, an interrupted run): it has no record, so it is "due".
-	seed("sub_g_unrecorded", "active", due.Add(time.Hour), nil, nil, nil, nil)
-	seed("sub_g_retrying", "active", due, nil, nil, &due, &later)
-	seed("sub_g_parked", "active", due, nil, nil, &due, nil)
+	seed("sub_g_unrecorded", "active", due.Add(time.Hour), nil, nil, nil)
+	seed("sub_g_retrying", "active", due, nil, &due, &later)
+	seed("sub_g_parked", "active", due, nil, &due, nil)
 	// The cancel arm of the key. An active row parked on a failing mid-period
 	// cancel: its due instant is cancel_at, not next_billing_at. A copy of
 	// the predicate that keyed on next_billing_at alone would call it due.
-	seed("sub_g_cancel_parked", "active", notDue, &due, nil, &due, nil)
+	seed("sub_g_cancel_parked", "active", notDue, &due, &due, nil)
 	// A trialing row ignores cancel_at: its due instant is next_billing_at
 	// although an earlier cancel_at is set. A copy that dropped the
 	// status = 'active' test would key it on cancel_at and lose it.
-	seed("sub_g_trial_retrying", "trialing", due, &earlier, nil, &due, &later)
+	seed("sub_g_trial_retrying", "trialing", due, &earlier, &due, &later)
 	// Decoys.
-	seed("sub_g_stale", "active", due, nil, nil, &stale, nil)    // record for another due instant: due, not failing
-	seed("sub_g_clock", "active", due, nil, clockID, &due, nil)  // clock-pinned: neither
-	seed("sub_g_canceled", "canceled", due, nil, nil, &due, nil) // evidence on a canceled row: neither
-	seed("sub_g_notdue", "active", notDue, nil, nil, nil, nil)
+	seed("sub_g_stale", "active", due, nil, &stale, nil)    // record for another due instant: due, not failing
+	seed("sub_g_canceled", "canceled", due, nil, &due, nil) // evidence on a canceled row: neither
+	seed("sub_g_notdue", "active", notDue, nil, nil, nil)
 	// Inside the invoice grace (ADR-120; the gauges are registered with 1h):
 	// the billing runs do not close these yet, so they are not due. One per
 	// arm of the due instant.
 	inGrace := now.Add(-30 * time.Minute)
-	seed("sub_g_ingrace", "active", inGrace, nil, nil, nil, nil)
-	seed("sub_g_cancel_ingrace", "active", notDue, &inGrace, nil, nil, nil)
+	seed("sub_g_ingrace", "active", inGrace, nil, nil, nil)
+	seed("sub_g_cancel_ingrace", "active", notDue, &inGrace, nil, nil)
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
