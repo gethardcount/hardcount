@@ -16,7 +16,8 @@ Read this page at the version you run. The quick start runs v0.10.0, and
 [this page as of v0.10.0](https://github.com/gethardcount/hardcount/blob/v0.10.0/docs/first-invoice.md)
 matches it. The copy on `main` can be ahead of that release.
 
-Open a terminal in the `hardcount` folder that the quick start downloaded. Save
+Open a terminal in the `hardcount` folder that the quick start downloaded
+(two folders above `deploy/compose`, where you ran it). Save
 the address and your test API key in two variables. Every command below
 uses them.
 
@@ -198,7 +199,7 @@ Recipe, meter and test clock: [quick start](quick-start.md#words-on-this-page).
    LiteLLM's `user` is the customer's external ID. This record has no
    time, so the event gets the clock's time, as in 5a. A real proxy sends
    each call's real time, so connect it for a customer without a test
-   clock: see [LiteLLM integration](integrations/litellm.md#before-you-start).
+   clock: see [LiteLLM integration](integrations/litellm.md#2-create-the-customer-and-put-it-on-a-plan).
 
    <!-- docs-run: command name=5b -->
    ```bash

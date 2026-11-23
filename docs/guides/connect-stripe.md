@@ -94,8 +94,8 @@ Hardcount**.
    - **On your own computer:** Stripe cannot reach it, so skip the endpoint
      in the Stripe Dashboard. With the
      [Stripe CLI](https://docs.stripe.com/stripe-cli) signed in to your
-     Stripe account, run this and leave it running. It passes Stripe's
-     events on to Hardcount. **Settings → Payments** shows the command with
+     Stripe account, run this in a second terminal and leave it running.
+     It passes Stripe's events on to Hardcount. **Settings → Payments** shows the command with
      your own address.
 
      ```bash
