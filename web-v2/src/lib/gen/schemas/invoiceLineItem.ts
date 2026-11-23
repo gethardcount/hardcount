@@ -92,16 +92,8 @@ export interface InvoiceLineItem {
      * gets a credit grant of this
      * many cents (in the invoice's currency). It may differ from the
      * line's price: a discounted commit sells $10,000 of credit for
-     * $9,000. Only on `add_on` lines of invoices you create, at most
-     * one per invoice. Absent on other lines.
+     * $9,000. Only on an `add_on` line of an invoice you create, alone
+     * on it. The credit never expires. Absent on other lines.
      */
   commit_granted_cents?: number;
-  /**
-     * When the granted credit expires. The credit can be drawn up to
-     * and including this instant; a period invoice draws it when its
-     * period ends at or before it. The dashboard sends the local
-     * midnight after the picked day. Absent when the credit never
-     * expires (the default).
-     */
-  commit_expires_at?: string;
 }

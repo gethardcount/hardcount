@@ -19,7 +19,7 @@ import { applyApiError, showApiError } from '@/lib/formErrors'
 import { emailStepAfterFinalize, isEmailNotConfigured, newInvoiceOutcome, type NewInvoiceResult } from '@/lib/actionOutcomes'
 import { showOutcome } from '@/lib/outcomeToast'
 import { billingProfileCard, profileOrAbsent } from '@/lib/billingProfileLoad'
-import { isBeforeCivilToday, startOfDayInTZ, startOfNextDayInTZ } from '@/lib/dates'
+import { startOfDayInTZ } from '@/lib/dates'
 import { Checkbox } from '@/components/ui/checkbox'
 import { MarginCard } from '@/components/MarginCard'
 import { SendSetupLinkDialog } from '@/components/SendSetupLinkDialog'
@@ -1708,7 +1708,6 @@ type ComposerLine = {
   // enforces one commit line per invoice.
   sellsCredits: boolean
   commitGranted: string    // typed in currency units, like unitAmount
-  commitExpiresAt: string    // yyyy-mm-dd; '' = never expires
 }
 
 const blankLine = (): ComposerLine => ({
@@ -1718,7 +1717,6 @@ const blankLine = (): ComposerLine => ({
   line_type: 'add_on',
   sellsCredits: false,
   commitGranted: '',
-  commitExpiresAt: '',
 })
 
 // What New invoice says when the create's answer is lost. The dialog sends
@@ -1767,13 +1765,7 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
   // second one. The dialog unmounts on close, so the next open makes a new key.
   const [idemKey] = useState(() => crypto.randomUUID())
   const [lines, setLines] = useState<ComposerLine[]>([blankLine()])
-  // Anchor date validation on the customer's simulated "now" when clock-pinned:
-  // a customer frozen at 2027 must reject a 2026 credit-expiry (past in sim
-  // time), which a wall-clock "today" would wrongly accept as "future". Surfaced
-  // by the no-restricted-syntax relative-time gate (ADR-086 Phase 4).
-  const now = useNowFor(customer)
-  // The commit expiry and the service period are days of the account's
-  // zone, sent as instants there.
+  // The service period is days of the account's zone, sent as instants there.
   const tz = useTenantTimezone()
   const [errors, setErrors] = useState<{
     lines?: Record<number, { description?: string; quantity?: string; unitAmount?: string; commit?: string }>
@@ -1825,14 +1817,13 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
 
   // validate returns sanitized lines suitable for the API. Returns null on
   // any validation failure (errors are surfaced via setErrors).
-  const validate = (): { description: string; line_type: string; quantity: number; unit_amount_cents: number; commit_granted_cents?: number; commit_expires_at?: string }[] | null => {
+  const validate = (): { description: string; line_type: string; quantity: number; unit_amount_cents: number; commit_granted_cents?: number }[] | null => {
     const lineErrors: Record<number, { description?: string; quantity?: string; unitAmount?: string; commit?: string }> = {}
-    const cleaned: { description: string; line_type: string; quantity: number; unit_amount_cents: number; commit_granted_cents?: number; commit_expires_at?: string }[] = []
+    const cleaned: { description: string; line_type: string; quantity: number; unit_amount_cents: number; commit_granted_cents?: number }[] = []
     if (lines.length === 0) {
       setErrors({ form: 'Add at least one line item.' })
       return null
     }
-    let commitLines = 0
     lines.forEach((l, i) => {
       const errs: { description?: string; quantity?: string; unitAmount?: string; commit?: string } = {}
       const desc = l.description.trim()
@@ -1849,31 +1840,17 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
         // The server refuses a unit price of 0; say so before the round trip.
         errs.unitAmount = 'Must be greater than 0'
       }
-      // Prepaid-credit sale: granted cents required and positive; at most
-      // one commit line per invoice (the backend enforces both too).
+      // Prepaid-credit sale: granted cents required and positive, and the
+      // line alone on its invoice (the backend enforces both too).
       let commitGranted: number | undefined
-      let commitExpires: string | undefined
       if (l.sellsCredits && (l.line_type || 'add_on') === 'add_on') {
-        commitLines++
         const granted = dollarsToWholeCents(l.commitGranted)
         if (granted === null || granted <= 0) {
           errs.commit = 'Credits granted: an amount like 100 or 100.50, greater than 0'
-        } else if (commitLines > 1) {
-          errs.commit = 'Only one line per invoice can sell prepaid credits — use a separate invoice'
+        } else if (lines.length > 1) {
+          errs.commit = 'A line that sells prepaid credits must be the only line on its invoice — put other charges on a separate invoice'
         } else {
           commitGranted = granted
-          if (l.commitExpiresAt) {
-            // "Today" is judged in tenant TZ, the zone startOfNextDayInTZ
-            // resolves the expiry in below: valid through the picked day, so
-            // today is a valid pick, as in the grant dialog.
-            // While the customer's now is not known the check is left to
-            // the server, which refuses an expiry in the past.
-            if (now !== undefined && isBeforeCivilToday(l.commitExpiresAt, now, tz)) {
-              errs.commit = 'Credit expiry must be today or later'
-            } else {
-              commitExpires = startOfNextDayInTZ(l.commitExpiresAt, tz)
-            }
-          }
         }
       }
       if (Object.keys(errs).length > 0 || qty === null || unit === null) {
@@ -1885,7 +1862,6 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
           quantity: qty,
           unit_amount_cents: unit,
           ...(commitGranted !== undefined ? { commit_granted_cents: commitGranted } : {}),
-          ...(commitExpires !== undefined ? { commit_expires_at: commitExpires } : {}),
         })
       }
     })
@@ -2211,21 +2187,10 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
                               onChange={e => updateLine(idx, { commitGranted: e.target.value })}
                               disabled={isBusy}
                             />
-                            <label className="flex items-center gap-2 text-xs text-muted-foreground">
-                              Valid through
-                              <Input
-                                type="date"
-                                aria-label={`Line ${idx + 1} credits valid through`}
-                                className="w-auto"
-                                value={line.commitExpiresAt}
-                                onChange={e => updateLine(idx, { commitExpiresAt: e.target.value })}
-                                disabled={isBusy}
-                              />
-                            </label>
                             <span className="text-xs text-muted-foreground">
                               {(dollarsToWholeCents(line.commitGranted) ?? 0) > 0
                                 ? `Grants ${formatCents(dollarsToWholeCents(line.commitGranted) ?? 0, currency)} of credits when the invoice is finalized.`
-                                : 'Expiry optional — blank means the credits never expire.'}
+                                : 'The credits never expire.'}
                             </span>
                           </div>
                         )}

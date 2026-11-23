@@ -559,7 +559,7 @@ func TestCurrency_EveryWriterRequiresOne(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin: %v", err)
 	}
-	_, err = r.svc.GrantCommitForInvoiceTx(r.ctx, tx, r.tenantID, cust, inv, "HC-WRITERS-COMMIT", "", 1000, nil)
+	_, err = r.svc.GrantCommitForInvoiceTx(r.ctx, tx, r.tenantID, cust, inv, "HC-WRITERS-COMMIT", "", 1000)
 	postgres.Rollback(tx)
 	if err == nil {
 		t.Error("commit grant with no currency: accepted, want an error")

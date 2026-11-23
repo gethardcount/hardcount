@@ -60,7 +60,13 @@ func (s *PostgresStore) SetOutboxEnqueuer(o OutboxEnqueuer) { s.outbox = o }
 // commit line exists: FinalizeWithDates fails loud on a commit invoice with
 // no funder wired.
 type CommitFunder interface {
-	GrantCommitForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber, currency string, amountCents int64, expiresAt *time.Time) (domain.CreditLedgerEntry, error)
+	GrantCommitForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber, currency string, amountCents int64) (domain.CreditLedgerEntry, error)
+}
+
+// errCommitLineAlone refuses a commit line beside any other line: an invoice
+// that buys prepaid credit buys nothing else (ADR-078).
+func errCommitLineAlone() error {
+	return errs.Invalid("commit_granted_cents", "a commit line must be the only line on its invoice; put other charges on a separate invoice")
 }
 
 // SetCommitFunder wires commit-grant funding at finalize (ADR-078).
@@ -699,16 +705,14 @@ func (s *PostgresStore) FinalizeWithDates(ctx context.Context, tenantID, id stri
 		return domain.Invoice{}, err
 	}
 
-	// Fund the commit line, if any (at most one — enforced at line create).
-	var (
-		commitCents   sql.NullInt64
-		commitExpires sql.NullTime
-	)
+	// Fund the commit line, if any (alone on its invoice — enforced at line
+	// create).
+	var commitCents sql.NullInt64
 	err = tx.QueryRowContext(ctx, `
-		SELECT commit_granted_cents, commit_expires_at
+		SELECT commit_granted_cents
 		FROM invoice_line_items
 		WHERE invoice_id = $1 AND tenant_id = $2 AND commit_granted_cents IS NOT NULL
-	`, id, tenantID).Scan(&commitCents, &commitExpires)
+	`, id, tenantID).Scan(&commitCents)
 	if err != nil && err != sql.ErrNoRows {
 		return domain.Invoice{}, fmt.Errorf("read commit line at finalize: %w", err)
 	}
@@ -718,12 +722,8 @@ func (s *PostgresStore) FinalizeWithDates(ctx context.Context, tenantID, id stri
 			// that never grants — fail loud, never silently skip.
 			return domain.Invoice{}, fmt.Errorf("invoice %s carries a commit line but no commit funder is wired", id)
 		}
-		var expiresAt *time.Time
-		if commitExpires.Valid {
-			expiresAt = &commitExpires.Time
-		}
 		if _, ferr := s.commitFunder.GrantCommitForInvoiceTx(ctx, tx, tenantID,
-			inv.CustomerID, inv.ID, inv.InvoiceNumber, inv.Currency, commitCents.Int64, expiresAt); ferr != nil {
+			inv.CustomerID, inv.ID, inv.InvoiceNumber, inv.Currency, commitCents.Int64); ferr != nil {
 			return domain.Invoice{}, fmt.Errorf("fund commit grant at finalize: %w", ferr)
 		}
 	}
@@ -1813,7 +1813,7 @@ func (s *PostgresStore) ListLineItemsTx(ctx context.Context, tx *sql.Tx, _ strin
 			total_amount_cents, currency, COALESCE(pricing_mode,''),
 			COALESCE(price_id,''), billing_period_start, billing_period_end,
 			metadata, created_at, tax_jurisdiction, tax_code, tax_reason, quantity_decimal,
-			commit_granted_cents, commit_expires_at, nominal_unit_amount_decimal, COALESCE(meter_unit,''), dimension_match
+			commit_granted_cents, nominal_unit_amount_decimal, COALESCE(meter_unit,''), dimension_match
 		FROM invoice_line_items WHERE invoice_id = $1
 		ORDER BY created_at ASC, id ASC
 	`, invoiceID)
@@ -1833,7 +1833,7 @@ func (s *PostgresStore) ListLineItemsTx(ctx context.Context, tx *sql.Tx, _ strin
 			&item.Currency, &item.PricingMode, &item.PriceID,
 			&item.BillingPeriodStart, &item.BillingPeriodEnd, &metaJSON, &item.CreatedAt,
 			&item.TaxJurisdiction, &item.TaxCode, &item.TaxabilityReason, &item.QuantityDecimal,
-			&item.CommitGrantedCents, &item.CommitExpiresAt, &nominal, &item.MeterUnit, &match); err != nil {
+			&item.CommitGrantedCents, &nominal, &item.MeterUnit, &match); err != nil {
 			return nil, err
 		}
 		item.NominalUnitAmountDecimal = scanNominalRate(nominal)
@@ -1951,27 +1951,22 @@ func (s *PostgresStore) AddLineItemAtomicAudited(
 	}
 
 	// Invoice-level commit rules (ADR-078), enforced under the row lock so
-	// they can't race a concurrent add: commit lines live only on manual
-	// invoices, at most one per invoice (the per-invoice fund-once index
-	// depends on it).
-	if item.IsCommitLine() {
-		if domain.InvoiceBillingReason(billingReason.String) != domain.BillingReasonManual {
-			return domain.InvoiceLineItem{}, domain.Invoice{},
-				errs.Invalid("commit_granted_cents", "commit purchase lines are only supported on manual invoices")
-		}
-		var hasCommit bool
-		if err := tx.QueryRowContext(ctx, `
-			SELECT EXISTS (
-				SELECT 1 FROM invoice_line_items
-				WHERE invoice_id = $1 AND tenant_id = $2 AND commit_granted_cents IS NOT NULL
-			)`, invoiceID, tenantID,
-		).Scan(&hasCommit); err != nil {
-			return domain.InvoiceLineItem{}, domain.Invoice{}, fmt.Errorf("check existing commit line: %w", err)
-		}
-		if hasCommit {
-			return domain.InvoiceLineItem{}, domain.Invoice{},
-				errs.Invalid("commit_granted_cents", "invoice already has a commit line — one commit per invoice; use a separate invoice")
-		}
+	// they can't race a concurrent add: a commit line lives only on a manual
+	// invoice, and alone on it, so the invoice buys credit and nothing else
+	// (the per-invoice fund-once index depends on one commit line).
+	if item.IsCommitLine() && domain.InvoiceBillingReason(billingReason.String) != domain.BillingReasonManual {
+		return domain.InvoiceLineItem{}, domain.Invoice{},
+			errs.Invalid("commit_granted_cents", "commit purchase lines are only supported on manual invoices")
+	}
+	var hasLine, hasCommit bool
+	if err := tx.QueryRowContext(ctx, `
+		SELECT EXISTS (SELECT 1 FROM invoice_line_items WHERE invoice_id = $1 AND tenant_id = $2),
+		       EXISTS (SELECT 1 FROM invoice_line_items WHERE invoice_id = $1 AND tenant_id = $2 AND commit_granted_cents IS NOT NULL)
+	`, invoiceID, tenantID).Scan(&hasLine, &hasCommit); err != nil {
+		return domain.InvoiceLineItem{}, domain.Invoice{}, fmt.Errorf("check existing lines: %w", err)
+	}
+	if (item.IsCommitLine() && hasLine) || hasCommit {
+		return domain.InvoiceLineItem{}, domain.Invoice{}, errCommitLineAlone()
 	}
 
 	item.InvoiceID = invoiceID
@@ -1991,21 +1986,21 @@ func (s *PostgresStore) AddLineItemAtomicAudited(
 			total_amount_cents, currency, pricing_mode, price_id,
 			billing_period_start, billing_period_end, metadata, created_at,
 			tax_jurisdiction, tax_code, tax_reason, quantity_decimal,
-			commit_granted_cents, commit_expires_at, nominal_unit_amount_decimal, meter_unit, dimension_match)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
+			commit_granted_cents, nominal_unit_amount_decimal, meter_unit, dimension_match)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
 		RETURNING id, invoice_id, tenant_id, line_type, COALESCE(meter_id,''), description,
 			quantity, unit_amount_cents, amount_cents, tax_rate, tax_amount_cents,
 			total_amount_cents, currency, COALESCE(pricing_mode,''),
 			COALESCE(price_id,''), billing_period_start, billing_period_end,
 			metadata, created_at, tax_jurisdiction, tax_code, tax_reason, quantity_decimal,
-			commit_granted_cents, commit_expires_at
+			commit_granted_cents
 	`, itemID, invoiceID, tenantID, item.LineType, postgres.NullableString(item.MeterID),
 		item.Description, item.Quantity, item.UnitAmountCents, item.AmountCents,
 		item.TaxRate, item.TaxAmountCents, item.TotalAmountCents, currency,
 		postgres.NullableString(item.PricingMode), postgres.NullableString(item.PriceID),
 		postgres.NullableTime(item.BillingPeriodStart), postgres.NullableTime(item.BillingPeriodEnd),
 		metaJSON, now, item.TaxJurisdiction, item.TaxCode, item.TaxabilityReason, item.QuantityDecimal,
-		item.CommitGrantedCents, postgres.NullableTime(item.CommitExpiresAt),
+		item.CommitGrantedCents,
 		nominalRateArg(item.NominalUnitAmountDecimal), postgres.NullableString(item.MeterUnit), matchArg(item.DimensionMatch),
 	).Scan(&item.ID, &item.InvoiceID, &item.TenantID, &item.LineType, &item.MeterID,
 		&item.Description, &item.Quantity, &item.UnitAmountCents, &item.AmountCents,
@@ -2013,7 +2008,7 @@ func (s *PostgresStore) AddLineItemAtomicAudited(
 		&item.PricingMode, &item.PriceID,
 		&item.BillingPeriodStart, &item.BillingPeriodEnd, &metaJSON, &item.CreatedAt,
 		&item.TaxJurisdiction, &item.TaxCode, &item.TaxabilityReason, &item.QuantityDecimal,
-		&item.CommitGrantedCents, &item.CommitExpiresAt)
+		&item.CommitGrantedCents)
 	if err != nil {
 		return domain.InvoiceLineItem{}, domain.Invoice{}, err
 	}
@@ -2459,8 +2454,8 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 		}
 	}
 
-	// Invoice-level commit rules (ADR-078): commit lines live only on
-	// manual invoices, at most one per invoice. Enforced here so the
+	// Invoice-level commit rules (ADR-078): a commit line lives only on a
+	// manual invoice, and alone on it. Enforced here so the
 	// composer's atomic create-with-lines path carries the same rules as
 	// AddLineItemAtomicAudited (buildLineItem validates only line-local rules).
 	commitLines := 0
@@ -2472,8 +2467,8 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 	if commitLines > 0 && inv.BillingReason != domain.BillingReasonManual {
 		return domain.Invoice{}, errs.Invalid("commit_granted_cents", "commit purchase lines are only supported on manual invoices")
 	}
-	if commitLines > 1 {
-		return domain.Invoice{}, errs.Invalid("commit_granted_cents", "invoice already has a commit line — one commit per invoice; use a separate invoice")
+	if commitLines > 0 && len(items) > 1 {
+		return domain.Invoice{}, errCommitLineAlone()
 	}
 
 	// Create all line items within the same transaction
@@ -2491,8 +2486,8 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 				tax_amount_cents, total_amount_cents, currency, pricing_mode,
 				price_id, billing_period_start, billing_period_end, metadata, created_at,
 				tax_jurisdiction, tax_code, tax_reason, quantity_decimal,
-				commit_granted_cents, commit_expires_at, nominal_unit_amount_decimal, meter_unit, dimension_match)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28)
+				commit_granted_cents, nominal_unit_amount_decimal, meter_unit, dimension_match)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
 		`, itemID, inv.ID, tenantID, items[i].LineType, postgres.NullableString(items[i].MeterID),
 			items[i].Description, items[i].Quantity, items[i].UnitAmountCents, items[i].AmountCents,
 			items[i].TaxRate, items[i].TaxAmountCents, items[i].TotalAmountCents,
@@ -2500,7 +2495,7 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 			postgres.NullableString(items[i].PriceID),
 			postgres.NullableTime(items[i].BillingPeriodStart), postgres.NullableTime(items[i].BillingPeriodEnd),
 			itemMetaJSON, now, items[i].TaxJurisdiction, items[i].TaxCode, items[i].TaxabilityReason, items[i].QuantityDecimal,
-			items[i].CommitGrantedCents, postgres.NullableTime(items[i].CommitExpiresAt),
+			items[i].CommitGrantedCents,
 			nominalRateArg(items[i].NominalUnitAmountDecimal), postgres.NullableString(items[i].MeterUnit), matchArg(items[i].DimensionMatch),
 		)
 		if err != nil {

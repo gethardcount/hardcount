@@ -38,19 +38,12 @@ export interface InvoiceLineItemInput {
   unit_amount_cents: number;
   /**
      * Makes this line a prepaid commit purchase: when the invoice is
-     * finalized, the customer gets this many cents of credit. Only on
-     * `add_on` lines of invoices you create, at most one per invoice.
-     * At most 100,000,000 ($1,000,000).
+     * finalized, the customer gets this many cents of credit, which
+     * never expires. Only on an `add_on` line of an invoice you create,
+     * and alone on it: an invoice with a commit line takes no other
+     * line. At most 100,000,000 ($1,000,000).
      * @minimum 1
      * @maximum 100000000
      */
   commit_granted_cents?: number;
-  /**
-     * When the granted credit expires. The credit can be drawn up to
-     * and including this instant; a period invoice draws it when its
-     * period ends at or before it. The dashboard sends the local
-     * midnight after the picked day. Must be in the future. Needs
-     * `commit_granted_cents`. Absent means it never expires.
-     */
-  commit_expires_at?: string;
 }

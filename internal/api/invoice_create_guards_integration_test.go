@@ -140,24 +140,50 @@ func TestInvoiceCreate_RefusesDiscountAndTaxLines(t *testing.T) {
 	}
 }
 
-// Each commit line passes the per-line rules; only the invoice-level rule
-// (one commit per invoice) refuses the pair, and it must do so before the
-// number is taken.
-func TestInvoiceCreate_TwoCommitLinesUseNoNumber(t *testing.T) {
-	e := newInvoiceGuardEnv(t, "Invoice Two Commits Co")
-	cust := e.customer(t, "two-commits")
+// Each line passes the per-line rules; only the invoice-level rule (a commit
+// line is alone on its invoice) refuses the pair, and it must do so before
+// the number is taken.
+func TestInvoiceCreate_CommitLineBesideAnotherUsesNoNumber(t *testing.T) {
+	e := newInvoiceGuardEnv(t, "Invoice Commit Alone Co")
+	cust := e.customer(t, "commit-alone")
 	first := e.addOnInvoice(t, cust)
-	commit := func(desc string) map[string]any {
-		return map[string]any{"description": desc, "quantity": 1, "unit_amount_cents": 10000, "commit_granted_cents": 10000}
+	commit := map[string]any{"description": "Commit", "quantity": 1, "unit_amount_cents": 10000, "commit_granted_cents": 10000}
+	setup := map[string]any{"description": "Setup", "quantity": 1, "unit_amount_cents": 1000}
+	for name, lines := range map[string][]map[string]any{
+		"two commit lines":             {commit, commit},
+		"a commit line and a charge":   {commit, setup},
+		"a charge, then a commit line": {setup, commit},
+	} {
+		t.Run(name, func(t *testing.T) {
+			r := e.call(t, "POST", "/v1/invoices", map[string]any{"customer_id": cust, "line_items": lines})
+			wantInvalid(t, r, "commit_granted_cents", "create with "+name)
+		})
 	}
-	r := e.call(t, "POST", "/v1/invoices", map[string]any{
-		"customer_id": cust, "line_items": []map[string]any{commit("Commit 1"), commit("Commit 2")},
-	})
-	wantInvalid(t, r, "commit_granted_cents", "create with two commit lines")
 	if n := e.invoiceCount(t, cust); n != 1 {
 		t.Errorf("customer has %d invoices, want only the first", n)
 	}
 	e.wantNextNumber(t, cust, first)
+}
+
+// Adding a line keeps a commit line alone, in either order: a charge is
+// refused on an invoice that buys credit, and a commit line on an invoice
+// that already has a line.
+func TestAddLineItem_CommitLineStaysAlone(t *testing.T) {
+	e := newInvoiceGuardEnv(t, "Invoice Add Commit Co")
+	cust := e.customer(t, "add-commit")
+	commit := map[string]any{"description": "Commit", "quantity": 1, "unit_amount_cents": 10000, "commit_granted_cents": 10000}
+	setup := map[string]any{"description": "Setup", "quantity": 1, "unit_amount_cents": 1000}
+	for name, c := range map[string]struct{ first, added map[string]any }{
+		"a charge after the commit line": {commit, setup},
+		"a commit line after a charge":   {setup, commit},
+	} {
+		t.Run(name, func(t *testing.T) {
+			id := flowStr(e.call(t, "POST", "/v1/invoices", map[string]any{
+				"customer_id": cust, "line_items": []map[string]any{c.first},
+			}).want(t, 201, "create draft").body, "id")
+			wantInvalid(t, e.call(t, "POST", "/v1/invoices/"+id+"/line-items", c.added), "commit_granted_cents", "add "+name)
+		})
+	}
 }
 
 func TestAddLineItem_RefusesDiscountAndTaxLines(t *testing.T) {

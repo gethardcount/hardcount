@@ -709,48 +709,6 @@ test('a credit grant valid through a picked day is sent as the next midnight and
   await row.screenshot({ path: path.join(VALID_THROUGH_SHOTS, 'credit-valid-through-ledger.png'), animations: 'disabled' })
 })
 
-test('a commit line valid through a picked day is sent as the next midnight and the grant reads that day', async ({ page }) => {
-  const customer = await createCustomer()
-  const zone = await workspaceZone()
-  const picked = pickedDay(zone)
-  await page.goto(`/customers/${customer.id}`)
-  await page.getByRole('button', { name: 'New invoice' }).click()
-  const composer = page.getByRole('dialog', { name: 'New invoice' })
-  await composer.getByPlaceholder('Implementation services').fill(`E2E prepaid commit ${uniq()}`)
-  await composer.getByLabel('Line 1 unit price in USD').fill('50')
-  await composer.getByText('This line sells prepaid credits').click()
-  await composer.getByLabel('Line 1 credits granted in USD').fill('50.00')
-  await expect(composer.getByText('Valid through', { exact: true })).toBeVisible()
-  await composer.getByLabel('Line 1 credits valid through').fill(picked)
-  const creating = page.waitForRequest(r => r.method() === 'POST' && new URL(r.url()).pathname === '/v1/invoices')
-  await composer.getByRole('button', { name: 'Save & send' }).click()
-  await page.getByRole('alertdialog', { name: 'Finalize and send this invoice?' }).getByRole('button', { name: 'Finalize and send' }).click()
-  const body = (await creating).postDataJSON() as { line_items: { unit_amount_cents: number; commit_granted_cents?: number; commit_expires_at?: string }[] }
-  expect([body.line_items[0].unit_amount_cents, body.line_items[0].commit_granted_cents]).toEqual([5000, 5000])
-  expectNextMidnight(body.line_items[0].commit_expires_at!, picked, zone)
-  await expect(composer).toBeHidden()
-
-  const grants = await api<{ grants: { grant_kind?: string; expires_at?: string }[] }>('GET', `/credits/grants/${customer.id}?include_exhausted=true`)
-  const commit = grants.grants.find(g => g.grant_kind === 'commit')
-  expect(commit?.expires_at && Date.parse(commit.expires_at)).toBe(Date.parse(body.line_items[0].commit_expires_at!))
-
-  // An API grant that stops at 17:17 UTC, a midnight in no zone.
-  const midDay = new Date(Date.now() + 50 * 86_400_000)
-  midDay.setUTCHours(17, 17, 0, 0)
-  await api('POST', '/credits/grant', { customer_id: customer.id, currency: 'USD', amount_cents: 1000, description: 'E2E mid-day expiry', expires_at: midDay.toISOString() })
-
-  // A fresh load reads the grant the finalize just wrote.
-  await page.reload()
-  const credits = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Credits', exact: true }) })
-  await expect(credits.getByRole('columnheader', { name: 'Expiry' })).toBeVisible()
-  const row = credits.getByRole('row').filter({ hasText: 'Commit' })
-  await expect(row).toContainText(`Valid through ${printedDay(picked)}`)
-  const midDayRow = credits.getByRole('row').filter({ hasText: 'E2E mid-day expiry' })
-  await expect(midDayRow).toContainText('Expires ')
-  await expect(midDayRow).not.toContainText('Valid through')
-  await credits.screenshot({ path: path.join(VALID_THROUGH_SHOTS, 'credit-valid-through-commit.png'), animations: 'disabled' })
-})
-
 test("a EUR-plan customer's credit balance reads in euros", async ({ page }) => {
   // No billing profile and no invoice yet: the live plan sets the currency.
   // The page used to fall back to the workspace's USD and read $0.00.

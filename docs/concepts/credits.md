@@ -104,12 +104,12 @@ A prepaid commit is credit the customer pays for up front, such as "pay
 $9,000, get $10,000 of credit". You sell it as a line on a one-off invoice:
 
 - `unit_amount_cents` is what the customer pays;
-- `commit_granted_cents` is the credit they get, and can be more;
-- `commit_expires_at`, if you set it, is when the credit expires.
+- `commit_granted_cents` is the credit they get, and can be more.
 
-When the invoice is finalized, the customer gets a block of kind `commit`.
-One invoice can hold one commit line. The purchase is not taxed; the usage
-the credit pays for is. Voiding the purchase invoice takes back what is left
+When the invoice is finalized, the customer gets a block of kind `commit`,
+which never expires. The commit line is the only line on its invoice. The
+purchase is not taxed; the usage the credit pays for is. For credit with an
+expiry, grant it by hand with `expires_at` (`POST /v1/credits/grant`). Voiding the purchase invoice takes back what is left
 of the credit.
 
 More: [Sell prepaid credit](../ai-pricing.md#sell-prepaid-credit-a-prepaid-commit),
