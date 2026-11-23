@@ -356,46 +356,6 @@ func TestFinalAttempt_LeaseHidesRunDuringCharge(t *testing.T) {
 	}
 }
 
-// escalateAlwaysFails models an escalation write that can never land, alone
-// or inside the write-off.
-type escalateAlwaysFails struct{ *memStore }
-
-func (s escalateAlwaysFails) EscalateRun(context.Context, string, domain.InvoiceDunningRun, int, map[string]any, func(*sql.Tx) error) (bool, error) {
-	return false, errors.New("escalation write keeps failing")
-}
-
-func (s escalateAlwaysFails) EscalateRunTx(context.Context, *sql.Tx, string, domain.InvoiceDunningRun, int, map[string]any, domain.InvoiceDunningEvent, func(*sql.Tx) error) (bool, error) {
-	return false, errors.New("escalation write keeps failing")
-}
-
-// TestProcessDueRunsForClock_PersistentExhaustFailure_Terminates: when the
-// escalation can never land, each re-drive only moves the lease 15 simulated
-// minutes, so within one advance the run is due again and again. The job
-// stops after the round whose step failed and returns that error, so the
-// advance fails. The run is left re-drivable, never NULL.
-// Mutation: go on after a round with an error (the run is re-driven again).
-func TestProcessDueRunsForClock_PersistentExhaustFailure_Terminates(t *testing.T) {
-	mem := newMemStore()
-	markUncollectiblePolicy(mem)
-	svc := NewService(escalateAlwaysFails{mem}, &failingRetrier{}, nil)
-	mover := &capturingUncollect{}
-	svc.SetInvoiceUncollectibleMarker(mover)
-	run := finalAttemptRun(t, mem, svc)
-
-	frozen := time.Now().UTC().Add(48 * time.Hour)
-	if _, errs := svc.ProcessDueRunsForClock(context.Background(), "t1", "clk", frozen, 20); len(errs) != 1 {
-		t.Fatalf("errors = %v, want the one escalation failure", errs)
-	}
-
-	got := mem.runs[run.ID]
-	if got.State != domain.DunningActive || got.NextActionAt == nil {
-		t.Fatalf("persistent failure left state=%s next=%v, want active and re-drivable", got.State, got.NextActionAt)
-	}
-	if n := len(mover.calls); n != 1 {
-		t.Fatalf("exhaustion attempted %d times in one advance, want 1: the job stops after the round that failed", n)
-	}
-}
-
 // reentrantMover re-enters a second processor's processRun while the first
 // is inside its terminal action — the in-flight SB-2 race. Then then runs, as
 // inside the write-off's transaction, and its error is the write-off's.
@@ -512,15 +472,13 @@ func TestAnchorInstant(t *testing.T) {
 	for _, tc := range []struct {
 		name      string
 		scheduled *time.Time
-		simulated bool
 		want      time.Time
 	}{
-		{"simulated uses the scheduled instant even in the past", &past, true, past},
-		{"simulated with nothing scheduled falls back to now", nil, true, now},
-		{"wall clock clamps a stale past schedule to now", &past, false, now},
-		{"wall clock keeps a future schedule", &future, false, future},
+		{"a stale past schedule runs at now", &past, now},
+		{"a future schedule is kept", &future, future},
+		{"nothing scheduled runs at now", nil, now},
 	} {
-		if got := anchorInstant(now, tc.scheduled, tc.simulated); !got.Equal(tc.want) {
+		if got := anchorInstant(now, tc.scheduled); !got.Equal(tc.want) {
 			t.Errorf("%s: got %v, want %v", tc.name, got, tc.want)
 		}
 	}

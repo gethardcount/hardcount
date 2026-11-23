@@ -68,16 +68,16 @@ func TestCatchup_CreditExpiryRunsAfterDunningRetries_RealStore(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			r := newHardDeclineRig(t, "Catchup Credit Expiry")
 
-			// The clock as Advance leaves it for the worker: marked advancing,
-			// frozen_time already at the target.
+			// The clock as Advance leaves it for the worker: marked advancing
+			// at t0, with its target.
 			clockID := postgres.NewID("hc_tclk")
 			tx, err := r.db.BeginTx(r.ctx, postgres.TxBypass, "")
 			if err != nil {
 				t.Fatalf("begin: %v", err)
 			}
 			if _, err := tx.ExecContext(r.ctx,
-				`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status)
-				 VALUES ($1, $2, false, 'Goodwill Credit', $3, 'advancing')`, clockID, r.tenantID, frozen); err != nil {
+				`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, advance_target, status)
+				 VALUES ($1, $2, false, 'Goodwill Credit', $3, $4, 'advancing')`, clockID, r.tenantID, t0, frozen); err != nil {
 				postgres.Rollback(tx)
 				t.Fatalf("insert clock: %v", err)
 			}

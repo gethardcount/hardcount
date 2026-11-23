@@ -250,7 +250,21 @@ func runScheduleCase(t *testing.T, tc scheduleCase, arm string) {
 		}
 	}
 	if arm == "test clock, one advance" {
-		advance(diffFailedAt.AddDate(0, 0, diffHorizonDays))
+		// One advance stops at each time the run falls due, as the clock's
+		// catch-up does (testclock.Service.runClock), then at its target.
+		runs := dunning.NewPostgresStore(db)
+		horizon := diffFailedAt.AddDate(0, 0, diffHorizonDays)
+		for {
+			cur, err := runs.GetRun(ctx, tenantID, run.ID)
+			if err != nil {
+				t.Fatalf("read run: %v", err)
+			}
+			if cur.State != domain.DunningActive || cur.Paused || cur.NextActionAt == nil || cur.NextActionAt.After(horizon) {
+				break
+			}
+			advance(*cur.NextActionAt)
+		}
+		advance(horizon)
 	} else {
 		for d := 1; d <= diffHorizonDays; d++ {
 			advance(diffFailedAt.Add(time.Duration(d) * 24 * time.Hour))

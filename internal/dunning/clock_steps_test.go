@@ -12,10 +12,10 @@ import (
 	"github.com/gethardcount/hardcount/internal/errs"
 )
 
-// The clock's dunning job (ProcessDueRunsForClock) works in rounds: each walks
-// every due run and takes each one step, and the job ends when nothing is due.
-// Work it leaves undone fails the advance; a real-time tick logs the same work
-// and goes on.
+// The clock's dunning job (ProcessDueRunsForClock) runs at each step of an
+// advance: it walks every due run and takes each one step, then lists the due
+// runs again. Work it leaves undone fails the advance; a real-time tick logs
+// the same work and goes on.
 
 // noAnswerCounter answers every retry with no definite answer.
 type noAnswerCounter struct{ calls int }
@@ -104,9 +104,8 @@ func (claimAlwaysLost) ClaimExhaustion(context.Context, string, string, int, tim
 	return false, nil
 }
 
-// A round that finds only runs its last step left as they were makes no
-// progress. On a clock that is an error, not a quiet exit with the run still
-// due.
+// A run its step leaves as it was is still due after the walk. On a clock
+// the re-list reports it, so the advance does not complete with it undone.
 func TestProcessDueRunsForClock_NoProgressIsAnError(t *testing.T) {
 	mem := newMemStore()
 	svc := NewService(claimAlwaysLost{mem}, &noopRetrier{}, nil)
@@ -116,37 +115,11 @@ func TestProcessDueRunsForClock_NoProgressIsAnError(t *testing.T) {
 	if len(runErrs) != 1 || !errors.Is(runErrs[0], domain.ErrLeftForNextRun) {
 		t.Fatalf("errors = %v, want one ErrLeftForNextRun: the run is still due", runErrs)
 	}
-	if got, want := errs.SummarizeForOperator(runErrs, ""), "1 payment retries due in this advance did not move: each is as its last step found it. Retry advance tries them again."; got != want {
+	if got, want := errs.SummarizeForOperator(runErrs, ""), "1 payment retries due at this time are still due after their step. Retry advance tries them again."; got != want {
 		t.Errorf("the operator reads %q, want %q", got, want)
 	}
 	if got := mem.runs[run.ID]; got.State != domain.DunningActive || got.AttemptCount != run.AttemptCount {
 		t.Errorf("run = %s at attempt %d, want it as it was", got.State, got.AttemptCount)
-	}
-}
-
-// One round takes a run one step, so a run with more steps due than the job
-// has rounds is still due when the rounds run out. That is an error. The
-// policy validator allows at most 15 retries; the store here takes 60.
-func TestProcessDueRunsForClock_StillDueAfterTheLastRoundIsAnError(t *testing.T) {
-	store := newMemStore()
-	p := store.policies[store.defaultID]
-	p.RetryDays = make([]int, 60)
-	for i := range p.RetryDays {
-		p.RetryDays[i] = 1
-	}
-	store.policies[store.defaultID] = p
-	svc := NewService(store, &failingRetrier{}, nil)
-	ids := dueRuns(t, store, svc, 1)
-
-	_, runErrs := svc.ProcessDueRunsForClock(context.Background(), "t1", "clk", time.Now().UTC().Add(100*24*time.Hour), 20)
-	if len(runErrs) != 1 || !errors.Is(runErrs[0], domain.ErrLeftForNextRun) {
-		t.Fatalf("errors = %v, want one ErrLeftForNextRun: the run is still due", runErrs)
-	}
-	if got, want := errs.SummarizeForOperator(runErrs, ""), "1 payment retries are still due after 50 rounds of this advance. Retry advance goes on with them."; got != want {
-		t.Errorf("the operator reads %q, want %q", got, want)
-	}
-	if got := store.runs[ids[0]].AttemptCount; got != maxDunningCatchupRounds {
-		t.Errorf("attempt count = %d, want %d: one retry a round", got, maxDunningCatchupRounds)
 	}
 }
 
@@ -171,9 +144,9 @@ func (c *claimLeftByAnotherWorker) ClaimExhaustion(ctx context.Context, tenantID
 }
 
 // A run whose exhaustion another worker claimed and left moves only its
-// next_action_at, to that worker's lease. When the lease ends inside the
-// advance, the next round takes the run again and runs its final action: a
-// moved next_action_at is progress, with the same attempt count.
+// next_action_at, to that worker's lease. At the step where it was due the
+// run is not still due (its lease is later), so nothing is reported; at the
+// lease's own step the run is taken again and its final action runs.
 func TestProcessDueRunsForClock_ALeaseLeftByAnotherWorkerIsProgress(t *testing.T) {
 	mem := newMemStore()
 	markUncollectiblePolicy(mem)
@@ -183,8 +156,14 @@ func TestProcessDueRunsForClock_ALeaseLeftByAnotherWorkerIsProgress(t *testing.T
 	svc.SetInvoiceUncollectibleMarker(mover)
 	run := exhaustedRun(t, mem, svc)
 
-	if _, errs := svc.ProcessDueRunsForClock(context.Background(), "t1", "clk", time.Now().UTC().Add(time.Hour), 20); len(errs) != 0 {
-		t.Fatalf("errors = %v, want none", errs)
+	if _, errs := svc.ProcessDueRunsForClock(context.Background(), "t1", "clk", *run.NextActionAt, 20); len(errs) != 0 {
+		t.Fatalf("errors at the run's step = %v, want none: its lease is later", errs)
+	}
+	if len(mover.calls) != 0 {
+		t.Fatalf("final actions at the run's step = %d, want none: another worker holds it", len(mover.calls))
+	}
+	if _, errs := svc.ProcessDueRunsForClock(context.Background(), "t1", "clk", *mem.runs[run.ID].NextActionAt, 20); len(errs) != 0 {
+		t.Fatalf("errors at the lease's step = %v, want none", errs)
 	}
 	if len(mover.calls) != 1 || mem.runs[run.ID].State != domain.DunningEscalated {
 		t.Errorf("final actions = %d, run %s; want 1 and escalated", len(mover.calls), mem.runs[run.ID].State)
