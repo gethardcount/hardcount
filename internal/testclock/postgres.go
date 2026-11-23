@@ -259,7 +259,9 @@ func (s *PostgresStore) MarkAdvancing(ctx context.Context, tenantID, id string, 
 	//
 	// The new time is checked against the row this statement changes, not
 	// the one Advance read: another advance can complete in between, and the
-	// clock must never move back.
+	// clock must never move back. For a clock standing on 29 February the
+	// statement's year ends a day earlier than Advance's own check (28
+	// February, not 1 March), and that day is refused as a conflict.
 	return s.transition(ctx, tenantID, id, auditRow, "can only advance a ready clock to a later time at most a year ahead", `
 		UPDATE test_clocks SET status = 'advancing', frozen_time = $2,
 			last_advance_summary = jsonb_build_object('advanced_from', frozen_time),
