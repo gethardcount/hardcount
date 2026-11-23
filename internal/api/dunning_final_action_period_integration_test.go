@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"testing"
 	"time"
 
@@ -279,4 +280,67 @@ func pauseRowSimAt(t *testing.T, admin *sql.DB, subID string) time.Time {
 		t.Fatalf("subscription %s collection-paused rows: %v, want one with a sim_effective_at", subID, found)
 	}
 	return found[0].Time
+}
+
+// TestDunningFinalAction_TestClock_OneAdvanceOverThreePeriods (#1276): a
+// card-less subscription billed in advance, whose one dunning retry runs out
+// three days after its day-1 invoice, and one advance over three renewals.
+// The customer has no card on purpose: a declined card starts and runs
+// dunning in the same order. One advance closes every period before it runs
+// any payment retry, so all three renewals are billed and go through their
+// own dunning, and the final action is dated at the last renewal (the
+// current period's start), not at the escalation.
+func TestDunningFinalAction_TestClock_OneAdvanceOverThreePeriods(t *testing.T) {
+	for _, tc := range []struct {
+		action     domain.DunningSubscriptionAction
+		lastStatus string // the third renewal's status
+	}{
+		{domain.SubActionCancel, "voided"}, // relieved by the cancel
+		{domain.SubActionPause, "finalized"},
+	} {
+		t.Run(string(tc.action), func(t *testing.T) {
+			r := newDatesRig(t, "Dunning Three Periods "+string(tc.action))
+			ctx := postgres.WithLivemode(context.Background(), false)
+			if _, err := r.srv.DunningSvc.UpsertPolicy(ctx, r.tenantID, domain.DunningPolicy{
+				Name: "one retry", Enabled: true, RetryDays: []int{3},
+				FinalSubscriptionAction: tc.action, FinalInvoiceAction: domain.InvActionMarkUncollectible,
+			}); err != nil {
+				t.Fatalf("upsert policy: %v", err)
+			}
+			start := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
+			clockID := r.newClock("three periods "+string(tc.action), start)
+			subID, _ := r.subWithItem("three-"+string(tc.action), clockID, r.planID)
+			r.advance(clockID, start.AddDate(0, 3, 2))
+
+			var renewals []map[string]any
+			for _, inv := range r.invoices(subID) {
+				if inv["billing_reason"] == "subscription_cycle" {
+					renewals = append(renewals, inv)
+				}
+			}
+			if len(renewals) != 3 {
+				t.Fatalf("%d renewals, want 3: %s", len(renewals), mustJSON(renewals))
+			}
+			lastRenewal := time.Date(2027, 5, 1, 0, 0, 0, 0, time.UTC)
+			for i, want := range []string{"uncollectible", "uncollectible", tc.lastStatus} {
+				wantAt(t, fmt.Sprintf("renewal %d", i), renewals[i], "issued_at", lastRenewal.AddDate(0, i-2, 0))
+				if got := flowStr(renewals[i], "status"); got != want {
+					t.Errorf("renewal %d status = %s, want %s", i, got, want)
+				}
+			}
+			sub, err := subscription.NewPostgresStore(r.db).Get(ctx, r.tenantID, subID)
+			if err != nil {
+				t.Fatalf("read subscription: %v", err)
+			}
+			if tc.action == domain.SubActionCancel {
+				if sub.CanceledAt == nil || !sub.CanceledAt.Equal(lastRenewal) {
+					t.Errorf("canceled_at = %v, want the last renewal %v", sub.CanceledAt, lastRenewal)
+				}
+				return
+			}
+			if got := pauseRowSimAt(t, testutil.AdminPool(t), subID); !got.Equal(lastRenewal) {
+				t.Errorf("collection paused at %v, want the last renewal %v", got, lastRenewal)
+			}
+		})
+	}
 }
