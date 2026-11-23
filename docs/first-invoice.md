@@ -198,7 +198,7 @@ Recipe, meter and test clock: [quick start](quick-start.md#words-on-this-page).
    LiteLLM's `user` is the customer's external ID. This record has no
    time, so the event gets the clock's time, as in 5a. A real proxy sends
    each call's real time, so connect it for a customer without a test
-   clock: see [LiteLLM integration](integrations/litellm.md#before-you-start).
+   clock: see [LiteLLM integration](integrations/litellm.md#2-create-the-customer-and-put-it-on-a-plan).
 
    <!-- docs-run: command name=5b -->
    ```bash
