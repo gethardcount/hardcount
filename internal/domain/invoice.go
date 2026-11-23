@@ -647,14 +647,11 @@ type InvoiceLineItem struct {
 	// (ADR-078). When the invoice finalizes, the customer is granted a
 	// credit block of this many cents (grant_kind='commit'). It may differ
 	// from AmountCents, because a discounted commit sells $10k of credits
-	// for $9k. It is valid only on add_on lines of manual invoices, at most
-	// one per invoice. buildLineItem enforces that, and a CHECK constraint
-	// in migration 0136 backs it up. Nil means not a commit line.
+	// for $9k. It is valid only on an add_on line of a manual invoice, alone
+	// on it; the credit it buys never expires. buildLineItem and the store
+	// enforce that, and a CHECK constraint backs the line rule up. Nil means
+	// not a commit line.
 	CommitGrantedCents *int64 `json:"commit_granted_cents,omitempty"`
-	// CommitExpiresAt is the granted block's expiry. Nil means it never
-	// expires, the phase-1 default. Term-aligned defaults arrive with
-	// recipe-carried commits in phase 2.
-	CommitExpiresAt *time.Time `json:"commit_expires_at,omitempty"`
 }
 
 // IsCommitLine reports whether this line funds a prepaid-commit grant.

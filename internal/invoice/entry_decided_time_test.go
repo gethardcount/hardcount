@@ -3,7 +3,6 @@ package invoice
 import (
 	"context"
 	"database/sql"
-	"strings"
 	"testing"
 	"time"
 
@@ -167,25 +166,6 @@ func TestEntryPoints_RunOnTheDecidedTime(t *testing.T) {
 		}
 		if !store.at.Equal(entryDecidedAt) || res.reads != 0 {
 			t.Errorf("the line's write at %v, clock reads %d; want %v, none", store.at, res.reads, entryDecidedAt)
-		}
-	})
-
-	// A commit line is checked against the decided time: one that expires an
-	// hour before it is refused, though it expires after the machine's time.
-	t.Run("a commit line's expiry is checked against the decided time", func(t *testing.T) {
-		svc, store, res := newSvc()
-		inv := seed(t, store, domain.Invoice{Status: domain.InvoiceDraft})
-		expires := entryDecidedAt.Add(-time.Hour)
-		if !expires.After(time.Now()) {
-			t.Fatalf("the commit must expire after the machine's time (%v) for the case to show anything", time.Now())
-		}
-		granted := int64(10000)
-		_, err := svc.AddLineItem(onDecidedClock(), "t1", inv.ID, AddLineItemInput{
-			Description: "Commit", Quantity: 1, UnitAmountCents: 10000,
-			CommitGrantedCents: &granted, CommitExpiresAt: &expires,
-		})
-		if err == nil || !strings.Contains(err.Error(), "must be in the future") || res.reads != 0 {
-			t.Errorf("err %v, clock reads %d; want the commit refused as expired at the decided time, no read", err, res.reads)
 		}
 	})
 

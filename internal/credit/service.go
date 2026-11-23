@@ -296,7 +296,7 @@ func grantAuditMetadata(out domain.CreditLedgerEntry) map[string]any {
 // GrantForCreditNoteTx's contract). Flat args so the invoice store's
 // consumer-side CommitFunder interface is satisfied directly (zero
 // cross-domain imports).
-func (s *Service) GrantCommitForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber, currency string, amountCents int64, expiresAt *time.Time) (domain.CreditLedgerEntry, error) {
+func (s *Service) GrantCommitForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber, currency string, amountCents int64) (domain.CreditLedgerEntry, error) {
 	if customerID == "" {
 		return domain.CreditLedgerEntry{}, errs.Required("customer_id")
 	}
@@ -314,15 +314,6 @@ func (s *Service) GrantCommitForInvoiceTx(ctx context.Context, tx *sql.Tx, tenan
 	if amountCents > 100_000_000 { // $1M cap, matches Grant; raise on first DP ask (ADR-078)
 		return domain.CreditLedgerEntry{}, errs.Invalid("commit_granted_cents", grantCapMessage)
 	}
-	// A commit whose expiry already passed would grant dead-on-arrival
-	// credits the next sweep silently retires — the customer pays and
-	// receives nothing. buildLineItem validates this at compose time; this
-	// re-check catches a line composed long before finalize. Loud,
-	// operator-synchronous: fix the line's expiry and re-finalize.
-	if expiresAt != nil && !expiresAt.After(clock.Now(ctx)) {
-		return domain.CreditLedgerEntry{}, errs.Invalid("commit_expires_at",
-			"already in the past — the granted credits would expire on arrival; update the commit line's expiry, then finalize")
-	}
 	desc := "Prepaid commit"
 	if invoiceNumber != "" {
 		desc = fmt.Sprintf("Prepaid commit — invoice %s", invoiceNumber)
@@ -334,7 +325,6 @@ func (s *Service) GrantCommitForInvoiceTx(ctx context.Context, tx *sql.Tx, tenan
 		AmountCents:     amountCents,
 		Description:     desc,
 		InvoiceID:       invoiceID,
-		ExpiresAt:       expiresAt,
 		GrantKind:       domain.GrantKindCommit,
 		SourceInvoiceID: invoiceID,
 		CreatedAt:       clock.Now(ctx),

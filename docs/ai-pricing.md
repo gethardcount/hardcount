@@ -374,7 +374,8 @@ $10,000 of credit.
    **You see:** `{"currency":"USD","balance_cents":1000000,"total_granted":1000000}`
    (one line per currency the customer holds credit in).
 
-One invoice can hold at most one commit line. To stop a customer's usage
+The commit line is the only line on its invoice, and the credit it buys
+never expires. To stop a customer's usage
 when the credit runs out, see [Stop usage when credit runs
 out](stop-usage-when-credit-runs-out.md).
 

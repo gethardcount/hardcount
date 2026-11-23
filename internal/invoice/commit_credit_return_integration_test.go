@@ -20,7 +20,7 @@ import (
 func TestVoid_ReturnsCommitCreditAndReRetiresIt(t *testing.T) {
 	t.Run("funding voided first: the returned share is retired again", func(t *testing.T) {
 		h, ctx := newCommitHarness(t, "Return Commit ReRetire")
-		funding := h.createCommitInvoice(t, ctx, 10000, 10000, nil)
+		funding := h.createCommitInvoice(t, ctx, 10000, 10000)
 		if _, err := h.invSvc.Finalize(ctx, h.tenantID, funding.ID); err != nil {
 			t.Fatalf("finalize: %v", err)
 		}
@@ -60,7 +60,7 @@ func TestVoid_ReturnsCommitCreditAndReRetiresIt(t *testing.T) {
 
 	t.Run("drawing invoice voided first: the share is back on the commit, then the funding void retires it", func(t *testing.T) {
 		h, ctx := newCommitHarness(t, "Return Commit Then Fund Void")
-		funding := h.createCommitInvoice(t, ctx, 10000, 10000, nil)
+		funding := h.createCommitInvoice(t, ctx, 10000, 10000)
 		if _, err := h.invSvc.Finalize(ctx, h.tenantID, funding.ID); err != nil {
 			t.Fatalf("finalize: %v", err)
 		}

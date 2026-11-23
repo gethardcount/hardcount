@@ -2777,17 +2777,8 @@ components:
             gets a credit grant of this
             many cents (in the invoice's currency). It may differ from the
             line's price: a discounted commit sells $10,000 of credit for
-            $9,000. Only on `add_on` lines of invoices you create, at most
-            one per invoice. Absent on other lines.
-        commit_expires_at:
-          type: string
-          format: date-time
-          description: |
-            When the granted credit expires. The credit can be drawn up to
-            and including this instant; a period invoice draws it when its
-            period ends at or before it. The dashboard sends the local
-            midnight after the picked day. Absent when the credit never
-            expires (the default).
+            $9,000. Only on an `add_on` line of an invoice you create, alone
+            on it. The credit never expires. Absent on other lines.
       example:
         id: hc_ili_dbj84baq3gpgqfoq5c4g
         invoice_id: hc_inv_dbj84b2q3gpgqfoq5c40
@@ -5699,18 +5690,10 @@ components:
           maximum: 100000000
           description: |
             Makes this line a prepaid commit purchase: when the invoice is
-            finalized, the customer gets this many cents of credit. Only on
-            `add_on` lines of invoices you create, at most one per invoice.
-            At most 100,000,000 ($1,000,000).
-        commit_expires_at:
-          type: string
-          format: date-time
-          description: |
-            When the granted credit expires. The credit can be drawn up to
-            and including this instant; a period invoice draws it when its
-            period ends at or before it. The dashboard sends the local
-            midnight after the picked day. Must be in the future. Needs
-            `commit_granted_cents`. Absent means it never expires.
+            finalized, the customer gets this many cents of credit, which
+            never expires. Only on an `add_on` line of an invoice you create,
+            and alone on it: an invoice with a commit line takes no other
+            line. At most 100,000,000 ($1,000,000).
       example:
         description: Onboarding and setup
         line_type: add_on
@@ -22158,11 +22141,7 @@ paths:
         "422":
           description: |
             Code `validation_error`. The request has a body with a field: this
-            route takes no body (`param` names the field). Or the invoice's
-            prepaid commit line has an expiry that has already passed
-            (`param` is `commit_expires_at`): the granted credit would expire
-            on arrival. A line cannot be edited: void the draft and create a
-            new invoice with a later `commit_expires_at`. Nothing changed.
+            route takes no body (`param` names the field). Nothing changed.
           content:
             application/json:
               schema:
