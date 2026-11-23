@@ -79,7 +79,7 @@ These run on every pull request and every push to main.
 | Time from the clock | A bare `time.Now()` in a clock-aware package, unless the line says why ([`.golangci.yml`](../.golangci.yml)) |
 | hardcount-doctor | Anything but a clean sweep after each of three period closes on a day-31 anchor ([`month_end_anchor_e2e_test.go`](../internal/api/month_end_anchor_e2e_test.go)) |
 | Money math | Generated cases for [billing dates](../internal/domain/billing_dates_property_test.go), [pricing](../internal/domain/pricing_property_test.go), [proration](../internal/subscription/proration_property_test.go), [tax apportionment](../internal/tax/apportionment_property_test.go) and the [credit waterfall](../internal/credit/waterfall_property_integration_test.go) |
-| Upgrades | Any invoice that differs after the previous release is upgraded to the new code |
+| Upgrades | Any invoice not on a test clock that differs after the previous release is upgraded to the new code |
 
 Two drills are run by hand. [`partition-drill.sh`](../scripts/partition-drill.sh) cuts the leader's link to Postgres and measures the takeover. [`restore-drill.sh`](../scripts/restore-drill.sh) runs backup, restore and a row-count check.
 

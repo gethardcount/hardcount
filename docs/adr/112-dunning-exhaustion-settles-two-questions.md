@@ -637,5 +637,5 @@ with the record.
   removed.
 
 Pinned by `TestDunningFinalAction_ReDrivenAfterARenewal_CancelsWhenItRuns`
-(both paths) and `TestExhaust_TestClock_FinalActionsDatedWhenTheyRun`, on real
+(both paths) and `TestExhaust_FinalActionsDatedWhenTheyRun`, on real
 Postgres.
