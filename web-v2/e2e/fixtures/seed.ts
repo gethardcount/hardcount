@@ -4,7 +4,7 @@ import { api, uniq } from './api'
 // The few API shapes the suite reads. Only the fields used here are listed.
 export interface Customer { id: string; display_name: string; external_id: string; email: string }
 export interface Plan { id: string; name: string; code: string }
-export interface Meter { id: string; name: string }
+export interface Meter { id: string; name: string; event_name: string }
 export interface TestClock { id: string; name: string; frozen_time: string; status: string }
 export interface Subscription { id: string; display_name: string; code: string; status: string }
 export interface Invoice {
@@ -87,36 +87,51 @@ export async function subscribedCustomer() {
   return { plan, clock, customer, subscription }
 }
 
-// The same, with the clock moved past the first renewal so one invoice exists.
+// A customer with one open invoice: 49 calls at $1.00 on a plan with no base
+// fee, then the subscription canceled, which issues its final invoice at once.
+// It bills usage because a same-day cancel bills an in-arrears base fee only
+// after noon (a period's days round to whole days).
 export async function billedCustomer() {
-  const world = await subscribedCustomer()
-  const to = new Date(world.clock.frozen_time)
-  to.setUTCMonth(to.getUTCMonth() + 1)
-  to.setUTCDate(to.getUTCDate() + 1)
-  await api('POST', `/test-clocks/${world.clock.id}/advance`, { frozen_time: to.toISOString().replace(/\.\d+Z$/, 'Z') })
-  await waitForClockReady(world.clock.id)
-  const invoices = await invoicesFor(world.customer.id)
-  if (invoices.length !== 1) throw new Error(`expected 1 invoice after the renewal, got ${invoices.length}`)
+  const id = uniq()
+  const plan = await api<Plan>('POST', '/plans', {
+    code: `e2e-usage-plan-${id}`,
+    name: `E2E Usage Plan ${id}`,
+    currency: 'USD',
+    billing_interval: 'monthly',
+    base_amount_cents: 0,
+    base_bill_timing: 'in_arrears',
+  })
+  const meter = await createMeter()
+  await api('POST', `/plans/${plan.id}/prices`, { meter_id: meter.id, mode: 'per_unit', unit_amount_cents: '100' })
+  const customer = await createCustomer()
+  const subscription = await createSubscription(customer.id, plan.id)
+  await api('POST', '/usage-events', { external_customer_id: customer.external_id, event_name: meter.event_name, quantity: '49', idempotency_key: `e2e_${uniq()}` })
+  await api('POST', `/subscriptions/${subscription.id}/cancel`)
+  const invoices = await invoicesFor(customer.id)
+  if (invoices.length !== 1) throw new Error(`expected the cancel's final invoice, got ${invoices.length} invoices`)
   const invoice = await api<{ invoice: Invoice }>('GET', `/invoices/${invoices[0].id}`)
-  return { ...world, invoice: invoice.invoice }
+  return { plan, customer, subscription, invoice: invoice.invoice }
 }
 
 // Everything the page smoke test needs so that no page renders empty: a billed
-// customer, a meter, a webhook endpoint and a credit grant.
+// customer with a live subscription, a meter, a webhook endpoint and a credit
+// grant.
 export async function seedWorld() {
   const billed = await billedCustomer()
+  const subscription = await createSubscription(billed.customer.id, billed.plan.id)
   const meter = await createMeter()
   const webhook = await api<{ endpoint: { id: string } }>('POST', '/webhook-endpoints/endpoints', {
     url: 'https://example.com/hardcount-e2e',
     description: 'E2E endpoint',
   })
   await api('POST', '/credits/grant', { customer_id: billed.customer.id, currency: 'USD', amount_cents: 1000, description: 'E2E welcome credit' })
+  // Read again: the grant pays part of the open invoice.
+  const invoice = await api<{ invoice: Invoice }>('GET', `/invoices/${billed.invoice.id}`)
   return {
     customer: billed.customer,
     plan: billed.plan,
-    clock: billed.clock,
-    subscription: billed.subscription,
-    invoice: billed.invoice,
+    subscription,
+    invoice: invoice.invoice,
     meter,
     webhookEndpointId: webhook.endpoint.id,
   }

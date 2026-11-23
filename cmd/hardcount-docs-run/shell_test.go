@@ -18,7 +18,7 @@ func runPage(t *testing.T, page string, skips, replaces []string) error {
 	if err != nil {
 		t.Fatalf("plan: %v", err)
 	}
-	return execute("test.md", p, t.TempDir(), 5, 20*time.Second)
+	return execute("test.md", p, t.TempDir(), 20*time.Second)
 }
 
 func cmdBlock(script string) string {
@@ -147,19 +147,6 @@ func TestExecuteJqFailsOnNull(t *testing.T) {
 	found := cmdBlock(`echo '{"id":"x"}' | jq -r .id`) + outBlock("x")
 	if err := runPage(t, found, nil, nil); err != nil {
 		t.Fatal(err)
-	}
-}
-
-func TestExecuteRepeatUntilOutput(t *testing.T) {
-	count := "n=$(( $(cat n 2>/dev/null || echo 0) + 1 )); echo $n > n\nif [ $n -ge 3 ]; then echo ready; else echo waiting; fi"
-	page := "<!-- docs-run: command repeat-until-output -->\n```bash\n" + count + "\n```\n\n" + outBlock("ready")
-	if err := runPage(t, page, nil, nil); err != nil {
-		t.Fatalf("want ready on the third try: %v", err)
-	}
-	never := "<!-- docs-run: command repeat-until-output -->\n```bash\necho waiting\n```\n\n" + outBlock("ready")
-	err := runPage(t, never, nil, nil)
-	if err == nil || !strings.Contains(err.Error(), "after 5 tries") {
-		t.Fatalf("want a failure after 5 tries, got %v", err)
 	}
 }
 

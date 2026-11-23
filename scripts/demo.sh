@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Hardcount demo: one month of AI token billing for a demo customer, end to end.
 #
-#   ready-made token prices → a demo customer on a test clock (a pretend
-#   clock for test customers) → token usage sent the way a LiteLLM proxy
-#   sends it → what the AI provider charges you → one month passes on the
-#   clock → an invoice and its PDF → your margin on that customer.
+#   ready-made token prices → a demo customer → token usage sent the way a
+#   LiteLLM proxy sends it → what the AI provider charges you → the invoice
+#   so far → your margin on that customer → the invoice issued now, and its
+#   PDF.
 #
 # What each step does, and what to open in the dashboard: docs/quick-start.md
 #
@@ -92,24 +92,21 @@ fi
 [ -n "$PLAN_ID" ] && [ "$PLAN_ID" != "null" ] || { echo "✗ no plan found for the recipe"; exit 1; }
 green "✓ Prices loaded: a tokens meter, a price for each model and token type, and plan $PLAN_ID"
 
-step "3. Create a test clock and a demo customer on it"
-# The clock lets us simulate a whole billing month in seconds.
+step "3. Create a demo customer"
 NOW=$(date -u +%Y-%m-%dT%H:%M:%SZ)
 # RUN makes this run's ids unique: customer external_id, subscription code
 # and LiteLLM call ids are unique per tenant, and a rerun must not collide.
 # Full UTC date and time plus a random suffix: a time of day alone repeats
 # the next day, and the PID alone repeats in a fresh container.
 RUN="$(date -u +%Y%m%d%H%M%S)-$RANDOM"
-CLOCK_ID=$(req POST "/v1/test-clocks" "{\"name\": \"demo\", \"frozen_time\": \"$NOW\"}" | jq -r '.id')
 CUST=$(req POST "/v1/customers" "{
   \"external_id\": \"acme_$RUN\",
   \"display_name\": \"ACME Corp\",
-  \"email\": \"billing@acme.com\",
-  \"test_clock_id\": \"$CLOCK_ID\"
+  \"email\": \"billing@acme.com\"
 }")
 CUST_ID=$(echo "$CUST" | jq -r '.id')
 [ "$CUST_ID" != "null" ] || { echo "✗ customer create failed"; echo "$CUST" | jq .; exit 1; }
-green "✓ Customer ACME Corp ($CUST_ID) is on test clock $CLOCK_ID"
+green "✓ Customer ACME Corp ($CUST_ID)"
 
 step "4. Put ACME Corp on the plan"
 SUB=$(req POST "/v1/subscriptions" "{
@@ -173,56 +170,58 @@ EVENTS=$(req GET "/v1/usage-events?customer_id=$CUST_ID&limit=100" | jq '.data |
 [ "$EVENTS" -ge 25 ] || { echo "✗ expected ≥25 token events (5 Sonnet calls × 3 + 5 Haiku calls × 2), got $EVENTS"; exit 1; }
 green "✓ 10 AI calls became $EVENTS usage events, one for each token type in each call"
 
-step "7. Move the test clock forward one month"
-ADV_TO=$(date -u -v+32d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "+32 days" +%Y-%m-%dT%H:%M:%SZ)
-req POST "/v1/test-clocks/$CLOCK_ID/advance" "{\"frozen_time\": \"$ADV_TO\"}" >/dev/null
-# The advance runs billing catchup; poll the clock back to ready.
-STATUS=""
-for i in $(seq 1 30); do
-  STATUS=$(req GET "/v1/test-clocks/$CLOCK_ID" | jq -r '.status')
-  [ "$STATUS" = "ready" ] && break
-  sleep 1
-done
-[ "$STATUS" = "ready" ] || { echo "✗ clock stuck in status '$STATUS'"; exit 1; }
-green "✓ The clock now reads $ADV_TO. Hardcount billed ACME Corp's month while the clock moved."
+step "7. ACME Corp's invoice so far"
+# The preview prices the month's usage so far, as the invoice will be at the
+# month's end. It creates nothing.
+PREVIEW=$(req POST "/v1/invoices/create_preview" "{\"customer_id\": \"$CUST_ID\"}")
+echo "$PREVIEW" | jq -r "$USD"'.lines[] | select(.amount_cents != 0) | "    \(.description)  → \(.amount_cents | usd)"' | head -8
+echo "$PREVIEW" | jq -e '[.lines[] | select(.line_type == "usage")] | length >= 5' >/dev/null \
+  || { echo "✗ expected at least 5 usage lines (3 for Sonnet, 2 for Haiku), got $(echo "$PREVIEW" | jq -c '[.lines[] | .line_type]')"; exit 1; }
+PREVIEW_CENTS=$(echo "$PREVIEW" | jq '[.lines[].amount_cents] | add')
+echo "$PREVIEW" | jq -e --argjson s "$PREVIEW_CENTS" '.totals[0].amount_cents == $s and $s > 0' >/dev/null \
+  || { echo "✗ preview total $(echo "$PREVIEW" | jq -c '.totals') does not equal the sum of its lines $PREVIEW_CENTS"; exit 1; }
+green "✓ So far this month: $(echo "$PREVIEW_CENTS" | jq -r "$USD"'usd'), one line per model and token type"
 
-step "8. The invoice ACME Corp receives"
-INVOICES=$(req GET "/v1/invoices?customer_id=$CUST_ID")
-INV_ID=$(echo "$INVOICES" | jq -r '.data[0].id // empty')
-[ -n "$INV_ID" ] || { echo "✗ no invoice generated"; echo "$INVOICES" | jq .; exit 1; }
-INV=$(req GET "/v1/invoices/$INV_ID")
-echo "$INV" | jq -r "$USD"'.invoice | "  \(.invoice_number)  total \(.total_amount_cents | usd) \(.currency)  status \(.status)"'
-echo "$INV" | jq -r "$USD"'.line_items[] | "    \(.description)  → \(.amount_cents | usd)"' | head -8
-# The numbers are checked, not just printed: a draft invoice, a missing line or
-# a subtotal that disagrees with its own lines must fail the demo.
-echo "$INV" | jq -e '.invoice.status == "finalized" or .invoice.status == "paid"' >/dev/null \
-  || { echo "✗ invoice is not finalized (status $(echo "$INV" | jq -r '.invoice.status'))"; exit 1; }
-echo "$INV" | jq -e '(.line_items | length) >= 5' >/dev/null \
-  || { echo "✗ expected at least 5 invoice lines (3 for Sonnet, 2 for Haiku), got $(echo "$INV" | jq '.line_items | length')"; exit 1; }
-echo "$INV" | jq -e '.invoice.subtotal_cents > 0 and .invoice.subtotal_cents == ([.line_items[].amount_cents] | add)' >/dev/null \
-  || { echo "✗ subtotal $(echo "$INV" | jq '.invoice.subtotal_cents') does not equal the sum of its lines $(echo "$INV" | jq '[.line_items[].amount_cents] | add')"; exit 1; }
-SUBTOTAL=$(echo "$INV" | jq '.invoice.subtotal_cents')
-PDF_BYTES=$(curl -sf "$BASE/v1/invoices/$INV_ID/pdf" -H "Authorization: Bearer $API_KEY" | wc -c | tr -d ' ')
-[ "$PDF_BYTES" -gt 5000 ] || { echo "✗ PDF looks empty ($PDF_BYTES bytes)"; exit 1; }
-green "✓ One invoice line per model and token type, and the PDF renders ($PDF_BYTES bytes)"
-
-step "9. Your margin: what you billed against what the provider charged you (only you see this)"
-MARGIN=$(req GET "/v1/customers/$CUST_ID/margin?from=$NOW&to=$ADV_TO")
+step "8. Your margin: what the usage earns you against what the provider charged you (only you see this)"
+MARGIN=$(req GET "/v1/customers/$CUST_ID/margin?from=$NOW")
 echo "$MARGIN" | jq -r "$USD"'"  billed  \(.revenue_cents | usd)\n  cost    \(.cost_cents | usd_cents)\n  margin  \((.margin_bps // 0) | pct1)"'
 # Per model: billed, cost, and the margin on that model. The server works
 # each model's margin out with the same formula as the total.
 echo "$MARGIN" | jq -r "$USD"'.by_model | sort_by(.model) | .[] | "    \(.model): cost \(.cost_cents | usd_cents)" + (if .attributed then "  billed \((.revenue_cents // 0) | usd)" else "" end) + (if .margin_bps != null then "  margin \(.margin_bps | pct1)" else "" end)'
 # The cost follows from this script's own inputs (the token counts in step 6
-# and the rates in step 5), and the billed amount must match the invoice.
+# and the rates in step 5), and the billed amount must match the preview.
 echo "$MARGIN" | jq -e '.cost_cents == "275.75"' >/dev/null \
   || { echo "✗ provider cost is $(echo "$MARGIN" | jq '.cost_cents') cents, expected 275.75"; exit 1; }
 echo "$MARGIN" | jq -e '([.by_model[] | {(.model): .cost_cents}] | add) == {"claude-sonnet-4.5": "127.75", "claude-haiku-4.5": "148"}' >/dev/null \
   || { echo "✗ cost by model is $(echo "$MARGIN" | jq -c '[.by_model[] | {(.model): .cost_cents}] | add'), expected Sonnet 127.75 and Haiku 148 cents"; exit 1; }
 echo "$MARGIN" | jq -e '[.by_model[] | select(.margin_bps == null)] | length == 0' >/dev/null \
   || { echo "✗ a model has no margin: $(echo "$MARGIN" | jq -c '[.by_model[] | {model, margin_bps}]')"; exit 1; }
-echo "$MARGIN" | jq -e --argjson s "$SUBTOTAL" '.revenue_cents == $s' >/dev/null \
-  || { echo "✗ margin says billed $(echo "$MARGIN" | jq '.revenue_cents') cents but the invoice subtotal is $SUBTOTAL"; exit 1; }
-green "✓ Checked: the cost matches your rates and usage, and the billed amount matches the invoice"
+echo "$MARGIN" | jq -e --argjson s "$PREVIEW_CENTS" '.revenue_cents == $s' >/dev/null \
+  || { echo "✗ margin says billed $(echo "$MARGIN" | jq '.revenue_cents') cents but the invoice so far is $PREVIEW_CENTS"; exit 1; }
+green "✓ Checked: the cost matches your rates and usage, and the billed amount matches the invoice so far"
+
+step "9. Issue the invoice now"
+# A subscription's invoice is issued when its month ends. ACME Corp is a
+# test customer, so the demo cancels its subscription instead: that ends it
+# now and issues its final invoice, for the usage so far.
+req POST "/v1/subscriptions/$SUB_ID/cancel" >/dev/null
+INVOICES=$(req GET "/v1/invoices?customer_id=$CUST_ID")
+INV_ID=$(echo "$INVOICES" | jq -r '.data[0].id // empty')
+[ -n "$INV_ID" ] || { echo "✗ no invoice issued"; echo "$INVOICES" | jq .; exit 1; }
+INV=$(req GET "/v1/invoices/$INV_ID")
+echo "$INV" | jq -r "$USD"'.invoice | "  \(.invoice_number)  total \(.total_amount_cents | usd) \(.currency)  status \(.status)"'
+echo "$INV" | jq -r "$USD"'.line_items[] | "    \(.description)  → \(.amount_cents | usd)"' | head -8
+# The numbers are checked, not just printed: a draft invoice, or a subtotal
+# that disagrees with its own lines or with the preview, must fail the demo.
+echo "$INV" | jq -e '.invoice.status == "finalized" or .invoice.status == "paid"' >/dev/null \
+  || { echo "✗ invoice is not finalized (status $(echo "$INV" | jq -r '.invoice.status'))"; exit 1; }
+echo "$INV" | jq -e '.invoice.subtotal_cents == ([.line_items[].amount_cents] | add)' >/dev/null \
+  || { echo "✗ subtotal $(echo "$INV" | jq '.invoice.subtotal_cents') does not equal the sum of its lines $(echo "$INV" | jq '[.line_items[].amount_cents] | add')"; exit 1; }
+echo "$INV" | jq -e --argjson s "$PREVIEW_CENTS" '.invoice.subtotal_cents == $s' >/dev/null \
+  || { echo "✗ invoice subtotal $(echo "$INV" | jq '.invoice.subtotal_cents') is not the preview's $PREVIEW_CENTS"; exit 1; }
+PDF_BYTES=$(curl -sf "$BASE/v1/invoices/$INV_ID/pdf" -H "Authorization: Bearer $API_KEY" | wc -c | tr -d ' ')
+[ "$PDF_BYTES" -gt 5000 ] || { echo "✗ PDF looks empty ($PDF_BYTES bytes)"; exit 1; }
+green "✓ The invoice bills what the preview showed, and the PDF renders ($PDF_BYTES bytes)"
 
 echo ""
 blue "━━━ Done: every step above ran and was checked ━━━"
@@ -230,15 +229,12 @@ echo ""
 echo "  ✓ One call loaded a price for each model and token type"
 echo "  ✓ LiteLLM-shaped calls to two models became usage events, with no SDK"
 echo "  ✓ Hardcount recorded what each usage event cost you"
-echo "  ✓ A test clock moved one month, and Hardcount made the invoice and its PDF"
 echo "  ✓ Your margin on this customer, by model"
+echo "  ✓ The invoice so far, then the invoice issued, and its PDF"
 echo ""
 DASH="${HARDCOUNT_DASHBOARD_URL:-http://localhost:5173}"
 echo "  Open these links to see it in the dashboard (sign in first; it opens"
 echo "  in test mode, where the demo ran):"
 echo "    Invoice:  $DASH/invoices/$INV_ID"
 echo "    Customer: $DASH/customers/$CUST_ID"
-echo ""
-echo "  Home leaves out customers on a test clock, so its totals still read"
-echo "  \$0 after the demo. Use the links above instead."
 echo "  What each step did: docs/quick-start.md"

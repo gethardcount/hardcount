@@ -372,8 +372,8 @@ jobs:
       # docs/first-invoice.md, run from its own code blocks by
       # cmd/hardcount-docs-run, before the demo, as on a fresh install. The page
       # reads the test key from the file the quick start writes, so this
-      # writes that file. The first pass sends the usage both ways (5a, then
-      # 5b, which deduplicates). The second takes only 5b, for a new
+      # writes that file. The first pass sends the usage both ways (4a, then
+      # 4b, which deduplicates). The second takes only 4b, for a new
       # customer, as the page's "already exists" row says to. Step 1 says
       # applying the recipe again returns the same setup, so the plans and
       # meters must be the same after the second pass as after the first.
@@ -391,7 +391,7 @@ jobs:
           }
           "$RUNNER_TEMP/hardcount-docs-run" docs/first-invoice.md
           after_first=$(setup)
-          "$RUNNER_TEMP/hardcount-docs-run" -skip 5a -replace acme-1=acme-2 docs/first-invoice.md
+          "$RUNNER_TEMP/hardcount-docs-run" -skip 4a -replace acme-1=acme-2 docs/first-invoice.md
           after_second=$(setup)
           echo "$after_first"
           [ "$after_first" = "$after_second" ] || { echo "Applying the recipe again changed the plans or meters:"; echo "$after_second"; exit 1; }

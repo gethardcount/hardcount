@@ -70,7 +70,7 @@ bills those charges too ([Spend thresholds](concepts/invoices.md#spend-threshold
 | Webhooks kept in the database | Every webhook is saved in the same transaction as the change that caused it, then delivered and retried from the database. | [Webhooks](webhooks.md#three-rules-for-your-receiver) |
 | Signed webhooks | Every webhook is signed. When you rotate the secret, both the old and the new secret sign each message for 72 hours. | [Webhooks](webhooks.md#verifying-signatures) |
 | Live webhook log | Watch webhooks as they go out, with every delivery attempt. | [Webhooks](webhooks.md#retries) |
-| [Test clocks](glossary.md#testing-with-simulated-time) | Move a test customer's clock forward, and months of billing happen in seconds. | [First invoice](first-invoice.md) |
+| [Test clocks](glossary.md#testing-with-simulated-time) | Move a test customer's clock forward, and months of billing happen in seconds. | [Test a billing change](guides/test-a-billing-change.md) |
 | Emails kept in a queue | Customer emails wait in a queue in the database, and a send that fails is retried. Payment receipts, failed-payment and dunning emails are saved with the change. Others, such as the invoice email, are queued just after it, so a crash at that moment can drop one. | [Email setup](ops/email-setup.md) |
 
 Everything shipped, by date: [CHANGELOG](../CHANGELOG.md).

@@ -435,11 +435,6 @@ func TestMakePlanRefusesWhatMatchesNothing(t *testing.T) {
 	if _, err := makePlan(branchPage, nil, []string{"noequals"}); err == nil {
 		t.Fatal("-replace noequals: want an error")
 	}
-	repeat := "<!-- docs-run: command repeat-until-output -->\n```bash\necho a\n```\n" +
-		"<!-- docs-run: output -->\n```text\na\n```\n<!-- docs-run: output -->\n```text\na\n```\n"
-	if _, err := makePlan(repeat, nil, nil); err == nil || !strings.Contains(err.Error(), "exactly one output") {
-		t.Fatalf("repeat with two outputs: %v", err)
-	}
 }
 
 // Every command that runs is checked against the page: deleting an output
