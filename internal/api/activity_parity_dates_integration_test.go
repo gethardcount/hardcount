@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
+	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -213,23 +214,101 @@ func TestActivityDates_TrialRunsOut(t *testing.T) {
 		}
 	})
 
-	t.Run("test clock: one advance past the trial end and the first renewal", func(t *testing.T) {
+	// One advance over three periods: the trial end and two renewals. A
+	// credit of two invoices' worth expires between the renewals, so the
+	// day-1 invoice and the first renewal draw it and the second does not.
+	t.Run("test clock: one advance past the trial end and two renewals", func(t *testing.T) {
 		clockID := r.newClock("trial and renewal", frozen)
 		subID, trialEnd := r.trialSub("renewal", clockID)
-		r.advance(clockID, trialEnd.AddDate(0, 1, 2))
+		customerID := flowStr(r.call("GET", "/v1/subscriptions/"+subID, flowReq{}).want(t, 200, "read subscription").body, "customer_id")
+		expires := trialEnd.AddDate(0, 1, 10)
+		r.call("POST", "/v1/credits/grant", flowReq{body: map[string]any{
+			"customer_id": customerID, "currency": "USD", "amount_cents": 9900, "description": "Goodwill",
+			"expires_at": expires.Format(time.RFC3339),
+		}}).want(t, 201, "grant credit")
+		r.advance(clockID, trialEnd.AddDate(0, 2, 2))
 
 		invs := r.invoices(subID)
-		if len(invs) < 2 {
-			t.Fatalf("%d invoices after an advance past the trial end and the first renewal, want the day-1 and a cycle invoice", len(invs))
+		if len(invs) != 3 {
+			t.Fatalf("%d invoices after an advance past the trial end and two renewals, want the day-1 and two cycle invoices: %s", len(invs), mustJSON(invs))
 		}
 		// Oldest first: the day-1 invoice the trial end issued comes before
-		// the renewal that followed it.
+		// the renewals that followed it.
 		if invs[0]["billing_reason"] != "subscription_create" {
 			t.Errorf("first invoice by created_at is %v (created %v), want the day-1 invoice: %s",
 				invs[0]["billing_reason"], invs[0]["created_at"], mustJSON(invs))
 		}
-		wantAt(t, "day-1 invoice", r.dayOne(subID), "issued_at", trialEnd)
+		renewal := trialEnd.Truncate(24*time.Hour).AddDate(0, 1, 0) // renewals fall at midnight
+		for i, want := range []struct {
+			issued time.Time
+			credit int64
+		}{{trialEnd, 4900}, {renewal, 4900}, {renewal.AddDate(0, 1, 0), 0}} {
+			wantAt(t, fmt.Sprintf("invoice %d", i), invs[i], "issued_at", want.issued)
+			if got := flowInt(invs[i], "credits_applied_cents"); got != want.credit {
+				t.Errorf("invoice %d credits_applied_cents = %d, want %d", i, got, want.credit)
+			}
+		}
 		wantAt(t, `"Trial ended" line`, r.subLine(subID, "Trial ended"), "occurred_at", trialEnd)
+		// Each draw is dated at its invoice's collection, and the 100 left
+		// expires at expires_at.
+		var draws []time.Time
+		var expiry map[string]any
+		for _, e := range r.call("GET", "/v1/credits/ledger/"+customerID, flowReq{}).want(t, 200, "read ledger").body["data"].([]any) {
+			switch m := e.(map[string]any); m["entry_type"] {
+			case "usage":
+				draws = append(draws, at(t, m, "created_at"))
+			case "expiry":
+				expiry = m
+			}
+		}
+		slices.SortFunc(draws, time.Time.Compare)
+		if len(draws) != 2 || !draws[0].Equal(trialEnd) || !draws[1].Equal(renewal) {
+			t.Errorf("credit draws at %v, want %v and %v", draws, trialEnd, renewal)
+		}
+		if expiry == nil || flowInt(expiry, "amount_cents") != -100 {
+			t.Fatalf("expiry entry %v, want one of -100", expiry)
+		}
+		wantAt(t, "expiry entry", expiry, "created_at", expires)
+	})
+
+	// One customer, two subscriptions, one invoice's worth of credit left:
+	// the first subscription renews (1 March) before the second one's trial
+	// ends (13 March). One advance ends every trial before it closes any
+	// period (#1276), so the trial's day-1 invoice draws the credit, and the
+	// renewal, which comes first in time, draws none.
+	t.Run("test clock: a trial that ends after another subscription's renewal", func(t *testing.T) {
+		clockID := r.newClock("trial after renewal", frozen)
+		customerID := flowStr(r.call("POST", "/v1/customers", flowReq{body: map[string]any{
+			"external_id": "dates-two-subs", "display_name": "Dates two subs", "email": "billing@dates.test", "test_clock_id": clockID,
+		}}).want(t, 201, "create customer").body, "id")
+		r.call("POST", "/v1/credits/grant", flowReq{body: map[string]any{
+			"customer_id": customerID, "currency": "USD", "amount_cents": 9800, "description": "Goodwill",
+		}}).want(t, 201, "grant credit")
+		newSub := func(code string, trialDays int) string {
+			return flowStr(r.call("POST", "/v1/subscriptions", flowReq{body: map[string]any{
+				"code": code, "display_name": code, "customer_id": customerID, "billing_time": "anniversary",
+				"items": []map[string]any{{"plan_id": r.planID, "quantity": 1}}, "trial_days": trialDays,
+			}}).want(t, 201, "create "+code).body, "id")
+		}
+		renewing := newSub("dates-renews", 0) // its day-1 invoice draws the first 4900
+		trialing := newSub("dates-trial-40", 40)
+		r.advance(clockID, frozen.AddDate(0, 0, 45))
+
+		var renewal map[string]any
+		for _, inv := range r.invoices(renewing) {
+			if inv["billing_reason"] == "subscription_cycle" {
+				renewal = inv
+			}
+		}
+		if renewal == nil {
+			t.Fatalf("no renewal invoice: %s", mustJSON(r.invoices(renewing)))
+		}
+		if got := flowInt(renewal, "credits_applied_cents"); got != 0 {
+			t.Errorf("renewal credits_applied_cents = %d, want 0", got)
+		}
+		if got := flowInt(r.dayOne(trialing), "credits_applied_cents"); got != 4900 {
+			t.Errorf("trial day-1 invoice credits_applied_cents = %d, want 4900", got)
+		}
 	})
 
 	t.Run("test clock: a cancellation due at trial end", func(t *testing.T) {
