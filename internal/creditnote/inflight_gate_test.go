@@ -137,7 +137,9 @@ func TestAutomatedClawback_DeferUntilSettleCycle(t *testing.T) {
 		// excludes it from the scan; the memStore can't model that cross-table
 		// join, so we assert the chokepoint's effect directly — integration covers
 		// the SQL gate.)
-		s.RetryPendingClawbackIssue(ctx, 100)
+		if issued, _ := s.RetryPendingClawbackIssue(ctx, 100); issued != 0 {
+			t.Errorf("a held draft counted as issued: %d, want 0", issued)
+		}
 		if got, _ := s.Get(ctx, "t1", draft.ID); got.Status != domain.CreditNoteDraft || !got.IssuePending {
 			t.Fatalf("draft must stay draft+pending while in flight, got status=%q pending=%v", got.Status, got.IssuePending)
 		}

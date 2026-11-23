@@ -821,11 +821,16 @@ func (s *Service) RetryPendingClawbackIssue(ctx context.Context, batch int) (int
 	issued := 0
 	for _, cn := range drafts {
 		ctx := clock.EnsureEffectiveNow(ctx, s.clock) // one instant for this note's work; the tick binds none
-		if _, err := s.Issue(ctx, cn.TenantID, cn.ID); err != nil {
+		note, err := s.Issue(ctx, cn.TenantID, cn.ID)
+		if err != nil {
 			errsOut = append(errsOut, fmt.Errorf("re-issue clawback credit note %s: %w", cn.ID, err))
 			continue
 		}
-		issued++
+		// A note still held (its invoice is a draft, or settles later) comes
+		// back unissued and is not counted.
+		if note.Status == domain.CreditNoteIssued {
+			issued++
+		}
 	}
 	return issued, errsOut
 }
