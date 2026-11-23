@@ -9,7 +9,9 @@ import (
 const deleteTestClocksVersion = 241
 
 // A clock with a customer on it, and a customer on no clock, each with an
-// invoice and a line. Clocks are test mode only.
+// invoice and a line, and an email of each. Clocks are test mode only. The
+// clock's email is reached by its clock id, not through a customer, so no
+// foreign key would show it left behind.
 const deleteTestClocksSeed = `
 INSERT INTO tenants (id, name) VALUES ('ten_tc', 'Clock removal');
 SELECT set_config('app.livemode', 'off', true);
@@ -24,6 +26,9 @@ INSERT INTO invoices (id, tenant_id, customer_id, invoice_number, status, paymen
 INSERT INTO invoice_line_items (id, tenant_id, invoice_id, line_type, description, amount_cents, total_amount_cents) VALUES
 	('li_clock', 'ten_tc', 'inv_clock', 'add_on', 'On a clock', 100, 100),
 	('li_real', 'ten_tc', 'inv_real', 'add_on', 'Real', 100, 100);
+INSERT INTO email_outbox (id, tenant_id, email_type, payload, effective_at, test_clock_id) VALUES
+	('em_clock', 'ten_tc', 'invoice', '{}', now(), 'tclk_gone'),
+	('em_real', 'ten_tc', 'invoice', '{}', now(), NULL);
 `
 
 // TestDeleteTestClocks_UpAndDown: 00241 deletes every test clock and the
@@ -50,9 +55,11 @@ func TestDeleteTestClocks_UpAndDown(t *testing.T) {
 		{"customers", "cus_clock", false},
 		{"invoices", "inv_clock", false},
 		{"invoice_line_items", "li_clock", false},
+		{"email_outbox", "em_clock", false},
 		{"customers", "cus_real", true},
 		{"invoices", "inv_real", true},
 		{"invoice_line_items", "li_real", true},
+		{"email_outbox", "em_real", true},
 	} {
 		if got := noDraftScalar[bool](t, db, `SELECT EXISTS (SELECT 1 FROM `+c.table+` WHERE id = '`+c.id+`')`); got != c.want {
 			t.Errorf("after Up, %s %s exists = %v, want %v", c.table, c.id, got, c.want)
