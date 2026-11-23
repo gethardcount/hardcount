@@ -567,7 +567,7 @@ test('the credit notes page issues a note against an invoice, and issues or void
   await voidDialog.getByLabel(/^Type VOID to confirm/).fill('VOID')
   await voidDialog.getByRole('button', { name: 'Void credit note' }).click()
   await expect(voidDialog).toBeHidden()
-  await expect(row(toVoid)).toContainText('Void')
+  await expect(row(toVoid).locator('[data-slot="badge"]')).toHaveText('Void')
 
   const notes = await creditNotesFor(invoice.id)
   expect(notes.find(n => n.id === toIssue.id)?.status).toBe('issued')
