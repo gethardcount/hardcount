@@ -225,7 +225,7 @@ func (r *inFlightRig) advanceHeld(days int) {
 	testclocktest.Drain(r.t, r.srv.TestClockSvc)
 	clk := r.call("GET", "/v1/test-clocks/"+r.clockID, nil).want(r.t, 200, "read clock").body
 	if status, reason := flowStr(clk, "status"), flowStr(clk, "last_failure_reason"); status != "internal_failure" ||
-		!strings.Contains(reason, "a payment retry is waiting for an earlier payment of this invoice to finish") {
+		!strings.Contains(reason, "its payment-retry run is waiting for a payment of this invoice to finish") {
 		r.t.Fatalf("clock after the advance to day %d: %s, %q; want internal_failure, the retry waiting for an earlier attempt", days, status, reason)
 	}
 }

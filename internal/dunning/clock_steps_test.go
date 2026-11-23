@@ -115,7 +115,7 @@ func TestProcessDueRunsForClock_NoProgressIsAnError(t *testing.T) {
 	if len(runErrs) != 1 || !errors.Is(runErrs[0], domain.ErrLeftForNextRun) {
 		t.Fatalf("errors = %v, want one ErrLeftForNextRun: the run is still due", runErrs)
 	}
-	if got, want := errs.SummarizeForOperator(runErrs, ""), "1 payment retries due at this time are still due after their step. Retry advance tries them again."; got != want {
+	if got, want := errs.SummarizeForOperator(runErrs, ""), "1 payment-retry runs fell due at this time while it was being worked and were not run. Retry advance runs them."; got != want {
 		t.Errorf("the operator reads %q, want %q", got, want)
 	}
 	if got := mem.runs[run.ID]; got.State != domain.DunningActive || got.AttemptCount != run.AttemptCount {
@@ -172,9 +172,8 @@ func TestProcessDueRunsForClock_ALeaseLeftByAnotherWorkerIsProgress(t *testing.T
 
 // A final action that fails keeps the run open (action_failed, due a day
 // later). On a clock the job returns it, once, with one attempt at the
-// action, so the advance fails and Retry advance tries it again; it does not
-// try the action once per simulated day inside the advance. In real time the
-// tick logs it and returns nothing.
+// action, so the advance stops; the action is tried again when the clock
+// reaches that day. In real time the tick logs it and returns nothing.
 func TestProcessDueRunsForClock_AFailedFinalActionFailsTheAdvance(t *testing.T) {
 	t.Run("on a clock", func(t *testing.T) {
 		store := newMemStore()
@@ -188,7 +187,7 @@ func TestProcessDueRunsForClock_AFailedFinalActionFailsTheAdvance(t *testing.T) 
 		if len(runErrs) != 1 || !errors.Is(runErrs[0], domain.ErrLeftForNextRun) {
 			t.Fatalf("errors = %v, want one ErrLeftForNextRun", runErrs)
 		}
-		const want = "Invoice inv_1: payment recovery's final action did not finish (its invoice could not be marked uncollectible), so its dunning run stays open. Retry advance tries the action again."
+		const want = "Invoice inv_1: payment recovery's final action did not finish (its invoice could not be marked uncollectible), so its dunning run stays open. The action is tried again 24 hours later on the clock: advance the clock past that time."
 		if got := errs.SummarizeForOperator(runErrs, ""); got != want {
 			t.Errorf("the operator reads:\n  %q\nwant\n  %q", got, want)
 		}

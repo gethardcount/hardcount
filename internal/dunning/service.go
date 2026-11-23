@@ -607,11 +607,11 @@ func (s *Service) ProcessDueRunsForClock(ctx context.Context, tenantID, clockID 
 	var left []error
 	if len(stillDue) > 0 {
 		left = append(left, &leftForNextPass{say: fmt.Sprintf(
-			"%d payment retries due at this time are still due after their step. Retry advance tries them again.", len(stillDue))})
+			"%d payment-retry runs fell due at this time while it was being worked and were not run. Retry advance runs them.", len(stillDue))})
 	}
 	for _, run := range heldByAttempt {
 		left = append(left, &leftForNextPass{say: fmt.Sprintf(
-			"Invoice %s: a payment retry is waiting for an earlier payment of this invoice to finish: it cannot be charged twice. "+
+			"Invoice %s: its payment-retry run is waiting for a payment of this invoice to finish: it cannot be charged twice. "+
 				"Hardcount checks it on its next billing run (hourly by default). Retry advance once it is done; to stop waiting, void or write off the invoice.", invoiceRef(run))})
 	}
 	return n, left
@@ -1564,9 +1564,8 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 		// action_failed, and is due again a day after this attempt: the
 		// due-run pickers skip escalated runs, so an escalated run would never
 		// be tried again. In real time that day is the re-attempt. On a clock
-		// the job returns the failure below, so the advance fails and Retry
-		// advance tries the action again, instead of trying it once per
-		// simulated day inside one advance.
+		// the job returns the failure below, so the advance stops, and the
+		// action is tried again when the clock reaches that day.
 		run.State = domain.DunningActive
 		run.Resolution = domain.ResolutionActionFailed
 		run.ResolvedAt = nil
@@ -1592,7 +1591,7 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 			"final_invoice_action", policy.FinalInvoiceAction)
 		if onClock {
 			return &leftForNextPass{
-				say: fmt.Sprintf("Invoice %s: payment recovery's final action did not finish (%s), so its dunning run stays open. Retry advance tries the action again.",
+				say: fmt.Sprintf("Invoice %s: payment recovery's final action did not finish (%s), so its dunning run stays open. The action is tried again 24 hours later on the clock: advance the clock past that time.",
 					invoiceRef(run), failure),
 				cause: fmt.Errorf("dunning run %s: final action: %s", run.ID, failure),
 			}

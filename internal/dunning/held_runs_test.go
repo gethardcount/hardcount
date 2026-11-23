@@ -24,7 +24,7 @@ func (r *countingRetrier) RetryPayment(context.Context, string, string, string) 
 	return nil
 }
 
-const heldSentence = ": a payment retry is waiting for an earlier payment of this invoice to finish: it cannot be charged twice. " +
+const heldSentence = ": its payment-retry run is waiting for a payment of this invoice to finish: it cannot be charged twice. " +
 	"Hardcount checks it on its next billing run (hourly by default). Retry advance once it is done; to stop waiting, void or write off the invoice."
 
 // heldSays returns what each left-for-next-pass error tells the operator.
@@ -101,7 +101,7 @@ func TestProcessDueRunsForClock_ReturnsUnmovedAndHeldTogether(t *testing.T) {
 	_, errs := svc.ProcessDueRunsForClock(context.Background(), "t1", "clk", time.Now().UTC().Add(time.Hour), 20)
 	says := heldSays(t, errs)
 	want := []string{
-		"1 payment retries due at this time are still due after their step. Retry advance tries them again.",
+		"1 payment-retry runs fell due at this time while it was being worked and were not run. Retry advance runs them.",
 		"Invoice inv_held" + heldSentence,
 	}
 	if len(says) != 2 || says[0] != want[0] || says[1] != want[1] {
