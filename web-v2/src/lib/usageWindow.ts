@@ -53,8 +53,8 @@ export function isOutsideWindow(iso: string, from: string, to: string): boolean 
 // rangeIncluding returns the civil-date range (yyyy-mm-dd, inclusive) from the
 // day of `latestISO` to the day of `nowMs`, in the tenant timezone. It is the
 // one-click "include the latest usage" range. Usage stamped after `now` (a
-// test clock moved back, or a client sending future timestamps) still gets a
-// range that covers it: the end is never before the start.
+// client sending future timestamps) still gets a range that covers it: the
+// end is never before the start.
 export function rangeIncluding(latestISO: string, nowMs: number, timezone?: string): { from: string; to: string } {
   const from = formatYMDInTZ(latestISO, timezone)
   const today = formatYMDInTZ(new Date(nowMs).toISOString(), timezone)

@@ -5,7 +5,7 @@ import type { APIKey } from '../src/lib/gen/schemas/aPIKey'
 import { env, seedFile } from './fixtures/env'
 import { api, apiListAll, usd, usdBalance, uniq } from './fixtures/api'
 import {
-  billedCustomer, createClock, createCustomer, createPlan, createSubscription, subscribedCustomer, invoicesFor,
+  billedCustomer, createCustomer, createPlan, createSubscription, subscribedCustomer, invoicesFor,
   type Customer, type Invoice, type Plan, type Seed, type Subscription,
 } from './fixtures/seed'
 
@@ -206,23 +206,8 @@ test('a new subscription starts now and bills its first month', async ({ page })
   expect(await invoicesFor(customer.id)).toHaveLength(1)
 })
 
-test('advance a test clock to the renewal and see the invoice', async ({ page }) => {
-  const clock = await createClock()
-  const customer = await createCustomer(clock.id)
-  await createSubscription(customer.id, (await createPlan()).id)
-  await page.goto(`/test-clocks/${clock.id}`)
-  await page.getByRole('button', { name: 'Advance', exact: true }).click()
-  const dialog = page.getByRole('dialog', { name: 'Advance clock' })
-  await dialog.getByRole('button', { name: '+1mo' }).click()
-  await dialog.getByRole('button', { name: 'Advance clock' }).click()
-  await expect(dialog).toBeHidden()
-  await expect(page.getByText('Moving the clock forward. Billing the skipped days…')).toBeVisible()
-  // The page shows the outcome once billing the skipped days has finished.
-  await expect(page.getByText('Last advance results')).toBeVisible({ timeout: 30_000 })
-
-  const invoices = await invoicesFor(customer.id)
-  expect(invoices).toHaveLength(1)
-  const { invoice } = await api<{ invoice: Invoice }>('GET', `/invoices/${invoices[0].id}`)
+test('the invoices list names an open invoice Open, and its page shows the subtotal and amount due', async ({ page }) => {
+  const { invoice } = await billedCustomer()
 
   await page.goto('/invoices')
   await page.getByPlaceholder('Search by number, customer or email').fill(invoice.invoice_number)
@@ -238,56 +223,6 @@ test('advance a test clock to the renewal and see the invoice', async ({ page })
   // The summary strip repeats Amount due and Due above the document; the
   // last match is the document's figure.
   await expect(page.getByText('Amount due', { exact: true }).last().locator('..')).toContainText(usd(invoice.amount_due_cents))
-})
-
-test('a new test clock says customers, not subscriptions, go on it', async ({ page }) => {
-  const clock = await createClock()
-  await page.goto(`/test-clocks/${clock.id}`)
-  await expect(page.getByText('No customers on this clock yet')).toBeVisible()
-  await expect(page.getByText(/To add one, create a new customer and pick this clock\./)).toBeVisible()
-  await expect(page.getByText(/catchup/i)).toHaveCount(0)
-})
-
-// A failed advance shows its reason and a Retry advance button, and the
-// button retries it. Nothing fails an advance on demand, so the browser
-// answers the clock's read as failed until the retry, and the retry as
-// accepted.
-test('a failed advance shows its reason, and Retry advance retries it', async ({ page }) => {
-  const clock = await createClock()
-  const clockPath = `/v1/test-clocks/${clock.id}`
-  const reason = 'Tax could not be calculated for invoice INV-E2E.'
-  let retried = false
-  await page.route(url => url.pathname === clockPath, async route => {
-    if (route.request().method() !== 'GET' || retried) return route.fallback()
-    const res = await route.fetch()
-    // A pass that failed at its first job: its summary counts nothing.
-    const summary = {
-      advanced_from: clock.frozen_time, advanced_to: clock.frozen_time,
-      invoices_generated: 0, trials_activated: 0, pauses_resumed: 0, thresholds_fired: 0, tax_retried: 0,
-      charges_retried: 0, clawbacks_issued: 0, credits_expired: 0, dunning_advanced: 0,
-    }
-    await route.fulfill({ response: res, json: { ...(await res.json()), status: 'internal_failure', last_failure_reason: reason, last_advance_summary: summary } })
-  })
-  await page.route(url => url.pathname === `${clockPath}/retry-advance`, async route => {
-    retried = true
-    await route.fulfill({ json: { ...clock, status: 'advancing' } })
-  })
-
-  await page.goto(`/test-clocks/${clock.id}`)
-  await expect(page.getByText('The last advance stopped before it finished billing the skipped days.')).toBeVisible()
-  await expect(page.getByText(`Reason: ${reason}`)).toBeVisible()
-  // The banner says the work the advance finished is kept; the results card
-  // has no error line of its own, and "nothing was due" would be false.
-  await expect(page.getByText('The work it finished is kept.', { exact: false })).toBeVisible()
-  await expect(page.getByText(/ended with an error/)).toHaveCount(0)
-  await expect(page.getByText(/No billing activity/)).toHaveCount(0)
-  // CI uploads activity-shots/ on every run, so a reviewer can see the banner
-  // and the results card.
-  await page.screenshot({ path: path.join(import.meta.dirname, '..', 'activity-shots', 'test-clock-failed-advance.png'), animations: 'disabled', fullPage: true })
-  await page.getByRole('button', { name: 'Retry advance' }).click()
-  await expect(page.getByText('Retrying. Billing the skipped days…')).toBeVisible()
-  expect(retried).toBe(true)
-  await expect(page.getByText('The last advance stopped before it finished billing the skipped days.')).toHaveCount(0)
 })
 
 test('a draft invoice reads as a draft and shows its memo', async ({ page }) => {
@@ -335,8 +270,8 @@ test('the DRAFT mark fits inside the invoice at phone width', async ({ page }) =
 })
 
 test('Home counts trialing subscriptions and compares failed payments with the previous period', async ({ page }) => {
-  // A live (not test-clock) customer on a trial, so the trialing count the
-  // Customers card reads from the server is at least 1.
+  // A customer on a trial, so the trialing count the Customers card reads
+  // from the server is at least 1.
   const plan = await createPlan()
   const customer = await createCustomer()
   const id = uniq()
@@ -991,7 +926,7 @@ test('on this computer, the Stripe webhook step gives the Stripe CLI command, no
   await expect(page.getByText('Paste the signing secret the command printed')).toBeVisible()
 })
 
-test('the setup checklist ticks Connect Stripe only for a working key in this mode, and counts test-clock customers', async ({ page }) => {
+test('the setup checklist ticks Connect Stripe only for a working key in this mode, and counts customers the Home totals leave out', async ({ page }) => {
   const key = (livemode: boolean, extra = {}) => ({ id: `e2e_${livemode}`, livemode, secret_key_last4: '0000', publishable_key: 'pk_e2e', has_webhook_secret: true, ...extra })
   let creds: object[] = []
   await page.route(url => url.pathname === '/v1/settings/stripe', route => route.request().method() === 'GET'
@@ -1000,7 +935,7 @@ test('the setup checklist ticks Connect Stripe only for a working key in this mo
   // No webhook endpoint yet: a step stays open, so the Setup button stays
   // shown even once Stripe is connected.
   await page.route(url => url.pathname === '/v1/webhook-endpoints/endpoints', route => route.fulfill({ json: { data: [], total: 0 } }))
-  // Home's totals leave test-clock customers out; the checklist must not (#1153).
+  // Home's totals can leave a customer out; the checklist must not (#1153).
   await page.route(url => url.pathname === '/v1/analytics/overview', async route => {
     const answer = await route.fetch()
     await route.fulfill({ response: answer, json: { ...(await answer.json()), active_customers: 0 } })
@@ -1330,8 +1265,8 @@ test('revoking a test key is a plain confirm; a live key needs the typed word', 
 
 test('each Home attention line counts the rows of the list it opens', async ({ page }) => {
   // Each count is its list's total (other workers add invoices meanwhile, so
-  // the answers are fixed here). The overview, which leaves out test-clock
-  // invoices, says none are open: the line still shows, without an amount.
+  // the answers are fixed here). The overview says none are open: the line
+  // still shows, without an amount.
   const totals: Record<string, number> = {
     '/v1/invoices status=finalized payment_status=failed': 3,
     '/v1/dunning/runs state=active': 2,

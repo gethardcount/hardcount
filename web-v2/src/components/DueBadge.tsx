@@ -6,10 +6,8 @@ interface DueBadgeProps {
   dueAt?: string | null
   warningDays?: number
   className?: string
-  // The invoice's now, from useNowFor or useNowResolver, so an invoice on a
-  // test clock reads relative to the clock's time. Engine actions (auto-charge
-  // retries, dunning) fire on that time, so the badge has to match. While it
-  // is not known (undefined), the badge is not drawn.
+  // The invoice's now, from useNowFor or useNowResolver. While it is not
+  // known (undefined), the badge is not drawn.
   now: EffectiveNow | undefined
 }
 

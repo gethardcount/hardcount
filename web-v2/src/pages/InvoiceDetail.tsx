@@ -22,7 +22,6 @@ import { showOutcome } from '@/lib/outcomeToast'
 import { InvoiceAttention } from '@/components/InvoiceAttention'
 import { RecordedFromStripeTag, StripeRefundActions, StripeRefundLine } from '@/components/StripeRefundActions'
 import { flaggedStripeRefunds } from '@/lib/stripeRefunds'
-import { TestClockBanner } from '@/components/TestClockBanner'
 import { ActivityList, ActivityZone } from '@/components/ActivityList'
 import { Callout } from '@/components/Callout'
 import { collectionPausedNow, finalizeConfirmLines, pickInvoiceNotice, writtenOffCardLine, writtenOffSubscriptionLine } from '@/lib/invoiceNotice'
@@ -271,12 +270,10 @@ export default function InvoiceDetailPage() {
     enabled: !!invoice?.subscription_id,
   })
 
-  // The invoice's "now", for Due in N days, Past due and "since X ago". The
-  // server fills test_clock_id from the customer's clock, which every
-  // subscription inherits (ADR-027), so it covers one-off invoices too. It is
-  // asked again on each render, so an invoice on no clock left open turns
-  // Past due when its due time passes. While it is not known (the invoice or
-  // its clock has not loaded), the badges show the stored status only.
+  // The invoice's "now", for Due in N days, Past due and "since X ago". It is
+  // asked again on each render, so an invoice left open turns Past due when
+  // its due time passes. While it is not known (the invoice has not loaded),
+  // the badges show the stored status only.
   const now = useNowResolver()(invoice)
 
   const { data: creditNotesData } = useQuery({
@@ -312,10 +309,9 @@ export default function InvoiceDetailPage() {
     refetchInterval: pollIntervalForInvoice(invoice as ApiInvoice | undefined),
   })
   // ONE lane (ADR-104). Every row's primary timestamp is on the
-  // invoice's own calendar — simulated when clock-pinned, since every
-  // fact is anchored at write time (outbox sim anchor for emails,
-  // ADR-102 dual stamps for attempts, entity-derived stamps for the
-  // rest). Rows whose two calendars differ carry recorded_at and render
+  // invoice's own calendar, since every fact is anchored at write time
+  // (outbox sim anchor for emails, ADR-102 dual stamps for attempts,
+  // entity-derived stamps for the rest). Rows whose two calendars differ carry recorded_at and render
   // a "Recorded <wall>" subline (operator contract, Invariant A).
   const timeline = timelineData?.events ?? []
   // Each row as the activity line standard words it (ADR-128), in the
@@ -895,14 +891,6 @@ export default function InvoiceDetailPage() {
           </DropdownMenu>
         </div>
       </div>
-
-      {/* Simulated-time line (ADR-099): one quiet line under the title, not
-          a box. Gated on the AUTHORITATIVE invoice.is_simulated (not the
-          subscription's clock id), so manual one-off invoices get it too.
-          test_clock_id is the customer's pin. */}
-      {invoice.is_simulated && invoice.test_clock_id && (
-        <TestClockBanner testClockId={invoice.test_clock_id} />
-      )}
 
       {/* Summary strip (L-03): the invoice's state, what is owed and by when,
           and whose it is, above the fold. The totals sat at the bottom of the

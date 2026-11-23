@@ -50,9 +50,8 @@ import { ChevronDown, ChevronRight, Activity, Loader2, Receipt } from 'lucide-re
 // Top-level wrapper
 // ============================================================================
 
-// The sections below take their now from hooks/useNow, so the cycle bar,
-// last-invoice "X ago" and activity window follow the customer's test clock,
-// and wait while its time is not known.
+// The sections below take their now from hooks/useNow for the cycle bar,
+// last-invoice "X ago" and activity window, and wait while it is not known.
 // currency: the customer's currency (useCustomerCurrency), used for a figure
 // the server sent without one, such as an empty window's $0. Undefined while
 // it loads, and such a figure reads "—" until then.
@@ -311,9 +310,6 @@ function ProjectionBreakdown({ preview }: { preview: InvoicePreview }) {
 const LAST_INVOICE_SCAN = 10
 
 function LastInvoiceLine({ invoice, effectiveNow }: { invoice: Invoice; effectiveNow: EffectiveNow | undefined }) {
-  // Invoices produced during a clock-advance carry a simulated created_at
-  // (billing/engine.go stamps effectiveNow). Measure "X ago" against the sub's
-  // frozen_time, or a simulated-future invoice collapses to "just now".
   const finalizedAgo = invoice.created_at && effectiveNow !== undefined ? timeAgo(invoice.created_at, effectiveNow) : ''
 
   return (
@@ -339,9 +335,8 @@ function LastInvoiceLine({ invoice, effectiveNow }: { invoice: Invoice; effectiv
 }
 
 // timeAgo — CostDashboard's richer "X ago" ladder (adds weeks/months tails, for
-// invoices that can be months old in a long simulation). Requires an anchor;
-// build it with the resolver so a simulated-future invoice doesn't collapse to
-// "just now".
+// invoices that can be months old). Requires an anchor; build it with the
+// resolver.
 function timeAgo(iso: string, now: EffectiveNow): string {
   const m = Math.floor(sinceMs(iso, now) / 60_000)
   if (m < 1) return 'just now'
@@ -369,12 +364,9 @@ const ACTIVITY_PRESETS: { value: ActivityPreset; label: string }[] = [
   { value: 'last_90d', label: '90d' },
 ]
 
-// activityPresetToParams anchors the rolling window's upper bound to `now`. For
-// a clock-pinned customer that's the clock's frozen_time: usage events are
-// stamped in simulation time (usage/service.go), so a wall-clock "last 30d"
-// window sits entirely before the simulated events and the chart reads $0. The
+// activityPresetToParams anchors the rolling window's upper bound to `now`. The
 // 'cycle' preset returns undefined on purpose — the backend defaults it to the
-// frozen_time cycle.
+// current cycle.
 function activityPresetToParams(p: ActivityPreset, now: EffectiveNow): { from?: string; to?: string } | undefined {
   if (p === 'cycle') return undefined
   const days = p === 'last_7d' ? 7 : p === 'last_30d' ? 30 : 90
@@ -388,12 +380,10 @@ function ActivitySection({ customer, currency }: { customer: Customer; currency?
   // total disagreed with the invoice above it.
   const [preset, setPreset] = useState<ActivityPreset>(DEFAULT_ACTIVITY_PRESET)
 
-  // Anchor the rolling window to the customer's now (its test clock's time
-  // when it is on one), so the 7/30/90d presets frame the simulated usage
-  // rather than a real-time window that predates it. Keyed into the query so a
-  // clock advance refetches; a customer on no clock keeps one value per mount
-  // (useNowFor), so the key does not change between renders. Both reads wait
-  // until now is known, and the section shows its spinner meanwhile.
+  // Anchor the rolling window to the customer's now. Keyed into the query; it
+  // keeps one value per mount (useNowFor), so the key does not change between
+  // renders. Both reads wait until now is known, and the section shows its
+  // spinner meanwhile.
   const now = useNowFor(customer)
 
   // The cycle query is shared with the Margin card's "Current period".

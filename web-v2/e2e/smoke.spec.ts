@@ -39,7 +39,6 @@ const routes: Route[] = [
   { name: 'webhook events', path: () => '/webhooks/events', heading: () => 'Webhooks' },
   { name: 'webhook endpoint detail', path: s => `/webhooks/endpoints/${s.webhookEndpointId}`, heading: () => 'Webhooks' },
   { name: 'api keys', path: () => '/api-keys', heading: () => 'API keys' },
-  { name: 'test clocks', path: () => '/test-clocks', heading: () => 'Test clocks' },
   { name: 'audit log', path: () => '/audit-log', heading: () => 'Audit log' },
   { name: 'settings', path: () => '/settings', heading: () => 'Settings' },
   { name: 'settings email', path: () => '/settings?tab=email', heading: () => 'Settings' },

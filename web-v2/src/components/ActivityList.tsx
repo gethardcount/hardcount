@@ -23,8 +23,8 @@ import { cn } from '@/lib/utils'
 // /v1/settings arrives on a cold deep link), never the browser's.
 
 export function ActivityZone({ lines }: { lines: readonly ActivityLine[] }) {
-  // Every time the card shows, not only the row times: a test clock months
-  // ahead puts the Recorded times on the other side of a summer-time change.
+  // Every time the card shows, not only the row times: the Recorded times can
+  // sit on the other side of a summer-time change.
   const text = zoneHeader(lineTimes(lines), useTenantTimezone())
   if (!text) return null
   return <span className="text-xs font-normal text-muted-foreground">{text}</span>

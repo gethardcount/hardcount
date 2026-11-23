@@ -45,7 +45,6 @@ export function describeAction(entry: AuditEntry): string {
       if (entry.resource_type === 'payment_method') return `Added ${label || 'card'}`
       if (entry.resource_type === 'api_key') return `Created API key${label ? ` "${label}"` : ''}`
       if (entry.resource_type === 'webhook_endpoint') return `Created webhook endpoint${label ? ` ${label}` : ''}`
-      if (entry.resource_type === 'test_clock') return `Created test clock${label ? ` "${label}"` : ''}`
       if (entry.resource_type === 'stripe_credentials') return `Connected Stripe (${(entry.metadata?.livemode as boolean) ? 'live' : 'test'})`
       return `Created ${label || entry.resource_type}`
     case 'update':
@@ -79,15 +78,12 @@ export function describeAction(entry: AuditEntry): string {
       }
       if (entry.resource_type === 'dunning_run' && metaAction === 'resolved') return `Resolved dunning run (${entry.metadata?.resolution})`
       if (entry.resource_type === 'dunning_policy' && metaAction === 'set_default') return `Set dunning policy as default${label ? ` (${label})` : ''}`
-      if (entry.resource_type === 'test_clock' && metaAction === 'advanced') return `Advanced test clock${label ? ` "${label}"` : ''}`
-      if (entry.resource_type === 'test_clock' && metaAction === 'retry_advance') return `Retried clock advance${label ? ` on "${label}"` : ''}`
       if (entry.resource_type === 'webhook_event' && metaAction === 'replayed') return `Replayed webhook event`
       if (entry.resource_type === 'stripe_credentials' && metaAction === 'webhook_secret_set') return `Set Stripe webhook secret (${(entry.metadata?.livemode as boolean) ? 'live' : 'test'})`
       return `Updated ${label || entry.resource_type}`
     case 'delete':
       if (entry.resource_type === 'payment_method') return `Removed ${label || 'card'}`
       if (entry.resource_type === 'webhook_endpoint') return `Deleted webhook endpoint`
-      if (entry.resource_type === 'test_clock') return `Deleted test clock`
       if (entry.resource_type === 'dunning_policy') return `Deleted dunning policy`
       if (entry.resource_type === 'stripe_credentials') return `Disconnected Stripe (${(entry.metadata?.livemode as boolean) ? 'live' : 'test'})`
       return `Deleted ${label || entry.resource_type}`
@@ -179,11 +175,9 @@ export function resourceLink(entry: AuditEntry): string | null {
   // empty resource_id, and rendering "View" → /customers/ would land the
   // user on a broken page.
   if (!entry.resource_id) return null
-  // The subject outlived by the row. Tearing down a test clock hard-deletes its
-  // entire simulated graph (ADR-086) while the audit rows survive on purpose —
-  // so the row still names an invoice that no longer exists, and the link we used
-  // to render for it went straight to a 404. The backend resolves this at read
-  // time; we just have to stop offering the door.
+  // The subject outlived by the row: the row still names a record that no
+  // longer exists, and a link to it would go straight to a 404. The backend
+  // resolves this at read time; we just have to stop offering the door.
   if (entry.subject_deleted) return null
   switch (entry.resource_type) {
     case 'invoice': return `/invoices/${entry.resource_id}`
@@ -191,9 +185,6 @@ export function resourceLink(entry: AuditEntry): string | null {
     case 'subscription': return `/subscriptions/${entry.resource_id}`
     case 'plan': return `/plans/${entry.resource_id}`
     case 'meter': return `/meters/${entry.resource_id}`
-    // Test clocks have had a detail route (/test-clocks/:id, main.tsx) since the
-    // clock UI shipped, but their audit rows never offered the "View" link.
-    case 'test_clock': return `/test-clocks/${entry.resource_id}`
     default: return null
   }
 }
@@ -206,7 +197,7 @@ export function resourceLink(entry: AuditEntry): string | null {
 export const DEFAULT_RESOURCE_TYPES = [
   'customer', 'subscription', 'invoice', 'plan', 'meter',
   'credit', 'credit_note', 'api_key', 'billing', 'billing_profile',
-  'payment_method', 'dunning_policy', 'dunning_run', 'test_clock',
+  'payment_method', 'dunning_policy', 'dunning_run',
   'webhook_endpoint', 'webhook_event', 'stripe_credentials',
   'price_override', 'plan_price',
   // Emitted by the ADR-090 in-tx writers. (The dropdown normally comes from

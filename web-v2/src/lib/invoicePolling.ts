@@ -56,7 +56,7 @@ export function pollIntervalForInvoice(invoice?: PollableInvoice): number | fals
   if (invoice.payment_status === 'succeeded' || invoice.payment_status === 'paid') {
     if (invoice.paid_at) {
       const paidAtMs = Date.parse(invoice.paid_at)
-      // eslint-disable-next-line no-restricted-syntax -- poll-freshness window is real elapsed wall-clock, not simulated time
+      // eslint-disable-next-line no-restricted-syntax -- poll-freshness window is real elapsed wall-clock
       if (!isNaN(paidAtMs) && Date.now() - paidAtMs < 30_000) return 5000
     }
     return false

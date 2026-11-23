@@ -8,11 +8,9 @@ interface ExpiryBadgeProps {
   label?: string
   className?: string
   // Reference "now" for the days-until calculation. Take the record's from
-  // useNowFor or useNowResolver, so a record on a test clock reads "in N
-  // days" from the clock's time, or wallClockNow() for a real-time surface
-  // (e.g. API-key expiry). Engine actions (dunning, finalize) fire on the
-  // clock's time, so the badge has to match. While it is not known
-  // (undefined), a badge counted from it is not drawn.
+  // useNowFor or useNowResolver, or wallClockNow() for a real-time surface
+  // (e.g. API-key expiry). While it is not known (undefined), a badge
+  // counted from it is not drawn.
   now: EffectiveNow | undefined
 }
 

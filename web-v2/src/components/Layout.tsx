@@ -25,7 +25,7 @@ import {
 } from '@/components/ui/dropdown-menu'
 import { CommandPalette } from '@/components/CommandPalette'
 import { AccountSettingsGate } from '@/components/AccountSettingsGate'
-import { isNavActive, isTestMode, SETTINGS_NAV, visibleNav } from '@/lib/navigation'
+import { isNavActive, NAV_SECTIONS, SETTINGS_NAV } from '@/lib/navigation'
 import { HardcountLogo } from '@/components/HardcountLogo'
 import { OnboardingLauncher, SetupChecklistPanel } from '@/components/OnboardingLauncher'
 import { useOnboardingSteps } from '@/hooks/useOnboardingSteps'
@@ -380,7 +380,7 @@ export function Layout() {
       </div>
 
       <ScrollPane as="nav" aria-label="Main navigation" className="flex-1 min-h-0 p-3 space-y-1">
-        {visibleNav(isTestMode(user)).map(section => (
+        {NAV_SECTIONS.map(section => (
           <div key={section.title ?? 'top'} className="space-y-0.5">
             {section.title && (
               <p className="px-3 pt-4 pb-1 text-2xs font-medium uppercase tracking-wider text-muted-foreground">

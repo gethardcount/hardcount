@@ -8,18 +8,14 @@ import { formatCompactCents } from '@/lib/money'
 import { ATTENTION_LISTS, homeAttentionLines, type AttentionSeverity } from '@/lib/homeAttention'
 import type { Invoice } from '@/lib/api'
 import { timeAgo, wallClockNow } from '@/lib/effectiveNow'
-import { useNowResolver, useTestClocks } from '@/hooks/useNow'
+import { useNowResolver } from '@/hooks/useNow'
 import { useAuth } from '@/contexts/AuthContext'
-import { NoticeRow } from '@/components/NoticeRow'
 import { CUSTOMERS_DEFINITION, FAILED_PAYMENTS_DEFINITION, MRR_DEFINITION, REVENUE_DEFINITION, currencyScopedHint, customersTrend, failedPaymentsTrend, subscriptionsHint } from '@/lib/homeKpis'
-import { SIMULATED_TOTALS_SENTENCE, SIMULATED_TOTALS_TITLE, showSimulatedTotalsNote } from '@/lib/homeNotices'
 import { LoadError } from '@/components/LoadError'
-import { TestClocksLoadError } from '@/components/TestClocksLoadError'
 import { FeedSkeleton } from '@/components/ui/TableSkeleton'
-import { SimulatedBadge } from '@/components/TestClockBadge'
 import { cn } from '@/lib/utils'
 import { Card, CardContent } from '@/components/ui/card'
-import { AlertTriangle, FlaskConical, Info, ListChecks } from 'lucide-react'
+import { AlertTriangle, Info, ListChecks } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { openSetupChecklist, useOnboardingSteps } from '@/hooks/useOnboardingSteps'
 import {
@@ -58,15 +54,9 @@ export default function DashboardPage() {
     queryFn: () => api.listInvoices('limit=5'),
   })
 
-  // Each invoice's now (its clock's time when it is on one), for the status
-  // and "X ago". While a row's now is not known, the row shows its stored
-  // status and no "X ago".
+  // Each invoice's now, for the status and "X ago".
   const resolveNow = useNowResolver()
-  // Totals leave out test-clock customers (analytics/simfilter.go) while
-  // Recent Invoices lists their invoices; the note says so where it matters.
   const { user } = useAuth()
-  const { data: clocks } = useTestClocks()
-  const simulatedNote = showSimulatedTotalsNote(user?.livemode ?? false, clocks?.data?.length ?? 0)
 
   // First run: an account with no subscriptions yet gets a welcome card whose
   // button opens the setup checklist. The checklist never opens by itself: it
@@ -104,8 +94,8 @@ export default function DashboardPage() {
           <h1 className="text-2xl font-semibold text-foreground">Home</h1>
           {dataUpdatedAt > 0 && (
             <p className="text-xs text-muted-foreground mt-1" aria-live="polite">
-              {/* Query-freshness is genuinely wall-clock: it reports when THIS
-                  browser last refetched, independent of any test clock. */}
+              {/* Query freshness is real time: when this browser last
+                  refetched. */}
               Updated {timeAgo(new Date(dataUpdatedAt).toISOString(), wallClockNow())}
             </p>
           )}
@@ -154,21 +144,6 @@ export default function DashboardPage() {
         </div>
       ) : (
         <>
-          {simulatedNote && (
-            <NoticeRow
-              icon={FlaskConical}
-              title={SIMULATED_TOTALS_TITLE}
-              className="mt-4"
-              action={
-                <Link to="/test-clocks" className="text-sm font-medium text-primary hover:underline">
-                  Test clocks
-                </Link>
-              }
-            >
-              {SIMULATED_TOTALS_SENTENCE}
-            </NoticeRow>
-          )}
-
           {/* Alerts row */}
           {alerts.length > 0 && (
             <div className="mt-6 space-y-2" role="region" aria-label="Attention required">
@@ -281,8 +256,6 @@ export default function DashboardPage() {
             </Card>
           )}
 
-          <TestClocksLoadError records={recentInvoices?.data ?? []} className="mt-6 mb-0" />
-
           {/* Recent activity */}
           <Card className="mt-6">
             <CardContent className="p-0">
@@ -304,8 +277,8 @@ export default function DashboardPage() {
                       to={`/invoices/${inv.id}`}
                       className="flex items-center justify-between gap-3 px-5 py-3 hover:bg-muted/50 transition-colors"
                     >
-                      {/* Wraps on a phone: at 390px the badges ran under the
-                          amount ("$99.00 due" over "Simulated"). */}
+                      {/* Wraps on a phone, so the badges don't run under
+                          the amount. */}
                       <div className="flex flex-wrap items-center gap-x-3 gap-y-1 min-w-0">
                         <StatusDot status={invoiceStatus(inv, now)} />
                         <span className="text-sm font-mono text-foreground">{inv.invoice_number}</span>
@@ -313,19 +286,12 @@ export default function DashboardPage() {
                           status={invoiceStatus(inv, now)}
                           className="text-[10px]"
                         />
-                        {/* Authoritative per-invoice flag — same rule as the
-                            Invoices list; covers manual one-off invoices that
-                            the old sub→clock lookup missed. */}
-                        {inv.is_simulated && <SimulatedBadge />}
                       </div>
                       <div className="flex items-center gap-4 shrink-0">
                         <span className="text-sm tabular-nums text-foreground">
                           {invoiceRowAmount(inv)}
                         </span>
                         <span className="text-xs text-muted-foreground w-16 text-right">
-                          {/* Relative to the invoice's simulated clock when pinned
-                              (created_at is stamped in simulation time on a clock-advanced
-                              invoice); wall-clock invoices resolve to wall time. */}
                           {now !== undefined && timeAgo(inv.created_at, now)}
                         </span>
                       </div>

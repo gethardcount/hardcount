@@ -10,7 +10,6 @@ test('a record page switches to its list', () => {
   assert.equal(listPathFor('/invoices/hc_inv_1'), '/invoices')
   assert.equal(listPathFor('/plans/hc_pln_1'), '/pricing')
   assert.equal(listPathFor('/meters/hc_mtr_1'), '/pricing?tab=meters')
-  assert.equal(listPathFor('/test-clocks/hc_clk_1'), '/test-clocks')
   assert.equal(listPathFor('/webhooks/endpoints/we_1'), '/webhooks')
 })
 

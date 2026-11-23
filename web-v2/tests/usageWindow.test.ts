@@ -2,7 +2,7 @@
 // Pure functions, no DOM: runs with `npm test`.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { clockTime } from '../src/lib/effectiveNow.ts'
+import type { EffectiveNow } from '../src/lib/effectiveNow.ts'
 import {
   DEFAULT_ACTIVITY_PRESET,
   DEFAULT_MARGIN_PRESET,
@@ -15,11 +15,11 @@ import {
   usageWindowIsEmpty,
 } from '../src/lib/usageWindow.ts'
 
-// The demo scenario: a clock starts 2026-01-31T10:00Z, usage is sent at that
-// instant, the clock is advanced 32 days to 2026-03-04T10:00Z. The first
-// period [Jan 31, Feb 28) is invoiced; the current cycle is [Feb 28, Mar 31).
+// The demo scenario: usage is sent at 2026-01-31T10:00Z, and now is 32 days
+// later, 2026-03-04T10:00Z. The first period [Jan 31, Feb 28) is invoiced;
+// the current cycle is [Feb 28, Mar 31).
 const usageAt = '2026-01-31T10:00:00Z'
-const clock = clockTime('2026-03-04T10:00:00Z')
+const now = Date.parse('2026-03-04T10:00:00Z') as EffectiveNow
 const cycle = { from: '2026-02-28T00:00:00Z', to: '2026-03-31T00:00:00Z' }
 const invoices = [
   {
@@ -29,7 +29,7 @@ const invoices = [
     billing_period_end: '2026-02-28T00:00:00Z',
   },
 ]
-const base = { cycle, lastInvoiced: lastInvoicedPeriod(invoices), now: clock, customFrom: '', customTo: '', timezone: 'UTC' }
+const base = { cycle, lastInvoiced: lastInvoicedPeriod(invoices), now, customFrom: '', customTo: '', timezone: 'UTC' }
 
 test('both cards open on the current billing period', () => {
   assert.equal(DEFAULT_MARGIN_PRESET, 'cycle')
@@ -86,11 +86,11 @@ test('isOutsideWindow uses [from, to): the end instant is outside', () => {
 })
 
 test('rangeIncluding runs from the latest usage day to today, in the tenant zone', () => {
-  assert.deepEqual(rangeIncluding(usageAt, clock, 'UTC'), { from: '2026-01-31', to: '2026-03-04' })
+  assert.deepEqual(rangeIncluding(usageAt, now, 'UTC'), { from: '2026-01-31', to: '2026-03-04' })
   // 02:00Z on Feb 1 is still Jan 31 in New York.
-  assert.deepEqual(rangeIncluding('2026-02-01T02:00:00Z', clock, 'America/New_York'), { from: '2026-01-31', to: '2026-03-04' })
+  assert.deepEqual(rangeIncluding('2026-02-01T02:00:00Z', now, 'America/New_York'), { from: '2026-01-31', to: '2026-03-04' })
   // Usage after "now" still gets a range that covers it.
-  assert.deepEqual(rangeIncluding('2026-04-01T00:00:00Z', clock, 'UTC'), { from: '2026-04-01', to: '2026-04-01' })
+  assert.deepEqual(rangeIncluding('2026-04-01T00:00:00Z', now, 'UTC'), { from: '2026-04-01', to: '2026-04-01' })
 })
 
 test('empty windows: margin with nothing in it, usage buckets all zero', () => {

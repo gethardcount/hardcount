@@ -15,7 +15,6 @@ import {
 } from '@/lib/api'
 import { sinceMs, untilMs, type EffectiveNow } from '@/lib/effectiveNow'
 import { useNowResolver } from '@/hooks/useNow'
-import { SimulatedBadge } from '@/components/TestClockBadge'
 import { dunningReasonLabel } from '@/lib/dunningReasons'
 import { retriesOffNotice } from '@/lib/dunningCoverage'
 import { Callout } from '@/components/Callout'
@@ -26,7 +25,6 @@ import { InitialsAvatar } from '@/components/InitialsAvatar'
 
 import { Button, buttonVariants } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
-import { TestClocksLoadError } from '@/components/TestClocksLoadError'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import {
@@ -162,9 +160,9 @@ function RunsTab() {
     return next
   }, { replace: true })
   const [page, setPage] = useState(1)
-  // Each run's "now" (its customer's clock time when it is on one), for Next
-  // step and Started. While a run's now is not known, those cells show the
-  // stored time itself in place of the relative one.
+  // Each run's "now", for Next step and Started. While a run's now is not
+  // known, those cells show the stored time itself in place of the relative
+  // one.
   const resolveNow = useNowResolver()
 
   const queryParams = useMemo(() => {
@@ -181,8 +179,7 @@ function RunsTab() {
       // Runs first, then resolve EXACTLY the referenced invoices and
       // customers via ids= — the old bare list fetches were capped at
       // one 50-row page, so any run referencing an invoice/customer
-      // past it rendered raw ids (P11). The subscriptions fetch stays
-      // page-bounded: it only feeds the cosmetic test-clock badge.
+      // past it rendered raw ids (P11).
       const runsRes = await api.listDunningRuns(queryParams)
       const runs = runsRes.data || []
       const invoiceIds = Array.from(new Set(runs.map(r => r.invoice_id).filter(Boolean)))
@@ -199,10 +196,6 @@ function RunsTab() {
       invoicesRes.data.forEach(inv => { iMap[inv.id] = inv })
       const cMap: Record<string, Customer> = {}
       custRes.data.forEach(c => { cMap[c.id] = c })
-      // Test-clock badge is server-authoritative now (run.test_clock_id
-      // resolves through the CUSTOMER's pin) — the old client-side
-      // subscription map lost the badge on one-off-invoice runs and on
-      // subs past the first unpaginated page.
       return { runs, total: runsRes.total || 0, invoiceMap: iMap, customerMap: cMap }
     },
   })
@@ -305,8 +298,6 @@ function RunsTab() {
         </div>
       )}
 
-      <TestClocksLoadError records={runs} className="mt-4 mb-0" />
-
       {/* Runs list */}
       <Card className="mt-4">
         <CardContent className="p-0">
@@ -407,7 +398,6 @@ function RunsTab() {
                               <div className="flex flex-wrap items-center justify-between gap-2">
                                 <div className="flex flex-wrap items-center gap-1.5">
                                   <StatusBadge status={dunningRunStatus(run.state)} />
-                                  {run.test_clock_id && <SimulatedBadge />}
                                   {openInvoice}
                                 </div>
                                 {nextStep}
@@ -430,9 +420,6 @@ function RunsTab() {
                                 className="text-sm font-mono text-primary hover:underline">
                                 {invoiceLabel}
                               </Link>
-                              {run.test_clock_id && (
-                                <SimulatedBadge />
-                              )}
                             </div>
                           </TableCell>
                           <TableCell className="text-right tabular-nums font-mono text-sm hidden sm:table-cell">

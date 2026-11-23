@@ -10,9 +10,7 @@ import { toast } from 'sonner'
 import { api, formatCents, formatDate, formatDateTime, type PlanDetail, type Customer } from '@/lib/api'
 import { applyApiError } from '@/lib/formErrors'
 import { LoadError } from '@/components/LoadError'
-import { TestClocksLoadError } from '@/components/TestClocksLoadError'
 import { Callout } from '@/components/Callout'
-import { SimulatedBadge } from '@/components/TestClockBadge'
 import { useNowResolver } from '@/hooks/useNow'
 import { collectionPausedFlag, genericStatus, subscriptionStatus } from '@/lib/statusLabels'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -66,9 +64,8 @@ export default function PlanDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const queryClient = useQueryClient()
-  // Each subscription's "now" (its test clock when pinned), for when a timed
-  // collection pause ends. While it is not known, the chip follows the
-  // stored pause.
+  // Each subscription's "now", for when a timed collection pause ends. While
+  // it is not known, the chip follows the stored pause.
   const resolveNow = useNowResolver()
   const [showEdit, setShowEdit] = useState(false)
 
@@ -221,8 +218,6 @@ export default function PlanDetailPage() {
 
       <PlanPricesCard plan={plan} meters={allMeters} />
 
-      <TestClocksLoadError records={subscriptions} className="mt-6 mb-0" />
-
       {/* Subscriptions */}
       <Card className="mt-6">
         <CardHeader>
@@ -264,7 +259,6 @@ export default function PlanDetailPage() {
                         <Link to={`/subscriptions/${sub.id}`} className="text-sm font-medium text-foreground hover:text-primary transition-colors">
                           {sub.display_name}
                         </Link>
-                        {sub.test_clock_id && <SimulatedBadge />}
                       </span>
                       <p className="text-xs text-muted-foreground font-mono">{sub.code}</p>
                     </TableCell>

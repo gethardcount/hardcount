@@ -19,7 +19,7 @@ const RATE_LIMIT_MIN_WAIT_MS = 1_000
 // parseRetryAfter reads a Retry-After header value: a whole number of seconds
 // or an HTTP date (RFC 9110). It returns milliseconds, or undefined when the
 // value is missing or unreadable.
-// eslint-disable-next-line no-restricted-syntax -- Retry-After is a wall-clock instant from the server, never a test-clock time
+// eslint-disable-next-line no-restricted-syntax -- Retry-After is a wall-clock instant from the server
 export function parseRetryAfter(value: string | null | undefined, now: number = Date.now()): number | undefined {
   const v = value?.trim()
   if (!v) return undefined

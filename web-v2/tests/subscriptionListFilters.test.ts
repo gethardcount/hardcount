@@ -41,7 +41,7 @@ test('the pause chip shows on live subscriptions whose collection is paused', ()
   assert.equal(collectionPausedFlag({ status: 'canceled', pause_collection: { behavior: 'keep_as_draft' } }, now), null)
 })
 
-test('a timed pause stops showing once its resume date passes, by the given now (a test clock)', () => {
+test('a timed pause stops showing once its resume date passes, by the given now', () => {
   // The engine collects again at resumes_at, though the row can keep the
   // pause until the resumer closes the periods that ended before it.
   const sub = { status: 'active', pause_collection: { behavior: 'keep_as_draft', resumes_at: '2027-01-15T00:00:00Z' } }

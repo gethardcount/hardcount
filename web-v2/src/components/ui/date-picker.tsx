@@ -279,8 +279,8 @@ export function DatePicker({ value, onChange, timeZone, now, min, placeholder = 
               mode="single"
               selected={selectedDate}
               onSelect={handleSelect}
-              // The account zone's today, not the browser's: on a test clock
-              // it is the clock's day, and an unset field opens on its month.
+              // The account zone's today, not the browser's, and an unset
+              // field opens on its month.
               today={todayDate}
               // Fall back to minDate, then today: startMonth below pins the
               // lower bound to JANUARY of minDate's year, and DayPicker clamps

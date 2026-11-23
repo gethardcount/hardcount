@@ -101,13 +101,10 @@ export function useOnboardingSteps() {
     queryFn: () => api.listWebhookEndpoints(),
     enabled,
   })
-  // Any subscription at all, in any state and on any customer (test-clock
-  // ones too). The overview's active_subscriptions leaves out trialing and
-  // test-clock subscriptions, so a first subscription made either way left
-  // the step undone. Home's welcome card reads the same answer.
-  // Any customer in this mode, test-clock ones too (#1153). The overview's
-  // active_customers leaves out test-clock customers, as Home's totals do,
-  // so following the docs' test-clock path never ticked the step.
+  // Any subscription at all, in any state. The overview's
+  // active_subscriptions leaves out trialing subscriptions, so a first
+  // subscription on a trial left the step undone. Home's welcome card reads
+  // the same answer. Any customer in this mode, likewise.
   const { data: anyCustomer } = useQuery({
     queryKey: ['onboarding-any-customer'],
     queryFn: () => api.listCustomers('limit=1'),

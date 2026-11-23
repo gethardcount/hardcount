@@ -1,11 +1,9 @@
-import { expect } from '@playwright/test'
 import { api, uniq } from './api'
 
 // The few API shapes the suite reads. Only the fields used here are listed.
 export interface Customer { id: string; display_name: string; external_id: string; email: string }
 export interface Plan { id: string; name: string; code: string }
 export interface Meter { id: string; name: string; event_name: string }
-export interface TestClock { id: string; name: string; frozen_time: string; status: string }
 export interface Subscription { id: string; display_name: string; code: string; status: string }
 export interface Invoice {
   id: string
@@ -34,22 +32,12 @@ export function createMeter(): Promise<Meter> {
   return api<Meter>('POST', '/meters', { event_name: `e2e_calls_${id}`, name: `E2E Calls ${id}`, unit: 'call', aggregation: 'sum' })
 }
 
-// A test clock frozen at the current time, so billing periods line up with
-// what an operator would see today.
-export function createClock(): Promise<TestClock> {
-  return api<TestClock>('POST', '/test-clocks', {
-    name: `E2E Clock ${uniq()}`,
-    frozen_time: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
-  })
-}
-
-export function createCustomer(testClockId?: string): Promise<Customer> {
+export function createCustomer(): Promise<Customer> {
   const id = uniq()
   return api<Customer>('POST', '/customers', {
     external_id: `e2e_${id}`,
     display_name: `E2E Customer ${id}`,
     email: `e2e-${id}@example.com`,
-    ...(testClockId ? { test_clock_id: testClockId } : {}),
   })
 }
 
@@ -62,15 +50,6 @@ export function createSubscription(customerId: string, planId: string): Promise<
     items: [{ plan_id: planId, quantity: 1 }],
     billing_time: 'anniversary',
   })
-}
-
-// Waits until a clock has finished its billing catchup.
-export async function waitForClockReady(clockId: string): Promise<TestClock> {
-  let clock: TestClock | undefined
-  await expect
-    .poll(async () => (clock = await api<TestClock>('GET', `/test-clocks/${clockId}`)).status, { timeout: 30_000 })
-    .toBe('ready')
-  return clock!
 }
 
 export async function invoicesFor(customerId: string): Promise<Invoice[]> {

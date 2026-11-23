@@ -56,9 +56,7 @@ export function InvoiceAttention({
   retrying?: boolean
   charging?: boolean
   sending?: boolean
-  // The invoice's now, from useNowResolver()(invoice): "since X ago" on an
-  // invoice on a test clock is counted from the clock's time, or it reads
-  // deltas like "833d ago" on an invoice just finalized at the clock's time.
+  // The invoice's now, from useNowResolver()(invoice), for "since X ago".
   // While it is not known (undefined), "since" is not drawn.
   now: EffectiveNow | undefined
   // Buttons the page draws after the server's own, for facts the notice

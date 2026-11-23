@@ -12,7 +12,6 @@ import { civilDateFrom, formatCivilDate, formatCivilPeriod, formatYMDInTZ, start
 import { showApiError } from '@/lib/formErrors'
 import { amountInputError, dollarsToWholeCents, wholeUnits } from '@/lib/priceInput'
 import { Combobox, type ComboboxOption } from '@/components/Combobox'
-import { TestClockBanner } from '@/components/TestClockBanner'
 import { Callout } from '@/components/Callout'
 import { NoticeRow } from '@/components/NoticeRow'
 import { SendSetupLinkDialog } from '@/components/SendSetupLinkDialog'
@@ -147,14 +146,12 @@ export default function SubscriptionDetailPage() {
   })
   const previewNotes = preview ? invoicePreviewNotes(preview) : null
 
-  // The subscription's "now" (its clock's time when it is on one): the one
-  // anchor for Trial ends, the lifecycle timeline's past and future dots and
-  // the date-picker floors below. A subscription frozen in the past must not
-  // offer real-time dates its engine would treat as far in the future. It is
-  // asked again on each render, so a subscription on no clock left open
-  // moves with real time, for example across midnight. While it is not known
-  // (the subscription or its clock has not loaded), nothing counted from it
-  // is drawn and the date pickers stay disabled.
+  // The subscription's "now": the one anchor for Trial ends, the lifecycle
+  // timeline's past and future dots and the date-picker floors below. It is
+  // asked again on each render, so a page left open moves with real time,
+  // for example across midnight. While it is not known (the subscription has
+  // not loaded), nothing counted from it is drawn and the date pickers stay
+  // disabled.
   const now = useNowResolver()(sub)
   // The account's zone, which the resume date and a new trial end are
   // picked and sent in.
@@ -194,9 +191,9 @@ export default function SubscriptionDetailPage() {
     queryClient.invalidateQueries({ queryKey: ['subscriptions'] })
     // Cross-page caches that surface this subscription's state.
     // CustomerDetail's overview + sub list show a sub badge / status
-    // pill; the Subscriptions list-with-test-clock-chip uses the same
-    // base query. Without these, pausing/canceling here left the
-    // CustomerDetail page stale until a hard refresh.
+    // pill; the Subscriptions list uses the same base query. Without these,
+    // pausing/canceling here left the CustomerDetail page stale until a
+    // hard refresh.
     if (sub?.customer_id) {
       queryClient.invalidateQueries({ queryKey: ['customer-overview', sub.customer_id] })
       queryClient.invalidateQueries({ queryKey: ['customer-subs-upcoming', sub.customer_id] })
@@ -427,12 +424,6 @@ export default function SubscriptionDetailPage() {
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <h1 className="text-2xl font-semibold text-foreground">{sub.display_name}</h1>
-            {/* Test-clock chip lives next to the title alongside the
-                CustomerDetail / InvoiceDetail treatment. Classification
-                chips (which scope this resource belongs to) sit on the
-                left; lifecycle state pills (active/paused/canceled) sit
-                on the right with the action buttons. Stripe / Linear /
-                Vercel all separate the two zones this way. */}
           </div>
           <div className="flex flex-wrap items-center gap-2 mt-1">
             <span className="text-xs text-muted-foreground font-mono bg-muted px-2 py-0.5 rounded">{sub.id}</span>
@@ -503,12 +494,6 @@ export default function SubscriptionDetailPage() {
         </div>
       </div>
 
-      {/* Simulated-time line (ADR-099): the one place on this page that says
-          the dates below follow a test clock, not today's date. */}
-      {sub.test_clock_id && (
-        <TestClockBanner testClockId={sub.test_clock_id} />
-      )}
-
       {/* Notices: at most one box, the most urgent present (billing failure,
           then no card, then scheduled cancel, then collection paused; see
           lib/subscriptionNotices). Any other that applies is a one-line row
@@ -530,9 +515,8 @@ export default function SubscriptionDetailPage() {
 
         // Created and the current period's start are always at or before
         // the subscription's now, so they are marked past from the stored
-        // record. The trial end is past when it is at or before that now
-        // (its clock's time when it is on one), and unmarked while now is
-        // not known.
+        // record. The trial end is past when it is at or before that now,
+        // and unmarked while now is not known.
         const reached = (iso: string) => now !== undefined && Date.parse(iso) <= now
 
         timelinePoints.push({
@@ -1115,14 +1099,6 @@ export default function SubscriptionDetailPage() {
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5 min-w-0">
                         <p className="text-sm text-foreground">{event.description}</p>
-                        {/* Narrative surface (ADR-030 2026-07-18 amendment):
-                            primary timestamp is the simulated instant,
-                            wall-clock demotes to the "Recorded …" subline.
-                            No per-row simulated chip here — the page banner
-                            is the single disclosure for this scope (ADR-099);
-                            the row's own timestamps carry the information.
-                            The AuditLog page keeps per-row chips: it is a
-                            MIXED wall-primary forensic list. */}
                       </div>
                       <span className="text-xs text-muted-foreground ml-4 whitespace-nowrap">{formatDateTime(event.sim_effective_at || event.timestamp)}</span>
                     </div>

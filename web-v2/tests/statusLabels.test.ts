@@ -17,7 +17,7 @@ test('invoiceStatus folds lifecycle and payment into one Stripe-style badge', ()
   assert.deepEqual(invoiceStatus({ status: 'uncollectible', payment_status: 'pending' }, now), { label: 'Uncollectible', tone: 'danger' })
 })
 
-test('Past due follows the given now (a test clock), not the wall clock', () => {
+test('Past due follows the given now, not the wall clock', () => {
   const inv = { status: 'finalized', payment_status: 'pending', due_at: '2027-01-15T00:00:00Z' }
   assert.equal(invoiceStatus(inv, Date.parse('2027-01-14T00:00:00Z')).label, 'Open')
   assert.equal(invoiceStatus(inv, Date.parse('2027-01-16T00:00:00Z')).label, 'Past due')

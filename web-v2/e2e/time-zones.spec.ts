@@ -1,12 +1,10 @@
 import { test, expect, type Locator, type Page, type Route } from '@playwright/test'
 import { api } from './fixtures/api'
-import { createCustomer, type TestClock } from './fixtures/seed'
+import { createCustomer } from './fixtures/seed'
 
 // The dashboard turns a picked day or time into an instant in the account's
 // time zone, which it reads from GET /v1/settings. A signed-in page waits for
-// the settings instead of guessing UTC while they load. The date picker's
-// first day and its Today button are the day of the customer's now in that
-// zone: a test clock's now when the customer is on one.
+// the settings instead of guessing UTC while they load.
 //
 // CI's account is in UTC, the guess the dashboard used to make, so the
 // browser answers the settings read with another zone.
@@ -114,32 +112,4 @@ test('a page says when the account settings did not load, and Retry loads them',
   await failed.getByRole('button', { name: 'Retry' }).click()
   await expect(page.getByRole('heading', { level: 1, name: customer.display_name, exact: true })).toBeVisible()
   await expect(failed).toHaveCount(0)
-})
-
-test.describe('a browser behind the account zone', () => {
-  test.use({ timezoneId: 'America/Los_Angeles' })
-
-  test("on a test clock, the expiry picker's first day and Today are the clock's day in the account zone", async ({ page }) => {
-    // 20:00 UTC on Jan 15 is noon on Jan 15 in Los Angeles, but already
-    // Jan 16 in the account zone (Tokyo or Kolkata).
-    const frozen = '2026-01-15T20:00:00Z'
-    const clock = await api<TestClock>('POST', '/test-clocks', { name: 'E2E zone clock', frozen_time: frozen })
-    const customer = await createCustomer(clock.id)
-    const zone = await otherZone()
-    await settingsIn(page, zone)
-    const clockDay = dayIn(new Date(frozen), zone)
-    expect(clockDay).toBe('2026-01-16')
-
-    await page.goto(`/customers/${customer.id}`)
-    const dialog = await openGrantCredits(page)
-    await dialog.getByRole('button', { name: 'Open calendar' }).click()
-    const calendar = page.getByRole('grid')
-    // Jan 15 has ended in the account zone, so it cannot be picked.
-    await expect(calendar.getByRole('button', { name: 'Thursday, January 15th, 2026' })).toBeDisabled()
-    await expect(calendar.getByRole('button', { name: 'Today, Friday, January 16th, 2026' })).toBeEnabled()
-
-    await page.getByRole('button', { name: 'Today', exact: true }).click()
-    await expect(dialog.getByPlaceholder('Never expires')).toHaveValue('Jan 16, 2026')
-    expect(await grantAndReadExpiry(page, dialog), `valid through the clock's day ends at the next midnight in ${zone}`).toBe(nextMidnightIn(clockDay, zone))
-  })
 })

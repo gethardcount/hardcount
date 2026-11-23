@@ -14,12 +14,10 @@ import { collectionPausedFlag, subscriptionStatus } from '@/lib/statusLabels'
 import { SUBSCRIPTION_TABS, subscriptionTabEmptyTitle, subscriptionTabParams } from '@/lib/subscriptionListFilters'
 import { StatusBadge } from '@/components/StatusBadge'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
-import { SimulatedBadge } from '@/components/TestClockBadge'
 import { CreateSubscriptionDialog } from '@/components/CreateSubscriptionDialog'
 
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
-import { TestClocksLoadError } from '@/components/TestClocksLoadError'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -47,7 +45,7 @@ import { ExpiryBadge } from '@/components/ExpiryBadge'
 import { trialBadgeEndsAt } from '@/lib/statusLabels'
 import { formatCivilDate } from '@/lib/dates'
 import { nextBillCell, periodLabels } from '@/lib/subscriptionPeriod'
-import { useNowResolver, useTestClocks } from '@/hooks/useNow'
+import { useNowResolver } from '@/hooks/useNow'
 
 const PAGE_SIZE = 25
 
@@ -131,19 +129,8 @@ export default function SubscriptionsPage() {
     queryFn: () => api.listPlans(),
   })
 
-  // Each row's "now" (its clock's time when it is on one), for Trial ends and
-  // a timed collection pause.
+  // Each row's "now", for Trial ends and a timed collection pause.
   const resolveNow = useNowResolver()
-  const { data: testClocksData } = useTestClocks()
-  // Clock id → name lookup for the customer-inherits-clock hint
-  // (ADR-027). Surfaced inside the Create dialog when the picked
-  // customer is pinned to a clock so the operator knows the new
-  // sub will bill on simulated time.
-  const clockNameMap = useMemo(() => {
-    const m: Record<string, string> = {}
-    ;(testClocksData?.data ?? []).forEach(c => { m[c.id] = c.name || c.id })
-    return m
-  }, [testClocksData])
 
   const subs = subsData?.data ?? []
   const total = subsData?.total ?? 0
@@ -244,8 +231,6 @@ export default function SubscriptionsPage() {
         </div>
       )}
 
-      <TestClocksLoadError records={subs} className="mt-4 mb-0" />
-
       {/* Table */}
       <Card className="mt-4">
         <CardContent className="p-0">
@@ -322,9 +307,6 @@ export default function SubscriptionsPage() {
                           >
                             {sub.display_name}
                           </Link>
-                          {sub.test_clock_id && (
-                            <SimulatedBadge />
-                          )}
                         </div>
                       </TableCell>
                       <TableCell className="text-sm">
@@ -457,7 +439,6 @@ export default function SubscriptionsPage() {
         open={showCreate}
         onOpenChange={setShowCreate}
         plans={plans}
-        clockNameMap={clockNameMap}
         onCreated={(created) => {
           queryClient.invalidateQueries({ queryKey: ['subscriptions'] })
           toast.success(`Subscription "${created.display_name}" created`)

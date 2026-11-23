@@ -2,7 +2,7 @@
 // (GET /v1/settings). Every day or time an operator picks is sent as an
 // instant in that zone. Before the settings load there is no zone, and a
 // page that asks for one then would send a guess: a credit that expires
-// hours early or late, a test clock set to the wrong hour. Signed-in pages
+// hours early or late, a pause that resumes at the wrong hour. Signed-in pages
 // wait for the settings (AccountSettingsGate), so the hook throws instead of
 // answering 'UTC'.
 //

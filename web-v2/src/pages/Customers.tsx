@@ -11,10 +11,6 @@ import { toast } from 'sonner'
 import { api, formatDate } from '@/lib/api'
 import type { Customer } from '@/lib/api'
 import { applyApiError } from '@/lib/formErrors'
-import { SimulatedBadge } from '@/components/TestClockBadge'
-import { useAuth } from '@/contexts/AuthContext'
-import { useTestClocks } from '@/hooks/useNow'
-import { Combobox } from '@/components/Combobox'
 import { downloadServerCSV } from '@/lib/csv'
 import { useSortable, type SortDir } from '@/hooks/useSortable'
 import { useUrlState } from '@/hooks/useUrlState'
@@ -68,11 +64,6 @@ const createCustomerSchema = z.object({
   external_id: z.string().min(1, 'External ID is required').regex(/^[a-zA-Z0-9_-]+$/, 'Only letters, numbers, hyphens, and underscores allowed'),
   display_name: z.string().min(1, 'Display name is required'),
   email: z.string().email('Invalid email address').optional().or(z.literal('')),
-  // Test-clock pin: customer-level attach (ADR-027, Stripe parity).
-  // Test-mode only; the field is hidden in live mode. Once set,
-  // every Subscription / Invoice for this customer runs on the
-  // clock's simulated time and the value cannot be changed.
-  test_clock_id: z.string().optional(),
 })
 
 type CreateCustomerData = z.infer<typeof createCustomerSchema>
@@ -120,15 +111,8 @@ export default function CustomersPage() {
 
   const form = useForm<CreateCustomerData>({
     resolver: zodResolver(createCustomerSchema),
-    defaultValues: { external_id: '', display_name: '', email: '', test_clock_id: '' },
+    defaultValues: { external_id: '', display_name: '', email: '' },
   })
-
-  // Test-clock pin (ADR-027): the field shows in test mode when a clock
-  // exists.
-  const { user } = useAuth()
-  const isTestMode = user?.livemode === false
-  const { data: clocksData } = useTestClocks()
-  const clocks = clocksData?.data ?? []
 
   // Debounced server-side search: matches name / email / external ID
   // (the backend decrypts and matches the encrypted PII columns) — not
@@ -166,7 +150,7 @@ export default function CustomersPage() {
       form.reset()
     },
     onError: (err) => {
-      applyApiError(form, err, ['external_id', 'display_name', 'email', 'test_clock_id'])
+      applyApiError(form, err, ['external_id', 'display_name', 'email'])
     },
   })
 
@@ -338,12 +322,6 @@ export default function CustomersPage() {
                               >
                                 {c.display_name}
                               </Link>
-                              {/* Customer-level test-clock badge (ADR-027).
-                                  Lets operators scan which customers are
-                                  in simulation without drilling into each
-                                  detail page. Mirrors Stripe's customer
-                                  list. */}
-                              {c.test_clock_id && <SimulatedBadge />}
                             </div>
                             <p className="text-xs text-muted-foreground font-mono truncate max-w-[220px]" title={c.external_id}>{c.external_id}</p>
                           </div>
@@ -472,44 +450,6 @@ export default function CustomersPage() {
                   </FormItem>
                 )}
               />
-              {/* Customer-level test-clock attach (ADR-027, Stripe
-                  parity). Test mode + clocks-exist gate matches the
-                  pre-ADR-027 sub-create form. Once set, every
-                  Subscription and Invoice for this customer simulates
-                  on the clock's frozen time. Cannot be changed
-                  post-creation — to switch clocks, recreate the
-                  customer. */}
-              {isTestMode && clocks.length > 0 && (
-                <FormField
-                  control={form.control}
-                  name="test_clock_id"
-                  render={({ field }) => (
-                    <FormItem>
-                      <FormLabel>Pin to test clock <span className="text-muted-foreground">(optional)</span></FormLabel>
-                      {/* Searchable: clocks are TENANT DATA and accumulate fast
-                          (a walkthrough session alone can add half a dozen). The
-                          empty-value row stays FIRST so the common "no clock"
-                          choice is never something you have to search for. */}
-                      <Combobox
-                        value={field.value ?? ''}
-                        onChange={(v) => field.onChange(v ?? '')}
-                        options={[
-                          { value: '', label: 'No test clock — bills in real time' },
-                          ...clocks.map(c => ({ value: c.id, label: c.name || c.id })),
-                        ]}
-                        placeholder="No test clock — bills in real time"
-                        emptyMessage="No clock matches that search."
-                        triggerClassName="w-full"
-                      />
-                      <FormDescription>
-                        Pinned customers run all subscriptions and invoices on the clock's simulated time. Cannot be changed later.
-                      </FormDescription>
-                      <FormMessage />
-                    </FormItem>
-                  )}
-                />
-              )}
-
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setShowCreate(false)}>
                   Cancel

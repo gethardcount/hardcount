@@ -6,8 +6,8 @@ import { getTenantTimezone, setTenantTimezone, subscribeTenantTimezone } from '@
 // AccountSettingsGate draws a signed-in page only once the account settings
 // (GET /v1/settings) have loaded. They hold the time zone that every picked
 // day or time is sent in, and the default currency. A page drawn before
-// would guess both: a credit expiring at a UTC midnight, a test clock set to
-// the wrong hour. Until then it shows a wait, or the error with Retry.
+// would guess both: a credit expiring at a UTC midnight, an amount in the
+// wrong currency. Until then it shows a wait, or the error with Retry.
 //
 // It also copies the zone into the display zone that formatDate and
 // dates.ts read (setTenantTimezone), and draws the page only once that copy

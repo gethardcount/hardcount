@@ -8,7 +8,7 @@ interface DetailSkeletonProps {
 }
 
 // DetailSkeleton is the initial-load state for entity detail pages
-// (invoice, customer, subscription, plan, meter, test clock). It renders
+// (invoice, customer, subscription, plan, meter). It renders
 // the REAL breadcrumb in its final position plus a stable header + body
 // skeleton, so nothing shifts when data arrives — previously these pages
 // early-returned a centered spinner with a hand-written breadcrumb

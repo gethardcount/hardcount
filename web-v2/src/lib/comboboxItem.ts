@@ -14,7 +14,7 @@ interface PickerOption {
  * value equals the highlighted one, and Enter picks the first of them. So it
  * is never the label, which two customers can share. The quotes keep it
  * non-empty: cmdk never highlights or matches an item whose value is '', and
- * an option such as "No test clock" has that value. cmdk also trims values,
+ * an option such as "Use account default" has that value. cmdk also trims values,
  * and the quotes leave nothing to trim.
  *
  * The label, the option's value and its keywords go into `keywords`, the only
