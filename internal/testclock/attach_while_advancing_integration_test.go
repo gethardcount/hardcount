@@ -7,6 +7,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/customer"
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/leader"
 	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
@@ -14,13 +15,11 @@ import (
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// TestCustomerJoinsAClockInAnyStatus pins what domain.TestClockStatus says:
-// no clock status blocks attaching a customer. On an advancing clock and on a
-// failed one, a customer is created on the clock, and the clock's instant it
-// joins at is the new frozen_time the advance already stamped. The comment
-// used to say a failed clock blocks attachment; nothing ever enforced it.
-// Mutation-verify: refuse a non-ready clock in ResolveSim → both cases fail.
-func TestCustomerJoinsAClockInAnyStatus(t *testing.T) {
+// TestCustomerJoinsAClock_RefusedWhileItAdvances pins what
+// domain.TestClockStatus says: a request that creates a customer on an
+// advancing clock is refused (409 clock_advancing), and on a failed clock the
+// customer joins at the new frozen_time the advance already stamped.
+func TestCustomerJoinsAClock_RefusedWhileItAdvances(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	clocks := testclock.NewPostgresStore(db)
 	// The lease lets the internal_failure case park the clock with the
@@ -32,16 +31,19 @@ func TestCustomerJoinsAClockInAnyStatus(t *testing.T) {
 
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	// The request is marked as a change, as the API's door marks it.
+	request := clock.MarkChange(ctx)
 	for _, c := range []struct {
-		name string
-		park func(t *testing.T, id string)
-		want domain.TestClockStatus
+		name    string
+		park    func(t *testing.T, id string)
+		want    domain.TestClockStatus
+		refused bool
 	}{
 		{"advancing", func(t *testing.T, id string) {
 			if _, err := clocks.MarkAdvancing(ctx, tenantID, id, to, noAuditRow); err != nil {
 				t.Fatalf("mark advancing: %v", err)
 			}
-		}, domain.TestClockStatusAdvancing},
+		}, domain.TestClockStatusAdvancing, true},
 		{"internal_failure", func(t *testing.T, id string) {
 			if _, err := clocks.MarkAdvancing(ctx, tenantID, id, to, noAuditRow); err != nil {
 				t.Fatalf("mark advancing: %v", err)
@@ -49,7 +51,7 @@ func TestCustomerJoinsAClockInAnyStatus(t *testing.T) {
 			if _, err := clocks.MarkFailed(ctx, tenantID, id, "catch-up failed", domain.AdvanceSummary{}); err != nil {
 				t.Fatalf("mark failed: %v", err)
 			}
-		}, domain.TestClockStatusInternalFailed},
+		}, domain.TestClockStatusInternalFailed, false},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			clk, err := clocks.Create(ctx, tenantID, domain.TestClock{Name: c.name, FrozenTime: start}, noAuditRow)
@@ -61,22 +63,20 @@ func TestCustomerJoinsAClockInAnyStatus(t *testing.T) {
 				t.Fatalf("clock status %q (err %v), want %q", got.Status, err, c.want)
 			}
 
-			sim, ok, err := clocks.ResolveSim(ctx, tenantID, clk.ID)
-			if err != nil || !ok {
-				t.Fatalf("ResolveSim on a %s clock = ok %v, err %v; want attach-able", c.want, ok, err)
-			}
-			if !sim.At.Equal(to) || sim.TestClockID != clk.ID {
-				t.Fatalf("ResolveSim = %v on %s, want the new frozen_time %v on %s", sim.At, sim.TestClockID, to, clk.ID)
-			}
-
-			cust, err := customers.Create(ctx, tenantID, customer.CreateInput{
+			cust, err := customers.Create(request, tenantID, customer.CreateInput{
 				ExternalID: "cus_on_" + c.name, DisplayName: "On " + c.name, TestClockID: clk.ID,
 			})
+			if c.refused {
+				if !clock.IsAdvancingRefusal(err) {
+					t.Fatalf("create a customer on an advancing clock: %v, want 409 clock_advancing", err)
+				}
+				return
+			}
 			if err != nil {
 				t.Fatalf("create a customer on a %s clock: %v", c.want, err)
 			}
-			if cust.TestClockID != clk.ID {
-				t.Fatalf("customer pinned to %q, want %q", cust.TestClockID, clk.ID)
+			if cust.TestClockID != clk.ID || !cust.CreatedAt.Equal(to) {
+				t.Fatalf("customer on %q created %v, want %q at the new frozen_time %v", cust.TestClockID, cust.CreatedAt, clk.ID, to)
 			}
 		})
 	}

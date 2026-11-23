@@ -220,7 +220,7 @@ func TestRouteTable_WritesNeedAWritePermission(t *testing.T) {
 	for k, d := range routeTable {
 		a := d.access
 		if !isMutatingMethod(k.Method) || d.outsideAuth || a.Session != "" ||
-			a.Perm == auth.PermUsageIngest || strings.HasSuffix(string(a.Perm), ":write") {
+			a.Perm == auth.PermUsageIngest || a.Perm.Writes() {
 			continue
 		}
 		got = append(got, k.Method+" "+k.Pattern)

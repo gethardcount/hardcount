@@ -14,6 +14,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -192,7 +193,9 @@ func (s *Service) Connect(ctx context.Context, tenantID string, in ConnectInput)
 // its cancel: the tenant, the mode (checkMode proved it is the
 // connection's), the actor, so the invoices it finalizes are recorded under
 // the operator who connected, and the request id. It is capped at
-// PostConnectRetryTimeout.
+// PostConnectRetryTimeout. It drops the request's change mark: it decides
+// each invoice's time on its own after the request has answered, as a job
+// does, and is never refused while a clock advances.
 //
 // Nothing waits for it at shutdown. A stop mid-row leaves that row pending
 // or finalized, never between: a tax retry writes the tax and the finalize
@@ -201,7 +204,7 @@ func (s *Service) Connect(ctx context.Context, tenantID string, in ConnectInput)
 // provider_auth one waits for a Retry tax click or the next connect. A wait
 // would not change what a stopped retry leaves.
 func (s *Service) startPostConnectRetry(ctx context.Context, tenantID string, livemode bool, expected int) {
-	retryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), PostConnectRetryTimeout)
+	retryCtx, cancel := context.WithTimeout(clock.WithoutChangeMark(context.WithoutCancel(ctx)), PostConnectRetryTimeout)
 	go s.runPostConnectRetry(retryCtx, cancel, tenantID, livemode, expected)
 }
 

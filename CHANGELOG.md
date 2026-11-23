@@ -21,6 +21,10 @@ original text.
 
 **Before upgrading:** nothing to do. Migration `00238_test_clock_advance_target` adds one nullable column to `test_clocks`, and gives a clock that is advancing during the upgrade its target. It runs on start, and copies of the earlier version keep working while it does ([#1900](https://github.com/gethardcount/hardcount/pull/1900)).
 
+### Changed
+
+- **While a test clock advances, a change to one of its customers, or a new customer on it, answers `409 clock_advancing`:** the customer, its subscriptions, invoices, credit notes and credits, and usage you backfill or release. Reads, usage your app or proxy sends, payments through Stripe, price changes (which take effect after the advance) and deleting the clock go on, and a clock whose advance failed stays open ([errors](docs/api/errors.md), [#1899](https://github.com/gethardcount/hardcount/pull/1899)).
+
 ## [0.10.0] - 2026-11-23
 
 A restored database now catches up with Stripe before Hardcount serves it (`hardcount restore`). A test clock's advance runs as a background job on one replica, and work on a test clock is dated at the event it belongs to. Each API route states who may call it, and a request that was refused no longer holds its `Idempotency-Key`. Draft subscriptions and the `X-API-Key` header are removed. Claude Fable 5.2 and Mythos 5.2 have prices.

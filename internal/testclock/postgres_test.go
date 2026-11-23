@@ -377,3 +377,44 @@ func randHex(n int) string {
 	_, _ = rand.Read(b)
 	return hex.EncodeToString(b)
 }
+
+// TestPostgresStore_MarkAdvancing_ChecksTheTimeOnTheRowItChanges: Advance
+// checks the new time against the clock it read, and another advance can
+// complete before its write. The write checks again, on the row it changes,
+// so the clock never moves back and never more than a year ahead.
+func TestPostgresStore_MarkAdvancing_ChecksTheTimeOnTheRowItChanges(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	store := testclock.NewPostgresStore(db)
+	ctx := leadertest.Token(t, testutil.AdminPool(t), postgres.WithLivemode(context.Background(), false), leader.RoleTestClockCatchup)
+	tenantID := testutil.CreateTestTenant(t, db, "Tenant")
+
+	jan, feb := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC), time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	clk, err := store.Create(ctx, tenantID, domain.TestClock{Name: "race", FrozenTime: jan}, noAuditRow)
+	if err != nil {
+		t.Fatalf("create clock: %v", err)
+	}
+	// The advance that won: January to February, completed.
+	if _, err := store.MarkAdvancing(ctx, tenantID, clk.ID, feb, noAuditRow); err != nil {
+		t.Fatalf("mark advancing: %v", err)
+	}
+	if _, err := store.CompleteAdvance(ctx, tenantID, clk.ID, domain.AdvanceSummary{AdvancedFrom: jan, AdvancedTo: feb}); err != nil {
+		t.Fatalf("complete advance: %v", err)
+	}
+	// Advances that read the clock at January, whose new times passed that
+	// read's checks, and one more than a year past the clock.
+	for _, c := range []struct {
+		name string
+		to   time.Time
+	}{
+		{"back to mid-January", time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC)},
+		{"to the clock's own time again", feb},
+		{"more than a year past the clock", feb.AddDate(1, 0, 0).Add(24 * time.Hour)},
+	} {
+		if _, err := store.MarkAdvancing(ctx, tenantID, clk.ID, c.to, noAuditRow); !errors.Is(err, errs.ErrInvalidState) {
+			t.Errorf("%s: err = %v, want a refusal", c.name, err)
+		}
+	}
+	if got, err := store.Get(ctx, tenantID, clk.ID); err != nil || got.Status != domain.TestClockStatusReady || !got.FrozenTime.Equal(feb) {
+		t.Fatalf("clock after the refused advances: %s at %v (err %v), want ready at %v", got.Status, got.FrozenTime, err, feb)
+	}
+}
