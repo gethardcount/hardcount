@@ -60,6 +60,9 @@ func TestCatchupWrites_FencedOnTheLease(t *testing.T) {
 	if err := store.TouchAdvancing(deposed, tenantID, clk.ID); !errors.Is(err, testclock.ErrCatchupFenceLost) {
 		t.Errorf("deposed TouchAdvancing: %v, want ErrCatchupFenceLost", err)
 	}
+	if err := store.MoveTo(deposed, tenantID, clk.ID, leaseTarget, late); !errors.Is(err, testclock.ErrCatchupFenceLost) {
+		t.Errorf("deposed MoveTo: %v, want ErrCatchupFenceLost", err)
+	}
 	if _, err := store.MarkFailed(deposed, tenantID, clk.ID, "deposed", late); !errors.Is(err, testclock.ErrCatchupFenceLost) {
 		t.Errorf("deposed MarkFailed: %v, want ErrCatchupFenceLost", err)
 	}
@@ -112,6 +115,9 @@ func TestCatchupWrites_ClockNoLongerAdvancing(t *testing.T) {
 		}
 		if err := store.TouchAdvancing(ctx, tenantID, clk.ID); !errors.Is(err, testclock.ErrClockNoLongerAdvancing) {
 			t.Errorf("TouchAdvancing on a ready clock: %v, want ErrClockNoLongerAdvancing", err)
+		}
+		if err := store.MoveTo(ctx, tenantID, clk.ID, leaseTarget.Add(time.Hour), late); !errors.Is(err, testclock.ErrClockNoLongerAdvancing) {
+			t.Errorf("MoveTo on a ready clock: %v, want ErrClockNoLongerAdvancing", err)
 		}
 		got, err := store.Get(base, tenantID, clk.ID)
 		if err != nil || got.Status != domain.TestClockStatusReady || got.LastFailureReason != "" || got.LastAdvanceSummary.InvoicesGenerated != 0 {
@@ -274,6 +280,8 @@ func TestRunCatchup_ClockTurnsReadyUnderThePass(t *testing.T) {
 }
 
 // countingClockRunner reports two invoices from its billing phase.
+// countingClockRunner bills two invoices at each step. An advance with
+// nothing due on the way has two steps, the clock's time and the target.
 type countingClockRunner struct{}
 
 func (countingClockRunner) RunCycleForClock(context.Context, string, string, int) (int, []error) {
@@ -315,8 +323,8 @@ func TestRunAdvancing_RetryKeepsAdvancedFrom(t *testing.T) {
 		t.Fatalf("status %q, want ready", got.Status)
 	}
 	sum := got.LastAdvanceSummary
-	if sum == nil || !sum.AdvancedFrom.Equal(leaseFrom) || !sum.AdvancedTo.Equal(leaseTarget) || sum.InvoicesGenerated != 2 {
-		t.Errorf("summary %+v, want %s → %s with 2 invoices", sum, leaseFrom, leaseTarget)
+	if sum == nil || !sum.AdvancedFrom.Equal(leaseFrom) || !sum.AdvancedTo.Equal(leaseTarget) || sum.InvoicesGenerated != 4 {
+		t.Errorf("summary %+v, want %s → %s with 4 invoices, two at each step", sum, leaseFrom, leaseTarget)
 	}
 }
 
@@ -423,7 +431,7 @@ func TestCatchupTick_LeaseLostMidPass(t *testing.T) {
 	if err != nil {
 		t.Fatalf("get clock: %v", err)
 	}
-	if got.Status != domain.TestClockStatusReady || got.LastAdvanceSummary == nil || got.LastAdvanceSummary.InvoicesGenerated != 2 {
-		t.Errorf("after the next leader: status %q summary %+v, want ready with its 2 invoices", got.Status, got.LastAdvanceSummary)
+	if got.Status != domain.TestClockStatusReady || got.LastAdvanceSummary == nil || got.LastAdvanceSummary.InvoicesGenerated != 4 {
+		t.Errorf("after the next leader: status %q summary %+v, want ready with 4 invoices, two at each step", got.Status, got.LastAdvanceSummary)
 	}
 }

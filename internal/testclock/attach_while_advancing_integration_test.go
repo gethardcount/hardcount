@@ -18,7 +18,7 @@ import (
 // TestCustomerJoinsAClock_RefusedWhileItAdvances pins what
 // domain.TestClockStatus says: a request that creates a customer on an
 // advancing clock is refused (409 clock_advancing), and on a failed clock the
-// customer joins at the new frozen_time the advance already stamped.
+// customer joins at the time the advance reached.
 func TestCustomerJoinsAClock_RefusedWhileItAdvances(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	clocks := testclock.NewPostgresStore(db)
@@ -31,6 +31,7 @@ func TestCustomerJoinsAClock_RefusedWhileItAdvances(t *testing.T) {
 
 	start := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	to := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	reached := time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC) // where the failed advance stopped
 	// The request is marked as a change, as the API's door marks it.
 	request := clock.MarkChange(ctx)
 	for _, c := range []struct {
@@ -47,6 +48,9 @@ func TestCustomerJoinsAClock_RefusedWhileItAdvances(t *testing.T) {
 		{"internal_failure", func(t *testing.T, id string) {
 			if _, err := clocks.MarkAdvancing(ctx, tenantID, id, to, noAuditRow); err != nil {
 				t.Fatalf("mark advancing: %v", err)
+			}
+			if err := clocks.MoveTo(ctx, tenantID, id, reached, domain.AdvanceSummary{}); err != nil {
+				t.Fatalf("move to where the advance stopped: %v", err)
 			}
 			if _, err := clocks.MarkFailed(ctx, tenantID, id, "catch-up failed", domain.AdvanceSummary{}); err != nil {
 				t.Fatalf("mark failed: %v", err)
@@ -75,8 +79,8 @@ func TestCustomerJoinsAClock_RefusedWhileItAdvances(t *testing.T) {
 			if err != nil {
 				t.Fatalf("create a customer on a %s clock: %v", c.want, err)
 			}
-			if cust.TestClockID != clk.ID || !cust.CreatedAt.Equal(to) {
-				t.Fatalf("customer on %q created %v, want %q at the new frozen_time %v", cust.TestClockID, cust.CreatedAt, clk.ID, to)
+			if cust.TestClockID != clk.ID || !cust.CreatedAt.Equal(reached) {
+				t.Fatalf("customer on %q created %v, want %q at the time the advance reached, %v", cust.TestClockID, cust.CreatedAt, clk.ID, reached)
 			}
 		})
 	}

@@ -742,7 +742,10 @@ func TestE2E_WebhookPayloads_SubscriptionSchedule(t *testing.T) {
 			ev.Data["item_id"], ev.Data["old_plan_id"], ev.Data["applied_at"], changeItem, starter)
 	}
 	ev = got[domain.EventSubscriptionCollectionResumed]
-	checkEventResource(t, "subscription.collection_resumed (schedule)", ev, getSub(flowStr(paused, "id")))
+	// The pause ends on day 20, before the close that starts the next
+	// period: the event shows the period the resume happened in.
+	checkEventResource(t, "subscription.collection_resumed (schedule)", ev, getSub(flowStr(paused, "id")),
+		"current_billing_period_start", "current_billing_period_end", "next_billing_at", "updated_at")
 	if ev.Data["triggered_by"] != "schedule" || flowStr(ev.Data, "resumed_at") == "" {
 		t.Errorf("subscription.collection_resumed extras = %v / %v, want schedule and the resume time", ev.Data["triggered_by"], ev.Data["resumed_at"])
 	}

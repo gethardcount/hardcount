@@ -28,7 +28,7 @@ func (f *flakyCreditExpirer) ExpireCreditsForClock(context.Context, string, stri
 
 // TestAdvance_FailedJobThenRetryCompletes: a job that fails leaves the clock
 // failed with a reason and a summary that says it failed. Retry advance runs
-// the pass again, and the clock reaches its target.
+// the failed step again, and the clock reaches its target.
 func TestAdvance_FailedJobThenRetryCompletes(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	store := testclock.NewPostgresStore(db)
@@ -69,8 +69,8 @@ func TestAdvance_FailedJobThenRetryCompletes(t *testing.T) {
 	if got.Status != domain.TestClockStatusReady || !got.FrozenTime.Equal(leaseTarget) {
 		t.Errorf("after the retry: status %q at %s, want ready at %s", got.Status, got.FrozenTime, leaseTarget)
 	}
-	if credits.calls != 2 {
-		t.Errorf("credit expiry ran %d times, want 2 (the failed pass and the retry)", credits.calls)
+	if credits.calls != 3 {
+		t.Errorf("credit expiry ran %d times, want 3 (the failed step, that step again on Retry, and the target)", credits.calls)
 	}
 }
 

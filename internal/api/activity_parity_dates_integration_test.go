@@ -273,9 +273,8 @@ func TestActivityDates_TrialRunsOut(t *testing.T) {
 
 	// One customer, two subscriptions, one invoice's worth of credit left:
 	// the first subscription renews (1 March) before the second one's trial
-	// ends (13 March). One advance ends every trial before it closes any
-	// period (#1276), so the trial's day-1 invoice draws the credit, and the
-	// renewal, which comes first in time, draws none.
+	// ends (13 March). The advance moves through each due time in order, so
+	// the renewal draws the credit and the trial's day-1 invoice draws none.
 	t.Run("test clock: a trial that ends after another subscription's renewal", func(t *testing.T) {
 		clockID := r.newClock("trial after renewal", frozen)
 		customerID := flowStr(r.call("POST", "/v1/customers", flowReq{body: map[string]any{
@@ -303,11 +302,11 @@ func TestActivityDates_TrialRunsOut(t *testing.T) {
 		if renewal == nil {
 			t.Fatalf("no renewal invoice: %s", mustJSON(r.invoices(renewing)))
 		}
-		if got := flowInt(renewal, "credits_applied_cents"); got != 0 {
-			t.Errorf("renewal credits_applied_cents = %d, want 0", got)
+		if got := flowInt(renewal, "credits_applied_cents"); got != 4900 {
+			t.Errorf("renewal credits_applied_cents = %d, want 4900", got)
 		}
-		if got := flowInt(r.dayOne(trialing), "credits_applied_cents"); got != 4900 {
-			t.Errorf("trial day-1 invoice credits_applied_cents = %d, want 4900", got)
+		if got := flowInt(r.dayOne(trialing), "credits_applied_cents"); got != 0 {
+			t.Errorf("trial day-1 invoice credits_applied_cents = %d, want 0", got)
 		}
 	})
 

@@ -220,6 +220,35 @@ func TestE2E_PlanPrices_AnAdvancingClockStampsAtItsTarget(t *testing.T) {
 	}
 }
 
+// TestE2E_TestClock_APriceEditDuringAnAdvanceTakesEffectAfterIt: a price
+// edit made while a clock advances takes effect after the advance's target.
+// The advance moves the clock through a period end on its way and stops a
+// day into the next period; usage sent there after the advance is billed at
+// the price the period began with.
+//
+// Mutation: stamp the edit at the clock's time, behind the target, and that
+// period bills the new rate.
+func TestE2E_TestClock_APriceEditDuringAnAdvanceTakesEffectAfterIt(t *testing.T) {
+	r := newPPRig(t, "edit during advance")
+	calls := r.meter("calls", "sum")
+	plan, ids := r.plan("pro", perUnit(calls, "1", nil))
+	frozen := time.Now().UTC().AddDate(0, 0, -120).Truncate(time.Second)
+	clk := r.clock("edit during", frozen)
+	sub, p0, p1 := r.clockSub("pp-edit", clk, plan)
+	p2 := monthAfter(p1, p0.Day())
+	target := p1.Add(24 * time.Hour)
+	// An advance to a day into [p1, p2) has started; its catch-up has not run.
+	r.exec(`UPDATE test_clocks SET status = 'advancing', advance_target = $2 WHERE id = $1`, clk, target)
+	r.editTo(plan, ids[0], "2", "next_period")
+	testclocktest.Drain(t, r.srv.TestClockSvc)
+	if got := flowStr(r.must(time.Time{}, http.MethodGet, "/v1/test-clocks/"+clk, nil, http.StatusOK), "frozen_time"); !ppTime(t, got).Equal(target) {
+		t.Fatalf("clock at %s after the advance, want its target %v", got, target)
+	}
+	r.ingest(time.Time{}, "pp-edit", "calls", 10, target.Add(-12*time.Hour), nil)
+	r.advance(clk, p2.Add(time.Hour))
+	wantUsage(t, "the period the advance stopped in: the rate it began with", r.cycle(sub, p1), map[string]int64{ids[0]: 10})
+}
+
 // TestE2E_PlanPrices_NeverUsedAgainAfterTeardown: a test-clock teardown
 // deletes the clock's subscriptions, so their plan can be never-used again
 // with several versions. A write then replaces every one of them, so it

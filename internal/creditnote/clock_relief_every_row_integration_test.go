@@ -53,6 +53,28 @@ func seedClockReliefDrafts(t *testing.T, db *postgres.DB, ctx context.Context, t
 	return clockID, notes
 }
 
+// A note that issuing holds again (its invoice is still a draft) is not
+// counted as issued: it stays a draft for the next step.
+func TestRetryPendingClawbackIssueForClock_AHeldNoteIsNotCounted(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "Clock Relief Held")
+	clockID, notes := seedClockReliefDrafts(t, db, ctx, tenantID, 2)
+	execBypassCN(t, db, `UPDATE invoices SET status = 'draft', payment_status = 'pending', amount_paid_cents = 0 WHERE id = $1`, notes[0].InvoiceID)
+
+	svc := creditnote.NewService(creditnote.NewPostgresStore(db), invoice.NewPostgresStore(db), nil, okGranterTx{})
+	issued, errs := svc.RetryPendingClawbackIssueForClock(ctx, tenantID, clockID, time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC), 100)
+	if len(errs) > 0 {
+		t.Fatalf("errors: %v", errs[0])
+	}
+	if issued != 0 {
+		t.Errorf("issued %d, want 0: both notes are held while their invoice is a draft", issued)
+	}
+	if got, err := creditnote.NewPostgresStore(db).Get(ctx, tenantID, notes[0].ID); err != nil || got.Status != domain.CreditNoteDraft {
+		t.Errorf("note status %q err %v, want still a draft", got.Status, err)
+	}
+}
+
 // A clock's relief-note job issues every held relief note: a clock has no
 // next tick to pick up a second page. Two pages and one note more prove it.
 func TestRetryPendingClawbackIssueForClock_IssuesEveryDraft(t *testing.T) {

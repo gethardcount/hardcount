@@ -1548,7 +1548,16 @@ func (e *Engine) clockOf(ctx context.Context, tenantID, clockID, owner string) (
 	if err := clock.RefuseIfAdvancing(ctx, tc.Name, tc.Status == domain.TestClockStatusAdvancing); err != nil {
 		return clock.Sim{}, err
 	}
-	return clock.Sim{At: tc.FrozenTime, TestClockID: clockID}, nil
+	// What arrives while the clock advances (usage, a payment's answer) is
+	// dated at the advance's target and takes effect after it: dated at the
+	// step the catch-up has reached, it could land in a period the catch-up
+	// closes before it commits. The catch-up binds each step's time itself
+	// and decides nothing through here.
+	at := tc.FrozenTime
+	if tc.Status == domain.TestClockStatusAdvancing && tc.AdvanceTarget != nil {
+		at = *tc.AdvanceTarget
+	}
+	return clock.Sim{At: at, TestClockID: clockID}, nil
 }
 
 // SimForInvoice is the time answer for an invoice: the clock of its
