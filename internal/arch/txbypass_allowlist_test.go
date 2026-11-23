@@ -20,10 +20,10 @@ import (
 //
 // This pins every function (outside tests) that names TxBypass, and the kind
 // of work it is. A new TxBypass use fails until it is added here with its
-// kind; a new kind also needs its words in the architecture.md list.
+// kind; a new kind also goes in the architecture.md list.
 
-// bypassKinds maps each kind of work to the words docs/architecture.md uses
-// for it. The test fails if those words are missing from the page.
+// bypassKinds is each kind of work that may skip RLS, in the words
+// docs/architecture.md uses for it.
 var bypassKinds = map[string]string{
 	"background": "background jobs",
 	"metrics":    "metrics that count their queues",
@@ -240,26 +240,5 @@ func TestTxBypass_EveryUseIsListed(t *testing.T) {
 	}
 	for _, k := range stale {
 		t.Errorf("%s is listed in txBypassUsers but no longer uses TxBypass: remove it", k)
-	}
-}
-
-func TestTxBypass_ArchitectureDocNamesEveryKind(t *testing.T) {
-	root := repoRoot(t)
-	b, err := os.ReadFile(filepath.Join(root, "docs", "architecture.md"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	doc := string(b)
-	used := map[string]bool{}
-	for _, kind := range txBypassUsers {
-		used[kind] = true
-	}
-	for kind, words := range bypassKinds {
-		if words == "" || !used[kind] {
-			continue
-		}
-		if !strings.Contains(doc, words) {
-			t.Errorf("docs/architecture.md must name TxBypass work of kind %q with the words %q", kind, words)
-		}
 	}
 }

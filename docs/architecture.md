@@ -135,7 +135,7 @@ The access log and the metrics name each request by its route's pattern when it 
 
 **Postgres keeps tenants apart.** Most work opens its transaction with `postgres.TxTenant`, and row-level security (RLS) then shows only that tenant's rows ([`rls_isolation_test.go`](../internal/platform/postgres/rls_isolation_test.go) proves it).
 
-**Work that skips RLS is listed.** `postgres.TxBypass` turns RLS off, so the query must filter by tenant itself. No test checks that filter. A reviewer must check it. [`txbypass_allowlist_test.go`](../internal/arch/txbypass_allowlist_test.go) fails on a function that uses `TxBypass` without being on its list. It also fails if a bullet below loses the exact words its `bypassKinds` table holds. So add a new kind of work to both, and reword a bullet only with the table.
+**Work that skips RLS is listed.** `postgres.TxBypass` turns RLS off, so the query must filter by tenant itself. No test checks that filter. A reviewer must check it. [`txbypass_allowlist_test.go`](../internal/arch/txbypass_allowlist_test.go) fails on a function that uses `TxBypass` without being on its list. A new kind of work goes in its `bypassKinds` table and in a bullet below.
 
 - background jobs, and the metrics that count their queues;
 - sign-in, sessions, API key lookup and creating an account;

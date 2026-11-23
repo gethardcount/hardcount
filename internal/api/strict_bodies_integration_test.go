@@ -91,7 +91,7 @@ func probePath(pattern string) string {
 // (bodiesNotChecked: the Stripe and Postmark webhooks and the LiteLLM
 // callback; their sender adds fields when it likes) and routes the spec
 // gives no body. A handler that reads a body the spec does not declare
-// fails TestNoRequestBodyDecodeOutsideRespond instead.
+// fails TestStrictBodies_BodylessRoutesRefuseABody instead.
 func TestStrictBodies_EveryJSONRouteRefusesAnUnknownKey(t *testing.T) {
 	r := newStrictRig(t)
 

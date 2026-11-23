@@ -198,11 +198,9 @@ Invariants, each mechanized or asserted in MANUAL_TEST:
   a button verb on a different surface) keeps its natural-language
   meaning — cause ("Record…") and effect ("Payment received …") read
   as a sentence, not a collision.
-- **Vocabulary gate:** `internal/arch/operator_vocabulary_test.go`
-  fails CI on "wall-clock" / "Real-time activity" / the negation
-  caption in operator-facing web-v2 source (comments exempt). Its first
-  run caught live copy on five surfaces, including the test-clock
-  banner itself.
+- **Vocabulary:** operator-facing copy does not say "wall-clock",
+  "Real-time activity" or the negation caption; the words are listed in
+  [Activity lines and UI words](../dev/activity-lines.md#words-to-keep-out-of-ui-text).
 
 ## Consequences
 

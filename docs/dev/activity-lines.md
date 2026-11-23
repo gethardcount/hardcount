@@ -114,3 +114,4 @@ the code's.
 | catchup, catch-up running | what is happening: "Billing the skipped days…" |
 | `event_name` or any field name | what it means: "The name your app sends with each usage event, for example `api_calls`" |
 | Configure … | what the page is for: "Your business details, invoice defaults, tax and payment setup" |
+| wall-clock, wall clock, Real-time activity, "not the test clock's dates" | the record's own date; when the real time differs, a "Recorded <time>" line under it |
