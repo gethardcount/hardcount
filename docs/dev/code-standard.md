@@ -25,6 +25,7 @@ New and changed code follows this page. Older code does not all follow it yet; s
 - **Tenant data goes through a tenant transaction:** `db.BeginTx(ctx, postgres.TxTenant, tenantID)`. The exceptions are in [Architecture](../architecture.md#design-rules).
 - API JSON fields are `snake_case`, and an ID carries its type: `postgres.NewID("hc_cus")` gives `hc_cus_...`.
 - A store returns `errs.ErrNotFound` for a missing row. `sql.ErrNoRows` never leaves the store.
+- **Work binds its one instant before it reads the clock:** the API's door binds a request's, and other work calls `clock.EnsureEffectiveNow`. A job reads the clock once before any bind, for the cutoff of its due list only, and each row it then works binds its own.
 
 ### Wiring and config
 
