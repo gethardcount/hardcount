@@ -117,6 +117,9 @@ func TestPostgresStore_AdvanceSummary_RoundTrips(t *testing.T) {
 	if marked.LastAdvanceSummary == nil || !marked.LastAdvanceSummary.AdvancedFrom.Equal(clk.FrozenTime) {
 		t.Fatalf("summary after MarkAdvancing: %+v, want advanced_from %s", marked.LastAdvanceSummary, clk.FrozenTime)
 	}
+	if got := advanceTarget(t, clk.ID); !got.Valid || !got.Time.Equal(to) {
+		t.Fatalf("advance_target after MarkAdvancing = %v, want %v", got, to)
+	}
 
 	want := domain.AdvanceSummary{
 		AdvancedFrom:      time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
@@ -133,6 +136,9 @@ func TestPostgresStore_AdvanceSummary_RoundTrips(t *testing.T) {
 	}
 	if done.LastAdvanceSummary == nil {
 		t.Fatal("CompleteAdvance did not return the persisted summary")
+	}
+	if got := advanceTarget(t, clk.ID); got.Valid {
+		t.Errorf("advance_target after CompleteAdvance = %v, want NULL: the advance reached it", got.Time)
 	}
 	got := *done.LastAdvanceSummary
 	if got.InvoicesGenerated != 2 || got.DunningAdvanced != 1 || got.CreditsExpired != 3 {
@@ -188,6 +194,20 @@ func TestPostgresStore_MarkFailed_ReasonCutInsideACharacter(t *testing.T) {
 	if want := kept + "…"; got.LastFailureReason != want {
 		t.Errorf("last_failure_reason = %q, want the first 498 bytes, which end before the split character, and …", got.LastFailureReason)
 	}
+	// Retry advance carries on to the target.
+	if target := advanceTarget(t, clk.ID); !target.Valid || !target.Time.Equal(time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Errorf("advance_target after MarkFailed = %v, want the advance's target kept", target)
+	}
+}
+
+// advanceTarget reads a clock's advance_target, which no Go field carries.
+func advanceTarget(t *testing.T, clockID string) sql.NullTime {
+	t.Helper()
+	var at sql.NullTime
+	if err := testutil.AdminPool(t).QueryRow(`SELECT advance_target FROM test_clocks WHERE id = $1`, clockID).Scan(&at); err != nil {
+		t.Fatalf("read advance_target: %v", err)
+	}
+	return at
 }
 
 // TestPostgresStore_AFailedAuditRowSavesNothing: the store saves an operator's

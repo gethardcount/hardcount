@@ -203,7 +203,9 @@ type PinPrices struct {
 // pin on test clock C has passed when it is at or before C's time, read
 // first: a price write stamps C with C's time plus 1 microsecond, read FOR
 // SHARE, so an advance that this read saw waited for every write that read
-// the clock before it, and the prices read next see those writes.
+// the clock before it, and the prices read next see those writes. Ingest's
+// pins are never after C's time (an item joins, and a period starts, at or
+// before it), so frozen_time answers them even while C advances.
 func (s *PostgresStore) PriceMatchesAt(ctx context.Context, tenantID string, pins []PlanPin) ([]PinPrices, error) {
 	out := make([]PinPrices, len(pins))
 	if len(pins) == 0 {
@@ -352,13 +354,7 @@ func latestPriceTx(ctx context.Context, tx *sql.Tx, planID, priceID string) (pri
 		WHERE p.id = $1 AND p.plan_id = $2`, priceID, planID))
 }
 
-// testClock is one test clock as a price write read it.
-type testClock struct {
-	id     string
-	frozen time.Time
-}
-
-// lockClocksTx reads every test clock of the account FOR SHARE, in id order,
+// lockClocksTx reads the id of every test clock of the account FOR SHARE, in id order,
 // before the plan lock (ADR-130 §8). FOR SHARE orders the write against a
 // clock advance (MarkAdvancing, the only writer of frozen_time) and against
 // a teardown, which takes its clock FOR UPDATE first. Every writer that takes
@@ -366,19 +362,19 @@ type testClock struct {
 // clocks before the plan makes no cycle. Row-level security scopes the read
 // to the tenant and the mode, so in live mode it reads nothing: a test clock
 // is always test mode.
-func lockClocksTx(ctx context.Context, tx *sql.Tx) ([]testClock, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id, frozen_time FROM test_clocks ORDER BY id FOR SHARE`)
+func lockClocksTx(ctx context.Context, tx *sql.Tx) ([]string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT id FROM test_clocks ORDER BY id FOR SHARE`)
 	if err != nil {
 		return nil, fmt.Errorf("lock test clocks: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
-	var out []testClock
+	var out []string
 	for rows.Next() {
-		var c testClock
-		if err := rows.Scan(&c.id, &c.frozen); err != nil {
+		var id string
+		if err := rows.Scan(&id); err != nil {
 			return nil, err
 		}
-		out = append(out, c)
+		out = append(out, id)
 	}
 	return out, rows.Err()
 }
@@ -611,7 +607,7 @@ type writtenVersion struct {
 // the plan can be never-used again with several versions, and updating only
 // one would leave a later one winning every future pin. On a used plan it
 // appends a version from now, and a stamp for every clock in clocks.
-func writeVersionTx(ctx context.Context, tx *sql.Tx, tenantID, planID, priceID string, used, removed bool, shape domain.PriceShape, clocks []testClock) (writtenVersion, error) {
+func writeVersionTx(ctx context.Context, tx *sql.Tx, tenantID, planID, priceID string, used, removed bool, shape domain.PriceShape, clocks []string) (writtenVersion, error) {
 	v := writtenVersion{id: postgres.NewID("hc_ppv")}
 	if !used {
 		if _, err := tx.ExecContext(ctx, `DELETE FROM plan_price_versions WHERE price_id = $1`, priceID); err != nil {
@@ -673,18 +669,16 @@ func writeVersionTx(ctx context.Context, tx *sql.Tx, tenantID, planID, priceID s
 		// starts at midnight before the clock's time, with no price.
 		return v, nil
 	}
-	ids := make([]string, 0, len(clocks))
-	for _, c := range clocks {
-		ids = append(ids, c.id)
-	}
 	// The extra microsecond keeps the old price for a period that opens
 	// exactly at the clock's time (an advance to a boundary), as a live
-	// period that opened before the edit does.
+	// period that opened before the edit does. While a clock advances, its
+	// time here is the advance's target, so the advance keeps the price it
+	// began with.
 	if _, err := tx.ExecContext(ctx, `
 		INSERT INTO plan_price_version_clocks (tenant_id, version_id, test_clock_id, valid_from)
-		SELECT $1, $2, c.id, c.frozen_time + interval '1 microsecond'
+		SELECT $1, $2, c.id, COALESCE(c.advance_target, c.frozen_time) + interval '1 microsecond'
 		FROM test_clocks c WHERE c.id = ANY($3::text[])`,
-		tenantID, v.id, ids); err != nil {
+		tenantID, v.id, clocks); err != nil {
 		return writtenVersion{}, fmt.Errorf("stamp version %s for the test clocks: %w", v.id, err)
 	}
 	return v, nil

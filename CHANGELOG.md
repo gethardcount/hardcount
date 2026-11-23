@@ -19,6 +19,8 @@ original text.
 
 ## [Unreleased]
 
+**Before upgrading:** nothing to do. Migration `00238_test_clock_advance_target` adds one nullable column to `test_clocks`, and gives a clock that is advancing during the upgrade its target. It runs on start, and copies of the earlier version keep working while it does ([#1900](https://github.com/gethardcount/hardcount/pull/1900)).
+
 ### Changed
 
 - **While a test clock advances, a change to one of its customers, or a new customer on it, answers `409 clock_advancing`:** the customer, its subscriptions, invoices, credit notes and credits, and usage you backfill or release. Reads, usage your app or proxy sends, payments through Stripe, price changes (which take effect after the advance) and deleting the clock go on, and a clock whose advance failed stays open ([errors](docs/api/errors.md), [#1899](https://github.com/gethardcount/hardcount/pull/1899)).
