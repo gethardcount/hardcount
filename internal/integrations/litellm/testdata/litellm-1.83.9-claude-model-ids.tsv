@@ -515,6 +515,44 @@ litellm	vertex_ai/claude-sonnet-4-6@default	claude-sonnet-4.6	vertex_ai/claude-s
 litellm	claude-sonnet-4-6@default	claude-sonnet-4.6	vertex_ai/claude-sonnet-4-6@default	3	15
 litellm	bedrock/us-gov-east-1/anthropic.claude-haiku-4-5-20251001-v1:0		bedrock/us-gov-east-1/anthropic.claude-haiku-4-5-20251001-v1:0	1.2	6
 litellm	bedrock/us-gov-west-1/anthropic.claude-haiku-4-5-20251001-v1:0		bedrock/us-gov-west-1/anthropic.claude-haiku-4-5-20251001-v1:0	1.2	6
+page	claude-fable-5-2	claude-fable-5.2			
+page	anthropic/claude-fable-5-2	claude-fable-5.2			
+page	anthropic.claude-fable-5-2	claude-fable-5.2			
+page	bedrock/anthropic.claude-fable-5-2	claude-fable-5.2			
+page	global.anthropic.claude-fable-5-2	claude-fable-5.2			
+page	us.anthropic.claude-fable-5-2	claude-fable-5.2			
+page	eu.anthropic.claude-fable-5-2	claude-fable-5.2			
+page	apac.anthropic.claude-fable-5-2	claude-fable-5.2			
+page	jp.anthropic.claude-fable-5-2	claude-fable-5.2			
+page	au.anthropic.claude-fable-5-2	claude-fable-5.2			
+page	us-gov.anthropic.claude-fable-5-2	claude-fable-5.2			
+page	bedrock/global.anthropic.claude-fable-5-2	claude-fable-5.2			
+page	bedrock/converse/us.anthropic.claude-fable-5-2	claude-fable-5.2			
+page	converse/eu.anthropic.claude-fable-5-2	claude-fable-5.2			
+page	invoke/us.anthropic.claude-fable-5-2	claude-fable-5.2			
+page	vertex_ai/claude-fable-5-2	claude-fable-5.2			
+page	azure_ai/claude-fable-5-2	claude-fable-5.2			
+page	claude-fable-5-2@default	claude-fable-5.2			
+page	vertex_ai/claude-fable-5-2@default	claude-fable-5.2			
+page	claude-mythos-5-2	claude-mythos-5.2			
+page	anthropic/claude-mythos-5-2	claude-mythos-5.2			
+page	anthropic.claude-mythos-5-2	claude-mythos-5.2			
+page	bedrock/anthropic.claude-mythos-5-2	claude-mythos-5.2			
+page	global.anthropic.claude-mythos-5-2	claude-mythos-5.2			
+page	us.anthropic.claude-mythos-5-2	claude-mythos-5.2			
+page	eu.anthropic.claude-mythos-5-2	claude-mythos-5.2			
+page	apac.anthropic.claude-mythos-5-2	claude-mythos-5.2			
+page	jp.anthropic.claude-mythos-5-2	claude-mythos-5.2			
+page	au.anthropic.claude-mythos-5-2	claude-mythos-5.2			
+page	us-gov.anthropic.claude-mythos-5-2	claude-mythos-5.2			
+page	bedrock/global.anthropic.claude-mythos-5-2	claude-mythos-5.2			
+page	bedrock/converse/us.anthropic.claude-mythos-5-2	claude-mythos-5.2			
+page	converse/eu.anthropic.claude-mythos-5-2	claude-mythos-5.2			
+page	invoke/us.anthropic.claude-mythos-5-2	claude-mythos-5.2			
+page	vertex_ai/claude-mythos-5-2	claude-mythos-5.2			
+page	azure_ai/claude-mythos-5-2	claude-mythos-5.2			
+page	claude-mythos-5-2@default	claude-mythos-5.2			
+page	vertex_ai/claude-mythos-5-2@default	claude-mythos-5.2			
 page	claude-fable-5-1	claude-fable-5.1			
 page	anthropic/claude-fable-5-1	claude-fable-5.1			
 page	anthropic.claude-fable-5-1	claude-fable-5.1			
@@ -952,7 +990,7 @@ probe	claude-opus-4-9
 probe	claude-opus-5-6				
 probe	claude-sonnet-6				
 probe	claude-haiku-5				
-probe	claude-fable-5-2				
+probe	claude-fable-5-3				
 probe	claude-mythos-preview				
 probe	claude-sonnet-4-5-thinking				
 probe	claude-opus-4-6-fast				

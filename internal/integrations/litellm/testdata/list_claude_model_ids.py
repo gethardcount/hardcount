@@ -19,7 +19,7 @@ for a key with no price):
     "anthropic/" + key for Anthropic keys; "bedrock/", "bedrock/converse/" and
     "converse/" + key for Bedrock keys; the bare id for vertex_ai/ and azure_ai/
     keys.
-  - page: every model id on Anthropic's pricing page (checked 2026-10-22), in
+  - page: every model id on Anthropic's pricing page (checked 2026-11-23), in
     the platform forms Bedrock, Google Cloud, Foundry and the API use.
   - probe: names that must stay unpriced (decision 2: an unknown version is
     never priced as an older model), and a few edge forms.
@@ -46,6 +46,8 @@ import sys
 
 # family id (API form) -> recipe token, from the design's section 5.3.
 FAMILIES = [
+    ("claude-fable-5-2", "claude-fable-5.2"),
+    ("claude-mythos-5-2", "claude-mythos-5.2"),
     ("claude-fable-5-1", "claude-fable-5.1"),
     ("claude-mythos-5-1", "claude-mythos-5.1"),
     ("claude-opus-5-5", "claude-opus-5.5"),
@@ -106,6 +108,7 @@ def expected(raw):
 
 
 PAGE = [
+    "claude-fable-5-2", "claude-mythos-5-2",
     "claude-fable-5-1", "claude-mythos-5-1", "claude-fable-5", "claude-mythos-5",
     "claude-opus-5-5", "claude-opus-5", "claude-opus-4-8", "claude-opus-4-7",
     "claude-opus-4-6", "claude-opus-4-5", "claude-opus-4-5-20251101",
@@ -119,7 +122,7 @@ PAGE = [
 
 PROBES = [
     "claude-opus-4-9", "claude-opus-5-6", "claude-sonnet-6", "claude-haiku-5",
-    "claude-fable-5-2", "claude-mythos-preview", "claude-sonnet-4-5-thinking",
+    "claude-fable-5-3", "claude-mythos-preview", "claude-sonnet-4-5-thinking",
     "claude-opus-4-6-fast", "claude-opus-5-5-20261101", "claude-3-7-sonnet-20250219",
     "anthropic.claude-3-5-sonnet-20241022-v2:0:51k", "claude-sonnet-4.6",
     "openrouter/anthropic/claude-sonnet-4.6",

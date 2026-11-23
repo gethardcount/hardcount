@@ -11,7 +11,7 @@ import (
 // anthropicPricesChecked is the date anthropicListPrices was last compared
 // with Anthropic's pricing page. When you check the page again, update the
 // table and this date (docs/dev/release-checklist.md).
-const anthropicPricesChecked = "2026-11-09"
+const anthropicPricesChecked = "2026-11-23"
 
 // anthropicPricingPage is the page the table is copied from.
 const anthropicPricingPage = "https://platform.claude.com/docs/en/about-claude/pricing"
@@ -31,6 +31,8 @@ type anthropicListPrice struct {
 // longer lists; the recipe keeps their last published price, checked on the
 // date given.
 var anthropicListPrices = []anthropicListPrice{
+	{"claude-fable-5.2", "", "8", "40", "0.20", "10", "16", true, anthropicPricesChecked},
+	{"claude-mythos-5.2", "", "8", "40", "0.20", "10", "16", true, anthropicPricesChecked},
 	{"claude-fable-5.1", "", "10", "50", "0.25", "12.50", "20", true, anthropicPricesChecked},
 	{"claude-mythos-5.1", "", "10", "50", "0.25", "12.50", "20", true, anthropicPricesChecked},
 	{"claude-fable-5", "", "10", "50", "1", "12.50", "20", true, anthropicPricesChecked},
