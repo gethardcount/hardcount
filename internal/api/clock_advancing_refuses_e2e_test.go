@@ -47,7 +47,12 @@ func TestE2E_TestClock_AnAdvancingClocksCustomersCannotBeChanged(t *testing.T) {
 	backfill["timestamp"] = start.Format(time.RFC3339)
 	refused("usage backfill", r.call("POST", "/v1/usage-events/backfill", flowReq{body: backfill}))
 
-	r.call("POST", "/v1/usage-events", flowReq{body: event("advancing-1")}).want(t, 201, "a usage event")
+	// Sent while the clock stands behind its target, it is dated at the
+	// target: it takes effect after the advance.
+	target := start.AddDate(0, 1, 0)
+	if ev := r.call("POST", "/v1/usage-events", flowReq{body: event("advancing-1")}).want(t, 201, "a usage event").body; !at(t, ev, "timestamp").Equal(target) {
+		t.Errorf("usage event timestamp %v, want the advance's target %v", ev["timestamp"], target)
+	}
 	r.call("POST", "/v1/usage-events/batch", flowReq{body: []map[string]any{event("advancing-2"), event("advancing-3")}}).want(t, 201, "a usage batch")
 	var call []map[string]any
 	if err := json.Unmarshal(e2eLiteLLMBatch(t, 1, "dates-on-clock", 0), &call); err != nil {

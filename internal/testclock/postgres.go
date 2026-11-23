@@ -25,7 +25,7 @@ func NewPostgresStore(db *postgres.DB) *PostgresStore {
 
 const clockCols = `id, tenant_id, name, frozen_time, status,
 	created_at, updated_at,
-	COALESCE(last_failure_reason,''), last_advance_summary`
+	COALESCE(last_failure_reason,''), last_advance_summary, advance_target`
 
 func (s *PostgresStore) Create(ctx context.Context, tenantID string, clk domain.TestClock, auditRow AuditRow) (domain.TestClock, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
@@ -64,8 +64,8 @@ func (s *PostgresStore) Create(ctx context.Context, tenantID string, clk domain.
 //
 // ErrNotFound → (zero, false, nil); other errors propagate. Soft-deleted clocks
 // count as not-existing. A request that creates a customer on an advancing
-// clock is refused (clock.RefuseIfAdvancing); a failed clock's frozen_time
-// is already its new time, so the customer joins at it.
+// clock is refused (clock.RefuseIfAdvancing); a failed clock's frozen_time is
+// the step its advance reached, and the customer joins at it.
 func (s *PostgresStore) ResolveSim(ctx context.Context, tenantID, id string) (clock.Sim, bool, error) {
 	clk, err := s.Get(ctx, tenantID, id)
 	if err != nil {
@@ -252,9 +252,9 @@ func (s *PostgresStore) Delete(ctx context.Context, tenantID, id string, auditRo
 }
 
 func (s *PostgresStore) MarkAdvancing(ctx context.Context, tenantID, id string, newFrozenTime time.Time, auditRow AuditRow) (domain.TestClock, error) {
-	// The summary restarts with the time the advance starts from, read off
-	// the row before this statement changes it (the right-hand side of SET
-	// sees the old row). The catch-up reads it back from the clock, so a
+	// The clock keeps its time, and the catch-up moves it to each due time
+	// on the way to the target. The summary restarts with the time the
+	// advance starts from. The catch-up reads it back from the clock, so a
 	// Retry and a run another replica picks up keep it.
 	//
 	// The new time is checked against the row this statement changes, not
@@ -264,7 +264,7 @@ func (s *PostgresStore) MarkAdvancing(ctx context.Context, tenantID, id string, 
 	// February, not 1 March), and that day is refused as a conflict. The
 	// statement adds its year in the database session's time zone.
 	return s.transition(ctx, tenantID, id, auditRow, "can only advance a ready clock to a later time at most a year ahead", `
-		UPDATE test_clocks SET status = 'advancing', frozen_time = $2, advance_target = $2,
+		UPDATE test_clocks SET status = 'advancing', advance_target = $2,
 			last_advance_summary = jsonb_build_object('advanced_from', frozen_time),
 			updated_at = now()
 		WHERE id = $1 AND status = 'ready'
@@ -422,10 +422,10 @@ func (s *PostgresStore) transition(ctx context.Context, tenantID, id string, aud
 
 // ListAdvancingForCatchup is the testclock_catchup role's claim list
 // (ADR-140, ADR-114): the clocks in status='advancing' across every tenant,
-// the one whose pass started longest ago first, at most limit. A pass starts
-// with TouchAdvancing, so a clock whose pass was cut off goes to the back.
-// A pass runs to its end, so a long one still holds up the clocks behind it;
-// fairness between clocks comes with the stepped catch-up. The statement
+// the one touched longest ago first, at most limit. A pass starts with
+// TouchAdvancing and each step moves the clock (MoveTo), so a clock whose
+// pass was cut off goes to the back. A pass runs to its target, so a long
+// one still holds up the clocks behind it. The statement
 // proves the lease's fence, so a deposed leader lists nothing.
 // RLS-bypassed (TxBypass): the tick runs for every tenant, before any tenant
 // ctx exists.
@@ -467,7 +467,7 @@ func scanDest(c *domain.TestClock) []any {
 	return []any{
 		&c.ID, &c.TenantID, &c.Name, &c.FrozenTime, &c.Status,
 		&c.CreatedAt, &c.UpdatedAt,
-		&c.LastFailureReason, advanceSummaryScan{&c.LastAdvanceSummary},
+		&c.LastFailureReason, advanceSummaryScan{&c.LastAdvanceSummary}, &c.AdvanceTarget,
 	}
 }
 
@@ -531,4 +531,77 @@ func (s *PostgresStore) TouchAdvancing(ctx context.Context, tenantID, id string)
 		return fencedMiss(ctx, tx, id)
 	}
 	return tx.Commit()
+}
+
+// MoveTo moves an advancing clock's time forward to to, a due time on the way
+// to its target, and writes the advance's counts so far in the same
+// statement, and moves the clock to the back of the claim list. A catch-up
+// write: fenced on the testclock_catchup lease (fencedMiss gives its errors).
+func (s *PostgresStore) MoveTo(ctx context.Context, tenantID, id string, to time.Time, summary domain.AdvanceSummary) error {
+	token, err := leader.Fence(ctx, leader.RoleTestClockCatchup)
+	if err != nil {
+		return err
+	}
+	b, err := json.Marshal(summary)
+	if err != nil {
+		return fmt.Errorf("encode advance summary: %w", err)
+	}
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return err
+	}
+	defer postgres.Rollback(tx)
+
+	res, err := tx.ExecContext(ctx,
+		`UPDATE test_clocks SET frozen_time = $4, last_advance_summary = $5::jsonb, updated_at = now()
+		 WHERE id = $1 AND status = 'advancing' AND leader_fence($2, $3)`,
+		id, string(leader.RoleTestClockCatchup), token, to, b,
+	)
+	if err != nil {
+		return err
+	}
+	if n, err := res.RowsAffected(); err != nil {
+		return err
+	} else if n == 0 {
+		return fencedMiss(ctx, tx, id)
+	}
+	return tx.Commit()
+}
+
+// NextDue is the next time something is due for the clock's customers after
+// after: a subscription's period end, scheduled cancel, trial end or pause
+// end, or a dunning run's next action, as the catch-up's jobs list them. It
+// answers until when nothing is due before it.
+func (s *PostgresStore) NextDue(ctx context.Context, tenantID, id string, after, until time.Time) (time.Time, error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return time.Time{}, err
+	}
+	defer postgres.Rollback(tx)
+
+	var next time.Time
+	err = tx.QueryRowContext(ctx, `
+		SELECT LEAST($3::timestamptz, MIN(due)) FROM (
+			SELECT next_billing_at AS due FROM subscriptions
+			 WHERE test_clock_id = $1 AND status IN ('active', 'trialing') AND next_billing_at > $2
+			UNION ALL
+			SELECT cancel_at FROM subscriptions
+			 WHERE test_clock_id = $1 AND status = 'active' AND cancel_at > $2
+			UNION ALL
+			SELECT trial_end_at FROM subscriptions
+			 WHERE test_clock_id = $1 AND status = 'trialing' AND trial_end_at > $2
+			UNION ALL
+			SELECT pause_collection_resumes_at FROM subscriptions
+			 WHERE test_clock_id = $1 AND pause_collection_resumes_at > $2
+			UNION ALL
+			SELECT r.next_action_at FROM invoice_dunning_runs r
+			  JOIN invoices i ON i.id = r.invoice_id
+			  JOIN customers c ON c.id = i.customer_id
+			 WHERE c.test_clock_id = $1 AND r.paused = false AND r.state NOT IN ('resolved', 'escalated')
+			   AND r.next_action_at > $2
+		) d`, id, after, until).Scan(&next)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("next due time of test clock %s: %w", id, err)
+	}
+	return next, nil
 }

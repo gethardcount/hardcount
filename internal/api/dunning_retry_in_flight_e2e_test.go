@@ -588,11 +588,12 @@ func TestE2E_DunningRetryProcessing_FailsNeedingConfirmation(t *testing.T) {
 // TestE2E_DunningFinalRetryProcessing_HeldThenEscalatedAtFailure: the last
 // retry comes back processing. Its final action falls due in the same
 // advance and waits: no final action and no escalation while the payment is
-// processing, and the advance fails, saying the retry waits for an earlier
-// charge attempt, so the clock cannot move past it until Stripe reports the
-// payment. Its failure sends no warning (the escalation is the last
-// attempt's email), and Retry advance escalates, dated at the failure rather
-// than at the retry before it.
+// processing, and the advance stops at that step, saying the retry waits for
+// an earlier charge attempt, so the clock cannot move past it until Stripe
+// reports the payment. Its failure, which arrives while the clock stands
+// there, sends no warning (the escalation is the last attempt's email), and
+// Retry advance escalates, dated at the failure rather than at the retry
+// before it.
 func TestE2E_DunningFinalRetryProcessing_HeldThenEscalatedAtFailure(t *testing.T) {
 	r := newInFlightRig(t, "Final Retry In Flight", []int{1}, map[string][]string{"pm_slow_d": {"processing"}})
 	inv := r.newInvoice(r.newCustomer("d", "pm_slow_d"))
@@ -606,7 +607,11 @@ func TestE2E_DunningFinalRetryProcessing_HeldThenEscalatedAtFailure(t *testing.T
 		t.Fatalf("escalation emails while the last payment is processing: %d, want 0", n)
 	}
 
-	// The payment fails while the clock stands at day 2.
+	// The payment fails while the clock stands where the advance stopped.
+	stopped := ppTime(t, flowStr(r.call("GET", "/v1/test-clocks/"+r.clockID, nil).want(t, 200, "read clock").body, "frozen_time"))
+	if !stopped.After(r.day(1)) || !stopped.Before(r.day(2)) {
+		t.Fatalf("the advance stopped at %v, want the held retry's step, after the retry on %v and before day 2", stopped, r.day(1))
+	}
 	r.webhook(r.piEvent("payment_intent.payment_failed", pi, inv, "requires_payment_method",
 		cardError("insufficient_funds", "Your card has insufficient funds.", "pm_slow_d"))).want(t, 200, "payment_intent.payment_failed")
 	if w := r.warnings(inv); len(w) != 0 {
@@ -617,8 +622,8 @@ func TestE2E_DunningFinalRetryProcessing_HeldThenEscalatedAtFailure(t *testing.T
 	if flowStr(run, "state") != "escalated" {
 		t.Fatalf("run after Retry advance: %v, want escalated", run["state"])
 	}
-	if got, want := r.runTime(run, "resolved_at"), r.day(2); !got.Equal(want) {
-		t.Errorf("escalation dated %v, want the failure %v (not the retry on %v)", got, want, r.day(1))
+	if got := r.runTime(run, "resolved_at"); !got.Equal(stopped) {
+		t.Errorf("escalation dated %v, want the failure %v (not the retry on %v)", got, stopped, r.day(1))
 	}
 	if n := r.emailsOfType(inv, "dunning_escalation"); n != 1 {
 		t.Errorf("escalation emails: %d, want 1", n)

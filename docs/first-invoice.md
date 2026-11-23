@@ -269,11 +269,6 @@ Recipe, meter and test clock: [quick start](quick-start.md#words-on-this-page).
    ready
    ```
 
-   Testing a dunning policy that pauses or cancels? (Dunning is Hardcount's
-   automatic payment retries.) Move the clock in two steps: see
-   [catch-up](glossary.md#testing-with-simulated-time), the work Hardcount
-   does while a test clock moves.
-
 7. **Read the invoice.**
 
    <!-- docs-run: command -->

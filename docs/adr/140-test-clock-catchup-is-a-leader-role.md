@@ -21,8 +21,9 @@ clock `advancing`, and the next leader runs the pass again; the passes are
 safe to repeat. An advance no longer runs on two replicas at once, or waits
 for a restart after a deploy.
 
-This is part 1. Part 2, the stepped loop (#1276: an advance runs its work in
-time order, one due instant at a time), builds on it.
+Part 2, the stepped loop, builds on it: an advance runs its work in time
+order, one due time at a time (#1276), within one pass, and each step is a
+fenced write (`MoveTo`).
 
 ## Context
 
@@ -56,13 +57,12 @@ the catch-up is one more job.
    advancing clocks with `ListAdvancingForCatchup`: every tenant (TxBypass),
    the clock whose pass started longest ago first, at most 20, in one
    statement that proves the fence (`leader_fence`). It runs one pass on
-   each. A pass starts with `TouchAdvancing`, which moves the clock to the
-   back, so a clock whose pass keeps being cut off does not hold up the
-   others. A pass runs to its end, so a long pass still holds up the clocks
-   behind it: fairness between clocks comes with the stepped catch-up
-   (part 2).
+   each. A pass starts with `TouchAdvancing`, and each step moves the clock
+   (`MoveTo`); both move it to the back, so a clock whose pass keeps being
+   cut off does not hold up the others. A pass runs to its target, so a long pass still holds up the
+   clocks behind it.
 3. **Fenced writes.** The catch-up's writes to a clock row
-   (`TouchAdvancing`, `CompleteAdvance`, `MarkFailed`) carry `AND
+   (`TouchAdvancing`, `MoveTo`, `CompleteAdvance`, `MarkFailed`) carry `AND
    leader_fence('testclock_catchup', token)`. `CompleteAdvance` and
    `MarkFailed` store the advance's summary in the same statement. A write
    that changes no row is one of two outcomes, and neither is a failure of

@@ -9,11 +9,12 @@ import (
 )
 
 // TestE2E_TestClock_RepeatedPassBillsOnce: the testclock_catchup leader runs
-// a pass again when the tick that ran it ended (a shutdown, a lost lease),
-// and the pass may have written some or all of its work by then. Running it
-// again must bill nothing twice. Here the whole pass ran, then runs again at
-// the same time, with real phases: the period invoice and its usage stay one
-// each.
+// a step again when the tick that ran it ended (a shutdown, a lost lease)
+// after the step's work was written and before the clock moved on. Running
+// it again must bill nothing twice. Here the advance ran through the period
+// end; the clock is put back at that step, with its target an hour on, and
+// the catch-up runs again with real jobs: the period invoice and its usage
+// stay one each.
 func TestE2E_TestClock_RepeatedPassBillsOnce(t *testing.T) {
 	r := newPPRig(t, "repeated pass")
 	calls := r.meter("calls", "sum")
@@ -33,14 +34,15 @@ func TestE2E_TestClock_RepeatedPassBillsOnce(t *testing.T) {
 	}
 	wantUsage(t, "after the first pass", r.cycle(sub, p0), map[string]int64{ids[0]: 10})
 
-	// The clock goes back to advancing at the same time, as when its tick
-	// ended before the leader could complete it, and the next tick runs the
-	// pass again.
+	// The clock goes back to advancing at the period end, as when its tick
+	// ended after that step's work and before it moved on, and the next tick
+	// runs the step again.
 	tx, err := r.db.BeginTx(t.Context(), postgres.TxBypass, "")
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
-	if _, err := tx.ExecContext(t.Context(), `UPDATE test_clocks SET status = 'advancing' WHERE id = $1`, clk); err != nil {
+	if _, err := tx.ExecContext(t.Context(), `UPDATE test_clocks SET status = 'advancing', frozen_time = $2, advance_target = $3 WHERE id = $1`,
+		clk, p1, p1.Add(time.Hour)); err != nil {
 		t.Fatalf("mark advancing again: %v", err)
 	}
 	if err := tx.Commit(); err != nil {

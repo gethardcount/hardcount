@@ -29,8 +29,8 @@ come from the clock, not from the real time.
 | Status | What it means | What you can do |
 |---|---|---|
 | `ready` | Idle. | Move it, or delete it. |
-| `advancing` | Hardcount is running everything that fell due in the skipped time. | Wait, and read the clock again. A change to one of its customers (the customer, its subscriptions, invoices, credit notes and credits, and usage you backfill or release), or a new customer on it, answers `409 clock_advancing`. Reads, usage your app or proxy sends, payments through Stripe, price changes (which take effect after the advance) and deleting the clock go on. |
-| `internal_failure` | A job failed, or the run took more than 10 minutes. Work done before the failure is kept, and the jobs after it did not run. `last_failure_reason` names the job that failed and why. | `POST /v1/test-clocks/{id}/retry-advance`, or delete the clock. |
+| `advancing` | Hardcount is running everything that fell due in the skipped time. | Wait, and read the clock again. A change to one of its customers (the customer, its subscriptions, invoices, credit notes and credits, and usage you backfill or release), or a new customer on it, answers `409 clock_advancing`. Reads, usage your app or proxy sends, payments through Stripe, price changes and deleting the clock go on; usage, payments and price changes that arrive during the advance take effect after it. |
+| `internal_failure` | A job failed, or the run took more than 10 minutes. The clock stops at the time it had got to; work done before the failure is kept, and the jobs after it did not run. `last_failure_reason` names the job that failed and why. | `POST /v1/test-clocks/{id}/retry-advance`, which carries on from there, or delete the clock. |
 
 ## Moving a clock
 
@@ -52,8 +52,12 @@ as `invoices_generated` and `charges_retried`.
 
 ## What runs while the clock moves
 
-Hardcount runs everything that fell due between the old time and the new
-one. It runs one job for each kind, in this order, not in time order:
+Hardcount moves the clock forward through each time something falls due
+for its customers, in order: a billing period's end, a trial's end, a
+pause's end, a scheduled cancel, a payment retry. So things happen in the
+order they would in real time: a payment retry due before a renewal runs
+before the renewal is billed. While it moves, `frozen_time` shows where it
+has got to. At each of those times it runs these jobs, in this order:
 
 1. trial ends;
 2. billing period closes, which make the invoices;
@@ -70,8 +74,14 @@ one. It runs one job for each kind, in this order, not in time order:
 10. credit expiry, last.
 
 If a job fails, the jobs after it do not run: the clock stops at
-`internal_failure`, and its `last_failure_reason` starts with the job's
-name from this list.
+`internal_failure` at the time it had got to, and its `last_failure_reason`
+starts with the job's name from this list. Retry advance runs that time
+again and carries on to the time you asked for; the counts in
+`last_advance_summary` add up across Retry advance.
+
+A draft whose tax cannot be calculated stays a draft and the move goes on,
+as in real time; the tax retry tries it again at each later time the clock
+reaches.
 
 A card charge that could not be made is a failure on a clock: the clock
 stops at `internal_failure`, and `last_failure_reason` names the invoice and
@@ -102,8 +112,8 @@ Payment retries work the same way. A retry that gets no definite answer
 from Stripe is not counted as an attempt, and on a clock it stops the move
 at `internal_failure`; Retry advance tries it again. One move takes each
 dunning run through every step due in it (its retries, then the final
-actions), up to 50 steps a run. A final action that fails, a run still due
-after 50 steps, or one that stops moving also stops the move. So does a
+actions), each at its own time. A final action that fails, or a run that
+stops moving, also stops the move. So does a
 retry whose invoice has an earlier payment that has not finished (a charge
 whose result is not known yet, or one still being sent): it cannot be
 charged twice. Hardcount checks that payment on its next billing run
@@ -117,19 +127,6 @@ the page is paid or closes.
 
 A clock has no invoice grace period: moving past a period's end makes its
 invoice at once.
-
-### Testing a dunning policy that pauses or cancels
-
-Because the kinds run in this order, one long move can close the next
-billing period before dunning's final action runs. The pause or cancel is
-then dated at that next billing date, not at the last retry. On a plan
-billed in advance, the next period's invoice is made too.
-
-So move the clock in two steps:
-
-1. To the time of the invoice's last retry, or later but before the next
-   billing date. The pause or cancel then runs, dated at that retry.
-2. Then to the next billing date.
 
 ## Deleting a clock
 

@@ -213,8 +213,9 @@ Home leaves out customers on a test clock, so its totals do not change.
   prorated: [Subscriptions](../concepts/subscriptions.md#plan-changes).
 - **A dunning policy** (what Hardcount's automatic payment retries do, and
   what happens when they run out): save a card that declines on the
-  customer, then move the clock to each retry date. A policy that pauses or
-  cancels needs a move in two steps: [Test clocks](../concepts/test-clocks.md#testing-a-dunning-policy-that-pauses-or-cancels).
+  customer, then move the clock past the last retry: the retries, and the
+  pause or cancel when they run out, happen at their own dates
+  ([Test clocks](../concepts/test-clocks.md#what-runs-while-the-clock-moves)).
 - **Late usage:** an event with a January `timestamp`, sent after step 10,
   is answered with `billing_status: "after_close"` and is on no invoice
   ([Late usage](../concepts/usage-events.md#late-usage)).

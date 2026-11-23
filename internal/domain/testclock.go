@@ -17,7 +17,7 @@ import "time"
 // While the clock is advancing, a request that changes one of its customers,
 // or creates one on it, is refused with 409 clock_advancing
 // (clock.RefuseIfAdvancing). A customer created on a failed clock joins it at
-// its frozen_time, which is already the new time.
+// its frozen_time, the time its advance reached.
 type TestClockStatus string
 
 const (
@@ -55,6 +55,11 @@ type TestClock struct {
 	// AdvancedFrom alone; the catch-up's completing or failing write fills
 	// in the rest.
 	LastAdvanceSummary *AdvanceSummary `json:"last_advance_summary,omitempty"`
+	// AdvanceTarget is the time an advance moves the clock to, set while the
+	// clock is advancing or its advance failed. The advance moves FrozenTime
+	// through each due time on the way (testclock.Service.runClock). Not in
+	// the API.
+	AdvanceTarget *time.Time `json:"-"`
 }
 
 // AdvanceSummary is the compact, operator-facing record of one test-clock

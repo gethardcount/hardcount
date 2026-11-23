@@ -371,20 +371,16 @@ follows.
   ends, invoices and payment retries happen in seconds, not months. It
   exists only in test mode. [More](concepts/test-clocks.md)
 - **catch-up (catchup)**: The work Hardcount does after a test clock moves
-  forward. It runs everything that fell due in the skipped time, grouped by
-  kind, not in time order. The kinds run in this order: trial ends, billing
-  periods, pauses that end, thresholds, tax retries, charges, credit notes
-  waiting for an invoice to settle, dunning steps and credit expiries.
-  Hardcount dates a dunning pause or cancel at the escalation, the time of
-  the last retry, but never before the current period's start. So one long
-  move that bills the next period first dates the pause or cancel at that
-  next billing date. To test a policy that pauses or cancels, move the
-  clock to the invoice's last retry first, then to the next billing date.
-  The clock then returns to `ready`, or to `internal_failure` if a step
-  failed or the move took more than 10 minutes.
-  [More](concepts/test-clocks.md#what-runs-while-the-clock-moves),
-  [the decision](adr/015-test-clock-async-catchup.md), and
-  [the two-step move](https://github.com/gethardcount/hardcount/issues/1276)
+  forward. It moves the clock through each time something falls due for its
+  customers, in order (a period's end, a trial's end, a pause's end, a
+  scheduled cancel, a payment retry), and at each runs the jobs: trial ends,
+  billing periods, pauses that end, thresholds, tax retries, charges, credit
+  notes waiting for an invoice to settle, dunning steps and credit expiries.
+  So things happen in the order they would in real time. The clock then
+  returns to `ready`, or stops at `internal_failure` at the time it had got
+  to if a job failed or the move took more than 10 minutes.
+  [More](concepts/test-clocks.md#what-runs-while-the-clock-moves) and
+  [the decision](adr/015-test-clock-async-catchup.md)
 - **clock-pinned**: Describes a customer on a test clock, and everything it
   owns (subscriptions, invoices, credits). Its time comes from the clock,
   not the real clock, and the normal billing run skips it.
