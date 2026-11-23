@@ -180,14 +180,14 @@ func newZeroDueDunningRig(t *testing.T, name string) *zeroDueDunningRig {
 // at next.
 func (r *zeroDueDunningRig) run(attempts int, next time.Time) domain.InvoiceDunningRun {
 	r.t.Helper()
-	run, err := r.runs.CreateRun(r.ctx, r.tenantID, domain.InvoiceDunningRun{
+	run, err := r.runs.CreateRun(testutil.RealInstant(r.ctx), r.tenantID, domain.InvoiceDunningRun{
 		InvoiceID: r.inv.ID, CustomerID: r.cust.ID, PolicyID: r.policy.ID,
 		State: domain.DunningActive, Reason: "payment_failed", AttemptCount: attempts, NextActionAt: &next,
 	})
 	if err != nil {
 		r.t.Fatalf("create run: %v", err)
 	}
-	if ok, err := r.runs.UpdateRunIfActive(r.ctx, r.tenantID, run, attempts, nil); err != nil || !ok {
+	if ok, err := r.runs.UpdateRunIfActive(testutil.RealInstant(r.ctx), r.tenantID, run, attempts, nil); err != nil || !ok {
 		r.t.Fatalf("record the attempts: applied=%v err=%v", ok, err)
 	}
 	return run
@@ -206,14 +206,15 @@ func (r *zeroDueDunningRig) getRun(id string) domain.InvoiceDunningRun {
 // then issue.
 func (r *zeroDueDunningRig) waive() {
 	r.t.Helper()
-	cn, err := r.srv.CreditNoteSvc.Create(r.ctx, r.tenantID, creditnote.CreateInput{
+	ctx := testutil.RealInstant(r.ctx) // the operator's request, as the door binds it
+	cn, err := r.srv.CreditNoteSvc.Create(ctx, r.tenantID, creditnote.CreateInput{
 		InvoiceID: r.inv.ID, Reason: "waived",
 		Lines: []creditnote.CreditLineInput{{Description: "waive the invoice", Quantity: 1, UnitAmountCents: r.inv.AmountDueCents}},
 	})
 	if err != nil {
 		r.t.Fatalf("create credit note: %v", err)
 	}
-	if _, err := r.srv.CreditNoteSvc.Issue(r.ctx, r.tenantID, cn.ID); err != nil {
+	if _, err := r.srv.CreditNoteSvc.Issue(ctx, r.tenantID, cn.ID); err != nil {
 		r.t.Fatalf("issue credit note: %v", err)
 	}
 }

@@ -200,11 +200,11 @@ func TestHandler_UpdateItem_ScheduledPlanChangeAuditNamesBothPlans(t *testing.T)
 	}
 }
 
-// A plan change on a subscription on no test clock: the door decides real
-// time for it, so the row's sim columns stay NULL and it never appears in the
-// simulated slice.
+// A plan change on a subscription on no test clock: the door binds a real
+// instant for it (one read of the server's clock), so the row's sim columns
+// stay NULL and it never appears in the simulated slice.
 func TestHandler_UpdateItem_PlanChangeAuditNoSimContextWhenUnpinned(t *testing.T) {
-	ctx := clock.WithRealTime(context.Background())
+	ctx := clock.WithEffectiveNow(context.Background(), time.Now().UTC())
 	tenantID := "t1"
 
 	store := newMemStore()

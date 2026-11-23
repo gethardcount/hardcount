@@ -3205,7 +3205,7 @@ func (s *Service) ProcessExpiredTrials(ctx context.Context, batch int) (int, []e
 	if err != nil {
 		return 0, []error{err}
 	}
-	now := s.clock.Now(ctx) // only for the list; each row reads its own
+	now := clock.Cutoff(ctx, s.clock) // only for the list; each row reads its own
 	expired, err := s.store.ListExpiredTrials(ctx, now, livemode, batch)
 	if err != nil {
 		return 0, []error{fmt.Errorf("list expired trials: %w", err)}
@@ -3373,7 +3373,7 @@ func (s *Service) ProcessExpiredPauseCollections(ctx context.Context, batch int)
 	if batch <= 0 {
 		batch = 100
 	}
-	now := s.clock.Now(ctx)
+	now := clock.Cutoff(ctx, s.clock) // only for the list; each row reads its own
 	expired, err := s.store.ListExpiredPauseCollections(ctx, now, batch)
 	if err != nil {
 		return 0, []error{fmt.Errorf("list expired pause collections: %w", err)}

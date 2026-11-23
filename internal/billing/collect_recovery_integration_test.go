@@ -386,7 +386,7 @@ func TestProcessDueRuns_LateWallClockRetryKeepsCadence_RealStore(t *testing.T) {
 
 	inv := h.seed(t, "INV-CADENCE-1")
 	// The invoice is on no clock: the failure that starts dunning is decided at real time.
-	run, err := svc.StartDunning(clock.WithRealTime(h.ctx), h.tenantID, inv.ID, inv.CustomerID, inv.IssuedAtOrZero(), domain.DunningCausePaymentFailed)
+	run, err := svc.StartDunning(testutil.RealInstant(h.ctx), h.tenantID, inv.ID, inv.CustomerID, inv.IssuedAtOrZero(), domain.DunningCausePaymentFailed)
 	if err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}

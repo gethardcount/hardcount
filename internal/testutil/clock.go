@@ -8,11 +8,19 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// AtRealTime is a test-mode context decided at real time: where a job's tick
-// starts (the scheduler decides real time), and where a request on a record
-// on no clock is decided.
+// AtRealTime is a test-mode context decided at real time with no instant:
+// where a job's tick starts (the scheduler decides real time, and each row
+// binds its own). A read of the server's clock on it fails under tests; work
+// that runs on it binds first, or reads a list cutoff (clock.Cutoff).
 func AtRealTime() context.Context {
 	return clock.WithRealTime(postgres.WithLivemode(context.Background(), false))
+}
+
+// RealInstant is ctx bound to one read of the server's clock, as the API's
+// door binds a request on a record on no clock: for a test's seeding or an
+// operator's request that means a real instant.
+func RealInstant(ctx context.Context) context.Context {
+	return clock.EnsureEffectiveNow(clock.WithRealTime(ctx), clock.Real())
 }
 
 // DecidedFor is a test-mode context decided from the record p names, as the

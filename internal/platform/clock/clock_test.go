@@ -221,8 +221,9 @@ func TestWithEffectiveNow_ClearsStaleClock(t *testing.T) {
 }
 
 // A ctx records one of three answers about its time: nothing decided, real
-// time, or a test clock and its instant. Now reads machine time for the first
-// two; only Decision tells them apart.
+// time, or a test clock and its instant. Only Decision tells the first two
+// apart. (A read under real time with no instant fails under tests:
+// TestRefuseMissedBind.)
 func TestDecision_RecordsOneOfThreeAnswers(t *testing.T) {
 	bare := context.Background()
 	if _, ok := Decision(bare); ok {
@@ -235,10 +236,6 @@ func TestDecision_RecordsOneOfThreeAnswers(t *testing.T) {
 	}
 	if _, ok := SimOf(realTime); ok {
 		t.Error("WithRealTime: SimOf reports a clock")
-	}
-	before := time.Now().UTC()
-	if got := Now(realTime); got.Before(before) || got.After(time.Now().UTC()) {
-		t.Errorf("WithRealTime: Now = %v, want machine time", got)
 	}
 
 	frozen := time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC)

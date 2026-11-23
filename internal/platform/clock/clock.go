@@ -17,6 +17,11 @@
 // in the same action, are dated when Stripe's answer arrives (AtArrival), in
 // the same call or by webhook. A Stripe Tax answer is not one: it keeps the
 // action's instant.
+//
+// Three reads may find no instant bound and read the server's clock:
+// EnsureEffectiveNow, to bind one; AtArrival, for a result's arrival; and
+// Cutoff, for a job's list cutoff. Under tests, any other read on a context
+// decided as real time with no instant bound fails (refuseMissedBind).
 package clock
 
 import (
@@ -63,6 +68,7 @@ func (realClock) Now(ctx context.Context) time.Time {
 	if t, ok := EffectiveNow(ctx); ok {
 		return t
 	}
+	refuseMissedBind(ctx)
 	return time.Now().UTC()
 }
 
@@ -230,6 +236,7 @@ func Now(ctx context.Context) time.Time {
 	if t, ok := EffectiveNow(ctx); ok {
 		return t
 	}
+	refuseMissedBind(ctx)
 	return time.Now().UTC()
 }
 

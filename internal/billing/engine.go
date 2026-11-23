@@ -2247,7 +2247,7 @@ func (e *Engine) RunCycleForTenant(ctx context.Context, tenantID string, batchSi
 
 	// Anchor the whole run at one instant so a sub billed early can't re-qualify
 	// under a later "now" within the same call.
-	now := e.clock.Now(ctx)
+	now := clock.Cutoff(ctx, e.clock)
 	dueBy := now.Add(-e.invoiceGrace)
 	fetch := func(ctx context.Context, exclude []string, limit int) ([]domain.Subscription, error) {
 		return e.subs.GetDueBillingForTenant(ctx, tenantID, now, dueBy, exclude, limit)
@@ -2282,7 +2282,7 @@ func (e *Engine) RunCycle(ctx context.Context, batchSize int, onPage func()) (in
 
 	// Same one-instant anchor as RunCycleForTenant: a sub due a few minutes
 	// into a long drain waits for the next tick instead of extending this one.
-	now := e.clock.Now(ctx)
+	now := clock.Cutoff(ctx, e.clock)
 	dueBy := now.Add(-e.invoiceGrace)
 	fetch := func(ctx context.Context, exclude []string, limit int) ([]domain.Subscription, error) {
 		return e.subs.GetDueBilling(ctx, now, dueBy, exclude, limit)

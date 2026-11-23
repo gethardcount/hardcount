@@ -479,7 +479,7 @@ func (s *Service) ProcessDueRuns(ctx context.Context, tenantID string, limit int
 	if limit <= 0 {
 		limit = 20
 	}
-	dueRuns, err := s.store.ListDueRuns(ctx, tenantID, s.clock.Now(ctx), limit)
+	dueRuns, err := s.store.ListDueRuns(ctx, tenantID, clock.Cutoff(ctx, s.clock), limit)
 	if err != nil {
 		return 0, []error{fmt.Errorf("list due runs: %w", err)}
 	}

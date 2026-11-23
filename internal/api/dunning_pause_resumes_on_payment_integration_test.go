@@ -45,7 +45,7 @@ func newPauseRig(t *testing.T, name string, invoiceAction domain.DunningInvoiceA
 	r.ctx = clock.WithRealTime(leadertest.Token(t, r.admin, postgres.WithLivemode(context.Background(), false), leader.RoleDunning))
 	r.invs = invoice.NewPostgresStore(r.db)
 	r.runs = dunning.NewPostgresStore(r.db)
-	pol, err := r.srv.DunningSvc.UpsertPolicy(r.ctx, r.tenantID, domain.DunningPolicy{
+	pol, err := r.srv.DunningSvc.UpsertPolicy(testutil.RealInstant(r.ctx), r.tenantID, domain.DunningPolicy{
 		Name: "pause on exhaustion", Enabled: true, RetryDays: []int{3},
 		FinalSubscriptionAction: domain.SubActionPause, FinalInvoiceAction: invoiceAction,
 	})
@@ -73,7 +73,7 @@ func (r *pauseRig) openInvoice(subID, number string, cents int64) string {
 	r.t.Helper()
 	sub := r.call("GET", "/v1/subscriptions/"+subID, flowReq{}).want(r.t, 200, "read subscription").body
 	now := time.Now().UTC()
-	inv, err := r.invs.CreateWithLineItems(r.ctx, r.tenantID, domain.Invoice{
+	inv, err := r.invs.CreateWithLineItems(testutil.RealInstant(r.ctx), r.tenantID, domain.Invoice{
 		CustomerID: flowStr(sub, "customer_id"), SubscriptionID: subID, InvoiceNumber: number,
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed, Currency: "USD",
 		SubtotalCents: cents, TotalAmountCents: cents, AmountDueCents: cents,
@@ -97,14 +97,14 @@ func (r *pauseRig) armRun(invoiceID, customerID string, next time.Time) string {
 		}
 		return run.ID
 	}
-	run, err := r.runs.CreateRun(r.ctx, r.tenantID, domain.InvoiceDunningRun{
+	run, err := r.runs.CreateRun(testutil.RealInstant(r.ctx), r.tenantID, domain.InvoiceDunningRun{
 		InvoiceID: invoiceID, CustomerID: customerID, PolicyID: r.pol.ID,
 		State: domain.DunningActive, Reason: "payment_failed", AttemptCount: r.pol.Retries(), NextActionAt: &next,
 	})
 	if err != nil {
 		r.t.Fatalf("create run: %v", err)
 	}
-	if ok, err := r.runs.UpdateRunIfActive(r.ctx, r.tenantID, run, run.AttemptCount, nil); err != nil || !ok {
+	if ok, err := r.runs.UpdateRunIfActive(testutil.RealInstant(r.ctx), r.tenantID, run, run.AttemptCount, nil); err != nil || !ok {
 		r.t.Fatalf("record the attempts: applied=%v err=%v", ok, err)
 	}
 	return run.ID
