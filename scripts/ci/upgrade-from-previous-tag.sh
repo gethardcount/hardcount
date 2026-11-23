@@ -18,8 +18,9 @@
 #   4. Stop it, start HEAD on the same database (its migrations run as it
 #      starts), snapshot again and compare. Any difference fails, printing
 #      the diff. A field HEAD adds passes only when
-#      scripts/ci/upgrade-new-fields.txt lists it. Each invoice that was on a
-#      clock must answer 404.
+#      scripts/ci/upgrade-new-fields.txt lists it, and a field HEAD removes
+#      when scripts/ci/upgrade-removed-fields.txt does. Each invoice that was
+#      on a clock must answer 404.
 #   5. On the upgraded database HEAD renders each old invoice's PDF, bills a
 #      new month with its own scripts/demo.sh, leaves the old invoices
 #      unchanged while doing it, and hardcount-doctor finds no broken money
@@ -41,6 +42,7 @@ mkdir -p "$OUT"
 PORT="${UPGRADE_PORT:-18080}"
 BASE="http://127.0.0.1:$PORT"
 NEW_FIELDS="$ROOT/scripts/ci/upgrade-new-fields.txt"
+REMOVED_FIELDS="$ROOT/scripts/ci/upgrade-removed-fields.txt"
 PG_NAME="hc-upgrade-$$"
 PREV_SRC="$WORK/prev-src"
 API_PID=""
@@ -61,20 +63,26 @@ for tool in docker go git curl jq; do
   command -v "$tool" >/dev/null || fail "this script needs $tool"
 done
 
-# The allowlist, read before anything starts so a malformed line fails
-# first: two JSON arrays of field names, one per scope.
-inv_new="" line_new=""
-while read -r scope field rest || [ -n "$scope" ]; do
-  case "$scope" in ''|'#'*) continue ;; esac
-  [ -n "$field" ] && [ -z "$rest" ] || fail "$NEW_FIELDS: want '<scope> <field>' with the comment on the line above, got '$scope $field $rest'"
-  case "$scope" in
-    invoice) inv_new+="$field"$'\n' ;;
-    line_item) line_new+="$field"$'\n' ;;
-    *) fail "$NEW_FIELDS: unknown scope '$scope' (want invoice or line_item)" ;;
-  esac
-done < "$NEW_FIELDS"
-INV_NEW=$(printf '%s' "$inv_new" | jq -R . | jq -s -c .)
-LINE_NEW=$(printf '%s' "$line_new" | jq -R . | jq -s -c .)
+# fields FILE SCOPE: the JSON array of the SCOPE field names FILE lists, one
+# "<scope> <field>" per line. A malformed line fails.
+fields() {
+  local out=""
+  while read -r scope field rest || [ -n "$scope" ]; do
+    case "$scope" in ''|'#'*) continue ;; esac
+    [ -n "$field" ] && [ -z "$rest" ] || fail "$1: want '<scope> <field>' with the comment on the line above, got '$scope $field $rest'"
+    case "$scope" in
+      invoice|line_item) [ "$scope" = "$2" ] && out+="$field"$'\n' ;;
+      *) fail "$1: unknown scope '$scope' (want invoice or line_item)" ;;
+    esac
+  done < "$1"
+  printf '%s' "$out" | jq -R . | jq -s -c .
+}
+
+# The two lists, read before anything starts so a malformed line fails first.
+INV_NEW=$(fields "$NEW_FIELDS" invoice)
+LINE_NEW=$(fields "$NEW_FIELDS" line_item)
+INV_REMOVED=$(fields "$REMOVED_FIELDS" invoice)
+LINE_REMOVED=$(fields "$REMOVED_FIELDS" line_item)
 
 # On a tag push the newest tag is the release being built, so tags on HEAD
 # are skipped. --merged keeps the choice to releases this code grew from.
@@ -222,9 +230,14 @@ snapshot() {
 # compare LABEL ONLY_OLD: the snapshot LABEL against the one taken before
 # the upgrade. A listed new field is dropped from HEAD's side only where the
 # old invoice or line did not have it, so a field both sides return is still
-# compared. ONLY_OLD=true leaves out invoices made after the upgrade.
+# compared; a listed removed field is dropped from the before side.
+# ONLY_OLD=true leaves out invoices made after the upgrade.
 compare() {
   local label=$1 only_old=$2
+  jq -S --argjson inv "$INV_REMOVED" --argjson line "$LINE_REMOVED" '
+    map_values(.invoice |= (reduce $inv[] as $f (.; del(.[$f])))
+      | .line_items |= map_values(reduce $line[] as $f (.; del(.[$f]))))
+  ' "$OUT/before.json" > "$OUT/before-compared.json"
   jq -S --slurpfile old "$OUT/before.json" --argjson inv "$INV_NEW" \
       --argjson line "$LINE_NEW" --argjson only_old "$only_old" '
     def drop_new($was; $fields):
@@ -235,12 +248,13 @@ compare() {
         .invoice |= drop_new($o[$k].invoice; $inv)
         | .line_items |= with_entries(.key as $l | .value |= drop_new($o[$k].line_items[$l]; $line))))
   ' "$OUT/$label.json" > "$OUT/$label-compared.json"
-  if ! diff -u "$OUT/before.json" "$OUT/$label-compared.json" > "$OUT/$label.diff"; then
+  if ! diff -u "$OUT/before-compared.json" "$OUT/$label-compared.json" > "$OUT/$label.diff"; then
     head -300 "$OUT/$label.diff"
     echo
     echo "An invoice that existed before the upgrade reads differently $label (- before, + after)."
     echo "A changed amount, line, status, number or tax is a money finding: fix the upgrade, do not list it."
-    echo "A field HEAD adds on purpose goes in scripts/ci/upgrade-new-fields.txt, with why."
+    echo "A field HEAD adds on purpose goes in scripts/ci/upgrade-new-fields.txt, with why;"
+    echo "one it removes on purpose goes in scripts/ci/upgrade-removed-fields.txt."
     fail "existing invoices changed $label"
   fi
   echo "$label: every invoice from before the upgrade is unchanged"
