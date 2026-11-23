@@ -14,11 +14,10 @@ import "time"
 //     (409). POST /retry-advance resumes the catch-up (ADR-018), or the
 //     tenant deletes the clock.
 //
-// No status blocks attaching a customer. A customer created on the clock
-// joins it at its frozen_time in any status: ResolveSim (testclock store)
-// checks only that the clock exists. While the clock is advancing or failed,
-// frozen_time is already the new time, so the customer joins as one created
-// just after the advance would.
+// While the clock is advancing, a request that changes one of its customers,
+// or creates one on it, is refused with 409 clock_advancing
+// (clock.RefuseIfAdvancing). A customer created on a failed clock joins it at
+// its frozen_time, which is already the new time.
 type TestClockStatus string
 
 const (

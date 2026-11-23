@@ -1,5 +1,7 @@
 package auth
 
+import "strings"
+
 // Permission is what a route requires of its caller (RequirePermission).
 type Permission string
 
@@ -30,6 +32,10 @@ const (
 
 	PermTestClockWrite Permission = "testclock:write"
 )
+
+// Writes reports whether p is a write permission: one that lets its holder
+// change an account's data. usage:ingest is not one; it sends usage.
+func (p Permission) Writes() bool { return strings.HasSuffix(string(p), ":write") }
 
 // KeyType is an API key's type, which sets the key's permissions
 // (hasPermission).

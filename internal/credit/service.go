@@ -132,6 +132,9 @@ func (s *Service) requireCustomer(ctx context.Context, tenantID, customerID stri
 func (s *Service) decideForCustomer(ctx context.Context, tenantID, customerID string) (context.Context, error) {
 	decided, err := clock.DecideOrRealTime(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID})
 	if err != nil {
+		if clock.IsAdvancingRefusal(err) {
+			return ctx, err
+		}
 		return ctx, errs.Unavailable("test_clock_unavailable",
 			"The customer's test clock could not be read. Nothing was changed; send the request again.", err)
 	}

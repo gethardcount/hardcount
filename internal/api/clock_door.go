@@ -37,6 +37,16 @@ import (
 // A request with no mode yet counts as test mode. A record's clock that
 // cannot be read answers 503, which the client retries and Idempotency does
 // not keep, and the handler does not run.
+//
+// The door also marks a request that changes a customer's data
+// (clock.MarkChange): one, not GET or HEAD, on a route that needs a write
+// permission (auth.Permission.Writes) and decides a record's clock or decides
+// in a named function. Usage an app or a proxy sends needs usage:ingest, not
+// a write permission, and goes on, as Stripe's payments do. The decision then
+// refuses a marked request while the record's clock advances (409
+// clock_advancing): here on a record route, in the named function otherwise.
+// The decision drops the mark, so work the request calls, or starts after it
+// answers, is never refused.
 type clockDoor struct {
 	resolver clock.Resolver
 	// clock is the server's clock: the door reads real time from it at most
@@ -64,6 +74,9 @@ func (h doorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	decl, params := entry.clock, request.Of(r.Context()).Route().Params
 	live, err := postgres.Livemode(r.Context())
 	live = err == nil && live
+	if routed && entry.access.Perm.Writes() && decl.Source != clockRealTime && r.Method != http.MethodGet && r.Method != http.MethodHead {
+		r = r.WithContext(clock.MarkChange(r.Context()))
+	}
 	// No entry means no route serves the request (mustListEveryRoute).
 	if !routed || decl.Source == clockDecidedIn {
 		if !live {
@@ -85,6 +98,9 @@ func (h doorHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case errors.Is(err, errUnknownClockSource):
 		respond.InternalError(w, r)
+		return
+	case clock.IsAdvancingRefusal(err):
+		respond.FromError(w, r, err, "record")
 		return
 	case errors.Is(err, errs.ErrNotFound):
 		// The record, or in a race with its clock's deletion the clock: the

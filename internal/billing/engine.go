@@ -1545,6 +1545,9 @@ func (e *Engine) clockOf(ctx context.Context, tenantID, clockID, owner string) (
 	if err != nil {
 		return clock.Sim{}, fmt.Errorf("could not read test clock %s of %s: %w", clockID, owner, err)
 	}
+	if err := clock.RefuseIfAdvancing(ctx, tc.Name, tc.Status == domain.TestClockStatusAdvancing); err != nil {
+		return clock.Sim{}, err
+	}
 	return clock.Sim{At: tc.FrozenTime, TestClockID: clockID}, nil
 }
 

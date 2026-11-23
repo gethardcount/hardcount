@@ -305,6 +305,9 @@ func (s *Service) DecideForInvoice(ctx context.Context, tenantID, invoiceID stri
 	}
 	decided, err := clock.DecideOrRealTime(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
 	if err != nil {
+		if clock.IsAdvancingRefusal(err) {
+			return ctx, err
+		}
 		return ctx, errs.Unavailable("test_clock_unavailable",
 			"The invoice's test clock could not be read. Nothing was created; send the request again.", err)
 	}
