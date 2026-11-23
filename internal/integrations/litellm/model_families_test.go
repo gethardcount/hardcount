@@ -275,10 +275,12 @@ func TestCanonicalModel_GoldenScriptFamilies(t *testing.T) {
 }
 
 // pricingPageClaudeIDs is every model id with a price on Anthropic's pricing
-// page, checked 2026-10-22
+// page, checked 2026-11-23
 // (https://platform.claude.com/docs/en/about-claude/pricing), and the
 // anthropic_style family each must bill under.
 var pricingPageClaudeIDs = map[string]string{
+	"claude-fable-5-2":           "claude-fable-5.2",
+	"claude-mythos-5-2":          "claude-mythos-5.2",
 	"claude-fable-5-1":           "claude-fable-5.1",
 	"claude-mythos-5-1":          "claude-mythos-5.1",
 	"claude-fable-5":             "claude-fable-5",
@@ -338,7 +340,7 @@ func TestCanonicalModel_PricingPageIDs(t *testing.T) {
 var mustStayRaw = []string{
 	"claude-opus-4-9",            // was priced as Claude Opus 4
 	"claude-opus-5-6",            // was priced as Claude Opus 5
-	"claude-fable-5-2",           // was priced as Claude Fable 5
+	"claude-fable-5-3",           // was priced as Claude Fable 5
 	"claude-sonnet-4-5-thinking", // not an Anthropic id
 	"claude-opus-4-6-fast",       // not an Anthropic id
 	"claude-opus-4-6[1m]",        // a context-window flag, not a version

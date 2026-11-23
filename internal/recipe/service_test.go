@@ -108,8 +108,8 @@ func TestService_Preview_RendersTemplates(t *testing.T) {
 		t.Errorf("plan.currency: got %q, want EUR", got)
 	}
 	// A price carries no currency: it takes its plan's (ADR-130 §11).
-	if len(rendered.Objects.Plans[0].Prices) != 125 {
-		t.Errorf("plan prices: got %d, want the recipe's 125", len(rendered.Objects.Plans[0].Prices))
+	if len(rendered.Objects.Plans[0].Prices) != 135 {
+		t.Errorf("plan prices: got %d, want the recipe's 135", len(rendered.Objects.Plans[0].Prices))
 	}
 	if rendered.Warnings == nil {
 		t.Error("Warnings must be non-nil so JSON serializes as [] not null")

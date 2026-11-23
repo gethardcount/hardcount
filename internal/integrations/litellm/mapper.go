@@ -202,7 +202,9 @@ type Mapping struct {
 // (decision of 2026-10-22). So every Claude model with a price needs its
 // own entry here, and order does not matter for Claude.
 var modelFamilies = []modelFamily{
-	// Current Anthropic lineup (pricing page checked 2026-10-22).
+	// Current Anthropic lineup (pricing page checked 2026-11-23).
+	{"claude-fable-5-2", "claude-fable-5.2"},
+	{"claude-mythos-5-2", "claude-mythos-5.2"},
 	{"claude-fable-5-1", "claude-fable-5.1"},
 	{"claude-mythos-5-1", "claude-mythos-5.1"},
 	{"claude-opus-5-5", "claude-opus-5.5"},

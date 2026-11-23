@@ -1,5 +1,5 @@
 key: anthropic_style
-version: 10.0.0
+version: 11.0.0
 name: Anthropic (Claude) token pricing
 summary: |
   Ready-made pricing for reselling Claude (Anthropic) API access. Bills each
@@ -10,13 +10,13 @@ description: |
 
     • A usage meter that counts tokens
     • Per-token prices for every Claude model on Anthropic's pricing page
-      on 2026-10-22: the current lineup (Fable 5.1, Mythos 5.1, Opus 5.5,
-      Sonnet 5.5, Haiku 5.5), the earlier 5 and 4.x models, Haiku 4.5 and
-      Haiku 3.5. Older 3.x models are priced at their last published prices
+      on 2026-11-23: the current lineup (Fable 5.2, Mythos 5.2, Opus 5.5,
+      Sonnet 5.5, Haiku 5.5), Fable 5.1 and Mythos 5.1, the earlier 5 and 4.x
+      models, Haiku 4.5 and Haiku 3.5. Older 3.x models are priced at their last published prices
     • Separate rates for input, output, cache reads and cache writes. Cache
       writes cost 1.25x input (5-minute) or 2x input (1-hour). Cache reads
       cost 0.1x input on most models, 0.05x on Opus 5.5 and Sonnet 5.5, and
-      0.025x on Fable 5.1 and Mythos 5.1
+      0.025x on Fable 5.2, Mythos 5.2, Fable 5.1 and Mythos 5.1
     • Two sets of Haiku 5.5 prices: one for prompts up to 100,000 tokens,
       and a higher one above that (a prompt counts input, cache reads and
       cache writes)
@@ -489,6 +489,52 @@ plans:
         unit_amount_cents: '0.00016'
 
       # ---- 2026-10-22: the current lineup. Each block page-checked
+      # ---- 2026-11-23. Cache writes 1.25x (5m) and 2x (1h) input. ----
+
+      # Claude Fable 5.2 — input $8 / output $40 per million; cache read 0.025x input (page-checked 2026-11-23).
+      - meter: tokens
+        dimension_match: { model: claude-fable-5.2, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.0008'
+      - meter: tokens
+        dimension_match: { model: claude-fable-5.2, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.004'
+      - meter: tokens
+        dimension_match: { model: claude-fable-5.2, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.00002'
+      - meter: tokens
+        dimension_match: { model: claude-fable-5.2, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.001'
+      - meter: tokens
+        dimension_match: { model: claude-fable-5.2, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.0016'
+
+      # Claude Mythos 5.2 (limited availability, published price) — input $8 / output $40 per million; cache read 0.025x input (page-checked 2026-11-23).
+      - meter: tokens
+        dimension_match: { model: claude-mythos-5.2, token_type: input }
+        mode: per_unit
+        unit_amount_cents: '0.0008'
+      - meter: tokens
+        dimension_match: { model: claude-mythos-5.2, token_type: output }
+        mode: per_unit
+        unit_amount_cents: '0.004'
+      - meter: tokens
+        dimension_match: { model: claude-mythos-5.2, token_type: cache_read }
+        mode: per_unit
+        unit_amount_cents: '0.00002'
+      - meter: tokens
+        dimension_match: { model: claude-mythos-5.2, token_type: cache_write_5m }
+        mode: per_unit
+        unit_amount_cents: '0.001'
+      - meter: tokens
+        dimension_match: { model: claude-mythos-5.2, token_type: cache_write_1h }
+        mode: per_unit
+        unit_amount_cents: '0.0016'
+
       # ---- 2026-10-22. Cache writes 1.25x (5m) and 2x (1h) input. ----
 
       # Claude Fable 5.1 — input $10 / output $50 per million; cache read 0.025x input (page-checked 2026-10-22).

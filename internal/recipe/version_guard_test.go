@@ -43,8 +43,11 @@ import (
 // §15). rating_rules, pricing_rules, dunning and webhook are gone, and
 // parseRecipe refuses them. Prices are unchanged; an install no longer
 // creates a dunning policy or a webhook endpoint.
+// anthropic_style 11.0.0 on 2026-11-23: prices for Claude Fable 5.2 and
+// Mythos 5.2. A MAJOR bump because an install of 10.0.0 does not get them on
+// re-apply.
 var pinnedCatalog = map[string]string{
-	"anthropic_style@10.0.0": "fbe0a5693290dd7042a3664eb8ad7cd37dc8c25247f74bd27c4a1403e4aaddbf",
+	"anthropic_style@11.0.0": "014f0c77700e42df75e4c5dc4f705030b00919d88e252813343a5fe0403ec013",
 	"openai_style@9.0.0":     "fd2564361133ba391063b343d76f820d2f7dc20f4f9ad2bec8a31fa85342a50a",
 	"replicate_style@7.0.0":  "6e32b8e7f3f792754795221ad467bee47174fa3bd6a2ee9183598d92fcfc9302",
 }

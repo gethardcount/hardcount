@@ -87,11 +87,11 @@ func TestService_Instantiate_BuildsFullGraph(t *testing.T) {
 	if got, want := len(inst.CreatedObjects.MeterIDs), 1; got != want {
 		t.Errorf("CreatedObjects.MeterIDs: got %d, want %d", got, want)
 	}
-	// anthropic_style (ADR-044 matrix): 25 price sets × 5 token roles —
-	// 7 from the v2/v3 catalog, 12 added by the 2026-07-26 refresh, and 6
-	// added on 2026-10-22 (Fable 5.1, Mythos 5.1, Opus 5.5, Sonnet 5.5, and
-	// Haiku 5.5's two prompt tiers).
-	if got, want := len(inst.CreatedObjects.PriceIDs), 125; got != want {
+	// anthropic_style (ADR-044 matrix): 27 price sets × 5 token roles —
+	// 7 from the v2/v3 catalog, 12 added by the 2026-07-26 refresh, 6 added
+	// on 2026-10-22 (Fable 5.1, Mythos 5.1, Opus 5.5, Sonnet 5.5, and Haiku
+	// 5.5's two prompt tiers), and 2 on 2026-11-23 (Fable 5.2, Mythos 5.2).
+	if got, want := len(inst.CreatedObjects.PriceIDs), 135; got != want {
 		t.Errorf("CreatedObjects.PriceIDs: got %d, want %d", got, want)
 	}
 	if got, want := len(inst.CreatedObjects.PlanIDs), 1; got != want {
@@ -102,11 +102,11 @@ func TestService_Instantiate_BuildsFullGraph(t *testing.T) {
 	if n := countRows(t, f.db, tenantID, "meters"); n != 1 {
 		t.Errorf("meters row count: got %d, want 1", n)
 	}
-	if n := countRows(t, f.db, tenantID, "plan_prices"); n != 125 {
-		t.Errorf("plan_prices row count: got %d, want 125", n)
+	if n := countRows(t, f.db, tenantID, "plan_prices"); n != 135 {
+		t.Errorf("plan_prices row count: got %d, want 135", n)
 	}
-	if n := countRows(t, f.db, tenantID, "plan_price_versions"); n != 125 {
-		t.Errorf("plan_price_versions row count: got %d, want 125 (one each: the plan is new)", n)
+	if n := countRows(t, f.db, tenantID, "plan_price_versions"); n != 135 {
+		t.Errorf("plan_price_versions row count: got %d, want 135 (one each: the plan is new)", n)
 	}
 	if n := countRows(t, f.db, tenantID, "plans"); n != 1 {
 		t.Errorf("plans row count: got %d, want 1", n)
