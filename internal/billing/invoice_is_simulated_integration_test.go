@@ -2,9 +2,7 @@ package billing_test
 
 import (
 	"context"
-	"database/sql"
 	"testing"
-	"time"
 
 	"github.com/gethardcount/hardcount/internal/billing"
 	"github.com/gethardcount/hardcount/internal/customer"
@@ -17,92 +15,46 @@ import (
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// TestManualInvoice_IsSimulatedFromCustomerPin is the wire-shape regression
-// guard for the simulated-timestamp badge on manual (operator-composed)
-// invoices. It exercises the REAL production path end-to-end:
+// TestManualInvoice_UnpinnedIsNotSimulated: a manual invoice's is_simulated
+// flag is captured at write time from the customer's test-clock pin
+// (invoiceSvc.SetCustomerReader), not inferred from the ctx's time. A create
+// binds an instant for an unpinned customer too, so a check on the ctx's
+// binding would flag every manual invoice as simulated.
 //
-//   - The FLAG (invoice.is_simulated) is captured at write time from the
-//     customer's test-clock pin (invoiceSvc.SetCustomerReader → the same
-//     authoritative customer.TestClockID check the engine uses on subs). It
-//     is not inferred from the ctx's time: a create binds an instant even for
-//     an UNPINNED customer, so a check on the ctx's binding would mis-flag
-//     EVERY manual invoice as simulated, the bug this test pins shut.
-//   - The TIMESTAMPS (issued_at) ride the resolver-bound frozen time
-//     (invoiceSvc.SetResolver(engine): the create decides through
-//     SimForCustomer).
-//
-// Production wires both: router.go SetResolver + invoiceSvc.SetCustomerReader +
-// engine.SetCustomerReader + engine.SetTestClockReader.
-func TestManualInvoice_IsSimulatedFromCustomerPin(t *testing.T) {
+// Wired as production wires it: router.go SetResolver +
+// invoiceSvc.SetCustomerReader + engine.SetCustomerReader +
+// engine.SetTestClockReader.
+func TestManualInvoice_UnpinnedIsNotSimulated(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	ctx := postgres.WithLivemode(context.Background(), false) // test clocks are test-mode only
+	ctx := postgres.WithLivemode(context.Background(), false)
 
 	customerStore := customer.NewPostgresStore(db)
 	invoiceStore := invoice.NewPostgresStore(db)
 	settingsStore := tenant.NewSettingsStore(db)
-	testClockStore := testclock.NewPostgresStore(db)
-	tenantID := testutil.CreateTestTenant(t, db, "Pinned Manual Corp")
+	tenantID := testutil.CreateTestTenant(t, db, "Unpinned Manual Corp")
 
-	frozen := time.Date(2026, 11, 13, 12, 0, 0, 0, time.UTC)
-	clk, err := testClockStore.Create(ctx, tenantID, domain.TestClock{Name: "sim", FrozenTime: frozen},
-		func(*sql.Tx, domain.TestClock) error { return nil }) // no audit row: this test reads the invoice
-	if err != nil {
-		t.Fatalf("create test clock: %v", err)
-	}
-
-	// Engine as the clock.Resolver — wired like production for the customer-pin
-	// path. Only customers + testClocks are exercised here; other deps unused.
 	engine := billing.NewEngine(nil, nil, nil, nil, nil, settingsStore, testPaymentSetupsNoPM{}, testChargerSentinel{}, clock.Real())
 	engine.SetCustomerReader(customerStore)
-	engine.SetTestClockReader(testClockStore)
+	engine.SetTestClockReader(testclock.NewReader(db))
 
 	invoiceSvc := invoice.NewService(invoiceStore, clock.Real(), settingsStore)
-	invoiceSvc.SetResolver(engine)              // drives simulated timestamps
-	invoiceSvc.SetCustomerReader(customerStore) // drives the is_simulated flag
+	invoiceSvc.SetResolver(engine)
+	invoiceSvc.SetCustomerReader(customerStore)
 
-	line := []invoice.AddLineItemInput{{Description: "Service", Quantity: 1, UnitAmountCents: 1000}}
-
-	// (1) PINNED customer → is_simulated=true AND issued_at lands on frozen time.
-	pinned, err := customerStore.Create(ctx, tenantID, domain.Customer{
-		ExternalID: "cus_pinned", DisplayName: "Pinned Customer", TestClockID: clk.ID,
-	})
-	if err != nil {
-		t.Fatalf("create pinned customer: %v", err)
-	}
-	inv, err := invoiceSvc.Create(ctx, tenantID, invoice.CreateInput{
-		CustomerID: pinned.ID, Currency: "USD", LineItems: line,
-	})
-	if err != nil {
-		t.Fatalf("create invoice (pinned): %v", err)
-	}
-	if !inv.IsSimulated {
-		t.Error("manual invoice for clock-pinned customer: is_simulated=false, want true (customer-pin reader not consulted / not wired)")
-	}
-	if inv.IssuedAt == nil || !inv.IssuedAt.Equal(frozen) {
-		t.Errorf("issued_at: got %v, want frozen %v (resolver did not bind the customer's frozen time)", inv.IssuedAt, frozen)
-	}
-	if reloaded, rerr := invoiceStore.Get(ctx, tenantID, inv.ID); rerr != nil {
-		t.Fatalf("reload: %v", rerr)
-	} else if !reloaded.IsSimulated {
-		t.Error("reloaded pinned-customer invoice: is_simulated=false, want true (did not persist)")
-	}
-
-	// (2) UNPINNED customer → is_simulated=false. A check on the ctx's
-	// binding gets this case wrong: a create binds an instant for an unpinned
-	// customer too.
 	plain, err := customerStore.Create(ctx, tenantID, domain.Customer{
 		ExternalID: "cus_plain", DisplayName: "Plain Customer",
 	})
 	if err != nil {
 		t.Fatalf("create plain customer: %v", err)
 	}
-	inv2, err := invoiceSvc.Create(ctx, tenantID, invoice.CreateInput{
-		CustomerID: plain.ID, Currency: "USD", LineItems: line,
+	inv, err := invoiceSvc.Create(ctx, tenantID, invoice.CreateInput{
+		CustomerID: plain.ID, Currency: "USD",
+		LineItems: []invoice.AddLineItemInput{{Description: "Service", Quantity: 1, UnitAmountCents: 1000}},
 	})
 	if err != nil {
-		t.Fatalf("create invoice (plain): %v", err)
+		t.Fatalf("create invoice: %v", err)
 	}
-	if inv2.IsSimulated {
+	if inv.IsSimulated {
 		t.Error("manual invoice for unpinned customer: is_simulated=true, want false")
 	}
 }

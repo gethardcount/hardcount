@@ -130,7 +130,6 @@ var ingestKeyRoutes = map[string]bool{
 	"POST /v1/credit-notes":              false,
 	"GET /v1/customers":                  false,
 	"POST /v1/customers":                 false,
-	"POST /v1/test-clocks":               false,
 	"GET /v1/webhook_events/stream":      false,
 	"GET /v1/exports/usage-events.csv":   false,
 	"POST /v1/billing/run":               false,

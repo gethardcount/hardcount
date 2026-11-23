@@ -410,9 +410,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	subSvc.SetAuditLogger(auditLogger)
 	invoiceSvc.SetAuditLogger(auditLogger)
 
-	// Test clocks and the billing engine.
-	testClockStore := testclock.NewPostgresStore(db)
-	customerSvc.SetTestClockChecker(testClockStore)
+	// The billing engine.
 	customerSvc.SetDunningPolicyReader(dunningStore)
 	customerSvc.SetSubscriptionChecker(&subscriptionCheckerAdapter{subs: subStore})
 	customerSvc.SetTaxFlusher(invoiceSvc)
@@ -421,20 +419,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 		&invoiceWriterAdapter{PostgresStore: invoiceStore}, creditSvc, settingsStore, paymentReadiness, stripeAdapter, clk, customerStore)
 	engine.SetIntervalReader(subStore)
 	engine.SetInvoiceGrace(o.invoiceGrace)
-	engine.SetTestClockReader(testClockStore)
-	testClockSvc := testclock.NewService(testClockStore, testclock.Deps{
-		Billing:      engine,
-		Customers:    customerSvc,
-		Trials:       subSvc,
-		Pauses:       subSvc,
-		Tax:          invoiceSvc,
-		Relief:       creditNoteSvc,
-		Credits:      creditSvc,
-		Dunning:      dunningSvc,
-		Audit:        auditLogger,
-		PassDeadline: testclock.CatchupPassDeadline,
-	})
-	testClockH := testclock.NewHandler(testClockSvc)
+	engine.SetTestClockReader(testclock.NewReader(db))
 	engine.SetAuditLogger(auditLogger)
 	engine.SetCustomerReader(customerStore)
 	engine.SetLiveBalanceReaders(creditSvc, subStore)
@@ -508,7 +493,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	audit.MustWired(creditSvc, subSvc, invoiceSvc, creditNoteSvc,
 		stripeAdapter, paymentMethodsSvc, engine, hostedInvoiceStripe,
 		customerSvc, pricingSvc, recipeSvc, providerCostH, usageSvc,
-		testClockSvc, noPMNotifier, publicPaymentH)
+		noPMNotifier, publicPaymentH)
 	webhook.MustWiredOutbox(invoiceStore, creditStore, subStore, dunningStore, customerStore, paymentMethodsStore, creditNoteSvc)
 	stripeAdapter.MustHaveAnomalyRecorder()
 
@@ -643,7 +628,6 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 		TokenSvc:            tokenSvc,
 		PaymentReconciler:   paymentReconciler,
 		LoginThrottle:       loginThrottle,
-		TestClockSvc:        testClockSvc,
 		RestoreCatchUp:      payment.NewCatchUp(stripeAdapter, stripeClients, tenantStripeSvc, customerStore, creditNoteStore),
 	}
 
@@ -708,7 +692,6 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	s.hostedInvoiceH = hostedInvoiceH
 	s.postmarkH = postmarkH
 	s.setupLinksEmailable = setupLinksEmailable
-	s.testClockH = testClockH
 	s.billingH = billingH
 	s.createPreviewH = createPreviewH
 	s.analyticsH = analyticsH

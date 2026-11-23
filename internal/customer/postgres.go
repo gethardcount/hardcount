@@ -924,55 +924,6 @@ func (s *PostgresStore) listSortedByEncryptedColumn(ctx context.Context, filter 
 	return customers[start:end], total, nil
 }
 
-// ListByTestClockID returns one page of the customers pinned to the given
-// test clock, oldest first, fully decrypted, and how many there are in all.
-// The testclock domain calls this through the CustomerReader interface so it
-// never reaches into the customers table directly — keeping decryption
-// centralised on this read path (encrypt-at-rest is otherwise transparently
-// bypassed when another package SELECTs display_name / email straight from
-// the table).
-func (s *PostgresStore) ListByTestClockID(ctx context.Context, tenantID, clockID string, limit, offset int) ([]domain.Customer, int, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer postgres.Rollback(tx)
-
-	var total int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM customers WHERE test_clock_id = $1`, clockID).Scan(&total); err != nil {
-		return nil, 0, err
-	}
-	rows, err := tx.QueryContext(ctx, `
-		SELECT id, tenant_id, external_id, display_name, COALESCE(email, ''), status,
-			COALESCE(test_clock_id, ''),
-			COALESCE(dunning_policy_id, ''),
-			created_at, updated_at
-		FROM customers
-		WHERE test_clock_id = $1
-		ORDER BY created_at ASC, id ASC
-		LIMIT $2 OFFSET $3
-	`, clockID, limit, offset)
-	if err != nil {
-		return nil, 0, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var customers []domain.Customer
-	for rows.Next() {
-		var c domain.Customer
-		if err := rows.Scan(&c.ID, &c.TenantID, &c.ExternalID, &c.DisplayName, &c.Email, &c.Status,
-			&c.TestClockID, &c.DunningPolicyID, &c.CreatedAt, &c.UpdatedAt); err != nil {
-			return nil, 0, err
-		}
-		c, err = s.decryptCustomer(c)
-		if err != nil {
-			return nil, 0, err
-		}
-		customers = append(customers, c)
-	}
-	return customers, total, rows.Err()
-}
-
 // WithCustomerRulesLock: see the Store interface.
 func (s *PostgresStore) WithCustomerRulesLock(ctx context.Context, tenantID, id string, fn func(tx *sql.Tx, locked domain.Customer) error) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)

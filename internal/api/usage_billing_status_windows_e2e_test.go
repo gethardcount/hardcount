@@ -166,45 +166,6 @@ func TestBillingStatus_FirstDayReachBackKeepsTheEarlierPlan(t *testing.T) {
 	}
 }
 
-// TestBillingStatus_GraceEventBeforeTheNextPinIsNotFlagged: a test clock is
-// parked three minutes before its subscription's period end P1. An event
-// stamped one minute after P1 (inside the future skew) is in the next period,
-// priced at P1. P1 has not passed on the clock, so a price saved now is in
-// force at P1: the answer cannot say no_price. The price for model c is
-// saved, and the next period's invoice bills the event. Since review round 3
-// an event after the period end is not checked at all.
-//
-// Mutation check: classify an event after the period end by the period's
-// plans → the event is answered no_price and then billed.
-func TestBillingStatus_GraceEventBeforeTheNextPinIsNotFlagged(t *testing.T) {
-	r := newPPRig(t, "next pin ahead")
-	tokens := r.meter("tokens", "sum")
-	plan, _ := r.plan("pro", perUnit(tokens, "1", map[string]string{"model": "a"}))
-	clk := r.clock("pin ahead", time.Now().UTC().AddDate(0, 0, -100).Truncate(time.Second))
-	sub, p0, p1 := r.clockSub("pp-pin", clk, plan)
-	parked := p1.Add(-3 * time.Minute)
-	r.advance(clk, parked)
-
-	code, out, raw := r.do(parked, http.MethodPost, "/v1/usage-events", map[string]any{
-		"external_customer_id": "pp-pin", "event_name": "tokens", "quantity": 9,
-		"timestamp": p1.Add(time.Minute).Format(time.RFC3339Nano), "idempotency_key": "pin-ahead",
-		"dimensions": map[string]any{"model": "c"},
-	})
-	if code != http.StatusCreated {
-		t.Fatalf("POST event: %d %s, want 201", code, raw)
-	}
-	wantStatus(t, "event after P1 sent before P1 on the clock", out, "")
-
-	added := r.must(time.Time{}, http.MethodPost, "/v1/plans/"+plan+"/prices", perUnit(tokens, "1", map[string]string{"model": "c"}), http.StatusCreated)
-	if got := flowStr(added, "effective"); got != "next_period" {
-		t.Fatalf("price add: effective %q, want next_period", got)
-	}
-	r.advance(clk, monthAfter(p1, p0.Day()).Add(time.Hour))
-	if got := r.cycle(sub, p1).usageCents(); got != 9 {
-		t.Errorf("next period usage = %dc, want 9c: the price saved before P1 bills the event", got)
-	}
-}
-
 // TestBillingStatus_HeldReleaseCountsTheUnbilledMetric: rows the held-usage
 // release writes with a billing_status are counted in
 // hardcount_usage_unbilled_total, as every other written row is (origin

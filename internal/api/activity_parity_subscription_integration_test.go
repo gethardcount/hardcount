@@ -13,12 +13,10 @@ import (
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// TestActivityParity_SubscriptionOperatorScenarios is the activity line
-// standard's parity test for the subscription page (ADR-128, PR 4): one
-// operator story, told twice through the real router and database — for a
-// customer on the real clock and for one pinned to a test clock — must
-// produce the same lines in the same order. A test-clock line is the
-// real-clock line plus one Recorded time; nothing else may differ.
+// TestActivityParity_SubscriptionOperatorScenarios tells one operator story
+// through the real router and database and checks the subscription page's
+// lines (ADR-128, PR 4): the standard's words, in the order they happened,
+// with no Recorded time.
 //
 // The story: a trial is extended and ended by hand; the plan changes now,
 // a plan change is scheduled for renewal and then canceled; a cancellation
@@ -27,10 +25,8 @@ import (
 // and removed. The plans bill in arrears, so no change makes a proration
 // invoice and the story needs no payment method.
 //
-// Dates inside a line differ between the arms (a month after Oct 19 is not
-// a month after Feb 1), so each one is checked against the instant it names
-// in its own arm: the trial end the operator asked for, or the current
-// period's end.
+// Each date inside a line is checked against the instant it names: the
+// trial end the operator asked for, or the current period's end.
 func TestActivityParity_SubscriptionOperatorScenarios(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
@@ -55,89 +51,57 @@ func TestActivityParity_SubscriptionOperatorScenarios(t *testing.T) {
 	basic := plan("parity-basic", "Parity Basic", 500)
 	extra := plan("parity-extra", "Parity Extra", 300)
 
-	const frozen = "2027-02-01T04:30:00Z"
-	clockID := flowStr(call("POST", "/v1/test-clocks", flowReq{body: map[string]any{
-		"name": "subscription parity", "frozen_time": frozen,
-	}}).want(t, 201, "create test clock").body, "id")
-
-	type arm struct {
-		name    string
-		clockID string
+	customerID := flowStr(call("POST", "/v1/customers", flowReq{body: map[string]any{
+		"external_id": "sub-parity-real", "display_name": "Sub Parity real", "email": "billing@parity.test",
+	}}).want(t, 201, "create customer").body, "id")
+	sub := call("POST", "/v1/subscriptions", flowReq{body: map[string]any{
+		"code": "sub-parity-real", "display_name": "Sub Parity real", "customer_id": customerID,
+		"items": []map[string]any{{"plan_id": starter, "quantity": 1}}, "billing_time": "anniversary",
+		"trial_days": 14,
+	}}).want(t, 201, "create subscription").body
+	subID := flowStr(sub, "id")
+	items, _ := sub["items"].([]any)
+	if len(items) != 1 {
+		t.Fatalf("subscription has %d items, want 1", len(items))
 	}
-	type told struct {
-		lines []map[string]any
-		names map[string]time.Time // the instants a line's dates may name
+	itemID := flowStr(items[0].(map[string]any), "id")
+	trialEndAt, err := time.Parse(time.RFC3339, flowStr(sub, "trial_end_at"))
+	if err != nil {
+		t.Fatalf("trial_end_at %q: %v", flowStr(sub, "trial_end_at"), err)
 	}
-	story := func(a arm) told {
-		t.Helper()
-		cust := map[string]any{"external_id": "sub-parity-" + a.name, "display_name": "Sub Parity " + a.name, "email": "billing@parity.test"}
-		if a.clockID != "" {
-			cust["test_clock_id"] = a.clockID
-		}
-		customerID := flowStr(call("POST", "/v1/customers", flowReq{body: cust}).want(t, 201, a.name+": create customer").body, "id")
-		sub := call("POST", "/v1/subscriptions", flowReq{body: map[string]any{
-			"code": "sub-parity-" + a.name, "display_name": "Sub Parity " + a.name, "customer_id": customerID,
-			"items": []map[string]any{{"plan_id": starter, "quantity": 1}}, "billing_time": "anniversary",
-			"trial_days": 14,
-		}}).want(t, 201, a.name+": create subscription").body
-		subID := flowStr(sub, "id")
-		items, _ := sub["items"].([]any)
-		if len(items) != 1 {
-			t.Fatalf("%s: subscription has %d items, want 1", a.name, len(items))
-		}
-		itemID := flowStr(items[0].(map[string]any), "id")
-		trialEndAt, err := time.Parse(time.RFC3339, flowStr(sub, "trial_end_at"))
-		if err != nil {
-			t.Fatalf("%s: trial_end_at %q: %v", a.name, flowStr(sub, "trial_end_at"), err)
-		}
-		newTrialEnd := trialEndAt.Add(7 * 24 * time.Hour).UTC()
-		base := "/v1/subscriptions/" + subID
+	newTrialEnd := trialEndAt.Add(7 * 24 * time.Hour).UTC()
+	base := "/v1/subscriptions/" + subID
 
-		call("POST", base+"/extend-trial", flowReq{body: map[string]any{"trial_end": newTrialEnd.Format(time.RFC3339)}}).want(t, 200, a.name+": extend trial")
-		call("POST", base+"/end-trial", flowReq{}).want(t, 200, a.name+": end trial")
-		call("PATCH", base+"/items/"+itemID, flowReq{body: map[string]any{"new_plan_id": pro, "immediate": true}}).want(t, 200, a.name+": change plan now")
-		call("PATCH", base+"/items/"+itemID, flowReq{body: map[string]any{"new_plan_id": basic, "immediate": false}}).want(t, 200, a.name+": schedule plan change")
-		call("DELETE", base+"/items/"+itemID+"/pending-change", flowReq{}).want(t, 200, a.name+": cancel scheduled plan change")
-		call("POST", base+"/schedule-cancel", flowReq{body: map[string]any{"at_period_end": true}}).want(t, 200, a.name+": schedule cancel")
-		call("DELETE", base+"/scheduled-cancel", flowReq{}).want(t, 200, a.name+": undo scheduled cancel")
-		call("PUT", base+"/pause-collection", flowReq{body: map[string]any{"behavior": "keep_as_draft"}}).want(t, 200, a.name+": pause collection")
-		call("DELETE", base+"/pause-collection", flowReq{}).want(t, 200, a.name+": resume collection")
-		call("PUT", base+"/billing-thresholds", flowReq{body: map[string]any{"amount_gte": 50000}}).want(t, 200, a.name+": set spend thresholds")
-		call("DELETE", base+"/billing-thresholds", flowReq{}).want(t, 200, a.name+": remove spend thresholds")
-		added := call("POST", base+"/items", flowReq{body: map[string]any{"plan_id": extra, "quantity": 2}}).want(t, 201, a.name+": add item").body
-		addedID := flowStr(added, "id")
-		call("PATCH", base+"/items/"+addedID, flowReq{body: map[string]any{"quantity": 3}}).want(t, 200, a.name+": change quantity")
-		call("DELETE", base+"/items/"+addedID, flowReq{}).want(t, 204, a.name+": remove item")
+	call("POST", base+"/extend-trial", flowReq{body: map[string]any{"trial_end": newTrialEnd.Format(time.RFC3339)}}).want(t, 200, "extend trial")
+	call("POST", base+"/end-trial", flowReq{}).want(t, 200, "end trial")
+	call("PATCH", base+"/items/"+itemID, flowReq{body: map[string]any{"new_plan_id": pro, "immediate": true}}).want(t, 200, "change plan now")
+	call("PATCH", base+"/items/"+itemID, flowReq{body: map[string]any{"new_plan_id": basic, "immediate": false}}).want(t, 200, "schedule plan change")
+	call("DELETE", base+"/items/"+itemID+"/pending-change", flowReq{}).want(t, 200, "cancel scheduled plan change")
+	call("POST", base+"/schedule-cancel", flowReq{body: map[string]any{"at_period_end": true}}).want(t, 200, "schedule cancel")
+	call("DELETE", base+"/scheduled-cancel", flowReq{}).want(t, 200, "undo scheduled cancel")
+	call("PUT", base+"/pause-collection", flowReq{body: map[string]any{"behavior": "keep_as_draft"}}).want(t, 200, "pause collection")
+	call("DELETE", base+"/pause-collection", flowReq{}).want(t, 200, "resume collection")
+	call("PUT", base+"/billing-thresholds", flowReq{body: map[string]any{"amount_gte": 50000}}).want(t, 200, "set spend thresholds")
+	call("DELETE", base+"/billing-thresholds", flowReq{}).want(t, 200, "remove spend thresholds")
+	added := call("POST", base+"/items", flowReq{body: map[string]any{"plan_id": extra, "quantity": 2}}).want(t, 201, "add item").body
+	addedID := flowStr(added, "id")
+	call("PATCH", base+"/items/"+addedID, flowReq{body: map[string]any{"quantity": 3}}).want(t, 200, "change quantity")
+	call("DELETE", base+"/items/"+addedID, flowReq{}).want(t, 204, "remove item")
 
-		after := call("GET", base, flowReq{}).want(t, 200, a.name+": read subscription").body
-		periodEnd, err := time.Parse(time.RFC3339, flowStr(after, "current_billing_period_end"))
-		if err != nil {
-			t.Fatalf("%s: current_billing_period_end %q: %v", a.name, flowStr(after, "current_billing_period_end"), err)
-		}
-		events := flowList(call("GET", base+"/timeline", flowReq{}).want(t, 200, a.name+": timeline").body, "events")
-		return told{
-			lines: linesOf(t, events),
-			names: map[string]time.Time{"<trial end>": newTrialEnd, "<period end>": periodEnd},
-		}
+	after := call("GET", base, flowReq{}).want(t, 200, "read subscription").body
+	periodEnd, err := time.Parse(time.RFC3339, flowStr(after, "current_billing_period_end"))
+	if err != nil {
+		t.Fatalf("current_billing_period_end %q: %v", flowStr(after, "current_billing_period_end"), err)
 	}
+	lines := linesOf(t, flowList(call("GET", base+"/timeline", flowReq{}).want(t, 200, "timeline").body, "events"))
+	names := map[string]time.Time{"<trial end>": newTrialEnd, "<period end>": periodEnd}
 
-	realArm := story(arm{name: "real"})
-	testArm := story(arm{name: "test", clockID: clockID})
-
-	if len(realArm.lines) < 10 {
-		t.Fatalf("%d rows on the real clock, want the whole story", len(realArm.lines))
+	if len(lines) < 10 {
+		t.Fatalf("%d rows, want the whole story", len(lines))
 	}
-	for i, l := range testArm.lines {
-		if l["recorded_at"] == nil {
-			t.Errorf("test-clock row %d (%v) has no recorded_at", i, l["title"])
-		}
-		if at, _ := time.Parse(time.RFC3339Nano, fmt.Sprint(l["occurred_at"])); at.UTC().Format(time.RFC3339) != frozen {
-			t.Errorf("test-clock row %d (%v) occurred at %v, want the frozen %s", i, l["title"], l["occurred_at"], frozen)
-		}
-	}
-	for i, l := range realArm.lines {
+	for i, l := range lines {
 		if l["recorded_at"] != nil {
-			t.Errorf("real-clock row %d (%v) carries recorded_at %v", i, l["title"], l["recorded_at"])
+			t.Errorf("row %d (%v) carries recorded_at %v", i, l["title"], l["recorded_at"])
 		}
 	}
 
@@ -158,20 +122,12 @@ func TestActivityParity_SubscriptionOperatorScenarios(t *testing.T) {
 		"Quantity changed | Parity Extra · 2 → 3 · by API key",
 		"Item removed | Parity Extra · by API key",
 	}
-	realSum, testSum := subscriptionSummaries(realArm.lines, realArm.names), subscriptionSummaries(testArm.lines, testArm.names)
-	if !reflect.DeepEqual(realSum, testSum) {
-		t.Errorf("the two clocks tell different stories\nreal: %q\ntest: %q", realSum, testSum)
-	}
-	if !reflect.DeepEqual(realSum, want) {
-		t.Errorf("subscription lines\n got: %q\nwant: %q", realSum, want)
-	}
-	// Beyond the words: kinds, tones and the parts' shapes are equal too.
-	if rs, tst := normalizeLines(namedTimes(realArm.lines, realArm.names)), normalizeLines(namedTimes(testArm.lines, testArm.names)); !reflect.DeepEqual(rs, tst) {
-		t.Errorf("the two clocks' lines differ\nreal: %s\ntest: %s", mustJSON(rs), mustJSON(tst))
+	if got := subscriptionSummaries(lines, names); !reflect.DeepEqual(got, want) {
+		t.Errorf("subscription lines\n got: %q\nwant: %q", got, want)
 	}
 }
 
-// namedTimes replaces each time part that equals one of the arm's named
+// namedTimes replaces each time part that equals one of the named
 // instants (to the second) with that name, as a text part.
 func namedTimes(lines []map[string]any, names map[string]time.Time) []map[string]any {
 	out := make([]map[string]any, 0, len(lines))

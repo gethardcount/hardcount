@@ -13,8 +13,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/pricing"
 	"github.com/gethardcount/hardcount/internal/subscription"
-	"github.com/gethardcount/hardcount/internal/testclock"
-	"github.com/gethardcount/hardcount/internal/testclock/testclocktest"
 	"github.com/gethardcount/hardcount/internal/usage"
 )
 
@@ -315,53 +313,6 @@ func TestLateClose_PauseWithoutResumesAt_CatchUp_AllDraft(t *testing.T) {
 	}
 }
 
-// TestLateClose_ScheduledResume_TestClock_AdvancePastResume: the same window
-// on a test clock. One advance lands at P1+45m, past a resumes_at of P1+30m;
-// the catchup bills [P0, P1) as a draft, and the pause is cleared by the end
-// of the same advance (not left for the next one).
-//
-// Mutation seams: drop resumeNotWaitingOnCloseSQL from
-// ListExpiredPauseCollectionsForClock → the early resumer clears the pause;
-// run the catchup's resume phase before Phase 1 → the store skip still holds
-// the pause, so [P0, P1) stays a draft, but the pause is left on the row after
-// the advance (not cleared in the same advance).
-func TestLateClose_ScheduledResume_TestClock_AdvancePastResume(t *testing.T) {
-	r := newCancelRig(t, "close lag scheduled resume on a test clock")
-	p0, p1 := r.f.cycleStart, r.f.cycleEnd
-	resumesAt := p1.Add(30 * time.Minute)
-	r.pauseUntil(t, &resumesAt)
-
-	frozen := p1.Add(45 * time.Minute)
-	clockID := postgres.NewID("hc_tclk")
-	execTx(t, r.f.db, r.base, r.f.tenantID,
-		`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status) VALUES ($1, $2, false, 'resume lag clock', $3, 'advancing')`,
-		clockID, r.f.tenantID, frozen)
-	r.exec(t, `UPDATE customers SET test_clock_id = $1 WHERE id = $2`, clockID, r.f.customerID)
-	r.exec(t, `UPDATE subscriptions SET test_clock_id = $1 WHERE id = $2`, clockID, r.f.subID)
-	clocks := testclock.NewPostgresStore(r.f.db)
-	r.f.engine.SetTestClockReader(clocks)
-	r.f.subSvc.SetResolver(r.f.engine)
-
-	// A failed Phase 1 leaves the resume phase to run with [P0, P1) still
-	// unclosed: it must keep the pause.
-	if _, errs := r.f.subSvc.ProcessExpiredPauseCollectionsForClock(r.base, r.f.tenantID, clockID, frozen); len(errs) != 0 {
-		t.Fatalf("clock pause resumer: %v", errs)
-	}
-	if sub := r.sub(t); sub.PauseCollection == nil {
-		t.Fatal("the clock resumer cleared the pause while [P0, P1), which ended before resumes_at, was still unclosed")
-	}
-
-	clockDeps := testclocktest.Deps(r.f.engine)
-	clockDeps.Pauses = r.f.subSvc
-	orchestrator := testclock.NewService(clocks, clockDeps)
-	testclocktest.DrainReady(t, orchestrator, r.f.tenantID, clockID)
-	invs, _ := r.liveInvoices(t)
-	wantStatus(t, invoiceFor(t, invs, p0, p1), domain.InvoiceDraft, "collection was paused at P1 (resumes_at P1+30m)")
-	if sub := r.sub(t); sub.PauseCollection != nil {
-		t.Errorf("after the advance, pause = %+v, want cleared in the same advance", sub.PauseCollection)
-	}
-}
-
 // wantWriteRefusedUnbilled: a subscription write was refused because a period
 // ended and could not be billed.
 func wantWriteRefusedUnbilled(t *testing.T, err error) {
@@ -514,37 +465,6 @@ func TestTrialFlipAfterResume_ResumerRunsFirst(t *testing.T) {
 	if sub := r.sub(t); sub.PauseCollection != nil {
 		t.Fatalf("pause still held after the trial flipped, want it cleared")
 	}
-}
-
-// TestTrialFlipAfterResume_TestClock: the same on a test clock, one advance
-// from before the trial end to past resumes_at (Phase 0.5).
-func TestTrialFlipAfterResume_TestClock(t *testing.T) {
-	r := newCancelRig(t, "trial flip after resume on a test clock")
-	trialEnd := r.f.cycleStart.Add(48 * time.Hour)
-	r.trialFlipRig(t, trialEnd, trialEnd.Add(30*time.Minute))
-
-	frozen := trialEnd.Add(45 * time.Minute)
-	clockID := postgres.NewID("hc_tclk")
-	execTx(t, r.f.db, r.base, r.f.tenantID,
-		`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status) VALUES ($1, $2, false, 'trial flip clock', $3, 'advancing')`,
-		clockID, r.f.tenantID, frozen)
-	r.exec(t, `UPDATE customers SET test_clock_id = $1 WHERE id = $2`, clockID, r.f.customerID)
-	r.exec(t, `UPDATE subscriptions SET test_clock_id = $1 WHERE id = $2`, clockID, r.f.subID)
-	clocks := testclock.NewPostgresStore(r.f.db)
-	r.f.engine.SetTestClockReader(clocks)
-	r.f.subSvc.SetResolver(r.f.engine)
-
-	clockDeps := testclocktest.Deps(r.f.engine)
-	clockDeps.Trials = r.f.subSvc
-	clockDeps.Pauses = r.f.subSvc
-	orchestrator := testclock.NewService(clocks, clockDeps)
-	testclocktest.DrainReady(t, orchestrator, r.f.tenantID, clockID)
-	if sub := r.sub(t); sub.Status != domain.SubscriptionActive {
-		t.Fatalf("status after the advance = %s, want active", sub.Status)
-	}
-	invs, _ := r.liveInvoices(t)
-	wantStatus(t, invoiceFor(t, invs, trialEnd, trialEnd.AddDate(0, 1, 0)), domain.InvoiceDraft,
-		"the period began at trial end, while collection was paused (resumes_at trial end+30m)")
 }
 
 // TestHeldTimedPause_DoesNotBlockOtherInvoicesPastResumesAt: a timed pause

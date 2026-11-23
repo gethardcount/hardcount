@@ -19,94 +19,72 @@ import (
 // run's final retry declines at S and takes the exhaustion lease, and the
 // process stops before the final actions. The subscription renews five
 // minutes later, inside the lease, and the run is re-driven at the lease. The
-// cancel is dated at the re-drive, after the renewal, on a test clock as in
-// real time, so the renewal's prebill is relieved: at day grade none of its
-// period was used, and it is voided. Real router, real Postgres; the clock
-// arm runs the clock's catch-up through each step to a target past the lease,
-// the real-time arm runs the billing and dunning ticks at the same instants.
+// cancel is dated at the re-drive, after the renewal, so the renewal's
+// prebill is relieved: at day grade none of its period was used, and it is
+// voided. Real router, real Postgres; the billing and dunning ticks run on a
+// fake clock.
 func TestDunningFinalAction_ReDrivenAfterARenewal_CancelsWhenItRuns(t *testing.T) {
-	for _, onClock := range []bool{true, false} {
-		name := "real time"
-		if onClock {
-			name = "test clock"
+	start := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
+	wall := clock.NewFake(start)
+	r := newDatesRigOn(t, "Dunning ReDrive After Renewal", wall)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	subID, _ := r.subWithItem("redrive", r.planID)
+	dayOneID := flowStr(r.dayOne(subID), "id")
+
+	subs := subscription.NewPostgresStore(r.db)
+	sub, err := subs.Get(ctx, r.tenantID, subID)
+	if err != nil || sub.CurrentBillingPeriodEnd == nil {
+		t.Fatalf("read subscription: %v (period end %v)", err, sub.CurrentBillingPeriodEnd)
+	}
+	renewal := sub.CurrentBillingPeriodEnd.UTC()
+	finalRetry := renewal.Add(-5 * time.Minute)
+	redrive := finalRetry.Add(15 * time.Minute) // the exhaustion lease
+
+	// The run as an interrupted exhaustion leaves it: its one retry ran at
+	// finalRetry and took the lease, and no final action ran.
+	policy, err := r.srv.DunningSvc.UpsertPolicy(ctx, r.tenantID, domain.DunningPolicy{
+		Name: "one retry", Enabled: true, RetryDays: []int{3},
+		FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: domain.InvActionMarkUncollectible,
+	})
+	if err != nil {
+		t.Fatalf("upsert policy: %v", err)
+	}
+	insertInterruptedRun(t, r, dayOneID, sub.CustomerID, policy.ID, finalRetry, start)
+	admin := testutil.AdminPool(t)
+	wall.Set(renewal)
+	if _, errs := r.srv.BillingEngine.RunCycle(leadertest.Token(t, admin, clock.WithRealTime(ctx), leader.RoleBilling), 50, nil); len(errs) != 0 {
+		t.Fatalf("billing tick at the renewal: %v", errs)
+	}
+	wall.Set(redrive)
+	if _, errs := r.srv.DunningSvc.ProcessDueRuns(leadertest.Token(t, admin, clock.WithRealTime(ctx), leader.RoleDunning), r.tenantID, 50); len(errs) != 0 {
+		t.Fatalf("dunning tick at the lease: %v", errs)
+	}
+
+	got, err := subs.Get(ctx, r.tenantID, subID)
+	if err != nil {
+		t.Fatalf("read subscription: %v", err)
+	}
+	if got.CurrentBillingPeriodStart == nil || !got.CurrentBillingPeriodStart.Equal(renewal) {
+		t.Fatalf("current period starts %v, want the renewal %v", got.CurrentBillingPeriodStart, renewal)
+	}
+	if got.Status != domain.SubscriptionCanceled || got.CanceledAt == nil || !got.CanceledAt.Equal(redrive) {
+		t.Fatalf("subscription %s canceled_at %v, want canceled at the re-drive %v (the renewal was %v)", got.Status, got.CanceledAt, redrive, renewal)
+	}
+	var renewalID string
+	for _, inv := range r.invoices(subID) {
+		if inv["billing_reason"] == string(domain.BillingReasonSubscriptionCycle) {
+			renewalID = flowStr(inv, "id")
 		}
-		t.Run(name, func(t *testing.T) {
-			start := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
-			wall := clock.NewFake(start)
-			r := newDatesRigOn(t, "Dunning ReDrive After Renewal "+name, wall)
-			ctx := postgres.WithLivemode(context.Background(), false)
-			clockID := ""
-			if onClock {
-				clockID = r.newClock("re-drive", start)
-			}
-			subID, _ := r.subWithItem("redrive", clockID, r.planID)
-			dayOneID := flowStr(r.dayOne(subID), "id")
-
-			subs := subscription.NewPostgresStore(r.db)
-			sub, err := subs.Get(ctx, r.tenantID, subID)
-			if err != nil || sub.CurrentBillingPeriodEnd == nil {
-				t.Fatalf("read subscription: %v (period end %v)", err, sub.CurrentBillingPeriodEnd)
-			}
-			renewal := sub.CurrentBillingPeriodEnd.UTC()
-			finalRetry := renewal.Add(-5 * time.Minute)
-			redrive := finalRetry.Add(15 * time.Minute) // the exhaustion lease
-
-			// The run as an interrupted exhaustion leaves it: its one retry
-			// ran at finalRetry and took the lease, and no final action ran.
-			interrupted := func() {
-				policy, err := r.srv.DunningSvc.UpsertPolicy(ctx, r.tenantID, domain.DunningPolicy{
-					Name: "one retry", Enabled: true, RetryDays: []int{3},
-					FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: domain.InvActionMarkUncollectible,
-				})
-				if err != nil {
-					t.Fatalf("upsert policy: %v", err)
-				}
-				insertInterruptedRun(t, r, dayOneID, sub.CustomerID, policy.ID, finalRetry, start)
-			}
-			if onClock {
-				r.advance(clockID, finalRetry)
-				interrupted()
-				r.advance(clockID, redrive.Add(48*time.Hour))
-			} else {
-				interrupted()
-				admin := testutil.AdminPool(t)
-				wall.Set(renewal)
-				if _, errs := r.srv.BillingEngine.RunCycle(leadertest.Token(t, admin, clock.WithRealTime(ctx), leader.RoleBilling), 50, nil); len(errs) != 0 {
-					t.Fatalf("billing tick at the renewal: %v", errs)
-				}
-				wall.Set(redrive)
-				if _, errs := r.srv.DunningSvc.ProcessDueRuns(leadertest.Token(t, admin, clock.WithRealTime(ctx), leader.RoleDunning), r.tenantID, 50); len(errs) != 0 {
-					t.Fatalf("dunning tick at the lease: %v", errs)
-				}
-			}
-
-			got, err := subs.Get(ctx, r.tenantID, subID)
-			if err != nil {
-				t.Fatalf("read subscription: %v", err)
-			}
-			if got.CurrentBillingPeriodStart == nil || !got.CurrentBillingPeriodStart.Equal(renewal) {
-				t.Fatalf("current period starts %v, want the renewal %v", got.CurrentBillingPeriodStart, renewal)
-			}
-			if got.Status != domain.SubscriptionCanceled || got.CanceledAt == nil || !got.CanceledAt.Equal(redrive) {
-				t.Fatalf("subscription %s canceled_at %v, want canceled at the re-drive %v (the renewal was %v)", got.Status, got.CanceledAt, redrive, renewal)
-			}
-			var renewalID string
-			for _, inv := range r.invoices(subID) {
-				if inv["billing_reason"] == string(domain.BillingReasonSubscriptionCycle) {
-					renewalID = flowStr(inv, "id")
-				}
-			}
-			if renewalID == "" {
-				t.Fatalf("no renewal invoice: %s", mustJSON(r.invoices(subID)))
-			}
-			renewalInv, err := invoice.NewPostgresStore(r.db).Get(ctx, r.tenantID, renewalID)
-			if err != nil {
-				t.Fatalf("read renewal invoice: %v", err)
-			}
-			if renewalInv.Status != domain.InvoiceVoided {
-				t.Errorf("renewal invoice is %s (amount due %d), want voided: canceled with none of its period used", renewalInv.Status, renewalInv.AmountDueCents)
-			}
-		})
+	}
+	if renewalID == "" {
+		t.Fatalf("no renewal invoice: %s", mustJSON(r.invoices(subID)))
+	}
+	renewalInv, err := invoice.NewPostgresStore(r.db).Get(ctx, r.tenantID, renewalID)
+	if err != nil {
+		t.Fatalf("read renewal invoice: %v", err)
+	}
+	if renewalInv.Status != domain.InvoiceVoided {
+		t.Errorf("renewal invoice is %s (amount due %d), want voided: canceled with none of its period used", renewalInv.Status, renewalInv.AmountDueCents)
 	}
 }
 
@@ -125,7 +103,7 @@ func TestDunningFinalAction_TheFinalInvoiceIsIssuedAtTheCancel(t *testing.T) {
 		"code": "dates-arrears", "name": "Dates Arrears", "currency": "USD", "billing_interval": "monthly",
 		"base_amount_cents": 3000, "base_bill_timing": "in_arrears",
 	}}).want(t, 201, "create arrears plan").body, "id")
-	subID, _ := r.subWithItem("final-invoice", "", planID)
+	subID, _ := r.subWithItem("final-invoice", planID)
 
 	subs := subscription.NewPostgresStore(r.db)
 	sub, err := subs.Get(ctx, r.tenantID, subID)
@@ -206,51 +184,5 @@ func insertInterruptedRun(t *testing.T, r *datesRig, invoiceID, customerID, poli
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit run: %v", err)
-	}
-}
-
-// TestDunningFinalAction_TestClock_OneAdvanceOverThreePeriods (#1276): a
-// card-less subscription billed in advance, whose one dunning retry runs out
-// three days after its day-1 invoice, and one advance over three renewals.
-// The customer has no card on purpose: a declined card starts and runs
-// dunning in the same order. The advance moves through each due time in
-// order, so the final action comes at the escalation, before the first
-// renewal: a cancel leaves no renewal billed.
-func TestDunningFinalAction_TestClock_OneAdvanceOverThreePeriods(t *testing.T) {
-	for _, action := range []domain.DunningSubscriptionAction{domain.SubActionCancel} {
-		t.Run(string(action), func(t *testing.T) {
-			r := newDatesRig(t, "Dunning Three Periods "+string(action))
-			ctx := postgres.WithLivemode(context.Background(), false)
-			if _, err := r.srv.DunningSvc.UpsertPolicy(ctx, r.tenantID, domain.DunningPolicy{
-				Name: "one retry", Enabled: true, RetryDays: []int{3},
-				FinalSubscriptionAction: action, FinalInvoiceAction: domain.InvActionMarkUncollectible,
-			}); err != nil {
-				t.Fatalf("upsert policy: %v", err)
-			}
-			start := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
-			escalation := start.AddDate(0, 0, 3)
-			clockID := r.newClock("three periods "+string(action), start)
-			subID, _ := r.subWithItem("three-"+string(action), clockID, r.planID)
-			r.advance(clockID, start.AddDate(0, 3, 2))
-
-			var renewals []map[string]any
-			for _, inv := range r.invoices(subID) {
-				if inv["billing_reason"] == "subscription_cycle" {
-					renewals = append(renewals, inv)
-				}
-			}
-			if action == domain.SubActionCancel {
-				sub, err := subscription.NewPostgresStore(r.db).Get(ctx, r.tenantID, subID)
-				if err != nil {
-					t.Fatalf("read subscription: %v", err)
-				}
-				if sub.CanceledAt == nil || !sub.CanceledAt.Equal(escalation) {
-					t.Errorf("canceled_at = %v, want the escalation %v", sub.CanceledAt, escalation)
-				}
-				if len(renewals) != 0 {
-					t.Errorf("%d renewals after a cancel at the escalation, want none: %s", len(renewals), mustJSON(renewals))
-				}
-			}
-		})
 	}
 }

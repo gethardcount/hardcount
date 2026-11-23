@@ -149,8 +149,8 @@ func sessionOnly(task string) auth.Access { return auth.Access{Session: task} }
 //   - credit notes: invoiceWrite;
 //   - credits: customerWrite.
 //
-// Test clocks have only testclockWrite. apikeyRead guards webhook events and
-// their stream, and the audit log and its export.
+// apikeyRead guards webhook events and their stream, and the audit log and
+// its export.
 var (
 	// anyCaller: any API key or dashboard session.
 	// TestRouteTable_AnyCallerStaysSmall lists the routes that take it.
@@ -174,7 +174,6 @@ var (
 	dunningWrite      = permission(auth.PermDunningWrite)
 	apikeyRead        = permission(auth.PermAPIKeyRead)
 	apikeyWrite       = permission(auth.PermAPIKeyWrite)
-	testclockWrite    = permission(auth.PermTestClockWrite)
 )
 
 // tableAccess is the route table as auth.RequirePermission reads it: each
@@ -406,14 +405,6 @@ var routeTable = map[routeKey]routeDecl{
 	// A replay needs only apikey:read: it sends again an event already
 	// emitted.
 	{"POST", "/v1/webhook_events/{id}/replay"}: realTime().needs(apikeyRead).withAudit(explicit("webhook.Handler.replayEventV2 (Log)")),
-	// A clock itself: the advance decides each pass's time per clock.
-	{"GET", "/v1/test-clocks"}:                     realTime().needs(testclockWrite),
-	{"POST", "/v1/test-clocks"}:                    realTime().needs(testclockWrite).withAudit(explicit("testclock.Service.Create (LogInTx)")),
-	{"GET", "/v1/test-clocks/{id}"}:                realTime().needs(testclockWrite),
-	{"DELETE", "/v1/test-clocks/{id}"}:             realTime().needs(testclockWrite).withAudit(explicit("testclock.Service.Delete (LogInTx)")),
-	{"POST", "/v1/test-clocks/{id}/advance"}:       realTime().needs(testclockWrite).withAudit(explicit("testclock.Service.Advance (LogInTx)")),
-	{"POST", "/v1/test-clocks/{id}/retry-advance"}: realTime().needs(testclockWrite).withAudit(explicit("testclock.Service.RetryAdvance (LogInTx)")),
-	{"GET", "/v1/test-clocks/{id}/customers"}:      realTime().needs(testclockWrite),
 	// Bills the tenant's due subscriptions, which never include a clock's.
 	{"POST", "/v1/billing/run"}: realTime().needs(invoiceWrite).withAudit(explicit("billing.Handler.triggerCycle (Log)")),
 

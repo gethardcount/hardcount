@@ -59,7 +59,7 @@ func newPauseRig(t *testing.T, name string, invoiceAction domain.DunningInvoiceA
 // invoice (finalized, unpaid: the customer has no card).
 func (r *pauseRig) sub(key string) (subID, dayOneID string) {
 	r.t.Helper()
-	subID, _ = r.subWithItem(key, "", r.planID)
+	subID, _ = r.subWithItem(key, r.planID)
 	dayOne := r.dayOne(subID)
 	if dayOne["status"] != "finalized" || flowInt(dayOne, "amount_due_cents") <= 0 {
 		r.t.Fatalf("%s: day-1 invoice %s with %d due, want finalized and owed", key, dayOne["status"], flowInt(dayOne, "amount_due_cents"))

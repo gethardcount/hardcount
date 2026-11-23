@@ -26,7 +26,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/subscription"
 	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/tenantstripe"
-	"github.com/gethardcount/hardcount/internal/testclock"
 	"github.com/gethardcount/hardcount/internal/usage"
 	"github.com/gethardcount/hardcount/internal/user"
 	"github.com/gethardcount/hardcount/internal/webhook"
@@ -109,8 +108,6 @@ var requestBodies = map[string]requestBody{
 	"POST /v1/auth/password-reset/confirm":                              {body: user.ConfirmResetReq{}},
 	"POST /v1/auth/accept-invite":                                       {body: dashmembers.AcceptInviteReq{}},
 	"POST /v1/members/invite":                                           {body: dashmembers.InviteReq{}},
-	"POST /v1/test-clocks":                                              {body: testclock.CreateInput{}},
-	"POST /v1/test-clocks/{id}/advance":                                 {body: testclock.AdvanceInput{}},
 	"POST /v1/recipes/{key}/preview":                                    {body: recipe.PreviewRequest{}},
 	"POST /v1/recipes/{key}/instantiate":                                {body: recipe.InstantiateRequest{}},
 	"POST /v1/dunning/policies":                                         {body: domain.DunningPolicy{}, undocumented: dunningPolicyReadOnly},

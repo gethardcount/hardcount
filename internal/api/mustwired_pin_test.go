@@ -63,8 +63,8 @@ func TestMustWired_CoversEveryAuditedComponent(t *testing.T) {
 	}
 
 	// A struct literal can hand over the logger too (hostedInvoiceStripe,
-	// noPMNotifier, testClockSvc, emailSettingsH). The grep above cannot see
-	// it, so each literal's variable must be listed as well.
+	// noPMNotifier, emailSettingsH). The grep above cannot see it, so each
+	// literal's variable must be listed as well.
 	literals := structLiteralAuditWirings(text)
 	if len(literals) == 0 {
 		t.Fatal("found ZERO struct-literal audit wirings — either the style is gone (delete this gate) or the pattern stopped matching (fix it). A gate that matches nothing is not a gate.")
@@ -98,8 +98,8 @@ func structLiteralAuditWirings(text string) [][]int {
 // enclosingVar walks BACKWARD from a struct-literal field to the variable the
 // literal is assigned to: `noPMNotifier := &noPaymentMethodNotifierAdapter{` →
 // "noPMNotifier". A literal passed as a constructor's last argument names the
-// constructed variable: `testClockSvc := testclock.NewService(store, testclock.Deps{`
-// → "testClockSvc". Nil when it cannot tell, which the caller treats as a failure —
+// constructed variable: `creditNoteH := creditnote.NewHandler(creditNoteSvc, creditnote.HandlerDeps{`
+// → "creditNoteH". Nil when it cannot tell, which the caller treats as a failure —
 // a gate that silently gives up is the thing being gated against.
 func enclosingVar(text string, at int) string {
 	// Same line first: `x := &T{a: 1, audit: auditLogger}`.

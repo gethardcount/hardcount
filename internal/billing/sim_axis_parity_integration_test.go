@@ -13,7 +13,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/pricing"
-	"github.com/gethardcount/hardcount/internal/testclock"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -43,7 +42,6 @@ func TestSimAxis_ClockDrivenLifecycle_EveryAuditRowIsStamped(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, db, "Sim Axis Parity")
 
 	logger := audit.NewLogger(db)
-	customerSvc := customer.NewService(customer.NewPostgresStore(db))
 	pricingStore := pricing.NewPostgresStore(db)
 	pricingSvc := pricing.NewService(pricingStore)
 
@@ -58,24 +56,12 @@ func TestSimAxis_ClockDrivenLifecycle_EveryAuditRowIsStamped(t *testing.T) {
 		`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status)
 		 VALUES ($1, $2, false, 'Parity Clock', $3, 'ready')`, clockID, tenantID, frozen)
 
-	// The customer is created INTO the clock through the real service — not
-	// created bare and UPDATEd into it afterwards. This is the origin row of the
-	// whole simulation, it is emitted by a NON-engine writer (so the set below is
-	// not just "every row the engine wrote"), and it is the row ADR-086 teardown
-	// makes irreplaceable: teardown HARD-DELETES the customer, so this row is the
-	// only surviving evidence the customer was ever in this clock's world.
-	customerSvc.SetAuditLogger(logger)
-	customerSvc.SetTestClockChecker(testclock.NewPostgresStore(db))
-
-	cust, err := customerSvc.Create(ctx, tenantID, customer.CreateInput{
+	cust, err := customer.NewPostgresStore(db).Create(ctx, tenantID, domain.Customer{
 		ExternalID: "cus_sim_parity", DisplayName: "Sim Parity", Email: "sim@example.test",
 		TestClockID: clockID,
 	})
 	if err != nil {
 		t.Fatalf("create customer: %v", err)
-	}
-	if cust.TestClockID != clockID {
-		t.Fatalf("customer test_clock_id = %q, want %q", cust.TestClockID, clockID)
 	}
 
 	meter, err := pricingSvc.CreateMeter(ctx, tenantID, pricing.CreateMeterInput{
@@ -122,9 +108,9 @@ func TestSimAxis_ClockDrivenLifecycle_EveryAuditRowIsStamped(t *testing.T) {
 		VALUES ($1,$2,$3,$4,1,$5,'create')`,
 		tenantID, subID, itemID, plan.ID, cycleStart)
 
-	// Everything below this line runs on the ctx CATCHUP binds (asserted
-	// separately by testclock.TestRunCatchup_BindsClockOntoCtx): the clock, not
-	// just its frozen instant. Nothing else in the lifecycle knows about it.
+	// Everything below this line runs on the ctx clock.Decide binds for a
+	// record on a clock: the clock, not just its frozen instant. Nothing else
+	// in the lifecycle knows about it.
 	simCtx := clock.WithSim(ctx, clock.Sim{At: frozen, TestClockID: clockID})
 
 	count, errsOut := engine.RunCycleForClock(simCtx, tenantID, clockID, 100)

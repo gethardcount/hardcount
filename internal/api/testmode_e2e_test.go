@@ -16,8 +16,8 @@ import (
 
 // TestE2E_TestModeIsolation checks, end to end, that a test-mode API key and
 // a live-mode API key, both belonging to the same tenant, see completely
-// disjoint data. Customers, webhook endpoints, and
-// test clocks created in one mode are invisible to the other. This is the
+// disjoint data. Customers and webhook endpoints created in one mode are
+// invisible to the other. This is the
 // guarantee a customer relies on to run synthetic load against their test
 // keys without risk to the live production partition.
 func TestE2E_TestModeIsolation(t *testing.T) {
@@ -142,36 +142,6 @@ func TestE2E_TestModeIsolation(t *testing.T) {
 		if len(ids) != 1 || ids[0] != testEPID {
 			t.Errorf("test key endpoint list: got %v, want [%s]", ids, testEPID)
 		}
-	})
-
-	// --- test clocks: write gated to secret + test mode (testclock handler
-	//     also refuses live-mode secret keys with 403). ---
-	t.Run("live key cannot create test clock (403)", func(t *testing.T) {
-		resp := doPost(t, ts, "/v1/test-clocks", liveAuth, map[string]any{
-			"name":        "should not be allowed",
-			"frozen_time": "2026-01-01T00:00:00Z",
-		})
-		assertStatus(t, resp, 403)
-	})
-
-	var clockID string
-	t.Run("test key creates test clock", func(t *testing.T) {
-		resp := doPost(t, ts, "/v1/test-clocks", testAuth, map[string]any{
-			"name":        "fy26",
-			"frozen_time": "2026-01-01T00:00:00Z",
-		})
-		assertStatus(t, resp, 201)
-		clk := readJSON(t, resp)
-		clockID = clk["id"].(string)
-		if clk["status"] != "ready" {
-			t.Errorf("new clock status: got %v, want ready", clk["status"])
-		}
-	})
-
-	t.Run("live key cannot see test clock", func(t *testing.T) {
-		resp := doGet(t, ts, "/v1/test-clocks/"+clockID, liveAuth)
-		// 403 from the requireTestMode gate — the clock is invisible to live.
-		assertStatus(t, resp, 403)
 	})
 }
 
