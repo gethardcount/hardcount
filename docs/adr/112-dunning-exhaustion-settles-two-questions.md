@@ -1,6 +1,6 @@
 # ADR-112: Dunning exhaustion settles two questions, not one
 
-**Status:** Accepted (2026-08-05; amended 2026-10-08, 2026-10-19, 2026-10-22, 2026-10-30 and 2026-11-09)
+**Status:** Accepted (2026-08-05; amended 2026-10-08, 2026-10-19, 2026-10-22, 2026-10-30, 2026-11-09, 2026-11-10 and 2026-11-23)
 **Amends:** [ADR-036](036-dunning-campaigns-model.md) (dunning campaigns —
 `final_action` and its 2026-05-16 four-value enum)
 **Relates to:** [ADR-110](110-written-off-invoices-close-self-service-payment.md)
@@ -614,4 +614,28 @@ the wait before the next retry, or the lease after the last.
 
 Pinned by `internal/dunning/schedule_before_charge_test.go` and
 `internal/dunning/schedule_before_charge_integration_test.go` on real
+Postgres.
+
+## Amendment 2026-11-23 — on a test clock, the final actions are dated when they run
+
+On a test clock as in real time, the final actions (the subscription's pause
+or cancel, the write-off) are dated when they run. That is the escalation,
+except after an interruption: there the escalation's record (the run's
+`resolved_at` and its escalated timeline row) keeps the final retry's instant
+([amendment of 2026-10-08](#amendment-2026-10-08--an-interrupted-exhaustion-is-finished-and-escalates-once)),
+and the actions take the re-drive's. A test clock used to date the actions
+with the record.
+
+- **Where the two differ.** Only an exhaustion re-driven after its lease, or
+  after a final payment that failed later
+  ([amendment of 2026-10-30](#amendment-2026-10-30--a-retry-whose-payment-is-processing-keeps-dunning-running)).
+  Inline after the final retry, and on entry after a shortened policy, the
+  actions run at the escalation.
+- **A cancel is not dated before the current period.** A re-drive comes
+  after any renewal billed inside the lease, so its cancel relieves that
+  renewal's prebill. The separate bound a test clock kept for this is
+  removed.
+
+Pinned by `TestDunningFinalAction_ReDrivenAfterARenewal_CancelsWhenItRuns`
+(both paths) and `TestExhaust_TestClock_FinalActionsDatedWhenTheyRun`, on real
 Postgres.

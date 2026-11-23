@@ -17,27 +17,14 @@ import (
 // staleNextActionAt + interval — still in the past — and the whole backlog
 // fired back-to-back in one tick, collapsing the configured cadence.
 //
-// The fix clamps the anchor to max(now, NextActionAt) on the non-catchup,
-// non-clock-pinned path, so a recovered scheduler resumes the cadence from the
-// recovery instant.
+// The anchor is max(now, NextActionAt), so a recovered scheduler resumes
+// the cadence from the recovery instant.
 func TestProcessDueRuns_WallClockCadenceAfterDowntime(t *testing.T) {
-	t.Run("real time, no instant bound", func(t *testing.T) { testWallClockCadenceAfterDowntime(t, false) })
-	// A run at real time carries an instant from the server's clock, which
-	// each processRun binds. The clamp must still apply: keyed on "an instant
-	// is bound", every production run would look simulated, and it never
-	// would.
-	t.Run("real time, an instant bound", func(t *testing.T) { testWallClockCadenceAfterDowntime(t, true) })
-}
-
-func testWallClockCadenceAfterDowntime(t *testing.T, boundInstant bool) {
 	recoveryNow := time.Date(2026, 6, 1, 12, 0, 0, 0, time.UTC)
 
 	store := newMemStore()
 	svc := NewService(store, &failingRetrier{}, clock.NewFake(recoveryNow))
 	ctx := testutil.AtRealTime() // where the scheduler's tick starts
-	if boundInstant {
-		ctx = clock.EnsureEffectiveNow(ctx, clock.NewFake(recoveryNow))
-	}
 
 	run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", recoveryNow.Add(-30*24*time.Hour), domain.DunningCausePaymentFailed)
 	// Simulate multi-interval scheduler downtime: this run was due 10 days ago
