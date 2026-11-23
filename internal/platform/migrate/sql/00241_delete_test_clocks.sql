@@ -1,8 +1,9 @@
 -- +goose Up
 -- Test clocks are removed. Delete every test clock and every customer on one,
 -- with everything they own, children first so no RESTRICT foreign key trips.
--- A clock is test mode only (its CHECK), and every statement reaches rows
--- through a clock's customers, so no live row is touched. Kept: the audit
+-- A clock is test mode only (its CHECK), and the app only ever put test-mode
+-- customers on one (customers has no CHECK for it); every statement reaches
+-- rows through a clock's customers, so no live row is touched. Kept: the audit
 -- log, and tenant config (meters, plans and their prices, dunning policies,
 -- API keys). The statements are the clock teardown's, for every clock.
 SET LOCAL app.bypass_rls = 'on';

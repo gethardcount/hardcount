@@ -12165,8 +12165,7 @@ export const getRunBillingUrl = () => {
  * late still makes its invoice. A subscription overdue for several
  * periods gets one invoice per period.
  *
- * Subscriptions on a test clock are not included; advance the clock
- * instead. A subscription whose billing is failing is skipped, both
+ * A subscription whose billing is failing is skipped, both
  * while it waits for its next attempt and while it is parked (set
  * aside after eight failed billing attempts, until someone retries
  * it). To retry one, use `POST /v1/subscriptions/{id}/retry-billing`. An audit log entry
@@ -15367,10 +15366,8 @@ export const getCreatePriceOverrideUrl = () => {
  * join when a subscription of the customer first joins the plan in a
  * period after it is created: an override created before a subscription
  * starts (after a trial, before the trial ends), even on the same day,
- * applies from its first period. On a test clock, it takes effect just
- * after the clock's time, so a subscription created at that same clock
- * time bills the list price; advance the clock first. The create is
- * written to the audit log.
+ * applies from its first period. The create is written to the audit
+ * log.
  * @summary Create a customer price override
  */
 export const createPriceOverride = async (createPriceOverrideBody: CreatePriceOverrideBody, options?: RequestInit): Promise<CustomerPriceOverride> => {
