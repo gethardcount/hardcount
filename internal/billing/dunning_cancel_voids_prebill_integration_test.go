@@ -581,18 +581,12 @@ func (m finalActionMovers) Cancel(ctx context.Context, tenantID, id string) erro
 	return err
 }
 
-func (m finalActionMovers) GetTerminalState(ctx context.Context, tenantID, id string) (dunning.SubscriptionTerminalState, error) {
+func (m finalActionMovers) IsCanceled(ctx context.Context, tenantID, id string) (bool, error) {
 	sub, err := m.svc.Get(ctx, tenantID, id)
 	if err != nil {
-		return dunning.SubscriptionTerminalState{}, err
+		return false, err
 	}
-	st := dunning.SubscriptionTerminalState{
-		Terminated: sub.Status == domain.SubscriptionCanceled,
-	}
-	if sub.CurrentBillingPeriodStart != nil {
-		st.PeriodStart = *sub.CurrentBillingPeriodStart
-	}
-	return st, nil
+	return sub.Status == domain.SubscriptionCanceled, nil
 }
 
 // finalActionWriteOff bridges invoice.Service to dunning's write-off port, the

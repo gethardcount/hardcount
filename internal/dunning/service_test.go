@@ -686,102 +686,33 @@ func inAdvance(ctx context.Context, frozen time.Time) context.Context {
 	return clock.WithSim(ctx, clock.Sim{At: frozen, TestClockID: "clock_1"})
 }
 
-// TestProcessDueRunsForClock_LoopsUntilExhausted locks in the Gap B
-// fix: a single Advance click must walk dunning state forward to
-// completion when multiple retries fit inside the advance window.
-// Pre-fix, the catchup orchestrator fired AT MOST one retry per
-// click — operators had to click Advance N times to exhaust an
-// N-retry policy. Stripe Test Clocks parity is one click → all
-// time-driven actions in [old_frozen, new_frozen] fire.
-//
-// Scenario: cycle closes May 1 → dunning starts → policy gives
-// retries at May 4, May 7, May 12 → final action at May 12. Operator
-// advances to May 20 in one click.
-func TestProcessDueRunsForClock_LoopsUntilExhausted(t *testing.T) {
-	store := newMemStore()
-	svc := NewService(store, &failingRetrier{}, nil)
-	ctx := context.Background()
-
-	cycleClose := time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC)
-	frozen := time.Date(2024, 5, 20, 0, 0, 0, 0, time.UTC)
-
-	// Start dunning at simulated cycle-close time. With grace=3d this
-	// schedules retry #1 for May 4 (well inside the May 20 window).
-	if _, err := svc.StartDunning(inAdvance(ctx, frozen), "t1", "inv_1", "cus_1", cycleClose, domain.DunningCausePaymentFailed); err != nil {
-		t.Fatalf("start dunning: %v", err)
-	}
-
-	processed, errs := svc.ProcessDueRunsForClock(ctx, "t1", "clock_1", frozen, 20)
-	if len(errs) > 0 {
-		t.Fatalf("unexpected errors: %v", errs)
-	}
-	// max_retry_attempts=3 → 3 retries fire before exhaustion.
-	if processed != 3 {
-		t.Errorf("processed: got %d, want 3 (all retries in one Advance)", processed)
-	}
-
-	// Run ends in terminal state. The fixture policy is (none, none)
-	// in this fixture → state=escalated, resolution=retries_exhausted.
-	var only domain.InvoiceDunningRun
-	for _, r := range store.runs {
-		only = r
-	}
-	if only.State != domain.DunningEscalated {
-		t.Errorf("state: got %q, want escalated", only.State)
-	}
-	if only.AttemptCount != 3 {
-		t.Errorf("attempt_count: got %d, want 3", only.AttemptCount)
-	}
-	if only.Resolution != domain.ResolutionRetriesExhausted {
-		t.Errorf("resolution: got %q, want retries_exhausted", only.Resolution)
-	}
-
-	// Each event row must carry its own simulated instant — not all
-	// pinned to advance-end frozen_time. Started at cycle_close;
-	// retry #1 at cycle_close + grace (3d); retry #2 at retry#1 +
-	// retry_schedule[0] (3d); retry #3 at retry#2 + retry_schedule[1]
-	// (5d); escalated co-instant with retry #3 (the retry that
-	// triggered the exhaustion).
-	wantTimestamps := map[domain.DunningEventType]time.Time{
-		domain.DunningEventStarted:   cycleClose,                                                  // May 1
-		domain.DunningEventEscalated: cycleClose.Add(72*time.Hour + 72*time.Hour + 120*time.Hour), // May 12
-	}
-	wantRetryTimestamps := []time.Time{
-		cycleClose.Add(72 * time.Hour),                              // retry #1: May 4
-		cycleClose.Add(72*time.Hour + 72*time.Hour),                 // retry #2: May 7
-		cycleClose.Add(72*time.Hour + 72*time.Hour + 120*time.Hour), // retry #3: May 12
-	}
-	retryIdx := 0
-	for _, e := range store.events {
-		if e.EventType == domain.DunningEventRetryAttempted {
-			if retryIdx >= len(wantRetryTimestamps) {
-				t.Errorf("unexpected extra retry event #%d at %v", retryIdx+1, e.CreatedAt)
-				continue
+// stepThrough runs the clock's dunning job as an advance to until does: at
+// each time a run of the store falls due, in order, on a context bound to
+// that time.
+func stepThrough(t *testing.T, svc *Service, store *memStore, until time.Time) {
+	t.Helper()
+	for range 50 {
+		var next *time.Time
+		for _, r := range store.runs {
+			if r.State == domain.DunningActive && !r.Paused && r.NextActionAt != nil && !r.NextActionAt.After(until) &&
+				(next == nil || r.NextActionAt.Before(*next)) {
+				at := *r.NextActionAt
+				next = &at
 			}
-			if !e.CreatedAt.Equal(wantRetryTimestamps[retryIdx]) {
-				t.Errorf("retry #%d CreatedAt: got %v, want %v",
-					retryIdx+1, e.CreatedAt, wantRetryTimestamps[retryIdx])
-			}
-			retryIdx++
-			continue
 		}
-		want, ok := wantTimestamps[e.EventType]
-		if !ok {
-			continue
+		if next == nil {
+			return
 		}
-		if !e.CreatedAt.Equal(want) {
-			t.Errorf("%s event CreatedAt: got %v, want %v",
-				e.EventType, e.CreatedAt, want)
+		if _, errs := svc.ProcessDueRunsForClock(inAdvance(context.Background(), *next), "t1", "clock_1", *next, 20); len(errs) > 0 {
+			t.Fatalf("the step at %v: %v", *next, errs)
 		}
 	}
-	if retryIdx != len(wantRetryTimestamps) {
-		t.Errorf("retry events count: got %d, want %d", retryIdx, len(wantRetryTimestamps))
-	}
+	t.Fatal("stepThrough took 50 steps without the runs moving past the target")
 }
 
-// TestProcessDueRunsForClock_StopsWhenAllAdvancePastFrozen confirms
-// the loop terminates naturally when all remaining runs have
-// next_action_at past frozen_time — no spinning, no spurious work.
+// TestProcessDueRunsForClock_StopsWhenAllAdvancePastFrozen: a step takes
+// each due run once; a run whose next action is after the step's time waits
+// for its own step.
 func TestProcessDueRunsForClock_StopsWhenAllAdvancePastFrozen(t *testing.T) {
 	store := newMemStore()
 	svc := NewService(store, &failingRetrier{}, nil)
@@ -888,9 +819,7 @@ func TestProcessDueRunsForClock_EnqueuesEscalationEmailOnExhaust(t *testing.T) {
 		t.Fatalf("start: %v", err)
 	}
 
-	if _, errs := svc.ProcessDueRunsForClock(ctx, "t1", "clock_1", frozen, 20); len(errs) > 0 {
-		t.Fatalf("processing errors: %v", errs)
-	}
+	stepThrough(t, svc, store, frozen)
 
 	// Policy fixture: max=3, retry_schedule=["72h","120h"]. Of 3 retries,
 	// retries #1 and #2 fire warnings; retry #3 skips warning and triggers
@@ -1088,13 +1017,11 @@ func TestDunning_StampsTheDecidedTime(t *testing.T) {
 		store.wroteAt(t, "StartRun", frozen)
 	})
 
-	t.Run("processRun chains in simulated time off run.NextActionAt", func(t *testing.T) {
-		// processRun anchors LastAttemptAt and the next retry's
-		// NextActionAt on run.NextActionAt (the retry's scheduled time on
-		// the test clock), not on the clock's frozen time. This keeps the
-		// catch-up walking forward on the clock even when its frozen time
-		// is past the retry's scheduled instant. Fields with no per-run
-		// scheduled time (resolved_at) use the decided time.
+	t.Run("a late retry on a clock is dated at the clock's time", func(t *testing.T) {
+		// A retry run after its scheduled time (here an hour late) is dated
+		// at the decided time, the clock's, and the next retry counts from
+		// it, as real time dates late work. On time, the two are the same:
+		// the advance stops at every retry's own time.
 		store := newMemStore()
 		svc := NewService(store, &failingRetrier{}, nil)
 		ctx := testutil.DecidedFor(t, resolver, clock.Pin{TenantID: "t1", InvoiceID: "inv_1"})
@@ -1111,16 +1038,16 @@ func TestDunning_StampsTheDecidedTime(t *testing.T) {
 		if updated.LastAttemptAt == nil {
 			t.Fatal("last_attempt_at should be stamped")
 		}
-		if !updated.LastAttemptAt.Equal(past) {
-			t.Errorf("last_attempt_at: got %v, want %v (= run.NextActionAt at fire time)", *updated.LastAttemptAt, past)
+		if !updated.LastAttemptAt.Equal(frozen) {
+			t.Errorf("last_attempt_at: got %v, want the clock's time %v", *updated.LastAttemptAt, frozen)
 		}
-		// Next retry chains off the previous scheduled instant.
+		// The next retry counts from the attempt.
 		if updated.NextActionAt == nil {
 			t.Fatal("next_action_at should be re-stamped")
 		}
-		wantNext := past.Add(72 * time.Hour)
+		wantNext := frozen.Add(72 * time.Hour)
 		if !updated.NextActionAt.Equal(wantNext) {
-			t.Errorf("next_action_at: got %v, want %v (past + 3d retry interval)", *updated.NextActionAt, wantNext)
+			t.Errorf("next_action_at: got %v, want %v (the attempt + 3d retry interval)", *updated.NextActionAt, wantNext)
 		}
 	})
 
@@ -1175,9 +1102,7 @@ func TestProcessDueRunsForClock_RecoveryStampsContractedInstant(t *testing.T) {
 	if _, err := svc.StartDunning(inAdvance(ctx, frozen), "t1", "inv_1", "cus_1", cycleClose, domain.DunningCausePaymentFailed); err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}
-	if _, errs := svc.ProcessDueRunsForClock(ctx, "t1", "clock_1", frozen, 20); len(errs) > 0 {
-		t.Fatalf("unexpected errors: %v", errs)
-	}
+	stepThrough(t, svc, store, frozen)
 
 	var run domain.InvoiceDunningRun
 	for _, r := range store.runs {
@@ -1247,9 +1172,7 @@ func TestProcessDueRunsForClock_ChargeCtxCarriesAnchoredInstant(t *testing.T) {
 	if _, err := svc.StartDunning(inAdvance(ctx, frozen), "t1", "inv_1", "cus_1", cycleClose, domain.DunningCausePaymentFailed); err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}
-	if _, errs := svc.ProcessDueRunsForClock(ctx, "t1", "clock_1", frozen, 20); len(errs) > 0 {
-		t.Fatalf("unexpected errors: %v", errs)
-	}
+	stepThrough(t, svc, store, frozen)
 
 	wantInstants := []time.Time{
 		cycleClose.Add(72 * time.Hour),                              // retry #1: May 4

@@ -9,155 +9,116 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/leader"
+	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/subscription"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// TestDunningFinalAction_TestClock_NeverBeforeTheCurrentPeriod: a dunning
-// run's final action on a test clock is dated at its escalation (P-5), but
-// never before the subscription's current period. Real router, real
-// Postgres, the catchup's dunning phase on the ctx the catchup binds.
-//
-// The shape: one advance crosses the next renewal. The catchup bills the
-// renewal (its cycle phase) before it runs the dunning work due before it
-// (its dunning phase), so a run whose escalation falls before the renewal
-// acts on a subscription already in the new period. Here the run's final
-// retry ran in an earlier advance and its exhaustion was interrupted, so this
-// advance re-drives it from that retry's instant, ten days before the
-// renewal.
-//
-// A cancel dated before current_period_start bills no final invoice and gives
-// the renewal's prebill no relief: both treat the cancel as outside the
-// period. The prebill, which began after the escalation, stayed open and
-// unpaid on a canceled subscription. The cancel lands at the period start
-// instead: nothing of the period used, its prebill voided. A pause is held to
-// the same bound, so it never reads as earlier than the renewal it followed.
-// The write-off of the escalated invoice keeps the escalation's instant.
-func TestDunningFinalAction_TestClock_NeverBeforeTheCurrentPeriod(t *testing.T) {
-	cases := []struct {
-		name   string
-		action domain.DunningSubscriptionAction
-	}{
-		{"cancel", domain.SubActionCancel},
-		{"pause", domain.SubActionPause},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			r := newDatesRig(t, "Dunning Final Action Period "+tc.name)
-			ctx := postgres.WithLivemode(context.Background(), false)
+// TestDunningFinalAction_ReDrivenAfterARenewal_CancelsWhenItRuns: a dunning
+// run's final retry declines at S and takes the exhaustion lease, and the
+// process stops before the final actions. The subscription renews five
+// minutes later, inside the lease, and the run is re-driven at the lease. The
+// cancel is dated at the re-drive, after the renewal, on a test clock as in
+// real time, so the renewal's prebill is relieved: at day grade none of its
+// period was used, and it is voided. Real router, real Postgres; the clock
+// arm runs the clock's catch-up through each step to a target past the lease,
+// the real-time arm runs the billing and dunning ticks at the same instants.
+func TestDunningFinalAction_ReDrivenAfterARenewal_CancelsWhenItRuns(t *testing.T) {
+	for _, onClock := range []bool{true, false} {
+		name := "real time"
+		if onClock {
+			name = "test clock"
+		}
+		t.Run(name, func(t *testing.T) {
 			start := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
-			clockID := r.newClock("final action "+tc.name, start)
-			subID, _ := r.subWithItem("final-"+tc.name, clockID, r.planID)
+			wall := clock.NewFake(start)
+			r := newDatesRigOn(t, "Dunning ReDrive After Renewal "+name, wall)
+			ctx := postgres.WithLivemode(context.Background(), false)
+			clockID := ""
+			if onClock {
+				clockID = r.newClock("re-drive", start)
+			}
+			subID, _ := r.subWithItem("redrive", clockID, r.planID)
 			dayOneID := flowStr(r.dayOne(subID), "id")
 
 			subs := subscription.NewPostgresStore(r.db)
 			sub, err := subs.Get(ctx, r.tenantID, subID)
-			if err != nil {
-				t.Fatalf("read subscription: %v", err)
-			}
-			if sub.CurrentBillingPeriodEnd == nil {
-				t.Fatal("subscription has no current period")
+			if err != nil || sub.CurrentBillingPeriodEnd == nil {
+				t.Fatalf("read subscription: %v (period end %v)", err, sub.CurrentBillingPeriodEnd)
 			}
 			renewal := sub.CurrentBillingPeriodEnd.UTC()
-			frozen := renewal.Add(48 * time.Hour)
-			escalation := renewal.Add(-10 * 24 * time.Hour) // the final retry, in an earlier advance
-			r.advance(clockID, frozen)
+			finalRetry := renewal.Add(-5 * time.Minute)
+			redrive := finalRetry.Add(15 * time.Minute) // the exhaustion lease
 
-			if sub, err = subs.Get(ctx, r.tenantID, subID); err != nil {
-				t.Fatalf("read subscription: %v", err)
-			}
-			if sub.CurrentBillingPeriodStart == nil || !sub.CurrentBillingPeriodStart.Equal(renewal) {
-				t.Fatalf("current period starts %v after the advance, want the renewal %v", sub.CurrentBillingPeriodStart, renewal)
-			}
-			var renewalID string
-			for _, inv := range r.invoices(subID) {
-				if inv["billing_reason"] == "subscription_cycle" {
-					renewalID = flowStr(inv, "id")
+			// The run as an interrupted exhaustion leaves it: its one retry
+			// ran at finalRetry and took the lease, and no final action ran.
+			interrupted := func() {
+				policy, err := r.srv.DunningSvc.UpsertPolicy(ctx, r.tenantID, domain.DunningPolicy{
+					Name: "one retry", Enabled: true, RetryDays: []int{3},
+					FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: domain.InvActionMarkUncollectible,
+				})
+				if err != nil {
+					t.Fatalf("upsert policy: %v", err)
 				}
+				insertInterruptedRun(t, r, dayOneID, sub.CustomerID, policy.ID, finalRetry, start)
 			}
-			if renewalID == "" {
-				t.Fatalf("no renewal invoice after the advance: %s", mustJSON(r.invoices(subID)))
-			}
-
-			policy, err := r.srv.DunningSvc.UpsertPolicy(ctx, r.tenantID, domain.DunningPolicy{
-				Name: "one retry", Enabled: true, RetryDays: []int{3},
-				FinalSubscriptionAction: tc.action, FinalInvoiceAction: domain.InvActionMarkUncollectible,
-			})
-			if err != nil {
-				t.Fatalf("upsert policy: %v", err)
-			}
-			// The day-1 invoice's run: its one retry ran at escalation and
-			// took the exhaustion lease; the exhaustion did not finish.
-			insertInterruptedRun(t, r, dayOneID, sub.CustomerID, policy.ID, escalation, start)
-
-			// The catchup's dunning phase, as the clock's catch-up pass
-			// calls it.
-			simCtx := clock.WithSim(ctx, clock.Sim{At: frozen, TestClockID: clockID})
-			if _, errs := r.srv.DunningSvc.ProcessDueRunsForClock(simCtx, r.tenantID, clockID, frozen, 50); len(errs) != 0 {
-				t.Fatalf("dunning phase: %v", errs)
-			}
-
-			invoices := invoice.NewPostgresStore(r.db)
-			dayOne, err := invoices.Get(ctx, r.tenantID, dayOneID)
-			if err != nil {
-				t.Fatalf("read day-1 invoice: %v", err)
-			}
-			if dayOne.Status != domain.InvoiceUncollectible || dayOne.UncollectibleAt == nil {
-				t.Fatalf("day-1 invoice status=%s uncollectible_at=%v, want written off", dayOne.Status, dayOne.UncollectibleAt)
-			}
-			if !dayOne.UncollectibleAt.Equal(escalation) {
-				t.Errorf("day-1 invoice uncollectible_at = %v, want the escalation %v", dayOne.UncollectibleAt.UTC(), escalation)
+			if onClock {
+				r.advance(clockID, finalRetry)
+				interrupted()
+				r.advance(clockID, redrive.Add(48*time.Hour))
+			} else {
+				interrupted()
+				admin := testutil.AdminPool(t)
+				wall.Set(renewal)
+				if _, errs := r.srv.BillingEngine.RunCycle(leadertest.Token(t, admin, clock.WithRealTime(ctx), leader.RoleBilling), 50, nil); len(errs) != 0 {
+					t.Fatalf("billing tick at the renewal: %v", errs)
+				}
+				wall.Set(redrive)
+				if _, errs := r.srv.DunningSvc.ProcessDueRuns(leadertest.Token(t, admin, clock.WithRealTime(ctx), leader.RoleDunning), r.tenantID, 50); len(errs) != 0 {
+					t.Fatalf("dunning tick at the lease: %v", errs)
+				}
 			}
 
 			got, err := subs.Get(ctx, r.tenantID, subID)
 			if err != nil {
 				t.Fatalf("read subscription: %v", err)
 			}
-			renewalInv, err := invoices.Get(ctx, r.tenantID, renewalID)
+			if got.CurrentBillingPeriodStart == nil || !got.CurrentBillingPeriodStart.Equal(renewal) {
+				t.Fatalf("current period starts %v, want the renewal %v", got.CurrentBillingPeriodStart, renewal)
+			}
+			if got.Status != domain.SubscriptionCanceled || got.CanceledAt == nil || !got.CanceledAt.Equal(redrive) {
+				t.Fatalf("subscription %s canceled_at %v, want canceled at the re-drive %v (the renewal was %v)", got.Status, got.CanceledAt, redrive, renewal)
+			}
+			var renewalID string
+			for _, inv := range r.invoices(subID) {
+				if inv["billing_reason"] == string(domain.BillingReasonSubscriptionCycle) {
+					renewalID = flowStr(inv, "id")
+				}
+			}
+			if renewalID == "" {
+				t.Fatalf("no renewal invoice: %s", mustJSON(r.invoices(subID)))
+			}
+			renewalInv, err := invoice.NewPostgresStore(r.db).Get(ctx, r.tenantID, renewalID)
 			if err != nil {
 				t.Fatalf("read renewal invoice: %v", err)
 			}
-
-			if tc.action == domain.SubActionCancel {
-				if got.Status != domain.SubscriptionCanceled || got.CanceledAt == nil {
-					t.Fatalf("subscription status=%s canceled_at=%v, want canceled", got.Status, got.CanceledAt)
-				}
-				if got.CanceledAt.Before(renewal) {
-					t.Errorf("canceled_at %v is before current_period_start %v: no final invoice and no relief for the period", got.CanceledAt.UTC(), renewal)
-				}
-				if !got.CanceledAt.Equal(renewal) {
-					t.Errorf("canceled_at = %v, want the current period's start %v", got.CanceledAt.UTC(), renewal)
-				}
-				if renewalInv.Status != domain.InvoiceVoided {
-					t.Errorf("renewal invoice %s is %s (amount due %d), want voided: the subscription was canceled with none of its period used",
-						renewalID, renewalInv.Status, renewalInv.AmountDueCents)
-				}
-				return
-			}
-
-			if renewalInv.Status != domain.InvoiceFinalized {
-				t.Errorf("renewal invoice is %s, want finalized: a pause changes no invoice", renewalInv.Status)
-			}
-			pausedAt := pauseRowSimAt(t, testutil.AdminPool(t), subID)
-			if pausedAt.Before(renewal) {
-				t.Errorf(`"Collection paused" row dated %v, before current_period_start %v: it reads as earlier than the renewal it followed`, pausedAt.UTC(), renewal)
-			}
-			if !pausedAt.Equal(renewal) {
-				t.Errorf(`"Collection paused" row dated %v, want the current period's start %v`, pausedAt.UTC(), renewal)
+			if renewalInv.Status != domain.InvoiceVoided {
+				t.Errorf("renewal invoice is %s (amount due %d), want voided: canceled with none of its period used", renewalInv.Status, renewalInv.AmountDueCents)
 			}
 		})
 	}
 }
 
-// TestDunningFinalAction_TestClock_TheFinalInvoiceIsIssuedAtTheEscalation: a
-// dunning run on a test clock that ends in a cancel inside the subscription's
-// current period issues the cancel's final invoice at the escalation, not at
-// the instant the advance landed on. The plan bills in arrears, so the cancel
-// bills the part of the period used before it. Real router, real Postgres,
-// the catchup's dunning phase on the ctx the catchup binds.
-func TestDunningFinalAction_TestClock_TheFinalInvoiceIsIssuedAtTheEscalation(t *testing.T) {
-	r := newDatesRig(t, "Dunning Final Invoice At The Escalation")
+// TestDunningFinalAction_TestClock_TheFinalInvoiceIsIssuedAtTheCancel: a
+// dunning run on a test clock whose escalation was interrupted is re-driven
+// at the step its lease falls due, and the cancel's final invoice is issued
+// there, with the cancel: not at the escalation, and not at the advance's
+// target. The plan bills in arrears, so the cancel bills the part of the
+// period used before it. Real router, real Postgres, the clock's catch-up.
+func TestDunningFinalAction_TestClock_TheFinalInvoiceIsIssuedAtTheCancel(t *testing.T) {
+	r := newDatesRig(t, "Dunning Final Invoice At The Cancel")
 	ctx := postgres.WithLivemode(context.Background(), false)
 	start := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
 	clockID := r.newClock("final invoice", start)
@@ -184,12 +145,10 @@ func TestDunningFinalAction_TestClock_TheFinalInvoiceIsIssuedAtTheEscalation(t *
 	if cycleID == "" {
 		t.Fatalf("no cycle invoice after the first period: %s", mustJSON(r.invoices(subID)))
 	}
-	// The run's last retry escalates five days into the next period; the
-	// advance lands two days after that.
-	escalation := renewal.Add(5 * 24 * time.Hour)
-	frozen := escalation.Add(48 * time.Hour)
-	r.advance(clockID, frozen)
-
+	// The run's last retry declines five days into the next period, and its
+	// exhaustion stops there; the next advance passes its lease.
+	finalRetry := renewal.Add(5 * 24 * time.Hour)
+	r.advance(clockID, finalRetry)
 	policy, err := r.srv.DunningSvc.UpsertPolicy(ctx, r.tenantID, domain.DunningPolicy{
 		Name: "one retry", Enabled: true, RetryDays: []int{3},
 		FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: domain.InvActionMarkUncollectible,
@@ -197,15 +156,14 @@ func TestDunningFinalAction_TestClock_TheFinalInvoiceIsIssuedAtTheEscalation(t *
 	if err != nil {
 		t.Fatalf("upsert policy: %v", err)
 	}
-	insertInterruptedRun(t, r, cycleID, sub.CustomerID, policy.ID, escalation, start)
-	simCtx := clock.WithSim(ctx, clock.Sim{At: frozen, TestClockID: clockID})
-	if _, errs := r.srv.DunningSvc.ProcessDueRunsForClock(simCtx, r.tenantID, clockID, frozen, 50); len(errs) != 0 {
-		t.Fatalf("dunning phase: %v", errs)
-	}
+	insertInterruptedRun(t, r, cycleID, sub.CustomerID, policy.ID, finalRetry, start)
+	redrive := finalRetry.Add(15 * time.Minute)
+	target := redrive.Add(48 * time.Hour)
+	r.advance(clockID, target)
 
 	got, err := subs.Get(ctx, r.tenantID, subID)
-	if err != nil || got.Status != domain.SubscriptionCanceled || got.CanceledAt == nil || !got.CanceledAt.Equal(escalation) {
-		t.Fatalf("subscription %s canceled_at %v (%v); want canceled at the escalation %v", got.Status, got.CanceledAt, err, escalation)
+	if err != nil || got.Status != domain.SubscriptionCanceled || got.CanceledAt == nil || !got.CanceledAt.Equal(redrive) {
+		t.Fatalf("subscription %s canceled_at %v (%v); want canceled at the re-drive %v", got.Status, got.CanceledAt, err, redrive)
 	}
 	var finalID string
 	for _, inv := range r.invoices(subID) {
@@ -220,9 +178,9 @@ func TestDunningFinalAction_TestClock_TheFinalInvoiceIsIssuedAtTheEscalation(t *
 	if err != nil {
 		t.Fatalf("read final invoice: %v", err)
 	}
-	if final.IssuedAt == nil || !final.IssuedAt.Equal(escalation) || !final.CreatedAt.Equal(escalation) {
-		t.Errorf("final invoice issued %v, created %v; want both at the escalation %v, not the advance's %v",
-			final.IssuedAt, final.CreatedAt, escalation, frozen)
+	if final.IssuedAt == nil || !final.IssuedAt.Equal(redrive) || !final.CreatedAt.Equal(redrive) {
+		t.Errorf("final invoice issued %v, created %v; want both at the re-drive %v, not the escalation %v or the target %v",
+			final.IssuedAt, final.CreatedAt, redrive, finalRetry, target)
 	}
 }
 

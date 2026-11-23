@@ -19,12 +19,12 @@ type stubSubState struct {
 	calls      int
 }
 
-func (s *stubSubState) GetTerminalState(_ context.Context, _, _ string) (SubscriptionTerminalState, error) {
+func (s *stubSubState) IsCanceled(_ context.Context, _, _ string) (bool, error) {
 	s.calls++
 	if s.err != nil {
-		return SubscriptionTerminalState{}, s.err
+		return false, s.err
 	}
-	return SubscriptionTerminalState{Terminated: s.terminated}, nil
+	return s.terminated, nil
 }
 
 // flakyCanceler fails until `failures` attempts have been made, then

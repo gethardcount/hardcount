@@ -96,18 +96,16 @@ const diffHorizonDays = 60 // past every case's last retry
 
 // TestSchedule_Differential pins every retry instant, every reminder and
 // escalation email, and the final action, for each schedule in
-// scheduleCases, on three timelines:
-//
-//   - a test clock advanced once across every retry (one advance, many
-//     boundaries: each retry still lands on its own instant);
-//   - a test clock advanced a day at a time;
-//   - the wall clock, ticked a day at a time.
+// scheduleCases, on two timelines: a test clock advanced a day at a time,
+// and the wall clock ticked a day at a time. One advance across many retries
+// stops at each of them, so it is the daily arm's case
+// (testclock.TestAdvance_StepsThroughEachDueTime holds the stops).
 //
 // The goldens were recorded with today's policy shape. Changing how the
 // schedule is written (#B8) must leave every one of them unchanged.
 func TestSchedule_Differential(t *testing.T) {
 	for _, tc := range scheduleCases() {
-		for _, arm := range []string{"test clock, one advance", "test clock, daily advances", "wall clock, daily ticks"} {
+		for _, arm := range []string{"test clock, daily advances", "wall clock, daily ticks"} {
 			t.Run(tc.name+"/"+arm, func(t *testing.T) {
 				runScheduleCase(t, tc, arm)
 			})
@@ -249,12 +247,8 @@ func runScheduleCase(t *testing.T, tc scheduleCase, arm string) {
 			t.Fatalf("dunning tick at %s: %v", to, errs)
 		}
 	}
-	if arm == "test clock, one advance" {
-		advance(diffFailedAt.AddDate(0, 0, diffHorizonDays))
-	} else {
-		for d := 1; d <= diffHorizonDays; d++ {
-			advance(diffFailedAt.Add(time.Duration(d) * 24 * time.Hour))
-		}
+	for d := 1; d <= diffHorizonDays; d++ {
+		advance(diffFailedAt.Add(time.Duration(d) * 24 * time.Hour))
 	}
 
 	want := make([]time.Time, len(tc.wantDays))

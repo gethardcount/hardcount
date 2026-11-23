@@ -24,7 +24,7 @@ func (r *countingRetrier) RetryPayment(context.Context, string, string, string) 
 	return nil
 }
 
-const heldSentence = ": a payment retry is waiting for an earlier payment of this invoice to finish: it cannot be charged twice. " +
+const heldSentence = ": its payment-retry run is waiting for a payment of this invoice to finish: it cannot be charged twice. " +
 	"Hardcount checks it on its next billing run (hourly by default). Retry advance once it is done; to stop waiting, void or write off the invoice."
 
 // heldSays returns what each left-for-next-pass error tells the operator.
@@ -41,9 +41,9 @@ func heldSays(t *testing.T, errs []error) []string {
 	return says
 }
 
-// A run held by an earlier payment of its invoice is not stepped, and when the
-// round has nothing to step the job fails once for each such run, so the
-// advance does not end ready with that retry not made. A run whose customer
+// A run held by an earlier payment of its invoice is not stepped, and the job
+// fails once for each such run still held after its walk, so the advance does
+// not end ready with that retry not made. A run whose customer
 // may be paying on the hosted page is neither stepped nor reported.
 func TestProcessDueRunsForClock_ReportsEachRunAChargeAttemptHolds(t *testing.T) {
 	store := newMemStore()
@@ -66,9 +66,8 @@ func TestProcessDueRunsForClock_ReportsEachRunAChargeAttemptHolds(t *testing.T) 
 	}
 }
 
-// After a round that stepped a run, a held run is still reported when the
-// next round has nothing to step.
-func TestProcessDueRunsForClock_ReportsAHeldRunAfterARoundThatDidWork(t *testing.T) {
+// A held run is still reported when the walk stepped another run.
+func TestProcessDueRunsForClock_ReportsAHeldRunAfterAWalkThatDidWork(t *testing.T) {
 	store := newMemStore()
 	retrier := &countingRetrier{}
 	svc := NewService(store, retrier, nil)
@@ -84,8 +83,8 @@ func TestProcessDueRunsForClock_ReportsAHeldRunAfterARoundThatDidWork(t *testing
 	}
 }
 
-// A round with nothing to step returns both what did not move and what a
-// charge attempt holds.
+// The job returns both a run still due after its step and a run a charge
+// attempt holds.
 func TestProcessDueRunsForClock_ReturnsUnmovedAndHeldTogether(t *testing.T) {
 	mem := newMemStore()
 	svc := NewService(claimAlwaysLost{mem}, &noopRetrier{}, nil)
@@ -102,7 +101,7 @@ func TestProcessDueRunsForClock_ReturnsUnmovedAndHeldTogether(t *testing.T) {
 	_, errs := svc.ProcessDueRunsForClock(context.Background(), "t1", "clk", time.Now().UTC().Add(time.Hour), 20)
 	says := heldSays(t, errs)
 	want := []string{
-		"1 payment retries due in this advance did not move: each is as its last step found it. Retry advance tries them again.",
+		"1 payment-retry runs fell due at this time while it was being worked and were not run. Retry advance runs them.",
 		"Invoice inv_held" + heldSentence,
 	}
 	if len(says) != 2 || says[0] != want[0] || says[1] != want[1] {
@@ -120,20 +119,6 @@ func TestProcessDueRunsForClock_OnlyHostedPageRunsDueEndsWithNoError(t *testing.
 	store.heldBy = map[string]domain.ChargeClaimState{ids[0]: domain.ChargePayingOnHostedPage, ids[1]: domain.ChargePayingOnHostedPage}
 	if _, errs := svc.ProcessDueRunsForClock(context.Background(), "t1", "clk", time.Now().UTC().Add(time.Hour), 20); len(errs) != 0 || retrier.calls != 0 {
 		t.Errorf("errors %v, %d retries; want none of either", errs, retrier.calls)
-	}
-}
-
-// A run whose earlier payment finishes between two rounds is stepped in the
-// next round, not reported.
-func TestProcessDueRunsForClock_ARunReleasedBetweenRoundsIsStepped(t *testing.T) {
-	store := newMemStore()
-	retrier := &countingRetrier{}
-	svc := NewService(store, retrier, nil)
-	ids := dueRuns(t, store, svc, 2)
-	store.heldBy = map[string]domain.ChargeClaimState{ids[1]: domain.ChargeHeldByAttempt}
-	retrier.onRetry = func() { delete(store.heldBy, ids[1]) } // the free run's retry, in round one
-	if _, errs := svc.ProcessDueRunsForClock(context.Background(), "t1", "clk", time.Now().UTC().Add(time.Hour), 20); len(errs) != 0 || retrier.calls != 2 {
-		t.Errorf("errors %v, %d retries; want both runs stepped and no error", errs, retrier.calls)
 	}
 }
 
