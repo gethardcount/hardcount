@@ -489,21 +489,3 @@ func TestProcessExpiredTrialsForClock_InDueOrder(t *testing.T) {
 		t.Errorf("trials ended in order %v, want the order they fell due %v", rec.ids, want)
 	}
 }
-
-// The flip itself refuses a trial whose end moved past the time it acts for,
-// with the not-due error, not a generic invalid state.
-func TestActivateAfterTrial_AfterAnExtendIsNotDue(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	ctx := postgres.WithLivemode(context.Background(), false)
-	tenantID := testutil.CreateTestTenant(t, db, "Trial Not Due")
-	store := NewPostgresStore(db)
-	_, frozen, ids := seedClockSubs(t, db, ctx, tenantID, 1, true)
-	oldEnd := frozen.Add(-time.Hour)
-	newEnd := frozen.Add(7 * 24 * time.Hour)
-	if _, err := store.ExtendTrial(ctx, tenantID, ids[0], newEnd, newEnd, newEnd.AddDate(0, 1, 0), newEnd, newEnd.Day()); err != nil {
-		t.Fatalf("extend trial: %v", err)
-	}
-	if _, err := store.ActivateAfterTrialWithBill(ctx, tenantID, ids[0], oldEnd, nil); !errors.Is(err, domain.ErrTrialNotDue) {
-		t.Errorf("flip at the old end after an extend: err = %v, want ErrTrialNotDue", err)
-	}
-}

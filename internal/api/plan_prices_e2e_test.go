@@ -620,9 +620,8 @@ func TestE2E_PlanPrices_RemovalEndsOverrides(t *testing.T) {
 }
 
 // TestE2E_PlanPrices_OverrideFromTheNextPeriod: an override create applies
-// from the customer's next period (ADR-130 §6). (The delete side is
-// TestE2E_PlanPrices_TestClockOverride: wall time cannot be moved past a
-// period start in a test, a test clock can.)
+// from the customer's next period (ADR-130 §6). The delete side is
+// TestE2E_PlanPrices_OverrideDeletedMidPeriod.
 //
 // Mutation: resolve the override at the close's instant instead of the
 // period start, and P0 bills the new override.
@@ -643,6 +642,38 @@ func TestE2E_PlanPrices_OverrideFromTheNextPeriod(t *testing.T) {
 	r.ingest(p1.Add(2*time.Hour), "pp-onp", "calls", 10, p1.Add(time.Hour), nil)
 	r.run(p2.Add(time.Hour))
 	wantUsage(t, "P1: the override", r.cycle(sub, p1), map[string]int64{ids[0]: 40})
+}
+
+// TestE2E_PlanPrices_OverrideDeletedMidPeriod: an override deleted while a
+// period is open leaves that period at the negotiated rate; the next period
+// is at list (ADR-130 §6). An override is stamped with the database's
+// clock, so the subscription starts 40 days ago and the delete, now, falls
+// in P1. The override is dated back into P0, so P1 is its first period.
+//
+// Mutation: stamp the delete at the period start it falls in, and P1 bills
+// the list price.
+func TestE2E_PlanPrices_OverrideDeletedMidPeriod(t *testing.T) {
+	r := newPPRig(t, "override deleted mid-period")
+	calls := r.meter("calls", "sum")
+	plan, ids := r.plan("pro", perUnit(calls, "10", nil))
+	cust := r.customer("pp-odm", "")
+	sub, p0, p1 := r.subscribe(time.Now().UTC().AddDate(0, 0, -40), cust, plan)
+	p2 := monthAfter(p1, p0.Day())
+	p3 := monthAfter(p2, p0.Day())
+	o := r.must(time.Time{}, http.MethodPost, "/v1/price-overrides", map[string]any{
+		"customer_id": cust, "price_id": ids[0], "mode": "per_unit", "unit_amount_cents": "4",
+	}, http.StatusCreated)
+	r.exec(`UPDATE customer_price_overrides SET created_at = $1 WHERE id = $2`, p0.Add(time.Hour), flowStr(o, "id"))
+	r.run(p1.Add(time.Hour))
+	r.ingest(p1.Add(2*time.Hour), "pp-odm", "calls", 10, p1.Add(time.Hour), nil)
+
+	r.must(time.Time{}, http.MethodDelete, "/v1/price-overrides/"+flowStr(o, "id"), nil, http.StatusOK)
+	r.run(p2.Add(time.Hour))
+	wantUsage(t, "P1: the override, deleted after P1 started", r.cycle(sub, p1), map[string]int64{ids[0]: 40})
+
+	r.ingest(p2.Add(2*time.Hour), "pp-odm", "calls", 10, p2.Add(time.Hour), nil)
+	r.run(p3.Add(time.Hour))
+	wantUsage(t, "P2: list again", r.cycle(sub, p2), map[string]int64{ids[0]: 100})
 }
 
 // TestE2E_PlanPrices_BaseBillTiming: base_bill_timing is required when the

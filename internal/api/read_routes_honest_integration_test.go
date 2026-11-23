@@ -16,7 +16,11 @@ import (
 // a check that refuses everything cannot pass.
 func TestReadRoutesHonest(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
+	// One instant for the server and for "today" below: an event with no
+	// timestamp lands at the server's time, so a second time.Now() would
+	// name the next day if midnight UTC fell between the two.
+	frozen := time.Now().UTC()
+	ts := httptest.NewServer(NewServer(db, clock.NewFake(frozen), nil))
 	defer ts.Close()
 
 	tenantID := testutil.CreateTestTenant(t, db, "Read Routes Honest Co")
@@ -38,16 +42,9 @@ func TestReadRoutesHonest(t *testing.T) {
 	}).want(t, 201, "create plan").body
 	planID := flowStr(plan, "id")
 	priceID := flowStr(flowList(plan, "prices")[0], "id")
-	// One instant for the clock and for "today" below: an event with no
-	// timestamp lands at the clock's frozen_time, so a second time.Now()
-	// would name the next day if midnight UTC fell between the two.
-	frozen := time.Now().UTC()
-	clockID := flowStr(call("POST", "/v1/test-clocks", map[string]any{
-		"name": "honest clock", "frozen_time": frozen.Format(time.RFC3339),
-	}).want(t, 201, "create test clock").body, "id")
 	customerID := flowStr(call("POST", "/v1/customers", map[string]any{
 		"external_id": "honest-cust", "display_name": "Honest Customer",
-		"email": "billing@honest.test", "test_clock_id": clockID,
+		"email": "billing@honest.test",
 	}).want(t, 201, "create customer").body, "id")
 	sub := call("POST", "/v1/subscriptions", map[string]any{
 		"code": "honest-sub", "display_name": "Honest Subscription", "customer_id": customerID,

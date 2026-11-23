@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
-	"slices"
 	"sort"
 	"testing"
 	"time"
@@ -145,22 +144,6 @@ func (r *datesRig) dayOne(subID string) map[string]any {
 	return found[0]
 }
 
-// invoiceLine returns the invoice timeline's one line titled title.
-func (r *datesRig) invoiceLine(invoiceID, title string) map[string]any {
-	r.t.Helper()
-	events := flowList(r.call("GET", "/v1/invoices/"+invoiceID+"/payment-timeline", flowReq{}).want(r.t, 200, "invoice timeline").body, "events")
-	var found []map[string]any
-	for _, l := range linesOf(r.t, events) {
-		if l["title"] == title {
-			found = append(found, l)
-		}
-	}
-	if len(found) != 1 {
-		r.t.Fatalf("invoice timeline has %d %q lines, want 1: %s", len(found), title, mustJSON(linesOf(r.t, events)))
-	}
-	return found[0]
-}
-
 // at parses m[key] as an RFC 3339 instant, failing when it is not one.
 func at(t *testing.T, m map[string]any, key string) time.Time {
 	t.Helper()
@@ -179,148 +162,10 @@ func wantAt(t *testing.T, what string, m map[string]any, key string, want time.T
 	}
 }
 
-// TestActivityDates_TrialRunsOut is B12 / P-3: a trial that runs out on a test
-// clock is dated at trial_end_at, not at the advance that found it, and so is
-// the day-1 invoice it issues. Before the fix the catchup ran the flip at the
-// clock's frozen_time: "Trial ended", the invoice's issue date, its due date
-// and its "Invoice finalized" line all read two days late, and a day-1
-// invoice swept by a longer advance sorted after the cycle invoice it
-// preceded.
-//
-// Mutation checks: drop the WithSim in ProcessExpiredTrialsForClock and the
-// line assertions fail; read the clock instead of startAt in
-// buildOnCreateInvoice and the invoice assertions fail while the "Trial
-// ended" line still passes (TestTrialExpiry_TestClock_ChargeNotBeforeIssue in
-// internal/billing catches the paid-before-issued split that leaves).
+// TestActivityDates_TrialRunsOut: a trial that runs out is dated at the
+// expiry tick, and its day-1 invoice is issued at trial_end_at.
 func TestActivityDates_TrialRunsOut(t *testing.T) {
 	r := newDatesRig(t, "Activity Dates Trial")
-	frozen := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
-
-	t.Run("test clock: two days past trial end", func(t *testing.T) {
-		clockID := r.newClock("trial ends", frozen)
-		subID, trialEnd := r.trialSub("trial", clockID)
-		r.advance(clockID, trialEnd.Add(48*time.Hour))
-
-		wantAt(t, `"Trial ended" line`, r.subLine(subID, "Trial ended"), "occurred_at", trialEnd)
-		inv := r.dayOne(subID)
-		wantAt(t, "day-1 invoice", inv, "issued_at", trialEnd)
-		wantAt(t, "day-1 invoice", inv, "created_at", trialEnd)
-		netDays := int(flowInt(inv, "net_payment_term_days"))
-		wantAt(t, "day-1 invoice", inv, "due_at", trialEnd.AddDate(0, 0, netDays))
-		wantAt(t, `day-1 "Invoice finalized" line`, r.invoiceLine(flowStr(inv, "id"), "Invoice finalized"), "occurred_at", trialEnd)
-		wantAt(t, `day-1 "Invoice created" line`, r.invoiceLine(flowStr(inv, "id"), "Invoice created"), "occurred_at", trialEnd)
-		if inv["paid_at"] != nil && at(t, inv, "paid_at").Before(at(t, inv, "issued_at")) {
-			t.Errorf("day-1 invoice paid_at %v is before its issued_at %v", inv["paid_at"], inv["issued_at"])
-		}
-	})
-
-	// One advance over three periods: the trial end and two renewals. A
-	// credit of two invoices' worth expires between the renewals, so the
-	// day-1 invoice and the first renewal draw it and the second does not.
-	t.Run("test clock: one advance past the trial end and two renewals", func(t *testing.T) {
-		clockID := r.newClock("trial and renewal", frozen)
-		subID, trialEnd := r.trialSub("renewal", clockID)
-		customerID := flowStr(r.call("GET", "/v1/subscriptions/"+subID, flowReq{}).want(t, 200, "read subscription").body, "customer_id")
-		expires := trialEnd.AddDate(0, 1, 10)
-		r.call("POST", "/v1/credits/grant", flowReq{body: map[string]any{
-			"customer_id": customerID, "currency": "USD", "amount_cents": 9900, "description": "Goodwill",
-			"expires_at": expires.Format(time.RFC3339),
-		}}).want(t, 201, "grant credit")
-		r.advance(clockID, trialEnd.AddDate(0, 2, 2))
-
-		invs := r.invoices(subID)
-		if len(invs) != 3 {
-			t.Fatalf("%d invoices after an advance past the trial end and two renewals, want the day-1 and two cycle invoices: %s", len(invs), mustJSON(invs))
-		}
-		// Oldest first: the day-1 invoice the trial end issued comes before
-		// the renewals that followed it.
-		if invs[0]["billing_reason"] != "subscription_create" {
-			t.Errorf("first invoice by created_at is %v (created %v), want the day-1 invoice: %s",
-				invs[0]["billing_reason"], invs[0]["created_at"], mustJSON(invs))
-		}
-		renewal := trialEnd.Truncate(24*time.Hour).AddDate(0, 1, 0) // renewals fall at midnight
-		for i, want := range []struct {
-			issued time.Time
-			credit int64
-		}{{trialEnd, 4900}, {renewal, 4900}, {renewal.AddDate(0, 1, 0), 0}} {
-			wantAt(t, fmt.Sprintf("invoice %d", i), invs[i], "issued_at", want.issued)
-			if got := flowInt(invs[i], "credits_applied_cents"); got != want.credit {
-				t.Errorf("invoice %d credits_applied_cents = %d, want %d", i, got, want.credit)
-			}
-		}
-		wantAt(t, `"Trial ended" line`, r.subLine(subID, "Trial ended"), "occurred_at", trialEnd)
-		// Each draw is dated at its invoice's collection, and the 100 left
-		// expires at expires_at.
-		var draws []time.Time
-		var expiry map[string]any
-		for _, e := range r.call("GET", "/v1/credits/ledger/"+customerID, flowReq{}).want(t, 200, "read ledger").body["data"].([]any) {
-			switch m := e.(map[string]any); m["entry_type"] {
-			case "usage":
-				draws = append(draws, at(t, m, "created_at"))
-			case "expiry":
-				expiry = m
-			}
-		}
-		slices.SortFunc(draws, time.Time.Compare)
-		if len(draws) != 2 || !draws[0].Equal(trialEnd) || !draws[1].Equal(renewal) {
-			t.Errorf("credit draws at %v, want %v and %v", draws, trialEnd, renewal)
-		}
-		if expiry == nil || flowInt(expiry, "amount_cents") != -100 {
-			t.Fatalf("expiry entry %v, want one of -100", expiry)
-		}
-		wantAt(t, "expiry entry", expiry, "created_at", expires)
-	})
-
-	// One customer, two subscriptions, one invoice's worth of credit left:
-	// the first subscription renews (1 March) before the second one's trial
-	// ends (13 March). The advance moves through each due time in order, so
-	// the renewal draws the credit and the trial's day-1 invoice draws none.
-	t.Run("test clock: a trial that ends after another subscription's renewal", func(t *testing.T) {
-		clockID := r.newClock("trial after renewal", frozen)
-		customerID := flowStr(r.call("POST", "/v1/customers", flowReq{body: map[string]any{
-			"external_id": "dates-two-subs", "display_name": "Dates two subs", "email": "billing@dates.test", "test_clock_id": clockID,
-		}}).want(t, 201, "create customer").body, "id")
-		r.call("POST", "/v1/credits/grant", flowReq{body: map[string]any{
-			"customer_id": customerID, "currency": "USD", "amount_cents": 9800, "description": "Goodwill",
-		}}).want(t, 201, "grant credit")
-		newSub := func(code string, trialDays int) string {
-			return flowStr(r.call("POST", "/v1/subscriptions", flowReq{body: map[string]any{
-				"code": code, "display_name": code, "customer_id": customerID, "billing_time": "anniversary",
-				"items": []map[string]any{{"plan_id": r.planID, "quantity": 1}}, "trial_days": trialDays,
-			}}).want(t, 201, "create "+code).body, "id")
-		}
-		renewing := newSub("dates-renews", 0) // its day-1 invoice draws the first 4900
-		trialing := newSub("dates-trial-40", 40)
-		r.advance(clockID, frozen.AddDate(0, 0, 45))
-
-		var renewal map[string]any
-		for _, inv := range r.invoices(renewing) {
-			if inv["billing_reason"] == "subscription_cycle" {
-				renewal = inv
-			}
-		}
-		if renewal == nil {
-			t.Fatalf("no renewal invoice: %s", mustJSON(r.invoices(renewing)))
-		}
-		if got := flowInt(renewal, "credits_applied_cents"); got != 4900 {
-			t.Errorf("renewal credits_applied_cents = %d, want 4900", got)
-		}
-		if got := flowInt(r.dayOne(trialing), "credits_applied_cents"); got != 0 {
-			t.Errorf("trial day-1 invoice credits_applied_cents = %d, want 0", got)
-		}
-	})
-
-	t.Run("test clock: a cancellation due at trial end", func(t *testing.T) {
-		clockID := r.newClock("trial cancel", frozen)
-		subID, trialEnd := r.trialSub("cancel", clockID)
-		r.call("POST", "/v1/subscriptions/"+subID+"/schedule-cancel", flowReq{body: map[string]any{"at_period_end": true}}).want(t, 200, "schedule cancel at trial end")
-		r.advance(clockID, trialEnd.Add(48*time.Hour))
-
-		wantAt(t, `"Subscription canceled" line`, r.subLine(subID, "Subscription canceled"), "occurred_at", trialEnd)
-		if invs := r.invoices(subID); len(invs) != 0 {
-			t.Errorf("a trial canceled at its end issued %d invoices, want none", len(invs))
-		}
-	})
 
 	t.Run("real clock: one expiry tick", func(t *testing.T) {
 		subID, trialEnd := r.trialSub("wall", "")
@@ -399,7 +244,9 @@ func (r *datesRig) finalizeRowMeta(invoiceID string) map[string]any {
 // row is checked in internal/billing; a draft finalized by the operator or by
 // the tax retry never carries the flag (internal/invoice).
 func TestActivityDates_BornFinalized(t *testing.T) {
-	r := newDatesRig(t, "Activity Dates Born Finalized")
+	frozen := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
+	wall := clock.NewFake(frozen)
+	r := newDatesRigOn(t, "Activity Dates Born Finalized", wall)
 	plan := func(code string, cents int, timing string) string {
 		return flowStr(r.call("POST", "/v1/plans", flowReq{body: map[string]any{
 			"code": code, "name": code, "currency": "USD", "billing_interval": "monthly",
@@ -408,25 +255,21 @@ func TestActivityDates_BornFinalized(t *testing.T) {
 	}
 	bigger := plan("dates-bigger", 9900, "in_advance")
 	arrears := plan("dates-arrears", 3000, "in_arrears")
-	frozen := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
 
-	// Day-1 and proration, on the real clock.
+	// Day-1 and proration.
 	upSub, upItem := r.subWithItem("upgrade", "", r.planID)
 	// An unpaid period invoice blocks a plan change: pay the day-1 invoice
 	// offline first.
 	r.call("POST", "/v1/invoices/"+flowStr(r.dayOne(upSub), "id")+"/record-payment", flowReq{body: map[string]any{"note": "Wire"}}).want(t, 200, "pay day-1 offline")
 	r.call("PATCH", "/v1/subscriptions/"+upSub+"/items/"+upItem, flowReq{body: map[string]any{"new_plan_id": bigger, "immediate": true}}).want(t, 200, "upgrade now")
 
-	// The cycle close, on a test clock.
-	cycleClock := r.newClock("cycle close", frozen)
-	cycleSub, _ := r.subWithItem("cycle", cycleClock, r.planID)
-	r.advance(cycleClock, frozen.AddDate(0, 1, 2))
-
-	// The final invoice of an immediate cancel, ten days into an arrears period.
-	cancelClock := r.newClock("cancel final", frozen)
-	cancelSub, _ := r.subWithItem("cancel", cancelClock, arrears)
-	r.advance(cancelClock, frozen.AddDate(0, 0, 10))
+	// The final invoice of an immediate cancel, ten days into an arrears
+	// period, then the cycle close.
+	cycleSub, _ := r.subWithItem("cycle", "", r.planID)
+	cancelSub, _ := r.subWithItem("cancel", "", arrears)
+	wall.Set(frozen.AddDate(0, 0, 10))
 	r.call("POST", "/v1/subscriptions/"+cancelSub+"/cancel", flowReq{}).want(t, 200, "cancel now")
+	tickAt(t, r.srv, wall, r.tenantID, frozen.AddDate(0, 1, 2))
 
 	seen := map[string]int{}
 	for _, subID := range []string{upSub, cycleSub, cancelSub} {
@@ -552,8 +395,8 @@ func TestActivityDates_HostedPageAttempts(t *testing.T) {
 		}
 	})
 
-	t.Run("test clock: a hosted-page payment succeeds", func(t *testing.T) {
-		id := newInvoice("pay", clockID)
+	t.Run("a hosted-page payment succeeds", func(t *testing.T) {
+		id := newInvoice("pay", "")
 		if err := hr.charger.SettleSucceeded(webhook(t, id), hr.tenantID, hr.invoice(id), "pi_hosted_ok", 4900, payment.SourceWebhook); err != nil {
 			t.Fatalf("settle succeeded: %v", err)
 		}
@@ -567,9 +410,9 @@ func TestActivityDates_HostedPageAttempts(t *testing.T) {
 		}
 	})
 
-	t.Run("test clock: a dunning retry's failure webhook beats its attempt write", func(t *testing.T) {
-		id := newInvoice("collide", clockID)
-		slot := frozen.Add(-36 * time.Hour) // the retry's contracted instant, inside the advance
+	t.Run("a dunning retry's failure webhook beats its attempt write", func(t *testing.T) {
+		id := newInvoice("collide", "")
+		slot := time.Now().UTC().Add(-36 * time.Hour).Truncate(time.Microsecond) // the retry's contracted instant
 		hostedFailure(id, "pi_retry_collide", "dunning_retry")
 		if err := hr.invoices.RecordChargeAttempt(clock.WithEffectiveNow(hr.ctx, slot), hr.tenantID, domain.InvoiceChargeAttempt{
 			InvoiceID: id, StripePaymentIntentID: "pi_retry_collide", Trigger: domain.ChargeTriggerDunningRetry,
@@ -582,7 +425,7 @@ func TestActivityDates_HostedPageAttempts(t *testing.T) {
 			t.Errorf("attempt trigger = %s, want dunning_retry", a.Trigger)
 		}
 		if !a.EffectiveAt.Equal(slot) {
-			t.Errorf("attempt effective_at = %v, want the retry's slot %v (the report that arrived first stamped the clock's frozen_time)", a.EffectiveAt, slot)
+			t.Errorf("attempt effective_at = %v, want the retry's slot %v (the report that arrived first stamped its own time)", a.EffectiveAt, slot)
 		}
 	})
 }

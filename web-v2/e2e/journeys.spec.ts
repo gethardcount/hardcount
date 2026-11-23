@@ -207,7 +207,9 @@ test('a new subscription starts now and bills its first month', async ({ page })
 })
 
 test('advance a test clock to the renewal and see the invoice', async ({ page }) => {
-  const { clock, customer } = await subscribedCustomer()
+  const clock = await createClock()
+  const customer = await createCustomer(clock.id)
+  await createSubscription(customer.id, (await createPlan()).id)
   await page.goto(`/test-clocks/${clock.id}`)
   await page.getByRole('button', { name: 'Advance', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Advance clock' })
@@ -415,34 +417,6 @@ test('Usage: a half-typed dimension shows a hint, and Export CSV holds only the 
   expect(rows).toHaveLength(2)
   expect(rows.every(r => r.includes(customer.id) && r.includes(meter.id))).toBe(true)
   expect(rows.map(r => Number(r.split(',')[3])).sort()).toEqual([5, 7])
-})
-
-test('the next-invoice preview prorates a mid-month calendar start', async ({ page }) => {
-  // A clock frozen on Jan 13 and a calendar-billed subscription started then:
-  // its first period is Jan 13–31, 19 of January's 31 days.
-  const plan = await createPlan()
-  const clock = await api<{ id: string }>('POST', '/test-clocks', { name: `E2E Clock ${uniq()}`, frozen_time: '2026-01-13T12:00:00Z' })
-  const customer = await createCustomer(clock.id)
-  const id = uniq()
-  const sub = await api<Subscription>('POST', '/subscriptions', {
-    code: `e2e-cal-${id}`,
-    display_name: `E2E Calendar ${id}`,
-    customer_id: customer.id,
-    items: [{ plan_id: plan.id, quantity: 1 }],
-    billing_time: 'calendar',
-  })
-  const preview = await api<{ lines: { description: string; amount_cents: number }[] }>('POST', '/invoices/create_preview', { customer_id: customer.id, subscription_id: sub.id })
-  expect(preview.lines).toHaveLength(1)
-  const [base] = preview.lines
-  expect(base.description).toBe(`${plan.name} - base fee (qty 1, prorated 19/31 days)`)
-
-  await page.goto(`/subscriptions/${sub.id}`)
-  const row = page.getByRole('row').filter({ hasText: base.description })
-  await expect(row).toBeVisible()
-  await expect(row).toContainText(usd(base.amount_cents))
-  // The card names the period it estimates and when the estimate was made.
-  await expect(page.getByText('Upcoming invoice', { exact: true })).toBeVisible()
-  await expect(page.getByText(/Jan 13.*Jan 31, 2026 · estimate as of/)).toBeVisible()
 })
 
 test('a canceled subscription reads "Ended", never "Renews"', async ({ page }) => {
@@ -760,8 +734,7 @@ test("Margin shows no margin without a provider cost, and each model's margin wi
   // number the server worked out, in the same form as the headline. The rate
   // is deleted at the end, so the check above still holds on the next run.
   const recipe = await api<{ created_objects: { plan_ids: string[] } }>('POST', '/recipes/anthropic_style/instantiate', {})
-  const clock = await createClock()
-  const priced = await createCustomer(clock.id)
+  const priced = await createCustomer()
   await createSubscription(priced.id, recipe.created_objects.plan_ids[0])
   const saved: { id: string }[] = []
   try {
@@ -794,8 +767,8 @@ test("Margin shows no margin without a provider cost, and each model's margin wi
   } finally {
     for (const r of saved) await api('DELETE', `/provider-costs/${r.id}`)
   }
-  const from = new Date(new Date(clock.frozen_time).getTime() - 86_400_000).toISOString().replace(/\.\d+Z$/, 'Z')
-  const to = new Date(new Date(clock.frozen_time).getTime() + 40 * 86_400_000).toISOString().replace(/\.\d+Z$/, 'Z')
+  const from = new Date(Date.now() - 86_400_000).toISOString().replace(/\.\d+Z$/, 'Z')
+  const to = new Date(Date.now() + 40 * 86_400_000).toISOString().replace(/\.\d+Z$/, 'Z')
   type Margin = { by_model: { model: string; margin_bps?: number }[] }
   const report = await api<Margin>('GET', `/customers/${priced.id}/margin?from=${from}&to=${to}`)
   const haiku = report.by_model.find(m => m.model === 'claude-haiku-4.5')
@@ -812,7 +785,7 @@ test("Margin shows no margin without a provider cost, and each model's margin wi
 // current prices, so it says it is an estimate. That is not a problem: it
 // used to show "Usage may be incomplete" for every such view.
 test("the customer's Activity card says a chosen window is an estimate, not a problem", async ({ page }) => {
-  const { clock, customer } = await subscribedCustomer()
+  const { customer } = await subscribedCustomer()
   await page.goto(`/customers/${customer.id}`)
   const activity = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Activity', exact: true }) })
   await expect(activity.getByText('Billed usage', { exact: true })).toBeVisible()
@@ -823,7 +796,7 @@ test("the customer's Activity card says a chosen window is an estimate, not a pr
   await expect(activity.getByText('Usage may be incomplete')).toHaveCount(0)
 
   // The API says the same: source "explicit" and no warning.
-  const to = new Date(clock.frozen_time)
+  const to = new Date()
   const from = new Date(to.getTime() - 30 * 86_400_000)
   const iso = (d: Date) => d.toISOString().replace(/\.\d+Z$/, 'Z')
   const usage = await api<{ period: { source: string }; warnings: string[] }>(

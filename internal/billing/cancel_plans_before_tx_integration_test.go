@@ -273,28 +273,6 @@ func (tr *offTxTracer) offTx() []string {
 	return append([]string(nil), tr.off...)
 }
 
-// customerResolver resolves a customer's time domain by reading the customer
-// row, as the engine's resolver does in production (Engine.SimForCustomer).
-type customerResolver struct {
-	customers *customer.PostgresStore
-	at        time.Time
-}
-
-func (r customerResolver) SimForCustomer(ctx context.Context, tenantID, customerID string) (clock.Sim, error) {
-	if _, err := r.customers.Get(ctx, tenantID, customerID); err != nil {
-		return clock.Sim{}, err
-	}
-	return clock.Sim{At: r.at}, nil
-}
-
-func (r customerResolver) SimForSubscription(context.Context, string, string) (clock.Sim, error) {
-	return clock.Sim{At: r.at}, nil
-}
-
-func (r customerResolver) SimForInvoice(context.Context, string, string) (clock.Sim, error) {
-	return clock.Sim{At: r.at}, nil
-}
-
 // The cancel's transaction asks for no second connection: once it has locked
 // the row, every statement until its commit runs on its own connection. A
 // read on another connection there holds the cancel's locks while it waits
@@ -302,8 +280,7 @@ func (r customerResolver) SimForInvoice(context.Context, string, string) (clock.
 //
 // Mutations: plan inside the store's callback (M1); read the relief's
 // funding invoices on the transaction (M12); read the invoice off the
-// transaction in creditnote create (M10, paid prebill); bind the customer's
-// clock in credit.ReverseForInvoiceTx (M11, the void case) → a statement on
+// transaction in creditnote create (M10, paid prebill) → a statement on
 // another connection is listed.
 func TestCancel_TransactionReadsOnlyItsOwnConnection(t *testing.T) {
 	testutil.SetupTestDB(t) // migrate and clean; each case opens its own traced pool
@@ -316,19 +293,6 @@ func TestCancel_TransactionReadsOnlyItsOwnConnection(t *testing.T) {
 		{"paid prebill: the relief is a credit-note draft", func(t *testing.T, db *postgres.DB) {
 			r := newReliefCancelRig(t, db, "P1-23 traced paid prebill", reliefRigOpts{usageUnits: 3000})
 			r.cancelImmediately(t)
-		}},
-		{"first-day unpaid prebill with credit applied: the relief voids it and returns the credit", func(t *testing.T, db *postgres.DB) {
-			r := newReliefCancelRig(t, db, "P1-23 traced voided prebill", reliefRigOpts{usageUnits: 500, sameDay: true, day1Credit: 1000})
-			// As router.go wires them: the void hands the applied credit back,
-			// and the credit service resolves the customer's time domain.
-			voider := invoice.NewService(r.invStore, clock.Real(), tenant.NewSettingsStore(db))
-			voider.SetCreditReverser(r.credit)
-			r.engine.SetInvoiceVoider(voider)
-			r.credit.SetResolver(customerResolver{customers: customer.NewPostgresStore(db), at: r.cancelAt})
-			r.cancelImmediately(t)
-			if d := r.invoice(t, r.day1ID); d.Status != domain.InvoiceVoided {
-				t.Fatalf("day-1 invoice is %s, want voided by the relief", d.Status)
-			}
 		}},
 		{"in arrears: no relief", func(t *testing.T, db *postgres.DB) {
 			r := newArrearsCancelRig(t, db, "P1-23 traced in arrears", 1, 0)

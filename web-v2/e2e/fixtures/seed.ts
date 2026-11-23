@@ -78,13 +78,12 @@ export async function invoicesFor(customerId: string): Promise<Invoice[]> {
   return res.data
 }
 
-// A customer on its own test clock with a monthly subscription, not yet billed.
+// A customer with a monthly subscription, not yet billed.
 export async function subscribedCustomer() {
   const plan = await createPlan()
-  const clock = await createClock()
-  const customer = await createCustomer(clock.id)
+  const customer = await createCustomer()
   const subscription = await createSubscription(customer.id, plan.id)
-  return { plan, clock, customer, subscription }
+  return { plan, customer, subscription }
 }
 
 // A customer with one open invoice: 49 calls at $1.00 on a plan with no base

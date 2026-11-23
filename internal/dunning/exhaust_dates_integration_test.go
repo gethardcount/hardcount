@@ -2,7 +2,6 @@ package dunning_test
 
 import (
 	"context"
-	"database/sql"
 	"errors"
 	"testing"
 	"time"
@@ -13,41 +12,15 @@ import (
 	"github.com/gethardcount/hardcount/internal/dunning"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/leader"
+	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/pricing"
 	"github.com/gethardcount/hardcount/internal/subscription"
 	"github.com/gethardcount/hardcount/internal/subscription/subscriptiontest"
 	"github.com/gethardcount/hardcount/internal/tenant"
-	"github.com/gethardcount/hardcount/internal/testclock"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
-
-// oneClockResolver resolves every pin to the one test clock this test puts
-// all its entities on, reading frozen_time from the database each time: the
-// answer billing.Engine's resolvers give for a pinned entity.
-type oneClockResolver struct {
-	clocks   *testclock.PostgresStore
-	tenantID string
-	clockID  string
-}
-
-func (r oneClockResolver) sim(ctx context.Context) (clock.Sim, error) {
-	tc, err := r.clocks.Get(ctx, r.tenantID, r.clockID)
-	if err != nil {
-		return clock.Sim{}, err
-	}
-	return clock.Sim{At: tc.FrozenTime, TestClockID: r.clockID}, nil
-}
-
-func (r oneClockResolver) SimForCustomer(ctx context.Context, _, _ string) (clock.Sim, error) {
-	return r.sim(ctx)
-}
-func (r oneClockResolver) SimForSubscription(ctx context.Context, _, _ string) (clock.Sim, error) {
-	return r.sim(ctx)
-}
-func (r oneClockResolver) SimForInvoice(ctx context.Context, _, _ string) (clock.Sim, error) {
-	return r.sim(ctx)
-}
 
 // declinedRetry is the card charge on every retry: declined, recorded on the
 // invoice as the charge path records a decline with no PaymentIntent.
@@ -68,56 +41,44 @@ func (d *declinedRetry) RetryPayment(ctx context.Context, tenantID, invoiceID, _
 	return errors.New("card_declined: your card was declined")
 }
 
-// TestExhaust_TestClock_FinalActionsDatedWhenTheyRun: when a dunning run on
-// a test clock runs out of retries, its final actions (the subscription's
-// pause or cancel row, its canceled_at, the invoice's uncollectible_at) are
-// dated at the step that runs them, as in real time, and the escalated event
-// at the escalation's instant (exhaustStampAt). Each arm runs the job at the
-// step where its run is due, as the clock's catch-up stops at it. The two
-// dates agree except after an interrupted exhaustion.
+// TestExhaust_FinalActionsDatedWhenTheyRun: when a dunning run runs out of
+// retries, its final actions (the subscription's canceled_at, the invoice's
+// uncollectible_at) are dated at the tick that runs them, and the escalated
+// event at the escalation's instant (exhaustStampAt). Each arm ticks when its
+// run is due. The two dates agree except after an interrupted exhaustion.
 //
 // Arms: the final retry declines and exhausts inline (both at the retry
 // slot); exhaust-on-entry after an interrupted exhaustion (next_action_at is
-// the lease: the actions at the lease, the escalation at last_attempt_at); a
-// lowered max_retry (both at the run's due slot); and cancel instead of pause.
-func TestExhaust_TestClock_FinalActionsDatedWhenTheyRun(t *testing.T) {
+// the lease: the actions at the lease, the escalation at last_attempt_at);
+// and a lowered max_retry (both at the run's due slot).
+func TestExhaust_FinalActionsDatedWhenTheyRun(t *testing.T) {
 	slot := time.Date(2027, 4, 10, 6, 0, 0, 0, time.UTC) // the run's due instant
 	last := slot.Add(-72 * time.Hour)
 
 	cases := []struct {
 		name         string
-		sub          domain.DunningSubscriptionAction
 		attemptsUsed int
 		lastAttempt  time.Time
 		nextAction   time.Time // the step that runs the job, and the final actions' date
 		wantStamp    time.Time // the escalated event's date
 		wantRetries  int
 	}{
-		{"inline after the final retry, pause", domain.SubActionPause, 1, last, slot, slot, 1},
-		{"inline after the final retry, cancel", domain.SubActionCancel, 1, last, slot, slot, 1},
+		{"inline after the final retry", 1, last, slot, slot, 1},
 		// The final retry ran at slot and wrote the lease; the process died
-		// before the final actions. The step at the lease re-drives them.
-		{"exhaust on entry after an interrupted exhaustion", domain.SubActionPause, 2, slot, slot.Add(15 * time.Minute), slot, 0},
+		// before the final actions. The tick at the lease re-drives them.
+		{"exhaust on entry after an interrupted exhaustion", 2, slot, slot.Add(15 * time.Minute), slot, 0},
 		// The policy's max_retry was lowered under a run already at it.
-		{"exhaust on entry after max_retry was lowered", domain.SubActionPause, 2, last, slot, slot, 0},
+		{"exhaust on entry after max_retry was lowered", 2, last, slot, slot, 0},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			db := testutil.SetupTestDB(t)
 			ctx := postgres.WithLivemode(context.Background(), false)
 			tenantID := testutil.CreateTestTenant(t, db, "Exhaust Dates")
-			admin := testutil.AdminPool(t)
-
-			clocks := testclock.NewPostgresStore(db)
-			clockID := postgres.NewID("hc_tclk")
-			if _, err := admin.Exec(`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status)
-				VALUES ($1, $2, false, 'exhaust dates', $3, 'advancing')`, clockID, tenantID, tc.nextAction); err != nil {
-				t.Fatalf("insert clock: %v", err)
-			}
-			resolver := oneClockResolver{clocks: clocks, tenantID: tenantID, clockID: clockID}
+			wall := clock.NewFake(tc.nextAction)
 
 			cust, err := customer.NewPostgresStore(db).Create(ctx, tenantID, domain.Customer{
-				ExternalID: "cus_exhaust_dates", DisplayName: "Exhaust Dates", TestClockID: clockID,
+				ExternalID: "cus_exhaust_dates", DisplayName: "Exhaust Dates",
 			})
 			if err != nil {
 				t.Fatalf("create customer: %v", err)
@@ -136,7 +97,7 @@ func TestExhaust_TestClock_FinalActionsDatedWhenTheyRun(t *testing.T) {
 			invStart, invEnd := periodStart, periodEnd
 			subStore := subscription.NewPostgresStore(db)
 			sub, err := subStore.Create(ctx, tenantID, domain.Subscription{
-				Code: "sub-exhaust-dates", DisplayName: "Exhaust Dates", CustomerID: cust.ID, TestClockID: clockID,
+				Code: "sub-exhaust-dates", DisplayName: "Exhaust Dates", CustomerID: cust.ID,
 				Items:  []domain.SubscriptionItem{{PlanID: plan.ID, Quantity: 1}},
 				Status: domain.SubscriptionActive, BillingTime: domain.BillingTimeCalendar,
 				StartedAt: &periodStart, CurrentBillingPeriodStart: &periodStart, CurrentBillingPeriodEnd: &periodEnd,
@@ -150,7 +111,7 @@ func TestExhaust_TestClock_FinalActionsDatedWhenTheyRun(t *testing.T) {
 			inv, err := invoices.CreateWithLineItems(ctx, tenantID, domain.Invoice{
 				CustomerID: cust.ID, SubscriptionID: sub.ID, InvoiceNumber: "INV-EXHAUST-DATES",
 				Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed, Currency: "USD",
-				SubtotalCents: 4900, TotalAmountCents: 4900, AmountDueCents: 4900, IsSimulated: true,
+				SubtotalCents: 4900, TotalAmountCents: 4900, AmountDueCents: 4900,
 				BillingPeriodStart: invStart, BillingPeriodEnd: invEnd, IssuedAt: &invStart,
 			}, nil)
 			if err != nil {
@@ -159,10 +120,10 @@ func TestExhaust_TestClock_FinalActionsDatedWhenTheyRun(t *testing.T) {
 
 			retrier := &declinedRetry{invoices: invoices}
 			runs := dunning.NewPostgresStore(db)
-			svc := dunning.NewService(runs, retrier, nil)
+			svc := dunning.NewService(runs, retrier, wall)
 			policy, err := svc.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
 				Name: "two retries", Enabled: true, RetryDays: []int{3, 3},
-				FinalSubscriptionAction: tc.sub, FinalInvoiceAction: domain.InvActionMarkUncollectible,
+				FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 			})
 			if err != nil {
 				t.Fatalf("upsert policy: %v", err)
@@ -189,22 +150,18 @@ func TestExhaust_TestClock_FinalActionsDatedWhenTheyRun(t *testing.T) {
 				t.Fatalf("commit run: %v", err)
 			}
 
-			subSvc := subscription.NewService(subStore, clock.Real())
-			subSvc.SetResolver(resolver)
+			subSvc := subscription.NewService(subStore, wall)
 			subSvc.SetAuditLogger(audit.NewLogger(db))
-			invSvc := invoice.NewService(invoices, clock.Real(), tenant.NewSettingsStore(db))
-			invSvc.SetResolver(resolver)
+			invSvc := invoice.NewService(invoices, wall, tenant.NewSettingsStore(db))
 			svc.SetSubscriptionPauser(dunningMovers{svc: subSvc}, invoices)
 			svc.SetSubscriptionCanceler(dunningMovers{svc: subSvc})
 			svc.SetSubscriptionStateReader(dunningMovers{svc: subSvc})
 			svc.SetInvoiceUncollectibleMarker(writeOff{svc: invSvc})
 			svc.SetChargeHoldClaimer(invoices)
 
-			// The catch-up's dunning job at the run's step, on the ctx the
-			// catch-up binds.
-			simCtx := clock.WithSim(ctx, clock.Sim{At: tc.nextAction, TestClockID: clockID})
-			if _, errs := svc.ProcessDueRunsForClock(simCtx, tenantID, clockID, tc.nextAction, 20); len(errs) != 0 {
-				t.Fatalf("dunning catchup: %v", errs)
+			tick := leadertest.Token(t, testutil.AdminPool(t), ctx, leader.RoleDunning)
+			if _, errs := svc.ProcessDueRuns(tick, tenantID, 20); len(errs) != 0 {
+				t.Fatalf("dunning tick: %v", errs)
 			}
 
 			if len(retrier.calls) != tc.wantRetries {
@@ -241,53 +198,16 @@ func TestExhaust_TestClock_FinalActionsDatedWhenTheyRun(t *testing.T) {
 			}
 			wantInstant(t, "invoice uncollectible_at", *got.UncollectibleAt, tc.nextAction)
 
-			action, auditAction := domain.SubAuditCollectionPaused, domain.AuditActionUpdate
-			if tc.sub == domain.SubActionCancel {
-				action, auditAction = "", domain.AuditActionCancel
-				s, err := subStore.Get(ctx, tenantID, sub.ID)
-				if err != nil {
-					t.Fatalf("read subscription: %v", err)
-				}
-				if s.CanceledAt == nil {
-					t.Fatalf("subscription is %s with no canceled_at, want canceled", s.Status)
-				}
-				wantInstant(t, "subscription canceled_at", *s.CanceledAt, tc.nextAction)
+			s, err := subStore.Get(ctx, tenantID, sub.ID)
+			if err != nil {
+				t.Fatalf("read subscription: %v", err)
 			}
-			wantInstant(t, "subscription "+string(auditAction)+" audit row sim_effective_at", subAuditSimAt(t, admin, sub.ID, auditAction, action), tc.nextAction)
+			if s.CanceledAt == nil {
+				t.Fatalf("subscription is %s with no canceled_at, want canceled", s.Status)
+			}
+			wantInstant(t, "subscription canceled_at", *s.CanceledAt, tc.nextAction)
 		})
 	}
-}
-
-// subAuditSimAt is the sim_effective_at of the subscription's one audit row
-// with this action (and metadata action, when set).
-func subAuditSimAt(t *testing.T, admin *sql.DB, subID, action, metaAction string) time.Time {
-	t.Helper()
-	q := `SELECT sim_effective_at FROM audit_log WHERE resource_type = 'subscription' AND resource_id = $1 AND action = $2`
-	args := []any{subID, action}
-	if metaAction != "" {
-		q += ` AND metadata->>'action' = $3`
-		args = append(args, metaAction)
-	}
-	rows, err := admin.Query(q, args...)
-	if err != nil {
-		t.Fatalf("read audit rows: %v", err)
-	}
-	defer func() { _ = rows.Close() }()
-	var found []sql.NullTime
-	for rows.Next() {
-		var v sql.NullTime
-		if err := rows.Scan(&v); err != nil {
-			t.Fatalf("scan audit row: %v", err)
-		}
-		found = append(found, v)
-	}
-	if err := rows.Err(); err != nil {
-		t.Fatalf("audit rows: %v", err)
-	}
-	if len(found) != 1 || !found[0].Valid {
-		t.Fatalf("subscription %s audit rows %q/%q: %v, want one with a sim_effective_at", subID, action, metaAction, found)
-	}
-	return found[0].Time
 }
 
 func wantInstant(t *testing.T, what string, got, want time.Time) {

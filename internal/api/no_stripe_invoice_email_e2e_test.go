@@ -9,6 +9,7 @@ import (
 	"mime/multipart"
 	"mime/quotedprintable"
 	"net"
+	"net/http/httptest"
 	"net/mail"
 	"strings"
 	"sync"
@@ -16,8 +17,122 @@ import (
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/email"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/leader"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/tenantstripe"
+	"github.com/gethardcount/hardcount/internal/testutil"
 )
+
+// noStripeRig is one tenant on the real router and database, with a dunning
+// policy of two retries (day 3, then day 6) that writes the invoice off, and
+// a server that can send email (SMTP set, no dispatcher: each email stays
+// queued in the outbox, where the test reads it).
+type noStripeRig struct {
+	t        *testing.T
+	db       *postgres.DB
+	srv      *Server
+	ts       *httptest.Server
+	tenantID string
+	key      string
+}
+
+// env is extra environment as name, value pairs, set before the server is
+// built (it reads its email settings once, at construction).
+func newNoStripeRig(t *testing.T, name string, env ...string) *noStripeRig {
+	t.Helper()
+	db := testutil.SetupTestDB(t)
+	t.Setenv("SMTP_HOST", "smtp.no-stripe.invalid")
+	t.Setenv("PAYMENT_UPDATE_URL", "https://billing.no-stripe.test/update-payment")
+	// The setup-link email is sent only when its page can add the card.
+	t.Setenv("PAYMENT_UPDATE_RETURN_URL", "https://billing.no-stripe.test/payment-method-added")
+	for i := 0; i+1 < len(env); i += 2 {
+		t.Setenv(env[i], env[i+1])
+	}
+	srv := NewServer(db, clock.Real(), nil)
+	ts := httptest.NewServer(srv)
+	t.Cleanup(ts.Close)
+	r := &noStripeRig{t: t, db: db, srv: srv, ts: ts}
+	r.tenantID = testutil.CreateTestTenant(t, db, name)
+	r.key = createAPIKeyWithMode(t, db, r.tenantID, false)
+	r.call("POST", "/v1/dunning/policies", flowReq{body: map[string]any{
+		"name": "No Stripe policy", "enabled": true, "retry_days": []int{3, 3},
+		"final_subscription_action": "none", "final_invoice_action": "mark_uncollectible",
+	}}).want(t, 201, "create dunning policy")
+	return r
+}
+
+func (r *noStripeRig) call(method, path string, req flowReq) flowResp {
+	r.t.Helper()
+	req.bearer = r.key
+	return flowDo(r.t, r.ts, method, path, req)
+}
+
+// finalizedInvoice is a $49 one-off invoice, finalized, for a new customer
+// with an email address and no card.
+func (r *noStripeRig) finalizedInvoice(name string) string {
+	r.t.Helper()
+	customerID := flowStr(r.call("POST", "/v1/customers", flowReq{body: map[string]any{
+		"external_id": "no-stripe-" + name, "display_name": "No Stripe " + name, "email": name + "@no-stripe.test",
+	}}).want(r.t, 201, name+": create customer").body, "id")
+	id := flowStr(r.call("POST", "/v1/invoices", flowReq{body: map[string]any{
+		"customer_id": customerID,
+		"line_items":  []map[string]any{{"description": "Seats " + name, "quantity": 1, "unit_amount_cents": 4900}},
+	}}).want(r.t, 201, name+": create invoice").body, "id")
+	r.call("POST", "/v1/invoices/"+id+"/finalize", flowReq{}).want(r.t, 200, name+": finalize")
+	return id
+}
+
+// queuedEmail is one customer email in the outbox for an invoice.
+type queuedEmail struct{ kind, ask string }
+
+// emailsOf lists the customer emails queued for the invoice, oldest first.
+func (r *noStripeRig) emailsOf(invoiceID string) []queuedEmail {
+	r.t.Helper()
+	tx, err := r.db.BeginTx(r.t.Context(), postgres.TxBypass, "")
+	if err != nil {
+		r.t.Fatalf("begin tx: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	rows, err := tx.QueryContext(r.t.Context(), `SELECT email_type, COALESCE(payload->>'decline_ask', '')
+		FROM email_outbox
+		WHERE tenant_id = $1 AND payload->>'invoice_number' = (SELECT invoice_number FROM invoices WHERE id = $2)
+		ORDER BY created_at, id`, r.tenantID, invoiceID)
+	if err != nil {
+		r.t.Fatalf("read email outbox: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var out []queuedEmail
+	for rows.Next() {
+		var q queuedEmail
+		if err := rows.Scan(&q.kind, &q.ask); err != nil {
+			r.t.Fatalf("scan email outbox: %v", err)
+		}
+		out = append(out, q)
+	}
+	return out
+}
+
+func (r *noStripeRig) connectStripe() {
+	r.t.Helper()
+	if _, err := tenantstripe.NewStore(r.db).Upsert(callerCtx(r.tenantID, false), tenantstripe.UpsertInput{
+		TenantID: r.tenantID, Livemode: false, SecretKey: "sk_test_no_stripe_later", PublishableKey: "pk_test_no_stripe_later",
+	}); err != nil {
+		r.t.Fatalf("connect stripe: %v", err)
+	}
+}
+
+func sameEmails(got []queuedEmail, want ...queuedEmail) bool {
+	if len(got) != len(want) {
+		return false
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			return false
+		}
+	}
+	return true
+}
 
 // smtpSink is a minimal SMTP server that keeps every message it is sent, so
 // a test can read the email a customer would get from the server's own

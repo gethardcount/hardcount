@@ -378,11 +378,8 @@ func TestProcessDueRuns_LateWallClockRetryKeepsCadence_RealStore(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("upsert policy: %v", err)
 	}
-	before := time.Now().UTC().Truncate(time.Microsecond) // the engine's clock is fixed when it is built
+	before := time.Now().UTC().Truncate(time.Microsecond)
 	svc := dunning.NewService(dstore, decliningRetrier{}, nil)
-	resolver := h.newEng(testPaymentSetupsNoPM{}, testChargerSentinel{}, nil)
-	resolver.SetCustomerReader(customer.NewPostgresStore(h.db))
-	resolver.SetTestClockReader(testclock.NewPostgresStore(h.db))
 
 	inv := h.seed(t, "INV-CADENCE-1")
 	// The invoice is on no clock: the failure that starts dunning is decided at real time.

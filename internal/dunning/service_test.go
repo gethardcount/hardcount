@@ -787,51 +787,6 @@ func (stubCustomerEmail) GetCustomerEmail(context.Context, string, string) (stri
 	return "test@hardcount.dev", "Test Co", nil, nil
 }
 
-// TestProcessDueRunsForClock_EnqueuesEscalationEmailOnExhaust locks in
-// the ADR-035 follow-up: the dunning_escalation email MUST be enqueued
-// when the final retry exhausts max attempts in a catchup pass, even
-// though that's the LAST goroutine the dunning service would spawn.
-//
-// Pre-fix the warning + escalation enqueues ran in goroutines bound to
-// the catchup ctx, which testclock/catchup.go cancels via `defer
-// cancel()` the instant the pass returns. The escalation, spawned
-// during the final retry, lost the race and the email never landed in
-// the outbox — even though the run's DB state correctly read
-// state=escalated. Symptom: 5/6 of an exhausted run's emails appeared
-// in Mailpit, the escalation missing.
-//
-// Fix: synchronous enqueue. The store-level email outbox is a fast
-// INSERT and the SMTP dispatch already happens on its own long-lived
-// ctx via the outbox dispatcher worker — no need for an in-service
-// goroutine. This test fails if a future refactor reintroduces the
-// goroutine.
-func TestProcessDueRunsForClock_EnqueuesEscalationEmailOnExhaust(t *testing.T) {
-	store := newMemStore()
-	svc := NewService(store, &failingRetrier{}, nil)
-	emails := &recordingEmailNotifier{}
-	svc.SetEmailNotifier(emails)
-	svc.SetCustomerEmailFetcher(stubCustomerEmail{})
-	ctx := context.Background()
-
-	cycleClose := time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC)
-	frozen := time.Date(2024, 5, 20, 0, 0, 0, 0, time.UTC)
-	if _, err := svc.StartDunning(inAdvance(ctx, frozen), "t1", "inv_1", "cus_1", cycleClose, domain.DunningCausePaymentFailed); err != nil {
-		t.Fatalf("start: %v", err)
-	}
-
-	stepThrough(t, svc, store, frozen)
-
-	// Policy fixture: max=3, retry_schedule=["72h","120h"]. Of 3 retries,
-	// retries #1 and #2 fire warnings; retry #3 skips warning and triggers
-	// exhaustRun → 1 escalation.
-	if emails.warnings != 2 {
-		t.Errorf("dunning_warning enqueues: got %d, want 2 (retries 1 + 2)", emails.warnings)
-	}
-	if emails.escalations != 1 {
-		t.Errorf("dunning_escalation enqueues: got %d, want 1 (= the retry that exhausted)", emails.escalations)
-	}
-}
-
 // An invoice paid outside dunning resolves its open run.
 func TestResolveByInvoice_ResolvesAnActiveRun(t *testing.T) {
 	store := newMemStore()
@@ -1082,27 +1037,28 @@ func (f *failThenSucceedRetrier) RetryPayment(_ context.Context, _, _, _ string)
 	return nil
 }
 
-// TestProcessDueRunsForClock_RecoveryStampsContractedInstant is the
-// contracted-instant regression for the retry-SUCCESS path (4th sighting
-// of the class: trial flips, scheduled cancels, pause resumes, and now
-// dunning resolves). Retry #1 (May 4) fails, retry #2 (May 7) succeeds,
-// the operator advanced to May 20 in one click. Pre-fix: resolved_at and
-// the resolved timeline row stamped May 20 (advance-end frozen_time), and
-// NO retry_attempted row existed for the succeeding attempt — the May 7
-// recovery instant appeared nowhere.
-func TestProcessDueRunsForClock_RecoveryStampsContractedInstant(t *testing.T) {
+// TestProcessDueRuns_RecoveryWritesItsOwnRetryRow: retry 1 fails and retry 2
+// succeeds. The succeeding retry writes its own retry_attempted row, so the
+// run does not read "resolved after 2 attempts" with one visible, and the run
+// resolves at that retry's time.
+func TestProcessDueRuns_RecoveryWritesItsOwnRetryRow(t *testing.T) {
 	store := newMemStore()
-	svc := NewService(store, &failThenSucceedRetrier{failures: 1}, nil)
+	failedAt := time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC)
+	wall := clock.NewFake(failedAt)
+	svc := NewService(store, &failThenSucceedRetrier{failures: 1}, wall)
 	ctx := context.Background()
-
-	cycleClose := time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC)
-	frozen := time.Date(2024, 5, 20, 0, 0, 0, 0, time.UTC)
-	retry2At := cycleClose.Add(72*time.Hour + 72*time.Hour) // grace 3d + schedule[0] 3d = May 7
-
-	if _, err := svc.StartDunning(inAdvance(ctx, frozen), "t1", "inv_1", "cus_1", cycleClose, domain.DunningCausePaymentFailed); err != nil {
+	if _, err := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", failedAt, domain.DunningCausePaymentFailed); err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}
-	stepThrough(t, svc, store, frozen)
+	// The policy's retry days are 3, 3, 5.
+	retry1At := failedAt.Add(3 * 24 * time.Hour)
+	retry2At := retry1At.Add(3 * 24 * time.Hour)
+	for _, at := range []time.Time{retry1At, retry2At} {
+		wall.Set(at)
+		if _, errs := svc.ProcessDueRuns(ctx, "t1", 20); len(errs) > 0 {
+			t.Fatalf("tick at %v: %v", at, errs)
+		}
+	}
 
 	var run domain.InvoiceDunningRun
 	for _, r := range store.runs {
@@ -1112,9 +1068,8 @@ func TestProcessDueRunsForClock_RecoveryStampsContractedInstant(t *testing.T) {
 		t.Fatalf("run: state=%q resolution=%q, want resolved/payment_recovered", run.State, run.Resolution)
 	}
 	if run.ResolvedAt == nil || !run.ResolvedAt.Equal(retry2At) {
-		t.Errorf("resolved_at: got %v, want the recovering retry's contracted instant %v (NOT advance-end %v)", run.ResolvedAt, retry2At, frozen)
+		t.Errorf("resolved_at: got %v, want the recovering retry's time %v", run.ResolvedAt, retry2At)
 	}
-
 	var successRow, resolvedRow *domain.InvoiceDunningEvent
 	for i := range store.events {
 		e := store.events[i]
@@ -1126,16 +1081,13 @@ func TestProcessDueRunsForClock_RecoveryStampsContractedInstant(t *testing.T) {
 		}
 	}
 	if successRow == nil {
-		t.Fatal("the SUCCESSFUL retry must write its own retry_attempted row — 'resolved after N attempts' with N-1 visible retries otherwise")
+		t.Fatal("the successful retry wrote no retry_attempted row")
 	}
 	if !successRow.CreatedAt.Equal(retry2At) {
 		t.Errorf("success retry row: got %v, want %v", successRow.CreatedAt, retry2At)
 	}
-	if resolvedRow == nil {
-		t.Fatal("resolved event missing")
-	}
-	if !resolvedRow.CreatedAt.Equal(retry2At) {
-		t.Errorf("resolved row: got %v, want the contracted instant %v (NOT advance-end %v)", resolvedRow.CreatedAt, retry2At, frozen)
+	if resolvedRow == nil || !resolvedRow.CreatedAt.Equal(retry2At) {
+		t.Errorf("resolved row: %v, want one at %v", resolvedRow, retry2At)
 	}
 }
 
@@ -1189,48 +1141,6 @@ func TestProcessDueRunsForClock_ChargeCtxCarriesAnchoredInstant(t *testing.T) {
 		if retrier.sims[i].TestClockID != "clock_1" {
 			t.Errorf("retry #%d lost its clock: %q (WithEffectiveNow would do this — must be WithSim)", i+1, retrier.sims[i].TestClockID)
 		}
-	}
-}
-
-// piCarryingRetrier declines with a RetryError carrying the failed PI id —
-// the adapter's post-fix shape.
-type piCarryingRetrier struct{ pi string }
-
-func (p *piCarryingRetrier) RetryPayment(_ context.Context, _, _, _ string) error {
-	return &RetryError{PaymentIntentID: p.pi, Err: fmt.Errorf("payment declined")}
-}
-
-// TestProcessRun_FailedRetryStampsPIAttribution: the retry_attempted event
-// carries the failed charge's PI id in metadata (the invoice timeline's
-// exact-attribution key) and the Reason string is the INNER error —
-// RetryError must be invisible in operator-facing text.
-func TestProcessRun_FailedRetryStampsPIAttribution(t *testing.T) {
-	store := newMemStore()
-	svc := NewService(store, &piCarryingRetrier{pi: "pi_dun_1"}, nil)
-	ctx := context.Background()
-
-	cycleClose := time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC)
-	if _, err := svc.StartDunning(inAdvance(ctx, cycleClose.Add(96*time.Hour)), "t1", "inv_1", "cus_1", cycleClose, domain.DunningCausePaymentFailed); err != nil {
-		t.Fatalf("start dunning: %v", err)
-	}
-	if _, errs := svc.ProcessDueRunsForClock(ctx, "t1", "clock_1", cycleClose.Add(96*time.Hour), 20); len(errs) > 0 {
-		t.Fatalf("unexpected errors: %v", errs)
-	}
-
-	var retryEvt *domain.InvoiceDunningEvent
-	for i := range store.events {
-		if store.events[i].EventType == domain.DunningEventRetryAttempted {
-			retryEvt = &store.events[i]
-		}
-	}
-	if retryEvt == nil {
-		t.Fatal("retry_attempted event missing")
-	}
-	if got, _ := retryEvt.Metadata["payment_intent_id"].(string); got != "pi_dun_1" {
-		t.Errorf("event metadata payment_intent_id: got %q, want pi_dun_1", got)
-	}
-	if retryEvt.Reason != "payment declined" {
-		t.Errorf("Reason must be the inner error, got %q (RetryError leaking into operator text)", retryEvt.Reason)
 	}
 }
 

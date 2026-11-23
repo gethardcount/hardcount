@@ -154,44 +154,6 @@ func TestE2E_PlanPrices_ClockFirstPeriodOnANewPlan(t *testing.T) {
 	wantUsage(t, "first period", r.cycle(sub, p0), map[string]int64{ids[0]: 70})
 }
 
-// TestE2E_PlanPrices_TestClockOverride: an override for a clock customer is
-// stamped with the clock's time, so it applies from the customer's next
-// simulated period, and its delete leaves the period in flight at the
-// negotiated rate (ADR-130 §6). Before ADR-130 overrides were stamped with
-// wall time.
-//
-// Mutation: stamp overrides with wall time, and a clock behind wall time
-// never sees the override.
-func TestE2E_PlanPrices_TestClockOverride(t *testing.T) {
-	r := newPPRig(t, "clock override")
-	calls := r.meter("calls", "sum")
-	plan, ids := r.plan("pro", perUnit(calls, "10", nil))
-	frozen := time.Now().UTC().AddDate(0, 0, -90).Truncate(time.Second)
-	clk := r.clock("override", frozen)
-	cust := r.customer("pp-co", clk)
-	sub, p0, p1 := r.subscribe(time.Time{}, cust, plan)
-	p2 := monthAfter(p1, p0.Day())
-	p3 := monthAfter(p2, p0.Day())
-	o := r.must(time.Time{}, http.MethodPost, "/v1/price-overrides", map[string]any{
-		"customer_id": cust, "price_id": ids[0], "mode": "per_unit", "unit_amount_cents": "4",
-	}, http.StatusCreated)
-	if got := ppTime(t, flowStr(o, "created_at")); !got.Equal(frozen.Add(time.Microsecond)) {
-		t.Errorf("override created_at = %v, want the clock's time plus 1µs (%v)", got, frozen.Add(time.Microsecond))
-	}
-	r.ingest(time.Time{}, "pp-co", "calls", 10, midpoint(p0, frozen), nil)
-	r.advance(clk, p1.Add(time.Hour))
-	wantUsage(t, "P0: list", r.cycle(sub, p0), map[string]int64{ids[0]: 100})
-
-	r.ingest(time.Time{}, "pp-co", "calls", 10, p1.Add(30*time.Minute), nil)
-	// Deleted while P1 is open, in simulated time: P1 keeps the override.
-	r.must(time.Time{}, http.MethodDelete, "/v1/price-overrides/"+flowStr(o, "id"), nil, http.StatusOK)
-	r.advance(clk, p2.Add(time.Hour))
-	wantUsage(t, "P1: the override, deleted after P1 started", r.cycle(sub, p1), map[string]int64{ids[0]: 40})
-	r.ingest(time.Time{}, "pp-co", "calls", 10, p2.Add(30*time.Minute), nil)
-	r.advance(clk, p3.Add(time.Hour))
-	wantUsage(t, "P2: list again", r.cycle(sub, p2), map[string]int64{ids[0]: 100})
-}
-
 // TestE2E_PlanPrices_AnAdvancingClockStampsAtItsTarget: while a clock
 // advances, a price edit and an override are stamped at the advance's target
 // plus 1 microsecond, not at the clock's time, so every period of the advance

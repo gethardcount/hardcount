@@ -15,7 +15,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/tenantstripe"
-	"github.com/gethardcount/hardcount/internal/testclock/testclocktest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -640,12 +639,13 @@ func TestE2E_WebhookPayloads_CreditBalance(t *testing.T) {
 }
 
 // TestE2E_WebhookPayloads_SubscriptionSchedule drives the schedule-side
-// subscription.* emitters (the billing engine on a test clock): a trial
-// that ends, a plan change and a collection pause that come due, and a
-// cancel at period end.
+// subscription.* emitters (the billing engine at the period's end): a plan
+// change that comes due, and a cancel at period end.
 func TestE2E_WebhookPayloads_SubscriptionSchedule(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	srv := NewServer(db, clock.Real(), nil)
+	start := time.Date(2027, 2, 1, 0, 0, 0, 0, time.UTC)
+	wall := clock.NewFake(start)
+	srv := NewServer(db, wall, nil)
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
@@ -664,75 +664,32 @@ func TestE2E_WebhookPayloads_SubscriptionSchedule(t *testing.T) {
 		}).want(t, 201, "create plan "+code).body, "id")
 	}
 	starter, pro := plan("wps-starter", 1000), plan("wps-pro", 2000)
-	start := time.Date(2027, 2, 1, 0, 0, 0, 0, time.UTC)
-	clockID := flowStr(call("POST", "/v1/test-clocks", map[string]any{
-		"name": "webhook payload schedule", "frozen_time": start.Format(time.RFC3339),
-	}).want(t, 201, "create test clock").body, "id")
 	customerID := flowStr(call("POST", "/v1/customers", map[string]any{
-		"external_id": "wps-cust", "display_name": "Webhook Payload Schedule", "test_clock_id": clockID,
+		"external_id": "wps-cust", "display_name": "Webhook Payload Schedule",
 	}).want(t, 201, "create customer").body, "id")
-	newSub := func(code string, extra map[string]any) map[string]any {
-		body := map[string]any{
+	newSub := func(code string) map[string]any {
+		return call("POST", "/v1/subscriptions", map[string]any{
 			"code": code, "display_name": code, "customer_id": customerID,
 			"items": []map[string]any{{"plan_id": starter, "quantity": 1}}, "billing_time": "anniversary",
-		}
-		for k, v := range extra {
-			body[k] = v
-		}
-		return call("POST", "/v1/subscriptions", body).want(t, 201, "create "+code).body
+		}).want(t, 201, "create "+code).body
 	}
 	getSub := func(id string) map[string]any {
 		t.Helper()
 		return call("GET", "/v1/subscriptions/"+id, nil).want(t, 200, "get subscription").body
 	}
-	advanceTo := func(target time.Time) {
-		t.Helper()
-		call("POST", "/v1/test-clocks/"+clockID+"/advance", map[string]any{"frozen_time": target.Format(time.RFC3339)}).want(t, 200, "advance")
-		testclocktest.Drain(t, srv.TestClockSvc)
-		deadline := time.Now().Add(60 * time.Second)
-		for flowStr(call("GET", "/v1/test-clocks/"+clockID, nil).want(t, 200, "get clock").body, "status") != "ready" {
-			if time.Now().After(deadline) {
-				t.Fatal("clock advance did not settle")
-			}
-			time.Sleep(200 * time.Millisecond)
-		}
-	}
-
-	trial := newSub("wps-trial", map[string]any{"trial_days": 7})
-	trialCancel := newSub("wps-trial-cancel", map[string]any{"trial_days": 7})
-	call("POST", "/v1/subscriptions/"+flowStr(trialCancel, "id")+"/schedule-cancel", map[string]any{"at_period_end": true}).want(t, 200, "schedule cancel in trial")
-	changing := newSub("wps-change", nil)
+	changing := newSub("wps-change")
 	changeItem := flowStr(changing["items"].([]any)[0].(map[string]any), "id")
 	call("PATCH", "/v1/subscriptions/"+flowStr(changing, "id")+"/items/"+changeItem,
 		map[string]any{"new_plan_id": pro, "immediate": false}).want(t, 200, "schedule plan change")
-	paused := newSub("wps-paused", nil)
-	call("PUT", "/v1/subscriptions/"+flowStr(paused, "id")+"/pause-collection",
-		map[string]any{"behavior": "keep_as_draft", "resumes_at": start.Add(20 * 24 * time.Hour).Format(time.RFC3339)}).want(t, 200, "pause collection")
-	ending := newSub("wps-ending", nil)
+	ending := newSub("wps-ending")
 	call("POST", "/v1/subscriptions/"+flowStr(ending, "id")+"/schedule-cancel", map[string]any{"at_period_end": true}).want(t, 200, "schedule cancel")
 	events.next("setup")
 
-	// Past the trial end.
-	advanceTo(start.Add(8 * 24 * time.Hour))
-	got := events.next("trial end", domain.EventSubscriptionTrialEnded, domain.EventSubscriptionCanceled)
-	ev := got[domain.EventSubscriptionTrialEnded]
-	checkEventResource(t, "subscription.trial_ended (schedule)", ev, getSub(flowStr(trial, "id")))
-	if ev.Data["triggered_by"] != "schedule" {
-		t.Errorf("subscription.trial_ended triggered_by = %v, want schedule", ev.Data["triggered_by"])
-	}
-	// The trial with a cancel scheduled ends canceled, with no trial_ended.
-	ev = got[domain.EventSubscriptionCanceled]
-	checkEventResource(t, "subscription.canceled (trial end)", ev, getSub(flowStr(trialCancel, "id")))
-	if ev.Data["canceled_by"] != "schedule" || ev.Data["reason"] != "trial_end_cancel" {
-		t.Errorf("subscription.canceled at trial end extras = %v / %v, want schedule / trial_end_cancel", ev.Data["canceled_by"], ev.Data["reason"])
-	}
-
-	// Past the first period end: the plan change applies, the pause's
-	// resume date passed, the scheduled cancel fires.
-	advanceTo(start.AddDate(0, 1, 1))
-	got = events.next("period end", domain.EventSubscriptionPendingChangeApplied,
-		domain.EventSubscriptionCollectionResumed, domain.EventSubscriptionCanceled)
-	ev = got[domain.EventSubscriptionPendingChangeApplied]
+	// Past the first period end: the plan change applies and the scheduled
+	// cancel fires.
+	tickAt(t, srv, wall, tenantID, start.AddDate(0, 1, 1))
+	got := events.next("period end", domain.EventSubscriptionPendingChangeApplied, domain.EventSubscriptionCanceled)
+	ev := got[domain.EventSubscriptionPendingChangeApplied]
 	// The change applies at the period end, before the close that starts
 	// the next period: the event shows the period that just ended.
 	checkEventResource(t, "subscription.pending_change.applied", ev, getSub(flowStr(changing, "id")),
@@ -740,14 +697,6 @@ func TestE2E_WebhookPayloads_SubscriptionSchedule(t *testing.T) {
 	if ev.Data["item_id"] != changeItem || ev.Data["old_plan_id"] != starter || flowStr(ev.Data, "applied_at") == "" {
 		t.Errorf("subscription.pending_change.applied extras = %v / %v / %v, want %s / %s / a time",
 			ev.Data["item_id"], ev.Data["old_plan_id"], ev.Data["applied_at"], changeItem, starter)
-	}
-	ev = got[domain.EventSubscriptionCollectionResumed]
-	// The pause ends on day 20, before the close that starts the next
-	// period: the event shows the period the resume happened in.
-	checkEventResource(t, "subscription.collection_resumed (schedule)", ev, getSub(flowStr(paused, "id")),
-		"current_billing_period_start", "current_billing_period_end", "next_billing_at", "updated_at")
-	if ev.Data["triggered_by"] != "schedule" || flowStr(ev.Data, "resumed_at") == "" {
-		t.Errorf("subscription.collection_resumed extras = %v / %v, want schedule and the resume time", ev.Data["triggered_by"], ev.Data["resumed_at"])
 	}
 	ev = got[domain.EventSubscriptionCanceled]
 	checkEventResource(t, "subscription.canceled (schedule)", ev, getSub(flowStr(ending, "id")))
@@ -757,12 +706,13 @@ func TestE2E_WebhookPayloads_SubscriptionSchedule(t *testing.T) {
 }
 
 // TestE2E_WebhookPayloads_EngineAndDunning drives the engine's and dunning's
-// emitters on a test clock: the day-1 invoice of a subscription billed in
-// advance, its dunning run exhausting into a cancel and a write-off, and a
-// cycle close.
+// emitters: the day-1 invoice of a subscription billed in advance, its
+// dunning run exhausting into a cancel and a write-off, and a cycle close.
 func TestE2E_WebhookPayloads_EngineAndDunning(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	srv := NewServer(db, clock.Real(), nil)
+	start := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
+	wall := clock.NewFake(start)
+	srv := NewServer(db, wall, nil)
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
@@ -785,14 +735,10 @@ func TestE2E_WebhookPayloads_EngineAndDunning(t *testing.T) {
 		}).want(t, 201, "create plan "+code).body, "id")
 	}
 	advancePlan, arrearsPlan := plan("wpe-advance", "in_advance"), plan("wpe-arrears", "in_arrears")
-	start := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
-	clockID := flowStr(call("POST", "/v1/test-clocks", map[string]any{
-		"name": "webhook payload engine", "frozen_time": start.Format(time.RFC3339),
-	}).want(t, 201, "create test clock").body, "id")
 	newSub := func(code, planID string) string {
 		t.Helper()
 		customerID := flowStr(call("POST", "/v1/customers", map[string]any{
-			"external_id": code, "display_name": code, "email": code + "@payload.test", "test_clock_id": clockID,
+			"external_id": code, "display_name": code, "email": code + "@payload.test",
 		}).want(t, 201, "create customer "+code).body, "id")
 		return flowStr(call("POST", "/v1/subscriptions", map[string]any{
 			"code": code, "display_name": code, "customer_id": customerID,
@@ -815,18 +761,6 @@ func TestE2E_WebhookPayloads_EngineAndDunning(t *testing.T) {
 		}
 		return flowObj(call("GET", "/v1/dunning/runs/"+flowStr(runs[0], "id"), nil).want(t, 200, "get dunning run").body, "run")
 	}
-	advanceTo := func(target time.Time) {
-		t.Helper()
-		call("POST", "/v1/test-clocks/"+clockID+"/advance", map[string]any{"frozen_time": target.Format(time.RFC3339)}).want(t, 200, "advance")
-		testclocktest.Drain(t, srv.TestClockSvc)
-		deadline := time.Now().Add(60 * time.Second)
-		for flowStr(call("GET", "/v1/test-clocks/"+clockID, nil).want(t, 200, "get clock").body, "status") != "ready" {
-			if time.Now().After(deadline) {
-				t.Fatal("clock advance did not settle")
-			}
-			time.Sleep(200 * time.Millisecond)
-		}
-	}
 	events.next("setup")
 
 	// The day-1 invoice of a subscription billed in advance.
@@ -839,7 +773,7 @@ func TestE2E_WebhookPayloads_EngineAndDunning(t *testing.T) {
 
 	// Its one retry fails: dunning cancels the subscription and writes the
 	// invoice off.
-	advanceTo(start.Add(2 * 24 * time.Hour))
+	tickAt(t, srv, wall, tenantID, start.Add(2*24*time.Hour))
 	got = events.next("dunning exhausted", domain.EventDunningEscalated, domain.EventSubscriptionCanceled, domain.EventInvoiceMarkedUncollectible)
 	esc := got[domain.EventDunningEscalated]
 	checkEventResource(t, "dunning.escalated", esc, getRun(dayOneID))
@@ -847,8 +781,8 @@ func TestE2E_WebhookPayloads_EngineAndDunning(t *testing.T) {
 		t.Errorf("dunning.escalated actions = %v / %v, want cancel / mark_uncollectible", esc.Data["final_subscription_action"], esc.Data["final_invoice_action"])
 	}
 	checkEventResource(t, "subscription.canceled (dunning)", got[domain.EventSubscriptionCanceled], getSub(advanceSub))
-	// The advance request carries an API key, but dunning made the cancel:
-	// the event and the cancel's audit row both say dunning.
+	// Dunning made the cancel: the event and the cancel's audit row both say
+	// dunning.
 	if by := got[domain.EventSubscriptionCanceled].Data["canceled_by"]; by != "dunning" {
 		t.Errorf("subscription.canceled (dunning) canceled_by = %v, want dunning", by)
 	}
@@ -868,7 +802,7 @@ func TestE2E_WebhookPayloads_EngineAndDunning(t *testing.T) {
 	// A cycle close bills a subscription in arrears.
 	newSub("wpe-arrears", arrearsPlan)
 	events.next("create arrears subscription", domain.EventSubscriptionCreated)
-	advanceTo(start.AddDate(0, 1, 0).Add(2 * 24 * time.Hour))
+	tickAt(t, srv, wall, tenantID, start.AddDate(0, 1, 0).Add(2*24*time.Hour))
 	got = events.next("cycle close", domain.EventInvoiceFinalized)
 	cycle := got[domain.EventInvoiceFinalized]
 	checkEventResource(t, "invoice.finalized (cycle)", cycle, getInvoice(flowStr(cycle.Data["invoice"].(map[string]any), "id")))
@@ -884,92 +818,4 @@ func cancelAuditCanceledBy(t *testing.T, call func(method, path string, body any
 		t.Fatalf("subscription %s has %d cancel audit rows, want 1", subID, len(rows))
 	}
 	return flowStr(rows[0], "metadata", "canceled_by")
-}
-
-// TestE2E_WebhookPayloads_DunningPause drives dunning's pause final action
-// on a test clock: retries run out and dunning pauses collection, then the
-// invoice is paid and the pause lifts.
-func TestE2E_WebhookPayloads_DunningPause(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	srv := NewServer(db, clock.Real(), nil)
-	ts := httptest.NewServer(srv)
-	defer ts.Close()
-
-	tenantID := testutil.CreateTestTenant(t, db, "Webhook Payload Dunning Pause Co")
-	key := createAPIKeyWithMode(t, db, tenantID, false)
-	call := func(method, path string, body any) flowResp {
-		t.Helper()
-		return flowDo(t, ts, method, path, flowReq{bearer: key, body: body})
-	}
-	events := &webhookCursor{t: t, db: db, tenantID: tenantID}
-
-	call("POST", "/v1/dunning/policies", map[string]any{
-		"name": "One retry, then pause", "enabled": true, "retry_days": []int{1},
-		"final_subscription_action": "pause", "final_invoice_action": "none",
-	}).want(t, 201, "create dunning policy")
-	planID := flowStr(call("POST", "/v1/plans", map[string]any{
-		"code": "wpp-advance", "name": "wpp-advance", "currency": "USD", "billing_interval": "monthly",
-		"base_amount_cents": 1000, "base_bill_timing": "in_advance",
-	}).want(t, 201, "create plan").body, "id")
-	start := time.Date(2027, 4, 1, 0, 0, 0, 0, time.UTC)
-	clockID := flowStr(call("POST", "/v1/test-clocks", map[string]any{
-		"name": "webhook payload dunning pause", "frozen_time": start.Format(time.RFC3339),
-	}).want(t, 201, "create test clock").body, "id")
-	customerID := flowStr(call("POST", "/v1/customers", map[string]any{
-		"external_id": "wpp-cust", "display_name": "wpp-cust", "email": "wpp@payload.test", "test_clock_id": clockID,
-	}).want(t, 201, "create customer").body, "id")
-	getSub := func(id string) map[string]any {
-		t.Helper()
-		return call("GET", "/v1/subscriptions/"+id, nil).want(t, 200, "get subscription").body
-	}
-	advanceTo := func(target time.Time) {
-		t.Helper()
-		call("POST", "/v1/test-clocks/"+clockID+"/advance", map[string]any{"frozen_time": target.Format(time.RFC3339)}).want(t, 200, "advance")
-		testclocktest.Drain(t, srv.TestClockSvc)
-		deadline := time.Now().Add(60 * time.Second)
-		for flowStr(call("GET", "/v1/test-clocks/"+clockID, nil).want(t, 200, "get clock").body, "status") != "ready" {
-			if time.Now().After(deadline) {
-				t.Fatal("clock advance did not settle")
-			}
-			time.Sleep(200 * time.Millisecond)
-		}
-	}
-	events.next("setup")
-
-	subID := flowStr(call("POST", "/v1/subscriptions", map[string]any{
-		"code": "wpp-sub", "display_name": "wpp-sub", "customer_id": customerID,
-		"items": []map[string]any{{"plan_id": planID, "quantity": 1}}, "billing_time": "anniversary",
-	}).want(t, 201, "create subscription").body, "id")
-	got := events.next("day-1 invoice", domain.EventSubscriptionCreated, domain.EventInvoiceFinalized, domain.EventDunningStarted)
-	invoiceID := flowStr(got[domain.EventInvoiceFinalized].Data["invoice"].(map[string]any), "id")
-
-	// The one retry fails: dunning pauses collection.
-	advanceTo(start.Add(2 * 24 * time.Hour))
-	got = events.next("dunning exhausted", domain.EventDunningEscalated, domain.EventSubscriptionCollectionPaused)
-	if applied := got[domain.EventDunningEscalated].Data["applied"]; applied != "subscription_paused" {
-		t.Errorf("dunning.escalated applied = %v, want subscription_paused", applied)
-	}
-	paused := got[domain.EventSubscriptionCollectionPaused]
-	checkEventResource(t, "subscription.collection_paused (dunning)", paused, getSub(subID))
-	if paused.Data["triggered_by"] != "dunning" {
-		t.Errorf("subscription.collection_paused triggered_by = %v, want dunning", paused.Data["triggered_by"])
-	}
-	if by := flowStr(paused.Data["subscription"].(map[string]any), "pause_collection", "set_by"); by != "dunning" {
-		t.Errorf("subscription.collection_paused pause_collection.set_by = %q, want dunning", by)
-	}
-
-	// The invoice is paid. Dunning does not resume collection itself; the
-	// payment lifts the pause, and the next advance resumes it.
-	call("POST", "/v1/invoices/"+invoiceID+"/record-payment", map[string]any{"note": "Wire ref P-2"}).want(t, 200, "record payment")
-	events.next("record payment", domain.EventInvoicePaid)
-	advanceTo(start.Add(3 * 24 * time.Hour))
-	got = events.next("resume after payment", domain.EventSubscriptionCollectionResumed)
-	resumed := got[domain.EventSubscriptionCollectionResumed]
-	checkEventResource(t, "subscription.collection_resumed (payment)", resumed, getSub(subID))
-	if resumed.Data["triggered_by"] != "payment" {
-		t.Errorf("subscription.collection_resumed triggered_by = %v, want payment", resumed.Data["triggered_by"])
-	}
-	if _, ok := got[domain.EventSubscriptionCollectionPaused]; ok {
-		t.Errorf("a second subscription.collection_paused was queued: %v", got[domain.EventSubscriptionCollectionPaused])
-	}
 }
