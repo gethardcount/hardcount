@@ -33,7 +33,10 @@ func Cutoff(ctx context.Context, c Clock) time.Time { return c.Now(ctx) }
 // It panics, because the read has no *testing.T to fail. The test runner
 // re-panics it, so a trip stops its package's test binary and that package's
 // later tests do not run until it is fixed. A server under test answers the
-// request 500.
+// request 500. Where code recovers the panic, a trip is only logged at error
+// and the test goes on: a job run by scheduler.Run, a test clock's catch-up
+// (which also records the advance as an internal failure), and the retry of
+// stuck invoices after a Stripe connect.
 func refuseMissedBind(ctx context.Context) {
 	if !testing.Testing() {
 		return
