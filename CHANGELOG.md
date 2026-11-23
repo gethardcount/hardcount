@@ -21,7 +21,7 @@ original text.
 
 ### Changed
 
-- **While a test clock advances, a change to one of its customers, or a new customer on it, answers `409 clock_advancing`.** Reads, Stripe's webhooks, the payment pages and deleting the clock go on, and a clock whose advance failed stays open. A usage batch names the refused event; a LiteLLM send lists the call in `errors` and saves the rest ([errors](docs/api/errors.md), [#1899](https://github.com/gethardcount/hardcount/pull/1899)).
+- **While a test clock advances, a change to one of its customers, or a new customer on it, answers `409 clock_advancing`:** the customer, its subscriptions, invoices, credit notes and credits, and usage you backfill or release. Reads, usage your app or proxy sends, payments through Stripe, price changes (which take effect after the advance) and deleting the clock go on, and a clock whose advance failed stays open ([errors](docs/api/errors.md), [#1899](https://github.com/gethardcount/hardcount/pull/1899)).
 
 ## [0.10.0] - 2026-11-23
 

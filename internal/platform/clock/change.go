@@ -8,21 +8,24 @@ import (
 )
 
 // While a test clock advances, a request that changes one of its customers is
-// refused (409 clock_advancing): the advance bills the customer's records as
-// the clock's time moves, and a change made meanwhile would be worked out at
-// a time the advance has not finished. Reads, Stripe's webhooks, the public
-// pages and the advance's own jobs go on.
+// refused (409 clock_advancing): the customer, its subscriptions, invoices,
+// credit notes and credits, and usage an operator backfills or releases. The
+// advance bills the customer's records as the clock's time moves, and a
+// change made meanwhile would be worked out at a time the advance has not
+// finished. Reads go on, as do usage an app or a proxy sends, payments
+// through Stripe, the public pages, the advance's own jobs, and price
+// changes, which take effect after the advance (their stamp).
 //
-// The API's door marks a request that changes data (MarkChange). A reader of
-// a record's clock asks RefuseIfAdvancing when it reads the clock for the
-// request's decision, and Decide returns that refusal as it is, with a
-// context that no longer carries the mark: only the request's own decision
-// is refused, never the work it calls or starts.
+// The API's door marks a request that changes a customer's data
+// (MarkChange). A reader of a record's clock asks RefuseIfAdvancing when it
+// reads the clock for the request's decision, and Decide returns that
+// refusal as it is, with a context that no longer carries the mark: only the
+// request's own decision is refused, never the work it calls or starts.
 
 type changeKey struct{}
 
-// MarkChange marks ctx as a request that changes data. The API's door calls
-// it, and nothing else does.
+// MarkChange marks ctx as a request that changes a customer's data. The
+// API's door calls it, and nothing else does.
 func MarkChange(ctx context.Context) context.Context {
 	return context.WithValue(ctx, changeKey{}, true)
 }

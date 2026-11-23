@@ -2,7 +2,6 @@ package api
 
 import (
 	"encoding/json"
-	"slices"
 	"testing"
 	"time"
 
@@ -12,17 +11,14 @@ import (
 // TestE2E_TestClock_AnAdvancingClocksCustomersCannotBeChanged: while a test
 // clock advances, a request that changes one of its customers answers 409
 // clock_advancing and changes nothing, on a record route and on one that
-// names the customer in its body. A send of many records refuses only that
-// customer's: the usage batch names it among its refused events, and the
-// LiteLLM spend callback, whose proxy never sends a 4xx again, lists it in
-// errors[] and saves the other calls. Reads go on, and deleting the clock
-// stops the advance.
+// names the customer in its body (an operator's usage backfill). Usage an app
+// or a proxy sends for the customer is accepted: one event, a batch, and a
+// LiteLLM spend send. Reads go on, and deleting the clock stops the advance.
 func TestE2E_TestClock_AnAdvancingClocksCustomersCannotBeChanged(t *testing.T) {
 	r := newDatesRig(t, "Clock Advancing")
 	start := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
 	clockID := r.newClock("advancing", start)
 	subID, _ := r.subWithItem("on-clock", clockID, r.planID)
-	r.subWithItem("off-clock", "", r.planID)
 	r.call("POST", "/v1/meters", flowReq{body: map[string]any{
 		"event_name": litellm.EventNameTokens, "name": "Tokens", "unit": "tokens", "aggregation": "sum",
 	}}).want(t, 201, "create tokens meter")
@@ -44,30 +40,22 @@ func TestE2E_TestClock_AnAdvancingClocksCustomersCannotBeChanged(t *testing.T) {
 	if flowStr(sub, "status") != "active" {
 		t.Errorf("subscription status %v after the refused cancel, want active", sub["status"])
 	}
-	event := func(customer, key string) map[string]any {
-		return map[string]any{"external_customer_id": "dates-" + customer, "event_name": litellm.EventNameTokens, "quantity": 1, "idempotency_key": key}
+	event := func(key string) map[string]any {
+		return map[string]any{"external_customer_id": "dates-on-clock", "event_name": litellm.EventNameTokens, "quantity": 1, "idempotency_key": key}
 	}
-	refused("usage event", r.call("POST", "/v1/usage-events", flowReq{body: event("on-clock", "advancing-1")}))
+	backfill := event("advancing-backfill")
+	backfill["timestamp"] = start.Format(time.RFC3339)
+	refused("usage backfill", r.call("POST", "/v1/usage-events/backfill", flowReq{body: backfill}))
 
-	batch := r.call("POST", "/v1/usage-events/batch", flowReq{body: []map[string]any{event("on-clock", "advancing-2"), event("off-clock", "advancing-3")}})
-	if batch.status != 422 || batch.errCode() != "batch_rejected" || !slices.Contains(flowStrings(batch.body, "errors"), "event[0]: "+refusal) {
-		t.Errorf("usage batch: %d %s, want 422 batch_rejected naming event[0]: %s", batch.status, batch.raw, refusal)
+	r.call("POST", "/v1/usage-events", flowReq{body: event("advancing-1")}).want(t, 201, "a usage event")
+	r.call("POST", "/v1/usage-events/batch", flowReq{body: []map[string]any{event("advancing-2"), event("advancing-3")}}).want(t, 201, "a usage batch")
+	var call []map[string]any
+	if err := json.Unmarshal(e2eLiteLLMBatch(t, 1, "dates-on-clock", 0), &call); err != nil {
+		t.Fatalf("decode LiteLLM record: %v", err)
 	}
-
-	var calls []map[string]any
-	for _, customer := range []string{"on-clock", "off-clock"} {
-		var one []map[string]any
-		if err := json.Unmarshal(e2eLiteLLMBatch(t, 1, "dates-"+customer, 0), &one); err != nil {
-			t.Fatalf("decode LiteLLM record: %v", err)
-		}
-		one[0]["id"] = "chatcmpl-" + customer
-		calls = append(calls, one[0])
-	}
-	spend := r.call("POST", "/v1/integrations/litellm/spend", flowReq{body: calls}).want(t, 200, "LiteLLM spend")
-	rowErrs, _ := spend.body["errors"].([]any)
-	if flowInt(spend.body, "accepted") != 2 || len(rowErrs) != 1 ||
-		flowStr(rowErrs[0].(map[string]any), "id") != "chatcmpl-on-clock" || flowStr(rowErrs[0].(map[string]any), "error") != refusal {
-		t.Errorf("LiteLLM spend: %s, want the off-clock call accepted (2 rows) and the on-clock call in errors[]: %s", spend.raw, refusal)
+	spend := r.call("POST", "/v1/integrations/litellm/spend", flowReq{body: call}).want(t, 200, "LiteLLM spend")
+	if rowErrs, _ := spend.body["errors"].([]any); flowInt(spend.body, "accepted") != 2 || len(rowErrs) != 0 {
+		t.Errorf("LiteLLM spend: %s, want the call's two rows accepted", spend.raw)
 	}
 
 	r.call("DELETE", "/v1/test-clocks/"+clockID, flowReq{}).want(t, 200, "delete the advancing clock")

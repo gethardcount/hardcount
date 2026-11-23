@@ -29,7 +29,7 @@ come from the clock, not from the real time.
 | Status | What it means | What you can do |
 |---|---|---|
 | `ready` | Idle. | Move it, or delete it. |
-| `advancing` | Hardcount is running everything that fell due in the skipped time. | Wait, and read the clock again. A change to one of its customers, or a new customer on it, answers `409 clock_advancing`. Reads, Stripe's webhooks, the payment pages and deleting the clock go on. |
+| `advancing` | Hardcount is running everything that fell due in the skipped time. | Wait, and read the clock again. A change to one of its customers (the customer, its subscriptions, invoices, credit notes and credits, and usage you backfill or release), or a new customer on it, answers `409 clock_advancing`. Reads, usage your app or proxy sends, payments through Stripe, price changes (which take effect after the advance) and deleting the clock go on. |
 | `internal_failure` | A job failed, or the run took more than 10 minutes. Work done before the failure is kept, and the jobs after it did not run. `last_failure_reason` names the job that failed and why. | `POST /v1/test-clocks/{id}/retry-advance`, or delete the clock. |
 
 ## Moving a clock

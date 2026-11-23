@@ -128,11 +128,13 @@ func through(d *clockDoor, ctx context.Context, method, path string) seen {
 // record is read; a real-time or a record route gets one read of the
 // server's clock, and a decidedIn route or an unknown one nothing.
 //
-// A signed-in request that changes data, on a record route or a decidedIn
-// one, is marked as a change: a record route's decision is asked with the
-// mark and the handler gets a context without it; a decidedIn route's
-// handler gets it, for its own decision. A read, a real-time route, a route
-// outside authentication and an unknown one are not marked.
+// A request that changes data and needs a write permission, on a record
+// route or a decidedIn one, is marked as a change: a record route's decision
+// is asked with the mark and the handler gets a context without it; a
+// decidedIn route's handler gets it, for its own decision. A read, a route
+// that needs no write permission (usage an app sends, a preview), a
+// real-time route, a route outside authentication and an unknown one are not
+// marked.
 func TestClockDoor_DecidesFromTheRouteTable(t *testing.T) {
 	test := auth.WithTenantID(postgres.WithLivemode(context.Background(), false), "t1")
 	onClock := clock.Sim{At: doorFrozen, TestClockID: "clk_1"}
@@ -155,11 +157,12 @@ func TestClockDoor_DecidesFromTheRouteTable(t *testing.T) {
 		{"a route its function decides", "POST", "/v1/customers", clock.Sim{}, "", 0, true},
 		// Usage's entries decide and bind themselves; usage's build refuses a
 		// context with no instant, which the door must leave to fire.
-		{"usage ingest", "POST", "/v1/usage-events", clock.Sim{}, "", 0, true},
-		{"usage batch", "POST", "/v1/usage-events/batch", clock.Sim{}, "", 0, true},
+		{"usage ingest", "POST", "/v1/usage-events", clock.Sim{}, "", 0, false},
+		{"usage batch", "POST", "/v1/usage-events/batch", clock.Sim{}, "", 0, false},
 		{"usage backfill", "POST", "/v1/usage-events/backfill", clock.Sim{}, "", 0, true},
 		{"usage held release", "POST", "/v1/usage-events/held/release", clock.Sim{}, "", 0, true},
-		{"a LiteLLM spend call", "POST", "/v1/integrations/litellm/spend", clock.Sim{}, "", 0, true},
+		{"a LiteLLM spend call", "POST", "/v1/integrations/litellm/spend", clock.Sim{}, "", 0, false},
+		{"a preview, which needs a read permission", "POST", "/v1/invoices/create_preview", clock.Sim{}, "", 0, false},
 		{"a Stripe webhook, outside authentication", "POST", "/v1/webhooks/stripe/ep_1", clock.Sim{}, "", 0, false},
 		{"a route the router does not have", "GET", "/v1/nothing-here", clock.Sim{}, "", 0, false},
 	} {
