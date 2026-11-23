@@ -9,7 +9,7 @@ PDF. Use Stripe test mode only. See [How we test](../testing.md).
 | Part | When |
 |---|---|
 | [Setup](#setup) to [Email, PDF, LiteLLM](#email-pdf-litellm) | Before you tag the release |
-| [Fresh install and upgrade](#fresh-install-and-upgrade) and [First invoice tutorial](#first-invoice-tutorial) | After the tag's image build has pushed the release images, and before you publish the release notes |
+| [Fresh install and upgrade](#fresh-install-and-upgrade) and [First invoice tutorial](#first-invoice-tutorial) | After the tag's image build has pushed the release images, and before you [publish](#publish) the release |
 
 The checks write Stripe-linked test data into the database the server uses.
 Point the server at a fresh or dedicated database if you want to keep yours
@@ -111,7 +111,7 @@ Then `grep -rn` for the previous release in `docs/` and `deploy/` finds only his
 
 ## Fresh install and upgrade
 
-- [ ] The release can be verified. Create the release with `gh release create`, which makes the tag and the release together: the tag's CI run then signs both images, checks the signatures, records their build provenance and attaches the API image's SBOM to the release. After that run is green: `gh release view <tag>` lists `hardcount-sbom.spdx.json`, and `gh attestation verify oci://ghcr.io/gethardcount/hardcount:<tag> --repo gethardcount/hardcount` passes.
+- [ ] The release can be verified. Push the tag, then at once create the release on it as a draft: `gh release create <tag> --draft --verify-tag --title <tag> --notes-file <notes>`. The tag's CI run signs both images, checks the signatures, records their build provenance and, as its last step, attaches the API image's SBOM to the release. The release must exist by then, about 40 minutes after the tag; a draft is enough, and it stays unpublished until the checks below pass. If the run fails at "Attach the SBOM to the release", create the draft and re-run the failed job. After that run is green: `gh release view <tag>` lists `hardcount-sbom.spdx.json`, and `gh attestation verify oci://ghcr.io/gethardcount/hardcount:<tag> --repo gethardcount/hardcount` passes, and so does the same command for `hardcount-dashboard`.
 
 These prove that the images the quick start pulls work, and that an existing install can move to them. Use a machine that has Docker but no Hardcount containers or volumes, for example a new VM.
 
@@ -146,3 +146,7 @@ The `upgrade` CI job runs steps 1 to 5 and 7 on every pull request ([What CI run
 ## First invoice tutorial
 
 - [ ] Run [docs/first-invoice.md](../first-invoice.md) end to end against the quick-start stack from the fresh install. Every command works as written, and each output matches the one under its "You see:". CI runs the same commands on every pull request, against a build from source, not the release images. When a step differs, fix the page on `main` before you publish the release notes. The page links its own version for the release that `quickstart.sh` starts. When you change `HARDCOUNT_VERSION` there, change the page's link and version too: `TestFirstInvoicePageNamesTheQuickStartRelease` fails until you do. Change the release in [docs/quick-start.md](../quick-start.md) too (its first step and its `--branch`); no test checks that page.
+
+## Publish
+
+- [ ] When every check above has passed, publish the draft: `gh release edit <tag> --draft=false --latest`. `gh api repos/gethardcount/hardcount/releases/latest` then names the new release.

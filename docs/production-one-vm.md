@@ -25,7 +25,7 @@ Every example uses `billing.example.com`. Replace it with your own address.
 
 ## 1. Install a pinned release
 
-A release is a tested version with a number, such as `v0.10.0`. Production runs a release, not the newest code: the newest code can hold changes that are not released yet. Find the newest release on the [releases page](https://github.com/gethardcount/hardcount/releases). This page uses `v0.9.3`. A Velox install (v0.8.x; Velox is Hardcount's name before v0.9.0) cannot be upgraded: see [Coming from Velox](upgrades.md#coming-from-velox).
+A release is a tested version with a number, such as `v0.10.0`. Production runs a release, not the newest code: the newest code can hold changes that are not released yet. Find the newest release on the [releases page](https://github.com/gethardcount/hardcount/releases). This page uses `v0.10.0`. A Velox install (v0.8.x; Velox is Hardcount's name before v0.9.0) cannot be upgraded: see [Coming from Velox](upgrades.md#coming-from-velox).
 
 1. Get the files for that release.
 
