@@ -341,11 +341,11 @@ type ScheduledCancelExecutor interface {
 	FireDueScheduledCancel(ctx context.Context, tenantID, id string, at time.Time) error
 }
 
-// TestClockReader looks up a test clock's frozen_time. The billing engine
-// calls this for every subscription that has test_clock_id set, so the clock
-// decides "what time is it for this sub?" instead of wall-clock. Returns
-// errs.ErrNotFound when the clock has been deleted (caller treats missing
-// clock as wall-clock — the detached sub quietly rejoins the live timeline).
+// TestClockReader looks up a test clock's frozen_time. Only the engine's
+// resolver (clockOf) calls it, to answer which clock a record is on and that
+// clock's frozen time. Returns errs.ErrNotFound when the clock has been
+// deleted; the resolver returns the error, and Decide's callers say what a
+// missing clock means.
 type TestClockReader interface {
 	Get(ctx context.Context, tenantID, id string) (domain.TestClock, error)
 }
@@ -499,9 +499,9 @@ type SubscriptionReader interface {
 	// the closer's tx it flips a sub with a due cancel_at / cancel_at_period_end
 	// intent to canceled, CAS-ing on `expected` as well as status='active',
 	// seals its intervals and enqueues subscription.canceled; the final
-	// invoice is inserted on the same tx. The `at` argument is the engine's
-	// effectiveNow so canceled_at stays consistent with test-clock time
-	// travel. subscription.ErrWatermarkMoved covers both "period moved" and
+	// invoice is inserted on the same tx. The `at` argument is the close's
+	// instant, so canceled_at stays on the period's timeline under a test
+	// clock. subscription.ErrWatermarkMoved covers both "period moved" and
 	// "already terminated" — the closer's snapshot is stale either way.
 	FireScheduledCancellationTx(ctx context.Context, tx *sql.Tx, tenantID, id string, expected subscription.PeriodSnapshot, at time.Time) (domain.Subscription, error)
 
@@ -952,9 +952,9 @@ func settingsForTaxDocument(ts domain.TenantSettings, upstreamRef string) domain
 	return ts
 }
 
-// SetTestClockReader wires the test-clock resolver. Optional: when nil, the
-// engine always uses wall-clock time, even for subs with test_clock_id set
-// (useful in narrow unit tests that don't exercise test-mode timing).
+// SetTestClockReader wires the reader the resolver answers a record's clock
+// from. Optional: when nil, the resolver answers no clock for every record
+// (narrow unit tests that don't exercise test-mode timing).
 func (e *Engine) SetTestClockReader(r TestClockReader) {
 	e.testClocks = r
 }
@@ -1546,26 +1546,6 @@ func (e *Engine) clockOf(ctx context.Context, tenantID, clockID, owner string) (
 		return clock.Sim{}, fmt.Errorf("could not read test clock %s of %s: %w", clockID, owner, err)
 	}
 	return clock.Sim{At: tc.FrozenTime, TestClockID: clockID}, nil
-}
-
-// effectiveNow is the instant the engine bills a subscription at: its test
-// clock's time, or else the engine's clock (under a bound ctx, its instant).
-// A clock it cannot read falls back to the engine's clock, logged, so one
-// dangling test_clock_id does not stop the billing run for every tenant.
-// That fallback reaches writes: the catch-up's due gate (closeEndedPeriods),
-// the cycle close's now, the invoice build's now (the invoice's tax date and
-// timestamps) and the threshold scan. It returns only the instant, so a
-// fallback can never be bound back onto a ctx as a time with no clock.
-func (e *Engine) effectiveNow(ctx context.Context, sub domain.Subscription) time.Time {
-	sim, err := e.clockOf(ctx, sub.TenantID, sub.TestClockID, "subscription "+sub.ID)
-	if err != nil {
-		slog.WarnContext(ctx, "test clock lookup failed, falling back to real time",
-			"subscription_id", sub.ID, "test_clock_id", sub.TestClockID, "error", err)
-	}
-	if !sim.Simulated() {
-		return e.clock.Now(ctx)
-	}
-	return sim.At
 }
 
 // SimForInvoice is the time answer for an invoice: the clock of its
@@ -2330,9 +2310,8 @@ func (e *Engine) RunCycle(ctx context.Context, batchSize int, onPage func()) (in
 // deadline (testclock.CatchupPassDeadline) is the outer ceiling.
 const maxPeriodsPerSubPerCall = 10000
 
-// billSubscription catches a subscription up to its effectiveNow by
-// looping billOnePeriod until next_billing_at exceeds the clock the
-// sub runs on. Production wall-clock subs typically need exactly one
+// billSubscription catches a subscription up to the instant its caller
+// bound by looping billOnePeriod until next_billing_at is after it. Production wall-clock subs typically need exactly one
 // iteration (the cycle accumulates one period of debt before each
 // scheduler tick). Test-clock catch-up after a multi-year advance
 // runs N iterations in a single call — the operator clicks Advance
@@ -2389,14 +2368,14 @@ func (e *Engine) billSubscription(ctx context.Context, sub domain.Subscription, 
 			return count, errBillingGated
 		}
 
-		// Caught-up check. The clock the sub lives on (test or wall)
-		// determines "now"; sub.NextBillingAt strictly after that
-		// means there's nothing more to bill in this call. dueBy is that
-		// now less the run's invoice grace (ADR-120). It decides only
-		// whether a due instant has come; the close itself still runs at
-		// the due instant (billOnePeriod anchors on next_billing_at, the
-		// cancel on cancel_at), so no invoice date moves.
-		dueBy := e.effectiveNow(ctx, sub).Add(-grace)
+		// Caught-up check, at the instant the caller bound: on a test clock
+		// the catch-up's clock time, a request's decided time, or dunning's
+		// escalation. sub.NextBillingAt strictly after it, less the run's
+		// invoice grace (ADR-120), means there's nothing more to bill in
+		// this call. It decides only whether a due instant has come; the
+		// close itself still runs at the due instant (billOnePeriod anchors
+		// on next_billing_at, the cancel on cancel_at).
+		dueBy := e.clock.Now(ctx).Add(-grace)
 
 		// ADR-097: a cancel_at strictly INSIDE the current period fires
 		// here, BEFORE the caught-up early-return — the motivating bug's
@@ -2949,7 +2928,7 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 // once per due sub per pass, and runCatchupLoop relied on an outer
 // loop to compress N periods of catch-up into N passes. Phase 2
 // keeps this function unchanged but wraps it in billSubscription
-// which loops until the sub catches up to its effectiveNow.
+// which loops until the sub catches up to the instant its caller bound.
 //
 // Returns (true, nil) if an invoice was created, (false, nil) if
 // skipped (e.g. status not active). The bool here means "invoice
@@ -3133,10 +3112,9 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	// race burns no number, and a rolled-back invoice leaves no gap. No
 	// fallback: a collision-prone number is worse than a failed billing
 	// attempt, since the attempt is retried, while a duplicate invoice number corrupts
-	// accounting. `now` was resolved at the top of billSubscription via
-	// effectiveNow — reuse it so invoice timestamps sit on the same timeline
-	// as the rest of this call (matters for test-clock subs where wall-clock
-	// ≠ frozen_time).
+	// accounting. `now` is this close's instant (next_billing_at, read at the
+	// top of this function): reuse it so invoice timestamps sit on the same
+	// timeline as the rest of this call.
 	if e.settings == nil {
 		return false, fmt.Errorf("billing engine: settings reader is required for invoice numbering")
 	}
@@ -4153,7 +4131,7 @@ func (e *Engine) priceFinalOnCancel(ctx context.Context, sub domain.Subscription
 	p.kind = finalOnCancelBill
 	p.billingLoc, p.netDays, p.invoiceCurrency = billingLoc, netDays, invoiceCurrency
 	p.lineItems, p.taxApp = lineItems, taxApp
-	p.now = e.effectiveNow(ctx, sub)
+	p.now = e.clock.Now(ctx) // the instant the cancel runs at, which its caller bound
 	p.dueAt = domain.AddDaysIn(p.now, netDays, billingLoc)
 	return p, nil
 }
@@ -4964,7 +4942,12 @@ func (e *Engine) processAutoCharge(ctx context.Context, inv domain.Invoice, at *
 	}
 	inv = fresh
 
-	settleAt := e.collectionAt(ctx, inv, at)
+	// The collection's instant: the caller's anchor when it has one, else
+	// the one bound above.
+	settleAt := e.clock.Now(ctx)
+	if at != nil {
+		settleAt = *at
+	}
 	// Apply customer credits BEFORE charging (trap R1: never charge the
 	// pre-credit amount). ApplyToInvoiceAt is safe to re-run: it drains
 	// min(amount_due, current balance), so an already-applied invoice or

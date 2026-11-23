@@ -107,7 +107,7 @@ type NoPaymentMethodNotifier interface {
 // or the setup-link email when there is none. Satisfied by the billing
 // engine's CollectInvoice, which is the same collector the auto-charge sweep
 // runs. Declared here so the invoice package doesn't import billing. at nil
-// means "the invoice's clock now".
+// means the instant bound on ctx.
 type Collector interface {
 	CollectInvoice(ctx context.Context, tenantID, invoiceID string, at *time.Time)
 }

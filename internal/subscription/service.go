@@ -2622,7 +2622,7 @@ func (s *Service) RetryBilling(ctx context.Context, tenantID, id string) (RetryB
 // it through the dedicated no-invoice transition, and ExtendTrial moves it
 // with the trial (the reason it stays a flag rather than eagerly converting
 // to a pinned cancel_at). CancelAt is an explicit timestamp the cycle scan
-// compares against effectiveNow. The mutually-exclusive split forces
+// compares against the run's instant. The mutually-exclusive split forces
 // unambiguous caller intent — Stripe's update endpoint accepts both fields
 // together but the resulting precedence is surprising; rejecting the
 // combination here keeps the API obvious. The derived read-only

@@ -89,26 +89,7 @@ func TestDunningFinalAction_TestClock_NeverBeforeTheCurrentPeriod(t *testing.T) 
 			}
 			// The day-1 invoice's run: its one retry ran at escalation and
 			// took the exhaustion lease; the exhaustion did not finish.
-			runID := "run_" + dayOneID
-			tx, err := r.db.BeginTx(ctx, postgres.TxBypass, "")
-			if err != nil {
-				t.Fatalf("begin: %v", err)
-			}
-			if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', 'off', true)`); err != nil {
-				postgres.Rollback(tx)
-				t.Fatalf("pin livemode GUC: %v", err)
-			}
-			if _, err := tx.ExecContext(ctx, `
-				INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, reason,
-					attempt_count, last_attempt_at, next_action_at, paused, created_at, updated_at, livemode)
-				VALUES ($1, $2, $3, $4, $5, 'active', 'payment_failed', 1, $6, $7, false, $8, $8, false)`,
-				runID, r.tenantID, dayOneID, sub.CustomerID, policy.ID, escalation, escalation.Add(15*time.Minute), start); err != nil {
-				postgres.Rollback(tx)
-				t.Fatalf("insert run: %v", err)
-			}
-			if err := tx.Commit(); err != nil {
-				t.Fatalf("commit run: %v", err)
-			}
+			insertInterruptedRun(t, r, dayOneID, sub.CustomerID, policy.ID, escalation, start)
 
 			// The catchup's dunning phase, as the clock's catch-up pass
 			// calls it.
@@ -166,6 +147,109 @@ func TestDunningFinalAction_TestClock_NeverBeforeTheCurrentPeriod(t *testing.T) 
 				t.Errorf(`"Collection paused" row dated %v, want the current period's start %v`, pausedAt.UTC(), renewal)
 			}
 		})
+	}
+}
+
+// TestDunningFinalAction_TestClock_TheFinalInvoiceIsIssuedAtTheEscalation: a
+// dunning run on a test clock that ends in a cancel inside the subscription's
+// current period issues the cancel's final invoice at the escalation, not at
+// the instant the advance landed on. The plan bills in arrears, so the cancel
+// bills the part of the period used before it. Real router, real Postgres,
+// the catchup's dunning phase on the ctx the catchup binds.
+func TestDunningFinalAction_TestClock_TheFinalInvoiceIsIssuedAtTheEscalation(t *testing.T) {
+	r := newDatesRig(t, "Dunning Final Invoice At The Escalation")
+	ctx := postgres.WithLivemode(context.Background(), false)
+	start := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
+	clockID := r.newClock("final invoice", start)
+	planID := flowStr(r.call("POST", "/v1/plans", flowReq{body: map[string]any{
+		"code": "dates-arrears", "name": "Dates Arrears", "currency": "USD", "billing_interval": "monthly",
+		"base_amount_cents": 3000, "base_bill_timing": "in_arrears",
+	}}).want(t, 201, "create arrears plan").body, "id")
+	subID, _ := r.subWithItem("final-invoice", clockID, planID)
+
+	subs := subscription.NewPostgresStore(r.db)
+	sub, err := subs.Get(ctx, r.tenantID, subID)
+	if err != nil || sub.CurrentBillingPeriodEnd == nil {
+		t.Fatalf("read subscription: %v (period end %v)", err, sub.CurrentBillingPeriodEnd)
+	}
+	// The first period closes: its arrears invoice is the one in dunning.
+	renewal := sub.CurrentBillingPeriodEnd.UTC()
+	r.advance(clockID, renewal.Add(time.Hour))
+	var cycleID string
+	for _, inv := range r.invoices(subID) {
+		if inv["billing_reason"] == string(domain.BillingReasonSubscriptionCycle) {
+			cycleID = flowStr(inv, "id")
+		}
+	}
+	if cycleID == "" {
+		t.Fatalf("no cycle invoice after the first period: %s", mustJSON(r.invoices(subID)))
+	}
+	// The run's last retry escalates five days into the next period; the
+	// advance lands two days after that.
+	escalation := renewal.Add(5 * 24 * time.Hour)
+	frozen := escalation.Add(48 * time.Hour)
+	r.advance(clockID, frozen)
+
+	policy, err := r.srv.DunningSvc.UpsertPolicy(ctx, r.tenantID, domain.DunningPolicy{
+		Name: "one retry", Enabled: true, RetryDays: []int{3},
+		FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: domain.InvActionMarkUncollectible,
+	})
+	if err != nil {
+		t.Fatalf("upsert policy: %v", err)
+	}
+	insertInterruptedRun(t, r, cycleID, sub.CustomerID, policy.ID, escalation, start)
+	simCtx := clock.WithSim(ctx, clock.Sim{At: frozen, TestClockID: clockID})
+	if _, errs := r.srv.DunningSvc.ProcessDueRunsForClock(simCtx, r.tenantID, clockID, frozen, 50); len(errs) != 0 {
+		t.Fatalf("dunning phase: %v", errs)
+	}
+
+	got, err := subs.Get(ctx, r.tenantID, subID)
+	if err != nil || got.Status != domain.SubscriptionCanceled || got.CanceledAt == nil || !got.CanceledAt.Equal(escalation) {
+		t.Fatalf("subscription %s canceled_at %v (%v); want canceled at the escalation %v", got.Status, got.CanceledAt, err, escalation)
+	}
+	var finalID string
+	for _, inv := range r.invoices(subID) {
+		if inv["billing_reason"] == string(domain.BillingReasonSubscriptionCancel) {
+			finalID = flowStr(inv, "id")
+		}
+	}
+	if finalID == "" {
+		t.Fatalf("no final invoice after the cancel: %s", mustJSON(r.invoices(subID)))
+	}
+	final, err := invoice.NewPostgresStore(r.db).Get(ctx, r.tenantID, finalID)
+	if err != nil {
+		t.Fatalf("read final invoice: %v", err)
+	}
+	if final.IssuedAt == nil || !final.IssuedAt.Equal(escalation) || !final.CreatedAt.Equal(escalation) {
+		t.Errorf("final invoice issued %v, created %v; want both at the escalation %v, not the advance's %v",
+			final.IssuedAt, final.CreatedAt, escalation, frozen)
+	}
+}
+
+// insertInterruptedRun writes an active dunning run for invoiceID whose last
+// retry ran at escalation and took the exhaustion lease (next_action_at a
+// quarter hour later), as a run whose exhaustion was interrupted leaves it.
+func insertInterruptedRun(t *testing.T, r *datesRig, invoiceID, customerID, policyID string, escalation, created time.Time) {
+	t.Helper()
+	ctx := context.Background()
+	tx, err := r.db.BeginTx(ctx, postgres.TxBypass, "")
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, `SELECT set_config('app.livemode', 'off', true)`); err != nil {
+		postgres.Rollback(tx)
+		t.Fatalf("pin livemode GUC: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, reason,
+			attempt_count, last_attempt_at, next_action_at, paused, created_at, updated_at, livemode)
+		VALUES ($1, $2, $3, $4, $5, 'active', 'payment_failed', 1, $6, $7, false, $8, $8, false)`,
+		"run_"+invoiceID, r.tenantID, invoiceID, customerID, policyID, escalation, escalation.Add(15*time.Minute), created); err != nil {
+		postgres.Rollback(tx)
+		t.Fatalf("insert run: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit run: %v", err)
 	}
 }
 

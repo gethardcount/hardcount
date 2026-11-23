@@ -88,7 +88,7 @@ func (e *Engine) WriteCancelReliefTx(ctx context.Context, tx *sql.Tx, canceled d
 
 // BillOnCreate bills a subscription's day-1 in_advance invoice on its own
 // transaction, for the tests that check what that invoice bills: it runs
-// BillOnCreateTx at the subscription's effective now on e.subs.WithTenantTx,
+// BillOnCreateTx at the instant bound on ctx on e.subs.WithTenantTx,
 // then, after the commit, FinalizeOnCreateInvoice, the one step the deleted
 // own-transaction BillOnCreate ran after its insert. Like it, a second call
 // for the same period finds the period's slot taken and returns the zero
@@ -102,7 +102,7 @@ func (e *Engine) BillOnCreate(ctx context.Context, sub domain.Subscription) (dom
 	)
 	if err := e.subs.WithTenantTx(ctx, sub.TenantID, func(tx *sql.Tx) error {
 		var err error
-		inv, ok, err = e.BillOnCreateTx(ctx, tx, sub, e.effectiveNow(ctx, sub))
+		inv, ok, err = e.BillOnCreateTx(ctx, tx, sub, e.clock.Now(ctx))
 		return err
 	}); err != nil {
 		if errs.Code(err) == errs.CodeInvoiceBillingPeriodTaken {

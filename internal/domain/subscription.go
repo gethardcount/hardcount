@@ -481,7 +481,7 @@ type Subscription struct {
 	// timestamp-based schedule.
 	CancelAt *time.Time `json:"cancel_at,omitempty"`
 	// CancelAtPeriodEnd is the soft-cancel flag. When true and the cycle
-	// scan observes effectiveNow >= CurrentBillingPeriodEnd, the engine
+	// scan's instant is at or after CurrentBillingPeriodEnd, the engine
 	// transitions the sub to canceled and skips the next invoice. Setting
 	// false before the boundary fires undoes the schedule.
 	CancelAtPeriodEnd bool `json:"cancel_at_period_end"`

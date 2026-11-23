@@ -31,8 +31,7 @@ const (
 // at anchors the credit application and a credit-covered settle. Cycle close
 // and threshold fires pass their own period instant (the credits that were
 // live at the boundary are the ones that apply, and paid_at lands there); a
-// nil at uses the invoice's clock now, which is right for request-time
-// finalizes.
+// nil at uses the instant bound on ctx (a request's, or a job's row's).
 //
 // A draft (tax pending, collection paused) is not collected: the claim
 // requires status=finalized, so the call is a no-op until it finalizes. Nor
@@ -90,25 +89,4 @@ func collectFailureNext(err error) string {
 	default:
 		return "the invoice is still queued, and the auto-charge sweep will retry"
 	}
-}
-
-// collectionAt is the instant processAutoCharge applies credits and settles
-// at: the caller's anchor when it has one, else the invoice's clock now, else
-// the engine's clock (under processAutoCharge's bound ctx, its instant). When
-// the invoice's clock cannot be found (the invoice, its subscription or
-// customer, or their test clock cannot be read), it falls back to the
-// engine's clock, logged, as effectiveNow does.
-func (e *Engine) collectionAt(ctx context.Context, inv domain.Invoice, at *time.Time) time.Time {
-	if at != nil {
-		return *at
-	}
-	sim, err := e.SimForInvoice(ctx, inv.TenantID, inv.ID)
-	if err != nil {
-		slog.WarnContext(ctx, "collect: could not find the invoice's test clock; collecting at real time",
-			"invoice_id", inv.ID, "error", err)
-	}
-	if !sim.Simulated() {
-		return e.clock.Now(ctx)
-	}
-	return sim.At
 }

@@ -142,7 +142,7 @@ func TestResolvers_UnreadableRecordIsAnError(t *testing.T) {
 func TestResolvers_AnswerTheRecordsClock(t *testing.T) {
 	test := postgres.WithLivemode(context.Background(), false)
 	onClock := clock.Sim{At: time.Date(2024, 2, 1, 12, 0, 0, 0, time.UTC), TestClockID: "tc_1"}
-	e, _, _, _, _, server := resolverHarness(nil)
+	e, _, _, _, clocks, server := resolverHarness(nil)
 	for name, c := range map[string]struct {
 		resolve func() (clock.Sim, error)
 		want    clock.Sim
@@ -166,6 +166,9 @@ func TestResolvers_AnswerTheRecordsClock(t *testing.T) {
 	}
 	if server.reads != 0 {
 		t.Errorf("the engine's clock was read %d times; want none", server.reads)
+	}
+	if clocks.lastTenant != "t1" || clocks.lastID != "tc_1" {
+		t.Errorf("the clock reader was asked for tenant %q, clock %q; want t1, tc_1", clocks.lastTenant, clocks.lastID)
 	}
 }
 
