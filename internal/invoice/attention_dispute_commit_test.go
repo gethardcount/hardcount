@@ -40,6 +40,33 @@ func (s *spyCommitGrants) CommitGrantExposure(context.Context, string, string, t
 	return s.drawable, s.consumed, nil
 }
 
+// The hosted page's lookup by token computes no attention: the public page
+// shows none, so a finalized commit invoice, whose operator-facing attention
+// reads the commit grant, is returned without reading it.
+func TestGetByPublicToken_ComputesNoAttention(t *testing.T) {
+	ctx := context.Background()
+	store := newMemStore()
+	inv, err := store.Create(ctx, "t1", domain.Invoice{
+		CustomerID: "cus_1", Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
+		BillingReason: domain.BillingReasonManual, Currency: "USD", TotalAmountCents: 9000, AmountDueCents: 9000,
+		PublicToken: "tok_commit",
+	})
+	if err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	grants := &spyCommitGrants{drawable: 6000}
+	svc := NewService(store, nil, newMemNumberer())
+	svc.SetCommitGrantReader(grants)
+
+	got, _, err := svc.GetByPublicToken(ctx, "tok_commit")
+	if err != nil {
+		t.Fatalf("GetByPublicToken: %v", err)
+	}
+	if got.ID != inv.ID || got.Attention != nil || grants.calls != 0 {
+		t.Errorf("invoice %s, attention %+v, commit grant reads %d; want %s, no attention, no read", got.ID, got.Attention, grants.calls, inv.ID)
+	}
+}
+
 // TestAttention_LostDisputeOnPaidCommitInvoice_ReadsTheGrant: the invoice
 // service reads the prepaid-commit grant of a paid invoice when, and only
 // when, a dispute on it was lost, so the dispute_lost notice can say the
