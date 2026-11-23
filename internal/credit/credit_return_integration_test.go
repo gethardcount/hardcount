@@ -724,42 +724,37 @@ func TestCreditReturn_LegacyRowsTakeTheLegacyPath(t *testing.T) {
 	})
 }
 
-// A test-clock customer's return judges expiry on the customer's clock and
-// stamps there. The grant is live on the wall clock but past expiry on the
-// customer's clock, so its share expires at once, at the clock's instant.
-func TestCreditReturn_TestClockCustomerUsesItsClock(t *testing.T) {
-	r := newReturnRig(t, "Return Test Clock")
+// A return judges expiry at the instant its caller bound, and stamps there,
+// not at the database's now(). The grant is live now but past expiry at the
+// bound instant, so its share expires at once, at that instant.
+func TestCreditReturn_JudgesExpiryAtTheBoundInstant(t *testing.T) {
+	r := newReturnRig(t, "Return Bound Instant")
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	frozen := now.Add(60 * 24 * time.Hour)
-	clockID := postgres.NewID("hc_tclk")
-	bypassExec(t, r.db, r.ctx, `INSERT INTO test_clocks (id, tenant_id, name, frozen_time, status, livemode)
-		VALUES ($1, $2, 'return', $3, 'ready', false)`, clockID, r.tenantID, frozen)
+	at := now.Add(60 * 24 * time.Hour)
 	expires := now.Add(30 * 24 * time.Hour)
 
-	pinned := r.customer("ret_clock")
-	bypassExec(t, r.db, r.ctx, `UPDATE customers SET test_clock_id = $1 WHERE id = $2`, clockID, pinned)
-	g := r.grant(pinned, 5000, &expires, "")
-	inv := r.invoice(pinned, 5000)
-	r.apply(pinned, inv, 5000)
+	later := r.customer("ret_later")
+	g := r.grant(later, 5000, &expires, "")
+	inv := r.invoice(later, 5000)
+	r.apply(later, inv, 5000)
 
-	simCtx := clock.WithSim(r.ctx, clock.Sim{At: frozen, TestClockID: clockID})
-	res := r.void(simCtx, pinned, inv)
+	res := r.void(clock.WithEffectiveNow(r.ctx, at), later, inv)
 
 	if res.ExpiredOnReturnCents != 5000 {
-		t.Errorf("return = %+v, want the 5000 expired at once on the customer's clock", res)
+		t.Errorf("return = %+v, want the 5000 expired at once at the bound instant", res)
 	}
-	if ex := r.expiries(pinned, g); len(ex) != 1 || !ex[0].CreatedAt.Equal(frozen) {
-		t.Errorf("expiry entries = %+v, want one stamped at the clock's %v", ex, frozen)
+	if ex := r.expiries(later, g); len(ex) != 1 || !ex[0].CreatedAt.Equal(at) {
+		t.Errorf("expiry entries = %+v, want one stamped at the bound %v", ex, at)
 	}
-	r.checkLedger(pinned)
+	r.checkLedger(later)
 
-	// The same grant on the wall clock is live: restored, nothing expires.
-	wall := r.customer("ret_clock_wall")
+	// The same grant returned now is live: restored, nothing expires.
+	wall := r.customer("ret_now")
 	gw := r.grant(wall, 5000, &expires, "")
 	invw := r.invoice(wall, 5000)
 	r.apply(wall, invw, 5000)
 	if res := r.void(r.ctx, wall, invw); res.ExpiredOnReturnCents != 0 || r.block(gw).Consumed != 0 {
-		t.Errorf("wall-clock return = %+v, consumed %d; want restored and live", res, r.block(gw).Consumed)
+		t.Errorf("return now = %+v, consumed %d; want restored and live", res, r.block(gw).Consumed)
 	}
 	r.checkLedger(wall)
 }
@@ -1021,32 +1016,27 @@ func TestCreditReturn_ExpirySweepWaitsForTheReturn(t *testing.T) {
 	r.checkLedger(cust)
 }
 
-// The credit-note path on a test clock: a note on an unpaid invoice judges
-// its grant's expiry at the customer's clock and stamps there.
-func TestCreditReturn_CreditNoteOnATestClock(t *testing.T) {
-	r := newReturnRig(t, "Return CN Test Clock")
+// The credit-note path: a note on an unpaid invoice judges its grant's
+// expiry at the instant its caller bound, and stamps there.
+func TestCreditReturn_CreditNoteJudgesExpiryAtTheBoundInstant(t *testing.T) {
+	r := newReturnRig(t, "Return CN Bound Instant")
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	frozen := now.Add(60 * 24 * time.Hour)
-	clockID := postgres.NewID("hc_tclk")
-	bypassExec(t, r.db, r.ctx, `INSERT INTO test_clocks (id, tenant_id, name, frozen_time, status, livemode)
-		VALUES ($1, $2, 'return-cn', $3, 'ready', false)`, clockID, r.tenantID, frozen)
-	cust := r.customer("ret_cn_clock")
-	bypassExec(t, r.db, r.ctx, `UPDATE customers SET test_clock_id = $1 WHERE id = $2`, clockID, cust)
+	at := now.Add(60 * 24 * time.Hour)
+	cust := r.customer("ret_cn_later")
 	expires := now.Add(30 * 24 * time.Hour)
 	g := r.grant(cust, 5000, &expires, "")
 	inv := r.invoice(cust, 5000)
 	r.apply(cust, inv, 5000)
 
-	simCtx := clock.WithSim(r.ctx, clock.Sim{At: frozen, TestClockID: clockID})
-	res, err := r.creditNoteAt(simCtx, cust, inv, "hc_cn_clock", 2000, false, 0)
+	res, err := r.creditNoteAt(clock.WithEffectiveNow(r.ctx, at), cust, inv, "hc_cn_later", 2000, false, 0)
 	if err != nil {
 		t.Fatalf("credit note: %v", err)
 	}
 	if res.ExpiredOnReturnCents != 2000 {
-		t.Errorf("return = %+v, want the 2000 expired at once on the customer's clock", res)
+		t.Errorf("return = %+v, want the 2000 expired at once at the bound instant", res)
 	}
-	if ex := r.expiries(cust, g); len(ex) != 1 || ex[0].Amount != -2000 || !ex[0].CreatedAt.Equal(frozen) {
-		t.Errorf("expiry entries = %+v, want one -2000 stamped at the clock's %v", ex, frozen)
+	if ex := r.expiries(cust, g); len(ex) != 1 || ex[0].Amount != -2000 || !ex[0].CreatedAt.Equal(at) {
+		t.Errorf("expiry entries = %+v, want one -2000 stamped at the bound %v", ex, at)
 	}
 	r.checkLedger(cust)
 }

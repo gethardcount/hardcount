@@ -15,7 +15,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/tenantstripe"
-	"github.com/gethardcount/hardcount/internal/testclock/testclocktest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -145,7 +144,9 @@ func TestE2E_OffSessionCharge_BankNeedsCustomerToConfirm(t *testing.T) {
 	// The customer confirms on the hosted invoice page, which takes payment,
 	// and the notice offers to email its link, only with this address set.
 	t.Setenv("HOSTED_INVOICE_BASE_URL", "https://billing.needs-confirm.test")
-	srv := NewServer(db, clock.Real(), nil)
+	frozen := time.Date(2027, 5, 3, 9, 0, 0, 0, time.UTC)
+	wall := clock.NewFake(frozen)
+	srv := NewServer(db, wall, nil)
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
@@ -169,22 +170,15 @@ func TestE2E_OffSessionCharge_BankNeedsCustomerToConfirm(t *testing.T) {
 	endpoint := "/v1/webhooks/stripe/" + flowStr(creds, "id")
 	stripe := installConfirmStripe(t)
 
-	frozen := time.Date(2027, 5, 3, 9, 0, 0, 0, time.UTC)
-	clockID := flowStr(call("POST", "/v1/test-clocks", flowReq{body: map[string]any{
-		"name": "needs confirm", "frozen_time": frozen.Format(time.RFC3339),
-	}}).want(t, 201, "create test clock").body, "id")
+	// advance runs the jobs due by day days.
 	advance := func(days int) {
 		t.Helper()
-		call("POST", "/v1/test-clocks/"+clockID+"/advance", flowReq{body: map[string]any{
-			"frozen_time": frozen.Add(time.Duration(days) * 24 * time.Hour).Format(time.RFC3339),
-		}}).want(t, 200, fmt.Sprintf("advance clock to day %d", days))
-		testclocktest.Drain(t, srv.TestClockSvc)
+		tickAt(t, srv, wall, tenantID, frozen.Add(time.Duration(days)*24*time.Hour))
 	}
 	newCustomer := func(name string) string {
 		t.Helper()
 		return flowStr(call("POST", "/v1/customers", flowReq{body: map[string]any{
 			"external_id": "confirm-" + name, "display_name": "Confirm " + name, "email": name + "@needs-confirm.test",
-			"test_clock_id": clockID,
 		}}).want(t, 201, name+": create customer").body, "id")
 	}
 	// saveCard runs the operator's Add payment method link and Stripe's

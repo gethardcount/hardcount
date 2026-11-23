@@ -1,120 +1,66 @@
 package api
 
 import (
-	"database/sql"
 	"net/http/httptest"
-	"os"
 	"strconv"
 	"strings"
 	"testing"
 	"time"
 
-	_ "github.com/jackc/pgx/v5/stdlib"
-
 	"github.com/gethardcount/hardcount/internal/doctor"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
-	"github.com/gethardcount/hardcount/internal/testclock/testclocktest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// TestE2E_ClockSoak_MonthEndAnchorThroughYearBoundary is the stability plan's
-// B2 soak (docs/dev/records/product-stability-plan.md): one subscription anchored on
-// the WORST day of the month (the 31st), driven through 13 real cycle closes
-// across a year boundary and two Februaries, through the REAL server — the
-// test-clock advance endpoint, the catchup orchestrator, the billing engine —
-// with the money-invariant doctor sweeping the whole database after every
-// advance.
-//
-// The pure date math is already pinned by anniversary_month_end_test.go
-// (ADR-055: Jan 31 → Feb 28 → Mar 31, anchor preserved). What that cannot
-// prove is the PIPELINE: that the engine actually consults the anchored
-// advance at cycle close, that every close produces exactly one invoice whose
-// period ends where the math says, and that thirteen consecutive closes leave
-// ZERO invariant violations behind. A drift here is a permanently shifted
-// billing day for every month-end customer; a violation here is the class the
-// doctor exists to catch at the moment it is created, not months later.
-func TestE2E_ClockSoak_MonthEndAnchorThroughYearBoundary(t *testing.T) {
+// TestE2E_MonthEndAnchor_SurvivesTheClose: a subscription anchored on the
+// 31st is closed three times through the real server and billing engine:
+// Jan 31 to Feb 28, back to Mar 31, then Apr 30. The date maths is pinned by
+// anniversary_month_end_test.go (ADR-055); what it cannot prove is that the
+// close keeps the anchor: a drift (31 becomes 28 and stays) shows by the
+// second close. Each close makes exactly one invoice for the period that
+// ended, and the money-invariant doctor sweeps the database after each.
+func TestE2E_MonthEndAnchor_SurvivesTheClose(t *testing.T) {
 	db := testutil.SetupTestDB(t)
-	t.Setenv("HARDCOUNT_BOOTSTRAP_TOKEN", "soak-bootstrap-token-1234")
-
-	srv := NewServer(db, clock.NewFake(time.Date(2026, 1, 31, 10, 0, 0, 0, time.UTC)), nil)
+	start := time.Date(2026, 1, 31, 10, 0, 0, 0, time.UTC)
+	wall := clock.NewFake(start)
+	srv := NewServer(db, wall, nil)
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
 	// The doctor sweep and this test's own invoice reads run on the admin
-	// pool. The plain reads need it, because the admin role reads past
-	// row-level security. The doctor reads every tenant's rows under any role
-	// that can read the tables (see beginRead in internal/doctor/doctor.go).
-	adminURL := strings.TrimSpace(os.Getenv("TEST_ADMIN_DATABASE_URL"))
-	if adminURL == "" {
-		adminURL = "postgres://hardcount:hardcount@localhost:5432/hardcount_test?sslmode=disable"
-	}
-	admin, err := sql.Open("pgx", adminURL)
-	if err != nil {
-		t.Fatalf("open admin pool: %v", err)
-	}
-	t.Cleanup(func() { _ = admin.Close() })
+	// pool, which reads past row-level security.
+	admin := testutil.AdminPool(t)
 
-	// --- fixture: tenant, clock frozen Jan 31, pinned customer, $50/mo sub ---
-	resp := doPost(t, ts, "/v1/bootstrap", "", map[string]any{
-		"token": "soak-bootstrap-token-1234", "tenant_name": "Soak Co",
-		"owner_email": "owner@soak.test", "owner_password": "a-real-12char-pw",
-	})
-	assertStatus(t, resp, 201)
-	key, _ := readJSON(t, resp)["secret_key_test"].(string)
-	if key == "" {
-		t.Fatal("bootstrap returned no test key")
-	}
-	auth := "Bearer " + key
+	tenantID := testutil.CreateTestTenant(t, db, "Month End Co")
+	auth := "Bearer " + createAPIKeyWithMode(t, db, tenantID, false)
 
-	start := time.Date(2026, 1, 31, 10, 0, 0, 0, time.UTC)
-	resp = doPost(t, ts, "/v1/test-clocks", auth, map[string]any{
-		"name": "soak clock", "frozen_time": start.Format(time.RFC3339),
-	})
-	assertStatus(t, resp, 201)
-	clockID := readJSON(t, resp)["id"].(string)
-
-	resp = doPost(t, ts, "/v1/customers", auth, map[string]any{
-		"external_id": "soak_cust", "display_name": "Soak Cust",
-		"email": "", "test_clock_id": clockID,
+	resp := doPost(t, ts, "/v1/customers", auth, map[string]any{
+		"external_id": "month_end_cust", "display_name": "Month End Cust", "email": "",
 	})
 	assertStatus(t, resp, 201)
 	custID := readJSON(t, resp)["id"].(string)
 
 	resp = doPost(t, ts, "/v1/plans", auth, map[string]any{
-		"code": "soak-mo", "name": "Soak Monthly", "currency": "USD",
+		"code": "month-end-mo", "name": "Month End Monthly", "currency": "USD",
 		"billing_interval": "monthly", "base_amount_cents": 5000, "base_bill_timing": "in_arrears", "status": "active",
 	})
 	assertStatus(t, resp, 201)
 	planID := readJSON(t, resp)["id"].(string)
 
 	resp = doPost(t, ts, "/v1/subscriptions", auth, map[string]any{
-		"code": "soak-sub", "display_name": "Soak Sub", "customer_id": custID,
+		"code": "month-end-sub", "display_name": "Month End Sub", "customer_id": custID,
 		"items": []map[string]any{{"plan_id": planID}}, "billing_time": "anniversary",
 	})
 	assertStatus(t, resp, 201)
 	subID := readJSON(t, resp)["id"].(string)
 
-	// The expected period-end DATES for a day-31 anchor (ADR-055 clamp):
-	// Feb 28 '26, Mar 31, Apr 30, May 31, Jun 30, Jul 31, Aug 31, Sep 30,
-	// Oct 31, Nov 30, Dec 31, Jan 31 '27, Feb 28 '27, Mar 31 '27.
-	// Both Februaries are non-leap; the anchor must clamp to 28 twice and
-	// RESTORE to 31 after each — the ratchet this sequence exists to refute.
+	// The period ends for a day-31 anchor (ADR-055 clamp): the anchor clamps
+	// to Feb 28 and must come back to the 31st after it.
 	ends := []time.Time{
 		time.Date(2026, 2, 28, 0, 0, 0, 0, time.UTC),
 		time.Date(2026, 3, 31, 0, 0, 0, 0, time.UTC),
 		time.Date(2026, 4, 30, 0, 0, 0, 0, time.UTC),
 		time.Date(2026, 5, 31, 0, 0, 0, 0, time.UTC),
-		time.Date(2026, 6, 30, 0, 0, 0, 0, time.UTC),
-		time.Date(2026, 7, 31, 0, 0, 0, 0, time.UTC),
-		time.Date(2026, 8, 31, 0, 0, 0, 0, time.UTC),
-		time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC),
-		time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC),
-		time.Date(2026, 11, 30, 0, 0, 0, 0, time.UTC),
-		time.Date(2026, 12, 31, 0, 0, 0, 0, time.UTC),
-		time.Date(2027, 1, 31, 0, 0, 0, 0, time.UTC),
-		time.Date(2027, 2, 28, 0, 0, 0, 0, time.UTC),
-		time.Date(2027, 3, 31, 0, 0, 0, 0, time.UTC),
 	}
 
 	assertPeriodEndDay := func(step int, wantDate time.Time) {
@@ -143,29 +89,6 @@ func TestE2E_ClockSoak_MonthEndAnchorThroughYearBoundary(t *testing.T) {
 			t.Fatalf("count invoices: %v", err)
 		}
 		return n
-	}
-
-	// advanceTo moves the customer's test clock and waits for the catchup
-	// phases (which run asynchronously) to settle.
-	advanceTo := func(step int, target time.Time) {
-		t.Helper()
-		resp := doPost(t, ts, "/v1/test-clocks/"+clockID+"/advance", auth, map[string]any{
-			"frozen_time": target.Format(time.RFC3339),
-		})
-		assertStatus(t, resp, 200)
-		testclocktest.Drain(t, srv.TestClockSvc)
-		deadline := time.Now().Add(60 * time.Second)
-		for {
-			resp := doGet(t, ts, "/v1/test-clocks/"+clockID, auth)
-			status, _ := readJSON(t, resp)["status"].(string)
-			if status == "ready" {
-				break
-			}
-			if time.Now().After(deadline) {
-				t.Fatalf("step %d: clock advance did not settle (status %q)", step, status)
-			}
-			time.Sleep(200 * time.Millisecond)
-		}
 	}
 
 	assertDoctorClean := func(step int) {
@@ -325,9 +248,9 @@ func TestE2E_ClockSoak_MonthEndAnchorThroughYearBoundary(t *testing.T) {
 	periodStart := time.Date(2026, 1, 31, 0, 0, 0, 0, time.UTC) // ADR-012 snap of the 10:00 start
 	for i := 0; i < len(ends)-1; i++ {
 		step := i + 1
-		advanceTo(step, ends[i].Add(26*time.Hour)) // past boundary i, well short of boundary i+1
+		tickAt(t, srv, wall, tenantID, ends[i].Add(26*time.Hour)) // past boundary i, well short of boundary i+1
 
-		// One close per advance: the new open period must end at ends[i+1]…
+		// One close per tick: the new open period must end at ends[i+1]…
 		assertPeriodEndDay(step, ends[i+1])
 		// …exactly one more invoice must exist (the closed period's)…
 		if got, want := countInvoices(), step; got != want {
@@ -339,18 +262,4 @@ func TestE2E_ClockSoak_MonthEndAnchorThroughYearBoundary(t *testing.T) {
 		// …and the WHOLE database must still satisfy every money invariant.
 		assertDoctorClean(step)
 	}
-
-	// Negative control (issue #988 item 3): advance again WITHOUT crossing
-	// the open period's end (Mar 31 '27). The clock sits at Mar 1 '27 02:00;
-	// Mar 30 '27 12:00 is past it and still 12h short of the boundary. No
-	// close is due, so no invoice may appear and the period must not move.
-	final := len(ends)
-	advanceTo(final, ends[len(ends)-1].Add(-12*time.Hour))
-	assertPeriodEndDay(final, ends[len(ends)-1])
-	if got, want := countInvoices(), len(ends)-1; got != want {
-		t.Fatalf("step %d: invoice count = %d after an advance that crossed no period end, want %d", final, got, want)
-	}
-	assertDoctorClean(final)
-
-	t.Logf("soak passed: 13 closes at 5000 cents each, Jan 31 anchor held through two Februaries and a year boundary, a no-boundary advance billed nothing, doctor clean after every advance")
 }

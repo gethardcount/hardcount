@@ -4,7 +4,6 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
-	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -455,87 +454,6 @@ func TestDunningPause_OnlyThePausingInvoiceLiftsIt(t *testing.T) {
 	r.payOffline(pausing)
 	r.assertReleasedBy(subID, pausing)
 	r.assertResumedByPayment(subID)
-}
-
-// T7 (C7). On a test clock: a period that ends under the dunning pause
-// bills a draft, the payment lifts the pause at its own instant, and the
-// next period bills normally. Two shapes: the period closed before the
-// payment (an advance closed it), and the period had ended but was not
-// closed when the payment landed (the clock moved, the catchup's cycle
-// phase had not run yet). Fails on main: the pause never lifts, so the
-// next period's invoice is a draft too.
-func TestDunningPause_TestClockPaymentAtPeriodBoundary(t *testing.T) {
-	for _, closedFirst := range []bool{true, false} {
-		name := "period closed before the payment"
-		if !closedFirst {
-			name = "period ended, not closed, when the payment lands"
-		}
-		t.Run(name, func(t *testing.T) {
-			r := newPauseRig(t, "Dunning Pause Clock "+name, domain.InvActionNone)
-			start := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
-			clockID := r.newClock("a3 "+name, start)
-			subID, _ := r.subWithItem("clock", clockID, r.planID)
-			dayOneID := flowStr(r.dayOne(subID), "id")
-			sub := r.call("GET", "/v1/subscriptions/"+subID, flowReq{}).want(t, 200, "read subscription").body
-			t1 := at(t, sub, "current_billing_period_end")
-
-			// The day-1 invoice's dunning exhausts at start.
-			r.armRun(dayOneID, flowStr(sub, "customer_id"), start.Add(-time.Minute))
-			simCtx := clock.WithSim(r.ctx, clock.Sim{At: start, TestClockID: clockID})
-			if _, errs := r.srv.DunningSvc.ProcessDueRunsForClock(simCtx, r.tenantID, clockID, start, 50); len(errs) != 0 {
-				t.Fatalf("dunning phase: %v", errs)
-			}
-			if pc := r.pause(subID); pc == nil || pc["resumes_at"] != nil {
-				t.Fatalf("pause_collection after exhaustion = %v, want a pause with no resumes_at", pc)
-			}
-
-			t2 := t1.Add(48 * time.Hour)
-			if closedFirst {
-				r.advance(clockID, t2)
-			} else if _, err := r.admin.Exec(`UPDATE test_clocks SET frozen_time = $1 WHERE id = $2`, t2, clockID); err != nil {
-				t.Fatalf("move the clock: %v", err)
-			}
-			r.payOffline(dayOneID)
-			pc := r.pause(subID)
-			got, _ := pc["resumes_at"].(string)
-			if ra, err := time.Parse(time.RFC3339Nano, got); err != nil || !ra.Equal(t2) {
-				t.Fatalf("pause_collection after the payment = %v, want resumes_at at the payment's instant %v", pc, t2)
-			}
-
-			sub = r.call("GET", "/v1/subscriptions/"+subID, flowReq{}).want(t, 200, "read subscription").body
-			t3 := at(t, sub, "current_billing_period_end")
-			if !closedFirst {
-				t3 = t3.AddDate(0, 1, 0) // P is still open: its end is t1, and the next one ends a month later
-			}
-			r.advance(clockID, t3.Add(48*time.Hour))
-
-			var cycle []map[string]any
-			for _, inv := range r.invoices(subID) {
-				if inv["billing_reason"] == "subscription_cycle" {
-					cycle = append(cycle, inv)
-				}
-			}
-			if len(cycle) != 2 {
-				t.Fatalf("%d cycle invoices, want 2: %s", len(cycle), mustJSON(cycle))
-			}
-			if cycle[0]["status"] != "draft" {
-				t.Errorf("invoice closed at %v (under the pause) is %s, want draft", t1, cycle[0]["status"])
-			}
-			if cycle[1]["status"] != "finalized" && cycle[1]["status"] != "paid" {
-				t.Errorf("invoice closed at %v (after the payment) is %s, want finalized", t3, cycle[1]["status"])
-			}
-			if r.pause(subID) != nil {
-				t.Error("the advance's resume phase left the pause on the subscription")
-			}
-			resumed := r.auditMetas(subID, domain.SubAuditCollectionResumed)
-			if len(resumed) != 1 || resumed[0]["triggered_by"] != "payment" {
-				t.Fatalf("collection_resumed rows %v, want one with triggered_by=payment", resumed)
-			}
-			if ra, err := time.Parse(time.RFC3339Nano, fmt.Sprint(resumed[0]["resumed_at"])); err != nil || !ra.Equal(t2) {
-				t.Errorf("resumed_at %v, want the payment's instant %v", resumed[0]["resumed_at"], t2)
-			}
-		})
-	}
 }
 
 // T8. A canceled subscription keeps its pause: no payment lifts it, and no

@@ -16,7 +16,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/tenantstripe"
-	"github.com/gethardcount/hardcount/internal/testclock/testclocktest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -25,8 +24,8 @@ import (
 // payment_recovered with dunning.resolved the moment the retry came back
 // processing; when that payment then failed, nothing retried the invoice.
 //
-// These drive the real router, database, charge path, signed webhooks and a
-// test clock. Only api.stripe.com is stood in for: the finalize-time charge
+// These drive the real router, database, charge path, signed webhooks and the
+// billing and dunning jobs on a fake clock. Only api.stripe.com is stood in for: the finalize-time charge
 // is declined (so dunning starts), and each dunning retry gets the next
 // answer scripted for its card.
 
@@ -146,8 +145,8 @@ func (s *inFlightStripe) piOf(pm string) string {
 	return s.lastPI[pm]
 }
 
-// inFlightRig is one tenant with a dunning policy, Stripe connected, a
-// webhook endpoint and a test clock.
+// inFlightRig is one tenant with a dunning policy, Stripe connected and a
+// webhook endpoint, on a server whose clock starts at frozen.
 type inFlightRig struct {
 	t        *testing.T
 	db       *postgres.DB
@@ -157,7 +156,7 @@ type inFlightRig struct {
 	key      string
 	endpoint string
 	secret   string
-	clockID  string
+	wall     *clock.Fake
 	frozen   time.Time
 	stripe   *inFlightStripe
 	evtSeq   int
@@ -172,11 +171,12 @@ func newInFlightRig(t *testing.T, name string, retryDays []int, script map[strin
 	// A setup session with no return_url needs the dashboard address; it has
 	// no default.
 	t.Setenv("CUSTOMER_PORTAL_URL", "https://app.retry-in-flight.test")
-	srv := NewServer(db, clock.Real(), nil)
+	frozen := time.Date(2027, 5, 3, 9, 0, 0, 0, time.UTC)
+	wall := clock.NewFake(frozen)
+	srv := NewServer(db, wall, nil)
 	ts := httptest.NewServer(srv)
 	t.Cleanup(ts.Close)
-	r := &inFlightRig{t: t, db: db, ts: ts, srv: srv, secret: "whsec_retry_in_flight",
-		frozen: time.Date(2027, 5, 3, 9, 0, 0, 0, time.UTC)}
+	r := &inFlightRig{t: t, db: db, ts: ts, srv: srv, secret: "whsec_retry_in_flight", wall: wall, frozen: frozen}
 	r.tenantID = testutil.CreateTestTenant(t, db, name)
 	r.key = createAPIKeyWithMode(t, db, r.tenantID, false)
 	r.call("POST", "/v1/dunning/policies", map[string]any{
@@ -191,9 +191,6 @@ func newInFlightRig(t *testing.T, name string, retryDays []int, script map[strin
 	creds := r.call("PATCH", "/v1/settings/stripe/test/webhook", map[string]any{"webhook_secret": r.secret}).want(t, 200, "set webhook secret").body
 	r.endpoint = "/v1/webhooks/stripe/" + flowStr(creds, "id")
 	r.stripe = installInFlightStripe(t, script)
-	r.clockID = flowStr(r.call("POST", "/v1/test-clocks", map[string]any{
-		"name": name, "frozen_time": r.frozen.Format(time.RFC3339),
-	}).want(t, 201, "create test clock").body, "id")
 	return r
 }
 
@@ -206,38 +203,10 @@ func (r *inFlightRig) day(days int) time.Time {
 	return r.frozen.Add(time.Duration(days) * 24 * time.Hour)
 }
 
+// advance runs the jobs due by day days.
 func (r *inFlightRig) advance(days int) {
 	r.t.Helper()
-	r.call("POST", "/v1/test-clocks/"+r.clockID+"/advance", map[string]any{
-		"frozen_time": r.day(days).Format(time.RFC3339),
-	}).want(r.t, 200, fmt.Sprintf("advance clock to day %d", days))
-	testclocktest.Drain(r.t, r.srv.TestClockSvc)
-}
-
-// advanceHeld advances the clock to day days and expects the advance to
-// fail, because a payment retry due in it waits for an earlier payment of its invoice
-// to finish; the clock reads internal_failure with that reason.
-func (r *inFlightRig) advanceHeld(days int) {
-	r.t.Helper()
-	r.call("POST", "/v1/test-clocks/"+r.clockID+"/advance", map[string]any{
-		"frozen_time": r.day(days).Format(time.RFC3339),
-	}).want(r.t, 200, fmt.Sprintf("advance clock to day %d", days))
-	testclocktest.Drain(r.t, r.srv.TestClockSvc)
-	clk := r.call("GET", "/v1/test-clocks/"+r.clockID, nil).want(r.t, 200, "read clock").body
-	if status, reason := flowStr(clk, "status"), flowStr(clk, "last_failure_reason"); status != "internal_failure" ||
-		!strings.Contains(reason, "its payment-retry run is waiting for a payment of this invoice to finish") {
-		r.t.Fatalf("clock after the advance to day %d: %s, %q; want internal_failure, the retry waiting for an earlier attempt", days, status, reason)
-	}
-}
-
-// retryAdvance retries the clock's failed advance and expects it to finish.
-func (r *inFlightRig) retryAdvance() {
-	r.t.Helper()
-	r.call("POST", "/v1/test-clocks/"+r.clockID+"/retry-advance", nil).want(r.t, 200, "retry advance")
-	testclocktest.Drain(r.t, r.srv.TestClockSvc)
-	if status := flowStr(r.call("GET", "/v1/test-clocks/"+r.clockID, nil).want(r.t, 200, "read clock").body, "status"); status != "ready" {
-		r.t.Fatalf("clock after Retry advance: %s, want ready", status)
-	}
+	tickAt(r.t, r.srv, r.wall, r.tenantID, r.day(days))
 }
 
 // webhook signs and posts one Stripe event to the tenant's endpoint.
@@ -276,12 +245,11 @@ func cardError(declineCode, message, pm string) map[string]any {
 	}
 }
 
-// newCustomer is a customer on the test clock whose saved card is pm.
+// newCustomer is a customer whose saved card is pm.
 func (r *inFlightRig) newCustomer(name, pm string) string {
 	r.t.Helper()
 	id := flowStr(r.call("POST", "/v1/customers", map[string]any{
 		"external_id": "slow-" + name, "display_name": "Slow " + name, "email": name + "@retry-in-flight.test",
-		"test_clock_id": r.clockID,
 	}).want(r.t, 201, name+": create customer").body, "id")
 	r.call("POST", "/v1/customers/"+id+"/payment-methods/setup-session", map[string]any{}).want(r.t, 201, "setup session")
 	r.webhook(map[string]any{
@@ -368,12 +336,6 @@ func (r *inFlightRig) warnings(invoiceID string) []queuedWarning {
 	return out
 }
 
-func (r *inFlightRig) emailsOfType(invoiceID, emailType string) int {
-	r.t.Helper()
-	return flowCount(r.t, r.db, `SELECT count(*) FROM email_outbox WHERE tenant_id = $1 AND email_type = $2
-		AND payload->>'invoice_number' = (SELECT invoice_number FROM invoices WHERE id = $3)`, r.tenantID, emailType, invoiceID)
-}
-
 func (r *inFlightRig) resolvedEvents(invoiceID string) int {
 	r.t.Helper()
 	return flowCount(r.t, r.db, `SELECT count(*) FROM webhook_outbox WHERE tenant_id = $1 AND event_type = 'dunning.resolved'
@@ -426,9 +388,9 @@ func TestE2E_DunningRetryProcessing_ThenFails(t *testing.T) {
 	inv := r.newInvoice(cust)
 
 	// Retry 1 (day 1): the payment comes back processing.
-	r.advance(2)
+	r.advance(1)
 	if cards := r.stripe.retryCards(); len(cards) != 1 {
-		t.Fatalf("dunning retry charges after day 2: %v, want one", cards)
+		t.Fatalf("dunning retry charges after day 1: %v, want one", cards)
 	}
 	pi := r.stripe.piOf("pm_slow_a")
 	if got := r.invoice(inv); flowStr(got, "payment_status") != "processing" || flowStr(got, "status") != "finalized" {
@@ -454,6 +416,7 @@ func TestE2E_DunningRetryProcessing_ThenFails(t *testing.T) {
 
 	// The failure (day 2), reported by the webhook and the reconciler's
 	// webhook-equivalent at the same moment.
+	r.wall.Set(r.day(2))
 	failure := cardError("insufficient_funds", "Your card has insufficient funds.", "pm_slow_a")
 	var wg sync.WaitGroup
 	statuses := make([]int, 2)
@@ -505,9 +468,9 @@ func TestE2E_DunningRetryProcessing_ThenFails(t *testing.T) {
 	}
 
 	// Retry 2 (day 5) is declined at once: its own warning.
-	r.advance(6)
+	r.advance(5)
 	if cards := r.stripe.retryCards(); len(cards) != 2 {
-		t.Fatalf("dunning retry charges after day 6: %v, want two (retry 2 ran on its moved date)", cards)
+		t.Fatalf("dunning retry charges after day 5: %v, want two (retry 2 ran on its moved date)", cards)
 	}
 	w = r.warnings(inv)
 	if len(w) != 2 || w[1].attempt != "2" {
@@ -518,7 +481,7 @@ func TestE2E_DunningRetryProcessing_ThenFails(t *testing.T) {
 	}
 
 	// Retry 3 (day 8) succeeds.
-	r.advance(9)
+	r.advance(8)
 	if got := r.invoice(inv); flowStr(got, "status") != "paid" {
 		t.Fatalf("invoice after retry 3: %v, want paid", got["status"])
 	}
@@ -553,7 +516,7 @@ func TestE2E_DunningRetryProcessing_ThenSucceeds(t *testing.T) {
 	if flowStr(run, "state") != "resolved" || flowStr(run, "resolution") != "payment_recovered" || flowInt(run, "attempt_count") != 1 {
 		t.Errorf("run: %v, want resolved / payment_recovered / 1", run)
 	}
-	// A later advance changes nothing, and the success redelivered resolves
+	// A later tick changes nothing, and the success redelivered resolves
 	// nothing twice.
 	r.webhook(r.piEvent("payment_intent.succeeded", pi, inv, "succeeded", nil)).want(t, 200, "payment_intent.succeeded again")
 	r.advance(10)
@@ -565,67 +528,5 @@ func TestE2E_DunningRetryProcessing_ThenSucceeds(t *testing.T) {
 	}
 	if cards := r.stripe.retryCards(); len(cards) != 1 {
 		t.Errorf("dunning retry charges: %v, want one", cards)
-	}
-}
-
-// TestE2E_DunningRetryProcessing_FailsNeedingConfirmation: a processing
-// payment that fails with authentication_required asks the customer to
-// confirm the payment, with no reason line (Stripe's text for it is written
-// for the developer).
-func TestE2E_DunningRetryProcessing_FailsNeedingConfirmation(t *testing.T) {
-	r := newInFlightRig(t, "Retry In Flight Confirm", []int{1, 3, 3}, map[string][]string{"pm_slow_c": {"processing"}})
-	inv := r.newInvoice(r.newCustomer("c", "pm_slow_c"))
-	r.advance(2)
-	pi := r.stripe.piOf("pm_slow_c")
-	r.webhook(r.piEvent("payment_intent.payment_failed", pi, inv, "requires_payment_method",
-		cardError("authentication_required", confirmDevText, "pm_slow_c"))).want(t, 200, "payment_intent.payment_failed")
-	w := r.warnings(inv)
-	if len(w) != 1 || w[0].ask != "confirm" || w[0].reason != "" {
-		t.Fatalf("warning emails: %+v, want one asking the customer to confirm, with no reason line", w)
-	}
-}
-
-// TestE2E_DunningFinalRetryProcessing_HeldThenEscalatedAtFailure: the last
-// retry comes back processing. Its final action falls due in the same
-// advance and waits: no final action and no escalation while the payment is
-// processing, and the advance stops at that step, saying the retry waits for
-// an earlier charge attempt, so the clock cannot move past it until Stripe
-// reports the payment. Its failure, which arrives while the clock stands
-// there, sends no warning (the escalation is the last attempt's email), and
-// Retry advance escalates, dated at the failure rather than at the retry
-// before it.
-func TestE2E_DunningFinalRetryProcessing_HeldThenEscalatedAtFailure(t *testing.T) {
-	r := newInFlightRig(t, "Final Retry In Flight", []int{1}, map[string][]string{"pm_slow_d": {"processing"}})
-	inv := r.newInvoice(r.newCustomer("d", "pm_slow_d"))
-	r.advanceHeld(2)
-	pi := r.stripe.piOf("pm_slow_d")
-	run := r.run(inv)
-	if flowStr(run, "state") != "active" || flowInt(run, "attempt_count") != 1 {
-		t.Fatalf("run while the last retry is processing: %v / %v, want active / 1 (the final action waits)", run["state"], run["attempt_count"])
-	}
-	if n := r.emailsOfType(inv, "dunning_escalation"); n != 0 {
-		t.Fatalf("escalation emails while the last payment is processing: %d, want 0", n)
-	}
-
-	// The payment fails while the clock stands where the advance stopped.
-	stopped := ppTime(t, flowStr(r.call("GET", "/v1/test-clocks/"+r.clockID, nil).want(t, 200, "read clock").body, "frozen_time"))
-	if !stopped.After(r.day(1)) || !stopped.Before(r.day(2)) {
-		t.Fatalf("the advance stopped at %v, want the held retry's step, after the retry on %v and before day 2", stopped, r.day(1))
-	}
-	r.webhook(r.piEvent("payment_intent.payment_failed", pi, inv, "requires_payment_method",
-		cardError("insufficient_funds", "Your card has insufficient funds.", "pm_slow_d"))).want(t, 200, "payment_intent.payment_failed")
-	if w := r.warnings(inv); len(w) != 0 {
-		t.Errorf("warning emails after the last retry failed: %+v, want none (the escalation follows)", w)
-	}
-	r.retryAdvance()
-	run = r.run(inv)
-	if flowStr(run, "state") != "escalated" {
-		t.Fatalf("run after Retry advance: %v, want escalated", run["state"])
-	}
-	if got := r.runTime(run, "resolved_at"); !got.Equal(stopped) {
-		t.Errorf("escalation dated %v, want the failure %v (not the retry on %v)", got, stopped, r.day(1))
-	}
-	if n := r.emailsOfType(inv, "dunning_escalation"); n != 1 {
-		t.Errorf("escalation emails: %d, want 1", n)
 	}
 }

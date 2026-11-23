@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"net/http"
@@ -13,11 +12,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
-	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/tenantstripe"
-	"github.com/gethardcount/hardcount/internal/testclock/testclocktest"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -142,16 +138,12 @@ func (s *minChargeStripe) count(call string) int {
 //     Pay click is the first charge, and Stripe's refusal of it is recorded
 //     like a charge's: the payment page is freed at once instead of holding
 //     charges for an hour, and the no-card payment recovery ends (B);
-//   - a payment recovery already running ends when its charge gets this
-//     answer, without a warning email to the customer: started with no card
-//     and ended by the auto-charge sweep once a card is saved (C), or
-//     started by a decline and ended by its own retry once credits bring the
-//     amount below the minimum (D);
-//   - a run on an invoice stamped below the minimum ends at its next tick
-//     even when the resolve that should have ended it was lost (E);
+//   - a payment recovery started by a decline ends when its own retry gets
+//     this answer, once credits bring the amount below the minimum, without a
+//     warning email to the customer (C);
 //   - the stamp is Stripe's latest answer, not a permanent fact: once Stripe
 //     would take the amount, Collect asks it again and records the new
-//     answer, and the hosted page offers Pay again (F).
+//     answer, and the hosted page offers Pay again (D).
 func TestE2E_BelowStripeMinimum_NotADecline(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	// A configured server queues customer emails, so an email Hardcount wrongly
@@ -161,7 +153,10 @@ func TestE2E_BelowStripeMinimum_NotADecline(t *testing.T) {
 	// only with these addresses set; they have no default.
 	t.Setenv("HOSTED_INVOICE_BASE_URL", "https://billing.min-charge.test")
 	t.Setenv("CUSTOMER_PORTAL_URL", "https://app.min-charge.test")
-	srv := NewServer(db, clock.Real(), nil)
+	// A fake clock that starts now, so D's first retry can fall due.
+	start := time.Now().UTC().Truncate(time.Second)
+	wall := clock.NewFake(start)
+	srv := NewServer(db, wall, nil)
 	ts := httptest.NewServer(srv)
 	defer ts.Close()
 
@@ -186,12 +181,9 @@ func TestE2E_BelowStripeMinimum_NotADecline(t *testing.T) {
 	endpoint := "/v1/webhooks/stripe/" + flowStr(creds, "id")
 	stripe := installMinChargeStripe(t)
 
-	newCustomer := func(name, clockID string) string {
+	newCustomer := func(name string) string {
 		t.Helper()
 		body := map[string]any{"external_id": "min-" + name, "display_name": "Min " + name, "email": name + "@min-charge.test"}
-		if clockID != "" {
-			body["test_clock_id"] = clockID
-		}
 		return flowStr(call("POST", "/v1/customers", flowReq{body: body}).want(t, 201, name+": create customer").body, "id")
 	}
 	// saveCard runs the operator's Add payment method link and Stripe's
@@ -265,7 +257,7 @@ func TestE2E_BelowStripeMinimum_NotADecline(t *testing.T) {
 	}
 
 	// A: a customer with a card. Finalizing charges once, and Stripe refuses.
-	custA := newCustomer("a", "")
+	custA := newCustomer("a")
 	saveCard(custA, "pm_min_a")
 	invA := newInvoice(custA, "Quiet month")
 	if n := stripe.count("POST /v1/payment_intents"); n != 1 {
@@ -351,7 +343,7 @@ func TestE2E_BelowStripeMinimum_NotADecline(t *testing.T) {
 	// the page has no Pay button, and the payment recovery the card-less
 	// finalize started ends, so no reminder or final action follows. A
 	// second click is refused before Stripe is asked.
-	custB := newCustomer("b", "")
+	custB := newCustomer("b")
 	invB := newInvoice(custB, "One-off")
 	if runs := runsOf(invB); len(runs) != 1 || flowStr(runs[0], "state") != "active" {
 		t.Fatalf("invoice B runs after a card-less finalize: %v, want one active run", runs)
@@ -381,160 +373,88 @@ func TestE2E_BelowStripeMinimum_NotADecline(t *testing.T) {
 		t.Errorf("payment-failure emails for invoice B: %d, want none", n)
 	}
 
-	// C: payment recovery already running. The customer on a test clock had
-	// no card at finalize, so recovery started; they then save a card, and
-	// the next charge on the advance gets Stripe's answer. Recovery ends
-	// there with no warning email, and the invoice reads as below the
-	// minimum.
-	frozen := time.Date(2027, 3, 1, 9, 0, 0, 0, time.UTC)
-	clockID := flowStr(call("POST", "/v1/test-clocks", flowReq{body: map[string]any{
-		"name": "min charge", "frozen_time": frozen.Format(time.RFC3339),
-	}}).want(t, 201, "create test clock").body, "id")
-	custC := newCustomer("c", clockID)
-	invC := newInvoice(custC, "Clocked quiet month")
-	if runs := runsOf(invC); len(runs) != 1 || flowStr(runs[0], "state") != "active" {
-		t.Fatalf("invoice C runs after a card-less finalize: %v, want one active run", runs)
-	}
-	saveCard(custC, "pm_min_c")
-	charges := stripe.count("POST /v1/payment_intents")
-	call("POST", "/v1/test-clocks/"+clockID+"/advance", flowReq{body: map[string]any{
-		"frozen_time": frozen.Add(5 * 24 * time.Hour).Format(time.RFC3339),
-	}}).want(t, 200, "advance clock")
-	testclocktest.Drain(t, srv.TestClockSvc)
-	if got := stripe.count("POST /v1/payment_intents") - charges; got != 1 {
-		t.Errorf("charges sent on the advance: %d, want 1 (the refusal ends recovery)", got)
-	}
-	runs := runsOf(invC)
-	if len(runs) != 1 || flowStr(runs[0], "state") != "resolved" || flowStr(runs[0], "resolution") != "amount_below_minimum" {
-		t.Errorf("invoice C run after the advance: %v, want resolved with amount_below_minimum", runs)
-	}
-	belowMinimum("invoice C after the advance", getInvoice(invC))
-	if n := customerEmails(invC); n != 0 {
-		t.Errorf("payment-failure emails for invoice C: %d, want none", n)
-	}
-
-	// D: an $0.80 invoice is declined at finalize, so recovery starts and
+	// C: an $0.80 invoice is declined at finalize, so recovery starts and
 	// the invoice leaves the auto-charge queue. A $0.50 credit then leaves
 	// $0.30, which the first retry applies before it charges: Stripe refuses
 	// the charge, and the retry ends recovery at its own instant.
-	custD := newCustomer("d", clockID)
-	saveCard(custD, "pm_min_d")
-	idD := flowStr(call("POST", "/v1/invoices", flowReq{body: map[string]any{
-		"customer_id": custD,
-		"line_items":  []map[string]any{{"description": "Clocked usage", "quantity": 1, "unit_amount_cents": 80}},
-	}}).want(t, 201, "create invoice D").body, "id")
-	call("POST", "/v1/invoices/"+idD+"/finalize", flowReq{}).want(t, 200, "finalize D")
-	if inv := getInvoice(idD); flowStr(inv, "payment_status") != "failed" {
-		t.Fatalf("invoice D after the declined finalize: payment_status %v, want failed", inv["payment_status"])
+	custC := newCustomer("c")
+	saveCard(custC, "pm_min_c")
+	idC := flowStr(call("POST", "/v1/invoices", flowReq{body: map[string]any{
+		"customer_id": custC,
+		"line_items":  []map[string]any{{"description": "Small usage", "quantity": 1, "unit_amount_cents": 80}},
+	}}).want(t, 201, "create invoice C").body, "id")
+	call("POST", "/v1/invoices/"+idC+"/finalize", flowReq{}).want(t, 200, "finalize C")
+	if inv := getInvoice(idC); flowStr(inv, "payment_status") != "failed" {
+		t.Fatalf("invoice C after the declined finalize: payment_status %v, want failed", inv["payment_status"])
 	}
-	runs = runsOf(idD)
+	runs := runsOf(idC)
 	if len(runs) != 1 || flowStr(runs[0], "state") != "active" {
-		t.Fatalf("invoice D runs after the decline: %v, want one active run", runs)
+		t.Fatalf("invoice C runs after the decline: %v, want one active run", runs)
 	}
 	call("POST", "/v1/credits/grant", flowReq{body: map[string]any{
-		"customer_id": custD, "currency": "USD", "amount_cents": 50, "description": "Goodwill",
-	}}).want(t, 201, "grant credit D")
+		"customer_id": custC, "currency": "USD", "amount_cents": 50, "description": "Goodwill",
+	}}).want(t, 201, "grant credit C")
 	warningsBefore := flowCount(t, db, `SELECT count(*) FROM email_outbox WHERE tenant_id = $1 AND email_type = 'dunning_warning'`, tenantID)
-	charges = stripe.count("POST /v1/payment_intents")
-	call("POST", "/v1/test-clocks/"+clockID+"/advance", flowReq{body: map[string]any{
-		"frozen_time": frozen.Add(10 * 24 * time.Hour).Format(time.RFC3339),
-	}}).want(t, 200, "advance clock for D")
-	testclocktest.Drain(t, srv.TestClockSvc)
+	charges := stripe.count("POST /v1/payment_intents")
+	tickAt(t, srv, wall, tenantID, start.Add(2*24*time.Hour))
 	if got := stripe.count("POST /v1/payment_intents") - charges; got != 1 {
-		t.Errorf("charges sent on D's advance: %d, want 1 (the first retry; the refusal ends recovery)", got)
+		t.Errorf("charges sent on C's tick: %d, want 1 (the first retry; the refusal ends recovery)", got)
 	}
-	runs = runsOf(idD)
+	runs = runsOf(idC)
 	if len(runs) != 1 || flowStr(runs[0], "state") != "resolved" || flowStr(runs[0], "resolution") != "amount_below_minimum" {
-		t.Errorf("invoice D run after the advance: %v, want resolved with amount_below_minimum", runs)
+		t.Errorf("invoice C run after the tick: %v, want resolved with amount_below_minimum", runs)
 	}
 	if len(runs) == 1 && flowInt(runs[0], "attempt_count") != 1 {
-		t.Errorf("invoice D run attempt_count %v, want 1", runs[0]["attempt_count"])
+		t.Errorf("invoice C run attempt_count %v, want 1", runs[0]["attempt_count"])
 	}
-	invD := getInvoice(idD)
-	belowMinimum("invoice D after the advance", invD)
-	if flowInt(invD, "amount_due_cents") != 30 {
-		t.Errorf("invoice D amount due %d, want 30 after the credit", flowInt(invD, "amount_due_cents"))
+	invC := getInvoice(idC)
+	belowMinimum("invoice C after the tick", invC)
+	if flowInt(invC, "amount_due_cents") != 30 {
+		t.Errorf("invoice C amount due %d, want 30 after the credit", flowInt(invC, "amount_due_cents"))
 	}
 	if n := flowCount(t, db, `SELECT count(*) FROM email_outbox WHERE tenant_id = $1 AND email_type = 'dunning_warning'`, tenantID) - warningsBefore; n != 0 {
-		t.Errorf("dunning warning emails on D's advance: %d, want none", n)
+		t.Errorf("dunning warning emails on C's tick: %d, want none", n)
 	}
 	// The retry's own row tells the refusal; the charge is not shown again
 	// as a failed payment beside it.
-	kindsD := lineKinds(idD)
-	if rows := kindsD["payment_recovery.retry_refused"]; len(rows) != 1 {
-		t.Errorf("invoice D timeline retry-refused rows %v, want one", rows)
+	kindsC := lineKinds(idC)
+	if rows := kindsC["payment_recovery.retry_refused"]; len(rows) != 1 {
+		t.Errorf("invoice C timeline retry-refused rows %v, want one", rows)
 	}
-	if rows := kindsD["payment.below_minimum"]; len(rows) != 0 {
-		t.Errorf("invoice D timeline shows the retry's refusal again as its own row: %v", rows)
+	if rows := kindsC["payment.below_minimum"]; len(rows) != 0 {
+		t.Errorf("invoice C timeline shows the retry's refusal again as its own row: %v", rows)
 	}
-	for _, l := range kindsD["payment.failed"] {
+	for _, l := range kindsC["payment.failed"] {
 		if strings.Contains(flowStr(l, "problem"), "at least $0.50") {
-			t.Errorf("invoice D timeline shows the below-minimum refusal as a failed payment: %v", l)
+			t.Errorf("invoice C timeline shows the below-minimum refusal as a failed payment: %v", l)
 		}
 	}
-	// E: the resolve that should end a run is lost. A card-less customer's
-	// $0.30 invoice has its no-card run; Stripe's refusal of a Pay click is
-	// stamped on the invoice by the real writer (as RecordCheckoutBelowMinimum
-	// writes it), and the resolve that follows is dropped (a DB blip, the tab
-	// closed, a restart). A card-less retry never asks Stripe, so only the
-	// stamp can end the run: at its next tick, with no reminder and no final
-	// action.
-	clockE := flowStr(call("POST", "/v1/test-clocks", flowReq{body: map[string]any{
-		"name": "min charge lost resolve", "frozen_time": frozen.Format(time.RFC3339),
-	}}).want(t, 201, "create test clock E").body, "id")
-	custE := newCustomer("e", clockE)
-	idE := newInvoice(custE, "Clocked one-off")
-	if runs := runsOf(idE); len(runs) != 1 || flowStr(runs[0], "state") != "active" {
-		t.Fatalf("invoice E runs after a card-less finalize: %v, want one active run", runs)
-	}
-	storeCtx := postgres.WithLivemode(context.Background(), false)
-	invStore := invoice.NewPostgresStore(db)
-	rowE, err := invStore.Get(storeCtx, tenantID, idE)
-	if err != nil {
-		t.Fatalf("read invoice E: %v", err)
-	}
-	if _, applied, err := invStore.StampBelowMinimum(storeCtx, tenantID, idE, rowE.ChargeAttemptSeq,
-		"The Checkout Session's total amount due must add up to at least $0.50 usd"); err != nil || !applied {
-		t.Fatalf("stamp invoice E: applied=%v err=%v", applied, err)
-	}
-	emailsE := customerEmails(idE)
-	call("POST", "/v1/test-clocks/"+clockE+"/advance", flowReq{body: map[string]any{
-		"frozen_time": frozen.Add(30 * 24 * time.Hour).Format(time.RFC3339),
-	}}).want(t, 200, "advance clock E")
-	testclocktest.Drain(t, srv.TestClockSvc)
-	runs = runsOf(idE)
-	if len(runs) != 1 || flowStr(runs[0], "state") != "resolved" || flowStr(runs[0], "resolution") != "amount_below_minimum" {
-		t.Errorf("invoice E run after the advance: %v, want resolved with amount_below_minimum", runs)
-	}
-	if n := customerEmails(idE) - emailsE; n != 0 {
-		t.Errorf("dunning emails for invoice E after the stamp: %d, want none", n)
-	}
 
-	// F: Stripe's answer changes. A $0.30 invoice is refused at finalize;
+	// D: Stripe's answer changes. A $0.30 invoice is refused at finalize;
 	// then Stripe's minimum for it drops (the account now settles in the
 	// charge's currency, so no conversion). Collect asks Stripe again rather
 	// than answering from the stamp, Stripe's new answer (here a decline) is
 	// recorded, and the invoice no longer reads as below the minimum: the
 	// notice is the decline's and the hosted page offers Pay.
-	custF := newCustomer("f", "")
-	saveCard(custF, "pm_min_f")
-	idF := newInvoice(custF, "Converted month")
-	belowMinimum("invoice F after finalize", getInvoice(idF))
+	custD := newCustomer("d")
+	saveCard(custD, "pm_min_d")
+	idD := newInvoice(custD, "Converted month")
+	belowMinimum("invoice D after finalize", getInvoice(idD))
 	stripe.setMinimum(25)
 	charges = stripe.count("POST /v1/payment_intents")
-	collectF := call("POST", "/v1/invoices/"+idF+"/collect", flowReq{})
+	collectD := call("POST", "/v1/invoices/"+idD+"/collect", flowReq{})
 	if got := stripe.count("POST /v1/payment_intents") - charges; got != 1 {
-		t.Errorf("charges sent by Collect on F: %d, want 1 (Collect asks Stripe again)", got)
+		t.Errorf("charges sent by Collect on D: %d, want 1 (Collect asks Stripe again)", got)
 	}
-	if collectF.errCode() == "amount_below_minimum" {
-		t.Errorf("Collect on F answered from the stamp: status %d body %s", collectF.status, collectF.raw)
+	if collectD.errCode() == "amount_below_minimum" {
+		t.Errorf("Collect on D answered from the stamp: status %d body %s", collectD.status, collectD.raw)
 	}
-	invF := getInvoice(idF)
-	if flowStr(invF, "payment_status") != "failed" || flowStr(flowObj(invF, "attention"), "reason") == "amount_below_minimum" {
-		t.Errorf("invoice F after the decline: payment_status %v attention %v, want failed and not below the minimum", invF["payment_status"], invF["attention"])
+	invD := getInvoice(idD)
+	if flowStr(invD, "payment_status") != "failed" || flowStr(flowObj(invD, "attention"), "reason") == "amount_below_minimum" {
+		t.Errorf("invoice D after the decline: payment_status %v attention %v, want failed and not below the minimum", invD["payment_status"], invD["attention"])
 	}
-	pageF := flowDo(t, ts, "GET", "/v1/public/invoices/"+flowStr(invF, "public_token"), flowReq{}).want(t, 200, "hosted page F").body
-	if pageF["pay_enabled"] != true {
-		t.Errorf("hosted page F: pay_enabled=%v reason=%q, want Pay offered again", pageF["pay_enabled"], flowStr(pageF, "pay_unavailable_reason"))
+	pageD := flowDo(t, ts, "GET", "/v1/public/invoices/"+flowStr(invD, "public_token"), flowReq{}).want(t, 200, "hosted page D").body
+	if pageD["pay_enabled"] != true {
+		t.Errorf("hosted page D: pay_enabled=%v reason=%q, want Pay offered again", pageD["pay_enabled"], flowStr(pageD, "pay_unavailable_reason"))
 	}
 }

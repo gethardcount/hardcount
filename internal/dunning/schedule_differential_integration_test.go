@@ -94,6 +94,33 @@ var diffFailedAt = time.Date(2027, 3, 10, 9, 30, 0, 0, time.UTC)
 
 const diffHorizonDays = 60 // past every case's last retry
 
+// oneClockResolver resolves every pin to the one test clock this test puts
+// all its entities on, reading frozen_time from the database each time: the
+// answer billing.Engine's resolvers give for a pinned entity.
+type oneClockResolver struct {
+	clocks   *testclock.PostgresStore
+	tenantID string
+	clockID  string
+}
+
+func (r oneClockResolver) sim(ctx context.Context) (clock.Sim, error) {
+	tc, err := r.clocks.Get(ctx, r.tenantID, r.clockID)
+	if err != nil {
+		return clock.Sim{}, err
+	}
+	return clock.Sim{At: tc.FrozenTime, TestClockID: r.clockID}, nil
+}
+
+func (r oneClockResolver) SimForCustomer(ctx context.Context, _, _ string) (clock.Sim, error) {
+	return r.sim(ctx)
+}
+func (r oneClockResolver) SimForSubscription(ctx context.Context, _, _ string) (clock.Sim, error) {
+	return r.sim(ctx)
+}
+func (r oneClockResolver) SimForInvoice(ctx context.Context, _, _ string) (clock.Sim, error) {
+	return r.sim(ctx)
+}
+
 // TestSchedule_Differential pins every retry instant, every reminder and
 // escalation email, and the final action, for each schedule in
 // scheduleCases, on two timelines: a test clock advanced a day at a time,

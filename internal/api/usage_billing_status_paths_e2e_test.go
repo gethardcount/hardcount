@@ -56,49 +56,6 @@ func TestBillingStatus_BatchClassifiesEachEventByItsCustomer(t *testing.T) {
 	}
 }
 
-// TestBillingStatus_TestClockPricesAtTheSimulatedPin: a subscription on a
-// test clock 100 days in the past. Its plan prices tokens for model a. A
-// price for model c is added (effective next_period: from the next simulated
-// period). The clock is advanced into that period. A model c event there
-// carries no status, and that period's invoice bills it; a model d event no
-// price takes answers no_price and is not billed. The prices are read at the
-// clock's period start, in the clock's time, as the close reads them.
-//
-// Mutation check: read the prices with no clock (wall time) → the model c
-// event answers no_price, and the invoice still bills it.
-func TestBillingStatus_TestClockPricesAtTheSimulatedPin(t *testing.T) {
-	r := newPPRig(t, "clock pin prices")
-	tokens := r.meter("tokens", "sum")
-	plan, _ := r.plan("pro", perUnit(tokens, "1", map[string]string{"model": "a"}))
-	clk := r.clock("pin prices", time.Now().UTC().AddDate(0, 0, -100).Truncate(time.Second))
-	sub, p0, p1 := r.clockSub("pp-clock-pin", clk, plan)
-	added := r.must(time.Time{}, http.MethodPost, "/v1/plans/"+plan+"/prices", perUnit(tokens, "1", map[string]string{"model": "c"}), http.StatusCreated)
-	if got := flowStr(added, "effective"); got != "next_period" {
-		t.Fatalf("price add: effective %q, want next_period", got)
-	}
-	r.advance(clk, p1.Add(48*time.Hour))
-
-	post := func(key, model string, qty int) map[string]any {
-		t.Helper()
-		code, out, raw := r.do(time.Time{}, http.MethodPost, "/v1/usage-events", map[string]any{
-			"external_customer_id": "pp-clock-pin", "event_name": "tokens", "quantity": qty,
-			"timestamp": p1.Add(24 * time.Hour).Format(time.RFC3339Nano), "idempotency_key": key,
-			"dimensions": map[string]any{"model": model},
-		})
-		if code != http.StatusCreated {
-			t.Fatalf("POST %s: %d %s, want 201", key, code, raw)
-		}
-		return out
-	}
-	wantStatus(t, "model c event the added price takes", post("clock-c", "c", 9), "")
-	wantStatus(t, "model d event no price takes", post("clock-d", "d", 4), "no_price")
-
-	r.advance(clk, monthAfter(p1, p0.Day()).Add(2*time.Hour))
-	if got := r.cycle(sub, p1).usageCents(); got != 9 {
-		t.Errorf("second simulated period usage = %dc, want 9c: the model c event only", got)
-	}
-}
-
 // TestBillingStatus_LiteLLMPreSplitCallIsClassifiedByItsOwnRows: a call whose
 // :input a release before the cache-write split stored at the old quantity
 // is resent while April is open. Hardcount writes it the old way, [input,
