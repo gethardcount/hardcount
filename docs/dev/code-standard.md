@@ -13,7 +13,7 @@ New and changed code follows this page. Older code does not all follow it yet; s
 - Production code binds a real instant only by reading a clock: `clock.EnsureEffectiveNow`, or `clock.AtArrival` for a payment's result. `clock.WithEffectiveNow` is for tests; a place that must name an instant says why: `//nolint:forbidigo // real-instant: <reason>`. (forbidigo)
 - A lint waiver names its linter and a reason: `//nolint:forbidigo // wall-clock: <reason>`. (nolintlint)
 - A calendar date shown to a person is formatted in a named time zone: `t.In(loc).Format(...)`. A real UTC or filename format carries a same-line `//tz:ok`. (`civil_date_timezone_test.go`)
-- `internal/api/respond` writes every error response and decodes every request body Hardcount defines. Return an `errs.DomainError`, and `respond.FromError` picks the status and error code. (`error_writes_test.go`, `respond_error_args_test.go`, `request_body_decode_test.go`)
+- `internal/api/respond` writes every error response and decodes every request body Hardcount defines. Return an `errs.DomainError`, and `respond.FromError` picks the status and error code. (`error_writes_test.go`, `respond_error_args_test.go`; request bodies: `internal/api/strict_bodies_integration_test.go`)
 - The SQL behind a list route has no fixed `LIMIT`: it takes `limit` and `offset` from `respond.ParsePage`. (`sql_row_caps_test.go`)
 - Every setting the code reads has a row in [settings.md](../settings.md), and the ones `config.Load` owns are read only in `internal/config`. (`settings_doc_test.go`, `config_env_reads_test.go`)
 
