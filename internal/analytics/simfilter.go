@@ -28,8 +28,7 @@ package analytics
 //
 // Scope note: per-row DISPLAY surfaces (customer/invoice lists, detail pages)
 // deliberately do NOT use these — they correctly SHOW simulated rows, badged.
-// Only shared-axis AGGREGATES exclude. The catchup/...ForClock plane is the
-// inverse: it includes ONLY simulated rows, in simulated time.
+// Only shared-axis AGGREGATES exclude.
 const (
 	notSimCustomer    = ` AND test_clock_id IS NULL`                                                 // customers.test_clock_id
 	notSimSubBare     = ` AND test_clock_id IS NULL`                                                 // subscriptions, unaliased (helpers inline the alias-s form)

@@ -18,8 +18,7 @@ import (
 // one-off (NULL subscription_id → nothing to join through), which then leaked
 // into these sweeps and got charged/enrolled against wall-clock time. These
 // are the real-Postgres proofs that the durable-flag gate catches that case
-// while leaving genuine wall-clock invoices eligible. Sim invoices are driven
-// by the catchup counterparts (…ForClock) instead.
+// while leaving genuine wall-clock invoices eligible.
 
 // seedSweepInvoice mutates a fresh draft invoice into the exact state a sweep
 // scans for, in its own tenant (seedDraftInvoice pins a fixed customer

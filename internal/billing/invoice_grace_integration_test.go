@@ -136,27 +136,6 @@ func TestInvoiceGrace_OperatorCloseDoesNotWait(t *testing.T) {
 	}
 }
 
-// TestInvoiceGrace_TestClockDoesNotWait: advancing a test clock to a period
-// end produces the invoice, whatever the grace. In a simulation the operator
-// decides when usage arrives relative to an advance.
-//
-// Mutation check: pass the engine's grace from RunCycleForClock → no invoice.
-func TestInvoiceGrace_TestClockDoesNotWait(t *testing.T) {
-	env := newBillFailureEnv(t, "Invoice Grace Test Clock")
-	env.pricing.failing.Store(false)
-	env.engine.SetInvoiceGrace(testGrace)
-	// clockSub pins a sub due at the period end to a clock frozen at the
-	// period end + 2s.
-	a, clockID := env.clockSub(t, "sub-grace-clock", env.planOK)
-
-	if gen, errs := env.engine.RunCycleForClock(env.ctx, env.tenantID, clockID, 50); gen != 1 || len(errs) != 0 {
-		t.Fatalf("clock advanced 2s past the period end: generated=%d errors=%v, want the period closed", gen, errs)
-	}
-	if n := env.invoiceCount(t, a.ID); n != 1 {
-		t.Fatalf("%d invoices, want 1", n)
-	}
-}
-
 // TestInvoiceGrace_SchedulerMidPeriodCancelWaitsForTheGrace: the scheduler's
 // cancel arm. A cancel_at C inside the period is not fired by the scheduler's
 // run until C + grace, and waiting saves no billing failure. When it fires,

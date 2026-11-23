@@ -2,7 +2,6 @@ package billing
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"sort"
 	"testing"
@@ -20,8 +19,7 @@ import (
 // mockSubs's status-based GetDueBilling filter.
 type thresholdMockSubs struct {
 	*mockSubs
-	candidates      []domain.Subscription
-	clockCandidates []domain.Subscription
+	candidates []domain.Subscription
 }
 
 func (m *thresholdMockSubs) ListWithThresholds(_ context.Context, _ bool, afterID string, limit int) ([]domain.Subscription, error) {
@@ -45,10 +43,6 @@ func pageByID(candidates []domain.Subscription, afterID string, limit int) []dom
 		}
 	}
 	return out
-}
-
-func (m *thresholdMockSubs) ListWithThresholdsForClock(_ context.Context, _, _, afterID string, limit int) ([]domain.Subscription, error) {
-	return pageByID(m.clockCandidates, afterID, limit), nil
 }
 
 // setupThresholdEngine builds a minimal engine wired with mocks that mirror the
@@ -484,44 +478,21 @@ func TestScanThresholds_NoCandidates(t *testing.T) {
 	}
 }
 
-// TestThresholdFire_ClockPinned_StampsIsSimulated locks the writer-drift fix:
-// the threshold invoice writer omitted IsSimulated, so a threshold invoice
-// fired on a test-clock-pinned subscription persisted is_simulated=false and
-// rendered without the Simulated badge while sibling cycle/proration invoices
-// on the same clock showed it. The frontend reads the field authoritatively
-// (no timestamp inference), so the write-time stamp is the only source.
-func TestThresholdFire_ClockPinned_StampsIsSimulated(t *testing.T) {
+// TestThresholdFire_UsageLinesCarryTheDecimalQuantity: a threshold invoice's
+// usage lines carry the exact decimal quantity (cycle-writer parity).
+func TestThresholdFire_UsageLinesCarryTheDecimalQuantity(t *testing.T) {
 	thresholds := &domain.BillingThresholds{AmountGTE: 100000}
-	engine, subs, invoices := setupThresholdEngine(thresholds, 1000)
+	engine, _, invoices := setupThresholdEngine(thresholds, 1000)
+	engine.clock = clock.NewFake(time.Date(2026, 4, 6, 0, 0, 0, 0, time.UTC))
 
-	// Pin the sub to a test clock frozen 5 days into the cycle; the clock's
-	// scan runs it, on the catch-up's ctx.
-	pinned := subs.candidates[0]
-	pinned.TestClockID = "tc_1"
-	subs.candidates = nil
-	subs.clockCandidates = []domain.Subscription{pinned}
-	subs.subs["sub_1"] = pinned
-	frozen := pinned.CurrentBillingPeriodStart.AddDate(0, 0, 5)
-	ctx := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: frozen, TestClockID: "tc_1"})
-
-	fired, errs := engine.ScanThresholdsForClock(ctx, "t1", "tc_1", 50)
+	fired, errs := engine.ScanThresholds(postgres.WithLivemode(context.Background(), true), 50)
 	if len(errs) > 0 {
 		t.Fatalf("scan errors: %v", errs)
 	}
-	if fired != 1 {
-		t.Fatalf("fired = %d, want 1", fired)
+	if fired != 1 || len(invoices.invoices) != 1 {
+		t.Fatalf("fired = %d, invoices = %d, want 1 and 1", fired, len(invoices.invoices))
 	}
-	if len(invoices.invoices) != 1 {
-		t.Fatalf("invoices = %d, want 1", len(invoices.invoices))
-	}
-	inv := invoices.invoices[0]
-	if !inv.IsSimulated {
-		t.Error("threshold invoice on a clock-pinned sub must stamp IsSimulated=true (Simulated badge)")
-	}
-	if !inv.IssuedAt.Equal(frozen) {
-		t.Errorf("issued_at = %v, want frozen time %v (simulation timeline)", inv.IssuedAt, frozen)
-	}
-	if inv.BillingReason != domain.BillingReasonThreshold {
+	if inv := invoices.invoices[0]; inv.BillingReason != domain.BillingReasonThreshold {
 		t.Errorf("billing_reason = %q, want threshold", inv.BillingReason)
 	}
 	// Usage lines must carry the exact decimal quantity (cycle-writer
@@ -627,81 +598,6 @@ func TestScanThresholds_DrainsPastBatchSize(t *testing.T) {
 	}
 	if len(invoices.invoices) != 60 {
 		t.Fatalf("expected 60 threshold invoices, got %d", len(invoices.invoices))
-	}
-}
-
-// The clock's threshold scan drains the same way: a clock has no next tick,
-// so 60 crossed subs with batchSize 50 must all fire in one call.
-func TestScanThresholdsForClock_DrainsPastBatchSize(t *testing.T) {
-	thresholds := &domain.BillingThresholds{AmountGTE: 50000}
-	engine, subs, invoices := setupThresholdEngine(thresholds, 1000)
-	at := time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC)
-	engine.clock = clock.NewFake(at)
-
-	periodStart := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-	periodEnd := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-	nextBilling := periodEnd
-	many := make([]domain.Subscription, 0, 60)
-	for i := 1; i <= 60; i++ {
-		many = append(many, domain.Subscription{
-			ID: fmt.Sprintf("sub_%04d", i), TenantID: "t1", CustomerID: "cus_1", TestClockID: "tc_1",
-			Items:                     []domain.SubscriptionItem{{ID: "subitem_1", PlanID: "pln_1", Quantity: 1}},
-			Status:                    domain.SubscriptionActive,
-			BillingTime:               domain.BillingTimeCalendar,
-			CurrentBillingPeriodStart: &periodStart,
-			CurrentBillingPeriodEnd:   &periodEnd,
-			NextBillingAt:             &nextBilling,
-			BillingThresholds:         thresholds,
-		})
-	}
-	subs.clockCandidates = many
-	for _, s := range many {
-		subs.subs[s.ID] = s
-	}
-
-	ctx := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: at, TestClockID: "tc_1"})
-	fired, errs := engine.ScanThresholdsForClock(ctx, "t1", "tc_1", 50)
-	if len(errs) != 0 {
-		t.Fatalf("scan errors: %v", errs)
-	}
-	if fired != 60 {
-		t.Fatalf("drain incomplete: fired = %d, want 60 (subs #51-60 past the first batch must scan)", fired)
-	}
-	if len(invoices.invoices) != 60 {
-		t.Fatalf("expected 60 threshold invoices, got %d", len(invoices.invoices))
-	}
-}
-
-// The clock's threshold scan works on the instant the catch-up bound, and
-// reads no test clock: with a clock reader that fails, the threshold still
-// fires, and the reader is never asked.
-func TestScanThresholdsForClock_ReadsNoTestClock(t *testing.T) {
-	thresholds := &domain.BillingThresholds{AmountGTE: 50000}
-	engine, subs, invoices := setupThresholdEngine(thresholds, 1000)
-	reader := &stubClockReader{err: errors.New("connection reset by peer")}
-	engine.SetTestClockReader(reader)
-	at := time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC)
-	periodStart := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
-	periodEnd := time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)
-	sub := domain.Subscription{
-		ID: "sub_clk", TenantID: "t1", CustomerID: "cus_1", TestClockID: "tc_1",
-		Items:                     []domain.SubscriptionItem{{ID: "subitem_1", PlanID: "pln_1", Quantity: 1}},
-		Status:                    domain.SubscriptionActive,
-		BillingTime:               domain.BillingTimeCalendar,
-		CurrentBillingPeriodStart: &periodStart,
-		CurrentBillingPeriodEnd:   &periodEnd,
-		NextBillingAt:             &periodEnd,
-		BillingThresholds:         thresholds,
-	}
-	subs.clockCandidates = []domain.Subscription{sub}
-	subs.subs[sub.ID] = sub
-	ctx := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: at, TestClockID: "tc_1"})
-
-	if fired, errs := engine.ScanThresholdsForClock(ctx, "t1", "tc_1", 50); fired != 1 || len(errs) != 0 || len(invoices.invoices) != 1 {
-		t.Fatalf("fired %d, errors %v, %d invoices; want it fired once", fired, errs, len(invoices.invoices))
-	}
-	if reader.lastID != "" {
-		t.Errorf("the test clock reader was asked for %q; want it never asked", reader.lastID)
 	}
 }
 

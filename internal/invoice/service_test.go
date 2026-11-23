@@ -16,7 +16,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
-	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/tax"
 )
 
@@ -446,14 +445,6 @@ func (m *memStore) ListProviderConfigErrors(_ context.Context, tenantID string, 
 		out = append(out, inv)
 	}
 	return out, nil
-}
-
-// ListPendingTaxRetryForClock — ADR-029 Phase 2 stub for the in-memory
-// test store. The narrow service tests in this file don't exercise the
-// catchup path; integration tests cover it. Returning nothing here
-// satisfies the interface without faking sub→clock joins in memory.
-func (m *memStore) ListPendingTaxRetryForClock(_ context.Context, _, _ string, _ []string, _ int, _ walk.Key, _ int) ([]domain.Invoice, error) {
-	return nil, nil
 }
 
 func (m *memStore) ListPendingTaxRetry(_ context.Context, batch int, retryableCodes []string, maxAttempts int, _ bool) ([]domain.Invoice, error) {
@@ -1666,7 +1657,7 @@ func (r *instantSeeingRetrier) RetryTaxForInvoice(ctx context.Context, tenantID,
 // invoice the moment tax resolves — but finalizing is not collecting: nothing
 // charges the card, starts dunning, or emails the customer. The ONLY thing
 // that re-drives collection afterwards is auto_charge_pending, which is what
-// both sweeps list on (ListAutoChargePending / ListAutoChargePendingForClock).
+// the sweep lists on (ListAutoChargePending).
 //
 // Without the flag the invoice is invisible to every retry owner: the charge
 // sweeps skip it (flag false), the dunning backfill skips it (payment_status
@@ -2008,15 +1999,5 @@ func TestServiceReads_SetBillingPeriodDisplay(t *testing.T) {
 				t.Errorf("GetWithLineItems BillingPeriodDisplay = %q, want %q", fetched.BillingPeriodDisplay, want)
 			}
 		})
-	}
-}
-
-// TestRetryPendingTaxForClock_NoTaxRetrierIsAnError: a clock's tax retry with
-// no retrier fails the advance; skipping it would end the advance ready with
-// drafts still waiting for tax.
-func TestRetryPendingTaxForClock_NoTaxRetrierIsAnError(t *testing.T) {
-	svc := NewService(newMemStore(), nil, newMemNumberer())
-	if _, errs := svc.RetryPendingTaxForClock(context.Background(), "t1", "tc_1", 50); len(errs) != 1 {
-		t.Errorf("errors = %v, want one: the job cannot retry tax", errs)
 	}
 }

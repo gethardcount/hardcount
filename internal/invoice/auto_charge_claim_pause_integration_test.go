@@ -132,9 +132,9 @@ func TestClaimAutoCharge_RefusesWhileCollectionPaused(t *testing.T) {
 		}
 	})
 
-	// A pinned customer's pause is read at its test clock's frozen time, as
-	// ListAutoChargePendingForClock reads it: the clock is 20 days ahead of
-	// the wall, and the pause resumes 10 days from now.
+	// A pinned customer's pause is read at its test clock's frozen time: the
+	// clock is 20 days ahead of the wall, and the pause resumes 10 days from
+	// now.
 	t.Run("test clock: read at the clock's frozen time", func(t *testing.T) {
 		resumesAt := now.Add(10 * 24 * time.Hour)
 		for _, tc := range []struct {

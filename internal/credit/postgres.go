@@ -1457,11 +1457,9 @@ func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string, limit
 }
 
 // ListExpiredGrants — CRON path. ADR-029 Phase 4: clock-pinned
-// customers' grants are excluded; the catchup orchestrator drives
-// per-clock expiry via ListExpiredGrantsForClock against the clock's
-// frozen_time. Without this filter the wall-clock cron would expire
-// a clock-pinned customer's grants based on wall-clock time, not the
-// simulated time the customer's other consequences run on.
+// customers' grants are excluded. Without this filter the wall-clock cron
+// would expire a clock-pinned customer's grants based on wall-clock time,
+// not the simulated time the customer's other consequences run on.
 //
 // A grant a period close or a period invoice still draws on is not listed
 // (domain.CreditDrawOwedSQL, ADR-071 §2): a close that fails and waits on the
@@ -1502,51 +1500,6 @@ func (s *PostgresStore) ListExpiredGrants(ctx context.Context) ([]domain.CreditL
 		  )
 		  AND NOT `+domain.CreditDrawOwedSQL("g")+`
 	`, live)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var entries []domain.CreditLedgerEntry
-	for rows.Next() {
-		var e domain.CreditLedgerEntry
-		if err := rows.Scan(&e.ID, &e.TenantID, &e.CustomerID, &e.AmountCents, &e.ConsumedCents, &e.ExpiresAt); err != nil {
-			return nil, err
-		}
-		entries = append(entries, e)
-	}
-	return entries, rows.Err()
-}
-
-// ListExpiredGrantsForClock is the catchup-path counterpart. ADR-029
-// Phase 4 — returns grants belonging to customers pinned to the given
-// clock whose expires_at is past the clock's frozen_time (passed
-// explicitly so the comparison happens in simulated time, not wall-
-// clock now).
-func (s *PostgresStore) ListExpiredGrantsForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time) ([]domain.CreditLedgerEntry, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
-	if err != nil {
-		return nil, err
-	}
-	defer postgres.Rollback(tx)
-
-	// Candidate discovery only (see ListExpiredGrants rationale):
-	// ExpireGrantAtomic re-reads under the row lock; `consumed_cents <
-	// amount_cents` is the single retirement exclusion. The catch-up runs
-	// its expiry phase even after a failed close phase, so the same hold
-	// applies here.
-	rows, err := tx.QueryContext(ctx, `
-		SELECT g.id, g.tenant_id, g.customer_id, g.amount_cents, g.consumed_cents, g.expires_at
-		FROM customer_credit_ledger g
-		JOIN customers c ON c.id = g.customer_id
-		WHERE g.entry_type = 'grant'
-		  AND g.expires_at IS NOT NULL
-		  AND g.expires_at < $3
-		  AND g.tenant_id = $1
-		  AND c.test_clock_id = $2
-		  AND g.consumed_cents < g.amount_cents
-		  AND NOT `+domain.CreditDrawOwedSQL("g")+`
-	`, tenantID, clockID, frozenTime)
 	if err != nil {
 		return nil, err
 	}

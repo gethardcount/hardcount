@@ -268,27 +268,10 @@ type Store interface {
 	// subscription.
 	ClearBillingThresholds(ctx context.Context, tenantID, id string) (domain.Subscription, error)
 
-	// ListExpiredTrialsForClock returns subs whose trial_end_at has
-	// elapsed in simulated time but whose status is still 'trialing' —
-	// the trial-expiry catchup scan picks these up at Phase 0.5 and
-	// flips them to active at trial_end_at (not at the later cycle
-	// close). Without this scan, status stays 'trialing' until the
-	// engine wakes at next_billing_at, which for a calendar+trial sub
-	// can be ~30 days after the actual trial-end (sub created Nov 29
-	// + 14d trial → trial_end Dec 13, next_billing_at Jan 1 →
-	// status='trialing' from Dec 13 to Jan 1).
-	//
-	// Hydrated with items so the caller can fire BillOnCreate for
-	// in_advance items without a round-trip. One page, after (afterAt,
-	// afterID) in trial_end_at then id order.
-	ListExpiredTrialsForClock(ctx context.Context, tenantID, clockID string, frozen, afterAt time.Time, afterID string, limit int) ([]domain.Subscription, error)
-
-	// ListExpiredTrials is the wall-clock counterpart for the cron
-	// tick — returns non-clock-pinned subs whose `trial_end_at` has
-	// elapsed in wall-clock time but whose status is still 'trialing'.
-	// ADR-028 disjoint flows: this query explicitly excludes
-	// `test_clock_id IS NOT NULL` rows (those run through the
-	// catchup orchestrator's Phase 0.5 instead). Scoped per livemode
+	// ListExpiredTrials returns, for the cron tick, non-clock-pinned subs
+	// whose `trial_end_at` has elapsed in wall-clock time but whose status
+	// is still 'trialing'. ADR-028 disjoint flows: this query explicitly
+	// excludes `test_clock_id IS NOT NULL` rows. Scoped per livemode
 	// partition by the caller's ctx (the scheduler fans out per mode).
 	ListExpiredTrials(ctx context.Context, before time.Time, livemode bool, limit int) ([]domain.Subscription, error)
 
@@ -296,17 +279,8 @@ type Store interface {
 	// pause_collection_resumes_at has passed. The scheduler tick walks
 	// these and clears the pause + writes audit (triggered_by=schedule).
 	// Skips a sub that still owes a close before resumes_at (see
-	// resumeNotWaitingOnCloseSQL). Excludes clock-pinned rows (ADR-028 —
-	// those flow through ListExpiredPauseCollectionsForClock at catchup
-	// time).
+	// resumeNotWaitingOnCloseSQL). Excludes clock-pinned rows (ADR-028).
 	ListExpiredPauseCollections(ctx context.Context, before time.Time, limit int) ([]domain.Subscription, error)
-
-	// ListExpiredPauseCollectionsForClock is the clock-scoped counterpart
-	// invoked from the catchup orchestrator after cycle billing, with the
-	// same skip, so an Advance that crosses resumes_at unpauses the sub in
-	// the same window once its paused periods are closed. One page, after
-	// (afterAt, afterID) in resumes_at then id order.
-	ListExpiredPauseCollectionsForClock(ctx context.Context, tenantID, clockID string, frozen, afterAt time.Time, afterID string, limit int) ([]domain.Subscription, error)
 
 	// ActivateAfterTrialWithBill flips trialing→active AND runs billFn (the day-1
 	// in_advance invoice insert) in the SAME transaction, so a billing failure

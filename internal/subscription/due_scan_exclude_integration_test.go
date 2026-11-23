@@ -19,17 +19,15 @@ import (
 // LIMIT (or no filter) returns the excluded sub or nothing, and the drain's
 // next page would be the same failing sub again.
 //
-// Mutation seam: drop `AND NOT (s.id = ANY(...))` from any of the three
-// queries and its subtest fails.
+// Mutation seam: drop `AND NOT (s.id = ANY(...))` from either query and its
+// subtest fails.
 func TestDueScans_ExcludeAppliesBeforeLimit(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	store := subscription.NewPostgresStore(db)
 	ctx := leadertest.Token(t, testutil.AdminPool(t), postgres.WithLivemode(context.Background(), false), leader.RoleBilling)
 
 	const tenantID = "hc_ten_dueexcl"
-	const clockID = "hc_tclk_dueexcl"
 	wallNow := time.Now().UTC().Truncate(time.Microsecond)
-	frozen := wallNow.Add(-10 * 24 * time.Hour)
 
 	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -44,24 +42,20 @@ func TestDueScans_ExcludeAppliesBeforeLimit(t *testing.T) {
 	}
 	mustExec(`SELECT set_config('app.livemode', 'off', true)`)
 	mustExec(`INSERT INTO tenants (id, name, status) VALUES ($1, 'DueExclude', 'active')`, tenantID)
-	mustExec(`INSERT INTO test_clocks (id, tenant_id, name, frozen_time, status, livemode)
-		VALUES ($1, $2, 'dueexcl', $3, 'ready', false)`, clockID, tenantID, frozen)
 	mustExec(`INSERT INTO customers (id, tenant_id, external_id, display_name, email, created_at, updated_at)
 		VALUES ('cus_de', $1, 'de', 'DueExclude', '', $2, $2)`, tenantID, wallNow)
-	seedSub := func(id string, nextBillingAt time.Time, clock any) {
+	seedSub := func(id string, nextBillingAt time.Time) {
 		mustExec(`INSERT INTO subscriptions (
 			id, tenant_id, code, display_name, customer_id, status, billing_time,
 			current_billing_period_start, current_billing_period_end, next_billing_at,
-			livemode, test_clock_id, created_at, updated_at
-		) VALUES ($1, $2, $1, $1, 'cus_de', 'active', 'calendar', $3, $4, $4, false, $5, $3, $3)`,
-			id, tenantID, nextBillingAt.Add(-30*24*time.Hour), nextBillingAt, clock)
+			livemode, created_at, updated_at
+		) VALUES ($1, $2, $1, $1, 'cus_de', 'active', 'calendar', $3, $4, $4, false, $3, $3)`,
+			id, tenantID, nextBillingAt.Add(-30*24*time.Hour), nextBillingAt)
 	}
 	// Wall subs, oldest first. Ages far past any other test's seed, so these
 	// two are the oldest due wall subs in the test-mode partition.
-	seedSub("sub_de_oldest", wallNow.Add(-3000*24*time.Hour), nil)
-	seedSub("sub_de_second", wallNow.Add(-2999*24*time.Hour), nil)
-	seedSub("sub_de_clk_oldest", frozen.Add(-2*time.Hour), clockID)
-	seedSub("sub_de_clk_second", frozen.Add(-1*time.Hour), clockID)
+	seedSub("sub_de_oldest", wallNow.Add(-3000*24*time.Hour))
+	seedSub("sub_de_second", wallNow.Add(-2999*24*time.Hour))
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
@@ -76,10 +70,6 @@ func TestDueScans_ExcludeAppliesBeforeLimit(t *testing.T) {
 		}},
 		{"GetDueBillingForTenant", "sub_de_oldest", "sub_de_second", func(ex []string) ([]string, error) {
 			subs, err := store.GetDueBillingForTenant(ctx, tenantID, wallNow, wallNow, ex, 1)
-			return ids(subs), err
-		}},
-		{"GetDueBillingForClock", "sub_de_clk_oldest", "sub_de_clk_second", func(ex []string) ([]string, error) {
-			subs, err := store.GetDueBillingForClock(ctx, tenantID, clockID, ex, 1)
 			return ids(subs), err
 		}},
 	}

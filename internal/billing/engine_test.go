@@ -113,7 +113,7 @@ func TestRunCycle_SkipsClockPinnedSubs(t *testing.T) {
 	}
 
 	// Exactly one invoice — for the wall-clock sub. The clock-pinned
-	// sub stays untouched; only Engine.RunCycleForClock processes it.
+	// sub stays untouched.
 	if len(invoices.invoices) != 1 {
 		t.Fatalf("expected 1 invoice (wall-clock only), got %d", len(invoices.invoices))
 	}
@@ -125,64 +125,11 @@ func TestRunCycle_SkipsClockPinnedSubs(t *testing.T) {
 	}
 }
 
-// TestRetryPendingCharges_SkipsClockPinned (ADR-029 Phase 1) — the
-// cron-side counterpart of TestRunCycle_SkipsClockPinnedSubs for the
-// auto-charge path. mockInvoices doesn't differentiate clock-pinned
-// from wall-clock invoices on its own; the production filter lives
-// in the SQL of ListAutoChargePending. This unit test exercises the
-// engine wiring contract: when the InvoiceWriter returns a list, the
-// engine charges every entry (no per-row clock check at the engine
-// layer — exclusion is the SQL's job, just like ADR-028's
-// GetDueBilling). The invariant we DO want pinned at this layer is
-// the symmetric one: RetryPendingChargesForClock must call the
-// per-clock list method, not the cron one.
-func TestRetryPendingCharges_DispatchesToCorrectQuery(t *testing.T) {
-	// A spy mockInvoices that records which list method got called.
-	subs := &mockSubs{cycleUpdated: make(map[string]bool)}
-	pricing := &mockPricing{}
-	inv := &mockInvoices{
-		invoices: []domain.Invoice{{
-			ID: "inv_wall", TenantID: "t1", CustomerID: "cus_wall",
-			Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
-			AutoChargePending: true, AmountDueCents: 1000,
-		}},
-	}
-	engine := wireBaseTax(NewEngine(subs, &mockUsage{}, pricing, inv, nil, &mockSettings{}, nil, nil, billingTestClock()))
-
-	t.Run("cron path uses ListAutoChargePending", func(t *testing.T) {
-		// We don't have a charger wired so the loop short-circuits at
-		// the paymentSetups nil check — that's fine, the assertion
-		// here is structural, not behavioural.
-		_, _ = engine.RetryPendingCharges(postgres.WithLivemode(context.Background(), true), 50, nil)
-	})
-
-	t.Run("catchup path uses ListAutoChargePendingForClock", func(t *testing.T) {
-		// Same short-circuit applies. The structural contract is that
-		// the engine has both methods and they delegate to the
-		// distinct InvoiceWriter methods; the SQL-level disjointness
-		// is verified in the postgres integration test.
-		_, _ = engine.RetryPendingChargesForClock(context.Background(), "t1", "tc_1", 50)
-	})
-}
-
-// TestRetryPendingChargesForClock_NoChargerIsAnError: a clock's collection
-// job with no charger fails the advance; skipping it would end the advance
-// ready with the clock's invoices uncharged.
-func TestRetryPendingChargesForClock_NoChargerIsAnError(t *testing.T) {
-	engine := NewEngine(&mockSubs{cycleUpdated: map[string]bool{}}, &mockUsage{}, &mockPricing{}, &mockInvoices{}, nil, &mockSettings{}, nil, nil, billingTestClock())
-	if _, errs := engine.RetryPendingChargesForClock(context.Background(), "t1", "tc_1", 50); len(errs) != 1 {
-		t.Errorf("errors = %v, want one: the job cannot collect", errs)
-	}
-}
-
 // TestRetryPendingCharges_CardDeclineDoesNotEscalate locks in the
 // expected-vs-fatal classification fix. A Stripe card decline is a
 // routine business outcome handled by dunning (ChargeInvoice fires
 // inline StartDunning + stamps payment_status=failed on the invoice),
-// NOT a catchup-infrastructure failure. Pre-fix the decline error
-// bubbled up through processAutoCharge → RetryPendingChargesForClock
-// → testclock catchup → clock flipped to internal_failure on the
-// first declined invoice.
+// NOT an infrastructure failure, so the sweep counts no error for it.
 func TestRetryPendingCharges_CardDeclineDoesNotEscalate(t *testing.T) {
 	inv := &mockInvoices{
 		invoices: []domain.Invoice{{
@@ -525,29 +472,6 @@ func (m *mockSubs) GetDueBillingForTenant(ctx context.Context, _ string, now, du
 	return m.GetDueBilling(ctx, now, dueBy, exclude, limit)
 }
 
-// GetDueBillingForClock — mirror of GetDueBilling for the disjoint
-// catchup path (ADR-028). Returns ONLY subs pinned to the given
-// clock whose next_billing_at is on-or-before `before`. The mock
-// uses `before` directly because it doesn't model test-clock rows;
-// real engine wiring resolves frozen_time via the SQL JOIN.
-func (m *mockSubs) GetDueBillingForClock(_ context.Context, _, clockID string, exclude []string, limit int) ([]domain.Subscription, error) {
-	var result []domain.Subscription
-	for _, s := range m.subs {
-		if s.TestClockID != clockID || slices.Contains(exclude, s.ID) {
-			continue
-		}
-		eligible := s.Status == domain.SubscriptionActive || s.Status == domain.SubscriptionTrialing
-		if eligible && s.NextBillingAt != nil {
-			result = append(result, s)
-		}
-	}
-	sortDueLikeSQL(result)
-	if len(result) > limit {
-		result = result[:limit]
-	}
-	return result, nil
-}
-
 func (m *mockSubs) Get(_ context.Context, _, id string) (domain.Subscription, error) {
 	s, ok := m.subs[id]
 	if !ok {
@@ -711,10 +635,6 @@ func (m *mockSubs) ApplyDuePendingItemPlansAtomic(_ context.Context, _, id strin
 	}
 	m.subs[id] = s
 	return subscription.AppliedPlanChanges{Items: slices.Clone(s.Items), Swapped: swapped}, nil
-}
-
-func (m *mockSubs) ListWithThresholdsForClock(_ context.Context, _, _, _ string, _ int) ([]domain.Subscription, error) {
-	return nil, nil
 }
 
 func (m *mockSubs) ListWithThresholds(_ context.Context, _ bool, _ string, _ int) ([]domain.Subscription, error) {
@@ -930,9 +850,6 @@ type mockInvoices struct {
 	mu sync.Mutex
 	// taxTriesRecorded counts RecordTaxRetryAttempt calls.
 	taxTriesRecorded int
-	// clockQueue holds the ids ListAutoChargePendingForClock returns (the fake
-	// has no sub→clock mapping). Empty by default.
-	clockQueue map[string]bool
 	// claimState is the answer ChargeClaimStateOf gives for an invoice, as
 	// the test sets it; claimStateErr fails the read. The fake does not copy
 	// the claim's rule: the store's SQL is the rule, and
@@ -1134,21 +1051,6 @@ func (m *mockInvoices) SetAutoChargePending(_ context.Context, _, id string, pen
 		}
 	}
 	return fmt.Errorf("not found")
-}
-
-// ListAutoChargePendingForClock — minimal stub for the ADR-029 Phase 1
-// interface bump. Tests that exercise the per-clock catchup path
-// install a more meaningful stub via the test fixture; the default
-// returns nothing because mockInvoices doesn't track sub→clock
-// mapping (that's the postgres store's job).
-func (m *mockInvoices) ListAutoChargePendingForClock(_ context.Context, _ string, _ string, after walk.Key, limit int) ([]domain.Invoice, error) {
-	var result []domain.Invoice
-	for _, inv := range m.invoices {
-		if m.clockQueue[inv.ID] && inv.AutoChargePending && inv.Status == domain.InvoiceFinalized && inv.PaymentStatus == domain.PaymentPending {
-			result = append(result, inv)
-		}
-	}
-	return keysetPage(result, after, limit), nil
 }
 
 // keysetPage mirrors the store's queue paging: ORDER BY (created_at, id),

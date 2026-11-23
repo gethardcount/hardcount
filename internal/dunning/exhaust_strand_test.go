@@ -234,10 +234,10 @@ func TestExhaustOnEntry_StaleProcessorFiresNothing(t *testing.T) {
 	run := exhaustedRun(t, mem, a) // attempts == max, due: exhaust-on-entry
 	snapshot := mem.runs[run.ID]   // what both processors listed
 
-	if err := a.processRun(ctx, "t1", snapshot, false); err != nil {
+	if err := a.processRun(ctx, "t1", snapshot); err != nil {
 		t.Fatalf("processor A: %v", err)
 	}
-	if err := b.processRun(ctx, "t1", snapshot, false); err != nil {
+	if err := b.processRun(ctx, "t1", snapshot); err != nil {
 		t.Fatalf("processor B (stale): %v", err)
 	}
 
@@ -369,7 +369,7 @@ type reentrantMover struct {
 func (m *reentrantMover) MarkUncollectible(ctx context.Context, tenantID, _ string, then func(*sql.Tx) error) error {
 	m.calls++
 	if m.calls == 1 {
-		m.errOther = m.other.processRun(ctx, tenantID, m.snapshot, false)
+		m.errOther = m.other.processRun(ctx, tenantID, m.snapshot)
 	}
 	if then != nil {
 		return then(nil)
@@ -394,7 +394,7 @@ func TestExhaustOnEntry_ConcurrentClaimDuringTerminalAction(t *testing.T) {
 	moverA := &reentrantMover{other: b, snapshot: snapshot}
 	a.SetInvoiceUncollectibleMarker(moverA)
 
-	if err := a.processRun(context.Background(), "t1", snapshot, false); err != nil {
+	if err := a.processRun(context.Background(), "t1", snapshot); err != nil {
 		t.Fatalf("A: %v", err)
 	}
 	if moverA.errOther != nil {
@@ -506,7 +506,7 @@ func TestExhaust_StaleResolveCannotUnescalate(t *testing.T) {
 	inv := unpaidInv()
 	inv.Status = domain.InvoiceUncollectible
 	svc.SetSubscriptionPauser(&recordingPauser{}, stubInvGet{inv: inv})
-	if err := svc.processRun(context.Background(), "t1", stale, false); err != nil {
+	if err := svc.processRun(context.Background(), "t1", stale); err != nil {
 		t.Fatalf("stale processor: %v", err)
 	}
 	if got := mem.runs[run.ID]; got.State != domain.DunningEscalated {

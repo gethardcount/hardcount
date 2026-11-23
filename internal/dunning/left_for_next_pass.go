@@ -4,9 +4,9 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 )
 
-// leftForNextPass is work a clock's dunning job did not finish in this
-// advance: domain.ErrLeftForNextRun, with a sentence for the operator that
-// says what is left and what to do. A real-time tick logs it and goes on.
+// leftForNextPass is work a dunning step left for the next tick:
+// domain.ErrLeftForNextRun, with a sentence for the operator that says what
+// is left. ProcessDueRuns logs it and goes on.
 type leftForNextPass struct {
 	say   string
 	cause error // may be nil

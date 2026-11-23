@@ -668,29 +668,14 @@ func (s *Service) ExpireCredits(ctx context.Context) (int, []error) {
 	}
 	expired, errs := s.processExpiry(ctx, grants)
 	// Each counted expiry has committed (ExpireGrantAtomic's own
-	// transaction). A test clock's expiries (ExpireCreditsForClock) are not
-	// counted.
+	// transaction).
 	for i := 0; i < expired; i++ {
 		recordCreditOperation("expiry")
 	}
 	return expired, errs
 }
 
-// ExpireCreditsForClock is the catchup-path counterpart. ADR-029
-// Phase 4: clock-pinned customer grants expire only on operator
-// Advance, against the clock's frozen_time, never on the wall-clock
-// cron tick.
-func (s *Service) ExpireCreditsForClock(ctx context.Context, tenantID, clockID string, frozenTime time.Time) (int, []error) {
-	grants, err := s.store.ListExpiredGrantsForClock(ctx, tenantID, clockID, frozenTime)
-	if err != nil {
-		return 0, []error{fmt.Errorf("list expired grants for clock %s: %w", clockID, err)}
-	}
-	return s.processExpiry(ctx, grants)
-}
-
-// processExpiry is the shared per-grant body of ExpireCredits and
-// ExpireCreditsForClock — the candidate list shape differs by trigger
-// path; the per-grant retirement is identical.
+// processExpiry retires each listed grant.
 //
 // The candidate list is DISCOVERY only. All money decisions happen
 // inside store.ExpireGrantAtomic: it recomputes the remaining

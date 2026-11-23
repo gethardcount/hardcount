@@ -449,11 +449,6 @@ type SubscriptionReader interface {
 	// now gates billing failures (ADR-119); dueBy = now less the invoice
 	// grace admits due instants (ADR-120).
 	GetDueBilling(ctx context.Context, now, dueBy time.Time, exclude []string, limit int) ([]domain.Subscription, error)
-	// GetDueBillingForClock: operator-driven catchup path. Returns
-	// ONLY subs pinned to the given clock whose next_billing_at is
-	// on-or-before that clock's frozen time. Called by the clock's catch-up
-	// pass after Advance flips status to 'advancing'.
-	GetDueBillingForClock(ctx context.Context, tenantID, clockID string, exclude []string, limit int) ([]domain.Subscription, error)
 	// GetDueBillingForTenant: operator-triggered (POST /v1/billing/run)
 	// path, scoped to ONE tenant under RLS. Wall-clock-due, non-clock-
 	// pinned subs for the caller's tenant only — never cross-tenant.
@@ -530,10 +525,6 @@ type SubscriptionReader interface {
 	// it until a short batch so the WHOLE candidate set is scanned every tick
 	// — a plain LIMIT would silently disable spend caps past the first batch.
 	ListWithThresholds(ctx context.Context, livemode bool, afterID string, limit int) ([]domain.Subscription, error)
-	// ListWithThresholdsForClock is the catchup-path counterpart to
-	// ListWithThresholds — returns clock-pinned subs with thresholds
-	// configured. ADR-029 Phase 3.
-	ListWithThresholdsForClock(ctx context.Context, tenantID, clockID, afterID string, limit int) ([]domain.Subscription, error)
 
 	// ListItemChangesInPeriod returns every subscription_item_changes row
 	// for the given subscription whose changed_at falls within
@@ -644,12 +635,6 @@ type InvoiceWriter interface {
 	// left of a charge a run did not make; never a gate.
 	ChargeClaimStateOf(ctx context.Context, tenantID, id string) (domain.ChargeClaimState, error)
 	ListAutoChargePending(ctx context.Context, after walk.Key, limit int) ([]domain.Invoice, error)
-	// ListAutoChargePendingForClock is the catchup-path counterpart to
-	// ListAutoChargePending — returns invoices whose owning subscription
-	// is pinned to the given clock. ADR-029 Phase 1: simulation-time
-	// charge attempts only fire on operator Advance, never on the
-	// wall-clock cron tick, mirroring Stripe Test Clocks.
-	ListAutoChargePendingForClock(ctx context.Context, tenantID, clockID string, after walk.Key, limit int) ([]domain.Invoice, error)
 	// ListFailedWithoutDunningRun powers the dunning_backfill reconciler:
 	// finalized, still-owed invoices in payment_status='failed' with NO
 	// dunning run — the SettleFailed post-commit crash / exhausted-retry
@@ -2065,8 +2050,8 @@ var errStillDue = refuse(refusalNoProgress, errors.New("still due after a clean 
 type dueFetch func(ctx context.Context, exclude []string, limit int) ([]domain.Subscription, error)
 
 // drainDue bills page after page of due subscriptions until a page comes back
-// empty. All three billing runs use it: the scheduler tick, the operator's
-// POST /v1/billing/run, and test-clock Advance.
+// empty. Both billing runs use it: the scheduler tick and the operator's
+// POST /v1/billing/run.
 //
 // Each sub is attempted at most once per call. A sub that is still due after
 // its attempt (it failed, or errStillDue) goes into exclude, and the next page
@@ -2078,7 +2063,7 @@ type dueFetch func(ctx context.Context, exclude []string, limit int) ([]domain.S
 // (attemptSub, ADR-119), and the wall-clock scans then skip it until its next
 // attempt is due, or for good once it is parked. The exclude list stays: it
 // covers the failures that are not saved (an interrupted run, a transient
-// database error, a failed save) and every clock-pinned sub.
+// database error, a failed save).
 //
 // Termination: every sub on a non-empty page is either attempted for the first
 // time or added to exclude, so each page shrinks what the next page can return.
@@ -2086,17 +2071,16 @@ type dueFetch func(ctx context.Context, exclude []string, limit int) ([]domain.S
 // onPage, if set, runs after every page. The scheduler stamps its liveness
 // there, because one tick can now run for hours.
 //
-// grace is the invoice grace this run honours (ADR-120): the wall-clock runs
-// pass the engine's, the test-clock run passes 0. It goes to
+// The run honours the engine's invoice grace (ADR-120). It goes to
 // billSubscription, whose checks must use the same instant as fetch's scan.
 //
 // A sub whose attempt panics is handled like one that failed: attemptSub has
 // saved the failure, and the sub goes into exclude and failures. The drain
 // bills the rest, and the first panic is raised again when it returns, so the
 // caller still sees it (the scheduler's tick ends as panicked; the operator's
-// run answers 500; the test-clock catch-up marks the clock failed). Without
+// run answers 500). Without
 // this, one panicking sub stopped every sub after it in the run.
-func (e *Engine) drainDue(ctx context.Context, batchSize int, fetch dueFetch, onPage func(), grace time.Duration, logArgs ...any) (int, []SubBillError) {
+func (e *Engine) drainDue(ctx context.Context, batchSize int, fetch dueFetch, onPage func(), logArgs ...any) (int, []SubBillError) {
 	if batchSize <= 0 {
 		batchSize = 50
 	}
@@ -2148,7 +2132,7 @@ func (e *Engine) drainDue(ctx context.Context, batchSize int, fetch dueFetch, on
 			n, err := 0, errBillPanic
 			func() {
 				defer panics.Guard(append([]any{"subscription_id", sub.ID, "tenant_id", sub.TenantID}, logArgs...)...)
-				n, err = e.attemptSub(rowCtx, sub, grace, logArgs...)
+				n, err = e.attemptSub(rowCtx, sub, e.invoiceGrace, logArgs...)
 			}()
 			generated += n
 			if errors.Is(err, errBillingGated) {
@@ -2179,41 +2163,6 @@ func subBillErrors(failures []SubBillError) []error {
 		out[i] = f
 	}
 	return out
-}
-
-// RunCycleForClock bills the due subs attached to ONE test clock, catching
-// each up to the clock's frozen time. Called by the test-clock catch-up
-// after MarkAdvancing — operator-driven (Advance click), never the wall-clock
-// cron. ADR-028 disjoint flows: this is the ONLY path for clock-pinned
-// billing; the wall-clock RunCycle excludes clock-pinned subs.
-//
-// Per-sub errors are returned, not fatal: one failing sub doesn't stall the
-// others. When any sub fails, the worker marks the clock internal_failure and
-// the operator's "Retry advance" resumes once the cause is fixed.
-func (e *Engine) RunCycleForClock(ctx context.Context, tenantID, clockID string, batchSize int) (int, []error) {
-	ctx, span := telemetry.Tracer("billing").Start(ctx, "billing.RunCycleForClock",
-		trace.WithAttributes(
-			attribute.String("clock_id", clockID),
-			attribute.String("tenant_id", tenantID),
-			attribute.Int("batch_size", batchSize),
-		),
-	)
-	defer span.End()
-
-	fetch := func(ctx context.Context, exclude []string, limit int) ([]domain.Subscription, error) {
-		return e.subs.GetDueBillingForClock(ctx, tenantID, clockID, exclude, limit)
-	}
-	// No invoice grace on a test clock (ADR-120): advancing to a period end
-	// produces its invoice, and the operator decides when usage arrives.
-	generated, failures := e.drainDue(ctx, batchSize, fetch, nil, 0, "run", "clock_catchup", "clock_id", clockID)
-
-	span.SetAttributes(attribute.Int("generated", generated))
-	slog.Info("clock catchup cycle complete",
-		"clock_id", clockID,
-		"generated", generated,
-		"errors", len(failures),
-	)
-	return generated, subBillErrors(failures)
 }
 
 // SubBillError pairs a subscription that failed to bill with its cause. The
@@ -2264,7 +2213,7 @@ func (e *Engine) RunCycleForTenant(ctx context.Context, tenantID string, batchSi
 	fetch := func(ctx context.Context, exclude []string, limit int) ([]domain.Subscription, error) {
 		return e.subs.GetDueBillingForTenant(ctx, tenantID, now, dueBy, exclude, limit)
 	}
-	generated, failures := e.drainDue(ctx, batchSize, fetch, nil, e.invoiceGrace, "run", "manual")
+	generated, failures := e.drainDue(ctx, batchSize, fetch, nil, "run", "manual")
 
 	span.SetAttributes(attribute.Int("generated", generated))
 	return generated, failures
@@ -2299,7 +2248,7 @@ func (e *Engine) RunCycle(ctx context.Context, batchSize int, onPage func()) (in
 	fetch := func(ctx context.Context, exclude []string, limit int) ([]domain.Subscription, error) {
 		return e.subs.GetDueBilling(ctx, now, dueBy, exclude, limit)
 	}
-	generated, failures := e.drainDue(ctx, batchSize, fetch, onPage, e.invoiceGrace, "run", "scheduled")
+	generated, failures := e.drainDue(ctx, batchSize, fetch, onPage, "run", "scheduled")
 
 	span.SetAttributes(attribute.Int("generated", generated))
 	if len(failures) > 0 {
@@ -4675,8 +4624,7 @@ func (e *Engine) FinishRelief(ctx context.Context, sub domain.Subscription, r do
 // call, pageSize at a time, and tries to collect it. CRON path — the
 // wall-clock scheduler calls this every tick, passing its liveness stamp as
 // onPage: a sweep can outlast the interval. ADR-029 Phase 1: clock-pinned
-// invoices are excluded from this query and are processed instead by
-// RetryPendingChargesForClock during catchup.
+// invoices are excluded from this query.
 //
 // Rows that stay queued by design (a card-less invoice waits for a card) do
 // not hold back the rows behind them: the walk reads the queue to its end.
@@ -4730,49 +4678,8 @@ func (e *Engine) RetryPendingCharges(ctx context.Context, pageSize int, onPage f
 	return charged, errs
 }
 
-// RetryPendingChargesForClock is the catchup-path counterpart to
-// RetryPendingCharges. Called by the test-clock catchup orchestrator
-// after period generation, so any invoice whose customer attached a
-// PM since the last advance fires its charge as part of THIS Advance,
-// not on a future wall-clock tick. ADR-029 Phase 1.
-//
-// Return shape matches RetryPendingCharges (count + per-invoice
-// errors) so the orchestrator can log the same telemetry shape per
-// catchup phase. Unlike the real-time sweep it returns the work a row left
-// for the next run (domain.ErrLeftForNextRun): the advance fails, and Retry
-// advance does that work.
-func (e *Engine) RetryPendingChargesForClock(ctx context.Context, tenantID, clockID string, limit int) (int, []error) {
-	// An advance that skipped collection would end ready with its invoices
-	// uncharged.
-	if e.charger == nil || e.paymentSetups == nil {
-		return 0, []error{errors.New("collect the clock's invoices: the engine has no charger or payment readiness")}
-	}
-	if limit <= 0 {
-		limit = 50
-	}
-	list := func(ctx context.Context, after walk.Key, limit int) ([]domain.Invoice, error) {
-		pending, err := e.invoices.ListAutoChargePendingForClock(ctx, tenantID, clockID, after, limit)
-		if err != nil {
-			return nil, fmt.Errorf("list pending charges for clock %s: %w", clockID, err)
-		}
-		return pending, nil
-	}
-	charged := 0
-	var errs []error
-	for inv, err := range walk.Walk(ctx, "ListAutoChargePendingForClock", list, autoChargePendingKey, limit) {
-		if err != nil {
-			errs = append(errs, fmt.Errorf("collect the clock's invoices: %w", err))
-			break
-		}
-		n, rowErrs := e.processAutoCharge(ctx, inv, nil, noPMTriggerSweep)
-		charged += n
-		errs = append(errs, rowErrs...)
-	}
-	return charged, errs
-}
-
 // autoChargePendingKey is an invoice's place in the auto-charge queue, which
-// both sweeps read by (created_at, id).
+// the sweep reads by (created_at, id).
 func autoChargePendingKey(inv domain.Invoice) walk.Key {
 	return walk.Key{At: inv.CreatedAt, ID: inv.ID}
 }
@@ -4863,10 +4770,10 @@ func (e *Engine) emailInvoiceOnce(ctx context.Context, inv domain.Invoice) {
 	}
 }
 
-// processAutoCharge collects one finalized invoice. The two sweeps
-// (RetryPendingCharges, RetryPendingChargesForClock) walk their queues and call
-// it for each invoice, and the post-commit CollectInvoice nudge calls it once,
-// so collection has a single implementation.
+// processAutoCharge collects one finalized invoice. The sweep
+// (RetryPendingCharges) walks its queue and calls it for each invoice, and the
+// post-commit CollectInvoice nudge calls it once, so collection has a single
+// implementation.
 //
 // Until ChargeInvoice returns, ctx carries the row's one instant; after it,
 // AtArrival re-dates what this function writes.
@@ -5432,10 +5339,7 @@ func (e *Engine) computeAndPersistInvoiceTax(ctx context.Context, tenantID, invo
 //
 // ctx carries effective-now via clock.WithEffectiveNow on
 // clock-pinned invoices; without binding, falls back to wall-clock.
-// Catchup's ListPendingTaxRetryForClock intentionally ignores
-// `tax_next_retry_at` (see its doc comment in invoice/postgres.go), so the
-// stamp's domain doesn't load-bear for clock-pinned scheduling — but
-// keeping it in the simulation domain matches the rest of the row's
+// Keeping it in the simulation domain matches the rest of the row's
 // timestamps for dashboard consistency (ADR-030).
 func nextTaxRetry(ctx context.Context, status domain.InvoiceTaxStatus, errCode string, attempts int) *time.Time {
 	if status == domain.InvoiceTaxOK {

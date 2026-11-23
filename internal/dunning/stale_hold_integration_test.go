@@ -14,7 +14,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/leader"
 	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
-	"github.com/gethardcount/hardcount/internal/platform/walk"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -139,72 +138,6 @@ func TestListDueRuns_ChargeHoldIsSkipped(t *testing.T) {
 	}
 	if !got[wroffRun] {
 		t.Error("a written-off invoice's run must still be picked even with a hold: the terminal branch resolves it")
-	}
-}
-
-// The sim-time twin of the scan above: the clock's list returns a run whose
-// invoice a charge holds, marked as held, and the job does not step it.
-func TestListDueRunsForClock_ChargeHoldIsMarkedHeld(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	ctx := postgres.WithLivemode(context.Background(), false)
-	tenantID := "tnt_hold_clock"
-	const clockID = "hc_tclk_hold"
-	frozen := time.Date(2027, 6, 1, 0, 0, 0, 0, time.UTC)
-
-	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	defer postgres.Rollback(tx)
-	mustExec := func(q string, args ...any) {
-		t.Helper()
-		if _, err := tx.ExecContext(ctx, q, args...); err != nil {
-			t.Fatalf("seed: %v", err)
-		}
-	}
-	mustExec(`SELECT set_config('app.livemode', 'off', true)`)
-	mustExec(`INSERT INTO tenants (id, name, status) VALUES ($1, 'Hold Clock', 'active')`, tenantID)
-	mustExec(`INSERT INTO test_clocks (id, tenant_id, name, frozen_time, status, livemode)
-		VALUES ($1, $2, 'hold', $3, 'ready', false)`, clockID, tenantID, frozen)
-	mustExec(`INSERT INTO customers (id, tenant_id, external_id, display_name, email, test_clock_id, created_at, updated_at)
-		VALUES ('cus_hold_clk', $1, 'hold_clk', 'Hold', '', $2, $3, $3)`, tenantID, clockID, frozen)
-	mustExec(`INSERT INTO dunning_policies (id, tenant_id, name, enabled, is_default, retry_days, final_subscription_action, final_invoice_action, livemode)
-		VALUES ('dpol_hold', $1, 'P', true, true, '[3, 3, 3]', 'pause', 'none', false)`, tenantID)
-	seedInvRun := func(invID, runID, invStatus string, hold bool) {
-		mustExec(`INSERT INTO invoices (id, tenant_id, customer_id, invoice_number,
-			status, payment_status, is_simulated, currency,
-			subtotal_cents, total_amount_cents, amount_due_cents, tax_status,
-			billing_period_start, billing_period_end, created_at, updated_at, auto_charge_claimed_until)
-		VALUES ($1, $2, 'cus_hold_clk', $1, $3, 'failed', true, 'USD', 2500, 2500, 2500, 'ok', $4, $4, $4, $4,
-			CASE WHEN $5 THEN now() - interval '11 minutes' END)`,
-			invID, tenantID, invStatus, frozen.Add(-24*time.Hour), hold)
-		mustExec(`INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, reason, attempt_count, next_action_at, paused, created_at, updated_at, livemode)
-		VALUES ($1, $2, $3, 'cus_hold_clk', 'dpol_hold', 'active', 'payment_failed', 0, $4, false, $5, $5, false)`,
-			runID, tenantID, invID, frozen.Add(-time.Hour), frozen.Add(-24*time.Hour))
-	}
-	seedInvRun("inv_clk_held", "run_clk_held", "finalized", true)
-	seedInvRun("inv_clk_held_wroff", "run_clk_held_wroff", "uncollectible", true)
-	seedInvRun("inv_clk_free", "run_clk_free", "finalized", false)
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-
-	due, err := dunning.NewPostgresStore(db).ListDueRunsForClock(ctx, tenantID, clockID, frozen, walk.Key{}, 50)
-	if err != nil {
-		t.Fatalf("ListDueRunsForClock: %v", err)
-	}
-	got := map[string]domain.ChargeClaimState{}
-	for _, r := range due {
-		got[r.ID] = r.HeldBy
-	}
-	if s, ok := got["run_clk_held"]; !ok || s != domain.ChargeHeldByAttempt {
-		t.Errorf("a simulated invoice with a charge hold: listed %v, held by %v; want it listed as held by an attempt, so the job does not step it", ok, s)
-	}
-	if s, ok := got["run_clk_held_wroff"]; !ok || s != domain.ChargeClaimable {
-		t.Errorf("a written-off simulated invoice with a hold: listed %v, held by %v; want it listed and not held — the terminal branch resolves the run", ok, s)
-	}
-	if s, ok := got["run_clk_free"]; !ok || s != domain.ChargeClaimable {
-		t.Errorf("an ordinary failed simulated invoice: listed %v, held by %v; want it listed and not held — the control", ok, s)
 	}
 }
 

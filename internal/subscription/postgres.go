@@ -1604,9 +1604,8 @@ func (s *PostgresStore) GetDueBilling(ctx context.Context, now, dueBy time.Time,
 
 	// ADR-028 disjoint flows: GetDueBilling is the wall-clock cron's
 	// query — it processes ONLY subs without a test clock. Clock-
-	// pinned subs are operator-controlled (Advance click triggers
-	// GetDueBillingForClock). Without this filter, the cron would
-	// silently drip-bill stuck clock-pinned subs in the background,
+	// pinned subs are operator-controlled. Without this filter, the cron
+	// would silently drip-bill stuck clock-pinned subs in the background,
 	// breaking the operator's mental model of simulation time AND
 	// racing with the test-clock catch-up for the same rows.
 	//
@@ -1738,67 +1737,6 @@ func (s *PostgresStore) GetDueBillingForTenant(ctx context.Context, tenantID str
 	return subs, nil
 }
 
-// GetDueBillingForClock returns subs attached to a specific test
-// clock whose next_billing_at is on-or-before the clock's frozen
-// time. Operator-driven catchup path (ADR-028 disjoint flows) —
-// fired by the test-clock catch-up after MarkAdvancing,
-// never by the wall-clock cron. The complement of GetDueBilling.
-//
-// The query joins test_clocks (not LEFT JOIN — clock-pinned subs
-// always have a row) and uses the clock's frozen_time as the
-// "now" cutoff. Tenant scope comes from RLS via the BeginTx
-// caller, but because the test-clock catch-up is a per-clock unit of
-// work, we also filter by test_clock_id explicitly.
-//
-// It takes no lock: a clock has one runner, and a row another transaction
-// holds must be waited for, not skipped. ClosePeriodTx's check that the
-// period has not moved is the guard.
-func (s *PostgresStore) GetDueBillingForClock(ctx context.Context, tenantID, clockID string, exclude []string, limit int) ([]domain.Subscription, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	defer postgres.Rollback(tx)
-
-	if limit <= 0 {
-		limit = 50
-	}
-
-	// exclude: see GetDueBilling (the COALESCE is load-bearing).
-	rows, err := tx.QueryContext(ctx, `
-		SELECT `+qualifiedSubCols("s")+` FROM subscriptions s
-		JOIN test_clocks tc ON tc.id = s.test_clock_id
-		WHERE s.status IN ('active', 'trialing')
-		  AND s.test_clock_id = $1
-		  AND (s.next_billing_at <= tc.frozen_time
-		       OR (s.status = 'active' AND s.cancel_at IS NOT NULL AND s.cancel_at <= tc.frozen_time))
-		  AND NOT (s.id = ANY(COALESCE($3::text[], '{}')))
-		ORDER BY s.next_billing_at ASC LIMIT $2
-	`, clockID, limit, exclude)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var subs []domain.Subscription
-	for rows.Next() {
-		var sub domain.Subscription
-		if err := scanSubRow(rows, &sub); err != nil {
-			return nil, err
-		}
-		subs = append(subs, sub)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	for i := range subs {
-		if err := hydrateSubChildrenTx(ctx, tx, &subs[i]); err != nil {
-			return nil, err
-		}
-	}
-	return subs, nil
-}
-
 // resumeNotWaitingOnCloseSQL keeps a scheduled resume from clearing a pause
 // while the subscription still owes a close at an instant before
 // resumes_at: a period end (next_billing_at) or a mid-period cancel_at.
@@ -1825,8 +1763,7 @@ func resumeNotWaitingOnCloseSQL(a string) string {
 // pause_collection_resumes_at has passed. Used by the scheduler's
 // pause-resume tick (the dedicated scan that pairs with the trial-
 // expiry scan — independent of cycle billing). Excludes clock-
-// pinned subs to honor ADR-028 disjoint flows; those are processed
-// by ListExpiredPauseCollectionsForClock instead.
+// pinned subs to honor ADR-028 disjoint flows.
 //
 // Stripe-parity rationale: Stripe resumes collection AT resumes_at
 // rather than at the next cycle close. Before this method existed,
@@ -1858,59 +1795,6 @@ func (s *PostgresStore) ListExpiredPauseCollections(ctx context.Context, before 
 		ORDER BY s.pause_collection_resumes_at ASC LIMIT $3
 		FOR UPDATE OF s SKIP LOCKED
 	`, live, before, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var subs []domain.Subscription
-	for rows.Next() {
-		var sub domain.Subscription
-		if err := scanSubRow(rows, &sub); err != nil {
-			return nil, err
-		}
-		subs = append(subs, sub)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	for i := range subs {
-		if err := hydrateSubChildrenTx(ctx, tx, &subs[i]); err != nil {
-			return nil, err
-		}
-	}
-	return subs, nil
-}
-
-// ListExpiredPauseCollectionsForClock is the clock-scoped counterpart.
-// Per ADR-028 disjoint flows: invoked from the catchup orchestrator
-// inside an Advance window, never by the wall-clock cron. Uses the
-// clock's frozen_time as the cutoff so an Advance that crosses
-// resumes_at picks the row up in the same advance window.
-//
-// It returns the page after (afterAt, afterID) in due order, resumes_at
-// then id, so a clock resumes its pauses in the order they fell due and a
-// row the job leaves paused is not read again. It takes no lock; the
-// resume's own conditional write is the guard.
-func (s *PostgresStore) ListExpiredPauseCollectionsForClock(ctx context.Context, tenantID, clockID string, frozen, afterAt time.Time, afterID string, limit int) ([]domain.Subscription, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	defer postgres.Rollback(tx)
-
-	if limit <= 0 {
-		limit = 50
-	}
-	rows, err := tx.QueryContext(ctx, `
-		SELECT `+qualifiedSubCols("s")+` FROM subscriptions s
-		WHERE s.test_clock_id = $1
-		  AND s.pause_collection_resumes_at IS NOT NULL
-		  AND s.pause_collection_resumes_at <= $2
-		  AND `+resumeNotWaitingOnCloseSQL("s")+`
-		  AND (s.pause_collection_resumes_at, s.id) > ($3, $4)
-		ORDER BY s.pause_collection_resumes_at, s.id LIMIT $5
-	`, clockID, frozen, afterAt, afterID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -3047,10 +2931,8 @@ func (s *PostgresStore) ClearBillingThresholds(ctx context.Context, tenantID, id
 // downstream calls (usage aggregation, plan reads) carry their own
 // tenant context.
 // ListWithThresholds — CRON path. ADR-029 Phase 3: clock-pinned subs
-// are excluded; ListWithThresholdsForClock is the catchup-side
-// counterpart driven by Engine.ScanThresholdsForClock during Advance.
-// Without this filter the wall-clock cron would fire threshold-based
-// invoices on clock-pinned subs even though their running cycle
+// are excluded. Without this filter the wall-clock cron would fire
+// threshold-based invoices on clock-pinned subs even though their running cycle
 // subtotals are accumulated against simulated time — same drip-bill
 // shape ADR-028 closed for period generation.
 func (s *PostgresStore) ListWithThresholds(ctx context.Context, livemode bool, afterID string, limit int) ([]domain.Subscription, error) {
@@ -3104,128 +2986,13 @@ func (s *PostgresStore) ListWithThresholds(ctx context.Context, livemode bool, a
 	return subs, nil
 }
 
-// ListWithThresholdsForClock is the catchup-path counterpart to
-// ListWithThresholds. ADR-029 Phase 3 — returns active+trialing
-// subscriptions with billing thresholds configured that are pinned to
-// the given clock. Caller (Engine.ScanThresholdsForClock) evaluates
-// running-cycle subtotals against the clock's frozen_time.
-func (s *PostgresStore) ListWithThresholdsForClock(ctx context.Context, tenantID, clockID, afterID string, limit int) ([]domain.Subscription, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxBypass, "")
-	if err != nil {
-		return nil, err
-	}
-	defer postgres.Rollback(tx)
-
-	if limit <= 0 {
-		limit = 100
-	}
-
-	rows, err := tx.QueryContext(ctx, `
-		SELECT `+qualifiedSubCols("s")+` FROM subscriptions s
-		WHERE s.status IN ('active', 'trialing')
-		  AND s.tenant_id = $1
-		  AND s.test_clock_id = $2
-		  AND s.id > $3
-		  AND (s.billing_threshold_amount_gte IS NOT NULL
-		       OR EXISTS (SELECT 1 FROM subscription_item_thresholds sit WHERE sit.subscription_id = s.id))
-		ORDER BY s.id ASC
-		LIMIT $4
-	`, tenantID, clockID, afterID, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var subs []domain.Subscription
-	for rows.Next() {
-		var sub domain.Subscription
-		if err := scanSubRow(rows, &sub); err != nil {
-			return nil, err
-		}
-		subs = append(subs, sub)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	for i := range subs {
-		if err := hydrateSubChildrenTx(ctx, tx, &subs[i]); err != nil {
-			return nil, err
-		}
-	}
-	return subs, nil
-}
-
-// ListExpiredTrialsForClock returns subs pinned to this clock whose
-// trial has elapsed in simulated time (trial_end_at <= frozen) but
-// whose status is still 'trialing'. Catchup Phase 0.5 picks these
-// up and flips status to active at trial_end_at so the dashboard
-// doesn't lie about lifecycle state for the (potentially 30-day)
-// gap between trial_end_at and the next cycle close.
-//
-// It returns the page after (afterAt, afterID) in due order, trial_end_at
-// then id, so a clock ends its trials (and numbers their day-1 invoices) in
-// the order they fell due, and a row the job leaves trialing is not read
-// again. It takes no lock: the activation's conditional write (still
-// trialing, the trial ended by the time it acts for) decides a race with an
-// operator's End trial or Extend trial. Items are hydrated for the
-// in_advance BillOnCreate downstream.
-func (s *PostgresStore) ListExpiredTrialsForClock(ctx context.Context, tenantID, clockID string, frozen, afterAt time.Time, afterID string, limit int) ([]domain.Subscription, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	defer postgres.Rollback(tx)
-
-	if limit <= 0 {
-		limit = 100
-	}
-
-	rows, err := tx.QueryContext(ctx, `
-		SELECT `+qualifiedSubCols("s")+` FROM subscriptions s
-		WHERE s.status = 'trialing'
-		  AND s.test_clock_id = $1
-		  AND s.trial_end_at IS NOT NULL
-		  AND s.trial_end_at <= $2
-		  AND (s.trial_end_at, s.id) > ($3, $4)
-		ORDER BY s.trial_end_at, s.id
-		LIMIT $5
-	`, clockID, frozen, afterAt, afterID, limit)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var subs []domain.Subscription
-	for rows.Next() {
-		var sub domain.Subscription
-		if err := scanSubRow(rows, &sub); err != nil {
-			return nil, err
-		}
-		subs = append(subs, sub)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	for i := range subs {
-		if err := hydrateSubChildrenTx(ctx, tx, &subs[i]); err != nil {
-			return nil, err
-		}
-	}
-	return subs, nil
-}
-
-// ListExpiredTrials is the wall-clock counterpart for the cron tick —
-// returns non-clock-pinned trialing subs whose trial_end_at has
-// elapsed. Mirrors ListExpiredTrialsForClock but scoped per livemode
-// rather than per clock; uses TxBypass to cross tenants (scheduler-
-// wide sweep) with an explicit livemode filter (TxBypass doesn't set
-// app.livemode for RLS).
+// ListExpiredTrials returns, for the cron tick, non-clock-pinned trialing
+// subs whose trial_end_at has elapsed, scoped per livemode; uses TxBypass
+// to cross tenants (scheduler-wide sweep) with an explicit livemode filter
+// (TxBypass doesn't set app.livemode for RLS).
 //
 // ADR-028 disjoint flows: clock-pinned subs are EXPLICITLY EXCLUDED
-// (`test_clock_id IS NULL`). Those flow through the catchup
-// orchestrator's Phase 0.5 — running them here too would race the
-// orchestrator and could drift status / generate duplicate
-// trial-end invoices.
+// (`test_clock_id IS NULL`).
 //
 // FOR UPDATE SKIP LOCKED so concurrent scheduler ticks (multi-
 // replica) don't double-process the same trialing sub.

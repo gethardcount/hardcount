@@ -123,46 +123,6 @@ func TestListAutoChargePending_CursorBreaksCreatedAtTiesByID(t *testing.T) {
 	}
 }
 
-// The test-clock queue pages the same way: after the cursor, by (created_at,
-// id). Without the cursor every full page would be the first page again, and
-// a clock with 100 or more queued invoices would loop until Advance times out.
-func TestListAutoChargePendingForClock_PagesAfterTheCursor(t *testing.T) {
-	h := newCollectHarness(t)
-	const clockID = "hc_tclk_drain"
-	first := h.seed(t, "INV-CLK-1")
-	second := h.seed(t, "INV-CLK-2")
-	tx, err := h.db.BeginTx(h.ctx, postgres.TxBypass, "")
-	if err != nil {
-		t.Fatalf("begin: %v", err)
-	}
-	if _, err := tx.ExecContext(h.ctx, `INSERT INTO test_clocks (id, tenant_id, name, frozen_time, status, livemode)
-		VALUES ($1, $2, 'drain', now(), 'ready', false)`, clockID, h.tenantID); err != nil {
-		t.Fatalf("seed clock: %v", err)
-	}
-	if _, err := tx.ExecContext(h.ctx, `UPDATE customers SET test_clock_id = $1 WHERE id IN ($2, $3)`, clockID, first.CustomerID, second.CustomerID); err != nil {
-		t.Fatalf("pin customers: %v", err)
-	}
-	if err := tx.Commit(); err != nil {
-		t.Fatalf("commit: %v", err)
-	}
-
-	page1, err := h.invoices.ListAutoChargePendingForClock(h.ctx, h.tenantID, clockID, walk.Key{}, 1)
-	if err != nil || len(page1) != 1 {
-		t.Fatalf("page 1: %v %v", page1, err)
-	}
-	page2, err := h.invoices.ListAutoChargePendingForClock(h.ctx, h.tenantID, clockID, walk.Key{At: page1[0].CreatedAt, ID: page1[0].ID}, 1)
-	if err != nil || len(page2) != 1 {
-		t.Fatalf("page 2: %v %v", page2, err)
-	}
-	if page1[0].ID == page2[0].ID {
-		t.Fatalf("page 2 repeated %s: the cursor is ignored", page1[0].ID)
-	}
-	page3, err := h.invoices.ListAutoChargePendingForClock(h.ctx, h.tenantID, clockID, walk.Key{At: page2[0].CreatedAt, ID: page2[0].ID}, 1)
-	if err != nil || len(page3) != 0 {
-		t.Fatalf("page 3 = %v %v, want empty", page3, err)
-	}
-}
-
 // stripeAnswersLater is a canned Stripe: create returns a new id, confirm
 // echoes it and succeeds, and each answer advances clk (the engine's) a minute.
 type stripeAnswersLater struct {
