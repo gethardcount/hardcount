@@ -324,12 +324,12 @@ func TestCollect_RefusedClaimSaysWhatIsLeft(t *testing.T) {
 }
 
 // An invoice collected right after it is made (FinalizeOnCreateInvoice) is
-// collected at the instant its caller bound, not at its clock's frozen time,
-// and its credits are applied then. The callers on a clock each bind a
+// collected at the instant bound on its context, not at its clock's frozen
+// time, and its credits are applied then. On a clock its callers bind a
 // contracted instant earlier than the advance's target: the clock's trial job
-// a trial's end, for its day-1 invoice, and dunning's cancel in a catch-up the
-// escalation, for its relief invoice. (A trial that ends inside a period is
-// collected at the period's close:
+// a trial's end, for its first invoice, and dunning's cancel in a catch-up
+// the escalation, for its final invoice. (A trial that ends inside a period
+// is collected at the period's close:
 // TestBillOnePeriod_ATrialEndingInThePeriodIsCollectedAtTheClose.)
 func TestFinalizeOnCreateInvoice_CollectsAtTheCallersInstant(t *testing.T) {
 	frozen := time.Date(2026, 5, 20, 0, 0, 0, 0, time.UTC)
@@ -337,8 +337,8 @@ func TestFinalizeOnCreateInvoice_CollectsAtTheCallersInstant(t *testing.T) {
 		name string
 		at   time.Time
 	}{
-		{"a trial's day-1 invoice, at the trial's end", time.Date(2026, 5, 3, 0, 0, 0, 0, time.UTC)},
-		{"a dunning cancel's relief invoice, at the escalation", time.Date(2026, 5, 10, 6, 0, 0, 0, time.UTC)},
+		{"an invoice collected under a context bound to a trial's end", time.Date(2026, 5, 3, 0, 0, 0, 0, time.UTC)},
+		{"an invoice collected under a context bound to an escalation", time.Date(2026, 5, 10, 6, 0, 0, 0, time.UTC)},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			inv, applier, _, engine := leftHarness(t)

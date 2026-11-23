@@ -31,8 +31,7 @@ const (
 // at anchors the credit application and a credit-covered settle. Cycle close
 // and threshold fires pass their own period instant (the credits that were
 // live at the boundary are the ones that apply, and paid_at lands there); a
-// nil at uses the invoice's clock now, which is right for request-time
-// finalizes.
+// nil at uses the instant bound on ctx (a request's, or a job's row's).
 //
 // A draft (tax pending, collection paused) is not collected: the claim
 // requires status=finalized, so the call is a no-op until it finalizes. Nor
