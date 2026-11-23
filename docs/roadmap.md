@@ -18,9 +18,10 @@ back silently, and what nobody uses is gone.
 - **After that:** signing in, then subscriptions, invoices, payments and
   dunning.
 
-The first three items under [Next](#next) are built when test clocks are
-finished. The rest of this work goes on beside them. A release goes out when
-a part is finished.
+The first items under [Next](#next) are built beside this work, one at a
+time. A release goes out when a part is finished. Where a part holds
+something only a general subscription product needs, it may be removed; the
+[changelog](../CHANGELOG.md) says so when it is.
 
 ## Next
 
@@ -38,26 +39,30 @@ In this order:
    future, so you cannot move a clock and see an invoice made from your own
    traffic ([why](integrations/litellm.md#2-create-the-customer-and-put-it-on-a-plan)).
    Such a call will take the clock's time, as an event with no time does.
-2. **Stop a customer whose prepaid credit has run out, at the gateway.**
+2. **A top-up your customer starts.** A link where your customer buys credit
+   with a card, through your Stripe account. The credit arrives when the
+   payment does. Today you write an invoice for each purchase
+   ([how](ai-pricing.md#sell-prepaid-credit-a-prepaid-commit)).
+3. **Stop a customer whose prepaid credit has run out, at the gateway.**
    Hardcount tells your gateway, and the gateway refuses the calls. Today
    this is a guide and your own code
    ([how](stop-usage-when-credit-runs-out.md)). Hardcount itself still never
    refuses usage.
-3. **A usage and balance page your customers can open.** The public cost
-   page that exists today, finished so that a customer can use it on their
-   own.
-4. **Spend alerts.** An alert level on each subscription, checked
-   against usage as it arrives, with an optional repeat. It is not the
-   [spend threshold](glossary.md#subscriptions-and-invoices) that bills early. When usage crosses it, Hardcount
-   sends a webhook and an email.
-5. **A simpler check for usage a gateway did not deliver.** Today you
-   compare Hardcount's usage with the gateway's spend log with SQL
+4. **A usage and balance page your customers can open,** with a way to top
+   up. Today's public cost page gives the figures to your app; this is a
+   page a customer can use on their own.
+5. **Automatic top-ups.** When the balance falls below a level, the
+   customer's card is charged for more credit.
+6. **A check against the gateway's own log.** Today you compare Hardcount's
+   usage with the gateway's spend log with SQL
    ([how](ops/runbook/litellm-spend-gap.md)).
-6. **Billed or not, on each usage event.** The Usage page shows whether an
+7. **A price set as your provider's cost plus a markup,** so your prices
+   follow the provider's.
+8. **Billed or not, on each usage event.** The Usage page shows whether an
    invoice billed each event and, if not, why, with a filter. Hardcount records
    it when it invoices the period, so it says what the invoice did. Today
    only the answer to the event says what Hardcount found when it arrived.
-7. **Generated SDKs for Go and TypeScript,** built from
+9. **Generated SDKs for Go and TypeScript,** built from
    [`api/openapi.yaml`](../api/openapi.yaml).
 
 ## Later
@@ -66,6 +71,10 @@ Each item waits until someone using Hardcount needs it:
 
 - Several subscriptions for one customer on one meter, such as one per
   project.
+- Spend alerts for usage billed after the period: an alert level on a
+  subscription, with a webhook and an email when usage crosses it. Prepaid
+  credit already sends low and used-up events
+  ([events](api/webhook-events.md)).
 - An allowance for each user inside one paying account, with a pool the
   account shares.
 - Payment methods beyond cards, such as SEPA or ACH debits, on the hosted
@@ -84,7 +93,6 @@ Each item waits until someone using Hardcount needs it:
   credit for its customer. Today the catch-up lists such a payment, and the
   operator grants the credit or refunds it by hand
   ([restore](ops/restore.md#payments-whose-invoice-the-restore-lost)).
-- Automatic credit top-ups.
 - Importing LLM prices from a public price list.
 - Two-factor sign-in.
 - Data deletion, compliance documents (SOC 2, audit-log retention), and
@@ -119,7 +127,8 @@ Each item waits until someone using Hardcount needs it:
   still finish a first charge whose result was unclear. A new key is used
   only once Stripe has shown no payment for that charge for 24 hours
   ([why](adr/127-a-lost-charge-result-is-resolved-by-asking-stripe.md)).
-- Coupons, a customer portal, quotes, contracts and minimum spend.
+- Coupons, a portal where customers manage their own subscription, quotes,
+  contracts and minimum spend.
 - Telemetry of any kind.
 - Docs kept outside this repo. The pages on gethardcount.com/docs are
   built from this repo's `docs/`.
