@@ -1567,16 +1567,20 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 		inv.RecoveryWarning = domain.RecoveryWarnsOnOfflinePayment(inv, unrelieved)
 	}
 
-	// Compute the inclusive display end ("Jun 1 – Jun 30") on the read path
-	// (ADR-058 follow-up). Storage stays half-open; this is the single
-	// backend-authored value every render surface (PDF, hosted, dashboard, list)
-	// shows, so the inclusive end can't drift across runtimes. Anchored in the
-	// invoice's OWN billing TZ (denormalized onto the invoice at
-	// creation), not the live tenant TZ — so the inclusive last-day step lands on
-	// the right civil date even after the tenant changes its timezone.
-	inv.BillingPeriodDisplay = domain.FormatInclusivePeriod(
-		inv.BillingPeriodStart, inv.BillingPeriodEnd, s.invoiceDisplayLocCached(ctx, inv, tenantLoc))
+	inv.BillingPeriodDisplay = s.periodDisplay(ctx, inv, tenantLoc)
 	return inv
+}
+
+// periodDisplay is the invoice's inclusive billing period ("Jun 1 – Jun 30",
+// ADR-058 follow-up), computed on the read path. Storage stays half-open;
+// this is the single backend-authored value every render surface (PDF,
+// hosted, dashboard, list) shows, so the inclusive end can't drift across
+// runtimes. It is anchored in the invoice's OWN billing TZ (denormalized onto
+// the invoice at creation), not the live tenant TZ, so the inclusive last-day
+// step lands on the right civil date even after the tenant changes its
+// timezone; an invoice with none uses the tenant's, cached in tenantLoc.
+func (s *Service) periodDisplay(ctx context.Context, inv domain.Invoice, tenantLoc **time.Location) string {
+	return domain.FormatInclusivePeriod(inv.BillingPeriodStart, inv.BillingPeriodEnd, s.invoiceDisplayLocCached(ctx, inv, tenantLoc))
 }
 
 // invoiceZone is the zone a stored date of the invoice is worked out in: its
@@ -2516,26 +2520,24 @@ func (s *Service) GetWithLineItems(ctx context.Context, tenantID, id string) (do
 }
 
 // GetByPublicToken resolves a hosted-invoice-URL token to the invoice and
-// its livemode. Exposed on the service so the public hosted-invoice
-// handler can look up the invoice (and hence the owning tenant + mode)
-// before any tenant context is available. Thin forward to the store —
-// the store method is the one that uses TxBypass. The livemode return
-// is what the handler uses to pin postgres.WithLivemode on the request
+// its livemode, for the public hosted-invoice handler, which has no tenant
+// context until it knows the invoice. The invoice carries its
+// BillingPeriodDisplay (the page's PDF prints it) and nothing else derived:
+// no attention, which the public page does not show. The page decides its
+// time from the invoice and reads what it shows itself. The store method
+// uses TxBypass; the livemode return is what the handler pins on the request
 // context for every downstream RLS-scoped read.
 func (s *Service) GetByPublicToken(ctx context.Context, token string) (domain.Invoice, bool, error) {
 	inv, livemode, err := s.store.GetByPublicToken(ctx, token)
 	if err != nil {
 		return domain.Invoice{}, false, err
 	}
-	// Pin livemode on the ctx before attachAttention. attachAttention
-	// reads payment_setups under TxTenant; without the pin it would
-	// default to live and either return a stale-mode row or trip the
-	// "livemode propagation missing" WARN. The hosted-invoice handler
-	// pins again on the request ctx for its own downstream reads, but
-	// service-level pinning here keeps callers (and the attention
-	// classification specifically) honest regardless of who's calling.
-	ctx = postgres.WithLivemode(ctx, livemode)
-	return s.attachAttention(ctx, inv), livemode, nil
+	// The period's display reads the tenant's timezone under TxTenant when
+	// the invoice has none of its own, and TxTenant refuses a ctx with no
+	// mode: pin the invoice's.
+	var tenantLoc *time.Location
+	inv.BillingPeriodDisplay = s.periodDisplay(postgres.WithLivemode(ctx, livemode), inv, &tenantLoc)
+	return inv, livemode, nil
 }
 
 // SetPublicToken persists a rotated public_token on a non-draft invoice.
