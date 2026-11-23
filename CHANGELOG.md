@@ -27,7 +27,7 @@ original text.
 
 ### Removed
 
-- **Test clocks.** The `/v1/test-clocks` routes, the dashboard's Test clocks pages, and `test_clock_id` on customer create, which is now refused with `422` as an unknown field. To see a customer's invoice before its period ends, use the upcoming invoice (`POST /v1/invoices/create_preview`); to issue a test customer's invoice now, cancel its subscription ([first invoice](docs/first-invoice.md#steps)).
+- **Test clocks.** The `/v1/test-clocks` routes, the dashboard's Test clocks pages, and `test_clock_id` on customer create, which is now refused with `422` as an unknown field. To see a customer's invoice before its period ends, use the upcoming invoice (`POST /v1/invoices/create_preview`); to issue a test customer's invoice now, cancel its subscription ([first invoice](docs/first-invoice.md#steps), [#1910](https://github.com/gethardcount/hardcount/pull/1910)).
 
 ### Fixed
 
