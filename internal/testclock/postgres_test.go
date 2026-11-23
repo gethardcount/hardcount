@@ -426,8 +426,8 @@ func TestPostgresStore_MarkAdvancing_ChecksTheTimeOnTheRowItChanges(t *testing.T
 // TestNextDue_EachKindOfDueTime: NextDue is the earliest time something falls
 // due for the clock's customers after the clock's time: a period end, a
 // scheduled cancel, a trial end, a pause's end or a dunning run's next action.
-// A time past the target, a row on another clock and a closed run are not due;
-// with nothing due before the target, it answers the target.
+// A row on another clock and a closed run are not due; a due time after the
+// target answers the target, as does nothing due before it.
 func TestNextDue_EachKindOfDueTime(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	store := testclock.NewPostgresStore(db)
@@ -507,6 +507,9 @@ func TestNextDue_EachKindOfDueTime(t *testing.T) {
 	}
 	if next, err := store.NextDue(ctx, tenantID, clk.ID, at, day(5)); err != nil || !next.Equal(day(2)) {
 		t.Errorf("next due before an early target: %v (%v), want %v", next, err, day(2))
+	}
+	if next, err := store.NextDue(ctx, tenantID, clk.ID, day(6), day(8)); err != nil || !next.Equal(day(8)) {
+		t.Errorf("next due with the period end (day 9) past the target: %v (%v), want the target %v", next, err, day(8))
 	}
 	if next, err := store.NextDue(ctx, tenantID, clk.ID, day(9), day(8).AddDate(0, 1, 0)); err != nil || !next.Equal(day(8).AddDate(0, 1, 0)) {
 		t.Errorf("next due with nothing left: %v (%v), want the target", next, err)

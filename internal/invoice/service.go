@@ -3159,36 +3159,14 @@ func (s *Service) RetryPendingTaxForClock(ctx context.Context, tenantID, clockID
 		if ctx.Err() != nil {
 			continue // the walk reports the stop once, at its next page
 		}
-		retried, err := s.RetryTax(ctx, inv.TenantID, inv.ID)
-		if err != nil {
-			errs = append(errs, fmt.Errorf("invoice %s: %w", inv.ID, err))
+		if err := s.retryTaxOne(ctx, inv); err != nil {
+			errs = append(errs, err)
 			continue
 		}
 		processed++
-		// A draft still waiting stops the advance at this step: ended ready,
-		// it would stay unbilled with nothing to try it again.
-		if retried.TaxStatus == domain.InvoiceTaxPending {
-			errs = append(errs, taxStillPending{retried})
-		}
 	}
 	return processed, errs
 }
-
-// taxStillPending is a clock's draft whose tax retry failed again:
-// domain.ErrLeftForNextRun, with a sentence for the operator.
-type taxStillPending struct{ inv domain.Invoice }
-
-func (e taxStillPending) OperatorSafeMessage() string {
-	ref := e.inv.InvoiceNumber
-	if ref == "" {
-		ref = e.inv.ID
-	}
-	return fmt.Sprintf("Invoice %s: its tax could not be calculated (%s). Retry advance tries again.", ref, e.inv.TaxPendingReason)
-}
-
-func (e taxStillPending) Error() string { return e.OperatorSafeMessage() }
-
-func (e taxStillPending) Unwrap() error { return domain.ErrLeftForNextRun }
 
 // pendingTaxRetryKey is a draft's place in the clock's tax-retry list, read
 // by (created_at, id).

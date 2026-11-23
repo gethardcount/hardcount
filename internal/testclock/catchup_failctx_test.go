@@ -106,4 +106,29 @@ func TestRunCatchup_EndedCtxLeavesTheClockAdvancing(t *testing.T) {
 	if got := base.clocks["c1"].Status; got != domain.TestClockStatusAdvancing {
 		t.Errorf("status: got %q, want advancing", got)
 	}
+
+	// The tick ends while the next due time is read, between two steps.
+	target := at.AddDate(0, 1, 0)
+	between := newMockStore()
+	between.clocks["c1"] = domain.TestClock{ID: "c1", TenantID: "t1", Status: domain.TestClockStatusAdvancing, FrozenTime: at, AdvanceTarget: &target}
+	tick, endTick := context.WithCancel(context.Background())
+	endsInNextDue := &tickEndingNextDue{ctxCheckingStore: ctxCheckingStore{mockStore: between}, endTick: endTick}
+	s = NewService(endsInNextDue, testDeps(&countingRunner{}))
+	if err := runPass(tick, s, "t1", "c1"); err != nil {
+		t.Fatalf("the pass whose tick ended between steps: %v, want nil", err)
+	}
+	if endsInNextDue.markFailedSawLiveCtx || between.clocks["c1"].Status != domain.TestClockStatusAdvancing {
+		t.Errorf("after a tick that ended between steps: %s, failed %v; want advancing, not failed", between.clocks["c1"].Status, endsInNextDue.markFailedSawLiveCtx)
+	}
+}
+
+// tickEndingNextDue ends the tick while it reads the next due time.
+type tickEndingNextDue struct {
+	ctxCheckingStore
+	endTick context.CancelFunc
+}
+
+func (s *tickEndingNextDue) NextDue(ctx context.Context, _, _ string, _, _ time.Time) (time.Time, error) {
+	s.endTick()
+	return time.Time{}, ctx.Err()
 }

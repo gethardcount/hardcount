@@ -64,8 +64,8 @@ func (s *PostgresStore) Create(ctx context.Context, tenantID string, clk domain.
 //
 // ErrNotFound → (zero, false, nil); other errors propagate. Soft-deleted clocks
 // count as not-existing. A request that creates a customer on an advancing
-// clock is refused (clock.RefuseIfAdvancing); a failed clock's frozen_time
-// is already its new time, so the customer joins at it.
+// clock is refused (clock.RefuseIfAdvancing); a failed clock's frozen_time is
+// the step its advance reached, and the customer joins at it.
 func (s *PostgresStore) ResolveSim(ctx context.Context, tenantID, id string) (clock.Sim, bool, error) {
 	clk, err := s.Get(ctx, tenantID, id)
 	if err != nil {
@@ -554,7 +554,7 @@ func (s *PostgresStore) MoveTo(ctx context.Context, tenantID, id string, to time
 
 	res, err := tx.ExecContext(ctx,
 		`UPDATE test_clocks SET frozen_time = $4, last_advance_summary = $5::jsonb, updated_at = now()
-		 WHERE id = $1 AND status = 'advancing' AND leader_fence($2, $3) AND $4 > frozen_time`,
+		 WHERE id = $1 AND status = 'advancing' AND leader_fence($2, $3)`,
 		id, string(leader.RoleTestClockCatchup), token, to, b,
 	)
 	if err != nil {

@@ -515,17 +515,25 @@ func (s *Service) runClock(ctx context.Context, clk domain.TestClock) (err error
 			break
 		}
 		next, err := s.store.NextDue(passCtx, tenantID, clockID, at, target)
-		if err != nil {
-			fail(errs.SanitizeForOperator(fmt.Errorf("could not read the next due time"), clockID))
-			return err
+		if err == nil {
+			err = s.store.MoveTo(passCtx, tenantID, clockID, next, sum)
 		}
-		if err := s.store.MoveTo(passCtx, tenantID, clockID, next, sum); err != nil {
-			if fencedWriteMissed(err) {
+		if err != nil {
+			// As after the jobs: an ended tick leaves the clock advancing at
+			// this step, and a deadline gives the deadline's reason.
+			switch {
+			case ctx.Err() != nil:
+				logStopped(ctx, tenantID, clockID)
+				return nil
+			case fencedWriteMissed(err):
 				logFencedMiss(ctx, tenantID, clockID, err)
 				return nil
+			case errors.Is(passCtx.Err(), context.DeadlineExceeded):
+				fail(fmt.Sprintf("the catch-up pass at %s did not finish within %s", at.UTC().Format(time.RFC3339), s.passDeadline))
+			default:
+				fail(errs.SanitizeForOperator(fmt.Errorf("could not move the clock on from %s", at.UTC().Format(time.RFC3339)), clockID))
 			}
-			fail(errs.SanitizeForOperator(fmt.Errorf("could not move the clock to %s", next.UTC().Format(time.RFC3339)), clockID))
-			return fmt.Errorf("move test clock %s to %s: %w", clockID, next, err)
+			return fmt.Errorf("move test clock %s on from %s: %w", clockID, at, err)
 		}
 		at = next
 	}

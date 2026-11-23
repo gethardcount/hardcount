@@ -29,7 +29,7 @@ come from the clock, not from the real time.
 | Status | What it means | What you can do |
 |---|---|---|
 | `ready` | Idle. | Move it, or delete it. |
-| `advancing` | Hardcount is running everything that fell due in the skipped time. | Wait, and read the clock again. A change to one of its customers (the customer, its subscriptions, invoices, credit notes and credits, and usage you backfill or release), or a new customer on it, answers `409 clock_advancing`. Reads, usage your app or proxy sends, payments through Stripe, price changes (which take effect after the advance) and deleting the clock go on. |
+| `advancing` | Hardcount is running everything that fell due in the skipped time. | Wait, and read the clock again. A change to one of its customers (the customer, its subscriptions, invoices, credit notes and credits, and usage you backfill or release), or a new customer on it, answers `409 clock_advancing`. Reads, usage your app or proxy sends, payments through Stripe, price changes and deleting the clock go on; usage, payments and price changes that arrive during the advance take effect after it. |
 | `internal_failure` | A job failed, or the run took more than 10 minutes. The clock stops at the time it had got to; work done before the failure is kept, and the jobs after it did not run. `last_failure_reason` names the job that failed and why. | `POST /v1/test-clocks/{id}/retry-advance`, which carries on from there, or delete the clock. |
 
 ## Moving a clock
@@ -76,12 +76,12 @@ has got to. At each of those times it runs these jobs, in this order:
 If a job fails, the jobs after it do not run: the clock stops at
 `internal_failure` at the time it had got to, and its `last_failure_reason`
 starts with the job's name from this list. Retry advance runs that time
-again and carries on to the time you asked for; `last_advance_summary`
-counts the whole move, both runs.
+again and carries on to the time you asked for; the counts in
+`last_advance_summary` add up across Retry advance.
 
-A tax calculation that fails again is a failure on a clock: the clock stops,
-and `last_failure_reason` names the invoice and the reason. Retry advance
-tries it again.
+A draft whose tax cannot be calculated stays a draft and the move goes on,
+as in real time; the tax retry tries it again at each later time the clock
+reaches.
 
 A card charge that could not be made is a failure on a clock: the clock
 stops at `internal_failure`, and `last_failure_reason` names the invoice and
