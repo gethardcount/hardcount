@@ -11,30 +11,59 @@ Making the billing path simpler to read and harder to get wrong, one part at
 a time. A part is finished when each thing is done one way, nothing falls
 back silently, and what nobody uses is gone.
 
-- **Done:** API keys.
+- **Done:** API keys, and the path a request travels.
 - **In progress:** test clocks. A request's time is decided once, and an
-  advance finishes its work or fails and says what is left.
-- **After that:** the path of a request, signing in, then subscriptions,
-  invoices, payments and dunning.
+  advance does its work in the order real time would, then finishes or
+  fails and says what is left.
+- **After that:** signing in, then subscriptions, invoices, payments and
+  dunning.
 
-The items under [Next](#next) follow this work.
+The first items under [Next](#next) are built beside this work, one at a
+time. A release goes out when a part is finished. Where a part holds
+something only a general subscription product needs, it may be removed; the
+[changelog](../CHANGELOG.md) says so when it is.
 
 ## Next
 
-**v0.10.0**, planned after the work under [Now](#now):
+**Who the next work is chosen for:** a small team that runs its own LLM
+gateway, such as LiteLLM, resells model access to its own customers, and
+charges their cards through its own Stripe account. That is a bet, not a
+finding: if you bill another way and something here is in your way,
+[say so](https://github.com/gethardcount/hardcount/issues). Nothing below
+works only with LiteLLM. The usage API stays the contract.
 
-- **Spend alerts.** An alert level on each subscription, checked
-  against usage as it arrives, with an optional repeat. It is not the
-  [spend threshold](glossary.md#subscriptions-and-invoices) that bills early. When usage crosses it, Hardcount
-  sends a webhook and an email. Cutting a customer off stays in your app
-  ([how](stop-usage-when-credit-runs-out.md)).
-- **Generated SDKs for Go and TypeScript,** built from
-  [`api/openapi.yaml`](../api/openapi.yaml), once the per-plan pricing API
-  has settled.
-- **Billed or not, on each usage event.** The Usage page shows whether an
-  invoice billed each event and, if not, why, with a filter. Hardcount records
-  it when it invoices the period, so it says what the invoice did. Today
-  only the answer to the event says what Hardcount found when it arrived.
+In this order:
+
+1. **Your gateway's own traffic on a test clock.** Today a call that a
+   gateway reports for a customer on a test clock is refused as dated in the
+   future, so you cannot move a clock and see an invoice made from your own
+   traffic ([why](integrations/litellm.md#2-create-the-customer-and-put-it-on-a-plan)).
+   Such a call will take the clock's time, as an event with no time does.
+2. **A top-up your customer starts.** A link where your customer buys credit
+   with a card, through your Stripe account. The credit arrives when the
+   payment does. Today you write an invoice for each purchase
+   ([how](ai-pricing.md#sell-prepaid-credit-a-prepaid-commit)).
+3. **Stop a customer whose prepaid credit has run out, at the gateway.**
+   Hardcount tells your gateway, and the gateway refuses the calls. Today
+   this is a guide and your own code
+   ([how](stop-usage-when-credit-runs-out.md)). Hardcount itself still never
+   refuses usage.
+4. **A usage and balance page your customers can open,** with a way to top
+   up. Today's public cost page gives the figures to your app; this is a
+   page a customer can use on their own.
+5. **Automatic top-ups.** When the balance falls below a level, the
+   customer's card is charged for more credit.
+6. **A check against the gateway's own log.** Today you compare Hardcount's
+   usage with the gateway's spend log with SQL
+   ([how](ops/runbook/litellm-spend-gap.md)).
+7. **A price set as your provider's cost plus a markup,** so your prices
+   follow the provider's.
+8. **Billed or not, on each usage event.** The Usage page shows whether an
+   invoice billed each event and, if not, why, with a filter. Hardcount records
+   it when it invoices the period, so it says what the invoice did. Today
+   only the answer to the event says what Hardcount found when it arrived.
+9. **Generated SDKs for Go and TypeScript,** built from
+   [`api/openapi.yaml`](../api/openapi.yaml).
 
 ## Later
 
@@ -42,6 +71,12 @@ Each item waits until someone using Hardcount needs it:
 
 - Several subscriptions for one customer on one meter, such as one per
   project.
+- Spend alerts for usage billed after the period: an alert level on a
+  subscription, with a webhook and an email when usage crosses it. Prepaid
+  credit already sends low and used-up events
+  ([events](api/webhook-events.md)).
+- An allowance for each user inside one paying account, with a pool the
+  account shares.
 - Payment methods beyond cards, such as SEPA or ACH debits, on the hosted
   invoice page.
 - A second payment processor.
@@ -58,7 +93,6 @@ Each item waits until someone using Hardcount needs it:
   credit for its customer. Today the catch-up lists such a payment, and the
   operator grants the credit or refunds it by hand
   ([restore](ops/restore.md#payments-whose-invoice-the-restore-lost)).
-- Automatic credit top-ups.
 - Importing LLM prices from a public price list.
 - Two-factor sign-in.
 - Data deletion, compliance documents (SOC 2, audit-log retention), and
@@ -93,15 +127,19 @@ Each item waits until someone using Hardcount needs it:
   still finish a first charge whose result was unclear. A new key is used
   only once Stripe has shown no payment for that charge for 24 hours
   ([why](adr/127-a-lost-charge-result-is-resolved-by-asking-stripe.md)).
-- Coupons, a customer portal, quotes, contracts and minimum spend.
+- Coupons, a portal where customers manage their own subscription, quotes,
+  contracts and minimum spend.
 - Telemetry of any kind.
 - Docs kept outside this repo. The pages on gethardcount.com/docs are
   built from this repo's `docs/`.
 
 ## Shipped recently
 
-After v0.9.0 (see the [changelog](../CHANGELOG.md)):
+November 2026, v0.9.1 to v0.10.0 (see the [changelog](../CHANGELOG.md)):
 
+- **A test clock's advance runs in the background, on one copy of Hardcount,** and the clock shows that it is advancing.
+- **Each API route states who may call it,** and a request that was refused no longer holds its `Idempotency-Key`.
+- **Draft subscriptions and the `X-API-Key` header are removed.** A subscription starts when it is created, and a key is sent as `Authorization: Bearer`.
 - **A restored database catches up with Stripe before it serves.** After a restore, Hardcount refuses to start until `hardcount restore catch-up` has applied every payment, refund, dispute and saved card Stripe recorded since the backup ([ADR-135](adr/135-restore-refuses-to-serve-until-caught-up.md)).
 - **A refund made in the Stripe dashboard is recorded.** It becomes a credit note when it plainly fits the invoice, so the documents and Stripe Tax match the card; otherwise the invoice shows a notice ([ADR-134](adr/134-refunds-made-in-stripe-are-recorded.md)).
 - **A usage-only API key for LiteLLM and other gateways.** It can send usage events and nothing else ([key types](api-keys.md#key-types)). The platform key type and `/v1/tenants`, which nothing could use, are removed ([ADR-133](adr/133-api-key-types-secret-and-ingest.md)).
