@@ -27,6 +27,11 @@ your first invoice](../first-invoice.md).
    Hardcount on the same computer at `http://host.docker.internal:8080`,
    not `localhost` (step 3).
 
+   Give the proxy a database (its `DATABASE_URL`), so that it keeps a
+   spend log. Comparing Hardcount's usage with that log is how lost calls
+   are found
+   ([What LiteLLM can lose, and what to do](#what-litellm-can-lose-and-what-to-do)).
+
 Do steps 1 and 2 before LiteLLM sends its first call. Usage that arrives
 before the customer or the meter exists is held. Once released, usage for a
 customer created after the calls is usually not invoiced, because it
