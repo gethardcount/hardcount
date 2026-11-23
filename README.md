@@ -63,7 +63,7 @@ The demo sets up AI token prices, creates a customer and sends token usage the w
 
 `./quickstart.sh stop` keeps your data. `./quickstart.sh destroy` deletes it, and cannot be undone. If port 8080 is taken, start with `HARDCOUNT_PORT=9000 ./quickstart.sh`.
 
-**Next:** [send your own usage and get a first invoice](docs/first-invoice.md) · [run it for real on one VM](docs/production-one-vm.md) · [change Hardcount itself](CONTRIBUTING.md#development-setup)
+**Next:** [send your own usage and get a first invoice](docs/first-invoice.md) · [connect Stripe and charge a test card](docs/guides/connect-stripe.md) · [run it for real on one VM](docs/production-one-vm.md) · [change Hardcount itself](CONTRIBUTING.md#development-setup)
 
 ---
 

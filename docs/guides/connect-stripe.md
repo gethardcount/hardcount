@@ -19,8 +19,11 @@ dashboard's live mode or with a live key.
   one in its step 3.
 - A Stripe account, in test mode.
 - An address Stripe can reach. Stripe sends its webhooks (messages about
-  payments) to Hardcount over the internet. On your own computer, the
-  Stripe CLI can forward them: see step 2.
+  payments) to Hardcount over the internet. It cannot reach your own
+  computer: there, install the
+  [Stripe CLI](https://docs.stripe.com/stripe-cli) and sign it in to your
+  Stripe account with `stripe login`. Step 2 uses it to pass the webhooks
+  on.
 
 How payments work, in short: [Payments](../concepts/payments.md).
 
@@ -134,6 +137,12 @@ them a link to it:
   customer, or open it yourself in test mode. Add `"return_url"` to the
   body to choose where Stripe sends them afterwards. Hardcount adds
   `?status=success` or `?status=cancel` to it.
+
+  An error with `return_address_not_set` instead? Hardcount has no
+  address to send the customer back to. The quick start sets one. On
+  another install, set `CUSTOMER_PORTAL_URL`
+  ([below](#addresses-stripe-sends-customers-back-to)), or pass
+  `"return_url"`.
 - **By email from Hardcount:**
   `POST /v1/customers/{customer_id}/payment-methods/send-setup-email`
   sends the link to the customer's email address. It needs email set up
@@ -152,12 +161,32 @@ hosted invoice page.
 
 ## 4. The first charge
 
-Put the customer on a plan and let an invoice be issued: in test mode, on a
-[test clock](../concepts/test-clocks.md), move the clock past the period
-end. Right after the invoice is issued, Hardcount uses any credit the
-customer holds, then charges the card for the rest.
+**An invoice the customer already has.** An invoice issued before the card
+was saved stays open, such as the one the
+[first invoice page](../first-invoice.md#steps) made (its step 7 saves the
+ID in `INVOICE_ID`). Charge it now:
 
-**You see:**
+- **From the dashboard:** open the invoice and click **Collect payment**,
+  then confirm.
+- **From the API:**
+
+  ```bash
+  curl -s -X POST "$HARDCOUNT/v1/invoices/$INVOICE_ID/collect" \
+    -H "Authorization: Bearer $HARDCOUNT_KEY" | jq '{status, payment_status}'
+  ```
+
+  **You see:** `"status": "paid"` and `"payment_status": "succeeded"`.
+
+Left alone, the invoice is charged on the next billing run. For a customer
+on a test clock, that is when the clock next moves
+([Payments](../concepts/payments.md#the-flow)).
+
+**A new invoice.** Put the customer on a plan and let an invoice be issued:
+in test mode, on a [test clock](../concepts/test-clocks.md), move the clock
+past the period end. Right after the invoice is issued, Hardcount uses any
+credit the customer holds, then charges the card for the rest.
+
+**You see**, either way:
 
 - the invoice reads **Paid** in the dashboard, and the payment shows in
   your Stripe dashboard, under **Payments**;
