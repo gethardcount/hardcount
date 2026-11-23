@@ -19,6 +19,8 @@ original text.
 
 ## [Unreleased]
 
+**Before upgrading:** nothing to do. Migration `00238_test_clock_advance_target` adds one nullable column to `test_clocks`, and gives a clock that is advancing during the upgrade its target. It runs on start, and copies of the earlier version keep working while it does.
+
 ## [0.10.0] - 2026-11-23
 
 A restored database now catches up with Stripe before Hardcount serves it (`hardcount restore`). A test clock's advance runs as a background job on one replica, and work on a test clock is dated at the event it belongs to. Each API route states who may call it, and a request that was refused no longer holds its `Idempotency-Key`. Draft subscriptions and the `X-API-Key` header are removed. Claude Fable 5.2 and Mythos 5.2 have prices.

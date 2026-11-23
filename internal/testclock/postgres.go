@@ -254,7 +254,7 @@ func (s *PostgresStore) MarkAdvancing(ctx context.Context, tenantID, id string, 
 	// sees the old row). The catch-up reads it back from the clock, so a
 	// Retry and a run another replica picks up keep it.
 	return s.transition(ctx, tenantID, id, auditRow, "can only advance a clock in status=ready", `
-		UPDATE test_clocks SET status = 'advancing', frozen_time = $2,
+		UPDATE test_clocks SET status = 'advancing', frozen_time = $2, advance_target = $2,
 			last_advance_summary = jsonb_build_object('advanced_from', frozen_time),
 			updated_at = now()
 		WHERE id = $1 AND status = 'ready'
@@ -311,7 +311,9 @@ func (s *PostgresStore) transitionWithReason(
 	}
 	defer postgres.Rollback(tx)
 
-	set := `last_failure_reason = NULL`
+	// A completed advance has reached its target; a failed one keeps it for
+	// Retry advance.
+	set := `last_failure_reason = NULL, advance_target = NULL`
 	args := []any{to, id}
 	if !clearReason {
 		// The dashboard shows the reason in one panel: keep 500 bytes, or

@@ -192,6 +192,34 @@ func TestE2E_PlanPrices_TestClockOverride(t *testing.T) {
 	wantUsage(t, "P2: list again", r.cycle(sub, p2), map[string]int64{ids[0]: 100})
 }
 
+// TestE2E_PlanPrices_AnAdvancingClockStampsAtItsTarget: while a clock
+// advances, a price edit and an override are stamped at the advance's target
+// plus 1 microsecond, not at the clock's time, so every period of the advance
+// keeps the price it began with. Only the stepped advance leaves a clock's
+// time behind its target; the state is set here directly.
+func TestE2E_PlanPrices_AnAdvancingClockStampsAtItsTarget(t *testing.T) {
+	r := newPPRig(t, "clock advancing")
+	calls := r.meter("calls", "sum")
+	plan, ids := r.plan("pro", perUnit(calls, "1", nil))
+	frozen := time.Now().UTC().AddDate(0, 0, -90).Truncate(time.Second)
+	clk := r.clock("advancing", frozen)
+	cust := r.customer("pp-adv", clk)
+	r.subscribe(time.Time{}, cust, plan) // the plan is used
+	target := frozen.AddDate(0, 0, 60)
+	r.exec(`UPDATE test_clocks SET status = 'advancing', advance_target = $2 WHERE id = $1`, clk, target)
+
+	r.editTo(plan, ids[0], "2", "next_period")
+	if n := r.count(`SELECT count(*) FROM plan_price_version_clocks WHERE test_clock_id = $1 AND valid_from = $2`, clk, target.Add(time.Microsecond)); n != 1 {
+		t.Errorf("%d version stamps for the clock at its target plus 1µs, want 1", n)
+	}
+	o := r.must(time.Time{}, http.MethodPost, "/v1/price-overrides", map[string]any{
+		"customer_id": cust, "price_id": ids[0], "mode": "per_unit", "unit_amount_cents": "4",
+	}, http.StatusCreated)
+	if got := ppTime(t, flowStr(o, "created_at")); !got.Equal(target.Add(time.Microsecond)) {
+		t.Errorf("override created_at = %v, want the advance's target plus 1µs (%v)", got, target.Add(time.Microsecond))
+	}
+}
+
 // TestE2E_PlanPrices_NeverUsedAgainAfterTeardown: a test-clock teardown
 // deletes the clock's subscriptions, so their plan can be never-used again
 // with several versions. A write then replaces every one of them, so it

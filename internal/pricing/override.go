@@ -89,7 +89,9 @@ func overrideLocksTx(ctx context.Context, tx *sql.Tx, priceID string) (taking bo
 }
 
 // customerStampTx is the instant an override write for the customer stamps:
-// the customer's clock time plus 1 microsecond, its clock read FOR SHARE
+// the customer's clock time plus 1 microsecond (while the clock advances, its
+// advance's target, so the advance keeps the price it began with), its clock
+// read FOR SHARE
 // (ADR-130 §8 step 5) so a clock advance or teardown is ordered with the
 // write; or wall time, clock_timestamp(), for a customer without a clock.
 func customerStampTx(ctx context.Context, tx *sql.Tx, customerID string) (time.Time, error) {
@@ -103,7 +105,7 @@ func customerStampTx(ctx context.Context, tx *sql.Tx, customerID string) (time.T
 	var at time.Time
 	if clockID.Valid && clockID.String != "" {
 		err := tx.QueryRowContext(ctx, `
-			SELECT frozen_time + interval '1 microsecond' FROM test_clocks WHERE id = $1 FOR SHARE`, clockID.String).Scan(&at)
+			SELECT COALESCE(advance_target, frozen_time) + interval '1 microsecond' FROM test_clocks WHERE id = $1 FOR SHARE`, clockID.String).Scan(&at)
 		if err == sql.ErrNoRows {
 			// A teardown of the clock committed while this waited for it,
 			// and deleted the customer with it.
