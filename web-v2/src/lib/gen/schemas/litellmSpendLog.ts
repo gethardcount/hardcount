@@ -84,7 +84,7 @@ export interface LitellmSpendLog {
   cost_breakdown?: LitellmSpendLogCostBreakdown;
   /** Unix seconds. Event time when `endTime` is absent. */
   startTime?: number;
-  /** Unix seconds. The event time. With neither, the customer's current time is used. */
+  /** Unix seconds. The event time. With neither, or for a customer on a test clock, the customer's current time is used. */
   endTime?: number;
   /**
      * `team_id` and `request_tags` become event dimensions (a list of

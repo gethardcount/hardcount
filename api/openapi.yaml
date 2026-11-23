@@ -7741,7 +7741,7 @@ components:
           description: Unix seconds. Event time when `endTime` is absent.
         endTime:
           type: number
-          description: Unix seconds. The event time. With neither, the customer's current time is used.
+          description: Unix seconds. The event time. With neither, or for a customer on a test clock, the customer's current time is used.
         metadata:
           type: object
           additionalProperties: true
