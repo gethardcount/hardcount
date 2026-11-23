@@ -29,6 +29,10 @@ original text.
 - **A LiteLLM call for a customer on a test clock is dated at the clock's time,** so the next advance bills it, as it bills usage your app sends. It kept the proxy's time, so it was refused as in the future, or dated in a period already billed ([LiteLLM](docs/integrations/litellm.md#what-lands-in-hardcount), [#1904](https://github.com/gethardcount/hardcount/pull/1904)).
 - **While a test clock advances, a change to one of its customers, or a new customer on it, answers `409 clock_advancing`:** the customer, its subscriptions, invoices, credit notes and credits, and usage you backfill or release. Reads, usage your app or proxy sends, payments through Stripe, price changes (which take effect after the advance) and deleting the clock go on, and a clock whose advance failed stays open ([errors](docs/api/errors.md), [#1899](https://github.com/gethardcount/hardcount/pull/1899)).
 
+### Fixed
+
+- **Revenue on Home and the revenue chart count what customers paid, once.** They added the credit applied to each paid invoice to its payment, so the money behind credit was counted again: a $10,000 prepaid commit counted $10,000 when it was paid and $10,000 more as its credit paid later invoices. Credit from a credit note and promotional credit counted too, though no new money came in. Revenue is now the card and offline payments on the invoices paid in the period ([#1906](https://github.com/gethardcount/hardcount/pull/1906)).
+
 ## [0.10.0] - 2026-11-23
 
 A restored database now catches up with Stripe before Hardcount serves it (`hardcount restore`). A test clock's advance runs as a background job on one replica, and work on a test clock is dated at the event it belongs to. Each API route states who may call it, and a request that was refused no longer holds its `Idempotency-Key`. Draft subscriptions and the `X-API-Key` header are removed. Claude Fable 5.2 and Mythos 5.2 have prices.

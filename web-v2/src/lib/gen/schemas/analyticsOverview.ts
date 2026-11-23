@@ -41,7 +41,7 @@ export interface AnalyticsOverview {
   arr: number;
   /** `mrr_prev` times 12. */
   arr_prev: number;
-  /** What paid the invoices paid in the window (payment plus customer credit applied). A credit note that lowered an invoice before it was paid is not counted. */
+  /** What customers paid for the invoices paid in the window, by card or offline. Credit applied to an invoice is not counted again; credit bought ahead counts when it was paid. A credit note that lowered an invoice before it was paid is not counted. */
   revenue: number;
   /** `revenue` for the previous window. */
   revenue_prev: number;

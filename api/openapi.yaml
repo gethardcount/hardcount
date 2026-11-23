@@ -5369,10 +5369,10 @@ components:
           type: integer
           format: int64
           description: |
-            What paid the invoices paid in the bucket (payment plus customer
-            credit applied), in the minor unit of the default currency
-            (cents for USD). A credit note that lowered an invoice before it
-            was paid is not counted.
+            What customers paid for the invoices paid in the bucket, by card or
+            offline, in the minor unit of the default currency (cents for
+            USD). Credit applied to an invoice is not counted again. A credit
+            note that lowered an invoice before it was paid is not counted.
         invoice_count:
           type: integer
           description: Invoices paid in the bucket.
@@ -5503,7 +5503,7 @@ components:
         revenue:
           type: integer
           format: int64
-          description: What paid the invoices paid in the window (payment plus customer credit applied). A credit note that lowered an invoice before it was paid is not counted.
+          description: What customers paid for the invoices paid in the window, by card or offline. Credit applied to an invoice is not counted again; credit bought ahead counts when it was paid. A credit note that lowered an invoice before it was paid is not counted.
         revenue_prev:
           type: integer
           format: int64
