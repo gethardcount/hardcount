@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"errors"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -393,9 +394,12 @@ func TestPostgresStore_MarkAdvancing_ChecksTheTimeOnTheRowItChanges(t *testing.T
 	if err != nil {
 		t.Fatalf("create clock: %v", err)
 	}
-	// The advance that won: January to February, completed.
+	// The advance that won: January to February, moved there and completed.
 	if _, err := store.MarkAdvancing(ctx, tenantID, clk.ID, feb, noAuditRow); err != nil {
 		t.Fatalf("mark advancing: %v", err)
+	}
+	if err := store.MoveTo(ctx, tenantID, clk.ID, feb, domain.AdvanceSummary{AdvancedFrom: jan, AdvancedTo: feb}); err != nil {
+		t.Fatalf("move to February: %v", err)
 	}
 	if _, err := store.CompleteAdvance(ctx, tenantID, clk.ID, domain.AdvanceSummary{AdvancedFrom: jan, AdvancedTo: feb}); err != nil {
 		t.Fatalf("complete advance: %v", err)
@@ -416,5 +420,95 @@ func TestPostgresStore_MarkAdvancing_ChecksTheTimeOnTheRowItChanges(t *testing.T
 	}
 	if got, err := store.Get(ctx, tenantID, clk.ID); err != nil || got.Status != domain.TestClockStatusReady || !got.FrozenTime.Equal(feb) {
 		t.Fatalf("clock after the refused advances: %s at %v (err %v), want ready at %v", got.Status, got.FrozenTime, err, feb)
+	}
+}
+
+// TestNextDue_EachKindOfDueTime: NextDue is the earliest time something falls
+// due for the clock's customers after the clock's time: a period end, a
+// scheduled cancel, a trial end, a pause's end or a dunning run's next action.
+// A time past the target, a row on another clock and a closed run are not due;
+// with nothing due before the target, it answers the target.
+func TestNextDue_EachKindOfDueTime(t *testing.T) {
+	db := testutil.SetupTestDB(t)
+	store := testclock.NewPostgresStore(db)
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tenantID := testutil.CreateTestTenant(t, db, "Tenant")
+	at := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	day := func(n int) time.Time { return at.AddDate(0, 0, n) }
+	clk, err := store.Create(ctx, tenantID, domain.TestClock{Name: "steps", FrozenTime: at}, noAuditRow)
+	if err != nil {
+		t.Fatalf("create clock: %v", err)
+	}
+	other, err := store.Create(ctx, tenantID, domain.TestClock{Name: "other", FrozenTime: at}, noAuditRow)
+	if err != nil {
+		t.Fatalf("create other clock: %v", err)
+	}
+	customerID := insertCustomer(t, db, tenantID)
+	pinCustomerToClock(t, db, customerID, clk.ID)
+	otherCustomer := insertCustomer(t, db, tenantID)
+	pinCustomerToClock(t, db, otherCustomer, other.ID)
+	// exec runs one seed statement in test mode, as the tables' triggers need.
+	exec := func(query string, args ...any) {
+		t.Helper()
+		tx, err := testutil.AdminPool(t).Begin()
+		if err != nil {
+			t.Fatalf("begin: %v", err)
+		}
+		defer func() { _ = tx.Rollback() }()
+		if _, err := tx.Exec(`SELECT set_config('app.livemode', 'off', true)`); err != nil {
+			t.Fatalf("set livemode: %v", err)
+		}
+		if _, err := tx.Exec(query, args...); err != nil {
+			t.Fatalf("%s: %v", query, err)
+		}
+		if err := tx.Commit(); err != nil {
+			t.Fatalf("commit: %v", err)
+		}
+	}
+	insertSub(t, db, "period", tenantID, customerID, clk.ID, "active")
+	insertSub(t, db, "cancel", tenantID, customerID, clk.ID, "active")
+	insertSub(t, db, "trial", tenantID, customerID, clk.ID, "trialing")
+	insertSub(t, db, "pause", tenantID, customerID, clk.ID, "active")
+	insertSub(t, db, "elsewhere", tenantID, otherCustomer, other.ID, "active")
+	exec(`UPDATE subscriptions SET next_billing_at = $1 WHERE code = 'period'`, day(9))
+	exec(`UPDATE subscriptions SET cancel_at = $1 WHERE code = 'cancel'`, day(4))
+	exec(`UPDATE subscriptions SET trial_end_at = $1 WHERE code = 'trial'`, day(6))
+	exec(`UPDATE subscriptions SET pause_collection_resumes_at = $1 WHERE code = 'pause'`, day(2))
+	exec(`UPDATE subscriptions SET next_billing_at = $1 WHERE code = 'elsewhere'`, day(1))
+	exec(`INSERT INTO dunning_policies (id, tenant_id, name, retry_days, livemode) VALUES ('dpol_steps', $1, 'P', '[3]', false)`, tenantID)
+	for _, run := range []struct {
+		id, state string
+		next      time.Time
+	}{{"open", "active", day(3)}, {"closed", "resolved", day(1)}} {
+		exec(`INSERT INTO invoices (id, tenant_id, customer_id, invoice_number, status, payment_status, currency,
+				subtotal_cents, total_amount_cents, amount_due_cents, billing_period_start, billing_period_end, livemode)
+			VALUES ($1, $2, $3, $1, 'finalized', 'failed', 'USD', 100, 100, 100, $4, $4, false)`, "inv_"+run.id, tenantID, customerID, at)
+		exec(`INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, reason,
+				attempt_count, next_action_at, paused, created_at, updated_at, livemode)
+			VALUES ($1, $2, $3, $4, 'dpol_steps', $5, 'payment_failed', 1, $6, false, $7, $7, false)`,
+			"run_"+run.id, tenantID, "inv_"+run.id, customerID, run.state, run.next, at)
+	}
+
+	target := day(30)
+	var got []time.Time
+	for from := at; from.Before(target); {
+		next, err := store.NextDue(ctx, tenantID, clk.ID, from, target)
+		if err != nil {
+			t.Fatalf("next due after %v: %v", from, err)
+		}
+		got = append(got, next)
+		from = next
+	}
+	// The pause's end, the run, the cancel, the trial's end, the period's
+	// end, then the target.
+	want := []time.Time{day(2), day(3), day(4), day(6), day(9), target}
+	if !slices.EqualFunc(got, want, time.Time.Equal) {
+		t.Errorf("due times %v, want %v", got, want)
+	}
+	if next, err := store.NextDue(ctx, tenantID, clk.ID, at, day(5)); err != nil || !next.Equal(day(2)) {
+		t.Errorf("next due before an early target: %v (%v), want %v", next, err, day(2))
+	}
+	if next, err := store.NextDue(ctx, tenantID, clk.ID, day(9), day(8).AddDate(0, 1, 0)); err != nil || !next.Equal(day(8).AddDate(0, 1, 0)) {
+		t.Errorf("next due with nothing left: %v (%v), want the target", next, err)
 	}
 }

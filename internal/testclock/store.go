@@ -33,20 +33,21 @@ type Store interface {
 	List(ctx context.Context, tenantID string, limit, offset int) ([]domain.TestClock, int, error)
 	Delete(ctx context.Context, tenantID, id string, auditRow AuditRow) error
 
-	// MarkAdvancing flips status ready → advancing and simultaneously sets
-	// the new frozen_time, atomically. It restarts last_advance_summary with
-	// advanced_from, the frozen_time before this advance. The new
-	// frozen_time becomes visible immediately — this is what lets the
-	// catch-up find subs on the clock as "due". Returns errs.InvalidState when the clock is
-	// not currently ready (prevents overlapping advances).
-	//
-	// The new frozen_time must be >= the current frozen_time; the service
-	// enforces that up-front so we don't ship a regressed-time clock.
+	// MarkAdvancing flips status ready → advancing and sets the advance's
+	// target, which must be later than frozen_time and at most a year after
+	// it. frozen_time stays: the catch-up moves it (MoveTo). It restarts
+	// last_advance_summary with advanced_from, the frozen_time before this
+	// advance. Returns errs.InvalidState when the clock is not ready or the
+	// target fails the check.
 	MarkAdvancing(ctx context.Context, tenantID, id string, newFrozenTime time.Time, auditRow AuditRow) (domain.TestClock, error)
 
-	// TouchAdvancing starts a catch-up pass: it moves the clock to the back
-	// of the claim list.
+	// TouchAdvancing starts a catch-up pass: it proves the lease's fence
+	// before any job runs, and moves the clock to the back of the claim list.
 	TouchAdvancing(ctx context.Context, tenantID, id string) error
+	// MoveTo moves an advancing clock to a due time on the way to its target
+	// and writes the counts so far; NextDue is the next such time, or until.
+	MoveTo(ctx context.Context, tenantID, id string, to time.Time, summary domain.AdvanceSummary) error
+	NextDue(ctx context.Context, tenantID, id string, after, until time.Time) (time.Time, error)
 	// CompleteAdvance flips status advancing → ready at the end of a
 	// successful catch-up, storing its summary in the same statement. Clears
 	// any last_failure_reason from a prior failed-then-retried advance.
@@ -70,13 +71,13 @@ type Store interface {
 	// longest ago first, at most limit. The statement proves the lease's
 	// fence (ADR-114), so a deposed leader lists nothing.
 	//
-	// TouchAdvancing, CompleteAdvance and MarkFailed are the catch-up's
+	// TouchAdvancing, MoveTo, CompleteAdvance and MarkFailed are the catch-up's
 	// writes: each is fenced on the testclock_catchup lease, and a miss
 	// returns ErrCatchupFenceLost or ErrClockNoLongerAdvancing.
 	ListAdvancingForCatchup(ctx context.Context, limit int) ([]domain.TestClock, error)
 }
 
-// The outcomes of a fenced catch-up write (TouchAdvancing, CompleteAdvance,
+// The outcomes of a fenced catch-up write (TouchAdvancing, MoveTo, CompleteAdvance,
 // MarkFailed) that changed no row. Neither is a failure of the
 // advance: the run stops, logs, and leaves the clock as it is.
 var (

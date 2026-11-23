@@ -78,7 +78,9 @@ func seedClockTaxDrafts(t *testing.T, db *postgres.DB, ctx context.Context, tena
 // A clock's tax-retry job tries every draft waiting for tax, once each: a
 // clock has no next tick to pick up a second page, and a draft the try left
 // waiting stays in the list, so the job must move past it. Two pages and one
-// row more prove both.
+// row more prove both. A draft the try leaves waiting is the job's error,
+// left for the next run: the advance stops at this step, and Retry advance
+// tries the draft again.
 func TestRetryPendingTaxForClock_TriesEveryDraftOnce(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -98,8 +100,13 @@ func TestRetryPendingTaxForClock_TriesEveryDraftOnce(t *testing.T) {
 	}()
 	select {
 	case errs := <-done:
-		if len(errs) > 0 {
-			t.Fatalf("errors: %v", errs[0])
+		if len(errs) != n {
+			t.Fatalf("errors = %d, want %d: one per draft left waiting", len(errs), n)
+		}
+		for _, err := range errs {
+			if !errors.Is(err, domain.ErrLeftForNextRun) {
+				t.Fatalf("error %v, want it left for the next run", err)
+			}
 		}
 	case <-time.After(30 * time.Second):
 		t.Fatal("the job did not end: it read the waiting drafts again")

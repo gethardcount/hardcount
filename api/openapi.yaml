@@ -24627,28 +24627,20 @@ paths:
         advance moves the clock at most one year; split a longer span into
         several advances.
 
-        The catch-up runs these steps in order: trials that ended, period
-        invoices (every period that came due), collection pauses that
-        ended, spend thresholds, tax retries, charges, credit notes that
-        were waiting to be issued, dunning steps, and credit expiry.
-        `last_advance_summary` counts what each step did. If a step fails,
-        the later steps still run, and the clock ends in
-        `internal_failure` with a `last_failure_reason`. Resume it with
-        `POST /v1/test-clocks/{id}/retry-advance`; you do not need to
-        delete it.
-
-        Every period that came due is invoiced before payment retries and
-        dunning run. So when a dunning policy cancels or pauses a
-        subscription during one long advance, the next period's invoice
-        may already exist. The cancel or pause is dated at the escalation:
-        the time of the invoice's final retry, or when that retry's failure
-        was recorded if that is later. It is never dated before the start
-        of the subscription's current period. When the escalation falls
-        before that start, the action lands at the period's start, which
-        uses none of the period and relieves any base fee billed in advance
-        for it in full. To see the steps as a real clock would, advance to
-        the time of the invoice's last retry first, then to the next
-        billing date.
+        The catch-up moves the clock through each time something falls
+        due for its customers, in order (a period's end, a trial's end, a
+        pause's end, a scheduled cancel, a payment retry), and at each runs
+        these jobs: trials that ended, period invoices, collection pauses
+        that ended, spend thresholds, tax retries, charges, credit notes
+        that were waiting to be issued, dunning steps, and credit expiry.
+        So things happen in the order they would in real time. While it
+        runs, `frozen_time` is the time it has reached.
+        `last_advance_summary` counts what the jobs did. If a job fails,
+        the jobs after it do not run, and the clock stops in
+        `internal_failure` at the time it reached, with a
+        `last_failure_reason`. Resume it with
+        `POST /v1/test-clocks/{id}/retry-advance`, which runs that time
+        again and carries on; you do not need to delete it.
       parameters:
         - $ref: "#/components/parameters/IdempotencyKey"
         - in: path
