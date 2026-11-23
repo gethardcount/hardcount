@@ -1,20 +1,25 @@
 #!/usr/bin/env bash
 # The upgrade CI job (ADR-125, amendment 2026-10-30). Its invariant: an
-# upgrade from the previous release leaves every invoice that existed before
-# it exactly as the API returned it, and the upgraded database still bills.
+# upgrade from the previous release leaves every invoice not on a test clock
+# exactly as the API returned it, and the upgraded database still bills.
+# Upgrading deletes test clocks and everything on one (00241), so an invoice
+# on a clock must be gone.
 #
 #   1. Build the previous release from its own source: the newest v* tag
 #      that HEAD contains, other than a tag on HEAD itself. No registry is
 #      involved, so the job does not depend on GHCR.
 #   2. Install it as Compose does, on an empty Postgres: the server starts
 #      with RUN_MIGRATIONS_ON_BOOT=true, then its hardcount-bootstrap makes a
-#      tenant, then its scripts/demo.sh bills one month for a test-clock
-#      customer, through the public API, to a finalized invoice.
-#   3. Snapshot every invoice and its lines through the API, in both modes.
+#      tenant, then its scripts/demo.sh bills, through the public API. It
+#      also bills a customer on no clock through its API: a subscription,
+#      one usage event, then a cancel, which issues the final invoice.
+#   3. Snapshot every invoice not on a clock, and its lines, through the API,
+#      in both modes, and note the invoices on a clock.
 #   4. Stop it, start HEAD on the same database (its migrations run as it
 #      starts), snapshot again and compare. Any difference fails, printing
 #      the diff. A field HEAD adds passes only when
-#      scripts/ci/upgrade-new-fields.txt lists it.
+#      scripts/ci/upgrade-new-fields.txt lists it. Each invoice that was on a
+#      clock must answer 404.
 #   5. On the upgraded database HEAD renders each old invoice's PDF, bills a
 #      new month with its own scripts/demo.sh, leaves the old invoices
 #      unchanged while doing it, and hardcount-doctor finds no broken money
@@ -146,6 +151,18 @@ stop_api() {
   echo "$label server stopped (exit $status)"
 }
 
+# post KEY PATH [BODY]: a POST with the key, and the JSON body if one is
+# given; non-2xx fails with the body.
+post() {
+  local out status args=(-sS -X POST "$BASE$2" -H "Authorization: Bearer $1" -w '\n%{http_code}')
+  [ -n "${3:-}" ] && args+=(-H "Content-Type: application/json" -d "$3")
+  out=$(curl "${args[@]}")
+  status=${out##*$'\n'}
+  out=${out%$'\n'*}
+  [ "${status:0:1}" = 2 ] || { echo "$out" >&2; fail "POST $2 answered HTTP $status"; }
+  printf '%s\n' "$out"
+}
+
 # api KEY PATH: a GET with the key; non-2xx fails with the body.
 api() {
   local out status
@@ -156,9 +173,10 @@ api() {
   printf '%s\n' "$out"
 }
 
-# snapshot LABEL: every invoice the API lists, in each mode, as one JSON
-# object keyed by "<mode> <invoice id>". The lines are keyed by their id,
-# so the comparison does not depend on the order they come back in.
+# snapshot LABEL: every invoice not on a test clock that the API lists, in
+# each mode, as one JSON object keyed by "<mode> <invoice id>". The lines are
+# keyed by their id, so the comparison does not depend on the order they
+# come back in. The raw file keeps every invoice, those on a clock too.
 #
 # Two fields are left out of both sides, because the API works them out on
 # each read from the moment and the server's settings, not from the invoice
@@ -193,7 +211,8 @@ snapshot() {
     done < "$ids" >> "$OUT/$label-raw.jsonl"
   done
   jq -S -s '
-    map({key: "\(.mode) \(.invoice.id)",
+    map(select((.invoice.test_clock_id // "") == ""))
+    | map({key: "\(.mode) \(.invoice.id)",
          value: {invoice: (.invoice | del(.attention, .recovery_warning)),
                  line_items: (.line_items | map({key: .id, value: .}) | from_entries)}})
     | from_entries' "$OUT/$label-raw.jsonl" > "$OUT/$label.json"
@@ -238,12 +257,22 @@ LIVE_KEY=$(grep -oE 'hc_secret_live_[a-f0-9]+' "$WORK/bootstrap.out" | head -1 |
 [ -n "$TEST_KEY" ] && [ -n "$LIVE_KEY" ] || fail "$PREV_TAG's hardcount-bootstrap printed no test and live secret keys"
 HARDCOUNT_BASE="$BASE" "$PREV_SRC/scripts/demo.sh" "$TEST_KEY" > "$OUT/prev-demo.txt" 2>&1 \
   || { cat "$OUT/prev-demo.txt"; fail "$PREV_TAG's scripts/demo.sh failed"; }
-echo "$PREV_TAG's demo billed a month"
+echo "$PREV_TAG's demo billed"
+# A customer on no clock, billed by the previous release on the demo's plan:
+# one usage event, then a cancel, which issues the final invoice at once.
+PLAN_ID=$(api "$TEST_KEY" "/v1/plans" | jq -r '.data[0].id')
+CUST_ID=$(post "$TEST_KEY" "/v1/customers" '{"external_id": "upgrade-real", "display_name": "Upgrade Real", "email": "billing@upgrade.test"}' | jq -r .id)
+SUB_ID=$(post "$TEST_KEY" "/v1/subscriptions" "{\"code\": \"upgrade-real\", \"display_name\": \"Upgrade Real\", \"customer_id\": \"$CUST_ID\", \"items\": [{\"plan_id\": \"$PLAN_ID\", \"quantity\": 1}], \"billing_time\": \"anniversary\"}" | jq -r .id)
+post "$TEST_KEY" "/v1/usage-events" '{"event_name": "tokens", "external_customer_id": "upgrade-real", "quantity": "1000000", "idempotency_key": "upgrade-real-1", "dimensions": {"provider": "anthropic", "model": "claude-sonnet-4.5", "token_type": "input"}}' > /dev/null
+post "$TEST_KEY" "/v1/subscriptions/$SUB_ID/cancel" > /dev/null
+echo "$PREV_TAG billed a customer on no clock"
 
 say "snapshot before the upgrade"
 snapshot before
 [ "$(jq '[.[] | select(.invoice.status == "finalized" or .invoice.status == "paid")] | length' "$OUT/before.json")" -ge 1 ] \
   || fail "no finalized invoice before the upgrade: the comparison would prove nothing"
+jq -r 'select((.invoice.test_clock_id // "") != "") | "\(.mode) \(.invoice.id)"' "$OUT/before-raw.jsonl" > "$OUT/clock-invoices.txt"
+echo "before: $(wc -l < "$OUT/clock-invoices.txt" | tr -d ' ') invoices on a test clock"
 stop_api prev
 
 say "upgrade: HEAD starts on the same database"
@@ -256,6 +285,13 @@ grep -q 'up to date, nothing to apply' "$OUT/status-after-upgrade.txt" || fail "
 say "snapshot after the upgrade"
 snapshot after
 compare after false
+while read -r mode id; do
+  k=$TEST_KEY
+  [ "$mode" = live ] && k=$LIVE_KEY
+  code=$(curl -sS -o /dev/null -w '%{http_code}' "$BASE/v1/invoices/$id" -H "Authorization: Bearer $k")
+  [ "$code" = 404 ] || fail "invoice $id was on a test clock and answers HTTP $code after the upgrade, want 404"
+done < "$OUT/clock-invoices.txt"
+echo "after: every invoice that was on a test clock is gone"
 
 say "HEAD on the upgraded database"
 while read -r key; do
