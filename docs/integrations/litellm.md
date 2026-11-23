@@ -644,8 +644,9 @@ exist, Hardcount holds the call's events instead of billing them:
   ```
 
   Each held event becomes a usage event under its original idempotency
-  key and time, so a call LiteLLM sent again after you created the
-  customer is not counted twice. Releasing twice adds nothing. If the
+  key and time (for a customer on a test clock, the clock's time), so a
+  call LiteLLM sent again after you created the customer is not counted
+  twice. Releasing twice adds nothing. If the
   `user` value had a typo, pass `"customer_id":"hc_cus_…"` to release
   into the right customer. One release takes at most 5,000 events;
   `more_to_release` counts the rest, and releasing again takes them.
@@ -682,9 +683,8 @@ way as the counts above:
   The period's invoice includes it only if that invoice is voided first.
   Once that invoice is paid, such an event counts as `outside_open_period`.
 
-The invoice is the final answer. Events whose meter still does not exist, or whose
-time is after the customer's current time (a customer on a test clock set
-in the past), stay held, counted in `still_held`.
+The invoice is the final answer. Events whose meter still does not exist
+stay held, counted in `still_held`.
 
 The Usage page lists the 200 customers whose usage was held most recently.
 When more are held, the notice says how many it does not list. `GET

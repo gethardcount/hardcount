@@ -30,11 +30,12 @@ func (o *onClock) SimForInvoice(context.Context, string, string) (clock.Sim, err
 	return clock.Sim{At: o.at, TestClockID: "clk_usage"}, nil
 }
 
-// A release for a customer on a test clock is bounded by the clock's time,
-// not real time: a held row dated after the clock's time, though before real
-// now, stays held; one dated before it is released.
-func TestHeld_ReleaseForAClockCustomerIsBoundedByTheClock(t *testing.T) {
-	f := newHeldFixture(t, "Held Clock Bound")
+// A release for a customer on a test clock writes every held row at the
+// clock's time, as IngestCall dates a call: a row held after the clock's time
+// (a call sent before the customer existed on a clock behind real time) is
+// released with one held before it.
+func TestHeld_ReleaseForAClockCustomerReleasesAtTheClocksTime(t *testing.T) {
+	f := newHeldFixture(t, "Held Clock Release")
 	clockAt := time.Now().UTC().Add(-48 * time.Hour).Truncate(time.Second)
 	if err := f.hold(t, "cus_on_clock", "clk-before:input", clockAt.Add(-time.Hour)); err != nil {
 		t.Fatalf("hold before the clock: %v", err)
@@ -47,11 +48,13 @@ func TestHeld_ReleaseForAClockCustomerIsBoundedByTheClock(t *testing.T) {
 	f.svc.SetResolver(&onClock{at: clockAt})
 
 	res := f.release(t, "cus_on_clock", customerID, meterID)
-	if res.Released != 1 || res.StillHeld != 1 {
-		t.Fatalf("release = %+v; want 1 released (before the clock) and 1 still held (after it)", res)
+	if res.Released != 2 || res.StillHeld != 0 {
+		t.Fatalf("release = %+v; want both released, none still held", res)
 	}
-	if before, after := f.countEvents(t, "clk-before:input"), f.countEvents(t, "clk-after:input"); before != 1 || after != 0 {
-		t.Errorf("usage events: before the clock %d, after it %d; want 1 and 0", before, after)
+	for _, key := range []string{"clk-before:input", "clk-after:input"} {
+		if at := eventTime(t, f, key); !at.Equal(clockAt) {
+			t.Errorf("%s at %v; want the clock's %v", key, at, clockAt)
+		}
 	}
 }
 
