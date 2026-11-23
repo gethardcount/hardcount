@@ -19,7 +19,7 @@ original text.
 
 ## [Unreleased]
 
-**Before upgrading:** nothing to do. Migration `00238_test_clock_advance_target` adds one nullable column to `test_clocks`, and gives a clock that is advancing during the upgrade its target. It runs on start, and copies of the earlier version keep working while it does.
+**Before upgrading:** nothing to do. Migration `00238_test_clock_advance_target` adds one nullable column to `test_clocks`, and gives a clock that is advancing during the upgrade its target. It runs on start, and copies of the earlier version keep working while it does ([#1900](https://github.com/gethardcount/hardcount/pull/1900)).
 
 ## [0.10.0] - 2026-11-23
 
