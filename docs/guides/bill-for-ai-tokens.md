@@ -20,9 +20,9 @@ Using a LiteLLM proxy? It sends the events for you: follow
 
 You need Hardcount running, with its address in `HARDCOUNT` and a test
 secret key in `HARDCOUNT_KEY`, as in [Send usage and get your first
-invoice](../first-invoice.md#before-you-start). That page's steps 2 to 4
-also create a customer on a test clock (see the end of step 1 below). This
-guide uses the `CUSTOMER_REF` (the customer's external ID) and
+invoice](../first-invoice.md#before-you-start). That page's steps 2 and 3
+also create a customer and its subscription (see the end of step 1 below).
+This guide uses the `CUSTOMER_REF` (the customer's external ID) and
 `CUSTOMER_ID` they set.
 
 ## 1. Load ready-made prices
@@ -48,9 +48,8 @@ same setup. The models, and how to set the plan's name and currency:
 [Ready-made recipes](../ai-pricing.md#ready-made-recipes).
 
 A customer must be on the plan before their usage is billed. The [first
-invoice page](../first-invoice.md#steps), steps 2 to 4, creates the
-customer on a test clock and the subscription. Its step 4 uses the
-`PLAN_ID` saved above. Those steps set `CUSTOMER_REF` and `CUSTOMER_ID`,
+invoice page](../first-invoice.md#steps), steps 2 and 3, creates the
+customer and the subscription. Its step 3 uses the `PLAN_ID` saved above. Those steps set `CUSTOMER_REF` and `CUSTOMER_ID`,
 which the steps below use.
 
 ## 2. Turn a provider's token counts into events
@@ -163,9 +162,9 @@ recipe's Claude Sonnet 4.5 prices:
 | output | 1,500,000 | $15.00 | 1,500,000 × 0.0015 cents = $22.50 |
 
 The invoice total is $6.00 + $15.00 + $37.50 + $22.50 = $81.00, before tax
-and credit. To see the invoice on a test clock now, move the clock past
-the period end, as in [first invoice](../first-invoice.md#steps) steps 6
-and 7.
+and credit. Until the period ends, the preview shows it, as in [first
+invoice](../first-invoice.md#steps) step 5; for a test customer, steps 6
+and 7 issue it now.
 
 ## 5. Price a model the recipe does not cover
 

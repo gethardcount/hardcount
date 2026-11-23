@@ -51,8 +51,8 @@ You do not need Go, Node, jq or a database. Docker downloads everything else.
    ```
 
    The script also saves these in `deploy/compose/quickstart-credentials.json`.
-   Keep that file private: it also holds a live key, which can charge real
-   cards once Stripe is connected.
+   Keep that file private: it also holds a live key. The live key does
+   nothing until you connect Stripe; after that, it can charge real cards.
 
 2. Open `http://localhost:8080` in your browser and sign in with that email
    and password. If Hardcount runs on another machine, such as a cloud
@@ -76,7 +76,6 @@ You do not need Go, Node, jq or a database. Docker downloads everything else.
 | Meter | A counter for one kind of usage, here AI tokens. |
 | Recipe | A ready-made pricing setup that Hardcount creates in one call. |
 | Usage event | One "this customer used this much" record that your app sends to Hardcount. |
-| Test clock | A pretend clock for test customers. Moving it forward makes a month pass in seconds. |
 | Provider cost | What your AI provider, such as Anthropic, charges you per token. |
 | Margin | What you billed a customer, minus what their usage cost you, as a percent of what you billed. |
 
@@ -113,10 +112,10 @@ says what went wrong. So a finished run means each step below worked. The IDs (t
 
    **You see:** `✓ Prices loaded: a tokens meter, a price for each model and token type, and plan hc_pln_…`
 
-3. **Create a test clock and a demo customer on it.** The clock starts at
-   today's date. The customer is "ACME Corp", and each run makes a new one.
+3. **Create a demo customer.** The customer is "ACME Corp", and each run
+   makes a new one.
 
-   **You see:** `✓ Customer ACME Corp (hc_cus_…) is on test clock hc_tclk_…`
+   **You see:** `✓ Customer ACME Corp (hc_cus_…)`
 
 4. **Put ACME Corp on the plan.** This is a subscription: it says which plan
    a customer pays for, and when each month starts. Here the month starts
@@ -145,30 +144,19 @@ says what went wrong. So a finished run means each step below worked. The IDs (t
 
    **You see:** `✓ 10 AI calls became 25 usage events, one for each token type in each call`
 
-7. **Move the test clock forward one month.** The demo moves the clock 32
-   days ahead, past the end of ACME Corp's first month. While the clock
-   moves, Hardcount closes that month and makes the invoice. The demo waits for
-   the clock to finish, for up to 30 seconds.
-
-   **You see:** `✓ The clock now reads <a date 32 days from now>. Hardcount billed ACME Corp's month while the clock moved.`
-
-8. **Show the invoice ACME Corp receives.** The demo checks that the
-   invoice is finalized (issued and no longer a draft), has a line for each
-   model and token type, and that its PDF renders. Nothing is charged: no
-   Stripe account is connected in the quick start. Without Stripe, Hardcount
-   emails the customer the invoice itself, once, instead of a link to add a
-   card. The quick start sets up no email server, so nothing is sent.
+7. **Show ACME Corp's invoice so far.** This is the preview: the invoice as
+   it will be at the end of ACME Corp's month, priced from the usage so far.
+   It creates nothing.
 
    **You see:**
 
    ```text
-     HC-000001  total $5.73 USD  status finalized
        Tokens (claude-sonnet-4.5 · input)  → $1.20
        Tokens (claude-sonnet-4.5 · output)  → $2.62
        Tokens (claude-sonnet-4.5 · cache_read)  → $0.06
        Tokens (claude-haiku-4.5 · input)  → $0.60
        Tokens (claude-haiku-4.5 · output)  → $1.25
-   ✓ One invoice line per model and token type, and the PDF renders (34417 bytes)
+   ✓ So far this month: $5.73, one line per model and token type
    ```
 
    The Sonnet lines are 400,000 input tokens at $3.00 per million, 175,000
@@ -176,11 +164,10 @@ says what went wrong. So a finished run means each step below worked. The IDs (t
    $0.30 per million. The Haiku lines are 600,000 input tokens at $1.00 per
    million and 250,000 output tokens at $5.00 per million. Half a cent
    rounds to the nearest even cent, so $2.625 is $2.62.
-   The invoice number goes up by one on each run.
 
-9. **Show your margin on ACME Corp.** Only you see this, never the customer.
-   It is what you billed ($5.73) against what the usage cost you ($2.76),
-   in total and for each model.
+8. **Show your margin on ACME Corp.** Only you see this, never the customer.
+   It is what the usage bills ($5.73) against what it cost you ($2.76), in
+   total and for each model.
 
    **You see:**
 
@@ -190,8 +177,39 @@ says what went wrong. So a finished run means each step below worked. The IDs (t
      margin  51.9%
        claude-haiku-4.5: cost $1.48  billed $1.85  margin 20.0%
        claude-sonnet-4.5: cost $1.28  billed $3.88  margin 67.1%
-   ✓ Checked: the cost matches your rates and usage, and the billed amount matches the invoice
+   ✓ Checked: the cost matches your rates and usage, and the billed amount matches the invoice so far
    ```
+
+9. **Issue the invoice now.** A subscription's invoice is issued when its
+   month ends. ACME Corp is a test customer, so the demo does not wait: it
+   cancels the subscription, which issues its final invoice now, for the
+   usage so far. This ends ACME Corp's subscription, and usage sent for it
+   afterwards is not billed. Each run of the demo makes a new customer. The
+   demo checks that the invoice is finalized (issued and no longer a draft),
+   bills what the preview showed, and that its PDF renders. Nothing is
+   charged: no Stripe account is connected in the quick start. Without
+   Stripe, Hardcount emails the customer the invoice itself, once, instead
+   of a link to add a card. The quick start sets up no email server, so
+   nothing is sent.
+
+   **You see:**
+
+   ```text
+     HC-000001  total $5.73 USD  status finalized
+       Tokens (claude-sonnet-4.5 · input) - canceled mid-period  → $1.20
+       Tokens (claude-sonnet-4.5 · output) - canceled mid-period  → $2.62
+       Tokens (claude-sonnet-4.5 · cache_read) - canceled mid-period  → $0.06
+       Tokens (claude-haiku-4.5 · input) - canceled mid-period  → $0.60
+       Tokens (claude-haiku-4.5 · output) - canceled mid-period  → $1.25
+   ✓ The invoice bills what the preview showed, and the PDF renders (34417 bytes)
+   ```
+
+   Each line says "canceled mid-period" because the cancel ended the month
+   early. The invoice number goes up by one on each run.
+
+   A real customer's invoice is issued by itself when its month ends, and
+   its lines have no "canceled mid-period". Canceling a real customer's
+   subscription ends it and issues their final invoice at once.
 
 At the end, the demo prints two links:
 
@@ -212,11 +230,7 @@ At the end, the demo prints two links:
 
 2. Open the **Customer** link.
 
-   **You see:** ACME Corp, with "Simulated time: <date>. Dates on this page
-   follow the test clock." at the top. Below are the subscription, the
-   recent invoices and a **Margin** card. The Margin card starts on the
-   current period, which is the new, empty month. Choose **Last invoiced
-   period** in it to see the demo month, with a row for each model and its margin.
+   **You see:** ACME Corp, with its canceled subscription and the invoice.
 
 3. Look around in the left menu.
 
@@ -224,15 +238,9 @@ At the end, the demo prints two links:
    - **Usage**: the 25 usage events.
    - **Pricing**: the Tokens meter and the AI API plan.
    - **Provider costs**: the five costs from step 5.
-   - **Test clocks**: the clock named "demo".
 
-### Why Home still reads $0
-
-Home leaves out every customer on a test clock, and everything they own.
-Its four cards (MRR, Revenue, Customers and Failed payments) add things up
-by real dates, and a test clock's dates are pretend ones. Adding them would
-put money on the wrong days. So Home reads $0 after the demo, and that is
-expected. Use the two links instead.
+Home's **Revenue** counts money paid, so it reads $0 until an invoice is
+paid.
 
 ## Run it again, stop it, or remove it
 

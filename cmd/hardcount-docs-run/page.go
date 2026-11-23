@@ -16,11 +16,10 @@ import (
 // between). GitHub does not show the comment.
 //
 //	<!-- docs-run: command -->                     run this block
-//	<!-- docs-run: command name=5a -->             a command a pass can --skip
-//	<!-- docs-run: command repeat-until-output --> run it again, once a second, until its output block matches
+//	<!-- docs-run: command name=4a -->             a command a pass can --skip
 //	<!-- docs-run: output -->                      what the command above prints
-//	<!-- docs-run: output if=5a -->                checked only when command 5a ran in this pass
-//	<!-- docs-run: output unless=5a -->            checked only when command 5a did not run
+//	<!-- docs-run: output if=4a -->                checked only when command 4a ran in this pass
+//	<!-- docs-run: output unless=4a -->            checked only when command 4a did not run
 //
 // An output block belongs to the nearest command block above it. In an
 // output block, … stands for any text within one line.
@@ -55,13 +54,12 @@ type span struct{ start, end int }
 
 type block struct {
 	line  int    // 1-based line of the opening fence
-	label string // the page step it sits in, such as "step 5a"
+	label string // the page step it sits in, such as "step 4a"
 	text  string // the content, without the list indent
 	kind  kind
 
 	// Command blocks.
-	name   string // set by name=; a pass may skip it
-	repeat bool   // repeat-until-output
+	name string // set by name=; a pass may skip it
 
 	// Output blocks.
 	of       int    // index of the command block it belongs to
@@ -72,7 +70,7 @@ type block struct {
 var (
 	fenceRE  = regexp.MustCompile("^( *)(```+|~~~+)(.*)$")
 	markerRE = regexp.MustCompile(`^ *<!--\s*docs-run:\s*(.*?)\s*-->\s*$`)
-	// "1. **Load ready-made prices" or "**5a. Send the events yourself.**".
+	// "1. **Load ready-made prices" or "**4a. Send the events yourself.**".
 	stepRE = regexp.MustCompile(`^(?:(\d+)\. \*\*|\s*\*\*(\d+[a-z])\. )`)
 	// The heading that starts the numbered steps ends "before you start".
 	headingRE = regexp.MustCompile(`^#{1,6} (.+)$`)
@@ -165,8 +163,6 @@ func parse(src string) ([]block, error) {
 					} else if prev, dup := names[b.name]; dup {
 						fail(start, "command name %q is already used at line %d", b.name, blocks[prev].line)
 					}
-				case f == "repeat-until-output":
-					b.repeat = true
 				default:
 					fail(start, "unknown command option %q", f)
 				}

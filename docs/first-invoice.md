@@ -49,13 +49,13 @@ variable into the JSON for you.
 
 | Word | Meaning |
 |---|---|
+| Recipe | A ready-made pricing setup that Hardcount creates in one call. |
+| Meter | Counts the usage events that carry one event name, here `tokens`. A plan's prices read from it. |
 | Plan | What you sell: a currency, a billing period such as monthly, and a price for each kind of usage. |
 | Customer | A person or company you bill. Its external ID is your own ID for it, such as the user ID in your database. |
 | Subscription | Puts a customer on a plan, and says when each billing month starts. |
 | Usage event | One "this customer used this much" record that your app sends. |
 | Idempotency key | A unique ID for one usage event. If you send the same event again with the same key, Hardcount counts it once. |
-
-Recipe, meter and test clock: [quick start](quick-start.md#words-on-this-page).
 
 ## Steps
 
@@ -83,36 +83,16 @@ Recipe, meter and test clock: [quick start](quick-start.md#words-on-this-page).
    hc_pln_…
    ```
 
-2. **Create a test clock.** It starts at the current time.
-
-   <!-- docs-run: command -->
-   ```bash
-   CLOCK_ID=$(jq -n --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-       '{name: "first invoice", frozen_time: $now}' \
-     | curl -s -X POST "$HARDCOUNT/v1/test-clocks" \
-       -H "Authorization: Bearer $HARDCOUNT_KEY" \
-       -H "Content-Type: application/json" \
-       -d @- | jq -r .id)
-   echo "$CLOCK_ID"
-   ```
-
-   **You see:** the clock ID.
-
-   <!-- docs-run: output -->
-   ```text
-   hc_tclk_…
-   ```
-
-3. **Create a customer on the test clock.** `CUSTOMER_REF` is your own ID
-   for the customer. Your app sends it with each usage event, so Hardcount
-   knows whose usage it is.
+2. **Create a customer.** `CUSTOMER_REF` is your own ID for the customer.
+   Your app sends it with each usage event, so Hardcount knows whose usage
+   it is.
 
    <!-- docs-run: command -->
    ```bash
    CUSTOMER_REF=acme-1
-   CUSTOMER_ID=$(jq -n --arg ref "$CUSTOMER_REF" --arg clock "$CLOCK_ID" \
+   CUSTOMER_ID=$(jq -n --arg ref "$CUSTOMER_REF" \
        '{external_id: $ref, display_name: "ACME Corp",
-         email: "billing@acme.com", test_clock_id: $clock}' \
+         email: "billing@acme.com"}' \
      | curl -s -X POST "$HARDCOUNT/v1/customers" \
        -H "Authorization: Bearer $HARDCOUNT_KEY" \
        -H "Content-Type: application/json" \
@@ -129,20 +109,23 @@ Recipe, meter and test clock: [quick start](quick-start.md#words-on-this-page).
 
    ACME Corp is now on the **Customers** page.
 
-4. **Put the customer on the plan.** This makes a subscription. It starts
-   when you create it: its first month starts at 00:00 on the clock's day,
-   in your account's billing time zone.
+3. **Put the customer on the plan.** This makes a subscription. It starts
+   when you create it: its first month starts at 00:00 today, in your
+   account's billing time zone. `billing_time: "anniversary"` makes each
+   month run from the day you create the subscription.
 
    <!-- docs-run: command -->
    ```bash
-   jq -n --arg ref "$CUSTOMER_REF" --arg cus "$CUSTOMER_ID" --arg plan "$PLAN_ID" \
+   SUBSCRIPTION=$(jq -n --arg ref "$CUSTOMER_REF" --arg cus "$CUSTOMER_ID" --arg plan "$PLAN_ID" \
        '{code: ($ref + "-ai-api"), display_name: "ACME Corp AI API",
          customer_id: $cus, items: [{plan_id: $plan, quantity: 1}],
          billing_time: "anniversary"}' \
      | curl -s -X POST "$HARDCOUNT/v1/subscriptions" \
        -H "Authorization: Bearer $HARDCOUNT_KEY" \
        -H "Content-Type: application/json" \
-       -d @- | jq '{id, status}'
+       -d @-)
+   SUBSCRIPTION_ID=$(echo "$SUBSCRIPTION" | jq -r .id)
+   echo "$SUBSCRIPTION" | jq '{id, status}'
    ```
 
    **You see:**
@@ -155,18 +138,22 @@ Recipe, meter and test clock: [quick start](quick-start.md#words-on-this-page).
    }
    ```
 
-5. **Send usage.** Your app sends one usage event for each thing it
+4. **Send usage.** Your app sends one usage event for each thing it
    counts. Here, one AI call used 1,000,000 input tokens and 200,000 output
    tokens of Claude Sonnet 4.5. That makes two events, one for each kind of
-   token. Do **5a** to send them yourself, or **5b** if you use a LiteLLM
+   token. Do **4a** to send them yourself, or **4b** if you use a LiteLLM
    proxy. You need only one of them.
 
-   **5a. Send the events yourself.** `event_name` says which meter counts
+   Send usage only for a customer Hardcount knows, such as the one from
+   step 2. For a customer it does not know, 4a answers with an error, and
+   4b holds the events until the customer exists.
+
+   **4a. Send the events yourself.** `event_name` says which meter counts
    the event: the Tokens meter counts `tokens`. `dimensions` are labels: the
    plan's prices pick events by `model` and `token_type`. Give each event its own idempotency key, and send the same
    key again when you retry that event.
 
-   <!-- docs-run: command name=5a -->
+   <!-- docs-run: command name=4a -->
    ```bash
    send_tokens() {   # send_tokens <token type> <quantity>
      jq -n --arg ref "$CUSTOMER_REF" --arg type "$1" --arg qty "$2" \
@@ -190,17 +177,15 @@ Recipe, meter and test clock: [quick start](quick-start.md#words-on-this-page).
    {"id":"hc_evt_…","quantity":"200000","token_type":"output","timestamp":"…"}
    ```
 
-   An event without a `timestamp` gets the customer's current time. For a
-   customer on a test clock, that is the clock's time.
+   An event without a `timestamp` gets the current time.
 
-   **5b. Or send one call the way a LiteLLM proxy does.** A LiteLLM proxy
+   **4b. Or send one call the way a LiteLLM proxy does.** A LiteLLM proxy
    reports each AI call to Hardcount, and Hardcount splits it into events by token
    type. This request sends the same record that the proxy sends.
-   LiteLLM's `user` is the customer's external ID. A real proxy's calls
-   work for this customer too: on a test clock, a call takes the clock's
-   time ([LiteLLM integration](integrations/litellm.md)).
+   LiteLLM's `user` is the customer's external ID. To connect a real proxy,
+   see [LiteLLM integration](integrations/litellm.md).
 
-   <!-- docs-run: command name=5b -->
+   <!-- docs-run: command name=4b -->
    ```bash
    jq -n --arg ref "$CUSTOMER_REF" \
        '{id: ($ref + "-call-1"), call_type: "completion",
@@ -213,16 +198,19 @@ Recipe, meter and test clock: [quick start](quick-start.md#words-on-this-page).
        -d @-
    ```
 
+   In the answer, `accepted` is the count to check: it counts the new
+   events.
+
    **You see:** two new events, input and output. Every other count is 0.
 
-   <!-- docs-run: output unless=5a -->
+   <!-- docs-run: output unless=4a -->
    ```json
    {"accepted":2,"deduplicated":0,"held":0,"skipped":0,"cache_hits":0,"after_close":0,"no_price":0,"not_on_plan":0,"outside_subscription":0}
    ```
 
-   Did 5a first? Then you see:
+   Did 4a first? Then you see:
 
-   <!-- docs-run: output if=5a -->
+   <!-- docs-run: output if=4a -->
    ```json
    {"accepted":0,"deduplicated":2,"held":0,"skipped":0,"cache_hits":0,"after_close":0,"no_price":0,"not_on_plan":0,"outside_subscription":0}
    ```
@@ -231,33 +219,54 @@ Recipe, meter and test clock: [quick start](quick-start.md#words-on-this-page).
 
    In the dashboard, the **Usage** page lists both events.
 
-6. **Move the test clock forward one month.** The clock moves 32 days
-   ahead, past the end of ACME Corp's first month. While it moves, Hardcount
-   closes that month and makes the invoice. The first `date` form is for
-   macOS, the second for Linux.
+5. **See your invoice so far.** The preview is ACME Corp's invoice as it
+   will be at the end of its month, priced from the usage so far. It
+   changes as more usage arrives, and it creates nothing.
 
    <!-- docs-run: command -->
    ```bash
-   LATER=$(date -u -v+32d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "+32 days" +%Y-%m-%dT%H:%M:%SZ)
-   jq -n --arg t "$LATER" '{frozen_time: $t}' \
-     | curl -s -X POST "$HARDCOUNT/v1/test-clocks/$CLOCK_ID/advance" \
+   jq -n --arg cus "$CUSTOMER_ID" '{customer_id: $cus}' \
+     | curl -s -X POST "$HARDCOUNT/v1/invoices/create_preview" \
        -H "Authorization: Bearer $HARDCOUNT_KEY" \
        -H "Content-Type: application/json" \
-       -d @- | jq -r .status
+       -d @- | jq '{total_cents: .totals[0].amount_cents,
+                    lines: [.lines[] | {description, amount_cents}]}'
    ```
 
    **You see:**
 
    <!-- docs-run: output -->
-   ```text
-   advancing
+   ```json
+   {
+     "total_cents": 600,
+     "lines": [
+       {
+         "description": "Tokens (claude-sonnet-4.5 · input)",
+         "amount_cents": 300
+       },
+       {
+         "description": "Tokens (claude-sonnet-4.5 · output)",
+         "amount_cents": 300
+       }
+     ]
+   }
    ```
 
-   Run this until it prints `ready`. It takes a few seconds.
+   In the dashboard, the customer's page shows it under **Upcoming
+   invoices**.
 
-   <!-- docs-run: command repeat-until-output -->
+6. **Issue the invoice now.** A subscription's invoice is issued when its
+   month ends. ACME Corp is a test customer, so you need not wait a month:
+   canceling its subscription issues its final invoice now, for the usage
+   so far.
+
+   This ends ACME Corp's subscription, and usage sent for it afterwards is
+   not billed. To keep trying things, create a new customer: run the page
+   again from step 2, with `acme-2` in place of `acme-1`.
+
+   <!-- docs-run: command -->
    ```bash
-   curl -s "$HARDCOUNT/v1/test-clocks/$CLOCK_ID" \
+   curl -s -X POST "$HARDCOUNT/v1/subscriptions/$SUBSCRIPTION_ID/cancel" \
      -H "Authorization: Bearer $HARDCOUNT_KEY" | jq -r .status
    ```
 
@@ -265,8 +274,12 @@ Recipe, meter and test clock: [quick start](quick-start.md#words-on-this-page).
 
    <!-- docs-run: output -->
    ```text
-   ready
+   canceled
    ```
+
+   A real customer's invoice is issued by itself when its month ends.
+   Canceling a real customer's subscription does what it did here: it ends
+   the subscription and issues their final invoice at once.
 
 7. **Read the invoice.**
 
@@ -291,11 +304,11 @@ Recipe, meter and test clock: [quick start](quick-start.md#words-on-this-page).
      "total_cents": 600,
      "lines": [
        {
-         "description": "Tokens (claude-sonnet-4.5 · input)",
+         "description": "Tokens (claude-sonnet-4.5 · input) - canceled mid-period",
          "amount_cents": 300
        },
        {
-         "description": "Tokens (claude-sonnet-4.5 · output)",
+         "description": "Tokens (claude-sonnet-4.5 · output) - canceled mid-period",
          "amount_cents": 300
        }
      ]
@@ -303,11 +316,11 @@ Recipe, meter and test clock: [quick start](quick-start.md#words-on-this-page).
    ```
 
    The lines are 1,000,000 input tokens at $3.00 per million, and 200,000
-   output tokens at $15.00 per million. "Finalized" means issued and no
-   longer a draft. Nothing is charged: no Stripe account is connected, and
-   ACME Corp has no card. Without Stripe, Hardcount emails ACME Corp the
-   invoice itself, with a link to view it, once. The quick start sets up no
-   email server, so here nothing is sent.
+   output tokens at $15.00 per million, the same as the preview. Each line
+   says "canceled mid-period" because the cancel ended the month early; an
+   invoice issued at the end of a month has no such words. "Finalized"
+   means issued and no longer a draft. Nothing is charged: no Stripe
+   account is connected, and ACME Corp has no card.
 
 8. **Open the invoice in the dashboard.** Sign in first.
 
@@ -327,23 +340,23 @@ Recipe, meter and test clock: [quick start](quick-start.md#words-on-this-page).
    and $6.00 due. The dashboard marks an invoice that is finalized and not
    paid as **Open**. A yellow **No payment method** notice says Stripe isn't
    connected in this mode, so no card can be added online. Its second line
-   says the server can't send email, so the invoice was not emailed. To see
+   says the server can't send email. Without Stripe, Hardcount emails the
+   customer the invoice itself, with a link to view it, but the quick start
+   sets up no email server, so nothing was sent. To see
    the PDF, open the **⋯** menu next to **Audit log** and choose **Preview
    PDF**.
 
-Home leaves out customers on a test clock, so its totals still read $0.
-That is expected: open the customer from **Customers** instead.
 
 ## If something goes wrong
 
 | What you see | What to do |
 |---|---|
 | A step prints `null` | The request failed. Run the same command without the last `jq` part to see the error message. |
-| `external_customer_id is required` in step 5a, or `payload.user is required` in step 5b | `CUSTOMER_REF` is not set. A variable lasts only as long as its terminal. Run the page again from the top in one terminal, with `acme-2` in place of `acme-1` in step 3. |
-| `customer "acme-1" not found`, or `"held":2` in step 5b | Step 3 did not run. Step 5a refuses usage for a customer Hardcount does not know. Step 5b holds it instead: run steps 3 and 4, then release it from the notice on the **Usage** page. |
-| `customer with external_id "acme-1" already exists` | You ran this page before. In step 3, change `acme-1` to `acme-2`, then run steps 2 to 8 again. |
-| `INVOICE_ID` is `null`, or the invoice has no token lines | The usage went to another customer, or was sent after the clock moved. Run steps 2 to 8 again with a new name in step 3. |
-| `after_close`, `no_price`, `not_on_plan` or `outside_subscription` is not 0 in step 5b | Hardcount stored the events but will not bill them. `no_price` means no price of the plan takes their `model` and `token_type`. In step 5a, the same reason is in the event's `billing_status`: run the command without the last `jq` part to see it. |
+| `external_customer_id is required` in step 4a, or `payload.user is required` in step 4b | `CUSTOMER_REF` is not set. A variable lasts only as long as its terminal. Run the page again from the top in one terminal, with `acme-2` in place of `acme-1` in step 2. |
+| `customer "acme-1" not found`, or `"held":2` in step 4b | Step 2 did not run. Step 4a refuses usage for a customer Hardcount does not know. Step 4b holds it instead: run steps 2 and 3, then release it from the notice on the **Usage** page. |
+| `customer with external_id "acme-1" already exists` | You ran this page before. In step 2, change `acme-1` to `acme-2`, then run steps 2 to 8 again. |
+| `INVOICE_ID` is `null`, or the invoice has no token lines | The usage went to another customer, or was sent after the cancel in step 6. Run steps 2 to 8 again with a new name in step 2. |
+| `after_close`, `no_price`, `not_on_plan` or `outside_subscription` is not 0 in step 4b | Hardcount stored the events but will not bill them. `no_price` means no price of the plan takes their `model` and `token_type`. In step 4a, the same reason is in the event's `billing_status`: run the command without the last `jq` part to see it. |
 
 **Next:**
 

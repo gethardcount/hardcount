@@ -471,20 +471,19 @@ it, never the customer.
 
    The **Provider costs** page lists them.
 
-2. **Read the margin for one invoiced period.** This reads the billing
-   period of the invoice in `INVOICE_ID`, which step 7 of the
-   [first invoice page](first-invoice.md#steps) sets.
+2. **Read the margin so far.** This reads the margin on the customer in
+   `CUSTOMER_ID` over the last 30 days. For the customer of the
+   [first invoice page](first-invoice.md#steps), read it before that page's
+   step 6: the cancel there ends the subscription, and the margin rates
+   usage on active subscriptions only.
 
    ```bash
-   PERIOD=$(curl -s "$HARDCOUNT/v1/invoices/$INVOICE_ID" \
-     -H "Authorization: Bearer $HARDCOUNT_KEY" \
-     | jq -r '.invoice | "from=\(.billing_period_start | @uri)&to=\(.billing_period_end | @uri)"')
-   curl -s "$HARDCOUNT/v1/customers/$CUSTOMER_ID/margin?$PERIOD" \
+   curl -s "$HARDCOUNT/v1/customers/$CUSTOMER_ID/margin" \
      -H "Authorization: Bearer $HARDCOUNT_KEY" | jq '{revenue_cents, cost_cents, margin_bps}'
    ```
 
-   **You see,** for a [first invoice](first-invoice.md) made after you
-   saved these two costs:
+   **You see,** for that customer, with its usage sent after you saved these
+   two costs:
 
    ```json
    {

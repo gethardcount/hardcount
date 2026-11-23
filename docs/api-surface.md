@@ -282,8 +282,6 @@ with a test key.
    `internal_failure` means the billing stopped;
    `POST /v1/test-clocks/{id}/retry-advance` tries again.
 
-[First invoice](first-invoice.md#steps) walks through this end to end.
-
 ### Payment retries and webhooks
 
 | Method | Path | What it does |

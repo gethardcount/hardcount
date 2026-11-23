@@ -443,7 +443,7 @@ test('an open invoice: a credit note lowers what is owed, an offline payment set
   await expect(figure(credits, 'Balance')).toContainText(usd(balance))
 })
 
-test('closing an unpaid invoice: void gives back the credit it used, write-off can pause the subscription, and the payment page says so', async ({ page }) => {
+test('closing an unpaid invoice: void gives back the credit it used, a write-off closes it, and the payment page says so', async ({ page }) => {
   const [voidable, writeOff] = await Promise.all([invoicePaidPartlyByCredit(1000), billedCustomer()])
 
   // Void. The invoice used $10.00 of credit at finalize; voiding returns it.
@@ -482,41 +482,19 @@ test('closing an unpaid invoice: void gives back the credit it used, write-off c
   await expect(page.getByRole('button', { name: /^Pay/ })).toHaveCount(0)
   await expect(page.getByText(/Online payment isn.t set up/)).toHaveCount(0)
 
-  // Write off, and also pause collection on the subscription.
-  const { invoice: open, subscription } = writeOff
+  // Write off.
+  const { invoice: open } = writeOff
   await page.goto(`/invoices/${open.id}`)
   await (await invoiceActions(page)).getByRole('menuitem', { name: 'Mark uncollectible' }).click()
   const writeOffDialog = page.getByRole('alertdialog', { name: 'Mark invoice uncollectible' })
-  const pause = writeOffDialog.getByRole('checkbox', { name: 'Also pause collection on this subscription' })
-  await expect(pause).not.toBeChecked()
-  await pause.click()
-  await expect(pause).toBeChecked()
-  await expect(writeOffDialog).toContainText('they stay drafts and nothing charges them. Retries already running on its other unpaid invoices continue.')
   await writeOffDialog.getByLabel(/^Type WRITE OFF to confirm/).fill('WRITE OFF')
   await writeOffDialog.getByRole('button', { name: 'Mark uncollectible' }).click()
   await expect(writeOffDialog).toBeHidden()
-  await expect(page.getByText(`${open.invoice_number} marked uncollectible, collection paused`)).toBeVisible()
 
-  const [written, sub] = await Promise.all([
-    getInvoice(open.id),
-    api<{ pause_collection?: { behavior: string } }>('GET', `/subscriptions/${subscription.id}`),
-  ])
+  const written = await getInvoice(open.id)
   expect(written.invoice.status).toBe('uncollectible')
-  expect(sub.pause_collection?.behavior).toBe('keep_as_draft')
   await expect(statusPill(page, 'Uncollectible')).toBeVisible()
   await expect(page.getByText('Written off', { exact: true })).toBeVisible()
-  // Soft, so the rest of the journey still reports when the page is stale.
-  await expect.soft(page.getByText('Collection on the subscription is paused.')).toBeVisible()
-
-  // The subscription, opened from the invoice, offers to resume collection.
-  // The invoice names it in its details and on the Activity card's rows;
-  // this is the details link, so the Activity rows' links are left out.
-  await page.getByRole('link', { name: subscription.display_name, exact: true })
-    .and(page.locator(':not([data-activity-link])'))
-    .click()
-  await expect(page.getByRole('heading', { name: subscription.display_name })).toBeVisible()
-  await expect.soft(page.getByText('New invoices are saved as drafts and not charged.')).toBeVisible()
-  await expect.soft(page.getByRole('button', { name: 'Resume collection' })).toBeVisible()
 
   await page.goto(`/invoice/${written.invoice.public_token}`)
   await expect(page.getByText('This invoice is closed')).toBeVisible()

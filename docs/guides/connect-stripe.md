@@ -177,13 +177,14 @@ ID in `INVOICE_ID`). Charge it now:
 
   **You see:** `"status": "paid"` and `"payment_status": "succeeded"`.
 
-Left alone, the invoice is charged on the next billing run. For a customer
-on a test clock, that is when the clock next moves
+Left alone, the invoice is charged on the next billing run
 ([Payments](../concepts/payments.md#the-flow)).
 
-**A new invoice.** Put the customer on a plan and let an invoice be issued:
-in test mode, on a [test clock](../concepts/test-clocks.md), move the clock
-past the period end. Right after the invoice is issued, Hardcount uses any
+**A new invoice.** Put the customer on a plan and let an invoice be issued.
+For a test customer, you need not wait for the period end: canceling the
+subscription issues its final invoice at once
+([first invoice](../first-invoice.md#steps), step 6). Right after the
+invoice is issued, Hardcount uses any
 credit the customer holds, then charges the card for the rest.
 
 **You see**, either way:

@@ -4,7 +4,7 @@
 // API.
 //
 //	go run ./cmd/hardcount-docs-run docs/first-invoice.md
-//	go run ./cmd/hardcount-docs-run -skip 5a -replace acme-1=acme-2 docs/first-invoice.md
+//	go run ./cmd/hardcount-docs-run -skip 4a -replace acme-1=acme-2 docs/first-invoice.md
 //
 // The page marks each fenced block as a command or as the output of the
 // command above it (see page.go). The run stops at the first command that
@@ -48,7 +48,6 @@ func main() {
 	flag.Var(&skips, "skip", "leave out the command named `name` (repeatable)")
 	flag.Var(&replaces, "replace", "replace `old=new` in every block before running (repeatable)")
 	dir := flag.String("dir", ".", "directory the commands run in")
-	tries := flag.Int("tries", 60, "how many times a repeat-until-output command runs, once a second, before the run fails")
 	timeout := flag.Duration("timeout", 2*time.Minute, "longest one command may take")
 	flag.Parse()
 	if flag.NArg() != 1 {
@@ -66,7 +65,7 @@ func main() {
 		fmt.Fprintf(os.Stderr, "hardcount-docs-run: %s:\n%v\n", page, err)
 		os.Exit(2)
 	}
-	if err := execute(page, plan, *dir, *tries, *timeout); err != nil {
+	if err := execute(page, plan, *dir, *timeout); err != nil {
 		fmt.Fprintf(os.Stderr, "\nhardcount-docs-run: FAIL: %v\n", err)
 		os.Exit(1)
 	}
@@ -140,8 +139,6 @@ func makePlan(src string, skips, replaces []string) (*plan, error) {
 		// deleted, marker and all, without the run failing.
 		if len(p.outputs[k]) == 0 {
 			errs = append(errs, fmt.Sprintf("line %d: the command has no output block in this pass; add a <!-- docs-run: output --> block under it (an empty one if it prints nothing)", b.line))
-		} else if b.repeat && len(p.outputs[k]) != 1 {
-			errs = append(errs, fmt.Sprintf("line %d: a repeat-until-output command needs exactly one output block to check, has %d", b.line, len(p.outputs[k])))
 		}
 	}
 	if len(errs) > 0 {
@@ -150,7 +147,7 @@ func makePlan(src string, skips, replaces []string) (*plan, error) {
 	return p, nil
 }
 
-func execute(page string, p *plan, dir string, tries int, timeout time.Duration) error {
+func execute(page string, p *plan, dir string, timeout time.Duration) error {
 	sh, err := startShell(dir)
 	if err != nil {
 		return err
@@ -168,26 +165,10 @@ func execute(page string, p *plan, dir string, tries int, timeout time.Duration)
 			continue
 		}
 		fmt.Printf("\n=== %s\n%s\n--- output\n", where, indent(b.text))
-		var got string
-		attempt := 1
-		for ; ; attempt++ {
-			got, err = sh.run(b.text, timeout)
-			if err != nil {
-				fmt.Println(indent(got))
-				return fmt.Errorf("%s: %v", where, err)
-			}
-			if !b.repeat || matchOutput(p.blocks[p.outputs[k][0]].text, got) {
-				break
-			}
-			if attempt >= tries {
-				fmt.Println(indent(got))
-				return fmt.Errorf("%s: still not the page's output after %d tries", where, tries)
-			}
-			time.Sleep(time.Second)
-		}
+		got, err := sh.run(b.text, timeout)
 		fmt.Println(indent(got))
-		if b.repeat {
-			fmt.Printf("    (after %d tries)\n", attempt)
+		if err != nil {
+			return fmt.Errorf("%s: %v", where, err)
 		}
 		ran++
 		for _, o := range p.outputs[k] {

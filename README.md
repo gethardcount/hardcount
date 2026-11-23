@@ -33,7 +33,7 @@ One month of AI usage for one customer, from the [demo](#quick-start) in test mo
 
 ## Quick start
 
-Try Hardcount on your own computer. It runs in test mode, where no real money moves.
+Try Hardcount on your own computer. It runs in test mode, where no real money moves, and needs no Stripe account.
 
 You need git and Docker 24 or newer with the Compose plugin. On Windows, run it inside WSL.
 
@@ -55,9 +55,9 @@ Open `http://localhost:8080` and sign in. Hardcount opens in test mode, and it i
 ./quickstart.sh demo
 ```
 
-The demo sets up AI token prices, creates a customer and sends token usage the way a LiteLLM proxy would. Then it moves the customer's test clock (a pretend clock for test customers) to the end of the month, and Hardcount makes the invoice, its PDF and the margin report shown above.
+The demo sets up AI token prices, creates a customer and sends token usage the way a LiteLLM proxy would. Then it shows the invoice so far and the margin report shown above, and cancels the test customer's subscription so Hardcount issues the invoice and its PDF now.
 
-**You see:** nine steps, each ending in a green ✓, then links to the invoice and the customer. Home still reads $0, because its totals leave out test-clock customers; use the links instead. [Each demo step, and where to click](docs/quick-start.md)
+**You see:** nine steps, each ending in a green ✓, then links to the invoice and the customer. [Each demo step, and where to click](docs/quick-start.md)
 
 **3. Stop or remove it**
 

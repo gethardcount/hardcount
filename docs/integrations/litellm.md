@@ -90,10 +90,6 @@ jq -n --arg ref "$CUSTOMER_REF" --arg cus "$CUSTOMER_ID" --arg plan "$PLAN_ID" \
 
 **You see:** the subscription's ID, and `"status": "active"`.
 
-Did [First invoice](../first-invoice.md)? Its customer `acme-1` is on the
-same Claude plan, on a test clock: use `acme-1` where this page says
-`acme-proxy`, go to step 3, then move the clock forward for the invoice.
-
 ## 3. Add Hardcount to the proxy config
 
 First create a usage-only key for the proxy. It can send usage and nothing
@@ -260,8 +256,8 @@ customer it is billed to. Give the header only to clients you trust.
    The events also show on the **Usage** page in the dashboard. Nothing
    there after a minute? Look for `Generic API Logger` in the proxy's log.
 
-4. **See what the usage will bill.** This customer is on no test clock, so
-   its first invoice is issued when its billing month ends. Until then, the
+4. **See what the usage will bill.** The customer's first invoice is issued
+   when its billing month ends. Until then, the
    customer's page in the dashboard shows the invoice so far, under
    **Upcoming invoices**. From the API:
 
@@ -300,8 +296,8 @@ customer it is billed to. Give the header only to clients you trust.
    }
    ```
 
-   The preview creates nothing. To see an invoice issued without waiting,
-   use a customer on a test clock and move it forward: [First invoice](../first-invoice.md).
+   The preview creates nothing. For a test customer, canceling its
+   subscription issues the invoice at once: [First invoice](../first-invoice.md#steps), step 6.
 
 Once this works, read [What LiteLLM can lose, and what to
 do](#what-litellm-can-lose-and-what-to-do) before you bill real customers
