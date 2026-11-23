@@ -477,6 +477,50 @@ Known limits:
    The events also show on the **Usage** page in the dashboard. Nothing
    there after a minute? Look for `Generic API Logger` in the proxy's log.
 
+4. **See what the usage will bill.** This customer is on no test clock, so
+   its first invoice is issued when its billing month ends. Until then, the
+   customer's page in the dashboard shows the invoice so far, under
+   **Upcoming invoices**. From the API:
+
+   ```bash
+   jq -n --arg cus "$CUSTOMER_ID" '{customer_id: $cus}' \
+     | curl -s -X POST "$HARDCOUNT/v1/invoices/create_preview" \
+       -H "Authorization: Bearer $HARDCOUNT_KEY" \
+       -H "Content-Type: application/json" \
+       -d @- | jq '{lines: [.lines[] | {description, quantity, amount_cents}], totals}'
+   ```
+
+   **You see:** one line for each model and kind of token, priced, and the
+   total so far. A million input tokens and 200,000 output tokens on
+   `claude-sonnet-4.5` read:
+
+   ```json
+   {
+     "lines": [
+       {
+         "description": "Tokens (claude-sonnet-4.5 · input)",
+         "quantity": "1000000",
+         "amount_cents": 300
+       },
+       {
+         "description": "Tokens (claude-sonnet-4.5 · output)",
+         "quantity": "200000",
+         "amount_cents": 300
+       }
+     ],
+     "totals": [
+       {
+         "currency": "USD",
+         "amount_cents": 600
+       }
+     ]
+   }
+   ```
+
+   The preview creates nothing. To see a whole month end and an invoice
+   issued without waiting, use a customer on a test clock and send its
+   usage yourself: [First invoice](../first-invoice.md).
+
 ## Response
 
 `POST /v1/integrations/litellm/spend` answers 200 with counts, plus an
