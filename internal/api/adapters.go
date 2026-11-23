@@ -766,22 +766,16 @@ type subscriptionStateAdapter struct {
 	svc *subscription.Service
 }
 
-func (a *subscriptionStateAdapter) GetTerminalState(ctx context.Context, tenantID, id string) (dunning.SubscriptionTerminalState, error) {
+func (a *subscriptionStateAdapter) IsCanceled(ctx context.Context, tenantID, id string) (bool, error) {
 	sub, err := a.svc.Get(ctx, tenantID, id)
 	if err != nil {
-		return dunning.SubscriptionTerminalState{}, err
+		return false, err
 	}
-	// Terminated marks the state in which both actions, cancel and pause,
-	// refuse. The cancel's compare-and-set (CancelAtomicWithBill) matches
-	// only a trialing or active row, and SetPauseCollection rejects
-	// canceled outright.
-	st := dunning.SubscriptionTerminalState{
-		Terminated: sub.Status == domain.SubscriptionCanceled,
-	}
-	if sub.CurrentBillingPeriodStart != nil {
-		st.PeriodStart = *sub.CurrentBillingPeriodStart
-	}
-	return st, nil
+	// Canceled is the state in which both actions, cancel and pause, refuse.
+	// The cancel's compare-and-set (CancelAtomicWithBill) matches only a
+	// trialing or active row, and SetPauseCollection rejects canceled
+	// outright.
+	return sub.Status == domain.SubscriptionCanceled, nil
 }
 
 // invoiceUncollectibleAdapter implements dunning.InvoiceUncollectibleMarker
