@@ -32,8 +32,7 @@ export interface HeldUsageReleaseResult {
   deduplicated: number;
   /**
      * Rows for this external ID still held that a release cannot take
-     * yet: their meter does not exist yet, or their time is after the
-     * customer's current time (a customer on a test clock).
+     * yet: their meter does not exist yet.
      */
   still_held: number;
   /**

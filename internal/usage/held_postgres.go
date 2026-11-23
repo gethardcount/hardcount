@@ -85,6 +85,9 @@ type ReleaseHeldInput struct {
 	// NotAfter is the customer's current time. Rows stamped after it stay
 	// held: ingesting them would put usage in the customer's future.
 	NotAfter time.Time
+	// At, when set (a customer on a test clock), is the time every released
+	// row is written at, and no row stays held for its own time.
+	At *time.Time
 	// Limit caps the rows claimed by one call.
 	Limit int
 }
@@ -239,13 +242,13 @@ func (s *PostgresStore) ReleaseHeld(ctx context.Context, tenantID string, in Rel
 			WHERE tenant_id = $1 AND status = 'held'
 			  AND external_customer_id = $2
 			  AND event_name = ANY($3::text[])
-			  AND event_at <= $4
+			  AND ($7 OR event_at <= $4)
 			ORDER BY event_at, id
 			LIMIT $6
 		)
 		AND status = 'held'
 		RETURNING id, event_name, quantity, properties, idempotency_key, event_at, observed_cost_micros
-	`, tenantID, in.ExternalCustomerID, keys, in.NotAfter, in.CustomerID, limit)
+	`, tenantID, in.ExternalCustomerID, keys, in.NotAfter, in.CustomerID, limit, in.At != nil)
 	if err != nil {
 		return ReleaseHeldResult{}, err
 	}
@@ -268,6 +271,9 @@ func (s *PostgresStore) ReleaseHeld(ctx context.Context, tenantID string, in Rel
 
 	res := ReleaseHeldResult{Rows: make([]ReleasedRow, 0, len(claimed))}
 	for _, h := range claimed {
+		if in.At != nil {
+			h.EventAt = *in.At
+		}
 		row := ReleasedRow{HeldID: h.ID, EventName: h.EventName, EventAt: h.EventAt, Dimensions: h.Dimensions}
 		if inputKey, isWrite := CallInputKey(h.IdempotencyKey); isWrite {
 			// A LiteLLM cache-write row whose call usage_events already
@@ -313,11 +319,11 @@ func (s *PostgresStore) ReleaseHeld(ctx context.Context, tenantID string, in Rel
 	// Limit (another release takes them) and rows it could not take.
 	if err := tx.QueryRowContext(ctx, `
 		SELECT
-			COUNT(*) FILTER (WHERE event_name = ANY($3::text[]) AND event_at <= $4),
-			COUNT(*) FILTER (WHERE NOT (event_name = ANY($3::text[]) AND event_at <= $4))
+			COUNT(*) FILTER (WHERE event_name = ANY($3::text[]) AND ($5 OR event_at <= $4)),
+			COUNT(*) FILTER (WHERE NOT (event_name = ANY($3::text[]) AND ($5 OR event_at <= $4)))
 		FROM usage_held_events
 		WHERE tenant_id = $1 AND status = 'held' AND external_customer_id = $2
-	`, tenantID, in.ExternalCustomerID, keys, in.NotAfter).Scan(&res.MoreToRelease, &res.StillHeld); err != nil {
+	`, tenantID, in.ExternalCustomerID, keys, in.NotAfter, in.At != nil).Scan(&res.MoreToRelease, &res.StillHeld); err != nil {
 		return ReleaseHeldResult{}, err
 	}
 

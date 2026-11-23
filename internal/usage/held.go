@@ -15,6 +15,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
 // Held usage (#1044, ADR-122).
@@ -231,12 +232,21 @@ func (s *Service) Release(ctx context.Context, tenantID string, in ReleaseInput)
 		return ReleaseResult{}, err
 	}
 	auditEmit := s.releaseEmission(decided, in)
+	now := s.clock.Now(decided)
+	// A gateway dates a call by its own clock, which has no place on a test
+	// clock's timeline: on a clock a held call is released at the clock's
+	// time, as IngestCall dates it.
+	var at *time.Time
+	if _, onClock := clock.SimOf(decided); onClock {
+		at = &now
+	}
 	var buckets map[string]MeterBuckets
 	res, err := s.held.ReleaseHeld(ctx, tenantID, ReleaseHeldInput{
 		ExternalCustomerID: in.ExternalCustomerID,
 		CustomerID:         in.CustomerID,
 		MeterIDs:           in.MeterIDs,
-		NotAfter:           s.clock.Now(decided),
+		NotAfter:           now,
+		At:                 at,
 	}, func(tx *sql.Tx, res ReleaseHeldResult) error {
 		b, err := s.releaseBuckets(ctx, tx, in, periods, res)
 		if err != nil {
