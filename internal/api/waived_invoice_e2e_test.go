@@ -63,8 +63,7 @@ func TestE2E_RemoveItemAfterWaive_NoFurtherCredit(t *testing.T) {
 }
 
 // TestE2E_Revenue_CountsWhatPaidTheInvoice: Revenue and the revenue chart
-// count what paid each invoice (the payment plus the customer credit
-// applied), not its total. A credit note lowers an unpaid invoice's amount
+// count what customers paid for each invoice, not its total. A credit note lowers an unpaid invoice's amount
 // due and leaves its total as it was, so summing totals counted the waived
 // part as revenue: an invoice waived in full added its whole total, in the
 // month it was waived (G3 made it paid). The Dunning page says a waived

@@ -11,7 +11,7 @@ import { timeAgo, wallClockNow } from '@/lib/effectiveNow'
 import { useNowResolver, useTestClocks } from '@/hooks/useNow'
 import { useAuth } from '@/contexts/AuthContext'
 import { NoticeRow } from '@/components/NoticeRow'
-import { CUSTOMERS_DEFINITION, FAILED_PAYMENTS_DEFINITION, MRR_DEFINITION, currencyScopedHint, customersTrend, failedPaymentsTrend, subscriptionsHint } from '@/lib/homeKpis'
+import { CUSTOMERS_DEFINITION, FAILED_PAYMENTS_DEFINITION, MRR_DEFINITION, REVENUE_DEFINITION, currencyScopedHint, customersTrend, failedPaymentsTrend, subscriptionsHint } from '@/lib/homeKpis'
 import { SIMULATED_TOTALS_SENTENCE, SIMULATED_TOTALS_TITLE, showSimulatedTotalsNote } from '@/lib/homeNotices'
 import { LoadError } from '@/components/LoadError'
 import { TestClocksLoadError } from '@/components/TestClocksLoadError'
@@ -190,6 +190,7 @@ export default function DashboardPage() {
             />
             <TrendCard
               label="Revenue"
+              definition={REVENUE_DEFINITION}
               value={formatCents(overview.revenue, overview.currency)}
               current={overview.revenue}
               previous={overview.revenue_prev}

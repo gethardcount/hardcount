@@ -435,17 +435,18 @@ func defaultCurrencyFor(ctx context.Context, tx *sql.Tx) (string, error) {
 	return cur, nil
 }
 
-// sumPaidRevenue is what paid the invoices paid in [start, end): the payment
-// (card or offline) plus the customer credit applied, not the invoice total. A
-// credit note on an unpaid invoice lowers its amount due and leaves its total
-// as it was, so a total counted the waived part as revenue; an invoice waived
-// in full is paid with nothing paid for it (ADR-061 amendment 2026-10-19). For
-// an invoice paid in full with no such note the two are equal. A note on an
-// invoice already paid changes neither: Revenue is before refunds.
+// sumPaidRevenue is what customers paid for the invoices paid in [start, end):
+// the payment, by card or offline, which the paid flip sets from the amount
+// due. Credit applied is not added: its money was counted when it was paid (a
+// prepaid commit) or never came in (promotional credit, credit from a note), so
+// adding it counted the same money twice. A credit note on an unpaid invoice
+// lowers the amount due, so a waived part is not counted (ADR-061 amendment
+// 2026-10-19). A note on an invoice already paid changes nothing: Revenue is
+// before refunds.
 func sumPaidRevenue(ctx context.Context, tx *sql.Tx, start, end any, currency string) (int64, error) {
 	var v int64
 	err := tx.QueryRowContext(ctx, `
-		SELECT COALESCE(SUM(amount_paid_cents + credits_applied_cents), 0)
+		SELECT COALESCE(SUM(amount_paid_cents), 0)
 		FROM invoices
 		WHERE status = 'paid' AND paid_at >= $1 AND paid_at < $2 AND currency = $3 AND is_simulated = false
 	`, start, end, currency).Scan(&v)

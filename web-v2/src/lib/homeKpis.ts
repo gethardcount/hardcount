@@ -31,6 +31,11 @@ export const CUSTOMERS_DEFINITION =
 export const MRR_DEFINITION =
   'Monthly recurring revenue: the base fees of active subscriptions, per month. Usage is not included. ARR is the same × 12.'
 
+// sumPaidRevenue (internal/analytics/overview.go): the payments on invoices
+// paid in the period. Credit applied is not added again.
+export const REVENUE_DEFINITION =
+  'What customers paid for invoices paid in this period, by card or offline. Credit is counted once, when it was bought.'
+
 export const FAILED_PAYMENTS_DEFINITION =
   'Open invoices created in this period whose payment failed. Void and uncollectible invoices are not counted.'
 

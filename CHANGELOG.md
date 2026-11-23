@@ -28,6 +28,10 @@ original text.
 - **On a test clock, late dunning work is dated when it runs, as in real time:** a payment retry that waited for the customer's payment page, and the cancel, pause and write-off after an interrupted escalation. The escalation keeps its own time. Both used to be dated at the earlier time ([#1903](https://github.com/gethardcount/hardcount/pull/1903)).
 - **While a test clock advances, a change to one of its customers, or a new customer on it, answers `409 clock_advancing`:** the customer, its subscriptions, invoices, credit notes and credits, and usage you backfill or release. Reads, usage your app or proxy sends, payments through Stripe, price changes (which take effect after the advance) and deleting the clock go on, and a clock whose advance failed stays open ([errors](docs/api/errors.md), [#1899](https://github.com/gethardcount/hardcount/pull/1899)).
 
+### Fixed
+
+- **Revenue on Home and the revenue chart count what customers paid, once.** They added the credit applied to each paid invoice to its payment, so the money behind credit was counted again: a $10,000 prepaid commit counted $10,000 when it was paid and $10,000 more as its credit paid later invoices. Credit from a credit note and promotional credit counted too, though no new money came in. Revenue is now the card and offline payments on the invoices paid in the period.
+
 ## [0.10.0] - 2026-11-23
 
 A restored database now catches up with Stripe before Hardcount serves it (`hardcount restore`). A test clock's advance runs as a background job on one replica, and work on a test clock is dated at the event it belongs to. Each API route states who may call it, and a request that was refused no longer holds its `Idempotency-Key`. Draft subscriptions and the `X-API-Key` header are removed. Claude Fable 5.2 and Mythos 5.2 have prices.

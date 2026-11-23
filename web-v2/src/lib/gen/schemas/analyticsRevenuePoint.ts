@@ -21,10 +21,10 @@ export interface AnalyticsRevenuePoint {
   /** Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC. */
   date: string;
   /**
-     * What paid the invoices paid in the bucket (payment plus customer
-     * credit applied), in the minor unit of the default currency
-     * (cents for USD). A credit note that lowered an invoice before it
-     * was paid is not counted.
+     * What customers paid for the invoices paid in the bucket, by card or
+     * offline, in the minor unit of the default currency (cents for
+     * USD). Credit applied to an invoice is not counted again. A credit
+     * note that lowered an invoice before it was paid is not counted.
      */
   revenue_cents: number;
   /** Invoices paid in the bucket. */
