@@ -30,7 +30,7 @@ original text.
 
 ### Fixed
 
-- **Revenue on Home and the revenue chart count what customers paid, once.** They added the credit applied to each paid invoice to its payment, so the money behind credit was counted again: a $10,000 prepaid commit counted $10,000 when it was paid and $10,000 more as its credit paid later invoices. Credit from a credit note and promotional credit counted too, though no new money came in. Revenue is now the card and offline payments on the invoices paid in the period.
+- **Revenue on Home and the revenue chart count what customers paid, once.** They added the credit applied to each paid invoice to its payment, so the money behind credit was counted again: a $10,000 prepaid commit counted $10,000 when it was paid and $10,000 more as its credit paid later invoices. Credit from a credit note and promotional credit counted too, though no new money came in. Revenue is now the card and offline payments on the invoices paid in the period ([#1906](https://github.com/gethardcount/hardcount/pull/1906)).
 
 ## [0.10.0] - 2026-11-23
 
