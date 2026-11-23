@@ -9,9 +9,8 @@ func TestSignInURL(t *testing.T) {
 		{"set with a trailing slash", "http://localhost:5190/", "http://localhost:5190/login"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
-			t.Setenv("DASHBOARD_BASE_URL", c.base)
-			if got := signInURL(); got != c.want {
-				t.Errorf("signInURL() = %q, want %q", got, c.want)
+			if got := signInURL(c.base); got != c.want {
+				t.Errorf("signInURL(%q) = %q, want %q", c.base, got, c.want)
 			}
 		})
 	}
