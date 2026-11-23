@@ -1,6 +1,6 @@
 import { test, expect, type Locator, type Page, type Response } from '@playwright/test'
 import { api, usd, uniq } from './fixtures/api'
-import { createClock, createCustomer, createPlan, createSubscription, waitForClockReady, type Plan, type TestClock } from './fixtures/seed'
+import { createCustomer, createPlan, createSubscription, type Plan } from './fixtures/seed'
 
 // Setting up what you sell and how you collect, through the screen: a meter,
 // a plan and the plan's price; a ready-made recipe; one customer's negotiated
@@ -223,16 +223,6 @@ function usageRate(preview: Preview): number[] {
   return preview.lines.filter(l => l.line_type === 'usage').map(l => l.unit_amount_cents)
 }
 
-// Moves a clock a month and a day on, past the end of the period it is in.
-async function advanceAPeriod(clock: TestClock) {
-  const now = await api<TestClock>('GET', `/test-clocks/${clock.id}`)
-  const to = new Date(now.frozen_time)
-  to.setUTCMonth(to.getUTCMonth() + 1)
-  to.setUTCDate(to.getUTCDate() + 1)
-  await api('POST', `/test-clocks/${clock.id}/advance`, { frozen_time: to.toISOString().replace(/\.\d+Z$/, 'Z') })
-  await waitForClockReady(clock.id)
-}
-
 // The price form writes each price shape in the API's words: a graduated
 // price's last tier is open (up_to null), and a package price can be a
 // fraction of a cent. Labels make each price take its own events.
@@ -415,7 +405,7 @@ test('the meter page shows the aggregation lock before an edit: free with no usa
   await expect(dialog.getByText('This meter has usage events, so its aggregation is fixed. Make a new meter to count differently.', { exact: true })).toBeVisible()
 })
 
-test('a price override for one customer: the upcoming invoice bills the negotiated rate from the next period, and the list rate once it ends', async ({ page }) => {
+test('a price override for one customer: the form saves the negotiated rate, the period in progress keeps the list rate, and ending it empties the card', async ({ page }) => {
   const id = uniq()
   const meter = await api<Meter>('POST', '/meters', {
     event_name: `e2e_deal_${id}`, name: `E2E Deal calls ${id}`, unit: 'call', aggregation: 'sum',
@@ -429,8 +419,7 @@ test('a price override for one customer: the upcoming invoice bills the negotiat
     code: `e2e-deal-other-${id}`, name: `E2E Deal other plan ${id}`, currency: 'USD', billing_interval: 'monthly', base_amount_cents: 0,
     prices: [{ meter_id: meter.id, mode: 'per_unit', unit_amount_cents: '5' }],
   })
-  const clock = await createClock()
-  const customer = await createCustomer(clock.id)
+  const customer = await createCustomer()
   const subscription = await createSubscription(customer.id, plan.id)
   const ingest = () => api('POST', '/usage-events', { external_customer_id: customer.external_id, event_name: meter.event_name, quantity: '500', idempotency_key: `e2e_${uniq()}` })
   await ingest()
@@ -474,11 +463,9 @@ test('a price override for one customer: the upcoming invoice bills the negotiat
   await expect(overrides).toContainText('$0.01 / call · list price $0.02 / call')
   await expect(overrides).toContainText(`${reason} · since`)
 
-  // The period in progress keeps the list rate; the next one bills the deal.
+  // The period in progress keeps the list rate. The next period's rate is
+  // tested in Go (TestE2E_PlanPrices_OverrideFromTheNextPeriod).
   expect(usageRate(await expectUpcomingInvoiceMatchesAPI(page, subscription.id))).toEqual([2])
-  await advanceAPeriod(clock)
-  await ingest()
-  expect(usageRate(await expectUpcomingInvoiceMatchesAPI(page, subscription.id))).toEqual([1])
 
   // End it: the card is empty again, and the list rate is back from the
   // next period.
@@ -493,11 +480,6 @@ test('a price override for one customer: the upcoming invoice bills the negotiat
   await expect(end).toBeHidden()
   expect(await active()).toEqual([])
   await expect(overrides).toContainText('No negotiated prices — this customer bills at list price.')
-
-  expect(usageRate(await expectUpcomingInvoiceMatchesAPI(page, subscription.id))).toEqual([1])
-  await advanceAPeriod(clock)
-  await ingest()
-  expect(usageRate(await expectUpcomingInvoiceMatchesAPI(page, subscription.id))).toEqual([2])
 })
 
 test('install a recipe: the preview lists what it will create, the install creates it once, and installing again changes nothing', async ({ page }) => {

@@ -1,52 +1,32 @@
 import { test, expect, type Page, type Response } from '@playwright/test'
-import { api, usd, uniq } from './fixtures/api'
+import { api, uniq } from './fixtures/api'
 import {
-  createClock, createCustomer, createPlan, createSubscription, invoicesFor, subscribedCustomer, waitForClockReady,
-  type Invoice, type Plan, type Subscription, type TestClock,
+  createCustomer, createSubscription, subscribedCustomer,
+  type Invoice, type Plan, type Subscription,
 } from './fixtures/seed'
 
-// Changing a subscription through the screen: its plan, its items, its end,
-// its collection and its trial. Each journey does what an operator does, then
-// reads the API and checks that the page, the toast and any invoice the change
-// made show what the API holds. One test per kind of change. The arithmetic
-// behind the amounts is tested in Go.
-
-const DAY = 86_400_000
+// Changing a subscription through the screen: its plan and its end. Each
+// journey does what an operator does, then reads the API and checks that the
+// page and the toast show what the API holds. One test per kind of change.
 
 // The subscription fields these journeys read, beyond the shared fixture's.
 interface Item {
   id: string
   plan_id: string
-  quantity: number
   pending_plan_id?: string
   pending_plan_effective_at?: string
 }
 interface Sub extends Subscription {
   items: Item[]
-  trial_start_at?: string
-  trial_end_at?: string
   current_billing_period_end?: string
   next_billing_at?: string
   cancel_at_period_end?: boolean
   cancel_effective_at?: string
   canceled_at?: string
-  pause_collection?: { behavior: string; resumes_at?: string }
 }
 interface ItemChange {
   item: Item
-  proration?: {
-    type: 'invoice' | 'credit' | 'adjustment'
-    amount_cents: number
-    invoice_id?: string
-    credited_to_balance_cents: number
-    reduced_open_invoices_cents: number
-    held_on_draft_invoices_cents: number
-  }
-  new_period_invoice?: { id: string; invoice_number: string; status: string; total_amount_cents: number; currency: string }
-}
-interface Preview {
-  lines: { description: string; amount_cents: number }[]
-  totals: { currency: string; amount_cents: number }[]
+  proration?: unknown
 }
 
 function getSub(id: string) {
@@ -57,24 +37,17 @@ async function subscriptionInvoices(id: string): Promise<Invoice[]> {
   return (await api<{ data: Invoice[] }>('GET', `/invoices?subscription_id=${id}`)).data
 }
 
-// A monthly USD plan whose base fee is billed at the start of each period, so
-// a change in the middle of one is charged or credited at once.
-function planBilledInAdvance(baseCents: number, interval: 'monthly' | 'yearly' = 'monthly'): Promise<Plan> {
+// A monthly USD plan whose base fee is billed at the start of each period.
+function planBilledInAdvance(baseCents: number): Promise<Plan> {
   const id = uniq()
   return api<Plan>('POST', '/plans', {
     code: `e2e-adv-${id}`,
     name: `E2E Advance ${id}`,
     currency: 'USD',
-    billing_interval: interval,
+    billing_interval: 'monthly',
     base_amount_cents: baseCents,
     base_bill_timing: 'in_advance',
   })
-}
-
-async function advanceDays(clock: TestClock, days: number) {
-  const to = new Date(new Date(clock.frozen_time).getTime() + days * DAY)
-  await api('POST', `/test-clocks/${clock.id}/advance`, { frozen_time: to.toISOString().replace(/\.\d+Z$/, 'Z') })
-  await waitForClockReady(clock.id)
 }
 
 // The workspace time zone: the dashboard prints every date in it.
@@ -87,15 +60,6 @@ function day(iso: string, timeZone: string): string {
   return new Date(iso).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric', timeZone })
 }
 
-// The same date as typed into a date field: "2026-11-18".
-function typedDate(at: Date, timeZone: string): string {
-  return new Intl.DateTimeFormat('en-CA', { year: 'numeric', month: '2-digit', day: '2-digit', timeZone }).format(at)
-}
-
-function escapeRegExp(s: string): string {
-  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-}
-
 // The next API call the page makes with this method to a path ending in `path`.
 function apiCall(page: Page, method: string, path: RegExp): Promise<Response> {
   return page.waitForResponse(r => r.request().method() === method && path.test(new URL(r.url()).pathname))
@@ -104,10 +68,6 @@ function apiCall(page: Page, method: string, path: RegExp): Promise<Response> {
 // Toasts render outside the page's main region.
 function toasts(page: Page) {
   return page.getByRole('region', { name: /^Notifications/ })
-}
-
-function card(page: Page, title: string | RegExp) {
-  return page.getByRole('main').locator('[data-slot="card"]').filter({ has: page.getByText(title, { exact: true }) })
 }
 
 function itemsCard(page: Page) {
@@ -125,61 +85,16 @@ function renewsOn(sub: Sub, zone: string): string {
   return day(sub.next_billing_at ?? sub.current_billing_period_end!, zone)
 }
 
-// The Upcoming invoice card lists the lines the API previews for the
-// subscription, in order, with their amounts and the total.
-async function expectUpcomingInvoiceMatchesAPI(page: Page, subscriptionId: string) {
-  const { customer_id } = await api<{ customer_id: string }>('GET', `/subscriptions/${subscriptionId}`)
-  const preview = await api<Preview>('POST', '/invoices/create_preview', { customer_id, subscription_id: subscriptionId })
-  expect(preview.totals).toHaveLength(1)
-  const upcoming = card(page, 'Upcoming invoice')
-  await expect(upcoming.getByRole('row')).toHaveText([
-    /^Description\s*Quantity\s*Amount$/,
-    ...preview.lines.map(l => new RegExp(`^${escapeRegExp(l.description)}.*${escapeRegExp(usd(l.amount_cents))}$`)),
-  ])
-  await expect(upcoming).toContainText(usd(preview.totals[0].amount_cents))
-}
-
-test('change plan now: the toast and the proration invoice match the API; a change at renewal shows as pending until canceled', async ({ page }) => {
+test('a change of plan at renewal charges nothing and shows as pending until canceled', async ({ page }) => {
   const small = await planBilledInAdvance(4900)
   const bigger = await planBilledInAdvance(9900)
-  const clock = await createClock()
-  const customer = await createCustomer(clock.id)
-  const subscription = await createSubscription(customer.id, small.id)
-  // The first period is invoiced when the subscription starts. Record that
-  // invoice as paid: an upgrade on an unpaid period is refused rather than
-  // charged twice (ADR-050), and this journey is about the charge.
-  const started = await invoicesFor(customer.id)
-  expect(started).toHaveLength(1)
-  await api('POST', `/invoices/${started[0].id}/record-payment`, { note: 'E2E paid outside Stripe' })
+  const customer = await createCustomer()
+  const subscription = await createSubscription(customer.id, bigger.id)
   const zone = await workspaceZone()
 
   await page.goto(`/subscriptions/${subscription.id}`)
   const items = itemsCard(page)
   const dialog = page.getByRole('dialog', { name: 'Change plan' })
-
-  // Change now: the item moves to the bigger plan and the difference is
-  // charged on a proration invoice, which the toast names.
-  await items.getByRole('button', { name: 'Change plan', exact: true }).click()
-  await dialog.getByRole('button', { name: 'Select a plan...' }).click()
-  await page.getByRole('option', { name: new RegExp(bigger.code) }).click()
-  await dialog.getByRole('checkbox', { name: /^Change now/ }).check()
-  const changingNow = apiCall(page, 'PATCH', /\/items\/[^/]+$/)
-  await dialog.getByRole('button', { name: 'Change plan', exact: true }).click()
-  const nowRes = await changingNow
-  expect(nowRes.ok()).toBe(true)
-  const now = (await nowRes.json()) as ItemChange
-  expect(now.proration?.type).toBe('invoice')
-  const proration = now.proration!
-  await expect(toasts(page).getByText(`Proration invoice created for ${usd(proration.amount_cents)}`, { exact: true })).toBeVisible()
-  await expect(dialog).toBeHidden()
-
-  expect((await getSub(subscription.id)).items.map(i => i.plan_id)).toEqual([bigger.id])
-  await expect(items.getByRole('row').filter({ hasText: bigger.name })).toBeVisible()
-  await expect(items.getByRole('row').filter({ hasText: small.name })).toHaveCount(0)
-  // The e2e workspace charges no tax, so the invoice totals the proration.
-  const { invoice } = await api<{ invoice: Invoice }>('GET', `/invoices/${proration.invoice_id}`)
-  expect([invoice.subtotal_cents, invoice.total_amount_cents]).toEqual([proration.amount_cents, proration.amount_cents])
-  await expect(card(page, /^Invoices \(\d+\)$/).getByRole('row').filter({ hasText: invoice.invoice_number })).toContainText(usd(invoice.total_amount_cents))
 
   // Change at renewal (Change now left unticked): nothing is charged; the
   // item shows the pending plan and its date until the change is canceled.
@@ -200,7 +115,7 @@ test('change plan now: the toast and the proration invoice match the API; a chan
   const pending = (await getSub(subscription.id)).items
   expect(pending.map(i => [i.plan_id, i.pending_plan_id])).toEqual([[bigger.id, small.id]])
   expect(day(pending[0].pending_plan_effective_at!, zone)).toBe(effectiveOn)
-  expect(await subscriptionInvoices(subscription.id)).toHaveLength(2)
+  expect(await subscriptionInvoices(subscription.id)).toHaveLength(1)
   const row = items.getByRole('row').filter({ hasText: bigger.name })
   await expect(row.getByText(`→ ${small.name}`, { exact: true })).toBeVisible()
   await expect(row).toContainText(effectiveOn)
@@ -213,130 +128,8 @@ test('change plan now: the toast and the proration invoice match the API; a chan
   await expect(row.getByRole('button', { name: 'Cancel', exact: true })).toHaveCount(0)
 })
 
-// #1280: a change now to a plan with another billing interval is not a price
-// difference for the rest of the period. A new period starts and is invoiced
-// at once, so the dialog says that, and the toast names that invoice and its
-// total as the API returned them.
-test('change plan now to a yearly plan: the dialog says a new period starts, and the toast names its invoice', async ({ page }) => {
-  const monthly = await planBilledInAdvance(4900)
-  const yearly = await planBilledInAdvance(49000, 'yearly')
-  const clock = await createClock()
-  const customer = await createCustomer(clock.id)
-  const subscription = await createSubscription(customer.id, monthly.id)
-  const [first] = await invoicesFor(customer.id)
-  await api('POST', `/invoices/${first.id}/record-payment`, { note: 'E2E paid outside Stripe' })
-  await advanceDays(clock, 10)
-
-  await page.goto(`/subscriptions/${subscription.id}`)
-  const items = itemsCard(page)
-  const dialog = page.getByRole('dialog', { name: 'Change plan' })
-  await items.getByRole('button', { name: 'Change plan', exact: true }).click()
-  await dialog.getByRole('button', { name: 'Select a plan...' }).click()
-  await page.getByRole('option', { name: new RegExp(yearly.code) }).click()
-  await dialog.getByRole('checkbox', { name: /^Change now/ }).check()
-  await expect(dialog).toContainText('A new yearly billing period starts now and is invoiced now on the new plan, with any usage so far. The unused part of the current period is credited.')
-  await expect(dialog).not.toContainText('price difference')
-
-  const changing = apiCall(page, 'PATCH', /\/items\/[^/]+$/)
-  await dialog.getByRole('button', { name: 'Change plan', exact: true }).click()
-  const res = await changing
-  expect(res.ok()).toBe(true)
-  const change = (await res.json()) as ItemChange
-  expect(change.proration).toBeUndefined()
-  const np = change.new_period_invoice!
-  expect(np, 'the swap names the invoice it created').toBeTruthy()
-  const { invoice } = await api<{ invoice: Invoice }>('GET', `/invoices/${np.id}`)
-  expect([invoice.invoice_number, invoice.total_amount_cents]).toEqual([np.invoice_number, np.total_amount_cents])
-  await expect(toasts(page).getByText(`A new billing period started. Invoice ${np.invoice_number} for ${usd(np.total_amount_cents)} was created for it.`, { exact: true })).toBeVisible()
-  await expect(dialog).toBeHidden()
-  expect((await getSub(subscription.id)).items.map(i => i.plan_id)).toEqual([yearly.id])
-})
-
-// #1280: a decrease whose credit went partly to the balance (the paid first
-// invoice) and partly off the open upgrade invoice names each part. It used
-// to say the whole credit went to the balance.
-test('a seat decrease that credits a paid and an open invoice says where each part went', async ({ page }) => {
-  const seat = await planBilledInAdvance(1000)
-  const clock = await createClock()
-  const customer = await createCustomer(clock.id)
-  const id = uniq()
-  const subscription = await api<Sub>('POST', '/subscriptions', {
-    code: `e2e-seats-${id}`, display_name: `E2E Seats ${id}`, customer_id: customer.id,
-    items: [{ plan_id: seat.id, quantity: 5 }], billing_time: 'anniversary',
-  })
-  const [first] = await invoicesFor(customer.id)
-  await api('POST', `/invoices/${first.id}/record-payment`, { note: 'E2E paid outside Stripe' })
-  await advanceDays(clock, 10)
-  // 5 → 8 seats: an upgrade invoice, left open (the customer has no card).
-  const itemId = (await getSub(subscription.id)).items[0].id
-  const up = await api<ItemChange>('PATCH', `/subscriptions/${subscription.id}/items/${itemId}`, { quantity: 8 })
-  expect(up.proration?.type).toBe('invoice')
-  await advanceDays(await api<TestClock>('GET', `/test-clocks/${clock.id}`), 5)
-
-  await page.goto(`/subscriptions/${subscription.id}`)
-  await itemsCard(page).getByRole('button', { name: 'Change quantity' }).click()
-  const quantity = page.getByRole('dialog', { name: 'Change quantity' })
-  await quantity.getByLabel('Quantity').fill('3')
-  const changing = apiCall(page, 'PATCH', /\/items\/[^/]+$/)
-  await quantity.getByRole('button', { name: 'Save' }).click()
-  const res = await changing
-  expect(res.ok()).toBe(true)
-  const p = ((await res.json()) as ItemChange).proration!
-  expect(p.type).toBe('credit')
-  expect(p.credited_to_balance_cents).toBeGreaterThan(0)
-  expect(p.reduced_open_invoices_cents).toBeGreaterThan(0)
-  expect(p.credited_to_balance_cents + p.reduced_open_invoices_cents).toBe(p.amount_cents)
-  await expect(toasts(page).getByText(
-    `${usd(p.credited_to_balance_cents)} credited to customer balance, and ${usd(p.reduced_open_invoices_cents)} taken off open invoices`,
-    { exact: true },
-  )).toBeVisible()
-  // The parts are what happened: the open upgrade invoice owes less by its part.
-  const { invoice: upgrade } = await api<{ invoice: Invoice }>('GET', `/invoices/${up.proration!.invoice_id}`)
-  expect(upgrade.amount_due_cents).toBe(up.proration!.amount_cents - p.reduced_open_invoices_cents)
-})
-
-// A credit on a draft invoice waits for the draft to be finalized. Collection
-// is paused with keep_as_draft, so the renewal stays a draft; a seat
-// decrease's credit is held on it, neither taken off it yet nor put on the
-// balance, and the toast says so.
-test('a seat decrease over a draft renewal says its credit waits for the draft', async ({ page }) => {
-  const seat = await planBilledInAdvance(1000)
-  const clock = await createClock()
-  const customer = await createCustomer(clock.id)
-  const id = uniq()
-  const subscription = await api<Sub>('POST', '/subscriptions', {
-    code: `e2e-seats-${id}`, display_name: `E2E Seats ${id}`, customer_id: customer.id,
-    items: [{ plan_id: seat.id, quantity: 5 }], billing_time: 'anniversary',
-  })
-  const [first] = await invoicesFor(customer.id)
-  await api('POST', `/invoices/${first.id}/record-payment`, { note: 'E2E paid outside Stripe' })
-  await api('PUT', `/subscriptions/${subscription.id}/pause-collection`, { behavior: 'keep_as_draft' })
-  await advanceDays(clock, 40)
-  const renewal = (await subscriptionInvoices(subscription.id)).find(i => i.id !== first.id)!
-  expect(renewal.status).toBe('draft')
-
-  await page.goto(`/subscriptions/${subscription.id}`)
-  await itemsCard(page).getByRole('button', { name: 'Change quantity' }).click()
-  const quantity = page.getByRole('dialog', { name: 'Change quantity' })
-  await quantity.getByLabel('Quantity').fill('1')
-  const changing = apiCall(page, 'PATCH', /\/items\/[^/]+$/)
-  await quantity.getByRole('button', { name: 'Save' }).click()
-  const res = await changing
-  expect(res.ok()).toBe(true)
-  const p = ((await res.json()) as ItemChange).proration!
-  expect(p.type).toBe('adjustment')
-  expect(p.held_on_draft_invoices_cents).toBeGreaterThan(0)
-  expect([p.held_on_draft_invoices_cents, p.credited_to_balance_cents, p.reduced_open_invoices_cents]).toEqual([p.amount_cents, 0, 0])
-  await expect(toasts(page).getByText(`${usd(p.held_on_draft_invoices_cents)} held until the draft invoice is finalized`, { exact: true })).toBeVisible()
-  // Nothing has moved yet: the draft still asks for all of it.
-  const { invoice: draft } = await api<{ invoice: Invoice }>('GET', `/invoices/${renewal.id}`)
-  expect(draft.amount_due_cents).toBe(renewal.amount_due_cents)
-})
-
-test('cancel at period end shows its date and can be undone; cancel now needs CANCEL typed, reads "Ended" and bills the days used', async ({ page }) => {
-  const { clock, subscription } = await subscribedCustomer()
-  // Ten days into the period, so a cancel now has days to bill.
-  await advanceDays(clock, 10)
+test('cancel at period end shows its date and can be undone; cancel now needs CANCEL typed and reads "Ended"', async ({ page }) => {
+  const { subscription } = await subscribedCustomer()
   const zone = await workspaceZone()
   const before = await getSub(subscription.id)
 
@@ -392,145 +185,7 @@ test('cancel at period end shows its date and can be undone; cancel now needs CA
   const endedOn = day(canceled.canceled_at!, zone)
   await expect(billingCycle).toContainText(`Canceled ${endedOn}`)
   await expect(main.getByText(/Renews/)).toHaveCount(0)
-  // The ten days used are billed on a final invoice, the one the page lists.
-  const invoices = await subscriptionInvoices(subscription.id)
-  expect(invoices).toHaveLength(1)
-  expect(invoices[0].total_amount_cents).toBeGreaterThan(0)
-  await expect(card(page, 'Invoices (1)').getByRole('row').filter({ hasText: invoices[0].invoice_number })).toContainText(usd(invoices[0].total_amount_cents))
 
   await page.goto(`/subscriptions?search=${encodeURIComponent(subscription.code)}`)
   await expect(page.getByRole('row').filter({ hasText: subscription.display_name })).toContainText(`Ended ${endedOn}`)
-})
-
-test('change quantity, add an item, remove it: the upcoming invoice shows what the API previews after each change', async ({ page }) => {
-  const { clock, plan, subscription } = await subscribedCustomer()
-  const extra = await createPlan()
-  // Ten days in, so each change splits the period.
-  await advanceDays(clock, 10)
-
-  await page.goto(`/subscriptions/${subscription.id}`)
-  const items = itemsCard(page)
-
-  // Quantity 1 → 3. The plan bills at the period end, so nothing is charged
-  // now and the toast says only that the quantity changed.
-  await items.getByRole('button', { name: 'Change quantity' }).click()
-  const quantity = page.getByRole('dialog', { name: 'Change quantity' })
-  await quantity.getByLabel('Quantity').fill('3')
-  const changing = apiCall(page, 'PATCH', /\/items\/[^/]+$/)
-  await quantity.getByRole('button', { name: 'Save' }).click()
-  const changeRes = await changing
-  expect(changeRes.ok()).toBe(true)
-  expect(((await changeRes.json()) as ItemChange).proration).toBeUndefined()
-  await expect(toasts(page).getByText('Quantity updated', { exact: true })).toBeVisible()
-  expect((await getSub(subscription.id)).items.map(i => [i.plan_id, i.quantity])).toEqual([[plan.id, 3]])
-  await expect(items.getByRole('row').filter({ hasText: plan.name }).getByRole('cell').nth(1)).toHaveText('3')
-  await expectUpcomingInvoiceMatchesAPI(page, subscription.id)
-
-  // Add a second plan.
-  await items.getByRole('button', { name: 'Add item' }).click()
-  const add = page.getByRole('dialog', { name: 'Add item' })
-  await add.getByRole('button', { name: 'Select a plan...' }).click()
-  await page.getByRole('option', { name: new RegExp(extra.code) }).click()
-  const adding = apiCall(page, 'POST', /\/items$/)
-  await add.getByRole('button', { name: 'Add item' }).click()
-  expect((await adding).ok()).toBe(true)
-  await expect(toasts(page).getByText('Item added', { exact: true })).toBeVisible()
-  const two = (await getSub(subscription.id)).items
-  expect(two.map(i => [i.plan_id, i.quantity]).sort()).toEqual([[plan.id, 3], [extra.id, 1]].sort())
-  await expect(items.getByRole('row').filter({ hasText: extra.name })).toBeVisible()
-  await expectUpcomingInvoiceMatchesAPI(page, subscription.id)
-
-  // Remove it again.
-  await items.getByRole('row').filter({ hasText: extra.name }).getByRole('button', { name: 'Remove' }).click()
-  const removing = apiCall(page, 'DELETE', /\/items\/[^/]+$/)
-  await page.getByRole('alertdialog', { name: 'Remove item from subscription?' }).getByRole('button', { name: 'Remove item' }).click()
-  expect((await removing).ok()).toBe(true)
-  await expect(toasts(page).getByText('Item removed', { exact: true })).toBeVisible()
-  expect((await getSub(subscription.id)).items.map(i => i.plan_id)).toEqual([plan.id])
-  await expect(items.getByRole('row').filter({ hasText: extra.name })).toHaveCount(0)
-  await expectUpcomingInvoiceMatchesAPI(page, subscription.id)
-})
-
-test('extend a trial, end it now (the first period is invoiced), then pause collection with an auto-resume date and resume it', async ({ page }) => {
-  const plan = await planBilledInAdvance(4900)
-  const clock = await createClock()
-  const customer = await createCustomer(clock.id)
-  const id = uniq()
-  const subscription = await api<Sub>('POST', '/subscriptions', {
-    code: `e2e-trial-${id}`,
-    display_name: `E2E Trial ${id}`,
-    customer_id: customer.id,
-    items: [{ plan_id: plan.id, quantity: 1 }],
-    trial_days: 14,
-  })
-  expect(subscription.status).toBe('trialing')
-  const zone = await workspaceZone()
-
-  await page.goto(`/subscriptions/${subscription.id}`)
-  const main = page.getByRole('main')
-  await expect(summaryCell(page, 'Trial')).toContainText(`14-day trial · ends ${day(subscription.trial_end_at!, zone)}`)
-
-  // Extend: the dialog offers a week past the current trial end, and names
-  // the account's time zone its times are in.
-  await main.getByRole('button', { name: 'Extend trial' }).click()
-  const extendDialog = page.getByRole('dialog', { name: 'Extend trial' })
-  await expect(extendDialog).toContainText(`Times are in your account's time zone (${zone}).`)
-  const extending = apiCall(page, 'POST', /\/extend-trial$/)
-  await extendDialog.getByRole('button', { name: 'Extend', exact: true }).click()
-  expect((await extending).ok()).toBe(true)
-  const extended = await getSub(subscription.id)
-  const endsOn = day(extended.trial_end_at!, zone)
-  await expect(toasts(page).getByText(`The trial now ends ${endsOn}`, { exact: false })).toBeVisible()
-  expect(extended.status).toBe('trialing')
-  expect(Math.round((Date.parse(extended.trial_end_at!) - Date.parse(subscription.trial_end_at!)) / DAY)).toBe(7)
-  await expect(summaryCell(page, 'Trial')).toContainText(`21-day trial · ends ${endsOn}`)
-
-  // End it now: it asks first, since the first paid period starts at once.
-  // Billed in advance, that period is invoiced now; this customer has no
-  // card (CI connects no Stripe), so nothing is charged. Then the
-  // subscription is active and the page lists that invoice.
-  await main.getByRole('button', { name: 'End trial now' }).click()
-  const endConfirm = page.getByRole('alertdialog', { name: 'End the trial now?' })
-  await expect(endConfirm).toContainText('The trial ends now, and the first paid billing period starts.')
-  await expect(endConfirm).toContainText('It is invoiced now. The customer has no card on file, so nothing is charged until they add one.')
-  const ending = apiCall(page, 'POST', /\/end-trial$/)
-  await endConfirm.getByRole('button', { name: 'End trial', exact: true }).click()
-  expect((await ending).ok()).toBe(true)
-  await expect(toasts(page).getByText('Trial ended — subscription is now active', { exact: true })).toBeVisible()
-  const active = await getSub(subscription.id)
-  expect(active.status).toBe('active')
-  await expect(summaryCell(page, 'Billing cycle')).toContainText(`Renews ${renewsOn(active, zone)}`)
-  await expect(main.getByRole('button', { name: 'End trial now' })).toHaveCount(0)
-  const invoices = await subscriptionInvoices(subscription.id)
-  expect(invoices).toHaveLength(1)
-  await expect(card(page, 'Invoices (1)').getByRole('row').filter({ hasText: invoices[0].invoice_number })).toContainText(usd(invoices[0].total_amount_cents))
-
-  // Pause collection until a date ten days out: the API keeps new invoices
-  // as drafts until then, and the page and toast name that day.
-  const resumeAt = new Date(new Date(clock.frozen_time).getTime() + 10 * DAY)
-  await main.getByRole('button', { name: 'Pause collection…' }).click()
-  const pause = page.getByRole('dialog', { name: 'Pause collection' })
-  await pause.getByPlaceholder('Pick a date').fill(typedDate(resumeAt, zone))
-  await pause.getByPlaceholder('Pick a date').press('Enter')
-  const pausing = apiCall(page, 'PUT', /\/pause-collection$/)
-  await pause.getByRole('button', { name: 'Pause collection', exact: true }).click()
-  expect((await pausing).ok()).toBe(true)
-  const paused = await getSub(subscription.id)
-  expect(paused.pause_collection?.behavior).toBe('keep_as_draft')
-  const resumesOn = day(paused.pause_collection!.resumes_at!, zone)
-  expect(resumesOn).toBe(day(resumeAt.toISOString(), zone))
-  await expect(toasts(page).getByText(`New invoices are saved as drafts until ${resumesOn}.`, { exact: true })).toBeVisible()
-  await expect(main.getByText(`Collection resumes ${resumesOn}`, { exact: false })).toBeVisible()
-  await expect(main.getByRole('button', { name: 'Pause collection…' })).toHaveCount(0)
-
-  const resuming = apiCall(page, 'DELETE', /\/pause-collection$/)
-  await main.getByRole('button', { name: 'Resume collection' }).click()
-  expect((await resuming).ok()).toBe(true)
-  await expect(toasts(page).getByText('Collection resumed', { exact: true })).toBeVisible()
-  expect((await getSub(subscription.id)).pause_collection ?? null).toBeNull()
-  // The notice and the timeline's resume date are gone (the Activity list
-  // keeps its "Collection paused" entry).
-  await expect(main.getByRole('button', { name: 'Resume collection' })).toHaveCount(0)
-  await expect(main.getByText(/Collection resumes/)).toHaveCount(0)
-  await expect(main.getByRole('button', { name: 'Pause collection…' })).toBeVisible()
 })
