@@ -6,9 +6,9 @@ A release has two images: `ghcr.io/gethardcount/hardcount` (the API) and `ghcr.i
 
 | Check | Works for | Needs |
 |---|---|---|
-| Build provenance | Releases after v0.9.3 | The GitHub CLI, `gh` |
+| Build provenance | v0.10.0 and later | The GitHub CLI, `gh` |
 | Cosign signature | v0.9.0 and later | `cosign` |
-| SBOM | Releases after v0.9.3 | The GitHub CLI, `gh` |
+| SBOM | v0.10.0 and later | The GitHub CLI, `gh` |
 
 ## Build provenance
 
