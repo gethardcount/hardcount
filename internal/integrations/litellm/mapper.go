@@ -453,19 +453,10 @@ func MapPayload(p StandardLoggingPayload) (Mapping, error) {
 		return Mapping{}, ErrMissingID
 	}
 
-	// Event timestamp: prefer EndTime (when the call actually completed), fall
-	// back to StartTime. LiteLLM emits floats in unix-seconds; convert to
-	// time.Time without loss for sub-second resolution.
-	//
-	// When the payload carries NEITHER (a synthetic or test-clock ingest that
-	// omits both), leave the timestamp NIL rather than manufacturing
-	// time.Now(): usage.Service then supplies the customer's effective-now —
-	// the frozen_time of a test-clock-pinned customer, wall-clock otherwise —
-	// exactly like the direct /v1/usage-events door (ADR-030, "no timestamp =>
-	// frozen_time"). A manufactured time.Now() here is non-nil, so the service
-	// skips the clock resolution and silently lands simulated usage at
-	// wall-clock, defeating the test clock (the flagship advance-clock →
-	// LiteLLM-ingest → billed demo depended on this).
+	// Event timestamp: EndTime (when the call completed), else StartTime,
+	// unix seconds to the sub-second. With neither it stays nil, and usage
+	// dates the call at the customer's time. For a customer on a test clock
+	// usage.Service.IngestCall dates every call at the clock's time.
 	var ts *time.Time
 	switch {
 	case p.EndTime > 0:

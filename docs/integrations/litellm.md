@@ -90,13 +90,9 @@ jq -n --arg ref "$CUSTOMER_REF" --arg cus "$CUSTOMER_ID" --arg plan "$PLAN_ID" \
 
 **You see:** the subscription's ID, and `"status": "active"`.
 
-Do not put this customer on a test clock. A test clock's time stands
-still, but the proxy stamps each call with the real time it ended. Once
-that is more than 5 minutes past the clock's time, Hardcount refuses the
-call as in the future (`must not be in the future`). LiteLLM still gets a
-200, so the call is never billed ([Response](#response)). For the same
-reason, a customer made on a test clock on the first invoice page, such as
-`acme-1`, is not billed for the proxy's calls.
+Did [First invoice](../first-invoice.md)? Its customer `acme-1` is on the
+same Claude plan, on a test clock: use `acme-1` where this page says
+`acme-proxy`, go to step 3, then move the clock forward for the invoice.
 
 ## 3. Add Hardcount to the proxy config
 
@@ -304,9 +300,8 @@ customer it is billed to. Give the header only to clients you trust.
    }
    ```
 
-   The preview creates nothing. To see a whole month end and an invoice
-   issued without waiting, use a customer on a test clock and send its
-   usage yourself: [First invoice](../first-invoice.md).
+   The preview creates nothing. To see an invoice issued without waiting,
+   use a customer on a test clock and move it forward: [First invoice](../first-invoice.md).
 
 Once this works, read [What LiteLLM can lose, and what to
 do](#what-litellm-can-lose-and-what-to-do) before you bill real customers
@@ -329,7 +324,8 @@ to the cache, so Hardcount takes those out of `input`.
 
 The idempotency key is a unique ID for each event. If LiteLLM sends the same
 call again, Hardcount counts it once. Hardcount saves a call's events together, or
-none of them.
+none of them. Each event is dated with the time the call ended, or, for a
+customer on a test clock, with the clock's time.
 
 `<call>` is LiteLLM's call ID, the same ID as the call's row in
 LiteLLM's spend log, so a replay from that log counts each call once.

@@ -57,7 +57,8 @@ func TestHeld_ReleaseForAClockCustomerIsBoundedByTheClock(t *testing.T) {
 
 // A LiteLLM call for a customer on a test clock decides its time once for
 // the whole call: one resolver read, and every event of the call at the
-// clock's time.
+// clock's time, whatever time the proxy sent. The call writes to the cache,
+// so it also carries the pre-split mapping, which is built too.
 func TestIngestCall_ForAClockCustomerDecidesOnce(t *testing.T) {
 	f := newHeldFixture(t, "Call Clock Once")
 	customerID := insertTestCustomer(t, f.db, f.tenantID, "cus_call_clock")
@@ -65,20 +66,27 @@ func TestIngestCall_ForAClockCustomerDecidesOnce(t *testing.T) {
 	clockAt := time.Now().UTC().Add(-72 * time.Hour).Truncate(time.Second)
 	res := &onClock{at: clockAt}
 	f.svc.SetResolver(res)
+	proxyEnd := time.Now().UTC() // the proxy's real end time, past the clock's
 
 	if _, err := f.svc.IngestCall(f.ctx, f.tenantID, usage.CallInput{
 		CustomerID: customerID, MeterID: meterID,
 		Events: []usage.CallEvent{
 			{Quantity: decimal.NewFromInt(100), IdempotencyKey: "once-1:input"},
-			{Quantity: decimal.NewFromInt(50), IdempotencyKey: "once-1:output"},
+			{Quantity: decimal.NewFromInt(40), IdempotencyKey: "once-1:cache_write_5m"},
+			{Quantity: decimal.NewFromInt(50), IdempotencyKey: "once-1:output", Timestamp: &proxyEnd},
 		},
+		Legacy: []usage.CallEvent{
+			{Quantity: decimal.NewFromInt(140), IdempotencyKey: "once-1:input", Timestamp: &proxyEnd},
+			{Quantity: decimal.NewFromInt(50), IdempotencyKey: "once-1:output", Timestamp: &proxyEnd},
+		},
+		LegacyKey: "once-1:input",
 	}); err != nil {
 		t.Fatalf("ingest call: %v", err)
 	}
 	if res.reads != 1 {
 		t.Errorf("%d clock reads for one call; want 1", res.reads)
 	}
-	for _, key := range []string{"once-1:input", "once-1:output"} {
+	for _, key := range []string{"once-1:input", "once-1:cache_write_5m", "once-1:output"} {
 		if at := eventTime(t, f, key); !at.Equal(clockAt) {
 			t.Errorf("%s at %v; want the clock's %v", key, at, clockAt)
 		}
