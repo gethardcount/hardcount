@@ -444,6 +444,9 @@ func (s *Service) decideCreate(ctx context.Context, tenantID string, input Creat
 	pin := clock.Pin{TenantID: tenantID, SubscriptionID: input.SubscriptionID, CustomerID: input.CustomerID}
 	decided, err := clock.DecideOrRealTime(ctx, s.resolver, pin)
 	if err != nil {
+		if clock.IsAdvancingRefusal(err) {
+			return ctx, err
+		}
 		return ctx, errs.Unavailable("test_clock_unavailable",
 			"The test clock this invoice would be on could not be read. Nothing was created; send the request again.", err)
 	}

@@ -288,7 +288,7 @@ func DecideWithoutDoor(ctx context.Context, r Resolver, p Pin) (context.Context,
 func DecideOrRealTime(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
 	decided, err := DecideWithoutDoor(ctx, r, p)
 	if errors.Is(err, errs.ErrNotFound) {
-		return keepOrRealTime(ctx), nil
+		return keepOrRealTime(WithoutChangeMark(ctx)), nil
 	}
 	return decided, err
 }
@@ -338,6 +338,10 @@ var ErrUndecided = errors.New("the time could not be decided")
 // clock's instant is dropped (keepOrRealTime).
 // Work on a record that did not come through the API's clock door decides
 // with DecideWithoutDoor, which calls it.
+//
+// It refuses a marked request whose record is on an advancing clock, and
+// returns a context without the mark (change.go): the refusal is returned
+// as it is, not as ErrUndecided.
 func Decide(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
 	if r == nil {
 		return ctx, errors.New("decide the time: no resolver")
@@ -357,8 +361,12 @@ func Decide(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
 		return ctx, errors.New("decide the time: the pin names no customer, subscription or invoice")
 	}
 	if err != nil {
+		if IsAdvancingRefusal(err) {
+			return ctx, err
+		}
 		return ctx, fmt.Errorf("%w: %w", ErrUndecided, err)
 	}
+	ctx = WithoutChangeMark(ctx)
 	if !sim.Simulated() {
 		return keepOrRealTime(ctx), nil
 	}

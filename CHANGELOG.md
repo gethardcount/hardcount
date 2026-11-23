@@ -19,6 +19,10 @@ original text.
 
 ## [Unreleased]
 
+### Changed
+
+- **While a test clock advances, a change to one of its customers, or a new customer on it, answers `409 clock_advancing`.** Reads, Stripe's webhooks, the payment pages and deleting the clock go on, and a clock whose advance failed stays open. A usage batch names the refused event; a LiteLLM send lists the call in `errors` and saves the rest ([errors](docs/api/errors.md)).
+
 ## [0.10.0] - 2026-11-23
 
 A restored database now catches up with Stripe before Hardcount serves it (`hardcount restore`). A test clock's advance runs as a background job on one replica, and work on a test clock is dated at the event it belongs to. Each API route states who may call it, and a request that was refused no longer holds its `Idempotency-Key`. Draft subscriptions and the `X-API-Key` header are removed. Claude Fable 5.2 and Mythos 5.2 have prices.

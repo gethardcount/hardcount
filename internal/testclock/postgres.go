@@ -63,15 +63,18 @@ func (s *PostgresStore) Create(ctx context.Context, tenantID string, clk domain.
 // clock.Sim is designed to make unrepresentable.
 //
 // ErrNotFound → (zero, false, nil); other errors propagate. Soft-deleted clocks
-// count as not-existing. A clock in any status is attach-able: an advancing
-// or failed clock's frozen_time is already its new time, so the customer
-// joins at it (domain.TestClockStatus says why no status blocks this).
+// count as not-existing. A request that creates a customer on an advancing
+// clock is refused (clock.RefuseIfAdvancing); a failed clock's frozen_time
+// is already its new time, so the customer joins at it.
 func (s *PostgresStore) ResolveSim(ctx context.Context, tenantID, id string) (clock.Sim, bool, error) {
 	clk, err := s.Get(ctx, tenantID, id)
 	if err != nil {
 		if errors.Is(err, errs.ErrNotFound) {
 			return clock.Sim{}, false, nil
 		}
+		return clock.Sim{}, false, err
+	}
+	if err := clock.RefuseIfAdvancing(ctx, clk.Name, clk.Status == domain.TestClockStatusAdvancing); err != nil {
 		return clock.Sim{}, false, err
 	}
 	return clock.Sim{At: clk.FrozenTime, TestClockID: clk.ID}, true, nil
@@ -253,11 +256,16 @@ func (s *PostgresStore) MarkAdvancing(ctx context.Context, tenantID, id string, 
 	// the row before this statement changes it (the right-hand side of SET
 	// sees the old row). The catch-up reads it back from the clock, so a
 	// Retry and a run another replica picks up keep it.
-	return s.transition(ctx, tenantID, id, auditRow, "can only advance a clock in status=ready", `
+	//
+	// The new time is checked against the row this statement changes, not
+	// the one Advance read: another advance can complete in between, and the
+	// clock must never move back.
+	return s.transition(ctx, tenantID, id, auditRow, "can only advance a ready clock to a later time at most a year ahead", `
 		UPDATE test_clocks SET status = 'advancing', frozen_time = $2,
 			last_advance_summary = jsonb_build_object('advanced_from', frozen_time),
 			updated_at = now()
 		WHERE id = $1 AND status = 'ready'
+		  AND $2 > frozen_time AND $2 <= frozen_time + interval '1 year'
 		RETURNING `+clockCols, id, newFrozenTime)
 }
 

@@ -21,29 +21,37 @@ import (
 )
 
 // spyResolver answers every record on clock clk_1 at doorFrozen, or err, and
-// records what it was asked.
+// records what it was asked, and whether a request marked as a change asked.
 type spyResolver struct {
-	asked []string
-	err   error
+	asked  []string
+	marked bool
+	err    error
 }
 
 var doorFrozen = time.Date(2025, 3, 1, 12, 0, 0, 0, time.UTC)
 
-func (s *spyResolver) answer(kind, id string) (clock.Sim, error) {
+func (s *spyResolver) answer(ctx context.Context, kind, id string) (clock.Sim, error) {
 	s.asked = append(s.asked, kind+":"+id)
+	s.marked = s.marked || markedAsChange(ctx)
 	if s.err != nil {
 		return clock.Sim{}, s.err
 	}
 	return clock.Sim{At: doorFrozen, TestClockID: "clk_1"}, nil
 }
-func (s *spyResolver) SimForCustomer(_ context.Context, _, id string) (clock.Sim, error) {
-	return s.answer("customer", id)
+func (s *spyResolver) SimForCustomer(ctx context.Context, _, id string) (clock.Sim, error) {
+	return s.answer(ctx, "customer", id)
 }
-func (s *spyResolver) SimForSubscription(_ context.Context, _, id string) (clock.Sim, error) {
-	return s.answer("subscription", id)
+func (s *spyResolver) SimForSubscription(ctx context.Context, _, id string) (clock.Sim, error) {
+	return s.answer(ctx, "subscription", id)
 }
-func (s *spyResolver) SimForInvoice(_ context.Context, _, id string) (clock.Sim, error) {
-	return s.answer("invoice", id)
+func (s *spyResolver) SimForInvoice(ctx context.Context, _, id string) (clock.Sim, error) {
+	return s.answer(ctx, "invoice", id)
+}
+
+// markedAsChange reports whether ctx carries the door's change mark: an
+// advancing clock would refuse it.
+func markedAsChange(ctx context.Context) bool {
+	return clock.RefuseIfAdvancing(ctx, "", true) != nil
 }
 
 // noClockCustomers answers every customer on no clock.
@@ -88,6 +96,7 @@ func serverOf(d *clockDoor) *doorServer { return d.clock.(*doorServer) }
 type seen struct {
 	decision clock.Sim
 	decided  bool
+	marked   bool // the handler's ctx carries the change mark
 	reached  bool
 	code     int
 	body     string
@@ -101,6 +110,7 @@ func through(d *clockDoor, ctx context.Context, method, path string) seen {
 	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		got.reached = true
 		got.decision, got.decided = clock.Decision(r.Context())
+		got.marked = markedAsChange(r.Context())
 		w.WriteHeader(http.StatusNoContent)
 	})
 	rec := httptest.NewRecorder()
@@ -117,6 +127,12 @@ func through(d *clockDoor, ctx context.Context, method, path string) seen {
 // router does not have: real time with no instant, and no read. Live: no
 // record is read; a real-time or a record route gets one read of the
 // server's clock, and a decidedIn route or an unknown one nothing.
+//
+// A signed-in request that changes data, on a record route or a decidedIn
+// one, is marked as a change: a record route's decision is asked with the
+// mark and the handler gets a context without it; a decidedIn route's
+// handler gets it, for its own decision. A read, a real-time route, a route
+// outside authentication and an unknown one are not marked.
 func TestClockDoor_DecidesFromTheRouteTable(t *testing.T) {
 	test := auth.WithTenantID(postgres.WithLivemode(context.Background(), false), "t1")
 	onClock := clock.Sim{At: doorFrozen, TestClockID: "clk_1"}
@@ -126,23 +142,26 @@ func TestClockDoor_DecidesFromTheRouteTable(t *testing.T) {
 		want               clock.Sim // the zero Sim is real time with no instant
 		asked              string
 		serverReads        int
+		change             bool // marked as a change
 	}{
-		{"a customer's route", "GET", "/v1/customers/cus_1", onClock, "customer:cus_1", 0},
-		{"a customer's route by customer_id", "GET", "/v1/credits/balance/cus_2/live", onClock, "customer:cus_2", 0},
-		{"a subscription's route", "POST", "/v1/subscriptions/sub_1/cancel", onClock, "subscription:sub_1", 0},
-		{"an invoice's route", "GET", "/v1/invoices/inv_1/pdf", onClock, "invoice:inv_1", 0},
-		{"a credit note's route, by its invoice", "GET", "/v1/credit-notes/cn_1", onClock, "invoice:inv_of_note", 0},
-		{"a dunning run's route, by its invoice", "GET", "/v1/dunning/runs/run_1", onClock, "invoice:inv_of_run", 0},
-		{"a route that names no record", "GET", "/v1/whoami", realInstant, "", 1},
-		{"a route its function decides", "POST", "/v1/customers", clock.Sim{}, "", 0},
+		{"a customer's route", "GET", "/v1/customers/cus_1", onClock, "customer:cus_1", 0, false},
+		{"a customer's route by customer_id", "GET", "/v1/credits/balance/cus_2/live", onClock, "customer:cus_2", 0, false},
+		{"a subscription's route", "POST", "/v1/subscriptions/sub_1/cancel", onClock, "subscription:sub_1", 0, true},
+		{"an invoice's route", "GET", "/v1/invoices/inv_1/pdf", onClock, "invoice:inv_1", 0, false},
+		{"a credit note's route, by its invoice", "GET", "/v1/credit-notes/cn_1", onClock, "invoice:inv_of_note", 0, false},
+		{"a dunning run's route, by its invoice", "GET", "/v1/dunning/runs/run_1", onClock, "invoice:inv_of_run", 0, false},
+		{"a route that names no record", "GET", "/v1/whoami", realInstant, "", 1, false},
+		{"a real-time route that changes data", "POST", "/v1/test-clocks/clk_1/advance", realInstant, "", 1, false},
+		{"a route its function decides", "POST", "/v1/customers", clock.Sim{}, "", 0, true},
 		// Usage's entries decide and bind themselves; usage's build refuses a
 		// context with no instant, which the door must leave to fire.
-		{"usage ingest", "POST", "/v1/usage-events", clock.Sim{}, "", 0},
-		{"usage batch", "POST", "/v1/usage-events/batch", clock.Sim{}, "", 0},
-		{"usage backfill", "POST", "/v1/usage-events/backfill", clock.Sim{}, "", 0},
-		{"usage held release", "POST", "/v1/usage-events/held/release", clock.Sim{}, "", 0},
-		{"a LiteLLM spend call", "POST", "/v1/integrations/litellm/spend", clock.Sim{}, "", 0},
-		{"a route the router does not have", "GET", "/v1/nothing-here", clock.Sim{}, "", 0},
+		{"usage ingest", "POST", "/v1/usage-events", clock.Sim{}, "", 0, true},
+		{"usage batch", "POST", "/v1/usage-events/batch", clock.Sim{}, "", 0, true},
+		{"usage backfill", "POST", "/v1/usage-events/backfill", clock.Sim{}, "", 0, true},
+		{"usage held release", "POST", "/v1/usage-events/held/release", clock.Sim{}, "", 0, true},
+		{"a LiteLLM spend call", "POST", "/v1/integrations/litellm/spend", clock.Sim{}, "", 0, true},
+		{"a Stripe webhook, outside authentication", "POST", "/v1/webhooks/stripe/ep_1", clock.Sim{}, "", 0, false},
+		{"a route the router does not have", "GET", "/v1/nothing-here", clock.Sim{}, "", 0, false},
 	} {
 		t.Run("test mode, "+c.name, func(t *testing.T) {
 			res := &spyResolver{}
@@ -154,6 +173,14 @@ func TestClockDoor_DecidesFromTheRouteTable(t *testing.T) {
 			}
 			if asked := strings.Join(res.asked, ","); asked != c.asked {
 				t.Errorf("asked %q, want %q", asked, c.asked)
+			}
+			// A record route's decision takes the mark; a decidedIn route's
+			// handler has it for its own.
+			if marked := res.marked || (c.asked == "" && got.marked); marked != c.change {
+				t.Errorf("marked as a change %v, want %v", marked, c.change)
+			}
+			if c.asked != "" && got.marked {
+				t.Error("the handler's context still carries the change mark after the door decided")
 			}
 		})
 	}
