@@ -31,7 +31,7 @@ const routes: Route[] = [
   { name: 'credit notes', path: () => '/credit-notes', heading: () => 'Credit notes' },
   { name: 'usage', path: () => '/usage', heading: () => 'Usage' },
   { name: 'credits', path: () => '/credits', heading: () => 'Credits' },
-  { name: 'customer credits', path: s => `/credits?customer=${s.customer.id}`, heading: s => s.customer.display_name },
+  { name: 'customer credits', path: s => `/credits?customer=${s.creditCustomer.id}`, heading: s => s.creditCustomer.display_name },
   { name: 'provider costs', path: () => '/provider-costs', heading: () => 'Provider costs' },
   { name: 'dunning', path: () => '/dunning', heading: () => 'Dunning' },
   { name: 'dunning policies', path: () => '/dunning-policies', heading: () => 'Dunning policies' },

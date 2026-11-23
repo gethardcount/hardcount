@@ -114,24 +114,26 @@ export async function billedCustomer() {
 }
 
 // Everything the page smoke test needs so that no page renders empty: a billed
-// customer with a live subscription, a meter, a webhook endpoint and a credit
-// grant.
+// customer with a live subscription, a meter, a webhook endpoint, and a credit
+// grant to another customer. The billed customer holds no credit, so its open
+// invoice stays as billed: the auto-charge sweep draws credit onto an open
+// invoice whenever it next runs.
 export async function seedWorld() {
   const billed = await billedCustomer()
   const subscription = await createSubscription(billed.customer.id, billed.plan.id)
+  const creditCustomer = await createCustomer()
   const meter = await createMeter()
   const webhook = await api<{ endpoint: { id: string } }>('POST', '/webhook-endpoints/endpoints', {
     url: 'https://example.com/hardcount-e2e',
     description: 'E2E endpoint',
   })
-  await api('POST', '/credits/grant', { customer_id: billed.customer.id, currency: 'USD', amount_cents: 1000, description: 'E2E welcome credit' })
-  // Read again: the grant pays part of the open invoice.
-  const invoice = await api<{ invoice: Invoice }>('GET', `/invoices/${billed.invoice.id}`)
+  await api('POST', '/credits/grant', { customer_id: creditCustomer.id, currency: 'USD', amount_cents: 1000, description: 'E2E welcome credit' })
   return {
     customer: billed.customer,
+    creditCustomer,
     plan: billed.plan,
     subscription,
-    invoice: invoice.invoice,
+    invoice: billed.invoice,
     meter,
     webhookEndpointId: webhook.endpoint.id,
   }
