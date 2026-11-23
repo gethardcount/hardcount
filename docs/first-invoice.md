@@ -49,13 +49,13 @@ variable into the JSON for you.
 
 | Word | Meaning |
 |---|---|
+| Recipe | A ready-made pricing setup that Hardcount creates in one call. |
+| Meter | Counts the usage events that carry one event name, here `tokens`. A plan's prices read from it. |
 | Plan | What you sell: a currency, a billing period such as monthly, and a price for each kind of usage. |
 | Customer | A person or company you bill. Its external ID is your own ID for it, such as the user ID in your database. |
 | Subscription | Puts a customer on a plan, and says when each billing month starts. |
 | Usage event | One "this customer used this much" record that your app sends. |
 | Idempotency key | A unique ID for one usage event. If you send the same event again with the same key, Hardcount counts it once. |
-
-Recipe and meter: [quick start](quick-start.md#words-on-this-page).
 
 ## Steps
 
@@ -111,7 +111,8 @@ Recipe and meter: [quick start](quick-start.md#words-on-this-page).
 
 3. **Put the customer on the plan.** This makes a subscription. It starts
    when you create it: its first month starts at 00:00 today, in your
-   account's billing time zone.
+   account's billing time zone. `billing_time: "anniversary"` makes each
+   month run from the day you create the subscription.
 
    <!-- docs-run: command -->
    ```bash
@@ -142,6 +143,10 @@ Recipe and meter: [quick start](quick-start.md#words-on-this-page).
    tokens of Claude Sonnet 4.5. That makes two events, one for each kind of
    token. Do **4a** to send them yourself, or **4b** if you use a LiteLLM
    proxy. You need only one of them.
+
+   Send usage only for a customer Hardcount knows, such as the one from
+   step 2. For a customer it does not know, 4a answers with an error, and
+   4b holds the events until the customer exists.
 
    **4a. Send the events yourself.** `event_name` says which meter counts
    the event: the Tokens meter counts `tokens`. `dimensions` are labels: the
@@ -192,6 +197,9 @@ Recipe and meter: [quick start](quick-start.md#words-on-this-page).
        -H "Content-Type: application/json" \
        -d @-
    ```
+
+   In the answer, `accepted` is the count to check: it counts the new
+   events.
 
    **You see:** two new events, input and output. Every other count is 0.
 
@@ -248,10 +256,13 @@ Recipe and meter: [quick start](quick-start.md#words-on-this-page).
    invoices**.
 
 6. **Issue the invoice now.** A subscription's invoice is issued when its
-   month ends. ACME Corp is a test customer, so there is no need to wait a
-   month: canceling its subscription now ends it at once and issues its
-   final invoice, which bills the usage so far. With a real customer, you
-   let the month end instead.
+   month ends. ACME Corp is a test customer, so you need not wait a month:
+   canceling its subscription issues its final invoice now, for the usage
+   so far.
+
+   This ends ACME Corp's subscription, and usage sent for it afterwards is
+   not billed. To keep trying things, create a new customer: run the page
+   again from step 2, with `acme-2` in place of `acme-1`.
 
    <!-- docs-run: command -->
    ```bash
@@ -265,6 +276,10 @@ Recipe and meter: [quick start](quick-start.md#words-on-this-page).
    ```text
    canceled
    ```
+
+   A real customer's invoice is issued by itself when its month ends.
+   Canceling a real customer's subscription does what it did here: it ends
+   the subscription and issues their final invoice at once.
 
 7. **Read the invoice.**
 
@@ -302,12 +317,10 @@ Recipe and meter: [quick start](quick-start.md#words-on-this-page).
 
    The lines are 1,000,000 input tokens at $3.00 per million, and 200,000
    output tokens at $15.00 per million, the same as the preview. Each line
-   says "canceled mid-period" because the cancel ended the month early.
-   "Finalized" means issued and no
-   longer a draft. Nothing is charged: no Stripe account is connected, and
-   ACME Corp has no card. Without Stripe, Hardcount emails ACME Corp the
-   invoice itself, with a link to view it, once. The quick start sets up no
-   email server, so here nothing is sent.
+   says "canceled mid-period" because the cancel ended the month early; an
+   invoice issued at the end of a month has no such words. "Finalized"
+   means issued and no longer a draft. Nothing is charged: no Stripe
+   account is connected, and ACME Corp has no card.
 
 8. **Open the invoice in the dashboard.** Sign in first.
 
@@ -327,7 +340,9 @@ Recipe and meter: [quick start](quick-start.md#words-on-this-page).
    and $6.00 due. The dashboard marks an invoice that is finalized and not
    paid as **Open**. A yellow **No payment method** notice says Stripe isn't
    connected in this mode, so no card can be added online. Its second line
-   says the server can't send email, so the invoice was not emailed. To see
+   says the server can't send email. Without Stripe, Hardcount emails the
+   customer the invoice itself, with a link to view it, but the quick start
+   sets up no email server, so nothing was sent. To see
    the PDF, open the **⋯** menu next to **Audit log** and choose **Preview
    PDF**.
 

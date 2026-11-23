@@ -51,8 +51,8 @@ You do not need Go, Node, jq or a database. Docker downloads everything else.
    ```
 
    The script also saves these in `deploy/compose/quickstart-credentials.json`.
-   Keep that file private: it also holds a live key, which can charge real
-   cards once Stripe is connected.
+   Keep that file private: it also holds a live key. The live key does
+   nothing until you connect Stripe; after that, it can charge real cards.
 
 2. Open `http://localhost:8080` in your browser and sign in with that email
    and password. If Hardcount runs on another machine, such as a cloud
@@ -182,13 +182,15 @@ says what went wrong. So a finished run means each step below worked. The IDs (t
 
 9. **Issue the invoice now.** A subscription's invoice is issued when its
    month ends. ACME Corp is a test customer, so the demo does not wait: it
-   cancels the subscription, which ends it now and issues its final
-   invoice, for the usage so far. The demo checks that the invoice is
-   finalized (issued and no longer a draft), bills what the preview showed,
-   and that its PDF renders. Nothing is charged: no Stripe account is
-   connected in the quick start. Without Stripe, Hardcount emails the
-   customer the invoice itself, once, instead of a link to add a card. The
-   quick start sets up no email server, so nothing is sent.
+   cancels the subscription, which issues its final invoice now, for the
+   usage so far. This ends ACME Corp's subscription, and usage sent for it
+   afterwards is not billed. Each run of the demo makes a new customer. The
+   demo checks that the invoice is finalized (issued and no longer a draft),
+   bills what the preview showed, and that its PDF renders. Nothing is
+   charged: no Stripe account is connected in the quick start. Without
+   Stripe, Hardcount emails the customer the invoice itself, once, instead
+   of a link to add a card. The quick start sets up no email server, so
+   nothing is sent.
 
    **You see:**
 
@@ -203,8 +205,11 @@ says what went wrong. So a finished run means each step below worked. The IDs (t
    ```
 
    Each line says "canceled mid-period" because the cancel ended the month
-   early.
-   The invoice number goes up by one on each run.
+   early. The invoice number goes up by one on each run.
+
+   A real customer's invoice is issued by itself when its month ends, and
+   its lines have no "canceled mid-period". Canceling a real customer's
+   subscription ends it and issues their final invoice at once.
 
 At the end, the demo prints two links:
 

@@ -33,7 +33,7 @@ One month of AI usage for one customer, from the [demo](#quick-start) in test mo
 
 ## Quick start
 
-Try Hardcount on your own computer. It runs in test mode, where no real money moves.
+Try Hardcount on your own computer. It runs in test mode, where no real money moves, and needs no Stripe account.
 
 You need git and Docker 24 or newer with the Compose plugin. On Windows, run it inside WSL.
 
