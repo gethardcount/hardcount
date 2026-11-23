@@ -34,9 +34,8 @@ arrives.
 ## The margin report
 
 `GET /v1/customers/{id}/margin?from=…&to=…` answers for one customer and a
-time window. Left out, `to` is the customer's current time and `from` is
-30 days before that time. On a test clock, that is the clock's time. A
-window can be at most one year.
+time window. Left out, `to` is the current time and `from` is 30 days
+before that time. A window can be at most one year.
 
 | Field | What it is |
 |---|---|

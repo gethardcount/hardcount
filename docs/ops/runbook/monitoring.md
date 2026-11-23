@@ -33,7 +33,7 @@ alerting tier: what should page someone, and what is only informational.
 | `up{job="hardcount"}` | == 0 | Process down |
 | `/health/ready` answers 503 (your load balancer's or orchestrator's probe) | for 1m | The database ping failed on that replica, or it is shutting down. The cause is in the `readiness: database ping failed` log line |
 | `time() - hardcount_scheduler_last_run_timestamp_seconds` | > 2× the billing interval (1 hour, or 5 minutes with `APP_ENV=local`) | This replica's billing loop stopped polling. Every replica's loop polls, the leader's and the others', so this says the loop is alive here, not that billing ran: the next row says that. `/health/ready` shows it in its body but stays 200, so this alert is how you find out |
-| `hardcount_leader_last_tick_age_seconds{role}` | > max(3× the role's interval, 5 min) | No replica has finished a tick of this role (a role is a background job that one replica runs at a time). The 5-minute floor is for the roles that run every few seconds: a restart or a lease handover stops them for more than 3 intervals, and that is not a stall. **On a busy billing day this trips too**: if `hardcount_billing_due_subscriptions` is falling, the tick is draining; do not restart it. **A long test-clock advance trips it for `testclock_catchup`**: one tick runs every advancing clock's pass, each up to 10 minutes; run the progress query in [Test-clock advance hung](test-clock-advance-hung.md) before treating it as stuck. See [A background job is stuck](background-job-stuck.md) |
+| `hardcount_leader_last_tick_age_seconds{role}` | > max(3× the role's interval, 5 min) | No replica has finished a tick of this role (a role is a background job that one replica runs at a time). The 5-minute floor is for the roles that run every few seconds: a restart or a lease handover stops them for more than 3 intervals, and that is not a stall. **On a busy billing day this trips too**: if `hardcount_billing_due_subscriptions` is falling, the tick is draining; do not restart it. See [A background job is stuck](background-job-stuck.md) |
 | `increase(hardcount_leader_lease_lost_total[1h])` | > 0 | A tick lost its lease. Split by `reason`, and exclude `paused` (an operator action). What each reason means: [Lease-lost reasons](background-job-stuck.md#lease-lost-reasons) |
 | `hardcount_email_outbox_failing_emails{mode="live"}` | > 0 | See [Emails not going out](email-outbox-backed-up.md) |
 | `hardcount_email_outbox_oldest_due_age_seconds{mode="live"}` | > 1800 | See [Emails not going out](email-outbox-backed-up.md) |
@@ -113,22 +113,22 @@ Notes on three rows:
   billing run's period closes, both modes, including a close that ends a
   subscription canceled at its period end. Not counted: the final invoice
   of a cancel scheduled inside a period, spend-threshold invoices, cancels
-  that take effect at once, `POST /v1/billing/run`, test-clock advances and
-  invoices created through the API
+  that take effect at once, `POST /v1/billing/run` and invoices created
+  through the API
 - `hardcount_http_requests_in_flight`: requests this replica is answering now
 - `hardcount_dunning_active_runs`: active dunning runs across every account
   and both modes (−1 = the count query failed)
 - `hardcount_leader_held{role}`: 1 while a replica holds the role's lease (a
   tick is running), else 0. Roles: `billing`, `dunning`, `webhook_outbox`,
-  `email_outbox`, `webhook_delivery`, `testclock_catchup`. A 1 that stays
+  `email_outbox`, `webhook_delivery`. A 1 that stays
   while `hardcount_leader_last_tick_age_seconds` grows is a tick still
   running: a long billing drain (`hardcount_billing_due_subscriptions`
-  falling), a long test-clock advance, or a tick stuck but still renewing.
+  falling), or a tick stuck but still renewing.
   Follow Check in [A background job is stuck](background-job-stuck.md#check)
   before restarting anything
 - `hardcount_usage_late_event_total{origin}`: usage events, other than
-  backfills, whose time was more than 24 hours before the customer's current
-  time when they arrived (`origin` is always `api`). An API event is counted
+  backfills, whose time was more than 24 hours before the current time when
+  they arrived (`origin` is always `api`). An API event is counted
   when it is checked, before the write; a LiteLLM event after its call is
   written. Either way a resend counts again. It does not say an
   event was left off an invoice:
@@ -150,9 +150,9 @@ logger). Useful searches:
 grep "billing cycle complete" log | jq 'select(.errors > 0)'
 
 # One subscription's failed billing attempts (class: counted, transient, interrupted).
-# recorded=false with class=counted carries not_recorded_reason: test_clock (a
-# test-clock subscription never saves a failure), moved_on (another run finished
-# the work or counted the attempt), write_error, or no_due_instant.
+# recorded=false with class=counted carries not_recorded_reason: moved_on
+# (another run finished the work or counted the attempt), write_error, or
+# no_due_instant.
 grep "bill subscription failed" log | jq '{subscription_id, class, recorded, not_recorded_reason, attempt, next_attempt_at, error}'
 
 # Subscriptions that parked

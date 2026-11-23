@@ -78,11 +78,11 @@ On a stop signal (SIGTERM), a copy first tells the load balancer it is leaving: 
 |---|---|---|
 | Readiness drain | `/health/ready` answers `503 {"status":"draining"}`; `/health` stays 200. The copy keeps listening, so the load balancer has time to stop sending it requests. | `SHUTDOWN_DRAIN_DELAY` (default 5s outside `local`) |
 | 1. Requests in progress | The dashboard's real-time webhook stream is closed first, so it cannot hold this stage open. | Up to 30s |
-| 2. Background jobs | Includes a test-clock advance in progress. A test-clock catch-up that is cut off leaves its clock `advancing`, and the copy that runs the catch-up next runs it again ([ADR-140](../adr/140-test-clock-catchup-is-a-leader-role.md)). | Up to 30s |
+| 2. Background jobs | The jobs that are running finish. | Up to 30s |
 
 The worst case is `SHUTDOWN_DRAIN_DELAY` plus 60 seconds. Usually the two stages take under 2 seconds after the drain delay.
 
-A grace period shorter than that can kill a copy (SIGKILL) halfway through. Hardcount is built to survive that. Queued webhooks and emails that a copy had claimed are picked up again when its claim on them runs out. The next copy to run the test-clock catch-up resumes a killed advance. The cost is that a few webhooks or emails can be sent twice.
+A grace period shorter than that can kill a copy (SIGKILL) halfway through. Hardcount is built to survive that. Queued webhooks and emails that a copy had claimed are picked up again when its claim on them runs out. The cost is that a few webhooks or emails can be sent twice.
 
 One job is not waited for at all: the retry of invoices stuck on Stripe settings that runs after you connect Stripe. A stop leaves each invoice it was working on either still waiting for tax or finalized, never in between. The invoices it did not reach stay in the needs-attention list: those waiting for Stripe to be connected are retried by the background tax retry, and those with a rejected key wait for a **Retry tax** click or the next connect.
 

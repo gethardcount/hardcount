@@ -19,7 +19,6 @@ flowchart BT
     M["Meter"]
     PR["Price"]
     P["Plan"]
-    TC["Test clock<br/>(test mode only)"]
     C["Customer"]
     U["Usage event"]
     PM["Payment<br/>method"]
@@ -32,7 +31,6 @@ flowchart BT
     PR -->|"meter_id"| M
     PR -->|"plan_id"| P
     C ~~~ PR
-    C -->|"test_clock_id"| TC
     U -->|"meter_id"| M
     U -->|"customer_id"| C
     PM --->|"customer_id"| C
@@ -65,7 +63,6 @@ stores the IDs they point to.
 | Credit ledger entry | One change to a customer's prepaid credit: a grant (credit added), a use, an expiry or an adjustment. | You, for grants and adjustments. Hardcount, for uses, expiries and prepaid commits (credit the customer pays for up front). | `hc_ccl_` |
 | Payment method | A card the customer saved through Stripe. | The customer, on a Stripe page | `hc_pm_` |
 | Dunning run | Hardcount retrying one unpaid invoice and emailing the customer. | Hardcount, when a charge fails or no card is saved | `hc_drun_` |
-| Test clock | A pretend clock for test customers. | You | `hc_tclk_` |
 
 Two more objects stand apart from the chain:
 
@@ -100,8 +97,7 @@ Hardcount does the rest on its own:
 ## Test mode and live mode
 
 Every object lives in one mode, test or live, and the two never mix. A key
-that starts with `hc_secret_test_` sees only test objects. A test clock
-exists only in test mode, so only test customers can be on one.
+that starts with `hc_secret_test_` sees only test objects.
 
 **Next:** [Usage events](usage-events.md).
 More: [How Hardcount works](../how-hardcount-works.md),

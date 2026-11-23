@@ -59,9 +59,9 @@ shaped like a LiteLLM proxy fleet, across 300 customers. Half the events came
 in batches of 10, a quarter as LiteLLM callbacks (3 events each) and a quarter
 one at a time. The 20 minutes alternated steady load and bursts at five times
 the rate: steady for 5 minutes, burst for 3, steady 5, burst 3, steady 4. Then
-a [test clock](glossary.md#testing-with-simulated-time) moved 32 days forward to
-bill all 300 customers. Last, each of six dashboard calls ran 20 times, one at
-a time. The general rate limit was raised so that creating the 300 customers
+simulated time moved 32 days forward to bill all 300 customers. Last, each
+of six dashboard calls ran 20 times, one at a time. The general rate limit
+was raised so that creating the 300 customers
 did not hit it; the ingest limit was left as shipped. CPU and memory were
 sampled every 5 seconds.
 
@@ -72,7 +72,7 @@ sampled every 5 seconds.
 - A year of history: the table held 30,000 events. Queries, vacuum and index
   growth on a large table were not tested.
 - Long runs: one 20-minute run, with no soak or memory-leak test.
-- The real scheduler: billing ran through the test clock, not through the
+- The real scheduler: billing ran on simulated time, not through the
   scheduler that bills on the real date.
 - Shared vCPU: other customers of the host can slow it down. This was one run
   on one server.

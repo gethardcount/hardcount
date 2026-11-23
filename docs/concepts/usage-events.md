@@ -38,11 +38,8 @@ instead: Hardcount keeps it without billing it. Once you create the
 customer, you release it, and it becomes usage events
 ([held usage](../integrations/litellm.md#usage-for-a-customer-hardcount-does-not-know-yet)).
 
-A `timestamp` may not be more than 5 minutes ahead of the customer's
-current time. For a customer on a [test clock](test-clocks.md), the current
-time is the clock's time, and an event without a `timestamp` gets the
-clock's time. There is no limit into the past, but see
-[Late usage](#late-usage).
+A `timestamp` may not be more than 5 minutes ahead of the current time.
+There is no limit into the past, but see [Late usage](#late-usage).
 
 More: every field rule and error is in the
 [API reference](../api-surface.md#sending-usage-safely).
@@ -119,8 +116,7 @@ period. To close a period is to make its invoice. These actions are:
 - a pause or resume of collection;
 - a scheduled cancel, or its removal;
 - a call to `POST /v1/subscriptions/{id}/retry-billing`, which retries a
-  subscription whose billing failed;
-- moving a test clock.
+  subscription whose billing failed.
 
 More: [Invoice timing and late usage](../ops/runbook/invoice-timing-late-usage.md).
 

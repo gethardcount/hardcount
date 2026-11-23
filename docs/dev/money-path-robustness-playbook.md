@@ -64,9 +64,9 @@ Dunning cancelled a subscription while its invoice was being paid.
 
 ### E. Crash or hidden error
 
-A [test-clock](../glossary.md#testing-with-simulated-time) advance panicked and stayed `advancing`.
+A test-clock advance panicked and stayed `advancing`.
 
-9. **After a crash on any line, does something that exists finish the work?** Name the queued row, marker column or repair job that picks the work up, and confirm it reads this state. A comment that promises a retry names the code that does it. Background work that panics marks its record failed, where an operator finds it. Copy: the test-clock advance (`internal/testclock/service.go`).
+9. **After a crash on any line, does something that exists finish the work?** Name the queued row, marker column or repair job that picks the work up, and confirm it reads this state. A comment that promises a retry names the code that does it. Background work that panics marks its record failed, where an operator finds it.
 10. **Is every error on a money write returned, or logged as an error?** No `_ =` on a store write or a queued send. Older code does not all follow this yet. A failure that leaves money uncollected if it lasts is logged at `ERROR`, not `WARN`.
 
 ### F. Part of a set

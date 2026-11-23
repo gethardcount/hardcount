@@ -34,7 +34,7 @@ Every request passes the root chain, then its group's chain, then its handler. I
 11. **Security headers.**
 12. **Audit detector** (`mw.AuditCoverage`) only observes: it reports a mutating 2xx that wrote no audit row and is not declared exempt.
 
-**The groups.** chi then routes the request into one group, which adds its own steps. Each group ends with **the clock door**. It decides the instant the request runs on, from the route's entry in the [route table](#the-route-table): real time, or the time of the test clock that the invoice, customer or other record named in the request is on. The handler reads that instant from the context.
+**The groups.** chi then routes the request into one group, which adds its own steps. Each group ends with **the clock door**. It decides the instant the request runs on, from the route's entry in the [route table](#the-route-table). The handler reads that instant from the context.
 
 | Group | Steps, in order |
 |---|---|
@@ -113,7 +113,7 @@ The access log and the metrics name each request by its route's pattern when it 
 | `422 idempotency_error` | Idempotency | the key reused for another request, or by another caller |
 | `503 idempotency_unavailable` | Idempotency | the key could not be recorded; its other answers are a `400` (a body it cannot read), the `413` above, and a `500` when no caller is on the request (a mis-wired router) |
 | `504 timeout` | the time limit | the handler wrote nothing in time |
-| `503 test_clock_unavailable`, `500` | the clock door | the record's test clock could not be read; a route entry the door does not know |
+| `500` | the clock door | a route entry the door does not know |
 | `500 internal_error` | the Recoverer | a panic before anything was written |
 
 ### The answer
@@ -185,24 +185,21 @@ Under `internal/`:
 - **Billing:** `billing` (engine, scheduler, invoice preview), `invoice`, `tax`, `credit` (one ledger of grants, usage, expiry and adjustments; append-only, except a grant's `consumed_cents` and `cn_retired_cents`), `creditnote` (credit notes and refunds).
 - **Getting paid:** `payment` (Stripe charges and Stripe's webhooks), `paymentmethods` (saved cards), `tenantstripe`, `dunning`, `hostedinvoice` (the public invoice page).
 - **Telling people:** `webhook` (outbound, HMAC-signed), `email`, `audit`, `analytics` (dashboard numbers).
-- **Checking:** `testclock`, `doctor`, `arch` (tests for the rules on this page), `testutil`.
+- **Checking:** `doctor`, `arch` (tests for the rules on this page), `testutil`.
 - **Shared:** `api` (builds every store, service and handler, and mounts the routes), `domain` (shared data types, in the package `internal/domain`; it imports no store, service or other business package), `errs`, `config`, `pdffonts`, `version`.
-- **`platform/`:** `postgres` (transactions and RLS), `migrate`, `leader`, `scheduler` (the loop for leased jobs), `clock` (real or test-clock time), `money` (integer-cents math), `crypto`, `telemetry`, `logging`, `request` (one request's record: [The record](#the-record)), `listorder`, `activity`, `timeline`.
+- **`platform/`:** `postgres` (transactions and RLS), `migrate`, `leader`, `scheduler` (the loop for leased jobs), `clock` (the current time, real or fake), `money` (integer-cents math), `crypto`, `telemetry`, `logging`, `request` (one request's record: [The record](#the-record)), `listorder`, `activity`, `timeline`.
 
 ## Background work
 
-Six jobs take a [leader lease](#design-rules):
+Five jobs take a [leader lease](#design-rules):
 
 - **`billing`**, every hour (5 minutes when `APP_ENV=local`). Runs for live mode, then test mode. Retries stuck charges and tax. Charges invoices waiting for payment. Checks billing thresholds (spend or usage) and ends trials. Closes billing periods into invoices. Resumes paused collection and expires credits.
 - **`dunning`**, at the same interval. Runs the payment retries that are due, queues their emails and takes final actions.
 - **`webhook_outbox`**, every 2 seconds. Sends queued webhook events.
 - **`email_outbox`**, every 5 seconds. Sends queued emails.
 - **`webhook_delivery`**, every 30 seconds. Retries failed deliveries.
-- **`testclock_catchup`**, every 2 seconds. Bills the skipped time for each [test clock](glossary.md#testing-with-simulated-time) that is being moved forward, one clock after another.
 
 An **outbox** is a table of messages waiting to be sent (`webhook_outbox`, `email_outbox`). Write to one in the same transaction as the change that needs the message: `OutboxStore.Enqueue(ctx, tx, ...)`.
-
-A request to move a test clock forward only marks the clock. If the copy running the catch-up stops, the next leader runs it again.
 
 ## Tax providers
 

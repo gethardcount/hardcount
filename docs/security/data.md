@@ -61,7 +61,7 @@ The database holds no SMTP password, database password or encryption key. Those 
 | **Stripe Tax** | Off. On when the account picks Stripe Tax as its tax provider (the default is manual rates) | The customer's address, tax ID and its type, the currency, each line's amount, quantity and tax code, and Hardcount's invoice ID (or credit note reference) on the recorded transaction |
 | **Your email server** | Off until `SMTP_HOST` is set | Recipient and CC addresses, the customer's name, invoice number and amount, links, and the invoice PDF, which shows the buyer's name, address and tax ID. Invites and password resets go to dashboard users' addresses; an invite names the inviter's email. |
 | **Webhook endpoints** | Off until an account adds an endpoint | Each event, signed, with the resource as the API returns it. A customer event carries the customer's name and email. Only `https://` addresses, except `localhost` outside production. Private, link-local and cloud metadata addresses are refused, and loopback addresses in production, when the endpoint is saved and on every connection. |
-| **Your OpenTelemetry collector** | Off until `OTEL_EXPORTER_OTLP_ENDPOINT` is set | Request spans: method, route, path with link tokens removed, status, client IP, the address of the proxy in front, the browser's user agent, host name, body sizes and timings. Billing-run spans carry account, subscription, customer and test clock IDs. No query strings, other headers, bodies or database queries. |
+| **Your OpenTelemetry collector** | Off until `OTEL_EXPORTER_OTLP_ENDPOINT` is set | Request spans: method, route, path with link tokens removed, status, client IP, the address of the proxy in front, the browser's user agent, host name, body sizes and timings. Billing-run spans carry account, subscription and customer IDs. No query strings, other headers, bodies or database queries. |
 
 Hardcount sends nothing to its maintainers: no usage statistics and no update check. The dashboard loads no scripts or fonts from other sites. The one thing loaded from elsewhere is your logo, from the Logo URL you set in Settings: the dashboard shows it in Settings, and your customers' browsers and mail clients load it on the payment pages and in emails.
 
@@ -78,10 +78,10 @@ Logs are JSON on standard output. Where they go, and how long they stay, is up t
 
 | Data | What the code does |
 |---|---|
-| Customers | Never deleted: archiving keeps every field. Deleting a test clock deletes its test-mode customers with their invoices, subscriptions, usage, billing profiles and emails; their audit log rows and outbound webhook events stay. |
+| Customers | Never deleted: archiving keeps every field. |
 | Accounts | No delete path. |
 | Dashboard users | Removing a member deletes the membership and ends their sessions in that workspace. The user row, with email and password hash, stays. API keys are not changed: rotate any key the person may have copied. |
-| Invoices and credit notes | Never deleted, outside test clocks. The buyer details are fixed when the invoice is issued. |
+| Invoices and credit notes | Never deleted. The buyer details are fixed when the invoice is issued. |
 | Audit log | Kept for good. A trigger refuses any update or delete. |
 | Usage events, outbound webhook events and deliveries, Stripe events, tax records | Kept. No cleanup job. |
 | Email queue | Links and the PDF are removed once an email is sent or skipped. An email that fails for good keeps them, so it can be sent again. The row, with recipient and customer name, stays. |

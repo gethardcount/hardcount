@@ -2,6 +2,7 @@
 
 **Status:** Accepted (amended 2026-11-11: the queue and worker are superseded by ADR-140)
 **Date:** 2026-05-04
+**Superseded:** test clocks were removed in v0.11.0.
 
 ## Summary
 

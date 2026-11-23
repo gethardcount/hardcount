@@ -101,7 +101,7 @@ follows.
 - **invoice grace period**: How long Hardcount waits after a billing period
   ends before it makes the period's invoice, so usage that arrives a little
   late is still billed. It is `INVOICE_GRACE_PERIOD` on the server: 1 hour
-  by default, from 0 to 72 hours. A test clock has none.
+  by default, from 0 to 72 hours.
   [More](concepts/usage-events.md#late-usage), and
   [the decision](adr/120-invoice-grace-period-for-late-usage.md)
 - **late usage**: A usage event that arrives after the invoice of the
@@ -363,34 +363,5 @@ follows.
   read-only JSON address that a partner can embed. That address opens with
   a secret token that is shown once.
   [More](adr/032-public-cost-dashboard-projection.md)
-
-## Testing with simulated time
-
-- **test clock**: A pretend clock for test customers. Create a clock, add a
-  new customer on it, then move the clock forward to see renewals, trial
-  ends, invoices and payment retries happen in seconds, not months. It
-  exists only in test mode. [More](concepts/test-clocks.md)
-- **catch-up (catchup)**: The work Hardcount does after a test clock moves
-  forward. It moves the clock through each time something falls due for its
-  customers, in order (a period's end, a trial's end, a pause's end, a
-  scheduled cancel, a payment retry), and at each runs the jobs: trial ends,
-  billing periods, pauses that end, thresholds, tax retries, charges, credit
-  notes waiting for an invoice to settle, dunning steps and credit expiries.
-  So things happen in the order they would in real time. The clock then
-  returns to `ready`, or stops at `internal_failure` at the time it had got
-  to if a job failed or the move took more than 10 minutes.
-  [More](concepts/test-clocks.md#what-runs-while-the-clock-moves) and
-  [the decision](adr/015-test-clock-async-catchup.md)
-- **clock-pinned**: Describes a customer on a test clock, and everything it
-  owns (subscriptions, invoices, credits). Its time comes from the clock,
-  not the real clock, and the normal billing run skips it.
-  [More](concepts/test-clocks.md#what-a-clock-holds), and
-  [the decision](adr/030-simulated-time-everywhere-on-clock-pinned-entities.md)
-- **simulated time**: The pretend current time of a test clock. Hardcount uses
-  it for every business date on a clock-pinned record (periods, due dates,
-  paid dates). The dashboard marks such invoices and credit notes
-  "Simulated", and Home leaves them out of its totals.
-  [More](concepts/test-clocks.md), and
-  [the decision](adr/030-simulated-time-everywhere-on-clock-pinned-entities.md)
 
 **Next:** see these words in action in the [quick start](quick-start.md).

@@ -76,8 +76,8 @@ A row has up to three lines, and its time sits on the right:
    - "Uncollectible" is the one word for an invoice written off as bad debt.
 6. **One clock rule.**
    - A row is dated at the instant the event happened, on the customer's
-     clock. For a customer on a [test clock](../concepts/test-clocks.md) (a
-     pretend clock for test customers), that is the clock's time. For every
+     clock. For a customer on a test clock (a pretend clock for test
+     customers), that is the clock's time. For every
      other customer, it is real time. The dashboard shows it in the
      account's time zone.
    - An automatic event happened at the instant it was due (a renewal, a

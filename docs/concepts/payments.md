@@ -40,7 +40,7 @@ Stripe is connected and `PAYMENT_UPDATE_URL` and `PAYMENT_UPDATE_RETURN_URL`
 are set, or the invoice itself when Stripe is not connected. With Stripe
 connected and either address unset, no email goes out at once. Each dunning
 retry then sends a reminder. Once they add a card, the next billing run
-charges it; on a test clock, the next move of the clock does.
+charges it.
 
 An amount below Stripe's minimum charge, such as $0.50 in USD, is not
 charged and starts no retries. The invoice stays open

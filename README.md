@@ -103,7 +103,6 @@ The gaps Hardcount is built for:
 | **Stripe Billing takes a cut:** 0.7% of billing volume on its pay-as-you-go plan, and its basic usage billing can't price each model and token type on one meter. | **No Stripe Billing fee.** Stripe still charges the card. One meter prices every model and token type. |
 | **Key parts sit behind a paid licence,** such as automatic failed-payment retries and invoice previews in Lago. | **One free edition.** MIT, with no paid edition. |
 | **Some are heavy to run:** Flexprice's default setup runs nine services, including Kafka and ClickHouse. | **One Go program, Postgres and Redis.** The ready-made Compose setup runs five small containers. |
-| **No way to fast-forward time** to test a billing change. | **Test clocks:** move a test customer forward a month and see the invoice before any real customer gets it. |
 | **A customer can cost you more than they pay,** because AI costs move with usage. | **Margin per customer and per model,** from the provider cost Hardcount records on each usage event as it arrives. OpenMeter and Flexprice report cost too. |
 
 Stripe still charges its normal card fee, and Stripe Tax's fee if you use it. Every claim above has a source in [Why Hardcount exists](docs/why-hardcount.md), and [How it compares](docs/comparison.md) lists where the other projects are ahead.

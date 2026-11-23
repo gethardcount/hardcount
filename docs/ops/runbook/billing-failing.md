@@ -113,11 +113,8 @@ attempt, so each period is billed once, whichever runs first.
      already used. Set `tenant_settings.invoice_next_seq_live` (or
      `invoice_next_seq_test`) above the highest number in use.
    - `invoice_billing_period_taken`: another invoice holds the period's
-     slot (the subscription, its period start and end). On a test clock
-     this is a spend-threshold invoice ending where a plan change cut the
-     period: void it if it is unpaid (`POST /v1/invoices/{id}/void`), and
-     the close bills the whole window; otherwise delete the clock. A period
-     set back in the database: set it forward again.
+     slot (the subscription, its period start and end). A period set back
+     in the database: set it forward again.
 
    Until the cause is fixed, every change to that subscription answers
    `unbilled_period`.
@@ -209,9 +206,5 @@ with its final invoice), ended a trial, or closed a period with nothing to
 bill.
 
 `hardcount_billing_failing_subscriptions` falls on the next scrape.
-
-**Not covered here:** a subscription on a test clock (a pretend clock for
-test customers) never appears in this gauge or list. Its failure stops the
-clock; see [Test-clock advance hung](test-clock-advance-hung.md).
 
 Related: [ADR-119](../../adr/119-billing-failure-record-keyed-to-the-due-instant.md).

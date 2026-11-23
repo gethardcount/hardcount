@@ -103,8 +103,6 @@ write the window in UTC, ending in `Z`.
    - `no customer` means Hardcount has no customer with that external ID,
      or the calls have no `end_user`. Sending such calls again holds them
      (`held` in step 3 of the Fix), or lists them in `errors`.
-   - A customer on a test clock has its calls dated at the clock's time,
-     outside the window, so they read as lost. Leave such customers out.
    - Calls of a kind Hardcount does not bill, such as image calls, also
      make Hardcount's number lower. Sending them again changes nothing:
      the answer counts each such call in `skipped`.

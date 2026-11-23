@@ -16,10 +16,9 @@ invoice ([how long that takes](../../api/timing-and-limits.md#when-invoices-are-
 
 - The same wait applies to `POST /v1/billing/run`, a billing run you start
   by hand, and to the final invoice of a cancel scheduled for a date.
-- These build the invoice at once, with no grace: an immediate cancel,
+- These build the invoice at once, with no grace: an immediate cancel, and
   `POST /v1/subscriptions/{id}/retry-billing` on a subscription whose
-  billing is failing, and moving a test clock (a pretend clock for test
-  customers) forward.
+  billing is failing.
 - A change you make now to a subscription whose period has ended, such as
   a plan change, builds that period's invoice at once too. Usage still on
   its way then misses it.

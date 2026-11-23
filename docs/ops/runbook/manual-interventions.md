@@ -28,8 +28,7 @@ Use the SQL below only in two cases:
   it stays escalated until this SQL closes it.
 
 The SQL changes the run only. It queues no `dunning.resolved` event, sends
-no email and writes no audit row, and the times it stamps are the machine's,
-even for a run on a test clock.
+no email and writes no audit row, and the times it stamps are the machine's.
 
 1. **Check the run and its invoice.** Step 3 needs the account, the invoice
    and the mode. For `livemode`, `true` is a live run, `false` a test run:

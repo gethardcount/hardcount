@@ -122,8 +122,7 @@ curl -s -X POST "$HARDCOUNT/v1/usage-events" \
   [the retry rules](#sending-usage-safely).
 - `dimensions` are labels; the plan's prices pick events by them.
 - `timestamp` is optional: an RFC 3339 time, such as
-  `2026-10-31T12:00:00Z`. Without it, the event gets the current time, or
-  the clock's time for a customer on a test clock.
+  `2026-10-31T12:00:00Z`. Without it, the event gets the current time.
 
 **You see:** status `201` and the stored event, with an `id` such as
 `hc_evt_…`. The meter and the customer must exist first, or the event is
@@ -210,11 +209,11 @@ the call returns `409` with code `unbilled_period`.
 
 `/v1/billing/run` bills what the hourly run would: periods whose grace
 period has passed. The grace period (`INVOICE_GRACE_PERIOD`, 1 hour by
-default) is the wait after a period ends. The run skips subscriptions on a
-test clock (advancing the clock bills those) and ones waiting after a failed
-billing attempt. It also skips parked ones: a parked subscription is set
-aside after eight failed billing attempts, until someone retries it with
-`retry-billing`. It answers 206 when some subscriptions could not be billed.
+default) is the wait after a period ends. The run skips subscriptions
+waiting after a failed billing attempt. It also skips parked ones: a parked
+subscription is set aside after eight failed billing attempts, until someone
+retries it with `retry-billing`. It answers 206 when some subscriptions
+could not be billed.
 
 ### Credits and refunds
 
@@ -227,60 +226,6 @@ aside after eight failed billing attempts, until someone retries it with
 
 To stop serving a customer when credit runs out, use the live balance. See
 [Stop usage when credit runs out](stop-usage-when-credit-runs-out.md).
-
-### Test clocks
-
-A test clock is a pretend clock for test customers: you move it forward to
-see a month of billing in seconds. See
-[test clock](glossary.md#testing-with-simulated-time). Test clocks work only
-with a test key.
-
-| Method | Path | What it does |
-|---|---|---|
-| `POST` | `/v1/test-clocks` | Create a test clock, with a `name` and its starting `frozen_time` |
-| `GET` | `/v1/test-clocks/{id}` | Read the clock, with its `status` |
-| `POST` | `/v1/test-clocks/{id}/advance` | Move the clock forward to `frozen_time`, at most 1 year at a time, and bill what falls due |
-
-1. Create a clock that starts at the current time, and save its ID:
-
-   ```bash
-   CLOCK_ID=$(jq -n --arg now "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-       '{name: "demo", frozen_time: $now}' \
-     | curl -s -X POST "$HARDCOUNT/v1/test-clocks" \
-       -H "Authorization: Bearer $HARDCOUNT_KEY" \
-       -H "Content-Type: application/json" \
-       -d @- | jq -r .id)
-   echo "$CLOCK_ID"
-   ```
-
-   **You see:** the clock's ID, `hc_tclk_…`.
-
-2. Put a customer on the clock: send its ID as `test_clock_id` when you
-   create the customer, with `POST /v1/customers`. Its subscriptions and
-   usage then follow the clock's time.
-3. Move the clock 32 days past its start, beyond the end of a monthly
-   period. The first `date` form is for macOS, the second for Linux:
-
-   ```bash
-   LATER=$(date -u -v+32d +%Y-%m-%dT%H:%M:%SZ 2>/dev/null || date -u -d "+32 days" +%Y-%m-%dT%H:%M:%SZ)
-   jq -n --arg t "$LATER" '{frozen_time: $t}' \
-     | curl -s -X POST "$HARDCOUNT/v1/test-clocks/$CLOCK_ID/advance" \
-       -H "Authorization: Bearer $HARDCOUNT_KEY" \
-       -H "Content-Type: application/json" \
-       -d @- | jq -r .status
-   ```
-
-   The call answers at once, while Hardcount bills in the background.
-   **You see:**
-
-   ```text
-   advancing
-   ```
-
-4. Read the clock with `GET /v1/test-clocks/{id}` every second or two until
-   its `status` is `ready`. Then the invoices are built. A `status` of
-   `internal_failure` means the billing stopped;
-   `POST /v1/test-clocks/{id}/retry-advance` tries again.
 
 ### Payment retries and webhooks
 
@@ -395,8 +340,7 @@ An event counts toward the billing period its `timestamp` falls in.
   - a pause or resume of collection;
   - a scheduled cancel, or its removal;
   - `retry-billing`;
-  - a spend-threshold invoice;
-  - a test-clock advance.
+  - a spend-threshold invoice.
 
   Setting or clearing spend thresholds does not.
 - Dunning's final pause or cancel waits for the grace period. When retries

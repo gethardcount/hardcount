@@ -5,6 +5,7 @@
 **Supersedes:** ADR-016 (test-clock soft-delete + cancel-subs + detach-customers → **complete hard-delete teardown**).
 **Extends:** ADR-029 (fully-disjoint test-clock flows).
 **Reaffirms:** ADR-030 (simulated time on clock-pinned entities stays; `created_at` is domain time) **and its audit exception** (the audit log is always wall-clock).
+**Superseded:** test clocks were removed in v0.11.0.
 
 ## Summary
 

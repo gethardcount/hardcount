@@ -335,7 +335,7 @@ Each line names a refund made after the backup, of a payment the restored databa
    SELECT role, last_tick_age_s FROM leader_status WHERE role = 'billing';
    SELECT count(*) AS due, min(next_billing_at) AS oldest
    FROM subscriptions
-   WHERE livemode AND test_clock_id IS NULL AND status IN ('active', 'trialing')
+   WHERE livemode AND status IN ('active', 'trialing')
      AND (next_billing_at <= now() - interval '1 hour'
           OR (status = 'active' AND cancel_at <= now() - interval '1 hour'));
    ```

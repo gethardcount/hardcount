@@ -181,8 +181,7 @@ five places:
   in `GET /v1/customers/{id}/usage` (the current billing period, unless
   you pass `from` and `to`), marked `no_price`;
 - the warning on the invoice preview, which gives the quantity;
-- the `hardcount_usage_unpriced_quantity_total{mode}` metric (usage
-  of customers on a test clock is not counted);
+- the `hardcount_usage_unpriced_quantity_total{mode}` metric;
 - a server log line when the invoice is made.
 
 To bill it from the next period, add a price. For usage already left out,
@@ -202,8 +201,7 @@ plan in that period. So:
   (`effective: now`).
 - On a used plan, it applies from each subscriber's next billing period
   (`effective: next_period`). The period already open keeps the prices it
-  started with, also after a quantity change. A customer on a test clock
-  follows the clock: the change applies from the clock's next period.
+  started with, also after a quantity change.
 - A subscriber who joins the plan after a change pays it at once:
   - a new subscription, from its start (after a trial, from the trial's
     end);
@@ -232,10 +230,6 @@ plan in that period. So:
   from the period start, so its part starts where the part before it
   ended. When those two touching parts are on one plan, they bill as one
   part: a `max` meter bills one peak, and the tiers continue across both.
-- On a test clock, a change or an override takes effect just after the
-  clock's current time. A subscription, an immediate plan change or an
-  added item at that same clock time gets the earlier prices, so advance
-  the clock first.
 
 On the dashboard, open the plan under **Pricing**. Its **Usage prices**
 card shows the prices as a rate card, one row per model with a column per
@@ -519,9 +513,8 @@ The margin covers usage only: base fees, credits and taxes are left out.
 - when revenue and cost are in different currencies. Provider costs are in
   USD, so a plan priced in EUR or GBP shows no margin.
 
-Left out, `to` is the customer's current time and `from` is 30 days
-before that time. On a test clock, that is the clock's time. A window can
-be at most one year; a longer one is refused with `422`. The **Margin**
+Left out, `to` is the current time and `from` is 30 days before that
+time. A window can be at most one year; a longer one is refused with `422`. The **Margin**
 card on the customer page starts on the current billing period. What each
 figure means: [Margin](concepts/margin.md).
 

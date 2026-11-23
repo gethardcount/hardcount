@@ -14,15 +14,14 @@ the [quick start](quick-start.md).
   [Meters and prices](concepts/meters-and-prices.md) ·
   [Subscriptions](concepts/subscriptions.md) ·
   [Invoices](concepts/invoices.md) · [Credits](concepts/credits.md) ·
-  [Payments](concepts/payments.md) · [Test clocks](concepts/test-clocks.md) ·
-  [Margin](concepts/margin.md) · [Glossary](glossary.md).
+  [Payments](concepts/payments.md) · [Margin](concepts/margin.md) ·
+  [Glossary](glossary.md).
 - **Guides:** [AI pricing reference](ai-pricing.md) ·
   [Bill for AI tokens by model](guides/bill-for-ai-tokens.md) ·
   [Stop usage when credit runs out](stop-usage-when-credit-runs-out.md) ·
   [Send usage from LiteLLM](integrations/litellm.md) ·
   [Receive webhooks](guides/receive-webhooks.md) ·
   [Connect Stripe](guides/connect-stripe.md) ·
-  [Simulate months with a test clock](guides/test-a-billing-change.md) ·
   [Manage API keys](api-keys.md) · [Set up tax](ops/tax-calculation.md).
 - **API reference:** [API overview](api-surface.md) ·
   [Authentication and keys](api/authentication.md) ·
