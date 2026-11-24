@@ -1592,7 +1592,7 @@ func (s *Service) Finalize(ctx context.Context, tenantID, id string) (domain.Inv
 	if err != nil {
 		return domain.Invoice{}, err
 	}
-	if inv.BillingReason == domain.BillingReasonTopup {
+	if inv.UnpaidTopup() {
 		return domain.Invoice{}, errs.InvalidState("A top-up is issued when it is paid: collect it, send it, or record a payment.")
 	}
 	if inv.Status != domain.InvoiceDraft {

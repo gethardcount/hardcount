@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/auth"
+	"github.com/gethardcount/hardcount/internal/credit"
 	"github.com/gethardcount/hardcount/internal/creditnote"
 	"github.com/gethardcount/hardcount/internal/customer"
 	"github.com/gethardcount/hardcount/internal/domain"
@@ -25,6 +26,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/payment"
 	"github.com/gethardcount/hardcount/internal/paymentmethods"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
+	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/tenantstripe"
 	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/webhook"
@@ -682,6 +684,43 @@ func TestCatchUp_ListsPaymentsWhoseInvoiceIsLostOrDraft(t *testing.T) {
 	later := onlyAccount(t, r.run(t))
 	if later.Err != nil || len(later.Lost) != 2 || !later.Lost[0].Acknowledged || !later.Lost[1].Acknowledged {
 		t.Fatalf("later run %+v, want both still listed as acknowledged", later)
+	}
+}
+
+// A top-up made before the backup and paid after it is a draft in the restored
+// database, and its payment is applied, not listed: the payment issues the
+// top-up and grants its credit, as the webhook would have.
+func TestCatchUp_AppliesThePaymentOfAnUnpaidTopup(t *testing.T) {
+	r := newCatchUpRig(t)
+	settings := tenant.NewSettingsStore(r.db)
+	r.invoices.SetCommitFunder(credit.NewService(credit.NewPostgresStore(r.db)))
+	r.invoices.SetInvoiceNumberer(settings)
+	tenantID := testutil.CreateTestTenant(t, r.db, "catchup-topup")
+	r.connect(tenantID, true, "sk_live_topup")
+	ctx := modeCtx(tenantID, true)
+	cust, err := r.customers.Create(ctx, tenantID, domain.Customer{ExternalID: "cus_topup", DisplayName: "Topup", Email: "billing@topup.test"})
+	if err != nil {
+		t.Fatalf("create customer: %v", err)
+	}
+	grant := int64(6000)
+	topup, err := invoice.NewService(r.invoices, nil, settings).Create(ctx, tenantID, invoice.CreateInput{
+		CustomerID: cust.ID, Currency: "USD",
+		LineItems: []invoice.AddLineItemInput{{Description: "Prepaid credit", Quantity: 1, UnitAmountCents: catchUpDue, CommitGrantedCents: &grant}},
+	})
+	if err != nil {
+		t.Fatalf("create top-up: %v", err)
+	}
+	r.addPayment("sk_live_topup", "evt_topup", "pi_topup", tenantID, topup.ID, cust.ID, time.Now().Add(-40*time.Hour).Unix())
+
+	acct := onlyAccount(t, r.run(t))
+	if acct.Err != nil || acct.Applied != 1 || len(acct.Lost) != 0 {
+		t.Fatalf("report %+v, want the top-up's payment applied and nothing listed", acct)
+	}
+	if got := r.invoiceStatus(t, tenantID, topup.ID); got.Status != domain.InvoicePaid || got.InvoiceNumber == "" {
+		t.Fatalf("the top-up is %s %q, want paid and numbered", got.Status, got.InvoiceNumber)
+	}
+	if n := r.count(t, `SELECT count(*) FROM customer_credit_ledger WHERE source_invoice_id = $1 AND grant_kind = 'commit'`, topup.ID); n != 1 {
+		t.Fatalf("commit grants = %d, want 1", n)
 	}
 }
 

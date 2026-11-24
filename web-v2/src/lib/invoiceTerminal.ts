@@ -73,6 +73,7 @@ export function invoiceAmountLabel(status: string | undefined | null): string {
 
 export interface InvoiceMoneyInput {
   status?: string | null
+  billing_reason?: string
   payment_status?: string
   amount_due_cents: number
   amount_paid_cents?: number
@@ -141,9 +142,18 @@ export function invoicePaymentInFlight(inv: InvoiceMoneyInput): 'processing' | '
   return inv.payment_status === 'processing' ? 'processing' : 'unknown'
 }
 
+/**
+ * Whether a payment may be taken for the invoice, the server's rule
+ * (domain.Invoice.OpenForPayment): a finalized invoice, or an unpaid top-up,
+ * which its payment issues.
+ */
+export function openForPayment(inv: { status?: string | null; billing_reason?: string }): boolean {
+  return inv.status === 'finalized' || (inv.status === 'draft' && inv.billing_reason === 'topup')
+}
+
 /** Open, something due, and no payment succeeded or unresolved: a charge can start. */
 export function invoiceCanCollect(inv: InvoiceMoneyInput): boolean {
-  return inv.status === 'finalized' &&
+  return openForPayment(inv) &&
     !invoicePaymentSucceeded(inv) &&
     invoicePaymentInFlight(inv) === null &&
     inv.amount_due_cents > 0

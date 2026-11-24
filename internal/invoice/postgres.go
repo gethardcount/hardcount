@@ -327,6 +327,17 @@ func splitTopLevelCommas(s string) []string {
 // that outcome, so a blanket settled-check muted the one email whose
 // purpose is that state (found on the FLOW I6 walk, VLX-000016).
 func (s *PostgresStore) InvoiceTerminalState(ctx context.Context, tenantID, invoiceNumber string) (string, error) {
+	return s.invoiceTerminalState(ctx, tenantID, `invoice_number = $1`, invoiceNumber)
+}
+
+// InvoiceTerminalStateByID is InvoiceTerminalState by the invoice's id, for
+// an email naming an invoice with no number: a top-up's offer, which is stale
+// once the top-up is paid ("paid") or withdrawn ("voided").
+func (s *PostgresStore) InvoiceTerminalStateByID(ctx context.Context, tenantID, invoiceID string) (string, error) {
+	return s.invoiceTerminalState(ctx, tenantID, `id = $1`, invoiceID)
+}
+
+func (s *PostgresStore) invoiceTerminalState(ctx context.Context, tenantID, where, key string) (string, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return "", err
@@ -334,8 +345,7 @@ func (s *PostgresStore) InvoiceTerminalState(ctx context.Context, tenantID, invo
 	defer postgres.Rollback(tx)
 	var status, paymentStatus string
 	err = tx.QueryRowContext(ctx,
-		`SELECT status, payment_status FROM invoices WHERE invoice_number = $1`,
-		invoiceNumber,
+		`SELECT status, payment_status FROM invoices WHERE `+where, key,
 	).Scan(&status, &paymentStatus)
 	if err == sql.ErrNoRows {
 		return "gone", nil
@@ -4155,7 +4165,7 @@ func (s *PostgresStore) SetPublicToken(ctx context.Context, tenantID, invoiceID,
 	// wall-clock via SQL now(), matching SetPaymentCard.
 	res, err := tx.ExecContext(ctx, `
 		UPDATE invoices SET public_token_encrypted = $1, public_token_hash = $2, updated_at = now()
-		WHERE id = $3 AND status <> 'draft'
+		WHERE id = $3 AND (status <> 'draft' OR billing_reason = 'topup')
 	`, postgres.NullableString(encToken), postgres.NullableString(tokenHash), invoiceID)
 	if err != nil {
 		if postgres.IsUniqueViolation(err) {

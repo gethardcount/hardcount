@@ -192,7 +192,7 @@ type capturingEmailSender struct {
 	called      bool
 }
 
-func (c *capturingEmailSender) SendTopupOffer(context.Context, string, string, []string, string, int64, domain.TopupCredit, string, string) error {
+func (c *capturingEmailSender) SendTopupOffer(context.Context, string, string, string, []string, string, int64, domain.TopupCredit, string, string) error {
 	return nil
 }
 

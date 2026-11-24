@@ -8,6 +8,7 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // errInvoicePDF marks a failure to render the invoice PDF, which the
@@ -25,7 +26,7 @@ const TriggerAutoCollectNoStripe = "auto_collect_no_stripe"
 // Both senders refuse the same way: the operator's "Email invoice" answers
 // with the error (a 409), and the collector's automatic send logs it and
 // tries again on its next visit.
-func (h *Handler) invoiceEmailRefusal(inv domain.Invoice) error {
+func (h *Handler) invoiceEmailRefusal(ctx context.Context, inv domain.Invoice) error {
 	// This email carries a "View & pay invoice" button. Sending it for an
 	// invoice whose payment is unresolved asks the customer to pay something we
 	// may already have taken from them — and for a parked invoice (ADR-107) the
@@ -39,13 +40,8 @@ func (h *Handler) invoiceEmailRefusal(inv domain.Invoice) error {
 	// money they do not owe.
 	switch {
 	case inv.UnpaidTopup():
-		// Its email is a link to its hosted page, where it is paid: without
-		// the link it would offer credit the customer cannot buy.
-		if h.svc.hostedPayOff {
-			return errs.InvalidState("This top-up's email is a link to its payment page, and the link can't be built: this server has no HOSTED_INVOICE_BASE_URL. Set it to your hosted invoice page's address (for example https://billing.example.com), restart, and send again.")
-		}
-		if inv.PublicToken == "" {
-			return errs.InvalidState("This top-up's email is a link to its payment page, and the link can't be built: its link token could not be read. Withdraw it and create another.")
+		if err := h.topupSendRefusal(ctx, inv); err != nil {
+			return err
 		}
 	case inv.Status == domain.InvoiceDraft:
 		return errs.InvalidState("a draft invoice can't be emailed because it isn't issued yet. Finalize it first, then email it").
@@ -62,6 +58,34 @@ func (h *Handler) invoiceEmailRefusal(inv domain.Invoice) error {
 	return nil
 }
 
+// topupSendRefusal is why an unpaid top-up's email cannot be sent, or nil.
+// The email is only a link to its hosted page, where it is paid by card:
+// without the link, or without Stripe to take the card, it would offer credit
+// the customer cannot buy.
+func (h *Handler) topupSendRefusal(ctx context.Context, inv domain.Invoice) error {
+	if h.svc.hostedPayOff {
+		return errs.InvalidState("This top-up's email is a link to its payment page, and the link can't be built: this server has no HOSTED_INVOICE_BASE_URL. Set it to your hosted invoice page's address (for example https://billing.example.com), restart, and send again.")
+	}
+	if inv.PublicToken == "" {
+		return errs.InvalidState("This top-up's email is a link to its payment page, and the link can't be built: its link token could not be read. Withdraw it and create another.")
+	}
+	if h.svc.stripeChecker == nil {
+		return nil
+	}
+	live, err := postgres.Livemode(ctx)
+	if err != nil {
+		return err
+	}
+	connected, err := h.svc.stripeChecker.HasFor(ctx, inv.TenantID, live)
+	if err != nil {
+		return fmt.Errorf("read the Stripe connection: %w", err)
+	}
+	if !connected {
+		return errs.InvalidState("This top-up's email is a link to pay it by card, and Stripe isn't connected in this mode, so the page couldn't take the payment. Connect Stripe in Settings for this mode, then send it again.")
+	}
+	return nil
+}
+
 // emailInvoice is the invoice email's one body, shared by the operator's
 // "Email invoice" (sendEmail) and the collector's automatic send (Emailer):
 // the refusals, the CC list (ADR-082: nil ccOverride means the customer's
@@ -69,7 +93,7 @@ func (h *Handler) invoiceEmailRefusal(inv domain.Invoice) error {
 // send, and the audit row. ctx carries the time its caller decided; trigger
 // is empty for the operator's send.
 func (h *Handler) emailInvoice(ctx context.Context, tenantID string, inv domain.Invoice, items []domain.InvoiceLineItem, to string, ccOverride *[]string, trigger string) error {
-	if err := h.invoiceEmailRefusal(inv); err != nil {
+	if err := h.invoiceEmailRefusal(ctx, inv); err != nil {
 		return err
 	}
 
@@ -90,7 +114,7 @@ func (h *Handler) emailInvoice(ctx context.Context, tenantID string, inv domain.
 		if !ok {
 			return fmt.Errorf("top-up %s has no commit line", inv.ID)
 		}
-		if err := h.emailSender.SendTopupOffer(ctx, tenantID, to, cc, bt.Name, inv.AmountDueCents, credit, inv.Currency, inv.PublicToken); err != nil {
+		if err := h.emailSender.SendTopupOffer(ctx, tenantID, inv.ID, to, cc, bt.Name, inv.AmountDueCents, credit, inv.Currency, inv.PublicToken); err != nil {
 			return err
 		}
 	} else {

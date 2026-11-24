@@ -41,7 +41,7 @@ import { StatusBadge } from '@/components/StatusBadge'
 import { cn } from '@/lib/utils'
 import { creditNoteReasonLabel } from '@/lib/status'
 import { cardLabel } from '@/lib/paymentMethodCopy'
-import { invoiceAwaitingPayment, invoiceCanCollect, invoiceDueCents, invoicePaymentInFlight, invoiceShowsCollect } from '@/lib/invoiceTerminal'
+import { invoiceAwaitingPayment, invoiceCanCollect, invoiceDueCents, invoicePaymentInFlight, invoiceShowsCollect, openForPayment } from '@/lib/invoiceTerminal'
 
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
@@ -654,8 +654,10 @@ export default function InvoiceDetailPage() {
   // while the payment is unresolved: the server refuses all three, because
   // the email asks the customer to pay (and for a parked invoice the hosted
   // page will not even show a Pay button). Offering it is discovery-by-failure.
-  const showEmailInvoice = invoice.status !== 'draft' && invoice.status !== 'voided' && invoicePaymentInFlight(invoice) === null
-  const showCopyLink = !!invoice.public_token && invoice.status !== 'draft'
+  // An unpaid top-up is the one draft that is sent: its email is its pay link.
+  const sendable = invoice.status !== 'draft' || openForPayment(invoice)
+  const showEmailInvoice = sendable && invoice.status !== 'voided' && invoicePaymentInFlight(invoice) === null
+  const showCopyLink = !!invoice.public_token && sendable
   // Voiding an unpaid top-up withdraws the offer: same request, its own words.
   const withdrawTopup = invoice.status === 'draft' && invoice.billing_reason === 'topup'
 
@@ -836,7 +838,7 @@ export default function InvoiceDetailPage() {
                   Copy public link
                 </DropdownMenuItem>
               )}
-              {invoice.public_token && invoice.status !== 'draft' && invoice.status !== 'paid' && (
+              {invoice.public_token && sendable && invoice.status !== 'paid' && (
                 <DropdownMenuItem onClick={() => setShowRotatePublicTokenConfirm(true)} disabled={acting}>
                   <RotateCw size={14} className="mr-2" />
                   Rotate public link
@@ -1643,24 +1645,30 @@ export default function InvoiceDetailPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Collect {formatCents(invoiceDueCents(invoice), invoice.currency)} now?</AlertDialogTitle>
             <AlertDialogDescription>
-              {formatCents(invoiceDueCents(invoice), invoice.currency)} due on {invoiceLabel(invoice)} from {customer?.display_name || invoice.bill_to_snapshot?.display_name || 'this customer'}.
+              {formatCents(invoiceDueCents(invoice), invoice.currency)} {withdrawTopup ? 'for' : 'due on'} {invoiceLabel(invoice)} from {customer?.display_name || invoice.bill_to_snapshot?.display_name || 'this customer'}.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {/* A top-up is what buys credit: no credit balance is applied to it,
+              so only a card can pay it. */}
           <div className="space-y-2 text-sm text-muted-foreground">
-            <p>Any credit balance the customer has is used first.</p>
+            {!withdrawTopup && <p>Any credit balance the customer has is used first.</p>}
             <p>
               {defaultCard
-                ? `Whatever is left is charged to ${defaultCard.card_last4 ? cardLabel(defaultCard) : "the customer's default card"} right away.`
-                : 'No card is on file, so only the credit balance can pay it.'}
+                ? `${withdrawTopup ? 'It is' : 'Whatever is left is'} charged to ${defaultCard.card_last4 ? cardLabel(defaultCard) : "the customer's default card"} right away.`
+                : withdrawTopup
+                  ? 'No card is on file, so it can\'t be charged. Send the customer its link instead.'
+                  : 'No card is on file, so only the credit balance can pay it.'}
             </p>
           </div>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={collectMutation.isPending}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => collectMutation.mutate()} disabled={collectMutation.isPending}>
-              {collectMutation.isPending
-                ? <><Loader2 size={14} className="animate-spin mr-1.5" />Collecting…</>
-                : defaultCard ? `Charge ${formatCents(invoiceDueCents(invoice), invoice.currency)}` : 'Apply credit'}
-            </AlertDialogAction>
+            {(defaultCard || !withdrawTopup) && (
+              <AlertDialogAction onClick={() => collectMutation.mutate()} disabled={collectMutation.isPending}>
+                {collectMutation.isPending
+                  ? <><Loader2 size={14} className="animate-spin mr-1.5" />Collecting…</>
+                  : defaultCard ? `Charge ${formatCents(invoiceDueCents(invoice), invoice.currency)}` : 'Apply credit'}
+              </AlertDialogAction>
+            )}
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

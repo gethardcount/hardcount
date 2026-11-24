@@ -124,6 +124,9 @@ type InvoiceSettledChecker interface {
 	// needs the specific state because ONE email type survives one of
 	// them — see handle().
 	InvoiceTerminalState(ctx context.Context, tenantID, invoiceNumber string) (string, error)
+	// InvoiceTerminalStateByID is InvoiceTerminalState by the invoice's id,
+	// for a row naming an invoice with no number (a top-up's offer).
+	InvoiceTerminalStateByID(ctx context.Context, tenantID, invoiceID string) (string, error)
 }
 
 // SetSettledChecker wires the staleness gate (see handle).
@@ -174,6 +177,9 @@ var actionRequiredTypes = map[string]bool{
 	TypePaymentFailed:       true,
 	TypeDunningWarning:      true,
 	TypeDunningEscalation:   true,
+	// A top-up's offer asks the customer to buy credit: once the top-up is
+	// paid or withdrawn, the link sells nothing.
+	TypeTopupOffer: true,
 }
 
 // handle is the per-row handler. It demarshals the payload based on
@@ -198,15 +204,23 @@ func (d *Dispatcher) handle(ctx context.Context, row OutboxRow) error {
 	// AFTER the customer paid erodes trust (found live, FLOW E
 	// 2026-07-19). FAIL-OPEN on checker errors: a DB blip must never eat
 	// customer mail; the pre-gate behavior (send) is the fallback.
-	if d.settled != nil && actionRequiredTypes[row.EmailType] && msg.InvoiceNumber != "" {
+	if d.settled != nil && actionRequiredTypes[row.EmailType] && (msg.InvoiceNumber != "" || msg.InvoiceID != "") {
 		livemodeCtx := postgres.WithLivemode(ctx, row.Livemode)
-		state, cerr := d.settled.InvoiceTerminalState(livemodeCtx, row.TenantID, msg.InvoiceNumber)
+		invoice := msg.InvoiceNumber
+		var state string
+		var cerr error
+		if invoice != "" {
+			state, cerr = d.settled.InvoiceTerminalState(livemodeCtx, row.TenantID, invoice)
+		} else {
+			invoice = msg.InvoiceID
+			state, cerr = d.settled.InvoiceTerminalStateByID(livemodeCtx, row.TenantID, invoice)
+		}
 		if cerr != nil {
 			slog.Warn("email staleness check failed — sending anyway (fail-open)",
 				"outbox_id", row.ID, "email_type", row.EmailType,
-				"invoice_number", msg.InvoiceNumber, "error", cerr)
+				"invoice", invoice, "error", cerr)
 		} else if state != "" && !escalationAnnounces(row.EmailType, state) && !setupLinkServesRecovery(row.EmailType, state) {
-			return &ObsoleteError{InvoiceNumber: msg.InvoiceNumber, State: state}
+			return &ObsoleteError{InvoiceNumber: invoice, State: state}
 		}
 	}
 

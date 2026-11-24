@@ -173,7 +173,8 @@ moment: 0 when credit or a credit note covered the rest.
 
 Someone recorded a payment made outside Hardcount, such as a bank transfer
 or a cheque. `recovered_from` is the status the invoice was paid from:
-`finalized` or `uncollectible`.
+`finalized`, `uncollectible`, or `draft` for a top-up, which the payment
+numbered and issued.
 
 **Also in `data`:** `recovered_from`.
 

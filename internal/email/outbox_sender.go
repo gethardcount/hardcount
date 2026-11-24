@@ -64,6 +64,10 @@ type outboxMessage struct {
 	Cc            []string `json:"cc,omitempty"`
 	CustomerName  string   `json:"customer_name,omitempty"`
 	InvoiceNumber string   `json:"invoice_number,omitempty"`
+	// InvoiceID names the invoice of a row that has no number: a top-up's
+	// offer, which the staleness gate drops once the top-up is paid or
+	// withdrawn.
+	InvoiceID string `json:"invoice_id,omitempty"`
 	// CreditNoteNumber names the CN document on TypeCreditNote rows
 	// (InvoiceNumber then carries the APPLIED invoice for the body copy).
 	CreditNoteNumber string `json:"credit_note_number,omitempty"`
@@ -311,8 +315,9 @@ func (s *OutboxSender) SendInvoice(ctx context.Context, tenantID, to string, cc 
 // SendTopupOffer enqueues the link to buy prepaid credit on an unpaid top-up.
 // It carries no PDF: a top-up has no document until it is paid. Satisfies
 // invoice.EmailSender.
-func (s *OutboxSender) SendTopupOffer(ctx context.Context, tenantID, to string, cc []string, customerName string, payCents int64, credit domain.TopupCredit, currency, publicToken string) error {
+func (s *OutboxSender) SendTopupOffer(ctx context.Context, tenantID, invoiceID, to string, cc []string, customerName string, payCents int64, credit domain.TopupCredit, currency, publicToken string) error {
 	return s.enqueue(ctx, tenantID, TypeTopupOffer, outboxMessage{
+		InvoiceID:       invoiceID,
 		To:              to,
 		Cc:              cc,
 		CustomerName:    customerName,

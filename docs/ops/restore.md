@@ -296,11 +296,15 @@ Do this for each line you copied, at step 2 of [Redo the changes made after the 
 
 ### Payments whose invoice the restore lost
 
-Each line names a payment Stripe took after the backup whose invoice the restore lost (`not in the database`) or left as a draft (`still a draft`). When billing resumes, it builds that invoice again, or finalizes the draft, and charges the card a second time, unless the money is already on the customer's balance.
+Each line names a payment Stripe took after the backup whose invoice the restore lost (`not in the database`) or left as a draft (`still a draft`). When billing resumes, it builds a lost subscription invoice again, or finalizes a draft one, and charges the card a second time, unless the money is already on the customer's balance.
+
+A top-up (an invoice that sells prepaid credit) is different. One the restore kept is not listed: the catch-up applies its payment, which issues it and grants its credit. Its payment is listed only when the restore lost the top-up itself, made after the backup. Billing never builds a top-up again, so nothing charges that customer a second time.
 
 1. **Find what is left of the payment.** Open it in the Stripe Dashboard (search for its `pi_…`). What is left is its amount less its refunds. Nothing is left while a dispute on it is open, or after you lost one.
 2. **Make sure the customer exists.** The line names the Hardcount customer, `hc_cus_…`. If the restore lost the customer too, create it again first, as your app or team did after the backup. Its saved card stays on the old Stripe customer: send it a new card link with **Send setup link**.
 3. **Keep the money as credit,** if you did not refund it before you acknowledged it. Grant the customer credit for what is left, in the payment's currency, with the payment's `pi_…` in the description: **Grant credits** on the customer's page, or `POST /v1/credits/grant` ([Adding credit](../concepts/credits.md#adding-credit)). Hardcount uses credit before it charges a card, so the invoice billing builds again is paid from it. If you refunded it, billing charges that invoice as usual.
+
+   For a lost top-up (its payment's description in Stripe reads `Prepaid credit`), grant the credit the top-up sold, as your app or team made it, which can be more than the amount paid, and with the expiry it sold. If part of the payment was refunded, grant the same share less.
 
 A refund event of a listed payment that reaches Hardcount after you acknowledged it finds no invoice. Stripe sends it again for up to three days, and the logs show `webhook processing failed` with `no invoice holds it yet`. For a later update of a refund held with the payment, that is expected, and safe to ignore.
 

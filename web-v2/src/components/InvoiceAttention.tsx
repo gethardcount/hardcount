@@ -16,7 +16,7 @@ import { attentionReasonLabel, supportCodeLine } from '@/lib/attentionLabels'
 import { messageLines, stripePaymentUrl } from '@/lib/invoiceNotice'
 import { useAuth } from '@/contexts/AuthContext'
 import { Button } from '@/components/ui/button'
-import { invoiceDueCents } from '@/lib/invoiceTerminal'
+import { invoiceDueCents, openForPayment } from '@/lib/invoiceTerminal'
 
 // InvoiceAttention is the unified "this invoice needs operator
 // attention" notice, drawn with the shared Callout. Reads server-derived
@@ -378,7 +378,9 @@ function UpdatePaymentMethodButton({ variant, display, invoice }: { variant: 'de
         onOpenChange={setOpen}
         customerId={invoice.customer_id}
         customerEmail={customer?.email}
-        invoiceContext={{ invoiceNumber: invoiceLabel(invoice), amountDueLabel }}
+        // A top-up is not collected automatically once a card is added: the
+        // invoice text would promise that, so its email is the plain one.
+        invoiceContext={invoice.status === 'draft' && openForPayment(invoice) ? undefined : { invoiceNumber: invoiceLabel(invoice), amountDueLabel }}
       />
     </>
   )

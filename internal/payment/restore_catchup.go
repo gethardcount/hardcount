@@ -591,7 +591,8 @@ func (c *CatchUp) recordHandled(ctx context.Context, acct tenantstripe.Account, 
 // lostPayment returns the payment of a payment_intent.succeeded event when
 // its invoice is missing or still a draft, and nil when HandleWebhook can
 // apply it: an invoice already holds the payment, or its
-// hardcount_invoice_id names an invoice past draft.
+// hardcount_invoice_id names an invoice past draft or an unpaid top-up, which
+// the payment issues.
 func (c *CatchUp) lostPayment(ctx context.Context, tenantID string, event domain.StripeWebhookEvent) (*LostPayment, error) {
 	_, err := c.stripe.invoices.GetByStripePaymentIntentID(ctx, tenantID, event.PaymentIntentID)
 	if err == nil || event.InvoiceID == "" {
@@ -606,7 +607,7 @@ func (c *CatchUp) lostPayment(ctx context.Context, tenantID string, event domain
 	case errors.Is(err, errs.ErrNotFound):
 	case err != nil:
 		return nil, fmt.Errorf("read invoice %s: %w", event.InvoiceID, err)
-	case inv.Status == domain.InvoiceDraft:
+	case inv.Status == domain.InvoiceDraft && !inv.UnpaidTopup():
 		draft = true
 	default:
 		return nil, nil

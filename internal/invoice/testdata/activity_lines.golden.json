@@ -209,26 +209,18 @@
           {
             "text": "Prepaid credit"
           }
-        ],
-        [
-          {
-            "link": {
-              "kind": "subscription",
-              "id": "hc_sub_1",
-              "label": "Starter"
-            }
-          }
         ]
       ],
       "actor": {
-        "kind": "automatic"
+        "kind": "person",
+        "name": "alice@example.com"
       },
       "tone": "neutral",
       "occurred_at": "2027-02-01T04:30:00Z"
     },
     "text": [
       "Invoice created",
-      "meta: Prepaid credit · Starter · Automatic",
+      "meta: Prepaid credit · by alice@example.com",
       "tone: neutral"
     ]
   },

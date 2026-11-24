@@ -19426,8 +19426,12 @@ paths:
           description: |
             Nothing was sent. Codes: `invoice_not_sendable` (the invoice
             is a draft, not issued yet, or voided), `email_not_configured`
-            (this server has no SMTP set up), or `payment_in_flight` /
-            `payment_unidentifiable` (a charge on the invoice is unresolved).
+            (this server has no SMTP set up), `payment_in_flight` /
+            `payment_unidentifiable` (a charge on the invoice is unresolved),
+            or `invalid_state` for an unpaid top-up whose pay link can't
+            work: this server has no `HOSTED_INVOICE_BASE_URL`, the
+            top-up's link token can't be read, or Stripe isn't connected in
+            this mode. The message names which.
           content:
             application/json:
               schema:
@@ -21801,7 +21805,8 @@ paths:
           issues it.
         - Moves the invoice to `finalized`, copies the customer and company
           details onto it (`bill_to_snapshot`, `supplier_snapshot`,
-          `footer`), issues any credit note held on the draft, creates the
+          `footer`), grants the credit of a prepaid commit line, issues any
+          credit note held on the draft, creates the
           hosted-page `public_token`, and records the tax with Stripe Tax
           when that is the provider.
         - Sends the `invoice.finalized` webhook event. Its

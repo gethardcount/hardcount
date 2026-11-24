@@ -145,7 +145,7 @@ type EmailSender interface {
 	SendInvoice(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, totalCents int64, currency string, pdfBytes []byte, publicToken string, writtenOff bool) error
 	// SendTopupOffer sends an unpaid top-up's link: "Buy prepaid credit".
 	// payCents is what the customer pays, credit what they get.
-	SendTopupOffer(ctx context.Context, tenantID, to string, cc []string, customerName string, payCents int64, credit domain.TopupCredit, currency, publicToken string) error
+	SendTopupOffer(ctx context.Context, tenantID, invoiceID, to string, cc []string, customerName string, payCents int64, credit domain.TopupCredit, currency, publicToken string) error
 }
 
 // EmailEventLister surfaces customer-notification email rows
@@ -779,7 +779,9 @@ func (h *Handler) rotatePublicToken(w http.ResponseWriter, r *http.Request) {
 		respond.FromError(w, r, err, "invoice")
 		return
 	}
-	if inv.Status == domain.InvoiceDraft {
+	// An unpaid top-up has its link from create, and a leaked one must be
+	// rotatable.
+	if inv.Status == domain.InvoiceDraft && !inv.UnpaidTopup() {
 		respond.Error(w, r, http.StatusUnprocessableEntity, "invalid_state",
 			"draft invoices do not have a public token — finalize first")
 		return
