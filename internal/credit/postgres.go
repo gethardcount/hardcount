@@ -1396,7 +1396,7 @@ func (s *PostgresStore) GetSpendableBalance(ctx context.Context, tenantID, custo
 // ListBalances returns one page of the rows, one per (customer, currency)
 // the tenant's ledger holds (ADR-129), largest balance first, and how many
 // rows match. filter "" lists every row; otherwise only the rows
-// domain.CreditBalanceFilterSQL picks.
+// balanceFilterSQL picks.
 func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string, filter domain.CreditBalanceFilter, limit, offset int) ([]domain.CreditBalance, int, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -1404,10 +1404,7 @@ func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string, filte
 	}
 	defer postgres.Rollback(tx)
 
-	having := ""
-	if p := domain.CreditBalanceFilterSQL(filter); p != "" {
-		having = " HAVING " + p
-	}
+	having := balanceFilterSQL(filter)
 
 	var total int
 	if err := tx.QueryRowContext(ctx, `
@@ -1421,7 +1418,7 @@ func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string, filte
 		SELECT
 			customer_id,
 			currency,
-			`+domain.CreditBalanceSQL+` AS balance_cents,
+			SUM(amount_cents) AS balance_cents,
 			`+balanceGrantedUsedColumns+`,
 			`+balanceWriteOffColumns+`
 		FROM customer_credit_ledger
@@ -1444,6 +1441,26 @@ func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string, filte
 		balances = append(balances, b)
 	}
 	return balances, total, rows.Err()
+}
+
+// balanceFilterSQL is the HAVING clause for f over the ledger grouped by
+// customer and currency, or "" for no filter. A filter lists the balances
+// that need the operator, so it leaves out archived customers. The low
+// threshold is one number, read in each currency's own minor unit; while it
+// is unset the comparison is with NULL and no balance is low.
+func balanceFilterSQL(f domain.CreditBalanceFilter) string {
+	const activeCustomer = `EXISTS (
+		SELECT 1 FROM customers c
+		WHERE c.id = customer_credit_ledger.customer_id AND c.status = 'active')`
+	switch f {
+	case domain.CreditBalanceOut:
+		return ` HAVING SUM(amount_cents) <= 0 AND ` + activeCustomer
+	case domain.CreditBalanceLow:
+		return ` HAVING SUM(amount_cents) > 0 AND SUM(amount_cents) < (
+			SELECT credit_balance_low_threshold_cents FROM tenant_settings
+			WHERE tenant_id = $1) AND ` + activeCustomer
+	}
+	return ""
 }
 
 // ListExpiredGrants lists the grants past their expiry, for the cron path.

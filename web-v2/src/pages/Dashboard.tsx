@@ -84,18 +84,20 @@ export default function DashboardPage() {
 
   // Needs attention: each count is the total of the list its line opens
   // (lib/homeAttention), so the line and the list never disagree.
+  const { data: outOfCredit } = useListTotal('outOfCredit', () => api.listBalanceTotal(ATTENTION_LISTS.outOfCredit.query))
+  const { data: lowOnCredit } = useListTotal('lowOnCredit', () => api.listBalanceTotal(ATTENTION_LISTS.lowOnCredit.query))
   const { data: failedOpen } = useListTotal('failed', () => api.listInvoices(`${ATTENTION_LISTS.failed.query}&limit=1`))
   const { data: retrying } = useListTotal('retrying', () => api.listDunningRuns(`${ATTENTION_LISTS.retrying.query}&limit=1`))
   const { data: openTotal } = useListTotal('open', () => api.listInvoices(`${ATTENTION_LISTS.open.query}&limit=1`))
   const alerts = useMemo(() => homeAttentionLines({
-    outOfCredit: overview?.customers_out_of_credit,
-    lowOnCredit: overview?.customers_low_on_credit,
+    outOfCredit,
+    lowOnCredit,
     failed: failedOpen,
     retrying,
     open: openTotal,
     refunds: overview?.refunds_needing_attention,
     outstanding: overview?.outstanding_by_currency,
-  }), [failedOpen, retrying, openTotal, overview])
+  }), [outOfCredit, lowOnCredit, failedOpen, retrying, openTotal, overview])
 
   return (
     <>
@@ -183,7 +185,7 @@ export default function DashboardPage() {
             />
           </div>
 
-          {/* Revenue chart */}
+          {/* What customers paid, per day or month */}
           {chartLoading ? (
             <div className="mt-6"><ChartCardSkeleton height={220} /></div>
           ) : (
@@ -191,12 +193,12 @@ export default function DashboardPage() {
               <CardContent className="p-5">
                 <div className="flex items-center justify-between mb-4">
                   <div>
-                    <p className="text-sm font-medium text-foreground">Revenue</p>
+                    <p className="text-sm font-medium text-foreground">Paid</p>
                     <p className="text-xs text-muted-foreground mt-0.5">Last {PERIOD_LABELS[period].toLowerCase()}</p>
                   </div>
                 </div>
                 {chartData.length > 0 ? (
-                  <div role="img" aria-label={`Revenue trend over the last ${PERIOD_LABELS[period].toLowerCase()}`}>
+                  <div role="img" aria-label={`Paid over the last ${PERIOD_LABELS[period].toLowerCase()}`}>
                   <ResponsiveContainer width="100%" height={220}>
                     <AreaChart data={chartSeries} margin={{ top: 5, right: 5, left: 5, bottom: 5 }}>
                       <defs>
@@ -221,7 +223,7 @@ export default function DashboardPage() {
                         width={55}
                       />
                       <Tooltip
-                        formatter={(value) => [formatCents(Number(value), overview.currency), 'Revenue']}
+                        formatter={(value) => [formatCents(Number(value), overview.currency), 'Paid']}
                         labelFormatter={(label) => revenueBucketLabel(String(label))}
                         contentStyle={tooltipStyle(theme)}
                         itemStyle={{ color: theme.tooltipText }}

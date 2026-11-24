@@ -27,14 +27,12 @@ import type { AnalyticsPeriod } from './analyticsPeriod';
  */
 export interface AnalyticsOverview {
   period: AnalyticsPeriod;
-  /** The account's default currency (USD when none is set). `revenue` and `outstanding_ar` use it. Each `..._by_currency` list carries its own currency on each entry, with this one first. */
+  /** The account's default currency (USD when none is set). `revenue` and `paid_invoices` use it. Each `..._by_currency` list carries its own currency on each entry, with this one first. */
   currency: string;
   /** What customers paid for the invoices paid in the window, by card or offline. Credit applied to an invoice is not counted again; credit bought ahead counts when it was paid. A credit note that lowered an invoice before it was paid is not counted. */
   revenue: number;
   /** `revenue` for the previous window. */
   revenue_prev: number;
-  /** Amount due on finalized invoices whose payment has not succeeded, in `currency` only. */
-  outstanding_ar: number;
   /**
      * Amount due on the invoices `open_invoices` counts, one entry per
      * currency. `currency` comes first, then the largest amount. Empty
@@ -52,21 +50,12 @@ export interface AnalyticsOverview {
      */
   credit_sold_by_currency: AnalyticsOverviewCreditSoldByCurrencyItem[];
   /**
-     * Usage lines, before tax, on the invoices issued in the window
-     * and not voided, one entry per currency, `currency` first, then
+     * Usage lines on the invoices issued in the window and not voided, one entry per currency, `currency` first, then
      * largest. A currency with no usage billed is left out.
      */
   usage_billed_by_currency: AnalyticsOverviewUsageBilledByCurrencyItem[];
-  /** Customer records with status `active`. */
-  active_customers: number;
-  /** Customers created in the window. */
-  new_customers: number;
   /** Invoices in `currency` paid in the window. */
   paid_invoices: number;
-  /** Open invoices created in the window whose payment failed. A voided or written-off invoice is not counted. All currencies. */
-  failed_payments: number;
-  /** `failed_payments` for the previous window. */
-  failed_payments_prev: number;
   /** Finalized invoices whose payment has not succeeded. All currencies. */
   open_invoices: number;
   /** Dunning runs (automatic payment retries) still in progress. */
@@ -80,17 +69,4 @@ export interface AnalyticsOverview {
   refunds_needing_attention: number;
   /** Usage events with a timestamp in the window. */
   usage_events: number;
-  /**
-     * Customers with a credit balance at zero or less in at least one
-     * currency they have had credit in: the customers in
-     * `GET /v1/credits/balances?balance=out`, each counted once.
-     */
-  customers_out_of_credit: number;
-  /**
-     * Customers with a credit balance above zero and below the
-     * account's `credit_balance_low_threshold_cents` in at least one
-     * currency: the customers in `GET /v1/credits/balances?balance=low`,
-     * each counted once. 0 when no threshold is set.
-     */
-  customers_low_on_credit: number;
 }

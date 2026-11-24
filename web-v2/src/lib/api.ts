@@ -374,6 +374,9 @@ export const api = {
   // the account's low-balance setting).
   listBalances: (balance?: ListCreditBalancesBalance) =>
     listAll<CreditBalance>('/credits/balances', balance ? { balance } : undefined),
+  // How many balances a filter picks, without their rows.
+  listBalanceTotal: (query: string) =>
+    apiRequest<{ data: CreditBalance[]; total: number }>('GET', `/credits/balances?${query}&limit=1`),
   // One balance per currency the customer holds credit in (ADR-129).
   getBalance: (customerId: string) =>
     apiRequest<{ data: CreditBalance[] }>('GET', `/credits/balance/${customerId}`),
@@ -1685,13 +1688,11 @@ export interface WebhookDeliveriesResponse {
 // in cents.
 export interface AnalyticsOverview {
   period: string
-  // The tenant's default currency; revenue and outstanding_ar are in it.
+  // The tenant's default currency; revenue and paid_invoices are in it.
   currency: string
   revenue: number
   revenue_prev: number
-  outstanding_ar: number
   // Amount due on the open invoices, one row per currency (default first).
-  // outstanding_ar alone is the default currency only.
   outstanding_by_currency: { currency: string; amount_cents: number }[]
   // Credit customers hold, one row per currency (default first).
   credit_balance_by_currency: { currency: string; amount_cents: number }[]
@@ -1699,20 +1700,11 @@ export interface AnalyticsOverview {
   credit_sold_by_currency: { currency: string; amount_cents: number }[]
   // Usage lines on the invoices issued in the period, per currency.
   usage_billed_by_currency: { currency: string; amount_cents: number }[]
-  // Customer records with status active.
-  active_customers: number
-  new_customers: number
   paid_invoices: number
-  failed_payments: number
-  failed_payments_prev: number
   open_invoices: number
   dunning_active: number
   refunds_needing_attention: number
   usage_events: number
-  // Customers with a balance the credit list's balance=out or balance=low
-  // filter picks, each counted once.
-  customers_out_of_credit: number
-  customers_low_on_credit: number
 }
 
 export interface RevenueDataPoint {

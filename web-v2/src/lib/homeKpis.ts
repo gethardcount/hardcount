@@ -21,10 +21,10 @@ export const CREDIT_SOLD_DEFINITION =
 export const PAID_DEFINITION =
   'What customers paid for invoices paid in this period, by card or offline. Credit is counted once, when it was bought.'
 
-// usageBilledByCurrency (internal/analytics/overview.go): usage lines,
-// before tax, on invoices issued in the period and not voided.
+// usageBilledByCurrency (internal/analytics/overview.go): usage lines on
+// invoices issued in the period and not voided.
 export const USAGE_BILLED_DEFINITION =
-  'Usage on invoices issued in this period, before tax. Void invoices are not counted.'
+  'Usage on invoices issued in this period. Void invoices are not counted.'
 
 // A card's figure in every currency it has, never one sum across
 // currencies. With nothing in any currency it is zero in the workspace

@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { cn } from '@/lib/utils'
 
 // KpiStrip is a single row of headline numbers at the top of a page
-// (MRR, outstanding, credit balance, next invoice). Each item can link to
+// (outstanding, credit balance, next invoice). Each item can link to
 // the list behind it. Tone colours the value only for states that need
 // attention (danger for money owed past due, warning for at risk).
 export interface Kpi {

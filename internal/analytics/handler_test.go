@@ -73,11 +73,10 @@ func TestRoutes_MethodNotAllowed(t *testing.T) {
 
 func TestOverviewResponse_JSONShape(t *testing.T) {
 	resp := OverviewResponse{
-		Period:        "30d",
-		Currency:      "USD",
-		Revenue:       500_000_00,
-		RevenuePrev:   450_000_00,
-		OutstandingAR: 15_000_00,
+		Period:      "30d",
+		Currency:    "USD",
+		Revenue:     500_000_00,
+		RevenuePrev: 450_000_00,
 		OutstandingByCurrency: []CurrencyAmount{
 			{Currency: "USD", AmountCents: 15_000_00},
 		},
@@ -86,15 +85,10 @@ func TestOverviewResponse_JSONShape(t *testing.T) {
 		},
 		CreditSoldByCurrency:  []CurrencyAmount{{Currency: "USD", AmountCents: 10_000_00}},
 		UsageBilledByCurrency: []CurrencyAmount{{Currency: "USD", AmountCents: 2_000_00}},
-		ActiveCustomers:       42,
-		NewCustomers:          5,
 		PaidInvoices:          156,
-		FailedPayments:        3,
 		OpenInvoices:          12,
 		DunningActive:         2,
 		UsageEvents:           12_345,
-		CustomersOutOfCredit:  1,
-		CustomersLowOnCredit:  2,
 	}
 
 	data, err := json.Marshal(resp)
@@ -109,12 +103,10 @@ func TestOverviewResponse_JSONShape(t *testing.T) {
 
 	expected := []string{
 		"period", "currency",
-		"revenue", "revenue_prev", "outstanding_ar", "outstanding_by_currency", "credit_balance_by_currency",
+		"revenue", "revenue_prev", "outstanding_by_currency", "credit_balance_by_currency",
 		"credit_sold_by_currency", "usage_billed_by_currency",
-		"active_customers", "new_customers",
-		"paid_invoices", "failed_payments", "failed_payments_prev", "open_invoices",
+		"paid_invoices", "open_invoices",
 		"dunning_active", "refunds_needing_attention", "usage_events",
-		"customers_out_of_credit", "customers_low_on_credit",
 	}
 	for _, field := range expected {
 		if _, ok := m[field]; !ok {

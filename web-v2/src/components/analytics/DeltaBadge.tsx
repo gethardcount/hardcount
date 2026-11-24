@@ -4,18 +4,12 @@ import { cn } from '@/lib/utils'
 interface DeltaBadgeProps {
   current: number
   previous: number
-  // When true, a decrease is "good" (e.g. failed payments, churn). Flips color.
-  inverse?: boolean
-  // Hide when both values are zero (avoids "—" clutter on empty accounts).
-  hideIfZero?: boolean
   className?: string
 }
 
 // DeltaBadge renders a compact percent-change indicator vs. a prior period.
 // Accessible label includes direction and magnitude; color is supplementary.
-export function DeltaBadge({ current, previous, inverse, hideIfZero, className }: DeltaBadgeProps) {
-  if (hideIfZero && current === 0 && previous === 0) return null
-
+export function DeltaBadge({ current, previous, className }: DeltaBadgeProps) {
   // Choose an appropriate sentinel when the prior period was zero.
   let pct: number | null = null
   if (previous === 0 && current === 0) pct = 0
@@ -23,18 +17,11 @@ export function DeltaBadge({ current, previous, inverse, hideIfZero, className }
   else pct = ((current - previous) / Math.abs(previous)) * 100
 
   const direction = pct === null ? 'n/a' : pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat'
-  const good = inverse ? direction === 'down' : direction === 'up'
-  const bad = inverse ? direction === 'up' : direction === 'down'
-
-  const color = pct === null
-    ? 'text-muted-foreground'
-    : direction === 'flat'
-      ? 'text-muted-foreground'
-      : good
-        ? 'text-success-foreground'
-        : bad
-          ? 'text-destructive'
-          : 'text-muted-foreground'
+  const color = direction === 'up'
+    ? 'text-success-foreground'
+    : direction === 'down'
+      ? 'text-destructive'
+      : 'text-muted-foreground'
 
   const label = pct === null
     ? 'no prior data'

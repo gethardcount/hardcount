@@ -14078,7 +14078,7 @@ export const getGetAnalyticsOverviewUrl = (params?: GetAnalyticsOverviewParams,)
  *
  * Money is in the minor unit (cents for USD) of the account's default
  * currency, named in `currency` (USD when none is set). `revenue` and
- * `outstanding_ar` leave out invoices in other currencies. Each
+ * `paid_invoices` leave out invoices in other currencies. Each
  * `..._by_currency` list names every currency, and amounts in two
  * currencies are never added together.
  * @summary Get headline billing metrics

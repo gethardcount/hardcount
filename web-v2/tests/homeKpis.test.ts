@@ -13,7 +13,7 @@ test('each card says what it counts, in the words the server computes it with', 
   assert.equal(CREDIT_SOLD_DEFINITION, 'Credit bought with top-ups paid in this period. A discounted top-up counts the credit it gave, not its price.')
   // Credit applied to an invoice is not counted again as a payment.
   assert.match(PAID_DEFINITION, /Credit is counted once, when it was bought\.$/)
-  assert.equal(USAGE_BILLED_DEFINITION, 'Usage on invoices issued in this period, before tax. Void invoices are not counted.')
+  assert.equal(USAGE_BILLED_DEFINITION, 'Usage on invoices issued in this period. Void invoices are not counted.')
 })
 
 test('no definition uses the subscription words Home no longer shows', () => {

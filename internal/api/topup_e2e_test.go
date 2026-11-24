@@ -111,10 +111,11 @@ func TestTopup_UnpaidIsOutOfHomeOpenListOutstandingAndDunning(t *testing.T) {
 	}
 
 	ov := e.call(t, "GET", "/v1/analytics/overview?period=30d", nil).want(t, 200, "overview").body
-	for _, figure := range []string{"outstanding_ar", "open_invoices", "failed_payments"} {
-		if got := flowInt(ov, figure); got != 0 {
-			t.Errorf("Home %s = %d, want 0", figure, got)
-		}
+	if got := flowInt(ov, "open_invoices"); got != 0 {
+		t.Errorf("Home open_invoices = %d, want 0", got)
+	}
+	if owed := flowList(ov, "outstanding_by_currency"); len(owed) != 0 {
+		t.Errorf("Home outstanding_by_currency = %v, want none", owed)
 	}
 	if open := flowList(e.call(t, "GET", "/v1/invoices?status=finalized", nil).want(t, 200, "open list").body, "data"); len(open) != 0 {
 		t.Errorf("open list has %d invoices, want 0", len(open))

@@ -20,7 +20,9 @@ import (
 //
 // Seeded world: out (USD 0 after a grant and a deduction), minus (USD -200),
 // low (USD 400), twice (USD 300 and EUR 5000), above (USD 1000, the
-// threshold).
+// threshold), and two archived customers, gone (USD 0) and goneLow (USD 100):
+// a filter lists the balances that need the operator, so it leaves them out,
+// and the unfiltered list keeps them.
 func TestListBalances_BalanceFilter(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -55,6 +57,21 @@ func TestListBalances_BalanceFilter(t *testing.T) {
 	ledger(twice, "EUR", 5000)
 	above := seedCustomer(t, db, ctx, tenantID, "cus_bf_above")
 	ledger(above, "USD", 1000)
+	gone := seedCustomer(t, db, ctx, tenantID, "cus_bf_gone")
+	ledger(gone, "USD", 500)
+	ledger(gone, "USD", -500)
+	goneLow := seedCustomer(t, db, ctx, tenantID, "cus_bf_gone_low")
+	ledger(goneLow, "USD", 100)
+	archive, err := db.BeginTx(ctx, postgres.TxBypass, "")
+	if err != nil {
+		t.Fatalf("begin bypass: %v", err)
+	}
+	if _, err := archive.Exec(`UPDATE customers SET status = 'archived' WHERE id IN ($1, $2)`, gone, goneLow); err != nil {
+		t.Fatalf("archive: %v", err)
+	}
+	if err := archive.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
 
 	type page struct {
 		Data  []domain.CreditBalance `json:"data"`
@@ -81,13 +98,13 @@ func TestListBalances_BalanceFilter(t *testing.T) {
 		return m
 	}
 
-	if code, p := get(""); code != http.StatusOK || p.Total != 6 || len(p.Data) != 6 {
-		t.Fatalf("no filter: %d, total %d, %d rows; want 200 and every one of 6 rows", code, p.Total, len(p.Data))
+	if code, p := get(""); code != http.StatusOK || p.Total != 8 || len(p.Data) != 8 {
+		t.Fatalf("no filter: %d, total %d, %d rows; want 200 and every one of 8 rows", code, p.Total, len(p.Data))
 	}
 
 	code, p := get("?balance=out&limit=1")
 	if code != http.StatusOK || p.Total != 2 || len(p.Data) != 1 {
-		t.Fatalf("balance=out&limit=1: %d, total %d, %d rows; want 200, total 2 (the filtered set), one row", code, p.Total, len(p.Data))
+		t.Fatalf("balance=out&limit=1: %d, total %d, %d rows; want 200, total 2 (the filtered set, without the archived customer), one row", code, p.Total, len(p.Data))
 	}
 	if _, p = get("?balance=out"); len(rows(p)) != 2 || rows(p)[out+"/USD"] != 0 || rows(p)[minus+"/USD"] != -200 {
 		t.Errorf("balance=out: %+v; want out's USD 0 and minus's USD -200", p.Data)
@@ -111,7 +128,7 @@ func TestListBalances_BalanceFilter(t *testing.T) {
 	}
 	if code, p = get("?balance=low"); code != http.StatusOK || p.Total != 2 || len(rows(p)) != 2 ||
 		rows(p)[low+"/USD"] != 400 || rows(p)[twice+"/USD"] != 300 {
-		t.Errorf("balance=low: %d, total %d, %+v; want low's USD 400 and twice's USD 300 (not EUR 5000, not 1000 at the threshold)", code, p.Total, p.Data)
+		t.Errorf("balance=low: %d, total %d, %+v; want low's USD 400 and twice's USD 300 (not EUR 5000, not 1000 at the threshold, not the archived customer)", code, p.Total, p.Data)
 	}
 
 	if code, _ = get("?balance=empty"); code != http.StatusUnprocessableEntity {

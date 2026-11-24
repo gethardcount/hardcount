@@ -1327,8 +1327,10 @@ test('each Home attention line counts the rows of the list it opens', async ({ p
     '/v1/invoices status=finalized payment_status=failed': 3,
     '/v1/dunning/runs state=active': 2,
     '/v1/invoices status=finalized': 5,
+    '/v1/credits/balances balance=out': 1,
+    '/v1/credits/balances balance=low': 2,
   }
-  await page.route(url => url.searchParams.get('limit') === '1' && (url.pathname === '/v1/invoices' || url.pathname === '/v1/dunning/runs'), route => {
+  await page.route(url => url.searchParams.get('limit') === '1' && ['/v1/invoices', '/v1/dunning/runs', '/v1/credits/balances'].includes(url.pathname), route => {
     const url = new URL(route.request().url())
     const filters = [...url.searchParams].filter(([k]) => k !== 'limit').map(([k, v]) => `${k}=${v}`).join(' ')
     const n = totals[`${url.pathname} ${filters}`]
@@ -1336,13 +1338,13 @@ test('each Home attention line counts the rows of the list it opens', async ({ p
   })
   await page.route(url => url.pathname === '/v1/analytics/overview', async route => {
     const answer = await route.fetch()
-    await route.fulfill({ response: answer, json: { ...(await answer.json()), open_invoices: 0, outstanding_by_currency: [], customers_out_of_credit: 1, customers_low_on_credit: 2 } })
+    await route.fulfill({ response: answer, json: { ...(await answer.json()), open_invoices: 0, outstanding_by_currency: [] } })
   })
   await page.goto('/')
   const lines = page.getByRole('region', { name: 'Attention required' }).getByRole('link')
-  await expect(lines.first()).toHaveText(/1 customer is out of credit/)
-  await expect(lines.filter({ hasText: '1 customer is out of credit' })).toHaveAttribute('href', '/credits?balance=out')
-  await expect(lines.filter({ hasText: '2 customers are low on credit' })).toHaveAttribute('href', '/credits?balance=low')
+  await expect(lines.first()).toHaveText(/1 credit balance has run out/)
+  await expect(lines.filter({ hasText: '1 credit balance has run out' })).toHaveAttribute('href', '/credits?balance=out')
+  await expect(lines.filter({ hasText: '2 credit balances are low' })).toHaveAttribute('href', '/credits?balance=low')
   await expect(lines.filter({ hasText: '3 open invoices with a failed payment' })).toHaveAttribute('href', '/invoices?status=finalized&payment_status=failed')
   await expect(lines.filter({ hasText: '2 invoices in payment retry' })).toHaveAttribute('href', '/dunning?state=active')
   await expect(lines.filter({ hasText: /^5 open invoices(?! with)/ })).toHaveAttribute('href', '/invoices?status=finalized')
@@ -1354,7 +1356,7 @@ test('each Home attention line counts the rows of the list it opens', async ({ p
 
   // The credit line opens the Credit page with the filter on, and it can be cleared.
   await page.goto('/')
-  await lines.filter({ hasText: 'out of credit' }).click()
+  await lines.filter({ hasText: 'run out' }).click()
   await expect(page).toHaveURL(/\/credits\?balance=out$/)
   await expect(page.getByRole('main').getByText(/^Out of credit/)).toBeVisible()
   await page.getByRole('button', { name: 'Clear balance filter' }).click()

@@ -5286,22 +5286,15 @@ components:
         - currency
         - revenue
         - revenue_prev
-        - outstanding_ar
         - outstanding_by_currency
         - credit_balance_by_currency
         - credit_sold_by_currency
         - usage_billed_by_currency
-        - active_customers
-        - new_customers
         - paid_invoices
-        - failed_payments
-        - failed_payments_prev
         - open_invoices
         - dunning_active
         - refunds_needing_attention
         - usage_events
-        - customers_out_of_credit
-        - customers_low_on_credit
       description: |
         The dashboard's headline metrics, from `GET /v1/analytics/overview`.
         "The window" is the requested period, ending now. "The previous
@@ -5314,7 +5307,7 @@ components:
           $ref: "#/components/schemas/AnalyticsPeriod"
         currency:
           type: string
-          description: The account's default currency (USD when none is set). `revenue` and `outstanding_ar` use it. Each `..._by_currency` list carries its own currency on each entry, with this one first.
+          description: The account's default currency (USD when none is set). `revenue` and `paid_invoices` use it. Each `..._by_currency` list carries its own currency on each entry, with this one first.
         revenue:
           type: integer
           format: int64
@@ -5323,10 +5316,6 @@ components:
           type: integer
           format: int64
           description: "`revenue` for the previous window."
-        outstanding_ar:
-          type: integer
-          format: int64
-          description: Amount due on finalized invoices whose payment has not succeeded, in `currency` only.
         outstanding_by_currency:
           type: array
           description: |
@@ -5385,8 +5374,7 @@ components:
         usage_billed_by_currency:
           type: array
           description: |
-            Usage lines, before tax, on the invoices issued in the window
-            and not voided, one entry per currency, `currency` first, then
+            Usage lines on the invoices issued in the window and not voided, one entry per currency, `currency` first, then
             largest. A currency with no usage billed is left out.
           items:
             type: object
@@ -5399,21 +5387,9 @@ components:
                 type: integer
                 format: int64
                 description: Usage billed in this currency, in its minor unit (cents for USD).
-        active_customers:
-          type: integer
-          description: Customer records with status `active`.
-        new_customers:
-          type: integer
-          description: Customers created in the window.
         paid_invoices:
           type: integer
           description: Invoices in `currency` paid in the window.
-        failed_payments:
-          type: integer
-          description: Open invoices created in the window whose payment failed. A voided or written-off invoice is not counted. All currencies.
-        failed_payments_prev:
-          type: integer
-          description: "`failed_payments` for the previous window."
         open_invoices:
           type: integer
           description: Finalized invoices whose payment has not succeeded. All currencies.
@@ -5431,25 +5407,11 @@ components:
           type: integer
           format: int64
           description: Usage events with a timestamp in the window.
-        customers_out_of_credit:
-          type: integer
-          description: |
-            Customers with a credit balance at zero or less in at least one
-            currency they have had credit in: the customers in
-            `GET /v1/credits/balances?balance=out`, each counted once.
-        customers_low_on_credit:
-          type: integer
-          description: |
-            Customers with a credit balance above zero and below the
-            account's `credit_balance_low_threshold_cents` in at least one
-            currency: the customers in `GET /v1/credits/balances?balance=low`,
-            each counted once. 0 when no threshold is set.
       example:
         period: "30d"
         currency: USD
         revenue: 61850
         revenue_prev: 48200
-        outstanding_ar: 8650
         outstanding_by_currency:
           - currency: USD
             amount_cents: 8650
@@ -5462,17 +5424,11 @@ components:
         usage_billed_by_currency:
           - currency: USD
             amount_cents: 41850
-        active_customers: 6
-        new_customers: 1
         paid_invoices: 7
-        failed_payments: 1
-        failed_payments_prev: 0
         open_invoices: 1
         dunning_active: 1
         refunds_needing_attention: 0
         usage_events: 48210
-        customers_out_of_credit: 1
-        customers_low_on_credit: 2
 
     InvoiceLineItemInput:
       type: object
@@ -12994,10 +12950,11 @@ paths:
         - name: balance
           in: query
           description: |
-            Only the rows with this much left. `out`: a balance of zero or
-            less. `low`: above zero and below the account's
-            `credit_balance_low_threshold_cents`; with no threshold set, the
-            list is empty. Any other value is a 422 with `param: balance`.
+            Only the balances that need attention, of customers who are not
+            archived. `out`: a balance of zero or less. `low`: above zero and
+            below the account's `credit_balance_low_threshold_cents`; with no
+            threshold set, the list is empty. Any other value is a 422 with
+            `param: balance`.
           schema:
             type: string
             enum: [out, low]
@@ -25018,7 +24975,7 @@ paths:
 
         Money is in the minor unit (cents for USD) of the account's default
         currency, named in `currency` (USD when none is set). `revenue` and
-        `outstanding_ar` leave out invoices in other currencies. Each
+        `paid_invoices` leave out invoices in other currencies. Each
         `..._by_currency` list names every currency, and amounts in two
         currencies are never added together.
       parameters:
@@ -25039,7 +24996,6 @@ paths:
                 currency: USD
                 revenue: 61850
                 revenue_prev: 48200
-                outstanding_ar: 8650
                 outstanding_by_currency:
                   - currency: USD
                     amount_cents: 8650
@@ -25052,17 +25008,11 @@ paths:
                 usage_billed_by_currency:
                   - currency: USD
                     amount_cents: 41850
-                active_customers: 6
-                new_customers: 1
                 paid_invoices: 7
-                failed_payments: 1
-                failed_payments_prev: 0
                 open_invoices: 1
                 dunning_active: 1
                 refunds_needing_attention: 0
                 usage_events: 48210
-                customers_out_of_credit: 1
-                customers_low_on_credit: 2
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":

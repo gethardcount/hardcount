@@ -14,12 +14,12 @@ import (
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// P9 (audit High #13): the 0029 MRR-audit trigger predates 0102's soft
-// delete — removing an item became `UPDATE ... SET deleted_at`, which
-// emitted NO 'remove' row, so MRR contraction silently vanished from
-// the change log (the analytics source of truth), ongoing and
-// unbackfillable once the timing context is gone. Migration 0129
-// replaces the trigger function.
+// The trigger on subscription_items writes each change to
+// subscription_item_changes, the log a period's billing reads to bill each
+// part of the period at its own plan and quantity
+// (subscription.ListItemChangesInPeriod). Removing an item is a soft delete,
+// `UPDATE ... SET deleted_at`, and must write a 'remove' row like any other
+// change (migration 0129).
 //
 // Mutation-verify: re-apply the 0029 function body (the down migration)
 // — the soft-delete assertions fail.
@@ -151,14 +151,13 @@ func TestItemChangeTrigger_SoftDeleteEmitsRemove(t *testing.T) {
 	}
 	_ = tx3.Commit()
 	if rows := changeRows(); len(rows) != 2 {
-		t.Fatalf("after dead-row update: %d rows, want still 2 (dead rows don't move MRR)", len(rows))
+		t.Fatalf("after dead-row update: %d rows, want still 2 (a removed item's row changes nothing)", len(rows))
 	}
 
 	// Un-delete is REFUSED outright (ADR-101, migration 0159): no flow
 	// maintains billing_intervals for a resurrected item, so a manual
 	// resurrection would silently un-bill it once the interval reader cuts
-	// over. The 0129 behavior (emit 'add' so MRR reappearance is loud) is
-	// superseded by refusing the write entirely — louder still.
+	// over. The write is refused entirely.
 	tx4, _ := db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	defer postgres.Rollback(tx4)
 	_, err = tx4.ExecContext(ctx, `UPDATE subscription_items SET deleted_at = NULL, updated_at = $1 WHERE id = $2`, now, itemID)
@@ -170,8 +169,8 @@ func TestItemChangeTrigger_SoftDeleteEmitsRemove(t *testing.T) {
 	}
 }
 
-// TestP9Indexes: the tenant-wide time-window analytics query must not
-// seq-scan usage_events (0130), and the per-item change index exists
+// TestP9Indexes: the overview's count of a tenant's usage events in a time
+// window must not seq-scan usage_events (0130), and the per-item change index exists
 // (0131 — the table is too small in tests for a planner assertion).
 func TestP9Indexes(t *testing.T) {
 	db := testutil.SetupTestDB(t)

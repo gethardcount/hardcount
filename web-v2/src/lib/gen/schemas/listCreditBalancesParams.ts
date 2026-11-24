@@ -17,10 +17,11 @@ import type { OffsetParameter } from './offsetParameter';
 
 export type ListCreditBalancesParams = {
 /**
- * Only the rows with this much left. `out`: a balance of zero or
- * less. `low`: above zero and below the account's
- * `credit_balance_low_threshold_cents`; with no threshold set, the
- * list is empty. Any other value is a 422 with `param: balance`.
+ * Only the balances that need attention, of customers who are not
+ * archived. `out`: a balance of zero or less. `low`: above zero and
+ * below the account's `credit_balance_low_threshold_cents`; with no
+ * threshold set, the list is empty. Any other value is a 422 with
+ * `param: balance`.
  */
 balance?: ListCreditBalancesBalance;
 /**

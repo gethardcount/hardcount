@@ -87,7 +87,7 @@ test('outstanding names every currency it sums', () => {
 })
 
 test('outstanding in a non-default currency only is still shown, in that currency', () => {
-  // outstanding_ar (default currency only) was 0 here, so the row used to vanish.
+  // Nothing is owed in the default currency here; the row names the currency owed.
   assert.equal(
     outstandingText(1, [{ currency: 'EUR', amount_cents: 1000 }]),
     '1 open invoice · €10.00 outstanding',

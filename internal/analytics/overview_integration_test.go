@@ -143,12 +143,10 @@ func execBypass(t *testing.T, db *postgres.DB, q string, args ...any) {
 	}
 }
 
-// TestOverview_OutstandingByCurrency: the dashboard's "N open invoices · X
-// outstanding" row put a count over every currency next to a default-currency
-// sum, so a tenant owed €300 and $200 read "2 open invoices · $200.00
-// outstanding". outstanding_by_currency names every currency the open
-// invoices are owed in, default currency first; outstanding_ar keeps its
-// default-currency-only meaning for API callers.
+// TestOverview_OutstandingByCurrency: outstanding_by_currency names every
+// currency the open invoices are owed in, default currency first, so the
+// dashboard's "N open invoices · X outstanding" line never puts a count over
+// every currency next to one currency's sum.
 func TestOverview_OutstandingByCurrency(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -179,9 +177,6 @@ func TestOverview_OutstandingByCurrency(t *testing.T) {
 
 	if resp.OpenInvoices != 4 {
 		t.Errorf("open_invoices: got %d, want 4", resp.OpenInvoices)
-	}
-	if resp.OutstandingAR != 200_00 {
-		t.Errorf("outstanding_ar: got %d, want 20000 (default currency only)", resp.OutstandingAR)
 	}
 	want := []CurrencyAmount{
 		{Currency: "USD", AmountCents: 200_00},

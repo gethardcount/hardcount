@@ -20,21 +20,19 @@ import (
 type OverviewResponse struct {
 	Period string `json:"period"`
 
-	// Currency is the tenant's default currency. Revenue and OutstandingAR
-	// are scoped to it: invoices in other currencies are excluded rather
-	// than summed into a meaningless mixed-currency total. Each
-	// ..._by_currency list names every currency instead.
+	// Currency is the tenant's default currency. Revenue and PaidInvoices
+	// are scoped to it: invoices in other currencies are left out rather
+	// than added into a total that mixes currencies. Each ..._by_currency
+	// list names every currency instead.
 	Currency string `json:"currency"`
 
 	// Money (cents)
-	Revenue       int64 `json:"revenue"`
-	RevenuePrev   int64 `json:"revenue_prev"`
-	OutstandingAR int64 `json:"outstanding_ar"`
+	Revenue     int64 `json:"revenue"`
+	RevenuePrev int64 `json:"revenue_prev"`
 
 	// OutstandingByCurrency is the amount still due on the same open invoices
-	// OpenInvoices counts, one row per currency. OutstandingAR covers the
-	// default currency only, so on its own it under-reports a tenant that
-	// bills in more than one currency. Default currency first, then largest.
+	// OpenInvoices counts, one row per currency. Default currency first, then
+	// largest.
 	OutstandingByCurrency []CurrencyAmount `json:"outstanding_by_currency"`
 
 	// CreditBalanceByCurrency is the credit customers hold, one row per
@@ -49,25 +47,15 @@ type OverviewResponse struct {
 	CreditSoldByCurrency []CurrencyAmount `json:"credit_sold_by_currency"`
 
 	// UsageBilledByCurrency is the usage lines on the invoices issued in the
-	// period, per currency, before tax. Ordered like CreditBalanceByCurrency.
+	// period, per currency. Ordered like CreditBalanceByCurrency.
 	UsageBilledByCurrency []CurrencyAmount `json:"usage_billed_by_currency"`
 
 	// Counts
-	ActiveCustomers    int   `json:"active_customers"`
-	NewCustomers       int   `json:"new_customers"`
-	PaidInvoices       int   `json:"paid_invoices"`
-	FailedPayments     int   `json:"failed_payments"`
-	FailedPaymentsPrev int   `json:"failed_payments_prev"`
-	OpenInvoices       int   `json:"open_invoices"`
-	DunningActive      int   `json:"dunning_active"`
-	RefundsAttention   int   `json:"refunds_needing_attention"`
-	UsageEvents        int64 `json:"usage_events"`
-	// CustomersOutOfCredit and CustomersLowOnCredit count customers with at
-	// least one balance the credit balances list's balance=out or
-	// balance=low filter picks. A customer with balances in two currencies
-	// counts once.
-	CustomersOutOfCredit int `json:"customers_out_of_credit"`
-	CustomersLowOnCredit int `json:"customers_low_on_credit"`
+	PaidInvoices     int   `json:"paid_invoices"`
+	OpenInvoices     int   `json:"open_invoices"`
+	DunningActive    int   `json:"dunning_active"`
+	RefundsAttention int   `json:"refunds_needing_attention"`
+	UsageEvents      int64 `json:"usage_events"`
 }
 
 // CurrencyAmount is an amount in one currency's minor units.
@@ -91,10 +79,9 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 
 	resp := OverviewResponse{Period: period.Key}
 
-	// Resolve the tenant's default currency once. Revenue and outstanding AR
-	// are scoped to it, so the dashboard never sums amounts across
-	// currencies into a corrupt total, and each by-currency list puts it
-	// first. Defaults to USD when settings are unset (fresh tenant).
+	// Resolve the tenant's default currency once. Revenue is scoped to it, so
+	// amounts in two currencies are never added, and each by-currency list
+	// puts it first. USD when the setting is unset (a fresh tenant).
 	defaultCurrency, err := defaultCurrencyFor(ctx, tx)
 	if err != nil {
 		slog.Log(ctx, logging.ErrorLevel(ctx, err), "analytics overview: default currency", "error", err)
@@ -120,28 +107,9 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 		sql  string
 		args []any
 	}{
-		{"active_customers", &resp.ActiveCustomers,
-			`SELECT COUNT(*) FROM customers WHERE status = 'active'`, nil},
-		{"new_customers", &resp.NewCustomers,
-			`SELECT COUNT(*) FROM customers WHERE created_at >= $1 AND created_at < $2`,
-			[]any{period.Start, period.End}},
-		{"outstanding_ar", &resp.OutstandingAR,
-			`SELECT COALESCE(SUM(amount_due_cents), 0) FROM invoices WHERE status = 'finalized' AND payment_status != 'succeeded' AND currency = $1`,
-			[]any{defaultCurrency}},
 		{"paid_invoices", &resp.PaidInvoices,
 			`SELECT COUNT(*) FROM invoices WHERE status = 'paid' AND currency = $1 AND paid_at >= $2 AND paid_at < $3`,
 			[]any{defaultCurrency, period.Start, period.End}},
-		// Open invoices only: a void or write-off keeps its last
-		// payment_status, so it counted as a failed payment nobody was
-		// collecting any more (sweep A7/E1, 2026-10-21).
-		{"failed_payments", &resp.FailedPayments,
-			`SELECT COUNT(*) FROM invoices WHERE status = 'finalized' AND payment_status = 'failed' AND created_at >= $1 AND created_at < $2`,
-			[]any{period.Start, period.End}},
-		// Same predicate over the previous window, so the trend compares like
-		// with like (the dashboard used to compare against a hard-coded 0).
-		{"failed_payments_prev", &resp.FailedPaymentsPrev,
-			`SELECT COUNT(*) FROM invoices WHERE status = 'finalized' AND payment_status = 'failed' AND created_at >= $1 AND created_at < $2`,
-			[]any{period.PrevStart, period.PrevEnd}},
 		{"open_invoices", &resp.OpenInvoices,
 			`SELECT COUNT(*) FROM invoices WHERE status = 'finalized' AND payment_status != 'succeeded'`, nil},
 		{"dunning_active", &resp.DunningActive,
@@ -168,13 +136,6 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 		// filter so the count and the list never disagree.
 		{"refunds_needing_attention", &resp.RefundsAttention,
 			`SELECT COUNT(*) FROM credit_notes WHERE ` + domain.CreditNoteRefundNeedsAttentionSQL, nil},
-		// Customers with a balance the credit balances list's filter picks,
-		// each counted once whatever its currencies. Both read the
-		// predicate from domain.CreditBalanceFilterSQL.
-		{"customers_out_of_credit", &resp.CustomersOutOfCredit,
-			customersWithBalanceSQL(domain.CreditBalanceOut), []any{tenantID}},
-		{"customers_low_on_credit", &resp.CustomersLowOnCredit,
-			customersWithBalanceSQL(domain.CreditBalanceLow), []any{tenantID}},
 	}
 	for _, q := range queries {
 		if err := tx.QueryRowContext(ctx, q.sql, q.args...).Scan(q.dst); err != nil {
@@ -287,9 +248,9 @@ const paidInPeriodSQL = `i.status = 'paid' AND i.paid_at >= $1 AND i.paid_at < $
 
 // issuedInPeriodSQL is "issued in the period" over invoices aliased i, with
 // the period's bounds as $1 and $2: issued_at in [$1, $2), the same
-// closed-open window paidInPeriodSQL uses, on an invoice still standing.
-// issued_at is set when an invoice is issued (a draft has none); a void
-// cancels the invoice, so it is left out.
+// closed-open window paidInPeriodSQL uses, on an invoice still standing. The
+// status list leaves out a draft, which is not issued yet whatever its
+// issued_at holds, and a void, which cancels the invoice.
 const issuedInPeriodSQL = `i.status IN ('finalized', 'paid', 'uncollectible') AND i.issued_at >= $1 AND i.issued_at < $2`
 
 // creditSoldByCurrency is the credit granted by the top-ups paid in [start,
@@ -307,8 +268,8 @@ func creditSoldByCurrency(ctx context.Context, tx *sql.Tx, start, end any, defau
 	`, start, end, defaultCurrency)
 }
 
-// usageBilledByCurrency is the usage lines (line_type usage, before tax) on
-// the invoices issued in [start, end), per currency. Ordered like
+// usageBilledByCurrency is the usage lines (line_type usage) on the invoices
+// issued in [start, end), per currency. Ordered like
 // outstandingByCurrency; a currency whose usage sums to zero is left out.
 func usageBilledByCurrency(ctx context.Context, tx *sql.Tx, start, end any, defaultCurrency string) ([]CurrencyAmount, error) {
 	return currencyAmounts(ctx, tx, `
@@ -320,18 +281,6 @@ func usageBilledByCurrency(ctx context.Context, tx *sql.Tx, start, end any, defa
 		HAVING SUM(li.amount_cents) <> 0
 		ORDER BY (i.currency = $3) DESC, SUM(li.amount_cents) DESC, i.currency
 	`, start, end, defaultCurrency)
-}
-
-// customersWithBalanceSQL counts the customers with at least one balance
-// filter picks, over the grouping the credit balances list uses
-// (credit.PostgresStore.ListBalances). $1 is the tenant id: explicit, as in
-// that list, so the ledger scan uses its tenant index.
-func customersWithBalanceSQL(filter domain.CreditBalanceFilter) string {
-	return `SELECT COUNT(DISTINCT customer_id) FROM (
-		SELECT customer_id FROM customer_credit_ledger WHERE tenant_id = $1
-		GROUP BY customer_id, currency
-		HAVING ` + domain.CreditBalanceFilterSQL(filter) + `
-	) balances`
 }
 
 // currencyAmounts runs a query whose rows are (currency, amount). Never nil:
