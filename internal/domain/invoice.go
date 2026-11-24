@@ -2,6 +2,7 @@ package domain
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/shopspring/decimal"
@@ -32,7 +33,8 @@ const (
 // natural period. SubscriptionCreate is the prorated first invoice when a
 // subscription starts mid-cycle. Manual is a standalone invoice an operator
 // creates. Threshold is the early invoice that the threshold scan tick
-// finalizes (see BillingThresholds).
+// finalizes (see BillingThresholds). Topup is a draft that sells prepaid
+// credit: its one line is a commit line, and it is issued when it is paid.
 type InvoiceBillingReason string
 
 const (
@@ -52,6 +54,7 @@ const (
 	BillingReasonSubscriptionUpdate InvoiceBillingReason = "subscription_update"
 	BillingReasonManual             InvoiceBillingReason = "manual"
 	BillingReasonThreshold          InvoiceBillingReason = "threshold"
+	BillingReasonTopup              InvoiceBillingReason = "topup"
 )
 
 // InvoicePaymentStatus is the state of collecting an invoice's payment.
@@ -123,6 +126,26 @@ func (i Invoice) Parked() bool {
 // and computes its tax at finalize, and its lines keep the amounts entered.
 func (i Invoice) OperatorComposed() bool {
 	return i.BillingReason == "" || i.BillingReason == BillingReasonManual
+}
+
+// UnpaidTopup reports whether the invoice is a top-up not yet paid: a draft
+// with no number that a payment issues and pays in one transaction. It is the
+// one draft a customer can pay, so every payment gate admits it beside a
+// finalized invoice (OpenForPaymentSQL is the SQL form).
+func (i Invoice) UnpaidTopup() bool {
+	return i.Status == InvoiceDraft && i.BillingReason == BillingReasonTopup
+}
+
+// OpenForPayment reports whether a payment may be taken for the invoice:
+// a finalized one, or an unpaid top-up.
+func (i Invoice) OpenForPayment() bool {
+	return i.Status == InvoiceFinalized || i.UnpaidTopup()
+}
+
+// OpenForPaymentSQL is OpenForPayment as a predicate on the invoices table
+// under alias, for the charge claims and their re-checks.
+func OpenForPaymentSQL(alias string) string {
+	return "(" + alias + ".status = 'finalized' OR (" + alias + ".status = 'draft' AND " + alias + ".billing_reason = 'topup'))"
 }
 
 // HasCardPayment reports whether this invoice's settled money is refundable to
@@ -613,19 +636,57 @@ type InvoiceLineItem struct {
 	CreatedAt                time.Time        `json:"created_at"`
 
 	// CommitGrantedCents marks this line as a prepaid-commit purchase
-	// (ADR-078). When the invoice finalizes, the customer is granted a
+	// (ADR-078). When the top-up is paid, the customer is granted a
 	// credit block of this many cents (grant_kind='commit'). It may differ
 	// from AmountCents, because a discounted commit sells $10k of credits
-	// for $9k. It is valid only on an add_on line of a manual invoice, alone
-	// on it; the credit it buys never expires. buildLineItem and the store
-	// enforce that, and a CHECK constraint backs the line rule up. Nil means
-	// not a commit line.
+	// for $9k. It is valid only on an add_on line of a top-up invoice, alone
+	// on it. buildLineItem and the store enforce that, and a CHECK
+	// constraint backs the line rule up. Nil means not a commit line.
 	CommitGrantedCents *int64 `json:"commit_granted_cents,omitempty"`
+	// CreditValidDays is how many days the credit a commit line buys stays
+	// usable after the payment, copied from the tenant's
+	// topup_credit_valid_days when the top-up is created. Nil: it never
+	// expires. A number of days, not an instant, so a late payment still
+	// gets the whole period.
+	CreditValidDays *int `json:"credit_valid_days,omitempty"`
 }
 
 // IsCommitLine reports whether this line funds a prepaid-commit grant.
 func (li InvoiceLineItem) IsCommitLine() bool {
 	return li.CommitGrantedCents != nil && *li.CommitGrantedCents > 0
+}
+
+// TopupCredit is the credit a top-up sells, as its email, hosted page and
+// receipt show it: the amount granted, and how many days it stays usable
+// after the payment (nil: it never expires).
+type TopupCredit struct {
+	CreditCents int64
+	ValidDays   *int
+}
+
+// TopupCreditOf reads a top-up's credit from its commit line; ok is false
+// when no line is one.
+func TopupCreditOf(items []InvoiceLineItem) (TopupCredit, bool) {
+	for _, li := range items {
+		if li.IsCommitLine() {
+			return TopupCredit{CreditCents: *li.CommitGrantedCents, ValidDays: li.CreditValidDays}, true
+		}
+	}
+	return TopupCredit{}, false
+}
+
+// CreditValidityLine says how long bought credit stays usable after its
+// payment, in days: the grant expires that many days after the payment, and a
+// count of months would be a day off across a 29 February.
+func CreditValidityLine(validDays *int) string {
+	switch {
+	case validDays == nil:
+		return "It never expires."
+	case *validDays == 1:
+		return "It is valid for 1 day after payment."
+	default:
+		return fmt.Sprintf("It is valid for %d days after payment.", *validDays)
+	}
 }
 
 // TaxReasonPrepaidCreditPurchase is the tax_reason on a prepaid-commit

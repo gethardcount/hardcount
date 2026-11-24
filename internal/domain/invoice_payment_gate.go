@@ -51,6 +51,17 @@ func PaymentBlocksAction(inv Invoice, action InvoiceAction) PaymentBlock {
 		return PaymentBlock{}
 	}
 
+	// An unpaid top-up is a draft, so the write-off below does not apply to
+	// it (only a finalized invoice can be written off): while its charge is
+	// in flight there is nothing an operator can do but wait for Stripe.
+	if inv.UnpaidTopup() {
+		return PaymentBlock{
+			Blocked: true,
+			Code:    "payment_in_flight",
+			Message: "Hardcount is checking this top-up's charge with Stripe. Nothing else can be done to it until Stripe answers.",
+		}
+	}
+
 	// An unclear charge (unknown, with or without its PaymentIntent) can be
 	// written off: the deliberate carve-out, for a customer who paid another
 	// way. Writing it off moves no money, and a payment Stripe completes later

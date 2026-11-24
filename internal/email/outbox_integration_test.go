@@ -435,7 +435,15 @@ func (f *fakeDeliverer) SendInvoice(_ context.Context, tenantID, to string, cc [
 	f.lastPublicToken = publicToken
 	return nil
 }
-func (f *fakeDeliverer) SendPaymentReceipt(_ context.Context, tenantID, to string, cc []string, name, inv string, amount int64, cur, publicToken string) error {
+func (f *fakeDeliverer) SendTopupOffer(_ context.Context, tenantID, to string, cc []string, name string, pay int64, _ domain.TopupCredit, cur, publicToken string) error {
+	f.calls++
+	f.lastType, f.lastTenant, f.lastTo, f.lastName = email.TypeTopupOffer, tenantID, to, name
+	f.lastAmount, f.lastCurrency = pay, cur
+	f.lastCc = cc
+	f.lastPublicToken = publicToken
+	return nil
+}
+func (f *fakeDeliverer) SendPaymentReceipt(_ context.Context, tenantID, to string, cc []string, name, inv string, amount int64, cur, publicToken string, _ *domain.TopupCredit) error {
 	f.calls++
 	f.lastType, f.lastTenant, f.lastTo, f.lastName, f.lastInvoice = email.TypePaymentReceipt, tenantID, to, name, inv
 	f.lastAmount, f.lastCurrency = amount, cur
@@ -542,7 +550,7 @@ func callDeliverer(ctx context.Context, d email.EmailDeliverer, row email.Outbox
 	case email.TypeInvoice:
 		return d.SendInvoice(ctx, row.TenantID, m.To, m.Cc, m.CustomerName, m.InvoiceNumber, m.AmountCents, m.Currency, m.PDF, m.PublicToken, m.InvoiceWrittenOff)
 	case email.TypePaymentReceipt:
-		return d.SendPaymentReceipt(ctx, row.TenantID, m.To, m.Cc, m.CustomerName, m.InvoiceNumber, m.AmountCents, m.Currency, m.PublicToken)
+		return d.SendPaymentReceipt(ctx, row.TenantID, m.To, m.Cc, m.CustomerName, m.InvoiceNumber, m.AmountCents, m.Currency, m.PublicToken, nil)
 	case email.TypeDunningWarning:
 		return d.SendDunningWarning(ctx, row.TenantID, m.To, m.Cc, m.CustomerName, m.InvoiceNumber, m.AttemptNumber, m.MaxAttempts, m.NextRetryDate, m.FailureReason, m.PublicToken, m.DeclineAsk)
 	case email.TypeDunningEscalation:

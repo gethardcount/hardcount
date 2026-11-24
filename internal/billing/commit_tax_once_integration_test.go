@@ -35,21 +35,23 @@ func setManualTax(t *testing.T, ctx context.Context, settings *tenant.SettingsSt
 	}
 }
 
-// createCommitInvoice composes a one-line commit invoice through the real
-// composer path (Create → buildLineItem → CreateWithLineItems).
-func createCommitInvoice(t *testing.T, ctx context.Context, svc *invoice.Service, tenantID, customerID string, priceCents, grantCents int64) domain.Invoice {
+// createCommitInvoice makes an operator's one-line commit draft from before
+// top-ups, which its finalize taxes and funds: composed through the service,
+// its line then marked as a commit line (testutil.MarkLegacyCommitLine).
+func createCommitInvoice(t *testing.T, ctx context.Context, svc *invoice.Service, db *postgres.DB, tenantID, customerID string, priceCents, grantCents int64) domain.Invoice {
 	t.Helper()
 	inv, err := svc.Create(ctx, tenantID, invoice.CreateInput{
 		CustomerID: customerID,
 		Currency:   "USD",
 		LineItems: []invoice.AddLineItemInput{{
 			Description: "Prepaid commit", LineType: "add_on", Quantity: 1,
-			UnitAmountCents: priceCents, CommitGrantedCents: &grantCents,
+			UnitAmountCents: priceCents,
 		}},
 	})
 	if err != nil {
 		t.Fatalf("create commit invoice: %v", err)
 	}
+	testutil.MarkLegacyCommitLine(ctx, t, db, tenantID, inv.ID, grantCents)
 	return inv
 }
 
@@ -75,7 +77,7 @@ func TestCommitTax_PurchaseUntaxed_UsageTaxedOnce_E2E(t *testing.T) {
 	invSvc.SetTaxRetrier(lf.engine)
 
 	// 1. The purchase: a commit invoice carries no tax.
-	draft := createCommitInvoice(t, ctx, invSvc, lf.tenantID, lf.customerID, 10000, 10000)
+	draft := createCommitInvoice(t, ctx, invSvc, lf.db, lf.tenantID, lf.customerID, 10000, 10000)
 	purchase, err := invSvc.Finalize(ctx, lf.tenantID, draft.ID)
 	if err != nil {
 		t.Fatalf("finalize commit invoice: %v", err)
@@ -157,7 +159,7 @@ func TestCommitRelief_TaxedPurchase_StillReversesItsTax(t *testing.T) {
 	invStore.SetCommitFunder(creditSvc)
 	invSvc := invoice.NewService(invStore, clock.Real(), settings)
 
-	draft := createCommitInvoice(t, ctx, invSvc, tenantID, cust.ID, 10000, 10000)
+	draft := createCommitInvoice(t, ctx, invSvc, db, tenantID, cust.ID, 10000, 10000)
 	if _, err := invSvc.Finalize(ctx, tenantID, draft.ID); err != nil {
 		t.Fatalf("finalize: %v", err)
 	}
@@ -218,7 +220,7 @@ func TestCommitTax_InclusiveDraftComputedBeforeTheChange_E2E(t *testing.T) {
 	invSvc := invoice.NewService(lf.invStore, clock.Real(), lf.settings)
 	invSvc.SetTaxRetrier(lf.engine)
 
-	draft := createCommitInvoice(t, ctx, invSvc, lf.tenantID, lf.customerID, 11800, 11800)
+	draft := createCommitInvoice(t, ctx, invSvc, lf.db, lf.tenantID, lf.customerID, 11800, 11800)
 	tx, err := lf.db.BeginTx(ctx, postgres.TxTenant, lf.tenantID)
 	if err != nil {
 		t.Fatalf("begin: %v", err)

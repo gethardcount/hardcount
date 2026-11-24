@@ -109,6 +109,13 @@ test('new invoice: each result gets its own single message', () => {
   const noEmail = newInvoiceOutcome('INV-9', { kind: 'no_email' })
   assert.equal(noEmail.tone, 'warning')
   assert.match(noEmail.description ?? '', /no email address/)
+
+  // A top-up is sent, never finalized; a refused send leaves its draft.
+  assert.equal(newInvoiceOutcome('Prepaid credit', { kind: 'topup_sent' }).title, 'Top-up created and its link sent')
+  const refused = newInvoiceOutcome('Prepaid credit', { kind: 'topup_not_sent', reason: 'Set HOSTED_INVOICE_BASE_URL.' })
+  assert.equal(refused.tone, 'warning')
+  assert.equal(refused.title, 'Top-up draft created, link not sent')
+  assert.equal(refused.description, 'Set HOSTED_INVOICE_BASE_URL.')
 })
 
 test('new invoice: Save & send on a server without email says the invoice was finalized and not emailed', () => {

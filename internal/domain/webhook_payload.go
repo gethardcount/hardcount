@@ -67,8 +67,9 @@ var webhookEventExtras = map[string][]string{
 	EventInvoicePaid:                {},
 	EventInvoiceVoided:              {},
 	EventInvoiceMarkedUncollectible: {},
-	// recovered_from: the status the invoice was paid from (finalized or
-	// uncollectible). The invoice itself now says paid.
+	// recovered_from: the status the invoice was paid from (finalized,
+	// uncollectible, or draft for a top-up, which the payment issued). The
+	// invoice itself now says paid.
 	EventInvoicePaymentRecorded: {"recovered_from"},
 
 	EventPaymentSucceeded: {},

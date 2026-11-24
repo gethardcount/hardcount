@@ -8,6 +8,7 @@ import { invoiceLineRate } from '@/lib/priceDisplay'
 import { invoiceAmountLine, invoiceDueCents, invoiceHeadline, invoicePaymentInFlight, invoicePaymentSucceeded } from '@/lib/invoiceTerminal'
 import { creditNoteBackText, hostedTotalRows, loadErrorCopy, payErrorCopy, payUnavailableCopy, type HostedCreditNote } from '@/lib/hostedInvoice'
 import { sellerContact } from '@/lib/sellerContact'
+import type { HostedInvoiceTopup } from '@/lib/gen/schemas/hostedInvoiceTopup'
 import { SellerContactLink } from '@/components/SellerContactLink'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent } from '@/components/ui/card'
@@ -96,6 +97,8 @@ interface HostedInvoicePayload {
   // online: no payment provider connected, or no hosted invoice address on
   // the server.
   pay_unavailable_reason?: string
+  // Sent only for a top-up (an invoice that sells prepaid credit).
+  topup?: HostedInvoiceTopup
   livemode: boolean
 }
 
@@ -156,7 +159,8 @@ export default function HostedInvoicePage() {
   const isPaymentSettling = (d?: HostedInvoicePayload | null) =>
     !!d &&
     paidSignal &&
-    d.invoice.status === 'finalized' &&
+    // An unpaid top-up stays a draft until its payment issues it.
+    (d.invoice.status === 'finalized' || (!!d.topup && d.invoice.status === 'draft')) &&
     !invoicePaymentSucceeded(d.invoice)
 
   // Invoice fetch keyed by (token, paidSignal). retry=false so a
@@ -182,7 +186,11 @@ export default function HostedInvoicePage() {
   })
   const data = invoiceQuery.data ?? null
   const seller = data?.branding.company_name?.trim() ?? ''
-  usePageTitle(data ? `Invoice ${data.invoice.invoice_number}${seller ? ` from ${seller}` : ''}` : 'Invoice')
+  // An unpaid top-up is an offer to buy credit: it has no number or due
+  // date yet, and its payment issues it.
+  const unpaidTopup = data?.invoice.status === 'draft' ? data.topup : undefined
+  const heading = unpaidTopup ? 'Buy prepaid credit' : `Invoice ${data?.invoice.invoice_number ?? ''}`.trim()
+  usePageTitle(data ? `${heading}${seller ? ` from ${seller}` : ''}` : 'Invoice')
   const loading = !!token && invoiceQuery.isLoading
   // A failed settle-poll keeps the invoice it already has: the next poll
   // may succeed, and a customer who just paid must not see "can't load".
@@ -445,13 +453,19 @@ export default function HostedInvoicePage() {
             {/* Title row */}
             <div className="flex items-start justify-between gap-4 flex-wrap">
               <div>
-                {/* The page's one h1: "Invoice" + number. The seller name
-                    above is optional, so it can't carry the heading. */}
-                <h1 className="flex flex-col">
-                  <span className="text-xs text-muted-foreground uppercase tracking-wider">Invoice</span>{' '}
-                  <span className="text-xl font-semibold text-foreground font-mono">{invoice.invoice_number}</span>
-                </h1>
+                {/* The page's one h1: "Invoice" + number, or the top-up
+                    heading. The seller name above is optional, so it can't
+                    carry the heading. */}
+                {unpaidTopup ? (
+                  <h1 className="text-xl font-semibold text-foreground">{heading}</h1>
+                ) : (
+                  <h1 className="flex flex-col">
+                    <span className="text-xs text-muted-foreground uppercase tracking-wider">Invoice</span>{' '}
+                    <span className="text-xl font-semibold text-foreground font-mono">{invoice.invoice_number}</span>
+                  </h1>
+                )}
               </div>
+              {!unpaidTopup && (
               <div className="text-right">
                 {/* Second label for the same figure — the totals block below
                     is the other. #651 renamed that one for closed invoices
@@ -473,6 +487,7 @@ export default function HostedInvoicePage() {
                   </p>
                 )}
               </div>
+              )}
             </div>
 
             {/* Two-column meta: Bill to / From */}
@@ -509,7 +524,19 @@ export default function HostedInvoicePage() {
               )}
             </div>
 
+            {/* An unpaid top-up says what the customer pays and gets in place
+                of its line and totals (which end in "Amount due"). */}
+            {unpaidTopup && (
+              <section className="space-y-1 text-sm text-foreground">
+                <p>
+                  {`You pay ${formatCents(invoiceDueCents(invoice), invoice.currency)}. You get ${formatCents(unpaidTopup.credit_cents, invoice.currency)} of credit, added to your account as soon as your payment goes through.`}
+                </p>
+                <p>{unpaidTopup.validity}</p>
+              </section>
+            )}
+
             {/* Line items */}
+            {!unpaidTopup && (
             <section aria-labelledby="line-items-heading">
               <h3 id="line-items-heading" className="sr-only">Line items</h3>
               <div className="overflow-hidden border rounded-lg">
@@ -541,8 +568,10 @@ export default function HostedInvoicePage() {
                 </table>
               </div>
             </section>
+            )}
 
             {/* Totals */}
+            {!unpaidTopup && (
             <section className="flex justify-end">
               <dl className="w-full sm:w-80 space-y-2 text-sm">
                 {totalRows.includes('subtotal') && (
@@ -634,6 +663,16 @@ export default function HostedInvoicePage() {
                 </div>
               </dl>
             </section>
+            )}
+
+            {data.topup && invoice.status === 'paid' && (
+              <section className="space-y-1 text-sm">
+                <p className="font-medium text-foreground">
+                  Credit added: {formatCents(data.topup.credit_cents, invoice.currency)}
+                </p>
+                <p className="text-muted-foreground">{data.topup.validity}</p>
+              </section>
+            )}
 
             {/* Credit notes issued after payment: what came back, and how.
                 Only settled parts are sent, as on the PDF. */}
@@ -727,15 +766,18 @@ export default function HostedInvoicePage() {
                   )}
                 </Button>
               ) : null}
-              <Button
-                render={<a href={pdfHref} target="_blank" rel="noopener noreferrer" />}
-                variant="outline"
-                size="lg"
-                className={data.pay_enabled ? '' : 'sm:flex-1'}
-              >
-                <Download size={16} className="mr-2" aria-hidden="true" />
-                Download PDF
-              </Button>
+              {/* An unpaid top-up is not an invoice yet: no PDF to keep. */}
+              {!unpaidTopup && (
+                <Button
+                  render={<a href={pdfHref} target="_blank" rel="noopener noreferrer" />}
+                  variant="outline"
+                  size="lg"
+                  className={data.pay_enabled ? '' : 'sm:flex-1'}
+                >
+                  <Download size={16} className="mr-2" aria-hidden="true" />
+                  Download PDF
+                </Button>
+              )}
             </section>
 
             {payError && (

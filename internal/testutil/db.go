@@ -202,6 +202,33 @@ func CreateTestTenant(t *testing.T, db *postgres.DB, name string) string {
 	return id
 }
 
+// MarkLegacyCommitLine makes the invoice's lines sell grantCents of prepaid
+// credit, the shape of an operator's commit invoice made before top-ups. The
+// store writes a commit line only on a top-up now, and such a row still
+// stands after the upgrade, so a test of one is set up here. ctx carries the
+// invoice's mode.
+func MarkLegacyCommitLine(ctx context.Context, t *testing.T, db *postgres.DB, tenantID, invoiceID string, grantCents int64) {
+	t.Helper()
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		t.Fatalf("mark legacy commit line: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	res, err := tx.ExecContext(ctx, `
+		UPDATE invoice_line_items SET commit_granted_cents = $1 WHERE invoice_id = $2`, grantCents, invoiceID)
+	if err != nil {
+		t.Fatalf("mark legacy commit line: %v", err)
+	}
+	if n, _ := res.RowsAffected(); n != 1 {
+		t.Fatalf("mark legacy commit line: %d lines on invoice %s, want 1", n, invoiceID)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("mark legacy commit line: %v", err)
+	}
+}
+
 func envOr(key, fallback string) string {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {

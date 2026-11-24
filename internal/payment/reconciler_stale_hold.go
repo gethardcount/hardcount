@@ -124,7 +124,7 @@ func (r *Reconciler) checkStaleHold(ctx context.Context, h domain.StaleChargeHol
 // the banner names, with no hourly error.
 func (r *Reconciler) earlierVersionHold(ctx context.Context, h domain.StaleChargeHold) (string, error) {
 	inv := h.Invoice
-	if inv.Status == domain.InvoiceFinalized {
+	if inv.OpenForPayment() {
 		r.markChecked(ctx, inv)
 		slog.ErrorContext(ctx, "stale charge check: this charge hold or parked charge was left by an earlier Hardcount version, which charged in one call, so Hardcount cannot tell whether it took money. Check the customer's payments in Stripe and settle the invoice by hand; the upgrade check should have stopped this",
 			"invoice_id", inv.ID, "tenant_id", inv.TenantID, "invoice_number", inv.InvoiceNumber,
@@ -167,9 +167,10 @@ func (r *Reconciler) markChecked(ctx context.Context, inv domain.Invoice) {
 	}
 }
 
-// openForCharge is the state a charge claim admits: finalized and pending or
-// failed. Only there does a cleared hold move the counter.
+// openForCharge is the state a charge claim admits: open for payment
+// (finalized, or an unpaid top-up) and pending or failed. Only there does a
+// cleared hold move the counter.
 func openForCharge(inv domain.Invoice) bool {
-	return inv.Status == domain.InvoiceFinalized &&
+	return inv.OpenForPayment() &&
 		(inv.PaymentStatus == domain.PaymentPending || inv.PaymentStatus == domain.PaymentFailed)
 }

@@ -152,6 +152,9 @@ test('payment predicates: collect, awaiting payment, in flight', () => {
   for (const status of ['voided', 'uncollectible', 'paid', 'draft']) {
     assert.equal(invoiceCanCollect({ ...open, status }), false, status)
   }
+  // An unpaid top-up is the one draft a payment is taken for.
+  assert.equal(invoiceCanCollect({ ...open, status: 'draft', billing_reason: 'topup' }), true)
+  assert.equal(invoiceCanCollect({ ...open, status: 'draft', billing_reason: 'manual' }), false)
 
   // Awaiting payment: open, nothing succeeded or processing. A parked charge
   // still awaits (mark uncollectible is its way out, ADR-107).

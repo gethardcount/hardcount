@@ -39,7 +39,8 @@ are not included; `GET /v1/invoices/{id}` returns them.
 
 An invoice is final and ready to pay. It is sent once per invoice, including
 the invoice for a mid-period upgrade, seat increase or added item. A draft
-sends it when it is finalized.
+sends it when it is finalized. A top-up (`billing_reason` `topup`) sends it
+when it is paid, just before `invoice.paid`, with its new `invoice_number`.
 
 Its `amount_due_cents` is the amount before credit, and
 `credits_applied_cents` is 0: Hardcount uses credit when it collects the
@@ -172,7 +173,8 @@ moment: 0 when credit or a credit note covered the rest.
 
 Someone recorded a payment made outside Hardcount, such as a bank transfer
 or a cheque. `recovered_from` is the status the invoice was paid from:
-`finalized` or `uncollectible`.
+`finalized`, `uncollectible`, or `draft` for a top-up, which the payment
+numbered and issued.
 
 **Also in `data`:** `recovered_from`.
 

@@ -80,7 +80,8 @@ type CardFetcher interface {
 type EmailReceipt interface {
 	// SendPaymentReceiptTx enqueues on the settle transaction so the receipt
 	// commits with the paid-flip (ADR-040 amendment).
-	SendPaymentReceiptTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, amountCents int64, currency, publicToken string) error
+	// credit is set for a top-up: the receipt says what credit was added.
+	SendPaymentReceiptTx(ctx context.Context, tx *sql.Tx, tenantID, to string, cc []string, customerName, invoiceNumber string, amountCents int64, currency, publicToken string, credit *domain.TopupCredit) error
 }
 
 // CustomerEmailResolver resolves customer contact info for email notifications.
@@ -321,6 +322,8 @@ type InvoiceUpdater interface {
 	SetPaymentCard(ctx context.Context, tenantID, id, brand, last4 string) error
 	GetByStripePaymentIntentID(ctx context.Context, tenantID, stripePaymentIntentID string) (domain.Invoice, error)
 	Get(ctx context.Context, tenantID, id string) (domain.Invoice, error)
+	// ListLineItems reads an unpaid top-up's line for its receipt.
+	ListLineItems(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceLineItem, error)
 	// StampPendingConfirm puts the charge's PaymentIntent on the invoice as
 	// an unknown outcome and records the attempt, only while hold is still
 	// the charger's; the charge confirms only if it applied (ADR-137).
@@ -722,8 +725,8 @@ func (s *Stripe) sendCharge(ctx context.Context, tenantID string, inv domain.Inv
 // hardcount_purpose metadata, which Stripe sees and the idempotency key carries;
 // trigger is the attempt row's trigger_source, which only Hardcount sees.
 func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.Invoice, hold domain.ChargeHold, stripeCustomerID, stripePaymentMethodID, purpose string, trigger domain.ChargeAttemptTrigger) (domain.Invoice, error) {
-	// finalized ONLY (ADR-113: nothing initiates money against a written-off
-	// invoice). This belt gate is not redundant with the claims: every claim
+	// Finalized, or an unpaid top-up (ADR-113: nothing initiates money against
+	// a written-off invoice). This belt gate is not redundant with the claims: every claim
 	// reads BEFORE the handler re-reads the invoice, so a MarkUncollectible
 	// landing between claim and charge arrives here carrying `uncollectible`
 	// — and until 2026-08-06 this line admitted it, which would have minted a
@@ -732,8 +735,12 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	// charge hold is live, but the status CAS itself still does not read the
 	// hold, so a write-off that lands after the hold lapsed (a charger stalled
 	// past five minutes) still reaches here; keep the gate.
-	if inv.Status != domain.InvoiceFinalized {
+	if !inv.OpenForPayment() {
 		return domain.Invoice{}, errs.Invalid("", fmt.Sprintf("can only charge a finalized invoice, current status: %s", inv.Status))
+	}
+	description := fmt.Sprintf("Invoice %s", inv.InvoiceNumber)
+	if inv.UnpaidTopup() {
+		purpose, description = piPurposeTopup, "Prepaid credit"
 	}
 	if inv.AmountDueCents <= 0 {
 		return domain.Invoice{}, fmt.Errorf("invoice has no amount due")
@@ -769,10 +776,12 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	// and 409. Log correlation goes through stripe_payment_intent_id
 	// (recorded back on the invoice) instead.
 	metadata := map[string]string{
-		"hardcount_invoice_id":     inv.ID,
-		"hardcount_invoice_number": inv.InvoiceNumber,
-		"hardcount_tenant_id":      tenantID,
-		"hardcount_customer_id":    inv.CustomerID,
+		"hardcount_invoice_id":  inv.ID,
+		"hardcount_tenant_id":   tenantID,
+		"hardcount_customer_id": inv.CustomerID,
+	}
+	if inv.InvoiceNumber != "" {
+		metadata["hardcount_invoice_number"] = inv.InvoiceNumber
 	}
 	if purpose != "" {
 		metadata["hardcount_purpose"] = purpose
@@ -798,7 +807,7 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 		Currency:        inv.Currency,
 		CustomerID:      stripeCustomerID,
 		PaymentMethodID: stripePaymentMethodID,
-		Description:     fmt.Sprintf("Invoice %s", inv.InvoiceNumber),
+		Description:     description,
 		IdempotencyKey:  idempotencyKey,
 		Metadata:        metadata,
 	}
@@ -1299,6 +1308,12 @@ const chargeOutcomeSaveTimeout = 10 * time.Second
 // Retries sends one email per attempt, not one webhook-email plus one
 // engine-email).
 const piPurposeDunningRetry = "dunning_retry"
+
+// piPurposeTopup tags a saved-card charge of an unpaid top-up. Its decline
+// sends the customer no payment-failed email, because the email is sent only
+// for a finalized invoice: no bill is owed, and the operator sees the decline
+// on the draft.
+const piPurposeTopup = "topup"
 
 // PurposeHostedInvoicePay tags a PaymentIntent created by the hosted invoice
 // page's Stripe Checkout session. Hardcount never waits on such an attempt — the

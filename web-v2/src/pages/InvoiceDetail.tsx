@@ -25,7 +25,7 @@ import { flaggedStripeRefunds } from '@/lib/stripeRefunds'
 import { ActivityList, ActivityZone } from '@/components/ActivityList'
 import { Callout } from '@/components/Callout'
 import { collectionPausedNow, finalizeConfirmLines, pickInvoiceNotice, writtenOffCardLine, writtenOffSubscriptionLine } from '@/lib/invoiceNotice'
-import { issueDates, sellerBlock, sellerMissing, SELLER_SETTINGS_PATH } from '@/lib/invoiceDocument'
+import { invoiceLabel, issueDates, sellerBlock, sellerMissing, SELLER_SETTINGS_PATH } from '@/lib/invoiceDocument'
 import { authApi } from '@/lib/auth'
 import { useAuth } from '@/contexts/AuthContext'
 import { useNowResolver } from '@/hooks/useNow'
@@ -41,7 +41,7 @@ import { StatusBadge } from '@/components/StatusBadge'
 import { cn } from '@/lib/utils'
 import { creditNoteReasonLabel } from '@/lib/status'
 import { cardLabel } from '@/lib/paymentMethodCopy'
-import { invoiceAwaitingPayment, invoiceCanCollect, invoiceDueCents, invoicePaymentInFlight, invoiceShowsCollect } from '@/lib/invoiceTerminal'
+import { invoiceAwaitingPayment, invoiceCanCollect, invoiceDueCents, invoicePaymentInFlight, invoiceShowsCollect, openForPayment } from '@/lib/invoiceTerminal'
 
 import { Button } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
@@ -445,7 +445,11 @@ export default function InvoiceDetailPage() {
 
   const voidMutation = useMutation({
     mutationFn: () => api.voidInvoice(id!),
-    onSuccess: () => { invalidateAll(); setShowVoidConfirm(false); toast.success(`Invoice ${invoice?.invoice_number} voided`) },
+    onSuccess: () => {
+      invalidateAll()
+      setShowVoidConfirm(false)
+      toast.success(invoice?.status === 'draft' && invoice.billing_reason === 'topup' ? 'Top-up withdrawn' : `Invoice ${invoice?.invoice_number} voided`)
+    },
     onError: (err) => showApiError(err, 'Failed to void'),
   })
 
@@ -545,7 +549,7 @@ export default function InvoiceDetailPage() {
       invalidateAll()
       setShowRecordPaymentDialog(false)
       setRecordPaymentNote('')
-      toast.success(`Payment recorded — invoice ${invoice?.invoice_number} marked paid`)
+      toast.success(`Payment recorded — ${invoice ? invoiceLabel(invoice) : 'invoice'} marked paid`)
     },
     onError: (err) => showApiError(err, 'Failed to record payment'),
   })
@@ -600,7 +604,10 @@ export default function InvoiceDetailPage() {
   const loading = isLoading
   const error = loadError instanceof Error ? loadError.message : loadError ? String(loadError) : null
 
-  usePageTitle(invoice?.invoice_number)
+  // An unpaid top-up has no number until its payment issues it, and keeps
+  // none once withdrawn.
+  const pageTitle = invoice ? invoiceLabel(invoice) : undefined
+  usePageTitle(pageTitle)
 
   if (loading) {
     return <DetailSkeleton to="/invoices" parentLabel="Invoices" />
@@ -647,19 +654,26 @@ export default function InvoiceDetailPage() {
   // while the payment is unresolved: the server refuses all three, because
   // the email asks the customer to pay (and for a parked invoice the hosted
   // page will not even show a Pay button). Offering it is discovery-by-failure.
-  const showEmailInvoice = invoice.status !== 'draft' && invoice.status !== 'voided' && invoicePaymentInFlight(invoice) === null
-  const showCopyLink = !!invoice.public_token && invoice.status !== 'draft'
+  // An unpaid top-up is the one draft that is sent: its email is its pay link.
+  const sendable = invoice.status !== 'draft' || openForPayment(invoice)
+  const showEmailInvoice = sendable && invoice.status !== 'voided' && invoicePaymentInFlight(invoice) === null
+  const showCopyLink = !!invoice.public_token && sendable
+  // Voiding an unpaid top-up withdraws the offer: same request, its own words.
+  const withdrawTopup = invoice.status === 'draft' && invoice.billing_reason === 'topup'
+  // While its charge is being confirmed the server refuses every action on
+  // a top-up, Withdraw included.
+  const topupChargeInFlight = withdrawTopup && invoicePaymentInFlight(invoice) !== null
 
   return (
     <>
-      <DetailBreadcrumb to="/invoices" parentLabel="Invoices" currentLabel={invoice.invoice_number} />
+      <DetailBreadcrumb to="/invoices" parentLabel="Invoices" currentLabel={pageTitle} />
       {loadError && <StaleNotice what="this invoice" onRetry={() => refetch()} />}
 
       {/* Header */}
       <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-3 mb-6">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <h1 className="text-2xl font-semibold text-foreground">{invoice.invoice_number}</h1>
+            <h1 className="text-2xl font-semibold text-foreground">{pageTitle}</h1>
           </div>
           <div className="flex items-center gap-1.5 mt-1">
             <span className="text-xs font-mono text-muted-foreground">{invoice.id}</span>
@@ -671,7 +685,11 @@ export default function InvoiceDetailPage() {
               points at Finalize as the next action. */}
           {invoice.status === 'draft' && (
             <p className="text-xs text-muted-foreground mt-1">
-              Draft invoice — finalize to issue and begin collection.
+              {topupChargeInFlight
+                ? "Top-up — Hardcount is checking its charge with Stripe. Nothing else can be done to it until Stripe answers."
+                : withdrawTopup
+                  ? 'Top-up — issued when it is paid.'
+                  : 'Draft invoice — finalize to issue and begin collection.'}
             </p>
           )}
         </div>
@@ -704,7 +722,8 @@ export default function InvoiceDetailPage() {
               should see one obvious green action. Other actions
               (including secondary destructive ones like Void) live
               behind the overflow menu. */}
-          {invoice.status === 'draft' && (() => {
+          {/* A top-up is issued by its payment: the server refuses Finalize. */}
+          {invoice.status === 'draft' && !withdrawTopup && (() => {
             // Server gates Finalize when tax_status != 'ok'. Mirror
             // the gate on the UI so operators see the constraint
             // before clicking. Stripe Dashboard does the same.
@@ -749,7 +768,7 @@ export default function InvoiceDetailPage() {
               header from collapsing to a single ⋯ trigger which
               feels empty. */}
           {(invoice.status === 'paid' || invoice.status === 'voided' || invoice.status === 'uncollectible') && (
-            <Button size="sm" onClick={() => downloadPDF(invoice.id, invoice.invoice_number)}>
+            <Button size="sm" onClick={() => downloadPDF(invoice.id, invoiceLabel(invoice))}>
               <Download size={14} className="mr-1.5" />
               Download PDF
             </Button>
@@ -824,7 +843,7 @@ export default function InvoiceDetailPage() {
                   Copy public link
                 </DropdownMenuItem>
               )}
-              {invoice.public_token && invoice.status !== 'draft' && invoice.status !== 'paid' && (
+              {invoice.public_token && sendable && invoice.status !== 'paid' && (
                 <DropdownMenuItem onClick={() => setShowRotatePublicTokenConfirm(true)} disabled={acting}>
                   <RotateCw size={14} className="mr-2" />
                   Rotate public link
@@ -851,7 +870,7 @@ export default function InvoiceDetailPage() {
                 <Eye size={14} className="mr-2" />
                 Preview PDF
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => downloadPDF(invoice.id, invoice.invoice_number)} disabled={acting}>
+              <DropdownMenuItem onClick={() => downloadPDF(invoice.id, invoiceLabel(invoice))} disabled={acting}>
                 <Download size={14} className="mr-2" />
                 Download PDF
               </DropdownMenuItem>
@@ -879,7 +898,7 @@ export default function InvoiceDetailPage() {
                     className="text-destructive focus:text-destructive focus:bg-destructive/10"
                   >
                     <XCircle size={14} className="mr-2" />
-                    Void invoice
+                    {withdrawTopup ? 'Withdraw' : 'Void invoice'}
                   </DropdownMenuItem>
                 </>
               )}
@@ -1085,7 +1104,7 @@ export default function InvoiceDetailPage() {
             </div>
             <div className="text-right">
               <p className="text-sm font-medium uppercase tracking-widest text-muted-foreground">Invoice</p>
-              <p className="text-xl font-semibold text-foreground mt-0.5">{invoice.invoice_number}</p>
+              <p className="text-xl font-semibold text-foreground mt-0.5">{invoiceLabel(invoice)}</p>
             </div>
           </div>
 
@@ -1631,23 +1650,49 @@ export default function InvoiceDetailPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Collect {formatCents(invoiceDueCents(invoice), invoice.currency)} now?</AlertDialogTitle>
             <AlertDialogDescription>
-              {formatCents(invoiceDueCents(invoice), invoice.currency)} due on {invoice.invoice_number} from {customer?.display_name || invoice.bill_to_snapshot?.display_name || 'this customer'}.
+              {formatCents(invoiceDueCents(invoice), invoice.currency)} {withdrawTopup ? 'for' : 'due on'} {invoiceLabel(invoice)} from {customer?.display_name || invoice.bill_to_snapshot?.display_name || 'this customer'}.
             </AlertDialogDescription>
           </AlertDialogHeader>
+          {/* A top-up is what buys credit: no credit balance is applied to it,
+              so only a card can pay it. */}
           <div className="space-y-2 text-sm text-muted-foreground">
-            <p>Any credit balance the customer has is used first.</p>
+            {!withdrawTopup && <p>Any credit balance the customer has is used first.</p>}
             <p>
               {defaultCard
-                ? `Whatever is left is charged to ${defaultCard.card_last4 ? cardLabel(defaultCard) : "the customer's default card"} right away.`
-                : 'No card is on file, so only the credit balance can pay it.'}
+                ? `${withdrawTopup ? 'It is' : 'Whatever is left is'} charged to ${defaultCard.card_last4 ? cardLabel(defaultCard) : "the customer's default card"} right away.`
+                : withdrawTopup
+                  ? 'No card is on file, so it can\'t be charged. Send the customer its link instead.'
+                  : 'No card is on file, so only the credit balance can pay it.'}
             </p>
           </div>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={collectMutation.isPending}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={() => collectMutation.mutate()} disabled={collectMutation.isPending}>
-              {collectMutation.isPending
-                ? <><Loader2 size={14} className="animate-spin mr-1.5" />Collecting…</>
-                : defaultCard ? `Charge ${formatCents(invoiceDueCents(invoice), invoice.currency)}` : 'Apply credit'}
+            {(defaultCard || !withdrawTopup) && (
+              <AlertDialogAction onClick={() => collectMutation.mutate()} disabled={collectMutation.isPending}>
+                {collectMutation.isPending
+                  ? <><Loader2 size={14} className="animate-spin mr-1.5" />Collecting…</>
+                  : defaultCard ? `Charge ${formatCents(invoiceDueCents(invoice), invoice.currency)}` : 'Apply credit'}
+              </AlertDialogAction>
+            )}
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Withdraw Confirm — a plain Confirm/Cancel: an unpaid top-up was
+          never issued and nothing is owed on it, so the typed confirmation
+          that guards voiding an issued invoice does not apply. */}
+      <AlertDialog open={showVoidConfirm && withdrawTopup} onOpenChange={(open) => { if (!open && !voidMutation.isPending) setShowVoidConfirm(false) }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Withdraw this top-up?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The customer&apos;s link stops working, and nothing is owed.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={voidMutation.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={() => voidMutation.mutate()} disabled={voidMutation.isPending}>
+              {voidMutation.isPending ? <><Loader2 size={14} className="animate-spin mr-1.5" />Withdrawing…</> : 'Withdraw'}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1656,7 +1701,7 @@ export default function InvoiceDetailPage() {
       {/* Void Confirm — short: what voiding does, then the one choice an
           operator most often gets wrong (void vs mark uncollectible). */}
       <TypedConfirmDialog
-        open={showVoidConfirm}
+        open={showVoidConfirm && !withdrawTopup}
         onOpenChange={setShowVoidConfirm}
         title="Void invoice"
         // The prepaid-credit clause is CONDITIONAL, keyed on the server's own
@@ -1866,7 +1911,7 @@ export default function InvoiceDetailPage() {
               PDF viewer is where the page controls sit. */}
           <div className="relative w-full max-w-4xl h-[85vh] bg-background rounded-2xl shadow-2xl overflow-hidden flex flex-col" onClick={e => e.stopPropagation()}>
             <div className="flex items-center justify-between px-6 py-3 border-b border-border">
-              <h2 className="text-sm font-semibold text-foreground">Invoice Preview -- {invoice.invoice_number}</h2>
+              <h2 className="text-sm font-semibold text-foreground">Invoice Preview -- {invoiceLabel(invoice)}</h2>
               <Button variant="ghost" size="sm" onClick={() => { URL.revokeObjectURL(pdfPreviewUrl); setPdfPreviewUrl(null) }}>
                 Close
               </Button>

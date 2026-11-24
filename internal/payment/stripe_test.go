@@ -348,6 +348,10 @@ func (m *mockInvoiceUpdater) Get(_ context.Context, _, id string) (domain.Invoic
 	return inv, nil
 }
 
+func (m *mockInvoiceUpdater) ListLineItems(context.Context, string, string) ([]domain.InvoiceLineItem, error) {
+	return nil, nil
+}
+
 func (m *mockInvoiceUpdater) MarkPaid(ctx context.Context, tenantID, id string, stripePI string, paidAt time.Time) (domain.Invoice, error) {
 	inv, _, err := m.MarkPaidReportingTransition(ctx, tenantID, id, stripePI, paidAt)
 	return inv, err

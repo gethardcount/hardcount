@@ -16,7 +16,11 @@ func (r *recordingDeliverer) SendInvoice(_ context.Context, _, _ string, _ []str
 	r.sent = append(r.sent, TypeInvoice)
 	return nil
 }
-func (r *recordingDeliverer) SendPaymentReceipt(_ context.Context, _, _ string, _ []string, _, _ string, _ int64, _, _ string) error {
+func (r *recordingDeliverer) SendTopupOffer(_ context.Context, _, _ string, _ []string, _ string, _ int64, _ domain.TopupCredit, _, _ string) error {
+	r.sent = append(r.sent, TypeTopupOffer)
+	return nil
+}
+func (r *recordingDeliverer) SendPaymentReceipt(_ context.Context, _, _ string, _ []string, _, _ string, _ int64, _, _ string, _ *domain.TopupCredit) error {
 	r.sent = append(r.sent, TypePaymentReceipt)
 	return nil
 }
@@ -67,6 +71,11 @@ func (c *recordingChecker) InvoiceTerminalState(_ context.Context, _, invoiceNum
 	return c.state, c.err
 }
 
+func (c *recordingChecker) InvoiceTerminalStateByID(_ context.Context, _, invoiceID string) (string, error) {
+	c.consulted = append(c.consulted, invoiceID)
+	return c.state, c.err
+}
+
 func rowOf(emailType string) OutboxRow {
 	return OutboxRow{
 		ID: "emob_1", TenantID: "t1", EmailType: emailType,
@@ -94,6 +103,30 @@ func TestDispatcherStalenessGate(t *testing.T) {
 			if len(sender.sent) != 0 {
 				t.Errorf("%s: obsolete row was SENT — the exact bug this gate closes", typ)
 			}
+		}
+	})
+
+	t.Run("a top-up's offer is dropped once the top-up is paid or withdrawn", func(t *testing.T) {
+		// The offer names no number: the gate reads the top-up by its id.
+		offer := OutboxRow{ID: "emob_2", TenantID: "t1", EmailType: TypeTopupOffer,
+			Payload: map[string]any{"to": "c@x.test", "customer_name": "C", "invoice_id": "hc_inv_topup", "amount_cents": 9000, "credit_cents": 10000}}
+		for _, st := range []string{"paid", "voided"} {
+			sender := &recordingDeliverer{}
+			checker := &recordingChecker{state: st}
+			d := NewDispatcher(nil, sender, DispatcherConfig{}, leader.AlwaysLead{})
+			d.SetSettledChecker(checker)
+			if err := d.handle(ctx, offer); !errors.Is(err, ErrEmailObsolete) {
+				t.Errorf("offer on a %s top-up: want ErrEmailObsolete, got %v", st, err)
+			}
+			if len(sender.sent) != 0 || len(checker.consulted) != 1 || checker.consulted[0] != "hc_inv_topup" {
+				t.Errorf("offer on a %s top-up: sent %v, consulted %v; want nothing sent, the top-up read by id", st, sender.sent, checker.consulted)
+			}
+		}
+		sender := &recordingDeliverer{}
+		d := NewDispatcher(nil, sender, DispatcherConfig{}, leader.AlwaysLead{})
+		d.SetSettledChecker(&recordingChecker{state: ""})
+		if err := d.handle(ctx, offer); err != nil || len(sender.sent) != 1 {
+			t.Errorf("offer on an unpaid top-up: %v, sent %v; want it sent", err, sender.sent)
 		}
 	})
 

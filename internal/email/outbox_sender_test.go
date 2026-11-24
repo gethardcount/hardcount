@@ -96,13 +96,15 @@ func (f suppressionFake) IsSuppressed(_ context.Context, _, _ string) (bool, str
 func TestOutboxMessage_EveryPayloadKeyIsClassified(t *testing.T) {
 	t.Parallel()
 	keptAfterSend := map[string]bool{
-		"to": true, "cc": true, "customer_name": true, "invoice_number": true,
+		"to": true, "cc": true, "customer_name": true, "invoice_number": true, "invoice_id": true,
 		"credit_note_number": true, "amount_cents": true, "currency": true,
 		"trigger": true, "attempt_number": true, "max_attempts": true,
 		"next_retry_date": true, "reason": true, "failure_reason": true,
 		"escalation_outcome": true, "operator_note": true, "inviter_email": true,
 		"tenant_name": true, "invoice_written_off": true,
 		"invitee_has_account": true,
+		// A top-up's credit amount and validity: facts, no link or token.
+		"credit_cents": true, "credit_valid_days": true,
 		// A yes/no on which warning copy was sent (#966): no link, no token.
 		"card_needs_replacing": true,
 		"decline_ask":          true,

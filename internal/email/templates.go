@@ -188,12 +188,67 @@ func renderInvoiceHTML(customerName, invoiceNumber, amount string, hostedURL str
 	return subject, b.String(), ctaURL, ctaLabel
 }
 
-func renderReceiptHTML(customerName, invoiceNumber, amount, hostedURL string) (subject, contentHTML, ctaURL, ctaLabel string) {
+// renderTopupOfferHTML is the link to buy prepaid credit on an unpaid top-up.
+// The top-up has no invoice number and no PDF until it is paid, and nothing
+// is owed before then, so the email shows no amount due and no due date.
+func renderTopupOfferHTML(customerName, companyName string, payCents int64, credit domain.TopupCredit, currency, hostedURL string) (subject, contentHTML, ctaURL, ctaLabel string) {
+	subject = "Buy prepaid credit from " + sellerName(companyName)
+	lead, validity := topupOfferCopy(companyName, payCents, credit, currency)
+	var b strings.Builder
+	b.WriteString(`<h1 style="margin:0 0 12px;font-size:20px;color:#111827;">Buy prepaid credit</h1>`)
+	b.WriteString(`<p style="margin:0 0 8px;color:#4b5563;">Hi ` + escape(customerName) + `,</p>`)
+	b.WriteString(`<p style="margin:0 0 8px;color:#4b5563;">` + escape(lead) + `</p>`)
+	b.WriteString(`<p style="margin:0 0 16px;color:#4b5563;">` + escape(validity) + `</p>`)
+	if hostedURL != "" {
+		ctaURL = hostedURL
+		ctaLabel = "Buy credit"
+	}
+	return subject, b.String(), ctaURL, ctaLabel
+}
+
+// topupOfferCopy is the top-up offer's body, shared by its HTML and
+// plain-text parts so the two cannot drift.
+func topupOfferCopy(companyName string, payCents int64, credit domain.TopupCredit, currency string) (lead, validity string) {
+	seller := sellerName(companyName)
+	if companyName == "" {
+		// The fallback starts the sentence; a company name keeps its own case.
+		seller = strings.ToUpper(seller[:1]) + seller[1:]
+	}
+	lead = seller + " sent you a link to buy " + formatAmount(credit.CreditCents, currency) +
+		" of prepaid credit for " + formatAmount(payCents, currency) +
+		". This is not a bill: nothing is owed until you pay."
+	return lead, domain.CreditValidityLine(credit.ValidDays)
+}
+
+// sellerName names the seller in an email's words: the tenant's company
+// name, or "your billing team" when none is set. Never Hardcount, which is
+// the software, not the business billing the customer.
+func sellerName(companyName string) string {
+	if companyName == "" {
+		return "your billing team"
+	}
+	return companyName
+}
+
+// topupReceiptLines is what a top-up's receipt adds after the payment
+// sentence, in both parts: the credit added and how long it lasts. It is nil
+// for every other receipt, which then renders unchanged.
+func topupReceiptLines(credit *domain.TopupCredit, currency string) []string {
+	if credit == nil {
+		return nil
+	}
+	return []string{"Credit added: " + formatAmount(credit.CreditCents, currency), domain.CreditValidityLine(credit.ValidDays)}
+}
+
+func renderReceiptHTML(customerName, invoiceNumber, amount, hostedURL string, creditLines []string) (subject, contentHTML, ctaURL, ctaLabel string) {
 	subject = "Payment received for invoice " + invoiceNumber
 	var b strings.Builder
 	b.WriteString(`<h1 style="margin:0 0 12px;font-size:20px;color:#111827;">Payment received</h1>`)
 	b.WriteString(`<p style="margin:0 0 8px;color:#4b5563;">Hi ` + escape(customerName) + `,</p>`)
 	b.WriteString(`<p style="margin:0 0 20px;color:#4b5563;">Thanks — we've received your payment of <strong style="color:#111827;">` + escape(amount) + `</strong> for invoice <strong style="color:#111827;">` + escape(invoiceNumber) + `</strong>.</p>`)
+	for _, line := range creditLines {
+		b.WriteString(`<p style="margin:0 0 8px;color:#4b5563;">` + escape(line) + `</p>`)
+	}
 	if hostedURL != "" {
 		ctaURL = hostedURL
 		ctaLabel = "View receipt"
@@ -624,11 +679,7 @@ func itoa(n int) string {
 // invoiceNumber names the APPLIED invoice so finance can match the
 // credit to the bill it adjusts.
 func renderCreditNoteHTML(customerName, creditNoteNumber, invoiceNumber, amount, companyName string) (subject, contentHTML string) {
-	from := companyName
-	if from == "" {
-		from = "your billing team"
-	}
-	subject = "Credit note " + creditNoteNumber + " from " + from
+	subject = "Credit note " + creditNoteNumber + " from " + sellerName(companyName)
 	var b strings.Builder
 	b.WriteString(`<h1 style="margin:0 0 12px;font-size:20px;color:#111827;">Credit note issued</h1>`)
 	b.WriteString(`<p style="margin:0 0 8px;color:#4b5563;">Hi ` + escape(customerName) + `,</p>`)

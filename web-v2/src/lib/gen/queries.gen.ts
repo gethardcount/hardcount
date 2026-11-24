@@ -8399,6 +8399,20 @@ export const getCreateInvoiceUrl = () => {
  * due date that finalize moves to the moment of finalizing. Tax is not
  * calculated here. It is calculated when the invoice is finalized, so
  * totals equal the subtotal until then.
+ *
+ * A top-up: send one line with `commit_granted_cents` and nothing else
+ * (no `subscription_id`; `net_payment_term_days` does not apply). The invoice gets
+ * billing reason `topup` and stays a draft that takes no other line,
+ * with no number and no due date. Its tax is decided now: buying
+ * credit is untaxed (`tax_reason` `prepaid_credit_purchase`), and the
+ * usage the credit pays for is taxed when it is invoiced. It has its
+ * hosted-page `public_token` at once, and its line keeps the account's
+ * `topup_credit_valid_days` as `credit_valid_days`. Charge the saved
+ * card with `POST /v1/invoices/{id}/collect`, email the customer the
+ * link with `POST /v1/invoices/{id}/send`, or record money received
+ * another way with `POST /v1/invoices/{id}/record-payment`; the
+ * payment numbers it, issues it and grants the credit. To withdraw an
+ * unpaid one, void it. Finalize refuses it.
  * @summary Create a draft invoice
  */
 export const createInvoice = async (invoiceCreateRequest: InvoiceCreateRequest, options?: RequestInit): Promise<Invoice> => {
@@ -8771,6 +8785,11 @@ export const getSendInvoiceUrl = (id: string,) => {
  * The invoice must be issued: `finalized`, `paid` or `uncollectible`.
  * A draft or voided invoice is refused with 409, and so is an invoice
  * whose charge is still unresolved.
+ *
+ * An unpaid top-up is the one draft this sends: its email, "Buy
+ * prepaid credit from <your company>", offers the credit for its price
+ * with a "Buy credit" button to its hosted page, says nothing is owed
+ * until the customer pays, and attaches no PDF.
  *
  * `email` is the recipient. `additional_emails` sets who is copied:
  * - absent: the customer's stored `additional_emails` are copied,
@@ -9228,6 +9247,10 @@ export const getRecordInvoicePaymentUrl = (id: string,) => {
  * from. The optional `note` is stored in the audit log, cut to 500
  * bytes.
  *
+ * On a top-up still a draft, the payment numbers it, issues it, marks
+ * it paid and grants its credit, all at once; `recovered_from` is
+ * `draft`.
+ *
  * On a written-off invoice, read its `recovery_warning` first: it says
  * when the payment will not reconcile on its own. The payment is still
  * recorded.
@@ -9400,6 +9423,16 @@ export const getCollectInvoicePaymentUrl = (id: string,) => {
  * the invoice's `payment_status` becomes `failed`, and dunning starts
  * when the customer's policy is enabled. Check
  * `payment_status` on the returned invoice.
+ *
+ * A top-up (`billing_reason` `topup`) is charged here while it is a
+ * draft. No credit balance is applied to it: it is what buys credit.
+ * A payment that succeeds numbers it, issues it, marks it paid and
+ * grants its credit, all at once. A declined card leaves it an
+ * unnumbered draft that can be charged again, and sends the customer
+ * no email. Your own code can call this route, for example when a
+ * customer's balance runs low: send an `Idempotency-Key`, and a retry
+ * with the same key answers what the first call answered and never
+ * charges twice.
  *
  * A written-off (`uncollectible`) invoice cannot be charged here.
  * Record an offline payment or issue a new invoice instead. The route
@@ -10750,6 +10783,8 @@ export const getFinalizeInvoiceUrl = (id: string,) => {
  * - Refuses with 409 while tax cannot be calculated (`tax_status`
  *   `pending`): the invoice stays a draft. See
  *   `POST /v1/invoices/{id}/retry-tax`.
+ * - Refuses a top-up (`billing_reason` `topup`) with 409: its payment
+ *   issues it.
  * - Moves the invoice to `finalized`, copies the customer and company
  *   details onto it (`bill_to_snapshot`, `supplier_snapshot`,
  *   `footer`), grants the credit of a prepaid commit line, issues any

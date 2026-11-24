@@ -131,24 +131,26 @@ func (h *commitHarness) countEvents(t *testing.T, ctx context.Context, custID, e
 	return n
 }
 
-// createCommitInvoice composes a manual invoice with one commit line through
-// the real service path (Create → buildLineItem → CreateWithLineItems).
+// createCommitInvoice makes an operator's commit draft from before top-ups,
+// which its finalize funds: a manual draft composed through the service,
+// whose one line is then marked as a commit line
+// (testutil.MarkLegacyCommitLine).
 func (h *commitHarness) createCommitInvoice(t *testing.T, ctx context.Context, priceCents, grantCents int64) domain.Invoice {
 	t.Helper()
 	inv, err := h.invSvc.Create(ctx, h.tenantID, invoice.CreateInput{
 		CustomerID: h.custID,
 		Currency:   "USD",
 		LineItems: []invoice.AddLineItemInput{{
-			Description:        "Prepaid commit — Q3",
-			LineType:           "add_on",
-			Quantity:           1,
-			UnitAmountCents:    priceCents,
-			CommitGrantedCents: &grantCents,
+			Description:     "Prepaid commit — Q3",
+			LineType:        "add_on",
+			Quantity:        1,
+			UnitAmountCents: priceCents,
 		}},
 	})
 	if err != nil {
 		t.Fatalf("create commit invoice: %v", err)
 	}
+	testutil.MarkLegacyCommitLine(ctx, t, h.db, h.tenantID, inv.ID, grantCents)
 	return inv
 }
 
@@ -254,7 +256,9 @@ func TestCommitFinalize_FunderErrorKeepsDraft(t *testing.T) {
 // failingFunder fails every commit grant.
 type failingFunder struct{}
 
-func (failingFunder) GrantCommitForInvoiceTx(context.Context, *sql.Tx, string, string, string, string, string, int64) (domain.CreditLedgerEntry, error) {
+func (failingFunder) LockCustomerCreditTx(context.Context, *sql.Tx, string, string) error { return nil }
+
+func (failingFunder) GrantCommitForInvoiceTx(context.Context, *sql.Tx, string, string, string, string, string, int64, *time.Time) (domain.CreditLedgerEntry, error) {
 	return domain.CreditLedgerEntry{}, errors.New("grant refused")
 }
 

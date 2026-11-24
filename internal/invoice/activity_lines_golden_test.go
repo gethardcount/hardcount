@@ -320,7 +320,14 @@ func buildGoldenCases(t *testing.T, w writerTokens) []goldenCase {
 	for _, br := range w.billingReasons {
 		i := inv
 		i.BillingReason = domain.InvoiceBillingReason(br)
-		add("created/"+br, createdLine(i, auto, &sub))
+		actor, link := auto, &sub
+		if i.BillingReason == domain.BillingReasonTopup {
+			// An operator creates a top-up; it has no subscription, and no
+			// number until it is paid.
+			i.SubscriptionID, i.InvoiceNumber = "", ""
+			actor, link = person, nil
+		}
+		add("created/"+br, createdLine(i, actor, link))
 	}
 	for _, ct := range []domain.ItemChangeType{domain.ItemChangeTypePlan, domain.ItemChangeTypeQuantity, domain.ItemChangeTypeAdd, ""} {
 		i := inv

@@ -37,7 +37,8 @@ type DispatcherConfig struct {
 // the Sender resolve against the correct tenant_settings row.
 type EmailDeliverer interface {
 	SendInvoice(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, totalCents int64, currency string, pdfBytes []byte, publicToken string, writtenOff bool) error
-	SendPaymentReceipt(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, amountCents int64, currency, publicToken string) error
+	SendTopupOffer(ctx context.Context, tenantID, to string, cc []string, customerName string, payCents int64, credit domain.TopupCredit, currency, publicToken string) error
+	SendPaymentReceipt(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, amountCents int64, currency, publicToken string, credit *domain.TopupCredit) error
 	SendDunningWarning(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, attemptNumber, maxAttempts int, nextRetryDate, failureReason, publicToken string, ask domain.DeclineAsk) error
 	SendDunningEscalation(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, outcome domain.DunningEscalationOutcome, publicToken string) error
 	SendPaymentFailed(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber, reason, publicToken string, ask domain.DeclineAsk) error
@@ -123,6 +124,9 @@ type InvoiceSettledChecker interface {
 	// needs the specific state because ONE email type survives one of
 	// them — see handle().
 	InvoiceTerminalState(ctx context.Context, tenantID, invoiceNumber string) (string, error)
+	// InvoiceTerminalStateByID is InvoiceTerminalState by the invoice's id,
+	// for a row naming an invoice with no number (a top-up's offer).
+	InvoiceTerminalStateByID(ctx context.Context, tenantID, invoiceID string) (string, error)
 }
 
 // SetSettledChecker wires the staleness gate (see handle).
@@ -173,6 +177,9 @@ var actionRequiredTypes = map[string]bool{
 	TypePaymentFailed:       true,
 	TypeDunningWarning:      true,
 	TypeDunningEscalation:   true,
+	// A top-up's offer asks the customer to buy credit: once the top-up is
+	// paid or withdrawn, the link sells nothing.
+	TypeTopupOffer: true,
 }
 
 // handle is the per-row handler. It demarshals the payload based on
@@ -197,15 +204,23 @@ func (d *Dispatcher) handle(ctx context.Context, row OutboxRow) error {
 	// AFTER the customer paid erodes trust (found live, FLOW E
 	// 2026-07-19). FAIL-OPEN on checker errors: a DB blip must never eat
 	// customer mail; the pre-gate behavior (send) is the fallback.
-	if d.settled != nil && actionRequiredTypes[row.EmailType] && msg.InvoiceNumber != "" {
+	if d.settled != nil && actionRequiredTypes[row.EmailType] && (msg.InvoiceNumber != "" || msg.InvoiceID != "") {
 		livemodeCtx := postgres.WithLivemode(ctx, row.Livemode)
-		state, cerr := d.settled.InvoiceTerminalState(livemodeCtx, row.TenantID, msg.InvoiceNumber)
+		invoice := msg.InvoiceNumber
+		var state string
+		var cerr error
+		if invoice != "" {
+			state, cerr = d.settled.InvoiceTerminalState(livemodeCtx, row.TenantID, invoice)
+		} else {
+			invoice = msg.InvoiceID
+			state, cerr = d.settled.InvoiceTerminalStateByID(livemodeCtx, row.TenantID, invoice)
+		}
 		if cerr != nil {
 			slog.Warn("email staleness check failed — sending anyway (fail-open)",
 				"outbox_id", row.ID, "email_type", row.EmailType,
-				"invoice_number", msg.InvoiceNumber, "error", cerr)
+				"invoice", invoice, "error", cerr)
 		} else if state != "" && !escalationAnnounces(row.EmailType, state) && !setupLinkServesRecovery(row.EmailType, state) {
-			return &ObsoleteError{InvoiceNumber: msg.InvoiceNumber, State: state}
+			return &ObsoleteError{InvoiceNumber: invoice, State: state}
 		}
 	}
 
@@ -225,9 +240,12 @@ func (d *Dispatcher) handle(ctx context.Context, row OutboxRow) error {
 	case TypeInvoice:
 		return d.sender.SendInvoice(ctx, row.TenantID, msg.To, msg.Cc, msg.CustomerName, msg.InvoiceNumber,
 			msg.AmountCents, msg.Currency, msg.PDF, msg.PublicToken, msg.InvoiceWrittenOff)
+	case TypeTopupOffer:
+		return d.sender.SendTopupOffer(ctx, row.TenantID, msg.To, msg.Cc, msg.CustomerName, msg.AmountCents,
+			domain.TopupCredit{CreditCents: msg.CreditCents, ValidDays: msg.CreditValidDays}, msg.Currency, msg.PublicToken)
 	case TypePaymentReceipt:
 		return d.sender.SendPaymentReceipt(ctx, row.TenantID, msg.To, msg.Cc, msg.CustomerName, msg.InvoiceNumber,
-			msg.AmountCents, msg.Currency, msg.PublicToken)
+			msg.AmountCents, msg.Currency, msg.PublicToken, msg.topupCredit())
 	case TypeDunningWarning:
 		return d.sender.SendDunningWarning(ctx, row.TenantID, msg.To, msg.Cc, msg.CustomerName, msg.InvoiceNumber,
 			msg.AttemptNumber, msg.MaxAttempts, msg.NextRetryDate, msg.FailureReason, msg.PublicToken, msg.declineAsk())

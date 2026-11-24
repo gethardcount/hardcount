@@ -16,8 +16,10 @@
 //     exists. Paid and voided invoices stay viewable (customers expect to
 //     revisit past invoices for their records) but the Pay action is
 //     disabled.
-//   - Drafts never leak: a token can only be minted at finalize, and the
-//     view returns 404 if the invoice ever regressed to draft.
+//   - Drafts never leak: a token is minted at finalize, and the view
+//     returns 404 for a draft. The one exception is an unpaid top-up, which
+//     gets its token at create: its page is where the customer buys the
+//     credit, and the payment issues it.
 //   - Safe projection of tenant branding only: company name, logo URL,
 //     brand color, support URL, and registered-business address — enough
 //     for customer-facing trust, nothing that could aid a cross-tenant
@@ -178,6 +180,10 @@ type HostedInvoicePayload struct {
 	// "invoice.status == finalized && amount_due > 0", but computed
 	// server-side so the rule lives in one place.
 	PayEnabled bool `json:"pay_enabled"`
+	// Topup is set for a top-up: the credit it sells, which the page shows
+	// in place of an amount due ("You pay $X. You get $Y of credit"). Absent
+	// for every other invoice.
+	Topup *viewTopup `json:"topup,omitempty"`
 	// PayUnavailableReason says why an owed invoice has no Pay button:
 	// "online_payment_unavailable" when it can't be paid online (no payment
 	// provider connected, or no hosted invoice address on this server), or
@@ -259,6 +265,26 @@ func toViewCreditNotes(notes []domain.CreditNote) []viewCreditNote {
 	return out
 }
 
+// viewTopup is the credit a top-up sells, as the customer sees it.
+type viewTopup struct {
+	CreditCents int64 `json:"credit_cents"`
+	// CreditValidDays is how long the credit stays usable after the payment;
+	// null: it never expires. Validity is the sentence that says so.
+	CreditValidDays *int   `json:"credit_valid_days"`
+	Validity        string `json:"validity"`
+}
+
+func toViewTopup(inv domain.Invoice, items []domain.InvoiceLineItem) *viewTopup {
+	if inv.BillingReason != domain.BillingReasonTopup {
+		return nil
+	}
+	c, ok := domain.TopupCreditOf(items)
+	if !ok {
+		return nil
+	}
+	return &viewTopup{CreditCents: c.CreditCents, CreditValidDays: c.ValidDays, Validity: domain.CreditValidityLine(c.ValidDays)}
+}
+
 type viewLineItem struct {
 	Description string `json:"description"`
 	// Quantity is the line's exact quantity as a decimal string
@@ -325,11 +351,11 @@ func (h *Handler) resolveInvoice(w http.ResponseWriter, r *http.Request) (domain
 		respond.InternalError(w, r)
 		return domain.Invoice{}, false
 	}
-	// Drafts must never be reachable via a public URL. Finalize is the
-	// only code path that mints a token, but belt-and-suspenders: even
-	// if a future code change regressed an invoice to draft, we still
-	// 404 here rather than leak draft state to the public.
-	if inv.Status == domain.InvoiceDraft {
+	// Drafts must never be reachable via a public URL, except an unpaid
+	// top-up, whose page is where it is paid. Only finalize and a top-up's
+	// create mint a token, but belt-and-suspenders: any other draft gets a
+	// 404 rather than leak draft state to the public.
+	if inv.Status == domain.InvoiceDraft && !inv.UnpaidTopup() {
 		respond.NotFound(w, r, "invoice")
 		return domain.Invoice{}, false
 	}
@@ -436,6 +462,7 @@ func (h *Handler) viewInvoice(w http.ResponseWriter, r *http.Request) {
 		Branding:             branding,
 		CreditNotes:          toViewCreditNotes(notes),
 		PayEnabled:           owed && online && !belowMinimum,
+		Topup:                toViewTopup(inv, items),
 		PayUnavailableReason: payUnavailableReason(owed, online, belowMinimum),
 		// resolveToken pinned the row's livemode onto the request ctx.
 		Livemode: live,
@@ -564,7 +591,7 @@ func (h *Handler) downloadPDF(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", "inline; filename=\""+inv.InvoiceNumber+".pdf\"")
+	w.Header().Set("Content-Disposition", "inline; filename=\""+invoice.PDFFileName(inv)+".pdf\"")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(pdfBytes)
 }
@@ -586,8 +613,9 @@ func (h *Handler) checkoutReturnURLs(token string) (successURL, cancelURL string
 }
 
 // payEnabled encodes the "can the customer click Pay" rule in one place.
-// Finalized invoices with a positive amount_due are payable. Paid invoices
-// aren't (already settled). Voided invoices aren't (no longer owed).
+// Finalized invoices and unpaid top-ups with a positive amount_due are
+// payable. Paid invoices aren't (already settled). Voided invoices aren't
+// (no longer owed).
 // amount_due=0 isn't payable either — that's a credit-fully-covered
 // invoice, not a Pay action.
 func payEnabled(inv domain.Invoice) bool {
@@ -597,7 +625,7 @@ func payEnabled(inv domain.Invoice) bool {
 	// happily rendered a Pay button that answered 409 when the customer pressed
 	// it. A button that cannot do what it says is the UI-lies class, and on the
 	// one page a paying customer sees.
-	return inv.Status == domain.InvoiceFinalized &&
+	return inv.OpenForPayment() &&
 		inv.AmountDueCents > 0 &&
 		!inv.PaymentInFlight()
 }

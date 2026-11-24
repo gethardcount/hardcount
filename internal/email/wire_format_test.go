@@ -70,8 +70,11 @@ func TestWireFormat_EverySendPath(t *testing.T) {
 			return s.SendInvoice(ctx, "t1", "ap@acme.test", nil, cust, "INV-000124", 0, "eur", pdf, "tok_abc", false)
 		}, []string{cust, "settled"}},
 		{"receipt", func() error {
-			return s.SendPaymentReceipt(ctx, "t1", "ap@acme.test", nil, cust, "INV-000123", 123456, "eur", "tok_abc")
+			return s.SendPaymentReceipt(ctx, "t1", "ap@acme.test", nil, cust, "INV-000123", 123456, "eur", "tok_abc", nil)
 		}, []string{cust}},
+		{"topup-offer", func() error {
+			return s.SendTopupOffer(ctx, "t1", "ap@acme.test", []string{"finance@acme.test"}, cust, 4500, domain.TopupCredit{CreditCents: 5000}, "eur", "tok_abc")
+		}, []string{cust, "Buy credit: https://pay.example.com/invoice/tok_abc"}},
 		{"dunning-warning", func() error {
 			return s.SendDunningWarning(ctx, "t1", "ap@acme.test", nil, cust, "INV-000123", 1, 4, "2026-10-20", "insufficient_funds", "tok_abc", domain.DeclineAskNone)
 		}, []string{cust, "insufficient_funds"}},

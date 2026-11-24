@@ -56,7 +56,9 @@ export interface Invoice {
      * The number printed on the invoice: the account's invoice prefix
      * (default `HC`), a hyphen and a sequence padded to six digits, for
      * example `HC-000042`. Test mode and live mode count separately.
-     * Set when the invoice is created, drafts included.
+     * Set when the invoice is created, drafts included, except on a
+     * top-up (`billing_reason` `topup`): empty until its payment
+     * numbers it, and still empty once an unpaid one is voided.
      */
   invoice_number: string;
   status: InvoiceStatus;
@@ -273,7 +275,8 @@ export interface Invoice {
      * calendar days, counted in `billing_timezone`. Set with
      * `issued_at`. Hardcount does not charge on this date: it collects
      * right after finalize and retries on the dunning schedule. The
-     * `overdue` filter of `GET /v1/invoices` uses it.
+     * `overdue` filter of `GET /v1/invoices` uses it. Absent on a
+     * top-up, which has no due date.
      */
   due_at?: string;
   /** When the invoice was paid. Absent until it is paid. */

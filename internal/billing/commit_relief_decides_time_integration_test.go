@@ -37,7 +37,7 @@ func reliefThroughTheRoute(t *testing.T, name string, at time.Time) domain.Credi
 	invStore := invoice.NewPostgresStore(db)
 	invStore.SetCommitFunder(creditSvc)
 	invSvc := invoice.NewService(invStore, clock.Real(), settings)
-	draft := createCommitInvoice(t, ctx, invSvc, tenantID, cust.ID, 10000, 10000)
+	draft := createCommitInvoice(t, ctx, invSvc, db, tenantID, cust.ID, 10000, 10000)
 	if _, err := invSvc.Finalize(ctx, tenantID, draft.ID); err != nil {
 		t.Fatalf("finalize: %v", err)
 	}

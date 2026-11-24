@@ -222,34 +222,21 @@ func grantAuditMetadata(out domain.CreditLedgerEntry) map[string]any {
 }
 
 // GrantCommitForInvoiceTx appends the commit grant on the CALLER's tx, in the
-// funding invoice's currency (ADR-129) —
-// invoice.FinalizeWithDates runs it inside the finalize coordinator tx so the
-// status flip and the grant commit or roll back together (ADR-078 D2). An
-// error here fails Finalize by design: it is operator-synchronous, loud, and
-// retryable (the finalize CAS makes the retry clean). The fund-once partial
-// unique index (migration 0136) is a structural backstop whose violation
-// aborts the tx loudly — never caught here (poisoned-tx; see
-// GrantForCreditNoteTx's contract). Flat args so the invoice store's
-// consumer-side CommitFunder interface is satisfied directly (zero
-// cross-domain imports).
-func (s *Service) GrantCommitForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber, currency string, amountCents int64) (domain.CreditLedgerEntry, error) {
-	if customerID == "" {
-		return domain.CreditLedgerEntry{}, errs.Required("customer_id")
-	}
-	if invoiceID == "" {
-		return domain.CreditLedgerEntry{}, errs.Required("invoice_id")
-	}
-	if strings.TrimSpace(currency) == "" {
-		// The funding invoice always has a currency; an empty one here is a
-		// caller bug. The store refuses it too.
-		return domain.CreditLedgerEntry{}, fmt.Errorf("commit grant for invoice %s has no currency", invoiceID)
-	}
-	if amountCents <= 0 {
-		return domain.CreditLedgerEntry{}, errs.Invalid("commit_granted_cents", "must be greater than 0")
-	}
-	if amountCents > 100_000_000 { // $1M cap, matches Grant; raise on first DP ask (ADR-078)
-		return domain.CreditLedgerEntry{}, errs.Invalid("commit_granted_cents", grantCapMessage)
-	}
+// funding invoice's currency (ADR-129), expiring at expiresAt (nil: never).
+// A top-up's payment runs it inside the settle transaction, and
+// invoice.FinalizeWithDates inside the finalize transaction, so the grant
+// commits or rolls back with the money write (ADR-078 D2).
+//
+// It checks nothing: every input comes from the funding invoice and its
+// commit line, which buildLineItem and the line's CHECK validated when the
+// invoice was created, and expiresAt lies after the payment. A payment that
+// arrives must always be recorded with its grant, so nothing here refuses one.
+// The store still refuses an empty currency, and the fund-once partial unique
+// index (migration 0136) aborts the tx on a second grant for one invoice —
+// never caught here (poisoned-tx; see GrantForCreditNoteTx's contract). Flat
+// args so the invoice store's consumer-side CommitFunder interface is
+// satisfied directly (zero cross-domain imports).
+func (s *Service) GrantCommitForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber, currency string, amountCents int64, expiresAt *time.Time) (domain.CreditLedgerEntry, error) {
 	desc := "Prepaid commit"
 	if invoiceNumber != "" {
 		desc = fmt.Sprintf("Prepaid commit — invoice %s", invoiceNumber)
@@ -261,10 +248,19 @@ func (s *Service) GrantCommitForInvoiceTx(ctx context.Context, tx *sql.Tx, tenan
 		AmountCents:     amountCents,
 		Description:     desc,
 		InvoiceID:       invoiceID,
+		ExpiresAt:       expiresAt,
 		GrantKind:       domain.GrantKindCommit,
 		SourceInvoiceID: invoiceID,
 		CreatedAt:       clock.Now(ctx),
 	})
+}
+
+// LockCustomerCreditTx takes the customer's credit lock on the caller's tx,
+// the lock every balance write takes before its ledger rows. A top-up's
+// settle takes it before the tenant's number row, the order every other
+// writer of both keeps. Re-entrant within tx.
+func (s *Service) LockCustomerCreditTx(ctx context.Context, tx *sql.Tx, tenantID, customerID string) error {
+	return s.store.LockCustomerCreditTx(ctx, tx, tenantID, customerID)
 }
 
 // CommitReliefResult is the post-retire grant state the relief CN needs

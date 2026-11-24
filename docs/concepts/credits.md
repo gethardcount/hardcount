@@ -41,8 +41,8 @@ There are three ways:
   `amount_cents` (up to 100,000,000, so $1,000,000), a `description`, and
   optionally `expires_at` and `"grant_kind": "promotional"`. Use it for
   goodwill credit or free promotional credit.
-- **A prepaid commit:** the customer pays up front on a one-off invoice
-  and gets credit when it is issued. See [Prepaid commits](#prepaid-commits).
+- **A prepaid commit:** the customer pays up front on a top-up and gets
+  credit when it is paid. See [Prepaid commits](#prepaid-commits).
 - **An adjustment:** `POST /v1/credits/adjust` with a positive or negative
   `amount_cents`. An adjustment down that is larger than the balance is
   refused with `422`.
@@ -101,16 +101,19 @@ credit amount.
 ## Prepaid commits
 
 A prepaid commit is credit the customer pays for up front, such as "pay
-$9,000, get $10,000 of credit". You sell it as a line on a one-off invoice:
+$9,000, get $10,000 of credit". You sell it on a top-up: a one-off invoice
+whose only line is the commit line.
 
 - `unit_amount_cents` is what the customer pays;
 - `commit_granted_cents` is the credit they get, and can be more.
 
-When the invoice is finalized, the customer gets a block of kind `commit`,
-which never expires. The commit line is the only line on its invoice. The
-purchase is not taxed; the usage the credit pays for is. For credit with an
-expiry, grant it by hand with `expires_at` (`POST /v1/credits/grant`). Voiding the purchase invoice takes back what is left
-of the credit.
+A top-up is a draft with no number until it is paid. When it is paid, by
+the saved card, on its hosted page or recorded by you, it is numbered and
+issued, and the customer gets a block of kind `commit`. The block expires
+`topup_credit_valid_days` after the payment, as the setting stood when the
+top-up was made; unset, it never expires. The purchase is not taxed; the
+usage the credit pays for is. To withdraw a top-up nobody paid, void it: it
+granted nothing.
 
 More: [Sell prepaid credit](../ai-pricing.md#sell-prepaid-credit-a-prepaid-commit),
 with every call, and [tax on prepaid credit](../ai-pricing.md#tax-on-prepaid-credit).

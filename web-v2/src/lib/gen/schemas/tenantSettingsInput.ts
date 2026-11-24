@@ -54,6 +54,17 @@ export interface TenantSettingsInput {
      * @nullable
      */
   credit_balance_low_threshold_cents?: number | null;
+  /**
+     * How many days credit bought with a top-up stays usable after its
+     * payment. A new top-up copies it onto its line
+     * (`credit_valid_days`), so a change applies to top-ups created
+     * after it. Send null for credit that never expires (the default);
+     * answers leave it out then.
+     * @minimum 1
+     * @maximum 3650
+     * @nullable
+     */
+  topup_credit_valid_days?: number | null;
   /** `none` = no tax, `manual` = the flat `tax_rate`, `stripe_tax` = Stripe Tax. */
   tax_provider?: TenantSettingsInputTaxProvider;
   /**

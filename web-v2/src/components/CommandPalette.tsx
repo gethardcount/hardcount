@@ -1,4 +1,5 @@
 import { useCallback, useState } from 'react'
+import { invoiceLabel } from '@/lib/invoiceDocument'
 import { useQuery } from '@tanstack/react-query'
 import { useNavigate } from 'react-router-dom'
 import { useDebouncedValue } from '@/hooks/useDebouncedValue'
@@ -171,13 +172,13 @@ export function CommandPalette({ open, onClose }: CommandPaletteProps) {
               {invoices.slice(0, 10).map(inv => (
                 <CommandItem
                   key={`inv-${inv.id}`}
-                  value={`invoice ${inv.invoice_number} ${inv.status}`}
+                  value={`invoice ${invoiceLabel(inv)} ${inv.status}`}
                   onSelect={() => go(`/invoices/${inv.id}`)}
                   className="py-2.5 px-3 data-selected:bg-accent data-selected:text-accent-foreground"
                 >
                   <FileText className="mr-2 h-4 w-4" />
                   <div className="flex flex-col">
-                    <span>{inv.invoice_number}</span>
+                    <span>{invoiceLabel(inv)}</span>
                     <span className="text-xs opacity-60">{invoiceStatus(inv, wallClockNow()).label} · {invoiceRowAmount(inv)}</span>
                   </div>
                 </CommandItem>

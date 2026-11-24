@@ -506,7 +506,10 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 	// date on a customer-retained financial document (ADR-075 audit).
 	docLoc := domain.LoadLocationOrUTC(inv.BillingTimezone)
 
-	detailRow("Number", inv.InvoiceNumber)
+	// An unpaid top-up has no number until its payment issues it.
+	if inv.InvoiceNumber != "" {
+		detailRow("Number", inv.InvoiceNumber)
+	}
 	for _, row := range issueDateRows(inv, docLoc) {
 		detailRow(row[0], row[1])
 	}
@@ -975,7 +978,7 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 			} else if inv.PaymentStatus == domain.PaymentSucceeded && inv.PaidAt != nil {
 				textAt(margin, y, fmt.Sprintf("Paid on %s - Thank you!", inv.PaidAt.In(docLoc).Format("January 2, 2006")))
 			} else {
-				textAt(margin, y, paymentTermsLine(inv.Status, inv.NetPaymentTermDays))
+				textAt(margin, y, paymentTermsLine(inv.Status, inv.BillingReason, inv.NetPaymentTermDays))
 			}
 
 			if inv.Memo != "" {
@@ -1099,6 +1102,10 @@ func sellerName(company ...CompanyInfo) string {
 func issueDateRows(inv domain.Invoice, loc *time.Location) [][2]string {
 	if inv.Status == domain.InvoiceDraft {
 		rows := [][2]string{{"Status", "Draft — not issued"}}
+		if inv.BillingReason == domain.BillingReasonTopup {
+			// A top-up has no due date: its payment issues it.
+			return append(rows, [2]string{"Due", topupTerms})
+		}
 		if isOperatorComposed(inv) || inv.DueAt == nil {
 			return append(rows, [2]string{"Due", draftDueTerms(inv.NetPaymentTermDays)})
 		}
@@ -1271,11 +1278,18 @@ func aggregateTaxByJurisdiction(lineItems []domain.InvoiceLineItem) []jurisdicti
 	return rows
 }
 
+// topupTerms is a top-up's terms: it has no due date.
+const topupTerms = "Nothing is owed until it is paid."
+
 // paymentTermsLine is the footer line for an unpaid invoice. Net 0 reads "due
 // on receipt", matching the dashboard's Terms label, not "within 0 days". A
 // written-off invoice is past its terms and has no Pay button (ADR-110), so
-// it asks the customer to contact the seller instead of naming a deadline.
-func paymentTermsLine(status domain.InvoiceStatus, netDays int) string {
+// it asks the customer to contact the seller instead of naming a deadline. A
+// top-up has no due date.
+func paymentTermsLine(status domain.InvoiceStatus, reason domain.InvoiceBillingReason, netDays int) string {
+	if reason == domain.BillingReasonTopup {
+		return topupTerms
+	}
 	if status == domain.InvoiceUncollectible {
 		return "This invoice is closed for online payment. Please contact us to arrange payment."
 	}

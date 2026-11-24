@@ -37,6 +37,18 @@ func TestPaymentBlocksAction_Matrix(t *testing.T) {
 		}
 	})
 
+	t.Run("an unpaid top-up in flight refuses everything, with no write-off offered", func(t *testing.T) {
+		// A top-up is a draft, so the store refuses a write-off on it: the
+		// refusal says only what is true, that Stripe is being asked.
+		topup := Invoice{Status: InvoiceDraft, BillingReason: BillingReasonTopup, PaymentStatus: PaymentUnknown, StripePaymentIntentID: "pi_1"}
+		for _, a := range every {
+			got := PaymentBlocksAction(topup, a)
+			if !got.Blocked || !strings.Contains(got.Message, "checking this top-up's charge with Stripe") || strings.Contains(got.Message, "uncollectible") {
+				t.Errorf("%s on an unpaid top-up in flight: %+v; want blocked, saying Stripe is being asked, with no write-off", a, got)
+			}
+		}
+	})
+
 	t.Run("parked allows ONLY mark-uncollectible", func(t *testing.T) {
 		for _, a := range every {
 			got := PaymentBlocksAction(parked, a)

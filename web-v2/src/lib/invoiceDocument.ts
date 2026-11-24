@@ -134,3 +134,12 @@ export function issueDates(
     due: inv.due_at ? fmt(inv.due_at) : '—',
   }
 }
+
+/**
+ * The name an invoice goes by: its number, or "Prepaid credit" for a top-up
+ * not yet numbered (an unpaid one, or one withdrawn before it was paid).
+ */
+export function invoiceLabel(inv: { invoice_number?: string | null; billing_reason?: string | null }): string {
+  if (!inv.invoice_number && inv.billing_reason === 'topup') return 'Prepaid credit'
+  return inv.invoice_number ?? ''
+}

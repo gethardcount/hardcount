@@ -63,6 +63,8 @@ func whyInvoiceExists(inv domain.Invoice) activity.Segment {
 		return activity.Text("Spend threshold crossed")
 	case domain.BillingReasonSubscriptionCancel:
 		return activity.Text("Final invoice after cancellation")
+	case domain.BillingReasonTopup:
+		return activity.Text("Prepaid credit")
 	}
 	return nil
 }

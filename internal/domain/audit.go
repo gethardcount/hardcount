@@ -93,10 +93,15 @@ type TenantSettings struct {
 	// balance from >= this value to < it emits the event. Nil turns
 	// low-balance alerts off. balance_depleted (>0→0) and balance_recovered
 	// (0→>0) fire whatever this is set to.
-	CreditBalanceLowThresholdCents *int64  `json:"credit_balance_low_threshold_cents,omitempty"`
-	TaxRate                        float64 `json:"tax_rate"` // Percent rate (4-decimal precision via NUMERIC(7,4)). 7.25 = 7.25%. ADR-042/043.
-	TaxName                        string  `json:"tax_name,omitempty"`
-	TaxInclusive                   bool    `json:"tax_inclusive"`
+	CreditBalanceLowThresholdCents *int64 `json:"credit_balance_low_threshold_cents,omitempty"`
+	// TopupCreditValidDays is how many days credit bought with a top-up stays
+	// usable after its payment. A new top-up copies it onto its line
+	// (InvoiceLineItem.CreditValidDays), so a later change leaves an unpaid
+	// one as it was. Nil: bought credit never expires.
+	TopupCreditValidDays *int    `json:"topup_credit_valid_days,omitempty"`
+	TaxRate              float64 `json:"tax_rate"` // Percent rate (4-decimal precision via NUMERIC(7,4)). 7.25 = 7.25%. ADR-042/043.
+	TaxName              string  `json:"tax_name,omitempty"`
+	TaxInclusive         bool    `json:"tax_inclusive"`
 	// TaxProvider selects the backend that computes tax (internal/tax):
 	// 'none' charges no tax, 'manual' applies the flat TaxRate above, and
 	// 'stripe_tax' asks Stripe Tax.

@@ -210,6 +210,7 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	paymentMethodsStore.SetOutboxEnqueuer(outboxStore)
 
 	invoiceStore.SetCommitFunder(creditSvc)
+	invoiceStore.SetInvoiceNumberer(settingsStore)
 	invoiceStore.SetDunningPauseReleaser(subStore)
 
 	// Audit, API keys, the cost dashboard and settings.

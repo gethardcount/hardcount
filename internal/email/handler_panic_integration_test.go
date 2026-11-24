@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/leader"
 	"github.com/gethardcount/hardcount/internal/platform/leader/leadertest"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
@@ -21,12 +22,12 @@ type panicOnceDeliverer struct {
 	panicked bool
 }
 
-func (p *panicOnceDeliverer) SendPaymentReceipt(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, amountCents int64, currency, publicToken string) error {
+func (p *panicOnceDeliverer) SendPaymentReceipt(ctx context.Context, tenantID, to string, cc []string, customerName, invoiceNumber string, amountCents int64, currency, publicToken string, credit *domain.TopupCredit) error {
 	if !p.panicked {
 		p.panicked = true
 		panic("receipt: nil dereference")
 	}
-	return p.recordingDeliverer.SendPaymentReceipt(ctx, tenantID, to, cc, customerName, invoiceNumber, amountCents, currency, publicToken)
+	return p.recordingDeliverer.SendPaymentReceipt(ctx, tenantID, to, cc, customerName, invoiceNumber, amountCents, currency, publicToken, credit)
 }
 
 // captureLogs sends slog's default logger to a buffer for the rest of the

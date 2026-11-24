@@ -147,6 +147,21 @@ func (s *PostgresStore) AppendEntryTx(ctx context.Context, tx *sql.Tx, tenantID 
 	return s.appendEntryInTx(ctx, tx, tenantID, entry)
 }
 
+// LockCustomerCreditTx takes the customer's credit lock on tx: the
+// transaction-scoped advisory lock every balance writer takes before its
+// ledger rows (insertEntryInTx). A transaction that must hold it before
+// another lock takes it here first. It is re-entrant within tx, so the
+// writer's own take of it later is free.
+func (s *PostgresStore) LockCustomerCreditTx(ctx context.Context, tx *sql.Tx, tenantID, customerID string) error {
+	if _, err := tx.ExecContext(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
+		tenantID+":"+customerID,
+	); err != nil {
+		return fmt.Errorf("acquire credit ledger lock: %w", err)
+	}
+	return nil
+}
+
 // appendEntryInTx is the shared body. AppendEntry opens+commits its
 // own tx; AppendEntryTx delegates to the caller. It inserts the entry and
 // enqueues the balance crossings the entry causes.
@@ -198,11 +213,8 @@ func (s *PostgresStore) insertEntryInTx(ctx context.Context, tx *sql.Tx, tenantI
 	//
 	// tenant_id is folded into the lock key as defense-in-depth (RLS already
 	// scopes the tx to this tenant).
-	if _, err := tx.ExecContext(ctx,
-		`SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
-		tenantID+":"+entry.CustomerID,
-	); err != nil {
-		return domain.CreditLedgerEntry{}, 0, fmt.Errorf("acquire credit ledger lock: %w", err)
+	if err := s.LockCustomerCreditTx(ctx, tx, tenantID, entry.CustomerID); err != nil {
+		return domain.CreditLedgerEntry{}, 0, err
 	}
 	// A second entry for the same source (credit note, invoice reversal,
 	// commit funding, proration) is refused by the dedup indexes; the INSERT

@@ -199,6 +199,32 @@
     ]
   },
   {
+    "case": "created/topup",
+    "line": {
+      "id": "created/topup",
+      "kind": "invoice.created",
+      "title": "Invoice created",
+      "detail": [
+        [
+          {
+            "text": "Prepaid credit"
+          }
+        ]
+      ],
+      "actor": {
+        "kind": "person",
+        "name": "alice@example.com"
+      },
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Invoice created",
+      "meta: Prepaid credit · by alice@example.com",
+      "tone: neutral"
+    ]
+  },
+  {
     "case": "created/subscription_update/plan",
     "line": {
       "id": "created/subscription_update/plan",
