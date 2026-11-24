@@ -234,8 +234,8 @@ type Service struct {
 	// clock is the server's clock: the router's clk, the one the engine
 	// bills by. Every credit-note action runs on a time decided on a test
 	// clock or at real time (see the clock package's doc). Who decides it:
-	//   - a request, the API's door (api.clockDoor), from the credit note or
-	//     invoice in its URL; a create, the route itself, from the invoice its
+	//   - a request, the API's door (api.clockDoor), with one read of the
+	//     server's clock; a create, the route itself, from the invoice its
 	//     body names (DecideForInvoice);
 	//   - a Stripe refund event, the service itself, from the invoice the
 	//     refund is on (RecordStripeRefund, ApplyRefundWebhook);
@@ -247,8 +247,8 @@ type Service struct {
 	//     clock.
 	// Each entry point keeps that time. Work that arrives with no instant
 	// bound (a job's row, or a function that decides its own time, before it
-	// binds) reads this clock once (clock.EnsureEffectiveNow); a request on a
-	// real-time or a record route arrives with the door's instant. Without
+	// binds) reads this clock once (clock.EnsureEffectiveNow); a request on
+	// any other route arrives with the door's instant. Without
 	// that read, two reads of the time in one action could differ, and a
 	// store's stamp could fall on another time than the action's.
 	clock           clock.Clock
@@ -304,9 +304,6 @@ func (s *Service) DecideForInvoice(ctx context.Context, tenantID, invoiceID stri
 	}
 	decided, err := clock.DecideOrRealTime(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
 	if err != nil {
-		if clock.IsAdvancingRefusal(err) {
-			return ctx, err
-		}
 		return ctx, errs.Unavailable("test_clock_unavailable",
 			"The invoice's test clock could not be read. Nothing was created; send the request again.", err)
 	}

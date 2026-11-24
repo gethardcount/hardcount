@@ -28,7 +28,7 @@ func TestFromError_EachKindAnswersItsStatusCodeAndParam(t *testing.T) {
 		{"wrapped already-exists", fmt.Errorf("%w: external_id dup", errs.ErrAlreadyExists), 409, "invalid_request_error", "already_exists", "already exists: external_id dup", ""},
 		{"AlreadyExists", errs.AlreadyExists("code", `plan code "acme-pro" already exists`), 409, "invalid_request_error", "already_exists", `plan code "acme-pro" already exists`, "code"},
 		{"InvalidState", errs.InvalidState("cannot rotate a revoked key"), 409, "invalid_request_error", "invalid_state", "cannot rotate a revoked key", ""},
-		{"InvalidState with a code", errs.InvalidState("clock is advancing").WithCode("clock_advancing"), 409, "invalid_request_error", "clock_advancing", "clock is advancing", ""},
+		{"InvalidState with a code", errs.InvalidState("a payment is in progress").WithCode("payment_in_progress"), 409, "invalid_request_error", "payment_in_progress", "a payment is in progress", ""},
 		{"Forbidden", errs.Forbidden("this key cannot do that"), 403, "authentication_error", "forbidden", "this key cannot do that", ""},
 		{"Forbidden with a code", errs.Forbidden("this key cannot do that").WithCode("other"), 403, "authentication_error", "forbidden", "this key cannot do that", ""},
 		{"Required", errs.Required("external_id"), 422, "invalid_request_error", "validation_error", "external_id is required", "external_id"},

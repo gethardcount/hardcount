@@ -1252,9 +1252,7 @@ func (h *Handler) refund(w http.ResponseWriter, r *http.Request) {
 
 	if h.auditLogger != nil {
 		// Label the row with the invoice number so it reads "Refunded
-		// INV-NNN" (a money-out action), matching finalize/void rows. The row
-		// is on the time the door decided from the invoice, so a refund on a
-		// clock invoice belongs to that clock's timeline.
+		// INV-NNN" (a money-out action), matching finalize/void rows.
 		refundLabel := ""
 		if refInv, gErr := h.svc.Get(r.Context(), tenantID, id); gErr == nil {
 			refundLabel = refInv.InvoiceNumber

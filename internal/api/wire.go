@@ -675,7 +675,6 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	s.customerUsageH = customerUsageH
 	s.providerCostH = providerCostH
 	s.creditH = creditH
-	s.creditNoteStore = creditNoteStore
 	s.creditNoteH = creditNoteH
 	s.webhookOutH = webhookOutH
 	s.auditLogger = auditLogger
@@ -683,7 +682,6 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	s.authSvc = authSvc
 	s.authH = authH
 	s.settingsH = settingsH
-	s.dunningStore = dunningStore
 	s.dunningH = dunningH
 	s.recipeH = recipeH
 	s.webhookH = webhookH

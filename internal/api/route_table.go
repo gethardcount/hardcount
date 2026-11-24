@@ -20,17 +20,18 @@ type routeKey struct {
 	Pattern string
 }
 
-// routeDecl is one route's entry, built in steps. A clock constructor below
-// (realTime, ofCustomer, ofSubscription, ofInvoice, ofCreditNote,
-// ofDunningRun, decidedIn) says how the route's time is decided. Then needs
-// or outsideAuth says who may call it, which makes the entry. Then withAudit
-// adds its audit, and withShowOnce marks its answer.
+// routeDecl is one route's entry, built in steps. needs or outsideAuth says
+// who may call it, which makes the entry; decidedIn before it says that a
+// named function, not the door, binds the route's time. Then withAudit adds
+// its audit, and withShowOnce marks its answer.
 type routeDecl struct {
 	// access is who may call the route, which auth.RequirePermission checks;
 	// it is zero on a route outside authentication.
 	access      auth.Access
 	outsideAuth bool
-	clock       clockDecl
+	// decidedIn is the function that binds the route's time, as
+	// package.Type.Method; empty when the door binds it (clockDoor).
+	decidedIn string
 	// audit is zero on a route that neither changes state nor exports.
 	audit    auditDecl
 	showOnce bool
@@ -69,67 +70,39 @@ func isShowOnce(r *http.Request) bool {
 	return routeTable[routeKeyOf(r.Context())].showOnce
 }
 
-// A request runs in test mode or live mode, the mode of its key or session.
-// In test mode a record can be on a test clock, which holds a simulated time;
-// there are no test clocks in live mode. clockSource is how a test-mode
-// request's time is decided; clockDoor has the rules.
-type clockSource int
-
-const (
-	// clockRealTime: the door binds one read of the server's clock, and the
-	// whole request runs on it. For work that belongs to no one record on a
-	// test clock: a tenant-wide list or export, whose rows show the dates
-	// stored on them, or a change whose records keep their own clocks, which
-	// the handler's SQL reads where it needs them.
-	clockRealTime clockSource = iota + 1
-	// clockOfCustomer, clockOfSubscription and clockOfInvoice: the path
-	// parameter names the record. Its clock's time, or real time when it is
-	// on none.
-	clockOfCustomer
-	clockOfSubscription
-	clockOfInvoice
-	// clockOfCreditNote and clockOfDunningRun: the path parameter names a
-	// record of an invoice; that invoice's clock decides.
-	clockOfCreditNote
-	clockOfDunningRun
-	// clockDecidedIn: the door binds no instant. The named function decides
-	// it once it has read the record: the one the body or a token names, or
-	// each of many records, which each run on their own clock.
-	clockDecidedIn
-)
-
-// clockDecl is how one route's time is decided.
-type clockDecl struct {
-	Source clockSource
-	// Param is the path parameter that names the record, for the clockOf
-	// sources.
-	Param string
-	// In is the function that decides, as package.Type.Method, for
-	// clockDecidedIn.
-	In string
-}
-
-// The clock constructors: each says how a route's time is decided.
-func realTime() clockDecl                 { return clockDecl{Source: clockRealTime} }
-func ofCustomer(param string) clockDecl   { return clockDecl{Source: clockOfCustomer, Param: param} }
-func ofSubscription() clockDecl           { return clockDecl{Source: clockOfSubscription, Param: "id"} }
-func ofInvoice() clockDecl                { return clockDecl{Source: clockOfInvoice, Param: "id"} }
-func ofCreditNote() clockDecl             { return clockDecl{Source: clockOfCreditNote, Param: "id"} }
-func ofDunningRun() clockDecl             { return clockDecl{Source: clockOfDunningRun, Param: "id"} }
-func decidedIn(function string) clockDecl { return clockDecl{Source: clockDecidedIn, In: function} }
-
 // needs is the entry of a route behind authentication, which a caller with
-// access may call. The table holds entries, not clock declarations, so a line
-// that calls neither needs nor outsideAuth does not compile.
-func (c clockDecl) needs(access auth.Access) routeDecl {
-	return routeDecl{access: access, clock: c}
+// access may call. The table holds entries, so a line that calls neither
+// needs nor outsideAuth does not compile.
+func needs(access auth.Access) routeDecl {
+	return routeDecl{access: access}
 }
 
 // outsideAuth is the entry of a route outside authentication: authentication
 // does not run, and its handler checks its own credential, if any: a session
 // cookie (sign-out, the mode switch), a token, a signature or a password.
-func (c clockDecl) outsideAuth() routeDecl {
-	return routeDecl{outsideAuth: true, clock: c}
+func outsideAuth() routeDecl {
+	return routeDecl{outsideAuth: true}
+}
+
+// decidedIn marks a route whose time the named function binds, as
+// package.Type.Method, so the door binds none: the function reads the record
+// the body or a token names first, or binds each of many records' own
+// instant. needs or outsideAuth then makes the entry.
+func decidedIn(function string) decider { return decider{function: function} }
+
+// decider is a route decidedIn a function, before needs or outsideAuth.
+type decider struct{ function string }
+
+func (d decider) needs(access auth.Access) routeDecl {
+	e := needs(access)
+	e.decidedIn = d.function
+	return e
+}
+
+func (d decider) outsideAuth() routeDecl {
+	e := outsideAuth()
+	e.decidedIn = d.function
+	return e
 }
 
 // permission is the access of a route that needs p.
@@ -270,42 +243,42 @@ func canonicalRoute(p string) string {
 // routeTable is the table, keyed by canonical method and pattern.
 var routeTable = map[routeKey]routeDecl{
 	// --- system ---------------------------------------------------------
-	{"GET", "/health"}:       realTime().outsideAuth(),
-	{"GET", "/health/ready"}: realTime().outsideAuth(),
+	{"GET", "/health"}:       outsideAuth(),
+	{"GET", "/health/ready"}: outsideAuth(),
 	// chi expands r.Handle("/metrics") to every method. Each is declared: a
 	// walk that skipped them would also skip a future route registered so.
 	// The write methods need an audit declaration, though each only returns
 	// the scrape.
-	{"GET", "/metrics"}:     realTime().outsideAuth(),
-	{"HEAD", "/metrics"}:    realTime().outsideAuth(),
-	{"POST", "/metrics"}:    realTime().outsideAuth().withAudit(exempt(reasonSystemEndpoint, "Returns the Prometheus scrape and changes nothing.")),
-	{"PUT", "/metrics"}:     realTime().outsideAuth().withAudit(exempt(reasonSystemEndpoint, "As POST /metrics.")),
-	{"PATCH", "/metrics"}:   realTime().outsideAuth().withAudit(exempt(reasonSystemEndpoint, "As POST /metrics.")),
-	{"DELETE", "/metrics"}:  realTime().outsideAuth().withAudit(exempt(reasonSystemEndpoint, "As POST /metrics.")),
-	{"CONNECT", "/metrics"}: realTime().outsideAuth(),
-	{"OPTIONS", "/metrics"}: realTime().outsideAuth(),
-	{"TRACE", "/metrics"}:   realTime().outsideAuth(),
-	{"QUERY", "/metrics"}:   realTime().outsideAuth(),
+	{"GET", "/metrics"}:     outsideAuth(),
+	{"HEAD", "/metrics"}:    outsideAuth(),
+	{"POST", "/metrics"}:    outsideAuth().withAudit(exempt(reasonSystemEndpoint, "Returns the Prometheus scrape and changes nothing.")),
+	{"PUT", "/metrics"}:     outsideAuth().withAudit(exempt(reasonSystemEndpoint, "As POST /metrics.")),
+	{"PATCH", "/metrics"}:   outsideAuth().withAudit(exempt(reasonSystemEndpoint, "As POST /metrics.")),
+	{"DELETE", "/metrics"}:  outsideAuth().withAudit(exempt(reasonSystemEndpoint, "As POST /metrics.")),
+	{"CONNECT", "/metrics"}: outsideAuth(),
+	{"OPTIONS", "/metrics"}: outsideAuth(),
+	{"TRACE", "/metrics"}:   outsideAuth(),
+	{"QUERY", "/metrics"}:   outsideAuth(),
 
-	// --- sign-in and setup: users and tenants are on no clock ------------
-	{"POST", "/v1/bootstrap"}:                   realTime().outsideAuth().withAudit(explicit("tenant.RunBootstrap (LogInTx, on its own transaction). Never exempt: it mints a live secret key.")),
-	{"POST", "/v1/auth/login"}:                  realTime().outsideAuth().withAudit(explicit("user.Service.Login (LogInTx)")),
-	{"POST", "/v1/auth/logout"}:                 realTime().outsideAuth().withAudit(explicit("user.Service.Logout (LogInTx)")),
-	{"POST", "/v1/auth/mode"}:                   realTime().outsideAuth().withAudit(explicit("user.Service.SetMode (LogInTx)")),
-	{"GET", "/v1/auth/password-reset/check"}:    realTime().outsideAuth(),
-	{"POST", "/v1/auth/password-reset/confirm"}: realTime().outsideAuth().withAudit(explicit("user.Service.ConfirmReset (LogInTx)")),
-	{"POST", "/v1/auth/password-reset/request"}: realTime().outsideAuth().withAudit(explicit("user.Handler.requestPasswordReset (Log)")),
-	{"GET", "/v1/auth/invite/{token}"}:          realTime().outsideAuth(),
-	{"POST", "/v1/auth/accept-invite"}:          realTime().outsideAuth().withAudit(explicit("dashmembers.Service.AcceptInvite (LogInTx)")),
-	{"GET", "/v1/whoami"}:                       realTime().needs(anyCaller),
-	{"GET", "/v1/members"}:                      realTime().needs(membersSession),
-	{"POST", "/v1/members/invite"}:              realTime().needs(membersSession).withAudit(explicit("dashmembers.Service.Invite (LogInTx)")),
-	{"DELETE", "/v1/members/invitations/{id}"}:  realTime().needs(membersSession).withAudit(explicit("dashmembers.Service.Revoke (LogInTx)")),
-	{"DELETE", "/v1/members/{userID}"}:          realTime().needs(membersSession).withAudit(explicit("dashmembers.Service.RemoveMember (LogInTx)")),
-	{"GET", "/v1/api-keys"}:                     realTime().needs(apikeyWrite),
-	{"POST", "/v1/api-keys"}:                    realTime().needs(apikeyWrite).withAudit(explicit("auth.Service.CreateKey (LogInTx)")).withShowOnce(),
-	{"DELETE", "/v1/api-keys/{id}"}:             realTime().needs(apikeyWrite).withAudit(explicit("auth.Service.RevokeKey (LogInTx)")),
-	{"POST", "/v1/api-keys/{id}/rotate"}:        realTime().needs(apikeyWrite).withAudit(explicit("auth.Service.RotateKey (LogInTx)")).withShowOnce(),
+	// --- sign-in and setup ----------------------------------------------
+	{"POST", "/v1/bootstrap"}:                   outsideAuth().withAudit(explicit("tenant.RunBootstrap (LogInTx, on its own transaction). Never exempt: it mints a live secret key.")),
+	{"POST", "/v1/auth/login"}:                  outsideAuth().withAudit(explicit("user.Service.Login (LogInTx)")),
+	{"POST", "/v1/auth/logout"}:                 outsideAuth().withAudit(explicit("user.Service.Logout (LogInTx)")),
+	{"POST", "/v1/auth/mode"}:                   outsideAuth().withAudit(explicit("user.Service.SetMode (LogInTx)")),
+	{"GET", "/v1/auth/password-reset/check"}:    outsideAuth(),
+	{"POST", "/v1/auth/password-reset/confirm"}: outsideAuth().withAudit(explicit("user.Service.ConfirmReset (LogInTx)")),
+	{"POST", "/v1/auth/password-reset/request"}: outsideAuth().withAudit(explicit("user.Handler.requestPasswordReset (Log)")),
+	{"GET", "/v1/auth/invite/{token}"}:          outsideAuth(),
+	{"POST", "/v1/auth/accept-invite"}:          outsideAuth().withAudit(explicit("dashmembers.Service.AcceptInvite (LogInTx)")),
+	{"GET", "/v1/whoami"}:                       needs(anyCaller),
+	{"GET", "/v1/members"}:                      needs(membersSession),
+	{"POST", "/v1/members/invite"}:              needs(membersSession).withAudit(explicit("dashmembers.Service.Invite (LogInTx)")),
+	{"DELETE", "/v1/members/invitations/{id}"}:  needs(membersSession).withAudit(explicit("dashmembers.Service.Revoke (LogInTx)")),
+	{"DELETE", "/v1/members/{userID}"}:          needs(membersSession).withAudit(explicit("dashmembers.Service.RemoveMember (LogInTx)")),
+	{"GET", "/v1/api-keys"}:                     needs(apikeyWrite),
+	{"POST", "/v1/api-keys"}:                    needs(apikeyWrite).withAudit(explicit("auth.Service.CreateKey (LogInTx)")).withShowOnce(),
+	{"DELETE", "/v1/api-keys/{id}"}:             needs(apikeyWrite).withAudit(explicit("auth.Service.RevokeKey (LogInTx)")),
+	{"POST", "/v1/api-keys/{id}/rotate"}:        needs(apikeyWrite).withAudit(explicit("auth.Service.RotateKey (LogInTx)")).withShowOnce(),
 
 	// --- inbound webhooks -----------------------------------------------
 	// The endpoint names the tenant and mode; the record is known only once
@@ -316,139 +289,133 @@ var routeTable = map[routeKey]routeDecl{
 	// on the settle transaction when an auditor asks audit_log for settlement
 	// evidence.
 	{"POST", "/v1/webhooks/stripe/{endpoint_id}"}: decidedIn("payment.Stripe.HandleWebhook").outsideAuth().withAudit(exempt(reasonWebhookOwned, "Its handlers audit a card saved at checkout, a refund's status and a refund made in Stripe, each in its own transaction.")),
-	// Email reports read no clock. Accepted loss: their effects are not
-	// audit_log rows; the outbox row's delivery state, the customer's email
-	// status and the outbox events record them.
-	{"POST", "/v1/webhooks/postmark"}: realTime().outsideAuth().withAudit(exempt(reasonWebhookOwned, "Postmark's delivery reports, behind Basic Auth; the tenant comes from the stored outbox row (ADR-098).")),
+	// Accepted loss: the effects of email reports are not audit_log rows; the
+	// outbox row's delivery state, the customer's email status and the outbox
+	// events record them.
+	{"POST", "/v1/webhooks/postmark"}: outsideAuth().withAudit(exempt(reasonWebhookOwned, "Postmark's delivery reports, behind Basic Auth; the tenant comes from the stored outbox row (ADR-098).")),
 
 	// --- public pages: the token names the record, and the mode is not
 	// known until it is read ----------------------------------------------
-	{"GET", "/v1/public/invoices/{token}"}:           decidedIn("hostedinvoice.Handler.resolveInvoice").outsideAuth(),
-	{"POST", "/v1/public/invoices/{token}/checkout"}: decidedIn("hostedinvoice.Handler.resolveInvoice").outsideAuth().withAudit(explicit("api.hostedInvoiceStripeAdapter.CreateInvoicePaymentSession (LogInTx)")),
-	{"GET", "/v1/public/invoices/{token}/pdf"}:       decidedIn("hostedinvoice.Handler.resolveInvoice").outsideAuth(),
-	// A card update reads no record's clock; its token expires on real time.
-	{"GET", "/v1/public/payment-updates/{token}"}:           realTime().outsideAuth(),
-	{"POST", "/v1/public/payment-updates/{token}/checkout"}: realTime().outsideAuth().withAudit(explicit("payment.PublicPaymentHandler.createCheckoutSession (LogInTx)")),
+	{"GET", "/v1/public/invoices/{token}"}:                  decidedIn("hostedinvoice.Handler.resolveInvoice").outsideAuth(),
+	{"POST", "/v1/public/invoices/{token}/checkout"}:        decidedIn("hostedinvoice.Handler.resolveInvoice").outsideAuth().withAudit(explicit("api.hostedInvoiceStripeAdapter.CreateInvoicePaymentSession (LogInTx)")),
+	{"GET", "/v1/public/invoices/{token}/pdf"}:              decidedIn("hostedinvoice.Handler.resolveInvoice").outsideAuth(),
+	{"GET", "/v1/public/payment-updates/{token}"}:           outsideAuth(),
+	{"POST", "/v1/public/payment-updates/{token}/checkout"}: outsideAuth().withAudit(explicit("payment.PublicPaymentHandler.createCheckoutSession (LogInTx)")),
 	{"GET", "/v1/public/cost-dashboard/{token}"}:            decidedIn("usage.CostDashboardAssembler.GetByToken").outsideAuth(),
 
 	// --- tenant-wide reads and streams ------------------------------------
-	{"GET", "/v1/webhook_events/stream"}: realTime().needs(apikeyRead),
+	{"GET", "/v1/webhook_events/stream"}: needs(apikeyRead),
 	// The audit log's export needs what reading it does: the file is the
 	// same data.
-	{"GET", "/v1/exports/audit-log.csv"}:     realTime().needs(apikeyRead).withAudit(explicit("api.exportsHandler.exportAuditLog (auditExport, before the first byte)")),
-	{"GET", "/v1/exports/customers.csv"}:     realTime().needs(customerRead).withAudit(explicit("api.exportsHandler.exportCustomers (auditExport, before the first byte)")),
-	{"GET", "/v1/exports/invoices.csv"}:      realTime().needs(invoiceRead).withAudit(explicit("api.exportsHandler.exportInvoices (auditExport, before the first byte)")),
-	{"GET", "/v1/exports/subscriptions.csv"}: realTime().needs(subscriptionRead).withAudit(explicit("api.exportsHandler.exportSubscriptions (auditExport, before the first byte)")),
-	{"GET", "/v1/exports/usage-events.csv"}:  realTime().needs(usageRead).withAudit(explicit("api.exportsHandler.exportUsageEvents (auditExport, before the first byte)")),
-	{"GET", "/v1/analytics/mrr-movement"}:    realTime().needs(invoiceRead),
-	{"GET", "/v1/analytics/overview"}:        realTime().needs(invoiceRead),
-	{"GET", "/v1/analytics/revenue-chart"}:   realTime().needs(invoiceRead),
-	{"GET", "/v1/analytics/usage"}:           realTime().needs(invoiceRead),
-	{"GET", "/v1/audit-log"}:                 realTime().needs(apikeyRead),
-	{"GET", "/v1/audit-log/filters"}:         realTime().needs(apikeyRead),
+	{"GET", "/v1/exports/audit-log.csv"}:     needs(apikeyRead).withAudit(explicit("api.exportsHandler.exportAuditLog (auditExport, before the first byte)")),
+	{"GET", "/v1/exports/customers.csv"}:     needs(customerRead).withAudit(explicit("api.exportsHandler.exportCustomers (auditExport, before the first byte)")),
+	{"GET", "/v1/exports/invoices.csv"}:      needs(invoiceRead).withAudit(explicit("api.exportsHandler.exportInvoices (auditExport, before the first byte)")),
+	{"GET", "/v1/exports/subscriptions.csv"}: needs(subscriptionRead).withAudit(explicit("api.exportsHandler.exportSubscriptions (auditExport, before the first byte)")),
+	{"GET", "/v1/exports/usage-events.csv"}:  needs(usageRead).withAudit(explicit("api.exportsHandler.exportUsageEvents (auditExport, before the first byte)")),
+	{"GET", "/v1/analytics/mrr-movement"}:    needs(invoiceRead),
+	{"GET", "/v1/analytics/overview"}:        needs(invoiceRead),
+	{"GET", "/v1/analytics/revenue-chart"}:   needs(invoiceRead),
+	{"GET", "/v1/analytics/usage"}:           needs(invoiceRead),
+	{"GET", "/v1/audit-log"}:                 needs(apikeyRead),
+	{"GET", "/v1/audit-log/filters"}:         needs(apikeyRead),
 
-	// --- pricing, settings and tooling: on no clock ----------------------
-	{"GET", "/v1/meters"}:            realTime().needs(pricingRead),
-	{"POST", "/v1/meters"}:           realTime().needs(pricingWrite).withAudit(explicit("pricing.Handler.createMeter (Log)")),
-	{"GET", "/v1/meters/{id}"}:       realTime().needs(pricingRead),
-	{"PATCH", "/v1/meters/{id}"}:     realTime().needs(pricingWrite).withAudit(explicit("pricing.Service.UpdateMeter (LogInTx)")),
-	{"GET", "/v1/plans"}:             realTime().needs(pricingRead),
-	{"POST", "/v1/plans"}:            realTime().needs(pricingWrite).withAudit(explicit("pricing.Handler.createPlan (Log)")),
-	{"GET", "/v1/plans/{id}"}:        realTime().needs(pricingRead),
-	{"PATCH", "/v1/plans/{id}"}:      realTime().needs(pricingWrite).withAudit(explicit("pricing.Handler.updatePlan (Log)")),
-	{"GET", "/v1/plans/{id}/prices"}: realTime().needs(pricingRead),
-	// A price edit reaches subscriptions on many clocks, so no one clock
-	// decides it.
-	{"POST", "/v1/plans/{id}/prices"}:              realTime().needs(pricingWrite).withAudit(explicit("pricing.Service.AddPrice (LogInTx)")),
-	{"PATCH", "/v1/plans/{id}/prices/{price_id}"}:  realTime().needs(pricingWrite).withAudit(explicit("pricing.Service.EditPrice (LogInTx)")),
-	{"DELETE", "/v1/plans/{id}/prices/{price_id}"}: realTime().needs(pricingWrite).withAudit(explicit("pricing.Service.RemovePrice (LogInTx)")),
-	// An override reads its customer's clock in its own SQL.
-	{"GET", "/v1/price-overrides"}:            realTime().needs(pricingWrite),
-	{"POST", "/v1/price-overrides"}:           realTime().needs(pricingWrite).withAudit(explicit("pricing.Handler.createOverride (Log)")),
-	{"DELETE", "/v1/price-overrides/{id}"}:    realTime().needs(pricingWrite).withAudit(explicit("pricing.Handler.deleteOverride (Log)")),
-	{"GET", "/v1/provider-costs"}:             realTime().needs(usageRead),
-	{"PUT", "/v1/provider-costs"}:             realTime().needs(usageWrite).withAudit(explicit("usage.ProviderCostHandler.upsert (LogInTx)")),
-	{"DELETE", "/v1/provider-costs/{id}"}:     realTime().needs(usageWrite).withAudit(explicit("usage.ProviderCostHandler.delete (LogInTx)")),
-	{"GET", "/v1/recipes"}:                    realTime().needs(pricingWrite),
-	{"GET", "/v1/recipes/instances"}:          realTime().needs(pricingWrite),
-	{"GET", "/v1/recipes/{key}"}:              realTime().needs(pricingWrite),
-	{"POST", "/v1/recipes/{key}/instantiate"}: realTime().needs(pricingWrite).withAudit(explicit("recipe.Service.Instantiate (LogInTx)")),
-	{"POST", "/v1/recipes/{key}/preview"}:     realTime().needs(pricingWrite).withAudit(exempt(reasonNonMutatingPreview, "Renders what instantiate would create and writes nothing (recipe.Handler calls audit.MarkSkip).")),
-	{"GET", "/v1/settings"}:                   realTime().needs(apikeyWrite),
-	{"PUT", "/v1/settings"}:                   realTime().needs(settingsSession).withAudit(explicit("tenant.SettingsHandler.upsert (Log)")),
-	{"GET", "/v1/settings/email"}:             realTime().needs(apikeyWrite),
-	{"POST", "/v1/settings/email/test"}:       realTime().needs(apikeyWrite).withAudit(explicit("api.emailSettingsHandler.sendTest (Log)")),
-	{"GET", "/v1/settings/stripe"}:            realTime().needs(apikeyWrite),
+	// --- pricing, settings and tooling -----------------------------------
+	{"GET", "/v1/meters"}:                          needs(pricingRead),
+	{"POST", "/v1/meters"}:                         needs(pricingWrite).withAudit(explicit("pricing.Handler.createMeter (Log)")),
+	{"GET", "/v1/meters/{id}"}:                     needs(pricingRead),
+	{"PATCH", "/v1/meters/{id}"}:                   needs(pricingWrite).withAudit(explicit("pricing.Service.UpdateMeter (LogInTx)")),
+	{"GET", "/v1/plans"}:                           needs(pricingRead),
+	{"POST", "/v1/plans"}:                          needs(pricingWrite).withAudit(explicit("pricing.Handler.createPlan (Log)")),
+	{"GET", "/v1/plans/{id}"}:                      needs(pricingRead),
+	{"PATCH", "/v1/plans/{id}"}:                    needs(pricingWrite).withAudit(explicit("pricing.Handler.updatePlan (Log)")),
+	{"GET", "/v1/plans/{id}/prices"}:               needs(pricingRead),
+	{"POST", "/v1/plans/{id}/prices"}:              needs(pricingWrite).withAudit(explicit("pricing.Service.AddPrice (LogInTx)")),
+	{"PATCH", "/v1/plans/{id}/prices/{price_id}"}:  needs(pricingWrite).withAudit(explicit("pricing.Service.EditPrice (LogInTx)")),
+	{"DELETE", "/v1/plans/{id}/prices/{price_id}"}: needs(pricingWrite).withAudit(explicit("pricing.Service.RemovePrice (LogInTx)")),
+	{"GET", "/v1/price-overrides"}:                 needs(pricingWrite),
+	{"POST", "/v1/price-overrides"}:                needs(pricingWrite).withAudit(explicit("pricing.Handler.createOverride (Log)")),
+	{"DELETE", "/v1/price-overrides/{id}"}:         needs(pricingWrite).withAudit(explicit("pricing.Handler.deleteOverride (Log)")),
+	{"GET", "/v1/provider-costs"}:                  needs(usageRead),
+	{"PUT", "/v1/provider-costs"}:                  needs(usageWrite).withAudit(explicit("usage.ProviderCostHandler.upsert (LogInTx)")),
+	{"DELETE", "/v1/provider-costs/{id}"}:          needs(usageWrite).withAudit(explicit("usage.ProviderCostHandler.delete (LogInTx)")),
+	{"GET", "/v1/recipes"}:                         needs(pricingWrite),
+	{"GET", "/v1/recipes/instances"}:               needs(pricingWrite),
+	{"GET", "/v1/recipes/{key}"}:                   needs(pricingWrite),
+	{"POST", "/v1/recipes/{key}/instantiate"}:      needs(pricingWrite).withAudit(explicit("recipe.Service.Instantiate (LogInTx)")),
+	{"POST", "/v1/recipes/{key}/preview"}:          needs(pricingWrite).withAudit(exempt(reasonNonMutatingPreview, "Renders what instantiate would create and writes nothing (recipe.Handler calls audit.MarkSkip).")),
+	{"GET", "/v1/settings"}:                        needs(apikeyWrite),
+	{"PUT", "/v1/settings"}:                        needs(settingsSession).withAudit(explicit("tenant.SettingsHandler.upsert (Log)")),
+	{"GET", "/v1/settings/email"}:                  needs(apikeyWrite),
+	{"POST", "/v1/settings/email/test"}:            needs(apikeyWrite).withAudit(explicit("api.emailSettingsHandler.sendTest (Log)")),
+	{"GET", "/v1/settings/stripe"}:                 needs(apikeyWrite),
 	// Connecting Stripe retries every invoice stuck on the missing key, each
-	// on its own clock.
+	// on its own instant.
 	{"POST", "/v1/settings/stripe"}:                                                 decidedIn("invoice.Service.RetryProviderConfigErrors").needs(apikeyWrite).withAudit(explicit("tenantstripe.Handler.connect (Log)")),
-	{"DELETE", "/v1/settings/stripe/{mode}"}:                                        realTime().needs(apikeyWrite).withAudit(explicit("tenantstripe.Handler.delete (Log)")),
-	{"PATCH", "/v1/settings/stripe/{mode}/webhook"}:                                 realTime().needs(apikeyWrite).withAudit(explicit("tenantstripe.Handler.setWebhook (Log)")),
-	{"GET", "/v1/dunning/policies"}:                                                 realTime().needs(dunningRead),
-	{"POST", "/v1/dunning/policies"}:                                                realTime().needs(dunningWrite).withAudit(explicit("dunning.Handler.createPolicy (Log)")),
-	{"GET", "/v1/dunning/policies/{id}"}:                                            realTime().needs(dunningRead),
-	{"PATCH", "/v1/dunning/policies/{id}"}:                                          realTime().needs(dunningWrite).withAudit(explicit("dunning.Handler.updatePolicy (Log)")),
-	{"DELETE", "/v1/dunning/policies/{id}"}:                                         realTime().needs(dunningWrite).withAudit(explicit("dunning.Handler.deletePolicy (Log)")),
-	{"POST", "/v1/dunning/policies/{id}/set-default"}:                               realTime().needs(dunningWrite).withAudit(explicit("dunning.Handler.setDefaultPolicy (Log)")),
-	{"GET", "/v1/dunning/stats"}:                                                    realTime().needs(dunningRead),
-	{"GET", "/v1/webhook-endpoints/endpoints"}:                                      realTime().needs(apikeyWrite),
-	{"POST", "/v1/webhook-endpoints/endpoints"}:                                     realTime().needs(apikeyWrite).withAudit(explicit("webhook.Handler.createEndpoint (Log)")).withShowOnce(),
-	{"GET", "/v1/webhook-endpoints/endpoints/stats"}:                                realTime().needs(apikeyWrite),
-	{"GET", "/v1/webhook-endpoints/endpoints/{id}"}:                                 realTime().needs(apikeyWrite),
-	{"PATCH", "/v1/webhook-endpoints/endpoints/{id}"}:                               realTime().needs(apikeyWrite).withAudit(explicit("webhook.Handler.updateEndpoint (Log)")),
-	{"DELETE", "/v1/webhook-endpoints/endpoints/{id}"}:                              realTime().needs(apikeyWrite).withAudit(explicit("webhook.Handler.deleteEndpoint (Log)")),
-	{"GET", "/v1/webhook-endpoints/endpoints/{id}/deliveries"}:                      realTime().needs(apikeyWrite),
-	{"POST", "/v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay"}: realTime().needs(apikeyWrite).withAudit(explicit("webhook.Handler.replayDelivery (Log)")),
-	{"POST", "/v1/webhook-endpoints/endpoints/{id}/rotate-secret"}:                  realTime().needs(apikeyWrite).withAudit(explicit("webhook.Handler.rotateSecret (Log)")).withShowOnce(),
-	{"GET", "/v1/webhook-endpoints/events"}:                                         realTime().needs(apikeyWrite),
-	{"GET", "/v1/webhook_events/{id}/deliveries"}:                                   realTime().needs(apikeyRead),
+	{"DELETE", "/v1/settings/stripe/{mode}"}:                                        needs(apikeyWrite).withAudit(explicit("tenantstripe.Handler.delete (Log)")),
+	{"PATCH", "/v1/settings/stripe/{mode}/webhook"}:                                 needs(apikeyWrite).withAudit(explicit("tenantstripe.Handler.setWebhook (Log)")),
+	{"GET", "/v1/dunning/policies"}:                                                 needs(dunningRead),
+	{"POST", "/v1/dunning/policies"}:                                                needs(dunningWrite).withAudit(explicit("dunning.Handler.createPolicy (Log)")),
+	{"GET", "/v1/dunning/policies/{id}"}:                                            needs(dunningRead),
+	{"PATCH", "/v1/dunning/policies/{id}"}:                                          needs(dunningWrite).withAudit(explicit("dunning.Handler.updatePolicy (Log)")),
+	{"DELETE", "/v1/dunning/policies/{id}"}:                                         needs(dunningWrite).withAudit(explicit("dunning.Handler.deletePolicy (Log)")),
+	{"POST", "/v1/dunning/policies/{id}/set-default"}:                               needs(dunningWrite).withAudit(explicit("dunning.Handler.setDefaultPolicy (Log)")),
+	{"GET", "/v1/dunning/stats"}:                                                    needs(dunningRead),
+	{"GET", "/v1/webhook-endpoints/endpoints"}:                                      needs(apikeyWrite),
+	{"POST", "/v1/webhook-endpoints/endpoints"}:                                     needs(apikeyWrite).withAudit(explicit("webhook.Handler.createEndpoint (Log)")).withShowOnce(),
+	{"GET", "/v1/webhook-endpoints/endpoints/stats"}:                                needs(apikeyWrite),
+	{"GET", "/v1/webhook-endpoints/endpoints/{id}"}:                                 needs(apikeyWrite),
+	{"PATCH", "/v1/webhook-endpoints/endpoints/{id}"}:                               needs(apikeyWrite).withAudit(explicit("webhook.Handler.updateEndpoint (Log)")),
+	{"DELETE", "/v1/webhook-endpoints/endpoints/{id}"}:                              needs(apikeyWrite).withAudit(explicit("webhook.Handler.deleteEndpoint (Log)")),
+	{"GET", "/v1/webhook-endpoints/endpoints/{id}/deliveries"}:                      needs(apikeyWrite),
+	{"POST", "/v1/webhook-endpoints/endpoints/{id}/deliveries/{deliveryID}/replay"}: needs(apikeyWrite).withAudit(explicit("webhook.Handler.replayDelivery (Log)")),
+	{"POST", "/v1/webhook-endpoints/endpoints/{id}/rotate-secret"}:                  needs(apikeyWrite).withAudit(explicit("webhook.Handler.rotateSecret (Log)")).withShowOnce(),
+	{"GET", "/v1/webhook-endpoints/events"}:                                         needs(apikeyWrite),
+	{"GET", "/v1/webhook_events/{id}/deliveries"}:                                   needs(apikeyRead),
 	// A replay needs only apikey:read: it sends again an event already
 	// emitted.
-	{"POST", "/v1/webhook_events/{id}/replay"}: realTime().needs(apikeyRead).withAudit(explicit("webhook.Handler.replayEventV2 (Log)")),
-	// Bills the tenant's due subscriptions, which never include a clock's.
-	{"POST", "/v1/billing/run"}: realTime().needs(invoiceWrite).withAudit(explicit("billing.Handler.triggerCycle (Log)")),
+	{"POST", "/v1/webhook_events/{id}/replay"}: needs(apikeyRead).withAudit(explicit("webhook.Handler.replayEventV2 (Log)")),
+	{"POST", "/v1/billing/run"}:                needs(invoiceWrite).withAudit(explicit("billing.Handler.triggerCycle (Log)")),
 
 	// --- customers --------------------------------------------------------
-	{"GET", "/v1/customers"}: realTime().needs(customerRead),
-	// the body names the clock
+	{"GET", "/v1/customers"}:                      needs(customerRead),
 	{"POST", "/v1/customers"}:                     decidedIn("customer.Service.Create").needs(customerWrite).withAudit(explicit("customer.Service.Create (LogInTx)")),
-	{"GET", "/v1/customers/{id}"}:                 ofCustomer("id").needs(customerRead),
-	{"PATCH", "/v1/customers/{id}"}:               ofCustomer("id").needs(customerWrite).withAudit(explicit("customer.Handler.update (Log)")),
-	{"GET", "/v1/customers/{id}/billing-profile"}: ofCustomer("id").needs(customerRead),
-	{"PUT", "/v1/customers/{id}/billing-profile"}: ofCustomer("id").needs(customerWrite).withAudit(explicit("customer.Handler.upsertBillingProfile (Log)")),
+	{"GET", "/v1/customers/{id}"}:                 needs(customerRead),
+	{"PATCH", "/v1/customers/{id}"}:               needs(customerWrite).withAudit(explicit("customer.Handler.update (Log)")),
+	{"GET", "/v1/customers/{id}/billing-profile"}: needs(customerRead),
+	{"PUT", "/v1/customers/{id}/billing-profile"}: needs(customerWrite).withAudit(explicit("customer.Handler.upsertBillingProfile (Log)")),
 	// A customer's usage and margin need usage:read, not the customer
 	// permissions.
-	{"GET", "/v1/customers/{id}/margin"}:                                     ofCustomer("id").needs(usageRead),
-	{"POST", "/v1/customers/{id}/rotate-cost-dashboard-token"}:               ofCustomer("id").needs(customerWrite).withAudit(explicit("customer.Handler.rotateCostDashboardToken (Log)")).withShowOnce(),
-	{"GET", "/v1/customers/{id}/sent-emails"}:                                ofCustomer("id").needs(customerRead),
-	{"GET", "/v1/customers/{id}/usage"}:                                      ofCustomer("id").needs(usageRead),
-	{"GET", "/v1/customers/{customer_id}/overview"}:                          ofCustomer("customer_id").needs(customerRead),
-	{"GET", "/v1/customers/{customer_id}/payment-methods"}:                   ofCustomer("customer_id").needs(customerRead),
-	{"POST", "/v1/customers/{customer_id}/payment-methods/send-setup-email"}: ofCustomer("customer_id").needs(customerWrite).withAudit(explicit("paymentmethods.Handler.operatorSendSetupEmail (Log)")),
-	{"POST", "/v1/customers/{customer_id}/payment-methods/setup-session"}:    ofCustomer("customer_id").needs(customerWrite).withAudit(explicit("paymentmethods.Service.CreateSetupSession (Log)")).withShowOnce(),
-	{"DELETE", "/v1/customers/{customer_id}/payment-methods/{pmID}"}:         ofCustomer("customer_id").needs(customerWrite).withAudit(explicit("paymentmethods.Service.Detach (Log)")),
-	{"POST", "/v1/customers/{customer_id}/payment-methods/{pmID}/default"}:   ofCustomer("customer_id").needs(customerWrite).withAudit(explicit("paymentmethods.Service.SetDefault (Log)")),
+	{"GET", "/v1/customers/{id}/margin"}:                                     needs(usageRead),
+	{"POST", "/v1/customers/{id}/rotate-cost-dashboard-token"}:               needs(customerWrite).withAudit(explicit("customer.Handler.rotateCostDashboardToken (Log)")).withShowOnce(),
+	{"GET", "/v1/customers/{id}/sent-emails"}:                                needs(customerRead),
+	{"GET", "/v1/customers/{id}/usage"}:                                      needs(usageRead),
+	{"GET", "/v1/customers/{customer_id}/overview"}:                          needs(customerRead),
+	{"GET", "/v1/customers/{customer_id}/payment-methods"}:                   needs(customerRead),
+	{"POST", "/v1/customers/{customer_id}/payment-methods/send-setup-email"}: needs(customerWrite).withAudit(explicit("paymentmethods.Handler.operatorSendSetupEmail (Log)")),
+	{"POST", "/v1/customers/{customer_id}/payment-methods/setup-session"}:    needs(customerWrite).withAudit(explicit("paymentmethods.Service.CreateSetupSession (Log)")).withShowOnce(),
+	{"DELETE", "/v1/customers/{customer_id}/payment-methods/{pmID}"}:         needs(customerWrite).withAudit(explicit("paymentmethods.Service.Detach (Log)")),
+	{"POST", "/v1/customers/{customer_id}/payment-methods/{pmID}/default"}:   needs(customerWrite).withAudit(explicit("paymentmethods.Service.SetDefault (Log)")),
 
 	// --- subscriptions ----------------------------------------------------
-	{"GET", "/v1/subscriptions"}: realTime().needs(subscriptionRead),
+	{"GET", "/v1/subscriptions"}: needs(subscriptionRead),
 	// the body names the customer
 	{"POST", "/v1/subscriptions"}:                                      decidedIn("subscription.Handler.create").needs(subscriptionWrite).withAudit(explicit("subscription.Handler.create (Log)")),
-	{"GET", "/v1/subscriptions/{id}"}:                                  ofSubscription().needs(subscriptionRead),
-	{"PUT", "/v1/subscriptions/{id}/billing-thresholds"}:               ofSubscription().needs(subscriptionWrite).withAudit(explicit("subscription.Handler.setBillingThresholds (Log)")),
-	{"DELETE", "/v1/subscriptions/{id}/billing-thresholds"}:            ofSubscription().needs(subscriptionWrite).withAudit(explicit("subscription.Handler.clearBillingThresholds (Log)")),
-	{"POST", "/v1/subscriptions/{id}/cancel"}:                          ofSubscription().needs(subscriptionWrite).withAudit(explicit("subscription.Service.Cancel (LogInTx)")),
-	{"POST", "/v1/subscriptions/{id}/end-trial"}:                       ofSubscription().needs(subscriptionWrite).withAudit(explicit("subscription.Handler.endTrial (Log)")),
-	{"POST", "/v1/subscriptions/{id}/extend-trial"}:                    ofSubscription().needs(subscriptionWrite).withAudit(explicit("subscription.Handler.extendTrial (Log)")),
-	{"POST", "/v1/subscriptions/{id}/items"}:                           ofSubscription().needs(subscriptionWrite).withAudit(explicit("subscription.Handler.addItem (Log)")),
-	{"PATCH", "/v1/subscriptions/{id}/items/{itemID}"}:                 ofSubscription().needs(subscriptionWrite).withAudit(explicit("subscription.Handler.updateItem (Log)")),
-	{"DELETE", "/v1/subscriptions/{id}/items/{itemID}"}:                ofSubscription().needs(subscriptionWrite).withAudit(explicit("subscription.Handler.removeItem (Log)")),
-	{"DELETE", "/v1/subscriptions/{id}/items/{itemID}/pending-change"}: ofSubscription().needs(subscriptionWrite).withAudit(explicit("subscription.Handler.cancelPendingItemChange (Log)")),
-	{"PUT", "/v1/subscriptions/{id}/pause-collection"}:                 ofSubscription().needs(subscriptionWrite).withAudit(explicit("subscription.Service.PauseCollection (Log)")),
-	{"DELETE", "/v1/subscriptions/{id}/pause-collection"}:              ofSubscription().needs(subscriptionWrite).withAudit(explicit("subscription.Service.ResumeCollection (Log)")),
-	{"POST", "/v1/subscriptions/{id}/retry-billing"}:                   ofSubscription().needs(subscriptionWrite).withAudit(explicit("subscription.Service.RetryBilling (LogInTx)")),
-	{"POST", "/v1/subscriptions/{id}/schedule-cancel"}:                 ofSubscription().needs(subscriptionWrite).withAudit(explicit("subscription.Handler.scheduleCancel (Log)")),
-	{"DELETE", "/v1/subscriptions/{id}/scheduled-cancel"}:              ofSubscription().needs(subscriptionWrite).withAudit(explicit("subscription.Handler.clearScheduledCancel (Log)")),
-	{"GET", "/v1/subscriptions/{id}/timeline"}:                         ofSubscription().needs(subscriptionRead),
+	{"GET", "/v1/subscriptions/{id}"}:                                  needs(subscriptionRead),
+	{"PUT", "/v1/subscriptions/{id}/billing-thresholds"}:               needs(subscriptionWrite).withAudit(explicit("subscription.Handler.setBillingThresholds (Log)")),
+	{"DELETE", "/v1/subscriptions/{id}/billing-thresholds"}:            needs(subscriptionWrite).withAudit(explicit("subscription.Handler.clearBillingThresholds (Log)")),
+	{"POST", "/v1/subscriptions/{id}/cancel"}:                          needs(subscriptionWrite).withAudit(explicit("subscription.Service.Cancel (LogInTx)")),
+	{"POST", "/v1/subscriptions/{id}/end-trial"}:                       needs(subscriptionWrite).withAudit(explicit("subscription.Handler.endTrial (Log)")),
+	{"POST", "/v1/subscriptions/{id}/extend-trial"}:                    needs(subscriptionWrite).withAudit(explicit("subscription.Handler.extendTrial (Log)")),
+	{"POST", "/v1/subscriptions/{id}/items"}:                           needs(subscriptionWrite).withAudit(explicit("subscription.Handler.addItem (Log)")),
+	{"PATCH", "/v1/subscriptions/{id}/items/{itemID}"}:                 needs(subscriptionWrite).withAudit(explicit("subscription.Handler.updateItem (Log)")),
+	{"DELETE", "/v1/subscriptions/{id}/items/{itemID}"}:                needs(subscriptionWrite).withAudit(explicit("subscription.Handler.removeItem (Log)")),
+	{"DELETE", "/v1/subscriptions/{id}/items/{itemID}/pending-change"}: needs(subscriptionWrite).withAudit(explicit("subscription.Handler.cancelPendingItemChange (Log)")),
+	{"PUT", "/v1/subscriptions/{id}/pause-collection"}:                 needs(subscriptionWrite).withAudit(explicit("subscription.Service.PauseCollection (Log)")),
+	{"DELETE", "/v1/subscriptions/{id}/pause-collection"}:              needs(subscriptionWrite).withAudit(explicit("subscription.Service.ResumeCollection (Log)")),
+	{"POST", "/v1/subscriptions/{id}/retry-billing"}:                   needs(subscriptionWrite).withAudit(explicit("subscription.Service.RetryBilling (LogInTx)")),
+	{"POST", "/v1/subscriptions/{id}/schedule-cancel"}:                 needs(subscriptionWrite).withAudit(explicit("subscription.Handler.scheduleCancel (Log)")),
+	{"DELETE", "/v1/subscriptions/{id}/scheduled-cancel"}:              needs(subscriptionWrite).withAudit(explicit("subscription.Handler.clearScheduledCancel (Log)")),
+	{"GET", "/v1/subscriptions/{id}/timeline"}:                         needs(subscriptionRead),
 
 	// --- usage --------------------------------------------------------------
 	// Sending usage needs only usage:ingest, the one permission an ingest key
@@ -468,61 +435,60 @@ var routeTable = map[routeKey]routeDecl{
 	// Releasing it changes what a customer is billed; discarding it means it
 	// never bills.
 	{"POST", "/v1/usage-events/held/release"}: decidedIn("usage.Service.Release").needs(usageWrite).withAudit(explicit("usage.Service.Release (LogInTx)")),
-	// Discard reads no clock.
-	{"POST", "/v1/usage-events/held/discard"}: realTime().needs(usageWrite).withAudit(explicit("usage.Service.Discard (LogInTx)")),
-	{"GET", "/v1/usage-events"}:               realTime().needs(usageRead),
-	{"GET", "/v1/usage-events/aggregate"}:     realTime().needs(usageRead),
-	{"GET", "/v1/usage-events/held"}:          realTime().needs(usageRead),
+	{"POST", "/v1/usage-events/held/discard"}: needs(usageWrite).withAudit(explicit("usage.Service.Discard (LogInTx)")),
+	{"GET", "/v1/usage-events"}:               needs(usageRead),
+	{"GET", "/v1/usage-events/aggregate"}:     needs(usageRead),
+	{"GET", "/v1/usage-events/held"}:          needs(usageRead),
 
 	// --- invoices -----------------------------------------------------------
-	{"GET", "/v1/invoices"}: realTime().needs(invoiceRead),
+	{"GET", "/v1/invoices"}: needs(invoiceRead),
 	// the body names the customer
 	{"POST", "/v1/invoices"}: decidedIn("invoice.Service.Create").needs(invoiceWrite).withAudit(explicit("invoice.Service.Create (LogInTx)")),
 	// the body names the customer
 	{"POST", "/v1/invoices/create_preview"}:                                 decidedIn("billing.PreviewService.CreatePreview").needs(invoiceRead).withAudit(exempt(reasonNonMutatingPreview, "Computes an estimate and writes nothing (billing.CreatePreviewHandler calls audit.MarkSkip).")),
-	{"GET", "/v1/invoices/{id}"}:                                            ofInvoice().needs(invoiceRead),
-	{"POST", "/v1/invoices/{id}/collect"}:                                   ofInvoice().needs(invoiceWrite).withAudit(explicit("invoice.Handler.collectPayment (Log)")),
-	{"GET", "/v1/invoices/{id}/disputes"}:                                   ofInvoice().needs(invoiceRead),
-	{"POST", "/v1/invoices/{id}/finalize"}:                                  ofInvoice().needs(invoiceWrite).withAudit(explicit("invoice.Service.Finalize (LogInTx)")),
-	{"POST", "/v1/invoices/{id}/line-items"}:                                ofInvoice().needs(invoiceWrite).withAudit(explicit("invoice.Service.AddLineItem (LogInTx)")),
-	{"POST", "/v1/invoices/{id}/mark-uncollectible"}:                        ofInvoice().needs(invoiceWrite).withAudit(explicit("invoice.Service.MarkUncollectible (Log)")),
-	{"GET", "/v1/invoices/{id}/payment-timeline"}:                           ofInvoice().needs(invoiceRead),
-	{"GET", "/v1/invoices/{id}/pdf"}:                                        ofInvoice().needs(invoiceRead),
-	{"POST", "/v1/invoices/{id}/record-payment"}:                            ofInvoice().needs(invoiceWrite).withAudit(explicit("invoice.Service.RecordOfflinePayment (Log)")),
-	{"POST", "/v1/invoices/{id}/refund"}:                                    ofInvoice().needs(invoiceWrite).withAudit(explicit("invoice.Handler.refund (Log)")),
-	{"POST", "/v1/invoices/{id}/resend-setup-link"}:                         ofInvoice().needs(invoiceWrite).withAudit(explicit("invoice.Handler.resendSetupLink (Log)")),
-	{"POST", "/v1/invoices/{id}/retry-tax"}:                                 ofInvoice().needs(invoiceWrite).withAudit(explicit("invoice.Handler.retryTax (Log)")),
-	{"POST", "/v1/invoices/{id}/rotate-public-token"}:                       ofInvoice().needs(invoiceWrite).withAudit(explicit("invoice.Handler.rotatePublicToken (Log)")),
-	{"POST", "/v1/invoices/{id}/send"}:                                      ofInvoice().needs(invoiceWrite).withAudit(explicit("invoice.Handler.sendEmail (Log)")),
-	{"GET", "/v1/invoices/{id}/stripe-refunds"}:                             ofInvoice().needs(invoiceRead),
-	{"POST", "/v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss"}: ofInvoice().needs(invoiceWrite).withAudit(explicit("creditnote.Service.DismissStripeRefund (LogInTx)")),
-	{"POST", "/v1/invoices/{id}/void"}:                                      ofInvoice().needs(invoiceWrite).withAudit(explicit("invoice.Service.Void (LogInTx)")),
+	{"GET", "/v1/invoices/{id}"}:                                            needs(invoiceRead),
+	{"POST", "/v1/invoices/{id}/collect"}:                                   needs(invoiceWrite).withAudit(explicit("invoice.Handler.collectPayment (Log)")),
+	{"GET", "/v1/invoices/{id}/disputes"}:                                   needs(invoiceRead),
+	{"POST", "/v1/invoices/{id}/finalize"}:                                  needs(invoiceWrite).withAudit(explicit("invoice.Service.Finalize (LogInTx)")),
+	{"POST", "/v1/invoices/{id}/line-items"}:                                needs(invoiceWrite).withAudit(explicit("invoice.Service.AddLineItem (LogInTx)")),
+	{"POST", "/v1/invoices/{id}/mark-uncollectible"}:                        needs(invoiceWrite).withAudit(explicit("invoice.Service.MarkUncollectible (Log)")),
+	{"GET", "/v1/invoices/{id}/payment-timeline"}:                           needs(invoiceRead),
+	{"GET", "/v1/invoices/{id}/pdf"}:                                        needs(invoiceRead),
+	{"POST", "/v1/invoices/{id}/record-payment"}:                            needs(invoiceWrite).withAudit(explicit("invoice.Service.RecordOfflinePayment (Log)")),
+	{"POST", "/v1/invoices/{id}/refund"}:                                    needs(invoiceWrite).withAudit(explicit("invoice.Handler.refund (Log)")),
+	{"POST", "/v1/invoices/{id}/resend-setup-link"}:                         needs(invoiceWrite).withAudit(explicit("invoice.Handler.resendSetupLink (Log)")),
+	{"POST", "/v1/invoices/{id}/retry-tax"}:                                 needs(invoiceWrite).withAudit(explicit("invoice.Handler.retryTax (Log)")),
+	{"POST", "/v1/invoices/{id}/rotate-public-token"}:                       needs(invoiceWrite).withAudit(explicit("invoice.Handler.rotatePublicToken (Log)")),
+	{"POST", "/v1/invoices/{id}/send"}:                                      needs(invoiceWrite).withAudit(explicit("invoice.Handler.sendEmail (Log)")),
+	{"GET", "/v1/invoices/{id}/stripe-refunds"}:                             needs(invoiceRead),
+	{"POST", "/v1/invoices/{id}/stripe-refunds/{stripe_refund_id}/dismiss"}: needs(invoiceWrite).withAudit(explicit("creditnote.Service.DismissStripeRefund (LogInTx)")),
+	{"POST", "/v1/invoices/{id}/void"}:                                      needs(invoiceWrite).withAudit(explicit("invoice.Service.Void (LogInTx)")),
 
 	// --- credit notes -------------------------------------------------------
-	{"GET", "/v1/credit-notes"}:       realTime().needs(invoiceWrite),
-	{"GET", "/v1/credit-notes/stats"}: realTime().needs(invoiceWrite),
+	{"GET", "/v1/credit-notes"}:       needs(invoiceWrite),
+	{"GET", "/v1/credit-notes/stats"}: needs(invoiceWrite),
 	// the body names the invoice
 	{"POST", "/v1/credit-notes"}:                           decidedIn("creditnote.Handler.create").needs(invoiceWrite).withAudit(explicit("creditnote.Service.Create (LogInTx)")),
-	{"GET", "/v1/credit-notes/{id}"}:                       ofCreditNote().needs(invoiceWrite),
-	{"POST", "/v1/credit-notes/{id}/attach-stripe-refund"}: ofCreditNote().needs(invoiceWrite).withAudit(explicit("creditnote.Service.AttachStripeRefund (LogInTx)")),
-	{"POST", "/v1/credit-notes/{id}/issue"}:                ofCreditNote().needs(invoiceWrite).withAudit(explicit("creditnote.Service.Issue (LogInTx)")),
-	{"GET", "/v1/credit-notes/{id}/pdf"}:                   ofCreditNote().needs(invoiceWrite),
-	{"POST", "/v1/credit-notes/{id}/retry-refund"}:         ofCreditNote().needs(invoiceWrite).withAudit(explicit("creditnote.Service.RetryRefund (LogInTx)")),
-	{"POST", "/v1/credit-notes/{id}/send"}:                 ofCreditNote().needs(invoiceWrite).withAudit(explicit("creditnote.Handler.sendEmail (Log)")),
-	{"POST", "/v1/credit-notes/{id}/void"}:                 ofCreditNote().needs(invoiceWrite).withAudit(explicit("creditnote.Service.Void (LogInTx)")),
+	{"GET", "/v1/credit-notes/{id}"}:                       needs(invoiceWrite),
+	{"POST", "/v1/credit-notes/{id}/attach-stripe-refund"}: needs(invoiceWrite).withAudit(explicit("creditnote.Service.AttachStripeRefund (LogInTx)")),
+	{"POST", "/v1/credit-notes/{id}/issue"}:                needs(invoiceWrite).withAudit(explicit("creditnote.Service.Issue (LogInTx)")),
+	{"GET", "/v1/credit-notes/{id}/pdf"}:                   needs(invoiceWrite),
+	{"POST", "/v1/credit-notes/{id}/retry-refund"}:         needs(invoiceWrite).withAudit(explicit("creditnote.Service.RetryRefund (LogInTx)")),
+	{"POST", "/v1/credit-notes/{id}/send"}:                 needs(invoiceWrite).withAudit(explicit("creditnote.Handler.sendEmail (Log)")),
+	{"POST", "/v1/credit-notes/{id}/void"}:                 needs(invoiceWrite).withAudit(explicit("creditnote.Service.Void (LogInTx)")),
 
 	// --- credits ------------------------------------------------------------
-	{"GET", "/v1/credits/balances"}: realTime().needs(customerWrite),
+	{"GET", "/v1/credits/balances"}: needs(customerWrite),
 	// the body names the customer
 	{"POST", "/v1/credits/grant"}: decidedIn("credit.Service.Grant").needs(customerWrite).withAudit(explicit("credit.Service.Grant (LogInTx)")),
 	// the body names the customer
 	{"POST", "/v1/credits/adjust"}:                    decidedIn("credit.Service.Adjust").needs(customerWrite).withAudit(explicit("credit.Service.Adjust (LogInTx)")),
-	{"GET", "/v1/credits/balance/{customer_id}"}:      ofCustomer("customer_id").needs(customerWrite),
-	{"GET", "/v1/credits/balance/{customer_id}/live"}: ofCustomer("customer_id").needs(customerWrite),
-	{"GET", "/v1/credits/grants/{customer_id}"}:       ofCustomer("customer_id").needs(customerWrite),
-	{"GET", "/v1/credits/ledger/{customer_id}"}:       ofCustomer("customer_id").needs(customerWrite),
+	{"GET", "/v1/credits/balance/{customer_id}"}:      needs(customerWrite),
+	{"GET", "/v1/credits/balance/{customer_id}/live"}: needs(customerWrite),
+	{"GET", "/v1/credits/grants/{customer_id}"}:       needs(customerWrite),
+	{"GET", "/v1/credits/ledger/{customer_id}"}:       needs(customerWrite),
 
 	// --- dunning runs -------------------------------------------------------
-	{"GET", "/v1/dunning/runs"}:      realTime().needs(dunningRead),
-	{"GET", "/v1/dunning/runs/{id}"}: ofDunningRun().needs(dunningRead),
+	{"GET", "/v1/dunning/runs"}:      needs(dunningRead),
+	{"GET", "/v1/dunning/runs/{id}"}: needs(dunningRead),
 }

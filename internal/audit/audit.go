@@ -250,19 +250,17 @@ type Entry struct {
 //
 // COVERED: every path that runs under a clock binding. That is every entry
 // point whose time is decided from its record (clock.Decide binds the
-// record's clock id with its instant: the API's door, and the functions that
-// decide their own time), the handler-level emitters that bind explicitly
-// before emitting (invoice, subscription, customer — including CREATE, which
+// record's clock id with its instant: the functions that decide their own
+// time), the handler-level emitters that bind explicitly before emitting
+// (invoice, subscription, customer — including CREATE, which
 // binds from the clock it is handed because the customer pin does not exist
 // yet — dunning), and the test-clock service, which binds each change's row
 // to the clock it changes.
-// Credit notes are covered on every route: each request is decided from its
-// credit note or invoice (the API's door; a create, from the invoice its body
-// names) and creditnote.Service keeps that decision, so the in-tx rows and
-// the handler's "send" row, emitted on the request's context, carry the sim
-// axis; a Stripe refund webhook's refund-status row (ApplyRefundWebhook) runs
-// on the time the service decides from the invoice of the note holding the
-// refund.
+// Credit notes are covered where their time is decided from their invoice:
+// a create, from the invoice its body names, which creditnote.Service keeps
+// for its in-tx rows, and a Stripe refund webhook's refund-status row
+// (ApplyRefundWebhook), on the time the service decides from the invoice of
+// the note holding the refund.
 //
 // A note on what "covered" means, so this list cannot quietly become a lie: a
 // path is covered if it EMITS and its emission runs under a binding. Credit

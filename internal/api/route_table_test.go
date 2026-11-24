@@ -71,13 +71,11 @@ func TestRouteTable_MatchesLiveRoutes(t *testing.T) {
 		}
 	}
 	report(undeclared, `route(s) have no entry in routeTable (internal/api/route_table.go). Declare
-how each one's time is decided: realTime() when the request names no record on
-a clock; ofCustomer, ofSubscription, ofInvoice, ofCreditNote or ofDunningRun
-when a path parameter names the record; or decidedIn("package.Type.Method")
-naming the function that decides after it reads the record the body or a
-token names. Then who may call it: .needs(customerWrite), or another
-permission, a session value or anyCaller, or .outsideAuth() for a route outside
-/v1's authentication. docs/architecture.md, "Adding a route", has an example.`)
+who may call each one: needs(customerWrite), or another permission, a session
+value or anyCaller, or outsideAuth() for a route outside /v1's authentication.
+Start the entry with decidedIn("package.Type.Method") only when that function,
+not the door, binds the route's time. docs/architecture.md, "Adding a route",
+has an example.`)
 	report(stale, `routeTable entr(y/ies) match no live route. The route was renamed or removed
 but its entry was not: delete the entry or update its pattern. Keys are
 canonical chi patterns (canonicalRoute), with their {placeholders}. A stale
@@ -106,8 +104,8 @@ routes and the GET routes under /v1/exports carry one; remove it.`)
 }
 
 // TestRouteTable_DeclarationsAreWhole: each entry says what its parts need,
-// and nothing else. A key is canonical. A record's clock parameter is in its
-// route's pattern, and a deciding function exists. An explicit audit's note
+// and nothing else. A key is canonical. A deciding function exists. An
+// explicit audit's note
 // starts with a function that exists; an exempt one has a reason from the
 // closed list, and only a state-changing route is exempt: there is no honest
 // reason for handing out a whole table with no record.
@@ -123,23 +121,12 @@ func TestRouteTable_DeclarationsAreWhole(t *testing.T) {
 		if got := canonicalRoute(k.Pattern); got != k.Pattern {
 			t.Errorf("%s: key is not canonical (canonicalRoute gives %q); the root would never find it", name, got)
 		}
-		switch c := entry.clock; c.Source {
-		case clockRealTime:
-			if c.Param != "" || c.In != "" {
-				t.Errorf("%s: real time takes no parameter or function, has %+v", name, c)
-			}
-		case clockOfCustomer, clockOfSubscription, clockOfInvoice, clockOfCreditNote, clockOfDunningRun:
-			if c.Param == "" || c.In != "" || !strings.Contains(k.Pattern, "{"+c.Param+"}") {
-				t.Errorf("%s: the record's parameter %q must be in the pattern, and no function named; has %+v", name, c.Param, c)
-			}
-		case clockDecidedIn:
-			if c.In == "" || c.Param != "" || strings.Count(c.In, ".") != 2 {
-				t.Errorf("%s: decidedIn names a function as package.Type.Method, and no parameter; has %+v", name, c)
-			} else if err := functionExists(c.In); err != nil {
+		if fn := entry.decidedIn; fn != "" {
+			if strings.Count(fn, ".") != 2 {
+				t.Errorf("%s: decidedIn names a function as package.Type.Method, has %q", name, fn)
+			} else if err := functionExists(fn); err != nil {
 				t.Errorf("%s: %v", name, err)
 			}
-		default:
-			t.Errorf("%s: no clock source", name)
 		}
 		a := entry.audit
 		if a.Coverage == 0 {

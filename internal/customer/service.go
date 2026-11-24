@@ -118,8 +118,8 @@ type Service struct {
 	// clock is the server's clock: the router's clk, the one the engine
 	// bills by. Every customer change runs on a time decided on a test clock
 	// or at real time (see the clock package's doc). Who decides it:
-	//   - a request, the API's door (api.clockDoor), from the customer in its
-	//     URL;
+	//   - a request, the API's door (api.clockDoor), with one read of the
+	//     server's clock;
 	//   - a create, Create itself, from the test clock its body names.
 	// Each entry point keeps that time. Only Create binds an instant itself:
 	// for a customer on no test clock it reads this clock once

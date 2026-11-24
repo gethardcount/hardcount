@@ -2,7 +2,7 @@
 // instant, such as a test clock's frozen_time, and Now then returns that
 // instant instead of the system time.
 //
-// One piece of work runs on one time. On a real-time or a record route the
+// One piece of work runs on one time. On every route but a decidedIn one the
 // API's door (api.clockDoor) binds the request's instant before the handler
 // runs. A function that decides its own time (a route whose body names its
 // record, a public page, a Stripe event) calls EnsureEffectiveNow right after
@@ -229,19 +229,18 @@ func Now(ctx context.Context) time.Time {
 
 // WithRealTime records on ctx that real time was decided for it, with no
 // instant: it is in no test clock's world. Now(ctx) then reads machine time,
-// as on an undecided ctx, but Decision reports the decision. A job's tick, a
-// test-mode request on a decidedIn route (until its function decides and
-// binds), and an entity on no clock with nothing bound are decided this way;
-// for an entity on no clock, a real instant ctx already carries is kept
-// instead (keepOrRealTime).
+// as on an undecided ctx, but Decision reports the decision. A job's tick and
+// an entity on no clock with nothing bound are decided this way; for an
+// entity on no clock, a real instant ctx already carries is kept instead
+// (keepOrRealTime).
 func WithRealTime(ctx context.Context) context.Context {
 	return WithSim(ctx, Sim{})
 }
 
 // DecidesWithoutDoor reports whether work on a record that the API's door
-// did not decide decides its time. On a real-time or a record route the
-// door (api.clockDoor) decides and binds the request's time before its
-// handler; this is for work the door does not decide: a decidedIn route's
+// did not decide decides its time. On every route but a decidedIn one the
+// door (api.clockDoor) binds the request's time before its handler; this is
+// for work the door does not decide: a decidedIn route's
 // function, a Stripe event, a job's row, a public page. With no resolver, no: only narrow unit tests build their service
 // without one, and the server always wires the engine. With no mode
 // on ctx, a fault, refused as ErrUndecided: every such entry point sets one.
@@ -282,7 +281,7 @@ func DecideWithoutDoor(ctx context.Context, r Resolver, p Pin) (context.Context,
 func DecideOrRealTime(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
 	decided, err := DecideWithoutDoor(ctx, r, p)
 	if errors.Is(err, errs.ErrNotFound) {
-		return keepOrRealTime(WithoutChangeMark(ctx)), nil
+		return keepOrRealTime(ctx), nil
 	}
 	return decided, err
 }
@@ -332,10 +331,6 @@ var ErrUndecided = errors.New("the time could not be decided")
 // clock's instant is dropped (keepOrRealTime).
 // Work on a record that did not come through the API's clock door decides
 // with DecideWithoutDoor, which calls it.
-//
-// It refuses a marked request whose record is on an advancing clock, and
-// returns a context without the mark (change.go): the refusal is returned
-// as it is, not as ErrUndecided.
 func Decide(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
 	if r == nil {
 		return ctx, errors.New("decide the time: no resolver")
@@ -355,12 +350,8 @@ func Decide(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
 		return ctx, errors.New("decide the time: the pin names no customer, subscription or invoice")
 	}
 	if err != nil {
-		if IsAdvancingRefusal(err) {
-			return ctx, err
-		}
 		return ctx, fmt.Errorf("%w: %w", ErrUndecided, err)
 	}
-	ctx = WithoutChangeMark(ctx)
 	if !sim.Simulated() {
 		return keepOrRealTime(ctx), nil
 	}
@@ -372,9 +363,8 @@ func Decide(ctx context.Context, r Resolver, p Pin) (context.Context, error) {
 // clock, a zero Sim, without reading any clock: the caller binds an instant
 // if it needs one (Decide's caller, with EnsureEffectiveNow). An error comes
 // with a zero Sim too, and a caller that goes on anyway reads its own clock.
-// Every decision made from a record goes through it (Decide): the API's door
-// on a record route in test mode, and Decide's other callers (a decidedIn
-// route's function, a Stripe event, a job's row, a public page).
+// Every decision made from a record goes through it (Decide): a decidedIn
+// route's function, a Stripe event, a job's row, a public page.
 //
 // It returns the instant and the clock id together, from one resolution,
 // because they are two halves of one fact. A clock id resolved apart from

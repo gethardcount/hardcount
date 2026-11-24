@@ -1,7 +1,6 @@
 package api
 
 import (
-	"context"
 	"fmt"
 	"log/slog"
 	"net"
@@ -67,7 +66,6 @@ type Server struct {
 	customerUsageH      *usage.CustomerUsageHandler
 	providerCostH       *usage.ProviderCostHandler
 	creditH             *credit.Handler
-	creditNoteStore     *creditnote.PostgresStore
 	creditNoteH         *creditnote.Handler
 	webhookOutH         *webhook.Handler
 	auditLogger         *audit.Logger
@@ -75,7 +73,6 @@ type Server struct {
 	authSvc             *auth.Service
 	authH               *auth.Handler
 	settingsH           *tenant.SettingsHandler
-	dunningStore        *dunning.PostgresStore
 	dunningH            *dunning.Handler
 	recipeH             *recipe.Handler
 	webhookH            *payment.Handler
@@ -141,18 +138,7 @@ func (s *Server) routes() chi.Router {
 	finder := &routeFinder{} // its root is set at the end of routes()
 	// The clock door ends every group; docs/architecture.md#the-path-of-a-request
 	// says why it sits last.
-	door := &clockDoor{
-		resolver: s.BillingEngine,
-		clock:    s.clk,
-		creditNoteInvoice: func(ctx context.Context, tenantID, id string) (string, error) {
-			cn, err := s.creditNoteStore.Get(ctx, tenantID, id)
-			return cn.InvoiceID, err
-		},
-		dunningRunInvoice: func(ctx context.Context, tenantID, id string) (string, error) {
-			run, err := s.dunningStore.GetRun(ctx, tenantID, id)
-			return run.InvoiceID, err
-		},
-	}
+	door := &clockDoor{clock: s.clk}
 	// chi hands both handlers down to every router mounted below, so the
 	// router's every 404 and 405 answers the JSON envelope; a 405 lists the
 	// path's methods.

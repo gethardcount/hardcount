@@ -865,10 +865,10 @@ func (h *Handler) addItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// One instant for the whole route: the door binds it (the subscription's
-	// clock and its instant, or one read of the server's clock), so the
-	// handler's own reads (the proration days, the period close, changeAt)
-	// and the service's agree. The item routes below run on it too.
+	// One instant for the whole route: the door binds it (one read of the
+	// server's clock), so the handler's own reads (the proration days, the
+	// period close, changeAt) and the service's agree. The item routes below
+	// run on it too.
 	ctx := r.Context()
 
 	// Close an ended, unbilled period first, so the snapshot below is the

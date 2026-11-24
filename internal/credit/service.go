@@ -45,9 +45,9 @@ type Service struct {
 	// clock is the server's clock: the router's clk, the one the engine
 	// bills by. Every credit action runs on a time decided on a test clock or
 	// at real time (see the clock package's doc). Who decides it:
-	//   - a request, the API's door (api.clockDoor), from the customer in its
-	//     URL; a grant or an adjustment, the service itself, from the customer
-	//     its body names (decideForCustomer);
+	//   - a request, the API's door (api.clockDoor), with one read of the
+	//     server's clock; a grant or an adjustment, the service itself, from
+	//     the customer its body names (decideForCustomer);
 	//   - the engine's reads (a balance, a draw), the time of the work that
 	//     makes them.
 	// Each entry point keeps that time. Only a grant and an adjustment bind
@@ -132,9 +132,6 @@ func (s *Service) requireCustomer(ctx context.Context, tenantID, customerID stri
 func (s *Service) decideForCustomer(ctx context.Context, tenantID, customerID string) (context.Context, error) {
 	decided, err := clock.DecideOrRealTime(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID})
 	if err != nil {
-		if clock.IsAdvancingRefusal(err) {
-			return ctx, err
-		}
 		return ctx, errs.Unavailable("test_clock_unavailable",
 			"The customer's test clock could not be read. Nothing was changed; send the request again.", err)
 	}
