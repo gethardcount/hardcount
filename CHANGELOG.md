@@ -32,7 +32,7 @@ original text.
 ### Changed
 
 - **Refunding a top-up's credit is refused while the customer's bank disputes the payment.** Commit relief answers `409` `payment_disputed` while the bank holds a chargeback, an appeal included, and after the bank won it. An inquiry does not stop it.
-- **A top-up's refund says what it refunded.** Its credit note's default reason is "Unused prepaid credit refunded", and its line "… — $60.00 of credit". Its email says "Refunded" and "Credit taken back", and its ledger entry "Refunded by credit note CN-… — $60.00 of bought credit".
+- **A top-up's refund says what it refunded.** Its credit note's default reason is "Unused prepaid credit refunded", and its line "Refund for $60.00 of unused prepaid credit". Its email lists "Refund" and "Credit taken back", not "Amount credited", and its ledger entry reads "Refunded by credit note CN-… — $60.00 of bought credit".
 - **Dispute appeals are recorded.** Disputes take Stripe's `appeal_needs_response` and `appeal_under_review` statuses, sent when appeals are turned on; their webhooks failed before.
 - **Home shows what a credit seller watches.** Its cards are Credit held, Credit sold, Paid and Usage billed, each with what it counts; the MRR, Customers and Failed payments cards are gone (failed payments stay under "Needs attention"). "Needs attention" first counts the credit balances that ran out and the low ones, each line opening the Credit page filtered to them. The chart is titled Paid, like its card.
 - **A top-up has no PDF until it is paid, and shows its history before.** The PDF routes answer `409` `invalid_state` for an unpaid or withdrawn top-up. `GET /v1/invoices/{id}/payment-timeline` and the customer's Sent emails now include an unpaid top-up's charges and emails, such as its link.
@@ -56,7 +56,7 @@ original text.
 ### Fixed
 
 - **The `stripe listen` command in Settings → Payments starts on the current Stripe CLI.** The CLI now refuses to start without a choice of events ("must specify events to forward"), so connecting Stripe on your own computer stopped at step 2. The command names the 12 events Hardcount handles, as the guide does.
-- **Refunding a top-up's credit refunded too much.** Commit relief took expired credit not yet written off, and credit already used by usage not invoiced yet. It now takes only unused credit (`retire_cents` above it answers `422`), and waits while an issued invoice is still to draw on it. Its card cap counts refunds made in Stripe.
+- **Refunding a top-up's credit refunded too much.** Commit relief took expired credit not yet written off, and credit already used by usage not invoiced yet. It now takes only unused credit (`retire_cents` above it answers `422`), and waits while an invoice is still to draw on it, naming that invoice and what to do. Its card cap counts refunds made in Stripe.
 - **Revenue on Home and the revenue chart count what customers paid, once.** They added the credit applied to each paid invoice to its payment, so the money behind credit was counted again: a $10,000 prepaid commit counted $10,000 when it was paid and $10,000 more as its credit paid later invoices. Credit from a credit note and promotional credit counted too, though no new money came in. Revenue is now the card and offline payments on the invoices paid in the period ([#1906](https://github.com/gethardcount/hardcount/pull/1906)).
 
 ## [0.10.0] - 2026-11-23

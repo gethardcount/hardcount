@@ -130,9 +130,12 @@ refund at face (over-refund); charging consumption at face under-refunds.
   credit lock; the unbilled usage, billing's figure, before the transaction.
   `retire_all` takes all of it; a larger `retire_cents` answers 422 with it.
   While an issued period or threshold invoice is still to draw on the grant
-  (`domain.CreditDrawPendingSQL`, the invoice half of the expiry sweep's
-  owed draw), relief is refused: that invoice's usage is no longer unbilled,
-  and the credit it will draw is still in the balance.
+  (`domain.CreditDrawPendingInvoiceSQL`, built from the same rule as the
+  invoice half of the expiry sweep's owed draw), relief is refused: that
+  invoice's usage is no longer unbilled, and the credit it will draw is still
+  in the balance. The refusal names the oldest such invoice and its way out:
+  finalize or void a draft, resume a paused collection or void the invoice,
+  or try again after the next collection pass.
 - **A top-up only.** Relief requires `billing_reason = 'topup'`, which
   replaces the mixed-invoice gate of decision 6: a top-up has one line.
 - **The card cap counts refunds made in Stripe** of the same payment that

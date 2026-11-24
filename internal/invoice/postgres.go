@@ -2792,7 +2792,7 @@ var autoChargeClaim = claimConditions{
 	{`auto_charge_pending = TRUE`, domain.ChargeNothingToCharge},
 	{chargeHoldFree, domain.ChargeHeldByAttempt},
 	{noLiveHostedPageSQL, domain.ChargePayingOnHostedPage},
-	{notPausedForCollection("invoices", "now()"), domain.ChargeCollectionPaused},
+	{domain.NotPausedForCollectionSQL("invoices", "now()"), domain.ChargeCollectionPaused},
 }
 
 // where is the conditions' AND: the claim's predicate.
@@ -3313,45 +3313,9 @@ func (s *PostgresStore) SetTaxTransaction(ctx context.Context, tenantID, id stri
 	return tx.Commit()
 }
 
-// notPausedForCollection is the SQL predicate the auto-charge sweep and the
-// auto-charge claim (ClaimAutoCharge) use to honour `pause_collection`. A
-// paused subscription means the operator (or dunning's `pause` final action)
-// stopped automatic collection on it, so nothing automatic may charge its
-// invoices — "pause_collection neuters the financial side without touching
-// the cycle".
-//
-// The engine's own finalize sites already skip collection for a paused sub,
-// which used to make this unreachable by accident: nothing set
-// auto_charge_pending on a paused sub's invoice, so the sweeps never saw one.
-// That stopped being true once the tax-retry chain queued the invoices it
-// auto-finalizes — a paused sub's tax-deferred draft finalizes on retry and
-// would otherwise have been charged, contradicting the pause. An operator's
-// Finalize of a paused sub's draft queues it too, and its collect claims
-// without a list. Enforcing it in the predicate keeps the rule with the
-// collection owner rather than with whichever writer happened to set the flag.
-//
-// One-off invoices (no subscription) are unaffected — NOT EXISTS holds when
-// there is nothing to join to.
-//
-// The pause is read as in force at `at` (an SQL expression for the sweep's
-// now): a timed pause whose resumes_at has passed no longer holds collection,
-// even while the row still carries it. The scheduled resumer leaves it there
-// until the sub's periods ending before resumes_at are closed (a parked
-// billing failure can hold it indefinitely), and those closes read it; the
-// sub's other invoices resume at resumes_at. Mirrors
-// domain.PauseCollection.InForceAt.
-func notPausedForCollection(alias, at string) string {
-	return `NOT EXISTS (
-			SELECT 1 FROM subscriptions ps
-			 WHERE ps.id = ` + alias + `.subscription_id
-			   AND ps.pause_collection_behavior IS NOT NULL
-			   AND (ps.pause_collection_resumes_at IS NULL OR ps.pause_collection_resumes_at > ` + at + `)
-		)`
-}
-
 // CollectionPausedTx reports, on the caller's transaction, whether the
 // invoice's subscription has pause_collection in force at `at` (the same
-// predicate as the sweeps, notPausedForCollection). An invoice with no
+// predicate as the sweeps, domain.NotPausedForCollectionSQL). An invoice with no
 // subscription, or whose subscription is gone, is not paused. A tax retry
 // reads it inside UpdateTaxAtomic's transaction before it finalizes: a paused
 // subscription keeps its invoices as drafts.
@@ -3361,7 +3325,7 @@ func notPausedForCollection(alias, at string) string {
 // lock here would take the two in the other order.
 func (s *PostgresStore) CollectionPausedTx(ctx context.Context, tx *sql.Tx, invoiceID string, at time.Time) (bool, error) {
 	var notPaused bool
-	err := tx.QueryRowContext(ctx, `SELECT `+notPausedForCollection("i", "$2::timestamptz")+` FROM invoices i WHERE i.id = $1`,
+	err := tx.QueryRowContext(ctx, `SELECT `+domain.NotPausedForCollectionSQL("i", "$2::timestamptz")+` FROM invoices i WHERE i.id = $1`,
 		invoiceID, at).Scan(&notPaused)
 	if err == sql.ErrNoRows {
 		return false, errs.ErrNotFound
@@ -3401,7 +3365,7 @@ func (s *PostgresStore) ListAutoChargePending(ctx context.Context, after walk.Ke
 		  AND i.payment_status = 'pending'
 		  AND i.status = 'finalized'
 		  AND i.livemode = $1
-		  AND `+notPausedForCollection("i", "now()")+`
+		  AND `+domain.NotPausedForCollectionSQL("i", "now()")+`
 		  AND (i.created_at, i.id) > ($3, $4)
 		ORDER BY i.created_at ASC, i.id ASC
 		LIMIT $2

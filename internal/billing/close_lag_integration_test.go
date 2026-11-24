@@ -474,7 +474,7 @@ func TestTrialFlipAfterResume_ResumerRunsFirst(t *testing.T) {
 // sweep picks up an invoice finalized before the pause. A pause still in
 // force, and one with no resumes_at, keep it out.
 //
-// Mutation seam: drop the resumes_at arm from notPausedForCollection → the
+// Mutation seam: drop the resumes_at arm from domain.NotPausedForCollectionSQL → the
 // sweep skips the invoice while the expired pause is held.
 func TestHeldTimedPause_DoesNotBlockOtherInvoicesPastResumesAt(t *testing.T) {
 	r := newCancelRig(t, "held timed pause collection")

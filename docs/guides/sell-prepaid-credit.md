@@ -259,8 +259,10 @@ and no usage reported):
 - **Usage your gateway has not reported yet** is not known to Hardcount.
   Pause the customer's key and let reporting catch up before you refund.
 - **While an invoice is waiting to use the credit,** such as the invoice of
-  a period that has just closed, the refund answers `409`. Try again once
-  that invoice is collected.
+  a period that has just closed, the refund answers `409` and names it. Try
+  again after the next collection pass. A draft not yet finalized, or an
+  invoice whose collection is paused, waits on you: finalize or void the
+  draft, or resume collection or void the invoice.
 - **How much:** `retire_all` takes all the unused credit. `retire_cents`
   takes part of it; more than is unused answers `422` with the figure.
 - **Where the money goes:** to the card that paid. The card gets at most

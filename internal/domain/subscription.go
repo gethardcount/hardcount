@@ -360,6 +360,43 @@ func (p *PauseCollection) InForceAt(t time.Time) bool {
 	return p != nil && (p.ResumesAt == nil || p.ResumesAt.After(t))
 }
 
+// NotPausedForCollectionSQL is the SQL predicate the auto-charge sweep and the
+// auto-charge claim (ClaimAutoCharge) use to honour `pause_collection`. A
+// paused subscription means the operator (or dunning's `pause` final action)
+// stopped automatic collection on it, so nothing automatic may charge its
+// invoices — "pause_collection neuters the financial side without touching
+// the cycle".
+//
+// The engine's own finalize sites already skip collection for a paused sub,
+// which used to make this unreachable by accident: nothing set
+// auto_charge_pending on a paused sub's invoice, so the sweeps never saw one.
+// That stopped being true once the tax-retry chain queued the invoices it
+// auto-finalizes — a paused sub's tax-deferred draft finalizes on retry and
+// would otherwise have been charged, contradicting the pause. An operator's
+// Finalize of a paused sub's draft queues it too, and its collect claims
+// without a list. Enforcing it in the predicate keeps the rule with the
+// collection owner rather than with whichever writer happened to set the flag.
+//
+// One-off invoices (no subscription) are unaffected — NOT EXISTS holds when
+// there is nothing to join to.
+//
+// The pause is read as in force at `at` (an SQL expression for the sweep's
+// now): a timed pause whose resumes_at has passed no longer holds collection,
+// even while the row still carries it. The scheduled resumer leaves it there
+// until the sub's periods ending before resumes_at are closed (a parked
+// billing failure can hold it indefinitely), and those closes read it; the
+// sub's other invoices resume at resumes_at. Mirrors
+// PauseCollection.InForceAt. Commit relief reads it too, to say why an
+// invoice still to draw on the credit has not drawn it.
+func NotPausedForCollectionSQL(alias, at string) string {
+	return `NOT EXISTS (
+			SELECT 1 FROM subscriptions ps
+			 WHERE ps.id = ` + alias + `.subscription_id
+			   AND ps.pause_collection_behavior IS NOT NULL
+			   AND (ps.pause_collection_resumes_at IS NULL OR ps.pause_collection_resumes_at > ` + at + `)
+		)`
+}
+
 // SubscriptionItemThreshold is one configured per-item usage cap on a
 // subscription. UsageGTE is decimal because meter quantities can be
 // fractional (cached-token ratios, GPU-hours) and we want round-trip

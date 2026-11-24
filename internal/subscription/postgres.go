@@ -532,7 +532,7 @@ func (s *PostgresStore) CancelAtomicWithBill(ctx context.Context, tenantID, id s
 //
 // The collection pause is not live-only, so it stays. It holds the
 // subscription's unpaid invoices after the cancel: the auto-charge sweep
-// (notPausedForCollection) and the tax retry's auto-finalize read it, and a
+// (domain.NotPausedForCollectionSQL) and the tax retry's auto-finalize read it, and a
 // cancel's own keep_as_draft final invoice is one of them. Clearing it would
 // let Hardcount charge invoices the operator, or dunning's pause, held back.
 // Resume collection releases them.

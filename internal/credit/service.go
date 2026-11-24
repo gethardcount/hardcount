@@ -294,9 +294,9 @@ type ReliefGrant struct {
 	// SpendableCents is the customer's spendable balance in the grant's
 	// currency at the instant (SpendableBalance), read under the same lock.
 	SpendableCents int64
-	// DrawPending is whether an issued invoice of the customer is still to
-	// draw on the grant (domain.CreditDrawPendingSQL).
-	DrawPending bool
+	// PendingDraw is the oldest issued invoice of the customer still to draw
+	// on the grant (domain.CreditDrawPendingInvoiceSQL), nil when none is.
+	PendingDraw *domain.PendingCreditDraw
 }
 
 // LockCommitGrantForReliefTx reads the funded grant under the relief locks
@@ -315,7 +315,7 @@ func (s *Service) LockCommitGrantForReliefTx(ctx context.Context, tx *sql.Tx, te
 		return ReliefGrant{}, false, fmt.Errorf("read the spendable balance for relief: %w", err)
 	}
 	out := ReliefGrant{GrantID: g.GrantID, GrantedCents: g.AmountCents, CNRetiredCents: g.CNRetiredCents,
-		SpendableCents: spendable[g.Currency], DrawPending: g.DrawPending}
+		SpendableCents: spendable[g.Currency], PendingDraw: g.PendingDraw}
 	if g.Live {
 		out.LiveRemainingCents = g.Remaining()
 	}

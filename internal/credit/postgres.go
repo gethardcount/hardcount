@@ -1019,9 +1019,9 @@ type commitGrantState struct {
 	// caller passed: drainPositiveBlocks' predicate, so credit is live at
 	// its expires_at and expired a moment later, swept or not.
 	Live bool
-	// DrawPending is whether an issued invoice is still to draw on the grant
-	// (domain.CreditDrawPendingSQL).
-	DrawPending bool
+	// PendingDraw is the oldest issued invoice still to draw on the grant
+	// (domain.CreditDrawPendingInvoiceSQL), nil when there is none.
+	PendingDraw *domain.PendingCreditDraw
 }
 
 func (g commitGrantState) Remaining() int64 { return g.AmountCents - g.ConsumedCents }
@@ -1029,7 +1029,7 @@ func (g commitGrantState) Remaining() int64 { return g.AmountCents - g.ConsumedC
 // LockCommitGrantTx locates the commit grant funded by invoiceID and
 // returns its state under the ADR-078 lock discipline (customer advisory
 // lock, then grant row FOR UPDATE re-read), with Live judged at `at` and
-// DrawPending read in the same statement.
+// PendingDraw read in the same statement.
 // found=false when the invoice funded no grant; the relief callers treat
 // that as corruption, since cash is about to move.
 func (s *PostgresStore) LockCommitGrantTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, at time.Time) (commitGrantState, bool, error) {
@@ -1058,15 +1058,28 @@ func (s *PostgresStore) LockCommitGrantTx(ctx context.Context, tx *sql.Tx, tenan
 	// Re-read under the row lock — the pre-lock snapshot is stale by
 	// construction (a concurrent drain can bump consumed_cents between
 	// the lookup and the lock).
+	var (
+		drawNumber, drawStatus, drawTZ sql.NullString
+		drawStart, drawEnd             sql.NullTime
+		drawPaused                     sql.NullBool
+	)
 	err = tx.QueryRowContext(ctx, `
 		SELECT g.amount_cents, g.consumed_cents, g.cn_retired_cents, (g.expires_at IS NULL OR g.expires_at >= $3),
-		       `+domain.CreditDrawPendingSQL("g")+`
+		       d.*
 		FROM customer_credit_ledger g
+		LEFT JOIN LATERAL (`+domain.CreditDrawPendingInvoiceSQL("g", "$3::timestamptz")+`) d ON true
 		WHERE g.tenant_id = $1 AND g.id = $2
 		FOR UPDATE OF g
-	`, tenantID, g.GrantID, at).Scan(&g.AmountCents, &g.ConsumedCents, &g.CNRetiredCents, &g.Live, &g.DrawPending)
+	`, tenantID, g.GrantID, at).Scan(&g.AmountCents, &g.ConsumedCents, &g.CNRetiredCents, &g.Live,
+		&drawNumber, &drawStatus, &drawStart, &drawEnd, &drawTZ, &drawPaused)
 	if err != nil {
 		return commitGrantState{}, false, fmt.Errorf("re-read commit grant %s under lock: %w", g.GrantID, err)
+	}
+	if drawStatus.Valid { // NULL only when the lateral join found no invoice
+		g.PendingDraw = &domain.PendingCreditDraw{
+			InvoiceNumber: drawNumber.String, Status: domain.InvoiceStatus(drawStatus.String),
+			PeriodStart: drawStart.Time, PeriodEnd: drawEnd.Time, Timezone: drawTZ.String, CollectionPaused: drawPaused.Bool,
+		}
 	}
 	return g, true, nil
 }

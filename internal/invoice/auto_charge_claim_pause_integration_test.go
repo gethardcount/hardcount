@@ -78,7 +78,7 @@ func bypassExec(t *testing.T, db *postgres.DB, query string, args ...any) {
 // collect that runs right after a finalize claims without a list, so an
 // operator's Finalize of a paused subscription's draft charged the card.
 //
-// Mutation: drop notPausedForCollection from ClaimAutoCharge, and the
+// Mutation: drop domain.NotPausedForCollectionSQL from ClaimAutoCharge, and the
 // open-ended and future pauses are claimed.
 func TestClaimAutoCharge_RefusesWhileCollectionPaused(t *testing.T) {
 	db := testutil.SetupTestDB(t)

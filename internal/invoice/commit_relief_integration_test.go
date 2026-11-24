@@ -14,9 +14,11 @@ import (
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/credit"
 	"github.com/gethardcount/hardcount/internal/creditnote"
+	"github.com/gethardcount/hardcount/internal/customer"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/subscription"
 	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/webhook"
 )
@@ -433,26 +435,69 @@ func TestCommitRelief_UnusedAgainstLiveBalance(t *testing.T) {
 	if _, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{InvoiceID: inv.ID, RetireAll: true}); !errors.Is(err, errs.ErrInvalidState) {
 		t.Fatalf("unbilled usage above the balance: err = %v, want 409", err)
 	}
-
-	// A period close commits its invoice queued for collection, then draws
-	// the credit. In between, the period's usage is no longer unbilled while
-	// the credit is still in the balance, so relief waits for the draw.
-	cnSvc.SetUnbilledUsageReader(fixedUnbilled{})
-	waiting, err := h.invStore.CreateWithLineItems(ctx, h.tenantID, domain.Invoice{
-		CustomerID: h.custID, InvoiceNumber: "HC-CLOSE-1", BillingReason: domain.BillingReasonSubscriptionCycle,
-		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending, IssuedAt: ptrTime(time.Now().UTC()),
-		Currency: "USD", SubtotalCents: 1000, TotalAmountCents: 1000, AmountDueCents: 1000,
-		BillingPeriodStart: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), BillingPeriodEnd: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
-	}, nil)
-	if err != nil || !waiting.AutoChargePending {
-		t.Fatalf("closed period's invoice: queued %v, err %v; want queued for collection", waiting.AutoChargePending, err)
-	}
-	if _, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{InvoiceID: inv.ID, RetireAll: true}); !errors.Is(err, errs.ErrInvalidState) {
-		t.Fatalf("relief while an invoice waits to draw credit: err = %v, want 409", err)
-	}
 }
 
-func ptrTime(t time.Time) *time.Time { return &t }
+// TestCommitRelief_PendingDrawSaysTheWayOut: while an invoice of the customer
+// is still to draw on the credit, its usage is no longer unbilled but the
+// credit is still in the balance, so relief refuses with the one way out the
+// invoice's state leaves. A period close commits its invoice queued for
+// collection and draws the credit after, so queued is the common row. Each row
+// is its own customer's 90.00 top-up of 100.00 credit.
+func TestCommitRelief_PendingDrawSaysTheWayOut(t *testing.T) {
+	h, ctx := newCommitHarness(t, "Relief Pending Draw")
+	cnSvc := newReliefCNService(h)
+	// cycleInvoice is a June 2026 period invoice of a new customer.
+	cycleInvoice := func(t *testing.T, num string, status domain.InvoiceStatus) string {
+		cust, err := customer.NewPostgresStore(h.db).Create(ctx, h.tenantID, domain.Customer{ExternalID: "cus_" + num, DisplayName: num})
+		if err != nil {
+			t.Fatalf("create customer: %v", err)
+		}
+		inv := domain.Invoice{
+			CustomerID: cust.ID, InvoiceNumber: num, BillingReason: domain.BillingReasonSubscriptionCycle,
+			Status: status, PaymentStatus: domain.PaymentPending,
+			Currency: "USD", SubtotalCents: 1000, TotalAmountCents: 1000, AmountDueCents: 1000,
+			BillingPeriodStart: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC), BillingPeriodEnd: time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
+		}
+		if status == domain.InvoiceFinalized {
+			now := time.Now().UTC()
+			inv.IssuedAt = &now
+		}
+		if _, err := h.invStore.CreateWithLineItems(ctx, h.tenantID, inv, nil); err != nil {
+			t.Fatalf("create invoice: %v", err)
+		}
+		return cust.ID
+	}
+
+	for _, tc := range []struct {
+		name    string
+		pending func(t *testing.T) (customerID string)
+		want    string
+	}{
+		{"draft", func(t *testing.T) string { return cycleInvoice(t, "HC-DRAFT-1", domain.InvoiceDraft) },
+			"Draft invoice HC-DRAFT-1 for Jun 1, 2026 – Jun 30, 2026 is waiting to use this credit; finalize or void it, then try again."},
+		{"queued", func(t *testing.T) string { return cycleInvoice(t, "HC-QUEUED-1", domain.InvoiceFinalized) },
+			"Invoice HC-QUEUED-1 draws this credit at the next collection pass; try again once that pass has run."},
+		{"paused", func(t *testing.T) string {
+			inv, subID := seedQueuedSubInvoice(t, h.db, ctx, h.tenantID, "HC-PAUSED-1")
+			if _, err := subscription.NewPostgresStore(h.db).SetPauseCollection(ctx, h.tenantID, subID,
+				domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft}, nil); err != nil {
+				t.Fatalf("pause collection: %v", err)
+			}
+			return inv.CustomerID
+		}, "Invoice HC-PAUSED-1 is waiting to use this credit, but its collection is paused; resume collection or void the invoice, then try again."},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			row := *h
+			row.custID = tc.pending(t)
+			topup := row.createTopup(t, ctx, "USD", 9000, 10000)
+			payOffline(t, &row, ctx, topup.ID)
+			_, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{InvoiceID: topup.ID, RetireAll: true})
+			if !errors.Is(err, errs.ErrInvalidState) || !strings.Contains(err.Error(), tc.want) {
+				t.Fatalf("relief while a %s invoice waits to draw the credit: err = %v\nwant 409: %s", tc.name, err, tc.want)
+			}
+		})
+	}
+}
 
 // TestCommitRelief_CardCapCountsStripeRefunds: the card refund of a relief fits
 // what the card paid less every refund of that payment, made by a note or in

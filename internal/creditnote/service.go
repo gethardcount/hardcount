@@ -212,9 +212,9 @@ type ReliefGrant struct {
 	// SpendableCents is the customer's spendable balance in the grant's
 	// currency.
 	SpendableCents int64
-	// DrawPending is whether an issued invoice of the customer is still to
-	// draw on the grant.
-	DrawPending bool
+	// PendingDraw is the oldest issued invoice of the customer still to draw
+	// on the grant, nil when none is.
+	PendingDraw *domain.PendingCreditDraw
 }
 
 // TaxReverser issues a reversal of the invoice's committed tax transaction.
@@ -1143,7 +1143,7 @@ const reliefReason = "Unused prepaid credit refunded"
 // on unpaid invoices. Those are what the period's invoice bills, not credit
 // already used. An invoice already issued that has not drawn its credit yet
 // would make the figure high, so relief refuses while one is pending
-// (ReliefGrant.DrawPending) instead of subtracting it.
+// (ReliefGrant.PendingDraw) instead of subtracting it.
 func unusedCredit(g ReliefGrant, unbilledCents int64) int64 {
 	return min(g.LiveRemainingCents, max(g.SpendableCents-unbilledCents, 0))
 }
@@ -1254,8 +1254,8 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 		if !found {
 			return domain.CreditNote{}, nil, fmt.Errorf("invoice %s is a paid top-up with no funded grant — its payment funds the grant in the same tx, so this is corrupted state; refusing to move cash", input.InvoiceID)
 		}
-		if g.DrawPending {
-			return domain.CreditNote{}, nil, errs.InvalidState("An invoice of this customer is waiting to use this credit, so what is unused is not known yet; try again once that invoice is collected.")
+		if g.PendingDraw != nil {
+			return domain.CreditNote{}, nil, pendingDrawRefusal(*g.PendingDraw)
 		}
 		unused := unusedCredit(g, unbilled)
 		if unused <= 0 {
@@ -1447,6 +1447,25 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 	// External legs (Stripe refund / tax reversal) — shared with Issue(),
 	// idempotency-keyed and self-healing.
 	return s.runPostIssueExternalLegs(ctx, tenantID, cn.ID, cn, inv)
+}
+
+// pendingDrawRefusal refuses a relief while invoice d is still to draw on the
+// credit, with the one way out its state leaves the operator. A draft wins
+// over a pause: finalizing it is the first step either way. Period and
+// threshold invoices are numbered when they are made, drafts included; only a
+// top-up's draft has no number.
+func pendingDrawRefusal(d domain.PendingCreditDraw) error {
+	switch {
+	case d.Status == domain.InvoiceDraft:
+		period := domain.FormatInclusivePeriod(d.PeriodStart, d.PeriodEnd, domain.LoadLocationOrUTC(d.Timezone))
+		return errs.InvalidState(fmt.Sprintf(
+			"Draft invoice %s for %s is waiting to use this credit; finalize or void it, then try again.", d.InvoiceNumber, period))
+	case d.CollectionPaused:
+		return errs.InvalidState(fmt.Sprintf(
+			"Invoice %s is waiting to use this credit, but its collection is paused; resume collection or void the invoice, then try again.", d.InvoiceNumber))
+	}
+	return errs.InvalidState(fmt.Sprintf(
+		"Invoice %s draws this credit at the next collection pass; try again once that pass has run.", d.InvoiceNumber))
 }
 
 // failedRefundsStillCount names the notes whose failed card refunds still
