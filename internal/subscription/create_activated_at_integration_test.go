@@ -15,9 +15,7 @@ import (
 // store-INSERT half of the activated_at fix. The CreateWithBill INSERT used to
 // omit activated_at from its column list entirely, so an immediately-active
 // (started on create) subscription landed with activated_at = NULL even when the
-// service set it — the sub then counted in headline MRR (status='active') but
-// was INVISIBLE to MRR movement / point-in-time / churn (all key on
-// activated_at as the MRR-start event), so the dashboard never reconciled.
+// service set it: an active subscription with no time it became active.
 //
 // The service-layer unit test (TestCreate) can't catch this: its in-memory
 // store echoes whatever fields the service passes, so it stays green even with
@@ -76,7 +74,7 @@ func TestCreate_StartNow_PersistsActivatedAt(t *testing.T) {
 		t.Fatalf("status: got %q, want active", statusStr)
 	}
 	if !hasActivated {
-		t.Fatal("persisted activated_at is NULL for a sub started on create — invisible to MRR movement")
+		t.Fatal("persisted activated_at is NULL for a sub started on create")
 	}
 
 	// A trialing sub, by contrast, must NOT be activated at create time.

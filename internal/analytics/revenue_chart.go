@@ -30,7 +30,7 @@ func (h *Handler) revenueChart(w http.ResponseWriter, r *http.Request) {
 	defer func() { _ = tx.Rollback() }()
 
 	// Scope to the tenant default currency — summing mixed currencies into one
-	// total is meaningless (matches the overview/MRR currency scoping).
+	// total is meaningless (matches the overview's revenue).
 	currency, err := defaultCurrencyFor(ctx, tx)
 	if err != nil {
 		slog.Error("analytics revenue-chart: default currency", "error", err)

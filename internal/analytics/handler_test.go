@@ -37,7 +37,6 @@ func TestRoutes_RegistersExpectedEndpoints(t *testing.T) {
 	expected := []route{
 		{"GET", "/overview"},
 		{"GET", "/revenue-chart"},
-		{"GET", "/mrr-movement"},
 		{"GET", "/usage"},
 	}
 
@@ -76,36 +75,26 @@ func TestOverviewResponse_JSONShape(t *testing.T) {
 	resp := OverviewResponse{
 		Period:        "30d",
 		Currency:      "USD",
-		MRR:           1200_00,
-		MRRPrev:       1100_00,
-		ARR:           14400_00,
-		ARRPrev:       13200_00,
 		Revenue:       500_000_00,
 		RevenuePrev:   450_000_00,
 		OutstandingAR: 15_000_00,
 		OutstandingByCurrency: []CurrencyAmount{
 			{Currency: "USD", AmountCents: 15_000_00},
 		},
-		AvgInvoiceValue: 320_00,
 		CreditBalanceByCurrency: []CurrencyAmount{
 			{Currency: "USD", AmountCents: 8_500_00},
 		},
-		ActiveCustomers:     42,
-		NewCustomers:        5,
-		ActiveSubs:          38,
-		TrialingSubs:        3,
-		PaidInvoices:        156,
-		FailedPayments:      3,
-		OpenInvoices:        12,
-		DunningActive:       2,
-		UsageEvents:         12_345,
-		LogoChurnRate:       0.05,
-		RevenueChurnRate:    0.02,
-		NRR:                 1.08,
-		DunningRecoveryRate: 0.75,
-		MRRMovement: MRRMovementTotals{
-			New: 2500, Expansion: 500, Contraction: 100, Churned: 800, Net: 2100,
-		},
+		CreditSoldByCurrency:  []CurrencyAmount{{Currency: "USD", AmountCents: 10_000_00}},
+		UsageBilledByCurrency: []CurrencyAmount{{Currency: "USD", AmountCents: 2_000_00}},
+		ActiveCustomers:       42,
+		NewCustomers:          5,
+		PaidInvoices:          156,
+		FailedPayments:        3,
+		OpenInvoices:          12,
+		DunningActive:         2,
+		UsageEvents:           12_345,
+		CustomersOutOfCredit:  1,
+		CustomersLowOnCredit:  2,
 	}
 
 	data, err := json.Marshal(resp)
@@ -119,14 +108,13 @@ func TestOverviewResponse_JSONShape(t *testing.T) {
 	}
 
 	expected := []string{
-		"period", "currency", "mrr", "mrr_prev", "arr", "arr_prev",
-		"revenue", "revenue_prev", "outstanding_ar", "outstanding_by_currency", "avg_invoice_value", "credit_balance_by_currency",
-		"active_customers", "new_customers", "live_customers", "live_customers_prev",
-		"active_subscriptions", "trialing_subscriptions",
+		"period", "currency",
+		"revenue", "revenue_prev", "outstanding_ar", "outstanding_by_currency", "credit_balance_by_currency",
+		"credit_sold_by_currency", "usage_billed_by_currency",
+		"active_customers", "new_customers",
 		"paid_invoices", "failed_payments", "failed_payments_prev", "open_invoices",
 		"dunning_active", "refunds_needing_attention", "usage_events",
-		"logo_churn_rate", "revenue_churn_rate", "nrr", "dunning_recovery_rate",
-		"mrr_movement",
+		"customers_out_of_credit", "customers_low_on_credit",
 	}
 	for _, field := range expected {
 		if _, ok := m[field]; !ok {
@@ -135,17 +123,6 @@ func TestOverviewResponse_JSONShape(t *testing.T) {
 	}
 	if len(m) != len(expected) {
 		t.Errorf("OverviewResponse has %d fields, want %d", len(m), len(expected))
-	}
-
-	// Spot-check the nested movement object.
-	mv, ok := m["mrr_movement"].(map[string]any)
-	if !ok {
-		t.Fatalf("mrr_movement: expected object, got %T", m["mrr_movement"])
-	}
-	for _, k := range []string{"new", "expansion", "contraction", "churned", "net"} {
-		if _, ok := mv[k]; !ok {
-			t.Errorf("mrr_movement missing field %q", k)
-		}
 	}
 }
 
@@ -162,8 +139,8 @@ func TestOverviewResponse_ZeroValues(t *testing.T) {
 	if m["period"] != "" {
 		t.Errorf("period: got %v, want empty", m["period"])
 	}
-	if m["mrr"] != float64(0) {
-		t.Errorf("mrr: got %v, want 0", m["mrr"])
+	if m["revenue"] != float64(0) {
+		t.Errorf("revenue: got %v, want 0", m["revenue"])
 	}
 }
 
@@ -190,19 +167,6 @@ func TestRevenueDataPoint_JSONShape(t *testing.T) {
 	}
 	if m["invoice_count"] != float64(42) {
 		t.Errorf("invoice_count: got %v", m["invoice_count"])
-	}
-}
-
-func TestMRRMovementPoint_JSONShape(t *testing.T) {
-	p := MRRMovementPoint{Date: "2026-04-01", New: 100, Expansion: 20, Contraction: 5, Churned: 10, Net: 105}
-	data, _ := json.Marshal(p)
-	var m map[string]any
-	_ = json.Unmarshal(data, &m)
-
-	for _, k := range []string{"date", "new", "expansion", "contraction", "churned", "net"} {
-		if _, ok := m[k]; !ok {
-			t.Errorf("missing field %q", k)
-		}
 	}
 }
 

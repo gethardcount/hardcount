@@ -3,11 +3,10 @@ package analytics
 import (
 	"context"
 	"database/sql"
-	"fmt"
-	"github.com/gethardcount/hardcount/internal/domain"
 	"log/slog"
-	"math/big"
 	"net/http"
+
+	"github.com/gethardcount/hardcount/internal/domain"
 
 	"github.com/gethardcount/hardcount/internal/api/respond"
 	"github.com/gethardcount/hardcount/internal/auth"
@@ -21,21 +20,16 @@ import (
 type OverviewResponse struct {
 	Period string `json:"period"`
 
-	// Currency is the tenant's default currency. All money figures below are
-	// scoped to it — invoices in other currencies are excluded rather than
-	// summed into a meaningless mixed-currency total. The dashboard renders
-	// every amount labeled with this code.
+	// Currency is the tenant's default currency. Revenue and OutstandingAR
+	// are scoped to it: invoices in other currencies are excluded rather
+	// than summed into a meaningless mixed-currency total. Each
+	// ..._by_currency list names every currency instead.
 	Currency string `json:"currency"`
 
 	// Money (cents)
-	MRR             int64 `json:"mrr"`
-	MRRPrev         int64 `json:"mrr_prev"`
-	ARR             int64 `json:"arr"`
-	ARRPrev         int64 `json:"arr_prev"`
-	Revenue         int64 `json:"revenue"`
-	RevenuePrev     int64 `json:"revenue_prev"`
-	OutstandingAR   int64 `json:"outstanding_ar"`
-	AvgInvoiceValue int64 `json:"avg_invoice_value"`
+	Revenue       int64 `json:"revenue"`
+	RevenuePrev   int64 `json:"revenue_prev"`
+	OutstandingAR int64 `json:"outstanding_ar"`
 
 	// OutstandingByCurrency is the amount still due on the same open invoices
 	// OpenInvoices counts, one row per currency. OutstandingAR covers the
@@ -49,20 +43,18 @@ type OverviewResponse struct {
 	// first, then largest.
 	CreditBalanceByCurrency []CurrencyAmount `json:"credit_balance_by_currency"`
 
+	// CreditSoldByCurrency is the credit granted by the top-ups paid in the
+	// period, per currency. A discounted top-up grants more than was paid,
+	// so this is not part of Revenue. Ordered like CreditBalanceByCurrency.
+	CreditSoldByCurrency []CurrencyAmount `json:"credit_sold_by_currency"`
+
+	// UsageBilledByCurrency is the usage lines on the invoices issued in the
+	// period, per currency, before tax. Ordered like CreditBalanceByCurrency.
+	UsageBilledByCurrency []CurrencyAmount `json:"usage_billed_by_currency"`
+
 	// Counts
-	ActiveCustomers int `json:"active_customers"`
-	NewCustomers    int `json:"new_customers"`
-	// LiveCustomers counts distinct customers with at least one active or
-	// trialing subscription: the customers you are billing or about to bill.
-	// ActiveCustomers counts customer records with status active, which also
-	// includes customers with no subscription or only canceled ones.
-	LiveCustomers int `json:"live_customers"`
-	// LiveCustomersPrev is the same count at the start of the window, rebuilt
-	// from subscription start and cancel times (like mrr_prev). It is never
-	// negative, unlike "live now minus new in the window" would be.
-	LiveCustomersPrev  int   `json:"live_customers_prev"`
-	ActiveSubs         int   `json:"active_subscriptions"`
-	TrialingSubs       int   `json:"trialing_subscriptions"`
+	ActiveCustomers    int   `json:"active_customers"`
+	NewCustomers       int   `json:"new_customers"`
 	PaidInvoices       int   `json:"paid_invoices"`
 	FailedPayments     int   `json:"failed_payments"`
 	FailedPaymentsPrev int   `json:"failed_payments_prev"`
@@ -70,32 +62,18 @@ type OverviewResponse struct {
 	DunningActive      int   `json:"dunning_active"`
 	RefundsAttention   int   `json:"refunds_needing_attention"`
 	UsageEvents        int64 `json:"usage_events"`
-
-	// Rates (0..1)
-	LogoChurnRate       float64 `json:"logo_churn_rate"`
-	RevenueChurnRate    float64 `json:"revenue_churn_rate"`
-	NRR                 float64 `json:"nrr"`
-	DunningRecoveryRate float64 `json:"dunning_recovery_rate"`
-
-	// MRR movement within the period (cents; churned/contraction are positive
-	// magnitudes — the UI subtracts them visually).
-	MRRMovement MRRMovementTotals `json:"mrr_movement"`
+	// CustomersOutOfCredit and CustomersLowOnCredit count customers with at
+	// least one balance the credit balances list's balance=out or
+	// balance=low filter picks. A customer with balances in two currencies
+	// counts once.
+	CustomersOutOfCredit int `json:"customers_out_of_credit"`
+	CustomersLowOnCredit int `json:"customers_low_on_credit"`
 }
 
 // CurrencyAmount is an amount in one currency's minor units.
 type CurrencyAmount struct {
 	Currency    string `json:"currency"`
 	AmountCents int64  `json:"amount_cents"`
-}
-
-// MRRMovementTotals breaks MRR change into its standard SaaS components.
-// Net = New + Expansion - Contraction - Churned.
-type MRRMovementTotals struct {
-	New         int64 `json:"new"`
-	Expansion   int64 `json:"expansion"`
-	Contraction int64 `json:"contraction"`
-	Churned     int64 `json:"churned"`
-	Net         int64 `json:"net"`
 }
 
 func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
@@ -113,10 +91,10 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 
 	resp := OverviewResponse{Period: period.Key}
 
-	// Resolve the tenant's default currency once. Every invoice-money
-	// aggregate (revenue, outstanding AR, avg invoice value) is scoped to it
-	// so the dashboard never sums amounts across currencies into a corrupt
-	// total. Defaults to USD when settings are unset (fresh tenant).
+	// Resolve the tenant's default currency once. Revenue and outstanding AR
+	// are scoped to it, so the dashboard never sums amounts across
+	// currencies into a corrupt total, and each by-currency list puts it
+	// first. Defaults to USD when settings are unset (fresh tenant).
 	defaultCurrency, err := defaultCurrencyFor(ctx, tx)
 	if err != nil {
 		slog.Log(ctx, logging.ErrorLevel(ctx, err), "analytics overview: default currency", "error", err)
@@ -125,19 +103,7 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 	}
 	resp.Currency = defaultCurrency
 
-	// MRR now and at the start of the period (approximated from current
-	// subscription state — see mrrAtPointInTime).
 	var err1, err2 error
-	resp.MRR, err1 = currentMRR(ctx, tx, defaultCurrency)
-	resp.MRRPrev, err2 = mrrAtPointInTime(ctx, tx, period.Start, defaultCurrency)
-	if err := firstErr(err1, err2); err != nil {
-		slog.Log(ctx, logging.ErrorLevel(ctx, err), "analytics overview: mrr", "error", err)
-		respond.InternalError(w, r)
-		return
-	}
-	resp.ARR = resp.MRR * 12
-	resp.ARRPrev = resp.MRRPrev * 12
-
 	// Revenue: paid invoices inside the period vs. the prior period.
 	resp.Revenue, err1 = sumPaidRevenue(ctx, tx, period.Start, period.End, defaultCurrency)
 	resp.RevenuePrev, err2 = sumPaidRevenue(ctx, tx, period.PrevStart, period.PrevEnd, defaultCurrency)
@@ -159,31 +125,9 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 		{"new_customers", &resp.NewCustomers,
 			`SELECT COUNT(*) FROM customers WHERE created_at >= $1 AND created_at < $2`,
 			[]any{period.Start, period.End}},
-		{"active_subs", &resp.ActiveSubs,
-			`SELECT COUNT(*) FROM subscriptions WHERE status = 'active'`, nil},
-		// A subscription in its trial has status 'trialing' (it flips to
-		// 'active' when the trial ends). The old predicate, status 'active'
-		// with a future trial_end_at, matched no row, so this always read 0.
-		{"trialing_subs", &resp.TrialingSubs,
-			`SELECT COUNT(*) FROM subscriptions WHERE status = 'trialing'`, nil},
-		{"live_customers", &resp.LiveCustomers,
-			`SELECT COUNT(DISTINCT customer_id) FROM subscriptions WHERE status IN ('active', 'trialing')`, nil},
-		// Live at the window start: started (trial or paid) at or before it
-		// and not canceled by then. A subscription canceled before it ever
-		// started (a draft in earlier releases, or canceled by migration
-		// 00235) has no start and no period.
-		{"live_customers_prev", &resp.LiveCustomersPrev,
-			`SELECT COUNT(DISTINCT customer_id) FROM subscriptions
-			 WHERE COALESCE(started_at, activated_at) IS NOT NULL
-			   AND COALESCE(started_at, activated_at) <= $1
-			   AND (canceled_at IS NULL OR canceled_at > $1)`,
-			[]any{period.Start}},
 		{"outstanding_ar", &resp.OutstandingAR,
 			`SELECT COALESCE(SUM(amount_due_cents), 0) FROM invoices WHERE status = 'finalized' AND payment_status != 'succeeded' AND currency = $1`,
 			[]any{defaultCurrency}},
-		{"avg_invoice", &resp.AvgInvoiceValue,
-			`SELECT COALESCE(AVG(total_amount_cents), 0)::bigint FROM invoices WHERE status = 'paid' AND currency = $1 AND paid_at >= $2 AND paid_at < $3`,
-			[]any{defaultCurrency, period.Start, period.End}},
 		{"paid_invoices", &resp.PaidInvoices,
 			`SELECT COUNT(*) FROM invoices WHERE status = 'paid' AND currency = $1 AND paid_at >= $2 AND paid_at < $3`,
 			[]any{defaultCurrency, period.Start, period.End}},
@@ -224,6 +168,13 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 		// filter so the count and the list never disagree.
 		{"refunds_needing_attention", &resp.RefundsAttention,
 			`SELECT COUNT(*) FROM credit_notes WHERE ` + domain.CreditNoteRefundNeedsAttentionSQL, nil},
+		// Customers with a balance the credit balances list's filter picks,
+		// each counted once whatever its currencies. Both read the
+		// predicate from domain.CreditBalanceFilterSQL.
+		{"customers_out_of_credit", &resp.CustomersOutOfCredit,
+			customersWithBalanceSQL(domain.CreditBalanceOut), []any{tenantID}},
+		{"customers_low_on_credit", &resp.CustomersLowOnCredit,
+			customersWithBalanceSQL(domain.CreditBalanceLow), []any{tenantID}},
 	}
 	for _, q := range queries {
 		if err := tx.QueryRowContext(ctx, q.sql, q.args...).Scan(q.dst); err != nil {
@@ -247,114 +198,22 @@ func (h *Handler) overview(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// MRR movement within the period
-	mvt, err := computeMRRMovement(ctx, tx, period.Start, period.End, defaultCurrency)
+	resp.CreditSoldByCurrency, err = creditSoldByCurrency(ctx, tx, period.Start, period.End, defaultCurrency)
 	if err != nil {
-		slog.Log(ctx, logging.ErrorLevel(ctx, err), "analytics overview: mrr movement", "error", err)
+		slog.Log(ctx, logging.ErrorLevel(ctx, err), "analytics overview: credit sold", "error", err)
 		respond.InternalError(w, r)
 		return
 	}
-	resp.MRRMovement = mvt
 
-	// Derived rates
-	resp.LogoChurnRate = churnRate(ctx, tx, period.Start, period.End, resp.MRRPrev != 0)
-	if resp.MRRPrev > 0 {
-		resp.RevenueChurnRate = float64(mvt.Churned) / float64(resp.MRRPrev)
-		resp.NRR = float64(resp.MRRPrev+mvt.Expansion-mvt.Contraction-mvt.Churned) / float64(resp.MRRPrev)
+	resp.UsageBilledByCurrency, err = usageBilledByCurrency(ctx, tx, period.Start, period.End, defaultCurrency)
+	if err != nil {
+		slog.Log(ctx, logging.ErrorLevel(ctx, err), "analytics overview: usage billed", "error", err)
+		respond.InternalError(w, r)
+		return
 	}
-	resp.DunningRecoveryRate = dunningRecoveryRate(ctx, tx, period.Start, period.End)
 
 	_ = tx.Commit()
 	respond.JSON(w, r, http.StatusOK, resp)
-}
-
-// currentMRR sums normalized-to-monthly base fees across all items of active
-// subscriptions. Each item contributes plan.base × item.quantity, normalized
-// from the plan's billing_interval. Scoped to the tenant's default currency —
-// cents in different currencies must never land in one SUM.
-func currentMRR(ctx context.Context, tx *sql.Tx, currency string) (int64, error) {
-	var v int64
-	err := tx.QueryRowContext(ctx, `
-		SELECT COALESCE(SUM(
-			CASE WHEN p.billing_interval = 'yearly' THEN (p.base_amount_cents * si.quantity) / 12
-			     ELSE p.base_amount_cents * si.quantity
-			END
-		), 0)
-		FROM subscriptions s
-		JOIN subscription_items si ON si.subscription_id = s.id AND si.deleted_at IS NULL
-		JOIN plans p ON p.id = si.plan_id
-		WHERE s.status = 'active'
-		  AND p.currency = $1
-	`, currency).Scan(&v)
-	return v, err
-}
-
-// mrrAtPointInTime reconstructs MRR at instant t by replaying the audit log
-// backwards from the current item state. For each item that existed at t, we
-// sum its MRR using the plan/quantity it held at that moment — rewound
-// through any subscription_item_changes that happened after t.
-//
-// An item's state at t is the most recent change event at or before t:
-// 'add'/'plan'/'quantity' give its (plan, quantity) via to_*; a 'remove'
-// means the item did NOT exist at t and is EXCLUDED (the original query
-// ignored 'remove' entirely, so removed items were counted forever —
-// MRRPrev/NRR/revenue-churn drifted permanently upward; audit HIGH #13).
-// If no event exists at or before t (item's history starts after t), the
-// earliest post-t event's from_* describes the pre-change state; an item
-// whose first event is its post-t 'add' yields NULLs and drops out.
-// Scoped to the tenant's default currency like every other MRR sum.
-//
-// The two LATERALs replace four correlated subqueries per item; both walk
-// idx_sic_item (0131).
-func mrrAtPointInTime(ctx context.Context, tx *sql.Tx, t any, currency string) (int64, error) {
-	var v int64
-	err := tx.QueryRowContext(ctx, `
-		WITH items_at_t AS (
-			SELECT
-				pi.subscription_id,
-				pi.subscription_item_id,
-				last_le.change_type AS state_type,
-				COALESCE(last_le.to_plan_id, first_gt.from_plan_id)     AS plan_id,
-				COALESCE(last_le.to_quantity, first_gt.from_quantity)   AS quantity
-			FROM (
-				SELECT DISTINCT c.subscription_id, c.subscription_item_id
-				FROM subscription_item_changes c
-			) pi
-			LEFT JOIN LATERAL (
-				SELECT c2.change_type, c2.to_plan_id, c2.to_quantity
-				FROM subscription_item_changes c2
-				WHERE c2.subscription_item_id = pi.subscription_item_id
-				  AND c2.changed_at <= $1
-				  AND c2.change_type IN ('add', 'plan', 'quantity', 'remove')
-				ORDER BY c2.changed_at DESC LIMIT 1
-			) last_le ON true
-			LEFT JOIN LATERAL (
-				SELECT c3.from_plan_id, c3.from_quantity
-				FROM subscription_item_changes c3
-				WHERE c3.subscription_item_id = pi.subscription_item_id
-				  AND c3.changed_at > $1
-				  AND c3.change_type IN ('plan', 'quantity', 'remove')
-				  AND c3.from_plan_id IS NOT NULL
-				ORDER BY c3.changed_at ASC LIMIT 1
-			) first_gt ON true
-		)
-		SELECT COALESCE(SUM(
-			CASE WHEN p.billing_interval = 'yearly' THEN (p.base_amount_cents * i.quantity) / 12
-			     ELSE p.base_amount_cents * i.quantity
-			END
-		), 0)
-		FROM items_at_t i
-		JOIN subscriptions s ON s.id = i.subscription_id
-		JOIN plans p ON p.id = i.plan_id
-		WHERE (i.state_type IS NULL OR i.state_type <> 'remove')
-		  AND i.plan_id IS NOT NULL
-		  AND i.quantity IS NOT NULL
-		  AND p.currency = $2
-		  AND s.activated_at IS NOT NULL
-		  AND s.activated_at <= $1
-		  AND (s.canceled_at IS NULL OR s.canceled_at > $1)
-	`, t, currency).Scan(&v)
-	return v, err
 }
 
 // outstandingByCurrency sums amount_due over the open invoices (the
@@ -363,26 +222,13 @@ func mrrAtPointInTime(ctx context.Context, tx *sql.Tx, t any, currency string) (
 // a count that includes other currencies. Never nil: an empty result encodes
 // as [], not null.
 func outstandingByCurrency(ctx context.Context, tx *sql.Tx, defaultCurrency string) ([]CurrencyAmount, error) {
-	rows, err := tx.QueryContext(ctx, `
+	return currencyAmounts(ctx, tx, `
 		SELECT currency, SUM(amount_due_cents)
 		FROM invoices
 		WHERE status = 'finalized' AND payment_status != 'succeeded' AND amount_due_cents > 0
 		GROUP BY currency
 		ORDER BY (currency = $1) DESC, SUM(amount_due_cents) DESC, currency
 	`, defaultCurrency)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	out := []CurrencyAmount{}
-	for rows.Next() {
-		var a CurrencyAmount
-		if err := rows.Scan(&a.Currency, &a.AmountCents); err != nil {
-			return nil, err
-		}
-		out = append(out, a)
-	}
-	return out, rows.Err()
 }
 
 // creditBalanceByCurrency is the credit customers hold per currency:
@@ -392,26 +238,13 @@ func outstandingByCurrency(ctx context.Context, tx *sql.Tx, defaultCurrency stri
 // row's balance_after is not the balance. Grouped by the currency each row stores (ADR-129); a currency
 // whose balance is zero is left out. Ordered like outstandingByCurrency.
 func creditBalanceByCurrency(ctx context.Context, tx *sql.Tx, defaultCurrency string) ([]CurrencyAmount, error) {
-	rows, err := tx.QueryContext(ctx, `
+	return currencyAmounts(ctx, tx, `
 		SELECT currency, COALESCE(SUM(amount_cents), 0)
 		FROM customer_credit_ledger
 		GROUP BY currency
 		HAVING SUM(amount_cents) <> 0
 		ORDER BY (currency = $1) DESC, SUM(amount_cents) DESC, currency
 	`, defaultCurrency)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-	out := []CurrencyAmount{}
-	for rows.Next() {
-		var a CurrencyAmount
-		if err := rows.Scan(&a.Currency, &a.AmountCents); err != nil {
-			return nil, err
-		}
-		out = append(out, a)
-	}
-	return out, rows.Err()
 }
 
 // defaultCurrencyFor returns the tenant's configured default currency, or
@@ -440,163 +273,84 @@ func defaultCurrencyFor(ctx context.Context, tx *sql.Tx) (string, error) {
 func sumPaidRevenue(ctx context.Context, tx *sql.Tx, start, end any, currency string) (int64, error) {
 	var v int64
 	err := tx.QueryRowContext(ctx, `
-		SELECT COALESCE(SUM(amount_paid_cents), 0)
-		FROM invoices
-		WHERE status = 'paid' AND paid_at >= $1 AND paid_at < $2 AND currency = $3
+		SELECT COALESCE(SUM(i.amount_paid_cents), 0)
+		FROM invoices i
+		WHERE `+paidInPeriodSQL+` AND i.currency = $3
 	`, start, end, currency).Scan(&v)
 	return v, err
 }
 
-// computeMRRMovement returns gross new/expansion/contraction/churned MRR
-// within [start, end).
-//
-// New / Churned use current subscription_items (items are preserved on
-// cancel — only the subscription's status/canceled_at change). Expansion /
-// Contraction come from the subscription_item_changes audit log, restricted
-// to subscriptions that were active throughout the period so their events
-// don't double-count against New / Churned.
-func computeMRRMovement(ctx context.Context, tx *sql.Tx, start, end any, currency string) (MRRMovementTotals, error) {
-	var m MRRMovementTotals
+// paidInPeriodSQL is "paid in the period" over invoices aliased i, with the
+// period's bounds as $1 and $2: status paid and paid_at in [$1, $2). Revenue
+// and credit sold share it.
+const paidInPeriodSQL = `i.status = 'paid' AND i.paid_at >= $1 AND i.paid_at < $2`
 
-	// New MRR: items of subscriptions activated in [start, end).
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COALESCE(SUM(
-			CASE WHEN p.billing_interval = 'yearly' THEN (p.base_amount_cents * si.quantity) / 12
-			     ELSE p.base_amount_cents * si.quantity
-			END
-		), 0)
-		FROM subscriptions s
-		JOIN subscription_items si ON si.subscription_id = s.id AND si.deleted_at IS NULL
-		JOIN plans p ON p.id = si.plan_id
-		WHERE s.activated_at >= $1 AND s.activated_at < $2
-		  AND p.currency = $3
-	`, start, end, currency).Scan(&m.New); err != nil {
-		return m, err
-	}
+// issuedInPeriodSQL is "issued in the period" over invoices aliased i, with
+// the period's bounds as $1 and $2: issued_at in [$1, $2), the same
+// closed-open window paidInPeriodSQL uses, on an invoice still standing.
+// issued_at is set when an invoice is issued (a draft has none); a void
+// cancels the invoice, so it is left out.
+const issuedInPeriodSQL = `i.status IN ('finalized', 'paid', 'uncollectible') AND i.issued_at >= $1 AND i.issued_at < $2`
 
-	// Churned MRR: items of subscriptions canceled in [start, end).
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COALESCE(SUM(
-			CASE WHEN p.billing_interval = 'yearly' THEN (p.base_amount_cents * si.quantity) / 12
-			     ELSE p.base_amount_cents * si.quantity
-			END
-		), 0)
-		FROM subscriptions s
-		JOIN subscription_items si ON si.subscription_id = s.id AND si.deleted_at IS NULL
-		JOIN plans p ON p.id = si.plan_id
-		WHERE s.canceled_at >= $1 AND s.canceled_at < $2
-		  AND p.currency = $3
-	`, start, end, currency).Scan(&m.Churned); err != nil {
-		return m, err
-	}
+// creditSoldByCurrency is the credit granted by the top-ups paid in [start,
+// end): the commit line's commit_granted_cents, per currency, which is more
+// than the payment when the top-up was sold at a discount. An unpaid top-up
+// is a draft and has granted nothing. Ordered like outstandingByCurrency.
+func creditSoldByCurrency(ctx context.Context, tx *sql.Tx, start, end any, defaultCurrency string) ([]CurrencyAmount, error) {
+	return currencyAmounts(ctx, tx, `
+		SELECT i.currency, SUM(li.commit_granted_cents)
+		FROM invoices i
+		JOIN invoice_line_items li ON li.invoice_id = i.id AND li.commit_granted_cents > 0
+		WHERE i.billing_reason = 'topup' AND `+paidInPeriodSQL+`
+		GROUP BY i.currency
+		ORDER BY (i.currency = $3) DESC, SUM(li.commit_granted_cents) DESC, i.currency
+	`, start, end, defaultCurrency)
+}
 
-	// Expansion / Contraction: plan, quantity, AND item add/remove changes
-	// on subs that were active throughout the period. Item adds/removes on
-	// continuing subs ARE expansion/contraction — the old inner joins on
-	// from_plan_id/to_plan_id silently dropped them ('add' has no from_*,
-	// 'remove' has no to_*), so Net never reconciled with the headline MRR
-	// delta. Subs activated or canceled inside the period stay excluded —
-	// their MRR impact (including their items' add/remove rows) is already
-	// in New / Churned.
-	err := tx.QueryRowContext(ctx, `
-		SELECT
-			COALESCE(SUM(CASE WHEN delta > 0 THEN delta ELSE 0 END), 0),
-			COALESCE(SUM(CASE WHEN delta < 0 THEN -delta ELSE 0 END), 0)
-		FROM (
-			SELECT (
-				COALESCE(CASE WHEN pto.billing_interval = 'yearly' THEN pto.base_amount_cents * c.to_quantity / 12
-				      ELSE pto.base_amount_cents * c.to_quantity END, 0)
-			  - COALESCE(CASE WHEN pfrom.billing_interval = 'yearly' THEN pfrom.base_amount_cents * c.from_quantity / 12
-				      ELSE pfrom.base_amount_cents * c.from_quantity END, 0)
-			) AS delta
-			FROM subscription_item_changes c
-			JOIN subscriptions s ON s.id = c.subscription_id
-			LEFT JOIN plans pfrom ON pfrom.id = c.from_plan_id
-			LEFT JOIN plans pto ON pto.id = c.to_plan_id
-			WHERE c.change_type IN ('plan', 'quantity', 'add', 'remove')
-			  AND c.changed_at >= $1 AND c.changed_at < $2
-			  AND (pfrom.id IS NULL OR pfrom.currency = $3)
-			  AND (pto.id IS NULL OR pto.currency = $3)
-			  AND s.activated_at IS NOT NULL
-			  AND s.activated_at < $1
-			  AND (s.canceled_at IS NULL OR s.canceled_at >= $2)
-		) d
-	`, start, end, currency).Scan(&m.Expansion, &m.Contraction)
+// usageBilledByCurrency is the usage lines (line_type usage, before tax) on
+// the invoices issued in [start, end), per currency. Ordered like
+// outstandingByCurrency; a currency whose usage sums to zero is left out.
+func usageBilledByCurrency(ctx context.Context, tx *sql.Tx, start, end any, defaultCurrency string) ([]CurrencyAmount, error) {
+	return currencyAmounts(ctx, tx, `
+		SELECT i.currency, SUM(li.amount_cents)
+		FROM invoices i
+		JOIN invoice_line_items li ON li.invoice_id = i.id AND li.line_type = 'usage'
+		WHERE `+issuedInPeriodSQL+`
+		GROUP BY i.currency
+		HAVING SUM(li.amount_cents) <> 0
+		ORDER BY (i.currency = $3) DESC, SUM(li.amount_cents) DESC, i.currency
+	`, start, end, defaultCurrency)
+}
+
+// customersWithBalanceSQL counts the customers with at least one balance
+// filter picks, over the grouping the credit balances list uses
+// (credit.PostgresStore.ListBalances). $1 is the tenant id: explicit, as in
+// that list, so the ledger scan uses its tenant index.
+func customersWithBalanceSQL(filter domain.CreditBalanceFilter) string {
+	return `SELECT COUNT(DISTINCT customer_id) FROM (
+		SELECT customer_id FROM customer_credit_ledger WHERE tenant_id = $1
+		GROUP BY customer_id, currency
+		HAVING ` + domain.CreditBalanceFilterSQL(filter) + `
+	) balances`
+}
+
+// currencyAmounts runs a query whose rows are (currency, amount). Never nil:
+// an empty result encodes as [], not null.
+func currencyAmounts(ctx context.Context, tx *sql.Tx, query string, args ...any) ([]CurrencyAmount, error) {
+	rows, err := tx.QueryContext(ctx, query, args...)
 	if err != nil {
-		return m, err
+		return nil, err
 	}
-
-	if m.Net, err = netMRR(m); err != nil {
-		return m, err
+	defer func() { _ = rows.Close() }()
+	out := []CurrencyAmount{}
+	for rows.Next() {
+		var a CurrencyAmount
+		if err := rows.Scan(&a.Currency, &a.AmountCents); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
 	}
-	return m, nil
-}
-
-// netMRR is New + Expansion − Contraction − Churned, each step checked: a
-// total past int64 is an error, never a wrapped figure. The four parts are
-// SQL sums of non-negative amounts.
-func netMRR(m MRRMovementTotals) (int64, error) {
-	// Summed in big integers so only the net must fit int64, not each step.
-	net := new(big.Int).SetInt64(m.New)
-	net.Add(net, big.NewInt(m.Expansion))
-	net.Sub(net, big.NewInt(m.Contraction))
-	net.Sub(net, big.NewInt(m.Churned))
-	if !net.IsInt64() {
-		return 0, fmt.Errorf("net MRR: %w", domain.ErrAmountOverflow)
-	}
-	return net.Int64(), nil
-}
-
-// churnRate = canceled-in-period / active-at-period-start.
-// Silent-fails to 0 on query errors to avoid nuking the whole overview for a
-// derived metric — the caller has already reported success on core fields.
-func churnRate(ctx context.Context, tx *sql.Tx, start, end any, _ bool) float64 {
-	var canceled, activeAtStart int
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM subscriptions
-		WHERE canceled_at >= $1 AND canceled_at < $2
-	`, start, end).Scan(&canceled); err != nil {
-		return 0
-	}
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM subscriptions
-		WHERE activated_at IS NOT NULL
-		  AND activated_at <= $1
-		  AND (canceled_at IS NULL OR canceled_at > $1)
-	`, start).Scan(&activeAtStart); err != nil {
-		return 0
-	}
-	if activeAtStart == 0 {
-		return 0
-	}
-	return float64(canceled) / float64(activeAtStart)
-}
-
-// dunningRecoveryRate = recovered / opened, over the runs opened in the
-// period. A run is recovered when a payment closed it: resolution
-// payment_recovered, with money paid on the invoice (amount_paid_cents > 0).
-// A run resolved by a void or a write-off is resolved but not recovered, and
-// used to raise the rate (sweep E7b, 2026-10-21); so is a run closed by a
-// credit note or customer credit that left nothing due, which is
-// payment_recovered with nothing paid (review of #1328).
-func dunningRecoveryRate(ctx context.Context, tx *sql.Tx, start, end any) float64 {
-	var opened, recovered int
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM invoice_dunning_runs
-		WHERE created_at >= $1 AND created_at < $2
-	`, start, end).Scan(&opened); err != nil {
-		return 0
-	}
-	if err := tx.QueryRowContext(ctx, `
-		SELECT COUNT(*) FROM invoice_dunning_runs
-		WHERE created_at >= $1 AND created_at < $2 AND state = 'resolved' AND resolution = $3 AND invoice_id IN (SELECT id FROM invoices WHERE amount_paid_cents > 0)
-	`, start, end, string(domain.ResolutionPaymentRecovered)).Scan(&recovered); err != nil {
-		return 0
-	}
-	if opened == 0 {
-		return 0
-	}
-	return float64(recovered) / float64(opened)
+	return out, rows.Err()
 }
 
 func firstErr(errs ...error) error {

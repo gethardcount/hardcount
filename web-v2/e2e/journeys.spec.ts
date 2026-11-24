@@ -272,31 +272,30 @@ test('the DRAFT mark fits inside the invoice at phone width', async ({ page }) =
   expect(fits).toBe(true)
 })
 
-test('Home counts trialing subscriptions and compares failed payments with the previous period', async ({ page }) => {
-  // A customer on a trial, so the trialing count the Customers card reads
-  // from the server is at least 1.
-  const plan = await createPlan()
-  const customer = await createCustomer()
-  const id = uniq()
-  const sub = await api<Subscription>('POST', '/subscriptions', {
-    code: `e2e-trial-${id}`,
-    display_name: `E2E Trial ${id}`,
-    customer_id: customer.id,
-    items: [{ plan_id: plan.id, quantity: 1 }],
-    trial_days: 14,
+test('the Home cards show credit held, credit sold, paid and usage billed, each in its own currencies', async ({ page }) => {
+  // Other workers add data meanwhile, so the figures are fixed here.
+  await page.route(url => url.pathname === '/v1/analytics/overview', async route => {
+    const answer = await route.fetch()
+    await route.fulfill({ response: answer, json: {
+      ...(await answer.json()),
+      currency: 'USD',
+      credit_balance_by_currency: [{ currency: 'USD', amount_cents: 10000 }, { currency: 'EUR', amount_cents: 2500 }],
+      credit_sold_by_currency: [{ currency: 'USD', amount_cents: 10000 }],
+      revenue: 9000,
+      revenue_prev: 0,
+      paid_invoices: 1,
+      usage_billed_by_currency: [],
+    } })
   })
-  expect(sub.status).toBe('trialing')
-
   await page.goto('/')
   await expect(page.getByRole('heading', { level: 1, name: 'Home', exact: true })).toBeVisible()
-  // The definition is on the card as text, not only in a hover tooltip.
-  const definition = page.getByText(/^Customers with an active or trialing subscription/)
-  await expect(definition).toBeVisible()
-  const customers = definition.locator('..')
-  await expect(customers).toContainText(/\d+ active subscriptions? · [1-9]\d* trialing subscriptions?/)
-  await expect(customers).not.toContainText(/\d+ active · /)
-  const failed = page.getByText('Failed payments', { exact: true }).locator('..')
-  await expect(failed).toContainText(/\d+ in the previous 30 days/)
+  // Each definition is on its card as text, not only in a hover tooltip.
+  const card = (definition: string) => page.getByText(definition, { exact: true }).locator('..')
+  await expect(card('Credit your customers can still spend, in each currency.')).toContainText('$100.00 + €25.00')
+  await expect(card('Credit bought with top-ups paid in this period. A discounted top-up counts the credit it gave, not its price.')).toContainText('$100.00')
+  await expect(card('What customers paid for invoices paid in this period, by card or offline. Credit is counted once, when it was bought.')).toContainText('$90.00')
+  await expect(card('Usage on invoices issued in this period, before tax. Void invoices are not counted.')).toContainText('$0.00')
+  await expect(page.getByRole('main').getByText(/^(MRR|Customers|Failed payments)$/)).toHaveCount(0)
 })
 
 test('the Usage page shows a Maximum meter as its peak per customer, not the sum', async ({ page }) => {
@@ -1337,10 +1336,13 @@ test('each Home attention line counts the rows of the list it opens', async ({ p
   })
   await page.route(url => url.pathname === '/v1/analytics/overview', async route => {
     const answer = await route.fetch()
-    await route.fulfill({ response: answer, json: { ...(await answer.json()), open_invoices: 0, outstanding_by_currency: [] } })
+    await route.fulfill({ response: answer, json: { ...(await answer.json()), open_invoices: 0, outstanding_by_currency: [], customers_out_of_credit: 1, customers_low_on_credit: 2 } })
   })
   await page.goto('/')
   const lines = page.getByRole('region', { name: 'Attention required' }).getByRole('link')
+  await expect(lines.first()).toHaveText(/1 customer is out of credit/)
+  await expect(lines.filter({ hasText: '1 customer is out of credit' })).toHaveAttribute('href', '/credits?balance=out')
+  await expect(lines.filter({ hasText: '2 customers are low on credit' })).toHaveAttribute('href', '/credits?balance=low')
   await expect(lines.filter({ hasText: '3 open invoices with a failed payment' })).toHaveAttribute('href', '/invoices?status=finalized&payment_status=failed')
   await expect(lines.filter({ hasText: '2 invoices in payment retry' })).toHaveAttribute('href', '/dunning?state=active')
   await expect(lines.filter({ hasText: /^5 open invoices(?! with)/ })).toHaveAttribute('href', '/invoices?status=finalized')
@@ -1349,11 +1351,14 @@ test('each Home attention line counts the rows of the list it opens', async ({ p
   // The retry line opens Payment retries already filtered to the runs it counted.
   await lines.filter({ hasText: 'in payment retry' }).click()
   await expect(page).toHaveURL(/\/dunning\?state=active$/)
-})
 
-test('Home defines MRR on its card', async ({ page }) => {
+  // The credit line opens the Credit page with the filter on, and it can be cleared.
   await page.goto('/')
-  await expect(page.getByText('Monthly recurring revenue: the base fees of active subscriptions, per month.', { exact: false })).toBeVisible()
+  await lines.filter({ hasText: 'out of credit' }).click()
+  await expect(page).toHaveURL(/\/credits\?balance=out$/)
+  await expect(page.getByRole('main').getByText(/^Out of credit/)).toBeVisible()
+  await page.getByRole('button', { name: 'Clear balance filter' }).click()
+  await expect(page).toHaveURL(/\/credits$/)
 })
 
 test('a promotional grant explains commit and promotional credit', async ({ page }) => {

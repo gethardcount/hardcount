@@ -1395,18 +1395,24 @@ func (s *PostgresStore) GetSpendableBalance(ctx context.Context, tenantID, custo
 
 // ListBalances returns one page of the rows, one per (customer, currency)
 // the tenant's ledger holds (ADR-129), largest balance first, and how many
-// rows there are.
-func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string, limit, offset int) ([]domain.CreditBalance, int, error) {
+// rows match. filter "" lists every row; otherwise only the rows
+// domain.CreditBalanceFilterSQL picks.
+func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string, filter domain.CreditBalanceFilter, limit, offset int) ([]domain.CreditBalance, int, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return nil, 0, err
 	}
 	defer postgres.Rollback(tx)
 
+	having := ""
+	if p := domain.CreditBalanceFilterSQL(filter); p != "" {
+		having = " HAVING " + p
+	}
+
 	var total int
 	if err := tx.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM (
-			SELECT 1 FROM customer_credit_ledger WHERE tenant_id = $1 GROUP BY customer_id, currency
+			SELECT 1 FROM customer_credit_ledger WHERE tenant_id = $1 GROUP BY customer_id, currency`+having+`
 		) pairs`, tenantID).Scan(&total); err != nil {
 		return nil, 0, err
 	}
@@ -1415,12 +1421,12 @@ func (s *PostgresStore) ListBalances(ctx context.Context, tenantID string, limit
 		SELECT
 			customer_id,
 			currency,
-			COALESCE(SUM(amount_cents), 0) AS balance_cents,
+			`+domain.CreditBalanceSQL+` AS balance_cents,
 			`+balanceGrantedUsedColumns+`,
 			`+balanceWriteOffColumns+`
 		FROM customer_credit_ledger
 		WHERE tenant_id = $1
-		GROUP BY customer_id, currency
+		GROUP BY customer_id, currency`+having+`
 		ORDER BY balance_cents DESC, customer_id, currency
 		LIMIT $2 OFFSET $3
 	`, tenantID, limit, offset)

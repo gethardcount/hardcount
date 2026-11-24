@@ -1,51 +1,39 @@
-// Pins the Home KPI baselines: each trend compares two server numbers with
-// one definition. The bug class: Failed payments compared against a
-// hard-coded 0, and Active customers against "active minus new", which read
-// -1 on real data.
+// Pins what each Home card says it counts, and how a card shows money in
+// several currencies.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { FAILED_PAYMENTS_DEFINITION, currencyScopedHint, customersTrend, failedPaymentsTrend, subscriptionsHint } from '../src/lib/homeKpis.ts'
+import {
+  CREDIT_HELD_DEFINITION, CREDIT_SOLD_DEFINITION, PAID_DEFINITION, USAGE_BILLED_DEFINITION,
+  amountsCardValue, currencyScopedHint,
+} from '../src/lib/homeKpis.ts'
 
-const base = {
-  live_customers: 3,
-  live_customers_prev: 2,
-  active_subscriptions: 3,
-  trialing_subscriptions: 1,
-  failed_payments: 1,
-  failed_payments_prev: 4,
-}
-
-test('failed payments compare against the previous window from the server', () => {
-  assert.deepEqual(failedPaymentsTrend(base), { current: 1, previous: 4 })
+test('each card says what it counts, in the words the server computes it with', () => {
+  assert.equal(CREDIT_HELD_DEFINITION, 'Credit your customers can still spend, in each currency.')
+  // A top-up sold at a discount grants more than was paid.
+  assert.equal(CREDIT_SOLD_DEFINITION, 'Credit bought with top-ups paid in this period. A discounted top-up counts the credit it gave, not its price.')
+  // Credit applied to an invoice is not counted again as a payment.
+  assert.match(PAID_DEFINITION, /Credit is counted once, when it was bought\.$/)
+  assert.equal(USAGE_BILLED_DEFINITION, 'Usage on invoices issued in this period, before tax. Void invoices are not counted.')
 })
 
-test('customers compare live now with live at the window start', () => {
-  assert.deepEqual(customersTrend(base), { current: 3, previous: 2 })
+test('no definition uses the subscription words Home no longer shows', () => {
+  for (const d of [CREDIT_HELD_DEFINITION, CREDIT_SOLD_DEFINITION, PAID_DEFINITION, USAGE_BILLED_DEFINITION]) {
+    assert.doesNotMatch(d, /MRR|ARR|churn|subscription|credits\b/i)
+  }
 })
 
-test('a baseline is never negative', () => {
-  assert.deepEqual(customersTrend({ ...base, live_customers_prev: -1 }), { current: 3, previous: 0 })
-  assert.deepEqual(failedPaymentsTrend({ ...base, failed_payments_prev: Number.NaN }), { current: 1, previous: 0 })
+test('a money card names every currency and never adds two together', () => {
+  const both = [{ currency: 'USD', amount_cents: 10000 }, { currency: 'EUR', amount_cents: 2500 }]
+  assert.equal(amountsCardValue(both, 'USD'), '$100.00 + €25.00')
+  assert.equal(amountsCardValue([{ currency: 'USD', amount_cents: 10000 }], 'USD'), '$100.00')
 })
 
-test('the hint names trialing subscriptions only when there are some', () => {
-  assert.equal(subscriptionsHint(base), '3 active subscriptions · 1 trialing subscription')
-  assert.equal(subscriptionsHint({ ...base, active_subscriptions: 2, trialing_subscriptions: 1 }), '2 active subscriptions · 1 trialing subscription')
-  assert.equal(subscriptionsHint({ ...base, active_subscriptions: 1, trialing_subscriptions: 2 }), '1 active subscription · 2 trialing subscriptions')
-  assert.equal(subscriptionsHint({ ...base, trialing_subscriptions: 0 }), '3 active subscriptions')
-  assert.equal(subscriptionsHint({ ...base, active_subscriptions: 1, trialing_subscriptions: 0 }), '1 active subscription')
+test('a money card with nothing shows zero in the workspace currency', () => {
+  assert.equal(amountsCardValue([], 'EUR'), '€0.00')
 })
 
-test('the failed payments caption names the statuses the server excludes', () => {
-  // The server counts only status = 'finalized' (#1328). The caption uses the
-  // product's status names, as the Invoices filter tabs do.
-  assert.match(FAILED_PAYMENTS_DEFINITION, /Void and uncollectible invoices are not counted\./)
-})
-
-// MRR and Revenue sum the workspace default currency only (internal/analytics
-// overview.go); a tenant with EUR customers saw a USD figure that silently
-// left them out. The hint says which currency the figure covers.
-test('MRR and Revenue hints name the one currency they cover', () => {
-  assert.equal(currencyScopedHint('ARR $14,400.00', 'usd'), 'ARR $14,400.00 · in USD only')
+// Paid sums the workspace default currency only (internal/analytics
+// overview.go). The hint says which currency the figure covers.
+test('the Paid hint names the one currency it covers', () => {
   assert.equal(currencyScopedHint('3 invoices paid', 'EUR'), '3 invoices paid · in EUR only')
 })

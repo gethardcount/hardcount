@@ -65,8 +65,7 @@ You do not need Go, Node, jq or a database. Docker downloads everything else.
 
    **You see:** Home, with a strip at the top: "Test mode. You're viewing test
    data. No real money moves." Its four cards show zero, because Hardcount has
-   no data yet: MRR (monthly recurring revenue), Revenue, Customers and
-   Failed payments.
+   no data yet: Credit held, Credit sold, Paid and Usage billed.
 
 ## Words on this page
 
@@ -239,7 +238,7 @@ At the end, the demo prints two links:
    - **Pricing**: the Tokens meter and the AI API plan.
    - **Pricing → Provider costs**: the five costs from step 5.
 
-Home's **Revenue** counts money paid, so it reads $0 until an invoice is
+Home's **Paid** counts money paid, so it reads $0 until an invoice is
 paid.
 
 ## Run it again, stop it, or remove it

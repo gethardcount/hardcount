@@ -12,9 +12,17 @@
  * OpenAPI spec version: 2026-04-07
  */
 import type { LimitParameter } from './limitParameter';
+import type { ListCreditBalancesBalance } from './listCreditBalancesBalance';
 import type { OffsetParameter } from './offsetParameter';
 
 export type ListCreditBalancesParams = {
+/**
+ * Only the rows with this much left. `out`: a balance of zero or
+ * less. `low`: above zero and below the account's
+ * `credit_balance_low_threshold_cents`; with no threshold set, the
+ * list is empty. Any other value is a 422 with `param: balance`.
+ */
+balance?: ListCreditBalancesBalance;
 /**
  * Rows per page, from 1 to 100. Default 50. Any other value, one that
  * is not a whole number, or `limit` sent twice is a 422 with

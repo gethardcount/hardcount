@@ -1,7 +1,7 @@
-// Home's "needs attention" lines. Each line's count is the total of the list
-// it links to, read with the same filter, so the two never disagree (C-04).
-// They used to come from the overview: a failed-payment count windowed to
-// the period behind a link to every failed invoice.
+// Home's "needs attention" lines. Each invoice line's count is the total of
+// the list it links to, read with the same filter, so the two never disagree
+// (C-04). The credit lines count customers, from the overview, with the
+// predicate of the Credit list's filter they link to.
 //
 // Dependency-free so the unit tests can load it.
 
@@ -25,6 +25,13 @@ export const ATTENTION_LISTS = {
 
 export interface AttentionCounts {
   // undefined while loading or after a failed read: no line rather than 0.
+  // Customers with a balance in some currency at zero or less, and above zero
+  // but below the low-balance setting (0 when it is unset). The server shares
+  // the predicate with the Credit list's filter
+  // (domain.CreditBalanceFilterSQL); the list has a row per customer and
+  // currency, the count one per customer.
+  outOfCredit?: number
+  lowOnCredit?: number
   failed?: number
   retrying?: number
   open?: number
@@ -40,6 +47,20 @@ const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one :
 
 export function homeAttentionLines(c: AttentionCounts): AttentionLine[] {
   const lines: AttentionLine[] = []
+  if (c.outOfCredit) {
+    lines.push({
+      severity: 'danger',
+      text: `${plural(c.outOfCredit, 'customer is', 'customers are')} out of credit`,
+      to: '/credits?balance=out',
+    })
+  }
+  if (c.lowOnCredit) {
+    lines.push({
+      severity: 'warning',
+      text: `${plural(c.lowOnCredit, 'customer is', 'customers are')} low on credit`,
+      to: '/credits?balance=low',
+    })
+  }
   if (c.failed) {
     lines.push({
       severity: 'danger',

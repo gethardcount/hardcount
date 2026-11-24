@@ -11,8 +11,7 @@ import (
 // Handler serves analytics API endpoints.
 //
 // All responses are tenant-scoped via RLS (postgres.TxTenant). Money is cents
-// (int64), rates are fractions in [0, 1] (float64), and periods are closed-open
-// windows [start, end) in UTC.
+// (int64), and periods are closed-open windows [start, end) in UTC.
 type Handler struct {
 	db *postgres.DB
 }
@@ -25,7 +24,6 @@ func (h *Handler) Routes() chi.Router {
 	r := chi.NewRouter()
 	r.Get("/overview", h.overview)
 	r.Get("/revenue-chart", h.revenueChart)
-	r.Get("/mrr-movement", h.mrrMovement)
 	r.Get("/usage", h.usageAnalytics)
 	return r
 }

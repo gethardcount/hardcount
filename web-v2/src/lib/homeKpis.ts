@@ -1,75 +1,42 @@
-// The Home page KPI numbers and the baselines their trends compare against.
+// The Home page cards: what each one counts and how its figure reads.
 // Plain functions so Vitest can check them.
-//
-// Rule: a trend compares two numbers the server computed with the same
-// definition. The page used to build baselines itself: Failed payments
-// against a hard-coded 0, and Active customers as "active now minus new in
-// the window", which went negative (archived customers count as new but not
-// as active). The server now returns *_prev for each.
 
-export interface HomeOverviewCounts {
-  live_customers: number
-  live_customers_prev: number
-  active_subscriptions: number
-  trialing_subscriptions: number
-  failed_payments: number
-  failed_payments_prev: number
-}
-
-export interface Trend {
-  current: number
-  previous: number
-}
+import { amountsByCurrencyText, formatCents, type CurrencyAmount } from './money.ts'
 
 // What each Home card counts, shown under the number on the card.
-export const CUSTOMERS_DEFINITION =
-  'Customers with an active or trialing subscription.'
 
-// currentMRR (internal/analytics/overview.go): plan base fee × quantity of
-// each active subscription, a yearly plan divided by 12, in the default
-// currency. Usage is not in it.
-export const MRR_DEFINITION =
-  'Monthly recurring revenue: the base fees of active subscriptions, per month. Usage is not included. ARR is the same × 12.'
+// creditBalanceByCurrency (internal/analytics/overview.go): the sum of the
+// credit ledger, per currency.
+export const CREDIT_HELD_DEFINITION =
+  'Credit your customers can still spend, in each currency.'
+
+// creditSoldByCurrency (internal/analytics/overview.go): the credit the
+// top-ups paid in the period granted, which a discount makes more than the
+// payment.
+export const CREDIT_SOLD_DEFINITION =
+  'Credit bought with top-ups paid in this period. A discounted top-up counts the credit it gave, not its price.'
 
 // sumPaidRevenue (internal/analytics/overview.go): the payments on invoices
 // paid in the period. Credit applied is not added again.
-export const REVENUE_DEFINITION =
+export const PAID_DEFINITION =
   'What customers paid for invoices paid in this period, by card or offline. Credit is counted once, when it was bought.'
 
-export const FAILED_PAYMENTS_DEFINITION =
-  'Open invoices created in this period whose payment failed. Void and uncollectible invoices are not counted.'
+// usageBilledByCurrency (internal/analytics/overview.go): usage lines,
+// before tax, on invoices issued in the period and not voided.
+export const USAGE_BILLED_DEFINITION =
+  'Usage on invoices issued in this period, before tax. Void invoices are not counted.'
 
-// Never negative: a count below zero is a bug, and a negative baseline turns
-// the percentage upside down.
-function count(n: number | undefined | null): number {
-  return typeof n === 'number' && Number.isFinite(n) && n > 0 ? Math.floor(n) : 0
+// A card's figure in every currency it has, never one sum across
+// currencies. With nothing in any currency it is zero in the workspace
+// currency the server returned.
+export function amountsCardValue(byCurrency: readonly CurrencyAmount[], currency: string): string {
+  return amountsByCurrencyText(byCurrency) ?? formatCents(0, currency)
 }
 
-export function customersTrend(o: HomeOverviewCounts): Trend {
-  return { current: count(o.live_customers), previous: count(o.live_customers_prev) }
-}
-
-export function failedPaymentsTrend(o: HomeOverviewCounts): Trend {
-  return { current: count(o.failed_payments), previous: count(o.failed_payments_prev) }
-}
-
-// "2 active subscriptions · 1 trialing subscription": the subscriptions
-// behind the customer count, each count with its own noun. Trialing shows
-// only when there is one.
-export function subscriptionsHint(o: HomeOverviewCounts): string {
-  const active = subscriptions(count(o.active_subscriptions), 'active')
-  const trialing = count(o.trialing_subscriptions)
-  return trialing > 0 ? `${active} · ${subscriptions(trialing, 'trialing')}` : active
-}
-
-function subscriptions(n: number, kind: string): string {
-  return `${n} ${kind} ${n === 1 ? 'subscription' : 'subscriptions'}`
-}
-
-// MRR, ARR, Revenue and the paid-invoice count cover the workspace default
-// currency only (internal/analytics/overview.go): a sum across currencies
-// would mean nothing. The hint says so, or a tenant with EUR customers reads
-// a USD figure that leaves them out without a word.
+// Revenue and the paid-invoice count cover the workspace default currency
+// only (internal/analytics/overview.go): a sum across currencies would mean
+// nothing. The hint says so, or a tenant with EUR customers reads a USD
+// figure that leaves them out without a word.
 export function currencyScopedHint(hint: string, currency: string): string {
   return `${hint} · in ${currency.toUpperCase()} only`
 }
