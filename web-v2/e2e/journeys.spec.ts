@@ -721,7 +721,8 @@ test("Margin shows no margin without a provider cost, and each model's margin wi
     // The input rate goes in on Pricing's Provider costs tab, in dollars per
     // 1M tokens; the API holds it in cents per token: $0.80 per 1M is 0.00008.
     await page.goto('/pricing?tab=provider-costs')
-    await page.getByLabel('Provider').fill('anthropic')
+    // Exact: the Provider costs tab's panel is labelled "Provider costs".
+    await page.getByLabel('Provider', { exact: true }).fill('anthropic')
     await page.getByLabel('Model').fill('claude-haiku-4.5')
     await page.getByLabel('Token type').fill('input')
     await page.getByLabel('$ per 1M tokens').fill('0.80')
@@ -950,8 +951,8 @@ test('a new account: Home welcomes the operator with the setup list open, in ord
     /^Set your prices/,
     /^Record what providers charge you\s*Optional/,
     /^Add a customer and put them on a plan/,
-    /^Send usage from your gateway/,
     /^Sell a customer credit/,
+    /^Send usage from your gateway/,
   ])
   await expect(list.getByRole('link', { name: 'Start from a recipe' })).toHaveAttribute('href', '/pricing?tab=recipes')
   await expect(list.getByRole('link', { name: 'Set them yourself' })).toHaveAttribute('href', '/pricing')
