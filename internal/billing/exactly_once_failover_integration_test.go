@@ -66,6 +66,7 @@ const (
 // to bill the same tenant at the same simulated instant.
 type exactlyOnceSeed struct {
 	tenantID    string
+	customerID  string
 	subIDs      []string
 	periodStart time.Time
 	periodEnd   time.Time
@@ -138,6 +139,7 @@ func seedDueSubscriptions(t *testing.T, db *postgres.DB, n int) exactlyOnceSeed 
 
 	return exactlyOnceSeed{
 		tenantID:    tenantID,
+		customerID:  cust.ID,
 		subIDs:      subIDs,
 		periodStart: periodStart,
 		periodEnd:   periodEnd,
@@ -209,11 +211,12 @@ func cycleInvoiceCounts(t *testing.T, db *postgres.DB, tenantID string) (total, 
 // invoices, a successor finishes the run, and every subscription must end with
 // exactly one invoice for the closed period — no duplicate, none lost.
 //
-// The kill point is chosen by watching the database rather than by sleeping:
-// the parent polls until the leader has committed killAfter invoices, then
-// kills it. That puts the kill inside the run almost every time instead of racing a
-// timer, and makes the interesting boundary (killed immediately after a commit,
-// before the loop advances) reachable on purpose.
+// The kill point is set by locks the parent holds, not by timing, so every
+// trial kills the leader inside its run. The parent holds the subscriptions it
+// wants left: the due claim skips a locked row, so the leader bills exactly
+// killAfter and then finds nothing due. Then the parent holds the customer row
+// and lets those subscriptions go: the leader's next close blocks at its
+// invoice insert, inside its transaction, and the parent kills it there.
 func TestExactlyOnce_LeaderKilledMidRun(t *testing.T) {
 	// Sweep the kill point rather than picking one. A single kill position can
 	// pass by luck — the boundaries are where recovery breaks, so 1 (killed
@@ -222,31 +225,24 @@ func TestExactlyOnce_LeaderKilledMidRun(t *testing.T) {
 	// middle.
 	for _, killAfter := range []int{1, 5, 12, 25, 39} {
 		t.Run(fmt.Sprintf("killed_after_%d_invoices", killAfter), func(t *testing.T) {
-			// A trial whose kill lands after the leader already finished
-			// interrupted nothing. It used to skip, which let this proof
-			// silently not run. Try again instead, and fail if the kill
-			// never lands inside the run.
-			const attempts = 5
-			for attempt := 1; attempt <= attempts; attempt++ {
-				if runKilledLeaderTrial(t, killAfter) {
-					return
-				}
-				t.Logf("attempt %d of %d: the leader finished before the kill landed; trying again", attempt, attempts)
-			}
-			t.Fatalf("the kill never landed inside the run in %d attempts, so crash recovery was not "+
-				"tested at this kill point (raise subCount or lower killAfter)", attempts)
+			runKilledLeaderTrial(t, killAfter)
 		})
 	}
 }
 
-// runKilledLeaderTrial reports whether the kill interrupted the leader. False
-// means the leader had already billed everything, so the trial proved nothing.
-func runKilledLeaderTrial(t *testing.T, killAfter int) bool {
+// runKilledLeaderTrial kills a billing leader inside the close of its
+// (killAfter+1)th subscription, then has a successor finish the run.
+func runKilledLeaderTrial(t *testing.T, killAfter int) {
 	db := testutil.SetupTestDB(t)
 	const subCount = 40
+	ctx := postgres.WithLivemode(context.Background(), false)
 
 	seed := seedDueSubscriptions(t, db, subCount)
 	failingID := seedFailingHeadSubscription(t, db, seed)
+
+	// Hold every subscription but killAfter of them, so the leader bills
+	// exactly killAfter.
+	held := beginHolding(t, db, seed.tenantID, `SELECT id FROM subscriptions WHERE id = ANY($1) FOR UPDATE`, seed.subIDs[killAfter:])
 
 	leader := exec.Command(os.Args[0], "-test.run=TestBillingLeaderHelperProcess")
 	leader.Env = append(os.Environ(),
@@ -260,19 +256,27 @@ func runKilledLeaderTrial(t *testing.T, killAfter int) bool {
 	}
 	defer func() { _ = leader.Process.Kill(); _, _ = leader.Process.Wait() }()
 
-	// Wait until the leader has actually committed partial work.
-	deadline := time.Now().Add(60 * time.Second)
-	var committedBeforeKill int
-	for {
+	waitFor(t, fmt.Sprintf("the leader to bill %d invoices", killAfter), func() bool {
 		total, _, _ := cycleInvoiceCounts(t, db, seed.tenantID)
-		if total >= killAfter {
-			committedBeforeKill = total
-			break
-		}
-		if time.Now().After(deadline) {
-			t.Fatalf("leader only committed %d invoices in 60s; expected to reach %d", total, killAfter)
-		}
-		time.Sleep(20 * time.Millisecond)
+		return total >= killAfter
+	})
+
+	// Hold the customer, then let the held subscriptions go: the leader's
+	// next close takes its subscription row and its invoice number, then
+	// waits at the invoice insert's customer key.
+	customerHold := beginHolding(t, db, seed.tenantID, `SELECT id FROM customers WHERE id = $1 FOR UPDATE`, seed.customerID)
+	var holder int
+	if err := customerHold.QueryRowContext(ctx, `SELECT pg_backend_pid()`).Scan(&holder); err != nil {
+		t.Fatalf("read the holder's backend: %v", err)
+	}
+	_ = held.Rollback()
+	var leaderBackend int
+	waitFor(t, "the leader to wait on the held customer", func() bool {
+		err := db.Pool.QueryRowContext(ctx, `SELECT pid FROM pg_stat_activity WHERE $1 = ANY(pg_blocking_pids(pid))`, holder).Scan(&leaderBackend)
+		return err == nil
+	})
+	if total, _, _ := cycleInvoiceCounts(t, db, seed.tenantID); total != killAfter {
+		t.Fatalf("%d invoices when the leader was killed; want %d", total, killAfter)
 	}
 
 	if err := leader.Process.Signal(syscall.SIGKILL); err != nil {
@@ -282,34 +286,26 @@ func runKilledLeaderTrial(t *testing.T, killAfter int) bool {
 	if err != nil {
 		t.Fatalf("wait for killed leader: %v", err)
 	}
-	ws, ok := state.Sys().(syscall.WaitStatus)
-	if !ok || !ws.Signaled() || ws.Signal() != syscall.SIGKILL {
-		// The leader can finish between two polls: with one subscription left,
-		// its last invoice and its exit fit inside the 20ms poll interval, and
-		// the kill then reaches a process that already exited. Nothing was
-		// interrupted, so the run proves nothing: report that, as the check a few
-		// lines down does when the kill lands after the last commit. A normal
-		// exit with work left undone is still a failure.
-		if total, _, _ := cycleInvoiceCounts(t, db, seed.tenantID); total >= subCount {
-			return false
-		}
+	if ws, ok := state.Sys().(syscall.WaitStatus); !ok || !ws.Signaled() || ws.Signal() != syscall.SIGKILL {
 		t.Fatalf("leader did not die of SIGKILL (state=%v) — the test would be measuring "+
 			"a clean shutdown, which proves nothing about crash recovery", state)
 	}
+	// Its backend still waits; once the customer is free it finishes the
+	// statement, finds no client, and rolls the close back.
+	_ = customerHold.Rollback()
+	waitFor(t, "the dead leader's backend to end", func() bool {
+		var n int
+		return db.Pool.QueryRowContext(ctx, `SELECT count(*) FROM pg_stat_activity WHERE pid = $1`, leaderBackend).Scan(&n) == nil && n == 0
+	})
 
 	midTotal, midDistinct, _ := cycleInvoiceCounts(t, db, seed.tenantID)
 	if midTotal != midDistinct {
 		t.Fatalf("the dead leader alone left %d invoices over %d distinct periods — it duplicated "+
 			"before anyone took over", midTotal, midDistinct)
 	}
-	if midTotal >= subCount {
-		return false
-	}
-	t.Logf("leader SIGKILLed after committing %d/%d invoices (observed %d at kill time)",
-		midTotal, subCount, committedBeforeKill)
+	t.Logf("leader SIGKILLed inside a close after committing %d/%d invoices", midTotal, subCount)
 
 	// Successor picks up.
-	ctx := postgres.WithLivemode(context.Background(), false)
 	generated, failures := newFailoverEngine(db, seed.runAt).RunCycleForTenant(ctx, seed.tenantID, 50)
 	for _, f := range failures {
 		t.Errorf("successor run failure sub=%s: %v", f.SubscriptionID, f.Err)
@@ -344,7 +340,34 @@ func runKilledLeaderTrial(t *testing.T, killAfter int) bool {
 	}
 
 	assertDoctorClean(t)
-	return true
+}
+
+// beginHolding opens a transaction that locks the rows query selects, for the
+// caller to release with Rollback.
+func beginHolding(t *testing.T, db *postgres.DB, tenantID, query string, arg any) *sql.Tx {
+	t.Helper()
+	ctx := postgres.WithLivemode(context.Background(), false)
+	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		t.Fatalf("begin holding tx: %v", err)
+	}
+	t.Cleanup(func() { _ = tx.Rollback() })
+	if _, err := tx.ExecContext(ctx, query, arg); err != nil {
+		t.Fatalf("hold rows: %v", err)
+	}
+	return tx
+}
+
+// waitFor polls cond until it holds, failing after a minute.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(time.Minute)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
 }
 
 // seedFailingHeadSubscription adds one subscription that can never bill (its
@@ -497,8 +520,8 @@ func TestExactlyOnce_ConcurrentLeaders(t *testing.T) {
 // TestBillingLeaderHelperProcess is not a test. It is the billing leader that
 // TestExactlyOnce_LeaderKilledMidRun kills mid-run: with the guard env var set
 // it opens its own pool (never testutil.SetupTestDB, which truncates), builds
-// the same engine the parent builds, and bills the seeded tenant until it is
-// killed. Without the env var it returns immediately, so a normal run skips it.
+// the same engine the parent builds, and bills the seeded tenant on every tick
+// until it is killed. Without the env var it returns immediately, so a normal run skips it.
 func TestBillingLeaderHelperProcess(t *testing.T) {
 	if os.Getenv(exactlyOnceHelperEnv) != "1" {
 		return
@@ -523,9 +546,11 @@ func TestBillingLeaderHelperProcess(t *testing.T) {
 	db := postgres.NewDB(pool, 30*time.Second)
 
 	ctx := postgres.WithLivemode(context.Background(), false)
-	// Batch of 1 so the leader commits one invoice at a time and the parent's
-	// database poll can land the kill mid-run rather than after a bulk commit.
-	n, failures := newFailoverEngine(db, runAt).RunCycleForTenant(ctx, tenantID, 1)
-	fmt.Fprintf(os.Stderr, "helper: completed without being killed (generated=%d failures=%d)\n",
-		n, len(failures))
+	// A leader bills on every tick until it is killed; the rows the parent
+	// holds decide what each tick finds due. The pause only paces the ticks.
+	engine := newFailoverEngine(db, runAt)
+	for {
+		engine.RunCycleForTenant(ctx, tenantID, 1)
+		time.Sleep(10 * time.Millisecond)
+	}
 }
