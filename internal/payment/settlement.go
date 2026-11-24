@@ -287,12 +287,10 @@ func customerFailureReason(f PaymentFailure) string {
 // failureEmailSuppressed reports whether a failure of a PaymentIntent with
 // this purpose skips the generic "payment failed" email. A dunning-retry
 // attempt already sent its own warning or escalation (Stripe Smart Retries /
-// Lago shape: one email per attempt). A top-up's charge owes nothing until it
-// succeeds, so its decline is the operator's to see, not a bill to chase. One
-// helper, so the charge response, the webhook and the reconciler cannot drift
-// apart on who gets emailed.
+// Lago shape: one email per attempt). One helper, so the charge response, the
+// webhook and the reconciler cannot drift apart on who gets emailed.
 func failureEmailSuppressed(purpose string) bool {
-	return purpose == piPurposeDunningRetry || purpose == piPurposeTopup
+	return purpose == piPurposeDunningRetry
 }
 
 // SettleFailed records a payment failure and fires its side effects once per
@@ -672,8 +670,9 @@ func (s *Stripe) buildPaymentFailedHook(ctx context.Context, tenantID string, in
 		return nil
 	}
 	return func(tx *sql.Tx, fresh domain.Invoice) error {
-		// Asking a customer to pay an invoice that was voided or written off
-		// during the charge is wrong; the row under the settle lock decides.
+		// Only a finalized invoice asks for payment; the row under the settle
+		// lock decides. Not one voided or written off during the charge, and
+		// not an unpaid top-up, which owes nothing until it is paid.
 		if fresh.Status != domain.InvoiceFinalized {
 			return nil
 		}

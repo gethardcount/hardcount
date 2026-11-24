@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http/httptest"
 	"net/url"
+	"strings"
 	"testing"
 	"time"
 
@@ -82,8 +83,9 @@ func TestAddLineItem_TopupIsFrozen(t *testing.T) {
 		"a commit line": {"description": "More credit", "quantity": 1, "unit_amount_cents": 1000, "commit_granted_cents": 1000},
 	} {
 		r := e.call(t, "POST", "/v1/invoices/"+id+"/line-items", line)
-		if r.status != 409 || flowStr(r.body, "error", "code") != "invoice_not_manual" {
-			t.Errorf("add %s: %d %s, want 409 invoice_not_manual", name, r.status, r.raw)
+		if r.status != 409 || flowStr(r.body, "error", "code") != "invoice_not_manual" ||
+			!strings.Contains(flowStr(r.body, "error", "message"), "A top-up is created whole") {
+			t.Errorf("add %s: %d %s, want 409 invoice_not_manual saying a top-up is created whole", name, r.status, r.raw)
 		}
 	}
 }

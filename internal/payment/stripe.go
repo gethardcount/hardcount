@@ -1310,8 +1310,9 @@ const chargeOutcomeSaveTimeout = 10 * time.Second
 const piPurposeDunningRetry = "dunning_retry"
 
 // piPurposeTopup tags a saved-card charge of an unpaid top-up. Its decline
-// sends the customer no payment-failed email (failureEmailSuppressed): no
-// bill is owed, and the operator sees the decline on the draft.
+// sends the customer no payment-failed email, because the email is sent only
+// for a finalized invoice: no bill is owed, and the operator sees the decline
+// on the draft.
 const piPurposeTopup = "topup"
 
 // PurposeHostedInvoicePay tags a PaymentIntent created by the hosted invoice
