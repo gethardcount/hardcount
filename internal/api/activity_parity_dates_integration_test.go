@@ -165,9 +165,6 @@ func TestActivityDates_TrialRunsOut(t *testing.T) {
 		if got := at(t, line, "occurred_at"); got.Before(before.Add(-time.Second)) || got.After(after.Add(time.Second)) {
 			t.Errorf(`"Trial ended" line at %v, want within the tick (%v – %v)`, got, before, after)
 		}
-		if line["recorded_at"] != nil {
-			t.Errorf("real-clock line carries recorded_at %v", line["recorded_at"])
-		}
 		wantAt(t, "day-1 invoice", r.dayOne(subID), "issued_at", trialEnd)
 	})
 }

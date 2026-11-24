@@ -34,8 +34,7 @@ export type CreateSubscriptionBody = {
   /**
      * Days of free trial; 0 means no trial. At 0, the
      * subscription is `active`, its first period starts today
-     * in the account's billing time zone (the clock's day for
-     * a customer on a test clock), and a non-zero base fee
+     * in the account's billing time zone, and a non-zero base fee
      * billed in advance is invoiced now. Above 0, the
      * subscription is `trialing` from now and its first paid
      * period starts on the day the trial ends.

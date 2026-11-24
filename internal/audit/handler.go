@@ -38,27 +38,15 @@ func (h *Handler) filters(w http.ResponseWriter, r *http.Request) {
 		respond.InternalError(w, r)
 		return
 	}
-	// Clocks the LOG has seen — including ones ADR-086 teardown has already
-	// deleted, which are the ones a forensic query is usually about.
-	clocks, err := h.logger.SimClocks(r.Context(), tenantID)
-	if err != nil {
-		slog.ErrorContext(r.Context(), "audit filters: sim clocks", "error", err)
-		respond.InternalError(w, r)
-		return
-	}
 	if actions == nil {
 		actions = []string{}
 	}
 	if resourceTypes == nil {
 		resourceTypes = []string{}
 	}
-	if clocks == nil {
-		clocks = []SimClock{}
-	}
 	respond.JSON(w, r, http.StatusOK, map[string]any{
 		"actions":        actions,
 		"resource_types": resourceTypes,
-		"test_clocks":    clocks,
 	})
 }
 
@@ -75,21 +63,11 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		respond.FromError(w, r, err, "audit_log")
 		return
 	}
-	// Sim-time window. Same parser as the wall-clock range (RFC3339 or bare
-	// YYYY-MM-DD) — an operator windowing a simulation types dates, and the
-	// dates they mean are the SIMULATED ones.
-	simFrom, simTo, err := timefilter.ParseRange(r, "sim_from", "sim_to")
-	if err != nil {
-		respond.FromError(w, r, err, "audit_log")
-		return
-	}
 
 	// There is ONE sort axis: created_at. `?order=` is still validated rather
 	// than ignored, because a client that asks for an ordering it does not get,
 	// and then pages through the result, reads rows in an order it is not
-	// expecting. See QueryFilter for why ordering by simulated time does not
-	// exist (short version: within a clock it is the same order; across clocks
-	// it is a timeline that never happened).
+	// expecting.
 	switch order := r.URL.Query().Get("order"); order {
 	case "", "created_at":
 	default:
@@ -104,9 +82,6 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 		ActorID:      r.URL.Query().Get("actor_id"),
 		DateFrom:     dateFrom,
 		DateTo:       dateTo,
-		TestClockID:  r.URL.Query().Get("test_clock_id"),
-		SimFrom:      simFrom,
-		SimTo:        simTo,
 		Limit:        page.Limit,
 		Offset:       page.Offset,
 	}

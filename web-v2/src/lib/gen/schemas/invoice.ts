@@ -366,7 +366,7 @@ export interface Invoice {
   footer?: string;
   /** Extra key-value data stored with the invoice. No API request sets it; it is absent when empty. */
   metadata?: InvoiceMetadata;
-  /** When the invoice was created. For a customer on a test clock, the clock's time. */
+  /** When the invoice was created. */
   created_at: string;
   /** When the invoice last changed. */
   updated_at: string;
@@ -380,12 +380,4 @@ export interface Invoice {
   source_subscription_item_id?: string;
   source_change_type?: ItemChangeType;
   billing_reason?: InvoiceBillingReason;
-  /**
-     * The test clock this invoice's dates follow: the clock its customer
-     * is pinned to, for cycle and one-off invoices alike. Read from the
-     * customer on `GET /v1/invoices` and `GET /v1/invoices/{id}`; other
-     * responses may leave it out. Left out for a customer on wall-clock
-     * time, and always in live mode.
-     */
-  test_clock_id?: string;
 }

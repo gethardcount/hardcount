@@ -50,7 +50,6 @@ export * from './auditLogEntry';
 export * from './auditLogEntryActorType';
 export * from './auditLogEntryMetadata';
 export * from './auditLogFilters';
-export * from './auditLogFiltersTestClocksItem';
 export * from './authenticationUnavailableResponse';
 export * from './backfillUsageEventBody';
 export * from './backfillUsageEventBodyDimensions';

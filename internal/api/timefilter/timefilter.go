@@ -25,7 +25,7 @@
 // Consumers do not all compare `to` the same way:
 //   - Inclusive (`<= to`): the invoice list and invoices.csv,
 //     customers.csv, subscriptions.csv, usage-events.csv, the audit log and
-//     audit-log.csv (both created_at and sim_effective_at).
+//     audit-log.csv.
 //   - Exclusive (`< to`): the usage event list and aggregate
 //     (/v1/usage-events, /v1/usage-events/aggregate), all through
 //     usage.buildUsageWhere, and customer usage (/v1/customers/{id}/usage,
@@ -70,9 +70,7 @@ func ParseRange(r *http.Request, fromParam, toParam string) (from, to time.Time,
 	}
 	// Refuse only an inverted range. Equal endpoints are a valid zero-width
 	// window for the inclusive consumers (>= and <=, listed in the package
-	// doc), so from==to selects the rows at exactly that instant. That is
-	// the natural query on the audit log's simulated-time axis, where
-	// sim_effective_at falls on advance targets and cycle boundaries. The
+	// doc), so from==to selects the rows at exactly that instant. The
 	// exclusive consumers apply their own check: customer usage refuses
 	// from==to, and the usage event list and aggregate return nothing.
 	if !from.IsZero() && !to.IsZero() && to.Before(from) {

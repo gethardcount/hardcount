@@ -61,8 +61,8 @@ func TestDisputeTimelineEvents(t *testing.T) {
 		if r.AmountCents != nil {
 			amount = *r.AmountCents
 		}
-		if amount != w.amount || r.PaymentIntentID != "pi_1" || r.IsSimulated || r.Line.RecordedAt != nil {
-			t.Errorf("row %d: amount %d, pi %q, simulated %v; want %d, pi_1, a real-world row", i, amount, r.PaymentIntentID, r.IsSimulated, w.amount)
+		if amount != w.amount || r.PaymentIntentID != "pi_1" {
+			t.Errorf("row %d: amount %d, pi %q; want %d, pi_1", i, amount, r.PaymentIntentID, w.amount)
 		}
 	}
 	if !rows[0].sortAt.Equal(opened) || !rows[2].sortAt.Equal(closed) {

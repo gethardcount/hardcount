@@ -1,7 +1,6 @@
 package api
 
 import (
-	"database/sql"
 	"testing"
 	"time"
 
@@ -13,7 +12,7 @@ import (
 // decided from the customer: at real time, the server's clock (the one the
 // server is built with, not the machine's). The customer's updated_at and its
 // billing profile's are stamped at that time, and the three audit rows
-// (update, billing profile, token rotation) carry no clock.
+// (update, billing profile, token rotation) are written.
 func TestE2E_CustomerChangesAreOnTheRequestsTime(t *testing.T) {
 	serverAt := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
 	r := newDatesRigOn(t, "Customer time real Co", clock.NewFake(serverAt))
@@ -36,28 +35,12 @@ func TestE2E_CustomerChangesAreOnTheRequestsTime(t *testing.T) {
 		t.Fatalf("begin tx: %v", err)
 	}
 	defer postgres.Rollback(tx)
-	rows, err := tx.QueryContext(t.Context(), `
-		SELECT action, sim_effective_at, test_clock_id FROM audit_log
-		WHERE tenant_id = $1 AND resource_type = 'customer' AND resource_id = $2 AND action IN ('update', 'rotate')
-		ORDER BY created_at, id`, r.tenantID, custID)
-	if err != nil {
-		t.Fatalf("read audit rows: %v", err)
-	}
-	defer func() { _ = rows.Close() }()
-	n := 0
-	for rows.Next() {
-		var (
-			action string
-			simAt  sql.NullTime
-			clk    sql.NullString
-		)
-		if err := rows.Scan(&action, &simAt, &clk); err != nil {
-			t.Fatalf("scan: %v", err)
-		}
-		n++
-		if clk.Valid || simAt.Valid {
-			t.Errorf("%s row at real time: test_clock_id %v, sim_effective_at %v; want none", action, clk, simAt)
-		}
+	var n int
+	if err := tx.QueryRowContext(t.Context(), `
+		SELECT count(*) FROM audit_log
+		WHERE tenant_id = $1 AND resource_type = 'customer' AND resource_id = $2 AND action IN ('update', 'rotate')`,
+		r.tenantID, custID).Scan(&n); err != nil {
+		t.Fatalf("count audit rows: %v", err)
 	}
 	if n != 3 {
 		t.Errorf("%d audit rows; want 3 (update, billing profile, rotation)", n)

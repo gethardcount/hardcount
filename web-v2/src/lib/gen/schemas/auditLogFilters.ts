@@ -11,7 +11,6 @@
  *
  * OpenAPI spec version: 2026-04-07
  */
-import type { AuditLogFiltersTestClocksItem } from './auditLogFiltersTestClocksItem';
 
 /**
  * The values `GET /v1/audit-log` can filter on, from
@@ -23,6 +22,4 @@ export interface AuditLogFilters {
   actions: string[];
   /** Every `resource_type` value recorded in this mode, sorted A to Z, at most 500. */
   resource_types: string[];
-  /** Test clocks seen in the log, most recent activity first, at most 100. Deleted clocks are included. */
-  test_clocks: AuditLogFiltersTestClocksItem[];
 }

@@ -37,16 +37,4 @@ action?: string;
  * Only rows by this actor (a user id or an API key id).
  */
 actor_id?: string;
-/**
- * Only rows from this test clock's simulation.
- */
-test_clock_id?: string;
-/**
- * Lower bound on simulated time (sim_effective_at). RFC 3339 or `YYYY-MM-DD`.
- */
-sim_from?: string;
-/**
- * Upper bound on simulated time (sim_effective_at). RFC 3339 or `YYYY-MM-DD`.
- */
-sim_to?: string;
 };

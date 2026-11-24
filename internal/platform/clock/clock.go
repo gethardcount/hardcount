@@ -88,11 +88,9 @@ func (c *Fake) Advance(d time.Duration) {
 }
 
 // Sim is the time a context carries: an instant (At), or none (a zero Sim,
-// WithRealTime). Production code sets no TestClockID: no record is on a test
-// clock.
+// WithRealTime).
 type Sim struct {
-	At          time.Time
-	TestClockID string
+	At time.Time
 }
 
 // simKey is the ctx key for the bound Sim. Its type is unexported, so other

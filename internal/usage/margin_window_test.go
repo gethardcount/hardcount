@@ -11,57 +11,44 @@ import (
 )
 
 // A bare GET /v1/customers/{id}/margin defaults to the last 30 days ending at
-// the report's instant, the one its context carries: for a customer on a test
-// clock that is the clock's frozen time (the API's door decided it), so the
-// window covers the simulated last 30 days, the timeline customer usage
-// follows. An explicit window is used as given.
+// the report's instant, the one its context carries. An explicit window is
+// used as given.
 func TestMarginDefaultWindow_FollowsTheDecidedTime(t *testing.T) {
-	frozen := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
+	decided := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
 	svc := NewService(newMemStore())
 	h := NewProviderCostHandler(nil, NewMarginAssembler(nil, NewCustomerUsageService(svc, nil, nil, nil)))
-	onClock := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: frozen, TestClockID: "clk_1"})
+	ctx := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), decided)
 	window := func(ctx context.Context, url string) (time.Time, time.Time, error) {
 		return h.marginWindow(ctx, httptest.NewRequest("GET", url, nil).WithContext(ctx))
 	}
 
-	t.Run("a bare request on a test clock covers the simulated last 30 days", func(t *testing.T) {
-		from, to, err := window(onClock, "/v1/customers/cus_pinned/margin")
+	t.Run("it ends at the instant the report bound", func(t *testing.T) {
+		from, to, err := window(ctx, "/v1/customers/cus_free/margin")
 		if err != nil {
 			t.Fatalf("marginWindow: %v", err)
 		}
-		if !to.Equal(frozen) || !from.Equal(frozen.AddDate(0, 0, -30)) {
-			t.Errorf("window %s..%s; want the 30 days ending at the clock's frozen time %s", from.Format(time.RFC3339), to.Format(time.RFC3339), frozen.Format(time.RFC3339))
-		}
-	})
-
-	t.Run("at real time it ends at the instant the report bound", func(t *testing.T) {
-		at := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
-		from, to, err := window(clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), at), "/v1/customers/cus_free/margin")
-		if err != nil {
-			t.Fatalf("marginWindow: %v", err)
-		}
-		if !to.Equal(at) || to.Sub(from) != 30*24*time.Hour {
-			t.Errorf("window %s..%s; want the 30 days ending at %s", from.Format(time.RFC3339), to.Format(time.RFC3339), at.Format(time.RFC3339))
+		if !to.Equal(decided) || to.Sub(from) != 30*24*time.Hour {
+			t.Errorf("window %s..%s; want the 30 days ending at %s", from.Format(time.RFC3339), to.Format(time.RFC3339), decided.Format(time.RFC3339))
 		}
 	})
 
 	t.Run("an explicit window is used as given", func(t *testing.T) {
-		from, to, err := window(onClock, "/v1/customers/cus_pinned/margin?from=2027-01-01T00:00:00Z&to=2027-02-01T00:00:00Z")
+		from, to, err := window(ctx, "/v1/customers/cus_free/margin?from=2024-11-01T00:00:00Z&to=2024-12-01T00:00:00Z")
 		if err != nil {
 			t.Fatalf("marginWindow: %v", err)
 		}
-		if !from.Equal(time.Date(2027, 1, 1, 0, 0, 0, 0, time.UTC)) || !to.Equal(time.Date(2027, 2, 1, 0, 0, 0, 0, time.UTC)) {
+		if !from.Equal(time.Date(2024, 11, 1, 0, 0, 0, 0, time.UTC)) || !to.Equal(time.Date(2024, 12, 1, 0, 0, 0, 0, time.UTC)) {
 			t.Errorf("explicit window changed: %s..%s", from, to)
 		}
 	})
 
 	t.Run("only from given: to defaults to the decided time", func(t *testing.T) {
-		_, to, err := window(onClock, "/v1/customers/cus_pinned/margin?from=2027-02-01T00:00:00Z")
+		_, to, err := window(ctx, "/v1/customers/cus_free/margin?from=2024-12-01T00:00:00Z")
 		if err != nil {
 			t.Fatalf("marginWindow: %v", err)
 		}
-		if !to.Equal(frozen) {
-			t.Errorf("to: got %s, want frozen_time %s", to.Format(time.RFC3339), frozen.Format(time.RFC3339))
+		if !to.Equal(decided) {
+			t.Errorf("to: got %s, want %s", to.Format(time.RFC3339), decided.Format(time.RFC3339))
 		}
 	})
 }

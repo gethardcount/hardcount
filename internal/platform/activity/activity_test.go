@@ -76,21 +76,14 @@ func TestDeclineReason(t *testing.T) {
 	}
 }
 
-func TestStampKeepsRecordedOnlyForPinnedEntities(t *testing.T) {
-	occurred := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
-	recorded := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
-	l := Stamp(Line{Title: "Invoice finalized"}, occurred, recorded, true)
-	if !l.OccurredAt.Equal(occurred) || l.RecordedAt == nil || !l.RecordedAt.Equal(recorded) {
-		t.Errorf("pinned: occurred %v recorded %v", l.OccurredAt, l.RecordedAt)
+func TestStamp(t *testing.T) {
+	occurred := time.Date(2026, 10, 19, 10, 0, 0, 0, time.FixedZone("CET", 3600))
+	l := Stamp(Line{Title: "Invoice finalized"}, occurred)
+	if !l.OccurredAt.Equal(occurred) || l.OccurredAt.Location() != time.UTC {
+		t.Errorf("occurred %v, want %v in UTC", l.OccurredAt, occurred)
 	}
 	if l.Detail == nil {
 		t.Error("Stamp leaves detail nil; it must serialize as a list")
-	}
-	if l := Stamp(Line{}, occurred, recorded, false); l.RecordedAt != nil {
-		t.Errorf("real clock: recorded %v, want none", l.RecordedAt)
-	}
-	if l := Stamp(Line{}, occurred, time.Time{}, true); l.RecordedAt != nil {
-		t.Errorf("pinned without a real stamp (legacy row): recorded %v, want none", l.RecordedAt)
 	}
 }
 
@@ -162,23 +155,5 @@ func TestEmailOutcomeWords(t *testing.T) {
 	// and the outcome never repeats "failed".
 	if got := EmailClause(Email{Type: "payment_failed", Status: "failed"}); got != "Failed payment notice couldn't be sent" {
 		t.Errorf("clause %q", got)
-	}
-}
-
-func TestEmailInstant(t *testing.T) {
-	created := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
-	dispatched := created.Add(time.Minute)
-	sim := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
-
-	action := created.Add(-time.Second) // the instant the send's action decided
-	// Real clock: the action's instant, whatever the queue and send times;
-	// not pinned.
-	if occ, rec, pinned := EmailInstant(Email{CreatedAt: created, DispatchedAt: &dispatched, EffectiveAt: action}); !occ.Equal(action) || !rec.IsZero() || pinned {
-		t.Errorf("real clock: %v %v %v", occ, rec, pinned)
-	}
-	// Test clock: the clock's instant, with the real send time as its
-	// Recorded time.
-	if occ, rec, pinned := EmailInstant(Email{CreatedAt: created, DispatchedAt: &dispatched, EffectiveAt: sim, TestClockID: "clk_1"}); !occ.Equal(sim) || !rec.Equal(dispatched) || !pinned {
-		t.Errorf("test clock: %v %v %v", occ, rec, pinned)
 	}
 }

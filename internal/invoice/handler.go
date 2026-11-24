@@ -70,10 +70,8 @@ type PaymentSetupGetter interface {
 // each one. The timeline uses it as READ-TIME enrichment:
 //
 //   - the invoice's own rows (resource "invoice") give its lifecycle rows
-//     their actor (ADR-128 rule 4) and, on a test clock, their Recorded
-//     stamp (ADR-104 Invariant A): lifecycle rows are derived from invoice
-//     state columns, whose stamps follow the entity's calendar (ADR-030),
-//     so their real-world moment and actor live only in the audit log;
+//     their actor (ADR-128 rule 4): lifecycle rows are derived from invoice
+//     state columns, so their actor lives only in the audit log;
 //   - a credit note's rows (resource "credit_note") give its issue actor
 //     and a failed refund's provider reason;
 //   - a payment-recovery run's rows (resource "dunning_run") give the
@@ -169,8 +167,6 @@ type EmailEventRow struct {
 	// DeliveryState is the provider-confirmed outcome layered over
 	// Status (ADR-098): unknown / delivered / bounced / complained.
 	DeliveryState string
-	CreatedAt     time.Time
-	DispatchedAt  *time.Time
 	To            string // resolved from payload
 	// AttemptNumber pairs a dunning_warning email with the retry
 	// attempt it warns about (payload attempt_number = run.AttemptCount
@@ -182,9 +178,9 @@ type EmailEventRow struct {
 	// auto_charge_retry_no_pm / operator_resend. Empty for legacy rows
 	// and types that carry no trigger.
 	Trigger string
-	// See activity.Email.
+	// EffectiveAt is the row's date: the instant the email's action decided
+	// (ADR-104).
 	EffectiveAt time.Time
-	TestClockID string
 	// SendFailure classifies a failed row's error into one the activity
 	// line can name in plain words (activity.SendFailure*); empty when the
 	// row did not fail or its error has no plain-words name. The raw error
@@ -1384,15 +1380,6 @@ func dunningEventRank(eventType domain.DunningEventType) int {
 	}
 }
 
-// rfc3339OrEmpty serializes a wall stamp for the Recorded subline;
-// zero (unknown) renders nothing.
-func rfc3339OrEmpty(t time.Time) string {
-	if t.IsZero() {
-		return ""
-	}
-	return t.Format(time.RFC3339)
-}
-
 // lifecycleAuditRows joins an invoice's audit entries to the lifecycle
 // event types they transition (ADR-104 Invariant A, corrected boundary №2;
 // ADR-128 rule 4). EXACT keys only: the top-level action for
@@ -1401,8 +1388,8 @@ func rfc3339OrEmpty(t time.Time) string {
 // mark-uncollectible and record-payment ride action=update). Earliest
 // row wins — each transition happens once, and Query returns
 // newest-first, so the walk runs backwards. A transition with no audit
-// row is simply absent: its timeline row names no actor and, on a test
-// clock, renders without a Recorded stamp, honest for pre-audit history.
+// row is simply absent: its timeline row names no actor, honest for
+// pre-audit history.
 func lifecycleAuditRows(entries []domain.AuditEntry) map[string]domain.AuditEntry {
 	out := map[string]domain.AuditEntry{}
 	for i := len(entries) - 1; i >= 0; i-- {
@@ -1430,16 +1417,12 @@ func lifecycleAuditRows(entries []domain.AuditEntry) map[string]domain.AuditEntr
 	return out
 }
 
-// sortInvoiceTimeline orders the invoice's rows by timeline.Order, the one
-// ordering rule for activity surfaces (ADR-128): the full-precision instant
-// on the invoice's calendar, then the real sequence inside a same-instant
-// group whose every row has a recorded stamp (ADR-104 ordering amendment,
-// 2026-07-29), then the causal rank, then insertion order (callers append
+// sortInvoiceTimeline orders the invoice's rows by the full-precision
+// instant, then the causal rank, then insertion order (callers append
 // sources oldest-first).
 func sortInvoiceTimeline(events []TimelineEvent) {
-	timeline.Order(events,
+	timeline.SortStable(events,
 		func(e TimelineEvent) time.Time { return e.sortAt },
-		func(e TimelineEvent) time.Time { return e.recordedSort },
 		func(a, b TimelineEvent) bool { return a.tieRank < b.tieRank })
 }
 
@@ -1472,14 +1455,6 @@ type TimelineEvent struct {
 	AttemptCount    int    `json:"attempt_count,omitempty"`
 	sortAt          time.Time
 	tieRank         int
-	// recordedSort is the row's real-world instant as a sortable value
-	// (zero when unknown). Within one story-instant group the timeline
-	// orders by it — but ONLY when every row in the group has one (the
-	// group-completeness gate): a partially-stamped group is legacy data,
-	// and any placement of its bare rows against stamped ones fabricates
-	// a sequence, so those groups keep the causal ladder. See
-	// sortInvoiceTimeline.
-	recordedSort time.Time
 	// Detail is a sub-line rendered beneath the row's main
 	// description. Used today on invoice.paid for the payment
 	// instrument ("via Visa •••• 4242"); generic enough that
@@ -1487,15 +1462,6 @@ type TimelineEvent struct {
 	// "after 3 retry attempts" on the same row in the dunning-
 	// recovered case). Empty = no sub-line. ADR-020.
 	Detail string `json:"detail,omitempty"`
-	// IsSimulated marks an email row caused on a test clock
-	// (activity.EmailInstant). The SPA reads it directly.
-	IsSimulated bool `json:"is_simulated,omitempty"`
-	// RecordedAt is the REAL-WORLD instant of a row whose primary
-	// timestamp is simulated — the operator contract's Invariant A
-	// ("any row whose two calendars differ shows both"). Rendered as a
-	// muted "Recorded <wall>" subline, mirroring the subscription
-	// timeline. Empty when the calendars coincide.
-	RecordedAt string `json:"recorded_at,omitempty"`
 	// Line is the row as the activity line standard words it (ADR-128).
 	// Description, Detail, Error, Status, AmountCents and Currency above
 	// are filled from it (fillFromLine), so a client that reads only the
@@ -1506,13 +1472,13 @@ type TimelineEvent struct {
 	dunningEventID string
 }
 
-// fillFromLine stamps the line's id and times and copies its words into the
+// fillFromLine stamps the line's id and time and copies its words into the
 // older fields: the title is the description, the meta line (detail parts
 // and actor) is the detail, the problem is the error, the tone is the
 // status, and the line's amount is the row's amount.
 func (e *TimelineEvent) fillFromLine() {
 	e.Line.ID = e.ID
-	e.Line = activity.Stamp(e.Line, e.sortAt, e.recordedSort, e.IsSimulated)
+	e.Line = activity.Stamp(e.Line, e.sortAt)
 	e.Description = e.Line.Title
 	e.Detail = activity.MetaText(e.Line)
 	e.Error = e.Line.Problem
@@ -1773,10 +1739,8 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 	// ── Read every source first, in lane order; build rows after. ──
 
 	// The invoice's audit rows: its lifecycle rows' actors (ADR-128 rule
-	// 4), and on a test clock their Recorded stamps (ADR-104 Invariant A,
-	// corrected boundary №2): lifecycle rows derive from invoice state
-	// columns whose stamps follow the entity's calendar, so their real-world
-	// moment and their actor live only in the audit log.
+	// 4). Lifecycle rows derive from invoice state columns, so their actor
+	// lives only in the audit log.
 	lifecycle := lifecycleAuditRows(auditRows("invoice", inv.ID))
 
 	// Credit notes. Issued notes only — drafts aren't activity yet, voided
@@ -2040,18 +2004,14 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			continue
 		}
-		ts, recorded, sim := activity.EmailInstant(evt.email())
 		events = append(events, TimelineEvent{
-			ID:           "email:" + evt.ID,
-			Timestamp:    ts.Format(time.RFC3339),
-			sortAt:       ts,
-			tieRank:      rankEmail,
-			Source:       "email",
-			EventType:    "email." + evt.EmailType,
-			IsSimulated:  sim,
-			RecordedAt:   rfc3339OrEmpty(recorded),
-			recordedSort: recorded,
-			Line:         line,
+			ID:        "email:" + evt.ID,
+			Timestamp: evt.EffectiveAt.Format(time.RFC3339),
+			sortAt:    evt.EffectiveAt,
+			tieRank:   rankEmail,
+			Source:    "email",
+			EventType: "email." + evt.EmailType,
+			Line:      line,
 		})
 	}
 

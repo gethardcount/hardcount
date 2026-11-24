@@ -13,7 +13,6 @@ import (
 	"gopkg.in/yaml.v3"
 
 	"github.com/gethardcount/hardcount/internal/analytics"
-	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/billing"
 	"github.com/gethardcount/hardcount/internal/credit"
@@ -136,7 +135,6 @@ var responsesNotChecked = map[string]string{
 // property of a map-literal response needs an entry here, or one in
 // literalFieldsNotChecked.
 var literalFieldTypes = map[string]any{
-	"AuditLogFilters.test_clocks":                                audit.SimClock{},
 	"CustomerOverview.active_subscriptions":                      domain.Subscription{},
 	"CustomerOverview.recent_invoices":                           domain.Invoice{},
 	"CustomerOverview.outstanding_balance":                       invoice.OutstandingBalance{},

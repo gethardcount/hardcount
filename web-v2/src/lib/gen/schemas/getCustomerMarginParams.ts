@@ -19,8 +19,7 @@ export type GetCustomerMarginParams = {
  */
 from?: string;
 /**
- * Window end, exclusive. RFC 3339. Default is the customer's current
- * time (test clock time for a customer on a test clock).
+ * Window end, exclusive. RFC 3339. Default is now.
  */
 to?: string;
 };

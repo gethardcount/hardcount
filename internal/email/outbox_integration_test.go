@@ -658,7 +658,7 @@ func TestEmailOutbox_Enqueue_StampsTheActionsInstant(t *testing.T) {
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("list: %d rows, %v; want 1", len(rows), err)
 	}
-	if !rows[0].EffectiveAt.Equal(real) || rows[0].TestClockID != "" {
-		t.Errorf("effective_at %v, clock %q; want %v, none", rows[0].EffectiveAt, rows[0].TestClockID, real)
+	if !rows[0].EffectiveAt.Equal(real) {
+		t.Errorf("effective_at %v, want %v", rows[0].EffectiveAt, real)
 	}
 }

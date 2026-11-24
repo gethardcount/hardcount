@@ -81,7 +81,6 @@ func TestSentEmailLinesGolden(t *testing.T) {
 	types, _, skipReasons := outboxAllowlists(t)
 	created := time.Date(2026, 10, 19, 10, 0, 0, 0, time.UTC)
 	dispatched := created.Add(2 * time.Minute)
-	sim := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
 	base := SentEmailOutboxRow{
 		ID: "hc_emob_1", Recipient: "billing@acme.test", Status: "dispatched", DeliveryState: "delivered",
 		CreatedAt: created, DispatchedAt: &dispatched, EffectiveAt: created, InvoiceNumber: "HC-000123", InvoiceID: "hc_inv_1",
@@ -138,11 +137,10 @@ func TestSentEmailLinesGolden(t *testing.T) {
 	noID := base
 	noID.EmailType, noID.InvoiceID = "invoice", ""
 	add("invoice not linked without its id", noID)
-	// On a test clock: dated at the instant that caused it, with the real
-	// send time as its Recorded time.
-	onClock := base
-	onClock.EmailType, onClock.EffectiveAt, onClock.TestClockID = "payment_receipt", sim, "clk_1"
-	add("test clock", onClock)
+	// Dated at the instant its action decided, not when it was queued.
+	decided := base
+	decided.EmailType, decided.EffectiveAt = "payment_receipt", created.Add(-30*time.Second)
+	add("dated at its action", decided)
 
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)

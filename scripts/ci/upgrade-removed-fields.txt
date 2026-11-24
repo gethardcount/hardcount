@@ -18,3 +18,8 @@
 # 00241 deletes every invoice that was on one, so it was false on every
 # invoice left.
 invoice is_simulated
+
+# The test clock the invoice's customer was on. Test clocks are removed, and
+# the field was left out when empty, so no invoice the job compares (those on
+# a clock are deleted by 00241) ever carried it.
+invoice test_clock_id

@@ -31,7 +31,6 @@ func TestActivityLines_SubscriptionWire(t *testing.T) {
 	trialEnd := time.Date(2026, 11, 9, 5, 3, 0, 0, time.UTC)
 	periodEnd := time.Date(2026, 11, 19, 5, 3, 0, 0, time.UTC)
 	resumes := time.Date(2026, 12, 1, 0, 0, 0, 0, time.UTC)
-	sim := time.Date(2027, 2, 1, 4, 30, 0, 0, time.UTC)
 
 	type row struct {
 		id, action, actorType, actorName string
@@ -81,8 +80,8 @@ func TestActivityLines_SubscriptionWire(t *testing.T) {
 			"action": "item_added", "plan_id": "plan_b", "quantity": float64(3), "proration_type": "invoice",
 			"proration_amount_cents": float64(1800), "currency": "USD", "proration_invoice_id": "hc_inv_gone"}},
 		{"aud_unknown", "subscription.some_future_action", "system", "", map[string]any{}},
-		{"aud_on_clock", domain.AuditActionUpdate, "user", "alice@example.com", map[string]any{
-			"action": "cancel_cleared", "sim_effective_at": sim.Format(time.RFC3339), "test_clock_id": "clk_1"}},
+		{"aud_cancel_cleared", domain.AuditActionUpdate, "user", "alice@example.com", map[string]any{
+			"action": "cancel_cleared"}},
 	}
 	entries := make([]domain.AuditEntry, 0, len(rows))
 	for i := len(rows) - 1; i >= 0; i-- {
@@ -153,7 +152,7 @@ func TestActivityLines_SubscriptionWire(t *testing.T) {
 		"aud_trial_end_cancel": {title: "Subscription canceled", status: "neutral", detail: "At trial end", actor: "automatic/"},
 		"aud_item_added":       {title: "Item added", status: "neutral", detail: "plan_b · Quantity 3 · Proration invoice $18.00", actor: "person/alice@example.com"},
 		"aud_unknown":          {title: "Subscription changed", status: "neutral", actor: "automatic/"},
-		"aud_on_clock":         {title: "Scheduled cancellation cleared", status: "neutral", actor: "person/alice@example.com"},
+		"aud_cancel_cleared":   {title: "Scheduled cancellation cleared", status: "neutral", actor: "person/alice@example.com"},
 	}
 	for id, w := range cases {
 		e := byID[id]
@@ -214,21 +213,10 @@ func TestActivityLines_SubscriptionWire(t *testing.T) {
 		}
 	}
 
-	// One clock rule: a test-clock row is dated at its simulated instant and
-	// carries the real one as recorded_at; a real-clock row carries none.
-	onClock := byID["aud_on_clock"]["line"].(map[string]any)
-	if got := str(onClock["occurred_at"]); got != sim.Format(time.RFC3339) {
-		t.Errorf("test-clock row occurred_at %q, want the simulated %s", got, sim.Format(time.RFC3339))
-	}
-	if onClock["recorded_at"] == nil {
-		t.Error("test-clock row has no recorded_at")
-	}
+	// A row is dated at its audit row's created_at.
 	created := byID["aud_created"]["line"].(map[string]any)
 	if got := str(created["occurred_at"]); got != base.Format(time.RFC3339) {
-		t.Errorf("real-clock row occurred_at %q, want %s", got, base.Format(time.RFC3339))
-	}
-	if created["recorded_at"] != nil {
-		t.Errorf("real-clock row carries recorded_at %v", created["recorded_at"])
+		t.Errorf("row occurred_at %q, want %s", got, base.Format(time.RFC3339))
 	}
 	for _, e := range resp.Events {
 		l := e["line"].(map[string]any)

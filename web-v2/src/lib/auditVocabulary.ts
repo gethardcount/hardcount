@@ -175,10 +175,6 @@ export function resourceLink(entry: AuditEntry): string | null {
   // empty resource_id, and rendering "View" → /customers/ would land the
   // user on a broken page.
   if (!entry.resource_id) return null
-  // The subject outlived by the row: the row still names a record that no
-  // longer exists, and a link to it would go straight to a 404. The backend
-  // resolves this at read time; we just have to stop offering the door.
-  if (entry.subject_deleted) return null
   switch (entry.resource_type) {
     case 'invoice': return `/invoices/${entry.resource_id}`
     case 'customer': return `/customers/${entry.resource_id}`

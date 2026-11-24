@@ -308,14 +308,10 @@ export default function InvoiceDetailPage() {
     enabled: !!id && invoice?.status !== 'draft',
     refetchInterval: pollIntervalForInvoice(invoice as ApiInvoice | undefined),
   })
-  // ONE lane (ADR-104). Every row's primary timestamp is on the
-  // invoice's own calendar, since every fact is anchored at write time
-  // (outbox sim anchor for emails, ADR-102 dual stamps for attempts,
-  // entity-derived stamps for the rest). Rows whose two calendars differ carry recorded_at and render
-  // a "Recorded <wall>" subline (operator contract, Invariant A).
+  // ONE lane (ADR-104): every row is dated when its fact took effect.
   const timeline = timelineData?.events ?? []
   // Each row as the activity line standard words it (ADR-128), in the
-  // server's order (timeline.Order).
+  // server's order.
   const timelineLines = timeline.flatMap(e => (e.line ? [e.line] : []))
   // Lane-degradation disclosure: the server names any side-source
   // (credit notes, emails, payment events, payment recovery) whose

@@ -19,9 +19,9 @@ import type { InvoiceDispute } from './invoiceDispute';
  * and `payment.dispute_closed`
  * ([Webhook events](https://gethardcount.com/docs/api/webhook-events/)): the
  * invoice the disputed payment paid and the dispute, each as the API
- * returns it. The invoice leaves out `attention`, `recovery_warning`,
- * `billing_period_display` and `test_clock_id`, which are worked out
- * per read. Both events are saved in the same transaction that records
+ * returns it. The invoice leaves out `attention`, `recovery_warning`
+ * and `billing_period_display`, which are worked out per read. Both
+ * events are saved in the same transaction that records
  * the dispute, so a crash cannot drop them. `payment.dispute_opened`
  * is sent once per dispute, when Hardcount first records it; if the
  * first event Hardcount receives is already the close, both are sent,

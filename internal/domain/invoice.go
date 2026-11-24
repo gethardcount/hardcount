@@ -470,15 +470,6 @@ type Invoice struct {
 	// subscription, billing_period_start), so a repeated threshold scan tick
 	// is idempotent under retry.
 	BillingReason InvoiceBillingReason `json:"billing_reason,omitempty"`
-
-	// TestClockID is the test clock this invoice's dates follow: the clock
-	// its customer is pinned to. The pin is set when the customer is
-	// created, never changes, and every subscription inherits it (ADR-027).
-	// So it covers cycle and one-off invoices alike. It is read from the
-	// customer and never stored on the invoice. The list and get reads fill
-	// it, and it is empty (left out) for a wall-clock customer. The
-	// dashboard reads "Due in N days" from this clock.
-	TestClockID string `json:"test_clock_id,omitempty"`
 }
 
 // ItemChangeType classifies per-item proration invoices, so the dedup index

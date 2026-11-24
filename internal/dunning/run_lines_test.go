@@ -72,8 +72,8 @@ func TestGetRun_EventsCarryTheirLines(t *testing.T) {
 	}
 	liner := &linerFake{
 		lines: map[string]activity.Line{
-			"evt_1": activity.Stamp(activity.Line{ID: "dunning:evt_1", Title: "Payment recovery started", Tone: activity.ToneNeutral, Actor: activity.Automatic()}, at, time.Time{}, false),
-			"evt_2": activity.Stamp(activity.Line{ID: "dunning:evt_2", Title: "Payment retry 1 failed", Tone: activity.ToneFailure, Actor: activity.Automatic()}, at.Add(time.Hour), time.Time{}, false),
+			"evt_1": activity.Stamp(activity.Line{ID: "dunning:evt_1", Title: "Payment recovery started", Tone: activity.ToneNeutral, Actor: activity.Automatic()}, at),
+			"evt_2": activity.Stamp(activity.Line{ID: "dunning:evt_2", Title: "Payment retry 1 failed", Tone: activity.ToneFailure, Actor: activity.Automatic()}, at.Add(time.Hour)),
 		},
 		degraded: []string{"emails"},
 	}

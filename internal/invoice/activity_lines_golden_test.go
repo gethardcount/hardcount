@@ -303,7 +303,7 @@ func buildGoldenCases(t *testing.T, w writerTokens) []goldenCase {
 	t.Helper()
 	var cases []goldenCase
 	add := func(name string, l activity.Line) {
-		l = activity.Stamp(l, goldenAt, time.Time{}, false)
+		l = activity.Stamp(l, goldenAt)
 		l.ID = name
 		cases = append(cases, goldenCase{Case: name, Line: l, Text: lineText(l)})
 	}

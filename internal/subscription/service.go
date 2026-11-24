@@ -28,9 +28,8 @@ type SettingsReader interface {
 }
 
 // CustomerReader fetches a customer by id on a tenant- and mode-scoped
-// transaction — narrow shape used by Create to confirm the customer is the
-// caller's and to read customer.test_clock_id for inheritance (ADR-027).
-// Implemented by *customer.PostgresStore.
+// transaction: the narrow shape Create uses to confirm the customer is the
+// caller's and not archived. Implemented by *customer.PostgresStore.
 type CustomerReader interface {
 	Get(ctx context.Context, tenantID, customerID string) (domain.Customer, error)
 }
@@ -203,11 +202,9 @@ func (s *Service) SetSettingsReader(r SettingsReader) {
 }
 
 // SetCustomerReader wires the customer fetcher used at sub-create time
-// to refuse a customer outside the caller's tenant and mode and to
-// inherit test_clock_id from the owning customer (ADR-027). When
-// unwired (narrow unit tests), neither happens: the new sub has no
-// clock unless the caller stamps one directly. Production wires the
-// real customer store via wire.go.
+// to refuse a customer outside the caller's tenant and mode, or archived.
+// When unwired (narrow unit tests), neither check runs. Production wires
+// the real customer store via wire.go.
 func (s *Service) SetCustomerReader(r CustomerReader) {
 	s.customers = r
 }
@@ -740,16 +737,7 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		}
 	}
 
-	// Customer-level test-clock attach (ADR-027, Stripe parity): a
-	// sub's clock is unconditionally inherited from its owning customer.
-	// The API does not accept a per-sub test_clock_id — Stripe doesn't
-	// either, and accepting one only created a redundant validation
-	// path against the canonical customer-level value.
-	//
-	// Skipped when the customer reader isn't wired (narrow unit-test
-	// path); the sub then has no clock unless the test sets one
-	// directly on the domain.Subscription it constructs.
-	var inheritedClockID string
+	// Skipped when the customer reader isn't wired (narrow unit-test path).
 	if s.customers != nil {
 		cust, err := s.customers.Get(ctx, tenantID, input.CustomerID)
 		if errors.Is(err, errs.ErrNotFound) {
@@ -761,8 +749,7 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 			return domain.Subscription{}, errs.NotFound("customer")
 		}
 		if err != nil {
-			// A read error must not skip the archived guard or the clock
-			// inheritance (a clock customer's sub would bill on wall time).
+			// A read error must not skip the archived guard.
 			return domain.Subscription{}, fmt.Errorf("get customer: %w", err)
 		}
 		// Archived customer = no NEW subscriptions (ADR-067). Archive's
@@ -772,7 +759,6 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		if cust.Status == domain.CustomerStatusArchived {
 			return domain.Subscription{}, errs.InvalidState("customer is archived — unarchive the customer before creating a subscription")
 		}
-		inheritedClockID = cust.TestClockID
 	}
 
 	planIDs := make([]string, 0, len(items))
@@ -888,7 +874,6 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		CurrentBillingPeriodEnd:   periodEnd,
 		NextBillingAt:             nextBilling,
 		BillingAnchorDay:          billingAnchorDay,
-		TestClockID:               inheritedClockID,
 		Items:                     items,
 	}, func(tx *sql.Tx, created domain.Subscription) error {
 		// Currency pin (ADR-100): the new sub's plans must agree with each

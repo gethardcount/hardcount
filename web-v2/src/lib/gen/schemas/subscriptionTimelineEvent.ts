@@ -55,11 +55,5 @@ export interface SubscriptionTimelineEvent {
   actor_name?: string;
   /** The actor's ID (a user's, an API key's `hc_key_…` or a customer's), or `system`. */
   actor_id?: string;
-  /** True when the action affected a subscription on a test clock. */
-  is_simulated?: boolean;
-  /** The test clock's simulated time when the action took effect. */
-  sim_effective_at?: string;
-  /** The test clock `sim_effective_at` belongs to. Absent when the action was not on a test clock. */
-  test_clock_id?: string;
   line: ActivityLine;
 }

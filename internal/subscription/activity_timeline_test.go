@@ -152,94 +152,59 @@ func TestActivityTimeline_NoTruncationOnFullHistory(t *testing.T) {
 	}
 }
 
-// TestActivityTimeline_SortsByDisplayedSimAxis is the 2026-07-19 inversion
-// regression, replicating the live shape exactly: a pause PUT and the
-// catchup auto-resume wrote 36ms apart (same wall SECOND), with simulated
-// instants 8 days apart. The old sort keyed on the second-truncated wall
-// Timestamp string — the pair tied, the tie kept the audit query's DESC
-// orientation, and "auto-resumed (sim Nov 10)" rendered ABOVE "paused
-// (sim Nov 2)" on a surface that displays sim-primary (#513). The sort
-// axis must be the DISPLAYED axis: sim when present, wall otherwise;
-// equal display instants tie-break on full-precision wall write order.
-func TestActivityTimeline_SortsByDisplayedSimAxis(t *testing.T) {
+// TestActivityTimeline_EarliestFirst: rows read earliest first, and rows with
+// an equal created_at keep write order, although the audit query returns them
+// newest first.
+func TestActivityTimeline_EarliestFirst(t *testing.T) {
 	tenantID := "t1"
 	store := newMemStore()
 	subID, _ := seedSubWithItem(t, store, tenantID, "cus_1", "plan_a")
 
 	wall := time.Date(2026, 7, 18, 19, 6, 37, 0, time.UTC)
-	simMeta := func(sim string) map[string]any {
-		return map[string]any{"sim_effective_at": sim, "test_clock_id": "clk_1"}
-	}
-	// Audit query returns DESC (newest wall first) — build it that way.
+	// The audit query returns newest first; build it that way.
 	entries := []domain.AuditEntry{
-		// The axis-disagreement case (ADR-097 remediation shape): the
-		// NEWEST wall write carries the EARLIEST sim instant — a stranded
-		// cancel healed long after its contracted date. Wall-axis sorting
-		// dumps it at the bottom; the display (sim) axis puts it FIRST.
-		{Action: "subscription.canceled", CreatedAt: wall.Add(50 * time.Second),
-			Metadata: map[string]any{"action": "cancel_fired", "sim_effective_at": "2028-08-15T00:00:00Z", "test_clock_id": "clk_1"}},
-		{Action: "subscription.updated", CreatedAt: wall.Add(840 * time.Millisecond),
-			Metadata: map[string]any{"action": "collection_resumed", "sim_effective_at": "2028-11-10T00:00:00Z", "test_clock_id": "clk_1"}},
-		{Action: "subscription.updated", CreatedAt: wall.Add(804 * time.Millisecond),
-			Metadata: map[string]any{"action": "collection_paused", "sim_effective_at": "2028-11-02T00:00:00Z", "test_clock_id": "clk_1"}},
-		// Same SIM instant pair (create+activate at the same frozen time,
-		// 100ms apart on the wall): the causal tie-break must order by
-		// full-precision wall write time, not the DESC input order.
-		{Action: "subscription.activated", CreatedAt: wall.Add(-10 * time.Second).Add(100 * time.Millisecond),
-			Metadata: simMeta("2028-10-20T00:00:00Z")},
-		{Action: "subscription.created", CreatedAt: wall.Add(-10 * time.Second),
-			Metadata: simMeta("2028-10-20T00:00:00Z")},
-		// Exactly-equal pair (same tx batch: identical created_at AND sim).
-		// DESC input carries them reverse-causally; only the pre-sort
-		// Reverse restores true insertion order for residual ties.
-		{Action: "subscription.item_removed", CreatedAt: wall.Add(-20 * time.Second),
-			Metadata: simMeta("2028-10-19T00:00:00Z")},
-		{Action: "subscription.item_added", CreatedAt: wall.Add(-20 * time.Second),
-			Metadata: simMeta("2028-10-19T00:00:00Z")},
+		{Action: domain.AuditActionUpdate, CreatedAt: wall.Add(840 * time.Millisecond),
+			Metadata: map[string]any{"action": "collection_resumed"}},
+		{Action: domain.AuditActionUpdate, CreatedAt: wall.Add(804 * time.Millisecond),
+			Metadata: map[string]any{"action": "collection_paused"}},
+		{Action: "subscription.activated", CreatedAt: wall.Add(-10 * time.Second).Add(100 * time.Millisecond)},
+		{Action: "subscription.created", CreatedAt: wall.Add(-10 * time.Second)},
+		// Written in one transaction: an equal created_at.
+		{Action: "subscription.item_removed", CreatedAt: wall.Add(-20 * time.Second)},
+		{Action: "subscription.item_added", CreatedAt: wall.Add(-20 * time.Second)},
 	}
-	rec := &auditRecorderMock{entries: entries, total: len(entries)}
-
 	h := NewHandler(NewService(store, nil))
-	h.SetAuditLogger(rec)
+	h.SetAuditLogger(&auditRecorderMock{entries: entries, total: len(entries)})
 
 	rr := httptest.NewRecorder()
-	h.activityTimeline(rr, timelineRequest(
-		auth.WithTenantID(context.Background(), tenantID), subID))
+	h.activityTimeline(rr, timelineRequest(auth.WithTenantID(context.Background(), tenantID), subID))
 	if rr.Code != http.StatusOK {
 		t.Fatalf("status: got %d, want 200. body=%s", rr.Code, rr.Body.String())
 	}
-
 	var resp struct {
 		Events []struct {
-			EventType      string `json:"event_type"`
-			SimEffectiveAt string `json:"sim_effective_at"`
+			EventType   string `json:"event_type"`
+			Description string `json:"description"`
 		} `json:"events"`
 	}
 	if err := json.Unmarshal(rr.Body.Bytes(), &resp); err != nil {
 		t.Fatalf("unmarshal: %v", err)
 	}
-	if len(resp.Events) != 7 {
-		t.Fatalf("events: got %d, want 7", len(resp.Events))
+	var got []string
+	for _, e := range resp.Events {
+		got = append(got, e.EventType+" "+e.Description)
 	}
-	if resp.Events[1].EventType != "subscription.item_added" || resp.Events[2].EventType != "subscription.item_removed" {
-		t.Errorf("exactly-equal (sim, created_at) pair must keep true insertion order (added before removed): got %s then %s", resp.Events[1].EventType, resp.Events[2].EventType)
+	want := []string{
+		"subscription.item_added", "subscription.item_removed", "subscription.created",
+		"subscription.activated", "update Collection paused", "update Collection resumed",
 	}
-	wantSims := []string{
-		"2028-08-15T00:00:00Z", // remediated cancel: latest wall write, earliest sim
-		"2028-10-19T00:00:00Z", // item added (equal-tie pair, causal order)
-		"2028-10-19T00:00:00Z", // item removed
-		"2028-10-20T00:00:00Z", // created (tie-break: earlier wall write)
-		"2028-10-20T00:00:00Z", // activated
-		"2028-11-02T00:00:00Z", // paused — MUST precede…
-		"2028-11-10T00:00:00Z", // …auto-resumed (the inversion)
+	if len(got) != len(want) {
+		t.Fatalf("events %q, want %d", got, len(want))
 	}
-	for i, want := range wantSims {
-		if resp.Events[i].SimEffectiveAt != want {
-			t.Fatalf("position %d: got sim %s (%s), want %s — display order does not follow the sim axis", i, resp.Events[i].SimEffectiveAt, resp.Events[i].EventType, want)
+	for i, w := range want {
+		if !strings.HasPrefix(got[i], w) {
+			t.Errorf("position %d: %q, want %q (order %q)", i, got[i], w, got)
 		}
-	}
-	if resp.Events[3].EventType != "subscription.created" || resp.Events[4].EventType != "subscription.activated" {
-		t.Errorf("same-sim tie must order by wall write time: got %s then %s", resp.Events[3].EventType, resp.Events[4].EventType)
 	}
 }
 

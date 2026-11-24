@@ -103,14 +103,6 @@ func TestActivityLines_DunningRunAndSentEmails(t *testing.T) {
 			t.Errorf("Sent emails line %v: link %v, want the invoice %s", l["title"], link, invoiceID)
 		}
 	}
-	for name, lines := range map[string][]map[string]any{"Dunning page": dunningLines, "Sent emails": emailLines} {
-		for i, l := range lines {
-			if l["recorded_at"] != nil {
-				t.Errorf("%s: row %d (%v) carries recorded_at %v", name, i, l["title"], l["recorded_at"])
-			}
-		}
-	}
-
 	// One event, one wording: a row on the Dunning page or the Sent emails
 	// card says what the invoice's Activity card says for the same event.
 	onInvoice := map[string]map[string]any{}

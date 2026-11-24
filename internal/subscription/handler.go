@@ -1084,9 +1084,8 @@ func (h *Handler) updateItem(w http.ResponseWriter, r *http.Request) {
 				payload["effective_at"] = result.Item.PendingPlanEffectiveAt.UTC()
 			}
 		}
-		// Sim-time context (ADR-030): re-fetch the post-change sub for its
-		// UpdatedAt (the change instant) + test_clock_id so a clock-pinned
-		// change renders the simulated effect-time subline.
+		// The row's label is the sub's code. subBefore is read only on the
+		// proration path, so read the sub again.
 		auditSub := subBefore
 		if s, err := h.svc.Get(ctx, tenantID, subID); err == nil {
 			auditSub = s
@@ -2380,18 +2379,10 @@ type TimelineEvent struct {
 	EventType   string `json:"event_type"`
 	Status      string `json:"status"`
 	Description string `json:"description"`
-	// sortAt / recordedAt are the ORDERING axes, never serialized.
-	// sortAt is the instant the surface DISPLAYS (sim_effective_at on
-	// clock-pinned rows, wall created_at otherwise — the ADR-030
-	// narrative-surface rule); recordedAt is the full-precision wall
-	// write instant used as the causal tie-break. Sorting on the
-	// serialized Timestamp string was the 2026-07-19 inversion bug:
-	// second-truncated wall stamps collided (a pause PUT and the
-	// catchup resume 36ms later), the tie kept the audit query's DESC
-	// orientation, and "auto-resumed (sim Nov 10)" rendered above
-	// "paused (sim Nov 2)".
-	sortAt     time.Time
-	recordedAt time.Time
+	// sortAt is the row's created_at at full precision, the ordering axis,
+	// never serialized. The serialized Timestamp truncates to seconds, so
+	// sorting it could invert a same-second pair.
+	sortAt time.Time
 	// Detail renders as a sub-line beneath the description (mirrors
 	// invoice timeline's same-named field). Used for the
 	// human-meaningful context that doesn't belong in the main line:
@@ -2409,27 +2400,6 @@ type TimelineEvent struct {
 	ActorType       string `json:"actor_type,omitempty"`
 	ActorName       string `json:"actor_name,omitempty"`
 	ActorID         string `json:"actor_id,omitempty"`
-	// IsSimulated marks events whose effect landed on the simulated
-	// timeline. After ADR-030's 2026-05-28 amendment, audit_log
-	// created_at is wall-clock for every row — the timestamp this
-	// event renders with IS wall-clock. The is_simulated flag now
-	// indicates a separate fact: the operator action affected a
-	// clock-pinned entity, and its simulated effect-time is in
-	// SimEffectiveAt below. Authoritative per row (driven off
-	// metadata.sim_effective_at), not a sub-level heuristic — wall-
-	// clock-active subs and one-off operator actions on a clock-
-	// pinned sub both report false / true correctly.
-	IsSimulated bool `json:"is_simulated,omitempty"`
-	// SimEffectiveAt is the simulated effect time of an operator
-	// action on a clock-pinned entity — what the test clock's
-	// frozen_time was when the action landed on the simulated
-	// timeline. Empty for events on wall-clock entities. SPA renders
-	// it as a subline ("Effect on test clock X at <simulated time>")
-	// under the wall-clock primary timestamp.
-	SimEffectiveAt string `json:"sim_effective_at,omitempty"`
-	// TestClockID identifies which test clock the SimEffectiveAt
-	// belongs to. Empty when SimEffectiveAt is empty.
-	TestClockID string `json:"test_clock_id,omitempty"`
 	// Error is the line's problem: what went wrong on a failure row, what it
 	// means on a warning row.
 	Error string `json:"error,omitempty"`
@@ -2441,14 +2411,14 @@ type TimelineEvent struct {
 	Line activity.Line `json:"line"`
 }
 
-// fillFromLine stamps the line's id, actor and times and copies its words
+// fillFromLine stamps the line's id, actor and time and copies its words
 // into the older fields: the title is the description, the meta line
 // without the actor is the detail (the card shows the actor from
 // actor_name), the problem is the error and the tone is the status.
 func (e *TimelineEvent) fillFromLine(id string, actor *activity.Actor) {
 	e.Line.ID = id
 	e.Line.Actor = actor
-	e.Line = activity.Stamp(e.Line, e.sortAt, e.recordedAt, e.IsSimulated)
+	e.Line = activity.Stamp(e.Line, e.sortAt)
 	e.Description = e.Line.Title
 	e.Detail, e.DetailTimestamp = legacyDetail(e.Line)
 	e.Error = e.Line.Problem
@@ -2600,22 +2570,6 @@ func (h *Handler) activityTimeline(w http.ResponseWriter, r *http.Request) {
 		respond.InternalError(w, r)
 		return
 	}
-	// audit_log.created_at is WALL-CLOCK on every row, including clock-pinned subs
-	// (ADR-030: it answers "when did the operator click"). It is NOT sim-time — an
-	// earlier version of this comment said it was. The SIMULATED instant is the
-	// SECOND axis (sim_effective_at), which is what the per-row values below read.
-	// Marking every audit-sourced row
-	// IsSimulated + SimEffectiveAt are computed PER ROW from
-	// metadata.sim_effective_at — the authoritative signal mirrored by
-	// the audit writer from the ctx clock binding (ADR-090 §5) at write
-	// time. Pre-2026-05-28 this was a sub-
-	// level heuristic (every audit row flagged simulated when the
-	// sub was clock-pinned), which fired the chip on operator
-	// actions whose audit timestamp was actually wall-clock — the
-	// 2026-05-28 ADR-030 amendment made audit created_at wall-
-	// clock everywhere, so the heuristic became actively wrong.
-	// Per-row metadata check below.
-
 	events := []TimelineEvent{}
 	truncated := false
 
@@ -2676,35 +2630,15 @@ func (h *Handler) activityTimeline(w http.ResponseWriter, r *http.Request) {
 			labels := lineLabels{plans: planNames, invoices: h.invoiceNumbers(r.Context(), tenantID, entries)}
 			for _, e := range entries {
 				line := describeSubscriptionAction(e.Action, e.Metadata, labels)
-				// Per-row sim context. metadata.sim_effective_at is
-				// mirrored by the audit writer from the ctx clock binding
-				// on writes affecting clock-pinned subs (ADR-090 §5; the
-				// columns are the queryable copy). Empty for everything else.
-				simAt, _ := e.Metadata["sim_effective_at"].(string)
-				clockID, _ := e.Metadata["test_clock_id"].(string)
-				// The display/sort instant: the simulated effect time on
-				// clock-pinned rows, wall write-time otherwise. Parse
-				// failure (malformed metadata) falls back to wall rather
-				// than sorting a garbage zero-time to the top.
-				sortAt := e.CreatedAt
-				if simAt != "" {
-					if t, perr := time.Parse(time.RFC3339, simAt); perr == nil {
-						sortAt = t
-					}
-				}
 				ev := TimelineEvent{
-					Timestamp:      e.CreatedAt.UTC().Format(time.RFC3339),
-					Source:         "audit",
-					EventType:      e.Action,
-					ActorType:      e.ActorType,
-					ActorName:      e.ActorName,
-					ActorID:        e.ActorID,
-					IsSimulated:    simAt != "",
-					SimEffectiveAt: simAt,
-					TestClockID:    clockID,
-					sortAt:         sortAt,
-					recordedAt:     e.CreatedAt,
-					Line:           line,
+					Timestamp: e.CreatedAt.UTC().Format(time.RFC3339),
+					Source:    "audit",
+					EventType: e.Action,
+					ActorType: e.ActorType,
+					ActorName: e.ActorName,
+					ActorID:   e.ActorID,
+					sortAt:    e.CreatedAt,
+					Line:      line,
 				}
 				ev.fillFromLine(e.ID, activity.ActorFromAudit(e.ActorType, e.ActorName))
 				events = append(events, ev)
@@ -2721,23 +2655,13 @@ func (h *Handler) activityTimeline(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// Ascending order — CS reps read a timeline top-down, earliest first.
-	// The sort axis is the axis the surface DISPLAYS (ADR-030 narrative
-	// amendment): the simulated instant on clock-pinned rows, wall
-	// otherwise. Sorting the serialized wall Timestamp string under a
-	// sim-primary display inverted causally-ordered pairs whose
-	// second-truncated wall stamps collided (2026-07-19 live find:
-	// "auto-resumed, sim Nov 10" rendered above "paused, sim Nov 2" —
-	// both wall-stamped 19:06:37, tie kept the query's DESC orientation).
-	//
-	// Equal display instants tie-break on full-precision wall recordedAt
-	// (causal write order); events sharing BOTH are pre-reversed below so
-	// the stable sort preserves true insertion order, not the audit
-	// query's DESC.
+	// Ascending order: CS reps read a timeline top-down, earliest first.
+	// Rows at one instant keep write order: the audit query is newest
+	// first, so the list is reversed before the stable sort.
 	slices.Reverse(events)
 	timeline.SortStable(events,
 		func(e TimelineEvent) time.Time { return e.sortAt },
-		func(a, b TimelineEvent) bool { return a.recordedAt.Before(b.recordedAt) })
+		func(a, b TimelineEvent) bool { return false })
 
 	respond.JSON(w, r, http.StatusOK, map[string]any{
 		"events": events,

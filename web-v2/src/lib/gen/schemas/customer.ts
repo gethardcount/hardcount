@@ -65,13 +65,6 @@ export interface Customer {
   status: CustomerStatus;
   /** When the customer was created. */
   created_at: string;
-  /**
-     * The test clock the customer was created on (test mode only).
-     * Its subscriptions and invoices then run on the clock's
-     * simulated time. Set at create and fixed after. Absent for a
-     * customer with no test clock.
-     */
-  test_clock_id?: string;
   /** The account the customer belongs to. */
   tenant_id?: string;
   /**

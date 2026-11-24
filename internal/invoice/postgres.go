@@ -250,11 +250,6 @@ const invCols = `id, tenant_id, customer_id, COALESCE(subscription_id,''), invoi
 	bill_to_snapshot, supplier_snapshot, below_minimum_at, paid_out_of_band, invoice_emailed_at,
 	tax_inclusive`
 
-// invClockCol reads the test clock an invoice's dates follow from its
-// customer (domain.Invoice.TestClockID). It follows invCols on the list and
-// get reads only; scan it into inv.TestClockID after scanInvDest.
-const invClockCol = `COALESCE((SELECT c.test_clock_id FROM customers c WHERE c.id = invoices.customer_id), '')`
-
 // qualifiedInvCols returns invCols with every column reference prefixed
 // by the given table alias. Used by ADR-029's per-clock queries that
 // JOIN invoices to subscriptions — without qualification, columns like
@@ -367,8 +362,8 @@ func (s *PostgresStore) Get(ctx context.Context, tenantID, id string) (domain.In
 // the read.
 func (s *PostgresStore) GetTx(ctx context.Context, tx *sql.Tx, _ string, id string) (domain.Invoice, error) {
 	var inv domain.Invoice
-	err := tx.QueryRowContext(ctx, `SELECT `+invCols+`, `+invClockCol+` FROM invoices WHERE id = $1`, id).
-		Scan(append(s.scanInvDest(&inv), &inv.TestClockID)...)
+	err := tx.QueryRowContext(ctx, `SELECT `+invCols+` FROM invoices WHERE id = $1`, id).
+		Scan(s.scanInvDest(&inv)...)
 	if err == sql.ErrNoRows {
 		return domain.Invoice{}, errs.ErrNotFound
 	}
@@ -441,7 +436,7 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.I
 		return nil, 0, err
 	}
 	args = append(args, limit, filter.Offset)
-	query := `SELECT ` + invCols + `, ` + invClockCol + ` FROM invoices` + where +
+	query := `SELECT ` + invCols + ` FROM invoices` + where +
 		` ORDER BY ` + orderBy +
 		fmt.Sprintf(` LIMIT $%d OFFSET $%d`, len(args)-1, len(args))
 
@@ -454,7 +449,7 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.I
 	var invoices []domain.Invoice
 	for rows.Next() {
 		var inv domain.Invoice
-		if err := rows.Scan(append(s.scanInvDest(&inv), &inv.TestClockID)...); err != nil {
+		if err := rows.Scan(s.scanInvDest(&inv)...); err != nil {
 			return nil, 0, err
 		}
 		invoices = append(invoices, inv)

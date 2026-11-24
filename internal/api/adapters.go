@@ -944,13 +944,10 @@ func (a *invoiceEmailEventsAdapter) ListByInvoice(ctx context.Context, tenantID,
 			EmailType:        r.EmailType,
 			Status:           r.Status,
 			DeliveryState:    r.DeliveryState,
-			CreatedAt:        r.CreatedAt,
-			DispatchedAt:     r.DispatchedAt,
 			To:               to,
 			AttemptNumber:    int(attempt),
 			Trigger:          trigger,
 			EffectiveAt:      r.EffectiveAt,
-			TestClockID:      r.TestClockID,
 			SendFailure:      emailSendFailure(r.Status, r.LastError),
 			SkipReason:       r.SkipReason,
 			CreditNoteNumber: cnNumber,
@@ -1027,7 +1024,6 @@ func (a *customerSentEmailsAdapter) ListByCustomer(ctx context.Context, tenantID
 			SendFailure:      emailSendFailure(r.Status, r.LastError),
 			SkipReason:       r.SkipReason,
 			EffectiveAt:      r.EffectiveAt,
-			TestClockID:      r.TestClockID,
 		})
 	}
 	return out, nil

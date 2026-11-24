@@ -121,7 +121,6 @@ const subCols = `id, tenant_id, code, display_name, customer_id, status, billing
 	billing_threshold_amount_gte,
 	current_billing_period_start, current_billing_period_end, next_billing_at,
 	COALESCE(billing_anchor_day, 0),
-	COALESCE(test_clock_id,''),
 	billing_failed_for, billing_failure_count, billing_failed_at,
 	billing_next_attempt_at, COALESCE(billing_last_error,''),
 	created_at, updated_at`
@@ -208,10 +207,9 @@ func (s *PostgresStore) createInTx(ctx context.Context, tx *sql.Tx, tenantID str
 			billing_time, trial_start_at, trial_end_at, started_at,
 			current_billing_period_start, current_billing_period_end, next_billing_at,
 			billing_anchor_day,
-			test_clock_id,
 			activated_at,
 			created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NULLIF($15,''),$16,$17,$17)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$16)
 		RETURNING `+subCols,
 		id, tenantID, sub.Code, sub.DisplayName, sub.CustomerID,
 		sub.Status, sub.BillingTime, postgres.NullableTime(sub.TrialStartAt),
@@ -220,7 +218,6 @@ func (s *PostgresStore) createInTx(ctx context.Context, tx *sql.Tx, tenantID str
 		postgres.NullableTime(sub.CurrentBillingPeriodEnd),
 		postgres.NullableTime(sub.NextBillingAt),
 		sub.BillingAnchorDay,
-		sub.TestClockID,
 		postgres.NullableTime(sub.ActivatedAt), now,
 	), &sub)
 
@@ -3140,7 +3137,6 @@ func scanSubRow(row rowScanner, sub *domain.Subscription) error {
 		&sub.CurrentBillingPeriodStart,
 		&sub.CurrentBillingPeriodEnd, &sub.NextBillingAt,
 		&sub.BillingAnchorDay,
-		&sub.TestClockID,
 		&failedFor, &failureCount, &failedAt, &nextAttemptAt, &lastError,
 		&sub.CreatedAt, &sub.UpdatedAt,
 	}

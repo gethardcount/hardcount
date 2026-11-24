@@ -123,34 +123,6 @@ func TestLogInTx_TotalityAndVocabulary(t *testing.T) {
 		_ = tx.Commit()
 	})
 
-	t.Run("wall-clock ctx leaves the sim columns NULL", func(t *testing.T) {
-		// The partial index (0148) and every sim filter key on IS NOT NULL, so a
-		// wall-clock row must carry SQL NULL — not a zero time, not an empty
-		// string, either of which would drag real-world rows into the simulated
-		// slice.
-		tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
-		if err != nil {
-			t.Fatalf("begin: %v", err)
-		}
-		defer postgres.Rollback(tx)
-		if err := logger.LogInTx(ctx, tx, audit.Entry{
-			Action: "update", ResourceType: "wall_probe", ResourceID: "hc_probe_8",
-		}); err != nil {
-			t.Fatalf("log: %v", err)
-		}
-		var colAt *time.Time
-		var colClock *string
-		if err := tx.QueryRowContext(ctx,
-			`SELECT sim_effective_at, test_clock_id FROM audit_log WHERE resource_type = 'wall_probe'`,
-		).Scan(&colAt, &colClock); err != nil {
-			t.Fatalf("read back: %v", err)
-		}
-		if colAt != nil || colClock != nil {
-			t.Errorf("wall-clock row must have NULL sim columns; got (%v, %v)", colAt, colClock)
-		}
-		_ = tx.Commit()
-	})
-
 	t.Run("GUC-less tx fails loudly on NOT NULL, not the incidental FK", func(t *testing.T) {
 		// TxBypass sets no app.tenant_id. On a pooled connection the
 		// reverted GUC placeholder is an EMPTY STRING (not NULL), which

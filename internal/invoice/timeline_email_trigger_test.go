@@ -39,8 +39,8 @@ func TestPaymentTimeline_SetupLinkRowsCarryTheirCause(t *testing.T) {
 	h := &Handler{
 		svc: NewService(store, nil, newMemNumberer()),
 		emailEvents: &emailRowsFake{rows: []EmailEventRow{
-			{ID: "em1", EmailType: "payment_setup_request", Status: "dispatched", CreatedAt: at, Trigger: "finalize_no_pm"},
-			{ID: "em2", EmailType: "payment_setup_request", Status: "skipped", CreatedAt: at.Add(time.Minute), Trigger: "operator_resend"},
+			{ID: "em1", EmailType: "payment_setup_request", Status: "dispatched", EffectiveAt: at, Trigger: "finalize_no_pm"},
+			{ID: "em2", EmailType: "payment_setup_request", Status: "skipped", EffectiveAt: at.Add(time.Minute), Trigger: "operator_resend"},
 		}},
 	}
 

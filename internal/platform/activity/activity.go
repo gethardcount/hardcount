@@ -12,9 +12,8 @@
 // the email names and outcome words, the credit-note reason labels and refund
 // parts, and the decline-code words.
 //
-// A describe function takes no clock input. Stamp attaches the times
-// afterwards, so a test-clock line can differ from a real-clock line only by
-// its Recorded time.
+// A describe function takes no clock input. Stamp attaches the time
+// afterwards.
 package activity
 
 import (
@@ -117,11 +116,8 @@ type Line struct {
 	// Actor is the meta line's last part. It is nil when no fact names one.
 	Actor *Actor `json:"actor,omitempty"`
 	Tone  Tone   `json:"tone"`
-	// OccurredAt is the event's instant on the entity's calendar.
+	// OccurredAt is the event's instant.
 	OccurredAt time.Time `json:"occurred_at"`
-	// RecordedAt is the real-world instant. It is set only for an entity on
-	// a test clock, and only when the row has one.
-	RecordedAt *time.Time `json:"recorded_at,omitempty"`
 }
 
 // Text is a one-part segment of plain words.
@@ -155,16 +151,10 @@ func Amount(cents int64, currency string) *Money {
 	return &Money{Cents: cents, Currency: currency}
 }
 
-// Stamp attaches a line's times. occurred is the instant on the entity's
-// calendar. recorded is the real-world instant. Stamp keeps it only when the
-// entity is on a test clock (pinned) and the row has one.
-func Stamp(l Line, occurred, recorded time.Time, pinned bool) Line {
+// Stamp attaches a line's instant, and makes a nil detail an empty list so
+// it serializes as one.
+func Stamp(l Line, occurred time.Time) Line {
 	l.OccurredAt = occurred.UTC()
-	l.RecordedAt = nil
-	if pinned && !recorded.IsZero() {
-		r := recorded.UTC()
-		l.RecordedAt = &r
-	}
 	if l.Detail == nil {
 		l.Detail = []Segment{}
 	}
@@ -223,8 +213,7 @@ func ActorText(a *Actor) string {
 }
 
 // MetaText renders the meta line as plain text: the detail segments, then
-// the actor, joined by " · ". It leaves out the Recorded part. The invoice
-// timeline's legacy `detail` field carries this text until the dashboard
+// the actor, joined by " · ". The invoice timeline's legacy `detail` field carries this text until the dashboard
 // renders lines itself.
 func MetaText(l Line) string {
 	var segs []string

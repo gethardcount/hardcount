@@ -363,13 +363,13 @@ func TestActivityLines_InvoiceWire(t *testing.T) {
 		events := fetchWire(t, wireCase{
 			inv: finalized,
 			emails: []EmailEventRow{
-				{ID: "m1", EmailType: "invoice", Status: "dispatched", DeliveryState: "delivered", To: "billing@acme.test", CreatedAt: at},
-				{ID: "m2", EmailType: "payment_receipt", Status: "dispatched", DeliveryState: "bounced", To: "billing@acme.test", CreatedAt: at.Add(time.Minute)},
-				{ID: "m3", EmailType: "payment_failed", Status: "pending", To: "billing@acme.test", CreatedAt: at.Add(2 * time.Minute)},
-				{ID: "m4", EmailType: "payment_setup_request", Status: "skipped", Trigger: "finalize_no_pm", To: "billing@acme.test", CreatedAt: at.Add(3 * time.Minute)},
-				{ID: "m5", EmailType: "payment_setup_request", Status: "dispatched", Trigger: "auto_charge_retry_no_pm", To: "billing@acme.test", CreatedAt: at.Add(4 * time.Minute)},
-				{ID: "m6", EmailType: "credit_note", Status: "dispatched", DeliveryState: "complained", To: "billing@acme.test", CreatedAt: at.Add(5 * time.Minute)},
-				{ID: "m7", EmailType: "invoice", Status: "failed", To: "billing@acme.test", CreatedAt: at.Add(6 * time.Minute)},
+				{ID: "m1", EmailType: "invoice", Status: "dispatched", DeliveryState: "delivered", To: "billing@acme.test", EffectiveAt: at},
+				{ID: "m2", EmailType: "payment_receipt", Status: "dispatched", DeliveryState: "bounced", To: "billing@acme.test", EffectiveAt: at.Add(time.Minute)},
+				{ID: "m3", EmailType: "payment_failed", Status: "pending", To: "billing@acme.test", EffectiveAt: at.Add(2 * time.Minute)},
+				{ID: "m4", EmailType: "payment_setup_request", Status: "skipped", Trigger: "finalize_no_pm", To: "billing@acme.test", EffectiveAt: at.Add(3 * time.Minute)},
+				{ID: "m5", EmailType: "payment_setup_request", Status: "dispatched", Trigger: "auto_charge_retry_no_pm", To: "billing@acme.test", EffectiveAt: at.Add(4 * time.Minute)},
+				{ID: "m6", EmailType: "credit_note", Status: "dispatched", DeliveryState: "complained", To: "billing@acme.test", EffectiveAt: at.Add(5 * time.Minute)},
+				{ID: "m7", EmailType: "invoice", Status: "failed", To: "billing@acme.test", EffectiveAt: at.Add(6 * time.Minute)},
 			},
 		})
 		byID := map[string]wireRow{}
@@ -549,7 +549,7 @@ func TestActivityLines_InvoiceWire(t *testing.T) {
 			attempts: []domain.InvoiceChargeAttempt{{ID: "a1", StripePaymentIntentID: "pi_bad", Outcome: domain.ChargeAttemptFailed, DeclineCode: "insufficient_funds", AmountCents: 4900, OccurredAt: at}},
 			runs:     []domain.InvoiceDunningRun{{ID: "run_1", State: domain.DunningResolved, Resolution: domain.ResolutionPaymentRecovered}},
 			events:   []domain.InvoiceDunningEvent{{ID: "e0", EventType: domain.DunningEventStarted, CreatedAt: at, Reason: "payment_failed"}},
-			emails:   []EmailEventRow{{ID: "m1", EmailType: "payment_receipt", Status: "dispatched", CreatedAt: paidAt}},
+			emails:   []EmailEventRow{{ID: "m1", EmailType: "payment_receipt", Status: "dispatched", EffectiveAt: paidAt}},
 		})
 		if len(events) < 5 {
 			t.Fatalf("%d rows, want at least 5", len(events))
@@ -572,9 +572,6 @@ func TestActivityLines_InvoiceWire(t *testing.T) {
 			}
 			if k, _ := line["kind"].(string); k == "" {
 				t.Errorf("%v: line has no kind", e["id"])
-			}
-			if _, ok := line["recorded_at"]; ok {
-				t.Errorf("%v: a real-clock invoice's line carries recorded_at", e["id"])
 			}
 		}
 	})

@@ -70,9 +70,9 @@ export interface SentEmail {
      * The email in the words of the activity line standard, the same
      * as on the invoice's payment timeline: its name and what
      * happened to it ("Receipt email delivered"), why it was not
-     * sent, the invoice it was about, and who it went to. Dated when
-     * the mail server took it, or when it was queued if it was not
-     * sent. Present for every email type this list returns.
+     * sent, the invoice it was about, and who it went to. Dated at
+     * the instant the action that sent it took effect. Present for
+     * every email type this list returns.
      */
   line?: ActivityLine;
 }

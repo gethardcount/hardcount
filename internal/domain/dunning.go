@@ -298,18 +298,6 @@ type InvoiceDunningRun struct {
 	InvoiceAmountDue int64  `json:"invoice_amount_due_cents,omitempty"`
 	InvoiceCurrency  string `json:"invoice_currency,omitempty"`
 
-	// EffectiveNow is the owning customer's test-clock frozen_time when the
-	// run is on a clock-pinned subscription (one whose customer is on a test
-	// clock). The frontend uses it as "now" for relative times. Wall-clock
-	// time would show "overdue" on every row whose next_action_at is in the
-	// clock's time (for example 2024-02 while the wall clock is in 2026). It
-	// is nil for wall-clock runs, and the relative-time renderer then uses
-	// Date.now(). The server's value is authoritative.
-	EffectiveNow *time.Time `json:"effective_now,omitempty"`
-	// TestClockID is the owning customer's clock when pinned. The server
-	// sets it, so the amber test-clock badge shows on every pinned run,
-	// one-off invoices and later pages included.
-	TestClockID string `json:"test_clock_id,omitempty"`
 	// MaxRetryAttempts is how many retries the bound policy makes (the
 	// length of its retry_days). The list reads (ListRuns,
 	// ListRunsByInvoices) read it with the run, and it is 0 where it was not

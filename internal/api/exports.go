@@ -685,11 +685,9 @@ func (h *exportsHandler) exportUsageEvents(w http.ResponseWriter, r *http.Reques
 // Whether the row is in the file is a different, weaker claim. An unfiltered
 // export contains its own row: the snapshot is taken after the write, newest
 // first, so the row is the first data row. But any filter that does not match
-// the row excludes it, as it would exclude any other row. A clock-scoped
-// export (?test_clock_id=) never contains it, because the export row is a
-// wall-clock row with NULL sim columns. That is correct, not a gap, since the
-// row is in the log either way. But in general the file does not certify
-// itself.
+// the row excludes it, as it would exclude any other row. That is correct,
+// not a gap, since the row is in the log either way. But in general the file
+// does not certify itself.
 func (h *exportsHandler) exportAuditLog(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	if tenantID == "" {
@@ -704,18 +702,6 @@ func (h *exportsHandler) exportAuditLog(w http.ResponseWriter, r *http.Request) 
 		respond.FromError(w, r, err, "export")
 		return
 	}
-	// The sim axis (ADR-090 §5), the simulated time on test-clock rows, is
-	// part of the on-screen slice. An operator who looks at one simulation
-	// and clicks Export must get that simulation, not the whole log. An
-	// export that silently dropped the clock filter would hand an auditor a
-	// file that looks like one clock's history but holds every tenant
-	// action. That is the worst kind of wrong, because nothing in the file
-	// says so.
-	simFrom, simTo, err := timefilter.ParseRange(r, "sim_from", "sim_to")
-	if err != nil {
-		respond.FromError(w, r, err, "export")
-		return
-	}
 	q := r.URL.Query()
 	filter := audit.QueryFilter{
 		ResourceType: q.Get("resource_type"),
@@ -724,9 +710,6 @@ func (h *exportsHandler) exportAuditLog(w http.ResponseWriter, r *http.Request) 
 		ActorID:      q.Get("actor_id"),
 		DateFrom:     dateFrom,
 		DateTo:       dateTo,
-		TestClockID:  q.Get("test_clock_id"),
-		SimFrom:      simFrom,
-		SimTo:        simTo,
 	}
 
 	scope := exportScope(dateFrom, dateTo)
@@ -735,19 +718,10 @@ func (h *exportsHandler) exportAuditLog(w http.ResponseWriter, r *http.Request) 
 		"resource_id":   filter.ResourceID,
 		"action":        filter.Action,
 		"actor_id":      filter.ActorID,
-		// Recorded on the export's own audit row: "which slice was taken
-		// out?" is the question this row exists to answer.
-		"test_clock_id": filter.TestClockID,
 	} {
 		if v != "" {
 			scope[k] = v
 		}
-	}
-	if !simFrom.IsZero() {
-		scope["sim_from"] = simFrom.UTC().Format(time.RFC3339)
-	}
-	if !simTo.IsZero() {
-		scope["sim_to"] = simTo.UTC().Format(time.RFC3339)
 	}
 
 	filename := exportFilename("audit-log")
@@ -759,28 +733,16 @@ func (h *exportsHandler) exportAuditLog(w http.ResponseWriter, r *http.Request) 
 	cw := writeCSVHeaders(w, r, filename)
 	defer cw.Flush()
 
-	// sim_effective_at and test_clock_id: a simulation's rows all share one
-	// wall-clock created_at, because an advance settles everything at one
-	// moment. So in a simulated tenant's CSV, created_at cannot tell the
-	// reader when, in the simulation, anything happened. Only these two
-	// columns can. After teardown (ADR-086), they are the only surviving
-	// record that the clock existed at all. They are empty on wall-clock
-	// rows.
 	if err := cw.Write([]string{
 		"id", "created_at", "actor_type", "actor_id", "actor_name",
 		"action", "resource_type", "resource_id", "resource_label",
-		"ip_address", "request_id", "sim_effective_at", "test_clock_id",
-		"metadata_json",
+		"ip_address", "request_id", "metadata_json",
 	}); err != nil {
 		return
 	}
 
 	n := 0
 	streamErr := h.auditLog.Stream(r.Context(), tenantID, filter, func(e domain.AuditEntry) error {
-		simAt := ""
-		if e.SimEffectiveAt != nil {
-			simAt = e.SimEffectiveAt.UTC().Format(time.RFC3339)
-		}
 		metaJSON := ""
 		if len(e.Metadata) > 0 {
 			if b, err := json.Marshal(e.Metadata); err == nil {
@@ -813,7 +775,6 @@ func (h *exportsHandler) exportAuditLog(w http.ResponseWriter, r *http.Request) 
 			e.ActorType, e.ActorID, csvSafe(e.ActorName),
 			e.Action, e.ResourceType, e.ResourceID, csvSafe(e.ResourceLabel),
 			csvSafe(e.IPAddress), csvSafe(e.RequestID),
-			simAt, e.TestClockID,
 			csvSafe(metaJSON),
 		}); err != nil {
 			return err

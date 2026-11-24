@@ -8,9 +8,7 @@ import { wallClockNow, type EffectiveNow } from '@/lib/effectiveNow'
 // only stored facts: dates, amounts and the stored status.
 
 /** A record a page measures from "now": a customer, subscription, invoice or dunning run. */
-export interface ClockPinned {
-  test_clock_id?: string | null
-}
+export type MeasuredRecord = object
 
 /**
  * useNowFor is "now" for one record: pass the loaded record, or undefined
@@ -21,7 +19,7 @@ export interface ClockPinned {
  * takes useNowResolver instead, so it moves with real time while the page
  * stays open.
  */
-export function useNowFor(record: ClockPinned | undefined): EffectiveNow | undefined {
+export function useNowFor(record: MeasuredRecord | undefined): EffectiveNow | undefined {
   const loaded = !!record
   return useMemo(() => (loaded ? wallClockNow() : undefined), [loaded])
 }
@@ -32,6 +30,6 @@ export function useNowFor(record: ClockPinned | undefined): EffectiveNow | undef
  * and a detail page calls it for the values it only draws. The function
  * returns undefined for a record that has not loaded.
  */
-export function useNowResolver(): (record: ClockPinned | undefined) => EffectiveNow | undefined {
-  return useCallback((record: ClockPinned | undefined) => (record ? wallClockNow() : undefined), [])
+export function useNowResolver(): (record: MeasuredRecord | undefined) => EffectiveNow | undefined {
+  return useCallback((record: MeasuredRecord | undefined) => (record ? wallClockNow() : undefined), [])
 }

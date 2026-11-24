@@ -95,7 +95,7 @@ func (c *webhookCursor) next(what string, want ...string) map[string]outboxEvent
 // readTimeFields are the keys the API works out per read, which events
 // leave out (domain.*WebhookData).
 var readTimeFields = map[string][]string{
-	domain.WebhookResourceInvoice:      {"attention", "recovery_warning", "billing_period_display", "test_clock_id"},
+	domain.WebhookResourceInvoice:      {"attention", "recovery_warning", "billing_period_display"},
 	domain.WebhookResourceSubscription: {"current_billing_period_display"},
 }
 

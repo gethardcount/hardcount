@@ -55,8 +55,7 @@ export interface CustomerPriceOverride {
      */
   active: boolean;
   /**
-     * When the override starts, in the customer's time: wall time, or
-     * its test clock's time. A subscription already on the plan gets
+     * When the override starts. A subscription already on the plan gets
      * it from its next period; one that first joins the plan in a
      * period after this instant gets it from the join.
      */

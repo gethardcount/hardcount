@@ -76,16 +76,16 @@ func newCustTimeSvc(t *testing.T, server clock.Clock) (*Service, *instantStore, 
 	return svc, store, cust.ID
 }
 
-// A change to a customer runs on the time the API's door decided for it (here
-// an instant on a test clock) and reads no clock of its own: the row is
-// stamped at the decided instant and the server's clock is never read.
+// A change to a customer runs on the instant the API's door bound for it and
+// reads no clock of its own: the row is stamped at the bound instant and the
+// server's clock is never read.
 func TestCustomerEntryPoints_RunOnTheDecidedTime(t *testing.T) {
 	decidedAt := time.Date(2027, 3, 4, 10, 0, 0, 0, time.UTC)
 	for _, e := range custEntries() {
 		t.Run(e.name, func(t *testing.T) {
 			server := &custSteppingClock{at: decidedAt.Add(72 * time.Hour)}
 			svc, store, id := newCustTimeSvc(t, server)
-			ctx := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: decidedAt, TestClockID: "clk_d"})
+			ctx := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), decidedAt)
 			e.run(t, ctx, svc, id)
 			if len(store.at) != 1 || !store.at[0].Equal(decidedAt) || server.reads != 0 {
 				t.Errorf("the write ran at %v, server clock read %d times; want one write at %v, no reads", store.at, server.reads, decidedAt)

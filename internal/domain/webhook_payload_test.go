@@ -23,8 +23,8 @@ func at(d time.Duration) *time.Time {
 }
 
 // The fixed resources every golden is rendered from. Read-time fields are
-// set on purpose (attention, billing_period_display, test_clock_id, the
-// run's joined figures) so the goldens show they are left out.
+// set on purpose (attention, billing_period_display, the run's joined
+// figures) so the goldens show they are left out.
 func goldenInvoice() Invoice {
 	return Invoice{
 		ID:             "hc_inv_golden",
@@ -59,7 +59,6 @@ func goldenInvoice() Invoice {
 		BillingReason:         BillingReasonSubscriptionCycle,
 		Attention:             &Attention{Severity: "warning", Reason: "overdue", Message: "read-time only"},
 		RecoveryWarning:       &PaymentBlock{Code: "read_time_only"},
-		TestClockID:           "hc_tclk_read_time_only",
 		CreatedAt:             goldenAt,
 		UpdatedAt:             goldenAt.Add(time.Minute),
 	}
@@ -143,8 +142,6 @@ func goldenDunningRun() InvoiceDunningRun {
 		InvoiceNumber:    "read-time only",
 		InvoiceAmountDue: 999,
 		InvoiceCurrency:  "XXX",
-		EffectiveNow:     at(0),
-		TestClockID:      "hc_tclk_read_time_only",
 		MaxRetryAttempts: 4,
 	}
 }
@@ -304,7 +301,7 @@ func TestWebhookPayloadGolden_NoStrayGoldens(t *testing.T) {
 // fields the API works out per read describe the read, not the event.
 func TestWebhookData_LeavesOutReadTimeFields(t *testing.T) {
 	inv := InvoiceWebhookData(goldenInvoice(), nil)["invoice"].(map[string]any)
-	for _, k := range []string{"attention", "recovery_warning", "billing_period_display", "test_clock_id"} {
+	for _, k := range []string{"attention", "recovery_warning", "billing_period_display"} {
 		if _, ok := inv[k]; ok {
 			t.Errorf("invoice resource carries read-time field %q", k)
 		}
@@ -314,7 +311,7 @@ func TestWebhookData_LeavesOutReadTimeFields(t *testing.T) {
 		t.Error("subscription resource carries current_billing_period_display")
 	}
 	run := DunningRunWebhookData(goldenDunningRun(), nil)["dunning_run"].(map[string]any)
-	for _, k := range []string{"invoice_number", "invoice_amount_due_cents", "invoice_currency", "effective_now", "test_clock_id", "max_retry_attempts"} {
+	for _, k := range []string{"invoice_number", "invoice_amount_due_cents", "invoice_currency", "max_retry_attempts"} {
 		if _, ok := run[k]; ok {
 			t.Errorf("dunning run resource carries list-read field %q", k)
 		}

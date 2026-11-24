@@ -29,6 +29,7 @@ original text.
 
 - **Test clocks.** The `/v1/test-clocks` routes, the dashboard's Test clocks pages, and `test_clock_id` on customer create, which is now refused with `422` as an unknown field. To see a customer's invoice before its period ends, use the upcoming invoice (`POST /v1/invoices/create_preview`); to issue a test customer's invoice now, cancel its subscription ([first invoice](docs/first-invoice.md#steps), [#1910](https://github.com/gethardcount/hardcount/pull/1910)).
 - **`is_simulated` on invoices and credit notes.** The field is removed from invoices and credit notes in the API and in webhook payloads; it was always false outside test clocks.
+- **The other test-clock fields.** Removed from the API and webhook payloads: `test_clock_id` on customers, subscriptions, invoices, dunning runs, audit entries and subscription timeline rows; `effective_now` on dunning runs; `sim_effective_at` on audit entries and subscription timeline rows; `subject_deleted` on audit entries; `is_simulated` on invoice and subscription timeline rows; `recorded_at` on activity lines and invoice timeline rows; `test_clocks` in the audit log's filters. The audit log list and its CSV export no longer have the `test_clock_id`, `sim_from` and `sim_to` filters, and `audit-log.csv` drops its `sim_effective_at` and `test_clock_id` columns. They were set only for work on a test clock.
 
 ### Fixed
 

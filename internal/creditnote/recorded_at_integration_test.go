@@ -47,7 +47,7 @@ func TestCreditNote_RecordedAt_DualStamp(t *testing.T) {
 	}
 
 	frozen := time.Date(2027, 6, 1, 12, 0, 0, 0, time.UTC)
-	simCtx := clock.WithSim(base, clock.Sim{At: frozen, TestClockID: "hc_tclk_rec"})
+	simCtx := clock.WithEffectiveNow(base, frozen)
 
 	cn, err := cnStore.Create(simCtx, tenantID, domain.CreditNote{
 		InvoiceID: inv.ID, CustomerID: cust.ID, CreditNoteNumber: "CN-REC-1",

@@ -26,9 +26,8 @@ export interface InvoiceTimelineEvent {
   /** Stable key for the row. */
   id: string;
   /**
-     * When the event happened, to the second: on the invoice's
-     * calendar (the test clock's time for an invoice on a test clock),
-     * and at Stripe's own time for disputes and refunds made in Stripe.
+     * When the event happened, to the second, and at Stripe's own
+     * time for disputes and refunds made in Stripe.
      */
   timestamp: string;
   /**
@@ -61,9 +60,5 @@ export interface InvoiceTimelineEvent {
   payment_intent_id?: string;
   /** On dunning rows, the run's retry count at the event; on the paid row, the retries that ran before payment. Absent when 0. */
   attempt_count?: number;
-  /** True when `timestamp` is test-clock time. Absent when false. */
-  is_simulated?: boolean;
-  /** Real-world time of a row whose `timestamp` is test-clock time. Absent otherwise. */
-  recorded_at?: string;
   line: ActivityLine;
 }

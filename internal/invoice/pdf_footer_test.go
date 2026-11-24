@@ -176,12 +176,11 @@ func TestRenderPDF_ManyFooterLinesStayOnThePage(t *testing.T) {
 	}
 }
 
-// The footer says when the file was made, in machine time, even for an
-// invoice whose customer is on a test clock: the clock's time is the
-// invoice's dates, not the file's.
+// The footer says when the file was made, in machine time, even when the
+// work carries another instant: that instant dates the invoice, not the file.
 func TestRenderPDF_GeneratedOnIsMachineTime(t *testing.T) {
 	inv, items := longInvoice(2, domain.InvoiceFinalized)
-	ctx := clock.WithSim(context.Background(), clock.Sim{At: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC), TestClockID: "hc_tclk_1"})
+	ctx := clock.WithEffectiveNow(context.Background(), time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC))
 	customers := &fakePDFCustomers{cust: domain.Customer{DisplayName: "Acme Corp"}}
 	bt, ci, cns := BuildPDFContext(ctx, customers, &fakePDFSettings{}, nil, "t1", inv)
 	out, err := RenderPDF(ctx, inv, items, bt, cns, ci)
