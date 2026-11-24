@@ -9201,7 +9201,7 @@ components:
               description: How many days the credit stays usable after the payment; null when it never expires.
             validity:
               type: string
-              description: The sentence that says so, such as "It never expires." or "It is valid for 12 months after payment."
+              description: The sentence that says so, such as "It never expires." or "It is valid for 365 days after payment."
         livemode:
           type: boolean
           description: False for a test-mode invoice. The page shows a test-mode banner.

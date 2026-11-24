@@ -26,6 +26,6 @@ export type HostedInvoiceTopup = {
      * @nullable
      */
   credit_valid_days: number | null;
-  /** The sentence that says so, such as "It never expires." or "It is valid for 12 months after payment." */
+  /** The sentence that says so, such as "It never expires." or "It is valid for 365 days after payment." */
   validity: string;
 };

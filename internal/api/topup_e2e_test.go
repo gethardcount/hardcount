@@ -2,14 +2,19 @@ package api
 
 import (
 	"context"
+	"fmt"
 	"net/http/httptest"
+	"net/url"
 	"testing"
 	"time"
 
+	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/platform/walk"
+	"github.com/gethardcount/hardcount/internal/tenant"
+	"github.com/gethardcount/hardcount/internal/tenantstripe"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -17,9 +22,10 @@ import (
 // commit line, which stays a draft until it is paid.
 
 type topupEnv struct {
-	db  *postgres.DB
-	ts  *httptest.Server
-	key string
+	db       *postgres.DB
+	ts       *httptest.Server
+	tenantID string
+	key      string
 }
 
 func newTopupEnv(t *testing.T, name string) topupEnv {
@@ -28,7 +34,21 @@ func newTopupEnv(t *testing.T, name string) topupEnv {
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
 	t.Cleanup(ts.Close)
 	tenantID := testutil.CreateTestTenant(t, db, name)
-	return topupEnv{db: db, ts: ts, key: createAPIKeyWithMode(t, db, tenantID, false)}
+	return topupEnv{db: db, ts: ts, tenantID: tenantID, key: createAPIKeyWithMode(t, db, tenantID, false)}
+}
+
+func (e topupEnv) count(t *testing.T, q string, args ...any) int {
+	t.Helper()
+	tx, err := e.db.BeginTx(t.Context(), postgres.TxBypass, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer postgres.Rollback(tx)
+	var n int
+	if err := tx.QueryRowContext(t.Context(), q, args...).Scan(&n); err != nil {
+		t.Fatalf("count %q: %v", q, err)
+	}
+	return n
 }
 
 func (e topupEnv) call(t *testing.T, method, path string, body any) flowResp {
@@ -113,5 +133,104 @@ func TestTopup_UnpaidIsOutOfHomeOpenListOutstandingAndDunning(t *testing.T) {
 		if inv.ID == id {
 			t.Errorf("the top-up is listed for dunning or automatic collection")
 		}
+	}
+}
+
+// Finalize refuses a top-up, which its payment issues, and changes nothing.
+// Without the refusal in Service.Finalize the draft takes the engine's
+// finalize (a top-up is not an operator's draft), and the
+// invoices_invoice_number_check constraint refuses a finalized row with no
+// number: a 500, not this 409 and its sentence. Without that constraint too,
+// the top-up is finalized unnumbered and sends invoice.finalized, which the
+// checks after the answer catch.
+func TestTopup_FinalizeIsRefused(t *testing.T) {
+	e := newTopupEnv(t, "Topup Finalize Co")
+	_, id := e.create(t)
+	r := e.call(t, "POST", "/v1/invoices/"+id+"/finalize", nil)
+	const sentence = "A top-up is issued when it is paid: collect it, send it, or record a payment."
+	if r.status != 409 || flowStr(r.body, "error", "code") != "invalid_state" || flowStr(r.body, "error", "message") != sentence {
+		t.Fatalf("finalize a top-up: %d %s, want 409 invalid_state %q", r.status, r.raw, sentence)
+	}
+	inv := flowObj(e.call(t, "GET", "/v1/invoices/"+id, nil).want(t, 200, "get the top-up").body, "invoice")
+	if flowStr(inv, "status") != "draft" || flowStr(inv, "invoice_number") != "" {
+		t.Errorf("after the refusal: %s %q, want an unnumbered draft", flowStr(inv, "status"), flowStr(inv, "invoice_number"))
+	}
+	if n := e.count(t, `SELECT count(*) FROM customer_credit_ledger WHERE source_invoice_id = $1 AND grant_kind = 'commit'`, id); n != 0 {
+		t.Errorf("commit grants = %d, want 0", n)
+	}
+	if n := e.count(t, `SELECT count(*) FROM webhook_outbox WHERE event_type = $1 AND payload->'invoice'->>'id' = $2`, domain.EventInvoiceFinalized, id); n != 0 {
+		t.Errorf("invoice.finalized events = %d, want 0", n)
+	}
+}
+
+// The hosted page is where a customer buys the credit: an unpaid top-up's
+// page answers with the credit and its validity, and no number or due date,
+// and its Checkout is admitted. Once withdrawn it answers as any voided
+// invoice. It fails if the hosted view refuses a draft again
+// (hostedinvoice.Handler.resolveInvoice), or if the Checkout claim admits
+// only status = 'finalized' again (payment.CheckoutSessionStore.ClaimOpenAudited):
+// either answers something other than 200 below.
+func TestTopup_HostedPageAndCheckout(t *testing.T) {
+	// The hosted page takes payment only with these addresses set.
+	t.Setenv("HOSTED_INVOICE_BASE_URL", "https://billing.topup.test")
+	t.Setenv("CUSTOMER_PORTAL_URL", "https://app.topup.test")
+	e := newTopupEnv(t, "Topup Hosted Co")
+	if _, err := tenantstripe.NewStore(e.db).Upsert(callerCtx(e.tenantID, false), tenantstripe.UpsertInput{
+		TenantID: e.tenantID, Livemode: false, SecretKey: "sk_test_topup_hosted", PublishableKey: "pk_test_topup_hosted",
+	}); err != nil {
+		t.Fatalf("connect stripe: %v", err)
+	}
+	stripe := installStripeStub(t)
+	stripe.extra = func(call string, form url.Values) (int, string, bool) {
+		switch {
+		case call == "POST /v1/customers":
+			return 200, `{"id":"cus_topup_hosted","object":"customer"}`, true
+		case call == "POST /v1/checkout/sessions" && form.Get("mode") == "payment":
+			return 200, fmt.Sprintf(`{"id":"cs_topup","object":"checkout.session","mode":"payment","status":"open","url":"https://checkout.stripe.test/c/cs_topup","expires_at":%d}`,
+				time.Now().Add(time.Hour).Unix()), true
+		case call == "POST /v1/checkout/sessions/cs_topup/expire":
+			return 200, `{"id":"cs_topup","object":"checkout.session","status":"expired"}`, true
+		}
+		return 0, "", false
+	}
+	days := 365
+	if _, err := tenant.NewSettingsStore(e.db).Update(callerCtx(e.tenantID, false), e.tenantID, func(ts *domain.TenantSettings) error {
+		ts.TopupCreditValidDays = &days
+		return nil
+	}); err != nil {
+		t.Fatalf("set the credit validity: %v", err)
+	}
+	_, id := e.create(t)
+	token := flowStr(flowObj(e.call(t, "GET", "/v1/invoices/"+id, nil).want(t, 200, "get the top-up").body, "invoice"), "public_token")
+	page := func() map[string]any {
+		return flowDo(t, e.ts, "GET", "/v1/public/invoices/"+token, flowReq{}).want(t, 200, "hosted page").body
+	}
+	checkout := func() flowResp {
+		return flowDo(t, e.ts, "POST", "/v1/public/invoices/"+token+"/checkout", flowReq{})
+	}
+
+	view := page()
+	inv := flowObj(view, "invoice")
+	if _, due := inv["due_at"]; due || flowStr(inv, "invoice_number") != "" {
+		t.Errorf("unpaid top-up page shows number %q, due_at present %t: want neither", flowStr(inv, "invoice_number"), due)
+	}
+	if got := flowInt(view, "topup", "credit_cents"); got != 10000 {
+		t.Errorf("credit = %d, want 10000", got)
+	}
+	if got := flowStr(view, "topup", "validity"); got != "It is valid for 365 days after payment." {
+		t.Errorf("validity %q, want the days the grant is valid for", got)
+	}
+	checkout().want(t, 200, "start the top-up's Checkout")
+	if n := e.count(t, `SELECT count(*) FROM checkout_sessions WHERE invoice_id = $1 AND status = 'open'`, id); n != 1 {
+		t.Errorf("open Checkout claims = %d, want 1", n)
+	}
+
+	e.call(t, "POST", "/v1/invoices/"+id+"/void", nil).want(t, 200, "withdraw the top-up")
+	voided := page()
+	if flowStr(voided, "invoice", "status") != "voided" || voided["pay_enabled"] != false {
+		t.Errorf("withdrawn top-up page: status %q pay_enabled %v, want voided and not payable", flowStr(voided, "invoice", "status"), voided["pay_enabled"])
+	}
+	if r := checkout(); r.status != 409 || flowStr(r.body, "error", "code") != "not_payable" {
+		t.Errorf("Checkout on a withdrawn top-up: %d %s, want 409 not_payable", r.status, r.raw)
 	}
 }

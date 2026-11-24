@@ -676,14 +676,12 @@ func TopupCreditOf(items []InvoiceLineItem) (TopupCredit, bool) {
 }
 
 // CreditValidityLine says how long bought credit stays usable after its
-// payment. A whole number of 365-day years reads in months ("valid for 12
-// months"), as sellers state it.
+// payment, in days: the grant expires that many days after the payment, and a
+// count of months would be a day off across a 29 February.
 func CreditValidityLine(validDays *int) string {
 	switch {
 	case validDays == nil:
 		return "It never expires."
-	case *validDays%365 == 0:
-		return fmt.Sprintf("It is valid for %d months after payment.", *validDays/365*12)
 	case *validDays == 1:
 		return "It is valid for 1 day after payment."
 	default:
