@@ -25,10 +25,8 @@ func TestSettle_FreesTheChargeHoldOfTheAttemptItEnds(t *testing.T) {
 	tenantID := testutil.CreateTestTenant(t, db, "Settle Frees Hold")
 	store := invoice.NewPostgresStore(db)
 
-	// setHold moves the hold's end, keeping its token equal to it as a claim
-	// writes it. tokened=false leaves the token behind: a hold an earlier
-	// version took.
-	setHold := func(t *testing.T, id, interval string, tokened bool) {
+	// setHold moves the hold's end.
+	setHold := func(t *testing.T, id, interval string) {
 		t.Helper()
 		tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
 		if err != nil {
@@ -36,9 +34,8 @@ func TestSettle_FreesTheChargeHoldOfTheAttemptItEnds(t *testing.T) {
 		}
 		defer postgres.Rollback(tx)
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE invoices SET auto_charge_claimed_until = now() + $2::interval,
-			       charge_hold_token = CASE WHEN $4 THEN now() + $2::interval ELSE NULL END
-			 WHERE id = $1 AND tenant_id = $3`, id, interval, tenantID, tokened); err != nil {
+			UPDATE invoices SET auto_charge_claimed_until = now() + $2::interval
+			 WHERE id = $1 AND tenant_id = $3`, id, interval, tenantID); err != nil {
 			t.Fatalf("set hold: %v", err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -77,7 +74,7 @@ func TestSettle_FreesTheChargeHoldOfTheAttemptItEnds(t *testing.T) {
 				t.Fatalf("commit: %v", err)
 			}
 		}
-		setHold(t, inv.ID, holdEnds, true)
+		setHold(t, inv.ID, holdEnds)
 		return inv
 	}
 	fail := func(t *testing.T, id, pi string) domain.PaymentFailureResult {
@@ -179,20 +176,6 @@ func TestSettle_FreesTheChargeHoldOfTheAttemptItEnds(t *testing.T) {
 		}
 		if !held(t, inv.ID) {
 			t.Error("a late failure for a PaymentIntent the invoice was no longer in flight on freed the hold of a charger that has claimed and not yet stamped")
-		}
-	})
-
-	// A hold without its token is an earlier version's. The stale-hold sweep
-	// keeps it for a person on a finalized invoice, and the settle must not
-	// undo that.
-	t.Run("an earlier version's hold is left for a person", func(t *testing.T) {
-		inv := inFlight(t, "INV-SFH-untokened", domain.PaymentProcessing, "5 minutes")
-		setHold(t, inv.ID, "5 minutes", false)
-		if res := fail(t, inv.ID, "pi_slow"); !res.Recorded {
-			t.Fatal("setup: the failure must be recorded on the invoice")
-		}
-		if !held(t, inv.ID) {
-			t.Error("the settle freed a hold that carries no token")
 		}
 	})
 

@@ -115,7 +115,7 @@ func TestChargeKey_MovesOnEveryRecordedOutcome(t *testing.T) {
 		inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-KEY-ADV-1")
 		before := chargeKey(t, store, ctx, tenantID, inv.ID)
 
-		stampOutcome(t, store, ctx, tenantID, inv.ID, domain.PaymentFailed, "pi_declined_1", "card_declined")
+		stampOutcome(t, db, store, ctx, tenantID, inv.ID, domain.PaymentFailed, "pi_declined_1", "card_declined")
 
 		if after := chargeKey(t, store, ctx, tenantID, inv.ID); after == before {
 			t.Fatalf("a recorded decline left the key at %q — the retry would be handed "+

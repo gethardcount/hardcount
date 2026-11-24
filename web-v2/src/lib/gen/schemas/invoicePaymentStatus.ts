@@ -31,9 +31,7 @@
  *   that payment from Stripe and records what happened: paid,
  *   declined, or nothing charged. After "nothing charged" the invoice
  *   goes back to `pending` (`failed` after a dunning retry) and is
- *   charged again as usual. An `unknown` invoice with no
- *   `stripe_payment_intent_id` was left by an earlier version (a parked
- *   invoice); it is not resolved or charged again automatically.
+ *   charged again as usual.
  */
 export type InvoicePaymentStatus = typeof InvoicePaymentStatus[keyof typeof InvoicePaymentStatus];
 

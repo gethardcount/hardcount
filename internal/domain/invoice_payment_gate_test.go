@@ -13,14 +13,8 @@ import (
 // TestPaymentBlocksAction_Matrix makes the whole rule visible in one place, so a
 // change to any cell is a deliberate edit rather than a side effect discovered
 // later on a customer's invoice.
-//
-// The distinction the matrix exists to protect: PARKED and IN-FLIGHT look alike
-// (both are IsInFlight) but call for opposite advice. One resolves itself and
-// waiting is correct; the other never will, and telling someone to wait is the
-// bug that took a four-agent sweep to find.
 func TestPaymentBlocksAction_Matrix(t *testing.T) {
 	settled := Invoice{PaymentStatus: PaymentPending}
-	parked := Invoice{PaymentStatus: PaymentUnknown, StripePaymentIntentID: ""}
 	resolving := Invoice{PaymentStatus: PaymentProcessing, StripePaymentIntentID: "pi_1"}
 	unknownWithPI := Invoice{PaymentStatus: PaymentUnknown, StripePaymentIntentID: "pi_1"}
 
@@ -45,47 +39,6 @@ func TestPaymentBlocksAction_Matrix(t *testing.T) {
 			got := PaymentBlocksAction(topup, a)
 			if !got.Blocked || !strings.Contains(got.Message, "checking this top-up's charge with Stripe") || strings.Contains(got.Message, "uncollectible") {
 				t.Errorf("%s on an unpaid top-up in flight: %+v; want blocked, saying Stripe is being asked, with no write-off", a, got)
-			}
-		}
-	})
-
-	t.Run("parked allows ONLY mark-uncollectible", func(t *testing.T) {
-		for _, a := range every {
-			got := PaymentBlocksAction(parked, a)
-			if a == ActionMarkUncollectible {
-				if got.Blocked {
-					t.Fatalf("mark-uncollectible is the ONLY exit from a parked invoice; blocking it leaves the invoice with no terminal state at all: %s", got.Message)
-				}
-				continue
-			}
-			if !got.Blocked {
-				t.Errorf("%s allowed on a parked invoice — its charge may have succeeded", a)
-			}
-			if got.Code != "payment_unidentifiable" {
-				t.Errorf("%s code = %q, want payment_unidentifiable", a, got.Code)
-			}
-		}
-	})
-
-	t.Run("parked refusals always name the way out", func(t *testing.T) {
-		// A refusal that names no alternative is how an operator ends up stuck
-		// with an invoice and no next step — which is exactly what shipped.
-		for _, a := range every {
-			if a == ActionMarkUncollectible {
-				continue
-			}
-			msg := PaymentBlocksAction(parked, a).Message
-			if !strings.Contains(msg, "uncollectible") {
-				t.Errorf("%s refusal names no way out: %q", a, msg)
-			}
-			if strings.Contains(msg, "wait for") || strings.Contains(msg, "cancel it") {
-				t.Errorf("%s refusal tells the operator to wait or cancel — neither is possible for a parked invoice: %q", a, msg)
-			}
-			// Only an earlier version parked an invoice, and this version
-			// cannot look its charge up (ADR-137): the refusal sends the
-			// operator to Stripe and promises no automatic re-charge.
-			if !strings.Contains(msg, "check the customer's payments in Stripe") || strings.Contains(msg, "24 hours") || strings.Contains(msg, "charged again") {
-				t.Errorf("%s refusal must send the operator to Stripe and promise no re-charge: %q", a, msg)
 			}
 		}
 	})
@@ -155,9 +108,8 @@ func TestNoHandWrittenPaymentInFlightRefusals(t *testing.T) {
 		// had been hand-written — was structurally invisible to it. It kept
 		// hand-writing `payment_status !== 'succeeded' && !== 'processing'`,
 		// omitting 'unknown', which rendered a green "Collect Payment" button on
-		// a parked invoice directly beneath a Critical banner saying no further
-		// charge would be attempted. A green scanner reported success the whole
-		// time. Widen before trusting.
+		// an invoice whose charge was unresolved. A green scanner reported
+		// success the whole time. Widen before trusting.
 		isGo := strings.HasSuffix(path, ".go") && !strings.HasSuffix(path, "_test.go")
 		isWeb := strings.HasSuffix(path, ".tsx") || strings.HasSuffix(path, ".ts")
 		if !isGo && !isWeb {
@@ -230,15 +182,13 @@ func itoa(n int) string {
 
 // TestEmailActionsRefuseAnUnresolvedPayment pins the customer-facing half. Both
 // invoice emails carry a pay call-to-action, so sending either while a payment
-// is unresolved asks a customer to pay something we may already have taken —
-// and for a parked invoice the hosted page will not even offer a Pay button
-// when they arrive, so the email leads them to a dead end.
+// is unresolved asks a customer to pay something we may already have taken.
 func TestEmailActionsRefuseAnUnresolvedPayment(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		inv  Invoice
 	}{
-		{"parked", Invoice{PaymentStatus: PaymentUnknown}},
+		{"unknown", Invoice{PaymentStatus: PaymentUnknown, StripePaymentIntentID: "pi_1"}},
 		{"resolving", Invoice{PaymentStatus: PaymentProcessing, StripePaymentIntentID: "pi_1"}},
 	} {
 		for _, action := range []InvoiceAction{ActionEmailInvoice, ActionResendSetupLink} {
@@ -260,12 +210,11 @@ func TestEmailActionsRefuseAnUnresolvedPayment(t *testing.T) {
 
 // TestPaymentBlocksActionHeld_Matrix (#975, ADR-127): a live hold refuses all
 // three actions; a stale one (a charge whose result was lost) refuses void
-// and offline payment but allows write-off, which moves no money. A parked
-// invoice consults the hold only while it is live (ADR-127 amendment
-// 2026-10-29): a request for it may still reach Stripe, so write-off waits;
-// with a stale hold, its normal waiting state, write-off is the exit
-// (ADR-107). 'processing' and 'unknown' with a PaymentIntent keep their own
-// refusal.
+// and offline payment but allows write-off, which moves no money. An
+// 'unknown' invoice consults the hold only while it is live (ADR-127
+// amendment 2026-10-29): a request for it may still reach Stripe, so
+// write-off waits; once the hold has ended, write-off is the exit.
+// 'processing' keeps its own refusal.
 func TestPaymentBlocksActionHeld_Matrix(t *testing.T) {
 	actions := []InvoiceAction{ActionVoid, ActionMarkUncollectible, ActionRecordOfflinePayment}
 	cases := []struct {
@@ -286,12 +235,11 @@ func TestPaymentBlocksActionHeld_Matrix(t *testing.T) {
 		{"pending free", PaymentPending, "", ChargeHoldNone, "", ""},
 		{"failed free", PaymentFailed, "pi_1", ChargeHoldNone, "", ""},
 		{"processing free", PaymentProcessing, "pi_1", ChargeHoldNone, "", "payment_in_flight"},
-		{"parked live, write-off", PaymentUnknown, "", ChargeHoldLive, ActionMarkUncollectible, "payment_in_flight"},
-		{"parked stale, write-off", PaymentUnknown, "", ChargeHoldStale, ActionMarkUncollectible, ""},
-		{"parked no hold, write-off", PaymentUnknown, "", ChargeHoldNone, ActionMarkUncollectible, ""},
-		{"unknown naming its payment, live", PaymentUnknown, "pi_1", ChargeHoldLive, ActionMarkUncollectible, "payment_in_flight"},
-		{"parked live, void", PaymentUnknown, "", ChargeHoldLive, ActionVoid, "payment_unidentifiable"},
-		{"parked live, offline", PaymentUnknown, "", ChargeHoldLive, ActionRecordOfflinePayment, "payment_unidentifiable"},
+		{"unknown live, write-off", PaymentUnknown, "pi_1", ChargeHoldLive, ActionMarkUncollectible, "payment_in_flight"},
+		{"unknown stale, write-off", PaymentUnknown, "pi_1", ChargeHoldStale, ActionMarkUncollectible, ""},
+		{"unknown no hold, write-off", PaymentUnknown, "pi_1", ChargeHoldNone, ActionMarkUncollectible, ""},
+		{"unknown stale, void", PaymentUnknown, "pi_1", ChargeHoldStale, ActionVoid, "payment_in_flight"},
+		{"unknown stale, offline", PaymentUnknown, "pi_1", ChargeHoldStale, ActionRecordOfflinePayment, "payment_in_flight"},
 	}
 	for _, c := range cases {
 		for _, a := range actions {

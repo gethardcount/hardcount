@@ -90,11 +90,10 @@ func stamp(status domain.InvoicePaymentStatus, pi, lastErr string) func(*testing
 	}
 }
 
-// park leaves the invoice as a parked charge an earlier version wrote: unknown
-// with no PaymentIntent. No writer of this version produces one (a charge puts
-// its PaymentIntent on the invoice before it confirms, and the store refuses
-// the shape; ADR-137), so the row is written directly.
-func park(lastErr string) func(*testing.T, context.Context, *exhaustFixture) {
+// unclear leaves the invoice unknown on pi, as a charge's stamp before its
+// confirm does (StampPendingConfirm, which needs a live charge hold), so the
+// row is written directly.
+func unclear(pi, lastErr string) func(*testing.T, context.Context, *exhaustFixture) {
 	return func(t *testing.T, ctx context.Context, f *exhaustFixture) {
 		t.Helper()
 		tx, err := f.db.BeginTx(ctx, postgres.TxBypass, "")
@@ -103,10 +102,10 @@ func park(lastErr string) func(*testing.T, context.Context, *exhaustFixture) {
 		}
 		defer postgres.Rollback(tx)
 		if _, err := tx.ExecContext(ctx, `
-			UPDATE invoices SET payment_status = 'unknown', stripe_payment_intent_id = NULL,
-			       last_payment_error = $2, charge_attempt_seq = charge_attempt_seq + 1
-			 WHERE id = $1`, f.invoiceID, lastErr); err != nil {
-			t.Fatalf("park: %v", err)
+			UPDATE invoices SET payment_status = 'unknown', stripe_payment_intent_id = $2,
+			       last_payment_error = $3, charge_attempt_seq = charge_attempt_seq + 1
+			 WHERE id = $1`, f.invoiceID, pi, lastErr); err != nil {
+			t.Fatalf("stamp unknown: %v", err)
 		}
 		if err := tx.Commit(); err != nil {
 			t.Fatalf("commit: %v", err)
@@ -116,8 +115,7 @@ func park(lastErr string) func(*testing.T, context.Context, *exhaustFixture) {
 
 var paymentShapes = []paymentShape{
 	{name: "processing", inFlight: true, apply: stamp(domain.PaymentProcessing, "pi_racing", "")},
-	{name: "unknown with a PaymentIntent", inFlight: true, apply: stamp(domain.PaymentUnknown, "pi_racing", "stripe: 500")},
-	{name: "parked", inFlight: true, apply: park("stripe: request timed out")},
+	{name: "unknown", inFlight: true, apply: unclear("pi_racing", "stripe: 500")},
 	// The control: the payment definitely failed, so the final action fires.
 	{name: "failed (control)", inFlight: false, apply: func(*testing.T, context.Context, *exhaustFixture) {}},
 }
@@ -383,8 +381,8 @@ func (r *finalRetry) RetryPayment(ctx context.Context, _, _, _ string) error {
 
 // TestExhaust_FinalRetry_PaymentInFlight_HoldsTheFinalAction is the inline
 // way in: the final retry is declined, and by the time dunning reaches the
-// final action the invoice's payment is processing, unknown or parked. Neither
-// the subscription action nor the write-off fires; the run stays active and is
+// final action the invoice's payment is processing or unknown. Neither the
+// subscription action nor the write-off fires; the run stays active and is
 // re-checked. The control, a payment that definitely failed, still gets both.
 func TestExhaust_FinalRetry_PaymentInFlight_HoldsTheFinalAction(t *testing.T) {
 	db := testutil.SetupTestDB(t)
@@ -473,7 +471,7 @@ func TestExhaust_OnEntry_PaymentInFlight_HoldsTheFinalAction(t *testing.T) {
 // TestExhaust_HeldRun_ReachesAnEnd follows a held run to each way out, so the
 // hold can never strand it: the payment fails (the final actions fire), the
 // payment succeeds (the run resolves as recovered, the subscription untouched),
-// or a parked invoice is written off by an operator (the run closes as not
+// or an unknown invoice is written off by an operator (the run closes as not
 // collectible, without the subscription action — the runbook line).
 func TestExhaust_HeldRun_ReachesAnEnd(t *testing.T) {
 	db := testutil.SetupTestDB(t)
@@ -576,10 +574,10 @@ func TestExhaust_HeldRun_ReachesAnEnd(t *testing.T) {
 		}
 	})
 
-	t.Run("parked, written off by an operator, the run closes without the subscription action", func(t *testing.T) {
-		f, _ := hold(t, "Held then written off", park("stripe: request timed out"))
+	t.Run("unknown, written off by an operator, the run closes without the subscription action", func(t *testing.T) {
+		f, _ := hold(t, "Held then written off", unclear("pi_racing", "stripe: request timed out"))
 		if _, err := f.invSvc.MarkUncollectible(f.ctx, f.tenantID, f.invoiceID); err != nil {
-			t.Fatalf("operator write-off of a parked invoice: %v", err)
+			t.Fatalf("operator write-off of an unknown invoice: %v", err)
 		}
 		f.tick(t)
 

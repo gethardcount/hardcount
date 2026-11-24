@@ -67,7 +67,7 @@ func TestTerminalTransitions_ClearAutoChargePending(t *testing.T) {
 
 	t.Run("a failed charge outcome leaves it; the later settle clears it", func(t *testing.T) {
 		inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-ACP-UPDPAY")
-		stampOutcome(t, store, ctx, tenantID, inv.ID, domain.PaymentFailed, "pi_acp_f", "card_declined")
+		stampOutcome(t, db, store, ctx, tenantID, inv.ID, domain.PaymentFailed, "pi_acp_f", "card_declined")
 		if !acp(inv.ID) {
 			t.Error("a FAILED payment must keep the flag — the invoice is still on the charge track (dunning/collect)")
 		}

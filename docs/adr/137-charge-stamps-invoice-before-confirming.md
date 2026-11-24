@@ -267,3 +267,20 @@ is not sent.
 - [Stripe: PaymentIntent lifecycle](https://docs.stripe.com/payments/paymentintents/lifecycle)
 - Provider research, 2026-11-10: Razorpay, Cashfree, Juspay, PayU, PayPal,
   Braintree, Adyen, Checkout.com, Mollie, GoCardless, Square.
+
+## Amendment 2026-11-24: the transition code is removed
+
+As planned above, the release after the one that shipped this removes the
+transition code: the hold token (migration 00245 drops
+`invoices.charge_hold_token`), the stale-hold sweep's "earlier version"
+branch and its `earlier` result, and the parked surface (the gate's
+`payment_unidentifiable` refusal, the dashboard banner and
+`hardcount_parked_invoices`). The store no longer accepts `unknown` from
+`StampChargeOutcome`: only `StampPendingConfirm` writes it.
+
+A stale hold is now cleared the same way whichever claim took it. On an
+invoice open for payment (finalized, or an unpaid top-up) whose payment is
+still pending or failed, the hold is cleared and the counter moved. On any
+other invoice, a written-off or voided one among them, the hold is cleared
+and the counter stays. A failure settle frees the hold of the attempt it
+ends without checking a token.

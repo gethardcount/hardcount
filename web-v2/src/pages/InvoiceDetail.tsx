@@ -664,14 +664,16 @@ export default function InvoiceDetailPage() {
   const notice = pickInvoiceNotice(invoice)
   // The two recovery items in the actions menu. Record offline payment also
   // serves a write-off (ADR-110: money that already arrived is recorded).
-  // Mark uncollectible is the one action a parked charge allows (ADR-107).
+  // Mark uncollectible is also shown while a charge is unclear (payment_status
+  // unknown: Stripe has not confirmed the charge yet), the one action allowed
+  // then.
   const showRecordOffline = invoiceCanCollect(invoice) || invoice.status === 'uncollectible'
   const showMarkUncollectible = invoiceAwaitingPayment(invoice)
   const showRetryTax = invoice.status === 'draft' && !!invoice.tax_calculation_id && !invoice.tax_transaction_id
   // Hidden on a draft (not issued yet) and a voided invoice (cancelled), and
   // while the payment is unresolved: the server refuses all three, because
-  // the email asks the customer to pay (and for a parked invoice the hosted
-  // page will not even show a Pay button). Offering it is discovery-by-failure.
+  // the email asks the customer to pay (and while the payment is unresolved
+  // the hosted page shows no Pay button). Offering it is discovery-by-failure.
   // An unpaid top-up is the one draft that is sent: its email is its pay link.
   const sendable = invoice.status !== 'draft' || openForPayment(invoice)
   const showEmailInvoice = sendable && invoice.status !== 'voided' && invoicePaymentInFlight(invoice) === null
@@ -837,13 +839,12 @@ export default function InvoiceDetailPage() {
                   Record offline payment
                 </DropdownMenuItem>
               )}
-              {/* Mark uncollectible is the DELIBERATE exception (ADR-107). It is
-                  the only action permitted on a parked invoice (Stripe's answer
-                  was unclear and named no payment) while Hardcount waits up to a day
-                  for Stripe: the action for a customer who paid another way, and
-                  the exit when Stripe cannot be asked. A payment that is
-                  genuinely still resolving is a different matter and is still
-                  excluded. */}
+              {/* Mark uncollectible is also offered while a charge is unclear
+                  (payment_status unknown: Stripe has not confirmed the charge
+                  yet). It is the one action the server allows then, once the
+                  charge's hold has ended: for a customer who paid another way,
+                  and the exit when Stripe cannot be asked. A payment that is
+                  processing is excluded. */}
               {showMarkUncollectible && (
                 <DropdownMenuItem onClick={() => setShowMarkUncollectibleConfirm(true)} disabled={acting} className="text-amber-700 dark:text-amber-400">
                   <AlertOctagon size={14} className="mr-2" />
@@ -910,8 +911,8 @@ export default function InvoiceDetailPage() {
 
               {/* Refused while the payment is unresolved: voiding an invoice
                   whose charge may have succeeded would annul something that was
-                  in fact paid. Mark uncollectible stays available above — it is
-                  the one action allowed on a parked invoice. */}
+                  in fact paid. Mark uncollectible stays available above: it is
+                  the one action allowed while a charge is unclear (unknown). */}
               {invoice.status !== 'voided' && invoice.status !== 'paid' &&
                 invoicePaymentInFlight(invoice) === null && (
                 <>
@@ -1089,8 +1090,6 @@ export default function InvoiceDetailPage() {
           // straight from the notice: void is irreversible, and the dialog is
           // where the consequences are spelled out.
           onVoidInvoice={() => setShowVoidConfirm(true)}
-          // Same for the parked invoice's write-off.
-          onMarkUncollectible={() => setShowMarkUncollectibleConfirm(true)}
           // Record as credit note / Attach / Dismiss for each refund made in
           // Stripe that Hardcount flagged. Drawn from the refunds themselves:
           // the server sends this notice with no actions of its own.
@@ -1958,12 +1957,10 @@ export default function InvoiceDetailPage() {
 }
 
 // OperatorContextCard is the collapsed "Payment details" section below the
-// invoice: tax retries, the Stripe payment id and the
-// recovery schedule. The notice above the invoice says what is wrong and
-// what to do; this section holds the supporting facts and never repeats the
-// notice (the old "Diagnostic detail" box sat above the invoice and restated
-// the parked-invoice text, "Reconciler will query Stripe…", and a second copy
-// of the Stripe decline, which the notice's Provider response already has).
+// invoice: tax retries, the Stripe payment id and the recovery schedule. The
+// notice above the invoice says what is wrong and what to do; this section
+// holds the supporting facts and never repeats the notice, nor the Stripe
+// decline its Provider response already shows.
 function OperatorContextCard({
   invoice,
   dunningRun,

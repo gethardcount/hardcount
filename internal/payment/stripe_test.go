@@ -166,6 +166,10 @@ func (m *mockInvoiceUpdater) StampChargeOutcome(ctx context.Context, tenantID, i
 		// Mirror the store: a failure naming a PaymentIntent is a report, not a stamp.
 		return domain.Invoice{}, false, fmt.Errorf("stamp charge outcome: a failure naming a PaymentIntent goes through MarkPaymentFailedReportingTransition")
 	}
+	if ps == domain.PaymentUnknown {
+		// Mirror the store: only StampPendingConfirm writes unknown.
+		return domain.Invoice{}, false, fmt.Errorf("stamp charge outcome: %q is not a charge outcome", ps)
+	}
 	inv, ok := m.invoices[id]
 	if !ok {
 		return domain.Invoice{}, false, errs.ErrNotFound

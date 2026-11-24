@@ -51,7 +51,7 @@ func TestStampBelowMinimum(t *testing.T) {
 
 	t.Run("an earlier decline's failed state turns pending", func(t *testing.T) {
 		inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-MIN-B")
-		stampOutcome(t, store, ctx, tenantID, inv.ID, domain.PaymentFailed, "pi_declined_b", "Your card was declined.")
+		stampOutcome(t, db, store, ctx, tenantID, inv.ID, domain.PaymentFailed, "pi_declined_b", "Your card was declined.")
 		cur, _ := store.Get(ctx, tenantID, inv.ID)
 		got, applied, err := store.StampBelowMinimum(ctx, tenantID, inv.ID, cur.ChargeAttemptSeq, msg)
 		if err != nil || !applied || got.PaymentStatus != domain.PaymentPending || got.StripePaymentIntentID != "" {
@@ -61,7 +61,7 @@ func TestStampBelowMinimum(t *testing.T) {
 
 	t.Run("an outcome recorded during the call wins", func(t *testing.T) {
 		inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-MIN-C")
-		stampOutcome(t, store, ctx, tenantID, inv.ID, domain.PaymentProcessing, "pi_other_c", "")
+		stampOutcome(t, db, store, ctx, tenantID, inv.ID, domain.PaymentProcessing, "pi_other_c", "")
 		got, applied, err := store.StampBelowMinimum(ctx, tenantID, inv.ID, inv.ChargeAttemptSeq, msg)
 		if err != nil || applied || got.PaymentStatus != domain.PaymentProcessing || got.BelowMinimumAt != nil {
 			t.Errorf("stamp after another outcome: applied=%v status=%s below_minimum_at=%v err=%v, want refused, processing kept", applied, got.PaymentStatus, got.BelowMinimumAt, err)
@@ -88,7 +88,7 @@ func TestStampBelowMinimum(t *testing.T) {
 				if _, applied, err := store.StampBelowMinimum(ctx, tenantID, inv.ID, inv.ChargeAttemptSeq, msg); err != nil || !applied {
 					t.Fatalf("stamp: applied=%v err=%v", applied, err)
 				}
-				stampOutcome(t, store, ctx, tenantID, inv.ID, tc.ps, tc.pi, "")
+				stampOutcome(t, db, store, ctx, tenantID, inv.ID, tc.ps, tc.pi, "")
 				after, err := store.Get(ctx, tenantID, inv.ID)
 				if err != nil {
 					t.Fatal(err)

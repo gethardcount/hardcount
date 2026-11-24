@@ -25,11 +25,9 @@ func (f *flakyUpdater) StampChargeOutcome(ctx context.Context, tenantID, id stri
 	return f.mockInvoiceUpdater.StampChargeOutcome(ctx, tenantID, id, attemptSeq, ps, piID, errMsg)
 }
 
-// TestPersistChargeOutcomeWithRetry locks the fix for the swallowed
-// PaymentUnknown enrollment write (`_, _ = UpdatePayment`). That write is the
-// SOLE thing enrolling a possibly-succeeded PI into the reconciler's
-// unknown-payment sweep, so a transient failure must be retried, and a
-// permanent failure must surface (so the caller logs loud) rather than be
+// TestPersistChargeOutcomeWithRetry: a definite failure with no PaymentIntent
+// is saved with a bounded retry, so a transient failure is retried, and a
+// permanent failure surfaces (so the caller logs loud) rather than being
 // silently dropped.
 func TestPersistChargeOutcomeWithRetry(t *testing.T) {
 	inv := domain.Invoice{ID: "inv_1", TenantID: "t1"}
@@ -39,18 +37,15 @@ func TestPersistChargeOutcomeWithRetry(t *testing.T) {
 		base.invoices["inv_1"] = inv
 		f := &flakyUpdater{mockInvoiceUpdater: base, failFirst: 2}
 
-		_, applied, err := persistChargeOutcomeWithRetry(context.Background(), f, "t1", inv, domain.PaymentUnknown, "pi_1", "timeout")
+		_, applied, err := persistChargeOutcomeWithRetry(context.Background(), f, "t1", inv, domain.PaymentFailed, "", "stripe not configured")
 		if err != nil || !applied {
 			t.Fatalf("expected recovery after retries, got applied=%v err=%v", applied, err)
 		}
 		if f.calls != 3 {
 			t.Fatalf("calls = %d, want 3 (2 fail + 1 success)", f.calls)
 		}
-		if base.invoices["inv_1"].PaymentStatus != domain.PaymentUnknown {
+		if base.invoices["inv_1"].PaymentStatus != domain.PaymentFailed {
 			t.Fatalf("payment_status not persisted on recovery: %q", base.invoices["inv_1"].PaymentStatus)
-		}
-		if base.invoices["inv_1"].StripePaymentIntentID != "pi_1" {
-			t.Fatalf("PaymentIntent id not persisted on recovery")
 		}
 	})
 
@@ -59,7 +54,7 @@ func TestPersistChargeOutcomeWithRetry(t *testing.T) {
 		base.invoices["inv_1"] = inv
 		f := &flakyUpdater{mockInvoiceUpdater: base, failFirst: 99}
 
-		_, _, err := persistChargeOutcomeWithRetry(context.Background(), f, "t1", inv, domain.PaymentUnknown, "pi_1", "timeout")
+		_, _, err := persistChargeOutcomeWithRetry(context.Background(), f, "t1", inv, domain.PaymentFailed, "", "stripe not configured")
 		if err == nil {
 			t.Fatal("expected an error after exhausting retries so the caller fails loud, got nil")
 		}
@@ -77,7 +72,7 @@ func TestPersistChargeOutcomeWithRetry(t *testing.T) {
 		base.invoices["inv_1"] = moved
 		f := &flakyUpdater{mockInvoiceUpdater: base}
 
-		got, applied, err := persistChargeOutcomeWithRetry(context.Background(), f, "t1", inv, domain.PaymentUnknown, "", "timeout")
+		got, applied, err := persistChargeOutcomeWithRetry(context.Background(), f, "t1", inv, domain.PaymentFailed, "", "stripe not configured")
 		if err != nil || applied {
 			t.Fatalf("applied=%v err=%v, want a refused stamp with no error", applied, err)
 		}
@@ -103,13 +98,9 @@ func (f *ctxCheckingUpdater) StampChargeOutcome(ctx context.Context, tenantID, i
 	return f.mockInvoiceUpdater.StampChargeOutcome(ctx, tenantID, id, attemptSeq, ps, piID, errMsg)
 }
 
-// TestPersistChargeOutcome_CallerCancelledLeavesInvoiceReplayable: when the
-// caller's own deadline or cancellation is what made the outcome Unknown, the
-// stamp must NOT land. The invoice stays claimable at the same
-// charge_attempt_seq, so the next claim rebuilds the same idempotency key and
-// Stripe replays the request instead of charging again. Landing it (a
-// detached ctx) parks the invoice for good on a charge that may never have
-// been sent.
+// TestPersistChargeOutcome_CallerCancelledLeavesInvoiceReplayable: the save
+// writes on the ctx it is handed, so on a cancelled caller ctx the stamp does
+// not land and the invoice stays at the same charge_attempt_seq.
 func TestPersistChargeOutcome_CallerCancelledLeavesInvoiceReplayable(t *testing.T) {
 	base := newMockInvoiceUpdater()
 	inv := domain.Invoice{ID: "inv_1", TenantID: "t1", PaymentStatus: domain.PaymentPending}
@@ -120,7 +111,7 @@ func TestPersistChargeOutcome_CallerCancelledLeavesInvoiceReplayable(t *testing.
 	defer cancel()
 	<-ctx.Done()
 
-	if _, _, err := persistChargeOutcomeWithRetry(ctx, f, "t1", inv, domain.PaymentUnknown, "", "context deadline exceeded"); err == nil {
+	if _, _, err := persistChargeOutcomeWithRetry(ctx, f, "t1", inv, domain.PaymentFailed, "", "stripe not configured"); err == nil {
 		t.Fatal("stamp landed on a cancelled caller ctx; want it dropped so the invoice stays replayable")
 	}
 	if got := base.invoices["inv_1"]; got.PaymentStatus != domain.PaymentPending || got.ChargeAttemptSeq != 0 {
@@ -146,18 +137,18 @@ func (f *lostCommitReplyUpdater) StampChargeOutcome(ctx context.Context, tenantI
 
 // The retry after a lost commit reply is refused by the first attempt's own
 // seq bump. That is this attempt's write, not another payment's: it must
-// count as applied, or a real park goes unannounced.
+// count as applied.
 func TestPersistChargeOutcome_LostCommitReplyCountsAsApplied(t *testing.T) {
 	base := newMockInvoiceUpdater()
 	inv := domain.Invoice{ID: "inv_1", TenantID: "t1", PaymentStatus: domain.PaymentPending, ChargeAttemptSeq: 2}
 	base.invoices["inv_1"] = inv
 	f := &lostCommitReplyUpdater{mockInvoiceUpdater: base}
 
-	got, applied, err := persistChargeOutcomeWithRetry(context.Background(), f, "t1", inv, domain.PaymentUnknown, "", "connection reset")
+	got, applied, err := persistChargeOutcomeWithRetry(context.Background(), f, "t1", inv, domain.PaymentFailed, "", "stripe not configured")
 	if err != nil || !applied {
 		t.Fatalf("applied=%v err=%v, want applied — the row holds this attempt's own outcome", applied, err)
 	}
-	if f.calls != 2 || got.PaymentStatus != domain.PaymentUnknown || got.ChargeAttemptSeq != 3 {
-		t.Fatalf("calls=%d row=%s/seq %d, want 2 calls and unknown/seq 3", f.calls, got.PaymentStatus, got.ChargeAttemptSeq)
+	if f.calls != 2 || got.PaymentStatus != domain.PaymentFailed || got.ChargeAttemptSeq != 3 {
+		t.Fatalf("calls=%d row=%s/seq %d, want 2 calls and failed/seq 3", f.calls, got.PaymentStatus, got.ChargeAttemptSeq)
 	}
 }

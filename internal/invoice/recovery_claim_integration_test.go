@@ -121,7 +121,7 @@ func TestManualCollectClaim_RefusalIsStatusNotGates(t *testing.T) {
 		{"INV-113-C", ""},                             // pristine recoverable shape
 		{"INV-113-D", ", tax_reversed_at=now()"},      // old gate 1 condition
 		{"INV-113-E", ", billing_reason='threshold'"}, // old gate 2 condition
-		{"INV-113-F", ", payment_status='unknown'"},   // parked
+		{"INV-113-F", ", payment_status='unknown'"},   // unclear charge
 	} {
 		inv := seedWrittenOff(t, db, ctx, tenantID, tc.num, tc.mutate)
 		if got, err := store.ClaimChargeForManualCollect(ctx, tenantID, inv.ID); err != nil {

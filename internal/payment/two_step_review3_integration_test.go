@@ -78,7 +78,7 @@ func TestStamp_AfterTheHoldEnded_Refused(t *testing.T) {
 		OccurredAt: time.Now().UTC(),
 	}
 	held := r.hold(inv.ID)
-	r.exec(`UPDATE invoices SET auto_charge_claimed_until = now() - interval '1 second', charge_hold_token = now() - interval '1 second' WHERE id = $1`, inv.ID)
+	r.exec(`UPDATE invoices SET auto_charge_claimed_until = now() - interval '1 second' WHERE id = $1`, inv.ID)
 	ended := r.hold(inv.ID)
 	for name, hold := range map[string]*time.Time{"the hold as claimed": held, "the hold as it now reads": ended} {
 		if _, ok, err := r.invoices.StampPendingConfirm(r.ctx, r.tenantID, attempt, domain.ChargeHold{Until: *hold}, inv.ChargeAttemptSeq); err != nil || ok {
@@ -116,8 +116,8 @@ func TestStaleSweep_StampLandedAfterTheList_NotReleased(t *testing.T) {
 			h = x
 		}
 	}
-	if h.Invoice.ID == "" || !h.Tokened || h.Invoice.PaymentStatus != domain.PaymentPending {
-		t.Fatalf("setup: want a tokened stale hold on a pending invoice, got %+v", h)
+	if h.Invoice.ID == "" || h.Invoice.PaymentStatus != domain.PaymentPending {
+		t.Fatalf("setup: want a stale hold on a pending invoice, got %+v", h)
 	}
 	pi := r.fake.addPI(stripeCustomerOf(inv), inv.ID, "", "succeeded", shDue)
 	r.exec(`UPDATE invoices SET payment_status = 'unknown', stripe_payment_intent_id = $2,

@@ -107,7 +107,7 @@ func TestChargeHold_RefusesVoidWriteOffAndOfflinePayment(t *testing.T) {
 
 		t.Run(a.name+"/retry of a declined charge claimed (failed)", func(t *testing.T) {
 			inv := seedClaimableInvoice(t, db, ctx, tenantID, num("FAIL"))
-			stampOutcome(t, store, ctx, tenantID, inv.ID, domain.PaymentFailed, "", "card_declined")
+			stampOutcome(t, db, store, ctx, tenantID, inv.ID, domain.PaymentFailed, "", "card_declined")
 			if h, err := store.ClaimChargeForManualCollect(ctx, tenantID, inv.ID); err != nil || !h.Held() {
 				t.Fatalf("ClaimChargeForManualCollect: held=%v err=%v", h.Held(), err)
 			}
@@ -151,26 +151,25 @@ func TestChargeHold_RefusesVoidWriteOffAndOfflinePayment(t *testing.T) {
 	}
 }
 
-// TestChargeHold_ParkedInvoice_WriteOffWaitsForALiveHold: an unknown outcome
-// keeps its hold (the charge path releases it only on a definite outcome). A
-// PARKED invoice — unknown with no PaymentIntent id — has write-off as its
-// exit for a customer who paid another way (ADR-107). While its hold is live
-// a request for it may still reach Stripe, so the write-off waits a few
-// minutes like every other action; once the hold is stale, the park's normal
-// waiting state, the write-off goes through (ADR-127 amendment 2026-10-29).
-// Void and offline payment stay refused throughout, by the parked rule.
-func TestChargeHold_ParkedInvoice_WriteOffWaitsForALiveHold(t *testing.T) {
+// TestChargeHold_UnknownInvoice_WriteOffWaitsForALiveHold: an unknown
+// outcome keeps its hold (the charge path releases it only on a definite
+// outcome). Write-off is its exit for a customer who paid another way. While
+// its hold is live a request for it may still reach Stripe, so the write-off
+// waits a few minutes like every other action; once the hold has ended, the
+// write-off goes through (ADR-127 amendment 2026-10-29). Void stays refused
+// throughout.
+func TestChargeHold_UnknownInvoice_WriteOffWaitsForALiveHold(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
-	tenantID := testutil.CreateTestTenant(t, db, "Charge Hold Parked")
+	tenantID := testutil.CreateTestTenant(t, db, "Charge Hold Unknown")
 	store := invoice.NewPostgresStore(db)
 	svc := invoice.NewService(store, nil, tenant.NewSettingsStore(db))
 
-	inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-HOLD-PARKED")
+	inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-HOLD-UNKNOWN")
 	claimAuto(t, store, ctx, tenantID, inv.ID)
-	seedPark(t, db, inv.ID, "ambiguous: no payment_intent_id")
+	stampOutcome(t, db, store, ctx, tenantID, inv.ID, domain.PaymentUnknown, "pi_unclear", "timeout")
 	if _, err := svc.Void(ctx, tenantID, inv.ID); err == nil {
-		t.Fatal("a parked invoice must still refuse a void")
+		t.Fatal("an unknown invoice must refuse a void")
 	}
 	got, err := svc.MarkUncollectible(ctx, tenantID, inv.ID)
 	requireHoldRefusal(t, store, ctx, tenantID, inv.ID, got, err)
@@ -178,7 +177,7 @@ func TestChargeHold_ParkedInvoice_WriteOffWaitsForALiveHold(t *testing.T) {
 	setHoldAgo(t, db, inv.ID, 20*time.Minute)
 	got, err = svc.MarkUncollectible(ctx, tenantID, inv.ID)
 	if err != nil {
-		t.Fatalf("parked invoice with a stale hold must stay writable-off (ADR-107's exit): %v", err)
+		t.Fatalf("an unknown invoice whose hold has ended must be writable-off: %v", err)
 	}
 	if got.Status != domain.InvoiceUncollectible {
 		t.Fatalf("status %s, want uncollectible", got.Status)
@@ -229,7 +228,7 @@ func TestChargeHold_StaleReadIsRefusedUnderTheLock(t *testing.T) {
 		t.Run(a.name+"/charge reported processing after the service read the invoice", func(t *testing.T) {
 			inv := seedClaimableInvoice(t, db, ctx, tenantID, "INV-HOLD-PROC-"+suffix)
 			racer := &raceAfterGet{PostgresStore: store, race: func() {
-				stampOutcome(t, store, ctx, tenantID, inv.ID, domain.PaymentProcessing, "pi_stale_"+suffix, "")
+				stampOutcome(t, db, store, ctx, tenantID, inv.ID, domain.PaymentProcessing, "pi_stale_"+suffix, "")
 			}}
 			svc := invoice.NewService(racer, nil, tenant.NewSettingsStore(db))
 			got, err := a.run(ctx, svc, tenantID, inv.ID)

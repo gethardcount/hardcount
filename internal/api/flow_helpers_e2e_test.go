@@ -337,8 +337,8 @@ type stripeStub struct {
 	extra func(call string, form url.Values) (status int, body string, ok bool)
 }
 
-// twoStepStripe adapts a stub scripted for a one-call charge (one POST
-// /v1/payment_intents that created and confirmed) to Hardcount's charge,
+// twoStepStripe adapts a stub scripted for a single create-and-confirm call
+// (one POST /v1/payment_intents) to Hardcount's charge,
 // which creates the PaymentIntent unconfirmed and then confirms it (POST
 // /v1/payment_intents/{id}/confirm). The create goes to the stub, which
 // answers with its scripted outcome. An answer Stripe gives at the create (a

@@ -142,18 +142,13 @@ func (r *Reconciler) SetBreaker(b *breaker.Breaker) {
 // rows and sweeps after it still run. The first such panic is raised again
 // only after the last sweep, so the billing tick still ends as panicked and
 // pages. Raised sooner, it would stop the sweeps after it on every tick: the
-// stale-hold check of an 'unknown' invoice that names its PaymentIntent is
-// never stamped, so it comes back first.
+// stale-hold check never stamps an 'unknown' invoice, so one whose check
+// panics comes back first.
 func (r *Reconciler) Run(ctx context.Context, limit int) (int, []error) {
 	live, err := postgres.Livemode(ctx)
 	if err != nil {
 		return 0, []error{err}
 	}
-	// The parked-invoice count (ADR-107's alerting surface) is exported by
-	// every replica from the database at scrape time
-	// (hardcount_parked_invoices, in cmd/hardcount's queue_gauges.go), not
-	// stamped here, where only the billing leader would set it.
-
 	var panics scheduler.Panics
 	n0, e0 := r.sweepStaleChargeHolds(ctx, limit, &panics)
 	n1, e1 := r.sweep(ctx, "unknown", r.invoices.ListUnknownPayments, r.olderThan, limit, &panics)
@@ -252,31 +247,6 @@ func (r *Reconciler) reconcileOne(ctx context.Context, inv domain.Invoice) (bool
 	// Stamp the invoice's tenant onto ctx so the per-tenant Stripe client
 	// resolver can look up credentials. Background ctx has no auth.
 	ctx = auth.WithTenantID(ctx, inv.TenantID)
-
-	if inv.StripePaymentIntentID == "" {
-		// DO NOTHING. This branch used to settle the invoice failed, with the
-		// comment "a safe retry generates a new PI" — which was the whole bug:
-		// an ambiguous charge may have left a PaymentIntent live at Stripe that
-		// we never learned the name of, and settling failed both bumps
-		// charge_attempt_seq (rotating the idempotency key) and moves
-		// payment_status into a claimable state, so the next retry opens a
-		// SECOND PaymentIntent beside the live one (ADR-107).
-		//
-		// Such an invoice is parked. Only an earlier version parked one
-		// (ADR-137: every unclear answer now names its PaymentIntent), and the
-		// stale-hold sweep keeps it for a person (earlierVersionHold).
-		//
-		// UNREACHABLE FROM THE SWEEP since #682: ListUnknownPayments excludes
-		// empty-PI rows at SQL. This branch is kept as defense-in-depth so a
-		// future widening of the sweep's predicate cannot silently resurrect
-		// the give-up write ADR-107 deleted — if it ever logs, the sweep's SQL
-		// has drifted.
-		slog.ErrorContext(ctx, "reconcile: an unknown charge outcome with no PaymentIntent id reached the unknown sweep, whose list should exclude it; nothing written. Only an earlier version left such an invoice; a person settles it",
-			"invoice_id", inv.ID, "tenant_id", inv.TenantID,
-			"customer_id", inv.CustomerID, "amount_due_cents", inv.AmountDueCents,
-			"invoice_number", inv.InvoiceNumber)
-		return false, nil
-	}
 
 	var res PaymentIntentResult
 	var err error

@@ -28,8 +28,6 @@ func newTwoStepRig(t *testing.T, name string) *shRig {
 // holds it any more.
 func (r *shRig) ageUpdated(invoiceID string, age time.Duration) {
 	r.exec(`UPDATE invoices SET updated_at = now() - make_interval(secs => $2),
-			charge_hold_token = CASE WHEN charge_hold_token = auto_charge_claimed_until
-				THEN charge_hold_token - make_interval(secs => $2) ELSE charge_hold_token END,
 			auto_charge_claimed_until = auto_charge_claimed_until - make_interval(secs => $2)
 		WHERE id = $1`, invoiceID, age.Seconds())
 }
@@ -89,12 +87,10 @@ func TestTwoStep_SavesTheAttemptBeforeConfirming(t *testing.T) {
 	}
 }
 
-// Stripe charged and its answer was a 500. The one-call charge's answer named
-// no PaymentIntent, so the invoice was parked and waited up to 24 hours when
-// Stripe's list showed nothing. The confirm names its PaymentIntent: the
-// invoice is unknown on that id, not parked, and the reconciler records the
+// Stripe charged and its answer was a 500. The invoice is unknown on the
+// PaymentIntent it stamped before the confirm, and the reconciler records the
 // payment with one read by id.
-func TestTwoStep_ConfirmAnswerLost_NamesThePayment_NotParked(t *testing.T) {
+func TestTwoStep_ConfirmAnswerLost_NamesThePayment(t *testing.T) {
 	r := newTwoStepRig(t, "A2 Confirm 500")
 	inv := r.seed("INV-A2-500")
 	r.fake.queueConfirm(fakeMode{kind: fakeSave500})
@@ -105,9 +101,6 @@ func TestTwoStep_ConfirmAnswerLost_NamesThePayment_NotParked(t *testing.T) {
 	got := r.get(inv.ID)
 	if got.PaymentStatus != domain.PaymentUnknown || got.StripePaymentIntentID != pi.id {
 		t.Fatalf("after the 500: %s on %q, want unknown on %q", got.PaymentStatus, got.StripePaymentIntentID, pi.id)
-	}
-	if got.Parked() {
-		t.Fatal("the invoice is parked: a two-step confirm always names its PaymentIntent")
 	}
 	r.assertNoSecondCharge(inv.ID)
 
@@ -121,9 +114,8 @@ func TestTwoStep_ConfirmAnswerLost_NamesThePayment_NotParked(t *testing.T) {
 }
 
 // The caller's deadline ends while Stripe is still confirming (dunning 15 s,
-// auto-charge 30 s). The one-call charge parked it; now it is unknown on its
-// PaymentIntent.
-func TestTwoStep_DeadlineEndsDuringConfirm_NotParked(t *testing.T) {
+// auto-charge 30 s). The invoice is unknown on its PaymentIntent.
+func TestTwoStep_DeadlineEndsDuringConfirm(t *testing.T) {
 	r := newTwoStepRig(t, "A2 Deadline")
 	inv := r.seed("INV-A2-DEADLINE")
 	r.fake.queueConfirm(fakeMode{kind: fakeOutliveCtx})
@@ -134,8 +126,8 @@ func TestTwoStep_DeadlineEndsDuringConfirm_NotParked(t *testing.T) {
 	}
 	pi := r.fake.onlyPI()
 	got := r.get(inv.ID)
-	if got.Parked() || got.PaymentStatus != domain.PaymentUnknown || got.StripePaymentIntentID != pi.id {
-		t.Fatalf("after the deadline: %s on %q parked=%v, want unknown on %q, not parked", got.PaymentStatus, got.StripePaymentIntentID, got.Parked(), pi.id)
+	if got.PaymentStatus != domain.PaymentUnknown || got.StripePaymentIntentID != pi.id {
+		t.Fatalf("after the deadline: %s on %q, want unknown on %q", got.PaymentStatus, got.StripePaymentIntentID, pi.id)
 	}
 	r.assertNoSecondCharge(inv.ID)
 	r.ageUpdated(inv.ID, 5*time.Minute)
@@ -289,12 +281,12 @@ func (r *shRig) sweepUntilClear(invoiceID string) {
 }
 
 // failedBeforeConfirm checks what a failure before the stamp must leave: one
-// PaymentIntent at Stripe, never confirmed; nothing charged; the invoice
-// still pending (not unknown, not parked) and held, with no attempt row. Then
-// the stale-hold sweep clears the hold and moves the counter without asking
-// Stripe, and the next charge takes exactly one payment on a new
-// PaymentIntent. The unconfirmed PaymentIntent stays where it is and can take
-// no money: only one stamped on the invoice is ever confirmed.
+// PaymentIntent at Stripe, never confirmed; nothing charged; the invoice still
+// pending (not unknown) and held, with no attempt row. Then the stale-hold
+// sweep clears the hold and moves the counter without asking Stripe, and the
+// next charge takes exactly one payment on a new PaymentIntent. The
+// unconfirmed PaymentIntent stays where it is and can take no money: only one
+// stamped on the invoice is ever confirmed.
 func (r *shRig) failedBeforeConfirm(inv domain.Invoice) {
 	r.t.Helper()
 	orphan := r.fake.onlyPI()
@@ -302,8 +294,8 @@ func (r *shRig) failedBeforeConfirm(inv domain.Invoice) {
 		r.t.Fatalf("the PaymentIntent at Stripe is %s, want requires_confirmation (created, never confirmed)", orphan.status)
 	}
 	got := r.get(inv.ID)
-	if got.PaymentStatus != domain.PaymentPending || got.Parked() || r.hold(inv.ID) == nil {
-		r.t.Fatalf("invoice %s parked=%v hold=%v, want pending, not parked, held", got.PaymentStatus, got.Parked(), r.hold(inv.ID))
+	if got.PaymentStatus != domain.PaymentPending || r.hold(inv.ID) == nil {
+		r.t.Fatalf("invoice %s hold=%v, want pending, held", got.PaymentStatus, r.hold(inv.ID))
 	}
 	r.assertNoSecondCharge(inv.ID)
 	reads := r.fake.readCount()

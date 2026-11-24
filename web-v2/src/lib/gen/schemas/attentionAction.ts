@@ -35,13 +35,6 @@
  * - `connect_tax_provider`: connect the tax provider under Settings.
  * - `void_invoice`: `POST /v1/invoices/{id}/void`. Offered only on
  *   `amount_below_minimum`.
- * - `mark_uncollectible`:
- *   `POST /v1/invoices/{id}/mark-uncollectible`. Offered only on a
- *   parked invoice (payment status `unknown` with no payment intent
- *   recorded, left by an earlier version), for a customer who paid
- *   another way. After the write-off, a payment whose Stripe event
- *   arrives later is still recorded, and nothing charges the invoice.
- *   The dashboard shows it as a secondary action.
  */
 export type AttentionAction = typeof AttentionAction[keyof typeof AttentionAction];
 
@@ -60,5 +53,4 @@ export const AttentionAction = {
   update_payment_method: 'update_payment_method',
   connect_tax_provider: 'connect_tax_provider',
   void_invoice: 'void_invoice',
-  mark_uncollectible: 'mark_uncollectible',
 } as const;

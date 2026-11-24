@@ -134,8 +134,7 @@ type AttemptStanding int
 const (
 	// AttemptNotHardcount: no attempt row that Hardcount made names this
 	// PaymentIntent. It is a hosted Checkout attempt, an attempt whose id
-	// Hardcount never learned (a parked one), or one whose row write was
-	// lost.
+	// Hardcount never learned, or one whose row write was lost.
 	AttemptNotHardcount AttemptStanding = iota
 	// AttemptNewest: the newest Hardcount-made attempt on the invoice.
 	AttemptNewest
@@ -151,8 +150,6 @@ const (
 //
 //   - A paid invoice: never.
 //   - The invoice already holds this PaymentIntent: yes, whoever created it.
-//     The stale-hold sweep can put a payment it found on a parked invoice, a
-//     hosted one included.
 //   - Otherwise, an External attempt: never, because Hardcount does not wait
 //     on it.
 //   - The charge call reporting its own attempt: only if the seq is still the
@@ -163,8 +160,7 @@ const (
 //     newest attempt, whose charge call's own report was lost. No if
 //     Hardcount has made a newer one (a late decline for an older attempt).
 //     With no Hardcount row to judge by, only if the invoice holds no
-//     PaymentIntent yet (the first attempt, or a parked attempt whose id
-//     Hardcount never learned).
+//     PaymentIntent yet (the first attempt).
 func (r PaymentFailureReport) MovesInvoice(status InvoiceStatus, paymentStatus InvoicePaymentStatus, holdsPI string, seq int64, standing AttemptStanding) bool {
 	switch {
 	case status == InvoicePaid || paymentStatus == PaymentSucceeded:

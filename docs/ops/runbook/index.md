@@ -31,7 +31,6 @@ Stripe troubleshooting is out of scope.
 | `hardcount migrate` or the start-up stops with `this database was made by Velox` | [The database was made by Velox](migration-failed-midway.md#the-database-was-made-by-velox) |
 | An upgrade stops with `waited 5s for a table lock` | [A database upgrade stopped: table lock](migration-failed-midway.md#it-waited-5s-for-a-table-lock) |
 | `hardcount_stripe_key_unusable_total` rising, or "Stripe refused this tenant's API key" in the logs: charges paused until the key is fixed in Settings → Payments | [Health checks, alerts and logs](monitoring.md) |
-| "stale charge check: this charge hold or parked charge was left by an earlier Hardcount version" in the logs, `hardcount_stale_charge_hold_resolutions_total{result="earlier"}` rising, or `hardcount_parked_invoices{disposition="open"}` above zero | [A charge's result is unclear: left by an earlier version](unclear-charge.md#left-by-an-earlier-version) |
 | An invoice notice reads "Customer must confirm payment", or a payment retry was not attempted because the bank wants the customer to confirm | [The customer's bank wants them to confirm a payment](customer-must-confirm-payment.md) |
 | An invoice notice reads "Below Stripe's minimum charge", or a customer's hosted page has no Pay button for a small amount | [An invoice is below Stripe's minimum charge](below-stripe-minimum.md) |
 | `hardcount_stale_charge_hold_resolutions_total{result="failed"}` rising, or an invoice that refuses **Collect payment** with "A charge on this invoice is being confirmed with Stripe" for more than two hours | [A charge's result is unclear: a charge hold that does not clear](unclear-charge.md#a-charge-hold-that-does-not-clear) |
@@ -106,8 +105,6 @@ tables without account data (`leader_leases`, `leader_status`,
   period is cut short, for example by a downgrade.
 - **Parked**: set aside until something changes. A subscription parks after
   eight failed billing attempts ([Billing failing](billing-failing.md)).
-  Only earlier versions parked invoices
-  ([A charge's result is unclear](unclear-charge.md#parked-no-paymentintent)).
 - **Wait ladder**: the growing waits between billing retries
   ([Billing failing](billing-failing.md#why)).
 - **PI**: a Stripe PaymentIntent, the Stripe object for one card charge.

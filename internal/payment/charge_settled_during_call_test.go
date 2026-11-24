@@ -78,8 +78,7 @@ func TestChargeInvoice_DeclineAfterMidChargePayment_NoDunning(t *testing.T) {
 
 // An invoice paid after the charge read it is never confirmed: the stamp
 // before the confirm is a compare-and-set on the invoice, so it does not
-// apply, and no money moves. (The one-call charge took the money and then
-// found the invoice paid.)
+// apply, and no money moves.
 func TestChargeInvoice_PaidBeforeTheStamp_ConfirmsNothing(t *testing.T) {
 	invoices, snapshot := paidMidCharge()
 	client := &mockStripeClient{piID: "pi_async", chargeStatus: "processing"}
@@ -127,7 +126,7 @@ func captureLogs(t *testing.T) *lockedBuf {
 // A confirm that timed out is an unclear outcome on the PaymentIntent the
 // charge saved. It never overwrites an outcome recorded during the call (P13),
 // and with nothing recorded it leaves the invoice unknown on that
-// PaymentIntent, which the reconciler reads by id: nothing is parked.
+// PaymentIntent, which the reconciler reads by id.
 func TestChargeInvoice_ConfirmTimeout_NeverOverwritesARecordedOutcome(t *testing.T) {
 	timeout := &PaymentError{Message: "context deadline exceeded", Unknown: true}
 
@@ -155,8 +154,8 @@ func TestChargeInvoice_ConfirmTimeout_NeverOverwritesARecordedOutcome(t *testing
 		invoices.invoices["inv_1"] = snapshot
 		stripe := NewStripe(&mockStripeClient{piID: "pi_T", shouldFail: true, failErr: timeout}, invoices, newMockWebhookStore(), nil, nil)
 		_, _ = stripe.ChargeInvoice(postgres.WithLivemode(context.Background(), true), "t1", snapshot, testHold, "cus_stripe", "pm_test")
-		if got := invoices.invoices["inv_1"]; got.PaymentStatus != domain.PaymentUnknown || got.StripePaymentIntentID != "pi_T" || got.Parked() {
-			t.Fatalf("after the timeout: %s on %q, want unknown on pi_T, not parked", got.PaymentStatus, got.StripePaymentIntentID)
+		if got := invoices.invoices["inv_1"]; got.PaymentStatus != domain.PaymentUnknown || got.StripePaymentIntentID != "pi_T" {
+			t.Fatalf("after the timeout: %s on %q, want unknown on pi_T", got.PaymentStatus, got.StripePaymentIntentID)
 		}
 	})
 }

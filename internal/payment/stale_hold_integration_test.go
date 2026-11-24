@@ -258,15 +258,12 @@ func (r *shRig) hold(invoiceID string) *time.Time {
 }
 
 // ageHold moves a set hold into the past by age, past its end: what a
-// crashed or timed-out charger leaves once its five minutes are over. The
-// hold's token and the attempt saved under the hold move with it, as they
-// would with real time passing. It also forgets any earlier check of the row.
+// crashed or timed-out charger leaves once its five minutes are over. It
+// also forgets any earlier check of the row.
 func (r *shRig) ageHold(invoiceID string, age time.Duration) {
-	// The hold, its token, and the invoice's last write all move back: a hold
-	// that ended age ago belongs to a charge that began before that.
+	// The hold and the invoice's last write both move back: a hold that
+	// ended age ago belongs to a charge that began before that.
 	r.exec(`UPDATE invoices SET
-			charge_hold_token = CASE WHEN charge_hold_token = auto_charge_claimed_until
-				THEN now() - make_interval(secs => $2) ELSE charge_hold_token END,
 			auto_charge_claimed_until = now() - make_interval(secs => $2),
 			updated_at = LEAST(updated_at, now() - make_interval(secs => $2)),
 			provider_synced_at = NULL
@@ -457,8 +454,8 @@ func TestStaleHold_CallerDeadlineEndsDuringTheCall(t *testing.T) {
 				t.Fatalf("setup: the confirm outliving its context should have charged one PaymentIntent, Stripe has %d", r.fake.countPIs())
 			}
 			got := r.get(inv.ID)
-			if got.PaymentStatus != domain.PaymentUnknown || got.StripePaymentIntentID != charged.id || got.ChargeAttemptSeq != inv.ChargeAttemptSeq+1 || got.Parked() {
-				t.Errorf("after the call: %s with PI %q seq %d, want unknown on %q, seq %d, not parked (stamped before the confirm)",
+			if got.PaymentStatus != domain.PaymentUnknown || got.StripePaymentIntentID != charged.id || got.ChargeAttemptSeq != inv.ChargeAttemptSeq+1 {
+				t.Errorf("after the call: %s with PI %q seq %d, want unknown on %q, seq %d (stamped before the confirm)",
 					got.PaymentStatus, got.StripePaymentIntentID, got.ChargeAttemptSeq, charged.id, inv.ChargeAttemptSeq+1)
 			}
 			if n := len(r.attemptsOf(inv.ID)); n != 1 {
