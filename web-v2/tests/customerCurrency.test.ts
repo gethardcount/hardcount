@@ -134,5 +134,8 @@ test('a manual invoice is fixed to the profile or live plan currency, not to an 
     'This customer is billed in EUR (subscription plan), so the invoice is too.')
   assert.equal(invoiceCurrencyPin({ currency: 'EUR', source: 'invoice' }), null)
   assert.equal(invoiceCurrencyPin({ currency: 'USD', source: 'workspace' }), null)
+  // A top-up is pinned the same way, and says so in its own words.
+  assert.equal(invoiceCurrencyPin({ currency: 'EUR', source: 'billing_profile' }, 'the top-up'),
+    'This customer is billed in EUR (billing profile), so the top-up is too.')
 })
 

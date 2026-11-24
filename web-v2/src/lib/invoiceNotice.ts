@@ -81,9 +81,8 @@ export function writtenOffCardLine(
   return { action: 'email_link', note: null }
 }
 
-// The message is one sentence per line, up to three lines split on "\n": the
-// cause, then facts that must show up front (the setup-link email, prepaid
-// credit at risk).
+// The message is one sentence per line, up to two lines split on "\n": the
+// cause, then a fact that must show up front (such as the setup-link email).
 export function messageLines(message: string | undefined | null): string[] {
   return (message ?? '').split('\n').map(l => l.trim()).filter(Boolean)
 }

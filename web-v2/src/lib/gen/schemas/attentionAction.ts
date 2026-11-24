@@ -33,10 +33,8 @@
  * - `update_payment_method`: send the customer a link to replace a
  *   card that was declined.
  * - `connect_tax_provider`: connect the tax provider under Settings.
- * - `void_invoice`: `POST /v1/invoices/{id}/void`. Offered on
- *   prepaid-commit exposure while some granted credit is unspent:
- *   voiding retires the unspent balance, and credit already spent is
- *   not taken back. Also offered on `amount_below_minimum`.
+ * - `void_invoice`: `POST /v1/invoices/{id}/void`. Offered only on
+ *   `amount_below_minimum`.
  * - `mark_uncollectible`:
  *   `POST /v1/invoices/{id}/mark-uncollectible`. Offered only on a
  *   parked invoice (payment status `unknown` with no payment intent

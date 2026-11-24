@@ -76,11 +76,11 @@ type SentEmailOutboxRow struct {
 	LastError     string
 	CreatedAt     time.Time
 	DispatchedAt  *time.Time
-	// InvoiceNumber is resolved from payload — non-empty for all
-	// invoice-scoped email types (which is everything the lister
-	// returns today, since ListByCustomer joins on invoice_number).
+	// InvoiceNumber is resolved from payload: non-empty for every
+	// invoice-scoped email type except a top-up's offer, which is sent
+	// before the top-up has a number and names it by id.
 	InvoiceNumber string
-	// InvoiceID is the invoice InvoiceNumber names, for the line's link.
+	// InvoiceID is the invoice the row names, for the line's link.
 	InvoiceID string
 	// CreditNoteNumber is the credit note a credit-note email sent (payload
 	// credit_note_number), and CreditNoteID its id while it exists.
@@ -482,8 +482,13 @@ func sentEmailLine(row SentEmailOutboxRow) (activity.Line, bool) {
 		SendFailure: row.SendFailure, SkipReason: row.SkipReason, Trigger: row.Trigger, To: row.Recipient,
 	}
 	var about []activity.Segment
-	if row.InvoiceNumber != "" {
+	switch {
+	case row.InvoiceNumber != "":
 		about = append(about, activity.Segment{reference(activity.LinkInvoice, row.InvoiceID, row.InvoiceNumber)})
+	case row.EmailType == "topup_offer" && row.InvoiceID != "":
+		// The offer was sent before the top-up had a number; the Invoices
+		// list names an unnumbered top-up the same way.
+		about = append(about, activity.Segment{activity.L(activity.LinkInvoice, row.InvoiceID, "Prepaid credit")})
 	}
 	if row.EmailType == "credit_note" && row.CreditNoteNumber != "" {
 		about = append(about, activity.Segment{reference(activity.LinkCreditNote, row.CreditNoteID, row.CreditNoteNumber)})

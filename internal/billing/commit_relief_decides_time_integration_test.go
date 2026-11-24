@@ -20,7 +20,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// reliefThroughTheRoute pays a commit invoice and sends its commit relief
+// reliefThroughTheRoute buys a top-up and sends its commit relief
 // through the credit note route on real stores, with at bound on the request
 // as the API binds a request's instant, and returns the note.
 func reliefThroughTheRoute(t *testing.T, name string, at time.Time) domain.CreditNote {
@@ -36,16 +36,11 @@ func reliefThroughTheRoute(t *testing.T, name string, at time.Time) domain.Credi
 	creditSvc := credit.NewService(credit.NewPostgresStore(db))
 	invStore := invoice.NewPostgresStore(db)
 	invStore.SetCommitFunder(creditSvc)
+	invStore.SetInvoiceNumberer(settings)
 	invSvc := invoice.NewService(invStore, clock.Real(), settings)
-	draft := createCommitInvoice(t, ctx, invSvc, db, tenantID, cust.ID, 10000, 10000)
-	if _, err := invSvc.Finalize(ctx, tenantID, draft.ID); err != nil {
-		t.Fatalf("finalize: %v", err)
-	}
-	if _, err := invStore.MarkPaidOffline(ctx, tenantID, draft.ID, time.Now().UTC(), nil); err != nil {
-		t.Fatalf("pay: %v", err)
-	}
+	topup := buyTopup(t, ctx, invSvc, tenantID, cust.ID, 10000, 10000)
 	svc := newReliefService(db, invStore, creditSvc, settings)
-	body := `{"invoice_id":"` + draft.ID + `","reason":"Lost card dispute","commit_relief":{"retire_all":true}}`
+	body := `{"invoice_id":"` + topup.ID + `","reason":"Lost card dispute","commit_relief":{"retire_all":true}}`
 	req := httptest.NewRequest("POST", "/", strings.NewReader(body))
 	req = req.WithContext(clock.WithEffectiveNow(auth.WithTenantID(ctx, tenantID), at))
 	rec := httptest.NewRecorder()

@@ -21,7 +21,6 @@ import { emailStepAfterFinalize, isEmailNotConfigured, newInvoiceOutcome, type N
 import { showOutcome } from '@/lib/outcomeToast'
 import { billingProfileCard, profileOrAbsent } from '@/lib/billingProfileLoad'
 import { startOfDayInTZ } from '@/lib/dates'
-import { Checkbox } from '@/components/ui/checkbox'
 import { MarginCard } from '@/components/MarginCard'
 import { SendSetupLinkDialog } from '@/components/SendSetupLinkDialog'
 import { PriceOverridesCard } from '@/components/PriceOverridesCard'
@@ -1218,7 +1217,7 @@ export default function CustomerDetailPage() {
             // invoice, so the credit balance, the commit/promo split and the
             // outstanding total all move: refresh every money surface.
             invalidateMoneySurfaces(queryClient, { customerId: id, invoiceId: invoice.id })
-            showOutcome(newInvoiceOutcome(invoiceLabel(invoice), result), {
+            showOutcome(newInvoiceOutcome(invoice.invoice_number, result), {
               label: 'View invoice',
               onClick: () => navigate(`/invoices/${invoice.id}`),
             })
@@ -1688,11 +1687,6 @@ type ComposerLine = {
   quantity: string         // string-bound input; coerced at submit time
   unitAmount: string       // typed in currency units ("25.50"); dollarsToWholeCents
   line_type: string
-  // Prepaid-credit sale (ADR-078): when set, finalizing the invoice grants
-  // this much credit to the customer. add_on lines only; the backend
-  // enforces one commit line per invoice.
-  sellsCredits: boolean
-  commitGranted: string    // typed in currency units, like unitAmount
 }
 
 const blankLine = (): ComposerLine => ({
@@ -1700,8 +1694,6 @@ const blankLine = (): ComposerLine => ({
   quantity: '1',
   unitAmount: '',
   line_type: 'add_on',
-  sellsCredits: false,
-  commitGranted: '',
 })
 
 // What New invoice says when the create's answer is lost. The dialog sends
@@ -1753,7 +1745,7 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
   // The service period is days of the account's zone, sent as instants there.
   const tz = useTenantTimezone()
   const [errors, setErrors] = useState<{
-    lines?: Record<number, { description?: string; quantity?: string; unitAmount?: string; commit?: string }>
+    lines?: Record<number, { description?: string; quantity?: string; unitAmount?: string }>
     form?: string
     // The form message is a lost answer: the invoice may exist.
     noAnswer?: boolean
@@ -1802,15 +1794,15 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
 
   // validate returns sanitized lines suitable for the API. Returns null on
   // any validation failure (errors are surfaced via setErrors).
-  const validate = (): { description: string; line_type: string; quantity: number; unit_amount_cents: number; commit_granted_cents?: number }[] | null => {
-    const lineErrors: Record<number, { description?: string; quantity?: string; unitAmount?: string; commit?: string }> = {}
-    const cleaned: { description: string; line_type: string; quantity: number; unit_amount_cents: number; commit_granted_cents?: number }[] = []
+  const validate = (): { description: string; line_type: string; quantity: number; unit_amount_cents: number }[] | null => {
+    const lineErrors: Record<number, { description?: string; quantity?: string; unitAmount?: string }> = {}
+    const cleaned: { description: string; line_type: string; quantity: number; unit_amount_cents: number }[] = []
     if (lines.length === 0) {
       setErrors({ form: 'Add at least one line item.' })
       return null
     }
     lines.forEach((l, i) => {
-      const errs: { description?: string; quantity?: string; unitAmount?: string; commit?: string } = {}
+      const errs: { description?: string; quantity?: string; unitAmount?: string } = {}
       const desc = l.description.trim()
       if (!desc) errs.description = 'Description is required'
       // Digits only: Number("1e3") is a whole number too.
@@ -1825,19 +1817,6 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
         // The server refuses a unit price of 0; say so before the round trip.
         errs.unitAmount = 'Must be greater than 0'
       }
-      // Prepaid-credit sale: granted cents required and positive, and the
-      // line alone on its invoice (the backend enforces both too).
-      let commitGranted: number | undefined
-      if (l.sellsCredits && (l.line_type || 'add_on') === 'add_on') {
-        const granted = dollarsToWholeCents(l.commitGranted)
-        if (granted === null || granted <= 0) {
-          errs.commit = 'Credits granted: an amount like 100 or 100.50, greater than 0'
-        } else if (lines.length > 1) {
-          errs.commit = 'A line that sells prepaid credits must be the only line on its invoice — put other charges on a separate invoice'
-        } else {
-          commitGranted = granted
-        }
-      }
       if (Object.keys(errs).length > 0 || qty === null || unit === null) {
         lineErrors[i] = errs
       } else {
@@ -1846,7 +1825,6 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
           line_type: l.line_type || 'add_on',
           quantity: qty,
           unit_amount_cents: unit,
-          ...(commitGranted !== undefined ? { commit_granted_cents: commitGranted } : {}),
         })
       }
     })
@@ -1923,21 +1901,7 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
       // best-effort: a failed send must not unwind a finalized invoice, and
       // it must not be reported as a saved draft either.
       let result: NewInvoiceResult = { kind: 'draft' }
-      const created: Invoice & { billing_reason?: string } = invoice
-      if (action === 'send' && created.billing_reason === 'topup') {
-        // A top-up is issued by its payment, never finalized: send its link.
-        const recipient = customer.email
-        if (!recipient) {
-          result = { kind: 'topup_not_sent', reason: 'The customer has no email address. Add one, then send it from the invoice page.' }
-        } else {
-          try {
-            await api.sendInvoiceEmail(invoice.id, recipient)
-            result = { kind: 'topup_sent' }
-          } catch (err) {
-            result = { kind: 'topup_not_sent', reason: err instanceof Error ? err.message : String(err) }
-          }
-        }
-      } else if (action === 'send') {
+      if (action === 'send') {
         invoice = await api.finalizeInvoice(invoice.id)
         const recipient = customer.email
         // Without Stripe the finalize already emailed the customer the
@@ -1969,7 +1933,7 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
       // can pick it up from the invoice detail page.
       if (invoice) {
         setErrors({
-          form: `Draft ${invoiceLabel(invoice)} created, but a later step failed: ${message}. Open the invoice detail page to continue.`,
+          form: `Draft ${invoice.invoice_number} created, but a later step failed: ${message}. Open the invoice detail page to continue.`,
         })
       } else if (outcomeUnknown(err)) {
         setErrors({ form: NEW_INVOICE_NO_ANSWER, noAnswer: true })
@@ -1982,9 +1946,6 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
   })
 
   const isBusy = submitting !== null
-  // One line that sells credit is a top-up: Save & send creates it and sends
-  // its link, and finalizes nothing (the server makes the same call).
-  const topupForm = lines.length === 1 && lines[0].sellsCredits && (lines[0].line_type || 'add_on') === 'add_on'
 
   return (
     <Dialog open onOpenChange={(open) => { if (!open && !isBusy) onClose() }}>
@@ -2164,41 +2125,6 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
                         </Button>
                       </div>
                     </div>
-                    {/* Prepaid-credit sale (ADR-078): finalizing the invoice
-                        grants the entered credits to the customer. add_on
-                        lines only; one per invoice. */}
-                    {(line.line_type || 'add_on') === 'add_on' && (
-                      <div className="px-3 pb-2 space-y-1.5">
-                        <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer w-fit">
-                          <Checkbox
-                            checked={line.sellsCredits}
-                            onCheckedChange={(v) => updateLine(idx, { sellsCredits: v === true })}
-                            disabled={isBusy}
-                          />
-                          This line sells prepaid credits
-                        </label>
-                        {line.sellsCredits && (
-                          <div className="flex flex-wrap items-center gap-2 pl-6">
-                            <Input
-                              type="text"
-                              inputMode="decimal"
-                              placeholder={`Credits granted (${currencySymbol.trim() || currency})`}
-                              aria-label={`Line ${idx + 1} credits granted in ${currency}`}
-                              className="w-[210px]"
-                              value={line.commitGranted}
-                              onChange={e => updateLine(idx, { commitGranted: e.target.value })}
-                              disabled={isBusy}
-                            />
-                            <span className="text-xs text-muted-foreground">
-                              {(dollarsToWholeCents(line.commitGranted) ?? 0) > 0
-                                ? `Grants ${formatCents(dollarsToWholeCents(line.commitGranted) ?? 0, currency)} of credits when the invoice is finalized.`
-                                : 'The credits never expire.'}
-                            </span>
-                          </div>
-                        )}
-                        {lineErrs.commit && <p className="text-xs text-destructive pl-6">{lineErrs.commit}</p>}
-                      </div>
-                    )}
                     </div>
                   )
                 })}
@@ -2305,26 +2231,7 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
         </DialogFooter>
       </DialogContent>
 
-      <AlertDialog open={confirmSend && topupForm} onOpenChange={(open) => { if (!open && !isBusy) setConfirmSend(false) }}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Create this top-up and send its link?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {customer.email
-                ? `${customer.display_name} gets a link at ${customer.email} to buy the credit. Nothing is charged until they pay.`
-                : 'The customer has no email address, so the top-up is created and its link is not sent.'}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isBusy}>Back</AlertDialogCancel>
-            <AlertDialogAction onClick={() => submit('send')} disabled={isBusy}>
-              {submitting === 'send' ? <><Loader2 size={14} className="animate-spin mr-1.5" />Sending…</> : 'Create and send'}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      <AlertDialog open={confirmSend && !topupForm} onOpenChange={(open) => { if (!open && !isBusy) setConfirmSend(false) }}>
+      <AlertDialog open={confirmSend} onOpenChange={(open) => { if (!open && !isBusy) setConfirmSend(false) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Finalize and send this invoice?</AlertDialogTitle>

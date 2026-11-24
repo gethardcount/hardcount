@@ -98,11 +98,11 @@ test('"after credit applied" is said only when an unpaid invoice had credit', ()
 })
 
 test('commit credit taken back with its invoice is "canceled", not used', () => {
-  // A $100 commit, $40 drawn, then its funding invoice voided: the void
-  // retires the $60 left and bumps consumed to $100.
-  const voided = { amount_cents: 10000, consumed_cents: 10000, remaining_cents: 0, expired_cents: 0, retired_cents: 6000 }
-  assert.equal(grantState(voided, NOW), 'canceled')
-  assert.equal(grantUsedCents(voided), 4000)
+  // A $100 commit, $40 drawn, then a credit note relieved all of it: the
+  // relief retires the $60 left and bumps consumed to $100.
+  const retired = { amount_cents: 10000, consumed_cents: 10000, remaining_cents: 0, expired_cents: 0, retired_cents: 6000 }
+  assert.equal(grantState(retired, NOW), 'canceled')
+  assert.equal(grantUsedCents(retired), 4000)
   // A credit note relieved $25 of a live commit: still active, $40 used.
   const relieved = { amount_cents: 10000, consumed_cents: 6500, remaining_cents: 3500, expired_cents: 0, retired_cents: 2500 }
   assert.equal(grantState(relieved, NOW), 'active')

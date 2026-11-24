@@ -9,7 +9,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
-	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // T5 (commit relief): the relief retire row and its credit.commit_retired
@@ -17,21 +16,7 @@ import (
 // (ADR-129).
 func TestCommitRelief_RetireCarriesTheGrantCurrency(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Relief Currency")
-	grantCents := int64(10000)
-	inv, err := h.invSvc.Create(ctx, h.tenantID, invoice.CreateInput{
-		CustomerID: h.custID, Currency: "EUR",
-		LineItems: []invoice.AddLineItemInput{{
-			Description: "Prepaid commit — EUR", LineType: "add_on", Quantity: 1,
-			UnitAmountCents: 9000,
-		}},
-	})
-	if err != nil {
-		t.Fatalf("create EUR commit invoice: %v", err)
-	}
-	testutil.MarkLegacyCommitLine(ctx, t, h.db, h.tenantID, inv.ID, grantCents)
-	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
-		t.Fatalf("finalize: %v", err)
-	}
+	inv := h.createTopup(t, ctx, "EUR", 9000, 10000)
 	payOffline(t, h, ctx, inv.ID)
 	target, err := invoice.NewPostgresStore(h.db).CreateWithLineItems(ctx, h.tenantID, domain.Invoice{
 		CustomerID: h.custID, InvoiceNumber: "HC-RELIEF-EUR-DRAIN",

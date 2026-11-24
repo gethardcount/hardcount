@@ -109,8 +109,8 @@ type GrantInput struct {
 
 	// GrantKind classifies the grant's cost basis (ADR-078). Operator/API
 	// callers may set 'promotional' (free marketing credits — drained
-	// before all paid-class blocks); 'commit' is RESERVED for the invoice
-	// finalize funding path (GrantCommitForInvoiceTx) and rejected here.
+	// before all paid-class blocks); 'commit' is RESERVED for a top-up's
+	// payment (GrantCommitForInvoiceTx) and rejected here.
 	// Empty = unclassified, drains in the paid class.
 	GrantKind domain.GrantKind `json:"grant_kind,omitempty"`
 }
@@ -167,15 +167,15 @@ func (s *Service) Grant(ctx context.Context, tenantID string, input GrantInput) 
 		return domain.CreditLedgerEntry{}, errs.Invalid("expires_at",
 			"must be in the future — a grant that expires at or before now is dead on arrival")
 	}
-	// Operators may mark a grant promotional; 'commit' is reserved for the
-	// invoice-finalize funding path (ADR-078) — a hand-minted commit would
-	// claim paid-class drain order and commit reporting without a funding
-	// invoice behind it.
+	// Operators may mark a grant promotional; 'commit' is reserved for a
+	// top-up's payment (ADR-078) — a hand-minted commit would claim
+	// paid-class drain order and commit reporting without a funding invoice
+	// behind it.
 	switch input.GrantKind {
 	case "", domain.GrantKindPromotional:
 	default:
 		return domain.CreditLedgerEntry{}, errs.Invalid("grant_kind",
-			"must be empty or 'promotional' — commit grants are created by finalizing a commit invoice")
+			"must be empty or 'promotional' — commit grants are created when a top-up is paid")
 	}
 
 	return s.store.AppendEntryAudited(ctx, tenantID, domain.CreditLedgerEntry{
@@ -223,9 +223,8 @@ func grantAuditMetadata(out domain.CreditLedgerEntry) map[string]any {
 
 // GrantCommitForInvoiceTx appends the commit grant on the CALLER's tx, in the
 // funding invoice's currency (ADR-129), expiring at expiresAt (nil: never).
-// A top-up's payment runs it inside the settle transaction, and
-// invoice.FinalizeWithDates inside the finalize transaction, so the grant
-// commits or rolls back with the money write (ADR-078 D2).
+// A top-up's payment runs it inside the settle transaction, so the grant
+// commits or rolls back with the payment (ADR-078 D2).
 //
 // It checks nothing: every input comes from the funding invoice and its
 // commit line, which buildLineItem and the line's CHECK validated when the
@@ -237,9 +236,9 @@ func grantAuditMetadata(out domain.CreditLedgerEntry) map[string]any {
 // args so the invoice store's consumer-side CommitFunder interface is
 // satisfied directly (zero cross-domain imports).
 func (s *Service) GrantCommitForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber, currency string, amountCents int64, expiresAt *time.Time) (domain.CreditLedgerEntry, error) {
-	desc := "Prepaid commit"
+	desc := "Top-up"
 	if invoiceNumber != "" {
-		desc = fmt.Sprintf("Prepaid commit — invoice %s", invoiceNumber)
+		desc = fmt.Sprintf("Top-up — invoice %s", invoiceNumber)
 	}
 	return s.store.AppendEntryTx(ctx, tx, tenantID, domain.CreditLedgerEntry{
 		CustomerID:      customerID,
@@ -295,14 +294,6 @@ func (s *Service) LockCommitGrantForReliefTx(ctx context.Context, tx *sql.Tx, te
 	return g.AmountCents, g.ConsumedCents, g.CNRetiredCents, true, nil
 }
 
-// RetireCommitGrantForInvoiceTx retires the remaining balance of the commit
-// grant funded by invoiceID, on the caller's tx (invoice void — ADR-078 D3).
-// Clean no-op when no grant exists or nothing remains; consumed stays
-// consumed.
-func (s *Service) RetireCommitGrantForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string) (int64, error) {
-	return s.store.RetireCommitGrantForInvoiceTx(ctx, tx, tenantID, invoiceID)
-}
-
 // GrantTx is the in-transaction variant used by the subscription
 // handler's atomic AddItem-with-proration flow. The caller owns the
 // tx; this method runs the same validation as Grant but writes the
@@ -336,13 +327,13 @@ func (s *Service) GrantTx(ctx context.Context, tx *sql.Tx, tenantID string, inpu
 		return domain.CreditLedgerEntry{}, errs.Invalid("expires_at",
 			"must be in the future — a grant that expires at or before now is dead on arrival")
 	}
-	// Same kind gate as Grant — 'commit' stays reserved for the
-	// invoice-finalize funding path (ADR-078).
+	// Same kind gate as Grant — 'commit' stays reserved for a top-up's
+	// payment (ADR-078).
 	switch input.GrantKind {
 	case "", domain.GrantKindPromotional:
 	default:
 		return domain.CreditLedgerEntry{}, errs.Invalid("grant_kind",
-			"must be empty or 'promotional' — commit grants are created by finalizing a commit invoice")
+			"must be empty or 'promotional' — commit grants are created when a top-up is paid")
 	}
 	out, err := s.store.AppendEntryTx(ctx, tx, tenantID, domain.CreditLedgerEntry{
 		CustomerID:  input.CustomerID,

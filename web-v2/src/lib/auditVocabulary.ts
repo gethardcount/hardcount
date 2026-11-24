@@ -32,6 +32,10 @@ const EXPORTED_RESOURCE_LABELS: Record<string, string> = {
   audit_log: 'the audit log',
 }
 
+function isTopupRow(entry: AuditEntry): boolean {
+  return entry.resource_type === 'invoice' && entry.metadata?.billing_reason === 'topup'
+}
+
 export function describeAction(entry: AuditEntry): string {
   const label = entry.resource_label || ''
   // Item-level audit rows carry the meaningful discriminator in
@@ -94,9 +98,11 @@ export function describeAction(entry: AuditEntry): string {
     case 'pause': return `Paused ${label || 'subscription'}`
     case 'resume': return `Resumed ${label || 'subscription'}`
     case 'finalize': return `Finalized ${label || 'invoice'}`
-    case 'void': return `Voided ${label || 'invoice'}`
+    // A top-up's row says so (metadata.billing_reason): it has no number, its
+    // email is its payment link, and voiding it withdraws it.
+    case 'void': return isTopupRow(entry) ? 'Withdrew a top-up' : `Voided ${label || 'invoice'}`
     case 'collect': return `Collected payment on ${label || 'invoice'}`
-    case 'send': return `Emailed ${label || 'invoice'}`
+    case 'send': return isTopupRow(entry) ? 'Emailed a top-up link' : `Emailed ${label || 'invoice'}`
     case 'refund': return `Refunded ${label || 'invoice'}`
     case 'retry_tax': return `Retried tax on ${label || 'invoice'}`
     case 'issue': return `Issued ${label || 'credit note'}`

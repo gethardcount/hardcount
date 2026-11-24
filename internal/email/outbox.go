@@ -707,14 +707,16 @@ func (s *OutboxStore) PendingCount(ctx context.Context) (int64, error) {
 	return n, nil
 }
 
-// ListByInvoice returns all email_outbox rows whose payload references the
-// given invoice_number. Used by the invoice timeline to surface
+// ListByInvoice returns all email_outbox rows whose payload names the
+// invoice: by its number, or by its id for a top-up's offer, which is sent
+// before the top-up has a number. invoiceNumber is empty for an unpaid
+// top-up. Used by the invoice timeline to surface
 // customer-notification events ("Customer notified — payment method
 // required", dunning reminders, receipts) alongside Stripe webhook
 // events. Filters to invoice-relevant email types; portal magic links
 // and password resets are excluded by their email_type since they
 // aren't invoice-scoped.
-func (s *OutboxStore) ListByInvoice(ctx context.Context, tenantID, invoiceNumber string) ([]OutboxRow, error) {
+func (s *OutboxStore) ListByInvoice(ctx context.Context, tenantID, invoiceID, invoiceNumber string) ([]OutboxRow, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return nil, err
@@ -728,10 +730,10 @@ func (s *OutboxStore) ListByInvoice(ctx context.Context, tenantID, invoiceNumber
 		FROM email_outbox
 		WHERE email_type IN ('invoice', 'payment_receipt', 'payment_failed',
 		                     'payment_setup_request', 'dunning_warning',
-		                     'dunning_escalation', 'credit_note')
-		  AND payload->>'invoice_number' = $1
+		                     'dunning_escalation', 'credit_note', 'topup_offer')
+		  AND ((payload->>'invoice_number' = $1 AND $1 <> '') OR payload->>'invoice_id' = $2)
 		ORDER BY created_at ASC
-	`, invoiceNumber)
+	`, invoiceNumber, invoiceID)
 	if err != nil {
 		return nil, err
 	}
@@ -761,7 +763,8 @@ func (s *OutboxStore) ListByInvoice(ctx context.Context, tenantID, invoiceNumber
 
 // ListByCustomer returns email_outbox rows associated with the given
 // customer, last 30 days, newest first. Rows are matched by joining
-// payload->>'invoice_number' to invoices.invoice_number and filtering
+// payload->>'invoice_number' to invoices.invoice_number (or a top-up
+// offer's payload->>'invoice_id' to invoices.id) and filtering
 // on invoices.customer_id — same email_type allowlist as ListByInvoice
 // (excludes platform-internal mail like password_reset that isn't
 // customer-scoped). Powers the "Sent emails" section on the customer
@@ -789,14 +792,14 @@ func (s *OutboxStore) ListByCustomer(ctx context.Context, tenantID, customerID s
 		FROM email_outbox eo
 		JOIN invoices i
 		  ON i.tenant_id = eo.tenant_id
-		 AND i.invoice_number = eo.payload->>'invoice_number'
+		 AND (i.invoice_number = eo.payload->>'invoice_number' OR i.id = eo.payload->>'invoice_id')
 		LEFT JOIN credit_notes cn
 		  ON cn.tenant_id = eo.tenant_id
 		 AND cn.livemode = eo.livemode
 		 AND cn.credit_note_number = eo.payload->>'credit_note_number'
 		WHERE eo.email_type IN ('invoice', 'payment_receipt', 'payment_failed',
 		                        'payment_setup_request', 'dunning_warning',
-		                        'dunning_escalation', 'credit_note')
+		                        'dunning_escalation', 'credit_note', 'topup_offer')
 		  AND i.customer_id = $1
 		  AND eo.created_at >= now() - interval '30 days'
 		ORDER BY eo.effective_at DESC, eo.id DESC

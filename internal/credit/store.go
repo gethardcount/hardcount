@@ -71,9 +71,8 @@ type Store interface {
 	// ReturnCreditTx hands back credit an invoice drew, on the caller's tx
 	// (ADR-132): the part the invoice drew from credit blocks goes back to
 	// those blocks, last drawn first, keeping their expiry and kind; a share
-	// whose grant is past expiry expires at once, by the expiry sweep's rule;
-	// a share whose commit grant's funding invoice is voided is retired
-	// again. The whole amount is one grant row for the entry's source.
+	// whose grant is past expiry expires at once, by the expiry sweep's
+	// rule. The whole amount is one grant row for the entry's source.
 	ReturnCreditTx(ctx context.Context, tx *sql.Tx, tenantID string, in ReturnEntry) (domain.CreditLedgerEntry, domain.CreditReturn, error)
 
 	// ExpireGrantAtomic retires one expired grant — flips its
@@ -91,14 +90,6 @@ type Store interface {
 	// period invoice still draws on (domain.CreditDrawOwedSQL, ADR-071 §2).
 	ListExpiredGrants(ctx context.Context) ([]domain.CreditLedgerEntry, error)
 
-	// RetireCommitGrantForInvoiceTx retires the remaining balance of the
-	// commit grant funded by the given invoice, on the caller's tx — the
-	// void leg of ADR-078. Clean no-op (0, nil) when the invoice funded no
-	// grant or the grant is already fully consumed/retired. The
-	// consumed_cents CAS flip is the structural exactly-once gate, so the
-	// legal uncollectible→void sequence and retries converge on one
-	// retirement entry.
-	RetireCommitGrantForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string) (int64, error)
 	// LockCommitGrantTx + RetireCommitSliceForReliefTx are the ADR-080
 	// relief pair: read the funded grant's frozen state under the relief
 	// locks, then retire an explicit slice (bumping the telescoping anchor

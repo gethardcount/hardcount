@@ -33,12 +33,10 @@ export interface Attention {
      * Text that is safe to show as it is: one plain sentence saying
      * what happens and what to do. Facts that must show up front
      * follow on more lines, separated by a newline (`\n`), one sentence
-     * each and up to three lines in all: the setup-link email on
+     * each and up to two lines in all, such as the setup-link email on
      * `no_payment_method` (and on `dunning_exhausted` when no link can
-     * be emailed), and the prepaid credit at risk on an unpaid commit
-     * invoice. A no-card commit invoice carries all three. The wording
-     * can change between releases; switch on `reason` and `code`, not
-     * on this text.
+     * be emailed). The wording can change between releases; switch on
+     * `reason` and `code`, not on this text.
      */
   message: string;
   /**

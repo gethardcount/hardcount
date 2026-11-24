@@ -39,8 +39,8 @@ type ReturnEntry struct {
 	// a credit note never gives less than it says. The note is split pro rata
 	// to how the invoice was paid (paidDrawnShare); the drawn share goes back
 	// to the blocks it came from where it stays spendable, and everything
-	// else, including a share whose block is past expiry or is a commit whose
-	// funding invoice is voided, is new credit with no expiry. When unset (a
+	// else, including a share whose block is past expiry, is new credit with
+	// no expiry. When unset (a
 	// void, or a credit note on an unpaid invoice) every cent of the amount
 	// is drawn credit.
 	PaidInvoice bool
@@ -188,22 +188,17 @@ func paidDrawnShare(earlier, amount, drawn, total int64) (int64, error) {
 
 // blockState is a source block as the return reads it under the locks.
 type blockState struct {
-	ID              string
-	EntryType       domain.CreditEntryType
-	Currency        string
-	AmountCents     int64
-	ConsumedCents   int64
-	CNRetiredCents  int64
-	ExpiresAt       *time.Time
-	GrantKind       string
-	SourceInvoiceID string
+	ID            string
+	EntryType     domain.CreditEntryType
+	Currency      string
+	AmountCents   int64
+	ConsumedCents int64
+	ExpiresAt     *time.Time
 	// Held: a draw that can still use this grant is owed, so the expiry
 	// sweep does not retire it (domain.CreditDrawOwedSQL, ADR-071 §2).
 	Held bool
 	// Swept: the sweep already wrote this grant's expiry entry.
 	Swept bool
-	// FundingVoided: a commit grant whose funding invoice is voided.
-	FundingVoided bool
 }
 
 // restoreAction is what happens to a share once it is back on its block.
@@ -215,21 +210,14 @@ const (
 	// restoreThenExpire: the block is a grant past its expiry, so the share
 	// expires at once, as the sweep would have expired it.
 	restoreThenExpire
-	// restoreThenRetire: the block is a commit grant whose funding invoice is
-	// voided, so the share is retired again, as the void retired the rest.
-	restoreThenRetire
 )
 
 // classifyRestore applies the expiry sweep's rule to a restored share, at the
 // return's instant. A grant is expired when expires_at < at (the drain's
 // liveness rule is its complement). The sweep skips a grant an owed draw
 // still needs (Held), and once it has retired a grant, retirement wins
-// (ADR-071 §2): a swept grant never gets live credit back, held or not. A commit whose funding invoice is voided has no money
-// behind it, so that comes first.
+// (ADR-071 §2): a swept grant never gets live credit back, held or not.
 func classifyRestore(b blockState, at time.Time) restoreAction {
-	if b.FundingVoided {
-		return restoreThenRetire
-	}
 	if b.EntryType == domain.CreditGrant && b.ExpiresAt != nil && b.ExpiresAt.Before(at) && (b.Swept || !b.Held) {
 		return restoreThenExpire
 	}
@@ -237,14 +225,11 @@ func classifyRestore(b blockState, at time.Time) restoreAction {
 }
 
 // spendableAt reports whether a share restored to b would be spendable at
-// `at`: not past its expiry (expires_at >= at, the drain's rule) and not a
-// commit whose funding invoice is voided. On a paid invoice only such shares
-// go back to their block (ADR-132): a credit note never gives less than it
-// says, so a share that would expire or be retired is new credit instead.
+// `at`: not past its expiry (expires_at >= at, the drain's rule). On a paid
+// invoice only such shares go back to their block (ADR-132): a credit note
+// never gives less than it says, so a share that would expire is new credit
+// instead.
 func spendableAt(b blockState, at time.Time) bool {
-	if b.FundingVoided {
-		return false
-	}
 	return b.ExpiresAt == nil || !b.ExpiresAt.Before(at)
 }
 
@@ -260,7 +245,7 @@ func spendableAt(b blockState, at time.Time) bool {
 // Order of writes: for a grant past expiry with a remainder the sweep has not
 // written off yet, that remainder's expiry entry (the sweep's own write,
 // stamped at expires_at); the restores; the return row; then the at-once
-// expiry entries (stamped at the return's instant) and commit re-retires.
+// expiry entries (stamped at the return's instant).
 // The balance crossings (ADR-078) are emitted once, for the net change.
 func (s *PostgresStore) ReturnCreditTx(ctx context.Context, tx *sql.Tx, tenantID string, in ReturnEntry) (domain.CreditLedgerEntry, domain.CreditReturn, error) {
 	currency := strings.ToUpper(strings.TrimSpace(in.Currency))
@@ -400,10 +385,9 @@ func (s *PostgresStore) ReturnCreditTx(ctx context.Context, tx *sql.Tx, tenantID
 
 	result := domain.CreditReturn{ReturnedCents: in.AmountCents, RestoredCents: restoredCents, UnattributedCents: unattributed}
 	type followUp struct {
-		block    blockState
-		take     int64
-		consumed int64 // the block's consumed_cents after the restore
-		action   restoreAction
+		block  blockState
+		take   int64
+		action restoreAction
 	}
 	followUps := make([]followUp, 0, len(legs))
 	for _, leg := range legs {
@@ -441,7 +425,7 @@ func (s *PostgresStore) ReturnCreditTx(ctx context.Context, tx *sql.Tx, tenantID
 				"credit return for invoice %s: block %s changed between the read and the restore; retry", in.InvoiceID, b.ID)).
 				WithCode("credit_block_changed")
 		}
-		followUps = append(followUps, followUp{block: b, take: leg.TakeCents, consumed: consumed - leg.TakeCents, action: action})
+		followUps = append(followUps, followUp{block: b, take: leg.TakeCents, action: action})
 	}
 
 	row.ConsumedCents = restoredCents
@@ -464,21 +448,6 @@ func (s *PostgresStore) ReturnCreditTx(ctx context.Context, tx *sql.Tx, tenantID
 
 	for _, f := range followUps {
 		switch f.action {
-		case restoreThenRetire:
-			g := commitGrantState{
-				GrantID: f.block.ID, CustomerID: in.CustomerID, Currency: f.block.Currency,
-				AmountCents: f.block.AmountCents, ConsumedCents: f.consumed, CNRetiredCents: f.block.CNRetiredCents,
-			}
-			if err := s.retireCommitSliceTx(ctx, tx, tenantID, g, f.take, false, false,
-				fmt.Sprintf("Commit retired — funding invoice voided (grant %s)", f.block.ID),
-				map[string]any{
-					"reason": "commit_void_retire", "grant_id": f.block.ID,
-					"funding_invoice_id": f.block.SourceInvoiceID, "returned_for_invoice_id": in.InvoiceID,
-				},
-			); err != nil {
-				return domain.CreditLedgerEntry{}, domain.CreditReturn{}, err
-			}
-			result.CommitRetiredOnReturnCents += f.take
 		case restoreThenExpire:
 			ok, _, _, err := s.expireGrantRemainderTx(ctx, tx, tenantID, in.CustomerID, f.block.ID, f.block.Currency, f.take, at)
 			if err != nil {
@@ -646,9 +615,8 @@ func invoiceRestoredTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, in
 }
 
 // blockStatesTx reads the source blocks under the ledger locks, with what the
-// expiry sweep's rule needs: whether an owed draw holds the grant, whether the
-// sweep already retired it, and for a commit whether its funding invoice is
-// voided.
+// expiry sweep's rule needs: whether an owed draw holds the grant, and whether
+// the sweep already retired it.
 //
 // The hold leaves out invoiceID, the invoice the credit is being returned
 // for: it is the draw being undone (an unpaid one may still be queued for
@@ -659,16 +627,12 @@ func blockStatesTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoic
 		return out, nil
 	}
 	rows, err := tx.QueryContext(ctx, `
-		SELECT g.id, g.entry_type, g.currency, g.amount_cents, g.consumed_cents, g.cn_retired_cents,
-			g.expires_at, COALESCE(g.grant_kind, ''), COALESCE(g.source_invoice_id, ''),
+		SELECT g.id, g.entry_type, g.currency, g.amount_cents, g.consumed_cents, g.expires_at,
 			(g.expires_at IS NOT NULL AND `+domain.CreditDrawOwedExceptSQL("g", "$4")+`),
 			EXISTS (
 				SELECT 1 FROM customer_credit_ledger e
 				WHERE e.tenant_id = g.tenant_id AND e.customer_id = g.customer_id
-				  AND e.entry_type = 'expiry' AND e.description = 'Expired grant ' || g.id),
-			(COALESCE(g.grant_kind, '') = 'commit' AND EXISTS (
-				SELECT 1 FROM invoices fi
-				WHERE fi.tenant_id = g.tenant_id AND fi.id = g.source_invoice_id AND fi.status = 'voided'))
+				  AND e.entry_type = 'expiry' AND e.description = 'Expired grant ' || g.id)
 		FROM customer_credit_ledger g
 		WHERE g.tenant_id = $1 AND g.customer_id = $2 AND g.id = ANY($3::text[])
 	`, tenantID, customerID, ids, invoiceID)
@@ -678,8 +642,8 @@ func blockStatesTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoic
 	defer func() { _ = rows.Close() }()
 	for rows.Next() {
 		var b blockState
-		if err := rows.Scan(&b.ID, (*string)(&b.EntryType), &b.Currency, &b.AmountCents, &b.ConsumedCents, &b.CNRetiredCents,
-			&b.ExpiresAt, &b.GrantKind, &b.SourceInvoiceID, &b.Held, &b.Swept, &b.FundingVoided); err != nil {
+		if err := rows.Scan(&b.ID, (*string)(&b.EntryType), &b.Currency, &b.AmountCents, &b.ConsumedCents,
+			&b.ExpiresAt, &b.Held, &b.Swept); err != nil {
 			return nil, fmt.Errorf("read the blocks to restore: %w", err)
 		}
 		out[b.ID] = b

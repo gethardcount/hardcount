@@ -16,7 +16,7 @@ import (
 
 type emailRowsFake struct{ rows []EmailEventRow }
 
-func (f *emailRowsFake) ListByInvoice(context.Context, string, string) ([]EmailEventRow, error) {
+func (f *emailRowsFake) ListByInvoice(context.Context, string, string, string) ([]EmailEventRow, error) {
 	return f.rows, nil
 }
 

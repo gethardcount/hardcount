@@ -116,27 +116,18 @@ type attentionContext struct {
 	// prepaid-commit grant this invoice funded (ADR-078). Drawable is what the
 	// customer can still spend right now; Consumed is what they already spent
 	// and which no recovery can claw back. Both zero when the invoice funded no
-	// commit.
-	//
-	// TWO numbers, not one "outstanding", because they drive different
-	// sentences and only one of them is recoverable. A single figure next to a
-	// Void button misrepresents what Void does: void retires the UNSPENT
-	// balance in the void tx and leaves consumed credit consumed (ADR-078 D3),
-	// so an operator shown one number reads it as the amount voiding gets back.
+	// commit. Two numbers, because they drive different sentences of the
+	// dispute_lost notice (classifyDisputeLost).
 	//
 	// Drawable applies the SAME liveness predicate the drawdown itself uses
 	// (drainPositiveBlocks: positive, not exhausted, not past expires_at,
 	// evaluated at the request's instant) — so an expired-but-unswept grant
-	// reports 0 and the banner cannot claim spendable credit the drain would
+	// reports 0 and the notice cannot claim spendable credit the drain would
 	// refuse to spend.
 	//
-	// Populated lazily, only for the finalized/uncollectible manual invoices
-	// that can carry a commit line: one hit on the unique partial index
-	// idx_credit_ledger_commit_fund_dedup (tenant_id, source_invoice_id WHERE
-	// grant_kind='commit'), never a scan. Zero values yield no attention, which
-	// is the safe default for every caller that does not supply the signal and
-	// for a read that errored — the alternative, a banner asserting a balance
-	// we could not read, is the failure mode worth avoiding.
+	// Populated only for a paid top-up with a lost dispute (decorateInvoice).
+	// Zero values name no prepaid credit, the safe default for every caller
+	// that does not supply the signal and for a read that errored.
 	CommitGrantDrawableCents int64
 	CommitGrantConsumedCents int64
 
@@ -218,27 +209,12 @@ func docURL(slug string) string {
 }
 
 // classifyInvoiceAttention returns the one notice an invoice shows its
-// operator, or nil when it needs none. classifyAttentionCause picks the
-// cause: its first matching branch wins, in the order written there.
-// withCommitExposure then adds the prepaid credit an unpaid invoice bought,
-// or raises a notice for that alone.
+// operator, or nil when it needs none: the CAUSE of the invoice's trouble,
+// one reason, highest urgency first. Its first matching branch wins, in the
+// order written here.
 //
 // It reads only its arguments and does no I/O.
 func classifyInvoiceAttention(inv domain.Invoice, atc attentionContext) *domain.Attention {
-	return withCommitExposure(classifyAttentionCause(inv, atc), inv, atc)
-}
-
-// classifyAttentionCause is the single-winner priority chain: the CAUSE of the
-// invoice's trouble, one reason, highest urgency first.
-//
-// Split out from classifyInvoiceAttention so commit exposure can be folded onto
-// its result instead of competing inside it. Exposure is not a cause — it is a
-// consequence that co-occurs with any of these, and it is present on healthy
-// invoices too (a Net-30 commit is unpaid-with-live-credit by design for its
-// whole term). A reason that answered "why does this need attention?" with
-// "because credit is live" would be both wrong and, since the chain returns the
-// FIRST match, would suppress the declined card that is the actual answer.
-func classifyAttentionCause(inv domain.Invoice, atc attentionContext) *domain.Attention {
 	// Terminal-ish statuses produce no attention surface. Uncollectible
 	// is technically forward-transitionable (operator can still record
 	// an offline payment or void it) but Stripe-parity treats it as a
@@ -389,148 +365,6 @@ func classifyRecoveryInFlight(inv domain.Invoice) *domain.Attention {
 		DocURL:   docURL("payment-processing"),
 		Since:    &since,
 	}
-}
-
-// attentionSeverityRank orders severity for max(). Kept next to the fold that
-// needs it — nothing else in the file compares two severities.
-func attentionSeverityRank(s domain.AttentionSeverity) int {
-	switch s {
-	case domain.AttentionSeverityCritical:
-		return 3
-	case domain.AttentionSeverityWarning:
-		return 2
-	default:
-		return 1
-	}
-}
-
-// withCommitExposure reports that this invoice bought prepaid credit and the
-// cash never arrived (ADR-078 D3's named fast-follow).
-//
-// It FOLDS rather than competes. When a cause banner already won, its reason,
-// its actions and their order are preserved and the exposure is appended to the
-// message; only when nothing else fired does this synthesize a banner of its
-// own. Two reasons, both learned the hard way:
-//
-//   - A commit invoice is unpaid-with-live-credit from finalize until payment.
-//     On Net-30 that is thirty days of the deal working exactly as agreed. A
-//     reason that fired there would cry wolf on every commit sale Hardcount makes.
-//   - The chain returns the FIRST match. Winning it would have replaced
-//     "the customer's card was declined" — the actionable answer — with a
-//     restatement of the deal terms, on precisely the invoices that most need
-//     the card fixed.
-//
-// Severity is raised to a floor, never lowered: exposure can make an existing
-// banner more urgent, but a Critical cause stays Critical.
-//
-// The amount goes in Message, deliberately, not Detail: the dashboard renders
-// detail inside a collapsed <details> (InvoiceAttention.tsx), and money leaving
-// the building behind a disclosure triangle is not surfaced. It is a second
-// line after the cause's sentence, so each line stays one plain sentence.
-func withCommitExposure(att *domain.Attention, inv domain.Invoice, atc attentionContext) *domain.Attention {
-	drawable, spent := atc.CommitGrantDrawableCents, atc.CommitGrantConsumedCents
-	if drawable <= 0 && spent <= 0 {
-		// No commit grant on this invoice — the overwhelmingly common case, and
-		// the reason this costs nothing on ordinary invoices.
-		return att
-	}
-	// Paid: the cash arrived, which is the whole point — nothing to report.
-	// (Unless a dispute took it back: classifyDisputeLost reports the
-	// spendable credit on a paid invoice itself, with commit relief as the
-	// action, since void is refused there.)
-	// Voided: the operator already took the one recovery action there is, and
-	// the void tx retired the unspent balance. Draft: a grant is funded at
-	// finalize, so a draft cannot have one; if it somehow does, that is a
-	// corruption for the ledger's own guards to raise, not a banner.
-	switch inv.Status {
-	case domain.InvoicePaid, domain.InvoiceVoided, domain.InvoiceDraft:
-		return att
-	}
-
-	// Spent credit is unrecoverable — void retires only what is left (ADR-078
-	// D3). Money that is already gone is the more serious state, so it, not the
-	// mere existence of a grant, is what escalates.
-	floor := domain.AttentionSeverityWarning
-	if spent > 0 {
-		floor = domain.AttentionSeverityCritical
-	}
-
-	amount := domain.FormatMoneyMinor(drawable, inv.Currency)
-	var sentence, detail string
-	switch {
-	case spent <= 0:
-		sentence = "The customer can already spend " + amount +
-			" from this invoice, and voiding it cancels that credit."
-		detail = "This invoice bought prepaid credit, and the credit was granted when the invoice was finalized, before any payment."
-	case drawable > 0:
-		sentence = "The customer can still spend " + amount + " (" +
-			domain.FormatMoneyMinor(spent, inv.Currency) + " already spent), and voiding cancels the unspent " + amount + "."
-		detail = "Voiding cancels only credit that hasn't been spent; credit the customer already spent stays spent."
-	default:
-		sentence = "The customer already spent all " +
-			domain.FormatMoneyMinor(spent, inv.Currency) + " this invoice bought, so voiding cannot recover it."
-		detail = "Voiding cancels only credit that hasn't been spent, and none is left."
-	}
-
-	// Void is offered only when there is something left to cancel. On a
-	// fully-spent grant the button would destroy the invoice and recover
-	// nothing, which is a worse outcome than no button at all.
-	//
-	// ...and never while a payment is in flight, because PaymentBlocksAction
-	// refuses void in that state — the button would answer 409. Reachable
-	// since bad-debt recovery shipped: a written-off commit invoice being
-	// recovered sits at uncollectible+processing, where this banner folds onto
-	// the recovery banner (pre-ADR-113 in-flight rows only)
-	// immediately above a Void button that cannot run.
-	var voidAction []domain.AttentionActionItem
-	if drawable > 0 && !inv.PaymentInFlight() {
-		voidAction = []domain.AttentionActionItem{{Code: domain.AttentionActionVoidInvoice, Label: "Void invoice"}}
-	}
-
-	if att == nil {
-		since := inv.UpdatedAt
-		return &domain.Attention{
-			Severity: floor,
-			Reason:   domain.AttentionReasonCommitExposure,
-			Code:     "credit.commit_exposure",
-			Message:  sentence,
-			Detail:   detail,
-			DocURL:   docURL("commit-exposure"),
-			Actions:  voidAction,
-			Since:    &since,
-			DueBy:    inv.DueAt,
-		}
-	}
-
-	folded := *att
-	if attentionSeverityRank(floor) > attentionSeverityRank(folded.Severity) {
-		folded.Severity = floor
-	}
-	// Labelled, because under another notice's title the line needs its own
-	// name ("The customer can…" alone would read as part of the cause).
-	folded.Message = strings.TrimSpace(folded.Message) + "\nUnpaid prepaid credit: t" + strings.TrimPrefix(sentence, "T")
-	folded.Detail = joinDetail(folded.Detail, detail)
-	// Appended, never prepended: the cause banner's first action is its primary
-	// CTA (fix the card, add a payment method), and that is still the right
-	// first move. Void is the fallback for when collection has failed.
-	// A cause that already offers Void (an amount below Stripe's minimum)
-	// keeps its one button.
-	folded.Actions = append([]domain.AttentionActionItem{}, folded.Actions...)
-	for _, a := range voidAction {
-		if !hasAttentionAction(folded.Actions, a.Code) {
-			folded.Actions = append(folded.Actions, a)
-		}
-	}
-	return &folded
-}
-
-func hasAttentionAction(actions []domain.AttentionActionItem, code domain.AttentionAction) bool {
-	for _, a := range actions {
-		if a.Code == code {
-			return true
-		}
-	}
-	return false
 }
 
 // classifyTaxAttention branches on the typed tax_error_code persisted
@@ -1301,7 +1135,7 @@ func classifyPaymentAnomaly(inv domain.Invoice) *domain.Attention {
 // that retires the credit (ADR-080), so the notice names it, with the
 // spendable amount up front. The service reads the grant for exactly this
 // case (decorateInvoice). Relief is for paid invoices only, so the branch is
-// too; on any other status withCommitExposure already reports the credit.
+// too.
 func classifyDisputeLost(inv domain.Invoice, d domain.InvoiceDispute, atc attentionContext) *domain.Attention {
 	since := inv.UpdatedAt
 	if d.ClosedAt != nil {

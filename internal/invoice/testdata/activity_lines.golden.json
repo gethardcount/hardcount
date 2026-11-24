@@ -203,14 +203,8 @@
     "line": {
       "id": "created/topup",
       "kind": "invoice.created",
-      "title": "Invoice created",
-      "detail": [
-        [
-          {
-            "text": "Prepaid credit"
-          }
-        ]
-      ],
+      "title": "Top-up created",
+      "detail": [],
       "actor": {
         "kind": "person",
         "name": "alice@example.com"
@@ -219,8 +213,8 @@
       "occurred_at": "2027-02-01T04:30:00Z"
     },
     "text": [
-      "Invoice created",
-      "meta: Prepaid credit · by alice@example.com",
+      "Top-up created",
+      "meta: by alice@example.com",
       "tone: neutral"
     ]
   },
@@ -444,6 +438,93 @@
     "text": [
       "Invoice voided · $49.00",
       "meta: by alice@example.com",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "voided/top-up withdrawn by person",
+    "line": {
+      "id": "voided/top-up withdrawn by person",
+      "kind": "invoice.voided",
+      "title": "Top-up withdrawn",
+      "detail": [],
+      "actor": {
+        "kind": "person",
+        "name": "alice@example.com"
+      },
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Top-up withdrawn",
+      "meta: by alice@example.com",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "finalized/top-up issued by its payment",
+    "line": {
+      "id": "finalized/top-up issued by its payment",
+      "kind": "invoice.finalized",
+      "title": "Invoice issued",
+      "amount": {
+        "cents": 4900,
+        "currency": "USD"
+      },
+      "detail": [],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Invoice issued · $49.00",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "credit added/never expires",
+    "line": {
+      "id": "credit added/never expires",
+      "kind": "credit.added",
+      "title": "Credit added",
+      "amount": {
+        "cents": 10000,
+        "currency": "USD"
+      },
+      "detail": [],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Credit added · $100.00",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "credit added/expires",
+    "line": {
+      "id": "credit added/expires",
+      "kind": "credit.added",
+      "title": "Credit added",
+      "amount": {
+        "cents": 10000,
+        "currency": "USD"
+      },
+      "detail": [
+        [
+          {
+            "text": "Expires "
+          },
+          {
+            "time": "2028-02-01T04:30:00Z"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Credit added · $100.00",
+      "meta: Expires Feb 1, 2028 04:30 UTC",
       "tone: neutral"
     ]
   },
@@ -7168,6 +7249,388 @@
     ]
   },
   {
+    "case": "email/topup_offer/dispatched/bounced",
+    "line": {
+      "id": "email/topup_offer/dispatched/bounced",
+      "kind": "email.topup_offer",
+      "title": "Top-up link bounced",
+      "problem": "The customer's mail server rejected it.",
+      "detail": [
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "failure",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Top-up link bounced",
+      "problem: The customer's mail server rejected it.",
+      "meta: To billing@acme.test",
+      "tone: failure"
+    ]
+  },
+  {
+    "case": "email/topup_offer/dispatched/complained",
+    "line": {
+      "id": "email/topup_offer/dispatched/complained",
+      "kind": "email.topup_offer",
+      "title": "Top-up link marked as spam",
+      "detail": [
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "failure",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Top-up link marked as spam",
+      "meta: To billing@acme.test",
+      "tone: failure"
+    ]
+  },
+  {
+    "case": "email/topup_offer/dispatched/delivered",
+    "line": {
+      "id": "email/topup_offer/dispatched/delivered",
+      "kind": "email.topup_offer",
+      "title": "Top-up link delivered",
+      "detail": [
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Top-up link delivered",
+      "meta: To billing@acme.test",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "email/topup_offer/dispatched/unknown",
+    "line": {
+      "id": "email/topup_offer/dispatched/unknown",
+      "kind": "email.topup_offer",
+      "title": "Top-up link sent",
+      "detail": [
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Top-up link sent",
+      "meta: To billing@acme.test",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "email/topup_offer/failed/bounced",
+    "line": {
+      "id": "email/topup_offer/failed/bounced",
+      "kind": "email.topup_offer",
+      "title": "Top-up link couldn't be sent",
+      "problem": "The customer did not get this email.",
+      "detail": [
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "failure",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Top-up link couldn't be sent",
+      "problem: The customer did not get this email.",
+      "meta: To billing@acme.test",
+      "tone: failure"
+    ]
+  },
+  {
+    "case": "email/topup_offer/failed/complained",
+    "line": {
+      "id": "email/topup_offer/failed/complained",
+      "kind": "email.topup_offer",
+      "title": "Top-up link couldn't be sent",
+      "problem": "The customer did not get this email.",
+      "detail": [
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "failure",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Top-up link couldn't be sent",
+      "problem: The customer did not get this email.",
+      "meta: To billing@acme.test",
+      "tone: failure"
+    ]
+  },
+  {
+    "case": "email/topup_offer/failed/delivered",
+    "line": {
+      "id": "email/topup_offer/failed/delivered",
+      "kind": "email.topup_offer",
+      "title": "Top-up link couldn't be sent",
+      "problem": "The customer did not get this email.",
+      "detail": [
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "failure",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Top-up link couldn't be sent",
+      "problem: The customer did not get this email.",
+      "meta: To billing@acme.test",
+      "tone: failure"
+    ]
+  },
+  {
+    "case": "email/topup_offer/failed/unknown",
+    "line": {
+      "id": "email/topup_offer/failed/unknown",
+      "kind": "email.topup_offer",
+      "title": "Top-up link couldn't be sent",
+      "problem": "The customer did not get this email.",
+      "detail": [
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "failure",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Top-up link couldn't be sent",
+      "problem: The customer did not get this email.",
+      "meta: To billing@acme.test",
+      "tone: failure"
+    ]
+  },
+  {
+    "case": "email/topup_offer/pending/bounced",
+    "line": {
+      "id": "email/topup_offer/pending/bounced",
+      "kind": "email.topup_offer",
+      "title": "Top-up link queued",
+      "detail": [
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Top-up link queued",
+      "meta: To billing@acme.test",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "email/topup_offer/pending/complained",
+    "line": {
+      "id": "email/topup_offer/pending/complained",
+      "kind": "email.topup_offer",
+      "title": "Top-up link queued",
+      "detail": [
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Top-up link queued",
+      "meta: To billing@acme.test",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "email/topup_offer/pending/delivered",
+    "line": {
+      "id": "email/topup_offer/pending/delivered",
+      "kind": "email.topup_offer",
+      "title": "Top-up link queued",
+      "detail": [
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Top-up link queued",
+      "meta: To billing@acme.test",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "email/topup_offer/pending/unknown",
+    "line": {
+      "id": "email/topup_offer/pending/unknown",
+      "kind": "email.topup_offer",
+      "title": "Top-up link queued",
+      "detail": [
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Top-up link queued",
+      "meta: To billing@acme.test",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "email/topup_offer/skipped/bounced",
+    "line": {
+      "id": "email/topup_offer/skipped/bounced",
+      "kind": "email.topup_offer",
+      "title": "Top-up link not sent",
+      "detail": [
+        [
+          {
+            "text": "The invoice was already closed"
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Top-up link not sent",
+      "meta: The invoice was already closed · To billing@acme.test",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "email/topup_offer/skipped/complained",
+    "line": {
+      "id": "email/topup_offer/skipped/complained",
+      "kind": "email.topup_offer",
+      "title": "Top-up link not sent",
+      "detail": [
+        [
+          {
+            "text": "The invoice was already closed"
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Top-up link not sent",
+      "meta: The invoice was already closed · To billing@acme.test",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "email/topup_offer/skipped/delivered",
+    "line": {
+      "id": "email/topup_offer/skipped/delivered",
+      "kind": "email.topup_offer",
+      "title": "Top-up link not sent",
+      "detail": [
+        [
+          {
+            "text": "The invoice was already closed"
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Top-up link not sent",
+      "meta: The invoice was already closed · To billing@acme.test",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "email/topup_offer/skipped/unknown",
+    "line": {
+      "id": "email/topup_offer/skipped/unknown",
+      "kind": "email.topup_offer",
+      "title": "Top-up link not sent",
+      "detail": [
+        [
+          {
+            "text": "The invoice was already closed"
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Top-up link not sent",
+      "meta: The invoice was already closed · To billing@acme.test",
+      "tone: neutral"
+    ]
+  },
+  {
     "case": "email/setup trigger/auto_charge_retry_no_pm",
     "line": {
       "id": "email/setup trigger/auto_charge_retry_no_pm",
@@ -7504,6 +7967,60 @@
     "text": [
       "Failed payment notice not sent",
       "meta: The invoice was already closed · To billing@acme.test · Automatic",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "email/top-up link skipped because/paid",
+    "line": {
+      "id": "email/top-up link skipped because/paid",
+      "kind": "email.topup_offer",
+      "title": "Top-up link not sent",
+      "detail": [
+        [
+          {
+            "text": "The top-up was already paid"
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Top-up link not sent",
+      "meta: The top-up was already paid · To billing@acme.test",
+      "tone: neutral"
+    ]
+  },
+  {
+    "case": "email/top-up link skipped because/voided",
+    "line": {
+      "id": "email/top-up link skipped because/voided",
+      "kind": "email.topup_offer",
+      "title": "Top-up link not sent",
+      "detail": [
+        [
+          {
+            "text": "The top-up was already withdrawn"
+          }
+        ],
+        [
+          {
+            "text": "To billing@acme.test"
+          }
+        ]
+      ],
+      "tone": "neutral",
+      "occurred_at": "2027-02-01T04:30:00Z"
+    },
+    "text": [
+      "Top-up link not sent",
+      "meta: The top-up was already withdrawn · To billing@acme.test",
       "tone: neutral"
     ]
   },

@@ -28,7 +28,7 @@ func (f *cnLaneFake) List(context.Context, string, string) ([]domain.CreditNote,
 
 type emailLaneFake struct{ err error }
 
-func (f *emailLaneFake) ListByInvoice(context.Context, string, string) ([]EmailEventRow, error) {
+func (f *emailLaneFake) ListByInvoice(context.Context, string, string, string) ([]EmailEventRow, error) {
 	return nil, f.err
 }
 

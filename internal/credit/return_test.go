@@ -176,8 +176,7 @@ func TestPaidDrawnShare(t *testing.T) {
 }
 
 // spendableAt is the paid branch's test: a share goes back to its block only
-// while the block is not past expiry (the boundary is live) and is not a
-// commit whose funding invoice is voided.
+// while the block is not past expiry (the boundary is live).
 func TestSpendableAt(t *testing.T) {
 	at := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
 	past, future := at.Add(-time.Second), at.Add(time.Second)
@@ -191,7 +190,6 @@ func TestSpendableAt(t *testing.T) {
 		{"at the boundary", blockState{ExpiresAt: &at}, true},
 		{"past expiry", blockState{ExpiresAt: &past}, false},
 		{"past expiry but held: still not spendable now", blockState{ExpiresAt: &past, Held: true}, false},
-		{"commit with a voided funding invoice", blockState{FundingVoided: true}, false},
 	} {
 		if got := spendableAt(tc.b, at); got != tc.want {
 			t.Errorf("%s: spendableAt = %v, want %v", tc.name, got, tc.want)
@@ -201,13 +199,11 @@ func TestSpendableAt(t *testing.T) {
 
 // classifyRestore applies the expiry sweep's rule: expired when
 // expires_at < at (the boundary instant is live), not while an owed draw holds
-// the grant, and retirement wins once the sweep wrote the grant off. A voided
-// commit funding invoice comes first.
+// the grant, and retirement wins once the sweep wrote the grant off.
 //
 // Mutation-verify: `!b.ExpiresAt.After(at)` (boundary expired) → "at the
 // boundary" red; drop `b.Swept ||` → "swept and held" red; drop the Held
-// test → "held, not swept" red; drop the funding check → both "funding
-// voided" cases red.
+// test → "held, not swept" red.
 func TestClassifyRestore_FollowsTheSweepRule(t *testing.T) {
 	at := time.Date(2026, 10, 30, 12, 0, 0, 0, time.UTC)
 	past, boundary, future := at.Add(-time.Hour), at, at.Add(time.Hour)
@@ -226,8 +222,6 @@ func TestClassifyRestore_FollowsTheSweepRule(t *testing.T) {
 		{"past expiry, held, not swept: the owed draw may use it", grant(&past, true, false), restoreLive},
 		{"past expiry, swept and held: retirement wins", grant(&past, true, true), restoreThenExpire},
 		{"a positive adjustment never expires", blockState{EntryType: domain.CreditAdjustment, ExpiresAt: &past}, restoreLive},
-		{"funding voided", blockState{EntryType: domain.CreditGrant, GrantKind: "commit", FundingVoided: true}, restoreThenRetire},
-		{"funding voided and expired: retired", blockState{EntryType: domain.CreditGrant, GrantKind: "commit", FundingVoided: true, ExpiresAt: &past}, restoreThenRetire},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

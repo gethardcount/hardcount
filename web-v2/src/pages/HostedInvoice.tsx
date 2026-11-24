@@ -6,7 +6,10 @@ import { useParams, useSearchParams } from 'react-router-dom'
 import { formatCents, formatRate, formatLineQuantity, formatDate, formatTaxRate } from '@/lib/api'
 import { invoiceLineRate } from '@/lib/priceDisplay'
 import { invoiceAmountLine, invoiceDueCents, invoiceHeadline, invoicePaymentInFlight, invoicePaymentSucceeded } from '@/lib/invoiceTerminal'
-import { creditNoteBackText, hostedTotalRows, loadErrorCopy, payErrorCopy, payUnavailableCopy, type HostedCreditNote } from '@/lib/hostedInvoice'
+import {
+  creditNoteBackText, hostedHasPdf, hostedHeading, hostedSubject, hostedTotalRows, loadErrorCopy, offerSentence, partyHeading,
+  payErrorCopy, paymentCheckCopy, payUnavailableCopy, testModeNotice, withdrawnSentence, type HostedCreditNote,
+} from '@/lib/hostedInvoice'
 import { sellerContact } from '@/lib/sellerContact'
 import type { HostedInvoiceTopup } from '@/lib/gen/schemas/hostedInvoiceTopup'
 import { SellerContactLink } from '@/components/SellerContactLink'
@@ -186,10 +189,12 @@ export default function HostedInvoicePage() {
   })
   const data = invoiceQuery.data ?? null
   const seller = data?.branding.company_name?.trim() ?? ''
-  // An unpaid top-up is an offer to buy credit: it has no number or due
-  // date yet, and its payment issues it.
-  const unpaidTopup = data?.invoice.status === 'draft' ? data.topup : undefined
-  const heading = unpaidTopup ? 'Buy prepaid credit' : `Invoice ${data?.invoice.invoice_number ?? ''}`.trim()
+  // A top-up is an offer to buy credit until it is paid: it has no number,
+  // due date or PDF, and its payment issues it. Withdrawn unpaid, it stays
+  // an offer. Paid, it is an invoice.
+  const subject = hostedSubject(data?.invoice.status ?? '', !!data?.topup)
+  const unpaidTopup = subject === 'offer' ? data?.topup : undefined
+  const heading = hostedHeading(subject, data?.invoice.invoice_number ?? '')
   usePageTitle(data ? `${heading}${seller ? ` from ${seller}` : ''}` : 'Invoice')
   const loading = !!token && invoiceQuery.isLoading
   // A failed settle-poll keeps the invoice it already has: the next poll
@@ -218,7 +223,7 @@ export default function HostedInvoicePage() {
         const body = await res.json().catch(() => ({}))
         setPayingStatus('idle')
         // Customer-safe copy keyed on the code, never the server message.
-        setPayError(payErrorCopy(body?.error?.code, seller, res.status))
+        setPayError(payErrorCopy(body?.error?.code, seller, res.status, subject))
         return
       }
       const { url } = (await res.json()) as { url: string }
@@ -226,7 +231,7 @@ export default function HostedInvoicePage() {
       window.location.href = url
     } catch {
       setPayingStatus('idle')
-      setPayError(payErrorCopy(undefined, seller))
+      setPayError(payErrorCopy(undefined, seller, 0, subject))
     }
   }
 
@@ -300,6 +305,17 @@ export default function HostedInvoicePage() {
                 Received on {formatDate(invoice.paid_at, invoice.billing_timezone || "UTC")}
               </p>
             )}
+          </div>
+        </div>
+      )
+    }
+    if (subject === 'withdrawn_offer') {
+      return (
+        <div role="status" className="rounded-lg bg-muted px-4 py-3 flex items-start gap-3">
+          <XCircle size={18} className="text-muted-foreground mt-0.5 shrink-0" aria-hidden="true" />
+          <div className="text-sm">
+            <p className="font-medium text-foreground">Offer withdrawn</p>
+            <p className="text-muted-foreground">{withdrawnSentence(seller)}</p>
           </div>
         </div>
       )
@@ -439,7 +455,7 @@ export default function HostedInvoicePage() {
             className="mb-4 rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 px-4 py-3"
           >
             <p className="text-sm font-medium text-amber-800 dark:text-amber-300">
-              Test mode — this invoice is a test and no real payment will be collected.
+              {testModeNotice(subject)}
             </p>
           </div>
         )}
@@ -456,7 +472,7 @@ export default function HostedInvoicePage() {
                 {/* The page's one h1: "Invoice" + number, or the top-up
                     heading. The seller name above is optional, so it can't
                     carry the heading. */}
-                {unpaidTopup ? (
+                {subject !== 'invoice' ? (
                   <h1 className="text-xl font-semibold text-foreground">{heading}</h1>
                 ) : (
                   <h1 className="flex flex-col">
@@ -465,7 +481,7 @@ export default function HostedInvoicePage() {
                   </h1>
                 )}
               </div>
-              {!unpaidTopup && (
+              {subject === 'invoice' && (
               <div className="text-right">
                 {/* Second label for the same figure — the totals block below
                     is the other. #651 renamed that one for closed invoices
@@ -494,7 +510,7 @@ export default function HostedInvoicePage() {
             <div className={hasFrom ? 'grid grid-cols-1 sm:grid-cols-2 gap-6' : 'grid grid-cols-1 gap-6'}>
               <section>
                 <h3 className="text-xs text-muted-foreground uppercase tracking-wider mb-2">
-                  Bill to
+                  {partyHeading(subject)}
                 </h3>
                 {bill_to.name && (
                   <p className="text-sm font-medium text-foreground">{bill_to.name}</p>
@@ -528,15 +544,13 @@ export default function HostedInvoicePage() {
                 of its line and totals (which end in "Amount due"). */}
             {unpaidTopup && (
               <section className="space-y-1 text-sm text-foreground">
-                <p>
-                  {`You pay ${formatCents(invoiceDueCents(invoice), invoice.currency)}. You get ${formatCents(unpaidTopup.credit_cents, invoice.currency)} of credit, added to your account as soon as your payment goes through.`}
-                </p>
+                <p>{offerSentence(formatCents(invoiceDueCents(invoice), invoice.currency), formatCents(unpaidTopup.credit_cents, invoice.currency))}</p>
                 <p>{unpaidTopup.validity}</p>
               </section>
             )}
 
             {/* Line items */}
-            {!unpaidTopup && (
+            {subject === 'invoice' && (
             <section aria-labelledby="line-items-heading">
               <h3 id="line-items-heading" className="sr-only">Line items</h3>
               <div className="overflow-hidden border rounded-lg">
@@ -571,7 +585,7 @@ export default function HostedInvoicePage() {
             )}
 
             {/* Totals */}
-            {!unpaidTopup && (
+            {subject === 'invoice' && (
             <section className="flex justify-end">
               <dl className="w-full sm:w-80 space-y-2 text-sm">
                 {totalRows.includes('subtotal') && (
@@ -711,14 +725,10 @@ export default function HostedInvoicePage() {
               invoicePaymentInFlight(data.invoice) !== null && (
                 <div className="rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 px-4 py-3">
                   <p className="font-medium text-amber-800 dark:text-amber-300">
-                    {invoicePaymentInFlight(data.invoice) === 'processing'
-                      ? 'A payment for this invoice is being confirmed'
-                      : "We're checking a recent payment on this invoice"}
+                    {paymentCheckCopy(invoicePaymentInFlight(data.invoice) === 'processing' ? 'processing' : 'unknown', subject).title}
                   </p>
                   <p className="text-sm text-amber-700/80 dark:text-amber-400/80 mt-1">
-                    {invoicePaymentInFlight(data.invoice) === 'processing'
-                      ? "You don't need to do anything — we'll email a receipt once it completes."
-                      : "Payment is paused here so you can't be charged twice while we confirm it with our payment provider. If you've already been charged, nothing further is needed."}
+                    {paymentCheckCopy(invoicePaymentInFlight(data.invoice) === 'processing' ? 'processing' : 'unknown', subject).body}
                   </p>
                 </div>
               )}
@@ -728,7 +738,7 @@ export default function HostedInvoicePage() {
                 Say so instead of offering a Pay button that can only fail. */}
             {data.pay_unavailable_reason && (
               <div role="status" className="rounded-lg bg-muted px-4 py-3 text-sm text-foreground">
-                {payUnavailableCopy(seller, data.pay_unavailable_reason)}
+                {payUnavailableCopy(seller, data.pay_unavailable_reason, subject)}
               </div>
             )}
 
@@ -766,8 +776,8 @@ export default function HostedInvoicePage() {
                   )}
                 </Button>
               ) : null}
-              {/* An unpaid top-up is not an invoice yet: no PDF to keep. */}
-              {!unpaidTopup && (
+              {/* A top-up has no document until it is paid. */}
+              {hostedHasPdf(subject) && (
                 <Button
                   render={<a href={pdfHref} target="_blank" rel="noopener noreferrer" />}
                   variant="outline"

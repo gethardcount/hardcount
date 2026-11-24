@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo } from 'react'
 import { StaleNotice } from '@/components/StaleNotice'
 import { usePageTitle } from '@/hooks/usePageTitle'
 import { useTenantSettings } from '@/hooks/useTenantSettings'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, useNavigate, useSearchParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -17,15 +17,16 @@ import { IssueCreditDialog } from '@/components/IssueCreditDialog'
 import { newRetryKeys } from '@/lib/retryKeys'
 import { pollIntervalForInvoice } from '@/lib/invoicePolling'
 import { amountInputError, dollarsToWholeCents, wholeUnits } from '@/lib/priceInput'
-import { collectOutcome, writeOffOutcome } from '@/lib/actionOutcomes'
+import { collectOutcome, invoicePageOutcome, writeOffOutcome } from '@/lib/actionOutcomes'
 import { showOutcome } from '@/lib/outcomeToast'
+import { arrivalConfirm } from '@/lib/sellCredit'
 import { InvoiceAttention } from '@/components/InvoiceAttention'
 import { RecordedFromStripeTag, StripeRefundActions, StripeRefundLine } from '@/components/StripeRefundActions'
 import { flaggedStripeRefunds } from '@/lib/stripeRefunds'
 import { ActivityList, ActivityZone } from '@/components/ActivityList'
 import { Callout } from '@/components/Callout'
 import { collectionPausedNow, finalizeConfirmLines, pickInvoiceNotice, writtenOffCardLine, writtenOffSubscriptionLine } from '@/lib/invoiceNotice'
-import { invoiceLabel, issueDates, sellerBlock, sellerMissing, SELLER_SETTINGS_PATH } from '@/lib/invoiceDocument'
+import { creditLastsText, hasDocument, invoiceLabel, isUnpaidTopup, issueDates, sellerBlock, sellerMissing, showsActivity, topupCredit, SELLER_SETTINGS_PATH } from '@/lib/invoiceDocument'
 import { authApi } from '@/lib/auth'
 import { useAuth } from '@/contexts/AuthContext'
 import { useNowResolver } from '@/hooks/useNow'
@@ -166,6 +167,7 @@ const LANE_LABELS: Record<string, string> = {
   disputes: 'disputes',
   charge_attempts: 'payment attempts',
   stripe_refunds: 'refunds made in Stripe',
+  credit: 'the credit a top-up added',
 }
 const laneLabel = (lane: string): string => LANE_LABELS[lane] ?? lane
 
@@ -305,7 +307,7 @@ export default function InvoiceDetailPage() {
   const { data: timelineData } = useQuery({
     queryKey: ['invoice-timeline', id],
     queryFn: () => api.getPaymentTimeline(id!),
-    enabled: !!id && invoice?.status !== 'draft',
+    enabled: !!id && !!invoice && showsActivity(invoice),
     refetchInterval: pollIntervalForInvoice(invoice as ApiInvoice | undefined),
   })
   // ONE lane (ADR-104): every row is dated when its fact took effect.
@@ -448,7 +450,7 @@ export default function InvoiceDetailPage() {
     onSuccess: () => {
       invalidateAll()
       setShowVoidConfirm(false)
-      toast.success(invoice?.status === 'draft' && invoice.billing_reason === 'topup' ? 'Top-up withdrawn' : `Invoice ${invoice?.invoice_number} voided`)
+      if (invoice) showOutcome(invoicePageOutcome('voided', invoice))
     },
     onError: (err) => showApiError(err, 'Failed to void'),
   })
@@ -490,6 +492,22 @@ export default function InvoiceDetailPage() {
   const [showMarkUncollectibleConfirm, setShowMarkUncollectibleConfirm] = useState(false)
   const [showRecordPaymentDialog, setShowRecordPaymentDialog] = useState(false)
   const [recordPaymentNote, setRecordPaymentNote] = useState('')
+
+  // Sell credit lands here with the confirm for the way the customer pays
+  // already open (?next=, lib/sellCredit): that confirm is the one place
+  // money or an email moves. Read once, then dropped from the address. The
+  // email form needs the customer's address, so it waits for the customer.
+  const [searchParams, setSearchParams] = useSearchParams()
+  const next = searchParams.get('next')
+  useEffect(() => {
+    if (next === null || !invoice) return
+    const confirm = arrivalConfirm(next, invoice)
+    if (confirm === 'email' && !customer) return
+    if (confirm === 'email') setShowEmailModal(true)
+    if (confirm === 'collect') setShowCollectConfirm(true)
+    if (confirm === 'record') setShowRecordPaymentDialog(true)
+    setSearchParams(p => { p.delete('next'); return p }, { replace: true })
+  }, [next, invoice, customer, setSearchParams])
   // Writing an invoice off and stopping the subscription are two decisions,
   // not one (ADR-112 — the same split the dunning policy now makes). The
   // dialog offers both; this is the second, defaulted OFF because a write-off
@@ -549,7 +567,7 @@ export default function InvoiceDetailPage() {
       invalidateAll()
       setShowRecordPaymentDialog(false)
       setRecordPaymentNote('')
-      toast.success(`Payment recorded — ${invoice ? invoiceLabel(invoice) : 'invoice'} marked paid`)
+      if (invoice) showOutcome(invoicePageOutcome('payment_recorded', invoice))
     },
     onError: (err) => showApiError(err, 'Failed to record payment'),
   })
@@ -658,11 +676,14 @@ export default function InvoiceDetailPage() {
   const sendable = invoice.status !== 'draft' || openForPayment(invoice)
   const showEmailInvoice = sendable && invoice.status !== 'voided' && invoicePaymentInFlight(invoice) === null
   const showCopyLink = !!invoice.public_token && sendable
-  // Voiding an unpaid top-up withdraws the offer: same request, its own words.
-  const withdrawTopup = invoice.status === 'draft' && invoice.billing_reason === 'topup'
+  // An unpaid top-up is a draft its payment issues. Voiding it withdraws the
+  // offer (same request, its own words), and it has no PDF until it is paid.
+  const unpaidTopup = isUnpaidTopup(invoice)
   // While its charge is being confirmed the server refuses every action on
   // a top-up, Withdraw included.
-  const topupChargeInFlight = withdrawTopup && invoicePaymentInFlight(invoice) !== null
+  const topupChargeInFlight = unpaidTopup && invoicePaymentInFlight(invoice) !== null
+  // What a top-up sells: its credit and how long it lasts.
+  const credit = invoice.billing_reason === 'topup' ? topupCredit(lineItems) : null
 
   return (
     <>
@@ -687,7 +708,7 @@ export default function InvoiceDetailPage() {
             <p className="text-xs text-muted-foreground mt-1">
               {topupChargeInFlight
                 ? "Top-up — Hardcount is checking its charge with Stripe. Nothing else can be done to it until Stripe answers."
-                : withdrawTopup
+                : unpaidTopup
                   ? 'Top-up — issued when it is paid.'
                   : 'Draft invoice — finalize to issue and begin collection.'}
             </p>
@@ -723,7 +744,7 @@ export default function InvoiceDetailPage() {
               (including secondary destructive ones like Void) live
               behind the overflow menu. */}
           {/* A top-up is issued by its payment: the server refuses Finalize. */}
-          {invoice.status === 'draft' && !withdrawTopup && (() => {
+          {invoice.status === 'draft' && !unpaidTopup && (() => {
             // Server gates Finalize when tax_status != 'ok'. Mirror
             // the gate on the UI so operators see the constraint
             // before clicking. Stripe Dashboard does the same.
@@ -767,7 +788,7 @@ export default function InvoiceDetailPage() {
               invoice is settled is "give me the receipt." Keeps the
               header from collapsing to a single ⋯ trigger which
               feels empty. */}
-          {(invoice.status === 'paid' || invoice.status === 'voided' || invoice.status === 'uncollectible') && (
+          {(invoice.status === 'paid' || invoice.status === 'voided' || invoice.status === 'uncollectible') && hasDocument(invoice) && (
             <Button size="sm" onClick={() => downloadPDF(invoice.id, invoiceLabel(invoice))}>
               <Download size={14} className="mr-1.5" />
               Download PDF
@@ -834,7 +855,7 @@ export default function InvoiceDetailPage() {
               {showEmailInvoice && (
                 <DropdownMenuItem onClick={() => setShowEmailModal(true)} disabled={acting}>
                   <Mail size={14} className="mr-2" />
-                  Email invoice
+                  {unpaidTopup ? 'Email top-up link' : 'Email invoice'}
                 </DropdownMenuItem>
               )}
               {showCopyLink && (
@@ -851,6 +872,8 @@ export default function InvoiceDetailPage() {
               )}
               {(showEmailInvoice || showCopyLink) && <DropdownMenuSeparator />}
 
+              {/* A top-up has no document until it is paid. */}
+              {hasDocument(invoice) && (<>
               <DropdownMenuItem
                 onClick={async () => {
                   try {
@@ -874,6 +897,7 @@ export default function InvoiceDetailPage() {
                 <Download size={14} className="mr-2" />
                 Download PDF
               </DropdownMenuItem>
+              </>)}
               {/* The server's rule: finalized or paid, and refused while the
                   payment is unresolved — crediting could refund money that
                   was never collected. */}
@@ -898,7 +922,7 @@ export default function InvoiceDetailPage() {
                     className="text-destructive focus:text-destructive focus:bg-destructive/10"
                   >
                     <XCircle size={14} className="mr-2" />
-                    {withdrawTopup ? 'Withdraw' : 'Void invoice'}
+                    {unpaidTopup ? 'Withdraw' : 'Void invoice'}
                   </DropdownMenuItem>
                 </>
               )}
@@ -928,13 +952,22 @@ export default function InvoiceDetailPage() {
               </div>
             </div>
             <div className="min-w-0 px-6 py-4 md:flex-1">
-              <p className="text-sm text-muted-foreground">Amount due</p>
+              <p className="text-sm text-muted-foreground">{unpaidTopup ? 'Price' : 'Amount due'}</p>
               <p className="mt-1 text-lg font-semibold tabular-nums text-foreground">{formatCents(invoiceDueCents(invoice), invoice.currency)}</p>
             </div>
-            <div className="min-w-0 px-6 py-4 md:flex-1">
-              <p className="text-sm text-muted-foreground">Total</p>
-              <p className="mt-1 text-sm font-medium tabular-nums text-foreground">{formatCents(invoice.total_amount_cents, invoice.currency)}</p>
-            </div>
+            {/* A top-up's total is its price; what it sells is the credit. */}
+            {credit ? (
+              <div className="min-w-0 px-6 py-4 md:flex-1">
+                <p className="text-sm text-muted-foreground">Credit</p>
+                <p className="mt-1 text-sm font-medium tabular-nums text-foreground">{formatCents(credit.creditCents, invoice.currency)}</p>
+                <p className="text-xs text-muted-foreground">{creditLastsText(credit.validDays)}</p>
+              </div>
+            ) : (
+              <div className="min-w-0 px-6 py-4 md:flex-1">
+                <p className="text-sm text-muted-foreground">Total</p>
+                <p className="mt-1 text-sm font-medium tabular-nums text-foreground">{formatCents(invoice.total_amount_cents, invoice.currency)}</p>
+              </div>
+            )}
             <div className="min-w-0 px-6 py-4 md:flex-1">
               <p className="text-sm text-muted-foreground">Due</p>
               <div className="mt-1 flex flex-wrap items-center gap-2">
@@ -1083,8 +1116,9 @@ export default function InvoiceDetailPage() {
         invoice.status === 'voided' && 'border-destructive/30'
       )}>
         {/* Same mark the PDF carries: a draft is a preview, not an invoice
-            anyone owes on. Smaller on a phone so the whole word fits. */}
-        {invoice.status === 'draft' && (
+            anyone owes on. Smaller on a phone so the whole word fits. An
+            unpaid top-up is finished, waiting for money: no mark. */}
+        {invoice.status === 'draft' && !unpaidTopup && (
           <span aria-hidden data-testid="draft-watermark" className="pointer-events-none absolute inset-0 flex items-center justify-center select-none text-[4.5rem] sm:text-[7rem] font-bold tracking-widest text-foreground/[0.04] -rotate-12">
             DRAFT
           </span>
@@ -1103,7 +1137,8 @@ export default function InvoiceDetailPage() {
               ))}
             </div>
             <div className="text-right">
-              <p className="text-sm font-medium uppercase tracking-widest text-muted-foreground">Invoice</p>
+              {/* An unpaid top-up is not an invoice until its payment issues it. */}
+              <p className="text-sm font-medium uppercase tracking-widest text-muted-foreground">{unpaidTopup ? 'Top-up' : 'Invoice'}</p>
               <p className="text-xl font-semibold text-foreground mt-0.5">{invoiceLabel(invoice)}</p>
             </div>
           </div>
@@ -1229,7 +1264,8 @@ export default function InvoiceDetailPage() {
                   Reading the live setting here made Terms disagree with
                   the Due date whenever the default had since changed. */}
               <p className="text-sm text-foreground">
-                {invoice.net_payment_term_days == null
+                {/* A top-up has no terms: it is issued when it is paid. */}
+                {invoice.net_payment_term_days == null || invoice.billing_reason === 'topup'
                   ? '\u2014'
                   : invoice.net_payment_term_days === 0
                     ? 'Due on receipt'
@@ -1286,7 +1322,9 @@ export default function InvoiceDetailPage() {
                           ) : (
                             <span className="text-sm text-foreground">{item.description}</span>
                           )}
-                          <span className="text-xs text-muted-foreground">({formatLineType(item.line_type)})</span>
+                          {invoice.billing_reason !== 'topup' && (
+                            <span className="text-xs text-muted-foreground">({formatLineType(item.line_type)})</span>
+                          )}
                           {reasonLabel && (
                             <Badge variant="outline" className="text-[10px] font-normal px-1.5 py-0 h-4">
                               {reasonLabel}
@@ -1300,6 +1338,9 @@ export default function InvoiceDetailPage() {
                             segment-aware billing under plan changes) — the
                             explicit dates convey what the line covers without
                             us guessing the cause. */}
+                        {credit && (
+                          <div className="text-xs text-muted-foreground mt-0.5">{formatCents(credit.creditCents, invoice.currency)} of prepaid credit</div>
+                        )}
                         <div className="sm:hidden text-xs text-muted-foreground font-mono tabular-nums mt-0.5">{qty} × {rate}</div>
                         {item.billing_period_start && item.billing_period_end && (
                           item.billing_period_start !== invoice.billing_period_start ||
@@ -1414,7 +1455,7 @@ export default function InvoiceDetailPage() {
                 <>
                   <Separator />
                   <div className="flex justify-between text-sm font-semibold">
-                    <span>Amount due</span>
+                    <span>{invoice.billing_reason === 'topup' ? 'Price' : 'Amount due'}</span>
                     <span className="font-mono tabular-nums">{formatCents(invoiceDueCents(invoice), invoice.currency)}</span>
                   </div>
                 </>
@@ -1461,7 +1502,7 @@ export default function InvoiceDetailPage() {
 
                     <Separator />
                     <div className="flex justify-between font-semibold text-base pt-1">
-                      <span>Amount due</span>
+                      <span>{unpaidTopup ? 'Price' : 'Amount due'}</span>
                       <span className="font-mono tabular-nums">{formatCents(invoiceDueCents(invoice), invoice.currency)}</span>
                     </div>
 
@@ -1587,7 +1628,7 @@ export default function InvoiceDetailPage() {
           Replaces the older "Payment Activity" framing now that
           lifecycle anchors (created, finalized, scheduled) sit
           alongside Stripe + dunning events. */}
-      {(timeline.length > 0 || timelineDegraded.length > 0) && invoice.status !== 'draft' && (
+      {(timeline.length > 0 || timelineDegraded.length > 0) && showsActivity(invoice) && (
         <Card className={cn('mt-6', invoice.status === 'voided' && 'opacity-60')}>
           <CardHeader className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
             <CardTitle className="text-sm">Activity</CardTitle>
@@ -1650,24 +1691,24 @@ export default function InvoiceDetailPage() {
           <AlertDialogHeader>
             <AlertDialogTitle>Collect {formatCents(invoiceDueCents(invoice), invoice.currency)} now?</AlertDialogTitle>
             <AlertDialogDescription>
-              {formatCents(invoiceDueCents(invoice), invoice.currency)} {withdrawTopup ? 'for' : 'due on'} {invoiceLabel(invoice)} from {customer?.display_name || invoice.bill_to_snapshot?.display_name || 'this customer'}.
+              {formatCents(invoiceDueCents(invoice), invoice.currency)} {unpaidTopup ? 'for' : 'due on'} {invoiceLabel(invoice)} from {customer?.display_name || invoice.bill_to_snapshot?.display_name || 'this customer'}.
             </AlertDialogDescription>
           </AlertDialogHeader>
           {/* A top-up is what buys credit: no credit balance is applied to it,
               so only a card can pay it. */}
           <div className="space-y-2 text-sm text-muted-foreground">
-            {!withdrawTopup && <p>Any credit balance the customer has is used first.</p>}
+            {!unpaidTopup && <p>Any credit balance the customer has is used first.</p>}
             <p>
               {defaultCard
-                ? `${withdrawTopup ? 'It is' : 'Whatever is left is'} charged to ${defaultCard.card_last4 ? cardLabel(defaultCard) : "the customer's default card"} right away.`
-                : withdrawTopup
+                ? `${unpaidTopup ? 'It is' : 'Whatever is left is'} charged to ${defaultCard.card_last4 ? cardLabel(defaultCard) : "the customer's default card"} right away.`
+                : unpaidTopup
                   ? 'No card is on file, so it can\'t be charged. Send the customer its link instead.'
                   : 'No card is on file, so only the credit balance can pay it.'}
             </p>
           </div>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={collectMutation.isPending}>Cancel</AlertDialogCancel>
-            {(defaultCard || !withdrawTopup) && (
+            {(defaultCard || !unpaidTopup) && (
               <AlertDialogAction onClick={() => collectMutation.mutate()} disabled={collectMutation.isPending}>
                 {collectMutation.isPending
                   ? <><Loader2 size={14} className="animate-spin mr-1.5" />Collecting…</>
@@ -1681,7 +1722,7 @@ export default function InvoiceDetailPage() {
       {/* Withdraw Confirm — a plain Confirm/Cancel: an unpaid top-up was
           never issued and nothing is owed on it, so the typed confirmation
           that guards voiding an issued invoice does not apply. */}
-      <AlertDialog open={showVoidConfirm && withdrawTopup} onOpenChange={(open) => { if (!open && !voidMutation.isPending) setShowVoidConfirm(false) }}>
+      <AlertDialog open={showVoidConfirm && unpaidTopup} onOpenChange={(open) => { if (!open && !voidMutation.isPending) setShowVoidConfirm(false) }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Withdraw this top-up?</AlertDialogTitle>
@@ -1701,21 +1742,10 @@ export default function InvoiceDetailPage() {
       {/* Void Confirm — short: what voiding does, then the one choice an
           operator most often gets wrong (void vs mark uncollectible). */}
       <TypedConfirmDialog
-        open={showVoidConfirm && !withdrawTopup}
+        open={showVoidConfirm && !unpaidTopup}
         onOpenChange={setShowVoidConfirm}
         title="Void invoice"
-        // The prepaid-credit clause is CONDITIONAL, keyed on the server's own
-        // void_invoice action — present exactly when this invoice funded
-        // prepaid credit that is still unspent. It can't be unconditional:
-        // "applied credits are returned" points the OTHER WAY (credit applied
-        // to PAY this invoice coming back), and an operator voiding a commit
-        // invoice would read it as the customer getting credit back, when
-        // voiding is what takes their unspent credit away.
-        description={
-          (invoice?.attention?.actions ?? []).some((a) => a.code === 'void_invoice')
-            ? "The invoice is cancelled as if it was never owed, and the unspent prepaid credit it bought is cancelled; spent credit stays spent. This can't be undone."
-            : "The invoice is cancelled as if it was never owed, and any credits applied to it are returned. This can't be undone."
-        }
+        description="The invoice is cancelled as if it was never owed, and any credits applied to it are returned. This can't be undone."
         confirmWord="VOID"
         confirmLabel="Void invoice"
         onConfirm={() => voidMutation.mutate()}
@@ -1822,9 +1852,11 @@ export default function InvoiceDetailPage() {
             </DialogHeader>
             <div className="space-y-3 py-2">
               <p className="text-sm text-muted-foreground">
-                Mark this invoice paid for money received outside Stripe
-                (cheque, wire, cash). The full {formatCents(invoiceDueCents(invoice), invoice.currency)} is
-                recorded as paid.
+                {unpaidTopup
+                  ? `Record ${formatCents(invoiceDueCents(invoice), invoice.currency)} the customer paid outside Stripe (bank transfer, cheque, cash). The top-up is issued as a paid invoice, and its credit is added to their balance.`
+                  : <>Mark this invoice paid for money received outside Stripe
+                    (cheque, wire, cash). The full {formatCents(invoiceDueCents(invoice), invoice.currency)} is
+                    recorded as paid.</>}
               </p>
               {/* The unreconciled consequence, stated BEFORE the operator
                   commits. Deliberately not a block — the money already
@@ -1853,7 +1885,7 @@ export default function InvoiceDetailPage() {
                   disabled={recordPaymentMutation.isPending}
                 />
                 <p className="text-xs text-muted-foreground">
-                  Surfaces in the audit trail for finance reconciliation.
+                  Shown in the audit log.
                 </p>
               </div>
             </div>
@@ -1874,7 +1906,8 @@ export default function InvoiceDetailPage() {
           defaultEmail={customer?.email || ''}
           defaultCc={customer?.additional_emails || []}
           onClose={() => setShowEmailModal(false)}
-          onSent={() => { setShowEmailModal(false); toast.success('Invoice email sent') }}
+          title={unpaidTopup ? 'Email top-up link' : 'Email invoice'}
+          onSent={() => { setShowEmailModal(false); showOutcome(invoicePageOutcome('email_sent', invoice)) }}
         />
       )}
 
@@ -2165,8 +2198,8 @@ function AddLineItemDialog({ invoiceId, currency, taxInclusive, onClose, onAdded
   )
 }
 
-function EmailInvoiceDialog({ invoiceId, defaultEmail, defaultCc, onClose, onSent }: {
-  invoiceId: string; defaultEmail: string; defaultCc: string[]; onClose: () => void; onSent: () => void
+function EmailInvoiceDialog({ invoiceId, title, defaultEmail, defaultCc, onClose, onSent }: {
+  invoiceId: string; title: string; defaultEmail: string; defaultCc: string[]; onClose: () => void; onSent: () => void
 }) {
   const form = useForm<EmailFormData>({
     resolver: zodResolver(emailSchema),
@@ -2190,7 +2223,7 @@ function EmailInvoiceDialog({ invoiceId, defaultEmail, defaultCc, onClose, onSen
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Email invoice</DialogTitle>
+          <DialogTitle>{title}</DialogTitle>
         </DialogHeader>
         <form onSubmit={onSubmit} noValidate className="space-y-4">
           <div className="space-y-2">

@@ -3,7 +3,7 @@
 // tests/actionOutcomes.test.ts; the pages only render the result.
 
 import { errorSentence, outcomeUnknown } from './errorCopy'
-import { invoiceLabel } from './invoiceDocument'
+import { isUnpaidTopup } from './invoiceDocument'
 
 export type OutcomeTone = 'success' | 'info' | 'warning' | 'error'
 
@@ -17,7 +17,8 @@ export interface Outcome {
 // "payment initiated": credit can settle the invoice with no charge at all,
 // Stripe can confirm a card charge inside the request, a charge can still be
 // confirming, and an outcome recorded by a webhook during the call comes back
-// as-is (it can be a failure). Declines arrive as API errors, not here.
+// as-is (it can be a failure). Declines arrive as API errors, not here. A
+// top-up is named as one: it has no number until a payment issues it.
 export function collectOutcome(inv: {
   invoice_number: string
   billing_reason?: string
@@ -26,7 +27,13 @@ export function collectOutcome(inv: {
   amount_paid_cents: number
   stripe_payment_intent_id?: string | null
 }): Outcome {
-  const n = invoiceLabel(inv)
+  const topup = inv.billing_reason === 'topup'
+  const n = topup ? 'Top-up' : inv.invoice_number
+  const thing = topup ? 'top-up' : 'invoice'
+  if (topup && (inv.status === 'paid' || inv.payment_status === 'succeeded')) {
+    // Its payment issued it and granted the credit, in one step.
+    return { tone: 'success', title: 'Top-up paid', description: "Its credit is on the customer's balance." }
+  }
   if (inv.status === 'paid' || inv.payment_status === 'succeeded') {
     // Only a credit-covered settle records no payment at all: it pays with no
     // PaymentIntent and leaves amount_paid at zero. amount_paid alone is not
@@ -41,9 +48,9 @@ export function collectOutcome(inv: {
     case 'processing':
       return { tone: 'info', title: 'Payment started', description: 'Stripe is confirming it. This page updates when it is done.' }
     case 'failed':
-      return { tone: 'error', title: `${n} payment failed`, description: 'The reason is shown on this invoice.' }
+      return { tone: 'error', title: `${n} payment failed`, description: `The reason is shown on this ${thing}.` }
     case 'unknown':
-      return { tone: 'warning', title: 'Payment status unknown', description: "Hardcount couldn't confirm the result with Stripe. See the notice on this invoice." }
+      return { tone: 'warning', title: 'Payment status unknown', description: `Hardcount couldn't confirm the result with Stripe. See the notice on this ${thing}.` }
     default:
       return { tone: 'info', title: `${n} not charged`, description: 'No payment was made. Refresh to see the latest status.' }
   }
@@ -73,19 +80,38 @@ export function writeOffOutcome(
   }
 }
 
+// invoicePageOutcome is the message after an action on the invoice page. An
+// unpaid top-up is not an invoice yet, so its messages name the top-up:
+// voiding it withdraws it, and its email is its payment link. inv is the
+// invoice as the page showed it before the action.
+export type InvoicePageAction = 'voided' | 'payment_recorded' | 'email_sent'
+
+export function invoicePageOutcome(
+  action: InvoicePageAction,
+  inv: { status: string; billing_reason?: string | null; invoice_number?: string | null },
+): Outcome {
+  const topup = isUnpaidTopup(inv)
+  switch (action) {
+    case 'voided':
+      return { tone: 'success', title: topup ? 'Top-up withdrawn' : `Invoice ${inv.invoice_number} voided` }
+    case 'payment_recorded':
+      return topup
+        ? { tone: 'success', title: 'Top-up paid', description: "Payment recorded. Its credit is on the customer's balance." }
+        : { tone: 'success', title: `Payment recorded — ${inv.invoice_number} marked paid` }
+    case 'email_sent':
+      return { tone: 'success', title: topup ? 'Top-up link sent' : 'Invoice email sent' }
+  }
+}
+
 // newInvoiceOutcome: the one message after the one-off invoice composer.
 // Finalizing and emailing are separate steps; when the email step does not
 // happen, the invoice is still finalized (not a draft), and that is said once.
-// A top-up is never finalized: its payment issues it, so Save & send creates
-// it and sends its link, and a send that does not happen leaves the draft.
 export type NewInvoiceResult =
   | { kind: 'draft' }
   | { kind: 'sent' }
   | { kind: 'email_failed'; recipient: string }
   | { kind: 'no_email' }
   | { kind: 'email_not_configured' }
-  | { kind: 'topup_sent' }
-  | { kind: 'topup_not_sent'; reason: string }
 
 // emailStepAfterFinalize: what Save & send still has to do once the invoice
 // is finalized. Without Stripe, finalizing a card-less customer's invoice
@@ -102,10 +128,6 @@ export function emailStepAfterFinalize(
 
 export function newInvoiceOutcome(invoiceNumber: string, result: NewInvoiceResult): Outcome {
   switch (result.kind) {
-    case 'topup_sent':
-      return { tone: 'success', title: 'Top-up created and its link sent' }
-    case 'topup_not_sent':
-      return { tone: 'warning', title: 'Top-up draft created, link not sent', description: result.reason }
     case 'sent':
       return { tone: 'success', title: `Invoice ${invoiceNumber} sent` }
     case 'email_failed':

@@ -332,31 +332,6 @@ func (m *memStore) ApplyToInvoiceAtomic(ctx context.Context, tenantID, customerI
 	return deduct, nil
 }
 
-func (m *memStore) RetireCommitGrantForInvoiceTx(_ context.Context, _ *sql.Tx, tenantID, invoiceID string) (int64, error) {
-	// Mirror the store contract: find the commit grant funded by the
-	// invoice, retire its remaining balance, append the negative entry.
-	for i := range m.entries {
-		e := &m.entries[i]
-		if e.SourceInvoiceID != invoiceID || e.GrantKind != domain.GrantKindCommit {
-			continue
-		}
-		remaining := e.AmountCents - e.ConsumedCents
-		if remaining <= 0 {
-			return 0, nil
-		}
-		e.ConsumedCents = e.AmountCents
-		m.entries = append(m.entries, domain.CreditLedgerEntry{
-			CustomerID:  e.CustomerID,
-			EntryType:   domain.CreditAdjustment,
-			Currency:    e.Currency,
-			AmountCents: -remaining,
-			Description: "Commit retired — funding invoice voided",
-		})
-		return remaining, nil
-	}
-	return 0, nil
-}
-
 // ReturnCreditTx records the return and appends its row. It does not model
 // the restore to source blocks: that is proven against Postgres
 // (credit_return_integration_test.go); the fake serves the service's own

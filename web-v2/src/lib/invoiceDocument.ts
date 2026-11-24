@@ -111,11 +111,17 @@ export interface IssueDates {
 // then. A cycle draft (a paused subscription's invoice, for example) keeps
 // the due date it was built with, so that date is shown. "Composed" matches
 // the server's isOperatorComposed: billing_reason 'manual', or none at all
-// (drafts written before the reason was stamped).
+// (drafts written before the reason was stamped). A top-up has no due date
+// and is issued by its payment; one withdrawn unpaid was never issued.
 export function issueDates(
   inv: { status: string; issued_at?: string | null; created_at?: string; due_at?: string | null; billing_reason?: string; net_payment_term_days?: number | null },
   fmt: (iso: string) => string,
 ): IssueDates {
+  if (inv.billing_reason === 'topup' && !inv.issued_at) {
+    return inv.status === 'draft'
+      ? { issued: 'Issued when paid', due: '—', dueHint: 'No due date' }
+      : { issued: 'Never issued', due: '—' }
+  }
   if (inv.status === 'draft') {
     const net = inv.net_payment_term_days
     const composed = !inv.billing_reason || inv.billing_reason === 'manual'
@@ -142,4 +148,45 @@ export function issueDates(
 export function invoiceLabel(inv: { invoice_number?: string | null; billing_reason?: string | null }): string {
   if (!inv.invoice_number && inv.billing_reason === 'topup') return 'Prepaid credit'
   return inv.invoice_number ?? ''
+}
+
+/** An unpaid top-up: a draft that sells prepaid credit, issued when it is paid. */
+export function isUnpaidTopup(inv: { status?: string | null; billing_reason?: string | null }): boolean {
+  return inv.status === 'draft' && inv.billing_reason === 'topup'
+}
+
+/**
+ * Whether the invoice has a PDF: every invoice but a top-up its payment never
+ * issued, an unpaid one or one withdrawn. The server refuses that PDF too.
+ */
+export function hasDocument(inv: { status?: string | null; billing_reason?: string | null }): boolean {
+  return !(inv.billing_reason === 'topup' && (inv.status === 'draft' || inv.status === 'voided'))
+}
+
+/**
+ * Whether the invoice page shows the Activity card: an issued invoice, or an
+ * unpaid top-up, whose link is sent and card charged before it is issued.
+ * Any other draft has no activity yet.
+ */
+export function showsActivity(inv: { status?: string | null; billing_reason?: string | null }): boolean {
+  return inv.status !== 'draft' || isUnpaidTopup(inv)
+}
+
+/**
+ * The credit a top-up sells, from its one commit line: the amount and the
+ * days it lasts after payment (null: it never expires). Null when no line
+ * sells credit.
+ */
+export function topupCredit(
+  items: ReadonlyArray<{ line_type: string; commit_granted_cents?: number | null; credit_valid_days?: number | null }>,
+): { creditCents: number; validDays: number | null } | null {
+  const line = items.find(i => (i.commit_granted_cents ?? 0) > 0)
+  if (!line || line.commit_granted_cents == null) return null
+  return { creditCents: line.commit_granted_cents, validDays: line.credit_valid_days ?? null }
+}
+
+/** How long a top-up's credit lasts, in the operator's words. */
+export function creditLastsText(validDays: number | null): string {
+  if (validDays == null) return 'Never expires'
+  return validDays === 1 ? 'Lasts 1 day after payment' : `Lasts ${validDays} days after payment`
 }

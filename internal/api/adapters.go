@@ -925,8 +925,8 @@ type invoiceEmailEventsAdapter struct {
 	store *email.OutboxStore
 }
 
-func (a *invoiceEmailEventsAdapter) ListByInvoice(ctx context.Context, tenantID, invoiceNumber string) ([]invoice.EmailEventRow, error) {
-	rows, err := a.store.ListByInvoice(ctx, tenantID, invoiceNumber)
+func (a *invoiceEmailEventsAdapter) ListByInvoice(ctx context.Context, tenantID, invoiceID, invoiceNumber string) ([]invoice.EmailEventRow, error) {
+	rows, err := a.store.ListByInvoice(ctx, tenantID, invoiceID, invoiceNumber)
 	if err != nil {
 		return nil, err
 	}

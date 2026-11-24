@@ -23,6 +23,7 @@ export interface InvoiceStatusInput {
   status: string
   payment_status?: string
   due_at?: string | null
+  billing_reason?: string | null
 }
 
 // invoiceStatus is the single badge for an invoice: lifecycle and payment
@@ -32,6 +33,14 @@ export interface InvoiceStatusInput {
 // decides Past due. While it is not known (undefined), the badge is the
 // stored status: an open invoice reads Open.
 export function invoiceStatus(inv: InvoiceStatusInput, nowMs: number | undefined): StatusDisplay {
+  // A top-up is stored as a draft until its payment issues it, but it is
+  // finished work waiting for money, and voiding it withdraws it.
+  if (inv.billing_reason === 'topup' && inv.status === 'draft') {
+    if (inv.payment_status === 'processing') return { label: 'Processing', tone: 'info' }
+    if (inv.payment_status === 'failed') return { label: 'Payment failed', tone: 'danger' }
+    return { label: 'Awaiting payment', tone: 'info' }
+  }
+  if (inv.billing_reason === 'topup' && inv.status === 'voided') return { label: 'Withdrawn', tone: 'neutral' }
   switch (inv.status) {
     case 'draft': return { label: 'Draft', tone: 'neutral' }
     case 'voided': return { label: 'Void', tone: 'neutral' }

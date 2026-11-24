@@ -106,14 +106,14 @@ export function settledCustomerCurrency(
 // currency, or null when it can be in any. POST /v1/invoices refuses another
 // currency (409 customer_currency_conflict) when the billing profile sets it
 // or a live subscription's plan does; the newest invoice and the workspace
-// default only suggest one. The New invoice dialog fixes the picker and
-// shows this line.
-export function invoiceCurrencyPin(c: CustomerCurrency): string | null {
+// default only suggest one. The New invoice and Sell credit dialogs fix the
+// picker and show this line; `what` names what is being made.
+export function invoiceCurrencyPin(c: CustomerCurrency, what = 'the invoice'): string | null {
   switch (c.source) {
     case 'billing_profile':
-      return `This customer is billed in ${c.currency} (billing profile), so the invoice is too.`
+      return `This customer is billed in ${c.currency} (billing profile), so ${what} is too.`
     case 'subscription':
-      return `This customer is billed in ${c.currency} (subscription plan), so the invoice is too.`
+      return `This customer is billed in ${c.currency} (subscription plan), so ${what} is too.`
     default:
       return null
   }

@@ -12,8 +12,8 @@ export interface CreditTotals {
   total_granted: number
   total_used: number
   total_expired: number
-  // Commit credit taken back with its voided or refunded invoice, and credit
-  // an operator deducted.
+  // Commit credit taken back with its refunded invoice, and credit an
+  // operator deducted.
   total_retired?: number
   total_deducted?: number
 }
@@ -38,7 +38,7 @@ export interface GrantRow {
   // consumed_cents also counts credit no invoice used, which the server
   // names: expired_cents, what ran out of time unused (the expiry sweep sets
   // consumed to the full amount); retired_cents, commit credit taken back
-  // when its invoice was voided or refunded by a credit note; and
+  // when its invoice was refunded by a credit note; and
   // deducted_cents, what an operator deducted from this grant.
   expired_cents?: number
   retired_cents?: number
@@ -50,7 +50,7 @@ export type GrantState = 'active' | 'used_up' | 'expired' | 'canceled' | 'deduct
 
 // grantState: a grant with nothing left is "expired" when some of it ran out
 // of time unused, "canceled" when the rest was taken back with its invoice
-// (voided, or refunded by a credit note), "deducted" when an operator
+// (refunded by a credit note), "deducted" when an operator
 // deducted all of it, and "used up" when invoices drew some of it. Expiry
 // wins over canceled: the sweep takes whatever is left, so it is the last
 // thing that can happen to a grant. A grant past its expiry that the sweep
