@@ -1,12 +1,14 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { toast } from 'sonner'
 import { Check, X, ChevronUp, ArrowRight } from 'lucide-react'
 import { cn } from '@/lib/utils'
+import type { SetupStep } from '@/lib/setupSteps'
 import {
-  useOnboardingSteps, openSetupChecklist, onOpenSetupChecklist, type OnboardingStep,
+  useOnboardingSteps, openSetupChecklist, onOpenSetupChecklist,
 } from '@/hooks/useOnboardingSteps'
 import { useAuth } from '@/contexts/AuthContext'
+import { Card } from '@/components/ui/card'
 import { ScrollPane } from '@/components/ui/scroll-pane'
 
 // OnboardingLauncher — the "Setup n/N" row in the sidebar footer. It opens
@@ -35,11 +37,13 @@ export function OnboardingLauncher({ onOpen }: { onOpen?: () => void }) {
   )
 }
 
-// SetupChecklistPanel — the checklist itself, opened by the sidebar row or
-// the Home welcome card. Non-modal: it doesn't block the page.
+// The list's title, said in the operator's words: what the list is for.
+const CHECKLIST_TITLE = 'Set up, in order'
+
+// SetupChecklistPanel — the checklist opened by the sidebar row, beside the
+// page. Non-modal: it doesn't block the page.
 export function SetupChecklistPanel() {
   const [open, setOpen] = useState(false)
-  const { user } = useAuth()
   const { steps, complete, total, show, setDismissed } = useOnboardingSteps()
 
   useEffect(() => onOpenSetupChecklist(() => setOpen(true)), [])
@@ -57,9 +61,6 @@ export function SetupChecklistPanel() {
 
   if (!show || !open) return null
 
-  const next = steps.find(s => !s.done)
-  const percent = total > 0 ? (complete / total) * 100 : 0
-
   return (
     <div
       role="dialog"
@@ -67,10 +68,55 @@ export function SetupChecklistPanel() {
       // Sits beside the sidebar (above the mobile menu's overlay).
       className="fixed bottom-4 left-4 z-50 w-[360px] max-w-[calc(100vw-2rem)] rounded-xl border border-border bg-card shadow-2xl md:left-64"
     >
+      <ChecklistHeader titleId="onboarding-launcher-title" complete={complete} total={total}>
+        <button
+          type="button"
+          onClick={() => setOpen(false)}
+          aria-label="Collapse checklist"
+          className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+        >
+          <ChevronUp size={14} className="rotate-180" aria-hidden />
+        </button>
+        <HideButton onHide={() => { setDismissed(true); setOpen(false) }} />
+      </ChecklistHeader>
+      <ScrollPane as="ul" className="max-h-[60vh] border-t border-border">
+        <StepRows steps={steps} onNavigate={() => setOpen(false)} />
+      </ScrollPane>
+      <WebhookLine onNavigate={() => setOpen(false)} />
+    </div>
+  )
+}
+
+// SetupChecklistCard — the same list, open in the Home page while setup is
+// left and the operator has not hidden it. intro goes above the list (Home's
+// welcome on a new account).
+export function SetupChecklistCard({ intro, className }: { intro?: ReactNode; className?: string }) {
+  const { steps, complete, total, setDismissed } = useOnboardingSteps()
+  return (
+    <Card role="region" aria-labelledby="setup-card-title" className={cn('gap-0 py-0', className)}>
+      {intro && <div className="px-4 pt-4">{intro}</div>}
+      <ChecklistHeader titleId="setup-card-title" complete={complete} total={total}>
+        <HideButton onHide={() => setDismissed(true)} />
+      </ChecklistHeader>
+      <ul className="border-t border-border">
+        <StepRows steps={steps} />
+      </ul>
+      <WebhookLine />
+    </Card>
+  )
+}
+
+function ChecklistHeader({ titleId, complete, total, children }: {
+  titleId: string; complete: number; total: number; children: ReactNode
+}) {
+  const { user } = useAuth()
+  const percent = total > 0 ? (complete / total) * 100 : 0
+  return (
+    <>
       <div className="flex items-start gap-3 px-4 pt-4 pb-2">
         <div className="flex-1 min-w-0">
-          <p id="onboarding-launcher-title" className="text-sm font-semibold text-foreground">
-            Bill your first customer
+          <p id={titleId} className="text-sm font-semibold text-foreground">
+            {CHECKLIST_TITLE}
           </p>
           {user && (
             <p className="mt-0.5 text-xs text-muted-foreground">
@@ -83,29 +129,7 @@ export function SetupChecklistPanel() {
             <span className="tabular-nums">{complete} of {total}</span> complete
           </p>
         </div>
-        <div className="flex shrink-0 items-center gap-1">
-          <button
-            type="button"
-            onClick={() => setOpen(false)}
-            aria-label="Collapse checklist"
-            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <ChevronUp size={14} className="rotate-180" aria-hidden />
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              setDismissed(true)
-              setOpen(false)
-              // The panel can come back, so say where from.
-              toast('Setup checklist hidden', { description: 'Show it again from the account menu, under your email.' })
-            }}
-            aria-label="Hide setup checklist"
-            className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            <X size={14} aria-hidden />
-          </button>
-        </div>
+        <div className="flex shrink-0 items-center gap-1">{children}</div>
       </div>
 
       <div className="px-4 pb-3">
@@ -123,26 +147,52 @@ export function SetupChecklistPanel() {
           />
         </div>
       </div>
+    </>
+  )
+}
 
-      <ScrollPane as="ul" className="max-h-[60vh] border-t border-border">
-        {steps.map((step) => (
-          <StepRow
-            key={step.key}
-            step={step}
-            isNext={step === next}
-            onNavigate={() => setOpen(false)}
-          />
-        ))}
-      </ScrollPane>
+function HideButton({ onHide }: { onHide: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={() => {
+        onHide()
+        // The list can come back, so say where from.
+        toast('Setup checklist hidden', { description: 'Show it again from the account menu, under your email.' })
+      }}
+      aria-label="Hide setup checklist"
+      className="flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+    >
+      <X size={14} aria-hidden />
+    </button>
+  )
+}
 
-    </div>
+// The steps in order; the first one not done is marked as next.
+function StepRows({ steps, onNavigate }: { steps: SetupStep[]; onNavigate?: () => void }) {
+  const next = steps.find(s => !s.done)
+  return steps.map(step => (
+    <StepRow key={step.key} step={step} isNext={step === next} onNavigate={onNavigate} />
+  ))
+}
+
+// Webhooks left the list: an operator can bill without one. The low-credit
+// event is the reason this operator wants one.
+function WebhookLine({ onNavigate }: { onNavigate?: () => void }) {
+  return (
+    <p className="border-t border-border px-4 py-3 text-xs text-muted-foreground">
+      To be told when a customer&apos;s credit runs low,{' '}
+      <Link to="/webhooks" onClick={onNavigate} className="font-medium text-primary hover:underline">
+        add a webhook endpoint
+      </Link>.
+    </p>
   )
 }
 
 function StepRow({
   step, isNext, onNavigate,
 }: {
-  step: OnboardingStep; isNext: boolean; onNavigate: () => void
+  step: SetupStep; isNext: boolean; onNavigate?: () => void
 }) {
   const indicator = step.done ? (
     <span
@@ -163,11 +213,15 @@ function StepRow({
     </span>
   )
 
+  // One action: the whole row is its link. More: each is its own link, and
+  // the row is not one.
+  const only = step.actions.length === 1 ? step.actions[0] : undefined
+
   const body = (
     <div
       className={cn(
         'flex items-center gap-3 border-b border-border px-4 py-3 transition-colors last:border-b-0',
-        !step.done && 'hover:bg-accent/40',
+        !step.done && only && 'hover:bg-accent/40',
         isNext && 'bg-primary/[0.04]',
       )}
     >
@@ -178,22 +232,32 @@ function StepRow({
           step.done ? 'text-muted-foreground line-through decoration-muted-foreground/40' : 'text-foreground',
         )}>
           {step.label}
+          {step.optional && <span className="ml-1.5 text-xs font-normal text-muted-foreground">Optional</span>}
         </p>
         {/* Every step says what it is for, not only the next one. */}
         <p className="mt-0.5 text-xs text-muted-foreground">{step.desc}</p>
+        {!step.done && !only && (
+          <p className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-xs font-medium">
+            {step.actions.map(a => (
+              <Link key={a.to} to={a.to} onClick={onNavigate} className="text-primary hover:underline">
+                {a.label}
+              </Link>
+            ))}
+          </p>
+        )}
       </div>
-      {isNext && (
+      {isNext && only && (
         <span className="flex shrink-0 items-center gap-1 text-xs font-medium text-primary">
-          {step.cta}
+          {only.label}
           <ArrowRight size={12} aria-hidden />
         </span>
       )}
     </div>
   )
 
-  return !step.done ? (
+  return !step.done && only ? (
     <li>
-      <Link to={step.to} onClick={onNavigate}>{body}</Link>
+      <Link to={only.to} onClick={onNavigate}>{body}</Link>
     </li>
   ) : (
     <li>{body}</li>

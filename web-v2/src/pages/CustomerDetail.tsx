@@ -697,7 +697,8 @@ export default function CustomerDetailPage() {
                 <div className="flex items-center justify-between">
                   {/* No count until the list arrives: "(0)" read as "none" (W-17). */}
                   <CardTitle className="text-sm">Subscriptions{subsPage ? ` (${subsTotal})` : ''}</CardTitle>
-                  {!isArchived && <Button size="sm" onClick={() => setShowCreateSub(true)}>Create subscription</Button>}
+                  {/* With none yet, "Put on a plan" below is the one button. */}
+                  {!isArchived && allSubs?.length !== 0 && <Button size="sm" onClick={() => setShowCreateSub(true)}>Create subscription</Button>}
                 </div>
               </CardHeader>
               <CardContent className="p-0">
@@ -752,9 +753,15 @@ export default function CustomerDetailPage() {
                   {!allSubs && (
                     <p className="px-6 py-6 text-sm text-muted-foreground text-center">Loading…</p>
                   )}
-                  {allSubs && allSubs.length === 0 && (
+                  {allSubs && allSubs.length === 0 && (isArchived ? (
                     <p className="px-6 py-6 text-sm text-muted-foreground text-center">No subscriptions</p>
-                  )}
+                  ) : (
+                    // A new customer's first action: a plan is what bills them.
+                    <div className="flex flex-col items-center gap-3 px-6 py-6 text-center">
+                      <p className="text-sm text-muted-foreground">Not on a plan yet.</p>
+                      <Button size="sm" onClick={() => setShowCreateSub(true)}>Put on a plan</Button>
+                    </div>
+                  ))}
                   {allSubs && subsTotal > allSubs.length && (
                     <p className="px-6 py-2 text-xs text-muted-foreground">Showing the first {allSubs.length} of {subsTotal}.</p>
                   )}

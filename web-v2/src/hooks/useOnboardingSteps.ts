@@ -1,18 +1,11 @@
 import { useSyncExternalStore } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
+import { listProviderCosts } from '@/lib/gen/queries.gen'
 import { useAuth } from '@/contexts/AuthContext'
 import { setupChecklistState } from '@/lib/homeNotices'
+import { hasPricedPlan, isGatewayKey, setupProgress, setupSteps, type SetupStepKey } from '@/lib/setupSteps'
 import { stripeKeyState, type StripeKeyState } from '@/lib/stripeVerify'
-
-export interface OnboardingStep {
-  key: 'stripe' | 'plan' | 'customer' | 'subscription' | 'usage' | 'webhook'
-  label: string
-  desc: string
-  to: string
-  cta: string
-  done: boolean
-}
 
 // Per-tenant so a user admin-ing multiple tenants doesn't mute the launcher
 // globally. The account menu's "Show setup checklist" un-dismisses.
@@ -41,8 +34,8 @@ function subscribeDismissed(onChange: () => void): () => void {
   }
 }
 
-// The checklist panel is rendered once by Layout; the sidebar row and the
-// Home welcome card open it with this event.
+// The checklist panel is rendered once by Layout; the sidebar row opens it
+// with this event. Home shows the list in the page instead (SetupChecklistCard).
 const OPEN_EVENT = 'hardcount:open-setup-checklist'
 
 export function openSetupChecklist() {
@@ -96,20 +89,22 @@ export function useOnboardingSteps() {
     queryFn: () => api.listPlans(),
     enabled,
   })
-  const { data: webhookEndpoints } = useQuery({
-    queryKey: ['onboarding-webhook-endpoints'],
-    queryFn: () => api.listWebhookEndpoints(),
+  // The gateway key step (isGatewayKey). Keys are few, so the whole list.
+  const { data: apiKeys } = useQuery({
+    queryKey: ['onboarding-api-keys'],
+    queryFn: () => api.listApiKeys(),
+    enabled,
+  })
+  // One provider cost is enough to tick its step.
+  const { data: providerCosts } = useQuery({
+    queryKey: ['onboarding-provider-costs'],
+    queryFn: () => listProviderCosts({ limit: 1 }),
     enabled,
   })
   // Any subscription at all, in any state. The overview's
   // active_subscriptions leaves out trialing subscriptions, so a first
   // subscription on a trial left the step undone. Home's welcome card reads
-  // the same answer. Any customer in this mode, likewise.
-  const { data: anyCustomer } = useQuery({
-    queryKey: ['onboarding-any-customer'],
-    queryFn: () => api.listCustomers('limit=1'),
-    enabled,
-  })
+  // the same answer.
   const { data: anySubscription } = useQuery({
     queryKey: ['onboarding-any-subscription'],
     queryFn: () => api.listSubscriptions('limit=1'),
@@ -137,86 +132,47 @@ export function useOnboardingSteps() {
   const liveStripe: StripeKeyState | undefined = stripeCreds
     ? stripeKeyState(stripeCreds.data, true)
     : undefined
-  const hasPlans = (plansList?.data?.length ?? 0) > 0
-  const hasWebhook = (webhookEndpoints?.data?.length ?? 0) > 0
-  const hasCustomer = (anyCustomer?.data?.length ?? 0) > 0
   const hasSubscription = (anySubscription?.data?.length ?? 0) > 0
-  const hasUsage = usageInWindow > 0 || anyUsageEver === true
   // undefined while loading: Home must not flash the welcome card at an
   // account that has subscriptions.
   const newAccount: boolean | undefined = anySubscription ? !hasSubscription : undefined
 
-  const steps: OnboardingStep[] = [
-    {
-      key: 'stripe',
-      label: 'Connect Stripe',
-      desc: stripeState === 'refused'
-        ? "Stripe refused the saved key. Paste the current one from your Stripe dashboard."
-        : "Needed to charge your customers' cards",
-      to: '/settings?tab=payments',
-      cta: stripeState === 'refused' ? 'Replace key' : 'Connect Stripe',
-      done: stripeState === 'connected',
-    },
-    {
-      key: 'plan',
-      label: 'Create your first plan',
-      desc: 'Set what you charge: a base fee, usage prices, or both',
-      to: '/pricing',
-      cta: 'Set up pricing',
-      done: hasPlans,
-    },
-    {
-      key: 'customer',
-      label: 'Add your first customer',
-      desc: 'Who are you billing?',
-      to: '/customers',
-      cta: 'Add a customer',
-      done: hasCustomer,
-    },
-    {
-      key: 'subscription',
-      label: 'Create a subscription',
-      desc: 'Subscribe the customer to a plan',
-      to: '/subscriptions',
-      cta: 'New subscription',
-      done: hasSubscription,
-    },
-    {
-      key: 'usage',
-      label: 'Send a usage event',
-      desc: 'Your app reports what each customer used; Hardcount prices it.',
-      to: '/usage',
-      cta: 'Go to Usage',
-      done: hasUsage,
-    },
-    {
-      key: 'webhook',
-      label: 'Set up a webhook endpoint',
-      desc: 'Let your app hear about invoices and subscriptions',
-      to: '/webhooks',
-      cta: 'Add endpoint',
-      done: hasWebhook,
-    },
-  ]
+  const steps = setupSteps({
+    stripe: stripeState,
+    gatewayKey: (apiKeys?.data ?? []).some(isGatewayKey),
+    pricedPlan: hasPricedPlan(plansList?.data ?? []),
+    providerCost: (providerCosts?.data.length ?? 0) > 0,
+    subscription: hasSubscription,
+    usage: usageInWindow > 0 || anyUsageEver === true,
+    // Credit customers hold now, from the overview: no list says whether
+    // credit was ever sold, so a customer who used all of it unticks this.
+    credit: (overview?.credit_balance_by_currency.length ?? 0) > 0,
+  })
 
-  const complete = steps.filter(s => s.done).length
-  const total = steps.length
-  // Don't flash the launcher before queries settle — avoids "0 of 5" pills
+  const { complete, total } = setupProgress(steps)
+  // Don't flash the launcher before queries settle — avoids a "0 of N" row
   // flickering for users who've actually completed everything.
   // A failed "any usage ever" check counts as settled (step not done) so it
   // can't hold the whole checklist back.
   const usageSettled = usageInWindow > 0 || anyUsageEver !== undefined || anyUsageFailed
-  const loaded = !!overview && !!plansList && !!stripeCreds && !!webhookEndpoints && !!anyCustomer && !!anySubscription && usageSettled
+  const loaded = !!overview && !!plansList && !!stripeCreds && !!apiKeys && !!providerCosts && !!anySubscription && usageSettled
   const { showPill: show, offerShowAgain } = setupChecklistState(dismissed, loaded, complete, total)
+
+  // stepLeft is true once the step is known not to be done. A page offers the
+  // next step only then, so it never flashes the offer while the list loads.
+  const stepLeft = (key: SetupStepKey): boolean =>
+    loaded && steps.some(s => s.key === key && !s.done)
 
   return {
     steps,
     complete,
     total,
+    loaded,
     dismissed,
     setDismissed,
     show,
     offerShowAgain,
+    stepLeft,
     liveStripe,
     newAccount,
   }

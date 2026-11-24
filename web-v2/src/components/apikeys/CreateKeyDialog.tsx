@@ -9,6 +9,7 @@ import { api } from '@/lib/api'
 import { addDaysInTZ, civilDateFrom, endOfDayInTZ, formatExpiryHintInTZ } from '@/lib/dates'
 import { wallClockNow } from '@/lib/effectiveNow'
 import { applyApiError } from '@/lib/formErrors'
+import type { APIKey } from '@/lib/gen/schemas/aPIKey'
 import type { APIKeyKeyType } from '@/lib/gen/schemas/aPIKeyKeyType'
 import { cn } from '@/lib/utils'
 import { KEY_TYPES } from '@/components/apikeys/keyTypes'
@@ -38,8 +39,8 @@ const EXPIRY_PRESETS = [
   { value: 'custom', label: 'Custom' },
 ] as const
 
-/** Asks for a new key's name, type and expiry, creates it, and gives onCreated the full key. */
-export function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (rawKey: string) => void }) {
+/** Asks for a new key's name, type and expiry, creates it, and gives onCreated the full key and its details. */
+export function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; onCreated: (rawKey: string, key: APIKey) => void }) {
   const [keyType, setKeyType] = useState<APIKeyKeyType>('secret')
   const [expiry, setExpiry] = useState<(typeof EXPIRY_PRESETS)[number]['value']>('never')
   const [customDate, setCustomDate] = useState('')
@@ -62,7 +63,7 @@ export function CreateKeyDialog({ onClose, onCreated }: { onClose: () => void; o
     }
     try {
       const res = await api.createApiKey({ name, key_type: keyType, expires_at: expiresAt })
-      onCreated(res.raw_key)
+      onCreated(res.raw_key, res.key)
     } catch (err) {
       applyApiError(form, err, ['name', 'key_type', 'expires_at'], { toastTitle: 'Failed to create API key' })
     }

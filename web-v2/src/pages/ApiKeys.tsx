@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { ChevronDown, Key, MoreHorizontal, Plus, RotateCw, Shield } from 'lucide-react'
 import { usePageTitle } from '@/hooks/usePageTitle'
@@ -10,14 +10,18 @@ import { calendarDaysUntil } from '@/lib/dates'
 import { sinceMs, timeAgo, wallClockNow, type EffectiveNow } from '@/lib/effectiveNow'
 import { showApiError } from '@/lib/formErrors'
 import type { APIKey } from '@/lib/gen/schemas/aPIKey'
+import type { APIKeyKeyType } from '@/lib/gen/schemas/aPIKeyKeyType'
 import { APIKeyStatus } from '@/lib/gen/schemas/aPIKeyStatus'
 import type { StatusDisplay } from '@/lib/statusLabels'
+import { isGatewayKey } from '@/lib/setupSteps'
 import { cn } from '@/lib/utils'
+import { useOnboardingSteps } from '@/hooks/useOnboardingSteps'
 import { CreateKeyDialog } from '@/components/apikeys/CreateKeyDialog'
 import { keyTypeLabel } from '@/components/apikeys/keyTypes'
 import { RotateKeyDialog } from '@/components/apikeys/RotateKeyDialog'
 import { EmptyState } from '@/components/EmptyState'
 import { LoadError } from '@/components/LoadError'
+import { NextStep } from '@/components/NextStep'
 import { NoticeRow } from '@/components/NoticeRow'
 import { CopyButton, ShowOnceSecretDialog } from '@/components/ShowOnceSecretDialog'
 import { StatusBadge } from '@/components/StatusBadge'
@@ -117,10 +121,19 @@ export default function ApiKeysPage() {
   const [rotateTarget, setRotateTarget] = useState<APIKey | null>(null)
   const [revokeTarget, setRevokeTarget] = useState<APIKey | null>(null)
   const [revoking, setRevoking] = useState(false)
-  const [newKey, setNewKey] = useState<{ title: string; rawKey: string; note?: string } | null>(null)
+  const [newKey, setNewKey] = useState<{ title: string; rawKey: string; keyType: APIKeyKeyType; note?: string } | null>(null)
   const [showInactive, setShowInactive] = useState(false)
+  // The setup list: once a usage-only key exists, prices are next.
+  const { stepLeft } = useOnboardingSteps()
 
   const { data, isLoading, error, refetch } = useQuery({ queryKey: ['api-keys'], queryFn: listKeys })
+  const queryClient = useQueryClient()
+  // After a create, rotate or revoke. The setup list reads its own copy of
+  // the keys for its key step.
+  const reload = () => {
+    void refetch()
+    void queryClient.invalidateQueries({ queryKey: ['onboarding-api-keys'] })
+  }
 
   // When an active key's expiry passes, fetch the list once so the server's
   // Expired replaces it: at that moment if it is within a day, or now for a
@@ -139,9 +152,9 @@ export default function ApiKeysPage() {
     return () => clearTimeout(timer)
   }, [data, refetch])
 
-  const showNewKey = (title: string, rawKey: string, note?: string) => {
-    setNewKey({ title, rawKey, note })
-    void refetch()
+  const showNewKey = (title: string, rawKey: string, keyType: APIKeyKeyType, note?: string) => {
+    setNewKey({ title, rawKey, keyType, note })
+    reload()
   }
 
   const revoke = async () => {
@@ -162,7 +175,7 @@ export default function ApiKeysPage() {
       setRevoking(false)
     }
     setRevokeTarget(null)
-    void refetch()
+    reload()
   }
   const closeRevoke = (open: boolean) => { if (!open) setRevokeTarget(null) }
 
@@ -171,6 +184,7 @@ export default function ApiKeysPage() {
   const expiredKeys = keys.filter(k => k.status === 'expired')
   const revokedKeys = keys.filter(k => k.status === 'revoked')
   const hasInactive = expiredKeys.length + revokedKeys.length > 0
+  const pricesNext = activeKeys.some(isGatewayKey) && stepLeft('prices')
   // A key's times are wall-clock.
   const now = wallClockNow()
 
@@ -229,6 +243,7 @@ export default function ApiKeysPage() {
         <div className="min-w-0 flex-1 basis-72">
           <h1 className="text-2xl font-semibold text-foreground">API keys</h1>
           <p className="text-sm text-muted-foreground mt-1">Keys your server uses to call the Hardcount API{activeKeys.length > 0 ? ` · ${activeKeys.length} active` : ''}</p>
+          {pricesNext && <NextStep to="/pricing" className="mt-2">set your prices</NextStep>}
         </div>
         <Button size="sm" onClick={() => setShowCreate(true)}>
           <Plus size={16} className="mr-2" />
@@ -323,9 +338,9 @@ export default function ApiKeysPage() {
       {showCreate && (
         <CreateKeyDialog
           onClose={() => setShowCreate(false)}
-          onCreated={(rawKey) => {
+          onCreated={(rawKey, key) => {
             setShowCreate(false)
-            showNewKey('API key created', rawKey)
+            showNewKey('API key created', rawKey, key.key_type)
           }}
         />
       )}
@@ -336,7 +351,7 @@ export default function ApiKeysPage() {
           onClose={() => setRotateTarget(null)}
           onRotated={(rawKey, oldKey) => {
             setRotateTarget(null)
-            showNewKey('API key rotated', rawKey, oldKeySentence(oldKey, tenantTZ))
+            showNewKey('API key rotated', rawKey, oldKey.key_type, oldKeySentence(oldKey, tenantTZ))
           }}
         />
       )}
@@ -345,6 +360,14 @@ export default function ApiKeysPage() {
         <ShowOnceSecretDialog title={newKey.title} label="New key" secret={newKey.rawKey} onDone={() => setNewKey(null)}>
           {newKey.note && <p className="text-sm text-muted-foreground">{newKey.note}</p>}
           <TryIt rawKey={newKey.rawKey} />
+          {/* Words, not a link: a link here would leave the page before the
+              key is copied, which this dialog exists to prevent. The page
+              offers the link once the dialog is closed. */}
+          {newKey.keyType === 'ingest' && stepLeft('prices') && (
+            <p className="text-sm text-muted-foreground">
+              Next: set your prices, under Pricing.
+            </p>
+          )}
         </ShowOnceSecretDialog>
       )}
 

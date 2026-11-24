@@ -142,7 +142,7 @@ test.describe('signed out', () => {
   })
 })
 
-test('create a customer', async ({ page }) => {
+test('create a customer: it opens on their page, which offers a plan first', async ({ page }) => {
   const id = uniq()
   const name = `UI Customer ${id}`
   await page.goto('/customers')
@@ -156,8 +156,11 @@ test('create a customer', async ({ page }) => {
 
   const found = await api<{ data: Customer[] }>('GET', `/customers?search=ui_${id}`)
   expect(found.data.map(c => c.display_name)).toEqual([name])
-  await page.getByPlaceholder('Search by name, email, or ID...').fill(`ui_${id}`)
-  await expect(page.getByRole('row').filter({ hasText: name })).toBeVisible()
+  await expect(page).toHaveURL(new RegExp(`/customers/${found.data[0].id}$`))
+  await expect(page.getByRole('heading', { level: 1, name, exact: true })).toBeVisible()
+  // No subscription yet: putting them on a plan is the one way offered.
+  await expect(page.getByRole('button', { name: 'Put on a plan' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Create subscription' })).toHaveCount(0)
 })
 
 test('create a subscription for a customer', async ({ page }) => {
@@ -165,7 +168,7 @@ test('create a subscription for a customer', async ({ page }) => {
   const customer = await createCustomer()
   const id = uniq()
   await page.goto(`/customers/${customer.id}`)
-  await page.getByRole('button', { name: 'Create subscription' }).click()
+  await page.getByRole('button', { name: 'Put on a plan' }).click()
   const dialog = page.getByRole('dialog', { name: 'Create subscription' })
   await dialog.getByLabel('Display name').fill(`UI Subscription ${id}`)
   await dialog.getByLabel('Code').fill(`ui-sub-${id}`)
@@ -193,7 +196,7 @@ test('a new subscription starts now and bills its first month', async ({ page })
   const customer = await createCustomer()
   const id = uniq()
   await page.goto(`/customers/${customer.id}`)
-  await page.getByRole('button', { name: 'Create subscription' }).click()
+  await page.getByRole('button', { name: 'Put on a plan' }).click()
   const dialog = page.getByRole('dialog', { name: 'Create subscription' })
   await dialog.getByLabel('Display name').fill(`UI Now ${id}`)
   await dialog.getByLabel('Code').fill(`ui-now-${id}`)
@@ -880,35 +883,45 @@ test('leaving Settings with unsaved changes asks first', async ({ page }) => {
   expect(saves).toEqual([])
 })
 
-test('a new account: Home welcomes the operator, and the setup checklist opens when asked', async ({ page }) => {
-  // The e2e account already has subscriptions. Answer "none yet" to the one
-  // question that makes an account new, so Home shows its first-run state.
+test('a new account: Home welcomes the operator with the setup list open, in order', async ({ page }) => {
+  // The e2e account already has subscriptions, plans and keys. Answer "none
+  // yet" to the questions that make an account new, so Home shows its
+  // first-run state with the steps left to do.
   await page.route(
     url => url.pathname === '/v1/subscriptions' && url.searchParams.get('limit') === '1',
     route => route.fulfill({ json: { data: [], total: 0 } }),
   )
+  for (const path of ['/v1/plans', '/v1/api-keys']) {
+    await page.route(url => url.pathname === path, route => route.fulfill({ json: { data: [], total: 0 } }))
+  }
   await page.goto('/')
+
+  // The list is open in the page, not behind the sidebar row, and says the
+  // job above its steps.
+  const list = page.getByRole('region', { name: 'Set up, in order' })
+  await expect(list).toContainText('Welcome to Hardcount')
+  await expect(list).toContainText("Hardcount prices your gateway's usage, keeps each customer's credit, and charges cards through your Stripe account.")
+  await expect(list).toContainText("You're in test mode, so nothing here charges real money.")
+  await expect(list.getByRole('listitem')).toHaveText([
+    /^Connect Stripe/,
+    /^Make a key for your gateway/,
+    /^Set your prices/,
+    /^Record what providers charge you\s*Optional/,
+    /^Add a customer and put them on a plan/,
+    /^Send usage from your gateway/,
+    /^Sell a customer credit/,
+  ])
+  await expect(list.getByRole('link', { name: 'Start from a recipe' })).toHaveAttribute('href', '/pricing?tab=recipes')
+  await expect(list.getByRole('link', { name: 'Set them yourself' })).toHaveAttribute('href', '/pricing')
+  await expect(list.getByRole('link', { name: 'add a webhook endpoint' })).toHaveAttribute('href', '/webhooks')
+
+  // Hidden, it leaves the welcome, which offers it again.
+  await list.getByRole('button', { name: 'Hide setup checklist' }).click()
+  await expect(list).toHaveCount(0)
   const welcome = page.getByRole('region', { name: 'Welcome' })
-  await expect(welcome).toContainText('Hardcount counts usage, works out each bill, makes the invoice and charges the card through Stripe.')
-  await expect(welcome).toContainText('Follow the setup checklist to bill your first test customer.')
-
-  // The checklist never opens by itself: it would cover the page and repeat
-  // the welcome card. The card's button opens it, every step with its line.
-  const checklist = page.getByRole('dialog', { name: 'Bill your first customer' })
-  await expect(checklist).toHaveCount(0)
-  await welcome.getByRole('button', { name: 'Open setup checklist' }).click()
-  await expect(checklist).toBeVisible()
-  await expect(checklist).toContainText("You're in test mode, so nothing here charges real money.")
-  await expect(checklist.getByText('Send a usage event', { exact: true })).toBeVisible()
-  await expect(checklist.getByText('Your app reports what each customer used; Hardcount prices it.')).toBeVisible()
-  await expect(checklist.getByText('Let your app hear about invoices and subscriptions')).toBeVisible()
-
-  // Closed stays closed: the next visit does not open it either.
-  await checklist.getByRole('button', { name: 'Collapse checklist' }).click()
-  await expect(checklist).toHaveCount(0)
-  await page.reload()
-  await expect(welcome).toBeVisible()
-  await expect(checklist).toHaveCount(0)
+  await expect(welcome).toContainText("Hardcount prices your gateway's usage")
+  await welcome.getByRole('button', { name: 'Show setup checklist' }).click()
+  await expect(list).toBeVisible()
 })
 
 test('on this computer, the Stripe webhook step gives the Stripe CLI command, not a URL to add in Stripe', async ({ page }) => {
@@ -926,25 +939,21 @@ test('on this computer, the Stripe webhook step gives the Stripe CLI command, no
   await expect(page.getByText('Paste the signing secret the command printed')).toBeVisible()
 })
 
-test('the setup checklist ticks Connect Stripe only for a working key in this mode, and counts customers the Home totals leave out', async ({ page }) => {
+test('the setup checklist ticks Connect Stripe only for a working key in this mode', async ({ page }) => {
   const key = (livemode: boolean, extra = {}) => ({ id: `e2e_${livemode}`, livemode, secret_key_last4: '0000', publishable_key: 'pk_e2e', has_webhook_secret: true, ...extra })
   let creds: object[] = []
   await page.route(url => url.pathname === '/v1/settings/stripe', route => route.request().method() === 'GET'
     ? route.fulfill({ json: { data: creds } })
     : route.fallback())
-  // No webhook endpoint yet: a step stays open, so the Setup button stays
+  // No usage-only key yet: a step stays open, so the Setup button stays
   // shown even once Stripe is connected.
-  await page.route(url => url.pathname === '/v1/webhook-endpoints/endpoints', route => route.fulfill({ json: { data: [], total: 0 } }))
-  // Home's totals can leave a customer out; the checklist must not (#1153).
-  await page.route(url => url.pathname === '/v1/analytics/overview', async route => {
-    const answer = await route.fetch()
-    await route.fulfill({ response: answer, json: { ...(await answer.json()), active_customers: 0 } })
-  })
+  await page.route(url => url.pathname === '/v1/api-keys', route => route.fulfill({ json: { data: [], total: 0 } }))
   const stripeStep = async () => {
     await page.goto('/')
     await page.getByRole('button', { name: /^Setup: / }).click()
-    const checklist = page.getByRole('dialog', { name: 'Bill your first customer' })
-    await expect(checklist.getByRole('listitem').filter({ hasText: 'Add your first customer' }).locator('[aria-label="done"]')).toHaveCount(1)
+    const checklist = page.getByRole('dialog', { name: 'Set up, in order' })
+    // Any subscription ticks its step, a trialing one too.
+    await expect(checklist.getByRole('listitem').filter({ hasText: 'Add a customer and put them on a plan' }).locator('[aria-label="done"]')).toHaveCount(1)
     return checklist.getByRole('listitem').filter({ hasText: 'Connect Stripe' })
   }
 
