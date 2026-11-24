@@ -78,7 +78,7 @@ func NewCustomerUsageService(
 }
 
 // readTime returns ctx with the read's one instant bound. The read's time is
-// decided before it: the API's door decides it from the customer in the URL,
+// decided before it: the API's door binds one read of the server's clock,
 // and the public cost dashboard decides its own (GetByToken). A clock's
 // decision carries its instant. A decision of real time may carry none, and
 // then the server's clock (the usage service's) is read here once, so the

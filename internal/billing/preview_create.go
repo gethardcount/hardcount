@@ -136,9 +136,6 @@ func (s *PreviewService) CreatePreview(ctx context.Context, tenantID string, req
 func (s *PreviewService) decide(ctx context.Context, tenantID, subscriptionID string) (context.Context, error) {
 	decided, err := clock.DecideOrRealTime(ctx, s.engine, clock.Pin{TenantID: tenantID, SubscriptionID: subscriptionID})
 	if err != nil {
-		if clock.IsAdvancingRefusal(err) {
-			return ctx, err
-		}
 		return ctx, errs.Unavailable("test_clock_unavailable",
 			"The subscription's test clock could not be read. Try again in a moment.", err)
 	}

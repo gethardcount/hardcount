@@ -82,8 +82,8 @@ func (s *Service) SetResolver(r clock.Resolver) {
 // is decided before them. The cases, in the order taken:
 //   - no customer id: real time;
 //   - else the customer's clock is decided here (clock.DecideOrRealTime:
-//     the customer is named in the body, so the API's door left the request
-//     at real time). Live mode reads nothing and is real time, as is a
+//     the customer is named in the body, so the API's door bound no
+//     instant). Live mode reads nothing and is real time, as is a
 //     customer on no clock, and a not-found (ingest's own store call answers
 //     a missing customer);
 //   - a clock that cannot be read refuses the event (503): nothing is
@@ -104,9 +104,6 @@ func (s *Service) decide(ctx context.Context, tenantID, customerID string) (cont
 	if customerID != "" {
 		var err error
 		if decided, err = clock.DecideOrRealTime(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID}); err != nil {
-			if clock.IsAdvancingRefusal(err) {
-				return ctx, err
-			}
 			return ctx, errs.Unavailable("test_clock_unavailable",
 				"The customer's test clock could not be read. Nothing was recorded; send the event again.", err)
 		}

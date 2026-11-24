@@ -226,8 +226,8 @@ type Service struct {
 	//     door (api.clockDoor) decides for a request.
 	// Each entry point keeps that time, and a run's start always arrives with
 	// it bound. A due run's retry, or a resolve, that arrives with no instant
-	// bound reads this clock once (clock.EnsureEffectiveNow); a request on a
-	// real-time or a record route arrives with the door's instant. Without
+	// bound reads this clock once (clock.EnsureEffectiveNow); a request on
+	// any other route arrives with the door's instant. Without
 	// that read, two reads of the time in one action could differ, and a
 	// store's stamp could fall on another time than the action's.
 	clock clock.Clock

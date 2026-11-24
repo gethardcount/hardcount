@@ -13,11 +13,6 @@ import "time"
 //     its new frozen_time with the catch-up unfinished. Advance is refused
 //     (409). POST /retry-advance resumes the catch-up (ADR-018), or the
 //     tenant deletes the clock.
-//
-// While the clock is advancing, a request that changes one of its customers,
-// or creates one on it, is refused with 409 clock_advancing
-// (clock.RefuseIfAdvancing). A customer created on a failed clock joins it at
-// its frozen_time, the time its advance reached.
 type TestClockStatus string
 
 const (

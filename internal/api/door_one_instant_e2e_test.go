@@ -15,10 +15,8 @@ import (
 
 // runClock is the server's clock in these tests. While the fixtures are
 // built it stands still at lagP0, and each fixture request carries lagP0
-// bound on its context. In live mode the door keeps that instant. In test
-// mode, on a real-time route, the door replaces it with one read of this
-// clock, which is lagP0 too. So every fixture write is at lagP0 either way.
-// Once stepping, the clock moves a second on every read it answers itself
+// bound on its context, which the request keeps, so every fixture write is
+// at lagP0. Once stepping, the clock moves a second on every read it answers itself
 // and counts those reads, so a request that reads it twice stamps two
 // instants.
 type runClock struct {
@@ -199,8 +197,7 @@ func TestBillingRun_EachSubscriptionIsBilledOnItsOwnTime(t *testing.T) {
 // A subscription write closes an ended period first, then plans from the new
 // one. On a subscription's route the door binds one instant, and the close
 // and the schedule both read it: one read of the server's clock, in both
-// modes (in test mode the engine answers a subscription on no clock without
-// a read). The ended period's invoice is dated at its boundary.
+// modes. The ended period's invoice is dated at its boundary.
 func TestScheduleCancel_TheCloseAndTheScheduleShareOneInstant(t *testing.T) {
 	for _, live := range []bool{false, true} {
 		t.Run(map[bool]string{false: "test mode", true: "live"}[live], func(t *testing.T) {
@@ -220,8 +217,7 @@ func TestScheduleCancel_TheCloseAndTheScheduleShareOneInstant(t *testing.T) {
 // Finalize collects right after it finalizes. On an invoice's route the door
 // binds one instant, and the finalize and the settle both read it, so an
 // invoice that credits cover is issued and paid at that one time: one read
-// of the server's clock, in both modes (in test mode the engine answers an
-// invoice on no clock without a read).
+// of the server's clock, in both modes.
 func TestFinalize_ACreditCoveredInvoiceIsIssuedAndPaidAtOneInstant(t *testing.T) {
 	for _, live := range []bool{false, true} {
 		t.Run(map[bool]string{false: "test mode", true: "live"}[live], func(t *testing.T) {

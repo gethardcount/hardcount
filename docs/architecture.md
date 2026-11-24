@@ -17,7 +17,7 @@ Each step queues its webhook events and emails for the [background jobs](#backgr
 
 ## The path of a request
 
-Every request passes the root chain, then its group's chain, then its handler. Inside `/v1`, authentication and the route's permission check come before the group's steps. `internal/api/router.go` builds all of it, and this section lists each step and says why the record (the one object per request that holds its route, client address and status), the metrics, the access log and the door (the clock door, which decides the instant the request runs on) sit where they do. In a chain, *above* means earlier: a step wraps every step below it, so it sees the request before them and their answer after.
+Every request passes the root chain, then its group's chain, then its handler. Inside `/v1`, authentication and the route's permission check come before the group's steps. `internal/api/router.go` builds all of it, and this section lists each step and says why the record (the one object per request that holds its route, client address and status), the metrics, the access log and the door (the clock door, which binds the instant the request runs on) sit where they do. In a chain, *above* means earlier: a step wraps every step below it, so it sees the request before them and their answer after.
 
 **The root chain**, in order:
 
@@ -34,7 +34,7 @@ Every request passes the root chain, then its group's chain, then its handler. I
 11. **Security headers.**
 12. **Audit detector** (`mw.AuditCoverage`) only observes: it reports a mutating 2xx that wrote no audit row and is not declared exempt.
 
-**The groups.** chi then routes the request into one group, which adds its own steps. Each group ends with **the clock door**. It decides the instant the request runs on, from the route's entry in the [route table](#the-route-table). The handler reads that instant from the context.
+**The groups.** chi then routes the request into one group, which adds its own steps. Each group ends with **the clock door**. It binds the instant the request runs on: one read of the server's clock, unless the route's entry in the [route table](#the-route-table) names a function that binds it (`decidedIn`). The handler reads that instant from the context.
 
 | Group | Steps, in order |
 |---|---|
@@ -49,10 +49,7 @@ Every request passes the root chain, then its group's chain, then its handler. I
 | — exports | general rate limit, 5 minutes, the clock door |
 | — the event stream | general rate limit, the clock door |
 
-The door is last for three reasons:
-- after authentication, so it looks up that invoice or customer in the caller's tenant and mode (test or live);
-- after Idempotency, so a replayed request never reaches it;
-- inside the time limit, so its lookups are bounded.
+The door is last, so the instant is read just before the handler runs: a request that waits in an earlier step, such as Idempotency's wait for the first request with its key, does not run on a time read before the wait, and a replayed request never reads the clock.
 
 ### The record
 
@@ -65,8 +62,8 @@ The door is last for three reasons:
 ### The route table
 
 `internal/api/route_table.go` has one line per route, saying:
-- who may call it: `.needs(…)` with a permission, a dashboard session only or any caller, or `.outsideAuth()` for a route outside authentication (the permission check reads this);
-- how its time is decided (the clock door reads this);
+- who may call it: `needs(…)` with a permission, a dashboard session only or any caller, or `outsideAuth()` for a route outside authentication (the permission check reads this);
+- whether a named function binds its time instead of the clock door: `decidedIn(…)` (the door reads this);
 - where its audit evidence comes from, when it changes state or exports (the audit detector);
 - whether its answer carries a secret shown once (Idempotency never keeps that answer).
 
@@ -77,19 +74,19 @@ The door is last for three reasons:
 1. **Register it** in its handler's `Routes()`, such as `invoice.Handler.Routes`, which `router.go` mounts at `/v1/invoices`. A new handler also needs a mount in `router.go`, in the group whose rate limit, Idempotency and time limit fit it ([the groups](#the-path-of-a-request)): the ordinary group, unless the route sends usage, streams or exports.
 2. **Add its entry** to `routeTable`, such as:
    ```go
-   {"POST", "/v1/invoices/{id}/finalize"}: ofInvoice().needs(invoiceWrite).withAudit(explicit("invoice.Service.Finalize (LogInTx)")),
+   {"POST", "/v1/invoices/{id}/finalize"}: needs(invoiceWrite).withAudit(explicit("invoice.Service.Finalize (LogInTx)")),
    ```
-   - how its time is decided: one of the clock constructors in `route_table.go` (`realTime()`, `ofCustomer("id")`, `ofInvoice()`, …, `decidedIn("package.Type.Method")`);
-   - who may call it: `.needs(…)` with a permission value (`invoiceRead`, `invoiceWrite`, …), `membersSession`, `settingsSession` or `anyCaller`; or `.outsideAuth()` for a route outside `/v1`'s authentication;
+   - who may call it: `needs(…)` with a permission value (`invoiceRead`, `invoiceWrite`, …), `membersSession`, `settingsSession` or `anyCaller`; or `outsideAuth()` for a route outside `/v1`'s authentication;
+   - `decidedIn("package.Type.Method")` before it, only when that function binds the route's time instead of the door: it reads the record the body or a token names first, or binds each of many records' own instant;
    - where its audit row comes from, if it changes state or exports: `.withAudit(explicit("…"))`, naming the function that writes it, or `.withAudit(exempt(reason, "…"))`, saying why it writes none;
    - `.withShowOnce()`, when its answer carries a secret shown once.
 3. **Describe it in `api/openapi.yaml`** ([OpenAPI workflow](dev/openapi-workflow.md)).
 4. **Read or write is your choice.** A route that changes data takes its area's write permission. `TestRouteTable_WritesNeedAWritePermission` fails on a `POST`, `PUT`, `PATCH` or `DELETE` that takes a read one, unless the test lists it with its reason.
 5. **What fails when a part is forgotten:**
    - no entry: the server does not start, and `TestRouteTable_MatchesLiveRoutes` fails;
-   - no `.needs(…)` or `.outsideAuth()`: the entry does not compile;
+   - no `needs(…)` or `outsideAuth()`: the entry does not compile;
    - no audit on a route that changes state: `TestRouteTable_MatchesLiveRoutes` fails;
-   - an explicit note naming a function that does not exist, or a clock parameter (`ofCustomer("…")`) that is not in the pattern: `TestRouteTable_DeclarationsAreWhole` fails;
+   - an explicit note or a `decidedIn` naming a function that does not exist: `TestRouteTable_DeclarationsAreWhole` fails;
    - a handler that never writes the audit row its entry declares: `internal/api`'s `TestMain` fails the end-to-end run, naming the route, when a test drives it;
    - no `api/openapi.yaml` entry: `TestOpenAPISpec_MatchesRouter` fails;
    - a new any-caller or session-only route: `TestRouteTable_AnyCallerStaysSmall` or `TestRouteTable_SessionOnlyRoutesAreListed` fails;
@@ -113,7 +110,6 @@ The access log and the metrics name each request by its route's pattern when it 
 | `422 idempotency_error` | Idempotency | the key reused for another request, or by another caller |
 | `503 idempotency_unavailable` | Idempotency | the key could not be recorded; its other answers are a `400` (a body it cannot read), the `413` above, and a `500` when no caller is on the request (a mis-wired router) |
 | `504 timeout` | the time limit | the handler wrote nothing in time |
-| `500` | the clock door | a route entry the door does not know |
 | `500 internal_error` | the Recoverer | a panic before anything was written |
 
 ### The answer

@@ -137,17 +137,17 @@ type Service struct {
 	// bills by. Every subscription action runs on a time decided on a test
 	// clock or at real time (see clock.Decide and clock.WithRealTime). Who
 	// decides it:
-	//   - a request, the API's door (api.clockDoor), from the subscription in
-	//     its URL; a create, the service itself, from the customer its body
-	//     names (DecideForCustomer);
+	//   - a request, the API's door (api.clockDoor), with one read of the
+	//     server's clock; a create, the service itself, from the customer its
+	//     body names (DecideForCustomer);
 	//   - the billing run at real time (its lists exclude subscriptions on a
 	//     test clock), and a test clock's catch-up on that clock (period
 	//     closes, due cancels, trial ends);
 	//   - dunning's final action (a pause or a cancel), its run's time.
 	// Each entry point keeps that time. Work that arrives with no instant
 	// bound (a job's row, or a function that decides its own time, before it
-	// binds) reads this clock once (clock.EnsureEffectiveNow); a request on a
-	// real-time or a record route arrives with the door's instant. Without
+	// binds) reads this clock once (clock.EnsureEffectiveNow); a request on
+	// any other route arrives with the door's instant. Without
 	// that read, two reads of the time in one action could differ, and a
 	// store's stamp could fall on another time than the action's.
 	clock     clock.Clock
@@ -308,9 +308,6 @@ func (s *Service) DecideForCustomer(ctx context.Context, tenantID, customerID st
 	}
 	decided, err := clock.DecideOrRealTime(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID})
 	if err != nil {
-		if clock.IsAdvancingRefusal(err) {
-			return ctx, err
-		}
 		return ctx, errs.Unavailable("test_clock_unavailable",
 			"The customer's test clock could not be read. Nothing was created; send the request again.", err)
 	}
