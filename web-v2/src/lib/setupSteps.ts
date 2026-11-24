@@ -1,6 +1,7 @@
 // The setup list: the operator's job, in order, from connecting Stripe to
-// selling a customer credit. useOnboardingSteps reads the facts; these plain
-// functions turn them into steps, so the unit tests can check each one.
+// usage running a customer's credit down. useOnboardingSteps reads the facts;
+// these plain functions turn them into steps, so the unit tests can check
+// each one.
 import type { StripeKeyState } from '@/lib/stripeVerify'
 
 export type SetupStepKey = 'stripe' | 'key' | 'prices' | 'costs' | 'subscription' | 'usage' | 'credit'
@@ -81,20 +82,20 @@ export function setupSteps(f: SetupFacts): SetupStep[] {
       done: f.subscription,
     },
     {
-      key: 'usage',
-      label: 'Send usage from your gateway',
-      desc: 'Your gateway reports what each customer used, and Hardcount prices it',
-      optional: false,
-      actions: [{ label: 'Go to Usage', to: '/usage' }],
-      done: f.usage,
-    },
-    {
       key: 'credit',
       label: 'Sell a customer credit',
       desc: 'Prepaid credit pays their invoices before their card is charged',
       optional: false,
       actions: [{ label: 'Sell credit', to: '/credits' }],
       done: f.credit,
+    },
+    {
+      key: 'usage',
+      label: 'Send usage from your gateway',
+      desc: 'Your gateway reports what each customer used, and Hardcount prices it',
+      optional: false,
+      actions: [{ label: 'Go to Usage', to: '/usage' }],
+      done: f.usage,
     },
   ]
 }

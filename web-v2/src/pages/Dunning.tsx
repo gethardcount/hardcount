@@ -23,7 +23,7 @@ import { dunningRunAmount } from '@/lib/invoiceTerminal'
 import { cn } from '@/lib/utils'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 
-import { Button, buttonVariants } from '@/components/ui/button'
+import { buttonVariants } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
@@ -127,11 +127,6 @@ export default function DunningPage() {
             write off the invoice, or leave them for you to handle. With no policy, nothing is retried.
           </p>
         </div>
-        {tab === 'runs' && (
-          <Button variant="outline" size="sm" className="shrink-0 self-start" onClick={() => setTab('policies')}>
-            Manage policies
-          </Button>
-        )}
       </div>
       <Tabs value={tab} onValueChange={setTab} className="mt-6">
         <TabsList>

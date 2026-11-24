@@ -21,8 +21,8 @@ test('the steps follow the job, in order', () => {
     'Set your prices',
     'Record what providers charge you',
     'Add a customer and put them on a plan',
-    'Send usage from your gateway',
     'Sell a customer credit',
+    'Send usage from your gateway',
   ])
   assert.ok(setupSteps(NONE).every(s => !s.done))
 })
