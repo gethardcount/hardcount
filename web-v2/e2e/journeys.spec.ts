@@ -294,7 +294,7 @@ test('the Home cards show credit held, credit sold, paid and usage billed, each 
   await expect(card('Credit your customers can still spend, in each currency.')).toContainText('$100.00 + €25.00')
   await expect(card('Credit bought with top-ups paid in this period. A discounted top-up counts the credit it gave, not its price.')).toContainText('$100.00')
   await expect(card('What customers paid for invoices paid in this period, by card or offline. Credit is counted once, when it was bought.')).toContainText('$90.00')
-  await expect(card('Usage on invoices issued in this period, before tax. Void invoices are not counted.')).toContainText('$0.00')
+  await expect(card('Usage on invoices issued in this period. Void invoices are not counted.')).toContainText('$0.00')
   await expect(page.getByRole('main').getByText(/^(MRR|Customers|Failed payments)$/)).toHaveCount(0)
 })
 
