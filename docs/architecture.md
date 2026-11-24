@@ -17,7 +17,7 @@ Each step queues its webhook events and emails for the [background jobs](#backgr
 
 ## The path of a request
 
-**Time has one rule:** a request's time is bound by the middleware that ends its group; work that outlives a request, and every job, binds one per row.
+**Money work runs on one time, the request's:** the middleware that ends its group binds it, and work that outlives a request, and every job, binds one per row. A key's expiry, a session and an audit row's `created_at` record when something happened in the world, so they read the machine's clock.
 
 Every request passes the root chain, then its group's chain, then its handler. Inside `/v1`, authentication and the route's permission check come before the group's steps. `internal/api/router.go` builds all of it, and this section lists each step and says why the record (the one object per request that holds its route, client address and status), the metrics, the access log and the request's time (the instant the request runs on) sit where they do. In a chain, *above* means earlier: a step wraps every step below it, so it sees the request before them and their answer after.
 
