@@ -14,7 +14,7 @@
   <a href="CHANGELOG.md"><img alt="Release" src="https://img.shields.io/github/v/tag/gethardcount/hardcount?label=release"></a>
 </p>
 
-Price tokens per model, sell prepaid credit, and see what each customer costs you. Hardcount makes the invoices, and Stripe charges the card. Your billing data stays in your own Postgres.
+For teams that resell model access to their own customers through an LLM gateway such as LiteLLM. Price tokens per model, sell prepaid credit, and see what each customer costs you. Hardcount makes the invoices, and Stripe charges the card. Your billing data stays in your own Postgres.
 
 An open-source alternative to Stripe Billing and Lago: no Stripe Billing fee, no paid edition, and light enough to run yourself. [Why Hardcount →](#why-hardcount)
 
@@ -115,7 +115,7 @@ Stripe still charges its normal card fee, and Stripe Tax's fee if you use it. Ev
 
 **A good fit if:**
 
-- **You charge by usage,** most of all an AI product that prices per token, by model and token type.
+- **You resell model access through your own LLM gateway,** such as LiteLLM, and charge per token, by model and token type. Any product that charges by usage can send its usage the same way.
 - **You want billing on your own servers.** Usage and invoice records stay in your own Postgres. Stripe sees each charge, and the invoice lines too if you use Stripe Tax.
 - **You are a small or mid-size team.** One engineer can run it, on one server or several.
 - **Your volume is up to about a million usage events a day.** A €6.49-a-month server took that rate for 20 minutes with no errors (measured on v0.8.0). Plan 15 to 18 GB of database disk a month at that volume. [How we measured](docs/scale.md)
@@ -127,6 +127,7 @@ Stripe still charges its normal card fee, and Stripe Tax's fee if you use it. Ev
 - **A marketplace that splits payouts** between sellers (Stripe Connect). Hardcount bills your own customers.
 - **Revenue recognition or accounting reports.** Export the data to your own warehouse.
 - **Quotes or multi-phase contracts** for sales-led deals.
+- **Customers who buy credit themselves, or are stopped at zero without your code.** You grant credit or sell it on an invoice. Hardcount records usage and never refuses it: [your app stops a customer whose credit has run out](docs/stop-usage-when-credit-runs-out.md).
 
 ---
 

@@ -189,7 +189,7 @@ The advisory lock this replaced took 95 s to release after a severed link
 - **Single-node Postgres.** No replication, no failover of the database itself.
   A leader dying is not the same event as Postgres dying, and only the first is
   measured here.
-- **Simulated clock.** Both leaders run at one fixed instant so "which periods
+- **A fixed time.** Both leaders run at one fixed instant so "which periods
   are due" is deterministic. Wall-clock behaviour across a real month boundary
   is covered by other tests, not by this one.
 - **No payment provider in the loop.** The charger is a sentinel that fails
