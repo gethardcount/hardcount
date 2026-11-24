@@ -93,7 +93,7 @@ export function setupSteps(f: SetupFacts): SetupStep[] {
       label: 'Sell a customer credit',
       desc: 'Prepaid credit pays their invoices before their card is charged',
       optional: false,
-      actions: [{ label: 'Go to customers', to: '/customers' }],
+      actions: [{ label: 'Sell credit', to: '/credits' }],
       done: f.credit,
     },
   ]

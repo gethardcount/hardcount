@@ -61,8 +61,8 @@ test('prices offer a recipe or your own, each on its Pricing tab', () => {
   assert.deepEqual(costs.actions.map(a => a.to), ['/pricing?tab=provider-costs'])
   assert.match(costs.desc, /margin/)
   assert.match(costs.desc, /before usage arrives/)
-  // Sell credit is built on the customer pages, so the step opens the list.
-  assert.deepEqual(setupSteps(NONE).find(s => s.key === 'credit')!.actions.map(a => a.to), ['/customers'])
+  // Sell credit is an action on the Credit page.
+  assert.deepEqual(setupSteps(NONE).find(s => s.key === 'credit')!.actions.map(a => a.to), ['/credits'])
 })
 
 test('provider costs are optional: not counted, and the list finishes without them', () => {

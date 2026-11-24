@@ -1,7 +1,7 @@
 import { useSyncExternalStore } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { api } from '@/lib/api'
-import { listProviderCosts } from '@/lib/gen/queries.gen'
+import { listCreditBalances, listProviderCosts } from '@/lib/gen/queries.gen'
 import { useAuth } from '@/contexts/AuthContext'
 import { setupChecklistState } from '@/lib/homeNotices'
 import { hasPricedPlan, isGatewayKey, setupProgress, setupSteps, type SetupStepKey } from '@/lib/setupSteps'
@@ -101,6 +101,14 @@ export function useOnboardingSteps() {
     queryFn: () => listProviderCosts({ limit: 1 }),
     enabled,
   })
+  // Any customer who was ever given or sold credit: the balances list has a
+  // row for each customer with a credit record, used up or not, so the step
+  // stays done after the credit is spent.
+  const { data: creditBalances } = useQuery({
+    queryKey: ['onboarding-any-credit'],
+    queryFn: () => listCreditBalances({ limit: 1 }),
+    enabled,
+  })
   // Any subscription at all, in any state. The overview's
   // active_subscriptions leaves out trialing subscriptions, so a first
   // subscription on a trial left the step undone. Home's welcome card reads
@@ -144,9 +152,7 @@ export function useOnboardingSteps() {
     providerCost: (providerCosts?.data.length ?? 0) > 0,
     subscription: hasSubscription,
     usage: usageInWindow > 0 || anyUsageEver === true,
-    // Credit customers hold now, from the overview: no list says whether
-    // credit was ever sold, so a customer who used all of it unticks this.
-    credit: (overview?.credit_balance_by_currency.length ?? 0) > 0,
+    credit: (creditBalances?.total ?? 0) > 0,
   })
 
   const { complete, total } = setupProgress(steps)
@@ -155,7 +161,7 @@ export function useOnboardingSteps() {
   // A failed "any usage ever" check counts as settled (step not done) so it
   // can't hold the whole checklist back.
   const usageSettled = usageInWindow > 0 || anyUsageEver !== undefined || anyUsageFailed
-  const loaded = !!overview && !!plansList && !!stripeCreds && !!apiKeys && !!providerCosts && !!anySubscription && usageSettled
+  const loaded = !!overview && !!plansList && !!stripeCreds && !!apiKeys && !!providerCosts && !!anySubscription && !!creditBalances && usageSettled
   const { showPill: show, offerShowAgain } = setupChecklistState(dismissed, loaded, complete, total)
 
   // stepLeft is true once the step is known not to be done. A page offers the
