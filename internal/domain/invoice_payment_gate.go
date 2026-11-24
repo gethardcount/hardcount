@@ -33,19 +33,13 @@ type PaymentBlock struct {
 // copy of the in-flight test, paymentIsUnresolved in
 // web-v2/src/lib/status.ts.
 //
-// There are three cases:
+// There are two cases:
 //   - No payment in flight: nothing is blocked here. The caller's own status
 //     rules (paid, voided, draft) still apply. They stay out of this function
 //     on purpose, because they differ per action.
-//   - Parked (payment_status 'unknown' with no PaymentIntent ID): an earlier
-//     version's charge got an unclear answer that named no payment (only an
-//     earlier version parks; ADR-137). Only mark-uncollectible is allowed,
-//     for a customer who paid another way. Every other action is refused, and
-//     the message sends the operator to the customer's payments in Stripe.
-//   - In flight with a known PaymentIntent: the charge is resolving, so every
-//     action is refused and the operator is told to wait.
-//
-// See ADR-107 and ADR-127 for the parked state.
+//   - In flight: the charge is resolving on the PaymentIntent the invoice
+//     names, so every action is refused and the operator is told to wait.
+//     Write-off of an 'unknown' charge is the one exception, below.
 func PaymentBlocksAction(inv Invoice, action InvoiceAction) PaymentBlock {
 	if !inv.PaymentInFlight() {
 		return PaymentBlock{}
@@ -62,7 +56,7 @@ func PaymentBlocksAction(inv Invoice, action InvoiceAction) PaymentBlock {
 		}
 	}
 
-	// An unclear charge (unknown, with or without its PaymentIntent) can be
+	// An unclear charge (payment status unknown) can be
 	// written off: the deliberate carve-out, for a customer who paid another
 	// way. Writing it off moves no money, and a payment Stripe completes later
 	// still settles the invoice as paid. It is also the exit when Stripe cannot
@@ -71,16 +65,6 @@ func PaymentBlocksAction(inv Invoice, action InvoiceAction) PaymentBlock {
 	// PaymentBlocksActionHeld's live-hold rule.
 	if inv.PaymentStatus == PaymentUnknown && action == ActionMarkUncollectible {
 		return PaymentBlock{}
-	}
-
-	// Parked (left by an earlier version): Stripe's answer was unclear and
-	// named no payment.
-	if inv.Parked() {
-		return PaymentBlock{
-			Blocked: true,
-			Code:    "payment_unidentifiable",
-			Message: parkedMessage(action, inv.Status == InvoiceUncollectible),
-		}
 	}
 
 	return PaymentBlock{
@@ -117,10 +101,9 @@ func PaymentBlocksAction(inv Invoice, action InvoiceAction) PaymentBlock {
 //     invoice (uncollectible → paid), and it is the exit when Stripe can
 //     never answer (disconnected, the customer deleted). This is ADR-107's
 //     carve-out reasoning.
-//   - On an 'unknown' invoice, parked or naming its PaymentIntent, only a
-//     live hold counts: write-off waits while the charge that left the
-//     outcome unclear may still be resending to Stripe (ADR-127 amendment
-//     2026-10-29, ADR-137).
+//   - On an 'unknown' invoice only a live hold counts: write-off waits
+//     while the charge that left the outcome unclear may still be resending
+//     to Stripe (ADR-127 amendment 2026-10-29, ADR-137).
 //   - Any other invoice ignores the hold. PaymentBlocksAction already
 //     decides 'processing'.
 func PaymentBlocksActionHeld(inv Invoice, action InvoiceAction, hold ChargeHoldState) PaymentBlock {
@@ -153,48 +136,8 @@ func PaymentBlocksActionHeld(inv Invoice, action InvoiceAction, hold ChargeHoldS
 // for the stale-hold sweep to clear it (ADR-127, ADR-137).
 const ChargeHoldRefusalMessage = "A charge on this invoice is being confirmed with Stripe. Try again in a few minutes; an interrupted charge is cleared within about an hour."
 
-// parkedMessage says why the action is refused on a park and what to do. Only
-// an earlier Hardcount version parked an invoice, and the upgrade to ADR-137
-// refuses to run while any exists, so a park here got past that check: this
-// version saved no payment to look up and does not resolve it on its own. The
-// message sends the operator to the customer's payments in Stripe and ends by
-// naming mark-uncollectible, the one action allowed, for a customer who paid
-// another way. alreadyWrittenOff swaps
-// that ending, because the advice is impossible on an invoice that already
-// is uncollectible. Writing off a parked invoice is the carve-out in
-// PaymentBlocksAction.
-func parkedMessage(action InvoiceAction, alreadyWrittenOff bool) string {
-	const why = "An earlier Hardcount version couldn't confirm this invoice's last charge with Stripe"
-	if alreadyWrittenOff {
-		return why + ". The invoice is already written off, so nothing charges it again. Check the customer's payments in Stripe for that charge"
-	}
-	const next = ". Hardcount can't look that charge up, so check the customer's payments in Stripe. If the customer paid another way, mark the invoice uncollectible instead"
-	switch action {
-	case ActionVoid:
-		return why + ", and voiding it could annul an invoice that is in fact paid" + next
-	case ActionRecordOfflinePayment:
-		return why + ", and recording an offline payment would label a card charge as out-of-band" + next
-	case ActionIssueCreditNote:
-		return why + ", and crediting it could refund money that was never collected" + next
-	case ActionCollectPayment:
-		return why + ", and charging again now risks a second charge" + next
-	case ActionResendSetupLink:
-		return why + ", and that email tells the customer we will collect automatically while this charge is unresolved" + next
-	case ActionEmailInvoice:
-		// The invoice email gets its own sentence. Its call to action is
-		// "View & pay invoice", not a promise to collect, so the
-		// resend-setup-link sentence would describe the wrong email. Sending
-		// it is wrong because it asks for money we may already have taken,
-		// and it lands the customer on a page with no Pay button.
-		return why + ", and that email asks the customer to pay an invoice we may already have charged them for, and the hosted page will not offer them a Pay button when they arrive" + next
-	default:
-		return why + next
-	}
-}
-
-// inFlightMessage covers the case where the charge is really resolving, so
-// waiting is the right advice. That advice differs from the parked case on
-// purpose.
+// inFlightMessage says why the action is refused while a charge resolves,
+// and that waiting for its outcome is the next step.
 func inFlightMessage(action InvoiceAction) string {
 	const why = "a charge on this invoice is still being confirmed by the payment provider"
 	switch action {

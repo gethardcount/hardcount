@@ -29,8 +29,7 @@ const TriggerAutoCollectNoStripe = "auto_collect_no_stripe"
 func (h *Handler) invoiceEmailRefusal(ctx context.Context, inv domain.Invoice) error {
 	// This email carries a "View & pay invoice" button. Sending it for an
 	// invoice whose payment is unresolved asks the customer to pay something we
-	// may already have taken from them — and for a parked invoice (ADR-107) the
-	// hosted page will not even offer a Pay button when they arrive.
+	// may already have taken from them.
 	if b := domain.PaymentBlocksAction(inv, domain.ActionEmailInvoice); b.Blocked {
 		return errs.InvalidState(b.Message).WithCode(b.Code)
 	}

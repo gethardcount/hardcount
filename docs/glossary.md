@@ -305,17 +305,11 @@ follows.
   scheduled billing run, hourly (every 5 minutes when `APP_ENV` is `local`
   or not set).
   [More](concepts/payments.md#when-the-answer-is-unclear)
-- **parked invoice**: A state that only earlier Hardcount versions created:
-  the charge result was unknown and no PaymentIntent ID was recorded. This
-  version never parks an invoice, and its upgrade does not run while one
-  exists. Only a write-off is allowed on a parked invoice.
-  [More](ops/runbook/unclear-charge.md#parked-no-paymentintent), and
-  [the decision](adr/137-charge-stamps-invoice-before-confirming.md)
 - **parked subscription**: A subscription whose billing failed eight times
   in a row for the same due time. Hardcount stops trying to bill it, so it
   stays due and no invoice is issued for that period. It leaves this state
   when an operator calls `POST /v1/subscriptions/{id}/retry-billing`, or
-  when what is due changes. It has nothing to do with a parked invoice.
+  when what is due changes.
   [More](ops/runbook/billing-failing.md), and
   [the decision](adr/119-billing-failure-record-keyed-to-the-due-instant.md)
 - **dunning**: Hardcount's automatic process for collecting an unpaid invoice.

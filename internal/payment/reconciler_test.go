@@ -176,36 +176,6 @@ func TestReconciler_StillInFlightSkipped(t *testing.T) {
 	}
 }
 
-// TestReconciler_NoPaymentIntentIDStaysUnknown replaces
-// TestReconciler_NoPaymentIntentIDMarksFailed, which pinned the behaviour that
-// WAS the bug: it asserted the reconciler settles an unresolvable invoice
-// failed, under the comment "mark failed so downstream can decide".
-//
-// Settling failed is exactly what makes the double charge possible. It bumps
-// charge_attempt_seq — rotating the Stripe idempotency key — and moves
-// payment_status out of 'unknown' into a state every charge-claim predicate
-// admits, so the next retry opens a SECOND PaymentIntent beside one that may be
-// live and charging. Leaving it at 'unknown' closes that by construction
-// (ADR-107).
-func TestReconciler_NoPaymentIntentIDStaysUnknown(t *testing.T) {
-	store := newMockReconcileStore(domain.Invoice{
-		ID: "inv_4", TenantID: "t1", PaymentStatus: domain.PaymentUnknown,
-	})
-	r := NewReconciler(&mockStripeClient{}, store, &recordingSettler{}, time.Second)
-
-	resolved, errs := r.Run(postgres.WithLivemode(context.Background(), true), 10)
-	if len(errs) != 0 {
-		t.Fatalf("unexpected errors: %v", errs)
-	}
-	if resolved != 0 {
-		t.Errorf("resolved %d — an invoice whose attempt cannot be named has not been resolved by anything", resolved)
-	}
-	got := store.byID["inv_4"]
-	if got.PaymentStatus != domain.PaymentUnknown {
-		t.Fatalf("payment_status moved to %q — leaving 'unknown' is the whole guarantee: every charge-claim predicate excludes it, so no sweep, operator click or dunning retry can open a second PaymentIntent", got.PaymentStatus)
-	}
-}
-
 type errStripeClient struct{ mockStripeClient }
 
 func (e *errStripeClient) GetPaymentIntent(_ context.Context, _ string) (PaymentIntentResult, error) {

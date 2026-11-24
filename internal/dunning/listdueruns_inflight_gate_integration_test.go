@@ -43,7 +43,7 @@ import (
 // It does not: reconciler.go settles only TERMINAL provider outcomes and skips
 // processing/requires_action/requires_confirmation/requires_capture every sweep,
 // so a PI sitting at requires_action (off-session SCA nobody completes) keeps the
-// invoice in flight indefinitely and spun exactly like a parked one. "Do we hold
+// invoice in flight indefinitely and spun every tick. "Do we hold
 // an id" was the wrong question; "can the claim succeed" is the right one, and
 // the claim's own predicate answers it for every in-flight shape at once.
 func TestListDueRuns_InFlightGate(t *testing.T) {
@@ -91,14 +91,19 @@ func TestListDueRuns_InFlightGate(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create run %s: %v", num, err)
 		}
-		// CreateWithLineItems does NOT persist stripe_payment_intent_id — that
+		// CreateWithLineItems does NOT persist stripe_payment_intent_id: that
 		// column is only ever written by the payment path. Setting it on the
-		// struct silently did nothing, which once made the "unknown WITH a PI"
-		// row indistinguishable from a parked one and its assertion vacuous.
-		// Write it the real way.
+		// struct silently did nothing, so it is written here.
 		if piID != "" {
-			if _, applied, err := istore.StampChargeOutcome(ctx, tenantID, inv.ID, inv.ChargeAttemptSeq, ps, piID, ""); err != nil || !applied {
-				t.Fatalf("attach payment intent to %s: applied=%v err=%v", num, applied, err)
+			tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+			if err != nil {
+				t.Fatalf("begin: %v", err)
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE invoices SET stripe_payment_intent_id = $2 WHERE id = $1`, inv.ID, piID); err != nil {
+				t.Fatalf("attach payment intent to %s: %v", num, err)
+			}
+			if err := tx.Commit(); err != nil {
+				t.Fatalf("commit: %v", err)
 			}
 			after, gerr := istore.Get(ctx, tenantID, inv.ID)
 			if gerr != nil {
@@ -134,10 +139,9 @@ func TestListDueRuns_InFlightGate(t *testing.T) {
 		return run.ID
 	}
 
-	parkedOpen := mkDueRun("INV-PARKED-OPEN", domain.PaymentUnknown, "", domain.InvoiceFinalized)
 	unknownWithPI := mkDueRun("INV-UNKNOWN-PI", domain.PaymentUnknown, "pi_live_1", domain.InvoiceFinalized)
 	processing := mkDueRun("INV-PROCESSING", domain.PaymentProcessing, "pi_live_2", domain.InvoiceFinalized)
-	parkedWrittenOff := mkDueRun("INV-PARKED-WROFF", domain.PaymentUnknown, "", domain.InvoiceUncollectible)
+	unknownWrittenOff := mkDueRun("INV-UNKNOWN-WROFF", domain.PaymentUnknown, "pi_live_3", domain.InvoiceUncollectible)
 	ordinaryFailed := mkDueRun("INV-FAILED", domain.PaymentFailed, "", domain.InvoiceFinalized)
 	hostedLive := mkDueRun("INV-HOSTED-LIVE", domain.PaymentFailed, "", domain.InvoiceFinalized)
 	hostedLiveWrittenOff := mkDueRun("INV-HOSTED-WROFF", domain.PaymentFailed, "", domain.InvoiceUncollectible)
@@ -157,16 +161,13 @@ func TestListDueRuns_InFlightGate(t *testing.T) {
 		got[r.ID] = true
 	}
 
-	if got[parkedOpen] {
-		t.Error("PARKED and open must be excluded — no charge path admits it, so every tick burns an attempt and rewinds it while its frozen next_action_at heads this LIMITed queue")
-	}
 	if got[unknownWithPI] {
-		t.Error("'unknown' WITH a PaymentIntent id must be excluded too — the claim requires pending/failed either way, and the reconciler settles only TERMINAL provider outcomes, so a PI at requires_action keeps this in flight forever")
+		t.Error("'unknown' must be excluded: the claim requires pending/failed either way, and the reconciler settles only TERMINAL provider outcomes, so a PI at requires_action keeps this in flight forever")
 	}
 	if got[processing] {
 		t.Error("'processing' must be excluded — ClaimChargeForDunningRetry cannot admit it, so selecting the run is wasted work every tick")
 	}
-	if !got[parkedWrittenOff] {
+	if !got[unknownWrittenOff] {
 		t.Error("a WRITTEN-OFF source must still be selected — the processing path's terminal branch is what resolves the run, and mark-uncollectible's own resolve is best-effort by design; excluding it strands the run active forever")
 	}
 	if !got[ordinaryFailed] {

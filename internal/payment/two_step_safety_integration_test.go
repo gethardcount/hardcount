@@ -4,9 +4,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"github.com/gethardcount/hardcount/internal/platform/postgres"
-	"os"
-	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -20,8 +17,7 @@ import (
 // a compare-and-set that needs the charger's live hold. These tests break it
 // from the sides the independent reviews found (2026-11-10): a stamp that
 // fails, a confirm that fails before or after it reached Stripe, a cancel
-// Stripe refuses, a hold taken by an earlier version, a PaymentIntent gone
-// from the account.
+// Stripe refuses, a PaymentIntent gone from the account.
 
 // confirmFailer is the rig's fake Stripe with a confirm that fails before it
 // reaches Stripe (as LiveStripeClient's does when the credentials cannot be
@@ -362,105 +358,19 @@ func (c *createFailer) CreateUnconfirmedPaymentIntent(ctx context.Context, p Pay
 	return c.fakeStripe.CreateUnconfirmedPaymentIntent(ctx, p)
 }
 
-// upgradeCheck runs migration 00225's upgrade check against the test
-// database, as the migration does before adding its columns, inside a
-// transaction that is rolled back: setup runs first in it, so the test
-// database (shared with other runs) is never changed.
-func (r *shRig) upgradeCheck(setup ...string) error {
-	r.t.Helper()
-	raw, err := os.ReadFile("../platform/migrate/sql/00225_charge_hold_token.sql")
-	if err != nil {
-		r.t.Fatalf("read the migration: %v", err)
-	}
-	src := string(raw)
-	i := strings.Index(src, "-- +goose StatementBegin")
-	j := strings.Index(src, "-- +goose StatementEnd")
-	if i < 0 || j < i {
-		r.t.Fatal("the migration has no upgrade check block")
-	}
-	tx, err := r.db.BeginTx(r.ctx, postgres.TxBypass, "")
-	if err != nil {
-		r.t.Fatal(err)
-	}
-	defer postgres.Rollback(tx)
-	for _, q := range setup {
-		if _, err := tx.ExecContext(r.ctx, q); err != nil {
-			r.t.Fatalf("setup %q: %v", q, err)
-		}
-	}
-	_, err = tx.ExecContext(r.ctx, src[i+len("-- +goose StatementBegin"):j])
-	return err
-}
-
-// The upgrade refuses to run over a charge hold or a parked charge the
-// previous version left, on an open invoice or a written-off one, and runs
-// once there are none. The previous version still settles those on a
-// written-off invoice (it records a payment it finds, and ends a park); this
-// version does not, so a written-off park that got past the check would stay
-// parked for good, with its credit note drafts waiting.
-func TestUpgradeCheck_RefusesEarlierVersionHoldsAndParks(t *testing.T) {
-	r := newSHRig(t, "Upgrade Check")
-	inv := r.seed("INV-UP-CHECK")
-	none := `UPDATE invoices SET auto_charge_claimed_until = NULL,
-		payment_status = CASE WHEN payment_status = 'unknown' AND COALESCE(stripe_payment_intent_id, '') = '' THEN 'pending' ELSE payment_status END`
-	if err := r.upgradeCheck(none); err != nil {
-		t.Fatalf("with nothing in flight: %v, want the upgrade to run", err)
-	}
-	for _, tc := range []struct{ name, set string }{
-		{"a charge hold", `auto_charge_claimed_until = now() - interval '1 minute'`},
-		{"a parked charge", `payment_status = 'unknown', stripe_payment_intent_id = NULL`},
-	} {
-		err := r.upgradeCheck(none, `UPDATE invoices SET `+tc.set+` WHERE id = '`+inv.ID+`'`)
-		if err == nil || !strings.Contains(err.Error(), "Hardcount upgrade stopped: 1 open or written-off invoice(s)") {
-			t.Errorf("with %s: err = %v, want the upgrade stopped", tc.name, err)
-		}
-		err = r.upgradeCheck(none, `UPDATE invoices SET `+tc.set+`, status = 'uncollectible' WHERE id = '`+inv.ID+`'`)
-		if err == nil || !strings.Contains(err.Error(), "Hardcount upgrade stopped: 1 open or written-off invoice(s)") {
-			t.Errorf("with %s on a written-off invoice: err = %v, want the upgrade stopped", tc.name, err)
-		}
-		// On a paid or voided invoice nothing is left to settle: it does not
-		// block the upgrade, and this version clears its hold.
-		for _, closed := range []string{"paid", "voided"} {
-			if err := r.upgradeCheck(none, `UPDATE invoices SET `+tc.set+`, status = '`+closed+`' WHERE id = '`+inv.ID+`'`); err != nil {
-				t.Errorf("with %s on a %s invoice: %v, want the upgrade to run", tc.name, closed, err)
-			}
-		}
-	}
-}
-
-// The fail-safe behind the upgrade check: a hold without its token (an old
-// version still running against the new schema), or a park, is never cleared
-// on a guess while the invoice is open. Kept, stamped so it rotates, Stripe
-// not read (there is no saved PaymentIntent to read), every charge blocked.
-// On an invoice nothing can charge any more, a hold without its token is
-// cleared.
-func TestStaleHold_EarlierVersionHold_KeptForAPerson(t *testing.T) {
-	r := newSHRig(t, "SH Earlier Version")
-	inv := r.seed("INV-SH-EARLIER")
-	paid := r.fake.addPI(stripeCustomerOf(inv), inv.ID, "", "succeeded", shDue) // the old version's one-call charge
-	r.exec(`UPDATE invoices SET auto_charge_claimed_until = now() - interval '11 minutes', charge_hold_token = NULL WHERE id = $1`, inv.ID)
+// A stale hold on an invoice nothing can charge any more is a leftover: the
+// sweep clears it, and asks Stripe nothing.
+func TestStaleHold_VoidedInvoice_HoldCleared(t *testing.T) {
+	r := newSHRig(t, "SH Voided")
+	closed := r.seed("INV-SH-VOID")
+	r.exec(`UPDATE invoices SET status = 'voided', auto_charge_claimed_until = now() - interval '11 minutes' WHERE id = $1`, closed.ID)
 	reads := r.fake.readCount()
 	r.runClean()
-	if r.hold(inv.ID) == nil || r.get(inv.ID).ProviderSyncedAt == nil {
-		t.Fatal("an earlier version's hold was cleared on a guess, or not stamped")
+	if r.hold(closed.ID) != nil {
+		t.Error("a stale hold kept on a voided invoice: nothing can charge it")
 	}
 	if n := r.fake.readCount() - reads; n != 0 {
 		t.Errorf("Stripe reads = %d, want 0", n)
-	}
-	for _, kind := range []chargeKind{autoCharge, dunningRetry, collect} {
-		if _, err := r.chargeAs(r.ctx, kind, inv.ID, "pm_card_1"); !errors.Is(err, errNotClaimed) {
-			t.Fatalf("%s: err = %v, want its claim refused", kind, err)
-		}
-	}
-	if ids := r.succeededFor(inv.ID); len(ids) != 1 || ids[0] != paid.id {
-		t.Fatalf("succeeded PaymentIntents = %v, want only the old version's", ids)
-	}
-
-	closed := r.seed("INV-SH-EARLIER-VOID")
-	r.exec(`UPDATE invoices SET status = 'voided', auto_charge_claimed_until = now() - interval '11 minutes', charge_hold_token = NULL WHERE id = $1`, closed.ID)
-	r.runClean()
-	if r.hold(closed.ID) != nil {
-		t.Error("an earlier version's hold kept on a voided invoice: nothing can charge it")
 	}
 }
 

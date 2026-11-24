@@ -53,9 +53,8 @@ before its charge reached Stripe.
    one more step when it is restored
    ([A backup with a charge in progress](ops/restore.md#a-backup-with-a-charge-in-progress)).
    Run one version at a time for this upgrade. A copy of the previous
-   version that keeps running can leave a charge that the new one will not
-   settle on its own
-   ([Left by an earlier version](ops/runbook/unclear-charge.md#left-by-an-earlier-version)).
+   version that keeps running puts nothing on the invoice before its charge
+   reaches Stripe, so the new version can charge that invoice a second time.
 
 Written-off invoices count: the previous version still settles a charge on
 one (it records a payment it finds at Stripe, and ends a parked charge), and

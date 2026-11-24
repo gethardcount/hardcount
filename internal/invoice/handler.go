@@ -636,10 +636,8 @@ func (h *Handler) resendSetupLink(w http.ResponseWriter, r *http.Request) {
 	}
 	// The setup-link email tells the CUSTOMER "add a payment method and we'll
 	// collect it automatically". No charge path collects an invoice whose
-	// payment is in flight — for a parked one (ADR-107), not until Stripe has
-	// shown no payment for a day. Sending it would be an outbound promise the
-	// engine cannot keep yet, triggerable by an operator button (found by the
-	// honesty sweep, 2026-07-31).
+	// payment is in flight, so sending it would be a promise the engine cannot
+	// keep yet.
 	if b := domain.PaymentBlocksAction(inv, domain.ActionResendSetupLink); b.Blocked {
 		respond.ConflictCoded(w, r, "", b.Code, b.Message)
 		return
@@ -947,7 +945,7 @@ func (h *Handler) collectPayment(w http.ResponseWriter, r *http.Request) {
 		//
 		// Carries the gate's CODE, not just its message. respond.Validation
 		// flattens everything to 422/validation_error, so a walk of all four
-		// parked refusals found this one alone answering a different code than
+		// in-flight refusals found this one alone answering a different code than
 		// void/send/resend — same rule, same sentence, and an API consumer
 		// still could not branch on it uniformly. The single source exists to
 		// stop exactly that divergence; it only works if callers pass both

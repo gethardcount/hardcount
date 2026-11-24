@@ -32,7 +32,7 @@ var (
 	staleChargeHoldResolutions = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "hardcount_stale_charge_hold_resolutions_total",
-			Help: "Stale charge holds cleared by the stale-hold sweep, which asks Stripe nothing (ADR-127, ADR-137), by result: released (the charge never confirmed; the invoice can be charged again), cleared (a leftover hold), failed (the write failed), earlier (a hold or park an earlier version left, kept for a person), lost_race.",
+			Help: "Stale charge holds cleared by the stale-hold sweep, which asks Stripe nothing (ADR-127, ADR-137), by result: released (the charge never confirmed; the invoice can be charged again), cleared (a leftover hold), failed (the write failed), lost_race.",
 		},
 		[]string{"result"},
 	)
@@ -64,9 +64,7 @@ func RecordStripeBreakerState(state string) {
 }
 
 // recordStaleChargeHoldResolution counts one stale-hold check (ADR-127,
-// ADR-137). "earlier" is a hold or park an earlier version left on an open
-// invoice: it stays blocked from charging until a person settles it, so alert
-// on it being non-zero. A steady "failed" is the database refusing the clear.
+// ADR-137). A steady "failed" is the database refusing the clear.
 func recordStaleChargeHoldResolution(result string) {
 	staleChargeHoldResolutions.WithLabelValues(result).Inc()
 }

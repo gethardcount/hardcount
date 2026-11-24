@@ -1447,14 +1447,9 @@ func (s *Stripe) settleDeclineWithRetry(ctx context.Context, tenantID string, in
 	return domain.Invoice{}, domain.PaymentFailureResult{}, fmt.Errorf("report declined charge failed after %d attempts: %w", len(delays), lastErr)
 }
 
-// persistChargeOutcomeWithRetry records the post-charge payment state (the
-// PaymentUnknown/PaymentFailed status + PaymentIntent id) with a bounded
-// retry, mirroring startDunningWithRetry. This write is LOAD-BEARING on the
-// Unknown path: it is the sole thing that sets payment_status='unknown'
-// (enrolling the invoice into the reconciler's ListUnknownPayments sweep) and
-// persists the PaymentIntent id, so a transient loss must be retried before
-// it strands a possibly-succeeded PI. The caller fails loud if every attempt
-// fails. Pre-fix the call site swallowed both the return and the error.
+// persistChargeOutcomeWithRetry records a definite failure with no
+// PaymentIntent (stampFailedWithoutPayment) with a bounded retry, mirroring
+// startDunningWithRetry. The caller fails loud if every attempt fails.
 //
 // The stamp is guarded by the attempt's charge_attempt_seq (P13): applied is
 // false, with a nil error, when another outcome was recorded during the call,
@@ -1463,10 +1458,9 @@ func (s *Stripe) settleDeclineWithRetry(ctx context.Context, tenantID string, in
 // refused retry whose row holds exactly this outcome at seq+1 is that first
 // attempt, and counts as applied.
 //
-// It writes on the ctx it is handed. Only a definite failure with no
-// PaymentIntent is saved through it now (stampFailedWithoutPayment): an
-// unclear outcome needs no save, because the invoice was stamped unknown on
-// the PaymentIntent before the confirm (ADR-137).
+// It writes on the ctx it is handed. An unclear outcome needs no save here:
+// StampPendingConfirm, the one writer of payment_status 'unknown', stamped
+// the invoice unknown on the PaymentIntent before the confirm (ADR-137).
 func persistChargeOutcomeWithRetry(ctx context.Context, invoices InvoiceUpdater, tenantID string, inv domain.Invoice, status domain.InvoicePaymentStatus, piID, message string) (domain.Invoice, bool, error) {
 	delays := []time.Duration{0, 100 * time.Millisecond, 500 * time.Millisecond}
 	var lastErr error

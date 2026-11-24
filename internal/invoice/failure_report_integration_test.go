@@ -41,12 +41,12 @@ func TestFailureReport_MovesOnlyTheAttemptTheInvoiceWaitsOn(t *testing.T) {
 	}
 	decline := func(pi string) step {
 		return func(t *testing.T, id string) {
-			stampOutcome(t, store, ctx, tenantID, id, domain.PaymentFailed, pid(pi), "declined")
+			stampOutcome(t, db, store, ctx, tenantID, id, domain.PaymentFailed, pid(pi), "declined")
 		}
 	}
 	processing := func(pi string) step {
 		return func(t *testing.T, id string) {
-			stampOutcome(t, store, ctx, tenantID, id, domain.PaymentProcessing, pid(pi), "")
+			stampOutcome(t, db, store, ctx, tenantID, id, domain.PaymentProcessing, pid(pi), "")
 		}
 	}
 	// hardcountAttempt writes the attempt row the charge call writes when Stripe
@@ -67,17 +67,7 @@ func TestFailureReport_MovesOnlyTheAttemptTheInvoiceWaitsOn(t *testing.T) {
 		}
 	}
 	stampFailedNoPI := func(t *testing.T, id string) {
-		stampOutcome(t, store, ctx, tenantID, id, domain.PaymentFailed, "", "stripe not configured")
-	}
-	park := func(t *testing.T, id string) {
-		seedPark(t, db, id, "timeout")
-	}
-	// The stale-hold sweep's adopt: it puts a processing payment it found at
-	// Stripe on a parked invoice, through StampChargeOutcome.
-	adopt := func(pi string) step {
-		return func(t *testing.T, id string) {
-			stampOutcome(t, store, ctx, tenantID, id, domain.PaymentProcessing, pid(pi), "")
-		}
+		stampOutcome(t, db, store, ctx, tenantID, id, domain.PaymentFailed, "", "stripe not configured")
 	}
 	markPaidWith := func(pi string) step {
 		return func(t *testing.T, id string) {
@@ -133,14 +123,11 @@ func TestFailureReport_MovesOnlyTheAttemptTheInvoiceWaitsOn(t *testing.T) {
 		// A hosted Checkout attempt never moves the invoice.
 		{"hosted decline on an invoice with no attempt", none, none, hostedReport, "pi_H", false, false},
 		{"hosted decline while an attempt is processing", processing("pi_B"), none, hostedReport, "pi_H", false, false},
-		{"hosted attempt a parked invoice adopted", steps(hardcountAttempt(""), park, adopt("pi_H")), none, hostedReport, "pi_H", true, true},
 
 		// The attempt history decides a report about a PaymentIntent the
 		// invoice does not hold.
 		{"lost charge report: webhook for Hardcount's newest attempt", steps(hardcountAttempt("pi_A"), decline("pi_A"), hardcountAttempt("pi_B")), none, webhookReport, "pi_B", true, true},
 		{"stale decline superseded by a newer Hardcount attempt", steps(hardcountAttempt("pi_A"), decline("pi_A"), hardcountAttempt("pi_B"), decline("pi_B")), none, webhookReport, "pi_A", false, false},
-		{"stale decline on a parked invoice", steps(hardcountAttempt("pi_A"), decline("pi_A"), hardcountAttempt(""), park), none, webhookReport, "pi_A", false, false},
-		{"the parked attempt's own decline", steps(hardcountAttempt("pi_A"), decline("pi_A"), hardcountAttempt(""), park), none, webhookReport, "pi_P", true, true},
 		{"stale decline after a failure with no PaymentIntent", steps(hardcountAttempt("pi_A"), decline("pi_A"), hardcountAttempt(""), stampFailedNoPI), none, webhookReport, "pi_A", false, false},
 
 		// A paid invoice is never moved, by any source.

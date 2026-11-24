@@ -218,11 +218,8 @@ const (
 	// generic "something is wrong here" suggestion.
 	AttentionActionVoidInvoice AttentionAction = "void_invoice"
 	// AttentionActionMarkUncollectible opens the invoice's write-off
-	// confirmation. Offered only on a PARKED invoice (payment status unknown
-	// and no PaymentIntent to look up, ADR-107): there it is the one action
-	// the product allows while Stripe may still complete the charge, for a
-	// customer who paid another way. A secondary action: the dashboard never
-	// renders it as the primary button.
+	// confirmation. No notice offers it at present; the dashboard still
+	// renders it, as a secondary action.
 	AttentionActionMarkUncollectible AttentionAction = "mark_uncollectible"
 )
 

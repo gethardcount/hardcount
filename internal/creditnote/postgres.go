@@ -287,15 +287,10 @@ func (s *PostgresStore) CreateUnderInvoiceLockDynamicTx(ctx context.Context, tx 
 //
 // THE STATUS TERM. A voided source defers nothing: Issue()'s orphan guard
 // voids its draft ("source annulled before issue", audited, no money
-// movement). Added 2026-07-31 for parked invoices (ADR-107: 'unknown' with no
-// PaymentIntent id), whose drafts then waited for good, with written-off
-// sources released too so Issue voided their drafts. Two later changes undo
-// that half: ADR-127 has the stale-hold sweep answer a park by asking Stripe,
-// so a parked source does settle; and since 2026-10-23 a written-off source is
-// billed but unpaid, so its draft issues and lowers what the invoice asks for
-// (ADR-050 amendment). A draft on a written-off source whose charge is in
-// flight therefore waits like any other, and Issue picks the channel once the
-// payment status is known.
+// movement). A written-off source is billed but unpaid, so its draft issues
+// and lowers what the invoice asks for (ADR-050 amendment). A draft on a
+// written-off source whose charge is in flight waits like any other, and
+// Issue picks the channel once the payment status is known.
 //
 // OBSERVABILITY (2026-07-06 truth pass): a draft deferred behind an
 // in-flight source is EXCLUDED by the NOT-EXISTS above, so it never

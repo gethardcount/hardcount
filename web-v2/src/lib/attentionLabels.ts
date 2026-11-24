@@ -27,12 +27,7 @@ const REASON_LABELS: Record<string, string> = {
 }
 
 export function attentionReasonLabel(reason: string, code?: string): string {
-  // A PARKED invoice shares the payment_unconfirmed REASON with a charge that is
-  // genuinely still being confirmed, but they differ: one has a payment to
-  // follow, the other has none named and waits up to a day for Stripe. The
-  // server distinguishes them by CODE, so the label does too.
-  if (code === 'payment.unidentifiable') return 'Payment status unknown'
-  // Two more cases share payment_processing: the customer is on the payment
+  // Two cases share payment_processing: the customer is on the payment
   // page, or a payment on a written-off invoice is being confirmed.
   if (code === 'payment.page_open') return 'Customer is paying'
   if (code === 'payment.recovery_processing') return 'Payment in progress'

@@ -67,11 +67,10 @@ func TestBuildInvWhere_Overdue(t *testing.T) {
 			t.Fatalf("overdue clause missing %q in %q", frag, where)
 		}
 	}
-	// 'unknown' joined 'processing' as an excluded status (ADR-107): the
-	// clause's own comment has always said "not mid-payment", and IsInFlight
-	// means processing OR unknown. Listing a PARKED invoice as past-due and
-	// chaseable pointed an operator at the one invoice no charge path will
-	// touch, and whose money may already have left the customer's account.
+	// 'unknown' is excluded with 'processing': the clause means "not
+	// mid-payment", and IsInFlight means processing or unknown. An invoice
+	// whose charge is unresolved is not past-due and chaseable: its money may
+	// already have left the customer's account.
 	if len(args) != 4 || args[0] != "finalized" || args[1] != "succeeded" ||
 		args[2] != "processing" || args[3] != "unknown" {
 		t.Fatalf("want [finalized succeeded processing unknown] args, got %v", args)

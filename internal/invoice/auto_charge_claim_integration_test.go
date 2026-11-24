@@ -443,7 +443,7 @@ func TestClaimChargeForManualCollect_SharedLeaseAndPredicate(t *testing.T) {
 
 	// 'unknown' payment status is never claimable — the reconciler owns it.
 	unknownInv := seedClaimableInvoice(t, db, ctx, tenantID, "MCC-2")
-	stampOutcome(t, store, ctx, tenantID, unknownInv.ID, domain.PaymentUnknown, "pi_amb", "ambiguous outcome")
+	stampOutcome(t, db, store, ctx, tenantID, unknownInv.ID, domain.PaymentUnknown, "pi_amb", "ambiguous outcome")
 	claimed, err = store.ClaimChargeForManualCollect(ctx, tenantID, unknownInv.ID)
 	if err != nil {
 		t.Fatalf("claim unknown: %v", err)

@@ -293,37 +293,8 @@ func TestSettleFailed_LostChargeReport_WebhookRecordsTheNewestAttempt(t *testing
 	}
 }
 
-// A parked invoice (its newest attempt's id never learned) must not be
-// released by a late decline for an older attempt: that attempt has its own
-// row, superseded by the parked one.
-func TestSettleFailed_ParkedInvoice_StaleOlderDeclineSuperseded(t *testing.T) {
-	invoices := newMockInvoiceUpdater()
-	invoices.invoices["inv_1"] = domain.Invoice{
-		ID: "inv_1", TenantID: "t1", CustomerID: "cus_1", Status: domain.InvoiceFinalized,
-		PaymentStatus: domain.PaymentUnknown, ChargeAttemptSeq: 3,
-	}
-	invoices.chargeAttempts = []domain.InvoiceChargeAttempt{
-		{InvoiceID: "inv_1", StripePaymentIntentID: "pi_A", Trigger: domain.ChargeTriggerAutoCharge},
-		{InvoiceID: "inv_1", StripePaymentIntentID: "", Trigger: domain.ChargeTriggerDunningRetry},
-	}
-	s, email, dunning := newDeclineStripe(&mockStripeClient{}, invoices)
-
-	if err := s.SettleFailed(context.Background(), "t1", invoices.invoices["inv_1"],
-		PaymentFailure{PaymentIntentID: "pi_A", Message: "late decline"}, SourceWebhook); err != nil {
-		t.Fatalf("SettleFailed: %v", err)
-	}
-	if got := invoices.invoices["inv_1"]; got.PaymentStatus != domain.PaymentUnknown || got.ChargeAttemptSeq != 3 {
-		t.Fatalf("parked invoice released by a stale decline: %s/seq %d", got.PaymentStatus, got.ChargeAttemptSeq)
-	}
-	if invoices.failedEventEnqueues != 0 || email.sends != 0 || len(dunning.calls) != 0 {
-		t.Errorf("events=%d emails=%d dunning=%d, want 0/0/0", invoices.failedEventEnqueues, email.sends, len(dunning.calls))
-	}
-}
-
-// A parked invoice can adopt a hosted Checkout attempt found by the search
-// sweep (ADR-108). The invoice then waits on it, so its failure must record —
-// before, the hosted check ran first and the invoice sat in 'processing'
-// forever.
+// An invoice that holds a hosted Checkout attempt waits on it, so its
+// failure must record.
 func TestSettleFailed_HostedAttemptTheInvoiceHolds_Records(t *testing.T) {
 	invoices := newMockInvoiceUpdater()
 	invoices.invoices["inv_1"] = domain.Invoice{

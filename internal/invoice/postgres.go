@@ -771,11 +771,9 @@ func (s *PostgresStore) runOnFinalizedTx(ctx context.Context, tx *sql.Tx, inv do
 }
 
 // StampChargeOutcome records a charge attempt's outcome on the invoice:
-// processing or unknown on a named PaymentIntent, or a failure with no
-// PaymentIntent. An in-flight outcome that names no PaymentIntent is refused:
-// that is a parked charge, which nothing in this version resolves (the
-// sweeps read the PaymentIntent the invoice names; ADR-137). A charge writes
-// "unknown" through StampPendingConfirm, before it confirms. A failure that
+// processing on a named PaymentIntent, or a failure with no PaymentIntent.
+// "Unknown" is written only by StampPendingConfirm, before the charge
+// confirms (ADR-137). A failure that
 // names a PaymentIntent goes through MarkPaymentFailedReportingTransition, which
 // applies the same seq CAS for the charge call (ChargedAtSeq). The write lands AFTER a Stripe round-trip, and
 // another outcome can be recorded during it: the PaymentIntent's own webhook
@@ -811,9 +809,9 @@ func (s *PostgresStore) runOnFinalizedTx(ctx context.Context, tx *sql.Tx, inv do
 // as it now stands with applied=false and a nil error.
 func (s *PostgresStore) StampChargeOutcome(ctx context.Context, tenantID, id string, attemptSeq int64, paymentStatus domain.InvoicePaymentStatus, stripePaymentIntentID, lastPaymentError string) (domain.Invoice, bool, error) {
 	switch paymentStatus {
-	case domain.PaymentProcessing, domain.PaymentUnknown:
+	case domain.PaymentProcessing:
 		if stripePaymentIntentID == "" {
-			return domain.Invoice{}, false, fmt.Errorf("stamp charge outcome: %q must name its PaymentIntent (an in-flight payment with none is a parked charge, which nothing resolves)", paymentStatus)
+			return domain.Invoice{}, false, fmt.Errorf("stamp charge outcome: %q must name its PaymentIntent", paymentStatus)
 		}
 	case domain.PaymentFailed:
 		// A failure that names a PaymentIntent is a report the webhook and
@@ -1029,9 +1027,7 @@ func (s *PostgresStore) MarkPaymentFailedReportingTransition(ctx context.Context
 		// (unknown or processing on this PaymentIntent) frees that attempt's
 		// hold: no claim admits an in-flight invoice, so the hold is its
 		// own. In any other state the hold may be a charger's that has
-		// claimed and not yet stamped, and stays. So does a hold without its
-		// token (an earlier version's), which the stale-hold sweep keeps for
-		// a person. (See ADR-137.)
+		// claimed and not yet stamped, and stays. (See ADR-137.)
 		endsInFlightAttempt := holdsThisPI &&
 			(domain.InvoicePaymentStatus(paymentStatus) == domain.PaymentUnknown ||
 				domain.InvoicePaymentStatus(paymentStatus) == domain.PaymentProcessing)
@@ -1044,7 +1040,7 @@ func (s *PostgresStore) MarkPaymentFailedReportingTransition(ctx context.Context
 				below_minimum_at = NULL,
 				charge_attempt_seq = charge_attempt_seq + 1,
 				auto_charge_claimed_until = CASE
-					WHEN $5 AND charge_hold_token = auto_charge_claimed_until THEN NULL
+					WHEN $5 THEN NULL
 					ELSE auto_charge_claimed_until END,
 				updated_at = $3
 			WHERE id = $4
@@ -2719,11 +2715,7 @@ func (s *PostgresStore) claimChargeHold(ctx context.Context, tenantID, id, where
 func chargeClaimSQL(where string) string {
 	return `
 		UPDATE invoices
-		SET auto_charge_claimed_until = now() + make_interval(secs => $2),
-		    -- The token (ADR-137): equal to the hold, so the stale-hold sweep
-		    -- knows this hold's charger puts its PaymentIntent on the invoice
-		    -- before confirming.
-		    charge_hold_token = now() + make_interval(secs => $2)
+		SET auto_charge_claimed_until = now() + make_interval(secs => $2)
 		WHERE id = $1 AND (` + where + `)
 		RETURNING auto_charge_claimed_until`
 }
@@ -3065,20 +3057,18 @@ func (s *PostgresStore) ClaimChargeHoldForFinalAction(ctx context.Context, tenan
 		  AND status = 'finalized'`))
 }
 
-// staleHoldRecheckAfter is how long a kept hold waits before the sweep
-// looks at it again. A kept hold's check stamps provider_synced_at
-// (MarkStaleHoldChecked), so a hold whose check failed rotates to the back of
-// the queue instead of heading it forever (the 0167 rotation). Shorter than
-// the hourly production tick on purpose: a stamp taken during one tick must
-// not hide the row from the next.
+// staleHoldRecheckAfter is how long a hold the sweep could not clear waits
+// before the sweep looks at it again. A failed check stamps provider_synced_at
+// (MarkStaleHoldChecked), so the hold rotates to the back of the queue
+// instead of heading it forever (the 0167 rotation). Shorter than the hourly
+// production tick on purpose: a stamp taken during one tick must not hide
+// the row from the next.
 const staleHoldRecheckAfter = 30 * time.Minute
 
 // ListStaleChargeHolds is the stale-hold sweep's input (ADR-127): invoices
 // whose hold ended at least domain.StaleChargeHoldWait ago, in ANY status:
 // a hold left on an invoice that was settled, written off or voided must be
-// cleared too, not left forever. Each row carries the hold value and whether
-// the hold carries its token (charge_hold_token equal to it: taken by a
-// charger that stamps the invoice before confirming, ADR-137).
+// cleared too, not left forever. Each row carries the hold value.
 //
 // TxBypass across tenants with an explicit livemode, like the payment sweeps'
 // lists.
@@ -3107,8 +3097,7 @@ func (s *PostgresStore) ListStaleChargeHolds(ctx context.Context, limit int, ski
 	// COALESCE: pgx sends a nil skip list as NULL, and
 	// NOT (id = ANY(NULL)) would filter out every row.
 	rows, err := tx.QueryContext(ctx, `
-		SELECT `+qualifiedInvCols("i")+`, i.auto_charge_claimed_until,
-		       COALESCE(i.charge_hold_token = i.auto_charge_claimed_until, false)
+		SELECT `+qualifiedInvCols("i")+`, i.auto_charge_claimed_until
 		FROM invoices i
 		WHERE i.auto_charge_claimed_until < now() - make_interval(secs => $1)
 		  AND i.livemode = $2
@@ -3126,7 +3115,7 @@ func (s *PostgresStore) ListStaleChargeHolds(ctx context.Context, limit int, ski
 	var out []domain.StaleChargeHold
 	for rows.Next() {
 		var h domain.StaleChargeHold
-		dest := append(s.scanInvDest(&h.Invoice), &h.Hold, &h.Tokened)
+		dest := append(s.scanInvDest(&h.Invoice), &h.Hold)
 		if err := rows.Scan(dest...); err != nil {
 			return nil, err
 		}
@@ -3181,14 +3170,13 @@ func (s *PostgresStore) ClearStaleChargeHold(ctx context.Context, tenantID, id s
 }
 
 // MarkStaleHoldChecked stamps provider_synced_at for a stale hold the sweep
-// looked at and kept, so the row rotates (staleHoldRecheckAfter). Only the
+// could not clear, so the row rotates (staleHoldRecheckAfter). Only the
 // time: provider_payment_status stays the verbatim PaymentIntent status the
 // payment sweeps last read, and no money column or updated_at is touched
 // (see RecordProviderSync).
 //
-// Not an 'unknown' invoice that names its PaymentIntent: there the column is
-// the unknown sweep's rotation key, and that sweep stamps it on its own
-// checks.
+// Not an 'unknown' invoice: there the column is the unknown sweep's rotation
+// key, and that sweep stamps it on its own checks.
 func (s *PostgresStore) MarkStaleHoldChecked(ctx context.Context, tenantID, id string) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
@@ -3198,7 +3186,7 @@ func (s *PostgresStore) MarkStaleHoldChecked(ctx context.Context, tenantID, id s
 
 	if _, err := tx.ExecContext(ctx, `
 		UPDATE invoices SET provider_synced_at = now()
-		WHERE id = $1 AND NOT (payment_status = 'unknown' AND COALESCE(stripe_payment_intent_id, '') <> '')
+		WHERE id = $1 AND payment_status <> 'unknown'
 	`, id); err != nil {
 		return err
 	}

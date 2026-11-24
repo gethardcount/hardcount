@@ -22,10 +22,8 @@ import (
 // clears any hold: nothing can charge a paid invoice, and a charger that has
 // claimed and not yet stamped finds its stamp refused. One that marks it
 // failed clears the hold only when the invoice was in flight (unknown or
-// processing) on that PaymentIntent and the hold carries its token: no claim
-// admits an in-flight invoice, so that hold is the attempt's own, and a hold
-// without its token is an earlier version's, kept for a person. Otherwise
-// only the stale-hold sweep (payment.Reconciler) clears a stale hold; it
+// processing) on that PaymentIntent: no claim admits an in-flight invoice, so
+// that hold is the attempt's own. Otherwise only the stale-hold sweep (payment.Reconciler) clears a stale hold; it
 // needs no answer from Stripe to do so.
 // Write-off is the one action allowed on a stale hold: it moves no money.
 //
@@ -71,11 +69,9 @@ const (
 //     StaleChargeHoldWait ago, and the unknown sweep only at invoices whose
 //     hold has ended. Neither needs the wait for safety: the stamp and the
 //     clear are compare-and-sets on one row, and Stripe refuses a confirm on a
-//     canceled PaymentIntent (ADR-137). StaleChargeHoldWait is kept from the
-//     one-call charge, where it gave the charge's webhook time to arrive
-//     before the sweep asked Stripe. Today it only lets a slow charger's own
-//     release land first, and delays the next charge of a stopped one by up
-//     to ten minutes; removing it is a follow-up.
+//     canceled PaymentIntent (ADR-137). StaleChargeHoldWait only lets a slow
+//     charger's own release land first, and delays the next charge of a
+//     stopped one by up to ten minutes; removing it is a follow-up.
 const (
 	ChargeHoldTTL       = 5 * time.Minute
 	ChargeSendMargin    = 2 * time.Minute
@@ -89,11 +85,6 @@ const (
 type StaleChargeHold struct {
 	Invoice Invoice
 	Hold    time.Time
-	// Tokened: the hold carries its token (charge_hold_token equal to it),
-	// so it was taken by a charger that puts its PaymentIntent on the
-	// invoice before confirming (ADR-137). A hold without it was taken by an
-	// earlier version, which charged in one call and saved nothing first.
-	Tokened bool
 }
 
 type chargeHoldOwnerKey struct{}

@@ -5,11 +5,10 @@ import (
 	"fmt"
 )
 
-// The fake's charge: create a PaymentIntent unconfirmed, then confirm it. It keeps the rules the
-// one-call fake keeps (a key returns its saved answer for the same
-// parameters, a 500 is saved under the key, a request can outlive its
-// caller), and adds the ones Stripe applies to a confirm, checked against
-// Stripe test mode on 2026-11-09:
+// The fake's charge: create a PaymentIntent unconfirmed, then confirm it. A
+// key returns its saved answer for the same parameters, a 500 is saved under
+// the key, and a request can outlive its caller. It adds the rules Stripe
+// applies to a confirm, checked against Stripe test mode on 2026-11-09:
 //
 //   - a PaymentIntent that already succeeded or is processing is not charged
 //     again; LiveStripeClient turns Stripe's payment_intent_unexpected_state

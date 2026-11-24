@@ -36,10 +36,8 @@
  * - `void_invoice`: `POST /v1/invoices/{id}/void`. Offered only on
  *   `amount_below_minimum`.
  * - `mark_uncollectible`:
- *   `POST /v1/invoices/{id}/mark-uncollectible`. Offered only on a
- *   parked invoice (payment status `unknown` with no payment intent
- *   recorded, left by an earlier version), for a customer who paid
- *   another way. After the write-off, a payment whose Stripe event
+ *   `POST /v1/invoices/{id}/mark-uncollectible`. No notice offers it
+ *   at present. After the write-off, a payment whose Stripe event
  *   arrives later is still recorded, and nothing charges the invoice.
  *   The dashboard shows it as a secondary action.
  */

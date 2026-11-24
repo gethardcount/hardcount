@@ -52,9 +52,8 @@ func TestUnknownSweepRotatesInsteadOfJamming(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create %s: %v", num, err)
 		}
-		// The PI id is what makes a row reconcilable at all (parked rows are
-		// excluded); write it the real way.
-		stampOutcome(t, store, ctx, tenantID, inv.ID, domain.PaymentUnknown, piID, "")
+		// The PI id is what makes a row reconcilable at all.
+		stampOutcome(t, db, store, ctx, tenantID, inv.ID, domain.PaymentUnknown, piID, "")
 		tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
 		if err != nil {
 			t.Fatalf("begin: %v", err)
@@ -158,7 +157,7 @@ func TestRecordProviderSyncTouchesOnlyTheObservation(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create invoice: %v", err)
 	}
-	stampOutcome(t, store, ctx, tenantID, inv.ID, domain.PaymentUnknown, "pi_narrow", "")
+	stampOutcome(t, db, store, ctx, tenantID, inv.ID, domain.PaymentUnknown, "pi_narrow", "")
 
 	before, err := store.Get(ctx, tenantID, inv.ID)
 	if err != nil {
@@ -226,7 +225,7 @@ func TestInflightSweeps_ListOnlyRowsPastTheCoolOff(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create %s: %v", num, err)
 		}
-		stampOutcome(t, store, ctx, tenantID, inv.ID, domain.PaymentUnknown, "pi_"+num, "")
+		stampOutcome(t, db, store, ctx, tenantID, inv.ID, domain.PaymentUnknown, "pi_"+num, "")
 		tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
 		if err != nil {
 			t.Fatalf("begin: %v", err)

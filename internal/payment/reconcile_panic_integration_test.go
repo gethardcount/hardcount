@@ -26,8 +26,8 @@ import (
 //   - U2: 'unknown'; its PaymentIntent succeeded.
 //   - P:  'processing'; its PaymentIntent succeeded and no webhook came.
 //
-// A parked invoice (no PaymentIntent id) is checked by the stale-hold sweep,
-// whose panicking row is pinned by TestStaleHold_PanickingCheck_RestOfTheRunGoesOn.
+// The stale-hold sweep's panicking row is pinned by
+// TestStaleHold_PanickingCheck_RestOfTheRunGoesOn.
 func TestReconcile_PanickingRow_RotatesAndTheRestGoesOn(t *testing.T) {
 	r := newSHRig(t, "Reconcile Panicking Row")
 	logs := captureLogs(t)

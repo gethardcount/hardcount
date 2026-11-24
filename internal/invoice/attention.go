@@ -661,32 +661,6 @@ func classifyPaymentUnconfirmed(inv domain.Invoice) *domain.Attention {
 	// "Check provider" button was non-functional (no endpoint); an on-demand
 	// re-check is deferred until real stuck-payment pressure (ADR-049), so the
 	// dead button is removed rather than shipped greyed-out.
-	// PARKED (ADR-107): Stripe's answer was unclear and named no payment. Only
-	// an earlier version parked an invoice, and the upgrade to ADR-137 refuses
-	// to run while any exists, so a park here got past that check. This
-	// version saved no payment to look up and does not resolve it on its own,
-	// so the banner is Critical and sends the operator to Stripe. (The copy
-	// approved on 2026-10-19 promised a re-charge after 24 hours, which this
-	// version never makes.)
-	if inv.Parked() {
-		return &domain.Attention{
-			Severity: domain.AttentionSeverityCritical,
-			Reason:   domain.AttentionReasonPaymentUnconfirmed,
-			Code:     "payment.unidentifiable",
-			Message: "An earlier Hardcount version couldn't confirm this charge with Stripe, and Hardcount can't look it up.\n" +
-				"Check the customer's payments in Stripe.",
-			Detail: "No new charge is made while it is unresolved. " +
-				"If Stripe shows the payment, the unclear-charge runbook says how to record it. " +
-				"If the customer paid another way, mark the invoice uncollectible. " +
-				"To find the attempt in Stripe, search by customer and amount.",
-			DocURL: docURL("payment-unconfirmed"),
-			Since:  &since,
-			Actions: []domain.AttentionActionItem{
-				{Code: domain.AttentionActionMarkUncollectible, Label: "Mark uncollectible"},
-			},
-		}
-	}
-
 	return &domain.Attention{
 		Severity: domain.AttentionSeverityInfo,
 		Reason:   domain.AttentionReasonPaymentUnconfirmed,
