@@ -526,8 +526,7 @@ type Subscription struct {
 	// calendar-monthly subs (always the 1st) and legacy/unset rows (the
 	// advance then falls back to the historical path). Recomputed whenever the
 	// cycle re-anchors to "now" (a cross-interval swap).
-	BillingAnchorDay int    `json:"billing_anchor_day,omitempty"`
-	TestClockID      string `json:"test_clock_id,omitempty"` // Test mode only — attached simulator clock
+	BillingAnchorDay int `json:"billing_anchor_day,omitempty"`
 	// BillingFailure is set while the billing run is failing on the work
 	// this subscription has due now, and nil otherwise (ADR-119). Composed at
 	// the store's row scan; never written through this struct.

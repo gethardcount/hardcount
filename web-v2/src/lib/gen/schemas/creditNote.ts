@@ -133,12 +133,11 @@ export interface CreditNote {
   tax_reversal_pending: boolean;
   /** Extra key-value data stored with the note. No API request sets it; it is absent when empty. */
   metadata?: CreditNoteMetadata;
-  /** When the note was created. For an invoice on a test clock, the clock's time. */
+  /** When the note was created. */
   created_at: string;
   /**
-     * The real-world time the note was created. It differs from
-     * `created_at` only when the invoice is on a test clock. Absent on
-     * notes created before releases recorded it.
+     * The real-world time the note was created. Absent on notes
+     * created before releases recorded it.
      */
   recorded_at?: string;
   /** When the note last changed. */

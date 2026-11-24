@@ -46,8 +46,8 @@ billing?: ListSubscriptionsBilling;
  * `paused` returns only active and trialing subscriptions whose
  * `pause_collection` is in force, whether a dashboard user or an
  * API key set it, or dunning (Hardcount's automatic payment
- * retries) did. A timed pause ends at `resumes_at` (on the subscription's test
- * clock, if it has one), even while the response still carries it.
+ * retries) did. A timed pause ends at `resumes_at`, even while the
+ * response still carries it.
  * Any other value is a 422 with `param: collection`.
  */
 collection?: ListSubscriptionsCollection;

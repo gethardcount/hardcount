@@ -4,27 +4,27 @@ import { useTenantTimezone } from '@/hooks/useTenantTimezone'
 import type { ActivityLine } from '@/lib/gen/schemas/activityLine'
 import type { ActivityPart } from '@/lib/gen/schemas/activityPart'
 import {
-  TONES, actorText, groupByDay, lineTimes, linkRoute, money, partTime, recordedTime, timeOfDay, toneOf, zoneHeader,
+  TONES, actorText, groupByDay, lineTimes, linkRoute, money, partTime, timeOfDay, toneOf, zoneHeader,
 } from '@/lib/activityLine'
 import { cn } from '@/lib/utils'
 
-// The shared activity list (ADR-128): rows grouped under day headers on the
-// entity's calendar, in the order the server sent them (timeline.Order).
+// The shared activity list (ADR-128): rows grouped under day headers, in the
+// order the server sent them.
 // Every word comes from the line; this component formats money and times,
 // draws links and the tone's dot, and lays the row out. Every date and time
 // is a <time> element, which the e2e text-parity check relies on.
 //
-// Row shape, the same on both clocks:
+// Row shape:
 //   ● Title · amount                                  10:00 AM
 //     Problem line (failure and warning rows)
-//     Detail · Detail · Actor · Recorded Oct 18, 8:14 PM
+//     Detail · Detail · Actor
 //
 // The zone is the account's (useTenantTimezone, which re-renders when
 // /v1/settings arrives on a cold deep link), never the browser's.
 
 export function ActivityZone({ lines }: { lines: readonly ActivityLine[] }) {
-  // Every time the card shows, not only the row times: the Recorded times can
-  // sit on the other side of a summer-time change.
+  // Every time the card shows, not only the row times: a time part can sit on
+  // the other side of a summer-time change.
   const text = zoneHeader(lineTimes(lines), useTenantTimezone())
   if (!text) return null
   return <span className="text-xs font-normal text-muted-foreground">{text}</span>
@@ -79,7 +79,7 @@ function ActivityRow({ line, tz, last }: { line: ActivityLine; tz: string; last:
         {line.problem && (
           <p className={cn('mt-0.5 text-xs [overflow-wrap:anywhere]', tone.problem)}>{line.problem}</p>
         )}
-        {(segments.length > 0 || actor || line.recorded_at) && (
+        {(segments.length > 0 || actor) && (
           <p className="mt-0.5 text-xs text-muted-foreground [overflow-wrap:anywhere]">
             {segments.map((seg, s) => (
               <Fragment key={`seg:${s}`}>
@@ -91,14 +91,6 @@ function ActivityRow({ line, tz, last }: { line: ActivityLine; tz: string; last:
               <>
                 {segments.length > 0 && ' · '}
                 {actor}
-              </>
-            )}
-            {line.recorded_at && (
-              <>
-                {(segments.length > 0 || actor) && ' · '}
-                <span data-activity-recorded>
-                  Recorded <time dateTime={line.recorded_at}>{recordedTime(line.recorded_at, tz)}</time>
-                </span>
               </>
             )}
           </p>

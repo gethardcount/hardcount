@@ -5278,10 +5278,8 @@ func (e *Engine) cancelTrialAtEndFromEngine(ctx context.Context, sub domain.Subs
 		if canceled.CanceledAt != nil {
 			meta["canceled_at"] = canceled.CanceledAt.UTC().Format(time.RFC3339)
 		}
-		// trial_end_at is its own fact, under its own key. The row's sim axis
-		// (test_clock_id + sim_effective_at) is the audit writer's, resolved
-		// from the ctx clock binding — see subscription.cancelTrialAtEnd, the
-		// other writer of this vocabulary.
+		// trial_end_at is its own fact, under its own key, as in
+		// subscription.cancelTrialAtEnd, the other writer of this vocabulary.
 		if sub.TrialEndAt != nil {
 			meta["trial_end_at"] = sub.TrialEndAt.UTC().Format(time.RFC3339)
 		}

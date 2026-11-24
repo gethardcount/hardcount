@@ -1100,7 +1100,7 @@ export default function SubscriptionDetailPage() {
                       <div className="flex items-center gap-1.5 min-w-0">
                         <p className="text-sm text-foreground">{event.description}</p>
                       </div>
-                      <span className="text-xs text-muted-foreground ml-4 whitespace-nowrap">{formatDateTime(event.sim_effective_at || event.timestamp)}</span>
+                      <span className="text-xs text-muted-foreground ml-4 whitespace-nowrap">{formatDateTime(event.timestamp)}</span>
                     </div>
                     {/* The problem line: what went wrong on a failure row,
                         what it means on a warning row. */}
@@ -1115,17 +1115,10 @@ export default function SubscriptionDetailPage() {
                         )}
                       </p>
                     )}
-                    {event.sim_effective_at ? (
+                    {(event.actor_name || event.actor_type) && (
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        Recorded {formatDateTime(event.timestamp)}
-                        {(event.actor_name || event.actor_type) && <> · by {event.actor_name || event.actor_type}</>}
+                        by {event.actor_name || event.actor_type}
                       </p>
-                    ) : (
-                      (event.actor_name || event.actor_type) && (
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          by {event.actor_name || event.actor_type}
-                        </p>
-                      )
                     )}
                   </div>
                 </div>

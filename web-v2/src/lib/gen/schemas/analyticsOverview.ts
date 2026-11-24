@@ -21,8 +21,7 @@ import type { AnalyticsPeriod } from './analyticsPeriod';
  * "The window" is the requested period, ending now. "The previous
  * window" is the one of equal length before it. Money is in the minor
  * unit of `currency` (cents for USD). Rates are fractions, so 0.05
- * means 5%. Customers, subscriptions and invoices on test clocks are
- * left out of every figure.
+ * means 5%.
  */
 export interface AnalyticsOverview {
   period: AnalyticsPeriod;
@@ -55,7 +54,7 @@ export interface AnalyticsOverview {
   outstanding_by_currency: AnalyticsOverviewOutstandingByCurrencyItem[];
   /** Average total of invoices paid in the window. */
   avg_invoice_value: number;
-  /** Customers' credit balances added up per currency, `currency` first, then largest. A currency whose balance is zero is left out. Customers on a test clock are not counted. */
+  /** Customers' credit balances added up per currency, `currency` first, then largest. A currency whose balance is zero is left out. */
   credit_balance_by_currency: AnalyticsOverviewCreditBalanceByCurrencyItem[];
   /**
      * Customer records with status `active`. Includes customers with
@@ -90,7 +89,7 @@ export interface AnalyticsOverview {
      * Issued credit notes whose refund failed or has an unknown
      * result, has stayed pending for 72 hours since the note last
      * changed, or owes a refund that has not started an hour after the
-     * note last changed. Test-clock credit notes are not counted.
+     * note last changed.
      */
   refunds_needing_attention: number;
   /** Usage events with a timestamp in the window. */

@@ -41,22 +41,6 @@ date_from?: string;
  */
 date_to?: string;
 /**
- * Only entries made inside this test clock's simulation. Works for deleted clocks too.
- */
-test_clock_id?: string;
-/**
- * Lower bound on `sim_effective_at` (simulated time), inclusive.
- * RFC3339 or YYYY-MM-DD, like `date_from`. Excludes entries with
- * no simulated time.
- */
-sim_from?: string;
-/**
- * Upper bound on `sim_effective_at`, inclusive. RFC3339 or
- * YYYY-MM-DD, like `date_to`. Excludes entries with no simulated
- * time.
- */
-sim_to?: string;
-/**
  * The only supported order. Any other value is a 400.
  */
 order?: ListAuditLogOrder;

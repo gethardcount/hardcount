@@ -12,7 +12,6 @@ import type { ActivityLine } from './gen/schemas/activityLine'
 import type { ActivityLink } from './gen/schemas/activityLink'
 import type { ActivityMoney } from './gen/schemas/activityMoney'
 import { formatCents } from './money'
-import { wallClockNow } from './effectiveNow'
 
 // The four tones, one meaning each (ADR-128 rule 7). The words carry the
 // meaning; the dot only repeats it. Green is for money only.
@@ -37,7 +36,7 @@ export function money(m: ActivityMoney): string {
 }
 
 // actorText words who did it, as the backend's activity.ActorText does. It
-// is the meta line's last part before the Recorded part.
+// is the meta line's last part.
 export function actorText(actor: ActivityActor | undefined): string {
   if (!actor) return ''
   switch (actor.kind) {
@@ -113,19 +112,6 @@ export function partTime(iso: string, tz: string | undefined): string {
   })
 }
 
-// recordedTime is the Recorded part's date and time: the real moment, which
-// is on the other calendar, so it keeps its date. The year shows only when
-// it is not the current year. The Recorded part is the real moment, so
-// "current" is the wall clock's year.
-export function recordedTime(iso: string, tz: string | undefined, nowMs: number = wallClockNow()): string {
-  const sameYear = dayKey(iso, tz).slice(0, 4) === dayKey(new Date(nowMs).toISOString(), tz).slice(0, 4)
-  return new Date(iso).toLocaleString('en-US', {
-    ...(sameYear ? {} : { year: 'numeric' }),
-    month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit',
-    ...(tz ? { timeZone: tz } : {}),
-  })
-}
-
 // zoneName is the zone as the dashboard's formatDateTime names it:
 // "GMT+5:30" for Asia/Kolkata, "EST" or "EDT" for America/New_York.
 function zoneName(iso: string, tz: string | undefined): string {
@@ -144,14 +130,13 @@ export function zoneHeader(isos: readonly string[], tz: string | undefined): str
   return names.length > 0 ? `Times in ${names.join(' / ')}` : ''
 }
 
-// lineTimes is every instant the lines show: each row's time, its Recorded
-// time and every time part in its meta line. The zone header is built from
-// all of them, so it names every zone name the card's times are in.
+// lineTimes is every instant the lines show: each row's time and every time
+// part in its meta line. The zone header is built from all of them, so it
+// names every zone name the card's times are in.
 export function lineTimes(lines: readonly ActivityLine[]): string[] {
   const out: string[] = []
   for (const line of lines) {
     out.push(line.occurred_at)
-    if (line.recorded_at) out.push(line.recorded_at)
     for (const seg of line.detail) {
       for (const part of seg) if (part.time) out.push(part.time)
     }
@@ -167,8 +152,7 @@ export interface ActivityDay {
   lines: ActivityLine[]
 }
 
-// groupByDay puts the lines under day headers on the entity's calendar,
-// keeping the server's order (timeline.Order). A day that comes back after
+// groupByDay puts the lines under day headers, keeping the server's order. A day that comes back after
 // another day gets a header again, so the order is never changed here.
 export function groupByDay(lines: readonly ActivityLine[], tz: string | undefined): ActivityDay[] {
   const days: ActivityDay[] = []

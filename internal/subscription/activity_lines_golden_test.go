@@ -481,7 +481,7 @@ func buildGoldenCases(t *testing.T) []goldenCase {
 	var cases []goldenCase
 	for _, c := range goldenActionCases(t) {
 		l := describeSubscriptionAction(c.action, c.meta, goldenLabels)
-		l = activity.Stamp(l, goldenAt, time.Time{}, false)
+		l = activity.Stamp(l, goldenAt)
 		l.ID = c.name
 		cases = append(cases, goldenCase{Case: c.name, Line: l, Text: lineText(l)})
 	}
@@ -489,7 +489,7 @@ func buildGoldenCases(t *testing.T) []goldenCase {
 	for _, a := range []struct{ kind, name string }{{"user", "alice@example.com"}, {"api_key", "billing-sync"}, {"customer", "Northwind"}, {"system", ""}} {
 		l := describeSubscriptionAction(domain.AuditActionCreate, map[string]any{}, goldenLabels)
 		l.Actor = activity.ActorFromAudit(a.kind, a.name)
-		l = activity.Stamp(l, goldenAt, time.Time{}, false)
+		l = activity.Stamp(l, goldenAt)
 		name := "actor/" + a.kind
 		l.ID = name
 		cases = append(cases, goldenCase{Case: name, Line: l, Text: lineText(l)})

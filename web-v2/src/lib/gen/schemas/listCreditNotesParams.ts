@@ -34,7 +34,7 @@ customer_id?: string;
 status?: ListCreditNotesStatus;
 /**
  * Only notes whose refund is in this state. `needs_attention`
- * returns issued, non-test-clock notes whose
+ * returns issued notes whose
  * refund failed or has an unknown result, has been pending more
  * than 72 hours, or has a refund amount still at `none` after 1
  * hour. Any other value is a 422 with `param: refund_status`.

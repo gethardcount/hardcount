@@ -135,27 +135,6 @@ test('a payment-setup-link row names the action, not a generic "Updated <custome
   )
 })
 
-test('a row whose subject was torn down offers no link', () => {
-  // The audit row survives its subject on purpose, so it still names an invoice
-  // that no longer exists, and "View" would go straight into a 404. The backend
-  // resolves subject_deleted at read time; the only job here is to stop offering
-  // the door.
-  assert.equal(
-    resourceLink(entry({ resource_type: 'invoice', resource_id: 'hc_inv_sim', subject_deleted: true })),
-    null,
-    'a torn-down subject must not render a View link — it 404s')
-
-  // The same row while the subject is there: the link works.
-  assert.equal(
-    resourceLink(entry({ resource_type: 'invoice', resource_id: 'hc_inv_sim', subject_deleted: false })),
-    '/invoices/hc_inv_sim')
-
-  // Absent: unchanged, still links.
-  assert.equal(
-    resourceLink(entry({ resource_type: 'invoice', resource_id: 'hc_inv_real' })),
-    '/invoices/hc_inv_real')
-})
-
 // The audit log printed every *_cents value with the workspace symbol, so a
 // EUR invoice's total read "$". A row that records its currency is shown in
 // it (credit rows record theirs since ADR-129); a row that records none is

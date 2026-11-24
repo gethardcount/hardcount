@@ -68,7 +68,7 @@ export interface DunningRun {
   resolution?: DunningRunResolution;
   /**
      * When the run started: when the payment failed or the collection
-     * found no card. For an invoice on a test clock, the clock's time.
+     * found no card.
      */
   created_at: string;
   /** When the run last changed. */
@@ -79,10 +79,6 @@ export interface DunningRun {
   invoice_amount_due_cents?: number;
   /** The invoice's currency. Filled in on list responses. */
   invoice_currency?: string;
-  /** The test clock's current time, when the customer is on a test clock. Filled in on list responses. */
-  effective_now?: string;
-  /** The customer's test clock, when they are on one. Filled in on list responses. */
-  test_clock_id?: string;
   /**
      * How many retries the run's policy makes: the length of its
      * `retry_days`. Filled in on list responses.

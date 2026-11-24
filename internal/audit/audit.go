@@ -163,13 +163,8 @@ func (l *Logger) Log(ctx context.Context, tenantID, action, resourceType, resour
 	ipAddress := request.ClientIPIfAny(ctx)
 	requestID := chimw.GetReqID(ctx)
 
-	// created_at is wall-clock — the audit row answers "when did the
-	// operator click" / "when did the engine emit," which are both real-
-	// time events regardless of which test clock the affected entity is
-	// pinned to. ADR-030 table line 131 ("Audit log row recorded_at:
-	// wall-clock | Forensics; never on the public API"). Diverged from
-	// this for ~2 weeks via subscription.auditCtxForSub (since reverted
-	// 2026-05-28) — see ADR-030 amendment.
+	// created_at is wall-clock: the audit row answers "when did the
+	// operator click" or "when did the engine emit", both real-time events.
 	_, err = tx.ExecContext(writeCtx, `
 		INSERT INTO audit_log (id, tenant_id, actor_type, actor_id, action,
 			resource_type, resource_id, resource_label, metadata, ip_address,
@@ -342,29 +337,6 @@ func buildListWhere(tenantID string, livemode bool, filter QueryFilter) (whereCl
 	idx := 3
 	where := " AND al.tenant_id = $1 AND al.livemode = $2"
 
-	// Sim axis (0148). The clock predicate sits HERE, immediately after
-	// tenant/livemode, because that is the leading-key order of the partial index
-	// it rides: idx_audit_log_clock (tenant_id, livemode, test_clock_id,
-	// created_at DESC, id DESC) WHERE test_clock_id IS NOT NULL. Equality on the
-	// first three keys, then the list's sort and cursor columns already in order —
-	// so a clock-scoped read needs no Sort step and the cursor seeks the same
-	// tuple it sorts on. sim_effective_at is NOT an index key: there is one sort
-	// axis (created_at), and a sim_from/sim_to window is a cheap filter inside an
-	// already-narrow clock slice. TestSimAxis_UsesPartialClockIndex pins the plan.
-	if filter.TestClockID != "" {
-		where += andClause(&idx, "al.test_clock_id", &args, filter.TestClockID)
-	}
-	if !filter.SimFrom.IsZero() {
-		where += fmt.Sprintf(" AND al.sim_effective_at >= $%d", idx)
-		args = append(args, filter.SimFrom)
-		idx++
-	}
-	if !filter.SimTo.IsZero() {
-		where += fmt.Sprintf(" AND al.sim_effective_at <= $%d", idx)
-		args = append(args, filter.SimTo)
-		idx++
-	}
-
 	if filter.ResourceType != "" {
 		where += andClause(&idx, "al.resource_type", &args, filter.ResourceType)
 	}
@@ -496,21 +468,13 @@ const auditListSelect = `SELECT al.id, al.tenant_id, al.actor_type, al.actor_id,
 		al.action, al.resource_type, al.resource_id,
 		COALESCE(NULLIF(al.resource_label,''), ru.email::text, ri.email, '') AS resource_label,
 		al.metadata,
-		-- The row outlived its subject. ADR-086 teardown HARD-DELETES a clock's
-		-- entire simulated graph, and the audit rows deliberately survive it — they
-		-- are the only remaining record that the simulation happened. But the
-		-- resources they name are gone, so a "View" link on them 404s, and the
-		-- dashboard was rendering one. Tell the client, so it can stop.
-		(al.test_clock_id IS NOT NULL AND tc.id IS NULL) AS subject_deleted,
-		COALESCE(al.ip_address,''), COALESCE(al.request_id,''), al.created_at,
-		al.sim_effective_at, COALESCE(al.test_clock_id,'')
+		COALESCE(al.ip_address,''), COALESCE(al.request_id,''), al.created_at
 		FROM audit_log al
 		LEFT JOIN api_keys k ON k.id = al.actor_id AND k.tenant_id = al.tenant_id
 		LEFT JOIN customers c ON c.id = al.actor_id AND c.tenant_id = al.tenant_id AND al.actor_type = 'customer'
 		LEFT JOIN users u ON u.id = al.actor_id AND al.actor_type = 'user'
 		LEFT JOIN users ru ON ru.id = al.resource_id AND al.resource_type = 'user'
-		LEFT JOIN member_invitations ri ON ri.id = al.resource_id AND al.resource_type = 'user'
-		LEFT JOIN test_clocks tc ON tc.id = al.test_clock_id`
+		LEFT JOIN member_invitations ri ON ri.id = al.resource_id AND al.resource_type = 'user'`
 
 // auditListOrder is newest-first, with an id tiebreaker so rows that share a
 // created_at keep one order across pages.
@@ -565,12 +529,9 @@ func distinctByLooseIndexScan(ctx context.Context, tx *sql.Tx, col, tenantID str
 func scanAuditEntry(rows *sql.Rows) (domain.AuditEntry, error) {
 	var e domain.AuditEntry
 	var metaJSON []byte
-	// The sim axis (0148) rides the SHARED select, so the list API and the CSV
-	// export can never disagree about which simulation a row belongs to.
 	if err := rows.Scan(&e.ID, &e.TenantID, &e.ActorType, &e.ActorID, &e.ActorName,
 		&e.Action, &e.ResourceType, &e.ResourceID, &e.ResourceLabel,
-		&metaJSON, &e.SubjectDeleted, &e.IPAddress, &e.RequestID, &e.CreatedAt,
-		&e.SimEffectiveAt, &e.TestClockID); err != nil {
+		&metaJSON, &e.IPAddress, &e.RequestID, &e.CreatedAt); err != nil {
 		return domain.AuditEntry{}, err
 	}
 	_ = json.Unmarshal(metaJSON, &e.Metadata)
@@ -670,72 +631,6 @@ func (l *Logger) FilterOptions(ctx context.Context, tenantID string) (actions, r
 	return actions, resourceTypes, nil
 }
 
-// SimClock is one entry in the audit log's clock picker.
-type SimClock struct {
-	ID   string `json:"id"`
-	Name string `json:"name"`
-}
-
-// SimClocks returns the distinct test clocks that appear on the tenant's audit
-// rows, newest activity first, each with the best name the LOG itself knows.
-//
-// It deliberately does NOT read the test_clocks table. ADR-086 teardown
-// hard-deletes a clock when the operator is done with it, and that is exactly
-// when a forensic view is wanted — a picker sourced from test_clocks would go
-// empty at the moment it becomes useful. The name is recovered from the clock's
-// own audit rows (resource_type='test_clock', whose resource_label is the name
-// the operator gave it), which survive teardown by design; unnamed or
-// pre-0148 clocks fall back to the id in the UI.
-func (l *Logger) SimClocks(ctx context.Context, tenantID string) ([]SimClock, error) {
-	live, err := postgres.Livemode(ctx)
-	if err != nil {
-		return nil, err
-	}
-	tx, err := l.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	defer postgres.Rollback(tx)
-
-	// Explicit tenant+livemode predicates for the same reason as Query: the RLS
-	// policy's column-free bypass OR-arm blocks index quals. The IS NOT NULL
-	// scope is the partial clock index's own predicate.
-	rows, err := tx.QueryContext(ctx, `
-		SELECT c.test_clock_id, COALESCE(n.name, '') AS name
-		FROM (
-			SELECT test_clock_id, MAX(created_at) AS last_at
-			FROM audit_log
-			WHERE tenant_id = $1 AND livemode = $2 AND test_clock_id IS NOT NULL
-			GROUP BY test_clock_id
-			ORDER BY last_at DESC
-			LIMIT 100
-		) c
-		LEFT JOIN LATERAL (
-			SELECT resource_label AS name
-			FROM audit_log
-			WHERE tenant_id = $1 AND livemode = $2
-			  AND resource_type = 'test_clock' AND resource_id = c.test_clock_id
-			  AND COALESCE(resource_label, '') <> ''
-			ORDER BY created_at DESC
-			LIMIT 1
-		) n ON true
-		ORDER BY c.last_at DESC`, tenantID, live)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var out []SimClock
-	for rows.Next() {
-		var c SimClock
-		if err := rows.Scan(&c.ID, &c.Name); err != nil {
-			return nil, err
-		}
-		out = append(out, c)
-	}
-	return out, rows.Err()
-}
-
 // CountCap bounds the "M total" the audit page shows.
 //
 // audit_log can never be pruned (0150), so an exact COUNT is an O(history) scan
@@ -754,28 +649,8 @@ type QueryFilter struct {
 	// means "no filter on this end."
 	DateFrom time.Time
 	DateTo   time.Time
-	// Sim axis (ADR-090 §5). TestClockID scopes to one simulation; SimFrom/SimTo
-	// window it in SIMULATED time. Both are meaningless for wall-clock rows,
-	// whose sim columns are NULL, so filtering on them excludes those rows by
-	// construction.
-	//
-	// There is deliberately NO "order by simulated time". Across clocks it
-	// interleaves unrelated simulations into a timeline that never happened.
-	// Within
-	// one clock the two orders USED to coincide (one advance = one instant);
-	// since the contracted-instant arc (#520/#523) rows inside an advance
-	// carry distinct per-boundary instants, so for a multi-subscription
-	// advance sim order and wall order can genuinely differ — the original
-	// "changes nothing" premise no longer holds. The deletion stands on the
-	// cross-clock ground; re-litigate if an operator needs
-	// intra-advance ordering across subscriptions (that is now a real
-	// ordering, not a no-op). Ordering stays on created_at (see
-	// auditListOrder).
-	TestClockID string
-	SimFrom     time.Time
-	SimTo       time.Time
-	Limit       int
-	Offset      int
+	Limit    int
+	Offset   int
 }
 
 func andClause(idx *int, col string, args *[]any, val string) string {

@@ -87,7 +87,7 @@ export interface CreditLedgerEntry {
      * list does.
      */
   metadata?: CreditLedgerEntryMetadata;
-  /** When the entry was written. For a customer on a test clock, the clock's time. */
+  /** When the entry was written. */
   created_at: string;
   /**
      * For entries that add credit, how much of it is gone, in the

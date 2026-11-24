@@ -20,10 +20,7 @@ import type { ActivityPart } from './activityPart';
  * One activity row, with every word written by the server: a title
  * with no values, the amount when the event moves money, asks for it
  * or cancels money owed, a problem line on failure and warning rows,
- * the meta line's parts and the actor, a tone, and the event's time on
- * the entity's calendar. `recorded_at` is the real-world time, set
- * only for an entity on a test clock. The invoice payment timeline and
- * dunning run events carry it.
+ * the meta line's parts and the actor, a tone, and the event's time.
  */
 export interface ActivityLine {
   /**
@@ -55,8 +52,6 @@ export interface ActivityLine {
      * be collected. failure: an attempt failed.
      */
   tone: ActivityLineTone;
-  /** When the event happened, on the entity's calendar (the test clock's time for an entity on a test clock). */
+  /** When the event happened. */
   occurred_at: string;
-  /** The real-world time of the event. Set only for an entity on a test clock, when it is known. */
-  recorded_at?: string;
 }

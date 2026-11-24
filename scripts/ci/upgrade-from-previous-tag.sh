@@ -184,7 +184,9 @@ api() {
 # snapshot LABEL: every invoice not on a test clock that the API lists, in
 # each mode, as one JSON object keyed by "<mode> <invoice id>". The lines are
 # keyed by their id, so the comparison does not depend on the order they
-# come back in. The raw file keeps every invoice, those on a clock too.
+# come back in. The raw file keeps every invoice, those on a clock too. Only
+# the previous release sends test_clock_id, so HEAD's snapshots keep every
+# invoice.
 #
 # Two fields are left out of both sides, because the API works them out on
 # each read from the moment and the server's settings, not from the invoice

@@ -14,8 +14,7 @@
 
 /**
  * Usage in one bucket of `GET /v1/analytics/usage`: a UTC day, or a
- * UTC month for `12m`. Events of customers on a test clock are left
- * out.
+ * UTC month for `12m`.
  */
 export interface AnalyticsUsagePoint {
   /** Bucket start, `YYYY-MM-DD` (or `YYYY-MM` for `12m`), in UTC. */

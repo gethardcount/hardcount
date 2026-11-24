@@ -23,8 +23,6 @@
  * The eighth failure parks the subscription (`parked: true`, no
  * `next_attempt_at`). A parked subscription is not attempted again
  * until `POST /v1/subscriptions/{id}/retry-billing` is called.
- *
- * Never set on a subscription attached to a test clock.
  */
 export interface BillingFailure {
   /** Failed attempts on the work that is due now. At least 1. */

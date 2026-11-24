@@ -68,13 +68,6 @@ type Customer struct {
 	// A field here for the cost-dashboard token, with a json tag, would
 	// disclose that credential on every authenticated customer GET and List.
 
-	// TestClockID pins this customer to a test clock, as in Stripe (ADR-027).
-	// It is set at create time, and then every subscription and invoice of
-	// this customer runs on that clock's simulated time. It is empty for
-	// live-mode customers, and for test-mode customers that are not pinned.
-	// It cannot be changed after creation. To switch clocks, delete and
-	// recreate the customer, as in Stripe.
-	TestClockID string `json:"test_clock_id,omitempty"`
 	// DunningPolicyID assigns this customer to a dunning policy, also called
 	// a campaign (ADR-036). Dunning is the retries and reminders for an
 	// unpaid invoice. Empty means the tenant's default policy. PATCH can

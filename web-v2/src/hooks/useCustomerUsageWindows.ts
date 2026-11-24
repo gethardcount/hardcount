@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { api, type Customer, type CustomerUsage } from '@/lib/api'
 import { lastInvoicedPeriod } from '@/lib/usageWindow'
-import { useNowFor } from '@/hooks/useNow'
 
 // Shared queries for the customer page's Activity and Margin cards (ADR-121).
 
@@ -29,18 +28,13 @@ export async function fetchCustomerUsageOrNull(
 // useCurrentCycleUsage is the customer's current-cycle usage: the server's
 // default window, the cycle of the subscription whose cycle started last.
 // Activity's Cycle tab and Margin's "Current period" call it, and both share
-// one request. The request sends no time: the server picks the cycle from the
-// customer's now. So the key carries the clock's time for a customer on a
-// clock, and an advance refetches; a customer on no clock has the one key
-// 'no-clock'. The read waits while the clock's time is not known, and a
-// disabled read writes nothing to the cache, so "not known" never shares an
-// entry with "no clock".
+// one request. The request sends no time: the server picks the cycle from
+// its own now.
 export function useCurrentCycleUsage(customer: Customer, enabled = true) {
-  const now = useNowFor(customer)
   return useQuery({
-    queryKey: ['customer-usage', customer.id, 'cycle', customer.test_clock_id ? now : 'no-clock'],
+    queryKey: ['customer-usage', customer.id, 'cycle'],
     queryFn: () => fetchCustomerUsageOrNull(customer.id),
-    enabled: enabled && now !== undefined,
+    enabled,
   })
 }
 

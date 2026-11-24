@@ -19,8 +19,8 @@ import type { InvoiceStripeRefund } from './invoiceStripeRefund';
  * ([Webhook events](https://gethardcount.com/docs/api/webhook-events/)): the invoice the refunded payment
  * belongs to, as it stood (a refund never changes it), and the refund
  * as the API returns it. The invoice leaves out `attention`,
- * `recovery_warning`, `billing_period_display` and `test_clock_id`,
- * which are worked out per read. Sent once per refund, when its
+ * `recovery_warning` and `billing_period_display`, which are worked
+ * out per read. Sent once per refund, when its
  * outcome is decided: when Hardcount first sees it, or, for a refund
  * first seen in flight, when it succeeds, fails or is canceled. Saved
  * in the same transaction that records it. A later change to the

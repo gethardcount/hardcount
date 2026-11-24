@@ -25,7 +25,6 @@ import (
 // added here with the reason it is not a list's cap.
 var sqlRowCaps = map[string]string{
 	"internal/analytics/usage.go Handler.usageAnalytics":                       "the analytics chart's top 10 meters",
-	"internal/audit/audit.go Logger.SimClocks":                                 "the audit page's clock filter menu: the 100 most recent clocks",
 	"internal/invoice/postgres.go PostgresStore.ListCustomerDataInvalidErrors": "a tax retry fan-out that retries the oldest 1000, not a list route",
 	"internal/invoice/postgres.go PostgresStore.ListProviderConfigErrors":      "a tax retry fan-out that retries the oldest 1000, not a list route",
 	"internal/subscription/postgres.go PostgresStore.ListLiveByCustomer":       "usage ingest's read of a customer's live subscriptions, not a list route",

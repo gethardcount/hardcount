@@ -92,11 +92,6 @@ func TestActivityParity_InvoiceOperatorScenarios(t *testing.T) {
 		}},
 	} {
 		lines := linesOf(t, c.events)
-		for i, l := range lines {
-			if l["recorded_at"] != nil {
-				t.Errorf("%s: row %d (%v) carries recorded_at %v", c.name, i, l["title"], l["recorded_at"])
-			}
-		}
 		if got := summaries(normalizeLines(lines)); !reflect.DeepEqual(got, c.want) {
 			t.Errorf("%s lines\n got: %q\nwant: %q", c.name, got, c.want)
 		}

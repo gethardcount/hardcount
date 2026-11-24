@@ -679,11 +679,6 @@ export interface Customer {
   email_status?: 'unknown' | 'ok' | 'bounced' | 'complained'
   email_last_bounced_at?: string
   email_bounce_reason?: string
-  // Customer-level test-clock attach (ADR-027, Stripe parity). Set at
-  // create time only; once attached, every Subscription / Invoice for
-  // this customer runs on the clock's simulated time. Empty for
-  // live-mode customers and test-mode customers not pinned.
-  test_clock_id?: string
   // DunningPolicyID assigns this customer to a specific dunning
   // policy (ADR-036 campaigns model). Empty/undefined = use the
   // tenant default. Updatable via PATCH /customers/{id}.
@@ -776,7 +771,6 @@ export interface Subscription {
   code: string
   display_name: string
   customer_id: string
-  test_clock_id?: string
   // items is the authoritative list of priced lines on the subscription.
   // Present on all list/get responses from FEAT-5 onward. Pre-FEAT-5 code
   // paths may omit it, so treat as optional and fall back gracefully.
@@ -974,9 +968,6 @@ export interface Invoice {
   // finalized invoices (migrated-in but never rotated) carry empty.
   public_token?: string
   created_at: string
-  // test_clock_id: the clock this invoice's dates follow (its customer's
-  // pin). Filled on the list and get reads; absent on wall-clock invoices.
-  test_clock_id?: string
 }
 
 export interface LineItem {
@@ -1059,27 +1050,6 @@ export interface TimelineEvent {
   actor_type?: string
   actor_name?: string
   actor_id?: string
-  // Backend-set authoritative flag. Semantics differ slightly by
-  // surface, but always per-row (no client-side heuristic):
-  // - Subscription activity timeline: true when the event's effect
-  //   landed on a clock-pinned timeline. The row's `timestamp` is
-  //   wall-clock (audit_log.created_at, per ADR-030 2026-05-28
-  //   amendment); when this flag is true the simulated effect time
-  //   is in sim_effective_at + test_clock_id below.
-  // - Invoice payment timeline: true on an email row caused on a test
-  //   clock, whose timestamp IS in simulated time.
-  is_simulated?: boolean
-  // RFC3339 simulated effect time. Populated alongside is_simulated
-  // on operator-action audit rows for clock-pinned entities. The
-  // subscription activity timeline shows it in place of `timestamp`.
-  sim_effective_at?: string
-  test_clock_id?: string
-  // Invoice timeline (ADR-104): the REAL-WORLD instant of a row whose
-  // primary `timestamp` is on the entity's simulated calendar — rendered
-  // as a muted "Recorded <wall>" subline (operator contract, Invariant A:
-  // any row whose two calendars differ shows both). Absent when the
-  // calendars coincide.
-  recorded_at?: string
   // The row in the words of the activity line standard (ADR-128). The
   // invoice timeline always sends it; <ActivityList> renders it.
   line?: ActivityLine
@@ -1539,9 +1509,6 @@ export interface DunningRun {
   invoice_number?: string
   invoice_amount_due_cents?: number
   invoice_currency?: string
-  // The customer's test clock, on list responses when the customer is on
-  // one. The response's effective_now is not read.
-  test_clock_id?: string
   // How many retries the run's policy makes, the length of its retry_days
   // (list responses).
   max_retry_attempts?: number
@@ -1626,20 +1593,6 @@ export interface AuditEntry {
   ip_address?: string
   request_id?: string
   created_at: string
-  // Sim axis (ADR-090 §5). Present only on rows emitted inside a test clock's
-  // world. created_at stays wall-clock ("when the operator clicked");
-  // sim_effective_at is the simulated instant the clock STOOD AT when the
-  // mutation happened. An advance does not replay the intervening months — it
-  // stands at the new frozen_time and settles what came due there — so every row
-  // an advance produces shares one sim instant. There is deliberately no
-  // "order by simulated time": it would order nothing.
-  sim_effective_at?: string
-  test_clock_id?: string
-  // The subject is gone. Set when the row's test clock was torn down (ADR-086
-  // hard-deletes the whole simulated graph). The row survives on purpose — it is
-  // the only record left that the simulation happened — but the invoice or
-  // customer it names does not, so a "View" link on it 404s.
-  subject_deleted?: boolean
 }
 
 export interface AuditFilterOptions {

@@ -2,6 +2,7 @@ package audit_test
 
 import (
 	"context"
+	"database/sql"
 	"fmt"
 	"strings"
 	"testing"
@@ -15,7 +16,7 @@ import (
 // for. An index nobody's plan reaches is pure write cost — three extra B-tree
 // inserts on every audit row, bought for nothing.
 //
-// The shape being pinned is the same one 0147 and 0148 pin: equality on
+// The shape being pinned is the same one 0147 pins: equality on
 // (tenant_id, livemode, <filter column>) followed by the list's own sort/seek tail
 // (created_at DESC, id DESC), so ONE index serves the filter, the ORDER BY and the
 // cursor — no Sort node, and deep pagination stays O(log n).
@@ -144,4 +145,35 @@ func TestFilterOptions_DoNotScanTheWholeHistory(t *testing.T) {
 	if len(resourceTypes) != 1 || resourceTypes[0] != "invoice" {
 		t.Errorf("resource_types = %v, want [invoice]", resourceTypes)
 	}
+}
+
+// analyze gathers statistics on audit_log, as its owner. The app role
+// cannot: Postgres 16 skips ANALYZE on a table the role does not own, with
+// only a WARNING. Without statistics every candidate index costs the same
+// on these small fixtures, and the planner breaks the tie by index creation
+// order — which the baseline (ADR-125) creates by name, not in
+// migration order. With statistics the plan follows the costs.
+func analyze(t *testing.T, _ *postgres.DB, ctx context.Context, _ string) {
+	t.Helper()
+	if _, err := testutil.AdminPool(t).ExecContext(ctx, `ANALYZE audit_log`); err != nil {
+		t.Fatalf("analyze: %v", err)
+	}
+}
+
+func explain(t *testing.T, tx *sql.Tx, ctx context.Context, q string, args ...any) string {
+	t.Helper()
+	rows, err := tx.QueryContext(ctx, "EXPLAIN "+q, args...)
+	if err != nil {
+		t.Fatalf("explain: %v", err)
+	}
+	defer func() { _ = rows.Close() }()
+	var b strings.Builder
+	for rows.Next() {
+		var line string
+		if err := rows.Scan(&line); err != nil {
+			t.Fatalf("scan plan: %v", err)
+		}
+		b.WriteString(line + "\n")
+	}
+	return b.String()
 }

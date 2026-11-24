@@ -44,9 +44,9 @@ type OutboxRow struct {
 	// (ListByInvoice/ListByCustomer/GetByID); the dispatcher's claim
 	// path leaves it zero — dispatch never reads it.
 	DeliveryState string
-	// See activity.Email.
+	// EffectiveAt is the instant the email's action decided (ADR-104): the
+	// date its activity line shows.
 	EffectiveAt time.Time
-	TestClockID string
 	// SkipReason is why a 'skipped' row was not sent: the final state its
 	// invoice reached while it waited (one of the SkipReason constants).
 	// Empty on every other row, and on rows skipped before migration 00187
@@ -725,8 +725,7 @@ func (s *OutboxStore) ListByInvoice(ctx context.Context, tenantID, invoiceNumber
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, tenant_id, livemode, email_type, payload, status, attempts,
 		       next_attempt_at, COALESCE(last_error,''), created_at, dispatched_at,
-		       delivery_state, effective_at, COALESCE(test_clock_id,''),
-		       COALESCE(skip_reason,'')
+		       delivery_state, effective_at, COALESCE(skip_reason,'')
 		FROM email_outbox
 		WHERE email_type IN ('invoice', 'payment_receipt', 'payment_failed',
 		                     'payment_setup_request', 'dunning_warning',
@@ -746,7 +745,7 @@ func (s *OutboxStore) ListByInvoice(ctx context.Context, tenantID, invoiceNumber
 		var dispatchedAt sql.NullTime
 		if err := rows.Scan(&r.ID, &r.TenantID, &r.Livemode, &r.EmailType, &payload, &r.Status,
 			&r.Attempts, &r.NextAttemptAt, &r.LastError, &r.CreatedAt, &dispatchedAt,
-			&r.DeliveryState, &r.EffectiveAt, &r.TestClockID, &r.SkipReason); err != nil {
+			&r.DeliveryState, &r.EffectiveAt, &r.SkipReason); err != nil {
 			return nil, err
 		}
 		if err := json.Unmarshal(payload, &r.Payload); err != nil {
@@ -786,7 +785,7 @@ func (s *OutboxStore) ListByCustomer(ctx context.Context, tenantID, customerID s
 		SELECT eo.id, eo.tenant_id, eo.livemode, eo.email_type, eo.payload, eo.status,
 		       eo.attempts, eo.next_attempt_at, COALESCE(eo.last_error,''),
 		       eo.created_at, eo.dispatched_at, eo.delivery_state,
-		       eo.effective_at, COALESCE(eo.test_clock_id,''), COALESCE(eo.skip_reason,''),
+		       eo.effective_at, COALESCE(eo.skip_reason,''),
 		       i.id, COALESCE(cn.id,'')
 		FROM email_outbox eo
 		JOIN invoices i
@@ -815,7 +814,7 @@ func (s *OutboxStore) ListByCustomer(ctx context.Context, tenantID, customerID s
 		var dispatchedAt sql.NullTime
 		if err := rows.Scan(&r.ID, &r.TenantID, &r.Livemode, &r.EmailType, &payload, &r.Status,
 			&r.Attempts, &r.NextAttemptAt, &r.LastError, &r.CreatedAt, &dispatchedAt,
-			&r.DeliveryState, &r.EffectiveAt, &r.TestClockID, &r.SkipReason,
+			&r.DeliveryState, &r.EffectiveAt, &r.SkipReason,
 			&r.InvoiceID, &r.CreditNoteID); err != nil {
 			return nil, err
 		}

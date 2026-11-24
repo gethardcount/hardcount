@@ -46,9 +46,8 @@ export type CreateUsageEventBody = {
   idempotency_key: string;
   /**
      * When the usage happened, as an RFC 3339 string. Leave it
-     * out to use the time Hardcount receives the event (the
-     * clock's time for a customer on a test clock). It may be
-     * at most 5 minutes ahead of that time. Any past time is
+     * out to use the time Hardcount receives the event. It may
+     * be at most 5 minutes ahead of that time. Any past time is
      * accepted, but an event in a period that is already
      * invoiced is stored and not billed (`billing_status:
      * after_close`). A value that is not an RFC 3339 string is

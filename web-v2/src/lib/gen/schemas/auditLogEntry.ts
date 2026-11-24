@@ -64,13 +64,4 @@ export interface AuditLogEntry {
   request_id?: string;
   /** When the entry was written, in real time. */
   created_at: string;
-  /** Simulated time, for entries made inside a test clock. Absent otherwise. */
-  sim_effective_at?: string;
-  /** The test clock whose simulation the entry was made in. Absent otherwise. */
-  test_clock_id?: string;
-  /**
-     * True when the resource no longer exists because its test clock
-     * was deleted. The entry is kept. Absent otherwise.
-     */
-  subject_deleted?: boolean;
 }

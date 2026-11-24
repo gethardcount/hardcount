@@ -356,12 +356,11 @@ func TestRenderPDF_AccentedLettersPrintWhole(t *testing.T) {
 	}
 }
 
-// The footer says when the file was made, in machine time, even for a credit
-// note whose customer is on a test clock: the clock's time is the note's
-// dates, not the file's.
+// The footer says when the file was made, in machine time, even when the
+// work carries another instant: that instant dates the note, not the file.
 func TestRenderPDF_GeneratedOnIsMachineTime(t *testing.T) {
 	cn, items := longCreditNote(2, domain.CreditNoteIssued)
-	ctx := clock.WithSim(context.Background(), clock.Sim{At: time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC), TestClockID: "hc_tclk_1"})
+	ctx := clock.WithEffectiveNow(context.Background(), time.Date(2020, 1, 1, 0, 0, 0, 0, time.UTC))
 	out, err := RenderPDF(ctx, cn, items, longOrig, BillToInfo{Name: "Acme Corp", Country: "US"}, CompanyInfo{Name: "Seller Ltd", Country: "US"})
 	if err != nil {
 		t.Fatalf("render: %v", err)

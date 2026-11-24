@@ -1,9 +1,6 @@
 package activity
 
-import (
-	"strings"
-	"time"
-)
+import "strings"
 
 // This file is the one email vocabulary. Every surface that shows an email
 // builds its line here, from the outbox row. Those surfaces are the invoice
@@ -91,16 +88,6 @@ type Email struct {
 	Trigger string
 	// To is the recipient.
 	To string
-	// CreatedAt is when the row was queued, and DispatchedAt is when the mail
-	// server took it. Both are real-world instants.
-	CreatedAt    time.Time
-	DispatchedAt *time.Time
-	// EffectiveAt is the line's date: the instant the email's action decided,
-	// in both modes (ADR-104). CreatedAt and DispatchedAt are real-world times
-	// and become the Recorded time on a test clock. TestClockID names the
-	// action's test clock, or is empty.
-	EffectiveAt time.Time
-	TestClockID string
 }
 
 // EmailOutcome is what happened to one email, in the words every surface
@@ -234,18 +221,4 @@ func EmailClause(e Email) string {
 		return ""
 	}
 	return name + " " + Outcome(e).Word
-}
-
-// EmailInstant dates an email at the instant its action decided. Caused on a
-// test clock, it is pinned, and its Recorded time is when the mail server took
-// it, else when it was queued (ADR-104).
-func EmailInstant(e Email) (occurred, recorded time.Time, pinned bool) {
-	if e.TestClockID == "" {
-		return e.EffectiveAt, time.Time{}, false
-	}
-	recorded = e.CreatedAt
-	if e.DispatchedAt != nil {
-		recorded = *e.DispatchedAt
-	}
-	return e.EffectiveAt, recorded, true
 }

@@ -50,7 +50,7 @@ func TestTwoStep_UnclearConfirm_OnAdvancedTestClock_IsResolved(t *testing.T) {
 	if _, err := r.chargeAs(r.ctx, autoCharge, wall.ID, "pm_card_1"); err == nil {
 		t.Fatal("wall-clock charge: want the unclear error")
 	}
-	simCtx := clock.WithSim(r.ctx, clock.Sim{At: time.Now().UTC().Add(30 * 24 * time.Hour), TestClockID: "clk_review4"})
+	simCtx := clock.WithEffectiveNow(r.ctx, time.Now().UTC().Add(30*24*time.Hour))
 	if _, err := r.chargeAs(simCtx, autoCharge, sim.ID, "pm_card_1"); err == nil {
 		t.Fatal("test-clock charge: want the unclear error")
 	}
@@ -86,7 +86,7 @@ func TestTwoStep_LostAnswer_OnAdvancedTestClock_PaymentIsRecorded(t *testing.T) 
 	r := newTwoStepRig(t, "R4 Sim Clock Paid")
 	sim := r.seed("INV-R4-SIMPAID")
 	r.fake.queueConfirm(fakeMode{kind: fakeSave500})
-	simCtx := clock.WithSim(r.ctx, clock.Sim{At: time.Now().UTC().Add(30 * 24 * time.Hour), TestClockID: "clk_review4"})
+	simCtx := clock.WithEffectiveNow(r.ctx, time.Now().UTC().Add(30*24*time.Hour))
 	if _, err := r.chargeAs(simCtx, autoCharge, sim.ID, "pm_card_1"); err == nil {
 		t.Fatal("want the unclear error")
 	}

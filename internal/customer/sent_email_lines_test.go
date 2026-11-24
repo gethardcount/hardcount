@@ -131,13 +131,10 @@ func TestSentEmails_EveryRowHasALine(t *testing.T) {
 		if l["id"] != "email:"+fmt.Sprint(row["id"]) {
 			t.Errorf("row %v: line id %v", row["id"], l["id"])
 		}
-		// A real-clock email is dated at its action's instant, whatever its
-		// queue and send times, and has no Recorded time.
+		// An email is dated at its action's instant, whatever its queue and
+		// send times.
 		if occ, _ := time.Parse(time.RFC3339Nano, fmt.Sprint(l["occurred_at"])); !occ.Equal(action) {
 			t.Errorf("row %v occurred_at %v, want %v", row["id"], l["occurred_at"], action)
-		}
-		if l["recorded_at"] != nil {
-			t.Errorf("row %v on the real clock has recorded_at %v", row["id"], l["recorded_at"])
 		}
 	}
 }

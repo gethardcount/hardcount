@@ -37,7 +37,7 @@ A row has up to three lines, and its time sits on the right:
 ```
 ●  Payment failed · $24.73                     10:13 AM   <- title (and amount)
    Card declined: insufficient funds                      <- problem line
-   Automatic · Recorded Oct 18, 8:14 PM                   <- meta line
+   Automatic                                              <- meta line
 ```
 
 1. **One event, one wording.** An event has the same title on every page it
@@ -58,7 +58,7 @@ A row has up to three lines, and its time sits on the right:
    - A title's amount always means the same thing. A credit note row always
      shows the credit note's total; the meta line splits it into its parts.
 4. **Who did it, on every row, from a fixed set.** The actor is the last
-   part of the meta line, before any Recorded part:
+   part of the meta line:
    - a person: `by <name>`, or `by <email>` when there is no name;
    - an API key: `by API key <key name>`;
    - the customer: `Customer, on the payment page` or
@@ -74,17 +74,11 @@ A row has up to three lines, and its time sits on the right:
    - Write decline reasons about the cardholder, not to them: "Card declined:
      insufficient funds", not "Your card has insufficient funds."
    - "Uncollectible" is the one word for an invoice written off as bad debt.
-6. **One clock rule.**
-   - A row is dated at the instant the event happened, on the customer's
-     clock. For a customer on a test clock (a pretend clock for test
-     customers), that is the clock's time. For every
-     other customer, it is real time. The dashboard shows it in the
-     account's time zone.
+6. **One time rule.**
+   - A row is dated at the instant the event happened. The dashboard shows
+     it in the account's time zone.
    - An automatic event happened at the instant it was due (a renewal, a
-     trial end, a retry slot), never at the instant a clock was moved.
-   - On a test clock, the meta line ends with `· Recorded <real date and
-     time>`. "Recorded" is the only word for the real-world time.
-   - Nothing else differs between a test-clock row and a real-clock row.
+     trial end, a retry slot).
 7. **Four tones, one meaning each.** The words carry the meaning; the dot only
    repeats it.
 
@@ -114,4 +108,4 @@ the code's.
 | catchup, catch-up running | what is happening: "Billing the skipped days…" |
 | `event_name` or any field name | what it means: "The name your app sends with each usage event, for example `api_calls`" |
 | Configure … | what the page is for: "Your business details, invoice defaults, tax and payment setup" |
-| wall-clock, wall clock, Real-time activity, "not the test clock's dates" | the record's own date; when the real time differs, a "Recorded <time>" line under it |
+| wall-clock, wall clock, Real-time activity | the record's own date |

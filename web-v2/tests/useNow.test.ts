@@ -4,11 +4,11 @@ import { createElement } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { useNowFor, useNowResolver, type ClockPinned } from '../src/hooks/useNow.ts'
+import { useNowFor, useNowResolver, type MeasuredRecord } from '../src/hooks/useNow.ts'
 
 interface Row {
   name: string
-  record: ClockPinned | undefined
+  record: MeasuredRecord | undefined
   // 'real' is real time, 'unknown' is undefined.
   want: 'real' | 'unknown'
 }

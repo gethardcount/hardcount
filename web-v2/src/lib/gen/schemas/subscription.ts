@@ -164,14 +164,8 @@ export interface Subscription {
      * calendar-monthly subscriptions.
      */
   billing_anchor_day?: number;
-  /**
-     * The test clock the subscription runs on (test mode only),
-     * taken from its customer when it was created. Absent when the
-     * customer is not on a test clock.
-     */
-  test_clock_id?: string;
   billing_failure?: BillingFailure;
-  /** When the subscription was created. For a customer on a test clock, the clock's time. */
+  /** When the subscription was created. */
   created_at: string;
   /** When the subscription last changed. */
   updated_at: string;

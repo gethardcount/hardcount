@@ -773,7 +773,7 @@
     ]
   },
   {
-    "case": "test clock",
+    "case": "dated at its action",
     "line": {
       "id": "email:hc_emob_1",
       "kind": "email.payment_receipt",
@@ -798,8 +798,7 @@
         "kind": "automatic"
       },
       "tone": "neutral",
-      "occurred_at": "2027-02-01T04:30:00Z",
-      "recorded_at": "2026-10-19T10:02:00Z"
+      "occurred_at": "2026-10-19T09:59:30Z"
     },
     "text": [
       "Receipt email delivered",

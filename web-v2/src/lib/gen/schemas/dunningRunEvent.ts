@@ -54,7 +54,7 @@ export interface DunningRunEvent {
   attempt_count: number;
   /** Extra facts about the event, such as `payment_intent_id` on a retry that charged. Absent when empty. */
   metadata?: DunningRunEventMetadata;
-  /** When the event happened. For an invoice on a test clock, the clock's time. */
+  /** When the event happened. */
   created_at: string;
   /** The real-world time the event was written. Absent on events written before releases recorded it. */
   recorded_at?: string;

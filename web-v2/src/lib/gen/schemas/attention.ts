@@ -85,8 +85,7 @@ export interface Attention {
      * reason it is when tax was deferred, for `amount_below_minimum`
      * when Stripe refused the amount, for `dispute_lost` when the
      * dispute closed, and for `refunded_in_stripe` when the refund was
-     * made. Otherwise it is when the invoice last changed; on a test
-     * clock, when it was issued or its last charge failed. Absent when
+     * made. Otherwise it is when the invoice last changed. Absent when
      * it is not known.
      */
   since?: string;

@@ -49,9 +49,8 @@ type SentEmailRow struct {
 	CreatedAt     string  `json:"created_at"`
 	DispatchedAt  *string `json:"dispatched_at,omitempty"`
 	// Line is the row as the activity line standard words it (ADR-128):
-	// the same email words the invoice's Activity card uses, dated on the
-	// customer's calendar with the real send time as its Recorded time on
-	// a test clock.
+	// the same email words the invoice's Activity card uses, dated at the
+	// instant the email's action decided.
 	Line *activity.Line `json:"line,omitempty"`
 }
 
@@ -95,9 +94,9 @@ type SentEmailOutboxRow struct {
 	// SkipReason is the state the invoice reached that made Hardcount skip a
 	// queued email, or empty.
 	SkipReason string
-	// See activity.Email.
+	// EffectiveAt is the line's date: the instant the email's action decided
+	// (ADR-104).
 	EffectiveAt time.Time
-	TestClockID string
 }
 
 func NewHandler(svc *Service) *Handler {
@@ -481,7 +480,6 @@ func sentEmailLine(row SentEmailOutboxRow) (activity.Line, bool) {
 	e := activity.Email{
 		Type: row.EmailType, Status: row.Status, DeliveryState: row.DeliveryState,
 		SendFailure: row.SendFailure, SkipReason: row.SkipReason, Trigger: row.Trigger, To: row.Recipient,
-		CreatedAt: row.CreatedAt, DispatchedAt: row.DispatchedAt, EffectiveAt: row.EffectiveAt, TestClockID: row.TestClockID,
 	}
 	var about []activity.Segment
 	if row.InvoiceNumber != "" {
@@ -495,8 +493,7 @@ func sentEmailLine(row SentEmailOutboxRow) (activity.Line, bool) {
 		return activity.Line{}, false
 	}
 	l.ID = "email:" + row.ID
-	occurred, recorded, pinned := activity.EmailInstant(e)
-	return activity.Stamp(l, occurred, recorded, pinned), true
+	return activity.Stamp(l, row.EffectiveAt), true
 }
 
 // reference names an object: a link while its id is known, else its number

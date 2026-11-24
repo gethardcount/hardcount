@@ -559,13 +559,6 @@ components:
           type: string
           format: date-time
           description: When the customer was created.
-        test_clock_id:
-          type: string
-          description: |
-            The test clock the customer was created on (test mode only).
-            Its subscriptions and invoices then run on the clock's
-            simulated time. Set at create and fixed after. Absent for a
-            customer with no test clock.
         tenant_id:
           type: string
           description: The account the customer belongs to.
@@ -1006,9 +999,7 @@ components:
         of the write bills a price added that day and not one removed that
         day. A subscription that was on the plan earlier in the period and
         joins it again keeps the prices of its first join until its next
-        period. On a test clock, the write takes effect just after the
-        clock's time: a subscriber who joins at that same clock time gets
-        the earlier prices.
+        period.
       allOf:
         - $ref: "#/components/schemas/PlanPrice"
         - type: object
@@ -1283,18 +1274,12 @@ components:
             first period started, or the day of its last immediate change to
             a plan with another billing interval. Absent for
             calendar-monthly subscriptions.
-        test_clock_id:
-          type: string
-          description: |
-            The test clock the subscription runs on (test mode only),
-            taken from its customer when it was created. Absent when the
-            customer is not on a test clock.
         billing_failure:
           $ref: "#/components/schemas/BillingFailure"
         created_at:
           type: string
           format: date-time
-          description: When the subscription was created. For a customer on a test clock, the clock's time.
+          description: When the subscription was created.
         updated_at:
           type: string
           format: date-time
@@ -1339,8 +1324,6 @@ components:
         The eighth failure parks the subscription (`parked: true`, no
         `next_attempt_at`). A parked subscription is not attempted again
         until `POST /v1/subscriptions/{id}/retry-billing` is called.
-
-        Never set on a subscription attached to a test clock.
       properties:
         attempts:
           type: integer
@@ -2037,8 +2020,7 @@ components:
             reason it is when tax was deferred, for `amount_below_minimum`
             when Stripe refused the amount, for `dispute_lost` when the
             dispute closed, and for `refunded_in_stripe` when the refund was
-            made. Otherwise it is when the invoice last changed; on a test
-            clock, when it was issued or its last charge failed. Absent when
+            made. Otherwise it is when the invoice last changed. Absent when
             it is not known.
         next_attempt_at:
           type: string
@@ -2547,7 +2529,7 @@ components:
         created_at:
           type: string
           format: date-time
-          description: When the invoice was created. For a customer on a test clock, the clock's time.
+          description: When the invoice was created.
         updated_at:
           type: string
           format: date-time
@@ -2566,14 +2548,6 @@ components:
           $ref: "#/components/schemas/ItemChangeType"
         billing_reason:
           $ref: "#/components/schemas/InvoiceBillingReason"
-        test_clock_id:
-          type: string
-          description: |
-            The test clock this invoice's dates follow: the clock its customer
-            is pinned to, for cycle and one-off invoices alike. Read from the
-            customer on `GET /v1/invoices` and `GET /v1/invoices/{id}`; other
-            responses may leave it out. Left out for a customer on wall-clock
-            time, and always in live mode.
       example:
         id: hc_inv_dbj84b2q3gpgqfoq5c40
         tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
@@ -4244,9 +4218,9 @@ components:
             The email in the words of the activity line standard, the same
             as on the invoice's payment timeline: its name and what
             happened to it ("Receipt email delivered"), why it was not
-            sent, the invoice it was about, and who it went to. Dated when
-            the mail server took it, or when it was queued if it was not
-            sent. Present for every email type this list returns.
+            sent, the invoice it was about, and who it went to. Dated at
+            the instant the action that sent it took effect. Present for
+            every email type this list returns.
           allOf:
             - $ref: "#/components/schemas/ActivityLine"
       example:
@@ -4784,7 +4758,7 @@ components:
         created_at:
           type: string
           format: date-time
-          description: When the entry was written. For a customer on a test clock, the clock's time.
+          description: When the entry was written.
         consumed_cents:
           type: integer
           format: int64
@@ -5206,16 +5180,6 @@ components:
         actor_id:
           type: string
           description: The actor's ID (a user's, an API key's `hc_key_…` or a customer's), or `system`.
-        is_simulated:
-          type: boolean
-          description: True when the action affected a subscription on a test clock.
-        sim_effective_at:
-          type: string
-          format: date-time
-          description: The test clock's simulated time when the action took effect.
-        test_clock_id:
-          type: string
-          description: The test clock `sim_effective_at` belongs to. Absent when the action was not on a test clock.
         line:
           $ref: "#/components/schemas/ActivityLine"
       example:
@@ -5257,8 +5221,7 @@ components:
         amounts. `net` = `new` + `expansion` - `contraction` - `churned`.
         Expansion and contraction count only subscriptions that were active
         for the whole window: a subscription activated or canceled inside
-        it counts only in `new` or `churned`. Test-clock subscriptions are
-        left out.
+        it counts only in `new` or `churned`.
       properties:
         new:
           type: integer
@@ -5359,8 +5322,7 @@ components:
       type: object
       description: |
         Usage in one bucket of `GET /v1/analytics/usage`: a UTC day, or a
-        UTC month for `12m`. Events of customers on a test clock are left
-        out.
+        UTC month for `12m`.
       required: [date, events, quantity]
       properties:
         date:
@@ -5446,8 +5408,7 @@ components:
         "The window" is the requested period, ending now. "The previous
         window" is the one of equal length before it. Money is in the minor
         unit of `currency` (cents for USD). Rates are fractions, so 0.05
-        means 5%. Customers, subscriptions and invoices on test clocks are
-        left out of every figure.
+        means 5%.
       properties:
         period:
           $ref: "#/components/schemas/AnalyticsPeriod"
@@ -5514,7 +5475,7 @@ components:
           description: >
             Customers' credit balances added up per currency, `currency`
             first, then largest. A currency whose balance is zero is left
-            out. Customers on a test clock are not counted.
+            out.
           items:
             type: object
             required: [currency, amount_cents]
@@ -5570,7 +5531,7 @@ components:
             Issued credit notes whose refund failed or has an unknown
             result, has stayed pending for 72 hours since the note last
             changed, or owes a refund that has not started an hour after the
-            note last changed. Test-clock credit notes are not counted.
+            note last changed.
         usage_events:
           type: integer
           format: int64
@@ -5970,14 +5931,13 @@ components:
         created_at:
           type: string
           format: date-time
-          description: When the note was created. For an invoice on a test clock, the clock's time.
+          description: When the note was created.
         recorded_at:
           type: string
           format: date-time
           description: |
-            The real-world time the note was created. It differs from
-            `created_at` only when the invoice is on a test clock. Absent on
-            notes created before releases recorded it.
+            The real-world time the note was created. Absent on notes
+            created before releases recorded it.
         updated_at:
           type: string
           format: date-time
@@ -6030,10 +5990,7 @@ components:
         One activity row, with every word written by the server: a title
         with no values, the amount when the event moves money, asks for it
         or cancels money owed, a problem line on failure and warning rows,
-        the meta line's parts and the actor, a tone, and the event's time on
-        the entity's calendar. `recorded_at` is the real-world time, set
-        only for an entity on a test clock. The invoice payment timeline and
-        dunning run events carry it.
+        the meta line's parts and the actor, a tone, and the event's time.
       required: [id, kind, title, detail, tone, occurred_at]
       properties:
         id:
@@ -6081,11 +6038,7 @@ components:
         occurred_at:
           type: string
           format: date-time
-          description: When the event happened, on the entity's calendar (the test clock's time for an entity on a test clock).
-        recorded_at:
-          type: string
-          format: date-time
-          description: The real-world time of the event. Set only for an entity on a test clock, when it is known.
+          description: When the event happened.
       example:
         id: lifecycle:paid:hc_inv_dbj84b2q3gpgqfoq5c40
         kind: invoice.paid
@@ -6194,9 +6147,8 @@ components:
           type: string
           format: date-time
           description: |
-            When the event happened, to the second: on the invoice's
-            calendar (the test clock's time for an invoice on a test clock),
-            and at Stripe's own time for disputes and refunds made in Stripe.
+            When the event happened, to the second, and at Stripe's own
+            time for disputes and refunds made in Stripe.
         source:
           type: string
           enum: [lifecycle, payment, dunning, email, credit_note, dispute, stripe_refund]
@@ -6239,13 +6191,6 @@ components:
         attempt_count:
           type: integer
           description: On dunning rows, the run's retry count at the event; on the paid row, the retries that ran before payment. Absent when 0.
-        is_simulated:
-          type: boolean
-          description: True when `timestamp` is test-clock time. Absent when false.
-        recorded_at:
-          type: string
-          format: date-time
-          description: Real-world time of a row whose `timestamp` is test-clock time. Absent otherwise.
         line:
           $ref: "#/components/schemas/ActivityLine"
       example:
@@ -6574,8 +6519,8 @@ components:
         ([Webhook events](https://gethardcount.com/docs/api/webhook-events/)): the invoice the refunded payment
         belongs to, as it stood (a refund never changes it), and the refund
         as the API returns it. The invoice leaves out `attention`,
-        `recovery_warning`, `billing_period_display` and `test_clock_id`,
-        which are worked out per read. Sent once per refund, when its
+        `recovery_warning` and `billing_period_display`, which are worked
+        out per read. Sent once per refund, when its
         outcome is decided: when Hardcount first sees it, or, for a refund
         first seen in flight, when it succeeds, fails or is canceled. Saved
         in the same transaction that records it. A later change to the
@@ -6663,9 +6608,9 @@ components:
         and `payment.dispute_closed`
         ([Webhook events](https://gethardcount.com/docs/api/webhook-events/)): the
         invoice the disputed payment paid and the dispute, each as the API
-        returns it. The invoice leaves out `attention`, `recovery_warning`,
-        `billing_period_display` and `test_clock_id`, which are worked out
-        per read. Both events are saved in the same transaction that records
+        returns it. The invoice leaves out `attention`, `recovery_warning`
+        and `billing_period_display`, which are worked out per read. Both
+        events are saved in the same transaction that records
         the dispute, so a crash cannot drop them. `payment.dispute_opened`
         is sent once per dispute, when Hardcount first records it; if the
         first event Hardcount receives is already the close, both are sent,
@@ -6914,7 +6859,7 @@ components:
           format: date-time
           description: |
             When the run started: when the payment failed or the collection
-            found no card. For an invoice on a test clock, the clock's time.
+            found no card.
         updated_at:
           type: string
           format: date-time
@@ -6929,13 +6874,6 @@ components:
         invoice_currency:
           type: string
           description: The invoice's currency. Filled in on list responses.
-        effective_now:
-          type: string
-          format: date-time
-          description: The test clock's current time, when the customer is on a test clock. Filled in on list responses.
-        test_clock_id:
-          type: string
-          description: The customer's test clock, when they are on one. Filled in on list responses.
         max_retry_attempts:
           type: integer
           description: |
@@ -7019,7 +6957,7 @@ components:
         created_at:
           type: string
           format: date-time
-          description: When the event happened. For an invoice on a test clock, the clock's time.
+          description: When the event happened.
         recorded_at:
           type: string
           format: date-time
@@ -7259,14 +7197,13 @@ components:
           type: string
           format: date-time
           description: |
-            When the override starts, in the customer's time: wall time, or
-            its test clock's time. A subscription already on the plan gets
+            When the override starts. A subscription already on the plan gets
             it from its next period; one that first joins the plan in a
             period after this instant gets it from the join.
         deactivated_at:
           type: string
           format: date-time
-          description: When the override ended, in the customer's time. Absent while it is active.
+          description: When the override ended. Absent while it is active.
         updated_at:
           type: string
           format: date-time
@@ -8558,18 +8495,6 @@ components:
           type: string
           format: date-time
           description: When the entry was written, in real time.
-        sim_effective_at:
-          type: string
-          format: date-time
-          description: Simulated time, for entries made inside a test clock. Absent otherwise.
-        test_clock_id:
-          type: string
-          description: The test clock whose simulation the entry was made in. Absent otherwise.
-        subject_deleted:
-          type: boolean
-          description: |
-            True when the resource no longer exists because its test clock
-            was deleted. The entry is kept. Absent otherwise.
       example:
         id: hc_aud_dbj84c2q3gpgqfoq5cb0
         tenant_id: hc_ten_dajqj02q3gpgqfoq5c00
@@ -8592,7 +8517,7 @@ components:
         The values `GET /v1/audit-log` can filter on, from
         `GET /v1/audit-log/filters`, for filter menus. Only entries in the
         caller's mode count.
-      required: [actions, resource_types, test_clocks]
+      required: [actions, resource_types]
       properties:
         actions:
           type: array
@@ -8604,25 +8529,9 @@ components:
           description: Every `resource_type` value recorded in this mode, sorted A to Z, at most 500.
           items:
             type: string
-        test_clocks:
-          type: array
-          description: Test clocks seen in the log, most recent activity first, at most 100. Deleted clocks are included.
-          items:
-            type: object
-            required: [id, name]
-            properties:
-              id:
-                type: string
-                description: The test clock's id (`hc_tclk_…`).
-              name:
-                type: string
-                description: The clock's name, taken from its own audit entries. Empty when the log has none.
       example:
         actions: [create, export, finalize, revoke, rotate, update]
-        resource_types: [api_key, customer, invoice, setting, subscription, test_clock]
-        test_clocks:
-          - id: hc_tclk_8e1f3a5c7b9d0e2f4a6c8b1d
-            name: October renewal test
+        resource_types: [api_key, customer, invoice, setting, subscription]
 
     WebhookEndpoint:
       type: object
@@ -12846,7 +12755,7 @@ paths:
             enum: [none, pending, succeeded, failed, unknown, needs_attention]
           description: |
             Only notes whose refund is in this state. `needs_attention`
-            returns issued, non-test-clock notes whose
+            returns issued notes whose
             refund failed or has an unknown result, has been pending more
             than 72 hours, or has a refund amount still at `none` after 1
             hour. Any other value is a 422 with `param: refund_status`.
@@ -15346,9 +15255,7 @@ paths:
         advance is saved together with its first invoice, in one database
         transaction: both are saved, or neither is. The invoice is then
         collected like any other invoice. A `trialing` subscription gets
-        that invoice when its trial ends. A customer on a test clock gives
-        the subscription its clock, and the subscription starts at the
-        clock's time.
+        that invoice when its trial ends.
 
         Sends the `subscription.created` webhook event.
       parameters:
@@ -15400,8 +15307,7 @@ paths:
                   description: |
                     Days of free trial; 0 means no trial. At 0, the
                     subscription is `active`, its first period starts today
-                    in the account's billing time zone (the clock's day for
-                    a customer on a test clock), and a non-zero base fee
+                    in the account's billing time zone, and a non-zero base fee
                     billed in advance is invoiced now. Above 0, the
                     subscription is `trialing` from now and its first paid
                     period starts on the day the trial ends.
@@ -15558,8 +15464,8 @@ paths:
             `paused` returns only active and trialing subscriptions whose
             `pause_collection` is in force, whether a dashboard user or an
             API key set it, or dunning (Hardcount's automatic payment
-            retries) did. A timed pause ends at `resumes_at` (on the subscription's test
-            clock, if it has one), even while the response still carries it.
+            retries) did. A timed pause ends at `resumes_at`, even while the
+            response still carries it.
             Any other value is a 422 with `param: collection`.
           schema:
             type: string
@@ -17603,11 +17509,8 @@ paths:
       operationId: getSubscriptionTimeline
       description: |
         Returns the subscription's history from the audit log as
-        display-ready rows, in the order the actions took effect: by
-        `sim_effective_at` for actions on a test-clock subscription,
-        otherwise by `timestamp`. On a test-clock subscription `timestamp`
-        (wall-clock) may therefore not be in ascending order. It holds at most the 100 most recent
-        entries. `truncated` is true when older entries were left out.
+        display-ready rows, oldest first by `timestamp`. It holds at most
+        the 100 most recent entries. `truncated` is true when older entries were left out.
       parameters:
         - name: id
           in: path
@@ -17760,9 +17663,8 @@ paths:
                   format: date-time
                   description: |
                     When the usage happened, as an RFC 3339 string. Leave it
-                    out to use the time Hardcount receives the event (the
-                    clock's time for a customer on a test clock). It may be
-                    at most 5 minutes ahead of that time. Any past time is
+                    out to use the time Hardcount receives the event. It may
+                    be at most 5 minutes ahead of that time. Any past time is
                     accepted, but an event in a period that is already
                     invoiced is stored and not billed (`billing_status:
                     after_close`). A value that is not an RFC 3339 string is
@@ -18199,8 +18101,7 @@ paths:
       description: |
         Records one usage event with a past timestamp. Same body as
         `POST /v1/usage-events`, but `timestamp` is required and must not be
-        after the customer's current time (a test clock's time when the
-        customer is on one). The event is marked `origin: backfill` and an
+        in the future. The event is marked `origin: backfill` and an
         audit log entry is written.
 
         The event counts toward the billing period its timestamp falls in
@@ -18453,8 +18354,8 @@ paths:
         a usage event under the same key is not written again. Releasing
         twice writes nothing the second time.
 
-        Rows whose meter still does not exist, or whose time is after the
-        customer's current time, stay held. One call releases at most 5,000
+        Rows whose meter still does not exist, or whose time is still in
+        the future, stay held. One call releases at most 5,000
         rows; `more_to_release` counts the rest, and another call takes
         them. A released row counts toward
         the billing period its time falls in only if that period's invoice
@@ -23734,9 +23635,8 @@ paths:
         costs never appear on the public cost dashboard.
 
         The window is `[from, to)`: `from` inclusive, `to` exclusive. A
-        missing bound defaults to the last 30 days ending at the customer's
-        current time, which is the test clock's time when the customer is on a
-        test clock. `from` and `to` take RFC 3339 instants only (no bare
+        missing bound defaults to the last 30 days ending now. `from` and `to`
+        take RFC 3339 instants only (no bare
         dates), and `from` must be before `to`. The window may be at most one
         year long.
       parameters:
@@ -23748,16 +23648,14 @@ paths:
         - name: from
           in: query
           description: |
-            Window start, inclusive. RFC 3339. Default is 30 days before the
-            customer's current time.
+            Window start, inclusive. RFC 3339. Default is 30 days before now.
           schema:
             type: string
             format: date-time
         - name: to
           in: query
           description: |
-            Window end, exclusive. RFC 3339. Default is the customer's current
-            time (test clock time for a customer on a test clock).
+            Window end, exclusive. RFC 3339. Default is now.
           schema:
             type: string
             format: date-time
@@ -25029,7 +24927,7 @@ paths:
         a filtered export includes it only if it matches the filters.
         Columns: id, created_at, actor_type, actor_id, actor_name,
         action, resource_type, resource_id, resource_label, ip_address,
-        request_id, sim_effective_at, test_clock_id, metadata_json.
+        request_id, metadata_json.
 
         `EXPORT_INCOMPLETE` marker and formula escaping work as in the
         customers export.
@@ -25063,21 +24961,6 @@ paths:
         - name: actor_id
           in: query
           description: Only rows by this actor (a user id or an API key id).
-          schema:
-            type: string
-        - name: test_clock_id
-          in: query
-          description: Only rows from this test clock's simulation.
-          schema:
-            type: string
-        - name: sim_from
-          in: query
-          description: Lower bound on simulated time (sim_effective_at). RFC 3339 or `YYYY-MM-DD`.
-          schema:
-            type: string
-        - name: sim_to
-          in: query
-          description: Upper bound on simulated time (sim_effective_at). RFC 3339 or `YYYY-MM-DD`.
           schema:
             type: string
       responses:
@@ -25138,8 +25021,7 @@ paths:
         `outstanding_by_currency` and `credit_balance_by_currency`, which
         list each currency. MRR (monthly recurring revenue) counts
         plan base fees only: base amount times quantity, with yearly
-        plans divided by 12. Usage charges are not included. Data from
-        test clocks is left out.
+        plans divided by 12. Usage charges are not included.
       parameters:
         - name: period
           in: query
@@ -25212,8 +25094,7 @@ paths:
         Returns paid-invoice revenue per day, or per month for `12m`.
         Only invoices in the account's default currency are counted; the
         currency is the `currency` of `GET /v1/analytics/overview`.
-        Buckets with no paid invoices are left out. Data from test clocks
-        is left out.
+        Buckets with no paid invoices are left out.
       parameters:
         - name: period
           in: query
@@ -25271,8 +25152,7 @@ paths:
 
         Only plans in the account's default currency are counted; the
         currency is the `currency` of `GET /v1/analytics/overview`.
-        Buckets with no movement are left out. Data from test clocks is
-        left out.
+        Buckets with no movement are left out.
       parameters:
         - name: period
           in: query
@@ -25335,8 +25215,7 @@ paths:
 
         Returns usage-event counts and summed quantities per day, or per
         month for `12m`, the 10 meters with the most events, and totals.
-        Buckets and meters with no events are left out. Data from
-        customers on test clocks is left out.
+        Buckets and meters with no events are left out.
       parameters:
         - name: period
           in: query
@@ -26054,8 +25933,7 @@ paths:
         the new plan's price is another price.
 
         A new or replaced rate applies from the customer's next billing
-        period, in the customer's time (its test clock's, if it has one); the
-        current period keeps the rate it started with. It applies from the
+        period; the current period keeps the rate it started with. It applies from the
         join when a subscription of the customer first joins the plan in a
         period after it is created: an override created before a subscription
         starts (after a trial, before the trial ends), even on the same day,
@@ -27624,8 +27502,7 @@ paths:
 
         Returns the account's audit entries in the caller's mode, newest
         first (by `created_at`, then `id`). The `resource_type`,
-        `resource_id`, `action`, `actor_id` and `test_clock_id` filters are
-        exact matches. All filters can be combined.
+        `resource_id`, `action` and `actor_id` filters are exact matches. All filters can be combined.
 
         Paged with `limit` and `offset`, like every list. Here `total`
         stops counting at 10,001, so a value above 10,000 means "more than
@@ -27668,27 +27545,6 @@ paths:
           schema:
             type: string
           description: Upper bound on `created_at`, inclusive. RFC3339 or YYYY-MM-DD (23:59:59.999999 UTC, the end of that day).
-        - name: test_clock_id
-          in: query
-          schema:
-            type: string
-          description: Only entries made inside this test clock's simulation. Works for deleted clocks too.
-        - name: sim_from
-          in: query
-          schema:
-            type: string
-          description: |
-            Lower bound on `sim_effective_at` (simulated time), inclusive.
-            RFC3339 or YYYY-MM-DD, like `date_from`. Excludes entries with
-            no simulated time.
-        - name: sim_to
-          in: query
-          schema:
-            type: string
-          description: |
-            Upper bound on `sim_effective_at`, inclusive. RFC3339 or
-            YYYY-MM-DD, like `date_to`. Excludes entries with no simulated
-            time.
         - name: order
           in: query
           schema:
@@ -27784,9 +27640,8 @@ paths:
         Used by the dashboard; not part of the integration API.
 
         Returns the distinct `action` and `resource_type` values recorded
-        for the account in the caller's mode, plus the test clocks that
-        appear in the log. Deleted test clocks are included, named from
-        their audit entries. Use these to fill filter menus.
+        for the account in the caller's mode. Use these to fill filter
+        menus.
       responses:
         "200":
           description: Filter values
@@ -27796,10 +27651,7 @@ paths:
                 $ref: "#/components/schemas/AuditLogFilters"
               example:
                 actions: [create, export, finalize, revoke, rotate, update]
-                resource_types: [api_key, customer, invoice, setting, subscription, test_clock]
-                test_clocks:
-                  - id: hc_tclk_8e1f3a5c7b9d0e2f4a6c8b1d
-                    name: October renewal test
+                resource_types: [api_key, customer, invoice, setting, subscription]
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":

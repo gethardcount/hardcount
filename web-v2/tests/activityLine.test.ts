@@ -5,7 +5,7 @@
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
 import {
-  TONES, actorText, dayKey, groupByDay, lineTimes, linkRoute, money, partTime, recordedTime, timeOfDay, toneOf, zoneHeader,
+  TONES, actorText, dayKey, groupByDay, lineTimes, linkRoute, money, partTime, timeOfDay, toneOf, zoneHeader,
 } from '../src/lib/activityLine.ts'
 import type { ActivityLine } from '../src/lib/gen/schemas/activityLine.ts'
 
@@ -32,15 +32,6 @@ test('a row time is the time of day in the account zone', () => {
 
 test('a time part carries its date and time, with no zone (the header names it)', () => {
   assert.equal(partTime('2026-11-01T03:30:00Z', KOLKATA), 'Nov 1, 2026, 9:00 AM')
-})
-
-test('the Recorded part shows the year only when it is not the current year', () => {
-  const now = Date.parse('2026-10-21T06:00:00Z')
-  assert.equal(recordedTime('2026-10-18T14:44:00Z', KOLKATA, now), 'Oct 18, 8:14 PM')
-  // 20:00 UTC on Dec 31, 2025 is already 2026 in Kolkata: the year is the
-  // account zone's, so it is the current year and not shown.
-  assert.equal(recordedTime('2025-12-31T20:00:00Z', KOLKATA, now), 'Jan 1, 1:30 AM')
-  assert.equal(recordedTime('2025-12-31T17:00:00Z', KOLKATA, now), 'Dec 31, 2025, 10:30 PM')
 })
 
 test('a link goes to the page of the object it names', () => {
@@ -112,15 +103,12 @@ test('the zone is named once, as the dashboard formatter names it', () => {
   assert.equal(zoneHeader([], KOLKATA), '')
 })
 
-test('the zone header counts the Recorded times and time parts, not only the row times', () => {
-  // A New York account with a row in Feb 2027, recorded in Oct 2026:
-  // the rows are in EST, the Recorded times in EDT. The header names both.
-  const onClock: ActivityLine = { ...line('a', '2027-02-01T15:00:00Z'), recorded_at: '2026-10-18T14:44:00Z' }
-  assert.equal(zoneHeader(lineTimes([onClock]), NEW_YORK), 'Times in EST / EDT')
-  // Negative control: the row times alone name one zone.
-  assert.equal(zoneHeader([onClock.occurred_at], NEW_YORK), 'Times in EST')
-  // A time part in the meta line counts too.
+test('the zone header counts the time parts, not only the row times', () => {
+  // A New York account with a row in Feb 2027 (EST) whose meta line names a
+  // time in April (EDT). The header names both.
   const withPart: ActivityLine = { ...line('b', '2027-02-01T15:00:00Z'), detail: [[{ text: 'Trial now ends ' }, { time: '2027-04-01T15:00:00Z' }]] }
   assert.deepEqual(lineTimes([withPart]), ['2027-02-01T15:00:00Z', '2027-04-01T15:00:00Z'])
   assert.equal(zoneHeader(lineTimes([withPart]), NEW_YORK), 'Times in EST / EDT')
+  // Negative control: the row times alone name one zone.
+  assert.equal(zoneHeader([withPart.occurred_at], NEW_YORK), 'Times in EST')
 })

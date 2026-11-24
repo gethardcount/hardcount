@@ -99,12 +99,6 @@ func TestActivityParity_SubscriptionOperatorScenarios(t *testing.T) {
 	if len(lines) < 10 {
 		t.Fatalf("%d rows, want the whole story", len(lines))
 	}
-	for i, l := range lines {
-		if l["recorded_at"] != nil {
-			t.Errorf("row %d (%v) carries recorded_at %v", i, l["title"], l["recorded_at"])
-		}
-	}
-
 	want := []string{
 		"Subscription created | by API key",
 		"Trial extended | Trial now ends <trial end> · by API key",

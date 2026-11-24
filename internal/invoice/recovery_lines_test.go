@@ -77,8 +77,8 @@ func TestRecoveryRunLines_SameWordsAsTheInvoicePageWithoutItsFolds(t *testing.T)
 			AmountCents: 4900, DeclineCode: "insufficient_funds", ProviderReason: "Your card has insufficient funds.", OccurredAt: wall,
 		}},
 		emails: []EmailEventRow{
-			{ID: "em_1", EmailType: "dunning_warning", Status: "dispatched", DeliveryState: "delivered", AttemptNumber: 1, CreatedAt: wall},
-			{ID: "em_2", EmailType: "dunning_escalation", Status: "dispatched", DeliveryState: "bounced", CreatedAt: wall},
+			{ID: "em_1", EmailType: "dunning_warning", Status: "dispatched", DeliveryState: "delivered", AttemptNumber: 1, EffectiveAt: wall},
+			{ID: "em_2", EmailType: "dunning_escalation", Status: "dispatched", DeliveryState: "bounced", EffectiveAt: wall},
 		},
 	}
 	dunning, onInvoice, degraded := recoveryLinesOf(t, c)
@@ -171,9 +171,6 @@ func TestRecoveryRunLines_TheRunsEndAndItsRecoveringRetryShow(t *testing.T) {
 		got += " · " + activity.MetaText(l) + " · " + string(l.Tone)
 		if got != want {
 			t.Errorf("%s: %q, want %q", id, got, want)
-		}
-		if l.RecordedAt != nil {
-			t.Errorf("%s on the real clock has a Recorded time", id)
 		}
 		if _, folded := onInvoice[id]; folded {
 			t.Errorf("%s shows on the invoice page; it folds into Invoice paid", id)

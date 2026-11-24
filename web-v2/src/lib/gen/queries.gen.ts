@@ -5893,9 +5893,7 @@ export const getCreateSubscriptionUrl = () => {
  * advance is saved together with its first invoice, in one database
  * transaction: both are saved, or neither is. The invoice is then
  * collected like any other invoice. A `trialing` subscription gets
- * that invoice when its trial ends. A customer on a test clock gives
- * the subscription its clock, and the subscription starts at the
- * clock's time.
+ * that invoice when its trial ends.
  *
  * Sends the `subscription.created` webhook event.
  * @summary Create a subscription
@@ -7394,11 +7392,8 @@ export const getGetSubscriptionTimelineUrl = (id: string,) => {
 
 /**
  * Returns the subscription's history from the audit log as
- * display-ready rows, in the order the actions took effect: by
- * `sim_effective_at` for actions on a test-clock subscription,
- * otherwise by `timestamp`. On a test-clock subscription `timestamp`
- * (wall-clock) may therefore not be in ascending order. It holds at most the 100 most recent
- * entries. `truncated` is true when older entries were left out.
+ * display-ready rows, oldest first by `timestamp`. It holds at most
+ * the 100 most recent entries. `truncated` is true when older entries were left out.
  * @summary Get a subscription's activity timeline
  */
 export const getSubscriptionTimeline = async (id: string, options?: RequestInit): Promise<GetSubscriptionTimeline200> => {
@@ -7786,8 +7781,7 @@ export const getBackfillUsageEventUrl = () => {
 /**
  * Records one usage event with a past timestamp. Same body as
  * `POST /v1/usage-events`, but `timestamp` is required and must not be
- * after the customer's current time (a test clock's time when the
- * customer is on one). The event is marked `origin: backfill` and an
+ * in the future. The event is marked `origin: backfill` and an
  * audit log entry is written.
  *
  * The event counts toward the billing period its timestamp falls in
@@ -7991,8 +7985,8 @@ export const getReleaseHeldUsageUrl = () => {
  * a usage event under the same key is not written again. Releasing
  * twice writes nothing the second time.
  *
- * Rows whose meter still does not exist, or whose time is after the
- * customer's current time, stay held. One call releases at most 5,000
+ * Rows whose meter still does not exist, or whose time is still in
+ * the future, stay held. One call releases at most 5,000
  * rows; `more_to_release` counts the rest, and another call takes
  * them. A released row counts toward
  * the billing period its time falls in only if that period's invoice
@@ -12523,9 +12517,8 @@ export const getGetCustomerMarginUrl = (id: string,
  * costs never appear on the public cost dashboard.
  *
  * The window is `[from, to)`: `from` inclusive, `to` exclusive. A
- * missing bound defaults to the last 30 days ending at the customer's
- * current time, which is the test clock's time when the customer is on a
- * test clock. `from` and `to` take RFC 3339 instants only (no bare
+ * missing bound defaults to the last 30 days ending now. `from` and `to`
+ * take RFC 3339 instants only (no bare
  * dates), and `from` must be before `to`. The window may be at most one
  * year long.
  * @summary Get a customer's margin report
@@ -13924,7 +13917,7 @@ export const getExportAuditLogCsvUrl = (params?: ExportAuditLogCsvParams,) => {
  * a filtered export includes it only if it matches the filters.
  * Columns: id, created_at, actor_type, actor_id, actor_name,
  * action, resource_type, resource_id, resource_label, ip_address,
- * request_id, sim_effective_at, test_clock_id, metadata_json.
+ * request_id, metadata_json.
  *
  * `EXPORT_INCOMPLETE` marker and formula escaping work as in the
  * customers export.
@@ -14048,8 +14041,7 @@ export const getGetAnalyticsOverviewUrl = (params?: GetAnalyticsOverviewParams,)
  * `outstanding_by_currency` and `credit_balance_by_currency`, which
  * list each currency. MRR (monthly recurring revenue) counts
  * plan base fees only: base amount times quantity, with yearly
- * plans divided by 12. Usage charges are not included. Data from
- * test clocks is left out.
+ * plans divided by 12. Usage charges are not included.
  * @summary Get headline billing metrics
  */
 export const getAnalyticsOverview = async (params?: GetAnalyticsOverviewParams, options?: RequestInit): Promise<AnalyticsOverview> => {
@@ -14163,8 +14155,7 @@ export const getGetAnalyticsRevenueChartUrl = (params?: GetAnalyticsRevenueChart
  * Returns paid-invoice revenue per day, or per month for `12m`.
  * Only invoices in the account's default currency are counted; the
  * currency is the `currency` of `GET /v1/analytics/overview`.
- * Buckets with no paid invoices are left out. Data from test clocks
- * is left out.
+ * Buckets with no paid invoices are left out.
  * @summary Get revenue over time
  */
 export const getAnalyticsRevenueChart = async (params?: GetAnalyticsRevenueChartParams, options?: RequestInit): Promise<GetAnalyticsRevenueChart200> => {
@@ -14286,8 +14277,7 @@ export const getGetAnalyticsMrrMovementUrl = (params?: GetAnalyticsMrrMovementPa
  *
  * Only plans in the account's default currency are counted; the
  * currency is the `currency` of `GET /v1/analytics/overview`.
- * Buckets with no movement are left out. Data from test clocks is
- * left out.
+ * Buckets with no movement are left out.
  * @summary Get MRR movement over time
  */
 export const getAnalyticsMrrMovement = async (params?: GetAnalyticsMrrMovementParams, options?: RequestInit): Promise<GetAnalyticsMrrMovement200> => {
@@ -14400,8 +14390,7 @@ export const getGetAnalyticsUsageUrl = (params?: GetAnalyticsUsageParams,) => {
  *
  * Returns usage-event counts and summed quantities per day, or per
  * month for `12m`, the 10 meters with the most events, and totals.
- * Buckets and meters with no events are left out. Data from
- * customers on test clocks is left out.
+ * Buckets and meters with no events are left out.
  * @summary Get usage over time
  */
 export const getAnalyticsUsage = async (params?: GetAnalyticsUsageParams, options?: RequestInit): Promise<GetAnalyticsUsage200> => {
@@ -15361,8 +15350,7 @@ export const getCreatePriceOverrideUrl = () => {
  * the new plan's price is another price.
  *
  * A new or replaced rate applies from the customer's next billing
- * period, in the customer's time (its test clock's, if it has one); the
- * current period keeps the rate it started with. It applies from the
+ * period; the current period keeps the rate it started with. It applies from the
  * join when a subscription of the customer first joins the plan in a
  * period after it is created: an override created before a subscription
  * starts (after a trial, before the trial ends), even on the same day,
@@ -16926,8 +16914,7 @@ export const getListAuditLogUrl = (params?: ListAuditLogParams,) => {
  *
  * Returns the account's audit entries in the caller's mode, newest
  * first (by `created_at`, then `id`). The `resource_type`,
- * `resource_id`, `action`, `actor_id` and `test_clock_id` filters are
- * exact matches. All filters can be combined.
+ * `resource_id`, `action` and `actor_id` filters are exact matches. All filters can be combined.
  *
  * Paged with `limit` and `offset`, like every list. Here `total`
  * stops counting at 10,001, so a value above 10,000 means "more than
@@ -17043,9 +17030,8 @@ export const getGetAuditLogFiltersUrl = () => {
  * Used by the dashboard; not part of the integration API.
  *
  * Returns the distinct `action` and `resource_type` values recorded
- * for the account in the caller's mode, plus the test clocks that
- * appear in the log. Deleted test clocks are included, named from
- * their audit entries. Use these to fill filter menus.
+ * for the account in the caller's mode. Use these to fill filter
+ * menus.
  * @summary List audit log filter values
  */
 export const getAuditLogFilters = async ( options?: RequestInit): Promise<AuditLogFilters> => {

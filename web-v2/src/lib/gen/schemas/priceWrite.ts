@@ -29,9 +29,7 @@ import type { PriceWriteEndedOverridesItem } from './priceWriteEndedOverridesIte
  * of the write bills a price added that day and not one removed that
  * day. A subscription that was on the plan earlier in the period and
  * joins it again keeps the prices of its first join until its next
- * period. On a test clock, the write takes effect just after the
- * clock's time: a subscriber who joins at that same clock time gets
- * the earlier prices.
+ * period.
  */
 export type PriceWrite = PlanPrice & {
   /** When the write applies, as explained above. */

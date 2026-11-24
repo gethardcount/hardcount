@@ -124,13 +124,12 @@ var webhookEventExtras = map[string][]string{
 
 // InvoiceWebhookData is the data of an invoice.* or payment.* event: the
 // invoice as GET /v1/invoices/{id} returns it under "invoice", plus the
-// event's extras. Left out: attention, recovery_warning,
-// billing_period_display and test_clock_id, which the API works out per read.
+// event's extras. Left out: attention, recovery_warning and
+// billing_period_display, which the API works out per read.
 func InvoiceWebhookData(inv Invoice, extra map[string]any) map[string]any {
 	inv.Attention = nil
 	inv.RecoveryWarning = nil
 	inv.BillingPeriodDisplay = ""
-	inv.TestClockID = ""
 	return webhookData(WebhookResourceInvoice, inv, extra)
 }
 
@@ -163,8 +162,6 @@ func DunningRunWebhookData(run InvoiceDunningRun, extra map[string]any) map[stri
 	run.InvoiceNumber = ""
 	run.InvoiceAmountDue = 0
 	run.InvoiceCurrency = ""
-	run.EffectiveNow = nil
-	run.TestClockID = ""
 	run.MaxRetryAttempts = 0
 	return webhookData(WebhookResourceDunningRun, run, extra)
 }

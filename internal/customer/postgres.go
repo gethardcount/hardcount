@@ -211,12 +211,12 @@ func (s *PostgresStore) CreateAudited(ctx context.Context, tenantID string, c do
 		return domain.Customer{}, err
 	}
 	err = tx.QueryRowContext(ctx, `
-		INSERT INTO customers (id, tenant_id, external_id, display_name, email, email_bidx, additional_emails, status, test_clock_id, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, NULLIF($6,''), $7, $8, NULLIF($9,''), $10, $10)
-		RETURNING id, tenant_id, external_id, display_name, email, status, COALESCE(test_clock_id,''), created_at, updated_at
+		INSERT INTO customers (id, tenant_id, external_id, display_name, email, email_bidx, additional_emails, status, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, NULLIF($6,''), $7, $8, $9, $9)
+		RETURNING id, tenant_id, external_id, display_name, email, status, created_at, updated_at
 	`, id, tenantID, c.ExternalID, enc.DisplayName, enc.Email,
-		s.emailBlindIndex(c.Email), storedCC, domain.CustomerStatusActive, c.TestClockID, now,
-	).Scan(&c.ID, &c.TenantID, &c.ExternalID, &c.DisplayName, &c.Email, &c.Status, &c.TestClockID, &c.CreatedAt, &c.UpdatedAt)
+		s.emailBlindIndex(c.Email), storedCC, domain.CustomerStatusActive, now,
+	).Scan(&c.ID, &c.TenantID, &c.ExternalID, &c.DisplayName, &c.Email, &c.Status, &c.CreatedAt, &c.UpdatedAt)
 
 	if err != nil {
 		if postgres.IsUniqueViolation(err) {
@@ -250,7 +250,6 @@ func (s *PostgresStore) CreateAudited(ctx context.Context, tenantID string, c do
 // returns the same customer a single read does, field for field.
 const customerFullCols = `id, tenant_id, external_id, display_name, COALESCE(email, ''), status,
 			email_status, email_last_bounced_at, COALESCE(email_bounce_reason,''),
-			COALESCE(test_clock_id, ''),
 			COALESCE(dunning_policy_id, ''),
 			COALESCE(stripe_customer_id, ''),
 			additional_emails,
@@ -263,7 +262,6 @@ func (s *PostgresStore) scanCustomerFull(row interface{ Scan(...any) error }) (d
 	var storedCC string
 	if err := row.Scan(&c.ID, &c.TenantID, &c.ExternalID, &c.DisplayName, &c.Email, &c.Status,
 		(*string)(&c.EmailStatus), &c.EmailLastBouncedAt, &c.EmailBounceReason,
-		&c.TestClockID,
 		&c.DunningPolicyID,
 		&c.StripeCustomerID,
 		&storedCC,
@@ -466,14 +464,12 @@ func (s *PostgresStore) GetByCostDashboardToken(ctx context.Context, token strin
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, tenant_id, external_id, display_name, COALESCE(email, ''), status,
 			email_status, email_last_bounced_at, COALESCE(email_bounce_reason,''),
-			COALESCE(test_clock_id, ''),
 			COALESCE(dunning_policy_id, ''),
 			livemode,
 			created_at, updated_at
 		FROM customers WHERE cost_dashboard_token_hash = $1
 	`, HashCostDashboardToken(token)).Scan(&c.ID, &c.TenantID, &c.ExternalID, &c.DisplayName, &c.Email, &c.Status,
 		(*string)(&c.EmailStatus), &c.EmailLastBouncedAt, &c.EmailBounceReason,
-		&c.TestClockID,
 		&c.DunningPolicyID,
 		&c.Livemode,
 		&c.CreatedAt, &c.UpdatedAt)
@@ -499,14 +495,12 @@ func (s *PostgresStore) GetByExternalID(ctx context.Context, tenantID, externalI
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, tenant_id, external_id, display_name, COALESCE(email, ''), status,
 			email_status, email_last_bounced_at, COALESCE(email_bounce_reason,''),
-			COALESCE(test_clock_id, ''),
 			COALESCE(dunning_policy_id, ''),
 			additional_emails,
 			created_at, updated_at
 		FROM customers WHERE external_id = $1
 	`, externalID).Scan(&c.ID, &c.TenantID, &c.ExternalID, &c.DisplayName, &c.Email, &c.Status,
 		(*string)(&c.EmailStatus), &c.EmailLastBouncedAt, &c.EmailBounceReason,
-		&c.TestClockID,
 		&c.DunningPolicyID,
 		&storedCC,
 		&c.CreatedAt, &c.UpdatedAt)
@@ -545,13 +539,11 @@ func (s *PostgresStore) GetByStripeCustomerID(ctx context.Context, tenantID, str
 	err = tx.QueryRowContext(ctx, `
 		SELECT id, tenant_id, external_id, display_name, COALESCE(email, ''), status,
 			email_status, email_last_bounced_at, COALESCE(email_bounce_reason,''),
-			COALESCE(test_clock_id, ''),
 			COALESCE(dunning_policy_id, ''),
 			created_at, updated_at
 		FROM customers WHERE stripe_customer_id = $1
 	`, stripeCustomerID).Scan(&c.ID, &c.TenantID, &c.ExternalID, &c.DisplayName, &c.Email, &c.Status,
 		(*string)(&c.EmailStatus), &c.EmailLastBouncedAt, &c.EmailBounceReason,
-		&c.TestClockID,
 		&c.DunningPolicyID,
 		&c.CreatedAt, &c.UpdatedAt)
 
@@ -668,7 +660,7 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.C
 	if err != nil {
 		return nil, 0, err
 	}
-	query := `SELECT id, tenant_id, external_id, display_name, COALESCE(email, ''), status, COALESCE(test_clock_id,''), created_at, updated_at
+	query := `SELECT id, tenant_id, external_id, display_name, COALESCE(email, ''), status, created_at, updated_at
 		FROM customers` + where +
 		` ORDER BY ` + orderBy +
 		` LIMIT $` + fmt.Sprintf("%d", len(args)+1) + ` OFFSET $` + fmt.Sprintf("%d", len(args)+2)
@@ -683,7 +675,7 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.C
 	var customers []domain.Customer
 	for rows.Next() {
 		var c domain.Customer
-		if err := rows.Scan(&c.ID, &c.TenantID, &c.ExternalID, &c.DisplayName, &c.Email, &c.Status, &c.TestClockID, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.TenantID, &c.ExternalID, &c.DisplayName, &c.Email, &c.Status, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, 0, err
 		}
 		c, err = s.decryptCustomer(c)
@@ -771,7 +763,7 @@ func (s *PostgresStore) listSearch(ctx context.Context, filter ListFilter) ([]do
 	if err != nil {
 		return nil, 0, err
 	}
-	query := `SELECT id, tenant_id, external_id, display_name, COALESCE(email, ''), status, COALESCE(test_clock_id,''), created_at, updated_at
+	query := `SELECT id, tenant_id, external_id, display_name, COALESCE(email, ''), status, created_at, updated_at
 		FROM customers` + where +
 		` ORDER BY ` + orderBy +
 		` LIMIT $` + fmt.Sprintf("%d", len(args)+1)
@@ -787,7 +779,7 @@ func (s *PostgresStore) listSearch(ctx context.Context, filter ListFilter) ([]do
 	var matched []domain.Customer
 	for rows.Next() {
 		var c domain.Customer
-		if err := rows.Scan(&c.ID, &c.TenantID, &c.ExternalID, &c.DisplayName, &c.Email, &c.Status, &c.TestClockID, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.TenantID, &c.ExternalID, &c.DisplayName, &c.Email, &c.Status, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, 0, err
 		}
 		c, err = s.decryptCustomer(c)
@@ -880,7 +872,7 @@ func (s *PostgresStore) listSortedByEncryptedColumn(ctx context.Context, filter 
 
 	where, args := buildCustomerWhere(filter)
 	// Deterministic scan window: the searchScanCap most recent rows.
-	query := `SELECT id, tenant_id, external_id, display_name, COALESCE(email, ''), status, COALESCE(test_clock_id,''), created_at, updated_at
+	query := `SELECT id, tenant_id, external_id, display_name, COALESCE(email, ''), status, created_at, updated_at
 		FROM customers` + where +
 		` ORDER BY created_at DESC, id DESC LIMIT $` + fmt.Sprintf("%d", len(args)+1)
 	args = append(args, searchScanCap)
@@ -894,7 +886,7 @@ func (s *PostgresStore) listSortedByEncryptedColumn(ctx context.Context, filter 
 	var customers []domain.Customer
 	for rows.Next() {
 		var c domain.Customer
-		if err := rows.Scan(&c.ID, &c.TenantID, &c.ExternalID, &c.DisplayName, &c.Email, &c.Status, &c.TestClockID, &c.CreatedAt, &c.UpdatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.TenantID, &c.ExternalID, &c.DisplayName, &c.Email, &c.Status, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return nil, 0, err
 		}
 		c, err = s.decryptCustomer(c)
@@ -949,9 +941,7 @@ func (s *PostgresStore) WithCustomerRulesLock(ctx context.Context, tenantID, id 
 	return tx.Commit()
 }
 
-// UpdateTx: see the Store interface. It leaves test_clock_id alone: a
-// customer stays on the clock it was created on (Stripe parity), and moving
-// it means deleting and creating it again.
+// UpdateTx: see the Store interface.
 func (s *PostgresStore) UpdateTx(ctx context.Context, tx *sql.Tx, c domain.Customer, emailChanged bool) (domain.Customer, error) {
 	enc, err := s.encryptCustomer(c)
 	if err != nil {
@@ -1270,7 +1260,7 @@ func (s *PostgresStore) StreamForExport(ctx context.Context, tenantID string, fr
 
 	rows, err := tx.QueryContext(ctx, `
 		SELECT id, tenant_id, external_id, display_name, COALESCE(email, ''),
-			status, email_status, COALESCE(test_clock_id,''), created_at, updated_at
+			status, email_status, created_at, updated_at
 		FROM customers
 		WHERE TRUE`+where+`
 		ORDER BY created_at DESC, id DESC`, args...)
@@ -1282,7 +1272,7 @@ func (s *PostgresStore) StreamForExport(ctx context.Context, tenantID string, fr
 	for rows.Next() {
 		var c domain.Customer
 		if err := rows.Scan(&c.ID, &c.TenantID, &c.ExternalID, &c.DisplayName, &c.Email,
-			&c.Status, &c.EmailStatus, &c.TestClockID, &c.CreatedAt, &c.UpdatedAt); err != nil {
+			&c.Status, &c.EmailStatus, &c.CreatedAt, &c.UpdatedAt); err != nil {
 			return err
 		}
 		c, err = s.decryptCustomer(c)

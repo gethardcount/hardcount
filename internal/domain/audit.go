@@ -18,28 +18,6 @@ type AuditEntry struct {
 	IPAddress     string         `json:"ip_address,omitempty"`
 	RequestID     string         `json:"request_id,omitempty"` // chi request UUID — joins back to server logs
 	CreatedAt     time.Time      `json:"created_at"`
-	// SimEffectiveAt and TestClockID are the sim axis (migration 0148,
-	// ADR-090 §5). SimEffectiveAt is the simulated instant the action
-	// happened at, and TestClockID is the test clock whose simulated time it
-	// happened in. Both are NULL or empty on every wall-clock row, which is
-	// almost every row, so their index is partial.
-	//
-	// They exist because ADR-086 teardown hard-deletes everything a test
-	// clock simulated. Once the clock is gone, the audit log is the only
-	// record left of the simulation. Its created_at is wall-clock time
-	// (ADR-030), which puts months of simulated events at the one instant
-	// the operator clicked Advance. Only this axis can order those events or
-	// select a window of them.
-	SimEffectiveAt *time.Time `json:"sim_effective_at,omitempty"`
-	TestClockID    string     `json:"test_clock_id,omitempty"`
-
-	// SubjectDeleted means the resource this row names no longer exists,
-	// because its test clock was torn down (ADR-086 hard-deletes everything
-	// the clock simulated). The row stays on purpose: it is the only record
-	// left that the simulation happened. A "View" link on it would return
-	// 404, so the dashboard must not offer one. It is worked out at read
-	// time and never stored.
-	SubjectDeleted bool `json:"subject_deleted,omitempty"`
 }
 
 // Well-known audit actions.
