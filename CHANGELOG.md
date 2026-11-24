@@ -42,6 +42,7 @@ original text.
 - **The test-clock tables, columns and leader role.** Migration `00242_drop_test_clock_schema` drops the `test_clocks` and `plan_price_version_clocks` tables and every `test_clock_id`, `sim_effective_at` and `is_simulated` column. The `testclock_catchup` role leaves `leader_status` and the `hardcount_leader_*` metrics. SQL that reads any of these now fails, and an alert on that role never fires.
 - **The `commit_exposure` attention reason.** Only a top-up's payment grants prepaid credit, so no unpaid invoice holds credit to report, and the reason is no longer sent. The `void_invoice` action is now offered only with `amount_below_minimum`, and a void's audit entry no longer carries `commit_retired_cents` or `commit_retired_on_return_cents`.
 - **The parked-charge alerts.** The `payment.unidentifiable` notice, the `payment_unidentifiable` error code, the `hardcount_parked_invoices` gauge, and the `earlier` result of `hardcount_stale_charge_hold_resolutions_total` with its log line are gone: since 0.10.0 every unclear charge names its PaymentIntent. Migration `00245_drop_charge_hold_token` drops `invoices.charge_hold_token`.
+- **The `mark_uncollectible` attention action.** It is no longer sent: only the `payment.unidentifiable` notice offered it. An invoice is still written off from its page (**Mark uncollectible**) or with `POST /v1/invoices/{id}/mark-uncollectible`.
 
 ### Fixed
 

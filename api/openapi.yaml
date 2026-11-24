@@ -1880,7 +1880,6 @@ components:
         - update_payment_method
         - connect_tax_provider
         - void_invoice
-        - mark_uncollectible
       description: |
         A recommended next step, as a closed code. Each code maps to an API
         route or a dashboard page.
@@ -1904,11 +1903,6 @@ components:
         - `connect_tax_provider`: connect the tax provider under Settings.
         - `void_invoice`: `POST /v1/invoices/{id}/void`. Offered only on
           `amount_below_minimum`.
-        - `mark_uncollectible`:
-          `POST /v1/invoices/{id}/mark-uncollectible`. No notice offers it
-          at present. After the write-off, a payment whose Stripe event
-          arrives later is still recorded, and nothing charges the invoice.
-          The dashboard shows it as a secondary action.
 
     AttentionActionItem:
       type: object

@@ -217,10 +217,6 @@ const (
 	// will never charge): void destroys an invoice, so it must never become a
 	// generic "something is wrong here" suggestion.
 	AttentionActionVoidInvoice AttentionAction = "void_invoice"
-	// AttentionActionMarkUncollectible opens the invoice's write-off
-	// confirmation. No notice offers it at present; the dashboard still
-	// renders it, as a secondary action.
-	AttentionActionMarkUncollectible AttentionAction = "mark_uncollectible"
 )
 
 // AttentionActionItem is one entry in Attention.Actions. Frontend

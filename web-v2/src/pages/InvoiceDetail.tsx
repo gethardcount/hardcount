@@ -1089,8 +1089,6 @@ export default function InvoiceDetailPage() {
           // straight from the notice: void is irreversible, and the dialog is
           // where the consequences are spelled out.
           onVoidInvoice={() => setShowVoidConfirm(true)}
-          // Same for the parked invoice's write-off.
-          onMarkUncollectible={() => setShowMarkUncollectibleConfirm(true)}
           // Record as credit note / Attach / Dismiss for each refund made in
           // Stripe that Hardcount flagged. Drawn from the refunds themselves:
           // the server sends this notice with no actions of its own.
