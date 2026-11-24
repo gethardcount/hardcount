@@ -66,7 +66,7 @@ test('with nothing loaded, every field is sent', () => {
 })
 
 test("a refused validity for bought credit opens the Invoicing tab with the server's sentence", () => {
-  const f = firstInvalidSettingsField({ topup_credit_valid_days: { message: 'must be from 1 to 3650 days when set (send null for credit that never expires)' } })
+  const f = firstInvalidSettingsField({ topup_credit_valid_days: { message: 'must be between 1 and 3650 days; leave it unset for credit that never expires' } })
   assert.equal(f?.tab, 'invoicing')
   assert.equal(f?.label, 'Bought credit lasts')
 })

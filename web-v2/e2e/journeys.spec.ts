@@ -518,6 +518,42 @@ test('grant credits and see the balance', async ({ page }) => {
   await expect(page.getByText('Credit balance', { exact: true }).locator('..')).toContainText(usd(balance.balance_cents))
 })
 
+// Sell credit makes a top-up and lands on its page. "Decide later" charges
+// nothing and sends nothing, so it needs no Stripe and no email: the page
+// shows an unpaid top-up that can be withdrawn and has no PDF until it is paid.
+test('sell credit, decide later, and land on the unpaid top-up', async ({ page }) => {
+  const customer = await createCustomer()
+  await page.goto(`/customers/${customer.id}`)
+  const credits = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Credits', exact: true }) })
+  await credits.getByRole('button', { name: 'Sell credit' }).click()
+  const dialog = page.getByRole('dialog', { name: 'Sell credit' })
+  await dialog.getByLabel(/^What the customer pays/).fill('90.00')
+  await dialog.getByLabel(/^The credit they get/).fill('100.00')
+  await expect(dialog.getByText('They get $10.00 more credit than they pay.')).toBeVisible()
+  await dialog.getByRole('radio', { name: /^Decide later/ }).click()
+  await dialog.getByRole('button', { name: 'Create top-up' }).click()
+
+  await expect(page).toHaveURL(/\/invoices\/hc_inv_\w+$/)
+  await expect(page.getByRole('heading', { level: 1, name: 'Prepaid credit' })).toBeVisible()
+  await expect(page.getByText('Top-up — issued when it is paid.')).toBeVisible()
+  // Deciding later opens no confirm: no charge, no payment, no email.
+  await expect(page.getByRole('alertdialog')).toHaveCount(0)
+  await expect(page.getByRole('dialog')).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Download PDF' })).toHaveCount(0)
+  await page.getByRole('button', { name: 'More invoice actions' }).click()
+  const menu = page.getByRole('menu')
+  await expect(menu.getByRole('menuitem', { name: 'Withdraw' })).toBeVisible()
+  await expect(menu.getByRole('menuitem', { name: /PDF/ })).toHaveCount(0)
+
+  const id = new URL(page.url()).pathname.split('/').pop()!
+  const { invoice, line_items } = await api<{
+    invoice: Invoice & { billing_reason: string }
+    line_items: { commit_granted_cents?: number }[]
+  }>('GET', `/invoices/${id}`)
+  expect(invoice).toMatchObject({ status: 'draft', billing_reason: 'topup', invoice_number: '', amount_due_cents: 9000 })
+  expect(line_items.map(l => l.commit_granted_cents)).toEqual([10000])
+})
+
 // Two customers can have the same name. A keyboard pick of the second one
 // must grant the credit to the second, not to the first.
 test('a keyboard pick of the second of two same-named customers grants the credit to that customer', async ({ page }) => {

@@ -20,6 +20,7 @@ the [quick start](quick-start.md).
   [Glossary](glossary.md).
 - **Guides:** [AI pricing reference](ai-pricing.md) ·
   [Bill for AI tokens by model](guides/bill-for-ai-tokens.md) ·
+  [Sell prepaid credit](guides/sell-prepaid-credit.md) ·
   [Stop usage when credit runs out](stop-usage-when-credit-runs-out.md) ·
   [Send usage from LiteLLM](integrations/litellm.md) ·
   [Receive webhooks](guides/receive-webhooks.md) ·
