@@ -109,7 +109,10 @@ func TestCancel_TrialActivatedWhilePriced_PlansAgainFromTheActiveRow(t *testing.
 // Mutation: plan each attempt on a fresh read of the server's clock, ignoring
 // the caller's instant → neither plan is at the caller's instant.
 func TestCancel_ASecondAttemptPlansAtTheCallersInstant(t *testing.T) {
-	server := &subSteppingClock{at: time.Now().UTC().Add(time.Hour)}
+	// Both instants fall on one day: the subscription's period starts at that
+	// day's midnight, before the cancel, whatever the hour the test runs.
+	noon := time.Now().UTC().Truncate(24 * time.Hour).Add(12 * time.Hour)
+	server := &subSteppingClock{at: noon.Add(time.Hour)}
 	svc := NewService(newMemStore(), server)
 	fb := &fakeBiller{}
 	svc.SetBiller(fb)
@@ -117,7 +120,7 @@ func TestCancel_ASecondAttemptPlansAtTheCallersInstant(t *testing.T) {
 	fb.writeMoved = 1
 	server.reads = 0
 
-	at := time.Now().UTC().Add(time.Minute).Truncate(time.Second)
+	at := noon.Add(time.Minute)
 	if _, _, err := svc.Cancel(clock.WithEffectiveNow(context.Background(), at), "t1", id); err != nil {
 		t.Fatalf("Cancel: %v", err)
 	}
