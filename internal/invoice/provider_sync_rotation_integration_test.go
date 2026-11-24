@@ -200,9 +200,9 @@ func TestRecordProviderSyncTouchesOnlyTheObservation(t *testing.T) {
 
 // The unknown and processing sweeps share one list, which waits out a
 // cool-off since the invoice's last write, so the webhook can settle it first.
-// updated_at and the cutoff are both read from the server's clock, so a row
-// written inside the cool-off is not listed, and neither is one dated ahead
-// of the database's clock.
+// updated_at and the cutoff are on one clock (the server's in production; the
+// database's here, for both), so a row written inside the cool-off is not
+// listed, and neither is one dated ahead of that clock.
 func TestInflightSweeps_ListOnlyRowsPastTheCoolOff(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -244,7 +244,11 @@ func TestInflightSweeps_ListOnlyRowsPastTheCoolOff(t *testing.T) {
 	unknownAt("INV-RECENT", 0)
 	unknownAt("INV-AHEAD", -time.Minute)
 
-	got, err := store.ListUnknownPayments(ctx, time.Now().UTC().Add(-time.Minute), 10)
+	var cutoff time.Time
+	if err := db.Pool.QueryRowContext(ctx, `SELECT now() - interval '1 minute'`).Scan(&cutoff); err != nil {
+		t.Fatalf("read the cutoff: %v", err)
+	}
+	got, err := store.ListUnknownPayments(ctx, cutoff, 10)
 	if err != nil {
 		t.Fatalf("ListUnknownPayments: %v", err)
 	}

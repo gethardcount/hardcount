@@ -53,7 +53,8 @@ func (s *Service) SetAuditLogger(a AuditEmitter) { s.audit = a }
 func (s *Service) SetOpenPeriodReader(r OpenPeriodReader) { s.periods = r }
 
 // SetClock sets the service's clock: the server's clock, the one the billing
-// engine bills by. Every read through it returns the request's instant.
+// engine bills by. A read through it returns the instant ctx carries, which on
+// a request is the request's; with none, each read reads the clock.
 func (s *Service) SetClock(c clock.Clock) { s.clock = c }
 
 // IngestInput is the internal service input — uses resolved internal IDs only.
@@ -325,8 +326,9 @@ func recordLate(ctx context.Context, ev domain.UsageEvent) {
 // that builds rows it may not write (IngestCall builds a call's two mappings
 // and writes one) records only the rows it wrote.
 func (s *Service) build(ctx context.Context, tenantID string, input IngestInput, origin domain.UsageEventOrigin) (domain.UsageEvent, bool, error) {
-	// "Now" is the instant its caller bound. An event with no timestamp lands
-	// at that time, and the future gate below compares against it.
+	// "Now" is the instant ctx carries, the request's; with none, a read of
+	// the clock. An event with no timestamp lands at that time, and the
+	// future gate below compares against it.
 	now := s.clock.Now(ctx)
 	ts := now
 	if input.Timestamp != nil {
@@ -407,11 +409,11 @@ type BatchEventResult struct {
 //
 // Validation failures are collected for EVERY failing index (a bare
 // "quantity too large" across a 500-event batch was undebuggable) and
-// abort before any write. The events share one instant: the request's, or
-// one read of the service's clock when ctx carries none. Idempotency replays count as deduplicated —
-// success, not failure — matching the LiteLLM door. A failed open-period
-// read aborts before any write too, and a failed meter read rolls the batch
-// back (errIngestUnavailable).
+// abort before any write. The events share the instant ctx carries, the
+// request's; with none, each event's build reads the clock. Idempotency
+// replays count as deduplicated — success, not failure — matching the
+// LiteLLM door. A failed open-period read aborts before any write too, and a
+// failed meter read rolls the batch back (errIngestUnavailable).
 func (s *Service) BatchIngest(ctx context.Context, tenantID string, events []IngestInput) (BatchResult, []error) {
 	prepared := make([]domain.UsageEvent, 0, len(events))
 	var batchErrs []error

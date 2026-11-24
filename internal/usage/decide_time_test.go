@@ -33,9 +33,9 @@ func TestIngest_IsRecordedAtTheServersClock(t *testing.T) {
 	}
 }
 
-// The events of one batch share the request's instant: none of them reads the
-// server's clock itself.
-func TestBatchIngest_TheEventsShareOneInstant(t *testing.T) {
+// An instant bound above the service is kept for every event of a batch: none
+// of them reads the server's clock itself.
+func TestBatchIngest_KeepsTheBoundInstantForEveryEvent(t *testing.T) {
 	at := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
 	store := newMemStore()
 	svc := NewService(store)

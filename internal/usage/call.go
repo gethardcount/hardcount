@@ -24,7 +24,8 @@ type CallEvent struct {
 	Quantity       decimal.Decimal
 	Dimensions     map[string]any
 	IdempotencyKey string
-	// Timestamp nil means the call's bound instant, as for Ingest.
+	// Timestamp nil means the instant ctx carries (the request's), as for
+	// Ingest.
 	Timestamp *time.Time
 	// ObservedCostMicros is the provider's own cost for this row (ADR-079
 	// D4); nil falls to the rate table.
