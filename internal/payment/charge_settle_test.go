@@ -79,20 +79,22 @@ func (a answersLater) CreateUnconfirmedPaymentIntent(ctx context.Context, p Paym
 // arrives, not at the instant the charge's action carries. An inline success
 // is paid then; a decline, or a refusal with no PaymentIntent, starts payment
 // recovery then; a payment Stripe is still processing is stamped processing
-// then.
+// then; a refusal below Stripe's minimum is stamped then.
 func TestChargeInvoice_AnInlineResultIsRecordedWhenItArrives(t *testing.T) {
 	action := time.Date(2026, 11, 16, 23, 59, 58, 0, time.UTC)
 	arrived := action.Add(time.Minute)
 	for _, c := range []struct {
-		name       string
-		client     *mockStripeClient
-		paid       bool
-		processing bool
+		name         string
+		client       *mockStripeClient
+		paid         bool
+		processing   bool
+		belowMinimum bool
 	}{
-		{"a success", &mockStripeClient{piID: "pi_ok", chargeStatus: "succeeded"}, true, false},
-		{"a decline", &mockStripeClient{shouldFail: true}, false, false},
-		{"a refusal with no PaymentIntent", &mockStripeClient{shouldFail: true, failErr: &PaymentError{Message: "invalid payment method"}}, false, false},
-		{"a payment still processing", &mockStripeClient{piID: "pi_async", chargeStatus: "processing"}, false, true},
+		{"a success", &mockStripeClient{piID: "pi_ok", chargeStatus: "succeeded"}, true, false, false},
+		{"a decline", &mockStripeClient{shouldFail: true}, false, false, false},
+		{"a refusal with no PaymentIntent", &mockStripeClient{shouldFail: true, failErr: &PaymentError{Message: "invalid payment method"}}, false, false, false},
+		{"a payment still processing", &mockStripeClient{piID: "pi_async", chargeStatus: "processing"}, false, true, false},
+		{"a refusal below Stripe's minimum", &mockStripeClient{shouldFail: true, failErr: &BelowMinimumError{Message: "Amount must be at least $0.50 usd"}}, false, false, true},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			invoices := newMockInvoiceUpdater()
@@ -107,6 +109,12 @@ func TestChargeInvoice_AnInlineResultIsRecordedWhenItArrives(t *testing.T) {
 			if c.paid {
 				if paid := invoices.invoices["inv_1"].PaidAt; paid == nil || !paid.Equal(arrived) {
 					t.Errorf("paid_at %v, want %v, when Stripe's answer arrived", paid, arrived)
+				}
+				return
+			}
+			if c.belowMinimum {
+				if at := invoices.invoices["inv_1"].BelowMinimumAt; at == nil || !at.Equal(arrived) {
+					t.Errorf("below_minimum_at %v, want %v, when Stripe's answer arrived", at, arrived)
 				}
 				return
 			}

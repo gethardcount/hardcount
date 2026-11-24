@@ -5016,7 +5016,7 @@ func (e *Engine) processAutoCharge(ctx context.Context, inv domain.Invoice, at *
 		// Cleared even if the charger could not record 'failed' (it logs
 		// CRITICAL then). Keeping the invoice queued would re-charge it
 		// under the same idempotency key with rebuilt parameters (amount
-		// after credits, a swapped card, the test-clock anchor), which
+		// after credits, a swapped card), which
 		// Stripe rejects as an idempotency conflict, and that parks the
 		// invoice as unknown for good. The inline dunning run, which
 		// retries under its own key, and the payment_failed webhook own it:

@@ -1398,10 +1398,10 @@ func (s *Stripe) stampFailedWithoutPayment(ctx context.Context, tenantID string,
 	if s.dunning == nil {
 		return
 	}
-	// Dunning starts inline, for the same test-clock reason as a decline (see
-	// SettleFailed): the run must exist when the Advance's dunning phase runs.
-	// Never on an invoice that is no longer finalized (paid, voided or written
-	// off before or during the charge), and the check reads current, not the
+	// Dunning starts inline: no webhook follows a failure with no
+	// PaymentIntent, so nothing else would start it. Never on an invoice
+	// that is no longer finalized (paid, voided or written off before or
+	// during the charge), and the check reads current, not the
 	// snapshot: StartDunning has no status opinion, and a written-off invoice
 	// already ran dunning to its final action.
 	if current.Status != domain.InvoiceFinalized {

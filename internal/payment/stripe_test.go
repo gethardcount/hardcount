@@ -187,7 +187,7 @@ func (m *mockInvoiceUpdater) StampChargeOutcome(ctx context.Context, tenantID, i
 
 // StampBelowMinimum mirrors the store: the seq CAS, finalized only, and the
 // invoice left pending, out of the auto-charge queue, with the stamp.
-func (m *mockInvoiceUpdater) StampBelowMinimum(_ context.Context, _, id string, attemptSeq int64, errMsg string) (domain.Invoice, bool, error) {
+func (m *mockInvoiceUpdater) StampBelowMinimum(ctx context.Context, _, id string, attemptSeq int64, errMsg string) (domain.Invoice, bool, error) {
 	inv, ok := m.invoices[id]
 	if !ok {
 		return domain.Invoice{}, false, errs.ErrNotFound
@@ -195,7 +195,7 @@ func (m *mockInvoiceUpdater) StampBelowMinimum(_ context.Context, _, id string, 
 	if inv.ChargeAttemptSeq != attemptSeq || inv.Status != domain.InvoiceFinalized {
 		return inv, false, nil
 	}
-	now := time.Now().UTC()
+	now := clock.Now(ctx)
 	inv.PaymentStatus = domain.PaymentPending
 	inv.StripePaymentIntentID = ""
 	inv.LastPaymentError = errMsg
