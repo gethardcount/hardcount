@@ -255,6 +255,14 @@ func (s *Service) GrantCommitForInvoiceTx(ctx context.Context, tx *sql.Tx, tenan
 	})
 }
 
+// LockCustomerCreditTx takes the customer's credit lock on the caller's tx,
+// the lock every balance write takes before its ledger rows. A top-up's
+// settle takes it before the tenant's number row, the order every other
+// writer of both keeps. Re-entrant within tx.
+func (s *Service) LockCustomerCreditTx(ctx context.Context, tx *sql.Tx, tenantID, customerID string) error {
+	return s.store.LockCustomerCreditTx(ctx, tx, tenantID, customerID)
+}
+
 // CommitReliefResult is the post-retire grant state the relief CN needs
 // for its event payload and response (ADR-080).
 type CommitReliefResult struct {

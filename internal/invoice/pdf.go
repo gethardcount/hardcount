@@ -506,7 +506,10 @@ func RenderPDF(ctx context.Context, inv domain.Invoice, lineItems []domain.Invoi
 	// date on a customer-retained financial document (ADR-075 audit).
 	docLoc := domain.LoadLocationOrUTC(inv.BillingTimezone)
 
-	detailRow("Number", inv.InvoiceNumber)
+	// An unpaid top-up has no number until its payment issues it.
+	if inv.InvoiceNumber != "" {
+		detailRow("Number", inv.InvoiceNumber)
+	}
 	for _, row := range issueDateRows(inv, docLoc) {
 		detailRow(row[0], row[1])
 	}

@@ -30,6 +30,8 @@ func newMemStore() *memStore {
 // AppendEntryTx mirrors AppendEntry for tx-aware callers. The fake
 // ignores the tx since it's in-memory — the test exercises business
 // rules, not transactional atomicity.
+func (m *memStore) LockCustomerCreditTx(context.Context, *sql.Tx, string, string) error { return nil }
+
 func (m *memStore) AppendEntryTx(ctx context.Context, _ *sql.Tx, tenantID string, entry domain.CreditLedgerEntry) (domain.CreditLedgerEntry, error) {
 	return m.AppendEntry(ctx, tenantID, entry)
 }

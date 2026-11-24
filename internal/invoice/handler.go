@@ -2235,7 +2235,16 @@ func (h *Handler) downloadPDF(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", "inline; filename=\""+inv.InvoiceNumber+".pdf\"")
+	w.Header().Set("Content-Disposition", "inline; filename=\""+PDFFileName(inv)+".pdf\"")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(pdfBytes)
+}
+
+// PDFFileName is the PDF's file name, without the extension: the invoice
+// number, or "prepaid-credit" for a top-up not yet numbered.
+func PDFFileName(inv domain.Invoice) string {
+	if inv.InvoiceNumber == "" {
+		return "prepaid-credit"
+	}
+	return inv.InvoiceNumber
 }

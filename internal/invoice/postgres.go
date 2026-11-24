@@ -63,6 +63,9 @@ func (s *PostgresStore) SetOutboxEnqueuer(o OutboxEnqueuer) { s.outbox = o }
 // funder wired.
 type CommitFunder interface {
 	GrantCommitForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber, currency string, amountCents int64, expiresAt *time.Time) (domain.CreditLedgerEntry, error)
+	// LockCustomerCreditTx takes the customer's credit lock, which the grant
+	// takes too, so a caller can take it in its place in the lock order.
+	LockCustomerCreditTx(ctx context.Context, tx *sql.Tx, tenantID, customerID string) error
 }
 
 // errCommitLineAlone refuses a commit line beside any other line: an invoice
@@ -1442,7 +1445,8 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 // settle's transaction, then grants the credit it sells. The caller holds the
 // invoice row lock and has read the row as an unpaid top-up. In order:
 //
-//  1. the full row lock, then the tenant's number row (NextInvoiceNumberTx);
+//  1. the full row lock, the customer's credit lock, then the tenant's number
+//     row (NextInvoiceNumberTx);
 //  2. the issue: the number, issued_at = paidAt, due_at left NULL (a top-up
 //     has no due date), the issued parties, and invoice.finalized;
 //  3. markPaidLockedTx, the paid flip every payment takes;
@@ -1456,17 +1460,34 @@ func (s *PostgresStore) markPaidReportingTransition(ctx context.Context, tenantI
 // recorded as an anomaly or acknowledged. The fund-once index
 // (idx_credit_ledger_commit_fund_dedup) aborts a second grant for the invoice.
 //
-// Lock order: invoice row, then number row. No writer takes the number row
-// and then an invoice row.
+// Lock order: invoice row → customer credit lock → number row → ledger rows.
+// Every other writer of these keeps it: a credit note locks its invoice, then
+// the customer (a commit refund), then the number row; a cancel or plan swap
+// returns credit (the customer lock) before it takes numbers; the credit store
+// takes the invoice row before the customer lock. The grant takes the
+// customer lock again, which is free: it is a transaction-scoped advisory
+// lock, re-entrant within the transaction. No writer takes the number row and
+// then an invoice row.
 func (s *PostgresStore) issueAndPayTopupLockedTx(ctx context.Context, tx *sql.Tx, tenantID, id, stripePaymentIntentID string, paidAt time.Time, kind settleKind) (domain.Invoice, error) {
 	if s.numberer == nil || s.commitFunder == nil {
 		return domain.Invoice{}, fmt.Errorf("pay top-up %s: no invoice numberer or commit funder is wired", id)
 	}
 	// Writing invoice_number, a unique-key column, needs the full row lock.
-	// Take it now, before the number row, so this transaction never waits on
-	// the invoice row while it holds the number row.
-	if _, err := tx.ExecContext(ctx, `SELECT 1 FROM invoices WHERE id = $1 FOR UPDATE`, id); err != nil {
+	// Take it now, before the customer and number locks, so this transaction
+	// never waits on the invoice row while it holds either. The upgrade from
+	// the caller's FOR NO KEY UPDATE waits only for a KEY SHARE holder, and
+	// none holds one on an unpaid top-up and then writes it: every writer of
+	// a table that references invoices (charge attempts, checkout sessions,
+	// credit notes, line items, Stripe refunds, disputes) locks or updates the
+	// invoice row first, which waits for the caller's lock, and dunning,
+	// payment-update tokens and tax calculations never reach a draft. Email
+	// and audit rows reference no invoice.
+	var customerID string
+	if err := tx.QueryRowContext(ctx, `SELECT customer_id FROM invoices WHERE id = $1 FOR UPDATE`, id).Scan(&customerID); err != nil {
 		return domain.Invoice{}, fmt.Errorf("pay top-up %s: lock the invoice: %v", id, err)
+	}
+	if err := s.commitFunder.LockCustomerCreditTx(ctx, tx, tenantID, customerID); err != nil {
+		return domain.Invoice{}, fmt.Errorf("pay top-up %s: lock the customer's credit: %v", id, err)
 	}
 	number, err := s.numberer.NextInvoiceNumberTx(ctx, tx, tenantID)
 	if err != nil {

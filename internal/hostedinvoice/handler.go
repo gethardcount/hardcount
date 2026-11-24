@@ -591,21 +591,12 @@ func (h *Handler) downloadPDF(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", "inline; filename=\""+pdfFileName(inv)+".pdf\"")
+	w.Header().Set("Content-Disposition", "inline; filename=\""+invoice.PDFFileName(inv)+".pdf\"")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(pdfBytes)
 }
 
 // ---- Helpers ----
-
-// pdfFileName names the PDF by the invoice number; an unpaid top-up has none
-// yet.
-func pdfFileName(inv domain.Invoice) string {
-	if inv.InvoiceNumber == "" {
-		return "prepaid-credit"
-	}
-	return inv.InvoiceNumber
-}
 
 // checkoutReturnURLs builds the success and cancel redirects for Stripe
 // Checkout. Both point back to the hosted invoice page so the customer

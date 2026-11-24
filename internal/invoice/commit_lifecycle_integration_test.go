@@ -256,6 +256,8 @@ func TestCommitFinalize_FunderErrorKeepsDraft(t *testing.T) {
 // failingFunder fails every commit grant.
 type failingFunder struct{}
 
+func (failingFunder) LockCustomerCreditTx(context.Context, *sql.Tx, string, string) error { return nil }
+
 func (failingFunder) GrantCommitForInvoiceTx(context.Context, *sql.Tx, string, string, string, string, string, int64, *time.Time) (domain.CreditLedgerEntry, error) {
 	return domain.CreditLedgerEntry{}, errors.New("grant refused")
 }

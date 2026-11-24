@@ -218,6 +218,8 @@ func (r *topupRig) charge(t *testing.T, inv domain.Invoice) (domain.Invoice, err
 // roll back with it.
 type failingFunder struct{}
 
+func (failingFunder) LockCustomerCreditTx(context.Context, *sql.Tx, string, string) error { return nil }
+
 func (failingFunder) GrantCommitForInvoiceTx(context.Context, *sql.Tx, string, string, string, string, string, int64, *time.Time) (domain.CreditLedgerEntry, error) {
 	return domain.CreditLedgerEntry{}, errors.New("ledger unavailable")
 }

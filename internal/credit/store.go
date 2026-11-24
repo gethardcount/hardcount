@@ -29,6 +29,9 @@ type Store interface {
 	// flow inserts the sub item + the credit entry in one tx). The
 	// caller owns the tx; the store just executes inside it.
 	AppendEntryTx(ctx context.Context, tx *sql.Tx, tenantID string, entry domain.CreditLedgerEntry) (domain.CreditLedgerEntry, error)
+	// LockCustomerCreditTx takes the customer's credit lock on tx, the lock
+	// every balance writer takes; re-entrant within tx.
+	LockCustomerCreditTx(ctx context.Context, tx *sql.Tx, tenantID, customerID string) error
 	// ApplyToInvoiceAtomic debits credits and reduces invoice.amount_due
 	// atomically. `at` stamps both the new ledger usage entry and the
 	// invoice's updated_at. Zero means clock.Now(ctx).

@@ -328,7 +328,7 @@ WHERE g.entry_type = 'grant' AND g.consumed_cents < g.amount_cents;`,
 	{
 		Name:   "paid_commit_invoice_without_grant",
 		Domain: "invoices",
-		Why:    "a paid invoice with a commit line sold prepaid credit, and its grant is written in the transaction that paid it (a top-up) or finalized it (a commit invoice finalized before top-ups); with no commit grant, the customer paid and got no credit, so grant it by hand",
+		Why:    "a paid invoice with a commit line sold prepaid credit, and its commit grant is written in the transaction that paid it (a top-up) or finalized it (a commit invoice finalized before top-ups), so a row here is a bug: the customer paid and holds no credit for it. Give the customer the credit now with a grant by hand (POST /v1/credits/grant), and report the bug; the row stays listed, because a hand grant is not the commit grant of this invoice",
 		SQL: `SELECT i.id, i.tenant_id, i.invoice_number, i.billing_reason, i.paid_at, li.commit_granted_cents
 		FROM invoices i
 		JOIN invoice_line_items li ON li.invoice_id = i.id AND li.commit_granted_cents IS NOT NULL
