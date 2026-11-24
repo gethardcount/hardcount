@@ -977,7 +977,12 @@ test('on this computer, the Stripe webhook step gives the Stripe CLI command, no
   await page.goto('/settings?tab=payments')
   await expect(page.getByText("Hardcount runs on this computer, so Stripe can’t send events to it.", { exact: false })).toBeVisible()
   const origin = new URL(page.url()).origin
-  await expect(page.getByText(`stripe listen --forward-to ${origin}/v1/webhooks/stripe/hc_spc_e2e`, { exact: true })).toBeVisible()
+  // The command names the events to forward: the Stripe CLI does not start
+  // without a choice of them.
+  const command = page.getByText(/^stripe listen --events [a-z_.,]+ --forward-to \S+$/)
+  await expect(command).toBeVisible()
+  await expect(command).toContainText('--events payment_intent.succeeded,')
+  await expect(command).toContainText(`--forward-to ${origin}/v1/webhooks/stripe/hc_spc_e2e`)
   await expect(page.getByText('paste this URL')).toHaveCount(0)
   await expect(page.getByText('Paste the signing secret the command printed')).toBeVisible()
 })
