@@ -164,8 +164,8 @@ func serve() {
 	registerMetrics(prometheus.DefaultRegisterer, appPool, db, cfg.InvoiceGracePeriod)
 
 	// Leader gate (ADR-114). Each singleton loop (billing, dunning, the two
-	// outbox dispatchers, webhook delivery retry and the test-clock catch-up)
-	// runs one tick at a time under a lease in leader_leases. Each role's
+	// outbox dispatchers and webhook delivery retry) runs one tick at a time
+	// under a lease in leader_leases. Each role's
 	// claim statement re-checks the lease token in SQL. Every statement stands alone, so the gate is
 	// safe behind a transaction-mode pooler.
 	gate := leader.New(appPool, func(role leader.Role, reason string) {
@@ -220,8 +220,8 @@ func serve() {
 	// issues a draft whose first attempt failed. The retry is a follow-up to
 	// ADR-056.
 	scheduler.SetClawbackRetrier(server.CreditNoteSvc)
-	// Trial expiry on the real clock, for subscriptions not on a test clock.
-	// Each tick moves trialing subscriptions to active at trial_end_at.
+	// Trial expiry: each tick moves trialing subscriptions to active at
+	// trial_end_at.
 	// Otherwise the dashboard could show an ended trial as trialing for up
 	// to about 30 days.
 	scheduler.SetTrialExpirer(server.SubscriptionSvc)
@@ -269,7 +269,7 @@ func serve() {
 	// SIGKILL mid-drain.
 	const (
 		shutdownHTTPDrain   = 30 * time.Second // stage 1: in-flight requests
-		shutdownWorkerDrain = 30 * time.Second // stage 2: scheduler, dispatcher and test-clock catch-up ticks
+		shutdownWorkerDrain = 30 * time.Second // stage 2: scheduler and dispatcher ticks
 	)
 
 	// Stage 0: as soon as Shutdown is called, close every SSE subscriber, so
@@ -355,9 +355,9 @@ func serve() {
 		slog.Error("http shutdown error", "error", err)
 	}
 
-	// Stage 2 (at most 30s): the scheduler, the dispatchers and the test-clock
-	// catch-up. Their ticks run on ctx, which is now cancelled, and abort
-	// atomically at their next database call. This wait is for the work that runs with
+	// Stage 2 (at most 30s): the scheduler and the dispatchers. Their ticks
+	// run on ctx, which is now cancelled, and abort atomically at their next
+	// database call. This wait is for the work that runs with
 	// context.WithoutCancel: a Stripe charge, a tax retry's finalize and its
 	// CommitTax, and an outbox row's detached mark. Waiting lets a tick that
 	// is part-way through record its result, instead of leaving a claimed

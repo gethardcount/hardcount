@@ -193,7 +193,7 @@ func TestRetrySweep_NoCreditsWired_ChargesAsBefore(t *testing.T) {
 	}
 }
 
-// An invoice that owes nothing, settled by the real-time run, is paid at the
+// An invoice that owes nothing, settled by the sweep, is paid at the
 // engine's clock (fixed here), never at a zero instant.
 func TestCollect_LiveZeroDueInvoiceIsPaidNow(t *testing.T) {
 	inv, _, engine := retryHarness(t, nil)

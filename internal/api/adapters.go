@@ -441,7 +441,7 @@ func (a *paymentRetrierAdapter) retryPayment(ctx context.Context, tenantID, invo
 	// apply failure never reaches Stripe, so RetryPayment logs it and skips
 	// the attempt uncounted.
 	if a.credits != nil {
-		at := clock.Now(ctx) // sim-aware: catchup binds effective-now on ctx
+		at := clock.Now(ctx) // the retry's bound instant
 		if _, err := a.credits.ApplyToInvoiceAt(ctx, tenantID, customerID, invoiceID, inv.AmountDueCents, at, inv.InvoiceNumber); err != nil {
 			// This failed before any Stripe call. Release the hold, so the
 			// next due tick retries without waiting for the stale-hold

@@ -375,9 +375,6 @@ func (s *PostgresStore) ListHeldReliefTx(ctx context.Context, tx *sql.Tx, tenant
 
 func (s *PostgresStore) insertCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID string, cn domain.CreditNote) (domain.CreditNote, error) {
 	id := postgres.NewID("hc_cn")
-	// Honors ctx-bound effective-now (ADR-030) — credit notes against
-	// invoices on clock-pinned subs inherit sim-time. Falls back to
-	// wall-clock for unbound ctx (production credit notes).
 	now := clock.Now(ctx)
 	metaJSON, _ := json.Marshal(cn.Metadata)
 	if cn.Metadata == nil {

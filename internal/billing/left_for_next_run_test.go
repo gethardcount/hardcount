@@ -196,11 +196,11 @@ func TestCollect_RefusedClaimSaysWhatIsLeft(t *testing.T) {
 			logs := warnLogs(t)
 			ctx := postgres.WithLivemode(context.Background(), true)
 			if _, runErrs := engine.RetryPendingCharges(ctx, 50, nil); len(runErrs) != 0 {
-				t.Fatalf("errors = %v, want none: a refused claim is quiet in real time", runErrs)
+				t.Fatalf("errors = %v, want none: a refused claim is quiet", runErrs)
 			}
 			engine.CollectInvoice(ctx, "t1", "inv_1", nil) // the finalize-time collect, the race's other side
 			if logs.Len() != 0 {
-				t.Errorf("a refused claim logged at Warn or above in real time:\n%s", logs.String())
+				t.Errorf("a refused claim logged at Warn or above:\n%s", logs.String())
 			}
 		})
 	}

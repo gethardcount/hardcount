@@ -15,8 +15,7 @@ import (
 // TestUpdateItem_Upgrade_EnrollsProrationInvoiceForAutoCharge locks the fix for
 // the proration-invoice collection gap: an immediate UPGRADE produces a charge
 // invoice that must be enrolled into the auto-charge sweep (auto_charge_pending),
-// so it actually collects — wall-clock cron for live subs, test-clock catchup on
-// advance for clock-pinned subs. Before this, proration invoices finalized but
+// so it actually collects. Before this, proration invoices finalized but
 // were never charged (no creation-site enrollment), unlike engine cycle/create
 // invoices.
 func TestUpdateItem_Upgrade_EnrollsProrationInvoiceForAutoCharge(t *testing.T) {

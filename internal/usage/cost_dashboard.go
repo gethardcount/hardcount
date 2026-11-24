@@ -235,10 +235,6 @@ func (a *CostDashboardAssembler) GetByToken(ctx context.Context, token string) (
 	// The token lookup runs under TxBypass and is the only place we learn
 	// the customer's mode, so we propagate it here.
 	ctx = postgres.WithLivemode(ctx, cust.Livemode)
-	// One instant for the whole page: the credit figures and the usage view
-	// all read it. A public page does not come through the API's door, so
-	// the server's clock is read here once.
-	ctx = a.usageService.readTime(ctx)
 	// The usage view and the live credit figure below aggregate the same
 	// meters over the same period; the memo makes that one scan, not two.
 	ctx, _ = WithAggregationMemo(ctx)

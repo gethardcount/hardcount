@@ -251,10 +251,9 @@ const invCols = `id, tenant_id, customer_id, COALESCE(subscription_id,''), invoi
 	tax_inclusive`
 
 // qualifiedInvCols returns invCols with every column reference prefixed
-// by the given table alias. Used by ADR-029's per-clock queries that
-// JOIN invoices to subscriptions — without qualification, columns like
-// `id` and `tenant_id` are ambiguous (both tables have them) and
-// Postgres rejects the query with SQLSTATE 42702.
+// by the given table alias, for a query that names invoices by an alias.
+// In a JOIN, an unqualified column such as `id` or `tenant_id` is
+// ambiguous and Postgres rejects the query with SQLSTATE 42702.
 //
 // Mirrors qualifiedSubCols in internal/subscription/postgres.go;
 // kept package-local to keep invCols a single source of truth.
@@ -425,10 +424,9 @@ func (s *PostgresStore) List(ctx context.Context, filter ListFilter) ([]domain.I
 	}
 
 	// Sort with deterministic tie-break on id. Without the tie-break,
-	// catchup-generated invoices share microsecond-level created_at
-	// values and Postgres returns ties in arbitrary order — looks
-	// "random" to operators, and an offset page could repeat or skip a
-	// row. Tie-break direction matches the primary sort direction so
+	// invoices dated at one period boundary share created_at values and
+	// Postgres returns ties in arbitrary order — looks "random" to
+	// operators, and an offset page could repeat or skip a row. Tie-break direction matches the primary sort direction so
 	// consecutive ties read as a single ordered group rather than
 	// zig-zagging.
 	orderBy, err := invoiceOrderBy(filter.Sort, filter.SortDir)
@@ -619,8 +617,8 @@ func (s *PostgresStore) updateStatusInTx(ctx context.Context, tx *sql.Tx, id str
 
 // FinalizeWithDates flips status to finalized and re-stamps issued_at + due_at
 // to the finalize moment in one UPDATE — for operator-composed invoices whose
-// draft may have been created on an earlier (test-clock) instant. Cycle
-// drafts use FinalizeDraft and keep their build-time dates.
+// draft may have been created long before. Cycle drafts use FinalizeDraft
+// and keep their build-time dates.
 //
 // The UPDATE carries an `AND status='draft'` CAS (ADR-078 D5): the service's
 // draft guard reads an earlier snapshot, so without the predicate a concurrent
@@ -2367,9 +2365,9 @@ func (s *PostgresStore) createWithLineItemsInTx(ctx context.Context, tx *sql.Tx,
 	for i := range items {
 		items[i].Currency = strings.ToUpper(items[i].Currency)
 	}
-	// Honor caller-provided CreatedAt — engine paths pass clk.Now()
-	// so test-clock-driven invoices align with their issued_at /
-	// due_at on simulation time. Zero falls back to wall-clock.
+	// Honor caller-provided CreatedAt: an engine invoice passes its
+	// period's instant, so created_at matches its issued_at. Zero means
+	// clock.Now(ctx).
 	now := inv.CreatedAt
 	if now.IsZero() {
 		now = clock.Now(ctx)
@@ -3432,13 +3430,10 @@ func (s *PostgresStore) listInflightPayments(ctx context.Context, status domain.
 		SELECT `+invCols+` FROM invoices
 		WHERE payment_status = $1
 		  -- The cool-off since the invoice's last write. That write is dated
-		  -- on the invoice's clock, so on a test clock advanced ahead of real
-		  -- time it lies in the future and the cool-off would never pass: the
-		  -- PaymentIntent would never be read. A last write in the future is
-		  -- such a row, and it is listed at once, in both sweeps that share
-		  -- this list: an unknown charge, and a processing payment (which is
-		  -- then read on every run instead of never). A confirm still in
-		  -- flight is protected by its hold, below.
+		  -- on the server's clock, which can run ahead of the database's: a
+		  -- last write in the future is listed at once, in both sweeps that
+		  -- share this list (an unknown charge, and a processing payment). A
+		  -- confirm still in flight is protected by its hold, below.
 		  AND (updated_at < $2 OR updated_at > now())
 		  AND livemode = $3
 		  -- This sweep resolves by reading the PaymentIntent by id. A charge
@@ -4004,8 +3999,7 @@ func (s *PostgresStore) SetPublicToken(ctx context.Context, tenantID, invoiceID,
 	encToken, tokenHash := s.encodeToken(token)
 	// Public-token rotation is an operational metadata write (re-issue a
 	// hosted-invoice URL), not a billing-domain transition — stamp updated_at
-	// wall-clock via SQL now(), matching SetPaymentCard. Domain transitions
-	// (status, tax, paid_at) are the ones that ride the test clock.
+	// wall-clock via SQL now(), matching SetPaymentCard.
 	res, err := tx.ExecContext(ctx, `
 		UPDATE invoices SET public_token_encrypted = $1, public_token_hash = $2, updated_at = now()
 		WHERE id = $3 AND status <> 'draft'
@@ -4323,12 +4317,7 @@ func (s *PostgresStore) GetLatestThresholdInvoiceForCycle(ctx context.Context, t
 // Every writer that locks the invoice FOR UPDATE (void, write-off, charge
 // claims, payment failures, draft edits, disputes) takes no subscription
 // lock in that transaction, except the cancel's and swap's own prebill
-// void, which already holds it. Test-clock teardown (testclock clockTeardownStatements)
-// is the exception: it deletes the clock's invoices before its
-// subscriptions, so a teardown that overlaps a closer on one of that
-// clock's subscriptions fails one of the two with a deadlock error (40P01);
-// a retry succeeds. Before this lock the same overlap could fail the
-// teardown on a foreign key. Simulation data only.
+// void, which already holds it.
 //
 // tenantID is accepted for symmetry with the store's other *Tx methods; RLS
 // scoping rides the tx's tenant binding.
@@ -4469,11 +4458,7 @@ func buildInvWhere(f ListFilter) (string, []any) {
 		// mid-payment. Mirrors classifyInvoiceAttention's
 		// overdue semantics, but computed in SQL so the filter
 		// paginates server-side. due_at compares against DB
-		// wall-clock now(); test-clock invoices stamp due_at in
-		// simulated time, so a frozen-future clock keeps its
-		// invoices out of this view until wall-clock catches up —
-		// the same trade Stripe's dashboard makes, and the per-row
-		// attention dot still reflects the authoritative state.
+		// wall-clock now().
 		// 'unknown' is excluded alongside 'processing' because the comment above
 		// already states the intent — "not mid-payment" — and IsInFlight has
 		// always meant processing OR unknown. Leaving it in listed an invoice
@@ -4634,9 +4619,8 @@ func (s *PostgresStore) StreamForExport(ctx context.Context, tenantID string, fr
 // no actor: the report does not know who paid, and its ctx (a webhook, the
 // reconciler) would name the system, which did not.
 //
-// That inserted row is dated at the settle's time, read from ctx, on the
-// invoice's test clock or not (ADR-128 decision 7): a customer paying is an
-// act on the invoice, like any other.
+// That inserted row is dated at the settle's time, read from ctx: when
+// Stripe's answer arrived (clock.AtArrival).
 //
 // declineCode and paymentMethodID are what the report knows about a decline
 // (#966); an empty value keeps what an earlier writer recorded, so a source

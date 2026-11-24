@@ -36,7 +36,7 @@ func TestE2E_ALiveInvoiceCreateReadsOneInstant(t *testing.T) {
 }
 
 // An invoice whose body names another customer's subscription is refused
-// (422) with nothing created, before any time is decided.
+// (422) with nothing created.
 func TestE2E_InvoiceCreateForAnotherCustomersSubscriptionIsRefused(t *testing.T) {
 	r := newDatesRig(t, "Invoice Other Sub Co")
 	_, _ = r.trialSub("owner")

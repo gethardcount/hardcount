@@ -17,7 +17,7 @@ import (
 func tickAt(t *testing.T, srv *Server, wall *clock.Fake, tenantID string, at time.Time) {
 	t.Helper()
 	wall.Set(at)
-	ctx := clock.WithRealTime(postgres.WithLivemode(context.Background(), false))
+	ctx := clock.WithoutInstant(postgres.WithLivemode(context.Background(), false))
 	admin := testutil.AdminPool(t)
 	if _, errs := srv.BillingEngine.RunCycle(leadertest.Token(t, admin, ctx, leader.RoleBilling), 50, nil); len(errs) != 0 {
 		t.Fatalf("billing tick at %v: %v", at, errs)

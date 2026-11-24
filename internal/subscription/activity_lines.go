@@ -15,8 +15,7 @@ import (
 // The subscription timeline's activity lines (ADR-128). describeSubscription
 // Action turns one audit row into an activity.Line: title, problem, meta and
 // tone. It takes no clock input; activityTimeline stamps the row's times and
-// its actor after describing, so a test-clock line differs from a real-clock
-// one only by its Recorded part.
+// its actor after describing.
 
 // lineLabels are the names a line shows for the objects its row names by id,
 // looked up once per timeline.

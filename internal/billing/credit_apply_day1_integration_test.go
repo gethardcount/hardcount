@@ -77,10 +77,10 @@ func TestBillOnCreate_CreditBalance_E2E(t *testing.T) {
 			t.Fatalf("create customer: %v", err)
 		}
 		if grantCents > 0 {
-			if _, err := creditSvc.Grant(ctx, tenantID, credit.GrantInput{
+			if _, err := creditSvc.Grant(clock.WithEffectiveNow(ctx, periodStart), tenantID, credit.GrantInput{
 				Currency:   "USD",
 				CustomerID: cust.ID, AmountCents: grantCents,
-				Description: "seed balance", At: periodStart,
+				Description: "seed balance",
 			}); err != nil {
 				t.Fatalf("grant credit: %v", err)
 			}

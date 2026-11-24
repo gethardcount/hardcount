@@ -212,7 +212,7 @@ func (e *Engine) previewWindow(ctx context.Context, sub domain.Subscription, per
 	// Usage lines per (window, price), priced by the one rater (rate.go):
 	// each stretch of the window a plan was on the subscription, by that
 	// plan's prices (ADR-130 §9), each plan at its pin of the subscription's
-	// current period, in its time domain (estimateSegments): an estimate
+	// current period (estimateSegments): an estimate
 	// over an explicit window is priced at today's prices, not at each past
 	// period's own (ADR-130 §10).
 	//

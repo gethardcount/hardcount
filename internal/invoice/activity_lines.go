@@ -12,8 +12,7 @@ import (
 // The invoice timeline's activity lines (ADR-128). Each describe function
 // turns one fact into an activity.Line: title, amount, problem, meta and
 // actor. None takes a clock input; paymentTimeline stamps the times after
-// describing, so a test-clock line differs from a real-clock one only by its
-// Recorded part.
+// describing.
 
 // legacyStatus is the line's tone in the words the timeline's `status`
 // field carries, which the Activity card's dot reads.

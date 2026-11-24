@@ -229,7 +229,7 @@ func TestLiftedPause_AResumeCallAnnouncesTheLift(t *testing.T) {
 	paid := r.pay(r.ctx, a)
 	// The operator's request writes the resume's row, so the row names the
 	// request's actor, as every audit row does (audit.ResolveActor). Its
-	// cause is the payment (triggered_by), as for a test-clock cancel.
+	// cause is the payment (triggered_by).
 	opCtx := auth.WithCaller(r.ctx, auth.Caller{KeyID: "hc_key_operator"})
 	sub, resumed, err := svc.ResumeCollection(opCtx, r.tenantID, r.subID)
 	if err != nil {
@@ -337,9 +337,9 @@ func TestScheduledResumer_ClearsOnlyThePauseItListed(t *testing.T) {
 		}
 	})
 
-	// On a test clock, a payment can land at the same instant an operator's
-	// timed pause reached its date: the pause's resumes_at is the same, and
-	// only who set it differs.
+	// A payment lands at the same instant an operator's timed pause reached
+	// its date: the pause's resumes_at is the same, and only who set it
+	// differs.
 	t.Run("an operator's pause replaced by a dunning pause lifted at the same instant", func(t *testing.T) {
 		r := newDunningPauseRig(t, "Resumer Race Same Instant")
 		race := &raceAfterList{PostgresStore: r.subs}
@@ -358,7 +358,7 @@ func TestScheduledResumer_ClearsOnlyThePauseItListed(t *testing.T) {
 				t.Fatalf("pause for B: %v", err)
 			}
 			// The payment is recorded at the instant the operator's pause
-			// reached its date, as a test-clock advance can do.
+			// reached its date.
 			if got := r.pay(clock.WithEffectiveNow(r.ctx, lifted), b); !got.Equal(lifted) {
 				t.Fatalf("B lifted at %v, want %v", got, lifted)
 			}

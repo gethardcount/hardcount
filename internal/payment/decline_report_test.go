@@ -11,9 +11,8 @@ import (
 
 // The charge call's own decline is a report like the webhook's: it fires
 // payment.failed and the customer email once per PaymentIntent, whichever
-// arrives first, and with no webhook at all. Before, it stamped the failure
-// and left every notification to the webhook — a decline with no delivery
-// (lost, or a test clock with no forwarder) told nobody.
+// arrives first, and with no webhook at all, so a decline whose webhook is
+// lost still tells the customer.
 
 func declineClient(pi string) *mockStripeClient {
 	return &mockStripeClient{shouldFail: true, failErr: &PaymentError{
@@ -50,7 +49,7 @@ func TestChargeDecline_NotifiesWithoutAWebhook(t *testing.T) {
 		t.Errorf("decline email sent %d times, want 1", email.sends)
 	}
 	if len(dunning.calls) != 1 {
-		t.Errorf("StartDunning called %d times, want 1 (inline, for a test-clock Advance)", len(dunning.calls))
+		t.Errorf("StartDunning called %d times, want 1 (inline, with no webhook)", len(dunning.calls))
 	}
 }
 
@@ -214,8 +213,8 @@ func TestSettleFailed_HostedAttempt_NeverMovesInvoice(t *testing.T) {
 }
 
 // The charge call writes its attempt row before reporting the decline: the
-// report's in-tx upsert inserts a missing row as 'external' with no sim
-// anchor, and nothing corrects the trigger afterwards.
+// report's in-tx upsert inserts a missing row as 'external', and nothing
+// corrects the trigger afterwards.
 func TestChargeDecline_AttemptRowCarriesItsTrigger(t *testing.T) {
 	invoices := newMockInvoiceUpdater()
 	snapshot := pendingSnapshot()
@@ -242,8 +241,7 @@ func (f *failingOnceDunning) StartDunning(_ context.Context, _, invoiceID, _ str
 
 // The charge call recorded and announced the decline, but its dunning start
 // failed. The webhook that follows is not the first notice, yet it must
-// still start dunning: on a test clock nothing else would (the backfill
-// skips simulated invoices).
+// still start dunning, so the run does not wait for the backfill sweep.
 func TestChargeDecline_WebhookRedrivesAFailedDunningStart(t *testing.T) {
 	invoices := newMockInvoiceUpdater()
 	snapshot := pendingSnapshot()

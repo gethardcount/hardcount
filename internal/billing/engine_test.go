@@ -76,7 +76,7 @@ func TestRetryPendingCharges_CardDeclineDoesNotEscalate(t *testing.T) {
 	if len(errs) != 0 {
 		t.Errorf("decline must not escalate; got %d errors: %v", len(errs), errs)
 	}
-	// AutoChargePending must be cleared so the next catchup tick doesn't
+	// AutoChargePending must be cleared so the next sweep doesn't
 	// re-pick the same invoice — dunning's retry schedule drives the
 	// next attempt.
 	if inv.invoices[0].AutoChargePending {
@@ -385,7 +385,7 @@ func (m *mockSubs) GetDueBilling(_ context.Context, _, dueBy time.Time, exclude 
 }
 
 // GetDueBillingForTenant — mock mirror of the tenant-scoped manual-run query.
-// The mock doesn't model RLS, so it returns the same non-clock-pinned due subs
+// The mock doesn't model RLS, so it returns the same due subs
 // as GetDueBilling (all mock subs are one tenant); tenantID is accepted for
 // signature parity.
 func (m *mockSubs) GetDueBillingForTenant(ctx context.Context, _ string, now, dueBy time.Time, exclude []string, limit int) ([]domain.Subscription, error) {
@@ -1051,7 +1051,7 @@ func (m *mockInvoices) ListAutoChargePending(_ context.Context, after walk.Key, 
 }
 
 // ListFailedWithoutDunningRun models only the invoice-level predicates; the
-// "no dunning run" NOT EXISTS and clock-pinned exclusion are DB concerns the
+// "no dunning run" NOT EXISTS is a DB concern the
 // fake can't see (the real coverage is the real-Postgres backfill test).
 func (m *mockInvoices) ListFailedWithoutDunningRun(_ context.Context, olderThan time.Time, limit int) ([]domain.Invoice, error) {
 	var result []domain.Invoice
@@ -1541,7 +1541,7 @@ func TestRunCycle_GeneratesInvoice(t *testing.T) {
 
 // A period's close runs at its next_billing_at. A subscription with no
 // next_billing_at, which the one caller never passes, is an error.
-func TestBillOnePeriod_ReadsNoTestClock(t *testing.T) {
+func TestBillOnePeriod_NeedsNextBillingAt(t *testing.T) {
 	engine, subs, _, _, invoices := setupEngine()
 	sub := subs.subs["sub_1"]
 	ctx := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), time.Date(2026, 4, 2, 0, 0, 0, 0, time.UTC))
@@ -2735,13 +2735,9 @@ func TestRunCycle_PauseCollection_GeneratesDraft(t *testing.T) {
 	}
 }
 
-// Auto-resume of pause_collection is no longer evaluated inside the
-// engine cycle scan — the scheduler runs Service.ProcessExpiredPause-
-// Collections as a dedicated phase AFTER the cycle scan now (the
-// catchup orchestrator does the equivalent at Phase 1.2). The old
-// in-cycle gate test (TestRunCycle_PauseCollection_AutoResumesWhen-
-// ResumesAtPasses) has been removed; the new contract is covered by
-// service-level tests in the subscription package.
+// The engine's cycle scan never resumes pause_collection: the scheduler
+// runs Service.ProcessExpiredPauseCollections as its own phase after the
+// cycle scan, covered by service-level tests in the subscription package.
 
 // A trialing row's period ends after its trial, so no writer leaves one due
 // while its trial runs. A row in that state (written by hand) fails with an

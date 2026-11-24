@@ -28,9 +28,8 @@ func finalizedPendingInvoice() domain.Invoice {
 // TestChargeInvoice_SyncSuccessSettlesInline locks ADR-049 Phase 3: when Stripe
 // returns a `succeeded` PaymentIntent synchronously in the create response (the
 // common off-session card case), the charge path settles the invoice INLINE —
-// no webhook required. This is the fix for the test-clock stuck-`processing`
-// symptom: the invoice resolves in-request rather than waiting on a wall-clock
-// webhook.
+// no webhook required, so the invoice settles in-request rather than waiting
+// on the webhook.
 func TestChargeInvoice_SyncSuccessSettlesInline(t *testing.T) {
 	client := &mockStripeClient{piID: "pi_ok", chargeStatus: "succeeded"}
 	invoices := newMockInvoiceUpdater()
@@ -75,8 +74,8 @@ func (a answersLater) CreateUnconfirmedPaymentIntent(ctx context.Context, p Paym
 	return a.mockStripeClient.CreateUnconfirmedPaymentIntent(ctx, p)
 }
 
-// A charge's result is its own event: on no clock it is recorded when it
-// arrives, not at the instant the charge's action carries. An inline success
+// A charge's result is its own event: it is recorded when it arrives, not at
+// the instant the charge's action carries. An inline success
 // is paid then; a decline, or a refusal with no PaymentIntent, starts payment
 // recovery then; a payment Stripe is still processing is stamped processing
 // then; a refusal below Stripe's minimum is stamped then.
@@ -206,15 +205,12 @@ func TestChargeAttemptFacts_RecordedAtChokepoint(t *testing.T) {
 	}
 }
 
-// TestChargeLease_ReleasedOnDefinitiveOutcomes locks the D1-walk fix:
-// the chokepoint frees the per-invoice charge lease when Stripe ANSWERS
-// (definite decline, or inline settle) — the round-trip is complete and
-// a held lease only starves the next initiator (under test-clock
-// catchup, back-to-back due dunning retries are seconds apart and a
-// 5-minute lease stalled the cascade: "dunning catchup loop made no
-// progress"). Ambiguous outcomes (unknown create error, async
-// processing) must NOT release — the charge may be live at Stripe and
-// the lease window is the anti-double-charge guard.
+// TestChargeLease_ReleasedOnDefinitiveOutcomes: the chokepoint frees the
+// per-invoice charge lease when Stripe ANSWERS (definite decline, or inline
+// settle) — the round-trip is complete and a held lease only starves the
+// next initiator, such as the next dunning retry. Ambiguous outcomes
+// (unknown create error, async processing) must NOT release — the charge may
+// be live at Stripe and the lease window is the anti-double-charge guard.
 func TestChargeLease_ReleasedOnDefinitiveOutcomes(t *testing.T) {
 	charge := func(client *mockStripeClient) *mockInvoiceUpdater {
 		t.Helper()

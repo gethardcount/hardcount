@@ -12,7 +12,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/tax"
 )
 
@@ -114,16 +113,6 @@ type Service struct {
 	subChecker    SubscriptionChecker
 	auditLogger   AuditEmitter
 	dunningPolicy DunningPolicyReader
-
-	// clock is the server's clock: the router's clk, the one the engine
-	// bills by. A request runs on the instant the API's door bound, one read
-	// of the server's clock. Create's route gets none from the door
-	// (decidedIn), so Create reads this clock once itself
-	// (clock.EnsureEffectiveNow); every other entry keeps its caller's
-	// instant. Without that read, two reads of the time in one create could
-	// differ, and a store's stamp could fall on another time than the
-	// action's.
-	clock clock.Clock
 }
 
 // DunningPolicyReader fetches a dunning policy by id on a tenant- and
@@ -139,12 +128,8 @@ type DunningPolicyReader interface {
 func (s *Service) SetDunningPolicyReader(r DunningPolicyReader) { s.dunningPolicy = r }
 
 func NewService(store Store) *Service {
-	return &Service{store: store, clock: clock.Real()}
+	return &Service{store: store}
 }
-
-// SetClock wires the server's clock (see the clock field). The router passes
-// the clock the server bills by; the default is the machine's.
-func (s *Service) SetClock(c clock.Clock) { s.clock = c }
 
 // SetAuditLogger wires in-tx audit emission for customer creation (ADR-090).
 // Nil-safe: unwired services skip emission, which keeps narrow unit tests
@@ -227,9 +212,6 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		}
 		input.Email = addr
 	}
-	// The create's one instant is one read of the server's clock.
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
-
 	cc, err := normalizeAdditionalEmails(input.AdditionalEmails, input.Email)
 	if err != nil {
 		return domain.Customer{}, err

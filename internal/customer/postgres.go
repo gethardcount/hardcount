@@ -367,12 +367,11 @@ func (s *PostgresStore) SetStripeCustomerIDAudited(ctx context.Context, tenantID
 	if err != nil {
 		return fmt.Errorf("set stripe_customer_id: %w", err)
 	}
-	// A zero-row UPDATE means the customer isn't there to map (unknown id, the
-	// other livemode plane under RLS, or torn down by a test-clock delete
-	// before a late webhook). Report it as ErrNotFound and emit NOTHING: the
-	// mutation did not happen, so evidence of it would be fabricated, and a
-	// silent success would let the caller hand back a Stripe session for a
-	// customer Hardcount does not have.
+	// A zero-row UPDATE means the customer isn't there to map (unknown id, or
+	// the other livemode plane under RLS). Report it as ErrNotFound and emit
+	// NOTHING: the mutation did not happen, so evidence of it would be
+	// fabricated, and a silent success would let the caller hand back a
+	// Stripe session for a customer Hardcount does not have.
 	//
 	// The two callers want opposite handling and BOTH are correct, so the
 	// store reports the fact and lets them decide: EnsureStripeCustomer

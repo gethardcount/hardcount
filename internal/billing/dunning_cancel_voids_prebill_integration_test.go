@@ -523,9 +523,8 @@ func TestDunningFinalCancel_VoidsTheUnusedPrebillUnderItsOwnHold(t *testing.T) {
 
 // A void run by dunning or by the billing run cancels, at Stripe, the
 // declined PaymentIntent recorded on the invoice, with the invoice's tenant's
-// key. Both run on a ctx that holds livemode and no tenant, as r.ctx does. A
-// test-clock catch-up does too: its ctx is context.Background() plus
-// livemode. The Stripe client finds the key by the tenant on ctx, so
+// key. Both run on a ctx that holds livemode and no tenant, as r.ctx does.
+// The Stripe client finds the key by the tenant on ctx, so
 // payment.Stripe.StopCollection names the void's tenant itself.
 //
 // Mutation: delete the auth.WithTenantID line in

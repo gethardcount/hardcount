@@ -298,7 +298,7 @@ func reliefEntries() []reliefEntry {
 				t.Fatalf("CancelForDunning: %v", err)
 			}
 		}},
-		{"FireDueScheduledCancel (the billing run and the catch-up)", func(t *testing.T, ctx context.Context, svc *Service, store *writeSpyStore, sub domain.Subscription, base time.Time) {
+		{"FireDueScheduledCancel (the billing run)", func(t *testing.T, ctx context.Context, svc *Service, store *writeSpyStore, sub domain.Subscription, base time.Time) {
 			cancelAt := base.Add(-time.Hour)
 			due := store.subs[sub.ID]
 			due.CancelAt = &cancelAt

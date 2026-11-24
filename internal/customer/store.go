@@ -30,8 +30,7 @@ type Store interface {
 	// The read comes after the lock, so locked holds every change that an
 	// earlier holder committed: another customer update, or a subscription
 	// create or item change, which take the same lock. fn runs
-	// its checks on locked and then writes on tx. It takes no clock or row
-	// lock first, so it cannot deadlock with a test-clock teardown.
+	// its checks on locked and then writes on tx.
 	WithCustomerRulesLock(ctx context.Context, tenantID, id string, fn func(tx *sql.Tx, locked domain.Customer) error) error
 	// UpdateTx writes c's display name, email, CC list, status and dunning
 	// policy on tx and returns the saved row. When emailChanged is set it

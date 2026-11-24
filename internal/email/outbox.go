@@ -44,8 +44,8 @@ type OutboxRow struct {
 	// (ListByInvoice/ListByCustomer/GetByID); the dispatcher's claim
 	// path leaves it zero — dispatch never reads it.
 	DeliveryState string
-	// EffectiveAt is the instant the email's action decided (ADR-104): the
-	// date its activity line shows.
+	// EffectiveAt is the instant of the email's action, the one bound on its
+	// ctx (ADR-104): the date its activity line shows.
 	EffectiveAt time.Time
 	// SkipReason is why a 'skipped' row was not sent: the final state its
 	// invoice reached while it waited (one of the SkipReason constants).
@@ -167,8 +167,7 @@ const (
 	SkipReasonPaid          = "paid"
 	SkipReasonVoided        = "voided"
 	SkipReasonUncollectible = "uncollectible"
-	// SkipReasonGone: the invoice row is gone (a test clock's teardown
-	// deletes its invoices).
+	// SkipReasonGone: no invoice row has the email's invoice number.
 	SkipReasonGone = "gone"
 )
 
@@ -274,7 +273,7 @@ func (s *OutboxStore) Enqueue(ctx context.Context, tx *sql.Tx, tenantID, emailTy
 	}
 
 	id := postgres.NewID("hc_emob")
-	// effective_at is the instant the send's action decided, read from ctx now
+	// effective_at is the instant of the send's action, read from ctx now
 	// because it is not known later. created_at stays SQL now(): the queue's
 	// own order and the "Recorded" time (ADR-104).
 	effectiveAt := clock.Now(ctx).UTC()

@@ -189,9 +189,8 @@ func TestUpdateItem_Downgrade_LIFOAcrossFundingInvoices(t *testing.T) {
 }
 
 // TestUpdateItem_Downgrade_LIFOTiebreak_SameInstantFunding pins the tie case
-// found live (FLOW B17c walk, 2026-07-21): a clock catchup stamps every
-// invoice it generates with the SAME simulated instant (and a same-second
-// subscribe+upgrade does it on wall time), so LIFO-by-CreatedAt alone was a
+// found live (FLOW B17c walk, 2026-07-21): a same-second subscribe+upgrade
+// stamps both invoices with the SAME instant, so LIFO-by-CreatedAt alone was a
 // coin flip resolved by the funding query's oldest-first order — the clawback
 // landed on the day-1 invoice, the exact opposite of LIFO. On equal
 // timestamps the subscription_update invoice IS the later price level.

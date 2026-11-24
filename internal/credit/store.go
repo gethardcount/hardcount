@@ -31,9 +31,7 @@ type Store interface {
 	AppendEntryTx(ctx context.Context, tx *sql.Tx, tenantID string, entry domain.CreditLedgerEntry) (domain.CreditLedgerEntry, error)
 	// ApplyToInvoiceAtomic debits credits and reduces invoice.amount_due
 	// atomically. `at` stamps both the new ledger usage entry and the
-	// invoice's updated_at, keeping the application on simulated time
-	// during catchup (cycle-close instant). Pass zero in operator paths
-	// to fall back to clock.Now() at the postgres layer.
+	// invoice's updated_at. Zero means clock.Now(ctx).
 	ApplyToInvoiceAtomic(ctx context.Context, tenantID, customerID, invoiceID, invoiceDesc string, invoiceAmountCents int64, at time.Time) (int64, error)
 
 	// AdjustAtomic appends a manual adjustment entry in `currency` with the
@@ -85,9 +83,9 @@ type Store interface {
 	// consumed_cents flip is the exactly-once gate: replayed and
 	// concurrent sweeps converge on one expiry entry per grant.
 	ExpireGrantAtomic(ctx context.Context, tenantID, customerID, grantID string) (int64, error)
-	// ListExpiredGrants lists the wall-clock grants past expires_at that the
-	// sweep may retire: not one an owed period close or period invoice still
-	// draws on (domain.CreditDrawOwedSQL, ADR-071 §2).
+	// ListExpiredGrants lists the grants past expires_at, on the database's
+	// clock, that the sweep may retire: not one an owed period close or
+	// period invoice still draws on (domain.CreditDrawOwedSQL, ADR-071 §2).
 	ListExpiredGrants(ctx context.Context) ([]domain.CreditLedgerEntry, error)
 
 	// RetireCommitGrantForInvoiceTx retires the remaining balance of the

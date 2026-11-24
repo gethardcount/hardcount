@@ -159,8 +159,7 @@ type EmailEventLister interface {
 // Trimmed to the fields the timeline renderer needs.
 type EmailEventRow struct {
 	// ID is the outbox row id — the timeline's stable per-row key
-	// (same-instant rows on a frozen clock made composite timestamp
-	// keys collide).
+	// (same-instant rows made composite timestamp keys collide).
 	ID        string
 	EmailType string
 	Status    string // pending / dispatched / failed / skipped
@@ -735,8 +734,7 @@ type RecordPaymentInput struct {
 //
 // Body shape: { "note": "Cheque #1234" } — single optional string.
 // Amount is implicit (full amount_due); partial payments deferred to
-// when a customer asks. paid_at is the request's time, a clock invoice's
-// clock time.
+// when a customer asks. paid_at is the request's time.
 //
 // The service closes the invoice's dunning run and expires its open
 // Checkout page after the commit.
@@ -1336,11 +1334,10 @@ func (h *Handler) retryTax(w http.ResponseWriter, r *http.Request) {
 	respond.JSON(w, r, http.StatusOK, inv)
 }
 
-// Causal tie-ranks for same-instant timeline cascades (frozen-clock
-// closes stamp finalize → dunning start → retries → escalation →
-// write-off → resolve at ONE instant; the rank encodes their causal
-// order so ties never render effect-before-cause). Gaps left for
-// future event kinds.
+// Causal tie-ranks for same-instant timeline cascades (one action's
+// writes share its instant, such as a card-less finalize and the dunning
+// start it causes; the rank encodes their causal order so ties never
+// render effect-before-cause). Gaps left for future event kinds.
 const (
 	rankInvoiceCreated   = 10
 	rankInvoiceFinalized = 20
@@ -1433,16 +1430,15 @@ type TimelineEvent struct {
 	// FULL-PRECISION source instant (the serialized Timestamp truncates
 	// to seconds — sorting it inverted same-second pairs, the 2026-07-19
 	// subscription-timeline class). tieRank orders true same-instant
-	// cascades causally: on a frozen clock an entire close cascade
-	// (finalize → dunning start → retries → escalate → write-off →
-	// resolve) legitimately shares one instant, and source-major
+	// cascades causally: one action's writes share its instant (a final
+	// retry's escalation and the write-off it causes), and source-major
 	// insertion rendered "Marked uncollectible" above the escalation
 	// that caused it. See sortInvoiceTimeline.
 	// ID is a stable per-row key for the SPA. Source rows use their own
 	// row id (outbox id, attempt id, dunning event id, credit-note id);
 	// synthesized lifecycle rows derive a deterministic one from the
 	// invoice id + kind. Composite timestamp keys collided the moment
-	// rows shared a frozen-clock instant (ADR-104).
+	// rows shared an instant (ADR-104).
 	ID              string `json:"id"`
 	Source          string `json:"source"` // "stripe" / "dunning" / "lifecycle" / "email" / "credit_note" / "dispute" / "stripe_refund"
 	EventType       string `json:"event_type"`
@@ -1954,8 +1950,7 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 	// Credit-note rows. The settlement waterfall on the page already shows
 	// credit notes channel-by-channel; these rows give the SAME facts a
 	// place in the chronology. There is one timeline (ADR-104): every CN
-	// row sorts by its issued_at on the invoice's calendar — operator CNs
-	// and engine clawbacks both issue under the invoice's clock.
+	// row sorts by its issued_at.
 	cnLinks := map[string]activity.Part{}
 	for _, cn := range cns {
 		if cn.CreditNoteNumber != "" {
@@ -2024,9 +2019,7 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 	})...)
 
 	// Card disputes: an opened row at Stripe's creation time, and a closed
-	// row once Stripe closes it. Both are real-world Stripe instants, never
-	// the invoice's simulated calendar (an open question the dates PR
-	// settles, ADR-128).
+	// row once Stripe closes it.
 	if derr == nil {
 		events = append(events, disputeTimelineEvents(disputes)...)
 	}

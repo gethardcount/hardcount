@@ -371,7 +371,7 @@ func (s *Service) StartDunning(ctx context.Context, tenantID string, invoiceID, 
 	if err != nil {
 		// No effective policy (tenant has no default configured) is a DELIBERATE
 		// SKIP, the same class as a disabled policy — an unconfigured optional
-		// feature must never poison the money-path enrollment sweep/catchup (the
+		// feature must never poison the money-path enrollment sweep (the
 		// SMTP-unset precedent). Map ONLY ErrNotFound to InvalidState so all three
 		// callers (no-payment sweep, inline decline, post-commit settle) treat it
 		// as a no-op via their shared ErrInvalidState swallow. A real infra error
@@ -473,9 +473,8 @@ func leaseFrom(t time.Time) time.Time { return t.Add(exhaustLease).Truncate(time
 
 // anchorInstant is the one rule for "the instant this action was contracted
 // for" (playbook class J): the later of now and the time it was scheduled
-// for. In steady state they are equal, in real time and at a test clock's
-// step alike. Work run late (after the scheduler was down, or held by a
-// payment in flight) is dated when it runs, as real time dates it: anchoring
+// for. In steady state they are equal. Work run late (after the scheduler
+// was down, or held by a payment in flight) is dated when it runs: anchoring
 // on a stale schedule would schedule the next action in the past too, and
 // the backlog would fire back to back and collapse the configured cadence.
 func anchorInstant(now time.Time, scheduled *time.Time) time.Time {
@@ -492,7 +491,7 @@ func anchorInstant(now time.Time, scheduled *time.Time) time.Time {
 // When listedNext is exactly the lease the final retry wrote
 // (leaseFrom(LastAttemptAt)), this is the late execution of the exhaustion
 // contracted at that retry, so it records the retry's instant — the record
-// the uninterrupted inline path writes — never the lease or frozen_time.
+// the uninterrupted inline path writes — never the lease.
 // Every other entry records when it ran (attemptAt): an action_failed
 // re-attempt (it carries attempt+24h, not the lease) is its own scheduled
 // action, and a run exhausted because an operator shortened
@@ -695,9 +694,8 @@ func (s *Service) processRun(ctx context.Context, tenantID string, run domain.In
 	// the last (nextActionAfterRetry). Otherwise a stop after the charge
 	// leaves the run due with the attempt counted, and the next tick charges
 	// the card again. On the final attempt the lease also hides the run from
-	// other processors while the charge and the final actions run; under
-	// test-clock catchup the clock's single-flight advance is that exclusion,
-	// and ClaimExhaustion guards a re-entry. (See ADR-112, amendment
+	// other processors while the charge and the final actions run, and
+	// ClaimExhaustion guards a re-entry. (See ADR-112, amendment
 	// 2026-11-10.)
 	next, err := nextActionAfterRetry(policy, run.AttemptCount, now)
 	if err != nil {
@@ -844,10 +842,7 @@ func (s *Service) retryFailed(ctx context.Context, tenantID string, run domain.I
 		"error", retryErr,
 	)
 
-	// Record failed retry event at this retry's simulated instant
-	// (= run.NextActionAt at fire time, captured into `now` above)
-	// so each retry row on the invoice timeline carries its own
-	// scheduled timestamp instead of all sharing frozen_time.
+	// Record the failed retry event at this retry's instant (`now`).
 	// Attribution key for the invoice timeline: the failed charge's
 	// PI id, when the adapter surfaced it (RetryError). Legacy rows
 	// without it fall back to index pairing in the timeline merge.
@@ -943,14 +938,11 @@ func (s *Service) retryFailed(ctx context.Context, tenantID string, run domain.I
 	// fires the terminal escalation email instead. A "we'll retry on [no
 	// more retries scheduled]" warning is confusing and stacks two back-to-
 	// back emails on the customer. Customer experience: N-1 warnings during
-	// retries 1..N-1, then ONE escalation on retry N. Catchup-mode
-	// experience is the same, just compressed in real time.
+	// retries 1..N-1, then ONE escalation on retry N.
 	//
-	// Check if exhausted after this attempt. Pass the simulated instant
-	// of this final retry (= run.NextActionAt at fire time, captured
-	// into `now` above) so the escalated event row aligns with the
-	// retry that actually triggered the exhaustion, not orchestrator
-	// frozen_time.
+	// Check if exhausted after this attempt. Pass this final retry's
+	// instant (`now`) so the escalated event row aligns with the retry
+	// that triggered the exhaustion.
 	if run.AttemptCount >= retries {
 		return s.exhaustRun(ctx, tenantID, run, policy, now, now)
 	}
@@ -978,11 +970,8 @@ func (s *Service) retrySucceeded(ctx context.Context, tenantID string, run domai
 		Reason:       "succeeded",
 		CreatedAt:    now,
 	})
-	// Resolve AT the retry's contracted instant (`now` = the anchored
-	// run.NextActionAt) — resolveRunNow's own clock read is the
-	// advance-end frozen_time under catchup, which stamped a Mar 7
-	// recovery "resolved Apr 1" when the operator advanced a month in
-	// one click (the contracted-instant class, 4th sighting).
+	// Resolve at the retry's anchored instant (`now`), so the resolve and
+	// the retry row above carry one time.
 	return s.resolveAfterRetry(ctx, tenantID, run, domain.ResolutionPaymentRecovered, "payment_recovered", now)
 }
 
@@ -1123,7 +1112,7 @@ func (s *Service) retrySettledFirst(ctx context.Context, tenantID string, run do
 // the contracted instant the escalation records — the run's resolved_at
 // and the escalated event's CreatedAt — so the invoice timeline shows
 // the escalation aligned with the retry that caused it, never the
-// orchestrator's frozen_time or the lease (see exhaustStampAt).
+// lease (see exhaustStampAt).
 // attemptAt is when this exhaustion is actually being attempted; an
 // action_failed re-attempt is scheduled from it, so the cadence never
 // collapses after an outage. Inline after the final retry, both are
@@ -1136,10 +1125,9 @@ func (s *Service) exhaustRun(ctx context.Context, tenantID string, run domain.In
 		now = s.clock.Now(ctx)
 	}
 	// The final actions below (the subscription's pause or cancel, the
-	// write-off) run on ctx, so they are dated when this runs, on a clock as
-	// in real time. Only the escalation's record takes stampAt: after an
-	// interrupted escalation it keeps the final retry's instant, and the
-	// actions take the re-drive's.
+	// write-off) run on ctx, so they are dated when this runs. Only the
+	// escalation's record takes stampAt: after an interrupted escalation it
+	// keeps the final retry's instant, and the actions take the re-drive's.
 
 	// Late paid re-check — the terminal action (cancel in
 	// particular) is IRREVERSIBLE, and the tick-start paid-pre-check goes stale
@@ -1791,11 +1779,9 @@ func (s *Service) resolveListedRun(ctx context.Context, tenantID string, run dom
 
 // resolveRunAt is resolveRunNow with an explicit resolve instant. With at
 // nil the resolve is at the action's time (see Service.clock): a settle's or
-// an invoice action's. The retry-success path passes the instant the retry
-// was scheduled for (run.NextActionAt when it fired), so resolved_at and the
-// resolved timeline row land on the retry that recovered the invoice, not on
-// wherever a test clock's advance happened to end (the same split as trial
-// flips, scheduled cancels and pause resumes).
+// an invoice action's. The retry-success path passes the retry's anchored
+// instant (see anchorInstant), so resolved_at and the resolved timeline row
+// land on the retry that recovered the invoice.
 func (s *Service) resolveRunAt(ctx context.Context, tenantID string, run domain.InvoiceDunningRun, resolution domain.DunningResolution, eventReason string, at *time.Time, fromActiveOnly bool) (domain.InvoiceDunningRun, error) {
 	ctx = clock.EnsureEffectiveNow(ctx, s.clock) // the action's time: see Service.clock
 	now := s.clock.Now(ctx)
@@ -1932,8 +1918,8 @@ func (s *Service) retryPaymentFailedTx(ctx context.Context, tx *sql.Tx, tenantID
 	if !won {
 		return nil
 	}
-	// The failure's instant: the settle's ctx is bound to the invoice's
-	// clock, so on a test clock this is the simulated time it was learned.
+	// The failure's instant: the settle bound the time Stripe's answer
+	// arrived (clock.AtArrival).
 	failedAt := s.clock.Now(ctx)
 	ask := domain.DeclineAskOf(declineCode)
 	reason := errRetryPaymentFailed.Error()

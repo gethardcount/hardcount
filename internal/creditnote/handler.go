@@ -153,9 +153,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		if relief.Reason == "" {
 			relief.Reason = req.Reason
 		}
-		// One instant for the relief, bound before anything is written.
-		ctx := h.svc.BindNow(r.Context())
-		cn, err := h.svc.CreateAndIssueCommitRelief(ctx, tenantID, relief)
+		cn, err := h.svc.CreateAndIssueCommitRelief(r.Context(), tenantID, relief)
 		if err != nil {
 			respond.FromError(w, r, err, "credit_note")
 			return
@@ -171,9 +169,9 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	// (settleFailedIssue). A server stop between the create and the issue
 	// still leaves a draft and logs nothing; it shows as a draft in the
 	// credit notes list. A plain create is one transaction on the request.
-	// One instant for the create and the issue, bound here before both; the
+	// The create and the issue run on the instant the API's door bound; the
 	// detached context below (for auto_issue) carries it with it.
-	ctx := h.svc.BindNow(r.Context())
+	ctx := r.Context()
 	if input.AutoIssue {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(context.WithoutCancel(ctx), stepsBudget)

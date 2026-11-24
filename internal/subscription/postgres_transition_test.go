@@ -365,7 +365,7 @@ func seedActiveSubscription(t *testing.T, db *postgres.DB, tenantID, custExt, pl
 // (1) ScheduleCancellation persists CancelAt and CancelAtPeriodEnd and a
 // SELECT round-trips the same values, (2) ClearScheduledCancellation wipes
 // both fields, (3) FireScheduledCancellation flips status to canceled,
-// stamps canceled_at to the supplied `at` (test-clock parity), nulls out
+// stamps canceled_at to the supplied `at`, nulls out
 // next_billing_at, and clears the schedule fields, and (4) firing on an
 // already-canceled sub returns ErrInvalidState — the engine relies on this
 // to detect concurrent immediate-cancel races and treat them as no-ops.
@@ -422,7 +422,7 @@ func TestScheduleAndFireCancellation_Roundtrip(t *testing.T) {
 		t.Errorf("status: got %q, want canceled", fired.Status)
 	}
 	if fired.CanceledAt == nil || !fired.CanceledAt.Equal(fireAt) {
-		t.Errorf("canceled_at: got %v, want %v (test-clock parity)", fired.CanceledAt, fireAt)
+		t.Errorf("canceled_at: got %v, want %v (the supplied at)", fired.CanceledAt, fireAt)
 	}
 	if fired.NextBillingAt != nil {
 		t.Error("next_billing_at must be nil on canceled sub")

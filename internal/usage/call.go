@@ -24,7 +24,7 @@ type CallEvent struct {
 	Quantity       decimal.Decimal
 	Dimensions     map[string]any
 	IdempotencyKey string
-	// Timestamp nil means the customer's effective now, as for Ingest.
+	// Timestamp nil means the call's bound instant, as for Ingest.
 	Timestamp *time.Time
 	// ObservedCostMicros is the provider's own cost for this row (ADR-079
 	// D4); nil falls to the rate table.
@@ -102,7 +102,7 @@ func (s *Service) IngestCall(ctx context.Context, tenantID string, in CallInput)
 		return CallResult{}, ErrHoldUnavailable
 	}
 	// decideEvent's rule, for a call's events: every event's own checks, in
-	// both mappings, come before the call's one decision.
+	// both mappings, come before the call's one bind.
 	check := func(evs []CallEvent) ([]IngestInput, error) {
 		if evs == nil {
 			return nil, nil

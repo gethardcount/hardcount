@@ -27,10 +27,10 @@ import (
 // with 409 unbilled_period when that close cannot bill.
 //
 // The rig drives the real server over HTTP with every collaborator wired as
-// in production. Time is the wall clock, not a test clock: each request is
-// served at a chosen instant (clock.WithEffectiveNow on the request ctx, and
-// the server's clock set to the same instant), which is how a request at that
-// wall-clock instant is served. The billing run is POST /v1/billing/run, the
+// in production. Each request is served at a chosen instant
+// (clock.WithEffectiveNow on the request ctx, and the server's clock set to
+// the same instant), which is how a request at that instant is served. The
+// billing run is POST /v1/billing/run, the
 // scheduler's run on demand.
 //
 // Fixture: a 1c/call sum meter; plan A monthly, base 3000c; the subscription

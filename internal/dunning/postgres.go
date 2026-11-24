@@ -280,12 +280,9 @@ func (s *PostgresStore) UpsertPolicy(ctx context.Context, tenantID string, p dom
 // so a tenant's first policy is a working default with no extra call. The
 // partial UNIQUE index is the loud backstop against two defaults.
 func (s *PostgresStore) upsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID string, p domain.DunningPolicy) (domain.DunningPolicy, error) {
-	// A dunning policy is tenant-level operator config, not a per-customer
-	// billing event — its created_at/updated_at must record the real instant
-	// the operator edited it, never a test clock's frozen_time. (Dunning RUN
-	// timestamps elsewhere DO use clock.Now(ctx) — those live on the customer's
-	// simulated timeline; policy config writes escape the simulation boundary.)
-	now := time.Now().UTC() //nolint:forbidigo // wall-clock: operator config write (ADR-030 addendum), never frozen_time
+	// A dunning policy is tenant-level operator config, not a billing event:
+	// its created_at/updated_at record the machine's time of the edit.
+	now := time.Now().UTC() //nolint:forbidigo // wall-clock: operator config write
 	daysJSON, err := json.Marshal(p.RetryDays)
 	if err != nil {
 		return domain.DunningPolicy{}, fmt.Errorf("encode retry_days: %w", err)
@@ -383,7 +380,7 @@ func (s *PostgresStore) SeedDefaultPoliciesTx(ctx context.Context, tx *sql.Tx, t
 	if err := tx.QueryRowContext(ctx, `SELECT current_setting('app.livemode', true)`).Scan(&prevMode); err != nil {
 		return fmt.Errorf("read livemode: %w", err)
 	}
-	now := time.Now().UTC() //nolint:forbidigo // wall-clock: operator config write (ADR-030 addendum), never frozen_time
+	now := time.Now().UTC() //nolint:forbidigo // wall-clock: operator config write
 	daysJSON, err := json.Marshal(p.RetryDays)
 	if err != nil {
 		return fmt.Errorf("encode retry_days: %w", err)
@@ -480,10 +477,6 @@ func (s *PostgresStore) StartRun(ctx context.Context, tenantID string, run domai
 
 func (s *PostgresStore) createRunTx(ctx context.Context, tx *sql.Tx, tenantID string, run domain.InvoiceDunningRun) (domain.InvoiceDunningRun, error) {
 	id := postgres.NewID("hc_drun")
-	// Honor caller-provided CreatedAt — dunning Service passes
-	// s.clock.Now() so test-clock-driven runs (started during a
-	// clock-advance billing cycle) have created_at on simulation
-	// time, matching the related invoice's issued_at.
 	now := run.CreatedAt
 	if now.IsZero() {
 		now = clock.Now(ctx)
@@ -1278,12 +1271,9 @@ func (s *PostgresStore) CreateEvent(ctx context.Context, tenantID string, event 
 func (s *PostgresStore) createEventTx(ctx context.Context, tx *sql.Tx, tenantID string, event domain.InvoiceDunningEvent) (domain.InvoiceDunningEvent, error) {
 	id := postgres.NewID("hc_devt")
 	// Honor caller-supplied CreatedAt so each event row carries the
-	// simulated instant the fact actually occurred — started at cycle
-	// close, retry #N at its scheduled fire time, escalated at the
-	// final retry's instant. Without this, every event in a single
-	// catchup pass shares clock.Now(ctx) (= frozen_time) and the
-	// invoice timeline shows four facts at one timestamp. Falls back
-	// to clock.Now() when zero so wall-clock callers stay correct.
+	// instant its fact occurred (an escalation re-driven after an
+	// interruption keeps its final retry's instant). Zero means
+	// clock.Now(ctx).
 	createdAt := event.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = clock.Now(ctx)

@@ -50,7 +50,7 @@ type SentEmailRow struct {
 	DispatchedAt  *string `json:"dispatched_at,omitempty"`
 	// Line is the row as the activity line standard words it (ADR-128):
 	// the same email words the invoice's Activity card uses, dated at the
-	// instant the email's action decided.
+	// instant of the email's action.
 	Line *activity.Line `json:"line,omitempty"`
 }
 
@@ -94,7 +94,7 @@ type SentEmailOutboxRow struct {
 	// SkipReason is the state the invoice reached that made Hardcount skip a
 	// queued email, or empty.
 	SkipReason string
-	// EffectiveAt is the line's date: the instant the email's action decided
+	// EffectiveAt is the line's date: the instant of the email's action
 	// (ADR-104).
 	EffectiveAt time.Time
 }

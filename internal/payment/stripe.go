@@ -203,9 +203,9 @@ func (s *Stripe) SetCheckoutSessionStore(cs *CheckoutSessionStore, clients *Stri
 	s.sessionClients = clients
 }
 
-// SetClock wires the server's clock. An event binds its instant from it
-// (bindEvent), and a settle reads the result's time from it
-// (clock.AtArrival). The router passes the clock the server bills by; the
+// SetClock wires the server's clock. An event the restore catch-up applies
+// binds its instant from it (bindEvent), and a settle reads the result's time
+// from it (clock.AtArrival). The router passes the clock the server bills by; the
 // default is the machine's.
 func (s *Stripe) SetClock(c clock.Clock) {
 	s.clock = c
@@ -340,9 +340,7 @@ type InvoiceUpdater interface {
 	// open, or the credentials could not be read. Unclear outcomes (unknown
 	// / timeout / still-processing / 429) never release: the confirm may be
 	// running at Stripe, and the unknown sweep leaves the invoice alone until
-	// the hold has ended. Found by the D1 walk: a declined dunning
-	// retry held the hold 5 wall-minutes, starving every later same-advance
-	// retry in test-clock catchup ("dunning catchup loop made no progress").
+	// the hold has ended.
 	ReleaseChargeHold(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error
 	// EndUnstampedAttempt ends an attempt whose PaymentIntent was created
 	// but not put on the invoice: on an invoice still open it clears the
@@ -792,9 +790,8 @@ func (s *Stripe) chargeInvoice(ctx context.Context, tenantID string, inv domain.
 	// retry (purpose="dunning_retry") when no outcome was recorded between
 	// them, so both read the same seq — the metadata differs (the retry adds
 	// hardcount_purpose=dunning_retry) and Stripe answers "same key, different
-	// parameters" with a 409. Surfaced 2026-05-19 from a clock-pinned dunning
-	// workflow. The seq seed does not retire this: it narrows when two calls
-	// share a key, it does not eliminate it.
+	// parameters" with a 409. The seq seed does not retire this: it narrows
+	// when two calls share a key, it does not eliminate it.
 	idempotencyKey := ChargeIdempotencyKey(inv.ID, inv.ChargeAttemptSeq, purpose)
 	params := PaymentIntentParams{
 		AmountCents:     inv.AmountDueCents,
@@ -1402,7 +1399,7 @@ func (s *Stripe) stampFailedWithoutPayment(ctx context.Context, tenantID string,
 		return
 	}
 	if _, derr := startDunningWithRetry(ctx, s.dunning, tenantID, inv.ID, inv.CustomerID, domain.DunningCausePaymentFailed); derr != nil {
-		slog.Error("inline StartDunning after a failed charge failed — for a wall-clock invoice the dunning backfill sweep starts the run on a later scheduler tick",
+		slog.Error("inline StartDunning after a failed charge failed — the dunning backfill sweep starts the run on a later scheduler tick",
 			"invoice_id", inv.ID, "customer_id", inv.CustomerID, "error", derr)
 	}
 }
@@ -1608,9 +1605,10 @@ func (s *Stripe) processEvent(ctx context.Context, tenantID string, event domain
 	}
 }
 
-// bindEvent binds one read of the server's clock for an event that did not
-// come through the API's door, so every action the event runs reads one
-// instant.
+// bindEvent binds one read of the server's clock for an event that carries
+// no instant, so every action the event runs reads one instant. A webhook
+// delivery keeps the instant the API's door bound; the restore catch-up
+// (CatchUp) works through many events and binds none, so each binds here.
 func (s *Stripe) bindEvent(ctx context.Context) context.Context {
 	return clock.EnsureEffectiveNow(ctx, s.clock)
 }
@@ -2430,11 +2428,11 @@ func (s *Stripe) RecordCheckoutCard(ctx context.Context, tenantID, customerID, s
 		}
 	}
 	if _, err := s.paymentSetups.UpsertPaymentSetupAudited(ctx, tenantID, setup, emit); err != nil {
-		// The customer isn't there to map — hard-deleted by a test-clock
-		// teardown, or on the other livemode plane than this webhook. There is
-		// nothing to record and nothing a retry would fix, so ACK the event:
-		// returning an error here would loop Stripe's redelivery for days
-		// against a customer that no longer exists.
+		// The customer isn't there to map: an unknown id, or on the other
+		// livemode plane than this webhook. There is nothing to record and
+		// nothing a retry would fix, so ACK the event: returning an error here
+		// would loop Stripe's redelivery for days against a customer
+		// Hardcount does not have.
 		if errors.Is(err, errs.ErrNotFound) {
 			slog.WarnContext(ctx, "checkout.session.completed: customer not found for payment-setup mapping — acking event",
 				"customer_id", customerID, "stripe_customer_id", stripeCustomerID)

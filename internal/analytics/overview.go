@@ -46,7 +46,7 @@ type OverviewResponse struct {
 	// CreditBalanceByCurrency is the credit customers hold, one row per
 	// currency (ADR-129): each ledger row stores its own currency, and
 	// balances in two currencies are never added together. Default currency
-	// first, then largest. Test-clock customers are left out.
+	// first, then largest.
 	CreditBalanceByCurrency []CurrencyAmount `json:"credit_balance_by_currency"`
 
 	// Counts
@@ -387,10 +387,9 @@ func outstandingByCurrency(ctx context.Context, tx *sql.Tx, defaultCurrency stri
 
 // creditBalanceByCurrency is the credit customers hold per currency:
 // authoritative SUM(amount_cents) over the ledger, matching
-// credit.GetBalance. (A DISTINCT ON (customer_id) read of the latest row's
-// balance_after mis-reported it: catchup / late-cron expiry entries can be
-// inserted out of created_at order. Summing amount_cents is order-independent
-// and exact.) Grouped by the currency each row stores (ADR-129); a currency
+// credit.GetBalance. Summing amount_cents is order-independent and exact: a
+// late expiry entry can be inserted out of created_at order, so the latest
+// row's balance_after is not the balance. Grouped by the currency each row stores (ADR-129); a currency
 // whose balance is zero is left out. Ordered like outstandingByCurrency.
 func creditBalanceByCurrency(ctx context.Context, tx *sql.Tx, defaultCurrency string) ([]CurrencyAmount, error) {
 	rows, err := tx.QueryContext(ctx, `

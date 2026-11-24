@@ -10,5 +10,5 @@ import (
 // AtRealTime is a test-mode context with no instant bound: where a job's tick
 // starts (the scheduler drops any instant, so each row binds its own).
 func AtRealTime() context.Context {
-	return clock.WithRealTime(postgres.WithLivemode(context.Background(), false))
+	return clock.WithoutInstant(postgres.WithLivemode(context.Background(), false))
 }

@@ -49,7 +49,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/invoice"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
@@ -126,14 +125,7 @@ type Handler struct {
 	// noBaseWarned makes the "no address" warning print once per process,
 	// not on every page view.
 	noBaseWarned sync.Once
-	// clock is the server's clock: resolveInvoice reads it once to bind the
-	// page's instant.
-	clock clock.Clock
 }
-
-// SetClock wires the server's clock (see the clock field). The router passes
-// the clock the server bills by; the default is the machine's.
-func (h *Handler) SetClock(c clock.Clock) { h.clock = c }
 
 type Deps struct {
 	Invoices    InvoiceResolver
@@ -155,7 +147,6 @@ func New(deps Deps) *Handler {
 		stripe:      deps.Stripe,
 		stripeReady: deps.StripeReady,
 		baseURL:     deps.BaseURL,
-		clock:       clock.Real(),
 	}
 }
 
@@ -350,12 +341,7 @@ func (h *Handler) resolveInvoice(w http.ResponseWriter, r *http.Request) (domain
 	// 500 to the customer who clicked the email CTA. GetByPublicToken
 	// itself is mode-agnostic (TxBypass per the package doc); the pin
 	// has to happen here, after we know the row's livemode.
-	//
-	// A public page does not come through the API's door, so the page binds
-	// its own instant: the checkout it opens, and that checkout's audit row,
-	// read it.
-	ctx := clock.EnsureEffectiveNow(postgres.WithLivemode(r.Context(), livemode), h.clock)
-	*r = *r.WithContext(ctx)
+	*r = *r.WithContext(postgres.WithLivemode(r.Context(), livemode))
 	return inv, true
 }
 

@@ -73,9 +73,9 @@ func TestRouteTable_MatchesLiveRoutes(t *testing.T) {
 	report(undeclared, `route(s) have no entry in routeTable (internal/api/route_table.go). Declare
 who may call each one: needs(customerWrite), or another permission, a session
 value or anyCaller, or outsideAuth() for a route outside /v1's authentication.
-Start the entry with decidedIn("package.Type.Method") only when that function,
-not the door, binds the route's time. docs/architecture.md, "Adding a route",
-has an example.`)
+Start the entry with decidedIn("package.Type.Method") only when that function
+works through many records and binds one instant for each, so the door must
+bind none. docs/architecture.md, "Adding a route", has an example.`)
 	report(stale, `routeTable entr(y/ies) match no live route. The route was renamed or removed
 but its entry was not: delete the entry or update its pattern. Keys are
 canonical chi patterns (canonicalRoute), with their {placeholders}. A stale
@@ -104,7 +104,7 @@ routes and the GET routes under /v1/exports carry one; remove it.`)
 }
 
 // TestRouteTable_DeclarationsAreWhole: each entry says what its parts need,
-// and nothing else. A key is canonical. A deciding function exists. An
+// and nothing else. A key is canonical. A decidedIn function exists. An
 // explicit audit's note
 // starts with a function that exists; an exempt one has a reason from the
 // closed list, and only a state-changing route is exempt: there is no honest

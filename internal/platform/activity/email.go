@@ -54,7 +54,7 @@ var skipReasons = map[string]string{
 	"paid":          "The invoice was already paid",
 	"voided":        "The invoice was already voided",
 	"uncollectible": "The invoice was already marked uncollectible",
-	// Test-clock teardown deletes a clock's invoices.
+	// No invoice row has the email's invoice number.
 	"gone": "The invoice no longer exists",
 }
 

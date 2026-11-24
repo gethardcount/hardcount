@@ -36,35 +36,32 @@ func (f *fakeCalcStore) LookupCalculationUsableUntil(_ context.Context, _, _, _ 
 	return f.createdAt.Add(tax.CalculationFallbackLifetime), nil
 }
 
-// TestCommitTax_ExpiryGuardIgnoresSimulatedClock locks the fix for the
-// clock-pinned proration orphan: a calc created seconds ago in REAL time must
-// commit even when the request ctx carries a far-future test-clock
-// effective-now. Pre-fix the guard used clock.Now(ctx) (the simulated clock),
-// so a customer whose test clock was advanced >23h past wall-clock produced a
-// false "tax calculation expired" — the commit was skipped and the proration
-// invoice kept tax_calculation_id but never got tax_transaction_id.
-func TestCommitTax_ExpiryGuardIgnoresSimulatedClock(t *testing.T) {
+// TestCommitTax_ExpiryGuardIgnoresTheBoundInstant: the expiry guard reads the
+// machine's time, not the instant bound on ctx, because the calculation
+// expires at Stripe in real time. A calc created just now commits even with a
+// bound instant 30 days later.
+func TestCommitTax_ExpiryGuardIgnoresTheBoundInstant(t *testing.T) {
 	store := &fakeCalcStore{createdAt: time.Now().UTC()} // created just now, real time
 	e := &Engine{
 		settings:     &taxSettings{provider: "stripe_tax"},
 		taxProviders: stubResolver(&stubProvider{}), // Commit -> ("", nil): no SetTaxTransaction needed
 		taxCalcStore: store,
 	}
-	// Simulate a customer pinned to a test clock advanced 30 days past real
-	// wall-clock; clock.Now(ctx) would return this far-future time.
+	// A bound instant 30 days past the machine's time; clock.Now(ctx) would
+	// return it.
 	ctx := clock.WithEffectiveNow(context.Background(), time.Now().UTC().Add(30*24*time.Hour))
 
 	if err := e.CommitTax(ctx, "t1", "inv_1", "taxcalc_1"); err != nil {
-		t.Fatalf("commit of a fresh calc must not be blocked by an advanced test clock: %v", err)
+		t.Fatalf("commit of a fresh calc must not be blocked by a later bound instant: %v", err)
 	}
 	if !store.lookedUp {
 		t.Fatal("expiry guard never ran (lookup not called) — assertion would be vacuous")
 	}
 }
 
-// TestCommitTax_ExpiryGuardTripsOnRealAge is the over-correction guard: the
-// fix must not disable expiry. A calc genuinely 30h old in real time must be
-// rejected regardless of where the simulated clock sits.
+// TestCommitTax_ExpiryGuardTripsOnRealAge: the guard still expires. A calc
+// genuinely 30h old in real time must be rejected, whatever instant is bound
+// on ctx.
 func TestCommitTax_ExpiryGuardTripsOnRealAge(t *testing.T) {
 	store := &fakeCalcStore{createdAt: time.Now().UTC().Add(-30 * time.Hour)} // real-stale
 	e := &Engine{
@@ -72,7 +69,7 @@ func TestCommitTax_ExpiryGuardTripsOnRealAge(t *testing.T) {
 		taxProviders: stubResolver(&stubProvider{}),
 		taxCalcStore: store,
 	}
-	// Simulated clock pinned to "now" — the calc is still genuinely expired.
+	// Bound to the machine's time now: the calc is still genuinely expired.
 	ctx := clock.WithEffectiveNow(context.Background(), time.Now().UTC())
 
 	err := e.CommitTax(ctx, "t1", "inv_1", "taxcalc_1")

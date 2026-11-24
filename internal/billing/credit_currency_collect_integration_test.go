@@ -57,8 +57,8 @@ func TestCollect_CreditInAnotherCurrencyIsNotApplied(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create customer: %v", err)
 	}
-	if _, err := creditSvc.Grant(ctx, tenantID, credit.GrantInput{
-		CustomerID: cust.ID, Currency: "USD", AmountCents: 5000, Description: "USD-era goodwill", At: periodStart,
+	if _, err := creditSvc.Grant(clock.WithEffectiveNow(ctx, periodStart), tenantID, credit.GrantInput{
+		CustomerID: cust.ID, Currency: "USD", AmountCents: 5000, Description: "USD-era goodwill",
 	}); err != nil {
 		t.Fatalf("grant USD credit: %v", err)
 	}

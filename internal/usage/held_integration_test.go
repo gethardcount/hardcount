@@ -282,9 +282,8 @@ func TestHeld_TenantAndModeIsolation(t *testing.T) {
 	}
 }
 
-// A row stamped after the customer's current time stays held: releasing it
-// would put usage in the customer's future (a test-clock customer frozen
-// in the past).
+// A row stamped after the release's instant (NotAfter) stays held: releasing
+// it would put usage in the future.
 func TestHeld_RowsAfterNowStayHeld(t *testing.T) {
 	f := newHeldFixture(t, "Held Future")
 	at := time.Now().UTC().Add(-time.Hour).Truncate(time.Second)

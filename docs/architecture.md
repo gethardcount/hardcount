@@ -34,7 +34,7 @@ Every request passes the root chain, then its group's chain, then its handler. I
 11. **Security headers.**
 12. **Audit detector** (`mw.AuditCoverage`) only observes: it reports a mutating 2xx that wrote no audit row and is not declared exempt.
 
-**The groups.** chi then routes the request into one group, which adds its own steps. Each group ends with **the clock door**. It binds the instant the request runs on: one read of the server's clock, unless the route's entry in the [route table](#the-route-table) names a function that binds it (`decidedIn`). The handler reads that instant from the context.
+**The groups.** chi then routes the request into one group, which adds its own steps. Each group ends with **the clock door**. It binds the instant the request runs on: one read of the server's clock, unless the route's entry in the [route table](#the-route-table) names a function that works through many records and binds one instant for each (`decidedIn`). The handler reads that instant from the context.
 
 | Group | Steps, in order |
 |---|---|
@@ -63,7 +63,7 @@ The door is last, so the instant is read just before the handler runs: a request
 
 `internal/api/route_table.go` has one line per route, saying:
 - who may call it: `needs(…)` with a permission, a dashboard session only or any caller, or `outsideAuth()` for a route outside authentication (the permission check reads this);
-- whether a named function binds its time instead of the clock door: `decidedIn(…)` (the door reads this);
+- whether a named function binds its times, one per record, instead of the clock door: `decidedIn(…)` (the door reads this);
 - where its audit evidence comes from, when it changes state or exports (the audit detector);
 - whether its answer carries a secret shown once (Idempotency never keeps that answer).
 
@@ -77,7 +77,7 @@ The door is last, so the instant is read just before the handler runs: a request
    {"POST", "/v1/invoices/{id}/finalize"}: needs(invoiceWrite).withAudit(explicit("invoice.Service.Finalize (LogInTx)")),
    ```
    - who may call it: `needs(…)` with a permission value (`invoiceRead`, `invoiceWrite`, …), `membersSession`, `settingsSession` or `anyCaller`; or `outsideAuth()` for a route outside `/v1`'s authentication;
-   - `decidedIn("package.Type.Method")` before it, only when that function binds the route's time instead of the door: one read after the reads that check the request, or one per record when it works through many;
+   - `decidedIn("package.Type.Method")` before it, only when that function works through many records and binds one instant for each, so the door binds none;
    - where its audit row comes from, if it changes state or exports: `.withAudit(explicit("…"))`, naming the function that writes it, or `.withAudit(exempt(reason, "…"))`, saying why it writes none;
    - `.withShowOnce()`, when its answer carries a secret shown once.
 3. **Describe it in `api/openapi.yaml`** ([OpenAPI workflow](dev/openapi-workflow.md)).

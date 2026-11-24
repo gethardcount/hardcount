@@ -14,13 +14,9 @@ import (
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// TestCreditNote_RecordedAt_DualStamp pins ADR-104 Invariant A's corrected
-// boundary (found live: an operator-issued CN on a frozen-clock invoice was
-// the only row on the timeline with no "Recorded" subline). A CN created
-// under a bound simulated ctx must carry BOTH calendars: created_at on the
-// entity's (the frozen instant, ADR-030) and recorded_at on ours (the real
-// INSERT moment) — the same dual-stamp shape as charge attempts (0162) and
-// emails (0163).
+// A credit note carries two stamps: created_at, the instant its work bound,
+// and recorded_at, the database's time of the INSERT, which the API returns.
+// A bound instant set apart from real time tells the two apart.
 func TestCreditNote_RecordedAt_DualStamp(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	base := postgres.WithLivemode(context.Background(), false)
@@ -46,10 +42,9 @@ func TestCreditNote_RecordedAt_DualStamp(t *testing.T) {
 		t.Fatalf("create invoice: %v", err)
 	}
 
-	frozen := time.Date(2027, 6, 1, 12, 0, 0, 0, time.UTC)
-	simCtx := clock.WithEffectiveNow(base, frozen)
+	at := time.Date(2027, 6, 1, 12, 0, 0, 0, time.UTC)
 
-	cn, err := cnStore.Create(simCtx, tenantID, domain.CreditNote{
+	cn, err := cnStore.Create(clock.WithEffectiveNow(base, at), tenantID, domain.CreditNote{
 		InvoiceID: inv.ID, CustomerID: cust.ID, CreditNoteNumber: "CN-REC-1",
 		Status: domain.CreditNoteDraft, Reason: "billing error",
 		SubtotalCents: 100, TotalCents: 100, CreditAmountCents: 100,
@@ -59,17 +54,14 @@ func TestCreditNote_RecordedAt_DualStamp(t *testing.T) {
 		t.Fatalf("create cn: %v", err)
 	}
 
-	// Entity calendar: created_at is the frozen instant, not wall.
-	if !cn.CreatedAt.Equal(frozen) {
-		t.Errorf("created_at = %s, want the frozen instant %s (ADR-030)", cn.CreatedAt, frozen)
+	if !cn.CreatedAt.Equal(at) {
+		t.Errorf("created_at = %s, want the bound instant %s", cn.CreatedAt, at)
 	}
-	// Our calendar: recorded_at is the real INSERT moment — present, wall,
-	// and NOT the simulated instant.
 	if cn.RecordedAt == nil {
-		t.Fatal("recorded_at is nil — the row carries no wall stamp, and the timeline cannot show both calendars (Invariant A)")
+		t.Fatal("recorded_at is nil; want the INSERT's time")
 	}
-	if cn.RecordedAt.Equal(frozen) {
-		t.Errorf("recorded_at = the frozen instant — stamped from the simulated clock instead of the real INSERT moment")
+	if cn.RecordedAt.Equal(at) {
+		t.Errorf("recorded_at = the bound instant; want the INSERT's time")
 	}
 	if d := time.Since(*cn.RecordedAt); d < 0 || d > 2*time.Minute {
 		t.Errorf("recorded_at = %s, not within the test's real-time window (drift %s)", cn.RecordedAt, d)

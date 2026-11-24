@@ -69,8 +69,6 @@ func TestRunCycle_DrainsEveryDueSubInOneCall(t *testing.T) {
 
 // Failing subs are the oldest due, so they lead every page. They must be
 // attempted once and then skipped, so the healthy subs behind them still bill.
-// Before the fix the scheduler's one page was all failures, and the manual and
-// Advance runs stopped at a page where every sub had already failed.
 func TestDrain_FailingSubsAtTheHeadDoNotBlockHealthyOnes(t *testing.T) {
 	runs := map[string]func(e *Engine) (int, []error){
 		"scheduled": func(e *Engine) (int, []error) {

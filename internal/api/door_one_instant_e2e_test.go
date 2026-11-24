@@ -166,9 +166,9 @@ func (r *instantRig) cycleInvoices() [][2]*time.Time {
 // The manual billing run is a job that a request starts, so it runs as the
 // scheduled run does: its handler drops the door's instant, and each
 // subscription is billed on its own instant, none of them the door's. Four
-// reads of the server's clock: the door's (a real-time route), the run's due
-// cutoff, then one per subscription. The invoices are dated at their
-// period's boundary. In both modes.
+// reads of the server's clock: the door's, the run's due cutoff, then one per
+// subscription. The invoices are dated at their period's boundary. In both
+// modes.
 func TestBillingRun_EachSubscriptionIsBilledOnItsOwnTime(t *testing.T) {
 	for _, live := range []bool{false, true} {
 		t.Run(map[bool]string{false: "test mode", true: "live"}[live], func(t *testing.T) {

@@ -250,7 +250,7 @@ func (l *Logger) LogInTx(ctx context.Context, tx *sql.Tx, e Entry) error {
 
 	actorType, actorID := ResolveActor(ctx)
 
-	// created_at is wall-clock time (ADR-030). The tenant comes from the
+	// created_at is wall-clock time. The tenant comes from the
 	// transaction's app.tenant_id setting.
 	// current_setting returns NULL on a connection that never set it. It
 	// returns an empty string on a connection where an earlier transaction

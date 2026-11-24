@@ -28,8 +28,8 @@ import (
 // clock when it is saved (clock_timestamp()), so the rig works in real time:
 // a subscription starts now, its first period P0 started at midnight UTC
 // today, and a price written during the test is written inside P0. The
-// period closes are run later in simulated wall time (the server's clock and
-// the request's effective now), as the scheduler would run them at the end of
+// period closes are run at later instants (the server's fake clock and the
+// request's bound instant), as the scheduler would run them at the end of
 // each period.
 
 type ppRig struct {

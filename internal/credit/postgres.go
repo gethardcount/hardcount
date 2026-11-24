@@ -235,14 +235,9 @@ func (s *PostgresStore) insertEntryInTx(ctx context.Context, tx *sql.Tx, tenantI
 		metaJSON = []byte("{}")
 	}
 
-	// Honor caller-supplied CreatedAt so ledger entries land at the
-	// simulated instant the fact occurred — grant at cycle close,
-	// expiry at grant.expires_at, usage at the invoice's issue moment.
-	// Without this, every entry stamps clock.Now() (= advance-end
-	// frozen_time during catchup) and the customer's Credits tab
-	// shows a stack of entries all at one timestamp instead of the
-	// per-fact chronology. Falls back to clock.Now() when zero so
-	// wall-clock callers stay correct.
+	// Honor caller-supplied CreatedAt so an entry lands at the instant
+	// its fact occurred (an expiry at the grant's expires_at, not the
+	// sweep's tick). Zero means clock.Now(ctx).
 	createdAt := entry.CreatedAt
 	if createdAt.IsZero() {
 		createdAt = clock.Now(ctx)
@@ -402,9 +397,9 @@ func (s *PostgresStore) ExpireGrantAtomic(ctx context.Context, tenantID, custome
 		return 0, fmt.Errorf("expire grant %s: grant has no expires_at", grantID)
 	}
 
-	// Stamp the expiry entry at the grant's own expires_at — the simulated
-	// (or wall-clock) instant it actually expired — so the customer's
-	// Credits timeline shows per-fact chronology, not the sweep tick time.
+	// Stamp the expiry entry at the grant's own expires_at, the instant it
+	// expired, so the customer's Credits timeline shows per-fact
+	// chronology, not the sweep tick time.
 	expired, entry, before, err := s.expireGrantRemainderTx(ctx, tx, tenantID, customerID, grantID, currency, remaining, expiresAt.Time)
 	if err != nil {
 		return 0, err
@@ -1525,13 +1520,12 @@ func (s *PostgresStore) ListEntries(ctx context.Context, filter ListFilter) ([]d
 	// Chronological running balance via SUM(amount_cents) OVER window.
 	// The stored balance_after column reflects the SUM at INSERTION
 	// time — which diverges from "balance as of this row's date" when
-	// rows are inserted out of chronological order (catchup-stamped
-	// expiry rows land with a past created_at AFTER newer rows
-	// already exist). Without this override, the UI's Balance column
-	// reads as gibberish for any customer who's had a catchup-driven
-	// expiry processed. Industry parity (Stripe / Lago / Orb): credit
-	// timelines show the chronological running balance, not insertion-
-	// order snapshots.
+	// rows are inserted out of chronological order (an expiry row is
+	// stamped at its grant's expires_at, so it can land AFTER newer
+	// rows). Without this override, the UI's Balance column reads as
+	// gibberish for any customer who has had such an expiry. Industry
+	// parity (Stripe / Lago / Orb): credit timelines show the chronological
+	// running balance, not insertion-order snapshots.
 	//
 	// Window is computed over the FULL customer ledger (no entry_type
 	// or invoice_id filter inside the window) so the running balance

@@ -45,7 +45,7 @@ import (
 // reset) — shared fate, ADR-090. It was the highest-value row and the first domain
 // migrated off the post-commit Log; the six textual finalize sites (cycle close,
 // subscription create, both cancel paths, both swap paths, threshold) are covered
-// by the shared-fate + sim-axis-parity tests. This is the shrinking set doing its
+// by the shared-fate tests. This is the shrinking set doing its
 // job: one entry removed, proven, gone.
 var residualOwnTxAuditWriters = map[string]int{
 	// Engine-driven subscription lifecycle. Cancel appears twice: end-of-period cancel

@@ -23,8 +23,8 @@ import (
 // They use cancelRig (cancel_after_period_end_integration_test.go): a monthly
 // plan with a 5000c in_arrears base and a 1c/call sum meter, a one-month
 // period [P0, P1) and 100 events × qty 10 in its first hours. Time is bound per
-// call with clock.WithEffectiveNow, which is how the wall-clock billing run
-// sees it; no test clock is involved.
+// call with clock.WithEffectiveNow, as the billing run binds each row's
+// instant.
 
 // makeLastMeter makes the rig's meter a last meter. Its plan prices it with
 // one catch-all price: the billed quantity is the latest event's in the
@@ -180,7 +180,7 @@ func (r *cancelRig) pauseUntil(t *testing.T, resumesAt *time.Time) {
 	}
 }
 
-// resumeExpired runs the wall-clock pause resumer at the given instant.
+// resumeExpired runs the scheduler's pause resumer at the given instant.
 func (r *cancelRig) resumeExpired(t *testing.T, at time.Time) {
 	t.Helper()
 	if _, errs := r.f.subSvc.ProcessExpiredPauseCollections(r.at(at), 100); len(errs) != 0 {

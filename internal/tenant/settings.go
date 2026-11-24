@@ -213,7 +213,7 @@ func (s *SettingsStore) Update(ctx context.Context, tenantID string, change func
 // NextInvoiceNumberTx allocates the next invoice number for a tenant on the
 // caller's transaction, in the mode carried on ctx (postgres.WithLivemode),
 // so the number and the invoice commit together: a rolled-back insert
-// returns the number and leaves no gap (ADR-030). Every invoice writer takes
+// returns the number and leaves no gap. Every invoice writer takes
 // its number this way. Test mode and live mode each have their own monotonic
 // sequence, Stripe-style, so test exploration doesn't burn numbers that
 // should have belonged to live invoices.

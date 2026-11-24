@@ -34,8 +34,7 @@ func (f *fakeCredits) CreditSummary(ctx context.Context, tenantID, customerID st
 type fakeLive struct {
 	live        domain.CreditLiveBalance
 	err         error
-	clock       clock.Clock
-	at          time.Time
+	at          time.Time // the instant bound on ctx, if any
 	gotTenant   string
 	gotCustomer string
 	gotLivemode bool
@@ -43,9 +42,7 @@ type fakeLive struct {
 
 func (f *fakeLive) LiveCreditBalance(ctx context.Context, tenantID, customerID string) (domain.CreditLiveBalance, error) {
 	f.gotTenant, f.gotCustomer, f.gotLivemode = tenantID, customerID, testutil.MustLivemode(ctx)
-	if f.clock != nil {
-		f.at = f.clock.Now(ctx)
-	}
+	f.at, _ = clock.EffectiveNow(ctx)
 	return f.live, f.err
 }
 

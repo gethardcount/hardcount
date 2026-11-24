@@ -54,18 +54,19 @@ func (s *Service) SetAuditLogger(a AuditEmitter) { s.audit = a }
 func (s *Service) SetOpenPeriodReader(r OpenPeriodReader) { s.periods = r }
 
 // SetClock sets the clock real time is read from: the server's clock, the one
-// the billing engine bills by. Each ingest entry reads it once to bind its
-// instant (bindNow). Without it, real time is the machine's.
+// the billing engine bills by. An ingest entry reads it once to bind its
+// instant when ctx carries none (bindNow). Without it, real time is the
+// machine's.
 func (s *Service) SetClock(c clock.Clock) { s.clock = c }
 
 // bindNow returns ctx with one instant bound, so all work below reads one
 // instant: the one ctx carries, else one read of the service's clock
 // (clock.EnsureEffectiveNow). Each ingest entry calls it once, before it
-// goes down: Ingest (per event), each event of a batch, Backfill, a LiteLLM
-// call (IngestCall), a held release (Release). The API's door binds no
-// instant on their routes. Nothing below an ingest entry binds: build reads
-// the bound instant. The customer usage, margin and cost dashboard reads do
-// not call it: their time is bound before them.
+// goes down: Ingest, each event of a batch, Backfill and a LiteLLM call
+// (IngestCall). Ingest and Backfill keep the instant the API's door bound;
+// the batch and LiteLLM routes get none from the door, so each event of a
+// batch, and each call, binds its own. Nothing below an ingest entry binds:
+// build reads the bound instant.
 func (s *Service) bindNow(ctx context.Context) context.Context {
 	return clock.EnsureEffectiveNow(ctx, s.clock)
 }
@@ -170,10 +171,10 @@ const MaxDimensionKeys = 16
 // letting events be parked in a future billing period.
 const usageFutureSkew = 5 * time.Minute
 
-// errBuildUndecided is build's refusal of a context its caller did not
-// decide: a fault in the caller, answered as an internal error (500), never a
-// stamp on the machine's time.
-var errBuildUndecided = errors.New("usage: an event was built with no decided time; its caller must decide first")
+// errBuildUndecided is build's refusal of a context with no instant bound: a
+// fault in the caller, answered as an internal error (500), never a stamp on
+// the machine's time.
+var errBuildUndecided = errors.New("usage: an event was built with no instant bound; its caller must bind one first")
 
 // checkInput is an event's own checks, which read no clock: the customer and
 // the meter are named, and the dimensions and the quantity are valid. It
@@ -304,7 +305,7 @@ func (s *Service) markWritten(ctx context.Context, event *domain.UsageEvent, cla
 }
 
 // lateUsageEvents counts events, other than backfills, whose timestamp is
-// more than 24h before the customer's effective now when they arrive, and
+// more than 24h before their ingest's instant when they arrive, and
 // logs a WARN for each. That is all it measures. It is a proxy for "missed
 // its invoice": an event one minute after its invoice was built is not
 // counted, and a 25h-old event in a period that is still open is. The exact

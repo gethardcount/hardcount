@@ -139,8 +139,7 @@ const maxKeyNameLen = 100
 
 // checkCreateInput checks a create request and returns the key to mint: a
 // name of 1 to maxKeyNameLen characters once trimmed, a key type (secret
-// when empty), and an expires_at after now. Keys belong to the account,
-// outside any customer's test clock, so now is the wall clock.
+// when empty), and an expires_at after now.
 func checkCreateInput(input CreateKeyInput, now time.Time) (CreateKeyInput, error) {
 	name := strings.TrimSpace(input.Name)
 	if name == "" {

@@ -21,8 +21,9 @@ import (
 )
 
 // reliefThroughTheRoute pays a commit invoice and sends its commit relief
-// through the credit note route on svc's real stores, and returns the note.
-func reliefThroughTheRoute(t *testing.T, name string, prepare func(svc *creditnote.Service)) domain.CreditNote {
+// through the credit note route on real stores, with at bound on the request
+// as the API's door binds it, and returns the note.
+func reliefThroughTheRoute(t *testing.T, name string, at time.Time) domain.CreditNote {
 	t.Helper()
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -44,10 +45,9 @@ func reliefThroughTheRoute(t *testing.T, name string, prepare func(svc *creditno
 		t.Fatalf("pay: %v", err)
 	}
 	svc := newReliefService(db, invStore, creditSvc, settings)
-	prepare(svc)
 	body := `{"invoice_id":"` + draft.ID + `","reason":"Lost card dispute","commit_relief":{"retire_all":true}}`
 	req := httptest.NewRequest("POST", "/", strings.NewReader(body))
-	req = req.WithContext(auth.WithTenantID(ctx, tenantID))
+	req = req.WithContext(clock.WithEffectiveNow(auth.WithTenantID(ctx, tenantID), at))
 	rec := httptest.NewRecorder()
 	creditnote.NewHandler(svc, creditnote.HandlerDeps{}).Routes().ServeHTTP(rec, req)
 	if rec.Code != 201 {
@@ -60,15 +60,13 @@ func reliefThroughTheRoute(t *testing.T, name string, prepare func(svc *creditno
 	return cn
 }
 
-// On the real stores, through the credit note route: the relief reads the
-// server's clock once (here a fixed past instant, not the machine's), and its
+// On the real stores, through the credit note route: the relief runs on the
+// request's instant (here a fixed past instant, not the machine's), and its
 // note is created and issued at it.
-func TestCommitRelief_AtRealTimeIsOnTheServersClock(t *testing.T) {
-	serverAt := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
-	cn := reliefThroughTheRoute(t, "Commit Relief Real Time", func(svc *creditnote.Service) {
-		svc.SetClock(clock.NewFake(serverAt))
-	})
-	if !cn.CreatedAt.Equal(serverAt) || cn.IssuedAt == nil || !cn.IssuedAt.Equal(serverAt) {
-		t.Errorf("created_at %v, issued_at %v; want both at the server's %v", cn.CreatedAt, cn.IssuedAt, serverAt)
+func TestCommitRelief_IsAtTheRequestsInstant(t *testing.T) {
+	at := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
+	cn := reliefThroughTheRoute(t, "Commit Relief Request Instant", at)
+	if !cn.CreatedAt.Equal(at) || cn.IssuedAt == nil || !cn.IssuedAt.Equal(at) {
+		t.Errorf("created_at %v, issued_at %v; want both at the request's %v", cn.CreatedAt, cn.IssuedAt, at)
 	}
 }

@@ -211,9 +211,7 @@ func (m *memStore) CreateRun(_ context.Context, tenantID string, run domain.Invo
 	run.TenantID = tenantID
 	// Honor caller-provided CreatedAt to match PostgresStore.CreateRun
 	// (postgres.go — it likewise falls back to now only when CreatedAt is
-	// zero). Dunning Service stamps CreatedAt in the
-	// effective-now domain so engine-triggered runs on a clock-pinned
-	// invoice carry simulated time, not wall-clock.
+	// zero).
 	if run.CreatedAt.IsZero() {
 		run.CreatedAt = time.Now().UTC()
 	}
@@ -509,7 +507,7 @@ func TestStartDunning_DisabledPolicy(t *testing.T) {
 // TestStartDunning_NoPolicyConfigured locks the resilience seam (Finding 2):
 // a tenant with NO effective/default policy must yield a DELIBERATE-SKIP
 // ErrInvalidState (the same class as disabled) — NOT a raw ErrNotFound — so the
-// money-path enrollment sweep swallows it instead of poisoning the catchup.
+// money-path enrollment sweep swallows it instead of failing on it.
 // Mutation guard: before the fix this returned a fmt.Errorf wrapping ErrNotFound
 // (errors.Is(err, ErrNotFound) == true), which the adapter propagated as a
 // sweep error.
@@ -613,9 +611,9 @@ func TestProcessDueRuns_MaxRetriesExhausted(t *testing.T) {
 	}
 }
 
-// recordingEmailNotifier captures the per-type email enqueues so
-// catchup-walk tests can assert "warnings + escalation actually
-// enqueued" instead of just "DB state is escalated."
+// recordingEmailNotifier captures the per-type email enqueues so tests can
+// assert "warnings + escalation actually enqueued" instead of just "DB state
+// is escalated."
 type recordingEmailNotifier struct {
 	warnings     int
 	escalations  int
@@ -785,10 +783,10 @@ func TestUpsertPolicy_RetryDaysBounds(t *testing.T) {
 // writes (next_action_at, last_attempt_at, resolved_at, created_at), and the
 // instant a run's start is written on, is the time its caller bound.
 func TestDunning_StampsTheDecidedTime(t *testing.T) {
-	frozen := time.Date(2024, 2, 1, 12, 0, 0, 0, time.UTC)
-	bound := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), frozen)
+	at := time.Date(2024, 2, 1, 12, 0, 0, 0, time.UTC)
+	bound := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), at)
 
-	t.Run("StartDunning stamps frozen", func(t *testing.T) {
+	t.Run("StartDunning stamps the bound time", func(t *testing.T) {
 		store := &instantStore{memStore: newMemStore()}
 		svc := NewService(store, &noopRetrier{}, nil)
 
@@ -796,18 +794,18 @@ func TestDunning_StampsTheDecidedTime(t *testing.T) {
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
-		if !run.CreatedAt.Equal(frozen) {
-			t.Errorf("created_at: got %v, want %v (frozen)", run.CreatedAt, frozen)
+		if !run.CreatedAt.Equal(at) {
+			t.Errorf("created_at: got %v, want %v (bound)", run.CreatedAt, at)
 		}
-		// next_action_at = frozen + grace (3 days default).
+		// next_action_at = at + grace (3 days default).
 		if run.NextActionAt == nil {
 			t.Fatal("next_action_at should be set")
 		}
-		wantNext := frozen.Add(72 * time.Hour)
+		wantNext := at.Add(72 * time.Hour)
 		if !run.NextActionAt.Equal(wantNext) {
-			t.Errorf("next_action_at: got %v, want %v (frozen + 3d grace)", *run.NextActionAt, wantNext)
+			t.Errorf("next_action_at: got %v, want %v (bound + 3d grace)", *run.NextActionAt, wantNext)
 		}
-		store.wroteAt(t, "StartRun", frozen)
+		store.wroteAt(t, "StartRun", at)
 	})
 
 	t.Run("a late retry is dated at the bound time", func(t *testing.T) {
@@ -819,7 +817,7 @@ func TestDunning_StampsTheDecidedTime(t *testing.T) {
 
 		run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
 		// Mark run as due so processRun picks it up.
-		past := frozen.Add(-1 * time.Hour)
+		past := at.Add(-1 * time.Hour)
 		run.NextActionAt = &past
 		store.runs[run.ID] = run
 
@@ -829,20 +827,20 @@ func TestDunning_StampsTheDecidedTime(t *testing.T) {
 		if updated.LastAttemptAt == nil {
 			t.Fatal("last_attempt_at should be stamped")
 		}
-		if !updated.LastAttemptAt.Equal(frozen) {
-			t.Errorf("last_attempt_at: got %v, want the bound time %v", *updated.LastAttemptAt, frozen)
+		if !updated.LastAttemptAt.Equal(at) {
+			t.Errorf("last_attempt_at: got %v, want the bound time %v", *updated.LastAttemptAt, at)
 		}
 		// The next retry counts from the attempt.
 		if updated.NextActionAt == nil {
 			t.Fatal("next_action_at should be re-stamped")
 		}
-		wantNext := frozen.Add(72 * time.Hour)
+		wantNext := at.Add(72 * time.Hour)
 		if !updated.NextActionAt.Equal(wantNext) {
 			t.Errorf("next_action_at: got %v, want %v (the attempt + 3d retry interval)", *updated.NextActionAt, wantNext)
 		}
 	})
 
-	t.Run("ResolveByInvoice stamps frozen", func(t *testing.T) {
+	t.Run("ResolveByInvoice stamps the bound time", func(t *testing.T) {
 		store := newMemStore()
 		svc := NewService(store, &noopRetrier{}, nil)
 		ctx := bound
@@ -855,8 +853,8 @@ func TestDunning_StampsTheDecidedTime(t *testing.T) {
 		if resolved.ResolvedAt == nil {
 			t.Fatal("resolved_at should be set")
 		}
-		if !resolved.ResolvedAt.Equal(frozen) {
-			t.Errorf("resolved_at: got %v, want %v (frozen)", *resolved.ResolvedAt, frozen)
+		if !resolved.ResolvedAt.Equal(at) {
+			t.Errorf("resolved_at: got %v, want %v (bound)", *resolved.ResolvedAt, at)
 		}
 	})
 }
@@ -965,7 +963,7 @@ func TestStartDunning_CauseStamped(t *testing.T) {
 // TestStartDunning_DisabledPolicy_SkipsSameClassAsNoPolicy pins the sibling of
 // TestStartDunning_NoPolicyConfigured. Both end in "this invoice will never
 // dun", so both must be the same DELIBERATE-SKIP class the enrollment sweeps
-// swallow — never a raw error that poisons a catchup.
+// swallow — never a raw error that fails a sweep.
 //
 // Why this exists (FLOW TC5 walk, 2026-08-04): POST /v1/dunning/policies
 // decodes straight into the domain struct, so omitting `enabled` creates a

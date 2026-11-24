@@ -82,8 +82,7 @@ func (e *Engine) chargeNotMadeFor(ctx context.Context, inv domain.Invoice, why s
 	}
 }
 
-// refusedClaim reports whether err is what a refused claim returned. A
-// real-time run logs it at Debug, as quiet as before: two collectors met on
-// one invoice (the finalize-time collect and the sweep, say), and the one
+// refusedClaim reports whether err is what a refused claim returned. A run
+// logs it at Debug: two collectors met on one invoice (the finalize-time collect and the sweep, say), and the one
 // holding it charges.
 func refusedClaim(err error) bool { return errors.Is(err, errChargeClaimRefused) }

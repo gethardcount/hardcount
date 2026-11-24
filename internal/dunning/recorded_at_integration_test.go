@@ -14,11 +14,9 @@ import (
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// TestDunningEvent_RecordedAt_DualStamp is the invoice_dunning_events half
-// of migration 0164 (ADR-104 Invariant A, corrected boundary): an event
-// written under a bound simulated ctx carries created_at on the entity's
-// calendar and recorded_at on ours. Same class as the credit-note twin —
-// both are INSERT-backed narrative rows that previously had no wall stamp.
+// A dunning event carries two stamps: created_at, the instant its work
+// bound, and recorded_at, the database's time of the INSERT. A bound instant
+// set apart from real time tells the two apart.
 func TestDunningEvent_RecordedAt_DualStamp(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	base := postgres.WithLivemode(context.Background(), false)
@@ -52,10 +50,10 @@ func TestDunningEvent_RecordedAt_DualStamp(t *testing.T) {
 		t.Fatalf("upsert policy: %v", err)
 	}
 
-	frozen := time.Date(2027, 3, 7, 9, 0, 0, 0, time.UTC)
-	simCtx := clock.WithEffectiveNow(base, frozen)
+	at := time.Date(2027, 3, 7, 9, 0, 0, 0, time.UTC)
+	ctx := clock.WithEffectiveNow(base, at)
 
-	run, err := dunStore.CreateRun(simCtx, tenantID, domain.InvoiceDunningRun{
+	run, err := dunStore.CreateRun(ctx, tenantID, domain.InvoiceDunningRun{
 		InvoiceID: inv.ID, CustomerID: cust.ID, PolicyID: policy.ID,
 		State: domain.DunningActive, AttemptCount: 0,
 	})
@@ -63,17 +61,17 @@ func TestDunningEvent_RecordedAt_DualStamp(t *testing.T) {
 		t.Fatalf("create run: %v", err)
 	}
 
-	// CreateEvent's contract: zero CreatedAt falls back to clock.Now(ctx)
-	// — the simulated instant on a bound ctx.
-	evt, err := dunStore.CreateEvent(simCtx, tenantID, domain.InvoiceDunningEvent{
+	// CreateEvent's contract: zero CreatedAt falls back to clock.Now(ctx),
+	// the bound instant.
+	evt, err := dunStore.CreateEvent(ctx, tenantID, domain.InvoiceDunningEvent{
 		RunID: run.ID, InvoiceID: inv.ID,
 		EventType: domain.DunningEventStarted, State: domain.DunningActive,
 	})
 	if err != nil {
 		t.Fatalf("create event: %v", err)
 	}
-	if !evt.CreatedAt.Equal(frozen) {
-		t.Errorf("created_at = %s, want the frozen instant %s (ADR-030)", evt.CreatedAt, frozen)
+	if !evt.CreatedAt.Equal(at) {
+		t.Errorf("created_at = %s, want the bound instant %s", evt.CreatedAt, at)
 	}
 
 	events, err := dunStore.ListEvents(base, tenantID, run.ID)
@@ -85,10 +83,10 @@ func TestDunningEvent_RecordedAt_DualStamp(t *testing.T) {
 	}
 	got := events[len(events)-1]
 	if got.RecordedAt == nil {
-		t.Fatal("recorded_at is nil — the row carries no wall stamp (Invariant A)")
+		t.Fatal("recorded_at is nil; want the INSERT's time")
 	}
-	if got.RecordedAt.Equal(frozen) {
-		t.Error("recorded_at = the frozen instant — stamped from the simulated clock instead of the real INSERT moment")
+	if got.RecordedAt.Equal(at) {
+		t.Error("recorded_at = the bound instant; want the INSERT's time")
 	}
 	if d := time.Since(*got.RecordedAt); d < 0 || d > 2*time.Minute {
 		t.Errorf("recorded_at = %s, not within the test's real-time window (drift %s)", got.RecordedAt, d)

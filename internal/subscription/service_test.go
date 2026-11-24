@@ -2129,7 +2129,7 @@ func TestExtendTrial(t *testing.T) {
 }
 
 // TestProcessExpiredTrials covers the scheduler-tick scan that flips
-// non-clock-pinned trialing subs at trial_end_at.
+// trialing subs at trial_end_at.
 func TestProcessExpiredTrials(t *testing.T) {
 	createdAt := time.Date(2025, 11, 29, 12, 0, 0, 0, time.UTC)
 	ctx := postgres.WithLivemode(context.Background(), true)
@@ -2357,7 +2357,7 @@ func TestPeriodAnchoring(t *testing.T) {
 		// fresh Service over the same memStore with an earlyEnd-pinned
 		// clock so EndTrial reads `now = earlyEnd`. NewService doesn't
 		// expose a SetClock, so the two-service shape is the cleanest
-		// way to advance the test clock between Create and EndTrial.
+		// way to advance the fake clock between Create and EndTrial.
 		mem := newMemStore()
 		svc2 := NewService(mem, clock.NewFake(now))
 		sub, _ := svc2.Create(ctx, "t1", CreateInput{
@@ -2568,7 +2568,7 @@ func TestPeriodAnchoring(t *testing.T) {
 	})
 
 	t.Run("UpdateItem rejects plan-swap that changes bill_timing on single-item sub (immediate=false)", func(t *testing.T) {
-		// User's exact scenario: clock-pinned active sub on Plan A
+		// User's exact scenario: active sub on Plan A
 		// (in_arrears $29/mo). Schedule a swap to Plan B
 		// (in_advance $49/mo). The cross-bill-timing boundary swap
 		// path is not exercised end-to-end, so reject at request
@@ -3353,8 +3353,8 @@ func TestProcessExpiredPauseCollections(t *testing.T) {
 		// Past-resumes_at is set by poking the store directly: the
 		// Service.PauseCollection contract rejects past timestamps
 		// (operator should never queue an already-elapsed resume), so
-		// we simulate state that arose from the clock advancing past
-		// a previously-future resumes_at.
+		// we simulate state that arose from time passing a
+		// previously-future resumes_at.
 		past := now.Add(-24 * time.Hour)
 		future := now.Add(24 * time.Hour)
 		ctx := context.Background()
@@ -3405,8 +3405,8 @@ func TestProcessExpiredPauseCollections(t *testing.T) {
 			t.Errorf("audit triggered_by: got %v, want schedule", e.metadata["triggered_by"])
 		}
 		// Regression (FLOW TC9 live find): resumed_at is the CONTRACTED
-		// resumes_at instant, not the tick/advance time that happened to
-		// sweep it — same contractual-instant split as trial flips and
+		// resumes_at instant, not the tick time that happened to sweep
+		// it — same contractual-instant split as trial flips and
 		// ADR-097 cancels.
 		if got, ok := e.metadata["resumed_at"].(time.Time); !ok || !got.Equal(past) {
 			t.Errorf("resumed_at: got %v, want the contracted resumes_at %v (not scan-time now)", e.metadata["resumed_at"], past)
@@ -3443,7 +3443,7 @@ func (m *memStore) CustomerSubPlanCurrencies(_ context.Context, _, _, _ string) 
 	return nil, nil
 }
 
-// The real-time pause scan resumes each subscription on its own instant: the
+// The pause scan resumes each subscription on its own instant: the
 // tick binds none, so a row reads the server's clock once.
 func TestProcessExpiredPauseCollections_EachSubscriptionOnItsOwnInstant(t *testing.T) {
 	createdAt := time.Date(2025, 11, 29, 12, 0, 0, 0, time.UTC)

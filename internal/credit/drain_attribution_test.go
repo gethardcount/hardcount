@@ -165,7 +165,7 @@ func TestGrantTx_CarriesGrantKind(t *testing.T) {
 		entry, err = svc.GrantTx(ctx, tx, tenantID, credit.GrantInput{
 			Currency:   "USD",
 			CustomerID: cust.ID, AmountCents: 1000, Description: "promo in-tx",
-			GrantKind: domain.GrantKindPromotional, At: time.Now().UTC(),
+			GrantKind: domain.GrantKindPromotional,
 		})
 		return err
 	})

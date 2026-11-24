@@ -155,7 +155,7 @@ func issueRefundKey(creditNoteID string) string { return "hardcount_cn_" + credi
 const refundOutcomeWriteTimeout = 10 * time.Second
 
 // afterRefundCall is the context for recording what a Stripe refund call
-// did. It keeps ctx's values (tenant, livemode, test clock, actor) and drops
+// did. It keeps ctx's values (tenant, livemode, bound instant, actor) and drops
 // its cancellation. Issue and Retry refund asked for through the API
 // (POST /v1/credit-notes/{id}/issue, /retry-refund) run on the request
 // context, which the route's Timeout middleware ends after 30 seconds
@@ -233,10 +233,10 @@ type Service struct {
 	// clock is the server's clock: the router's clk, the one the engine
 	// bills by. Who binds a credit-note action's time:
 	//   - a request, the API's door (api.clockDoor), with one read of the
-	//     server's clock; a create, the route itself, with one read of this
-	//     clock (BindNow);
-	//   - a Stripe refund event, the service itself, with one read of this
-	//     clock (RecordStripeRefund, ApplyRefundWebhook);
+	//     server's clock;
+	//   - a Stripe refund event, the door on the webhook route; with none
+	//     bound (the restore catch-up), the service itself, with one read of
+	//     this clock (RecordStripeRefund, ApplyRefundWebhook);
 	//   - the relief at a subscription's cancel or plan swap and a
 	//     subscription's clawback drafts, the subscription action's time; a
 	//     finalize's held relief, the finalize's time;
@@ -258,7 +258,7 @@ type Service struct {
 
 // AuditEmitter is the narrow in-tx audit seam (ADR-090). Issue() emits the
 // credit_note.issued row on its own coordinator tx — one canonical row for
-// operator issues, engine adjustments, reconciler retries, and catchup.
+// operator issues, engine adjustments and reconciler retries.
 type AuditEmitter interface {
 	LogInTx(ctx context.Context, tx *sql.Tx, e audit.Entry) error
 }
@@ -278,15 +278,6 @@ func (s *Service) SetAuditLogger(a AuditEmitter) { s.audit = a }
 // SetClock wires the server's clock (see the clock field). The router passes
 // the clock the server bills by; the default is the machine's.
 func (s *Service) SetClock(c clock.Clock) { s.clock = c }
-
-// BindNow binds one read of the service's clock on ctx, unless ctx already
-// carries an instant (clock.EnsureEffectiveNow). The create routes call it
-// before anything runs, so a create, and the issue that auto_issue runs after
-// it, share one instant. It is on the service because the service holds the
-// clock.
-func (s *Service) BindNow(ctx context.Context) context.Context {
-	return clock.EnsureEffectiveNow(ctx, s.clock)
-}
 
 // SetDunningResolver wires the dunning service, so a credit note that marks
 // a dunned invoice paid also closes its dunning run. Without it an escalated
@@ -1895,7 +1886,7 @@ func (s *Service) emitIssuedTx(ctx context.Context, tx *sql.Tx, cn domain.Credit
 	// ADR-090 in-tx emission — rides the coordinator tx with the CAS and
 	// the internal effect, and only on the CAS-won path (lost CAS, defers,
 	// and orphan-void produce no new issue fact). One canonical row for
-	// operator issues, engine adjustments, reconciler retries, and catchup
+	// operator issues, engine adjustments and reconciler retries
 	// — the background paths previously left no audit trail at all.
 	if s.audit != nil {
 		if auditErr := s.audit.LogInTx(ctx, tx, audit.Entry{

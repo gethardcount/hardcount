@@ -1664,11 +1664,6 @@ func (r *instantSeeingRetrier) RetryTaxForInvoice(ctx context.Context, tenantID,
 // is 'pending', not 'failed'), and dunning never started because nothing ever
 // failed. It sits finalized and owed until an operator notices the banner —
 // the same silent-overdue sink already fixed for the manual-finalize path.
-//
-// The catchup pipeline encodes the intended handoff in its phase ORDER: tax
-// retry (Phase 2) runs before auto-charge (Phase 3) specifically so an
-// unstuck invoice charges in the same Advance. That ordering only means
-// something if this flag is set.
 func TestRetryTax_AutoFinalize_QueuesForCollection(t *testing.T) {
 	store := newMemStore()
 	now := time.Now().UTC()

@@ -231,8 +231,8 @@ func TestSettleFailed_ConcurrentRedeliveryFiresSideEffectsOnce(t *testing.T) {
 	}
 	// StartDunning is re-driven by every report that records the failure, not
 	// only the first: the first reporter's start can fail after its stamp
-	// committed, and a test-clock invoice has no backfill. It is idempotent by
-	// invoice (0085 UNIQUE), so the second call returns the existing run.
+	// committed. It is idempotent by invoice (0085 UNIQUE), so the second call
+	// returns the existing run.
 	if len(dunning.calls) != 2 {
 		t.Errorf("StartDunning called %d times, want 2 (once per recording report)", len(dunning.calls))
 	}
@@ -544,9 +544,9 @@ func TestStopCollection_ExpiresSessionsBeforeCancelingPI(t *testing.T) {
 }
 
 // StopCollection cancels the PaymentIntent with the Stripe key of the tenant
-// it is given, whatever tenant ctx carries. The billing run, dunning and a
-// test-clock advance void on a ctx that holds livemode and no tenant, and
-// LiveStripeClient finds the key by the tenant on ctx.
+// it is given, whatever tenant ctx carries. The billing run and dunning void
+// on a ctx that holds livemode and no tenant, and LiveStripeClient finds the
+// key by the tenant on ctx.
 //
 // The credentials fake holds one key per (tenant, mode). A lookup with the
 // wrong tenant or the wrong mode finds no key, so nothing is sent.
@@ -564,7 +564,7 @@ func TestStopCollection_CancelsWithTheNamedTenantsCredentials(t *testing.T) {
 	inv.TenantID = "t_a"
 	inv.PaymentStatus = domain.PaymentFailed
 	inv.StripePaymentIntentID = "pi_declined"
-	// The ctx of the billing run, dunning and a test-clock catch-up.
+	// The ctx of the billing run and dunning.
 	background := postgres.WithLivemode(context.Background(), false)
 
 	stopper := func(creds *stubCredentials) (*Stripe, *routedStripe) {

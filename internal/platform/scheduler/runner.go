@@ -111,7 +111,7 @@ func leadOneTick(ctx context.Context, role leader.Role, interval time.Duration, 
 			led, err = false, nil
 		}
 	}()
-	// A tick runs in real time and binds no instant. Each job below it binds
-	// one per row: one read of the server's clock.
-	return gate.Lead(ctx, role, interval, func(ctx context.Context) { workFn(clock.WithRealTime(ctx)) })
+	// A tick drops any instant ctx carries. Each job below it binds one per
+	// row: one read of the server's clock.
+	return gate.Lead(ctx, role, interval, func(ctx context.Context) { workFn(clock.WithoutInstant(ctx)) })
 }

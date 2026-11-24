@@ -33,7 +33,7 @@ func TestFinalize_ManualInvoice_AnchorsIssuedAndDueToFinalize(t *testing.T) {
 		t.Fatalf("draft issued_at: got %v, want %v", inv.IssuedAt, t1)
 	}
 
-	// Operator finalizes later — advance the (test) clock.
+	// Operator finalizes later — advance the fake clock.
 	fake.Set(t2)
 	final, err := svc.Finalize(ctx, "t1", inv.ID)
 	if err != nil {

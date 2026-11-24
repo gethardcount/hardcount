@@ -36,7 +36,7 @@ func TestIngest_IsRecordedAtTheServersClock(t *testing.T) {
 
 // In one batch, each event binds its own instant: a read of the server's
 // clock each, so nothing one event bound carries to the next.
-func TestBatchIngest_EachEventIsDatedByItsOwnCustomer(t *testing.T) {
+func TestBatchIngest_EachEventBindsItsOwnInstant(t *testing.T) {
 	past := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
 	store := newMemStore()
 	svc := NewService(store)
@@ -140,7 +140,7 @@ func TestIngestCall_ChecksBothMappingsBeforeBuilding(t *testing.T) {
 // build's caller binds; on a context with no instant, build refuses with an
 // internal error, and the ingest writes nothing, rather than stamp the
 // machine's time.
-func TestBuild_RefusesAnUndecidedContext(t *testing.T) {
+func TestBuild_RefusesAContextWithNoInstant(t *testing.T) {
 	store := newMemStore()
 	svc := NewService(store)
 	_, err := svc.ingestAudited(testMode(), "t1", IngestInput{CustomerID: "cus_1", MeterID: "mtr_1", Quantity: dec(1)}, domain.UsageOriginAPI, nil)

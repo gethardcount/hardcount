@@ -135,14 +135,13 @@ type Service struct {
 	// clock is the server's clock: the router's clk, the one the engine
 	// bills by. Who binds a subscription action's time:
 	//   - a request, the API's door (api.clockDoor), with one read of the
-	//     server's clock; a create, the create route, with one read of this
-	//     clock (BindNow);
-	//   - the billing run, each subscription its own instant;
+	//     server's clock;
+	//   - the billing run and this service's jobs (trial expiry, pause
+	//     resume), each subscription its own instant;
 	//   - dunning's final action (a pause or a cancel), its run's time.
-	// Each entry point keeps that time. Work that arrives with no instant
-	// bound reads this clock once (clock.EnsureEffectiveNow). Without that
-	// read, two reads of the time in one action could differ, and a store's
-	// stamp could fall on another time than the action's.
+	// Each entry point keeps that time. Without one, two reads of the time in
+	// one action could differ, and a store's stamp could fall on another time
+	// than the action's.
 	clock     clock.Clock
 	settings  SettingsReader
 	customers CustomerReader
@@ -276,14 +275,6 @@ type InsideInvoiceGraceError struct {
 
 func (e *InsideInvoiceGraceError) Error() string {
 	return "the subscription's ended period is inside its invoice grace until " + e.Until.UTC().Format(time.RFC3339Nano)
-}
-
-// BindNow binds one read of the service's clock on ctx, unless ctx already
-// carries an instant (clock.EnsureEffectiveNow). The create route calls it
-// before Create runs, so all of the create's writes share one instant; it is
-// on the service because the service holds the clock.
-func (s *Service) BindNow(ctx context.Context) context.Context {
-	return clock.EnsureEffectiveNow(ctx, s.clock)
 }
 
 // tenantLocation resolves the tenant's billing timezone (ADR-077). The zone
@@ -668,8 +659,8 @@ type CreateInput struct {
 
 // Create creates a subscription that starts now, or starts its trial now,
 // and bills its first in-advance period when it has no trial. Its caller
-// binds the time first (BindNow, as the create route does), and Create reads
-// every instant from ctx, so all its writes share one.
+// binds the time first (the API's door does, for the create route), and
+// Create reads every instant from ctx, so all its writes share one.
 func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput) (domain.Subscription, error) {
 	code := strings.TrimSpace(input.Code)
 	displayName := strings.TrimSpace(input.DisplayName)
@@ -1207,7 +1198,7 @@ func (s *Service) AddItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscript
 // (changeItemUnderLock, or the swap's period CAS plus its item check), and
 // the result carries that state for the handler to price from (#1270).
 func (s *Service) UpdateItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscriptionID, itemID string, input UpdateItemInput) (ItemChangeResult, error) {
-	ctx, c, err := s.checkItemChange(ctx, tenantID, subscriptionID, itemID, input)
+	c, err := s.checkItemChange(ctx, tenantID, subscriptionID, itemID, input)
 	if err != nil {
 		return ItemChangeResult{}, err
 	}
@@ -1243,23 +1234,21 @@ type checkedItemChange struct {
 
 // checkItemChange runs the checks UpdateItemTx and UpdateItem both make
 // before their write, on reads outside the change's tx. Exactly one of
-// Quantity and NewPlanID must be set. It returns ctx bound to the
-// subscription's pin, so the change instant and a scheduled change's
-// effective date land in simulated time on a clock-pinned subscription.
+// Quantity and NewPlanID must be set.
 //
 // The plan checks gate a scheduled change too: a pending swap onto an
 // archived plan, a meter another subscription bills, another currency or
 // another bill timing would take effect at the next cycle boundary.
-func (s *Service) checkItemChange(ctx context.Context, tenantID, subscriptionID, itemID string, input UpdateItemInput) (context.Context, checkedItemChange, error) {
+func (s *Service) checkItemChange(ctx context.Context, tenantID, subscriptionID, itemID string, input UpdateItemInput) (checkedItemChange, error) {
 	if input.Quantity == nil && input.NewPlanID == "" {
-		return ctx, checkedItemChange{}, errs.Invalid("body", "one of quantity or new_plan_id is required")
+		return checkedItemChange{}, errs.Invalid("body", "one of quantity or new_plan_id is required")
 	}
 	if input.Quantity != nil && input.NewPlanID != "" {
-		return ctx, checkedItemChange{}, errs.Invalid("body", "quantity and new_plan_id cannot be set together; issue two requests")
+		return checkedItemChange{}, errs.Invalid("body", "quantity and new_plan_id cannot be set together; issue two requests")
 	}
 	sub, err := s.store.Get(ctx, tenantID, subscriptionID)
 	if err != nil {
-		return ctx, checkedItemChange{}, err
+		return checkedItemChange{}, err
 	}
 	// The item comes from the same read as sub.Items, which the swap's item
 	// check compares under the lock: a change that commits between two reads
@@ -1268,56 +1257,56 @@ func (s *Service) checkItemChange(ctx context.Context, tenantID, subscriptionID,
 	// name (RLS already keeps other tenants out).
 	item, ok := findItem(sub.Items, itemID)
 	if !ok {
-		return ctx, checkedItemChange{}, errs.ErrNotFound
+		return checkedItemChange{}, errs.ErrNotFound
 	}
 	if sub.Status != domain.SubscriptionActive {
-		return ctx, checkedItemChange{}, errs.InvalidState(fmt.Sprintf("Items can only be changed on an active subscription. This one is %s.", sub.Status))
+		return checkedItemChange{}, errs.InvalidState(fmt.Sprintf("Items can only be changed on an active subscription. This one is %s.", sub.Status))
 	}
 	c := checkedItemChange{sub: sub, item: item, now: s.clock.Now(ctx)}
 
 	if input.Quantity != nil {
 		if *input.Quantity < 1 {
-			return ctx, checkedItemChange{}, errs.Invalid("quantity", "must be >= 1")
+			return checkedItemChange{}, errs.Invalid("quantity", "must be >= 1")
 		}
 		// The "same as current" check runs under the lock, against the
 		// quantity the change is priced from.
-		return ctx, c, nil
+		return c, nil
 	}
 
 	if input.NewPlanID == item.PlanID {
-		return ctx, checkedItemChange{}, errs.Invalid("new_plan_id", "new plan is the same as current plan")
+		return checkedItemChange{}, errs.Invalid("new_plan_id", "new plan is the same as current plan")
 	}
 	// Skipped when PlanReader isn't wired (narrow unit tests).
 	if s.plans == nil {
-		return ctx, c, nil
+		return c, nil
 	}
 	currentPlan, perr := s.plans.GetPlan(ctx, tenantID, item.PlanID)
 	if perr != nil {
-		return ctx, checkedItemChange{}, errs.Invalid("items", fmt.Sprintf("plan %q not found", item.PlanID))
+		return checkedItemChange{}, errs.Invalid("items", fmt.Sprintf("plan %q not found", item.PlanID))
 	}
 	newPlan, perr := s.plans.GetPlan(ctx, tenantID, input.NewPlanID)
 	if perr != nil {
-		return ctx, checkedItemChange{}, errs.Invalid("new_plan_id", fmt.Sprintf("plan %q not found", input.NewPlanID))
+		return checkedItemChange{}, errs.Invalid("new_plan_id", fmt.Sprintf("plan %q not found", input.NewPlanID))
 	}
 	// Swapping ONTO an archived plan is new business on a retired price
 	// (ADR-067) — same guard as subscription.Create. Existing items
 	// already on an archived plan keep billing (archive ≠ cancel).
 	if newPlan.Status == domain.PlanArchived {
-		return ctx, checkedItemChange{}, errs.InvalidState(fmt.Sprintf("plan %q is archived — pick an active plan", input.NewPlanID))
+		return checkedItemChange{}, errs.InvalidState(fmt.Sprintf("plan %q is archived — pick an active plan", input.NewPlanID))
 	}
 	// Double-billing guard: the swapped-to plan's meters must be
 	// disjoint from every live sub of the customer and this sub's
 	// OTHER items. The item being swapped is excluded — its outgoing
 	// plan stops billing when the new one starts.
 	if err := s.rejectMeterOverlap(ctx, tenantID, sub.CustomerID, subscriptionID, itemID, []string{input.NewPlanID}); err != nil {
-		return ctx, checkedItemChange{}, err
+		return checkedItemChange{}, err
 	}
 	// Currency pin (ADR-100): a swap may not cross currencies — the
 	// proration path subtracts old-plan cents from new-plan cents as
 	// raw integers, and the sub's other items + profile + other subs
 	// must stay coherent. Outgoing plan resolved via the swapped item.
 	if err := s.guardSwapCurrency(ctx, tenantID, sub, subscriptionID, itemID, input.NewPlanID); err != nil {
-		return ctx, checkedItemChange{}, err
+		return checkedItemChange{}, err
 	}
 	// Mixed-interval guard: the engine's hybrid invoice and the per-sub
 	// period anchor assume one interval and one bill timing across items.
@@ -1334,7 +1323,7 @@ func (s *Service) checkItemChange(ctx context.Context, tenantID, subscriptionID,
 		}
 	}
 	if err := s.rejectMixedItemIntervals(ctx, tenantID, hypothetical); err != nil {
-		return ctx, checkedItemChange{}, err
+		return checkedItemChange{}, err
 	}
 	// Both legs default to in_arrears for pre-ADR-031 plans, matching the
 	// engine's lenient defaults.
@@ -1352,7 +1341,7 @@ func (s *Service) checkItemChange(ctx context.Context, tenantID, subscriptionID,
 	// new subscription on the target plan. The multi-item check above cannot
 	// catch it on a single-item subscription, so it is checked here.
 	if currentTiming != newTiming {
-		return ctx, checkedItemChange{}, errs.Invalid("new_plan_id", fmt.Sprintf(
+		return checkedItemChange{}, errs.Invalid("new_plan_id", fmt.Sprintf(
 			"bill_timing change is not supported on plan-swap (current %s, new %s); cancel the subscription and start a new one with the target plan",
 			currentTiming, newTiming))
 	}
@@ -1370,7 +1359,7 @@ func (s *Service) checkItemChange(ctx context.Context, tenantID, subscriptionID,
 	if input.Immediate && currentInterval != newInterval {
 		c.swapInterval, c.swapTiming = newInterval, newTiming
 	}
-	return ctx, c, nil
+	return c, nil
 }
 
 // changeItemUnderLock writes a quantity change, a same-interval immediate
@@ -1566,7 +1555,7 @@ func sameIntervals(a, b []domain.ItemInterval) bool {
 // swap's refund, plan write, period CAS and new-period invoice commit
 // together (ADR-118).
 func (s *Service) UpdateItem(ctx context.Context, tenantID, subscriptionID, itemID string, input UpdateItemInput) (ItemChangeResult, error) {
-	ctx, c, err := s.checkItemChange(ctx, tenantID, subscriptionID, itemID, input)
+	c, err := s.checkItemChange(ctx, tenantID, subscriptionID, itemID, input)
 	if err != nil {
 		return ItemChangeResult{}, err
 	}
@@ -1711,8 +1700,8 @@ func (s *Service) applyCrossIntervalPlanSwapTx(
 		}
 		// In arrears the swap cuts the period to [start, now), and that
 		// period's invoice takes the key (sub, start, now). A threshold
-		// invoice ending at now holds it (on a test clock a fire and a
-		// swap share an instant), so the cut period could not be invoiced.
+		// invoice ending at now (a fire at the swap's instant) holds it, so
+		// the cut period could not be invoiced.
 		// The key is stored to the microsecond, so compare there. The
 		// in_advance swap's invoice starts at now, so it does not clash.
 		if billedThrough != nil && newTiming != domain.BillInAdvance && billedThrough.Equal(now.Truncate(time.Microsecond)) {
@@ -1853,8 +1842,7 @@ func (s *Service) finishReliefThenCollect(ctx context.Context, sub domain.Subscr
 		// invoice was queued for collection when it was created, and its tax
 		// commit has a sweep. A billing run issues relief drafts before it
 		// collects queued invoices (clawback_issue before the auto-charge
-		// step; on a test clock the catch-up does the same, and stops before
-		// the charge when a note fails). Not covered in real time: a note
+		// step). Not covered: a note
 		// that keeps failing is followed by a full charge on the next run; a
 		// run already inside its auto-charge step when this commits
 		// charges the invoice before the note is retried; and a draft Issue
@@ -1986,11 +1974,9 @@ func (s *Service) RemoveItemTx(ctx context.Context, tx *sql.Tx, tenantID, subscr
 // cancelActorLabel derives the timeline's "canceled by …" vocabulary
 // (ADR-090 D16). The machinery that decided the cancel names itself via
 // WithCancelOrigin (the dunning adapter stamps "dunning"), and that stamp
-// wins over the request identity: dunning can run inside a request, such as
-// a test-clock advance made with an API key, and the cancel is still
-// dunning's. Without a stamp, a dashboard session or API key reads as
-// "operator", a stamped customer actor as "customer", and a background
-// cancel is honestly "system".
+// wins over a request identity on ctx. Without a stamp, a dashboard session
+// or API key reads as "operator", a stamped customer actor as "customer",
+// and a background cancel is honestly "system".
 //
 // The SAME function feeds the outbound subscription.canceled webhook
 // (postgres.go, enqueued in the cancel tx), so the webhook and the audit
@@ -2262,7 +2248,7 @@ func (s *Service) CancelForDunning(ctx context.Context, tenantID, id string) (do
 const cancelAttempts = 2
 
 // cancel runs cancelOnce up to cancelAttempts times, each on the caller's
-// instant (the door's, dunning's or a test clock's), so a second attempt
+// instant (the door's or dunning's), so a second attempt
 // cancels at the same instant as the first.
 func (s *Service) cancel(ctx context.Context, tenantID, id string, grace time.Duration) (domain.Subscription, int64, error) {
 	var err error
@@ -2365,11 +2351,11 @@ func (s *Service) cancelOnce(ctx context.Context, tenantID, id string, grace tim
 		return domain.Subscription{}, 0, errAlreadyTerminated(sub.Status)
 	}
 
-	// The cancel instant is the caller's (the door's, dunning's or a test
-	// clock's). Priced from a row whose period starts after it, the final
-	// invoice would bill nothing and the relief would skip the new period's
-	// prebill, while the compare-and-set passes on that row: the subscription
-	// would be canceled with the new period unrelieved. So that row is not
+	// The cancel instant is the caller's (the door's or dunning's). Priced
+	// from a row whose period starts after it, the final invoice would bill
+	// nothing and the relief would skip the new period's prebill, while the
+	// compare-and-set passes on that row: the subscription would be canceled
+	// with the new period unrelieved. So that row is not
 	// planned. The next attempt, on the same instant, refuses it again, and
 	// the cancel answers ErrWatermarkMoved (a 409); a new request takes a new
 	// instant. A trialing row is planned: an instant before the first paid
@@ -2416,8 +2402,6 @@ func (s *Service) cancelOnce(ctx context.Context, tenantID, id string, grace tim
 				"canceled_by": cancelActorLabel(ctx),
 			}
 			addReliefMeta(meta, r, currency)
-			// No sim field: the Logger derives the sim axis from the clock
-			// the cancel's time was decided on (see Service.clock).
 			if auditErr := s.audit.LogInTx(ctx, tx, audit.Entry{
 				Action:        domain.AuditActionCancel,
 				ResourceType:  "subscription",
@@ -2609,8 +2593,7 @@ func (s *Service) ScheduleCancel(ctx context.Context, tenantID, id string, input
 		return domain.Subscription{}, err
 	}
 
-	// cancel_at must be after this time: on a test clock its frozen time,
-	// not the machine's, which may be far ahead of it.
+	// cancel_at must be after this time.
 	now := s.clock.Now(ctx)
 	var cancelAt *time.Time
 	if input.CancelAt != nil {
@@ -3128,13 +3111,11 @@ func (s *Service) ProcessExpiredPauseCollections(ctx context.Context, batch int)
 // whether it did. The clear is a compare-and-set on the pause as listed (Store.ResumeLiftedPause):
 // the "Collection resumed" row and subscription.collection_resumed commit
 // with it, triggered_by "schedule" for an operator's timed pause or
-// "payment" for a dunning pause, resumed_at the CONTRACTED resumes_at (on
-// a test clock, also the audit row's simulated instant), not when the scan
-// ran. When another writer got to the row after the list (a sibling
+// "payment" for a dunning pause, resumed_at the CONTRACTED resumes_at, not
+// when the scan ran. When another writer got to the row after the list (a sibling
 // leader, the operator, a new pause), the clear misses and the row is
 // skipped: that writer announced what it did.
 func (s *Service) resumeListedPause(ctx context.Context, sub domain.Subscription) (bool, error) {
-	// The store binds a test-clock row's ctx to its resumes_at.
 	_, err := s.store.ResumeLiftedPause(ctx, sub.TenantID, sub, s.resumeAudit())
 	if errors.Is(err, ErrNotPaused) {
 		slog.InfoContext(ctx, "pause collection changed since the list — skipping resume announcement", "subscription_id", sub.ID)
@@ -3146,8 +3127,8 @@ func (s *Service) resumeListedPause(ctx context.Context, sub domain.Subscription
 	return true, nil
 }
 
-// resumeListedPauses resumes the pauses of one page of the real-time list,
-// which ProcessExpiredPauseCollections reads one page of.
+// resumeListedPauses resumes the pauses of one page of the list
+// ProcessExpiredPauseCollections reads.
 func (s *Service) resumeListedPauses(ctx context.Context, listed []domain.Subscription) (int, []error) {
 	var (
 		processed int

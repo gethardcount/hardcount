@@ -10,10 +10,9 @@ import (
 )
 
 // INVOICE_GRACE_PERIOD (ADR-120) on the engine's own runs, on real Postgres.
-// The two wall-clock billing runs close a period only once the grace has
-// passed after its end; the operator's one-subscription close (BillDueNow,
-// behind retry-billing and every subscription write's pre-close) and the
-// test-clock run do not wait. The HTTP-level cases (late usage billed, a
+// The two billing runs close a period only once the grace has passed after
+// its end; the operator's one-subscription close (BillDueNow, behind
+// retry-billing and every subscription write's pre-close) does not wait. The HTTP-level cases (late usage billed, a
 // mid-period cancel_at, POST /v1/billing/run, immediate cancel) are in
 // internal/api/invoice_grace_e2e_test.go.
 

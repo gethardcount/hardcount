@@ -140,7 +140,7 @@ func TestItemChangeTrigger_SoftDeleteEmitsRemove(t *testing.T) {
 		t.Errorf("remove row provenance: plan=%q qty=%d, want %q/3", rm.fromPlan, rm.fromQty, plan.ID)
 	}
 	if !rm.changedAt.Equal(deletedAt) {
-		t.Errorf("remove changed_at: %v, want the deleted_at stamp %v (honors sim-time)", rm.changedAt, deletedAt)
+		t.Errorf("remove changed_at: %v, want the deleted_at stamp %v", rm.changedAt, deletedAt)
 	}
 
 	// Bookkeeping on the dead row emits nothing.

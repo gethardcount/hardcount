@@ -8,7 +8,7 @@ New and changed code follows this page. Older code does not all follow it yet; s
 
 [CI runs these](../../CONTRIBUTING.md#what-ci-runs-on-your-pr). forbidigo and nolintlint are linters in [`.golangci.yml`](../../.golangci.yml). The rest are tests in [`internal/arch`](../../internal/arch), and each top comment says how to pass.
 
-- Where records can run on a test clock, time comes from the clock, not `time.Now()`: `s.clock.Now(ctx)` in a service, `clock.Now(ctx)` in a store. `.golangci.yml` lists the packages. (forbidigo)
+- In the billing packages, time comes from the clock, not `time.Now()`: `s.clock.Now(ctx)` in a service, `clock.Now(ctx)` in a store. So one piece of work reads one time, and a test can fix it. `.golangci.yml` lists the packages. (forbidigo)
 - In `internal/subscription` and `internal/billing`, a credit or void for a whole billing period uses `FindFundingInvoicesForPeriod`, because one period can have several invoices. A real single-invoice case says why: `//nolint:forbidigo // single-invoice-ok: <reason>`. (forbidigo)
 - Production code binds a real instant only by reading a clock: `clock.EnsureEffectiveNow`, or `clock.AtArrival` for a payment's result. `clock.WithEffectiveNow` is for tests; a place that must name an instant says why: `//nolint:forbidigo // real-instant: <reason>`. (forbidigo)
 - A lint waiver names its linter and a reason: `//nolint:forbidigo // wall-clock: <reason>`. (nolintlint)

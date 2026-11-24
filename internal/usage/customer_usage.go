@@ -77,17 +77,6 @@ func NewCustomerUsageService(
 	}
 }
 
-// readTime returns ctx with the read's one instant bound: the instant the
-// API's door bound, or, on the public cost dashboard (GetByToken), whose
-// route the door does not bind, one read of the server's clock (the usage
-// service's) here. So the window, the rater and the buckets all read one
-// instant. The constructors
-// guarantee the chain: NewCustomerUsageService requires the usage service,
-// and NewService gives it the real clock until SetClock replaces it.
-func (s *CustomerUsageService) readTime(ctx context.Context) context.Context {
-	return clock.EnsureEffectiveNow(ctx, s.usage.clock)
-}
-
 // SetRater wires the billing rater. The engine is built after this service,
 // so it is set after construction.
 func (s *CustomerUsageService) SetRater(r UsageRater) { s.rater = r }
@@ -225,8 +214,6 @@ func (s *CustomerUsageService) Get(ctx context.Context, tenantID, customerID str
 	if s.rater == nil {
 		return CustomerUsageResult{}, fmt.Errorf("customer usage: rater not wired")
 	}
-	ctx = s.readTime(ctx)
-
 	if _, err := s.customers.Get(ctx, tenantID, customerID); err != nil {
 		return CustomerUsageResult{}, err
 	}

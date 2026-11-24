@@ -141,7 +141,7 @@ func thresholdCandidateKey(sub domain.Subscription) walk.Key { return walk.Key{I
 // and — when crossed — fires the early finalize via fireThreshold. through is
 // one invoice grace before now on the wall clock (thresholdUsageThrough).
 func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) (bool, error) {
-	// One instant for this subscription's work (a catch-up's clock is kept).
+	// One instant for this subscription's work; the tick binds none.
 	ctx = clock.EnsureEffectiveNow(ctx, e.clock)
 	live, err := postgres.Livemode(ctx)
 	if err != nil {
@@ -462,8 +462,7 @@ func (e *Engine) noteThresholdDeferred(ctx context.Context, sub domain.Subscript
 // ADR-116.) Idempotent by construction (the gate re-checks live state;
 // MarkPaid's already-paid branch is a no-op) and best-effort: a failure WARNs
 // and the same probe re-enters next tick.
-// The paidAt argument is the caller's effective now (test-clock aware) so a
-// healed simulated invoice's paid_at stays in the simulation's time domain.
+// The paidAt argument is the scan's instant, written as paid_at.
 func (e *Engine) healStrandedZeroDue(ctx context.Context, tenantID string, inv domain.Invoice, paidAt time.Time) {
 	if inv.Status != domain.InvoiceFinalized ||
 		inv.PaymentStatus != domain.PaymentPending ||
@@ -806,7 +805,7 @@ func (e *Engine) fireThreshold(ctx context.Context, sub domain.Subscription, eva
 		BillingPeriodEnd:   through,
 		IssuedAt:           &now,
 		DueAt:              &dueAt,
-		// CreatedAt on test-clock time — keeps engine-driven rows
+		// CreatedAt = now, as IssuedAt — keeps engine-driven rows
 		// internally consistent (Stripe / Lago / Orb pattern).
 		CreatedAt:          now,
 		NetPaymentTermDays: netDays,

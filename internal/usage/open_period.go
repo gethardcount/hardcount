@@ -64,7 +64,7 @@ import (
 // release. Ingest reads the open periods, with each plan's prices at its pin,
 // BEFORE it writes the event, and that order is what keeps after_close true.
 // Every writer of a period start (the cycle close, BillDueNow, a
-// cross-interval swap, a test-clock advance) and the threshold fire's
+// cross-interval swap) and the threshold fire's
 // watermark invoice commit in the transaction that froze that window, after
 // reading its usage. So when the read shows the window frozen, it was frozen
 // before this event existed, and nothing counted it.

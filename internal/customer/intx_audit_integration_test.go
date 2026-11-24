@@ -26,9 +26,9 @@ import (
 //  2. a NONEXISTENT customer id (zero-row UPDATE) emits NOTHING and returns nil
 //     — the FABRICATED-EVIDENCE class: the hook used to write a
 //     `payment_setup_completed` row for a customer whose row was never written
-//     (torn down by a test-clock delete, or on the other livemode plane under
-//     RLS), permanently recording a mutation that never happened in an
-//     append-only compliance log;
+//     (an unknown id, or on the other livemode plane under RLS), permanently
+//     recording a mutation that never happened in an append-only compliance
+//     log;
 //  3. an emit failure ABORTS the mapping write (shared fate) — no
 //     stripe_customer_id lands unrecorded.
 //

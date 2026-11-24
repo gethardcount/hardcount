@@ -14,7 +14,6 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
 // ---- In-memory fakes ----
@@ -108,14 +107,9 @@ type fakeCheckout struct {
 	lastTenant  string
 	err         error
 	url         string
-	// at is the instant bound on the ctx the checkout was opened with, and
-	// bound whether there was one.
-	at    time.Time
-	bound bool
 }
 
 func (f *fakeCheckout) CreateInvoicePaymentSession(ctx context.Context, tenantID string, inv domain.Invoice, successURL, cancelURL string) (string, error) {
-	f.at, f.bound = clock.EffectiveNow(ctx)
 	f.lastInvoice = inv
 	f.lastSuccess = successURL
 	f.lastCancel = cancelURL

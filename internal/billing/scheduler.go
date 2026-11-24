@@ -187,9 +187,9 @@ func (s *Scheduler) SetClawbackRetrier(r ClawbackRetrier) {
 	s.clawbackRetrier = r
 }
 
-// SetTrialExpirer wires the wall-clock trial-expiry phase (Bug #8).
-// Each tick scans non-clock-pinned trialing subs past their
-// trial_end_at and flips status to active at the trial-end instant.
+// SetTrialExpirer wires the trial-expiry phase (Bug #8). Each tick scans
+// trialing subs past their trial_end_at and flips status to active at the
+// trial-end instant.
 // Without this, the engine flips status only at cycle close — for
 // calendar billing that's the next month boundary, ~30 days late.
 func (s *Scheduler) SetTrialExpirer(t TrialExpirer) {

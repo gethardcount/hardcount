@@ -189,8 +189,8 @@ type Service struct {
 	// the service: a request's by the API's door (api.clockDoor), with one
 	// read of the server's clock; a job's row, its own; dunning's final
 	// action, its run's. Each entry point keeps that time. Work that arrives
-	// with no instant bound (a job's row, or a function that binds its own
-	// time, before it binds) reads this clock once (clock.EnsureEffectiveNow).
+	// with no instant bound (a job's row, or the connect fan-out's) reads this
+	// clock once (clock.EnsureEffectiveNow).
 	// Without that read, two reads of the time in one action could differ,
 	// and a store's stamp could fall on another time than the action's.
 	clock          clock.Clock
@@ -511,8 +511,8 @@ func (s *Service) SetCustomerSearcher(c CustomerSearcher) {
 //
 // Returns the two figures separately because only one of them is recoverable:
 // drawable is what void still cancels, consumed is gone for good. `now` is the
-// action's time (see Service.clock), not the machine's, so a clock invoice
-// judges its grant's expiry on the same axis the drawdown does.
+// action's time (see Service.clock), so the grant's expiry is judged at the
+// same instant the drawdown uses.
 type CommitGrantReader interface {
 	CommitGrantExposure(ctx context.Context, tenantID, invoiceID string, now time.Time) (drawableCents, consumedCents int64, err error)
 }
@@ -768,9 +768,8 @@ type CreateInput struct {
 	LineItems []AddLineItemInput `json:"line_items,omitempty"`
 }
 
-// Create creates a one-off draft invoice. It binds its one instant after the
-// reads that check the body and before any write; every instant it stamps
-// comes from it.
+// Create creates a one-off draft invoice. Every instant it stamps is the one
+// its caller bound on ctx.
 func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput) (domain.Invoice, error) {
 	if input.CustomerID == "" {
 		return domain.Invoice{}, errs.Required("customer_id")
@@ -846,9 +845,8 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		netDays = ts.NetPaymentTerms
 	}
 
-	// One instant for the whole create, bound before any write: the store's
+	// The create runs on the instant the API's door bound: the store's
 	// created_at reads it as the period, issue and due dates do.
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	now := s.clock.Now(ctx)
 
 	// Validate and build every line before the create transaction opens.
@@ -990,7 +988,7 @@ func (s *Service) SetCreditApplier(c CreditApplier) {
 
 // ApplyCreditBalance drains the customer's credit balance against a
 // FINALIZED invoice and returns the refreshed row (ADR-088). The ledger
-// entry is at the time the caller decided, a clock invoice's clock time.
+// entry is at the instant bound on ctx.
 // No-op (invoice returned unchanged) when no applier is wired, nothing is
 // due, or the invoice isn't finalized — a draft's credits wait for
 // finalize. An apply error is returned for the caller to route to the
@@ -1021,7 +1019,7 @@ func (s *Service) ApplyCreditBalance(ctx context.Context, tenantID, id string) (
 // still-pending, zero-due invoice settles — the store's MarkPaid guard
 // additionally rejects drafts and non-ok tax (the DEMO-000906 class), so a
 // racing tax-pending draft can never jump to paid through here. paid_at is
-// at the time the caller decided, so a clock invoice settles on its clock.
+// the instant bound on ctx.
 func (s *Service) SettleZeroDue(ctx context.Context, tenantID, id string) (domain.Invoice, error) {
 	inv, err := s.store.Get(ctx, tenantID, id)
 	if err != nil {
@@ -1643,12 +1641,11 @@ func (s *Service) Finalize(ctx context.Context, tenantID, id string) (domain.Inv
 	}
 	// Anchor issue + due dates to the finalize moment for operator-composed
 	// (manual) invoices, mirroring Stripe's finalized_at: a manual draft is
-	// "issued" when the operator finalizes it — possibly on a later test-clock
-	// instant than draft-create — and Net terms run from issuance. ctx
-	// carries the time the caller decided (a clock invoice's clock time),
-	// so clock.Now is that time. Net term is the
-	// value the draft was created with. A cycle draft keeps the dates the
-	// engine built it with (the FinalizeDraft branch).
+	// "issued" when the operator finalizes it, possibly long after
+	// draft-create, and Net terms run from issuance: the finalize's instant,
+	// bound on ctx. Net term is the value the draft was created with. A
+	// cycle draft keeps the dates the engine built it with (the
+	// FinalizeDraft branch).
 	var finishRelief func(context.Context)
 	onFinalized := s.finalizeHook(ctx, tenantID, &finishRelief)
 	var finalized domain.Invoice
@@ -2568,8 +2565,8 @@ func buildLineItem(input AddLineItemInput, currency string) (domain.InvoiceLineI
 }
 
 // RetryTax routes a "Retry tax" action through the billing engine: the
-// operator's button, the tax_retry sweep, the test-clock catch-up and the two
-// fan-outs (Stripe connect, billing-profile save). When the tax resolves on an
+// operator's button, the tax_retry sweep and the two fan-outs (Stripe
+// connect, billing-profile save). When the tax resolves on an
 // engine-generated draft (shouldAutoFinalizeAfterRetry), it finalizes the
 // draft inside the tax write's transaction (the engine's hook). The tax and
 // the finalize commit together or not at all, so no engine draft is left
@@ -2605,7 +2602,7 @@ func (s *Service) RetryTax(ctx context.Context, tenantID, invoiceID string) (dom
 		// send. It stays a draft until an operator finalizes it: resuming
 		// collection does not finalize it (Stripe: after a resume, "set
 		// auto_advance=true on each draft invoice"). The pause is read at
-		// the invoice's now (its test clock's on a simulated one).
+		// the instant bound on ctx.
 		paused, err := s.store.CollectionPausedTx(ctx, tx, taxed.ID, s.clock.Now(ctx))
 		if err != nil {
 			hookErr = fmt.Errorf("read whether collection is paused: %w", err)
@@ -2656,8 +2653,7 @@ func (s *Service) RetryTax(ctx context.Context, tenantID, invoiceID string) (dom
 	// Still owed after finalize: nothing more to do here. The finalize
 	// queued the invoice for collection (auto_charge_pending), and the
 	// auto-charge sweep is its collector: credits, the card, a decline into
-	// dunning, or the setup-link email. The catchup's Phase 2 → Phase 3
-	// order collects it in the same Advance.
+	// dunning, or the setup-link email.
 	return s.attachAttention(stepsCtx, final), nil
 }
 
@@ -2988,8 +2984,8 @@ func (s *Service) retryTaxOne(ctx context.Context, inv domain.Invoice) error {
 	return nil
 }
 
-// processTaxRetryBatch retries tax on one page of the real-time list, which
-// RetryPendingTax reads one page of.
+// processTaxRetryBatch retries tax on one page of the list RetryPendingTax
+// reads.
 func (s *Service) processTaxRetryBatch(ctx context.Context, stuck []domain.Invoice) (int, []error) {
 	var (
 		processed int

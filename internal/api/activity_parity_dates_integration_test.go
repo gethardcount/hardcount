@@ -259,10 +259,10 @@ func TestActivityDates_BornFinalized(t *testing.T) {
 
 // TestActivityDates_HostedPageAttempts is P-2 (ADR-128 decision 7): a charge
 // attempt the settle path records for a PaymentIntent Hardcount did not make
-// (the hosted payment page) is dated at the invoice's time, like any other act
-// on the invoice. Writes go through the production payment adapter's settle
-// (the webhook's entry point, on a ctx with no clock) and the real invoice
-// store.
+// (the hosted payment page) is dated at the settle's time, when Stripe's
+// answer arrives. Writes go through the production payment adapter's settle
+// (the webhook's entry point, on a ctx with no instant bound) and the real
+// invoice store.
 //
 // Collision: a Hardcount-made dunning retry whose failure webhook commits before
 // the charge call records its attempt. The early report stamps the time it was

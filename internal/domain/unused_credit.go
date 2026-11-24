@@ -73,8 +73,8 @@ func creditShareFor(inv Invoice, gross int64) CreditShare {
 //     item B. With no itemID (cancel, swap: the whole subscription) every
 //     funding invoice is a candidate.
 //   - Order. Newest first by CreatedAt. On a tie the subscription_update
-//     invoice goes first, because it is the later price level (a test-clock
-//     catch-up stamps every invoice it makes with one instant). Then the
+//     invoice goes first, because it is the later price level (one action
+//     stamps every invoice it makes with its one instant). Then the
 //     later row in sources' order goes first (FindFundingInvoicesForPeriod
 //     orders base first).
 //   - Room. A paid invoice, or one whose charge is in flight, can take what

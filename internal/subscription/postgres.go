@@ -697,10 +697,10 @@ func (s *PostgresStore) ClearScheduledCancellation(ctx context.Context, tenantID
 // on the engine's closer tx, as its FIRST statement, so the final invoice the
 // engine inserts afterwards shares fate with the flip. Differs from
 // CancelAtomicWithBill in that (a) it accepts the engine's close instant as
-// the canceled_at timestamp so the audit trail stays consistent under test
-// clocks, (b) it clears the schedule fields so a subsequent cycle tick is a
-// no-op rather than a confusing re-fire attempt, and (c) it runs on the
-// caller's transaction.
+// the canceled_at timestamp, so canceled_at is the instant the close bills
+// to, not when its tick ran, (b) it clears the schedule fields so a
+// subsequent cycle tick is a no-op rather than a confusing re-fire attempt,
+// and (c) it runs on the caller's transaction.
 //
 // The CAS proves `expected` (period start + watermark) as well as
 // status='active': a closer that planned this terminal close from a period
@@ -967,12 +967,12 @@ func (s *PostgresStore) resumeIfLiftedTx(ctx context.Context, tx *sql.Tx, locked
 // (pause_collection_invoice_id set or not). Every writer that replaces a
 // pause writes a new resumes_at (none, or a future one) or clears it, and a
 // payment stamps resumes_at only on a dunning pause with none. So the pair
-// changes whenever the pause does, except on a test clock, where a payment
-// can lift a new dunning pause at the very instant an operator's timed
-// pause reached its date: the setter tells them apart, and with it the
-// trigger. Two dunning pauses lifted at the same instant are not told
-// apart, and need not be: the resume is the same (payment, at that
-// instant). The invoice id is not part of the key for that reason.
+// changes whenever the pause does, except when a payment lifts a new
+// dunning pause at the very instant an operator's timed pause reached its
+// date: the setter tells them apart, and with it the trigger. Two dunning
+// pauses lifted at the same instant are not told apart, and need not be:
+// the resume is the same (payment, at that instant). The invoice id is not
+// part of the key for that reason.
 //
 // ok is false when the CAS misses: the pause changed since it was listed,
 // and nothing is written or announced.
@@ -3406,8 +3406,8 @@ func (s *PostgresStore) CountLiveSubsByPlan(ctx context.Context, tenantID, planI
 //
 // Range is exclusive-left, inclusive-right: a change exactly at
 // periodEnd (a scheduled plan swap firing at the boundary) belongs to
-// the closing period, NOT the next period. Same-instant rows (frozen
-// sim time: an add and a plan swap can share one changed_at) tie-break
+// the closing period, NOT the next period. Same-instant rows (one
+// action's writes share its instant) tie-break
 // by wall-clock created_at — ids are random hex and carry no sequence,
 // and id-ordering was observed on real data putting a 'plan' row
 // before its own item's 'add', which walks the segments at the WRONG

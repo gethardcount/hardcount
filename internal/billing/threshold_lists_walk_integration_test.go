@@ -83,7 +83,7 @@ func TestListWithThresholds_WalkReturnsEveryRowOnce(t *testing.T) {
 	store := subscription.NewPostgresStore(db)
 	ids := seedThresholdSubs(t, db, ctx, tenantID, 5)
 
-	// The real-time list reads every tenant in the mode, so other tests' rows
+	// The list reads every tenant in the mode, so other tests' rows
 	// are walked too; only ours are counted.
 	seen := walkThresholds(t, ctx, "ListWithThresholds", func(ctx context.Context, after walk.Key, limit int) ([]domain.Subscription, error) {
 		return store.ListWithThresholds(ctx, false, after.ID, limit)

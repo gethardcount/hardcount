@@ -11,11 +11,8 @@ Making the billing path simpler to read and harder to get wrong, one part at
 a time. A part is finished when each thing is done one way, nothing falls
 back silently, and what nobody uses is gone.
 
-- **Done:** API keys, and the path a request travels.
-- **In progress:** removing test clocks. To see a customer's invoice before
-  its period ends, use the upcoming invoice; to issue a test customer's
-  invoice now, cancel its subscription
-  ([first invoice](first-invoice.md#steps)).
+- **Done:** API keys, the path a request travels, and time: one piece of
+  work reads one time.
 - **After that:** signing in, then subscriptions, invoices, payments and
   dunning.
 

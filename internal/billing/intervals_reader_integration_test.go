@@ -242,19 +242,19 @@ func intervalCorpus() []intervalScenario {
 			"base_fee|si-a - base fee (qty 1)|1|3100|2026-05-01T00:00:00Z|2026-06-01T00:00:00Z",
 			"base_fee|si-c - base fee (qty 1, prorated 25/31 days)|1|7500|2026-05-07T00:00:00Z|2026-06-01T00:00:00Z",
 		}, build: func(t *testing.T, f *parityFixture) domain.Subscription {
-			// A frozen sim clock lands an add and a plan swap on ONE
-			// instant — the shape that exposed the id-order tie bug on
-			// real data. The reader must bill the POST-swap plan.
+			// An add and a plan swap bound to ONE instant — the shape
+			// that exposed the id-order tie bug on real data. The reader
+			// must bill the POST-swap plan.
 			pA := f.plan(t, "si-a", 3100)
 			pB := f.plan(t, "si-b", 6200)
 			pC := f.plan(t, "si-c", 9300)
 			sub := f.activeSub(t, "sub-si", parityPS, domain.SubscriptionItem{PlanID: pA.ID, Quantity: 1})
-			frozen := clock.WithEffectiveNow(f.ctx, day(6))
-			it, err := f.subs.AddItem(frozen, f.tenantID, domain.SubscriptionItem{SubscriptionID: sub.ID, PlanID: pB.ID, Quantity: 1})
+			bound := clock.WithEffectiveNow(f.ctx, day(6))
+			it, err := f.subs.AddItem(bound, f.tenantID, domain.SubscriptionItem{SubscriptionID: sub.ID, PlanID: pB.ID, Quantity: 1})
 			if err != nil {
 				t.Fatalf("add: %v", err)
 			}
-			if _, err := f.subs.ApplyItemPlanImmediately(frozen, f.tenantID, it.ID, pC.ID, day(6)); err != nil {
+			if _, err := f.subs.ApplyItemPlanImmediately(bound, f.tenantID, it.ID, pC.ID, day(6)); err != nil {
 				t.Fatalf("same-instant swap: %v", err)
 			}
 			return sub
