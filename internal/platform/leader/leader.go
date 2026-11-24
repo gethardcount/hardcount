@@ -28,8 +28,8 @@ import (
 	"time"
 )
 
-// Role names one singleton loop. The list is pinned to migration 0174's
-// CHECK constraint by TestLease_RolesSeededMatchGoConstants.
+// Role names one singleton loop. The list is pinned to leader_leases' role
+// CHECK by TestLease_RolesMatchCheckConstraint.
 type Role string
 
 const (
@@ -38,13 +38,10 @@ const (
 	RoleWebhookOutbox   Role = "webhook_outbox"
 	RoleEmailOutbox     Role = "email_outbox"
 	RoleWebhookDelivery Role = "webhook_delivery"
-	// RoleTestClockCatchup has no runner: it stays while the leases CHECK
-	// names it.
-	RoleTestClockCatchup Role = "testclock_catchup"
 )
 
 // Roles is every role a binary may lead.
-var Roles = []Role{RoleBilling, RoleDunning, RoleWebhookOutbox, RoleEmailOutbox, RoleWebhookDelivery, RoleTestClockCatchup}
+var Roles = []Role{RoleBilling, RoleDunning, RoleWebhookOutbox, RoleEmailOutbox, RoleWebhookDelivery}
 
 // The lease timings are compiled in, like the tick interval. A mis-set TTL
 // would mean two leaders at once with no error, so it is not a setting.

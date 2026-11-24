@@ -67,7 +67,9 @@ func TestNoDraftSubscriptions_UpAndDown(t *testing.T) {
 		WHERE id IN ('sub_trialing', 'sub_active', 'sub_canceled')`
 	othersBefore := noDraftScalar[string](t, db, others)
 
-	if err := up(ctx, dsn, migrationFiles()); err != nil {
+	// Up through this migration and its validate (00236) only: a later one
+	// drops columns the row compare above reads.
+	if err := up(ctx, dsn, filesBefore(t, noDraftVersion+2)); err != nil {
 		t.Fatalf("Up: %v", err)
 	}
 

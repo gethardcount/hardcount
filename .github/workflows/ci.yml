@@ -301,8 +301,8 @@ jobs:
 
   # Golden path: the first-invoice tutorial's own commands, then the README
   # quickstart + scripts/demo.sh, executed for real.
-  # This is the whole wedge chain in one run — recipe → test-clock customer →
-  # LiteLLM-shaped token ingest → provider cost rates → simulated month →
+  # This is the whole wedge chain in one run — recipe → customer →
+  # LiteLLM-shaped token ingest → provider cost rates → a billed period →
   # finalized invoice with per-(model, token_type) lines + PDF → margin
   # report. demo.sh fails loudly at the first API mismatch, so this job is
   # what keeps the front door structurally unable to lie again (it rotted

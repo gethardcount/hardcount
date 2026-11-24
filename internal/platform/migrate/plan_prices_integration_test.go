@@ -10,10 +10,11 @@ import (
 // planPricesVersion is 00212_plan_prices.sql.
 const planPricesVersion = 212
 
-// planPricesTables are the tables 00212 creates, drops or changes.
+// planPricesTables are the tables 00212 creates, drops or changes, less
+// the clock stamps' table, which 00242 drops.
 var planPricesTables = []string{
 	"rating_rule_versions", "meter_pricing_rules", "customer_price_overrides", "plans", "meters",
-	"invoice_line_items", "plan_prices", "plan_price_versions", "plan_price_version_clocks",
+	"invoice_line_items", "plan_prices", "plan_price_versions",
 }
 
 // schemaOf describes tables as the catalog holds them: each column with its
@@ -116,7 +117,7 @@ func TestPlanPrices_UpAndDown(t *testing.T) {
 			t.Errorf("after the up, %s has no %s", c.table, c.column)
 		}
 	}
-	for _, table := range []string{"plan_prices", "plan_price_versions", "plan_price_version_clocks", "customer_price_overrides"} {
+	for _, table := range []string{"plan_prices", "plan_price_versions", "customer_price_overrides"} {
 		if got := maRows(t, db, `SELECT relrowsecurity::text || ' ' || relforcerowsecurity::text FROM pg_class WHERE oid = 'public.`+table+`'::regclass`); got != "true true" {
 			t.Errorf("%s row-level security (enabled forced) = %s, want true true", table, got)
 		}
