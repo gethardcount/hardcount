@@ -130,7 +130,6 @@ func goldenDunningRun() InvoiceDunningRun {
 		TenantID:         "hc_ten_golden",
 		InvoiceID:        "hc_inv_golden",
 		CustomerID:       "hc_cus_golden",
-		PolicyID:         "hc_dpol_golden",
 		State:            DunningEscalated,
 		Reason:           "payment_failed",
 		AttemptCount:     4,

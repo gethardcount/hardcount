@@ -317,11 +317,13 @@ follows.
   charge on a schedule and sends reminders. When the retries run out, the
   dunning policy makes two separate choices. For the subscription: pause
   it, cancel it, or do nothing. For the invoice: write it off, or leave it
-  open. A new account starts with one policy in each mode, "Default
-  retries", which retries three times and then does nothing to either.
+  open. An account has one dunning policy in each mode, used for every
+  customer. A new account's retries three times and then does nothing to
+  either.
   [More](concepts/payments.md#retries-dunning)
 - **dunning run**: One dunning process for one unpaid invoice (at most one
-  per invoice). It records the policy, the number of tries, when the next
+  per invoice). It follows the account's dunning policy, and records the
+  number of tries, when the next
   action is due, whether it is paused, and its state: active, resolved or
   escalated (every retry failed and the final action was taken). Once
   closed, it also records how it was resolved.

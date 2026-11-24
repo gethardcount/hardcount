@@ -25,7 +25,7 @@ import (
 // loops review 2026-10-19). The note marks the invoice paid, and its dunning
 // run closes as payment_recovered at once, on the server as router.go wires it.
 //
-// The escalated run is the case that matters: under the default policy (no
+// The escalated run is the case that matters: under a new account's policy (no
 // final action) every run whose retries ran out ends escalated with its
 // invoice still open, which is when an operator is most likely to waive it.
 // The dunning ticks skip escalated runs, so before, the run stayed escalated
@@ -140,7 +140,7 @@ type zeroDueDunningRig struct {
 }
 
 // newZeroDueDunningRig is the production server over real Postgres, a tenant
-// on the default dunning policy, and a finalized 50.00 invoice whose card
+// on the account's dunning policy, and a finalized 50.00 invoice whose card
 // payment failed.
 func newZeroDueDunningRig(t *testing.T, name string) *zeroDueDunningRig {
 	t.Helper()
@@ -152,7 +152,7 @@ func newZeroDueDunningRig(t *testing.T, name string) *zeroDueDunningRig {
 	r := &zeroDueDunningRig{t: t, ctx: clock.WithoutInstant(ctx), db: db, srv: NewServer(db, clock.Real(), nil),
 		tenantID: testutil.CreateTestTenant(t, db, name), invoices: invoice.NewPostgresStore(db), runs: dunning.NewPostgresStore(db)}
 
-	policy, err := r.srv.DunningSvc.UpsertPolicy(ctx, r.tenantID, dunning.DefaultSeedPolicy())
+	policy, err := r.srv.DunningSvc.PutPolicy(ctx, r.tenantID, dunning.DefaultSeedPolicy())
 	if err != nil {
 		t.Fatalf("upsert policy: %v", err)
 	}
@@ -180,7 +180,7 @@ func newZeroDueDunningRig(t *testing.T, name string) *zeroDueDunningRig {
 func (r *zeroDueDunningRig) run(attempts int, next time.Time) domain.InvoiceDunningRun {
 	r.t.Helper()
 	run, err := r.runs.CreateRun(r.ctx, r.tenantID, domain.InvoiceDunningRun{
-		InvoiceID: r.inv.ID, CustomerID: r.cust.ID, PolicyID: r.policy.ID,
+		InvoiceID: r.inv.ID, CustomerID: r.cust.ID,
 		State: domain.DunningActive, Reason: "payment_failed", AttemptCount: attempts, NextActionAt: &next,
 	})
 	if err != nil {

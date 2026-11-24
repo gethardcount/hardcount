@@ -54,13 +54,6 @@ func TestListDueRuns_LivemodeIsolation(t *testing.T) {
 		t.Fatalf("create customer: %v", err)
 	}
 	dstore := dunning.NewPostgresStore(db)
-	policy, err := dstore.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
-		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
-	})
-	if err != nil {
-		t.Fatalf("upsert policy: %v", err)
-	}
 	istore := invoice.NewPostgresStore(db)
 	now := time.Now().UTC()
 
@@ -80,7 +73,7 @@ func TestListDueRuns_LivemodeIsolation(t *testing.T) {
 		}
 		defer postgres.Rollback(tx)
 		// Trigger 0021 autosets livemode from the GUC and would silently
-		// overwrite $6 — pin it per-row (found the hard way: both fixture runs
+		// overwrite $5 — pin it per-row (found the hard way: both fixture runs
 		// came out live and the control failed).
 		guc := "off"
 		if livemode {
@@ -90,9 +83,9 @@ func TestListDueRuns_LivemodeIsolation(t *testing.T) {
 			t.Fatalf("pin livemode GUC: %v", err)
 		}
 		if _, err := tx.ExecContext(ctx, `
-			INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, reason, attempt_count, next_action_at, paused, created_at, updated_at, livemode)
-			VALUES ($1, $2, $3, $4, $5, 'active', 'payment_failed', 0, now() - interval '1 hour', false, now(), now(), $6)`,
-			runID, tenantID, inv.ID, cust.ID, policy.ID, livemode); err != nil {
+			INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, state, reason, attempt_count, next_action_at, paused, created_at, updated_at, livemode)
+			VALUES ($1, $2, $3, $4, 'active', 'payment_failed', 0, now() - interval '1 hour', false, now(), now(), $5)`,
+			runID, tenantID, inv.ID, cust.ID, livemode); err != nil {
 			t.Fatalf("insert run %s: %v", runID, err)
 		}
 		if err := tx.Commit(); err != nil {
@@ -119,10 +112,10 @@ func TestListDueRuns_LivemodeIsolation(t *testing.T) {
 	}
 }
 
-// TestProcessDueRuns_TerminalInvoiceResolvesWithoutPolicy: a run whose policy
-// row CANNOT be loaded must still resolve when its invoice is terminal — the
-// resolve needs no policy, and erroring before the terminal check stranded
-// such runs forever.
+// TestProcessDueRuns_TerminalInvoiceResolvesWithoutPolicy: a run whose
+// policy CANNOT be loaded (its mode has none) must still resolve when its
+// invoice is terminal — the resolve needs no policy, and erroring before the
+// terminal check stranded such runs forever.
 func TestProcessDueRuns_TerminalInvoiceResolvesWithoutPolicy(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := leadertest.Token(t, testutil.AdminPool(t), postgres.WithLivemode(context.Background(), false), leader.RoleDunning)
@@ -152,18 +145,8 @@ func TestProcessDueRuns_TerminalInvoiceResolvesWithoutPolicy(t *testing.T) {
 	}
 
 	dstore := dunning.NewPostgresStore(db)
-	// The policy_id FK is RESTRICT, so "deleted policy" cannot be seeded
-	// directly. Reproduce the EXACT walk shape instead: a policy that EXISTS
-	// but is invisible to this pass's mode — created under LIVE, referenced by
-	// a TEST run. GetPolicyByID under the test ctx cannot see it (mode-scoped
-	// read), which is precisely the not-found the walk hit.
-	livePolicy, err := dstore.UpsertPolicy(postgres.WithLivemode(context.Background(), true), tenantID, domain.DunningPolicy{
-		Name: "live-only", Enabled: true, RetryDays: []int{3, 3, 3},
-		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
-	})
-	if err != nil {
-		t.Fatalf("upsert live policy: %v", err)
-	}
+	// The account has no test-mode policy, so the test-mode run's policy
+	// read is a not-found.
 	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
 		t.Fatalf("begin: %v", err)
@@ -173,9 +156,9 @@ func TestProcessDueRuns_TerminalInvoiceResolvesWithoutPolicy(t *testing.T) {
 		t.Fatalf("pin livemode GUC: %v", err)
 	}
 	if _, err := tx.ExecContext(ctx, `
-		INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, reason, attempt_count, next_action_at, paused, created_at, updated_at, livemode)
-		VALUES ('run_no_policy', $1, $2, $3, $4, 'active', 'payment_failed', 0, now() - interval '1 hour', false, now(), now(), false)`,
-		tenantID, inv.ID, cust.ID, livePolicy.ID); err != nil {
+		INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, state, reason, attempt_count, next_action_at, paused, created_at, updated_at, livemode)
+		VALUES ('run_no_policy', $1, $2, $3, 'active', 'payment_failed', 0, now() - interval '1 hour', false, now(), now(), false)`,
+		tenantID, inv.ID, cust.ID); err != nil {
 		t.Fatalf("insert run: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
@@ -194,7 +177,7 @@ func TestProcessDueRuns_TerminalInvoiceResolvesWithoutPolicy(t *testing.T) {
 		t.Fatalf("get run: %v", err)
 	}
 	if run.State != domain.DunningResolved {
-		t.Fatalf("run state = %q, want resolved — a terminal invoice's run must resolve even when its policy row is gone", run.State)
+		t.Fatalf("run state = %q, want resolved — a terminal invoice's run must resolve even when its policy cannot be read", run.State)
 	}
 	// The fixture wrote the invoice off (InvoiceUncollectible above), so the
 	// terminal branch must record the write-off successor — not the void one,

@@ -53,10 +53,6 @@ func addDueRun(t *testing.T, f *exhaustFixture, number string, next time.Time) (
 	if err != nil {
 		t.Fatalf("read invoice: %v", err)
 	}
-	xRun, err := f.runs.GetRun(f.ctx, f.tenantID, f.runID)
-	if err != nil {
-		t.Fatalf("read run: %v", err)
-	}
 	inv, err := f.invoices.CreateWithLineItems(f.ctx, f.tenantID, domain.Invoice{
 		CustomerID: x.CustomerID, InvoiceNumber: number,
 		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentFailed, Currency: "USD",
@@ -76,10 +72,10 @@ func addDueRun(t *testing.T, f *exhaustFixture, number string, next time.Time) (
 		t.Fatalf("pin livemode GUC: %v", err)
 	}
 	if _, err := tx.ExecContext(f.ctx, `
-		INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, reason,
+		INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, state, reason,
 			attempt_count, next_action_at, paused, created_at, updated_at, livemode)
-		VALUES ($1, $2, $3, $4, $5, 'active', 'payment_failed', 0, $6, false, $7, $7, false)`,
-		runID, f.tenantID, inv.ID, x.CustomerID, xRun.PolicyID, next, next.Add(-time.Hour)); err != nil {
+		VALUES ($1, $2, $3, $4, 'active', 'payment_failed', 0, $5, false, $6, $6, false)`,
+		runID, f.tenantID, inv.ID, x.CustomerID, next, next.Add(-time.Hour)); err != nil {
 		t.Fatalf("insert run: %v", err)
 	}
 	if err := tx.Commit(); err != nil {

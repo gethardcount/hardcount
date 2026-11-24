@@ -1,38 +1,22 @@
-// New accounts start with a seeded default policy (ADR-123); older accounts
-// may have none. The pages must say which, and the create dialog must say
-// whether a new policy will take over the default.
+// An account has one retry policy per mode, and an older account may have
+// none. The Payment retries page must say when failed payments are not
+// retried.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { newPolicyDefaultNote, retriesOffNotice } from '../src/lib/dunningCoverage.ts'
+import { retriesOffNotice } from '../src/lib/dunningCoverage.ts'
 
-const seed = { name: 'Default retries', enabled: true, is_default: true, seeded: true }
-const mine = { name: 'Net 30', enabled: true, is_default: true, seeded: false }
-
-test('no policy at all: failed payments are not retried', () => {
-  const n = retriesOffNotice([])
-  assert.equal(n?.title, 'Failed payments are not retried')
-  assert.equal(n?.body, 'Create a policy to start automatic retries.')
+test('no policy: retries are not set up', () => {
+  const n = retriesOffNotice(null)
+  assert.equal(n?.title, 'Retries are not set up')
+  assert.equal(n?.body, 'Failed payments are not retried until you save a retry policy.')
 })
 
-test('a disabled default is called out by name', () => {
-  const n = retriesOffNotice([{ ...mine, enabled: false }])
-  assert.equal(n?.title, 'Default policy is turned off')
-  assert.match(n?.body ?? '', /Net 30/)
+test('a policy turned off: retries are turned off', () => {
+  const n = retriesOffNotice({ enabled: false })
+  assert.equal(n?.title, 'Retries are turned off')
+  assert.match(n?.body ?? '', /not retried/)
 })
 
-test('an enabled default needs no notice, seeded or not', () => {
-  assert.equal(retriesOffNotice([seed]), null)
-  assert.equal(retriesOffNotice([mine, { ...seed, is_default: false }]), null)
-})
-
-test('create dialog: says when saving replaces the seeded default', () => {
-  assert.equal(
-    newPolicyDefaultNote([seed], true),
-    'Saving makes this your default: every customer without their own policy uses it instead of Default retries.',
-  )
-  // A policy created turned off does not take over (ADR-123).
-  assert.equal(newPolicyDefaultNote([seed], false), 'Default retries stays your default while this policy is turned off.')
-  // Only the seeded default hands over; an operator's own default stays.
-  assert.equal(newPolicyDefaultNote([mine], true), null)
-  assert.equal(newPolicyDefaultNote([mine, { ...seed, is_default: false }], true), null)
+test('a policy turned on needs no notice', () => {
+  assert.equal(retriesOffNotice({ enabled: true }), null)
 })

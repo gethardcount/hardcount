@@ -38,7 +38,7 @@ type scheduleCase struct {
 	wantOutcome string
 }
 
-// scheduleCases covers the schedules written today: the seeded default, the
+// scheduleCases covers the schedules written today: a new account's policy, the
 // built-in recipes' policy, one retry, a schedule with entries past its last
 // retry (never used), the longest allowed, and uneven waits. The goldens
 // were recorded on main before the schedule became one list (#B8), with
@@ -49,7 +49,7 @@ type scheduleCase struct {
 func scheduleCases() []scheduleCase {
 	return []scheduleCase{
 		{
-			name: "seeded default",
+			name: "new account",
 			policy: domain.DunningPolicy{RetryDays: []int{3, 4, 7},
 				FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone},
 			wantDays: []int{3, 7, 14}, wantOutcome: "",
@@ -170,13 +170,10 @@ func runScheduleCase(t *testing.T, tc scheduleCase) {
 	svc.SetEmailNotifier(email.NewOutboxSender(email.NewOutboxStore(db)))
 	svc.SetCustomerEmailFetcher(fixedEmailFetcher{email: "debtor@example.test", name: "Schedule Differential"})
 
-	tc.policy.Name, tc.policy.Enabled = "schedule under test", true
-	policy, err := svc.UpsertPolicy(ctx, tenantID, tc.policy)
+	tc.policy.Enabled = true
+	_, err = svc.PutPolicy(ctx, tenantID, tc.policy)
 	if err != nil {
 		t.Fatalf("upsert policy: %v", err)
-	}
-	if err := svc.SetDefaultPolicy(ctx, tenantID, policy.ID); err != nil {
-		t.Fatalf("set default policy: %v", err)
 	}
 
 	// The failure that starts dunning carries no instant, so it reads the
@@ -184,9 +181,6 @@ func runScheduleCase(t *testing.T, tc scheduleCase) {
 	run, err := svc.StartDunning(clock.WithoutInstant(ctx), tenantID, inv.ID, cust.ID, domain.DunningCausePaymentFailed)
 	if err != nil {
 		t.Fatalf("start dunning: %v", err)
-	}
-	if run.PolicyID != policy.ID {
-		t.Fatalf("run bound to policy %s, want %s", run.PolicyID, policy.ID)
 	}
 
 	advance := func(to time.Time) {

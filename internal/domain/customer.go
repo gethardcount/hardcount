@@ -68,13 +68,6 @@ type Customer struct {
 	// A field here for the cost-dashboard token, with a json tag, would
 	// disclose that credential on every authenticated customer GET and List.
 
-	// DunningPolicyID assigns this customer to a dunning policy, also called
-	// a campaign (ADR-036). Dunning is the retries and reminders for an
-	// unpaid invoice. Empty means the tenant's default policy. PATCH can
-	// change it at any time. A change affects only the next dunning run
-	// started for this customer's invoices. Runs already in flight keep their
-	// original policy.
-	DunningPolicyID string `json:"dunning_policy_id,omitempty"`
 	// StripeCustomerID is the Stripe Customer object mapped 1:1 to this
 	// Hardcount customer. It is created on the first payment-method action
 	// (paymentmethods.StripeAdapter.EnsureStripeCustomer). It is empty for a

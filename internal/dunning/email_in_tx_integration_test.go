@@ -43,8 +43,8 @@ func seedDunningFixture(t *testing.T, db *postgres.DB, ctx context.Context, name
 		t.Fatalf("create customer: %v", err)
 	}
 	store = dunning.NewPostgresStore(db)
-	policy, err := store.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
+	_, err = store.PutPolicy(ctx, tenantID, domain.DunningPolicy{
+		Enabled: true, RetryDays: []int{3, 3, 3},
 		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	})
 	if err != nil {
@@ -62,7 +62,7 @@ func seedDunningFixture(t *testing.T, db *postgres.DB, ctx context.Context, name
 	}
 	due := now.Add(-time.Minute)
 	run, err := store.CreateRun(ctx, tenantID, domain.InvoiceDunningRun{
-		InvoiceID: inv.ID, CustomerID: cust.ID, PolicyID: policy.ID,
+		InvoiceID: inv.ID, CustomerID: cust.ID,
 		State: domain.DunningActive, Reason: "payment_failed", AttemptCount: attempts, NextActionAt: &due,
 	})
 	if err != nil {

@@ -562,3 +562,15 @@ error: rounding would retry on a day nobody chose, and under the clean
 break from 0.8.x only local databases can hold one. The API refuses the
 three old fields by name with a 422.
 
+
+## Amendment 2026-11-25 — one policy per mode
+
+An account now has one dunning policy per mode, and it governs every
+payment retry in that mode. The named policies, the default flag and the
+per-customer assignment (`customers.dunning_policy_id`) are gone, and a run
+no longer stores a policy: each step reads the account's policy for the
+run's mode. The API is `GET` and `PUT /v1/dunning/policy`. Migration 00248
+kept each account's default in each mode (the oldest where there was none)
+and deleted the others. Nothing in the product's flows assigned a policy:
+recipes, the demo and the seed never did. The rest of this record (the
+schedule, the final actions, the no-policy skip) stands.

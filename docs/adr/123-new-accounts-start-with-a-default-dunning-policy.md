@@ -178,3 +178,12 @@ and its default as they were. So:
   this ADR), ADR-112 (two final actions), ADR-116 (the card-less collector)
 - Migration 0180 (`dunning_policies.seeded`)
 - Issue #1152
+
+## Amendment 2026-11-25: one policy per mode
+
+An account now has at most one dunning policy per mode (ADR-036,
+amendment of 2026-11-25). A new account still gets one in each mode, with
+the same schedule and final actions, but it has no name, is not marked
+`seeded`, and there is no default to hand over: the takeover rule and the
+`seeded` column are gone. An operator changes the policy with
+`PUT /v1/dunning/policy` or on the Payment retries page's Policy tab.

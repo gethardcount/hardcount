@@ -1,58 +1,28 @@
-// What the dunning pages say about whether failed payments are retried.
-//
-// Every new account starts with a "Default retries" policy per mode
-// (ADR-123). Accounts made before that have none, and nothing adds one for
-// them: a policy appearing on a running account would start retrying old
-// failed invoices. So those accounts need to be told, in words, that
-// nothing is retried until they create a policy.
-
-type PolicyLike = {
-  name: string
-  enabled: boolean
-  is_default: boolean
-  seeded?: boolean
-}
+// What the Payment retries page says about whether failed payments are
+// retried. An account has one retry policy per mode. Every new account
+// starts with one (ADR-123); an older account may have none, and nothing
+// adds one for it: a policy appearing on a running account would start
+// retrying old failed invoices. So the page says, in words, when nothing is
+// retried.
 
 export type RetriesNotice = { title: string; body: string }
 
 /**
- * A notice when failed payments in this mode are not retried, or null when
- * the default policy is on. With no default there are no policies at all
- * (the first one created becomes the default, and the default cannot be
- * deleted), so "nothing is retried" is exactly true.
+ * A notice when failed payments in this mode are not retried: there is no
+ * policy (null), or it is turned off. Null when retries are on.
  */
-export function retriesOffNotice(policies: PolicyLike[]): RetriesNotice | null {
-  const def = policies.find(p => p.is_default)
-  if (!def) {
+export function retriesOffNotice(policy: { enabled: boolean } | null): RetriesNotice | null {
+  if (!policy) {
     return {
-      title: 'Failed payments are not retried',
-      body: 'Create a policy to start automatic retries.',
+      title: 'Retries are not set up',
+      body: 'Failed payments are not retried until you save a retry policy.',
     }
   }
-  if (!def.enabled) {
+  if (!policy.enabled) {
     return {
-      title: 'Default policy is turned off',
-      body: `Customers on the default policy, ${def.name || 'unnamed'}, are not retried. Turn it on, or make another policy the default.`,
+      title: 'Retries are turned off',
+      body: 'Failed payments are not retried. Turn retries on in the retry policy to start them.',
     }
   }
   return null
-}
-
-/** Shown on the policy an account was created with, until it is edited or chosen. */
-// Shown once under the policies list, after "Default retries came with your
-// account."
-export const SEEDED_POLICY_NOTE =
-  'When retries run out nothing changes: the subscription keeps billing, so each new unpaid invoice is retried on its own. Choose "Pause collection" to stop that. The first enabled policy you create becomes the default instead, unless you edit this one or make it the default first.'
-
-/**
- * What saving a new policy does to the default, shown in the create dialog
- * before anything is saved. Only the seeded default hands over (ADR-123),
- * and only to an enabled policy: a policy created turned off leaves it in
- * place. Null when the new policy is just added next to the default.
- */
-export function newPolicyDefaultNote(policies: PolicyLike[], enabled: boolean): string | null {
-  const def = policies.find(p => p.is_default)
-  if (!def?.seeded) return null
-  if (!enabled) return `${def.name} stays your default while this policy is turned off.`
-  return `Saving makes this your default: every customer without their own policy uses it instead of ${def.name}.`
 }

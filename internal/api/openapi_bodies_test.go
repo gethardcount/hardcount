@@ -110,8 +110,7 @@ var requestBodies = map[string]requestBody{
 	"POST /v1/members/invite":                                           {body: dashmembers.InviteReq{}},
 	"POST /v1/recipes/{key}/preview":                                    {body: recipe.PreviewRequest{}},
 	"POST /v1/recipes/{key}/instantiate":                                {body: recipe.InstantiateRequest{}},
-	"POST /v1/dunning/policies":                                         {body: domain.DunningPolicy{}, undocumented: dunningPolicyReadOnly},
-	"PATCH /v1/dunning/policies/{id}":                                   {body: domain.DunningPolicy{}, undocumented: dunningPolicyReadOnly},
+	"PUT /v1/dunning/policy":                                            {body: domain.DunningPolicy{}, undocumented: readOnly("tenant_id", "created_at", "updated_at")},
 	"POST /v1/api-keys":                                                 {body: auth.CreateKeyInput{}},
 	"POST /v1/api-keys/{id}/rotate":                                     {body: auth.RotateKeyInput{}},
 	"PUT /v1/settings":                                                  {body: domain.TenantSettings{}, undocumented: readOnly("tenant_id", "created_at", "updated_at")},
@@ -119,10 +118,6 @@ var requestBodies = map[string]requestBody{
 	"PATCH /v1/settings/stripe/{mode}/webhook":                          {body: tenantstripe.SetWebhookInput{}},
 	"POST /v1/bootstrap":                                                {body: tenant.BootstrapRequest{}},
 }
-
-// dunningPolicyReadOnly: set-default moves is_default, and an edit clears
-// seeded (ADR-123). Neither is taken from the body.
-var dunningPolicyReadOnly = readOnly("id", "tenant_id", "is_default", "seeded", "created_at", "updated_at")
 
 // providerBody is why the inbound webhook bodies are not checked.
 const providerBody = "The provider defines this body, not Hardcount. The handler reads the few fields it needs from it."

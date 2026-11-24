@@ -72,10 +72,10 @@ func (e *capturingEscalationEmail) SendDunningEscalationTx(ctx context.Context, 
 }
 
 func twoAxisPolicy(store *memStore, sub domain.DunningSubscriptionAction, inv domain.DunningInvoiceAction) {
-	p := store.policies[store.defaultID]
+	p := *store.policy
 	p.FinalSubscriptionAction = sub
 	p.FinalInvoiceAction = inv
-	store.policies[store.defaultID] = p
+	store.policy = &p
 }
 
 func makeDue(store *memStore, runID string) {

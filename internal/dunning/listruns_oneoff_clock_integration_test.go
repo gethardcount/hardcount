@@ -39,16 +39,16 @@ func TestListRuns_OneOffInvoiceRun(t *testing.T) {
 	mustExec(`INSERT INTO tenants (id, name, status) VALUES ($1, 'Dun OneOff', 'active')`, tenantID)
 	mustExec(`INSERT INTO customers (id, tenant_id, external_id, display_name, email, created_at, updated_at)
 		VALUES ('cus_dun_pin', $1, 'dun_pin', 'Pin', '', $2, $2)`, tenantID, base)
-	mustExec(`INSERT INTO dunning_policies (id, tenant_id, name, enabled, is_default, retry_days, final_subscription_action, final_invoice_action, livemode)
-		VALUES ('dpol_oneoff', $1, 'P', true, true, '[3, 3, 3]', 'pause', 'none', false)`, tenantID)
+	mustExec(`INSERT INTO dunning_policies (id, tenant_id, enabled, retry_days, final_subscription_action, final_invoice_action, livemode)
+		VALUES ('dpol_oneoff', $1, true, '[3, 3, 3]', 'pause', 'none', false)`, tenantID)
 	// A one-off invoice: subscription_id NULL.
 	mustExec(`INSERT INTO invoices (id, tenant_id, customer_id, invoice_number,
 			status, payment_status, currency, subtotal_cents, total_amount_cents,
 			amount_due_cents, tax_status, billing_period_start, billing_period_end, created_at, updated_at)
 		VALUES ('inv_dun_oneoff', $1, 'cus_dun_pin', 'inv_dun_oneoff', 'finalized', 'failed', 'USD', 2500, 2500, 2500, 'ok', $2, $2, $2, $2)`,
 		tenantID, base.Add(-24*time.Hour))
-	mustExec(`INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, reason, attempt_count, next_action_at, paused, created_at, updated_at, livemode)
-		VALUES ('run_oneoff_pin', $1, 'inv_dun_oneoff', 'cus_dun_pin', 'dpol_oneoff', 'active', 'payment_failed', 0, $2, false, $3, $3, false)`,
+	mustExec(`INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, state, reason, attempt_count, next_action_at, paused, created_at, updated_at, livemode)
+		VALUES ('run_oneoff_pin', $1, 'inv_dun_oneoff', 'cus_dun_pin', 'active', 'payment_failed', 0, $2, false, $3, $3, false)`,
 		tenantID, base.Add(-time.Hour), base.Add(-24*time.Hour))
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)

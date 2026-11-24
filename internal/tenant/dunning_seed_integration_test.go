@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -29,28 +30,24 @@ func bootstrapDeps(db *postgres.DB, seed tenant.DunningSeedFunc) tenant.Bootstra
 	}
 }
 
-func modePolicies(t *testing.T, svc *dunning.Service, tenantID string, livemode bool) []domain.DunningPolicy {
+func modePolicy(t *testing.T, svc *dunning.Service, tenantID string, livemode bool) domain.DunningPolicy {
 	t.Helper()
-	ps, err := svc.ListPolicies(postgres.WithLivemode(context.Background(), livemode), tenantID)
+	p, err := svc.GetPolicy(postgres.WithLivemode(context.Background(), livemode), tenantID)
 	if err != nil {
-		t.Fatalf("list policies (livemode=%v): %v", livemode, err)
+		t.Fatalf("get policy (livemode=%v): %v", livemode, err)
 	}
-	return ps
+	return p
 }
 
-// assertSeeded checks that each mode has exactly one policy, the enabled
-// seeded default, with final actions none/none (not the pause an empty
+// assertSeeded checks that each mode has its policy, enabled, retrying on
+// day 3, 7 and 14, with final actions none/none (not the pause an empty
 // value would normalize to).
 func assertSeeded(t *testing.T, svc *dunning.Service, tenantID string) {
 	t.Helper()
 	for _, live := range []bool{false, true} {
-		ps := modePolicies(t, svc, tenantID, live)
-		if len(ps) != 1 {
-			t.Fatalf("livemode=%v: %d policies, want exactly 1", live, len(ps))
-		}
-		p := ps[0]
-		if !p.IsDefault || !p.Enabled || !p.Seeded || p.Name != "Default retries" {
-			t.Errorf("livemode=%v: %+v, want the enabled seeded default \"Default retries\"", live, p)
+		p := modePolicy(t, svc, tenantID, live)
+		if !p.Enabled || fmt.Sprint(p.RetryDays) != "[3 4 7]" {
+			t.Errorf("livemode=%v: %+v, want enabled with retry_days [3 4 7]", live, p)
 		}
 		if p.FinalSubscriptionAction != domain.SubActionNone || p.FinalInvoiceAction != domain.InvActionNone {
 			t.Errorf("livemode=%v: final actions %q/%q, want none/none", live, p.FinalSubscriptionAction, p.FinalInvoiceAction)
@@ -99,10 +96,6 @@ func TestBootstrap_SeedsDefaultDunningPolicy(t *testing.T) {
 		run, err := dunSvc.StartDunning(testCtx, res.Tenant.ID, inv.ID, cust.ID, domain.DunningCausePaymentFailed)
 		if err != nil {
 			t.Fatalf("a failed payment on a fresh account must start dunning: %v", err)
-		}
-		seed := modePolicies(t, dunSvc, res.Tenant.ID, false)[0]
-		if run.PolicyID != seed.ID {
-			t.Fatalf("run policy = %s, want the test-mode seed %s", run.PolicyID, seed.ID)
 		}
 		if run.NextActionAt == nil {
 			t.Fatal("run has no first retry")

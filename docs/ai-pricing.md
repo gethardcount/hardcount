@@ -23,7 +23,7 @@ prices: one for each model and kind of token, or for each GPU type in
 have no meter with that event name, the recipe creates it. If you have one
 with the same aggregation, the recipe uses it. If yours has another
 aggregation, the recipe is refused with 409 and creates nothing. It creates
-nothing else: set payment retries under **Payment retries → Policies** and webhook
+nothing else: set payment retries under **Payment retries → Policy** and webhook
 endpoints under **Webhooks**. The prices start at the provider's public
 list prices, which you can change later.
 

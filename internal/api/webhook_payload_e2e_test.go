@@ -168,9 +168,9 @@ func TestE2E_WebhookPayloads_InvoicePaymentDunningPaymentMethod(t *testing.T) {
 	}
 	events := &webhookCursor{t: t, db: db, tenantID: tenantID}
 
-	call("POST", "/v1/dunning/policies", flowReq{body: map[string]any{
-		"name": "Payload policy", "enabled": true, "retry_days": []int{3, 3},
-	}}).want(t, 201, "create dunning policy")
+	call("PUT", "/v1/dunning/policy", flowReq{body: map[string]any{
+		"enabled": true, "retry_days": []int{3, 3},
+	}}).want(t, 200, "create dunning policy")
 	customerID := flowStr(call("POST", "/v1/customers", flowReq{body: map[string]any{
 		"external_id": "webhook-payload", "display_name": "Webhook Payload Customer", "email": "ap@payload.test",
 	}}).want(t, 201, "create customer").body, "id")
@@ -724,10 +724,10 @@ func TestE2E_WebhookPayloads_EngineAndDunning(t *testing.T) {
 	}
 	events := &webhookCursor{t: t, db: db, tenantID: tenantID}
 
-	call("POST", "/v1/dunning/policies", map[string]any{
-		"name": "One retry", "enabled": true, "retry_days": []int{1},
+	call("PUT", "/v1/dunning/policy", map[string]any{
+		"enabled": true, "retry_days": []int{1},
 		"final_subscription_action": "cancel", "final_invoice_action": "mark_uncollectible",
-	}).want(t, 201, "create dunning policy")
+	}).want(t, 200, "create dunning policy")
 	plan := func(code, timing string) string {
 		return flowStr(call("POST", "/v1/plans", map[string]any{
 			"code": code, "name": code, "currency": "USD", "billing_interval": "monthly",

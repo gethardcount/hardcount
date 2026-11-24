@@ -152,7 +152,7 @@ October 2026 (v0.5.0 to v0.8.2):
 
 - **Try it with one script.** `deploy/compose/quickstart.sh` starts Hardcount from the published images and prints a login, and `./quickstart.sh demo` runs AI token usage through to an invoice.
 - **Usage that arrives a little late is billed.** An invoice is built an hour after its period ends (`INVOICE_GRACE_PERIOD`), so usage that arrives a little late still counts.
-- **New accounts retry failed payments.** Each new account starts with a "Default retries" policy.
+- **New accounts retry failed payments.** Each new account starts with a retry policy in each mode.
 - **Live credit balance.** `GET /v1/credits/balance/{customer_id}/live` and the public cost page show how much prepaid credit a customer has left, including usage not yet invoiced.
 - **LiteLLM usage for a customer that does not exist yet is kept.** Hardcount holds it and shows it on the Usage page. Create the customer, then release it once.
 - **Issued invoices do not change.** An invoice or credit note keeps the customer and company details it was issued with.

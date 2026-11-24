@@ -42,16 +42,14 @@ func NewPostgresStore(db *postgres.DB) *PostgresStore {
 	return &PostgresStore{db: db}
 }
 
-// scanPolicy is the shared row decoder for the policy SELECTs below.
-// Returned columns are fixed: id, tenant_id, name, enabled, is_default,
-// seeded, retry_days (jsonb), final_subscription_action,
-// final_invoice_action, created_at, updated_at — in that order.
+// scanPolicy is the shared row decoder for the policy SELECTs below, which
+// return policyColumns in that order.
 func scanPolicy(row interface {
 	Scan(dest ...any) error
 }) (domain.DunningPolicy, error) {
 	var p domain.DunningPolicy
 	var daysJSON []byte
-	if err := row.Scan(&p.ID, &p.TenantID, &p.Name, &p.Enabled, &p.IsDefault, &p.Seeded, &daysJSON,
+	if err := row.Scan(&p.ID, &p.TenantID, &p.Enabled, &daysJSON,
 		&p.FinalSubscriptionAction, &p.FinalInvoiceAction,
 		&p.CreatedAt, &p.UpdatedAt); err != nil {
 		return domain.DunningPolicy{}, err
@@ -64,199 +62,58 @@ func scanPolicy(row interface {
 	return p, nil
 }
 
-const policyColumns = `id, tenant_id, name, enabled, is_default, seeded, retry_days, final_subscription_action, final_invoice_action, created_at, updated_at`
+const policyColumns = `id, tenant_id, enabled, retry_days, final_subscription_action, final_invoice_action, created_at, updated_at`
 
-// GetPolicyByID looks up a single policy by its id within the tenant.
-func (s *PostgresStore) GetPolicyByID(ctx context.Context, tenantID, id string) (domain.DunningPolicy, error) {
+// GetPolicy returns the account's policy for the mode on ctx. Row-level
+// security scopes the read to the tenant and mode, and the unique index on
+// (tenant_id, livemode) leaves at most one row.
+func (s *PostgresStore) GetPolicy(ctx context.Context, tenantID string) (domain.DunningPolicy, error) {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.DunningPolicy{}, err
 	}
 	defer postgres.Rollback(tx)
 
-	p, err := scanPolicy(tx.QueryRowContext(ctx, `SELECT `+policyColumns+` FROM dunning_policies WHERE id = $1`, id))
-	if err == sql.ErrNoRows {
+	p, err := scanPolicy(tx.QueryRowContext(ctx, `SELECT `+policyColumns+` FROM dunning_policies`))
+	if errors.Is(err, sql.ErrNoRows) {
 		return domain.DunningPolicy{}, errs.ErrNotFound
 	}
 	return p, err
 }
 
-// GetDefaultPolicy returns the tenant's default policy (is_default=true).
-// Exactly one such row exists per (tenant, livemode) — enforced by the
-// partial UNIQUE index from migration 0086.
-func (s *PostgresStore) GetDefaultPolicy(ctx context.Context, tenantID string) (domain.DunningPolicy, error) {
+// PutPolicy creates the account's policy for the mode on ctx, or replaces
+// every field of the one it has. One statement against the unique index on
+// (tenant_id, livemode), so two puts at once leave one row, the later put's.
+// The set_livemode trigger stamps the inserted row's mode before the
+// conflict check.
+func (s *PostgresStore) PutPolicy(ctx context.Context, tenantID string, p domain.DunningPolicy) (domain.DunningPolicy, error) {
+	// A dunning policy is tenant-level operator config, not a billing event:
+	// its created_at/updated_at record the machine's time of the edit.
+	now := time.Now().UTC() //nolint:forbidigo // wall-clock: operator config write
+	daysJSON, err := json.Marshal(p.RetryDays)
+	if err != nil {
+		return domain.DunningPolicy{}, fmt.Errorf("encode retry_days: %w", err)
+	}
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {
 		return domain.DunningPolicy{}, err
 	}
 	defer postgres.Rollback(tx)
 
-	p, err := scanPolicy(tx.QueryRowContext(ctx, `SELECT `+policyColumns+` FROM dunning_policies WHERE is_default LIMIT 1`))
-	if err == sql.ErrNoRows {
-		return domain.DunningPolicy{}, errs.ErrNotFound
-	}
-	return p, err
-}
-
-// ListPolicies returns all policies for the tenant, defaults first
-// then by created_at. Caller renders the campaigns admin page off this.
-func (s *PostgresStore) ListPolicies(ctx context.Context, tenantID string) ([]domain.DunningPolicy, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return nil, err
-	}
-	defer postgres.Rollback(tx)
-
-	rows, err := tx.QueryContext(ctx, `SELECT `+policyColumns+` FROM dunning_policies ORDER BY is_default DESC, created_at ASC, id ASC`)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = rows.Close() }()
-
-	var out []domain.DunningPolicy
-	for rows.Next() {
-		p, err := scanPolicy(rows)
-		if err != nil {
-			return nil, err
-		}
-		out = append(out, p)
-	}
-	return out, rows.Err()
-}
-
-// DeletePolicy removes a policy. Refuses to delete the default policy
-// (operator must promote another policy first); refuses when any
-// customer has an explicit dunning_policy_id pointing at it (operator
-// reassigns those customers first); and refuses once the policy has run
-// on an invoice, because each run keeps pointing at the policy it ran
-// under (invoice_dunning_runs.policy_id, ON DELETE RESTRICT). Without that
-// last check the database refused the delete and the API answered 500
-// (#1215). The application-layer guards are the primary defense; the FK
-// on customers.dunning_policy_id ON DELETE SET NULL is belt-and-suspenders
-// only.
-//
-// The policy row is locked first. A run being created on it holds a key
-// share lock on the row until it commits, so the run count below either
-// sees that run or the run waits for this delete and then fails its own
-// foreign-key check.
-func (s *PostgresStore) DeletePolicy(ctx context.Context, tenantID, id string) error {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return err
-	}
-	defer postgres.Rollback(tx)
-
-	var isDefault bool
-	if err := tx.QueryRowContext(ctx, `SELECT is_default FROM dunning_policies WHERE id = $1 FOR UPDATE`, id).Scan(&isDefault); err != nil {
-		if err == sql.ErrNoRows {
-			return errs.ErrNotFound
-		}
-		return err
-	}
-	if isDefault {
-		return errs.InvalidState("cannot delete the default dunning policy — promote another policy first")
-	}
-	var assigned int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM customers WHERE dunning_policy_id = $1`, id).Scan(&assigned); err != nil {
-		return err
-	}
-	if assigned > 0 {
-		return errs.InvalidState(fmt.Sprintf("cannot delete policy — %d customer(s) still assigned; reassign them first", assigned))
-	}
-	var ran int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM invoice_dunning_runs WHERE policy_id = $1`, id).Scan(&ran); err != nil {
-		return err
-	}
-	if ran > 0 {
-		return errs.InvalidState(fmt.Sprintf("cannot delete policy — it has run payment retries on %d invoice(s), and their history refers to it", ran))
-	}
-	if _, err := tx.ExecContext(ctx, `DELETE FROM dunning_policies WHERE id = $1`, id); err != nil {
-		return err
-	}
-	return tx.Commit()
-}
-
-// SetDefaultPolicy promotes the given policy to default and demotes the
-// previous default in a single tx. The partial UNIQUE index would
-// otherwise reject "set new default first" (two is_default=true rows
-// simultaneously), so we flip both atomically. It runs under the default
-// policy lock (lockDefaultPolicy), so it is safe to call concurrently.
-func (s *PostgresStore) SetDefaultPolicy(ctx context.Context, tenantID, id string) error {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return err
-	}
-	defer postgres.Rollback(tx)
-
-	if err := lockDefaultPolicy(ctx, tx, tenantID); err != nil {
-		return err
-	}
-
-	// Demote first; the partial UNIQUE index permits zero defaults
-	// transiently, then we promote the target.
-	if _, err := tx.ExecContext(ctx, `UPDATE dunning_policies SET is_default = false WHERE is_default`); err != nil {
-		return err
-	}
-	// Choosing a policy as the default is the operator taking ownership of
-	// it, so a seeded policy stops being seeded here: the next policy
-	// created must not take the default away from it (ADR-123).
-	res, err := tx.ExecContext(ctx, `UPDATE dunning_policies SET is_default = true, seeded = false, updated_at = NOW() WHERE id = $1`, id)
-	if err != nil {
-		return err
-	}
-	if n, _ := res.RowsAffected(); n == 0 {
-		return errs.ErrNotFound
-	}
-	return tx.Commit()
-}
-
-// lockDefaultPolicy takes the lock on the account's default policy in the
-// mode of ctx (test or live), held until the transaction ends. Every write
-// that can change which policy is the default takes it first:
-// SetDefaultPolicy and a policy create. Without it, two such writes at once
-// each read the policies before the other commits, and the second misses
-// the first's new default and fails on the one-default unique index. An
-// edit keeps is_default, a delete refuses the default, and the seed writes
-// a new account no other transaction can see, so none of them takes it.
-func lockDefaultPolicy(ctx context.Context, tx *sql.Tx, tenantID string) error {
-	live, err := postgres.Livemode(ctx)
-	if err != nil {
-		return err
-	}
-	mode := "test"
-	if live {
-		mode = "live"
-	}
-	if _, err := tx.ExecContext(ctx, `SELECT pg_advisory_xact_lock(hashtextextended($1, 0))`,
-		"dunning_policies:"+tenantID+":"+mode); err != nil {
-		return fmt.Errorf("acquire default dunning policy lock: %w", err)
-	}
-	return nil
-}
-
-// CountCustomersOnPolicy returns the number of customers explicitly
-// assigned to the given policy. Used by the handler / UI to surface
-// "N customers assigned" and to gate destructive operations.
-func (s *PostgresStore) CountCustomersOnPolicy(ctx context.Context, tenantID, policyID string) (int, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return 0, err
-	}
-	defer postgres.Rollback(tx)
-
-	var n int
-	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM customers WHERE dunning_policy_id = $1`, policyID).Scan(&n)
-	return n, err
-}
-
-func (s *PostgresStore) UpsertPolicy(ctx context.Context, tenantID string, p domain.DunningPolicy) (domain.DunningPolicy, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return domain.DunningPolicy{}, err
-	}
-	defer postgres.Rollback(tx)
-
-	stored, err := s.upsertPolicyTx(ctx, tx, tenantID, p)
+	stored, err := scanPolicy(tx.QueryRowContext(ctx, `
+		INSERT INTO dunning_policies (id, tenant_id, enabled, retry_days,
+			final_subscription_action, final_invoice_action, created_at, updated_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$7)
+		ON CONFLICT (tenant_id, livemode) DO UPDATE SET
+			enabled = EXCLUDED.enabled,
+			retry_days = EXCLUDED.retry_days,
+			final_subscription_action = EXCLUDED.final_subscription_action,
+			final_invoice_action = EXCLUDED.final_invoice_action,
+			updated_at = EXCLUDED.updated_at
+		RETURNING `+policyColumns,
+		postgres.NewID("hc_dpol"), tenantID, p.Enabled, daysJSON,
+		p.FinalSubscriptionAction, p.FinalInvoiceAction, now,
+	))
 	if err != nil {
 		return domain.DunningPolicy{}, err
 	}
@@ -266,115 +123,13 @@ func (s *PostgresStore) UpsertPolicy(ctx context.Context, tenantID string, p dom
 	return stored, nil
 }
 
-// upsertPolicyTx inserts a new policy when p.ID is empty, updates the
-// existing row when p.ID is set. The migration to the campaigns model
-// (ADR-036) made tenant↔policy a 1:N relation, so the prior ON CONFLICT
-// (tenant_id, livemode) singleton-merge no longer applies — that
-// constraint was dropped in migration 0086.
-//
-// IsDefault handling: the caller CANNOT set is_default via p (an UPDATE
-// preserves the stored flag; SetDefaultPolicy is the dedicated atomic
-// demote-all/promote-one path). The ONE exception is the initial default —
-// the FIRST policy inserted per (tenant, livemode) is auto-promoted to
-// is_default=true in-statement (ADR-036 amendment; see the INSERT branch),
-// so a tenant's first policy is a working default with no extra call. The
-// partial UNIQUE index is the loud backstop against two defaults.
-func (s *PostgresStore) upsertPolicyTx(ctx context.Context, tx *sql.Tx, tenantID string, p domain.DunningPolicy) (domain.DunningPolicy, error) {
-	// A dunning policy is tenant-level operator config, not a billing event:
-	// its created_at/updated_at record the machine's time of the edit.
-	now := time.Now().UTC() //nolint:forbidigo // wall-clock: operator config write
-	daysJSON, err := json.Marshal(p.RetryDays)
-	if err != nil {
-		return domain.DunningPolicy{}, fmt.Errorf("encode retry_days: %w", err)
-	}
-	if p.ID == "" {
-		// A create can take the default, so it runs under the default policy
-		// lock. The demote and the NOT EXISTS below then see a create or a
-		// SetDefaultPolicy that committed first, and two creates, or a
-		// create and a flip, at once never both take the default.
-		if err := lockDefaultPolicy(ctx, tx, tenantID); err != nil {
-			return domain.DunningPolicy{}, err
-		}
-
-		// INSERT new policy. The FIRST policy in a (tenant, livemode) scope is
-		// born is_default=true (ADR-036 amendment): NOT EXISTS(... WHERE is_default)
-		// is evaluated against the pre-insert table state, RLS-scoped to the
-		// current (tenant, livemode) — so a tenant that creates its first
-		// policy gets a WORKING default with no extra SetDefaultPolicy step,
-		// closing the "policies exist but GetDefaultPolicy
-		// → not found" trap. Subsequent policies are is_default=false; the operator
-		// re-points via SetDefaultPolicy (the atomic demote-all/promote-one path).
-		//
-		// The policy an account was created with (seeded = true, ADR-123)
-		// only holds the default until someone creates a policy of their
-		// own. Demote it first, so the NOT EXISTS below sees no default and
-		// this insert takes the slot, exactly as the first policy did before
-		// accounts had one. Without this, the operator's first policy
-		// would be created non-default and assigned
-		// to nobody, so it would never govern a run. A seeded policy that
-		// was edited or chosen as default has seeded = false and keeps the
-		// slot. A concurrent edit of the seeded row holds its row lock;
-		// READ COMMITTED re-checks "seeded" after the wait, so an edit that
-		// commits first keeps the default.
-		//
-		// Only an enabled policy takes over. A disabled default starts no
-		// dunning, so handing the slot to a policy created turned off (the
-		// API's enabled defaults to false; the dashboard switch can be off
-		// for a draft) would silently stop retries for every customer
-		// without an assigned policy. The seed keeps the slot instead, and
-		// the NOT EXISTS below makes the disabled policy non-default.
-		if p.Enabled {
-			if _, err := tx.ExecContext(ctx,
-				`UPDATE dunning_policies SET is_default = false, updated_at = $1 WHERE is_default AND seeded`, now,
-			); err != nil {
-				return domain.DunningPolicy{}, fmt.Errorf("hand over seeded default: %w", err)
-			}
-		}
-		newID := postgres.NewID("hc_dpol")
-		row := tx.QueryRowContext(ctx, `
-			INSERT INTO dunning_policies (id, tenant_id, name, enabled, is_default,
-				retry_days, final_subscription_action, final_invoice_action, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,NOT EXISTS(SELECT 1 FROM dunning_policies WHERE is_default),$5,$6,$7,$8,$8)
-			RETURNING `+policyColumns,
-			newID, tenantID, p.Name, p.Enabled, daysJSON,
-			p.FinalSubscriptionAction, p.FinalInvoiceAction, now,
-		)
-		return scanPolicy(row)
-	}
-	// UPDATE existing policy. is_default is preserved (callers use
-	// SetDefaultPolicy to flip). seeded is cleared: an edited policy is the
-	// operator's own, and a later create must not take its default (ADR-123).
-	row := tx.QueryRowContext(ctx, `
-		UPDATE dunning_policies
-		SET name = $2, enabled = $3, retry_days = $4, seeded = false,
-			final_subscription_action = $5, final_invoice_action = $6,
-			updated_at = $7
-		WHERE id = $1
-		RETURNING `+policyColumns,
-		p.ID, p.Name, p.Enabled, daysJSON,
-		p.FinalSubscriptionAction, p.FinalInvoiceAction, now,
-	)
-	stored, err := scanPolicy(row)
-	if errors.Is(err, sql.ErrNoRows) {
-		// No row has that id in this tenant and mode. Without this mapping
-		// the miss reached the client as a 500.
-		return domain.DunningPolicy{}, errs.ErrNotFound
-	}
-	return stored, err
-}
-
-// SeedDefaultPoliciesTx inserts p once per mode (test, then live) as that
-// mode's default, marked seeded, on the caller's account-creation tx
-// (ADR-123). Each insert runs with app.livemode set to its mode, so the
-// livemode trigger stamps the row and the RLS check passes; onSeeded runs
-// in the same mode, so an audit row lands in the matching log. The
-// caller's app.livemode is restored before returning.
-//
-// is_default is written true outright instead of using upsertPolicyTx's
-// NOT EXISTS rule: account creation may run on a bypass-RLS tx, where that
-// subquery would see every other account's defaults. On a brand-new
-// account there is no default to collide with; if one somehow exists, the
-// partial unique index rejects the insert and the account is not created.
+// SeedDefaultPoliciesTx inserts p once per mode (test, then live) on the
+// caller's account-creation tx (ADR-123). Each insert runs with
+// app.livemode set to its mode, so the livemode trigger stamps the row and
+// the RLS check passes; onSeeded runs in the same mode, so an audit row
+// lands in the matching log. The caller's app.livemode is restored before
+// returning. If the account somehow has a policy already, the unique index
+// rejects the insert and the account is not created.
 func (s *PostgresStore) SeedDefaultPoliciesTx(ctx context.Context, tx *sql.Tx, tenantID string, p domain.DunningPolicy, onSeeded func(p domain.DunningPolicy, livemode bool) error) error {
 	var prevMode sql.NullString
 	if err := tx.QueryRowContext(ctx, `SELECT current_setting('app.livemode', true)`).Scan(&prevMode); err != nil {
@@ -394,11 +149,11 @@ func (s *PostgresStore) SeedDefaultPoliciesTx(ctx context.Context, tx *sql.Tx, t
 			return fmt.Errorf("set livemode: %w", err)
 		}
 		stored, err := scanPolicy(tx.QueryRowContext(ctx, `
-			INSERT INTO dunning_policies (id, tenant_id, name, enabled, is_default, seeded,
+			INSERT INTO dunning_policies (id, tenant_id, enabled,
 				retry_days, final_subscription_action, final_invoice_action, created_at, updated_at)
-			VALUES ($1,$2,$3,$4,true,true,$5,$6,$7,$8,$8)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$7)
 			RETURNING `+policyColumns,
-			postgres.NewID("hc_dpol"), tenantID, p.Name, p.Enabled, daysJSON,
+			postgres.NewID("hc_dpol"), tenantID, p.Enabled, daysJSON,
 			p.FinalSubscriptionAction, p.FinalInvoiceAction, now,
 		))
 		if err != nil {
@@ -482,16 +237,16 @@ func (s *PostgresStore) createRunTx(ctx context.Context, tx *sql.Tx, tenantID st
 		now = clock.Now(ctx)
 	}
 	err := tx.QueryRowContext(ctx, `
-		INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id,
+		INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id,
 			state, reason, attempt_count, next_action_at, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$10)
-		RETURNING id, tenant_id, invoice_id, COALESCE(customer_id,''), policy_id, state,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$9)
+		RETURNING id, tenant_id, invoice_id, COALESCE(customer_id,''), state,
 			COALESCE(reason,''), attempt_count, last_attempt_at, next_action_at,
 			paused, resolved_at, COALESCE(resolution,''), created_at, updated_at
 	`, id, tenantID, run.InvoiceID, postgres.NullableString(run.CustomerID),
-		run.PolicyID, run.State, postgres.NullableString(run.Reason),
+		run.State, postgres.NullableString(run.Reason),
 		run.AttemptCount, postgres.NullableTime(run.NextActionAt), now,
-	).Scan(&run.ID, &run.TenantID, &run.InvoiceID, &run.CustomerID, &run.PolicyID,
+	).Scan(&run.ID, &run.TenantID, &run.InvoiceID, &run.CustomerID,
 		&run.State, &run.Reason, &run.AttemptCount, &run.LastAttemptAt, &run.NextActionAt,
 		&run.Paused, &run.ResolvedAt, &run.Resolution, &run.CreatedAt, &run.UpdatedAt)
 	if err != nil {
@@ -509,11 +264,11 @@ func (s *PostgresStore) GetRun(ctx context.Context, tenantID, id string) (domain
 
 	var run domain.InvoiceDunningRun
 	err = tx.QueryRowContext(ctx, `
-		SELECT id, tenant_id, invoice_id, COALESCE(customer_id,''), policy_id, state,
+		SELECT id, tenant_id, invoice_id, COALESCE(customer_id,''), state,
 			COALESCE(reason,''), attempt_count, last_attempt_at, next_action_at,
 			paused, resolved_at, COALESCE(resolution,''), created_at, updated_at
 		FROM invoice_dunning_runs WHERE id = $1
-	`, id).Scan(&run.ID, &run.TenantID, &run.InvoiceID, &run.CustomerID, &run.PolicyID,
+	`, id).Scan(&run.ID, &run.TenantID, &run.InvoiceID, &run.CustomerID,
 		&run.State, &run.Reason, &run.AttemptCount, &run.LastAttemptAt, &run.NextActionAt,
 		&run.Paused, &run.ResolvedAt, &run.Resolution, &run.CreatedAt, &run.UpdatedAt)
 	if err == sql.ErrNoRows {
@@ -536,13 +291,13 @@ func (s *PostgresStore) GetRunByInvoice(ctx context.Context, tenantID, invoiceID
 
 	var run domain.InvoiceDunningRun
 	err = tx.QueryRowContext(ctx, `
-		SELECT id, tenant_id, invoice_id, COALESCE(customer_id,''), policy_id, state,
+		SELECT id, tenant_id, invoice_id, COALESCE(customer_id,''), state,
 			COALESCE(reason,''), attempt_count, last_attempt_at, next_action_at,
 			paused, resolved_at, COALESCE(resolution,''), created_at, updated_at
 		FROM invoice_dunning_runs
 		WHERE invoice_id = $1
 		LIMIT 1
-	`, invoiceID).Scan(&run.ID, &run.TenantID, &run.InvoiceID, &run.CustomerID, &run.PolicyID,
+	`, invoiceID).Scan(&run.ID, &run.TenantID, &run.InvoiceID, &run.CustomerID,
 		&run.State, &run.Reason, &run.AttemptCount, &run.LastAttemptAt, &run.NextActionAt,
 		&run.Paused, &run.ResolvedAt, &run.Resolution, &run.CreatedAt, &run.UpdatedAt)
 	if err == sql.ErrNoRows {
@@ -566,17 +321,18 @@ func (s *PostgresStore) ListRunsByInvoices(ctx context.Context, tenantID string,
 	}
 	defer postgres.Rollback(tx)
 
-	// The bound policy's retry count (the length of its retry_days) rides
-	// along (LEFT JOIN: a run is never dropped for its policy), so a reader
-	// can tell a run with a retry still to come from one whose next step is
-	// only its final action (InvoiceDunningRun.RetryScheduled).
+	// The retry count of the policy for the run's mode (the length of its
+	// retry_days) rides along (LEFT JOIN: a run is never dropped for its
+	// policy), so a reader can tell a run with a retry still to come from
+	// one whose next step is only its final action
+	// (InvoiceDunningRun.RetryScheduled).
 	rows, err := tx.QueryContext(ctx, `
-		SELECT r.id, r.tenant_id, r.invoice_id, COALESCE(r.customer_id,''), r.policy_id, r.state,
+		SELECT r.id, r.tenant_id, r.invoice_id, COALESCE(r.customer_id,''), r.state,
 			COALESCE(r.reason,''), r.attempt_count, r.last_attempt_at, r.next_action_at,
 			r.paused, r.resolved_at, COALESCE(r.resolution,''), r.created_at, r.updated_at,
 			COALESCE(jsonb_array_length(p.retry_days), 0)
 		FROM invoice_dunning_runs r
-		LEFT JOIN dunning_policies p ON p.id = r.policy_id
+		LEFT JOIN dunning_policies p ON p.tenant_id = r.tenant_id AND p.livemode = r.livemode
 		WHERE r.invoice_id = ANY($1::text[])
 	`, invoiceIDs)
 	if err != nil {
@@ -587,7 +343,7 @@ func (s *PostgresStore) ListRunsByInvoices(ctx context.Context, tenantID string,
 	var out []domain.InvoiceDunningRun
 	for rows.Next() {
 		var run domain.InvoiceDunningRun
-		if err := rows.Scan(&run.ID, &run.TenantID, &run.InvoiceID, &run.CustomerID, &run.PolicyID,
+		if err := rows.Scan(&run.ID, &run.TenantID, &run.InvoiceID, &run.CustomerID,
 			&run.State, &run.Reason, &run.AttemptCount, &run.LastAttemptAt, &run.NextActionAt,
 			&run.Paused, &run.ResolvedAt, &run.Resolution, &run.CreatedAt, &run.UpdatedAt,
 			&run.MaxRetryAttempts); err != nil {
@@ -607,7 +363,7 @@ func (s *PostgresStore) GetActiveRunByInvoice(ctx context.Context, tenantID, inv
 
 	var run domain.InvoiceDunningRun
 	err = tx.QueryRowContext(ctx, `
-		SELECT id, tenant_id, invoice_id, COALESCE(customer_id,''), policy_id, state,
+		SELECT id, tenant_id, invoice_id, COALESCE(customer_id,''), state,
 			COALESCE(reason,''), attempt_count, last_attempt_at, next_action_at,
 			paused, resolved_at, COALESCE(resolution,''), created_at, updated_at
 		FROM invoice_dunning_runs
@@ -617,7 +373,7 @@ func (s *PostgresStore) GetActiveRunByInvoice(ctx context.Context, tenantID, inv
 		-- in 'escalated' forever and never emits dunning.resolved.
 		WHERE invoice_id = $1 AND state != 'resolved'
 		LIMIT 1
-	`, invoiceID).Scan(&run.ID, &run.TenantID, &run.InvoiceID, &run.CustomerID, &run.PolicyID,
+	`, invoiceID).Scan(&run.ID, &run.TenantID, &run.InvoiceID, &run.CustomerID,
 		&run.State, &run.Reason, &run.AttemptCount, &run.LastAttemptAt, &run.NextActionAt,
 		&run.Paused, &run.ResolvedAt, &run.Resolution, &run.CreatedAt, &run.UpdatedAt)
 	if err == sql.ErrNoRows {
@@ -668,18 +424,18 @@ func (s *PostgresStore) ListRuns(ctx context.Context, filter RunListFilter) ([]d
 	// LEFT JOIN denormalizes invoice fields onto each row, so the /dunning
 	// page is one query, not 1 list + N invoice fetches. LEFT JOINs because
 	// an invoice reference can be unresolvable (RLS gap) without dropping
-	// the dunning row itself. The bound policy's retry count rides along
+	// the dunning row itself. The retry count of the run's policy rides along
 	// too, so the page can tell a run with a retry still to come from one
 	// whose next step is only its final action
 	// (InvoiceDunningRun.RetryScheduled).
-	query := `SELECT r.id, r.tenant_id, r.invoice_id, COALESCE(r.customer_id,''), r.policy_id, r.state,
+	query := `SELECT r.id, r.tenant_id, r.invoice_id, COALESCE(r.customer_id,''), r.state,
 		COALESCE(r.reason,''), r.attempt_count, r.last_attempt_at, r.next_action_at,
 		r.paused, r.resolved_at, COALESCE(r.resolution,''), r.created_at, r.updated_at,
 		COALESCE(i.invoice_number, ''), COALESCE(i.amount_due_cents, 0), COALESCE(i.currency, ''),
 		COALESCE(jsonb_array_length(p.retry_days), 0)
 		FROM invoice_dunning_runs r
 		LEFT JOIN invoices i ON i.id = r.invoice_id
-		LEFT JOIN dunning_policies p ON p.id = r.policy_id` + whereClause + ` ORDER BY r.created_at DESC, r.id DESC`
+		LEFT JOIN dunning_policies p ON p.tenant_id = r.tenant_id AND p.livemode = r.livemode` + whereClause + ` ORDER BY r.created_at DESC, r.id DESC`
 	// Default 50, clamp to 100 — no-silent-fallbacks principle.
 	limit := filter.Limit
 	if limit <= 0 {
@@ -699,7 +455,7 @@ func (s *PostgresStore) ListRuns(ctx context.Context, filter RunListFilter) ([]d
 	var runs []domain.InvoiceDunningRun
 	for rows.Next() {
 		var r domain.InvoiceDunningRun
-		if err := rows.Scan(&r.ID, &r.TenantID, &r.InvoiceID, &r.CustomerID, &r.PolicyID,
+		if err := rows.Scan(&r.ID, &r.TenantID, &r.InvoiceID, &r.CustomerID,
 			&r.State, &r.Reason, &r.AttemptCount, &r.LastAttemptAt, &r.NextActionAt,
 			&r.Paused, &r.ResolvedAt, &r.Resolution, &r.CreatedAt, &r.UpdatedAt,
 			&r.InvoiceNumber, &r.InvoiceAmountDue, &r.InvoiceCurrency,
@@ -960,13 +716,13 @@ func (s *PostgresStore) ClaimExhaustion(ctx context.Context, tenantID, runID str
 
 // runColumns is the run row as the single-run reads return it, in the order
 // scanRun reads.
-const runColumns = `id, tenant_id, invoice_id, COALESCE(customer_id,''), policy_id, state,
+const runColumns = `id, tenant_id, invoice_id, COALESCE(customer_id,''), state,
 	COALESCE(reason,''), attempt_count, last_attempt_at, next_action_at,
 	paused, resolved_at, COALESCE(resolution,''), created_at, updated_at`
 
 func scanRun(row interface{ Scan(dest ...any) error }) (domain.InvoiceDunningRun, error) {
 	var run domain.InvoiceDunningRun
-	err := row.Scan(&run.ID, &run.TenantID, &run.InvoiceID, &run.CustomerID, &run.PolicyID,
+	err := row.Scan(&run.ID, &run.TenantID, &run.InvoiceID, &run.CustomerID,
 		&run.State, &run.Reason, &run.AttemptCount, &run.LastAttemptAt, &run.NextActionAt,
 		&run.Paused, &run.ResolvedAt, &run.Resolution, &run.CreatedAt, &run.UpdatedAt)
 	return run, err
@@ -1065,8 +821,8 @@ func (s *PostgresStore) GetRunAwaitingPayment(ctx context.Context, tenantID, inv
 }
 
 // TakeAwaitedRetryTx clears the run's awaited PaymentIntent, only while it is
-// paymentIntentID and the run is active, and returns the run and its bound
-// policy when this call did. The UPDATE is the compare-and-set: the webhook,
+// paymentIntentID and the run is active, and returns the run and the policy
+// for its mode when this call did. The UPDATE is the compare-and-set: the webhook,
 // a redelivery and the reconciler can each report the failure, and one wins.
 // The caller's transaction locks the invoice row before this one (the
 // failure settle's FOR UPDATE), so the lock order matches RecordRetryInFlight.
@@ -1085,9 +841,12 @@ func (s *PostgresStore) TakeAwaitedRetryTx(ctx context.Context, tx *sql.Tx, invo
 	if err != nil {
 		return domain.InvoiceDunningRun{}, domain.DunningPolicy{}, false, fmt.Errorf("take the run waiting on the payment: %w", err)
 	}
-	policy, err := scanPolicy(tx.QueryRowContext(ctx, `SELECT `+policyColumns+` FROM dunning_policies WHERE id = $1`, run.PolicyID))
+	// The run's own tenant and mode pick the policy, so the read does not
+	// depend on how the caller's transaction is scoped.
+	policy, err := scanPolicy(tx.QueryRowContext(ctx, `SELECT `+policyColumns+` FROM dunning_policies
+		WHERE (tenant_id, livemode) = (SELECT tenant_id, livemode FROM invoice_dunning_runs WHERE id = $1)`, run.ID))
 	if err != nil {
-		return domain.InvoiceDunningRun{}, domain.DunningPolicy{}, false, fmt.Errorf("read bound policy %s for run %s: %w", run.PolicyID, run.ID, err)
+		return domain.InvoiceDunningRun{}, domain.DunningPolicy{}, false, fmt.Errorf("read the dunning policy for run %s: %w", run.ID, err)
 	}
 	return run, policy, true, nil
 }
@@ -1153,7 +912,7 @@ func (s *PostgresStore) ListDueRuns(ctx context.Context, tenantID string, dueBef
 	}
 
 	rows, err := tx.QueryContext(ctx, `
-		SELECT r.id, r.tenant_id, r.invoice_id, COALESCE(r.customer_id,''), r.policy_id, r.state,
+		SELECT r.id, r.tenant_id, r.invoice_id, COALESCE(r.customer_id,''), r.state,
 			COALESCE(r.reason,''), r.attempt_count, r.last_attempt_at, r.next_action_at,
 			r.paused, r.resolved_at, COALESCE(r.resolution,''), r.created_at, r.updated_at
 		FROM invoice_dunning_runs r
@@ -1241,7 +1000,7 @@ func (s *PostgresStore) ListDueRuns(ctx context.Context, tenantID string, dueBef
 	var runs []domain.InvoiceDunningRun
 	for rows.Next() {
 		var r domain.InvoiceDunningRun
-		if err := rows.Scan(&r.ID, &r.TenantID, &r.InvoiceID, &r.CustomerID, &r.PolicyID,
+		if err := rows.Scan(&r.ID, &r.TenantID, &r.InvoiceID, &r.CustomerID,
 			&r.State, &r.Reason, &r.AttemptCount, &r.LastAttemptAt, &r.NextActionAt,
 			&r.Paused, &r.ResolvedAt, &r.Resolution, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, err
@@ -1413,9 +1172,3 @@ func (s *PostgresStore) GetStats(ctx context.Context, tenantID string) (Stats, e
 	}
 	return stats, nil
 }
-
-// Customer dunning overrides (GetCustomerOverride / UpsertCustomerOverride
-// / DeleteCustomerOverride) were removed in ADR-036. Per-customer
-// differentiation now flows through customers.dunning_policy_id
-// referencing a DunningPolicy row, matching the Stripe / Lago / Orb /
-// Recurly campaigns-model shape.

@@ -195,9 +195,9 @@ func TestProcessRun_PaidInvoice_ResolvesWithoutRetrying(t *testing.T) {
 // BEFORE the max-retries→exhaustRun branch.
 func TestProcessRun_MaxRetriesPaid_DoesNotCancelSubscription(t *testing.T) {
 	store := newMemStore()
-	p := store.policies[store.defaultID]
+	p := *store.policy
 	p.FinalSubscriptionAction = domain.SubActionCancel // would cancel if exhaustRun reached
-	store.policies[store.defaultID] = p
+	store.policy = &p
 
 	canceler := &recordingSubCanceler{}
 	svc := NewService(store, &recordingRetrier{}, nil)
@@ -332,9 +332,9 @@ func (r *settlingDeclineRetrier) RetryPayment(_ context.Context, _, _, _ string)
 // this — the settle lands after it.
 func TestExhaustRun_LatePaidRecheck_DoesNotCancel(t *testing.T) {
 	store := newMemStore()
-	p := store.policies[store.defaultID]
+	p := *store.policy
 	p.FinalSubscriptionAction = domain.SubActionCancel
-	store.policies[store.defaultID] = p
+	store.policy = &p
 
 	paid := false
 	canceler := &recordingSubCanceler{}
@@ -377,9 +377,9 @@ func (c *resolvingCanceler) Cancel(ctx context.Context, tenantID, _ string) erro
 func TestExhaustRun_ResolvedDuringTerminalAction_NoEscalatedClobber(t *testing.T) {
 	store := newMemStore()
 	disp := &store.webhooks
-	p := store.policies[store.defaultID]
+	p := *store.policy
 	p.FinalSubscriptionAction = domain.SubActionCancel
-	store.policies[store.defaultID] = p
+	store.policy = &p
 
 	svc := NewService(store, &noopRetrier{}, nil)
 	svc.SetSubscriptionPauser(&recordingPauser{}, stubInvGet{inv: unpaidInv()})

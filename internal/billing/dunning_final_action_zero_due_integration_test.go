@@ -216,8 +216,8 @@ func newZeroDueFinalActionRig(t *testing.T, name string) *zeroDueFinalActionRig 
 	r.dsvc.SetChargeHoldClaimer(r.invStore)
 	r.dsvc.SetEmailNotifier(email.NewOutboxSender(email.NewOutboxStore(db)))
 	r.dsvc.SetCustomerEmailFetcher(customerEmails{customers})
-	r.policy, err = r.dsvc.UpsertPolicy(ctx, r.tenantID, domain.DunningPolicy{
-		Name: "cancel at the end", Enabled: true, RetryDays: []int{3},
+	r.policy, err = r.dsvc.PutPolicy(ctx, r.tenantID, domain.DunningPolicy{
+		Enabled: true, RetryDays: []int{3},
 		FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	})
 	if err != nil {
@@ -234,10 +234,10 @@ func (r *zeroDueFinalActionRig) dueRun(resolution domain.DunningResolution) stri
 	runID := "run_" + r.day1.ID
 	now := time.Now().UTC()
 	r.exec(`
-		INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, reason, resolution,
+		INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, state, reason, resolution,
 			attempt_count, last_attempt_at, next_action_at, paused, created_at, updated_at, livemode)
-		VALUES ($1, $2, $3, $4, $5, 'active', 'payment_failed', NULLIF($6, ''), 1, $7, $8, false, $9, $9, false)`,
-		runID, r.tenantID, r.day1.ID, r.cust.ID, r.policy.ID, string(resolution), now.Add(-30*time.Minute), now.Add(-10*time.Minute), now.Add(-time.Hour))
+		VALUES ($1, $2, $3, $4, 'active', 'payment_failed', NULLIF($5, ''), 1, $6, $7, false, $8, $8, false)`,
+		runID, r.tenantID, r.day1.ID, r.cust.ID, string(resolution), now.Add(-30*time.Minute), now.Add(-10*time.Minute), now.Add(-time.Hour))
 	return runID
 }
 

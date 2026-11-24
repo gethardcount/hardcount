@@ -55,10 +55,10 @@ func newNoStripeRig(t *testing.T, name string, env ...string) *noStripeRig {
 	r := &noStripeRig{t: t, db: db, srv: srv, ts: ts}
 	r.tenantID = testutil.CreateTestTenant(t, db, name)
 	r.key = createAPIKeyWithMode(t, db, r.tenantID, false)
-	r.call("POST", "/v1/dunning/policies", flowReq{body: map[string]any{
-		"name": "No Stripe policy", "enabled": true, "retry_days": []int{3, 3},
+	r.call("PUT", "/v1/dunning/policy", flowReq{body: map[string]any{
+		"enabled": true, "retry_days": []int{3, 3},
 		"final_subscription_action": "none", "final_invoice_action": "mark_uncollectible",
-	}}).want(t, 201, "create dunning policy")
+	}}).want(t, 200, "create dunning policy")
 	return r
 }
 

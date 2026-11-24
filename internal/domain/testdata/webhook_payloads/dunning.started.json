@@ -7,7 +7,6 @@
     "invoice_id": "hc_inv_golden",
     "last_attempt_at": "2026-10-01T11:00:00Z",
     "paused": false,
-    "policy_id": "hc_dpol_golden",
     "reason": "payment_failed",
     "resolution": "retries_exhausted",
     "resolved_at": "2026-10-01T12:00:00Z",

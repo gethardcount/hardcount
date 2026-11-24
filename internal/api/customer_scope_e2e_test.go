@@ -138,20 +138,20 @@ type scopeRefs struct {
 	cus, ext, price, meter, meterKey, plan, plan2, plan3 string
 	sub, item, activeSub, activeItem                     string
 	draftInv, finalInv, creditNote                       string
-	policy, override, hook, rate, apiKey                 string
+	override, hook, rate, apiKey                         string
 }
 
 func (r scopeRefs) ids() []string {
 	return []string{
 		r.cus, r.ext, r.price, r.meter, r.meterKey, r.plan, r.plan2, r.plan3, r.sub, r.item, r.activeSub, r.activeItem,
-		r.draftInv, r.finalInv, r.creditNote, r.policy, r.override, r.hook, r.rate, r.apiKey,
+		r.draftInv, r.finalInv, r.creditNote, r.override, r.hook, r.rate, r.apiKey,
 	}
 }
 
 // TestE2E_ReferencedIDsAreTenantAndModeScoped widens the test above from
 // three endpoints to every operator endpoint that writes a row naming another
-// object: by a customer, subscription, invoice, plan, meter, price or
-// dunning policy id in the body, or by the id in the path.
+// object: by a customer, subscription, invoice, plan, meter or price id in
+// the body, or by the id in the path.
 //
 // Each request is sent three times, naming another tenant's object, the same
 // tenant's object in the other mode, and an id that does not exist. It must
@@ -254,9 +254,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 		r.activeSub, r.activeItem = id(sub), id(sub["items"].([]any)[0].(map[string]any))
 		// The policy comes first: finalizing an unpaid invoice starts a
 		// dunning run only when the tenant has one.
-		r.policy = id(create("POST", "/v1/dunning/policies", map[string]any{
-			"name": tag + " policy", "enabled": true, "retry_days": []int{3, 3},
-		}))
+		create("PUT", "/v1/dunning/policy", map[string]any{"enabled": true, "retry_days": []int{3, 3}})
 		r.draftInv = id(create("POST", "/v1/invoices", map[string]any{"customer_id": r.cus, "line_items": line}))
 		r.finalInv = id(create("POST", "/v1/invoices", map[string]any{"customer_id": cus2, "line_items": line}))
 		create("POST", "/v1/invoices/"+r.finalInv+"/finalize", nil)
@@ -285,7 +283,7 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 			plan: "hc_pln_missing", plan2: "hc_pln_missing2", plan3: "hc_pln_missing3",
 			sub: "hc_sub_missing", item: "hc_si_missing", activeSub: "hc_sub_missing2", activeItem: "hc_si_missing2",
 			draftInv: "hc_inv_missing", finalInv: "hc_inv_missing2", creditNote: "hc_cn_missing",
-			policy: "hc_dpol_missing", override: "hc_cpo_missing", hook: "hc_whe_missing", rate: "hc_pcr_missing", apiKey: "hc_key_missing",
+			override: "hc_cpo_missing", hook: "hc_whe_missing", rate: "hc_pcr_missing", apiKey: "hc_key_missing",
 		}},
 	}
 
@@ -351,7 +349,6 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 	inv := func(f scopeRefs) string { return f.draftInv }
 	note := func(f scopeRefs) string { return f.creditNote }
 	hook := func(f scopeRefs) string { return f.hook }
-	policy := func(f scopeRefs) string { return f.policy }
 	suffix := func(id string) string { return id[len(id)-6:] }
 
 	cases := []refCase{
@@ -393,13 +390,6 @@ func TestE2E_ReferencedIDsAreTenantAndModeScoped(t *testing.T) {
 				"usage": map[string]any{"prompt_tokens": 10, "completion_tokens": 5, "total_tokens": 15},
 			}
 		}, 200, "", 0},
-
-		// --- dunning policy id ---
-		{"fixed: customer update [dunning_policy_id]", "PATCH", func(o, _ scopeRefs) string { return "/v1/customers/" + o.cus }, func(_, f scopeRefs) any {
-			return map[string]any{"dunning_policy_id": f.policy}
-		}, 404, "dunning policy not found", 200},
-		{"dunning policy set default [path policy]", "POST", at("/v1/dunning/policies/%s/set-default", policy), none, 404, "", 200},
-		{"dunning policy delete [path policy]", "DELETE", at("/v1/dunning/policies/%s", policy), none, 404, "", 0},
 
 		// --- meter and price ids ---
 		{"plan create [prices[].meter_id]", "POST", fixed("/v1/plans"), func(_, f scopeRefs) any {

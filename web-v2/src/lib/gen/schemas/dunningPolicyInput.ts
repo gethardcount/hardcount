@@ -15,18 +15,12 @@ import type { DunningPolicyInputFinalInvoiceAction } from './dunningPolicyInputF
 import type { DunningPolicyInputFinalSubscriptionAction } from './dunningPolicyInputFinalSubscriptionAction';
 
 /**
- * The body of `POST /v1/dunning/policies` and
- * `PATCH /v1/dunning/policies/{id}`. A PATCH replaces every setting,
- * so send the full policy. `id`, `tenant_id`, `is_default`, `seeded`,
- * `created_at` and `updated_at` are set by the server; sending one is
- * refused with 422.
+ * The body of `PUT /v1/dunning/policy`. It replaces every setting, so
+ * send the full policy. `id`, `tenant_id`, `created_at` and
+ * `updated_at` are set by the server; sending one is refused with
+ * 422.
  */
 export interface DunningPolicyInput {
-  /**
-     * A name for the policy, up to 255 bytes (a character outside ASCII counts as more than one). Defaults to empty.
-     * @maxLength 255
-     */
-  name?: string;
   /** A disabled policy starts no dunning. */
   enabled?: boolean;
   /**

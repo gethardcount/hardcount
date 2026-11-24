@@ -320,8 +320,8 @@ func TestE2E_CustomerLock_ArchiveRacesCreate(t *testing.T) {
 // TestE2E_CustomerUpdate_ConcurrentEditsKeepBothFields: two PATCHes to one
 // customer at the same moment, each sending one field. Each update reads the
 // customer and writes every field back, so with no lock the second wrote the
-// first's field back as it had read it: a rename un-archived the customer or
-// reset its dunning policy. Under the customer-rules lock the second reads
+// first's field back as it had read it: a rename un-archived the customer.
+// Under the customer-rules lock the second reads
 // the row the first saved.
 //
 // Mutation-verify: drop the lock from WithCustomerRulesLock, or build the
@@ -330,13 +330,9 @@ func TestE2E_CustomerUpdate_ConcurrentEditsKeepBothFields(t *testing.T) {
 	r := newLagRigBare(t, "in_advance", 0)
 	ctx := t.Context()
 	admin := testutil.AdminPool(t)
-	policyID := r.must(http.MethodPost, "/v1/dunning/policies", lagP0, map[string]any{
-		"name": "Gentle", "enabled": true, "retry_days": []int{3, 3},
-	}, http.StatusCreated)["id"].(string)
 
 	archive := map[string]any{"status": "archived"}
 	rename := map[string]any{"display_name": "Renamed"}
-	policy := map[string]any{"dunning_policy_id": policyID}
 	cases := []struct {
 		name   string
 		a, b   map[string]any
@@ -344,7 +340,6 @@ func TestE2E_CustomerUpdate_ConcurrentEditsKeepBothFields(t *testing.T) {
 	}{
 		{"archive then name", archive, rename, map[string]any{"status": "archived", "display_name": "Renamed"}},
 		{"name then archive", rename, archive, map[string]any{"status": "archived", "display_name": "Renamed"}},
-		{"policy then name", policy, rename, map[string]any{"dunning_policy_id": policyID, "display_name": "Renamed"}},
 	}
 	for i, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

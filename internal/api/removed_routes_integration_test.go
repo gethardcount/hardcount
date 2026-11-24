@@ -55,9 +55,9 @@ func TestRemovedRoutes_AnswerNotFound(t *testing.T) {
 		"billing_time": "anniversary",
 	}).want(t, 201, "create subscription").body, "id")
 	// A dunning policy, so finalizing an invoice with no card opens a run.
-	call("POST", "/v1/dunning/policies", map[string]any{
-		"name": "Removed routes policy", "enabled": true, "retry_days": []int{3, 3},
-	}).want(t, 201, "create dunning policy")
+	call("PUT", "/v1/dunning/policy", map[string]any{
+		"enabled": true, "retry_days": []int{3, 3},
+	}).want(t, 200, "create dunning policy")
 	dunnedID := flowStr(call("POST", "/v1/invoices", map[string]any{
 		"customer_id": customerID,
 		"line_items":  []map[string]any{{"description": "Dunned service", "quantity": 1, "unit_amount_cents": 4200}},

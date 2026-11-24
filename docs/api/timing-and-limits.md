@@ -32,7 +32,7 @@ payment on a schedule, and emailing the customer.
 |---|---|
 | Waits after a failed billing attempt for a subscription | 15 minutes, 1 hour, 4 hours, 12 hours, then 24 hours |
 | Failed billing attempts before the subscription is parked | 8. `POST /v1/subscriptions/{id}/retry-billing` brings it back. |
-| Payment retries of a new account's default dunning policy | On day 3, 7 and 14 after the failed payment. A policy takes 1 to 15 retries, each 1 to 30 days after the one before. |
+| Payment retries of a new account's dunning policy | On day 3, 7 and 14 after the failed payment. A policy takes 1 to 15 retries, each 1 to 30 days after the one before. |
 | A card charge whose answer from Stripe was unclear | Hardcount looks the payment up at Stripe on the first billing run at least 5 minutes after the charge began. A payment Stripe took is recorded. If it took none, the invoice is charged again as usual. When the unclear answer came before Stripe was asked to take the money, Hardcount looks nothing up: the invoice is charged again from the first billing run at least 15 minutes after the charge began. |
 
 Hardcount acts on these waits only during a billing run. So each wait ends

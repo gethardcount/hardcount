@@ -709,7 +709,7 @@ type dunningRunStarter interface {
 //
 // StartDunning returns InvalidState for two skips that are on purpose, and
 // this adapter turns both into a no-op. One is dunning disabled. The other
-// is dunning not configured: the tenant has no effective or default policy.
+// is dunning not configured: the account has no policy for the mode.
 // StartDunning maps that ErrNotFound to InvalidState, so an optional feature
 // left unconfigured never fails the money-path sweep. A tenant in either
 // state gets no automatic retries for a missing card, as it gets none for a

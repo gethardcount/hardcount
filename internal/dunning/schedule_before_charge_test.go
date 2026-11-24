@@ -44,10 +44,10 @@ func TestProcessRun_DeclineThenWriteFails_RunWaitsThePolicysInterval(t *testing.
 		return errors.New("payment declined")
 	}}, nil)
 	run := dueRunAt(t, mem, svc, 0)
-	policy := mem.policies[mem.defaultID]
+	policy := *mem.policy
 	wait, ok := policy.WaitBeforeRetry(2)
 	if !ok || wait < time.Hour {
-		t.Fatalf("setup: the default policy's wait before retry 2 is %v (ok=%v), want days", wait, ok)
+		t.Fatalf("setup: the policy's wait before retry 2 is %v (ok=%v), want days", wait, ok)
 	}
 
 	if _, errs := svc.ProcessDueRuns(context.Background(), "t1", 20); len(errs) == 0 {

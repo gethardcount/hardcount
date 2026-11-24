@@ -27,8 +27,8 @@ func exhaustedRunPG(t *testing.T, name string) (context.Context, *dunning.Postgr
 		t.Fatalf("create customer: %v", err)
 	}
 	store := dunning.NewPostgresStore(db)
-	policy, err := store.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
+	_, err = store.PutPolicy(ctx, tenantID, domain.DunningPolicy{
+		Enabled: true, RetryDays: []int{3, 3, 3},
 		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	})
 	if err != nil {
@@ -47,7 +47,7 @@ func exhaustedRunPG(t *testing.T, name string) (context.Context, *dunning.Postgr
 	last := now.Add(-time.Hour)
 	next := now.Add(-time.Minute)
 	run, err := store.CreateRun(ctx, tenantID, domain.InvoiceDunningRun{
-		InvoiceID: inv.ID, CustomerID: cust.ID, PolicyID: policy.ID, State: domain.DunningActive,
+		InvoiceID: inv.ID, CustomerID: cust.ID, State: domain.DunningActive,
 		Reason: "payment_failed", AttemptCount: 3, LastAttemptAt: &last, NextActionAt: &next,
 	})
 	if err != nil {

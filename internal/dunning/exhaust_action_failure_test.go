@@ -9,12 +9,12 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 )
 
-// markUncollectiblePolicy mutates the mem store's default policy to a
+// markUncollectiblePolicy mutates the mem store's policy to a
 // mark_uncollectible terminal so exhaustRun invokes a real mover.
 func markUncollectiblePolicy(store *memStore) {
-	p := store.policies[store.defaultID]
+	p := *store.policy
 	p.FinalInvoiceAction = domain.InvActionMarkUncollectible
-	store.policies[store.defaultID] = p
+	store.policy = &p
 }
 
 func exhaustedRun(t *testing.T, store *memStore, svc *Service) domain.InvoiceDunningRun {

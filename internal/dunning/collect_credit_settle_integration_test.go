@@ -64,15 +64,12 @@ func TestCollect_CreditCoveredInvoice_ResolvesActiveDunningRun(t *testing.T) {
 
 	dunStore := dunning.NewPostgresStore(db)
 	dunSvc := dunning.NewService(dunStore, nil, clock.Real())
-	policy, err := dunSvc.UpsertPolicy(ctx, tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
+	_, err = dunSvc.PutPolicy(ctx, tenantID, domain.DunningPolicy{
+		Enabled: true, RetryDays: []int{3, 3, 3},
 		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	})
 	if err != nil {
 		t.Fatalf("upsert policy: %v", err)
-	}
-	if err := dunSvc.SetDefaultPolicy(ctx, tenantID, policy.ID); err != nil {
-		t.Fatalf("set default policy: %v", err)
 	}
 
 	invStore := invoice.NewPostgresStore(db)

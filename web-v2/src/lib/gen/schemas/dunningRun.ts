@@ -17,8 +17,9 @@ import type { DunningRunState } from './dunningRunState';
 /**
  * A dunning run: the payment retries for one unpaid invoice. Dunning
  * is retrying a failed or missing payment on a schedule (the
- * invoice's dunning policy), and running the policy's final action
- * when the retries run out. Each invoice has at most one run.
+ * account's dunning policy for the run's mode), and running the
+ * policy's final action when the retries run out. Each invoice has at
+ * most one run.
  */
 export interface DunningRun {
   /** Unique identifier of the run, starting `hc_drun_`. */
@@ -29,8 +30,6 @@ export interface DunningRun {
   invoice_id: string;
   /** The invoice's customer. Absent when not recorded. */
   customer_id?: string;
-  /** The dunning policy whose schedule and final action the run follows. */
-  policy_id: string;
   /**
      * `active`: retries are running. `escalated`: retries ran out
      * (`resolution` is `retries_exhausted`). `resolved`: the run ended

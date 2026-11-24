@@ -1098,7 +1098,7 @@ func (s *readHookStore) ListItemIntervals(ctx context.Context, tenantID, subscri
 // whose final action cancels the subscription.
 func cancelAtTheEnd() domain.DunningPolicy {
 	return domain.DunningPolicy{
-		Name: "cancel at the end", Enabled: true, RetryDays: []int{3},
+		Enabled: true, RetryDays: []int{3},
 		FinalSubscriptionAction: domain.SubActionCancel, FinalInvoiceAction: domain.InvActionMarkUncollectible,
 	}
 }

@@ -185,11 +185,11 @@ func TestDoctor_CleanSchemaIsQuiet_AndSeededViolationsAreCaught(t *testing.T) {
 	// SB-1: an active run with no next action is invisible to both due-run
 	// pickers forever — flagged. Control: an escalated run with no next action
 	// is the legal terminal shape — NOT flagged by the new check.
-	mustExec(`INSERT INTO dunning_policies (id, tenant_id, name, retry_days) VALUES ('hc_dpol_doc', $1, 'doc', '[3]')`, tenantID)
-	mustExec(`INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, attempt_count, last_attempt_at)
-		VALUES ('hc_drun_doc_strand', $1, 'hc_inv_doc1', 'cus_doc1', 'hc_dpol_doc', 'active', 3, now())`, tenantID)
-	mustExec(`INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, attempt_count, last_attempt_at, resolved_at, resolution)
-		VALUES ('hc_drun_doc_escal', $1, 'hc_inv_doc_max_c', 'cus_doc1', 'hc_dpol_doc', 'escalated', 3, now(), now(), 'retries_exhausted')`, tenantID)
+	mustExec(`INSERT INTO dunning_policies (id, tenant_id, retry_days) VALUES ('hc_dpol_doc', $1, '[3]')`, tenantID)
+	mustExec(`INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, state, attempt_count, last_attempt_at)
+		VALUES ('hc_drun_doc_strand', $1, 'hc_inv_doc1', 'cus_doc1', 'active', 3, now())`, tenantID)
+	mustExec(`INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, state, attempt_count, last_attempt_at, resolved_at, resolution)
+		VALUES ('hc_drun_doc_escal', $1, 'hc_inv_doc_max_c', 'cus_doc1', 'escalated', 3, now(), now(), 'retries_exhausted')`, tenantID)
 
 	// invoice_due_conservation with credit notes. One defect, three controls:
 	//   doc_cn_over  — 100.00 invoice, 60.00 credits applied, an issued 100.00

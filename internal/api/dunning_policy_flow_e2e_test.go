@@ -1,157 +1,177 @@
 package api
 
 import (
+	"fmt"
 	"net/http/httptest"
-	"strings"
 	"testing"
+	"time"
 
+	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/dunning"
+	"github.com/gethardcount/hardcount/internal/payment"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// TestE2E_DunningPolicyDelete walks "Delete policy" on the dunning policies
-// page over the real router and database. A policy is refused while it is
-// the default or while a customer is assigned to it, and deleted once
-// neither holds. Before this test the delete had no success test at any
-// level, only a stub store.
-func TestE2E_DunningPolicyDelete(t *testing.T) {
+// policyFlow is a server and a test-mode key for one account with no dunning
+// policy (testutil.CreateTestTenant seeds none).
+func policyFlow(t *testing.T, name string) (call func(method, path string, req flowReq) flowResp, key func(livemode bool) string) {
+	t.Helper()
 	db := testutil.SetupTestDB(t)
 	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
-	defer ts.Close()
-
-	tenantID := testutil.CreateTestTenant(t, db, "Dunning Delete Flow Co")
-	key := createAPIKeyWithMode(t, db, tenantID, false)
-	call := func(method, path string, req flowReq) flowResp {
+	t.Cleanup(ts.Close)
+	tenantID := testutil.CreateTestTenant(t, db, name)
+	keys := map[bool]string{false: createAPIKeyWithMode(t, db, tenantID, false)}
+	key = func(livemode bool) string {
 		t.Helper()
-		req.bearer = key
+		if _, ok := keys[livemode]; !ok {
+			keys[livemode] = createAPIKeyWithMode(t, db, tenantID, livemode)
+		}
+		return keys[livemode]
+	}
+	call = func(method, path string, req flowReq) flowResp {
+		t.Helper()
+		if req.bearer == "" {
+			req.bearer = keys[false]
+		}
 		return flowDo(t, ts, method, path, req)
 	}
-	newPolicy := func(name string) map[string]any {
-		t.Helper()
-		return call("POST", "/v1/dunning/policies", flowReq{body: map[string]any{
-			"name": name, "enabled": true, "retry_days": []int{3, 3},
-		}}).want(t, 201, "create policy "+name).body
-	}
-	// assigned lists the policies with their "N customers assigned" count,
-	// as the policies page shows them.
-	assigned := func() map[string]int64 {
-		t.Helper()
-		out := map[string]int64{}
-		for _, p := range flowList(call("GET", "/v1/dunning/policies", flowReq{}).want(t, 200, "list policies").body, "data") {
-			out[flowStr(p, "id")] = flowInt(p, "assigned_customers")
-		}
-		return out
-	}
+	return call, key
+}
 
-	standard := newPolicy("Standard (delete flow)")
-	strict := newPolicy("Strict (delete flow)")
-	standardID, strictID := flowStr(standard, "id"), flowStr(strict, "id")
-	if standard["is_default"] != true || strict["is_default"] != false {
-		t.Fatalf("first policy default=%v, second default=%v; want the first to be the default", standard["is_default"], strict["is_default"])
-	}
-
-	// The default cannot be deleted.
-	if res := call("DELETE", "/v1/dunning/policies/"+standardID, flowReq{}).want(t, 409, "delete the default policy"); !strings.Contains(res.errMessage(), "default") {
-		t.Errorf("default delete message %q, want it to name the default", res.errMessage())
-	}
-
-	// Nor can a policy a customer is on.
-	customerID := flowStr(call("POST", "/v1/customers", flowReq{body: map[string]any{
-		"external_id": "dunning-delete-flow", "display_name": "Dunning Delete Customer", "email": "ap@dunning-delete-flow.test",
-	}}).want(t, 201, "create customer").body, "id")
-	call("PATCH", "/v1/customers/"+customerID, flowReq{body: map[string]any{"dunning_policy_id": strictID}}).want(t, 200, "assign the customer")
-	if n := assigned()[strictID]; n != 1 {
-		t.Fatalf("strict policy shows %d assigned customers, want 1", n)
-	}
-	if res := call("DELETE", "/v1/dunning/policies/"+strictID, flowReq{}).want(t, 409, "delete an assigned policy"); !strings.Contains(res.errMessage(), "1 customer(s) still assigned") {
-		t.Errorf("assigned delete message %q, want it to count the assigned customer", res.errMessage())
-	}
-	call("GET", "/v1/dunning/policies/"+strictID, flowReq{}).want(t, 200, "the refused policy is still there")
-
-	// Move the customer back to the default, and the delete goes through.
-	moved := call("PATCH", "/v1/customers/"+customerID, flowReq{body: map[string]any{"dunning_policy_id": ""}}).want(t, 200, "unassign the customer")
-	if got := flowStr(moved.body, "dunning_policy_id"); got != "" {
-		t.Fatalf("customer still on policy %q after clearing it", got)
-	}
-	if res := call("DELETE", "/v1/dunning/policies/"+strictID, flowReq{}).want(t, 200, "delete the policy"); flowStr(res.body, "status") != "deleted" {
-		t.Errorf("delete answered %s, want status deleted", res.raw)
-	}
-	call("GET", "/v1/dunning/policies/"+strictID, flowReq{}).want(t, 404, "get the deleted policy")
-	call("DELETE", "/v1/dunning/policies/"+strictID, flowReq{}).want(t, 404, "delete it again")
-	left := assigned()
-	if _, ok := left[strictID]; ok || len(left) != 1 {
-		t.Errorf("policies after the delete: %v, want only the default %s", left, standardID)
-	}
-	if _, ok := left[standardID]; !ok {
-		t.Errorf("the default policy %s is gone after deleting another one", standardID)
-	}
-
-	// The delete is in the audit log.
-	var actions []string
-	for _, e := range flowList(call("GET", "/v1/audit-log?resource_type=dunning_policy&resource_id="+strictID, flowReq{}).want(t, 200, "audit log").body, "data") {
-		actions = append(actions, flowStr(e, "action"))
-	}
-	if strings.Count(","+strings.Join(actions, ",")+",", ",delete,") != 1 {
-		t.Errorf("audit rows for the deleted policy: %v, want one delete", actions)
+// TestE2E_DunningPolicy_GetWithoutAPolicyIsNotFound: an account with no
+// policy in the mode answers 404 not_found, and nothing is retried there.
+func TestE2E_DunningPolicy_GetWithoutAPolicyIsNotFound(t *testing.T) {
+	call, _ := policyFlow(t, "Dunning Policy None Co")
+	if res := call("GET", "/v1/dunning/policy", flowReq{}).want(t, 404, "get with no policy"); res.errCode() != "not_found" {
+		t.Errorf("code %q, want not_found", res.errCode())
 	}
 }
 
-// TestE2E_DunningPolicyDelete_RefusedOnceItHasRun: a policy that has run
-// payment retries on an invoice keeps that history pointing at it, so it
-// cannot be deleted. The delete is refused with a reason, like the other two
-// refusals, even after every customer is moved off it (#1215). Before, the
-// database refused the delete and the API answered 500.
-//
-// The run is made the way it happens for real: a customer on the policy with
-// no card is billed, and Hardcount starts payment retries on the unpaid invoice.
-func TestE2E_DunningPolicyDelete_RefusedOnceItHasRun(t *testing.T) {
-	db := testutil.SetupTestDB(t)
-	ts := httptest.NewServer(NewServer(db, clock.Real(), nil))
-	defer ts.Close()
+// TestE2E_DunningPolicy_PutCreatesThenReplaces: the first PUT creates the
+// account's policy and GET answers it; a second PUT replaces every field of
+// the same policy. The answer carries no id, and each PUT writes one update
+// row to the audit log.
+func TestE2E_DunningPolicy_PutCreatesThenReplaces(t *testing.T) {
+	call, _ := policyFlow(t, "Dunning Policy Put Co")
 
-	tenantID := testutil.CreateTestTenant(t, db, "Dunning Delete History Co")
-	key := createAPIKeyWithMode(t, db, tenantID, false)
-	call := func(method, path string, req flowReq) flowResp {
-		t.Helper()
-		req.bearer = key
-		return flowDo(t, ts, method, path, req)
+	created := call("PUT", "/v1/dunning/policy", flowReq{body: map[string]any{
+		"enabled": true, "retry_days": []int{2, 3}, "final_subscription_action": "pause", "final_invoice_action": "none",
+	}}).want(t, 200, "create the policy").body
+	if _, ok := created["id"]; ok {
+		t.Errorf("answer carries id %v; the policy is found by its account and mode", created["id"])
 	}
-	newPolicy := func(name string) string {
-		t.Helper()
-		return flowStr(call("POST", "/v1/dunning/policies", flowReq{body: map[string]any{
-			"name": name, "enabled": true, "retry_days": []int{3, 3},
-		}}).want(t, 201, "create policy "+name).body, "id")
-	}
-	newPolicy("Standard (history)")
-	usedID := newPolicy("Used (history)")
-
-	customerID := flowStr(call("POST", "/v1/customers", flowReq{body: map[string]any{
-		"external_id": "dunning-delete-history", "display_name": "No Card Customer", "email": "ap@dunning-delete-history.test",
-	}}).want(t, 201, "create customer").body, "id")
-	call("PATCH", "/v1/customers/"+customerID, flowReq{body: map[string]any{"dunning_policy_id": usedID}}).want(t, 200, "assign the customer")
-	planID := flowStr(call("POST", "/v1/plans", flowReq{body: map[string]any{
-		"code": "history_plan", "name": "History plan", "currency": "USD", "billing_interval": "monthly",
-		"base_amount_cents": 2500, "base_bill_timing": "in_advance",
-	}}).want(t, 201, "create plan").body, "id")
-	call("POST", "/v1/subscriptions", flowReq{body: map[string]any{
-		"code": "history-sub", "display_name": "History Sub", "customer_id": customerID,
-		"items": []map[string]any{{"plan_id": planID, "quantity": 1}},
-	}}).want(t, 201, "create subscription")
-
-	invoices := flowList(call("GET", "/v1/invoices?customer_id="+customerID, flowReq{}).want(t, 200, "list invoices").body, "data")
-	if len(invoices) != 1 {
-		t.Fatalf("invoices for the new subscription: %d, want 1", len(invoices))
-	}
-	runs := flowList(call("GET", "/v1/dunning/runs?invoice_id="+flowStr(invoices[0], "id"), flowReq{}).want(t, 200, "list runs").body, "data")
-	if len(runs) != 1 || flowStr(runs[0], "policy_id") != usedID {
-		t.Fatalf("payment retry runs on the unpaid invoice: %v, want one on the policy %s", runs, usedID)
+	got := call("GET", "/v1/dunning/policy", flowReq{}).want(t, 200, "get the created policy").body
+	if got["enabled"] != true || fmt.Sprint(got["retry_days"]) != "[2 3]" ||
+		got["final_subscription_action"] != "pause" || got["final_invoice_action"] != "none" {
+		t.Fatalf("created policy = %v, want enabled, [2 3], pause, none", got)
 	}
 
-	// Move the customer off it: only the history is left.
-	call("PATCH", "/v1/customers/"+customerID, flowReq{body: map[string]any{"dunning_policy_id": ""}}).want(t, 200, "unassign the customer")
-	res := call("DELETE", "/v1/dunning/policies/"+usedID, flowReq{}).want(t, 409, "delete a policy that has run")
-	if msg := res.errMessage(); !strings.Contains(msg, "1 invoice") {
-		t.Errorf("refusal message %q, want it to say the policy has run on 1 invoice", msg)
+	call("PUT", "/v1/dunning/policy", flowReq{body: map[string]any{
+		"retry_days": []int{5}, "final_subscription_action": "cancel", "final_invoice_action": "mark_uncollectible",
+	}}).want(t, 200, "replace the policy")
+	got = call("GET", "/v1/dunning/policy", flowReq{}).want(t, 200, "get the replaced policy").body
+	if got["enabled"] != false || fmt.Sprint(got["retry_days"]) != "[5]" ||
+		got["final_subscription_action"] != "cancel" || got["final_invoice_action"] != "mark_uncollectible" {
+		t.Fatalf("replaced policy = %v, want every field from the second PUT (enabled left out is false)", got)
 	}
-	call("GET", "/v1/dunning/policies/"+usedID, flowReq{}).want(t, 200, "the refused policy is still there")
+	if got["created_at"] != created["created_at"] {
+		t.Errorf("created_at %v after the replace, want %v: the same policy, not a new one", got["created_at"], created["created_at"])
+	}
+
+	var updates int
+	for _, e := range flowList(call("GET", "/v1/audit-log?resource_type=dunning_policy", flowReq{}).want(t, 200, "audit log").body, "data") {
+		if flowStr(e, "action") == domain.AuditActionUpdate {
+			updates++
+		}
+	}
+	if updates != 2 {
+		t.Errorf("audit update rows for the policy = %d, want 2 (one per PUT)", updates)
+	}
+}
+
+// TestE2E_DunningPolicy_PutRefusesABadBody: a body that fails validation,
+// one with a field the policy does not have and one with a field the server
+// sets are refused with 422 naming the field, and nothing is written.
+func TestE2E_DunningPolicy_PutRefusesABadBody(t *testing.T) {
+	call, _ := policyFlow(t, "Dunning Policy Refuse Co")
+	for name, tc := range map[string]struct {
+		body  map[string]any
+		param string
+	}{
+		"a wait over 30 days":     {map[string]any{"enabled": true, "retry_days": []int{3, 45}}, "retry_days"},
+		"an unknown field":        {map[string]any{"enabled": true, "retry_days": []int{3}, "name": "Strict"}, "name"},
+		"a field the server sets": {map[string]any{"enabled": true, "retry_days": []int{3}, "id": "hc_dpol_other"}, "id"},
+	} {
+		res := call("PUT", "/v1/dunning/policy", flowReq{body: tc.body}).want(t, 422, name)
+		if got := flowStr(res.body, "error", "param"); got != tc.param {
+			t.Errorf("%s: param %q, want %q", name, got, tc.param)
+		}
+	}
+	call("GET", "/v1/dunning/policy", flowReq{}).want(t, 404, "no policy after the refused bodies")
+}
+
+// TestE2E_DunningPolicy_ModesHoldSeparatePolicies: test mode and live mode
+// each have their own policy. A PUT in one mode leaves the other as it was.
+func TestE2E_DunningPolicy_ModesHoldSeparatePolicies(t *testing.T) {
+	call, key := policyFlow(t, "Dunning Policy Modes Co")
+	test, live := flowReq{bearer: key(false)}, flowReq{bearer: key(true)}
+
+	test.body = map[string]any{"enabled": true, "retry_days": []int{2}}
+	call("PUT", "/v1/dunning/policy", test).want(t, 200, "put in test mode")
+	call("GET", "/v1/dunning/policy", flowReq{bearer: live.bearer}).want(t, 404, "live mode has none after a test-mode put")
+
+	live.body = map[string]any{"enabled": true, "retry_days": []int{7, 7}}
+	call("PUT", "/v1/dunning/policy", live).want(t, 200, "put in live mode")
+	if got := call("GET", "/v1/dunning/policy", flowReq{bearer: test.bearer}).want(t, 200, "get in test mode").body; fmt.Sprint(got["retry_days"]) != "[2]" {
+		t.Errorf("test-mode retry_days = %v after a live-mode put, want [2]", got["retry_days"])
+	}
+	if got := call("GET", "/v1/dunning/policy", flowReq{bearer: live.bearer}).want(t, 200, "get in live mode").body; fmt.Sprint(got["retry_days"]) != "[7 7]" {
+		t.Errorf("live-mode retry_days = %v, want [7 7]", got["retry_days"])
+	}
+}
+
+// TestDunning_FailedPaymentStartsARunOnTheAccountPolicy: a declined charge
+// starts a run on the account's policy for the mode. Its first retry is the
+// policy's first wait after the failure, and the run lists the policy's
+// retry count.
+func TestDunning_FailedPaymentStartsARunOnTheAccountPolicy(t *testing.T) {
+	r := newHardDeclineRig(t, "Failed Payment Run Co")
+	runs := dunning.NewPostgresStore(r.db)
+	svc := dunning.NewService(runs, nil, nil)
+	if _, err := svc.PutPolicy(r.ctx, r.tenantID, domain.DunningPolicy{
+		Enabled: true, RetryDays: []int{2, 5},
+		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone,
+	}); err != nil {
+		t.Fatalf("put policy: %v", err)
+	}
+	// The charger as router.go wires it, with dunning started inline on a
+	// decline.
+	charger := payment.NewStripe(r.charges, r.invoices, payment.NewPostgresWebhookStore(r.db),
+		&compositePaymentSetupStore{customers: r.customers, pms: r.pmSvc}, svc)
+	custID := r.customerWithCard("run", "pm_run")
+	inv := r.finalizedInvoice(custID, "INV-RUN-1")
+	r.charges.answers = []scriptedCharge{{err: stripeDeclined("pi_run_1", "insufficient_funds", "Your card has insufficient funds.")}}
+
+	hold, err := r.invoices.ClaimChargeForManualCollect(r.ctx, r.tenantID, inv.ID)
+	if err != nil || !hold.Held() {
+		t.Fatalf("claim: held=%v err=%v", hold.Held(), err)
+	}
+	before := time.Now().UTC()
+	_, _ = charger.ChargeInvoice(r.ctx, r.tenantID, inv, hold, "cus_stripe_run", "pm_run")
+
+	listed, _, err := runs.ListRuns(r.ctx, dunning.RunListFilter{TenantID: r.tenantID, InvoiceID: inv.ID})
+	if err != nil || len(listed) != 1 {
+		t.Fatalf("runs on the declined invoice = %d (%v), want 1", len(listed), err)
+	}
+	run := listed[0]
+	if run.Reason != string(domain.DunningCausePaymentFailed) || run.MaxRetryAttempts != 2 {
+		t.Errorf("run reason %q retries %d, want payment_failed and the policy's 2", run.Reason, run.MaxRetryAttempts)
+	}
+	if run.NextActionAt == nil {
+		t.Fatal("the run has no first retry")
+	}
+	if wait := run.NextActionAt.Sub(before); wait < 48*time.Hour || wait > 48*time.Hour+time.Minute {
+		t.Errorf("first retry %v after the failure, want the policy's 2 days", wait)
+	}
 }

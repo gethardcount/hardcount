@@ -39,8 +39,8 @@ type BootstrapDeps struct {
 	// bootstrap tx (auth.Service.CreateKeyTx), so the setup keys have the
 	// same shape, salted hash and audit row as every other key. Required.
 	CreateKeyTx func(ctx context.Context, tx *sql.Tx, tenantID string, input auth.CreateKeyInput) (auth.CreateKeyResult, error)
-	// SeedDunningTx writes the account's default dunning policy in each
-	// mode inside the bootstrap tx (ADR-123). Required: an account created
+	// SeedDunningTx writes the account's dunning policy in each mode
+	// inside the bootstrap tx (ADR-123). Required: an account created
 	// without it would never retry a failed payment.
 	SeedDunningTx DunningSeedFunc
 	// Audit records the provisioning inside the bootstrap tx (ADR-090).
@@ -75,7 +75,7 @@ type BootstrapResult struct {
 }
 
 // RunBootstrap provisions an account: the tenant, its settings, a test and a
-// live secret key, the owner user, the audit rows and a default dunning policy
+// live secret key, the owner user, the audit rows and a dunning policy
 // per mode. It is the one path that provisions an account (ADR-073); the HTTP
 // handler and cmd/hardcount-bootstrap call it. It checks every input before
 // the first write and runs in one transaction under the bootstrap advisory
@@ -252,11 +252,9 @@ func RunBootstrap(ctx context.Context, db *postgres.DB, deps BootstrapDeps, opts
 		}
 	}
 
-	// The account's default dunning policy, one per mode (ADR-123): without
-	// it a failed payment is never retried until someone thinks to create a
-	// policy. Seeded last so app.tenant_id is already stamped for its audit
-	// rows. The seed only holds the default until the operator's first
-	// enabled policy takes it over.
+	// The account's dunning policy, one per mode (ADR-123): without it a
+	// failed payment is never retried until someone thinks to save a policy.
+	// Seeded last so app.tenant_id is already stamped for its audit rows.
 	if err := seedDunningPolicies(ctx, tx, deps.SeedDunningTx, deps.Audit, tenantID, "bootstrap_provisioned"); err != nil {
 		return BootstrapResult{}, err
 	}

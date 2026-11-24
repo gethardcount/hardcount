@@ -1,7 +1,7 @@
 import path from 'node:path'
 import { test, expect, type Locator, type Page } from '@playwright/test'
 import { api, apiListAll, uniq } from './fixtures/api'
-import { createCustomer, invoicesFor, type Customer, type Plan, type Subscription } from './fixtures/seed'
+import { createCustomer, invoicesFor, retriesOn, type Customer, type Plan, type Subscription } from './fixtures/seed'
 
 // Screenshots of the activity cards, for a person to compare before and after
 // a change to activity lines (ADR-128). They are not a pass/fail check: the
@@ -48,24 +48,6 @@ function planBilledInAdvance(): Promise<Plan> {
     base_amount_cents: 4900,
     base_bill_timing: 'in_advance',
   })
-}
-
-// Gives the customer a dunning policy of its own: three retries, on days 3, 7
-// and 14, then collection is paused. Other specs change the workspace's
-// default policy while they run, so the default would give a different
-// story on different runs. The policy is created turned off and then turned
-// on, because a new policy created turned on takes the default from the
-// one the account was created with (ADR-123).
-async function ownRetryPolicy(customerId: string) {
-  const policy = {
-    name: `E2E Activity retries ${uniq()}`,
-    retry_days: [3, 4, 7],
-    final_subscription_action: 'pause',
-    final_invoice_action: 'none',
-  }
-  const created = await api<{ id: string }>('POST', '/dunning/policies', { ...policy, enabled: false })
-  await api('PATCH', `/dunning/policies/${created.id}`, { ...policy, enabled: true })
-  await api('PATCH', `/customers/${customerId}`, { dunning_policy_id: created.id })
 }
 
 function subscribe(customerId: string, planId: string, extra: Record<string, unknown> = {}): Promise<Sub> {
@@ -160,7 +142,7 @@ async function shootDunningRun(page: Page, invoice: Invoice, name: string) {
 test('activity shots: an unpaid first invoice through emails, a credit note and an offline payment (invoice, Dunning run, Sent emails)', async ({ page }) => {
   const plan = await planBilledInAdvance()
   const customer = (await createCustomer()) as Person
-  await ownRetryPolicy(customer.id)
+  await retriesOn()
   await subscribe(customer.id, plan.id)
   // The first period is invoiced at the start. With no card on file,
   // payment recovery starts at once.
