@@ -3418,9 +3418,6 @@ func (s *PostgresStore) ListProcessingPayments(ctx context.Context, olderThan ti
 // sweep; the livemode filter prevents test-mode rows from being reconciled
 // under a live ctx (see #13). Status is a trusted internal enum (not user
 // input), interpolated into the predicate.
-//
-// The reconciler decides each row's time from its invoice (decideRow) and the
-// settle keeps it, with the hardcount_anchor_at PI anchor.
 func (s *PostgresStore) listInflightPayments(ctx context.Context, status domain.InvoicePaymentStatus, olderThan time.Time, limit int) ([]domain.Invoice, error) {
 	live, err := postgres.Livemode(ctx)
 	if err != nil {

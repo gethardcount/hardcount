@@ -21,7 +21,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/subscription"
 	"github.com/gethardcount/hardcount/internal/tax"
 	"github.com/gethardcount/hardcount/internal/tenant"
-	"github.com/gethardcount/hardcount/internal/testclock"
 	"github.com/gethardcount/hardcount/internal/testutil"
 	"github.com/gethardcount/hardcount/internal/usage"
 )
@@ -218,8 +217,8 @@ func TestCollect_NudgeAndSweepRace_ChargesOnce(t *testing.T) {
 // DunningStarter, the way api.dunningStarterAdapter does.
 type dunningServiceStarter struct{ svc *dunning.Service }
 
-func (d dunningServiceStarter) StartDunning(ctx context.Context, tenantID, invoiceID, customerID string, failureAt time.Time, cause domain.DunningStartCause) error {
-	_, err := d.svc.StartDunning(ctx, tenantID, invoiceID, customerID, failureAt, cause)
+func (d dunningServiceStarter) StartDunning(ctx context.Context, tenantID, invoiceID, customerID string, cause domain.DunningStartCause) error {
+	_, err := d.svc.StartDunning(ctx, tenantID, invoiceID, customerID, cause)
 	return err
 }
 
@@ -307,57 +306,6 @@ func TestCollector_FirstRetryCountsFromTheFailure_RealStore(t *testing.T) {
 	}
 }
 
-// The clock-pinned twin, outside any Advance (a decline webhook or the
-// reconciler reports it): the real resolver finds the customer's clock, so
-// the first retry counts from the invoice's simulated issue instant — inside
-// the window the operator advances through — not from wall-clock now.
-func TestStartDunning_ClockPinnedInvoiceCountsFromIssue_RealStore(t *testing.T) {
-	h := newCollectHarness(t)
-	dstore := dunning.NewPostgresStore(h.db)
-	if _, err := dstore.UpsertPolicy(h.ctx, h.tenantID, domain.DunningPolicy{
-		Name: "default", Enabled: true, RetryDays: []int{3, 3, 3},
-		FinalSubscriptionAction: domain.SubActionNone, FinalInvoiceAction: domain.InvActionNone,
-	}); err != nil {
-		t.Fatalf("upsert policy: %v", err)
-	}
-	svc := dunning.NewService(dstore, nil, nil)
-	resolver := h.newEng(testPaymentSetupsNoPM{}, testChargerSentinel{}, nil)
-	resolver.SetCustomerReader(customer.NewPostgresStore(h.db)) // as api/router.go wires it
-	resolver.SetTestClockReader(testclock.NewReader(h.db))
-
-	frozen := time.Date(2027, 3, 20, 0, 0, 0, 0, time.UTC)
-	clockID := postgres.NewID("hc_tclk")
-	execTx(t, h.db, h.ctx, h.tenantID,
-		`INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status)
-		 VALUES ($1, $2, false, 'Anchor Clock', $3, 'ready')`, clockID, h.tenantID, frozen)
-	cust, err := customer.NewPostgresStore(h.db).Create(h.ctx, h.tenantID, domain.Customer{ExternalID: "cus_anchor_sim", DisplayName: "Anchor Sim", TestClockID: clockID})
-	if err != nil {
-		t.Fatalf("create customer: %v", err)
-	}
-	if cust.TestClockID != clockID {
-		t.Fatalf("customer test_clock_id = %q, want %q", cust.TestClockID, clockID)
-	}
-	issued := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
-	inv, err := h.invoices.CreateWithLineItems(h.ctx, h.tenantID, domain.Invoice{
-		CustomerID: cust.ID, InvoiceNumber: "INV-ANCHOR-SIM",
-		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
-		Currency: "USD", SubtotalCents: 5000, TotalAmountCents: 5000, AmountDueCents: 5000,
-		IssuedAt: &issued,
-	}, nil)
-	if err != nil {
-		t.Fatalf("create invoice: %v", err)
-	}
-
-	// The failure that starts dunning is decided at the invoice's clock.
-	run, err := svc.StartDunning(testutil.DecidedFor(t, resolver, clock.Pin{TenantID: h.tenantID, InvoiceID: inv.ID}), h.tenantID, inv.ID, cust.ID, issued, domain.DunningCausePaymentFailed)
-	if err != nil {
-		t.Fatalf("start dunning: %v", err)
-	}
-	if want := issued.Add(3 * 24 * time.Hour); run.NextActionAt == nil || !run.NextActionAt.Equal(want) {
-		t.Errorf("first retry = %v, want %v (simulated issue + 3d)", run.NextActionAt, want)
-	}
-}
-
 type decliningRetrier struct{}
 
 func (decliningRetrier) RetryPayment(context.Context, string, string, string) error {
@@ -383,7 +331,7 @@ func TestProcessDueRuns_LateWallClockRetryKeepsCadence_RealStore(t *testing.T) {
 
 	inv := h.seed(t, "INV-CADENCE-1")
 	// The invoice is on no clock: the failure that starts dunning is decided at real time.
-	run, err := svc.StartDunning(clock.WithRealTime(h.ctx), h.tenantID, inv.ID, inv.CustomerID, inv.IssuedAtOrZero(), domain.DunningCausePaymentFailed)
+	run, err := svc.StartDunning(clock.WithRealTime(h.ctx), h.tenantID, inv.ID, inv.CustomerID, domain.DunningCausePaymentFailed)
 	if err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}

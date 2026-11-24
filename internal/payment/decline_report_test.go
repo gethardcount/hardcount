@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"testing"
-	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
@@ -233,7 +232,7 @@ func TestChargeDecline_AttemptRowCarriesItsTrigger(t *testing.T) {
 // charge call's inline start would.
 type failingOnceDunning struct{ calls int }
 
-func (f *failingOnceDunning) StartDunning(_ context.Context, _, invoiceID, _ string, _ time.Time, _ domain.DunningStartCause) (domain.InvoiceDunningRun, error) {
+func (f *failingOnceDunning) StartDunning(_ context.Context, _, invoiceID, _ string, _ domain.DunningStartCause) (domain.InvoiceDunningRun, error) {
 	f.calls++
 	if f.calls <= 3 { // startDunningWithRetry tries three times
 		return domain.InvoiceDunningRun{}, errors.New("db blip")

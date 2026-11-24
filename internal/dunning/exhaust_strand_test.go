@@ -44,7 +44,7 @@ func (s *escalateFailsOnce) EscalateRunTx(ctx context.Context, tx *sql.Tx, tenan
 // finalAttemptRun puts a run one retry short of exhaustion, due now.
 func finalAttemptRun(t *testing.T, store *memStore, svc *Service) domain.InvoiceDunningRun {
 	t.Helper()
-	run, err := svc.StartDunning(context.Background(), "t1", "inv_1", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
+	run, err := svc.StartDunning(context.Background(), "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
 	if err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}

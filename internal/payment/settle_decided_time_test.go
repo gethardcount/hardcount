@@ -11,52 +11,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/scheduler"
 )
 
-// decidedAt is an instant on clock clk_e before its frozen time, eventFrozen:
-// one a caller decided on purpose (a cycle's boundary, a retry's slot).
-var decidedAt = eventFrozen.Add(-72 * time.Hour)
-
-func decidedOnClock() context.Context {
-	return clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: decidedAt, TestClockID: "clk_e"})
-}
-
-// On a test clock a settle runs on the time its caller decided and reads no
-// clock of its own: paid_at, the failed stamp and dunning's start are at the
-// decided instant, and the resolver is never asked. (On no clock it reads the
-// time its result arrived: TestChargeInvoice_AnInlineResultIsRecordedWhenItArrives.)
-func TestSettle_RunsOnTheDecidedTime(t *testing.T) {
-	t.Run("paid", func(t *testing.T) {
-		res := &eventResolver{}
-		invoices, webhooks := processingInvoice()
-		s := NewStripe(&mockStripeClient{}, invoices, webhooks, nil)
-		s.SetResolver(res)
-		if err := s.SettleSucceeded(decidedOnClock(), "t1", invoices.invoices["inv_1"], "pi_ev", 0, SourceWebhook); err != nil {
-			t.Fatalf("SettleSucceeded: %v", err)
-		}
-		if got := invoices.invoices["inv_1"]; got.PaidAt == nil || !got.PaidAt.Equal(decidedAt) || res.reads != 0 {
-			t.Errorf("paid_at %v, clock reads %d; want %v, none", got.PaidAt, res.reads, decidedAt)
-		}
-	})
-
-	t.Run("failed", func(t *testing.T) {
-		res := &eventResolver{}
-		inv := unknownClockInvoice()
-		updater := &stampTimeUpdater{mockInvoiceUpdater: newMockInvoiceUpdater()}
-		updater.invoices[inv.ID] = inv
-		dunning := &recordingDunningStarter{}
-		s := NewStripe(&mockStripeClient{}, updater, newMockWebhookStore(), nil, dunning)
-		s.SetResolver(res)
-		if err := s.SettleFailed(decidedOnClock(), "t1", inv, PaymentFailure{PaymentIntentID: "pi_sweep", Message: "card declined"}, SourceWebhook); err != nil {
-			t.Fatalf("SettleFailed: %v", err)
-		}
-		if !updater.failedAt.Equal(decidedAt) || res.reads != 0 {
-			t.Errorf("failed stamp at %v, clock reads %d; want %v, none", updater.failedAt, res.reads, decidedAt)
-		}
-		if len(dunning.calls) != 1 || !dunning.calls[0].failureAt.Equal(decidedAt) {
-			t.Errorf("dunning starts %+v; want one at %v", dunning.calls, decidedAt)
-		}
-	})
-}
-
 // In live mode no record is on a test clock, so no settle reads one: a live
 // payment must never wait on a clock read, nor be refused when one fails.
 // Not a failed payment's event (a paid one is
@@ -175,7 +129,7 @@ func TestSettle_RealTimeIsTheServersClock(t *testing.T) {
 		if !updater.failedAt.Equal(serverNow) {
 			t.Errorf("failed stamp at %v; want the server's %v", updater.failedAt, serverNow)
 		}
-		if len(dunning.calls) != 1 || !dunning.calls[0].failureAt.Equal(serverNow) {
+		if len(dunning.calls) != 1 || !dunning.calls[0].at.Equal(serverNow) {
 			t.Errorf("dunning starts %+v; want one at the server's %v", dunning.calls, serverNow)
 		}
 	})

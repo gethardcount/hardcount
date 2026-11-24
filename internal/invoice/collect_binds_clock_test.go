@@ -38,9 +38,7 @@ func (p pinnedResolver) SimForSubscription(context.Context, string, string) (clo
 
 // Collect charges on the request's decided clock: the API's door decides
 // POST /v1/invoices/{id}/collect from the invoice (ofInvoice), and the charge
-// runs on that decision. The charge stamps its instant on the PaymentIntent
-// (hardcount_anchor_at); paid_at and a decline's first dunning retry are
-// dated from it.
+// runs on that decision.
 func TestCollectPayment_ChargesOnTheDecidedClock(t *testing.T) {
 	ctx := context.Background()
 	store := newMemStore()

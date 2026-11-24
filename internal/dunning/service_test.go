@@ -430,7 +430,7 @@ func TestStartDunning(t *testing.T) {
 	ctx := context.Background()
 
 	t.Run("creates run", func(t *testing.T) {
-		run, err := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
+		run, err := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -449,7 +449,7 @@ func TestStartDunning(t *testing.T) {
 	})
 
 	t.Run("idempotent — returns existing", func(t *testing.T) {
-		run2, err := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
+		run2, err := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -476,53 +476,22 @@ func TestStartDunning(t *testing.T) {
 }
 
 // TestStartDunning_FirstRetryAnchor: the first retry is grace_period_days
-// after the moment collection failed, in the invoice's own time domain.
-// Found walking FLOW I10 (2026-10-11): an invoice issued Oct 11 inside an
-// Oct-1 period was anchored on Oct 1, so its first retry (Oct 4) was already
-// past and ran at once — no grace at all.
+// after the moment the failure is recorded, so an invoice declined days after
+// its issue still gets its grace.
 func TestStartDunning_FirstRetryAnchor(t *testing.T) {
 	grace := 3 * 24 * time.Hour // newMemStore's default policy
-
-	t.Run("wall-clock invoice counts from now, not its issue date", func(t *testing.T) {
-		now := time.Date(2026, 10, 11, 9, 0, 0, 0, time.UTC)
-		svc := NewService(newMemStore(), &noopRetrier{}, clock.NewFake(now))
-		issued := now.Add(-10 * 24 * time.Hour) // declined 10 days after issue
-		run, err := svc.StartDunning(context.Background(), "t1", "inv_1", "cus_1", issued, domain.DunningCausePaymentFailed)
-		if err != nil {
-			t.Fatalf("start: %v", err)
-		}
-		if want := now.Add(grace); run.NextActionAt == nil || !run.NextActionAt.Equal(want) {
-			t.Errorf("next_action_at: got %v, want %v (decline + grace)", run.NextActionAt, want)
-		}
-		if !run.CreatedAt.Equal(now) {
-			t.Errorf("created_at: got %v, want %v", run.CreatedAt, now)
-		}
-	})
-
-	t.Run("clock-pinned invoice counts from its issue instant", func(t *testing.T) {
-		frozen := time.Date(2024, 5, 20, 0, 0, 0, 0, time.UTC)
-		issued := time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC)
-		svc := NewService(newMemStore(), &noopRetrier{}, nil)
-		run, err := svc.StartDunning(inAdvance(context.Background(), frozen), "t1", "inv_1", "cus_1", issued, domain.DunningCausePaymentFailed)
-		if err != nil {
-			t.Fatalf("start: %v", err)
-		}
-		if want := issued.Add(grace); run.NextActionAt == nil || !run.NextActionAt.Equal(want) {
-			t.Errorf("next_action_at: got %v, want %v (issue + grace)", run.NextActionAt, want)
-		}
-	})
-
-	t.Run("clock-pinned invoice with no issue instant counts from the clock's now", func(t *testing.T) {
-		frozen := time.Date(2024, 5, 20, 0, 0, 0, 0, time.UTC)
-		svc := NewService(newMemStore(), &noopRetrier{}, nil)
-		run, err := svc.StartDunning(inAdvance(context.Background(), frozen), "t1", "inv_1", "cus_1", time.Time{}, domain.DunningCausePaymentFailed)
-		if err != nil {
-			t.Fatalf("start: %v", err)
-		}
-		if want := frozen.Add(grace); run.NextActionAt == nil || !run.NextActionAt.Equal(want) {
-			t.Errorf("next_action_at: got %v, want %v", run.NextActionAt, want)
-		}
-	})
+	now := time.Date(2026, 10, 11, 9, 0, 0, 0, time.UTC)
+	svc := NewService(newMemStore(), &noopRetrier{}, clock.NewFake(now))
+	run, err := svc.StartDunning(context.Background(), "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
+	if err != nil {
+		t.Fatalf("start: %v", err)
+	}
+	if want := now.Add(grace); run.NextActionAt == nil || !run.NextActionAt.Equal(want) {
+		t.Errorf("next_action_at: got %v, want %v (decline + grace)", run.NextActionAt, want)
+	}
+	if !run.CreatedAt.Equal(now) {
+		t.Errorf("created_at: got %v, want %v", run.CreatedAt, now)
+	}
 }
 
 func TestStartDunning_DisabledPolicy(t *testing.T) {
@@ -532,7 +501,7 @@ func TestStartDunning_DisabledPolicy(t *testing.T) {
 	store.policies[store.defaultID] = p
 	svc := NewService(store, &noopRetrier{}, nil)
 
-	_, err := svc.StartDunning(context.Background(), "t1", "inv_2", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
+	_, err := svc.StartDunning(context.Background(), "t1", "inv_2", "cus_1", domain.DunningCausePaymentFailed)
 	if err == nil {
 		t.Fatal("expected error when dunning is disabled")
 	}
@@ -550,7 +519,7 @@ func TestStartDunning_NoPolicyConfigured(t *testing.T) {
 	store.defaultID = "" // no default → GetDefaultPolicy returns ErrNotFound
 	svc := NewService(store, &noopRetrier{}, nil)
 
-	_, err := svc.StartDunning(context.Background(), "t1", "inv_3", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
+	_, err := svc.StartDunning(context.Background(), "t1", "inv_3", "cus_1", domain.DunningCausePaymentFailed)
 	if err == nil {
 		t.Fatal("expected a deliberate-skip error when no policy is configured")
 	}
@@ -568,7 +537,7 @@ func TestProcessDueRuns(t *testing.T) {
 	ctx := context.Background()
 
 	// Start a run, then make it due
-	run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
+	run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
 	past := time.Now().UTC().Add(-1 * time.Hour)
 	run.NextActionAt = &past
 	store.runs[run.ID] = run
@@ -600,7 +569,7 @@ func TestResolveByInvoice_ResolvesEscalatedRun(t *testing.T) {
 	svc := NewService(store, &noopRetrier{}, nil)
 	ctx := context.Background()
 
-	run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
+	run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
 	run.State = domain.DunningEscalated // retries exhausted
 	run.Resolution = domain.ResolutionRetriesExhausted
 	store.runs[run.ID] = run
@@ -623,7 +592,7 @@ func TestProcessDueRuns_MaxRetriesExhausted(t *testing.T) {
 	svc := NewService(store, &noopRetrier{}, nil)
 	ctx := context.Background()
 
-	run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
+	run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
 
 	// Simulate max retries reached
 	run.AttemptCount = 3 // equals MaxRetryAttempts
@@ -643,14 +612,6 @@ func TestProcessDueRuns_MaxRetriesExhausted(t *testing.T) {
 	if updated.ResolvedAt == nil {
 		t.Error("resolved_at should be set")
 	}
-}
-
-// inAdvance binds ctx the way a test-clock Advance does (catchup's
-// clock.WithSim at advance-end frozen_time), so StartDunning reads the
-// invoice as clock-pinned and anchors its first retry on the issue instant
-// passed in — the cycle close — not on frozen.
-func inAdvance(ctx context.Context, frozen time.Time) context.Context {
-	return clock.WithSim(ctx, clock.Sim{At: frozen, TestClockID: "clock_1"})
 }
 
 // recordingEmailNotifier captures the per-type email enqueues so
@@ -700,7 +661,7 @@ func TestResolveByInvoice_ResolvesAnActiveRun(t *testing.T) {
 	svc := NewService(store, &noopRetrier{}, nil)
 	ctx := context.Background()
 
-	run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
+	run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
 
 	if err := svc.ResolveByInvoice(ctx, "t1", "inv_1", domain.ResolutionPaymentRecovered); err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -861,7 +822,7 @@ func TestDunning_StampsTheDecidedTime(t *testing.T) {
 		store := &instantStore{memStore: newMemStore()}
 		svc := NewService(store, &noopRetrier{}, nil)
 
-		run, err := svc.StartDunning(testutil.DecidedFor(t, resolver, clock.Pin{TenantID: "t1", InvoiceID: "inv_1"}), "t1", "inv_1", "cus_1", frozen, domain.DunningCausePaymentFailed)
+		run, err := svc.StartDunning(testutil.DecidedFor(t, resolver, clock.Pin{TenantID: "t1", InvoiceID: "inv_1"}), "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -888,7 +849,7 @@ func TestDunning_StampsTheDecidedTime(t *testing.T) {
 		svc := NewService(store, &failingRetrier{}, nil)
 		ctx := testutil.DecidedFor(t, resolver, clock.Pin{TenantID: "t1", InvoiceID: "inv_1"})
 
-		run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", frozen, domain.DunningCausePaymentFailed)
+		run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
 		// Mark run as due so processRun picks it up.
 		past := frozen.Add(-1 * time.Hour)
 		run.NextActionAt = &past
@@ -918,7 +879,7 @@ func TestDunning_StampsTheDecidedTime(t *testing.T) {
 		svc := NewService(store, &noopRetrier{}, nil)
 		ctx := testutil.DecidedFor(t, resolver, clock.Pin{TenantID: "t1", InvoiceID: "inv_1"})
 
-		run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", frozen, domain.DunningCausePaymentFailed)
+		run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
 		if err := svc.ResolveByInvoice(ctx, "t1", "inv_1", domain.ResolutionPaymentRecovered); err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -954,7 +915,7 @@ func TestProcessDueRuns_RecoveryWritesItsOwnRetryRow(t *testing.T) {
 	wall := clock.NewFake(failedAt)
 	svc := NewService(store, &failThenSucceedRetrier{failures: 1}, wall)
 	ctx := context.Background()
-	if _, err := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", failedAt, domain.DunningCausePaymentFailed); err != nil {
+	if _, err := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed); err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}
 	// The policy's retry days are 3, 3, 5.
@@ -1007,7 +968,7 @@ func TestStartDunning_CauseStamped(t *testing.T) {
 	svc := NewService(store, &noopRetrier{}, nil)
 	ctx := context.Background()
 
-	run, err := svc.StartDunning(ctx, "t1", "inv_cause", "cus_1", time.Now(), domain.DunningCauseNoPaymentMethod)
+	run, err := svc.StartDunning(ctx, "t1", "inv_cause", "cus_1", domain.DunningCauseNoPaymentMethod)
 	if err != nil {
 		t.Fatalf("start: %v", err)
 	}
@@ -1028,7 +989,7 @@ func TestStartDunning_CauseStamped(t *testing.T) {
 		t.Fatal("no dunning_started event written")
 	}
 
-	if _, err := svc.StartDunning(ctx, "t1", "inv_cause2", "cus_1", time.Now(), domain.DunningStartCause("wat")); err == nil {
+	if _, err := svc.StartDunning(ctx, "t1", "inv_cause2", "cus_1", domain.DunningStartCause("wat")); err == nil {
 		t.Fatal("unknown cause must be refused")
 	}
 }
@@ -1054,7 +1015,7 @@ func TestStartDunning_DisabledPolicy_SkipsSameClassAsNoPolicy(t *testing.T) {
 	store.policies["dpol_1"] = p
 	svc := NewService(store, &noopRetrier{}, nil)
 
-	_, err := svc.StartDunning(context.Background(), "t1", "inv_disabled", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
+	_, err := svc.StartDunning(context.Background(), "t1", "inv_disabled", "cus_1", domain.DunningCausePaymentFailed)
 	if err == nil {
 		t.Fatal("expected a deliberate-skip error when the effective policy is disabled")
 	}

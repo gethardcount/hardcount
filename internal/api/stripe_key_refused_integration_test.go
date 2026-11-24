@@ -8,7 +8,6 @@ import (
 	"strings"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/prometheus/client_golang/prometheus"
 
@@ -74,8 +73,8 @@ func (s *keyStripeStub) set(status int, body string) {
 // built after the charger it retries through.
 type lazyDunningStarter struct{ d *dunningRetryRig }
 
-func (l lazyDunningStarter) StartDunning(ctx context.Context, tenantID, invoiceID, customerID string, simFailedAt time.Time, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error) {
-	return l.d.svc.StartDunning(ctx, tenantID, invoiceID, customerID, simFailedAt, cause)
+func (l lazyDunningStarter) StartDunning(ctx context.Context, tenantID, invoiceID, customerID string, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error) {
+	return l.d.svc.StartDunning(ctx, tenantID, invoiceID, customerID, cause)
 }
 
 type keyRefusedRig struct {

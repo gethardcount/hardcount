@@ -116,7 +116,7 @@ func TestChargeInvoice_AnInlineResultIsRecordedWhenItArrives(t *testing.T) {
 				}
 				return
 			}
-			if len(dunning.calls) != 1 || !dunning.calls[0].failureAt.Equal(arrived) || !dunning.calls[0].at.Equal(arrived) {
+			if len(dunning.calls) != 1 || !dunning.calls[0].at.Equal(arrived) {
 				t.Errorf("StartDunning calls %+v, want one at %v, on a ctx carrying it, when Stripe's answer arrived", dunning.calls, arrived)
 			}
 		})

@@ -96,7 +96,7 @@ func TestBootstrap_SeedsDefaultDunningPolicy(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create invoice: %v", err)
 		}
-		run, err := dunSvc.StartDunning(testCtx, res.Tenant.ID, inv.ID, cust.ID, time.Time{}, domain.DunningCausePaymentFailed)
+		run, err := dunSvc.StartDunning(testCtx, res.Tenant.ID, inv.ID, cust.ID, domain.DunningCausePaymentFailed)
 		if err != nil {
 			t.Fatalf("a failed payment on a fresh account must start dunning: %v", err)
 		}

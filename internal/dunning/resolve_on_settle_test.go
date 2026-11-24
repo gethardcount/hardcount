@@ -43,7 +43,7 @@ func (p *recordingPauser) PauseCollection(_ context.Context, _, _, _ string) (bo
 // next_action_at) with the given attempt count.
 func dueRunAt(t *testing.T, store *memStore, svc *Service, attempt int) domain.InvoiceDunningRun {
 	t.Helper()
-	run, err := svc.StartDunning(context.Background(), "t1", "inv_1", "cus_1", time.Now(), domain.DunningCausePaymentFailed)
+	run, err := svc.StartDunning(context.Background(), "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
 	if err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}

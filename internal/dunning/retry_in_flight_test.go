@@ -88,7 +88,7 @@ func newInFlightHarness(t *testing.T, retrier PaymentRetrier) *inFlightHarness {
 	h.svc.SetEmailNotifier(h.emails)
 	h.svc.SetCustomerEmailFetcher(stubCustomerEmail{})
 	h.svc.SetSubscriptionPauser(nil, h.invoice)
-	run, err := h.svc.StartDunning(h.ctx, "t1", "inv_1", "cus_1", time.Time{}, domain.DunningCausePaymentFailed)
+	run, err := h.svc.StartDunning(h.ctx, "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
 	if err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}

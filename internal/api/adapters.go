@@ -680,7 +680,7 @@ func (a *paymentRetrierAdapter) stripeConnected(ctx context.Context, tenantID st
 // dunningRunStarter is the part of dunning.Service the adapter needs. It is
 // an interface so a unit test can reach the disabled-skip branch.
 type dunningRunStarter interface {
-	StartDunning(ctx context.Context, tenantID, invoiceID, customerID string, simFailedAt time.Time, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error)
+	StartDunning(ctx context.Context, tenantID, invoiceID, customerID string, cause domain.DunningStartCause) (domain.InvoiceDunningRun, error)
 }
 
 // dunningStarterAdapter implements billing.DunningStarter over
@@ -703,8 +703,8 @@ type dunningStarterAdapter struct {
 	dunning dunningRunStarter
 }
 
-func (a *dunningStarterAdapter) StartDunning(ctx context.Context, tenantID, invoiceID, customerID string, simFailedAt time.Time, cause domain.DunningStartCause) error {
-	if _, err := a.dunning.StartDunning(ctx, tenantID, invoiceID, customerID, simFailedAt, cause); err != nil {
+func (a *dunningStarterAdapter) StartDunning(ctx context.Context, tenantID, invoiceID, customerID string, cause domain.DunningStartCause) error {
+	if _, err := a.dunning.StartDunning(ctx, tenantID, invoiceID, customerID, cause); err != nil {
 		if errors.Is(err, errs.ErrInvalidState) {
 			return nil // dunning disabled — deliberate skip, not a sweep error
 		}

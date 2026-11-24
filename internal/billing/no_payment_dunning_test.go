@@ -21,7 +21,7 @@ type recordingDunningStarter struct {
 	at      []time.Time
 }
 
-func (d *recordingDunningStarter) StartDunning(ctx context.Context, _, invoiceID, _ string, _ time.Time, cause domain.DunningStartCause) error {
+func (d *recordingDunningStarter) StartDunning(ctx context.Context, _, invoiceID, _ string, cause domain.DunningStartCause) error {
 	d.causes = append(d.causes, cause)
 	at, _ := clock.EffectiveNow(ctx)
 	d.at = append(d.at, at)

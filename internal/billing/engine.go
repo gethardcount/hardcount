@@ -305,7 +305,7 @@ type InvoiceEmailer interface {
 // card-less invoices out of dunning forever. Wire in wire.go via
 // SetDunningStarter.
 type DunningStarter interface {
-	StartDunning(ctx context.Context, tenantID, invoiceID, customerID string, simFailedAt time.Time, cause domain.DunningStartCause) error
+	StartDunning(ctx context.Context, tenantID, invoiceID, customerID string, cause domain.DunningStartCause) error
 }
 
 // DunningResolver resolves an active dunning run when an invoice settles via a
@@ -2949,11 +2949,8 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 	}
 	now := *sub.NextBillingAt
 	// Rebind ctx's instant to this cycle's own close (keeping the clock)
-	// so downstream effects that read ctx time — the auto-charge, whose
-	// PI metadata anchor drives the settle's paid_at — land on the
-	// boundary like every other cycle stamp, not on advance-end
-	// frozen_time (live find: a Jul-1-boundary invoice recorded
-	// paid_at at the advance target an hour later).
+	// so downstream effects that read ctx time land on the boundary like
+	// every other cycle stamp, not on advance-end frozen_time.
 	if sim, ok := clock.SimOf(ctx); ok {
 		ctx = clock.WithSim(ctx, clock.Sim{At: now, TestClockID: sim.TestClockID})
 	}
@@ -4701,16 +4698,16 @@ func (e *Engine) EnrollFailedWithoutDunning(ctx context.Context, limit int) (int
 }
 
 // enrollStalledForDunning enrolls each candidate via the idempotent
-// StartDunning (which anchors the first retry: now for a wall-clock invoice,
-// the issue instant for a clock-pinned one). A "dunning
-// disabled" outcome is swallowed by the adapter as a deliberate skip; other
-// errors are collected per-invoice so one bad row doesn't abort the sweep.
+// StartDunning, which counts the first retry from the instant bound here. A
+// "dunning disabled" outcome is swallowed by the adapter as a deliberate
+// skip; other errors are collected per-invoice so one bad row doesn't abort
+// the sweep.
 func (e *Engine) enrollStalledForDunning(ctx context.Context, pending []domain.Invoice, cause domain.DunningStartCause) (int, []error) {
 	swept := 0
 	var errs []error
 	for _, inv := range pending {
 		ctx := clock.EnsureEffectiveNow(ctx, e.clock) // one instant for this invoice's work; the tick binds none
-		if err := e.dunningStarter.StartDunning(ctx, inv.TenantID, inv.ID, inv.CustomerID, inv.IssuedAtOrZero(), cause); err != nil {
+		if err := e.dunningStarter.StartDunning(ctx, inv.TenantID, inv.ID, inv.CustomerID, cause); err != nil {
 			errs = append(errs, fmt.Errorf("enroll invoice %s for dunning: %w", inv.ID, err))
 			continue
 		}
@@ -4977,12 +4974,7 @@ func (e *Engine) processAutoCharge(ctx context.Context, inv domain.Invoice, at *
 		// the customer to pay the invoice and its retries charge nothing,
 		// and it still ends in the policy's final action.
 		if err == nil {
-			// Anchored on settleAt, the instant this collection runs in the
-			// invoice's time domain: a cycle invoice's close when collected
-			// at finalize, the clock's now for a draft finalized on a later
-			// Advance (a paused subscription's). Its issue instant would date
-			// that draft's first retry in the past.
-			if derr := e.dunningStarter.StartDunning(ctx, inv.TenantID, inv.ID, inv.CustomerID, settleAt, domain.DunningCauseNoPaymentMethod); derr != nil {
+			if derr := e.dunningStarter.StartDunning(ctx, inv.TenantID, inv.ID, inv.CustomerID, domain.DunningCauseNoPaymentMethod); derr != nil {
 				// Left queued: the next sweep retries the start.
 				errs = append(errs, fmt.Errorf("start no-payment dunning for %s: %w", inv.ID, derr))
 			}
