@@ -50,9 +50,8 @@ export function InvoiceAttention({
   // Opens the write-off confirmation. Offered by the server only when a
   // payment's outcome can never be identified (ADR-107).
   onMarkUncollectible?: () => void
-  // Opens the invoice's existing void confirmation. Surfaced only on
-  // prepaid-commit exposure, where voiding is the sole way to stop credit
-  // going out against an invoice nobody paid (ADR-078).
+  // Opens the invoice's existing void confirmation. Surfaced only on an
+  // amount below Stripe's minimum charge, which Stripe will never charge.
   onVoidInvoice?: () => void
   retrying?: boolean
   charging?: boolean
@@ -148,7 +147,7 @@ export function InvoiceAttention({
     >
       {/* The sentence is SERVER-OWNED: a second hardcoded copy here would
           drift from it and repeat the promise twice in one notice. Further
-          lines (setup-link email, prepaid credit at risk; up to three in all)
+          lines (such as the setup-link email; up to two in all)
           come after newlines and are shown, never folded into Details: they
           carry money or the next step. */}
       {messageLines(att.message).map((line, i) => (

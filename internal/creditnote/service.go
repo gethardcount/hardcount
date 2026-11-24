@@ -472,7 +472,7 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 	// collected while the grant stays configured full-size; post-payment, a
 	// refund CN returns cash while the funded block stays drawable (and a
 	// credit-settled CN would ADD a second grant on top). Unwind paths:
-	// unpaid → void the invoice (retires the grant, ADR-078 D3); paid →
+	// unpaid → void the invoice; paid →
 	// blocked until the CN-retire leg ships (phase 2 — trigger: first DP
 	// commit-refund ask). Checked in the shared core so the operator path
 	// and the automated clawback paths carry the same rule.
@@ -1193,7 +1193,7 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 			return domain.CreditNote{}, nil, gerr
 		}
 		if !found {
-			return domain.CreditNote{}, nil, fmt.Errorf("invoice %s has a commit line but no funded grant — finalize funds the grant in the same tx, so this is corrupted state; refusing to move cash", input.InvoiceID)
+			return domain.CreditNote{}, nil, fmt.Errorf("invoice %s has a commit line but no funded grant — its payment funds the grant in the same tx, so this is corrupted state; refusing to move cash", input.InvoiceID)
 		}
 		remaining := granted - consumed
 		if remaining <= 0 {

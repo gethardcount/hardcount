@@ -171,15 +171,8 @@ type TenantSettingsStore interface {
 type CreditReverser interface {
 	// ReverseForInvoiceTx hands the invoice's applied credit back to the
 	// blocks it was drawn from (ADR-132) and says what it did: a share
-	// whose grant is past expiry expires at once, a share of a commit whose
-	// funding invoice is voided is retired again.
+	// whose grant is past expiry expires at once.
 	ReverseForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber string) (domain.CreditReturn, error)
-	// RetireCommitGrantForInvoiceTx retires the remaining balance of the
-	// commit grant this invoice funded, if any (ADR-078 D3: voiding a
-	// commit funding invoice kills the unfunded credits; consumed stays
-	// consumed). Clean no-op for non-commit invoices and already-retired
-	// grants.
-	RetireCommitGrantForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string) (int64, error)
 }
 
 type Service struct {
@@ -501,25 +494,27 @@ func (s *Service) SetCustomerSearcher(c CustomerSearcher) {
 }
 
 // CommitGrantReader is the narrow prepaid-commit lookup the attention
-// classifier uses to report credit that is live against an invoice nobody
-// paid (ADR-078 D3's named fast-follow). Satisfied by *credit.PostgresStore.
+// classifier uses when a dispute on a paid top-up was lost: the dispute_lost
+// notice says how much of the credit is still spendable. Satisfied by
+// *credit.PostgresStore.
 //
 // Consumer-defined here rather than imported from `credit`: the arch boundary
 // (internal/arch/boundaries_test.go) allows `invoice` only {audit, auth,
 // payment, tax}, and this is a read for a banner — nowhere near enough reason
 // to open a new edge between two money domains.
 //
-// Returns the two figures separately because only one of them is recoverable:
-// drawable is what void still cancels, consumed is gone for good. `now` is the
-// action's time (see Service.clock), so the grant's expiry is judged at the
-// same instant the drawdown uses.
+// Returns the two figures separately because they drive different sentences:
+// drawable is what commit relief can still retire, consumed is gone for good.
+// `now` is the action's time (see Service.clock), so the grant's expiry is
+// judged at the same instant the drawdown uses.
 type CommitGrantReader interface {
 	CommitGrantExposure(ctx context.Context, tenantID, invoiceID string, now time.Time) (drawableCents, consumedCents int64, err error)
 }
 
 // SetCommitGrantReader wires the prepaid-commit lookup (see
-// CommitGrantReader). Optional: when nil the exposure fields stay zero and no
-// exposure is claimed — the same safe default as an unwired dunning reader.
+// CommitGrantReader). Optional: when nil the figures stay zero and the
+// dispute_lost notice names no prepaid credit — the same safe default as an
+// unwired dunning reader.
 func (s *Service) SetCommitGrantReader(r CommitGrantReader) {
 	s.commitGrants = r
 }
@@ -1448,33 +1443,21 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 	if r, ok := f.refundReview[inv.ID]; ok {
 		atc.StripeRefundReview = &r
 	}
-	// Prepaid-commit exposure: credit this invoice already handed the customer
-	// while the cash never arrived (ADR-078 D3 fast-follow). Read per row, but
-	// behind the tightest guard of any attention read — commit lines are on
-	// operators' invoices only, funded at finalize or, on a top-up, at
-	// payment (ADR-078 D2/D3), so a draft or a subscription-cycle invoice can
-	// never carry a live grant, and
-	// a paid one has nothing to report (the cash arrived); none of them pays
-	// for the lookup, except the paid case below. What remains is one hit on
-	// the unique partial index idx_credit_ledger_commit_fund_dedup.
+	// A paid top-up whose dispute was lost (#1287 review): the bank took the
+	// cash back while the credit stays spendable, and the dispute_lost notice
+	// must say so and point to commit relief instead of the credit note a
+	// commit invoice refuses. Only a top-up's payment grants commit credit,
+	// and only paid top-ups with a lost dispute pay for the read, which is
+	// almost none: one hit on the unique partial index
+	// idx_credit_ledger_commit_fund_dedup.
 	//
 	// Expiry is judged at the request's instant (s.clock.Now(ctx)), with the
-	// predicate drainPositiveBlocks uses, so a banner and a drawdown agree
-	// about whether credit is still live.
-	//
-	// A read error leaves both figures zero and claims no exposure. The
-	// alternative — a banner asserting a balance we could not read — is the
-	// failure worth avoiding, and the invoice's own cause banner still renders.
-	//
-	// One paid case joins the read: a lost dispute (#1287 review). The bank
-	// took the cash back while the credit stays spendable, and the
-	// dispute_lost notice must say so and point to commit relief instead of
-	// the credit note a commit invoice refuses. Only paid invoices with a lost
-	// dispute pay for it, which is almost none.
-	if s.commitGrants != nil && inv.ID != "" &&
-		(inv.BillingReason == domain.BillingReasonManual || inv.BillingReason == domain.BillingReasonTopup) &&
-		(inv.Status == domain.InvoiceFinalized || inv.Status == domain.InvoiceUncollectible ||
-			(inv.Status == domain.InvoicePaid && atc.LostDispute != nil)) {
+	// predicate drainPositiveBlocks uses, so the notice and a drawdown agree
+	// about whether credit is still live. A read error leaves both figures
+	// zero, and the notice names no prepaid credit rather than a balance we
+	// could not read.
+	if s.commitGrants != nil && inv.ID != "" && inv.BillingReason == domain.BillingReasonTopup &&
+		inv.Status == domain.InvoicePaid && atc.LostDispute != nil {
 		if drawable, consumed, err := s.commitGrants.CommitGrantExposure(ctx, inv.TenantID, inv.ID, s.clock.Now(ctx)); err == nil {
 			atc.CommitGrantDrawableCents = drawable
 			atc.CommitGrantConsumedCents = consumed
@@ -2045,35 +2028,21 @@ func (s *Service) VoidUnchangedTx(ctx context.Context, tx *sql.Tx, tenantID stri
 }
 
 // voidEffectsTx is the in-tx half of a void, shared by Void and
-// VoidUnchangedTx: hand back the consumed customer credits, retire a funded
-// commit grant, and write the audit row — all on the void's transaction.
+// VoidUnchangedTx: hand back the consumed customer credits and write the
+// audit row, both on the void's transaction.
 func (s *Service) voidEffectsTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice, prior domain.InvoiceStatus) error {
 	var reversed domain.CreditReturn
-	var commitRetired int64
 	if s.creditReverser != nil && inv.CustomerID != "" {
 		var rerr error
 		reversed, rerr = s.creditReverser.ReverseForInvoiceTx(ctx, tx, tenantID, inv.CustomerID, inv.ID, inv.InvoiceNumber)
 		if rerr != nil {
 			return rerr
 		}
-		// ADR-078 D3: voiding a commit FUNDING invoice retires the funded
-		// grant's remaining balance in this same tx (no-op for non-commit
-		// invoices). Void is the ONLY retire trigger — uncollectible and
-		// the dunning pause/cancel terminals leave the block live as a
-		// collections stance, and voided→paid is rejected so a retired
-		// grant can never be paid for afterwards. The consumed_cents CAS
-		// inside makes the legal uncollectible→void sequence and retries
-		// converge on one retirement.
-		retired, rerr := s.creditReverser.RetireCommitGrantForInvoiceTx(ctx, tx, tenantID, inv.ID)
-		if rerr != nil {
-			return rerr
-		}
-		commitRetired = retired
 	}
 	// ADR-090 in-tx emission — one canonical void row for BOTH the
 	// operator endpoint and engine-triggered voids (unpaid-prebill
-	// relief). The reversal/retirement amounts ride the row so the ledger
-	// effects of the void are readable without cross-referencing the ledger.
+	// relief). The reversal amounts ride the row so the ledger effects of
+	// the void are readable without cross-referencing the ledger.
 	if s.audit != nil {
 		meta := map[string]any{
 			"invoice_number":     inv.InvoiceNumber,
@@ -2086,16 +2055,9 @@ func (s *Service) voidEffectsTx(ctx context.Context, tx *sql.Tx, tenantID string
 			meta["credits_reversed_cents"] = reversed.ReturnedCents
 		}
 		// ADR-132: of the credit handed back, what expired at once (its
-		// grant was past expiry) and what was retired again (its commit's
-		// funding invoice is voided). Both are inside credits_reversed_cents.
+		// grant was past expiry). It is inside credits_reversed_cents.
 		if reversed.ExpiredOnReturnCents > 0 {
 			meta["expired_on_return_cents"] = reversed.ExpiredOnReturnCents
-		}
-		if reversed.CommitRetiredOnReturnCents > 0 {
-			meta["commit_retired_on_return_cents"] = reversed.CommitRetiredOnReturnCents
-		}
-		if commitRetired > 0 {
-			meta["commit_retired_cents"] = commitRetired
 		}
 		if auditErr := s.audit.LogInTx(ctx, tx, audit.Entry{
 			Action:        domain.AuditActionVoid,

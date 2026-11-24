@@ -16,8 +16,8 @@
  * Optional cost-basis class. `promotional` marks free or
  * marketing credit, which invoices draw before any other
  * credit. Omitted means unclassified credit. `commit` is
- * refused here: commit credit comes only from finalizing a
- * commit invoice.
+ * refused here: commit credit comes only from paying a
+ * top-up.
  */
 export type GrantCreditsBodyGrantKind = typeof GrantCreditsBodyGrantKind[keyof typeof GrantCreditsBodyGrantKind];
 

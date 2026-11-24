@@ -1681,8 +1681,8 @@ type ComposerLine = {
   quantity: string         // string-bound input; coerced at submit time
   unitAmount: string       // typed in currency units ("25.50"); dollarsToWholeCents
   line_type: string
-  // Prepaid-credit sale (ADR-078): when set, finalizing the invoice grants
-  // this much credit to the customer. add_on lines only; the backend
+  // Prepaid-credit sale (ADR-078): when set, paying the invoice (a top-up)
+  // grants this much credit to the customer. add_on lines only; the backend
   // enforces one commit line per invoice.
   sellsCredits: boolean
   commitGranted: string    // typed in currency units, like unitAmount
@@ -2157,9 +2157,9 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
                         </Button>
                       </div>
                     </div>
-                    {/* Prepaid-credit sale (ADR-078): finalizing the invoice
-                        grants the entered credits to the customer. add_on
-                        lines only; one per invoice. */}
+                    {/* Prepaid-credit sale (ADR-078): paying the invoice (a
+                        top-up) grants the entered credits to the customer.
+                        add_on lines only; one per invoice. */}
                     {(line.line_type || 'add_on') === 'add_on' && (
                       <div className="px-3 pb-2 space-y-1.5">
                         <label className="flex items-center gap-2 text-xs text-muted-foreground cursor-pointer w-fit">
@@ -2184,7 +2184,7 @@ function NewInvoiceDialog({ customerId, customer, customerCurrency, hasCard, onC
                             />
                             <span className="text-xs text-muted-foreground">
                               {(dollarsToWholeCents(line.commitGranted) ?? 0) > 0
-                                ? `Grants ${formatCents(dollarsToWholeCents(line.commitGranted) ?? 0, currency)} of credits when the invoice is finalized.`
+                                ? `Grants ${formatCents(dollarsToWholeCents(line.commitGranted) ?? 0, currency)} of credits when the invoice is paid.`
                                 : 'The credits never expire.'}
                             </span>
                           </div>

@@ -828,7 +828,6 @@ export type AttentionReason =
   | 'no_payment_method'
   | 'dunning_exhausted'
   | 'collection_paused'
-  | 'commit_exposure'
   | 'dispute_lost'
   | 'refunded_in_stripe'
   | 'amount_below_minimum'
@@ -858,8 +857,8 @@ export interface AttentionActionItem {
 export interface InvoiceAttention {
   severity: AttentionSeverity
   reason: AttentionReason
-  // One sentence per line, up to three lines split on "\n": the cause, then
-  // the setup-link email and prepaid credit at risk when they apply.
+  // One sentence per line, up to two lines split on "\n": the cause, then
+  // a fact that must show up front, such as the setup-link email.
   message: string
   actions?: AttentionActionItem[]
   // Open dotted code (e.g. "tax.customer_data_invalid"). Stable but
@@ -1061,8 +1060,8 @@ export interface CreditBalance {
   total_granted: number
   total_used: number
   total_expired: number
-  // Commit credit taken back with its voided or refunded invoice, and credit
-  // an operator deducted. granted = used + expired + retired + deducted + balance.
+  // Commit credit taken back with its refunded invoice, and credit an
+  // operator deducted. granted = used + expired + retired + deducted + balance.
   total_retired: number
   total_deducted: number
   // The currency of this balance. Each ledger row stores its own currency,

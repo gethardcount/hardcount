@@ -27,8 +27,9 @@ const (
 // tax.customer_data_invalid).
 //
 // ADR-009 reserves three codes that are never sent: finalization_failed,
-// payment_action_required and payment_method_required. Do not use them for
-// another meaning.
+// payment_action_required and payment_method_required. commit_exposure is
+// retired: only a top-up's payment grants prepaid credit, so no unpaid
+// invoice has any. Do not use them for another meaning.
 type AttentionReason string
 
 const (
@@ -60,30 +61,6 @@ const (
 	// operators benefit from a quiet "the system has it" signal rather
 	// than silence.
 	AttentionReasonPaymentUnconfirmed AttentionReason = "payment_unconfirmed"
-
-	// AttentionReasonCommitExposure: this invoice funded a prepaid-commit
-	// grant that is still live, and the invoice was never paid. ADR-078 funds
-	// commits at ISSUE (finalize), not at payment — the negotiated-B2B default,
-	// deliberately chosen and unchanged — which means the customer holds
-	// spendable credit against cash that has not arrived.
-	//
-	// That disposition is fine; its INVISIBILITY was not. The only recovery is
-	// operator void, which retires the REMAINING balance only (consumed stays
-	// consumed), so every hour the customer keeps drawing is recovery
-	// permanently lost. Nothing surfaced the state, so nobody could void in
-	// time — observed live on VLX-000060: $96.52 invoiced, $0.00 collected,
-	// $100.00 still drawable, dunning since Jul 30, and no surface said so.
-	// docs/dev/design/prepaid-commits.md D3 named this exact surfacing a
-	// "fast-follow candidate"; this is that fast-follow.
-	//
-	// This reason is only ever SYNTHESIZED when nothing else fired — see
-	// withCommitExposure in internal/invoice, which folds the exposure into whichever cause banner
-	// won rather than competing with it. A commit invoice is unpaid-with-live-
-	// grant from finalize until payment, so a reason that pre-empted the chain
-	// would fire on every healthy Net-30 commit sale AND mask the declined card
-	// underneath it. The fold is what makes it safe to report a state that is,
-	// most of the time, simply the deal working as agreed.
-	AttentionReasonCommitExposure AttentionReason = "commit_exposure"
 
 	// AttentionReasonPaymentAnomaly: the settle path detected money that
 	// does not reconcile — a second different PaymentIntent succeeded on an
@@ -235,18 +212,10 @@ const (
 	// provider's credentials. Distinct from RotateAPIKey: nothing
 	// to rotate, the connection has never been made.
 	AttentionActionConnectTaxProvider AttentionAction = "connect_tax_provider"
-	// AttentionActionVoidInvoice opens the invoice's void confirmation. It is
-	// the ONLY recovery for an unpaid invoice whose prepaid credit is still
-	// live: voiding retires the unspent balance inside the void tx (ADR-078
-	// D3). Offered on commit exposure and on an amount below Stripe's minimum
-	// charge (which Stripe will never charge) only — void destroys an
-	// invoice, so it must never become a generic "something is wrong here"
-	// suggestion.
-	//
-	// Reusing an existing code with a relabelled button was rejected: audit
-	// logs key off the code, so an action reading `add_payment_method` on a
-	// credit-exposure banner would be a lie in the machine-readable field, and
-	// unlike the label nothing downstream would ever correct it.
+	// AttentionActionVoidInvoice opens the invoice's void confirmation.
+	// Offered only on an amount below Stripe's minimum charge (which Stripe
+	// will never charge): void destroys an invoice, so it must never become a
+	// generic "something is wrong here" suggestion.
 	AttentionActionVoidInvoice AttentionAction = "void_invoice"
 	// AttentionActionMarkUncollectible opens the invoice's write-off
 	// confirmation. Offered only on a PARKED invoice (payment status unknown
@@ -291,10 +260,9 @@ type Attention struct {
 	// Message is what the operator reads first: one plain sentence of 25
 	// words or fewer saying what happens and what to do. Facts that must show
 	// up front follow as more lines after "\n", one sentence each, up to
-	// three lines in all: the setup-link email on a no-payment-method or
-	// recovery-ended notice, and the prepaid credit at risk on a commit
-	// invoice. A no-card commit invoice carries all three. How the engine
-	// works and longer instructions go in Detail.
+	// two lines in all, such as the setup-link email on a no-payment-method
+	// or recovery-ended notice. How the engine works and longer instructions
+	// go in Detail.
 	Message string                `json:"message"`
 	Actions []AttentionActionItem `json:"actions,omitempty"`
 

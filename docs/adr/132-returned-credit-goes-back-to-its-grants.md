@@ -10,7 +10,9 @@ invoice drew from the customer's balance, that credit goes back to the
 grants it was drawn from. It keeps their expiry and their kind (promotional,
 commit or paid). A share whose grant is already past its expiry expires at
 once, by the expiry sweep's rule. A share of a commit whose funding invoice
-is voided is retired again. A credit note on a paid invoice follows one more
+is voided was retired again; that rule is gone, since a commit's funding
+invoice is paid when the credit is granted and can't be voided
+([ADR-078's amendment of 2026-11-24](078-prepaid-commits-phase-1.md#amendment-2026-11-24--the-credit-is-granted-when-a-top-up-is-paid)). A credit note on a paid invoice follows one more
 rule: it never gives the customer less than it says. Its drawn share goes
 back to its grants only while they stay spendable, and the rest is new
 credit. Before this, every return was a new grant with no expiry and no
@@ -93,7 +95,9 @@ usage row.
    invoice is voided is retired again through `retireCommitSliceTx`
    (reason `commit_void_retire`). This comes before the expiry test. It reads
    the funding invoice's status, so it also covers a void that found the
-   grant fully drawn and retired nothing.
+   grant fully drawn and retired nothing. *(Removed by
+   [ADR-078's amendment of 2026-11-24](078-prepaid-commits-phase-1.md#amendment-2026-11-24--the-credit-is-granted-when-a-top-up-is-paid): no
+   commit grant's funding invoice can be voided.)*
 6. **Credit note on a paid invoice: never less than it says.** The
    customer's balance rises by exactly the note's credit amount, the figure
    the note's PDF, hosted page and audit row state.
@@ -104,10 +108,9 @@ usage row.
      The rounding telescopes, so the notes never return more drawn credit
      than their share of it (`paidDrawnShare`).
    - The drawn share goes back to its blocks, last drawn first, only where
-     it stays spendable: not past expiry, and not a commit whose funding
-     invoice is voided (`spendableAt`). A share that would expire or be
-     retired is new credit instead. Nothing on this branch expires or is
-     retired at once.
+     it stays spendable: not past expiry (`spendableAt`; the voided-commit
+     test went with item 5, [ADR-078's amendment of 2026-11-24](078-prepaid-commits-phase-1.md#amendment-2026-11-24--the-credit-is-granted-when-a-top-up-is-paid)). A share that would
+     expire is new credit instead. Nothing on this branch expires at once.
    - The rest of the note is new credit with no expiry, as before.
    - Each such row carries metadata `paid_invoice: true` and
      `drawn_share_cents`, which the next note's cumulative share reads.
@@ -140,9 +143,9 @@ usage row.
      total_deducted + balance` still holds.
    - The ledger list reports a return row's `consumed_cents` without its
      restored part, so the field stays "how much has been used or expired".
-   - The void audit row adds `expired_on_return_cents` and
-     `commit_retired_on_return_cents` (inside `credits_reversed_cents`),
-     when not zero.
+   - The void audit row adds `expired_on_return_cents` (inside
+     `credits_reversed_cents`), when not zero. `commit_retired_on_return_cents`
+     went with item 5 ([ADR-078's amendment of 2026-11-24](078-prepaid-commits-phase-1.md#amendment-2026-11-24--the-credit-is-granted-when-a-top-up-is-paid)).
 
 ## Why this design
 

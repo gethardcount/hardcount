@@ -47,8 +47,8 @@ func newReliefCNService(h *commitHarness) *creditnote.Service {
 	return cnSvc
 }
 
-// payOffline marks the commit invoice paid out-of-band (the migration norm),
-// as Record offline payment does.
+// payOffline marks the top-up paid out-of-band, as Record offline payment
+// does: the payment issues it and grants its credit.
 func payOffline(t *testing.T, h *commitHarness, ctx context.Context, invoiceID string) {
 	t.Helper()
 	if _, err := h.invStore.MarkPaidOffline(ctx, h.tenantID, invoiceID, time.Now().UTC(), nil); err != nil {
@@ -76,10 +76,7 @@ func drain(t *testing.T, h *commitHarness, ctx context.Context, cents int64, rou
 // account for 3600 of the cash; NOT 6000 face, NOT 5000 face-minus-face).
 func TestCommitRelief_WorkedExample(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Relief Worked Example")
-	inv := h.createCommitInvoice(t, ctx, 9000, 10000)
-	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
-		t.Fatalf("finalize: %v", err)
-	}
+	inv := h.createTopup(t, ctx, "USD", 9000, 10000)
 	payOffline(t, h, ctx, inv.ID)
 	drain(t, h, ctx, 4000, 1)
 
@@ -132,10 +129,7 @@ func TestCommitRelief_WorkedExample(t *testing.T) {
 // f(total retired) — per-slice independent rounding would over-refund.
 func TestCommitRelief_PartialsTelescope(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Relief Telescoping")
-	inv := h.createCommitInvoice(t, ctx, 9000, 10000)
-	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
-		t.Fatalf("finalize: %v", err)
-	}
+	inv := h.createTopup(t, ctx, "USD", 9000, 10000)
 	payOffline(t, h, ctx, inv.ID)
 	cnSvc := newReliefCNService(h)
 
@@ -174,18 +168,15 @@ func TestCommitRelief_Gates(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Relief Gates")
 	cnSvc := newReliefCNService(h)
 
-	// Unpaid commit invoice → route to void.
-	inv := h.createCommitInvoice(t, ctx, 9000, 10000)
-	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
-		t.Fatalf("finalize: %v", err)
-	}
+	// Unpaid top-up → route to void.
+	inv := h.createTopup(t, ctx, "USD", 9000, 10000)
 	if _, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{
 		InvoiceID: inv.ID, RetireAll: true,
 	}); err == nil || !strings.Contains(err.Error(), "void the unpaid invoice") {
 		t.Fatalf("unpaid relief: err = %v, want route-to-void", err)
 	}
 
-	// Ordinary line-based CN on the PAID commit invoice → routes to relief.
+	// Ordinary line-based CN on the PAID top-up → routes to relief.
 	payOffline(t, h, ctx, inv.ID)
 	if _, err := cnSvc.Create(ctx, h.tenantID, creditnote.CreateInput{
 		InvoiceID: inv.ID, Reason: "refund",
@@ -224,10 +215,7 @@ func TestCommitRelief_Gates(t *testing.T) {
 // relief cash always matches the f-slice of what was actually retired).
 func TestCommitRelief_ConcurrentDrawdown(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Relief Race")
-	inv := h.createCommitInvoice(t, ctx, 9000, 10000)
-	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
-		t.Fatalf("finalize: %v", err)
-	}
+	inv := h.createTopup(t, ctx, "USD", 9000, 10000)
 	payOffline(t, h, ctx, inv.ID)
 	cnSvc := newReliefCNService(h)
 
@@ -271,14 +259,11 @@ func TestCommitRelief_ConcurrentDrawdown(t *testing.T) {
 }
 
 // TestCommitRelief_ExpiredGrant: term lapse is contractual breakage — the
-// swept grant has nothing refundable. Bought credit no longer expires; a
-// grant made before that can still carry an expiry, set here on the ledger.
+// swept grant has nothing refundable. The expiry is set on the ledger here,
+// in the past, so the sweep retires the grant at once.
 func TestCommitRelief_ExpiredGrant(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Relief Expired")
-	inv := h.createCommitInvoice(t, ctx, 9000, 10000)
-	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
-		t.Fatalf("finalize: %v", err)
-	}
+	inv := h.createTopup(t, ctx, "USD", 9000, 10000)
 	payOffline(t, h, ctx, inv.ID)
 
 	// Force-expire: backdate expires_at, then run the expiry sweep.
@@ -313,10 +298,7 @@ func TestCommitRelief_ExpiredGrant(t *testing.T) {
 // nothing to reverse.
 func TestCommitRelief_OnAStripeTaxTenant_OwesNoTaxReversal(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Relief Stripe Tax Tenant")
-	inv := h.createCommitInvoice(t, ctx, 9000, 10000)
-	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
-		t.Fatalf("finalize: %v", err)
-	}
+	inv := h.createTopup(t, ctx, "USD", 9000, 10000)
 	execBypassStamp(t, h.db, `UPDATE invoices SET tax_provider = 'stripe_tax', tax_calculation_id = '', tax_transaction_id = NULL WHERE id = $1`, inv.ID)
 	payOffline(t, h, ctx, inv.ID)
 	drain(t, h, ctx, 4000, 1)

@@ -55,12 +55,10 @@ func (s *PostgresStore) SetOutboxEnqueuer(o OutboxEnqueuer) { s.outbox = o }
 // CommitFunder grants a prepaid-commit credit block, in the funding invoice's
 // currency (ADR-129), on the caller's tx, expiring at expiresAt (nil: never).
 // A top-up's payment calls it inside the settle transaction
-// (issueAndPayTopupLockedTx), and FinalizeWithDates inside the finalize
-// transaction, so the grant commits or rolls back with the money write
-// (ADR-078 D2). Satisfied by *credit.Service; declared consumer-side so the
-// invoice store needs no credit import. Unlike the outbox, this dependency is
-// NOT optional when a commit line exists: both writers fail loud with no
-// funder wired.
+// (issueAndPayTopupLockedTx), so the grant commits or rolls back with the
+// payment (ADR-078 D2). Satisfied by *credit.Service; declared consumer-side
+// so the invoice store needs no credit import. Unlike the outbox, this
+// dependency is NOT optional: paying a top-up fails loud with no funder wired.
 type CommitFunder interface {
 	GrantCommitForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber, currency string, amountCents int64, expiresAt *time.Time) (domain.CreditLedgerEntry, error)
 	// LockCustomerCreditTx takes the customer's credit lock, which the grant
@@ -641,17 +639,8 @@ func (s *PostgresStore) updateStatusInTx(ctx context.Context, tx *sql.Tx, id str
 //
 // The UPDATE carries an `AND status='draft'` CAS (ADR-078 D5): the service's
 // draft guard reads an earlier snapshot, so without the predicate a concurrent
-// void/finalize could flip voided→finalized — resurrecting an annulled invoice
-// and, below, minting its commit grant. 0 rows → typed conflict, no grant.
-//
-// Commit funding (ADR-078 D2): when the invoice carries a commit line, the
-// injected commitFunder grants the credit block IN THIS TX — the status flip
-// and the grant commit or roll back together. The commit line is read in-tx,
-// AFTER the flip (the row UPDATE serializes against AddLineItemAtomicAudited's
-// FOR UPDATE, so a line added concurrently with finalize is either seen here or
-// rejected by its own draft re-check). A funder error fails finalize by
-// design: operator-synchronous, loud, retryable — never weaken to
-// post-commit.
+// void/finalize could flip voided→finalized — resurrecting an annulled
+// invoice. 0 rows → typed conflict.
 //
 // The finalize gives the invoice its hosted-page token and queues
 // invoice.finalized in this transaction too (finalizedTx), after
@@ -664,8 +653,7 @@ func (s *PostgresStore) FinalizeWithDates(ctx context.Context, tenantID, id stri
 	defer postgres.Rollback(tx)
 
 	// The lines must be the ones Finalize read before computing tax. A line
-	// added after the tax write would otherwise be finalized with no tax, and
-	// a commit line's credit granted below without its charge being taxed
+	// added after the tax write would otherwise be finalized with no tax
 	// (#1298). AddLineItemAtomicAudited takes this row lock too, so a line either
 	// lands first and is seen here, or finds the invoice finalized.
 	var locked string
@@ -716,30 +704,6 @@ func (s *PostgresStore) FinalizeWithDates(ctx context.Context, tenantID, id stri
 	if err := s.stampIssuedPartiesTx(ctx, tx, &inv); err != nil {
 		return domain.Invoice{}, err
 	}
-
-	// Fund the commit line, if any (alone on its invoice — enforced at line
-	// create).
-	var commitCents sql.NullInt64
-	err = tx.QueryRowContext(ctx, `
-		SELECT commit_granted_cents
-		FROM invoice_line_items
-		WHERE invoice_id = $1 AND tenant_id = $2 AND commit_granted_cents IS NOT NULL
-	`, id, tenantID).Scan(&commitCents)
-	if err != nil && err != sql.ErrNoRows {
-		return domain.Invoice{}, fmt.Errorf("read commit line at finalize: %w", err)
-	}
-	if err == nil && commitCents.Valid {
-		if s.commitFunder == nil {
-			// A commit line with no funder wired would finalize a purchase
-			// that never grants — fail loud, never silently skip.
-			return domain.Invoice{}, fmt.Errorf("invoice %s carries a commit line but no commit funder is wired", id)
-		}
-		if _, ferr := s.commitFunder.GrantCommitForInvoiceTx(ctx, tx, tenantID,
-			inv.CustomerID, inv.ID, inv.InvoiceNumber, inv.Currency, commitCents.Int64, nil); ferr != nil {
-			return domain.Invoice{}, fmt.Errorf("fund commit grant at finalize: %w", ferr)
-		}
-	}
-
 	if inv, err = s.runOnFinalizedTx(ctx, tx, inv, onFinalized); err != nil {
 		return domain.Invoice{}, err
 	}

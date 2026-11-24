@@ -10,13 +10,12 @@ import (
 )
 
 // The grant summary behind the customer page's credit rows splits a grant's
-// consumed_cents into what invoices used and what was written off. A commit
-// unwind (void of the funding invoice, or a credit note's relief) bumps
-// consumed by the retired part, so before retired_cents the page counted the
-// retired credit as "Used" and labelled a voided commit "Used up".
+// consumed_cents into what invoices used and what was written off. A credit
+// note's relief bumps consumed by the retired part, so before retired_cents
+// the page counted the retired credit as "Used".
 // Mutation-verify: drop the commit-retire arm of ListGrantSummaries' JOIN
 // (retired_cents = 0), or the retire arm of balanceWriteOffColumns
-// (total_retired = 0) → both tests red.
+// (total_retired = 0) → red.
 
 // assertRetiredTotal: the balance totals name the retired part as
 // total_retired (the page's "Canceled"), not as a deduction, and the totals
@@ -50,49 +49,12 @@ func grantSummaryFor(t *testing.T, h *commitHarness, ctx context.Context, grantI
 	return credit.GrantSummary{}
 }
 
-// TestGrantSummary_VoidRetiredIsNotUsed: $100 commit, $40 drawn, funding
-// invoice voided → the $60 the void retired is retired_cents, not used.
-func TestGrantSummary_VoidRetiredIsNotUsed(t *testing.T) {
-	h, ctx := newCommitHarness(t, "Grant Summary Void Retired")
-
-	inv := h.createCommitInvoice(t, ctx, 10000, 10000)
-	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
-		t.Fatalf("finalize: %v", err)
-	}
-	drain(t, h, ctx, 4000, 1)
-	if _, err := h.invSvc.Void(ctx, h.tenantID, inv.ID); err != nil {
-		t.Fatalf("void: %v", err)
-	}
-
-	grant, ok := h.commitGrant(t, ctx, inv.ID)
-	if !ok {
-		t.Fatal("no commit grant for the funding invoice")
-	}
-	g := grantSummaryFor(t, h, ctx, grant.ID)
-	if g.ConsumedCents != 10000 || g.RemainingCents != 0 {
-		t.Errorf("consumed=%d remaining=%d, want 10000 0 (the void retires the remainder)", g.ConsumedCents, g.RemainingCents)
-	}
-	if g.RetiredCents != 6000 {
-		t.Errorf("retired_cents = %d, want 6000 (the remainder the void retired)", g.RetiredCents)
-	}
-	if g.ExpiredCents != 0 {
-		t.Errorf("expired_cents = %d, want 0", g.ExpiredCents)
-	}
-	if used := g.ConsumedCents - g.ExpiredCents - g.RetiredCents; used != 4000 {
-		t.Errorf("used = %d, want 4000 (only the drawdown)", used)
-	}
-	assertRetiredTotal(t, h, ctx, 6000)
-}
-
-// TestGrantSummary_ReliefRetiredIsNotUsed: $100 commit paid, $40 drawn, a
+// TestGrantSummary_ReliefRetiredIsNotUsed: $100 top-up paid, $40 drawn, a
 // credit note relieves $25 of it → retired 2500, used 4000, 3500 left.
 func TestGrantSummary_ReliefRetiredIsNotUsed(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Grant Summary Relief Retired")
 
-	inv := h.createCommitInvoice(t, ctx, 10000, 10000)
-	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
-		t.Fatalf("finalize: %v", err)
-	}
+	inv := h.createTopup(t, ctx, "USD", 10000, 10000)
 	payOffline(t, h, ctx, inv.ID)
 	drain(t, h, ctx, 4000, 1)
 	if _, err := newReliefCNService(h).CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{

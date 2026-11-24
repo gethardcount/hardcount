@@ -127,9 +127,6 @@ type CreditReturn struct {
 	// ExpiredOnReturnCents is the part of RestoredCents that expired at once,
 	// because its block was already past its expiry.
 	ExpiredOnReturnCents int64
-	// CommitRetiredOnReturnCents is the part of RestoredCents that was retired
-	// again, because its commit grant's funding invoice is voided.
-	CommitRetiredOnReturnCents int64
 	// UnattributedCents is the part handed back as new credit with no expiry.
 	// It is credit drawn before drains recorded their blocks (2026-07-05),
 	// and, on a paid invoice, the part the customer paid in cash.

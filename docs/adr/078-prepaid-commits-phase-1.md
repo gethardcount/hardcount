@@ -1,6 +1,6 @@
 # ADR-078: Prepaid commits + drawdown, phase 1
 
-**Status:** Accepted (2026-07-05; amended 2026-08-04, 2026-10-19 and 2026-11-23; supplemented by [ADR-080](080-paid-commit-cn-relief.md) on 2026-07-06)
+**Status:** Accepted (2026-07-05; amended 2026-08-04, 2026-10-19, 2026-11-23 and 2026-11-24; supplemented by [ADR-080](080-paid-commit-cn-relief.md) on 2026-07-06)
 **Context:** `docs/dev/design/prepaid-commits.md` (the locked design — peer-swept
 across Metronome/Lago/Stripe/AI-infra with adversarial quote-verification,
 then a 6-lens adversarial design panel; this ADR records the decisions, the
@@ -21,7 +21,9 @@ paid commit is refunded at the price paid through a relief credit note
 credit is still live (`commit_exposure`), and holding credit until payment
 stays deferred until a self-serve or auto-top-up build exists. Amended
 2026-10-19: the purchase of a commit is not taxed; the usage the credit pays
-for is taxed when it is invoiced, so tax is charged once.
+for is taxed when it is invoiced, so tax is charged once. Amended
+2026-11-24: the credit is granted when a top-up is paid, so finalize and void
+no longer touch a grant.
 
 ## Decision
 
@@ -324,3 +326,25 @@ decision. Trigger: a partner uses promotional credit with tax on.
   optional expiry is gone. A commit grant made before this keeps the expiry
   already written on it. Credit with an expiry is granted by hand
   (`POST /v1/credits/grant` with `expires_at`).
+
+## Amendment 2026-11-24 — the credit is granted when a top-up is paid
+
+- **The credit is granted when a top-up is paid, in the payment's
+  transaction.** A commit line lives only on a top-up (`billing_reason`
+  `topup`), a draft created with that one line. Its payment, by card, on
+  the hosted page or recorded by hand, issues it and grants the credit
+  (`issueAndPayTopupLockedTx`). This replaces item 3, "Fund on ISSUE".
+- **Finalize and void no longer touch a grant.** Finalize refuses a top-up
+  with 409. Void withdraws an unpaid top-up, which has no grant.
+- **A paid top-up can't be voided,** like any paid invoice (item 6's CAS).
+- **Nothing replaces retire-on-void (item 4),** because there is no
+  grant before payment. With it go ADR-132's re-retire of returned credit
+  whose funding invoice is voided, and the `commit_exposure` reason of the
+  2026-08-04 amendment.
+- **Bought credit can expire.** One account setting
+  (`topup_credit_valid_days`, unset meaning never) is copied onto the
+  commit line when the top-up is created, and the grant expires that many
+  days after payment. This replaces the 2026-11-23 amendment's "Bought
+  credit never expires".
+- **A refund or a lost dispute is handled by commit relief today**
+  ([ADR-080](080-paid-commit-cn-relief.md)).

@@ -28,7 +28,7 @@ export interface CreditBalance {
   total_used: number;
   /** Credit written off by expiry, in the currency's minor unit. */
   total_expired: number;
-  /** Prepaid commit credit taken back because the invoice that funded it was voided or refunded by a credit note, in the currency's minor unit. */
+  /** Prepaid commit credit taken back because the invoice that funded it was refunded by a credit note, in the currency's minor unit. */
   total_retired: number;
   /** Credit a dashboard user or an API key deducted (a negative adjustment), in the currency's minor unit. */
   total_deducted: number;

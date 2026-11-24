@@ -45,10 +45,6 @@ func (c *txAuditCapture) LogInTx(_ context.Context, _ *sql.Tx, e audit.Entry) er
 	return nil
 }
 
-func (f *fakeCreditReverser) RetireCommitGrantForInvoiceTx(_ context.Context, _ *sql.Tx, _, _ string) (int64, error) {
-	return 0, nil // non-commit invoices: clean no-op (ADR-078)
-}
-
 // TestVoid_CreditReversalAtomic pins the first-good-practice contract for the
 // void → consumed-credit reversal seam: the reversal rides the SAME coordinator
 // transaction as the status flip. A reversal failure rolls the void back (the
@@ -129,16 +125,16 @@ func TestVoid_CreditReversalAtomic(t *testing.T) {
 	})
 
 	// ADR-132: the void audit row says how much of the returned credit
-	// expired at once and how much was retired again; both keys are left out
-	// when zero, like the other amounts on the row.
-	t.Run("audit row carries what expired or was retired on return", func(t *testing.T) {
+	// expired at once; the key is left out when zero, like the other amounts
+	// on the row.
+	t.Run("audit row carries what expired on return", func(t *testing.T) {
 		for _, tc := range []struct {
 			name string
 			ret  domain.CreditReturn
 			want map[string]any
 		}{
-			{"some expired, some retired", domain.CreditReturn{ReturnedCents: 900, RestoredCents: 900, ExpiredOnReturnCents: 200, CommitRetiredOnReturnCents: 100},
-				map[string]any{"credits_reversed_cents": int64(900), "expired_on_return_cents": int64(200), "commit_retired_on_return_cents": int64(100)}},
+			{"some expired", domain.CreditReturn{ReturnedCents: 900, RestoredCents: 900, ExpiredOnReturnCents: 200},
+				map[string]any{"credits_reversed_cents": int64(900), "expired_on_return_cents": int64(200)}},
 			{"all live", domain.CreditReturn{ReturnedCents: 900, RestoredCents: 900},
 				map[string]any{"credits_reversed_cents": int64(900)}},
 		} {
@@ -159,7 +155,7 @@ func TestVoid_CreditReversalAtomic(t *testing.T) {
 				if meta == nil {
 					t.Fatal("no void audit row")
 				}
-				for _, k := range []string{"credits_reversed_cents", "expired_on_return_cents", "commit_retired_on_return_cents"} {
+				for _, k := range []string{"credits_reversed_cents", "expired_on_return_cents"} {
 					got, ok := meta[k]
 					want, wantOK := tc.want[k]
 					if ok != wantOK || got != want {

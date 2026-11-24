@@ -2,15 +2,12 @@ package invoice_test
 
 import (
 	"context"
-	"database/sql"
-	"errors"
 	"fmt"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/credit"
-	"github.com/gethardcount/hardcount/internal/creditnote"
 	"github.com/gethardcount/hardcount/internal/customer"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/invoice"
@@ -21,9 +18,9 @@ import (
 )
 
 // commitHarness wires the REAL production seams (ADR-078): the invoice store
-// with credit.Service injected as commit funder, the invoice service with
-// credit.Service as credit reverser/retirer, and the tenant settings store as
-// the invoice numberer — the same wiring the router does.
+// with credit.Service injected as commit funder and the tenant settings store
+// as the number a top-up takes when it is paid, the invoice service with
+// credit.Service as credit reverser — the same wiring the router does.
 type commitHarness struct {
 	db        *postgres.DB
 	tenantID  string
@@ -49,9 +46,11 @@ func newCommitHarness(t *testing.T, name string) (*commitHarness, context.Contex
 	creditStore := credit.NewPostgresStore(db)
 	creditStore.SetOutboxEnqueuer(webhook.NewOutboxStore(db))
 	creditSvc := credit.NewService(creditStore)
+	settings := tenant.NewSettingsStore(db)
 	invStore := invoice.NewPostgresStore(db)
 	invStore.SetCommitFunder(creditSvc)
-	invSvc := invoice.NewService(invStore, nil, tenant.NewSettingsStore(db))
+	invStore.SetInvoiceNumberer(settings)
+	invSvc := invoice.NewService(invStore, nil, settings)
 	invSvc.SetCreditReverser(creditSvc)
 
 	return &commitHarness{
@@ -131,26 +130,24 @@ func (h *commitHarness) countEvents(t *testing.T, ctx context.Context, custID, e
 	return n
 }
 
-// createCommitInvoice makes an operator's commit draft from before top-ups,
-// which its finalize funds: a manual draft composed through the service,
-// whose one line is then marked as a commit line
-// (testutil.MarkLegacyCommitLine).
-func (h *commitHarness) createCommitInvoice(t *testing.T, ctx context.Context, priceCents, grantCents int64) domain.Invoice {
+// createTopup makes a top-up selling grantCents of credit for priceCents in
+// currency, as POST /v1/invoices does. Its payment (payOffline) issues it and
+// grants the credit.
+func (h *commitHarness) createTopup(t *testing.T, ctx context.Context, currency string, priceCents, grantCents int64) domain.Invoice {
 	t.Helper()
 	inv, err := h.invSvc.Create(ctx, h.tenantID, invoice.CreateInput{
 		CustomerID: h.custID,
-		Currency:   "USD",
+		Currency:   currency,
 		LineItems: []invoice.AddLineItemInput{{
-			Description:     "Prepaid commit — Q3",
-			LineType:        "add_on",
-			Quantity:        1,
-			UnitAmountCents: priceCents,
+			Description:        "Prepaid credit",
+			Quantity:           1,
+			UnitAmountCents:    priceCents,
+			CommitGrantedCents: &grantCents,
 		}},
 	})
 	if err != nil {
-		t.Fatalf("create commit invoice: %v", err)
+		t.Fatalf("create top-up: %v", err)
 	}
-	testutil.MarkLegacyCommitLine(ctx, t, h.db, h.tenantID, inv.ID, grantCents)
 	return inv
 }
 
@@ -180,190 +177,14 @@ func (h *commitHarness) commitGrant(t *testing.T, ctx context.Context, invoiceID
 	return domain.CreditLedgerEntry{}, false
 }
 
-// TestCommitFinalize_FundsGrantOnce pins ADR-078 D2: finalizing a manual
-// invoice with a commit line grants the block IN the finalize tx —
-// grant_kind='commit', source_invoice_id set, granted amount independent of
-// the line price (discounted commit) — and the finalize CAS makes a second
-// finalize a clean 409 with no second grant.
-func TestCommitFinalize_FundsGrantOnce(t *testing.T) {
-	h, ctx := newCommitHarness(t, "Commit Fund Once")
-
-	// Discounted commit: pay $90, receive $100 of credits.
-	inv := h.createCommitInvoice(t, ctx, 9000, 10000)
-	if h.balance(t, ctx) != 0 {
-		t.Fatalf("balance before finalize = %d, want 0 (grant-on-ISSUE, not on create)", h.balance(t, ctx))
-	}
-
-	finalized, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID)
-	if err != nil {
-		t.Fatalf("finalize: %v", err)
-	}
-	if finalized.Status != domain.InvoiceFinalized {
-		t.Fatalf("status = %s, want finalized", finalized.Status)
-	}
-	if got := h.balance(t, ctx); got != 10000 {
-		t.Fatalf("balance after finalize = %d, want 10000 (the GRANTED amount, not the price)", got)
-	}
-	grant, ok := h.commitGrant(t, ctx, inv.ID)
-	if !ok {
-		t.Fatal("no commit grant found for the funding invoice")
-	}
-	if grant.ExpiresAt != nil {
-		t.Errorf("grant expiry = %v, want nil: bought credit never expires", grant.ExpiresAt)
-	}
-	if grant.AmountCents != 10000 {
-		t.Errorf("grant amount = %d, want 10000", grant.AmountCents)
-	}
-
-	// Second finalize: CAS rejects, no double grant.
-	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err == nil {
-		t.Fatal("second finalize should fail (already finalized)")
-	}
-	if got := h.balance(t, ctx); got != 10000 {
-		t.Errorf("balance after re-finalize attempt = %d, want 10000 (no double fund)", got)
-	}
-}
-
-// TestCommitFinalize_FunderErrorKeepsDraft pins the both-or-neither contract:
-// a funder error fails Finalize loudly, the status flip rolls back, and no
-// ledger row exists — never a finalized purchase that silently granted
-// nothing.
-func TestCommitFinalize_FunderErrorKeepsDraft(t *testing.T) {
-	h, ctx := newCommitHarness(t, "Commit Funder Error")
-	inv := h.createCommitInvoice(t, ctx, 9000, 10000)
-	h.invStore.SetCommitFunder(failingFunder{})
-
-	_, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID)
-	if err == nil || !strings.Contains(err.Error(), "fund commit grant at finalize") {
-		t.Fatalf("finalize: err = %v, want the funder's error", err)
-	}
-
-	got, err := h.invSvc.Get(ctx, h.tenantID, inv.ID)
-	if err != nil {
-		t.Fatalf("get: %v", err)
-	}
-	if got.Status != domain.InvoiceDraft {
-		t.Fatalf("status after failed finalize = %s, want draft (flip rolled back)", got.Status)
-	}
-	if bal := h.balance(t, ctx); bal != 0 {
-		t.Errorf("balance = %d, want 0 (no grant landed)", bal)
-	}
-	if _, ok := h.commitGrant(t, ctx, inv.ID); ok {
-		t.Error("commit grant exists despite failed finalize")
-	}
-}
-
-// failingFunder fails every commit grant.
-type failingFunder struct{}
-
-func (failingFunder) LockCustomerCreditTx(context.Context, *sql.Tx, string, string) error { return nil }
-
-func (failingFunder) GrantCommitForInvoiceTx(context.Context, *sql.Tx, string, string, string, string, string, int64, *time.Time) (domain.CreditLedgerEntry, error) {
-	return domain.CreditLedgerEntry{}, errors.New("grant refused")
-}
-
-// TestCommitVoid_RetiresRemaining pins ADR-078 D3: voiding an unpaid commit
-// funding invoice retires the grant's REMAINING balance in the void tx;
-// consumed stays consumed. And D3's exactly-once: the legal
-// uncollectible→void sequence retires once, uncollectible alone retires
-// nothing.
-func TestCommitVoid_RetiresRemaining(t *testing.T) {
-	h, ctx := newCommitHarness(t, "Commit Void Retire")
-
-	inv := h.createCommitInvoice(t, ctx, 10000, 10000)
-	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
-		t.Fatalf("finalize: %v", err)
-	}
-
-	// Customer draws $40 against a normal invoice before the commit is paid.
-	target, err := invoice.NewPostgresStore(h.db).CreateWithLineItems(ctx, h.tenantID, domain.Invoice{
-		CustomerID: h.custID, InvoiceNumber: "HC-VOIDRETIRE-DRAW",
-		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
-		Currency: "USD", SubtotalCents: 4000, TotalAmountCents: 4000, AmountDueCents: 4000,
-		BillingPeriodStart: time.Date(2026, 6, 1, 0, 0, 0, 0, time.UTC),
-		BillingPeriodEnd:   time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC),
-	}, nil)
-	if err != nil {
-		t.Fatalf("seed drawdown invoice: %v", err)
-	}
-	if _, err := h.creditSvc.ApplyToInvoice(ctx, h.tenantID, h.custID, target.ID, 4000, "HC-VOIDRETIRE-DRAW"); err != nil {
-		t.Fatalf("apply: %v", err)
-	}
-	if got := h.balance(t, ctx); got != 6000 {
-		t.Fatalf("balance after draw = %d, want 6000", got)
-	}
-
-	// Void the funding invoice: the remaining $60 retires in the same tx.
-	if _, err := h.invSvc.Void(ctx, h.tenantID, inv.ID); err != nil {
-		t.Fatalf("void: %v", err)
-	}
-	if got := h.balance(t, ctx); got != 0 {
-		t.Fatalf("balance after void = %d, want 0 (remaining retired; consumed stays consumed)", got)
-	}
-	grant, ok := h.commitGrant(t, ctx, inv.ID)
-	if !ok {
-		t.Fatal("grant row should still exist (append-only ledger)")
-	}
-	if grant.ConsumedCents != grant.AmountCents {
-		t.Errorf("grant consumed = %d, want %d (fully retired)", grant.ConsumedCents, grant.AmountCents)
-	}
-}
-
-// TestCommitUncollectible_NoRetire_ThenVoidRetiresOnce pins the D3 decision
-// boundary: mark-uncollectible leaves the block LIVE (collections stance —
-// uncollectible→paid recovery then needs no restore leg), and the follow-up
-// void (a legal transition) retires exactly once.
-func TestCommitUncollectible_NoRetire_ThenVoidRetiresOnce(t *testing.T) {
-	h, ctx := newCommitHarness(t, "Commit Uncollectible Then Void")
-
-	inv := h.createCommitInvoice(t, ctx, 10000, 10000)
-	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
-		t.Fatalf("finalize: %v", err)
-	}
-
-	if _, err := h.invSvc.MarkUncollectible(ctx, h.tenantID, inv.ID); err != nil {
-		t.Fatalf("mark uncollectible: %v", err)
-	}
-	if got := h.balance(t, ctx); got != 10000 {
-		t.Fatalf("balance after uncollectible = %d, want 10000 (no retire — block stays live)", got)
-	}
-
-	// uncollectible → void: retire fires now, once.
-	if _, err := h.invSvc.Void(ctx, h.tenantID, inv.ID); err != nil {
-		t.Fatalf("void after uncollectible: %v", err)
-	}
-	if got := h.balance(t, ctx); got != 0 {
-		t.Fatalf("balance after void = %d, want 0", got)
-	}
-
-	// Exactly one retirement entry.
-	entries, err := h.creditSvc.ListEntries(ctx, credit.ListFilter{TenantID: h.tenantID, CustomerID: h.custID})
-	if err != nil {
-		t.Fatalf("list entries: %v", err)
-	}
-	retires := 0
-	for _, e := range entries {
-		if e.EntryType == domain.CreditAdjustment && e.AmountCents < 0 {
-			retires++
-		}
-	}
-	if retires != 1 {
-		t.Errorf("retirement entries = %d, want exactly 1", retires)
-	}
-}
-
 // TestUpdateStatusWithReversalPrior_CAS_RejectsPaidToVoid pins ADR-078 D5 at
 // the STORE level: the void flip carries an in-SQL allowed-source predicate,
 // so a pay-vs-void race (service guard read a stale pre-paid snapshot) cannot
-// flip a PAID invoice to voided — which would retire credits the customer just
-// paid for.
+// flip a PAID top-up to voided after its payment granted the credit.
 func TestUpdateStatusWithReversalPrior_CAS_RejectsPaidToVoid(t *testing.T) {
 	h, ctx := newCommitHarness(t, "CAS Paid To Void")
 
-	inv := h.createCommitInvoice(t, ctx, 10000, 10000)
-	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
-		t.Fatalf("finalize: %v", err)
-	}
+	inv := h.createTopup(t, ctx, "USD", 10000, 10000)
 	if _, err := h.invStore.MarkPaid(ctx, h.tenantID, inv.ID, "pi_cas_test", time.Now()); err != nil {
 		t.Fatalf("mark paid: %v", err)
 	}
@@ -379,41 +200,5 @@ func TestUpdateStatusWithReversalPrior_CAS_RejectsPaidToVoid(t *testing.T) {
 	}
 	if got := h.balance(t, ctx); got != 10000 {
 		t.Errorf("balance = %d, want 10000 (paid commit's credits untouched)", got)
-	}
-}
-
-// TestCreditNote_BlockedOnCommitInvoice pins ADR-078 D4: credit notes are
-// rejected on invoices carrying a commit line — pre-pay AND post-pay — with a
-// typed operator error (the CN paths have no grant-unwind leg in phase 1;
-// silence would ship a doubling machine).
-func TestCreditNote_BlockedOnCommitInvoice(t *testing.T) {
-	h, ctx := newCommitHarness(t, "CN Blocked On Commit")
-
-	inv := h.createCommitInvoice(t, ctx, 10000, 10000)
-	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
-		t.Fatalf("finalize: %v", err)
-	}
-
-	cnSvc := creditnote.NewService(creditnote.NewPostgresStore(h.db), h.invStore, nil, nil)
-
-	// Pre-payment (finalized).
-	_, err := cnSvc.Create(ctx, h.tenantID, creditnote.CreateInput{
-		InvoiceID: inv.ID, Reason: "duplicate",
-		Lines: []creditnote.CreditLineInput{{Description: "concession", Quantity: 1, UnitAmountCents: 1000}},
-	})
-	if err == nil || !strings.Contains(err.Error(), "prepaid commit") {
-		t.Fatalf("CN on finalized commit invoice: err = %v, want the commit block error", err)
-	}
-
-	// Post-payment (paid).
-	if _, err := h.invStore.MarkPaid(ctx, h.tenantID, inv.ID, "pi_cn_block", time.Now()); err != nil {
-		t.Fatalf("mark paid: %v", err)
-	}
-	_, err = cnSvc.Create(ctx, h.tenantID, creditnote.CreateInput{
-		InvoiceID: inv.ID, Reason: "refund",
-		Lines: []creditnote.CreditLineInput{{Description: "refund", Quantity: 1, UnitAmountCents: 10000}},
-	})
-	if err == nil || !strings.Contains(err.Error(), "prepaid commit") {
-		t.Fatalf("CN on paid commit invoice: err = %v, want the commit block error", err)
 	}
 }
