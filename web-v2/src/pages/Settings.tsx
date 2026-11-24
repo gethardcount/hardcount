@@ -59,7 +59,7 @@ import { Callout } from '@/components/Callout'
 import { UnsavedChangesGuard } from '@/components/UnsavedChangesGuard'
 import { stripeVerifyNotice, STRIPE_VERIFY_TOAST_BODY } from '@/lib/stripeVerify'
 import { CONTENT_BAND } from '@/lib/contentBand'
-import { COMPANY_EMAIL_HINT, CREDIT_LOW_THRESHOLD_HINT, sharedSettingsNotice, invoiceNumberPreview } from '@/lib/settingsCopy'
+import { COMPANY_EMAIL_HINT, CREDIT_LOW_THRESHOLD_HINT, TOPUP_VALIDITY_HINT, sharedSettingsNotice, invoiceNumberPreview } from '@/lib/settingsCopy'
 import { API_ORIGIN } from '@/lib/apiOrigin'
 import { isLocalAddress, stripeListenCommand, stripeWebhookUrl } from '@/lib/stripeWebhookUrl'
 
@@ -110,6 +110,9 @@ const settingsSchema = z.object({
     .regex(/^\d*(\.\d{1,2})?$/, 'Dollar amount like 50 or 50.00')
     .refine(v => (dollarsToWholeCents(v) ?? 0) > 0, 'Enter an amount above 0, or leave it blank to turn alerts off')
     .or(z.literal('')),
+  // Whole days; '' = bought credit never expires. The range (1 to 3650) is
+  // the server's to refuse, with its own sentence at the field.
+  topup_credit_valid_days: z.string().regex(/^\s*-?\d*\s*$/, 'Enter a whole number of days, or leave it blank'),
 })
 
 type SettingsFormData = z.infer<typeof settingsSchema>
@@ -191,6 +194,7 @@ export default function SettingsPage() {
       default_product_tax_code: '',
       default_currency: '', timezone: '',
       credit_balance_low_threshold: '',
+      topup_credit_valid_days: '',
     },
   })
   const { register, handleSubmit, watch, reset, setValue, formState: { errors: formErrors, isDirty } } = formMethods
@@ -227,6 +231,7 @@ export default function SettingsPage() {
         credit_balance_low_threshold: s.credit_balance_low_threshold_cents != null
           ? (s.credit_balance_low_threshold_cents / 100).toString()
           : '',
+        topup_credit_valid_days: s.topup_credit_valid_days != null ? String(s.topup_credit_valid_days) : '',
       }
       reset(f)
       setTaxRateText(null)
@@ -269,7 +274,7 @@ export default function SettingsPage() {
       // loaded (its default values). The server keeps every field the body
       // leaves out, so this save cannot put back an older value of a field
       // someone else saved since this page loaded.
-      const { credit_balance_low_threshold, ...rest } = changedSettings(formMethods.formState.defaultValues, data)
+      const { credit_balance_low_threshold, topup_credit_valid_days, ...rest } = changedSettings(formMethods.formState.defaultValues, data)
       const updated = await updateTenantSettings({
         ...rest,
         // Dollar string -> cents (null clears the threshold: alerts off).
@@ -279,6 +284,10 @@ export default function SettingsPage() {
           credit_balance_low_threshold_cents: credit_balance_low_threshold === ''
             ? null
             : dollarsToWholeCents(credit_balance_low_threshold),
+        }),
+        // Days string -> number (null: bought credit never expires).
+        ...(topup_credit_valid_days !== undefined && {
+          topup_credit_valid_days: topup_credit_valid_days.trim() === '' ? null : Number(topup_credit_valid_days.trim()),
         }),
       })
       const f = {
@@ -302,6 +311,7 @@ export default function SettingsPage() {
         credit_balance_low_threshold: updated.credit_balance_low_threshold_cents != null
           ? (updated.credit_balance_low_threshold_cents / 100).toString()
           : '',
+        topup_credit_valid_days: updated.topup_credit_valid_days != null ? String(updated.topup_credit_valid_days) : '',
       }
       reset(f)
       setTaxRateText(null)
@@ -328,6 +338,7 @@ export default function SettingsPage() {
           'default_product_tax_code', 'default_currency', 'timezone',
         ].map(f => [f, f])),
         credit_balance_low_threshold_cents: 'credit_balance_low_threshold',
+        topup_credit_valid_days: 'topup_credit_valid_days',
       }
       applyApiError(formMethods, err, fields, { toastTitle: 'Failed to save settings' })
       // applyApiError marks a field the server named; if that field is on
@@ -687,6 +698,18 @@ export default function SettingsPage() {
                     {formErrors.credit_balance_low_threshold
                       ? <p className="text-xs text-destructive mt-1">{formErrors.credit_balance_low_threshold.message}</p>
                       : <p className="text-xs text-muted-foreground mt-1.5">{CREDIT_LOW_THRESHOLD_HINT}</p>}
+                  </div>
+                  <div>
+                    <Label htmlFor="settings-topup-credit-valid-days">Bought credit lasts (days)</Label>
+                    <div className="mt-1 max-w-[200px]">
+                      <Input id="settings-topup-credit-valid-days" inputMode="numeric"
+                        {...register('topup_credit_valid_days')}
+                        className={cn(formErrors.topup_credit_valid_days && 'border-destructive')}
+                        placeholder="Never expires" />
+                    </div>
+                    {formErrors.topup_credit_valid_days
+                      ? <p className="text-xs text-destructive mt-1">{formErrors.topup_credit_valid_days.message}</p>
+                      : <p className="text-xs text-muted-foreground mt-1.5">{TOPUP_VALIDITY_HINT}</p>}
                   </div>
                   <div className="md:col-span-2">
                     <Label htmlFor="settings-invoice-footer">Invoice footer</Label>

@@ -14,6 +14,7 @@ import { amountInputError, dollarsToWholeCents } from '@/lib/priceInput'
 import { CURRENCIES as GEO_CURRENCIES } from '@/lib/geo'
 import { useCustomerCurrency } from '@/hooks/useCustomerCurrency'
 import { CustomerCombobox } from '@/components/CustomerCombobox'
+import { SellCreditDialog } from '@/components/SellCreditDialog'
 import { creditExpiryLabel, startOfNextDayInTZ } from '@/lib/dates'
 import type { Customer, CreditBalance } from '@/lib/api'
 import { applyApiError } from '@/lib/formErrors'
@@ -159,6 +160,7 @@ export default function CreditsPage() {
   // Modals
   const [showGrant, setShowGrant] = useState(false)
   const [showDeduct, setShowDeduct] = useState(false)
+  const [showSell, setShowSell] = useState(false)
   const [modalCustomerId, setModalCustomerId] = useState('')
 
   const [urlState, setUrlState] = useUrlState({
@@ -312,8 +314,11 @@ export default function CreditsPage() {
             <Button variant="outline" size="sm" onClick={() => { setModalCustomerId(selectedCustomerId); setShowDeduct(true) }}>
               <Minus size={16} className="mr-2" /> Deduct
             </Button>
-            <Button size="sm" onClick={() => { setModalCustomerId(selectedCustomerId); setShowGrant(true) }}>
+            <Button variant="outline" size="sm" onClick={() => { setModalCustomerId(selectedCustomerId); setShowGrant(true) }}>
               <Plus size={16} className="mr-2" /> Grant
+            </Button>
+            <Button size="sm" onClick={() => { setModalCustomerId(selectedCustomerId); setShowSell(true) }}>
+              <Coins size={16} className="mr-2" /> Sell credit
             </Button>
           </div>
         </div>
@@ -380,7 +385,7 @@ export default function CreditsPage() {
             ) : filteredLedger.length === 0 ? (
               <div className="px-6 py-12 text-center">
                 <p className="text-sm font-medium text-foreground">No transactions{entryTypeFilter !== 'All' ? ` of type "${entryTypeFilter}"` : ''}</p>
-                <p className="text-sm text-muted-foreground mt-1">Grant credits to get started</p>
+                <p className="text-sm text-muted-foreground mt-1">Sell or grant credit to get started</p>
               </div>
             ) : (
               <>
@@ -509,6 +514,9 @@ export default function CreditsPage() {
             onOpenChange={(open) => { if (!open) setShowDeduct(false) }}
             onDone={() => { setShowDeduct(false); loadLedger(selectedCustomerId); loadData(); toast.success('Credits deducted') }} />
         )}
+        {showSell && (
+          <SellCreditDialog customerId={modalCustomerId} open={showSell} onOpenChange={setShowSell} />
+        )}
       </>
     )
   }
@@ -534,9 +542,14 @@ export default function CreditsPage() {
           </p>
         </div>
         {customersWithCredits.size > 0 && (
-          <Button size="sm" onClick={() => { setModalCustomerId(''); setShowGrant(true) }}>
-            <Plus size={16} className="mr-2" /> Grant credits
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={() => { setModalCustomerId(''); setShowGrant(true) }}>
+              <Plus size={16} className="mr-2" /> Grant credits
+            </Button>
+            <Button size="sm" onClick={() => { setModalCustomerId(''); setShowSell(true) }}>
+              <Coins size={16} className="mr-2" /> Sell credit
+            </Button>
+          </div>
         )}
       </div>
 
@@ -551,8 +564,13 @@ export default function CreditsPage() {
             <EmptyState
               icon={Coins}
               title="No credit activity"
-              description="Give a customer credit, for example a prepaid top-up or a goodwill credit."
+              description="Sell a customer credit they pay for up front, or grant credit with no payment, such as goodwill."
               action={{
+                label: 'Sell credit',
+                icon: Coins,
+                onClick: () => { setModalCustomerId(''); setShowSell(true) },
+              }}
+              secondaryAction={{
                 label: 'Grant credits',
                 icon: Plus,
                 onClick: () => { setModalCustomerId(''); setShowGrant(true) },
@@ -611,6 +629,9 @@ export default function CreditsPage() {
           open={showGrant}
           onOpenChange={(open) => { if (!open) setShowGrant(false) }}
           onDone={() => { setShowGrant(false); loadData(); toast.success('Credits granted') }} />
+      )}
+      {showSell && (
+        <SellCreditDialog customerId={modalCustomerId} open={showSell} onOpenChange={setShowSell} />
       )}
     </>
   )
@@ -778,6 +799,11 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
           <DialogHeader>
             <DialogTitle>{isDeduct ? 'Deduct credits' : 'Grant credits'}</DialogTitle>
           </DialogHeader>
+          {!isDeduct && (
+            <p className="text-sm text-muted-foreground">
+              Credit with no payment: goodwill, a balance brought over, or a correction. To charge for credit, use Sell credit.
+            </p>
+          )}
           <Form {...form}>
             <form onSubmit={onFormSubmit} noValidate className="space-y-4">
               {!customerId && (
@@ -920,8 +946,8 @@ export function CreditDialog({ mode, customerId, customerName, customers, curren
                       <div className="space-y-1 leading-none">
                         <FormLabel className="font-normal">Promotional credits</FormLabel>
                         <FormDescription>
-                          Free / marketing credits. They are used up before any purchased or
-                          refunded credits. Leave off for paid-for or goodwill balances.
+                          Free marketing credit. It is used up before any other credit. Leave
+                          off for goodwill, a balance brought over, or a correction.
                         </FormDescription>
                       </div>
                     </FormItem>

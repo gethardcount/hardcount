@@ -153,9 +153,10 @@ type EmailSender interface {
 // Without this, operators have no signal that the customer was
 // notified — the no-PM finalize email goes out asynchronously and
 // the only trace is the email_outbox row. Satisfied by
-// email.OutboxStore.ListByInvoice.
+// email.OutboxStore.ListByInvoice. An email names the invoice by its number,
+// or by its id when it has none (an unpaid top-up's offer).
 type EmailEventLister interface {
-	ListByInvoice(ctx context.Context, tenantID, invoiceNumber string) ([]EmailEventRow, error)
+	ListByInvoice(ctx context.Context, tenantID, invoiceID, invoiceNumber string) ([]EmailEventRow, error)
 }
 
 // EmailEventRow is the timeline-friendly view of an email_outbox row.
@@ -1702,8 +1703,9 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Draft invoices have no payment activity
-	if inv.Status == domain.InvoiceDraft {
+	// A draft has no activity yet, except an unpaid top-up: its link is sent
+	// and its card charged before its payment issues it.
+	if inv.Status == domain.InvoiceDraft && !inv.UnpaidTopup() {
 		respond.JSON(w, r, http.StatusOK, map[string]any{"events": []TimelineEvent{}, "degraded": []string{}, "truncated": false})
 		return
 	}
@@ -1781,7 +1783,7 @@ func (h *Handler) paymentTimeline(w http.ResponseWriter, r *http.Request) {
 	reminderByAttempt := map[int]EmailEventRow{}
 	var escalationEmail *EmailEventRow
 	if h.emailEvents != nil {
-		if list, err := h.emailEvents.ListByInvoice(ctx, tenantID, inv.InvoiceNumber); err != nil {
+		if list, err := h.emailEvents.ListByInvoice(ctx, tenantID, inv.ID, inv.InvoiceNumber); err != nil {
 			degrade("emails", err)
 		} else {
 			emails, reminderByAttempt, escalationEmail = recoveryEmails(list)
@@ -2226,6 +2228,10 @@ func (h *Handler) downloadPDF(w http.ResponseWriter, r *http.Request) {
 		respond.InternalError(w, r)
 		return
 	}
+	if err := DocumentRefusal(inv); err != nil {
+		respond.FromError(w, r, err, "invoice")
+		return
+	}
 
 	// One shared context builder across emailed/downloaded/hosted PDFs.
 	bt, ci, cnInfos := BuildPDFContext(r.Context(), h.customers, h.settings, h.pdfCreditNotes, tenantID, inv)
@@ -2237,16 +2243,18 @@ func (h *Handler) downloadPDF(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/pdf")
-	w.Header().Set("Content-Disposition", "inline; filename=\""+PDFFileName(inv)+".pdf\"")
+	w.Header().Set("Content-Disposition", "inline; filename=\""+inv.InvoiceNumber+".pdf\"")
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(pdfBytes)
 }
 
-// PDFFileName is the PDF's file name, without the extension: the invoice
-// number, or "prepaid-credit" for a top-up not yet numbered.
-func PDFFileName(inv domain.Invoice) string {
-	if inv.InvoiceNumber == "" {
-		return "prepaid-credit"
+// DocumentRefusal is why the invoice has no PDF, or nil. A top-up its payment
+// never issued, an unpaid one or one withdrawn, has no number and is not a
+// bill: its document is the invoice its payment issues. Both PDF routes, the
+// operator's and the hosted page's, answer with it.
+func DocumentRefusal(inv domain.Invoice) error {
+	if inv.BillingReason == domain.BillingReasonTopup && (inv.Status == domain.InvoiceDraft || inv.Status == domain.InvoiceVoided) {
+		return errs.InvalidState("A top-up has no document until it is paid.")
 	}
-	return inv.InvoiceNumber
+	return nil
 }

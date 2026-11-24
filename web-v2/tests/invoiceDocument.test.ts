@@ -2,7 +2,7 @@
 // (it used to show "HARDCOUNT" / "Your Company" and "Issued Oct 16" on a draft).
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { issueDates, sellerBlock, sellerMissing } from '../src/lib/invoiceDocument.ts'
+import { hasDocument, issueDates, sellerBlock, sellerMissing, showsActivity } from '../src/lib/invoiceDocument.ts'
 
 const fmt = (iso: string) => iso.slice(0, 10)
 
@@ -47,4 +47,26 @@ test('a cycle draft keeps the due date it was built with', () => {
 test('an open invoice shows its issue and due dates', () => {
   const d = issueDates({ status: 'finalized', issued_at: '2026-10-16T00:00:00Z', due_at: '2026-11-15T00:00:00Z' }, fmt)
   assert.deepEqual(d, { issued: '2026-10-16', due: '2026-11-15' })
+})
+
+test('a top-up has no due date, is issued by its payment, and one withdrawn was never issued', () => {
+  assert.deepEqual(issueDates({ status: 'draft', billing_reason: 'topup', net_payment_term_days: 30 }, fmt),
+    { issued: 'Issued when paid', due: '—', dueHint: 'No due date' })
+  assert.deepEqual(issueDates({ status: 'voided', billing_reason: 'topup', created_at: '2026-10-16T00:00:00Z' }, fmt),
+    { issued: 'Never issued', due: '—' })
+  // Paid, it is an issued invoice.
+  assert.deepEqual(issueDates({ status: 'paid', billing_reason: 'topup', issued_at: '2026-10-16T00:00:00Z' }, fmt),
+    { issued: '2026-10-16', due: '—' })
+})
+
+// The server refuses the PDF of a top-up not issued, and its timeline answers
+// for an unpaid one: the page offers the PDF and shows Activity by the same rules.
+test('a top-up has a PDF only once paid, and Activity while unpaid', () => {
+  const topup = (status: string) => ({ status, billing_reason: 'topup' })
+  assert.deepEqual(['draft', 'voided', 'paid'].map(st => hasDocument(topup(st))), [false, false, true])
+  assert.equal(hasDocument({ status: 'draft', billing_reason: 'manual' }), true)
+  assert.equal(hasDocument({ status: 'voided', billing_reason: 'manual' }), true)
+  assert.equal(showsActivity(topup('draft')), true)
+  assert.equal(showsActivity({ status: 'draft', billing_reason: 'manual' }), false)
+  assert.equal(showsActivity({ status: 'finalized', billing_reason: 'manual' }), true)
 })

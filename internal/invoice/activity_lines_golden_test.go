@@ -344,6 +344,9 @@ func buildGoldenCases(t *testing.T, w writerTokens) []goldenCase {
 	// I-2 to I-6.
 	add("finalized/by API key", finalizedLine(inv, key))
 	add("voided/by person", voidedLine(inv, person))
+	withdrawn := inv
+	withdrawn.BillingReason, withdrawn.InvoiceNumber, withdrawn.SubscriptionID = domain.BillingReasonTopup, "", ""
+	add("voided/top-up withdrawn by person", voidedLine(withdrawn, person))
 	due := int64(4900)
 	add("uncollectible/by payment recovery", uncollectibleLine(inv, &due, true, auto))
 	add("uncollectible/by person", uncollectibleLine(inv, &due, false, person))
@@ -462,6 +465,12 @@ func buildGoldenCases(t *testing.T, w writerTokens) []goldenCase {
 		}
 		l, _ := emailLine(EmailEventRow{EmailType: "payment_failed", Status: "skipped", SkipReason: r, To: "billing@acme.test"}, nil)
 		add("email/skipped because/"+name, l)
+	}
+	// A top-up's link is dropped once the top-up is paid or withdrawn, and
+	// says so in a top-up's words.
+	for _, r := range []string{"paid", "voided"} {
+		l, _ := emailLine(EmailEventRow{EmailType: "topup_offer", Status: "skipped", SkipReason: r, To: "billing@acme.test"}, nil)
+		add("email/top-up link skipped because/"+r, l)
 	}
 
 	// I-14 to I-17: every dunning event type (writer or not), every start
@@ -630,7 +639,8 @@ func TestActivityLines_NoFallback(t *testing.T) {
 		}
 	}
 	for _, br := range w.billingReasons {
-		if br == string(domain.BillingReasonManual) {
+		// A manual invoice's actor says why it exists, and a top-up's title.
+		if br == string(domain.BillingReasonManual) || br == string(domain.BillingReasonTopup) {
 			continue
 		}
 		if whyInvoiceExists(domain.Invoice{BillingReason: domain.InvoiceBillingReason(br)}) == nil {

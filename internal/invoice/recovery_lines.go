@@ -187,7 +187,7 @@ func (h *Handler) RecoveryRunLines(ctx context.Context, tenantID string, run dom
 	reminders := map[int]EmailEventRow{}
 	var escalation *EmailEventRow
 	if h.emailEvents != nil {
-		if list, err := h.emailEvents.ListByInvoice(ctx, tenantID, inv.InvoiceNumber); err != nil {
+		if list, err := h.emailEvents.ListByInvoice(ctx, tenantID, inv.ID, inv.InvoiceNumber); err != nil {
 			degrade("emails", err)
 		} else {
 			_, reminders, escalation = recoveryEmails(list)

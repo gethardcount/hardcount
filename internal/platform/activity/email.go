@@ -19,6 +19,7 @@ var emailNames = map[string]string{
 	"credit_note":           "Credit note email",
 	"dunning_warning":       "Payment reminder email",
 	"dunning_escalation":    "Final notice",
+	"topup_offer":           "Top-up link",
 }
 
 // EmailName returns the name of an email type, and false for a type no
@@ -58,6 +59,13 @@ var skipReasons = map[string]string{
 	"gone": "The invoice no longer exists",
 }
 
+// topupSkipReasons says why a top-up's link was not sent, in a top-up's
+// words: an unpaid top-up is withdrawn by voiding it.
+var topupSkipReasons = map[string]string{
+	"paid":   "The top-up was already paid",
+	"voided": "The top-up was already withdrawn",
+}
+
 // skippedBeforeTheReason is the reason for a row skipped before the outbox
 // recorded which state the invoice reached. All such a row can say is that
 // the invoice was in a final state.
@@ -68,6 +76,15 @@ const skippedBeforeTheReason = "The invoice was already closed"
 func SkipReasonWords(reason string) (string, bool) {
 	w, ok := skipReasons[reason]
 	return w, ok
+}
+
+// skipReasonFor is SkipReasonWords for one email type: a top-up's link names
+// the top-up.
+func skipReasonFor(emailType, reason string) (string, bool) {
+	if w, ok := topupSkipReasons[reason]; ok && emailType == "topup_offer" {
+		return w, true
+	}
+	return SkipReasonWords(reason)
 }
 
 // Email is one email_outbox row, as its activity line needs it.
@@ -116,7 +133,7 @@ func Outcome(e Email) EmailOutcome {
 	case "skipped":
 		// The dispatcher skips an action-required email whose invoice reached
 		// a final state while the row sat queued.
-		reason, ok := SkipReasonWords(e.SkipReason)
+		reason, ok := skipReasonFor(e.Type, e.SkipReason)
 		if !ok {
 			reason = skippedBeforeTheReason
 		}

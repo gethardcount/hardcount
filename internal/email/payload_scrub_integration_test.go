@@ -119,7 +119,7 @@ func TestProcessBatch_TerminalMarksScrubPayload(t *testing.T) {
 	}
 
 	// The readers of sent rows still work on a scrubbed payload.
-	rows, err := store.ListByInvoice(ctx, tenantID, "HC-000042")
+	rows, err := store.ListByInvoice(ctx, tenantID, "", "HC-000042")
 	if err != nil {
 		t.Fatalf("list by invoice: %v", err)
 	}

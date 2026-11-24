@@ -64,3 +64,9 @@ test('with nothing loaded, every field is sent', () => {
   const edited = { company_name: 'Acme', tax_rate: 8 }
   assert.deepEqual(changedSettings(undefined, edited), edited)
 })
+
+test("a refused validity for bought credit opens the Invoicing tab with the server's sentence", () => {
+  const f = firstInvalidSettingsField({ topup_credit_valid_days: { message: 'must be from 1 to 3650 days when set (send null for credit that never expires)' } })
+  assert.equal(f?.tab, 'invoicing')
+  assert.equal(f?.label, 'Bought credit lasts')
+})
