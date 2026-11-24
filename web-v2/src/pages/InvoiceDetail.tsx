@@ -660,6 +660,9 @@ export default function InvoiceDetailPage() {
   const showCopyLink = !!invoice.public_token && sendable
   // Voiding an unpaid top-up withdraws the offer: same request, its own words.
   const withdrawTopup = invoice.status === 'draft' && invoice.billing_reason === 'topup'
+  // While its charge is being confirmed the server refuses every action on
+  // a top-up, Withdraw included.
+  const topupChargeInFlight = withdrawTopup && invoicePaymentInFlight(invoice) !== null
 
   return (
     <>
@@ -682,9 +685,11 @@ export default function InvoiceDetailPage() {
               points at Finalize as the next action. */}
           {invoice.status === 'draft' && (
             <p className="text-xs text-muted-foreground mt-1">
-              {withdrawTopup
-                ? 'Top-up — issued when it is paid.'
-                : 'Draft invoice — finalize to issue and begin collection.'}
+              {topupChargeInFlight
+                ? "Top-up — Hardcount is checking its charge with Stripe. Nothing else can be done to it until Stripe answers."
+                : withdrawTopup
+                  ? 'Top-up — issued when it is paid.'
+                  : 'Draft invoice — finalize to issue and begin collection.'}
             </p>
           )}
         </div>
