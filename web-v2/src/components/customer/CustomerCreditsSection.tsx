@@ -14,11 +14,13 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { CreditDialog } from '@/pages/Credits'
+import { SellCreditDialog } from '@/components/SellCreditDialog'
 
 // CustomerCreditsSection is the customer page's credit picture: the balance
 // in each currency with where that credit went (granted, used, expired,
 // canceled, deducted); every grant, including the finished ones behind a
-// toggle; the latest ledger entries; and Grant credits.
+// toggle; the latest ledger entries; Sell credit (a top-up the customer
+// pays) and Grant credits (credit with no payment).
 // A grant that was fully applied to an invoice used to leave no trace here.
 // Every amount is shown in its own currency (ADR-129); `currency` is only
 // the customer's billing currency, the default of the grant dialog.
@@ -34,6 +36,7 @@ export function CustomerCreditsSection({ customer, currency, readOnly }: {
   const now = useNowFor(customer)
   const [showFinished, setShowFinished] = useState(false)
   const [grantOpen, setGrantOpen] = useState(false)
+  const [sellOpen, setSellOpen] = useState(false)
 
   // Same key as the page's balance stat, so one request serves both. No zero
   // fallback: a balance that failed to load shows a dash with Retry.
@@ -62,14 +65,12 @@ export function CustomerCreditsSection({ customer, currency, readOnly }: {
       title="Credits"
       description="Prepaid balance applied to this customer's invoices before payment is collected."
       actions={
-        <>
-          <Button variant="ghost" size="sm" render={<Link to={`/credits?customer=${customerId}`} />}>
-            Full ledger
-          </Button>
-          {!readOnly && (
+        !readOnly && (
+          <>
+            <Button size="sm" onClick={() => setSellOpen(true)}>Sell credit</Button>
             <Button variant="outline" size="sm" onClick={() => setGrantOpen(true)}>Grant credits</Button>
-          )}
-        </>
+          </>
+        )
       }
     >
       <div className="space-y-5">
@@ -99,7 +100,7 @@ export function CustomerCreditsSection({ customer, currency, readOnly }: {
                       // Kind split: money-backed commit must not read as one
                       // number with free promotional credit.
                       <p className="mt-0.5 text-xs text-muted-foreground tabular-nums">
-                        {r.commit_remaining_cents > 0 && <>Commit {formatCents(r.commit_remaining_cents, b.currency)}</>}
+                        {r.commit_remaining_cents > 0 && <>Bought {formatCents(r.commit_remaining_cents, b.currency)}</>}
                         {r.commit_remaining_cents > 0 && r.promotional_remaining_cents > 0 && ' · '}
                         {r.promotional_remaining_cents > 0 && <>Promotional {formatCents(r.promotional_remaining_cents, b.currency)}</>}
                       </p>
@@ -116,7 +117,7 @@ export function CustomerCreditsSection({ customer, currency, readOnly }: {
             <p className="mb-2 text-xs font-medium text-muted-foreground">Grants</p>
             {shown.some(g => g.grant_kind === 'commit' || g.grant_kind === 'promotional') && (
               <p className="mb-2 text-xs text-muted-foreground">
-                Commit credit was bought on an invoice. Promotional credit is free and is used up first.
+                Bought credit was paid for with a top-up. Promotional credit is free and is used up first.
               </p>
             )}
             {shown.length > 0 && (
@@ -139,7 +140,7 @@ export function CustomerCreditsSection({ customer, currency, readOnly }: {
                           <TableCell className="max-w-[16rem]">
                             <div className="flex items-center gap-2 min-w-0">
                               <span className="truncate text-sm" title={g.description}>{g.description || 'Credit grant'}</span>
-                              {g.grant_kind === 'commit' && <Badge variant="info">Commit</Badge>}
+                              {g.grant_kind === 'commit' && <Badge variant="info">Bought</Badge>}
                               {g.grant_kind === 'promotional' && <Badge variant="secondary">Promotional</Badge>}
                               {state === 'used_up' && <Badge variant="secondary">Used up</Badge>}
                               {state === 'expired' && <Badge variant="warning">Expired</Badge>}
@@ -179,7 +180,10 @@ export function CustomerCreditsSection({ customer, currency, readOnly }: {
 
         {(ledger.data?.data.length ?? 0) > 0 && (
           <div>
-            <p className="mb-2 text-xs font-medium text-muted-foreground">Latest entries</p>
+            <div className="mb-2 flex items-baseline justify-between gap-3">
+              <p className="text-xs font-medium text-muted-foreground">Latest entries</p>
+              <Link to={`/credits?customer=${customerId}`} className="text-xs text-primary underline-offset-2 hover:underline">Full ledger</Link>
+            </div>
             <ul className="divide-y divide-border rounded-md border border-border">
               {ledger.data!.data.map(e => (
                 <li key={e.id} className="flex items-center justify-between gap-3 px-3 py-2 text-sm">
@@ -223,6 +227,7 @@ export function CustomerCreditsSection({ customer, currency, readOnly }: {
           }}
         />
       )}
+      {sellOpen && <SellCreditDialog customerId={customerId} open={sellOpen} onOpenChange={setSellOpen} />}
     </Section>
   )
 }

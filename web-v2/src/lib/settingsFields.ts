@@ -31,6 +31,7 @@ export const SETTINGS_FIELDS: ReadonlyArray<{ field: string; tab: SettingsFormTa
   { field: 'credit_note_prefix', tab: 'invoicing', label: 'Credit note prefix' },
   { field: 'net_payment_terms', tab: 'invoicing', label: 'Payment terms' },
   { field: 'credit_balance_low_threshold', tab: 'invoicing', label: 'Credit low-balance alert' },
+  { field: 'topup_credit_valid_days', tab: 'invoicing', label: 'Bought credit lasts' },
   { field: 'invoice_footer', tab: 'invoicing', label: 'Invoice footer' },
   { field: 'tax_id', tab: 'tax', label: 'Tax ID' },
   { field: 'tax_provider', tab: 'tax', label: 'Tax provider' },

@@ -46,8 +46,9 @@ const (
 	// email_outbox.email_type, so appending a type needs no migration.
 	TypeCreditNote = "credit_note"
 	// TypeTopupOffer is the link to buy prepaid credit on an unpaid top-up.
-	// It is not action-required: the staleness gate looks invoices up by
-	// number, and a top-up has none until it is paid.
+	// Its payload names the top-up by invoice_id, because a top-up has no
+	// number until it is paid: the staleness gate and the invoice's and
+	// customer's email lists find it by that id.
 	TypeTopupOffer = "topup_offer"
 )
 

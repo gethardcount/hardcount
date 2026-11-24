@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/activity"
@@ -63,15 +64,17 @@ func whyInvoiceExists(inv domain.Invoice) activity.Segment {
 		return activity.Text("Spend threshold crossed")
 	case domain.BillingReasonSubscriptionCancel:
 		return activity.Text("Final invoice after cancellation")
-	case domain.BillingReasonTopup:
-		return activity.Text("Prepaid credit")
 	}
 	return nil
 }
 
-// createdLine is I-1. sub is the subscription link part, or nil.
+// createdLine is I-1. sub is the subscription link part, or nil. A top-up is
+// named as one: it is not an invoice until its payment issues it.
 func createdLine(inv domain.Invoice, actor *activity.Actor, sub *activity.Part) activity.Line {
 	l := activity.Line{Kind: "invoice.created", Title: "Invoice created", Tone: activity.ToneNeutral, Actor: actor}
+	if inv.BillingReason == domain.BillingReasonTopup {
+		l.Title = "Top-up created"
+	}
 	if why := whyInvoiceExists(inv); why != nil {
 		l.Detail = append(l.Detail, why)
 	}
@@ -83,17 +86,41 @@ func createdLine(inv domain.Invoice, actor *activity.Actor, sub *activity.Part) 
 
 // finalizedLine is I-2. The amount is what the invoice asked for when it was
 // finalized: its total, before any credit applied at collection or credit
-// note issued later.
+// note issued later. A top-up is never finalized: its payment issues it.
 func finalizedLine(inv domain.Invoice, actor *activity.Actor) activity.Line {
+	title := "Invoice finalized"
+	if inv.BillingReason == domain.BillingReasonTopup {
+		title = "Invoice issued"
+	}
 	return activity.Line{
-		Kind: "invoice.finalized", Title: "Invoice finalized", Tone: activity.ToneNeutral,
+		Kind: "invoice.finalized", Title: title, Tone: activity.ToneNeutral,
 		Amount: activity.Amount(inv.TotalAmountCents, inv.Currency), Actor: actor,
 	}
 }
 
+// topupGrant is the credit a paid top-up granted.
+type topupGrant struct {
+	cents     int64
+	expiresAt *time.Time
+}
+
+// creditAddedLine is the credit a top-up's payment added to the customer's
+// balance, with its expiry when it has one.
+func creditAddedLine(cents int64, currency string, expiresAt *time.Time) activity.Line {
+	l := activity.Line{Kind: "credit.added", Title: "Credit added", Tone: activity.ToneNeutral, Amount: activity.Amount(cents, currency)}
+	if expiresAt != nil {
+		l.Detail = append(l.Detail, activity.Segment{activity.T("Expires "), activity.At(*expiresAt)})
+	}
+	return l
+}
+
 // voidedLine is I-3: voiding is a choice, not a failure, and it cancels the
-// amount still owed.
+// amount still owed. A voided top-up was withdrawn before it was paid, which
+// cancels nothing: nothing was owed on it.
 func voidedLine(inv domain.Invoice, actor *activity.Actor) activity.Line {
+	if inv.BillingReason == domain.BillingReasonTopup {
+		return activity.Line{Kind: "invoice.voided", Title: "Top-up withdrawn", Tone: activity.ToneNeutral, Actor: actor}
+	}
 	return activity.Line{
 		Kind: "invoice.voided", Title: "Invoice voided", Tone: activity.ToneNeutral,
 		Amount: activity.Amount(inv.AmountDueCents, inv.Currency), Actor: actor,

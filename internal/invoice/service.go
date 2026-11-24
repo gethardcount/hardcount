@@ -2051,6 +2051,11 @@ func (s *Service) voidEffectsTx(ctx context.Context, tx *sql.Tx, tenantID string
 			"currency":           inv.Currency,
 			"status_before":      string(prior),
 		}
+		if inv.BillingReason == domain.BillingReasonTopup {
+			// A voided top-up was withdrawn unpaid, and has no number: the
+			// audit log reads the row as withdrawing a top-up.
+			meta["billing_reason"] = string(domain.BillingReasonTopup)
+		}
 		if reversed.ReturnedCents > 0 {
 			meta["credits_reversed_cents"] = reversed.ReturnedCents
 		}

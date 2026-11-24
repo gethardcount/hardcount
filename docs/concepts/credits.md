@@ -115,8 +115,9 @@ top-up was made; unset, it never expires. The purchase is not taxed; the
 usage the credit pays for is. To withdraw a top-up nobody paid, void it: it
 granted nothing.
 
-More: [Sell prepaid credit](../ai-pricing.md#sell-prepaid-credit-a-prepaid-commit),
-with every call, and [tax on prepaid credit](../ai-pricing.md#tax-on-prepaid-credit).
+More: [Sell prepaid credit](../guides/sell-prepaid-credit.md), with every
+call and what the customer sees, and
+[tax on prepaid credit](../ai-pricing.md#tax-on-prepaid-credit).
 
 ## Worked example: $10,000 of credit, one month of usage
 

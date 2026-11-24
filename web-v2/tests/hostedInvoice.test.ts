@@ -2,7 +2,10 @@
 // repeated totals, and an honest line when online payment isn't set up.
 import { test } from 'vitest'
 import assert from 'node:assert/strict'
-import { creditNoteBackText, hostedTotalRows, loadErrorCopy, payErrorCopy, payUnavailableCopy } from '../src/lib/hostedInvoice.ts'
+import {
+  creditNoteBackText, hostedHasPdf, hostedHeading, hostedSubject, hostedTotalRows, loadErrorCopy, offerSentence, partyHeading,
+  payErrorCopy, paymentCheckCopy, payUnavailableCopy, testModeNotice, withdrawnSentence,
+} from '../src/lib/hostedInvoice.ts'
 
 const base = { status: 'finalized', subtotal_cents: 56600, discount_cents: 0, tax_amount_cents: 0, total_amount_cents: 56600, credits_applied_cents: 0, amount_paid_cents: 0 }
 
@@ -65,4 +68,44 @@ test('an after-payment credit note says where the money went', () => {
     '$20.00 refunded to your card · $5.00 added to your account credit · $4.00 settled with you directly',
   )
   assert.equal(creditNoteBackText({ number: 'CN-3', amount_cents: 500, before_payment: false, credited_cents: 500 }, money), '$5.00 added to your account credit')
+})
+
+// A top-up read as its customer reads it, in each state: what they buy, what
+// it costs and nothing about an invoice until there is one.
+test('a top-up page in each state: offer, paid (an invoice), withdrawn', () => {
+  const rows: [status: string, heading: string, party: string, pdf: boolean][] = [
+    ['draft', 'Buy prepaid credit', 'For', false],
+    ['paid', 'Invoice INV-0042', 'Bill to', true],
+    ['voided', 'Prepaid credit', 'For', false],
+  ]
+  for (const [status, heading, party, pdf] of rows) {
+    const subject = hostedSubject(status, true)
+    const number = status === 'paid' ? 'INV-0042' : ''
+    assert.equal(hostedHeading(subject, number), heading, status)
+    assert.equal(partyHeading(subject), party, status)
+    assert.equal(hostedHasPdf(subject), pdf, status)
+  }
+  assert.equal(offerSentence('$90.00', '$100.00'), 'You pay $90.00. You get $100.00 of credit, added to your account as soon as your payment goes through.')
+  assert.equal(withdrawnSentence('Acme'), 'This offer was withdrawn by Acme.')
+  assert.equal(withdrawnSentence(''), 'This offer was withdrawn by the seller.')
+  // An invoice keeps its words.
+  assert.equal(hostedSubject('voided', false), 'invoice')
+  assert.equal(hostedHeading('invoice', 'INV-7'), 'Invoice INV-7')
+})
+
+test('an unpaid top-up\u2019s notices say "offer", never "invoice"', () => {
+  const offer = hostedSubject('draft', true)
+  const lines = [
+    testModeNotice(offer),
+    payErrorCopy('not_payable', 'Acme', 409, offer),
+    payErrorCopy('online_payment_unavailable', '', 409, offer),
+    payErrorCopy('payment_in_flight', 'Acme', 409, offer),
+    payUnavailableCopy('', undefined, offer),
+    paymentCheckCopy('processing', offer).title,
+    paymentCheckCopy('unknown', offer).title,
+  ]
+  for (const line of lines) assert.doesNotMatch(line, /invoice/i, line)
+  assert.equal(testModeNotice(offer), 'Test mode — this offer is a test and no real payment will be collected.')
+  assert.equal(payUnavailableCopy('', undefined, offer), "Online payment isn't set up for this offer. Contact the sender of this offer to arrange payment.")
+  assert.equal(testModeNotice('invoice'), 'Test mode — this invoice is a test and no real payment will be collected.')
 })

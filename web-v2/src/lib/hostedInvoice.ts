@@ -57,27 +57,96 @@ export function creditNoteBackText(cn: HostedCreditNote, money: (cents: number) 
   return parts.join(' · ')
 }
 
+// HostedSubject is what the page is about, in the customer's words. A top-up
+// is an offer to buy credit until it is paid; paid, it is an invoice; and
+// one withdrawn unpaid stays an offer, with no number and nothing owed.
+export type HostedSubject = 'invoice' | 'offer' | 'withdrawn_offer'
+
+export function hostedSubject(status: string, isTopup: boolean): HostedSubject {
+  if (!isTopup || status === 'paid') return 'invoice'
+  return status === 'voided' ? 'withdrawn_offer' : 'offer'
+}
+
+// thing is the subject's noun inside a sentence: "this invoice", "this offer".
+function thing(subject: HostedSubject): string {
+  return subject === 'invoice' ? 'invoice' : 'offer'
+}
+
+// hostedHeading is the page's one heading, and its title: nothing about an
+// invoice until there is one, and no blank number.
+export function hostedHeading(subject: HostedSubject, invoiceNumber: string): string {
+  switch (subject) {
+    case 'offer': return 'Buy prepaid credit'
+    case 'withdrawn_offer': return 'Prepaid credit'
+    default: return `Invoice ${invoiceNumber}`.trim()
+  }
+}
+
+// offerSentence is what the customer buys and pays, on an unpaid top-up.
+export function offerSentence(pay: string, credit: string): string {
+  return `You pay ${pay}. You get ${credit} of credit, added to your account as soon as your payment goes through.`
+}
+
+// withdrawnSentence is the whole story of a top-up withdrawn unpaid.
+export function withdrawnSentence(seller: string): string {
+  return `This offer was withdrawn by ${seller || 'the seller'}.`
+}
+
+// testModeNotice tells the customer a test-mode page takes no real money.
+export function testModeNotice(subject: HostedSubject): string {
+  return `Test mode — this ${thing(subject)} is a test and no real payment will be collected.`
+}
+
+// partyHeading heads the customer's block: an offer bills no one.
+export function partyHeading(subject: HostedSubject): string {
+  return subject === 'invoice' ? 'Bill to' : 'For'
+}
+
+// hostedHasPdf: a top-up has no document until it is paid (the server
+// refuses its PDF too).
+export function hostedHasPdf(subject: HostedSubject): boolean {
+  return subject === 'invoice'
+}
+
+// paymentCheckCopy is what the page says in place of Pay while a payment is
+// unresolved: being confirmed (processing), or being checked with the
+// payment provider (unknown).
+export function paymentCheckCopy(state: 'processing' | 'unknown', subject: HostedSubject = 'invoice'): { title: string; body: string } {
+  if (state === 'processing') {
+    return {
+      title: `A payment for this ${thing(subject)} is being confirmed`,
+      body: "You don't need to do anything — we'll email a receipt once it completes.",
+    }
+  }
+  return {
+    title: `We're checking a recent payment for this ${thing(subject)}`,
+    body: "Payment is paused here so you can't be charged twice while we confirm it with our payment provider. If you've already been charged, nothing further is needed.",
+  }
+}
+
 // payErrorCopy maps a failed "Pay" request to what the customer reads.
 // `seller` is the company name, or "" when the tenant has not set one.
 // A 409 with any other code means the invoice changed or a payment is
 // already in flight: paying again is what the server is protecting against.
-export function payErrorCopy(code: string | undefined, seller: string, status = 0): string {
-  const who = seller || 'the sender of this invoice'
+export function payErrorCopy(code: string | undefined, seller: string, status = 0, subject: HostedSubject = 'invoice'): string {
+  const it = thing(subject)
+  const who = seller || `the sender of this ${it}`
+  const inFlight = `A payment for this ${it} is already being processed, so you can\u2019t pay twice. Refresh the page in a minute.`
   if (status === 409 && code !== 'not_payable' && code !== 'online_payment_unavailable' && code !== 'amount_below_minimum') {
-    return 'A payment on this invoice is already being processed, so you can\u2019t pay twice. Refresh the page in a minute.'
+    return inFlight
   }
   switch (code) {
     case 'online_payment_unavailable':
     case 'stripe_unavailable':
-      return `Online payment isn't available for this invoice. Contact ${who} to pay another way.`
+      return `Online payment isn't available for this ${it}. Contact ${who} to pay another way.`
     case 'not_payable':
-      return 'This invoice can no longer be paid online. Refresh the page to see its current status.'
+      return `This ${it} can no longer be paid online. Refresh the page to see its current status.`
     // Stripe refused the amount as below its minimum charge: no card can pay
     // it, so "try again" would be false.
     case 'amount_below_minimum':
       return belowMinimumCopy(who)
     case 'invalid_state':
-      return 'A payment on this invoice is already being processed, so you can’t pay twice. Refresh the page in a minute.'
+      return inFlight
     default:
       return 'We couldn’t start the payment. Nothing was charged. Please try again in a few minutes.'
   }
@@ -88,10 +157,11 @@ export function payErrorCopy(code: string | undefined, seller: string, status = 
 // minimum charge, or (any other reason) the seller has no payment provider
 // connected or the server has no address for Stripe to send the customer
 // back to. The copy names no setting: the customer can't change one.
-export function payUnavailableCopy(seller: string, reason?: string): string {
-  const who = seller || 'the sender of this invoice'
+export function payUnavailableCopy(seller: string, reason?: string, subject: HostedSubject = 'invoice'): string {
+  const it = thing(subject)
+  const who = seller || `the sender of this ${it}`
   if (reason === 'amount_below_minimum') return belowMinimumCopy(who)
-  return `Online payment isn't set up for this invoice. Contact ${who} to arrange payment.`
+  return `Online payment isn't set up for this ${it}. Contact ${who} to arrange payment.`
 }
 
 function belowMinimumCopy(who: string): string {

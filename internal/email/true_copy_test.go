@@ -120,6 +120,40 @@ func TestInvoiceEmail_WrittenOffOffersViewNotPay(t *testing.T) {
 	}
 }
 
+// A top-up's offer reads as what the customer buys, for how much, and for
+// how long: nothing about an invoice, an amount due or a due date, since
+// none exists until it is paid. Its receipt, once there is an invoice, adds
+// the credit and how long it lasts.
+func TestTopupEmails_SayWhatIsBought(t *testing.T) {
+	const hosted = "https://pay.example.com/i/tok"
+	days := 365
+	credit := domain.TopupCredit{CreditCents: 10000, ValidDays: &days}
+	subject, rawHTML, ctaURL, ctaLabel := renderTopupOfferHTML("Ada", "Acme", 9000, credit, "usd", hosted)
+	if subject != "Buy prepaid credit from Acme" || ctaURL != hosted || ctaLabel != "Buy credit" {
+		t.Errorf("offer: subject %q, CTA %q %q", subject, ctaLabel, ctaURL)
+	}
+	text := topupOfferTextBody("Ada", "Acme", 9000, credit, "usd", hosted)
+	for part, body := range map[string]string{"html": stdhtml.UnescapeString(rawHTML), "text": text} {
+		for _, want := range []string{
+			"Acme sent you a link to buy USD 100.00 of prepaid credit for USD 90.00.",
+			"The credit is added to your account as soon as your payment goes through. It is valid for 365 days after payment.",
+			"This is not a bill: you pay only if you want the credit.",
+		} {
+			if !strings.Contains(body, want) {
+				t.Errorf("offer %s part does not say %q:\n%s", part, want, body)
+			}
+		}
+		for _, never := range []string{"invoice", "amount due", "due date", "owed until"} {
+			if strings.Contains(strings.ToLower(body), never) {
+				t.Errorf("offer %s part says %q:\n%s", part, never, body)
+			}
+		}
+	}
+	if got := topupReceiptLines(&domain.TopupCredit{CreditCents: 10000}, "usd"); strings.Join(got, "|") != "Credit added: USD 100.00|It never expires." {
+		t.Errorf("receipt credit lines %q", got)
+	}
+}
+
 // The same, through the real sender and an SMTP exchange: the HTML part a
 // customer sees carries the "View invoice" button, never "View & pay".
 func TestSendInvoice_WrittenOffHTMLPartOffersViewNotPay(t *testing.T) {

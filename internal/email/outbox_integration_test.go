@@ -662,7 +662,7 @@ func TestEmailOutbox_Enqueue_StampsTheActionsInstant(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("enqueue: %v", err)
 	}
-	rows, err := store.ListByInvoice(baseCtx, tenantID, "HC-000043")
+	rows, err := store.ListByInvoice(baseCtx, tenantID, "", "HC-000043")
 	if err != nil || len(rows) != 1 {
 		t.Fatalf("list: %d rows, %v; want 1", len(rows), err)
 	}

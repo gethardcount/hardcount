@@ -30,3 +30,8 @@ export function invoiceNumberPreview(prefix: string, nextSequence: number, livem
 // of EUR credit. The field shows no currency symbol for that reason.
 export const CREDIT_LOW_THRESHOLD_HINT =
   "Hardcount tells your app (by webhook) when a customer's credit in one currency drops below this amount of that currency: 10 means $10 of USD credit and €10 of EUR credit. Leave blank to turn off. A balance that runs out always sends its own message."
+
+// A top-up copies the validity onto its line when it is made, so a change
+// reaches only top-ups made after it.
+export const TOPUP_VALIDITY_HINT =
+  'Blank means it never expires. A change applies to top-ups created from then on, since each top-up keeps the days it had when it was made.'

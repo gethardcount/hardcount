@@ -2298,7 +2298,7 @@ export const getGetHostedInvoicePdfUrl = (token: string,) => {
 /**
  * Unauthenticated, like the hosted invoice page. Returns the same PDF
  * as `GET /v1/invoices/{id}/pdf`, shown inline and named after the
- * invoice number.
+ * invoice number. A top-up has no PDF until it is paid.
  * @summary Download the hosted invoice PDF
  */
 export const getHostedInvoicePdf = async (token: string, options?: RequestInit): Promise<Blob> => {
@@ -8678,7 +8678,8 @@ export const getGetInvoicePdfUrl = (id: string,) => {
  * Returns the invoice as a PDF, shown inline and named after the
  * invoice number (`HC-000042.pdf`). An issued invoice prints the
  * customer and company details it was issued with, and every issued
- * credit note on it. A draft prints the current details.
+ * credit note on it. A draft prints the current details. A top-up has
+ * no PDF until it is paid.
  * @summary Download an invoice PDF
  */
 export const getInvoicePdf = async (id: string, options?: RequestInit): Promise<Blob> => {
@@ -9611,7 +9612,11 @@ export const getGetInvoicePaymentTimelineUrl = (id: string,) => {
  * `stripe_refund`, event_type `payment.refunded_in_stripe`, at Stripe's
  * own time). A refund recorded as a credit note shows as that note's
  * row, titled "Refunded in Stripe".
- * A draft invoice returns an empty list.
+ * A draft invoice returns an empty list, except an unpaid top-up: it
+ * returns its creation, its charge attempts and the emails sent for
+ * it, such as its link. A paid top-up's payment is followed by a
+ * `credit.added` row (source `lifecycle`): the credit it added, and
+ * when that credit expires.
  *
  * Each row carries `line`, the row with every word written by the
  * server: a title, an amount, a problem line, the meta line and who

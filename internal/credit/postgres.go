@@ -1122,6 +1122,36 @@ func (s *PostgresStore) CommitGrantExposure(
 	return drawable, consumed, nil
 }
 
+// TopupGrant returns the credit a paid top-up granted: its amount and its
+// expiry (nil: never). found is false when the invoice granted none. It is
+// a display read for the top-up's Activity, so it takes no lock. Satisfies
+// invoice.TopupGrantReader.
+func (s *PostgresStore) TopupGrant(ctx context.Context, tenantID, invoiceID string) (amountCents int64, expiresAt *time.Time, found bool, err error) {
+	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		return 0, nil, false, err
+	}
+	defer postgres.Rollback(tx)
+
+	var expires sql.NullTime
+	// At most one row: idx_credit_ledger_commit_fund_dedup.
+	err = tx.QueryRowContext(ctx, `
+		SELECT amount_cents, expires_at FROM customer_credit_ledger
+		WHERE tenant_id = $1 AND source_invoice_id = $2 AND grant_kind = 'commit'
+	`, tenantID, invoiceID).Scan(&amountCents, &expires)
+	if err == sql.ErrNoRows {
+		return 0, nil, false, nil
+	}
+	if err != nil {
+		return 0, nil, false, fmt.Errorf("read the top-up grant of invoice %s: %w", invoiceID, err)
+	}
+	if expires.Valid {
+		t := expires.Time
+		expiresAt = &t
+	}
+	return amountCents, expiresAt, true, nil
+}
+
 // retireCommitSliceTx retires exactly `slice` credits from the locked grant
 // for a credit note's relief (ADR-080), the one commit-unwind writer: a
 // CAS-guarded bump of consumed_cents and of cn_retired_cents (the relief

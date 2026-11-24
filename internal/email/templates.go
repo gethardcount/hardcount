@@ -193,12 +193,12 @@ func renderInvoiceHTML(customerName, invoiceNumber, amount string, hostedURL str
 // is owed before then, so the email shows no amount due and no due date.
 func renderTopupOfferHTML(customerName, companyName string, payCents int64, credit domain.TopupCredit, currency, hostedURL string) (subject, contentHTML, ctaURL, ctaLabel string) {
 	subject = "Buy prepaid credit from " + sellerName(companyName)
-	lead, validity := topupOfferCopy(companyName, payCents, credit, currency)
 	var b strings.Builder
 	b.WriteString(`<h1 style="margin:0 0 12px;font-size:20px;color:#111827;">Buy prepaid credit</h1>`)
 	b.WriteString(`<p style="margin:0 0 8px;color:#4b5563;">Hi ` + escape(customerName) + `,</p>`)
-	b.WriteString(`<p style="margin:0 0 8px;color:#4b5563;">` + escape(lead) + `</p>`)
-	b.WriteString(`<p style="margin:0 0 16px;color:#4b5563;">` + escape(validity) + `</p>`)
+	for _, p := range topupOfferCopy(companyName, payCents, credit, currency) {
+		b.WriteString(`<p style="margin:0 0 8px;color:#4b5563;">` + escape(p) + `</p>`)
+	}
 	if hostedURL != "" {
 		ctaURL = hostedURL
 		ctaLabel = "Buy credit"
@@ -206,18 +206,22 @@ func renderTopupOfferHTML(customerName, companyName string, payCents int64, cred
 	return subject, b.String(), ctaURL, ctaLabel
 }
 
-// topupOfferCopy is the top-up offer's body, shared by its HTML and
-// plain-text parts so the two cannot drift.
-func topupOfferCopy(companyName string, payCents int64, credit domain.TopupCredit, currency string) (lead, validity string) {
+// topupOfferCopy is the top-up offer's body, one paragraph a line, shared by
+// its HTML and plain-text parts so the two cannot drift: what the customer
+// buys and for how much, when the credit arrives and how long it lasts, and
+// that nothing is owed.
+func topupOfferCopy(companyName string, payCents int64, credit domain.TopupCredit, currency string) []string {
 	seller := sellerName(companyName)
 	if companyName == "" {
 		// The fallback starts the sentence; a company name keeps its own case.
 		seller = strings.ToUpper(seller[:1]) + seller[1:]
 	}
-	lead = seller + " sent you a link to buy " + formatAmount(credit.CreditCents, currency) +
-		" of prepaid credit for " + formatAmount(payCents, currency) +
-		". This is not a bill: nothing is owed until you pay."
-	return lead, domain.CreditValidityLine(credit.ValidDays)
+	return []string{
+		seller + " sent you a link to buy " + formatAmount(credit.CreditCents, currency) +
+			" of prepaid credit for " + formatAmount(payCents, currency) + ".",
+		"The credit is added to your account as soon as your payment goes through. " + domain.CreditValidityLine(credit.ValidDays),
+		"This is not a bill: you pay only if you want the credit.",
+	}
 }
 
 // sellerName names the seller in an email's words: the tenant's company

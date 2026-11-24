@@ -236,9 +236,9 @@ func grantAuditMetadata(out domain.CreditLedgerEntry) map[string]any {
 // args so the invoice store's consumer-side CommitFunder interface is
 // satisfied directly (zero cross-domain imports).
 func (s *Service) GrantCommitForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber, currency string, amountCents int64, expiresAt *time.Time) (domain.CreditLedgerEntry, error) {
-	desc := "Prepaid commit"
+	desc := "Top-up"
 	if invoiceNumber != "" {
-		desc = fmt.Sprintf("Prepaid commit — invoice %s", invoiceNumber)
+		desc = fmt.Sprintf("Top-up — invoice %s", invoiceNumber)
 	}
 	return s.store.AppendEntryTx(ctx, tx, tenantID, domain.CreditLedgerEntry{
 		CustomerID:      customerID,

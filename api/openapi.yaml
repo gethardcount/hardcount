@@ -6713,7 +6713,7 @@ components:
           description: Sources that could not be read, so their rows are missing.
           items:
             type: string
-            enum: [audit, credit_notes, emails, dunning, charge_attempts, disputes, stripe_refunds]
+            enum: [audit, credit_notes, emails, dunning, charge_attempts, disputes, stripe_refunds, credit]
         truncated:
           type: boolean
           description: True when the credit-note source hit its limit of 100 rows.
@@ -11822,7 +11822,7 @@ paths:
       description: |
         Unauthenticated, like the hosted invoice page. Returns the same PDF
         as `GET /v1/invoices/{id}/pdf`, shown inline and named after the
-        invoice number.
+        invoice number. A top-up has no PDF until it is paid.
       parameters:
         - name: token
           in: path
@@ -11849,6 +11849,18 @@ paths:
                   type: invalid_request_error
                   code: not_found
                   message: invoice not found
+                  request_id: req_dbjg652q3gpgqfoq5cd0
+        "409":
+          description: The invoice is a top-up not paid yet, or one withdrawn before it was paid. Its document is the invoice its payment issues.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  type: invalid_request_error
+                  code: invalid_state
+                  message: A top-up has no document until it is paid.
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "429":
           description: Too many requests from this IP address. The public hosted-invoice, payment-update and cost-dashboard routes share one limit of 60 requests a minute per IP. Wait for the seconds in `Retry-After`.
@@ -19280,7 +19292,8 @@ paths:
         Returns the invoice as a PDF, shown inline and named after the
         invoice number (`HC-000042.pdf`). An issued invoice prints the
         customer and company details it was issued with, and every issued
-        credit note on it. A draft prints the current details.
+        credit note on it. A draft prints the current details. A top-up has
+        no PDF until it is paid.
       parameters:
         - name: id
           in: path
@@ -19311,6 +19324,18 @@ paths:
                   type: invalid_request_error
                   code: not_found
                   message: invoice not found
+                  request_id: req_dbjg652q3gpgqfoq5cd0
+        "409":
+          description: The invoice is a top-up not paid yet, or one withdrawn before it was paid. Its document is the invoice its payment issues.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  type: invalid_request_error
+                  code: invalid_state
+                  message: A top-up has no document until it is paid.
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "429":
           $ref: "#/components/responses/RateLimited"
@@ -20615,7 +20640,11 @@ paths:
         `stripe_refund`, event_type `payment.refunded_in_stripe`, at Stripe's
         own time). A refund recorded as a credit note shows as that note's
         row, titled "Refunded in Stripe".
-        A draft invoice returns an empty list.
+        A draft invoice returns an empty list, except an unpaid top-up: it
+        returns its creation, its charge attempts and the emails sent for
+        it, such as its link. A paid top-up's payment is followed by a
+        `credit.added` row (source `lifecycle`): the credit it added, and
+        when that credit expires.
 
         Each row carries `line`, the row with every word written by the
         server: a title, an amount, a problem line, the meta line and who

@@ -23,4 +23,5 @@ export const InvoicePaymentTimelineDegradedItem = {
   charge_attempts: 'charge_attempts',
   disputes: 'disputes',
   stripe_refunds: 'stripe_refunds',
+  credit: 'credit',
 } as const;

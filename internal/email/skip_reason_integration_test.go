@@ -44,7 +44,7 @@ func TestDispatcher_SkippedEmailRecordsWhy(t *testing.T) {
 			}
 
 			// Read back the way the invoice's Activity card reads it.
-			rows, err := store.ListByInvoice(ctx, tenantID, "SKIP-"+state)
+			rows, err := store.ListByInvoice(ctx, tenantID, "", "SKIP-"+state)
 			if err != nil {
 				t.Fatalf("list by invoice: %v", err)
 			}
