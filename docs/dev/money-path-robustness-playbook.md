@@ -91,7 +91,7 @@ An invoice with no card was retried for auto-charge forever.
 
 A draft invoice's due date was counted in UTC, an hour off across a daylight-saving change.
 
-14. **Does every time come from the right clock?** A billing period's month or year step goes through `domain.NextBillingPeriodEnd`, and the length a proration divides by through `domain.CyclePeriod.CycleDays`, with the tenant's time zone, never the host's ([ADR-058](../adr/058-billing-date-math-tenant-timezone.md)). One piece of work reads one time: the instant its request or record binds ([code standard](code-standard.md#money-tenants-and-the-api)). A charge's result is the exception, dated when Stripe's answer arrives.
+14. **Does every time come from the right clock?** A billing period's month or year step goes through `domain.NextBillingPeriodEnd`, and the length a proration divides by through `domain.CyclePeriod.CycleDays`, with the tenant's time zone, never the host's ([ADR-058](../adr/058-billing-date-math-tenant-timezone.md)). A compare has the same clock on both sides: never the app's clock against the database's `now()`, or either against a Stripe timestamp. One piece of work reads one time: the instant its request or record binds ([code standard](code-standard.md#money-tenants-and-the-api)). A charge's result is the exception, dated when Stripe's answer arrives.
 15. **Is the money math exact?** Whole cents, no floats ([code standard](code-standard.md)), and currency codes in upper case.
 
 ### J. Stamped late

@@ -136,12 +136,12 @@ type Service struct {
 	// bills by. Who binds a subscription action's time:
 	//   - a request, the API's door (api.clockDoor), with one read of the
 	//     server's clock;
-	//   - the billing run, each subscription its own instant;
+	//   - the billing run and this service's jobs (trial expiry, pause
+	//     resume), each subscription its own instant;
 	//   - dunning's final action (a pause or a cancel), its run's time.
-	// Each entry point keeps that time. Work that arrives with no instant
-	// bound reads this clock once (clock.EnsureEffectiveNow). Without that
-	// read, two reads of the time in one action could differ, and a store's
-	// stamp could fall on another time than the action's.
+	// Each entry point keeps that time. Without one, two reads of the time in
+	// one action could differ, and a store's stamp could fall on another time
+	// than the action's.
 	clock     clock.Clock
 	settings  SettingsReader
 	customers CustomerReader
@@ -1234,7 +1234,7 @@ type checkedItemChange struct {
 
 // checkItemChange runs the checks UpdateItemTx and UpdateItem both make
 // before their write, on reads outside the change's tx. Exactly one of
-// Quantity and NewPlanID must be set. It returns ctx unchanged.
+// Quantity and NewPlanID must be set.
 //
 // The plan checks gate a scheduled change too: a pending swap onto an
 // archived plan, a meter another subscription bills, another currency or

@@ -768,9 +768,8 @@ type CreateInput struct {
 	LineItems []AddLineItemInput `json:"line_items,omitempty"`
 }
 
-// Create creates a one-off draft invoice. It binds its one instant after the
-// reads that check the body and before any write; every instant it stamps
-// comes from it.
+// Create creates a one-off draft invoice. Every instant it stamps is the one
+// its caller bound on ctx.
 func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput) (domain.Invoice, error) {
 	if input.CustomerID == "" {
 		return domain.Invoice{}, errs.Required("customer_id")
