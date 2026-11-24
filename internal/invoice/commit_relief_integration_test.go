@@ -200,6 +200,27 @@ func TestCommitRelief_Gates(t *testing.T) {
 		t.Fatalf("failed relief must leave no CN row; got %d", len(cns))
 	}
 
+	// A paid top-up that carries tax → refused: relief reverses no tax, and a
+	// top-up carries none, so a taxed one is never refunded with its tax left
+	// reported.
+	taxed := h.createTopup(t, ctx, "USD", 9000, 10000)
+	payOffline(t, h, ctx, taxed.ID)
+	tx, err := h.db.BeginTx(ctx, postgres.TxBypass, "")
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE invoices SET tax_amount_cents = 100 WHERE id = $1`, taxed.ID); err != nil {
+		t.Fatalf("set tax: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	if _, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{
+		InvoiceID: taxed.ID, RetireAll: true,
+	}); err == nil || !strings.Contains(err.Error(), "does not reverse tax") {
+		t.Fatalf("relief on a taxed top-up: err = %v, want refused for its tax", err)
+	}
+
 	// Non-commit invoice with a commit_relief request → 400.
 	plain := h.seedPayable(t, ctx, h.custID, 1000, 4)
 	if _, err := cnSvc.CreateAndIssueCommitRelief(ctx, h.tenantID, creditnote.CommitReliefInput{

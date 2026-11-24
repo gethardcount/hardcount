@@ -1168,6 +1168,12 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 	if grossPaid <= 0 {
 		return domain.CreditNote{}, errs.InvalidState("commit invoice has a zero total — nothing to relieve")
 	}
+	// The relief note's subtotal is its total: it reverses no tax. A top-up
+	// carries none, and this keeps a taxed one from being refunded in cash
+	// with its tax silently left reported.
+	if inv.TaxAmountCents != 0 {
+		return domain.CreditNote{}, errs.InvalidState("commit relief does not reverse tax, and a top-up carries none — this invoice has tax, so it cannot be relieved")
+	}
 
 	tx, err := s.store.BeginTx(ctx, tenantID)
 	if err != nil {
