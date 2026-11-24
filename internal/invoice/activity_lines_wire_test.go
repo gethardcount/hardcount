@@ -51,8 +51,12 @@ func (f *disputesFake) ListDisputesByInvoice(context.Context, string, string) ([
 	return f.disputes, nil
 }
 
-func (f *disputesFake) LostDisputesByInvoices(context.Context, string, []string) (map[string]domain.InvoiceDispute, error) {
+func (f *disputesFake) NoticeDisputesByInvoices(context.Context, string, []string) (map[string]domain.InvoiceDispute, error) {
 	return nil, nil
+}
+
+func (f *disputesFake) RecordDisputeLoss(context.Context, string, string, string) (domain.InvoiceDispute, error) {
+	return domain.InvoiceDispute{}, nil
 }
 
 // wireCase is one invoice and the side lanes around it.

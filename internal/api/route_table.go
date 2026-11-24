@@ -454,6 +454,7 @@ var routeTable = map[routeKey]routeDecl{
 	{"GET", "/v1/invoices/{id}"}:                                            needs(invoiceRead),
 	{"POST", "/v1/invoices/{id}/collect"}:                                   needs(invoiceWrite).withAudit(explicit("invoice.Handler.collectPayment (Log)")),
 	{"GET", "/v1/invoices/{id}/disputes"}:                                   needs(invoiceRead).withPaging(),
+	{"POST", "/v1/invoices/{id}/disputes/{dispute_id}/record-loss"}:         needs(invoiceWrite).withAudit(explicit("creditnote.Service.TakeBackForLostDisputeTx (LogInTx)")),
 	{"POST", "/v1/invoices/{id}/finalize"}:                                  needs(invoiceWrite).withAudit(explicit("invoice.Service.Finalize (LogInTx)")),
 	{"POST", "/v1/invoices/{id}/line-items"}:                                needs(invoiceWrite).withAudit(explicit("invoice.Service.AddLineItem (LogInTx)")),
 	{"POST", "/v1/invoices/{id}/mark-uncollectible"}:                        needs(invoiceWrite).withAudit(explicit("invoice.Service.MarkUncollectible (Log)")),

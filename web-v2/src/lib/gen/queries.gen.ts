@@ -123,6 +123,7 @@ import type {
   InviteMemberBody,
   Invoice,
   InvoiceCreateRequest,
+  InvoiceDispute,
   InvoiceDisputeList,
   InvoiceLineItem,
   InvoiceLineItemInput,
@@ -9743,8 +9744,9 @@ export const getListInvoiceDisputesUrl = (id: string,
  * empty list. Hardcount records them from Stripe's `charge.dispute.*`
  * webhook events, which must be turned on for the Stripe webhook
  * endpoint. Hardcount never changes the invoice because of a dispute:
- * respond to it in Stripe, and if it is lost, record the loss with a
- * credit note or a write-off in your books.
+ * respond to it in Stripe. A loss on a top-up's own payment is
+ * recorded as a credit note by itself (`credit_note_id`); record any
+ * other loss with a credit note or a write-off in your books.
  * @summary List the card disputes on an invoice
  */
 export const listInvoiceDisputes = async (id: string,
@@ -9843,6 +9845,87 @@ export function useListInvoiceDisputes<TData = Awaited<ReturnType<typeof listInv
 
 
 
+
+export const getRecordInvoiceDisputeLossUrl = (id: string,
+    disputeId: string,) => {
+
+
+
+
+  return `/v1/invoices/${id}/disputes/${disputeId}/record-loss`
+}
+
+/**
+ * Writes the credit note that records a dispute lost on a top-up's own
+ * payment, when Hardcount could not write it as the loss arrived (it
+ * could not read the customer's usage not invoiced yet). The note is
+ * for the money the customer's bank returned, no more than the
+ * payment's credit notes still allow, recorded as returned out of band
+ * (not a card refund, not emailed), and it takes back the unused credit
+ * that money paid for. It is the same step Hardcount runs on a loss,
+ * once per dispute. No request body.
+ * @summary Record a lost dispute on a top-up
+ */
+export const recordInvoiceDisputeLoss = async (id: string,
+    disputeId: string, options?: RequestInit): Promise<InvoiceDispute> => {
+
+  return orvalClient<InvoiceDispute>(getRecordInvoiceDisputeLossUrl(id,disputeId),
+  {
+    ...options,
+    method: 'POST'
+
+
+  }
+);}
+
+
+
+
+
+export const getRecordInvoiceDisputeLossMutationOptions = <TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordInvoiceDisputeLoss>>, TError,{id: string;disputeId: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
+): UseMutationOptions<Awaited<ReturnType<typeof recordInvoiceDisputeLoss>>, TError,{id: string;disputeId: string}, TContext> => {
+
+const mutationKey = ['recordInvoiceDisputeLoss'];
+const {mutation: mutationOptions, request: requestOptions} = options ?
+      options.mutation && 'mutationKey' in options.mutation && options.mutation.mutationKey ?
+      options
+      : {...options, mutation: {...options.mutation, mutationKey}}
+      : {mutation: { mutationKey, }, request: undefined};
+
+
+
+
+      const mutationFn: MutationFunction<Awaited<ReturnType<typeof recordInvoiceDisputeLoss>>, {id: string;disputeId: string}> = (props) => {
+          const {id,disputeId} = props ?? {};
+
+          return  recordInvoiceDisputeLoss(id,disputeId,requestOptions)
+        }
+
+
+
+
+
+
+  return  { mutationFn, ...mutationOptions }}
+
+    export type RecordInvoiceDisputeLossMutationResult = NonNullable<Awaited<ReturnType<typeof recordInvoiceDisputeLoss>>>
+
+    export type RecordInvoiceDisputeLossMutationError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse
+
+    /**
+ * @summary Record a lost dispute on a top-up
+ */
+export const useRecordInvoiceDisputeLoss = <TError = UnauthorizedResponse | ForbiddenResponse | Error | RateLimitedResponse,
+    TContext = unknown>(options?: { mutation?:UseMutationOptions<Awaited<ReturnType<typeof recordInvoiceDisputeLoss>>, TError,{id: string;disputeId: string}, TContext>, request?: SecondParameter<typeof orvalClient>}
+ , queryClient?: QueryClient): UseMutationResult<
+        Awaited<ReturnType<typeof recordInvoiceDisputeLoss>>,
+        TError,
+        {id: string;disputeId: string},
+        TContext
+      > => {
+      return useMutation(getRecordInvoiceDisputeLossMutationOptions(options), queryClient);
+    }
 
 export const getListInvoiceStripeRefundsUrl = (id: string,
     params?: ListInvoiceStripeRefundsParams,) => {

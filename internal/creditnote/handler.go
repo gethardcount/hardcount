@@ -124,7 +124,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if req.StripeRefundID != "" {
-			respond.ValidationField(w, r, "stripe_refund_id", "stripe_refund_id can't be sent with commit_relief; for a refund made in Stripe on a top-up, refund the unused credit with out_of_band_amount_cents inside commit_relief, then dismiss that refund on the invoice.")
+			respond.ValidationField(w, r, "stripe_refund_id", "stripe_refund_id can't be sent with commit_relief; to record a refund made in Stripe on a top-up, send stripe_refund_id without commit_relief: its credit note takes back the credit that refund paid for.")
 			return
 		}
 		if req.CreditAmountCents > 0 {

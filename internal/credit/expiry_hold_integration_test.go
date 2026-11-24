@@ -393,12 +393,12 @@ func TestExpireCredits_HoldsAGrantExpiringAtAPeriodInvoiceIssue(t *testing.T) {
 }
 
 // TestLivenessAtTheExpiryInstant_DrainSpendableExposureAgree: the drain, the
-// spendable balance and the commit banner apply one rule. At expires_at the
-// grant is live in all three; one microsecond later it is live in none, and
-// the sweep lists it.
+// spendable balance and the top-up grant's display read apply one rule. At
+// expires_at the grant is live in all three; one microsecond later it is
+// live in none, and the sweep lists it.
 //
 // Fails before the fix: all three treated expires_at itself as expired.
-// Mutations: put `expires_at > $3` back in CommitGrantExposure, or
+// Mutations: put `expires_at > $3` back in ReadTopupGrantAndBalance, or
 // `expires_at <= $3` back in GetSpendableBalance.
 func TestLivenessAtTheExpiryInstant_DrainSpendableExposureAgree(t *testing.T) {
 	db, ctx, tenantID, cust, store, svc, invoiceStore := expirySetup(t, "expiry_boundary_agree")
@@ -420,11 +420,11 @@ func TestLivenessAtTheExpiryInstant_DrainSpendableExposureAgree(t *testing.T) {
 	}
 	drawable := func(at time.Time) int64 {
 		t.Helper()
-		v, _, err := store.CommitGrantExposure(ctx, tenantID, fundingID, at)
-		if err != nil {
-			t.Fatalf("commit exposure at %v: %v", at, err)
+		g, _, found, err := svc.TopupGrantAndBalance(ctx, tenantID, fundingID, at)
+		if err != nil || !found {
+			t.Fatalf("top-up grant at %v: found %v, %v", at, found, err)
 		}
-		return v
+		return g.LiveRemainingCents
 	}
 	drain := func(at time.Time) int64 {
 		t.Helper()

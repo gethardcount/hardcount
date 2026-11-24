@@ -1737,6 +1737,7 @@ components:
         - dunning_exhausted
         - collection_paused
         - dispute_lost
+        - dispute_open
         - refunded_in_stripe
         - amount_below_minimum
       description: |
@@ -1789,22 +1790,30 @@ components:
           resumes.
         - `dispute_lost`: the customer disputed a payment on the invoice with
           their bank, and the dispute closed as `lost`, so the bank took the
-          money back. Hardcount leaves the invoice paid and moves no money;
-          you record the loss. Shown even on paid invoices, which is where
-          disputes land. On an invoice that
-          bought prepaid credit, the message also says how much of the
-          credit is still spendable and names commit relief, because an
-          ordinary credit note is refused there. When the invoice also has
-          `payment_anomaly`, that reason stays and its message asks you to
-          check Stripe before any refund. The disputes are at
-          `GET /v1/invoices/{id}/disputes`.
+          money back. The invoice stays paid. On an ordinary invoice you
+          record the loss. On a top-up whose own payment was disputed,
+          Hardcount records it as a credit note that takes back the unused
+          credit the money paid for, and the notice is a warning with the
+          figures; it is critical while that note is not written yet
+          (`POST /v1/invoices/{id}/disputes/{dispute_id}/record-loss` writes
+          it). Shown even on paid invoices, which is where disputes land.
+          When the invoice also has `payment_anomaly`, that reason stays and
+          its message asks you to check Stripe before any refund. The
+          disputes are at `GET /v1/invoices/{id}/disputes`.
+        - `dispute_open`: the customer's bank holds a chargeback on a
+          top-up's payment (an inquiry raises none), and the customer can
+          still spend the credit it bought. Critical: the message says what
+          Stripe took, the date to respond by and the unused credit. Pause
+          the customer's key at your gateway while it is open. It clears
+          when the dispute closes.
         - `refunded_in_stripe`: a refund of the invoice's payment was made
           in Stripe outside Hardcount, and Hardcount did not record it as a
           credit note: the invoice was not paid yet, the currency differs,
-          the invoice bought prepaid credit, Hardcount first saw the refund
-          more than a day after it was made, a credit note on the invoice
-          has a failed card refund this refund may replace, or the refund is
-          more than the invoice had left to refund or credit. `code` is
+          Hardcount first saw the refund more than a day after it was made, a
+          credit note on the invoice has a failed card refund this refund may
+          replace, the refund is more than the invoice had left to refund or
+          credit, or the credit it paid for on a top-up could not be worked
+          out (critical, since that credit can still be spent). `code` is
           `payment.refunded_in_stripe.` followed by that review reason.
           Record it with a credit note that names the refund
           (`stripe_refund_id` on `POST /v1/credit-notes`), attach it to the
@@ -1996,7 +2005,8 @@ components:
             When the condition started, so you can sort by age. For a tax
             reason it is when tax was deferred, for `amount_below_minimum`
             when Stripe refused the amount, for `dispute_lost` when the
-            dispute closed, and for `refunded_in_stripe` when the refund was
+            dispute closed, for `dispute_open` when Stripe opened it, and for
+            `refunded_in_stripe` when the refund was
             made. Otherwise it is when the invoice last changed. Absent when
             it is not known.
         next_attempt_at:
@@ -2009,9 +2019,10 @@ components:
           type: string
           format: date-time
           description: |
-            The invoice's payment deadline (its `due_at`). Hardcount does not
-            act on this date; it is shown so you know it. Absent when the
-            reason does not show a deadline or the invoice has none.
+            The invoice's payment deadline (its `due_at`), or for
+            `dispute_open` the date to respond to the dispute by. Hardcount
+            does not act on this date; it is shown so you know it. Absent when
+            the reason does not show a deadline or there is none.
       example:
         severity: critical
         reason: payment_failed
@@ -6057,8 +6068,10 @@ components:
         invoice's payments, recorded from Stripe's `charge.dispute.created`,
         `.updated` and `.closed` webhook events. It holds the dispute as the
         newest of those events showed it, whatever order they arrived in.
-        Hardcount records and reports a dispute, and nothing else: the invoice
-        stays paid and no money moves.
+        The invoice stays paid. A dispute lost on a top-up's own payment is
+        recorded as a credit note that takes back the unused credit the money
+        paid for (`credit_note_id`); any other lost dispute is yours to
+        record.
       required:
         - id
         - invoice_id
@@ -6135,6 +6148,14 @@ components:
           type: string
           format: date-time
           description: When Stripe closed it. Absent while it is open.
+        credit_note_id:
+          type: string
+          description: |
+            The credit note that records this dispute's loss on a top-up's
+            own payment: money returned by the customer's bank (out of band),
+            with the unused credit it paid for taken back. Absent until the
+            loss is recorded; a dispute lost again after an appeal keeps its
+            one note.
         livemode:
           type: boolean
           description: True for a live-mode payment, false for test mode.
@@ -6276,11 +6297,15 @@ components:
             outside Hardcount.
         review_reason:
           type: string
-          enum: [invoice_not_paid, currency_mismatch, prepaid_commit, seen_late, credit_note_refund_failed, exceeds_card_refundable, exceeds_creditable]
+          enum: [invoice_not_paid, currency_mismatch, seen_late, credit_note_refund_failed, exceeds_card_refundable, exceeds_creditable, credit_note_not_written]
           description: |
             Why a refund of the invoice's own payment was flagged instead of
             recorded. Set for `needs_review` and `dismissed`, and kept when
             a dashboard user or an API key records one with a credit note.
+            `credit_note_not_written`: Hardcount has not written this
+            refund's credit note yet; record it as a credit note. On a top-up
+            the note takes back the unused credit the refund paid for, which
+            Hardcount could not work out when the refund arrived.
         credit_note_id:
           type: string
           description: The credit note that records the refund, when `outcome` is `credit_note`.
@@ -12550,14 +12575,17 @@ paths:
           description: |
             The invoice's state refuses the note. Code `invalid_state`: the
             invoice is a draft, voided or written off, already fully
-            credited, or bought prepaid credit (use commit relief when it is
-            paid, void it when it is unpaid); a relief on an unpaid or
-            withdrawn top-up, one with no unused credit, or one of a customer
-            with an issued invoice still to draw on the credit; or a
-            `stripe_refund_id` that a credit note already records, or
-            that is still in flight at Stripe. Code `payment_disputed`: a
-            relief on a top-up whose payment the customer's bank disputes (a
-            chargeback, an appeal included) or took back in a lost dispute.
+            credited, or bought prepaid credit (use commit relief or
+            `stripe_refund_id` when it is paid, void it when it is unpaid); a
+            relief on an unpaid or withdrawn top-up, one with no unused
+            credit, one whose payment is already returned in full, or one of
+            a customer with an issued invoice still to draw on the credit; or
+            a `stripe_refund_id` that a credit note already records, or that
+            is still in flight at Stripe. Code `stripe_refund_unresolved`: a
+            relief while a refund made in Stripe on the top-up is in flight
+            or flagged. Code `payment_disputed`: a relief on a top-up whose
+            payment the customer's bank disputes (a chargeback, an appeal
+            included).
             Code `payment_in_flight`: a charge on the invoice is unresolved.
             Code `concurrent_change`: with `auto_issue`, Postgres stopped the
             issue because of another change to the same records (it broke a
@@ -20633,8 +20661,9 @@ paths:
         empty list. Hardcount records them from Stripe's `charge.dispute.*`
         webhook events, which must be turned on for the Stripe webhook
         endpoint. Hardcount never changes the invoice because of a dispute:
-        respond to it in Stripe, and if it is lost, record the loss with a
-        credit note or a write-off in your books.
+        respond to it in Stripe. A loss on a top-up's own payment is
+        recorded as a credit note by itself (`credit_note_id`); record any
+        other loss with a credit note or a write-off in your books.
       parameters:
         - name: id
           in: path
@@ -20686,6 +20715,93 @@ paths:
                   request_id: req_dbjg652q3gpgqfoq5cd0
         "422":
           $ref: "#/components/responses/InvalidPage"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /v1/invoices/{id}/disputes/{dispute_id}/record-loss:
+    post:
+      tags: [Invoices]
+      summary: Record a lost dispute on a top-up
+      operationId: recordInvoiceDisputeLoss
+      description: |
+        Writes the credit note that records a dispute lost on a top-up's own
+        payment, when Hardcount could not write it as the loss arrived (it
+        could not read the customer's usage not invoiced yet). The note is
+        for the money the customer's bank returned, no more than the
+        payment's credit notes still allow, recorded as returned out of band
+        (not a card refund, not emailed), and it takes back the unused credit
+        that money paid for. It is the same step Hardcount runs on a loss,
+        once per dispute. No request body.
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: The top-up's invoice id (`hc_inv_…`).
+          schema:
+            type: string
+        - name: dispute_id
+          in: path
+          required: true
+          description: The dispute record's id (`hc_dsp_…`), as in the dispute's `id`.
+          schema:
+            type: string
+        - $ref: "#/components/parameters/IdempotencyKey"
+      responses:
+        "200":
+          description: The dispute, with `credit_note_id` naming the note written.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvoiceDispute"
+              example:
+                id: hc_dsp_6f1c0a7e9b2d4c8e1a3b5d7f
+                invoice_id: hc_inv_dbj84b2q3gpgqfoq5c40
+                stripe_dispute_id: du_1QHk2fLkdIwHu7ix2c3d4e5f
+                stripe_charge_id: ch_3QHk2fLkdIwHu7ix0a1b2c3d
+                stripe_payment_intent_id: pi_3QHk2fLkdIwHu7ix0a1b2c3d
+                status: lost
+                reason: fraudulent
+                amount_cents: 9000
+                currency: USD
+                opened_at: "2026-11-10T08:30:00Z"
+                closed_at: "2026-11-24T08:30:00Z"
+                credit_note_id: hc_cn_dbjh1kmq3gpgqfoq5cf0
+                livemode: false
+                created_at: "2026-11-10T08:30:04Z"
+                updated_at: "2026-11-25T09:12:40Z"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          description: No invoice with this id in this account and mode, or no dispute with this id on it.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  type: invalid_request_error
+                  code: not_found
+                  message: dispute not found
+                  request_id: req_dbjg652q3gpgqfoq5cd0
+        "409":
+          description: |
+            The loss cannot be recorded this way: the dispute is not lost,
+            its loss is already recorded, the invoice is not a top-up or the
+            dispute is not on its own payment, the dispute is in another
+            currency, or the payment's credit notes already return all of
+            it. Code `invalid_state`; the message says which.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  type: invalid_request_error
+                  code: invalid_state
+                  message: This loss is already recorded as a credit note.
+                  request_id: req_dbjg652q3gpgqfoq5cd0
         "429":
           $ref: "#/components/responses/RateLimited"
 

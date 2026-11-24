@@ -101,3 +101,15 @@ The common practice is that the invoice stays paid and a credit note carries the
 - [ADR-063](063-refund-status-webhook-reconciliation.md): refund status from webhooks; this ADR adds refunds Hardcount did not make.
 - [ADR-049](049-payment-settlement-primitive.md): the disputes amendment is the precedent (`invoice_disputes`, one writer, any delivery order).
 - [A refund made in Stripe](../ops/runbook/refund-made-in-stripe.md) and [Card disputes](../ops/runbook/card-disputes.md) for operators.
+
+## Amendment 2026-11-25
+
+A refund made in Stripe on a top-up is recorded like any other: the check
+"the invoice bought no prepaid credit" of decision 4 is gone, and the note
+also takes back the unused credit the refund paid for
+([ADR-080](080-paid-commit-cn-relief.md), amendment of 2026-11-25 (2)). Its
+deferred "linking a refund into commit relief" is done that way. The review
+reason `prepaid_commit` is replaced by `credit_note_not_written`. The card cap
+of decision 4 is the one card-refundable figure, which also counts refunds
+made in Stripe that no note holds, and nothing once a dispute on the payment
+is lost.

@@ -150,16 +150,41 @@ func (i Invoice) HasCardPayment() bool {
 	return i.StripePaymentIntentID != ""
 }
 
-// CardRefundableCents is the most a credit note may push back to the card:
-// what the card settled, less the refunds already committed by earlier
-// credit notes that are not voided. It is zero when no card backs the
-// payment. That puts the offline case under the same cap the over-refund
-// path already enforces, with no second guard beside it.
-func (i Invoice) CardRefundableCents(priorRefundCents int64) int64 {
-	if !i.HasCardPayment() {
+// CardRefundableCents is the most that can still go back to the card that
+// paid the invoice: what the card settled, less committedCents, what has gone
+// or may still go back to it (CardRefundsSQL). It is zero when no card backs
+// the payment, and once the bank won a dispute on it: Stripe refuses a refund
+// of a charged-back payment (charge_disputed).
+func (i Invoice) CardRefundableCents(committedCents int64, disputeLost bool) int64 {
+	if !i.HasCardPayment() || disputeLost {
 		return 0
 	}
-	return max(0, i.AmountPaidCents-priorRefundCents)
+	return max(0, i.AmountPaidCents-committedCents)
+}
+
+// CardRefundsSQL is the one definition of what has gone, or may still go,
+// back to the card that paid an invoice, as two columns for the invoice row
+// aliased inv:
+//
+//   - notes_cents: the card refunds of its credit notes not voided, failed
+//     ones too, since a retry may send them; a note that holds a refund made
+//     in Stripe counts it here, once;
+//   - stripe_cents: the refunds made in Stripe of the invoice's payment that
+//     no note holds and that moved or may move money (succeeded, pending,
+//     requires_action), whatever the operator decided about them.
+//
+// except is a placeholder for a refund made in Stripe to leave out (the one a
+// caller is recording), or NULL. The credit-note caps and the doctor check
+// read it.
+func CardRefundsSQL(inv, except string) string {
+	return `(SELECT COALESCE(SUM(cn.refund_amount_cents), 0) FROM credit_notes cn
+		WHERE cn.tenant_id = ` + inv + `.tenant_id AND cn.invoice_id = ` + inv + `.id AND cn.status IN ('draft', 'issued')) AS notes_cents,
+	(SELECT COALESCE(SUM(sr.amount_cents), 0) FROM invoice_stripe_refunds sr
+		WHERE sr.tenant_id = ` + inv + `.tenant_id AND sr.invoice_id = ` + inv + `.id
+		  AND sr.stripe_payment_intent_id = ` + inv + `.stripe_payment_intent_id
+		  AND sr.status IN ('succeeded', 'pending', 'requires_action') AND sr.credit_note_id IS NULL
+		  AND sr.stripe_refund_id IS DISTINCT FROM ` + except + `
+		  AND NOT EXISTS (SELECT 1 FROM credit_notes h WHERE h.tenant_id = sr.tenant_id AND h.stripe_refund_id = sr.stripe_refund_id)) AS stripe_cents`
 }
 
 // PricedCents is the invoice's amount in the terms its prices were in: its

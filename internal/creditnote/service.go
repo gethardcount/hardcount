@@ -191,27 +191,28 @@ type CreditGranter interface {
 	// The 0093 dedup index still backs it, but the CAS makes it unreachable: a
 	// dedup conflict here would mean a second CAS winner, which cannot happen.
 	GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, creditNoteID string, input CreditGrantInput) error
-	// ADR-080 relief pair. Lock reads the funded commit grant under the
-	// relief locks on the caller's tx, with what is left of it and the
-	// customer's spendable balance at `at`; Retire retires an explicit
-	// slice, bumps K, names the note in the ledger entry, and enqueues
-	// credit.commit_retired in the same tx.
-	LockCommitGrantForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, at time.Time) (g ReliefGrant, found bool, err error)
+	// LockTopupGrantAndBalanceTx reads, on the caller's tx, the grant the
+	// top-up funded and the customer's spendable balance in its currency at
+	// `at`, under the customer's credit lock and the grant's row lock.
+	// RetireCommitSliceForReliefTx takes `slice` of the grant back for a note
+	// on the top-up, bumps K, names the note in the ledger entry, and queues
+	// credit.commit_retired, in the same tx.
+	LockTopupGrantAndBalanceTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, at time.Time) (g TopupGrant, spendableCents int64, found bool, err error)
 	RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID, creditNoteID, creditNoteNumber string, slice, refundedGrossCents, grossPaidCents int64) (remainingAfter int64, err error)
+	// TopupGrantAndBalance is LockTopupGrantAndBalanceTx read with no lock,
+	// for display (UnusedCredit).
+	TopupGrantAndBalance(ctx context.Context, tenantID, invoiceID string, at time.Time) (g TopupGrant, spendableCents int64, found bool, err error)
 }
 
-// ReliefGrant is a top-up's grant as a relief reads it under its locks, at the
-// relief's instant (credit.ReliefGrant).
-type ReliefGrant struct {
+// TopupGrant is a top-up's grant as a note on the top-up reads it, at the
+// note's instant (credit.TopupGrant).
+type TopupGrant struct {
 	GrantID        string
 	GrantedCents   int64 // G
-	CNRetiredCents int64 // K, credit retired by earlier reliefs
+	CNRetiredCents int64 // K, the credit every note on the top-up took back
 	// LiveRemainingCents is what is left of the grant, 0 once past its
 	// expires_at, swept or not.
 	LiveRemainingCents int64
-	// SpendableCents is the customer's spendable balance in the grant's
-	// currency.
-	SpendableCents int64
 	// PendingDraw is the oldest issued invoice of the customer still to draw
 	// on the grant, nil when none is.
 	PendingDraw *domain.PendingCreditDraw
@@ -466,17 +467,8 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 	if strings.TrimSpace(input.Reason) == "" {
 		return domain.CreditNote{}, errs.Required("reason")
 	}
-	if len(input.Lines) == 0 {
-		return domain.CreditNote{}, errs.Invalid("lines", "at least one line item is required")
-	}
-
-	for i, line := range input.Lines {
-		if line.Quantity <= 0 {
-			return domain.CreditNote{}, errs.Invalid("lines", fmt.Sprintf("line %d: quantity must be positive", i+1))
-		}
-		if line.UnitAmountCents <= 0 {
-			return domain.CreditNote{}, errs.Invalid("lines", fmt.Sprintf("line %d: amount must be greater than 0", i+1))
-		}
+	if err := checkLines(input.Lines); err != nil {
+		return domain.CreditNote{}, err
 	}
 
 	// Verify invoice exists and is finalized or paid
@@ -509,9 +501,10 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 	// second grant), and line caps are wrong where cash differs from face on
 	// a discounted commit. Only a paid top-up gets here with a commit line:
 	// a top-up is issued by its payment, and a relief or clawback never takes
-	// one as its source (it has no subscription). Its unwind is commit
-	// relief. Checked in the shared core so the operator path and the
-	// automated clawback paths carry the same rule.
+	// one as its source (it has no subscription). Its notes take credit back:
+	// commit relief, and a refund made in Stripe linked at create, which
+	// never reaches here (linkedTopupNoteTx). Checked in the shared core so
+	// the operator path and the automated clawback paths carry the same rule.
 	invLines, err := listLines()
 	if err != nil {
 		return domain.CreditNote{}, fmt.Errorf("list invoice line items: %w", err)
@@ -519,66 +512,13 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 	for _, li := range invLines {
 		if li.IsCommitLine() {
 			return domain.CreditNote{}, errs.InvalidState(
-				"This invoice sold prepaid credit, so refund it with a commit_relief block on POST /v1/credit-notes, which refunds the unused credit at the price paid.")
+				"This invoice sold prepaid credit, so refund it with a commit_relief block on POST /v1/credit-notes, which refunds the unused credit at the price paid; to record a refund made in Stripe on it, send that refund's stripe_refund_id.")
 		}
 	}
 
-	// Calculate totals. Line amounts are interpreted as tax-inclusive
-	// (gross) so the caller's sum matches the invoice's gross total the
-	// caps below use as the ceiling. The tax portion is back-solved from
-	// the invoice's tax ratio (see proportional tax block below) so a CN
-	// that refunds half the invoice also reverses half the tax.
-	// Overflow-checked: an absurd quantity × price wrapped to a negative total
-	// that slipped under the over-credit cap below.
-	var subtotal int64
-	lineAmounts := make([]int64, len(input.Lines))
-	for i, line := range input.Lines {
-		amount, err := domain.MulCents(line.Quantity, line.UnitAmountCents)
-		if err == nil {
-			subtotal, err = domain.AddCents(subtotal, amount)
-		}
-		if err != nil {
-			return domain.CreditNote{}, errs.Invalid("lines", fmt.Sprintf("line %d: amount is too large", i+1))
-		}
-		lineAmounts[i] = amount
-	}
-
-	// A line may name the invoice line it credits. The column has no foreign
-	// key, so the id is checked here: it must be a line of the named invoice,
-	// read on the caller's tenant and mode.
-	var ownLines map[string]bool
-	for i, line := range input.Lines {
-		if line.InvoiceLineItemID == "" {
-			continue
-		}
-		if ownLines == nil {
-			invLines, err := listLines()
-			if err != nil {
-				return domain.CreditNote{}, fmt.Errorf("list invoice line items: %w", err)
-			}
-			ownLines = make(map[string]bool, len(invLines))
-			for _, li := range invLines {
-				ownLines[li.ID] = true
-			}
-		}
-		if !ownLines[line.InvoiceLineItemID] {
-			return domain.CreditNote{}, errs.Invalid(fmt.Sprintf("lines[%d].invoice_line_item_id", i), "not a line of this invoice")
-		}
-	}
-
-	// Line rows are built up front and committed in the SAME transaction as
-	// the header (CreateUnderInvoiceLock) — pre-fix they were inserted one by
-	// one after the header committed, so a partial failure left an orphan
-	// credit note with a non-zero total and zero lines.
-	lineRows := make([]domain.CreditNoteLineItem, 0, len(input.Lines))
-	for i, line := range input.Lines {
-		lineRows = append(lineRows, domain.CreditNoteLineItem{
-			InvoiceLineItemID: line.InvoiceLineItemID,
-			Description:       line.Description,
-			Quantity:          line.Quantity,
-			UnitAmountCents:   line.UnitAmountCents,
-			AmountCents:       lineAmounts[i],
-		})
+	lineRows, subtotal, err := noteLines(input, listLines)
+	if err != nil {
+		return domain.CreditNote{}, err
 	}
 
 	// Build + insert the credit note under a per-invoice advisory lock so the
@@ -606,24 +546,12 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 		}
 		// Validate: total credit notes cannot exceed invoice total.
 		// For unpaid invoices, also cap at current amount_due.
-		var existingTotal, existingTaxReversed int64
-		for _, cn := range existingCNs {
-			if cn.Status != domain.CreditNoteVoided {
-				var err error
-				if existingTotal, err = domain.SumCents(existingTotal, cn.TotalCents); err != nil {
-					return domain.CreditNote{}, fmt.Errorf("credit notes on invoice %s: total: %w", input.InvoiceID, err)
-				}
-				if existingTaxReversed, err = domain.SumCents(existingTaxReversed, cn.TaxAmountCents); err != nil {
-					return domain.CreditNote{}, fmt.Errorf("credit notes on invoice %s: tax: %w", input.InvoiceID, err)
-				}
-			}
+		existingTotal, existingTaxReversed, err := noteSums(input.InvoiceID, existingCNs)
+		if err != nil {
+			return domain.CreditNote{}, err
 		}
-		if subtotal > inv.TotalAmountCents-existingTotal { // never existingTotal+subtotal: that sum can wrap
-			remaining := inv.TotalAmountCents - existingTotal
-			if remaining <= 0 {
-				return domain.CreditNote{}, errs.InvalidState("invoice has already been fully credited")
-			}
-			return domain.CreditNote{}, errs.Invalid("lines", fmt.Sprintf("credit note amount exceeds remaining creditable amount (%.2f)", float64(remaining)/100))
+		if err := fitsCreditable(inv, subtotal, existingTotal); err != nil {
+			return domain.CreditNote{}, err
 		}
 		// For unpaid invoices (a written-off one is unpaid), a credit note
 		// cannot exceed what the invoice can still be relieved of: the amount
@@ -638,8 +566,23 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 				float64(subtotal)/100, float64(inv.AmountDueCents)/100, float64(inv.CreditsAppliedCents)/100))
 		}
 
-		cn, err := s.buildCreditNote(ctx, lockTx, tenantID, input, inv, subtotal, existingTotal, existingTaxReversed, existingCNs)
-		if err != nil || input.linked == nil {
+		var card cardRoom
+		if inv.Status == domain.InvoicePaid {
+			except := ""
+			if input.linked != nil {
+				except = input.linked.facts.ID // counted once, as this note's card refund
+			}
+			if card, err = s.cardRoomTx(ctx, lockTx, inv, except); err != nil {
+				return domain.CreditNote{}, err
+			}
+		}
+		cn, err := buildCreditNote(input, inv, subtotal, existingTotal, existingTaxReversed, card)
+		if err != nil {
+			return domain.CreditNote{}, err
+		}
+		// No customer lock on this path (it refuses a top-up), so the number
+		// row may come here, last before the insert.
+		if cn.CreditNoteNumber, err = nextNumberTx(ctx, lockTx, tenantID, s.numbers); err != nil || input.linked == nil {
 			return cn, err
 		}
 		// The note records a refund made in Stripe (ADR-134): its card refund
@@ -714,6 +657,82 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 	}
 
 	return cn, nil
+}
+
+// checkLines refuses a note with no line, or a line with no quantity or no
+// amount.
+func checkLines(lines []CreditLineInput) error {
+	if len(lines) == 0 {
+		return errs.Invalid("lines", "at least one line item is required")
+	}
+	for i, line := range lines {
+		if line.Quantity <= 0 {
+			return errs.Invalid("lines", fmt.Sprintf("line %d: quantity must be positive", i+1))
+		}
+		if line.UnitAmountCents <= 0 {
+			return errs.Invalid("lines", fmt.Sprintf("line %d: amount must be greater than 0", i+1))
+		}
+	}
+	return nil
+}
+
+// noteLines builds the line rows of an operator's note and their total.
+// Line amounts are tax-inclusive (gross), so their sum compares with the
+// invoice's gross total in the caps; the note's tax is worked out from the
+// invoice's tax ratio (buildCreditNote). The sums are overflow-checked: an
+// absurd quantity times price once wrapped to a negative total under the
+// cap. A line may name the invoice line it credits; the column has no
+// foreign key, so the id is checked against the invoice's lines, read on the
+// caller's tenant and mode.
+func noteLines(input CreateInput, listLines func() ([]domain.InvoiceLineItem, error)) ([]domain.CreditNoteLineItem, int64, error) {
+	var subtotal int64
+	var ownLines map[string]bool
+	rows := make([]domain.CreditNoteLineItem, 0, len(input.Lines))
+	for i, line := range input.Lines {
+		amount, err := domain.MulCents(line.Quantity, line.UnitAmountCents)
+		if err == nil {
+			subtotal, err = domain.AddCents(subtotal, amount)
+		}
+		if err != nil {
+			return nil, 0, errs.Invalid("lines", fmt.Sprintf("line %d: amount is too large", i+1))
+		}
+		if line.InvoiceLineItemID != "" {
+			if ownLines == nil {
+				invLines, err := listLines()
+				if err != nil {
+					return nil, 0, fmt.Errorf("list invoice line items: %w", err)
+				}
+				ownLines = make(map[string]bool, len(invLines))
+				for _, li := range invLines {
+					ownLines[li.ID] = true
+				}
+			}
+			if !ownLines[line.InvoiceLineItemID] {
+				return nil, 0, errs.Invalid(fmt.Sprintf("lines[%d].invoice_line_item_id", i), "not a line of this invoice")
+			}
+		}
+		rows = append(rows, domain.CreditNoteLineItem{
+			InvoiceLineItemID: line.InvoiceLineItemID,
+			Description:       line.Description,
+			Quantity:          line.Quantity,
+			UnitAmountCents:   line.UnitAmountCents,
+			AmountCents:       amount,
+		})
+	}
+	return rows, subtotal, nil
+}
+
+// fitsCreditable refuses a note larger than what the invoice's notes leave
+// to credit.
+func fitsCreditable(inv domain.Invoice, subtotal, existingTotal int64) error {
+	if subtotal <= inv.TotalAmountCents-existingTotal { // never existingTotal+subtotal: that sum can wrap
+		return nil
+	}
+	remaining := inv.TotalAmountCents - existingTotal
+	if remaining <= 0 {
+		return errs.InvalidState("invoice has already been fully credited")
+	}
+	return errs.Invalid("lines", fmt.Sprintf("credit note amount exceeds remaining creditable amount (%.2f)", float64(remaining)/100))
 }
 
 // CreateAndIssueAdjustment creates and immediately issues an adjustment credit
@@ -913,11 +932,12 @@ func (s *Service) RetryPendingCreditNoteTaxReversal(ctx context.Context, batch i
 	return reversed, errsOut
 }
 
-// buildCreditNote runs the tax-breakout, three-channel allocation, refund cap,
-// and number generation, returning the credit note to insert. Called inside
-// CreateUnderInvoiceLock with the lock-stable `existingCNs` snapshot; tx is
-// that lock's transaction, which the number is allocated on.
-func (s *Service) buildCreditNote(ctx context.Context, tx *sql.Tx, tenantID string, input CreateInput, inv domain.Invoice, subtotal, existingTotal, existingTaxReversed int64, existingCNs []domain.CreditNote) (domain.CreditNote, error) {
+// buildCreditNote runs the tax breakout, the three-channel allocation and the
+// card refund cap, returning the credit note to insert, not numbered yet.
+// Called inside CreateUnderInvoiceLock with the lock-stable sums of the notes
+// already on the invoice; card is the invoice's cardRoom read under the same
+// lock, used only on a paid invoice.
+func buildCreditNote(input CreateInput, inv domain.Invoice, subtotal, existingTotal, existingTaxReversed int64, card cardRoom) (domain.CreditNote, error) {
 	// Break out proportional tax from the gross subtotal. The invoice's
 	// tax_amount / total_amount ratio tells us what fraction of the gross
 	// was tax; apply the same ratio to the CN's gross subtotal so a
@@ -1014,63 +1034,39 @@ func (s *Service) buildCreditNote(ctx context.Context, tx *sql.Tx, tenantID stri
 			))
 		}
 
-		// Refund cap: cannot push more cash to PM than was paid
-		// via PM (less any prior refunds). Matches Stripe — its
-		// `refund_amount` validation rejects over-refund with
-		// `amount_too_large`.
-		var existingRefunds int64
-		for _, cn := range existingCNs {
-			if cn.Status == domain.CreditNoteVoided {
-				continue
-			}
-			var err error
-			if existingRefunds, err = domain.SumCents(existingRefunds, cn.RefundAmountCents); err != nil {
-				return domain.CreditNote{}, fmt.Errorf("credit notes on invoice %s: refunds: %w", input.InvoiceID, err)
-			}
-		}
-		pmRefundable := inv.CardRefundableCents(existingRefunds)
-		if refundAmount > pmRefundable {
+		// Card refund cap: no more to the card than can still go back to
+		// it (cardRoom). Stripe refuses an over-refund too
+		// (`amount_too_large`), but only after the note exists.
+		if refundAmount > card.refundable {
 			// With no card behind the payment (offline, credits) the over-cap
 			// wording ("exceeds 0.00 paid via card") would misdescribe the
 			// cause. Name the rail instead — the operator's fix is to
 			// re-route the money, not to lower it.
-			if !inv.HasCardPayment() {
+			switch {
+			case !inv.HasCardPayment():
 				return domain.CreditNote{}, errs.Invalid("refund_amount_cents", fmt.Sprintf(
 					"this invoice was not paid by card, so there is no card to refund (%.2f requested) — route the amount to credit_amount_cents or out_of_band_amount_cents.",
 					float64(refundAmount)/100,
 				))
+			case card.lost:
+				return domain.CreditNote{}, errs.Invalid("refund_amount_cents", fmt.Sprintf(
+					"The customer's bank reversed this payment in a dispute, so nothing can go back to the card; route the %s to credit_amount_cents or out_of_band_amount_cents.",
+					domain.FormatMoneyMinor(refundAmount, inv.Currency)))
 			}
 			return domain.CreditNote{}, errs.Invalid("refund_amount_cents", fmt.Sprintf(
-				"refund amount (%.2f) exceeds payment-method refundable (%.2f) — %.2f paid via card, %.2f already refunded by prior credit notes. Reduce refund_amount_cents and route the rest to credit_amount_cents or out_of_band_amount_cents.",
+				"refund amount (%.2f) exceeds payment-method refundable (%.2f) — %.2f paid via card, %.2f already refunded by credit notes, %.2f by refunds made in Stripe that no credit note holds. Reduce refund_amount_cents and route the rest to credit_amount_cents or out_of_band_amount_cents.",
 				float64(refundAmount)/100,
-				float64(pmRefundable)/100,
+				float64(card.refundable)/100,
 				float64(inv.AmountPaidCents)/100,
-				float64(existingRefunds)/100,
+				float64(card.NotesCents)/100,
+				float64(card.StripeCents)/100,
 			))
 		}
-	}
-
-	// Credit-note numbers are a strictly monotonic per-tenant sequence, same
-	// contract as invoice numbers. No fallback: the previous synthesized
-	// CN-YYYYMM-<unixnano%1e6> number was non-monotonic and collision-prone,
-	// and swallowing the allocator error hid the misconfiguration — a
-	// duplicate document number corrupts accounting downstream, while a
-	// failed Create just retries.
-	if s.numbers == nil {
-		return domain.CreditNote{}, fmt.Errorf("credit-note number generator not wired (call SetNumberGenerator)")
-	}
-	cnNumber, err := s.numbers.NextCreditNoteNumberTx(ctx, tx, tenantID)
-	if err != nil {
-		return domain.CreditNote{}, fmt.Errorf("allocate credit note number: %w", err)
-	}
-	if cnNumber == "" {
-		return domain.CreditNote{}, fmt.Errorf("credit-note number generator returned an empty number")
 	}
 
 	return domain.CreditNote{
 		InvoiceID:            input.InvoiceID,
 		CustomerID:           inv.CustomerID,
-		CreditNoteNumber:     cnNumber,
 		Status:               domain.CreditNoteDraft,
 		Reason:               strings.TrimSpace(input.Reason),
 		SubtotalCents:        netSubtotal,
@@ -1143,35 +1139,35 @@ const reliefReason = "Unused prepaid credit refunded"
 // on unpaid invoices. Those are what the period's invoice bills, not credit
 // already used. An invoice already issued that has not drawn its credit yet
 // would make the figure high, so relief refuses while one is pending
-// (ReliefGrant.PendingDraw) instead of subtracting it.
-func unusedCredit(g ReliefGrant, unbilledCents int64) int64 {
-	return min(g.LiveRemainingCents, max(g.SpendableCents-unbilledCents, 0))
+// (TopupGrant.PendingDraw) instead of subtracting it.
+func unusedCredit(g TopupGrant, spendableCents, unbilledCents int64) int64 {
+	return min(g.LiveRemainingCents, max(spendableCents-unbilledCents, 0))
 }
 
 // CreateAndIssueCommitRelief refunds a paid top-up's unused credit (ADR-080):
-// it retires credit and refunds the cash paid for it, at the price paid per
-// credit. ONE coordinator tx creates the credit note, issues it and retires
-// the credit, so a crash leaves nothing or all of it, and credit is retired
-// before cash leaves. Only the Stripe refund and the tax reversal run after
-// the commit, idempotency-keyed and swept. Deliberately create-and-issue (no
-// draft): a draft would neither reserve the cap nor survive Issue()'s
-// re-derived allocation.
+// it takes credit back and refunds the cash paid for it, at the price paid
+// per credit. ONE transaction creates the credit note, issues it and takes
+// the credit back (issueNoteTx), so a crash leaves nothing or all of it,
+// and credit is retired before cash leaves. Only the Stripe refund and the
+// tax reversal run after the commit, idempotency-keyed and swept.
+// Deliberately create-and-issue (no draft): a draft would neither reserve the
+// cap nor survive Issue()'s re-derived allocation.
 //
-// Unused credit is unusedCredit at the request's instant. The unbilled usage
-// is read before the transaction, as a decided input; the grant, the spendable
-// balance and the pending draw under the customer's credit lock. A period that
-// closes after the usage read is still counted in it; one that closed before
-// shows as a pending draw until its invoice draws the credit.
+// It refunds the smaller of the unused credit at the request's instant and
+// the worth of what the payment's documents still allow (reliefCredit). The
+// unbilled usage is read before the transaction, as a decided input; the
+// grant, the spendable balance and the pending draw under the customer's
+// credit lock. The card gets no more than can still go back to it (cardRoom).
 //
-// Relief is refused when a chargeback is recorded. When one opens during the
-// relief, Stripe refuses the card refund, and "returned another way" ends it.
-// No lock can close that race, because Stripe opens the dispute before its
-// webhook reaches Hardcount.
+// Relief is refused while a chargeback is open, and while a refund made in
+// Stripe on the invoice is not settled (reliefMayRunTx). When a chargeback
+// opens during the relief, Stripe refuses the card refund, and "returned
+// another way" ends it. No lock can close that race, because Stripe opens the
+// dispute before its webhook reaches Hardcount.
 //
-// Lock order: the per-invoice credit-note lock, the invoice row FOR KEY
-// SHARE, the customer's credit lock and the grant row, then the tenant's
-// number row. FOR KEY SHARE comes early to keep the invoice row before the
-// number row: the note's insert takes it again for its foreign key.
+// Lock order (issueNoteTx): the per-invoice credit-note lock, the
+// invoice row FOR KEY SHARE, the customer's credit lock and the grant row,
+// then the tenant's number row.
 func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID string, input CommitReliefInput) (domain.CreditNote, error) {
 	if input.InvoiceID == "" {
 		return domain.CreditNote{}, errs.Required("invoice_id")
@@ -1183,7 +1179,6 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 		return domain.CreditNote{}, fmt.Errorf("commit relief is not wired: it needs the number generator, the credit granter and the unbilled usage reader")
 	}
 	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
-	at := clock.Now(ctx)
 
 	inv, err := s.invoices.Get(ctx, tenantID, input.InvoiceID)
 	if err != nil {
@@ -1202,8 +1197,6 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 	case inv.Status == domain.InvoiceVoided:
 		return domain.CreditNote{}, errs.InvalidState("This top-up was withdrawn before it was paid, so it granted no credit to refund.")
 	case domain.PaymentBlocksAction(inv, domain.ActionIssueCreditNote).Blocked:
-		// Same rule, same source — this one told the operator to "cancel it",
-		// which has never been an action the product offers.
 		return domain.CreditNote{}, errs.InvalidState(domain.PaymentBlocksAction(inv, domain.ActionIssueCreditNote).Message).
 			WithCode(domain.PaymentBlocksAction(inv, domain.ActionIssueCreditNote).Code)
 	case inv.Status != domain.InvoicePaid || inv.PaymentStatus != domain.PaymentSucceeded:
@@ -1213,14 +1206,9 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 	// carries no tax: createTopup writes none, finalize refuses a top-up and
 	// tax retry finds no calculation to refresh. So its total is what was paid
 	// for the credit, and the note reverses no tax.
-	grossPaid := inv.TotalAmountCents
-	unbilledByCurrency, err := s.unbilled.UnbilledUsage(ctx, tenantID, inv.CustomerID)
+	unbilled, err := s.UnbilledUsageCents(ctx, tenantID, inv)
 	if err != nil {
 		return domain.CreditNote{}, fmt.Errorf("read unbilled usage for commit relief: %w", err)
-	}
-	unbilled := unbilledByCurrency[strings.ToUpper(inv.Currency)]
-	amount := func(cents int64) string {
-		return activity.FormatMoney(activity.Money{Cents: cents, Currency: inv.Currency})
 	}
 
 	tx, err := s.store.BeginTx(ctx, tenantID)
@@ -1229,189 +1217,42 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 	}
 	defer postgres.Rollback(tx)
 
-	// Captured by the build closure for the post-insert retire.
-	var retireSlice, reliefCash int64
 	var grantID string
-
-	cn, err := s.store.CreateUnderInvoiceLockDynamicTx(ctx, tx, tenantID, input.InvoiceID, func(existing []domain.CreditNote) (domain.CreditNote, []domain.CreditNoteLineItem, error) {
-		open, lost, err := s.disputeStateTx(ctx, tx, input.InvoiceID, inv.StripePaymentIntentID)
-		switch {
-		case err != nil:
+	cn, err := s.issueNoteTx(ctx, tx, tenantID, inv, func(existing []domain.CreditNote) (domain.CreditNote, []domain.CreditNoteLineItem, error) {
+		if err := s.reliefMayRunTx(ctx, tx, tenantID, inv); err != nil {
 			return domain.CreditNote{}, nil, err
-		case open:
-			return domain.CreditNote{}, nil, errs.InvalidState("The customer's bank is disputing this payment, so it can't be refunded while the dispute is open; answer the dispute in Stripe, and refund the unused credit if you win.").WithCode("payment_disputed")
-		case lost:
-			return domain.CreditNote{}, nil, errs.InvalidState("This payment was reversed by the customer's bank in a dispute, so there is nothing left to refund.").WithCode("payment_disputed")
 		}
-		stripeRefunded, err := s.store.StripeRefundedOutsideNotesTx(ctx, tx, input.InvoiceID, inv.StripePaymentIntentID)
+		card, err := s.cardRoomTx(ctx, tx, inv, "")
 		if err != nil {
 			return domain.CreditNote{}, nil, err
 		}
-		g, found, err := s.credits.LockCommitGrantForReliefTx(ctx, tx, tenantID, input.InvoiceID, at)
+		hold, err := s.holdTopupGrantTx(ctx, tx, tenantID, inv, unbilled)
 		if err != nil {
 			return domain.CreditNote{}, nil, err
 		}
-		if !found {
-			return domain.CreditNote{}, nil, fmt.Errorf("invoice %s is a paid top-up with no funded grant — its payment funds the grant in the same tx, so this is corrupted state; refusing to move cash", input.InvoiceID)
+		if hold.PendingDraw != nil {
+			return domain.CreditNote{}, nil, pendingDrawRefusal(*hold.PendingDraw)
 		}
-		if g.PendingDraw != nil {
-			return domain.CreditNote{}, nil, pendingDrawRefusal(*g.PendingDraw)
+		returned, _, err := noteSums(inv.ID, existing)
+		if err != nil {
+			return domain.CreditNote{}, nil, err
 		}
-		unused := unusedCredit(g, unbilled)
-		if unused <= 0 {
-			return domain.CreditNote{}, nil, errs.InvalidState("This top-up has no unused credit: it is used, expired or already refunded.")
+		// A refund made in Stripe that no note holds returned money too: the
+		// room relief may still pay out is what the documents allow less it.
+		r, x, err := reliefCredit(input, hold, inv.TotalAmountCents-returned-card.StripeCents, inv.Currency)
+		if err != nil {
+			return domain.CreditNote{}, nil, err
 		}
-		r := input.RetireCents
-		if input.RetireAll {
-			r = unused
+		failedNotes, failedCents := failedCardRefunds(existing)
+		refund, oob, err := reliefSplit(input, inv, x, card, failedNotes, failedCents)
+		if err != nil {
+			return domain.CreditNote{}, nil, err
 		}
-		if r > unused {
-			return domain.CreditNote{}, nil, errs.Invalid("retire_cents", fmt.Sprintf(
-				"Only %s of the %s of credit asked for is unused (usage not invoiced yet counts as used), refundable for %s; ask for that much or less, or set retire_all.",
-				amount(unused), amount(r), amount(commitReliefCash(grossPaid, g.GrantedCents, g.CNRetiredCents, unused))))
-		}
-
-		x := commitReliefCash(grossPaid, g.GrantedCents, g.CNRetiredCents, r)
-		if x == 0 {
-			// Deep-discount degenerate slice: the credits round to zero
-			// cash. A zero-total CN would silently donate the credits —
-			// refuse; retiring a bigger slice loses nothing (telescoping).
-			return domain.CreditNote{}, nil, errs.Invalid("retire_cents", "That much credit refunds less than one cent at the price paid; retire more credit in one refund.")
-		}
-
-		// The earlier notes on a top-up are reliefs: an ordinary note is
-		// refused on it (create's commit-line gate), and a refund made in
-		// Stripe on it is flagged, not recorded as a note
-		// (decideStripeRefund). The anchor keeps their totals within what was
-		// paid, so only their card refunds are summed here, failed ones apart.
-		var existingRefunds, failedRefunds int64
-		var failedNotes []string
-		for _, e := range existing {
-			if e.Status == domain.CreditNoteVoided {
-				continue
-			}
-			var serr error
-			existingRefunds, serr = domain.SumCents(existingRefunds, e.RefundAmountCents)
-			if serr == nil && e.RefundStatus == domain.RefundFailed && e.RefundAmountCents > 0 {
-				failedRefunds, serr = domain.SumCents(failedRefunds, e.RefundAmountCents)
-				failedNotes = append(failedNotes, e.CreditNoteNumber)
-			}
-			if serr != nil {
-				return domain.CreditNote{}, nil, fmt.Errorf("credit notes on invoice %s: %w", input.InvoiceID, serr)
-			}
-		}
-
-		// Allocation: the two permitted channels only (requirement f).
-		var refundAmount, outOfBand int64
-		// An offline-paid commit (RecordOfflinePayment) has no PaymentIntent:
-		// there is no card to refund behind it.
-		if input.RefundAmountCents == nil && input.OutOfBandAmountCents == nil {
-			if inv.HasCardPayment() {
-				refundAmount = x
-			} else {
-				outOfBand = x // offline-paid commit: the CN records the obligation; cash moves outside
-			}
-		} else {
-			if input.RefundAmountCents != nil {
-				refundAmount = *input.RefundAmountCents
-			}
-			if input.OutOfBandAmountCents != nil {
-				outOfBand = *input.OutOfBandAmountCents
-			}
-			if refundAmount < 0 {
-				return domain.CreditNote{}, nil, errs.Invalid("refund_amount_cents", "refund_amount_cents is negative; send zero or more.")
-			}
-			if outOfBand < 0 {
-				return domain.CreditNote{}, nil, errs.Invalid("out_of_band_amount_cents", "out_of_band_amount_cents is negative; send zero or more.")
-			}
-			if allocated, aerr := domain.SumCents(refundAmount, outOfBand); aerr != nil || allocated != x {
-				return domain.CreditNote{}, nil, errs.Invalid("refund_amount_cents", fmt.Sprintf(
-					"refund_amount_cents and out_of_band_amount_cents don't add up to this refund's %s; change them so they do.", amount(x)))
-			}
-		}
-		// PM refund cap: the card refund fits what the card paid less every
-		// refund of that payment, the earlier notes' (failed ones too, which a
-		// retry may send) and those made in Stripe. Zero when no card backs the
-		// payment at all, so an EXPLICIT refund allocation on an offline-paid
-		// invoice is refused here rather than reaching Stripe with no
-		// PaymentIntent.
-		priorRefunds, serr := domain.SumCents(existingRefunds, stripeRefunded)
-		if serr != nil {
-			return domain.CreditNote{}, nil, fmt.Errorf("refunds on invoice %s: %w", input.InvoiceID, serr)
-		}
-		if pmRefundable := inv.CardRefundableCents(priorRefunds); refundAmount > pmRefundable {
-			switch {
-			case !inv.HasCardPayment():
-				return domain.CreditNote{}, nil, errs.Invalid("refund_amount_cents", fmt.Sprintf(
-					"This top-up was not paid by card, so send the %s to out_of_band_amount_cents instead of refund_amount_cents.",
-					amount(refundAmount)))
-			case len(failedNotes) > 0 && refundAmount <= inv.CardRefundableCents(priorRefunds-failedRefunds):
-				return domain.CreditNote{}, nil, errs.Invalid("refund_amount_cents", fmt.Sprintf(
-					"The card has %s left to refund, because %s until retried or marked as returned another way; send the rest of the %s to out_of_band_amount_cents.",
-					amount(pmRefundable), failedRefundsStillCount(failedNotes), amount(refundAmount)))
-			}
-			return domain.CreditNote{}, nil, errs.Invalid("refund_amount_cents", fmt.Sprintf(
-				"The card has %s left to refund after earlier refunds, including refunds made in Stripe; send the rest of the %s to out_of_band_amount_cents.",
-				amount(pmRefundable), amount(refundAmount)))
-		}
-
-		cnNumber, nerr := s.numbers.NextCreditNoteNumberTx(ctx, tx, tenantID)
-		if nerr != nil {
-			return domain.CreditNote{}, nil, fmt.Errorf("allocate credit note number: %w", nerr)
-		}
-		if cnNumber == "" {
-			return domain.CreditNote{}, nil, fmt.Errorf("credit-note number generator returned an empty number")
-		}
-
-		reason := strings.TrimSpace(input.Reason)
-		if reason == "" {
-			reason = reliefReason
-		}
-		retireSlice, reliefCash, grantID = r, x, g.GrantID
-
-		// The note reverses no tax (a top-up carries none): its subtotal is
-		// its total.
-		header := domain.CreditNote{
-			InvoiceID:            input.InvoiceID,
-			CustomerID:           inv.CustomerID,
-			CreditNoteNumber:     cnNumber,
-			Status:               domain.CreditNoteDraft, // flipped issued below, same tx
-			Reason:               reason,
-			SubtotalCents:        x,
-			TotalCents:           x,
-			RefundAmountCents:    refundAmount,
-			CreditAmountCents:    0, // structurally forbidden channel
-			OutOfBandAmountCents: outOfBand,
-			CommitRetiredCents:   r,
-			Currency:             inv.Currency,
-			RefundStatus:         domain.RefundNone,
-		}
-		line := domain.CreditNoteLineItem{
-			Description:     "Refund for " + amount(r) + " of unused prepaid credit",
-			Quantity:        1,
-			UnitAmountCents: x,
-			AmountCents:     x,
-		}
-		return header, []domain.CreditNoteLineItem{line}, nil
+		grantID = hold.GrantID
+		return reliefNote(inv, input.Reason, r, x, refund, oob)
 	})
 	if err != nil {
 		return domain.CreditNote{}, err
-	}
-
-	// Flip issued on the SAME tx — trivially won on a fresh row, but kept
-	// as the single issued-state gate (and it stamps issued_at).
-	won, err := s.store.TransitionStatusTx(ctx, tx, tenantID, cn.ID, domain.CreditNoteDraft, domain.CreditNoteIssued)
-	if err != nil {
-		return domain.CreditNote{}, fmt.Errorf("claim relief issue transition: %w", err)
-	}
-	if !won {
-		return domain.CreditNote{}, fmt.Errorf("commit relief: freshly-created draft lost its issue CAS — concurrent writer on a row created this tx (impossible; investigate)")
-	}
-
-	// Retire the credits IN the tx (the internal money effect). The grant
-	// row is already locked by this tx, so the re-read is consistent.
-	if _, err := s.credits.RetireCommitSliceForReliefTx(ctx, tx, tenantID, input.InvoiceID, cn.ID, cn.CreditNoteNumber, retireSlice, reliefCash, grossPaid); err != nil {
-		return domain.CreditNote{}, fmt.Errorf("retire commit slice: %w", err)
 	}
 
 	// ADR-090 in-tx emission — mirrors Issue()'s row so relief CNs are as
@@ -1430,7 +1271,7 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 				"refund_amount_cents":      cn.RefundAmountCents,
 				"credit_amount_cents":      cn.CreditAmountCents,
 				"out_of_band_amount_cents": cn.OutOfBandAmountCents,
-				"credit_taken_back_cents":  retireSlice,
+				"credit_taken_back_cents":  cn.CommitRetiredCents,
 				"grant_id":                 grantID,
 				"reason":                   cn.Reason,
 				"currency":                 cn.Currency,
@@ -1447,6 +1288,165 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 	// External legs (Stripe refund / tax reversal) — shared with Issue(),
 	// idempotency-keyed and self-healing.
 	return s.runPostIssueExternalLegs(ctx, tenantID, cn.ID, cn, inv)
+}
+
+// reliefMayRunTx refuses a relief while the customer's bank holds a
+// chargeback on the payment (an appeal included), and while a refund made in
+// Stripe on the invoice is not settled: that refund may be this money
+// (ADR-134, no path refunds a customer twice). A lost dispute does not stop
+// it: the note's room and the card's say what is left. The dispute read is a
+// plain read: FOR SHARE here, under the credit-note lock, would cycle with
+// the dispute recorder, which takes its row before that lock.
+func (s *Service) reliefMayRunTx(ctx context.Context, tx *sql.Tx, tenantID string, inv domain.Invoice) error {
+	open, _, err := s.disputeStateTx(ctx, tx, inv.ID, inv.StripePaymentIntentID)
+	if err != nil {
+		return err
+	}
+	if open {
+		return errs.InvalidState("The customer's bank is disputing this payment, so it can't be refunded while the dispute is open; answer the dispute in Stripe, and refund the unused credit if you win.").WithCode("payment_disputed")
+	}
+	return s.refundBlockedByStripeRefund(ctx, tenantID, inv.ID, blockRelief)
+}
+
+// reliefCredit works out the credit a relief takes back and the cash it
+// refunds: the credit asked for, or with retire_all the most there is, which
+// is the smaller of the unused credit and the worth of room, what the
+// payment's documents still allow. A note that uses up the room takes all
+// the unused credit (topupHold.takes), so an explicit retire_cents that
+// would take more than it asked for is refused in favour of retire_all.
+func reliefCredit(input CommitReliefInput, hold topupHold, room int64, currency string) (r, x int64, err error) {
+	amount := func(cents int64) string {
+		return activity.FormatMoney(activity.Money{Cents: cents, Currency: currency})
+	}
+	if room <= 0 {
+		return 0, 0, errs.InvalidState("This payment has already been returned in full.")
+	}
+	if hold.unused <= 0 {
+		return 0, 0, errs.InvalidState("This top-up has no unused credit: it is used, expired or already refunded.")
+	}
+	most := min(hold.unused, hold.worth(room))
+	r = input.RetireCents
+	if input.RetireAll {
+		r = most
+	}
+	switch {
+	case r > hold.unused:
+		return 0, 0, errs.Invalid("retire_cents", fmt.Sprintf(
+			"Only %s of the %s of credit asked for is unused (usage not invoiced yet counts as used), refundable for %s; ask for that much or less, or set retire_all.",
+			amount(hold.unused), amount(r), amount(hold.cash(most))))
+	case r > most:
+		return 0, 0, errs.Invalid("retire_cents", fmt.Sprintf(
+			"This payment has %s left to return after the money that already went back, which pays for %s of credit; ask for that much or less, or set retire_all.",
+			amount(hold.cash(most)), amount(most)))
+	}
+	x = hold.cash(r)
+	if x == 0 {
+		// Deep-discount degenerate slice: the credits round to zero cash. A
+		// zero-total note would silently donate the credits; retiring a
+		// bigger slice loses nothing (telescoping).
+		return 0, 0, errs.Invalid("retire_cents", "That much credit refunds less than one cent at the price paid; retire more credit in one refund.")
+	}
+	taken := hold.takes(r, x, room)
+	if !input.RetireAll && taken > r {
+		return 0, 0, errs.Invalid("retire_cents", fmt.Sprintf(
+			"This refund returns the last of the payment, so it takes all %s of unused credit; send retire_all.", amount(taken)))
+	}
+	return taken, x, nil
+}
+
+// failedCardRefunds names the notes whose card refund failed and still
+// counts, since a retry may send it, with their sum.
+func failedCardRefunds(notes []domain.CreditNote) (numbers []string, cents int64) {
+	for _, cn := range notes {
+		if cn.Status != domain.CreditNoteVoided && cn.RefundStatus == domain.RefundFailed && cn.RefundAmountCents > 0 {
+			numbers = append(numbers, cn.CreditNoteNumber)
+			cents += cn.RefundAmountCents
+		}
+	}
+	return numbers, cents
+}
+
+// reliefSplit allocates a relief's cash x over its two channels, the card and
+// money paid back another way: the credit balance is never one, since paying
+// a relief into it would give back the credit it takes. With no split given,
+// all of it goes to the card that paid, or out of band for a top-up paid
+// another way. The card gets no more than card has left.
+func reliefSplit(input CommitReliefInput, inv domain.Invoice, x int64, card cardRoom, failedNotes []string, failedCents int64) (refund, oob int64, err error) {
+	amount := func(cents int64) string {
+		return activity.FormatMoney(activity.Money{Cents: cents, Currency: inv.Currency})
+	}
+	if input.RefundAmountCents == nil && input.OutOfBandAmountCents == nil {
+		if inv.HasCardPayment() {
+			refund = x
+		} else {
+			oob = x // offline-paid: the note records the obligation; cash moves outside
+		}
+	} else {
+		if input.RefundAmountCents != nil {
+			refund = *input.RefundAmountCents
+		}
+		if input.OutOfBandAmountCents != nil {
+			oob = *input.OutOfBandAmountCents
+		}
+		if refund < 0 {
+			return 0, 0, errs.Invalid("refund_amount_cents", "refund_amount_cents is negative; send zero or more.")
+		}
+		if oob < 0 {
+			return 0, 0, errs.Invalid("out_of_band_amount_cents", "out_of_band_amount_cents is negative; send zero or more.")
+		}
+		if allocated, aerr := domain.SumCents(refund, oob); aerr != nil || allocated != x {
+			return 0, 0, errs.Invalid("refund_amount_cents", fmt.Sprintf(
+				"refund_amount_cents and out_of_band_amount_cents don't add up to this refund's %s; change them so they do.", amount(x)))
+		}
+	}
+	if refund <= card.refundable {
+		return refund, oob, nil
+	}
+	switch {
+	case !inv.HasCardPayment():
+		return 0, 0, errs.Invalid("refund_amount_cents", fmt.Sprintf(
+			"This top-up was not paid by card, so send the %s to out_of_band_amount_cents instead of refund_amount_cents.", amount(refund)))
+	case card.lost:
+		return 0, 0, errs.Invalid("refund_amount_cents", fmt.Sprintf(
+			"The customer's bank reversed this payment in a dispute, so nothing more can go back to the card. If you pay the %s back another way, send it as out_of_band_amount_cents.", amount(refund)))
+	case len(failedNotes) > 0 && refund <= card.refundable+failedCents:
+		return 0, 0, errs.Invalid("refund_amount_cents", fmt.Sprintf(
+			"The card has %s left to refund, because %s until retried or marked as returned another way; send the rest of the %s to out_of_band_amount_cents.",
+			amount(card.refundable), failedRefundsStillCount(failedNotes), amount(refund)))
+	}
+	return 0, 0, errs.Invalid("refund_amount_cents", fmt.Sprintf(
+		"The card has %s left to refund after earlier refunds, including refunds made in Stripe; send the rest of the %s to out_of_band_amount_cents.",
+		amount(card.refundable), amount(refund)))
+}
+
+// reliefNote is the note a relief writes, not numbered yet: r credit taken
+// back for x cash, refund of it to the card and oob paid back another way.
+// It reverses no tax (a top-up carries none): its subtotal is its total.
+func reliefNote(inv domain.Invoice, reason string, r, x, refund, oob int64) (domain.CreditNote, []domain.CreditNoteLineItem, error) {
+	reason = strings.TrimSpace(reason)
+	if reason == "" {
+		reason = reliefReason
+	}
+	header := domain.CreditNote{
+		InvoiceID:            inv.ID,
+		CustomerID:           inv.CustomerID,
+		Status:               domain.CreditNoteDraft, // issued by issueNoteTx, same tx
+		Reason:               reason,
+		SubtotalCents:        x,
+		TotalCents:           x,
+		RefundAmountCents:    refund,
+		OutOfBandAmountCents: oob,
+		CommitRetiredCents:   r,
+		Currency:             inv.Currency,
+		RefundStatus:         domain.RefundNone,
+	}
+	line := domain.CreditNoteLineItem{
+		Description:     "Refund for " + activity.FormatMoney(activity.Money{Cents: r, Currency: inv.Currency}) + " of unused prepaid credit",
+		Quantity:        1,
+		UnitAmountCents: x,
+		AmountCents:     x,
+	}
+	return header, []domain.CreditNoteLineItem{line}, nil
 }
 
 // pendingDrawRefusal refuses a relief while invoice d is still to draw on the
@@ -1538,22 +1538,28 @@ func (s *Service) CreateRefund(ctx context.Context, tenantID string, input Refun
 		return domain.CreditNote{}, errs.InvalidState("invoice was paid outside Stripe — there is no card to refund; issue a credit note allocated to out_of_band_amount_cents instead")
 	}
 
-	// No amount: refund the most Create's two caps allow, what was paid by
-	// card less the refunds on notes not voided (a failed refund counts: its
-	// note keeps the amount for retry-refund), but no more than the invoice
-	// can still be credited (a note to the customer's balance or settled
-	// outside Stripe uses up part of the invoice too). Create checks both
-	// again under the invoice lock.
+	// No amount: refund the most Create's two caps allow, what can still go
+	// back to the card (cardRoom), but no more than the invoice can still be
+	// credited (a note to the customer's balance or settled outside Stripe
+	// uses up part of the invoice too). Create checks both again under the
+	// invoice lock.
 	amount := input.AmountCents
 	if amount == 0 {
 		sums, err := s.store.InvoiceSums(ctx, tenantID, input.InvoiceID)
 		if err != nil {
 			return domain.CreditNote{}, err
 		}
-		refundable := inv.CardRefundableCents(sums.RefundCents)
-		if refundable <= 0 {
+		card, err := s.cardRoom(ctx, tenantID, inv)
+		if err != nil {
+			return domain.CreditNote{}, err
+		}
+		switch {
+		case card.lost:
+			return domain.CreditNote{}, errs.InvalidState("The customer's bank reversed this payment in a dispute, so nothing can go back to the card.")
+		case card.refundable <= 0:
 			return domain.CreditNote{}, errs.InvalidState("invoice has already been fully refunded")
 		}
+		refundable := card.refundable
 		creditable := inv.TotalAmountCents - sums.CreditedCents
 		if creditable <= 0 {
 			return domain.CreditNote{}, errs.InvalidState("invoice has already been fully credited")

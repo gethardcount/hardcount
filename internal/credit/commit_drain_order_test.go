@@ -311,7 +311,9 @@ func outboxEvents(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, 
 // the real transactional outbox: value crossings (low / depleted / recovered)
 // enqueue in the same tx as the ledger write, the low threshold comes from
 // tenant_settings, and payloads carry customer_id + balance_cents (+
-// threshold_cents on low) so consumers can layer per-customer logic.
+// threshold_cents on low) so consumers can layer per-customer logic. low and
+// depleted say why the balance fell, as each writer states it: usage,
+// adjustment, expiry, or refund when a note takes bought credit back.
 func TestBalanceCrossingEvents(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
@@ -371,6 +373,9 @@ func TestBalanceCrossingEvents(t *testing.T) {
 	if lowBalance["customer_id"] != custID || lowBalance["currency"] != "USD" {
 		t.Errorf("low payload balance = %v, want %s in USD", lowBalance, custID)
 	}
+	if lows[0]["reason"] != "usage" {
+		t.Errorf("low reason = %v, want usage", lows[0]["reason"])
+	}
 
 	// 3000 → 0 via clawback: depleted fires; low does NOT re-fire (already
 	// below threshold — crossing semantics, not level semantics).
@@ -380,8 +385,12 @@ func TestBalanceCrossingEvents(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("adjust: %v", err)
 	}
-	if got := len(outboxEvents(t, db, ctx, tenantID, domain.EventCreditBalanceDepleted)); got != 1 {
-		t.Fatalf("depleted events = %d, want 1", got)
+	depleted := outboxEvents(t, db, ctx, tenantID, domain.EventCreditBalanceDepleted)
+	if len(depleted) != 1 {
+		t.Fatalf("depleted events = %d, want 1", len(depleted))
+	}
+	if depleted[0]["reason"] != "adjustment" {
+		t.Errorf("depleted reason = %v, want adjustment", depleted[0]["reason"])
 	}
 	if got := len(outboxEvents(t, db, ctx, tenantID, domain.EventCreditBalanceLow)); got != 1 {
 		t.Errorf("low events after depletion = %d, want still 1 (no re-fire below threshold)", got)
@@ -401,6 +410,56 @@ func TestBalanceCrossingEvents(t *testing.T) {
 	}
 	if b := recovered[1][domain.WebhookResourceCreditBalance].(map[string]any); b["balance_cents"] != float64(2000) {
 		t.Errorf("recovered payload balance = %v, want 2000", b["balance_cents"])
+	}
+	if _, ok := recovered[1]["reason"]; ok {
+		t.Errorf("recovered payload = %v, want no reason: only a fall carries one", recovered[1])
+	}
+
+	// 2000 → 0 when that grant expires and the sweep writes it off.
+	expireNow(t, db, ctx, tenantID, custID)
+	if _, errsList := svc.ExpireCredits(ctx); len(errsList) > 0 {
+		t.Fatalf("sweep: %v", errsList)
+	}
+	// 1000 of a top-up's credit → 0 when a note takes it back.
+	topup := seedPayableInvoice(t, db, ctx, tenantID, custID, 900, "HC-CROSS-TOPUP")
+	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	if _, err := svc.GrantCommitForInvoiceTx(ctx, tx, tenantID, custID, topup, "HC-CROSS-TOPUP", "USD", 1000, nil); err != nil {
+		t.Fatalf("top-up grant: %v", err)
+	}
+	if _, err := svc.RetireCommitSliceForReliefTx(ctx, tx, tenantID, topup, "hc_cn_cross", "CN-CROSS", 1000, 900, 900); err != nil {
+		t.Fatalf("take back: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+	var reasons []any
+	for _, e := range outboxEvents(t, db, ctx, tenantID, domain.EventCreditBalanceDepleted) {
+		reasons = append(reasons, e["reason"])
+	}
+	if len(reasons) != 3 || reasons[1] != "expiry" || reasons[2] != "refund" {
+		t.Errorf("depleted reasons = %v, want [adjustment expiry refund]", reasons)
+	}
+}
+
+// expireNow moves every grant of the customer that has credit left past its
+// expiry, as time does.
+func expireNow(t *testing.T, db *postgres.DB, ctx context.Context, tenantID, custID string) {
+	t.Helper()
+	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	if _, err := tx.ExecContext(ctx, `UPDATE customer_credit_ledger SET expires_at = NOW() - INTERVAL '1 minute'
+		WHERE customer_id = $1 AND amount_cents > consumed_cents AND entry_type = 'grant'`, custID); err != nil {
+		t.Fatalf("expire: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
 	}
 }
 

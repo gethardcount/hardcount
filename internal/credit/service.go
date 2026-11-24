@@ -282,44 +282,55 @@ func (s *Service) RetireCommitSliceForReliefTx(ctx context.Context, tx *sql.Tx, 
 	return CommitReliefResult{GrantID: g.GrantID, RemainingAfterCents: g.Remaining(), CNRetiredCents: g.CNRetiredCents}, nil
 }
 
-// ReliefGrant is a top-up's grant as a relief reads it under its locks, at
-// the relief's instant.
-type ReliefGrant struct {
+// TopupGrant is a top-up's grant as a note on the top-up reads it, at the
+// note's instant.
+type TopupGrant struct {
 	GrantID        string
 	GrantedCents   int64 // G
-	CNRetiredCents int64 // K
+	CNRetiredCents int64 // K, the credit every note on the top-up took back
 	// LiveRemainingCents is what is left of the grant at the instant, 0 once
 	// it is past its expires_at, swept or not.
 	LiveRemainingCents int64
-	// SpendableCents is the customer's spendable balance in the grant's
-	// currency at the instant (SpendableBalance), read under the same lock.
-	SpendableCents int64
 	// PendingDraw is the oldest issued invoice of the customer still to draw
 	// on the grant (domain.CreditDrawPendingInvoiceSQL), nil when none is.
 	PendingDraw *domain.PendingCreditDraw
 }
 
-// LockCommitGrantForReliefTx reads the funded grant under the relief locks
-// (customer advisory + grant FOR UPDATE) on the caller's tx, and the
-// customer's spendable balance in its currency, both at `at`: the read half
-// of the relief. Its figures stay frozen until the tx commits, because every
-// balance writer takes the customer lock first. found=false when the invoice
+// LockTopupGrantAndBalanceTx reads, on the caller's tx, the grant the top-up
+// invoiceID funded and the customer's spendable balance in its currency,
+// both at `at`, under the customer's credit lock and the grant's row lock.
+// The figures stay as read until the tx commits, because every balance
+// writer takes the customer's lock first. found=false when the invoice
 // funded no grant.
-func (s *Service) LockCommitGrantForReliefTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, at time.Time) (ReliefGrant, bool, error) {
-	g, found, err := s.store.LockCommitGrantTx(ctx, tx, tenantID, invoiceID, at)
+func (s *Service) LockTopupGrantAndBalanceTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, at time.Time) (g TopupGrant, spendableCents int64, found bool, err error) {
+	st, found, err := s.store.LockCommitGrantTx(ctx, tx, tenantID, invoiceID, at)
 	if err != nil || !found {
-		return ReliefGrant{}, found, err
+		return TopupGrant{}, 0, found, err
 	}
-	spendable, err := s.store.GetSpendableBalanceTx(ctx, tx, tenantID, g.CustomerID, at)
+	spendable, err := s.store.GetSpendableBalanceTx(ctx, tx, tenantID, st.CustomerID, at)
 	if err != nil {
-		return ReliefGrant{}, false, fmt.Errorf("read the spendable balance for relief: %w", err)
+		return TopupGrant{}, 0, false, fmt.Errorf("read the spendable balance under the top-up's grant: %w", err)
 	}
-	out := ReliefGrant{GrantID: g.GrantID, GrantedCents: g.AmountCents, CNRetiredCents: g.CNRetiredCents,
-		SpendableCents: spendable[g.Currency], PendingDraw: g.PendingDraw}
-	if g.Live {
-		out.LiveRemainingCents = g.Remaining()
+	return topupGrant(st), spendable[st.Currency], true, nil
+}
+
+// TopupGrantAndBalance is LockTopupGrantAndBalanceTx read with no lock, for
+// display (PostgresStore.ReadTopupGrantAndBalance).
+func (s *Service) TopupGrantAndBalance(ctx context.Context, tenantID, invoiceID string, at time.Time) (TopupGrant, int64, bool, error) {
+	st, spendable, found, err := s.store.ReadTopupGrantAndBalance(ctx, tenantID, invoiceID, at)
+	if err != nil || !found {
+		return TopupGrant{}, 0, found, err
 	}
-	return out, true, nil
+	return topupGrant(st), spendable, true, nil
+}
+
+// topupGrant is the grant's state as a note on its top-up reads it.
+func topupGrant(st commitGrantState) TopupGrant {
+	g := TopupGrant{GrantID: st.GrantID, GrantedCents: st.AmountCents, CNRetiredCents: st.CNRetiredCents, PendingDraw: st.PendingDraw}
+	if st.Live {
+		g.LiveRemainingCents = st.Remaining()
+	}
+	return g
 }
 
 // GrantTx is the in-transaction variant used by the subscription

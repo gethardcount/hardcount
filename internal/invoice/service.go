@@ -200,7 +200,7 @@ type Service struct {
 	dunningReader  DunningRunReader
 	subPauseReader SubscriptionPauseReader
 	customerSearch CustomerSearcher
-	commitGrants   CommitGrantReader
+	topupCredit    TopupCreditReader
 	paymentPages   PaymentPageReader
 	cardRefusals   CardRefusalReader
 	disputes       DisputeReader
@@ -493,30 +493,22 @@ func (s *Service) SetCustomerSearcher(c CustomerSearcher) {
 	s.customerSearch = c
 }
 
-// CommitGrantReader is the narrow prepaid-commit lookup the attention
-// classifier uses when a dispute on a paid top-up was lost: the dispute_lost
-// notice says how much of the credit is still spendable. Satisfied by
-// *credit.PostgresStore.
-//
-// Consumer-defined here rather than imported from `credit`: the arch boundary
-// (internal/arch/boundaries_test.go) allows `invoice` only {audit, auth,
-// payment, tax}, and this is a read for a banner — nowhere near enough reason
-// to open a new edge between two money domains.
-//
-// Returns the two figures separately because they drive different sentences:
-// drawable is what commit relief can still retire, consumed is gone for good.
-// `now` is the action's time (see Service.clock), so the grant's expiry is
-// judged at the same instant the drawdown uses.
-type CommitGrantReader interface {
-	CommitGrantExposure(ctx context.Context, tenantID, invoiceID string, now time.Time) (drawableCents, consumedCents int64, err error)
+// TopupCreditReader reads what the dispute notices on a top-up show: its
+// issued credit notes, which the lost notice reads its figures from, and its
+// unused credit, which the open-chargeback notice states. Satisfied by
+// *creditnote.Service; declared consumer-side, since invoice may not import
+// creditnote (internal/arch/boundaries_test.go). `at` is the action's time,
+// so the grant's expiry is judged as the drawdown judges it.
+type TopupCreditReader interface {
+	ListIssuedForInvoice(ctx context.Context, tenantID, invoiceID string) ([]domain.CreditNote, error)
+	UnusedCredit(ctx context.Context, tenantID, invoiceID string, at time.Time) (int64, error)
 }
 
-// SetCommitGrantReader wires the prepaid-commit lookup (see
-// CommitGrantReader). Optional: when nil the figures stay zero and the
-// dispute_lost notice names no prepaid credit — the same safe default as an
-// unwired dunning reader.
-func (s *Service) SetCommitGrantReader(r CommitGrantReader) {
-	s.commitGrants = r
+// SetTopupCreditReader wires the reads behind the dispute notices on a
+// top-up. Optional: when nil the lost notice reads no note (and calls the
+// loss not recorded) and the open-chargeback notice names no figure.
+func (s *Service) SetTopupCreditReader(r TopupCreditReader) {
+	s.topupCredit = r
 }
 
 // PaymentPageReader reports whether an invoice has a hosted payment page that
@@ -574,18 +566,29 @@ func (s *Service) CardRefusedForGood(ctx context.Context, tenantID, invoiceID, s
 }
 
 // DisputeReader reads the card disputes Stripe reported against invoices
-// (#979). Satisfied by *PostgresStore, which also records them from the
-// charge.dispute.* webhooks.
+// (#979), and records a lost one's credit note on a top-up
+// (RecordDisputeLoss). Satisfied by *PostgresStore, which also records them
+// from the charge.dispute.* webhooks.
 type DisputeReader interface {
 	ListDisputesByInvoice(ctx context.Context, tenantID, invoiceID string) ([]domain.InvoiceDispute, error)
-	LostDisputesByInvoices(ctx context.Context, tenantID string, invoiceIDs []string) (map[string]domain.InvoiceDispute, error)
+	NoticeDisputesByInvoices(ctx context.Context, tenantID string, invoiceIDs []string) (map[string]domain.InvoiceDispute, error)
+	RecordDisputeLoss(ctx context.Context, tenantID, invoiceID, disputeID string) (domain.InvoiceDispute, error)
 }
 
-// SetDisputeReader wires the dispute records behind the dispute_lost notice,
-// the timeline's dispute rows and GET /v1/invoices/{id}/disputes. Optional:
-// when nil no dispute is reported.
+// SetDisputeReader wires the dispute records behind the dispute notices, the
+// timeline's dispute rows, GET /v1/invoices/{id}/disputes and its
+// record-loss. Optional: when nil no dispute is reported.
 func (s *Service) SetDisputeReader(r DisputeReader) {
 	s.disputes = r
+}
+
+// RecordDisputeLoss writes the credit note of a lost dispute on a top-up that
+// has none (PostgresStore.RecordDisputeLoss).
+func (s *Service) RecordDisputeLoss(ctx context.Context, tenantID, invoiceID, disputeID string) (domain.InvoiceDispute, error) {
+	if s.disputes == nil {
+		return domain.InvoiceDispute{}, errs.ErrNotFound
+	}
+	return s.disputes.RecordDisputeLoss(ctx, tenantID, invoiceID, disputeID)
 }
 
 // ListDisputes returns the invoice's card disputes, oldest first. Empty when
@@ -1147,7 +1150,7 @@ type attentionFacts struct {
 	pageLive        map[string]bool                       // invoice id → hosted payment page live
 	refusedCard     map[string]string                     // invoice id → decline code that stops retries charging the default card
 	retrying        map[string]bool                       // invoice id → a charge retry is still to come (RetryScheduled)
-	lostDispute     map[string]domain.InvoiceDispute      // invoice id → newest dispute closed as lost
+	dispute         map[string]domain.InvoiceDispute      // invoice id → newest lost dispute, else newest open chargeback
 	refundReview    map[string]domain.InvoiceStripeRefund // invoice id → newest refund made in Stripe that needs review
 }
 
@@ -1356,11 +1359,12 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 		}
 	}
 
-	// A lost dispute (#979) can sit on any invoice that took a payment, and a
-	// paid invoice is where it usually does, so every non-draft row joins
-	// the read: one indexed query for the page. A read error leaves the map
-	// empty and the notice off (logged); the dispute itself stays on the
-	// invoice's timeline and in its disputes list.
+	// A lost dispute (#979), or a chargeback open on a top-up, can sit on any
+	// invoice that took a payment, and a paid invoice is where it usually
+	// does, so every non-draft row joins the read: one indexed query for the
+	// page. A read error leaves the map empty and the notice off (logged);
+	// the dispute itself stays on the invoice's timeline and in its disputes
+	// list.
 	if s.disputes != nil {
 		ids := distinct(page, func(inv domain.Invoice) string {
 			if inv.Status != domain.InvoiceDraft {
@@ -1369,12 +1373,12 @@ func (s *Service) readAttentionFacts(ctx context.Context, tenantID string, page 
 			return ""
 		})
 		if len(ids) > 0 {
-			lost, err := s.disputes.LostDisputesByInvoices(ctx, tenantID, ids)
+			disputes, err := s.disputes.NoticeDisputesByInvoices(ctx, tenantID, ids)
 			if err != nil {
-				slog.Log(ctx, logging.ErrorLevel(ctx, err), "invoice: attention could not read lost disputes", "error", err,
+				slog.Log(ctx, logging.ErrorLevel(ctx, err), "invoice: attention could not read disputes", "error", err,
 					"tenant_id", tenantID, "invoices", len(ids))
 			}
-			f.lostDispute = lost
+			f.dispute = disputes
 		}
 	}
 
@@ -1437,32 +1441,38 @@ func (s *Service) decorateInvoice(ctx context.Context, inv domain.Invoice, f att
 	atc.PaymentPageOpen = f.pageLive[inv.ID]
 	atc.RetryBlockingDeclineCode = f.refusedCard[inv.ID]
 	atc.DunningRetrying = f.retrying[inv.ID]
-	if d, ok := f.lostDispute[inv.ID]; ok {
-		atc.LostDispute = &d
+	if d, ok := f.dispute[inv.ID]; ok {
+		if d.Status == domain.DisputeLost {
+			atc.LostDispute = &d
+		} else {
+			atc.OpenChargeback = &d
+		}
 	}
 	if r, ok := f.refundReview[inv.ID]; ok {
 		atc.StripeRefundReview = &r
 	}
-	// A paid top-up whose dispute was lost (#1287 review): the bank took the
-	// cash back while the credit stays spendable, and the dispute_lost notice
-	// must say so and point to commit relief instead of the credit note a
-	// commit invoice refuses. Only a top-up's payment grants commit credit,
-	// and only paid top-ups with a lost dispute pay for the read, which is
-	// almost none: one hit on the unique partial index
-	// idx_credit_ledger_commit_fund_dedup.
-	//
-	// Expiry is judged at the request's instant (s.clock.Now(ctx)), with the
-	// predicate drainPositiveBlocks uses, so the notice and a drawdown agree
-	// about whether credit is still live. A read error leaves both figures
-	// zero, and the notice names no prepaid credit rather than a balance we
-	// could not read.
-	if s.commitGrants != nil && inv.ID != "" && inv.BillingReason == domain.BillingReasonTopup &&
-		inv.Status == domain.InvoicePaid && atc.LostDispute != nil {
-		if drawable, consumed, err := s.commitGrants.CommitGrantExposure(ctx, inv.TenantID, inv.ID, s.clock.Now(ctx)); err == nil {
-			atc.CommitGrantDrawableCents = drawable
-			atc.CommitGrantConsumedCents = consumed
+	// The dispute notices on a top-up read its notes or its unused credit.
+	// Only top-ups with a dispute on their own payment pay for the reads,
+	// almost none. A read error leaves the figures out (logged): the notice
+	// is display-only.
+	if s.topupCredit != nil && inv.BillingReason == domain.BillingReasonTopup {
+		switch {
+		case atc.LostDispute != nil && atc.LostDispute.OnTopupPayment(inv):
+			notes, err := s.topupCredit.ListIssuedForInvoice(ctx, inv.TenantID, inv.ID)
+			if err != nil {
+				slog.WarnContext(ctx, "invoice: the lost notice could not read the top-up's credit notes", "invoice_id", inv.ID, "error", err)
+			}
+			atc.TopupNotes = notes
+		case atc.OpenChargeback != nil && atc.OpenChargeback.OnTopupPayment(inv):
+			unused, err := s.topupCredit.UnusedCredit(ctx, inv.TenantID, inv.ID, s.clock.Now(ctx))
+			if err != nil {
+				slog.WarnContext(ctx, "invoice: the chargeback notice could not read the top-up's unused credit", "invoice_id", inv.ID, "error", err)
+			} else {
+				atc.UnusedCreditCents = &unused
+			}
 		}
 	}
+	atc.Location = s.invoiceDisplayLocCached(ctx, inv, tenantLoc)
 	atc.StripeConnected = f.stripeConnected
 	atc.SetupLinkEmailOff = s.setupLinkEmailOff
 	atc.InvoiceEmailOff = s.invoiceEmailOff

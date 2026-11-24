@@ -15,10 +15,11 @@ import (
 )
 
 // card_refunds_exceed_paid lists the invoices whose card refunds add up to
-// more than the card paid: the refunds of issued notes that did not fail,
-// plus the refunds made in Stripe of the same payment that moved or may move
-// money and that no note holds. The rows are written directly, because the
-// flagged one is what the caps refuse to write.
+// more than the card paid, by the one definition the caps use
+// (domain.CardRefundsSQL): the card refunds of notes not voided, failed ones
+// and drafts too, plus the refunds made in Stripe of the same payment that
+// moved or may move money and that no note holds. The rows are written
+// directly, because the flagged ones are what the caps refuse to write.
 func TestDoctor_CardRefundsExceedPaid(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
@@ -78,11 +79,17 @@ func TestDoctor_CardRefundsExceedPaid(t *testing.T) {
 			VALUES ($1, $2, $3, 'cus_crdoc', $1, 'issued', 'refund', $4, $4, $4, 'USD', $5, NULLIF($6, ''), now())`,
 			id, tenantID, invoiceID, cents, status, refundID)
 	}
+	draft := func(id, invoiceID string, cents int64) {
+		seed(`INSERT INTO credit_notes (id, tenant_id, invoice_id, customer_id, credit_note_number, status, reason,
+				subtotal_cents, total_cents, refund_amount_cents, currency, refund_status)
+			VALUES ($1, $2, $3, 'cus_crdoc', $1, 'draft', 'refund', $4, $4, $4, 'USD', 'none')`,
+			id, tenantID, invoiceID, cents)
+	}
 	// stripeRefund records a refund made in Stripe of payment pi.
 	stripeRefund := func(invoiceID, refundID, pi string, cents int64, status, outcome, creditNoteID string) {
 		review := ""
 		if outcome == "needs_review" {
-			review = "prepaid_commit"
+			review = "seen_late"
 		}
 		seed(`INSERT INTO invoice_stripe_refunds (tenant_id, invoice_id, stripe_refund_id, stripe_payment_intent_id,
 				amount_cents, currency, status, outcome, review_reason, credit_note_id,
@@ -99,10 +106,16 @@ func TestDoctor_CardRefundsExceedPaid(t *testing.T) {
 	paid("hc_inv_crdoc_failed_stripe")
 	note("hc_cn_crdoc_failed_stripe", "hc_inv_crdoc_failed_stripe", 5000, "succeeded", "")
 	stripeRefund("hc_inv_crdoc_failed_stripe", "re_crdoc_failed_stripe", "pi_hc_inv_crdoc_failed_stripe", 5000, "failed", "not_refunded", "")
-	// A note whose card refund failed, and a refund made in Stripe for it: within.
+	// A note whose card refund failed, and a refund made in Stripe for it:
+	// over until the refund is attached to the note, since a retry may send
+	// the failed one.
 	paid("hc_inv_crdoc_failed_note")
 	note("hc_cn_crdoc_failed_note", "hc_inv_crdoc_failed_note", 9000, "failed", "")
 	stripeRefund("hc_inv_crdoc_failed_note", "re_crdoc_failed_note", "pi_hc_inv_crdoc_failed_note", 9000, "succeeded", "needs_review", "")
+	// A draft's card refund counts.
+	paid("hc_inv_crdoc_draft")
+	draft("hc_cn_crdoc_draft", "hc_inv_crdoc_draft", 5000)
+	stripeRefund("hc_inv_crdoc_draft", "re_crdoc_draft", "pi_hc_inv_crdoc_draft", 5000, "pending", "awaiting", "")
 	// A refund made in Stripe that a note holds counts once: within.
 	paid("hc_inv_crdoc_held")
 	note("hc_cn_crdoc_held", "hc_inv_crdoc_held", 9000, "succeeded", "re_crdoc_held")
@@ -120,7 +133,8 @@ func TestDoctor_CardRefundsExceedPaid(t *testing.T) {
 	for _, v := range res.Violations {
 		flagged = append(flagged, v.RowID)
 	}
-	if !slices.Equal(flagged, []string{"hc_inv_crdoc_over"}) {
-		t.Errorf("flagged %v, want only hc_inv_crdoc_over", flagged)
+	slices.Sort(flagged)
+	if want := []string{"hc_inv_crdoc_draft", "hc_inv_crdoc_failed_note", "hc_inv_crdoc_over"}; !slices.Equal(flagged, want) {
+		t.Errorf("flagged %v, want %v", flagged, want)
 	}
 }

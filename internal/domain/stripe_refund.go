@@ -108,10 +108,6 @@ const (
 	// StripeRefundReviewCurrencyMismatch: the refund's currency is not the
 	// invoice's.
 	StripeRefundReviewCurrencyMismatch StripeRefundReviewReason = "currency_mismatch"
-	// StripeRefundReviewPrepaidCommit: the invoice bought prepaid credit. An
-	// ordinary credit note is refused there (ADR-078 D4), and the credit
-	// stays spendable until commit relief retires it.
-	StripeRefundReviewPrepaidCommit StripeRefundReviewReason = "prepaid_commit"
 	// StripeRefundReviewSeenLate: Hardcount first saw the refund more than
 	// stripeRefundLateAfter after Stripe made it, so the operator may already
 	// have recorded it by hand.
@@ -131,6 +127,12 @@ const (
 	// invoice has left to credit, because an earlier credit note already gave
 	// part of it back another way.
 	StripeRefundReviewExceedsCreditable StripeRefundReviewReason = "exceeds_creditable"
+	// StripeRefundReviewCreditNoteNotWritten: the refund passed every check,
+	// but its credit note on a top-up is not written yet: the customer's
+	// unbilled usage could not be read before the transaction, so the credit
+	// it paid for could not be worked out. The operator records it with the
+	// linked create (POST /v1/credit-notes with stripe_refund_id).
+	StripeRefundReviewCreditNoteNotWritten StripeRefundReviewReason = "credit_note_not_written"
 )
 
 // stripeRefundLateAfter is how long after Stripe made a refund Hardcount may

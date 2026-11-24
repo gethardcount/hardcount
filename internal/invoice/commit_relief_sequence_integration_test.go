@@ -28,10 +28,14 @@ var (
 // a seeded random sequence of reliefs (some of whose card refunds fail),
 // "returned another way" on a failed one, usage and its close, expiry, refunds
 // made in Stripe and disputes, on one customer with top-ups (every other one
-// discounted) and promotional credit. Six invariants are checked after every
-// step, and each kind of step must have succeeded a few times, so a change
-// that refuses every relief cannot pass. A failure names its seed;
-// -relief-seed replays it.
+// discounted) and promotional credit. A refund made in Stripe and a lost
+// dispute write their own notes, which take credit back, and a void of a
+// usage invoice gives drawn credit back to its grants. Six invariants are
+// checked after every step, and each kind of step must have succeeded a few
+// times, so a change that refuses every relief cannot pass. Stripe and the
+// bank never return more than the payment has left, as they do not, so the
+// first invariant catches Hardcount returning too much. A failure names its
+// seed; -relief-seed replays it.
 func TestCommitRelief_RandomSequence(t *testing.T) {
 	seeds := []int64{1, 2, 3}
 	if *reliefSeed != 0 {
@@ -73,6 +77,7 @@ type reliefSequence struct {
 	eventAt  time.Time          // the next Stripe event's time; each event is a second later
 	refunds  []stripeRefundMade // refunds made in Stripe that succeeded
 	inFlight []stripeRefundMade // refunds made in Stripe still pending
+	closes   []string           // usage invoices a close made, not voided
 	n        int
 	done     map[string]int // steps that succeeded, by kind
 }
@@ -94,6 +99,7 @@ func newReliefSequence(t *testing.T, seed int64) *reliefSequence {
 		unbilled: &unbilledUsage{}, eventAt: time.Now().UTC().Truncate(time.Second), cards: &stripeRefunds{}, done: map[string]int{}}
 	s.svc = newCardReliefService(h, s.cards)
 	s.svc.SetUnbilledUsageReader(s.unbilled)
+	h.invStore.SetDisputeLossRecorder(s.svc)
 	s.buy()
 	s.buy()
 	expires := time.Now().Add(24 * time.Hour)
@@ -111,7 +117,8 @@ func newReliefSequence(t *testing.T, seed int64) *reliefSequence {
 // the default length: well under what the seeds do, well over zero.
 var sequenceFloor = map[string]int{
 	"relief": 10, "returned another way": 1, "close drew credit": 3, "expiry": 2,
-	"purchase": 1, "refund made in Stripe": 10, "dispute": 10,
+	"purchase": 1, "refund made in Stripe": 5, "dispute": 10,
+	"refund recorded as a note": 1, "loss recorded as a note": 1, "void gave credit back": 1,
 }
 
 func (s *reliefSequence) run(steps int) {
@@ -166,8 +173,10 @@ func (s *reliefSequence) step() string {
 	case k < 52:
 		s.unbilled.cents += s.rng.Int63n(2000)
 		return fmt.Sprintf("usage, unbilled %d", s.unbilled.cents)
-	case k < 64:
+	case k < 61:
 		return s.close()
+	case k < 64:
+		return s.void()
 	case k < 67:
 		return s.expire()
 	case k < 71:
@@ -185,11 +194,13 @@ func (s *reliefSequence) relief() string {
 	tp := s.top()
 	at := time.Now().UTC().Truncate(time.Microsecond)
 	unused := s.unusedAt(tp, at)
-	blocked := s.chargebackOrLoss(tp)
+	blocked := s.chargebackOpen(tp)
 	k := s.grant(tp).cnRetired
 
 	in := creditnote.CommitReliefInput{InvoiceID: tp.inv.ID}
-	if s.rng.Intn(20) == 0 {
+	// One relief in four takes all it can, which reaches what the payment's
+	// documents allow once money went back outside Hardcount.
+	if s.rng.Intn(4) == 0 {
 		in.RetireAll = true
 	} else {
 		in.RetireCents = 1 + s.rng.Int63n(5000)
@@ -220,7 +231,7 @@ func (s *reliefSequence) relief() string {
 		return did + ": refused: " + err.Error()
 	}
 	if blocked {
-		s.t.Errorf("invariant 4: %s was issued while a chargeback is open or lost", did)
+		s.t.Errorf("invariant 4: %s was issued while a chargeback is open", did)
 	}
 	if cn.CommitRetiredCents > unused {
 		s.t.Errorf("invariant 5: %s took %d credit, more than the %d unused at its read", did, cn.CommitRetiredCents, unused)
@@ -296,8 +307,27 @@ func (s *reliefSequence) close() string {
 	s.unbilled.cents = 0
 	if drawn > 0 {
 		s.done["close drew credit"]++
+		s.closes = append(s.closes, inv)
 	}
 	return did
+}
+
+// void voids a usage invoice a close made, as an operator does: the credit
+// it drew goes back to the grants it came from (ADR-132), so credit already
+// used, and already paid back by a note for money returned outside
+// Hardcount, can be unused again.
+func (s *reliefSequence) void() string {
+	if len(s.closes) == 0 {
+		return "no usage invoice to void"
+	}
+	i := s.rng.Intn(len(s.closes))
+	id := s.closes[i]
+	s.closes = append(s.closes[:i], s.closes[i+1:]...)
+	if _, err := s.h.invSvc.Void(s.ctx, s.h.tenantID, id); err != nil {
+		s.t.Fatalf("void %s: %v", id, err)
+	}
+	s.done["void gave credit back"]++
+	return "voided " + id
 }
 
 // expire moves a grant past its expiry, as time does, and sometimes sweeps.
@@ -341,15 +371,21 @@ func (s *reliefSequence) stripeRefund() string {
 		return "refund " + re.id + " failed after it succeeded"
 	}
 	tp := s.top()
-	left := tp.price - s.cardRefunded(tp)
+	if s.chargebackOpen(tp) || s.lost(tp) {
+		return "no refund: Stripe refuses a refund of a disputed payment"
+	}
+	left := tp.price - s.cash(tp)
 	if left <= 0 {
-		return "no refund: the card is fully refunded"
+		return "no refund: the payment is returned in full"
 	}
 	statuses := []domain.StripeRefundStatus{domain.StripeRefundSucceeded, domain.StripeRefundPending, domain.StripeRefundRequiresAction, domain.StripeRefundFailed}
 	status := statuses[s.rng.Intn(len(statuses))]
 	s.n++
 	re := fmt.Sprintf("re_seq_%d_%d", s.seed, s.n)
 	cents := 1 + s.rng.Int63n(min(left, 20000))
+	if status == domain.StripeRefundSucceeded && s.rng.Intn(3) == 0 {
+		return s.lateRefund(tp, re, cents)
+	}
 	recordStripeRefund(s.t, s.ctx, s.svc, s.h.tenantID, re, tp.pi, cents, status, s.nextEventAt())
 	switch {
 	case status == domain.StripeRefundSucceeded:
@@ -357,8 +393,46 @@ func (s *reliefSequence) stripeRefund() string {
 	case status.InFlight():
 		s.inFlight = append(s.inFlight, stripeRefundMade{re, tp.pi, cents})
 	}
+	if status == domain.StripeRefundSucceeded && s.heldByNote(re) {
+		s.done["refund recorded as a note"]++
+	}
 	s.done["refund made in Stripe"]++
 	return fmt.Sprintf("refund %s of %d made in Stripe, %s", re, cents, status)
+}
+
+// lateRefund is a refund made in Stripe that Hardcount hears of two days
+// late, so it is flagged; the operator records it with a credit note linked
+// to it, or says they handled it outside Hardcount.
+func (s *reliefSequence) lateRefund(tp *seqTopup, re string, cents int64) string {
+	at := s.nextEventAt()
+	if _, err := s.svc.RecordStripeRefund(s.ctx, s.h.tenantID, domain.StripeRefundSnapshot{
+		StripeEventID: "evt_" + re, EventAt: at, StripeRefundID: re, StripePaymentIntentID: tp.pi,
+		AmountCents: cents, Currency: "usd", Status: domain.StripeRefundSucceeded, CreatedAt: at.Add(-48 * time.Hour),
+	}); err != nil {
+		s.t.Fatalf("record refund %s: %v", re, err)
+	}
+	s.refunds = append(s.refunds, stripeRefundMade{re, tp.pi, cents})
+	s.done["refund made in Stripe"]++
+	did := fmt.Sprintf("refund %s of %d made in Stripe, seen late", re, cents)
+	if s.rng.Intn(2) == 0 {
+		s.svc.SetRefundReader(fixedRefund{domain.StripeRefundFacts{ID: re, PaymentIntentID: tp.pi, AmountCents: cents, Currency: "usd", Status: domain.StripeRefundSucceeded}})
+		_, err := s.svc.Create(s.ctx, s.h.tenantID, creditnote.CreateInput{
+			InvoiceID: tp.inv.ID, Reason: "Refunded in Stripe", RefundAmountCents: cents, AutoIssue: true, StripeRefundID: re,
+			Lines: []creditnote.CreditLineInput{{Description: "Refund made in Stripe (" + re + ")", Quantity: 1, UnitAmountCents: cents}},
+		})
+		if err == nil {
+			s.done["refund recorded as a note"]++
+			return did + ", recorded"
+		}
+		if !errors.Is(err, errs.ErrInvalidState) && !errors.Is(err, errs.ErrValidation) {
+			s.t.Fatalf("%s: record: %v", did, err)
+		}
+		did += ", not recorded (" + err.Error() + ")"
+	}
+	if _, err := s.svc.DismissStripeRefund(s.ctx, s.h.tenantID, tp.inv.ID, re, "handled outside Hardcount"); err != nil {
+		s.t.Fatalf("%s: dismiss: %v", did, err)
+	}
+	return did + ", dismissed"
 }
 
 // dispute moves the top-up's dispute to a random status.
@@ -372,17 +446,32 @@ func (s *reliefSequence) dispute() string {
 		domain.DisputeWarningNeedsResponse, domain.DisputeWarningUnderReview, domain.DisputeWarningClosed,
 		domain.DisputeNeedsResponse, domain.DisputeUnderReview, domain.DisputeAppealNeedsResponse,
 		domain.DisputeAppealUnderReview, domain.DisputeWon, domain.DisputeLost, domain.DisputePrevented,
+		domain.DisputeLost, // twice, so a loss is recorded on every seed
 	}
 	status := statuses[s.rng.Intn(len(statuses))]
+	// The bank takes what the payment has left, and nothing from one
+	// returned in full.
+	wasLost := s.lost(tp)
+	amount := tp.price - s.cash(tp)
+	if wasLost {
+		amount = s.disputeAmount(tp)
+	}
+	if status == domain.DisputeLost && amount <= 0 {
+		status = domain.DisputeWon
+	}
 	at := s.nextEventAt()
-	if _, err := s.h.invStore.RecordStripeDispute(s.ctx, s.h.tenantID, domain.DisputeSnapshot{
+	res, err := s.h.invStore.RecordStripeDispute(s.ctx, s.h.tenantID, domain.DisputeSnapshot{
 		StripeEventID: fmt.Sprintf("evt_%s_%d", tp.disputeID, at.Unix()), EventAt: at, StripeDisputeID: tp.disputeID,
-		StripePaymentIntentID: tp.pi, Status: status, AmountCents: tp.price, Currency: "usd", OpenedAt: s.eventAt,
-	}); err != nil {
+		StripePaymentIntentID: tp.pi, Status: status, AmountCents: max(amount, 1), Currency: "usd", OpenedAt: s.eventAt,
+	})
+	if err != nil {
 		s.t.Fatalf("dispute: %v", err)
 	}
 	s.done["dispute"]++
-	return fmt.Sprintf("dispute %s now %s", tp.disputeID, status)
+	if !wasLost && res.Dispute.Status == domain.DisputeLost && res.Dispute.CreditNoteID != "" {
+		s.done["loss recorded as a note"]++
+	}
+	return fmt.Sprintf("dispute %s now %s, of %d", tp.disputeID, status, max(amount, 1))
 }
 
 // reliefCash is the price-ratio anchor stated again: f(K+r) - f(K), with
@@ -419,44 +508,83 @@ func (s *reliefSequence) unusedAt(tp *seqTopup, at time.Time) int64 {
 	return min(live, max(spendable-s.unbilled.cents, 0))
 }
 
-func (s *reliefSequence) chargebackOrLoss(tp *seqTopup) bool {
+// dispute returns the top-up's dispute on its payment, if any.
+func (s *reliefSequence) disputeOf(tp *seqTopup) (domain.InvoiceDispute, bool) {
 	ds, err := s.h.invStore.ListDisputesByInvoice(s.ctx, s.h.tenantID, tp.inv.ID)
 	if err != nil {
 		s.t.Fatalf("disputes: %v", err)
 	}
 	for _, d := range ds {
-		if d.StripePaymentIntentID != tp.pi {
-			continue
-		}
-		switch d.Status {
-		case domain.DisputeNeedsResponse, domain.DisputeUnderReview, domain.DisputeAppealNeedsResponse,
-			domain.DisputeAppealUnderReview, domain.DisputeLost:
-			return true
+		if d.StripePaymentIntentID == tp.pi {
+			return d, true
 		}
 	}
-	return false
+	return domain.InvoiceDispute{}, false
 }
 
-// cardRefunded is what has left the card or may still leave it: the refunds
-// of issued notes that did not fail, and the refunds made in Stripe of the
-// same payment that moved or may move money and that no note holds.
-func (s *reliefSequence) cardRefunded(tp *seqTopup) int64 {
-	var notes, stripe int64
+func (s *reliefSequence) chargebackOpen(tp *seqTopup) bool {
+	d, ok := s.disputeOf(tp)
+	return ok && !d.Status.Inquiry() && !d.Status.Closed()
+}
+
+func (s *reliefSequence) lost(tp *seqTopup) bool {
+	d, ok := s.disputeOf(tp)
+	return ok && d.Status == domain.DisputeLost
+}
+
+func (s *reliefSequence) disputeAmount(tp *seqTopup) int64 {
+	d, _ := s.disputeOf(tp)
+	return d.AmountCents
+}
+
+func (s *reliefSequence) heldByNote(refundID string) bool {
+	var held bool
 	s.query(func(tx *sql.Tx) error {
-		if err := tx.QueryRowContext(s.ctx, `
-			SELECT COALESCE(SUM(refund_amount_cents), 0) FROM credit_notes
-			WHERE invoice_id = $1 AND status = 'issued' AND COALESCE(refund_status, 'none') IN ('none', 'pending', 'succeeded', 'unknown')`,
-			tp.inv.ID).Scan(&notes); err != nil {
-			return err
-		}
+		return tx.QueryRowContext(s.ctx, `SELECT EXISTS (SELECT 1 FROM credit_notes WHERE stripe_refund_id = $1)`, refundID).Scan(&held)
+	})
+	return held
+}
+
+// undocumented is the refunds made in Stripe of the top-up's payment that no
+// note holds and that moved or may move money.
+func (s *reliefSequence) undocumented(tp *seqTopup) int64 {
+	var cents int64
+	s.query(func(tx *sql.Tx) error {
 		return tx.QueryRowContext(s.ctx, `
 			SELECT COALESCE(SUM(r.amount_cents), 0) FROM invoice_stripe_refunds r
 			WHERE r.invoice_id = $1 AND r.stripe_payment_intent_id = $2
 			  AND r.status IN ('succeeded', 'pending', 'requires_action') AND r.credit_note_id IS NULL
-			  AND NOT EXISTS (SELECT 1 FROM credit_notes n WHERE n.stripe_refund_id = r.stripe_refund_id)`,
-			tp.inv.ID, tp.pi).Scan(&stripe)
+			  AND NOT EXISTS (SELECT 1 FROM credit_notes h WHERE h.stripe_refund_id = r.stripe_refund_id)`,
+			tp.inv.ID, tp.pi).Scan(&cents)
 	})
-	return notes + stripe
+	return cents
+}
+
+// cash is the money that went back to the customer for the top-up, or may
+// still, by every channel: the card (the card refunds of notes not voided,
+// failed ones too since a retry may send them, and the refunds made in
+// Stripe of the payment that no note holds and that moved or may move
+// money), money paid back another way (out_of_band, except a loss's note,
+// whose money is the bank's), and what the bank took in a dispute it won.
+func (s *reliefSequence) cash(tp *seqTopup) int64 {
+	var cash int64
+	s.query(func(tx *sql.Tx) error {
+		return tx.QueryRowContext(s.ctx, `
+			SELECT
+			  (SELECT COALESCE(SUM(n.refund_amount_cents), 0) FROM credit_notes n
+			   WHERE n.invoice_id = $1 AND n.status <> 'voided')
+			+ (SELECT COALESCE(SUM(r.amount_cents), 0) FROM invoice_stripe_refunds r
+			   WHERE r.invoice_id = $1 AND r.stripe_payment_intent_id = $2
+			     AND r.status IN ('succeeded', 'pending', 'requires_action') AND r.credit_note_id IS NULL
+			     AND NOT EXISTS (SELECT 1 FROM credit_notes h WHERE h.stripe_refund_id = r.stripe_refund_id))
+			+ (SELECT COALESCE(SUM(n.out_of_band_amount_cents), 0) FROM credit_notes n
+			   WHERE n.invoice_id = $1 AND n.status <> 'voided'
+			     AND NOT EXISTS (SELECT 1 FROM invoice_disputes d WHERE d.credit_note_id = n.id))
+			+ (SELECT COALESCE(SUM(d.amount_cents), 0) FROM invoice_disputes d
+			   WHERE d.invoice_id = $1 AND d.stripe_payment_intent_id = $2 AND d.status = 'lost')`,
+			tp.inv.ID, tp.pi).Scan(&cash)
+	})
+	return cash
 }
 
 func (s *reliefSequence) grant(tp *seqTopup) seqGrant {
@@ -471,21 +599,35 @@ func (s *reliefSequence) grant(tp *seqTopup) seqGrant {
 
 func (s *reliefSequence) checkInvariants(did string) {
 	for _, tp := range s.tops {
-		if card := s.cardRefunded(tp); card > tp.price {
-			s.t.Errorf("invariant 1: after %s, %d is refunded to the card of %s, which paid %d", did, card, tp.inv.ID, tp.price)
+		if cash := s.cash(tp); cash > tp.price {
+			s.t.Errorf("invariant 1: after %s, %d went back for %s by every channel, which paid %d", did, cash, tp.inv.ID, tp.price)
 		}
 		g := s.grant(tp)
 		if g.consumed > g.amount || g.cnRetired > g.consumed {
 			s.t.Errorf("invariant 2: after %s, grant %s has consumed %d, amount %d, retired by relief %d", did, g.id, g.consumed, g.amount, g.cnRetired)
 		}
-		var cash int64
+		// Notes' totals stay within what was paid. While every note is a
+		// relief and no refund made in Stripe went back without one, they add
+		// up to the anchor of the credit taken back; a note for money
+		// returned outside Hardcount takes credit at its own price, and a
+		// relief that uses up what is left takes all the unused credit.
+		var total, reliefs int64
+		onlyReliefs := s.undocumented(tp) == 0
 		for _, cn := range reliefNotes(s.t, s.ctx, s.svc, s.h.tenantID, tp.inv.ID) {
-			if cn.Status == domain.CreditNoteIssued {
-				cash += cn.TotalCents
+			if cn.Status != domain.CreditNoteIssued {
+				continue
 			}
+			total += cn.TotalCents
+			if cn.StripeRefundID != "" && cn.RecordedFromStripe || cn.Reason == "Payment reversed in a dispute" {
+				onlyReliefs = false
+				continue
+			}
+			reliefs += cn.TotalCents
 		}
-		if want := reliefCash(tp.price, tp.granted, 0, g.cnRetired); cash != want || cash > tp.price {
-			s.t.Errorf("invariant 3: after %s, relief of %s paid %d for %d credit, want %d of at most %d", did, tp.inv.ID, cash, g.cnRetired, want, tp.price)
+		anchor := reliefCash(tp.price, tp.granted, 0, g.cnRetired)
+		if total > tp.price || reliefs > anchor || (onlyReliefs && total != anchor) {
+			s.t.Errorf("invariant 3: after %s, notes of %s add up to %d (reliefs %d) for %d credit taken back, anchor %d, paid %d",
+				did, tp.inv.ID, total, reliefs, g.cnRetired, anchor, tp.price)
 		}
 	}
 	// Invariants 4 and 5 are checked by each relief, against its own read.

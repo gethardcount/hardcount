@@ -62,22 +62,30 @@
  *   resumes.
  * - `dispute_lost`: the customer disputed a payment on the invoice with
  *   their bank, and the dispute closed as `lost`, so the bank took the
- *   money back. Hardcount leaves the invoice paid and moves no money;
- *   you record the loss. Shown even on paid invoices, which is where
- *   disputes land. On an invoice that
- *   bought prepaid credit, the message also says how much of the
- *   credit is still spendable and names commit relief, because an
- *   ordinary credit note is refused there. When the invoice also has
- *   `payment_anomaly`, that reason stays and its message asks you to
- *   check Stripe before any refund. The disputes are at
- *   `GET /v1/invoices/{id}/disputes`.
+ *   money back. The invoice stays paid. On an ordinary invoice you
+ *   record the loss. On a top-up whose own payment was disputed,
+ *   Hardcount records it as a credit note that takes back the unused
+ *   credit the money paid for, and the notice is a warning with the
+ *   figures; it is critical while that note is not written yet
+ *   (`POST /v1/invoices/{id}/disputes/{dispute_id}/record-loss` writes
+ *   it). Shown even on paid invoices, which is where disputes land.
+ *   When the invoice also has `payment_anomaly`, that reason stays and
+ *   its message asks you to check Stripe before any refund. The
+ *   disputes are at `GET /v1/invoices/{id}/disputes`.
+ * - `dispute_open`: the customer's bank holds a chargeback on a
+ *   top-up's payment (an inquiry raises none), and the customer can
+ *   still spend the credit it bought. Critical: the message says what
+ *   Stripe took, the date to respond by and the unused credit. Pause
+ *   the customer's key at your gateway while it is open. It clears
+ *   when the dispute closes.
  * - `refunded_in_stripe`: a refund of the invoice's payment was made
  *   in Stripe outside Hardcount, and Hardcount did not record it as a
  *   credit note: the invoice was not paid yet, the currency differs,
- *   the invoice bought prepaid credit, Hardcount first saw the refund
- *   more than a day after it was made, a credit note on the invoice
- *   has a failed card refund this refund may replace, or the refund is
- *   more than the invoice had left to refund or credit. `code` is
+ *   Hardcount first saw the refund more than a day after it was made, a
+ *   credit note on the invoice has a failed card refund this refund may
+ *   replace, the refund is more than the invoice had left to refund or
+ *   credit, or the credit it paid for on a top-up could not be worked
+ *   out (critical, since that credit can still be spent). `code` is
  *   `payment.refunded_in_stripe.` followed by that review reason.
  *   Record it with a credit note that names the refund
  *   (`stripe_refund_id` on `POST /v1/credit-notes`), attach it to the
@@ -115,6 +123,7 @@ export const AttentionReason = {
   dunning_exhausted: 'dunning_exhausted',
   collection_paused: 'collection_paused',
   dispute_lost: 'dispute_lost',
+  dispute_open: 'dispute_open',
   refunded_in_stripe: 'refunded_in_stripe',
   amount_below_minimum: 'amount_below_minimum',
 } as const;

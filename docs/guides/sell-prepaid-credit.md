@@ -263,17 +263,30 @@ and no usage reported):
   again after the next collection pass. A draft not yet finalized, or an
   invoice whose collection is paused, waits on you: finalize or void the
   draft, or resume collection or void the invoice.
-- **How much:** `retire_all` takes all the unused credit. `retire_cents`
-  takes part of it; more than is unused answers `422` with the figure.
+- **How much:** `retire_all` takes all the unused credit, but no more than
+  the payment has left once money went back another way: a refund made in
+  Stripe, or a dispute the customer's bank won. `retire_cents` takes part of
+  it; more answers `422` with the figure. With nothing left, it answers
+  `409` "This payment has already been returned in full." A refund that
+  returns the rest of the payment takes all the unused credit, so none
+  outlives the money.
 - **Where the money goes:** to the card that paid. The card gets at most
   what it paid less every refund of that payment, including refunds made in
   the Stripe dashboard; put the rest in `out_of_band_amount_cents`. For a
   top-up paid another way, the refund is `out_of_band_amount_cents`: you pay
   the customer back, and Hardcount records it.
 - **Refused** with `409` `payment_disputed` while the customer's bank
-  disputes the payment (a chargeback, or your appeal of one), and after the
-  bank has decided for the customer, when nothing is left to refund. An
-  inquiry, before any chargeback, does not stop a refund.
+  disputes the payment (a chargeback, or your appeal of one). An inquiry,
+  before any chargeback, does not stop a refund. Also refused with `409`
+  `stripe_refund_unresolved` while a refund made in Stripe on the top-up is
+  in flight or flagged: it may be the same money. Record it or dismiss it
+  first.
+- **After the bank won a dispute,** Hardcount has already recorded the loss
+  and taken back the credit that money paid for
+  ([Card disputes](../ops/runbook/card-disputes.md)). A refund of what is
+  left cannot go to the card: it answers `422` and says to send the money
+  as `out_of_band_amount_cents` if you pay it back another way. Hardcount
+  does not choose that for you.
 - **A card refund that fails** leaves the credit note's `refund_status`
   `failed`. When it failed because a chargeback opened during the refund,
   don't pay the customer back while the dispute is open. If you win it,
@@ -284,6 +297,27 @@ and no usage reported):
   mark it. Returned another way means outside Stripe: a refund you make
   later in the Stripe dashboard is recorded as a refund made in Stripe,
   apart from this credit note.
+
+### Money returned in Stripe takes the credit back
+
+A refund of a top-up's payment made in the Stripe dashboard is recorded as a
+credit note for its amount, as on any invoice, and the note takes back the
+unused credit that amount paid for, at the price paid. $45.00 refunded on a
+$90 top-up of $100 takes back $50.00 of credit, or less if less is unused.
+Each refund stands alone; a refund for credit already used takes none. A
+dispute the customer's bank wins on the payment does the same, with the
+money recorded as returned by the bank.
+
+- **For goodwill, grant credit or pay another way.** Hardcount cannot tell a
+  goodwill refund from a refund of credit. Don't refund the top-up's payment
+  in Stripe unless the credit should go: grant credit with
+  `POST /v1/credits/grant`, or pay the customer outside Stripe.
+- **A refund for credit already used, then a void** of the usage invoice
+  that used it, gives the credit back on a payment already refunded. Both
+  are your own acts, and no more money can follow by card. If the customer
+  should not keep that credit, refund it or remove it.
+- **Never top up automatically when the balance falls by `refund`**
+  (below): that credit went back because its money went back.
 
 ## Automatic top-up with your own code
 
@@ -311,6 +345,11 @@ threshold.
 - `credit.balance_depleted` fires when a balance reaches zero or less, with
   or without a threshold. Handle it the same way if you top up only when
   the credit is gone.
+- **`data.reason` says why the balance fell:** `usage`, `expiry`,
+  `adjustment` or `refund`. Top up only on `usage`. `refund` is credit a
+  top-up bought, taken back because its money went back to the customer: a
+  refund, or a dispute the bank won. Pausing the customer's key is right
+  whatever the reason.
 
 **A handler for the event.** This Python handler uses only the standard
 library, and `verify_hardcount_signature` from
@@ -343,6 +382,8 @@ def on_webhook(raw: bytes, signature: str) -> int:
     event = json.loads(raw)
     if event["event_type"] != "credit.balance_low" or event["id"] in handled:
         return 200
+    if event["data"]["reason"] != "usage":  # never top up for credit taken back
+        return 200
     cus, cur = event["data"]["credit_balance"]["customer_id"], event["data"]["credit_balance"]["currency"]
     balances = api("GET", f"/credits/balance/{cus}")[1]["data"]
     if not any(b["currency"] == cur and b["balance_cents"] >= event["data"]["threshold_cents"] for b in balances):
@@ -363,7 +404,7 @@ def on_webhook(raw: bytes, signature: str) -> int:
 What it does, in order:
 
 1. **Checks the signature and skips an event it has handled**, by the
-   event's `id` (`hc_whevt_…`). Hardcount retries a failed delivery for about
+   event's `id` (`hc_whevt_…`), and one whose `reason` is not `usage`. Hardcount retries a failed delivery for about
    26 hours, so a short outage of your endpoint loses nothing
    ([Retries](../webhooks.md#retries)). Keep `handled` in your database, so a
    restart does not forget it.

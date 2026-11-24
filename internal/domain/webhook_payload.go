@@ -114,8 +114,8 @@ var webhookEventExtras = map[string][]string{
 	EventDunningEscalated: {"final_subscription_action", "final_invoice_action", "applied"},
 	EventDunningResolved:  {},
 
-	EventCreditBalanceLow:       {"threshold_cents"},
-	EventCreditBalanceDepleted:  {},
+	EventCreditBalanceLow:       {"reason", "threshold_cents"},
+	EventCreditBalanceDepleted:  {"reason"},
 	EventCreditBalanceRecovered: {},
 	EventCreditCommitRetired: {
 		"grant_id", "funding_invoice_id", "credit_note_id",

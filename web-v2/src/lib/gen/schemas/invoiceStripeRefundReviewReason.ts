@@ -16,6 +16,10 @@
  * Why a refund of the invoice's own payment was flagged instead of
  * recorded. Set for `needs_review` and `dismissed`, and kept when
  * a dashboard user or an API key records one with a credit note.
+ * `credit_note_not_written`: Hardcount has not written this
+ * refund's credit note yet; record it as a credit note. On a top-up
+ * the note takes back the unused credit the refund paid for, which
+ * Hardcount could not work out when the refund arrived.
  */
 export type InvoiceStripeRefundReviewReason = typeof InvoiceStripeRefundReviewReason[keyof typeof InvoiceStripeRefundReviewReason];
 
@@ -23,9 +27,9 @@ export type InvoiceStripeRefundReviewReason = typeof InvoiceStripeRefundReviewRe
 export const InvoiceStripeRefundReviewReason = {
   invoice_not_paid: 'invoice_not_paid',
   currency_mismatch: 'currency_mismatch',
-  prepaid_commit: 'prepaid_commit',
   seen_late: 'seen_late',
   credit_note_refund_failed: 'credit_note_refund_failed',
   exceeds_card_refundable: 'exceeds_card_refundable',
   exceeds_creditable: 'exceeds_creditable',
+  credit_note_not_written: 'credit_note_not_written',
 } as const;

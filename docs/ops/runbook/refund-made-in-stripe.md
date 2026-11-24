@@ -34,6 +34,12 @@ One of these:
   tax. The note carries `recorded_from_stripe: true` and names the refund in
   `stripe_refund_id`; its row on the invoice's Activity list reads "Refunded
   in Stripe".
+- **On a top-up, the note also takes back credit:** the unused credit the
+  refund's amount paid for, at the price paid (`commit_retired_cents`). Each
+  refund stands alone, at its own amount; two partial refunds take what one
+  of their sum would. A refund for credit already used takes none, and its
+  note is still written. A note that, with the earlier ones, returns the
+  whole payment takes all the unused credit.
 - **Anything else is flagged, never documented.** Hardcount does not guess:
   an issued credit note cannot be undone. A refund of another payment (a
   second charge), or one that failed, shows on the invoice's Activity list
@@ -78,7 +84,8 @@ a button for each step below that applies to the refund, and each asks
 before it acts:
 
 - **Record as credit note** (step 1). Offered on a paid invoice when the
-  reason is `seen_late`, `invoice_not_paid` or `credit_note_refund_failed`.
+  reason is `seen_late`, `invoice_not_paid`, `credit_note_refund_failed` or
+  `credit_note_not_written`.
 - **Dismiss** (step 2), with a note saying how you handled it. Always
   offered.
 - **Attach to** the credit note whose refund failed (step 3). Offered for
@@ -103,7 +110,7 @@ The same steps through the API follow. Act on a `needs_review` refund by its
 | `invoice_not_paid` | Check the invoice's payments in Stripe. Once the invoice is paid, record it (step 1); otherwise dismiss it. |
 | `exceeds_card_refundable` | The refund is more than the card payment had left after the credit notes on the invoice. Check the payment in Stripe, record the difference in your own books, and dismiss it. |
 | `exceeds_creditable` | An earlier credit note already gave part of the invoice back another way, for example as account credit. If that credit was not meant as well, take it back from the customer's balance. Then dismiss it. |
-| `prepaid_commit` | The invoice bought prepaid credit, which the customer can still spend. Take back the credit this refund paid for with commit relief, its money as `out_of_band_amount_cents` because the refund already returned it ([Refund unused credit](../../guides/sell-prepaid-credit.md#refund-unused-credit)), then dismiss it. |
+| `credit_note_not_written` | Hardcount has not written this refund's credit note yet; record it as a credit note (step 1). On a top-up it takes back the credit the refund paid for, which the customer can spend until then, so the notice is critical. It happens when Hardcount could not read the customer's usage not invoiced yet as the refund arrived (the log line `refund made in Stripe on a top-up recorded without its credit note`). A refund of a top-up is otherwise recorded by Hardcount itself. |
 | `currency_mismatch` | Record it in your own books and dismiss it. |
 
 1. **Record it with a credit note that names the refund.** Send the refund's
@@ -124,7 +131,9 @@ The same steps through the API follow. Act on a `needs_review` refund by its
    **You see:** `201` with the issued note, `recorded_from_stripe: true` and
    `refund_status` from Stripe. Hardcount reads the refund from Stripe first:
    it must be of this invoice's payment, not made by Hardcount, and not
-   failed. Nothing goes to the credit balance on this note.
+   failed. Nothing goes to the credit balance on this note. On a top-up the
+   note takes back the unused credit the refund paid for
+   (`commit_retired_cents`), as Hardcount's own recording does.
 2. **Or dismiss it,** with how you handled it:
 
    ```bash
@@ -180,3 +189,19 @@ Two log lines matter:
 Related: [how Hardcount handles card payments and refunds](../../payments.md),
 the [webhook events](../../api/webhook-events.md#paymentrefunded_in_stripe), and
 [ADR-134](../../adr/134-refunds-made-in-stripe-are-recorded.md).
+
+## On a top-up: two cases to know
+
+- **A refund for credit already used, then a void.** You refund in Stripe
+  money for credit the customer already used, so the note takes little or
+  no credit back. If you then void the usage invoice that used it, the
+  credit comes back to the top-up, on a payment already refunded. Both are
+  your own acts; no more money can go back by card than was paid, and a
+  later refund of the unused credit is bounded by what the credit notes
+  leave. If the customer should not keep that credit, refund it or remove
+  it.
+- **A partial refund meant as goodwill takes credit.** Hardcount cannot
+  tell a goodwill refund from a refund of credit, so every refund of a
+  top-up's payment takes back the credit it paid for. For goodwill, grant
+  credit (`POST /v1/credits/grant`) or pay the customer another way; don't
+  refund the top-up's payment. If you did, grant the credit again.

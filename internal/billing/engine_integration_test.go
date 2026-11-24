@@ -646,7 +646,10 @@ func (g reliefLedgerGranter) GrantForCreditNoteTx(ctx context.Context, tx *sql.T
 	_, err := g.svc.GrantForCreditNoteTx(ctx, tx, tenantID, cnID, g.in(i))
 	return err
 }
-func (g reliefLedgerGranter) LockCommitGrantForReliefTx(context.Context, *sql.Tx, string, string, time.Time) (creditnote.ReliefGrant, bool, error) {
+func (g reliefLedgerGranter) TopupGrantAndBalance(context.Context, string, string, time.Time) (creditnote.TopupGrant, int64, bool, error) {
+	panic("commit relief is not exercised by this test")
+}
+func (g reliefLedgerGranter) LockTopupGrantAndBalanceTx(context.Context, *sql.Tx, string, string, time.Time) (creditnote.TopupGrant, int64, bool, error) {
 	panic("commit relief is not exercised by this test")
 }
 func (g reliefLedgerGranter) RetireCommitSliceForReliefTx(context.Context, *sql.Tx, string, string, string, string, int64, int64, int64) (int64, error) {

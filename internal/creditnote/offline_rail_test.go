@@ -74,7 +74,7 @@ func TestDomain_HasCardPayment(t *testing.T) {
 			// The cap must collapse to zero exactly when there is no card,
 			// so the offline case reuses the over-refund guard rather than
 			// needing a second parallel check.
-			gotCap := inv.CardRefundableCents(0)
+			gotCap := inv.CardRefundableCents(0, false)
 			wantCap := int64(0)
 			if tc.want {
 				wantCap = 5000
@@ -87,14 +87,17 @@ func TestDomain_HasCardPayment(t *testing.T) {
 
 	t.Run("prior refunds subtract, never below zero", func(t *testing.T) {
 		inv := domain.Invoice{StripePaymentIntentID: "pi_x", AmountPaidCents: 6260}
-		if got := inv.CardRefundableCents(6260); got != 0 {
+		if got := inv.CardRefundableCents(6260, false); got != 0 {
 			t.Errorf("fully refunded: got %d, want 0", got)
 		}
-		if got := inv.CardRefundableCents(9999); got != 0 {
+		if got := inv.CardRefundableCents(9999, false); got != 0 {
 			t.Errorf("over-refunded must clamp at 0, got %d", got)
 		}
-		if got := inv.CardRefundableCents(1000); got != 5260 {
+		if got := inv.CardRefundableCents(1000, false); got != 5260 {
 			t.Errorf("partial: got %d, want 5260", got)
+		}
+		if got := inv.CardRefundableCents(0, true); got != 0 {
+			t.Errorf("after a lost dispute: got %d, want 0", got)
 		}
 	})
 }

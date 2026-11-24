@@ -47,9 +47,13 @@ test('a refund on an invoice that is not paid can be recorded only once it is pa
 })
 
 test('refunds the server refuses to record offer Dismiss only', () => {
-  for (const review_reason of ['exceeds_card_refundable', 'exceeds_creditable', 'prepaid_commit', 'currency_mismatch']) {
+  for (const review_reason of ['exceeds_card_refundable', 'exceeds_creditable', 'currency_mismatch']) {
     assert.deepEqual(stripeRefundChoices(refund({ review_reason }), paid, [failedNote()]), { attachTo: [], record: false, dismiss: true }, review_reason)
   }
+})
+
+test('a refund whose credit note is not written yet can be recorded', () => {
+  assert.equal(stripeRefundChoices(refund({ review_reason: 'credit_note_not_written' }), paid, []).record, true)
 })
 
 test('a refund that no longer succeeded at Stripe is not recorded or attached', () => {

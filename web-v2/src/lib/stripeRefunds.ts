@@ -49,10 +49,11 @@ export function flaggedStripeRefunds<T extends StripeRefundRow>(refunds: readonl
 // Review reasons whose refund can be recorded as a credit note. The others
 // are refused by the server's checks, and the notice tells the operator to
 // handle them in Stripe or their own books and dismiss them:
-// exceeds_card_refundable and exceeds_creditable fail the caps,
-// currency_mismatch fails the currency check, and prepaid_commit is retired
-// with commit relief instead.
-const RECORDABLE_REASONS = new Set(['seen_late', 'invoice_not_paid', 'credit_note_refund_failed'])
+// exceeds_card_refundable and exceeds_creditable fail the caps, and
+// currency_mismatch fails the currency check. credit_note_not_written is a
+// refund whose note Hardcount has not written yet: recording it writes it,
+// and on a top-up takes back the credit the refund paid for.
+const RECORDABLE_REASONS = new Set(['seen_late', 'invoice_not_paid', 'credit_note_refund_failed', 'credit_note_not_written'])
 
 // stripeRefundChoices is what the notice offers for one flagged refund. Record
 // and Attach follow the server's own checks, so a button is never offered for

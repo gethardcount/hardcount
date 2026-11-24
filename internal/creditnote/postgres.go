@@ -240,15 +240,15 @@ func (s *PostgresStore) createUnderInvoiceLockInTx(ctx context.Context, tx *sql.
 	return created, nil
 }
 
-// CreateUnderInvoiceLockDynamicTx is CreateUnderInvoiceLockTx for callers
-// whose LINE AMOUNTS depend on state that must be read UNDER locks taken
-// inside build (ADR-080 commit relief: the CN's cash amount is derived from
-// the grant's live drawdown state, which is only frozen once build takes
-// the customer advisory + grant row locks — after this method has taken
-// the per-invoice CN lock and the invoice row FOR KEY SHARE, preserving the
-// invoice → customer-advisory → ledger-row → number-row order). build
-// returns the header AND its lines.
-func (s *PostgresStore) CreateUnderInvoiceLockDynamicTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, build func(existing []domain.CreditNote) (domain.CreditNote, []domain.CreditNoteLineItem, error)) (domain.CreditNote, error) {
+// CreateUnderInvoiceLockDynamicTx is CreateUnderInvoiceLockTx for a note
+// whose amounts depend on state read under locks build takes: a note on a
+// top-up takes the customer's credit lock and the grant's row to work out
+// the credit it takes back. It takes the per-invoice credit-note lock and the
+// invoice row FOR KEY SHARE, runs build, and only then numbers the note on
+// the tenant's number row and inserts it. So the order is invoice row →
+// customer's credit lock → grant row → number row, the order a top-up's
+// payment keeps; build never numbers. It returns the header AND its lines.
+func (s *PostgresStore) CreateUnderInvoiceLockDynamicTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, numbers NumberGenerator, build func(existing []domain.CreditNote) (domain.CreditNote, []domain.CreditNoteLineItem, error)) (domain.CreditNote, error) {
 	if err := lockInvoiceForNoteTx(ctx, tx, tenantID, invoiceID); err != nil {
 		return domain.CreditNote{}, err
 	}
@@ -258,6 +258,9 @@ func (s *PostgresStore) CreateUnderInvoiceLockDynamicTx(ctx context.Context, tx 
 	}
 	cn, lines, err := build(existing)
 	if err != nil {
+		return domain.CreditNote{}, err
+	}
+	if cn.CreditNoteNumber, err = nextNumberTx(ctx, tx, tenantID, numbers); err != nil {
 		return domain.CreditNote{}, err
 	}
 	created, err := s.insertCreditNoteTx(ctx, tx, tenantID, cn)
@@ -271,6 +274,24 @@ func (s *PostgresStore) CreateUnderInvoiceLockDynamicTx(ctx context.Context, tx 
 		}
 	}
 	return created, nil
+}
+
+// nextNumberTx allocates the next credit note number on tx. Credit-note
+// numbers are a strictly monotonic per-tenant sequence, as invoice numbers
+// are, so there is no fallback: a duplicate document number corrupts
+// accounting downstream, while a failed create just retries.
+func nextNumberTx(ctx context.Context, tx *sql.Tx, tenantID string, numbers NumberGenerator) (string, error) {
+	if numbers == nil {
+		return "", fmt.Errorf("credit-note number generator not wired (call SetNumberGenerator)")
+	}
+	n, err := numbers.NextCreditNoteNumberTx(ctx, tx, tenantID)
+	if err != nil {
+		return "", fmt.Errorf("allocate credit note number: %w", err)
+	}
+	if n == "" {
+		return "", fmt.Errorf("credit-note number generator returned an empty number")
+	}
+	return n, nil
 }
 
 // ListPendingClawbackDrafts returns auto-issue clawback drafts (issue_pending,

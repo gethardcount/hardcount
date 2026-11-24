@@ -474,8 +474,11 @@ func (f *fakeCreditGranter) GrantForCreditNoteTx(_ context.Context, _ *sql.Tx, _
 }
 
 // Relief is proven on real Postgres; the unit double holds no commit grant.
-func (f *fakeCreditGranter) LockCommitGrantForReliefTx(context.Context, *sql.Tx, string, string, time.Time) (ReliefGrant, bool, error) {
-	return ReliefGrant{}, false, nil
+func (f *fakeCreditGranter) TopupGrantAndBalance(context.Context, string, string, time.Time) (TopupGrant, int64, bool, error) {
+	return TopupGrant{}, 0, false, nil
+}
+func (f *fakeCreditGranter) LockTopupGrantAndBalanceTx(context.Context, *sql.Tx, string, string, time.Time) (TopupGrant, int64, bool, error) {
+	return TopupGrant{}, 0, false, nil
 }
 
 func (f *fakeCreditGranter) RetireCommitSliceForReliefTx(context.Context, *sql.Tx, string, string, string, string, int64, int64, int64) (int64, error) {

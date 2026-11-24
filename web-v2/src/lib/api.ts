@@ -834,6 +834,7 @@ export type AttentionReason =
   | 'dunning_exhausted'
   | 'collection_paused'
   | 'dispute_lost'
+  | 'dispute_open'
   | 'refunded_in_stripe'
   | 'amount_below_minimum'
 

@@ -1122,33 +1122,50 @@ func TestE2E_StripeRefund_SeenLateThenLinked(t *testing.T) {
 	}
 }
 
-// TestE2E_StripeRefund_PrepaidCommitInvoice: a refund of an invoice that
-// bought prepaid credit is flagged: an ordinary note is refused there, and
-// the credit stays spendable until commit relief retires it.
-func TestE2E_StripeRefund_PrepaidCommitInvoice(t *testing.T) {
+// TestE2E_StripeRefund_OnATopupTakesBackItsCredit: through the webhook
+// handler and the server's own wiring, a refund made in Stripe of a top-up's
+// payment is recorded as on any invoice, one credit note for its amount whose
+// card refund is that refund, and the note takes back the unused credit the
+// amount paid for: 45.00 of a 90.00 top-up of 100.00 takes back 50.00. No
+// notice: nothing is left for the operator.
+func TestE2E_StripeRefund_OnATopupTakesBackItsCredit(t *testing.T) {
 	db, ts, _, register := newRefundServer(t)
-	f := newRefundFlow(t, db, ts, "Refund commit Co")
+	f := newRefundFlow(t, db, ts, "Refund topup Co")
 	register(f)
 	invID := flowStr(f.call("POST", "/v1/invoices", map[string]any{
 		"customer_id": f.customerID,
-		"line_items":  []map[string]any{{"description": "Prepaid credit", "quantity": 1, "unit_amount_cents": 5000, "commit_granted_cents": 5000}},
+		"line_items":  []map[string]any{{"description": "Prepaid credit", "quantity": 1, "unit_amount_cents": 9000, "commit_granted_cents": 10000}},
 	}).want(t, 201, "create the top-up").body, "id")
-	const pi = "pi_rf_commit"
-	f.pay(invID, pi, 5000).want(t, 200, "pay the top-up")
+	const pi = "pi_rf_topup"
+	f.pay(invID, pi, 9000).want(t, 200, "pay the top-up")
 	if got := flowStr(f.invoice(invID), "status"); got != "paid" {
-		t.Fatalf("commit invoice status %q, want paid", got)
+		t.Fatalf("top-up status %q, want paid", got)
 	}
 	created := time.Now().Add(-time.Minute).Truncate(time.Second).UTC()
-	f.deliver(refundEvent("evt_rf_commit", "refund.created", refundSpec{id: "re_commit", pi: pi, status: "succeeded", amount: 5000, created: created}, created)).want(t, 200, "refund of the commit invoice")
+	f.deliver(refundEvent("evt_rf_topup", "refund.created", refundSpec{id: "re_topup", pi: pi, status: "succeeded", amount: 4500, created: created}, created)).want(t, 200, "refund of the top-up")
+
+	notes := f.notes(invID)
+	if len(notes) != 1 {
+		t.Fatalf("credit notes: %v, want one", notes)
+	}
+	cn := notes[0]
+	if flowStr(cn, "status") != "issued" || flowInt(cn, "total_cents") != 4500 || flowInt(cn, "refund_amount_cents") != 4500 ||
+		flowStr(cn, "stripe_refund_id") != "re_topup" || cn["recorded_from_stripe"] != true || flowInt(cn, "commit_retired_cents") != 5000 {
+		t.Errorf("credit note = %v, want issued 4500 to the card, holding re_topup, taking back 5000 of credit", cn)
+	}
 	rows := f.refundRows(invID)
-	if len(rows) != 1 || flowStr(rows[0], "outcome") != "needs_review" || flowStr(rows[0], "review_reason") != "prepaid_commit" {
-		t.Errorf("refund rows = %v, want needs_review prepaid_commit", rows)
+	if len(rows) != 1 || flowStr(rows[0], "outcome") != "credit_note" || flowStr(rows[0], "credit_note_id") != flowStr(cn, "id") {
+		t.Errorf("refund rows = %v, want one recorded as %s", rows, flowStr(cn, "id"))
 	}
-	if n := len(f.notes(invID)); n != 0 {
-		t.Errorf("credit notes: %d, want 0", n)
+	if att := f.invoice(invID)["attention"]; att != nil {
+		t.Errorf("attention = %v, want none", att)
 	}
-	if att := flowObj(f.invoice(invID), "attention"); flowStr(att, "reason") != "refunded_in_stripe" || !strings.Contains(flowStr(att, "message"), "commit relief") {
-		t.Errorf("attention = %v, want refunded_in_stripe naming commit relief", att)
+	balance := flowList(f.call("GET", "/v1/credits/balance/"+f.customerID, nil).want(t, 200, "get balance").body, "data")
+	if len(balance) != 1 || flowInt(balance[0], "balance_cents") != 5000 {
+		t.Errorf("credit balance = %v, want 5000 left of 10000", balance)
+	}
+	if f.refundCalls() != 0 {
+		t.Errorf("Hardcount called Stripe's refund %d times, want none: the refund was already made", f.refundCalls())
 	}
 }
 

@@ -551,8 +551,8 @@ func stripeRefundReviewWords(r domain.StripeRefundReviewReason) string {
 		return "the invoice was not paid when Stripe reported it"
 	case domain.StripeRefundReviewCurrencyMismatch:
 		return "it is in another currency"
-	case domain.StripeRefundReviewPrepaidCommit:
-		return "the invoice bought prepaid credit"
+	case domain.StripeRefundReviewCreditNoteNotWritten:
+		return "Hardcount has not written its credit note yet; record it as a credit note"
 	case domain.StripeRefundReviewSeenLate:
 		return "Hardcount heard of it more than a day late"
 	case domain.StripeRefundReviewCreditNoteRefundFailed:

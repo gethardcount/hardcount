@@ -175,7 +175,7 @@ func TestRecordStripeDispute_InOrder(t *testing.T) {
 	h.wantEvents(t, du, 1, 1)
 	h.wantInvoiceUntouched(t)
 
-	lost, err := h.store.LostDisputesByInvoices(h.ctx, h.tenantID, []string{h.invID, "hc_inv_other"})
+	lost, err := h.store.NoticeDisputesByInvoices(h.ctx, h.tenantID, []string{h.invID, "hc_inv_other"})
 	if err != nil {
 		t.Fatalf("lost disputes: %v", err)
 	}
@@ -282,7 +282,7 @@ func TestRecordStripeDispute_AnyOrderAndRedelivery(t *testing.T) {
 
 	h.wantInvoiceUntouched(t)
 	// du_close_first was won in the end, and the same-second pair is lost.
-	lost, err := h.store.LostDisputesByInvoices(h.ctx, h.tenantID, []string{h.invID})
+	lost, err := h.store.NoticeDisputesByInvoices(h.ctx, h.tenantID, []string{h.invID})
 	if err != nil {
 		t.Fatalf("lost disputes: %v", err)
 	}

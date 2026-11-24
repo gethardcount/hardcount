@@ -82,7 +82,8 @@ export interface Attention {
      * When the condition started, so you can sort by age. For a tax
      * reason it is when tax was deferred, for `amount_below_minimum`
      * when Stripe refused the amount, for `dispute_lost` when the
-     * dispute closed, and for `refunded_in_stripe` when the refund was
+     * dispute closed, for `dispute_open` when Stripe opened it, and for
+     * `refunded_in_stripe` when the refund was
      * made. Otherwise it is when the invoice last changed. Absent when
      * it is not known.
      */
@@ -93,9 +94,10 @@ export interface Attention {
      */
   next_attempt_at?: string;
   /**
-     * The invoice's payment deadline (its `due_at`). Hardcount does not
-     * act on this date; it is shown so you know it. Absent when the
-     * reason does not show a deadline or the invoice has none.
+     * The invoice's payment deadline (its `due_at`), or for
+     * `dispute_open` the date to respond to the dispute by. Hardcount
+     * does not act on this date; it is shown so you know it. Absent when
+     * the reason does not show a deadline or there is none.
      */
   due_by?: string;
 }

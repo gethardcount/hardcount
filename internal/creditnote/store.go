@@ -31,9 +31,10 @@ type Store interface {
 	// both create paths carry identical evidence (ADR-090 §3).
 	CreateUnderInvoiceLockTxAudited(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, lines []domain.CreditNoteLineItem, build func(tx *sql.Tx, existing []domain.CreditNote) (domain.CreditNote, error), emit func(tx *sql.Tx, created domain.CreditNote) error) (domain.CreditNote, error)
 	// CreateUnderInvoiceLockDynamicTx: build returns the header AND lines —
-	// for callers whose line amounts derive from state read under locks
-	// taken inside build (ADR-080 commit relief).
-	CreateUnderInvoiceLockDynamicTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, build func(existing []domain.CreditNote) (domain.CreditNote, []domain.CreditNoteLineItem, error)) (domain.CreditNote, error)
+	// for callers whose amounts derive from state read under locks taken
+	// inside build (a note on a top-up takes the customer's credit lock).
+	// The store numbers the note after build returns, then inserts it.
+	CreateUnderInvoiceLockDynamicTx(ctx context.Context, tx *sql.Tx, tenantID, invoiceID string, numbers NumberGenerator, build func(existing []domain.CreditNote) (domain.CreditNote, []domain.CreditNoteLineItem, error)) (domain.CreditNote, error)
 	// ListPendingClawbackDrafts returns auto-issue clawback drafts whose
 	// post-commit Issue() hasn't succeeded yet (issue_pending, status='draft'),
 	// cross-tenant + scoped by livemode, for RetryPendingClawbackIssue.
@@ -47,10 +48,11 @@ type Store interface {
 	// in sorted order, on the caller's tx — called before the first create by
 	// a transaction that writes credit notes on several invoices.
 	LockInvoicesTx(ctx context.Context, tx *sql.Tx, tenantID string, invoiceIDs []string) error
-	// StripeRefundedOutsideNotesTx sums the refunds made in Stripe of the
-	// invoice's payment that moved or may move money and that no note holds,
-	// on the caller's tx under its credit-note lock.
-	StripeRefundedOutsideNotesTx(ctx context.Context, tx *sql.Tx, invoiceID, paymentIntentID string) (int64, error)
+	// CardRefundsTx reads what has gone or may still go back to the card
+	// that paid the invoice (domain.CardRefundsSQL), leaving out the refund
+	// made in Stripe exceptRefundID, on the caller's tx under its
+	// credit-note lock.
+	CardRefundsTx(ctx context.Context, tx *sql.Tx, invoiceID, exceptRefundID string) (CardRefunds, error)
 	// ReturnRefundAnotherWayTx moves an issued note's failed card refund to
 	// out_of_band, as a CAS on the refund amount read; false when it moved.
 	ReturnRefundAnotherWayTx(ctx context.Context, tx *sql.Tx, creditNoteID string, refundCents int64) (bool, error)

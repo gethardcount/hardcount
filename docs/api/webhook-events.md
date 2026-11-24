@@ -2247,9 +2247,17 @@ not use them to decide whether to keep serving a customer:
 ### `credit.balance_low`
 
 The settled credit balance in one currency fell below your account's
-threshold, `threshold_cents`.
+threshold, `threshold_cents`. `reason` says why the balance fell:
 
-**Also in `data`:** `threshold_cents`.
+- `usage`: an invoice drew the credit;
+- `expiry`: credit expired;
+- `adjustment`: credit was deducted by hand;
+- `refund`: a credit note took back credit a top-up bought, for a refund of
+  unused credit, a refund made in Stripe or a lost dispute. Never top up
+  automatically on it: that credit went back because its money went back to
+  the customer.
+
+**Also in `data`:** `reason`, `threshold_cents`.
 
 <details>
 <summary>Example message</summary>
@@ -2268,6 +2276,7 @@ threshold, `threshold_cents`.
       "total_retired": 500,
       "total_used": 8000
     },
+    "reason": "usage",
     "threshold_cents": 1000
   },
   "event_type": "credit.balance_low",
@@ -2279,9 +2288,10 @@ threshold, `threshold_cents`.
 
 ### `credit.balance_depleted`
 
-The settled credit balance in one currency reached zero or less.
+The settled credit balance in one currency reached zero or less. `reason`
+says why, as on [`credit.balance_low`](#creditbalance_low).
 
-**Also in `data`:** nothing.
+**Also in `data`:** `reason`.
 
 <details>
 <summary>Example message</summary>
@@ -2299,7 +2309,8 @@ The settled credit balance in one currency reached zero or less.
       "total_granted": 10000,
       "total_retired": 500,
       "total_used": 8000
-    }
+    },
+    "reason": "usage"
   },
   "event_type": "credit.balance_depleted",
   "id": "hc_whevt_golden"
