@@ -14,8 +14,8 @@
 
 /**
  * On a grant, what the credit cost the customer. `commit`:
- * prepaid credit granted when a commit invoice was finalized; that
- * invoice is `source_invoice_id`. `promotional`:
+ * prepaid credit granted when a top-up was paid; that invoice is
+ * `source_invoice_id`. `promotional`:
  * free credit you marked so; invoices draw it before any other
  * credit. Absent for other credit.
  */

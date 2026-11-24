@@ -467,30 +467,23 @@ func (s *Service) create(ctx context.Context, tenantID string, input CreateInput
 	if inv.Status != domain.InvoiceFinalized && inv.Status != domain.InvoicePaid && !reliefOnDraft && !reliefOnWrittenOff {
 		return domain.CreditNote{}, errs.InvalidState("can only create credit notes for finalized or paid invoices")
 	}
-	// ADR-078 D4: commit funding invoices are cash instruments — no credit
-	// notes, phase 1. Pre-payment, a concession CN would shrink the cash
-	// collected while the grant stays configured full-size; post-payment, a
-	// refund CN returns cash while the funded block stays drawable (and a
-	// credit-settled CN would ADD a second grant on top). Unwind paths:
-	// unpaid → void the invoice (retires the grant, ADR-078 D3); paid →
-	// blocked until the CN-retire leg ships (phase 2 — trigger: first DP
-	// commit-refund ask). Checked in the shared core so the operator path
-	// and the automated clawback paths carry the same rule.
+	// ADR-078 D4: an invoice that bought prepaid credit is a cash instrument
+	// and takes no ordinary credit note. A refund note would return cash
+	// while the credit stays drawable (a credit-settled one would add a
+	// second grant), and line caps are wrong where cash differs from face on
+	// a discounted commit. Only a paid top-up gets here with a commit line:
+	// a top-up is issued by its payment, and a relief or clawback never takes
+	// one as its source (it has no subscription). Its unwind is commit
+	// relief. Checked in the shared core so the operator path and the
+	// automated clawback paths carry the same rule.
 	invLines, err := listLines()
 	if err != nil {
 		return domain.CreditNote{}, fmt.Errorf("list invoice line items: %w", err)
 	}
 	for _, li := range invLines {
 		if li.IsCommitLine() {
-			// Ordinary line-based CNs stay blocked on commit invoices in
-			// BOTH states: cash != face on a discounted commit, so line-cap
-			// semantics are wrong. Route by state to the correct unwind.
-			if inv.Status == domain.InvoicePaid {
-				return domain.CreditNote{}, errs.InvalidState(
-					"this invoice funds a prepaid commit — use commit relief (POST /v1/credit-notes with a commit_relief block) to refund it; the relief derives the cash from the commit's remaining credits")
-			}
 			return domain.CreditNote{}, errs.InvalidState(
-				"this invoice funds a prepaid commit — void the unpaid invoice to cancel the commit instead")
+				"this invoice funds a prepaid commit — use commit relief (POST /v1/credit-notes with a commit_relief block) to refund it; the relief derives the cash from the commit's remaining credits")
 		}
 	}
 
@@ -1157,7 +1150,8 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 
 	// Status gates. Paid is terminal for commit invoices (void-of-paid is
 	// blocked), so these pre-tx reads cannot regress under us; the money
-	// inputs are frozen later by the grant row lock.
+	// inputs are frozen later by the grant row lock. An unpaid top-up is a
+	// draft that granted nothing, so it has nothing to relieve.
 	switch {
 	case inv.Status == domain.InvoiceVoided || inv.Status == domain.InvoiceUncollectible:
 		return domain.CreditNote{}, errs.InvalidState("cannot relieve a voided or uncollectible commit invoice")
@@ -1167,12 +1161,18 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 		return domain.CreditNote{}, errs.InvalidState(domain.PaymentBlocksAction(inv, domain.ActionIssueCreditNote).Message).
 			WithCode(domain.PaymentBlocksAction(inv, domain.ActionIssueCreditNote).Code)
 	case inv.Status != domain.InvoicePaid || inv.PaymentStatus != domain.PaymentSucceeded:
-		return domain.CreditNote{}, errs.InvalidState("commit relief applies to PAID commit invoices — void the unpaid invoice to cancel the commit instead")
+		return domain.CreditNote{}, errs.InvalidState("commit relief applies only to a paid top-up — this one is unpaid and granted no credit, so void it to withdraw it")
 	}
 
 	grossPaid := inv.TotalAmountCents
 	if grossPaid <= 0 {
 		return domain.CreditNote{}, errs.InvalidState("commit invoice has a zero total — nothing to relieve")
+	}
+	// The relief note's subtotal is its total: it reverses no tax. A top-up
+	// carries none, and this keeps a taxed one from being refunded in cash
+	// with its tax silently left reported.
+	if inv.TaxAmountCents != 0 {
+		return domain.CreditNote{}, errs.InvalidState("commit relief does not reverse tax, and a top-up carries none — this invoice has tax, so it cannot be relieved")
 	}
 
 	tx, err := s.store.BeginTx(ctx, tenantID)
@@ -1193,7 +1193,7 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 			return domain.CreditNote{}, nil, gerr
 		}
 		if !found {
-			return domain.CreditNote{}, nil, fmt.Errorf("invoice %s has a commit line but no funded grant — finalize funds the grant in the same tx, so this is corrupted state; refusing to move cash", input.InvoiceID)
+			return domain.CreditNote{}, nil, fmt.Errorf("invoice %s has a commit line but no funded grant — its payment funds the grant in the same tx, so this is corrupted state; refusing to move cash", input.InvoiceID)
 		}
 		remaining := granted - consumed
 		if remaining <= 0 {
@@ -1221,16 +1221,14 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 		// invoices, so `existing` are prior relief CNs; the telescoping
 		// anchor guarantees Σ totals ≤ grossPaid — keep the check as a
 		// defensive invariant, not a reachable branch.
-		var existingTotal, existingTaxReversed, existingRefunds int64
+		var existingTotal, existingRefunds int64
 		for _, e := range existing {
 			if e.Status == domain.CreditNoteVoided {
 				continue
 			}
 			var serr error
 			if existingTotal, serr = domain.SumCents(existingTotal, e.TotalCents); serr == nil {
-				if existingTaxReversed, serr = domain.SumCents(existingTaxReversed, e.TaxAmountCents); serr == nil {
-					existingRefunds, serr = domain.SumCents(existingRefunds, e.RefundAmountCents)
-				}
+				existingRefunds, serr = domain.SumCents(existingRefunds, e.RefundAmountCents)
 			}
 			if serr != nil {
 				return domain.CreditNote{}, nil, fmt.Errorf("credit notes on invoice %s: %w", input.InvoiceID, serr)
@@ -1238,26 +1236,6 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 		}
 		if x > inv.TotalAmountCents-existingTotal { // never existingTotal+x: that sum can wrap
 			return domain.CreditNote{}, nil, fmt.Errorf("commit relief invariant violated: existing CN total %d + relief %d exceeds invoice total %d", existingTotal, x, inv.TotalAmountCents)
-		}
-
-		// Proportional tax — same discipline as buildCreditNote: floor
-		// ratio per CN, and the EXHAUSTING relief absorbs the cumulative
-		// residual so Σ reversed tax equals the invoice tax exactly.
-		var taxAmount int64
-		netSubtotal := x
-		if inv.TotalAmountCents > 0 && inv.TaxAmountCents > 0 {
-			if x == inv.TotalAmountCents-existingTotal {
-				taxAmount = inv.TaxAmountCents - existingTaxReversed
-			} else {
-				// tax × x is worked in 128 bits; the quotient truncates
-				// exactly as int64 "/" did, and is below the tax (x < total).
-				q, _, ok := money.MulDivRem(inv.TaxAmountCents, x, inv.TotalAmountCents)
-				if !ok {
-					return domain.CreditNote{}, nil, fmt.Errorf("commit relief tax share: %w", domain.ErrAmountOverflow)
-				}
-				taxAmount = q
-			}
-			netSubtotal = x - taxAmount
 		}
 
 		// Allocation: the two permitted channels only (requirement f).
@@ -1322,14 +1300,15 @@ func (s *Service) CreateAndIssueCommitRelief(ctx context.Context, tenantID strin
 		}
 		retireSlice, reliefCash = r, x
 
+		// A top-up carries no tax (decided when it is created), so the note
+		// reverses none: its subtotal is its total.
 		header := domain.CreditNote{
 			InvoiceID:            input.InvoiceID,
 			CustomerID:           inv.CustomerID,
 			CreditNoteNumber:     cnNumber,
 			Status:               domain.CreditNoteDraft, // flipped issued below, same tx
 			Reason:               reason,
-			SubtotalCents:        netSubtotal,
-			TaxAmountCents:       taxAmount,
+			SubtotalCents:        x,
 			TotalCents:           x,
 			RefundAmountCents:    refundAmount,
 			CreditAmountCents:    0, // structurally forbidden channel

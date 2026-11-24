@@ -394,10 +394,7 @@ the $10,000 of credit pays for about $9,091 of usage and $909 of tax.
   taxed", and the PDF says why there is no tax.
 - **Refunds:** refunding unused credit reverses no tax, because the
   purchase carried none
-  ([how a refund works](adr/080-paid-commit-cn-relief.md)). One case is
-  different: a commit invoiced before Hardcount stopped taxing the purchase
-  was taxed. Refunding it still reverses that tax
-  ([the change](https://github.com/gethardcount/hardcount/pull/1288)).
+  ([how a refund works](adr/080-paid-commit-cn-relief.md)).
 - **Free (promotional) credit** pays usage invoices the same way, tax
   included.
 

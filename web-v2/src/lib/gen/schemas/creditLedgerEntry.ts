@@ -32,15 +32,14 @@ export interface CreditLedgerEntry {
   customer_id: string;
   /**
      * - `grant`: credit added, by you with `POST /v1/credits/grant` or
-     *   by Hardcount (a prepaid-commit invoice when it is finalized, a
-     *   credit note, or a void or credit note that gave drawn credit
-     *   back).
+     *   by Hardcount (a top-up when it is paid, a credit note, or a
+     *   void or credit note that gave drawn credit back).
      * - `usage`: credit an invoice drew.
      * - `expiry`: the unused rest of a grant, written off once its
      *   `expires_at` passed.
      * - `adjustment`: credit added or removed with
      *   `POST /v1/credits/adjust`, or commit credit taken back when its
-     *   invoice was voided or refunded.
+     *   invoice was refunded by a credit note.
      */
   entry_type: CreditLedgerEntryEntryType;
   /** The entry's currency, uppercase. Credit pays only invoices in its own currency. */
@@ -65,10 +64,10 @@ export interface CreditLedgerEntry {
   /**
      * The invoice the entry comes from: the invoice a `usage` entry
      * was drawn by, the voided or credited invoice that gave credit
-     * back, or the commit invoice that funded a grant. Absent when no
-     * invoice caused the entry, and on the `adjustment` that takes
-     * commit credit back after its invoice was voided or refunded:
-     * that invoice is in `metadata.funding_invoice_id`.
+     * back, or the top-up that funded a grant. Absent when no invoice
+     * caused the entry, and on the `adjustment` that takes commit
+     * credit back after its invoice was refunded: that invoice is in
+     * `metadata.funding_invoice_id`.
      */
   invoice_id?: string;
   /**
@@ -93,21 +92,20 @@ export interface CreditLedgerEntry {
      * For entries that add credit, how much of it is gone, in the
      * currency's minor unit: drawn by invoices, expired, removed by a
      * negative adjustment, or, for commit credit, taken back when its
-     * invoice was voided or refunded by a credit note. Absent when
-     * nothing is.
+     * invoice was refunded by a credit note. Absent when nothing is.
      */
   consumed_cents?: number;
   /**
      * On a grant, what the credit cost the customer. `commit`:
-     * prepaid credit granted when a commit invoice was finalized; that
-     * invoice is `source_invoice_id`. `promotional`:
+     * prepaid credit granted when a top-up was paid; that invoice is
+     * `source_invoice_id`. `promotional`:
      * free credit you marked so; invoices draw it before any other
      * credit. Absent for other credit.
      */
   grant_kind?: CreditLedgerEntryGrantKind;
   /**
-     * For a `commit` grant, the commit invoice whose finalizing made
-     * the grant. Absent on other entries.
+     * For a `commit` grant, the top-up whose payment made the grant.
+     * Absent on other entries.
      */
   source_invoice_id?: string;
   /**

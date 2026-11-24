@@ -42,8 +42,7 @@ export interface CreditGrantBlock {
   expired_cents: number;
   /**
      * Commit credit taken back when the invoice that funded it was
-     * voided, or refunded by a credit note, in the currency's minor
-     * unit.
+     * refunded by a credit note, in the currency's minor unit.
      */
   retired_cents: number;
   /** The part a dashboard user or an API key removed with a negative adjustment, in the currency's minor unit. */
@@ -55,7 +54,7 @@ export interface CreditGrantBlock {
      * Absent when the credit does not expire.
      */
   expires_at?: string;
-  /** For a `commit` grant, the commit invoice whose finalizing made the grant. Absent for other grants. */
+  /** For a `commit` grant, the top-up whose payment made the grant. Absent for other grants. */
   source_invoice_id?: string;
   /** When the grant was added. */
   created_at: string;

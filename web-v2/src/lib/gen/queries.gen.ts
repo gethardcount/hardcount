@@ -3068,8 +3068,8 @@ export const getCreateCreditNoteUrl = () => {
  * price the customer paid per credit, so a discounted commit is
  * refunded at the discounted rate, never at face value. The note is
  * created and issued in one step. Its cash goes to the card or out of
- * band, never to the credit balance. To cancel the commit on an unpaid
- * invoice, void the invoice instead.
+ * band, never to the credit balance. An unpaid top-up granted no
+ * credit: void it to withdraw it.
  *
  * A note with `stripe_refund_id` records a refund already made in
  * Stripe; see that field. Nothing is emailed; send the note with
@@ -3273,7 +3273,7 @@ export const getGetCreditGrantsUrl = (customerId: string,
  * history. Each grant's `consumed_cents`
  * also counts credit no invoice used: `expired_cents`, the part that
  * expired unused; `retired_cents`, commit credit taken back when the
- * invoice that funded it was voided or refunded by a credit note; and
+ * invoice that funded it was refunded by a credit note; and
  * `deducted_cents`, the part a deduction (a negative adjustment by a
  * dashboard user or an API key) drew from this grant. The credit invoices actually used
  * is `consumed_cents - expired_cents - retired_cents - deducted_cents`.
@@ -8956,9 +8956,8 @@ export const getVoidInvoiceUrl = (id: string,) => {
 /**
  * Cancels a `draft`, `finalized` or `uncollectible` invoice. Voiding
  * is final. In the same transaction, credits that were applied to the
- * invoice go back to the customer's credit balance, and if the
- * invoice bought a prepaid commit, the unspent part of that credit is
- * retired.
+ * invoice go back to the customer's credit balance. Voiding an unpaid
+ * top-up withdraws it; it granted no credit.
  *
  * After the void, Hardcount stops collection at Stripe (expires open
  * Checkout sessions and cancels the PaymentIntent where Stripe allows
@@ -10787,8 +10786,7 @@ export const getFinalizeInvoiceUrl = (id: string,) => {
  *   issues it.
  * - Moves the invoice to `finalized`, copies the customer and company
  *   details onto it (`bill_to_snapshot`, `supplier_snapshot`,
- *   `footer`), grants the credit of a prepaid commit line, issues any
- *   credit note held on the draft, creates the
+ *   `footer`), issues any credit note held on the draft, creates the
  *   hosted-page `public_token`, and records the tax with Stripe Tax
  *   when that is the provider.
  * - Sends the `invoice.finalized` webhook event. Its

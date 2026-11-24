@@ -60,14 +60,6 @@
  *   retrying it through the pause, and `message` then says so. With no
  *   open run it is not charged automatically until collection
  *   resumes.
- * - `commit_exposure`: the invoice funded a prepaid commit and is
- *   unpaid, and the customer can already spend that credit or has
- *   spent it. Prepaid credit is granted when the invoice is issued,
- *   not when it is paid.
- *   This reason is returned only when no other reason applies. When
- *   one does, the exposure is folded into that reason's `message` and
- *   `actions` instead, so do not treat this code as the only sign of
- *   exposure.
  * - `dispute_lost`: the customer disputed a payment on the invoice with
  *   their bank, and the dispute closed as `lost`, so the bank took the
  *   money back. Hardcount leaves the invoice paid and moves no money;
@@ -122,7 +114,6 @@ export const AttentionReason = {
   no_payment_method: 'no_payment_method',
   dunning_exhausted: 'dunning_exhausted',
   collection_paused: 'collection_paused',
-  commit_exposure: 'commit_exposure',
   dispute_lost: 'dispute_lost',
   refunded_in_stripe: 'refunded_in_stripe',
   amount_below_minimum: 'amount_below_minimum',

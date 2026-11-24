@@ -1738,7 +1738,6 @@ components:
         - no_payment_method
         - dunning_exhausted
         - collection_paused
-        - commit_exposure
         - dispute_lost
         - refunded_in_stripe
         - amount_below_minimum
@@ -1790,14 +1789,6 @@ components:
           retrying it through the pause, and `message` then says so. With no
           open run it is not charged automatically until collection
           resumes.
-        - `commit_exposure`: the invoice funded a prepaid commit and is
-          unpaid, and the customer can already spend that credit or has
-          spent it. Prepaid credit is granted when the invoice is issued,
-          not when it is paid.
-          This reason is returned only when no other reason applies. When
-          one does, the exposure is folded into that reason's `message` and
-          `actions` instead, so do not treat this code as the only sign of
-          exposure.
         - `dispute_lost`: the customer disputed a payment on the invoice with
           their bank, and the dispute closed as `lost`, so the bank took the
           money back. Hardcount leaves the invoice paid and moves no money;
@@ -1913,10 +1904,8 @@ components:
         - `update_payment_method`: send the customer a link to replace a
           card that was declined.
         - `connect_tax_provider`: connect the tax provider under Settings.
-        - `void_invoice`: `POST /v1/invoices/{id}/void`. Offered on
-          prepaid-commit exposure while some granted credit is unspent:
-          voiding retires the unspent balance, and credit already spent is
-          not taken back. Also offered on `amount_below_minimum`.
+        - `void_invoice`: `POST /v1/invoices/{id}/void`. Offered only on
+          `amount_below_minimum`.
         - `mark_uncollectible`:
           `POST /v1/invoices/{id}/mark-uncollectible`. Offered only on a
           parked invoice (payment status `unknown` with no payment intent
@@ -1965,12 +1954,10 @@ components:
             Text that is safe to show as it is: one plain sentence saying
             what happens and what to do. Facts that must show up front
             follow on more lines, separated by a newline (`\n`), one sentence
-            each and up to three lines in all: the setup-link email on
+            each and up to two lines in all, such as the setup-link email on
             `no_payment_method` (and on `dunning_exhausted` when no link can
-            be emailed), and the prepaid credit at risk on an unpaid commit
-            invoice. A no-card commit invoice carries all three. The wording
-            can change between releases; switch on `reason` and `code`, not
-            on this text.
+            be emailed). The wording can change between releases; switch on
+            `reason` and `code`, not on this text.
         actions:
           type: array
           items:
@@ -3127,8 +3114,7 @@ components:
           format: int64
           description: >
             Prepaid commit credit taken back because the invoice that funded
-            it was voided or refunded by a credit note, in the currency's
-            minor unit.
+            it was refunded by a credit note, in the currency's minor unit.
         total_deducted:
           type: integer
           format: int64
@@ -4710,15 +4696,14 @@ components:
           enum: [grant, usage, expiry, adjustment]
           description: |
             - `grant`: credit added, by you with `POST /v1/credits/grant` or
-              by Hardcount (a prepaid-commit invoice when it is finalized, a
-              credit note, or a void or credit note that gave drawn credit
-              back).
+              by Hardcount (a top-up when it is paid, a credit note, or a
+              void or credit note that gave drawn credit back).
             - `usage`: credit an invoice drew.
             - `expiry`: the unused rest of a grant, written off once its
               `expires_at` passed.
             - `adjustment`: credit added or removed with
               `POST /v1/credits/adjust`, or commit credit taken back when its
-              invoice was voided or refunded.
+              invoice was refunded by a credit note.
         currency:
           type: string
           description: >
@@ -4748,10 +4733,10 @@ components:
           description: |
             The invoice the entry comes from: the invoice a `usage` entry
             was drawn by, the voided or credited invoice that gave credit
-            back, or the commit invoice that funded a grant. Absent when no
-            invoice caused the entry, and on the `adjustment` that takes
-            commit credit back after its invoice was voided or refunded:
-            that invoice is in `metadata.funding_invoice_id`.
+            back, or the top-up that funded a grant. Absent when no invoice
+            caused the entry, and on the `adjustment` that takes commit
+            credit back after its invoice was refunded: that invoice is in
+            `metadata.funding_invoice_id`.
         expires_at:
           type: string
           format: date-time
@@ -4781,22 +4766,21 @@ components:
             For entries that add credit, how much of it is gone, in the
             currency's minor unit: drawn by invoices, expired, removed by a
             negative adjustment, or, for commit credit, taken back when its
-            invoice was voided or refunded by a credit note. Absent when
-            nothing is.
+            invoice was refunded by a credit note. Absent when nothing is.
         grant_kind:
           type: string
           enum: [commit, promotional]
           description: |
             On a grant, what the credit cost the customer. `commit`:
-            prepaid credit granted when a commit invoice was finalized; that
-            invoice is `source_invoice_id`. `promotional`:
+            prepaid credit granted when a top-up was paid; that invoice is
+            `source_invoice_id`. `promotional`:
             free credit you marked so; invoices draw it before any other
             credit. Absent for other credit.
         source_invoice_id:
           type: string
           description: |
-            For a `commit` grant, the commit invoice whose finalizing made
-            the grant. Absent on other entries.
+            For a `commit` grant, the top-up whose payment made the grant.
+            Absent on other entries.
         source_subscription_id:
           type: string
           description: |
@@ -9397,8 +9381,7 @@ components:
           format: int64
           description: |
             Commit credit taken back when the invoice that funded it was
-            voided, or refunded by a credit note, in the currency's minor
-            unit.
+            refunded by a credit note, in the currency's minor unit.
         deducted_cents:
           type: integer
           format: int64
@@ -9413,7 +9396,7 @@ components:
             Absent when the credit does not expire.
         source_invoice_id:
           type: string
-          description: For a `commit` grant, the commit invoice whose finalizing made the grant. Absent for other grants.
+          description: For a `commit` grant, the top-up whose payment made the grant. Absent for other grants.
         created_at:
           type: string
           format: date-time
@@ -12541,8 +12524,8 @@ paths:
         price the customer paid per credit, so a discounted commit is
         refunded at the discounted rate, never at face value. The note is
         created and issued in one step. Its cash goes to the card or out of
-        band, never to the credit balance. To cancel the commit on an unpaid
-        invoice, void the invoice instead.
+        band, never to the credit balance. An unpaid top-up granted no
+        credit: void it to withdraw it.
 
         A note with `stripe_refund_id` records a refund already made in
         Stripe; see that field. Nothing is emailed; send the note with
@@ -12928,7 +12911,7 @@ paths:
         history. Each grant's `consumed_cents`
         also counts credit no invoice used: `expired_cents`, the part that
         expired unused; `retired_cents`, commit credit taken back when the
-        invoice that funded it was voided or refunded by a credit note; and
+        invoice that funded it was refunded by a credit note; and
         `deducted_cents`, the part a deduction (a negative adjustment by a
         dashboard user or an API key) drew from this grant. The credit invoices actually used
         is `consumed_cents - expired_cents - retired_cents - deducted_cents`.
@@ -19577,9 +19560,8 @@ paths:
       description: |
         Cancels a `draft`, `finalized` or `uncollectible` invoice. Voiding
         is final. In the same transaction, credits that were applied to the
-        invoice go back to the customer's credit balance, and if the
-        invoice bought a prepaid commit, the unspent part of that credit is
-        retired.
+        invoice go back to the customer's credit balance. Voiding an unpaid
+        top-up withdraws it; it granted no credit.
 
         After the void, Hardcount stops collection at Stripe (expires open
         Checkout sessions and cancels the PaymentIntent where Stripe allows
@@ -21805,8 +21787,7 @@ paths:
           issues it.
         - Moves the invoice to `finalized`, copies the customer and company
           details onto it (`bill_to_snapshot`, `supplier_snapshot`,
-          `footer`), grants the credit of a prepaid commit line, issues any
-          credit note held on the draft, creates the
+          `footer`), issues any credit note held on the draft, creates the
           hosted-page `public_token`, and records the tax with Stripe Tax
           when that is the provider.
         - Sends the `invoice.finalized` webhook event. Its
@@ -23887,8 +23868,8 @@ paths:
                     Optional cost-basis class. `promotional` marks free or
                     marketing credit, which invoices draw before any other
                     credit. Omitted means unclassified credit. `commit` is
-                    refused here: commit credit comes only from finalizing a
-                    commit invoice.
+                    refused here: commit credit comes only from paying a
+                    top-up.
             example:
               customer_id: hc_cus_dakhnk2q3gpgqfoq5c0g
               currency: USD

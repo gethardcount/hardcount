@@ -41,14 +41,14 @@ func (s *spyCommitGrants) CommitGrantExposure(context.Context, string, string, t
 }
 
 // The hosted page's lookup by token computes no attention: the public page
-// shows none, so a finalized commit invoice, whose operator-facing attention
-// reads the commit grant, is returned without reading it.
+// shows none, so a paid top-up with a lost dispute, whose operator-facing
+// attention reads the commit grant, is returned without reading it.
 func TestGetByPublicToken_ComputesNoAttention(t *testing.T) {
 	ctx := context.Background()
 	store := newMemStore()
 	inv, err := store.Create(ctx, "t1", domain.Invoice{
-		CustomerID: "cus_1", Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
-		BillingReason: domain.BillingReasonManual, Currency: "USD", TotalAmountCents: 9000, AmountDueCents: 9000,
+		CustomerID: "cus_1", Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded,
+		BillingReason: domain.BillingReasonTopup, Currency: "USD", TotalAmountCents: 9000, AmountPaidCents: 9000,
 		PublicToken: "tok_commit",
 	})
 	if err != nil {
@@ -56,6 +56,7 @@ func TestGetByPublicToken_ComputesNoAttention(t *testing.T) {
 	}
 	grants := &spyCommitGrants{drawable: 6000}
 	svc := NewService(store, nil, newMemNumberer())
+	svc.SetDisputeReader(fakeDisputeReader{lost: &domain.InvoiceDispute{StripeDisputeID: "du_1", Status: domain.DisputeLost, AmountCents: 9000, Currency: "USD"}})
 	svc.SetCommitGrantReader(grants)
 
 	got, _, err := svc.GetByPublicToken(ctx, "tok_commit")
@@ -68,10 +69,10 @@ func TestGetByPublicToken_ComputesNoAttention(t *testing.T) {
 }
 
 // TestAttention_LostDisputeOnPaidCommitInvoice_ReadsTheGrant: the invoice
-// service reads the prepaid-commit grant of a paid invoice when, and only
+// service reads the prepaid-commit grant of a paid top-up when, and only
 // when, a dispute on it was lost, so the dispute_lost notice can say the
-// credit is still spendable. A paid invoice without a lost dispute still
-// never pays for the read (the guard the exposure read was built with).
+// credit is still spendable. A paid top-up without a lost dispute never pays
+// for the read.
 func TestAttention_LostDisputeOnPaidCommitInvoice_ReadsTheGrant(t *testing.T) {
 	ctx := context.Background()
 	closedAt := time.Date(2026, 10, 3, 12, 0, 0, 0, time.UTC)
@@ -84,7 +85,7 @@ func TestAttention_LostDisputeOnPaidCommitInvoice_ReadsTheGrant(t *testing.T) {
 		store := newMemStore()
 		inv, err := store.Create(ctx, "t1", domain.Invoice{
 			CustomerID: "cus_1", Status: domain.InvoicePaid, PaymentStatus: domain.PaymentSucceeded,
-			BillingReason: domain.BillingReasonManual, Currency: "USD",
+			BillingReason: domain.BillingReasonTopup, Currency: "USD",
 			TotalAmountCents: 9000, AmountPaidCents: 9000, StripePaymentIntentID: "pi_commit_1",
 		})
 		if err != nil {

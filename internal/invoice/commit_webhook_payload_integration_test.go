@@ -17,10 +17,7 @@ import (
 // carries the same balance.
 func TestCommitRelief_WebhookCarriesTheBalance(t *testing.T) {
 	h, ctx := newCommitHarness(t, "Relief Webhook Payload")
-	inv := h.createCommitInvoice(t, ctx, 9000, 10000)
-	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
-		t.Fatalf("finalize: %v", err)
-	}
+	inv := h.createTopup(t, ctx, "USD", 9000, 10000)
 	payOffline(t, h, ctx, inv.ID)
 	drain(t, h, ctx, 4000, 1)
 

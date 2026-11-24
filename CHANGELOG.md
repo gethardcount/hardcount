@@ -19,7 +19,7 @@ original text.
 
 ## [Unreleased]
 
-**Before upgrading:** stop every copy of the earlier version before you start this one: a copy of the earlier version could still make a test clock, or refuse a top-up's payment. Test clocks are removed. Upgrading deletes every test clock and every customer on one, with everything they own (test mode only); the audit log keeps its rows. A draft invoice whose prepaid commit line has an expiry loses it in migration `00239_commit_line_no_expiry`, so its credit will not expire: to keep the expiry, finalize those drafts before you upgrade, or void them and grant expiring credit by hand.
+**Before upgrading:** stop every copy of the earlier version before you start this one: a copy of the earlier version could still make a test clock, or refuse a top-up's payment. Test clocks are removed. Upgrading deletes every test clock and every customer on one, with everything they own (test mode only); the audit log keeps its rows. Before upgrading, void every invoice that sells prepaid credit and is not paid, draft or issued, and grant by hand any credit you still mean to give: after the upgrade a draft that is finalized grants no credit, and voiding an issued one no longer takes its credit back.
 
 ### Added
 
@@ -27,7 +27,7 @@ original text.
 
 ### Changed
 
-- **A prepaid commit's line has no expiry date, and it is the only line on its invoice.** `commit_expires_at` is removed from invoice lines: a request that sends it is refused with `422`. Creating an invoice, or adding a line, refuses a commit line beside any other line with `422`; put other charges on a separate invoice. To sell credit that expires, set `topup_credit_valid_days` (see Added). A commit already finalized keeps the expiry on its credit ([#1907](https://github.com/gethardcount/hardcount/pull/1907)).
+- **A prepaid commit's line has no expiry date, and it is the only line on its invoice.** `commit_expires_at` is removed from invoice lines: a request that sends it is refused with `422`. Creating an invoice, or adding a line, refuses a commit line beside any other line with `422`; put other charges on a separate invoice. To sell credit that expires, set `topup_credit_valid_days` (see Added).
 - **An invoice created with one commit line is now a top-up.** It stays a draft with no number and no due date until it is paid: finalize on it answers `409`, and `invoice.finalized` is sent when it is paid, with its new number. Adding a commit line to an existing draft answers `422`. An integration that finalized such an invoice to grant the credit now charges the card (`collect`), sends the link (`send`) or records the payment instead.
 - **The events of one usage request share one time.** Events sent in one `POST /v1/usage-events/batch` with no `timestamp` are all dated when Hardcount receives the request, and so are the calls of one LiteLLM spend request that carry no time. Before, each read the clock in turn. A `last` meter bills the event with the latest `timestamp`, so if the events of one request must have an order, send each one's `timestamp`.
 
@@ -37,6 +37,7 @@ original text.
 - **`is_simulated` on invoices and credit notes.** The field is removed from invoices and credit notes in the API and in webhook payloads; it was always false outside test clocks.
 - **The other test-clock fields.** Removed from the API and webhook payloads: `test_clock_id` on customers, subscriptions, invoices, dunning runs, audit entries and subscription timeline rows; `effective_now` on dunning runs; `sim_effective_at` on audit entries and subscription timeline rows; `subject_deleted` on audit entries; `is_simulated` on invoice and subscription timeline rows; `recorded_at` on activity lines and invoice timeline rows. These were set only for work on a test clock. Also removed: `test_clocks` from the audit log's filter options, which was always sent, as an empty list; and the `test_clock_id`, `sim_from` and `sim_to` filters of the audit log list and its CSV export. `audit-log.csv` drops its `sim_effective_at` and `test_clock_id` columns, which were in every export's header, so each later column moves two places left (`metadata_json` from 14th to 12th). A parser that reads the file by column position must be updated.
 - **The test-clock tables, columns and leader role.** Migration `00242_drop_test_clock_schema` drops the `test_clocks` and `plan_price_version_clocks` tables and every `test_clock_id`, `sim_effective_at` and `is_simulated` column. The `testclock_catchup` role leaves `leader_status` and the `hardcount_leader_*` metrics. SQL that reads any of these now fails, and an alert on that role never fires.
+- **The `commit_exposure` attention reason.** Only a top-up's payment grants prepaid credit, so no unpaid invoice holds credit to report, and the reason is no longer sent. The `void_invoice` action is now offered only with `amount_below_minimum`, and a void's audit entry no longer carries `commit_retired_cents` or `commit_retired_on_return_cents`.
 
 ### Fixed
 

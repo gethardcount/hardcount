@@ -507,10 +507,6 @@ func (b *blockingReverser) ReverseForInvoiceTx(context.Context, *sql.Tx, string,
 	return domain.CreditReturn{}, nil
 }
 
-func (b *blockingReverser) RetireCommitGrantForInvoiceTx(context.Context, *sql.Tx, string, string) (int64, error) {
-	return 0, nil
-}
-
 // TestThresholdVoid_vs_Close_VoidHoldsTheRow is the other order: the void
 // has locked the threshold invoice and is mid-transaction when the close
 // re-reads the watermark. The re-read waits for the void, sees the invoice

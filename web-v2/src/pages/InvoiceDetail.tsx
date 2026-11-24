@@ -1704,18 +1704,7 @@ export default function InvoiceDetailPage() {
         open={showVoidConfirm && !withdrawTopup}
         onOpenChange={setShowVoidConfirm}
         title="Void invoice"
-        // The prepaid-credit clause is CONDITIONAL, keyed on the server's own
-        // void_invoice action — present exactly when this invoice funded
-        // prepaid credit that is still unspent. It can't be unconditional:
-        // "applied credits are returned" points the OTHER WAY (credit applied
-        // to PAY this invoice coming back), and an operator voiding a commit
-        // invoice would read it as the customer getting credit back, when
-        // voiding is what takes their unspent credit away.
-        description={
-          (invoice?.attention?.actions ?? []).some((a) => a.code === 'void_invoice')
-            ? "The invoice is cancelled as if it was never owed, and the unspent prepaid credit it bought is cancelled; spent credit stays spent. This can't be undone."
-            : "The invoice is cancelled as if it was never owed, and any credits applied to it are returned. This can't be undone."
-        }
+        description="The invoice is cancelled as if it was never owed, and any credits applied to it are returned. This can't be undone."
         confirmWord="VOID"
         confirmLabel="Void invoice"
         onConfirm={() => voidMutation.mutate()}

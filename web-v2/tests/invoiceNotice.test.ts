@@ -99,11 +99,6 @@ test('written off, no card: the email button needs an address AND a server that 
   assert.equal(writtenOffCardLine(null, false).note, noEmail.note)
 })
 
-test('messageLines keeps all three lines of a no-card commit invoice', () => {
-  const msg = 'Card line.\nEmail line.\nUnpaid prepaid credit: amount line.'
-  assert.deepEqual(messageLines(msg), ['Card line.', 'Email line.', 'Unpaid prepaid credit: amount line.'])
-})
-
 // #1109: Finalize asks first, and says what it will do for this customer.
 test('the finalize confirmation says what finalizing does', () => {
   const card = finalizeConfirmLines({ collectionPaused: false, stripeConnected: true, hasCard: true, hasEmail: true, canEmailSetupLinks: true, taxAtFinalize: false })

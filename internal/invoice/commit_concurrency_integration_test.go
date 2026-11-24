@@ -7,20 +7,26 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/credit"
 	"github.com/gethardcount/hardcount/internal/domain"
+	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// TestCommitFinalize_ConcurrentDoubleFinalize pins the D5 CAS under true
-// concurrency: two operators finalize the same draft commit invoice at once.
-// Both service-level draft guards read the same pre-flip snapshot; the
-// `AND status='draft'` predicate on FinalizeWithDates is what makes exactly
-// one win — and therefore exactly one commit grant. Pre-CAS, the loser's
-// unpredicated UPDATE re-flipped the row and the funder ran twice into the
-// fund-once index, aborting a legitimate settle path.
-func TestCommitFinalize_ConcurrentDoubleFinalize(t *testing.T) {
-	h, ctx := newCommitHarness(t, "Commit Concurrent Finalize")
+// TestFinalize_ConcurrentDoubleFinalize pins the D5 CAS under true
+// concurrency: two operators finalize the same draft at once. Both
+// service-level draft guards can read the same pre-flip snapshot; the
+// `AND status='draft'` predicate on FinalizeWithDates lets exactly one
+// succeed, and the other fails.
+func TestFinalize_ConcurrentDoubleFinalize(t *testing.T) {
+	h, ctx := newCommitHarness(t, "Concurrent Finalize")
 
-	inv := h.createCommitInvoice(t, ctx, 9000, 10000)
+	inv, err := h.invSvc.Create(ctx, h.tenantID, invoice.CreateInput{
+		CustomerID: h.custID,
+		Currency:   "USD",
+		LineItems:  []invoice.AddLineItemInput{{Description: "Setup", Quantity: 1, UnitAmountCents: 9000}},
+	})
+	if err != nil {
+		t.Fatalf("create draft: %v", err)
+	}
 
 	const racers = 2
 	var wg sync.WaitGroup
@@ -47,27 +53,16 @@ func TestCommitFinalize_ConcurrentDoubleFinalize(t *testing.T) {
 	if oks != 1 || fails != 1 {
 		t.Fatalf("concurrent finalize: oks=%d fails=%d, want exactly 1/1", oks, fails)
 	}
-	if got := h.balance(t, ctx); got != 10000 {
-		t.Fatalf("balance = %d, want 10000 (exactly one fund)", got)
-	}
-	grant, ok := h.commitGrant(t, ctx, inv.ID)
-	if !ok || grant.AmountCents != 10000 {
-		t.Fatalf("commit grant = %+v ok=%v, want single 10000 grant", grant, ok)
-	}
 }
 
-// TestCommitMarkPaid_ConcurrentRedelivery_NoGrantEffect pins the phase-1
-// contract that NO funder hooks the paid transition: two concurrent MarkPaid
-// deliveries of a finalized commit invoice settle idempotently (FOR UPDATE +
-// already-paid early return) and the ledger is untouched — still exactly the
-// one grant minted at finalize, no adjustments.
-func TestCommitMarkPaid_ConcurrentRedelivery_NoGrantEffect(t *testing.T) {
-	h, ctx := newCommitHarness(t, "Commit Concurrent MarkPaid")
+// TestTopupMarkPaid_ConcurrentRedelivery_GrantsOnce: two concurrent
+// deliveries of one payment for a top-up settle once. The first issues it,
+// pays it and grants the credit; the second waits on the invoice row, finds
+// it paid and grants nothing, so the ledger holds exactly one grant.
+func TestTopupMarkPaid_ConcurrentRedelivery_GrantsOnce(t *testing.T) {
+	h, ctx := newCommitHarness(t, "Topup Concurrent MarkPaid")
 
-	inv := h.createCommitInvoice(t, ctx, 9000, 10000)
-	if _, err := h.invSvc.Finalize(ctx, h.tenantID, inv.ID); err != nil {
-		t.Fatalf("finalize: %v", err)
-	}
+	inv := h.createTopup(t, ctx, "USD", 9000, 10000)
 
 	const racers = 2
 	var wg sync.WaitGroup
@@ -96,14 +91,14 @@ func TestCommitMarkPaid_ConcurrentRedelivery_NoGrantEffect(t *testing.T) {
 		t.Fatalf("status = %s, want paid", got.Status)
 	}
 	if bal := h.balance(t, ctx); bal != 10000 {
-		t.Fatalf("balance = %d, want 10000 (paid transition mints nothing)", bal)
+		t.Fatalf("balance = %d, want 10000 (one grant)", bal)
 	}
 	entries, err := h.creditSvc.ListEntries(ctx, credit.ListFilter{TenantID: h.tenantID, CustomerID: h.custID})
 	if err != nil {
 		t.Fatalf("list entries: %v", err)
 	}
 	if len(entries) != 1 {
-		t.Fatalf("ledger entries = %d, want exactly 1 (the finalize grant)", len(entries))
+		t.Fatalf("ledger entries = %d, want exactly 1 (the payment's grant)", len(entries))
 	}
 }
 
