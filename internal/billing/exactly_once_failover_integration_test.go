@@ -63,14 +63,14 @@ const (
 )
 
 // exactlyOnceSeed is everything both the parent and a helper subprocess need
-// to bill the same tenant at the same simulated instant.
+// to bill the same tenant at the same fixed instant.
 type exactlyOnceSeed struct {
 	tenantID    string
 	customerID  string
 	subIDs      []string
 	periodStart time.Time
 	periodEnd   time.Time
-	// runAt is the simulated clock both sides use. Passed to the subprocess
+	// runAt is the fake clock's time both sides use. Passed to the subprocess
 	// as RFC3339Nano so leader and successor agree on "now" exactly — a
 	// difference here would change which periods are due and make any
 	// duplicate/missing count meaningless.
@@ -150,8 +150,8 @@ func seedDueSubscriptions(t *testing.T, db *postgres.DB, n int) exactlyOnceSeed 
 	}
 }
 
-// newFailoverEngine builds an engine wired to real Postgres stores at a fixed
-// simulated instant. Used identically by the parent and by the helper
+// newFailoverEngine builds an engine wired to real Postgres stores on a fake
+// clock fixed at now. Used identically by the parent and by the helper
 // subprocess, so both leaders are the same code driving the same path.
 func newFailoverEngine(db *postgres.DB, now time.Time) *billing.Engine {
 	pricingStore := pricing.NewPostgresStore(db)

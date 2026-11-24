@@ -95,9 +95,9 @@ func TestManualInvoice_CreditBalanceApplied_E2E(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create customer: %v", err)
 	}
-	if _, err := creditSvc.Grant(ctx, tenantID, credit.GrantInput{
+	if _, err := creditSvc.Grant(clock.WithEffectiveNow(ctx, time.Now().UTC().Add(-time.Hour)), tenantID, credit.GrantInput{
 		Currency:   "USD",
-		CustomerID: cust.ID, AmountCents: 2000, Description: "seed", At: time.Now().UTC().Add(-time.Hour),
+		CustomerID: cust.ID, AmountCents: 2000, Description: "seed",
 	}); err != nil {
 		t.Fatalf("grant: %v", err)
 	}

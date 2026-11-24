@@ -591,7 +591,7 @@ func TestCycleClose_GrantValidThroughTheLastDay_PaysThePeriodInvoice(t *testing.
 		t.Fatalf("read usage entry: %v", err)
 	}
 	// The close collects inline on its own instant, the period end (billing
-	// rebinds the context's clock to the cycle close), so the draw is stamped
+	// passes the cycle close as the collection's at), so the draw is stamped
 	// there, not at the tick an hour later.
 	if !drawnAt.Equal(x.periodEnd) {
 		t.Errorf("usage entry created_at = %v, want the close's collection instant %v", drawnAt, x.periodEnd)

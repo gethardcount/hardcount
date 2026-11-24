@@ -374,8 +374,8 @@ func (n *skippingNoPMNotifier) NotifyNoPaymentMethod(_ context.Context, _ string
 	return domain.NotifySkippedNoEmail, nil
 }
 
-// A catch-up cycle close (several periods closed in one run, as a test-clock
-// Advance or a late tick does) collects each invoice at ITS period boundary,
+// A catch-up cycle close (several periods closed in one run, as a late tick
+// does) collects each invoice at ITS period boundary,
 // not at the run's now. Credits are applied as of the boundary — a grant that
 // expired after it still covers that period — and a credit-covered invoice's
 // paid_at lands there too. Applying at now would skip those grants and charge
@@ -482,8 +482,7 @@ func (c *belowMinimumCharger) ChargeInvoice(_ context.Context, _ string, inv dom
 }
 
 // A refusal below Stripe's minimum is a normal outcome of the sweep, not an
-// error: a test-clock advance that hit one used to fail with 422 (catchup
-// internal_failure) instead of finishing.
+// error.
 func TestProcessAutoCharge_BelowMinimumIsNotAnError(t *testing.T) {
 	e, _, notifier, inv := collectFixture()
 	e.paymentSetups = &fakePaymentSetups{ready: true, stripeCustomerID: "cus_stripe"}
@@ -541,7 +540,7 @@ func TestCollect_CardRefusalWithoutDeclineCodeIsADecline(t *testing.T) {
 // code: a card refusal does not (the sweep counts no error); an invalid
 // request does, as a fault of the request, so the sweep's failed count shows
 // it.
-func TestCollect_RefusalWithoutDeclineCode_WhichJobsFail(t *testing.T) {
+func TestCollect_RefusalWithoutDeclineCode_WhenTheSweepFails(t *testing.T) {
 	for _, c := range []struct {
 		name    string
 		charger func(*mockInvoices) InvoiceCharger
@@ -550,7 +549,7 @@ func TestCollect_RefusalWithoutDeclineCode_WhichJobsFail(t *testing.T) {
 		{"a card refusal", func(m *mockInvoices) InvoiceCharger { return cardRefusingCharger{store: m} }, 0},
 		{"an invalid request", func(m *mockInvoices) InvoiceCharger { return refusingCharger{store: m} }, 1},
 	} {
-		t.Run(c.name+", in real time", func(t *testing.T) {
+		t.Run(c.name, func(t *testing.T) {
 			inv, _, _, engine := leftHarness(t)
 			engine.charger = c.charger(inv)
 			if _, errs := engine.RetryPendingCharges(postgres.WithLivemode(context.Background(), true), 50, nil); len(errs) != c.errs {

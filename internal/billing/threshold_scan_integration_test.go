@@ -321,7 +321,7 @@ func TestThresholdScan_EachSubscriptionOnItsOwnInstant(t *testing.T) {
 		}
 	}
 
-	if fired, scanErrs := f.engine.ScanThresholds(clock.WithRealTime(ctx), 50); fired != 2 || len(scanErrs) > 0 {
+	if fired, scanErrs := f.engine.ScanThresholds(clock.WithoutInstant(ctx), 50); fired != 2 || len(scanErrs) > 0 {
 		t.Fatalf("fired %d, errors %v; want 2 fires", fired, scanErrs)
 	}
 	seen := map[int64]bool{} // by microsecond, what Postgres stores

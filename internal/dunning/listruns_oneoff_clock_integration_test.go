@@ -21,7 +21,7 @@ func TestListRuns_OneOffInvoiceRun(t *testing.T) {
 	ctx := postgres.WithLivemode(context.Background(), false)
 
 	const tenantID = "hc_ten_dun_oneoff"
-	frozen := time.Date(2027, 6, 1, 0, 0, 0, 0, time.UTC)
+	base := time.Date(2027, 6, 1, 0, 0, 0, 0, time.UTC)
 
 	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
 	if err != nil {
@@ -38,7 +38,7 @@ func TestListRuns_OneOffInvoiceRun(t *testing.T) {
 	mustExec(`SELECT set_config('app.livemode', 'off', true)`)
 	mustExec(`INSERT INTO tenants (id, name, status) VALUES ($1, 'Dun OneOff', 'active')`, tenantID)
 	mustExec(`INSERT INTO customers (id, tenant_id, external_id, display_name, email, created_at, updated_at)
-		VALUES ('cus_dun_pin', $1, 'dun_pin', 'Pin', '', $2, $2)`, tenantID, frozen)
+		VALUES ('cus_dun_pin', $1, 'dun_pin', 'Pin', '', $2, $2)`, tenantID, base)
 	mustExec(`INSERT INTO dunning_policies (id, tenant_id, name, enabled, is_default, retry_days, final_subscription_action, final_invoice_action, livemode)
 		VALUES ('dpol_oneoff', $1, 'P', true, true, '[3, 3, 3]', 'pause', 'none', false)`, tenantID)
 	// A one-off invoice: subscription_id NULL.
@@ -46,10 +46,10 @@ func TestListRuns_OneOffInvoiceRun(t *testing.T) {
 			status, payment_status, currency, subtotal_cents, total_amount_cents,
 			amount_due_cents, tax_status, billing_period_start, billing_period_end, created_at, updated_at)
 		VALUES ('inv_dun_oneoff', $1, 'cus_dun_pin', 'inv_dun_oneoff', 'finalized', 'failed', 'USD', 2500, 2500, 2500, 'ok', $2, $2, $2, $2)`,
-		tenantID, frozen.Add(-24*time.Hour))
+		tenantID, base.Add(-24*time.Hour))
 	mustExec(`INSERT INTO invoice_dunning_runs (id, tenant_id, invoice_id, customer_id, policy_id, state, reason, attempt_count, next_action_at, paused, created_at, updated_at, livemode)
 		VALUES ('run_oneoff_pin', $1, 'inv_dun_oneoff', 'cus_dun_pin', 'dpol_oneoff', 'active', 'payment_failed', 0, $2, false, $3, $3, false)`,
-		tenantID, frozen.Add(-time.Hour), frozen.Add(-24*time.Hour))
+		tenantID, base.Add(-time.Hour), base.Add(-24*time.Hour))
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
 	}
@@ -76,7 +76,7 @@ func TestListRuns_OneOffInvoiceRun(t *testing.T) {
 	})
 
 	t.Run("ListEvents tie-breaks equal created_at by id", func(t *testing.T) {
-		sameInstant := frozen.Add(-time.Hour)
+		sameInstant := base.Add(-time.Hour)
 		tx2, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
 		if err != nil {
 			t.Fatalf("begin: %v", err)

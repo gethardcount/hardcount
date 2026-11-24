@@ -646,15 +646,10 @@ func (r *recordingDunningStarter) StartDunning(ctx context.Context, tenantID, in
 	return domain.InvoiceDunningRun{ID: "drun_test", InvoiceID: invoiceID}, nil
 }
 
-// TestChargeInvoice_DefiniteFailure_InlineStartsDunning locks in the
-// Phase 3 → Phase 5 invariant from ADR-035: when ChargeInvoice gets a
-// definitively failed PaymentIntent error (card declined, not the
-// ambiguous unknown/timeout case), it MUST inline-call StartDunning so
-// the run exists by the time the catchup orchestrator's Phase 5
-// queries due runs in the same Advance. Without this, a future
-// refactor that reverts to webhook-only StartDunning silently brings
-// back the race where Phase 5 fires zero retries because the run
-// hasn't been created yet.
+// TestChargeInvoice_DefiniteFailure_InlineStartsDunning: when ChargeInvoice
+// gets a definitively failed PaymentIntent error (card declined, not the
+// ambiguous unknown/timeout case), it MUST inline-call StartDunning, so
+// payment recovery starts without waiting for the webhook.
 func TestChargeInvoice_DefiniteFailure_InlineStartsDunning(t *testing.T) {
 	client := &mockStripeClient{
 		shouldFail: true,

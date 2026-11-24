@@ -491,20 +491,6 @@ func TestCustomerService_BillingProfile(t *testing.T) {
 	})
 }
 
-// createServer is the server's clock: a fixed time, counting the reads it
-// answers itself (a bound instant is not a read).
-type createServer struct{ reads int }
-
-var createServerAt = time.Date(2026, 7, 8, 9, 10, 11, 0, time.UTC)
-
-func (c *createServer) Now(ctx context.Context) time.Time {
-	if at, ok := clock.EffectiveNow(ctx); ok {
-		return at
-	}
-	c.reads++
-	return createServerAt
-}
-
 // instantCapturingAudit records the instant the emission runs on.
 type instantCapturingAudit struct{ at time.Time }
 
@@ -513,20 +499,18 @@ func (a *instantCapturingAudit) LogInTx(ctx context.Context, _ *sql.Tx, _ audit.
 	return nil
 }
 
-// A create runs on one instant: one read of the server's clock, which the
-// row and its audit row both carry.
-func TestCreate_RunsOnOneInstant(t *testing.T) {
+// A create runs on the instant its ctx carries (the API's door bound it):
+// the row and its audit row both carry it.
+func TestCreate_RunsOnTheBoundInstant(t *testing.T) {
+	at := time.Date(2026, 7, 8, 9, 10, 11, 0, time.UTC)
 	svc := NewService(newMemoryStore())
-	server := &createServer{}
-	svc.SetClock(server)
 	spy := &instantCapturingAudit{}
 	svc.SetAuditLogger(spy)
-	created, err := svc.Create(context.Background(), "tenant1", CreateInput{ExternalID: "cus_one", DisplayName: "One"})
+	created, err := svc.Create(clock.WithEffectiveNow(context.Background(), at), "tenant1", CreateInput{ExternalID: "cus_one", DisplayName: "One"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	if !spy.at.Equal(createServerAt) || !created.CreatedAt.Equal(createServerAt) || !created.UpdatedAt.Equal(createServerAt) || server.reads != 1 {
-		t.Errorf("row created %v, updated %v, audit row %v after %d server reads; want all at %v after 1",
-			created.CreatedAt, created.UpdatedAt, spy.at, server.reads, createServerAt)
+	if !spy.at.Equal(at) || !created.CreatedAt.Equal(at) || !created.UpdatedAt.Equal(at) {
+		t.Errorf("row created %v, updated %v, audit row %v; want all at %v", created.CreatedAt, created.UpdatedAt, spy.at, at)
 	}
 }

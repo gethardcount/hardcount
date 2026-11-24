@@ -171,9 +171,8 @@ type NetTermsReader interface {
 // auditRecorder is the narrow audit interface the subscription handler uses:
 // Log to write operator-action rows and Query to read them back for the
 // activity timeline. *audit.Logger satisfies it. Declared as an interface (vs
-// the concrete logger) so the handler's audit metadata — including the
-// ADR-030 sim-time context on clock-pinned actions — is unit-testable with a
-// capturing fake.
+// the concrete logger) so the handler's audit metadata is unit-testable with
+// a capturing fake.
 type auditRecorder interface {
 	Log(ctx context.Context, tenantID, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
 	Query(ctx context.Context, tenantID string, filter audit.QueryFilter) ([]domain.AuditEntry, int, error)
@@ -326,8 +325,8 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// One instant for all of the create's writes, bound before Create runs.
-	ctx := h.svc.BindNow(r.Context())
+	// All of the create's writes run on the instant the API's door bound.
+	ctx := r.Context()
 	sub, err := h.svc.Create(ctx, tenantID, input)
 	if err != nil {
 		// A create that lost a deadlock or a lock wait (such as on the
@@ -1844,7 +1843,7 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 
 	if proratedCents > 0 {
 		// The action's time, so the proration invoice's issued and due
-		// dates are on it (on a test clock, its frozen time).
+		// dates are on it.
 		now := clock.Now(ctx)
 		// Tenant-configured Net terms, same resolution as the engine's
 		// cycle/create invoices. Pre-fix this hardcoded 30, so a Net-15
@@ -2035,8 +2034,7 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 			BillingPeriodEnd:   periodEnd,
 			IssuedAt:           &now,
 			DueAt:              &dueAt,
-			// CreatedAt on the same `now` so test-clock-driven plan
-			// changes have created_at == issued_at on simulation time.
+			// CreatedAt on the same `now`, so created_at == issued_at.
 			CreatedAt:          now,
 			NetPaymentTermDays: netDays,
 			// Stripe stamps subscription_update for every mid-period
@@ -2117,11 +2115,9 @@ func (h *Handler) handleItemProration(ctx context.Context, tenantID string, sub 
 		// it actually collects (ADR — proration parity). Without this an upgrade /
 		// add / qty-increase invoice finalizes but is never charged, because
 		// (unlike engine cycle/create invoices) the subscription handler has no
-		// finalize-time collection step. The sweep does the timeline-correct
-		// charge — wall-clock cron for live subs, test-clock catchup on advance
-		// for clock-pinned — so we deliberately do NOT charge inline here (that
-		// would duplicate the charge path and wall-clock-charge a simulated
-		// invoice). Set only on this fresh-creation path, never the dedup-replay
+		// finalize-time collection step. The sweep is the charge path, so we
+		// deliberately do NOT charge inline here (that would duplicate it).
+		// Set only on this fresh-creation path, never the dedup-replay
 		// above (that invoice may already be paid). The caller enrolls it on
 		// the item change's tx (enrollAutoChargeTx).
 		detail.AutoChargeInvoiceID = inv.ID

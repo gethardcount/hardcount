@@ -150,8 +150,8 @@ func ClaimOrder(prices []PlanPrice) {
 
 // CustomerPriceOverride is a customer's negotiated price for one plan price
 // (ADR-130 §6). It replaces the price's shape for that customer while it is
-// in force: [CreatedAt, DeactivatedAt), stamped in the customer's own time
-// (wall time, or its test clock's).
+// in force: [CreatedAt, DeactivatedAt), each stamped at its action's
+// instant.
 type CustomerPriceOverride struct {
 	ID         string `json:"id"`
 	TenantID   string `json:"tenant_id,omitempty"`

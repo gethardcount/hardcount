@@ -53,9 +53,8 @@ const (
 // InvoiceChargeAttempt is one charge attempt on an invoice, a billing fact of
 // its own (ADR-102). It is written when the PaymentIntent is created, and
 // settle paths upsert it, keyed by PaymentIntent, as they learn the outcome.
-// So the billing-axis timeline (on the invoice's own calendar, simulated
-// under a test clock) can show every attempt exactly once, without borrowing
-// the dunning subsystem's events or the webhook stream's wall-clock rows.
+// So the invoice's timeline can show every attempt exactly once, without
+// borrowing the dunning subsystem's events or the webhook stream's rows.
 type InvoiceChargeAttempt struct {
 	ID                    string
 	TenantID              string
@@ -75,7 +74,7 @@ type InvoiceChargeAttempt struct {
 	StripePaymentMethodID string
 	AmountCents           int64
 	OccurredAt            time.Time // real time the row was written
-	EffectiveAt           time.Time // the instant the attempt's action decided, in both modes; the store stamps it from ctx
+	EffectiveAt           time.Time // the instant of the attempt's action; the store stamps it from ctx
 	Livemode              bool
 	CreatedAt             time.Time
 	UpdatedAt             time.Time

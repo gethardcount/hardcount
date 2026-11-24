@@ -347,19 +347,12 @@ type MarginAssembler struct {
 }
 
 // NewMarginAssembler requires the customer usage service: the report rates
-// its usage through it, and takes its instant from it (reportTime).
+// its usage through it.
 func NewMarginAssembler(store *PostgresStore, usageSvc *CustomerUsageService) *MarginAssembler {
 	if usageSvc == nil {
 		panic("usage.NewMarginAssembler: the customer usage service is required")
 	}
 	return &MarginAssembler{store: store, usageSvc: usageSvc}
-}
-
-// reportTime returns ctx with the report's one instant bound, as customer
-// usage binds its read's (CustomerUsageService.readTime): the default window
-// and the rated usage then agree.
-func (a *MarginAssembler) reportTime(ctx context.Context) context.Context {
-	return a.usageSvc.readTime(ctx)
 }
 
 func (a *MarginAssembler) Get(ctx context.Context, tenantID, customerID string, from, to time.Time) (MarginReport, error) {
@@ -671,8 +664,9 @@ func providerCostLabel(r domain.ProviderCostRate) string {
 func (h *ProviderCostHandler) Margin(w http.ResponseWriter, r *http.Request) {
 	tenantID := auth.TenantID(r.Context())
 	customerID := chi.URLParam(r, "id")
-	// One instant for the report: the one the API's door bound.
-	ctx := h.margin.reportTime(r.Context())
+	// One instant for the report, the one the API's door bound: the default
+	// window and the rated usage then agree.
+	ctx := r.Context()
 	from, to, err := h.marginWindow(ctx, r)
 	if err != nil {
 		respond.BadRequest(w, r, err.Error())

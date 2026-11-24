@@ -11,9 +11,9 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// The payment reconciler runs in real time (the billing role's tick) and
-// binds each row's own instant (rowTime). The settle's times are read when
-// Stripe's answer arrives, and the bound instant dates the row's other
+// The payment reconciler runs on the billing role's tick, which binds no
+// instant, and binds each row's own (rowTime). The settle's times are read
+// when Stripe's answer arrives, and the bound instant dates the row's other
 // writes.
 
 // stampTimeUpdater records the time its ctx gives when the failed stamp is
@@ -42,10 +42,10 @@ func sweepHarness(inv domain.Invoice, client *mockStripeClient) (*Reconciler, *s
 	return r, updater, dunning
 }
 
-// A real-time, test-mode ctx with nothing bound: what the billing tick gives.
+// A test-mode ctx with no instant bound: what the billing tick gives.
 func tickCtx() context.Context { return postgres.WithLivemode(context.Background(), false) }
 
-func unknownClockInvoice() domain.Invoice {
+func unknownPaymentInvoice() domain.Invoice {
 	inv := finalizedPendingInvoice()
 	inv.PaymentStatus = domain.PaymentUnknown
 	inv.StripePaymentIntentID = "pi_sweep"
@@ -54,8 +54,8 @@ func unknownClockInvoice() domain.Invoice {
 
 // A test-mode invoice is paid at the time Stripe's answer arrives, not the
 // row's instant.
-func TestRealTimeSweep_AnInvoiceIsPaidAtRealTime(t *testing.T) {
-	inv := unknownClockInvoice()
+func TestSweep_AnInvoiceIsPaidWhenStripesAnswerArrives(t *testing.T) {
+	inv := unknownPaymentInvoice()
 	r, updater, _ := sweepHarness(inv, &mockStripeClient{piStates: map[string]PaymentIntentResult{
 		"pi_sweep": {ID: "pi_sweep", Status: "succeeded", AmountReceivedCents: 5000},
 	}})
@@ -71,7 +71,7 @@ func TestRealTimeSweep_AnInvoiceIsPaidAtRealTime(t *testing.T) {
 
 // A row is bound to one read of the server's clock, as an event is bound, so
 // what the row's work stamps is that instant, not a later read each time.
-func TestRealTimeSweep_ARowIsBoundToOneInstant(t *testing.T) {
+func TestSweep_ARowIsBoundToOneInstant(t *testing.T) {
 	if _, ok := clock.EffectiveNow(rowTime(tickCtx())); !ok {
 		t.Error("the row's ctx carries no instant: each stamp would read the clock again")
 	}

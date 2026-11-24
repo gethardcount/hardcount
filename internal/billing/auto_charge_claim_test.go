@@ -84,8 +84,8 @@ func (failingCredits) ApplyToInvoiceAt(context.Context, string, string, string, 
 // TestProcessAutoCharge_ReleasesClaimOnPreStripeSkips: the two skip
 // paths where ChargeInvoice was provably never called (credit-apply
 // failure, no payment method) must RELEASE the lease so the next
-// tick — or the next test-clock Advance — retries immediately instead
-// of silently waiting out five wall-clock minutes.
+// tick retries immediately instead of silently waiting out five
+// wall-clock minutes.
 func TestProcessAutoCharge_ReleasesClaimOnPreStripeSkips(t *testing.T) {
 	t.Run("no payment method", func(t *testing.T) {
 		inv := &mockInvoices{

@@ -8,13 +8,12 @@ import (
 )
 
 // TestSortInvoiceTimeline_CausalTies locks the 2026-07-19 audit findings:
-// a frozen-clock close cascade stamps finalize → dunning start → retries →
-// escalation → write-off → resolve at ONE instant, and the old second-
-// truncated string sort fell back to source-major insertion — rendering
-// "Marked uncollectible" above the escalation that caused it, and
-// "Invoice paid" above the same-second retry that collected it. Ties now
-// order by causal rank; distinct sub-second instants order by full
-// precision (the serialized string can't carry them).
+// a cascade of facts can share ONE instant (one action's writes share it),
+// and the old second-truncated string sort fell back to source-major
+// insertion — rendering "Marked uncollectible" above the escalation that
+// caused it, and "Invoice paid" above the same-second retry that collected
+// it. Ties now order by causal rank; distinct sub-second instants order by
+// full precision (the serialized string can't carry them).
 func TestSortInvoiceTimeline_CausalTies(t *testing.T) {
 	instant := time.Date(2027, 3, 8, 18, 30, 0, 0, time.UTC)
 
@@ -88,8 +87,7 @@ func typesOf(events []TimelineEvent) []string {
 }
 
 // TestSortInvoiceTimeline_FullLifeAtOneInstant is ADR-104's golden test:
-// an invoice whose ENTIRE life happens at one frozen instant — the
-// degenerate case a single clock advance produces — must render as the
+// an invoice whose ENTIRE life happens at one instant must render as the
 // declared causal grammar, ending with the notification. Emails could
 // never exercise their reserved rank before ADR-104 (they lived in a
 // second card at wall time); this pins the rank the moment it goes live.

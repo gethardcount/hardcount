@@ -422,10 +422,10 @@ func (s *Stripe) settleFailed(ctx context.Context, tenantID string, inv domain.I
 	// cross-domain policy read on every failed charge (dunning-start is a
 	// schedule, not a money artifact). A crash here leaves the invoice failed
 	// with no run; the next report of this PaymentIntent re-drives it (see
-	// above), and for wall-clock invoices the dunning_backfill reconciler
-	// (billing.Engine.EnrollFailedWithoutDunning) does too.
+	// above), and so does the dunning_backfill reconciler
+	// (billing.Engine.EnrollFailedWithoutDunning).
 	if started, err := startDunningWithRetry(ctx, s.dunning, tenantID, fresh.ID, fresh.CustomerID, domain.DunningCausePaymentFailed); err != nil {
-		slog.Error("payment failure StartDunning failed after retries — the next report of this payment intent retries it, and for a wall-clock invoice the dunning backfill sweep does on a later scheduler tick",
+		slog.Error("payment failure StartDunning failed after retries — the next report of this payment intent retries it, and so does the dunning backfill sweep on a later scheduler tick",
 			"invoice_id", fresh.ID, "customer_id", fresh.CustomerID, "error", err)
 	} else if started {
 		slog.Info("dunning started for failed payment", "invoice_id", fresh.ID)
@@ -536,8 +536,8 @@ func logPaymentAnomaly(ctx context.Context, tenantID string, inv domain.Invoice,
 // the ADR-068 payment-received-on-voided-invoice anomaly.
 func (s *Stripe) StopCollection(ctx context.Context, tenantID string, inv domain.Invoice) {
 	// LiveStripeClient reads the tenant's key from the tenant on ctx. A void
-	// run by the billing run, dunning or a test-clock advance carries none,
-	// so name this void's tenant, as chargeInvoice does.
+	// run by the billing run or dunning carries none, so name this void's
+	// tenant, as chargeInvoice does.
 	ctx = hardcountauth.WithTenantID(ctx, tenantID)
 	s.ExpireCheckoutSessions(ctx, tenantID, inv)
 	if inv.StripePaymentIntentID == "" {

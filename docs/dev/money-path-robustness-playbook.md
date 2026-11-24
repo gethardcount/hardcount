@@ -64,7 +64,7 @@ Dunning cancelled a subscription while its invoice was being paid.
 
 ### E. Crash or hidden error
 
-A test-clock advance panicked and stayed `advancing`.
+A panic on one row stopped billing and dunning for every tenant.
 
 9. **After a crash on any line, does something that exists finish the work?** Name the queued row, marker column or repair job that picks the work up, and confirm it reads this state. A comment that promises a retry names the code that does it. Background work that panics marks its record failed, where an operator finds it.
 10. **Is every error on a money write returned, or logged as an error?** No `_ =` on a store write or a queued send. Older code does not all follow this yet. A failure that leaves money uncollected if it lasts is logged at `ERROR`, not `WARN`.
@@ -89,14 +89,14 @@ An invoice with no card was retried for auto-charge forever.
 
 ### I. Wrong time or amount
 
-A staleness check compared test-clock time with the database's `now()`.
+A draft invoice's due date was counted in UTC, an hour off across a daylight-saving change.
 
-14. **Does every time come from the right clock?** A billing period's month or year step goes through `domain.NextBillingPeriodEnd`, and the length a proration divides by through `domain.CyclePeriod.CycleDays`, with the tenant's time zone, never the host's ([ADR-058](../adr/058-billing-date-math-tenant-timezone.md)). A compare has the same clock on both sides: never test-clock time against the database's `now()` or a Stripe timestamp.
+14. **Does every time come from the right clock?** A billing period's month or year step goes through `domain.NextBillingPeriodEnd`, and the length a proration divides by through `domain.CyclePeriod.CycleDays`, with the tenant's time zone, never the host's ([ADR-058](../adr/058-billing-date-math-tenant-timezone.md)). One piece of work reads one time: the instant its request or record binds ([code standard](code-standard.md#money-tenants-and-the-api)). A charge's result is the exception, dated when Stripe's answer arrives.
 15. **Is the money math exact?** Whole cents, no floats ([code standard](code-standard.md)), and currency codes in upper case.
 
 ### J. Stamped late
 
-One clock advance crossed two retry dates, and both retries carried its end time.
+An invoice paid from credits as it was finalized got a `paid_at` a moment after its `issued_at`.
 
 16. **Does work that runs late stamp the time it was due?** That is any field for when a billing event happened: `resolved_at`, `paid_at`, a timeline row. Pass the due time in, as `resolveRunAt`'s `at` parameter does. A bookkeeping field (`updated_at`, `issued_at`, audit time) carries the current time.
 

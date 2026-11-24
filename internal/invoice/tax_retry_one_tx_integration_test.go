@@ -9,7 +9,6 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/pricing"
 	"github.com/gethardcount/hardcount/internal/subscription"
 )
@@ -237,46 +236,6 @@ func TestFinalize_AuditFailureRollsTheFinalizeBack(t *testing.T) {
 			t.Errorf("status = %s, tax_status = %s; want draft with tax pending", got.Status, got.TaxStatus)
 		}
 	})
-}
-
-// TestRetryTax_PauseIsReadAtTheInvoicesNow: on a test clock the pause is read
-// at the clock's instant, not the wall clock's. The catch-up binds the
-// clock's frozen time on its ctx, and RetryTax reads the pause there. A timed
-// pause the clock has passed no longer holds the draft though the wall clock
-// has not reached its resumes_at; one the clock has not reached still holds
-// it though the wall clock has passed it.
-//
-// Mutation: read the pause at time.Now(), and both cases flip.
-func TestRetryTax_PauseIsReadAtTheInvoicesNow(t *testing.T) {
-	now := time.Now().UTC()
-	cases := []struct {
-		name          string
-		resumesAt     time.Time
-		clockAt       time.Time
-		wantFinalized bool
-	}{
-		{"clock past resumes_at, wall clock before it: finalized", now.AddDate(0, 0, 30), now.AddDate(0, 0, 60), true},
-		{"clock before resumes_at, wall clock past it: stays a draft", now.Add(-time.Hour), now.AddDate(0, 0, -30), false},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			r := newSnapRig(t, "P129 Clock Pause Corp")
-			resumes := c.resumesAt
-			id := r.subTaxPendingDraftPaused(t, "P129-CLOCK", &domain.PauseCollection{Behavior: domain.PauseCollectionKeepAsDraft, ResumesAt: &resumes})
-			r.svc.SetTaxRetrier(&resolvingTaxRetrier{db: r.db, store: r.store})
-
-			if _, err := r.svc.RetryTax(clock.WithEffectiveNow(r.ctx, c.clockAt), r.tenantID, id); err != nil {
-				t.Fatalf("RetryTax: %v", err)
-			}
-			got, err := r.store.Get(r.ctx, r.tenantID, id)
-			if err != nil {
-				t.Fatal(err)
-			}
-			if c.wantFinalized != (got.Status == domain.InvoiceFinalized) {
-				t.Errorf("status = %s at clock %s (pause until %s), want finalized = %v", got.Status, c.clockAt.Format(time.DateOnly), c.resumesAt.Format(time.DateOnly), c.wantFinalized)
-			}
-		})
-	}
 }
 
 // TestRecordTaxRetryAttempt_CountsOnlyAPendingDraft: the try counter changes

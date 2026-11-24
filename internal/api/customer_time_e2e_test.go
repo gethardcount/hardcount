@@ -8,9 +8,9 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// A change to a customer through the API runs on the time the API's door
-// decided from the customer: at real time, the server's clock (the one the
-// server is built with, not the machine's). The customer's updated_at and its
+// A change to a customer through the API runs on the instant the API's door
+// bound: one read of the server's clock (the one the server is built with,
+// not the machine's). The customer's updated_at and its
 // billing profile's are stamped at that time, and the three audit rows
 // (update, billing profile, token rotation) are written.
 func TestE2E_CustomerChangesAreOnTheRequestsTime(t *testing.T) {

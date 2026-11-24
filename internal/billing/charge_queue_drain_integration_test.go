@@ -142,7 +142,7 @@ func (s *stripeAnswersLater) RoundTrip(req *http.Request) (*http.Response, error
 		Body: io.NopCloser(strings.NewReader(body)), Request: req}, nil
 }
 
-// The sweep's tick decides no time, so each invoice's work runs on its own
+// The sweep's tick binds no instant, so each invoice's work runs on its own
 // instant: the time that invoice was reached. The first is charged on the
 // clock as the sweep starts; the second when the first's answer is in, not on
 // the first's instant.

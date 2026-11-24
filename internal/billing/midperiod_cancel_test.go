@@ -74,7 +74,7 @@ func midPeriodEngine(subs *mockSubs) *Engine {
 // past its own cancellation. The engine must route it to the executor with
 // the EXACT contracted instant, and must not also advance the cycle.
 func TestRunCycle_MidPeriodCancelAt_FiresViaExecutor(t *testing.T) {
-	// The engine's test clock reads wall now; pick a cancel_at safely in
+	// The engine's fake clock reads 2026-04-01; pick a cancel_at safely in
 	// the past relative to it so the arm is due.
 	cancelAt := time.Date(2025, 5, 16, 0, 0, 0, 0, time.UTC)
 	subs, _ := midPeriodCancelFixture(cancelAt)

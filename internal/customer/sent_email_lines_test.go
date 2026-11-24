@@ -97,7 +97,7 @@ func TestSentEmails_EveryRowHasALine(t *testing.T) {
 		{ID: "emob_5", EmailType: "payment_receipt", Recipient: "billing@acme.test", Status: "dispatched", DeliveryState: "complained",
 			CreatedAt: created, DispatchedAt: &dispatched, InvoiceNumber: "HC-000123"},
 	}
-	action := created.Add(-time.Second) // the instant each send's action decided
+	action := created.Add(-time.Second) // the instant of each send's action
 	for i := range rows {
 		rows[i].EffectiveAt = action
 	}

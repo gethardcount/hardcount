@@ -144,14 +144,14 @@ func (env *billFailureEnv) newEngine(subs billing.SubscriptionReader, pr billing
 	return e
 }
 
-// dueSub creates an active wall-clock subscription on plan whose March period
+// dueSub creates an active subscription on plan whose March period
 // has ended and whose next_billing_at is `next`.
 func (env *billFailureEnv) dueSub(t *testing.T, code string, plan domain.Plan, next time.Time) domain.Subscription {
 	t.Helper()
 	return env.subWith(t, domain.Subscription{Code: code, Status: domain.SubscriptionActive}, plan, env.periodStart, env.periodEnd, next)
 }
 
-// subWith creates a wall-clock subscription from tmpl on plan, with the
+// subWith creates a subscription from tmpl on plan, with the
 // period [start, end) and next_billing_at = next.
 func (env *billFailureEnv) subWith(t *testing.T, tmpl domain.Subscription, plan domain.Plan, start, end, next time.Time) domain.Subscription {
 	t.Helper()

@@ -27,7 +27,7 @@ func (c *usageSteppingClock) Now(ctx context.Context) time.Time {
 }
 
 // releaseSpy records the NotAfter a held release hands the store: the
-// release's decided time.
+// release's instant.
 type releaseSpy struct {
 	*heldMemStore
 	notAfter []time.Time
@@ -49,14 +49,15 @@ func (c *callSpy) IngestCallResolvingHeld(ctx context.Context, tenantID string, 
 	return c.heldMemStore.IngestCallResolvingHeld(ctx, tenantID, call, after)
 }
 
-// Each ingest entry binds its time itself, once per event (a LiteLLM call,
-// once for the call), and everything below reads it. Every row runs from
-// three contexts: nothing bound, which is what usage's routes get from the
-// door; real time marked with no instant (clock.WithRealTime, what a
-// scheduled job runs on); and a real instant bound above the service.
+// Each ingest entry binds its time itself when ctx carries none, once per
+// event (a LiteLLM call, once for the call), and everything below reads it.
+// Every row runs from three contexts: nothing bound, which is what the batch
+// and LiteLLM routes get from the door; an instant dropped
+// (clock.WithoutInstant, what a scheduled job runs on); and an instant bound
+// above the service, as the door binds one for Ingest.
 // The event is stamped at one read of the server's clock, or at the real
 // instant when one is bound.
-func TestUsageEntries_StampTheCustomersDecidedTime(t *testing.T) {
+func TestUsageEntries_StampOneInstant(t *testing.T) {
 	serverAt := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
 	realAt := time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC)
 	setup := func(store Store) (*Service, *usageSteppingClock) {
@@ -74,7 +75,7 @@ func TestUsageEntries_StampTheCustomersDecidedTime(t *testing.T) {
 		serverReads int
 	}{
 		{"nothing bound", testMode, serverAt, 1},
-		{"real time marked", func() context.Context { return clock.WithRealTime(testMode()) }, serverAt, 1},
+		{"an instant dropped", func() context.Context { return clock.WithoutInstant(testMode()) }, serverAt, 1},
 		{"a real instant bound above", func() context.Context { return clock.WithEffectiveNow(testMode(), realAt) }, realAt, 0},
 	} {
 		t.Run("Ingest, from "+base.name, func(t *testing.T) {
@@ -109,16 +110,20 @@ func TestUsageEntries_StampTheCustomersDecidedTime(t *testing.T) {
 				t.Errorf("%d server reads; want %d for the call", server.reads, base.serverReads)
 			}
 		})
-		t.Run("a held release: its NotAfter is the bound instant, from "+base.name, func(t *testing.T) {
-			store := &releaseSpy{heldMemStore: &heldMemStore{memStore: newMemStore()}}
-			svc, _ := setup(store)
-			if _, err := svc.Release(base.ctx(), "t1", ReleaseInput{ExternalCustomerID: "ext_n", CustomerID: "cus_n", MeterIDs: map[string]string{"tokens": "mtr_1"}}); err != nil {
-				t.Fatalf("Release: %v", err)
-			}
-			if len(store.notAfter) != 1 || !store.notAfter[0].Equal(base.want) {
-				t.Errorf("not after %v; want %v", store.notAfter, base.want)
-			}
-		})
+	}
+}
+
+// A held release runs on the instant the API's door bound: rows stamped
+// after it stay held.
+func TestRelease_NotAfterIsTheBoundInstant(t *testing.T) {
+	at := time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC)
+	store := &releaseSpy{heldMemStore: &heldMemStore{memStore: newMemStore()}}
+	svc := NewService(store)
+	if _, err := svc.Release(clock.WithEffectiveNow(testMode(), at), "t1", ReleaseInput{ExternalCustomerID: "ext_n", CustomerID: "cus_n", MeterIDs: map[string]string{"tokens": "mtr_1"}}); err != nil {
+		t.Fatalf("Release: %v", err)
+	}
+	if len(store.notAfter) != 1 || !store.notAfter[0].Equal(at) {
+		t.Errorf("not after %v; want %v", store.notAfter, at)
 	}
 }
 
@@ -140,7 +145,7 @@ func TestBackfill_TheFutureIsAfterTheBoundInstant(t *testing.T) {
 
 // One instant per action: a LiteLLM call reads the server's clock once for
 // all its events, and a backfill once for its check and its ingest.
-func TestUsage_DecidesTheCustomerOncePerAction(t *testing.T) {
+func TestUsage_OneInstantPerAction(t *testing.T) {
 	now := time.Now().UTC()
 	past := now.Add(-time.Hour)
 	for _, c := range []struct {

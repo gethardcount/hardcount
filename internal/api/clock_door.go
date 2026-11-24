@@ -14,9 +14,9 @@ import (
 //
 // The door binds one read of the server's clock (clock.EnsureEffectiveNow),
 // in either mode, and reads nothing else. It binds none on a route whose
-// entry is decidedIn, whose function binds the time itself, once per record
-// when it works through many, nor on a request no route serves, which the
-// router answers 404 or 405.
+// entry is decidedIn, whose function binds one instant per record it works
+// through, nor on a request no route serves, which the router answers 404 or
+// 405.
 type clockDoor struct {
 	// clock is the server's clock.
 	clock clock.Clock

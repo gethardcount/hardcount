@@ -22,8 +22,8 @@ import (
 // amount. Each case is a pricing shape the other fixtures do not reach on
 // every path: package prices, decimal rates with fractional quantities, a
 // multi-dimension meter that mixes package, graduated and a catch-all price,
-// a graduated customer override, a tax-inclusive tenant whose tiers continue
-// across a threshold invoice, and a test-clock subscription. Each case
+// a graduated customer override, and a tax-inclusive tenant whose tiers
+// continue across a threshold invoice. Each case
 // previews the open period (close mirror), reads the live balance, fires a
 // spend threshold, previews again, and ends the period or cancels: the
 // close-mirror preview just before the end must equal the final invoice's

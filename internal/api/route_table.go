@@ -9,7 +9,7 @@ import (
 )
 
 // The route table has one entry per route the router serves: who may call it,
-// how its time is decided, where its audit row comes from, and whether its
+// who binds its time, where its audit row comes from, and whether its
 // answer shows a secret once (docs/architecture.md#the-route-table).
 // TestRouteTable_MatchesLiveRoutes fails on a route with no entry, an entry
 // with no route, and a missing or stray audit.
@@ -22,15 +22,16 @@ type routeKey struct {
 
 // routeDecl is one route's entry, built in steps. needs or outsideAuth says
 // who may call it, which makes the entry; decidedIn before it says that a
-// named function, not the door, binds the route's time. Then withAudit adds
+// named function, not the door, binds the route's times. Then withAudit adds
 // its audit, and withShowOnce marks its answer.
 type routeDecl struct {
 	// access is who may call the route, which auth.RequirePermission checks;
 	// it is zero on a route outside authentication.
 	access      auth.Access
 	outsideAuth bool
-	// decidedIn is the function that binds the route's time, as
-	// package.Type.Method; empty when the door binds it (clockDoor).
+	// decidedIn is the function that binds the route's times, one per
+	// record, as package.Type.Method; empty when the door binds the route's
+	// one instant (clockDoor).
 	decidedIn string
 	// audit is zero on a route that neither changes state nor exports.
 	audit    auditDecl
@@ -84,23 +85,16 @@ func outsideAuth() routeDecl {
 	return routeDecl{outsideAuth: true}
 }
 
-// decidedIn marks a route whose time the named function binds, as
-// package.Type.Method, so the door binds none: the function binds one read
-// after the reads that check the request, or one per record when it works
-// through many. needs or outsideAuth then makes the entry.
+// decidedIn marks a route whose function, named as package.Type.Method,
+// works through many records and binds one instant for each, so the door
+// binds none. needs then makes the entry.
 func decidedIn(function string) decider { return decider{function: function} }
 
-// decider is a route decidedIn a function, before needs or outsideAuth.
+// decider is a route decidedIn a function, before needs.
 type decider struct{ function string }
 
 func (d decider) needs(access auth.Access) routeDecl {
 	e := needs(access)
-	e.decidedIn = d.function
-	return e
-}
-
-func (d decider) outsideAuth() routeDecl {
-	e := outsideAuth()
 	e.decidedIn = d.function
 	return e
 }
@@ -288,7 +282,7 @@ var routeTable = map[routeKey]routeDecl{
 	// outbox events and stripe_webhook_events record it. Close it with a row
 	// on the settle transaction when an auditor asks audit_log for settlement
 	// evidence.
-	{"POST", "/v1/webhooks/stripe/{endpoint_id}"}: decidedIn("payment.Stripe.HandleWebhook").outsideAuth().withAudit(exempt(reasonWebhookOwned, "Its handlers audit a card saved at checkout, a refund's status and a refund made in Stripe, each in its own transaction.")),
+	{"POST", "/v1/webhooks/stripe/{endpoint_id}"}: outsideAuth().withAudit(exempt(reasonWebhookOwned, "Its handlers audit a card saved at checkout, a refund's status and a refund made in Stripe, each in its own transaction.")),
 	// Accepted loss: the effects of email reports are not audit_log rows; the
 	// outbox row's delivery state, the customer's email status and the outbox
 	// events record them.
@@ -296,12 +290,12 @@ var routeTable = map[routeKey]routeDecl{
 
 	// --- public pages: the token names the record, and the mode is not
 	// known until it is read ----------------------------------------------
-	{"GET", "/v1/public/invoices/{token}"}:                  decidedIn("hostedinvoice.Handler.resolveInvoice").outsideAuth(),
-	{"POST", "/v1/public/invoices/{token}/checkout"}:        decidedIn("hostedinvoice.Handler.resolveInvoice").outsideAuth().withAudit(explicit("api.hostedInvoiceStripeAdapter.CreateInvoicePaymentSession (LogInTx)")),
-	{"GET", "/v1/public/invoices/{token}/pdf"}:              decidedIn("hostedinvoice.Handler.resolveInvoice").outsideAuth(),
+	{"GET", "/v1/public/invoices/{token}"}:                  outsideAuth(),
+	{"POST", "/v1/public/invoices/{token}/checkout"}:        outsideAuth().withAudit(explicit("api.hostedInvoiceStripeAdapter.CreateInvoicePaymentSession (LogInTx)")),
+	{"GET", "/v1/public/invoices/{token}/pdf"}:              outsideAuth(),
 	{"GET", "/v1/public/payment-updates/{token}"}:           outsideAuth(),
 	{"POST", "/v1/public/payment-updates/{token}/checkout"}: outsideAuth().withAudit(explicit("payment.PublicPaymentHandler.createCheckoutSession (LogInTx)")),
-	{"GET", "/v1/public/cost-dashboard/{token}"}:            decidedIn("usage.CostDashboardAssembler.GetByToken").outsideAuth(),
+	{"GET", "/v1/public/cost-dashboard/{token}"}:            outsideAuth(),
 
 	// --- tenant-wide reads and streams ------------------------------------
 	{"GET", "/v1/webhook_events/stream"}: needs(apikeyRead),
@@ -378,7 +372,7 @@ var routeTable = map[routeKey]routeDecl{
 
 	// --- customers --------------------------------------------------------
 	{"GET", "/v1/customers"}:                      needs(customerRead),
-	{"POST", "/v1/customers"}:                     decidedIn("customer.Service.Create").needs(customerWrite).withAudit(explicit("customer.Service.Create (LogInTx)")),
+	{"POST", "/v1/customers"}:                     needs(customerWrite).withAudit(explicit("customer.Service.Create (LogInTx)")),
 	{"GET", "/v1/customers/{id}"}:                 needs(customerRead),
 	{"PATCH", "/v1/customers/{id}"}:               needs(customerWrite).withAudit(explicit("customer.Handler.update (Log)")),
 	{"GET", "/v1/customers/{id}/billing-profile"}: needs(customerRead),
@@ -399,7 +393,7 @@ var routeTable = map[routeKey]routeDecl{
 	// --- subscriptions ----------------------------------------------------
 	{"GET", "/v1/subscriptions"}: needs(subscriptionRead),
 	// the body names the customer
-	{"POST", "/v1/subscriptions"}:                                      decidedIn("subscription.Handler.create").needs(subscriptionWrite).withAudit(explicit("subscription.Handler.create (Log)")),
+	{"POST", "/v1/subscriptions"}:                                      needs(subscriptionWrite).withAudit(explicit("subscription.Handler.create (Log)")),
 	{"GET", "/v1/subscriptions/{id}"}:                                  needs(subscriptionRead),
 	{"PUT", "/v1/subscriptions/{id}/billing-thresholds"}:               needs(subscriptionWrite).withAudit(explicit("subscription.Handler.setBillingThresholds (Log)")),
 	{"DELETE", "/v1/subscriptions/{id}/billing-thresholds"}:            needs(subscriptionWrite).withAudit(explicit("subscription.Handler.clearBillingThresholds (Log)")),
@@ -425,16 +419,16 @@ var routeTable = map[routeKey]routeDecl{
 	// all three: which key sent an event, since usage_events has no key_id.
 	// Close it with that column at the first billing dispute that turns on
 	// which key sent usage.
-	{"POST", "/v1/usage-events"}:               decidedIn("usage.Service.Ingest").needs(usageIngest).withAudit(exempt(reasonMachineIngest, "usage_events is the record, and a row per call would double the writes of the busiest path.")),
+	{"POST", "/v1/usage-events"}:               needs(usageIngest).withAudit(exempt(reasonMachineIngest, "usage_events is the record, and a row per call would double the writes of the busiest path.")),
 	{"POST", "/v1/usage-events/batch"}:         decidedIn("usage.Service.BatchIngest").needs(usageIngest).withAudit(exempt(reasonMachineIngest, "The batch form of the same ingest.")),
 	{"POST", "/v1/integrations/litellm/spend"}: decidedIn("usage.Service.IngestCall").needs(usageIngest).withAudit(exempt(reasonMachineIngest, "LiteLLM's spend callback, which writes usage events like the ingest above.")),
 	// Backfill is audited, unlike the ingest above: an operator's backdated
 	// usage changes what a customer is billed.
-	{"POST", "/v1/usage-events/backfill"}: decidedIn("usage.Service.Backfill").needs(usageWrite).withAudit(explicit("usage.Service.Backfill (LogInTx)")),
+	{"POST", "/v1/usage-events/backfill"}: needs(usageWrite).withAudit(explicit("usage.Service.Backfill (LogInTx)")),
 	// Held usage (ADR-122) is what the LiteLLM callback could not ingest.
 	// Releasing it changes what a customer is billed; discarding it means it
 	// never bills.
-	{"POST", "/v1/usage-events/held/release"}: decidedIn("usage.Service.Release").needs(usageWrite).withAudit(explicit("usage.Service.Release (LogInTx)")),
+	{"POST", "/v1/usage-events/held/release"}: needs(usageWrite).withAudit(explicit("usage.Service.Release (LogInTx)")),
 	{"POST", "/v1/usage-events/held/discard"}: needs(usageWrite).withAudit(explicit("usage.Service.Discard (LogInTx)")),
 	{"GET", "/v1/usage-events"}:               needs(usageRead),
 	{"GET", "/v1/usage-events/aggregate"}:     needs(usageRead),
@@ -443,9 +437,9 @@ var routeTable = map[routeKey]routeDecl{
 	// --- invoices -----------------------------------------------------------
 	{"GET", "/v1/invoices"}: needs(invoiceRead),
 	// the body names the customer
-	{"POST", "/v1/invoices"}: decidedIn("invoice.Service.Create").needs(invoiceWrite).withAudit(explicit("invoice.Service.Create (LogInTx)")),
+	{"POST", "/v1/invoices"}: needs(invoiceWrite).withAudit(explicit("invoice.Service.Create (LogInTx)")),
 	// the body names the customer
-	{"POST", "/v1/invoices/create_preview"}:                                 decidedIn("billing.PreviewService.CreatePreview").needs(invoiceRead).withAudit(exempt(reasonNonMutatingPreview, "Computes an estimate and writes nothing (billing.CreatePreviewHandler calls audit.MarkSkip).")),
+	{"POST", "/v1/invoices/create_preview"}:                                 needs(invoiceRead).withAudit(exempt(reasonNonMutatingPreview, "Computes an estimate and writes nothing (billing.CreatePreviewHandler calls audit.MarkSkip).")),
 	{"GET", "/v1/invoices/{id}"}:                                            needs(invoiceRead),
 	{"POST", "/v1/invoices/{id}/collect"}:                                   needs(invoiceWrite).withAudit(explicit("invoice.Handler.collectPayment (Log)")),
 	{"GET", "/v1/invoices/{id}/disputes"}:                                   needs(invoiceRead),
@@ -468,7 +462,7 @@ var routeTable = map[routeKey]routeDecl{
 	{"GET", "/v1/credit-notes"}:       needs(invoiceWrite),
 	{"GET", "/v1/credit-notes/stats"}: needs(invoiceWrite),
 	// the body names the invoice
-	{"POST", "/v1/credit-notes"}:                           decidedIn("creditnote.Handler.create").needs(invoiceWrite).withAudit(explicit("creditnote.Service.Create (LogInTx)")),
+	{"POST", "/v1/credit-notes"}:                           needs(invoiceWrite).withAudit(explicit("creditnote.Service.Create (LogInTx)")),
 	{"GET", "/v1/credit-notes/{id}"}:                       needs(invoiceWrite),
 	{"POST", "/v1/credit-notes/{id}/attach-stripe-refund"}: needs(invoiceWrite).withAudit(explicit("creditnote.Service.AttachStripeRefund (LogInTx)")),
 	{"POST", "/v1/credit-notes/{id}/issue"}:                needs(invoiceWrite).withAudit(explicit("creditnote.Service.Issue (LogInTx)")),
@@ -480,9 +474,9 @@ var routeTable = map[routeKey]routeDecl{
 	// --- credits ------------------------------------------------------------
 	{"GET", "/v1/credits/balances"}: needs(customerWrite),
 	// the body names the customer
-	{"POST", "/v1/credits/grant"}: decidedIn("credit.Service.Grant").needs(customerWrite).withAudit(explicit("credit.Service.Grant (LogInTx)")),
+	{"POST", "/v1/credits/grant"}: needs(customerWrite).withAudit(explicit("credit.Service.Grant (LogInTx)")),
 	// the body names the customer
-	{"POST", "/v1/credits/adjust"}:                    decidedIn("credit.Service.Adjust").needs(customerWrite).withAudit(explicit("credit.Service.Adjust (LogInTx)")),
+	{"POST", "/v1/credits/adjust"}:                    needs(customerWrite).withAudit(explicit("credit.Service.Adjust (LogInTx)")),
 	{"GET", "/v1/credits/balance/{customer_id}"}:      needs(customerWrite),
 	{"GET", "/v1/credits/balance/{customer_id}/live"}: needs(customerWrite),
 	{"GET", "/v1/credits/grants/{customer_id}"}:       needs(customerWrite),

@@ -46,10 +46,9 @@ func newMemStore() *memStore {
 func (m *memStore) Create(ctx context.Context, tenantID string, cn domain.CreditNote) (domain.CreditNote, error) {
 	cn.ID = fmt.Sprintf("hc_cn_%d", len(m.notes)+1)
 	cn.TenantID = tenantID
-	// Mirrors the real Postgres store, which reads clock.Now(ctx) so a
-	// clock-pinned write lands in simulated time (ADR-030 rule 3). A fake that
-	// hardcodes time.Now() would silently pass a binding test that the real
-	// store would fail.
+	// Mirrors the real Postgres store, which reads clock.Now(ctx): the
+	// instant bound on ctx. A fake that hardcodes time.Now() would silently
+	// pass a binding test that the real store would fail.
 	cn.CreatedAt = clock.Now(ctx)
 	cn.UpdatedAt = cn.CreatedAt
 	m.notes[cn.ID] = cn
@@ -1336,9 +1335,9 @@ func TestCreate_LinesCommitWithHeader(t *testing.T) {
 	}
 }
 
-// TestOperatorCreditNote_UnpinnedStaysWallClock: with no instant bound, the
+// TestOperatorCreditNote_UnboundStaysWallClock: with no instant bound, the
 // row keeps wall-clock time.
-func TestOperatorCreditNote_UnpinnedStaysWallClock(t *testing.T) {
+func TestOperatorCreditNote_UnboundStaysWallClock(t *testing.T) {
 	store := newMemStore()
 	invoices := &memInvoiceReader{invoices: map[string]domain.Invoice{
 		"inv_real": {
@@ -1360,7 +1359,7 @@ func TestOperatorCreditNote_UnpinnedStaysWallClock(t *testing.T) {
 		t.Fatalf("Create: %v", err)
 	}
 	if cn.CreatedAt.Before(before) {
-		t.Errorf("created_at = %s, want wall-clock (>= %s) on a non-simulated invoice", cn.CreatedAt, before)
+		t.Errorf("created_at = %s, want wall-clock (>= %s) with no instant bound", cn.CreatedAt, before)
 	}
 }
 

@@ -48,7 +48,7 @@ func TestUpsertPolicy_AutoDefaultFirst(t *testing.T) {
 		}
 
 		// GetDefaultPolicy resolves — the exact call that returned ErrNotFound
-		// before the fix and poisoned the money-path catchup.
+		// before the fix and poisoned the money-path enrollment sweep.
 		def, err := store.GetDefaultPolicy(ctx, tenantID)
 		if err != nil {
 			t.Fatalf("GetDefaultPolicy should resolve after auto-default-first: %v", err)

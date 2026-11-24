@@ -16,7 +16,7 @@ import (
 // per-line split. The proration CREATE path upholds this by taxing a single
 // net line and splitting into the credit/charge pair only afterwards
 // (ADR-048 Phase C), but the retry family (operator retry-tax, the tax_retry
-// reconciler, the clock variant, the billing-profile flush) rebuilds the
+// reconciler, the billing-profile flush) rebuilds the
 // provider request from the STORED lines — which for a split proration
 // invoice contain the negative credit line (issue #556: a create-time
 // deferral on a split invoice could never be retried out of pending).

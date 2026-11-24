@@ -20,7 +20,7 @@ import (
 // goldens of internal/billing, as the pricing-shapes job.
 //
 // The rig is ppRig (plan_prices_e2e_test.go): a subscription starts now,
-// and the period closes run later in simulated wall time.
+// and the period closes run at later instants on a fake clock.
 
 // shapePlan creates a plan with a base fee and its prices, and returns its id
 // and its prices' ids in order. timing is "" for a plan with no base fee.

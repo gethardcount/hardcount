@@ -259,10 +259,9 @@ func TestCollector_StartsNoPaymentDunning_RealStore(t *testing.T) {
 // The first retry counts from when collection failed, not from the invoice's
 // issue date or billing period (found walking FLOW I10, 2026-10-11: an
 // invoice issued 10 days into its period was anchored on the period start,
-// so its first retry was already past and ran at once). Real store, real
-// engine as the clock resolver — the production wiring — so an invoice on no
-// clock is dated at the sweep row's instant, read from the engine's clock, as
-// it is live.
+// so its first retry was already past and ran at once). Real store and real
+// engine — the production wiring — so the failure is dated at the sweep row's
+// instant, read from the engine's clock, as it is live.
 func TestCollector_FirstRetryCountsFromTheFailure_RealStore(t *testing.T) {
 	h := newCollectHarness(t)
 	dstore := dunning.NewPostgresStore(h.db)
@@ -293,7 +292,7 @@ func TestCollector_FirstRetryCountsFromTheFailure_RealStore(t *testing.T) {
 		t.Fatalf("create invoice: %v", err)
 	}
 
-	e.RetryPendingCharges(clock.WithRealTime(h.ctx), 50, nil) // a job's tick, decided at real time as the scheduler decides it
+	e.RetryPendingCharges(clock.WithoutInstant(h.ctx), 50, nil) // a job's tick, with no instant, as the scheduler runs it
 
 	run, err := dstore.GetRunByInvoice(h.ctx, h.tenantID, inv.ID)
 	if err != nil {
@@ -312,11 +311,10 @@ func (decliningRetrier) RetryPayment(context.Context, string, string, string) er
 	return fmt.Errorf("card declined")
 }
 
-// A retry at real time that runs late — the scheduler was down, or its first
-// retry was mis-anchored in the past — schedules the next one from when it
-// ran, not from when it was due. Had a run at real time read as on a test
-// clock, each later retry would be dated in the past too and fire on the next
-// tick.
+// A retry that runs late — the scheduler was down, or its first retry was
+// mis-anchored in the past — schedules the next one from when it ran, not
+// from when it was due. Dated from when it was due, each later retry would be
+// in the past too and fire on the next tick.
 func TestProcessDueRuns_LateWallClockRetryKeepsCadence_RealStore(t *testing.T) {
 	h := newCollectHarness(t)
 	dstore := dunning.NewPostgresStore(h.db)
@@ -330,8 +328,8 @@ func TestProcessDueRuns_LateWallClockRetryKeepsCadence_RealStore(t *testing.T) {
 	svc := dunning.NewService(dstore, decliningRetrier{}, nil)
 
 	inv := h.seed(t, "INV-CADENCE-1")
-	// The invoice is on no clock: the failure that starts dunning is decided at real time.
-	run, err := svc.StartDunning(clock.WithRealTime(h.ctx), h.tenantID, inv.ID, inv.CustomerID, domain.DunningCausePaymentFailed)
+	// No instant on ctx: the failure that starts dunning reads the server's clock.
+	run, err := svc.StartDunning(clock.WithoutInstant(h.ctx), h.tenantID, inv.ID, inv.CustomerID, domain.DunningCausePaymentFailed)
 	if err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}
@@ -339,7 +337,7 @@ func TestProcessDueRuns_LateWallClockRetryKeepsCadence_RealStore(t *testing.T) {
 	overdue := time.Now().UTC().Add(-10 * 24 * time.Hour)
 	execTx(t, h.db, h.ctx, h.tenantID, `UPDATE invoice_dunning_runs SET next_action_at = $1 WHERE id = $2`, overdue, run.ID)
 
-	tick := leadertest.Token(t, testutil.AdminPool(t), clock.WithRealTime(h.ctx), leader.RoleDunning) // a led dunning tick, as the scheduler runs and decides it
+	tick := leadertest.Token(t, testutil.AdminPool(t), clock.WithoutInstant(h.ctx), leader.RoleDunning) // a led dunning tick, with no instant, as the scheduler runs it
 	if _, errs := svc.ProcessDueRuns(tick, h.tenantID, 20); len(errs) > 0 {
 		t.Fatalf("process due runs: %v", errs)
 	}

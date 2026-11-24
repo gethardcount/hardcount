@@ -96,8 +96,8 @@ func heldEvent(in HoldInput) (domain.HeldUsageEvent, error) {
 	if err != nil {
 		return domain.HeldUsageEvent{}, err
 	}
-	// No customer exists, so there is no test clock to read: wall-clock is
-	// the only "now" there is.
+	// The LiteLLM route binds no instant, and a held row bills nothing until
+	// it is released, so its "now" is the machine's time.
 	now := time.Now().UTC()
 	at := now
 	if in.EventAt != nil {
@@ -205,8 +205,8 @@ type ReleaseResult struct {
 
 // Release ingests the held rows for one external customer id into the
 // given customer, at most once per idempotency key (see
-// PostgresStore.ReleaseHeld). Rows stamped after the customer's current
-// time stay held. The result says which released rows an invoice counts,
+// PostgresStore.ReleaseHeld). Rows stamped after the request's instant
+// stay held. The result says which released rows an invoice counts,
 // by the rule ingest flags with (classify, open_period.go).
 func (s *Service) Release(ctx context.Context, tenantID string, in ReleaseInput) (ReleaseResult, error) {
 	if s.held == nil {
@@ -226,9 +226,8 @@ func (s *Service) Release(ctx context.Context, tenantID string, in ReleaseInput)
 	if err != nil {
 		return ReleaseResult{}, err
 	}
-	decided := s.bindNow(ctx)
-	auditEmit := s.releaseEmission(decided, in)
-	now := s.clock.Now(decided)
+	auditEmit := s.releaseEmission(ctx, in)
+	now := s.clock.Now(ctx)
 	var buckets map[string]MeterBuckets
 	res, err := s.held.ReleaseHeld(ctx, tenantID, ReleaseHeldInput{
 		ExternalCustomerID: in.ExternalCustomerID,

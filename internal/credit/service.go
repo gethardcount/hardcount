@@ -41,27 +41,14 @@ type Service struct {
 	auditLogger AuditEmitter
 	customers   CustomerReader
 	live        LiveBalanceReader
-	// clock is the server's clock: the router's clk, the one the engine
-	// bills by. Who binds a credit action's time:
-	//   - a request, the API's door (api.clockDoor), with one read of the
-	//     server's clock; a grant or an adjustment, the service itself, with
-	//     one read of this clock (clock.EnsureEffectiveNow);
-	//   - the engine's reads (a balance, a draw), the time of the work that
-	//     makes them.
-	// Each entry point keeps that time. Without the grant's read, two reads
-	// of the time in one grant could differ, and a store's stamp could fall
-	// on another time than the action's.
-	clock clock.Clock
 }
 
+// NewService builds the credit service. It reads the time from ctx: a
+// request's instant, which the API's door bound, or the instant of the
+// engine's work that reads a balance or draws one.
 func NewService(store Store) *Service {
-	return &Service{store: store, clock: clock.Real()}
+	return &Service{store: store}
 }
-
-// SetClock sets the clock real time is read from: the server's clock, the one
-// the billing engine bills by. A grant and an adjustment read it once to bind
-// their instant. Without it, real time is the machine's.
-func (s *Service) SetClock(c clock.Clock) { s.clock = c }
 
 // SetAuditLogger wires in-tx audit emission for operator-facing credit
 // mutations (grant / adjust). Moved here from the handler (ADR-090): the
@@ -120,16 +107,6 @@ type GrantInput struct {
 	// returns ErrAlreadyExists.
 	SourceCreditNoteID string `json:"source_credit_note_id,omitempty"`
 
-	// At is the simulated instant the grant was earned (cancel time
-	// for cancel-proration credits, plan-change time for plan-change
-	// credits, operator action time for manual grants). Empty falls
-	// back to clock.Now(ctx) at the postgres layer — fine for
-	// operator-action paths in wall-clock. Set by engine callers
-	// during catchup to keep ledger entries on simulated-time so
-	// the customer's Credits tab shows per-fact chronology instead
-	// of every entry stacked at advance-end frozen_time.
-	At time.Time `json:"-"`
-
 	// GrantKind classifies the grant's cost basis (ADR-078). Operator/API
 	// callers may set 'promotional' (free marketing credits — drained
 	// before all paid-class blocks); 'commit' is RESERVED for the invoice
@@ -160,10 +137,6 @@ func (s *Service) Grant(ctx context.Context, tenantID string, input GrantInput) 
 	if err := s.requireCustomer(ctx, tenantID, input.CustomerID); err != nil {
 		return domain.CreditLedgerEntry{}, err
 	}
-	// One instant for the whole grant, bound before anything is written, so
-	// the expiry check and the ledger entry's created_at read the same one.
-	// Grant binds it itself because it is the one call its route makes.
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	if input.AmountCents <= 0 {
 		return domain.CreditLedgerEntry{}, errs.Invalid("amount_cents", "must be greater than 0")
 	}
@@ -179,14 +152,14 @@ func (s *Service) Grant(ctx context.Context, tenantID string, input GrantInput) 
 	}
 	// Reject past expires_at — a grant that's already expired at
 	// creation time is dead-on-arrival: it briefly inflates the
-	// balance, then the next expiry catchup retires it (with my
+	// balance, then the next expiry sweep retires it (with my
 	// fullCycleDays/consumed-aware fixes, net effect is $0). But the
 	// operator clearly didn't intend this — they likely picked the
 	// wrong year/date. Industry parity: Stripe credit-grant API
 	// returns 422 on past expires_at.
 	//
-	// Compare against the grant's bound instant (above). Internal engine
-	// callers
+	// Compare against the request's instant, which the ledger entry's
+	// created_at carries too. Internal engine callers
 	// (cancel / plan-swap relief, CN Issue) don't set
 	// ExpiresAt on their grants, so this gate doesn't affect refund
 	// flows — only operator-driven and SDK-driven Grant calls.
@@ -215,7 +188,6 @@ func (s *Service) Grant(ctx context.Context, tenantID string, input GrantInput) 
 		ExpiresAt:          input.ExpiresAt,
 		SourceCreditNoteID: input.SourceCreditNoteID,
 		GrantKind:          input.GrantKind,
-		CreatedAt:          input.At,
 	}, s.grantEmission(ctx))
 }
 
@@ -341,8 +313,8 @@ func (s *Service) RetireCommitGrantForInvoiceTx(ctx context.Context, tx *sql.Tx,
 // ledger entry via the store's AppendEntryTx so it shares the caller's
 // tx. ADR-030 atomic-proration follow-through (2026-05-29).
 //
-// It decides no time of its own: it runs inside its caller's transaction,
-// on the ctx its caller decided.
+// It runs inside its caller's transaction, at the instant bound on its
+// caller's ctx.
 func (s *Service) GrantTx(ctx context.Context, tx *sql.Tx, tenantID string, input GrantInput) (domain.CreditLedgerEntry, error) {
 	if input.CustomerID == "" {
 		return domain.CreditLedgerEntry{}, errs.Required("customer_id")
@@ -390,7 +362,6 @@ func (s *Service) GrantTx(ctx context.Context, tx *sql.Tx, tenantID string, inpu
 		// paid drain class and invisible to kind-scoped reporting.
 		GrantKind:          input.GrantKind,
 		SourceCreditNoteID: input.SourceCreditNoteID,
-		CreatedAt:          input.At,
 	})
 	if err != nil {
 		return out, err
@@ -450,8 +421,7 @@ type CreditNoteReturnInput struct {
 // never fires; if it does, the invariant is broken.
 //
 // It runs GrantTx's checks and writes the same in-tx "grant" audit row
-// (ADR-090). It runs on its caller's time, a credit note's Issue on the
-// invoice's time, and looks no clock up.
+// (ADR-090). It runs at the instant bound on its caller's ctx.
 func (s *Service) GrantForCreditNoteTx(ctx context.Context, tx *sql.Tx, tenantID, creditNoteID string, input CreditNoteReturnInput) (domain.CreditReturn, error) {
 	if creditNoteID == "" {
 		return domain.CreditReturn{}, errs.Required("credit_note_id")
@@ -523,12 +493,9 @@ func (s *Service) ApplyToInvoice(ctx context.Context, tenantID, customerID, invo
 	return s.ApplyToInvoiceAt(ctx, tenantID, customerID, invoiceID, invoiceAmountCents, time.Time{}, invoiceNumber...)
 }
 
-// ApplyToInvoiceAt is the simulated-time-aware variant: `at` stamps the
-// ledger usage entry and the invoice's updated_at, anchoring on the
-// invoice's cycle-close instant during catchup so credits applied across
-// multiple periods don't all stack at advance-end frozen_time on the
-// customer's Credits tab. Pass zero from operator paths to fall back to
-// clock.Now(ctx) at the postgres layer.
+// ApplyToInvoiceAt is ApplyToInvoice with a time: `at` stamps the ledger
+// usage entry and the invoice's updated_at. Zero means clock.Now(ctx) at
+// the postgres layer.
 func (s *Service) ApplyToInvoiceAt(ctx context.Context, tenantID, customerID, invoiceID string, invoiceAmountCents int64, at time.Time, invoiceNumber ...string) (int64, error) {
 	desc := fmt.Sprintf("Applied to invoice %s", invoiceID)
 	if len(invoiceNumber) > 0 && invoiceNumber[0] != "" {
@@ -558,13 +525,8 @@ func (s *Service) ApplyToInvoiceAt(ctx context.Context, tenantID, customerID, in
 // so the error (code credit_reversal_source_taken) is returned, not
 // swallowed: the caller must fail, not carry on.
 //
-// It looks no clock up: both callers carry the invoice's time before they
-// open tx (invoice.Service.Void keeps the time its caller decided; the cancel
-// and the plan swap run on the subscription action's time), and a lookup here
-// would read the customer's clock on another connection while tx holds the
-// invoice row (ADR-139). clock.Now(ctx) stamps the grant at that time (on a
-// test clock, its frozen time), and the same instant decides which source
-// grants are past their expiry.
+// clock.Now(ctx), the instant bound on its caller's ctx, stamps the grant,
+// and the same instant decides which source grants are past their expiry.
 func (s *Service) ReverseForInvoiceTx(ctx context.Context, tx *sql.Tx, tenantID, customerID, invoiceID, invoiceNumber string) (domain.CreditReturn, error) {
 	sums, err := s.store.InvoiceCreditsTx(ctx, tx, tenantID, customerID, invoiceID)
 	if err != nil {
@@ -751,9 +713,8 @@ func (s *Service) GetBalance(ctx context.Context, tenantID, customerID string) (
 
 // SpendableBalance is the credit a draw could use right now, per currency:
 // the ledger balance less any grant past its expiry that the sweep has not
-// written off yet. "Now" is the time its caller decided (for a customer on
-// a test clock, that clock's frozen time), the same instant a draw would
-// judge expiry at.
+// written off yet. "Now" is clock.Now(ctx), the instant bound on ctx, the
+// same instant a draw would judge expiry at.
 func (s *Service) SpendableBalance(ctx context.Context, tenantID, customerID string) (map[string]int64, error) {
 	return s.store.GetSpendableBalance(ctx, tenantID, customerID, clock.Now(ctx))
 }
@@ -811,9 +772,6 @@ func (s *Service) Adjust(ctx context.Context, tenantID string, input AdjustInput
 	if err := s.requireCustomer(ctx, tenantID, input.CustomerID); err != nil {
 		return domain.CreditLedgerEntry{}, err
 	}
-	// One instant for the whole adjustment, bound before anything is
-	// written: the ledger entry carries it.
-	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	if input.AmountCents == 0 {
 		return domain.CreditLedgerEntry{}, errs.Invalid("amount_cents", "cannot be zero")
 	}

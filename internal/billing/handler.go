@@ -54,10 +54,10 @@ func (h *Handler) triggerCycle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// The run is a job: each subscription is billed on its own time, as the
-	// scheduled run bills it, so it starts with no instant (the door's is
-	// dropped; a tenant run lists no subscription on a clock).
-	generated, failures := h.engine.RunCycleForTenant(clock.WithRealTime(r.Context()), tenantID, 50)
+	// The run is a job: each subscription is billed on its own instant, as
+	// the scheduled run bills it, so it starts with no instant (the door's is
+	// dropped).
+	generated, failures := h.engine.RunCycleForTenant(clock.WithoutInstant(r.Context()), tenantID, 50)
 
 	// Full detail (pq constraint names, Stripe internals) goes to the server log
 	// only; the API caller gets its own subscription ids + a generic class. Even

@@ -103,8 +103,8 @@ func TestCancel_TrialActivatedWhilePriced_PlansAgainFromTheActiveRow(t *testing.
 	}
 }
 
-// Each attempt runs on the caller's instant (the door's, dunning's or a test
-// clock's), so a second attempt plans at the same instant as the first.
+// Each attempt runs on the caller's instant (the door's or dunning's), so a
+// second attempt plans at the same instant as the first.
 //
 // Mutation: plan each attempt on a fresh read of the server's clock, ignoring
 // the caller's instant → neither plan is at the caller's instant.

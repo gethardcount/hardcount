@@ -99,14 +99,9 @@ func main() {
 
 	db := postgres.NewDB(pool, 30*time.Second)
 
-	// BENCH_LIVEMODE selects which ingest path the benchmark measures, and
-	// the default is the production one. Test mode is more than a label. In
-	// test mode the service does an extra test-clock lookup per event, which
-	// live mode skips by design ("the high-volume production ingest path
-	// stays at zero extra queries", simNow in internal/usage/service.go). So
-	// every number measured in test mode includes a query production never
-	// makes. The bench database is throwaway, so live mode here touches no
-	// money.
+	// BENCH_LIVEMODE selects the mode the benchmark ingests in, and the
+	// default is live, as in production. The bench database is throwaway, so
+	// live mode here touches no money.
 	live := benchLivemode()
 	// The key-minting path reads WithLivemode (auth opens a TxTenant). It
 	// does not reach the fixture INSERTs: see the note in bootstrapFixtures.

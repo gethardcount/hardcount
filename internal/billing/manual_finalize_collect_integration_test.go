@@ -114,9 +114,9 @@ func TestManualFinalize_CollectsThroughTheEngine_E2E(t *testing.T) {
 
 	t.Run("credit-holding customer → ledger drains, card charged the remainder", func(t *testing.T) {
 		cusID := newCustomer(t, "cus_mf_credit")
-		if _, err := creditSvc.Grant(ctx, tenantID, credit.GrantInput{
+		if _, err := creditSvc.Grant(clock.WithEffectiveNow(ctx, time.Now().UTC().Add(-time.Hour)), tenantID, credit.GrantInput{
 			Currency:   "USD",
-			CustomerID: cusID, AmountCents: 2000, Description: "seed", At: time.Now().UTC().Add(-time.Hour),
+			CustomerID: cusID, AmountCents: 2000, Description: "seed",
 		}); err != nil {
 			t.Fatalf("grant: %v", err)
 		}

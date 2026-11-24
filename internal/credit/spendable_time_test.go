@@ -26,7 +26,6 @@ func TestSpendableBalance_JudgesExpiryAtTheDecidedTime(t *testing.T) {
 	decidedAt := time.Date(2027, 3, 4, 10, 0, 0, 0, time.UTC)
 	store := &atStore{memStore: newMemStore()}
 	svc := NewService(store)
-	svc.SetClock(clock.NewFake(decidedAt.Add(72 * time.Hour)))
 	ctx := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), decidedAt)
 	if _, err := svc.SpendableBalance(ctx, "t1", "cus_1"); err != nil {
 		t.Fatalf("SpendableBalance: %v", err)

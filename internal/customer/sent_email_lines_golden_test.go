@@ -137,10 +137,10 @@ func TestSentEmailLinesGolden(t *testing.T) {
 	noID := base
 	noID.EmailType, noID.InvoiceID = "invoice", ""
 	add("invoice not linked without its id", noID)
-	// Dated at the instant its action decided, not when it was queued.
-	decided := base
-	decided.EmailType, decided.EffectiveAt = "payment_receipt", created.Add(-30*time.Second)
-	add("dated at its action", decided)
+	// Dated at the instant of its action, not when it was queued.
+	atAction := base
+	atAction.EmailType, atAction.EffectiveAt = "payment_receipt", created.Add(-30*time.Second)
+	add("dated at its action", atAction)
 
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)

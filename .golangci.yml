@@ -17,13 +17,14 @@ linters:
       # import (stdtime.Now) is caught too.
       analyze-types: true
       forbid:
-        # ADR-030: clock-pinned entities live in simulated time. In the packages
-        # that write them (scoped under exclusions below), read the time through
-        # the clock: s.clock.Now(ctx) in a service, clock.Now(ctx) in a store or
-        # render code. A genuine wall-clock use says why on the same line:
+        # One piece of work reads one time, the instant bound on its ctx, and
+        # a test can fix that time. In the billing packages (scoped under
+        # exclusions below), read the time through the clock: s.clock.Now(ctx)
+        # in a service, clock.Now(ctx) in a store or render code. A genuine
+        # wall-clock use says why on the same line:
         #   //nolint:forbidigo // wall-clock: <reason>
         - pattern: ^time\.Now$
-          msg: "wall-clock: use s.clock.Now(ctx) or clock.Now(ctx) on clock-pinned entities (ADR-030); if wall-clock time is intended, add //nolint:forbidigo // wall-clock: <reason>"
+          msg: "wall-clock: use s.clock.Now(ctx) or clock.Now(ctx), so one piece of work reads one time and a test can fix it; if wall-clock time is intended, add //nolint:forbidigo // wall-clock: <reason>"
         # Funding-set invariant (ADR-048 amendment): a billing period can be
         # funded by more than one invoice, so a period-wide credit, clawback or
         # void must use FindFundingInvoicesForPeriod. A single-row lookup that

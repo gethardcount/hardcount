@@ -8,8 +8,8 @@ import (
 )
 
 // A dismissal of a refund made in Stripe and an attach of one to a credit
-// note run on the time the API's door decided for their request: at real
-// time, the server's clock, the one the server is built with, not the
+// note run on the instant the API's door bound for their request: one read
+// of the server's clock, the one the server is built with, not the
 // machine's.
 func TestE2E_StripeRefund_DismissAndAttachAreOnTheRequestsTime(t *testing.T) {
 	serverAt := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)

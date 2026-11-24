@@ -1,19 +1,11 @@
-// Package clock gives code the current time. A ctx may carry a bound
-// instant, and Now then returns that instant instead of the system time.
+// Package clock gives code the current time. One piece of work reads one
+// time: the instant bound on its ctx, which Clock.Now and Now return. The
+// API's door binds a request's instant before its handler runs; a job, or a
+// request that fans out over many records, binds one per record
+// (EnsureEffectiveNow). With none bound, they read the machine's time.
 //
-// One piece of work runs on one time. On every route but a decidedIn one the
-// API's door (api.clockDoor) binds the request's instant before the handler
-// runs. A function that binds its own time (a decidedIn route's function, a
-// public page, a Stripe event) calls EnsureEffectiveNow with the service's
-// Clock: an instant ctx already carries is kept, else one read of that Clock
-// is bound. Every read of the clock below then answers that instant. Work
-// over many records (a job a request starts, or a fan-out after the request
-// has answered) binds no instant for all of them: each row binds its own.
-//
-// One exception: a charge's result, and the invoice's writes that follow it
-// in the same action, are dated when Stripe's answer arrives (AtArrival), in
-// the same call or by webhook. A Stripe Tax answer is not one: it keeps the
-// action's instant.
+// The one exception is AtArrival: a charge's result, and the invoice's writes
+// that follow it, are dated when Stripe's answer arrives.
 package clock
 
 import (
@@ -29,7 +21,7 @@ import (
 //
 // Code that wants wall-clock time whatever ctx carries calls
 // time.Now().UTC() directly, by design. Examples are the cron tick
-// scheduler, webhook delivery timestamps and the audit log's recorded_at.
+// scheduler, webhook delivery timestamps and the audit log's rows.
 type Clock interface {
 	// Now returns ctx's effective-now if one is bound
 	// (clock.WithEffectiveNow), and otherwise wall-clock time in UTC.
@@ -87,29 +79,17 @@ func (c *Fake) Advance(d time.Duration) {
 	c.current = c.current.Add(d)
 }
 
-// Sim is the time a context carries: an instant (At), or none (a zero Sim,
-// WithRealTime).
-type Sim struct {
-	At time.Time
-}
+// instantKey is the ctx key for the bound instant; a zero time means none.
+// Its type is unexported, so other packages bind it only through this
+// package.
+type instantKeyType struct{}
 
-// simKey is the ctx key for the bound Sim. Its type is unexported, so other
-// packages can set the binding only through WithSim or WithEffectiveNow.
-type simKeyType struct{}
-
-var simKey = simKeyType{}
-
-// WithSim binds s to ctx. Every Clock.Now(ctx) below reads s.At when it is
-// set.
-func WithSim(ctx context.Context, s Sim) context.Context {
-	s.At = s.At.UTC()
-	return context.WithValue(ctx, simKey, s)
-}
+var instantKey = instantKeyType{}
 
 // WithEffectiveNow binds a real instant. Every Clock.Now(ctx) below reads
 // this value instead of wall-clock time.
 func WithEffectiveNow(ctx context.Context, t time.Time) context.Context {
-	return WithSim(ctx, Sim{At: t})
+	return context.WithValue(ctx, instantKey, t.UTC())
 }
 
 // EnsureEffectiveNow returns ctx with an effective now bound: the one ctx
@@ -128,20 +108,20 @@ func EnsureEffectiveNow(ctx context.Context, c Clock) context.Context {
 // read replaces any instant ctx carries, so the result is dated when it
 // arrived.
 func AtArrival(ctx context.Context, c Clock) context.Context {
-	return WithEffectiveNow(ctx, c.Now(WithRealTime(ctx)))
+	return WithEffectiveNow(ctx, c.Now(WithoutInstant(ctx)))
 }
 
 // EffectiveNow returns the bound instant and true when ctx carries one, from
-// WithEffectiveNow or WithSim. Otherwise it returns the zero time and false.
+// WithEffectiveNow. Otherwise it returns the zero time and false.
 func EffectiveNow(ctx context.Context) (time.Time, bool) {
 	if ctx == nil {
 		return time.Time{}, false
 	}
-	s, ok := ctx.Value(simKey).(Sim)
-	if !ok || s.At.IsZero() {
+	t, ok := ctx.Value(instantKey).(time.Time)
+	if !ok || t.IsZero() {
 		return time.Time{}, false
 	}
-	return s.At, true
+	return t, true
 }
 
 // Now returns the bound instant if ctx has one, and wall-clock time
@@ -160,9 +140,9 @@ func Now(ctx context.Context) time.Time {
 	return time.Now().UTC()
 }
 
-// WithRealTime drops any instant ctx carries: Now(ctx) then reads machine
+// WithoutInstant drops any instant ctx carries: Now(ctx) then reads machine
 // time. A job's tick starts this way, so each row it works binds its own
 // instant.
-func WithRealTime(ctx context.Context) context.Context {
-	return WithSim(ctx, Sim{})
+func WithoutInstant(ctx context.Context) context.Context {
+	return context.WithValue(ctx, instantKey, time.Time{})
 }

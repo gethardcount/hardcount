@@ -27,10 +27,9 @@ func (c *steppingClock) Now(ctx context.Context) time.Time {
 	return c.at
 }
 
-// At real time (an invoice on no clock: the decision binds no instant) a
-// resolve and a due run's retry each read the server's clock once, and every
-// stamp of the action is that one instant. Two reads would differ here, as
-// the clock steps on each.
+// With no instant bound, a resolve and a due run's retry each read the
+// server's clock once, and every stamp of the action is that one instant.
+// Two reads would differ here, as the clock steps on each.
 func TestDunning_AtRealTimeReadsTheServersClockOnce(t *testing.T) {
 	past := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
 

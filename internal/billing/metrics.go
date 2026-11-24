@@ -16,7 +16,7 @@ var (
 	invoicesGenerated = promauto.NewCounter(
 		prometheus.CounterOpts{
 			Name: "hardcount_invoices_generated_total",
-			Help: "Invoices built by the scheduled billing run's period closes, both modes, including a close that ends a subscription canceled at its period end. Not counted: the final invoice of a cancel scheduled inside a period, spend-threshold invoices, cancels that take effect at once, POST /v1/billing/run, test-clock advances and invoices created through the API.",
+			Help: "Invoices built by the scheduled billing run's period closes, both modes, including a close that ends a subscription canceled at its period end. Not counted: the final invoice of a cancel scheduled inside a period, spend-threshold invoices, cancels that take effect at once, POST /v1/billing/run and invoices created through the API.",
 		},
 	)
 
@@ -74,13 +74,13 @@ var (
 	// no price and was left off an invoice (#981). It is a signal, not a
 	// record: it resets on restart and is not per customer. The per-customer
 	// view is the no_price row of GET /v1/customers/{id}/usage, and the WARN
-	// names the meter by id and event name. A meter label would add a series for every meter of
-	// every account, never dropped. Test-clock simulations are not counted.
+	// names the meter by id and event name. A meter label would add a series
+	// for every meter of every account, never dropped.
 	// Both modes start at 0 (init below), as the dead-letter counters do.
 	usageUnpricedQuantity = promauto.NewCounterVec(
 		prometheus.CounterOpts{
 			Name: "hardcount_usage_unpriced_quantity_total",
-			Help: "Usage quantity that matched no price of its subscription's plan, and so was left off an invoice (period close, cancel final invoice or spend-threshold invoice), by mode. Test-clock simulations are not counted. The WARN \"usage matched no price of its plan\" names the meter's id and event name. Bill it with a one-off invoice; add a price to the plan so later invoices include it.",
+			Help: "Usage quantity that matched no price of its subscription's plan, and so was left off an invoice (period close, cancel final invoice or spend-threshold invoice), by mode. The WARN \"usage matched no price of its plan\" names the meter's id and event name. Bill it with a one-off invoice; add a price to the plan so later invoices include it.",
 		},
 		[]string{"mode"},
 	)

@@ -8,10 +8,10 @@ import (
 )
 
 // A credit note a subscription action issues (the cancel route, a plan
-// downgrade, a cross-interval plan swap) is dated at the time the action was
-// decided on: at real time, the server's clock, the one the server is built
-// with (here a fixed past instant, not the machine's).
-func TestE2E_SubscriptionCreditNotesAtRealTimeAreOnTheServersClock(t *testing.T) {
+// downgrade, a cross-interval plan swap) is dated at the action's instant:
+// one read of the server's clock, the one the server is built with (here a
+// fixed past instant, not the machine's).
+func TestE2E_SubscriptionCreditNotesAreOnTheServersClock(t *testing.T) {
 	serverAt := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
 	r := newDatesRigOn(t, "Sub credit note real time Co", clock.NewFake(serverAt))
 	plan := func(code, interval string, cents int) string {

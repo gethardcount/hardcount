@@ -291,10 +291,8 @@ func (m *memStore) AdjustAtomic(ctx context.Context, tenantID, customerID, curre
 		return domain.CreditLedgerEntry{}, fmt.Errorf("Insufficient balance: only %.2f is available, so %.2f can't be deducted.",
 			float64(bal.BalanceCents)/100, float64(-amountCents)/100)
 	}
-	// Mirror PostgresStore.AdjustAtomic: stamp created_at from the
-	// ctx-bound clock so a clock-pinned customer's deduct lands in sim
-	// time, not wall-clock. AppendEntry's zero-CreatedAt fallback
-	// would otherwise mask the missing bind in Service.Adjust.
+	// Mirror PostgresStore.AdjustAtomic: stamp created_at with
+	// clock.Now(ctx), the instant bound on ctx.
 	return m.AppendEntry(ctx, tenantID, domain.CreditLedgerEntry{
 		CustomerID:  customerID,
 		EntryType:   domain.CreditAdjustment,
@@ -482,9 +480,9 @@ func TestGrant(t *testing.T) {
 
 	t.Run("past expires_at rejected", func(t *testing.T) {
 		// Operator picked a date in the past — DOA grant. Industry
-		// parity with Stripe's 422 on past expires_at. The customer
-		// is NOT clock-pinned in this test, so clock.Now(ctx) returns
-		// wall-clock; the past date should fail.
+		// parity with Stripe's 422 on past expires_at. No instant is
+		// bound, so clock.Now(ctx) returns the machine's time; the past
+		// date should fail.
 		past := time.Now().AddDate(0, 0, -1) // yesterday
 		_, err := svc.Grant(ctx, "t1", GrantInput{
 			Currency:    "USD",

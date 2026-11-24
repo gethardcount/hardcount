@@ -123,7 +123,7 @@ func TestResolvePeriod(t *testing.T) {
 		wantFrom    time.Time
 		wantTo      time.Time
 		wantErrCode string
-		now         time.Time // customer's effective now; zero → jun1
+		now         time.Time // the bound instant; zero → jun1
 	}{
 		{
 			name:       "default to current cycle",

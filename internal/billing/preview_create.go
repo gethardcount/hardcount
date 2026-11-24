@@ -8,7 +8,6 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/subscription"
 )
 
@@ -88,9 +87,8 @@ type CreatePreviewRequest struct {
 // next billing event. Composition order:
 //  1. Customer existence (RLS makes cross-tenant IDs return ErrNotFound).
 //  2. Subscription resolution (explicit ID, or pick primary active sub).
-//  3. The time bound: one read of the service's clock.
-//  4. Period resolution (explicit window, or sub's current cycle).
-//  5. Defer to the engine: previewCycle (mirrors the cycle close) for the
+//  3. Period resolution (explicit window, or sub's current cycle).
+//  4. Defer to the engine: previewCycle (mirrors the cycle close) for the
 //     default window, previewWithWindow for an explicit one.
 //
 // Returns a PreviewResult, the one wire shape the subscription page and the
@@ -109,10 +107,6 @@ func (s *PreviewService) CreatePreview(ctx context.Context, tenantID string, req
 	if err != nil {
 		return PreviewResult{}, err
 	}
-
-	// One instant for the preview: its generated_at, and any later read of
-	// now, read it.
-	ctx = clock.EnsureEffectiveNow(ctx, s.engine.clock)
 
 	from, to, err := resolveCreatePreviewPeriod(req.Period, sub)
 	if err != nil {

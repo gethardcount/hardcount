@@ -60,9 +60,7 @@ func TestParseRange(t *testing.T) {
 		{
 			// Equal endpoints are a VALID zero-width window: every consumer's
 			// SQL is inclusive both ends, so from==to selects rows at exactly
-			// that instant — the natural query on the quantized sim axis
-			// (FLOW P2 walk, 2026-08-03: the flow's own single-instant example
-			// 422'd against the previous stricter check).
+			// that instant.
 			name:     "to equal to from is a valid single-instant window",
 			url:      "/x?from=2026-06-01T00:00:00Z&to=2026-06-01T00:00:00Z",
 			wantFrom: "2026-06-01T00:00:00Z",

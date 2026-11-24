@@ -333,8 +333,8 @@ func TestImmediateCancel_TwoPeriodsBehind_EachPeriodInvoicedOnce(t *testing.T) {
 				c.name, inv.BillingReason, usage, base, inv.SubtotalCents, c.usage, cancelFixtureBaseCents)
 		}
 		// Each close is stamped at its own boundary, not at the cancel.
-		if !inv.IssuedAtOrZero().Equal(c.end) {
-			t.Errorf("%s: issued at %v, want its boundary %v", c.name, inv.IssuedAtOrZero(), c.end)
+		if inv.IssuedAt == nil || !inv.IssuedAt.Equal(c.end) {
+			t.Errorf("%s: issued at %v, want its boundary %v", c.name, inv.IssuedAt, c.end)
 		}
 	}
 	final := invoiceFor(t, invs, p2, cancelAt)

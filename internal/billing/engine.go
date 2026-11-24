@@ -105,9 +105,9 @@ type Engine struct {
 type AuditWriter interface {
 	Log(ctx context.Context, tenantID, action, resourceType, resourceID, resourceLabel string, metadata map[string]any) error
 	// LogInTx writes the row on the caller's transaction (ADR-090 shared fate):
-	// the row and the business mutation commit or roll back together. tenant_id,
-	// actor and the sim axis are derived from ctx + the tx GUC, so the Entry
-	// carries only the row's own facts. Used by the engine's finalize emission so
+	// the row and the business mutation commit or roll back together. tenant_id
+	// and actor are derived from ctx + the tx GUC, so the Entry carries only
+	// the row's own facts. Used by the engine's finalize emission so
 	// the audit row rides the invoice-create tx instead of a lossy post-commit
 	// write. The concrete *audit.Logger satisfies this directly.
 	LogInTx(ctx context.Context, tx *sql.Tx, e audit.Entry) error
@@ -137,10 +137,9 @@ func (e *Engine) auditWriter() AuditWriter { return e.auditLogger }
 // Drafts (tax-pending / pause-collection) are skipped: they finalize later,
 // and invoice.Service.finalizeHook writes the row on that finalize's
 // transaction (the operator's Finalize, or the tax retry's in-transaction
-// finalize) — auditing here too would double-count. tenant_id, actor and the sim axis are derived
-// from ctx + the tx GUC inside LogInTx, so the Entry carries only the row's own
-// facts (ADR-030: created_at stays wall-clock; the simulated instant is a
-// derived column, not metadata).
+// finalize) — auditing here too would double-count. LogInTx derives tenant_id
+// and actor from ctx + the tx GUC, and created_at is the machine's time,
+// so the Entry carries only the row's own facts.
 //
 // The finalize of a draft gets its row from invoice.Service.finalizeHook;
 // engine invoices never pass through it — they are born finalized — so
@@ -315,10 +314,8 @@ type ScheduledCancelExecutor interface {
 }
 
 // CreditApplier applies customer credits to an invoice before charging.
-// ApplyToInvoiceAt is the simulated-time-aware variant — engine callers
-// pass their `now` (cycle close instant) so the ledger usage entry +
-// invoice updated_at land on simulated time rather than advance-end
-// frozen_time during catchup.
+// ApplyToInvoiceAt stamps the ledger usage entry and the invoice's
+// updated_at with at, the collection's instant the engine passes.
 type CreditApplier interface {
 	ApplyToInvoiceAt(ctx context.Context, tenantID, customerID, invoiceID string, amountCents int64, at time.Time, invoiceNumber ...string) (int64, error)
 }
@@ -413,12 +410,11 @@ type SubscriptionReader interface {
 	// grace admits due instants (ADR-120).
 	GetDueBilling(ctx context.Context, now, dueBy time.Time, exclude []string, limit int) ([]domain.Subscription, error)
 	// GetDueBillingForTenant: operator-triggered (POST /v1/billing/run)
-	// path, scoped to ONE tenant under RLS. Wall-clock-due, non-clock-
-	// pinned subs for the caller's tenant only — never cross-tenant.
-	// now and dueBy as for GetDueBilling.
+	// path, scoped to ONE tenant under RLS. Due subs for the caller's
+	// tenant only — never cross-tenant. now and dueBy as for GetDueBilling.
 	GetDueBillingForTenant(ctx context.Context, tenantID string, now, dueBy time.Time, exclude []string, limit int) ([]domain.Subscription, error)
 	Get(ctx context.Context, tenantID, id string) (domain.Subscription, error)
-	// RecordBillingFailure saves one counted billing failure on a wall-clock
+	// RecordBillingFailure saves one counted billing failure on a
 	// subscription (ADR-119) and reports whether a row was written. Zero rows
 	// is normal: the due instant moved, or another run counted this attempt.
 	// It writes only the five billing_* columns.
@@ -458,9 +454,9 @@ type SubscriptionReader interface {
 	// intent to canceled, CAS-ing on `expected` as well as status='active',
 	// seals its intervals and enqueues subscription.canceled; the final
 	// invoice is inserted on the same tx. The `at` argument is the close's
-	// instant, so canceled_at stays on the period's timeline under a test
-	// clock. subscription.ErrWatermarkMoved covers both "period moved" and
-	// "already terminated" — the closer's snapshot is stale either way.
+	// instant, written as canceled_at. subscription.ErrWatermarkMoved covers
+	// both "period moved" and "already terminated" — the closer's snapshot is
+	// stale either way.
 	FireScheduledCancellationTx(ctx context.Context, tx *sql.Tx, tenantID, id string, expected subscription.PeriodSnapshot, at time.Time) (domain.Subscription, error)
 
 	// ActivateAfterTrialWithBill atomically transitions a sub from
@@ -589,7 +585,7 @@ type InvoiceWriter interface {
 	// moved on — skip, never charge.
 	ClaimAutoCharge(ctx context.Context, tenantID, id string) (domain.ChargeHold, error)
 	// ReleaseChargeHold clears this owner's hold (compared by token) on
-	// paths that sent no charge, so the next tick/Advance retries
+	// paths that sent no charge, so the next tick retries
 	// immediately instead of waiting for the stale-hold sweep.
 	ReleaseChargeHold(ctx context.Context, tenantID, id string, hold domain.ChargeHold) error
 	// ChargeClaimStateOf says whether ClaimAutoCharge would take the invoice
@@ -833,15 +829,9 @@ func (e *Engine) CheckTaxCalculationUsable(ctx context.Context, tenantID, invoic
 	}
 	usableUntil, lookupErr := e.taxCalcStore.LookupCalculationUsableUntil(ctx, tenantID, invoiceID, calculationID)
 	if lookupErr == nil {
-		// REAL wall-clock — never clock.Now(ctx). The calculation expires at
-		// Stripe, which knows nothing about a Hardcount test clock, and
-		// usableUntil is Stripe's own instant. Using the ctx-bound simulated
-		// clock here conflated the two: a customer pinned to a test clock
-		// advanced past the window (e.g. a mid-period proration after
-		// advancing the clock) made a calc created seconds ago in real time
-		// read as expired. The commit was skipped and the proration invoice
-		// kept tax_calculation_id but no tax_transaction_id.
-		if now := time.Now().UTC(); now.After(usableUntil.Add(-taxCalculationExpiryMargin)) { //nolint:forbidigo // wall-clock: the calculation expires at Stripe in real time, never on the simulated clock
+		// The machine's time, not clock.Now(ctx): the calculation expires at
+		// Stripe in real time, and usableUntil is Stripe's own instant.
+		if now := time.Now().UTC(); now.After(usableUntil.Add(-taxCalculationExpiryMargin)) { //nolint:forbidigo // wall-clock: the calculation expires at Stripe in real time, not at the action's bound instant
 			de := errs.InvalidState(fmt.Sprintf(
 				"tax calculation expired (usable until %s) — retry tax to refresh, then finalize",
 				usableUntil.UTC().Format(time.RFC3339)))
@@ -938,7 +928,7 @@ func (e *Engine) SetScheduledCancelExecutor(x ScheduledCancelExecutor) {
 }
 
 // SetInvoiceGrace sets INVOICE_GRACE_PERIOD (ADR-120). Usage reaches Hardcount
-// some time after it happens, so the two wall-clock billing runs (the
+// some time after it happens, so the two billing runs (the
 // scheduler's RunCycle and the operator's POST /v1/billing/run) close a
 // period only once the grace has passed after its end, or after a
 // mid-period cancel_at. Usage stamped inside the period that arrives within
@@ -946,11 +936,9 @@ func (e *Engine) SetScheduledCancelExecutor(x ScheduledCancelExecutor) {
 //
 // The other closers do not wait. An operator acting on one subscription
 // (immediate cancel, retry-billing, the pre-close of every other
-// subscription write) closes the ended period now, and a test clock closes at
-// the instant it is advanced to: there the operator decides when usage
-// arrives. Dunning's final pause and cancel do wait: they close through
-// BillDue with the same grace (subscription.Service.SetInvoiceGrace, ADR-120
-// amendment 2026-10-22). Unset (0) closes as soon as the period is due.
+// subscription write) closes the ended period now. Dunning's final pause
+// and cancel do wait: they close through BillDue with the same grace
+// (subscription.Service.SetInvoiceGrace, ADR-120 amendment 2026-10-22). Unset (0) closes as soon as the period is due.
 func (e *Engine) SetInvoiceGrace(d time.Duration) {
 	e.invoiceGrace = d
 }
@@ -1599,8 +1587,8 @@ func (e *Engine) loadTaxSettings(ctx context.Context, tenantID string) (context.
 	// Pin tenant_id on ctx before resolving the provider. The
 	// StripeTaxProvider's clientForCtx reads auth.TenantID(ctx) to
 	// look up per-tenant Stripe credentials; background workers
-	// (scheduler tick, test-clock catchup) build ctx with
-	// WithLivemode but never set the tenant. Without this pin,
+	// (the scheduler tick) build ctx with WithLivemode but never
+	// set the tenant. Without this pin,
 	// every tax call from a worker resolved a nil Stripe client
 	// and surfaced as "no client configured for livemode=…" even
 	// when credentials existed in the DB. HTTP-handler-driven
@@ -1767,10 +1755,9 @@ func (e *Engine) applyTax(ctx context.Context, ts domain.TenantSettings, inclusi
 		// for diagnostic depth.
 		app.TaxErrorCode = string(tax.Classify(err))
 		app.TaxPendingReason = errs.Clip(tax.CleanMessage(err.Error()), 500)
-		// tax_deferred_at lands in simulated time on clock-pinned
-		// invoices via ctx-bound effective-now. The clock-nil branch
-		// covers narrow unit tests that construct an Engine without
-		// wiring a Clock; production always wires Real().
+		// tax_deferred_at is the action's bound instant. The clock-nil
+		// branch covers narrow unit tests that construct an Engine
+		// without wiring a Clock; production always wires Real().
 		var deferredAt time.Time
 		if e.clock != nil {
 			deferredAt = e.clock.Now(ctx)
@@ -1916,11 +1903,11 @@ type dueFetch func(ctx context.Context, exclude []string, limit int) ([]domain.S
 // oldest-first order and comes back on every page. A page made only of such
 // subs used to end the run while healthy subs waited behind them.
 //
-// A failed attempt on a wall-clock sub is also saved on the subscription
-// (attemptSub, ADR-119), and the wall-clock scans then skip it until its next
-// attempt is due, or for good once it is parked. The exclude list stays: it
-// covers the failures that are not saved (an interrupted run, a transient
-// database error, a failed save).
+// A failed attempt is also saved on the subscription (attemptSub,
+// ADR-119), and the due scans then skip it until its next attempt is due,
+// or for good once it is parked. The exclude list stays: it covers the
+// failures that are not saved (an interrupted run, a transient database
+// error, a failed save).
 //
 // Termination: every sub on a non-empty page is either attempted for the first
 // time or added to exclude, so each page shrinks what the next page can return.
@@ -1970,10 +1957,9 @@ func (e *Engine) drainDue(ctx context.Context, batchSize int, fetch dueFetch, on
 				panics.Repanic()
 				return generated, failures
 			}
-			// The row's one instant (see the clock package's doc): a
-			// catch-up's clock, or a request's instant, is kept; a tick's
-			// row reads the server's clock once, so every stamp of the row
-			// shares it and the next row reads its own.
+			// The row's one instant (see the clock package's doc): the run
+			// starts with none, so each row reads the server's clock once,
+			// every stamp of the row shares it and the next row reads its own.
 			rowCtx := clock.EnsureEffectiveNow(ctx, e.clock)
 			if attempted[sub.ID] {
 				exclude = append(exclude, sub.ID)
@@ -2076,7 +2062,7 @@ func (e *Engine) RunCycleForTenant(ctx context.Context, tenantID string, batchSi
 	return generated, failures
 }
 
-// RunCycle is the scheduler's billing run: it bills every wall-clock sub that
+// RunCycle is the scheduler's billing run: it bills every sub that
 // is due, across all tenants in ctx's livemode, before returning. Before P27 it
 // billed one page of batchSize subs per tick, which at 50 subs per hourly tick
 // meant 20,000 subs due on the 1st took about 17 days to invoice.
@@ -2122,18 +2108,15 @@ func (e *Engine) RunCycle(ctx context.Context, batchSize int, onPage func()) (in
 // guard against a billOnePeriod bug that fails to advance
 // next_billing_at — without it the period loop would spin forever.
 //
-// 10000 covers any realistic catch-up: 833 years of monthly billing,
-// 27 years of daily. Test-clock advances beyond that need a chained
-// retry, which is fine — the 10-minute test-clock catch-up pass
-// deadline (testclock.CatchupPassDeadline) is the outer ceiling.
+// 10000 covers any realistic catch-up after downtime: 833 years of
+// monthly billing, 27 years of daily.
 const maxPeriodsPerSubPerCall = 10000
 
 // billSubscription catches a subscription up to the instant its caller
-// bound by looping billOnePeriod until next_billing_at is after it. Production wall-clock subs typically need exactly one
-// iteration (the cycle accumulates one period of debt before each
-// scheduler tick). Test-clock catch-up after a multi-year advance
-// runs N iterations in a single call — the operator clicks Advance
-// once and the sub catches up fully, no chained retries.
+// bound by looping billOnePeriod until next_billing_at is after it. A sub
+// typically needs exactly one iteration (the cycle accumulates one period
+// of debt before each scheduler tick); after downtime it bills every
+// missed period in one call.
 //
 // Returns the number of invoices generated (skipped/trial periods
 // don't count) and any fatal error encountered. Partial progress
@@ -2146,7 +2129,7 @@ const maxPeriodsPerSubPerCall = 10000
 // billed, even when this returns an error or panics.
 //
 // grace is the invoice grace of the run (ADR-120; 0 for the operator's
-// one-subscription close and for test clocks). A due instant (next_billing_at,
+// one-subscription close). A due instant (next_billing_at,
 // or a mid-period cancel_at) counts only once grace has passed after it, so a
 // catch-up after downtime bills the older periods at once and the newest
 // after its grace. The due scans admit with the same rule, both arms.
@@ -2156,8 +2139,8 @@ func (e *Engine) billSubscription(ctx context.Context, sub domain.Subscription, 
 	count := 0
 	movedRetry := false
 	for i := 0; i < maxPeriodsPerSubPerCall; i++ {
-		// Honour ctx deadline (the test-clock catch-up's pass deadline, or
-		// the scheduler tick's ctx). Returns the partial count + err.
+		// Honour ctx deadline (the scheduler tick's ctx, or the request's).
+		// Returns the partial count + err.
 		if err := ctx.Err(); err != nil {
 			return count, fmt.Errorf("billing loop ctx done: %w", err)
 		}
@@ -2181,18 +2164,16 @@ func (e *Engine) billSubscription(ctx context.Context, sub domain.Subscription, 
 		// the re-check that stale page would attempt past the wait. The
 		// sentinel tells the caller no attempt was made; count is kept because
 		// an earlier iteration of a catch-up may already have invoiced.
-		// Never set on a clock-pinned sub.
 		if bf := sub.BillingFailure; bf != nil && (bf.NextAttemptAt == nil || bf.NextAttemptAt.After(e.clock.Now(ctx))) {
 			return count, errBillingGated
 		}
 
-		// Caught-up check, at the instant the caller bound: on a test clock
-		// the catch-up's clock time, a request's decided time, or dunning's
-		// escalation. sub.NextBillingAt strictly after it, less the run's
-		// invoice grace (ADR-120), means there's nothing more to bill in
-		// this call. It decides only whether a due instant has come; the
-		// close itself still runs at the due instant (billOnePeriod anchors
-		// on next_billing_at, the cancel on cancel_at).
+		// Caught-up check, at the instant the caller bound (a run's row, a
+		// request, or dunning's escalation). sub.NextBillingAt strictly
+		// after it, less the run's invoice grace (ADR-120), means there's
+		// nothing more to bill in this call. It decides only whether a due
+		// instant has come; the close itself still runs at the due instant
+		// (billOnePeriod anchors on next_billing_at, the cancel on cancel_at).
 		dueBy := e.clock.Now(ctx).Add(-grace)
 
 		// ADR-097: a cancel_at strictly INSIDE the current period fires
@@ -2267,9 +2248,8 @@ func (e *Engine) billSubscription(ctx context.Context, sub domain.Subscription, 
 
 		// No-progress guard: if billOnePeriod returned cleanly but
 		// did not advance next_billing_at, the next iteration would
-		// fire identically forever. Bail with a typed error so the
-		// caller can mark the clock internal_failure with a useful
-		// reason instead of looping until the per-sub cap.
+		// fire identically forever, so stop here instead of looping
+		// until the per-sub cap.
 		afterCheck, err := e.subs.Get(ctx, sub.TenantID, sub.ID)
 		if err != nil {
 			return count, fmt.Errorf("post-bill refresh %s: %w", sub.ID, err)
@@ -2318,19 +2298,15 @@ func (e *Engine) applyDueScheduledPlanChanges(ctx context.Context, sub domain.Su
 	// within (or at) the cycle being processed, apply them all BEFORE
 	// reading plans so the new cycle bills on the new plans.
 	//
-	// Gate is CurrentBillingPeriodEnd, NOT wall-clock now. Stripe-Billing
-	// parity: a change scheduled for "next cycle" must not apply
-	// retroactively to a late-billed earlier cycle just because the
-	// engine ran late. Pre-fix the comparison was `effective_at <= now`,
-	// which fired for any cycle as long as the engine was running after
-	// the effective date — visible bug on test-clock catchup spanning
-	// multiple periods (engine processes each period sequentially with
-	// frozen_time as `now`, so a mid-year scheduled change retroactively
-	// applied to ALL prior periods).
+	// Gate is CurrentBillingPeriodEnd, not now. Stripe-Billing parity: a
+	// change scheduled for "next cycle" must not apply retroactively to a
+	// late-billed earlier cycle just because the engine ran late. A
+	// catch-up after downtime closes each missed period with the same
+	// `now`, so a `now` gate would apply a mid-year change to every
+	// earlier period too.
 	//
 	// Falls back to `now` when CurrentBillingPeriodEnd is unset (rare;
-	// shouldn't happen for a finalized cycle, but the fallback preserves
-	// pre-fix behavior in that path).
+	// shouldn't happen for a finalized cycle).
 	gate := now
 	if sub.CurrentBillingPeriodEnd != nil {
 		gate = *sub.CurrentBillingPeriodEnd
@@ -2565,8 +2541,8 @@ func (e *Engine) handleTrialState(ctx context.Context, sub domain.Subscription, 
 				"tenant_id", sub.TenantID,
 			)
 			// Audit the auto-flip — third trial-end path (cycle-close);
-			// matches the row the operator EndTrial and the scheduler /
-			// catchup expiry scans write.
+			// matches the row the operator EndTrial and the scheduler's
+			// expiry scan write.
 			if e.auditLogger != nil {
 				meta := map[string]any{
 					"action":       domain.SubAuditTrialEnded,
@@ -2741,12 +2717,9 @@ func (e *Engine) buildLineItems(ctx context.Context, sub domain.Subscription, no
 }
 
 // billOnePeriod generates an invoice for ONE billing period of a
-// subscription, advancing next_billing_at by one cycle. Pre-Phase-2
-// (ADR-028) this was the only billing primitive — RunCycle called it
-// once per due sub per pass, and runCatchupLoop relied on an outer
-// loop to compress N periods of catch-up into N passes. Phase 2
-// keeps this function unchanged but wraps it in billSubscription
-// which loops until the sub catches up to the instant its caller bound.
+// subscription, advancing next_billing_at by one cycle. billSubscription
+// loops it until the sub catches up to the instant its caller bound
+// (ADR-028).
 //
 // Returns (true, nil) if an invoice was created, (false, nil) if
 // skipped (e.g. status not active). The bool here means "invoice
@@ -3001,11 +2974,8 @@ func (e *Engine) billOnePeriod(ctx context.Context, sub domain.Subscription) (bo
 		BillingPeriodEnd:   invoicePeriodEnd,
 		IssuedAt:           &now,
 		DueAt:              &dueAt,
-		// CreatedAt = clock.Now() so test-clock-driven invoices land
-		// created_at on simulation time (matching issued_at). Pre-fix
-		// the store fell back to time.Now() (wall-clock) and the
-		// activity timeline showed split-brain timestamps — created
-		// on real time, issued on test-clock time.
+		// CreatedAt = now, the cycle close, so created_at matches
+		// issued_at on the activity timeline.
 		CreatedAt:          now,
 		NetPaymentTermDays: netDays,
 		BillingReason:      domain.BillingReasonSubscriptionCycle,
@@ -3276,9 +3246,9 @@ func (e *Engine) buildOnCreateInvoice(ctx context.Context, sub domain.Subscripti
 	// The invoice is issued when its period began. Every caller passes that
 	// instant: effective-now for create, early trial end and the
 	// plan swap; trial_end_at for the trial-expiry scans; the cycle close for
-	// the engine's own trial flip. Reading the clock here instead dated a
-	// day-1 invoice swept by a long advance at the advance's target, after
-	// the cycle invoices it preceded (B12, P-3).
+	// the engine's own trial flip. Reading the clock here would date a day-1
+	// invoice billed late (a catch-up after downtime) after the cycle
+	// invoices it precedes (B12, P-3).
 	now := startAt
 	periodStart := *sub.CurrentBillingPeriodStart
 	periodEnd := *sub.CurrentBillingPeriodEnd
@@ -4612,28 +4582,23 @@ func (e *Engine) emailInvoiceOnce(ctx context.Context, inv domain.Invoice) {
 // site nudges, auto_charge_retry_no_pm from the sweeps).
 //
 // Error classification: a card refusal (a card error, with a typed
-// decline_code or without) is an EXPECTED business outcome, not a catchup
-// failure. ChargeInvoice already inline-fires StartDunning for the
-// declined invoice and stamps invoice.payment_status='failed' →
-// dunning takes over from there. Returning the decline as an error
-// would push the test-clock catchup into 'internal_failure' for what
-// is supposed to be a normal payment-failure flow.
+// decline_code or without) is an expected business outcome, so it
+// returns no error. ChargeInvoice already inline-fires StartDunning for
+// the declined invoice and stamps invoice.payment_status='failed' →
+// dunning takes over from there.
 //
 // Credits that could not be applied, and a transient answer, return a
 // chargeNotMade (domain.ErrLeftForNextRun) that says what is left: the
-// real-time run logs it, and a clock's job returns it.
+// sweep logs it and a later run collects the invoice.
 //
 // Only Unknown (5xx, network drop, timeout — outcome unresolved) and
 // non-Stripe errors (config, infrastructure) escalate to the caller.
 // Unknown errors return because the reconciler needs to follow up on
-// the ambiguous PaymentIntent; the catchup orchestrator surfaces them
-// to the operator. Industry parity: Stripe Test Clocks don't fail
-// when a tester uses a decline-card; they record the decline and
-// move on.
+// the ambiguous PaymentIntent.
 func (e *Engine) processAutoCharge(ctx context.Context, inv domain.Invoice, at *time.Time, trigger string) (int, []error) {
-	// One instant for all of this invoice's stamps. EnsureEffectiveNow keeps one
-	// already bound (a test clock's, or the action's) and reads the clock once
-	// otherwise.
+	// One instant for all of this invoice's stamps. EnsureEffectiveNow keeps
+	// the one the caller bound (a finalize action's) and reads the clock once
+	// otherwise (a sweep's row).
 	ctx = clock.EnsureEffectiveNow(ctx, e.clock)
 	charged := 0
 	var errs []error
@@ -4877,10 +4842,9 @@ func (e *Engine) processAutoCharge(ctx context.Context, inv domain.Invoice, at *
 			}
 			// A card refusal is a card error from Stripe, with a decline
 			// code or without: dunning's, a normal outcome of collection, so
-			// it is not an error and a clock's advance goes on. Any other
-			// definite refusal (an invalid request: a wrong parameter, a
-			// customer or payment method Stripe does not know) is a fault,
-			// returned so the sweep counts it and a clock's advance fails.
+			// it is not an error. Any other definite refusal (an invalid
+			// request: a wrong parameter, a customer or payment method Stripe
+			// does not know) is a fault, returned so the sweep counts it.
 			switch {
 			case pe.DeclineCode != "":
 				slog.Info("auto-charge declined; dunning will retry on schedule",
@@ -4905,8 +4869,7 @@ func (e *Engine) processAutoCharge(ctx context.Context, inv domain.Invoice, at *
 			return charged, errs
 		}
 		// Everything else (Unknown PaymentError or non-Stripe
-		// error) escalates — the catchup operator gets visible
-		// feedback to investigate.
+		// error) escalates, so the sweep counts it.
 		errs = append(errs, fmt.Errorf("charge invoice %s: %w", inv.ID, err))
 		return charged, errs
 	}
@@ -5146,7 +5109,7 @@ func (e *Engine) computeAndPersistInvoiceTax(ctx context.Context, tenantID, invo
 //     filter anyway because tax_status flips out of pending,
 //     so the value doesn't matter; nil keeps the column tidy).
 //   - retryable failure (provider_outage / unknown) under cap:
-//     time.Now + taxRetryBackoff(attempts). The next reconciler
+//     now + taxRetryBackoff(attempts). The next reconciler
 //     tick that crosses this timestamp picks it up.
 //   - non-retryable failure (auth / customer_data / jurisdiction /
 //     provider_not_configured): nil. The reconciler skips because
@@ -5160,10 +5123,8 @@ func (e *Engine) computeAndPersistInvoiceTax(ctx context.Context, tenantID, invo
 // (i.e. inv.TaxRetryCount BEFORE this retry runs). UpdateTaxAtomic
 // increments it server-side.
 //
-// ctx carries effective-now via clock.WithEffectiveNow on
-// clock-pinned invoices; without binding, falls back to wall-clock.
-// Keeping it in the simulation domain matches the rest of the row's
-// timestamps for dashboard consistency (ADR-030).
+// now is clock.Now(ctx), the instant bound on ctx, so the retry time
+// starts from the same instant as the row's other timestamps.
 func nextTaxRetry(ctx context.Context, status domain.InvoiceTaxStatus, errCode string, attempts int) *time.Time {
 	if status == domain.InvoiceTaxOK {
 		return nil

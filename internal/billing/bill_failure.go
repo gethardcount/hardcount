@@ -18,10 +18,10 @@ import (
 
 // This file is the saved failure state of subscription billing (ADR-119,
 // issue #960). A subscription whose billing fails used to be re-attempted on
-// every run and left only a log line. Now a failed attempt on a wall-clock
-// subscription is saved on the subscription row, the next attempts wait on a
-// fixed ladder, and after domain.MaxBillingAttempts the subscription is parked
-// until an operator retries it.
+// every run and left only a log line. Now a failed attempt is saved on the
+// subscription row, the next attempts wait on a fixed ladder, and after
+// domain.MaxBillingAttempts the subscription is parked until an operator
+// retries it.
 //
 // The record is keyed to the due instant it failed on (domain.DueInstant).
 // Nothing here clears it after a clean bill: the period advance moves the due
@@ -30,7 +30,7 @@ import (
 // Failure classes. Only billClassCounted is saved.
 const (
 	// billClassInterrupted: the run's own ctx is done (shutdown, a lost
-	// lease, a request or catch-up timeout). Nothing is known about the
+	// lease, a request timeout). Nothing is known about the
 	// subscription.
 	billClassInterrupted = "interrupted"
 	// billClassTransient: the connection or the transaction was taken away

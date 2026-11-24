@@ -142,9 +142,7 @@ checks corresponds to a bug that actually shipped in this rig once.
 ## Things that will bite you (each one did)
 
 - **The bench is live-mode by default** (`BENCH_LIVEMODE=false` for test mode).
-  Live mode is Hardcount's real (non-simulated) data mode. Test-mode ingest does a
-  per-event test-clock lookup production skips, so numbers measured in test mode
-  understate production. Fixtures, key, seeded history and pgbench rows must all
+  Live mode is Hardcount's real data mode. Fixtures, key, seeded history and pgbench rows must all
   be in the same livemode partition; the scripts refuse otherwise.
 - **`k6` puts your process environment in `__ENV`.** Exporting `PROBE_RATE`,
   `VUS`, `MODE`, … reconfigures the script silently. `calibrate.sh` and

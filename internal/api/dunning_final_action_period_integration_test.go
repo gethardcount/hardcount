@@ -52,11 +52,11 @@ func TestDunningFinalAction_ReDrivenAfterARenewal_CancelsWhenItRuns(t *testing.T
 	insertInterruptedRun(t, r, dayOneID, sub.CustomerID, policy.ID, finalRetry, start)
 	admin := testutil.AdminPool(t)
 	wall.Set(renewal)
-	if _, errs := r.srv.BillingEngine.RunCycle(leadertest.Token(t, admin, clock.WithRealTime(ctx), leader.RoleBilling), 50, nil); len(errs) != 0 {
+	if _, errs := r.srv.BillingEngine.RunCycle(leadertest.Token(t, admin, clock.WithoutInstant(ctx), leader.RoleBilling), 50, nil); len(errs) != 0 {
 		t.Fatalf("billing tick at the renewal: %v", errs)
 	}
 	wall.Set(redrive)
-	if _, errs := r.srv.DunningSvc.ProcessDueRuns(leadertest.Token(t, admin, clock.WithRealTime(ctx), leader.RoleDunning), r.tenantID, 50); len(errs) != 0 {
+	if _, errs := r.srv.DunningSvc.ProcessDueRuns(leadertest.Token(t, admin, clock.WithoutInstant(ctx), leader.RoleDunning), r.tenantID, 50); len(errs) != 0 {
 		t.Fatalf("dunning tick at the lease: %v", errs)
 	}
 

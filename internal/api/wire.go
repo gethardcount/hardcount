@@ -154,7 +154,6 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	pricingSvc.SetSubscriptionPlanUsageReader(subStore)
 	pricingSvc.SetCustomerReader(customerStore)
 	customerSvc := customer.NewService(customerStore)
-	customerSvc.SetClock(clk)
 	customerSvc.SetStripeSyncer(payment.NewStripeBillingSync(stripeClients))
 	customerH := customer.NewHandler(customerSvc)
 	pricingH := pricing.NewHandler(pricingSvc)
@@ -424,8 +423,6 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	creditSvc.SetLiveBalanceReader(engine)
 	costDashboardSvc.SetLiveBalanceReader(engine)
 	// The services that bind their own instant read the server's clock.
-	hostedInvoiceH.SetClock(clk)
-	creditSvc.SetClock(clk)
 	usageSvc.SetClock(clk)
 	usageSvc.SetOpenPeriodReader(usageOpenPeriods{subs: subStore, pricing: pricingStore, thresholds: invoiceStore})
 	subH.SetTenantLocator(engine)

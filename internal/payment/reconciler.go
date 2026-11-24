@@ -49,7 +49,7 @@ type ReconcileInvoiceStore interface {
 }
 
 // Settler is the shared payment-settlement primitive (ADR-049): it owns the
-// complete terminal-transition side-effects (mark + sim-time, card stamp,
+// complete terminal-transition side-effects (mark, card stamp,
 // payment.succeeded/failed event, dunning, customer email) plus the
 // out-of-order guard. Implemented by *Stripe. The reconciler routes its
 // recovered terminals through it so a dropped-webhook recovery fires the SAME

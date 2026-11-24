@@ -13,7 +13,7 @@ import (
 
 // A live payment settles on every path: a payment's event, paid or failed,
 // the reconciler's sweeps, and a charge settled inline.
-func TestSettle_LiveReadsNoClock(t *testing.T) {
+func TestSettle_ALivePaymentSettlesOnEveryPath(t *testing.T) {
 	live := func() context.Context { return postgres.WithLivemode(context.Background(), true) }
 
 	t.Run("the hosted-session sweep, paid", func(t *testing.T) {
@@ -57,7 +57,7 @@ func TestSettle_LiveReadsNoClock(t *testing.T) {
 		want   domain.InvoicePaymentStatus
 	}{{"succeeded", domain.PaymentSucceeded}, {"canceled", domain.PaymentFailed}} {
 		t.Run("the reconciler's sweep, "+c.status, func(t *testing.T) {
-			inv := unknownClockInvoice()
+			inv := unknownPaymentInvoice()
 			r, updater, _ := sweepHarness(inv, &mockStripeClient{piStates: map[string]PaymentIntentResult{
 				"pi_sweep": {ID: "pi_sweep", Status: c.status, AmountReceivedCents: inv.AmountDueCents, Charged: true},
 			}})
@@ -90,9 +90,8 @@ func TestSettle_LiveReadsNoClock(t *testing.T) {
 	}
 }
 
-// With no instant decided (live, or real time) a settle reads real time from
-// the server's clock, the one the router passes and the engine bills by, not
-// the machine's: paid_at, the failed stamp and dunning's start are at the
+// A settle reads its time from the server's clock (clock.AtArrival), the one
+// the router passes and the engine bills by, not the machine's: paid_at, the failed stamp and dunning's start are at the
 // server's now.
 func TestSettle_RealTimeIsTheServersClock(t *testing.T) {
 	serverNow := time.Date(2025, 6, 3, 10, 0, 0, 0, time.UTC)
@@ -111,7 +110,7 @@ func TestSettle_RealTimeIsTheServersClock(t *testing.T) {
 	})
 
 	t.Run("failed", func(t *testing.T) {
-		inv := unknownClockInvoice()
+		inv := unknownPaymentInvoice()
 		updater := &stampTimeUpdater{mockInvoiceUpdater: newMockInvoiceUpdater()}
 		updater.invoices[inv.ID] = inv
 		dunning := &recordingDunningStarter{}

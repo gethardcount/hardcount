@@ -11,11 +11,10 @@ import (
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// With the server's clock at a fixed past instant, a card payment on an
-// invoice on no test clock (decided at real time, so no instant is bound) is
-// paid at the server's instant, not the machine's: the settle reads real
-// time from the clock the server is built with.
-func TestE2E_APaymentAtRealTimeIsDatedByTheServersClock(t *testing.T) {
+// With the server's clock at a fixed past instant, a card payment is paid at
+// the server's instant, not the machine's: the settle reads the result's time
+// from the clock the server is built with.
+func TestE2E_APaymentIsDatedByTheServersClock(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	past := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
 	ts := httptest.NewServer(NewServer(db, clock.NewFake(past), nil))

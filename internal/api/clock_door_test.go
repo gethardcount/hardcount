@@ -32,8 +32,8 @@ func (c *doorServer) Now(ctx context.Context) time.Time {
 // The door binds one read of the server's clock for every routed request but
 // a decidedIn one, in either mode and before a mode is known. A decidedIn
 // route and a request no route serves get no instant, and the clock is not
-// read: the named function binds its own.
-func TestClockDoor_BindsOneInstantUnlessAFunctionDecides(t *testing.T) {
+// read: the named function binds one per record.
+func TestClockDoor_BindsOneInstantUnlessAFunctionBindsEach(t *testing.T) {
 	modes := []struct {
 		name string
 		ctx  context.Context
@@ -49,8 +49,8 @@ func TestClockDoor_BindsOneInstantUnlessAFunctionDecides(t *testing.T) {
 		{"a route that names no record", "GET", "/v1/whoami", true},
 		{"a route that names a record", "POST", "/v1/subscriptions/sub_1/cancel", true},
 		{"a route outside authentication", "POST", "/v1/auth/login", true},
-		{"a route its function decides", "POST", "/v1/customers", false},
-		{"a public page its function decides", "GET", "/v1/public/invoices/tok_1", false},
+		{"a public page", "GET", "/v1/public/invoices/tok_1", true},
+		{"a route whose function binds one instant per record", "POST", "/v1/usage-events/batch", false},
 		{"a route the router does not have", "GET", "/v1/nothing-here", false},
 	} {
 		for _, m := range modes {

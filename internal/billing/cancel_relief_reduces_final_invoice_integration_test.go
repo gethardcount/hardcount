@@ -232,9 +232,9 @@ func newReliefCancelRig(t *testing.T, db *postgres.DB, name string, o reliefRigO
 
 	wantCredited := int64(reliefCents)
 	if o.day1Credit > 0 {
-		if _, err := creditSvc.Grant(ctx, tenantID, credit.GrantInput{
+		if _, err := creditSvc.Grant(clock.WithEffectiveNow(ctx, periodStart), tenantID, credit.GrantInput{
 			Currency:   "USD",
-			CustomerID: cust.ID, AmountCents: o.day1Credit, Description: "seed balance", At: periodStart,
+			CustomerID: cust.ID, AmountCents: o.day1Credit, Description: "seed balance",
 		}); err != nil {
 			t.Fatalf("grant credit: %v", err)
 		}

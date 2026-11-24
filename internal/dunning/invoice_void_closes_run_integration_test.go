@@ -79,7 +79,7 @@ func TestInvoiceVoid_ClosesTheRunOnce_ARefusedVoidLeavesItOpen(t *testing.T) {
 		if err != nil {
 			t.Fatalf("create invoice: %v", err)
 		}
-		run, err := dsvc.StartDunning(clock.WithRealTime(ctx), tenantID, inv.ID, cust.ID, domain.DunningCausePaymentFailed)
+		run, err := dsvc.StartDunning(clock.WithoutInstant(ctx), tenantID, inv.ID, cust.ID, domain.DunningCausePaymentFailed)
 		if err != nil || run.State != domain.DunningActive {
 			t.Fatalf("start dunning: state %s, %v", run.State, err)
 		}
@@ -114,8 +114,8 @@ func TestInvoiceVoid_ClosesTheRunOnce_ARefusedVoidLeavesItOpen(t *testing.T) {
 		}
 		return n
 	}
-	// The door decides a void at its invoice's time: real time here.
-	opCtx := clock.WithRealTime(ctx)
+	// No instant bound: the void reads the machine's time.
+	opCtx := clock.WithoutInstant(ctx)
 
 	t.Run("void succeeds: one stop, the run resolved once", func(t *testing.T) {
 		r := newRig(t, "OK")

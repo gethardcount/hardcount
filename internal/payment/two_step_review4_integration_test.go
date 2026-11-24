@@ -5,14 +5,10 @@ import (
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/gethardcount/hardcount/internal/domain"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
-// From review 4 (2026-11-10), on the real database (the stale-hold rig): an
-// unclear charge on a test clock ahead of real time, and the upgrade check run
-// as the migration runs it.
+// On the real database (the stale-hold rig): the upgrade check run as the
+// migration runs it.
 
 // timePasses moves every wall-clock mark on the invoice back by d, which is
 // what d of real time passing does to "now minus the mark": the hold and its
@@ -26,78 +22,6 @@ func (r *shRig) timePasses(invoiceID string, d time.Duration) {
 			charge_hold_token = charge_hold_token - make_interval(secs => $2),
 			auto_charge_claimed_until = auto_charge_claimed_until - make_interval(secs => $2)
 		WHERE id = $1`, invoiceID, d.Seconds())
-}
-
-// A confirm whose answer never arrived on a test-clock invoice whose clock is
-// ahead of real time (the ordinary use of a test clock: advance a month).
-// The charge runs on the invoice's clock (the API's door decides Collect
-// from the invoice, the catch-up runs on its clock), so StampPendingConfirm writes
-// updated_at = the simulated instant. The unknown sweep's cool-off compares
-// updated_at with the real clock, so the invoice is not listed until real
-// time reaches the simulated instant: it stays unknown, refusing every
-// charge, void, offline payment and the hosted page, with write-off the only
-// exit. The one-call design resolved a lost charge from its hold, which is
-// written on the database's clock.
-//
-// Correct: once the hold has ended, the sweep reads the PaymentIntent, cancels
-// it and frees the invoice, exactly as for the wall-clock invoice beside it.
-func TestTwoStep_UnclearConfirm_OnAdvancedTestClock_IsResolved(t *testing.T) {
-	r := newTwoStepRig(t, "R4 Sim Clock")
-	wall := r.seed("INV-R4-WALL")
-	sim := r.seed("INV-R4-SIM")
-
-	r.fake.queueConfirm(fakeMode{kind: fakeConfirmNeverArrived}, fakeMode{kind: fakeConfirmNeverArrived})
-	if _, err := r.chargeAs(r.ctx, autoCharge, wall.ID, "pm_card_1"); err == nil {
-		t.Fatal("wall-clock charge: want the unclear error")
-	}
-	simCtx := clock.WithEffectiveNow(r.ctx, time.Now().UTC().Add(30*24*time.Hour))
-	if _, err := r.chargeAs(simCtx, autoCharge, sim.ID, "pm_card_1"); err == nil {
-		t.Fatal("test-clock charge: want the unclear error")
-	}
-	for _, inv := range []domain.Invoice{wall, sim} {
-		if got := r.get(inv.ID); got.PaymentStatus != domain.PaymentUnknown || got.StripePaymentIntentID == "" {
-			t.Fatalf("setup %s: %s on %q, want unknown on its PaymentIntent", inv.InvoiceNumber, got.PaymentStatus, got.StripePaymentIntentID)
-		}
-	}
-
-	// Sixteen minutes of real time: both holds ended eleven minutes ago.
-	r.timePasses(wall.ID, 16*time.Minute)
-	r.timePasses(sim.ID, 16*time.Minute)
-	r.runClean()
-
-	if got := r.get(wall.ID); got.PaymentStatus != domain.PaymentPending {
-		t.Fatalf("control (wall clock): %s, want pending after the sweep canceled the never-confirmed PaymentIntent", got.PaymentStatus)
-	}
-	got := r.get(sim.ID)
-	if got.PaymentStatus != domain.PaymentPending {
-		t.Errorf("test-clock invoice: still %s on %s (updated_at %s, %s ahead of real time); want pending. The unknown sweep never lists it, so nothing reads or cancels its PaymentIntent and no charge can ever start",
-			got.PaymentStatus, got.StripePaymentIntentID, got.UpdatedAt.Format(time.RFC3339), time.Until(got.UpdatedAt).Round(time.Hour))
-	}
-	if st := r.fake.pi(got.StripePaymentIntentID).status; st != "canceled" {
-		t.Errorf("the test-clock invoice's PaymentIntent is %s at Stripe, want canceled", st)
-	}
-}
-
-// The same miss when the money DID move: the confirm charged the card and the
-// answer was lost. With no webhook (a test clock in local development has no
-// forwarder; in production the webhook may be the thing that was lost), the
-// sweep is the only reader. Correct: the payment is recorded.
-func TestTwoStep_LostAnswer_OnAdvancedTestClock_PaymentIsRecorded(t *testing.T) {
-	r := newTwoStepRig(t, "R4 Sim Clock Paid")
-	sim := r.seed("INV-R4-SIMPAID")
-	r.fake.queueConfirm(fakeMode{kind: fakeSave500})
-	simCtx := clock.WithEffectiveNow(r.ctx, time.Now().UTC().Add(30*24*time.Hour))
-	if _, err := r.chargeAs(simCtx, autoCharge, sim.ID, "pm_card_1"); err == nil {
-		t.Fatal("want the unclear error")
-	}
-	if st := r.fake.onlyPI().status; st != "succeeded" {
-		t.Fatalf("setup: the PaymentIntent is %s at Stripe, want succeeded (money moved)", st)
-	}
-	r.timePasses(sim.ID, 16*time.Minute)
-	r.runClean()
-	if got := r.get(sim.ID); got.Status != domain.InvoicePaid {
-		t.Errorf("invoice %s/%s; want paid: Stripe took the money and nothing recorded it", got.Status, got.PaymentStatus)
-	}
 }
 
 // Migration 00225's upgrade check, run the way the migration runs it: in its

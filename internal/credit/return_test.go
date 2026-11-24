@@ -277,9 +277,9 @@ func TestReverseForInvoiceTx_ReturnsWhatIsStillApplied(t *testing.T) {
 // void and the credit-note grant both pass it to the store as At.
 //
 // Mutation-verify: pass time.Now() as At in either method → red.
-func TestReturns_UseTheCustomersInstant(t *testing.T) {
-	frozen := time.Date(2027, 1, 15, 9, 0, 0, 0, time.UTC)
-	ctx := clock.WithEffectiveNow(context.Background(), frozen)
+func TestReturns_UseTheBoundInstant(t *testing.T) {
+	boundAt := time.Date(2027, 1, 15, 9, 0, 0, 0, time.UTC)
+	ctx := clock.WithEffectiveNow(context.Background(), boundAt)
 	store := newMemStore()
 	svc := NewService(store)
 	if _, err := store.AppendEntry(ctx, "t1", domain.CreditLedgerEntry{
@@ -299,8 +299,8 @@ func TestReturns_UseTheCustomersInstant(t *testing.T) {
 		t.Fatalf("returns = %d, want 2", len(store.returns))
 	}
 	for i, r := range store.returns {
-		if !r.At.Equal(frozen) {
-			t.Errorf("return %d At = %v, want the clock's %v", i, r.At, frozen)
+		if !r.At.Equal(boundAt) {
+			t.Errorf("return %d At = %v, want the bound %v", i, r.At, boundAt)
 		}
 	}
 }

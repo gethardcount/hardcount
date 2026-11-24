@@ -322,13 +322,11 @@ func TestMapPayload_RequestTagsListBecomesScalar(t *testing.T) {
 	}
 }
 
-// TestMapPayload_TimestampSourcing pins the test-clock fix: the mapper must NOT
-// manufacture a wall-clock timestamp when the payload omits both EndTime and
-// StartTime. It leaves Timestamp nil so usage.Service supplies the customer's
-// effective-now (a test-clock-pinned customer's frozen_time) — the flagship
-// advance-clock → LiteLLM-ingest → billed demo depends on this. A non-nil
-// time.Now() here is treated as an explicit timestamp and silently defeats the
-// clock, landing simulated usage at wall-clock.
+// TestMapPayload_TimestampSourcing: the mapper must NOT manufacture a
+// wall-clock timestamp when the payload omits both EndTime and StartTime. It
+// leaves Timestamp nil so usage.Service stamps the call's bound instant, one
+// read of the server's clock. A non-nil time.Now() here would be taken as an
+// explicit timestamp read from the machine.
 func TestMapPayload_TimestampSourcing(t *testing.T) {
 	base := StandardLoggingPayload{
 		ID: "call_ts", CallType: "completion", Model: "claude-3-5-sonnet-20241022",
@@ -336,7 +334,7 @@ func TestMapPayload_TimestampSourcing(t *testing.T) {
 		Usage: &Usage{PromptTokens: 100, CompletionTokens: 50, TotalTokens: 150},
 	}
 
-	t.Run("no start/end leaves nil timestamp (service applies frozen_time)", func(t *testing.T) {
+	t.Run("no start/end leaves nil timestamp (service applies the call's instant)", func(t *testing.T) {
 		out, err := mapEvents(base) // StartTime/EndTime both zero
 		if err != nil {
 			t.Fatalf("unexpected: %v", err)

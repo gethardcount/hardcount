@@ -87,8 +87,8 @@ func TestCurrencyPin_ProfileReadErrorFails(t *testing.T) {
 	}
 }
 
-// A customer read error fails Create with nothing written: it used to skip
-// the archived guard and the test-clock inheritance and create the sub.
+// A customer read error fails Create with nothing written, never skipping
+// the archived guard.
 func TestCreate_CustomerReadErrorFails(t *testing.T) {
 	store := newMemStore()
 	svc := NewService(store, nil)

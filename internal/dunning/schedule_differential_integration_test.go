@@ -179,8 +179,9 @@ func runScheduleCase(t *testing.T, tc scheduleCase) {
 		t.Fatalf("set default policy: %v", err)
 	}
 
-	// The failure that starts dunning is decided at real time.
-	run, err := svc.StartDunning(clock.WithRealTime(ctx), tenantID, inv.ID, cust.ID, domain.DunningCausePaymentFailed)
+	// The failure that starts dunning carries no instant, so it reads the
+	// fake clock.
+	run, err := svc.StartDunning(clock.WithoutInstant(ctx), tenantID, inv.ID, cust.ID, domain.DunningCausePaymentFailed)
 	if err != nil {
 		t.Fatalf("start dunning: %v", err)
 	}

@@ -47,8 +47,8 @@ type ReturnEntry struct {
 	// InvoiceTotalCents is the paid invoice's total, the base of the pro-rata
 	// split. Required when PaidInvoice is set.
 	InvoiceTotalCents int64
-	// At is the instant of the return on the customer's clock. It stamps the
-	// row and decides which source grants are already past their expiry.
+	// At is the instant of the return. It stamps the row and decides which
+	// source grants are already past their expiry.
 	// Zero means clock.Now(ctx).
 	At time.Time
 }
@@ -221,11 +221,10 @@ const (
 )
 
 // classifyRestore applies the expiry sweep's rule to a restored share, at the
-// return's instant on the customer's clock. A grant is expired when
-// expires_at < at (the drain's liveness rule is its complement). The sweep
-// skips a grant an owed draw still needs (Held), and once it has retired a
-// grant, retirement wins (ADR-071 §2): a swept grant never gets live credit
-// back, held or not. A commit whose funding invoice is voided has no money
+// return's instant. A grant is expired when expires_at < at (the drain's
+// liveness rule is its complement). The sweep skips a grant an owed draw
+// still needs (Held), and once it has retired a grant, retirement wins
+// (ADR-071 §2): a swept grant never gets live credit back, held or not. A commit whose funding invoice is voided has no money
 // behind it, so that comes first.
 func classifyRestore(b blockState, at time.Time) restoreAction {
 	if b.FundingVoided {

@@ -145,7 +145,7 @@ func (c *countingClock) Now(context.Context) time.Time {
 // EnsureEffectiveNow keeps the instant ctx carries and reads no clock;
 // otherwise it reads the clock once and binds that instant.
 func TestEnsureEffectiveNow(t *testing.T) {
-	frozen := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
+	bound := time.Date(2027, 3, 1, 0, 0, 0, 0, time.UTC)
 	server := time.Date(2026, 6, 1, 9, 0, 0, 0, time.UTC)
 	testMode := postgres.WithLivemode(context.Background(), false)
 	for _, c := range []struct {
@@ -154,8 +154,8 @@ func TestEnsureEffectiveNow(t *testing.T) {
 		want      time.Time
 		wantReads int
 	}{
-		{"an instant is kept", WithEffectiveNow(testMode, frozen), frozen, 0},
-		{"real time is read once and bound", WithRealTime(testMode), server, 1},
+		{"an instant is kept", WithEffectiveNow(testMode, bound), bound, 0},
+		{"a dropped instant is read once and bound", WithoutInstant(testMode), server, 1},
 		{"nothing bound is read once and bound", testMode, server, 1},
 	} {
 		t.Run(c.name, func(t *testing.T) {
@@ -184,7 +184,7 @@ func TestAtArrival(t *testing.T) {
 		ctx  context.Context
 	}{
 		{"nothing bound", testMode},
-		{"real time with no instant", WithRealTime(testMode)},
+		{"a dropped instant", WithoutInstant(testMode)},
 		{"the action's real instant", WithEffectiveNow(testMode, action)},
 	} {
 		t.Run(c.name, func(t *testing.T) {

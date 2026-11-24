@@ -41,7 +41,7 @@ func tenantRunEngineWith(subs *mockSubs, invoices *mockInvoices) *Engine {
 }
 
 // TestRunCycleForTenant_BillsDueSubs: the happy path — the manual run bills the
-// tenant's due, non-clock-pinned subs and reports no failures.
+// tenant's due subs and reports no failures.
 func TestRunCycleForTenant_BillsDueSubs(t *testing.T) {
 	subs := &mockSubs{
 		subs:         map[string]domain.Subscription{"sub_a": dueSubFixture("sub_a")},

@@ -171,8 +171,7 @@ func (h *PublicPaymentHandler) validateToken(w http.ResponseWriter, r *http.Requ
 	// Customer name comes from the customer service so display_name
 	// arrives decrypted. Reading customers.display_name directly here
 	// would surface the encrypted ciphertext (`enc:…`) to the public
-	// payment page — same architectural issue we fixed for the
-	// testclock attached-customers panel.
+	// payment page.
 	cust, err := h.customers.Get(scopedCtx, token.TenantID, token.CustomerID)
 	if err != nil {
 		customerReadFailed(scopedCtx, w, r, token.CustomerID, err)

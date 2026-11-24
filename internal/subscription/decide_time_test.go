@@ -13,31 +13,18 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// BindNow binds one read of the service's clock, in either mode, so a create
-// and everything it runs read one instant.
-func TestBindNow(t *testing.T) {
+// One instant per create: the create runs on the instant the API's door
+// bound and reads no clock of its own.
+func TestCreateRoute_RunsOnTheDoorsInstant(t *testing.T) {
 	past := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
-	for _, live := range []bool{false, true} {
-		srv := &subSteppingClock{at: past}
-		svc := NewService(newMemStore(), srv)
-		ctx := svc.BindNow(postgres.WithLivemode(context.Background(), live))
-		if at, _ := clock.EffectiveNow(ctx); !at.Equal(past.Add(time.Second)) || srv.reads != 1 {
-			t.Errorf("live %v: bound %v after %d server reads; want %v after 1", live, at, srv.reads, past.Add(time.Second))
-		}
-	}
-}
-
-// One instant per create: the create runs on the route's one read of the
-// server's clock.
-func TestCreateRoute_OneReadOfTheServersClock(t *testing.T) {
-	past := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
-	srv := &subSteppingClock{at: past}
+	srv := &subSteppingClock{at: past.Add(72 * time.Hour)}
 	h := NewHandler(NewService(newMemStore(), srv))
 	audits := &capturingAudit{}
 	h.SetAuditLogger(audits)
 	body := `{"code":"sub-time","display_name":"Time","customer_id":"cus_1","items":[{"plan_id":"pln_1"}]}`
 	req := httptest.NewRequest("POST", "/", strings.NewReader(body))
-	req = req.WithContext(auth.WithTenantID(postgres.WithLivemode(req.Context(), false), "t1"))
+	ctx := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), past)
+	req = req.WithContext(auth.WithTenantID(ctx, "t1"))
 	rec := httptest.NewRecorder()
 	h.create(rec, req)
 	if rec.Code != 201 {
@@ -46,11 +33,10 @@ func TestCreateRoute_OneReadOfTheServersClock(t *testing.T) {
 	var created struct {
 		StartedAt time.Time `json:"started_at"`
 	}
-	want := past.Add(time.Second)
-	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil || !created.StartedAt.Equal(want) {
-		t.Errorf("started_at %v (%v); want the route's %v", created.StartedAt, err, want)
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil || !created.StartedAt.Equal(past) {
+		t.Errorf("started_at %v (%v); want the door's %v", created.StartedAt, err, past)
 	}
-	if len(audits.entries) != 1 || srv.reads != 1 {
-		t.Errorf("%d audit rows after %d server reads; want 1 after 1", len(audits.entries), srv.reads)
+	if len(audits.entries) != 1 || srv.reads != 0 {
+		t.Errorf("%d audit rows after %d server reads; want 1 after none", len(audits.entries), srv.reads)
 	}
 }

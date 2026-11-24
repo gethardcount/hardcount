@@ -309,7 +309,7 @@ func TestUsageWindow_ThresholdFireAfterTrial_BillsUsageFromTrialEndOnce(t *testi
 		"mode": "per_unit", "unit_amount_cents": "2",
 	}, http.StatusOK)
 	// The database stamps the edit with its own clock; put it at 18:30 of
-	// the simulated day, after the paid window opened at the trial end.
+	// day D, after the paid window opened at the trial end.
 	r.exec(`UPDATE plan_price_versions SET valid_from = $1 WHERE price_id = $2 AND valid_from = (SELECT max(valid_from) FROM plan_price_versions WHERE price_id = $2)`, dayAt(18, 30), priceID)
 	r.ingest(dayAt(10, 0), 40)
 	r.ingest(dayAt(19, 0), 7)
@@ -367,7 +367,7 @@ func TestUsageWindow_PriceEditDuringTrial_FirstPaidPeriodAtTheEdit(t *testing.T)
 		t.Fatalf("edit during the trial: effective %q, want next_period (the plan is used)", flowStr(edit, "effective"))
 	}
 	// The database stamps the edit with its own clock; put it at 12:00 of
-	// the simulated day, during the trial.
+	// day D, during the trial.
 	r.exec(`UPDATE plan_price_versions SET valid_from = $1 WHERE price_id = $2 AND valid_from = (SELECT max(valid_from) FROM plan_price_versions WHERE price_id = $2)`, dayAt(12, 0), priceID)
 	r.ingest(dayAt(19, 0), 7)
 

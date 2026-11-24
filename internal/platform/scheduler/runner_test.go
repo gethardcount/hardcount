@@ -212,7 +212,7 @@ func TestRun_PollsNoSlowerThanMaxPoll(t *testing.T) {
 
 // A tick's work runs with no instant bound, even when the ctx it is started
 // on carries one, so each row it works binds its own.
-func TestRun_TickRunsInRealTime(t *testing.T) {
+func TestRun_TickRunsWithoutInstant(t *testing.T) {
 	ctx, cancel := context.WithCancel(clock.WithEffectiveNow(context.Background(), time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)))
 	defer cancel()
 	unbound := make(chan bool, 1)

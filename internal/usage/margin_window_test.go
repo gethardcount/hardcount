@@ -13,11 +13,11 @@ import (
 // A bare GET /v1/customers/{id}/margin defaults to the last 30 days ending at
 // the report's instant, the one its context carries. An explicit window is
 // used as given.
-func TestMarginDefaultWindow_FollowsTheDecidedTime(t *testing.T) {
-	decided := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
+func TestMarginDefaultWindow_FollowsTheBoundInstant(t *testing.T) {
+	bound := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
 	svc := NewService(newMemStore())
 	h := NewProviderCostHandler(nil, NewMarginAssembler(nil, NewCustomerUsageService(svc, nil, nil, nil)))
-	ctx := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), decided)
+	ctx := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), bound)
 	window := func(ctx context.Context, url string) (time.Time, time.Time, error) {
 		return h.marginWindow(ctx, httptest.NewRequest("GET", url, nil).WithContext(ctx))
 	}
@@ -27,8 +27,8 @@ func TestMarginDefaultWindow_FollowsTheDecidedTime(t *testing.T) {
 		if err != nil {
 			t.Fatalf("marginWindow: %v", err)
 		}
-		if !to.Equal(decided) || to.Sub(from) != 30*24*time.Hour {
-			t.Errorf("window %s..%s; want the 30 days ending at %s", from.Format(time.RFC3339), to.Format(time.RFC3339), decided.Format(time.RFC3339))
+		if !to.Equal(bound) || to.Sub(from) != 30*24*time.Hour {
+			t.Errorf("window %s..%s; want the 30 days ending at %s", from.Format(time.RFC3339), to.Format(time.RFC3339), bound.Format(time.RFC3339))
 		}
 	})
 
@@ -42,21 +42,21 @@ func TestMarginDefaultWindow_FollowsTheDecidedTime(t *testing.T) {
 		}
 	})
 
-	t.Run("only from given: to defaults to the decided time", func(t *testing.T) {
+	t.Run("only from given: to defaults to the bound instant", func(t *testing.T) {
 		_, to, err := window(ctx, "/v1/customers/cus_free/margin?from=2024-12-01T00:00:00Z")
 		if err != nil {
 			t.Fatalf("marginWindow: %v", err)
 		}
-		if !to.Equal(decided) {
-			t.Errorf("to: got %s, want %s", to.Format(time.RFC3339), decided.Format(time.RFC3339))
+		if !to.Equal(bound) {
+			t.Errorf("to: got %s, want %s", to.Format(time.RFC3339), bound.Format(time.RFC3339))
 		}
 	})
 }
 
-// The margin report and the cost dashboard take their instant from the usage
-// service.s clock, through customer usage (and, for the margin, the margin
-// assembler). Each constructor on those chains refuses a missing link, so no
-// wiring can build a read that would fail on its first request.
+// The margin report and the cost dashboard read usage through customer usage
+// (and, for the margin, the margin assembler), which reads it through the
+// usage service. Each constructor on those chains refuses a missing link, so
+// no wiring can build a read that would fail on its first request.
 func TestUsageReads_EachConstructorRequiresItsLink(t *testing.T) {
 	for name, build := range map[string]func(){
 		"customer usage without the usage service":    func() { NewCustomerUsageService(nil, nil, nil, nil) },

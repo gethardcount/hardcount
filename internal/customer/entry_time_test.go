@@ -30,19 +30,6 @@ func (s *instantStore) UpsertBillingProfileTx(ctx context.Context, tx *sql.Tx, t
 	return s.memoryStore.UpsertBillingProfileTx(ctx, tx, tenantID, bp)
 }
 
-// custSteppingClock is a server clock that moves a second each time it is
-// read, and counts the reads.
-type custSteppingClock struct {
-	at    time.Time
-	reads int
-}
-
-func (c *custSteppingClock) Now(context.Context) time.Time {
-	c.reads++
-	c.at = c.at.Add(time.Second)
-	return c.at
-}
-
 // custEntry is a customer entry point that writes the customer's rows.
 type custEntry struct {
 	name string
@@ -64,31 +51,27 @@ func custEntries() []custEntry {
 	}
 }
 
-func newCustTimeSvc(t *testing.T, server clock.Clock) (*Service, *instantStore, string) {
+func newCustTimeSvc(t *testing.T) (*Service, *instantStore, string) {
 	t.Helper()
 	store := &instantStore{memoryStore: newMemoryStore()}
 	cust, err := store.Create(context.Background(), "t1", domain.Customer{ExternalID: "cus_time", DisplayName: "Time Co"})
 	if err != nil {
 		t.Fatalf("seed: %v", err)
 	}
-	svc := NewService(store)
-	svc.SetClock(server)
-	return svc, store, cust.ID
+	return NewService(store), store, cust.ID
 }
 
-// A change to a customer runs on the instant the API's door bound for it and
-// reads no clock of its own: the row is stamped at the bound instant and the
-// server's clock is never read.
-func TestCustomerEntryPoints_RunOnTheDecidedTime(t *testing.T) {
-	decidedAt := time.Date(2027, 3, 4, 10, 0, 0, 0, time.UTC)
+// A change to a customer runs on the instant the API's door bound for it:
+// the row is stamped at the bound instant.
+func TestCustomerEntryPoints_RunOnTheBoundInstant(t *testing.T) {
+	boundAt := time.Date(2027, 3, 4, 10, 0, 0, 0, time.UTC)
 	for _, e := range custEntries() {
 		t.Run(e.name, func(t *testing.T) {
-			server := &custSteppingClock{at: decidedAt.Add(72 * time.Hour)}
-			svc, store, id := newCustTimeSvc(t, server)
-			ctx := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), decidedAt)
+			svc, store, id := newCustTimeSvc(t)
+			ctx := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), boundAt)
 			e.run(t, ctx, svc, id)
-			if len(store.at) != 1 || !store.at[0].Equal(decidedAt) || server.reads != 0 {
-				t.Errorf("the write ran at %v, server clock read %d times; want one write at %v, no reads", store.at, server.reads, decidedAt)
+			if len(store.at) != 1 || !store.at[0].Equal(boundAt) {
+				t.Errorf("the write ran at %v; want one write at %v", store.at, boundAt)
 			}
 		})
 	}
