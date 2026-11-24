@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { usePageTitle } from '@/hooks/usePageTitle'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { Pencil, Trash2, Plus, Star, AlertTriangle, MoreHorizontal } from 'lucide-react'
@@ -53,8 +52,8 @@ function sentenceStart(text: string): string {
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
-// DunningPoliciesPage — admin surface for the campaigns model
-// (ADR-036). Operators create named policies ("Enterprise — Net 30",
+// DunningPoliciesTab — the Payment retries page's Policies tab, the admin
+// surface for the campaigns model (ADR-036). Operators create named policies ("Enterprise — Net 30",
 // "SMB — fast-fail"), edit them, mark one as the tenant default,
 // delete unused ones. Customer assignment happens on the customer
 // detail page (one dropdown picks from this list).
@@ -97,8 +96,7 @@ function outcomeSentence(sub: string, inv: string): string {
   return `${subPart} ${invPart}`
 }
 
-export default function DunningPoliciesPage() {
-  usePageTitle('Dunning policies')
+export function DunningPoliciesTab() {
   const queryClient = useQueryClient()
   const [editingPolicy, setEditingPolicy] = useState<DunningPolicyWithCount | null>(null)
   const [showCreate, setShowCreate] = useState(false)
@@ -151,14 +149,11 @@ export default function DunningPoliciesPage() {
 
   return (
     <>
-      <div className="space-y-6">
+      <div className="mt-4 space-y-6">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div className="max-w-3xl">
-            <h1 className="text-2xl font-semibold text-foreground">Dunning policies</h1>
-            <p className="text-sm text-muted-foreground mt-1">
-              A policy sets how many days to wait before each retry of a failed payment, and what happens if every retry fails. Your default policy applies to every customer unless you pick another on their page.
-            </p>
-          </div>
+          <p className="max-w-3xl text-sm text-muted-foreground">
+            A policy sets how many days to wait before each retry of a failed payment, and what happens if every retry fails. Your default policy applies to every customer unless you pick another on their page.
+          </p>
           <Button className="shrink-0 self-start" onClick={() => setShowCreate(true)}>
             <Plus size={16} className="mr-2" /> New policy
           </Button>
@@ -174,13 +169,13 @@ export default function DunningPoliciesPage() {
           <CardContent className="p-0">
             {isLoading && <FeedSkeleton rows={3} />}
             {!isLoading && policiesError && (
-              <LoadError what="dunning policies" error={policiesError} onRetry={() => refetchPolicies()} />
+              <LoadError what="retry policies" error={policiesError} onRetry={() => refetchPolicies()} />
             )}
             {!isLoading && !policiesError && policies.length === 0 && (
               <EmptyState
                 icon={AlertTriangle}
-                title="No dunning policies yet"
-                description="A dunning policy decides how failed payments are retried and when customers are emailed. Until you create one, failed payments are not retried."
+                title="No retry policies yet"
+                description="A retry policy decides how failed payments are retried and when customers are emailed. Until you create one, failed payments are not retried."
                 action={{ label: 'New policy', onClick: () => setShowCreate(true), icon: Plus }}
               />
             )}
@@ -346,7 +341,7 @@ function PolicyDialog({ mode, initial, policies = [], onClose, onSaved }: {
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>{mode === 'create' ? 'New dunning policy' : 'Edit policy'}</DialogTitle>
+          <DialogTitle>{mode === 'create' ? 'New retry policy' : 'Edit policy'}</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} noValidate className="space-y-4">
           <div className="space-y-2">

@@ -468,9 +468,9 @@ test('Ctrl+K opens any page, including the ones it used to miss', async ({ page 
   await expect(page.getByRole('heading', { level: 1, name: 'Customers', exact: true })).toBeVisible()
   await page.keyboard.press('Control+k')
   const palette = page.getByRole('dialog')
-  await palette.getByPlaceholder('Search customers, invoices, subscriptions...').fill('provider')
-  await palette.getByRole('option', { name: /^Provider costs/ }).click()
-  await expect(page.getByRole('heading', { level: 1, name: 'Provider costs', exact: true })).toBeVisible()
+  await palette.getByPlaceholder('Search customers, invoices, subscriptions...').fill('retries')
+  await palette.getByRole('option', { name: /^Payment retries/ }).click()
+  await expect(page.getByRole('heading', { level: 1, name: 'Payment retries', exact: true })).toBeVisible()
 })
 
 test('Ctrl+K names an invoice the way the invoice page does', async ({ page }) => {
@@ -658,7 +658,7 @@ test("Margin shows no margin without a provider cost, and each model's margin wi
   await page.goto(`/customers/${customer.id}`)
   const card = page.locator('[data-slot="card"]').filter({ has: page.getByText('Usage billing vs your provider costs') })
   await expect(card.getByText('No provider costs configured, so there is no margin to show.')).toBeVisible()
-  await expect(card.getByRole('link', { name: 'Set up provider costs' })).toHaveAttribute('href', '/provider-costs')
+  await expect(card.getByRole('link', { name: 'Set up provider costs' })).toHaveAttribute('href', '/pricing?tab=provider-costs')
   await expect(card.getByText('Provider cost', { exact: true }).locator('..')).toContainText('—')
   await expect(card.getByText('Margin', { exact: true }).locator('..').last()).not.toContainText('%')
   // The report prices the window at current prices, so the card says it is
@@ -673,9 +673,9 @@ test("Margin shows no margin without a provider cost, and each model's margin wi
   await createSubscription(priced.id, recipe.created_objects.plan_ids[0])
   const saved: { id: string }[] = []
   try {
-    // The input rate goes in on the Provider costs page, in dollars per 1M
-    // tokens; the API holds it in cents per token: $0.80 per 1M is 0.00008.
-    await page.goto('/provider-costs')
+    // The input rate goes in on Pricing's Provider costs tab, in dollars per
+    // 1M tokens; the API holds it in cents per token: $0.80 per 1M is 0.00008.
+    await page.goto('/pricing?tab=provider-costs')
     await page.getByLabel('Provider').fill('anthropic')
     await page.getByLabel('Model').fill('claude-haiku-4.5')
     await page.getByLabel('Token type').fill('input')
@@ -1289,7 +1289,7 @@ test('each Home attention line counts the rows of the list it opens', async ({ p
   await expect(lines.filter({ hasText: /^5 open invoices(?! with)/ })).toHaveAttribute('href', '/invoices?status=finalized')
   await expect(lines.filter({ hasText: 'outstanding' })).toHaveCount(0)
 
-  // The retry line opens Dunning already filtered to the runs it counted.
+  // The retry line opens Payment retries already filtered to the runs it counted.
   await lines.filter({ hasText: 'in payment retry' }).click()
   await expect(page).toHaveURL(/\/dunning\?state=active$/)
 })

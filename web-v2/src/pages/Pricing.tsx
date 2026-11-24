@@ -50,6 +50,8 @@ import { TableSkeleton } from '@/components/ui/TableSkeleton'
 
 import { Plus, Loader2, Package, Gauge } from 'lucide-react'
 import { EmptyState } from '@/components/EmptyState'
+import { ProviderCostsTab } from '@/components/ProviderCostsTab'
+import { RecipesTab } from '@/components/RecipesTab'
 
 // Static option sets for the pricing selects. Each is the single source of
 // truth for BOTH the dropdown <SelectItem>s AND the Base UI `items` prop.
@@ -74,10 +76,16 @@ function badgeVariant(val: string): 'success' | 'info' | 'secondary' | 'outline'
   }
 }
 
+// The Pricing tabs, in ?tab= (Plans has none). Setting prices, recording what
+// providers charge and installing a recipe are one step of setting up, so
+// they share this page.
+const PRICING_TABS = ['plans', 'meters', 'provider-costs', 'recipes'] as const
+type PricingTab = (typeof PRICING_TABS)[number]
+
 export default function PricingPage() {
   usePageTitle('Pricing')
   const [searchParams, setSearchParams] = useSearchParams()
-  const tab = (searchParams.get('tab') === 'meters' ? 'meters' : 'plans') as 'plans' | 'meters'
+  const tab: PricingTab = PRICING_TABS.find(t => t === searchParams.get('tab')) ?? 'plans'
   const setTab = (t: string) => setSearchParams(t === 'plans' ? {} : { tab: t })
   const [createFor, setCreateFor] = useState<'plans' | 'meters' | null>(null)
   const navigate = useNavigate()
@@ -115,13 +123,22 @@ export default function PricingPage() {
             A plan has a base fee and the prices of its meters' usage. To bill a customer, you put
             them on a plan with a subscription.
           </p>
-          <p className="text-sm text-muted-foreground mt-2">
-            New here? Start with a plan, or install a{' '}
-            <Link to="/recipes" className="text-primary hover:underline">ready-made recipe</Link>.
-          </p>
+          {tab === 'plans' && (
+            <p className="text-sm text-muted-foreground mt-2">
+              New here? Start with a plan, or install a{' '}
+              <Link to="/pricing?tab=recipes" className="text-primary hover:underline">ready-made recipe</Link>.
+            </p>
+          )}
+          {(tab === 'plans' || tab === 'meters') && (
+            <p className="text-sm text-muted-foreground mt-2">
+              To see your margin,{' '}
+              <Link to="/pricing?tab=provider-costs" className="text-primary hover:underline">record what providers charge you</Link>{' '}
+              before usage arrives: Hardcount sets each event's cost when it arrives.
+            </p>
+          )}
         </div>
         {showAdd && (
-          <Button size="sm" className="shrink-0 self-start" onClick={() => setCreateFor(tab)}>
+          <Button size="sm" className="shrink-0 self-start" onClick={() => setCreateFor(tab === 'meters' ? 'meters' : 'plans')}>
             <Plus size={16} className="mr-2" />
             {tab === 'plans' ? 'Add Plan' : 'Add Meter'}
           </Button>
@@ -129,13 +146,20 @@ export default function PricingPage() {
       </div>
 
       <Tabs value={tab} onValueChange={setTab} className="mt-6">
+        {/* Four tabs are about as wide as a phone: the strip scrolls
+            sideways instead of widening the page. */}
+        <div className="-mx-4 max-w-[100vw] overflow-x-auto px-4 md:mx-0 md:px-0">
         <TabsList>
           {/* Counts only once the lists have loaded: "(0)" over a load
               error or a skeleton claims an empty list nobody has seen. */}
           <TabsTrigger value="plans">Plans{showCounts ? ` (${plans.length})` : ''}</TabsTrigger>
           <TabsTrigger value="meters">Meters{showCounts ? ` (${meters.length})` : ''}</TabsTrigger>
+          <TabsTrigger value="provider-costs">Provider costs</TabsTrigger>
+          <TabsTrigger value="recipes">Recipes</TabsTrigger>
         </TabsList>
+        </div>
 
+        {(tab === 'plans' || tab === 'meters') && (
         <Card className="mt-4">
           <CardContent className="p-0">
             {error ? (
@@ -273,6 +297,14 @@ export default function PricingPage() {
             )}
           </CardContent>
         </Card>
+        )}
+
+        <TabsContent value="provider-costs">
+          <ProviderCostsTab />
+        </TabsContent>
+        <TabsContent value="recipes">
+          <RecipesTab />
+        </TabsContent>
       </Tabs>
 
       {createFor === 'meters' && (

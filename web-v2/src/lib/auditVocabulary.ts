@@ -76,15 +76,15 @@ export function describeAction(entry: AuditEntry): string {
         const n = entry.metadata?.changed ? Object.keys(entry.metadata.changed as Record<string, unknown>).length : 0
         return n > 0 ? `Updated settings (${n} field${n === 1 ? '' : 's'})` : 'Updated settings'
       }
-      if (entry.resource_type === 'dunning_run' && metaAction === 'resolved') return `Resolved dunning run (${entry.metadata?.resolution})`
-      if (entry.resource_type === 'dunning_policy' && metaAction === 'set_default') return `Set dunning policy as default${label ? ` (${label})` : ''}`
+      if (entry.resource_type === 'dunning_run' && metaAction === 'resolved') return `Resolved payment retries (${entry.metadata?.resolution})`
+      if (entry.resource_type === 'dunning_policy' && metaAction === 'set_default') return `Set retry policy as default${label ? ` (${label})` : ''}`
       if (entry.resource_type === 'webhook_event' && metaAction === 'replayed') return `Replayed webhook event`
       if (entry.resource_type === 'stripe_credentials' && metaAction === 'webhook_secret_set') return `Set Stripe webhook secret (${(entry.metadata?.livemode as boolean) ? 'live' : 'test'})`
       return `Updated ${label || entry.resource_type}`
     case 'delete':
       if (entry.resource_type === 'payment_method') return `Removed ${label || 'card'}`
       if (entry.resource_type === 'webhook_endpoint') return `Deleted webhook endpoint`
-      if (entry.resource_type === 'dunning_policy') return `Deleted dunning policy`
+      if (entry.resource_type === 'dunning_policy') return `Deleted retry policy`
       if (entry.resource_type === 'stripe_credentials') return `Disconnected Stripe (${(entry.metadata?.livemode as boolean) ? 'live' : 'test'})`
       return `Deleted ${label || entry.resource_type}`
     // Written only by earlier releases, when a draft subscription was
@@ -100,7 +100,7 @@ export function describeAction(entry: AuditEntry): string {
     case 'refund': return `Refunded ${label || 'invoice'}`
     case 'retry_tax': return `Retried tax on ${label || 'invoice'}`
     case 'issue': return `Issued ${label || 'credit note'}`
-    case 'resolve': return `Resolved ${label || 'dunning run'}`
+    case 'resolve': return `Resolved ${label || 'payment retries'}`
     case 'grant': return `Granted credits${label ? ` to ${label}` : ''}`
     case 'adjust': return `Adjusted credits${label ? ` for ${label}` : ''}`
     case 'credit.adjustment': return `Adjusted credits${label ? ` for ${label}` : ''}`

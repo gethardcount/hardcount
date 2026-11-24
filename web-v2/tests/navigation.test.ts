@@ -60,8 +60,14 @@ test('the Ctrl+K palette builds its pages from the shared config', () => {
   assert.ok(layout.includes('NAV_SECTIONS.map('), 'Layout must render the sidebar from lib/navigation')
 })
 
-test('Dunning policies sit directly under Dunning', () => {
-  const items = allNavItems()
-  const dunning = items.findIndex(i => i.to === '/dunning')
-  assert.equal(items[dunning + 1]?.to, '/dunning-policies')
+test("the menu follows the operator's job, in order", () => {
+  assert.deepEqual(
+    NAV_SECTIONS.map(s => [s.title, s.items.map(i => i.label)]),
+    [
+      [null, ['Home']],
+      ['Customers and money', ['Customers', 'Credit', 'Usage', 'Invoices', 'Credit notes', 'Subscriptions']],
+      ['Setup', ['Pricing', 'Payment retries']],
+      ['Developers', ['API keys', 'Webhooks', 'Audit log']],
+    ],
+  )
 })

@@ -237,7 +237,7 @@ At the end, the demo prints two links:
    **You see:**
    - **Usage**: the 25 usage events.
    - **Pricing**: the Tokens meter and the AI API plan.
-   - **Provider costs**: the five costs from step 5.
+   - **Pricing → Provider costs**: the five costs from step 5.
 
 Home's **Revenue** counts money paid, so it reads $0 until an invoice is
 paid.

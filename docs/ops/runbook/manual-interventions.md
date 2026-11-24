@@ -7,7 +7,7 @@ hand: keep your own record of what you ran, when and why. Back to the [runbook i
 ## Force-resolve a stuck dunning run
 
 A dunning run is Hardcount's schedule of retries for one unpaid invoice.
-Close it on the run's invoice in the dashboard (the Dunning page's **Open
+Close it on the run's invoice in the dashboard (the Payment retries page's **Open
 invoice**): **Record offline payment**, **Void invoice** or **Mark
 uncollectible** on an open invoice each close its run, an escalated one too,
 and send `dunning.resolved`. The API does the same with

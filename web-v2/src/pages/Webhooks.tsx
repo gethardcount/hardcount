@@ -414,11 +414,11 @@ const EVENT_GROUPS: { label: string; events: { type: string; description: string
     ],
   },
   {
-    label: 'Dunning',
+    label: 'Payment retries',
     events: [
-      { type: 'dunning.started', description: 'Dunning process started' },
-      { type: 'dunning.escalated', description: 'Dunning escalated after retries exhausted' },
-      { type: 'dunning.resolved', description: 'Dunning resolved (payment recovered)' },
+      { type: 'dunning.started', description: 'Payment retries started for an invoice' },
+      { type: 'dunning.escalated', description: "Payment retries ran out, and the policy's final action was taken" },
+      { type: 'dunning.resolved', description: 'Payment retries ended early, for example because the invoice was paid' },
     ],
   },
 ]

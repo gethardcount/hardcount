@@ -130,7 +130,6 @@ const DashboardPage = lazy(() => import('@/pages/Dashboard'))
 const CustomersPage = lazy(() => import('@/pages/Customers'))
 const PricingPage = lazy(() => import('@/pages/Pricing'))
 const DunningPage = lazy(() => import('@/pages/Dunning'))
-const DunningPoliciesPage = lazy(() => import('@/pages/DunningPolicies'))
 const WebhooksPage = lazy(() => import('@/pages/Webhooks'))
 const WebhookEventsPage = lazy(() => import('@/pages/WebhookEvents'))
 const WebhookEndpointDetailPage = lazy(() => import('@/pages/WebhookEndpointDetail'))
@@ -140,7 +139,6 @@ const InvoicesPage = lazy(() => import('@/pages/Invoices'))
 const SubscriptionsPage = lazy(() => import('@/pages/Subscriptions'))
 const UsageEventsPage = lazy(() => import('@/pages/UsageEvents'))
 const CreditsPage = lazy(() => import('@/pages/Credits'))
-const ProviderCostsPage = lazy(() => import('@/pages/ProviderCosts'))
 const CreditNotesPage = lazy(() => import('@/pages/CreditNotes'))
 const AuditLogPage = lazy(() => import('@/pages/AuditLog'))
 const UpdatePaymentPage = lazy(() => import('@/pages/UpdatePayment'))
@@ -151,7 +149,6 @@ const InvoiceDetailPage = lazy(() => import('@/pages/InvoiceDetail'))
 const SubscriptionDetailPage = lazy(() => import('@/pages/SubscriptionDetail'))
 const PlanDetailPage = lazy(() => import('@/pages/PlanDetail'))
 const MeterDetailPage = lazy(() => import('@/pages/MeterDetail'))
-const RecipesPage = lazy(() => import('@/pages/Recipes'))
 const NotFoundPage = lazy(() => import('@/pages/NotFound'))
 
 // Every page renders inside RouteShell: one Suspense for the lazy public
@@ -185,11 +182,9 @@ const router = createBrowserRouter(createRoutesFromElements(
         stay mounted while the operator moves between these pages. */}
     <Route element={<ProtectedRoute><Layout /></ProtectedRoute>}>
       <Route path="/" element={<DashboardPage />} />
-      <Route path="/recipes" element={<RecipesPage />} />
       <Route path="/customers" element={<CustomersPage />} />
       <Route path="/pricing" element={<PricingPage />} />
       <Route path="/dunning" element={<DunningPage />} />
-      <Route path="/dunning-policies" element={<DunningPoliciesPage />} />
       <Route path="/webhooks" element={<WebhooksPage />} />
       <Route path="/webhooks/events" element={<WebhookEventsPage />} />
       <Route path="/webhooks/endpoints/:id" element={<WebhookEndpointDetailPage />} />
@@ -198,7 +193,6 @@ const router = createBrowserRouter(createRoutesFromElements(
       <Route path="/subscriptions" element={<SubscriptionsPage />} />
       <Route path="/usage" element={<UsageEventsPage />} />
       <Route path="/credits" element={<CreditsPage />} />
-      <Route path="/provider-costs" element={<ProviderCostsPage />} />
       <Route path="/credit-notes" element={<CreditNotesPage />} />
       <Route path="/audit-log" element={<AuditLogPage />} />
       <Route path="/settings" element={<SettingsPage />} />

@@ -497,7 +497,7 @@ test('install a recipe: the preview lists what it will create, the install creat
     const id = uniq()
     const planName = `E2E GPU ${id}`
     const planCode = `e2e_gpu_${id}`
-    await page.goto('/recipes')
+    await page.goto('/pricing?tab=recipes')
     await card(page, KEY).getByRole('button', { name: 'Configure' }).click()
     await dialog.getByLabel('Plan name', { exact: true }).fill(planName)
     await dialog.getByLabel('Plan ID', { exact: true }).fill(planCode)
@@ -548,7 +548,7 @@ test('install a recipe: the preview lists what it will create, the install creat
 
   // The recipe reads as installed, with the settings it was installed
   // with, and cannot be installed again from the page.
-  await page.goto('/recipes')
+  await page.goto('/pricing?tab=recipes')
   const installed = card(page, KEY)
   await expect(installed.getByText('Installed', { exact: true })).toBeVisible()
   // The settings are fixed once installed, so the card no longer offers them.
@@ -574,7 +574,7 @@ test('install a recipe: the preview lists what it will create, the install creat
   expect(meters.filter(m => m.event_name === 'gpu_seconds').map(m => m.id)).toEqual(instance.created_objects.meter_ids)
 })
 
-test('dunning policies: create one turned off, turn it on and edit it, give it to a customer (it cannot be deleted then), and make it the default', async ({ page }) => {
+test('retry policies: create one turned off, turn it on and edit it, give it to a customer (it cannot be deleted then), and make it the default', async ({ page }) => {
   const id = uniq()
   const name = `E2E retries ${id}`
   const customer = await createCustomer()
@@ -596,9 +596,9 @@ test('dunning policies: create one turned off, turn it on and edit it, give it t
     // Created turned off, so it cannot take the default on its own
     // (ADR-123); it leaves the subscription and invoice alone when retries
     // run out.
-    await page.goto('/dunning-policies')
+    await page.goto('/dunning?tab=policies')
     await page.getByRole('main').getByRole('button', { name: 'New policy' }).first().click()
-    const create = page.getByRole('dialog', { name: 'New dunning policy' })
+    const create = page.getByRole('dialog', { name: 'New retry policy' })
     await field(create, 'Name').getByRole('textbox').fill(name)
     await create.getByRole('switch').click()
     await expect(create.getByRole('switch')).not.toBeChecked()
@@ -651,16 +651,16 @@ test('dunning policies: create one turned off, turn it on and edit it, give it t
 
     // Give it to one customer: their page names it instead of the default.
     await page.goto(`/customers/${customer.id}`)
-    const dunning = card(page, 'Dunning policy')
+    const dunning = card(page, 'Retry policy')
     await expect(dunning.getByText('Account default', { exact: true })).toBeVisible()
     await dunning.getByRole('button', { name: 'Change' }).click()
-    const assign = page.getByRole('dialog', { name: 'Dunning policy' })
+    const assign = page.getByRole('dialog', { name: 'Retry policy' })
     await assign.getByRole('button', { name: /^Account default/ }).click()
     await pick(page, name, name)
     const assigning = apiCall(page, 'PATCH', new RegExp(`/customers/${customer.id}$`))
     await assign.getByRole('button', { name: 'Save' }).click()
     expect((await assigning).ok()).toBe(true)
-    await expect(toasts(page).getByText('Dunning policy assignment saved', { exact: true })).toBeVisible()
+    await expect(toasts(page).getByText('Retry policy assignment saved', { exact: true })).toBeVisible()
     expect((await api<{ dunning_policy_id?: string }>('GET', `/customers/${customer.id}`)).dunning_policy_id).toBe(created.id)
     await expect(dunning).toContainText(name)
     await expect(dunning.getByText('Account default', { exact: true })).toHaveCount(0)
@@ -668,7 +668,7 @@ test('dunning policies: create one turned off, turn it on and edit it, give it t
 
     // While a customer has it, the policy cannot be deleted: the page says
     // why and asks nothing.
-    await page.goto('/dunning-policies')
+    await page.goto('/dunning?tab=policies')
     expect((await policy(created.id))?.assigned_customers).toBe(1)
     await expect(cell(name, 3)).toHaveText('1')
     await (await menu(name)).getByRole('menuitem', { name: 'Delete', exact: true }).click()

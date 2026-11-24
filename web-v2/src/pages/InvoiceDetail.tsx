@@ -1746,7 +1746,7 @@ export default function InvoiceDetailPage() {
         open={showMarkUncollectibleConfirm}
         onOpenChange={setShowMarkUncollectibleConfirm}
         title="Mark invoice uncollectible"
-        description="Records this invoice as bad debt. The invoice stays on the books for audit, but dunning automation halts and no further collection is attempted. If the payment provider later confirms the charge did go through, the invoice still settles as paid on its own."
+        description="Records this invoice as bad debt. The invoice stays on the books for audit, but payment retries stop and no further collection is attempted. If the payment provider later confirms the charge did go through, the invoice still settles as paid on its own."
         confirmWord="WRITE OFF"
         confirmLabel="Mark uncollectible"
         onConfirm={() => markUncollectibleMutation.mutate()}
@@ -2025,7 +2025,7 @@ function OperatorContextCard({
                       <dd className="text-foreground">
                         {formatDateTime(dunningRun.next_action_at)}
                         {finalStep && (
-                          <span className="block text-xs text-muted-foreground">All retries used. No more charges; the dunning policy's final action runs then.</span>
+                          <span className="block text-xs text-muted-foreground">All retries used. No more charges; the retry policy's final action runs then.</span>
                         )}
                         {cardless && !finalStep && (
                           <span className="block text-xs text-muted-foreground">Won't charge until a card is added.</span>

@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { usePageTitle } from '@/hooks/usePageTitle'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { toast } from 'sonner'
 import { useNavigate } from 'react-router-dom'
@@ -32,8 +31,8 @@ import { TableSkeleton } from '@/components/ui/TableSkeleton'
 import { Box, Loader2, Eye, Sparkles, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import { ScrollPane } from '@/components/ui/scroll-pane'
 
-export default function RecipesPage() {
-  usePageTitle('Recipes')
+/** The Pricing page's Recipes tab: ready-made pricing, installed in one click. */
+export function RecipesTab() {
   const [selected, setSelected] = useState<RecipeListItem | null>(null)
 
   // Recipes are built into the server, so an empty list only ever meant the
@@ -47,30 +46,24 @@ export default function RecipesPage() {
 
   return (
     <>
-      {/* Header */}
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-foreground">Recipes</h1>
-          <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
-            Ready-made pricing for common AI products. One click creates the meter, prices and plan, filled in with a provider's public rates; change the numbers after.
-          </p>
-        </div>
-      </div>
+      <p className="text-sm text-muted-foreground mt-4 max-w-2xl">
+        Ready-made pricing for common AI products. One click creates the meter, prices and plan, filled in with a provider's public rates; change the numbers after.
+      </p>
 
       {error ? (
-        <Card className="mt-6">
+        <Card className="mt-4">
           <CardContent className="p-0">
             <LoadError what="recipes" error={error} onRetry={() => refetch()} />
           </CardContent>
         </Card>
       ) : isLoading ? (
-        <Card className="mt-6">
+        <Card className="mt-4">
           <CardContent className="p-0">
             <TableSkeleton columns={3} />
           </CardContent>
         </Card>
       ) : recipes.length === 0 ? (
-        <Card className="mt-6">
+        <Card className="mt-4">
           <CardContent className="p-0">
             <EmptyState
               icon={Box}
@@ -80,7 +73,7 @@ export default function RecipesPage() {
           </CardContent>
         </Card>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-4">
           {recipes.map(r => (
             <RecipeCard key={r.key} recipe={r} onConfigure={() => setSelected(r)} />
           ))}
@@ -202,7 +195,10 @@ function RecipeDialog({ recipe, onClose }: { recipe: RecipeListItem; onClose: ()
       }),
     onSuccess: (res) => {
       toast.success(`Installed ${recipe.name}`)
-      queryClient.invalidateQueries({ queryKey: ['recipes'] })
+      // The Plans and Meters tab counts sit beside this tab.
+      for (const key of ['recipes', 'plans', 'meters']) {
+        queryClient.invalidateQueries({ queryKey: [key] })
+      }
       onClose()
       // Send the operator straight to the catalog — the new plan is the
       // most likely next thing they want to look at. plan_ids is omitted

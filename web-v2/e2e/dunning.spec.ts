@@ -115,7 +115,7 @@ test('a dunning policy that has run cannot be deleted, and the page says why', a
   // Only the history is left: the customer is moved off the policy.
   await api('PATCH', `/customers/${customerId}`, { dunning_policy_id: '' })
 
-  await page.goto('/dunning-policies')
+  await page.goto('/dunning?tab=policies')
   await page.getByRole('button', { name: `Actions for policy ${name}`, exact: true }).click()
   await page.getByRole('menuitem', { name: 'Delete', exact: true }).click()
   const confirm = page.getByRole('alertdialog')

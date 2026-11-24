@@ -1075,7 +1075,7 @@ type WebhookSecretForm = z.infer<typeof webhookSecretSchema>
 // handle is dropped at its default case.
 const STRIPE_WEBHOOK_EVENTS: { name: string; purpose: string }[] = [
   { name: 'payment_intent.succeeded', purpose: 'marks invoice paid' },
-  { name: 'payment_intent.payment_failed', purpose: 'triggers dunning retry' },
+  { name: 'payment_intent.payment_failed', purpose: 'starts payment retries' },
   { name: 'checkout.session.completed', purpose: 'completes Stripe Checkout returns' },
   { name: 'setup_intent.succeeded', purpose: 'saves customer payment method' },
   { name: 'setup_intent.setup_failed', purpose: 'logs setup errors' },

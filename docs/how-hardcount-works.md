@@ -90,10 +90,11 @@ flowchart TB
    invoice, unless the subscription was canceled; a pause you set lasts
    until you resume it, or until its end date if you gave one.
 
-   **You see:** the invoice on the **Dunning** page while it is being
-   retried. The schedule is under **Dunning policies**. A new account
-   starts with "Default retries": three retries over two weeks, after
-   which the subscription keeps billing and the invoice stays open.
+   **You see:** the invoice on the **Payment retries** page while it is
+   being retried. The schedule is under **Payment retries → Policies**.
+   A new account starts with "Default retries": three retries over two
+   weeks, after which the subscription keeps billing and the invoice
+   stays open.
 
 ## See it without waiting a month
 

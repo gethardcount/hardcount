@@ -331,7 +331,7 @@ attempt.
 
 An account created before ADR-123 has no policy. The failed payment is then
 skipped with a "dunning not configured" WARN, and the runs list stays empty.
-Create a policy first (dashboard → Dunning policies, or
+Create a policy first (dashboard → Payment retries → Policies, or
 `POST /v1/dunning/policies`).
 
 To recover the customer, swap the card via step 2b with `4242`, then wait for
