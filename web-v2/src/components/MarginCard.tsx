@@ -199,7 +199,7 @@ export function MarginCard({ customer, currency }: { customer: Customer; currenc
             {costNote && (
               <p className="text-xs text-muted-foreground mt-3">
                 {costNote}{' '}
-                <Link to="/provider-costs" className="text-primary underline-offset-2 hover:underline">
+                <Link to="/pricing?tab=provider-costs" className="text-primary underline-offset-2 hover:underline">
                   {costState === 'no-rates' ? 'Set up provider costs' : 'Provider costs'}
                 </Link>
               </p>

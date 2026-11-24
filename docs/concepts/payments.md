@@ -84,8 +84,8 @@ Some declines are never retried on the same card:
   The emails ask the customer to pay on the hosted invoice page, where they
   can confirm.
 
-You see each run on the **Dunning** page, and set policies under **Dunning
-policies**.
+You see each run on the **Payment retries** page, and set policies on its
+**Policies** tab.
 
 ## When the answer is unclear
 

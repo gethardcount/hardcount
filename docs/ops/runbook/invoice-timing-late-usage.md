@@ -276,7 +276,7 @@ with its memo.
 - **Dunning's final step.** Dunning is Hardcount's retrying of a failed
   payment. When the retries run out while a period's grace is running, the
   final pause or cancel waits until that grace ends. The invoice page shows
-  that time as "Final step", and the Dunning page as "Final step in …".
+  that time as "Final step", and the Payment retries page as "Final step in …".
   No charge is retried then: the pause or cancel runs.
 - **A cancel or plan change scheduled for a date.** It takes effect when
   Hardcount builds that period's invoice, up to one grace period after the

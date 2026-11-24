@@ -23,7 +23,7 @@ prices: one for each model and kind of token, or for each GPU type in
 have no meter with that event name, the recipe creates it. If you have one
 with the same aggregation, the recipe uses it. If yours has another
 aggregation, the recipe is refused with 409 and creates nothing. It creates
-nothing else: set payment retries under **Dunning policies** and webhook
+nothing else: set payment retries under **Payment retries → Policies** and webhook
 endpoints under **Webhooks**. The prices start at the provider's public
 list prices, which you can change later.
 
@@ -420,7 +420,7 @@ it, never the customer.
    {"id":"hc_pcr_…","token_type":"output","unit_cost_cents":"0.00045"}
    ```
 
-   The **Provider costs** page lists them.
+   The **Provider costs** tab of the **Pricing** page lists them.
 
 2. **Read the margin so far.** This reads the margin on the customer in
    `CUSTOMER_ID` over the last 30 days. For the customer of the

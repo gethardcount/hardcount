@@ -148,6 +148,8 @@ export default function CustomersPage() {
       toast.success(`Customer "${created.display_name}" created`)
       setShowCreate(false)
       form.reset()
+      // Their page is where they are put on a plan, the next step.
+      navigate(`/customers/${created.id}`)
     },
     onError: (err) => {
       applyApiError(form, err, ['external_id', 'display_name', 'email'])

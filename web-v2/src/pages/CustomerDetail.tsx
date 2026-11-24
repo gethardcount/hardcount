@@ -696,7 +696,8 @@ export default function CustomerDetailPage() {
                 <div className="flex items-center justify-between">
                   {/* No count until the list arrives: "(0)" read as "none" (W-17). */}
                   <CardTitle className="text-sm">Subscriptions{subsPage ? ` (${subsTotal})` : ''}</CardTitle>
-                  {!isArchived && <Button size="sm" onClick={() => setShowCreateSub(true)}>Create subscription</Button>}
+                  {/* With none yet, "Put on a plan" below is the one button. */}
+                  {!isArchived && allSubs?.length !== 0 && <Button size="sm" onClick={() => setShowCreateSub(true)}>Create subscription</Button>}
                 </div>
               </CardHeader>
               <CardContent className="p-0">
@@ -751,9 +752,15 @@ export default function CustomerDetailPage() {
                   {!allSubs && (
                     <p className="px-6 py-6 text-sm text-muted-foreground text-center">Loading…</p>
                   )}
-                  {allSubs && allSubs.length === 0 && (
+                  {allSubs && allSubs.length === 0 && (isArchived ? (
                     <p className="px-6 py-6 text-sm text-muted-foreground text-center">No subscriptions</p>
-                  )}
+                  ) : (
+                    // A new customer's first action: a plan is what bills them.
+                    <div className="flex flex-col items-center gap-3 px-6 py-6 text-center">
+                      <p className="text-sm text-muted-foreground">Not on a plan yet.</p>
+                      <Button size="sm" onClick={() => setShowCreateSub(true)}>Put on a plan</Button>
+                    </div>
+                  ))}
                   {allSubs && subsTotal > allSubs.length && (
                     <p className="px-6 py-2 text-xs text-muted-foreground">Showing the first {allSubs.length} of {subsTotal}.</p>
                   )}
@@ -1063,7 +1070,7 @@ export default function CustomerDetailPage() {
           <Card>
             <CardHeader>
               <div className="flex items-center justify-between">
-                <CardTitle className="text-sm">Dunning policy</CardTitle>
+                <CardTitle className="text-sm">Retry policy</CardTitle>
                 {!isArchived && (
                   <Button variant="outline" size="sm" onClick={() => setShowDunningOverride(true)}>
                     Change
@@ -1093,7 +1100,7 @@ export default function CustomerDetailPage() {
                   </div>
                 </div>
               ) : (
-                <p className="px-6 py-6 text-sm text-muted-foreground text-center">No dunning policies configured</p>
+                <p className="px-6 py-6 text-sm text-muted-foreground text-center">No retry policies yet</p>
               )}
             </CardContent>
           </Card>
@@ -1187,7 +1194,7 @@ export default function CustomerDetailPage() {
           onSaved={() => {
             setShowDunningOverride(false)
             queryClient.invalidateQueries({ queryKey: ['customer', id] })
-            toast.success('Dunning policy assignment saved')
+            toast.success('Retry policy assignment saved')
           }}
         />
       )}
@@ -1585,7 +1592,7 @@ function EditBillingProfileDialog({ customerId, customer, profile, onClose, onSa
    Replaces the partial-field-override dialog. Customers either
    inherit the tenant default policy or are explicitly assigned to a
    named policy (Stripe / Lago / Recurly campaigns shape). To create
-   or edit policies, operators use the /dunning-policies admin page.
+   or edit policies, operators use the Policies tab of /dunning.
 ─────────────────────────────────────────────────────────────────── */
 
 function AssignDunningPolicyDialog({ customerId, currentPolicyID, policies, onClose, onSaved }: {
@@ -1624,7 +1631,7 @@ function AssignDunningPolicyDialog({ customerId, currentPolicyID, policies, onCl
     <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
-          <DialogTitle>Dunning policy</DialogTitle>
+          <DialogTitle>Retry policy</DialogTitle>
         </DialogHeader>
         <form onSubmit={handleSubmit} noValidate className="space-y-4">
           <div className="space-y-2">
@@ -1643,7 +1650,7 @@ function AssignDunningPolicyDialog({ customerId, currentPolicyID, policies, onCl
               triggerClassName="w-full"
             />
             <p className="text-xs text-muted-foreground">
-              Manage policies on the <Link to="/dunning-policies" className="underline">Dunning policies</Link> page.
+              Manage policies on the <Link to="/dunning?tab=policies" className="underline">Payment retries</Link> page, under Policies.
             </p>
           </div>
           {selectedPolicy && (

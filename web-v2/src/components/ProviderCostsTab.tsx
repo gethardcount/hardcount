@@ -22,21 +22,19 @@ import {
   useUpsertProviderCost,
 } from '@/lib/gen/queries.gen'
 import { api } from '@/lib/api'
-import { usePageTitle } from '@/hooks/usePageTitle'
 import { money, shiftDecimal } from '@/lib/priceDisplay'
 import { amountInputError, dollarsToRateCents } from '@/lib/priceInput'
 
-// Provider costs (ADR-079): the operator's COGS table — what THEY pay LLM
-// providers per token. Feeds the per-event cost stamp at ingest and the
-// customer margin card. Current-rate semantics: editing a rate only affects
+// The Pricing page's Provider costs tab (ADR-079): the operator's COGS
+// table — what THEY pay LLM providers per token. Feeds the per-event cost
+// stamp at ingest and the customer margin card. Current-rate semantics: editing a rate only affects
 // NEW events; history keeps its stamp.
 //
 // The API takes unit_cost_cents, US cents per token. Providers publish token
-// prices per 1M tokens, so the page takes and shows dollars per 1M tokens and
+// prices per 1M tokens, so the tab takes and shows dollars per 1M tokens and
 // converts by moving the decimal point (no float math): $3.00 per 1M tokens
 // is 300 cents per 1M, 0.0003 cents per token.
-export default function ProviderCostsPage() {
-  usePageTitle('Provider costs')
+export function ProviderCostsTab() {
   const queryClient = useQueryClient()
 
   // The whole rate table, every page.
@@ -103,18 +101,13 @@ export default function ProviderCostsPage() {
 
   return (
     <>
-      <div className="flex items-start justify-between">
-        <div>
-          <h1 className="text-2xl font-semibold text-foreground">Provider costs</h1>
-          <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
-            Enter what each AI provider charges you per 1M tokens, and Hardcount shows your
-            margin on each customer. Add rates before you send usage: Hardcount works
-            out each event's cost when it arrives and never goes back to older events.
-          </p>
-        </div>
-      </div>
+      <p className="text-sm text-muted-foreground mt-4 max-w-2xl">
+        Enter what each AI provider charges you per 1M tokens, and Hardcount shows your
+        margin on each customer. Add rates before you send usage: Hardcount works
+        out each event's cost when it arrives and never goes back to older events.
+      </p>
 
-      <Card className="mt-6">
+      <Card className="mt-4">
         <CardHeader>
           <CardTitle>Add or update a rate</CardTitle>
           <CardDescription>

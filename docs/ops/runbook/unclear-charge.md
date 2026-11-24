@@ -196,7 +196,7 @@ its notice reads "Stripe still hasn't confirmed this payment after 6 hours,
 so check it in Stripe." Dunning is Hardcount's retrying of a failed card
 payment, and a dunning run is the retries for one invoice. When a dunning
 retry made the payment, its activity shows "Payment retry N is processing",
-and its dunning run stays under Active on the Dunning page with no new retry.
+and its dunning run stays under Active on the Payment retries page with no new retry.
 
 **Why:** Stripe has the payment and has not finished it. Card payments end
 within seconds; a payment method that settles later, such as a bank debit,

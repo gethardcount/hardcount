@@ -11,7 +11,7 @@ One of these:
 - An invoice shows the notice "Below Stripe's minimum charge".
 - The log line `Stripe refused to charge this invoice because the amount is
   below its minimum charge`.
-- A dunning run on the Dunning page ended with "Below Stripe's minimum
+- A dunning run on the Payment retries page ended with "Below Stripe's minimum
   charge". A dunning run is Hardcount's retries of a failed payment for one
   invoice, with emails to the customer.
 - A customer says the hosted invoice page has no Pay button and reads "This

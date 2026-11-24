@@ -153,7 +153,7 @@ function entryTypeVariant(type: string): 'default' | 'secondary' | 'destructive'
 }
 
 export default function CreditsPage() {
-  usePageTitle('Credits')
+  usePageTitle('Credit')
   const queryClient = useQueryClient()
   const ledgerPageSize = 25
 
@@ -543,7 +543,7 @@ export default function CreditsPage() {
     <>
       <div className="flex flex-wrap justify-between items-center gap-3">
         <div className="min-w-0 flex-1 basis-72">
-          <h1 className="text-2xl font-semibold text-foreground">Credits</h1>
+          <h1 className="text-2xl font-semibold text-foreground">Credit</h1>
           <p className="text-sm text-muted-foreground mt-1">
             Balance a customer can spend. Hardcount uses it to pay their invoices in the same currency before charging their card{customersWithCredits.size > 0 ? ` · ${totalOutstanding} across ${customersWithCredits.size} customer${customersWithCredits.size !== 1 ? 's' : ''}` : ''}
           </p>

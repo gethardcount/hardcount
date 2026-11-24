@@ -38,6 +38,8 @@ import { PlanPricesCard } from '@/components/PlanPricesCard'
 import { CopyButton } from '@/components/CopyButton'
 import { DetailBreadcrumb } from '@/components/DetailBreadcrumb'
 import { DetailSkeleton } from '@/components/ui/DetailSkeleton'
+import { NextStep } from '@/components/NextStep'
+import { useOnboardingSteps } from '@/hooks/useOnboardingSteps'
 
 
 // Static option sets — single source of truth for both the dropdown
@@ -68,6 +70,8 @@ export default function PlanDetailPage() {
   // it is not known, the chip follows the stored pause.
   const resolveNow = useNowResolver()
   const [showEdit, setShowEdit] = useState(false)
+  // The setup list: once a plan has a usage price, a customer is next.
+  const { stepLeft } = useOnboardingSteps()
 
   const { data: plan, isLoading, error: loadError, refetch } = useQuery({
     queryKey: ['plan', id],
@@ -217,6 +221,9 @@ export default function PlanDetailPage() {
       </Card>
 
       <PlanPricesCard plan={plan} meters={allMeters} />
+      {plan.prices.length > 0 && stepLeft('subscription') && (
+        <NextStep to="/customers" className="mt-3">add a customer</NextStep>
+      )}
 
       {/* Subscriptions */}
       <Card className="mt-6">

@@ -54,6 +54,8 @@ import {
 
 import { Building2, CreditCard, FileText, Receipt, Check, AlertCircle, Info, Loader2, Trash2, Copy, ExternalLink, X, Users, Mail } from 'lucide-react'
 import { TeamTab } from '@/components/TeamTab'
+import { NextStep } from '@/components/NextStep'
+import { useOnboardingSteps } from '@/hooks/useOnboardingSteps'
 import { EmailSettingsPanel } from '@/components/settings/EmailSettingsPanel'
 import { Callout } from '@/components/Callout'
 import { UnsavedChangesGuard } from '@/components/UnsavedChangesGuard'
@@ -1098,7 +1100,7 @@ type WebhookSecretForm = z.infer<typeof webhookSecretSchema>
 // handle is dropped at its default case.
 const STRIPE_WEBHOOK_EVENTS: { name: string; purpose: string }[] = [
   { name: 'payment_intent.succeeded', purpose: 'marks invoice paid' },
-  { name: 'payment_intent.payment_failed', purpose: 'triggers dunning retry' },
+  { name: 'payment_intent.payment_failed', purpose: 'starts payment retries' },
   { name: 'checkout.session.completed', purpose: 'completes Stripe Checkout returns' },
   { name: 'setup_intent.succeeded', purpose: 'saves customer payment method' },
   { name: 'setup_intent.setup_failed', purpose: 'logs setup errors' },
@@ -1141,6 +1143,7 @@ function StripeCard({ livemode, current, onChanged }: {
   const [managing, setManaging] = useState(false)
   const [replacingKeys, setReplacingKeys] = useState(false)
   const [replacingWebhook, setReplacingWebhook] = useState(false)
+  const { stepLeft } = useOnboardingSteps()
 
   const connected = !!current
   const failing = connected && !!current.last_verified_error
@@ -1150,11 +1153,17 @@ function StripeCard({ livemode, current, onChanged }: {
 
   if (fullyConnected && !managing && current) {
     return (
-      <ConnectedSummary
-        current={current}
-        livemode={livemode}
-        onManage={() => setManaging(true)}
-      />
+      <>
+        <ConnectedSummary
+          current={current}
+          livemode={livemode}
+          onManage={() => setManaging(true)}
+        />
+        {/* Stripe is the first step of the setup list; the key is next. */}
+        {stepLeft('key') && (
+          <NextStep to="/api-keys" className="mt-3">make the key your gateway sends usage with</NextStep>
+        )}
+      </>
     )
   }
 

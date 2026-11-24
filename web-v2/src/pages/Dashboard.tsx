@@ -10,7 +10,6 @@ import { ATTENTION_LISTS, homeAttentionLines, type AttentionSeverity } from '@/l
 import type { Invoice } from '@/lib/api'
 import { timeAgo, wallClockNow } from '@/lib/effectiveNow'
 import { useNowResolver } from '@/hooks/useNow'
-import { useAuth } from '@/contexts/AuthContext'
 import { CUSTOMERS_DEFINITION, FAILED_PAYMENTS_DEFINITION, MRR_DEFINITION, REVENUE_DEFINITION, currencyScopedHint, customersTrend, failedPaymentsTrend, subscriptionsHint } from '@/lib/homeKpis'
 import { LoadError } from '@/components/LoadError'
 import { FeedSkeleton } from '@/components/ui/TableSkeleton'
@@ -18,7 +17,8 @@ import { cn } from '@/lib/utils'
 import { Card, CardContent } from '@/components/ui/card'
 import { AlertTriangle, Info, ListChecks } from 'lucide-react'
 import { Button } from '@/components/ui/button'
-import { openSetupChecklist, useOnboardingSteps } from '@/hooks/useOnboardingSteps'
+import { useOnboardingSteps } from '@/hooks/useOnboardingSteps'
+import { SetupChecklistCard } from '@/components/OnboardingLauncher'
 import {
   Area, AreaChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis,
 } from 'recharts'
@@ -31,6 +31,9 @@ import { PeriodTabs } from '@/components/analytics/PeriodTabs'
 import { PERIOD_LABELS, type Period } from '@/components/analytics/period'
 import { tooltipStyle, useChartTheme } from '@/lib/chartTheme'
 import { revenueBucketLabel } from '@/lib/chartLabels'
+
+// The job in one line, for an account that is new.
+const WELCOME_LINE = "Hardcount prices your gateway's usage, keeps each customer's credit, and charges cards through your Stripe account."
 
 // The total of a list, for a count that must equal it.
 function useListTotal(key: string, read: () => Promise<{ total: number }>) {
@@ -57,12 +60,17 @@ export default function DashboardPage() {
 
   // Each invoice's now, for the status and "X ago".
   const resolveNow = useNowResolver()
-  const { user } = useAuth()
 
-  // First run: an account with no subscriptions yet gets a welcome card whose
-  // button opens the setup checklist. The checklist never opens by itself: it
-  // covered the page (on a phone, all of it) and repeated the welcome card.
-  const { newAccount, dismissed: checklistHidden, setDismissed: setChecklistHidden } = useOnboardingSteps()
+  // The setup list is open in the page while a step is left and the operator
+  // has not hidden it. An account with no subscription yet is welcomed above
+  // it; once hidden, the welcome card offers to show it again.
+  const { newAccount, loaded: setupLoaded, show: setupOpen, setDismissed: setChecklistHidden } = useOnboardingSteps()
+  const welcome = (
+    <div className="min-w-0 flex-1">
+      <p className="text-sm font-semibold text-foreground">Welcome to Hardcount</p>
+      <p className="mt-1 text-sm text-muted-foreground">{WELCOME_LINE}</p>
+    </div>
+  )
 
   const chartData = useMemo(() => chartRes?.data ?? [], [chartRes])
   // The server returns only buckets with revenue; the chart plots every bucket
@@ -105,28 +113,21 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {newAccount === true && (
+      {setupOpen ? (
+        <SetupChecklistCard className="mt-6" intro={newAccount === true ? welcome : undefined} />
+      ) : newAccount === true && setupLoaded && (
         <Card className="mt-6" role="region" aria-label="Welcome">
           <CardContent className="flex flex-col gap-4 p-5 sm:flex-row sm:items-center">
             <div className="hidden h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary sm:flex">
               <ListChecks size={18} aria-hidden />
             </div>
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-foreground">Welcome to Hardcount</p>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Hardcount counts usage, works out each bill, makes the invoice and charges the card through Stripe.
-                Follow the setup checklist to bill your first {user?.livemode ? 'customer' : 'test customer'}.
-              </p>
-            </div>
+            {welcome}
             <Button
               size="sm"
               className="shrink-0 self-start sm:self-center"
-              onClick={() => {
-                if (checklistHidden) setChecklistHidden(false)
-                openSetupChecklist()
-              }}
+              onClick={() => setChecklistHidden(false)}
             >
-              Open setup checklist
+              Show setup checklist
             </Button>
           </CardContent>
         </Card>

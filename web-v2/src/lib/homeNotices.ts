@@ -11,10 +11,11 @@ export function usageNoneYet(meterCount: number | null): { description: string; 
     : { description: 'Send usage from your app through the API. Each event names one of your meters.', setUpMeter: false }
 }
 
-// The setup checklist (useOnboardingSteps). The pill shows while it is not
-// hidden and a step is left. "Show setup checklist" in the account menu shows
-// only when that click would bring the pill back: hidden, and a step left.
-// Once every step is done the pill never shows, so the item would do nothing.
+// The setup checklist (useOnboardingSteps). The pill (the sidebar's Setup row,
+// and the list open on Home) shows while it is not hidden and a step is left.
+// "Show setup checklist" in the account menu shows only when that click would
+// bring the pill back: hidden, and a step left. Once every step is done the
+// pill never shows, so the item would do nothing.
 // loaded = false: no item rather than one that might do nothing.
 export function setupChecklistState(
   hidden: boolean, loaded: boolean, complete: number, total: number,

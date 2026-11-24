@@ -8,10 +8,10 @@ or an end customer sees.
 ## Activity lines
 
 An activity line is one row on an activity card: the invoice and subscription
-Activity cards, the Dunning page's recovery timeline and the customer's Sent
-emails card. The backend builds every word of a row. The dashboard formats
-money and times and lays the row out. Use these rules when you add or change a
-row. The decision behind them is
+Activity cards, the Payment retries page's recovery timeline and the
+customer's Sent emails card. The backend builds every word of a row. The
+dashboard formats money and times and lays the row out. Use these rules when
+you add or change a row. The decision behind them is
 [ADR-128](../adr/128-activity-line-standard.md).
 
 **Where the code is:**
@@ -21,7 +21,8 @@ row. The decision behind them is
 - Each card's rows are worded in `internal/invoice/activity_lines.go`,
   `internal/subscription/activity_lines.go` and `sentEmailLine` in
   `internal/customer/handler.go`. Payment-recovery rows, on the invoice card
-  and the Dunning page, are worded in `internal/invoice/recovery_lines.go`.
+  and the Payment retries page, are worded in
+  `internal/invoice/recovery_lines.go`.
 - The dashboard's row component is `web-v2/src/components/ActivityList.tsx`,
   with its helpers in `web-v2/src/lib/activityLine.ts`. Its one money
   formatter is `formatCents` in `web-v2/src/lib/money.ts`.
@@ -95,7 +96,7 @@ A row has up to three lines, and its time sits on the right:
 8. **Link what the row's own data names:** an invoice, a credit note or a
    subscription whose id the row carries, and only while it still exists. A
    deleted object stays plain text. Never link from a guess, and never to a
-   payment-recovery run: the Dunning page cannot open on one run.
+   payment-recovery run: the Payment retries page cannot open on one run.
 
 ## Words to keep out of UI text
 

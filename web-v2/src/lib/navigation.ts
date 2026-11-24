@@ -1,7 +1,6 @@
 import {
   LayoutDashboard, Users, FileText, CreditCard, Tag, Wallet, Settings,
-  Receipt, AlertTriangle, ScrollText, Key, BarChart3, Sparkles,
-  Coins, ListChecks, Webhook,
+  Receipt, AlertTriangle, ScrollText, Key, BarChart3, Webhook,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -9,14 +8,14 @@ import {
 // palette both read it, so a page can't be reachable from one and missing
 // from the other.
 //
-// Grouped by the job an operator is doing: run billing day to day, recover
-// and adjust money, set up what you sell, and developer tooling. Labels are
-// sentence case; every item has its own icon.
+// It follows the operator's job: the customers and the money they bring in,
+// day to day; then what is set once (prices, payment retries); then
+// developer tooling. Labels are sentence case; every item has its own icon.
 export interface NavItem {
   to: string
   label: string
   icon: LucideIcon
-  // Palette subtitle: what the page is for.
+  // Palette subtitle: what the operator finds on the page.
   hint: string
   // Extra path prefixes that belong to this section (detail routes).
   owns?: string[]
@@ -36,36 +35,28 @@ export const NAV_SECTIONS: NavSection[] = [
     ],
   },
   {
-    title: 'Billing',
+    title: 'Customers and money',
     items: [
-      { to: '/customers', label: 'Customers', icon: Users, hint: 'Accounts you bill' },
-      { to: '/subscriptions', label: 'Subscriptions', icon: CreditCard, hint: 'Plans customers are on' },
-      { to: '/invoices', label: 'Invoices', icon: FileText, hint: 'Drafts, open and paid invoices' },
-      { to: '/usage', label: 'Usage', icon: BarChart3, hint: 'Metered usage events' },
+      { to: '/customers', label: 'Customers', icon: Users, hint: 'Who you bill, and what each has used' },
+      { to: '/credits', label: 'Credit', icon: Wallet, hint: 'What each customer has left' },
+      { to: '/usage', label: 'Usage', icon: BarChart3, hint: 'Each usage event your gateway sends' },
+      { to: '/invoices', label: 'Invoices', icon: FileText, hint: 'What you billed, and what is paid' },
+      { to: '/credit-notes', label: 'Credit notes', icon: Receipt, hint: 'Refunds and corrections to invoices' },
+      { to: '/subscriptions', label: 'Subscriptions', icon: CreditCard, hint: 'Which plan each customer is on' },
     ],
   },
   {
-    title: 'Revenue',
+    title: 'Setup',
     items: [
-      { to: '/dunning', label: 'Dunning', icon: AlertTriangle, hint: 'Failed-payment recovery' },
-      { to: '/dunning-policies', label: 'Dunning policies', icon: ListChecks, hint: 'Retry schedules for failed payments' },
-      { to: '/credits', label: 'Credits', icon: Wallet, hint: 'Customer credit balances' },
-      { to: '/credit-notes', label: 'Credit notes', icon: Receipt, hint: 'Refunds and adjustments' },
-    ],
-  },
-  {
-    title: 'Catalog',
-    items: [
-      { to: '/pricing', label: 'Pricing', icon: Tag, hint: 'Plans, meters and prices', owns: ['/plans/', '/meters/'] },
-      { to: '/recipes', label: 'Recipes', icon: Sparkles, hint: 'Ready-made pricing setups' },
-      { to: '/provider-costs', label: 'Provider costs', icon: Coins, hint: 'What providers charge you, for margin' },
+      { to: '/pricing', label: 'Pricing', icon: Tag, hint: 'What you charge, and what providers charge you', owns: ['/plans/', '/meters/'] },
+      { to: '/dunning', label: 'Payment retries', icon: AlertTriangle, hint: 'Failed payments, and when they are retried' },
     ],
   },
   {
     title: 'Developers',
     items: [
-      { to: '/api-keys', label: 'API keys', icon: Key, hint: 'Keys for the API' },
-      { to: '/webhooks', label: 'Webhooks', icon: Webhook, hint: 'Endpoints and event deliveries' },
+      { to: '/api-keys', label: 'API keys', icon: Key, hint: 'The keys your gateway and server use' },
+      { to: '/webhooks', label: 'Webhooks', icon: Webhook, hint: 'Where Hardcount sends events, and what it sent' },
       { to: '/audit-log', label: 'Audit log', icon: ScrollText, hint: 'Who changed what' },
     ],
   },

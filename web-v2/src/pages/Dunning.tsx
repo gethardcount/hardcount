@@ -23,10 +23,12 @@ import { dunningRunAmount } from '@/lib/invoiceTerminal'
 import { cn } from '@/lib/utils'
 import { InitialsAvatar } from '@/components/InitialsAvatar'
 
-import { Button, buttonVariants } from '@/components/ui/button'
+import { buttonVariants } from '@/components/ui/button'
 import { LoadError } from '@/components/LoadError'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { DunningPoliciesTab } from '@/components/DunningPoliciesTab'
 import {
   Table,
   TableBody,
@@ -96,9 +98,16 @@ function futureRelativeTime(dateStr: string, now: EffectiveNow): string {
   return `in ${diffDays}d`
 }
 
+// The page's tabs, in ?tab=: the failed payments being retried (no tab), and
+// the retry policies that set how. ?state= filters the first tab.
+type RetriesTab = 'runs' | 'policies'
+
 export default function DunningPage() {
-  usePageTitle('Dunning')
-  // Same query key as the policies page, so the two share one fetch.
+  usePageTitle('Payment retries')
+  const [searchParams, setSearchParams] = useSearchParams()
+  const tab: RetriesTab = searchParams.get('tab') === 'policies' ? 'policies' : 'runs'
+  const setTab = (t: string) => setSearchParams(t === 'policies' ? { tab: t } : {})
+  // Same query key as the Policies tab, so the two share one fetch.
   const { data: policiesData, isLoading: policiesLoading, error: policiesError } = useQuery({
     queryKey: ['dunning-policies'],
     queryFn: () => api.listDunningPolicies(),
@@ -108,33 +117,40 @@ export default function DunningPage() {
     <>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div className="max-w-3xl">
-          <h1 className="text-2xl font-semibold text-foreground">Dunning</h1>
+          <h1 className="text-2xl font-semibold text-foreground">Payment retries</h1>
           {/* Final actions: domain.DunningSubscriptionAction (none, pause,
               cancel) and DunningInvoiceAction (none, mark_uncollectible).
               No enabled policy = StartDunning skips the invoice. */}
           <p className="text-sm text-muted-foreground mt-1">
-            When a payment fails, Hardcount retries it on the schedule in your dunning policy and, if email is set up,
+            When a payment fails, Hardcount retries it on the schedule in your retry policy and, if email is set up,
             emails the customer. If every retry fails, it does what the policy says: pause or cancel the subscription,
             write off the invoice, or leave them for you to handle. With no policy, nothing is retried.
           </p>
         </div>
-        <Link to="/dunning-policies" className="shrink-0 self-start">
-          <Button variant="outline" size="sm">Manage policies</Button>
-        </Link>
       </div>
-      {retriesOff && (
-        <Callout
-          tone="amber"
-          title={retriesOff.title}
-          role="status"
-          className="mt-6"
-        >
-          {retriesOff.body}
-        </Callout>
-      )}
-      <div className="mt-6">
-        <RunsTab />
-      </div>
+      <Tabs value={tab} onValueChange={setTab} className="mt-6">
+        <TabsList>
+          <TabsTrigger value="runs">Failed payments</TabsTrigger>
+          <TabsTrigger value="policies">Policies</TabsTrigger>
+        </TabsList>
+        <TabsContent value="runs">
+          {/* The Policies tab says this itself, under its own list. */}
+          {retriesOff && (
+            <Callout
+              tone="amber"
+              title={retriesOff.title}
+              role="status"
+              className="mt-4"
+            >
+              {retriesOff.body}
+            </Callout>
+          )}
+          <RunsTab />
+        </TabsContent>
+        <TabsContent value="policies">
+          <DunningPoliciesTab />
+        </TabsContent>
+      </Tabs>
     </>
   )
 }
@@ -302,7 +318,7 @@ function RunsTab() {
       <Card className="mt-4">
         <CardContent className="p-0">
           {loadError ? (
-            <LoadError what="dunning runs" error={loadError} onRetry={() => loadRuns()} />
+            <LoadError what="failed payments" error={loadError} onRetry={() => loadRuns()} />
           ) : loading ? (
             <TableSkeleton columns={8} />
           ) : runs.length === 0 ? (
@@ -313,7 +329,7 @@ function RunsTab() {
                     No {filterStatus} runs
                   </p>
                   <p className="text-sm text-muted-foreground mt-1">
-                    Try a different filter to see other dunning runs.
+                    Try a different filter to see other failed payments.
                   </p>
                 </>
               ) : (
@@ -322,8 +338,8 @@ function RunsTab() {
                   <p className="text-sm text-muted-foreground mt-1">
                     An invoice shows up here when its payment fails and Hardcount starts retrying it.
                   </p>
-                  <Link to="/dunning-policies" className="inline-block mt-4">
-                    <Button variant="outline" size="sm">Set up a retry policy</Button>
+                  <Link to="/dunning?tab=policies" className={cn(buttonVariants({ variant: 'outline', size: 'sm' }), 'mt-4')}>
+                    Set up a retry policy
                   </Link>
                 </>
               )}
@@ -530,7 +546,7 @@ function RunsTab() {
 /* ─── Event Timeline ─── */
 
 const EVENT_LABELS: Record<string, { label: string; color: string }> = {
-  dunning_started: { label: 'Dunning started', color: 'bg-blue-400' },
+  dunning_started: { label: 'Payment recovery started', color: 'bg-blue-400' },
   retry_attempted: { label: 'Retry attempted', color: 'bg-blue-400' },
   escalated: { label: 'Escalated', color: 'bg-danger' },
   resolved: { label: 'Resolved', color: 'bg-emerald-500' },
