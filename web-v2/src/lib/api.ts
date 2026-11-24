@@ -846,7 +846,6 @@ export type AttentionAction =
   | 'update_payment_method'
   | 'connect_tax_provider'
   | 'void_invoice'
-  | 'mark_uncollectible'
 
 export interface AttentionActionItem {
   code: AttentionAction

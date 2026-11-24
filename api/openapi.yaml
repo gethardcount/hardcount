@@ -1703,9 +1703,7 @@ components:
           that payment from Stripe and records what happened: paid,
           declined, or nothing charged. After "nothing charged" the invoice
           goes back to `pending` (`failed` after a dunning retry) and is
-          charged again as usual. An `unknown` invoice with no
-          `stripe_payment_intent_id` was left by an earlier version (a parked
-          invoice); it is not resolved or charged again automatically.
+          charged again as usual.
 
     InvoiceTaxStatus:
       type: string
@@ -1882,7 +1880,6 @@ components:
         - update_payment_method
         - connect_tax_provider
         - void_invoice
-        - mark_uncollectible
       description: |
         A recommended next step, as a closed code. Each code maps to an API
         route or a dashboard page.
@@ -1906,13 +1903,6 @@ components:
         - `connect_tax_provider`: connect the tax provider under Settings.
         - `void_invoice`: `POST /v1/invoices/{id}/void`. Offered only on
           `amount_below_minimum`.
-        - `mark_uncollectible`:
-          `POST /v1/invoices/{id}/mark-uncollectible`. Offered only on a
-          parked invoice (payment status `unknown` with no payment intent
-          recorded, left by an earlier version), for a customer who paid
-          another way. After the write-off, a payment whose Stripe event
-          arrives later is still recorded, and nothing charges the invoice.
-          The dashboard shows it as a secondary action.
 
     AttentionActionItem:
       type: object
@@ -12708,8 +12698,8 @@ paths:
             paid, void it when it is unpaid); a relief on an unpaid,
             written-off, voided, mixed-line, zero-total or fully used commit;
             or a `stripe_refund_id` that a credit note already records, or
-            that is still in flight at Stripe. Codes `payment_in_flight` and
-            `payment_unidentifiable`: a charge on the invoice is unresolved.
+            that is still in flight at Stripe. Code `payment_in_flight`: a
+            charge on the invoice is unresolved.
             Code `concurrent_change`: with `auto_issue`, Postgres stopped the
             issue because of another change to the same records (it broke a
             deadlock, or ended a wait for a lock), and the note made was voided;
@@ -19434,8 +19424,8 @@ paths:
           description: |
             Nothing was sent. Codes: `invoice_not_sendable` (the invoice
             is a draft, not issued yet, or voided), `email_not_configured`
-            (this server has no SMTP set up), `payment_in_flight` /
-            `payment_unidentifiable` (a charge on the invoice is unresolved),
+            (this server has no SMTP set up), `payment_in_flight` (a charge
+            on the invoice is unresolved),
             or `invalid_state` for an unpaid top-up whose pay link can't
             work: this server has no `HOSTED_INVOICE_BASE_URL`, the
             top-up's link token can't be read, or Stripe isn't connected in
@@ -19688,12 +19678,9 @@ paths:
         "409":
           description: |
             The invoice cannot be voided in its current state. Codes:
-            `invalid_state` (already paid or already voided),
+            `invalid_state` (already paid or already voided), or
             `payment_in_flight` (a charge is still running or being
-            confirmed with Stripe), or
-            `payment_unidentifiable` (an earlier version left a charge on the
-            invoice unclear with no payment named; it is not resolved
-            automatically).
+            confirmed with Stripe).
           content:
             application/json:
               schema:
@@ -19783,8 +19770,8 @@ paths:
         "409":
           description: |
             Nothing was sent. Codes: `invoice_not_collectible` (the invoice
-            is draft, voided or paid), `payment_in_flight` or
-            `payment_unidentifiable` (a charge is unresolved),
+            is draft, voided or paid), `payment_in_flight` (a charge is
+            unresolved),
             `email_not_configured` (this server has no SMTP set up), or
             `no_email_on_file` (the customer has no email address).
           content:
@@ -20099,8 +20086,8 @@ paths:
         "409":
           description: |
             The payment cannot be recorded. Codes: `invalid_state` (draft,
-            voided or already paid), `payment_in_flight` or
-            `payment_unidentifiable` (a card charge is unresolved), and
+            voided or already paid), `payment_in_flight` (a card charge is
+            unresolved), and
             `concurrent_change` (Postgres stopped the request because of
             another change to the same records: it broke a deadlock, or ended a
             wait for a lock; send the same request again, with the same
@@ -20384,10 +20371,7 @@ paths:
             An earlier charge must be resolved first. Code
             `payment_in_flight`: a charge on the invoice is running, or its
             result is not known yet and Hardcount is reading the payment from
-            Stripe (within about an hour). Code `payment_unidentifiable`: an
-            earlier version left a charge on the invoice unclear with no
-            payment named; Hardcount does not charge the invoice again. Code
-            `amount_below_minimum`: the amount is below Stripe's minimum
+            Stripe (within about an hour). Code `amount_below_minimum`: the amount is below Stripe's minimum
             charge, so nothing was charged; the invoice stays open with
             `payment_status` `pending`, and no dunning starts. Collect
             applies the credit balance first and asks Stripe each time

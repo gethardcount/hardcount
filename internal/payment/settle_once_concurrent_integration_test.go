@@ -372,12 +372,12 @@ func TestSettleSucceeded_ConcurrentSources_RecordsOnce(t *testing.T) {
 			if _, err := r.stripe.ChargeInvoice(r.ctx, tenantID, inv, hold, "cus_stripe_race", "pm_race_4242"); err == nil {
 				t.Fatalf("round %d: ambiguous charge returned no error", round)
 			}
-			parked, err := r.invStore.Get(r.ctx, tenantID, inv.ID)
+			stamped, err := r.invStore.Get(r.ctx, tenantID, inv.ID)
 			if err != nil {
 				t.Fatal(err)
 			}
-			if parked.PaymentStatus != domain.PaymentUnknown || parked.StripePaymentIntentID != piID {
-				t.Fatalf("round %d: setup: invoice %s with PI %q, want unknown with %q", round, parked.PaymentStatus, parked.StripePaymentIntentID, piID)
+			if stamped.PaymentStatus != domain.PaymentUnknown || stamped.StripePaymentIntentID != piID {
+				t.Fatalf("round %d: setup: invoice %s with PI %q, want unknown with %q", round, stamped.PaymentStatus, stamped.StripePaymentIntentID, piID)
 			}
 			// The charger is gone and its hold has ended: the unknown sweep
 			// leaves an invoice alone while a charge still holds it.
@@ -407,7 +407,7 @@ func TestSettleSucceeded_ConcurrentSources_RecordsOnce(t *testing.T) {
 			if r.counting.reached.Load() > 1 {
 				contended++
 			}
-			r.assertRecordedOnce(t, round, tenantID, inv.ID, piID, evtID, parked.ChargeAttemptSeq, false)
+			r.assertRecordedOnce(t, round, tenantID, inv.ID, piID, evtID, stamped.ChargeAttemptSeq, false)
 		}
 		if contended == 0 {
 			t.Fatalf("no round had two settles reach the locked transition — the snapshot guard serialized every round, so the row lock was never exercised")

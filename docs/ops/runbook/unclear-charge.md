@@ -12,7 +12,6 @@ in the table, then follow its Check, Fix and Verify. Back to the
 | `reconciler error` in the logs with `get payment intent`, on every billing run for the same invoice | [Unconfirmed, with a PaymentIntent](#unconfirmed-with-a-paymentintent) |
 | An invoice says "Stripe still hasn't confirmed this payment", its payment is `processing`, or its activity shows "Payment retry N is processing" for days | [Processing for days](#processing-for-days) |
 | An invoice stays Pending or Failed for more than two hours and refuses **Collect payment** with "A charge on this invoice is being confirmed with Stripe", or `hardcount_stale_charge_hold_resolutions_total{result="failed"}` rising | [A charge hold that does not clear](#a-charge-hold-that-does-not-clear) |
-| `stale charge check: this charge hold or parked charge was left by an earlier Hardcount version` in the logs, `hardcount_stale_charge_hold_resolutions_total{result="earlier"}` rising, or `hardcount_parked_invoices{disposition="open"}` above 0 | [Left by an earlier version](#left-by-an-earlier-version) |
 | `hardcount_creditnote_pending_issue_drafts` growing over days | [Clawback drafts waiting](#clawback-drafts-waiting) |
 | Incomplete payments in the Stripe dashboard that Hardcount never confirmed | [How a charge reaches Stripe](#how-a-charge-reaches-stripe) |
 
@@ -269,11 +268,10 @@ stays longer.
 | `released` | The hold was on an invoice still `pending` or `failed`: its charge never confirmed. The hold is cleared and the attempt counter moved, so the invoice can be charged again. |
 | `cleared` | A leftover hold on an invoice that is `unknown`, `processing`, paid, voided or written off. The hold is cleared, and nothing else changes. |
 | `failed` | The database write failed, or the check panicked. The hold stays for a later run. |
-| `earlier` | An earlier version left the hold, or a parked charge. Hardcount keeps it for a person: [Left by an earlier version](#left-by-an-earlier-version). |
 | `lost_race` | Another write changed the invoice first. The next run looks again. |
 
-So a hold stays when the reconciler is not running, when its write keeps
-failing, or when an earlier version left it. The reconciler never asks
+So a hold stays when the reconciler is not running, or when its write keeps
+failing. The reconciler never asks
 Stripe about a hold. A payment it cannot read at Stripe is an `unknown`
 invoice: see [Unconfirmed, with a PaymentIntent](#unconfirmed-with-a-paymentintent).
 
@@ -283,7 +281,7 @@ invoice: see [Unconfirmed, with a PaymentIntent](#unconfirmed-with-a-paymentinte
 SET app.bypass_rls = 'on';
 -- Invoices with a charge hold, oldest first
 SELECT id, tenant_id, invoice_number, status, payment_status,
-       auto_charge_claimed_until, charge_hold_token, provider_synced_at,
+       auto_charge_claimed_until, provider_synced_at,
        stripe_payment_intent_id
 FROM invoices
 WHERE auto_charge_claimed_until IS NOT NULL
@@ -296,11 +294,8 @@ Read each row by its hold (`auto_charge_claimed_until`):
   or by dunning's final action. A charge is running, or it stopped without
   a definite answer.
 - **Ended less than 10 minutes ago:** the reconciler has not looked yet.
-- **Ended earlier, with `charge_hold_token` equal to it:** the reconciler
-  clears it on its next run, once `provider_synced_at` is empty or at least
-  30 minutes old.
-- **Ended earlier, with `charge_hold_token` empty or different:** an earlier
-  version took it. See [Left by an earlier version](#left-by-an-earlier-version).
+- **Ended earlier:** the reconciler clears it on its next run, once
+  `provider_synced_at` is empty or at least 30 minutes old.
 
 A `failed` check logs `reconciler error` with `reconciler` `payment_unknown`
 and an `error` that names the invoice and `clear stale hold`. A check that
@@ -313,85 +308,16 @@ panicked logs `step panicked; running the rest` with `step`
    [A background job is stuck](background-job-stuck.md).
 2. **`failed`:** fix the database error the log line names. The next run
    clears the hold on its own.
-3. **`earlier`:** follow
-   [Left by an earlier version](#left-by-an-earlier-version).
 
 Do not clear `auto_charge_claimed_until` (the charge hold) by hand on an open
 invoice. The reconciler's clear also moves the attempt counter, so the next
-charge sends a new idempotency key. And a hold that an earlier version left
-may cover a charge that took money.
+charge sends a new idempotency key.
 
 **Verify:**
 
 - The query above no longer lists the invoice.
 - `hardcount_stale_charge_hold_resolutions_total` shows `released` or
   `cleared` for the run that cleared it.
-
-## Left by an earlier version
-
-Earlier Hardcount versions charged in one call, and saved nothing before the
-charge reached Stripe. Such a charge could leave an invoice with a charge
-hold, or parked (next section). The upgrade to this version refuses to run
-while any exists
-([Upgrade Hardcount](../../upgrades.md#migration-00225-finish-charges-first)).
-So you see this case only when a copy of an earlier version ran against the
-upgraded database.
-
-**Symptom:**
-
-- This ERROR in the logs, every hour for the same invoice:
-  `stale charge check: this charge hold or parked charge was left by an earlier Hardcount version, which charged in one call, so Hardcount cannot tell whether it took money`.
-- `hardcount_stale_charge_hold_resolutions_total{result="earlier"}` rising.
-- `hardcount_parked_invoices{disposition="open"}` above 0. Otherwise this
-  gauge stays at 0, because this version parks no invoice.
-
-**Why:** Hardcount's records cannot say whether that charge took money. It
-does not guess: it keeps the charge hold, charges nothing on the invoice, and
-logs the ERROR on each run for a person to settle the invoice.
-
-**Check:**
-
-1. Stop every copy of the earlier version.
-2. Find the invoice's payments in Stripe by the invoice's ID, as in step 1
-   of
-   [Mark an invoice paid](manual-interventions.md#mark-an-invoice-paid-offline-payment-received).
-
-**Fix:** act on what Stripe shows.
-
-- **`succeeded`:** send its `payment_intent.succeeded` event again from the
-  Stripe dashboard to the Hardcount webhook endpoint. The webhook marks the
-  invoice paid, a written-off one too. The next run clears the charge hold.
-- **`processing`:** wait until Stripe finishes it, then act on what it
-  became.
-- **Nothing, or only `requires_payment_method` or `canceled`:** mark the
-  invoice uncollectible. The write-off is allowed while the charge hold
-  waits, and a payment Stripe completes later still marks the invoice paid.
-  The next run clears the charge hold, on a parked invoice too. If its
-  dunning run used every retry, check its final action as in step 4 of
-  [Unconfirmed](#unconfirmed-with-a-paymentintent).
-
-**Verify:** the ERROR stops for the invoice, and
-`hardcount_parked_invoices{disposition="open"}` is back to 0.
-
-### Parked: no PaymentIntent
-
-A parked invoice is one an earlier version left with its payment `unknown`
-and no PI ID: its charge got an unclear answer from Stripe that named no
-payment. This version never parks an invoice. A parked invoice from an
-earlier version is not charged again. Void, offline payment, a credit note,
-**Collect payment** and the invoice emails are refused on it with
-`payment_unidentifiable`; only a write-off is allowed.
-
-After you write it off (previous section), the next run clears its charge
-hold, and the hourly ERROR stops. Nothing charges a written-off invoice, and
-a payment Stripe completes later is still recorded by its webhook. The
-invoice stays parked and keeps its notice, which asks you to check the
-customer's payments in Stripe. A credit note draft that waits on its payment
-([Clawback drafts waiting](#clawback-drafts-waiting)) keeps waiting: nothing
-in this version ends a park.
-
-**Verify:** the ERROR does not come back for the invoice on the next run,
-and its `auto_charge_claimed_until` is empty.
 
 ## Clawback drafts waiting
 

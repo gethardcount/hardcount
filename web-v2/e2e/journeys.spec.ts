@@ -507,6 +507,9 @@ test('grant credits and see the balance', async ({ page }) => {
   const customer = await createCustomer()
   await page.goto(`/customers/${customer.id}`)
   await page.getByRole('link', { name: /Credit balance/ }).click()
+  // Wait for the Credit page itself (the URL changes before it renders), so
+  // the heading checked is its own: a customer with no credit is named too.
+  await expect(page.getByRole('link', { name: 'View customer' })).toBeVisible()
   await expect(page.getByRole('heading', { level: 1, name: customer.display_name, exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Grant', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Grant credits' })
@@ -638,6 +641,9 @@ test('a credit grant valid through a picked day is sent as the next midnight and
   const picked = pickedDay(zone)
   await page.goto(`/customers/${customer.id}`)
   await page.getByRole('link', { name: /Credit balance/ }).click()
+  // Wait for the Credit page itself (the URL changes before it renders), so
+  // the heading checked is its own: a customer with no credit is named too.
+  await expect(page.getByRole('link', { name: 'View customer' })).toBeVisible()
   await expect(page.getByRole('heading', { level: 1, name: customer.display_name, exact: true })).toBeVisible()
   await page.getByRole('button', { name: 'Grant', exact: true }).click()
   const dialog = page.getByRole('dialog', { name: 'Grant credits' })

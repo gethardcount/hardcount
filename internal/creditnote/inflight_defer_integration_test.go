@@ -97,8 +97,8 @@ func TestListPendingClawbackDrafts_DefersInFlightSource(t *testing.T) {
 	mustCount(1, "settled source must make even an aged draft eligible — no 24h window")
 }
 
-// The other answer to a written-off park: the card charge did succeed. The
-// card settlement records it (uncollectible -> paid, ADR-113: money that
+// A written-off invoice whose charge is unknown, where the card charge did
+// succeed. The card settlement records it (uncollectible -> paid, ADR-113: money that
 // already moved is recorded), the held relief draft is released, and Issue
 // takes the paid branch: the unused time goes to the customer's balance, the
 // same money as a cancel on an invoice paid before the write-off (ADR-050).
@@ -107,13 +107,13 @@ func TestListPendingClawbackDrafts_DefersInFlightSource(t *testing.T) {
 //
 // Mutation seam: release an uncollectible source in the held-draft scan again
 // (step 1 lists the draft while the charge is unknown).
-func TestListPendingClawbackDrafts_ParkedWrittenOffSource_CardSucceeded_CreditsTheBalance(t *testing.T) {
+func TestListPendingClawbackDrafts_UnknownWrittenOffSource_CardSucceeded_CreditsTheBalance(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
-	tenantID := testutil.CreateTestTenant(t, db, "CN Parked Card Succeeded")
+	tenantID := testutil.CreateTestTenant(t, db, "CN Unknown Card Succeeded")
 
 	cust, err := customer.NewPostgresStore(db).Create(ctx, tenantID, domain.Customer{
-		ExternalID: "cus_parked_paid", DisplayName: "Parked Paid",
+		ExternalID: "cus_unknown_paid", DisplayName: "Unknown Paid",
 	})
 	if err != nil {
 		t.Fatalf("create customer: %v", err)
@@ -121,20 +121,21 @@ func TestListPendingClawbackDrafts_ParkedWrittenOffSource_CardSucceeded_CreditsT
 	invStore := invoice.NewPostgresStore(db)
 	now := time.Now().UTC()
 	inv, err := invStore.CreateWithLineItems(ctx, tenantID, domain.Invoice{
-		CustomerID: cust.ID, InvoiceNumber: "INV-PARKED-PAID-1",
-		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentUnknown,
+		CustomerID: cust.ID, InvoiceNumber: "INV-UNKNOWN-PAID-1",
+		Status: domain.InvoiceFinalized, PaymentStatus: domain.PaymentPending,
 		Currency: "USD", SubtotalCents: 10000, TotalAmountCents: 10000, AmountDueCents: 10000,
 		BillingPeriodStart: now.Add(-30 * 24 * time.Hour), BillingPeriodEnd: now, IssuedAt: &now,
 	}, nil)
 	if err != nil {
-		t.Fatalf("create parked invoice: %v", err)
+		t.Fatalf("create invoice: %v", err)
 	}
+	stampUnknown(t, db, inv.ID, "pi_found")
 	if _, err := invStore.UpdateStatusWithReversalPrior(ctx, tenantID, inv.ID, domain.InvoiceUncollectible, nil); err != nil {
-		t.Fatalf("write off parked invoice: %v", err)
+		t.Fatalf("write off the invoice: %v", err)
 	}
 	cnStore := creditnote.NewPostgresStore(db)
 	draft, err := cnStore.Create(ctx, tenantID, domain.CreditNote{
-		InvoiceID: inv.ID, CustomerID: cust.ID, CreditNoteNumber: "CN-PARKED-PAID-1",
+		InvoiceID: inv.ID, CustomerID: cust.ID, CreditNoteNumber: "CN-UNKNOWN-PAID-1",
 		Status: domain.CreditNoteDraft, Reason: "subscription_cancellation",
 		SubtotalCents: 4000, TotalCents: 4000, Currency: "USD",
 		RefundStatus: domain.RefundNone, IssuePending: true,
@@ -151,7 +152,7 @@ func TestListPendingClawbackDrafts_ParkedWrittenOffSource_CardSucceeded_CreditsT
 		return len(drafts)
 	}
 
-	// 1. Written off and parked: the draft waits for the charge's answer.
+	// 1. Written off and unknown: the draft waits for the charge's answer.
 	if n := pending(); n != 0 {
 		t.Fatalf("%d pending drafts while the charge is unknown, want 0", n)
 	}
@@ -234,9 +235,7 @@ func TestListPendingClawbackDrafts_UnknownWrittenOffSourceWaitsThenIssues(t *tes
 		t.Fatalf("create invoice: %v", err)
 	}
 	// The charge's stamp: unknown on pi_X, before any confirm.
-	if _, applied, err := invStore.StampChargeOutcome(ctx, tenantID, inv.ID, inv.ChargeAttemptSeq, domain.PaymentUnknown, "pi_X", ""); err != nil || !applied {
-		t.Fatalf("stamp unknown on pi_X: applied=%v err=%v", applied, err)
-	}
+	stampUnknown(t, db, inv.ID, "pi_X")
 
 	cnStore := creditnote.NewPostgresStore(db)
 	draft, err := cnStore.Create(ctx, tenantID, domain.CreditNote{
@@ -313,5 +312,24 @@ func backdateCreditNote(t *testing.T, db *postgres.DB, id string) {
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit backdate: %v", err)
+	}
+}
+
+// stampUnknown leaves the invoice unknown on pi, as a charge's stamp before
+// its confirm does (StampPendingConfirm, which needs a live charge hold), so
+// the row is written directly.
+func stampUnknown(t *testing.T, db *postgres.DB, invoiceID, pi string) {
+	t.Helper()
+	tx, err := db.BeginTx(context.Background(), postgres.TxBypass, "")
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	if _, err := tx.Exec(`UPDATE invoices SET payment_status = 'unknown', stripe_payment_intent_id = $2,
+		charge_attempt_seq = charge_attempt_seq + 1 WHERE id = $1`, invoiceID, pi); err != nil {
+		t.Fatalf("stamp unknown on %s: %v", pi, err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
 	}
 }

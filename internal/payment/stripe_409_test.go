@@ -182,7 +182,7 @@ const stripeCreatedForConfirm = `{"id":"pi_scripted","object":"payment_intent","
 // because the first request is still running. The charge must not count as a
 // decline: no failed status, no dunning, no released hold, no new key. The
 // invoice is unknown on the PaymentIntent the charge saved before confirming,
-// so the reconciler reads it by id; nothing is parked.
+// so the reconciler reads it by id.
 func TestChargeInvoice_NetworkErrorThenKeyInUse_IsNotADecline(t *testing.T) {
 	connReset := errors.New("read tcp 10.0.0.2:51234->34.200.27.109:443: read: connection reset by peer")
 	created := scriptedStep{status: http.StatusOK, body: stripeCreatedForConfirm}

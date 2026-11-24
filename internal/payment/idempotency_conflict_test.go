@@ -69,14 +69,12 @@ func TestClassifyStripeError_RealRejectionsStayDefinite(t *testing.T) {
 // invalid_request) and EVERYTHING else is ambiguous — a 5xx, a non-Stripe
 // transport error, and any error type Stripe ships in a future SDK.
 //
-// This is the single point of failure BOTH charge designs share (the shipped
-// park-don't-replay design and the parked ADR-106 ledger): an ambiguous
-// outcome misclassified as definite settles the invoice 'failed', bumps
+// This is the charge path's single point of failure: an ambiguous outcome
+// misclassified as definite settles the invoice 'failed', bumps
 // charge_attempt_seq — rotating the idempotency key — and makes the invoice
 // claimable again, so the next retry opens a second PaymentIntent beside one
-// that may be capturing. No downstream guard in either design can recover
-// from that misclassification, which is why the default direction is pinned
-// here rather than trusted (2026-08-02 design-review panel: "the highest-value
+// that may be capturing. That is why the default direction is pinned here
+// rather than trusted (2026-08-02 design-review panel: "the highest-value
 // correctness work in this area regardless of which design exists").
 func TestClassifyStripeError_DefiniteIsAnAllowList(t *testing.T) {
 	ambiguous := []struct {

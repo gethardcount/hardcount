@@ -252,7 +252,14 @@ export default function CreditsPage() {
   const selectedBalances = balances
     .filter(b => b.customer_id === selectedCustomerId)
     .sort((a, b) => a.currency.localeCompare(b.currency))
-  const selectedCustomer = selectedCustomerId ? customerMap[selectedCustomerId] : null
+  // Read by id: a customer with no credit yet is not in the balances list,
+  // and is who an operator opens here to sell credit to.
+  const selectedCustomerQuery = useQuery({
+    queryKey: ['customer', selectedCustomerId],
+    queryFn: () => api.getCustomer(selectedCustomerId!),
+    enabled: !!selectedCustomerId,
+  })
+  const selectedCustomer = selectedCustomerQuery.data ?? null
 
   // entry-type filtering happens SERVER-SIDE now (query param above);
   // the fetched page is already the filtered page.

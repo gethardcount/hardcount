@@ -169,7 +169,6 @@ first:
 | `code` | When | What to do |
 |---|---|---|
 | `payment_in_flight` | A card charge for the invoice is running, or its result is not known yet. Every charge takes a second or so. A void, write-off, offline payment, credit note, collection or email would run at the same time as that charge. | Wait a few minutes, then retry. After an unclear answer from Stripe, Hardcount can take about an hour to settle the charge. |
-| `payment_unidentifiable` | An earlier Hardcount version parked this invoice: Stripe's answer for its charge was unclear and named no payment. Only a write-off is allowed. Invoices this version charges never return it. | Mark the invoice uncollectible, or ask the person who runs your server to check it ([runbook](../ops/runbook/unclear-charge.md#parked-no-paymentintent)) |
 | `payment_in_progress` | A payment for this invoice is already in progress on the hosted page | Wait |
 | `not_payable` | The invoice cannot be paid now, for example it is paid or voided | Do not retry |
 | `amount_below_minimum` | The amount is below Stripe's smallest card charge | Void it, record an offline payment, or bill it later |

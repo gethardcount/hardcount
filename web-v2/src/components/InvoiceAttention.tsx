@@ -35,7 +35,6 @@ export function InvoiceAttention({
   onChargeNow,
   onSendReminder,
   onVoidInvoice,
-  onMarkUncollectible,
   retrying,
   charging,
   sending,
@@ -47,9 +46,6 @@ export function InvoiceAttention({
   onRetryTax?: () => void
   onChargeNow?: () => void
   onSendReminder?: () => void
-  // Opens the write-off confirmation. Offered by the server only when a
-  // payment's outcome can never be identified (ADR-107).
-  onMarkUncollectible?: () => void
   // Opens the invoice's existing void confirmation. Surfaced only on an
   // amount below Stripe's minimum charge, which Stripe will never charge.
   onVoidInvoice?: () => void
@@ -108,7 +104,6 @@ export function InvoiceAttention({
               onChargeNow={onChargeNow}
               onSendReminder={onSendReminder}
               onVoidInvoice={onVoidInvoice}
-              onMarkUncollectible={onMarkUncollectible}
               retrying={retrying}
               charging={charging}
               sending={sending}
@@ -189,7 +184,6 @@ function ActionButton({
   onChargeNow,
   onSendReminder,
   onVoidInvoice,
-  onMarkUncollectible,
   retrying,
   charging,
   sending,
@@ -202,7 +196,6 @@ function ActionButton({
   onChargeNow?: () => void
   onSendReminder?: () => void
   onVoidInvoice?: () => void
-  onMarkUncollectible?: () => void
   retrying?: boolean
   charging?: boolean
   sending?: boolean
@@ -308,17 +301,6 @@ function ActionButton({
           invoice={invoice}
         />
       )
-    case 'mark_uncollectible':
-      // A parked invoice's write-off (ADR-107), for a customer who paid
-      // another way. Always the secondary style: the usual next step is to
-      // wait, since Hardcount records the payment if Stripe shows it and charges
-      // again after 24 hours if not. Opens the page's existing write-off
-      // confirmation, which states the consequences.
-      return (
-        <Button variant="outline" size="sm" onClick={onMarkUncollectible} disabled={!onMarkUncollectible}>
-          {display}
-        </Button>
-      )
     case 'reconcile_payment':
       // Payment anomaly: the refund or correction is made in Stripe, so the
       // button opens the payment there.
@@ -419,7 +401,6 @@ function defaultLabel(action: AttentionAction): string {
     update_payment_method: 'Update payment method',
     connect_tax_provider: 'Connect Stripe',
     void_invoice: 'Void invoice',
-    mark_uncollectible: 'Mark uncollectible',
   }
   return map[action] ?? action
 }

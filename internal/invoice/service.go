@@ -2186,8 +2186,10 @@ func (s *Service) MarkUncollectibleThen(ctx context.Context, tenantID, id string
 	// Re-run under the row lock, with the charge hold: the check above read
 	// the invoice before the lock, and a charge can claim it in between
 	// (#975). A live hold refuses; an 'unknown' invoice whose hold has ended
-	// passes, and so does one whose hold is stale (ADR-127): writing off moves
-	// no money, and a payment the unknown sweep finds later still settles it.
+	// passes, and so does a pending or failed one whose hold is stale
+	// (ADR-127). Writing off moves no money. On an 'unknown' invoice a payment
+	// the unknown sweep finds later still settles it; a stale hold on a
+	// pending or failed one confirmed nothing (domain.PaymentBlocksActionHeld).
 	updated, err := s.store.UpdateStatusWithReversalPrior(ctx, tenantID, id, domain.InvoiceUncollectible, func(tx *sql.Tx, locked domain.Invoice) error {
 		if err := s.refuseWhileChargeHeld(ctx, tx, locked, domain.ActionMarkUncollectible); err != nil {
 			return err
@@ -2215,14 +2217,13 @@ func (s *Service) MarkUncollectibleThen(ctx context.Context, tenantID, id string
 	// the service was delivered, the invoice was correct, and the tax was
 	// correctly reported on accrual. The entry is Dr bad debt / Cr AR.
 	//
-	// Reversing here shipped a machine-driven under-remit with no human in it:
-	// an ambiguous charge parks an invoice (ADR-107), write-off is its only
-	// legal exit and the attention banner advises it, the reversal fires, then
-	// a sweep finds the charge succeeded at Stripe and
-	// markPaidReportingTransition settles uncollectible -> paid — leaving a
-	// PAID invoice whose tax is un-reported and nothing to re-report it. The
-	// in-flight guard above catches only the payment already moving at
-	// write-off time, not the one that arrives later.
+	// Reversing here would under-remit: an operator writes off an invoice whose
+	// charge is unclear ('unknown', allowed once its hold has ended), the
+	// reversal fires, then the unknown sweep or a webhook finds the charge
+	// succeeded at Stripe and markPaidReportingTransition settles
+	// uncollectible -> paid — leaving a PAID invoice whose tax is un-reported
+	// and nothing to re-report it. The in-flight guard above catches only the
+	// payment already moving at write-off time, not the one that arrives later.
 	//
 	// Recovering tax remitted on an uncollected debt is BAD-DEBT RELIEF: a
 	// separate claim conditioned on facts Hardcount does not hold (UK: 6 months

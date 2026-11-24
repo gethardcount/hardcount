@@ -256,11 +256,8 @@ func TestClassifyInvoiceAttention_PaymentFailed(t *testing.T) {
 func TestClassifyInvoiceAttention_PaymentUnknownIsInfo(t *testing.T) {
 	inv := draft()
 	inv.PaymentStatus = domain.PaymentUnknown
-	// A PaymentIntent id is what makes this the RESOLVING case — the reconciler
-	// has something to query, so Info is honest. Without one the invoice is
-	// parked and will never resolve, which is Critical
-	// (TestParkedInvoiceAttentionTellsTheTruth). This fixture predates that
-	// split and meant the resolving case.
+	// The reconciler reads the PaymentIntent by id, so the charge resolves
+	// itself and Info is honest.
 	inv.StripePaymentIntentID = "pi_resolving"
 	att := classifyInvoiceAttention(inv, attentionContext{})
 	if att == nil || att.Severity != domain.AttentionSeverityInfo {
@@ -773,8 +770,8 @@ func TestClassify_CollectionPaused_BeatsPaymentScheduled(t *testing.T) {
 // more importantly, its SILENCE.
 //
 // Post-ADR-113 no charge path admits uncollectible, so the state is reachable
-// only for rows whose charge was in flight when the removal deployed (and for
-// parked payments awaiting ADR-108 adoption). The banner stays for those, and
+// only for rows whose charge was in flight when the removal deployed. The
+// banner stays for those, and
 // it must fire ONLY while a payment is genuinely in flight — a
 // written-off invoice sitting at `failed` is every dunning-exhausted write-off
 // in the system, and lighting those up would put a permanent banner on the
@@ -789,7 +786,7 @@ func TestRecoveryInFlight_NarrowByDesign(t *testing.T) {
 		{"written off + recovery in flight", domain.InvoiceUncollectible, domain.PaymentProcessing, true},
 		{"written off + failed (every dunning exhaustion)", domain.InvoiceUncollectible, domain.PaymentFailed, false},
 		{"written off + pending", domain.InvoiceUncollectible, domain.PaymentPending, false},
-		{"written off + parked", domain.InvoiceUncollectible, domain.PaymentUnknown, false},
+		{"written off + unknown", domain.InvoiceUncollectible, domain.PaymentUnknown, false},
 		{"voided + processing", domain.InvoiceVoided, domain.PaymentProcessing, false},
 		{"paid + processing", domain.InvoicePaid, domain.PaymentProcessing, false},
 	}
@@ -1107,10 +1104,6 @@ func TestPaymentStateCopy_EveryBranch(t *testing.T) {
 		}(), withCard, domain.AttentionReasonPaymentUnconfirmed, domain.AttentionSeverityInfo,
 			"Stripe hasn't confirmed this charge yet, and Hardcount re-checks automatically until it does.",
 			"3-D Secure", nil},
-		{"parked (no payment id)", func() domain.Invoice { i := queued(); i.PaymentStatus = domain.PaymentUnknown; return i }(), withCard,
-			domain.AttentionReasonPaymentUnconfirmed, domain.AttentionSeverityCritical,
-			"An earlier Hardcount version couldn't confirm this charge with Stripe, and Hardcount can't look it up.\nCheck the customer's payments in Stripe.",
-			"paid another way", []domain.AttentionAction{domain.AttentionActionMarkUncollectible}},
 		{"declined", func() domain.Invoice {
 			i := queued()
 			i.PaymentStatus = domain.PaymentFailed
@@ -1443,62 +1436,9 @@ func TestClassify_AmountBelowMinimum(t *testing.T) {
 	})
 }
 
-// TestParkedInvoiceAttentionTellsTheTruth pins the banner for an invoice whose
-// charge got an unclear answer from Stripe that named no payment (ADR-107).
-//
-// Only an earlier Hardcount version parked an invoice, and the upgrade to
-// ADR-137 refuses to run while any exists. This version saved no payment to
-// look up and never resolves a park on its own or charges it again, so the
-// banner is Critical, sends the operator to Stripe, and keeps write-off for a
-// customer who paid another way.
-func TestParkedInvoiceAttentionTellsTheTruth(t *testing.T) {
-	parked := domain.Invoice{
-		Status:                domain.InvoiceFinalized,
-		PaymentStatus:         domain.PaymentUnknown,
-		StripePaymentIntentID: "", // the defining property
-		AmountDueCents:        5000,
-	}
-
-	att := classifyPaymentUnconfirmed(parked)
-	if att == nil {
-		t.Fatal("a parked invoice must raise an attention")
-	}
-	if att.Severity != domain.AttentionSeverityCritical {
-		t.Errorf("severity = %v, want critical: nothing resolves it without a person", att.Severity)
-	}
-	const want = "An earlier Hardcount version couldn't confirm this charge with Stripe, and Hardcount can't look it up.\n" +
-		"Check the customer's payments in Stripe."
-	if att.Message != want {
-		t.Errorf("message = %q, want the approved copy %q", att.Message, want)
-	}
-	all := att.Message + " " + att.Detail
-	// "never charged twice" is false since REC-5: after 24 hours Hardcount charges
-	// again, and if Stripe creates the original payment after that (ADR-127
-	// R10) the customer has paid twice; the second payment is flagged
-	// (payment.duplicate_charge), not prevented.
-	for _, stale := range []string{"24 hours", "charged again", "keeps searching", "checks Stripe every hour", "charged twice"} {
-		if strings.Contains(all, stale) {
-			t.Errorf("the notice still says %q, which is no longer true", stale)
-		}
-	}
-	// Write-off stays reachable from the notice, as the action for a customer
-	// who paid another way.
-	if len(att.Actions) != 1 || att.Actions[0].Code != domain.AttentionActionMarkUncollectible {
-		t.Errorf("actions = %+v, want exactly [mark_uncollectible]", att.Actions)
-	}
-	if !strings.Contains(att.Detail, "paid another way") {
-		t.Errorf("detail = %q: it must say when to write the invoice off (the customer paid another way)", att.Detail)
-	}
-	// And that nothing is charged meanwhile, or the wait reads as a defect.
-	if !strings.Contains(att.Detail, "No new charge is made while it is unresolved.") {
-		t.Errorf("detail = %q: it must say no new charge is made meanwhile", att.Detail)
-	}
-}
-
-// TestUnconfirmedWithAPaymentIntentKeepsTheWaitingCopy is the negative control.
-// A charge that IS being confirmed genuinely resolves itself, so escalating it
-// to critical and telling the operator to write it off would be its own lie —
-// and would train them to ignore the critical case.
+// TestUnconfirmedWithAPaymentIntentKeepsTheWaitingCopy: a charge that is
+// being confirmed resolves itself, so the notice says to wait and offers no
+// write-off.
 func TestUnconfirmedWithAPaymentIntentKeepsTheWaitingCopy(t *testing.T) {
 	confirming := domain.Invoice{
 		Status:                domain.InvoiceFinalized,

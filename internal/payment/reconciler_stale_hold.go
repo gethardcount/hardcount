@@ -27,7 +27,6 @@ const (
 	staleHoldReleased = "released"  // the held charge sent no confirm; hold cleared and counter moved, so the invoice is charged again
 	staleHoldCleared  = "cleared"   // a leftover hold on an invoice that is in flight, settled, voided or written off; cleared
 	staleHoldFailed   = "failed"    // the clear could not be written (or the check panicked); hold kept for the next tick
-	staleHoldEarlier  = "earlier"   // a hold or park an earlier version left past the upgrade check: kept for a person
 	staleHoldLostRace = "lost_race" // another writer changed the invoice first; the next tick looks again
 )
 
@@ -46,9 +45,6 @@ const (
 // clear is a compare-and-set on the same row, so a charger that stalled past
 // its hold either stamped first (the clear then moves no counter) or finds
 // the hold gone and confirms nothing.
-//
-// A hold without its token, or a park, was left by an earlier version, which
-// charged in one call: kept for a person (earlierVersionHold).
 //
 // It runs first in Run, so an invoice it releases is charged by the same
 // tick's auto-charge sweep. It drains page after page of limit holds, open
@@ -97,49 +93,15 @@ func (r *Reconciler) sweepStaleChargeHolds(ctx context.Context, limit int, panic
 	}
 }
 
-// checkStaleHold clears one stale hold, or keeps an earlier version's for a
-// person. It returns the result label, and an error only for a failure worth
-// surfacing on the reconciler's error log.
+// checkStaleHold clears one stale hold. On an invoice still open for a charge
+// its charger never confirmed, so the counter moves and the next charge uses
+// a fresh idempotency key (ADR-105 amendment): the old one could be handed a
+// 500 Stripe saved under the create. On any other invoice it only clears. It
+// returns the result label, and an error only for a failure worth surfacing
+// on the reconciler's error log.
 func (r *Reconciler) checkStaleHold(ctx context.Context, h domain.StaleChargeHold) (string, error) {
 	inv := h.Invoice
 	ctx = auth.WithTenantID(ctx, inv.TenantID)
-	if !h.Tokened || inv.Parked() {
-		// Left by the one-call version (no current charge parks an invoice).
-		// The upgrade's migration refuses to run while any exists (00225), so
-		// this is a fail-safe for one that got past it.
-		return r.earlierVersionHold(ctx, h)
-	}
-	return r.clearStaleHold(ctx, h)
-}
-
-// earlierVersionHold handles a hold without its token, or a park: left by the
-// one-call version, whose charge put nothing on the invoice before it reached
-// Stripe, so Hardcount's records cannot say whether it took money. The
-// upgrade's migration refuses to run while any exists (00225); this is the
-// fail-safe for one that got past it (an old version still running against
-// the new schema). Never cleared on a guess: kept and reported on the open
-// invoice, whose charges stay blocked, for a person to check the customer's
-// payments in Stripe. Cleared where nothing can charge the invoice any more
-// (written off, voided, paid): a written-off park is then left for the person
-// the banner names, with no hourly error.
-func (r *Reconciler) earlierVersionHold(ctx context.Context, h domain.StaleChargeHold) (string, error) {
-	inv := h.Invoice
-	if inv.OpenForPayment() {
-		r.markChecked(ctx, inv)
-		slog.ErrorContext(ctx, "stale charge check: this charge hold or parked charge was left by an earlier Hardcount version, which charged in one call, so Hardcount cannot tell whether it took money. Check the customer's payments in Stripe and settle the invoice by hand; the upgrade check should have stopped this",
-			"invoice_id", inv.ID, "tenant_id", inv.TenantID, "invoice_number", inv.InvoiceNumber,
-			"status", inv.Status, "payment_status", inv.PaymentStatus, "hold", h.Hold)
-		return staleHoldEarlier, nil
-	}
-	return r.clearStaleHold(ctx, h)
-}
-
-// clearStaleHold clears the hold. On an invoice still open for a charge its
-// charger never confirmed, so the counter moves and the next charge uses a
-// fresh idempotency key (ADR-105 amendment): the old one could be handed a
-// 500 Stripe saved under the create. On any other invoice it only clears.
-func (r *Reconciler) clearStaleHold(ctx context.Context, h domain.StaleChargeHold) (string, error) {
-	inv := h.Invoice
 	moveSeq := openForCharge(inv)
 	cleared, err := r.invoices.ClearStaleChargeHold(ctx, inv.TenantID, inv.ID, h.Hold, inv.ChargeAttemptSeq, moveSeq)
 	if err != nil {
@@ -157,9 +119,9 @@ func (r *Reconciler) clearStaleHold(ctx context.Context, h domain.StaleChargeHol
 	return staleHoldCleared, nil
 }
 
-// markChecked stamps a kept row so it rotates. Best-effort: a lost stamp only
-// means the row is looked at again sooner. The store leaves an 'unknown'
-// invoice that names its PaymentIntent unstamped: the unknown sweep rotates on
+// markChecked stamps a row whose hold could not be cleared, so it rotates.
+// Best-effort: a lost stamp only means the row is looked at again sooner. The
+// store leaves an 'unknown' invoice unstamped: the unknown sweep rotates on
 // the same column and stamps it on its own checks.
 func (r *Reconciler) markChecked(ctx context.Context, inv domain.Invoice) {
 	if err := r.invoices.MarkStaleHoldChecked(ctx, inv.TenantID, inv.ID); err != nil {

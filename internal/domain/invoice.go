@@ -108,17 +108,6 @@ func (i Invoice) PaymentInFlight() bool {
 	return i.PaymentStatus.IsInFlight()
 }
 
-// Parked reports whether the invoice's last charge got an unclear answer from
-// Stripe that named no PaymentIntent (ADR-107): payment_status 'unknown' with
-// no PaymentIntent ID. No charge path takes it, and no sweep can look the
-// payment up by ID. Only an earlier Hardcount version parked an invoice:
-// since ADR-137 every unclear answer names its PaymentIntent, and the upgrade
-// refuses to run over a park. The stale-hold sweep keeps one that got past it
-// for a person.
-func (i Invoice) Parked() bool {
-	return i.PaymentStatus == PaymentUnknown && i.StripePaymentIntentID == ""
-}
-
 // OperatorComposed reports whether an operator made the invoice (POST
 // /v1/invoices), not billing for a subscription. BillingReasonManual is the
 // stamp Create writes; an empty reason is a draft written before the stamp

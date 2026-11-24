@@ -715,12 +715,11 @@ export default function HostedInvoicePage() {
                 payment is settling (including past the poll cap) — a live
                 Pay button during settle is how cards get charged twice.
                 Once the invoice flips paid, pay_enabled goes false. */}
-            {/* A customer whose invoice has an unresolved payment previously
-                arrived here, saw "Amount due", found no Pay button, and was
-                told nothing at all — the worst possible version of a page whose
-                entire job is to be payable. pay_enabled is false for both
-                in-flight states (ADR-107), so say WHICH one it is and what,
-                if anything, they should do. */}
+            {/* pay_enabled is false while a payment is unresolved
+                (processing, or unknown: Stripe has not confirmed the charge
+                yet). Without this note the customer sees "Amount due" and no
+                Pay button, and is told nothing, so say which state it is and
+                what, if anything, they should do. */}
             {!data.pay_enabled && !isPaymentSettling(data) &&
               invoicePaymentInFlight(data.invoice) !== null && (
                 <div className="rounded-lg bg-amber-50 dark:bg-amber-500/10 border border-amber-200 dark:border-amber-500/20 px-4 py-3">

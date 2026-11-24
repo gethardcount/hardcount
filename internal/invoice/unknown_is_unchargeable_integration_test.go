@@ -64,18 +64,14 @@ func TestUnknownPaymentIsUnchargeableByEveryClaimPath(t *testing.T) {
 		},
 	}
 
-	// The two shapes of "unknown". On a PaymentIntent: what every charge
-	// writes before it confirms (ADR-137), and what an unclear confirm leaves.
-	// Parked (no PaymentIntent): only an earlier version wrote it.
+	// "Unknown" on a PaymentIntent: what every charge writes before it
+	// confirms (ADR-137), and what an unclear confirm leaves.
 	shapes := []struct {
 		name string
 		make func(t *testing.T, inv domain.Invoice)
 	}{
 		{"unknown on a PaymentIntent", func(t *testing.T, inv domain.Invoice) {
-			stampOutcome(t, store, ctx, tenantID, inv.ID, domain.PaymentUnknown, "pi_live_"+inv.ID, "unclear answer to the confirm")
-		}},
-		{"parked", func(t *testing.T, inv domain.Invoice) {
-			seedPark(t, db, inv.ID, "ambiguous: no payment_intent_id")
+			stampOutcome(t, db, store, ctx, tenantID, inv.ID, domain.PaymentUnknown, "pi_live_"+inv.ID, "unclear answer to the confirm")
 		}},
 	}
 

@@ -26,36 +26,6 @@ func registerQueueDepthGauges(reg prometheus.Registerer, invoiceGrace time.Durat
 			return n
 		})
 	}
-	// Parked invoices (ADR-107) are those whose last charge got an unclear
-	// answer from Stripe that named no payment. The count is a cluster fact, so
-	// every replica computes it from the database on each scrape. A gauge set
-	// only by the replica that led the billing tick would leave the others
-	// exporting a stale copy. The runbook's alert would then fire from replicas
-	// whose number had resolved.
-	//
-	// Only an earlier Hardcount version parked an invoice (ADR-137), and the
-	// upgrade refuses to run over a park, open or written off, so this stays
-	// 0 unless a copy of that version ran beside this one. It still counts
-	// parks past the 24 hours the earlier version waited (a hold more than 26
-	// hours old, or none), as before; a follow-up change removes the gauge.
-	// TestParkedInvoicesGauge_CountsOnlyParksPastTheirDay pins the window.
-	parkedHelp := "Invoices an earlier Hardcount version parked (an unclear answer from Stripe that named no payment, ADR-107) still parked 26 hours after the charge's hold, or with no hold. By disposition: open (finalized) or written_off (uncollectible). Since ADR-137 nothing parks an invoice and the upgrade refuses to run over a park, so this stays 0 unless a copy of an earlier version ran against the upgraded database; alert on open > 0: a person must check the customer's payments in Stripe. -1 = metric query failed."
-	for _, m := range []struct {
-		label string
-		live  bool
-	}{{"live", true}, {"test", false}} {
-		for _, d := range []struct{ label, status string }{{"open", "finalized"}, {"written_off", "uncollectible"}} {
-			q := fmt.Sprintf(`SELECT COUNT(*) FROM invoices WHERE status = '%s' AND payment_status = 'unknown' AND COALESCE(stripe_payment_intent_id, '') = '' AND livemode = %t
-				AND (auto_charge_claimed_until IS NULL OR auto_charge_claimed_until < now() - interval '26 hours')`, d.status, m.live)
-			auto.NewGaugeFunc(prometheus.GaugeOpts{Name: "hardcount_parked_invoices", Help: parkedHelp, ConstLabels: prometheus.Labels{"mode": m.label, "disposition": d.label}}, func() float64 {
-				n, err := count(q)
-				if err != nil {
-					return -1
-				}
-				return n
-			})
-		}
-	}
 	// Billing backlog (ADR-006, amendment P27). The scheduler drains every due
 	// subscription in one tick, so on a busy day a tick can run for hours. On
 	// hardcount_leader_last_tick_age_seconds that looks like a wedged tick.

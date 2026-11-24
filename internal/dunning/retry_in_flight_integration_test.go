@@ -104,9 +104,7 @@ func (f *exhaustFixture) getRun(t *testing.T) domain.InvoiceDunningRun {
 }
 
 // setHold sets the invoice's charge hold to a live value, as the retry's own
-// claim left it while its payment was processing: the hold and, equal to it,
-// its token (a hold without its token is an earlier version's, which the
-// failure settle leaves for a person).
+// claim left it while its payment was processing.
 func (f *exhaustFixture) setHold(t *testing.T) {
 	t.Helper()
 	tx, err := f.db.BeginTx(f.ctx, postgres.TxBypass, "")
@@ -114,7 +112,7 @@ func (f *exhaustFixture) setHold(t *testing.T) {
 		t.Fatalf("begin: %v", err)
 	}
 	defer postgres.Rollback(tx)
-	if _, err := tx.ExecContext(f.ctx, `UPDATE invoices SET auto_charge_claimed_until = now() + interval '4 minutes', charge_hold_token = now() + interval '4 minutes' WHERE id = $1 AND tenant_id = $2`, f.invoiceID, f.tenantID); err != nil {
+	if _, err := tx.ExecContext(f.ctx, `UPDATE invoices SET auto_charge_claimed_until = now() + interval '4 minutes' WHERE id = $1 AND tenant_id = $2`, f.invoiceID, f.tenantID); err != nil {
 		t.Fatalf("set hold: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
