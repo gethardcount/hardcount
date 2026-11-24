@@ -11,19 +11,16 @@ import (
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
-// TestListRuns_OneOffInvoiceRunOnACustomerClock: a dunning run on a one-off
-// invoice (subscription_id NULL) of a clock-pinned customer resolves its
-// clock through the customer (the pin's owner, ADR-027):
-//   - ListRuns surfaces effective_now + test_clock_id for it (the sub join
-//     rendered it wall-anchored and badge-less);
+// TestListRuns_OneOffInvoiceRun: a dunning run on a one-off invoice
+// (subscription_id NULL):
+//   - ListRuns lists it with its invoice's fields;
 //   - ListEvents tie-breaks equal created_at by id (creation-ordered xid),
-//     so same-sim-instant cascades render deterministically causal.
-func TestListRuns_OneOffInvoiceRunOnACustomerClock(t *testing.T) {
+//     so same-instant cascades render deterministically causal.
+func TestListRuns_OneOffInvoiceRun(t *testing.T) {
 	db := testutil.SetupTestDB(t)
 	ctx := postgres.WithLivemode(context.Background(), false)
 
 	const tenantID = "hc_ten_dun_oneoff"
-	const clockID = "hc_tclk_dun_oneoff"
 	frozen := time.Date(2027, 6, 1, 0, 0, 0, 0, time.UTC)
 
 	tx, err := db.BeginTx(ctx, postgres.TxBypass, "")
@@ -40,10 +37,8 @@ func TestListRuns_OneOffInvoiceRunOnACustomerClock(t *testing.T) {
 	// 0021 livemode-autoset trigger reads the GUC; pin the tx to test mode.
 	mustExec(`SELECT set_config('app.livemode', 'off', true)`)
 	mustExec(`INSERT INTO tenants (id, name, status) VALUES ($1, 'Dun OneOff', 'active')`, tenantID)
-	mustExec(`INSERT INTO test_clocks (id, tenant_id, name, frozen_time, status, livemode)
-		VALUES ($1, $2, 'dunoneoff', $3, 'ready', false)`, clockID, tenantID, frozen)
-	mustExec(`INSERT INTO customers (id, tenant_id, external_id, display_name, email, test_clock_id, created_at, updated_at)
-		VALUES ('cus_dun_pin', $1, 'dun_pin', 'Pin', '', $2, $3, $3)`, tenantID, clockID, frozen)
+	mustExec(`INSERT INTO customers (id, tenant_id, external_id, display_name, email, created_at, updated_at)
+		VALUES ('cus_dun_pin', $1, 'dun_pin', 'Pin', '', $2, $2)`, tenantID, frozen)
 	mustExec(`INSERT INTO dunning_policies (id, tenant_id, name, enabled, is_default, retry_days, final_subscription_action, final_invoice_action, livemode)
 		VALUES ('dpol_oneoff', $1, 'P', true, true, '[3, 3, 3]', 'pause', 'none', false)`, tenantID)
 	// A one-off invoice: subscription_id NULL.
@@ -61,7 +56,7 @@ func TestListRuns_OneOffInvoiceRunOnACustomerClock(t *testing.T) {
 
 	dstore := dunning.NewPostgresStore(db)
 
-	t.Run("ListRuns anchors one-off runs on the customer clock", func(t *testing.T) {
+	t.Run("ListRuns lists a one-off run with its invoice", func(t *testing.T) {
 		runs, _, err := dstore.ListRuns(ctx, dunning.RunListFilter{TenantID: tenantID})
 		if err != nil {
 			t.Fatalf("ListRuns: %v", err)
@@ -75,11 +70,8 @@ func TestListRuns_OneOffInvoiceRunOnACustomerClock(t *testing.T) {
 		if oneoff == nil {
 			t.Fatal("run_oneoff_pin missing from ListRuns")
 		}
-		if oneoff.EffectiveNow == nil || !oneoff.EffectiveNow.Equal(frozen) {
-			t.Errorf("effective_now: got %v, want the customer clock's frozen_time %v (was NULL under the sub join — wall-anchored relative times)", oneoff.EffectiveNow, frozen)
-		}
-		if oneoff.TestClockID != clockID {
-			t.Errorf("test_clock_id: got %q, want %q (drives the badge server-authoritatively)", oneoff.TestClockID, clockID)
+		if oneoff.InvoiceNumber != "inv_dun_oneoff" || oneoff.InvoiceAmountDue != 2500 || oneoff.MaxRetryAttempts != 3 {
+			t.Errorf("invoice %q, due %d, retries %d; want inv_dun_oneoff, 2500, 3", oneoff.InvoiceNumber, oneoff.InvoiceAmountDue, oneoff.MaxRetryAttempts)
 		}
 	})
 

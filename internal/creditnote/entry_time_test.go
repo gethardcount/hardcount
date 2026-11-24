@@ -10,31 +10,12 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// cnDecidedAt is an instant on clock clk_d before its frozen time, as a
-// request decided before an advance would carry. laterOnSameClock answers a
-// later time on that same clock (its frozen time, three days on) on purpose:
-// an entry point that asked it would stamp that later time, so a row that
-// sees cnDecidedAt and no reads shows the resolver was never asked.
+// cnDecidedAt is the instant a caller bound, far from the machine's time, so
+// a stamp read from the machine's clock instead shows.
 var cnDecidedAt = time.Date(2027, 3, 4, 10, 0, 0, 0, time.UTC)
 
-func cnOnDecidedClock() context.Context {
-	return clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: cnDecidedAt, TestClockID: "clk_d"})
-}
-
-type laterOnSameClock struct{ reads int }
-
-func (r *laterOnSameClock) answer() (clock.Sim, error) {
-	r.reads++
-	return clock.Sim{At: cnDecidedAt.Add(72 * time.Hour), TestClockID: "clk_d"}, nil
-}
-func (r *laterOnSameClock) SimForInvoice(context.Context, string, string) (clock.Sim, error) {
-	return r.answer()
-}
-func (r *laterOnSameClock) SimForSubscription(context.Context, string, string) (clock.Sim, error) {
-	return r.answer()
-}
-func (r *laterOnSameClock) SimForCustomer(context.Context, string, string) (clock.Sim, error) {
-	return r.answer()
+func cnAtDecidedTime() context.Context {
+	return clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), cnDecidedAt)
 }
 
 // cnSteppingClock is a server clock that moves a second each time it answers
@@ -110,32 +91,31 @@ func cnEntries() []cnEntry {
 }
 
 // cnService builds the service every time row uses: inv behind it, a number
-// generator, the resolver res, and clk as the server's clock when one is
-// given (else the default, the machine's).
-func cnService(store Store, inv domain.Invoice, clk clock.Clock, res clock.Resolver) *Service {
+// generator, and clk as the server's clock when one is given (else the
+// default, the machine's).
+func cnService(store Store, inv domain.Invoice, clk clock.Clock) *Service {
 	svc := NewService(store, &memInvoiceReader{invoices: map[string]domain.Invoice{inv.ID: inv}}, &fakeRefunder{})
 	svc.SetNumberGenerator(&fakeCNNumbers{})
-	svc.SetResolver(res)
 	if clk != nil {
 		svc.SetClock(clk)
 	}
 	return svc
 }
 
-func newCNSvc(clk clock.Clock) (*Service, *memStore, *laterOnSameClock) {
-	store, res := newMemStore(), &laterOnSameClock{}
-	return cnService(store, cardInvoice(), clk, res), store, res
+func newCNSvc(clk clock.Clock) (*Service, *memStore) {
+	store := newMemStore()
+	return cnService(store, cardInvoice(), clk), store
 }
 
-// Each credit-note entry point runs on the time its caller decided and reads
-// no clock of its own: the stamp it writes is the decided instant.
+// Each credit-note entry point runs on the time its caller bound and reads
+// no clock of its own: the stamp it writes is the bound instant.
 func TestCreditNoteEntryPoints_RunOnTheDecidedTime(t *testing.T) {
 	for _, e := range cnEntries() {
 		t.Run(e.name+" at the decided time", func(t *testing.T) {
-			svc, store, res := newCNSvc(nil)
-			stamp := e.run(t, cnOnDecidedClock(), svc, store)
-			if stamp == nil || !stamp.Equal(cnDecidedAt) || res.reads != 0 {
-				t.Errorf("stamp %v, clock reads %d; want %v, none", stamp, res.reads, cnDecidedAt)
+			svc, store := newCNSvc(nil)
+			stamp := e.run(t, cnAtDecidedTime(), svc, store)
+			if stamp == nil || !stamp.Equal(cnDecidedAt) {
+				t.Errorf("stamp %v; want %v", stamp, cnDecidedAt)
 			}
 		})
 	}

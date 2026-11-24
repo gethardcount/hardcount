@@ -49,78 +49,49 @@ func (c *callSpy) IngestCallResolvingHeld(ctx context.Context, tenantID string, 
 	return c.heldMemStore.IngestCallResolvingHeld(ctx, tenantID, call, after)
 }
 
-// Each ingest entry decides its customer's time itself, once per event (a
-// LiteLLM call, once for the call), and everything below reads that decided
-// time. Every row runs from three contexts: nothing decided; the door's real
-// time (clock.WithRealTime, what production hands usage); and a real instant
-// bound above the service. A customer on a test clock is stamped at its
-// clock's frozen time from all three (a real instant must not hide the
-// clock); a customer on no clock at one read of the server's clock, or at
-// the real instant when one is bound.
+// Each ingest entry binds its time itself, once per event (a LiteLLM call,
+// once for the call), and everything below reads it. Every row runs from
+// three contexts: nothing bound; the door's real time (clock.WithRealTime,
+// what production hands usage); and a real instant bound above the service.
+// The event is stamped at one read of the server's clock, or at the real
+// instant when one is bound.
 func TestUsageEntries_StampTheCustomersDecidedTime(t *testing.T) {
-	frozenA := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
 	serverAt := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
 	realAt := time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC)
-	setup := func(store Store) (*Service, *fakeResolver, *usageSteppingClock) {
+	setup := func(store Store) (*Service, *usageSteppingClock) {
 		svc := NewService(store)
-		res := &fakeResolver{frozen: map[string]time.Time{"cus_a": frozenA}}
-		svc.SetResolver(res)
 		server := &usageSteppingClock{at: serverAt.Add(-time.Second)}
 		svc.SetClock(server)
-		return svc, res, server
+		return svc, server
 	}
 	for _, base := range []struct {
 		name string
 		ctx  func() context.Context
-		// noClock is when an event of a customer on no clock is stamped,
-		// and serverReads how many reads of the server's clock that takes.
-		noClock     time.Time
+		// want is when an event is stamped, and serverReads how many reads
+		// of the server's clock that takes.
+		want        time.Time
 		serverReads int
 	}{
-		{"nothing decided", testMode, serverAt, 1},
+		{"nothing bound", testMode, serverAt, 1},
 		{"the door's real time", func() context.Context { return clock.WithRealTime(testMode()) }, serverAt, 1},
 		{"a real instant bound above", func() context.Context { return clock.WithEffectiveNow(testMode(), realAt) }, realAt, 0},
 	} {
-		t.Run("Ingest, a customer on a test clock, from "+base.name, func(t *testing.T) {
-			svc, res, server := setup(newMemStore())
-			e, err := svc.Ingest(base.ctx(), "t1", IngestInput{CustomerID: "cus_a", MeterID: "mtr_1", Quantity: dec(1)})
-			if err != nil {
-				t.Fatalf("Ingest: %v", err)
-			}
-			if !e.Timestamp.Equal(frozenA) || res.calls != 1 || server.reads != 0 {
-				t.Errorf("stamped %v, %d resolver reads, %d server reads; want %v, one, none", e.Timestamp, res.calls, server.reads, frozenA)
-			}
-		})
-		t.Run("Ingest, a customer on no clock, from "+base.name, func(t *testing.T) {
-			svc, res, server := setup(newMemStore())
+		t.Run("Ingest, from "+base.name, func(t *testing.T) {
+			svc, server := setup(newMemStore())
 			e, err := svc.Ingest(base.ctx(), "t1", IngestInput{CustomerID: "cus_n", MeterID: "mtr_1", Quantity: dec(1)})
 			if err != nil {
 				t.Fatalf("Ingest: %v", err)
 			}
-			if !e.Timestamp.Equal(base.noClock) || res.calls != 1 || server.reads != base.serverReads {
-				t.Errorf("stamped %v, %d resolver reads, %d server reads; want %v, one, %d", e.Timestamp, res.calls, server.reads, base.noClock, base.serverReads)
+			if !e.Timestamp.Equal(base.want) || server.reads != base.serverReads {
+				t.Errorf("stamped %v, %d server reads; want %v, %d", e.Timestamp, server.reads, base.want, base.serverReads)
 			}
 		})
-		t.Run("Backfill: its future check is the clock's time, from "+base.name, func(t *testing.T) {
-			svc, res, _ := setup(newMemStore())
-			at := frozenA
-			if _, err := svc.Backfill(base.ctx(), "t1", IngestInput{CustomerID: "cus_a", MeterID: "mtr_1", Quantity: dec(1), Timestamp: &at}); err != nil {
-				t.Fatalf("a backfill at the clock's frozen time: %v", err)
-			}
-			if res.calls != 1 {
-				t.Errorf("%d resolver reads; want one", res.calls)
-			}
-			later := frozenA.Add(time.Second)
-			if _, err := svc.Backfill(base.ctx(), "t1", IngestInput{CustomerID: "cus_a", MeterID: "mtr_1", Quantity: dec(1), Timestamp: &later}); err == nil {
-				t.Error("a backfill a second after the clock's frozen time was accepted; want it refused as in the future")
-			}
-		})
-		t.Run("IngestCall: one decision for the call's events, from "+base.name, func(t *testing.T) {
+		t.Run("IngestCall: one instant for the call's events, from "+base.name, func(t *testing.T) {
 			store := &callSpy{heldMemStore: &heldMemStore{memStore: newMemStore()}}
-			svc, res, _ := setup(store)
+			svc, server := setup(store)
 			ev := func(key string) CallEvent { return CallEvent{Quantity: dec(1), IdempotencyKey: key} }
 			if _, err := svc.IngestCall(base.ctx(), "t1", CallInput{
-				CustomerID: "cus_a", MeterID: "mtr_1",
+				CustomerID: "cus_n", MeterID: "mtr_1",
 				Events: []CallEvent{ev("c:input"), ev("c:output"), ev("c:cache_write_5m")},
 			}); err != nil {
 				t.Fatalf("IngestCall: %v", err)
@@ -129,64 +100,29 @@ func TestUsageEntries_StampTheCustomersDecidedTime(t *testing.T) {
 				t.Fatalf("%d events; want 3", len(store.events))
 			}
 			for _, e := range store.events {
-				if !e.Timestamp.Equal(frozenA) {
-					t.Errorf("stamped %v; want %v", e.Timestamp, frozenA)
+				if !e.Timestamp.Equal(base.want) {
+					t.Errorf("stamped %v; want %v", e.Timestamp, base.want)
 				}
 			}
-			if res.calls != 1 {
-				t.Errorf("%d resolver reads; want one for the call", res.calls)
+			if server.reads != base.serverReads {
+				t.Errorf("%d server reads; want %d for the call", server.reads, base.serverReads)
 			}
 		})
-		t.Run("a held release: its NotAfter is the clock's time, from "+base.name, func(t *testing.T) {
+		t.Run("a held release: its NotAfter is the bound instant, from "+base.name, func(t *testing.T) {
 			store := &releaseSpy{heldMemStore: &heldMemStore{memStore: newMemStore()}}
-			svc, res, _ := setup(store)
-			if _, err := svc.Release(base.ctx(), "t1", ReleaseInput{ExternalCustomerID: "ext_a", CustomerID: "cus_a", MeterIDs: map[string]string{"tokens": "mtr_1"}}); err != nil {
+			svc, _ := setup(store)
+			if _, err := svc.Release(base.ctx(), "t1", ReleaseInput{ExternalCustomerID: "ext_n", CustomerID: "cus_n", MeterIDs: map[string]string{"tokens": "mtr_1"}}); err != nil {
 				t.Fatalf("Release: %v", err)
 			}
-			if len(store.notAfter) != 1 || !store.notAfter[0].Equal(frozenA) || res.calls != 1 {
-				t.Errorf("not after %v, %d resolver reads; want %v, one", store.notAfter, res.calls, frozenA)
+			if len(store.notAfter) != 1 || !store.notAfter[0].Equal(base.want) {
+				t.Errorf("not after %v; want %v", store.notAfter, base.want)
 			}
 		})
 	}
 }
 
-// A batch under a real instant bound above the service: each event is
-// stamped by its own customer, at its clock's frozen time for a customer on
-// a test clock and at the real instant for one on no clock, with the
-// resolver read once per event. (TestBatchIngest_EachEventIsDatedByItsOwn
-// Customer covers a batch from a context with nothing decided.)
-func TestBatchIngest_ARealInstantDoesNotHideAnEventsClock(t *testing.T) {
-	frozenA := time.Date(2026, 7, 4, 12, 0, 0, 0, time.UTC)
-	frozenB := time.Date(2026, 9, 1, 8, 0, 0, 0, time.UTC)
-	realAt := time.Date(2026, 11, 16, 9, 0, 0, 0, time.UTC)
-	store := newMemStore()
-	svc := NewService(store)
-	res := &fakeResolver{frozen: map[string]time.Time{"cus_a": frozenA, "cus_b": frozenB}}
-	svc.SetResolver(res)
-	if _, batchErrs := svc.BatchIngest(clock.WithEffectiveNow(testMode(), realAt), "t1", []IngestInput{
-		{CustomerID: "cus_a", MeterID: "mtr_1", Quantity: dec(1), IdempotencyKey: "b-a"},
-		{CustomerID: "cus_b", MeterID: "mtr_1", Quantity: dec(1), IdempotencyKey: "b-b"},
-		{CustomerID: "cus_n", MeterID: "mtr_1", Quantity: dec(1), IdempotencyKey: "b-n"},
-	}); len(batchErrs) != 0 {
-		t.Fatalf("batch: %v", batchErrs)
-	}
-	want := map[string]time.Time{"cus_a": frozenA, "cus_b": frozenB, "cus_n": realAt}
-	if len(store.events) != 3 {
-		t.Fatalf("%d events; want 3", len(store.events))
-	}
-	for _, e := range store.events {
-		if !e.Timestamp.Equal(want[e.CustomerID]) {
-			t.Errorf("%s stamped %v; want %v", e.CustomerID, e.Timestamp, want[e.CustomerID])
-		}
-	}
-	if res.calls != 3 {
-		t.Errorf("%d resolver reads; want one per event (3)", res.calls)
-	}
-}
-
-// One decision per action at real time (a customer on no clock): a LiteLLM
-// call decides its customer once for all its events, and a backfill once for
-// its check and its ingest.
+// One instant per action: a LiteLLM call reads the server's clock once for
+// all its events, and a backfill once for its check and its ingest.
 func TestUsage_DecidesTheCustomerOncePerAction(t *testing.T) {
 	now := time.Now().UTC()
 	past := now.Add(-time.Hour)
@@ -209,13 +145,13 @@ func TestUsage_DecidesTheCustomerOncePerAction(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			svc := NewService(&heldMemStore{memStore: newMemStore()})
-			res := &answerResolver{sim: clock.Sim{At: now}}
-			svc.SetResolver(res)
+			server := &usageSteppingClock{at: now}
+			svc.SetClock(server)
 			if err := c.act(svc); err != nil {
 				t.Fatalf("act: %v", err)
 			}
-			if res.reads != 1 {
-				t.Errorf("%d resolver reads; want one decision for the action", res.reads)
+			if server.reads != 1 {
+				t.Errorf("%d server reads; want one for the action", server.reads)
 			}
 		})
 	}

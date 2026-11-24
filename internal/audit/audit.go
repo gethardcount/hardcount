@@ -10,7 +10,6 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/crypto"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/platform/request"
@@ -143,15 +142,6 @@ func (l *Logger) Log(ctx context.Context, tenantID, action, resourceType, resour
 	defer postgres.Rollback(tx)
 
 	id := postgres.NewID("hc_aud")
-	// Same ctx-derived sim axis as LogInTx (ADR-090 §5). The residual own-tx
-	// callers are not a lesser class of evidence: the engine's end-of-period
-	// cancel and its subscription updates write here (the residual writers in
-	// internal/arch/audit_background_writers_test.go). Every finalize row is
-	// written with LogInTx, in its transaction: billing.Engine's
-	// emitFinalizeAuditTx for an invoice the engine creates already
-	// finalized, and invoice.Service.finalizeHook for the finalize of a draft
-	// (the operator's Finalize and the tax retry).
-	simAt, clockID, metadata := simColumns(ctx, metadata)
 	metaJSON, err := json.Marshal(metadata)
 	if err != nil {
 		// Same totality rule as LogInTx, and it was missing here. The old code
@@ -180,26 +170,13 @@ func (l *Logger) Log(ctx context.Context, tenantID, action, resourceType, resour
 	// wall-clock | Forensics; never on the public API"). Diverged from
 	// this for ~2 weeks via subscription.auditCtxForSub (since reverted
 	// 2026-05-28) — see ADR-030 amendment.
-	//
-	// The SECOND axis is sim_effective_at + test_clock_id: the simulated
-	// instant the ctx's clock binding CARRIED when this mutation was
-	// performed. Since the contracted-instant arc (#520/#523, playbook
-	// class J) the engine and dunning REBIND that instant per cycle close /
-	// per retry, so rows inside one advance carry their own boundary
-	// instants — a Jan→Mar advance stamps January's close on January's
-	// rows. Writers without a rebinding still stamp where the clock stood.
-	// Derived from the ctx's clock binding (simColumns), queryable via
-	// ?test_clock_id= / ?sim_from= / ?sim_to=. It is not a substitute for
-	// created_at — it is the only axis that survives ADR-086 teardown, which
-	// hard-deletes every simulated business row and leaves the audit log as
-	// the simulation's sole record.
 	_, err = tx.ExecContext(writeCtx, `
 		INSERT INTO audit_log (id, tenant_id, actor_type, actor_id, action,
 			resource_type, resource_id, resource_label, metadata, ip_address,
-			request_id, sim_effective_at, test_clock_id, created_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+			request_id, created_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
 	`, id, tenantID, actorType, actorID, action, resourceType, resourceID, resourceLabel, metaJSON,
-		nullIfEmpty(ipAddress), nullIfEmpty(requestID), simAt, clockID, time.Now().UTC())
+		nullIfEmpty(ipAddress), nullIfEmpty(requestID), time.Now().UTC())
 	if err != nil {
 		auditWriteErrors.WithLabelValues(OutcomeRowLost).Inc()
 		slog.Error("audit: failed to insert entry",
@@ -228,128 +205,12 @@ func (l *Logger) Log(ctx context.Context, tenantID, action, resourceType, resour
 // domain.AuditAction* / existing wire strings — those strings are FROZEN
 // (ADR-090): the FE filter vocabulary, badge maps, and existing rows all key
 // on them, so a rename is a coordinated FE+MANUAL_TEST change, never a drive-by.
-//
-// There is deliberately NO sim field. The simulated-time axis
-// (sim_effective_at / test_clock_id) is derived by the writer from the ctx's
-// clock binding (clock.SimOf) — see simColumns. A per-emission field would
-// mean ~90 emitters each remembering to populate it, which is exactly how
-// stamping ended up partial: an emitter that forgets is invisible, and the
-// resulting clock filter lies by omission. Deriving it once, at the two
-// writers, makes the axis TOTAL for every path that runs under a bound clock
-// and makes "clock C at wall-clock now" unrepresentable (clock.Sim pairs the
-// halves). ADR-090 §5.
 type Entry struct {
 	Action        string
 	ResourceType  string
 	ResourceID    string
 	ResourceLabel string
 	Metadata      map[string]any
-}
-
-// SIM-AXIS COVERAGE (ADR-090 §5) — what ?test_clock_id= can and cannot see.
-//
-// COVERED: every path that runs under a clock binding. That is every entry
-// point whose time is decided from its record (clock.Decide binds the
-// record's clock id with its instant: the functions that decide their own
-// time), the handler-level emitters that bind explicitly before emitting
-// (invoice, subscription, customer — including CREATE, which
-// binds from the clock it is handed because the customer pin does not exist
-// yet — dunning), and the test-clock service, which binds each change's row
-// to the clock it changes.
-// Credit notes are covered where their time is decided from their invoice:
-// a create, from the invoice its body names, which creditnote.Service keeps
-// for its in-tx rows, and a Stripe refund webhook's refund-status row
-// (ApplyRefundWebhook), on the time the service decides from the invoice of
-// the note holding the refund.
-//
-// A note on what "covered" means, so this list cannot quietly become a lie: a
-// path is covered if it EMITS and its emission runs under a binding. Credit
-// expiry runs under the catchup binding but emits NO audit row at all — the
-// credit ledger is event-sourced and immutable, so the expiry entry IS the
-// record, exactly as usage_events is the record for metering. It was listed
-// here as covered, which credited a row that does not exist. Closure trigger:
-// if credit expiry ever emits, it needs nothing but the ctx it already has.
-//
-// NOT COVERED — stated because a filter that omits rows silently is worse than
-// no filter at all:
-//
-//   - Operator-driven PRICE-OVERRIDE routes (create/delete a customer price
-//     override). internal/pricing has no clock.Resolver at all, so the handler
-//     emits on an unbound r.Context() and the row lands with NULL sim columns.
-//     This one is NOT a "not in the clock domain" case and must not be
-//     mistaken for one — customer_price_overrides IS torn down with the
-//     clock (ADR-086, testclock/postgres.go), so an
-//     operator who negotiates a price for a simulated customer mid-simulation
-//     leaves a row that is invisible to ?test_clock_id= AND, after teardown, is
-//     the only surviving evidence the override ever existed. Closure: give
-//     pricing a clock.Resolver and bind at the handler — the axis then follows
-//     from ctx with no change here.
-//   - PAYMENT-METHOD routes. NOT because they are "outside the clock domain" — an
-//     earlier version of this note said that, and it is false by the very test the
-//     price-override bullet above applies: payment_methods IS torn down with the
-//     clock (testclock/postgres.go). The real reason is narrower and worth stating
-//     exactly: a payment method is a REAL Stripe object. Attaching one during a
-//     simulation attaches a real card at Stripe, so the row is a wall-clock fact
-//     about a real-world effect, and stamping it into simulated time would claim
-//     the card was attached at an instant that never happened. The accepted loss
-//     is real: a clock-scoped view will not show "operator attached a card
-//     mid-simulation." Closure trigger: the same one as the checkout rows below —
-//     auditing the settle path, at which point these breadcrumbs join it.
-//   - PUBLIC CHECKOUT rows (hosted-invoice Pay click, payment-update
-//     link). These paths never bind a pin — they stamp wall-clock and
-//     talk to real Stripe — so their rows are wall-clock rows about an entity
-//     that happens to be pinned. This is consistent with what the clock view
-//     already cannot show: the SETTLEMENT those clicks lead to is a Stripe
-//     webhook, which the registry already records as writing no audit row at
-//     all. Closure trigger: the same one — auditing the settle path.
-//
-// A row from either class has NULL sim columns and is therefore absent from the
-// simulated slice — not mis-attributed. That is the safe failure direction, and
-// it is the reason this comment exists instead of a plausible-looking guess.
-//
-// simColumns resolves the sim axis for an emission from the ctx's clock
-// binding: the clock whose world this code path is running in, and the
-// simulated instant it lands at. Returns (nil, nil) — SQL NULLs — for every
-// wall-clock path, which is the overwhelming majority of rows and the reason
-// the clock index (0148) is partial.
-//
-// It also mirrors the pair into the metadata bag under the legacy keys. The audit
-// PAGE no longer reads that mirror — it reads the columns only, deliberately, so
-// that what it renders is exactly what the clock filter can find. The mirror is
-// still what the SUBSCRIPTION timeline renders (it offers no clock filter, so it
-// has no promise to break), and it is where rows written before 0148 carry their
-// sim context. The mirror is a COPY — the caller's map is never mutated, because
-// emitters build their metadata once and reuse it.
-//
-// THE WRITER OWNS metadata["sim_effective_at"] AND metadata["test_clock_id"].
-// Emitters must not set them: this function overwrites both unconditionally,
-// silently, and an emitter cannot tell its value was dropped. Seven emitters
-// used to hand-stamp them. Four wrote the same instant this does and were pure
-// duplication. The other three (the trial-end cancel/activate rows) wrote the
-// TRIAL-END instant — a genuinely different fact — and had it destroyed under
-// catchup, because a catchup performs the cancel at the ADVANCE's instant,
-// which can be weeks of simulated time after the trial ended. All seven are
-// gone; the trial-end instant now travels as metadata["trial_end_at"], which
-// says what it is. If you need another simulated instant on a row, give it its
-// own key — do not overload this one.
-//
-// Both halves come from one clock.Sim, resolved from one read of the clock
-// (clock.Resolver), so the column pair can never disagree with itself. A partial binding reports Simulated()=false and is
-// treated as absent rather than half-stamped: a row with a clock id and a
-// wall-clock instant would sit IN the partial index and answer sim-time
-// queries with a lie.
-func simColumns(ctx context.Context, metadata map[string]any) (simAt, clockID any, meta map[string]any) {
-	sim, ok := clock.SimOf(ctx)
-	if !ok {
-		return nil, nil, metadata
-	}
-	m := make(map[string]any, len(metadata)+2)
-	for k, v := range metadata {
-		m[k] = v
-	}
-	m["sim_effective_at"] = sim.At.UTC().Format(time.RFC3339)
-	m["test_clock_id"] = sim.TestClockID
-	return sim.At.UTC(), sim.TestClockID, m
 }
 
 // LogInTxFields is LogInTx with the entry's fields as arguments, for a
@@ -372,16 +233,14 @@ func (l *Logger) LogInTxFields(ctx context.Context, tx *sql.Tx, action, resource
 // No Entry may make the insert fail (LogInTx is total by construction).
 // Otherwise a bug in audit data, such as telemetry metadata, would roll back
 // a money change. Metadata that cannot be encoded as JSON is stored as
-// {"marshal_error": ...} instead. The simulated-time columns,
-// sim_effective_at and test_clock_id (the sim axis), come from the clock
-// binding in ctx, never from the caller (simColumns). The integration test
+// {"marshal_error": ...} instead. The integration test
 // TestLogInTx_TotalityAndVocabulary lists every domain.AuditAction* constant
 // and inserts each one, so an action the schema rejects fails CI.
 //
 // After the insert succeeds, LogInTx also marks the request as audited for
 // the mw.AuditCoverage detector.
 func (l *Logger) LogInTx(ctx context.Context, tx *sql.Tx, e Entry) error {
-	simAt, clockID, metadata := simColumns(ctx, e.Metadata)
+	metadata := e.Metadata
 	metaJSON, err := json.Marshal(metadata)
 	if err != nil {
 		// Keep LogInTx total: store the marshal error as the row's metadata,
@@ -396,8 +255,8 @@ func (l *Logger) LogInTx(ctx context.Context, tx *sql.Tx, e Entry) error {
 
 	actorType, actorID := ResolveActor(ctx)
 
-	// created_at is wall-clock time, even under a test clock (ADR-030). The
-	// tenant comes from the transaction's app.tenant_id setting.
+	// created_at is wall-clock time (ADR-030). The tenant comes from the
+	// transaction's app.tenant_id setting.
 	// current_setting returns NULL on a connection that never set it. It
 	// returns an empty string on a connection where an earlier transaction
 	// set it with is_local, the usual case in a warm pool. NULLIF turns both
@@ -407,12 +266,12 @@ func (l *Logger) LogInTx(ctx context.Context, tx *sql.Tx, e Entry) error {
 	_, err = tx.ExecContext(ctx, `
 		INSERT INTO audit_log (id, tenant_id, actor_type, actor_id, action,
 			resource_type, resource_id, resource_label, metadata, ip_address,
-			request_id, sim_effective_at, test_clock_id, created_at)
-		VALUES ($1, NULLIF(current_setting('app.tenant_id', true), ''), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+			request_id, created_at)
+		VALUES ($1, NULLIF(current_setting('app.tenant_id', true), ''), $2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 	`, postgres.NewID("hc_aud"), actorType, actorID, e.Action, e.ResourceType,
 		e.ResourceID, e.ResourceLabel, metaJSON,
 		nullIfEmpty(request.ClientIPIfAny(ctx)), nullIfEmpty(chimw.GetReqID(ctx)),
-		simAt, clockID, time.Now().UTC())
+		time.Now().UTC())
 	if err != nil {
 		// Count this as OutcomeMutationRefused, not OutcomeRowLost. Returning
 		// this error refuses the caller's change, which rolls back with the

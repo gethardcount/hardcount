@@ -286,7 +286,7 @@ func (e *Engine) scanOneThreshold(ctx context.Context, sub domain.Subscription) 
 			"subscription_id", sub.ID)
 		unpriced.add(u.MeterID, u.Quantity)
 	}
-	unpriced.record(live, sub)
+	unpriced.record(live)
 	// Usage below zero: its audit row committed with the fire (#1193).
 	for _, b := range eval.BelowZero {
 		slog.Warn("threshold: usage below zero after corrections — billed as 0",

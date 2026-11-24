@@ -6,7 +6,6 @@ import (
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/domain"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 )
 
 // PauseResume is the resume of a lifted pause: one whose resumes_at has
@@ -38,16 +37,6 @@ func liftedPauseResume(pc domain.PauseCollection) PauseResume {
 		r.TriggeredBy = "payment"
 	}
 	return r
-}
-
-// bind puts the resume on its contracted instant for a subscription on a
-// test clock, keeping the clock, so its audit row and updated_at carry
-// that instant (ADR-097), not the advance that found it.
-func (r PauseResume) bind(ctx context.Context, sub domain.Subscription) context.Context {
-	if sub.TestClockID == "" {
-		return ctx
-	}
-	return clock.WithSim(ctx, clock.Sim{At: r.At, TestClockID: sub.TestClockID})
 }
 
 // eventExtras are subscription.collection_resumed's extras.

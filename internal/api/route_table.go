@@ -85,9 +85,9 @@ func outsideAuth() routeDecl {
 }
 
 // decidedIn marks a route whose time the named function binds, as
-// package.Type.Method, so the door binds none: the function reads the record
-// the body or a token names first, or binds each of many records' own
-// instant. needs or outsideAuth then makes the entry.
+// package.Type.Method, so the door binds none: a function that works through
+// many records binds each one's own instant. needs or outsideAuth then makes
+// the entry.
 func decidedIn(function string) decider { return decider{function: function} }
 
 // decider is a route decidedIn a function, before needs or outsideAuth.

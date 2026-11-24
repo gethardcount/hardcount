@@ -105,7 +105,7 @@ func (s *Stripe) SettleSucceeded(ctx context.Context, tenantID string, inv domai
 	// that must survive a client disconnect now STARTS at the transition — a
 	// webhook client hanging up mid-settle would otherwise abort a
 	// transaction that carries a customer-visible effect. WithoutCancel keeps
-	// the ctx VALUES (tenant binding, simulated clock, livemode) and drops
+	// the ctx VALUES (tenant binding, bound instant, livemode) and drops
 	// only the cancel signal; every call below is individually bounded.
 	ctx = context.WithoutCancel(ctx)
 	// Resolve the recipient BEFORE the settle transaction: the hook below runs
@@ -173,8 +173,8 @@ func (s *Stripe) SettleSucceeded(ctx context.Context, tenantID string, inv domai
 	// paid-pre-check floor to catch it when the run next comes due (which can be
 	// days out). Best-effort + nil-tolerant
 	// (narrow tests) + idempotent (no-op when there is no active run); on failure the
-	// floor still resolves it, so log and continue. Runs in the invoice-bound ctx
-	// so it stamps simulated time on clock-pinned invoices.
+	// floor still resolves it, so log and continue. Runs on the settle's ctx, so
+	// it stamps the result's instant.
 	//
 	// Exactly-once: dunning's resolveRunNow CASes the resolve, so this and
 	// processRun's own resolve on a synchronous retry-success emit ONE
@@ -342,7 +342,7 @@ func (s *Stripe) settleFailed(ctx context.Context, tenantID string, inv domain.I
 	ctx = clock.AtArrival(ctx, s.clock)
 	// Detached before the tx: the stamp, payment.failed and the email commit
 	// together, and a webhook disconnect must not cut the dunning start that
-	// follows them. Values (the simulated clock) survive WithoutCancel.
+	// follows them. Values (the bound instant) survive WithoutCancel.
 	ctx = context.WithoutCancel(ctx)
 
 	if f.Message == "" {

@@ -16,14 +16,8 @@ import (
 )
 
 // capturingAudit records audit Log calls so a test can assert what a handler
-// wrote, without a real DB. Satisfies auditRecorder.
-//
-// It captures the emission's CTX SIM BINDING as well as its metadata: since
-// ADR-090 §5 the sim axis is derived by the Logger from the ctx clock binding
-// (and written to the sim_effective_at / test_clock_id COLUMNS, mirrored into
-// metadata), so a fake logger never sees the mirror — what the handler is
-// responsible for, and what these tests must therefore assert, is binding the
-// clock onto the ctx it emits with.
+// wrote, without a real DB. Satisfies auditRecorder. It captures the instant
+// the emission's ctx carries as well as its metadata.
 type capturingAudit struct {
 	entries []capturedAudit
 }
@@ -31,12 +25,12 @@ type capturingAudit struct {
 type capturedAudit struct {
 	action string
 	meta   map[string]any
-	sim    clock.Sim
+	at     time.Time
 }
 
 func (c *capturingAudit) Log(ctx context.Context, _, action, _, _, _ string, metadata map[string]any) error {
-	sim, _ := clock.SimOf(ctx)
-	c.entries = append(c.entries, capturedAudit{action: action, meta: metadata, sim: sim})
+	at, _ := clock.EffectiveNow(ctx)
+	c.entries = append(c.entries, capturedAudit{action: action, meta: metadata, at: at})
 	return nil
 }
 
@@ -61,18 +55,9 @@ func (c *capturingAudit) actions() []string {
 	return out
 }
 
-// A plan change on a CLOCK-PINNED subscription must record the test clock +
-// simulated effect-time on the audit row (ADR-030 / ADR-090 §5), so the audit
-// UI shows the wall-clock click time as the primary timestamp and "Effect on
-// test clock at <sim>" as a subline — and so the row is reachable by
-// ?test_clock_id= after teardown deletes the sub.
-//
-// The handler's contract is to BIND the sub's clock onto the emission ctx; the
-// Logger stamps the columns from that binding. Pre-fix the item-update writer
-// passed the raw payload instead of the sim-carrying metadata — the lone
-// subscription audit path that omitted it — so these rows carried no test-clock
-// context.
-func TestHandler_UpdateItem_PlanChangeAuditCarriesSimContext(t *testing.T) {
+// A plan change's audit row runs on the request's instant, which the API's
+// door binds, and carries the proration outcome.
+func TestHandler_UpdateItem_PlanChangeAuditRunsOnTheRequestsInstant(t *testing.T) {
 	ctx := postgres.WithLivemode(context.Background(), true)
 	tenantID := "t1"
 
@@ -81,24 +66,22 @@ func TestHandler_UpdateItem_PlanChangeAuditCarriesSimContext(t *testing.T) {
 	ps := now.Add(-15 * 24 * time.Hour)
 	pe := now.Add(15 * 24 * time.Hour)
 	sub, err := store.CreateWithBill(ctx, tenantID, domain.Subscription{
-		Code: "sub-clk", DisplayName: "Clock Sub", CustomerID: "cus_1",
+		Code: "sub-time", DisplayName: "Time Sub", CustomerID: "cus_1",
 		Status:                    domain.SubscriptionActive,
 		BillingTime:               domain.BillingTimeCalendar,
 		CurrentBillingPeriodStart: &ps,
 		CurrentBillingPeriodEnd:   &pe,
-		TestClockID:               "tclk_1",
 		Items:                     []domain.SubscriptionItem{{PlanID: "plan_old", Quantity: 1}},
 	}, nil)
 	if err != nil {
-		t.Fatalf("seed clock-pinned sub: %v", err)
+		t.Fatalf("seed sub: %v", err)
 	}
 	subID, itemID := sub.ID, sub.Items[0].ID
 
-	// The clock stands still at a simulated instant that is NOT wall-clock now —
-	// the whole point of the second axis. It sits inside the sub's current
-	// billing period, because the proration math runs on the decided time too
-	// (that is the ADR-029 contract, and this test asserts the proration
-	// outcome below).
+	// The request's instant is not wall-clock now, so a row stamped from the
+	// machine's clock shows. It sits inside the sub's current billing period,
+	// because the proration math runs on it too (this test asserts the
+	// proration outcome below).
 	frozen := ps.Add(5 * 24 * time.Hour)
 
 	svc := NewService(store, nil)
@@ -115,9 +98,8 @@ func TestHandler_UpdateItem_PlanChangeAuditCarriesSimContext(t *testing.T) {
 	h.SetAuditLogger(rec)
 
 	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
-	// The route is ofSubscription: the API's door decides the sub's clock at
-	// its frozen time before the handler runs.
-	decided := clock.WithSim(auth.WithTenantID(ctx, tenantID), clock.Sim{At: frozen, TestClockID: "tclk_1"})
+	// The API's door binds the request's instant before the handler runs.
+	decided := clock.WithEffectiveNow(auth.WithTenantID(ctx, tenantID), frozen)
 	req := updateItemURL(decided, subID, itemID, body)
 	rr := httptest.NewRecorder()
 	h.updateItem(rr, req)
@@ -132,11 +114,8 @@ func TestHandler_UpdateItem_PlanChangeAuditCarriesSimContext(t *testing.T) {
 	if entry.meta["action"] != "item_plan_changed" {
 		t.Errorf("meta.action: got %v, want item_plan_changed", entry.meta["action"])
 	}
-	if entry.sim.TestClockID != "tclk_1" {
-		t.Errorf("emission ctx test_clock_id: got %q, want tclk_1 — sim context dropped (the bug)", entry.sim.TestClockID)
-	}
-	if !entry.sim.At.Equal(frozen) {
-		t.Errorf("emission ctx sim instant: got %v, want %v (the clock's frozen_time)", entry.sim.At, frozen)
+	if !entry.at.Equal(frozen) {
+		t.Errorf("emission ctx instant: got %v, want the request's %v", entry.at, frozen)
 	}
 	// The audit row carries the proration outcome: the handler writes it
 	// after the proration resolves, so the timeline shows the amount the
@@ -197,45 +176,5 @@ func TestHandler_UpdateItem_ScheduledPlanChangeAuditNamesBothPlans(t *testing.T)
 	}
 	if got, ts := legacyDetail(l); got != "Basic → Pro at renewal on" || ts != effectiveAt.UTC().Format(time.RFC3339) {
 		t.Errorf("detail: got %q, %q; want %q, %q", got, ts, "Basic → Pro at renewal on", effectiveAt.UTC().Format(time.RFC3339))
-	}
-}
-
-// A plan change on a subscription on no test clock: the door decides real
-// time for it, so the row's sim columns stay NULL and it never appears in the
-// simulated slice.
-func TestHandler_UpdateItem_PlanChangeAuditNoSimContextWhenUnpinned(t *testing.T) {
-	ctx := clock.WithRealTime(context.Background())
-	tenantID := "t1"
-
-	store := newMemStore()
-	subID, itemID := seedSubWithItem(t, store, tenantID, "cus_1", "plan_old")
-
-	svc := NewService(store, nil)
-	plans := &plansMock{plans: map[string]domain.Plan{
-		"plan_old": {ID: "plan_old", Name: "Basic", BaseAmountCents: 1000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
-		"plan_new": {ID: "plan_new", Name: "Pro", BaseAmountCents: 3000, Currency: "USD", BaseBillTiming: domain.BillInAdvance},
-	}}
-	h := NewHandler(svc)
-	// Paid current-period prebill so the immediate upgrade proceeds (an upgrade
-	// against an UNPAID source is blocked per ADR-050 — not what these audit
-	// tests are exercising).
-	h.SetProrationDeps(plans, &invoicesMock{sourceInvoice: domain.Invoice{ID: "src_inv", PaymentStatus: domain.PaymentSucceeded}})
-	rec := &capturingAudit{}
-	h.SetAuditLogger(rec)
-
-	body, _ := json.Marshal(UpdateItemInput{NewPlanID: "plan_new", Immediate: true})
-	req := updateItemURL(auth.WithTenantID(ctx, tenantID), subID, itemID, body)
-	rr := httptest.NewRecorder()
-	h.updateItem(rr, req)
-	if rr.Code != http.StatusOK {
-		t.Fatalf("status: got %d, want 200. body=%s", rr.Code, rr.Body.String())
-	}
-
-	entry, ok := rec.firstOf("subscription.item_updated")
-	if !ok {
-		t.Fatalf("expected a subscription.item_updated audit row; got actions=%v", rec.actions())
-	}
-	if entry.sim.Simulated() {
-		t.Errorf("emission ctx carries a clock on a wall-clock sub: %+v", entry.sim)
 	}
 }

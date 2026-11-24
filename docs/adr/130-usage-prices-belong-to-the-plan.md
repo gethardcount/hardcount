@@ -185,8 +185,8 @@ is a break. v0.9.0 is also a clean break: there is no upgrade from Hardcount
 3. The pin is the start of the billing period being priced. It is the same
    for every reader of that period: the close, an immediate cancel, a spend
    threshold invoice, the preview, the live balance and customer usage.
-   The pin is read in the subscription's own time: wall time, or its test
-   clock's time.
+   The pin is in wall time (the test clock's time removed 2026-11-24,
+   section 7).
 4. Each of the plan's prices for that meter takes its latest version in
    force at the pin. A price with no version then, or whose version is a
    tombstone, takes no part.
@@ -255,11 +255,8 @@ item of #1386. Step 3 changes; the other steps stay.
   current plan at the same pin; it reads the subscription's billing
   intervals only when an item joined its plan in the period, since only
   then can an earlier join exist. Credit notes work from invoice lines.
-- On a test clock the pin is in simulated time. A price version or an
-  override written at clock time T takes effect at T + 1 µs (sections 6
-  and 7), so a subscription created, an immediate swap or an item added
-  while the clock still reads T gets the earlier prices. Advance the clock
-  first.
+- *Removed 2026-11-24 (section 7): the pin in a test clock's simulated
+  time.*
 - Every pin is a stored instant (`started_at`, `trial_end_at`, a billing
   interval's start, an item's `created_at` and `plan_changed_at`), so all
   readers agree on it. A
@@ -437,8 +434,7 @@ before they apply, so a never-used write still settles the plan's versions
 
 Subscription writers, price writes and override writes take rows in this
 order. Once one holds a row of one step, it takes no row of an earlier
-step. A subscription create's read of its customer's test clock is the
-one exception (below).
+step.
 
 1. the subscription row ([ADR-115](115-one-closer-for-the-billing-period.md));
    1a. the customer-rules lock, for the writers of a customer-scoped rule
@@ -467,19 +463,11 @@ takes its invoice row (`FOR KEY SHARE`) before it numbers the note, and a
 relief void takes the voided invoice's row before the number row.
 
 *Removed 2026-11-24 (section 7): the test-clock teardown, which was
-outside this order, and the clock reads of a price write and an override
-write, which ordered them against it.*
-
-A subscription create for a clock customer reads its clock first (amended
-2026-10-26, third review of #1386). Its insert's foreign keys lock the
-customer row and then the clock row. A create that inserted while a
-teardown held the clock waited there holding the customer, and the
-teardown then waited to delete that customer: a real-Postgres test
-aborted one with `40P01`. So a create reads its clock
-`FOR KEY SHARE` before the insert, waits at the clock holding nothing the
-teardown deletes, and answers 404 when the teardown took the customer.
-Teardown is removed (2026-11-24, section 7), and no customer is on a clock,
-so the read finds none.
+outside this order; the clock reads of a price write and an override
+write, which ordered them against it; and a subscription create's read of
+its customer's clock before its insert (amended 2026-10-26), the one
+exception to the order, which kept a create from deadlocking with a
+teardown.*
 
 **Step 1a: the customer-rules lock** (amended 2026-11-10, [#1659](https://github.com/gethardcount/hardcount/pull/1659)).
 Four rules span a customer's subscriptions:
@@ -500,20 +488,18 @@ twice.
   pooler. It conflicts only with itself. The key is defined once, in
   `postgres.LockCustomerRulesTx`.
 - **Who takes it, and where.** An item writer and a draft activation take
-  it right after their subscription row (step 1). A create takes it after
-  its clock read and before its insert. A customer update and a billing
+  it right after their subscription row (step 1). A create takes it before
+  its insert. A customer update and a billing
   profile write take it first. Each reads what its rule checks after it
   gets the lock.
 - **The order.** It comes before step 2 and everything after: plans, the
   number row, invoices, credit notes, the credit ledger lock and the
   payment-method lock. A holder takes no subscription row other than its
-  own, and no clock row. No transaction that holds a lock of a later step
+  own. No transaction that holds a lock of a later step
   asks for it. So it adds no cycle.
-- **Teardown** (removed 2026-11-24, section 7). A test-clock teardown
-  never takes it. A create waits for it while holding only its clock
-  `FOR KEY SHARE`, which teardown orders
-  at the clock as before. A customer update and a profile write take no
-  clock lock and hold their row only for their last statement.
+- **Teardown** (removed 2026-11-24, section 7). A create waits for it
+  holding no row. A customer update and a profile write hold their row
+  only for their last statement.
 - **Who does not wait.** Bounce and complaint marks, the other single-row
   customer writes, usage ingest and foreign-key checks on the customer row.
 - **The cost.** Quantity changes and removals take it too, because they

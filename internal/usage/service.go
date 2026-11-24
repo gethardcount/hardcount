@@ -21,8 +21,7 @@ import (
 )
 
 type Service struct {
-	store    Store
-	resolver clock.Resolver
+	store Store
 	// clock is real time: the server's clock (SetClock), the one the
 	// engine bills by.
 	clock clock.Clock
@@ -55,60 +54,20 @@ func (s *Service) SetAuditLogger(a AuditEmitter) { s.audit = a }
 func (s *Service) SetOpenPeriodReader(r OpenPeriodReader) { s.periods = r }
 
 // SetClock sets the clock real time is read from: the server's clock, the one
-// the billing engine bills by. The service is handed it because a decision
-// for a customer on no clock carries no instant, so the service reads real
-// time itself. Without it, real time is the machine's.
+// the billing engine bills by. Each ingest entry reads it once to bind its
+// instant (bindNow). Without it, real time is the machine's.
 func (s *Service) SetClock(c clock.Clock) { s.clock = c }
 
-// SetResolver wires the unified clock.Resolver (implemented by
-// *billing.Engine). Ingest timestamps default to and gate against the
-// CUSTOMER's effective now — a test clock's frozen_time when the
-// customer is pinned — so usage ingestion works in simulated time: on
-// a clock advanced into the (wall-clock) future, events without a
-// timestamp land at frozen_time inside the simulated current period,
-// and sim-timestamped events pass the future-skew gate that wall-clock
-// comparison would wrongly reject. Optional: nil keeps wall-clock
-// gating (narrow tests).
-func (s *Service) SetResolver(r clock.Resolver) {
-	s.resolver = r
-}
-
-// decide returns ctx with the customer's time decided and its instant bound,
-// so all work below reads one instant, and audit rows the clock. Each ingest
-// entry calls it once, before it goes down: Ingest (per event), each event of
-// a batch, Backfill, a LiteLLM call (IngestCall), a held release (Release).
-// Nothing below an ingest entry decides: build reads the decided instant. The
-// customer usage, margin and cost dashboard reads do not call it: their time
-// is decided before them. The cases, in the order taken:
-//   - no customer id: real time;
-//   - else the customer's clock is decided here (clock.DecideOrRealTime:
-//     the customer is named in the body, so the API's door bound no
-//     instant). Live mode reads nothing and is real time, as is a
-//     customer on no clock, and a not-found (ingest's own store call answers
-//     a missing customer);
-//   - a clock that cannot be read refuses the event (503): nothing is
-//     recorded, and the client sends it again.
-//
-// A real instant ctx already carries is kept for a customer on no clock and
-// for a not-found (clock.DecideOrRealTime keeps it). A clock already on ctx
-// is replaced by the customer's own decision in test mode with a resolver
-// and a customer id; in live mode, with no resolver, or with no customer id,
-// ctx is kept as it is. None of those cases can carry a clock: only HTTP
-// handlers call the ingest entries, the API's door binds no clock on usage's
-// routes, and no live record is on a test clock.
-//
-// Real time is read once from the service's clock (SetClock) and bound
-// (clock.EnsureEffectiveNow).
-func (s *Service) decide(ctx context.Context, tenantID, customerID string) (context.Context, error) {
-	decided := ctx
-	if customerID != "" {
-		var err error
-		if decided, err = clock.DecideOrRealTime(ctx, s.resolver, clock.Pin{TenantID: tenantID, CustomerID: customerID}); err != nil {
-			return ctx, errs.Unavailable("test_clock_unavailable",
-				"The customer's test clock could not be read. Nothing was recorded; send the event again.", err)
-		}
-	}
-	return clock.EnsureEffectiveNow(decided, s.clock), nil
+// bindNow returns ctx with one instant bound, so all work below reads one
+// instant: the one ctx carries, else one read of the service's clock
+// (clock.EnsureEffectiveNow). Each ingest entry calls it once, before it
+// goes down: Ingest (per event), each event of a batch, Backfill, a LiteLLM
+// call (IngestCall), a held release (Release). The API's door binds no
+// instant on their routes. Nothing below an ingest entry binds: build reads
+// the bound instant. The customer usage, margin and cost dashboard reads do
+// not call it: their time is bound before them.
+func (s *Service) bindNow(ctx context.Context) context.Context {
+	return clock.EnsureEffectiveNow(ctx, s.clock)
 }
 
 // IngestInput is the internal service input — uses resolved internal IDs only.
@@ -155,15 +114,12 @@ func (s *Service) Backfill(ctx context.Context, tenantID string, input IngestInp
 	if input.Timestamp == nil {
 		return domain.UsageEvent{}, errs.Required("timestamp")
 	}
-	// Reject future timestamps — relative to the CUSTOMER's effective now
-	// (frozen_time when pinned to a test clock), so backfilling simulated
-	// history onto an advanced clock works: with the clock frozen in July,
-	// June events are valid backfill even when wall-clock says May.
+	// Reject future timestamps, relative to the backfill's bound instant.
 	// Equality-with-now is allowed because the test-vs-prod clock race
 	// makes strict past-only brittle to verify, and the 'backfill' origin
 	// tag already distinguishes these rows from live POST traffic for
 	// audit purposes.
-	bound, input, err := s.decideEvent(ctx, tenantID, input)
+	bound, input, err := s.decideEvent(ctx, input)
 	if err != nil {
 		return domain.UsageEvent{}, err
 	}
@@ -281,7 +237,7 @@ func validateDimensions(dims map[string]any) error {
 }
 
 func (s *Service) ingest(ctx context.Context, tenantID string, input IngestInput, origin domain.UsageEventOrigin) (domain.UsageEvent, error) {
-	ctx, input, err := s.decideEvent(ctx, tenantID, input)
+	ctx, input, err := s.decideEvent(ctx, input)
 	if err != nil {
 		return domain.UsageEvent{}, err
 	}
@@ -289,20 +245,17 @@ func (s *Service) ingest(ctx context.Context, tenantID string, input IngestInput
 }
 
 // decideEvent is the one rule of every ingest entry: an event's own checks
-// (checkInput), then its customer's time (decide), so an invalid event is
-// refused as invalid before its customer's clock is read. Callers go on with
-// the input it returns, whose quantity is the one recorded: build, below it,
-// checks nothing, so a caller that kept the original would store an
-// unchecked quantity. A single ingest, each event of a batch and Backfill go
-// through it; a LiteLLM call checks all its events the same way before its
-// one decision.
-func (s *Service) decideEvent(ctx context.Context, tenantID string, input IngestInput) (context.Context, IngestInput, error) {
+// (checkInput), then its instant (bindNow). Callers go on with the input it
+// returns, whose quantity is the one recorded: build, below it, checks
+// nothing, so a caller that kept the original would store an unchecked
+// quantity. A single ingest, each event of a batch and Backfill go through
+// it; a LiteLLM call checks all its events the same way before its one bind.
+func (s *Service) decideEvent(ctx context.Context, input IngestInput) (context.Context, IngestInput, error) {
 	input, err := checkInput(input)
 	if err != nil {
 		return ctx, input, err
 	}
-	ctx, err = s.decide(ctx, tenantID, input.CustomerID)
-	return ctx, input, err
+	return s.bindNow(ctx), input, nil
 }
 
 // ingestAudited is ingest with an optional in-tx audit emission. Only backfill
@@ -406,22 +359,15 @@ func recordLate(ctx context.Context, ev domain.UsageEvent) {
 }
 
 // build is prepare without recording anything. Its caller has run checkInput
-// and decided the customer's time (decideEvent, Backfill, IngestCall), so
+// and bound its instant (decideEvent, Backfill, IngestCall), so
 // build checks nothing: it resolves the event's timestamp, refuses one in the
 // future, composes the row, and reports whether the row is late. A caller
 // that builds rows it may not write (IngestCall builds a call's two mappings
 // and writes one) records only the rows it wrote.
 func (s *Service) build(ctx context.Context, tenantID string, input IngestInput, origin domain.UsageEventOrigin) (domain.UsageEvent, bool, error) {
-	// "Now" is the CUSTOMER's now, the instant its caller decided — a test
-	// clock's frozen_time when the customer is pinned (Stripe Test Clocks
-	// shape: meter events on a pinned customer live on the simulated
-	// timeline). build reads the bound instant and refuses a context with
-	// none, rather than stamp the machine's time. Two effects: an event with
-	// no timestamp lands at that time (on a test clock, inside the simulated
-	// current billing period, where the next advance bills it), and the
-	// future gate below compares against it, so an event dated on the
-	// clock's timeline is not refused as in the future against the
-	// machine's.
+	// "Now" is the instant its caller bound. build refuses a context with
+	// none, rather than stamp the machine's time. An event with no timestamp
+	// lands at that time, and the future gate below compares against it.
 	now, ok := clock.EffectiveNow(ctx)
 	if !ok {
 		return domain.UsageEvent{}, false, errBuildUndecided
@@ -513,16 +459,11 @@ func (s *Service) BatchIngest(ctx context.Context, tenantID string, events []Ing
 	prepared := make([]domain.UsageEvent, 0, len(events))
 	var batchErrs []error
 	for i, input := range events {
-		// Each event is decided for its own customer.
+		// Each event binds its own instant.
 		var ev domain.UsageEvent
-		evCtx, checked, err := s.decideEvent(ctx, tenantID, input)
+		evCtx, checked, err := s.decideEvent(ctx, input)
 		if err == nil {
 			ev, err = s.prepare(evCtx, tenantID, checked, domain.UsageOriginAPI)
-		}
-		if errors.Is(err, errs.ErrUnavailable) {
-			// An event refused for retry (its customer's test clock could
-			// not be read) refuses the whole batch: the rest are not read.
-			return BatchResult{}, []error{fmt.Errorf("event[%d]: %w", i, err)}
 		}
 		if err != nil {
 			batchErrs = append(batchErrs, fmt.Errorf("event[%d]: %w", i, err))

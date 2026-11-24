@@ -20,20 +20,18 @@ func (s *atStore) GetSpendableBalance(ctx context.Context, tenantID, customerID 
 	return s.memStore.GetSpendableBalance(ctx, tenantID, customerID, at)
 }
 
-// A spendable balance judges expiry at the time its caller decided (the
-// API's door from the customer, or the engine's work that reads it), and
-// reads no clock of its own.
+// A spendable balance judges expiry at the time its caller bound (the API's
+// door, or the engine's work that reads it), not at a read of its own.
 func TestSpendableBalance_JudgesExpiryAtTheDecidedTime(t *testing.T) {
 	decidedAt := time.Date(2027, 3, 4, 10, 0, 0, 0, time.UTC)
 	store := &atStore{memStore: newMemStore()}
 	svc := NewService(store)
-	res := &customerAnswer{sim: clock.Sim{At: decidedAt.Add(72 * time.Hour), TestClockID: "clk_d"}}
-	svc.SetResolver(res)
-	ctx := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: decidedAt, TestClockID: "clk_d"})
+	svc.SetClock(clock.NewFake(decidedAt.Add(72 * time.Hour)))
+	ctx := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), decidedAt)
 	if _, err := svc.SpendableBalance(ctx, "t1", "cus_1"); err != nil {
 		t.Fatalf("SpendableBalance: %v", err)
 	}
-	if !store.at.Equal(decidedAt) || res.reads != 0 {
-		t.Errorf("expiry judged at %v, clock reads %d; want %v, none", store.at, res.reads, decidedAt)
+	if !store.at.Equal(decidedAt) {
+		t.Errorf("expiry judged at %v; want %v", store.at, decidedAt)
 	}
 }

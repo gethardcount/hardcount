@@ -33,7 +33,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/tax"
 	"github.com/gethardcount/hardcount/internal/tenant"
 	"github.com/gethardcount/hardcount/internal/tenantstripe"
-	"github.com/gethardcount/hardcount/internal/testclock"
 	"github.com/gethardcount/hardcount/internal/usage"
 	"github.com/gethardcount/hardcount/internal/user"
 	"github.com/gethardcount/hardcount/internal/webhook"
@@ -419,27 +418,16 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 		&invoiceWriterAdapter{PostgresStore: invoiceStore}, creditSvc, settingsStore, paymentReadiness, stripeAdapter, clk, customerStore)
 	engine.SetIntervalReader(subStore)
 	engine.SetInvoiceGrace(o.invoiceGrace)
-	engine.SetTestClockReader(testclock.NewReader(db))
 	engine.SetAuditLogger(auditLogger)
-	engine.SetCustomerReader(customerStore)
 	engine.SetLiveBalanceReaders(creditSvc, subStore)
 	customerUsageSvc.SetRater(engine)
 	creditSvc.SetLiveBalanceReader(engine)
 	costDashboardSvc.SetLiveBalanceReader(engine)
-	// The engine is the resolver: it says whether a customer runs on a test
-	// clock's frozen time or the wall clock (ADR-030). Whatever stamps a time
-	// for a customer takes it.
-	costDashboardSvc.SetResolver(engine)
-	paymentReconciler.SetResolver(engine)
-	hostedInvoiceH.SetResolver(engine)
+	// The services that bind their own instant read the server's clock.
 	hostedInvoiceH.SetClock(clk)
-	stripeAdapter.SetResolver(engine)
-	creditSvc.SetResolver(engine)
 	creditSvc.SetClock(clk)
-	usageSvc.SetResolver(engine)
 	usageSvc.SetClock(clk)
 	usageSvc.SetOpenPeriodReader(usageOpenPeriods{subs: subStore, pricing: pricingStore, thresholds: invoiceStore})
-	subSvc.SetResolver(engine)
 	subH.SetTenantLocator(engine)
 	subH.SetNetTermsReader(engine)
 	subH.SetInvoiceFinalizeRecorder(engine)
@@ -451,7 +439,6 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	engine.SetInvoiceVoider(invoiceSvc)
 	engine.SetCreditNoteAdjuster(creditNoteSvc)
 	engine.SetCreditHeadroomReader(creditNoteSvc)
-	invoiceSvc.SetResolver(engine)
 	invoiceSvc.SetCustomerReader(customerStore)
 	invoiceSvc.SetDunningRunReader(dunningStore)
 	invoiceSvc.SetSubscriptionPauseReader(subStore)
@@ -508,7 +495,6 @@ func wire(db *postgres.DB, clk clock.Clock, rdb *redis.Client, opts ...ServerOpt
 	invoiceSvc.SetPaymentMethodReader(paymentSetupStore)
 	invoiceSvc.SetStripeChecker(stripeClients)
 	creditNoteSvc.SetTaxReverser(engine)
-	creditNoteSvc.SetResolver(engine)
 	subH.SetProrationTaxApplier(&prorationTaxApplierAdapter{engine: engine})
 	subH.SetCreditNoteIssuer(creditNoteSvc)
 

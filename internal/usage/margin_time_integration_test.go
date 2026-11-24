@@ -3,7 +3,6 @@ package usage_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http/httptest"
 	"testing"
 	"time"
@@ -32,27 +31,10 @@ func (c *marginCountingClock) Now(ctx context.Context) time.Time {
 	return c.at
 }
 
-// refusingResolver fails every read and counts them: the margin report must
-// not decide the customer's time again.
-type refusingResolver struct{ reads int }
-
-func (r *refusingResolver) SimForCustomer(context.Context, string, string) (clock.Sim, error) {
-	r.reads++
-	return clock.Sim{}, errors.New("the margin report must not read the customer's clock")
-}
-func (r *refusingResolver) SimForSubscription(context.Context, string, string) (clock.Sim, error) {
-	return clock.Sim{}, errors.New("not used")
-}
-func (r *refusingResolver) SimForInvoice(context.Context, string, string) (clock.Sim, error) {
-	return clock.Sim{}, errors.New("not used")
-}
-
-// The margin report runs on one instant, decided before it: the API's door
-// decides it from the customer in the URL, and the report reads no clock of
-// the customer's again. On a test clock the default window ends at the
-// clock's frozen time and the server's clock is not read; at real time the
-// server's clock is read once, and the default window and the rated usage
-// share that instant.
+// The margin report runs on one instant, bound before it by the API's door.
+// On a bound instant the default window ends at it and the server's clock is
+// not read; with none bound the server's clock is read once, and the default
+// window and the rated usage share that instant.
 func TestMarginHandler_OneInstantForTheReport(t *testing.T) {
 	f := newCustomerUsageFixture(t, "Margin One Instant")
 	base := postgres.WithLivemode(context.Background(), false)
@@ -65,8 +47,6 @@ func TestMarginHandler_OneInstantForTheReport(t *testing.T) {
 	store := usage.NewPostgresStore(f.db)
 	server := &marginCountingClock{at: serverAt}
 	f.usageSvc.SetClock(server)
-	resolver := &refusingResolver{}
-	f.usageSvc.SetResolver(resolver)
 	h := usage.NewProviderCostHandler(store, usage.NewMarginAssembler(store, f.custUsage))
 
 	margin := func(t *testing.T, ctx context.Context) usage.MarginReport {
@@ -86,19 +66,19 @@ func TestMarginHandler_OneInstantForTheReport(t *testing.T) {
 		return rep
 	}
 
-	t.Run("on a test clock", func(t *testing.T) {
-		frozen := serverAt.Add(-6 * time.Hour)
-		server.reads, resolver.reads = 0, 0
-		rep := margin(t, clock.WithSim(base, clock.Sim{At: frozen, TestClockID: "clk_1"}))
-		if !rep.To.Equal(frozen) || server.reads != 0 || resolver.reads != 0 {
-			t.Errorf("window ends %v, server reads %d, resolver reads %d; want %v, none, none", rep.To, server.reads, resolver.reads, frozen)
+	t.Run("on a bound instant", func(t *testing.T) {
+		bound := serverAt.Add(-6 * time.Hour)
+		server.reads = 0
+		rep := margin(t, clock.WithEffectiveNow(base, bound))
+		if !rep.To.Equal(bound) || server.reads != 0 {
+			t.Errorf("window ends %v, server reads %d; want %v, none", rep.To, server.reads, bound)
 		}
 	})
 	t.Run("at real time", func(t *testing.T) {
-		server.reads, resolver.reads = 0, 0
+		server.reads = 0
 		rep := margin(t, clock.WithRealTime(base))
-		if !rep.To.Equal(serverAt) || server.reads != 1 || resolver.reads != 0 {
-			t.Errorf("window ends %v, server reads %d, resolver reads %d; want %v, one read for the whole report, none", rep.To, server.reads, resolver.reads, serverAt)
+		if !rep.To.Equal(serverAt) || server.reads != 1 {
+			t.Errorf("window ends %v, server reads %d; want %v, one read for the whole report", rep.To, server.reads, serverAt)
 		}
 	})
 }

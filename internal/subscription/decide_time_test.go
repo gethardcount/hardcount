@@ -3,131 +3,36 @@ package subscription
 import (
 	"context"
 	"encoding/json"
-	"errors"
-	"fmt"
 	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/auth"
-	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// customerAnswer answers every customer with sim, or fails with err, and
-// counts the reads.
-type customerAnswer struct {
-	sim   clock.Sim
-	err   error
-	reads int
-}
-
-func (c *customerAnswer) SimForCustomer(context.Context, string, string) (clock.Sim, error) {
-	c.reads++
-	return c.sim, c.err
-}
-func (c *customerAnswer) SimForSubscription(context.Context, string, string) (clock.Sim, error) {
-	return clock.Sim{}, errors.New("not used")
-}
-func (c *customerAnswer) SimForInvoice(context.Context, string, string) (clock.Sim, error) {
-	return clock.Sim{}, errors.New("not used")
-}
-
-// A new subscription's time is decided from the customer its body names and
-// bound, so the create and everything it runs read one instant: the
-// customer's clock and its frozen time, with no read of the server's clock;
-// for a not-found, in live mode, and for a body naming no customer, one read
-// of the server's clock. A clock that cannot be read refuses the create and
-// binds nothing.
-func TestDecideForCustomer(t *testing.T) {
-	frozen := time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)
+// BindNow binds one read of the service's clock, in either mode, so a create
+// and everything it runs read one instant.
+func TestBindNow(t *testing.T) {
 	past := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
-	server := past.Add(time.Second) // the stepping clock's first answer
-	testMode := postgres.WithLivemode(context.Background(), false)
-	for _, c := range []struct {
-		name            string
-		ctx             context.Context
-		customerID      string
-		answer          customerAnswer
-		wantReads       int
-		wantClock       string
-		wantAt          time.Time
-		wantServerReads int
-		wantErr         bool
-	}{
-		{"the customer's clock", testMode, "cus_1", customerAnswer{sim: clock.Sim{At: frozen, TestClockID: "clk_cus"}}, 1, "clk_cus", frozen, 0, false},
-		{"a not-found is one read of the server's clock", testMode, "cus_1", customerAnswer{err: fmt.Errorf("read test clock clk_gone: %w", errs.ErrNotFound)}, 1, "", server, 1, false},
-		{"an unreadable clock refuses", testMode, "cus_1", customerAnswer{err: errors.New("connection reset by peer")}, 1, "", time.Time{}, 0, true},
-		{"live mode reads no clock record, and the server's clock once", postgres.WithLivemode(context.Background(), true), "cus_1", customerAnswer{err: errors.New("must not be read")}, 0, "", server, 1, false},
-		{"no customer id reads no clock record, and the server's clock once", testMode, "", customerAnswer{err: errors.New("must not be read")}, 0, "", server, 1, false},
-	} {
-		t.Run(c.name, func(t *testing.T) {
-			srv := &subSteppingClock{at: past}
-			svc := NewService(newMemStore(), srv)
-			res := c.answer
-			svc.SetResolver(&res)
-			ctx, err := svc.DecideForCustomer(c.ctx, "t1", c.customerID)
-			if c.wantErr != (err != nil) || (c.wantErr && (!errors.Is(err, errs.ErrUnavailable) || !errors.Is(err, clock.ErrUndecided))) {
-				t.Fatalf("err %v; want error %v (unavailable over clock.ErrUndecided)", err, c.wantErr)
-			}
-			if res.reads != c.wantReads {
-				t.Errorf("%d resolver reads; want %d", res.reads, c.wantReads)
-			}
-			if sim, _ := clock.SimOf(ctx); sim.TestClockID != c.wantClock {
-				t.Errorf("clock %q; want %q", sim.TestClockID, c.wantClock)
-			}
-			if at, _ := clock.EffectiveNow(ctx); !at.Equal(c.wantAt) || srv.reads != c.wantServerReads {
-				t.Errorf("bound %v after %d server reads; want %v after %d", at, srv.reads, c.wantAt, c.wantServerReads)
-			}
-		})
+	for _, live := range []bool{false, true} {
+		srv := &subSteppingClock{at: past}
+		svc := NewService(newMemStore(), srv)
+		ctx := svc.BindNow(postgres.WithLivemode(context.Background(), live))
+		if at, _ := clock.EffectiveNow(ctx); !at.Equal(past.Add(time.Second)) || srv.reads != 1 {
+			t.Errorf("live %v: bound %v after %d server reads; want %v after 1", live, at, srv.reads, past.Add(time.Second))
+		}
 	}
 }
 
-// POST /v1/subscriptions decides from the body's customer before the service
-// runs: a clock that cannot be read answers 503, and nothing is created.
-func TestCreateRoute_DecidesBeforeTheServiceRuns(t *testing.T) {
-	store := newMemStore()
-	svc := NewService(store, nil)
-	svc.SetResolver(&customerAnswer{err: errors.New("connection reset by peer")})
-	body := `{"code":"sub-time","display_name":"Time","customer_id":"cus_1","items":[{"plan_id":"pln_1"}]}`
-	req := httptest.NewRequest("POST", "/", strings.NewReader(body))
-	req = req.WithContext(auth.WithTenantID(postgres.WithLivemode(req.Context(), false), "t1"))
-	rec := httptest.NewRecorder()
-	NewHandler(svc).create(rec, req)
-	if rec.Code != 503 || !strings.Contains(rec.Body.String(), "test_clock_unavailable") {
-		t.Errorf("%d %s; want 503 test_clock_unavailable", rec.Code, rec.Body.String())
-	}
-	if len(store.subs) != 0 {
-		t.Errorf("%d subscriptions created; want none", len(store.subs))
-	}
-}
-
-// countingClocks answers the customer as on clock clk_1 and counts the reads
-// of each kind.
-type countingClocks struct{ customerReads, subscriptionReads int }
-
-func (c *countingClocks) SimForCustomer(context.Context, string, string) (clock.Sim, error) {
-	c.customerReads++
-	return clock.Sim{At: time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC), TestClockID: "clk_1"}, nil
-}
-func (c *countingClocks) SimForSubscription(context.Context, string, string) (clock.Sim, error) {
-	c.subscriptionReads++
-	return clock.Sim{At: time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC), TestClockID: "clk_1"}, nil
-}
-func (c *countingClocks) SimForInvoice(context.Context, string, string) (clock.Sim, error) {
-	return clock.Sim{}, errors.New("not used")
-}
-
-// One decision and one read per create: the create and its audit row run on
-// the handler's decision, so the audit row carries the customer's clock and
-// no second lookup is made.
+// One instant per create: the create and its audit row run on the route's
+// one read of the server's clock.
 func TestCreateRoute_OneDecisionForTheCreateAndItsAuditRow(t *testing.T) {
-	clocks := &countingClocks{}
-	svc := NewService(newMemStore(), nil)
-	svc.SetResolver(clocks)
-	h := NewHandler(svc)
+	past := time.Date(2026, 3, 4, 5, 6, 7, 0, time.UTC)
+	srv := &subSteppingClock{at: past}
+	h := NewHandler(NewService(newMemStore(), srv))
 	audits := &capturingAudit{}
 	h.SetAuditLogger(audits)
 	body := `{"code":"sub-time","display_name":"Time","customer_id":"cus_1","items":[{"plan_id":"pln_1"}]}`
@@ -141,13 +46,11 @@ func TestCreateRoute_OneDecisionForTheCreateAndItsAuditRow(t *testing.T) {
 	var created struct {
 		StartedAt time.Time `json:"started_at"`
 	}
-	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil || !created.StartedAt.Equal(time.Date(2025, 1, 10, 12, 0, 0, 0, time.UTC)) {
-		t.Errorf("started_at %v (%v); want the clock's time", created.StartedAt, err)
+	want := past.Add(time.Second)
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil || !created.StartedAt.Equal(want) {
+		t.Errorf("started_at %v (%v); want the route's %v", created.StartedAt, err, want)
 	}
-	if len(audits.entries) != 1 || audits.entries[0].sim.TestClockID != "clk_1" {
-		t.Errorf("audit rows %+v; want one, on clk_1", audits.entries)
-	}
-	if clocks.customerReads != 1 || clocks.subscriptionReads != 0 {
-		t.Errorf("reads: customer %d, subscription %d; want 1 and 0", clocks.customerReads, clocks.subscriptionReads)
+	if len(audits.entries) != 1 || !audits.entries[0].at.Equal(want) || srv.reads != 1 {
+		t.Errorf("audit rows %+v after %d server reads; want one at %v after 1", audits.entries, srv.reads, want)
 	}
 }

@@ -11,7 +11,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
-	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
@@ -742,57 +741,6 @@ func TestAdjust(t *testing.T) {
 			t.Fatal("expected error for missing description")
 		}
 	})
-
-	// Adjust on a clock-pinned customer stamps the ledger entry's
-	// created_at at the customer's clock time. Test mode, as every caller
-	// has: a pinned customer is test-mode only.
-	t.Run("clock-pinned customer stamps ledger at sim time", func(t *testing.T) {
-		svc := NewService(newMemStore())
-		simNow := time.Date(2028, 6, 15, 12, 0, 0, 0, time.UTC)
-		svc.SetResolver(&stubResolverForCustomer{pinned: map[string]time.Time{"cus_sim": simNow}})
-		testMode := postgres.WithLivemode(context.Background(), false)
-
-		// Seed a grant first so the deduct has balance to pull from.
-		if _, err := svc.Grant(testMode, "t1", GrantInput{
-			Currency:   "USD",
-			CustomerID: "cus_sim", AmountCents: 10000, Description: "seed",
-		}); err != nil {
-			t.Fatalf("seed grant: %v", err)
-		}
-
-		entry, err := svc.Adjust(testMode, "t1", AdjustInput{
-			Currency:   "USD",
-			CustomerID: "cus_sim", AmountCents: -3000, Description: "Deduct",
-		})
-		if err != nil {
-			t.Fatalf("Adjust on clock-pinned customer: %v", err)
-		}
-		if !entry.CreatedAt.Equal(simNow) {
-			t.Errorf("created_at: got %v want %v (sim time from clock pin)", entry.CreatedAt, simNow)
-		}
-	})
-}
-
-// stubResolverForCustomer is a minimal clock.Resolver that maps
-// customer ids → a frozen simulated-now. Returns errs.ErrNotFound for
-// unmapped customers so unbound rows fall back to wall-clock (the
-// production behaviour for non-pinned customers).
-type stubResolverForCustomer struct {
-	pinned map[string]time.Time
-}
-
-func (s *stubResolverForCustomer) SimForCustomer(_ context.Context, _, customerID string) (clock.Sim, error) {
-	if t, ok := s.pinned[customerID]; ok {
-		// A pinned customer resolves BOTH halves — instant and clock.
-		return clock.Sim{At: t, TestClockID: "tc_stub"}, nil
-	}
-	return clock.Sim{}, errs.ErrNotFound
-}
-func (s *stubResolverForCustomer) SimForSubscription(_ context.Context, _, _ string) (clock.Sim, error) {
-	return clock.Sim{}, errs.ErrNotFound
-}
-func (s *stubResolverForCustomer) SimForInvoice(_ context.Context, _, _ string) (clock.Sim, error) {
-	return clock.Sim{}, errs.ErrNotFound
 }
 
 func TestGetBalance(t *testing.T) {

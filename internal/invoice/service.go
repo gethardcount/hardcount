@@ -185,19 +185,15 @@ type CreditReverser interface {
 type Service struct {
 	store Store
 	// clock is the server's clock: the router's clk, the one the engine
-	// bills by. Every invoice action runs on a time decided before it
-	// reaches the service: a request's by the API's door (api.clockDoor),
-	// with one read of the server's clock; a test clock's catch-up, on that
-	// clock; a real-time job, whose lists exclude clock invoices; dunning's
-	// final action, from its run's invoice. Each entry point keeps that
-	// decision. Work that arrives with no instant bound (a job's row, or a
-	// function that decides its own time, before it binds) reads this clock
-	// once (clock.EnsureEffectiveNow); a request on any other route arrives
-	// with the door's instant. Without that read, two reads of the time in
-	// one action could differ, and a store's stamp could fall on another time
-	// than the action's.
+	// bills by. Every invoice action runs on a time bound before it reaches
+	// the service: a request's by the API's door (api.clockDoor), with one
+	// read of the server's clock; a job's row, its own; dunning's final
+	// action, its run's. Each entry point keeps that time. Work that arrives
+	// with no instant bound (a job's row, or a function that binds its own
+	// time, before it binds) reads this clock once (clock.EnsureEffectiveNow).
+	// Without that read, two reads of the time in one action could differ,
+	// and a store's stamp could fall on another time than the action's.
 	clock          clock.Clock
-	resolver       clock.Resolver
 	settings       TenantSettingsStore
 	taxCommitter   TaxCommitter
 	taxReverser    TaxReverser
@@ -420,42 +416,6 @@ func (s *Service) SetCreditNoteTotaler(c CreditNoteTotaler) {
 // no credits (correct for tenants that never apply customer credit).
 func (s *Service) SetCreditReverser(r CreditReverser) {
 	s.creditReverser = r
-}
-
-// SetResolver wires the clock resolver the service decides a time with
-// where no caller decided one: a new invoice's customer or subscription
-// (decideCreate) and each invoice of the connect fan-out (decideInvoice).
-// Nil (narrow unit tests) decides nothing.
-func (s *Service) SetResolver(r clock.Resolver) {
-	s.resolver = r
-}
-
-// decideCreate decides a new invoice's time (clock.DecideOrRealTime) from
-// the subscription the body names, when it names one, else from its
-// customer. The two cannot disagree: a subscription takes its customer's
-// clock. A clock that cannot be read is a 503, and Create writes nothing.
-func (s *Service) decideCreate(ctx context.Context, tenantID string, input CreateInput) (context.Context, error) {
-	pin := clock.Pin{TenantID: tenantID, SubscriptionID: input.SubscriptionID, CustomerID: input.CustomerID}
-	decided, err := clock.DecideOrRealTime(ctx, s.resolver, pin)
-	if err != nil {
-		return ctx, errs.Unavailable("test_clock_unavailable",
-			"The test clock this invoice would be on could not be read. Nothing was created; send the request again.", err)
-	}
-	return decided, nil
-}
-
-// decideInvoice is the connect fan-out's: it decides and binds each
-// invoice's time (clock.DecideOrRealTime) before that invoice's retry. The
-// fan-out calls it once per invoice, so an invoice on no clock gets its own
-// read of the service's clock, when its retry starts, and a fan-out that runs
-// for minutes never dates all its invoices at its start. When the invoice's
-// clock cannot be read, the fan-out skips the invoice and writes nothing.
-func (s *Service) decideInvoice(ctx context.Context, tenantID, invoiceID string) (context.Context, error) {
-	decided, err := clock.DecideOrRealTime(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
-	if err != nil {
-		return ctx, fmt.Errorf("its test clock could not be read, so its tax was not retried; it stays marked Needs attention: click Retry tax on it, or it is retried on the next connect: %w", err)
-	}
-	return clock.EnsureEffectiveNow(decided, s.clock), nil
 }
 
 // HeldReliefIssuer issues the relief credit notes held on a draft (a cancel,
@@ -808,10 +768,9 @@ type CreateInput struct {
 	LineItems []AddLineItemInput `json:"line_items,omitempty"`
 }
 
-// Create creates a one-off draft invoice. Its time is decided from the
-// body's subscription, else its customer (decideCreate), after the reads that
-// check the body and before any write; every instant it stamps comes from
-// that one decision.
+// Create creates a one-off draft invoice. It binds its one instant after the
+// reads that check the body and before any write; every instant it stamps
+// comes from it.
 func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput) (domain.Invoice, error) {
 	if input.CustomerID == "" {
 		return domain.Invoice{}, errs.Required("customer_id")
@@ -887,15 +846,8 @@ func (s *Service) Create(ctx context.Context, tenantID string, input CreateInput
 		netDays = ts.NetPaymentTerms
 	}
 
-	// Decided before any write: every s.clock.Now(ctx) below, the store's
-	// stamps among them, reads the decision.
-	ctx, err = s.decideCreate(ctx, tenantID, input)
-	if err != nil {
-		return domain.Invoice{}, err
-	}
-	// One instant for the whole create. A clock decision carries one; a
-	// real-time decision does not, so the one read is bound here, and the
-	// store's created_at reads it as the period, issue and due dates do.
+	// One instant for the whole create, bound before any write: the store's
+	// created_at reads it as the period, issue and due dates do.
 	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	now := s.clock.Now(ctx)
 
@@ -2774,7 +2726,7 @@ func (s *Service) RetryProviderConfigErrors(ctx context.Context, tenantID string
 	if err != nil {
 		return 0, []error{fmt.Errorf("list stuck provider-config invoices: %w", err)}
 	}
-	return s.retryStuck(ctx, tenantID, stuck, s.decideInvoice)
+	return s.retryStuck(ctx, tenantID, stuck, true)
 }
 
 // RetryCustomerDataErrors fans out a tax retry across every draft
@@ -2801,20 +2753,18 @@ func (s *Service) RetryCustomerDataErrors(ctx context.Context, tenantID, custome
 	if err != nil {
 		return 0, []error{fmt.Errorf("list customer-data-invalid invoices: %w", err)}
 	}
-	return s.retryStuck(ctx, tenantID, stuck, nil)
+	return s.retryStuck(ctx, tenantID, stuck, false)
 }
 
 // retryStuck is the shared per-row body of RetryProviderConfigErrors
 // and RetryCustomerDataErrors. The candidate list shape differs by
 // trigger; the per-invoice retry call is identical.
 //
-// decide, when given, decides each invoice's time before its whole retry
-// (the connect fan-out's invoices may each be on a clock of their own); with
-// none, every retry keeps the request's decision (the billing-profile
-// fan-out: one customer's invoices, decided by its route).
-func (s *Service) retryStuck(ctx context.Context, tenantID string, stuck []domain.Invoice,
-	decide func(ctx context.Context, tenantID, invoiceID string) (context.Context, error),
-) (int, []error) {
+// With ownTime, each invoice binds its own instant (one read of the service's
+// clock) when its retry starts, so a connect fan-out that runs for minutes
+// never dates all its invoices at its start. Without it, every retry keeps
+// the request's instant (the billing-profile fan-out, bound by its route).
+func (s *Service) retryStuck(ctx context.Context, tenantID string, stuck []domain.Invoice, ownTime bool) (int, []error) {
 	var (
 		processed int
 		errs      []error
@@ -2829,13 +2779,8 @@ func (s *Service) retryStuck(ctx context.Context, tenantID string, stuck []domai
 			return processed, append(errs, fmt.Errorf("stopped before %d of %d invoices: %w", len(stuck)-i, len(stuck), err))
 		}
 		rowCtx := ctx
-		if decide != nil {
-			decided, err := decide(ctx, tenantID, inv.ID)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("invoice %s: %w", inv.ID, err))
-				continue
-			}
-			rowCtx = decided
+		if ownTime {
+			rowCtx = clock.EnsureEffectiveNow(ctx, s.clock)
 		}
 		if _, retryErr := s.RetryTax(rowCtx, tenantID, inv.ID); retryErr != nil {
 			errs = append(errs, fmt.Errorf("invoice %s: %w", inv.ID, retryErr))

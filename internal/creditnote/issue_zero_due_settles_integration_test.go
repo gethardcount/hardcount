@@ -9,7 +9,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/credit"
 	"github.com/gethardcount/hardcount/internal/creditnote"
 	"github.com/gethardcount/hardcount/internal/domain"
-	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/invoice"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
@@ -26,20 +25,6 @@ import (
 // paid. Before, the invoice stayed finalized with its payment failed and
 // nothing due. No charge path takes a $0 invoice, and dunning either closed the
 // run as recovered with the invoice unpaid, or ran its final action on it.
-
-// pinnedClock pins every invoice to one simulated instant, standing in for the
-// billing engine's clock.Resolver on an invoice under a test clock.
-type pinnedClock struct{ at time.Time }
-
-func (pinnedClock) SimForCustomer(context.Context, string, string) (clock.Sim, error) {
-	return clock.Sim{}, errs.ErrNotFound
-}
-func (pinnedClock) SimForSubscription(context.Context, string, string) (clock.Sim, error) {
-	return clock.Sim{}, errs.ErrNotFound
-}
-func (p pinnedClock) SimForInvoice(context.Context, string, string) (clock.Sim, error) {
-	return clock.Sim{At: p.at, TestClockID: "hc_tclk_zero_due"}, nil
-}
 
 // bypassExec runs one statement on a transaction RLS does not filter, in test
 // mode (the livemode trigger stamps inserted rows from the session setting).
@@ -104,7 +89,7 @@ type zeroDueRig struct {
 	inv      domain.Invoice
 	invStore *invoice.PostgresStore
 	notes    *creditnote.Service
-	at       time.Time // the invoice's simulated now
+	at       time.Time // the notes' bound instant
 }
 
 func newZeroDueRig(t *testing.T, name string, payment domain.InvoicePaymentStatus) *zeroDueRig {
@@ -120,14 +105,9 @@ func newZeroDueRig(t *testing.T, name string, payment domain.InvoicePaymentStatu
 	settings := tenant.NewSettingsStore(db)
 	notes := creditnote.NewService(creditnote.NewPostgresStore(db), invStore, nil, ledgerGranter{credits})
 	notes.SetNumberGenerator(settings)
+	// The notes' time, as their routes bind it.
 	at := time.Date(2026, 9, 14, 10, 30, 0, 0, time.UTC)
-	notes.SetResolver(pinnedClock{at: at})
-	// The notes' time, as their routes decide it from the invoice.
-	decided, err := clock.Decide(ctx, pinnedClock{at: at}, clock.Pin{TenantID: tenantID, InvoiceID: inv.ID})
-	if err != nil {
-		t.Fatalf("decide the notes' time: %v", err)
-	}
-	return &zeroDueRig{ctx: decided, db: db, tenantID: tenantID, inv: inv, invStore: invStore, notes: notes, at: at}
+	return &zeroDueRig{ctx: clock.WithEffectiveNow(ctx, at), db: db, tenantID: tenantID, inv: inv, invStore: invStore, notes: notes, at: at}
 }
 
 func (r *zeroDueRig) draft(t *testing.T, cents int64) domain.CreditNote {
@@ -207,7 +187,7 @@ func TestIssue_ToZeroOnDunnedInvoice_MarksPaidInIssueTx(t *testing.T) {
 			t.Errorf("invoice due %d / paid %d, want 0 / 0: no money was taken", inv.AmountDueCents, inv.AmountPaidCents)
 		}
 		if inv.PaidAt == nil || !inv.PaidAt.Equal(r.at) {
-			t.Errorf("paid_at %v, want the invoice's own clock %v", inv.PaidAt, r.at)
+			t.Errorf("paid_at %v, want the note's instant %v", inv.PaidAt, r.at)
 		}
 		if n := r.paidEvents(t); n != 1 {
 			t.Errorf("%d invoice.paid events queued, want exactly 1", n)

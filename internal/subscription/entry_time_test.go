@@ -3,7 +3,6 @@ package subscription
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"testing"
 	"time"
 
@@ -12,26 +11,13 @@ import (
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
-// subDecidedAt is an instant on clock tclk_1 before its frozen time, as a
-// request decided before an advance would carry. subLaterOnSameClock answers
-// that clock's frozen time, three days later. If an entry point asked this
-// resolver, its stamp would be the later time and reads would be above 0.
+// subDecidedAt is the instant a caller bound. The server's clock in these
+// tests answers a month later, so a stamp read from it instead shows.
 var subDecidedAt = time.Date(2027, 3, 4, 10, 0, 0, 0, time.UTC)
 
-type subLaterOnSameClock struct{ reads int }
-
-func (r *subLaterOnSameClock) answer() (clock.Sim, error) {
-	r.reads++
-	return clock.Sim{At: subDecidedAt.Add(72 * time.Hour), TestClockID: "tclk_1"}, nil
-}
-func (r *subLaterOnSameClock) SimForSubscription(context.Context, string, string) (clock.Sim, error) {
-	return r.answer()
-}
-func (r *subLaterOnSameClock) SimForCustomer(context.Context, string, string) (clock.Sim, error) {
-	return r.answer()
-}
-func (r *subLaterOnSameClock) SimForInvoice(context.Context, string, string) (clock.Sim, error) {
-	return clock.Sim{}, errors.New("not used")
+// subAtDecidedTime is a test-mode ctx carrying subDecidedAt.
+func subAtDecidedTime() context.Context {
+	return clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), subDecidedAt)
 }
 
 // subSteppingClock is a server clock that moves a second each time it answers
@@ -88,7 +74,7 @@ func (s *writeSpyStore) ClearBillingThresholds(ctx context.Context, tenantID, id
 }
 
 // subEntry is a subscription entry point run on ctx against a fresh service
-// and a subscription seeded around base on clock tclk_1. It returns the stamp
+// and a subscription seeded around base. It returns the stamp
 // the action wrote.
 type subEntry struct {
 	name   string
@@ -243,18 +229,15 @@ func subEntries() []subEntry {
 	}
 }
 
-func newSubTimeSvc(t *testing.T, status domain.SubscriptionStatus, base time.Time, server clock.Clock) (*Service, *writeSpyStore, domain.Subscription, *subLaterOnSameClock) {
+func newSubTimeSvc(t *testing.T, status domain.SubscriptionStatus, base time.Time, server clock.Clock) (*Service, *writeSpyStore, domain.Subscription) {
 	t.Helper()
 	store := &writeSpyStore{memStore: newMemStore()}
 	svc := NewService(store, server)
-	res := &subLaterOnSameClock{}
-	svc.SetResolver(res)
 	ps, pe := base.Add(-3*24*time.Hour), base.Add(28*24*time.Hour)
 	seed := domain.Subscription{
 		Code: "sub-time", DisplayName: "Time", CustomerID: "cus_time", Status: status,
 		CurrentBillingPeriodStart: &ps, CurrentBillingPeriodEnd: &pe,
-		Items:       []domain.SubscriptionItem{{PlanID: "pln_1", Quantity: 1}},
-		TestClockID: "tclk_1",
+		Items: []domain.SubscriptionItem{{PlanID: "pln_1", Quantity: 1}},
 	}
 	if status == domain.SubscriptionTrialing {
 		trialEnd := base.Add(7 * 24 * time.Hour)
@@ -264,20 +247,19 @@ func newSubTimeSvc(t *testing.T, status domain.SubscriptionStatus, base time.Tim
 	if err != nil {
 		t.Fatalf("seed sub: %v", err)
 	}
-	return svc, store, sub, res
+	return svc, store, sub
 }
 
-// Each subscription entry point runs on the time its caller decided and reads
-// no clock of its own: the stamp it writes is the decided instant, and
-// neither the resolver nor the server's clock is read.
+// Each subscription entry point runs on the time its caller bound and reads
+// no clock of its own: the stamp it writes is the bound instant, and the
+// server's clock is not read.
 func TestSubscriptionEntryPoints_RunOnTheDecidedTime(t *testing.T) {
 	for _, e := range subEntries() {
 		t.Run(e.name, func(t *testing.T) {
 			server := &subSteppingClock{at: subDecidedAt.Add(30 * 24 * time.Hour)}
-			svc, store, sub, res := newSubTimeSvc(t, e.status, subDecidedAt, server)
-			ctx := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: subDecidedAt, TestClockID: "tclk_1"})
-			if at := e.run(t, ctx, svc, store, sub, subDecidedAt); !at.Equal(subDecidedAt) || res.reads != 0 || server.reads != 0 {
-				t.Errorf("stamped %v; resolver reads %d, server clock reads %d; want %v, none, none", at, res.reads, server.reads, subDecidedAt)
+			svc, store, sub := newSubTimeSvc(t, e.status, subDecidedAt, server)
+			if at := e.run(t, subAtDecidedTime(), svc, store, sub, subDecidedAt); !at.Equal(subDecidedAt) || server.reads != 0 {
+				t.Errorf("stamped %v; server clock reads %d; want %v, none", at, server.reads, subDecidedAt)
 			}
 		})
 	}
@@ -339,19 +321,18 @@ func withReliefBiller(svc *Service) *reliefTimeBiller {
 	return b
 }
 
-// A cancel's relief credit note is issued on the time its caller decided:
-// the cancel route's (the door), dunning's final action's (its run), the
-// billing run's or the catch-up's. On a decided time neither the resolver nor
-// the server's clock is read.
+// A cancel's relief credit note is issued on the time its caller bound: the
+// cancel route's (the door), dunning's final action's (its run) or the
+// billing run's. The server's clock is not read.
 func TestSubscriptionRelief_IsIssuedOnTheDecidedTime(t *testing.T) {
 	for _, e := range reliefEntries() {
 		t.Run(e.name, func(t *testing.T) {
 			server := &subSteppingClock{at: subDecidedAt.Add(30 * 24 * time.Hour)}
-			svc, store, sub, res := newSubTimeSvc(t, domain.SubscriptionActive, subDecidedAt, server)
+			svc, store, sub := newSubTimeSvc(t, domain.SubscriptionActive, subDecidedAt, server)
 			b := withReliefBiller(svc)
-			e.run(t, clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: subDecidedAt, TestClockID: "tclk_1"}), svc, store, sub, subDecidedAt)
-			if len(b.at) != 1 || !b.at[0].Equal(subDecidedAt) || res.reads != 0 || server.reads != 0 {
-				t.Errorf("relief issued at %v; resolver reads %d, server clock reads %d; want once at %v, none, none", b.at, res.reads, server.reads, subDecidedAt)
+			e.run(t, subAtDecidedTime(), svc, store, sub, subDecidedAt)
+			if len(b.at) != 1 || !b.at[0].Equal(subDecidedAt) || server.reads != 0 {
+				t.Errorf("relief issued at %v; server clock reads %d; want once at %v, none", b.at, server.reads, subDecidedAt)
 			}
 		})
 	}
@@ -382,9 +363,9 @@ func (b *closeTimeBiller) BillDue(ctx context.Context, _, id string, grace time.
 
 // closeEndedSub seeds an active subscription whose period ended ten days
 // before base, and wires a due biller that closes it on server.
-func closeEndedSub(t *testing.T, base time.Time, server clock.Clock) (*Service, *closeTimeBiller, string, *subLaterOnSameClock) {
+func closeEndedSub(t *testing.T, base time.Time, server clock.Clock) (*Service, *closeTimeBiller, string) {
 	t.Helper()
-	svc, store, sub, res := newSubTimeSvc(t, domain.SubscriptionActive, base, server)
+	svc, store, sub := newSubTimeSvc(t, domain.SubscriptionActive, base, server)
 	ended := store.subs[sub.ID]
 	ps, pe := base.Add(-40*24*time.Hour), base.Add(-10*24*time.Hour)
 	ended.CurrentBillingPeriodStart, ended.CurrentBillingPeriodEnd, ended.NextBillingAt = &ps, &pe, &pe
@@ -392,20 +373,19 @@ func closeEndedSub(t *testing.T, base time.Time, server clock.Clock) (*Service, 
 	store.subs[sub.ID] = ended
 	b := &closeTimeBiller{store: store, clk: server}
 	svc.SetDueBiller(b)
-	return svc, b, sub.ID, res
+	return svc, b, sub.ID
 }
 
 // Closing an ended period runs on the caller's one time for the whole close:
-// the period check, the close and the check after it all read the decided
-// time, and neither the resolver nor the server's clock is read.
+// the period check, the close and the check after it all read the bound
+// time, and the server's clock is not read.
 func TestCloseEndedPeriodFirst_OneTimeForTheWholeClose(t *testing.T) {
 	server := &subSteppingClock{at: subDecidedAt.Add(30 * 24 * time.Hour)}
-	svc, b, id, res := closeEndedSub(t, subDecidedAt, server)
-	ctx := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: subDecidedAt, TestClockID: "tclk_1"})
-	if _, err := svc.CloseEndedPeriodFirst(ctx, "t1", id); err != nil {
+	svc, b, id := closeEndedSub(t, subDecidedAt, server)
+	if _, err := svc.CloseEndedPeriodFirst(subAtDecidedTime(), "t1", id); err != nil {
 		t.Fatalf("CloseEndedPeriodFirst: %v", err)
 	}
-	if len(b.at) != 1 || !b.at[0].Equal(subDecidedAt) || res.reads != 0 || server.reads != 0 {
-		t.Errorf("closed at %v; resolver reads %d, server clock reads %d; want once at %v, none, none", b.at, res.reads, server.reads, subDecidedAt)
+	if len(b.at) != 1 || !b.at[0].Equal(subDecidedAt) || server.reads != 0 {
+		t.Errorf("closed at %v; server clock reads %d; want once at %v, none", b.at, server.reads, subDecidedAt)
 	}
 }

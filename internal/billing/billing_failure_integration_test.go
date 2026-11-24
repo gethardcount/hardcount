@@ -1098,21 +1098,3 @@ func TestBillingFailure_SavedTextIsCuratedOrGeneric(t *testing.T) {
 		}
 	})
 }
-
-// clockSub pins a due subscription to a ready test clock frozen at the fake
-// clock's instant. The pin is written directly: the tests are about what
-// billing does with a pinned subscription, not about how one joins a clock.
-func (env *billFailureEnv) clockSub(t *testing.T, code string, plan domain.Plan) (sub domain.Subscription, clockID string) {
-	t.Helper()
-	sub = env.dueSub(t, code, plan, env.periodEnd)
-	clockID = postgres.NewID("hc_tclk")
-	admin := env.admin
-	if _, err := admin.ExecContext(env.ctx, `INSERT INTO test_clocks (id, tenant_id, livemode, name, frozen_time, status)
-		VALUES ($1, $2, false, 'billing failure', $3, 'ready')`, clockID, env.tenantID, env.clock.Now(env.ctx)); err != nil {
-		t.Fatalf("test clock: %v", err)
-	}
-	if _, err := admin.ExecContext(env.ctx, `UPDATE subscriptions SET test_clock_id = $1 WHERE id = $2`, clockID, sub.ID); err != nil {
-		t.Fatalf("pin to clock: %v", err)
-	}
-	return sub, clockID
-}

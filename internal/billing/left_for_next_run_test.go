@@ -207,15 +207,10 @@ func TestCollect_RefusedClaimSaysWhatIsLeft(t *testing.T) {
 }
 
 // An invoice collected right after it is made (FinalizeOnCreateInvoice) is
-// collected at the instant bound on its context, not at its clock's frozen
-// time, and its credits are applied then. On a clock its callers bind a
-// contracted instant earlier than the advance's target: the clock's trial job
-// a trial's end, for its first invoice, and dunning's cancel in a catch-up
-// the escalation, for its final invoice. (A trial that ends inside a period
-// is collected at the period's close:
-// TestBillOnePeriod_ATrialEndingInThePeriodIsCollectedAtTheClose.)
+// collected at the instant bound on its context, and its credits are applied
+// then: a trial's end for its first invoice, or dunning's escalation for its
+// final invoice.
 func TestFinalizeOnCreateInvoice_CollectsAtTheCallersInstant(t *testing.T) {
-	frozen := time.Date(2026, 5, 20, 0, 0, 0, 0, time.UTC)
 	for _, c := range []struct {
 		name string
 		at   time.Time
@@ -225,15 +220,11 @@ func TestFinalizeOnCreateInvoice_CollectsAtTheCallersInstant(t *testing.T) {
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			inv, applier, _, engine := leftHarness(t)
-			engine.SetCustomerReader(&stubCustomerReader{customers: map[string]domain.Customer{
-				"cus_1": {ID: "cus_1", TenantID: "t1", TestClockID: "tc_1"},
-			}})
-			engine.SetTestClockReader(&stubClockReader{clk: domain.TestClock{ID: "tc_1", FrozenTime: frozen}})
-			ctx := clock.WithSim(postgres.WithLivemode(context.Background(), false), clock.Sim{At: c.at, TestClockID: "tc_1"})
+			ctx := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), c.at)
 
-			engine.FinalizeOnCreateInvoice(ctx, domain.Subscription{ID: "sub_1", TenantID: "t1", TestClockID: "tc_1"}, inv.invoices[0])
+			engine.FinalizeOnCreateInvoice(ctx, domain.Subscription{ID: "sub_1", TenantID: "t1"}, inv.invoices[0])
 			if len(applier.at) != 1 || !applier.at[0].Equal(c.at) {
-				t.Errorf("credits applied at %v; want once, at %v (not the clock's frozen %v)", applier.at, c.at, frozen)
+				t.Errorf("credits applied at %v; want once, at %v", applier.at, c.at)
 			}
 		})
 	}

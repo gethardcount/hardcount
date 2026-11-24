@@ -16,7 +16,6 @@ import (
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
-	"github.com/gethardcount/hardcount/internal/testutil"
 )
 
 // memStore is an in-memory Store implementation used across the subscription
@@ -366,7 +365,6 @@ func (m *memStore) resumeLifted(ctx context.Context, listed domain.Subscription,
 		return domain.Subscription{}, false, nil
 	}
 	r := liftedPauseResume(*pc)
-	ctx = r.bind(ctx, listed)
 	if pc.ResumesAt.After(clock.Now(ctx)) {
 		return domain.Subscription{}, false, nil
 	}
@@ -3205,110 +3203,11 @@ func TestClearBillingThresholds(t *testing.T) {
 	})
 }
 
-// stubClockResolver returns a fixed time per entity id — lets tests
-// pin the simulated "now" deterministically. Implements
-// clock.Resolver so it can drop into Service.SetResolver directly.
-type stubClockResolver struct {
-	byCustomer map[string]time.Time
-	bySub      map[string]time.Time
-	byInvoice  map[string]time.Time
-	// clockID is the pin the stub resolves to; defaults to "tc_stub". A
-	// resolution always yields BOTH halves (instant + clock) — that pairing is
-	// the invariant clock.Sim exists to hold.
-	clockID string
-}
-
-func (s *stubClockResolver) clk() string {
-	if s.clockID != "" {
-		return s.clockID
-	}
-	return "tc_stub"
-}
-
-func (s *stubClockResolver) SimForCustomer(_ context.Context, _, customerID string) (clock.Sim, error) {
-	if t, ok := s.byCustomer[customerID]; ok {
-		return clock.Sim{At: t, TestClockID: s.clk()}, nil
-	}
-	return clock.Sim{}, fmt.Errorf("no stub for customer %s", customerID)
-}
-
-func (s *stubClockResolver) SimForSubscription(_ context.Context, _, subID string) (clock.Sim, error) {
-	if t, ok := s.bySub[subID]; ok {
-		return clock.Sim{At: t, TestClockID: s.clk()}, nil
-	}
-	return clock.Sim{}, fmt.Errorf("no stub for subscription %s", subID)
-}
-
-func (s *stubClockResolver) SimForInvoice(_ context.Context, _, invoiceID string) (clock.Sim, error) {
-	if t, ok := s.byInvoice[invoiceID]; ok {
-		return clock.Sim{At: t, TestClockID: s.clk()}, nil
-	}
-	return clock.Sim{}, fmt.Errorf("no stub for invoice %s", invoiceID)
-}
-
-// TestClockResolver_StampsFrozenDomain locks in the ADR-029 follow-up
-// at the subscription-service layer: when the resolver is wired,
-// per-sub timestamp writes (next_billing_at / period_start /
-// period_end / activated_at / started_at) land in the simulated
-// time domain, not wall-clock. Without this, a clock-pinned customer
-// whose owning clock has drifted gets next_billing_at stranded
-// outside the catchup window.
-func TestClockResolver_StampsFrozenDomain(t *testing.T) {
-	frozen := time.Date(2024, 4, 15, 12, 0, 0, 0, time.UTC)
-	resolver := &stubClockResolver{
-		byCustomer: map[string]time.Time{"cus_pinned": frozen},
-	}
-
-	t.Run("Create stamps frozen for clock-pinned customer", func(t *testing.T) {
-		store := newMemStore()
-		svc := NewService(store, nil)
-		svc.SetResolver(resolver)
-
-		// The caller decides the time, as the create route does.
-		ctx, err := svc.DecideForCustomer(postgres.WithLivemode(context.Background(), false), "t1", "cus_pinned")
-		if err != nil {
-			t.Fatalf("decide: %v", err)
-		}
-		sub, err := svc.Create(ctx, "t1", CreateInput{
-			Code:        "sub-pinned",
-			DisplayName: "Pinned",
-			CustomerID:  "cus_pinned",
-			Items:       []CreateItemInput{{PlanID: "pln_1"}},
-		})
-		if err != nil {
-			t.Fatalf("unexpected error: %v", err)
-		}
-		// StartedAt + period bounds must come from the resolver, not wall-clock.
-		if sub.StartedAt == nil {
-			t.Fatal("started_at should be set")
-		}
-		// StartedAt is stamped raw from `now`, before any tenant-tz snap.
-		if !sub.StartedAt.Equal(frozen) {
-			t.Errorf("started_at: got %v, want %v (frozen)", *sub.StartedAt, frozen)
-		}
-		// Calendar + start now: ps = beginningOfDayIn(now, UTC); pe =
-		// beginningOfMonthIn(now+1mo, UTC). Plus 1 month from 2024-04-15
-		// = 2024-05-15 → first of May 2024.
-		wantPeriodStart := time.Date(2024, 4, 15, 0, 0, 0, 0, time.UTC)
-		wantPeriodEnd := time.Date(2024, 5, 1, 0, 0, 0, 0, time.UTC)
-		if sub.CurrentBillingPeriodStart == nil || !sub.CurrentBillingPeriodStart.Equal(wantPeriodStart) {
-			t.Errorf("period_start: got %v, want %v (frozen-derived)", sub.CurrentBillingPeriodStart, wantPeriodStart)
-		}
-		if sub.CurrentBillingPeriodEnd == nil || !sub.CurrentBillingPeriodEnd.Equal(wantPeriodEnd) {
-			t.Errorf("period_end: got %v, want %v (frozen-derived)", sub.CurrentBillingPeriodEnd, wantPeriodEnd)
-		}
-		if sub.NextBillingAt == nil || !sub.NextBillingAt.Equal(wantPeriodEnd) {
-			t.Errorf("next_billing_at: got %v, want %v (frozen-derived)", sub.NextBillingAt, wantPeriodEnd)
-		}
-	})
-}
-
-// TestClockResolver_NotWired confirms the wall-clock fallback shape —
-// without a resolver, Create still works and stamps wall-clock.
-// The previous behaviour, kept for narrow unit tests.
-func TestClockResolver_NotWired(t *testing.T) {
+// TestCreate_WithNoInstantStampsWallClock: with no instant bound, Create
+// stamps wall-clock time.
+func TestCreate_WithNoInstantStampsWallClock(t *testing.T) {
 	store := newMemStore()
-	svc := NewService(store, nil) // no SetClockResolver
+	svc := NewService(store, nil)
 
 	before := time.Now().UTC()
 	sub, err := svc.Create(context.Background(), "t1", CreateInput{
@@ -3332,28 +3231,18 @@ func TestClockResolver_NotWired(t *testing.T) {
 
 // TestSubMutators_StampTheDecidedTime enumerates every public Service
 // mutator that touches a subscription row, and asserts each stamps its
-// writes at the request's decided time: the API's door decides a
-// subscription route from the subscription's clock, and the mutator's
-// writes (updated_at, canceled_at) read that decision. Failure means a
+// writes at the request's instant: the API's door binds it, and the
+// mutator's writes (updated_at, canceled_at) read it. Failure means a
 // mutator writes on a time of its own. Add a new mutator to the table below.
 func TestSubMutators_StampTheDecidedTime(t *testing.T) {
 	frozen := time.Date(2024, 4, 15, 12, 0, 0, 0, time.UTC)
 
-	// Helper: build a fresh service + clock-pinned sub for each case.
-	// The resolver looks up by sub id; subID is the same string the
-	// mem store mints (hc_sub_1) so the resolver always resolves.
-	// decided is the request's time, as the API's door decides it for the
-	// subscription: its clock.
-	decided := func(t *testing.T, svc *Service, sub domain.Subscription) context.Context {
-		return testutil.DecidedFor(t, svc.resolver, clock.Pin{TenantID: "t1", SubscriptionID: sub.ID})
-	}
+	// decided is the request's time, as the API's door binds it.
+	decided := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), frozen)
 	newPinned := func(t *testing.T, status domain.SubscriptionStatus) (*Service, domain.Subscription) {
 		t.Helper()
 		store := newMemStore()
 		svc := NewService(store, nil)
-		svc.SetResolver(&stubClockResolver{
-			bySub: map[string]time.Time{"hc_sub_1": frozen},
-		})
 		// Seed a sub directly via the store so we sidestep Create's
 		// own (correctly-bound) path — the goal is to exercise the
 		// post-create mutators in isolation.
@@ -3362,7 +3251,6 @@ func TestSubMutators_StampTheDecidedTime(t *testing.T) {
 			DisplayName: "Pinned",
 			CustomerID:  "cus_pinned",
 			Status:      status,
-			TestClockID: "tclk_1",
 			Items: []domain.SubscriptionItem{
 				{PlanID: "pln_1", Quantity: 1},
 			},
@@ -3378,7 +3266,7 @@ func TestSubMutators_StampTheDecidedTime(t *testing.T) {
 	// CanceledAt) on the returned domain object must equal frozen.
 	t.Run("Cancel", func(t *testing.T) {
 		svc, sub := newPinned(t, domain.SubscriptionActive)
-		out, _, err := svc.Cancel(decided(t, svc, sub), "t1", sub.ID)
+		out, _, err := svc.Cancel(decided, "t1", sub.ID)
 		if err != nil {
 			t.Fatalf("Cancel: %v", err)
 		}
@@ -3392,7 +3280,7 @@ func TestSubMutators_StampTheDecidedTime(t *testing.T) {
 
 	t.Run("AddItem", func(t *testing.T) {
 		svc, sub := newPinned(t, domain.SubscriptionActive)
-		item, err := svc.AddItem(decided(t, svc, sub), "t1", sub.ID, AddItemInput{PlanID: "pln_2", Quantity: 1})
+		item, err := svc.AddItem(decided, "t1", sub.ID, AddItemInput{PlanID: "pln_2", Quantity: 1})
 		if err != nil {
 			t.Fatalf("AddItem: %v", err)
 		}
@@ -3408,7 +3296,7 @@ func TestSubMutators_StampTheDecidedTime(t *testing.T) {
 		if err != nil {
 			t.Fatalf("seed pending plan: %v", err)
 		}
-		item, _, err := svc.CancelPendingItemChange(decided(t, svc, sub), "t1", sub.ID, sub.Items[0].ID)
+		item, _, err := svc.CancelPendingItemChange(decided, "t1", sub.ID, sub.Items[0].ID)
 		if err != nil {
 			t.Fatalf("CancelPendingItemChange: %v", err)
 		}
@@ -3424,13 +3312,10 @@ type captureAudit struct {
 	entries []capturedAuditEntry
 }
 
-// LogInTx captures like Log, ctx clock binding included (nil tx fine for
-// content-level unit tests).
-func (c *captureAudit) LogInTx(ctx context.Context, _ *sql.Tx, e audit.Entry) error {
-	sim, bound := clock.SimOf(ctx)
+// LogInTx captures like Log (nil tx fine for content-level unit tests).
+func (c *captureAudit) LogInTx(_ context.Context, _ *sql.Tx, e audit.Entry) error {
 	c.entries = append(c.entries, capturedAuditEntry{
 		action: e.Action, resourceID: e.ResourceID, resourceType: e.ResourceType, metadata: e.Metadata,
-		sim: sim, bound: bound,
 	})
 	return nil
 }
@@ -3440,19 +3325,12 @@ type capturedAuditEntry struct {
 	resourceID   string
 	metadata     map[string]any
 	resourceType string
-	sim          clock.Sim
-	bound        bool
 }
 
-// Log captures the ctx CLOCK BINDING alongside the content. The sim axis is
-// resolved by the audit writer from ctx (audit.simColumns) and nowhere else, so
-// "is this row on the sim axis?" is a question about the ctx the emission ran
-// under — not about metadata keys the emitter set.
-func (c *captureAudit) Log(ctx context.Context, _, action, resourceType, resourceID, _ string, metadata map[string]any) error {
-	sim, bound := clock.SimOf(ctx)
+// Log captures the row's content.
+func (c *captureAudit) Log(_ context.Context, _, action, resourceType, resourceID, _ string, metadata map[string]any) error {
 	c.entries = append(c.entries, capturedAuditEntry{
 		action: action, resourceType: resourceType, resourceID: resourceID, metadata: metadata,
-		sim: sim, bound: bound,
 	})
 	return nil
 }

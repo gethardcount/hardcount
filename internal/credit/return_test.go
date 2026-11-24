@@ -273,14 +273,13 @@ func TestReverseForInvoiceTx_ReturnsWhatIsStillApplied(t *testing.T) {
 	}
 }
 
-// A return judges expiry at the customer's instant: on a test clock that is
-// the clock's time on ctx, not the wall clock. The void and the credit-note
-// grant both pass it to the store as At.
+// A return judges expiry at the instant bound on ctx, not the wall clock. The
+// void and the credit-note grant both pass it to the store as At.
 //
 // Mutation-verify: pass time.Now() as At in either method → red.
 func TestReturns_UseTheCustomersInstant(t *testing.T) {
 	frozen := time.Date(2027, 1, 15, 9, 0, 0, 0, time.UTC)
-	ctx := clock.WithSim(context.Background(), clock.Sim{At: frozen, TestClockID: "hc_tclk_1"})
+	ctx := clock.WithEffectiveNow(context.Background(), frozen)
 	store := newMemStore()
 	svc := NewService(store)
 	if _, err := store.AppendEntry(ctx, "t1", domain.CreditLedgerEntry{

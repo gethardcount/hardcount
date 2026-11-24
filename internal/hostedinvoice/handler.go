@@ -126,15 +126,10 @@ type Handler struct {
 	// noBaseWarned makes the "no address" warning print once per process,
 	// not on every page view.
 	noBaseWarned sync.Once
-	// resolver decides the page's time from its invoice (decide).
-	resolver clock.Resolver
-	// clock is the server's clock: decide reads real time from it once, for
-	// a page whose invoice is on no clock.
+	// clock is the server's clock: resolveInvoice reads it once to bind the
+	// page's instant.
 	clock clock.Clock
 }
-
-// SetResolver wires the clock resolver the page decides its time with.
-func (h *Handler) SetResolver(r clock.Resolver) { h.resolver = r }
 
 // SetClock wires the server's clock (see the clock field). The router passes
 // the clock the server bills by; the default is the machine's.
@@ -355,28 +350,13 @@ func (h *Handler) resolveInvoice(w http.ResponseWriter, r *http.Request) (domain
 	// 500 to the customer who clicked the email CTA. GetByPublicToken
 	// itself is mode-agnostic (TxBypass per the package doc); the pin
 	// has to happen here, after we know the row's livemode.
-	ctx, err := h.decide(postgres.WithLivemode(r.Context(), livemode), inv)
-	if err != nil {
-		slog.WarnContext(r.Context(), "hostedinvoice: the invoice's test clock could not be read", "invoice_id", inv.ID, "error", err)
-		respond.FromError(w, r, errs.Unavailable("test_clock_unavailable",
-			"This invoice can't be opened right now. Please try again in a moment.", err), "invoice")
-		return domain.Invoice{}, false
-	}
+	//
+	// A public page does not come through the API's door, so the page binds
+	// its own instant: the checkout it opens, and that checkout's audit row,
+	// read it.
+	ctx := clock.EnsureEffectiveNow(postgres.WithLivemode(r.Context(), livemode), h.clock)
 	*r = *r.WithContext(ctx)
 	return inv, true
-}
-
-// decide decides the page's time from the invoice its token names
-// (clock.DecideOrRealTime: a public page does not come through the API's
-// door) and binds it (see the clock package's doc). The checkout it opens,
-// and that checkout's audit row, carry the decision. A failure is clock.ErrUndecided, and the page answers
-// 503 with nothing done.
-func (h *Handler) decide(ctx context.Context, inv domain.Invoice) (context.Context, error) {
-	decided, err := clock.DecideOrRealTime(ctx, h.resolver, clock.Pin{TenantID: inv.TenantID, InvoiceID: inv.ID})
-	if err != nil {
-		return ctx, err
-	}
-	return clock.EnsureEffectiveNow(decided, h.clock), nil
 }
 
 func (h *Handler) viewInvoice(w http.ResponseWriter, r *http.Request) {

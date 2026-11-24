@@ -1108,28 +1108,6 @@ func (s *PostgresStore) ApplyRefundWebhookStatusAudited(ctx context.Context, ten
 // zeros, so Issue re-derives it (default: full credit to balance) and
 // persists the result here so the dashboard and any retry observe the
 // same split Issue acted on.
-// InvoiceOfRefundNote returns the invoice of the credit note holding
-// stripeRefundID, the note ApplyRefundWebhookStatusAudited writes;
-// ErrNotFound when no note holds it.
-func (s *PostgresStore) InvoiceOfRefundNote(ctx context.Context, tenantID, stripeRefundID string) (string, error) {
-	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
-	if err != nil {
-		return "", err
-	}
-	defer postgres.Rollback(tx)
-	var invoiceID string
-	err = tx.QueryRowContext(ctx,
-		`SELECT invoice_id FROM credit_notes WHERE stripe_refund_id = $1 ORDER BY created_at, id LIMIT 1`, stripeRefundID,
-	).Scan(&invoiceID)
-	if errors.Is(err, sql.ErrNoRows) {
-		return "", errs.ErrNotFound
-	}
-	if err != nil {
-		return "", fmt.Errorf("find the credit note holding refund %s: %w", stripeRefundID, err)
-	}
-	return invoiceID, nil
-}
-
 func (s *PostgresStore) UpdateAllocation(ctx context.Context, tenantID, id string, refundCents, creditCents, outOfBandCents int64) error {
 	tx, err := s.db.BeginTx(ctx, postgres.TxTenant, tenantID)
 	if err != nil {

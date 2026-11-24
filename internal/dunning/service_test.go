@@ -8,11 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gethardcount/hardcount/internal/testutil"
-
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/errs"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 type memStore struct {
@@ -782,47 +781,18 @@ func TestUpsertPolicy_RetryDaysBounds(t *testing.T) {
 	}
 }
 
-// stubClockResolver returns a fixed time per invoice ID — lets tests
-// pin the simulated "now" deterministically. Implements clock.Resolver
-// (the customer / subscription methods are unused by dunning tests but
-// required by the interface).
-type stubClockResolver struct {
-	byInvoice map[string]time.Time
-	err       error
-}
-
-func (s *stubClockResolver) SimForInvoice(_ context.Context, _, invoiceID string) (clock.Sim, error) {
-	if s.err != nil {
-		return clock.Sim{}, s.err
-	}
-	if t, ok := s.byInvoice[invoiceID]; ok {
-		return clock.Sim{At: t, TestClockID: "tc_stub"}, nil
-	}
-	return clock.Sim{}, fmt.Errorf("no stub for invoice %s", invoiceID)
-}
-
-func (s *stubClockResolver) SimForCustomer(_ context.Context, _, _ string) (clock.Sim, error) {
-	return clock.Sim{}, fmt.Errorf("not used by dunning tests")
-}
-
-func (s *stubClockResolver) SimForSubscription(_ context.Context, _, _ string) (clock.Sim, error) {
-	return clock.Sim{}, fmt.Errorf("not used by dunning tests")
-}
-
 // TestDunning_StampsTheDecidedTime: every per-invoice timestamp dunning
 // writes (next_action_at, last_attempt_at, resolved_at, created_at), and the
-// instant a run's start is written on, is the time its caller decided. A
-// clock-pinned invoice's run, decided at the invoice's clock, is stamped at
-// frozen_time, so the clock's catch-up finds it in its window.
+// instant a run's start is written on, is the time its caller bound.
 func TestDunning_StampsTheDecidedTime(t *testing.T) {
 	frozen := time.Date(2024, 2, 1, 12, 0, 0, 0, time.UTC)
-	resolver := &stubClockResolver{byInvoice: map[string]time.Time{"inv_1": frozen}}
+	bound := clock.WithEffectiveNow(postgres.WithLivemode(context.Background(), false), frozen)
 
 	t.Run("StartDunning stamps frozen", func(t *testing.T) {
 		store := &instantStore{memStore: newMemStore()}
 		svc := NewService(store, &noopRetrier{}, nil)
 
-		run, err := svc.StartDunning(testutil.DecidedFor(t, resolver, clock.Pin{TenantID: "t1", InvoiceID: "inv_1"}), "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
+		run, err := svc.StartDunning(bound, "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -840,14 +810,12 @@ func TestDunning_StampsTheDecidedTime(t *testing.T) {
 		store.wroteAt(t, "StartRun", frozen)
 	})
 
-	t.Run("a late retry on a clock is dated at the clock's time", func(t *testing.T) {
+	t.Run("a late retry is dated at the bound time", func(t *testing.T) {
 		// A retry run after its scheduled time (here an hour late) is dated
-		// at the decided time, the clock's, and the next retry counts from
-		// it, as real time dates late work. On time, the two are the same:
-		// the advance stops at every retry's own time.
+		// at the bound time, and the next retry counts from it.
 		store := newMemStore()
 		svc := NewService(store, &failingRetrier{}, nil)
-		ctx := testutil.DecidedFor(t, resolver, clock.Pin{TenantID: "t1", InvoiceID: "inv_1"})
+		ctx := bound
 
 		run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
 		// Mark run as due so processRun picks it up.
@@ -862,7 +830,7 @@ func TestDunning_StampsTheDecidedTime(t *testing.T) {
 			t.Fatal("last_attempt_at should be stamped")
 		}
 		if !updated.LastAttemptAt.Equal(frozen) {
-			t.Errorf("last_attempt_at: got %v, want the clock's time %v", *updated.LastAttemptAt, frozen)
+			t.Errorf("last_attempt_at: got %v, want the bound time %v", *updated.LastAttemptAt, frozen)
 		}
 		// The next retry counts from the attempt.
 		if updated.NextActionAt == nil {
@@ -877,7 +845,7 @@ func TestDunning_StampsTheDecidedTime(t *testing.T) {
 	t.Run("ResolveByInvoice stamps frozen", func(t *testing.T) {
 		store := newMemStore()
 		svc := NewService(store, &noopRetrier{}, nil)
-		ctx := testutil.DecidedFor(t, resolver, clock.Pin{TenantID: "t1", InvoiceID: "inv_1"})
+		ctx := bound
 
 		run, _ := svc.StartDunning(ctx, "t1", "inv_1", "cus_1", domain.DunningCausePaymentFailed)
 		if err := svc.ResolveByInvoice(ctx, "t1", "inv_1", domain.ResolutionPaymentRecovered); err != nil {

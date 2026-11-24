@@ -346,7 +346,7 @@ func TestMapPayload_TimestampSourcing(t *testing.T) {
 		}
 		for _, e := range out {
 			if e.Timestamp != nil {
-				t.Errorf("timestamp must be nil when payload omits start/end (got %v) — a non-nil value defeats the test clock", *e.Timestamp)
+				t.Errorf("timestamp must be nil when payload omits start/end (got %v) — usage stamps the call's own instant", *e.Timestamp)
 			}
 		}
 	})

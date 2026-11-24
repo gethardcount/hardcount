@@ -210,22 +210,22 @@ func TestRun_PollsNoSlowerThanMaxPoll(t *testing.T) {
 	// pin the constant so a future bump is a conscious change.
 }
 
-// A tick's work runs on a ctx that records real time (clock.Decision), not on
-// one with no decision, so code below it never meets an undecided ctx.
+// A tick's work runs with no instant bound, even when the ctx it is started
+// on carries one, so each row it works binds its own.
 func TestRun_TickRunsInRealTime(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
+	ctx, cancel := context.WithCancel(clock.WithEffectiveNow(context.Background(), time.Date(2026, 1, 2, 3, 4, 5, 0, time.UTC)))
 	defer cancel()
-	decided := make(chan bool, 1)
+	unbound := make(chan bool, 1)
 	work := func(ctx context.Context) {
-		s, ok := clock.Decision(ctx)
+		_, ok := clock.EffectiveNow(ctx)
 		select {
-		case decided <- ok && s == (clock.Sim{}):
+		case unbound <- !ok:
 		default:
 		}
 		cancel()
 	}
 	Run(ctx, leader.Role("test_worker"), 5*time.Millisecond, leader.AlwaysLead{}, work, nil)
-	if !<-decided {
-		t.Error("the tick's ctx does not record real time")
+	if !<-unbound {
+		t.Error("the tick's ctx carries an instant")
 	}
 }

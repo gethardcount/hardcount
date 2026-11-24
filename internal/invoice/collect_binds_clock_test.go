@@ -12,7 +12,7 @@ import (
 	"github.com/gethardcount/hardcount/internal/auth"
 	"github.com/gethardcount/hardcount/internal/domain"
 	"github.com/gethardcount/hardcount/internal/platform/clock"
-	"github.com/gethardcount/hardcount/internal/testutil"
+	"github.com/gethardcount/hardcount/internal/platform/postgres"
 )
 
 // ctxCapturingCharger records the ctx the charge ran under.
@@ -23,23 +23,9 @@ func (c *ctxCapturingCharger) ChargeInvoiceNow(ctx context.Context, _ string, in
 	return inv, nil
 }
 
-// pinnedResolver resolves every invoice onto one test clock.
-type pinnedResolver struct{ sim clock.Sim }
-
-func (p pinnedResolver) SimForInvoice(context.Context, string, string) (clock.Sim, error) {
-	return p.sim, nil
-}
-func (p pinnedResolver) SimForCustomer(context.Context, string, string) (clock.Sim, error) {
-	return p.sim, nil
-}
-func (p pinnedResolver) SimForSubscription(context.Context, string, string) (clock.Sim, error) {
-	return p.sim, nil
-}
-
-// Collect charges on the request's decided clock: the API's door decides
-// POST /v1/invoices/{id}/collect from the invoice (ofInvoice), and the charge
-// runs on that decision.
-func TestCollectPayment_ChargesOnTheDecidedClock(t *testing.T) {
+// Collect charges on the request's instant: the API's door binds it for
+// POST /v1/invoices/{id}/collect, and the charge runs on it.
+func TestCollectPayment_ChargesOnTheRequestsInstant(t *testing.T) {
 	ctx := context.Background()
 	store := newMemStore()
 	inv, err := store.Create(ctx, "t1", domain.Invoice{
@@ -51,7 +37,6 @@ func TestCollectPayment_ChargesOnTheDecidedClock(t *testing.T) {
 	}
 	frozen := time.Date(2027, 6, 5, 0, 0, 0, 0, time.UTC)
 	svc := NewService(store, nil, newMemNumberer())
-	svc.SetResolver(pinnedResolver{sim: clock.Sim{At: frozen, TestClockID: "clk_1"}})
 	charger := &ctxCapturingCharger{}
 	h := &Handler{
 		svc:           svc,
@@ -63,8 +48,8 @@ func TestCollectPayment_ChargesOnTheDecidedClock(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/v1/invoices/"+inv.ID+"/collect", nil)
 	rctx := chi.NewRouteContext()
 	rctx.URLParams.Add("id", inv.ID)
-	// The request's time, as the API's door decides it for the invoice.
-	reqCtx := auth.WithTenantID(testutil.DecidedFor(t, svc.resolver, clock.Pin{TenantID: "t1", InvoiceID: inv.ID}), "t1")
+	// The request's time, as the API's door binds it.
+	reqCtx := auth.WithTenantID(clock.WithEffectiveNow(postgres.WithLivemode(ctx, false), frozen), "t1")
 	reqCtx = context.WithValue(reqCtx, chi.RouteCtxKey, rctx)
 	rr := httptest.NewRecorder()
 	h.collectPayment(rr, req.WithContext(reqCtx))
@@ -75,8 +60,7 @@ func TestCollectPayment_ChargesOnTheDecidedClock(t *testing.T) {
 	if charger.ctx == nil {
 		t.Fatal("charge was not attempted")
 	}
-	sim, ok := clock.SimOf(charger.ctx)
-	if !ok || sim.TestClockID != "clk_1" || !sim.At.Equal(frozen) {
-		t.Errorf("charge ctx sim = %+v (bound %v), want the invoice's clock at %v", sim, ok, frozen)
+	if at, ok := clock.EffectiveNow(charger.ctx); !ok || !at.Equal(frozen) {
+		t.Errorf("charge ctx instant = %v (bound %v), want the request's %v", at, ok, frozen)
 	}
 }

@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/gethardcount/hardcount/internal/audit"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
@@ -37,10 +36,7 @@ func TestSubjectDeleted_TheRowOutlivesItsSubject(t *testing.T) {
 	seedClock(t, db, ctx, tenantID, clockID)
 
 	simAt := time.Date(2027, 5, 1, 0, 0, 0, 0, time.UTC)
-	simCtx := clock.WithSim(ctx, clock.Sim{At: simAt, TestClockID: clockID})
-	if err := logger.Log(simCtx, tenantID, "finalize", "invoice", "hc_inv_sim", "INV-SIM", nil); err != nil {
-		t.Fatalf("log sim row: %v", err)
-	}
+	emitOnClock(t, db, ctx, tenantID, simAt, clockID, audit.Entry{Action: "finalize", ResourceType: "invoice", ResourceID: "hc_inv_sim", ResourceLabel: "INV-SIM"})
 	// A live wall-clock row, as the control: it belongs to no clock, so nothing can
 	// ever delete its subject out from under it.
 	if err := logger.Log(ctx, tenantID, "finalize", "invoice", "hc_inv_real", "INV-REAL", nil); err != nil {

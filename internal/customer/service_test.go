@@ -266,37 +266,6 @@ func TestCustomerService_Create(t *testing.T) {
 	})
 }
 
-// simCapturingAudit records the clock binding present on the ctx the emission
-// runs under — which is the ONLY thing that decides whether a row lands on the
-// sim axis (audit.simColumns reads it from ctx and nowhere else).
-type simCapturingAudit struct {
-	sim   clock.Sim
-	bound bool
-}
-
-func (a *simCapturingAudit) LogInTx(ctx context.Context, _ *sql.Tx, _ audit.Entry) error {
-	a.sim, a.bound = clock.SimOf(ctx)
-	return nil
-}
-
-// A create stays off the sim axis: a stamped row would fill the partial
-// index (0148) with wall-clock rows, and the clock filter would return
-// customers that were never on a clock.
-func TestCreate_StaysOffTheSimAxis(t *testing.T) {
-	svc := NewService(newMemoryStore())
-	spy := &simCapturingAudit{}
-	svc.SetAuditLogger(spy)
-	if _, err := svc.Create(context.Background(), "tenant1", CreateInput{
-		ExternalID:  "cus_live",
-		DisplayName: "Live",
-	}); err != nil {
-		t.Fatalf("create: %v", err)
-	}
-	if spy.bound {
-		t.Errorf("a create bound a sim context (%+v); it must stay wall-clock", spy.sim)
-	}
-}
-
 func TestCustomerService_Get(t *testing.T) {
 	store := newMemoryStore()
 	svc := NewService(store)

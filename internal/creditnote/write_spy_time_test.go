@@ -62,24 +62,24 @@ func (s *instantSender) SendCreditNote(ctx context.Context, tenantID, to string,
 type spiedWrite struct {
 	name string
 	want int
-	run  func(t *testing.T, ctx context.Context, res clock.Resolver) []time.Time
+	run  func(t *testing.T, ctx context.Context) []time.Time
 }
 
 func spiedWrites() []spiedWrite {
 	return []spiedWrite{
-		{"a refund retry's write", 1, func(t *testing.T, ctx context.Context, res clock.Resolver) []time.Time {
+		{"a refund retry's write", 1, func(t *testing.T, ctx context.Context) []time.Time {
 			store := &refundWriteStore{memStore: newMemStore()}
 			store.notes["hc_cn_retry"] = domain.CreditNote{
 				ID: "hc_cn_retry", TenantID: "t1", InvoiceID: "inv_card", CustomerID: "cus_1",
 				Status: domain.CreditNoteIssued, Currency: "USD", RefundAmountCents: 1000, RefundStatus: domain.RefundFailed,
 			}
-			svc := cnService(store, cardInvoice(), nil, res)
+			svc := cnService(store, cardInvoice(), nil)
 			if _, err := svc.RetryRefund(ctx, "t1", "hc_cn_retry"); err != nil {
 				t.Fatalf("RetryRefund: %v", err)
 			}
 			return store.at
 		}},
-		{"a finalize's held relief, two notes: each dunning close and tax reversal", 4, func(t *testing.T, ctx context.Context, res clock.Resolver) []time.Time {
+		{"a finalize's held relief, two notes: each dunning close and tax reversal", 4, func(t *testing.T, ctx context.Context) []time.Time {
 			store := newMemStore()
 			for _, id := range []string{"hc_cn_held_1", "hc_cn_held_2"} {
 				store.notes[id] = domain.CreditNote{
@@ -89,14 +89,14 @@ func spiedWrites() []spiedWrite {
 			}
 			inv := cardInvoice()
 			inv.TaxTransactionID = "tax_inv_card"
-			svc := cnService(store, inv, nil, res)
+			svc := cnService(store, inv, nil)
 			d, rev := &instantDunning{}, &instantReverser{}
 			svc.SetDunningResolver(d)
 			svc.SetTaxReverser(rev)
 			svc.FinishHeldRelief(ctx, "t1", []HeldRelief{{CreditNoteID: "hc_cn_held_1", Settled: true}, {CreditNoteID: "hc_cn_held_2", Settled: true}})
 			return append(d.at, rev.at...)
 		}},
-		{"a credit note's email", 1, func(t *testing.T, ctx context.Context, res clock.Resolver) []time.Time {
+		{"a credit note's email", 1, func(t *testing.T, ctx context.Context) []time.Time {
 			store := newMemStore()
 			cn, err := store.Create(clock.WithEffectiveNow(context.Background(), cnDecidedAt.Add(-48*time.Hour)), "t1", domain.CreditNote{
 				InvoiceID: "inv_1", CustomerID: "cus_1", CreditNoteNumber: "CN-1", Status: domain.CreditNoteIssued,
@@ -105,7 +105,7 @@ func spiedWrites() []spiedWrite {
 			if err != nil {
 				t.Fatalf("seed: %v", err)
 			}
-			h := NewHandler(cnService(store, cardInvoice(), nil, res), HandlerDeps{
+			h := NewHandler(cnService(store, cardInvoice(), nil), HandlerDeps{
 				Customers: cnStaticCustomers{cust: domain.Customer{ID: "cus_1", DisplayName: "Acme", Email: "ap@acme.test"}},
 				Invoices:  cnStaticInvoices{inv: domain.Invoice{InvoiceNumber: "INV-9", Currency: "USD"}},
 			})
@@ -133,10 +133,9 @@ func allAt(got []time.Time, want time.Time) bool {
 func TestCreditNoteWrites_RunOnTheDecidedTime(t *testing.T) {
 	for _, e := range spiedWrites() {
 		t.Run(e.name+" is at the decided time", func(t *testing.T) {
-			res := &laterOnSameClock{}
-			got := e.run(t, cnOnDecidedClock(), res)
-			if len(got) != e.want || !allAt(got, cnDecidedAt) || res.reads != 0 {
-				t.Errorf("the writes ran at %v, clock reads %d; want %d writes at %v, no reads", got, res.reads, e.want, cnDecidedAt)
+			got := e.run(t, cnAtDecidedTime())
+			if len(got) != e.want || !allAt(got, cnDecidedAt) {
+				t.Errorf("the writes ran at %v; want %d writes at %v", got, e.want, cnDecidedAt)
 			}
 		})
 	}

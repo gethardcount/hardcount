@@ -230,27 +230,21 @@ type Service struct {
 	numbers  NumberGenerator
 	taxRev   TaxReverser
 	audit    AuditEmitter
-	resolver clock.Resolver
 	// clock is the server's clock: the router's clk, the one the engine
-	// bills by. Every credit-note action runs on a time decided on a test
-	// clock or at real time (see the clock package's doc). Who decides it:
+	// bills by. Who binds a credit-note action's time:
 	//   - a request, the API's door (api.clockDoor), with one read of the
-	//     server's clock; a create, the route itself, from the invoice its
-	//     body names (DecideForInvoice);
-	//   - a Stripe refund event, the service itself, from the invoice the
-	//     refund is on (RecordStripeRefund, ApplyRefundWebhook);
+	//     server's clock; a create, the route itself, with one read of this
+	//     clock (BindNow);
+	//   - a Stripe refund event, the service itself, with one read of this
+	//     clock (RecordStripeRefund, ApplyRefundWebhook);
 	//   - the relief at a subscription's cancel or plan swap and a
 	//     subscription's clawback drafts, the subscription action's time; a
 	//     finalize's held relief, the finalize's time;
-	//   - the clawback job retries at real time (its list excludes notes on a
-	//     test clock), and a test clock's catch-up retries its own on that
-	//     clock.
+	//   - the clawback job, each note its own instant.
 	// Each entry point keeps that time. Work that arrives with no instant
-	// bound (a job's row, or a function that decides its own time, before it
-	// binds) reads this clock once (clock.EnsureEffectiveNow); a request on
-	// any other route arrives with the door's instant. Without
-	// that read, two reads of the time in one action could differ, and a
-	// store's stamp could fall on another time than the action's.
+	// bound reads this clock once (clock.EnsureEffectiveNow). Without that
+	// read, two reads of the time in one action could differ, and a store's
+	// stamp could fall on another time than the action's.
 	clock           clock.Clock
 	dunning         DunningResolver
 	checkoutExpirer CheckoutExpirer
@@ -281,33 +275,17 @@ func NewService(store Store, invoices InvoiceReader, refunder Refunder, credits 
 // Optional — nil skips emission (unit-test fakes).
 func (s *Service) SetAuditLogger(a AuditEmitter) { s.audit = a }
 
-// SetResolver wires the clock resolver the service decides a time with where
-// no caller decided one: the create route's invoice (DecideForInvoice) and a
-// Stripe refund event's invoice. Nil (narrow unit tests) decides nothing.
-func (s *Service) SetResolver(r clock.Resolver) { s.resolver = r }
-
 // SetClock wires the server's clock (see the clock field). The router passes
 // the clock the server bills by; the default is the machine's.
 func (s *Service) SetClock(c clock.Clock) { s.clock = c }
 
-// DecideForInvoice decides a credit note's time from the invoice its body
-// names (clock.DecideOrRealTime) and binds it: the invoice's clock and its
-// instant, or one read of the service's clock. The create routes call it
+// BindNow binds one read of the service's clock on ctx, unless ctx already
+// carries an instant (clock.EnsureEffectiveNow). The create routes call it
 // before anything runs, so a create, and the issue that auto_issue runs after
 // it, share one instant. It is on the service because the service holds the
-// resolver. A clock that cannot be read refuses the request (503), with
-// nothing written. No invoice id names no record to decide from: it binds one
-// read of the service's clock, and the create answers the missing field.
-func (s *Service) DecideForInvoice(ctx context.Context, tenantID, invoiceID string) (context.Context, error) {
-	if invoiceID == "" {
-		return clock.EnsureEffectiveNow(ctx, s.clock), nil
-	}
-	decided, err := clock.DecideOrRealTime(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID})
-	if err != nil {
-		return ctx, errs.Unavailable("test_clock_unavailable",
-			"The invoice's test clock could not be read. Nothing was created; send the request again.", err)
-	}
-	return clock.EnsureEffectiveNow(decided, s.clock), nil
+// clock.
+func (s *Service) BindNow(ctx context.Context) context.Context {
+	return clock.EnsureEffectiveNow(ctx, s.clock)
 }
 
 // SetDunningResolver wires the dunning service, so a credit note that marks
@@ -2601,27 +2579,8 @@ func (s *Service) RetryRefund(ctx context.Context, tenantID, id string) (domain.
 // (pending→succeeded/failed) that the create-call cannot observe. Returns
 // ErrNotFound for an unknown/foreign refund id — the caller decides ack vs retry.
 func (s *Service) ApplyRefundWebhook(ctx context.Context, tenantID, stripeRefundID string, status domain.RefundStatus, failureReason string) error {
-	// The write and its audit row carry the time decided from the invoice of
-	// the credit note holding the refund, read first (a note's invoice never
-	// changes). No note holds it: the write answers ErrNotFound itself.
-	decides, err := clock.DecidesWithoutDoor(ctx, s.resolver)
-	if err != nil {
-		return fmt.Errorf("refund %s refused, Stripe delivers it again: %w", stripeRefundID, err)
-	}
-	if decides {
-		invoiceID, err := s.store.InvoiceOfRefundNote(ctx, tenantID, stripeRefundID)
-		switch {
-		case errors.Is(err, errs.ErrNotFound):
-		case err != nil:
-			return fmt.Errorf("read the credit note holding refund %s: %w", stripeRefundID, err)
-		default:
-			if ctx, err = clock.Decide(ctx, s.resolver, clock.Pin{TenantID: tenantID, InvoiceID: invoiceID}); err != nil {
-				return fmt.Errorf("refund %s refused, Stripe delivers it again: %w", stripeRefundID, err)
-			}
-		}
-	}
-	// Bind the decision (see the clock package's doc); live, a note on no
-	// clock and no note each bind one read of the service's clock.
+	// The write and its audit row read one instant. No note holds the
+	// refund: the write answers ErrNotFound itself.
 	ctx = clock.EnsureEffectiveNow(ctx, s.clock)
 	// ADR-090 in-tx emission: the refund-status transition and its audit
 	// row commit together; the store fires the emission ONLY when the

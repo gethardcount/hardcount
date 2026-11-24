@@ -10,7 +10,6 @@ import (
 
 	"github.com/gethardcount/hardcount/internal/audit"
 	"github.com/gethardcount/hardcount/internal/domain"
-	"github.com/gethardcount/hardcount/internal/platform/clock"
 	"github.com/gethardcount/hardcount/internal/platform/postgres"
 	"github.com/gethardcount/hardcount/internal/testutil"
 )
@@ -29,6 +28,29 @@ func analyze(t *testing.T, _ *postgres.DB, ctx context.Context, _ string) {
 	t.Helper()
 	if _, err := testutil.AdminPool(t).ExecContext(ctx, `ANALYZE audit_log`); err != nil {
 		t.Fatalf("analyze: %v", err)
+	}
+}
+
+// emitOnClock writes one audit row as an earlier version wrote it for work on
+// a test clock: its sim columns set. No writer stamps them now, and the audit
+// log keeps the rows written before the upgrade, which these reads still
+// serve.
+func emitOnClock(t *testing.T, db *postgres.DB, ctx context.Context, tenantID string, at time.Time, clockID string, e audit.Entry) {
+	t.Helper()
+	tx, err := db.BeginTx(ctx, postgres.TxTenant, tenantID)
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer postgres.Rollback(tx)
+	if _, err := tx.ExecContext(ctx, `
+		INSERT INTO audit_log (tenant_id, actor_type, actor_id, action, resource_type, resource_id, resource_label,
+			sim_effective_at, test_clock_id)
+		VALUES (NULLIF(current_setting('app.tenant_id', true), ''), 'system', 'system', $1, $2, $3, $4, $5, $6)`,
+		e.Action, e.ResourceType, e.ResourceID, e.ResourceLabel, at, clockID); err != nil {
+		t.Fatalf("insert a clock row: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
 	}
 }
 
@@ -84,17 +106,13 @@ func TestSimAxis_FilterAndWindow(t *testing.T) {
 	emit(t, db, ctx, tenantID, logger, audit.Entry{Action: "finalize", ResourceType: "invoice", ResourceID: "inv_mar"})
 	emit(t, db, ctx, tenantID, logger, audit.Entry{Action: "finalize", ResourceType: "invoice", ResourceID: "inv_jan"})
 	emit(t, db, ctx, tenantID, logger, audit.Entry{Action: "finalize", ResourceType: "invoice", ResourceID: "inv_feb"})
-	// Re-emit them WITH sim context (the three above are the wall-clock control
+	// The same WITH sim context (the three above are the wall-clock control
 	// group: same tenant, no clock — they must never appear in a sim query).
-	simA := func(at time.Time) context.Context {
-		return clock.WithSim(ctx, clock.Sim{At: at, TestClockID: clockA})
-	}
-	emit(t, db, simA(mar), tenantID, logger, audit.Entry{Action: "finalize", ResourceType: "invoice", ResourceID: "sim_mar"})
-	emit(t, db, simA(jan), tenantID, logger, audit.Entry{Action: "finalize", ResourceType: "invoice", ResourceID: "sim_jan"})
-	emit(t, db, simA(feb), tenantID, logger, audit.Entry{Action: "cancel", ResourceType: "subscription", ResourceID: "sim_feb"})
+	emitOnClock(t, db, ctx, tenantID, mar, clockA, audit.Entry{Action: "finalize", ResourceType: "invoice", ResourceID: "sim_mar"})
+	emitOnClock(t, db, ctx, tenantID, jan, clockA, audit.Entry{Action: "finalize", ResourceType: "invoice", ResourceID: "sim_jan"})
+	emitOnClock(t, db, ctx, tenantID, feb, clockA, audit.Entry{Action: "cancel", ResourceType: "subscription", ResourceID: "sim_feb"})
 	// A second clock's rows — the filter must not bleed across simulations.
-	emit(t, db, clock.WithSim(ctx, clock.Sim{At: feb, TestClockID: clockB}), tenantID, logger,
-		audit.Entry{Action: "finalize", ResourceType: "invoice", ResourceID: "other_clock"})
+	emitOnClock(t, db, ctx, tenantID, feb, clockB, audit.Entry{Action: "finalize", ResourceType: "invoice", ResourceID: "other_clock"})
 
 	t.Run("test_clock_id returns exactly that clock's rows", func(t *testing.T) {
 		got, _, err := logger.Query(ctx, tenantID, audit.QueryFilter{TestClockID: clockA})
@@ -256,8 +274,8 @@ func TestSimAxis_UsesPartialClockIndex(t *testing.T) {
 	frozen := time.Date(2027, 5, 1, 0, 0, 0, 0, time.UTC)
 	clockID := "hc_tclk_explain"
 	for i := 0; i < 40; i++ {
-		emit(t, db, clock.WithSim(ctx, clock.Sim{At: frozen.Add(time.Duration(i) * time.Hour), TestClockID: clockID}),
-			tenantID, logger, audit.Entry{Action: "finalize", ResourceType: "invoice", ResourceID: fmt.Sprintf("inv_%d", i)})
+		emitOnClock(t, db, ctx, tenantID, frozen.Add(time.Duration(i)*time.Hour), clockID,
+			audit.Entry{Action: "finalize", ResourceType: "invoice", ResourceID: fmt.Sprintf("inv_%d", i)})
 	}
 	for i := 0; i < 2000; i++ {
 		emit(t, db, ctx, tenantID, logger, audit.Entry{

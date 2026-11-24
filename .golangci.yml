@@ -32,8 +32,8 @@ linters:
         - pattern: \.(FindBaseInvoiceForPeriod|GetByProrationSource)$
           msg: "single-invoice-ok: a period can be funded by several invoices; use FindFundingInvoicesForPeriod (ADR-048 amendment), or add //nolint:forbidigo // single-invoice-ok: <reason>"
         # A real instant on a context is trusted as one read of the server's
-        # clock (clock.Decide keeps it for a record on no clock), so production
-        # makes one only by reading a clock. A place that must name an instant
+        # clock (clock.EnsureEffectiveNow keeps it), so production makes one
+        # only by reading a clock. A place that must name an instant
         # says why: //nolint:forbidigo // real-instant: <reason>
         - pattern: ^clock\.WithEffectiveNow$
           pkg: ^github\.com/gethardcount/hardcount/internal/platform/clock$
